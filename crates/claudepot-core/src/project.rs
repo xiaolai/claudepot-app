@@ -592,22 +592,7 @@ fn is_claude_running_in(dir: &str) -> bool {
 }
 
 fn copy_dir_recursive(src: &Path, dst: &Path) -> Result<(), ProjectError> {
-    fs::create_dir_all(dst).map_err(ProjectError::Io)?;
-    for entry in fs::read_dir(src).map_err(ProjectError::Io)? {
-        let entry = entry.map_err(ProjectError::Io)?;
-        let target = dst.join(entry.file_name());
-        // Use symlink_metadata to avoid following symlinks
-        let ft = entry.metadata().map_err(ProjectError::Io)?.file_type();
-        if ft.is_symlink() {
-            // Skip symlinks — do not follow them during copy
-            continue;
-        } else if ft.is_dir() {
-            copy_dir_recursive(&entry.path(), &target)?;
-        } else {
-            fs::copy(entry.path(), &target).map_err(ProjectError::Io)?;
-        }
-    }
-    Ok(())
+    crate::fs_utils::copy_dir_recursive(src, dst).map_err(ProjectError::Io)
 }
 
 fn merge_project_dirs(src: &Path, dst: &Path) -> Result<(), ProjectError> {

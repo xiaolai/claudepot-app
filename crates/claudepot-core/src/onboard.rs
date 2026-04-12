@@ -83,27 +83,8 @@ pub async fn cleanup(config_dir: &std::path::Path) {
 }
 
 fn which_claude() -> Result<PathBuf, OnboardError> {
-    // Check common locations
-    let candidates = [
-        dirs::home_dir().map(|h| h.join(".local/bin/claude")),
-        Some(PathBuf::from("/usr/local/bin/claude")),
-        Some(PathBuf::from("/usr/bin/claude")),
-    ];
-    for candidate in candidates.iter().flatten() {
-        if candidate.exists() {
-            return Ok(candidate.clone());
-        }
-    }
-
-    // Try PATH
-    if let Ok(output) = std::process::Command::new("which").arg("claude").output() {
-        if output.status.success() {
-            let path = String::from_utf8_lossy(&output.stdout).trim().to_string();
-            if !path.is_empty() {
-                return Ok(PathBuf::from(path));
-            }
-        }
-    }
-
-    Err(OnboardError::CliBinaryNotFound("claude not found in PATH or common locations".into()))
+    crate::fs_utils::find_claude_binary()
+        .ok_or_else(|| OnboardError::CliBinaryNotFound(
+            "claude not found in PATH or common locations".into()
+        ))
 }

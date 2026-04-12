@@ -3,6 +3,7 @@ pub mod blob;
 pub mod cli_backend;
 pub mod desktop_backend;
 pub mod error;
+pub mod fs_utils;
 pub mod launcher;
 pub mod oauth;
 pub mod onboard;
