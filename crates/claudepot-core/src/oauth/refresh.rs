@@ -51,8 +51,9 @@ pub async fn refresh(refresh_token: &str) -> Result<TokenResponse, OAuthError> {
     Ok(token_resp)
 }
 
-/// Build a credential blob JSON string from a token response.
-pub fn build_blob(resp: &TokenResponse) -> String {
+/// Build a credential blob JSON string from a token response,
+/// preserving the original blob's subscription metadata if provided.
+pub fn build_blob(resp: &TokenResponse, original: Option<&crate::blob::CredentialBlob>) -> String {
     let expires_at_ms = chrono::Utc::now().timestamp_millis() + (resp.expires_in as i64 * 1000);
     let scopes: Vec<&str> = resp.scope
         .as_deref()
@@ -60,14 +61,77 @@ pub fn build_blob(resp: &TokenResponse) -> String {
         .split(' ')
         .collect();
 
+    // Preserve subscription metadata from the original blob if available,
+    // otherwise fall back to what the token response implies.
+    let sub_type = original
+        .and_then(|b| b.claude_ai_oauth.subscription_type.as_deref())
+        .unwrap_or("");
+    let rate_tier = original
+        .and_then(|b| b.claude_ai_oauth.rate_limit_tier.as_deref())
+        .unwrap_or("");
+
     serde_json::json!({
         "claudeAiOauth": {
             "accessToken": resp.access_token,
             "refreshToken": resp.refresh_token,
             "expiresAt": expires_at_ms,
             "scopes": scopes,
-            "subscriptionType": "max",
-            "rateLimitTier": ""
+            "subscriptionType": sub_type,
+            "rateLimitTier": rate_tier
         }
     }).to_string()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::blob::CredentialBlob;
+
+    fn make_token_response() -> TokenResponse {
+        TokenResponse {
+            access_token: "sk-ant-oat01-new".into(),
+            refresh_token: "sk-ant-ort01-new".into(),
+            expires_in: 3600,
+            scope: Some("user:inference".into()),
+            token_type: Some("Bearer".into()),
+        }
+    }
+
+    #[test]
+    fn test_build_blob_preserves_subscription_metadata() {
+        let original_json = crate::testing::sample_blob_json(0);
+        let original = CredentialBlob::from_json(&original_json).unwrap();
+        assert_eq!(original.claude_ai_oauth.subscription_type.as_deref(), Some("pro"));
+        assert_eq!(original.claude_ai_oauth.rate_limit_tier.as_deref(), Some("default_claude_pro"));
+
+        let resp = make_token_response();
+        let result_json = build_blob(&resp, Some(&original));
+        let result = CredentialBlob::from_json(&result_json).unwrap();
+
+        assert_eq!(result.claude_ai_oauth.access_token, "sk-ant-oat01-new");
+        assert_eq!(result.claude_ai_oauth.subscription_type.as_deref(), Some("pro"));
+        assert_eq!(result.claude_ai_oauth.rate_limit_tier.as_deref(), Some("default_claude_pro"));
+    }
+
+    #[test]
+    fn test_build_blob_without_original_uses_empty_defaults() {
+        let resp = make_token_response();
+        let result_json = build_blob(&resp, None);
+        let result = CredentialBlob::from_json(&result_json).unwrap();
+
+        assert_eq!(result.claude_ai_oauth.access_token, "sk-ant-oat01-new");
+        assert_eq!(result.claude_ai_oauth.subscription_type.as_deref(), Some(""));
+        assert_eq!(result.claude_ai_oauth.rate_limit_tier.as_deref(), Some(""));
+    }
+
+    #[test]
+    fn test_build_blob_computes_future_expiry() {
+        let resp = make_token_response();
+        let result_json = build_blob(&resp, None);
+        let result = CredentialBlob::from_json(&result_json).unwrap();
+
+        let now_ms = chrono::Utc::now().timestamp_millis();
+        assert!(result.claude_ai_oauth.expires_at > now_ms + 3500_000);
+        assert!(result.claude_ai_oauth.expires_at < now_ms + 3700_000);
+    }
 }

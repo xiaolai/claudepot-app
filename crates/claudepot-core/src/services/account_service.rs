@@ -88,7 +88,7 @@ pub async fn register_from_token(
     }
 
     let account_id = Uuid::new_v4();
-    let blob_str = refresh::build_blob(&token_resp);
+    let blob_str = refresh::build_blob(&token_resp, None);
     swap::save_private(account_id, &blob_str)
         .map_err(|e| RegisterError::CredentialWrite(e.to_string()))?;
 

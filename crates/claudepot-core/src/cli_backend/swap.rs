@@ -2,10 +2,27 @@
 //! See reference.md §I.7.
 
 use crate::account::AccountStore;
-use crate::error::SwapError;
+use crate::error::{OAuthError, SwapError};
+use crate::oauth::refresh::TokenResponse;
 use super::CliPlatform;
 use uuid::Uuid;
 use std::fs;
+
+/// Abstraction over token refresh — enables testing without network calls.
+#[async_trait::async_trait]
+pub trait TokenRefresher: Send + Sync {
+    async fn refresh(&self, refresh_token: &str) -> Result<TokenResponse, OAuthError>;
+}
+
+/// Production refresher that calls the Anthropic token endpoint.
+pub struct DefaultRefresher;
+
+#[async_trait::async_trait]
+impl TokenRefresher for DefaultRefresher {
+    async fn refresh(&self, refresh_token: &str) -> Result<TokenResponse, OAuthError> {
+        crate::oauth::refresh::refresh(refresh_token).await
+    }
+}
 
 /// Acquire an exclusive file lock for swap operations.
 /// Returns the locked file handle — lock is released when dropped.
@@ -39,6 +56,32 @@ fn acquire_swap_lock() -> Result<fs::File, SwapError> {
     Ok(file)
 }
 
+/// Conditionally refresh the credential blob if it is expired or expiring
+/// within a 5-minute margin. Returns the (possibly refreshed) blob JSON string.
+/// On refresh, the new blob is persisted to private storage.
+pub(crate) async fn maybe_refresh_blob(
+    blob_str: &str,
+    account_id: Uuid,
+    refresher: &dyn TokenRefresher,
+) -> Result<String, SwapError> {
+    let blob = crate::blob::CredentialBlob::from_json(blob_str)
+        .map_err(|e| SwapError::CorruptBlob(e.to_string()))?;
+
+    if !blob.is_expired(300) {
+        return Ok(blob_str.to_string());
+    }
+
+    tracing::info!("token expired or expiring soon, refreshing...");
+    let token_resp = refresher
+        .refresh(&blob.claude_ai_oauth.refresh_token)
+        .await
+        .map_err(|e| SwapError::RefreshFailed(e.to_string()))?;
+
+    let new_blob = crate::oauth::refresh::build_blob(&token_resp, Some(&blob));
+    save_private(account_id, &new_blob)?;
+    Ok(new_blob)
+}
+
 /// Swap the active CLI account from `current_id` to `target_id`.
 ///
 /// Acquires an exclusive file lock to prevent concurrent swaps.
@@ -53,6 +96,8 @@ pub async fn switch(
     current_id: Option<Uuid>,
     target_id: Uuid,
     platform: &dyn CliPlatform,
+    auto_refresh: bool,
+    refresher: &dyn TokenRefresher,
 ) -> Result<(), SwapError> {
     // Acquire exclusive lock — prevents concurrent swaps.
     tracing::debug!("acquiring swap lock...");
@@ -63,6 +108,13 @@ pub async fn switch(
     // If it doesn't exist, fail before touching anything.
     tracing::debug!(target = %target_id, "loading target credentials");
     let target_blob = load_private(target_id)?;
+
+    // Conditionally refresh if expired/expiring and auto_refresh is enabled.
+    let target_blob = if auto_refresh {
+        maybe_refresh_blob(&target_blob, target_id, refresher).await?
+    } else {
+        target_blob
+    };
 
     // Save outgoing (current CC blob may have been refreshed by the CLI).
     if let Some(cur) = current_id {
@@ -225,7 +277,51 @@ mod tests {
         }
     }
 
-    use crate::testing::{DATA_DIR_LOCK, setup_test_data_dir};
+    /// Mock TokenRefresher for testing refresh logic.
+    struct MockRefresher {
+        response: Result<TokenResponse, OAuthError>,
+    }
+
+    impl MockRefresher {
+        fn success() -> Self {
+            Self {
+                response: Ok(TokenResponse {
+                    access_token: "sk-ant-oat01-refreshed".into(),
+                    refresh_token: "sk-ant-ort01-refreshed".into(),
+                    expires_in: 3600,
+                    scope: Some("user:inference user:profile".into()),
+                    token_type: Some("Bearer".into()),
+                }),
+            }
+        }
+        fn failing(msg: &str) -> Self {
+            Self {
+                response: Err(OAuthError::RefreshFailed(msg.to_string())),
+            }
+        }
+    }
+
+    #[async_trait::async_trait]
+    impl TokenRefresher for MockRefresher {
+        async fn refresh(&self, _refresh_token: &str) -> Result<TokenResponse, OAuthError> {
+            match &self.response {
+                Ok(r) => Ok(TokenResponse {
+                    access_token: r.access_token.clone(),
+                    refresh_token: r.refresh_token.clone(),
+                    expires_in: r.expires_in,
+                    scope: r.scope.clone(),
+                    token_type: r.token_type.clone(),
+                }),
+                Err(OAuthError::RefreshFailed(msg)) => Err(OAuthError::RefreshFailed(msg.clone())),
+                Err(OAuthError::RateLimited { retry_after_secs }) => {
+                    Err(OAuthError::RateLimited { retry_after_secs: *retry_after_secs })
+                }
+                _ => Err(OAuthError::RefreshFailed("unexpected error variant".into())),
+            }
+        }
+    }
+
+    use crate::testing::setup_test_data_dir;
 
     fn test_store() -> (AccountStore, tempfile::TempDir) {
         let dir = tempfile::tempdir().unwrap();
@@ -294,7 +390,8 @@ mod tests {
         save_private(target_id, "target_blob").unwrap();
 
         let platform = MockPlatform::new(None);
-        switch(&store, None, target_id, &platform).await.unwrap();
+        let refresher = DefaultRefresher;
+        switch(&store, None, target_id, &platform, false, &refresher).await.unwrap();
 
         assert_eq!(platform.get(), Some("target_blob".to_string()));
         assert_eq!(store.active_cli_uuid().unwrap(), Some(target_id.to_string()));
@@ -315,8 +412,9 @@ mod tests {
 
         // Platform has current credentials (as if CC refreshed them)
         let platform = MockPlatform::new(Some("refreshed_current_blob"));
+        let refresher = DefaultRefresher;
 
-        switch(&store, Some(current_id), target_id, &platform).await.unwrap();
+        switch(&store, Some(current_id), target_id, &platform, false, &refresher).await.unwrap();
 
         // Current's credentials should be saved to private storage
         assert_eq!(load_private(current_id).unwrap(), "refreshed_current_blob");
@@ -343,8 +441,9 @@ mod tests {
         let platform = MockPlatform::failing();
         // Set initial storage to simulate current CC credentials
         *platform.storage.lock().unwrap() = Some("cc_current".to_string());
+        let refresher = DefaultRefresher;
 
-        let result = switch(&store, Some(current_id), target_id, &platform).await;
+        let result = switch(&store, Some(current_id), target_id, &platform, false, &refresher).await;
         assert!(result.is_err());
 
         // Current's private storage should be rolled back to original
@@ -362,8 +461,9 @@ mod tests {
         let target_id = Uuid::new_v4();
         // Don't pre-store — target has no credentials
         let platform = MockPlatform::new(None);
+        let refresher = DefaultRefresher;
 
-        let result = switch(&store, None, target_id, &platform).await;
+        let result = switch(&store, None, target_id, &platform, false, &refresher).await;
         assert!(matches!(result, Err(SwapError::NoStoredCredentials(_))));
     }
 
@@ -376,7 +476,8 @@ mod tests {
         save_private(target_id, "blob").unwrap();
 
         let platform = MockPlatform::new(None);
-        switch(&store, None, target_id, &platform).await.unwrap();
+        let refresher = DefaultRefresher;
+        switch(&store, None, target_id, &platform, false, &refresher).await.unwrap();
 
         // DB active pointer must match target
         assert_eq!(store.active_cli_uuid().unwrap(), Some(target_id.to_string()));
@@ -397,8 +498,9 @@ mod tests {
 
         let platform = MockPlatform::failing();
         *platform.storage.lock().unwrap() = Some("cc".to_string());
+        let refresher = DefaultRefresher;
 
-        let result = switch(&store, Some(current_id), target_id, &platform).await;
+        let result = switch(&store, Some(current_id), target_id, &platform, false, &refresher).await;
         assert!(result.is_err());
 
         // DB should still point to current, NOT target
@@ -420,8 +522,9 @@ mod tests {
 
         let platform = MockPlatform::failing();
         *platform.storage.lock().unwrap() = Some("cc_blob".to_string());
+        let refresher = DefaultRefresher;
 
-        let result = switch(&store, Some(current_id), target_id, &platform).await;
+        let result = switch(&store, Some(current_id), target_id, &platform, false, &refresher).await;
         assert!(result.is_err());
 
         // Rollback should have deleted the private storage that was created during swap
@@ -429,6 +532,24 @@ mod tests {
         assert!(load_private(current_id).is_err());
 
         delete_private(target_id).unwrap();
+    }
+
+    #[test]
+    fn test_swap_error_corrupt_blob_display() {
+        let err = SwapError::CorruptBlob("missing field accessToken".into());
+        assert_eq!(
+            err.to_string(),
+            "corrupt credential blob: missing field accessToken"
+        );
+    }
+
+    #[test]
+    fn test_swap_error_refresh_failed_display() {
+        let err = SwapError::RefreshFailed("token endpoint returned 401".into());
+        assert_eq!(
+            err.to_string(),
+            "token refresh failed: token endpoint returned 401"
+        );
     }
 
     #[tokio::test]
@@ -441,8 +562,9 @@ mod tests {
 
         // Platform tracks whether read_default was ever called
         let platform = MockPlatform::new(Some("should-not-be-read"));
+        let refresher = DefaultRefresher;
 
-        let result = switch(&store, None, target_id, &platform).await;
+        let result = switch(&store, None, target_id, &platform, false, &refresher).await;
         assert!(result.is_err());
 
         // Platform storage should be untouched (read_default never called for write path)
@@ -458,10 +580,219 @@ mod tests {
         save_private(target_id, "direct_blob").unwrap();
 
         let platform = MockPlatform::new(None);
-        switch(&store, None, target_id, &platform).await.unwrap();
+        let refresher = DefaultRefresher;
+        switch(&store, None, target_id, &platform, false, &refresher).await.unwrap();
 
         // Target written directly, no outgoing save
         assert_eq!(platform.get(), Some("direct_blob".to_string()));
         delete_private(target_id).unwrap();
+    }
+
+    // --- switch() auto_refresh tests ---
+
+    #[tokio::test]
+    async fn test_swap_auto_refresh_writes_fresh_blob() {
+        let _lock = crate::testing::lock_data_dir();
+        let _env = setup_test_data_dir();
+        let (store, _dir) = test_store();
+        let target_id = Uuid::new_v4();
+
+        // Store an expired blob for the target
+        save_private(target_id, &crate::testing::expired_blob_json()).unwrap();
+
+        let platform = MockPlatform::new(None);
+        let refresher = MockRefresher::success();
+
+        switch(&store, None, target_id, &platform, true, &refresher)
+            .await
+            .unwrap();
+
+        // The platform should have the refreshed blob, not the expired one
+        let written = platform.get().unwrap();
+        let parsed = crate::blob::CredentialBlob::from_json(&written).unwrap();
+        assert_eq!(parsed.claude_ai_oauth.access_token, "sk-ant-oat01-refreshed");
+
+        delete_private(target_id).unwrap();
+    }
+
+    #[tokio::test]
+    async fn test_swap_auto_refresh_noop_for_fresh_blob() {
+        let _lock = crate::testing::lock_data_dir();
+        let _env = setup_test_data_dir();
+        let (store, _dir) = test_store();
+        let target_id = Uuid::new_v4();
+
+        let fresh = crate::testing::fresh_blob_json();
+        save_private(target_id, &fresh).unwrap();
+
+        let platform = MockPlatform::new(None);
+        let refresher = MockRefresher::success();
+
+        switch(&store, None, target_id, &platform, true, &refresher)
+            .await
+            .unwrap();
+
+        // Should use the original fresh blob (not refreshed)
+        let written = platform.get().unwrap();
+        let parsed = crate::blob::CredentialBlob::from_json(&written).unwrap();
+        assert_eq!(parsed.claude_ai_oauth.access_token, "sk-ant-oat01-test");
+
+        delete_private(target_id).unwrap();
+    }
+
+    #[tokio::test]
+    async fn test_swap_auto_refresh_false_skips_refresh() {
+        let _lock = crate::testing::lock_data_dir();
+        let _env = setup_test_data_dir();
+        let (store, _dir) = test_store();
+        let target_id = Uuid::new_v4();
+
+        let expired = crate::testing::expired_blob_json();
+        save_private(target_id, &expired).unwrap();
+
+        let platform = MockPlatform::new(None);
+        let refresher = MockRefresher::success();
+
+        // auto_refresh = false — should NOT call refresher
+        switch(&store, None, target_id, &platform, false, &refresher)
+            .await
+            .unwrap();
+
+        // Should use the expired blob as-is
+        let written = platform.get().unwrap();
+        assert_eq!(written, expired);
+
+        delete_private(target_id).unwrap();
+    }
+
+    #[tokio::test]
+    async fn test_swap_auto_refresh_failure_aborts_before_mutation() {
+        let _lock = crate::testing::lock_data_dir();
+        let _env = setup_test_data_dir();
+        let (store, _dir) = test_store();
+        let target_id = Uuid::new_v4();
+
+        save_private(target_id, &crate::testing::expired_blob_json()).unwrap();
+
+        let platform = MockPlatform::new(Some("original-cc-blob"));
+        let refresher = MockRefresher::failing("network error");
+
+        let result = switch(&store, None, target_id, &platform, true, &refresher).await;
+        assert!(matches!(result, Err(SwapError::RefreshFailed(_))));
+
+        // Platform should be untouched
+        assert_eq!(platform.get(), Some("original-cc-blob".to_string()));
+
+        delete_private(target_id).unwrap();
+    }
+
+    #[tokio::test]
+    async fn test_swap_auto_refresh_rollback_works_after_refresh() {
+        let _lock = crate::testing::lock_data_dir();
+        let _env = setup_test_data_dir();
+        let (store, _dir) = test_store();
+        let current_id = Uuid::new_v4();
+        let target_id = Uuid::new_v4();
+
+        save_private(current_id, "original_current").unwrap();
+        save_private(target_id, &crate::testing::expired_blob_json()).unwrap();
+
+        // Platform will fail on write
+        let platform = MockPlatform::failing();
+        *platform.storage.lock().unwrap() = Some("cc_current".to_string());
+        let refresher = MockRefresher::success();
+
+        let result = switch(&store, Some(current_id), target_id, &platform, true, &refresher).await;
+        assert!(result.is_err());
+
+        // Current's private storage should be rolled back to original
+        assert_eq!(load_private(current_id).unwrap(), "original_current");
+
+        delete_private(current_id).unwrap();
+        delete_private(target_id).unwrap();
+    }
+
+    // --- maybe_refresh_blob tests ---
+
+    #[tokio::test]
+    async fn test_swap_maybe_refresh_not_expired_returns_unchanged() {
+        let _lock = crate::testing::lock_data_dir();
+        let _env = setup_test_data_dir();
+        let id = Uuid::new_v4();
+        let blob = crate::testing::fresh_blob_json();
+        let refresher = MockRefresher::success();
+
+        let result = maybe_refresh_blob(&blob, id, &refresher).await.unwrap();
+        // Fresh blob should be returned unchanged (same string)
+        assert_eq!(result, blob);
+    }
+
+    #[tokio::test]
+    async fn test_swap_maybe_refresh_within_margin_triggers_refresh() {
+        let _lock = crate::testing::lock_data_dir();
+        let _env = setup_test_data_dir();
+        let id = Uuid::new_v4();
+        let blob = crate::testing::expiring_soon_blob_json();
+        let refresher = MockRefresher::success();
+
+        let result = maybe_refresh_blob(&blob, id, &refresher).await.unwrap();
+        // Should have refreshed — result should contain the new token
+        let parsed = crate::blob::CredentialBlob::from_json(&result).unwrap();
+        assert_eq!(parsed.claude_ai_oauth.access_token, "sk-ant-oat01-refreshed");
+    }
+
+    #[tokio::test]
+    async fn test_swap_maybe_refresh_corrupt_input_errors() {
+        let _lock = crate::testing::lock_data_dir();
+        let _env = setup_test_data_dir();
+        let id = Uuid::new_v4();
+        let refresher = MockRefresher::success();
+
+        let result = maybe_refresh_blob("not valid json", id, &refresher).await;
+        assert!(matches!(result, Err(SwapError::CorruptBlob(_))));
+    }
+
+    #[tokio::test]
+    async fn test_swap_maybe_refresh_expired_refreshes() {
+        let _lock = crate::testing::lock_data_dir();
+        let _env = setup_test_data_dir();
+        let id = Uuid::new_v4();
+        let blob = crate::testing::expired_blob_json();
+        let refresher = MockRefresher::success();
+
+        let result = maybe_refresh_blob(&blob, id, &refresher).await.unwrap();
+        let parsed = crate::blob::CredentialBlob::from_json(&result).unwrap();
+        assert_eq!(parsed.claude_ai_oauth.access_token, "sk-ant-oat01-refreshed");
+        assert_eq!(parsed.claude_ai_oauth.refresh_token, "sk-ant-ort01-refreshed");
+    }
+
+    #[tokio::test]
+    async fn test_swap_maybe_refresh_refresh_failure_errors() {
+        let _lock = crate::testing::lock_data_dir();
+        let _env = setup_test_data_dir();
+        let id = Uuid::new_v4();
+        let blob = crate::testing::expired_blob_json();
+        let refresher = MockRefresher::failing("network timeout");
+
+        let result = maybe_refresh_blob(&blob, id, &refresher).await;
+        assert!(matches!(result, Err(SwapError::RefreshFailed(_))));
+    }
+
+    #[tokio::test]
+    async fn test_swap_maybe_refresh_saves_refreshed_blob() {
+        let _lock = crate::testing::lock_data_dir();
+        let _env = setup_test_data_dir();
+        let id = Uuid::new_v4();
+        let blob = crate::testing::expired_blob_json();
+        let refresher = MockRefresher::success();
+
+        maybe_refresh_blob(&blob, id, &refresher).await.unwrap();
+
+        // The refreshed blob should be persisted in private storage
+        let saved = load_private(id).unwrap();
+        let parsed = crate::blob::CredentialBlob::from_json(&saved).unwrap();
+        assert_eq!(parsed.claude_ai_oauth.access_token, "sk-ant-oat01-refreshed");
+
+        delete_private(id).unwrap();
     }
 }
