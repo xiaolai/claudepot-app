@@ -58,8 +58,23 @@ pub async fn switch(
 }
 
 // --- Private storage: file-based, 0600 perms ---
-// Using files instead of the `keyring` crate because unsigned CLI
-// binaries over SSH can't reliably write to macOS keychains.
+//
+// WORKAROUND: using files instead of the `keyring` crate.
+//
+// The `keyring` crate calls macOS `SecItem*` APIs, which require the
+// calling binary to have a valid code-signing identity. Our debug
+// builds (`cargo build`) produce ad-hoc signed binaries that lack
+// the entitlements needed for Keychain access — `set_password()`
+// returns Ok(()) but silently writes nothing. This affects ALL
+// unsigned binaries, not just SSH sessions.
+//
+// Once the release binary is signed with a Developer ID certificate
+// (implementation plan Phase 12), switch back to `keyring`:
+//
+//   keyring::Entry::new("com.claudepot.credentials", &uuid.to_string())
+//
+// Tracked as audit finding Critical #2 (2026-04-12).
+//
 // Blobs are stored at: <claudepot_data_dir>/credentials/<uuid>.json
 
 fn private_path(account_id: Uuid) -> std::path::PathBuf {
