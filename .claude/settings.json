@@ -15,6 +15,7 @@
   "enabledPlugins": {
     "codex-toolkit@xiaolai": true,
     "loc-guardian@xiaolai": true,
-    "grill@xiaolai": true
+    "grill@xiaolai": true,
+    "tdd-guardian@xiaolai": true
   }
 }
