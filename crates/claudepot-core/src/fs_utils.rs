@@ -76,3 +76,82 @@ pub fn claude_version(path: &Path) -> Option<String> {
         .and_then(|o| String::from_utf8(o.stdout).ok())
         .map(|s| s.trim().to_string())
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::fs;
+
+    #[test]
+    fn test_copy_dir_recursive_files() {
+        let tmp = tempfile::tempdir().unwrap();
+        let src = tmp.path().join("src");
+        let dst = tmp.path().join("dst");
+        fs::create_dir(&src).unwrap();
+        fs::write(src.join("a.txt"), "hello").unwrap();
+        fs::write(src.join("b.txt"), "world").unwrap();
+        fs::write(src.join("c.bin"), &[0u8, 1, 2]).unwrap();
+
+        copy_dir_recursive(&src, &dst).unwrap();
+
+        assert_eq!(fs::read_to_string(dst.join("a.txt")).unwrap(), "hello");
+        assert_eq!(fs::read_to_string(dst.join("b.txt")).unwrap(), "world");
+        assert_eq!(fs::read(dst.join("c.bin")).unwrap(), &[0, 1, 2]);
+    }
+
+    #[test]
+    fn test_copy_dir_recursive_nested() {
+        let tmp = tempfile::tempdir().unwrap();
+        let src = tmp.path().join("src");
+        let dst = tmp.path().join("dst");
+        fs::create_dir_all(src.join("sub1/sub2")).unwrap();
+        fs::write(src.join("top.txt"), "top").unwrap();
+        fs::write(src.join("sub1/mid.txt"), "mid").unwrap();
+        fs::write(src.join("sub1/sub2/deep.txt"), "deep").unwrap();
+
+        copy_dir_recursive(&src, &dst).unwrap();
+
+        assert_eq!(fs::read_to_string(dst.join("top.txt")).unwrap(), "top");
+        assert_eq!(fs::read_to_string(dst.join("sub1/mid.txt")).unwrap(), "mid");
+        assert_eq!(fs::read_to_string(dst.join("sub1/sub2/deep.txt")).unwrap(), "deep");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn test_copy_dir_recursive_skips_symlinks() {
+        let tmp = tempfile::tempdir().unwrap();
+        let src = tmp.path().join("src");
+        let dst = tmp.path().join("dst");
+        fs::create_dir(&src).unwrap();
+        fs::write(src.join("real.txt"), "data").unwrap();
+        std::os::unix::fs::symlink("/etc/passwd", src.join("link")).unwrap();
+
+        copy_dir_recursive(&src, &dst).unwrap();
+
+        assert!(dst.join("real.txt").exists());
+        assert!(!dst.join("link").exists());
+    }
+
+    #[test]
+    fn test_copy_dir_recursive_empty_dir() {
+        let tmp = tempfile::tempdir().unwrap();
+        let src = tmp.path().join("src");
+        let dst = tmp.path().join("dst");
+        fs::create_dir(&src).unwrap();
+
+        copy_dir_recursive(&src, &dst).unwrap();
+
+        assert!(dst.exists());
+        assert!(fs::read_dir(&dst).unwrap().next().is_none());
+    }
+
+    #[test]
+    fn test_copy_dir_recursive_src_not_found() {
+        let tmp = tempfile::tempdir().unwrap();
+        let result = copy_dir_recursive(
+            &tmp.path().join("nonexistent"),
+            &tmp.path().join("dst"),
+        );
+        assert!(result.is_err());
+    }
+}

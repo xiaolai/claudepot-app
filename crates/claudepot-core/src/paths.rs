@@ -38,15 +38,19 @@ pub fn claude_desktop_data_dir() -> Option<PathBuf> {
     }
 }
 
-/// Claudepot's own private data root.
+/// Claudepot's own private data root. Honors `$CLAUDEPOT_DATA_DIR`.
 pub fn claudepot_data_dir() -> PathBuf {
-    dirs::data_dir()
+    std::env::var_os("CLAUDEPOT_DATA_DIR")
+        .map(PathBuf::from)
         .unwrap_or_else(|| {
-            dirs::home_dir()
-                .unwrap_or_else(|| PathBuf::from("/tmp"))
-                .join(".local/share")
+            dirs::data_dir()
+                .unwrap_or_else(|| {
+                    dirs::home_dir()
+                        .unwrap_or_else(|| PathBuf::from("/tmp"))
+                        .join(".local/share")
+                })
+                .join("Claudepot")
         })
-        .join("Claudepot")
 }
 
 /// Per-account Desktop profile snapshot directory.

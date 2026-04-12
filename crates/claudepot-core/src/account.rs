@@ -237,6 +237,203 @@ impl AccountStore {
     }
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn test_store() -> (AccountStore, tempfile::TempDir) {
+        let dir = tempfile::tempdir().unwrap();
+        let db = dir.path().join("test.db");
+        let store = AccountStore::open(&db).unwrap();
+        (store, dir)
+    }
+
+    fn make_account(email: &str) -> Account {
+        Account {
+            uuid: Uuid::new_v4(),
+            email: email.to_string(),
+            org_uuid: Some("org-123".to_string()),
+            org_name: Some("Test Org".to_string()),
+            subscription_type: Some("pro".to_string()),
+            rate_limit_tier: Some("default".to_string()),
+            created_at: Utc::now(),
+            last_cli_switch: None,
+            last_desktop_switch: None,
+            has_cli_credentials: true,
+            has_desktop_profile: false,
+            is_cli_active: false,
+            is_desktop_active: false,
+        }
+    }
+
+    #[test]
+    fn test_store_open_creates_tables() {
+        let (store, _dir) = test_store();
+        let accounts = store.list().unwrap();
+        assert!(accounts.is_empty());
+    }
+
+    #[test]
+    fn test_store_insert_and_find_by_email() {
+        let (store, _dir) = test_store();
+        let account = make_account("alice@example.com");
+        let uuid = account.uuid;
+        store.insert(&account).unwrap();
+
+        let found = store.find_by_email("alice@example.com").unwrap().unwrap();
+        assert_eq!(found.uuid, uuid);
+        assert_eq!(found.email, "alice@example.com");
+        assert_eq!(found.org_name.as_deref(), Some("Test Org"));
+        assert!(found.has_cli_credentials);
+        assert!(!found.has_desktop_profile);
+    }
+
+    #[test]
+    fn test_store_insert_and_find_by_uuid() {
+        let (store, _dir) = test_store();
+        let account = make_account("bob@example.com");
+        let uuid = account.uuid;
+        store.insert(&account).unwrap();
+
+        let found = store.find_by_uuid(uuid).unwrap().unwrap();
+        assert_eq!(found.email, "bob@example.com");
+    }
+
+    #[test]
+    fn test_store_insert_duplicate_email_fails() {
+        let (store, _dir) = test_store();
+        store.insert(&make_account("dup@example.com")).unwrap();
+        let result = store.insert(&make_account("dup@example.com"));
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_store_list_ordered_by_email() {
+        let (store, _dir) = test_store();
+        store.insert(&make_account("charlie@example.com")).unwrap();
+        store.insert(&make_account("alice@example.com")).unwrap();
+        store.insert(&make_account("bob@example.com")).unwrap();
+
+        let list = store.list().unwrap();
+        assert_eq!(list.len(), 3);
+        assert_eq!(list[0].email, "alice@example.com");
+        assert_eq!(list[1].email, "bob@example.com");
+        assert_eq!(list[2].email, "charlie@example.com");
+    }
+
+    #[test]
+    fn test_store_remove_deletes_account() {
+        let (store, _dir) = test_store();
+        let account = make_account("remove@example.com");
+        let uuid = account.uuid;
+        store.insert(&account).unwrap();
+
+        store.remove(uuid).unwrap();
+        assert!(store.find_by_uuid(uuid).unwrap().is_none());
+    }
+
+    #[test]
+    fn test_store_set_active_cli_and_read() {
+        let (store, _dir) = test_store();
+        let account = make_account("cli@example.com");
+        let uuid = account.uuid;
+        store.insert(&account).unwrap();
+
+        store.set_active_cli(uuid).unwrap();
+        assert_eq!(store.active_cli_uuid().unwrap(), Some(uuid.to_string()));
+    }
+
+    #[test]
+    fn test_store_active_cli_reflected_in_list() {
+        let (store, _dir) = test_store();
+        let a = make_account("a@example.com");
+        let b = make_account("b@example.com");
+        let a_uuid = a.uuid;
+        store.insert(&a).unwrap();
+        store.insert(&b).unwrap();
+
+        store.set_active_cli(a_uuid).unwrap();
+        let list = store.list().unwrap();
+        let a_found = list.iter().find(|x| x.uuid == a_uuid).unwrap();
+        assert!(a_found.is_cli_active);
+        let b_found = list.iter().find(|x| x.uuid != a_uuid).unwrap();
+        assert!(!b_found.is_cli_active);
+    }
+
+    #[test]
+    fn test_store_clear_active_cli() {
+        let (store, _dir) = test_store();
+        let account = make_account("clear@example.com");
+        store.insert(&account).unwrap();
+        store.set_active_cli(account.uuid).unwrap();
+
+        store.clear_active_cli().unwrap();
+        assert!(store.active_cli_uuid().unwrap().is_none());
+    }
+
+    #[test]
+    fn test_store_set_active_desktop_and_read() {
+        let (store, _dir) = test_store();
+        let account = make_account("desk@example.com");
+        let uuid = account.uuid;
+        store.insert(&account).unwrap();
+
+        store.set_active_desktop(uuid).unwrap();
+        assert_eq!(store.active_desktop_uuid().unwrap(), Some(uuid.to_string()));
+    }
+
+    #[test]
+    fn test_store_clear_active_desktop() {
+        let (store, _dir) = test_store();
+        let account = make_account("desk2@example.com");
+        store.insert(&account).unwrap();
+        store.set_active_desktop(account.uuid).unwrap();
+
+        store.clear_active_desktop().unwrap();
+        assert!(store.active_desktop_uuid().unwrap().is_none());
+    }
+
+    #[test]
+    fn test_store_update_credentials_flag() {
+        let (store, _dir) = test_store();
+        let mut account = make_account("flag@example.com");
+        account.has_cli_credentials = false;
+        store.insert(&account).unwrap();
+
+        store.update_credentials_flag(account.uuid, true).unwrap();
+        let found = store.find_by_uuid(account.uuid).unwrap().unwrap();
+        assert!(found.has_cli_credentials);
+    }
+
+    #[test]
+    fn test_store_update_desktop_profile_flag() {
+        let (store, _dir) = test_store();
+        let account = make_account("profile@example.com");
+        store.insert(&account).unwrap();
+
+        store.update_desktop_profile_flag(account.uuid, true).unwrap();
+        let found = store.find_by_uuid(account.uuid).unwrap().unwrap();
+        assert!(found.has_desktop_profile);
+    }
+
+    #[test]
+    fn test_store_set_active_cli_updates_last_switch() {
+        let (store, _dir) = test_store();
+        let account = make_account("switch@example.com");
+        store.insert(&account).unwrap();
+
+        store.set_active_cli(account.uuid).unwrap();
+        let found = store.find_by_uuid(account.uuid).unwrap().unwrap();
+        assert!(found.last_cli_switch.is_some());
+    }
+
+    #[test]
+    fn test_store_find_by_email_not_found() {
+        let (store, _dir) = test_store();
+        assert!(store.find_by_email("nobody@example.com").unwrap().is_none());
+    }
+}
+
 const SCHEMA: &str = "
 CREATE TABLE IF NOT EXISTS accounts (
     uuid TEXT PRIMARY KEY,
