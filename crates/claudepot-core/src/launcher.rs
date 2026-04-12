@@ -64,3 +64,88 @@ pub async fn run(
 
     Ok(status.code().unwrap_or(1))
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::testing::{lock_data_dir, setup_test_data_dir, fresh_blob_json};
+
+    #[tokio::test]
+    async fn test_get_access_token_fresh_returns_directly() {
+        let _lock = lock_data_dir();
+        let _env = setup_test_data_dir();
+        let id = Uuid::new_v4();
+
+        swap::save_private(id, &fresh_blob_json()).unwrap();
+
+        let token = get_access_token(id).await.unwrap();
+        assert_eq!(token, "sk-ant-oat01-test");
+
+        swap::delete_private(id).unwrap();
+    }
+
+    #[tokio::test]
+    async fn test_get_access_token_missing_credentials() {
+        let _lock = lock_data_dir();
+        let _env = setup_test_data_dir();
+        let id = Uuid::new_v4();
+
+        let result = get_access_token(id).await;
+        assert!(matches!(result, Err(LauncherError::NoStoredCredentials(_))));
+    }
+
+    #[tokio::test]
+    async fn test_get_access_token_corrupt_blob() {
+        let _lock = lock_data_dir();
+        let _env = setup_test_data_dir();
+        let id = Uuid::new_v4();
+
+        swap::save_private(id, "not json").unwrap();
+
+        let result = get_access_token(id).await;
+        assert!(matches!(result, Err(LauncherError::CorruptBlob(_))));
+
+        swap::delete_private(id).unwrap();
+    }
+
+    #[tokio::test]
+    async fn test_run_empty_args_returns_no_command() {
+        let _lock = lock_data_dir();
+        let _env = setup_test_data_dir();
+        let id = Uuid::new_v4();
+        swap::save_private(id, &fresh_blob_json()).unwrap();
+
+        let result = run(id, &[]).await;
+        assert!(matches!(result, Err(LauncherError::NoCommand)));
+
+        swap::delete_private(id).unwrap();
+    }
+
+    #[tokio::test]
+    async fn test_run_executes_command() {
+        let _lock = lock_data_dir();
+        let _env = setup_test_data_dir();
+        let id = Uuid::new_v4();
+        swap::save_private(id, &fresh_blob_json()).unwrap();
+
+        let args = vec!["echo".to_string(), "hello".to_string()];
+        let exit_code = run(id, &args).await.unwrap();
+        assert_eq!(exit_code, 0);
+
+        swap::delete_private(id).unwrap();
+    }
+
+    #[tokio::test]
+    async fn test_run_nonexistent_command_returns_spawn_failed() {
+        let _lock = lock_data_dir();
+        let _env = setup_test_data_dir();
+        let id = Uuid::new_v4();
+        swap::save_private(id, &fresh_blob_json()).unwrap();
+
+        let args = vec!["/nonexistent/binary/that/doesnt/exist".to_string()];
+        let result = run(id, &args).await;
+        assert!(matches!(result, Err(LauncherError::SpawnFailed(_))));
+
+        swap::delete_private(id).unwrap();
+    }
+}
