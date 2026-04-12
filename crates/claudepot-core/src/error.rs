@@ -70,6 +70,27 @@ pub enum ProjectError {
 }
 
 #[derive(Error, Debug)]
+pub enum LauncherError {
+    #[error("no stored credentials for account {0}")]
+    NoStoredCredentials(uuid::Uuid),
+
+    #[error("corrupt credential blob: {0}")]
+    CorruptBlob(String),
+
+    #[error("token refresh failed: {0}")]
+    RefreshFailed(String),
+
+    #[error("failed to save refreshed credentials: {0}")]
+    SaveFailed(String),
+
+    #[error("no command specified")]
+    NoCommand,
+
+    #[error("spawn failed: {0}")]
+    SpawnFailed(String),
+}
+
+#[derive(Error, Debug)]
 pub enum OnboardError {
     #[error("claude CLI not found at {0}")]
     CliBinaryNotFound(String),
