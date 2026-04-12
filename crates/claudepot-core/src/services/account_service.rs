@@ -303,3 +303,126 @@ pub enum RegisterError {
     #[error("account not found")]
     NotFound,
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::testing::{DATA_DIR_LOCK, setup_test_data_dir, test_store, make_account};
+
+    fn insert_account(store: &AccountStore, email: &str) -> Account {
+        let account = make_account(email);
+        store.insert(&account).unwrap();
+        account
+    }
+
+    #[test]
+    fn test_remove_deletes_credential_file() {
+        let _lock = crate::testing::lock_data_dir();
+        let _env = setup_test_data_dir();
+        let (store, _db_dir) = test_store();
+        let account = insert_account(&store, "cred@example.com");
+
+        // Save a credential file
+        swap::save_private(account.uuid, r#"{"test":"blob"}"#).unwrap();
+        assert!(swap::load_private(account.uuid).is_ok());
+
+        remove_account(&store, account.uuid).unwrap();
+
+        // Credential file should be gone
+        assert!(swap::load_private(account.uuid).is_err());
+    }
+
+    #[test]
+    fn test_remove_deletes_desktop_profile() {
+        let _lock = crate::testing::lock_data_dir();
+        let _env = setup_test_data_dir();
+        let (store, _db_dir) = test_store();
+        let account = insert_account(&store, "desk@example.com");
+
+        // Create desktop profile dir
+        let profile_dir = paths::desktop_profile_dir(account.uuid);
+        std::fs::create_dir_all(&profile_dir).unwrap();
+        std::fs::write(profile_dir.join("config.json"), "cfg").unwrap();
+
+        let result = remove_account(&store, account.uuid).unwrap();
+        assert!(result.had_desktop_profile);
+        assert!(!profile_dir.exists());
+    }
+
+    #[test]
+    fn test_remove_removes_from_db() {
+        let _lock = crate::testing::lock_data_dir();
+        let _env = setup_test_data_dir();
+        let (store, _db_dir) = test_store();
+        let account = insert_account(&store, "db@example.com");
+
+        remove_account(&store, account.uuid).unwrap();
+        assert!(store.find_by_uuid(account.uuid).unwrap().is_none());
+    }
+
+    #[test]
+    fn test_remove_clears_active_cli() {
+        let _lock = crate::testing::lock_data_dir();
+        let _env = setup_test_data_dir();
+        let (store, _db_dir) = test_store();
+        let account = insert_account(&store, "cli@example.com");
+        store.set_active_cli(account.uuid).unwrap();
+
+        let result = remove_account(&store, account.uuid).unwrap();
+        assert!(result.was_cli_active);
+        assert!(store.active_cli_uuid().unwrap().is_none());
+    }
+
+    #[test]
+    fn test_remove_clears_active_desktop() {
+        let _lock = crate::testing::lock_data_dir();
+        let _env = setup_test_data_dir();
+        let (store, _db_dir) = test_store();
+        let account = insert_account(&store, "desk2@example.com");
+        store.set_active_desktop(account.uuid).unwrap();
+
+        let result = remove_account(&store, account.uuid).unwrap();
+        assert!(result.was_desktop_active);
+        assert!(store.active_desktop_uuid().unwrap().is_none());
+    }
+
+    #[test]
+    fn test_remove_nonexistent_returns_not_found() {
+        let _lock = crate::testing::lock_data_dir();
+        let _env = setup_test_data_dir();
+        let (store, _db_dir) = test_store();
+
+        let result = remove_account(&store, Uuid::new_v4());
+        assert!(matches!(result, Err(RegisterError::NotFound)));
+    }
+
+    #[test]
+    fn test_remove_missing_credential_succeeds_silently() {
+        let _lock = crate::testing::lock_data_dir();
+        let _env = setup_test_data_dir();
+        let (store, _db_dir) = test_store();
+        let account = insert_account(&store, "warn@example.com");
+        // Do NOT save_private — credential file doesn't exist
+
+        let result = remove_account(&store, account.uuid).unwrap();
+        // delete_private returns Ok when file doesn't exist,
+        // so no warning is produced — this is correct behavior
+        assert!(result.warnings.is_empty());
+        // Account still removed from DB
+        assert!(store.find_by_uuid(account.uuid).unwrap().is_none());
+    }
+
+    #[test]
+    fn test_remove_returns_correct_metadata() {
+        let _lock = crate::testing::lock_data_dir();
+        let _env = setup_test_data_dir();
+        let (store, _db_dir) = test_store();
+        let account = insert_account(&store, "meta@example.com");
+
+        let result = remove_account(&store, account.uuid).unwrap();
+        assert_eq!(result.email, "meta@example.com");
+        assert!(!result.was_cli_active);
+        assert!(!result.was_desktop_active);
+        assert!(!result.had_desktop_profile);
+    }
+}

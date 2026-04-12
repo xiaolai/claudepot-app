@@ -1,3 +1,6 @@
+#[cfg(test)]
+pub mod testing;
+
 pub mod account;
 pub mod blob;
 pub mod cli_backend;
