@@ -4,10 +4,11 @@
     "loc-guardian@xiaolai": true
   },
   "hooks": {
-    "preCommit": [
+    "PreToolUse": [
       {
-        "command": "bash -c \"git diff --cached --diff-filter=ACM -z --name-only | xargs -0 grep -lE 'sk-ant-(oat|ort)01-|security unlock-keychain -p|CLAUDE_CODE_OAUTH_TOKEN=sk-' 2>/dev/null && echo '\\n❌ BLOCKED: staged files contain secrets (tokens or passwords). Remove them before committing.' && exit 1 || exit 0\"",
-        "description": "Block commits containing OAuth tokens or keychain passwords"
+        "matcher": "Bash",
+        "command": "bash -c 'COMMAND=$(echo \"$TOOL_INPUT\" | jq -r .command 2>/dev/null); if echo \"$COMMAND\" | grep -q \"git commit\"; then git diff --cached --diff-filter=ACM -z --name-only 2>/dev/null | xargs -0 grep -lE \"sk-ant-(oat|ort)01-|security unlock-keychain -p [a-zA-Z]|CLAUDE_CODE_OAUTH_TOKEN=sk-\" 2>/dev/null && echo \"BLOCKED: staged files contain secrets\" && exit 2; fi; exit 0'",
+        "description": "Block git commits containing OAuth tokens or keychain passwords"
       }
     ]
   }
