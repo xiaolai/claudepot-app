@@ -15,3 +15,15 @@ pub trait CliPlatform: Send + Sync {
     async fn write_default(&self, blob: &str) -> Result<(), SwapError>;
     async fn touch_credfile(&self) -> Result<(), SwapError>;
 }
+
+/// Create the platform-appropriate CLI backend.
+pub fn create_platform() -> Box<dyn CliPlatform> {
+    #[cfg(target_os = "macos")]
+    {
+        Box::new(keychain::MacosKeychain)
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        Box::new(credfile::CredentialFile)
+    }
+}
