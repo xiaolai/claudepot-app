@@ -12,10 +12,10 @@ pub fn list(ctx: &AppContext) -> Result<()> {
 pub async fn add(ctx: &AppContext, from_current: bool, from_token: Option<String>) -> Result<()> {
     if from_current {
         add_from_current(ctx).await
-    } else if let Some(_token) = from_token {
-        anyhow::bail!("--from-token not yet implemented (Step 5)")
+    } else if let Some(token) = from_token {
+        add_from_token(ctx, &token).await
     } else {
-        anyhow::bail!("browser-based add not yet implemented (Step 5)")
+        add_via_browser(ctx).await
     }
 }
 
@@ -215,6 +215,122 @@ pub async fn inspect(ctx: &AppContext, email_input: &str) -> Result<()> {
         }
     }
 
+    Ok(())
+}
+
+async fn add_from_token(ctx: &AppContext, refresh_token: &str) -> Result<()> {
+    use claudepot_core::oauth::{profile, refresh};
+    use claudepot_core::cli_backend::swap;
+    use claudepot_core::account::Account;
+    use chrono::Utc;
+    use uuid::Uuid;
+
+    ctx.info("Exchanging refresh token...");
+    let token_resp = refresh::refresh(refresh_token).await
+        .map_err(|e| anyhow::anyhow!("token exchange failed: {e}"))?;
+
+    ctx.info("Fetching account profile...");
+    let prof = profile::fetch(&token_resp.access_token).await?;
+
+    if let Some(existing) = ctx.store.find_by_email(&prof.email)? {
+        anyhow::bail!("Already registered: {} (uuid: {})", existing.email, existing.uuid);
+    }
+
+    let account_id = Uuid::new_v4();
+    let blob_str = refresh::build_blob(&token_resp);
+    swap::save_private(account_id, &blob_str)?;
+
+    let account = Account {
+        uuid: account_id,
+        email: prof.email.clone(),
+        org_uuid: Some(prof.org_uuid),
+        org_name: Some(prof.org_name),
+        subscription_type: Some(prof.subscription_type.clone()),
+        rate_limit_tier: prof.rate_limit_tier.clone(),
+        created_at: Utc::now(),
+        last_cli_switch: None,
+        last_desktop_switch: None,
+        has_cli_credentials: true,
+        has_desktop_profile: false,
+        is_cli_active: false,
+        is_desktop_active: false,
+    };
+    ctx.store.insert(&account)?;
+
+    if ctx.json {
+        println!("{}", serde_json::json!({"registered": true, "email": prof.email}));
+    } else {
+        println!("Registered: {} ({})", prof.email, capitalize(&prof.subscription_type));
+    }
+    Ok(())
+}
+
+async fn add_via_browser(ctx: &AppContext) -> Result<()> {
+    use claudepot_core::onboard;
+    use claudepot_core::oauth::profile;
+    use claudepot_core::cli_backend::swap;
+    use claudepot_core::account::Account;
+    use chrono::Utc;
+    use uuid::Uuid;
+
+    ctx.info("Opening browser for OAuth login...");
+    ctx.info("(Complete the login in your browser)");
+
+    let config_dir = onboard::run_auth_login().await?;
+
+    ctx.info("Reading credentials from login...");
+    let blob_str = match onboard::read_credentials_from_dir(&config_dir) {
+        Ok(b) => b,
+        Err(e) => {
+            onboard::cleanup(&config_dir).await;
+            return Err(anyhow::anyhow!("failed to read credentials: {e}"));
+        }
+    };
+
+    let blob = claudepot_core::blob::CredentialBlob::from_json(&blob_str)?;
+
+    ctx.info("Fetching account profile...");
+    let prof = match profile::fetch(&blob.claude_ai_oauth.access_token).await {
+        Ok(p) => p,
+        Err(e) => {
+            onboard::cleanup(&config_dir).await;
+            return Err(anyhow::anyhow!("profile fetch failed: {e}"));
+        }
+    };
+
+    if let Some(existing) = ctx.store.find_by_email(&prof.email)? {
+        onboard::cleanup(&config_dir).await;
+        anyhow::bail!("Already registered: {} (uuid: {})", existing.email, existing.uuid);
+    }
+
+    let account_id = Uuid::new_v4();
+    swap::save_private(account_id, &blob_str)?;
+
+    let account = Account {
+        uuid: account_id,
+        email: prof.email.clone(),
+        org_uuid: Some(prof.org_uuid),
+        org_name: Some(prof.org_name),
+        subscription_type: Some(prof.subscription_type.clone()),
+        rate_limit_tier: prof.rate_limit_tier.clone(),
+        created_at: Utc::now(),
+        last_cli_switch: None,
+        last_desktop_switch: None,
+        has_cli_credentials: true,
+        has_desktop_profile: false,
+        is_cli_active: false,
+        is_desktop_active: false,
+    };
+    ctx.store.insert(&account)?;
+
+    // Cleanup temp dir + hashed keychain
+    onboard::cleanup(&config_dir).await;
+
+    if ctx.json {
+        println!("{}", serde_json::json!({"registered": true, "email": prof.email}));
+    } else {
+        println!("Registered: {} ({})", prof.email, capitalize(&prof.subscription_type));
+    }
     Ok(())
 }
 
