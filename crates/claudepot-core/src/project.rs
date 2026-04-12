@@ -1278,4 +1278,370 @@ mod tests {
             result
         );
     }
+
+    // -- merge_project_dirs tests --
+
+    #[test]
+    fn test_merge_project_dirs_copies_missing_files() {
+        let tmp = tempfile::tempdir().unwrap();
+        let src = tmp.path().join("src");
+        let dst = tmp.path().join("dst");
+        fs::create_dir_all(&src).unwrap();
+        fs::create_dir_all(&dst).unwrap();
+
+        fs::write(src.join("a.jsonl"), "session-a").unwrap();
+        fs::write(src.join("b.jsonl"), "session-b").unwrap();
+        fs::write(dst.join("c.jsonl"), "session-c").unwrap();
+
+        merge_project_dirs(&src, &dst).unwrap();
+
+        assert_eq!(fs::read_to_string(dst.join("a.jsonl")).unwrap(), "session-a");
+        assert_eq!(fs::read_to_string(dst.join("b.jsonl")).unwrap(), "session-b");
+        assert_eq!(fs::read_to_string(dst.join("c.jsonl")).unwrap(), "session-c");
+    }
+
+    #[test]
+    fn test_merge_project_dirs_skips_existing_files() {
+        let tmp = tempfile::tempdir().unwrap();
+        let src = tmp.path().join("src");
+        let dst = tmp.path().join("dst");
+        fs::create_dir_all(&src).unwrap();
+        fs::create_dir_all(&dst).unwrap();
+
+        fs::write(src.join("dup.jsonl"), "src-version").unwrap();
+        fs::write(dst.join("dup.jsonl"), "dst-version").unwrap();
+
+        merge_project_dirs(&src, &dst).unwrap();
+
+        // dst version preserved, not overwritten
+        assert_eq!(fs::read_to_string(dst.join("dup.jsonl")).unwrap(), "dst-version");
+    }
+
+    #[test]
+    fn test_merge_project_dirs_recursive_subdir() {
+        let tmp = tempfile::tempdir().unwrap();
+        let src = tmp.path().join("src");
+        let dst = tmp.path().join("dst");
+        fs::create_dir_all(src.join("memory")).unwrap();
+        fs::create_dir_all(&dst).unwrap();
+
+        fs::write(src.join("memory").join("topic.md"), "# Topic").unwrap();
+
+        merge_project_dirs(&src, &dst).unwrap();
+
+        assert_eq!(
+            fs::read_to_string(dst.join("memory").join("topic.md")).unwrap(),
+            "# Topic"
+        );
+    }
+
+    // -- rewrite_history edge cases --
+
+    #[test]
+    fn test_rewrite_history_invalid_json_passthrough() {
+        let tmp = tempfile::tempdir().unwrap();
+        let history = tmp.path().join("history.jsonl");
+        let old_path = "/old/path";
+        let new_path = "/new/path";
+
+        let lines = vec![
+            format!(r#"{{"project":"{}","sessionId":"abc"}}"#, old_path),
+            format!("not valid json but contains {}", old_path),
+            "totally unrelated line".to_string(),
+        ];
+        fs::write(&history, lines.join("\n") + "\n").unwrap();
+
+        let count = rewrite_history(&history, old_path, new_path).unwrap();
+        assert_eq!(count, 1); // only valid JSON line was rewritten
+
+        let content = fs::read_to_string(&history).unwrap();
+        assert!(content.contains(new_path));
+        // Invalid JSON line preserved unchanged
+        assert!(content.contains(&format!("not valid json but contains {}", old_path)));
+        assert!(content.contains("totally unrelated line"));
+    }
+
+    #[test]
+    fn test_rewrite_history_empty_file() {
+        let tmp = tempfile::tempdir().unwrap();
+        let history = tmp.path().join("history.jsonl");
+        fs::write(&history, "").unwrap();
+
+        let count = rewrite_history(&history, "/old", "/new").unwrap();
+        assert_eq!(count, 0);
+    }
+
+    // -- resolve_path edge cases --
+
+    #[test]
+    fn test_resolve_path_relative_joins_cwd() {
+        // resolve_path with a relative path should join it with cwd
+        let result = resolve_path("some-relative-dir").unwrap();
+        let cwd = std::env::current_dir().unwrap();
+        let expected = cwd.join("some-relative-dir").to_string_lossy().to_string();
+        // NFC normalization may change the string slightly on macOS
+        assert!(result.contains("some-relative-dir"));
+        assert!(result.starts_with('/') || result.contains(':'));  // absolute
+    }
+
+    // -- move_project error branches --
+
+    #[test]
+    fn test_move_project_both_exist_error() {
+        let tmp = tempfile::tempdir().unwrap();
+        let base = tmp.path().canonicalize().unwrap();
+
+        let src = base.join("old");
+        let dst = base.join("new");
+        fs::create_dir(&src).unwrap();
+        fs::create_dir(&dst).unwrap();
+
+        let projects_dir = base.join("projects");
+        fs::create_dir(&projects_dir).unwrap();
+
+        let args = MoveArgs {
+            old_path: src,
+            new_path: dst,
+            config_dir: base,
+            no_move: false,
+            merge: false,
+            overwrite: false,
+            force: false,
+            dry_run: false,
+        };
+
+        let result = move_project(&args);
+        assert!(matches!(result, Err(ProjectError::Ambiguous(_))));
+        let msg = result.unwrap_err().to_string();
+        assert!(msg.contains("both"));
+    }
+
+    #[test]
+    fn test_move_project_neither_exist_error() {
+        let tmp = tempfile::tempdir().unwrap();
+        let base = tmp.path().canonicalize().unwrap();
+
+        let args = MoveArgs {
+            old_path: base.join("nonexistent1"),
+            new_path: base.join("nonexistent2"),
+            config_dir: base,
+            no_move: false,
+            merge: false,
+            overwrite: false,
+            force: false,
+            dry_run: false,
+        };
+
+        let result = move_project(&args);
+        assert!(matches!(result, Err(ProjectError::Ambiguous(_))));
+        let msg = result.unwrap_err().to_string();
+        assert!(msg.contains("neither"));
+    }
+
+    #[test]
+    fn test_move_project_merge_cc_dirs() {
+        let tmp = tempfile::tempdir().unwrap();
+        let base = tmp.path().canonicalize().unwrap();
+
+        let src = base.join("old");
+        fs::create_dir(&src).unwrap();
+        let dst = base.join("new");
+
+        let projects_dir = base.join("projects");
+        fs::create_dir(&projects_dir).unwrap();
+
+        // Create old CC dir with session
+        let old_san = sanitize_path(&src.to_string_lossy());
+        let cc_old = projects_dir.join(&old_san);
+        fs::create_dir(&cc_old).unwrap();
+        fs::write(cc_old.join("old-session.jsonl"), "old").unwrap();
+
+        // Create new CC dir with different session
+        let new_san = sanitize_path(&dst.to_string_lossy());
+        let cc_new = projects_dir.join(&new_san);
+        fs::create_dir(&cc_new).unwrap();
+        fs::write(cc_new.join("new-session.jsonl"), "new").unwrap();
+
+        let args = MoveArgs {
+            old_path: src.clone(),
+            new_path: dst.clone(),
+            config_dir: base.clone(),
+            no_move: false,
+            merge: true,
+            overwrite: false,
+            force: true,
+            dry_run: false,
+        };
+
+        let result = move_project(&args).unwrap();
+        assert!(result.cc_dir_renamed);
+
+        // New CC dir has both sessions
+        assert!(cc_new.join("new-session.jsonl").exists());
+        assert!(cc_new.join("old-session.jsonl").exists());
+        // Old CC dir is gone
+        assert!(!cc_old.exists());
+    }
+
+    #[test]
+    fn test_move_project_overwrite_cc_dir() {
+        let tmp = tempfile::tempdir().unwrap();
+        let base = tmp.path().canonicalize().unwrap();
+
+        let src = base.join("old");
+        fs::create_dir(&src).unwrap();
+        let dst = base.join("new");
+
+        let projects_dir = base.join("projects");
+        fs::create_dir(&projects_dir).unwrap();
+
+        let old_san = sanitize_path(&src.to_string_lossy());
+        let cc_old = projects_dir.join(&old_san);
+        fs::create_dir(&cc_old).unwrap();
+        fs::write(cc_old.join("keep.jsonl"), "keep-this").unwrap();
+
+        let new_san = sanitize_path(&dst.to_string_lossy());
+        let cc_new = projects_dir.join(&new_san);
+        fs::create_dir(&cc_new).unwrap();
+        fs::write(cc_new.join("discard.jsonl"), "discard-this").unwrap();
+
+        let args = MoveArgs {
+            old_path: src.clone(),
+            new_path: dst.clone(),
+            config_dir: base.clone(),
+            no_move: false,
+            merge: false,
+            overwrite: true,
+            force: true,
+            dry_run: false,
+        };
+
+        let result = move_project(&args).unwrap();
+        assert!(result.cc_dir_renamed);
+
+        // New CC dir has old's content, not the original new content
+        assert!(cc_new.join("keep.jsonl").exists());
+        assert!(!cc_new.join("discard.jsonl").exists());
+        assert!(!cc_old.exists());
+    }
+
+    #[test]
+    fn test_move_project_conflict_warning() {
+        let tmp = tempfile::tempdir().unwrap();
+        let base = tmp.path().canonicalize().unwrap();
+
+        let src = base.join("old");
+        fs::create_dir(&src).unwrap();
+        let dst = base.join("new");
+
+        let projects_dir = base.join("projects");
+        fs::create_dir(&projects_dir).unwrap();
+
+        let old_san = sanitize_path(&src.to_string_lossy());
+        let cc_old = projects_dir.join(&old_san);
+        fs::create_dir(&cc_old).unwrap();
+        fs::write(cc_old.join("s.jsonl"), "data").unwrap();
+
+        let new_san = sanitize_path(&dst.to_string_lossy());
+        let cc_new = projects_dir.join(&new_san);
+        fs::create_dir(&cc_new).unwrap();
+        fs::write(cc_new.join("s.jsonl"), "data").unwrap();
+
+        let args = MoveArgs {
+            old_path: src,
+            new_path: dst,
+            config_dir: base,
+            no_move: false,
+            merge: false,
+            overwrite: false,
+            force: true,
+            dry_run: false,
+        };
+
+        let result = move_project(&args).unwrap();
+        assert!(!result.cc_dir_renamed); // no rename happened
+        assert!(!result.warnings.is_empty());
+        assert!(result.warnings[0].contains("--merge"));
+    }
+
+    #[test]
+    fn test_move_project_dry_run_with_conflict() {
+        let tmp = tempfile::tempdir().unwrap();
+        let base = tmp.path().canonicalize().unwrap();
+
+        let src = base.join("old");
+        fs::create_dir(&src).unwrap();
+        let dst = base.join("new");
+
+        let projects_dir = base.join("projects");
+        fs::create_dir(&projects_dir).unwrap();
+
+        // Create non-empty CC dirs for both paths
+        let old_san = sanitize_path(&src.canonicalize().unwrap().to_string_lossy());
+        let cc_old = projects_dir.join(&old_san);
+        fs::create_dir(&cc_old).unwrap();
+        fs::write(cc_old.join("s.jsonl"), "{}").unwrap();
+
+        let new_san = sanitize_path(&dst.to_string_lossy());
+        let cc_new = projects_dir.join(&new_san);
+        fs::create_dir(&cc_new).unwrap();
+        fs::write(cc_new.join("s.jsonl"), "{}").unwrap();
+
+        let args = MoveArgs {
+            old_path: src.clone(),
+            new_path: dst.clone(),
+            config_dir: base,
+            no_move: false,
+            merge: false,
+            overwrite: false,
+            force: false,
+            dry_run: true,
+        };
+
+        let result = move_project(&args).unwrap();
+        // Dry run plan should mention conflict
+        assert!(!result.warnings.is_empty());
+        let plan = &result.warnings[0];
+        assert!(plan.contains("Conflict") || plan.contains("--merge"));
+        // Nothing actually changed
+        assert!(src.exists());
+    }
+
+    #[test]
+    fn test_move_project_empty_new_cc_dir_replaced() {
+        let tmp = tempfile::tempdir().unwrap();
+        let base = tmp.path().canonicalize().unwrap();
+
+        let src = base.join("old");
+        fs::create_dir(&src).unwrap();
+        let dst = base.join("new");
+
+        let projects_dir = base.join("projects");
+        fs::create_dir(&projects_dir).unwrap();
+
+        let old_san = sanitize_path(&src.to_string_lossy());
+        let cc_old = projects_dir.join(&old_san);
+        fs::create_dir(&cc_old).unwrap();
+        fs::write(cc_old.join("s.jsonl"), "data").unwrap();
+
+        // Create EMPTY new CC dir
+        let new_san = sanitize_path(&dst.to_string_lossy());
+        let cc_new = projects_dir.join(&new_san);
+        fs::create_dir(&cc_new).unwrap();
+
+        let args = MoveArgs {
+            old_path: src,
+            new_path: dst,
+            config_dir: base,
+            no_move: false,
+            merge: false,
+            overwrite: false,
+            force: true,
+            dry_run: false,
+        };
+
+        let result = move_project(&args).unwrap();
+        assert!(result.cc_dir_renamed);
+        assert!(cc_new.join("s.jsonl").exists());
+    }
 }

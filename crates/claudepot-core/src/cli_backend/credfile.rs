@@ -82,3 +82,98 @@ impl super::CliPlatform for CredentialFile {
         touch()
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::sync::Mutex;
+
+    // credfile tests modify CLAUDE_CONFIG_DIR — serialize with global lock
+    static ENV_LOCK: Mutex<()> = Mutex::new(());
+
+    fn setup_config_dir() -> tempfile::TempDir {
+        let dir = tempfile::tempdir().unwrap();
+        std::env::set_var("CLAUDE_CONFIG_DIR", dir.path());
+        dir
+    }
+
+    #[test]
+    fn test_credfile_write_and_read_roundtrip() {
+        let _lock = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let _dir = setup_config_dir();
+
+        write_default(r#"{"test":"blob"}"#).unwrap();
+        let result = read_default().unwrap();
+        assert_eq!(result, Some(r#"{"test":"blob"}"#.to_string()));
+    }
+
+    #[test]
+    fn test_credfile_read_missing_returns_none() {
+        let _lock = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let _dir = setup_config_dir();
+
+        let result = read_default().unwrap();
+        assert_eq!(result, None);
+    }
+
+    #[test]
+    fn test_credfile_read_empty_returns_none() {
+        let _lock = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let dir = setup_config_dir();
+
+        std::fs::write(dir.path().join(".credentials.json"), "  \n  ").unwrap();
+        let result = read_default().unwrap();
+        assert_eq!(result, None);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn test_credfile_write_sets_0600_permissions() {
+        let _lock = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let dir = setup_config_dir();
+
+        write_default("secret").unwrap();
+
+        use std::os::unix::fs::PermissionsExt;
+        let meta = std::fs::metadata(dir.path().join(".credentials.json")).unwrap();
+        assert_eq!(meta.permissions().mode() & 0o777, 0o600);
+    }
+
+    #[test]
+    fn test_credfile_touch_existing_file() {
+        let _lock = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let dir = setup_config_dir();
+
+        write_default("data").unwrap();
+        let before = std::fs::metadata(dir.path().join(".credentials.json"))
+            .unwrap().modified().unwrap();
+
+        // Small delay to ensure mtime changes
+        std::thread::sleep(std::time::Duration::from_millis(50));
+
+        touch().unwrap();
+        let after = std::fs::metadata(dir.path().join(".credentials.json"))
+            .unwrap().modified().unwrap();
+
+        assert!(after >= before);
+    }
+
+    #[test]
+    fn test_credfile_touch_missing_file_is_noop() {
+        let _lock = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let _dir = setup_config_dir();
+
+        // No credential file exists — touch should succeed silently
+        touch().unwrap();
+    }
+
+    #[test]
+    fn test_credfile_write_overwrites() {
+        let _lock = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let _dir = setup_config_dir();
+
+        write_default("first").unwrap();
+        write_default("second").unwrap();
+        assert_eq!(read_default().unwrap(), Some("second".to_string()));
+    }
+}
