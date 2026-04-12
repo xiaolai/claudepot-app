@@ -107,12 +107,27 @@ pub async fn check_health(store: &AccountStore) -> HealthReport {
 }
 
 fn detect_cli() -> (Option<PathBuf>, Option<String>) {
-    let candidates = [
-        dirs::home_dir().map(|h| h.join(".local/bin/claude")),
-        Some(PathBuf::from("/usr/local/bin/claude")),
-        Some(PathBuf::from("/usr/bin/claude")),
-    ];
-    for path in candidates.iter().flatten() {
+    let mut candidates: Vec<PathBuf> = vec![];
+
+    // Unix paths
+    if let Some(home) = dirs::home_dir() {
+        candidates.push(home.join(".local/bin/claude"));
+    }
+    candidates.push(PathBuf::from("/usr/local/bin/claude"));
+    candidates.push(PathBuf::from("/usr/bin/claude"));
+
+    // Windows paths
+    #[cfg(target_os = "windows")]
+    {
+        if let Some(appdata) = std::env::var_os("APPDATA") {
+            candidates.push(PathBuf::from(appdata).join("npm").join("claude.cmd"));
+        }
+        if let Some(home) = dirs::home_dir() {
+            candidates.push(home.join(".local").join("bin").join("claude.exe"));
+        }
+    }
+
+    for path in &candidates {
         if path.exists() {
             let version = std::process::Command::new(path)
                 .arg("--version")
@@ -123,6 +138,26 @@ fn detect_cli() -> (Option<PathBuf>, Option<String>) {
             return (Some(path.clone()), version);
         }
     }
+
+    // Fallback: try `which`/`where` on PATH
+    let which_cmd = if cfg!(target_os = "windows") { "where" } else { "which" };
+    let claude_name = if cfg!(target_os = "windows") { "claude.cmd" } else { "claude" };
+    if let Ok(output) = std::process::Command::new(which_cmd).arg(claude_name).output() {
+        if output.status.success() {
+            let path_str = String::from_utf8_lossy(&output.stdout).trim().lines().next().unwrap_or("").to_string();
+            if !path_str.is_empty() {
+                let path = PathBuf::from(&path_str);
+                let version = std::process::Command::new(&path)
+                    .arg("--version")
+                    .output()
+                    .ok()
+                    .and_then(|o| String::from_utf8(o.stdout).ok())
+                    .map(|s| s.trim().to_string());
+                return (Some(path), version);
+            }
+        }
+    }
+
     (None, None)
 }
 
@@ -141,7 +176,26 @@ fn detect_desktop() -> (bool, Option<String>) {
         }
         (false, None)
     }
-    #[cfg(not(target_os = "macos"))]
+    #[cfg(target_os = "windows")]
+    {
+        // Check MSIX package via data dir existence
+        let data_dir = crate::paths::claude_desktop_data_dir();
+        if let Some(ref dir) = data_dir {
+            if dir.exists() {
+                // Get version from powershell
+                let version = std::process::Command::new("powershell")
+                    .args(["-Command", "(Get-AppxPackage Claude).Version"])
+                    .output()
+                    .ok()
+                    .and_then(|o| String::from_utf8(o.stdout).ok())
+                    .map(|s| s.trim().to_string())
+                    .filter(|s| !s.is_empty());
+                return (true, version);
+            }
+        }
+        (false, None)
+    }
+    #[cfg(not(any(target_os = "macos", target_os = "windows")))]
     {
         (false, None)
     }
