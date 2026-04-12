@@ -28,3 +28,4 @@ Cargo.lock
 *.sw?
 typescript
 scripts/
+dev-docs/
