@@ -27,3 +27,4 @@ Cargo.lock
 *.sln
 *.sw?
 typescript
+scripts/
