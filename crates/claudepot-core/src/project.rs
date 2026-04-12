@@ -225,6 +225,8 @@ enum MoveScenario {
 }
 
 pub fn move_project(args: &MoveArgs) -> Result<MoveResult, ProjectError> {
+    tracing::info!(old = ?args.old_path, new = ?args.new_path, "starting project move");
+
     // Phase 1: Validate
     let old_str = args.old_path.to_str().ok_or_else(|| {
         ProjectError::Ambiguous("old path contains invalid UTF-8".to_string())
@@ -356,9 +358,16 @@ pub fn move_project(args: &MoveArgs) -> Result<MoveResult, ProjectError> {
     // Phase 5: Rewrite history.jsonl
     let history_path = args.config_dir.join("history.jsonl");
     if history_path.exists() {
+        tracing::debug!("rewriting history.jsonl");
         result.history_lines_updated = rewrite_history(&history_path, &old_norm, &new_norm)?;
     }
 
+    tracing::info!(
+        moved = result.actual_dir_moved,
+        renamed = result.cc_dir_renamed,
+        history = result.history_lines_updated,
+        "project move complete"
+    );
     Ok(result)
 }
 
