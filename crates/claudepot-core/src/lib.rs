@@ -7,5 +7,6 @@ pub mod launcher;
 pub mod oauth;
 pub mod onboard;
 pub mod paths;
+pub mod project;
 pub mod resolve;
 pub mod services;

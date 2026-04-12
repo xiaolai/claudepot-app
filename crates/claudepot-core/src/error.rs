@@ -52,6 +52,24 @@ pub enum OAuthError {
 }
 
 #[derive(Error, Debug)]
+pub enum ProjectError {
+    #[error("project not found: {0}")]
+    NotFound(String),
+
+    #[error("old and new paths are the same")]
+    SamePath,
+
+    #[error("ambiguous: {0}")]
+    Ambiguous(String),
+
+    #[error("a claude process is running in {0} — use --force to proceed")]
+    ClaudeRunning(String),
+
+    #[error("{0}")]
+    Io(#[from] std::io::Error),
+}
+
+#[derive(Error, Debug)]
 pub enum OnboardError {
     #[error("claude CLI not found at {0}")]
     CliBinaryNotFound(String),
