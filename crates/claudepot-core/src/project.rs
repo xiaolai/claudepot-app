@@ -1,140 +1,15 @@
 use crate::error::ProjectError;
-use serde::Serialize;
 use std::fs;
-use std::io::{BufRead, BufReader, BufWriter, Write};
-use std::path::{Path, PathBuf};
-use std::time::SystemTime;
-use unicode_normalization::UnicodeNormalization;
+use std::path::Path;
 
-// ---------------------------------------------------------------------------
-// Path sanitization (mirrors CC's sessionStoragePortable.ts:311-319)
-// ---------------------------------------------------------------------------
+// Re-export public API from submodules
+pub use crate::project_sanitize::{sanitize_path, unsanitize_path};
+pub use crate::project_types::*;
+pub use crate::project_helpers::format_size;
 
-const MAX_SANITIZED_LENGTH: usize = 200;
-
-/// Replicate CC's `sanitizePath`. Non-alphanumeric ASCII chars become `-`.
-/// Paths longer than 200 chars get a djb2 hash suffix.
-pub fn sanitize_path(name: &str) -> String {
-    let sanitized: String = name
-        .chars()
-        .map(|c| if c.is_ascii_alphanumeric() { c } else { '-' })
-        .collect();
-    if sanitized.len() <= MAX_SANITIZED_LENGTH {
-        sanitized
-    } else {
-        let hash = djb2_hash(name);
-        format!("{}-{}", &sanitized[..MAX_SANITIZED_LENGTH], hash)
-    }
-}
-
-/// Best-effort reverse of `sanitize_path`. Lossy: hyphens could have been
-/// any non-alphanumeric char. Used for display only.
-pub fn unsanitize_path(sanitized: &str) -> String {
-    // Leading `-` was a `/` (Unix) or drive separator (Windows).
-    // Remaining `-` are path separators — this is wrong for names containing
-    // hyphens/underscores/spaces, but it's the best we can do.
-    sanitized.replace('-', "/")
-}
-
-/// djb2 string hash (Daniel J. Bernstein). Returns the hash as a base-36 string.
-///
-/// This is a 32-bit hash, so collisions are expected at ~65 536 entries
-/// (birthday bound). We accept this because CC uses the same algorithm
-/// and we must produce identical directory names for compatibility.
-fn djb2_hash(s: &str) -> String {
-    let mut hash: u32 = 5381;
-    for byte in s.bytes() {
-        hash = hash.wrapping_mul(33).wrapping_add(byte as u32);
-    }
-    format_radix(hash, 36)
-}
-
-fn format_radix(mut x: u32, radix: u32) -> String {
-    if x == 0 {
-        return "0".to_string();
-    }
-    let mut result = Vec::new();
-    while x > 0 {
-        let digit = (x % radix) as u8;
-        let ch = if digit < 10 {
-            b'0' + digit
-        } else {
-            b'a' + digit - 10
-        };
-        result.push(ch);
-        x /= radix;
-    }
-    result.reverse();
-    String::from_utf8(result).unwrap_or_default()
-}
-
-// ---------------------------------------------------------------------------
-// Data types
-// ---------------------------------------------------------------------------
-
-#[derive(Debug, Clone, Serialize)]
-pub struct ProjectInfo {
-    pub sanitized_name: String,
-    pub original_path: String,
-    pub session_count: usize,
-    pub memory_file_count: usize,
-    pub total_size_bytes: u64,
-    pub last_modified: Option<SystemTime>,
-    pub is_orphan: bool,
-}
-
-#[derive(Debug, Clone, Serialize)]
-pub struct ProjectDetail {
-    pub info: ProjectInfo,
-    pub sessions: Vec<SessionInfo>,
-    pub memory_files: Vec<String>,
-}
-
-#[derive(Debug, Clone, Serialize)]
-pub struct SessionInfo {
-    pub session_id: String,
-    pub file_size: u64,
-    pub last_modified: Option<SystemTime>,
-}
-
-pub struct MoveArgs {
-    pub old_path: PathBuf,
-    pub new_path: PathBuf,
-    pub config_dir: PathBuf,
-    pub no_move: bool,
-    pub merge: bool,
-    pub overwrite: bool,
-    pub force: bool,
-    pub dry_run: bool,
-}
-
-#[derive(Debug, Default, Serialize)]
-pub struct MoveResult {
-    pub actual_dir_moved: bool,
-    pub cc_dir_renamed: bool,
-    pub old_sanitized: Option<String>,
-    pub new_sanitized: Option<String>,
-    pub history_lines_updated: usize,
-    pub warnings: Vec<String>,
-}
-
-#[derive(Debug, Default, Serialize)]
-pub struct CleanResult {
-    pub orphans_found: usize,
-    pub orphans_removed: usize,
-    pub bytes_freed: u64,
-}
-
-#[derive(Debug, Clone, Serialize)]
-pub struct DryRunPlan {
-    pub would_move_dir: bool,
-    pub old_cc_dir: String,
-    pub new_cc_dir: String,
-    pub session_count: usize,
-    pub cc_dir_size: u64,
-    pub estimated_history_lines: usize,
-    pub conflict: Option<String>,
-}
+// Private imports from submodules
+use crate::project_sanitize::{MAX_SANITIZED_LENGTH, djb2_hash, format_radix};
+use crate::project_helpers::*;
 
 // ---------------------------------------------------------------------------
 // list_projects
@@ -153,36 +28,8 @@ pub fn list_projects(config_dir: &Path) -> Result<Vec<ProjectInfo>, ProjectError
         if !ft.is_dir() {
             continue;
         }
-
         let sanitized_name = entry.file_name().to_string_lossy().to_string();
-        let original_path = unsanitize_path(&sanitized_name);
-
-        let session_count = count_files_with_ext(&entry.path(), "jsonl");
-        let memory_dir = entry.path().join("memory");
-        let memory_file_count = if memory_dir.exists() {
-            count_files_with_ext(&memory_dir, "md")
-        } else {
-            0
-        };
-        let total_size_bytes = dir_size(&entry.path());
-        let last_modified = most_recent_mtime(&entry.path());
-        // Orphan detection: check if the reconstructed path exists on disk.
-        // unsanitize_path is lossy — if re-sanitizing the unsanitized path
-        // doesn't round-trip back to the same sanitized name, the reconstruction
-        // is unreliable and we mark it as "unknown" (not orphan) to avoid
-        // false-positive deletions.
-        let roundtrips = sanitize_path(&original_path) == sanitized_name;
-        let is_orphan = roundtrips && !Path::new(&original_path).exists();
-
-        projects.push(ProjectInfo {
-            sanitized_name,
-            original_path,
-            session_count,
-            memory_file_count,
-            total_size_bytes,
-            last_modified,
-            is_orphan,
-        });
+        projects.push(compute_project_info(&entry.path(), &sanitized_name)?);
     }
 
     projects.sort_by(|a, b| b.last_modified.cmp(&a.last_modified));
@@ -201,9 +48,6 @@ pub fn show_project(
     let sanitized = sanitize_path(&resolved);
     let project_dir = config_dir.join("projects").join(&sanitized);
 
-    // If exact match doesn't exist, try prefix scan ONLY for long paths
-    // (where the hash suffix may differ between CC CLI and SDK).
-    // Short paths have deterministic sanitization — no prefix fallback.
     let project_dir = if project_dir.exists() {
         project_dir
     } else if sanitized.len() > MAX_SANITIZED_LENGTH {
@@ -222,11 +66,7 @@ pub fn show_project(
     let sessions = list_sessions(&project_dir)?;
     let memory_files = list_memory_files(&project_dir)?;
 
-    Ok(ProjectDetail {
-        info,
-        sessions,
-        memory_files,
-    })
+    Ok(ProjectDetail { info, sessions, memory_files })
 }
 
 // ---------------------------------------------------------------------------
@@ -234,7 +74,7 @@ pub fn show_project(
 // ---------------------------------------------------------------------------
 
 #[derive(Debug, PartialEq)]
-enum MoveScenario {
+pub(crate) enum MoveScenario {
     StateOnly,
     MoveAndUpdate,
     AlreadyMoved,
@@ -243,7 +83,6 @@ enum MoveScenario {
 pub fn move_project(args: &MoveArgs) -> Result<MoveResult, ProjectError> {
     tracing::info!(old = ?args.old_path, new = ?args.new_path, "starting project move");
 
-    // Phase 1: Validate
     let old_str = args.old_path.to_str().ok_or_else(|| {
         ProjectError::Ambiguous("old path contains invalid UTF-8".to_string())
     })?;
@@ -260,7 +99,6 @@ pub fn move_project(args: &MoveArgs) -> Result<MoveResult, ProjectError> {
     let old_san = sanitize_path(&old_norm);
     let new_san = sanitize_path(&new_norm);
 
-    // Phase 2: Detect scenario
     let old_exists = Path::new(&old_norm).exists();
     let new_exists = Path::new(&new_norm).exists();
 
@@ -270,30 +108,19 @@ pub fn move_project(args: &MoveArgs) -> Result<MoveResult, ProjectError> {
         match (old_exists, new_exists) {
             (true, false) => MoveScenario::MoveAndUpdate,
             (false, true) => MoveScenario::AlreadyMoved,
-            (true, true) => {
-                return Err(ProjectError::Ambiguous(
-                    "both old and new paths exist on disk".to_string(),
-                ))
-            }
-            (false, false) => {
-                return Err(ProjectError::Ambiguous(
-                    "neither old nor new path exists on disk".to_string(),
-                ))
-            }
+            (true, true) => return Err(ProjectError::Ambiguous(
+                "both old and new paths exist on disk".to_string(),
+            )),
+            (false, false) => return Err(ProjectError::Ambiguous(
+                "neither old nor new path exists on disk".to_string(),
+            )),
         }
     };
 
-    // Dry run: compute plan and return
     if args.dry_run {
         let plan = compute_dry_run_plan(
-            &args.config_dir,
-            &old_norm,
-            &new_norm,
-            &old_san,
-            &new_san,
-            &scenario,
+            &args.config_dir, &old_norm, &new_norm, &old_san, &new_san, &scenario,
         )?;
-        // Return a MoveResult with warnings containing the plan description
         return Ok(MoveResult {
             warnings: vec![format_dry_run_plan(&plan, &old_norm, &new_norm)],
             ..Default::default()
@@ -307,11 +134,9 @@ pub fn move_project(args: &MoveArgs) -> Result<MoveResult, ProjectError> {
         if !args.force && is_claude_running_in(&old_norm) {
             return Err(ProjectError::ClaudeRunning(old_norm.clone()));
         }
-
         if let Some(parent) = Path::new(&new_norm).parent() {
             fs::create_dir_all(parent).map_err(ProjectError::Io)?;
         }
-
         match fs::rename(&old_norm, &new_norm) {
             Ok(()) => {}
             #[cfg(unix)]
@@ -325,9 +150,6 @@ pub fn move_project(args: &MoveArgs) -> Result<MoveResult, ProjectError> {
     }
 
     // Phase 4: Rename CC project directory
-    // After phase 3, the real directory is already moved. Post-move failures
-    // are collected as warnings rather than hard errors to avoid misleading
-    // callers into thinking the move didn't happen.
     result.old_sanitized = Some(old_san.clone());
     result.new_sanitized = Some(new_san.clone());
     if old_san != new_san {
@@ -335,7 +157,6 @@ pub fn move_project(args: &MoveArgs) -> Result<MoveResult, ProjectError> {
         let cc_old = projects_base.join(&old_san);
         let cc_new = projects_base.join(&new_san);
 
-        // Defense-in-depth: ensure paths stay within projects/
         if !cc_old.starts_with(&projects_base) || !cc_new.starts_with(&projects_base) {
             if result.actual_dir_moved {
                 result.warnings.push("sanitized path escapes projects directory — CC state not updated".to_string());
@@ -351,7 +172,6 @@ pub fn move_project(args: &MoveArgs) -> Result<MoveResult, ProjectError> {
                 let new_is_empty = fs::read_dir(&cc_new)
                     .map(|mut d| d.next().is_none())
                     .unwrap_or(false);
-
                 if new_is_empty {
                     fs::remove_dir(&cc_new).map_err(ProjectError::Io)?;
                     fs::rename(&cc_old, &cc_new).map_err(ProjectError::Io)?;
@@ -367,8 +187,7 @@ pub fn move_project(args: &MoveArgs) -> Result<MoveResult, ProjectError> {
                 } else {
                     result.warnings.push(
                         "CC project data exists at both old and new paths. \
-                         Use --merge or --overwrite to resolve."
-                            .to_string(),
+                         Use --merge or --overwrite to resolve.".to_string(),
                     );
                 }
             } else {
@@ -378,9 +197,7 @@ pub fn move_project(args: &MoveArgs) -> Result<MoveResult, ProjectError> {
         }
     }
 
-    // Phase 5: Rewrite history.jsonl — only if CC dir was successfully renamed
-    // (or same sanitized name, meaning no CC rename was needed).
-    // Skip if there's an unresolved CC dir conflict to avoid split state.
+    // Phase 5: Rewrite history.jsonl
     let cc_dir_conflict = !result.warnings.is_empty() && !result.cc_dir_renamed;
     if !cc_dir_conflict {
         let history_path = args.config_dir.join("history.jsonl");
@@ -419,8 +236,6 @@ pub fn clean_orphans(
     if !dry_run {
         for orphan in &orphans {
             let dir = config_dir.join("projects").join(&orphan.sanitized_name);
-            // Re-verify orphan status to guard against TOCTOU:
-            // the source path could have been created between the scan and now.
             if dir.exists() && !Path::new(&orphan.original_path).exists() {
                 result.bytes_freed += orphan.total_size_bytes;
                 fs::remove_dir_all(&dir).map_err(ProjectError::Io)?;
@@ -430,385 +245,6 @@ pub fn clean_orphans(
     }
 
     Ok((result, orphans))
-}
-
-// ---------------------------------------------------------------------------
-// Helpers
-// ---------------------------------------------------------------------------
-
-fn resolve_path(path: &str) -> Result<String, ProjectError> {
-    let p = PathBuf::from(path);
-    let abs = if p.is_absolute() {
-        p
-    } else {
-        std::env::current_dir()
-            .map_err(ProjectError::Io)?
-            .join(&p)
-    };
-    // Normalize: resolve symlinks if the path exists, otherwise just canonicalize components
-    let resolved = if abs.exists() {
-        abs.canonicalize().map_err(ProjectError::Io)?
-    } else {
-        abs
-    };
-    Ok(resolved.to_string_lossy().nfc().collect::<String>())
-}
-
-fn find_project_dir_by_prefix(
-    config_dir: &Path,
-    sanitized_prefix: &str,
-) -> Result<Option<PathBuf>, ProjectError> {
-    let projects_dir = config_dir.join("projects");
-    if !projects_dir.exists() {
-        return Ok(None);
-    }
-
-    // Prefix-truncated at MAX_SANITIZED_LENGTH for long paths
-    let prefix = if sanitized_prefix.len() > MAX_SANITIZED_LENGTH {
-        &sanitized_prefix[..MAX_SANITIZED_LENGTH]
-    } else {
-        sanitized_prefix
-    };
-
-    let mut matches = Vec::new();
-    for entry in fs::read_dir(&projects_dir).map_err(ProjectError::Io)? {
-        let entry = entry.map_err(ProjectError::Io)?;
-        if !entry.file_type().map_err(ProjectError::Io)?.is_dir() {
-            continue;
-        }
-        let name = entry.file_name().to_string_lossy().to_string();
-        if name.starts_with(prefix) {
-            matches.push(entry.path());
-        }
-    }
-
-    match matches.len() {
-        0 => Ok(None),
-        1 => Ok(Some(matches.remove(0))),
-        _ => Err(ProjectError::Ambiguous(format!(
-            "multiple CC project dirs match prefix '{}'",
-            prefix
-        ))),
-    }
-}
-
-fn compute_project_info(
-    dir: &Path,
-    sanitized_name: &str,
-) -> Result<ProjectInfo, ProjectError> {
-    let original_path = unsanitize_path(sanitized_name);
-    let session_count = count_files_with_ext(dir, "jsonl");
-    let memory_dir = dir.join("memory");
-    let memory_file_count = if memory_dir.exists() {
-        count_files_with_ext(&memory_dir, "md")
-    } else {
-        0
-    };
-    let total_size_bytes = dir_size(dir);
-    let last_modified = most_recent_mtime(dir);
-    let roundtrips = sanitize_path(&original_path) == sanitized_name;
-    let is_orphan = roundtrips && !Path::new(&original_path).exists();
-
-    Ok(ProjectInfo {
-        sanitized_name: sanitized_name.to_string(),
-        original_path,
-        session_count,
-        memory_file_count,
-        total_size_bytes,
-        last_modified,
-        is_orphan,
-    })
-}
-
-fn list_sessions(dir: &Path) -> Result<Vec<SessionInfo>, ProjectError> {
-    let mut sessions = Vec::new();
-    for entry in fs::read_dir(dir).map_err(ProjectError::Io)? {
-        let entry = entry.map_err(ProjectError::Io)?;
-        let name = entry.file_name().to_string_lossy().to_string();
-        if !name.ends_with(".jsonl") {
-            continue;
-        }
-        let session_id = name.trim_end_matches(".jsonl").to_string();
-        let meta = entry.metadata().map_err(ProjectError::Io)?;
-        sessions.push(SessionInfo {
-            session_id,
-            file_size: meta.len(),
-            last_modified: meta.modified().ok(),
-        });
-    }
-    sessions.sort_by(|a, b| b.last_modified.cmp(&a.last_modified));
-    Ok(sessions)
-}
-
-fn list_memory_files(dir: &Path) -> Result<Vec<String>, ProjectError> {
-    let memory_dir = dir.join("memory");
-    if !memory_dir.exists() {
-        return Ok(vec![]);
-    }
-    let mut files = Vec::new();
-    for entry in fs::read_dir(&memory_dir).map_err(ProjectError::Io)? {
-        let entry = entry.map_err(ProjectError::Io)?;
-        let name = entry.file_name().to_string_lossy().to_string();
-        if name.ends_with(".md") {
-            files.push(name);
-        }
-    }
-    files.sort();
-    Ok(files)
-}
-
-fn count_files_with_ext(dir: &Path, ext: &str) -> usize {
-    fs::read_dir(dir)
-        .map(|entries| {
-            entries
-                .filter_map(|e| e.ok())
-                .filter(|e| {
-                    e.path()
-                        .extension()
-                        .map(|x| x == ext)
-                        .unwrap_or(false)
-                })
-                .count()
-        })
-        .unwrap_or(0)
-}
-
-fn dir_size(dir: &Path) -> u64 {
-    let mut total = 0;
-    if let Ok(entries) = fs::read_dir(dir) {
-        for entry in entries.flatten() {
-            let meta = match entry.metadata() {
-                Ok(m) => m,
-                Err(_) => continue,
-            };
-            if meta.is_file() {
-                total += meta.len();
-            } else if meta.is_dir() {
-                total += dir_size(&entry.path());
-            }
-        }
-    }
-    total
-}
-
-fn most_recent_mtime(dir: &Path) -> Option<SystemTime> {
-    let mut latest: Option<SystemTime> = None;
-    if let Ok(entries) = fs::read_dir(dir) {
-        for entry in entries.flatten() {
-            let meta = match entry.metadata() {
-                Ok(m) => m,
-                Err(_) => continue,
-            };
-            let mtime = meta.modified().ok();
-            if meta.is_dir() {
-                let sub = most_recent_mtime(&entry.path());
-                if sub > latest {
-                    latest = sub;
-                }
-            }
-            if mtime > latest {
-                latest = mtime;
-            }
-        }
-    }
-    latest
-}
-
-fn is_claude_running_in(dir: &str) -> bool {
-    use sysinfo::System;
-    let mut sys = System::new();
-    sys.refresh_processes(sysinfo::ProcessesToUpdate::All, true);
-
-    for (_pid, proc) in sys.processes() {
-        let name = proc.name().to_string_lossy();
-        if name.contains("claude") || name.contains("Claude") {
-            let cwd = proc.cwd().map(|p| p.to_string_lossy().to_string());
-            if cwd.as_deref() == Some(dir) {
-                return true;
-            }
-        }
-    }
-    false
-}
-
-fn copy_dir_recursive(src: &Path, dst: &Path) -> Result<(), ProjectError> {
-    crate::fs_utils::copy_dir_recursive(src, dst).map_err(ProjectError::Io)
-}
-
-fn merge_project_dirs(src: &Path, dst: &Path) -> Result<(), ProjectError> {
-    for entry in fs::read_dir(src).map_err(ProjectError::Io)? {
-        let entry = entry.map_err(ProjectError::Io)?;
-        let target = dst.join(entry.file_name());
-        if entry.file_type().map_err(ProjectError::Io)?.is_dir() {
-            if !target.exists() {
-                fs::create_dir_all(&target).map_err(ProjectError::Io)?;
-            }
-            merge_project_dirs(&entry.path(), &target)?;
-        } else if !target.exists() {
-            // Only copy files that don't already exist in destination
-            fs::copy(entry.path(), &target).map_err(ProjectError::Io)?;
-        }
-    }
-    Ok(())
-}
-
-fn rewrite_history(
-    history_path: &Path,
-    old_path: &str,
-    new_path: &str,
-) -> Result<usize, ProjectError> {
-    let tmp = tempfile::NamedTempFile::new_in(
-        history_path.parent().unwrap_or(Path::new(".")),
-    )
-    .map_err(ProjectError::Io)?;
-
-    let reader = BufReader::new(fs::File::open(history_path).map_err(ProjectError::Io)?);
-    let mut writer = BufWriter::new(&tmp);
-    let mut count = 0;
-
-    for line in reader.lines() {
-        let line = line.map_err(ProjectError::Io)?;
-        if line.contains(old_path) {
-            if let Ok(mut entry) = serde_json::from_str::<serde_json::Value>(&line) {
-                if let Some(proj) = entry.get_mut("project") {
-                    if proj.as_str() == Some(old_path) {
-                        *proj = serde_json::Value::String(new_path.to_string());
-                        count += 1;
-                    }
-                }
-                writeln!(writer, "{}", serde_json::to_string(&entry).unwrap_or(line))
-                    .map_err(ProjectError::Io)?;
-            } else {
-                writeln!(writer, "{}", line).map_err(ProjectError::Io)?;
-            }
-        } else {
-            writeln!(writer, "{}", line).map_err(ProjectError::Io)?;
-        }
-    }
-
-    drop(writer);
-    tmp.persist(history_path)
-        .map_err(|e| ProjectError::Io(e.error))?;
-    Ok(count)
-}
-
-fn compute_dry_run_plan(
-    config_dir: &Path,
-    old_norm: &str,
-    _new_norm: &str,
-    old_san: &str,
-    new_san: &str,
-    scenario: &MoveScenario,
-) -> Result<DryRunPlan, ProjectError> {
-    let cc_old = config_dir.join("projects").join(old_san);
-    let cc_new = config_dir.join("projects").join(new_san);
-
-    let (session_count, cc_dir_size) = if cc_old.exists() {
-        (count_files_with_ext(&cc_old, "jsonl"), dir_size(&cc_old))
-    } else {
-        (0, 0)
-    };
-
-    let estimated_history_lines = estimate_history_matches(config_dir, old_norm);
-
-    let conflict = if old_san != new_san && cc_new.exists() {
-        let is_empty = fs::read_dir(&cc_new)
-            .map(|mut d| d.next().is_none())
-            .unwrap_or(true);
-        if is_empty {
-            None
-        } else {
-            Some(format!(
-                "CC dir already exists at '{}' (non-empty). Use --merge or --overwrite.",
-                new_san
-            ))
-        }
-    } else {
-        None
-    };
-
-    Ok(DryRunPlan {
-        would_move_dir: *scenario == MoveScenario::MoveAndUpdate,
-        old_cc_dir: old_san.to_string(),
-        new_cc_dir: new_san.to_string(),
-        session_count,
-        cc_dir_size,
-        estimated_history_lines,
-        conflict,
-    })
-}
-
-fn estimate_history_matches(config_dir: &Path, old_path: &str) -> usize {
-    let history_path = config_dir.join("history.jsonl");
-    if !history_path.exists() {
-        return 0;
-    }
-    fs::File::open(&history_path)
-        .map(|f| {
-            BufReader::new(f)
-                .lines()
-                .filter_map(|l| l.ok())
-                .filter(|l| l.contains(old_path))
-                .count()
-        })
-        .unwrap_or(0)
-}
-
-fn format_dry_run_plan(plan: &DryRunPlan, old_norm: &str, new_norm: &str) -> String {
-    let mut out = String::from("Dry run \u{2014} no changes will be made.\n\nWould:\n");
-
-    let mut step = 1;
-    if plan.would_move_dir {
-        out.push_str(&format!(
-            "  {}. Move {} \u{2192} {}\n",
-            step, old_norm, new_norm
-        ));
-        step += 1;
-    }
-
-    if plan.old_cc_dir != plan.new_cc_dir {
-        out.push_str(&format!(
-            "  {}. Rename CC dir: {} \u{2192} {}\n     ({} sessions, {})\n",
-            step,
-            plan.old_cc_dir,
-            plan.new_cc_dir,
-            plan.session_count,
-            format_size(plan.cc_dir_size)
-        ));
-        step += 1;
-    }
-
-    if plan.estimated_history_lines > 0 {
-        out.push_str(&format!(
-            "  {}. Rewrite ~{} history.jsonl entries\n",
-            step, plan.estimated_history_lines
-        ));
-    }
-
-    if let Some(ref conflict) = plan.conflict {
-        out.push_str(&format!("\nConflict: {}\n", conflict));
-    } else {
-        out.push_str("\nNo conflicts detected.\n");
-    }
-
-    out
-}
-
-/// Format bytes as human-readable size.
-pub fn format_size(bytes: u64) -> String {
-    const KB: u64 = 1024;
-    const MB: u64 = 1024 * KB;
-    const GB: u64 = 1024 * MB;
-
-    if bytes >= GB {
-        format!("{:.1} GB", bytes as f64 / GB as f64)
-    } else if bytes >= MB {
-        format!("{:.1} MB", bytes as f64 / MB as f64)
-    } else if bytes >= KB {
-        format!("{:.1} KB", bytes as f64 / KB as f64)
-    } else {
-        format!("{} B", bytes)
-    }
 }
 
 // ---------------------------------------------------------------------------

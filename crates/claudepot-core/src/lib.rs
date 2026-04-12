@@ -12,5 +12,8 @@ pub mod oauth;
 pub mod onboard;
 pub mod paths;
 pub mod project;
+pub mod project_helpers;
+pub mod project_sanitize;
+pub mod project_types;
 pub mod resolve;
 pub mod services;
