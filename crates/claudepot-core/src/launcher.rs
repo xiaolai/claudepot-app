@@ -28,8 +28,8 @@ pub async fn get_access_token(account_id: Uuid) -> Result<String, LauncherError>
         .await
         .map_err(|e| LauncherError::RefreshFailed(e.to_string()))?;
 
-    // Save the rotated credentials
-    let new_blob_str = refresh::build_blob(&token_resp);
+    // Save the rotated credentials, preserving original subscription metadata
+    let new_blob_str = refresh::build_blob(&token_resp, Some(&blob));
     swap::save_private(account_id, &new_blob_str)
         .map_err(|e| LauncherError::SaveFailed(e.to_string()))?;
 
