@@ -2,164 +2,124 @@ use anyhow::Result;
 use crate::AppContext;
 
 pub async fn run(ctx: &AppContext) -> Result<()> {
+    use claudepot_core::services::doctor_service;
+
+    let report = doctor_service::check_health(&ctx.store).await;
+
+    if ctx.json {
+        println!("{}", serde_json::json!({
+            "platform": report.platform,
+            "arch": report.arch,
+            "data_dir": report.data_dir.display().to_string(),
+            "data_dir_exists": report.data_dir_exists,
+            "account_count": report.account_count,
+            "cli_path": report.cli_path.map(|p| p.display().to_string()),
+            "cli_version": report.cli_version,
+            "desktop_installed": report.desktop_installed,
+            "desktop_version": report.desktop_version,
+            "beta_header": report.beta_header,
+            "api_reachable": matches!(report.api_status, doctor_service::ApiStatus::Reachable),
+            "accounts": report.account_health.iter().map(|a| {
+                serde_json::json!({
+                    "email": a.email,
+                    "token_status": a.token_status,
+                    "remaining_mins": a.remaining_mins,
+                })
+            }).collect::<Vec<_>>(),
+        }));
+        return Ok(());
+    }
+
     println!("Claudepot v{} — Health Check\n", env!("CARGO_PKG_VERSION"));
 
-    let mut warnings = 0u32;
-    let mut errors = 0u32;
-
     // Platform
-    println!("  Platform:     {} ({})", std::env::consts::OS, std::env::consts::ARCH);
+    println!("  Platform:     {} ({})", report.platform, report.arch);
 
     // Data dir
-    let data_dir = claudepot_core::paths::claudepot_data_dir();
-    if data_dir.exists() {
-        ok("Data dir", &data_dir.display().to_string());
+    if report.data_dir_exists {
+        ok("Data dir", &report.data_dir.display().to_string());
     } else {
-        warn("Data dir", &format!("{} (does not exist)", data_dir.display()));
-        warnings += 1;
+        warn("Data dir", &format!("{} (does not exist)", report.data_dir.display()));
     }
 
-    // Accounts DB
-    match ctx.store.list() {
-        Ok(accounts) => ok("Accounts", &format!("{} registered", accounts.len())),
-        Err(e) => { err("Accounts", &e.to_string()); errors += 1; }
+    // Accounts
+    ok("Accounts", &format!("{} registered", report.account_count));
+
+    // CLI
+    match (&report.cli_path, &report.cli_version) {
+        (Some(p), Some(v)) => ok("Claude CLI", &format!("{} ({})", p.display(), v)),
+        (Some(p), None) => ok("Claude CLI", &format!("{}", p.display())),
+        _ => warn("Claude CLI", "not found"),
     }
 
-    // Claude CLI
-    let claude_paths = [
-        dirs::home_dir().map(|h| h.join(".local/bin/claude")),
-        Some(std::path::PathBuf::from("/usr/local/bin/claude")),
-        Some(std::path::PathBuf::from("/usr/bin/claude")),
-    ];
-    let mut cli_found = false;
-    for path in claude_paths.iter().flatten() {
-        if path.exists() {
-            let version = std::process::Command::new(path)
-                .arg("--version")
-                .output()
-                .ok()
-                .and_then(|o| String::from_utf8(o.stdout).ok())
-                .unwrap_or_else(|| "?".to_string());
-            ok("Claude CLI", &format!("{} ({})", path.display(), version.trim()));
-            cli_found = true;
-            break;
-        }
-    }
-    if !cli_found {
-        warn("Claude CLI", "not found"); warnings += 1;
+    // Desktop
+    if report.desktop_installed {
+        ok("Claude Desktop", &format!("v{}", report.desktop_version.as_deref().unwrap_or("?")));
+    } else {
+        warn("Claude Desktop", "not installed");
     }
 
-    // Claude Desktop
-    #[cfg(target_os = "macos")]
-    {
-        let desktop_path = std::path::Path::new("/Applications/Claude.app");
-        if desktop_path.exists() {
-            let version = std::process::Command::new("defaults")
-                .args(["read", "/Applications/Claude.app/Contents/Info.plist", "CFBundleShortVersionString"])
-                .output()
-                .ok()
-                .and_then(|o| String::from_utf8(o.stdout).ok())
-                .unwrap_or_else(|| "?".to_string());
-            ok("Claude Desktop", &format!("v{}", version.trim()));
+    // Keychain
+    if let Some(readable) = report.keychain_readable {
+        if readable {
+            ok("Keychain", "Claude Code-credentials readable");
         } else {
-            warn("Claude Desktop", "not installed"); warnings += 1;
-        }
-    }
-    #[cfg(not(target_os = "macos"))]
-    {
-        println!("  Claude Desktop: (check skipped on {})", std::env::consts::OS);
-    }
-
-    // Keychain access (macOS)
-    #[cfg(target_os = "macos")]
-    {
-        match claudepot_core::cli_backend::keychain::read_default().await {
-            Ok(Some(_)) => ok("Keychain", "Claude Code-credentials readable"),
-            Ok(None) => { warn("Keychain", "Claude Code-credentials empty (not logged in)"); warnings += 1; },
-            Err(e) => { err("Keychain", &e.to_string()); errors += 1; },
+            warn("Keychain", "Claude Code-credentials empty");
         }
     }
 
     // Beta header
-    let beta = claudepot_core::oauth::beta_header::get_or_default();
-    ok("Beta header", beta);
+    ok("Beta header", &report.beta_header);
 
-    // API reachability
-    match reqwest::Client::builder()
-        .timeout(std::time::Duration::from_secs(10))
-        .build()
-        .unwrap()
-        .get("https://api.anthropic.com/api/oauth/profile")
-        .header("Authorization", "Bearer test")
-        .header("anthropic-beta", beta)
-        .send()
-        .await
-    {
-        Ok(resp) => {
-            let status = resp.status().as_u16();
-            if status == 401 {
-                ok("API reachable", "api.anthropic.com (401 = reachable, token rejected as expected)");
-            } else if status == 403 {
-                err("API blocked", "403 Forbidden — likely geo-restricted. Use HTTPS_PROXY.");
-                errors += 1;
-            } else {
-                ok("API reachable", &format!("api.anthropic.com (HTTP {})", status));
-            }
+    // API
+    match &report.api_status {
+        doctor_service::ApiStatus::Reachable => {
+            ok("API reachable", "api.anthropic.com");
         }
-        Err(e) => { err("API", &format!("unreachable: {e}")); errors += 1; }
+        doctor_service::ApiStatus::GeoBlocked => {
+            err("API blocked", "403 Forbidden — use HTTPS_PROXY");
+        }
+        doctor_service::ApiStatus::Unreachable(e) => {
+            err("API", &format!("unreachable: {e}"));
+        }
+        doctor_service::ApiStatus::Unknown => {
+            warn("API", "status unknown");
+        }
     }
 
-    // Per-account health
-    println!();
-    let accounts = ctx.store.list().unwrap_or_default();
-    if !accounts.is_empty() {
-        println!("  Account health:");
-        for a in &accounts {
-            let cred = claudepot_core::cli_backend::swap::load_private(a.uuid);
-            match cred {
-                Ok(blob_str) => {
-                    match claudepot_core::blob::CredentialBlob::from_json(&blob_str) {
-                        Ok(blob) => {
-                            let remaining = (blob.claude_ai_oauth.expires_at
-                                - chrono::Utc::now().timestamp_millis()) / 60_000;
-                            if remaining > 0 {
-                                println!("    {}  ✓ token valid ({}m)", a.email, remaining);
-                            } else {
-                                println!("    {}  ✗ token expired", a.email);
-                                warnings += 1;
-                            }
-                        }
-                        Err(_) => {
-                            println!("    {}  ✗ corrupt credential blob", a.email);
-                            errors += 1;
-                        }
-                    }
-                }
-                Err(_) => {
-                    println!("    {}  ✗ no stored credentials", a.email);
-                    warnings += 1;
-                }
+    // Account health
+    if !report.account_health.is_empty() {
+        println!("\n  Account health:");
+        for a in &report.account_health {
+            if a.remaining_mins.map_or(false, |m| m > 0) {
+                println!("    {}  ✓ {}", a.email, a.token_status);
+            } else {
+                println!("    {}  ✗ {}", a.email, a.token_status);
             }
         }
     }
 
     // Desktop profiles
-    let profile_base = claudepot_core::paths::claudepot_data_dir().join("desktop");
-    if profile_base.exists() {
+    if report.desktop_profiles.iter().any(|p| p.item_count.is_some()) {
         println!("\n  Desktop profiles:");
-        for a in &accounts {
-            let p = claudepot_core::paths::desktop_profile_dir(a.uuid);
-            if p.exists() {
-                let count = std::fs::read_dir(&p).map(|d| d.count()).unwrap_or(0);
-                println!("    {}  ✓ {} items", a.email, count);
-            } else {
-                println!("    {}  — no profile", a.email);
+        for p in &report.desktop_profiles {
+            match p.item_count {
+                Some(c) => println!("    {}  ✓ {} items", p.email, c),
+                None => println!("    {}  — no profile", p.email),
             }
         }
     }
 
-    // Summary
     println!();
+    let errors = [
+        matches!(report.api_status, doctor_service::ApiStatus::GeoBlocked | doctor_service::ApiStatus::Unreachable(_)),
+    ].iter().filter(|&&x| x).count();
+    let warnings = [
+        !report.data_dir_exists,
+        report.cli_path.is_none(),
+        !report.desktop_installed,
+    ].iter().filter(|&&x| x).count();
+
     if errors > 0 {
         println!("{} error(s), {} warning(s).", errors, warnings);
     } else if warnings > 0 {
