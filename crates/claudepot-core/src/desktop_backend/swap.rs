@@ -118,22 +118,7 @@ fn rollback(data_dir: &Path, holding_dir: &Path, items: &[String]) {
 }
 
 fn copy_dir_recursive(src: &Path, dst: &Path) -> std::io::Result<()> {
-    std::fs::create_dir_all(dst)?;
-    for entry in std::fs::read_dir(src)? {
-        let entry = entry?;
-        let dst_path = dst.join(entry.file_name());
-        // Use symlink_metadata to avoid following symlinks
-        let ft = entry.metadata()?.file_type();
-        if ft.is_symlink() {
-            // Skip symlinks — do not follow them during copy
-            continue;
-        } else if ft.is_dir() {
-            copy_dir_recursive(&entry.path(), &dst_path)?;
-        } else {
-            std::fs::copy(entry.path(), &dst_path)?;
-        }
-    }
-    Ok(())
+    crate::fs_utils::copy_dir_recursive(src, dst)
 }
 
 /// Full Desktop switch: quit → snapshot outgoing → restore target → relaunch.
