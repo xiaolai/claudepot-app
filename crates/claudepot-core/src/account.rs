@@ -54,6 +54,42 @@ impl AccountStore {
         Ok(Self { db })
     }
 
+    fn row_to_account(
+        row: &rusqlite::Row,
+        active_cli: &Option<String>,
+        active_desktop: &Option<String>,
+    ) -> rusqlite::Result<Account> {
+        let uuid_str: String = row.get(0)?;
+        let uuid: Uuid = uuid_str.parse().map_err(|e| {
+            rusqlite::Error::FromSqlConversionFailure(
+                0, rusqlite::types::Type::Text,
+                Box::new(std::io::Error::new(std::io::ErrorKind::InvalidData, format!("bad UUID: {e}")))
+            )
+        })?;
+        let created_str: String = row.get(6)?;
+        let created_at: DateTime<Utc> = created_str.parse().map_err(|e| {
+            rusqlite::Error::FromSqlConversionFailure(
+                6, rusqlite::types::Type::Text,
+                Box::new(std::io::Error::new(std::io::ErrorKind::InvalidData, format!("bad timestamp: {e}")))
+            )
+        })?;
+        Ok(Account {
+            uuid,
+            email: row.get(1)?,
+            org_uuid: row.get(2)?,
+            org_name: row.get(3)?,
+            subscription_type: row.get(4)?,
+            rate_limit_tier: row.get(5)?,
+            created_at,
+            last_cli_switch: row.get::<_, Option<String>>(7)?.and_then(|s| s.parse().ok()),
+            last_desktop_switch: row.get::<_, Option<String>>(8)?.and_then(|s| s.parse().ok()),
+            has_cli_credentials: row.get(9)?,
+            has_desktop_profile: row.get(10)?,
+            is_cli_active: active_cli.as_ref() == Some(&uuid_str),
+            is_desktop_active: active_desktop.as_ref() == Some(&uuid_str),
+        })
+    }
+
     pub fn list(&self) -> SqlResult<Vec<Account>> {
         let active_cli = self.active_cli_uuid()?;
         let active_desktop = self.active_desktop_uuid()?;
@@ -66,47 +102,43 @@ impl AccountStore {
              FROM accounts ORDER BY email",
         )?;
         let rows = stmt.query_map([], |row| {
-            let uuid_str: String = row.get(0)?;
-            let uuid: Uuid = uuid_str.parse().map_err(|e| {
-                rusqlite::Error::FromSqlConversionFailure(
-                    0, rusqlite::types::Type::Text,
-                    Box::new(std::io::Error::new(std::io::ErrorKind::InvalidData, format!("bad UUID: {e}")))
-                )
-            })?;
-            let created_str: String = row.get(6)?;
-            let created_at: DateTime<Utc> = created_str.parse().map_err(|e| {
-                rusqlite::Error::FromSqlConversionFailure(
-                    6, rusqlite::types::Type::Text,
-                    Box::new(std::io::Error::new(std::io::ErrorKind::InvalidData, format!("bad timestamp: {e}")))
-                )
-            })?;
-            Ok(Account {
-                uuid,
-                email: row.get(1)?,
-                org_uuid: row.get(2)?,
-                org_name: row.get(3)?,
-                subscription_type: row.get(4)?,
-                rate_limit_tier: row.get(5)?,
-                created_at,
-                last_cli_switch: row.get::<_, Option<String>>(7)?.and_then(|s| s.parse().ok()),
-                last_desktop_switch: row.get::<_, Option<String>>(8)?.and_then(|s| s.parse().ok()),
-                has_cli_credentials: row.get(9)?,
-                has_desktop_profile: row.get(10)?,
-                is_cli_active: active_cli.as_ref() == Some(&uuid_str),
-                is_desktop_active: active_desktop.as_ref() == Some(&uuid_str),
-            })
+            Self::row_to_account(row, &active_cli, &active_desktop)
         })?;
         rows.collect()
     }
 
     pub fn find_by_email(&self, email: &str) -> SqlResult<Option<Account>> {
-        let accounts = self.list()?;
-        Ok(accounts.into_iter().find(|a| a.email == email))
+        let active_cli = self.active_cli_uuid()?;
+        let active_desktop = self.active_desktop_uuid()?;
+
+        self.db
+            .query_row(
+                "SELECT uuid, email, org_uuid, org_name, \
+                 subscription_type, rate_limit_tier, created_at, \
+                 last_cli_switch, last_desktop_switch, \
+                 has_cli_credentials, has_desktop_profile \
+                 FROM accounts WHERE email = ?1",
+                params![email],
+                |row| Self::row_to_account(row, &active_cli, &active_desktop),
+            )
+            .optional()
     }
 
     pub fn find_by_uuid(&self, uuid: Uuid) -> SqlResult<Option<Account>> {
-        let accounts = self.list()?;
-        Ok(accounts.into_iter().find(|a| a.uuid == uuid))
+        let active_cli = self.active_cli_uuid()?;
+        let active_desktop = self.active_desktop_uuid()?;
+
+        self.db
+            .query_row(
+                "SELECT uuid, email, org_uuid, org_name, \
+                 subscription_type, rate_limit_tier, created_at, \
+                 last_cli_switch, last_desktop_switch, \
+                 has_cli_credentials, has_desktop_profile \
+                 FROM accounts WHERE uuid = ?1",
+                params![uuid.to_string()],
+                |row| Self::row_to_account(row, &active_cli, &active_desktop),
+            )
+            .optional()
     }
 
     pub fn insert(&self, account: &Account) -> SqlResult<()> {

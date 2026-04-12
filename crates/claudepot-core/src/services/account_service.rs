@@ -188,19 +188,26 @@ pub async fn register_from_browser(store: &AccountStore) -> Result<RegisterResul
 }
 
 /// Remove an account and all its associated data.
+/// Collects non-fatal warnings instead of silently swallowing errors.
 pub fn remove_account(store: &AccountStore, uuid: Uuid) -> Result<RemoveResult, RegisterError> {
     let account = store.find_by_uuid(uuid)
         .map_err(|e| RegisterError::Store(e.to_string()))?
         .ok_or(RegisterError::NotFound)?;
 
+    let mut warnings: Vec<String> = Vec::new();
+
     // Delete credential
-    let _ = swap::delete_private(uuid);
+    if let Err(e) = swap::delete_private(uuid) {
+        warnings.push(format!("failed to delete credential file: {e}"));
+    }
 
     // Delete Desktop profile
     let profile_dir = paths::desktop_profile_dir(uuid);
     let had_profile = profile_dir.exists();
     if had_profile {
-        let _ = std::fs::remove_dir_all(&profile_dir);
+        if let Err(e) = std::fs::remove_dir_all(&profile_dir) {
+            warnings.push(format!("failed to delete desktop profile: {e}"));
+        }
     }
 
     // Remove from store
@@ -208,10 +215,14 @@ pub fn remove_account(store: &AccountStore, uuid: Uuid) -> Result<RemoveResult, 
 
     // Clear active pointers if needed
     if account.is_cli_active {
-        let _ = store.clear_active_cli();
+        if let Err(e) = store.clear_active_cli() {
+            warnings.push(format!("failed to clear active CLI pointer: {e}"));
+        }
     }
     if account.is_desktop_active {
-        let _ = store.clear_active_desktop();
+        if let Err(e) = store.clear_active_desktop() {
+            warnings.push(format!("failed to clear active Desktop pointer: {e}"));
+        }
     }
 
     Ok(RemoveResult {
@@ -219,6 +230,7 @@ pub fn remove_account(store: &AccountStore, uuid: Uuid) -> Result<RemoveResult, 
         was_cli_active: account.is_cli_active,
         was_desktop_active: account.is_desktop_active,
         had_desktop_profile: had_profile,
+        warnings,
     })
 }
 
@@ -228,6 +240,7 @@ pub struct RemoveResult {
     pub was_cli_active: bool,
     pub was_desktop_active: bool,
     pub had_desktop_profile: bool,
+    pub warnings: Vec<String>,
 }
 
 /// Token health info for an account.
