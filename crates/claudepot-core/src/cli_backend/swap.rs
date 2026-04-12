@@ -57,30 +57,51 @@ pub async fn switch(
     Ok(())
 }
 
-// --- Private storage helpers using `keyring` crate ---
+// --- Private storage: file-based, 0600 perms ---
+// Using files instead of the `keyring` crate because unsigned CLI
+// binaries over SSH can't reliably write to macOS keychains.
+// Blobs are stored at: <claudepot_data_dir>/credentials/<uuid>.json
 
-pub fn private_entry(account_id: Uuid) -> keyring::Entry {
-    keyring::Entry::new("com.claudepot.credentials", &account_id.to_string())
-        .expect("keyring entry creation failed")
+fn private_path(account_id: Uuid) -> std::path::PathBuf {
+    crate::paths::claudepot_data_dir()
+        .join("credentials")
+        .join(format!("{}.json", account_id))
 }
 
 pub fn load_private(account_id: Uuid) -> Result<String, SwapError> {
-    private_entry(account_id)
-        .get_password()
+    let path = private_path(account_id);
+    std::fs::read_to_string(&path)
         .map_err(|_| SwapError::NoStoredCredentials(account_id))
 }
 
 fn load_private_opt(account_id: Uuid) -> Option<String> {
-    private_entry(account_id).get_password().ok()
+    std::fs::read_to_string(private_path(account_id)).ok()
 }
 
 pub fn save_private(account_id: Uuid, blob: &str) -> Result<(), SwapError> {
-    private_entry(account_id)
-        .set_password(blob)
-        .map_err(|e| SwapError::KeychainError(format!("keyring set failed: {e}")))
+    let path = private_path(account_id);
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+    let mut tmp = tempfile::NamedTempFile::new_in(
+        path.parent().unwrap_or(std::path::Path::new(".")),
+    )?;
+    std::io::Write::write_all(&mut tmp, blob.as_bytes())?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        tmp.as_file()
+            .set_permissions(std::fs::Permissions::from_mode(0o600))?;
+    }
+    tmp.persist(&path)
+        .map_err(|e| SwapError::WriteFailed(format!("persist failed: {e}")))?;
+    Ok(())
 }
 
 pub fn delete_private(account_id: Uuid) -> Result<(), SwapError> {
-    let _ = private_entry(account_id).delete_credential();
+    let path = private_path(account_id);
+    if path.exists() {
+        std::fs::remove_file(&path)?;
+    }
     Ok(())
 }
