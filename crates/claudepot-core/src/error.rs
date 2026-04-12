@@ -1,0 +1,70 @@
+use thiserror::Error;
+
+#[derive(Error, Debug)]
+pub enum SwapError {
+    #[error("no stored credentials for account {0}")]
+    NoStoredCredentials(uuid::Uuid),
+
+    #[error("no default credentials found in CC storage")]
+    NoDefaultCredentials,
+
+    #[error("failed to write credentials: {0}")]
+    WriteFailed(String),
+
+    #[error("keychain operation failed: {0}")]
+    KeychainError(String),
+
+    #[error("file operation failed: {0}")]
+    FileError(#[from] std::io::Error),
+}
+
+#[derive(Error, Debug)]
+pub enum DesktopSwapError {
+    #[error("Claude Desktop is still running after quit timeout")]
+    DesktopStillRunning,
+
+    #[error("no desktop profile stored for account {0}")]
+    NoStoredProfile(uuid::Uuid),
+
+    #[error("file copy failed: {0}")]
+    FileCopyFailed(String),
+
+    #[error("desktop not installed on this platform")]
+    NotInstalled,
+
+    #[error("{0}")]
+    Io(#[from] std::io::Error),
+}
+
+#[derive(Error, Debug)]
+pub enum OAuthError {
+    #[error("HTTP request failed: {0}")]
+    HttpError(#[from] reqwest::Error),
+
+    #[error("token expired and refresh failed: {0}")]
+    RefreshFailed(String),
+
+    #[error("rate limited — retry after {retry_after_secs}s")]
+    RateLimited { retry_after_secs: u64 },
+
+    #[error("authentication failed: {0}")]
+    AuthFailed(String),
+}
+
+#[derive(Error, Debug)]
+pub enum OnboardError {
+    #[error("claude CLI not found at {0}")]
+    CliBinaryNotFound(String),
+
+    #[error("auth login failed with exit code {0}")]
+    AuthLoginFailed(i32),
+
+    #[error("import failed: no credentials at hashed service name for {0}")]
+    ImportFailed(String),
+
+    #[error("{0}")]
+    Swap(#[from] SwapError),
+
+    #[error("{0}")]
+    Io(#[from] std::io::Error),
+}

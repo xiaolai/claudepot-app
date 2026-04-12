@@ -1,0 +1,19 @@
+[package]
+name = "claudepot-cli"
+description = "CLI for Claudepot — multi-account Claude Code/Desktop switcher"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+
+[[bin]]
+name = "claudepot"
+path = "src/main.rs"
+
+[dependencies]
+claudepot-core = { path = "../claudepot-core" }
+tokio.workspace = true
+clap.workspace = true
+anyhow.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true
+uuid.workspace = true

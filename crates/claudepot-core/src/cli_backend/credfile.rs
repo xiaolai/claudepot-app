@@ -1,0 +1,67 @@
+//! File-based credential storage — Linux, Windows, macOS fallback.
+//! Reads/writes `$CLAUDE_CONFIG_DIR/.credentials.json` with 0600 perms.
+
+use crate::error::SwapError;
+use crate::paths;
+use std::io::Write;
+
+/// Read the credential blob from `.credentials.json`.
+pub fn read_default() -> Result<Option<String>, SwapError> {
+    let path = paths::claude_credentials_file();
+    match std::fs::read_to_string(&path) {
+        Ok(s) if s.trim().is_empty() => Ok(None),
+        Ok(s) => Ok(Some(s)),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(None),
+        Err(e) => Err(SwapError::FileError(e)),
+    }
+}
+
+/// Write the credential blob to `.credentials.json` atomically with 0600 perms.
+pub fn write_default(blob: &str) -> Result<(), SwapError> {
+    let path = paths::claude_credentials_file();
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+    let mut tmp = tempfile::NamedTempFile::new_in(
+        path.parent().unwrap_or(std::path::Path::new(".")),
+    )?;
+    tmp.write_all(blob.as_bytes())?;
+
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        tmp.as_file()
+            .set_permissions(std::fs::Permissions::from_mode(0o600))?;
+    }
+
+    tmp.persist(&path)
+        .map_err(|e| SwapError::WriteFailed(format!("persist failed: {e}")))?;
+    Ok(())
+}
+
+/// Touch the mtime of `.credentials.json` for cross-process invalidation.
+pub fn touch() -> Result<(), SwapError> {
+    let path = paths::claude_credentials_file();
+    if path.exists() {
+        filetime::set_file_mtime(&path, filetime::FileTime::now())?;
+    }
+    Ok(())
+}
+
+/// The file-based CliPlatform implementation (Linux, Windows).
+pub struct CredentialFile;
+
+#[async_trait::async_trait]
+impl super::CliPlatform for CredentialFile {
+    async fn read_default(&self) -> Result<Option<String>, SwapError> {
+        read_default()
+    }
+
+    async fn write_default(&self, blob: &str) -> Result<(), SwapError> {
+        write_default(blob)
+    }
+
+    async fn touch_credfile(&self) -> Result<(), SwapError> {
+        touch()
+    }
+}

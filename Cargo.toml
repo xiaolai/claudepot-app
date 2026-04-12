@@ -1,0 +1,67 @@
+[workspace]
+resolver = "2"
+members = [
+    "src-tauri",
+    "crates/claudepot-core",
+    "crates/claudepot-cli",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+authors = ["xiaolai"]
+license = "MIT"
+
+[workspace.dependencies]
+# Async
+tokio = { version = "1", features = ["full"] }
+
+# HTTP
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
+
+# Serialization
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+# Time
+chrono = { version = "0.4", features = ["serde"] }
+
+# Crypto (service-name hashing only)
+sha2 = "0.10"
+hex = "0.4"
+
+# Keychain (Claudepot's own secrets — NOT for CC's Keychain item)
+keyring = "3"
+
+# Async trait (for platform trait objects)
+async-trait = "0.1"
+
+# File operations
+tempfile = "3"
+filetime = "0.2"
+notify = "7"
+notify-debouncer-full = "0.4"
+
+# System info
+whoami = "1"
+
+# Process inspection
+sysinfo = "0.32"
+
+# SQLite (account registry)
+rusqlite = { version = "0.32", features = ["bundled", "serde_json"] }
+
+# CLI
+clap = { version = "4", features = ["derive"] }
+
+# Error handling
+thiserror = "2"
+anyhow = "1"
+
+# Logging
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+
+# Utilities
+uuid = { version = "1", features = ["v4", "serde"] }
+dirs = "6"
