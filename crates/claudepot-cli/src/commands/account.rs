@@ -104,6 +104,9 @@ pub fn remove(ctx: &AppContext, email_input: &str) -> Result<()> {
     if result.was_desktop_active {
         ctx.info("Note: this was the active Desktop account. Desktop slot is now empty.");
     }
+    for warning in &result.warnings {
+        eprintln!("Warning: {warning}");
+    }
     ctx.info(&format!("Removed: {}", result.email));
     Ok(())
 }
