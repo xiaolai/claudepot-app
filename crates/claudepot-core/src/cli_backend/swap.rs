@@ -182,7 +182,7 @@ fn private_path(account_id: Uuid) -> std::path::PathBuf {
 pub fn load_private(account_id: Uuid) -> Result<String, SwapError> {
     let path = private_path(account_id);
 
-    // Verify file permissions before reading credentials
+    // Verify file permissions before reading credentials — fail closed
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;
@@ -193,7 +193,8 @@ pub fn load_private(account_id: Uuid) -> Result<String, SwapError> {
                     "credential file {} has permissions {:o} (expected 600), fixing",
                     path.display(), mode
                 );
-                let _ = std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600));
+                std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600))
+                    .map_err(|e| SwapError::FileError(e))?;
             }
         }
     }

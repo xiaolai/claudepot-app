@@ -177,15 +177,16 @@ impl AccountStore {
     }
 
     pub fn set_active_cli(&self, uuid: Uuid) -> SqlResult<()> {
-        self.db.execute(
-            "INSERT OR REPLACE INTO state (key, value) VALUES ('active_cli', ?1)",
-            params![uuid.to_string()],
-        )?;
-        self.db.execute(
+        let tx = self.db.unchecked_transaction()?;
+        tx.execute(
             "UPDATE accounts SET last_cli_switch = ?1 WHERE uuid = ?2",
             params![Utc::now().to_rfc3339(), uuid.to_string()],
         )?;
-        Ok(())
+        tx.execute(
+            "INSERT OR REPLACE INTO state (key, value) VALUES ('active_cli', ?1)",
+            params![uuid.to_string()],
+        )?;
+        tx.commit()
     }
 
     pub fn clear_active_cli(&self) -> SqlResult<()> {
@@ -204,15 +205,16 @@ impl AccountStore {
     }
 
     pub fn set_active_desktop(&self, uuid: Uuid) -> SqlResult<()> {
-        self.db.execute(
-            "INSERT OR REPLACE INTO state (key, value) VALUES ('active_desktop', ?1)",
-            params![uuid.to_string()],
-        )?;
-        self.db.execute(
+        let tx = self.db.unchecked_transaction()?;
+        tx.execute(
             "UPDATE accounts SET last_desktop_switch = ?1 WHERE uuid = ?2",
             params![Utc::now().to_rfc3339(), uuid.to_string()],
         )?;
-        Ok(())
+        tx.execute(
+            "INSERT OR REPLACE INTO state (key, value) VALUES ('active_desktop', ?1)",
+            params![uuid.to_string()],
+        )?;
+        tx.commit()
     }
 
     pub fn clear_active_desktop(&self) -> SqlResult<()> {

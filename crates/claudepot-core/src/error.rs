@@ -16,6 +16,12 @@ pub enum SwapError {
 
     #[error("file operation failed: {0}")]
     FileError(#[from] std::io::Error),
+
+    #[error("corrupt credential blob: {0}")]
+    CorruptBlob(String),
+
+    #[error("token refresh failed: {0}")]
+    RefreshFailed(String),
 }
 
 #[derive(Error, Debug)]

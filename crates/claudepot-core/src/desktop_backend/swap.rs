@@ -25,6 +25,9 @@ pub fn snapshot(
             }
             copy_dir_recursive(&src, &dst)?;
         } else if src.is_file() {
+            if let Some(parent) = dst.parent() {
+                std::fs::create_dir_all(parent)?;
+            }
             std::fs::copy(&src, &dst)?;
         }
         // Missing items are OK — not all items exist on all platforms
@@ -69,36 +72,55 @@ pub fn restore(
         let src = data_dir.join(item);
         let dst = holding_dir.path().join(item);
         if src.exists() {
-            if src.is_dir() {
-                copy_dir_recursive(&src, &dst)?;
-                std::fs::remove_dir_all(&src)?;
+            if let Some(parent) = dst.parent() {
+                std::fs::create_dir_all(parent)?;
+            }
+            let copy_result = if src.is_dir() {
+                copy_dir_recursive(&src, &dst)
+                    .and_then(|_| std::fs::remove_dir_all(&src))
             } else {
-                std::fs::copy(&src, &dst)?;
-                std::fs::remove_file(&src)?;
+                std::fs::copy(&src, &dst)
+                    .map(|_| ())
+                    .and_then(|_| std::fs::remove_file(&src))
+            };
+            if let Err(e) = copy_result {
+                // Phase-2 failure: rollback already-moved items
+                rollback(data_dir, holding_dir.path(), &moved);
+                return Err(DesktopSwapError::FileCopyFailed(
+                    format!("backup {item} failed: {e}"),
+                ));
             }
             moved.push(item.to_string());
         }
     }
 
     // Phase 3: move staged items into data dir
+    let mut restored: Vec<String> = Vec::new();
     for item in session_items {
         let src = stage_dir.path().join(item);
         let dst = data_dir.join(item);
         if src.exists() {
-            if src.is_dir() {
-                if let Err(e) = copy_dir_recursive(&src, &dst) {
-                    // Rollback: restore from holding
-                    rollback(data_dir, holding_dir.path(), &moved);
-                    return Err(DesktopSwapError::FileCopyFailed(
-                        format!("restore {item} failed: {e}"),
-                    ));
+            if let Some(parent) = dst.parent() {
+                let _ = std::fs::create_dir_all(parent);
+            }
+            let result = if src.is_dir() {
+                copy_dir_recursive(&src, &dst)
+            } else {
+                std::fs::copy(&src, &dst).map(|_| ())
+            };
+            if let Err(e) = result {
+                // Phase-3 failure: clean up partially-restored targets, then rollback
+                for r in &restored {
+                    let p = data_dir.join(r);
+                    if p.is_dir() { let _ = std::fs::remove_dir_all(&p); }
+                    else if p.exists() { let _ = std::fs::remove_file(&p); }
                 }
-            } else if let Err(e) = std::fs::copy(&src, &dst) {
                 rollback(data_dir, holding_dir.path(), &moved);
                 return Err(DesktopSwapError::FileCopyFailed(
                     format!("restore {item} failed: {e}"),
                 ));
             }
+            restored.push(item.to_string());
         }
     }
 

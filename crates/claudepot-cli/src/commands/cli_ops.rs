@@ -45,7 +45,7 @@ pub fn status(ctx: &AppContext) -> Result<()> {
     Ok(())
 }
 
-pub async fn use_account(ctx: &AppContext, email_input: &str) -> Result<()> {
+pub async fn use_account(ctx: &AppContext, email_input: &str, no_refresh: bool) -> Result<()> {
     use claudepot_core::resolve::resolve_email;
     use claudepot_core::cli_backend;
 
@@ -59,14 +59,22 @@ pub async fn use_account(ctx: &AppContext, email_input: &str) -> Result<()> {
         .and_then(|s| s.parse::<uuid::Uuid>().ok());
 
     if current_uuid == Some(target.uuid) {
-        ctx.info(&format!("Already active: {email}"));
+        if ctx.json {
+            println!("{}", serde_json::json!({"already_active": true, "email": email}));
+        } else {
+            ctx.info(&format!("Already active: {email}"));
+        }
         return Ok(());
     }
 
     let platform = cli_backend::create_platform();
 
     ctx.info(&format!("Switching CLI to {email}..."));
-    cli_backend::swap::switch(&ctx.store, current_uuid, target.uuid, platform.as_ref()).await?;
+    let refresher = cli_backend::swap::DefaultRefresher;
+    cli_backend::swap::switch(
+        &ctx.store, current_uuid, target.uuid, platform.as_ref(),
+        !no_refresh, &refresher,
+    ).await?;
 
     let from = current_uuid
         .and_then(|u| ctx.store.find_by_uuid(u).ok().flatten())

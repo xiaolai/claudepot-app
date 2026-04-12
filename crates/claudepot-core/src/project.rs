@@ -195,12 +195,16 @@ pub fn show_project(
     let sanitized = sanitize_path(&resolved);
     let project_dir = config_dir.join("projects").join(&sanitized);
 
-    // If exact match doesn't exist, try prefix scan (for long-path hash mismatches)
+    // If exact match doesn't exist, try prefix scan ONLY for long paths
+    // (where the hash suffix may differ between CC CLI and SDK).
+    // Short paths have deterministic sanitization — no prefix fallback.
     let project_dir = if project_dir.exists() {
         project_dir
-    } else {
+    } else if sanitized.len() > MAX_SANITIZED_LENGTH {
         find_project_dir_by_prefix(config_dir, &sanitized)?
             .ok_or_else(|| ProjectError::NotFound(path.to_string()))?
+    } else {
+        return Err(ProjectError::NotFound(path.to_string()));
     };
 
     let sanitized_name = project_dir
@@ -361,11 +365,16 @@ pub fn move_project(args: &MoveArgs) -> Result<MoveResult, ProjectError> {
         }
     }
 
-    // Phase 5: Rewrite history.jsonl
-    let history_path = args.config_dir.join("history.jsonl");
-    if history_path.exists() {
-        tracing::debug!("rewriting history.jsonl");
-        result.history_lines_updated = rewrite_history(&history_path, &old_norm, &new_norm)?;
+    // Phase 5: Rewrite history.jsonl — only if CC dir was successfully renamed
+    // (or same sanitized name, meaning no CC rename was needed).
+    // Skip if there's an unresolved CC dir conflict to avoid split state.
+    let cc_dir_conflict = !result.warnings.is_empty() && !result.cc_dir_renamed;
+    if !cc_dir_conflict {
+        let history_path = args.config_dir.join("history.jsonl");
+        if history_path.exists() {
+            tracing::debug!("rewriting history.jsonl");
+            result.history_lines_updated = rewrite_history(&history_path, &old_norm, &new_norm)?;
+        }
     }
 
     tracing::info!(

@@ -7,14 +7,15 @@ use crate::cli_backend;
 pub async fn clear_credentials(store: &AccountStore) -> Result<(), ClearError> {
     let platform = cli_backend::create_platform();
 
-    // Save current credentials before clearing
+    // Save current credentials before clearing — fail if backup fails
     if let Some(active_uuid_str) = store.active_cli_uuid()
         .map_err(|e| ClearError::Store(e.to_string()))? {
-        if let Ok(uuid) = active_uuid_str.parse::<uuid::Uuid>() {
-            if let Ok(Some(blob)) = platform.read_default().await {
-                cli_backend::swap::save_private(uuid, &blob)
-                    .map_err(|e| ClearError::SaveFailed(e.to_string()))?;
-            }
+        let uuid: uuid::Uuid = active_uuid_str.parse()
+            .map_err(|e| ClearError::Store(format!("corrupt active UUID: {e}")))?;
+        if let Some(blob) = platform.read_default().await
+            .map_err(|e| ClearError::SaveFailed(format!("failed to read current credentials: {e}")))? {
+            cli_backend::swap::save_private(uuid, &blob)
+                .map_err(|e| ClearError::SaveFailed(e.to_string()))?;
         }
     }
 
@@ -43,14 +44,15 @@ pub async fn clear_credentials_with_platform(
     store: &AccountStore,
     platform: &dyn cli_backend::CliPlatform,
 ) -> Result<(), ClearError> {
-    // Save current credentials before clearing
+    // Save current credentials before clearing — fail if backup fails
     if let Some(active_uuid_str) = store.active_cli_uuid()
         .map_err(|e| ClearError::Store(e.to_string()))? {
-        if let Ok(uuid) = active_uuid_str.parse::<uuid::Uuid>() {
-            if let Ok(Some(blob)) = platform.read_default().await {
-                cli_backend::swap::save_private(uuid, &blob)
-                    .map_err(|e| ClearError::SaveFailed(e.to_string()))?;
-            }
+        let uuid: uuid::Uuid = active_uuid_str.parse()
+            .map_err(|e| ClearError::Store(format!("corrupt active UUID: {e}")))?;
+        if let Some(blob) = platform.read_default().await
+            .map_err(|e| ClearError::SaveFailed(format!("failed to read current credentials: {e}")))? {
+            cli_backend::swap::save_private(uuid, &blob)
+                .map_err(|e| ClearError::SaveFailed(e.to_string()))?;
         }
     }
 
