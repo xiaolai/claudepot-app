@@ -49,3 +49,84 @@ impl CredentialBlob {
         self.claude_ai_oauth.expires_at < now_ms + (margin_secs * 1000)
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn sample_blob_json(expires_at: i64) -> String {
+        format!(
+            r#"{{"claudeAiOauth":{{"accessToken":"sk-ant-oat01-test","refreshToken":"sk-ant-ort01-test","expiresAt":{},"scopes":["user:inference","user:profile"],"subscriptionType":"pro","rateLimitTier":"default_claude_pro"}}}}"#,
+            expires_at
+        )
+    }
+
+    #[test]
+    fn test_blob_from_json_valid() {
+        let json = sample_blob_json(9999999999999);
+        let blob = CredentialBlob::from_json(&json).unwrap();
+        assert_eq!(blob.claude_ai_oauth.access_token, "sk-ant-oat01-test");
+        assert_eq!(blob.claude_ai_oauth.refresh_token, "sk-ant-ort01-test");
+        assert_eq!(blob.claude_ai_oauth.expires_at, 9999999999999);
+        assert_eq!(blob.claude_ai_oauth.scopes.len(), 2);
+        assert_eq!(blob.claude_ai_oauth.subscription_type.as_deref(), Some("pro"));
+        assert_eq!(blob.claude_ai_oauth.rate_limit_tier.as_deref(), Some("default_claude_pro"));
+    }
+
+    #[test]
+    fn test_blob_from_json_minimal() {
+        let json = r#"{"claudeAiOauth":{"accessToken":"t","refreshToken":"r","expiresAt":0,"scopes":[]}}"#;
+        let blob = CredentialBlob::from_json(json).unwrap();
+        assert!(blob.claude_ai_oauth.subscription_type.is_none());
+        assert!(blob.claude_ai_oauth.rate_limit_tier.is_none());
+    }
+
+    #[test]
+    fn test_blob_from_json_missing_required() {
+        let json = r#"{"claudeAiOauth":{"refreshToken":"r","expiresAt":0,"scopes":[]}}"#;
+        assert!(CredentialBlob::from_json(json).is_err());
+    }
+
+    #[test]
+    fn test_blob_from_json_garbage() {
+        assert!(CredentialBlob::from_json("not json").is_err());
+        assert!(CredentialBlob::from_json("").is_err());
+        assert!(CredentialBlob::from_json("{}").is_err());
+    }
+
+    #[test]
+    fn test_blob_roundtrip() {
+        let json = sample_blob_json(1234567890000);
+        let blob = CredentialBlob::from_json(&json).unwrap();
+        let serialized = blob.to_json().unwrap();
+        let blob2 = CredentialBlob::from_json(&serialized).unwrap();
+        assert_eq!(blob.claude_ai_oauth.access_token, blob2.claude_ai_oauth.access_token);
+        assert_eq!(blob.claude_ai_oauth.expires_at, blob2.claude_ai_oauth.expires_at);
+        assert_eq!(blob.claude_ai_oauth.scopes, blob2.claude_ai_oauth.scopes);
+    }
+
+    #[test]
+    fn test_blob_is_expired_future() {
+        let future = chrono::Utc::now().timestamp_millis() + 3_600_000; // +1h
+        let json = sample_blob_json(future);
+        let blob = CredentialBlob::from_json(&json).unwrap();
+        assert!(!blob.is_expired(0));
+    }
+
+    #[test]
+    fn test_blob_is_expired_past() {
+        let past = chrono::Utc::now().timestamp_millis() - 3_600_000; // -1h
+        let json = sample_blob_json(past);
+        let blob = CredentialBlob::from_json(&json).unwrap();
+        assert!(blob.is_expired(0));
+    }
+
+    #[test]
+    fn test_blob_is_expired_within_margin() {
+        let soon = chrono::Utc::now().timestamp_millis() + 30_000; // +30s
+        let json = sample_blob_json(soon);
+        let blob = CredentialBlob::from_json(&json).unwrap();
+        assert!(!blob.is_expired(0));    // not expired without margin
+        assert!(blob.is_expired(60));    // expired with 60s margin
+    }
+}
