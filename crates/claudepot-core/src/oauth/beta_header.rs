@@ -10,3 +10,22 @@ const DEFAULT_BETA_HEADER: &str = "oauth-2025-04-20";
 pub fn get_or_default() -> &'static str {
     DEFAULT_BETA_HEADER
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_beta_header_not_empty() {
+        let header = get_or_default();
+        assert!(!header.is_empty());
+    }
+
+    #[test]
+    fn test_beta_header_format() {
+        let header = get_or_default();
+        // Should be "oauth-YYYY-MM-DD" format
+        assert!(header.starts_with("oauth-"));
+        assert_eq!(header.len(), "oauth-2025-04-20".len());
+    }
+}

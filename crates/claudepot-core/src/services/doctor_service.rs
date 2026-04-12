@@ -168,6 +168,33 @@ async fn check_keychain() -> Option<bool> {
     }
 }
 
+/// Build account health vector from a list of accounts (testable extraction).
+pub(crate) fn build_account_health(accounts: &[crate::account::Account]) -> Vec<AccountHealth> {
+    accounts.iter().map(|a| {
+        let health = crate::services::account_service::token_health(a.uuid, a.has_cli_credentials);
+        AccountHealth {
+            email: a.email.clone(),
+            token_status: health.status,
+            remaining_mins: health.remaining_mins,
+        }
+    }).collect()
+}
+
+/// Build desktop profile info from a list of accounts (testable extraction).
+pub(crate) fn build_profile_info(accounts: &[crate::account::Account]) -> Vec<ProfileInfo> {
+    accounts.iter().map(|a| {
+        let p = crate::paths::desktop_profile_dir(a.uuid);
+        ProfileInfo {
+            email: a.email.clone(),
+            item_count: if p.exists() {
+                std::fs::read_dir(&p).map(|d| d.count()).ok()
+            } else {
+                None
+            },
+        }
+    }).collect()
+}
+
 async fn check_api(beta_header: &str) -> ApiStatus {
     match reqwest::Client::builder()
         .timeout(std::time::Duration::from_secs(10))
@@ -191,5 +218,119 @@ async fn check_api(beta_header: &str) -> ApiStatus {
                 Err(e) => ApiStatus::Unreachable(e.to_string()),
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::testing::{lock_data_dir, setup_test_data_dir, test_store, make_account,
+                          fresh_blob_json, expired_blob_json};
+    use crate::cli_backend::swap;
+
+    #[test]
+    fn test_build_account_health_empty() {
+        let health = build_account_health(&[]);
+        assert!(health.is_empty());
+    }
+
+    #[test]
+    fn test_build_account_health_with_credentials() {
+        let _lock = lock_data_dir();
+        let _env = setup_test_data_dir();
+
+        let mut account = make_account("health@example.com");
+        let id = account.uuid;
+        swap::save_private(id, &fresh_blob_json()).unwrap();
+
+        let health = build_account_health(&[account]);
+        assert_eq!(health.len(), 1);
+        assert_eq!(health[0].email, "health@example.com");
+        assert!(health[0].token_status.contains("valid"));
+        assert!(health[0].remaining_mins.unwrap() > 0);
+
+        swap::delete_private(id).unwrap();
+    }
+
+    #[test]
+    fn test_build_account_health_expired() {
+        let _lock = lock_data_dir();
+        let _env = setup_test_data_dir();
+
+        let mut account = make_account("expired@example.com");
+        let id = account.uuid;
+        swap::save_private(id, &expired_blob_json()).unwrap();
+
+        let health = build_account_health(&[account]);
+        assert_eq!(health[0].token_status, "expired");
+
+        swap::delete_private(id).unwrap();
+    }
+
+    #[test]
+    fn test_build_account_health_no_credentials() {
+        let account = {
+            let mut a = make_account("nocred@example.com");
+            a.has_cli_credentials = false;
+            a
+        };
+        let health = build_account_health(&[account]);
+        assert_eq!(health[0].token_status, "no credentials");
+    }
+
+    #[test]
+    fn test_build_profile_info_no_profile() {
+        let _lock = lock_data_dir();
+        let _env = setup_test_data_dir();
+
+        let account = make_account("noprofile@example.com");
+        let info = build_profile_info(&[account]);
+        assert_eq!(info.len(), 1);
+        assert_eq!(info[0].email, "noprofile@example.com");
+        assert!(info[0].item_count.is_none());
+    }
+
+    #[test]
+    fn test_build_profile_info_with_profile() {
+        let _lock = lock_data_dir();
+        let _env = setup_test_data_dir();
+
+        let account = make_account("profile@example.com");
+        let profile_dir = crate::paths::desktop_profile_dir(account.uuid);
+        std::fs::create_dir_all(&profile_dir).unwrap();
+        std::fs::write(profile_dir.join("config.json"), "{}").unwrap();
+        std::fs::write(profile_dir.join("Cookies"), "cookies").unwrap();
+
+        let info = build_profile_info(&[account]);
+        assert_eq!(info[0].item_count, Some(2));
+    }
+
+    #[tokio::test]
+    async fn test_check_health_with_empty_store() {
+        let _lock = lock_data_dir();
+        let _env = setup_test_data_dir();
+        let (store, _db) = test_store();
+
+        let report = check_health(&store).await;
+        assert_eq!(report.account_count, 0);
+        assert!(report.account_health.is_empty());
+        assert!(report.desktop_profiles.is_empty());
+        assert!(!report.platform.is_empty());
+        assert!(!report.arch.is_empty());
+    }
+
+    #[tokio::test]
+    async fn test_check_health_with_accounts() {
+        let _lock = lock_data_dir();
+        let _env = setup_test_data_dir();
+        let (store, _db) = test_store();
+
+        let account = make_account("doctor@example.com");
+        store.insert(&account).unwrap();
+
+        let report = check_health(&store).await;
+        assert_eq!(report.account_count, 1);
+        assert_eq!(report.account_health.len(), 1);
+        assert_eq!(report.account_health[0].email, "doctor@example.com");
     }
 }

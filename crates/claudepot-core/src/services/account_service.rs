@@ -22,8 +22,17 @@ pub struct RegisterResult {
 
 /// Register an account by importing the current CC credentials.
 pub async fn register_from_current(store: &AccountStore) -> Result<RegisterResult, RegisterError> {
-    tracing::info!("registering from current CC credentials");
     let platform = cli_backend::create_platform();
+    register_from_current_with(store, platform.as_ref(), &DefaultProfileFetcher).await
+}
+
+/// Testable variant: accepts injectable platform and profile fetcher.
+pub(crate) async fn register_from_current_with(
+    store: &AccountStore,
+    platform: &dyn cli_backend::CliPlatform,
+    fetch_profile: &dyn ProfileFetcher,
+) -> Result<RegisterResult, RegisterError> {
+    tracing::info!("registering from current CC credentials");
     let blob_str = platform.read_default().await
         .map_err(|e| RegisterError::CredentialRead(e.to_string()))?
         .ok_or(RegisterError::NoCredentials)?;
@@ -31,16 +40,42 @@ pub async fn register_from_current(store: &AccountStore) -> Result<RegisterResul
     let blob = CredentialBlob::from_json(&blob_str)
         .map_err(|e| RegisterError::CredentialRead(e.to_string()))?;
 
-    let prof = profile::fetch(&blob.claude_ai_oauth.access_token).await
+    let prof = fetch_profile.fetch(&blob.claude_ai_oauth.access_token).await
         .map_err(|e| RegisterError::ProfileFetch(e.to_string()))?;
 
+    register_account_from_profile(store, &blob_str, &prof)
+}
+
+/// Trait for fetching an OAuth profile — enables testing without network.
+#[async_trait::async_trait]
+pub(crate) trait ProfileFetcher: Send + Sync {
+    async fn fetch(&self, access_token: &str) -> Result<profile::Profile, crate::error::OAuthError>;
+}
+
+/// Production implementation that calls the Anthropic API.
+struct DefaultProfileFetcher;
+
+#[async_trait::async_trait]
+impl ProfileFetcher for DefaultProfileFetcher {
+    async fn fetch(&self, access_token: &str) -> Result<profile::Profile, crate::error::OAuthError> {
+        profile::fetch(access_token).await
+    }
+}
+
+/// Shared logic: given a credential blob string and a fetched profile,
+/// save credentials and insert the account.
+fn register_account_from_profile(
+    store: &AccountStore,
+    blob_str: &str,
+    prof: &profile::Profile,
+) -> Result<RegisterResult, RegisterError> {
     if let Some(existing) = store.find_by_email(&prof.email)
         .map_err(|e| RegisterError::Store(e.to_string()))? {
         return Err(RegisterError::AlreadyRegistered(existing.email, existing.uuid));
     }
 
     let account_id = Uuid::new_v4();
-    swap::save_private(account_id, &blob_str)
+    swap::save_private(account_id, blob_str)
         .map_err(|e| RegisterError::CredentialWrite(e.to_string()))?;
 
     let account = Account {
@@ -62,10 +97,10 @@ pub async fn register_from_current(store: &AccountStore) -> Result<RegisterResul
 
     Ok(RegisterResult {
         uuid: account_id,
-        email: prof.email,
-        org_name: prof.org_name,
-        subscription_type: prof.subscription_type,
-        rate_limit_tier: prof.rate_limit_tier,
+        email: prof.email.clone(),
+        org_name: prof.org_name.clone(),
+        subscription_type: prof.subscription_type.clone(),
+        rate_limit_tier: prof.rate_limit_tier.clone(),
     })
 }
 
@@ -74,48 +109,27 @@ pub async fn register_from_token(
     store: &AccountStore,
     refresh_token: &str,
 ) -> Result<RegisterResult, RegisterError> {
+    use crate::cli_backend::swap::DefaultRefresher;
+    register_from_token_with(store, refresh_token, &DefaultRefresher, &DefaultProfileFetcher).await
+}
+
+/// Testable variant: accepts injectable refresher and profile fetcher.
+pub(crate) async fn register_from_token_with(
+    store: &AccountStore,
+    refresh_token: &str,
+    refresher: &dyn crate::cli_backend::swap::TokenRefresher,
+    fetch_profile: &dyn ProfileFetcher,
+) -> Result<RegisterResult, RegisterError> {
     use crate::oauth::refresh;
 
-    let token_resp = refresh::refresh(refresh_token).await
+    let token_resp = refresher.refresh(refresh_token).await
         .map_err(|e| RegisterError::ProfileFetch(format!("token exchange failed: {e}")))?;
 
-    let prof = profile::fetch(&token_resp.access_token).await
+    let prof = fetch_profile.fetch(&token_resp.access_token).await
         .map_err(|e| RegisterError::ProfileFetch(e.to_string()))?;
 
-    if let Some(existing) = store.find_by_email(&prof.email)
-        .map_err(|e| RegisterError::Store(e.to_string()))? {
-        return Err(RegisterError::AlreadyRegistered(existing.email, existing.uuid));
-    }
-
-    let account_id = Uuid::new_v4();
     let blob_str = refresh::build_blob(&token_resp, None);
-    swap::save_private(account_id, &blob_str)
-        .map_err(|e| RegisterError::CredentialWrite(e.to_string()))?;
-
-    let account = Account {
-        uuid: account_id,
-        email: prof.email.clone(),
-        org_uuid: Some(prof.org_uuid.clone()),
-        org_name: Some(prof.org_name.clone()),
-        subscription_type: Some(prof.subscription_type.clone()),
-        rate_limit_tier: prof.rate_limit_tier.clone(),
-        created_at: Utc::now(),
-        last_cli_switch: None,
-        last_desktop_switch: None,
-        has_cli_credentials: true,
-        has_desktop_profile: false,
-        is_cli_active: false,
-        is_desktop_active: false,
-    };
-    store.insert(&account).map_err(|e| RegisterError::Store(e.to_string()))?;
-
-    Ok(RegisterResult {
-        uuid: account_id,
-        email: prof.email,
-        org_name: prof.org_name,
-        subscription_type: prof.subscription_type,
-        rate_limit_tier: prof.rate_limit_tier,
-    })
+    register_account_from_profile(store, &blob_str, &prof)
 }
 
 /// Register an account via browser-based OAuth login.
@@ -307,12 +321,304 @@ pub enum RegisterError {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::testing::{DATA_DIR_LOCK, setup_test_data_dir, test_store, make_account};
+    use crate::error::{OAuthError, SwapError};
+    use crate::oauth::refresh::TokenResponse;
+    use crate::testing::{DATA_DIR_LOCK, setup_test_data_dir, test_store, make_account,
+                          fresh_blob_json};
 
     fn insert_account(store: &AccountStore, email: &str) -> Account {
         let account = make_account(email);
         store.insert(&account).unwrap();
         account
+    }
+
+    // -- Mock infrastructure --
+
+    struct MockPlatform {
+        blob: Option<String>,
+    }
+
+    #[async_trait::async_trait]
+    impl cli_backend::CliPlatform for MockPlatform {
+        async fn read_default(&self) -> Result<Option<String>, SwapError> {
+            Ok(self.blob.clone())
+        }
+        async fn write_default(&self, _blob: &str) -> Result<(), SwapError> {
+            Ok(())
+        }
+        async fn touch_credfile(&self) -> Result<(), SwapError> {
+            Ok(())
+        }
+    }
+
+    struct MockProfileFetcher {
+        profile: Result<profile::Profile, OAuthError>,
+    }
+
+    impl MockProfileFetcher {
+        fn ok(email: &str) -> Self {
+            Self {
+                profile: Ok(profile::Profile {
+                    email: email.to_string(),
+                    org_uuid: "org-uuid-1".to_string(),
+                    org_name: "Test Org".to_string(),
+                    subscription_type: "pro".to_string(),
+                    rate_limit_tier: Some("default_claude_pro".to_string()),
+                    account_uuid: "acc-uuid-1".to_string(),
+                    display_name: Some("Test User".to_string()),
+                }),
+            }
+        }
+        fn failing(msg: &str) -> Self {
+            Self {
+                profile: Err(OAuthError::AuthFailed(msg.to_string())),
+            }
+        }
+    }
+
+    #[async_trait::async_trait]
+    impl ProfileFetcher for MockProfileFetcher {
+        async fn fetch(&self, _access_token: &str) -> Result<profile::Profile, OAuthError> {
+            match &self.profile {
+                Ok(p) => Ok(p.clone()),
+                Err(OAuthError::AuthFailed(msg)) => Err(OAuthError::AuthFailed(msg.clone())),
+                Err(OAuthError::RefreshFailed(msg)) => Err(OAuthError::RefreshFailed(msg.clone())),
+                _ => Err(OAuthError::AuthFailed("mock error".into())),
+            }
+        }
+    }
+
+    struct MockRefresher {
+        response: Result<TokenResponse, OAuthError>,
+    }
+
+    impl MockRefresher {
+        fn success() -> Self {
+            Self {
+                response: Ok(TokenResponse {
+                    access_token: "sk-ant-oat01-new".into(),
+                    refresh_token: "sk-ant-ort01-new".into(),
+                    expires_in: 3600,
+                    scope: Some("user:inference".into()),
+                    token_type: Some("Bearer".into()),
+                }),
+            }
+        }
+        fn failing(msg: &str) -> Self {
+            Self {
+                response: Err(OAuthError::RefreshFailed(msg.to_string())),
+            }
+        }
+    }
+
+    #[async_trait::async_trait]
+    impl crate::cli_backend::swap::TokenRefresher for MockRefresher {
+        async fn refresh(&self, _rt: &str) -> Result<TokenResponse, OAuthError> {
+            match &self.response {
+                Ok(r) => Ok(TokenResponse {
+                    access_token: r.access_token.clone(),
+                    refresh_token: r.refresh_token.clone(),
+                    expires_in: r.expires_in,
+                    scope: r.scope.clone(),
+                    token_type: r.token_type.clone(),
+                }),
+                Err(OAuthError::RefreshFailed(msg)) => Err(OAuthError::RefreshFailed(msg.clone())),
+                _ => Err(OAuthError::RefreshFailed("mock".into())),
+            }
+        }
+    }
+
+    // -- register_from_current_with tests --
+
+    #[tokio::test]
+    async fn test_register_from_current_success() {
+        let _lock = crate::testing::lock_data_dir();
+        let _env = setup_test_data_dir();
+        let (store, _db) = test_store();
+
+        let platform = MockPlatform { blob: Some(fresh_blob_json()) };
+        let fetcher = MockProfileFetcher::ok("alice@example.com");
+
+        let result = register_from_current_with(&store, &platform, &fetcher).await.unwrap();
+        assert_eq!(result.email, "alice@example.com");
+        assert_eq!(result.org_name, "Test Org");
+        assert_eq!(result.subscription_type, "pro");
+
+        // Account inserted into store
+        let found = store.find_by_email("alice@example.com").unwrap().unwrap();
+        assert_eq!(found.email, "alice@example.com");
+        assert!(found.has_cli_credentials);
+
+        swap::delete_private(result.uuid).unwrap();
+    }
+
+    #[tokio::test]
+    async fn test_register_from_current_no_credentials() {
+        let _lock = crate::testing::lock_data_dir();
+        let _env = setup_test_data_dir();
+        let (store, _db) = test_store();
+
+        let platform = MockPlatform { blob: None };
+        let fetcher = MockProfileFetcher::ok("alice@example.com");
+
+        let result = register_from_current_with(&store, &platform, &fetcher).await;
+        assert!(matches!(result, Err(RegisterError::NoCredentials)));
+    }
+
+    #[tokio::test]
+    async fn test_register_from_current_profile_fetch_fails() {
+        let _lock = crate::testing::lock_data_dir();
+        let _env = setup_test_data_dir();
+        let (store, _db) = test_store();
+
+        let platform = MockPlatform { blob: Some(fresh_blob_json()) };
+        let fetcher = MockProfileFetcher::failing("401 Unauthorized");
+
+        let result = register_from_current_with(&store, &platform, &fetcher).await;
+        assert!(matches!(result, Err(RegisterError::ProfileFetch(_))));
+    }
+
+    #[tokio::test]
+    async fn test_register_from_current_duplicate_account() {
+        let _lock = crate::testing::lock_data_dir();
+        let _env = setup_test_data_dir();
+        let (store, _db) = test_store();
+
+        // Pre-register
+        insert_account(&store, "dup@example.com");
+
+        let platform = MockPlatform { blob: Some(fresh_blob_json()) };
+        let fetcher = MockProfileFetcher::ok("dup@example.com");
+
+        let result = register_from_current_with(&store, &platform, &fetcher).await;
+        assert!(matches!(result, Err(RegisterError::AlreadyRegistered(_, _))));
+    }
+
+    #[tokio::test]
+    async fn test_register_from_current_corrupt_blob() {
+        let _lock = crate::testing::lock_data_dir();
+        let _env = setup_test_data_dir();
+        let (store, _db) = test_store();
+
+        let platform = MockPlatform { blob: Some("not json".to_string()) };
+        let fetcher = MockProfileFetcher::ok("alice@example.com");
+
+        let result = register_from_current_with(&store, &platform, &fetcher).await;
+        assert!(matches!(result, Err(RegisterError::CredentialRead(_))));
+    }
+
+    // -- register_from_token_with tests --
+
+    #[tokio::test]
+    async fn test_register_from_token_success() {
+        let _lock = crate::testing::lock_data_dir();
+        let _env = setup_test_data_dir();
+        let (store, _db) = test_store();
+
+        let refresher = MockRefresher::success();
+        let fetcher = MockProfileFetcher::ok("bob@example.com");
+
+        let result = register_from_token_with(
+            &store, "rt-test", &refresher, &fetcher
+        ).await.unwrap();
+
+        assert_eq!(result.email, "bob@example.com");
+        assert!(store.find_by_email("bob@example.com").unwrap().is_some());
+
+        swap::delete_private(result.uuid).unwrap();
+    }
+
+    #[tokio::test]
+    async fn test_register_from_token_refresh_fails() {
+        let _lock = crate::testing::lock_data_dir();
+        let _env = setup_test_data_dir();
+        let (store, _db) = test_store();
+
+        let refresher = MockRefresher::failing("invalid token");
+        let fetcher = MockProfileFetcher::ok("bob@example.com");
+
+        let result = register_from_token_with(
+            &store, "rt-bad", &refresher, &fetcher
+        ).await;
+
+        assert!(matches!(result, Err(RegisterError::ProfileFetch(_))));
+        let msg = result.unwrap_err().to_string();
+        assert!(msg.contains("token exchange failed"));
+    }
+
+    #[tokio::test]
+    async fn test_register_from_token_duplicate() {
+        let _lock = crate::testing::lock_data_dir();
+        let _env = setup_test_data_dir();
+        let (store, _db) = test_store();
+        insert_account(&store, "dup@example.com");
+
+        let refresher = MockRefresher::success();
+        let fetcher = MockProfileFetcher::ok("dup@example.com");
+
+        let result = register_from_token_with(
+            &store, "rt-test", &refresher, &fetcher
+        ).await;
+
+        assert!(matches!(result, Err(RegisterError::AlreadyRegistered(_, _))));
+    }
+
+    // -- token_health tests --
+
+    #[test]
+    fn test_token_health_no_credentials() {
+        let health = token_health(Uuid::new_v4(), false);
+        assert_eq!(health.status, "no credentials");
+        assert!(health.remaining_mins.is_none());
+    }
+
+    #[test]
+    fn test_token_health_missing_blob() {
+        let _lock = crate::testing::lock_data_dir();
+        let _env = setup_test_data_dir();
+        let health = token_health(Uuid::new_v4(), true);
+        assert_eq!(health.status, "missing");
+    }
+
+    #[test]
+    fn test_token_health_valid_token() {
+        let _lock = crate::testing::lock_data_dir();
+        let _env = setup_test_data_dir();
+        let id = Uuid::new_v4();
+        swap::save_private(id, &fresh_blob_json()).unwrap();
+
+        let health = token_health(id, true);
+        assert!(health.status.contains("valid"));
+        assert!(health.remaining_mins.unwrap() > 0);
+
+        swap::delete_private(id).unwrap();
+    }
+
+    #[test]
+    fn test_token_health_expired_token() {
+        let _lock = crate::testing::lock_data_dir();
+        let _env = setup_test_data_dir();
+        let id = Uuid::new_v4();
+        swap::save_private(id, &crate::testing::expired_blob_json()).unwrap();
+
+        let health = token_health(id, true);
+        assert_eq!(health.status, "expired");
+        assert!(health.remaining_mins.unwrap() < 0);
+
+        swap::delete_private(id).unwrap();
+    }
+
+    #[test]
+    fn test_token_health_corrupt_blob() {
+        let _lock = crate::testing::lock_data_dir();
+        let _env = setup_test_data_dir();
+        let id = Uuid::new_v4();
+        swap::save_private(id, "not json").unwrap();
+
+        let health = token_health(id, true);
+        assert_eq!(health.status, "corrupt blob");
+
+        swap::delete_private(id).unwrap();
     }
 
     #[test]

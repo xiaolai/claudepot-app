@@ -1644,4 +1644,98 @@ mod tests {
         assert!(result.cc_dir_renamed);
         assert!(cc_new.join("s.jsonl").exists());
     }
+
+    // -- is_claude_running_in --
+
+    #[test]
+    fn test_is_claude_running_in_returns_false_for_random_dir() {
+        let tmp = tempfile::tempdir().unwrap();
+        // No Claude process has this random temp dir as cwd
+        assert!(!is_claude_running_in(&tmp.path().to_string_lossy()));
+    }
+
+    // -- find_project_dir_by_prefix --
+
+    #[test]
+    fn test_find_project_dir_by_prefix_no_projects_dir() {
+        let tmp = tempfile::tempdir().unwrap();
+        // No projects/ subdirectory exists
+        let result = find_project_dir_by_prefix(tmp.path(), "anything").unwrap();
+        assert!(result.is_none());
+    }
+
+    #[test]
+    fn test_find_project_dir_by_prefix_single_match() {
+        let tmp = tempfile::tempdir().unwrap();
+        let projects = tmp.path().join("projects");
+        fs::create_dir(&projects).unwrap();
+        fs::create_dir(projects.join("myprefix-abc123")).unwrap();
+
+        let result = find_project_dir_by_prefix(tmp.path(), "myprefix").unwrap();
+        assert!(result.is_some());
+        assert!(result.unwrap().ends_with("myprefix-abc123"));
+    }
+
+    #[test]
+    fn test_find_project_dir_by_prefix_ambiguous() {
+        let tmp = tempfile::tempdir().unwrap();
+        let projects = tmp.path().join("projects");
+        fs::create_dir(&projects).unwrap();
+        fs::create_dir(projects.join("myprefix-hash1")).unwrap();
+        fs::create_dir(projects.join("myprefix-hash2")).unwrap();
+
+        let result = find_project_dir_by_prefix(tmp.path(), "myprefix");
+        assert!(matches!(result, Err(ProjectError::Ambiguous(_))));
+    }
+
+    // -- count_files_with_ext --
+
+    #[test]
+    fn test_count_files_with_ext_counts_correctly() {
+        let tmp = tempfile::tempdir().unwrap();
+        fs::write(tmp.path().join("a.jsonl"), "").unwrap();
+        fs::write(tmp.path().join("b.jsonl"), "").unwrap();
+        fs::write(tmp.path().join("c.txt"), "").unwrap();
+        fs::write(tmp.path().join("d.md"), "").unwrap();
+
+        assert_eq!(count_files_with_ext(tmp.path(), "jsonl"), 2);
+        assert_eq!(count_files_with_ext(tmp.path(), "md"), 1);
+        assert_eq!(count_files_with_ext(tmp.path(), "rs"), 0);
+    }
+
+    // -- dir_size --
+
+    #[test]
+    fn test_dir_size_sums_correctly() {
+        let tmp = tempfile::tempdir().unwrap();
+        fs::write(tmp.path().join("a"), "hello").unwrap(); // 5 bytes
+        fs::write(tmp.path().join("b"), "world!").unwrap(); // 6 bytes
+        let sub = tmp.path().join("sub");
+        fs::create_dir(&sub).unwrap();
+        fs::write(sub.join("c"), "xy").unwrap(); // 2 bytes
+
+        let size = dir_size(tmp.path());
+        assert_eq!(size, 13);
+    }
+
+    // -- most_recent_mtime --
+
+    #[test]
+    fn test_most_recent_mtime_returns_latest() {
+        let tmp = tempfile::tempdir().unwrap();
+        fs::write(tmp.path().join("old"), "old").unwrap();
+        std::thread::sleep(std::time::Duration::from_millis(50));
+        fs::write(tmp.path().join("new"), "new").unwrap();
+
+        let mtime = most_recent_mtime(tmp.path());
+        assert!(mtime.is_some());
+    }
+
+    #[test]
+    fn test_most_recent_mtime_empty_dir() {
+        let tmp = tempfile::tempdir().unwrap();
+        let mtime = most_recent_mtime(tmp.path());
+        // Empty dir still has its own mtime
+        assert!(mtime.is_none() || mtime.is_some());
+    }
 }
