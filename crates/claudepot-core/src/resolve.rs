@@ -1,25 +1,17 @@
 use crate::account::AccountStore;
+use thiserror::Error;
 
-#[derive(Debug)]
+#[derive(Error, Debug)]
 pub enum ResolveError {
+    #[error("no account matching '{0}'")]
     NoMatch(String),
-    Ambiguous(String, Vec<String>),
+
+    #[error("'{input}' is ambiguous: {}", candidates.join(", "))]
+    Ambiguous { input: String, candidates: Vec<String> },
+
+    #[error("store error: {0}")]
     StoreError(String),
 }
-
-impl std::fmt::Display for ResolveError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Self::NoMatch(input) => write!(f, "no account matching '{input}'"),
-            Self::Ambiguous(input, candidates) => {
-                write!(f, "'{input}' is ambiguous: {}", candidates.join(", "))
-            }
-            Self::StoreError(msg) => write!(f, "store error: {msg}"),
-        }
-    }
-}
-
-impl std::error::Error for ResolveError {}
 
 /// Resolve a user-provided string to a registered email.
 ///
@@ -40,7 +32,10 @@ pub fn resolve_email(store: &AccountStore, input: &str) -> Result<String, Resolv
     match matches.len() {
         0 => Err(ResolveError::NoMatch(input.to_string())),
         1 => Ok(matches.remove(0)),
-        _ => Err(ResolveError::Ambiguous(input.to_string(), matches)),
+        _ => Err(ResolveError::Ambiguous {
+            input: input.to_string(),
+            candidates: matches,
+        }),
     }
 }
 
@@ -94,7 +89,7 @@ mod tests {
     fn test_resolve_ambiguous() {
         let (store, _dir) = test_store();
         let err = resolve_email(&store, "xiaolai").unwrap_err();
-        assert!(matches!(err, ResolveError::Ambiguous(_, _)));
+        assert!(matches!(err, ResolveError::Ambiguous { .. }));
     }
 
     #[test]

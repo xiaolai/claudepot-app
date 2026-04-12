@@ -55,10 +55,13 @@ pub async fn switch(
     platform: &dyn CliPlatform,
 ) -> Result<(), SwapError> {
     // Acquire exclusive lock — prevents concurrent swaps.
+    tracing::debug!("acquiring swap lock...");
     let _lock = acquire_swap_lock()?;
+    tracing::debug!("swap lock acquired");
 
     // Load target blob from Claudepot private storage first.
     // If it doesn't exist, fail before touching anything.
+    tracing::debug!(target = %target_id, "loading target credentials");
     let target_blob = load_private(target_id)?;
 
     // Save outgoing (current CC blob may have been refreshed by the CLI).
@@ -88,10 +91,12 @@ pub async fn switch(
     let _ = platform.touch_credfile().await;
 
     // Update active pointer in account store.
+    tracing::debug!(target = %target_id, "updating active CLI pointer");
     store
         .set_active_cli(target_id)
         .map_err(|e| SwapError::WriteFailed(format!("db update failed: {e}")))?;
 
+    tracing::info!(target = %target_id, "swap complete");
     // _lock dropped here — releases the file lock.
     Ok(())
 }

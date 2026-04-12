@@ -22,6 +22,7 @@ pub struct RegisterResult {
 
 /// Register an account by importing the current CC credentials.
 pub async fn register_from_current(store: &AccountStore) -> Result<RegisterResult, RegisterError> {
+    tracing::info!("registering from current CC credentials");
     let platform = cli_backend::create_platform();
     let blob_str = platform.read_default().await
         .map_err(|e| RegisterError::CredentialRead(e.to_string()))?
