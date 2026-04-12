@@ -92,12 +92,11 @@ pub async fn use_account(
 
     desktop_backend::swap::switch(
         platform.as_ref(),
+        &ctx.store,
         current_uuid,
         target.uuid,
         no_launch,
     ).await.map_err(|e| anyhow::anyhow!("{e}"))?;
-
-    ctx.store.set_active_desktop(target.uuid)?;
 
     if ctx.json {
         println!("{}", serde_json::json!({
