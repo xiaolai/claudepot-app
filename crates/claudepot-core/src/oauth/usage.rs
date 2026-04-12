@@ -71,3 +71,45 @@ pub async fn fetch(access_token: &str) -> Result<UsageResponse, OAuthError> {
 
     Ok(usage)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_usage_response_deserialize_full() {
+        let json = r#"{
+            "five_hour": {"utilization": 42.5, "resets_at": "2026-04-13T10:00:00+00:00"},
+            "seven_day": {"utilization": 10.0, "resets_at": "2026-04-19T00:00:00+00:00"}
+        }"#;
+        let usage: UsageResponse = serde_json::from_str(json).unwrap();
+        assert_eq!(usage.five_hour.unwrap().utilization, 42.5);
+        assert_eq!(usage.seven_day.unwrap().utilization, 10.0);
+    }
+
+    #[test]
+    fn test_usage_response_deserialize_minimal() {
+        let json = "{}";
+        let usage: UsageResponse = serde_json::from_str(json).unwrap();
+        assert!(usage.five_hour.is_none());
+        assert!(usage.seven_day.is_none());
+        assert!(usage.extra_usage.is_none());
+    }
+
+    #[test]
+    fn test_usage_response_unknown_fields_captured() {
+        let json = r#"{"new_window": {"utilization": 99.0, "resets_at": "2026-04-13T10:00:00+00:00"}}"#;
+        let usage: UsageResponse = serde_json::from_str(json).unwrap();
+        assert!(usage.unknown.contains_key("new_window"));
+    }
+
+    #[test]
+    fn test_extra_usage_deserialize() {
+        let json = r#"{"extra_usage": {"is_enabled": true, "monthly_limit": 100.0, "used_credits": 25.0, "utilization": 0.25}}"#;
+        let usage: UsageResponse = serde_json::from_str(json).unwrap();
+        let extra = usage.extra_usage.unwrap();
+        assert!(extra.is_enabled);
+        assert_eq!(extra.monthly_limit, Some(100.0));
+        assert_eq!(extra.used_credits, Some(25.0));
+    }
+}

@@ -172,3 +172,46 @@ impl super::CliPlatform for MacosKeychain {
         Ok(())
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_hashed_service_name_deterministic() {
+        let a = hashed_service_name("/Users/joker/.claude");
+        let b = hashed_service_name("/Users/joker/.claude");
+        assert_eq!(a, b);
+    }
+
+    #[test]
+    fn test_hashed_service_name_format() {
+        let result = hashed_service_name("/Users/joker/.claude");
+        assert!(result.starts_with("Claude Code-credentials-"));
+        // SHA-256 first 4 bytes = 8 hex chars
+        let suffix = result.strip_prefix("Claude Code-credentials-").unwrap();
+        assert_eq!(suffix.len(), 8);
+        assert!(suffix.chars().all(|c| c.is_ascii_hexdigit()));
+    }
+
+    #[test]
+    fn test_hashed_service_name_different_paths() {
+        let a = hashed_service_name("/Users/alice/.claude");
+        let b = hashed_service_name("/Users/bob/.claude");
+        assert_ne!(a, b);
+    }
+
+    #[test]
+    fn test_validate_security_input_rejects_quotes() {
+        assert!(validate_security_input("normal", "test").is_ok());
+        assert!(validate_security_input("has\"quote", "test").is_err());
+        assert!(validate_security_input("has\nnewline", "test").is_err());
+        assert!(validate_security_input("has\\backslash", "test").is_err());
+        assert!(validate_security_input("has\rreturn", "test").is_err());
+    }
+
+    #[test]
+    fn test_default_service_name() {
+        assert_eq!(DEFAULT_SERVICE, "Claude Code-credentials");
+    }
+}
