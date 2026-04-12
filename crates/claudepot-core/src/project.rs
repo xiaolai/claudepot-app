@@ -596,7 +596,12 @@ fn copy_dir_recursive(src: &Path, dst: &Path) -> Result<(), ProjectError> {
     for entry in fs::read_dir(src).map_err(ProjectError::Io)? {
         let entry = entry.map_err(ProjectError::Io)?;
         let target = dst.join(entry.file_name());
-        if entry.file_type().map_err(ProjectError::Io)?.is_dir() {
+        // Use symlink_metadata to avoid following symlinks
+        let ft = entry.metadata().map_err(ProjectError::Io)?.file_type();
+        if ft.is_symlink() {
+            // Skip symlinks — do not follow them during copy
+            continue;
+        } else if ft.is_dir() {
             copy_dir_recursive(&entry.path(), &target)?;
         } else {
             fs::copy(entry.path(), &target).map_err(ProjectError::Io)?;

@@ -56,11 +56,25 @@ pub async fn read(service: &str) -> Result<Option<String>, SwapError> {
     Ok(Some(blob))
 }
 
+/// Validate that a string is safe to interpolate in a `security -i` command.
+/// Rejects values containing quotes, newlines, or backslashes that could
+/// alter the parsed command semantics.
+fn validate_security_input(value: &str, label: &str) -> Result<(), SwapError> {
+    if value.contains('"') || value.contains('\n') || value.contains('\r') || value.contains('\\') {
+        return Err(SwapError::KeychainError(format!(
+            "{label} contains unsafe characters for keychain command"
+        )));
+    }
+    Ok(())
+}
+
 /// Write a credential blob to the Keychain via `security -i` stdin mode.
 /// Uses hex-encoded payload to avoid shell escaping issues.
 /// See reference.md §I.6 for the exact protocol.
 pub async fn write(service: &str, blob: &str) -> Result<(), SwapError> {
     let user = std::env::var("USER").unwrap_or_else(|_| whoami::username());
+    validate_security_input(&user, "USER")?;
+    validate_security_input(service, "service")?;
     let hex_value = hex::encode(blob.as_bytes());
     let command_line = format!(
         "add-generic-password -U -a \"{user}\" -s \"{service}\" -X \"{hex_value}\"\n"

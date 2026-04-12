@@ -124,6 +124,23 @@ fn private_path(account_id: Uuid) -> std::path::PathBuf {
 
 pub fn load_private(account_id: Uuid) -> Result<String, SwapError> {
     let path = private_path(account_id);
+
+    // Verify file permissions before reading credentials
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        if let Ok(meta) = std::fs::metadata(&path) {
+            let mode = meta.permissions().mode() & 0o777;
+            if mode != 0o600 {
+                tracing::warn!(
+                    "credential file {} has permissions {:o} (expected 600), fixing",
+                    path.display(), mode
+                );
+                let _ = std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600));
+            }
+        }
+    }
+
     std::fs::read_to_string(&path)
         .map_err(|_| SwapError::NoStoredCredentials(account_id))
 }

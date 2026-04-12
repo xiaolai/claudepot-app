@@ -121,12 +121,16 @@ fn copy_dir_recursive(src: &Path, dst: &Path) -> std::io::Result<()> {
     std::fs::create_dir_all(dst)?;
     for entry in std::fs::read_dir(src)? {
         let entry = entry?;
-        let src_path = entry.path();
         let dst_path = dst.join(entry.file_name());
-        if src_path.is_dir() {
-            copy_dir_recursive(&src_path, &dst_path)?;
+        // Use symlink_metadata to avoid following symlinks
+        let ft = entry.metadata()?.file_type();
+        if ft.is_symlink() {
+            // Skip symlinks — do not follow them during copy
+            continue;
+        } else if ft.is_dir() {
+            copy_dir_recursive(&entry.path(), &dst_path)?;
         } else {
-            std::fs::copy(&src_path, &dst_path)?;
+            std::fs::copy(entry.path(), &dst_path)?;
         }
     }
     Ok(())
