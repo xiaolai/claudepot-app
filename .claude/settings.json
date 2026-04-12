@@ -1,8 +1,4 @@
 {
-  "enabledPlugins": {
-    "codex-toolkit@xiaolai": true,
-    "loc-guardian@xiaolai": true
-  },
   "hooks": {
     "PreToolUse": [
       {
@@ -15,5 +11,10 @@
         ]
       }
     ]
+  },
+  "enabledPlugins": {
+    "codex-toolkit@xiaolai": true,
+    "loc-guardian@xiaolai": true,
+    "grill@xiaolai": true
   }
 }
