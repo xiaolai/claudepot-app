@@ -5,11 +5,12 @@ use std::path::Path;
 // Re-export public API from submodules
 pub use crate::project_sanitize::{sanitize_path, unsanitize_path};
 pub use crate::project_types::*;
-pub use crate::project_helpers::format_size;
+pub use crate::project_display::format_size;
 
 // Private imports from submodules
 use crate::project_sanitize::{MAX_SANITIZED_LENGTH, djb2_hash, format_radix};
 use crate::project_helpers::*;
+use crate::project_display::{compute_dry_run_plan, format_dry_run_plan};
 
 // ---------------------------------------------------------------------------
 // list_projects
