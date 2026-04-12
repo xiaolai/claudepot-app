@@ -93,7 +93,11 @@ fn register_account_from_profile(
         is_cli_active: false,
         is_desktop_active: false,
     };
-    store.insert(&account).map_err(|e| RegisterError::Store(e.to_string()))?;
+    if let Err(e) = store.insert(&account) {
+        // Rollback: delete orphaned private blob
+        let _ = swap::delete_private(account_id);
+        return Err(RegisterError::Store(e.to_string()));
+    }
 
     Ok(RegisterResult {
         uuid: account_id,
@@ -173,7 +177,12 @@ pub async fn register_from_browser(store: &AccountStore) -> Result<RegisterResul
 
     let account_id = Uuid::new_v4();
     swap::save_private(account_id, &blob_str)
-        .map_err(|e| RegisterError::CredentialWrite(e.to_string()))?;
+        .map_err(|e| {
+            // Cleanup on credential write failure
+            let cd = config_dir.clone();
+            tokio::spawn(async move { onboard::cleanup(&cd).await });
+            RegisterError::CredentialWrite(e.to_string())
+        })?;
 
     let account = Account {
         uuid: account_id,
@@ -190,7 +199,12 @@ pub async fn register_from_browser(store: &AccountStore) -> Result<RegisterResul
         is_cli_active: false,
         is_desktop_active: false,
     };
-    store.insert(&account).map_err(|e| RegisterError::Store(e.to_string()))?;
+    if let Err(e) = store.insert(&account) {
+        // Rollback: delete orphaned private blob + cleanup temp dir
+        let _ = swap::delete_private(account_id);
+        onboard::cleanup(&config_dir).await;
+        return Err(RegisterError::Store(e.to_string()));
+    }
     onboard::cleanup(&config_dir).await;
 
     Ok(RegisterResult {
@@ -211,24 +225,10 @@ pub fn remove_account(store: &AccountStore, uuid: Uuid) -> Result<RemoveResult, 
 
     let mut warnings: Vec<String> = Vec::new();
 
-    // Delete credential
-    if let Err(e) = swap::delete_private(uuid) {
-        warnings.push(format!("failed to delete credential file: {e}"));
-    }
-
-    // Delete Desktop profile
     let profile_dir = paths::desktop_profile_dir(uuid);
     let had_profile = profile_dir.exists();
-    if had_profile {
-        if let Err(e) = std::fs::remove_dir_all(&profile_dir) {
-            warnings.push(format!("failed to delete desktop profile: {e}"));
-        }
-    }
 
-    // Remove from store
-    store.remove(uuid).map_err(|e| RegisterError::Store(e.to_string()))?;
-
-    // Clear active pointers if needed
+    // Clear active pointers first (reversible DB operations)
     if account.is_cli_active {
         if let Err(e) = store.clear_active_cli() {
             warnings.push(format!("failed to clear active CLI pointer: {e}"));
@@ -237,6 +237,19 @@ pub fn remove_account(store: &AccountStore, uuid: Uuid) -> Result<RemoveResult, 
     if account.is_desktop_active {
         if let Err(e) = store.clear_active_desktop() {
             warnings.push(format!("failed to clear active Desktop pointer: {e}"));
+        }
+    }
+
+    // Remove from DB before irreversible file deletions
+    store.remove(uuid).map_err(|e| RegisterError::Store(e.to_string()))?;
+
+    // Now safe to delete files — DB row is already gone
+    if let Err(e) = swap::delete_private(uuid) {
+        warnings.push(format!("failed to delete credential file: {e}"));
+    }
+    if had_profile {
+        if let Err(e) = std::fs::remove_dir_all(&profile_dir) {
+            warnings.push(format!("failed to delete desktop profile: {e}"));
         }
     }
 

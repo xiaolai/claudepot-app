@@ -166,7 +166,13 @@ pub fn list_projects(config_dir: &Path) -> Result<Vec<ProjectInfo>, ProjectError
         };
         let total_size_bytes = dir_size(&entry.path());
         let last_modified = most_recent_mtime(&entry.path());
-        let is_orphan = !Path::new(&original_path).exists();
+        // Orphan detection: check if the reconstructed path exists on disk.
+        // unsanitize_path is lossy — if re-sanitizing the unsanitized path
+        // doesn't round-trip back to the same sanitized name, the reconstruction
+        // is unreliable and we mark it as "unknown" (not orphan) to avoid
+        // false-positive deletions.
+        let roundtrips = sanitize_path(&original_path) == sanitized_name;
+        let is_orphan = roundtrips && !Path::new(&original_path).exists();
 
         projects.push(ProjectInfo {
             sanitized_name,
@@ -319,6 +325,9 @@ pub fn move_project(args: &MoveArgs) -> Result<MoveResult, ProjectError> {
     }
 
     // Phase 4: Rename CC project directory
+    // After phase 3, the real directory is already moved. Post-move failures
+    // are collected as warnings rather than hard errors to avoid misleading
+    // callers into thinking the move didn't happen.
     result.old_sanitized = Some(old_san.clone());
     result.new_sanitized = Some(new_san.clone());
     if old_san != new_san {
@@ -328,9 +337,13 @@ pub fn move_project(args: &MoveArgs) -> Result<MoveResult, ProjectError> {
 
         // Defense-in-depth: ensure paths stay within projects/
         if !cc_old.starts_with(&projects_base) || !cc_new.starts_with(&projects_base) {
-            return Err(ProjectError::Ambiguous(
-                "sanitized path escapes projects directory".to_string(),
-            ));
+            if result.actual_dir_moved {
+                result.warnings.push("sanitized path escapes projects directory — CC state not updated".to_string());
+            } else {
+                return Err(ProjectError::Ambiguous(
+                    "sanitized path escapes projects directory".to_string(),
+                ));
+            }
         }
 
         if cc_old.exists() {
@@ -493,7 +506,8 @@ fn compute_project_info(
     };
     let total_size_bytes = dir_size(dir);
     let last_modified = most_recent_mtime(dir);
-    let is_orphan = !Path::new(&original_path).exists();
+    let roundtrips = sanitize_path(&original_path) == sanitized_name;
+    let is_orphan = roundtrips && !Path::new(&original_path).exists();
 
     Ok(ProjectInfo {
         sanitized_name: sanitized_name.to_string(),

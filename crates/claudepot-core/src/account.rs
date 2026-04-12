@@ -39,15 +39,18 @@ impl AccountStore {
         #[cfg(unix)]
         {
             use std::os::unix::fs::PermissionsExt;
-            let _ = std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o600));
+            std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o600))
+                .map_err(|e| rusqlite::Error::ToSqlConversionFailure(Box::new(e)))?;
             // Also secure the WAL and SHM files if they exist
             let wal = path.with_extension("db-wal");
             let shm = path.with_extension("db-shm");
             if wal.exists() {
-                let _ = std::fs::set_permissions(&wal, std::fs::Permissions::from_mode(0o600));
+                std::fs::set_permissions(&wal, std::fs::Permissions::from_mode(0o600))
+                    .map_err(|e| rusqlite::Error::ToSqlConversionFailure(Box::new(e)))?;
             }
             if shm.exists() {
-                let _ = std::fs::set_permissions(&shm, std::fs::Permissions::from_mode(0o600));
+                std::fs::set_permissions(&shm, std::fs::Permissions::from_mode(0o600))
+                    .map_err(|e| rusqlite::Error::ToSqlConversionFailure(Box::new(e)))?;
             }
         }
 

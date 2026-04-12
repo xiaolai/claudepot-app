@@ -60,11 +60,11 @@ pub async fn run(ctx: &AppContext) -> Result<()> {
     }
 
     // Keychain
-    if let Some(readable) = report.keychain_readable {
-        if readable {
-            ok("Keychain", "Claude Code-credentials readable");
-        } else {
-            warn("Keychain", "Claude Code-credentials empty");
+    if let Some(ref status) = report.keychain_status {
+        match status {
+            Ok(true) => ok("Keychain", "Claude Code-credentials readable"),
+            Ok(false) => warn("Keychain", "Claude Code-credentials empty"),
+            Err(e) => err("Keychain", e),
         }
     }
 
@@ -87,7 +87,13 @@ pub async fn run(ctx: &AppContext) -> Result<()> {
         }
     }
 
+    // DB error
+    if let Some(ref db_err) = report.db_error {
+        err("Database", db_err);
+    }
+
     // Account health
+    let mut expired_accounts = 0;
     if !report.account_health.is_empty() {
         println!("\n  Account health:");
         for a in &report.account_health {
@@ -95,6 +101,7 @@ pub async fn run(ctx: &AppContext) -> Result<()> {
                 println!("    {}  ✓ {}", a.email, a.token_status);
             } else {
                 println!("    {}  ✗ {}", a.email, a.token_status);
+                expired_accounts += 1;
             }
         }
     }
@@ -111,14 +118,19 @@ pub async fn run(ctx: &AppContext) -> Result<()> {
     }
 
     println!();
-    let errors = [
-        matches!(report.api_status, doctor_service::ApiStatus::GeoBlocked | doctor_service::ApiStatus::Unreachable(_)),
-    ].iter().filter(|&&x| x).count();
-    let warnings = [
-        !report.data_dir_exists,
-        report.cli_path.is_none(),
-        !report.desktop_installed,
-    ].iter().filter(|&&x| x).count();
+    let mut errors = 0;
+    if matches!(report.api_status, doctor_service::ApiStatus::GeoBlocked | doctor_service::ApiStatus::Unreachable(_)) {
+        errors += 1;
+    }
+    if report.db_error.is_some() {
+        errors += 1;
+    }
+
+    let mut warnings = 0;
+    if !report.data_dir_exists { warnings += 1; }
+    if report.cli_path.is_none() { warnings += 1; }
+    if !report.desktop_installed { warnings += 1; }
+    if expired_accounts > 0 { warnings += expired_accounts; }
 
     if errors > 0 {
         println!("{} error(s), {} warning(s).", errors, warnings);

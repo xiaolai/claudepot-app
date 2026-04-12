@@ -14,11 +14,14 @@ pub struct HealthReport {
     pub cli_version: Option<String>,
     pub desktop_installed: bool,
     pub desktop_version: Option<String>,
-    pub keychain_readable: Option<bool>,
+    /// None = not macOS, Some(Ok(true)) = credential found,
+    /// Some(Ok(false)) = no credential, Some(Err) = access error
+    pub keychain_status: Option<Result<bool, String>>,
     pub beta_header: String,
     pub api_status: ApiStatus,
     pub account_health: Vec<AccountHealth>,
     pub desktop_profiles: Vec<ProfileInfo>,
+    pub db_error: Option<String>,
 }
 
 #[derive(Debug)]
@@ -53,7 +56,7 @@ pub async fn check_health(store: &AccountStore) -> HealthReport {
     let (desktop_installed, desktop_version) = detect_desktop();
 
     // Keychain
-    let keychain_readable = check_keychain().await;
+    let keychain_status = check_keychain().await;
 
     // Beta header
     let beta_header = crate::oauth::beta_header::get_or_default().to_string();
@@ -62,7 +65,10 @@ pub async fn check_health(store: &AccountStore) -> HealthReport {
     let api_status = check_api(&beta_header).await;
 
     // Account health
-    let accounts = store.list().unwrap_or_default();
+    let (accounts, db_error) = match store.list() {
+        Ok(a) => (a, None),
+        Err(e) => (vec![], Some(format!("failed to list accounts: {e}"))),
+    };
     let account_health: Vec<AccountHealth> = accounts.iter().map(|a| {
         let health = crate::services::account_service::token_health(a.uuid, a.has_cli_credentials);
         AccountHealth {
@@ -95,11 +101,12 @@ pub async fn check_health(store: &AccountStore) -> HealthReport {
         cli_version,
         desktop_installed,
         desktop_version,
-        keychain_readable,
+        keychain_status,
         beta_header,
         api_status,
         account_health,
         desktop_profiles,
+        db_error,
     }
 }
 
@@ -153,13 +160,13 @@ fn detect_desktop() -> (bool, Option<String>) {
     }
 }
 
-async fn check_keychain() -> Option<bool> {
+async fn check_keychain() -> Option<Result<bool, String>> {
     #[cfg(target_os = "macos")]
     {
         match crate::cli_backend::keychain::read_default().await {
-            Ok(Some(_)) => Some(true),
-            Ok(None) => Some(false),
-            Err(_) => Some(false),
+            Ok(Some(_)) => Some(Ok(true)),
+            Ok(None) => Some(Ok(false)),
+            Err(e) => Some(Err(format!("keychain access failed: {e}"))),
         }
     }
     #[cfg(not(target_os = "macos"))]
