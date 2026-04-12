@@ -1,7 +1,7 @@
 use anyhow::Result;
 use crate::AppContext;
 
-pub fn status(ctx: &AppContext) -> Result<()> {
+pub async fn status(ctx: &AppContext) -> Result<()> {
     use claudepot_core::desktop_backend;
 
     let platform = desktop_backend::create_platform();
@@ -25,9 +25,7 @@ pub fn status(ctx: &AppContext) -> Result<()> {
         .and_then(|u| u.parse::<uuid::Uuid>().ok())
         .and_then(|u| ctx.store.find_by_uuid(u).ok().flatten());
 
-    // Check running state synchronously via a small runtime block
-    let is_running = tokio::runtime::Handle::current()
-        .block_on(platform.is_running());
+    let is_running = platform.is_running().await;
 
     if ctx.json {
         println!("{}", serde_json::json!({

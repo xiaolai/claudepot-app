@@ -38,8 +38,8 @@ impl super::DesktopPlatform for MacosDesktop {
         let mut sys = sysinfo::System::new();
         sys.refresh_processes(sysinfo::ProcessesToUpdate::All, true);
         sys.processes().values().any(|p| {
-            p.name().to_string_lossy().contains("Claude")
-                && !p.name().to_string_lossy().contains("Claudepot")
+            let exe = p.exe().map(|e| e.to_string_lossy().to_string()).unwrap_or_default();
+            exe.contains("/Applications/Claude.app/")
         })
     }
 
