@@ -87,35 +87,9 @@ pub async fn use_account(ctx: &AppContext, email_input: &str) -> Result<()> {
 }
 
 pub async fn clear(ctx: &AppContext) -> Result<()> {
-    use claudepot_core::cli_backend;
+    use claudepot_core::services::cli_service;
 
-    let platform = cli_backend::create_platform();
-
-    // Save current credentials before clearing — propagate errors (don't silently lose creds)
-    if let Some(active_uuid_str) = ctx.store.active_cli_uuid()? {
-        if let Ok(uuid) = active_uuid_str.parse::<uuid::Uuid>() {
-            if let Ok(Some(blob)) = platform.read_default().await {
-                cli_backend::swap::save_private(uuid, &blob)
-                    .map_err(|e| anyhow::anyhow!("failed to save credentials before clearing: {e}"))?;
-            }
-        }
-    }
-
-    // Clear CC's credentials — propagate errors
-    #[cfg(target_os = "macos")]
-    {
-        cli_backend::keychain::delete(cli_backend::keychain::DEFAULT_SERVICE)
-            .await
-            .map_err(|e| anyhow::anyhow!("failed to delete keychain item: {e}"))?;
-    }
-
-    let cred_path = claudepot_core::paths::claude_credentials_file();
-    if cred_path.exists() {
-        std::fs::remove_file(&cred_path)
-            .map_err(|e| anyhow::anyhow!("failed to delete credentials file: {e}"))?;
-    }
-
-    ctx.store.clear_active_cli()?;
+    cli_service::clear_credentials(&ctx.store).await?;
 
     if ctx.json {
         println!("{}", serde_json::json!({"cleared": true}));

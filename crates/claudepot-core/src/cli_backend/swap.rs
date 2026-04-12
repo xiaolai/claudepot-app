@@ -120,3 +120,173 @@ pub fn delete_private(account_id: Uuid) -> Result<(), SwapError> {
     }
     Ok(())
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::sync::Mutex;
+
+    /// Mock CliPlatform for testing swap logic.
+    struct MockPlatform {
+        storage: Mutex<Option<String>>,
+        fail_write: bool,
+    }
+
+    impl MockPlatform {
+        fn new(initial: Option<&str>) -> Self {
+            Self {
+                storage: Mutex::new(initial.map(String::from)),
+                fail_write: false,
+            }
+        }
+        fn failing() -> Self {
+            Self { storage: Mutex::new(None), fail_write: true }
+        }
+        fn get(&self) -> Option<String> {
+            self.storage.lock().unwrap().clone()
+        }
+    }
+
+    #[async_trait::async_trait]
+    impl CliPlatform for MockPlatform {
+        async fn read_default(&self) -> Result<Option<String>, SwapError> {
+            Ok(self.storage.lock().unwrap().clone())
+        }
+        async fn write_default(&self, blob: &str) -> Result<(), SwapError> {
+            if self.fail_write {
+                return Err(SwapError::WriteFailed("mock write failure".into()));
+            }
+            *self.storage.lock().unwrap() = Some(blob.to_string());
+            Ok(())
+        }
+        async fn touch_credfile(&self) -> Result<(), SwapError> {
+            Ok(())
+        }
+    }
+
+    fn test_store() -> (AccountStore, tempfile::TempDir) {
+        let dir = tempfile::tempdir().unwrap();
+        let db = dir.path().join("test.db");
+        let store = AccountStore::open(&db).unwrap();
+        (store, dir)
+    }
+
+    #[test]
+    fn test_private_storage_roundtrip() {
+        let id = Uuid::new_v4();
+        let blob = r#"{"test":"data"}"#;
+
+        // Save
+        save_private(id, blob).unwrap();
+
+        // Load
+        let loaded = load_private(id).unwrap();
+        assert_eq!(loaded, blob);
+
+        // Verify 0600 permissions
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let perms = std::fs::metadata(private_path(id)).unwrap().permissions();
+            assert_eq!(perms.mode() & 0o777, 0o600);
+        }
+
+        // Delete
+        delete_private(id).unwrap();
+        assert!(load_private(id).is_err());
+    }
+
+    #[test]
+    fn test_private_storage_missing() {
+        let id = Uuid::new_v4();
+        assert!(matches!(
+            load_private(id),
+            Err(SwapError::NoStoredCredentials(_))
+        ));
+    }
+
+    #[test]
+    fn test_private_storage_overwrite() {
+        let id = Uuid::new_v4();
+        save_private(id, "first").unwrap();
+        save_private(id, "second").unwrap();
+        assert_eq!(load_private(id).unwrap(), "second");
+        delete_private(id).unwrap();
+    }
+
+    #[tokio::test]
+    async fn test_swap_success() {
+        let (store, _dir) = test_store();
+        let target_id = Uuid::new_v4();
+
+        // Pre-store target credentials
+        save_private(target_id, "target_blob").unwrap();
+
+        let platform = MockPlatform::new(None);
+        switch(&store, None, target_id, &platform).await.unwrap();
+
+        assert_eq!(platform.get(), Some("target_blob".to_string()));
+        assert_eq!(store.active_cli_uuid().unwrap(), Some(target_id.to_string()));
+
+        delete_private(target_id).unwrap();
+    }
+
+    #[tokio::test]
+    async fn test_swap_saves_outgoing() {
+        let (store, _dir) = test_store();
+        let current_id = Uuid::new_v4();
+        let target_id = Uuid::new_v4();
+
+        // Pre-store target credentials
+        save_private(target_id, "target_blob").unwrap();
+
+        // Platform has current credentials (as if CC refreshed them)
+        let platform = MockPlatform::new(Some("refreshed_current_blob"));
+
+        switch(&store, Some(current_id), target_id, &platform).await.unwrap();
+
+        // Current's credentials should be saved to private storage
+        assert_eq!(load_private(current_id).unwrap(), "refreshed_current_blob");
+        // Target should be in platform
+        assert_eq!(platform.get(), Some("target_blob".to_string()));
+
+        delete_private(current_id).unwrap();
+        delete_private(target_id).unwrap();
+    }
+
+    #[tokio::test]
+    async fn test_swap_rollback_on_write_failure() {
+        let (store, _dir) = test_store();
+        let current_id = Uuid::new_v4();
+        let target_id = Uuid::new_v4();
+
+        // Pre-store both
+        save_private(current_id, "original_current").unwrap();
+        save_private(target_id, "target_blob").unwrap();
+
+        // Platform will fail on write
+        let platform = MockPlatform::failing();
+        // Set initial storage to simulate current CC credentials
+        *platform.storage.lock().unwrap() = Some("cc_current".to_string());
+
+        let result = switch(&store, Some(current_id), target_id, &platform).await;
+        assert!(result.is_err());
+
+        // Current's private storage should be rolled back to original
+        assert_eq!(load_private(current_id).unwrap(), "original_current");
+
+        delete_private(current_id).unwrap();
+        delete_private(target_id).unwrap();
+    }
+
+    #[tokio::test]
+    async fn test_swap_no_target_credentials() {
+        let (store, _dir) = test_store();
+        let target_id = Uuid::new_v4();
+        // Don't pre-store — target has no credentials
+        let platform = MockPlatform::new(None);
+
+        let result = switch(&store, None, target_id, &platform).await;
+        assert!(matches!(result, Err(SwapError::NoStoredCredentials(_))));
+    }
+}

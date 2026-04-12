@@ -133,8 +133,10 @@ fn copy_dir_recursive(src: &Path, dst: &Path) -> std::io::Result<()> {
 }
 
 /// Full Desktop switch: quit → snapshot outgoing → restore target → relaunch.
+/// Updates `has_desktop_profile` and `active_desktop` in the store.
 pub async fn switch(
     platform: &dyn DesktopPlatform,
+    store: &crate::account::AccountStore,
     outgoing_id: Option<Uuid>,
     target_id: Uuid,
     no_launch: bool,
@@ -158,11 +160,15 @@ pub async fn switch(
     if let Some(out_id) = outgoing_id {
         tracing::info!("saving profile for outgoing account...");
         snapshot(&data_dir, out_id, items)?;
+        let _ = store.update_desktop_profile_flag(out_id, true);
     }
 
     // Restore target
     tracing::info!("restoring profile for target account...");
     restore(&data_dir, target_id, items)?;
+
+    // Update active pointer in store (before relaunch so state is consistent)
+    let _ = store.set_active_desktop(target_id);
 
     // Relaunch
     if !no_launch {

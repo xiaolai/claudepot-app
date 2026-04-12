@@ -10,274 +10,45 @@ pub fn list(ctx: &AppContext) -> Result<()> {
 }
 
 pub async fn add(ctx: &AppContext, from_current: bool, from_token: Option<String>) -> Result<()> {
-    if from_current {
-        add_from_current(ctx).await
+    use claudepot_core::services::account_service;
+
+    let result = if from_current {
+        ctx.info("Reading current CC credentials...");
+        ctx.info("Fetching account profile...");
+        account_service::register_from_current(&ctx.store).await?
     } else if let Some(token) = from_token {
-        add_from_token(ctx, &token).await
+        ctx.info("Exchanging refresh token...");
+        ctx.info("Fetching account profile...");
+        account_service::register_from_token(&ctx.store, &token).await?
     } else {
-        add_via_browser(ctx).await
-    }
-}
-
-async fn add_from_current(ctx: &AppContext) -> Result<()> {
-    use claudepot_core::blob::CredentialBlob;
-    use claudepot_core::cli_backend;
-    use claudepot_core::account::Account;
-    use claudepot_core::oauth::profile;
-    use chrono::Utc;
-    use uuid::Uuid;
-
-    ctx.info("Reading current CC credentials...");
-
-    // Read from CC's storage
-    let platform = cli_backend::create_platform();
-    let blob_str = platform.read_default().await?
-        .ok_or_else(|| anyhow::anyhow!(
-            "No CC credentials found. Log in with `claude auth login` first."
-        ))?;
-
-    let blob = CredentialBlob::from_json(&blob_str)?;
-    ctx.info("Fetching account profile...");
-
-    // Call profile API to get email + org info
-    let prof = profile::fetch(&blob.claude_ai_oauth.access_token).await?;
-
-    // Check if already registered
-    if let Some(existing) = ctx.store.find_by_email(&prof.email)? {
-        anyhow::bail!("Already registered: {} (uuid: {})", existing.email, existing.uuid);
-    }
-
-    let account_id = Uuid::new_v4();
-
-    // Save credential to keyring
-    cli_backend::swap::save_private(account_id, &blob_str)?;
-
-    // Insert into account store
-    let account = Account {
-        uuid: account_id,
-        email: prof.email.clone(),
-        org_uuid: Some(prof.org_uuid.clone()),
-        org_name: Some(prof.org_name.clone()),
-        subscription_type: Some(prof.subscription_type.clone()),
-        rate_limit_tier: prof.rate_limit_tier.clone(),
-        created_at: Utc::now(),
-        last_cli_switch: None,
-        last_desktop_switch: None,
-        has_cli_credentials: true,
-        has_desktop_profile: false,
-        is_cli_active: false,
-        is_desktop_active: false,
+        return add_via_browser(ctx).await;
     };
-    ctx.store.insert(&account)?;
 
     if ctx.json {
         println!("{}", serde_json::json!({
             "registered": true,
-            "email": prof.email,
-            "org": prof.org_name,
-            "plan": prof.subscription_type,
-            "uuid": account_id.to_string(),
+            "email": result.email,
+            "org": result.org_name,
+            "plan": result.subscription_type,
+            "uuid": result.uuid.to_string(),
         }));
     } else {
         println!("Registered: {} ({} {})",
-            prof.email,
-            capitalize(&prof.subscription_type),
-            prof.rate_limit_tier.as_deref()
+            result.email,
+            capitalize(&result.subscription_type),
+            result.rate_limit_tier.as_deref()
                 .and_then(|t| t.split('_').last())
                 .unwrap_or("")
         );
     }
-
     Ok(())
 }
 
-pub fn remove(ctx: &AppContext, email_input: &str) -> Result<()> {
-    use claudepot_core::resolve::resolve_email;
-
-    let email = resolve_email(&ctx.store, email_input)
-        .map_err(|e| anyhow::anyhow!("{e}"))?;
-
-    let account = ctx.store.find_by_email(&email)?
-        .ok_or_else(|| anyhow::anyhow!("account not found: {email}"))?;
-
-    if !ctx.yes {
-        eprint!("Remove account \"{email}\"? [y/N] ");
-        let mut input = String::new();
-        std::io::stdin().read_line(&mut input)?;
-        if !input.trim().eq_ignore_ascii_case("y") {
-            eprintln!("Cancelled.");
-            return Ok(());
-        }
-    }
-
-    // Delete CLI credential
-    let _ = claudepot_core::cli_backend::swap::delete_private(account.uuid);
-
-    // Delete Desktop profile snapshot if it exists
-    let profile_dir = claudepot_core::paths::desktop_profile_dir(account.uuid);
-    if profile_dir.exists() {
-        let _ = std::fs::remove_dir_all(&profile_dir);
-        ctx.info("Deleted Desktop profile snapshot.");
-    }
-
-    // Remove from store
-    ctx.store.remove(account.uuid)?;
-
-    if account.is_cli_active {
-        ctx.store.clear_active_cli()?;
-        ctx.info("Note: this was the active CLI account. CLI slot is now empty.");
-    }
-    if account.is_desktop_active {
-        let _ = ctx.store.clear_active_desktop();
-        ctx.info("Note: this was the active Desktop account. Desktop slot is now empty.");
-    }
-
-    ctx.info(&format!("Removed: {email}"));
-    Ok(())
-}
-
-pub async fn inspect(ctx: &AppContext, email_input: &str) -> Result<()> {
-    use claudepot_core::resolve::resolve_email;
-    use claudepot_core::cli_backend::swap::load_private;
-    use claudepot_core::blob::CredentialBlob;
-    use claudepot_core::oauth::usage;
-
-    let email = resolve_email(&ctx.store, email_input)
-        .map_err(|e| anyhow::anyhow!("{e}"))?;
-
-    let account = ctx.store.find_by_email(&email)?
-        .ok_or_else(|| anyhow::anyhow!("account not found: {email}"))?;
-
-    // Try to fetch usage if we have credentials
-    let usage_result = if account.has_cli_credentials {
-        if let Ok(blob_str) = load_private(account.uuid) {
-            if let Ok(blob) = CredentialBlob::from_json(&blob_str) {
-                if !blob.is_expired(0) {
-                    usage::fetch(&blob.claude_ai_oauth.access_token).await.ok()
-                } else {
-                    None
-                }
-            } else { None }
-        } else { None }
-    } else { None };
-
-    // Token health
-    let token_status = if account.has_cli_credentials {
-        if let Ok(blob_str) = load_private(account.uuid) {
-            if let Ok(blob) = CredentialBlob::from_json(&blob_str) {
-                let remaining_mins = (blob.claude_ai_oauth.expires_at - chrono::Utc::now().timestamp_millis()) / 60_000;
-                if remaining_mins > 0 {
-                    format!("valid ({}m remaining)", remaining_mins)
-                } else {
-                    "expired".to_string()
-                }
-            } else { "corrupt blob".to_string() }
-        } else { "missing".to_string() }
-    } else { "no credentials".to_string() };
-
-    if ctx.json {
-        let mut j = serde_json::json!({
-            "uuid": account.uuid.to_string(),
-            "email": account.email,
-            "org_uuid": account.org_uuid,
-            "org_name": account.org_name,
-            "subscription_type": account.subscription_type,
-            "rate_limit_tier": account.rate_limit_tier,
-            "created_at": account.created_at.to_rfc3339(),
-            "cli_active": account.is_cli_active,
-            "desktop_active": account.is_desktop_active,
-            "token_status": token_status,
-        });
-        if let Some(ref u) = usage_result {
-            if let Some(ref fh) = u.five_hour {
-                j["five_hour_pct"] = serde_json::json!(fh.utilization);
-                j["five_hour_resets"] = serde_json::json!(fh.resets_at.to_rfc3339());
-            }
-            if let Some(ref sd) = u.seven_day {
-                j["seven_day_pct"] = serde_json::json!(sd.utilization);
-                j["seven_day_resets"] = serde_json::json!(sd.resets_at.to_rfc3339());
-            }
-        }
-        println!("{}", serde_json::to_string_pretty(&j)?);
-    } else {
-        println!("Account: {}", account.email);
-        println!("  Org:       {}", account.org_name.as_deref().unwrap_or("?"));
-        println!("  Org UUID:  {}", account.org_uuid.as_deref().unwrap_or("?"));
-        println!("  Plan:      {} {}",
-            capitalize(account.subscription_type.as_deref().unwrap_or("?")),
-            account.rate_limit_tier.as_deref()
-                .and_then(|t| t.split('_').last())
-                .unwrap_or("")
-        );
-        println!("  Token:     {}", token_status);
-        println!("  Added:     {}", account.created_at.format("%Y-%m-%d %H:%M"));
-        println!("  CLI:       {}", if account.is_cli_active { "active" } else { "—" });
-        println!("  Desktop:   {}", if account.is_desktop_active { "active" } else if account.has_desktop_profile { "profile stored" } else { "—" });
-
-        if let Some(ref u) = usage_result {
-            if let Some(ref fh) = u.five_hour {
-                println!("  5h usage:  {:.0}% (resets {})", fh.utilization, fh.resets_at.format("%H:%M UTC"));
-            }
-            if let Some(ref sd) = u.seven_day {
-                println!("  7d usage:  {:.0}% (resets {})", sd.utilization, sd.resets_at.format("%b %d"));
-            }
-        } else if account.has_cli_credentials {
-            println!("  Usage:     (could not fetch — token may be expired)");
-        }
-    }
-
-    Ok(())
-}
-
-async fn add_from_token(ctx: &AppContext, refresh_token: &str) -> Result<()> {
-    use claudepot_core::oauth::{profile, refresh};
-    use claudepot_core::cli_backend::swap;
-    use claudepot_core::account::Account;
-    use chrono::Utc;
-    use uuid::Uuid;
-
-    ctx.info("Exchanging refresh token...");
-    let token_resp = refresh::refresh(refresh_token).await
-        .map_err(|e| anyhow::anyhow!("token exchange failed: {e}"))?;
-
-    ctx.info("Fetching account profile...");
-    let prof = profile::fetch(&token_resp.access_token).await?;
-
-    if let Some(existing) = ctx.store.find_by_email(&prof.email)? {
-        anyhow::bail!("Already registered: {} (uuid: {})", existing.email, existing.uuid);
-    }
-
-    let account_id = Uuid::new_v4();
-    let blob_str = refresh::build_blob(&token_resp);
-    swap::save_private(account_id, &blob_str)?;
-
-    let account = Account {
-        uuid: account_id,
-        email: prof.email.clone(),
-        org_uuid: Some(prof.org_uuid),
-        org_name: Some(prof.org_name),
-        subscription_type: Some(prof.subscription_type.clone()),
-        rate_limit_tier: prof.rate_limit_tier.clone(),
-        created_at: Utc::now(),
-        last_cli_switch: None,
-        last_desktop_switch: None,
-        has_cli_credentials: true,
-        has_desktop_profile: false,
-        is_cli_active: false,
-        is_desktop_active: false,
-    };
-    ctx.store.insert(&account)?;
-
-    if ctx.json {
-        println!("{}", serde_json::json!({"registered": true, "email": prof.email}));
-    } else {
-        println!("Registered: {} ({})", prof.email, capitalize(&prof.subscription_type));
-    }
-    Ok(())
-}
-
+/// Browser-based add uses the onboarding scaffold — this stays in CLI
+/// because it requires interactive stdin/stdout for the browser flow.
 async fn add_via_browser(ctx: &AppContext) -> Result<()> {
     use claudepot_core::onboard;
+    use claudepot_core::services::account_service;
     use claudepot_core::oauth::profile;
     use claudepot_core::cli_backend::swap;
     use claudepot_core::account::Account;
@@ -321,7 +92,7 @@ async fn add_via_browser(ctx: &AppContext) -> Result<()> {
         uuid: account_id,
         email: prof.email.clone(),
         org_uuid: Some(prof.org_uuid),
-        org_name: Some(prof.org_name),
+        org_name: Some(prof.org_name.clone()),
         subscription_type: Some(prof.subscription_type.clone()),
         rate_limit_tier: prof.rate_limit_tier.clone(),
         created_at: Utc::now(),
@@ -333,8 +104,6 @@ async fn add_via_browser(ctx: &AppContext) -> Result<()> {
         is_desktop_active: false,
     };
     ctx.store.insert(&account)?;
-
-    // Cleanup temp dir + hashed keychain
     onboard::cleanup(&config_dir).await;
 
     if ctx.json {
@@ -342,6 +111,108 @@ async fn add_via_browser(ctx: &AppContext) -> Result<()> {
     } else {
         println!("Registered: {} ({})", prof.email, capitalize(&prof.subscription_type));
     }
+    Ok(())
+}
+
+pub fn remove(ctx: &AppContext, email_input: &str) -> Result<()> {
+    use claudepot_core::resolve::resolve_email;
+    use claudepot_core::services::account_service;
+
+    let email = resolve_email(&ctx.store, email_input)
+        .map_err(|e| anyhow::anyhow!("{e}"))?;
+
+    let account = ctx.store.find_by_email(&email)?
+        .ok_or_else(|| anyhow::anyhow!("account not found: {email}"))?;
+
+    if !ctx.yes {
+        eprint!("Remove account \"{email}\"? [y/N] ");
+        let mut input = String::new();
+        std::io::stdin().read_line(&mut input)?;
+        if !input.trim().eq_ignore_ascii_case("y") {
+            eprintln!("Cancelled.");
+            return Ok(());
+        }
+    }
+
+    let result = account_service::remove_account(&ctx.store, account.uuid)?;
+
+    if result.had_desktop_profile {
+        ctx.info("Deleted Desktop profile snapshot.");
+    }
+    if result.was_cli_active {
+        ctx.info("Note: this was the active CLI account. CLI slot is now empty.");
+    }
+    if result.was_desktop_active {
+        ctx.info("Note: this was the active Desktop account. Desktop slot is now empty.");
+    }
+    ctx.info(&format!("Removed: {}", result.email));
+    Ok(())
+}
+
+pub async fn inspect(ctx: &AppContext, email_input: &str) -> Result<()> {
+    use claudepot_core::resolve::resolve_email;
+    use claudepot_core::services::account_service;
+
+    let email = resolve_email(&ctx.store, email_input)
+        .map_err(|e| anyhow::anyhow!("{e}"))?;
+
+    let account = ctx.store.find_by_email(&email)?
+        .ok_or_else(|| anyhow::anyhow!("account not found: {email}"))?;
+
+    let health = account_service::token_health(account.uuid, account.has_cli_credentials);
+    let usage_result = account_service::fetch_usage(account.uuid).await;
+
+    if ctx.json {
+        let mut j = serde_json::json!({
+            "uuid": account.uuid.to_string(),
+            "email": account.email,
+            "org_uuid": account.org_uuid,
+            "org_name": account.org_name,
+            "subscription_type": account.subscription_type,
+            "rate_limit_tier": account.rate_limit_tier,
+            "created_at": account.created_at.to_rfc3339(),
+            "cli_active": account.is_cli_active,
+            "desktop_active": account.is_desktop_active,
+            "token_status": health.status,
+        });
+        if let Some(ref u) = usage_result {
+            if let Some(ref fh) = u.five_hour {
+                j["five_hour_pct"] = serde_json::json!(fh.utilization);
+                j["five_hour_resets"] = serde_json::json!(fh.resets_at.to_rfc3339());
+            }
+            if let Some(ref sd) = u.seven_day {
+                j["seven_day_pct"] = serde_json::json!(sd.utilization);
+                j["seven_day_resets"] = serde_json::json!(sd.resets_at.to_rfc3339());
+            }
+        }
+        println!("{}", serde_json::to_string_pretty(&j)?);
+    } else {
+        println!("Account: {}", account.email);
+        println!("  Org:       {}", account.org_name.as_deref().unwrap_or("?"));
+        println!("  Org UUID:  {}", account.org_uuid.as_deref().unwrap_or("?"));
+        println!("  Plan:      {} {}",
+            capitalize(account.subscription_type.as_deref().unwrap_or("?")),
+            account.rate_limit_tier.as_deref()
+                .and_then(|t| t.split('_').last())
+                .unwrap_or("")
+        );
+        println!("  Token:     {}", health.status);
+        println!("  Added:     {}", account.created_at.format("%Y-%m-%d %H:%M"));
+        println!("  CLI:       {}", if account.is_cli_active { "active" } else { "—" });
+        println!("  Desktop:   {}", if account.is_desktop_active { "active" } else if account.has_desktop_profile { "profile stored" } else { "—" });
+
+        if let Some(ref u) = usage_result {
+            if let Some(ref fh) = u.five_hour {
+                println!("  5h usage:  {:.0}% (resets {})", fh.utilization, fh.resets_at.format("%H:%M UTC"));
+            }
+            if let Some(ref sd) = u.seven_day {
+                println!("  7d usage:  {:.0}% (resets {})", sd.utilization, sd.resets_at.format("%b %d"));
+            }
+        } else if account.has_cli_credentials {
+            println!("  Usage:     (could not fetch — token may be expired)");
+        }
+    }
+
     Ok(())
 }
 

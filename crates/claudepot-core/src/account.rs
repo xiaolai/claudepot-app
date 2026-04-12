@@ -177,6 +177,14 @@ impl AccountStore {
         )?;
         Ok(())
     }
+
+    pub fn update_desktop_profile_flag(&self, uuid: Uuid, has: bool) -> SqlResult<()> {
+        self.db.execute(
+            "UPDATE accounts SET has_desktop_profile = ?1 WHERE uuid = ?2",
+            params![has, uuid.to_string()],
+        )?;
+        Ok(())
+    }
 }
 
 const SCHEMA: &str = "
