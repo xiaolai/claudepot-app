@@ -44,11 +44,11 @@ pub async fn run_auth_login() -> Result<PathBuf, OnboardError> {
 }
 
 /// Read the credential blob from a temp config dir (file fallback).
-pub fn read_credentials_from_dir(config_dir: &std::path::Path) -> Result<String, OnboardError> {
+pub async fn read_credentials_from_dir(config_dir: &std::path::Path) -> Result<String, OnboardError> {
     let cred_file = config_dir.join(".credentials.json");
     if cred_file.exists() {
         return std::fs::read_to_string(&cred_file)
-            .map_err(|e| OnboardError::Io(e));
+            .map_err(OnboardError::Io);
     }
 
     // Try the hashed keychain item (macOS)
@@ -57,8 +57,7 @@ pub fn read_credentials_from_dir(config_dir: &std::path::Path) -> Result<String,
         let hash = crate::cli_backend::keychain::hashed_service_name(
             &config_dir.to_string_lossy(),
         );
-        let rt = tokio::runtime::Handle::current();
-        if let Ok(Some(blob)) = rt.block_on(crate::cli_backend::keychain::read(&hash)) {
+        if let Ok(Some(blob)) = crate::cli_backend::keychain::read(&hash).await {
             return Ok(blob);
         }
     }

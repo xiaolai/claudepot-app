@@ -59,8 +59,8 @@ pub async fn fetch(access_token: &str) -> Result<UsageResponse, OAuthError> {
         return Err(OAuthError::RateLimited { retry_after_secs: 60 });
     }
     if !status.is_success() {
-        let body = resp.text().await.unwrap_or_default();
-        return Err(OAuthError::AuthFailed(format!("usage API returned {status}: {body}")));
+        let _ = resp.text().await; // consume without exposing
+        return Err(OAuthError::AuthFailed(format!("usage API returned {status}")));
     }
 
     // Parse typed fields first, then separately parse unknown fields.

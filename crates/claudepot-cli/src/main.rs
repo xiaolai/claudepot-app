@@ -172,7 +172,7 @@ async fn main() -> Result<()> {
             }
         },
         Commands::Desktop { action } => match action {
-            DesktopAction::Status => commands::desktop_ops::status(&ctx)?,
+            DesktopAction::Status => commands::desktop_ops::status(&ctx).await?,
             DesktopAction::Use { email, no_launch } => {
                 commands::desktop_ops::use_account(&ctx, &email, no_launch).await?
             }

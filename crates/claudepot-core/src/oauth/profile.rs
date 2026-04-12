@@ -30,8 +30,8 @@ pub async fn fetch(access_token: &str) -> Result<Profile, OAuthError> {
         return Err(OAuthError::RateLimited { retry_after_secs: 60 });
     }
     if !status.is_success() {
-        let body = resp.text().await.unwrap_or_default();
-        return Err(OAuthError::AuthFailed(format!("profile API returned {status}: {body}")));
+        let _ = resp.text().await; // consume body without exposing it
+        return Err(OAuthError::AuthFailed(format!("profile API returned {status}")));
     }
 
     let body: serde_json::Value = resp.json().await?;
@@ -39,8 +39,13 @@ pub async fn fetch(access_token: &str) -> Result<Profile, OAuthError> {
     let account = &body["account"];
     let org = &body["organization"];
 
+    let email = account["email"].as_str().unwrap_or("");
+    if email.is_empty() {
+        return Err(OAuthError::AuthFailed("profile response missing email field".into()));
+    }
+
     Ok(Profile {
-        email: account["email"].as_str().unwrap_or("").to_string(),
+        email: email.to_string(),
         account_uuid: account["uuid"].as_str().unwrap_or("").to_string(),
         display_name: account["display_name"].as_str().map(String::from),
         org_uuid: org["uuid"].as_str().unwrap_or("").to_string(),

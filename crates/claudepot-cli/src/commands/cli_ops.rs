@@ -91,26 +91,29 @@ pub async fn clear(ctx: &AppContext) -> Result<()> {
 
     let platform = cli_backend::create_platform();
 
-    // Read current to save it back to Claudepot storage first
+    // Save current credentials before clearing — propagate errors (don't silently lose creds)
     if let Some(active_uuid_str) = ctx.store.active_cli_uuid()? {
         if let Ok(uuid) = active_uuid_str.parse::<uuid::Uuid>() {
             if let Ok(Some(blob)) = platform.read_default().await {
-                let _ = cli_backend::swap::save_private(uuid, &blob);
+                cli_backend::swap::save_private(uuid, &blob)
+                    .map_err(|e| anyhow::anyhow!("failed to save credentials before clearing: {e}"))?;
             }
         }
     }
 
-    // Clear CC's credentials
+    // Clear CC's credentials — propagate errors
     #[cfg(target_os = "macos")]
     {
-        let _ = cli_backend::keychain::delete(
-            cli_backend::keychain::DEFAULT_SERVICE
-        ).await;
+        cli_backend::keychain::delete(cli_backend::keychain::DEFAULT_SERVICE)
+            .await
+            .map_err(|e| anyhow::anyhow!("failed to delete keychain item: {e}"))?;
     }
 
-    // Delete the credentials file
     let cred_path = claudepot_core::paths::claude_credentials_file();
-    let _ = std::fs::remove_file(&cred_path);
+    if cred_path.exists() {
+        std::fs::remove_file(&cred_path)
+            .map_err(|e| anyhow::anyhow!("failed to delete credentials file: {e}"))?;
+    }
 
     ctx.store.clear_active_cli()?;
 
@@ -143,6 +146,7 @@ pub async fn run(
     }
 
     if print_token {
+        eprintln!("⚠ WARNING: outputting raw access token. Do not log or share this value.");
         let token = launcher::get_access_token(account.uuid).await
             .map_err(|e| anyhow::anyhow!("{e}"))?;
         println!("{token}");
