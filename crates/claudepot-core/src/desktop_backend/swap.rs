@@ -171,7 +171,10 @@ pub async fn switch(
     if let Some(out_id) = outgoing_id {
         tracing::info!("saving profile for outgoing account...");
         snapshot(&data_dir, out_id, items)?;
-        let _ = store.update_desktop_profile_flag(out_id, true);
+        store.update_desktop_profile_flag(out_id, true)
+            .map_err(|e| DesktopSwapError::Io(
+                std::io::Error::new(std::io::ErrorKind::Other, format!("db update failed: {e}"))
+            ))?;
     }
 
     // Restore target
@@ -179,7 +182,10 @@ pub async fn switch(
     restore(&data_dir, target_id, items)?;
 
     // Update active pointer in store (before relaunch so state is consistent)
-    let _ = store.set_active_desktop(target_id);
+    store.set_active_desktop(target_id)
+        .map_err(|e| DesktopSwapError::Io(
+            std::io::Error::new(std::io::ErrorKind::Other, format!("db update failed: {e}"))
+        ))?;
 
     // Relaunch
     if !no_launch {

@@ -16,7 +16,16 @@ pub async fn add(ctx: &AppContext, from_current: bool, from_token: Option<String
         ctx.info("Reading current CC credentials...");
         ctx.info("Fetching account profile...");
         account_service::register_from_current(&ctx.store).await?
-    } else if let Some(token) = from_token {
+    } else if let Some(token_arg) = from_token {
+        // Read token from stdin if "-" is passed (avoids shell history exposure)
+        let token = if token_arg == "-" {
+            ctx.info("Reading refresh token from stdin...");
+            let mut buf = String::new();
+            std::io::stdin().read_line(&mut buf)?;
+            buf.trim().to_string()
+        } else {
+            token_arg
+        };
         ctx.info("Exchanging refresh token...");
         ctx.info("Fetching account profile...");
         account_service::register_from_token(&ctx.store, &token).await?
@@ -95,19 +104,30 @@ pub fn remove(ctx: &AppContext, email_input: &str) -> Result<()> {
 
     let result = account_service::remove_account(&ctx.store, account.uuid)?;
 
-    if result.had_desktop_profile {
-        ctx.info("Deleted Desktop profile snapshot.");
+    if ctx.json {
+        println!("{}", serde_json::json!({
+            "removed": true,
+            "email": result.email,
+            "was_cli_active": result.was_cli_active,
+            "was_desktop_active": result.was_desktop_active,
+            "had_desktop_profile": result.had_desktop_profile,
+            "warnings": result.warnings,
+        }));
+    } else {
+        if result.had_desktop_profile {
+            ctx.info("Deleted Desktop profile snapshot.");
+        }
+        if result.was_cli_active {
+            ctx.info("Note: this was the active CLI account. CLI slot is now empty.");
+        }
+        if result.was_desktop_active {
+            ctx.info("Note: this was the active Desktop account. Desktop slot is now empty.");
+        }
+        for warning in &result.warnings {
+            eprintln!("Warning: {warning}");
+        }
+        ctx.info(&format!("Removed: {}", result.email));
     }
-    if result.was_cli_active {
-        ctx.info("Note: this was the active CLI account. CLI slot is now empty.");
-    }
-    if result.was_desktop_active {
-        ctx.info("Note: this was the active Desktop account. Desktop slot is now empty.");
-    }
-    for warning in &result.warnings {
-        eprintln!("Warning: {warning}");
-    }
-    ctx.info(&format!("Removed: {}", result.email));
     Ok(())
 }
 

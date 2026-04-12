@@ -144,9 +144,15 @@ pub async fn switch(
 
     // Update active pointer in account store.
     tracing::debug!(target = %target_id, "updating active CLI pointer");
-    store
-        .set_active_cli(target_id)
-        .map_err(|e| SwapError::WriteFailed(format!("db update failed: {e}")))?;
+    if let Err(e) = store.set_active_cli(target_id) {
+        // Best-effort rollback: restore previous CC credentials
+        if let Some(cur) = current_id {
+            if let Ok(prev_blob) = load_private(cur) {
+                let _ = platform.write_default(&prev_blob).await;
+            }
+        }
+        return Err(SwapError::WriteFailed(format!("db update failed: {e}")));
+    }
 
     tracing::info!(target = %target_id, "swap complete");
     // _lock dropped here — releases the file lock.
