@@ -59,12 +59,12 @@ pub async fn switch(
 
 // --- Private storage helpers using `keyring` crate ---
 
-fn private_entry(account_id: Uuid) -> keyring::Entry {
+pub fn private_entry(account_id: Uuid) -> keyring::Entry {
     keyring::Entry::new("com.claudepot.credentials", &account_id.to_string())
         .expect("keyring entry creation failed")
 }
 
-fn load_private(account_id: Uuid) -> Result<String, SwapError> {
+pub fn load_private(account_id: Uuid) -> Result<String, SwapError> {
     private_entry(account_id)
         .get_password()
         .map_err(|_| SwapError::NoStoredCredentials(account_id))
@@ -74,13 +74,13 @@ fn load_private_opt(account_id: Uuid) -> Option<String> {
     private_entry(account_id).get_password().ok()
 }
 
-fn save_private(account_id: Uuid, blob: &str) -> Result<(), SwapError> {
+pub fn save_private(account_id: Uuid, blob: &str) -> Result<(), SwapError> {
     private_entry(account_id)
         .set_password(blob)
         .map_err(|e| SwapError::KeychainError(format!("keyring set failed: {e}")))
 }
 
-fn delete_private(account_id: Uuid) -> Result<(), SwapError> {
+pub fn delete_private(account_id: Uuid) -> Result<(), SwapError> {
     let _ = private_entry(account_id).delete_credential();
     Ok(())
 }
