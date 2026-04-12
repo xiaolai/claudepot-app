@@ -124,10 +124,38 @@ pub async fn clear(ctx: &AppContext) -> Result<()> {
 }
 
 pub async fn run(
-    _ctx: &AppContext,
-    _email_input: &str,
-    _print_token: bool,
-    _args: &[String],
+    ctx: &AppContext,
+    email_input: &str,
+    print_token: bool,
+    args: &[String],
 ) -> Result<()> {
-    anyhow::bail!("cli run not yet implemented (Step 6)")
+    use claudepot_core::resolve::resolve_email;
+    use claudepot_core::launcher;
+
+    let email = resolve_email(&ctx.store, email_input)
+        .map_err(|e| anyhow::anyhow!("{e}"))?;
+
+    let account = ctx.store.find_by_email(&email)?
+        .ok_or_else(|| anyhow::anyhow!("account not found: {email}"))?;
+
+    if !account.has_cli_credentials {
+        anyhow::bail!("no credentials stored for {email}");
+    }
+
+    if print_token {
+        let token = launcher::get_access_token(account.uuid).await
+            .map_err(|e| anyhow::anyhow!("{e}"))?;
+        println!("{token}");
+        return Ok(());
+    }
+
+    if args.is_empty() {
+        anyhow::bail!("no command specified. Usage: claudepot cli run <email> [--] <cmd...>");
+    }
+
+    ctx.info(&format!("Running as {} (Mode D)...", email));
+    let exit_code = launcher::run(account.uuid, args).await
+        .map_err(|e| anyhow::anyhow!("{e}"))?;
+
+    std::process::exit(exit_code);
 }
