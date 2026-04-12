@@ -125,8 +125,11 @@ pub fn remove(ctx: &AppContext, email_input: &str) -> Result<()> {
     Ok(())
 }
 
-pub fn inspect(ctx: &AppContext, email_input: &str) -> Result<()> {
+pub async fn inspect(ctx: &AppContext, email_input: &str) -> Result<()> {
     use claudepot_core::resolve::resolve_email;
+    use claudepot_core::cli_backend::swap::load_private;
+    use claudepot_core::blob::CredentialBlob;
+    use claudepot_core::oauth::usage;
 
     let email = resolve_email(&ctx.store, email_input)
         .map_err(|e| anyhow::anyhow!("{e}"))?;
@@ -134,8 +137,35 @@ pub fn inspect(ctx: &AppContext, email_input: &str) -> Result<()> {
     let account = ctx.store.find_by_email(&email)?
         .ok_or_else(|| anyhow::anyhow!("account not found: {email}"))?;
 
+    // Try to fetch usage if we have credentials
+    let usage_result = if account.has_cli_credentials {
+        if let Ok(blob_str) = load_private(account.uuid) {
+            if let Ok(blob) = CredentialBlob::from_json(&blob_str) {
+                if !blob.is_expired(0) {
+                    usage::fetch(&blob.claude_ai_oauth.access_token).await.ok()
+                } else {
+                    None
+                }
+            } else { None }
+        } else { None }
+    } else { None };
+
+    // Token health
+    let token_status = if account.has_cli_credentials {
+        if let Ok(blob_str) = load_private(account.uuid) {
+            if let Ok(blob) = CredentialBlob::from_json(&blob_str) {
+                let remaining_mins = (blob.claude_ai_oauth.expires_at - chrono::Utc::now().timestamp_millis()) / 60_000;
+                if remaining_mins > 0 {
+                    format!("valid ({}m remaining)", remaining_mins)
+                } else {
+                    "expired".to_string()
+                }
+            } else { "corrupt blob".to_string() }
+        } else { "missing".to_string() }
+    } else { "no credentials".to_string() };
+
     if ctx.json {
-        println!("{}", serde_json::json!({
+        let mut j = serde_json::json!({
             "uuid": account.uuid.to_string(),
             "email": account.email,
             "org_uuid": account.org_uuid,
@@ -145,9 +175,19 @@ pub fn inspect(ctx: &AppContext, email_input: &str) -> Result<()> {
             "created_at": account.created_at.to_rfc3339(),
             "cli_active": account.is_cli_active,
             "desktop_active": account.is_desktop_active,
-            "has_cli_credentials": account.has_cli_credentials,
-            "has_desktop_profile": account.has_desktop_profile,
-        }));
+            "token_status": token_status,
+        });
+        if let Some(ref u) = usage_result {
+            if let Some(ref fh) = u.five_hour {
+                j["five_hour_pct"] = serde_json::json!(fh.utilization);
+                j["five_hour_resets"] = serde_json::json!(fh.resets_at.to_rfc3339());
+            }
+            if let Some(ref sd) = u.seven_day {
+                j["seven_day_pct"] = serde_json::json!(sd.utilization);
+                j["seven_day_resets"] = serde_json::json!(sd.resets_at.to_rfc3339());
+            }
+        }
+        println!("{}", serde_json::to_string_pretty(&j)?);
     } else {
         println!("Account: {}", account.email);
         println!("  Org:       {}", account.org_name.as_deref().unwrap_or("?"));
@@ -158,9 +198,21 @@ pub fn inspect(ctx: &AppContext, email_input: &str) -> Result<()> {
                 .and_then(|t| t.split('_').last())
                 .unwrap_or("")
         );
+        println!("  Token:     {}", token_status);
         println!("  Added:     {}", account.created_at.format("%Y-%m-%d %H:%M"));
         println!("  CLI:       {}", if account.is_cli_active { "active" } else { "—" });
         println!("  Desktop:   {}", if account.is_desktop_active { "active" } else if account.has_desktop_profile { "profile stored" } else { "—" });
+
+        if let Some(ref u) = usage_result {
+            if let Some(ref fh) = u.five_hour {
+                println!("  5h usage:  {:.0}% (resets {})", fh.utilization, fh.resets_at.format("%H:%M UTC"));
+            }
+            if let Some(ref sd) = u.seven_day {
+                println!("  7d usage:  {:.0}% (resets {})", sd.utilization, sd.resets_at.format("%b %d"));
+            }
+        } else if account.has_cli_credentials {
+            println!("  Usage:     (could not fetch — token may be expired)");
+        }
     }
 
     Ok(())
