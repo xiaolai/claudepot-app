@@ -26,3 +26,4 @@ Cargo.lock
 *.njsproj
 *.sln
 *.sw?
+typescript
