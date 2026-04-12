@@ -161,7 +161,7 @@ async fn main() -> Result<()> {
                 commands::account::add(&ctx, from_current, from_token).await?
             }
             AccountAction::Remove { email } => commands::account::remove(&ctx, &email)?,
-            AccountAction::Inspect { email } => commands::account::inspect(&ctx, &email)?,
+            AccountAction::Inspect { email } => commands::account::inspect(&ctx, &email).await?,
         },
         Commands::Cli { action } => match action {
             CliAction::Status => commands::cli_ops::status(&ctx)?,
