@@ -11,7 +11,7 @@ use tokio::io::AsyncWriteExt;
 
 const SECURITY_BIN: &str = "/usr/bin/security";
 const TIMEOUT: Duration = Duration::from_secs(5);
-const DEFAULT_SERVICE: &str = "Claude Code-credentials";
+pub const DEFAULT_SERVICE: &str = "Claude Code-credentials";
 
 /// Compute the hashed Keychain service name for a given config dir.
 /// Matches CC's `getMacOsKeychainStorageServiceName()`.

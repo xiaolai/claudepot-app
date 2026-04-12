@@ -1,12 +1,11 @@
 use chrono::{DateTime, Utc};
-use rusqlite::{params, Connection, Result as SqlResult};
+use rusqlite::{params, Connection, OptionalExtension, Result as SqlResult};
 use uuid::Uuid;
 
 #[derive(Debug, Clone)]
 pub struct Account {
     pub uuid: Uuid,
-    pub display_name: String,
-    pub email: Option<String>,
+    pub email: String,
     pub org_uuid: Option<String>,
     pub org_name: Option<String>,
     pub subscription_type: Option<String>,
@@ -16,6 +15,10 @@ pub struct Account {
     pub last_desktop_switch: Option<DateTime<Utc>>,
     pub has_cli_credentials: bool,
     pub has_desktop_profile: bool,
+    /// Computed: is this the active CLI account?
+    pub is_cli_active: bool,
+    /// Computed: is this the active Desktop account?
+    pub is_desktop_active: bool,
 }
 
 pub struct AccountStore {
@@ -24,52 +27,69 @@ pub struct AccountStore {
 
 impl AccountStore {
     pub fn open(path: &std::path::Path) -> SqlResult<Self> {
-        std::fs::create_dir_all(path.parent().unwrap_or(path))
-            .map_err(|e| rusqlite::Error::ToSqlConversionFailure(Box::new(e)))?;
+        if let Some(parent) = path.parent() {
+            std::fs::create_dir_all(parent)
+                .map_err(|e| rusqlite::Error::ToSqlConversionFailure(Box::new(e)))?;
+        }
         let db = Connection::open(path)?;
         db.execute_batch(SCHEMA)?;
         Ok(Self { db })
     }
 
     pub fn list(&self) -> SqlResult<Vec<Account>> {
+        let active_cli = self.active_cli_uuid()?;
+        let active_desktop = self.active_desktop_uuid()?;
+
         let mut stmt = self.db.prepare(
-            "SELECT uuid, display_name, email, org_uuid, org_name, \
+            "SELECT uuid, email, org_uuid, org_name, \
              subscription_type, rate_limit_tier, created_at, \
              last_cli_switch, last_desktop_switch, \
              has_cli_credentials, has_desktop_profile \
-             FROM accounts ORDER BY display_name",
+             FROM accounts ORDER BY email",
         )?;
         let rows = stmt.query_map([], |row| {
+            let uuid_str: String = row.get(0)?;
+            let uuid: Uuid = uuid_str.parse().unwrap_or_default();
             Ok(Account {
-                uuid: row.get::<_, String>(0)?.parse().unwrap_or_default(),
-                display_name: row.get(1)?,
-                email: row.get(2)?,
-                org_uuid: row.get(3)?,
-                org_name: row.get(4)?,
-                subscription_type: row.get(5)?,
-                rate_limit_tier: row.get(6)?,
+                uuid,
+                email: row.get(1)?,
+                org_uuid: row.get(2)?,
+                org_name: row.get(3)?,
+                subscription_type: row.get(4)?,
+                rate_limit_tier: row.get(5)?,
                 created_at: row
-                    .get::<_, String>(7)?
+                    .get::<_, String>(6)?
                     .parse()
                     .unwrap_or_default(),
-                last_cli_switch: row.get::<_, Option<String>>(8)?.and_then(|s| s.parse().ok()),
-                last_desktop_switch: row.get::<_, Option<String>>(9)?.and_then(|s| s.parse().ok()),
-                has_cli_credentials: row.get(10)?,
-                has_desktop_profile: row.get(11)?,
+                last_cli_switch: row.get::<_, Option<String>>(7)?.and_then(|s| s.parse().ok()),
+                last_desktop_switch: row.get::<_, Option<String>>(8)?.and_then(|s| s.parse().ok()),
+                has_cli_credentials: row.get(9)?,
+                has_desktop_profile: row.get(10)?,
+                is_cli_active: active_cli.as_ref() == Some(&uuid_str),
+                is_desktop_active: active_desktop.as_ref() == Some(&uuid_str),
             })
         })?;
         rows.collect()
     }
 
+    pub fn find_by_email(&self, email: &str) -> SqlResult<Option<Account>> {
+        let accounts = self.list()?;
+        Ok(accounts.into_iter().find(|a| a.email == email))
+    }
+
+    pub fn find_by_uuid(&self, uuid: Uuid) -> SqlResult<Option<Account>> {
+        let accounts = self.list()?;
+        Ok(accounts.into_iter().find(|a| a.uuid == uuid))
+    }
+
     pub fn insert(&self, account: &Account) -> SqlResult<()> {
         self.db.execute(
-            "INSERT INTO accounts (uuid, display_name, email, org_uuid, org_name, \
+            "INSERT INTO accounts (uuid, email, org_uuid, org_name, \
              subscription_type, rate_limit_tier, created_at, \
              has_cli_credentials, has_desktop_profile) \
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
             params![
                 account.uuid.to_string(),
-                account.display_name,
                 account.email,
                 account.org_uuid,
                 account.org_name,
@@ -89,7 +109,7 @@ impl AccountStore {
         Ok(())
     }
 
-    pub fn active_cli(&self) -> SqlResult<Option<String>> {
+    pub fn active_cli_uuid(&self) -> SqlResult<Option<String>> {
         self.db
             .query_row("SELECT value FROM state WHERE key = 'active_cli'", [], |r| {
                 r.get(0)
@@ -109,7 +129,12 @@ impl AccountStore {
         Ok(())
     }
 
-    pub fn active_desktop(&self) -> SqlResult<Option<String>> {
+    pub fn clear_active_cli(&self) -> SqlResult<()> {
+        self.db.execute("DELETE FROM state WHERE key = 'active_cli'", [])?;
+        Ok(())
+    }
+
+    pub fn active_desktop_uuid(&self) -> SqlResult<Option<String>> {
         self.db
             .query_row(
                 "SELECT value FROM state WHERE key = 'active_desktop'",
@@ -130,15 +155,20 @@ impl AccountStore {
         )?;
         Ok(())
     }
-}
 
-use rusqlite::OptionalExtension;
+    pub fn update_credentials_flag(&self, uuid: Uuid, has: bool) -> SqlResult<()> {
+        self.db.execute(
+            "UPDATE accounts SET has_cli_credentials = ?1 WHERE uuid = ?2",
+            params![has, uuid.to_string()],
+        )?;
+        Ok(())
+    }
+}
 
 const SCHEMA: &str = "
 CREATE TABLE IF NOT EXISTS accounts (
     uuid TEXT PRIMARY KEY,
-    display_name TEXT NOT NULL,
-    email TEXT,
+    email TEXT NOT NULL UNIQUE,
     org_uuid TEXT,
     org_name TEXT,
     subscription_type TEXT,
