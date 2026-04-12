@@ -225,6 +225,8 @@ mod tests {
         }
     }
 
+    use crate::testing::{DATA_DIR_LOCK, setup_test_data_dir};
+
     fn test_store() -> (AccountStore, tempfile::TempDir) {
         let dir = tempfile::tempdir().unwrap();
         let db = dir.path().join("test.db");
@@ -234,6 +236,8 @@ mod tests {
 
     #[test]
     fn test_private_storage_roundtrip() {
+        let _lock = crate::testing::lock_data_dir();
+        let _env = setup_test_data_dir();
         let id = Uuid::new_v4();
         let blob = r#"{"test":"data"}"#;
 
@@ -259,6 +263,8 @@ mod tests {
 
     #[test]
     fn test_private_storage_missing() {
+        let _lock = crate::testing::lock_data_dir();
+        let _env = setup_test_data_dir();
         let id = Uuid::new_v4();
         assert!(matches!(
             load_private(id),
@@ -268,6 +274,8 @@ mod tests {
 
     #[test]
     fn test_private_storage_overwrite() {
+        let _lock = crate::testing::lock_data_dir();
+        let _env = setup_test_data_dir();
         let id = Uuid::new_v4();
         save_private(id, "first").unwrap();
         save_private(id, "second").unwrap();
@@ -277,6 +285,8 @@ mod tests {
 
     #[tokio::test]
     async fn test_swap_success() {
+        let _lock = crate::testing::lock_data_dir();
+        let _env = setup_test_data_dir();
         let (store, _dir) = test_store();
         let target_id = Uuid::new_v4();
 
@@ -294,6 +304,8 @@ mod tests {
 
     #[tokio::test]
     async fn test_swap_saves_outgoing() {
+        let _lock = crate::testing::lock_data_dir();
+        let _env = setup_test_data_dir();
         let (store, _dir) = test_store();
         let current_id = Uuid::new_v4();
         let target_id = Uuid::new_v4();
@@ -317,6 +329,8 @@ mod tests {
 
     #[tokio::test]
     async fn test_swap_rollback_on_write_failure() {
+        let _lock = crate::testing::lock_data_dir();
+        let _env = setup_test_data_dir();
         let (store, _dir) = test_store();
         let current_id = Uuid::new_v4();
         let target_id = Uuid::new_v4();
@@ -342,6 +356,8 @@ mod tests {
 
     #[tokio::test]
     async fn test_swap_no_target_credentials() {
+        let _lock = crate::testing::lock_data_dir();
+        let _env = setup_test_data_dir();
         let (store, _dir) = test_store();
         let target_id = Uuid::new_v4();
         // Don't pre-store — target has no credentials
@@ -349,5 +365,103 @@ mod tests {
 
         let result = switch(&store, None, target_id, &platform).await;
         assert!(matches!(result, Err(SwapError::NoStoredCredentials(_))));
+    }
+
+    #[tokio::test]
+    async fn test_swap_db_pointer_matches_after_success() {
+        let _lock = crate::testing::lock_data_dir();
+        let _env = setup_test_data_dir();
+        let (store, _dir) = test_store();
+        let target_id = Uuid::new_v4();
+        save_private(target_id, "blob").unwrap();
+
+        let platform = MockPlatform::new(None);
+        switch(&store, None, target_id, &platform).await.unwrap();
+
+        // DB active pointer must match target
+        assert_eq!(store.active_cli_uuid().unwrap(), Some(target_id.to_string()));
+        delete_private(target_id).unwrap();
+    }
+
+    #[tokio::test]
+    async fn test_swap_db_not_updated_on_write_failure() {
+        let _lock = crate::testing::lock_data_dir();
+        let _env = setup_test_data_dir();
+        let (store, _dir) = test_store();
+        let current_id = Uuid::new_v4();
+        let target_id = Uuid::new_v4();
+        save_private(target_id, "target").unwrap();
+
+        // Set initial active to current
+        store.set_active_cli(current_id).unwrap();
+
+        let platform = MockPlatform::failing();
+        *platform.storage.lock().unwrap() = Some("cc".to_string());
+
+        let result = switch(&store, Some(current_id), target_id, &platform).await;
+        assert!(result.is_err());
+
+        // DB should still point to current, NOT target
+        assert_eq!(store.active_cli_uuid().unwrap(), Some(current_id.to_string()));
+
+        delete_private(current_id).unwrap();
+        delete_private(target_id).unwrap();
+    }
+
+    #[tokio::test]
+    async fn test_swap_rollback_deletes_when_no_previous() {
+        let _lock = crate::testing::lock_data_dir();
+        let _env = setup_test_data_dir();
+        let (store, _dir) = test_store();
+        let current_id = Uuid::new_v4();
+        let target_id = Uuid::new_v4();
+        // current has NO prior private storage
+        save_private(target_id, "target").unwrap();
+
+        let platform = MockPlatform::failing();
+        *platform.storage.lock().unwrap() = Some("cc_blob".to_string());
+
+        let result = switch(&store, Some(current_id), target_id, &platform).await;
+        assert!(result.is_err());
+
+        // Rollback should have deleted the private storage that was created during swap
+        // (since there was no previous blob to restore to)
+        assert!(load_private(current_id).is_err());
+
+        delete_private(target_id).unwrap();
+    }
+
+    #[tokio::test]
+    async fn test_swap_target_load_fails_before_any_mutation() {
+        let _lock = crate::testing::lock_data_dir();
+        let _env = setup_test_data_dir();
+        let (store, _dir) = test_store();
+        let target_id = Uuid::new_v4();
+        // Target has no stored credentials — should fail immediately
+
+        // Platform tracks whether read_default was ever called
+        let platform = MockPlatform::new(Some("should-not-be-read"));
+
+        let result = switch(&store, None, target_id, &platform).await;
+        assert!(result.is_err());
+
+        // Platform storage should be untouched (read_default never called for write path)
+        assert_eq!(platform.get(), Some("should-not-be-read".to_string()));
+    }
+
+    #[tokio::test]
+    async fn test_swap_current_none_writes_directly() {
+        let _lock = crate::testing::lock_data_dir();
+        let _env = setup_test_data_dir();
+        let (store, _dir) = test_store();
+        let target_id = Uuid::new_v4();
+        save_private(target_id, "direct_blob").unwrap();
+
+        let platform = MockPlatform::new(None);
+        switch(&store, None, target_id, &platform).await.unwrap();
+
+        // Target written directly, no outgoing save
+        assert_eq!(platform.get(), Some("direct_blob".to_string()));
+        delete_private(target_id).unwrap();
     }
 }
