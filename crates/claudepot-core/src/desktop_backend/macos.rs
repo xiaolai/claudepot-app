@@ -27,7 +27,7 @@ pub struct MacosDesktop;
 #[async_trait::async_trait]
 impl super::DesktopPlatform for MacosDesktop {
     fn data_dir(&self) -> Option<PathBuf> {
-        Some(dirs::data_dir().expect("no data dir").join("Claude"))
+        dirs::data_dir().map(|d| d.join("Claude"))
     }
 
     fn session_items(&self) -> &[&str] {

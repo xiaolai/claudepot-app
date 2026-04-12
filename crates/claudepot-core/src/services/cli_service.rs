@@ -2,7 +2,6 @@
 
 use crate::account::AccountStore;
 use crate::cli_backend;
-use crate::error::SwapError;
 
 /// Clear CC credentials: save outgoing to Claudepot storage, then remove from CC.
 pub async fn clear_credentials(store: &AccountStore) -> Result<(), ClearError> {
