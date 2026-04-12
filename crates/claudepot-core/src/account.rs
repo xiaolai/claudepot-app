@@ -32,7 +32,25 @@ impl AccountStore {
                 .map_err(|e| rusqlite::Error::ToSqlConversionFailure(Box::new(e)))?;
         }
         let db = Connection::open(path)?;
+        db.execute_batch("PRAGMA journal_mode=WAL;")?;
         db.execute_batch(SCHEMA)?;
+
+        // Set 0600 permissions on the DB file (contains account metadata)
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let _ = std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o600));
+            // Also secure the WAL and SHM files if they exist
+            let wal = path.with_extension("db-wal");
+            let shm = path.with_extension("db-shm");
+            if wal.exists() {
+                let _ = std::fs::set_permissions(&wal, std::fs::Permissions::from_mode(0o600));
+            }
+            if shm.exists() {
+                let _ = std::fs::set_permissions(&shm, std::fs::Permissions::from_mode(0o600));
+            }
+        }
+
         Ok(Self { db })
     }
 

@@ -5,8 +5,48 @@ use crate::account::AccountStore;
 use crate::error::SwapError;
 use super::CliPlatform;
 use uuid::Uuid;
+use std::fs;
+
+/// Acquire an exclusive file lock for swap operations.
+/// Returns the locked file handle — lock is released when dropped.
+fn acquire_swap_lock() -> Result<fs::File, SwapError> {
+    let lock_path = crate::paths::claudepot_data_dir().join(".swap.lock");
+    if let Some(parent) = lock_path.parent() {
+        fs::create_dir_all(parent)?;
+    }
+    let file = fs::OpenOptions::new()
+        .create(true)
+        .write(true)
+        .truncate(false)
+        .open(&lock_path)?;
+
+    #[cfg(unix)]
+    {
+        use std::os::unix::io::AsRawFd;
+        let fd = file.as_raw_fd();
+        let ret = unsafe { libc::flock(fd, libc::LOCK_EX | libc::LOCK_NB) };
+        if ret != 0 {
+            let err = std::io::Error::last_os_error();
+            if err.raw_os_error() == Some(libc::EWOULDBLOCK) {
+                return Err(SwapError::WriteFailed(
+                    "another claudepot swap is in progress".into(),
+                ));
+            }
+            return Err(SwapError::FileError(err));
+        }
+    }
+    #[cfg(windows)]
+    {
+        // On Windows, opening with write + no sharing provides exclusion.
+        // The OpenOptions above already provide this behavior.
+    }
+
+    Ok(file)
+}
 
 /// Swap the active CLI account from `current_id` to `target_id`.
+///
+/// Acquires an exclusive file lock to prevent concurrent swaps.
 ///
 /// 1. Read the current blob from CC storage (may have been refreshed).
 /// 2. Save outgoing blob to Claudepot private storage.
@@ -19,6 +59,9 @@ pub async fn switch(
     target_id: Uuid,
     platform: &dyn CliPlatform,
 ) -> Result<(), SwapError> {
+    // Acquire exclusive lock — prevents concurrent swaps.
+    let _lock = acquire_swap_lock()?;
+
     // Load target blob from Claudepot private storage first.
     // If it doesn't exist, fail before touching anything.
     let target_blob = load_private(target_id)?;
@@ -54,6 +97,7 @@ pub async fn switch(
         .set_active_cli(target_id)
         .map_err(|e| SwapError::WriteFailed(format!("db update failed: {e}")))?;
 
+    // _lock dropped here — releases the file lock.
     Ok(())
 }
 

@@ -296,8 +296,8 @@ pub fn move_project(args: &MoveArgs) -> Result<MoveResult, ProjectError> {
 
         match fs::rename(&old_norm, &new_norm) {
             Ok(()) => {}
-            // EXDEV = 18 on all Unix platforms
-            Err(e) if e.raw_os_error() == Some(18) => {
+            #[cfg(unix)]
+            Err(e) if e.raw_os_error() == Some(libc::EXDEV) => {
                 copy_dir_recursive(Path::new(&old_norm), Path::new(&new_norm))?;
                 fs::remove_dir_all(&old_norm).map_err(ProjectError::Io)?;
             }
