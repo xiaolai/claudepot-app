@@ -35,12 +35,16 @@ impl super::DesktopPlatform for MacosDesktop {
     }
 
     async fn is_running(&self) -> bool {
-        let mut sys = sysinfo::System::new();
-        sys.refresh_processes(sysinfo::ProcessesToUpdate::All, true);
-        sys.processes().values().any(|p| {
-            let exe = p.exe().map(|e| e.to_string_lossy().to_string()).unwrap_or_default();
-            exe.contains("/Applications/Claude.app/")
-        })
+        // Use pgrep instead of sysinfo — sysinfo's exe() returns None
+        // for some processes on macOS when running over SSH.
+        tokio::process::Command::new("pgrep")
+            .args(["-f", "/Applications/Claude.app/"])
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .status()
+            .await
+            .map(|s| s.success())
+            .unwrap_or(false)
     }
 
     async fn quit(&self) -> Result<(), DesktopSwapError> {
