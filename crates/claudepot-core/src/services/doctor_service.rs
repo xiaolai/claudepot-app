@@ -1,8 +1,6 @@
 //! Doctor health checks — core business logic.
 
 use crate::account::AccountStore;
-use crate::blob::CredentialBlob;
-use crate::cli_backend::swap::load_private;
 use std::path::PathBuf;
 
 #[derive(Debug)]
@@ -75,7 +73,6 @@ pub async fn check_health(store: &AccountStore) -> HealthReport {
     }).collect();
 
     // Desktop profiles
-    let profile_base = data_dir.join("desktop");
     let desktop_profiles: Vec<ProfileInfo> = accounts.iter().map(|a| {
         let p = crate::paths::desktop_profile_dir(a.uuid);
         ProfileInfo {

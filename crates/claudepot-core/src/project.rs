@@ -391,7 +391,9 @@ pub fn clean_orphans(
     if !dry_run {
         for orphan in &orphans {
             let dir = config_dir.join("projects").join(&orphan.sanitized_name);
-            if dir.exists() {
+            // Re-verify orphan status to guard against TOCTOU:
+            // the source path could have been created between the scan and now.
+            if dir.exists() && !Path::new(&orphan.original_path).exists() {
                 result.bytes_freed += orphan.total_size_bytes;
                 fs::remove_dir_all(&dir).map_err(ProjectError::Io)?;
                 result.orphans_removed += 1;
@@ -712,8 +714,14 @@ fn estimate_history_matches(config_dir: &Path, old_path: &str) -> usize {
     if !history_path.exists() {
         return 0;
     }
-    fs::read_to_string(&history_path)
-        .map(|content| content.lines().filter(|l| l.contains(old_path)).count())
+    fs::File::open(&history_path)
+        .map(|f| {
+            BufReader::new(f)
+                .lines()
+                .filter_map(|l| l.ok())
+                .filter(|l| l.contains(old_path))
+                .count()
+        })
         .unwrap_or(0)
 }
 
@@ -978,6 +986,11 @@ mod tests {
         let new_san = sanitize_path(&dst.to_string_lossy());
         assert!(projects_dir.join(&new_san).exists());
         assert!(!projects_dir.join(&old_san).exists());
+
+        // Verify session file content survived the move
+        let moved_session = projects_dir.join(&new_san).join("session.jsonl");
+        assert!(moved_session.exists());
+        assert_eq!(fs::read_to_string(moved_session).unwrap(), "{}");
     }
 
     #[test]
