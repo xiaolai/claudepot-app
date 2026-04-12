@@ -4,7 +4,11 @@ use std::path::PathBuf;
 pub fn claude_config_dir() -> PathBuf {
     std::env::var_os("CLAUDE_CONFIG_DIR")
         .map(PathBuf::from)
-        .unwrap_or_else(|| dirs::home_dir().expect("no home dir").join(".claude"))
+        .unwrap_or_else(|| {
+            dirs::home_dir()
+                .unwrap_or_else(|| PathBuf::from("/tmp"))
+                .join(".claude")
+        })
 }
 
 /// CC CLI credentials file path.
@@ -16,11 +20,10 @@ pub fn claude_credentials_file() -> PathBuf {
 pub fn claude_desktop_data_dir() -> Option<PathBuf> {
     #[cfg(target_os = "macos")]
     {
-        Some(dirs::data_dir().expect("no data dir").join("Claude"))
+        dirs::data_dir().map(|d| d.join("Claude"))
     }
     #[cfg(target_os = "windows")]
     {
-        // MSIX-virtualized path — NOT %APPDATA%\Claude
         dirs::data_local_dir().map(|d| {
             d.join("Packages")
                 .join("Claude_pzs8sxrjxfjjc")
@@ -38,7 +41,11 @@ pub fn claude_desktop_data_dir() -> Option<PathBuf> {
 /// Claudepot's own private data root.
 pub fn claudepot_data_dir() -> PathBuf {
     dirs::data_dir()
-        .expect("no data dir")
+        .unwrap_or_else(|| {
+            dirs::home_dir()
+                .unwrap_or_else(|| PathBuf::from("/tmp"))
+                .join(".local/share")
+        })
         .join("Claudepot")
 }
 

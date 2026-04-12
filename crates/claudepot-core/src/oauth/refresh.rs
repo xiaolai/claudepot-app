@@ -43,8 +43,8 @@ pub async fn refresh(refresh_token: &str) -> Result<TokenResponse, OAuthError> {
         return Err(OAuthError::RateLimited { retry_after_secs: retry_after });
     }
     if !status.is_success() {
-        let body = resp.text().await.unwrap_or_default();
-        return Err(OAuthError::RefreshFailed(format!("{status}: {body}")));
+        let _ = resp.text().await; // consume without exposing
+        return Err(OAuthError::RefreshFailed(format!("token endpoint returned {status}")));
     }
 
     let token_resp: TokenResponse = resp.json().await?;

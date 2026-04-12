@@ -39,8 +39,6 @@ async-trait = "0.1"
 # File operations
 tempfile = "3"
 filetime = "0.2"
-notify = "7"
-notify-debouncer-full = "0.4"
 
 # System info
 whoami = "1"
