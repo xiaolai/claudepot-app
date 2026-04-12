@@ -4,17 +4,18 @@
 //! account's stored credential. Zero disk state mutation.
 
 use crate::blob::CredentialBlob;
-use crate::cli_backend::swap::load_private;
-use crate::error::SwapError;
+use crate::cli_backend::swap;
+use crate::error::LauncherError;
 use crate::oauth::refresh;
 
 use uuid::Uuid;
 
 /// Get a fresh access token for an account, refreshing if expired.
-pub async fn get_access_token(account_id: Uuid) -> Result<String, SwapError> {
-    let blob_str = load_private(account_id)?;
+pub async fn get_access_token(account_id: Uuid) -> Result<String, LauncherError> {
+    let blob_str = swap::load_private(account_id)
+        .map_err(|_| LauncherError::NoStoredCredentials(account_id))?;
     let blob = CredentialBlob::from_json(&blob_str)
-        .map_err(|e| SwapError::WriteFailed(format!("corrupt credential blob: {e}")))?;
+        .map_err(|e| LauncherError::CorruptBlob(e.to_string()))?;
 
     // If token has >5 minutes remaining, use it directly
     if !blob.is_expired(300) {
@@ -25,11 +26,12 @@ pub async fn get_access_token(account_id: Uuid) -> Result<String, SwapError> {
     tracing::debug!("access token expired/expiring, refreshing...");
     let token_resp = refresh::refresh(&blob.claude_ai_oauth.refresh_token)
         .await
-        .map_err(|e| SwapError::KeychainError(format!("token refresh failed: {e}")))?;
+        .map_err(|e| LauncherError::RefreshFailed(e.to_string()))?;
 
     // Save the rotated credentials
     let new_blob_str = refresh::build_blob(&token_resp);
-    crate::cli_backend::swap::save_private(account_id, &new_blob_str)?;
+    swap::save_private(account_id, &new_blob_str)
+        .map_err(|e| LauncherError::SaveFailed(e.to_string()))?;
 
     Ok(token_resp.access_token)
 }
@@ -39,14 +41,15 @@ pub async fn get_access_token(account_id: Uuid) -> Result<String, SwapError> {
 pub async fn run(
     account_id: Uuid,
     args: &[String],
-) -> Result<i32, SwapError> {
+) -> Result<i32, LauncherError> {
     let access_token = get_access_token(account_id).await?;
 
     if args.is_empty() {
-        return Err(SwapError::WriteFailed("no command specified".into()));
+        return Err(LauncherError::NoCommand);
     }
 
-    let (cmd, cmd_args) = args.split_first().unwrap();
+    let (cmd, cmd_args) = args.split_first()
+        .ok_or(LauncherError::NoCommand)?;
 
     let status = tokio::process::Command::new(cmd)
         .args(cmd_args)
@@ -57,7 +60,7 @@ pub async fn run(
         .stderr(std::process::Stdio::inherit())
         .status()
         .await
-        .map_err(|e| SwapError::WriteFailed(format!("spawn failed: {e}")))?;
+        .map_err(|e| LauncherError::SpawnFailed(e.to_string()))?;
 
     Ok(status.code().unwrap_or(1))
 }

@@ -24,15 +24,10 @@ fn acquire_swap_lock() -> Result<fs::File, SwapError> {
     {
         use std::os::unix::io::AsRawFd;
         let fd = file.as_raw_fd();
-        let ret = unsafe { libc::flock(fd, libc::LOCK_EX | libc::LOCK_NB) };
+        // Blocking exclusive lock — waits if another swap is in progress.
+        let ret = unsafe { libc::flock(fd, libc::LOCK_EX) };
         if ret != 0 {
-            let err = std::io::Error::last_os_error();
-            if err.raw_os_error() == Some(libc::EWOULDBLOCK) {
-                return Err(SwapError::WriteFailed(
-                    "another claudepot swap is in progress".into(),
-                ));
-            }
-            return Err(SwapError::FileError(err));
+            return Err(SwapError::FileError(std::io::Error::last_os_error()));
         }
     }
     #[cfg(windows)]
