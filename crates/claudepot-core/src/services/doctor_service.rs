@@ -211,9 +211,13 @@ async fn check_api(beta_header: &str) -> ApiStatus {
             {
                 Ok(resp) => {
                     let status = resp.status().as_u16();
-                    if status == 401 { ApiStatus::Reachable }
-                    else if status == 403 { ApiStatus::GeoBlocked }
-                    else { ApiStatus::Reachable }
+                    match status {
+                        401 => ApiStatus::Reachable,  // expected for invalid token probe
+                        403 => ApiStatus::GeoBlocked,
+                        429 => ApiStatus::Unreachable("rate limited".into()),
+                        s if s >= 500 => ApiStatus::Unreachable(format!("server error {s}")),
+                        _ => ApiStatus::Reachable,
+                    }
                 }
                 Err(e) => ApiStatus::Unreachable(e.to_string()),
             }

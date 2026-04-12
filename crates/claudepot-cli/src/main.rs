@@ -74,10 +74,10 @@ enum ProjectAction {
         #[arg(long)]
         no_move: bool,
         /// Merge CC data if target already has sessions
-        #[arg(long)]
+        #[arg(long, conflicts_with = "overwrite")]
         merge: bool,
         /// Overwrite CC data at target
-        #[arg(long)]
+        #[arg(long, conflicts_with = "merge")]
         overwrite: bool,
         /// Proceed even if Claude is running in the directory
         #[arg(long)]
@@ -101,10 +101,10 @@ enum AccountAction {
     /// Register a new account
     Add {
         /// Import from current CC credentials
-        #[arg(long)]
+        #[arg(long, conflicts_with = "from_token")]
         from_current: bool,
-        /// Bootstrap from a refresh token
-        #[arg(long)]
+        /// Bootstrap from a refresh token (reads from stdin if value is "-")
+        #[arg(long, conflicts_with = "from_current")]
         from_token: Option<String>,
     },
     /// Remove a registered account
@@ -127,6 +127,9 @@ enum CliAction {
     Use {
         /// Account email (prefix match)
         email: String,
+        /// Skip automatic token refresh during switch
+        #[arg(long)]
+        no_refresh: bool,
     },
     /// Clear CC credentials (log out)
     Clear,
@@ -209,7 +212,9 @@ async fn main() -> Result<()> {
         },
         Commands::Cli { action } => match action {
             CliAction::Status => commands::cli_ops::status(&ctx)?,
-            CliAction::Use { email } => commands::cli_ops::use_account(&ctx, &email).await?,
+            CliAction::Use { email, no_refresh } => {
+                commands::cli_ops::use_account(&ctx, &email, no_refresh).await?
+            }
             CliAction::Clear => commands::cli_ops::clear(&ctx).await?,
             CliAction::Run { email, print_token, args } => {
                 commands::cli_ops::run(&ctx, &email, print_token, &args).await?

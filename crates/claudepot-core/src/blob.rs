@@ -53,13 +53,7 @@ impl CredentialBlob {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    fn sample_blob_json(expires_at: i64) -> String {
-        format!(
-            r#"{{"claudeAiOauth":{{"accessToken":"sk-ant-oat01-test","refreshToken":"sk-ant-ort01-test","expiresAt":{},"scopes":["user:inference","user:profile"],"subscriptionType":"pro","rateLimitTier":"default_claude_pro"}}}}"#,
-            expires_at
-        )
-    }
+    use crate::testing::sample_blob_json;
 
     #[test]
     fn test_blob_from_json_valid() {

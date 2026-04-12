@@ -20,7 +20,8 @@ pub fn read_default() -> Result<Option<String>, SwapError> {
                     "credential file {} has permissions {:o} (expected 600), fixing",
                     path.display(), mode
                 );
-                let _ = std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600));
+                std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600))
+                    .map_err(SwapError::FileError)?;
             }
         }
     }

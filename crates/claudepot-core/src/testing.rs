@@ -33,6 +33,29 @@ pub fn test_store() -> (crate::account::AccountStore, tempfile::TempDir) {
     (store, dir)
 }
 
+/// Build a sample credential blob JSON string with a given `expires_at` (epoch millis).
+pub fn sample_blob_json(expires_at: i64) -> String {
+    format!(
+        r#"{{"claudeAiOauth":{{"accessToken":"sk-ant-oat01-test","refreshToken":"sk-ant-ort01-test","expiresAt":{},"scopes":["user:inference","user:profile"],"subscriptionType":"pro","rateLimitTier":"default_claude_pro"}}}}"#,
+        expires_at
+    )
+}
+
+/// A blob that expires 1 hour from now (fresh).
+pub fn fresh_blob_json() -> String {
+    sample_blob_json(chrono::Utc::now().timestamp_millis() + 3_600_000)
+}
+
+/// A blob that expired 1 hour ago.
+pub fn expired_blob_json() -> String {
+    sample_blob_json(chrono::Utc::now().timestamp_millis() - 3_600_000)
+}
+
+/// A blob that expires in 2 minutes (within 5-minute margin).
+pub fn expiring_soon_blob_json() -> String {
+    sample_blob_json(chrono::Utc::now().timestamp_millis() + 120_000)
+}
+
 /// Create a test Account with sensible defaults.
 pub fn make_account(email: &str) -> crate::account::Account {
     crate::account::Account {

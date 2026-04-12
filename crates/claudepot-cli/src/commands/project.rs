@@ -54,9 +54,10 @@ pub fn list(ctx: &AppContext) -> Result<()> {
             .map(|t| format_relative_time(t))
             .unwrap_or_else(|| "unknown".to_string());
 
-        // Truncate path for display
-        let display_path = if p.original_path.len() > 50 {
-            format!("...{}", &p.original_path[p.original_path.len() - 47..])
+        // Truncate path for display (char-safe to avoid panic on multibyte)
+        let display_path = if p.original_path.chars().count() > 50 {
+            let tail: String = p.original_path.chars().rev().take(47).collect::<Vec<_>>().into_iter().rev().collect();
+            format!("...{}", tail)
         } else {
             p.original_path.clone()
         };
@@ -258,8 +259,9 @@ pub fn clean(ctx: &AppContext, dry_run: bool) -> Result<()> {
             .unwrap_or_else(|| "unknown".to_string());
         println!(
             "  {:<50}  {} session{}  {:>9}  {}",
-            if o.original_path.len() > 50 {
-                format!("...{}", &o.original_path[o.original_path.len() - 47..])
+            if o.original_path.chars().count() > 50 {
+                let tail: String = o.original_path.chars().rev().take(47).collect::<Vec<_>>().into_iter().rev().collect();
+                format!("...{}", tail)
             } else {
                 o.original_path.clone()
             },
