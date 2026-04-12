@@ -63,13 +63,11 @@ pub fn desktop_profile_dir(account_id: uuid::Uuid) -> PathBuf {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::sync::Mutex;
-
-    static ENV_LOCK: Mutex<()> = Mutex::new(());
+    use crate::testing::lock_data_dir;
 
     #[test]
     fn test_claude_config_dir_honors_env() {
-        let _lock = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let _lock = lock_data_dir();
         std::env::set_var("CLAUDE_CONFIG_DIR", "/custom/config");
         let result = claude_config_dir();
         assert_eq!(result, PathBuf::from("/custom/config"));
@@ -78,7 +76,7 @@ mod tests {
 
     #[test]
     fn test_claude_config_dir_default_fallback() {
-        let _lock = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let _lock = lock_data_dir();
         std::env::remove_var("CLAUDE_CONFIG_DIR");
         let result = claude_config_dir();
         // Should end with .claude (either ~/.claude or /tmp/.claude)
@@ -87,7 +85,7 @@ mod tests {
 
     #[test]
     fn test_claude_credentials_file_is_under_config() {
-        let _lock = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let _lock = lock_data_dir();
         std::env::set_var("CLAUDE_CONFIG_DIR", "/test/config");
         let result = claude_credentials_file();
         assert_eq!(result, PathBuf::from("/test/config/.credentials.json"));
@@ -96,7 +94,7 @@ mod tests {
 
     #[test]
     fn test_claudepot_data_dir_honors_env() {
-        let _lock = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let _lock = lock_data_dir();
         std::env::set_var("CLAUDEPOT_DATA_DIR", "/custom/data");
         let result = claudepot_data_dir();
         assert_eq!(result, PathBuf::from("/custom/data"));
@@ -105,7 +103,7 @@ mod tests {
 
     #[test]
     fn test_claudepot_data_dir_default_contains_claudepot() {
-        let _lock = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let _lock = lock_data_dir();
         std::env::remove_var("CLAUDEPOT_DATA_DIR");
         let result = claudepot_data_dir();
         assert!(
@@ -117,7 +115,7 @@ mod tests {
 
     #[test]
     fn test_desktop_profile_dir_includes_uuid() {
-        let _lock = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let _lock = lock_data_dir();
         std::env::set_var("CLAUDEPOT_DATA_DIR", "/data");
         let id = uuid::Uuid::parse_str("550e8400-e29b-41d4-a716-446655440000").unwrap();
         let result = desktop_profile_dir(id);
