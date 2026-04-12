@@ -1,0 +1,10 @@
+{
+  "hooks": {
+    "preCommit": [
+      {
+        "command": "bash -c \"git diff --cached --diff-filter=ACM -z --name-only | xargs -0 grep -lE 'sk-ant-(oat|ort)01-|security unlock-keychain -p|CLAUDE_CODE_OAUTH_TOKEN=sk-' 2>/dev/null && echo '\\n❌ BLOCKED: staged files contain secrets (tokens or passwords). Remove them before committing.' && exit 1 || exit 0\"",
+        "description": "Block commits containing OAuth tokens or keychain passwords"
+      }
+    ]
+  }
+}
