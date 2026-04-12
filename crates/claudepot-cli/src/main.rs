@@ -46,8 +46,52 @@ enum Commands {
         #[command(subcommand)]
         action: DesktopAction,
     },
+    /// Manage CC project session storage
+    Project {
+        #[command(subcommand)]
+        action: ProjectAction,
+    },
     /// Health check and diagnostics
     Doctor,
+}
+
+#[derive(Subcommand)]
+enum ProjectAction {
+    /// List all CC projects
+    List,
+    /// Show details for a project
+    Show {
+        /// Path to the project (resolved to absolute)
+        path: String,
+    },
+    /// Move/rename a project and migrate CC state
+    Move {
+        /// Current project path
+        old_path: String,
+        /// New project path
+        new_path: String,
+        /// Only update CC state, don't move the actual directory
+        #[arg(long)]
+        no_move: bool,
+        /// Merge CC data if target already has sessions
+        #[arg(long)]
+        merge: bool,
+        /// Overwrite CC data at target
+        #[arg(long)]
+        overwrite: bool,
+        /// Proceed even if Claude is running in the directory
+        #[arg(long)]
+        force: bool,
+        /// Show what would happen without making changes
+        #[arg(long)]
+        dry_run: bool,
+    },
+    /// Remove orphaned project directories
+    Clean {
+        /// Show what would be removed without deleting
+        #[arg(long)]
+        dry_run: bool,
+    },
 }
 
 #[derive(Subcommand)]
@@ -176,6 +220,24 @@ async fn main() -> Result<()> {
             DesktopAction::Use { email, no_launch } => {
                 commands::desktop_ops::use_account(&ctx, &email, no_launch).await?
             }
+        },
+        Commands::Project { action } => match action {
+            ProjectAction::List => commands::project::list(&ctx)?,
+            ProjectAction::Show { path } => commands::project::show(&ctx, &path)?,
+            ProjectAction::Move {
+                old_path,
+                new_path,
+                no_move,
+                merge,
+                overwrite,
+                force,
+                dry_run,
+            } => {
+                commands::project::move_project(
+                    &ctx, &old_path, &new_path, no_move, merge, overwrite, force, dry_run,
+                )?
+            }
+            ProjectAction::Clean { dry_run } => commands::project::clean(&ctx, dry_run)?,
         },
         Commands::Doctor => commands::doctor::run(&ctx).await?,
     }
