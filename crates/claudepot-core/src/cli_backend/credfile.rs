@@ -8,6 +8,23 @@ use std::io::Write;
 /// Read the credential blob from `.credentials.json`.
 pub fn read_default() -> Result<Option<String>, SwapError> {
     let path = paths::claude_credentials_file();
+
+    // Verify file permissions before reading credentials
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        if let Ok(meta) = std::fs::metadata(&path) {
+            let mode = meta.permissions().mode() & 0o777;
+            if mode != 0o600 {
+                tracing::warn!(
+                    "credential file {} has permissions {:o} (expected 600), fixing",
+                    path.display(), mode
+                );
+                let _ = std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600));
+            }
+        }
+    }
+
     match std::fs::read_to_string(&path) {
         Ok(s) if s.trim().is_empty() => Ok(None),
         Ok(s) => Ok(Some(s)),
