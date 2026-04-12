@@ -1,0 +1,44 @@
+{
+  "enabled": true,
+  "projectType": "rust",
+  "packageManager": "cargo",
+  "testCommand": "cargo test --workspace",
+  "coverageCommand": "cargo llvm-cov --workspace --json --output-path coverage.json",
+  "coverageSummaryPath": "coverage.json",
+  "mutationCommand": "cargo mutants --workspace --timeout 60",
+  "thresholds": {
+    "lines": 100,
+    "functions": 100,
+    "branches": 100,
+    "statements": 100,
+    "mutationKillRate": 80
+  },
+  "gates": {
+    "preImplementation": {
+      "requiredRedTests": true,
+      "enforceTestFirst": true
+    },
+    "postImplementation": {
+      "requireAllGreen": true,
+      "requireCoverageThreshold": true,
+      "requireNoRegressions": true
+    }
+  },
+  "notes": {
+    "coverageTool": "cargo-llvm-cov NOT installed. Install with: cargo install cargo-llvm-cov",
+    "mutationTool": "cargo-mutants NOT installed. Install with: cargo install cargo-mutants",
+    "currentTestCount": 112,
+    "lastUpdated": "2026-04-12",
+    "testModules": [
+      "project.rs (29 tests)",
+      "cli_backend/swap.rs (25 tests)",
+      "account.rs (15 tests)",
+      "desktop_backend/swap.rs (14 tests)",
+      "blob.rs (8 tests)",
+      "services/account_service.rs (8 tests)",
+      "resolve.rs (5 tests)",
+      "fs_utils.rs (5 tests)",
+      "oauth/refresh.rs (3 tests)"
+    ]
+  }
+}
