@@ -4,12 +4,17 @@ pub mod refresh;
 pub mod usage;
 
 use crate::error::OAuthError;
+use std::sync::OnceLock;
 
-/// Shared HTTP client for OAuth API calls.
-pub fn http_client() -> Result<reqwest::Client, OAuthError> {
-    reqwest::Client::builder()
-        .user_agent("claudepot/0.1.0")
-        .timeout(std::time::Duration::from_secs(15))
-        .build()
-        .map_err(|e| OAuthError::HttpError(e))
+static HTTP_CLIENT: OnceLock<reqwest::Client> = OnceLock::new();
+
+/// Shared HTTP client for all OAuth API calls. Connection-pooled, TLS-reused.
+pub fn http_client() -> Result<&'static reqwest::Client, OAuthError> {
+    Ok(HTTP_CLIENT.get_or_init(|| {
+        reqwest::Client::builder()
+            .user_agent("claudepot/0.1.0")
+            .timeout(std::time::Duration::from_secs(15))
+            .build()
+            .expect("failed to build HTTP client")
+    }))
 }
