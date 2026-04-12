@@ -25,3 +25,4 @@ sysinfo.workspace = true
 libc.workspace = true
 async-trait.workspace = true
 whoami.workspace = true
+unicode-normalization.workspace = true

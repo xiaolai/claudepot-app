@@ -4,6 +4,7 @@ use std::fs;
 use std::io::{BufRead, BufReader, BufWriter, Write};
 use std::path::{Path, PathBuf};
 use std::time::SystemTime;
+use unicode_normalization::UnicodeNormalization;
 
 // ---------------------------------------------------------------------------
 // Path sanitization (mirrors CC's sessionStoragePortable.ts:311-319)
@@ -35,6 +36,11 @@ pub fn unsanitize_path(sanitized: &str) -> String {
     sanitized.replace('-', "/")
 }
 
+/// djb2 string hash (Daniel J. Bernstein). Returns the hash as a base-36 string.
+///
+/// This is a 32-bit hash, so collisions are expected at ~65 536 entries
+/// (birthday bound). We accept this because CC uses the same algorithm
+/// and we must produce identical directory names for compatibility.
 fn djb2_hash(s: &str) -> String {
     let mut hash: u32 = 5381;
     for byte in s.bytes() {
@@ -423,7 +429,7 @@ fn resolve_path(path: &str) -> Result<String, ProjectError> {
     } else {
         abs
     };
-    Ok(resolved.to_string_lossy().to_string())
+    Ok(resolved.to_string_lossy().nfc().collect::<String>())
 }
 
 fn find_project_dir_by_prefix(
@@ -1177,5 +1183,99 @@ mod tests {
         // Both dirs still exist (--no-move)
         assert!(src.exists());
         assert!(dst.exists());
+    }
+
+    #[test]
+    fn test_resolve_path_nfc_ascii_unchanged() {
+        // ASCII paths must pass through NFC unchanged
+        let tmp = tempfile::tempdir().unwrap();
+        let ascii_dir = tmp.path().canonicalize().unwrap().join("plain_ascii");
+        fs::create_dir(&ascii_dir).unwrap();
+        let resolved = resolve_path(ascii_dir.to_str().unwrap()).unwrap();
+        let canonical = ascii_dir.canonicalize().unwrap().to_string_lossy().to_string();
+        assert_eq!(resolved, canonical);
+    }
+
+    #[test]
+    fn test_resolve_path_nfc_normalizes_nfd() {
+        // NFD "café" (e + combining acute) must become NFC "café" (é precomposed)
+        let tmp = tempfile::tempdir().unwrap();
+        let base = tmp.path().canonicalize().unwrap();
+        let nfd_name = "caf\u{0065}\u{0301}"; // NFD: e + combining acute accent
+        let nfd_dir = base.join(nfd_name);
+        fs::create_dir(&nfd_dir).unwrap();
+        let resolved = resolve_path(nfd_dir.to_str().unwrap()).unwrap();
+        assert!(
+            resolved.contains("caf\u{00e9}"),
+            "Expected NFC 'café' in resolved path, got: {}",
+            resolved
+        );
+    }
+
+    #[test]
+    fn test_sanitize_nfd_nfc_produces_same_output() {
+        // NFD and NFC of the same path must produce identical sanitize output
+        // after resolve_path normalizes to NFC
+        let tmp = tempfile::tempdir().unwrap();
+        let base = tmp.path().canonicalize().unwrap();
+        let nfd_name = "caf\u{0065}\u{0301}";
+        let nfc_name = "caf\u{00e9}";
+        let nfd_dir = base.join(nfd_name);
+        // macOS HFS+ / APFS may normalize the dirname itself, so just create one
+        fs::create_dir_all(&nfd_dir).unwrap();
+        let resolved_nfd = resolve_path(nfd_dir.to_str().unwrap()).unwrap();
+        let nfc_dir = base.join(nfc_name);
+        // On macOS, NFD and NFC names resolve to the same directory
+        let resolved_nfc = resolve_path(nfc_dir.to_str().unwrap()).unwrap();
+        assert_eq!(
+            sanitize_path(&resolved_nfd),
+            sanitize_path(&resolved_nfc),
+            "NFD and NFC resolved paths must produce same sanitized output"
+        );
+    }
+
+    #[test]
+    fn test_resolve_path_nfc_korean_jamo() {
+        // Korean Jamo (한) must become precomposed Hangul (한)
+        let tmp = tempfile::tempdir().unwrap();
+        let base = tmp.path().canonicalize().unwrap();
+        let jamo = "\u{1112}\u{1161}\u{11AB}"; // 한 (conjoining Jamo)
+        let jamo_dir = base.join(jamo);
+        fs::create_dir(&jamo_dir).unwrap();
+        let resolved = resolve_path(jamo_dir.to_str().unwrap()).unwrap();
+        assert!(
+            resolved.contains("\u{D55C}"),
+            "Expected precomposed Hangul 한 (U+D55C) in resolved path, got: {}",
+            resolved
+        );
+    }
+
+    #[test]
+    fn test_djb2_hash_collision_exists() {
+        // djb2 is a 32-bit hash; collisions are inevitable.
+        // "ku" and "lT" produce the same djb2 hash (verified by brute-force search).
+        let h1 = djb2_hash("ku");
+        let h2 = djb2_hash("lT");
+        assert_eq!(h1, h2, "Expected djb2 collision between 'ku' and 'lT'");
+        assert_eq!(h1, "3hocl");
+    }
+
+    #[test]
+    fn test_sanitize_long_path_exact_hash() {
+        // Verify that a specific long path produces the expected hash suffix.
+        let long_path = format!(
+            "/Users/joker/github/xiaolai/myprojects/{}",
+            "a".repeat(200)
+        );
+        let result = sanitize_path(&long_path);
+        // Path is 239 chars, sanitized > 200, so hash is appended
+        assert!(result.len() > MAX_SANITIZED_LENGTH);
+        let expected_hash = djb2_hash(&long_path);
+        assert_eq!(expected_hash, "49t8tq");
+        assert!(
+            result.ends_with(&format!("-{}", expected_hash)),
+            "Expected hash suffix '-49t8tq', got: {}",
+            result
+        );
     }
 }

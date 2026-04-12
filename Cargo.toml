@@ -63,6 +63,9 @@ tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 # Platform (file locking)
 libc = "0.2"
 
+# Unicode normalization (NFC for cross-platform path consistency)
+unicode-normalization = "0.1"
+
 # Utilities
 uuid = { version = "1", features = ["v4", "serde"] }
 dirs = "6"
