@@ -110,8 +110,15 @@ pub fn remove(ctx: &AppContext, email_input: &str) -> Result<()> {
         }
     }
 
-    // Delete credential from keyring
+    // Delete CLI credential
     let _ = claudepot_core::cli_backend::swap::delete_private(account.uuid);
+
+    // Delete Desktop profile snapshot if it exists
+    let profile_dir = claudepot_core::paths::desktop_profile_dir(account.uuid);
+    if profile_dir.exists() {
+        let _ = std::fs::remove_dir_all(&profile_dir);
+        ctx.info("Deleted Desktop profile snapshot.");
+    }
 
     // Remove from store
     ctx.store.remove(account.uuid)?;
@@ -119,6 +126,10 @@ pub fn remove(ctx: &AppContext, email_input: &str) -> Result<()> {
     if account.is_cli_active {
         ctx.store.clear_active_cli()?;
         ctx.info("Note: this was the active CLI account. CLI slot is now empty.");
+    }
+    if account.is_desktop_active {
+        let _ = ctx.store.clear_active_desktop();
+        ctx.info("Note: this was the active Desktop account. Desktop slot is now empty.");
     }
 
     ctx.info(&format!("Removed: {email}"));
@@ -279,7 +290,7 @@ async fn add_via_browser(ctx: &AppContext) -> Result<()> {
     let config_dir = onboard::run_auth_login().await?;
 
     ctx.info("Reading credentials from login...");
-    let blob_str = match onboard::read_credentials_from_dir(&config_dir) {
+    let blob_str = match onboard::read_credentials_from_dir(&config_dir).await {
         Ok(b) => b,
         Err(e) => {
             onboard::cleanup(&config_dir).await;

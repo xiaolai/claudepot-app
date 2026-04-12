@@ -49,7 +49,19 @@ impl AccountStore {
         )?;
         let rows = stmt.query_map([], |row| {
             let uuid_str: String = row.get(0)?;
-            let uuid: Uuid = uuid_str.parse().unwrap_or_default();
+            let uuid: Uuid = uuid_str.parse().map_err(|e| {
+                rusqlite::Error::FromSqlConversionFailure(
+                    0, rusqlite::types::Type::Text,
+                    Box::new(std::io::Error::new(std::io::ErrorKind::InvalidData, format!("bad UUID: {e}")))
+                )
+            })?;
+            let created_str: String = row.get(6)?;
+            let created_at: DateTime<Utc> = created_str.parse().map_err(|e| {
+                rusqlite::Error::FromSqlConversionFailure(
+                    6, rusqlite::types::Type::Text,
+                    Box::new(std::io::Error::new(std::io::ErrorKind::InvalidData, format!("bad timestamp: {e}")))
+                )
+            })?;
             Ok(Account {
                 uuid,
                 email: row.get(1)?,
@@ -57,10 +69,7 @@ impl AccountStore {
                 org_name: row.get(3)?,
                 subscription_type: row.get(4)?,
                 rate_limit_tier: row.get(5)?,
-                created_at: row
-                    .get::<_, String>(6)?
-                    .parse()
-                    .unwrap_or_default(),
+                created_at,
                 last_cli_switch: row.get::<_, Option<String>>(7)?.and_then(|s| s.parse().ok()),
                 last_desktop_switch: row.get::<_, Option<String>>(8)?.and_then(|s| s.parse().ok()),
                 has_cli_credentials: row.get(9)?,
@@ -153,6 +162,11 @@ impl AccountStore {
             "UPDATE accounts SET last_desktop_switch = ?1 WHERE uuid = ?2",
             params![Utc::now().to_rfc3339(), uuid.to_string()],
         )?;
+        Ok(())
+    }
+
+    pub fn clear_active_desktop(&self) -> SqlResult<()> {
+        self.db.execute("DELETE FROM state WHERE key = 'active_desktop'", [])?;
         Ok(())
     }
 
