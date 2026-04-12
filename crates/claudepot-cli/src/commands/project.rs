@@ -204,19 +204,12 @@ pub fn move_project(
         println!("  \u{2713} Moved directory on disk");
     }
     if result.cc_dir_renamed {
-        let old_san = project::sanitize_path(
-            &std::fs::canonicalize(new_path)
-                .unwrap_or_else(|_| new_path.into())
-                .to_string_lossy()
-                .replace(new_path, old_path),
-        );
-        let new_san = project::sanitize_path(
-            &std::fs::canonicalize(new_path)
-                .unwrap_or_else(|_| new_path.into())
-                .to_string_lossy(),
-        );
         println!("  \u{2713} Renamed CC project data");
-        println!("    {} \u{2192} {}", old_san, new_san);
+        if let (Some(old_san), Some(new_san)) =
+            (&result.old_sanitized, &result.new_sanitized)
+        {
+            println!("    {} \u{2192} {}", old_san, new_san);
+        }
     }
     if result.history_lines_updated > 0 {
         println!(
