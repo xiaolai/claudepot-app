@@ -117,6 +117,76 @@ pub async fn register_from_token(
     })
 }
 
+/// Register an account via browser-based OAuth login.
+/// Runs `claude auth login` in a temp config dir, reads credentials,
+/// fetches profile, and registers the account.
+pub async fn register_from_browser(store: &AccountStore) -> Result<RegisterResult, RegisterError> {
+    use crate::onboard;
+
+    let config_dir = onboard::run_auth_login().await
+        .map_err(|e| RegisterError::CredentialRead(e.to_string()))?;
+
+    let blob_str = match onboard::read_credentials_from_dir(&config_dir).await {
+        Ok(b) => b,
+        Err(e) => {
+            onboard::cleanup(&config_dir).await;
+            return Err(RegisterError::CredentialRead(e.to_string()));
+        }
+    };
+
+    let blob = CredentialBlob::from_json(&blob_str)
+        .map_err(|e| {
+            // Fire-and-forget cleanup — don't propagate cleanup errors
+            let config_dir = config_dir.clone();
+            tokio::spawn(async move { onboard::cleanup(&config_dir).await });
+            RegisterError::CredentialRead(e.to_string())
+        })?;
+
+    let prof = match profile::fetch(&blob.claude_ai_oauth.access_token).await {
+        Ok(p) => p,
+        Err(e) => {
+            onboard::cleanup(&config_dir).await;
+            return Err(RegisterError::ProfileFetch(e.to_string()));
+        }
+    };
+
+    if let Some(existing) = store.find_by_email(&prof.email)
+        .map_err(|e| RegisterError::Store(e.to_string()))? {
+        onboard::cleanup(&config_dir).await;
+        return Err(RegisterError::AlreadyRegistered(existing.email, existing.uuid));
+    }
+
+    let account_id = Uuid::new_v4();
+    swap::save_private(account_id, &blob_str)
+        .map_err(|e| RegisterError::CredentialWrite(e.to_string()))?;
+
+    let account = Account {
+        uuid: account_id,
+        email: prof.email.clone(),
+        org_uuid: Some(prof.org_uuid.clone()),
+        org_name: Some(prof.org_name.clone()),
+        subscription_type: Some(prof.subscription_type.clone()),
+        rate_limit_tier: prof.rate_limit_tier.clone(),
+        created_at: Utc::now(),
+        last_cli_switch: None,
+        last_desktop_switch: None,
+        has_cli_credentials: true,
+        has_desktop_profile: false,
+        is_cli_active: false,
+        is_desktop_active: false,
+    };
+    store.insert(&account).map_err(|e| RegisterError::Store(e.to_string()))?;
+    onboard::cleanup(&config_dir).await;
+
+    Ok(RegisterResult {
+        uuid: account_id,
+        email: prof.email,
+        org_name: prof.org_name,
+        subscription_type: prof.subscription_type,
+        rate_limit_tier: prof.rate_limit_tier,
+    })
+}
+
 /// Remove an account and all its associated data.
 pub fn remove_account(store: &AccountStore, uuid: Uuid) -> Result<RemoveResult, RegisterError> {
     let account = store.find_by_uuid(uuid)
