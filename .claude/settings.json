@@ -1,4 +1,8 @@
 {
+  "enabledPlugins": {
+    "codex-toolkit@xiaolai": true,
+    "loc-guardian@xiaolai": true
+  },
   "hooks": {
     "preCommit": [
       {
