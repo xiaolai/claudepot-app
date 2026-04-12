@@ -106,6 +106,8 @@ pub struct MoveArgs {
 pub struct MoveResult {
     pub actual_dir_moved: bool,
     pub cc_dir_renamed: bool,
+    pub old_sanitized: Option<String>,
+    pub new_sanitized: Option<String>,
     pub history_lines_updated: usize,
     pub warnings: Vec<String>,
 }
@@ -224,8 +226,14 @@ enum MoveScenario {
 
 pub fn move_project(args: &MoveArgs) -> Result<MoveResult, ProjectError> {
     // Phase 1: Validate
-    let old_norm = resolve_path(args.old_path.to_str().unwrap_or(""))?;
-    let new_norm = resolve_path(args.new_path.to_str().unwrap_or(""))?;
+    let old_str = args.old_path.to_str().ok_or_else(|| {
+        ProjectError::Ambiguous("old path contains invalid UTF-8".to_string())
+    })?;
+    let new_str = args.new_path.to_str().ok_or_else(|| {
+        ProjectError::Ambiguous("new path contains invalid UTF-8".to_string())
+    })?;
+    let old_norm = resolve_path(old_str)?;
+    let new_norm = resolve_path(new_str)?;
 
     if old_norm == new_norm {
         return Err(ProjectError::SamePath);
@@ -299,9 +307,19 @@ pub fn move_project(args: &MoveArgs) -> Result<MoveResult, ProjectError> {
     }
 
     // Phase 4: Rename CC project directory
+    result.old_sanitized = Some(old_san.clone());
+    result.new_sanitized = Some(new_san.clone());
     if old_san != new_san {
-        let cc_old = args.config_dir.join("projects").join(&old_san);
-        let cc_new = args.config_dir.join("projects").join(&new_san);
+        let projects_base = args.config_dir.join("projects");
+        let cc_old = projects_base.join(&old_san);
+        let cc_new = projects_base.join(&new_san);
+
+        // Defense-in-depth: ensure paths stay within projects/
+        if !cc_old.starts_with(&projects_base) || !cc_new.starts_with(&projects_base) {
+            return Err(ProjectError::Ambiguous(
+                "sanitized path escapes projects directory".to_string(),
+            ));
+        }
 
         if cc_old.exists() {
             if cc_new.exists() {
