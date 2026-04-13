@@ -5,11 +5,19 @@ Multi-account Claude Code / Claude Desktop switcher. Tauri 2 + Rust + React.
 ## Build
 
 ```bash
-cargo check --workspace          # Rust
-cargo build -p claudepot-cli     # CLI binary
-pnpm build                       # Frontend
-pnpm tauri dev                   # Tauri app (GUI)
+cargo check --workspace              # Rust
+cargo build -p claudepot-cli         # CLI binary
+pnpm build                           # Frontend bundle
+pnpm tauri dev                       # GUI in dev mode (hot reload)
+pnpm tauri build --no-bundle         # GUI release binary (no .dmg)
 ```
+
+## GUI (Tauri)
+
+- `src-tauri/src/commands.rs` — async Tauri commands wrapping `claudepot-core`. NO business logic.
+- `src-tauri/src/dto.rs` — serde DTOs crossing to JS. Credentials never cross.
+- `src/App.tsx` + `src/api.ts` + `src/types.ts` — React UI, plain CSS.
+- `AccountStore.db` is `Mutex<Connection>` so stores can cross `await` points in Tauri commands.
 
 ## Test on test-host
 
