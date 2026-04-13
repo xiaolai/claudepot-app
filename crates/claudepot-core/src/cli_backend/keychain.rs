@@ -42,6 +42,17 @@ pub async fn read(service: &str) -> Result<Option<String>, SwapError> {
         if stderr.contains("could not be found") {
             return Ok(None);
         }
+        // Exit 36 = errSecAuthFailed — on macOS this is nearly always "the
+        // login keychain is locked". It's distinguishable from "item not
+        // found" (exit 44) and worth reporting verbatim so the UI can
+        // prompt the user to unlock.
+        if output.status.code() == Some(36) {
+            return Err(SwapError::KeychainError(
+                "macOS login keychain is locked — open Keychain Access and \
+                 unlock the \"login\" keychain, then retry"
+                    .into(),
+            ));
+        }
         return Err(SwapError::KeychainError(format!(
             "security find-generic-password failed: {stderr}"
         )));

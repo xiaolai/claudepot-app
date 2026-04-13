@@ -436,6 +436,14 @@ fn load_from_keyring(account_id: Uuid) -> std::io::Result<Option<String>> {
         let code = out.status.code().unwrap_or(-1);
         if code == 44 {
             Ok(None)
+        } else if code == 36 {
+            // errSecAuthFailed — keychain is locked. Surface a clear
+            // message so the GUI can route the user to unlock instead of
+            // silently pretending the blob is missing.
+            Err(std::io::Error::other(
+                "macOS login keychain is locked — open Keychain Access and \
+                 unlock the \"login\" keychain, then retry",
+            ))
         } else {
             Err(std::io::Error::other(format!(
                 "security find-generic-password failed (code {code}): {}",
@@ -540,6 +548,16 @@ pub fn load_private(account_id: Uuid) -> Result<String, SwapError> {
                     }
                 }
                 Err(e) => {
+                    // If the keychain is locked, don't silently mask it as
+                    // "missing credentials" — surface the lock message so
+                    // the UI can route the user to unlock. The file
+                    // fallback wouldn't help anyway when items are in
+                    // Keychain, and a stale file blob could be actively
+                    // misleading.
+                    let msg = e.to_string();
+                    if msg.contains("keychain is locked") {
+                        return Err(SwapError::KeychainError(msg));
+                    }
                     tracing::warn!("keyring load failed ({e}); trying file storage");
                     load_from_file(account_id)
                 }
