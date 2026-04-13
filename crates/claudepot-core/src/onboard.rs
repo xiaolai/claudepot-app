@@ -6,32 +6,78 @@
 use crate::error::OnboardError;
 use std::path::PathBuf;
 
+/// Hard timeout for `claude auth login` — generous enough that slow
+/// readers completing OAuth in the browser finish in time, tight enough
+/// that a user who closed the browser or walked away doesn't leave the
+/// GUI stuck on a spinner forever. Matches Kannon's 10-minute window.
+pub const LOGIN_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(600);
+
 /// Run `claude auth login` against the user's real CC config dir (no env
 /// override). The browser opens; the user authenticates; CC's own keychain
 /// item (or .credentials.json on Linux/Windows) is overwritten with a fresh
 /// blob. Caller can then read CC's current state via a CliPlatform.
 ///
-/// Used by re-login flows: the account already exists in Claudepot's DB,
-/// the user just needs to re-auth into CC for that identity.
+/// Timeout: `LOGIN_TIMEOUT` (10 min). If the user abandons the browser,
+/// the child is killed and we return AuthLoginFailed with a recognisable
+/// exit code (-2). The GUI surfaces this as a toast so the button
+/// un-spinners instead of hanging indefinitely.
+///
+/// stdin is piped to /dev/null — if CC ever prompted on stdin from a GUI
+/// context we'd deadlock on a read nobody can answer. stdout/stderr are
+/// captured and tee'd to tracing so GUI launches still have a log trail.
 pub async fn run_auth_login_in_place() -> Result<(), OnboardError> {
     let claude_path = which_claude()?;
 
-    tracing::debug!(binary = %claude_path.display(), "spawning `claude auth login` in place");
+    tracing::info!(binary = %claude_path.display(), timeout_secs = LOGIN_TIMEOUT.as_secs(), "spawning `claude auth login` in place");
 
-    let status = tokio::process::Command::new(&claude_path)
+    let mut child = tokio::process::Command::new(&claude_path)
         .arg("auth")
         .arg("login")
-        .stdin(std::process::Stdio::inherit())
-        .stdout(std::process::Stdio::inherit())
-        .stderr(std::process::Stdio::inherit())
-        .status()
-        .await
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
+        .spawn()
         .map_err(OnboardError::Io)?;
 
-    if !status.success() {
-        return Err(OnboardError::AuthLoginFailed(status.code().unwrap_or(-1)));
+    // Drain stdout / stderr into tracing so logs from the child surface
+    // when the GUI is launched without a terminal. Tasks are aborted
+    // automatically when the parent `child` is dropped.
+    if let Some(stdout) = child.stdout.take() {
+        tokio::spawn(pipe_to_tracing(stdout, "claude-stdout"));
+    }
+    if let Some(stderr) = child.stderr.take() {
+        tokio::spawn(pipe_to_tracing(stderr, "claude-stderr"));
+    }
+
+    let exit = match tokio::time::timeout(LOGIN_TIMEOUT, child.wait()).await {
+        Ok(Ok(status)) => status,
+        Ok(Err(e)) => return Err(OnboardError::Io(e)),
+        Err(_) => {
+            tracing::warn!(
+                "`claude auth login` exceeded {}s — killing child",
+                LOGIN_TIMEOUT.as_secs()
+            );
+            let _ = child.kill().await;
+            // Sentinel exit code for "timed out" so callers can distinguish.
+            return Err(OnboardError::AuthLoginFailed(-2));
+        }
+    };
+
+    if !exit.success() {
+        return Err(OnboardError::AuthLoginFailed(exit.code().unwrap_or(-1)));
     }
     Ok(())
+}
+
+async fn pipe_to_tracing<R: tokio::io::AsyncRead + Unpin + Send + 'static>(
+    reader: R,
+    stream_name: &'static str,
+) {
+    use tokio::io::{AsyncBufReadExt, BufReader};
+    let mut lines = BufReader::new(reader).lines();
+    while let Ok(Some(line)) = lines.next_line().await {
+        tracing::info!(target: "claudepot::onboard", stream = stream_name, "{}", line);
+    }
 }
 
 /// Run `claude auth login` with a temporary config dir.
@@ -107,4 +153,34 @@ fn which_claude() -> Result<PathBuf, OnboardError> {
     crate::fs_utils::find_claude_binary().ok_or_else(|| {
         OnboardError::CliBinaryNotFound("claude not found in PATH or common locations".into())
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The -2 sentinel for "timed out" must render a clear, actionable
+    /// message — the GUI shows this verbatim in a toast, so it needs to
+    /// guide the user instead of displaying a cryptic exit code.
+    #[test]
+    fn test_auth_login_timeout_error_message() {
+        let err = OnboardError::AuthLoginFailed(-2);
+        let msg = err.to_string();
+        assert!(
+            msg.contains("timed out"),
+            "timeout message should say 'timed out'; got: {msg}"
+        );
+        assert!(
+            msg.contains("try again"),
+            "timeout message should include a recovery hint; got: {msg}"
+        );
+    }
+
+    #[test]
+    fn test_auth_login_non_timeout_exit_code_is_reported() {
+        // Any non-(-2) exit code should include the actual code so the
+        // user can diagnose (e.g. 1 = generic CC failure).
+        let err = OnboardError::AuthLoginFailed(1);
+        assert!(err.to_string().contains("1"));
+    }
 }
