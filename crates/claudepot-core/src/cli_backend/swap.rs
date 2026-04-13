@@ -372,10 +372,32 @@ fn delete_file(account_id: Uuid) -> Result<(), SwapError> {
 #[cfg(target_os = "macos")]
 fn save_to_keyring(account_id: Uuid, blob: &str) -> std::io::Result<()> {
     use std::process::Command;
+    // Delete any existing item first so our ACL flags always apply (the
+    // `-U` update path leaves a pre-existing ACL unchanged, which is what
+    // made reads fail from a GUI subprocess context — existing items had
+    // a per-app ACL that didn't cover the invoking process).
+    //
+    // Errors from delete are ignored: NotFound is fine, any other error
+    // will surface on the subsequent add anyway.
+    let _ = Command::new("/usr/bin/security")
+        .args([
+            "delete-generic-password",
+            "-a",
+            &account_id.to_string(),
+            "-s",
+            KEYCHAIN_SERVICE,
+        ])
+        .output();
+
+    // -A: grant access to all applications without prompting. Without this,
+    // the item's ACL lists only the signing identity that created it, which
+    // breaks reads from a GUI subprocess with errSecAuthFailed (code 36).
+    // The item itself stays protected by the login keychain being unlocked,
+    // so -A is a safe broadening.
     let out = Command::new("/usr/bin/security")
         .args([
             "add-generic-password",
-            "-U", // update if exists
+            "-A", // always-allow: any app, no ACL prompts
             "-a",
             &account_id.to_string(),
             "-s",
