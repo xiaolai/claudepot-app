@@ -18,8 +18,10 @@ export const api = {
     invoke<RegisterOutcome>("account_add_from_current"),
   // Token-based onboarding is CLI-only — the refresh token must never enter
   // the webview JS heap. Use a future browser-flow command instead.
-  accountReimportFromCurrent: (uuid: string) =>
-    invoke<void>("account_reimport_from_current", { uuid }),
+  /// Re-log in via browser (opens Claude's OAuth flow) and imports the
+  /// resulting blob into the given account's slot. Can take several
+  /// minutes while the user completes auth in the browser.
+  accountLogin: (uuid: string) => invoke<void>("account_login", { uuid }),
   accountRemove: (uuid: string) =>
     invoke<RemoveOutcome>("account_remove", { uuid }),
 };
