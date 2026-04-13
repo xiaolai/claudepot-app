@@ -158,6 +158,33 @@ pub async fn desktop_use(email: String, no_launch: bool) -> Result<(), String> {
         .map_err(|e| format!("desktop switch failed: {e}"))
 }
 
+/// Idempotent startup sync: if CC is currently signed in as one of the
+/// registered Claudepot accounts, make sure Claudepot's stored blob
+/// and active_cli match. Lets users who ran `claude auth login`
+/// externally see healthy credentials the moment the GUI opens,
+/// without clicking anything.
+///
+/// Returns the email that was synced, or empty string if nothing matched.
+#[tauri::command]
+pub async fn sync_from_current_cc() -> Result<String, String> {
+    let store = open_store()?;
+    match services::account_service::sync_from_current_cc(&store).await {
+        Ok(Some(uuid)) => Ok(store
+            .find_by_uuid(uuid)
+            .ok()
+            .flatten()
+            .map(|a| a.email)
+            .unwrap_or_default()),
+        Ok(None) => Ok(String::new()),
+        // Best-effort: don't let sync failures block startup. Log and
+        // return empty so the UI proceeds normally.
+        Err(e) => {
+            tracing::warn!("sync_from_current_cc: {e}");
+            Ok(String::new())
+        }
+    }
+}
+
 /// Spawn `claude auth login` (browser opens), wait for the user to
 /// complete OAuth, then import CC's fresh blob into the existing
 /// account's slot with identity verification.
