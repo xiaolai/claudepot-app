@@ -119,6 +119,9 @@ pub enum OnboardError {
     })]
     AuthLoginFailed(i32),
 
+    #[error("login cancelled")]
+    AuthLoginCancelled,
+
     #[error("import failed: no credentials at hashed service name for {0}")]
     ImportFailed(String),
 

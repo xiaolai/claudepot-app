@@ -128,6 +128,45 @@ describe("AccountCard — button disable logic", () => {
     ).toBeInTheDocument();
   });
 
+  it("shows Cancel-login during an in-flight login, calls account_login_cancel", async () => {
+    const user = userEvent.setup();
+    // account_login resolves only when cancel fires, so we can drive the
+    // in-flight state. Use a deferred-like pattern.
+    let rejectLogin: ((e: Error) => void) | null = null;
+    const cancel = vi.fn(() => {
+      rejectLogin?.(new Error("login cancelled"));
+    });
+    await renderApp({
+      app_status: () => sampleStatus({ account_count: 1 }),
+      account_list: () => [
+        sampleAccount({
+          credentials_healthy: false,
+          token_status: "missing",
+        }),
+      ],
+      account_login: () =>
+        new Promise((_resolve, reject) => {
+          rejectLogin = reject;
+        }),
+      account_login_cancel: cancel,
+    });
+
+    await user.click(await screen.findByRole("button", { name: /^log in$/i }));
+    // Button flips to Cancel login while the subprocess is running.
+    const cancelBtn = await screen.findByRole("button", {
+      name: /cancel login/i,
+    });
+    await user.click(cancelBtn);
+
+    await waitFor(() => {
+      expect(cancel).toHaveBeenCalledTimes(1);
+    });
+    // After the promise rejects with "cancelled", Log in returns.
+    expect(
+      await screen.findByRole("button", { name: /^log in$/i }),
+    ).toBeInTheDocument();
+  });
+
   it("shows Log in (not Use CLI) when the stored blob is unhealthy", async () => {
     await renderApp({
       app_status: () => sampleStatus({ account_count: 1 }),

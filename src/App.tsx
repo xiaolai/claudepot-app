@@ -73,9 +73,24 @@ function App() {
         pushToast("info", `Signed in as ${a.email}`);
         await refresh();
       } catch (e) {
-        pushToast("error", `Login failed: ${e}`);
+        // Cancel produces a specific "login cancelled" string from Rust;
+        // present it as an info toast, not an error, since the user asked.
+        const msg = `${e}`;
+        if (msg.toLowerCase().includes("cancelled")) {
+          pushToast("info", "Login cancelled.");
+        } else {
+          pushToast("error", `Login failed: ${msg}`);
+        }
       }
     });
+
+  const cancelLogin = async () => {
+    try {
+      await api.accountLoginCancel();
+    } catch (e) {
+      pushToast("error", `Cancel failed: ${e}`);
+    }
+  };
 
   const useDesktop = (a: AccountSummary) =>
     withBusy(`desk-${a.uuid}`, async () => {
@@ -156,6 +171,7 @@ function App() {
               onUseCli={() => useCli(a)}
               onUseDesktop={() => useDesktop(a)}
               onLogin={() => login(a)}
+              onCancelLogin={cancelLogin}
               onRemove={() => setConfirmRemove(a)}
             />
           ))
@@ -253,6 +269,7 @@ function AccountCard({
   onUseCli,
   onUseDesktop,
   onLogin,
+  onCancelLogin,
   onRemove,
 }: {
   account: AccountSummary;
@@ -261,6 +278,7 @@ function AccountCard({
   onUseCli: () => void;
   onUseDesktop: () => void;
   onLogin: () => void;
+  onCancelLogin: () => void;
   onRemove: () => void;
 }) {
   const cliBusy = busyKey === `cli-${a.uuid}`;
@@ -293,6 +311,16 @@ function AccountCard({
           >
             {cliBusy ? "…" : a.is_cli_active ? "✓ CLI" : "Use CLI"}
           </button>
+        ) : reBusy ? (
+          // Login in flight for this account — show Cancel so the user
+          // can abort if they closed the browser or changed their mind.
+          <button
+            onClick={onCancelLogin}
+            className="danger"
+            title="Cancel the in-flight browser login"
+          >
+            Cancel login
+          </button>
         ) : (
           <button
             onClick={onLogin}
@@ -300,7 +328,7 @@ function AccountCard({
             className="warn"
             title={`Sign in as ${a.email} — opens the browser, imports credentials.`}
           >
-            {reBusy ? "…" : "Log in"}
+            Log in
           </button>
         )}
         <button
