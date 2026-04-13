@@ -9,6 +9,10 @@ import type {
 
 export const api = {
   appStatus: () => invoke<AppStatus>("app_status"),
+  /// Idempotent startup adoption: if CC holds credentials for one of the
+  /// registered accounts, imports them into the matching slot. Returns
+  /// the synced email (empty string when nothing matched).
+  syncFromCurrentCc: () => invoke<string>("sync_from_current_cc"),
   accountList: () => invoke<AccountSummary[]>("account_list"),
   cliUse: (email: string) => invoke<void>("cli_use", { email }),
   cliClear: () => invoke<void>("cli_clear"),

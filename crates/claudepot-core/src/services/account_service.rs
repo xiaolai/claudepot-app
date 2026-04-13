@@ -243,6 +243,73 @@ pub async fn register_from_browser(store: &AccountStore) -> Result<RegisterResul
     })
 }
 
+/// Sync Claudepot state with whatever account CC is currently signed in
+/// as. Idempotent; designed to run on GUI startup so users who logged in
+/// externally (or in a previous session) don't see stale "missing" badges.
+///
+/// Returns `Ok(Some(uuid))` if a sync happened, `Ok(None)` if there was
+/// nothing to adopt (CC empty, or its blob matches no registered email).
+/// Errors bubble up, but callers typically log-and-continue.
+pub async fn sync_from_current_cc(store: &AccountStore) -> Result<Option<Uuid>, RegisterError> {
+    let platform = cli_backend::create_platform();
+    sync_from_current_cc_with(store, platform.as_ref(), &DefaultProfileFetcher).await
+}
+
+pub(crate) async fn sync_from_current_cc_with(
+    store: &AccountStore,
+    platform: &dyn cli_backend::CliPlatform,
+    fetch_profile: &dyn ProfileFetcher,
+) -> Result<Option<Uuid>, RegisterError> {
+    let blob_str = match platform
+        .read_default()
+        .await
+        .map_err(|e| RegisterError::CredentialRead(e.to_string()))?
+    {
+        Some(b) => b,
+        None => return Ok(None), // CC has no credentials — nothing to sync.
+    };
+
+    let blob = match CredentialBlob::from_json(&blob_str) {
+        Ok(b) => b,
+        Err(_) => return Ok(None), // Unparseable — leave it alone.
+    };
+
+    let email = fetch_profile
+        .fetch(&blob.claude_ai_oauth.access_token)
+        .await
+        .map_err(|e| RegisterError::ProfileFetch(e.to_string()))?
+        .email;
+
+    let account = match store
+        .find_by_email(&email)
+        .map_err(|e| RegisterError::Store(e.to_string()))?
+    {
+        Some(a) => a,
+        None => return Ok(None), // Unknown account — user hasn't added it yet.
+    };
+
+    // Write if the stored blob differs from or is missing vs. CC's current.
+    let needs_write = match swap::load_private(account.uuid) {
+        Ok(stored) => stored != blob_str,
+        Err(_) => true,
+    };
+    if needs_write {
+        swap::save_private(account.uuid, &blob_str)
+            .map_err(|e| RegisterError::CredentialWrite(e.to_string()))?;
+        let _ = store.update_credentials_flag(account.uuid, true);
+    }
+
+    // Always sync the active pointer so downstream swaps see the truth.
+    if let Err(e) = store.set_active_cli(account.uuid) {
+        tracing::warn!(
+            "sync_from_current_cc: set_active_cli({}) failed: {e}",
+            account.uuid
+        );
+    }
+
+    Ok(Some(account.uuid))
+}
+
 /// Launch `claude auth login` (which opens the browser), wait for the
 /// user to complete OAuth, then import CC's resulting blob into the
 /// EXISTING account's slot. The full "Log in" UX.
@@ -900,6 +967,82 @@ mod tests {
         assert!(!result.was_cli_active);
         assert!(!result.was_desktop_active);
         assert!(!result.had_desktop_profile);
+    }
+
+    // -- sync_from_current_cc --
+
+    #[tokio::test]
+    async fn test_sync_adopts_cc_blob_when_email_matches_registered_account() {
+        // Startup scenario: CC is signed in as an account the user has
+        // already registered in Claudepot, but Claudepot's stored blob
+        // slot for that account is empty (e.g. after a reinstall).
+        // sync_from_current_cc should write the blob + flip the flag +
+        // set active_cli — no user action needed.
+        let _lock = crate::testing::lock_data_dir();
+        let _env = setup_test_data_dir();
+        let (store, _db) = test_store();
+
+        let account = insert_account(&store, "alice@example.com");
+        // DB flag was flipped off (e.g. reinstall wiped storage).
+        let _ = store.update_credentials_flag(account.uuid, false);
+        let platform = MockPlatform {
+            blob: Some(fresh_blob_json()),
+        };
+        let fetcher = MockProfileFetcher::ok("alice@example.com");
+
+        let synced = sync_from_current_cc_with(&store, &platform, &fetcher)
+            .await
+            .unwrap();
+
+        assert_eq!(synced, Some(account.uuid), "should report the synced uuid");
+        // Blob now in Claudepot's storage.
+        assert_eq!(swap::load_private(account.uuid).unwrap(), fresh_blob_json());
+        // active_cli aligned with CC's current reality.
+        assert_eq!(
+            store.active_cli_uuid().unwrap(),
+            Some(account.uuid.to_string())
+        );
+
+        swap::delete_private(account.uuid).unwrap();
+    }
+
+    #[tokio::test]
+    async fn test_sync_is_noop_when_cc_email_is_not_registered() {
+        // CC holds a blob for an account Claudepot doesn't know about.
+        // We should NOT auto-register; just leave the state alone.
+        let _lock = crate::testing::lock_data_dir();
+        let _env = setup_test_data_dir();
+        let (store, _db) = test_store();
+
+        let platform = MockPlatform {
+            blob: Some(fresh_blob_json()),
+        };
+        let fetcher = MockProfileFetcher::ok("stranger@example.com");
+
+        let result = sync_from_current_cc_with(&store, &platform, &fetcher)
+            .await
+            .unwrap();
+
+        assert_eq!(result, None);
+        // No accounts were registered.
+        assert_eq!(store.list().unwrap().len(), 0);
+    }
+
+    #[tokio::test]
+    async fn test_sync_is_noop_when_cc_has_no_credentials() {
+        // CC empty (logged out) — sync should return Ok(None).
+        let _lock = crate::testing::lock_data_dir();
+        let _env = setup_test_data_dir();
+        let (store, _db) = test_store();
+
+        insert_account(&store, "alice@example.com");
+        let platform = MockPlatform { blob: None };
+        let fetcher = MockProfileFetcher::ok("alice@example.com");
+
+        let result = sync_from_current_cc_with(&store, &platform, &fetcher)
+            .await
+            .unwrap();
+        assert_eq!(result, None);
     }
 
     // -- Group 5: account service rollbacks --
