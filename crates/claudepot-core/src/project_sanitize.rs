@@ -5,9 +5,19 @@ pub(crate) const MAX_SANITIZED_LENGTH: usize = 200;
 /// Replicate CC's `sanitizePath`. Non-alphanumeric ASCII chars become `-`.
 /// Paths longer than 200 chars get a djb2 hash suffix.
 pub fn sanitize_path(name: &str) -> String {
+    // Iterate UTF-16 code units to match JS's `.replace(/[^a-zA-Z0-9]/g, '-')`.
+    // JS strings are UTF-16, so surrogate pairs (emoji, etc.) produce 2 hyphens
+    // where Rust's char iterator would produce 1.
     let sanitized: String = name
-        .chars()
-        .map(|c| if c.is_ascii_alphanumeric() { c } else { '-' })
+        .encode_utf16()
+        .map(|u| {
+            let c = u as u8;
+            if u < 128 && (c as char).is_ascii_alphanumeric() {
+                c as char
+            } else {
+                '-'
+            }
+        })
         .collect();
     if sanitized.len() <= MAX_SANITIZED_LENGTH {
         sanitized
@@ -23,17 +33,24 @@ pub fn unsanitize_path(sanitized: &str) -> String {
     sanitized.replace('-', "/")
 }
 
-/// djb2 string hash (Daniel J. Bernstein). Returns the hash as a base-36 string.
+/// CC's djb2 hash — matches `djb2Hash()` in CC's `hash.ts`.
+///
+/// CC uses: seed=0, multiplier=31 (via `(h<<5)-h`), signed 32-bit,
+/// then `Math.abs().toString(36)`. Input is UTF-16 code units
+/// (JavaScript's `.charCodeAt()`), not UTF-8 bytes.
 ///
 /// This is a 32-bit hash, so collisions are expected at ~65 536 entries
 /// (birthday bound). We accept this because CC uses the same algorithm
 /// and we must produce identical directory names for compatibility.
 pub(crate) fn djb2_hash(s: &str) -> String {
-    let mut hash: u32 = 5381;
-    for byte in s.bytes() {
-        hash = hash.wrapping_mul(33).wrapping_add(byte as u32);
+    let mut hash: i32 = 0;
+    // Iterate UTF-16 code units to match JavaScript's charCodeAt()
+    for code_unit in s.encode_utf16() {
+        hash = hash.wrapping_mul(31).wrapping_add(code_unit as i32);
     }
-    format_radix(hash, 36)
+    // CC does Math.abs(hash).toString(36)
+    let abs = (hash as i64).unsigned_abs() as u32;
+    format_radix(abs, 36)
 }
 
 pub(crate) fn format_radix(mut x: u32, radix: u32) -> String {

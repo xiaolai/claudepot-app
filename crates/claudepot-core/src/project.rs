@@ -711,18 +711,37 @@ mod tests {
     }
 
     #[test]
+    fn test_sanitize_emoji_matches_cc_utf16() {
+        // JS sees emoji as 2 surrogate code units → 2 hyphens.
+        // Our sanitize_path must produce the same result.
+        assert_eq!(sanitize_path("/tmp/\u{1F389}project"), "-tmp---project");
+        // NFC accented char is 1 code unit → 1 hyphen
+        assert_eq!(sanitize_path("/tmp/caf\u{00e9}"), "-tmp-caf-");
+    }
+
+    #[test]
     fn test_djb2_hash_collision_exists() {
         // djb2 is a 32-bit hash; collisions are inevitable.
-        // "ku" and "lT" produce the same djb2 hash (verified by brute-force search).
-        let h1 = djb2_hash("ku");
-        let h2 = djb2_hash("lT");
-        assert_eq!(h1, h2, "Expected djb2 collision between 'ku' and 'lT'");
-        assert_eq!(h1, "3hocl");
+        // "aaa" and "abB" produce the same hash (verified by brute-force search
+        // against CC's JS implementation).
+        let h1 = djb2_hash("aaa");
+        let h2 = djb2_hash("abB");
+        assert_eq!(h1, h2, "Expected djb2 collision between 'aaa' and 'abB'");
+        assert_eq!(h1, "22bl");
+    }
+
+    #[test]
+    fn test_djb2_hash_matches_cc() {
+        // Verify our hash matches CC's djb2Hash + Math.abs + toString(36)
+        // for a known long path. Expected value computed with CC's JS implementation.
+        let long_path = "/Users/joker/".to_string() + &"a".repeat(250);
+        let hash = djb2_hash(&long_path);
+        assert_eq!(hash, "lwkvhu", "hash must match CC's JS output");
     }
 
     #[test]
     fn test_sanitize_long_path_exact_hash() {
-        // Verify that a specific long path produces the expected hash suffix.
+        // Verify that a specific long path produces the CC-compatible hash suffix.
         let long_path = format!(
             "/Users/joker/github/xiaolai/myprojects/{}",
             "a".repeat(200)
@@ -731,11 +750,10 @@ mod tests {
         // Path is 239 chars, sanitized > 200, so hash is appended
         assert!(result.len() > MAX_SANITIZED_LENGTH);
         let expected_hash = djb2_hash(&long_path);
-        assert_eq!(expected_hash, "49t8tq");
         assert!(
             result.ends_with(&format!("-{}", expected_hash)),
-            "Expected hash suffix '-49t8tq', got: {}",
-            result
+            "Expected hash suffix '-{}', got: {}",
+            expected_hash, result
         );
     }
 
