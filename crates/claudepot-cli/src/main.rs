@@ -7,7 +7,10 @@ mod commands;
 mod output;
 
 #[derive(Parser)]
-#[command(name = "claudepot", about = "Multi-account Claude Code / Desktop switcher")]
+#[command(
+    name = "claudepot",
+    about = "Multi-account Claude Code / Desktop switcher"
+)]
 struct Cli {
     /// Output JSON instead of human-readable text
     #[arg(long, short, global = true)]
@@ -204,9 +207,10 @@ async fn main() -> Result<()> {
     match cli.command {
         Commands::Account { action } => match action {
             AccountAction::List => commands::account::list(&ctx)?,
-            AccountAction::Add { from_current, from_token } => {
-                commands::account::add(&ctx, from_current, from_token).await?
-            }
+            AccountAction::Add {
+                from_current,
+                from_token,
+            } => commands::account::add(&ctx, from_current, from_token).await?,
             AccountAction::Remove { email } => commands::account::remove(&ctx, &email)?,
             AccountAction::Inspect { email } => commands::account::inspect(&ctx, &email).await?,
         },
@@ -216,9 +220,11 @@ async fn main() -> Result<()> {
                 commands::cli_ops::use_account(&ctx, &email, no_refresh).await?
             }
             CliAction::Clear => commands::cli_ops::clear(&ctx).await?,
-            CliAction::Run { email, print_token, args } => {
-                commands::cli_ops::run(&ctx, &email, print_token, &args).await?
-            }
+            CliAction::Run {
+                email,
+                print_token,
+                args,
+            } => commands::cli_ops::run(&ctx, &email, print_token, &args).await?,
         },
         Commands::Desktop { action } => match action {
             DesktopAction::Status => commands::desktop_ops::status(&ctx).await?,
@@ -237,11 +243,9 @@ async fn main() -> Result<()> {
                 overwrite,
                 force,
                 dry_run,
-            } => {
-                commands::project::move_project(
-                    &ctx, &old_path, &new_path, no_move, merge, overwrite, force, dry_run,
-                )?
-            }
+            } => commands::project::move_project(
+                &ctx, &old_path, &new_path, no_move, merge, overwrite, force, dry_run,
+            )?,
             ProjectAction::Clean { dry_run } => commands::project::clean(&ctx, dry_run)?,
         },
         Commands::Doctor => commands::doctor::run(&ctx).await?,

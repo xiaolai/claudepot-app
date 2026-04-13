@@ -38,9 +38,9 @@ impl super::DesktopPlatform for WindowsDesktop {
     async fn is_running(&self) -> bool {
         let mut sys = sysinfo::System::new();
         sys.refresh_processes(sysinfo::ProcessesToUpdate::All, true);
-        sys.processes().values().any(|p| {
-            p.name().to_string_lossy() == "Claude.exe"
-        })
+        sys.processes()
+            .values()
+            .any(|p| p.name().to_string_lossy() == "Claude.exe")
     }
 
     async fn quit(&self) -> Result<(), DesktopSwapError> {

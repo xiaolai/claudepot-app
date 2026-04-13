@@ -4,7 +4,8 @@ use serde::Deserialize;
 
 const TOKEN_URL: &str = "https://platform.claude.com/v1/oauth/token";
 const CLIENT_ID: &str = "9d1c250a-e61b-44d9-88ed-5944d1962f5e";
-const DEFAULT_SCOPES: &str = "user:file_upload user:inference user:mcp_servers user:profile user:sessions:claude_code";
+const DEFAULT_SCOPES: &str =
+    "user:file_upload user:inference user:mcp_servers user:profile user:sessions:claude_code";
 
 #[derive(Debug, Deserialize)]
 pub struct TokenResponse {
@@ -40,11 +41,15 @@ pub async fn refresh(refresh_token: &str) -> Result<TokenResponse, OAuthError> {
             .and_then(|v| v.to_str().ok())
             .and_then(|s| s.parse::<u64>().ok())
             .unwrap_or(60);
-        return Err(OAuthError::RateLimited { retry_after_secs: retry_after });
+        return Err(OAuthError::RateLimited {
+            retry_after_secs: retry_after,
+        });
     }
     if !status.is_success() {
         let _ = resp.text().await; // consume without exposing
-        return Err(OAuthError::RefreshFailed(format!("token endpoint returned {status}")));
+        return Err(OAuthError::RefreshFailed(format!(
+            "token endpoint returned {status}"
+        )));
     }
 
     let token_resp: TokenResponse = resp.json().await?;
@@ -55,7 +60,8 @@ pub async fn refresh(refresh_token: &str) -> Result<TokenResponse, OAuthError> {
 /// preserving the original blob's subscription metadata if provided.
 pub fn build_blob(resp: &TokenResponse, original: Option<&crate::blob::CredentialBlob>) -> String {
     let expires_at_ms = chrono::Utc::now().timestamp_millis() + (resp.expires_in as i64 * 1000);
-    let scopes: Vec<&str> = resp.scope
+    let scopes: Vec<&str> = resp
+        .scope
         .as_deref()
         .unwrap_or(DEFAULT_SCOPES)
         .split(' ')
@@ -79,7 +85,8 @@ pub fn build_blob(resp: &TokenResponse, original: Option<&crate::blob::Credentia
             "subscriptionType": sub_type,
             "rateLimitTier": rate_tier
         }
-    }).to_string()
+    })
+    .to_string()
 }
 
 #[cfg(test)]
@@ -101,16 +108,28 @@ mod tests {
     fn test_build_blob_preserves_subscription_metadata() {
         let original_json = crate::testing::sample_blob_json(0);
         let original = CredentialBlob::from_json(&original_json).unwrap();
-        assert_eq!(original.claude_ai_oauth.subscription_type.as_deref(), Some("pro"));
-        assert_eq!(original.claude_ai_oauth.rate_limit_tier.as_deref(), Some("default_claude_pro"));
+        assert_eq!(
+            original.claude_ai_oauth.subscription_type.as_deref(),
+            Some("pro")
+        );
+        assert_eq!(
+            original.claude_ai_oauth.rate_limit_tier.as_deref(),
+            Some("default_claude_pro")
+        );
 
         let resp = make_token_response();
         let result_json = build_blob(&resp, Some(&original));
         let result = CredentialBlob::from_json(&result_json).unwrap();
 
         assert_eq!(result.claude_ai_oauth.access_token, "sk-ant-oat01-new");
-        assert_eq!(result.claude_ai_oauth.subscription_type.as_deref(), Some("pro"));
-        assert_eq!(result.claude_ai_oauth.rate_limit_tier.as_deref(), Some("default_claude_pro"));
+        assert_eq!(
+            result.claude_ai_oauth.subscription_type.as_deref(),
+            Some("pro")
+        );
+        assert_eq!(
+            result.claude_ai_oauth.rate_limit_tier.as_deref(),
+            Some("default_claude_pro")
+        );
     }
 
     #[test]
@@ -120,7 +139,10 @@ mod tests {
         let result = CredentialBlob::from_json(&result_json).unwrap();
 
         assert_eq!(result.claude_ai_oauth.access_token, "sk-ant-oat01-new");
-        assert_eq!(result.claude_ai_oauth.subscription_type.as_deref(), Some(""));
+        assert_eq!(
+            result.claude_ai_oauth.subscription_type.as_deref(),
+            Some("")
+        );
         assert_eq!(result.claude_ai_oauth.rate_limit_tier.as_deref(), Some(""));
     }
 

@@ -1,5 +1,5 @@
-use anyhow::Result;
 use crate::AppContext;
+use anyhow::Result;
 use claudepot_core::paths;
 use claudepot_core::project::{self, format_size};
 use std::time::SystemTime;
@@ -24,17 +24,16 @@ pub fn list(ctx: &AppContext) -> Result<()> {
 
     // Header
     println!(
-        "  {:<50}  {:>8}  {:>6}  {:>9}  {:>10}  {}",
-        "Path", "Sessions", "Memory", "Size", "Last used", "Status"
+        "  {:<50}  {:>8}  {:>6}  {:>9}  {:>10}  Status",
+        "Path", "Sessions", "Memory", "Size", "Last used"
     );
     println!(
-        "  {:<50}  {:>8}  {:>6}  {:>9}  {:>10}  {}",
+        "  {:<50}  {:>8}  {:>6}  {:>9}  {:>10}  \u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}",
         "\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}",
         "\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}",
         "\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}",
         "\u{2500}\u{2500}\u{2500}\u{2500}",
-        "\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}",
-        "\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}"
+        "\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}"
     );
 
     for p in &projects {
@@ -51,12 +50,20 @@ pub fn list(ctx: &AppContext) -> Result<()> {
         };
         let last_used = p
             .last_modified
-            .map(|t| format_relative_time(t))
+            .map(format_relative_time)
             .unwrap_or_else(|| "unknown".to_string());
 
         // Truncate path for display (char-safe to avoid panic on multibyte)
         let display_path = if p.original_path.chars().count() > 50 {
-            let tail: String = p.original_path.chars().rev().take(47).collect::<Vec<_>>().into_iter().rev().collect();
+            let tail: String = p
+                .original_path
+                .chars()
+                .rev()
+                .take(47)
+                .collect::<Vec<_>>()
+                .into_iter()
+                .rev()
+                .collect();
             format!("...{}", tail)
         } else {
             p.original_path.clone()
@@ -111,7 +118,11 @@ pub fn show(ctx: &AppContext, path: &str) -> Result<()> {
     println!(
         "  Memory:    {} file{}{}",
         detail.info.memory_file_count,
-        if detail.info.memory_file_count == 1 { "" } else { "s" },
+        if detail.info.memory_file_count == 1 {
+            ""
+        } else {
+            "s"
+        },
         if detail.memory_files.is_empty() {
             String::new()
         } else {
@@ -124,7 +135,7 @@ pub fn show(ctx: &AppContext, path: &str) -> Result<()> {
         detail
             .info
             .last_modified
-            .map(|t| format_absolute_time(t))
+            .map(format_absolute_time)
             .unwrap_or_else(|| "unknown".to_string())
     );
 
@@ -138,7 +149,7 @@ pub fn show(ctx: &AppContext, path: &str) -> Result<()> {
         for s in &detail.sessions {
             let last = s
                 .last_modified
-                .map(|t| format_absolute_time(t))
+                .map(format_absolute_time)
                 .unwrap_or_else(|| "unknown".to_string());
 
             // Truncate session ID for display
@@ -160,6 +171,7 @@ pub fn show(ctx: &AppContext, path: &str) -> Result<()> {
     Ok(())
 }
 
+#[allow(clippy::too_many_arguments)]
 pub fn move_project(
     ctx: &AppContext,
     old_path: &str,
@@ -206,9 +218,7 @@ pub fn move_project(
     }
     if result.cc_dir_renamed {
         println!("  \u{2713} Renamed CC project data");
-        if let (Some(old_san), Some(new_san)) =
-            (&result.old_sanitized, &result.new_sanitized)
-        {
+        if let (Some(old_san), Some(new_san)) = (&result.old_sanitized, &result.new_sanitized) {
             println!("    {} \u{2192} {}", old_san, new_san);
         }
     }
@@ -255,12 +265,20 @@ pub fn clean(ctx: &AppContext, dry_run: bool) -> Result<()> {
     for o in &orphans {
         let last = o
             .last_modified
-            .map(|t| format_relative_time(t))
+            .map(format_relative_time)
             .unwrap_or_else(|| "unknown".to_string());
         println!(
             "  {:<50}  {} session{}  {:>9}  {}",
             if o.original_path.chars().count() > 50 {
-                let tail: String = o.original_path.chars().rev().take(47).collect::<Vec<_>>().into_iter().rev().collect();
+                let tail: String = o
+                    .original_path
+                    .chars()
+                    .rev()
+                    .take(47)
+                    .collect::<Vec<_>>()
+                    .into_iter()
+                    .rev()
+                    .collect();
                 format!("...{}", tail)
             } else {
                 o.original_path.clone()
@@ -290,7 +308,11 @@ pub fn clean(ctx: &AppContext, dry_run: bool) -> Result<()> {
         println!(
             "\u{2713} Removed {} project{}, freed {}.",
             real_result.orphans_removed,
-            if real_result.orphans_removed == 1 { "" } else { "s" },
+            if real_result.orphans_removed == 1 {
+                ""
+            } else {
+                "s"
+            },
             format_size(real_result.bytes_freed)
         );
     }

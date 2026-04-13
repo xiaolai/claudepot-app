@@ -1,10 +1,10 @@
 //! Desktop session swap — quit, snapshot, restore, relaunch.
 
+use super::DesktopPlatform;
 use crate::error::DesktopSwapError;
 use crate::paths;
-use super::DesktopPlatform;
-use uuid::Uuid;
 use std::path::Path;
+use uuid::Uuid;
 
 /// Snapshot the current Desktop session items into the profile dir for `account_id`.
 pub fn snapshot(
@@ -58,6 +58,10 @@ pub fn restore(
         if src.is_dir() {
             copy_dir_recursive(&src, &dst)?;
         } else if src.is_file() {
+            // Nested items like "Network/Cookies" need the parent staged.
+            if let Some(parent) = dst.parent() {
+                std::fs::create_dir_all(parent)?;
+            }
             std::fs::copy(&src, &dst)?;
         }
     }
@@ -76,8 +80,7 @@ pub fn restore(
                 std::fs::create_dir_all(parent)?;
             }
             let copy_result = if src.is_dir() {
-                copy_dir_recursive(&src, &dst)
-                    .and_then(|_| std::fs::remove_dir_all(&src))
+                copy_dir_recursive(&src, &dst).and_then(|_| std::fs::remove_dir_all(&src))
             } else {
                 std::fs::copy(&src, &dst)
                     .map(|_| ())
@@ -86,9 +89,9 @@ pub fn restore(
             if let Err(e) = copy_result {
                 // Phase-2 failure: rollback already-moved items
                 rollback(data_dir, holding_dir.path(), &moved);
-                return Err(DesktopSwapError::FileCopyFailed(
-                    format!("backup {item} failed: {e}"),
-                ));
+                return Err(DesktopSwapError::FileCopyFailed(format!(
+                    "backup {item} failed: {e}"
+                )));
             }
             moved.push(item.to_string());
         }
@@ -112,13 +115,16 @@ pub fn restore(
                 // Phase-3 failure: clean up partially-restored targets, then rollback
                 for r in &restored {
                     let p = data_dir.join(r);
-                    if p.is_dir() { let _ = std::fs::remove_dir_all(&p); }
-                    else if p.exists() { let _ = std::fs::remove_file(&p); }
+                    if p.is_dir() {
+                        let _ = std::fs::remove_dir_all(&p);
+                    } else if p.exists() {
+                        let _ = std::fs::remove_file(&p);
+                    }
                 }
                 rollback(data_dir, holding_dir.path(), &moved);
-                return Err(DesktopSwapError::FileCopyFailed(
-                    format!("restore {item} failed: {e}"),
-                ));
+                return Err(DesktopSwapError::FileCopyFailed(format!(
+                    "restore {item} failed: {e}"
+                )));
             }
             restored.push(item.to_string());
         }
@@ -152,8 +158,7 @@ pub async fn switch(
     target_id: Uuid,
     no_launch: bool,
 ) -> Result<(), DesktopSwapError> {
-    let data_dir = platform.data_dir()
-        .ok_or(DesktopSwapError::NotInstalled)?;
+    let data_dir = platform.data_dir().ok_or(DesktopSwapError::NotInstalled)?;
 
     if !data_dir.exists() {
         return Err(DesktopSwapError::NotInstalled);
@@ -171,10 +176,11 @@ pub async fn switch(
     if let Some(out_id) = outgoing_id {
         tracing::info!("saving profile for outgoing account...");
         snapshot(&data_dir, out_id, items)?;
-        store.update_desktop_profile_flag(out_id, true)
-            .map_err(|e| DesktopSwapError::Io(
-                std::io::Error::new(std::io::ErrorKind::Other, format!("db update failed: {e}"))
-            ))?;
+        store
+            .update_desktop_profile_flag(out_id, true)
+            .map_err(|e| {
+                DesktopSwapError::Io(std::io::Error::other(format!("db update failed: {e}")))
+            })?;
     }
 
     // Restore target
@@ -182,10 +188,9 @@ pub async fn switch(
     restore(&data_dir, target_id, items)?;
 
     // Update active pointer in store (before relaunch so state is consistent)
-    store.set_active_desktop(target_id)
-        .map_err(|e| DesktopSwapError::Io(
-            std::io::Error::new(std::io::ErrorKind::Other, format!("db update failed: {e}"))
-        ))?;
+    store.set_active_desktop(target_id).map_err(|e| {
+        DesktopSwapError::Io(std::io::Error::other(format!("db update failed: {e}")))
+    })?;
 
     // Relaunch
     if !no_launch {
@@ -200,7 +205,7 @@ pub async fn switch(
 mod tests {
     use super::*;
     use crate::error::DesktopSwapError;
-    use crate::testing::{DATA_DIR_LOCK, setup_test_data_dir, test_store, make_account};
+    use crate::testing::{make_account, setup_test_data_dir, test_store, DATA_DIR_LOCK};
     use std::fs;
     use std::sync::atomic::{AtomicBool, Ordering};
 
@@ -298,7 +303,10 @@ mod tests {
         snapshot(&data_dir, account_id, &["config.json"]).unwrap();
 
         let profile = crate::paths::desktop_profile_dir(account_id);
-        assert_eq!(fs::read_to_string(profile.join("config.json")).unwrap(), "v2");
+        assert_eq!(
+            fs::read_to_string(profile.join("config.json")).unwrap(),
+            "v2"
+        );
     }
 
     // -- restore tests --
@@ -470,19 +478,30 @@ mod tests {
         let mut platform = MockDesktopPlatform::new(&data_dir, &["config.json"]);
         platform.running.store(true, Ordering::SeqCst);
 
-        switch(&platform, &store, Some(out_acct.uuid), tgt_acct.uuid, false).await.unwrap();
+        switch(&platform, &store, Some(out_acct.uuid), tgt_acct.uuid, false)
+            .await
+            .unwrap();
 
         // Verify quit was called
         assert!(platform.quit_called.load(Ordering::SeqCst));
         // Verify launch was called
         assert!(platform.launch_called.load(Ordering::SeqCst));
         // Verify data_dir now has target's config
-        assert_eq!(fs::read_to_string(data_dir.join("config.json")).unwrap(), "target-config");
+        assert_eq!(
+            fs::read_to_string(data_dir.join("config.json")).unwrap(),
+            "target-config"
+        );
         // Verify outgoing was snapshotted
         let out_profile = crate::paths::desktop_profile_dir(out_acct.uuid);
-        assert_eq!(fs::read_to_string(out_profile.join("config.json")).unwrap(), "outgoing-config");
+        assert_eq!(
+            fs::read_to_string(out_profile.join("config.json")).unwrap(),
+            "outgoing-config"
+        );
         // Verify active desktop pointer
-        assert_eq!(store.active_desktop_uuid().unwrap(), Some(tgt_acct.uuid.to_string()));
+        assert_eq!(
+            store.active_desktop_uuid().unwrap(),
+            Some(tgt_acct.uuid.to_string())
+        );
     }
 
     #[tokio::test]
@@ -501,7 +520,9 @@ mod tests {
         fs::write(tgt_profile.join("config.json"), "cfg").unwrap();
 
         let platform = MockDesktopPlatform::new(&data_dir, &["config.json"]);
-        switch(&platform, &store, None, tgt.uuid, true).await.unwrap();
+        switch(&platform, &store, None, tgt.uuid, true)
+            .await
+            .unwrap();
 
         assert!(!platform.launch_called.load(Ordering::SeqCst));
     }
@@ -523,7 +544,9 @@ mod tests {
 
         let platform = MockDesktopPlatform::new(&data_dir, &["config.json"]);
         // running = false (default)
-        switch(&platform, &store, None, tgt.uuid, false).await.unwrap();
+        switch(&platform, &store, None, tgt.uuid, false)
+            .await
+            .unwrap();
 
         assert!(!platform.quit_called.load(Ordering::SeqCst));
     }
@@ -546,10 +569,15 @@ mod tests {
         let platform = MockDesktopPlatform::new(&data_dir, &["config.json"]);
 
         // outgoing_id = None
-        switch(&platform, &store, None, tgt.uuid, false).await.unwrap();
+        switch(&platform, &store, None, tgt.uuid, false)
+            .await
+            .unwrap();
 
         // Data dir should have target's config
-        assert_eq!(fs::read_to_string(data_dir.join("config.json")).unwrap(), "cfg");
+        assert_eq!(
+            fs::read_to_string(data_dir.join("config.json")).unwrap(),
+            "cfg"
+        );
     }
 
     #[tokio::test]
@@ -582,5 +610,361 @@ mod tests {
 
         let result = switch(&platform, &store, None, tgt.uuid, false).await;
         assert!(matches!(result, Err(DesktopSwapError::DesktopStillRunning)));
+    }
+
+    // -------------------------------------------------------------------
+    // Group 12 — Windows Desktop backend (nested session items).
+    // Windows has `Network/Cookies` instead of macOS's `Cookies`. These
+    // tests use MockDesktopPlatform with Windows-style items to verify
+    // snapshot/restore handle parent-dir creation for nested paths.
+    // -------------------------------------------------------------------
+
+    /// The 12 Windows session items from `desktop_backend/windows.rs`.
+    /// Kept in sync with `WindowsDesktop::session_items()`.
+    const WINDOWS_ITEMS: &[&str] = &[
+        "config.json",
+        "Network/Cookies",
+        "Network/Cookies-journal",
+        "Network/Network Persistent State",
+        "DIPS",
+        "DIPS-wal",
+        "Preferences",
+        "ant-did",
+        "git-worktrees.json",
+        "Local Storage",
+        "Session Storage",
+        "IndexedDB",
+    ];
+
+    fn populate_windows_data_dir(data_dir: &Path) {
+        fs::create_dir_all(data_dir.join("Network")).unwrap();
+        for item in WINDOWS_ITEMS {
+            let p = data_dir.join(item);
+            if item.ends_with("Storage") || item.ends_with("IndexedDB") {
+                fs::create_dir_all(&p).unwrap();
+                fs::write(p.join("data.dat"), format!("dir-{item}")).unwrap();
+            } else {
+                if let Some(parent) = p.parent() {
+                    fs::create_dir_all(parent).unwrap();
+                }
+                fs::write(&p, format!("file-{item}")).unwrap();
+            }
+        }
+    }
+
+    #[test]
+    fn test_desktop_snapshot_nested_session_items() {
+        let _lock = crate::testing::lock_data_dir();
+        let _env_dir = setup_test_data_dir();
+        let data_dir = _env_dir.path().join("Claude");
+        fs::create_dir_all(&data_dir).unwrap();
+        populate_windows_data_dir(&data_dir);
+
+        let account_id = Uuid::new_v4();
+        snapshot(&data_dir, account_id, WINDOWS_ITEMS).unwrap();
+
+        let profile = crate::paths::desktop_profile_dir(account_id);
+        // Parent Network/ must be created by the file-copy branch.
+        assert!(profile.join("Network").is_dir(), "Network dir missing");
+        assert_eq!(
+            fs::read_to_string(profile.join("Network/Cookies")).unwrap(),
+            "file-Network/Cookies"
+        );
+        assert_eq!(
+            fs::read_to_string(profile.join("Network/Cookies-journal")).unwrap(),
+            "file-Network/Cookies-journal"
+        );
+    }
+
+    #[test]
+    fn test_desktop_restore_nested_session_items() {
+        let _lock = crate::testing::lock_data_dir();
+        let _env_dir = setup_test_data_dir();
+        let data_dir = _env_dir.path().join("Claude");
+        fs::create_dir_all(&data_dir).unwrap();
+
+        let account_id = Uuid::new_v4();
+        // Pre-create a profile with nested content.
+        let profile = crate::paths::desktop_profile_dir(account_id);
+        fs::create_dir_all(profile.join("Network")).unwrap();
+        fs::write(profile.join("Network/Cookies"), "restored-cookies").unwrap();
+        fs::write(profile.join("config.json"), "restored-config").unwrap();
+
+        restore(&data_dir, account_id, &["config.json", "Network/Cookies"]).unwrap();
+
+        // Parent dir must be created by phase-3 create_dir_all(parent).
+        assert!(data_dir.join("Network").is_dir(), "Network dir not created");
+        assert_eq!(
+            fs::read_to_string(data_dir.join("Network/Cookies")).unwrap(),
+            "restored-cookies"
+        );
+        assert_eq!(
+            fs::read_to_string(data_dir.join("config.json")).unwrap(),
+            "restored-config"
+        );
+    }
+
+    // -------------------------------------------------------------------
+    // Group 3 — Desktop swap rollback (4 tests).
+    // -------------------------------------------------------------------
+
+    #[cfg(unix)]
+    #[test]
+    fn test_desktop_restore_phase2_failure_rollback() {
+        // Phase 2 moves data_dir items to the holding dir. If a later item
+        // fails to move, the already-moved items must be restored to data_dir.
+        // Strategy: put `config.json` and `Cookies` directly in data_dir, and
+        // `readonly_dir/file3` inside an un-removable subdir. Phase 2 moves the
+        // first two successfully, then fails on file3 (remove_file inside the
+        // 0o500 parent). Rollback must restore the first two.
+        //
+        // Skip when running as root (e.g. WSL2 default user): root ignores
+        // the 0o500 perm and the test's failure-injection mechanism does
+        // nothing.
+        if unsafe { libc::geteuid() } == 0 {
+            eprintln!("skipping: root bypasses chmod 0o500");
+            return;
+        }
+        use std::os::unix::fs::PermissionsExt;
+        let _lock = crate::testing::lock_data_dir();
+        let _env_dir = setup_test_data_dir();
+        let data_dir = _env_dir.path().join("Claude");
+        fs::create_dir_all(&data_dir).unwrap();
+
+        fs::write(data_dir.join("config.json"), "cfg-original").unwrap();
+        fs::write(data_dir.join("Cookies"), "cookies-original").unwrap();
+        let trap_dir = data_dir.join("readonly_dir");
+        fs::create_dir(&trap_dir).unwrap();
+        fs::write(trap_dir.join("file3"), "trapped").unwrap();
+
+        // Profile for the account being restored (must exist).
+        let account_id = Uuid::new_v4();
+        let profile = crate::paths::desktop_profile_dir(account_id);
+        fs::create_dir_all(&profile).unwrap();
+        fs::write(profile.join("config.json"), "profile-cfg").unwrap();
+
+        // Deny writes inside trap_dir so `remove_file` on readonly_dir/file3 fails.
+        fs::set_permissions(&trap_dir, fs::Permissions::from_mode(0o500)).unwrap();
+
+        let items: &[&str] = &["config.json", "Cookies", "readonly_dir/file3"];
+        let result = restore(&data_dir, account_id, items);
+
+        // Restore permissions BEFORE any assertion so cleanup works even on fail.
+        fs::set_permissions(&trap_dir, fs::Permissions::from_mode(0o755)).unwrap();
+
+        assert!(
+            matches!(result, Err(DesktopSwapError::FileCopyFailed(_))),
+            "phase 2 failure must surface as FileCopyFailed, got {:?}",
+            result
+        );
+        // Already-moved items restored to data_dir.
+        assert_eq!(
+            fs::read_to_string(data_dir.join("config.json")).unwrap(),
+            "cfg-original",
+            "config.json must be rolled back to original"
+        );
+        assert_eq!(
+            fs::read_to_string(data_dir.join("Cookies")).unwrap(),
+            "cookies-original",
+            "Cookies must be rolled back to original"
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn test_desktop_restore_phase3_failure_cleans_partial() {
+        // Phase 2 succeeds (all data_dir items moved to holding). Phase 3
+        // then copies from stage into data_dir — fail on the LAST item by
+        // making the data_dir itself read-only midway. The restore cleans
+        // partially-restored targets and rolls back from holding.
+        //
+        // Strategy: stage has items [a, b, c]. data_dir initially has [a, b, c].
+        // Make data_dir/c a DIRECTORY we've chmoded, so phase-3 copy into it
+        // fails. Phase 2 succeeds (removes a, b, c from data_dir). Phase 3
+        // starts: stage/a → data_dir/a OK; stage/b → data_dir/b OK; stage/c
+        // → data_dir/c — FAILS because the parent dir changed perms.
+        //
+        // Simpler realization: put item `c` inside a subdir whose perms we
+        // change to 0o500 AFTER phase 2 has moved things (but phase 2 runs
+        // synchronously inside restore()). To fail phase 3 only, we pre-create
+        // an unwritable DIRECTORY at the target path for item `c`, which
+        // causes `fs::copy` to fail without disturbing phase 2.
+        use std::os::unix::fs::PermissionsExt;
+        let _lock = crate::testing::lock_data_dir();
+        let _env_dir = setup_test_data_dir();
+        let data_dir = _env_dir.path().join("Claude");
+        fs::create_dir_all(&data_dir).unwrap();
+
+        fs::write(data_dir.join("a.json"), "a-orig").unwrap();
+        fs::write(data_dir.join("b.json"), "b-orig").unwrap();
+        fs::write(data_dir.join("c.json"), "c-orig").unwrap();
+
+        // Profile has content for all three items.
+        let account_id = Uuid::new_v4();
+        let profile = crate::paths::desktop_profile_dir(account_id);
+        fs::create_dir_all(&profile).unwrap();
+        fs::write(profile.join("a.json"), "a-new").unwrap();
+        fs::write(profile.join("b.json"), "b-new").unwrap();
+        fs::write(profile.join("c.json"), "c-new").unwrap();
+
+        // Phase 3 copy from stage/c.json → data_dir/c.json must fail.
+        // Pre-create data_dir/c.json as a DIRECTORY — phase 2 removes it (via
+        // remove_file for file). Actually phase 2 uses remove_file on files;
+        // if c.json is a directory, the `src.is_dir()` branch runs, calling
+        // copy_dir_recursive + remove_dir_all. That succeeds too.
+        //
+        // Trick: put c.json inside a subdir whose DATA DIR PARENT is writable,
+        // but the file CANNOT be placed at the final location. The cleanest:
+        // make data_dir itself read-only AFTER phase 2 removed items but
+        // BEFORE phase 3 restores. We can't inject code mid-run from a test.
+        //
+        // Alternative: set the stage item's PROFILE source file unreadable —
+        // phase 1 staging would fail before phase 2, which isn't what we want.
+        //
+        // Real approach: use an item path whose PARENT doesn't exist in
+        // data_dir, and phase-3's `let _ = create_dir_all(parent)` swallows
+        // errors. Then `fs::copy` fails because parent doesn't exist.
+        // Make the parent a FILE (not a dir) — create_dir_all will fail
+        // silently and fs::copy into a nonexistent dir fails.
+        fs::write(data_dir.join("blocker"), "this is a file, not a dir").unwrap();
+        fs::write(profile.join("blocker/nested.json"), "x").ok();
+        // Ensure the profile has a nested item where the data_dir parent is a file.
+        let profile_nested = profile.join("blocker");
+        let _ = fs::remove_file(&profile_nested);
+        fs::create_dir_all(&profile_nested).unwrap();
+        fs::write(profile_nested.join("nested.json"), "nested-new").unwrap();
+
+        let items: &[&str] = &["a.json", "b.json", "blocker/nested.json"];
+        let result = restore(&data_dir, account_id, items);
+
+        // Cleanup-safe assertions.
+        assert!(
+            matches!(result, Err(DesktopSwapError::FileCopyFailed(_))),
+            "phase 3 failure expected, got {:?}",
+            result
+        );
+        // Partially-restored items cleaned up + originals rolled back.
+        assert_eq!(
+            fs::read_to_string(data_dir.join("a.json")).unwrap(),
+            "a-orig",
+            "a.json rolled back from holding"
+        );
+        assert_eq!(
+            fs::read_to_string(data_dir.join("b.json")).unwrap(),
+            "b-orig",
+            "b.json rolled back from holding"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_desktop_switch_db_profile_flag_failure_propagates() {
+        // snapshot() succeeds, but the subsequent
+        // store.update_desktop_profile_flag() fails because we drop the
+        // accounts table. switch() must return Err rather than silently ignore.
+        let _lock = crate::testing::lock_data_dir();
+        let _env_dir = setup_test_data_dir();
+        let data_dir = _env_dir.path().join("Claude");
+        fs::create_dir_all(&data_dir).unwrap();
+        fs::write(data_dir.join("config.json"), "out-cfg").unwrap();
+
+        let (store, _db) = test_store();
+        let out = make_account("out@example.com");
+        let tgt = make_account("tgt@example.com");
+        store.insert(&out).unwrap();
+        store.insert(&tgt).unwrap();
+
+        let tgt_profile = crate::paths::desktop_profile_dir(tgt.uuid);
+        fs::create_dir_all(&tgt_profile).unwrap();
+        fs::write(tgt_profile.join("config.json"), "tgt-cfg").unwrap();
+
+        // Drop accounts table: snapshot writes files (OK), then DB update fails.
+        store.corrupt_for_test();
+
+        let platform = MockDesktopPlatform::new(&data_dir, &["config.json"]);
+        let result = switch(&platform, &store, Some(out.uuid), tgt.uuid, true).await;
+        assert!(
+            matches!(result, Err(DesktopSwapError::Io(_))),
+            "DB failure during update_desktop_profile_flag must surface as Err, got {:?}",
+            result
+        );
+    }
+
+    #[tokio::test]
+    async fn test_desktop_switch_db_active_pointer_failure_propagates() {
+        // Drop ONLY the state table: snapshot writes files (OK), accounts
+        // UPDATE for update_desktop_profile_flag works (if used), but
+        // set_active_desktop INSERTs into state → fails → switch() returns Err.
+        let _lock = crate::testing::lock_data_dir();
+        let _env_dir = setup_test_data_dir();
+        let data_dir = _env_dir.path().join("Claude");
+        fs::create_dir_all(&data_dir).unwrap();
+
+        let (store, _db) = test_store();
+        let tgt = make_account("tgt@example.com");
+        store.insert(&tgt).unwrap();
+
+        let tgt_profile = crate::paths::desktop_profile_dir(tgt.uuid);
+        fs::create_dir_all(&tgt_profile).unwrap();
+        fs::write(tgt_profile.join("config.json"), "tgt-cfg").unwrap();
+
+        store.corrupt_state_table_for_test();
+
+        let platform = MockDesktopPlatform::new(&data_dir, &["config.json"]);
+        // outgoing_id=None so we skip update_desktop_profile_flag — the only
+        // DB write is set_active_desktop, which needs the state table.
+        let result = switch(&platform, &store, None, tgt.uuid, true).await;
+        assert!(
+            matches!(result, Err(DesktopSwapError::Io(_))),
+            "DB failure during set_active_desktop must surface as Err, got {:?}",
+            result
+        );
+    }
+
+    #[tokio::test]
+    async fn test_desktop_switch_with_windows_items() {
+        let _lock = crate::testing::lock_data_dir();
+        let _env_dir = setup_test_data_dir();
+        let data_dir = _env_dir.path().join("Claude");
+        fs::create_dir_all(&data_dir).unwrap();
+        populate_windows_data_dir(&data_dir);
+
+        let (store, _db_dir) = test_store();
+        let out = make_account("out@example.com");
+        let tgt = make_account("tgt@example.com");
+        store.insert(&out).unwrap();
+        store.insert(&tgt).unwrap();
+
+        // Pre-populate target profile with distinct Network/Cookies content.
+        let tgt_profile = crate::paths::desktop_profile_dir(tgt.uuid);
+        fs::create_dir_all(tgt_profile.join("Network")).unwrap();
+        fs::write(tgt_profile.join("Network/Cookies"), "tgt-cookies").unwrap();
+        fs::write(tgt_profile.join("config.json"), "tgt-config").unwrap();
+
+        let mut platform = MockDesktopPlatform::new(&data_dir, WINDOWS_ITEMS);
+        platform.running.store(true, Ordering::SeqCst);
+
+        switch(&platform, &store, Some(out.uuid), tgt.uuid, true)
+            .await
+            .unwrap();
+
+        // Outgoing snapshot captured nested items.
+        let out_profile = crate::paths::desktop_profile_dir(out.uuid);
+        assert_eq!(
+            fs::read_to_string(out_profile.join("Network/Cookies")).unwrap(),
+            "file-Network/Cookies"
+        );
+        // Data dir now has target's content — nested path correctly restored.
+        assert_eq!(
+            fs::read_to_string(data_dir.join("Network/Cookies")).unwrap(),
+            "tgt-cookies"
+        );
+        assert_eq!(
+            fs::read_to_string(data_dir.join("config.json")).unwrap(),
+            "tgt-config"
+        );
+        assert_eq!(
+            store.active_desktop_uuid().unwrap(),
+            Some(tgt.uuid.to_string())
+        );
     }
 }

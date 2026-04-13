@@ -38,18 +38,14 @@ pub async fn get_access_token(account_id: Uuid) -> Result<String, LauncherError>
 
 /// Spawn a child process with CLAUDE_CODE_OAUTH_TOKEN injected.
 /// Returns the child's exit code.
-pub async fn run(
-    account_id: Uuid,
-    args: &[String],
-) -> Result<i32, LauncherError> {
+pub async fn run(account_id: Uuid, args: &[String]) -> Result<i32, LauncherError> {
     let access_token = get_access_token(account_id).await?;
 
     if args.is_empty() {
         return Err(LauncherError::NoCommand);
     }
 
-    let (cmd, cmd_args) = args.split_first()
-        .ok_or(LauncherError::NoCommand)?;
+    let (cmd, cmd_args) = args.split_first().ok_or(LauncherError::NoCommand)?;
 
     let status = tokio::process::Command::new(cmd)
         .args(cmd_args)
@@ -68,7 +64,7 @@ pub async fn run(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::testing::{lock_data_dir, setup_test_data_dir, fresh_blob_json};
+    use crate::testing::{fresh_blob_json, lock_data_dir, setup_test_data_dir};
 
     #[tokio::test]
     async fn test_get_access_token_fresh_returns_directly() {
@@ -128,7 +124,13 @@ mod tests {
         let id = Uuid::new_v4();
         swap::save_private(id, &fresh_blob_json()).unwrap();
 
+        // Cross-platform: `echo` is a cmd.exe builtin on Windows (no .exe),
+        // but `cmd /c exit 0` always works. On Unix, prefer `true`.
+        #[cfg(windows)]
+        let args = vec!["cmd".to_string(), "/c".to_string(), "exit 0".to_string()];
+        #[cfg(not(windows))]
         let args = vec!["echo".to_string(), "hello".to_string()];
+
         let exit_code = run(id, &args).await.unwrap();
         assert_eq!(exit_code, 0);
 

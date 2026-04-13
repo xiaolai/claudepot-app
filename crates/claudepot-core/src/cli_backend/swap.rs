@@ -1,12 +1,12 @@
 //! Mode A atomic swap primitive for CLI credentials.
 //! See reference.md §I.7.
 
+use super::CliPlatform;
 use crate::account::AccountStore;
 use crate::error::{OAuthError, SwapError};
 use crate::oauth::refresh::TokenResponse;
-use super::CliPlatform;
-use uuid::Uuid;
 use std::fs;
+use uuid::Uuid;
 
 /// Abstraction over token refresh — enables testing without network calls.
 #[async_trait::async_trait]
@@ -126,8 +126,12 @@ pub async fn switch(
             if let Err(e) = platform.write_default(&target_blob).await {
                 // Rollback: restore previous Claudepot blob for outgoing account.
                 match previous_private {
-                    Some(prev) => { let _ = save_private(cur, &prev); }
-                    None => { let _ = delete_private(cur); }
+                    Some(prev) => {
+                        let _ = save_private(cur, &prev);
+                    }
+                    None => {
+                        let _ = delete_private(cur);
+                    }
                 }
                 return Err(e);
             }
@@ -197,16 +201,16 @@ pub fn load_private(account_id: Uuid) -> Result<String, SwapError> {
             if mode != 0o600 {
                 tracing::warn!(
                     "credential file {} has permissions {:o} (expected 600), fixing",
-                    path.display(), mode
+                    path.display(),
+                    mode
                 );
                 std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600))
-                    .map_err(|e| SwapError::FileError(e))?;
+                    .map_err(SwapError::FileError)?;
             }
         }
     }
 
-    std::fs::read_to_string(&path)
-        .map_err(|_| SwapError::NoStoredCredentials(account_id))
+    std::fs::read_to_string(&path).map_err(|_| SwapError::NoStoredCredentials(account_id))
 }
 
 fn load_private_opt(account_id: Uuid) -> Option<String> {
@@ -218,9 +222,8 @@ pub fn save_private(account_id: Uuid, blob: &str) -> Result<(), SwapError> {
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent)?;
     }
-    let mut tmp = tempfile::NamedTempFile::new_in(
-        path.parent().unwrap_or(std::path::Path::new(".")),
-    )?;
+    let mut tmp =
+        tempfile::NamedTempFile::new_in(path.parent().unwrap_or(std::path::Path::new(".")))?;
     std::io::Write::write_all(&mut tmp, blob.as_bytes())?;
     #[cfg(unix)]
     {
@@ -260,7 +263,10 @@ mod tests {
             }
         }
         fn failing() -> Self {
-            Self { storage: Mutex::new(None), fail_write: true }
+            Self {
+                storage: Mutex::new(None),
+                fail_write: true,
+            }
         }
         fn get(&self) -> Option<String> {
             self.storage.lock().unwrap().clone()
@@ -320,9 +326,9 @@ mod tests {
                     token_type: r.token_type.clone(),
                 }),
                 Err(OAuthError::RefreshFailed(msg)) => Err(OAuthError::RefreshFailed(msg.clone())),
-                Err(OAuthError::RateLimited { retry_after_secs }) => {
-                    Err(OAuthError::RateLimited { retry_after_secs: *retry_after_secs })
-                }
+                Err(OAuthError::RateLimited { retry_after_secs }) => Err(OAuthError::RateLimited {
+                    retry_after_secs: *retry_after_secs,
+                }),
                 _ => Err(OAuthError::RefreshFailed("unexpected error variant".into())),
             }
         }
@@ -386,6 +392,35 @@ mod tests {
         delete_private(id).unwrap();
     }
 
+    // -- Group 7: permission auto-repair on load_private --
+    #[cfg(unix)]
+    #[test]
+    fn test_load_private_permission_repair_succeeds() {
+        // Save a private blob (0600), widen to 0644, then load.
+        // Expected: load succeeds, perms auto-repaired back to 0600.
+        let _lock = crate::testing::lock_data_dir();
+        let _env = setup_test_data_dir();
+        let id = Uuid::new_v4();
+        save_private(id, "secret-blob").unwrap();
+
+        use std::os::unix::fs::PermissionsExt;
+        let path = private_path(id);
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o644)).unwrap();
+        assert_eq!(
+            std::fs::metadata(&path).unwrap().permissions().mode() & 0o777,
+            0o644,
+            "setup: widened to 0644"
+        );
+
+        let loaded = load_private(id).unwrap();
+        assert_eq!(loaded, "secret-blob");
+
+        let after = std::fs::metadata(&path).unwrap().permissions().mode() & 0o777;
+        assert_eq!(after, 0o600, "load_private must auto-repair perms to 0600");
+
+        delete_private(id).unwrap();
+    }
+
     #[tokio::test]
     async fn test_swap_success() {
         let _lock = crate::testing::lock_data_dir();
@@ -398,10 +433,15 @@ mod tests {
 
         let platform = MockPlatform::new(None);
         let refresher = DefaultRefresher;
-        switch(&store, None, target_id, &platform, false, &refresher).await.unwrap();
+        switch(&store, None, target_id, &platform, false, &refresher)
+            .await
+            .unwrap();
 
         assert_eq!(platform.get(), Some("target_blob".to_string()));
-        assert_eq!(store.active_cli_uuid().unwrap(), Some(target_id.to_string()));
+        assert_eq!(
+            store.active_cli_uuid().unwrap(),
+            Some(target_id.to_string())
+        );
 
         delete_private(target_id).unwrap();
     }
@@ -421,7 +461,16 @@ mod tests {
         let platform = MockPlatform::new(Some("refreshed_current_blob"));
         let refresher = DefaultRefresher;
 
-        switch(&store, Some(current_id), target_id, &platform, false, &refresher).await.unwrap();
+        switch(
+            &store,
+            Some(current_id),
+            target_id,
+            &platform,
+            false,
+            &refresher,
+        )
+        .await
+        .unwrap();
 
         // Current's credentials should be saved to private storage
         assert_eq!(load_private(current_id).unwrap(), "refreshed_current_blob");
@@ -450,7 +499,15 @@ mod tests {
         *platform.storage.lock().unwrap() = Some("cc_current".to_string());
         let refresher = DefaultRefresher;
 
-        let result = switch(&store, Some(current_id), target_id, &platform, false, &refresher).await;
+        let result = switch(
+            &store,
+            Some(current_id),
+            target_id,
+            &platform,
+            false,
+            &refresher,
+        )
+        .await;
         assert!(result.is_err());
 
         // Current's private storage should be rolled back to original
@@ -484,10 +541,15 @@ mod tests {
 
         let platform = MockPlatform::new(None);
         let refresher = DefaultRefresher;
-        switch(&store, None, target_id, &platform, false, &refresher).await.unwrap();
+        switch(&store, None, target_id, &platform, false, &refresher)
+            .await
+            .unwrap();
 
         // DB active pointer must match target
-        assert_eq!(store.active_cli_uuid().unwrap(), Some(target_id.to_string()));
+        assert_eq!(
+            store.active_cli_uuid().unwrap(),
+            Some(target_id.to_string())
+        );
         delete_private(target_id).unwrap();
     }
 
@@ -507,11 +569,22 @@ mod tests {
         *platform.storage.lock().unwrap() = Some("cc".to_string());
         let refresher = DefaultRefresher;
 
-        let result = switch(&store, Some(current_id), target_id, &platform, false, &refresher).await;
+        let result = switch(
+            &store,
+            Some(current_id),
+            target_id,
+            &platform,
+            false,
+            &refresher,
+        )
+        .await;
         assert!(result.is_err());
 
         // DB should still point to current, NOT target
-        assert_eq!(store.active_cli_uuid().unwrap(), Some(current_id.to_string()));
+        assert_eq!(
+            store.active_cli_uuid().unwrap(),
+            Some(current_id.to_string())
+        );
 
         delete_private(current_id).unwrap();
         delete_private(target_id).unwrap();
@@ -531,7 +604,15 @@ mod tests {
         *platform.storage.lock().unwrap() = Some("cc_blob".to_string());
         let refresher = DefaultRefresher;
 
-        let result = switch(&store, Some(current_id), target_id, &platform, false, &refresher).await;
+        let result = switch(
+            &store,
+            Some(current_id),
+            target_id,
+            &platform,
+            false,
+            &refresher,
+        )
+        .await;
         assert!(result.is_err());
 
         // Rollback should have deleted the private storage that was created during swap
@@ -588,7 +669,9 @@ mod tests {
 
         let platform = MockPlatform::new(None);
         let refresher = DefaultRefresher;
-        switch(&store, None, target_id, &platform, false, &refresher).await.unwrap();
+        switch(&store, None, target_id, &platform, false, &refresher)
+            .await
+            .unwrap();
 
         // Target written directly, no outgoing save
         assert_eq!(platform.get(), Some("direct_blob".to_string()));
@@ -617,7 +700,10 @@ mod tests {
         // The platform should have the refreshed blob, not the expired one
         let written = platform.get().unwrap();
         let parsed = crate::blob::CredentialBlob::from_json(&written).unwrap();
-        assert_eq!(parsed.claude_ai_oauth.access_token, "sk-ant-oat01-refreshed");
+        assert_eq!(
+            parsed.claude_ai_oauth.access_token,
+            "sk-ant-oat01-refreshed"
+        );
 
         delete_private(target_id).unwrap();
     }
@@ -709,7 +795,15 @@ mod tests {
         *platform.storage.lock().unwrap() = Some("cc_current".to_string());
         let refresher = MockRefresher::success();
 
-        let result = switch(&store, Some(current_id), target_id, &platform, true, &refresher).await;
+        let result = switch(
+            &store,
+            Some(current_id),
+            target_id,
+            &platform,
+            true,
+            &refresher,
+        )
+        .await;
         assert!(result.is_err());
 
         // Current's private storage should be rolled back to original
@@ -745,7 +839,10 @@ mod tests {
         let result = maybe_refresh_blob(&blob, id, &refresher).await.unwrap();
         // Should have refreshed — result should contain the new token
         let parsed = crate::blob::CredentialBlob::from_json(&result).unwrap();
-        assert_eq!(parsed.claude_ai_oauth.access_token, "sk-ant-oat01-refreshed");
+        assert_eq!(
+            parsed.claude_ai_oauth.access_token,
+            "sk-ant-oat01-refreshed"
+        );
     }
 
     #[tokio::test]
@@ -769,8 +866,14 @@ mod tests {
 
         let result = maybe_refresh_blob(&blob, id, &refresher).await.unwrap();
         let parsed = crate::blob::CredentialBlob::from_json(&result).unwrap();
-        assert_eq!(parsed.claude_ai_oauth.access_token, "sk-ant-oat01-refreshed");
-        assert_eq!(parsed.claude_ai_oauth.refresh_token, "sk-ant-ort01-refreshed");
+        assert_eq!(
+            parsed.claude_ai_oauth.access_token,
+            "sk-ant-oat01-refreshed"
+        );
+        assert_eq!(
+            parsed.claude_ai_oauth.refresh_token,
+            "sk-ant-ort01-refreshed"
+        );
     }
 
     #[tokio::test]
@@ -798,8 +901,184 @@ mod tests {
         // The refreshed blob should be persisted in private storage
         let saved = load_private(id).unwrap();
         let parsed = crate::blob::CredentialBlob::from_json(&saved).unwrap();
-        assert_eq!(parsed.claude_ai_oauth.access_token, "sk-ant-oat01-refreshed");
+        assert_eq!(
+            parsed.claude_ai_oauth.access_token,
+            "sk-ant-oat01-refreshed"
+        );
 
         delete_private(id).unwrap();
+    }
+
+    // -- Group 11: Unix-only code gaps --
+
+    #[test]
+    fn test_save_private_no_permission_check_on_non_unix() {
+        // save_private + load_private roundtrip works on every platform.
+        // On Unix, perms are verified (0o600). On non-Unix, the whole
+        // #[cfg(unix)] block is skipped and data integrity is all that matters.
+        let _lock = crate::testing::lock_data_dir();
+        let _env = setup_test_data_dir();
+        let id = Uuid::new_v4();
+        let blob = r#"{"platform":"agnostic"}"#;
+
+        save_private(id, blob).unwrap();
+        let loaded = load_private(id).unwrap();
+        assert_eq!(loaded, blob);
+
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let mode = std::fs::metadata(private_path(id))
+                .unwrap()
+                .permissions()
+                .mode()
+                & 0o777;
+            assert_eq!(mode, 0o600, "unix: enforced 0o600");
+        }
+
+        delete_private(id).unwrap();
+    }
+
+    #[test]
+    fn test_swap_lock_works_on_all_platforms() {
+        // acquire_swap_lock() uses flock on Unix, OpenOptions exclusion on
+        // Windows. The contract: returns Ok, creates the lock file, and
+        // releases on drop. Verify the lock file exists after acquire.
+        let _lock = crate::testing::lock_data_dir();
+        let _env = setup_test_data_dir();
+
+        let lock_path = crate::paths::claudepot_data_dir().join(".swap.lock");
+        let _guard = acquire_swap_lock().expect("acquire_swap_lock must work on all platforms");
+        assert!(lock_path.exists(), "lock file created");
+    }
+
+    // -- Group 4: CLI swap DB rollback (3 tests) --
+
+    #[tokio::test]
+    async fn test_swap_db_failure_restores_cc_credentials() {
+        // Drop the state table so set_active_cli() fails AFTER write_default
+        // succeeded. The rollback reads load_private(current) — which, at that
+        // point, contains the CC blob that was saved during phase 2 (what CC
+        // had before the swap). That's the correct "outgoing" blob to restore.
+        let _lock = crate::testing::lock_data_dir();
+        let _env = setup_test_data_dir();
+        let (store, _dir) = test_store();
+        let current_id = Uuid::new_v4();
+        let target_id = Uuid::new_v4();
+
+        // Any older private content for current — not what rollback restores.
+        save_private(current_id, "older_private_from_prior_swap").unwrap();
+        save_private(target_id, "target_blob").unwrap();
+
+        let platform = MockPlatform::new(Some("outgoing_cc_blob"));
+        let refresher = DefaultRefresher;
+
+        // Make set_active_cli fail while write_default remains working.
+        store.corrupt_state_table_for_test();
+
+        let result = switch(
+            &store,
+            Some(current_id),
+            target_id,
+            &platform,
+            false,
+            &refresher,
+        )
+        .await;
+        assert!(
+            matches!(result, Err(SwapError::WriteFailed(_))),
+            "expected WriteFailed from DB update, got {:?}",
+            result
+        );
+        // Rollback restored the CC blob that was outgoing at swap start.
+        assert_eq!(
+            platform.get(),
+            Some("outgoing_cc_blob".to_string()),
+            "platform must be restored to outgoing CC credentials"
+        );
+
+        delete_private(current_id).unwrap();
+        delete_private(target_id).unwrap();
+    }
+
+    #[tokio::test]
+    async fn test_swap_db_failure_with_no_outgoing() {
+        // current_id=None path: write_default succeeds, set_active_cli fails.
+        // With no previous blob to restore, the rollback branch is a no-op
+        // and we return Err. Verify platform has the target blob (not rolled back)
+        // and error is surfaced.
+        let _lock = crate::testing::lock_data_dir();
+        let _env = setup_test_data_dir();
+        let (store, _dir) = test_store();
+        let target_id = Uuid::new_v4();
+        save_private(target_id, "target_only_blob").unwrap();
+
+        let platform = MockPlatform::new(None);
+        let refresher = DefaultRefresher;
+
+        store.corrupt_state_table_for_test();
+
+        let result = switch(&store, None, target_id, &platform, false, &refresher).await;
+        assert!(
+            matches!(result, Err(SwapError::WriteFailed(_))),
+            "DB failure must surface as WriteFailed, got {:?}",
+            result
+        );
+        // No previous blob to restore — platform still has target content.
+        assert_eq!(platform.get(), Some("target_only_blob".to_string()));
+
+        delete_private(target_id).unwrap();
+    }
+
+    #[tokio::test]
+    async fn test_swap_auto_refresh_then_db_failure() {
+        // auto_refresh=true, target is expired → refresh runs and is
+        // persisted to private storage. Then write_default succeeds.
+        // Then set_active_cli fails. Verify:
+        //   - rollback restores previous CC credentials for current_id
+        //   - refreshed blob stays in target's private storage (was persisted
+        //     by maybe_refresh_blob BEFORE the swap mutations)
+        let _lock = crate::testing::lock_data_dir();
+        let _env = setup_test_data_dir();
+        let (store, _dir) = test_store();
+        let current_id = Uuid::new_v4();
+        let target_id = Uuid::new_v4();
+
+        save_private(current_id, "older_private_from_prior_swap").unwrap();
+        save_private(target_id, &crate::testing::expired_blob_json()).unwrap();
+
+        let platform = MockPlatform::new(Some("outgoing_cc_blob"));
+
+        // Use a mock refresher that returns fresh tokens.
+        let refresher = MockRefresher::success();
+
+        store.corrupt_state_table_for_test();
+
+        let result = switch(
+            &store,
+            Some(current_id),
+            target_id,
+            &platform,
+            true,
+            &refresher,
+        )
+        .await;
+        assert!(
+            matches!(result, Err(SwapError::WriteFailed(_))),
+            "DB update failure must surface, got {:?}",
+            result
+        );
+        // Rollback restored the outgoing CC blob that was in the platform
+        // before the swap (which got saved into private storage for `current`).
+        assert_eq!(platform.get(), Some("outgoing_cc_blob".to_string()));
+        // Target's refreshed blob persisted before swap mutations.
+        let target_priv = load_private(target_id).unwrap();
+        assert!(
+            target_priv.contains("sk-ant-oat01-refreshed"),
+            "refreshed token must remain in target's private storage after rollback"
+        );
+
+        delete_private(current_id).unwrap();
+        delete_private(target_id).unwrap();
     }
 }

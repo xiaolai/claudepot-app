@@ -1,6 +1,6 @@
-use anyhow::Result;
-use crate::AppContext;
 use crate::output;
+use crate::AppContext;
+use anyhow::Result;
 
 pub fn list(ctx: &AppContext) -> Result<()> {
     let accounts = ctx.store.list()?;
@@ -34,19 +34,25 @@ pub async fn add(ctx: &AppContext, from_current: bool, from_token: Option<String
     };
 
     if ctx.json {
-        println!("{}", serde_json::json!({
-            "registered": true,
-            "email": result.email,
-            "org": result.org_name,
-            "plan": result.subscription_type,
-            "uuid": result.uuid.to_string(),
-        }));
+        println!(
+            "{}",
+            serde_json::json!({
+                "registered": true,
+                "email": result.email,
+                "org": result.org_name,
+                "plan": result.subscription_type,
+                "uuid": result.uuid.to_string(),
+            })
+        );
     } else {
-        println!("Registered: {} ({} {})",
+        println!(
+            "Registered: {} ({} {})",
             result.email,
             capitalize(&result.subscription_type),
-            result.rate_limit_tier.as_deref()
-                .and_then(|t| t.split('_').last())
+            result
+                .rate_limit_tier
+                .as_deref()
+                .and_then(|t| t.split('_').next_back())
                 .unwrap_or("")
         );
     }
@@ -63,19 +69,25 @@ async fn add_via_browser(ctx: &AppContext) -> Result<()> {
     let result = account_service::register_from_browser(&ctx.store).await?;
 
     if ctx.json {
-        println!("{}", serde_json::json!({
-            "registered": true,
-            "email": result.email,
-            "org": result.org_name,
-            "plan": result.subscription_type,
-            "uuid": result.uuid.to_string(),
-        }));
+        println!(
+            "{}",
+            serde_json::json!({
+                "registered": true,
+                "email": result.email,
+                "org": result.org_name,
+                "plan": result.subscription_type,
+                "uuid": result.uuid.to_string(),
+            })
+        );
     } else {
-        println!("Registered: {} ({} {})",
+        println!(
+            "Registered: {} ({} {})",
             result.email,
             capitalize(&result.subscription_type),
-            result.rate_limit_tier.as_deref()
-                .and_then(|t| t.split('_').last())
+            result
+                .rate_limit_tier
+                .as_deref()
+                .and_then(|t| t.split('_').next_back())
                 .unwrap_or("")
         );
     }
@@ -86,10 +98,11 @@ pub fn remove(ctx: &AppContext, email_input: &str) -> Result<()> {
     use claudepot_core::resolve::resolve_email;
     use claudepot_core::services::account_service;
 
-    let email = resolve_email(&ctx.store, email_input)
-        .map_err(|e| anyhow::anyhow!("{e}"))?;
+    let email = resolve_email(&ctx.store, email_input).map_err(|e| anyhow::anyhow!("{e}"))?;
 
-    let account = ctx.store.find_by_email(&email)?
+    let account = ctx
+        .store
+        .find_by_email(&email)?
         .ok_or_else(|| anyhow::anyhow!("account not found: {email}"))?;
 
     if !ctx.yes {
@@ -105,14 +118,17 @@ pub fn remove(ctx: &AppContext, email_input: &str) -> Result<()> {
     let result = account_service::remove_account(&ctx.store, account.uuid)?;
 
     if ctx.json {
-        println!("{}", serde_json::json!({
-            "removed": true,
-            "email": result.email,
-            "was_cli_active": result.was_cli_active,
-            "was_desktop_active": result.was_desktop_active,
-            "had_desktop_profile": result.had_desktop_profile,
-            "warnings": result.warnings,
-        }));
+        println!(
+            "{}",
+            serde_json::json!({
+                "removed": true,
+                "email": result.email,
+                "was_cli_active": result.was_cli_active,
+                "was_desktop_active": result.was_desktop_active,
+                "had_desktop_profile": result.had_desktop_profile,
+                "warnings": result.warnings,
+            })
+        );
     } else {
         if result.had_desktop_profile {
             ctx.info("Deleted Desktop profile snapshot.");
@@ -135,10 +151,11 @@ pub async fn inspect(ctx: &AppContext, email_input: &str) -> Result<()> {
     use claudepot_core::resolve::resolve_email;
     use claudepot_core::services::account_service;
 
-    let email = resolve_email(&ctx.store, email_input)
-        .map_err(|e| anyhow::anyhow!("{e}"))?;
+    let email = resolve_email(&ctx.store, email_input).map_err(|e| anyhow::anyhow!("{e}"))?;
 
-    let account = ctx.store.find_by_email(&email)?
+    let account = ctx
+        .store
+        .find_by_email(&email)?
         .ok_or_else(|| anyhow::anyhow!("account not found: {email}"))?;
 
     let health = account_service::token_health(account.uuid, account.has_cli_credentials);
@@ -170,25 +187,61 @@ pub async fn inspect(ctx: &AppContext, email_input: &str) -> Result<()> {
         println!("{}", serde_json::to_string_pretty(&j)?);
     } else {
         println!("Account: {}", account.email);
-        println!("  Org:       {}", account.org_name.as_deref().unwrap_or("?"));
-        println!("  Org UUID:  {}", account.org_uuid.as_deref().unwrap_or("?"));
-        println!("  Plan:      {} {}",
+        println!(
+            "  Org:       {}",
+            account.org_name.as_deref().unwrap_or("?")
+        );
+        println!(
+            "  Org UUID:  {}",
+            account.org_uuid.as_deref().unwrap_or("?")
+        );
+        println!(
+            "  Plan:      {} {}",
             capitalize(account.subscription_type.as_deref().unwrap_or("?")),
-            account.rate_limit_tier.as_deref()
-                .and_then(|t| t.split('_').last())
+            account
+                .rate_limit_tier
+                .as_deref()
+                .and_then(|t| t.split('_').next_back())
                 .unwrap_or("")
         );
         println!("  Token:     {}", health.status);
-        println!("  Added:     {}", account.created_at.format("%Y-%m-%d %H:%M"));
-        println!("  CLI:       {}", if account.is_cli_active { "active" } else { "—" });
-        println!("  Desktop:   {}", if account.is_desktop_active { "active" } else if account.has_desktop_profile { "profile stored" } else { "—" });
+        println!(
+            "  Added:     {}",
+            account.created_at.format("%Y-%m-%d %H:%M")
+        );
+        println!(
+            "  CLI:       {}",
+            if account.is_cli_active {
+                "active"
+            } else {
+                "—"
+            }
+        );
+        println!(
+            "  Desktop:   {}",
+            if account.is_desktop_active {
+                "active"
+            } else if account.has_desktop_profile {
+                "profile stored"
+            } else {
+                "—"
+            }
+        );
 
         if let Some(ref u) = usage_result {
             if let Some(ref fh) = u.five_hour {
-                println!("  5h usage:  {:.0}% (resets {})", fh.utilization, fh.resets_at.format("%H:%M UTC"));
+                println!(
+                    "  5h usage:  {:.0}% (resets {})",
+                    fh.utilization,
+                    fh.resets_at.format("%H:%M UTC")
+                );
             }
             if let Some(ref sd) = u.seven_day {
-                println!("  7d usage:  {:.0}% (resets {})", sd.utilization, sd.resets_at.format("%b %d"));
+                println!(
+                    "  7d usage:  {:.0}% (resets {})",
+                    sd.utilization,
+                    sd.resets_at.format("%b %d")
+                );
             }
         } else if account.has_cli_credentials {
             println!("  Usage:     (could not fetch — token may be expired)");

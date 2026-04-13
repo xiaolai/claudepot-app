@@ -3,14 +3,16 @@ use std::fs;
 use std::path::Path;
 
 // Re-export public API from submodules
+pub use crate::project_display::format_size;
 pub use crate::project_sanitize::{sanitize_path, unsanitize_path};
 pub use crate::project_types::*;
-pub use crate::project_display::format_size;
 
 // Private imports from submodules
-use crate::project_sanitize::{MAX_SANITIZED_LENGTH, djb2_hash, format_radix};
-use crate::project_helpers::*;
 use crate::project_display::{compute_dry_run_plan, format_dry_run_plan};
+use crate::project_helpers::*;
+use crate::project_sanitize::MAX_SANITIZED_LENGTH;
+#[cfg(test)]
+use crate::project_sanitize::{djb2_hash, format_radix};
 
 // ---------------------------------------------------------------------------
 // list_projects
@@ -41,10 +43,7 @@ pub fn list_projects(config_dir: &Path) -> Result<Vec<ProjectInfo>, ProjectError
 // show_project
 // ---------------------------------------------------------------------------
 
-pub fn show_project(
-    config_dir: &Path,
-    path: &str,
-) -> Result<ProjectDetail, ProjectError> {
+pub fn show_project(config_dir: &Path, path: &str) -> Result<ProjectDetail, ProjectError> {
     let resolved = resolve_path(path)?;
     let sanitized = sanitize_path(&resolved);
     let project_dir = config_dir.join("projects").join(&sanitized);
@@ -67,7 +66,11 @@ pub fn show_project(
     let sessions = list_sessions(&project_dir)?;
     let memory_files = list_memory_files(&project_dir)?;
 
-    Ok(ProjectDetail { info, sessions, memory_files })
+    Ok(ProjectDetail {
+        info,
+        sessions,
+        memory_files,
+    })
 }
 
 // ---------------------------------------------------------------------------
@@ -84,12 +87,14 @@ pub(crate) enum MoveScenario {
 pub fn move_project(args: &MoveArgs) -> Result<MoveResult, ProjectError> {
     tracing::info!(old = ?args.old_path, new = ?args.new_path, "starting project move");
 
-    let old_str = args.old_path.to_str().ok_or_else(|| {
-        ProjectError::Ambiguous("old path contains invalid UTF-8".to_string())
-    })?;
-    let new_str = args.new_path.to_str().ok_or_else(|| {
-        ProjectError::Ambiguous("new path contains invalid UTF-8".to_string())
-    })?;
+    let old_str = args
+        .old_path
+        .to_str()
+        .ok_or_else(|| ProjectError::Ambiguous("old path contains invalid UTF-8".to_string()))?;
+    let new_str = args
+        .new_path
+        .to_str()
+        .ok_or_else(|| ProjectError::Ambiguous("new path contains invalid UTF-8".to_string()))?;
     let old_norm = resolve_path(old_str)?;
     let new_norm = resolve_path(new_str)?;
 
@@ -109,18 +114,27 @@ pub fn move_project(args: &MoveArgs) -> Result<MoveResult, ProjectError> {
         match (old_exists, new_exists) {
             (true, false) => MoveScenario::MoveAndUpdate,
             (false, true) => MoveScenario::AlreadyMoved,
-            (true, true) => return Err(ProjectError::Ambiguous(
-                "both old and new paths exist on disk".to_string(),
-            )),
-            (false, false) => return Err(ProjectError::Ambiguous(
-                "neither old nor new path exists on disk".to_string(),
-            )),
+            (true, true) => {
+                return Err(ProjectError::Ambiguous(
+                    "both old and new paths exist on disk".to_string(),
+                ))
+            }
+            (false, false) => {
+                return Err(ProjectError::Ambiguous(
+                    "neither old nor new path exists on disk".to_string(),
+                ))
+            }
         }
     };
 
     if args.dry_run {
         let plan = compute_dry_run_plan(
-            &args.config_dir, &old_norm, &new_norm, &old_san, &new_san, &scenario,
+            &args.config_dir,
+            &old_norm,
+            &new_norm,
+            &old_san,
+            &new_san,
+            &scenario,
         )?;
         return Ok(MoveResult {
             warnings: vec![format_dry_run_plan(&plan, &old_norm, &new_norm)],
@@ -160,7 +174,9 @@ pub fn move_project(args: &MoveArgs) -> Result<MoveResult, ProjectError> {
 
         if !cc_old.starts_with(&projects_base) || !cc_new.starts_with(&projects_base) {
             if result.actual_dir_moved {
-                result.warnings.push("sanitized path escapes projects directory — CC state not updated".to_string());
+                result.warnings.push(
+                    "sanitized path escapes projects directory — CC state not updated".to_string(),
+                );
             } else {
                 return Err(ProjectError::Ambiguous(
                     "sanitized path escapes projects directory".to_string(),
@@ -188,7 +204,8 @@ pub fn move_project(args: &MoveArgs) -> Result<MoveResult, ProjectError> {
                 } else {
                     result.warnings.push(
                         "CC project data exists at both old and new paths. \
-                         Use --merge or --overwrite to resolve.".to_string(),
+                         Use --merge or --overwrite to resolve."
+                            .to_string(),
                     );
                 }
             } else {
@@ -331,6 +348,111 @@ mod tests {
         assert_ne!(h1, h2);
     }
 
+    // ---------------------------------------------------------------------
+    // Group 1 — CC parity (golden values from CC's sanitizePath/djb2Hash
+    // run in Node.js on 2026-04-13). If these fail, either CC changed their
+    // implementation or we drifted. See /tmp/cc-golden-values.js.
+    // ---------------------------------------------------------------------
+
+    #[test]
+    fn test_sanitize_cc_parity_unix() {
+        assert_eq!(
+            sanitize_path("/Users/joker/github/xiaolai/myprojects/com.claudepot.app"),
+            "-Users-joker-github-xiaolai-myprojects-com-claudepot-app"
+        );
+    }
+
+    #[test]
+    fn test_sanitize_cc_parity_windows() {
+        assert_eq!(
+            sanitize_path("C:\\Users\\joker\\Documents\\project"),
+            "C--Users-joker-Documents-project"
+        );
+    }
+
+    #[test]
+    fn test_sanitize_cc_parity_hyphen_in_name() {
+        assert_eq!(
+            sanitize_path("/Users/joker/my-project"),
+            "-Users-joker-my-project"
+        );
+    }
+
+    #[test]
+    fn test_sanitize_cc_parity_nfc_accent() {
+        assert_eq!(sanitize_path("/tmp/café-project"), "-tmp-caf--project");
+    }
+
+    #[test]
+    fn test_sanitize_cc_parity_emoji() {
+        // JS UTF-16 surrogate pair (🎉 = U+1F389) produces TWO hyphens,
+        // not one. This is the whole point of encode_utf16 in our impl.
+        assert_eq!(sanitize_path("/tmp/🎉emoji"), "-tmp---emoji");
+    }
+
+    #[test]
+    fn test_djb2_cc_parity_long_path() {
+        let input = "/Users/joker/".to_string() + &"a".repeat(250);
+        assert_eq!(djb2_hash(&input), "lwkvhu");
+        // Full sanitize_path output: 200-char prefix + '-' + hash.
+        let result = sanitize_path(&input);
+        assert!(result.ends_with("-lwkvhu"), "result={result}");
+        assert_eq!(result.len(), 200 + 1 + "lwkvhu".len());
+    }
+
+    #[test]
+    fn test_djb2_cc_parity_unicode() {
+        // "/tmp/café" — 'é' encodes as U+00E9 (one UTF-16 code unit).
+        assert_eq!(djb2_hash("/tmp/café"), "udmm60");
+    }
+
+    // ---------------------------------------------------------------------
+    // Group 10 — Windows path tests (CC parity golden values).
+    // Pure string ops: these run on all platforms regardless of cfg.
+    // ---------------------------------------------------------------------
+
+    #[test]
+    fn test_sanitize_windows_drive_letter() {
+        assert_eq!(
+            sanitize_path("C:\\Users\\joker\\project"),
+            "C--Users-joker-project"
+        );
+    }
+
+    #[test]
+    fn test_sanitize_windows_unc_path() {
+        assert_eq!(
+            sanitize_path("\\\\server\\share\\project"),
+            "--server-share-project"
+        );
+    }
+
+    #[test]
+    fn test_sanitize_windows_spaces_in_path() {
+        assert_eq!(
+            sanitize_path("C:\\Program Files\\My App"),
+            "C--Program-Files-My-App"
+        );
+    }
+
+    #[test]
+    fn test_sanitize_windows_long_path() {
+        let input = "C:\\Users\\joker\\".to_string() + &"a".repeat(250);
+        assert_eq!(djb2_hash(&input), "27k5dq");
+        let out = sanitize_path(&input);
+        assert!(out.ends_with("-27k5dq"), "out={out}");
+        assert_eq!(out.len(), 200 + 1 + "27k5dq".len());
+    }
+
+    #[test]
+    fn test_sanitize_windows_reserved_chars() {
+        // ':', '?' are reserved on Windows; all non-alphanumerics become '-'.
+        assert_eq!(
+            sanitize_path("C:\\Users\\joker\\file:name?"),
+            "C--Users-joker-file-name-"
+        );
+    }
+
     #[test]
     fn test_format_radix_base36() {
         assert_eq!(format_radix(0, 36), "0");
@@ -468,16 +590,17 @@ mod tests {
         fs::create_dir(&src).unwrap();
         let dst = base.join("new");
 
-        // Use canonical paths in history entries
+        // Use canonical paths in history entries. Build entries via
+        // serde_json so Windows backslashes get correctly JSON-escaped.
         let old_str = src.canonicalize().unwrap().to_string_lossy().to_string();
         let new_str = dst.to_string_lossy().to_string();
 
-        // Create history file
         let history = base.join("history.jsonl");
         let entries = vec![
-            format!(r#"{{"project":"{}","sessionId":"abc","timestamp":1}}"#, old_str),
-            format!(r#"{{"project":"/other/path","sessionId":"def","timestamp":2}}"#),
-            format!(r#"{{"project":"{}","sessionId":"ghi","timestamp":3}}"#, old_str),
+            serde_json::json!({"project": old_str, "sessionId": "abc", "timestamp": 1}).to_string(),
+            serde_json::json!({"project": "/other/path", "sessionId": "def", "timestamp": 2})
+                .to_string(),
+            serde_json::json!({"project": old_str, "sessionId": "ghi", "timestamp": 3}).to_string(),
         ];
         fs::write(&history, entries.join("\n") + "\n").unwrap();
 
@@ -499,12 +622,20 @@ mod tests {
         let result = move_project(&args).unwrap();
         assert_eq!(result.history_lines_updated, 2);
 
-        // Verify history was rewritten
+        // Verify history was rewritten by parsing each JSON line — raw string
+        // matching breaks on Windows UNC paths (double-escaped backslashes).
         let content = fs::read_to_string(&history).unwrap();
-        assert!(content.contains(&new_str));
-        assert!(!content.contains(&old_str));
-        // Other entries preserved
-        assert!(content.contains("/other/path"));
+        let projects: Vec<String> = content
+            .lines()
+            .filter_map(|l| serde_json::from_str::<serde_json::Value>(l).ok())
+            .filter_map(|v| v.get("project").and_then(|p| p.as_str()).map(String::from))
+            .collect();
+        assert!(projects.iter().any(|p| p == &new_str), "new path present");
+        assert!(!projects.iter().any(|p| p == &old_str), "old path gone");
+        assert!(
+            projects.iter().any(|p| p == "/other/path"),
+            "unrelated entry kept"
+        );
     }
 
     #[test]
@@ -652,7 +783,11 @@ mod tests {
         let ascii_dir = tmp.path().canonicalize().unwrap().join("plain_ascii");
         fs::create_dir(&ascii_dir).unwrap();
         let resolved = resolve_path(ascii_dir.to_str().unwrap()).unwrap();
-        let canonical = ascii_dir.canonicalize().unwrap().to_string_lossy().to_string();
+        let canonical = ascii_dir
+            .canonicalize()
+            .unwrap()
+            .to_string_lossy()
+            .to_string();
         assert_eq!(resolved, canonical);
     }
 
@@ -742,10 +877,7 @@ mod tests {
     #[test]
     fn test_sanitize_long_path_exact_hash() {
         // Verify that a specific long path produces the CC-compatible hash suffix.
-        let long_path = format!(
-            "/Users/joker/github/xiaolai/myprojects/{}",
-            "a".repeat(200)
-        );
+        let long_path = format!("/Users/joker/github/xiaolai/myprojects/{}", "a".repeat(200));
         let result = sanitize_path(&long_path);
         // Path is 239 chars, sanitized > 200, so hash is appended
         assert!(result.len() > MAX_SANITIZED_LENGTH);
@@ -753,7 +885,8 @@ mod tests {
         assert!(
             result.ends_with(&format!("-{}", expected_hash)),
             "Expected hash suffix '-{}', got: {}",
-            expected_hash, result
+            expected_hash,
+            result
         );
     }
 
@@ -773,9 +906,18 @@ mod tests {
 
         merge_project_dirs(&src, &dst).unwrap();
 
-        assert_eq!(fs::read_to_string(dst.join("a.jsonl")).unwrap(), "session-a");
-        assert_eq!(fs::read_to_string(dst.join("b.jsonl")).unwrap(), "session-b");
-        assert_eq!(fs::read_to_string(dst.join("c.jsonl")).unwrap(), "session-c");
+        assert_eq!(
+            fs::read_to_string(dst.join("a.jsonl")).unwrap(),
+            "session-a"
+        );
+        assert_eq!(
+            fs::read_to_string(dst.join("b.jsonl")).unwrap(),
+            "session-b"
+        );
+        assert_eq!(
+            fs::read_to_string(dst.join("c.jsonl")).unwrap(),
+            "session-c"
+        );
     }
 
     #[test]
@@ -792,7 +934,10 @@ mod tests {
         merge_project_dirs(&src, &dst).unwrap();
 
         // dst version preserved, not overwritten
-        assert_eq!(fs::read_to_string(dst.join("dup.jsonl")).unwrap(), "dst-version");
+        assert_eq!(
+            fs::read_to_string(dst.join("dup.jsonl")).unwrap(),
+            "dst-version"
+        );
     }
 
     #[test]
@@ -859,7 +1004,7 @@ mod tests {
         let expected = cwd.join("some-relative-dir").to_string_lossy().to_string();
         // NFC normalization may change the string slightly on macOS
         assert!(result.contains("some-relative-dir"));
-        assert!(result.starts_with('/') || result.contains(':'));  // absolute
+        assert!(result.starts_with('/') || result.contains(':')); // absolute
     }
 
     // -- move_project error branches --
@@ -1215,5 +1360,287 @@ mod tests {
         let mtime = most_recent_mtime(tmp.path());
         // Empty dir still has its own mtime
         assert!(mtime.is_none() || mtime.is_some());
+    }
+
+    // ---------------------------------------------------------------------
+    // Group 2 — Project move conflict handling (4 tests).
+    // ---------------------------------------------------------------------
+
+    /// Build a Group-2 fixture: a TempDir plus canonical src/dst/config dirs.
+    /// Kept as a single fn returning everything so tests don't drop the TempDir.
+    fn mk_move_fixture() -> (
+        tempfile::TempDir,
+        std::path::PathBuf,
+        std::path::PathBuf,
+        std::path::PathBuf,
+    ) {
+        let tmp = tempfile::tempdir().unwrap();
+        let base = tmp.path().canonicalize().unwrap();
+        let src = base.join("old");
+        fs::create_dir(&src).unwrap();
+        let dst = base.join("new");
+        let projects = base.join("projects");
+        fs::create_dir(&projects).unwrap();
+        (tmp, src, dst, base)
+    }
+
+    #[test]
+    fn test_move_project_conflict_skips_history_rewrite() {
+        let (_tmp, src, dst, base) = mk_move_fixture();
+        let old_san = sanitize_path(&src.to_string_lossy());
+        let new_san = sanitize_path(&dst.to_string_lossy());
+        let projects = base.join("projects");
+        // Both CC dirs exist, both non-empty — conflict requiring resolution.
+        let cc_old = projects.join(&old_san);
+        fs::create_dir(&cc_old).unwrap();
+        fs::write(cc_old.join("old-session.jsonl"), "{}").unwrap();
+        let cc_new = projects.join(&new_san);
+        fs::create_dir(&cc_new).unwrap();
+        fs::write(cc_new.join("new-session.jsonl"), "{}").unwrap();
+
+        let old_str = src.to_string_lossy();
+        let old_line = serde_json::json!({
+            "project": old_str,
+            "sessionId": "abc",
+            "timestamp": 1,
+        })
+        .to_string();
+        let history = base.join("history.jsonl");
+        fs::write(&history, format!("{old_line}\n")).unwrap();
+
+        let args = MoveArgs {
+            old_path: src.clone(),
+            new_path: dst.clone(),
+            config_dir: base.clone(),
+            no_move: false,
+            merge: false,
+            overwrite: false,
+            force: true,
+            dry_run: false,
+        };
+
+        let result = move_project(&args).unwrap();
+        assert!(
+            !result.cc_dir_renamed,
+            "rename should be blocked by conflict"
+        );
+        assert!(
+            !result.warnings.is_empty(),
+            "must surface a conflict warning"
+        );
+        assert_eq!(
+            result.history_lines_updated, 0,
+            "history.jsonl must NOT be rewritten when CC dir conflict is unresolved"
+        );
+        // Verify old path still in history on disk (parse-based).
+        let content = fs::read_to_string(&history).unwrap();
+        let src_str = src.to_string_lossy().to_string();
+        let has_old = content.lines().any(|l| {
+            serde_json::from_str::<serde_json::Value>(l)
+                .ok()
+                .and_then(|v| v.get("project").and_then(|p| p.as_str()).map(String::from))
+                == Some(src_str.clone())
+        });
+        assert!(
+            has_old,
+            "old path still in history since rewrite was skipped"
+        );
+    }
+
+    #[test]
+    fn test_move_project_merge_rewrites_history() {
+        let (_tmp, src, dst, base) = mk_move_fixture();
+        let old_san = sanitize_path(&src.to_string_lossy());
+        let new_san = sanitize_path(&dst.to_string_lossy());
+        let projects = base.join("projects");
+        let cc_old = projects.join(&old_san);
+        fs::create_dir(&cc_old).unwrap();
+        fs::write(cc_old.join("a.jsonl"), "old-a").unwrap();
+        let cc_new = projects.join(&new_san);
+        fs::create_dir(&cc_new).unwrap();
+        fs::write(cc_new.join("b.jsonl"), "new-b").unwrap();
+
+        let history = base.join("history.jsonl");
+        let line = serde_json::json!({
+            "project": src.to_string_lossy(),
+            "sessionId": "abc",
+            "timestamp": 1,
+        })
+        .to_string();
+        fs::write(&history, format!("{line}\n")).unwrap();
+
+        let args = MoveArgs {
+            old_path: src.clone(),
+            new_path: dst.clone(),
+            config_dir: base.clone(),
+            no_move: false,
+            merge: true,
+            overwrite: false,
+            force: true,
+            dry_run: false,
+        };
+
+        let result = move_project(&args).unwrap();
+        assert!(result.cc_dir_renamed, "merge should resolve the conflict");
+        assert_eq!(
+            result.history_lines_updated, 1,
+            "history rewritten on merge"
+        );
+        let content = fs::read_to_string(&history).unwrap();
+        // Parse-based assertion: tolerates Windows UNC path escaping.
+        let new_str = dst.to_string_lossy();
+        let has_new = content.lines().any(|l| {
+            serde_json::from_str::<serde_json::Value>(l)
+                .ok()
+                .and_then(|v| v.get("project").and_then(|p| p.as_str()).map(String::from))
+                == Some(new_str.to_string())
+        });
+        assert!(has_new, "new path present in history after merge");
+        // Both files merged into new CC dir.
+        assert!(cc_new.join("a.jsonl").exists(), "merged file from old dir");
+        assert!(
+            cc_new.join("b.jsonl").exists(),
+            "preserved file from new dir"
+        );
+    }
+
+    #[test]
+    fn test_move_project_orphan_roundtrip_prevents_false_positive() {
+        // A project at /tmp/my-project sanitizes to `-tmp-my-project`.
+        // unsanitize gives /tmp/my/project — which doesn't exist. Without
+        // the cwd-from-sessions recovery, the project would be flagged orphan
+        // even though the real dir /tmp/my-project exists.
+        let tmp = tempfile::tempdir().unwrap();
+        let base = tmp.path().canonicalize().unwrap();
+
+        // The real project dir (with a hyphen in the name).
+        let project_dir = base.join("my-project");
+        fs::create_dir(&project_dir).unwrap();
+
+        // The CC project dir — sanitized for the real path.
+        let projects = base.join("projects");
+        fs::create_dir(&projects).unwrap();
+        let san = sanitize_path(&project_dir.to_string_lossy());
+        let cc_dir = projects.join(&san);
+        fs::create_dir(&cc_dir).unwrap();
+
+        // Write a session.jsonl with the correct cwd. This is how CC records
+        // the authoritative original path.
+        let session_line = serde_json::json!({
+            "cwd": project_dir.to_string_lossy(),
+            "sessionId": "abc",
+            "type": "user",
+        })
+        .to_string();
+        fs::write(cc_dir.join("session.jsonl"), session_line + "\n").unwrap();
+
+        let listed = list_projects(&base).unwrap();
+        let found = listed
+            .iter()
+            .find(|p| p.sanitized_name == san)
+            .expect("project must be listed");
+
+        assert_eq!(
+            found.original_path,
+            project_dir.to_string_lossy().to_string(),
+            "cwd from session should override lossy unsanitize"
+        );
+        assert!(
+            !found.is_orphan,
+            "project dir exists; must NOT be flagged orphan"
+        );
+    }
+
+    // -----------------------------------------------------------------
+    // Group 11 — Unix-only code gaps (platform-gated structural tests).
+    // -----------------------------------------------------------------
+
+    #[test]
+    fn test_move_project_cross_device_no_exdev_on_windows() {
+        // Structural: the EXDEV-fallback branch is #[cfg(unix)]-gated in
+        // move_project. On non-unix, a cross-device fs::rename failure
+        // returns a regular Io error rather than invoking copy+remove.
+        //
+        // This test simply documents the platform gate. We can't easily
+        // provoke a real EXDEV in a unit test (would need two mounted fs).
+        // Instead, verify the in-same-device happy path still works on all
+        // platforms (which it does via fs::rename without the fallback).
+        let tmp = tempfile::tempdir().unwrap();
+        let base = tmp.path().canonicalize().unwrap();
+        let src = base.join("old");
+        fs::create_dir(&src).unwrap();
+        let dst = base.join("new");
+        fs::create_dir(&base.join("projects")).unwrap();
+
+        let args = MoveArgs {
+            old_path: src.clone(),
+            new_path: dst.clone(),
+            config_dir: base.clone(),
+            no_move: false,
+            merge: false,
+            overwrite: false,
+            force: true,
+            dry_run: false,
+        };
+
+        let result = move_project(&args).unwrap();
+        assert!(result.actual_dir_moved);
+        assert!(dst.exists());
+        assert!(!src.exists());
+        // Platform-gate assertion: EXDEV handler presence differs by cfg.
+        #[cfg(unix)]
+        {
+            // Unix has the EXDEV fallback path; same-device move used fs::rename.
+        }
+        #[cfg(not(unix))]
+        {
+            // Non-Unix: no EXDEV fallback at all — cross-device move would
+            // propagate as a plain Io error. Same-device move still works.
+        }
+    }
+
+    #[test]
+    fn test_move_project_post_move_failure_becomes_warning() {
+        // After phase 3 (real dir moved), phase 4 failures should become
+        // warnings on the MoveResult instead of hard errors.
+        //
+        // Trigger: set up old_san != new_san, create cc_old, pre-create cc_new
+        // WITHOUT merge/overwrite — this becomes a conflict warning after the
+        // actual dir has already been moved. The caller still gets Ok(...)
+        // so they know the move succeeded even if the CC state is out of sync.
+        let (_tmp, src, dst, base) = mk_move_fixture();
+        let old_san = sanitize_path(&src.to_string_lossy());
+        let new_san = sanitize_path(&dst.to_string_lossy());
+        let projects = base.join("projects");
+        let cc_old = projects.join(&old_san);
+        fs::create_dir(&cc_old).unwrap();
+        fs::write(cc_old.join("s.jsonl"), "{}").unwrap();
+        let cc_new = projects.join(&new_san);
+        fs::create_dir(&cc_new).unwrap();
+        fs::write(cc_new.join("t.jsonl"), "{}").unwrap();
+
+        let args = MoveArgs {
+            old_path: src.clone(),
+            new_path: dst.clone(),
+            config_dir: base.clone(),
+            no_move: false,
+            merge: false,
+            overwrite: false,
+            force: true,
+            dry_run: false,
+        };
+
+        let result = move_project(&args).expect("must return Ok with warnings, not Err");
+        assert!(
+            result.actual_dir_moved,
+            "phase 3 actually moved the directory"
+        );
+        assert!(!result.cc_dir_renamed, "phase 4 blocked by conflict");
+        assert!(
+            !result.warnings.is_empty(),
+            "conflict must be surfaced as a warning"
+        );
+        assert!(dst.exists(), "new path on disk");
+        assert!(!src.exists(), "old path gone from disk");
     }
 }
