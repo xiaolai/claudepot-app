@@ -20,6 +20,7 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             commands::app_status,
             commands::sync_from_current_cc,
+            commands::unlock_keychain,
             commands::account_list,
             commands::cli_use,
             commands::cli_clear,
