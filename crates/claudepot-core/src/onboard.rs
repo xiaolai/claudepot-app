@@ -6,6 +6,34 @@
 use crate::error::OnboardError;
 use std::path::PathBuf;
 
+/// Run `claude auth login` against the user's real CC config dir (no env
+/// override). The browser opens; the user authenticates; CC's own keychain
+/// item (or .credentials.json on Linux/Windows) is overwritten with a fresh
+/// blob. Caller can then read CC's current state via a CliPlatform.
+///
+/// Used by re-login flows: the account already exists in Claudepot's DB,
+/// the user just needs to re-auth into CC for that identity.
+pub async fn run_auth_login_in_place() -> Result<(), OnboardError> {
+    let claude_path = which_claude()?;
+
+    tracing::debug!(binary = %claude_path.display(), "spawning `claude auth login` in place");
+
+    let status = tokio::process::Command::new(&claude_path)
+        .arg("auth")
+        .arg("login")
+        .stdin(std::process::Stdio::inherit())
+        .stdout(std::process::Stdio::inherit())
+        .stderr(std::process::Stdio::inherit())
+        .status()
+        .await
+        .map_err(OnboardError::Io)?;
+
+    if !status.success() {
+        return Err(OnboardError::AuthLoginFailed(status.code().unwrap_or(-1)));
+    }
+    Ok(())
+}
+
 /// Run `claude auth login` with a temporary config dir.
 /// Returns the path to the temp dir (caller is responsible for cleanup).
 pub async fn run_auth_login() -> Result<PathBuf, OnboardError> {
