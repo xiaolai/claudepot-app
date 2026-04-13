@@ -24,6 +24,14 @@ function App() {
 
   const refresh = useCallback(async () => {
     try {
+      // Let Claudepot adopt CC's current credentials first (idempotent).
+      // On failure we log-and-continue — this must not block the list.
+      try {
+        await api.syncFromCurrentCc();
+      } catch (e) {
+        // eslint-disable-next-line no-console
+        console.warn("sync_from_current_cc failed:", e);
+      }
       const [s, list] = await Promise.all([
         api.appStatus(),
         api.accountList(),
