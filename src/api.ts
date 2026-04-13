@@ -22,6 +22,7 @@ export const api = {
   /// resulting blob into the given account's slot. Can take several
   /// minutes while the user completes auth in the browser.
   accountLogin: (uuid: string) => invoke<void>("account_login", { uuid }),
+  accountLoginCancel: () => invoke<void>("account_login_cancel"),
   accountRemove: (uuid: string) =>
     invoke<RemoveOutcome>("account_remove", { uuid }),
 };

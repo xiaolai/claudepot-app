@@ -254,6 +254,7 @@ pub async fn register_from_browser(store: &AccountStore) -> Result<RegisterResul
 pub async fn login_and_reimport(
     store: &AccountStore,
     account_id: Uuid,
+    cancel: Option<std::sync::Arc<tokio::sync::Notify>>,
 ) -> Result<(), RegisterError> {
     use crate::onboard;
 
@@ -267,7 +268,7 @@ pub async fn login_and_reimport(
         email = %account.email,
         "launching `claude auth login` for re-authentication"
     );
-    onboard::run_auth_login_in_place()
+    onboard::run_auth_login_in_place_cancellable(cancel)
         .await
         .map_err(|e| RegisterError::CredentialRead(e.to_string()))?;
 
