@@ -88,6 +88,7 @@ pub async fn cli_use(email: String) -> Result<(), String> {
 
     let platform = cli_backend::create_platform();
     let refresher = cli_backend::swap::DefaultRefresher;
+    let fetcher = cli_backend::swap::DefaultProfileFetcher;
     cli_backend::swap::switch(
         &store,
         current_id,
@@ -95,6 +96,7 @@ pub async fn cli_use(email: String) -> Result<(), String> {
         platform.as_ref(),
         true,
         &refresher,
+        &fetcher,
     )
     .await
     .map_err(|e| format!("cli switch failed: {e}"))
