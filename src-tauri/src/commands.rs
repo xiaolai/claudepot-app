@@ -23,7 +23,18 @@ fn open_store() -> Result<AccountStore, String> {
 pub fn account_list() -> Result<Vec<AccountSummary>, String> {
     let store = open_store()?;
     let accounts = store.list().map_err(|e| format!("list failed: {e}"))?;
-    Ok(accounts.iter().map(AccountSummary::from).collect())
+    let summaries: Vec<AccountSummary> = accounts.iter().map(AccountSummary::from).collect();
+
+    // Opportunistically sync DB flags with reality: if an account's flag
+    // claims credentials exist but the stored blob is missing/corrupt,
+    // flip the flag false. Best-effort — ignore DB errors.
+    for (acct, sum) in accounts.iter().zip(summaries.iter()) {
+        if acct.has_cli_credentials && !sum.credentials_healthy {
+            let _ = store.update_credentials_flag(acct.uuid, false);
+        }
+    }
+
+    Ok(summaries)
 }
 
 #[tauri::command]
@@ -145,6 +156,15 @@ pub async fn desktop_use(email: String, no_launch: bool) -> Result<(), String> {
     desktop_backend::swap::switch(&*platform, &store, outgoing_id, target.uuid, no_launch)
         .await
         .map_err(|e| format!("desktop switch failed: {e}"))
+}
+
+#[tauri::command]
+pub async fn account_reimport_from_current(uuid: String) -> Result<(), String> {
+    let store = open_store()?;
+    let id = Uuid::parse_str(&uuid).map_err(|e| format!("bad uuid: {e}"))?;
+    services::account_service::reimport_from_current(&store, id)
+        .await
+        .map_err(|e| format!("reimport failed: {e}"))
 }
 
 #[tauri::command]
