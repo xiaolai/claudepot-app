@@ -32,3 +32,9 @@ dev-docs/
 
 # tdd-guardian generated artifacts
 .claude/tdd-guardian/state.json
+
+# loc-guardian local-only thresholds
+.claude/loc-guardian.local.md
+
+# Claude harness local task scheduler lock
+.claude/scheduled_tasks.lock
