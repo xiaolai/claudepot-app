@@ -1,0 +1,190 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Tag to build (e.g. v0.1.0)'
+        required: true
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  build-macos:
+    name: Build + Sign + Notarize (macOS ${{ matrix.arch }})
+    runs-on: macos-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: aarch64
+            target: aarch64-apple-darwin
+          - arch: x86_64
+            target: x86_64-apple-darwin
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust stable
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - name: Cache cargo registry & build
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-${{ matrix.arch }}-cargo-release-${{ hashFiles('**/Cargo.lock') }}
+
+      - name: Build release binary
+        run: cargo build -p claudepot-cli --release --target ${{ matrix.target }}
+
+      - name: Import signing certificate
+        env:
+          APPLE_CERT_P12_BASE64: ${{ secrets.APPLE_CERT_P12_BASE64 }}
+          APPLE_CERT_P12_PASSWORD: ${{ secrets.APPLE_CERT_P12_PASSWORD }}
+        run: |
+          set -eu
+          echo "$APPLE_CERT_P12_BASE64" | base64 --decode -o /tmp/cert.p12
+          # Temporary keychain unique to this job run.
+          KC_PASS="ci-$(openssl rand -hex 16)"
+          security create-keychain -p "$KC_PASS" build.keychain
+          security default-keychain -s build.keychain
+          security unlock-keychain -p "$KC_PASS" build.keychain
+          security set-keychain-settings -lut 21600 build.keychain
+          # Install the cert.
+          security import /tmp/cert.p12 -k build.keychain \
+            -P "$APPLE_CERT_P12_PASSWORD" \
+            -T /usr/bin/codesign -T /usr/bin/security
+          # Grant codesign access without UI prompt.
+          security set-key-partition-list -S apple-tool:,apple: -s -k "$KC_PASS" build.keychain
+          # Install the Developer ID G2 intermediate CA so the chain validates.
+          curl -sSfL -o /tmp/DeveloperIDG2CA.cer \
+            https://www.apple.com/certificateauthority/DeveloperIDG2CA.cer
+          security add-certificates -k build.keychain /tmp/DeveloperIDG2CA.cer
+          # Verify the identity is usable.
+          security find-identity -v -p codesigning build.keychain
+          rm /tmp/cert.p12
+
+      - name: Sign binary
+        env:
+          CODESIGN_IDENTITY: "Developer ID Application: HANDO K.K. (Y53RSUA3SM)"
+        run: |
+          .github/scripts/sign-macos.sh target/${{ matrix.target }}/release/claudepot
+
+      - name: Zip for notarization
+        run: |
+          cd target/${{ matrix.target }}/release
+          zip -j claudepot-${{ matrix.arch }}.zip claudepot
+
+      - name: Notarize
+        env:
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_APP_PASSWORD: ${{ secrets.APPLE_APP_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        run: |
+          xcrun notarytool submit \
+            "target/${{ matrix.target }}/release/claudepot-${{ matrix.arch }}.zip" \
+            --apple-id "$APPLE_ID" \
+            --password "$APPLE_APP_PASSWORD" \
+            --team-id "$APPLE_TEAM_ID" \
+            --wait
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: claudepot-${{ matrix.arch }}-apple-darwin
+          path: target/${{ matrix.target }}/release/claudepot-${{ matrix.arch }}.zip
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Cleanup keychain
+        if: always()
+        run: |
+          security delete-keychain build.keychain || true
+
+  build-linux:
+    name: Build (Linux ${{ matrix.arch }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: x86_64
+            target: x86_64-unknown-linux-gnu
+          - arch: aarch64
+            target: aarch64-unknown-linux-gnu
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+      - name: Install cross toolchain (aarch64)
+        if: matrix.arch == 'aarch64'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y gcc-aarch64-linux-gnu
+          mkdir -p .cargo
+          cat >> .cargo/config.toml <<'EOF'
+          [target.aarch64-unknown-linux-gnu]
+          linker = "aarch64-linux-gnu-gcc"
+          EOF
+      - name: Build
+        run: cargo build -p claudepot-cli --release --target ${{ matrix.target }}
+      - name: Package
+        run: |
+          cd target/${{ matrix.target }}/release
+          tar czf claudepot-${{ matrix.arch }}-linux.tar.gz claudepot
+      - uses: actions/upload-artifact@v4
+        with:
+          name: claudepot-${{ matrix.arch }}-linux
+          path: target/${{ matrix.target }}/release/claudepot-${{ matrix.arch }}-linux.tar.gz
+          if-no-files-found: error
+          retention-days: 30
+
+  build-windows:
+    name: Build (Windows x86_64)
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Build
+        run: cargo build -p claudepot-cli --release
+      - name: Package
+        run: |
+          cd target/release
+          Compress-Archive -Path claudepot.exe -DestinationPath claudepot-x86_64-windows.zip
+      - uses: actions/upload-artifact@v4
+        with:
+          name: claudepot-x86_64-windows
+          path: target/release/claudepot-x86_64-windows.zip
+          if-no-files-found: error
+          retention-days: 30
+
+  release:
+    name: Create GitHub Release
+    needs: [build-macos, build-linux, build-windows]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+      - name: Flatten artifacts
+        run: |
+          mkdir -p release
+          find artifacts -type f \( -name '*.zip' -o -name '*.tar.gz' \) -exec cp {} release/ \;
+          ls -la release/
+      - name: Create release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: release/*
+          draft: true
+          generate_release_notes: true

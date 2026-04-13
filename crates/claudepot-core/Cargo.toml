@@ -13,7 +13,6 @@ serde_json.workspace = true
 chrono.workspace = true
 sha2.workspace = true
 hex.workspace = true
-keyring.workspace = true
 tempfile.workspace = true
 filetime.workspace = true
 rusqlite.workspace = true
