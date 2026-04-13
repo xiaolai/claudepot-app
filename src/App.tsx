@@ -179,12 +179,26 @@ function App() {
         <div className="banner warn" role="alert">
           <div>
             <strong>macOS Keychain is locked.</strong> Claudepot can't read
-            credentials until it's unlocked. Open{" "}
-            <em>Applications → Utilities → Keychain Access</em>, double-click
-            the <em>login</em> keychain, choose <em>Unlock</em> (enter your
-            macOS password), then click Retry.
+            credentials until you unlock it. Click <em>Unlock</em> — macOS
+            will show its standard password prompt (your password goes to
+            macOS, not Claudepot).
           </div>
-          <button onClick={refresh}>Retry</button>
+          <div className="banner-actions">
+            <button
+              className="primary"
+              onClick={async () => {
+                try {
+                  await api.unlockKeychain();
+                  await refresh();
+                } catch (e) {
+                  pushToast("error", `Unlock failed: ${e}`);
+                }
+              }}
+            >
+              Unlock
+            </button>
+            <button onClick={refresh}>Retry</button>
+          </div>
         </div>
       )}
 

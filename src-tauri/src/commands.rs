@@ -158,6 +158,37 @@ pub async fn desktop_use(email: String, no_launch: bool) -> Result<(), String> {
         .map_err(|e| format!("desktop switch failed: {e}"))
 }
 
+/// macOS-only: request a keychain unlock via the system's native dialog.
+/// Spawns `security unlock-keychain` without -p so macOS shows its built-in
+/// "Unlock Keychain" password prompt. The user's password never reaches
+/// Claudepot (it goes to macOS's trusted process).
+#[tauri::command]
+pub async fn unlock_keychain() -> Result<(), String> {
+    #[cfg(target_os = "macos")]
+    {
+        use tokio::process::Command;
+        // `security unlock-keychain` with no password attempts an interactive
+        // unlock. In a GUI process context, macOS surfaces the standard
+        // Keychain Access unlock panel.
+        let out = Command::new("/usr/bin/security")
+            .arg("unlock-keychain")
+            .output()
+            .await
+            .map_err(|e| format!("security spawn failed: {e}"))?;
+        if !out.status.success() {
+            // Exit 51 is common when the user cancels the prompt.
+            let code = out.status.code().unwrap_or(-1);
+            let stderr = String::from_utf8_lossy(&out.stderr);
+            return Err(format!("unlock-keychain exited {code}: {}", stderr.trim()));
+        }
+        Ok(())
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        Err("keychain unlock is macOS-only".to_string())
+    }
+}
+
 /// Idempotent startup sync: if CC is currently signed in as one of the
 /// registered Claudepot accounts, make sure Claudepot's stored blob
 /// and active_cli match. Lets users who ran `claude auth login`

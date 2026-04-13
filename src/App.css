@@ -123,6 +123,11 @@ body {
   padding: 1px 6px;
   border-radius: 4px;
 }
+.banner-actions {
+  display: flex;
+  gap: 8px;
+  flex-shrink: 0;
+}
 
 .pill {
   display: inline-flex;

@@ -13,6 +13,10 @@ export const api = {
   /// registered accounts, imports them into the matching slot. Returns
   /// the synced email (empty string when nothing matched).
   syncFromCurrentCc: () => invoke<string>("sync_from_current_cc"),
+  /// macOS-only: request a native keychain-unlock dialog. The user's
+  /// password is entered directly into macOS's own trusted prompt and
+  /// never reaches Claudepot.
+  unlockKeychain: () => invoke<void>("unlock_keychain"),
   accountList: () => invoke<AccountSummary[]>("account_list"),
   cliUse: (email: string) => invoke<void>("cli_use", { email }),
   cliClear: () => invoke<void>("cli_clear"),
