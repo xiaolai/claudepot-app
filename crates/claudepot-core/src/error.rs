@@ -113,7 +113,10 @@ pub enum OnboardError {
     #[error("claude CLI not found at {0}")]
     CliBinaryNotFound(String),
 
-    #[error("auth login failed with exit code {0}")]
+    #[error("{}", match *.0 {
+        -2 => "login timed out — close the Claudepot window and try again, or complete the browser flow faster".to_string(),
+        code => format!("`claude auth login` exited with code {code}"),
+    })]
     AuthLoginFailed(i32),
 
     #[error("import failed: no credentials at hashed service name for {0}")]
