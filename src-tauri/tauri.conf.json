@@ -29,6 +29,19 @@
   "bundle": {
     "active": true,
     "targets": "all",
+    "category": "DeveloperTool",
+    "shortDescription": "Multi-account Claude Code / Desktop switcher",
+    "longDescription": "Manage multiple Anthropic Claude Code and Claude Desktop accounts. Switch the active account in seconds without re-authenticating.",
+    "publisher": "HANDO K.K.",
+    "homepage": "https://github.com/xiaolai/com.claudepot.app",
+    "macOS": {
+      "minimumSystemVersion": "10.15"
+    },
+    "linux": {
+      "deb": {
+        "depends": ["libwebkit2gtk-4.1-0", "libgtk-3-0"]
+      }
+    },
     "icon": [
       "icons/32x32.png",
       "icons/128x128.png",
