@@ -62,6 +62,20 @@ function App() {
       }
     });
 
+  const reimport = (a: AccountSummary) =>
+    withBusy(`re-${a.uuid}`, async () => {
+      try {
+        await api.accountReimportFromCurrent(a.uuid);
+        pushToast("info", `Re-imported credentials for ${a.email}`);
+        await refresh();
+      } catch (e) {
+        pushToast(
+          "error",
+          `Re-import failed: ${e}. Make sure CC is logged in as ${a.email} (\`claude auth login\`), then try again.`,
+        );
+      }
+    });
+
   const useDesktop = (a: AccountSummary) =>
     withBusy(`desk-${a.uuid}`, async () => {
       try {
@@ -140,6 +154,7 @@ function App() {
               busyKey={busy}
               onUseCli={() => useCli(a)}
               onUseDesktop={() => useDesktop(a)}
+              onReimport={() => reimport(a)}
               onRemove={() => setConfirmRemove(a)}
             />
           ))
@@ -236,6 +251,7 @@ function AccountCard({
   busyKey,
   onUseCli,
   onUseDesktop,
+  onReimport,
   onRemove,
 }: {
   account: AccountSummary;
@@ -243,10 +259,12 @@ function AccountCard({
   busyKey: string | null;
   onUseCli: () => void;
   onUseDesktop: () => void;
+  onReimport: () => void;
   onRemove: () => void;
 }) {
   const cliBusy = busyKey === `cli-${a.uuid}`;
   const deskBusy = busyKey === `desk-${a.uuid}`;
+  const reBusy = busyKey === `re-${a.uuid}`;
   const rmBusy = busyKey === `rm-${a.uuid}`;
   const anyBusy = busyKey !== null;
 
@@ -266,19 +284,24 @@ function AccountCard({
         </div>
       </div>
       <div className="account-actions">
-        <button
-          onClick={onUseCli}
-          disabled={anyBusy || a.is_cli_active || !a.has_cli_credentials}
-          title={
-            a.is_cli_active
-              ? "Already active CLI"
-              : !a.has_cli_credentials
-              ? "No credentials on file"
-              : "Use for CLI"
-          }
-        >
-          {cliBusy ? "…" : a.is_cli_active ? "✓ CLI" : "Use CLI"}
-        </button>
+        {a.credentials_healthy ? (
+          <button
+            onClick={onUseCli}
+            disabled={anyBusy || a.is_cli_active}
+            title={a.is_cli_active ? "Already active CLI" : "Use for CLI"}
+          >
+            {cliBusy ? "…" : a.is_cli_active ? "✓ CLI" : "Use CLI"}
+          </button>
+        ) : (
+          <button
+            onClick={onReimport}
+            disabled={anyBusy}
+            className="warn"
+            title={`Re-import from CC. Sign into CC as ${a.email} first (\`claude auth login\`).`}
+          >
+            {reBusy ? "…" : "Re-import"}
+          </button>
+        )}
         <button
           onClick={onUseDesktop}
           disabled={

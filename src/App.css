@@ -232,6 +232,13 @@ button.danger:hover:not(:disabled) {
   color: var(--bad);
   border-color: var(--bad);
 }
+button.warn {
+  color: var(--warn);
+  border-color: var(--warn);
+}
+button.warn:hover:not(:disabled) {
+  background: var(--warn-weak);
+}
 button.danger.primary {
   background: var(--bad);
   border-color: var(--bad);
