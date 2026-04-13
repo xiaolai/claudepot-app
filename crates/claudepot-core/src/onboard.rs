@@ -13,22 +13,30 @@ use std::path::PathBuf;
 pub const LOGIN_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(600);
 
 /// Run `claude auth login` against the user's real CC config dir (no env
-/// override). The browser opens; the user authenticates; CC's own keychain
-/// item (or .credentials.json on Linux/Windows) is overwritten with a fresh
-/// blob. Caller can then read CC's current state via a CliPlatform.
-///
-/// Timeout: `LOGIN_TIMEOUT` (10 min). If the user abandons the browser,
-/// the child is killed and we return AuthLoginFailed with a recognisable
-/// exit code (-2). The GUI surfaces this as a toast so the button
-/// un-spinners instead of hanging indefinitely.
-///
-/// stdin is piped to /dev/null — if CC ever prompted on stdin from a GUI
-/// context we'd deadlock on a read nobody can answer. stdout/stderr are
-/// captured and tee'd to tracing so GUI launches still have a log trail.
+/// override). Convenience wrapper: no cancellation channel, only the
+/// hard timeout applies.
 pub async fn run_auth_login_in_place() -> Result<(), OnboardError> {
+    run_auth_login_in_place_cancellable(None).await
+}
+
+/// Cancellable variant: pass a shared `Notify`; when another task calls
+/// `notify.notify_one()`, the subprocess is killed and this function
+/// returns `AuthLoginCancelled`. Used by the GUI's Cancel button.
+///
+/// Error cases:
+/// - `AuthLoginCancelled` — user clicked Cancel
+/// - `AuthLoginFailed(-2)` — hit LOGIN_TIMEOUT
+/// - `AuthLoginFailed(code)` — subprocess exited with failure
+pub async fn run_auth_login_in_place_cancellable(
+    cancel: Option<std::sync::Arc<tokio::sync::Notify>>,
+) -> Result<(), OnboardError> {
     let claude_path = which_claude()?;
 
-    tracing::info!(binary = %claude_path.display(), timeout_secs = LOGIN_TIMEOUT.as_secs(), "spawning `claude auth login` in place");
+    tracing::info!(
+        binary = %claude_path.display(),
+        timeout_secs = LOGIN_TIMEOUT.as_secs(),
+        "spawning `claude auth login` in place"
+    );
 
     let mut child = tokio::process::Command::new(&claude_path)
         .arg("auth")
@@ -49,24 +57,36 @@ pub async fn run_auth_login_in_place() -> Result<(), OnboardError> {
         tokio::spawn(pipe_to_tracing(stderr, "claude-stderr"));
     }
 
-    let exit = match tokio::time::timeout(LOGIN_TIMEOUT, child.wait()).await {
-        Ok(Ok(status)) => status,
-        Ok(Err(e)) => return Err(OnboardError::Io(e)),
-        Err(_) => {
+    let cancel_fut = async {
+        match cancel.as_ref() {
+            Some(n) => n.notified().await,
+            // Never-resolving future when no cancel channel was provided.
+            None => std::future::pending::<()>().await,
+        }
+    };
+
+    tokio::select! {
+        exit = child.wait() => {
+            match exit {
+                Ok(status) if status.success() => Ok(()),
+                Ok(status) => Err(OnboardError::AuthLoginFailed(status.code().unwrap_or(-1))),
+                Err(e) => Err(OnboardError::Io(e)),
+            }
+        }
+        _ = tokio::time::sleep(LOGIN_TIMEOUT) => {
             tracing::warn!(
                 "`claude auth login` exceeded {}s — killing child",
                 LOGIN_TIMEOUT.as_secs()
             );
             let _ = child.kill().await;
-            // Sentinel exit code for "timed out" so callers can distinguish.
-            return Err(OnboardError::AuthLoginFailed(-2));
+            Err(OnboardError::AuthLoginFailed(-2))
         }
-    };
-
-    if !exit.success() {
-        return Err(OnboardError::AuthLoginFailed(exit.code().unwrap_or(-1)));
+        _ = cancel_fut => {
+            tracing::info!("login cancelled by user — killing child");
+            let _ = child.kill().await;
+            Err(OnboardError::AuthLoginCancelled)
+        }
     }
-    Ok(())
 }
 
 async fn pipe_to_tracing<R: tokio::io::AsyncRead + Unpin + Send + 'static>(
