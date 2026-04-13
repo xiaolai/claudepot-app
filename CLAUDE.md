@@ -12,6 +12,14 @@ pnpm tauri dev                       # GUI in dev mode (hot reload)
 pnpm tauri build --no-bundle         # GUI release binary (no .dmg)
 ```
 
+## Test
+
+```bash
+cargo test --workspace               # Rust (229 tests)
+pnpm test                            # React (Vitest + RTL, jsdom)
+pnpm test:coverage                   # React with coverage report
+```
+
 ## GUI (Tauri)
 
 - `src-tauri/src/commands.rs` — async Tauri commands wrapping `claudepot-core`. NO business logic.
