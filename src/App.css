@@ -232,6 +232,16 @@ button.danger:hover:not(:disabled) {
   color: var(--bad);
   border-color: var(--bad);
 }
+button.danger.primary {
+  background: var(--bad);
+  border-color: var(--bad);
+  color: #fff;
+}
+button.danger.primary:hover:not(:disabled) {
+  filter: brightness(0.92);
+  color: #fff;
+  border-color: var(--bad);
+}
 
 /* ---------- footer ---------- */
 .footer {
@@ -296,6 +306,12 @@ button.danger:hover:not(:disabled) {
 .modal-body p.small {
   font-size: 12px;
   margin-top: 8px;
+}
+.modal-body p {
+  margin: 0 0 8px;
+}
+.modal-body p:last-child {
+  margin-bottom: 0;
 }
 .modal-actions {
   display: flex;
