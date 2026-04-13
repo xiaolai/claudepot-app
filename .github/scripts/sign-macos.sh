@@ -3,13 +3,13 @@
 # hardened runtime + entitlements. Required for keyring access on signed
 # release builds and for notarization.
 #
-# Usage: scripts/sign-macos.sh <binary-path>
+# Usage: .github/scripts/sign-macos.sh <binary-path>
 #
 # Environment:
 #   CODESIGN_IDENTITY   — override the signing identity
 #                         (default: "Developer ID Application: HANDO K.K. (Y53RSUA3SM)")
 #   ENTITLEMENTS_FILE   — override entitlements path
-#                         (default: crates/claudepot-cli/macos/entitlements.plist)
+#                         (default: <repo-root>/crates/claudepot-cli/macos/entitlements.plist)
 
 set -euo pipefail
 
@@ -25,8 +25,10 @@ if [[ "$(uname -s)" != "Darwin" ]]; then
     exit 1
 fi
 
+# Script lives at .github/scripts/sign-macos.sh — repo root is two levels up.
+REPO_ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 IDENTITY="${CODESIGN_IDENTITY:-Developer ID Application: HANDO K.K. (Y53RSUA3SM)}"
-ENTITLEMENTS="${ENTITLEMENTS_FILE:-$(dirname "$0")/../crates/claudepot-cli/macos/entitlements.plist}"
+ENTITLEMENTS="${ENTITLEMENTS_FILE:-$REPO_ROOT/crates/claudepot-cli/macos/entitlements.plist}"
 
 if [[ ! -f "$ENTITLEMENTS" ]]; then
     echo "error: entitlements file not found: $ENTITLEMENTS" >&2
