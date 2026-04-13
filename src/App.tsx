@@ -62,17 +62,18 @@ function App() {
       }
     });
 
-  const reimport = (a: AccountSummary) =>
+  const login = (a: AccountSummary) =>
     withBusy(`re-${a.uuid}`, async () => {
       try {
-        await api.accountReimportFromCurrent(a.uuid);
-        pushToast("info", `Re-imported credentials for ${a.email}`);
+        // Opens the system browser via `claude auth login` and blocks until
+        // the user completes OAuth (up to several minutes). The returned
+        // blob is verified against `a.email` before being stored.
+        pushToast("info", `Opening browser — sign in as ${a.email}…`);
+        await api.accountLogin(a.uuid);
+        pushToast("info", `Signed in as ${a.email}`);
         await refresh();
       } catch (e) {
-        pushToast(
-          "error",
-          `Re-import failed: ${e}. Make sure CC is logged in as ${a.email} (\`claude auth login\`), then try again.`,
-        );
+        pushToast("error", `Login failed: ${e}`);
       }
     });
 
@@ -154,7 +155,7 @@ function App() {
               busyKey={busy}
               onUseCli={() => useCli(a)}
               onUseDesktop={() => useDesktop(a)}
-              onReimport={() => reimport(a)}
+              onLogin={() => login(a)}
               onRemove={() => setConfirmRemove(a)}
             />
           ))
@@ -251,7 +252,7 @@ function AccountCard({
   busyKey,
   onUseCli,
   onUseDesktop,
-  onReimport,
+  onLogin,
   onRemove,
 }: {
   account: AccountSummary;
@@ -259,7 +260,7 @@ function AccountCard({
   busyKey: string | null;
   onUseCli: () => void;
   onUseDesktop: () => void;
-  onReimport: () => void;
+  onLogin: () => void;
   onRemove: () => void;
 }) {
   const cliBusy = busyKey === `cli-${a.uuid}`;
@@ -294,12 +295,12 @@ function AccountCard({
           </button>
         ) : (
           <button
-            onClick={onReimport}
+            onClick={onLogin}
             disabled={anyBusy}
             className="warn"
-            title={`Re-import from CC. Sign into CC as ${a.email} first (\`claude auth login\`).`}
+            title={`Sign in as ${a.email} — opens the browser, imports credentials.`}
           >
-            {reBusy ? "…" : "Re-import"}
+            {reBusy ? "…" : "Log in"}
           </button>
         )}
         <button

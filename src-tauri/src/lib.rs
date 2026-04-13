@@ -22,7 +22,7 @@ pub fn run() {
             commands::cli_clear,
             commands::desktop_use,
             commands::account_add_from_current,
-            commands::account_reimport_from_current,
+            commands::account_login,
             commands::account_remove,
         ])
         .run(tauri::generate_context!())

@@ -243,6 +243,39 @@ pub async fn register_from_browser(store: &AccountStore) -> Result<RegisterResul
     })
 }
 
+/// Launch `claude auth login` (which opens the browser), wait for the
+/// user to complete OAuth, then import CC's resulting blob into the
+/// EXISTING account's slot. The full "Log in" UX.
+///
+/// Identity check: the blob's profile email must match `account_id`'s
+/// stored email. If the user authenticates as a different account,
+/// the import is rejected — they'd otherwise be overwriting the wrong
+/// slot (the mis-filing corruption we otherwise guard against).
+pub async fn login_and_reimport(
+    store: &AccountStore,
+    account_id: Uuid,
+) -> Result<(), RegisterError> {
+    use crate::onboard;
+
+    // Validate the account exists before spending minutes in the browser.
+    let account = store
+        .find_by_uuid(account_id)
+        .map_err(|e| RegisterError::Store(e.to_string()))?
+        .ok_or(RegisterError::NotFound)?;
+
+    tracing::info!(
+        email = %account.email,
+        "launching `claude auth login` for re-authentication"
+    );
+    onboard::run_auth_login_in_place()
+        .await
+        .map_err(|e| RegisterError::CredentialRead(e.to_string()))?;
+
+    // After success, CC holds fresh credentials. Re-use reimport path for
+    // identity verification + persistence.
+    reimport_from_current(store, account_id).await
+}
+
 /// Re-import credentials into an EXISTING account's slot from the blob
 /// CC is currently holding. One-click recovery when Claudepot's stored
 /// blob is missing/corrupt but the user has logged back into CC as the
