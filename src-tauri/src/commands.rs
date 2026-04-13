@@ -161,13 +161,45 @@ pub async fn desktop_use(email: String, no_launch: bool) -> Result<(), String> {
 /// Spawn `claude auth login` (browser opens), wait for the user to
 /// complete OAuth, then import CC's fresh blob into the existing
 /// account's slot with identity verification.
+///
+/// Registers a cancellation Notify in `LoginState` so the companion
+/// `account_login_cancel` command can abort the in-flight subprocess.
+/// Only one login may run at a time; concurrent calls are rejected.
 #[tauri::command]
-pub async fn account_login(uuid: String) -> Result<(), String> {
+pub async fn account_login(
+    uuid: String,
+    state: tauri::State<'_, crate::state::LoginState>,
+) -> Result<(), String> {
     let store = open_store()?;
     let id = Uuid::parse_str(&uuid).map_err(|e| format!("bad uuid: {e}"))?;
-    services::account_service::login_and_reimport(&store, id)
-        .await
-        .map_err(|e| format!("login failed: {e}"))
+
+    let notify = std::sync::Arc::new(tokio::sync::Notify::new());
+    {
+        let mut slot = state.active.lock().unwrap();
+        if slot.is_some() {
+            return Err("a login is already in progress".to_string());
+        }
+        *slot = Some(notify.clone());
+    }
+
+    let result = services::account_service::login_and_reimport(&store, id, Some(notify)).await;
+
+    // Clear the slot regardless of outcome so the next login can run.
+    state.active.lock().unwrap().take();
+
+    result.map_err(|e| format!("login failed: {e}"))
+}
+
+/// Abort the in-flight `account_login` subprocess, if any. Safe to call
+/// when nothing is running — returns Ok either way.
+#[tauri::command]
+pub fn account_login_cancel(
+    state: tauri::State<'_, crate::state::LoginState>,
+) -> Result<(), String> {
+    if let Some(notify) = state.active.lock().unwrap().as_ref() {
+        notify.notify_one();
+    }
+    Ok(())
 }
 
 #[tauri::command]

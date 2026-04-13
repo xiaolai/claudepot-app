@@ -1,5 +1,6 @@
 mod commands;
 mod dto;
+mod state;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
@@ -15,6 +16,7 @@ pub fn run() {
         .try_init();
 
     tauri::Builder::default()
+        .manage(state::LoginState::default())
         .invoke_handler(tauri::generate_handler![
             commands::app_status,
             commands::account_list,
@@ -23,6 +25,7 @@ pub fn run() {
             commands::desktop_use,
             commands::account_add_from_current,
             commands::account_login,
+            commands::account_login_cancel,
             commands::account_remove,
         ])
         .run(tauri::generate_context!())
