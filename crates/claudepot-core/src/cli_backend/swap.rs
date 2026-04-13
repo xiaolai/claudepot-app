@@ -530,7 +530,15 @@ mod tests {
         }
     }
 
-    use crate::testing::setup_test_data_dir;
+    use crate::testing::{make_account, setup_test_data_dir};
+
+    /// Insert a placeholder account for `uuid` so set_active_cli's strict
+    /// zero-row check doesn't fail in tests that only care about swap mechanics.
+    fn seed_account(store: &super::AccountStore, uuid: Uuid) {
+        let mut a = make_account(&format!("seed-{uuid}@example.com"));
+        a.uuid = uuid;
+        store.insert(&a).unwrap();
+    }
 
     fn test_store() -> (AccountStore, tempfile::TempDir) {
         let dir = tempfile::tempdir().unwrap();
@@ -623,6 +631,7 @@ mod tests {
         let _env = setup_test_data_dir();
         let (store, _dir) = test_store();
         let target_id = Uuid::new_v4();
+        seed_account(&store, target_id);
 
         // Pre-store target credentials
         save_private(target_id, "target_blob").unwrap();
@@ -649,6 +658,8 @@ mod tests {
         let (store, _dir) = test_store();
         let current_id = Uuid::new_v4();
         let target_id = Uuid::new_v4();
+        seed_account(&store, current_id);
+        seed_account(&store, target_id);
 
         // Pre-store target credentials
         save_private(target_id, "target_blob").unwrap();
@@ -733,6 +744,7 @@ mod tests {
         let _env = setup_test_data_dir();
         let (store, _dir) = test_store();
         let target_id = Uuid::new_v4();
+        seed_account(&store, target_id);
         save_private(target_id, "blob").unwrap();
 
         let platform = MockPlatform::new(None);
@@ -756,6 +768,8 @@ mod tests {
         let (store, _dir) = test_store();
         let current_id = Uuid::new_v4();
         let target_id = Uuid::new_v4();
+        seed_account(&store, current_id);
+        seed_account(&store, target_id);
         save_private(target_id, "target").unwrap();
 
         // Set initial active to current
@@ -861,6 +875,7 @@ mod tests {
         let _env = setup_test_data_dir();
         let (store, _dir) = test_store();
         let target_id = Uuid::new_v4();
+        seed_account(&store, target_id);
         save_private(target_id, "direct_blob").unwrap();
 
         let platform = MockPlatform::new(None);
@@ -882,6 +897,7 @@ mod tests {
         let _env = setup_test_data_dir();
         let (store, _dir) = test_store();
         let target_id = Uuid::new_v4();
+        seed_account(&store, target_id);
 
         // Store an expired blob for the target
         save_private(target_id, &crate::testing::expired_blob_json()).unwrap();
@@ -910,6 +926,7 @@ mod tests {
         let _env = setup_test_data_dir();
         let (store, _dir) = test_store();
         let target_id = Uuid::new_v4();
+        seed_account(&store, target_id);
 
         let fresh = crate::testing::fresh_blob_json();
         save_private(target_id, &fresh).unwrap();
@@ -935,6 +952,7 @@ mod tests {
         let _env = setup_test_data_dir();
         let (store, _dir) = test_store();
         let target_id = Uuid::new_v4();
+        seed_account(&store, target_id);
 
         let expired = crate::testing::expired_blob_json();
         save_private(target_id, &expired).unwrap();

@@ -16,8 +16,8 @@ export const api = {
     invoke<void>("desktop_use", { email, noLaunch }),
   accountAddFromCurrent: () =>
     invoke<RegisterOutcome>("account_add_from_current"),
-  accountAddFromToken: (refreshToken: string) =>
-    invoke<RegisterOutcome>("account_add_from_token", { refreshToken }),
+  // Token-based onboarding is CLI-only — the refresh token must never enter
+  // the webview JS heap. Use a future browser-flow command instead.
   accountRemove: (uuid: string) =>
     invoke<RemoveOutcome>("account_remove", { uuid }),
 };
