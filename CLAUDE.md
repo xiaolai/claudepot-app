@@ -39,3 +39,7 @@ See `dev-docs/implementation-plan.md` for the full plan.
 
 `dev-docs/kannon/reference.md` — 3400-line verified reference for CC/Desktop internals.
 Always verify claims against CC source at `~/github/claude_code_src/src` before coding.
+
+## Conventions
+
+- Grill reports go in `dev-docs/reports/`. Never drop them at the repo root.
