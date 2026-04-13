@@ -95,9 +95,9 @@ describe("AccountCard — button disable logic", () => {
     expect(btn).toHaveTextContent(/✓ CLI/);
   });
 
-  it("Re-import calls account_reimport_from_current and refreshes", async () => {
+  it("Log in calls account_login (browser flow) and refreshes", async () => {
     const user = userEvent.setup();
-    const reimport = vi.fn();
+    const login = vi.fn();
     let listCalls = 0;
     await renderApp({
       app_status: () => sampleStatus({ account_count: 1 }),
@@ -112,21 +112,23 @@ describe("AccountCard — button disable logic", () => {
             ]
           : [sampleAccount({ credentials_healthy: true })];
       },
-      account_reimport_from_current: reimport,
+      account_login: login,
     });
 
-    await user.click(await screen.findByRole("button", { name: /re-import/i }));
+    await user.click(await screen.findByRole("button", { name: /log in/i }));
 
     await waitFor(() => {
-      expect(reimport).toHaveBeenCalledWith({
+      expect(login).toHaveBeenCalledWith({
         uuid: "aaaa1111-2222-4333-8444-555555555555",
       });
     });
     // After success the list re-fetches and the button is now Use CLI.
-    expect(await screen.findByRole("button", { name: /use cli/i })).toBeInTheDocument();
+    expect(
+      await screen.findByRole("button", { name: /use cli/i }),
+    ).toBeInTheDocument();
   });
 
-  it("shows Re-import (not Use CLI) when the stored blob is unhealthy", async () => {
+  it("shows Log in (not Use CLI) when the stored blob is unhealthy", async () => {
     await renderApp({
       app_status: () => sampleStatus({ account_count: 1 }),
       account_list: () => [
@@ -138,11 +140,11 @@ describe("AccountCard — button disable logic", () => {
       ],
     });
 
-    // Use CLI disappears; Re-import takes its place.
+    // Use CLI disappears; Log in takes its place.
     expect(screen.queryByRole("button", { name: /use cli/i })).toBeNull();
-    const btn = await screen.findByRole("button", { name: /re-import/i });
+    const btn = await screen.findByRole("button", { name: /log in/i });
     expect(btn).toBeEnabled();
-    expect(btn.getAttribute("title")).toMatch(/Re-import from CC/i);
+    expect(btn.getAttribute("title")).toMatch(/sign in as/i);
   });
 
   it("disables Use Desktop when the account has no desktop profile (audit fix #4)", async () => {

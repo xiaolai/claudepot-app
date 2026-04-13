@@ -158,13 +158,16 @@ pub async fn desktop_use(email: String, no_launch: bool) -> Result<(), String> {
         .map_err(|e| format!("desktop switch failed: {e}"))
 }
 
+/// Spawn `claude auth login` (browser opens), wait for the user to
+/// complete OAuth, then import CC's fresh blob into the existing
+/// account's slot with identity verification.
 #[tauri::command]
-pub async fn account_reimport_from_current(uuid: String) -> Result<(), String> {
+pub async fn account_login(uuid: String) -> Result<(), String> {
     let store = open_store()?;
     let id = Uuid::parse_str(&uuid).map_err(|e| format!("bad uuid: {e}"))?;
-    services::account_service::reimport_from_current(&store, id)
+    services::account_service::login_and_reimport(&store, id)
         .await
-        .map_err(|e| format!("reimport failed: {e}"))
+        .map_err(|e| format!("login failed: {e}"))
 }
 
 #[tauri::command]
