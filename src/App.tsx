@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import React, { useCallback, useEffect, useState } from "react";
 import { api } from "./api";
 import type { AccountSummary, AppStatus } from "./types";
 import "./App.css";
@@ -12,6 +12,9 @@ function App() {
   const [busy, setBusy] = useState<string | null>(null); // id of busy account
   const [toasts, setToasts] = useState<Toast[]>([]);
   const [showAdd, setShowAdd] = useState(false);
+  const [confirmRemove, setConfirmRemove] = useState<AccountSummary | null>(
+    null,
+  );
 
   const pushToast = useCallback((kind: Toast["kind"], text: string) => {
     const id = Date.now() + Math.random();
@@ -70,12 +73,8 @@ function App() {
       }
     });
 
-  const remove = (a: AccountSummary) =>
+  const performRemove = (a: AccountSummary) =>
     withBusy(`rm-${a.uuid}`, async () => {
-      if (
-        !confirm(`Remove ${a.email}? Credentials and profile will be deleted.`)
-      )
-        return;
       try {
         const r = await api.accountRemove(a.uuid);
         pushToast("info", `Removed ${r.email}`);
@@ -141,7 +140,7 @@ function App() {
               busyKey={busy}
               onUseCli={() => useCli(a)}
               onUseDesktop={() => useDesktop(a)}
-              onRemove={() => remove(a)}
+              onRemove={() => setConfirmRemove(a)}
             />
           ))
         )}
@@ -163,6 +162,33 @@ function App() {
             pushToast("info", "Account added.");
           }}
           onError={(msg) => pushToast("error", msg)}
+        />
+      )}
+
+      {confirmRemove && (
+        <ConfirmDialog
+          title="Remove account?"
+          body={
+            <>
+              <p>
+                Remove <strong>{confirmRemove.email}</strong>?
+              </p>
+              <p className="muted small">
+                This deletes the credential blob and any saved Desktop
+                profile from this machine. Active CLI/Desktop pointers
+                will be cleared. The account on Anthropic's side is not
+                affected.
+              </p>
+            </>
+          }
+          confirmLabel="Remove"
+          confirmDanger
+          onCancel={() => setConfirmRemove(null)}
+          onConfirm={async () => {
+            const target = confirmRemove;
+            setConfirmRemove(null);
+            await performRemove(target);
+          }}
         />
       )}
 
@@ -300,6 +326,47 @@ function TokenBadge({
     : "warn";
   const label = kind === "ok" && mins != null ? `valid · ${mins}m` : status;
   return <span className={`token-badge ${kind}`}>{label}</span>;
+}
+
+function ConfirmDialog({
+  title,
+  body,
+  confirmLabel = "Confirm",
+  confirmDanger = false,
+  onCancel,
+  onConfirm,
+}: {
+  title: string;
+  body: React.ReactNode;
+  confirmLabel?: string;
+  confirmDanger?: boolean;
+  onCancel: () => void;
+  onConfirm: () => void;
+}) {
+  return (
+    <div className="modal-backdrop" onClick={onCancel}>
+      <div
+        className="modal"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="confirm-title"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <h2 id="confirm-title">{title}</h2>
+        <div className="modal-body">{body}</div>
+        <div className="modal-actions">
+          <button onClick={onCancel}>Cancel</button>
+          <button
+            className={confirmDanger ? "danger primary" : "primary"}
+            onClick={onConfirm}
+            autoFocus
+          >
+            {confirmLabel}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
 }
 
 function EmptyState({ onAdd }: { onAdd: () => void }) {

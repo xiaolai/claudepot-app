@@ -6,7 +6,7 @@
 // the mock per test.
 
 import { describe, expect, it, vi, beforeEach } from "vitest";
-import { render, screen, waitFor } from "@testing-library/react";
+import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { sampleAccount, sampleStatus } from "./test/fixtures";
 
@@ -210,6 +210,92 @@ describe("Add-account modal", () => {
     expect(
       await screen.findByText("newly-added@example.com"),
     ).toBeInTheDocument();
+  });
+
+  it("Remove opens an in-app confirm dialog, not window.confirm", async () => {
+    // window.confirm can be invisible/suppressed in Tauri webviews. The app
+    // uses a state-driven modal instead. A confirm() call must never leak out.
+    const user = userEvent.setup();
+    const confirmSpy = vi
+      .spyOn(window, "confirm")
+      .mockImplementation(() => true);
+
+    await renderApp({
+      app_status: () => sampleStatus({ account_count: 1 }),
+      account_list: () => [sampleAccount()],
+    });
+
+    await user.click(await screen.findByRole("button", { name: /remove/i }));
+
+    // Dialog is visible with the account email highlighted.
+    const dialog = await screen.findByRole("dialog", {
+      name: /remove account/i,
+    });
+    expect(within(dialog).getByText("alice@example.com")).toBeInTheDocument();
+
+    // window.confirm must not have been called — that's the whole bug.
+    expect(confirmSpy).not.toHaveBeenCalled();
+    confirmSpy.mockRestore();
+  });
+
+  it("Remove → Cancel closes the dialog without calling account_remove", async () => {
+    const user = userEvent.setup();
+    const removeMock = vi.fn();
+    await renderApp({
+      app_status: () => sampleStatus({ account_count: 1 }),
+      account_list: () => [sampleAccount()],
+      account_remove: removeMock,
+    });
+
+    await user.click(await screen.findByRole("button", { name: /remove/i }));
+    await screen.findByRole("dialog", { name: /remove account/i });
+
+    await user.click(screen.getByRole("button", { name: /cancel/i }));
+
+    await waitFor(() => {
+      expect(
+        screen.queryByRole("dialog", { name: /remove account/i }),
+      ).not.toBeInTheDocument();
+    });
+    expect(removeMock).not.toHaveBeenCalled();
+  });
+
+  it("Remove → Remove confirms, calls account_remove with the right uuid, refreshes", async () => {
+    const user = userEvent.setup();
+    let listCalls = 0;
+    const removeMock = vi.fn(() => ({
+      email: "alice@example.com",
+      was_cli_active: false,
+      was_desktop_active: false,
+      had_desktop_profile: false,
+      warnings: [],
+    }));
+    await renderApp({
+      app_status: () => sampleStatus({ account_count: 1 }),
+      account_list: () => {
+        listCalls += 1;
+        return listCalls === 1 ? [sampleAccount()] : [];
+      },
+      account_remove: removeMock,
+    });
+
+    await user.click(await screen.findByRole("button", { name: /remove/i }));
+    // Two buttons labeled "Remove" now — the card's original + the dialog's
+    // confirm. The dialog one is inside role=dialog.
+    const dialog = await screen.findByRole("dialog", {
+      name: /remove account/i,
+    });
+    await user.click(
+      await within(dialog).findByRole("button", { name: /remove/i }),
+    );
+
+    await waitFor(() => {
+      expect(removeMock).toHaveBeenCalledWith({
+        uuid: "aaaa1111-2222-4333-8444-555555555555",
+      });
+    });
+    // After success the list re-fetches and shows the empty state.
+    expect(await screen.findByText(/No accounts yet/i)).toBeInTheDocument();
   });
 
   it("does NOT expose any refresh-token input (audit fix #1)", async () => {
