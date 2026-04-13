@@ -15,6 +15,7 @@ function App() {
   const [confirmRemove, setConfirmRemove] = useState<AccountSummary | null>(
     null,
   );
+  const [keychainIssue, setKeychainIssue] = useState<string | null>(null);
 
   const pushToast = useCallback((kind: Toast["kind"], text: string) => {
     const id = Date.now() + Math.random();
@@ -25,12 +26,20 @@ function App() {
   const refresh = useCallback(async () => {
     try {
       // Let Claudepot adopt CC's current credentials first (idempotent).
-      // On failure we log-and-continue — this must not block the list.
+      // If it fails with a user-actionable error (keychain locked), we
+      // record the message so the UI can show a banner.
       try {
         await api.syncFromCurrentCc();
+        setKeychainIssue(null);
       } catch (e) {
-        // eslint-disable-next-line no-console
-        console.warn("sync_from_current_cc failed:", e);
+        const msg = `${e}`;
+        if (msg.toLowerCase().includes("keychain is locked")) {
+          setKeychainIssue(msg);
+        } else {
+          setKeychainIssue(null);
+          // eslint-disable-next-line no-console
+          console.warn("sync_from_current_cc failed:", msg);
+        }
       }
       const [s, list] = await Promise.all([
         api.appStatus(),
@@ -165,6 +174,19 @@ function App() {
           />
         </div>
       </header>
+
+      {keychainIssue && (
+        <div className="banner warn" role="alert">
+          <div>
+            <strong>macOS Keychain is locked.</strong> Claudepot can't read
+            credentials until it's unlocked. Open{" "}
+            <em>Applications → Utilities → Keychain Access</em>, double-click
+            the <em>login</em> keychain, choose <em>Unlock</em> (enter your
+            macOS password), then click Retry.
+          </div>
+          <button onClick={refresh}>Retry</button>
+        </div>
+      )}
 
       <section className="accounts">
         {accounts.length === 0 ? (

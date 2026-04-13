@@ -102,6 +102,28 @@ body {
   gap: 10px;
 }
 
+.banner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 12px 16px;
+  border-radius: 10px;
+  border: 1px solid var(--warn);
+  background: var(--warn-weak);
+  color: var(--warn);
+}
+.banner strong {
+  color: var(--text);
+}
+.banner em {
+  font-style: normal;
+  font-family: "SF Mono", Menlo, monospace;
+  background: var(--surface);
+  padding: 1px 6px;
+  border-radius: 4px;
+}
+
 .pill {
   display: inline-flex;
   align-items: center;

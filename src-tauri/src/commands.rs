@@ -164,7 +164,9 @@ pub async fn desktop_use(email: String, no_launch: bool) -> Result<(), String> {
 /// externally see healthy credentials the moment the GUI opens,
 /// without clicking anything.
 ///
-/// Returns the email that was synced, or empty string if nothing matched.
+/// Returns the email that was synced, empty string if nothing matched,
+/// or a clearly-prefixed error message for user-facing conditions (like
+/// a locked keychain) that the UI should surface prominently.
 #[tauri::command]
 pub async fn sync_from_current_cc() -> Result<String, String> {
     let store = open_store()?;
@@ -176,9 +178,13 @@ pub async fn sync_from_current_cc() -> Result<String, String> {
             .map(|a| a.email)
             .unwrap_or_default()),
         Ok(None) => Ok(String::new()),
-        // Best-effort: don't let sync failures block startup. Log and
-        // return empty so the UI proceeds normally.
         Err(e) => {
+            let msg = e.to_string();
+            if msg.contains("keychain is locked") {
+                // User-actionable error: bubble up to the GUI so it can
+                // show a banner, not a hidden log line.
+                return Err(msg);
+            }
             tracing::warn!("sync_from_current_cc: {e}");
             Ok(String::new())
         }
