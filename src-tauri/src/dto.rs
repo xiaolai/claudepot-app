@@ -21,12 +21,20 @@ pub struct AccountSummary {
     /// "valid", "expired", "no credentials", "missing", "corrupt blob"
     pub token_status: String,
     pub token_remaining_mins: Option<i64>,
+    /// True iff the stored blob actually exists and parses. Mirrors reality,
+    /// not the DB flag. Used by the UI to gate the "Use CLI" button — the
+    /// DB's has_cli_credentials can lie after external state changes.
+    pub credentials_healthy: bool,
 }
 
 impl From<&claudepot_core::account::Account> for AccountSummary {
     fn from(a: &claudepot_core::account::Account) -> Self {
         let health =
             claudepot_core::services::account_service::token_health(a.uuid, a.has_cli_credentials);
+        // A stored blob is "healthy" if it exists and parses. Any other
+        // status ("missing", "corrupt blob", "no credentials") means the
+        // swap can't succeed — the UI should gate on this, not the DB flag.
+        let credentials_healthy = health.status.starts_with("valid") || health.status == "expired";
         Self {
             uuid: a.uuid.to_string(),
             email: a.email.clone(),
@@ -40,6 +48,7 @@ impl From<&claudepot_core::account::Account> for AccountSummary {
             last_desktop_switch: a.last_desktop_switch,
             token_status: health.status,
             token_remaining_mins: health.remaining_mins,
+            credentials_healthy,
         }
     }
 }

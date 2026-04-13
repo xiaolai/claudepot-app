@@ -30,5 +30,6 @@ export const sampleAccount = (
   last_desktop_switch: null,
   token_status: "valid (47m remaining)",
   token_remaining_mins: 47,
+  credentials_healthy: true,
   ...overrides,
 });

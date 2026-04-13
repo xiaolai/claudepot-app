@@ -13,6 +13,7 @@ export interface AccountSummary {
   last_desktop_switch: string | null;
   token_status: string; // "valid (...)", "expired", "no credentials", ...
   token_remaining_mins: number | null;
+  credentials_healthy: boolean; // true iff stored blob exists + parses
 }
 
 export interface AppStatus {
