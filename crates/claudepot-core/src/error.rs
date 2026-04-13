@@ -22,6 +22,18 @@ pub enum SwapError {
 
     #[error("token refresh failed: {0}")]
     RefreshFailed(String),
+
+    #[error(
+        "identity mismatch: account {stored_email} holds credentials for {actual_email}. \
+         Run `claudepot account remove {stored_email}` and re-add to re-seed."
+    )]
+    IdentityMismatch {
+        stored_email: String,
+        actual_email: String,
+    },
+
+    #[error("identity verification failed: {0}")]
+    IdentityVerificationFailed(String),
 }
 
 #[derive(Error, Debug)]

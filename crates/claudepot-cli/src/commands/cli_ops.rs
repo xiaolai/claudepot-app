@@ -83,6 +83,7 @@ pub async fn use_account(ctx: &AppContext, email_input: &str, no_refresh: bool) 
 
     ctx.info(&format!("Switching CLI to {email}..."));
     let refresher = cli_backend::swap::DefaultRefresher;
+    let fetcher = cli_backend::swap::DefaultProfileFetcher;
     cli_backend::swap::switch(
         &ctx.store,
         current_uuid,
@@ -90,6 +91,7 @@ pub async fn use_account(ctx: &AppContext, email_input: &str, no_refresh: bool) 
         platform.as_ref(),
         !no_refresh,
         &refresher,
+        &fetcher,
     )
     .await?;
 

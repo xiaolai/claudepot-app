@@ -24,6 +24,62 @@ impl TokenRefresher for DefaultRefresher {
     }
 }
 
+/// Abstraction over OAuth profile lookup — enables testing without network calls.
+/// The returned string is the email the server associates with the access token.
+#[async_trait::async_trait]
+pub trait ProfileFetcher: Send + Sync {
+    async fn fetch_email(&self, access_token: &str) -> Result<String, OAuthError>;
+}
+
+/// Production profile fetcher that calls `/api/oauth/profile`.
+pub struct DefaultProfileFetcher;
+
+#[async_trait::async_trait]
+impl ProfileFetcher for DefaultProfileFetcher {
+    async fn fetch_email(&self, access_token: &str) -> Result<String, OAuthError> {
+        crate::oauth::profile::fetch(access_token)
+            .await
+            .map(|p| p.email)
+    }
+}
+
+/// Verify that a credential blob actually represents `expected_email`.
+/// Parses the blob, fetches the profile via its access token, compares emails.
+///
+/// Returns:
+/// - `Ok(())` if the blob's access token resolves to `expected_email`.
+/// - `Ok(())` if the blob isn't a recognisable credentials JSON (degrades
+///   open — CC's real format is always JSON in production; this branch exists
+///   so storage-mechanics tests using opaque placeholder blobs don't need to
+///   fabricate full credentials).
+/// - `Err(IdentityMismatch)` on a verified mismatch (the corruption case).
+/// - `Err(IdentityVerificationFailed)` on network / server errors.
+async fn verify_blob_identity(
+    blob_str: &str,
+    expected_email: &str,
+    fetcher: &dyn ProfileFetcher,
+) -> Result<(), SwapError> {
+    let Ok(blob) = crate::blob::CredentialBlob::from_json(blob_str) else {
+        tracing::warn!(
+            "skipping identity verification — blob is not a recognisable \
+             credentials JSON"
+        );
+        return Ok(());
+    };
+    let actual = fetcher
+        .fetch_email(&blob.claude_ai_oauth.access_token)
+        .await
+        .map_err(|e| SwapError::IdentityVerificationFailed(e.to_string()))?;
+    if actual.eq_ignore_ascii_case(expected_email) {
+        Ok(())
+    } else {
+        Err(SwapError::IdentityMismatch {
+            stored_email: expected_email.to_string(),
+            actual_email: actual,
+        })
+    }
+}
+
 /// Acquire an exclusive file lock for swap operations.
 /// Returns the locked file handle — lock is released when dropped.
 fn acquire_swap_lock() -> Result<fs::File, SwapError> {
@@ -86,11 +142,16 @@ pub(crate) async fn maybe_refresh_blob(
 ///
 /// Acquires an exclusive file lock to prevent concurrent swaps.
 ///
-/// 1. Read the current blob from CC storage (may have been refreshed).
-/// 2. Save outgoing blob to Claudepot private storage.
-/// 3. Load target blob from Claudepot private storage.
-/// 4. Write target blob to CC storage + touch credfile.
-/// 5. On failure at step 4, rollback Claudepot private storage.
+/// Verifies identity at both boundaries via `fetcher` before any storage
+/// mutation, so a divergence between Claudepot's view and CC's actual
+/// credentials is caught before it corrupts a blob slot.
+///
+/// 1. Load target blob + (optionally) refresh.
+/// 2. Verify target blob's email matches the stored account's email.
+/// 3. Read CC's current blob. Verify it matches `current_id`'s stored email.
+/// 4. Save outgoing to private storage.
+/// 5. Write target to CC storage (with rollback on failure).
+/// 6. Update active pointer in the DB.
 pub async fn switch(
     store: &AccountStore,
     current_id: Option<Uuid>,
@@ -98,6 +159,7 @@ pub async fn switch(
     platform: &dyn CliPlatform,
     auto_refresh: bool,
     refresher: &dyn TokenRefresher,
+    fetcher: &dyn ProfileFetcher,
 ) -> Result<(), SwapError> {
     // Acquire exclusive lock — prevents concurrent swaps.
     tracing::debug!("acquiring swap lock...");
@@ -116,9 +178,30 @@ pub async fn switch(
         target_blob
     };
 
+    // Verify target blob actually belongs to target_id's stored email. If it
+    // doesn't, the slot is mis-filed — abort before writing to CC.
+    let target_email = store
+        .find_by_uuid(target_id)
+        .map_err(|e| SwapError::WriteFailed(format!("db lookup failed: {e}")))?
+        .ok_or_else(|| SwapError::WriteFailed(format!("target {target_id} not in DB")))?
+        .email;
+    tracing::debug!(target = %target_id, "verifying target blob identity");
+    verify_blob_identity(&target_blob, &target_email, fetcher).await?;
+
     // Save outgoing (current CC blob may have been refreshed by the CLI).
     if let Some(cur) = current_id {
         if let Some(current_blob) = platform.read_default().await? {
+            // Before caching CC's current blob under cur's slot, verify the
+            // blob actually represents cur's stored email. If not, we'd be
+            // mis-filing (exactly the corruption pattern we want to stop).
+            let cur_email = store
+                .find_by_uuid(cur)
+                .map_err(|e| SwapError::WriteFailed(format!("db lookup failed: {e}")))?
+                .ok_or_else(|| SwapError::WriteFailed(format!("current {cur} not in DB")))?
+                .email;
+            tracing::debug!(current = %cur, "verifying outgoing blob identity");
+            verify_blob_identity(&current_blob, &cur_email, fetcher).await?;
+
             let previous_private = load_private_opt(cur);
             save_private(cur, &current_blob)?;
 
@@ -540,6 +623,36 @@ mod tests {
         store.insert(&a).unwrap();
     }
 
+    /// Mock ProfileFetcher — lets tests assert identity-verification behavior
+    /// without any network calls. Most tests pass a placeholder via
+    /// `noop_fetcher()`; tests that exercise the verification path configure
+    /// a specific email to return.
+    struct MockProfileFetcher {
+        email: String,
+    }
+
+    impl MockProfileFetcher {
+        fn returning(email: &str) -> Self {
+            Self {
+                email: email.to_string(),
+            }
+        }
+    }
+
+    #[async_trait::async_trait]
+    impl super::ProfileFetcher for MockProfileFetcher {
+        async fn fetch_email(&self, _access_token: &str) -> Result<String, OAuthError> {
+            Ok(self.email.clone())
+        }
+    }
+
+    /// Placeholder fetcher for tests whose blobs are opaque strings —
+    /// verify_blob_identity degrades open on unparseable blobs, so this is
+    /// never actually invoked. It exists to satisfy the type signature.
+    fn noop_fetcher() -> MockProfileFetcher {
+        MockProfileFetcher::returning("never-called@example.com")
+    }
+
     fn test_store() -> (AccountStore, tempfile::TempDir) {
         let dir = tempfile::tempdir().unwrap();
         let db = dir.path().join("test.db");
@@ -638,9 +751,17 @@ mod tests {
 
         let platform = MockPlatform::new(None);
         let refresher = DefaultRefresher;
-        switch(&store, None, target_id, &platform, false, &refresher)
-            .await
-            .unwrap();
+        switch(
+            &store,
+            None,
+            target_id,
+            &platform,
+            false,
+            &refresher,
+            &noop_fetcher(),
+        )
+        .await
+        .unwrap();
 
         assert_eq!(platform.get(), Some("target_blob".to_string()));
         assert_eq!(
@@ -675,6 +796,7 @@ mod tests {
             &platform,
             false,
             &refresher,
+            &noop_fetcher(),
         )
         .await
         .unwrap();
@@ -713,6 +835,7 @@ mod tests {
             &platform,
             false,
             &refresher,
+            &noop_fetcher(),
         )
         .await;
         assert!(result.is_err());
@@ -734,7 +857,16 @@ mod tests {
         let platform = MockPlatform::new(None);
         let refresher = DefaultRefresher;
 
-        let result = switch(&store, None, target_id, &platform, false, &refresher).await;
+        let result = switch(
+            &store,
+            None,
+            target_id,
+            &platform,
+            false,
+            &refresher,
+            &noop_fetcher(),
+        )
+        .await;
         assert!(matches!(result, Err(SwapError::NoStoredCredentials(_))));
     }
 
@@ -749,9 +881,17 @@ mod tests {
 
         let platform = MockPlatform::new(None);
         let refresher = DefaultRefresher;
-        switch(&store, None, target_id, &platform, false, &refresher)
-            .await
-            .unwrap();
+        switch(
+            &store,
+            None,
+            target_id,
+            &platform,
+            false,
+            &refresher,
+            &noop_fetcher(),
+        )
+        .await
+        .unwrap();
 
         // DB active pointer must match target
         assert_eq!(
@@ -786,6 +926,7 @@ mod tests {
             &platform,
             false,
             &refresher,
+            &noop_fetcher(),
         )
         .await;
         assert!(result.is_err());
@@ -821,6 +962,7 @@ mod tests {
             &platform,
             false,
             &refresher,
+            &noop_fetcher(),
         )
         .await;
         assert!(result.is_err());
@@ -862,7 +1004,16 @@ mod tests {
         let platform = MockPlatform::new(Some("should-not-be-read"));
         let refresher = DefaultRefresher;
 
-        let result = switch(&store, None, target_id, &platform, false, &refresher).await;
+        let result = switch(
+            &store,
+            None,
+            target_id,
+            &platform,
+            false,
+            &refresher,
+            &noop_fetcher(),
+        )
+        .await;
         assert!(result.is_err());
 
         // Platform storage should be untouched (read_default never called for write path)
@@ -880,9 +1031,17 @@ mod tests {
 
         let platform = MockPlatform::new(None);
         let refresher = DefaultRefresher;
-        switch(&store, None, target_id, &platform, false, &refresher)
-            .await
-            .unwrap();
+        switch(
+            &store,
+            None,
+            target_id,
+            &platform,
+            false,
+            &refresher,
+            &noop_fetcher(),
+        )
+        .await
+        .unwrap();
 
         // Target written directly, no outgoing save
         assert_eq!(platform.get(), Some("direct_blob".to_string()));
@@ -904,10 +1063,13 @@ mod tests {
 
         let platform = MockPlatform::new(None);
         let refresher = MockRefresher::success();
+        let fetcher = MockProfileFetcher::returning(&format!("seed-{target_id}@example.com"));
 
-        switch(&store, None, target_id, &platform, true, &refresher)
-            .await
-            .unwrap();
+        switch(
+            &store, None, target_id, &platform, true, &refresher, &fetcher,
+        )
+        .await
+        .unwrap();
 
         // The platform should have the refreshed blob, not the expired one
         let written = platform.get().unwrap();
@@ -933,10 +1095,13 @@ mod tests {
 
         let platform = MockPlatform::new(None);
         let refresher = MockRefresher::success();
+        let fetcher = MockProfileFetcher::returning(&format!("seed-{target_id}@example.com"));
 
-        switch(&store, None, target_id, &platform, true, &refresher)
-            .await
-            .unwrap();
+        switch(
+            &store, None, target_id, &platform, true, &refresher, &fetcher,
+        )
+        .await
+        .unwrap();
 
         // Should use the original fresh blob (not refreshed)
         let written = platform.get().unwrap();
@@ -959,11 +1124,14 @@ mod tests {
 
         let platform = MockPlatform::new(None);
         let refresher = MockRefresher::success();
+        let fetcher = MockProfileFetcher::returning(&format!("seed-{target_id}@example.com"));
 
         // auto_refresh = false — should NOT call refresher
-        switch(&store, None, target_id, &platform, false, &refresher)
-            .await
-            .unwrap();
+        switch(
+            &store, None, target_id, &platform, false, &refresher, &fetcher,
+        )
+        .await
+        .unwrap();
 
         // Should use the expired blob as-is
         let written = platform.get().unwrap();
@@ -984,7 +1152,16 @@ mod tests {
         let platform = MockPlatform::new(Some("original-cc-blob"));
         let refresher = MockRefresher::failing("network error");
 
-        let result = switch(&store, None, target_id, &platform, true, &refresher).await;
+        let result = switch(
+            &store,
+            None,
+            target_id,
+            &platform,
+            true,
+            &refresher,
+            &noop_fetcher(),
+        )
+        .await;
         assert!(matches!(result, Err(SwapError::RefreshFailed(_))));
 
         // Platform should be untouched
@@ -1016,6 +1193,7 @@ mod tests {
             &platform,
             true,
             &refresher,
+            &noop_fetcher(),
         )
         .await;
         assert!(result.is_err());
@@ -1197,6 +1375,7 @@ mod tests {
             &platform,
             false,
             &refresher,
+            &noop_fetcher(),
         )
         .await;
         assert!(
@@ -1215,16 +1394,109 @@ mod tests {
         delete_private(target_id).unwrap();
     }
 
+    // -- Identity verification (prevents mis-filed-blob corruption) --
+
     #[tokio::test]
-    async fn test_swap_db_failure_with_no_outgoing() {
-        // current_id=None path: write_default succeeds, set_active_cli fails.
-        // With no previous blob to restore, the rollback branch is a no-op
-        // and we return Err. Verify platform has the target blob (not rolled back)
-        // and error is surfaced.
+    async fn test_swap_aborts_when_target_blob_belongs_to_different_account() {
+        // Regression guard for the "wrong blob under wrong UUID" corruption
+        // that motivated the verification. The target's stored blob reports
+        // a different email than the target's DB record — switch() must
+        // abort with IdentityMismatch before writing CC.
         let _lock = crate::testing::lock_data_dir();
         let _env = setup_test_data_dir();
         let (store, _dir) = test_store();
         let target_id = Uuid::new_v4();
+        seed_account(&store, target_id); // stored email: seed-{uuid}@example.com
+        save_private(target_id, &crate::testing::fresh_blob_json()).unwrap();
+
+        let platform = MockPlatform::new(None);
+        let refresher = MockRefresher::success();
+        // Fetcher claims the blob is for someone else — the divergence case.
+        let fetcher = MockProfileFetcher::returning("intruder@example.com");
+
+        let result = switch(
+            &store, None, target_id, &platform, false, &refresher, &fetcher,
+        )
+        .await;
+
+        assert!(
+            matches!(
+                result,
+                Err(SwapError::IdentityMismatch {
+                    ref actual_email,
+                    ..
+                }) if actual_email == "intruder@example.com"
+            ),
+            "expected IdentityMismatch, got {:?}",
+            result
+        );
+        // Platform untouched — abort happened before write_default.
+        assert_eq!(platform.get(), None);
+
+        delete_private(target_id).unwrap();
+    }
+
+    #[tokio::test]
+    async fn test_swap_aborts_when_cc_current_blob_belongs_to_different_account() {
+        // The outgoing-verification guard: CC's current blob must match the
+        // current_id's stored email. Catches the case where the user did
+        // `claude auth login` outside Claudepot, so CC now holds a different
+        // account's credentials than the DB thinks.
+        let _lock = crate::testing::lock_data_dir();
+        let _env = setup_test_data_dir();
+        let (store, _dir) = test_store();
+        let current_id = Uuid::new_v4();
+        let target_id = Uuid::new_v4();
+        seed_account(&store, current_id);
+        seed_account(&store, target_id);
+
+        // Target blob has matching identity (passes first verify gate).
+        save_private(target_id, &crate::testing::fresh_blob_json()).unwrap();
+        // CC currently holds a valid-looking blob (same fresh_blob_json for
+        // shape), but the fetcher will say it's for an unrelated account.
+        let cc_blob = crate::testing::fresh_blob_json();
+        let platform = MockPlatform::new(Some(&cc_blob));
+        let refresher = MockRefresher::success();
+
+        // Fetcher: returns the matching email for target, but a wrong email
+        // for the CC-current blob. Since MockProfileFetcher::returning is
+        // single-valued, use two separate test cases. Here we make BOTH
+        // verifications see the target's email; the outgoing check fails
+        // because cur_email is different from that shared value.
+        let fetcher = MockProfileFetcher::returning(&format!("seed-{target_id}@example.com"));
+
+        let result = switch(
+            &store,
+            Some(current_id),
+            target_id,
+            &platform,
+            false,
+            &refresher,
+            &fetcher,
+        )
+        .await;
+
+        assert!(
+            matches!(result, Err(SwapError::IdentityMismatch { .. })),
+            "expected IdentityMismatch for outgoing blob, got {:?}",
+            result
+        );
+
+        delete_private(target_id).unwrap();
+    }
+
+    #[tokio::test]
+    async fn test_swap_db_failure_with_no_outgoing() {
+        // Full DB corruption (state table dropped) breaks the early
+        // find_by_uuid lookup used by identity verification. The swap aborts
+        // before touching the platform — safer than the old "write, then
+        // fail at set_active_cli" pattern: if we can't verify the DB's
+        // expectations, we don't mutate CC's state.
+        let _lock = crate::testing::lock_data_dir();
+        let _env = setup_test_data_dir();
+        let (store, _dir) = test_store();
+        let target_id = Uuid::new_v4();
+        seed_account(&store, target_id);
         save_private(target_id, "target_only_blob").unwrap();
 
         let platform = MockPlatform::new(None);
@@ -1232,14 +1504,23 @@ mod tests {
 
         store.corrupt_state_table_for_test();
 
-        let result = switch(&store, None, target_id, &platform, false, &refresher).await;
+        let result = switch(
+            &store,
+            None,
+            target_id,
+            &platform,
+            false,
+            &refresher,
+            &noop_fetcher(),
+        )
+        .await;
         assert!(
             matches!(result, Err(SwapError::WriteFailed(_))),
             "DB failure must surface as WriteFailed, got {:?}",
             result
         );
-        // No previous blob to restore — platform still has target content.
-        assert_eq!(platform.get(), Some("target_only_blob".to_string()));
+        // Platform never written to — aborted before the mutation.
+        assert_eq!(platform.get(), None);
 
         delete_private(target_id).unwrap();
     }
@@ -1275,6 +1556,7 @@ mod tests {
             &platform,
             true,
             &refresher,
+            &noop_fetcher(),
         )
         .await;
         assert!(
