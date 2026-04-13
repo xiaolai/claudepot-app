@@ -27,7 +27,7 @@ Cargo.lock
 *.sln
 *.sw?
 typescript
-scripts/
+/scripts/
 dev-docs/
 
 # tdd-guardian generated artifacts

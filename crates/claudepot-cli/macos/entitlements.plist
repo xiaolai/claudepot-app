@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <!--
+      Minimal entitlements for a Developer ID-signed CLI with hardened runtime.
+      No keychain-access-groups: a CLI without a provisioning profile cannot
+      use shared keychain groups. Our binary accesses its own Keychain items
+      (service "com.claudepot.credentials") which works without any group
+      entitlement once the binary is properly signed.
+    -->
+</dict>
+</plist>

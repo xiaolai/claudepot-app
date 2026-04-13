@@ -19,9 +19,13 @@ pub fn lock_data_dir() -> std::sync::MutexGuard<'static, ()> {
 
 /// Set `CLAUDEPOT_DATA_DIR` to a fresh temp dir and return it.
 /// Caller MUST hold `DATA_DIR_LOCK` for the duration of the test.
+///
+/// Also forces file-based credential storage via `CLAUDEPOT_CREDENTIAL_BACKEND=file`
+/// so tests don't touch the real Keychain on macOS.
 pub fn setup_test_data_dir() -> tempfile::TempDir {
     let dir = tempfile::tempdir().unwrap();
     std::env::set_var("CLAUDEPOT_DATA_DIR", dir.path());
+    std::env::set_var("CLAUDEPOT_CREDENTIAL_BACKEND", "file");
     dir
 }
 
