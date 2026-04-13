@@ -189,31 +189,51 @@ pub async fn switch(
     verify_blob_identity(&target_blob, &target_email, fetcher).await?;
 
     // Save outgoing (current CC blob may have been refreshed by the CLI).
+    //
+    // If the outgoing check detects drift — CC holds a blob for a DIFFERENT
+    // account than DB's active_cli — we can't safely cache it under `cur`'s
+    // slot (that's the mis-filing corruption). Instead of aborting the
+    // swap, we log + skip the backup save. The target-blob check still
+    // runs unconditionally and will abort on a real target mismatch. Net
+    // effect: drift is self-healing, never silently corrupting.
     if let Some(cur) = current_id {
         if let Some(current_blob) = platform.read_default().await? {
-            // Before caching CC's current blob under cur's slot, verify the
-            // blob actually represents cur's stored email. If not, we'd be
-            // mis-filing (exactly the corruption pattern we want to stop).
             let cur_email = store
                 .find_by_uuid(cur)
                 .map_err(|e| SwapError::WriteFailed(format!("db lookup failed: {e}")))?
                 .ok_or_else(|| SwapError::WriteFailed(format!("current {cur} not in DB")))?
                 .email;
             tracing::debug!(current = %cur, "verifying outgoing blob identity");
-            verify_blob_identity(&current_blob, &cur_email, fetcher).await?;
+
+            let skip_backup = match verify_blob_identity(&current_blob, &cur_email, fetcher).await {
+                Ok(()) => false,
+                Err(SwapError::IdentityMismatch { actual_email, .. }) => {
+                    tracing::warn!(
+                        "CC is currently signed in as {actual_email}, not {cur_email} \
+                         (Claudepot's last-known active CLI). Skipping the outgoing backup \
+                         to avoid mis-filing; proceeding with the target swap."
+                    );
+                    true
+                }
+                Err(other) => return Err(other),
+            };
 
             let previous_private = load_private_opt(cur);
-            save_private(cur, &current_blob)?;
+            if !skip_backup {
+                save_private(cur, &current_blob)?;
+            }
 
             // Write target to CC storage.
             if let Err(e) = platform.write_default(&target_blob).await {
                 // Rollback: restore previous Claudepot blob for outgoing account.
-                match previous_private {
-                    Some(prev) => {
-                        let _ = save_private(cur, &prev);
-                    }
-                    None => {
-                        let _ = delete_private(cur);
+                if !skip_backup {
+                    match previous_private {
+                        Some(prev) => {
+                            let _ = save_private(cur, &prev);
+                        }
+                        None => {
+                            let _ = delete_private(cur);
+                        }
                     }
                 }
                 return Err(e);
@@ -1437,11 +1457,13 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_swap_aborts_when_cc_current_blob_belongs_to_different_account() {
-        // The outgoing-verification guard: CC's current blob must match the
-        // current_id's stored email. Catches the case where the user did
-        // `claude auth login` outside Claudepot, so CC now holds a different
-        // account's credentials than the DB thinks.
+    async fn test_swap_drift_on_outgoing_blob_skips_backup_but_completes() {
+        // When CC's current blob represents a different account than the DB
+        // thinks is active (drift from an external `claude auth login`),
+        // the swap must NOT abort — that would leave the user stuck. Instead,
+        // skip the outgoing backup (so we don't mis-file), but complete the
+        // target swap. The target-blob verification still runs and aborts
+        // on a real target mismatch.
         let _lock = crate::testing::lock_data_dir();
         let _env = setup_test_data_dir();
         let (store, _dir) = test_store();
@@ -1450,19 +1472,17 @@ mod tests {
         seed_account(&store, current_id);
         seed_account(&store, target_id);
 
-        // Target blob has matching identity (passes first verify gate).
         save_private(target_id, &crate::testing::fresh_blob_json()).unwrap();
-        // CC currently holds a valid-looking blob (same fresh_blob_json for
-        // shape), but the fetcher will say it's for an unrelated account.
+        // Pre-existing blob for current (a valid earlier backup). We'll
+        // verify it stays UNCHANGED by this swap (we skipped the backup save).
+        save_private(current_id, "original-current-backup").unwrap();
+
         let cc_blob = crate::testing::fresh_blob_json();
         let platform = MockPlatform::new(Some(&cc_blob));
         let refresher = MockRefresher::success();
 
-        // Fetcher: returns the matching email for target, but a wrong email
-        // for the CC-current blob. Since MockProfileFetcher::returning is
-        // single-valued, use two separate test cases. Here we make BOTH
-        // verifications see the target's email; the outgoing check fails
-        // because cur_email is different from that shared value.
+        // Single-valued fetcher: both verifications see target's seeded email.
+        // → target check passes; outgoing check sees drift (cur_email differs).
         let fetcher = MockProfileFetcher::returning(&format!("seed-{target_id}@example.com"));
 
         let result = switch(
@@ -1477,11 +1497,22 @@ mod tests {
         .await;
 
         assert!(
-            matches!(result, Err(SwapError::IdentityMismatch { .. })),
-            "expected IdentityMismatch for outgoing blob, got {:?}",
+            result.is_ok(),
+            "drift case must NOT abort; got {:?}",
             result
         );
 
+        // Platform received the target blob.
+        assert_eq!(platform.get(), Some(cc_blob.clone()));
+        // Current's private storage was NOT overwritten with the drifted CC
+        // blob — still the original backup.
+        assert_eq!(
+            load_private(current_id).unwrap(),
+            "original-current-backup",
+            "outgoing backup must be skipped when CC drift is detected"
+        );
+
+        delete_private(current_id).unwrap();
         delete_private(target_id).unwrap();
     }
 

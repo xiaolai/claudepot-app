@@ -273,7 +273,8 @@ pub async fn login_and_reimport(
         .map_err(|e| RegisterError::CredentialRead(e.to_string()))?;
 
     // After success, CC holds fresh credentials. Re-use reimport path for
-    // identity verification + persistence.
+    // identity verification + persistence — reimport also syncs
+    // state.active_cli so subsequent swaps don't see drift.
     reimport_from_current(store, account_id).await
 }
 
@@ -332,6 +333,14 @@ pub(crate) async fn reimport_from_current_with(
 
     // Sync the flag — storage is now populated.
     let _ = store.update_credentials_flag(account_id, true);
+
+    // Align Claudepot's active_cli with CC's reality: CC is now holding
+    // this account's blob (that's the premise of re-import), so this
+    // account IS the active CLI. Without this sync a subsequent swap
+    // would see drift on the outgoing-blob check.
+    if let Err(e) = store.set_active_cli(account_id) {
+        tracing::warn!("post-reimport failed to sync active_cli to {account_id}: {e}");
+    }
 
     Ok(())
 }
