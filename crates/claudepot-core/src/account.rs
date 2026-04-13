@@ -57,6 +57,10 @@ impl AccountStore {
         }
         let db = Connection::open(path)?;
         db.execute_batch("PRAGMA journal_mode=WAL;")?;
+        // Wait up to 5 s on writer contention before returning SQLITE_BUSY.
+        // Without this, simultaneous CLI + GUI access on the same db file
+        // would fail immediately with "database is locked".
+        db.busy_timeout(std::time::Duration::from_secs(5))?;
         db.execute_batch(SCHEMA)?;
 
         // Set 0600 permissions on the DB file (contains account metadata)
@@ -223,10 +227,15 @@ impl AccountStore {
     pub fn set_active_cli(&self, uuid: Uuid) -> SqlResult<()> {
         let db = self.db();
         let tx = db.unchecked_transaction()?;
-        tx.execute(
+        let updated = tx.execute(
             "UPDATE accounts SET last_cli_switch = ?1 WHERE uuid = ?2",
             params![Utc::now().to_rfc3339(), uuid.to_string()],
         )?;
+        if updated == 0 {
+            // Refuse to commit an orphan state pointer for a UUID that has
+            // no corresponding accounts row. Roll back the transaction.
+            return Err(rusqlite::Error::QueryReturnedNoRows);
+        }
         tx.execute(
             "INSERT OR REPLACE INTO state (key, value) VALUES ('active_cli', ?1)",
             params![uuid.to_string()],
@@ -253,10 +262,13 @@ impl AccountStore {
     pub fn set_active_desktop(&self, uuid: Uuid) -> SqlResult<()> {
         let db = self.db();
         let tx = db.unchecked_transaction()?;
-        tx.execute(
+        let updated = tx.execute(
             "UPDATE accounts SET last_desktop_switch = ?1 WHERE uuid = ?2",
             params![Utc::now().to_rfc3339(), uuid.to_string()],
         )?;
+        if updated == 0 {
+            return Err(rusqlite::Error::QueryReturnedNoRows);
+        }
         tx.execute(
             "INSERT OR REPLACE INTO state (key, value) VALUES ('active_desktop', ?1)",
             params![uuid.to_string()],
@@ -488,23 +500,24 @@ mod tests {
     // -- Group 6: transactional set_active --
 
     #[test]
-    fn test_set_active_cli_nonexistent_uuid_state_unchanged() {
-        // Document current behavior: set_active_cli with an unknown UUID runs
-        // the UPDATE (affects 0 rows — not an error in SQL) AND the state
-        // INSERT in the same transaction. The transaction commits successfully.
-        // State table IS updated even though no account row matched.
+    fn test_set_active_cli_nonexistent_uuid_rolls_back() {
+        // set_active_cli with an unknown UUID must NOT commit an orphan
+        // state pointer. The transaction rolls back on zero affected rows
+        // and returns an error; state.active_cli stays unchanged.
         let (store, _dir) = test_store();
         let orphan_uuid = Uuid::new_v4();
 
         let before = store.active_cli_uuid().unwrap();
-        store.set_active_cli(orphan_uuid).unwrap();
+        let result = store.set_active_cli(orphan_uuid);
         let after = store.active_cli_uuid().unwrap();
 
         assert!(before.is_none(), "no active_cli before");
-        // Structural note: current behavior — state updated despite no matching
-        // account row. This is a known gap documented by the test, not a
-        // regression. A stricter impl would roll back when UPDATE affects 0 rows.
-        assert_eq!(after, Some(orphan_uuid.to_string()));
+        assert!(
+            matches!(result, Err(rusqlite::Error::QueryReturnedNoRows)),
+            "expected zero-row error, got {:?}",
+            result
+        );
+        assert_eq!(after, None, "state must not be updated for orphan UUID");
     }
 
     #[test]

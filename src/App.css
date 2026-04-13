@@ -286,49 +286,16 @@ button.danger:hover:not(:disabled) {
   font-size: 16px;
   font-weight: 600;
 }
-.mode-tabs {
-  display: flex;
-  gap: 0;
-  margin-bottom: 16px;
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  padding: 3px;
-  background: var(--bg);
-}
-.mode-tabs button {
-  flex: 1;
-  border: none;
-  background: transparent;
-  padding: 6px 10px;
-  font-size: 13px;
-  border-radius: 6px;
-}
-.mode-tabs button.active {
-  background: var(--surface);
-  box-shadow: var(--shadow);
-}
-.modal-body input {
-  width: 100%;
-  padding: 8px 10px;
-  border: 1px solid var(--border-strong);
-  border-radius: 7px;
-  background: var(--bg);
-  color: var(--text);
-  font: inherit;
-  font-family: "SF Mono", Menlo, monospace;
-  font-size: 12px;
-  margin-top: 8px;
-}
-.modal-body input:focus {
-  outline: none;
-  border-color: var(--accent);
-}
 .modal-body code {
   font-family: "SF Mono", Menlo, monospace;
   background: var(--bg);
   padding: 1px 5px;
   border-radius: 4px;
   font-size: 12px;
+}
+.modal-body p.small {
+  font-size: 12px;
+  margin-top: 8px;
 }
 .modal-actions {
   display: flex;

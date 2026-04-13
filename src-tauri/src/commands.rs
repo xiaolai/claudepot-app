@@ -118,6 +118,20 @@ pub async fn desktop_use(email: String, no_launch: bool) -> Result<(), String> {
         .map_err(|e| format!("lookup failed: {e}"))?
         .ok_or_else(|| format!("account not found: {target_email}"))?;
 
+    // Preflight: refuse to quit Desktop if the target has no stored profile.
+    // Without this, switch() would quit Claude, snapshot the outgoing account,
+    // then fail on NoStoredProfile and leave the user without an open Desktop.
+    //
+    // The filesystem is authoritative — has_desktop_profile in the DB can lag
+    // (e.g. user deleted the profile directory manually). Check the dir.
+    let target_profile_dir = paths::desktop_profile_dir(target.uuid);
+    if !target_profile_dir.exists() {
+        return Err(format!(
+            "{} has no Desktop profile yet \u{2014} sign in via the Desktop app first",
+            target.email
+        ));
+    }
+
     let outgoing_id = store
         .active_desktop_uuid()
         .ok()
@@ -144,18 +158,11 @@ pub async fn account_add_from_current() -> Result<RegisterOutcome, String> {
     })
 }
 
-#[tauri::command]
-pub async fn account_add_from_token(refresh_token: String) -> Result<RegisterOutcome, String> {
-    let store = open_store()?;
-    let result = services::account_service::register_from_token(&store, &refresh_token)
-        .await
-        .map_err(|e| format!("register failed: {e}"))?;
-    Ok(RegisterOutcome {
-        email: result.email,
-        org_name: result.org_name,
-        subscription_type: result.subscription_type,
-    })
-}
+// Intentionally NOT exposed to the webview: a command that accepts a raw
+// refresh token would force the secret through JS memory and the IPC bridge.
+// Token-based onboarding stays CLI-only; the GUI will support it via a future
+// core-owned browser flow (register_from_browser) that never materializes the
+// token in JS.
 
 #[tauri::command]
 pub fn account_remove(uuid: String) -> Result<RemoveOutcome, String> {
