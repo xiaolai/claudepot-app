@@ -8,6 +8,7 @@ type Toast = { id: number; kind: "info" | "error"; text: string };
 function App() {
   const [status, setStatus] = useState<AppStatus | null>(null);
   const [accounts, setAccounts] = useState<AccountSummary[]>([]);
+  const [loadError, setLoadError] = useState<string | null>(null);
   const [busy, setBusy] = useState<string | null>(null); // id of busy account
   const [toasts, setToasts] = useState<Toast[]>([]);
   const [showAdd, setShowAdd] = useState(false);
@@ -26,8 +27,11 @@ function App() {
       ]);
       setStatus(s);
       setAccounts(list);
+      setLoadError(null);
     } catch (e) {
-      pushToast("error", `refresh failed: ${e}`);
+      const msg = `${e}`;
+      setLoadError(msg);
+      pushToast("error", `refresh failed: ${msg}`);
     }
   }, [pushToast]);
 
@@ -84,6 +88,19 @@ function App() {
     });
 
   if (!status) {
+    if (loadError) {
+      return (
+        <main className="app loading">
+          <div className="empty">
+            <h2>Couldn't load Claudepot</h2>
+            <p className="muted mono">{loadError}</p>
+            <button className="primary" onClick={refresh}>
+              Retry
+            </button>
+          </div>
+        </main>
+      );
+    }
     return (
       <main className="app loading">
         <p>Loading…</p>
@@ -238,12 +255,19 @@ function AccountCard({
         </button>
         <button
           onClick={onUseDesktop}
-          disabled={anyBusy || a.is_desktop_active || !desktopAvailable}
+          disabled={
+            anyBusy ||
+            a.is_desktop_active ||
+            !desktopAvailable ||
+            !a.has_desktop_profile
+          }
           title={
             !desktopAvailable
               ? "Desktop not installed"
               : a.is_desktop_active
               ? "Already active Desktop"
+              : !a.has_desktop_profile
+              ? "No Desktop profile yet — sign in via the Desktop app first"
               : "Use for Desktop (quits + relaunches Claude)"
           }
         >
@@ -302,19 +326,12 @@ function AddAccountModal({
   onAdded: () => void;
   onError: (msg: string) => void;
 }) {
-  const [mode, setMode] = useState<"current" | "token">("current");
-  const [token, setToken] = useState("");
   const [busy, setBusy] = useState(false);
 
   const submit = async () => {
     setBusy(true);
     try {
-      if (mode === "current") {
-        await api.accountAddFromCurrent();
-      } else {
-        if (!token.trim()) throw new Error("refresh token required");
-        await api.accountAddFromToken(token.trim());
-      }
+      await api.accountAddFromCurrent();
       onAdded();
     } catch (e) {
       onError(`add failed: ${e}`);
@@ -327,53 +344,23 @@ function AddAccountModal({
     <div className="modal-backdrop" onClick={onClose}>
       <div className="modal" onClick={(e) => e.stopPropagation()}>
         <h2>Add account</h2>
-
-        <div className="mode-tabs">
-          <button
-            className={mode === "current" ? "active" : ""}
-            onClick={() => setMode("current")}
-          >
-            From current CC login
-          </button>
-          <button
-            className={mode === "token" ? "active" : ""}
-            onClick={() => setMode("token")}
-          >
-            From refresh token
-          </button>
-        </div>
-
         <div className="modal-body">
-          {mode === "current" ? (
-            <p className="muted">
-              Imports whichever account Claude Code is currently signed into.
-              Log in with <code>claude auth login</code> first if needed.
-            </p>
-          ) : (
-            <>
-              <p className="muted">
-                Paste an <code>sk-ant-ort01-…</code> refresh token (headless
-                onboarding).
-              </p>
-              <input
-                type="password"
-                value={token}
-                onChange={(e) => setToken(e.currentTarget.value)}
-                placeholder="sk-ant-ort01-…"
-                spellCheck={false}
-                autoComplete="off"
-                disabled={busy}
-              />
-            </>
-          )}
+          <p className="muted">
+            Imports whichever account Claude Code is currently signed into.
+            Log in with <code>claude auth login</code> first if needed.
+          </p>
+          <p className="muted small">
+            For headless or token-based onboarding, use the{" "}
+            <code>claudepot</code> CLI &mdash; refresh tokens never enter the
+            GUI to avoid leaking secrets through the webview.
+          </p>
         </div>
-
         <div className="modal-actions">
           <button onClick={onClose} disabled={busy}>
             Cancel
           </button>
           <button className="primary" onClick={submit} disabled={busy}>
-            {busy ? "Adding…" : "Add"}
+            {busy ? "Adding…" : "Add from current"}
           </button>
         </div>
       </div>
