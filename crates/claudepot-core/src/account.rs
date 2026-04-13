@@ -1,5 +1,6 @@
 use chrono::{DateTime, Utc};
 use rusqlite::{params, Connection, OptionalExtension, Result as SqlResult};
+use std::sync::{Mutex, MutexGuard};
 use uuid::Uuid;
 
 #[derive(Debug, Clone)]
@@ -22,22 +23,29 @@ pub struct Account {
 }
 
 pub struct AccountStore {
-    db: Connection,
+    /// rusqlite::Connection is !Send on its own. Wrapping in Mutex makes the
+    /// store Send + Sync so it can cross await points in Tauri commands.
+    /// Contention is effectively zero — each CLI / GUI action is serialized.
+    db: Mutex<Connection>,
 }
 
 impl AccountStore {
+    fn db(&self) -> MutexGuard<'_, Connection> {
+        self.db.lock().expect("account store mutex poisoned")
+    }
+
     /// Test-only helper: drop the accounts table so subsequent queries fail.
     /// Used to verify error-path handling in higher-level services.
     #[cfg(test)]
     pub(crate) fn corrupt_for_test(&self) {
-        self.db.execute("DROP TABLE accounts", []).unwrap();
+        self.db().execute("DROP TABLE accounts", []).unwrap();
     }
 
     /// Test-only helper: drop the state table so active-pointer writes fail
     /// while accounts-table operations continue to work.
     #[cfg(test)]
     pub(crate) fn corrupt_state_table_for_test(&self) {
-        self.db.execute("DROP TABLE state", []).unwrap();
+        self.db().execute("DROP TABLE state", []).unwrap();
     }
 }
 
@@ -70,7 +78,7 @@ impl AccountStore {
             }
         }
 
-        Ok(Self { db })
+        Ok(Self { db: Mutex::new(db) })
     }
 
     fn row_to_account(
@@ -125,7 +133,8 @@ impl AccountStore {
         let active_cli = self.active_cli_uuid()?;
         let active_desktop = self.active_desktop_uuid()?;
 
-        let mut stmt = self.db.prepare(
+        let db = self.db();
+        let mut stmt = db.prepare(
             "SELECT uuid, email, org_uuid, org_name, \
              subscription_type, rate_limit_tier, created_at, \
              last_cli_switch, last_desktop_switch, \
@@ -142,7 +151,7 @@ impl AccountStore {
         let active_cli = self.active_cli_uuid()?;
         let active_desktop = self.active_desktop_uuid()?;
 
-        self.db
+        self.db()
             .query_row(
                 "SELECT uuid, email, org_uuid, org_name, \
                  subscription_type, rate_limit_tier, created_at, \
@@ -159,7 +168,7 @@ impl AccountStore {
         let active_cli = self.active_cli_uuid()?;
         let active_desktop = self.active_desktop_uuid()?;
 
-        self.db
+        self.db()
             .query_row(
                 "SELECT uuid, email, org_uuid, org_name, \
                  subscription_type, rate_limit_tier, created_at, \
@@ -173,7 +182,7 @@ impl AccountStore {
     }
 
     pub fn insert(&self, account: &Account) -> SqlResult<()> {
-        self.db.execute(
+        self.db().execute(
             "INSERT INTO accounts (uuid, email, org_uuid, org_name, \
              subscription_type, rate_limit_tier, created_at, \
              has_cli_credentials, has_desktop_profile) \
@@ -194,7 +203,7 @@ impl AccountStore {
     }
 
     pub fn remove(&self, uuid: Uuid) -> SqlResult<()> {
-        self.db.execute(
+        self.db().execute(
             "DELETE FROM accounts WHERE uuid = ?1",
             params![uuid.to_string()],
         )?;
@@ -202,7 +211,7 @@ impl AccountStore {
     }
 
     pub fn active_cli_uuid(&self) -> SqlResult<Option<String>> {
-        self.db
+        self.db()
             .query_row(
                 "SELECT value FROM state WHERE key = 'active_cli'",
                 [],
@@ -212,7 +221,8 @@ impl AccountStore {
     }
 
     pub fn set_active_cli(&self, uuid: Uuid) -> SqlResult<()> {
-        let tx = self.db.unchecked_transaction()?;
+        let db = self.db();
+        let tx = db.unchecked_transaction()?;
         tx.execute(
             "UPDATE accounts SET last_cli_switch = ?1 WHERE uuid = ?2",
             params![Utc::now().to_rfc3339(), uuid.to_string()],
@@ -225,13 +235,13 @@ impl AccountStore {
     }
 
     pub fn clear_active_cli(&self) -> SqlResult<()> {
-        self.db
+        self.db()
             .execute("DELETE FROM state WHERE key = 'active_cli'", [])?;
         Ok(())
     }
 
     pub fn active_desktop_uuid(&self) -> SqlResult<Option<String>> {
-        self.db
+        self.db()
             .query_row(
                 "SELECT value FROM state WHERE key = 'active_desktop'",
                 [],
@@ -241,7 +251,8 @@ impl AccountStore {
     }
 
     pub fn set_active_desktop(&self, uuid: Uuid) -> SqlResult<()> {
-        let tx = self.db.unchecked_transaction()?;
+        let db = self.db();
+        let tx = db.unchecked_transaction()?;
         tx.execute(
             "UPDATE accounts SET last_desktop_switch = ?1 WHERE uuid = ?2",
             params![Utc::now().to_rfc3339(), uuid.to_string()],
@@ -254,13 +265,13 @@ impl AccountStore {
     }
 
     pub fn clear_active_desktop(&self) -> SqlResult<()> {
-        self.db
+        self.db()
             .execute("DELETE FROM state WHERE key = 'active_desktop'", [])?;
         Ok(())
     }
 
     pub fn update_credentials_flag(&self, uuid: Uuid, has: bool) -> SqlResult<()> {
-        self.db.execute(
+        self.db().execute(
             "UPDATE accounts SET has_cli_credentials = ?1 WHERE uuid = ?2",
             params![has, uuid.to_string()],
         )?;
@@ -268,7 +279,7 @@ impl AccountStore {
     }
 
     pub fn update_desktop_profile_flag(&self, uuid: Uuid, has: bool) -> SqlResult<()> {
-        self.db.execute(
+        self.db().execute(
             "UPDATE accounts SET has_desktop_profile = ?1 WHERE uuid = ?2",
             params![has, uuid.to_string()],
         )?;
