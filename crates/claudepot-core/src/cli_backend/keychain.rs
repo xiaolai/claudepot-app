@@ -82,6 +82,14 @@ pub async fn write(service: &str, blob: &str) -> Result<(), SwapError> {
     validate_security_input(&user, "USER")?;
     validate_security_input(service, "service")?;
     let hex_value = hex::encode(blob.as_bytes());
+    tracing::info!(
+        target: "claudepot::keychain_write",
+        service = %service,
+        user = %user,
+        blob_prefix = %&blob.chars().take(50).collect::<String>(),
+        blob_len = blob.len(),
+        "writing to CC keychain via `security -i add-generic-password -U`"
+    );
     let command_line =
         format!("add-generic-password -U -a \"{user}\" -s \"{service}\" -X \"{hex_value}\"\n");
 
@@ -110,13 +118,58 @@ pub async fn write(service: &str, blob: &str) -> Result<(), SwapError> {
     .await
     .map_err(|_| SwapError::KeychainError("security write timed out".into()))??;
 
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    tracing::info!(
+        target: "claudepot::keychain_write",
+        exit_code = output.status.code().unwrap_or(-1),
+        stderr = %stderr.trim(),
+        stdout = %stdout.trim(),
+        "security -i returned"
+    );
     if !output.status.success() {
-        let stderr = String::from_utf8_lossy(&output.stderr);
         return Err(SwapError::KeychainError(format!(
-            "security add-generic-password failed: {stderr}"
+            "security add-generic-password failed (exit {}): {}",
+            output.status.code().unwrap_or(-1),
+            stderr.trim()
         )));
     }
-
+    // Exit-zero is not always sufficient — `security -i` can silently accept
+    // a command and return 0 while the inner command fails (notably when
+    // TCC or an ACL gate kicks in for the keychain write). Read back to
+    // verify our blob is actually what's in the keychain.
+    match read(service).await {
+        Ok(Some(stored)) if stored == blob => {
+            tracing::info!(target: "claudepot::keychain_write", "readback verified");
+        }
+        Ok(Some(stored)) => {
+            tracing::error!(
+                target: "claudepot::keychain_write",
+                expected_prefix = %&blob.chars().take(50).collect::<String>(),
+                actual_prefix = %&stored.chars().take(50).collect::<String>(),
+                "readback MISMATCH — the write silently didn't stick"
+            );
+            return Err(SwapError::KeychainError(
+                "write to CC keychain did not take effect — verify the login \
+                 keychain is unlocked and Claudepot is allowed to modify the \
+                 'Claude Code-credentials' item in Keychain Access"
+                    .into(),
+            ));
+        }
+        Ok(None) => {
+            tracing::error!(target: "claudepot::keychain_write", "readback found no item");
+            return Err(SwapError::KeychainError(
+                "wrote to CC keychain but the item disappeared on readback".into(),
+            ));
+        }
+        Err(e) => {
+            tracing::warn!(
+                target: "claudepot::keychain_write",
+                error = %e,
+                "readback errored — assuming success on exit-zero"
+            );
+        }
+    }
     Ok(())
 }
 
