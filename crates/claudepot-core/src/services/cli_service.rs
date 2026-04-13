@@ -8,12 +8,16 @@ pub async fn clear_credentials(store: &AccountStore) -> Result<(), ClearError> {
     let platform = cli_backend::create_platform();
 
     // Save current credentials before clearing — fail if backup fails
-    if let Some(active_uuid_str) = store.active_cli_uuid()
-        .map_err(|e| ClearError::Store(e.to_string()))? {
-        let uuid: uuid::Uuid = active_uuid_str.parse()
+    if let Some(active_uuid_str) = store
+        .active_cli_uuid()
+        .map_err(|e| ClearError::Store(e.to_string()))?
+    {
+        let uuid: uuid::Uuid = active_uuid_str
+            .parse()
             .map_err(|e| ClearError::Store(format!("corrupt active UUID: {e}")))?;
-        if let Some(blob) = platform.read_default().await
-            .map_err(|e| ClearError::SaveFailed(format!("failed to read current credentials: {e}")))? {
+        if let Some(blob) = platform.read_default().await.map_err(|e| {
+            ClearError::SaveFailed(format!("failed to read current credentials: {e}"))
+        })? {
             cli_backend::swap::save_private(uuid, &blob)
                 .map_err(|e| ClearError::SaveFailed(e.to_string()))?;
         }
@@ -29,11 +33,11 @@ pub async fn clear_credentials(store: &AccountStore) -> Result<(), ClearError> {
 
     let cred_path = crate::paths::claude_credentials_file();
     if cred_path.exists() {
-        std::fs::remove_file(&cred_path)
-            .map_err(|e| ClearError::DeleteFailed(e.to_string()))?;
+        std::fs::remove_file(&cred_path).map_err(|e| ClearError::DeleteFailed(e.to_string()))?;
     }
 
-    store.clear_active_cli()
+    store
+        .clear_active_cli()
         .map_err(|e| ClearError::Store(e.to_string()))?;
 
     Ok(())
@@ -45,12 +49,16 @@ pub async fn clear_credentials_with_platform(
     platform: &dyn cli_backend::CliPlatform,
 ) -> Result<(), ClearError> {
     // Save current credentials before clearing — fail if backup fails
-    if let Some(active_uuid_str) = store.active_cli_uuid()
-        .map_err(|e| ClearError::Store(e.to_string()))? {
-        let uuid: uuid::Uuid = active_uuid_str.parse()
+    if let Some(active_uuid_str) = store
+        .active_cli_uuid()
+        .map_err(|e| ClearError::Store(e.to_string()))?
+    {
+        let uuid: uuid::Uuid = active_uuid_str
+            .parse()
             .map_err(|e| ClearError::Store(format!("corrupt active UUID: {e}")))?;
-        if let Some(blob) = platform.read_default().await
-            .map_err(|e| ClearError::SaveFailed(format!("failed to read current credentials: {e}")))? {
+        if let Some(blob) = platform.read_default().await.map_err(|e| {
+            ClearError::SaveFailed(format!("failed to read current credentials: {e}"))
+        })? {
             cli_backend::swap::save_private(uuid, &blob)
                 .map_err(|e| ClearError::SaveFailed(e.to_string()))?;
         }
@@ -58,11 +66,11 @@ pub async fn clear_credentials_with_platform(
 
     let cred_path = crate::paths::claude_credentials_file();
     if cred_path.exists() {
-        std::fs::remove_file(&cred_path)
-            .map_err(|e| ClearError::DeleteFailed(e.to_string()))?;
+        std::fs::remove_file(&cred_path).map_err(|e| ClearError::DeleteFailed(e.to_string()))?;
     }
 
-    store.clear_active_cli()
+    store
+        .clear_active_cli()
         .map_err(|e| ClearError::Store(e.to_string()))?;
 
     Ok(())
@@ -82,7 +90,7 @@ pub enum ClearError {
 mod tests {
     use super::*;
     use crate::error::SwapError;
-    use crate::testing::{lock_data_dir, setup_test_data_dir, test_store, make_account};
+    use crate::testing::{lock_data_dir, make_account, setup_test_data_dir, test_store};
     use std::sync::Mutex as StdMutex;
 
     struct MockPlatform {
@@ -122,7 +130,9 @@ mod tests {
         store.set_active_cli(account.uuid).unwrap();
 
         let platform = MockPlatform::new(None);
-        clear_credentials_with_platform(&store, &platform).await.unwrap();
+        clear_credentials_with_platform(&store, &platform)
+            .await
+            .unwrap();
 
         assert!(store.active_cli_uuid().unwrap().is_none());
     }
@@ -138,7 +148,9 @@ mod tests {
         store.set_active_cli(account.uuid).unwrap();
 
         let platform = MockPlatform::new(Some("current-cc-blob"));
-        clear_credentials_with_platform(&store, &platform).await.unwrap();
+        clear_credentials_with_platform(&store, &platform)
+            .await
+            .unwrap();
 
         // Outgoing blob saved to private storage
         let saved = cli_backend::swap::load_private(account.uuid).unwrap();
@@ -155,7 +167,9 @@ mod tests {
 
         // No active CLI account
         let platform = MockPlatform::new(None);
-        clear_credentials_with_platform(&store, &platform).await.unwrap();
+        clear_credentials_with_platform(&store, &platform)
+            .await
+            .unwrap();
 
         assert!(store.active_cli_uuid().unwrap().is_none());
     }
@@ -173,7 +187,9 @@ mod tests {
         std::fs::write(&cred_file, "old-creds").unwrap();
 
         let platform = MockPlatform::new(None);
-        clear_credentials_with_platform(&store, &platform).await.unwrap();
+        clear_credentials_with_platform(&store, &platform)
+            .await
+            .unwrap();
 
         assert!(!cred_file.exists());
     }

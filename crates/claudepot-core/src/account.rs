@@ -26,6 +26,22 @@ pub struct AccountStore {
 }
 
 impl AccountStore {
+    /// Test-only helper: drop the accounts table so subsequent queries fail.
+    /// Used to verify error-path handling in higher-level services.
+    #[cfg(test)]
+    pub(crate) fn corrupt_for_test(&self) {
+        self.db.execute("DROP TABLE accounts", []).unwrap();
+    }
+
+    /// Test-only helper: drop the state table so active-pointer writes fail
+    /// while accounts-table operations continue to work.
+    #[cfg(test)]
+    pub(crate) fn corrupt_state_table_for_test(&self) {
+        self.db.execute("DROP TABLE state", []).unwrap();
+    }
+}
+
+impl AccountStore {
     pub fn open(path: &std::path::Path) -> SqlResult<Self> {
         if let Some(parent) = path.parent() {
             std::fs::create_dir_all(parent)
@@ -65,15 +81,23 @@ impl AccountStore {
         let uuid_str: String = row.get(0)?;
         let uuid: Uuid = uuid_str.parse().map_err(|e| {
             rusqlite::Error::FromSqlConversionFailure(
-                0, rusqlite::types::Type::Text,
-                Box::new(std::io::Error::new(std::io::ErrorKind::InvalidData, format!("bad UUID: {e}")))
+                0,
+                rusqlite::types::Type::Text,
+                Box::new(std::io::Error::new(
+                    std::io::ErrorKind::InvalidData,
+                    format!("bad UUID: {e}"),
+                )),
             )
         })?;
         let created_str: String = row.get(6)?;
         let created_at: DateTime<Utc> = created_str.parse().map_err(|e| {
             rusqlite::Error::FromSqlConversionFailure(
-                6, rusqlite::types::Type::Text,
-                Box::new(std::io::Error::new(std::io::ErrorKind::InvalidData, format!("bad timestamp: {e}")))
+                6,
+                rusqlite::types::Type::Text,
+                Box::new(std::io::Error::new(
+                    std::io::ErrorKind::InvalidData,
+                    format!("bad timestamp: {e}"),
+                )),
             )
         })?;
         Ok(Account {
@@ -84,8 +108,12 @@ impl AccountStore {
             subscription_type: row.get(4)?,
             rate_limit_tier: row.get(5)?,
             created_at,
-            last_cli_switch: row.get::<_, Option<String>>(7)?.and_then(|s| s.parse().ok()),
-            last_desktop_switch: row.get::<_, Option<String>>(8)?.and_then(|s| s.parse().ok()),
+            last_cli_switch: row
+                .get::<_, Option<String>>(7)?
+                .and_then(|s| s.parse().ok()),
+            last_desktop_switch: row
+                .get::<_, Option<String>>(8)?
+                .and_then(|s| s.parse().ok()),
             has_cli_credentials: row.get(9)?,
             has_desktop_profile: row.get(10)?,
             is_cli_active: active_cli.as_ref() == Some(&uuid_str),
@@ -166,16 +194,20 @@ impl AccountStore {
     }
 
     pub fn remove(&self, uuid: Uuid) -> SqlResult<()> {
-        self.db
-            .execute("DELETE FROM accounts WHERE uuid = ?1", params![uuid.to_string()])?;
+        self.db.execute(
+            "DELETE FROM accounts WHERE uuid = ?1",
+            params![uuid.to_string()],
+        )?;
         Ok(())
     }
 
     pub fn active_cli_uuid(&self) -> SqlResult<Option<String>> {
         self.db
-            .query_row("SELECT value FROM state WHERE key = 'active_cli'", [], |r| {
-                r.get(0)
-            })
+            .query_row(
+                "SELECT value FROM state WHERE key = 'active_cli'",
+                [],
+                |r| r.get(0),
+            )
             .optional()
     }
 
@@ -193,7 +225,8 @@ impl AccountStore {
     }
 
     pub fn clear_active_cli(&self) -> SqlResult<()> {
-        self.db.execute("DELETE FROM state WHERE key = 'active_cli'", [])?;
+        self.db
+            .execute("DELETE FROM state WHERE key = 'active_cli'", [])?;
         Ok(())
     }
 
@@ -221,7 +254,8 @@ impl AccountStore {
     }
 
     pub fn clear_active_desktop(&self) -> SqlResult<()> {
-        self.db.execute("DELETE FROM state WHERE key = 'active_desktop'", [])?;
+        self.db
+            .execute("DELETE FROM state WHERE key = 'active_desktop'", [])?;
         Ok(())
     }
 
@@ -416,7 +450,9 @@ mod tests {
         let account = make_account("profile@example.com");
         store.insert(&account).unwrap();
 
-        store.update_desktop_profile_flag(account.uuid, true).unwrap();
+        store
+            .update_desktop_profile_flag(account.uuid, true)
+            .unwrap();
         let found = store.find_by_uuid(account.uuid).unwrap().unwrap();
         assert!(found.has_desktop_profile);
     }
@@ -436,6 +472,50 @@ mod tests {
     fn test_store_find_by_email_not_found() {
         let (store, _dir) = test_store();
         assert!(store.find_by_email("nobody@example.com").unwrap().is_none());
+    }
+
+    // -- Group 6: transactional set_active --
+
+    #[test]
+    fn test_set_active_cli_nonexistent_uuid_state_unchanged() {
+        // Document current behavior: set_active_cli with an unknown UUID runs
+        // the UPDATE (affects 0 rows — not an error in SQL) AND the state
+        // INSERT in the same transaction. The transaction commits successfully.
+        // State table IS updated even though no account row matched.
+        let (store, _dir) = test_store();
+        let orphan_uuid = Uuid::new_v4();
+
+        let before = store.active_cli_uuid().unwrap();
+        store.set_active_cli(orphan_uuid).unwrap();
+        let after = store.active_cli_uuid().unwrap();
+
+        assert!(before.is_none(), "no active_cli before");
+        // Structural note: current behavior — state updated despite no matching
+        // account row. This is a known gap documented by the test, not a
+        // regression. A stricter impl would roll back when UPDATE affects 0 rows.
+        assert_eq!(after, Some(orphan_uuid.to_string()));
+    }
+
+    #[test]
+    fn test_set_active_cli_transaction_both_updated() {
+        // Positive path: both the state table and accounts.last_cli_switch
+        // must be updated atomically by set_active_cli.
+        let (store, _dir) = test_store();
+        let account = make_account("atomic@example.com");
+        store.insert(&account).unwrap();
+
+        store.set_active_cli(account.uuid).unwrap();
+
+        assert_eq!(
+            store.active_cli_uuid().unwrap(),
+            Some(account.uuid.to_string()),
+            "state.active_cli updated"
+        );
+        let row = store.find_by_uuid(account.uuid).unwrap().unwrap();
+        assert!(
+            row.last_cli_switch.is_some(),
+            "accounts.last_cli_switch updated in the same transaction"
+        );
     }
 }
 

@@ -18,7 +18,8 @@ pub fn read_default() -> Result<Option<String>, SwapError> {
             if mode != 0o600 {
                 tracing::warn!(
                     "credential file {} has permissions {:o} (expected 600), fixing",
-                    path.display(), mode
+                    path.display(),
+                    mode
                 );
                 std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600))
                     .map_err(SwapError::FileError)?;
@@ -40,9 +41,8 @@ pub fn write_default(blob: &str) -> Result<(), SwapError> {
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent)?;
     }
-    let mut tmp = tempfile::NamedTempFile::new_in(
-        path.parent().unwrap_or(std::path::Path::new(".")),
-    )?;
+    let mut tmp =
+        tempfile::NamedTempFile::new_in(path.parent().unwrap_or(std::path::Path::new(".")))?;
     tmp.write_all(blob.as_bytes())?;
 
     #[cfg(unix)]
@@ -144,14 +144,18 @@ mod tests {
 
         write_default("data").unwrap();
         let before = std::fs::metadata(dir.path().join(".credentials.json"))
-            .unwrap().modified().unwrap();
+            .unwrap()
+            .modified()
+            .unwrap();
 
         // Small delay to ensure mtime changes
         std::thread::sleep(std::time::Duration::from_millis(50));
 
         touch().unwrap();
         let after = std::fs::metadata(dir.path().join(".credentials.json"))
-            .unwrap().modified().unwrap();
+            .unwrap()
+            .modified()
+            .unwrap();
 
         assert!(after >= before);
     }
@@ -173,5 +177,50 @@ mod tests {
         write_default("first").unwrap();
         write_default("second").unwrap();
         assert_eq!(read_default().unwrap(), Some("second".to_string()));
+    }
+
+    // -- Group 11: Unix-only code gaps --
+    #[test]
+    fn test_credfile_write_read_no_permission_on_non_unix() {
+        // write_default + read_default roundtrip must work on any platform.
+        // Unix additionally enforces 0o600 — verified in a separate test.
+        let _lock = lock_data_dir();
+        let _dir = setup_config_dir();
+
+        write_default("cross-platform-secret").unwrap();
+        let got = read_default().unwrap();
+        assert_eq!(got, Some("cross-platform-secret".to_string()));
+
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let path = paths::claude_credentials_file();
+            let mode = std::fs::metadata(&path).unwrap().permissions().mode() & 0o777;
+            assert_eq!(mode, 0o600, "unix: enforced 0o600");
+        }
+    }
+
+    // -- Group 7: permission auto-repair on read --
+    #[cfg(unix)]
+    #[test]
+    fn test_credfile_read_permission_repair_succeeds() {
+        // Write credfile (0600), widen perms to 0644, then read.
+        // Expected: read succeeds, perms auto-repaired back to 0600.
+        let _lock = lock_data_dir();
+        let dir = setup_config_dir();
+
+        write_default("secret-content").unwrap();
+
+        use std::os::unix::fs::PermissionsExt;
+        let path = dir.path().join(".credentials.json");
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o644)).unwrap();
+        let before = std::fs::metadata(&path).unwrap().permissions().mode() & 0o777;
+        assert_eq!(before, 0o644, "setup: widened to 0644");
+
+        let result = read_default().unwrap();
+        assert_eq!(result, Some("secret-content".to_string()));
+
+        let after = std::fs::metadata(&path).unwrap().permissions().mode() & 0o777;
+        assert_eq!(after, 0o600, "read_default must auto-repair perms to 0600");
     }
 }

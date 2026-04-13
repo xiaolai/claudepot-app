@@ -1,5 +1,5 @@
-use anyhow::Result;
 use crate::AppContext;
+use anyhow::Result;
 
 pub fn status(ctx: &AppContext) -> Result<()> {
     let active_uuid = ctx.store.active_cli_uuid()?;
@@ -16,11 +16,14 @@ pub fn status(ctx: &AppContext) -> Result<()> {
             match ctx.store.find_by_uuid(uuid)? {
                 Some(account) => {
                     if ctx.json {
-                        println!("{}", serde_json::json!({
-                            "active": account.email,
-                            "uuid": account.uuid.to_string(),
-                            "plan": account.subscription_type,
-                        }));
+                        println!(
+                            "{}",
+                            serde_json::json!({
+                                "active": account.email,
+                                "uuid": account.uuid.to_string(),
+                                "plan": account.subscription_type,
+                            })
+                        );
                     } else {
                         println!("Active CLI account: {}", account.email);
                         if let Some(ref plan) = account.subscription_type {
@@ -34,7 +37,10 @@ pub fn status(ctx: &AppContext) -> Result<()> {
                 None => {
                     ctx.store.clear_active_cli()?;
                     if ctx.json {
-                        println!("{}", serde_json::json!({"active": null, "error": "orphaned pointer cleared"}));
+                        println!(
+                            "{}",
+                            serde_json::json!({"active": null, "error": "orphaned pointer cleared"})
+                        );
                     } else {
                         println!("Active pointer was orphaned (account removed). Cleared.");
                     }
@@ -46,21 +52,27 @@ pub fn status(ctx: &AppContext) -> Result<()> {
 }
 
 pub async fn use_account(ctx: &AppContext, email_input: &str, no_refresh: bool) -> Result<()> {
-    use claudepot_core::resolve::resolve_email;
     use claudepot_core::cli_backend;
+    use claudepot_core::resolve::resolve_email;
 
-    let email = resolve_email(&ctx.store, email_input)
-        .map_err(|e| anyhow::anyhow!("{e}"))?;
+    let email = resolve_email(&ctx.store, email_input).map_err(|e| anyhow::anyhow!("{e}"))?;
 
-    let target = ctx.store.find_by_email(&email)?
+    let target = ctx
+        .store
+        .find_by_email(&email)?
         .ok_or_else(|| anyhow::anyhow!("account not found: {email}"))?;
 
-    let current_uuid = ctx.store.active_cli_uuid()?
+    let current_uuid = ctx
+        .store
+        .active_cli_uuid()?
         .and_then(|s| s.parse::<uuid::Uuid>().ok());
 
     if current_uuid == Some(target.uuid) {
         if ctx.json {
-            println!("{}", serde_json::json!({"already_active": true, "email": email}));
+            println!(
+                "{}",
+                serde_json::json!({"already_active": true, "email": email})
+            );
         } else {
             ctx.info(&format!("Already active: {email}"));
         }
@@ -72,9 +84,14 @@ pub async fn use_account(ctx: &AppContext, email_input: &str, no_refresh: bool) 
     ctx.info(&format!("Switching CLI to {email}..."));
     let refresher = cli_backend::swap::DefaultRefresher;
     cli_backend::swap::switch(
-        &ctx.store, current_uuid, target.uuid, platform.as_ref(),
-        !no_refresh, &refresher,
-    ).await?;
+        &ctx.store,
+        current_uuid,
+        target.uuid,
+        platform.as_ref(),
+        !no_refresh,
+        &refresher,
+    )
+    .await?;
 
     let from = current_uuid
         .and_then(|u| ctx.store.find_by_uuid(u).ok().flatten())
@@ -82,10 +99,13 @@ pub async fn use_account(ctx: &AppContext, email_input: &str, no_refresh: bool) 
         .unwrap_or_else(|| "(none)".to_string());
 
     if ctx.json {
-        println!("{}", serde_json::json!({
-            "from": from,
-            "to": email,
-        }));
+        println!(
+            "{}",
+            serde_json::json!({
+                "from": from,
+                "to": email,
+            })
+        );
     } else {
         println!("CLI: {from} → {email}");
         eprintln!("\nNote: running claude processes will continue using the previous account until restarted.");
@@ -114,13 +134,14 @@ pub async fn run(
     print_token: bool,
     args: &[String],
 ) -> Result<()> {
-    use claudepot_core::resolve::resolve_email;
     use claudepot_core::launcher;
+    use claudepot_core::resolve::resolve_email;
 
-    let email = resolve_email(&ctx.store, email_input)
-        .map_err(|e| anyhow::anyhow!("{e}"))?;
+    let email = resolve_email(&ctx.store, email_input).map_err(|e| anyhow::anyhow!("{e}"))?;
 
-    let account = ctx.store.find_by_email(&email)?
+    let account = ctx
+        .store
+        .find_by_email(&email)?
         .ok_or_else(|| anyhow::anyhow!("account not found: {email}"))?;
 
     if !account.has_cli_credentials {
@@ -129,7 +150,8 @@ pub async fn run(
 
     if print_token {
         eprintln!("⚠ WARNING: outputting raw access token. Do not log or share this value.");
-        let token = launcher::get_access_token(account.uuid).await
+        let token = launcher::get_access_token(account.uuid)
+            .await
             .map_err(|e| anyhow::anyhow!("{e}"))?;
         println!("{token}");
         return Ok(());
@@ -140,7 +162,8 @@ pub async fn run(
     }
 
     ctx.info(&format!("Running as {} (Mode D)...", email));
-    let exit_code = launcher::run(account.uuid, args).await
+    let exit_code = launcher::run(account.uuid, args)
+        .await
         .map_err(|e| anyhow::anyhow!("{e}"))?;
 
     std::process::exit(exit_code);

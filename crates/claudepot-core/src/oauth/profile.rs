@@ -17,21 +17,30 @@ pub async fn fetch(access_token: &str) -> Result<Profile, OAuthError> {
     let resp = client
         .get("https://api.anthropic.com/api/oauth/profile")
         .bearer_auth(access_token)
-        .header("anthropic-beta", crate::oauth::beta_header::get_or_default())
+        .header(
+            "anthropic-beta",
+            crate::oauth::beta_header::get_or_default(),
+        )
         .header("Content-Type", "application/json")
         .send()
         .await?;
 
     let status = resp.status();
     if status == 401 {
-        return Err(OAuthError::AuthFailed("access token rejected by /api/oauth/profile".into()));
+        return Err(OAuthError::AuthFailed(
+            "access token rejected by /api/oauth/profile".into(),
+        ));
     }
     if status == 429 {
-        return Err(OAuthError::RateLimited { retry_after_secs: 60 });
+        return Err(OAuthError::RateLimited {
+            retry_after_secs: 60,
+        });
     }
     if !status.is_success() {
         let _ = resp.text().await; // consume body without exposing it
-        return Err(OAuthError::AuthFailed(format!("profile API returned {status}")));
+        return Err(OAuthError::AuthFailed(format!(
+            "profile API returned {status}"
+        )));
     }
 
     let body: serde_json::Value = resp.json().await?;
@@ -41,7 +50,9 @@ pub async fn fetch(access_token: &str) -> Result<Profile, OAuthError> {
 
     let email = account["email"].as_str().unwrap_or("");
     if email.is_empty() {
-        return Err(OAuthError::AuthFailed("profile response missing email field".into()));
+        return Err(OAuthError::AuthFailed(
+            "profile response missing email field".into(),
+        ));
     }
 
     Ok(Profile {

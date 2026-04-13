@@ -14,7 +14,10 @@ pub fn format_account_list(accounts: &[Account], json: bool) -> String {
         "  {:<30}  {:<6}  {:<8}  {:<8}\n",
         "Email", "Plan", "CLI", "Desktop"
     ));
-    out.push_str(&format!("  {:<30}  {:<6}  {:<8}  {:<8}\n", "─────", "────", "───", "───────"));
+    out.push_str(&format!(
+        "  {:<30}  {:<6}  {:<8}  {:<8}\n",
+        "─────", "────", "───", "───────"
+    ));
 
     for a in accounts {
         let plan = a.subscription_type.as_deref().unwrap_or("?");

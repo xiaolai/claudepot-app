@@ -14,9 +14,7 @@ pub(crate) fn resolve_path(path: &str) -> Result<String, ProjectError> {
     let abs = if p.is_absolute() {
         p
     } else {
-        std::env::current_dir()
-            .map_err(ProjectError::Io)?
-            .join(&p)
+        std::env::current_dir().map_err(ProjectError::Io)?.join(&p)
     };
     let resolved = if abs.exists() {
         abs.canonicalize().map_err(ProjectError::Io)?
@@ -67,7 +65,12 @@ pub(crate) fn compute_project_info(
     dir: &Path,
     sanitized_name: &str,
 ) -> Result<ProjectInfo, ProjectError> {
-    let original_path = unsanitize_path(sanitized_name);
+    // Prefer the authoritative `cwd` field from any session.jsonl. Fall back to
+    // the lossy unsanitize_path only when no session metadata is available.
+    let recovered = recover_cwd_from_sessions(dir);
+    let original_path = recovered
+        .clone()
+        .unwrap_or_else(|| unsanitize_path(sanitized_name));
     let session_count = count_files_with_ext(dir, "jsonl");
     let memory_dir = dir.join("memory");
     let memory_file_count = if memory_dir.exists() {
@@ -77,8 +80,15 @@ pub(crate) fn compute_project_info(
     };
     let total_size_bytes = dir_size(dir);
     let last_modified = most_recent_mtime(dir);
-    let roundtrips = sanitize_path(&original_path) == sanitized_name;
-    let is_orphan = roundtrips && !Path::new(&original_path).exists();
+    // If we recovered cwd from sessions, trust it. Otherwise, the roundtrip
+    // check guards against false positives from truncated or ambiguous paths
+    // (e.g. hyphens in directory names).
+    let is_orphan = if recovered.is_some() {
+        !Path::new(&original_path).exists()
+    } else {
+        let roundtrips = sanitize_path(&original_path) == sanitized_name;
+        roundtrips && !Path::new(&original_path).exists()
+    };
 
     Ok(ProjectInfo {
         sanitized_name: sanitized_name.to_string(),
@@ -89,6 +99,35 @@ pub(crate) fn compute_project_info(
         last_modified,
         is_orphan,
     })
+}
+
+/// Recover the project's original cwd from any session.jsonl's `cwd` field.
+/// CC writes `cwd` into every session entry, so this is authoritative and
+/// survives lossy sanitization (hyphens, long paths, unicode).
+pub(crate) fn recover_cwd_from_sessions(dir: &Path) -> Option<String> {
+    let entries = fs::read_dir(dir).ok()?;
+    for entry in entries.flatten() {
+        let name = entry.file_name().to_string_lossy().to_string();
+        if !name.ends_with(".jsonl") {
+            continue;
+        }
+        let Ok(file) = fs::File::open(entry.path()) else {
+            continue;
+        };
+        let mut reader = BufReader::new(file);
+        let mut line = String::new();
+        if reader.read_line(&mut line).ok()? == 0 {
+            continue;
+        }
+        if let Ok(val) = serde_json::from_str::<serde_json::Value>(&line) {
+            if let Some(cwd) = val.get("cwd").and_then(|v| v.as_str()) {
+                if !cwd.is_empty() {
+                    return Some(cwd.to_string());
+                }
+            }
+        }
+    }
+    None
 }
 
 pub(crate) fn list_sessions(dir: &Path) -> Result<Vec<SessionInfo>, ProjectError> {
@@ -133,12 +172,7 @@ pub(crate) fn count_files_with_ext(dir: &Path, ext: &str) -> usize {
         .map(|entries| {
             entries
                 .filter_map(|e| e.ok())
-                .filter(|e| {
-                    e.path()
-                        .extension()
-                        .map(|x| x == ext)
-                        .unwrap_or(false)
-                })
+                .filter(|e| e.path().extension().map(|x| x == ext).unwrap_or(false))
                 .count()
         })
         .unwrap_or(0)
@@ -190,7 +224,7 @@ pub(crate) fn is_claude_running_in(dir: &str) -> bool {
     let mut sys = System::new();
     sys.refresh_processes(sysinfo::ProcessesToUpdate::All, true);
 
-    for (_pid, proc) in sys.processes() {
+    for proc in sys.processes().values() {
         let name = proc.name().to_string_lossy();
         if name.contains("claude") || name.contains("Claude") {
             let cwd = proc.cwd().map(|p| p.to_string_lossy().to_string());
@@ -227,18 +261,27 @@ pub(crate) fn rewrite_history(
     old_path: &str,
     new_path: &str,
 ) -> Result<usize, ProjectError> {
-    let tmp = tempfile::NamedTempFile::new_in(
-        history_path.parent().unwrap_or(Path::new(".")),
-    )
-    .map_err(ProjectError::Io)?;
+    let tmp = tempfile::NamedTempFile::new_in(history_path.parent().unwrap_or(Path::new(".")))
+        .map_err(ProjectError::Io)?;
 
     let reader = BufReader::new(fs::File::open(history_path).map_err(ProjectError::Io)?);
     let mut writer = BufWriter::new(&tmp);
     let mut count = 0;
 
+    // Pre-check against the JSON-escaped form of old_path to avoid parsing
+    // lines that obviously don't reference it. On Windows, raw paths contain
+    // backslashes that appear as double-escaped sequences in the file, so
+    // `line.contains(old_path)` on the raw string misses them. Use the
+    // JSON-serialized form of old_path for correct escape matching.
+    let old_needle = serde_json::to_string(old_path).unwrap_or_else(|_| format!("\"{old_path}\""));
+    // Strip enclosing quotes: we want the needle to be just the escaped path,
+    // not a fully-quoted JSON string, so it matches inside the surrounding
+    // `"project":"…"` context.
+    let old_needle = old_needle.trim_matches('"');
+
     for line in reader.lines() {
         let line = line.map_err(ProjectError::Io)?;
-        if line.contains(old_path) {
+        if line.contains(old_needle) {
             if let Ok(mut entry) = serde_json::from_str::<serde_json::Value>(&line) {
                 if let Some(proj) = entry.get_mut("project") {
                     if proj.as_str() == Some(old_path) {
@@ -271,7 +314,7 @@ pub(crate) fn estimate_history_matches(config_dir: &Path, old_path: &str) -> usi
         .map(|f| {
             BufReader::new(f)
                 .lines()
-                .filter_map(|l| l.ok())
+                .map_while(Result::ok)
                 .filter(|l| l.contains(old_path))
                 .count()
         })

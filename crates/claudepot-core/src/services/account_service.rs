@@ -33,14 +33,18 @@ pub(crate) async fn register_from_current_with(
     fetch_profile: &dyn ProfileFetcher,
 ) -> Result<RegisterResult, RegisterError> {
     tracing::info!("registering from current CC credentials");
-    let blob_str = platform.read_default().await
+    let blob_str = platform
+        .read_default()
+        .await
         .map_err(|e| RegisterError::CredentialRead(e.to_string()))?
         .ok_or(RegisterError::NoCredentials)?;
 
     let blob = CredentialBlob::from_json(&blob_str)
         .map_err(|e| RegisterError::CredentialRead(e.to_string()))?;
 
-    let prof = fetch_profile.fetch(&blob.claude_ai_oauth.access_token).await
+    let prof = fetch_profile
+        .fetch(&blob.claude_ai_oauth.access_token)
+        .await
         .map_err(|e| RegisterError::ProfileFetch(e.to_string()))?;
 
     register_account_from_profile(store, &blob_str, &prof)
@@ -49,7 +53,8 @@ pub(crate) async fn register_from_current_with(
 /// Trait for fetching an OAuth profile — enables testing without network.
 #[async_trait::async_trait]
 pub(crate) trait ProfileFetcher: Send + Sync {
-    async fn fetch(&self, access_token: &str) -> Result<profile::Profile, crate::error::OAuthError>;
+    async fn fetch(&self, access_token: &str)
+        -> Result<profile::Profile, crate::error::OAuthError>;
 }
 
 /// Production implementation that calls the Anthropic API.
@@ -57,7 +62,10 @@ struct DefaultProfileFetcher;
 
 #[async_trait::async_trait]
 impl ProfileFetcher for DefaultProfileFetcher {
-    async fn fetch(&self, access_token: &str) -> Result<profile::Profile, crate::error::OAuthError> {
+    async fn fetch(
+        &self,
+        access_token: &str,
+    ) -> Result<profile::Profile, crate::error::OAuthError> {
         profile::fetch(access_token).await
     }
 }
@@ -69,9 +77,14 @@ fn register_account_from_profile(
     blob_str: &str,
     prof: &profile::Profile,
 ) -> Result<RegisterResult, RegisterError> {
-    if let Some(existing) = store.find_by_email(&prof.email)
-        .map_err(|e| RegisterError::Store(e.to_string()))? {
-        return Err(RegisterError::AlreadyRegistered(existing.email, existing.uuid));
+    if let Some(existing) = store
+        .find_by_email(&prof.email)
+        .map_err(|e| RegisterError::Store(e.to_string()))?
+    {
+        return Err(RegisterError::AlreadyRegistered(
+            existing.email,
+            existing.uuid,
+        ));
     }
 
     let account_id = Uuid::new_v4();
@@ -114,7 +127,13 @@ pub async fn register_from_token(
     refresh_token: &str,
 ) -> Result<RegisterResult, RegisterError> {
     use crate::cli_backend::swap::DefaultRefresher;
-    register_from_token_with(store, refresh_token, &DefaultRefresher, &DefaultProfileFetcher).await
+    register_from_token_with(
+        store,
+        refresh_token,
+        &DefaultRefresher,
+        &DefaultProfileFetcher,
+    )
+    .await
 }
 
 /// Testable variant: accepts injectable refresher and profile fetcher.
@@ -126,10 +145,14 @@ pub(crate) async fn register_from_token_with(
 ) -> Result<RegisterResult, RegisterError> {
     use crate::oauth::refresh;
 
-    let token_resp = refresher.refresh(refresh_token).await
+    let token_resp = refresher
+        .refresh(refresh_token)
+        .await
         .map_err(|e| RegisterError::ProfileFetch(format!("token exchange failed: {e}")))?;
 
-    let prof = fetch_profile.fetch(&token_resp.access_token).await
+    let prof = fetch_profile
+        .fetch(&token_resp.access_token)
+        .await
         .map_err(|e| RegisterError::ProfileFetch(e.to_string()))?;
 
     let blob_str = refresh::build_blob(&token_resp, None);
@@ -142,7 +165,8 @@ pub(crate) async fn register_from_token_with(
 pub async fn register_from_browser(store: &AccountStore) -> Result<RegisterResult, RegisterError> {
     use crate::onboard;
 
-    let config_dir = onboard::run_auth_login().await
+    let config_dir = onboard::run_auth_login()
+        .await
         .map_err(|e| RegisterError::CredentialRead(e.to_string()))?;
 
     let blob_str = match onboard::read_credentials_from_dir(&config_dir).await {
@@ -153,13 +177,12 @@ pub async fn register_from_browser(store: &AccountStore) -> Result<RegisterResul
         }
     };
 
-    let blob = CredentialBlob::from_json(&blob_str)
-        .map_err(|e| {
-            // Fire-and-forget cleanup — don't propagate cleanup errors
-            let config_dir = config_dir.clone();
-            tokio::spawn(async move { onboard::cleanup(&config_dir).await });
-            RegisterError::CredentialRead(e.to_string())
-        })?;
+    let blob = CredentialBlob::from_json(&blob_str).map_err(|e| {
+        // Fire-and-forget cleanup — don't propagate cleanup errors
+        let config_dir = config_dir.clone();
+        tokio::spawn(async move { onboard::cleanup(&config_dir).await });
+        RegisterError::CredentialRead(e.to_string())
+    })?;
 
     let prof = match profile::fetch(&blob.claude_ai_oauth.access_token).await {
         Ok(p) => p,
@@ -169,20 +192,24 @@ pub async fn register_from_browser(store: &AccountStore) -> Result<RegisterResul
         }
     };
 
-    if let Some(existing) = store.find_by_email(&prof.email)
-        .map_err(|e| RegisterError::Store(e.to_string()))? {
+    if let Some(existing) = store
+        .find_by_email(&prof.email)
+        .map_err(|e| RegisterError::Store(e.to_string()))?
+    {
         onboard::cleanup(&config_dir).await;
-        return Err(RegisterError::AlreadyRegistered(existing.email, existing.uuid));
+        return Err(RegisterError::AlreadyRegistered(
+            existing.email,
+            existing.uuid,
+        ));
     }
 
     let account_id = Uuid::new_v4();
-    swap::save_private(account_id, &blob_str)
-        .map_err(|e| {
-            // Cleanup on credential write failure
-            let cd = config_dir.clone();
-            tokio::spawn(async move { onboard::cleanup(&cd).await });
-            RegisterError::CredentialWrite(e.to_string())
-        })?;
+    swap::save_private(account_id, &blob_str).map_err(|e| {
+        // Cleanup on credential write failure
+        let cd = config_dir.clone();
+        tokio::spawn(async move { onboard::cleanup(&cd).await });
+        RegisterError::CredentialWrite(e.to_string())
+    })?;
 
     let account = Account {
         uuid: account_id,
@@ -219,7 +246,8 @@ pub async fn register_from_browser(store: &AccountStore) -> Result<RegisterResul
 /// Remove an account and all its associated data.
 /// Collects non-fatal warnings instead of silently swallowing errors.
 pub fn remove_account(store: &AccountStore, uuid: Uuid) -> Result<RemoveResult, RegisterError> {
-    let account = store.find_by_uuid(uuid)
+    let account = store
+        .find_by_uuid(uuid)
         .map_err(|e| RegisterError::Store(e.to_string()))?
         .ok_or(RegisterError::NotFound)?;
 
@@ -241,7 +269,9 @@ pub fn remove_account(store: &AccountStore, uuid: Uuid) -> Result<RemoveResult, 
     }
 
     // Remove from DB before irreversible file deletions
-    store.remove(uuid).map_err(|e| RegisterError::Store(e.to_string()))?;
+    store
+        .remove(uuid)
+        .map_err(|e| RegisterError::Store(e.to_string()))?;
 
     // Now safe to delete files — DB row is already gone
     if let Err(e) = swap::delete_private(uuid) {
@@ -281,25 +311,37 @@ pub struct TokenHealth {
 /// Get token health for an account.
 pub fn token_health(uuid: Uuid, has_credentials: bool) -> TokenHealth {
     if !has_credentials {
-        return TokenHealth { status: "no credentials".into(), remaining_mins: None };
+        return TokenHealth {
+            status: "no credentials".into(),
+            remaining_mins: None,
+        };
     }
     match swap::load_private(uuid) {
         Ok(blob_str) => match CredentialBlob::from_json(&blob_str) {
             Ok(blob) => {
-                let remaining = (blob.claude_ai_oauth.expires_at
-                    - Utc::now().timestamp_millis()) / 60_000;
+                let remaining =
+                    (blob.claude_ai_oauth.expires_at - Utc::now().timestamp_millis()) / 60_000;
                 if remaining > 0 {
                     TokenHealth {
                         status: format!("valid ({}m remaining)", remaining),
                         remaining_mins: Some(remaining),
                     }
                 } else {
-                    TokenHealth { status: "expired".into(), remaining_mins: Some(remaining) }
+                    TokenHealth {
+                        status: "expired".into(),
+                        remaining_mins: Some(remaining),
+                    }
                 }
             }
-            Err(_) => TokenHealth { status: "corrupt blob".into(), remaining_mins: None },
+            Err(_) => TokenHealth {
+                status: "corrupt blob".into(),
+                remaining_mins: None,
+            },
         },
-        Err(_) => TokenHealth { status: "missing".into(), remaining_mins: None },
+        Err(_) => TokenHealth {
+            status: "missing".into(),
+            remaining_mins: None,
+        },
     }
 }
 
@@ -336,8 +378,9 @@ mod tests {
     use super::*;
     use crate::error::{OAuthError, SwapError};
     use crate::oauth::refresh::TokenResponse;
-    use crate::testing::{DATA_DIR_LOCK, setup_test_data_dir, test_store, make_account,
-                          fresh_blob_json};
+    use crate::testing::{
+        fresh_blob_json, make_account, setup_test_data_dir, test_store, DATA_DIR_LOCK,
+    };
 
     fn insert_account(store: &AccountStore, email: &str) -> Account {
         let account = make_account(email);
@@ -449,10 +492,14 @@ mod tests {
         let _env = setup_test_data_dir();
         let (store, _db) = test_store();
 
-        let platform = MockPlatform { blob: Some(fresh_blob_json()) };
+        let platform = MockPlatform {
+            blob: Some(fresh_blob_json()),
+        };
         let fetcher = MockProfileFetcher::ok("alice@example.com");
 
-        let result = register_from_current_with(&store, &platform, &fetcher).await.unwrap();
+        let result = register_from_current_with(&store, &platform, &fetcher)
+            .await
+            .unwrap();
         assert_eq!(result.email, "alice@example.com");
         assert_eq!(result.org_name, "Test Org");
         assert_eq!(result.subscription_type, "pro");
@@ -484,7 +531,9 @@ mod tests {
         let _env = setup_test_data_dir();
         let (store, _db) = test_store();
 
-        let platform = MockPlatform { blob: Some(fresh_blob_json()) };
+        let platform = MockPlatform {
+            blob: Some(fresh_blob_json()),
+        };
         let fetcher = MockProfileFetcher::failing("401 Unauthorized");
 
         let result = register_from_current_with(&store, &platform, &fetcher).await;
@@ -500,11 +549,16 @@ mod tests {
         // Pre-register
         insert_account(&store, "dup@example.com");
 
-        let platform = MockPlatform { blob: Some(fresh_blob_json()) };
+        let platform = MockPlatform {
+            blob: Some(fresh_blob_json()),
+        };
         let fetcher = MockProfileFetcher::ok("dup@example.com");
 
         let result = register_from_current_with(&store, &platform, &fetcher).await;
-        assert!(matches!(result, Err(RegisterError::AlreadyRegistered(_, _))));
+        assert!(matches!(
+            result,
+            Err(RegisterError::AlreadyRegistered(_, _))
+        ));
     }
 
     #[tokio::test]
@@ -513,7 +567,9 @@ mod tests {
         let _env = setup_test_data_dir();
         let (store, _db) = test_store();
 
-        let platform = MockPlatform { blob: Some("not json".to_string()) };
+        let platform = MockPlatform {
+            blob: Some("not json".to_string()),
+        };
         let fetcher = MockProfileFetcher::ok("alice@example.com");
 
         let result = register_from_current_with(&store, &platform, &fetcher).await;
@@ -531,9 +587,9 @@ mod tests {
         let refresher = MockRefresher::success();
         let fetcher = MockProfileFetcher::ok("bob@example.com");
 
-        let result = register_from_token_with(
-            &store, "rt-test", &refresher, &fetcher
-        ).await.unwrap();
+        let result = register_from_token_with(&store, "rt-test", &refresher, &fetcher)
+            .await
+            .unwrap();
 
         assert_eq!(result.email, "bob@example.com");
         assert!(store.find_by_email("bob@example.com").unwrap().is_some());
@@ -550,9 +606,7 @@ mod tests {
         let refresher = MockRefresher::failing("invalid token");
         let fetcher = MockProfileFetcher::ok("bob@example.com");
 
-        let result = register_from_token_with(
-            &store, "rt-bad", &refresher, &fetcher
-        ).await;
+        let result = register_from_token_with(&store, "rt-bad", &refresher, &fetcher).await;
 
         assert!(matches!(result, Err(RegisterError::ProfileFetch(_))));
         let msg = result.unwrap_err().to_string();
@@ -569,11 +623,12 @@ mod tests {
         let refresher = MockRefresher::success();
         let fetcher = MockProfileFetcher::ok("dup@example.com");
 
-        let result = register_from_token_with(
-            &store, "rt-test", &refresher, &fetcher
-        ).await;
+        let result = register_from_token_with(&store, "rt-test", &refresher, &fetcher).await;
 
-        assert!(matches!(result, Err(RegisterError::AlreadyRegistered(_, _))));
+        assert!(matches!(
+            result,
+            Err(RegisterError::AlreadyRegistered(_, _))
+        ));
     }
 
     // -- token_health tests --
@@ -743,5 +798,101 @@ mod tests {
         assert!(!result.was_cli_active);
         assert!(!result.was_desktop_active);
         assert!(!result.had_desktop_profile);
+    }
+
+    // -- Group 5: account service rollbacks --
+
+    #[tokio::test]
+    async fn test_register_from_current_duplicate_cleans_no_blob() {
+        // When the fetched profile matches an existing account's email,
+        // registration fails with AlreadyRegistered BEFORE any blob is saved.
+        // Verify: no credential file for the attempted UUID exists after.
+        let _lock = crate::testing::lock_data_dir();
+        let _env = setup_test_data_dir();
+        let (store, _db) = test_store();
+
+        insert_account(&store, "dup@example.com");
+        let before_privates = count_private_files();
+
+        let platform = MockPlatform {
+            blob: Some(fresh_blob_json()),
+        };
+        let fetcher = MockProfileFetcher::ok("dup@example.com");
+        let result = register_from_current_with(&store, &platform, &fetcher).await;
+        assert!(matches!(
+            result,
+            Err(RegisterError::AlreadyRegistered(_, _))
+        ));
+
+        let after_privates = count_private_files();
+        assert_eq!(
+            before_privates, after_privates,
+            "duplicate rejection must not leave orphan blob on disk"
+        );
+    }
+
+    #[test]
+    fn test_remove_account_preserves_files_on_db_failure() {
+        // If store.remove() fails, credential file and profile dir must still
+        // exist (irreversible file deletions gated behind successful DB remove).
+        let _lock = crate::testing::lock_data_dir();
+        let _env = setup_test_data_dir();
+        let (store, _db) = test_store();
+
+        let account = insert_account(&store, "dbfail@example.com");
+        swap::save_private(account.uuid, "credential-content").unwrap();
+        let profile_dir = paths::desktop_profile_dir(account.uuid);
+        std::fs::create_dir_all(&profile_dir).unwrap();
+        std::fs::write(profile_dir.join("config.json"), "{}").unwrap();
+
+        // Make store.remove() fail by dropping the accounts table.
+        store.corrupt_for_test();
+
+        let result = remove_account(&store, account.uuid);
+        assert!(matches!(result, Err(RegisterError::Store(_))));
+
+        // Credential + profile files still on disk since DB remove failed first.
+        assert!(
+            swap::load_private(account.uuid).is_ok(),
+            "credential blob preserved after DB failure"
+        );
+        assert!(
+            profile_dir.exists() && profile_dir.join("config.json").exists(),
+            "desktop profile preserved after DB failure"
+        );
+
+        // Cleanup — tear down manually since store is now corrupt.
+        let _ = swap::delete_private(account.uuid);
+        let _ = std::fs::remove_dir_all(&profile_dir);
+    }
+
+    #[test]
+    fn test_remove_account_clears_pointers_before_db_remove() {
+        // The ordering fix: pointers are cleared before store.remove(). Even
+        // though that's partly structural, the observable effect is: after a
+        // successful remove_account, active_cli_uuid() and active_desktop_uuid()
+        // return None for the removed account.
+        let _lock = crate::testing::lock_data_dir();
+        let _env = setup_test_data_dir();
+        let (store, _db) = test_store();
+
+        let account = insert_account(&store, "ordering@example.com");
+        store.set_active_cli(account.uuid).unwrap();
+        store.set_active_desktop(account.uuid).unwrap();
+
+        let result = remove_account(&store, account.uuid).unwrap();
+        assert!(result.was_cli_active);
+        assert!(result.was_desktop_active);
+
+        assert!(store.active_cli_uuid().unwrap().is_none());
+        assert!(store.active_desktop_uuid().unwrap().is_none());
+        assert!(store.find_by_uuid(account.uuid).unwrap().is_none());
+    }
+
+    fn count_private_files() -> usize {
+        let dir = crate::paths::claudepot_data_dir().join("credentials");
+        std::fs::read_dir(&dir)
+            .map(|rd| rd.filter_map(|e| e.ok()).count())
+            .unwrap_or(0)
     }
 }

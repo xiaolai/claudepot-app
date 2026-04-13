@@ -6,8 +6,8 @@
 
 use crate::error::SwapError;
 use std::time::Duration;
-use tokio::process::Command;
 use tokio::io::AsyncWriteExt;
+use tokio::process::Command;
 
 const SECURITY_BIN: &str = "/usr/bin/security";
 const TIMEOUT: Duration = Duration::from_secs(5);
@@ -29,12 +29,7 @@ pub async fn read(service: &str) -> Result<Option<String>, SwapError> {
     let user = std::env::var("USER").unwrap_or_else(|_| whoami::username());
     let output = tokio::time::timeout(TIMEOUT, async {
         Command::new(SECURITY_BIN)
-            .args([
-                "find-generic-password",
-                "-a", &user,
-                "-s", service,
-                "-w",
-            ])
+            .args(["find-generic-password", "-a", &user, "-s", service, "-w"])
             .output()
             .await
     })
@@ -76,9 +71,8 @@ pub async fn write(service: &str, blob: &str) -> Result<(), SwapError> {
     validate_security_input(&user, "USER")?;
     validate_security_input(service, "service")?;
     let hex_value = hex::encode(blob.as_bytes());
-    let command_line = format!(
-        "add-generic-password -U -a \"{user}\" -s \"{service}\" -X \"{hex_value}\"\n"
-    );
+    let command_line =
+        format!("add-generic-password -U -a \"{user}\" -s \"{service}\" -X \"{hex_value}\"\n");
 
     let output = tokio::time::timeout(TIMEOUT, async {
         let mut child = Command::new(SECURITY_BIN)
@@ -90,12 +84,16 @@ pub async fn write(service: &str, blob: &str) -> Result<(), SwapError> {
             .map_err(|e| SwapError::KeychainError(format!("security spawn failed: {e}")))?;
 
         if let Some(mut stdin) = child.stdin.take() {
-            stdin.write_all(command_line.as_bytes()).await
+            stdin
+                .write_all(command_line.as_bytes())
+                .await
                 .map_err(|e| SwapError::KeychainError(format!("stdin write failed: {e}")))?;
             drop(stdin);
         }
 
-        child.wait_with_output().await
+        child
+            .wait_with_output()
+            .await
             .map_err(|e| SwapError::KeychainError(format!("security wait failed: {e}")))
     })
     .await
@@ -116,11 +114,7 @@ pub async fn delete(service: &str) -> Result<(), SwapError> {
     let user = std::env::var("USER").unwrap_or_else(|_| whoami::username());
     let output = tokio::time::timeout(TIMEOUT, async {
         Command::new(SECURITY_BIN)
-            .args([
-                "delete-generic-password",
-                "-a", &user,
-                "-s", service,
-            ])
+            .args(["delete-generic-password", "-a", &user, "-s", service])
             .output()
             .await
     })
@@ -167,7 +161,7 @@ impl super::CliPlatform for MacosKeychain {
         let path = crate::paths::claude_credentials_file();
         if path.exists() {
             filetime::set_file_mtime(&path, filetime::FileTime::now())
-                .map_err(|e| SwapError::FileError(e))?;
+                .map_err(SwapError::FileError)?;
         }
         Ok(())
     }

@@ -48,9 +48,20 @@ pub fn find_claude_binary() -> Option<PathBuf> {
     }
 
     // Fallback: try PATH
-    let which_cmd = if cfg!(target_os = "windows") { "where" } else { "which" };
-    let claude_name = if cfg!(target_os = "windows") { "claude.cmd" } else { "claude" };
-    if let Ok(output) = std::process::Command::new(which_cmd).arg(claude_name).output() {
+    let which_cmd = if cfg!(target_os = "windows") {
+        "where"
+    } else {
+        "which"
+    };
+    let claude_name = if cfg!(target_os = "windows") {
+        "claude.cmd"
+    } else {
+        "claude"
+    };
+    if let Ok(output) = std::process::Command::new(which_cmd)
+        .arg(claude_name)
+        .output()
+    {
         if output.status.success() {
             let path_str = String::from_utf8_lossy(&output.stdout)
                 .trim()
@@ -113,7 +124,10 @@ mod tests {
 
         assert_eq!(fs::read_to_string(dst.join("top.txt")).unwrap(), "top");
         assert_eq!(fs::read_to_string(dst.join("sub1/mid.txt")).unwrap(), "mid");
-        assert_eq!(fs::read_to_string(dst.join("sub1/sub2/deep.txt")).unwrap(), "deep");
+        assert_eq!(
+            fs::read_to_string(dst.join("sub1/sub2/deep.txt")).unwrap(),
+            "deep"
+        );
     }
 
     #[cfg(unix)]
@@ -148,10 +162,7 @@ mod tests {
     #[test]
     fn test_copy_dir_recursive_src_not_found() {
         let tmp = tempfile::tempdir().unwrap();
-        let result = copy_dir_recursive(
-            &tmp.path().join("nonexistent"),
-            &tmp.path().join("dst"),
-        );
+        let result = copy_dir_recursive(&tmp.path().join("nonexistent"), &tmp.path().join("dst"));
         assert!(result.is_err());
     }
 }

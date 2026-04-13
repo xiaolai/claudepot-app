@@ -1,5 +1,5 @@
-use anyhow::Result;
 use crate::AppContext;
+use anyhow::Result;
 
 pub async fn status(ctx: &AppContext) -> Result<()> {
     use claudepot_core::desktop_backend;
@@ -9,7 +9,10 @@ pub async fn status(ctx: &AppContext) -> Result<()> {
         Some(p) => p,
         None => {
             if ctx.json {
-                println!("{}", serde_json::json!({"error": "Desktop not supported on this platform"}));
+                println!(
+                    "{}",
+                    serde_json::json!({"error": "Desktop not supported on this platform"})
+                );
             } else {
                 println!("Claude Desktop is not supported on this platform.");
             }
@@ -18,7 +21,7 @@ pub async fn status(ctx: &AppContext) -> Result<()> {
     };
 
     let data_dir = platform.data_dir();
-    let installed = data_dir.as_ref().map_or(false, |d| d.exists());
+    let installed = data_dir.as_ref().is_some_and(|d| d.exists());
 
     let active_uuid = ctx.store.active_desktop_uuid()?;
     let active_account = active_uuid
@@ -28,11 +31,14 @@ pub async fn status(ctx: &AppContext) -> Result<()> {
     let is_running = platform.is_running().await;
 
     if ctx.json {
-        println!("{}", serde_json::json!({
-            "installed": installed,
-            "running": is_running,
-            "active": active_account.as_ref().map(|a| &a.email),
-        }));
+        println!(
+            "{}",
+            serde_json::json!({
+                "installed": installed,
+                "running": is_running,
+                "active": active_account.as_ref().map(|a| &a.email),
+            })
+        );
     } else {
         if !installed {
             println!("Claude Desktop is not installed.");
@@ -42,27 +48,27 @@ pub async fn status(ctx: &AppContext) -> Result<()> {
             Some(a) => println!("Active Desktop account: {}", a.email),
             None => println!("No active Desktop account."),
         }
-        println!("  Desktop: {}", if is_running { "running" } else { "not running" });
+        println!(
+            "  Desktop: {}",
+            if is_running { "running" } else { "not running" }
+        );
     }
 
     Ok(())
 }
 
-pub async fn use_account(
-    ctx: &AppContext,
-    email_input: &str,
-    no_launch: bool,
-) -> Result<()> {
-    use claudepot_core::resolve::resolve_email;
+pub async fn use_account(ctx: &AppContext, email_input: &str, no_launch: bool) -> Result<()> {
     use claudepot_core::desktop_backend;
+    use claudepot_core::resolve::resolve_email;
 
     let platform = desktop_backend::create_platform()
         .ok_or_else(|| anyhow::anyhow!("Claude Desktop is not supported on this platform"))?;
 
-    let email = resolve_email(&ctx.store, email_input)
-        .map_err(|e| anyhow::anyhow!("{e}"))?;
+    let email = resolve_email(&ctx.store, email_input).map_err(|e| anyhow::anyhow!("{e}"))?;
 
-    let target = ctx.store.find_by_email(&email)?
+    let target = ctx
+        .store
+        .find_by_email(&email)?
         .ok_or_else(|| anyhow::anyhow!("account not found: {email}"))?;
 
     // Check if target has a Desktop profile
@@ -75,7 +81,9 @@ pub async fn use_account(
         );
     }
 
-    let current_uuid = ctx.store.active_desktop_uuid()?
+    let current_uuid = ctx
+        .store
+        .active_desktop_uuid()?
         .and_then(|s| s.parse::<uuid::Uuid>().ok());
 
     if current_uuid == Some(target.uuid) {
@@ -96,14 +104,19 @@ pub async fn use_account(
         current_uuid,
         target.uuid,
         no_launch,
-    ).await.map_err(|e| anyhow::anyhow!("{e}"))?;
+    )
+    .await
+    .map_err(|e| anyhow::anyhow!("{e}"))?;
 
     if ctx.json {
-        println!("{}", serde_json::json!({
-            "from": from_email,
-            "to": email,
-            "launched": !no_launch,
-        }));
+        println!(
+            "{}",
+            serde_json::json!({
+                "from": from_email,
+                "to": email,
+                "launched": !no_launch,
+            })
+        );
     } else {
         println!("Desktop: {from_email} → {email}");
         if no_launch {

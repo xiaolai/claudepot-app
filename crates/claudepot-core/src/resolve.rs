@@ -7,7 +7,10 @@ pub enum ResolveError {
     NoMatch(String),
 
     #[error("'{input}' is ambiguous: {}", candidates.join(", "))]
-    Ambiguous { input: String, candidates: Vec<String> },
+    Ambiguous {
+        input: String,
+        candidates: Vec<String>,
+    },
 
     #[error("store error: {0}")]
     StoreError(String),
@@ -51,22 +54,28 @@ mod tests {
         let db_path = dir.path().join("test.db");
         let store = AccountStore::open(&db_path).unwrap();
 
-        for email in ["lixiaolai@gmail.com", "xiaolaidev@gmail.com", "xiaolaiapple@gmail.com"] {
-            store.insert(&Account {
-                uuid: Uuid::new_v4(),
-                email: email.to_string(),
-                org_uuid: None,
-                org_name: None,
-                subscription_type: None,
-                rate_limit_tier: None,
-                created_at: Utc::now(),
-                last_cli_switch: None,
-                last_desktop_switch: None,
-                has_cli_credentials: true,
-                has_desktop_profile: false,
-                is_cli_active: false,
-                is_desktop_active: false,
-            }).unwrap();
+        for email in [
+            "lixiaolai@gmail.com",
+            "xiaolaidev@gmail.com",
+            "xiaolaiapple@gmail.com",
+        ] {
+            store
+                .insert(&Account {
+                    uuid: Uuid::new_v4(),
+                    email: email.to_string(),
+                    org_uuid: None,
+                    org_name: None,
+                    subscription_type: None,
+                    rate_limit_tier: None,
+                    created_at: Utc::now(),
+                    last_cli_switch: None,
+                    last_desktop_switch: None,
+                    has_cli_credentials: true,
+                    has_desktop_profile: false,
+                    is_cli_active: false,
+                    is_desktop_active: false,
+                })
+                .unwrap();
         }
         (store, dir)
     }
@@ -74,15 +83,24 @@ mod tests {
     #[test]
     fn test_resolve_exact_email() {
         let (store, _dir) = test_store();
-        assert_eq!(resolve_email(&store, "lixiaolai@gmail.com").unwrap(), "lixiaolai@gmail.com");
+        assert_eq!(
+            resolve_email(&store, "lixiaolai@gmail.com").unwrap(),
+            "lixiaolai@gmail.com"
+        );
     }
 
     #[test]
     fn test_resolve_prefix_unique() {
         let (store, _dir) = test_store();
         assert_eq!(resolve_email(&store, "li").unwrap(), "lixiaolai@gmail.com");
-        assert_eq!(resolve_email(&store, "xiaolaid").unwrap(), "xiaolaidev@gmail.com");
-        assert_eq!(resolve_email(&store, "xiaolaia").unwrap(), "xiaolaiapple@gmail.com");
+        assert_eq!(
+            resolve_email(&store, "xiaolaid").unwrap(),
+            "xiaolaidev@gmail.com"
+        );
+        assert_eq!(
+            resolve_email(&store, "xiaolaia").unwrap(),
+            "xiaolaiapple@gmail.com"
+        );
     }
 
     #[test]
@@ -102,6 +120,9 @@ mod tests {
     #[test]
     fn test_resolve_case_insensitive() {
         let (store, _dir) = test_store();
-        assert_eq!(resolve_email(&store, "LiXiao").unwrap(), "lixiaolai@gmail.com");
+        assert_eq!(
+            resolve_email(&store, "LiXiao").unwrap(),
+            "lixiaolai@gmail.com"
+        );
     }
 }

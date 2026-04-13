@@ -63,13 +63,20 @@ mod tests {
         assert_eq!(blob.claude_ai_oauth.refresh_token, "sk-ant-ort01-test");
         assert_eq!(blob.claude_ai_oauth.expires_at, 9999999999999);
         assert_eq!(blob.claude_ai_oauth.scopes.len(), 2);
-        assert_eq!(blob.claude_ai_oauth.subscription_type.as_deref(), Some("pro"));
-        assert_eq!(blob.claude_ai_oauth.rate_limit_tier.as_deref(), Some("default_claude_pro"));
+        assert_eq!(
+            blob.claude_ai_oauth.subscription_type.as_deref(),
+            Some("pro")
+        );
+        assert_eq!(
+            blob.claude_ai_oauth.rate_limit_tier.as_deref(),
+            Some("default_claude_pro")
+        );
     }
 
     #[test]
     fn test_blob_from_json_minimal() {
-        let json = r#"{"claudeAiOauth":{"accessToken":"t","refreshToken":"r","expiresAt":0,"scopes":[]}}"#;
+        let json =
+            r#"{"claudeAiOauth":{"accessToken":"t","refreshToken":"r","expiresAt":0,"scopes":[]}}"#;
         let blob = CredentialBlob::from_json(json).unwrap();
         assert!(blob.claude_ai_oauth.subscription_type.is_none());
         assert!(blob.claude_ai_oauth.rate_limit_tier.is_none());
@@ -94,8 +101,14 @@ mod tests {
         let blob = CredentialBlob::from_json(&json).unwrap();
         let serialized = blob.to_json().unwrap();
         let blob2 = CredentialBlob::from_json(&serialized).unwrap();
-        assert_eq!(blob.claude_ai_oauth.access_token, blob2.claude_ai_oauth.access_token);
-        assert_eq!(blob.claude_ai_oauth.expires_at, blob2.claude_ai_oauth.expires_at);
+        assert_eq!(
+            blob.claude_ai_oauth.access_token,
+            blob2.claude_ai_oauth.access_token
+        );
+        assert_eq!(
+            blob.claude_ai_oauth.expires_at,
+            blob2.claude_ai_oauth.expires_at
+        );
         assert_eq!(blob.claude_ai_oauth.scopes, blob2.claude_ai_oauth.scopes);
     }
 
@@ -120,7 +133,7 @@ mod tests {
         let soon = chrono::Utc::now().timestamp_millis() + 30_000; // +30s
         let json = sample_blob_json(soon);
         let blob = CredentialBlob::from_json(&json).unwrap();
-        assert!(!blob.is_expired(0));    // not expired without margin
-        assert!(blob.is_expired(60));    // expired with 60s margin
+        assert!(!blob.is_expired(0)); // not expired without margin
+        assert!(blob.is_expired(60)); // expired with 60s margin
     }
 }

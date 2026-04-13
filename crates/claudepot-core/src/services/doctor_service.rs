@@ -69,27 +69,34 @@ pub async fn check_health(store: &AccountStore) -> HealthReport {
         Ok(a) => (a, None),
         Err(e) => (vec![], Some(format!("failed to list accounts: {e}"))),
     };
-    let account_health: Vec<AccountHealth> = accounts.iter().map(|a| {
-        let health = crate::services::account_service::token_health(a.uuid, a.has_cli_credentials);
-        AccountHealth {
-            email: a.email.clone(),
-            token_status: health.status,
-            remaining_mins: health.remaining_mins,
-        }
-    }).collect();
+    let account_health: Vec<AccountHealth> = accounts
+        .iter()
+        .map(|a| {
+            let health =
+                crate::services::account_service::token_health(a.uuid, a.has_cli_credentials);
+            AccountHealth {
+                email: a.email.clone(),
+                token_status: health.status,
+                remaining_mins: health.remaining_mins,
+            }
+        })
+        .collect();
 
     // Desktop profiles
-    let desktop_profiles: Vec<ProfileInfo> = accounts.iter().map(|a| {
-        let p = crate::paths::desktop_profile_dir(a.uuid);
-        ProfileInfo {
-            email: a.email.clone(),
-            item_count: if p.exists() {
-                std::fs::read_dir(&p).map(|d| d.count()).ok()
-            } else {
-                None
-            },
-        }
-    }).collect();
+    let desktop_profiles: Vec<ProfileInfo> = accounts
+        .iter()
+        .map(|a| {
+            let p = crate::paths::desktop_profile_dir(a.uuid);
+            ProfileInfo {
+                email: a.email.clone(),
+                item_count: if p.exists() {
+                    std::fs::read_dir(&p).map(|d| d.count()).ok()
+                } else {
+                    None
+                },
+            }
+        })
+        .collect();
 
     HealthReport {
         platform: std::env::consts::OS.to_string(),
@@ -126,7 +133,11 @@ fn detect_desktop() -> (bool, Option<String>) {
         let path = std::path::Path::new("/Applications/Claude.app");
         if path.exists() {
             let version = std::process::Command::new("defaults")
-                .args(["read", "/Applications/Claude.app/Contents/Info.plist", "CFBundleShortVersionString"])
+                .args([
+                    "read",
+                    "/Applications/Claude.app/Contents/Info.plist",
+                    "CFBundleShortVersionString",
+                ])
                 .output()
                 .ok()
                 .and_then(|o| String::from_utf8(o.stdout).ok())
@@ -176,30 +187,39 @@ async fn check_keychain() -> Option<Result<bool, String>> {
 }
 
 /// Build account health vector from a list of accounts (testable extraction).
+#[allow(dead_code)] // used from tests; inlined in check_health above
 pub(crate) fn build_account_health(accounts: &[crate::account::Account]) -> Vec<AccountHealth> {
-    accounts.iter().map(|a| {
-        let health = crate::services::account_service::token_health(a.uuid, a.has_cli_credentials);
-        AccountHealth {
-            email: a.email.clone(),
-            token_status: health.status,
-            remaining_mins: health.remaining_mins,
-        }
-    }).collect()
+    accounts
+        .iter()
+        .map(|a| {
+            let health =
+                crate::services::account_service::token_health(a.uuid, a.has_cli_credentials);
+            AccountHealth {
+                email: a.email.clone(),
+                token_status: health.status,
+                remaining_mins: health.remaining_mins,
+            }
+        })
+        .collect()
 }
 
 /// Build desktop profile info from a list of accounts (testable extraction).
+#[allow(dead_code)] // used from tests; inlined in check_health above
 pub(crate) fn build_profile_info(accounts: &[crate::account::Account]) -> Vec<ProfileInfo> {
-    accounts.iter().map(|a| {
-        let p = crate::paths::desktop_profile_dir(a.uuid);
-        ProfileInfo {
-            email: a.email.clone(),
-            item_count: if p.exists() {
-                std::fs::read_dir(&p).map(|d| d.count()).ok()
-            } else {
-                None
-            },
-        }
-    }).collect()
+    accounts
+        .iter()
+        .map(|a| {
+            let p = crate::paths::desktop_profile_dir(a.uuid);
+            ProfileInfo {
+                email: a.email.clone(),
+                item_count: if p.exists() {
+                    std::fs::read_dir(&p).map(|d| d.count()).ok()
+                } else {
+                    None
+                },
+            }
+        })
+        .collect()
 }
 
 async fn check_api(beta_header: &str) -> ApiStatus {
@@ -207,7 +227,7 @@ async fn check_api(beta_header: &str) -> ApiStatus {
         .timeout(std::time::Duration::from_secs(10))
         .build()
     {
-        Err(_) => return ApiStatus::Unreachable("failed to build HTTP client".into()),
+        Err(_) => ApiStatus::Unreachable("failed to build HTTP client".into()),
         Ok(client) => {
             match client
                 .get("https://api.anthropic.com/api/oauth/profile")
@@ -219,7 +239,7 @@ async fn check_api(beta_header: &str) -> ApiStatus {
                 Ok(resp) => {
                     let status = resp.status().as_u16();
                     match status {
-                        401 => ApiStatus::Reachable,  // expected for invalid token probe
+                        401 => ApiStatus::Reachable, // expected for invalid token probe
                         403 => ApiStatus::GeoBlocked,
                         429 => ApiStatus::Unreachable("rate limited".into()),
                         s if s >= 500 => ApiStatus::Unreachable(format!("server error {s}")),
@@ -235,9 +255,11 @@ async fn check_api(beta_header: &str) -> ApiStatus {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::testing::{lock_data_dir, setup_test_data_dir, test_store, make_account,
-                          fresh_blob_json, expired_blob_json};
     use crate::cli_backend::swap;
+    use crate::testing::{
+        expired_blob_json, fresh_blob_json, lock_data_dir, make_account, setup_test_data_dir,
+        test_store,
+    };
 
     #[test]
     fn test_build_account_health_empty() {
@@ -343,5 +365,62 @@ mod tests {
         assert_eq!(report.account_count, 1);
         assert_eq!(report.account_health.len(), 1);
         assert_eq!(report.account_health[0].email, "doctor@example.com");
+    }
+
+    // -- Group 8: doctor accuracy --
+
+    #[test]
+    fn test_doctor_expired_accounts_counted_as_warnings() {
+        // Build account_health for a store with two accounts (1 fresh, 1 expired).
+        // The expired one must have status == "expired"; the fresh one "valid (...)".
+        let _lock = lock_data_dir();
+        let _env = setup_test_data_dir();
+
+        let fresh = make_account("fresh@example.com");
+        swap::save_private(fresh.uuid, &fresh_blob_json()).unwrap();
+        let expired = make_account("expired@example.com");
+        swap::save_private(expired.uuid, &expired_blob_json()).unwrap();
+
+        let health = build_account_health(&[fresh.clone(), expired.clone()]);
+        assert_eq!(health.len(), 2);
+
+        let fresh_entry = health
+            .iter()
+            .find(|h| h.email == "fresh@example.com")
+            .unwrap();
+        assert!(
+            fresh_entry.token_status.contains("valid"),
+            "fresh account shows as valid"
+        );
+        let expired_entry = health
+            .iter()
+            .find(|h| h.email == "expired@example.com")
+            .unwrap();
+        assert_eq!(
+            expired_entry.token_status, "expired",
+            "expired account surfaces as 'expired' (counted as warning in summary)"
+        );
+
+        swap::delete_private(fresh.uuid).unwrap();
+        swap::delete_private(expired.uuid).unwrap();
+    }
+
+    #[tokio::test]
+    async fn test_doctor_db_error_surfaces() {
+        // Corrupt the store (drop accounts table), then run check_health.
+        // Expected: report.db_error is Some(...) and account_count is 0.
+        let _lock = lock_data_dir();
+        let _env = setup_test_data_dir();
+        let (store, _db) = test_store();
+
+        store.corrupt_for_test();
+
+        let report = check_health(&store).await;
+        assert!(
+            report.db_error.is_some(),
+            "db_error should surface when store.list() fails"
+        );
+        assert_eq!(report.account_count, 0, "no accounts listed on failure");
+        assert!(report.account_health.is_empty());
     }
 }

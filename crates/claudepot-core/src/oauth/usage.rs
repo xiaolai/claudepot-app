@@ -46,21 +46,30 @@ pub async fn fetch(access_token: &str) -> Result<UsageResponse, OAuthError> {
     let resp = client
         .get("https://api.anthropic.com/api/oauth/usage")
         .bearer_auth(access_token)
-        .header("anthropic-beta", crate::oauth::beta_header::get_or_default())
+        .header(
+            "anthropic-beta",
+            crate::oauth::beta_header::get_or_default(),
+        )
         .header("Content-Type", "application/json")
         .send()
         .await?;
 
     let status = resp.status();
     if status == 401 {
-        return Err(OAuthError::AuthFailed("access token rejected by /api/oauth/usage".into()));
+        return Err(OAuthError::AuthFailed(
+            "access token rejected by /api/oauth/usage".into(),
+        ));
     }
     if status == 429 {
-        return Err(OAuthError::RateLimited { retry_after_secs: 60 });
+        return Err(OAuthError::RateLimited {
+            retry_after_secs: 60,
+        });
     }
     if !status.is_success() {
         let _ = resp.text().await; // consume without exposing
-        return Err(OAuthError::AuthFailed(format!("usage API returned {status}")));
+        return Err(OAuthError::AuthFailed(format!(
+            "usage API returned {status}"
+        )));
     }
 
     // Parse typed fields first, then separately parse unknown fields.
@@ -98,7 +107,8 @@ mod tests {
 
     #[test]
     fn test_usage_response_unknown_fields_captured() {
-        let json = r#"{"new_window": {"utilization": 99.0, "resets_at": "2026-04-13T10:00:00+00:00"}}"#;
+        let json =
+            r#"{"new_window": {"utilization": 99.0, "resets_at": "2026-04-13T10:00:00+00:00"}}"#;
         let usage: UsageResponse = serde_json::from_str(json).unwrap();
         assert!(usage.unknown.contains_key("new_window"));
     }

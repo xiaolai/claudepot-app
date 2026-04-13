@@ -2,6 +2,7 @@ use crate::error::DesktopSwapError;
 use std::path::PathBuf;
 use std::time::{Duration, Instant};
 
+#[allow(dead_code)]
 const BUNDLE_ID: &str = "com.anthropic.claudefordesktop";
 const QUIT_TIMEOUT: Duration = Duration::from_secs(10);
 
@@ -53,7 +54,7 @@ impl super::DesktopPlatform for MacosDesktop {
             .args(["-e", "tell application \"Claude\" to quit"])
             .output()
             .await
-            .map_err(|e| DesktopSwapError::Io(e))?;
+            .map_err(DesktopSwapError::Io)?;
 
         if !output.status.success() {
             tracing::warn!("osascript quit returned non-zero");
@@ -76,7 +77,7 @@ impl super::DesktopPlatform for MacosDesktop {
             .args(["-a", "Claude"])
             .output()
             .await
-            .map_err(|e| DesktopSwapError::Io(e))?;
+            .map_err(DesktopSwapError::Io)?;
         Ok(())
     }
 }
