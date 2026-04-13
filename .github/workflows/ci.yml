@@ -63,3 +63,29 @@ jobs:
 
       - name: Tests (core + cli)
         run: cargo test -p claudepot-core -p claudepot-cli
+
+  frontend-test:
+    name: Frontend tests (Vitest)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 9
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+
+      - name: Install JS deps
+        run: pnpm install --frozen-lockfile
+
+      - name: Typecheck
+        run: pnpm tsc --noEmit
+
+      - name: Run tests
+        run: pnpm test
