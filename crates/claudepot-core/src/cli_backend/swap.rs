@@ -175,6 +175,7 @@ pub async fn switch(
 // Migration: load_private reads from Keychain first; on Keychain miss, if an
 // older file exists, it's imported into Keychain and the file is removed.
 
+#[cfg(target_os = "macos")]
 const KEYCHAIN_SERVICE: &str = "com.claudepot.credentials";
 
 /// Backend selector. Reads CLAUDEPOT_CREDENTIAL_BACKEND env var:
