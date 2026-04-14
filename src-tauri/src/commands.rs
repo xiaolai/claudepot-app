@@ -4,12 +4,14 @@
 //! command opens the store, calls a core function, and serializes the result.
 //! Errors become user-facing strings at this boundary.
 
-use crate::dto::{AccountSummary, AppStatus, RegisterOutcome, RemoveOutcome};
+use crate::dto::{AccountSummary, AccountUsageDto, AppStatus, RegisterOutcome, RemoveOutcome};
 use claudepot_core::account::{Account, AccountStore};
 use claudepot_core::cli_backend;
 use claudepot_core::desktop_backend;
 use claudepot_core::paths;
 use claudepot_core::services;
+use claudepot_core::services::usage_cache::UsageCache;
+use std::collections::HashMap;
 use uuid::Uuid;
 
 fn resolve_target(store: &AccountStore, email: &str) -> Result<Account, String> {
@@ -282,4 +284,38 @@ pub async fn account_remove(uuid: String) -> Result<RemoveOutcome, String> {
         had_desktop_profile: result.had_desktop_profile,
         warnings: result.warnings,
     })
+}
+
+/// Fetch usage for all accounts that have credentials.
+///
+/// Returns a map of UUID → usage data. Accounts with no credentials,
+/// expired tokens, or any error (including rate limits) are silently
+/// omitted — the UI sees `null` and shows nothing. Rate-limit errors
+/// are never exposed to the frontend.
+#[tauri::command]
+pub async fn fetch_all_usage(
+    cache: tauri::State<'_, UsageCache>,
+) -> Result<HashMap<String, AccountUsageDto>, String> {
+    let store = open_store()?;
+    let accounts = store.list().map_err(|e| format!("list failed: {e}"))?;
+
+    let uuids: Vec<Uuid> = accounts
+        .iter()
+        .filter(|a| a.has_cli_credentials)
+        .map(|a| a.uuid)
+        .collect();
+
+    if uuids.is_empty() {
+        return Ok(HashMap::new());
+    }
+
+    let batch = cache.fetch_batch_graceful(&uuids).await;
+
+    let mut out = HashMap::new();
+    for (uuid, maybe_response) in batch {
+        if let Some(response) = maybe_response {
+            out.insert(uuid.to_string(), AccountUsageDto::from_response(&response));
+        }
+    }
+    Ok(out)
 }

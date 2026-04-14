@@ -7,7 +7,7 @@ import {
   XCircle,
   UserPlus,
 } from "@phosphor-icons/react";
-import type { AccountSummary, AppStatus } from "../types";
+import type { AccountSummary, AccountUsage, AppStatus } from "../types";
 import { TokenBadge } from "./TokenBadge";
 import { AccountDetail } from "./AccountDetail";
 import { CopyButton } from "./CopyButton";
@@ -21,6 +21,7 @@ function getDesktopDisabledHint(a: AccountSummary, desktopInstalled: boolean): s
 
 export function ContentPane({
   account,
+  usage,
   status,
   busyKeys,
   anyBusy,
@@ -33,6 +34,7 @@ export function ContentPane({
   onAdd,
 }: {
   account: AccountSummary | null;
+  usage: AccountUsage | null;
   status: AppStatus;
   busyKeys: Set<string>;
   anyBusy: boolean;
@@ -131,7 +133,7 @@ export function ContentPane({
       {deskHint && <div className="account-hint">{deskHint}</div>}
 
       {/* Details */}
-      <AccountDetail account={a} />
+      <AccountDetail account={a} usage={usage} />
 
       {/* Footer */}
       <div className="content-footer">

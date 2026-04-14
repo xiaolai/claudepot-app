@@ -15,9 +15,16 @@ pub fn run() {
         )
         .try_init();
 
-    tauri::Builder::default()
+    let mut builder = tauri::Builder::default()
         .manage(state::LoginState::default())
-        .invoke_handler(tauri::generate_handler![
+        .manage(claudepot_core::services::usage_cache::UsageCache::new());
+
+    #[cfg(debug_assertions)]
+    {
+        builder = builder.plugin(tauri_plugin_mcp_bridge::init());
+    }
+
+    builder.invoke_handler(tauri::generate_handler![
             commands::app_status,
             commands::sync_from_current_cc,
             commands::unlock_keychain,
@@ -29,6 +36,7 @@ pub fn run() {
             commands::account_login,
             commands::account_login_cancel,
             commands::account_remove,
+            commands::fetch_all_usage,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

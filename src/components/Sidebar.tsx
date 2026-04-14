@@ -1,14 +1,16 @@
 import { ArrowsClockwise, Plus } from "@phosphor-icons/react";
-import type { AccountSummary } from "../types";
+import type { AccountSummary, UsageMap } from "../types";
 
 export function Sidebar({
   accounts,
+  usage,
   selectedUuid,
   onSelect,
   onAdd,
   onRefresh,
 }: {
   accounts: AccountSummary[];
+  usage: UsageMap;
   selectedUuid: string | null;
   onSelect: (uuid: string) => void;
   onAdd: () => void;
@@ -43,6 +45,8 @@ export function Sidebar({
           const active = selectedUuid === a.uuid;
           const tokenKind = a.token_status.startsWith("valid")
             ? "ok" : a.token_status === "expired" ? "bad" : "warn";
+          const acctUsage = usage[a.uuid];
+          const fiveHourPct = acctUsage?.five_hour?.utilization ?? null;
 
           return (
             <div
@@ -67,6 +71,14 @@ export function Sidebar({
                   {a.is_cli_active && " · CLI"}
                   {a.is_desktop_active && " · Desktop"}
                 </div>
+                {fiveHourPct !== null && (
+                  <div className="usage-bar-container" title={`5h usage: ${Math.round(fiveHourPct)}%`}>
+                    <div
+                      className={`usage-bar-fill ${fiveHourPct >= 80 ? "high" : ""}`}
+                      style={{ width: `${Math.min(fiveHourPct, 100)}%` }}
+                    />
+                  </div>
+                )}
               </div>
             </div>
           );

@@ -186,6 +186,42 @@ body {
   white-space: nowrap;
 }
 
+/* ---------- usage-bar (sidebar) ---------- */
+
+.usage-bar-container {
+  height: 3px;
+  background: var(--border);
+  border-radius: 999px;
+  margin-top: 4px;
+  overflow: hidden;
+}
+
+.usage-bar-fill {
+  height: 100%;
+  background: var(--accent);
+  border-radius: 999px;
+  transition: width 0.3s ease;
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .usage-bar-fill { transition: width 0.3s ease; }
+}
+
+.usage-bar-fill.high {
+  background: var(--warn);
+}
+
+/* ---------- usage-pct (detail) ---------- */
+
+.usage-pct {
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+.usage-pct.high {
+  color: var(--warn);
+}
+
 .sidebar-item-badges {
   display: flex;
   gap: 4px;
