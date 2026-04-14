@@ -414,7 +414,11 @@ pub(crate) async fn reimport_from_current_with(
 
 /// Remove an account and all its associated data.
 /// Collects non-fatal warnings instead of silently swallowing errors.
-pub fn remove_account(store: &AccountStore, uuid: Uuid) -> Result<RemoveResult, RegisterError> {
+pub async fn remove_account(
+    store: &AccountStore,
+    uuid: Uuid,
+    cache: Option<&super::usage_cache::UsageCache>,
+) -> Result<RemoveResult, RegisterError> {
     let account = store
         .find_by_uuid(uuid)
         .map_err(|e| RegisterError::Store(e.to_string()))?
@@ -450,6 +454,11 @@ pub fn remove_account(store: &AccountStore, uuid: Uuid) -> Result<RemoveResult, 
         if let Err(e) = std::fs::remove_dir_all(&profile_dir) {
             warnings.push(format!("failed to delete desktop profile: {e}"));
         }
+    }
+
+    // Invalidate usage cache so stale data doesn't linger.
+    if let Some(c) = cache {
+        c.invalidate(uuid).await;
     }
 
     Ok(RemoveResult {
@@ -514,14 +523,13 @@ pub fn token_health(uuid: Uuid, has_credentials: bool) -> TokenHealth {
     }
 }
 
-/// Fetch live usage for an account (returns None if token expired or missing).
-pub async fn fetch_usage(uuid: Uuid) -> Option<usage::UsageResponse> {
-    let blob_str = swap::load_private(uuid).ok()?;
-    let blob = CredentialBlob::from_json(&blob_str).ok()?;
-    if blob.is_expired(0) {
-        return None;
-    }
-    usage::fetch(&blob.claude_ai_oauth.access_token).await.ok()
+/// Fetch live usage for an account through the cache layer.
+pub async fn fetch_usage(
+    cache: &super::usage_cache::UsageCache,
+    uuid: Uuid,
+    force: bool,
+) -> Result<Option<usage::UsageResponse>, super::usage_cache::UsageFetchError> {
+    cache.fetch_usage(uuid, force).await
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -858,8 +866,8 @@ mod tests {
         swap::delete_private(id).unwrap();
     }
 
-    #[test]
-    fn test_remove_deletes_credential_file() {
+    #[tokio::test]
+    async fn test_remove_deletes_credential_file() {
         let _lock = crate::testing::lock_data_dir();
         let _env = setup_test_data_dir();
         let (store, _db_dir) = test_store();
@@ -869,14 +877,14 @@ mod tests {
         swap::save_private(account.uuid, r#"{"test":"blob"}"#).unwrap();
         assert!(swap::load_private(account.uuid).is_ok());
 
-        remove_account(&store, account.uuid).unwrap();
+        remove_account(&store, account.uuid, None).await.unwrap();
 
         // Credential file should be gone
         assert!(swap::load_private(account.uuid).is_err());
     }
 
-    #[test]
-    fn test_remove_deletes_desktop_profile() {
+    #[tokio::test]
+    async fn test_remove_deletes_desktop_profile() {
         let _lock = crate::testing::lock_data_dir();
         let _env = setup_test_data_dir();
         let (store, _db_dir) = test_store();
@@ -887,67 +895,67 @@ mod tests {
         std::fs::create_dir_all(&profile_dir).unwrap();
         std::fs::write(profile_dir.join("config.json"), "cfg").unwrap();
 
-        let result = remove_account(&store, account.uuid).unwrap();
+        let result = remove_account(&store, account.uuid, None).await.unwrap();
         assert!(result.had_desktop_profile);
         assert!(!profile_dir.exists());
     }
 
-    #[test]
-    fn test_remove_removes_from_db() {
+    #[tokio::test]
+    async fn test_remove_removes_from_db() {
         let _lock = crate::testing::lock_data_dir();
         let _env = setup_test_data_dir();
         let (store, _db_dir) = test_store();
         let account = insert_account(&store, "db@example.com");
 
-        remove_account(&store, account.uuid).unwrap();
+        remove_account(&store, account.uuid, None).await.unwrap();
         assert!(store.find_by_uuid(account.uuid).unwrap().is_none());
     }
 
-    #[test]
-    fn test_remove_clears_active_cli() {
+    #[tokio::test]
+    async fn test_remove_clears_active_cli() {
         let _lock = crate::testing::lock_data_dir();
         let _env = setup_test_data_dir();
         let (store, _db_dir) = test_store();
         let account = insert_account(&store, "cli@example.com");
         store.set_active_cli(account.uuid).unwrap();
 
-        let result = remove_account(&store, account.uuid).unwrap();
+        let result = remove_account(&store, account.uuid, None).await.unwrap();
         assert!(result.was_cli_active);
         assert!(store.active_cli_uuid().unwrap().is_none());
     }
 
-    #[test]
-    fn test_remove_clears_active_desktop() {
+    #[tokio::test]
+    async fn test_remove_clears_active_desktop() {
         let _lock = crate::testing::lock_data_dir();
         let _env = setup_test_data_dir();
         let (store, _db_dir) = test_store();
         let account = insert_account(&store, "desk2@example.com");
         store.set_active_desktop(account.uuid).unwrap();
 
-        let result = remove_account(&store, account.uuid).unwrap();
+        let result = remove_account(&store, account.uuid, None).await.unwrap();
         assert!(result.was_desktop_active);
         assert!(store.active_desktop_uuid().unwrap().is_none());
     }
 
-    #[test]
-    fn test_remove_nonexistent_returns_not_found() {
+    #[tokio::test]
+    async fn test_remove_nonexistent_returns_not_found() {
         let _lock = crate::testing::lock_data_dir();
         let _env = setup_test_data_dir();
         let (store, _db_dir) = test_store();
 
-        let result = remove_account(&store, Uuid::new_v4());
+        let result = remove_account(&store, Uuid::new_v4(), None).await;
         assert!(matches!(result, Err(RegisterError::NotFound)));
     }
 
-    #[test]
-    fn test_remove_missing_credential_succeeds_silently() {
+    #[tokio::test]
+    async fn test_remove_missing_credential_succeeds_silently() {
         let _lock = crate::testing::lock_data_dir();
         let _env = setup_test_data_dir();
         let (store, _db_dir) = test_store();
         let account = insert_account(&store, "warn@example.com");
         // Do NOT save_private — credential file doesn't exist
 
-        let result = remove_account(&store, account.uuid).unwrap();
+        let result = remove_account(&store, account.uuid, None).await.unwrap();
         // delete_private returns Ok when file doesn't exist,
         // so no warning is produced — this is correct behavior
         assert!(result.warnings.is_empty());
@@ -955,14 +963,14 @@ mod tests {
         assert!(store.find_by_uuid(account.uuid).unwrap().is_none());
     }
 
-    #[test]
-    fn test_remove_returns_correct_metadata() {
+    #[tokio::test]
+    async fn test_remove_returns_correct_metadata() {
         let _lock = crate::testing::lock_data_dir();
         let _env = setup_test_data_dir();
         let (store, _db_dir) = test_store();
         let account = insert_account(&store, "meta@example.com");
 
-        let result = remove_account(&store, account.uuid).unwrap();
+        let result = remove_account(&store, account.uuid, None).await.unwrap();
         assert_eq!(result.email, "meta@example.com");
         assert!(!result.was_cli_active);
         assert!(!result.was_desktop_active);
@@ -1076,8 +1084,8 @@ mod tests {
         );
     }
 
-    #[test]
-    fn test_remove_account_preserves_files_on_db_failure() {
+    #[tokio::test]
+    async fn test_remove_account_preserves_files_on_db_failure() {
         // If store.remove() fails, credential file and profile dir must still
         // exist (irreversible file deletions gated behind successful DB remove).
         let _lock = crate::testing::lock_data_dir();
@@ -1093,7 +1101,7 @@ mod tests {
         // Make store.remove() fail by dropping the accounts table.
         store.corrupt_for_test();
 
-        let result = remove_account(&store, account.uuid);
+        let result = remove_account(&store, account.uuid, None).await;
         assert!(matches!(result, Err(RegisterError::Store(_))));
 
         // Credential + profile files still on disk since DB remove failed first.
@@ -1111,8 +1119,8 @@ mod tests {
         let _ = std::fs::remove_dir_all(&profile_dir);
     }
 
-    #[test]
-    fn test_remove_account_clears_pointers_before_db_remove() {
+    #[tokio::test]
+    async fn test_remove_account_clears_pointers_before_db_remove() {
         // The ordering fix: pointers are cleared before store.remove(). Even
         // though that's partly structural, the observable effect is: after a
         // successful remove_account, active_cli_uuid() and active_desktop_uuid()
@@ -1125,7 +1133,7 @@ mod tests {
         store.set_active_cli(account.uuid).unwrap();
         store.set_active_desktop(account.uuid).unwrap();
 
-        let result = remove_account(&store, account.uuid).unwrap();
+        let result = remove_account(&store, account.uuid, None).await.unwrap();
         assert!(result.was_cli_active);
         assert!(result.was_desktop_active);
 

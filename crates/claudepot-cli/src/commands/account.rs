@@ -2,9 +2,33 @@ use crate::output;
 use crate::AppContext;
 use anyhow::Result;
 
-pub fn list(ctx: &AppContext) -> Result<()> {
+pub async fn list(ctx: &AppContext) -> Result<()> {
     let accounts = ctx.store.list()?;
-    let formatted = output::format_account_list(&accounts, ctx.json);
+
+    // Collect UUIDs for accounts with credentials to batch-fetch usage.
+    let uuids: Vec<uuid::Uuid> = accounts
+        .iter()
+        .filter(|a| a.has_cli_credentials)
+        .map(|a| a.uuid)
+        .collect();
+
+    let usage_map = if uuids.is_empty() {
+        std::collections::HashMap::new()
+    } else {
+        ctx.usage_cache
+            .fetch_batch(&uuids)
+            .await
+            .into_iter()
+            .filter_map(|(id, result)| {
+                result
+                    .ok()
+                    .flatten()
+                    .and_then(|r| r.five_hour.map(|fh| (id, fh.utilization)))
+            })
+            .collect()
+    };
+
+    let formatted = output::format_account_list(&accounts, &usage_map, ctx.json);
     println!("{formatted}");
     Ok(())
 }
@@ -33,29 +57,7 @@ pub async fn add(ctx: &AppContext, from_current: bool, from_token: Option<String
         return add_via_browser(ctx).await;
     };
 
-    if ctx.json {
-        println!(
-            "{}",
-            serde_json::json!({
-                "registered": true,
-                "email": result.email,
-                "org": result.org_name,
-                "plan": result.subscription_type,
-                "uuid": result.uuid.to_string(),
-            })
-        );
-    } else {
-        println!(
-            "Registered: {} ({} {})",
-            result.email,
-            capitalize(&result.subscription_type),
-            result
-                .rate_limit_tier
-                .as_deref()
-                .and_then(|t| t.split('_').next_back())
-                .unwrap_or("")
-        );
-    }
+    print_register_result(&result, ctx.json);
     Ok(())
 }
 
@@ -67,8 +69,15 @@ async fn add_via_browser(ctx: &AppContext) -> Result<()> {
     ctx.info("(Complete the login in your browser)");
 
     let result = account_service::register_from_browser(&ctx.store).await?;
+    print_register_result(&result, ctx.json);
+    Ok(())
+}
 
-    if ctx.json {
+fn print_register_result(
+    result: &claudepot_core::services::account_service::RegisterResult,
+    json: bool,
+) {
+    if json {
         println!(
             "{}",
             serde_json::json!({
@@ -91,10 +100,9 @@ async fn add_via_browser(ctx: &AppContext) -> Result<()> {
                 .unwrap_or("")
         );
     }
-    Ok(())
 }
 
-pub fn remove(ctx: &AppContext, email_input: &str) -> Result<()> {
+pub async fn remove(ctx: &AppContext, email_input: &str) -> Result<()> {
     use claudepot_core::resolve::resolve_email;
     use claudepot_core::services::account_service;
 
@@ -115,7 +123,9 @@ pub fn remove(ctx: &AppContext, email_input: &str) -> Result<()> {
         }
     }
 
-    let result = account_service::remove_account(&ctx.store, account.uuid)?;
+    let result =
+        account_service::remove_account(&ctx.store, account.uuid, Some(&ctx.usage_cache))
+            .await?;
 
     if ctx.json {
         println!(
@@ -149,7 +159,7 @@ pub fn remove(ctx: &AppContext, email_input: &str) -> Result<()> {
 
 pub async fn inspect(ctx: &AppContext, email_input: &str) -> Result<()> {
     use claudepot_core::resolve::resolve_email;
-    use claudepot_core::services::account_service;
+    use claudepot_core::services::{account_service, usage_cache::UsageFetchError};
 
     let email = resolve_email(&ctx.store, email_input).map_err(|e| anyhow::anyhow!("{e}"))?;
 
@@ -159,7 +169,8 @@ pub async fn inspect(ctx: &AppContext, email_input: &str) -> Result<()> {
         .ok_or_else(|| anyhow::anyhow!("account not found: {email}"))?;
 
     let health = account_service::token_health(account.uuid, account.has_cli_credentials);
-    let usage_result = account_service::fetch_usage(account.uuid).await;
+    let usage_result =
+        account_service::fetch_usage(&ctx.usage_cache, account.uuid, false).await;
 
     if ctx.json {
         let mut j = serde_json::json!({
@@ -174,14 +185,36 @@ pub async fn inspect(ctx: &AppContext, email_input: &str) -> Result<()> {
             "desktop_active": account.is_desktop_active,
             "token_status": health.status,
         });
-        if let Some(ref u) = usage_result {
-            if let Some(ref fh) = u.five_hour {
-                j["five_hour_pct"] = serde_json::json!(fh.utilization);
-                j["five_hour_resets"] = serde_json::json!(fh.resets_at.to_rfc3339());
+        match &usage_result {
+            Ok(Some(u)) => {
+                if let Some(ref w) = u.five_hour {
+                    j["five_hour"] =
+                        serde_json::json!({"utilization": w.utilization, "resets_at": w.resets_at.to_rfc3339()});
+                }
+                if let Some(ref w) = u.seven_day {
+                    j["seven_day"] =
+                        serde_json::json!({"utilization": w.utilization, "resets_at": w.resets_at.to_rfc3339()});
+                }
+                if let Some(ref w) = u.seven_day_opus {
+                    j["seven_day_opus"] =
+                        serde_json::json!({"utilization": w.utilization, "resets_at": w.resets_at.to_rfc3339()});
+                }
+                if let Some(ref w) = u.seven_day_sonnet {
+                    j["seven_day_sonnet"] =
+                        serde_json::json!({"utilization": w.utilization, "resets_at": w.resets_at.to_rfc3339()});
+                }
+                if let Some(ref extra) = u.extra_usage {
+                    j["extra_usage"] = serde_json::json!({
+                        "is_enabled": extra.is_enabled,
+                        "monthly_limit": extra.monthly_limit,
+                        "used_credits": extra.used_credits,
+                        "utilization": extra.utilization,
+                    });
+                }
             }
-            if let Some(ref sd) = u.seven_day {
-                j["seven_day_pct"] = serde_json::json!(sd.utilization);
-                j["seven_day_resets"] = serde_json::json!(sd.resets_at.to_rfc3339());
+            Ok(None) => {}
+            Err(e) => {
+                j["usage_error"] = serde_json::json!(e.to_string());
             }
         }
         println!("{}", serde_json::to_string_pretty(&j)?);
@@ -228,27 +261,56 @@ pub async fn inspect(ctx: &AppContext, email_input: &str) -> Result<()> {
             }
         );
 
-        if let Some(ref u) = usage_result {
-            if let Some(ref fh) = u.five_hour {
-                println!(
-                    "  5h usage:  {:.0}% (resets {})",
-                    fh.utilization,
-                    fh.resets_at.format("%H:%M UTC")
-                );
+        match &usage_result {
+            Ok(Some(u)) => {
+                print_window("5h usage", &u.five_hour);
+                print_window("7d usage", &u.seven_day);
+                print_window("7d opus", &u.seven_day_opus);
+                print_window("7d sonnet", &u.seven_day_sonnet);
+                if let Some(ref extra) = u.extra_usage {
+                    if extra.is_enabled {
+                        let used = extra.used_credits.unwrap_or(0.0);
+                        let limit = extra.monthly_limit.unwrap_or(0.0);
+                        if limit > 0.0 {
+                            println!("  Extra:     ${used:.2} / ${limit:.2} ({:.0}%)", (used / limit) * 100.0);
+                        } else {
+                            println!("  Extra:     enabled (${used:.2} used)");
+                        }
+                    } else {
+                        println!("  Extra:     disabled");
+                    }
+                }
             }
-            if let Some(ref sd) = u.seven_day {
-                println!(
-                    "  7d usage:  {:.0}% (resets {})",
-                    sd.utilization,
-                    sd.resets_at.format("%b %d")
-                );
+            Ok(None) => {
+                // No credentials — nothing to show
             }
-        } else if account.has_cli_credentials {
-            println!("  Usage:     (could not fetch — token may be expired)");
+            Err(UsageFetchError::Cooldown { remaining_secs }) => {
+                println!("  Usage:     rate limited ({remaining_secs}s remaining)");
+            }
+            Err(UsageFetchError::TokenExpired) => {
+                println!("  Usage:     token expired");
+            }
+            Err(e) => {
+                println!("  Usage:     {e}");
+            }
         }
     }
 
     Ok(())
+}
+
+fn print_window(
+    label: &str,
+    window: &Option<claudepot_core::oauth::usage::UsageWindow>,
+) {
+    if let Some(w) = window {
+        println!(
+            "  {:<9}  {:.0}% (resets {})",
+            format!("{label}:"),
+            w.utilization,
+            w.resets_at.format("%H:%M UTC")
+        );
+    }
 }
 
 fn capitalize(s: &str) -> String {
