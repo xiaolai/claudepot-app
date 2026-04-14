@@ -423,17 +423,25 @@ body {
   color: var(--ok);
 }
 
-/* Sidebar slot icons — compact replacement for text badges */
+/* Sidebar slot icons — three-state matrix per slot.
+   .active   = filled, full-color (account currently fills this slot)
+   .available = light, muted (account COULD fill this slot)
+   (no icon) = the slot can't be filled — no credentials/profile */
 .slot-icon {
   flex-shrink: 0;
 }
 
-.slot-icon.cli {
+.slot-icon.cli.active {
   color: var(--accent);
 }
 
-.slot-icon.desktop {
+.slot-icon.desktop.active {
   color: var(--ok);
+}
+
+.slot-icon.available {
+  color: var(--muted);
+  opacity: 0.6;
 }
 
 /* ---------- token badge ---------- */

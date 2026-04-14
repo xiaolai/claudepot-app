@@ -68,22 +68,36 @@ export function Sidebar({
                 <div className="sidebar-item-row">
                   <span className="sidebar-item-text">{a.email}</span>
                   <span className="sidebar-item-badges">
-                    {a.is_cli_active && (
+                    {a.is_cli_active ? (
                       <Terminal
                         size={13}
                         weight="fill"
-                        className="slot-icon cli"
+                        className="slot-icon cli active"
                         aria-label="Active CLI account"
                       />
-                    )}
-                    {a.is_desktop_active && (
+                    ) : a.credentials_healthy ? (
+                      <Terminal
+                        size={13}
+                        weight="light"
+                        className="slot-icon cli available"
+                        aria-label="CLI credentials available"
+                      />
+                    ) : null}
+                    {a.is_desktop_active ? (
                       <Desktop
                         size={13}
                         weight="fill"
-                        className="slot-icon desktop"
+                        className="slot-icon desktop active"
                         aria-label="Active Desktop account"
                       />
-                    )}
+                    ) : a.has_desktop_profile ? (
+                      <Desktop
+                        size={13}
+                        weight="light"
+                        className="slot-icon desktop available"
+                        aria-label="Desktop profile available"
+                      />
+                    ) : null}
                   </span>
                 </div>
                 <div className="sidebar-item-meta">{a.org_name ?? "personal"}</div>
