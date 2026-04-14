@@ -79,3 +79,51 @@ pub struct RemoveOutcome {
     pub had_desktop_profile: bool,
     pub warnings: Vec<String>,
 }
+
+/// A single usage window (utilization + reset time).
+#[derive(Serialize, Clone)]
+pub struct UsageWindowDto {
+    pub utilization: f64,
+    pub resets_at: String, // RFC3339
+}
+
+/// Extra-usage (monthly overage billing) info.
+#[derive(Serialize, Clone)]
+pub struct ExtraUsageDto {
+    pub is_enabled: bool,
+    pub monthly_limit: Option<f64>,
+    pub used_credits: Option<f64>,
+}
+
+/// Per-account usage data. `None` fields mean the window is not active
+/// for this subscription type, or no data is available.
+#[derive(Serialize, Clone)]
+pub struct AccountUsageDto {
+    pub five_hour: Option<UsageWindowDto>,
+    pub seven_day: Option<UsageWindowDto>,
+    pub seven_day_opus: Option<UsageWindowDto>,
+    pub seven_day_sonnet: Option<UsageWindowDto>,
+    pub extra_usage: Option<ExtraUsageDto>,
+}
+
+impl AccountUsageDto {
+    pub fn from_response(r: &claudepot_core::oauth::usage::UsageResponse) -> Self {
+        let map_window = |w: &Option<claudepot_core::oauth::usage::UsageWindow>| {
+            w.as_ref().map(|w| UsageWindowDto {
+                utilization: w.utilization,
+                resets_at: w.resets_at.to_rfc3339(),
+            })
+        };
+        Self {
+            five_hour: map_window(&r.five_hour),
+            seven_day: map_window(&r.seven_day),
+            seven_day_opus: map_window(&r.seven_day_opus),
+            seven_day_sonnet: map_window(&r.seven_day_sonnet),
+            extra_usage: r.extra_usage.as_ref().map(|e| ExtraUsageDto {
+                is_enabled: e.is_enabled,
+                monthly_limit: e.monthly_limit,
+                used_credits: e.used_credits,
+            }),
+        }
+    }
+}

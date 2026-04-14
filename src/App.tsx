@@ -5,6 +5,7 @@ import type { AccountSummary } from "./types";
 import { useToasts } from "./hooks/useToasts";
 import { useBusy } from "./hooks/useBusy";
 import { useRefresh } from "./hooks/useRefresh";
+import { useUsage } from "./hooks/useUsage";
 import { useActions } from "./hooks/useActions";
 import { Sidebar } from "./components/Sidebar";
 import { ContentPane } from "./components/ContentPane";
@@ -17,6 +18,7 @@ function App() {
   const busy = useBusy();
   const { status, accounts, loadError, keychainIssue, refresh } =
     useRefresh(pushToast);
+  const { usage, refreshUsage } = useUsage();
   const actions = useActions({ pushToast, refresh, ...busy });
 
   const [showAdd, setShowAdd] = useState(false);
@@ -60,10 +62,11 @@ function App() {
       <div className="app-layout">
         <Sidebar
           accounts={accounts}
+          usage={usage}
           selectedUuid={selectedUuid}
           onSelect={setSelectedUuid}
           onAdd={() => setShowAdd(true)}
-          onRefresh={refresh}
+          onRefresh={() => { refresh(); refreshUsage(); }}
         />
 
         <main className="content">
@@ -84,6 +87,7 @@ function App() {
 
           <ContentPane
             account={selectedAccount}
+            usage={selectedAccount ? usage[selectedAccount.uuid] ?? null : null}
             status={status}
             busyKeys={busy.busyKeys}
             anyBusy={busy.anyBusy}
