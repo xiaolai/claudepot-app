@@ -1,33 +1,45 @@
-import React, { useCallback, useEffect, useState } from "react";
+import React, { useCallback, useEffect, useRef, useState } from "react";
 import { api } from "./api";
 import type { AccountSummary, AppStatus } from "./types";
 import "./App.css";
 
 type Toast = { id: number; kind: "info" | "error"; text: string };
 
+let toastCounter = 0;
+
 function App() {
   const [status, setStatus] = useState<AppStatus | null>(null);
   const [accounts, setAccounts] = useState<AccountSummary[]>([]);
   const [loadError, setLoadError] = useState<string | null>(null);
-  const [busy, setBusy] = useState<string | null>(null); // id of busy account
+  const [busyKeys, setBusyKeys] = useState<Set<string>>(new Set());
   const [toasts, setToasts] = useState<Toast[]>([]);
   const [showAdd, setShowAdd] = useState(false);
   const [confirmRemove, setConfirmRemove] = useState<AccountSummary | null>(
     null,
   );
+  const [confirmDesktop, setConfirmDesktop] = useState<AccountSummary | null>(
+    null,
+  );
+  const [confirmClear, setConfirmClear] = useState(false);
   const [keychainIssue, setKeychainIssue] = useState<string | null>(null);
+  const lastRefreshRef = useRef(0);
 
   const pushToast = useCallback((kind: Toast["kind"], text: string) => {
-    const id = Date.now() + Math.random();
+    toastCounter += 1;
+    const id = toastCounter;
     setToasts((t) => [...t, { id, kind, text }]);
-    setTimeout(() => setToasts((t) => t.filter((x) => x.id !== id)), 4000);
+    if (kind === "info") {
+      setTimeout(() => setToasts((t) => t.filter((x) => x.id !== id)), 4000);
+    }
+  }, []);
+
+  const dismissToast = useCallback((id: number) => {
+    setToasts((t) => t.filter((x) => x.id !== id));
   }, []);
 
   const refresh = useCallback(async () => {
+    lastRefreshRef.current = Date.now();
     try {
-      // Let Claudepot adopt CC's current credentials first (idempotent).
-      // If it fails with a user-actionable error (keychain locked), we
-      // record the message so the UI can show a banner.
       try {
         await api.syncFromCurrentCc();
         setKeychainIssue(null);
@@ -55,18 +67,33 @@ function App() {
     }
   }, [pushToast]);
 
+  // WI-1: initial load + window-focus refresh (debounced 2s)
   useEffect(() => {
     refresh();
+    const onFocus = () => {
+      if (Date.now() - lastRefreshRef.current > 2000) {
+        refresh();
+      }
+    };
+    window.addEventListener("focus", onFocus);
+    return () => window.removeEventListener("focus", onFocus);
   }, [refresh]);
 
+  // WI-2: per-account busy states
   const withBusy = async <T,>(key: string, fn: () => Promise<T>) => {
-    setBusy(key);
+    setBusyKeys((prev) => new Set(prev).add(key));
     try {
       return await fn();
     } finally {
-      setBusy(null);
+      setBusyKeys((prev) => {
+        const next = new Set(prev);
+        next.delete(key);
+        return next;
+      });
     }
   };
+
+  const anyBusy = busyKeys.size > 0;
 
   const useCli = (a: AccountSummary) =>
     withBusy(`cli-${a.uuid}`, async () => {
@@ -82,16 +109,11 @@ function App() {
   const login = (a: AccountSummary) =>
     withBusy(`re-${a.uuid}`, async () => {
       try {
-        // Opens the system browser via `claude auth login` and blocks until
-        // the user completes OAuth (up to several minutes). The returned
-        // blob is verified against `a.email` before being stored.
         pushToast("info", `Opening browser — sign in as ${a.email}…`);
         await api.accountLogin(a.uuid);
         pushToast("info", `Signed in as ${a.email}`);
         await refresh();
       } catch (e) {
-        // Cancel produces a specific "login cancelled" string from Rust;
-        // present it as an info toast, not an error, since the user asked.
         const msg = `${e}`;
         if (msg.toLowerCase().includes("cancelled")) {
           pushToast("info", "Login cancelled.");
@@ -133,6 +155,24 @@ function App() {
       }
     });
 
+  // WI-5: CLI Clear
+  const performClearCli = async () => {
+    setBusyKeys((prev) => new Set(prev).add("cli-clear"));
+    try {
+      await api.cliClear();
+      pushToast("info", "CLI signed out.");
+      await refresh();
+    } catch (e) {
+      pushToast("error", `Clear CLI failed: ${e}`);
+    } finally {
+      setBusyKeys((prev) => {
+        const next = new Set(prev);
+        next.delete("cli-clear");
+        return next;
+      });
+    }
+  };
+
   if (!status) {
     if (loadError) {
       return (
@@ -165,6 +205,15 @@ function App() {
           </span>
         </div>
         <div className="active-row">
+          {/* WI-1: refresh button */}
+          <button
+            className="refresh-btn"
+            onClick={refresh}
+            title="Refresh account data"
+            aria-label="Refresh"
+          >
+            ↻
+          </button>
           <ActivePill label="CLI" email={status.cli_active_email} />
           <ActivePill
             label="Desktop"
@@ -211,9 +260,10 @@ function App() {
               key={a.uuid}
               account={a}
               desktopAvailable={status.desktop_installed}
-              busyKey={busy}
+              busyKeys={busyKeys}
+              anyBusy={anyBusy}
               onUseCli={() => useCli(a)}
-              onUseDesktop={() => useDesktop(a)}
+              onUseDesktop={() => setConfirmDesktop(a)}
               onLogin={() => login(a)}
               onCancelLogin={cancelLogin}
               onRemove={() => setConfirmRemove(a)}
@@ -226,6 +276,17 @@ function App() {
         <button className="primary" onClick={() => setShowAdd(true)}>
           + Add account
         </button>
+        {/* WI-5: Clear CLI button */}
+        {status.cli_active_email && (
+          <button
+            className="danger"
+            onClick={() => setConfirmClear(true)}
+            disabled={anyBusy}
+            title="Sign CC out — clears credentials file"
+          >
+            Clear CLI
+          </button>
+        )}
         <span className="muted mono">{status.data_dir}</span>
       </footer>
 
@@ -268,10 +329,59 @@ function App() {
         />
       )}
 
-      <div className="toasts">
+      {/* WI-6: Desktop switch confirmation */}
+      {confirmDesktop && (
+        <ConfirmDialog
+          title="Switch Desktop?"
+          body={
+            <p>
+              Switch Desktop to <strong>{confirmDesktop.email}</strong>?
+              Claude Desktop will quit and relaunch.
+            </p>
+          }
+          confirmLabel="Switch"
+          onCancel={() => setConfirmDesktop(null)}
+          onConfirm={async () => {
+            const target = confirmDesktop;
+            setConfirmDesktop(null);
+            await useDesktop(target);
+          }}
+        />
+      )}
+
+      {/* WI-5: Clear CLI confirmation */}
+      {confirmClear && (
+        <ConfirmDialog
+          title="Sign out of Claude Code?"
+          body={
+            <p>
+              This clears CC's credentials file. You'll need to sign in
+              again to use Claude Code.
+            </p>
+          }
+          confirmLabel="Clear"
+          confirmDanger
+          onCancel={() => setConfirmClear(false)}
+          onConfirm={async () => {
+            setConfirmClear(false);
+            await performClearCli();
+          }}
+        />
+      )}
+
+      <div className="toasts" aria-live="polite">
         {toasts.map((t) => (
           <div key={t.id} className={`toast ${t.kind}`}>
-            {t.text}
+            <span className="toast-text">{t.text}</span>
+            {/* WI-8: close button on all toasts, error toasts persist */}
+            <button
+              className="toast-close"
+              onClick={() => dismissToast(t.id)}
+              aria-label="Dismiss"
+              title="Dismiss"
+            >
+              ×
+            </button>
           </div>
         ))}
       </div>
@@ -306,10 +416,23 @@ function ActivePill({
   );
 }
 
+// WI-9: compute inline disabled reason for an account card
+function getDisabledHint(
+  a: AccountSummary,
+  desktopAvailable: boolean,
+): string | null {
+  if (!a.credentials_healthy) return "Credentials missing — log in to restore";
+  if (!desktopAvailable) return "Desktop app not detected";
+  if (!a.has_desktop_profile)
+    return "No Desktop profile — sign in via Desktop first";
+  return null;
+}
+
 function AccountCard({
   account: a,
   desktopAvailable,
-  busyKey,
+  busyKeys,
+  anyBusy,
   onUseCli,
   onUseDesktop,
   onLogin,
@@ -318,28 +441,49 @@ function AccountCard({
 }: {
   account: AccountSummary;
   desktopAvailable: boolean;
-  busyKey: string | null;
+  busyKeys: Set<string>;
+  anyBusy: boolean;
   onUseCli: () => void;
   onUseDesktop: () => void;
   onLogin: () => void;
   onCancelLogin: () => void;
   onRemove: () => void;
 }) {
-  const cliBusy = busyKey === `cli-${a.uuid}`;
-  const deskBusy = busyKey === `desk-${a.uuid}`;
-  const reBusy = busyKey === `re-${a.uuid}`;
-  const rmBusy = busyKey === `rm-${a.uuid}`;
-  const anyBusy = busyKey !== null;
+  // WI-2: per-account busy
+  const cliBusy = busyKeys.has(`cli-${a.uuid}`);
+  const deskBusy = busyKeys.has(`desk-${a.uuid}`);
+  const reBusy = busyKeys.has(`re-${a.uuid}`);
+  const rmBusy = busyKeys.has(`rm-${a.uuid}`);
+  // Only add/remove require global lock
+  const selfBusy = cliBusy || deskBusy || reBusy || rmBusy;
+
+  const desktopDisabled =
+    selfBusy ||
+    a.is_desktop_active ||
+    !desktopAvailable ||
+    !a.has_desktop_profile;
+
+  // WI-9: inline hint
+  const hint =
+    !a.is_desktop_active && desktopDisabled && !selfBusy
+      ? getDisabledHint(a, desktopAvailable)
+      : null;
 
   return (
     <article
       className={`account ${a.is_cli_active ? "cli-active" : ""} ${
         a.is_desktop_active ? "desktop-active" : ""
       }`}
+      aria-current={a.is_cli_active || a.is_desktop_active ? "true" : undefined}
     >
       <div className="account-main">
         <div className="account-head">
           <h3>{a.email}</h3>
+          {/* WI-7: active-slot badges */}
+          {a.is_cli_active && <span className="slot-badge cli">CLI</span>}
+          {a.is_desktop_active && (
+            <span className="slot-badge desktop">Desktop</span>
+          )}
           <TokenBadge status={a.token_status} mins={a.token_remaining_mins} />
         </div>
         <div className="account-meta muted">
@@ -350,14 +494,12 @@ function AccountCard({
         {a.credentials_healthy ? (
           <button
             onClick={onUseCli}
-            disabled={anyBusy || a.is_cli_active}
+            disabled={selfBusy || a.is_cli_active}
             title={a.is_cli_active ? "Already active CLI" : "Use for CLI"}
           >
             {cliBusy ? "…" : a.is_cli_active ? "✓ CLI" : "Use CLI"}
           </button>
         ) : reBusy ? (
-          // Login in flight for this account — show Cancel so the user
-          // can abort if they closed the browser or changed their mind.
           <button
             onClick={onCancelLogin}
             className="danger"
@@ -368,7 +510,7 @@ function AccountCard({
         ) : (
           <button
             onClick={onLogin}
-            disabled={anyBusy}
+            disabled={selfBusy}
             className="warn"
             title={`Sign in as ${a.email} — opens the browser, imports credentials.`}
           >
@@ -377,12 +519,7 @@ function AccountCard({
         )}
         <button
           onClick={onUseDesktop}
-          disabled={
-            anyBusy ||
-            a.is_desktop_active ||
-            !desktopAvailable ||
-            !a.has_desktop_profile
-          }
+          disabled={desktopDisabled}
           title={
             !desktopAvailable
               ? "Desktop not installed"
@@ -397,13 +534,15 @@ function AccountCard({
         </button>
         <button
           onClick={onRemove}
-          disabled={anyBusy}
+          disabled={selfBusy || anyBusy}
           className="danger"
           title="Remove account, credentials, and profile"
         >
           {rmBusy ? "…" : "Remove"}
         </button>
       </div>
+      {/* WI-9: inline disabled reason */}
+      {hint && <div className="account-hint muted">{hint}</div>}
     </article>
   );
 }
@@ -421,9 +560,23 @@ function TokenBadge({
     ? "bad"
     : "warn";
   const label = kind === "ok" && mins != null ? `valid · ${mins}m` : status;
-  return <span className={`token-badge ${kind}`}>{label}</span>;
+  // WI-14: descriptive tooltip
+  const title =
+    kind === "ok"
+      ? `Access token valid, expires in ${mins ?? "?"} minutes. Auto-refreshes on switch.`
+      : status === "expired"
+      ? "Access token expired. Will refresh automatically on next switch."
+      : status === "missing" || status === "no credentials"
+      ? "No stored credentials. Log in to restore."
+      : "Credential file is corrupt. Log in to restore.";
+  return (
+    <span className={`token-badge ${kind}`} title={title}>
+      {label}
+    </span>
+  );
 }
 
+// WI-4: Escape key closes modals
 function ConfirmDialog({
   title,
   body,
@@ -439,6 +592,14 @@ function ConfirmDialog({
   onCancel: () => void;
   onConfirm: () => void;
 }) {
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") onCancel();
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [onCancel]);
+
   return (
     <div className="modal-backdrop" onClick={onCancel}>
       <div
@@ -480,6 +641,7 @@ function EmptyState({ onAdd }: { onAdd: () => void }) {
   );
 }
 
+// WI-4 + WI-13: Escape key + aria attributes
 function AddAccountModal({
   onClose,
   onAdded,
@@ -490,6 +652,14 @@ function AddAccountModal({
   onError: (msg: string) => void;
 }) {
   const [busy, setBusy] = useState(false);
+
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") onClose();
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [onClose]);
 
   const submit = async () => {
     setBusy(true);
@@ -505,8 +675,14 @@ function AddAccountModal({
 
   return (
     <div className="modal-backdrop" onClick={onClose}>
-      <div className="modal" onClick={(e) => e.stopPropagation()}>
-        <h2>Add account</h2>
+      <div
+        className="modal"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="add-account-title"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <h2 id="add-account-title">Add account</h2>
         <div className="modal-body">
           <p className="muted">
             Imports whichever account Claude Code is currently signed into.
