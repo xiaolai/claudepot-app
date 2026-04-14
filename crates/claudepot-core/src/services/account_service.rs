@@ -105,6 +105,11 @@ fn register_account_from_profile(
         has_desktop_profile: false,
         is_cli_active: false,
         is_desktop_active: false,
+        // Profile fetch just succeeded — seed verification state so the
+        // account starts its lifecycle already verified instead of "never".
+        verified_email: Some(prof.email.clone()),
+        verified_at: Some(Utc::now()),
+        verify_status: "ok".to_string(),
     };
     if let Err(e) = store.insert(&account) {
         // Rollback: delete orphaned private blob
@@ -225,6 +230,9 @@ pub async fn register_from_browser(store: &AccountStore) -> Result<RegisterResul
         has_desktop_profile: false,
         is_cli_active: false,
         is_desktop_active: false,
+        verified_email: Some(prof.email.clone()),
+        verified_at: Some(Utc::now()),
+        verify_status: "ok".to_string(),
     };
     if let Err(e) = store.insert(&account) {
         // Rollback: delete orphaned private blob + cleanup temp dir
