@@ -1,4 +1,4 @@
-import { ArrowsClockwise, Plus } from "@phosphor-icons/react";
+import { ArrowsClockwise, Desktop, Plus, Terminal } from "@phosphor-icons/react";
 import type { AccountSummary, UsageMap } from "../types";
 
 export function Sidebar({
@@ -65,12 +65,28 @@ export function Sidebar({
             >
               <span className={`status-dot ${tokenKind}`} />
               <div style={{ flex: 1, minWidth: 0 }}>
-                <div className="sidebar-item-text">{a.email}</div>
-                <div className="sidebar-item-meta">
-                  {a.org_name ?? "personal"}
-                  {a.is_cli_active && " · CLI"}
-                  {a.is_desktop_active && " · Desktop"}
+                <div className="sidebar-item-row">
+                  <span className="sidebar-item-text">{a.email}</span>
+                  <span className="sidebar-item-badges">
+                    {a.is_cli_active && (
+                      <Terminal
+                        size={13}
+                        weight="fill"
+                        className="slot-icon cli"
+                        aria-label="Active CLI account"
+                      />
+                    )}
+                    {a.is_desktop_active && (
+                      <Desktop
+                        size={13}
+                        weight="fill"
+                        className="slot-icon desktop"
+                        aria-label="Active Desktop account"
+                      />
+                    )}
+                  </span>
                 </div>
+                <div className="sidebar-item-meta">{a.org_name ?? "personal"}</div>
                 {fiveHourPct !== null && (
                   <div className="usage-bar-container" title={`5h usage: ${Math.round(fiveHourPct)}%`}>
                     <div
