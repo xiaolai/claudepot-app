@@ -486,6 +486,37 @@ pub struct TokenHealth {
     pub remaining_mins: Option<i64>,
 }
 
+/// Format a duration in minutes as "Xd Xh Xm", dropping zero-leading
+/// units. Examples: 88 → "1h 28m", 45 → "45m", 1500 → "1d 1h",
+/// 60 → "1h", 0 → "0m".
+fn format_duration_mins(mins: i64) -> String {
+    if mins <= 0 {
+        return "0m".to_string();
+    }
+    let days = mins / (24 * 60);
+    let hours = (mins % (24 * 60)) / 60;
+    let minutes = mins % 60;
+
+    let mut parts = Vec::new();
+    if days > 0 {
+        parts.push(format!("{days}d"));
+    }
+    if hours > 0 {
+        parts.push(format!("{hours}h"));
+    }
+    // Show minutes if no larger unit, or if they're non-zero and we're
+    // not showing days (avoid "1d 0h 5m" — collapse to "1d 5m" feels off,
+    // so we just drop minutes when days are present).
+    if minutes > 0 && days == 0 {
+        parts.push(format!("{minutes}m"));
+    }
+    if parts.is_empty() {
+        // e.g., exactly 1 day with no remainder
+        parts.push(format!("{days}d"));
+    }
+    parts.join(" ")
+}
+
 /// Get token health for an account.
 pub fn token_health(uuid: Uuid, has_credentials: bool) -> TokenHealth {
     if !has_credentials {
@@ -501,7 +532,7 @@ pub fn token_health(uuid: Uuid, has_credentials: bool) -> TokenHealth {
                     (blob.claude_ai_oauth.expires_at - Utc::now().timestamp_millis()) / 60_000;
                 if remaining > 0 {
                     TokenHealth {
-                        status: format!("valid ({}m remaining)", remaining),
+                        status: format!("valid ({} remaining)", format_duration_mins(remaining)),
                         remaining_mins: Some(remaining),
                     }
                 } else {
@@ -806,6 +837,24 @@ mod tests {
             result,
             Err(RegisterError::AlreadyRegistered(_, _))
         ));
+    }
+
+    // -- format_duration_mins tests --
+
+    #[test]
+    fn test_format_duration_mins() {
+        assert_eq!(format_duration_mins(0), "0m");
+        assert_eq!(format_duration_mins(-5), "0m");
+        assert_eq!(format_duration_mins(1), "1m");
+        assert_eq!(format_duration_mins(45), "45m");
+        assert_eq!(format_duration_mins(60), "1h");
+        assert_eq!(format_duration_mins(88), "1h 28m");
+        assert_eq!(format_duration_mins(120), "2h");
+        assert_eq!(format_duration_mins(125), "2h 5m");
+        assert_eq!(format_duration_mins(1440), "1d");
+        assert_eq!(format_duration_mins(1500), "1d 1h");
+        assert_eq!(format_duration_mins(2880), "2d");
+        assert_eq!(format_duration_mins(2945), "2d 1h"); // minutes dropped when days present
     }
 
     // -- token_health tests --
