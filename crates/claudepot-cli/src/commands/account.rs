@@ -304,12 +304,30 @@ fn print_window(
     window: &Option<claudepot_core::oauth::usage::UsageWindow>,
 ) {
     if let Some(w) = window {
+        let local = w.resets_at.with_timezone(&chrono::Local);
         println!(
             "  {:<9}  {:.0}% (resets {})",
             format!("{label}:"),
             w.utilization,
-            w.resets_at.format("%H:%M UTC")
+            format_local_time(&local)
         );
+    }
+}
+
+/// Format a local datetime as "HH:MM" with a compact UTC offset.
+/// Examples: "20:59 (+08)", "14:59 (-05)", "12:59 (UTC)"
+fn format_local_time(dt: &chrono::DateTime<chrono::Local>) -> String {
+    let offset_secs = dt.offset().local_minus_utc();
+    if offset_secs == 0 {
+        format!("{} (UTC)", dt.format("%H:%M"))
+    } else {
+        let hours = offset_secs / 3600;
+        let mins = (offset_secs.abs() % 3600) / 60;
+        if mins == 0 {
+            format!("{} ({:+03})", dt.format("%H:%M"), hours)
+        } else {
+            format!("{} ({:+03}:{:02})", dt.format("%H:%M"), hours, mins)
+        }
     }
 }
 
