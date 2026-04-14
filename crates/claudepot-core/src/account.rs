@@ -20,6 +20,49 @@ pub struct Account {
     pub is_cli_active: bool,
     /// Computed: is this the active Desktop account?
     pub is_desktop_active: bool,
+    /// Last observed `/api/oauth/profile` email for this UUID's blob.
+    /// `None` until a verification pass has run. When this differs from
+    /// `email`, the slot is misfiled — the stored blob authenticates as
+    /// someone other than the account label says.
+    pub verified_email: Option<String>,
+    /// Timestamp of the verification run that produced `verified_email` /
+    /// `verify_status`. `None` means no verification has ever run.
+    pub verified_at: Option<DateTime<Utc>>,
+    /// Outcome of the last verification run. `"never"`, `"ok"`, `"drift"`,
+    /// `"rejected"` (token refused by server), or `"network_error"`.
+    pub verify_status: String,
+}
+
+/// Result of an identity-verification pass against `/api/oauth/profile`.
+/// Persisted to the account row via [`AccountStore::update_verification`].
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum VerifyOutcome {
+    /// Server confirmed the blob authenticates as the stored email.
+    Ok { email: String },
+    /// Server returned a profile email that doesn't match the stored email.
+    /// The slot is misfiled — a refresh or switch could cross-contaminate.
+    Drift {
+        stored_email: String,
+        actual_email: String,
+    },
+    /// Server rejected the token (401). Local expiry may still pretend valid,
+    /// but the server has revoked the chain. Refresh can't fix it; re-login
+    /// is required.
+    Rejected,
+    /// Transient failure (network, timeout, 5xx). Preserves any prior
+    /// verified_email — a network blip must not wipe verification history.
+    NetworkError,
+}
+
+impl VerifyOutcome {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            VerifyOutcome::Ok { .. } => "ok",
+            VerifyOutcome::Drift { .. } => "drift",
+            VerifyOutcome::Rejected => "rejected",
+            VerifyOutcome::NetworkError => "network_error",
+        }
+    }
 }
 
 pub struct AccountStore {
@@ -62,6 +105,7 @@ impl AccountStore {
         // would fail immediately with "database is locked".
         db.busy_timeout(std::time::Duration::from_secs(5))?;
         db.execute_batch(SCHEMA)?;
+        Self::migrate_add_verification_columns(&db)?;
 
         // Set 0600 permissions on the DB file (contains account metadata)
         #[cfg(unix)]
@@ -83,6 +127,34 @@ impl AccountStore {
         }
 
         Ok(Self { db: Mutex::new(db) })
+    }
+
+    /// Additive migration: add `verified_email`, `verified_at`,
+    /// `verify_status` columns to an existing `accounts` table. Idempotent —
+    /// skips columns that already exist by consulting `PRAGMA table_info`.
+    fn migrate_add_verification_columns(db: &Connection) -> SqlResult<()> {
+        let mut existing: Vec<String> = Vec::new();
+        {
+            let mut stmt = db.prepare("PRAGMA table_info(accounts)")?;
+            let rows = stmt.query_map([], |r| r.get::<_, String>(1))?;
+            for r in rows {
+                existing.push(r?);
+            }
+        }
+        let has = |col: &str| existing.iter().any(|c| c == col);
+        if !has("verified_email") {
+            db.execute("ALTER TABLE accounts ADD COLUMN verified_email TEXT", [])?;
+        }
+        if !has("verified_at") {
+            db.execute("ALTER TABLE accounts ADD COLUMN verified_at TEXT", [])?;
+        }
+        if !has("verify_status") {
+            db.execute(
+                "ALTER TABLE accounts ADD COLUMN verify_status TEXT NOT NULL DEFAULT 'never'",
+                [],
+            )?;
+        }
+        Ok(())
     }
 
     fn row_to_account(
@@ -130,7 +202,48 @@ impl AccountStore {
             has_desktop_profile: row.get(10)?,
             is_cli_active: active_cli.as_ref() == Some(&uuid_str),
             is_desktop_active: active_desktop.as_ref() == Some(&uuid_str),
+            verified_email: row.get::<_, Option<String>>(11)?,
+            verified_at: row
+                .get::<_, Option<String>>(12)?
+                .and_then(|s| s.parse().ok()),
+            verify_status: row
+                .get::<_, Option<String>>(13)?
+                .unwrap_or_else(|| "never".to_string()),
         })
+    }
+
+    /// Persist a verification outcome on the account row. Called by
+    /// `services::identity::verify_account_identity` after each `/profile`
+    /// check. `VerifyOutcome::NetworkError` preserves `verified_email` so a
+    /// transient blip doesn't wipe the last-known-good identity — only the
+    /// status is updated.
+    pub fn update_verification(&self, uuid: Uuid, outcome: &VerifyOutcome) -> SqlResult<()> {
+        let status = outcome.as_str();
+        let now = Utc::now().to_rfc3339();
+        match outcome {
+            VerifyOutcome::Ok { email } => {
+                self.db().execute(
+                    "UPDATE accounts SET verified_email = ?1, verified_at = ?2, \
+                     verify_status = ?3 WHERE uuid = ?4",
+                    params![email, now, status, uuid.to_string()],
+                )?;
+            }
+            VerifyOutcome::Drift { actual_email, .. } => {
+                self.db().execute(
+                    "UPDATE accounts SET verified_email = ?1, verified_at = ?2, \
+                     verify_status = ?3 WHERE uuid = ?4",
+                    params![actual_email, now, status, uuid.to_string()],
+                )?;
+            }
+            VerifyOutcome::Rejected | VerifyOutcome::NetworkError => {
+                self.db().execute(
+                    "UPDATE accounts SET verified_at = ?1, verify_status = ?2 \
+                     WHERE uuid = ?3",
+                    params![now, status, uuid.to_string()],
+                )?;
+            }
+        }
+        Ok(())
     }
 
     pub fn list(&self) -> SqlResult<Vec<Account>> {
@@ -142,7 +255,8 @@ impl AccountStore {
             "SELECT uuid, email, org_uuid, org_name, \
              subscription_type, rate_limit_tier, created_at, \
              last_cli_switch, last_desktop_switch, \
-             has_cli_credentials, has_desktop_profile \
+             has_cli_credentials, has_desktop_profile, \
+             verified_email, verified_at, verify_status \
              FROM accounts ORDER BY email",
         )?;
         let rows = stmt.query_map([], |row| {
@@ -160,7 +274,8 @@ impl AccountStore {
                 "SELECT uuid, email, org_uuid, org_name, \
                  subscription_type, rate_limit_tier, created_at, \
                  last_cli_switch, last_desktop_switch, \
-                 has_cli_credentials, has_desktop_profile \
+                 has_cli_credentials, has_desktop_profile, \
+                 verified_email, verified_at, verify_status \
                  FROM accounts WHERE email = ?1",
                 params![email],
                 |row| Self::row_to_account(row, &active_cli, &active_desktop),
@@ -177,7 +292,8 @@ impl AccountStore {
                 "SELECT uuid, email, org_uuid, org_name, \
                  subscription_type, rate_limit_tier, created_at, \
                  last_cli_switch, last_desktop_switch, \
-                 has_cli_credentials, has_desktop_profile \
+                 has_cli_credentials, has_desktop_profile, \
+                 verified_email, verified_at, verify_status \
                  FROM accounts WHERE uuid = ?1",
                 params![uuid.to_string()],
                 |row| Self::row_to_account(row, &active_cli, &active_desktop),
@@ -325,6 +441,9 @@ mod tests {
             has_desktop_profile: false,
             is_cli_active: false,
             is_desktop_active: false,
+            verified_email: None,
+            verified_at: None,
+            verify_status: "never".to_string(),
         }
     }
 
@@ -555,7 +674,10 @@ CREATE TABLE IF NOT EXISTS accounts (
     last_cli_switch TEXT,
     last_desktop_switch TEXT,
     has_cli_credentials INTEGER NOT NULL DEFAULT 0,
-    has_desktop_profile INTEGER NOT NULL DEFAULT 0
+    has_desktop_profile INTEGER NOT NULL DEFAULT 0,
+    verified_email TEXT,
+    verified_at TEXT,
+    verify_status TEXT NOT NULL DEFAULT 'never'
 );
 
 CREATE TABLE IF NOT EXISTS state (
