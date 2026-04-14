@@ -100,6 +100,24 @@ body {
 .active-row {
   display: flex;
   gap: 10px;
+  align-items: center;
+}
+
+/* ---------- refresh button ---------- */
+.refresh-btn {
+  font-size: 16px;
+  padding: 4px 8px;
+  line-height: 1;
+  border: 1px solid var(--border-strong);
+  border-radius: 7px;
+  background: var(--surface);
+  color: var(--muted);
+  cursor: pointer;
+  transition: background 0.12s ease, border-color 0.12s ease;
+}
+.refresh-btn:hover {
+  background: var(--border);
+  color: var(--text);
 }
 
 .banner {
@@ -207,6 +225,31 @@ body {
   display: flex;
   gap: 6px;
   flex-shrink: 0;
+}
+
+/* ---------- WI-7: slot badges ---------- */
+.slot-badge {
+  font-size: 10px;
+  padding: 1px 6px;
+  border-radius: 999px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+.slot-badge.cli {
+  background: var(--accent-weak);
+  color: var(--accent);
+}
+.slot-badge.desktop {
+  background: var(--ok-weak);
+  color: var(--ok);
+}
+
+/* ---------- WI-9: inline disabled hint ---------- */
+.account-hint {
+  font-size: 12px;
+  margin-top: 6px;
+  padding-left: 16px;
 }
 
 .token-badge {
@@ -366,6 +409,9 @@ button.danger.primary:hover:not(:disabled) {
   pointer-events: none;
 }
 .toast {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
   padding: 10px 14px;
   border-radius: 8px;
   background: var(--surface);
@@ -373,7 +419,26 @@ button.danger.primary:hover:not(:disabled) {
   box-shadow: 0 8px 24px rgba(0, 0, 0, 0.15);
   font-size: 13px;
   max-width: 360px;
+  pointer-events: auto;
   animation: toast-in 0.15s ease;
+}
+.toast-text {
+  flex: 1;
+}
+.toast-close {
+  font-size: 14px;
+  line-height: 1;
+  padding: 0 2px;
+  border: none;
+  background: none;
+  color: var(--muted);
+  cursor: pointer;
+  opacity: 0.7;
+  flex-shrink: 0;
+}
+.toast-close:hover {
+  opacity: 1;
+  color: var(--text);
 }
 .toast.error {
   border-color: var(--bad);
