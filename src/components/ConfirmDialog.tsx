@@ -1,4 +1,5 @@
 import React, { useEffect } from "react";
+import { useFocusTrap } from "../hooks/useFocusTrap";
 
 export function ConfirmDialog({
   title,
@@ -15,6 +16,8 @@ export function ConfirmDialog({
   onCancel: () => void;
   onConfirm: () => void;
 }) {
+  const trapRef = useFocusTrap<HTMLDivElement>();
+
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.key === "Escape") onCancel();
@@ -25,24 +28,14 @@ export function ConfirmDialog({
 
   return (
     <div className="modal-backdrop" onClick={onCancel}>
-      <div
-        className="modal"
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby="confirm-title"
-        onClick={(e) => e.stopPropagation()}
-      >
+      <div ref={trapRef} className="modal" role="dialog" aria-modal="true"
+        aria-labelledby="confirm-title" onClick={(e) => e.stopPropagation()}>
         <h2 id="confirm-title">{title}</h2>
         <div className="modal-body">{body}</div>
         <div className="modal-actions">
           <button onClick={onCancel}>Cancel</button>
-          <button
-            className={confirmDanger ? "danger primary" : "primary"}
-            onClick={onConfirm}
-            autoFocus
-          >
-            {confirmLabel}
-          </button>
+          <button className={confirmDanger ? "danger primary" : "primary"}
+            onClick={onConfirm} autoFocus>{confirmLabel}</button>
         </div>
       </div>
     </div>

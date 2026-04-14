@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { api } from "../api";
+import { useFocusTrap } from "../hooks/useFocusTrap";
 
 export function AddAccountModal({
   onClose,
@@ -11,6 +12,7 @@ export function AddAccountModal({
   onError: (msg: string) => void;
 }) {
   const [busy, setBusy] = useState(false);
+  const trapRef = useFocusTrap<HTMLDivElement>();
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -34,13 +36,8 @@ export function AddAccountModal({
 
   return (
     <div className="modal-backdrop" onClick={onClose}>
-      <div
-        className="modal"
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby="add-account-title"
-        onClick={(e) => e.stopPropagation()}
-      >
+      <div ref={trapRef} className="modal" role="dialog" aria-modal="true"
+        aria-labelledby="add-account-title" onClick={(e) => e.stopPropagation()}>
         <h2 id="add-account-title">Add account</h2>
         <div className="modal-body">
           <p className="muted">
@@ -54,9 +51,7 @@ export function AddAccountModal({
           </p>
         </div>
         <div className="modal-actions">
-          <button onClick={onClose} disabled={busy}>
-            Cancel
-          </button>
+          <button onClick={onClose} disabled={busy}>Cancel</button>
           <button className="primary" onClick={submit} disabled={busy}>
             {busy ? "Adding…" : "Add from current"}
           </button>

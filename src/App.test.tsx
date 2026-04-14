@@ -171,9 +171,8 @@ describe("AccountCard — button disable logic", () => {
       account_list: () => [sampleAccount({ is_cli_active: true })],
     });
 
-    const btn = await screen.findByRole("button", { name: /CLI/i });
+    const btn = await screen.findByRole("button", { name: /✓ CLI/ });
     expect(btn).toBeDisabled();
-    expect(btn).toHaveTextContent(/✓ CLI/);
   });
 
   it("Log in calls account_login (browser flow) and refreshes", async () => {
@@ -735,5 +734,78 @@ describe("Add-account modal", () => {
     ).toBeNull();
     const modal = document.querySelector(".modal");
     expect(modal?.textContent ?? "").not.toMatch(/paste|sk-ant-ort01/i);
+  });
+});
+
+describe("WI-11: Account detail/inspect view", () => {
+  it("clicking card toggles detail panel", async () => {
+    const user = userEvent.setup();
+    await renderApp({
+      app_status: () => sampleStatus({ account_count: 1 }),
+      account_list: () => [sampleAccount()],
+    });
+
+    const mainArea = (await screen.findByText("alice@example.com")).closest("[role='button']") as HTMLElement;
+    await user.click(mainArea);
+
+    // Detail panel shows UUID
+    expect(await screen.findByText("aaaa1111-2222-4333-8444-555555555555")).toBeInTheDocument();
+
+    // Click again to collapse
+    await user.click(mainArea);
+    await waitFor(() => {
+      expect(screen.queryByText("aaaa1111-2222-4333-8444-555555555555")).not.toBeInTheDocument();
+    });
+  });
+
+  it("detail shows UUID and timestamps", async () => {
+    const user = userEvent.setup();
+    await renderApp({
+      app_status: () => sampleStatus({ account_count: 1 }),
+      account_list: () => [sampleAccount({
+        last_cli_switch: new Date(Date.now() - 3600000).toISOString(),
+      })],
+    });
+
+    const mainArea = (await screen.findByText("alice@example.com")).closest("[role='button']") as HTMLElement;
+    await user.click(mainArea);
+
+    expect(await screen.findByText("aaaa1111-2222-4333-8444-555555555555")).toBeInTheDocument();
+    expect(await screen.findByText(/1h ago/)).toBeInTheDocument();
+  });
+
+  it("clicking another card collapses the first", async () => {
+    const user = userEvent.setup();
+    await renderApp({
+      app_status: () => sampleStatus({ account_count: 2 }),
+      account_list: () => [
+        sampleAccount(),
+        sampleAccount({ uuid: "bbbb2222-3333-4444-8555-666666666666", email: "bob@example.com" }),
+      ],
+    });
+
+    const aliceMain = (await screen.findByText("alice@example.com")).closest("[role='button']") as HTMLElement;
+    await user.click(aliceMain);
+    expect(await screen.findByText("aaaa1111-2222-4333-8444-555555555555")).toBeInTheDocument();
+
+    const bobMain = (await screen.findByText("bob@example.com")).closest("[role='button']") as HTMLElement;
+    await user.click(bobMain);
+
+    await waitFor(() => {
+      expect(screen.queryByText("aaaa1111-2222-4333-8444-555555555555")).not.toBeInTheDocument();
+    });
+    expect(screen.getByText("bbbb2222-3333-4444-8555-666666666666")).toBeInTheDocument();
+  });
+});
+
+describe("WI-14: Token badge tooltip", () => {
+  it("valid token badge has descriptive title", async () => {
+    await renderApp({
+      app_status: () => sampleStatus({ account_count: 1 }),
+      account_list: () => [sampleAccount()],
+    });
+
+    const badge = await screen.findByText(/valid · 47m/);
+    expect(badge.getAttribute("title")).toMatch(/expires in 47 minutes/i);
   });
 });
