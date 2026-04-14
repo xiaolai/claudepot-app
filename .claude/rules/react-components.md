@@ -6,17 +6,23 @@ globs: ["src/**/*.tsx", "src/**/*.ts"]
 
 ## File structure
 
-<!-- TARGET: after WI-10 (component decomposition) -->
-<!-- Until WI-10, App.tsx contains all components in one file. -->
-
 One component per file. Max 120 lines per component file.
 Props interface defined inline above the component (no separate types file
 for component-local types).
 
 ```
 src/
-  App.tsx              — shell: providers, layout, toast container
-  components/          — all UI components
+  App.tsx              — shell: IconContext provider, layout, modals, toasts
+  components/
+    Sidebar.tsx        — account list sidebar (transparent for vibrancy)
+    ContentPane.tsx    — selected account detail + actions
+    AccountDetail.tsx  — detail grid (email, UUID, timestamps, etc.)
+    AddAccountModal.tsx
+    ConfirmDialog.tsx
+    ToastContainer.tsx — HUD-style toasts (top-center)
+    CopyButton.tsx
+    EmptyState.tsx
+    TokenBadge.tsx
   hooks/               — custom hooks (reused across 2+ components)
   api.ts               — Tauri invoke wrappers
   types.ts             — shared DTO types (synced with Rust dto.rs)
@@ -28,9 +34,16 @@ src/
 - Functional components only. No class components (except Error Boundary).
 - Props destructured in the function signature.
 - No default exports except `App.tsx`. Use named exports everywhere else.
-  <!-- TARGET: applies after WI-10 component decomposition -->
 - Co-locate component CSS classes in `App.css` under a section comment
   (`/* ---------- component-name ---------- */`).
+- All icons from `@phosphor-icons/react`. Never use emoji or text for icons.
+
+## Layout
+
+App uses a sidebar + content pane split:
+- `Sidebar` — 240px, transparent background for macOS vibrancy
+- `ContentPane` — flex:1, opaque `var(--bg)` background
+- Selection: click sidebar item → ContentPane shows that account's detail
 
 ## Hooks
 
@@ -45,9 +58,7 @@ Hook files: `src/hooks/useName.ts`. Export a single named function.
 - No state library. React `useState` + `useCallback` + prop drilling.
 - State that crosses an `await` point: use functional updater
   `setState(prev => ...)` to avoid stale closures.
-- Busy states: per-entity Set (not a global string). Each component
-  checks membership for its own key.
-  <!-- TARGET: after WI-2. Current code uses a single busy string. -->
+- Busy states: per-entity Set. Each component checks membership for its key.
 
 ## Modals and dialogs
 
@@ -60,17 +71,18 @@ These are invisible in Tauri webviews. Always use in-app dialog components.
 ## Buttons
 
 - Always provide a `title` tooltip explaining the action.
+- Use `cursor: default` (set globally). Never add `cursor: pointer`.
 - Disabled buttons: set `disabled` AND provide a visible inline hint
-  explaining why (not just a tooltip — tooltips are invisible on touch
-  and require hover on disabled elements).
+  explaining why (not just a tooltip).
 - Use className variants: `primary`, `danger`, `warn`,
   `danger primary` (filled danger).
+- Icon-only buttons: use `.icon-btn` class (28x28, no border).
 
 ## Toasts
 
+- HUD-style, top-center positioned. Dark translucent background.
 - Info toasts: auto-dismiss after 4 seconds.
 - Error toasts: persist until manually dismissed (close button).
-  <!-- TARGET: after WI-8. Current code auto-dismisses all toasts. -->
 - Toast IDs: incrementing counter, not `Date.now() + Math.random()`.
 
 ## Data fetching
@@ -78,7 +90,6 @@ These are invisible in Tauri webviews. Always use in-app dialog components.
 - All Tauri invocations go through `src/api.ts`. Components never call
   `invoke()` directly.
 - Refresh on window focus (debounced 2s) + manual refresh button.
-  <!-- TARGET: after WI-1. Current code loads once on mount. -->
 - Startup sync: call `syncFromCurrentCc()` before loading account list.
 
 ## Testing
@@ -90,3 +101,5 @@ These are invisible in Tauri webviews. Always use in-app dialog components.
   `Partial<T>` overrides.
 - Test behavior, not implementation. Assert on visible text and ARIA
   roles, not CSS classes or internal state.
+- Email text may appear in multiple places (sidebar + content + detail).
+  Use `getAllByText` / `findAllByText` when asserting on email presence.
