@@ -8,8 +8,11 @@ export function useRefresh(pushToast: (kind: "info" | "error", text: string) => 
   const [loadError, setLoadError] = useState<string | null>(null);
   const [keychainIssue, setKeychainIssue] = useState<string | null>(null);
   const lastRefreshRef = useRef(0);
+  const refreshingRef = useRef(false);
 
   const refresh = useCallback(async () => {
+    if (refreshingRef.current) return;
+    refreshingRef.current = true;
     lastRefreshRef.current = Date.now();
     try {
       try {
@@ -36,6 +39,8 @@ export function useRefresh(pushToast: (kind: "info" | "error", text: string) => 
       const msg = `${e}`;
       setLoadError(msg);
       pushToast("error", `refresh failed: ${msg}`);
+    } finally {
+      refreshingRef.current = false;
     }
   }, [pushToast]);
 

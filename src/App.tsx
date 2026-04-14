@@ -12,7 +12,6 @@ import { AddAccountModal } from "./components/AddAccountModal";
 import { ConfirmDialog } from "./components/ConfirmDialog";
 import { ToastContainer } from "./components/ToastContainer";
 import { CopyButton } from "./components/CopyButton";
-import "./App.css";
 
 function App() {
   const { toasts, pushToast, dismissToast } = useToasts();

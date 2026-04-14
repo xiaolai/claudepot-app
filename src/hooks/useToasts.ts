@@ -1,4 +1,4 @@
-import { useCallback, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 
 export type Toast = { id: number; kind: "info" | "error"; text: string; exiting: boolean };
 
@@ -8,19 +8,26 @@ export function useToasts() {
   const [toasts, setToasts] = useState<Toast[]>([]);
   const timersRef = useRef<Map<number, ReturnType<typeof setTimeout>>>(new Map());
 
+  // Clear all pending timers on unmount
+  useEffect(() => {
+    const timers = timersRef.current;
+    return () => {
+      for (const t of timers.values()) clearTimeout(t);
+      timers.clear();
+    };
+  }, []);
+
   const removeToast = useCallback((id: number) => {
     setToasts((t) => t.filter((x) => x.id !== id));
     timersRef.current.delete(id);
   }, []);
 
   const dismissToast = useCallback((id: number) => {
-    // Clear any pending auto-dismiss timer
     const timer = timersRef.current.get(id);
     if (timer) {
       clearTimeout(timer);
       timersRef.current.delete(id);
     }
-    // Mark as exiting, then remove after animation
     setToasts((t) => t.map((x) => (x.id === id ? { ...x, exiting: true } : x)));
     setTimeout(() => removeToast(id), 150);
   }, [removeToast]);
