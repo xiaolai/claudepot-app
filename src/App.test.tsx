@@ -668,9 +668,10 @@ describe("Add-account modal", () => {
       await screen.findByRole("button", { name: /add from current/i }),
     );
 
-    expect(
-      await screen.findByText("newly-added@example.com"),
-    ).toBeInTheDocument();
+    // Email may appear in multiple places after auto-select fires
+    // (sidebar + detail header + detail row). Use findAllByText.
+    const matches = await screen.findAllByText("newly-added@example.com");
+    expect(matches.length).toBeGreaterThan(0);
   });
 
   it("Remove opens an in-app confirm dialog, not window.confirm", async () => {
