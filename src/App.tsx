@@ -24,6 +24,7 @@ function App() {
   const [confirmRemove, setConfirmRemove] = useState<AccountSummary | null>(null);
   const [confirmDesktop, setConfirmDesktop] = useState<AccountSummary | null>(null);
   const [confirmClear, setConfirmClear] = useState(false);
+  const [expandedUuid, setExpandedUuid] = useState<string | null>(null);
 
   if (!status) {
     if (loadError) {
@@ -69,6 +70,8 @@ function App() {
             <AccountCard key={a.uuid} account={a}
               desktopAvailable={status.desktop_installed}
               busyKeys={busy.busyKeys} anyBusy={busy.anyBusy}
+              expanded={expandedUuid === a.uuid}
+              onToggleExpand={() => setExpandedUuid((prev) => prev === a.uuid ? null : a.uuid)}
               onUseCli={() => actions.useCli(a)}
               onUseDesktop={() => setConfirmDesktop(a)}
               onLogin={() => actions.login(a)}
