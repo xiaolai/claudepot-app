@@ -1,4 +1,5 @@
 import type { AccountSummary } from "../types";
+import { CopyButton } from "./CopyButton";
 
 function relativeTime(iso: string | null): string {
   if (!iso) return "—";
@@ -16,8 +17,10 @@ export function AccountDetail({ account: a }: { account: AccountSummary }) {
   return (
     <div className="account-detail">
       <dl className="detail-grid">
+        <dt>Email</dt>
+        <dd>{a.email} <CopyButton text={a.email} /></dd>
         <dt>UUID</dt>
-        <dd className="mono">{a.uuid}</dd>
+        <dd className="mono">{a.uuid} <CopyButton text={a.uuid} /></dd>
         <dt>Org</dt>
         <dd>{a.org_name ?? "—"}</dd>
         <dt>Plan</dt>

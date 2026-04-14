@@ -11,6 +11,7 @@ import { EmptyState } from "./components/EmptyState";
 import { AddAccountModal } from "./components/AddAccountModal";
 import { ConfirmDialog } from "./components/ConfirmDialog";
 import { ToastContainer } from "./components/ToastContainer";
+import { CopyButton } from "./components/CopyButton";
 import "./App.css";
 
 function App() {
@@ -38,7 +39,16 @@ function App() {
         </main>
       );
     }
-    return <main className="app loading"><p>Loading…</p></main>;
+    return (
+      <main className="app loading">
+        <div className="skeleton-container">
+          <div className="skeleton skeleton-header" />
+          <div className="skeleton skeleton-card" />
+          <div className="skeleton skeleton-card" />
+          <div className="skeleton skeleton-card short" />
+        </div>
+      </main>
+    );
   }
 
   return (
@@ -89,7 +99,7 @@ function App() {
             Clear CLI
           </button>
         )}
-        <span className="muted mono">{status.data_dir}</span>
+        <span className="muted mono">Data: {status.data_dir} <CopyButton text={status.data_dir} /></span>
       </footer>
 
       {showAdd && <AddAccountModal

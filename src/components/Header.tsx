@@ -13,8 +13,7 @@ export function Header({
       <div className="brand">
         <h1>Claudepot</h1>
         <span className="muted">
-          {status.platform} / {status.arch} · {status.account_count}{" "}
-          account{status.account_count === 1 ? "" : "s"}
+          {status.account_count} account{status.account_count === 1 ? "" : "s"}
         </span>
       </div>
       <div className="active-row">

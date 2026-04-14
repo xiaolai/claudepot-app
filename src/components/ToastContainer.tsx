@@ -10,7 +10,7 @@ export function ToastContainer({
   return (
     <div className="toasts" aria-live="polite">
       {toasts.map((t) => (
-        <div key={t.id} className={`toast ${t.kind}`}>
+        <div key={t.id} className={`toast ${t.kind} ${t.exiting ? "exiting" : ""}`}>
           <span className="toast-text">{t.text}</span>
           <button
             className="toast-close"

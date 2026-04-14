@@ -466,6 +466,16 @@ button.danger.primary:hover:not(:disabled) {
     transform: translateY(8px);
   }
 }
+/* WI-17: toast exit animation */
+.toast.exiting {
+  animation: toast-out 0.15s ease forwards;
+}
+@keyframes toast-out {
+  to {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+}
 
 /* ---------- WI-11: account detail panel ---------- */
 .account-detail {
@@ -522,9 +532,56 @@ button:focus-visible {
   }
 }
 
+/* ---------- WI-16: copy button ---------- */
+.copy-btn {
+  font-size: 12px;
+  padding: 0 4px;
+  border: none;
+  background: none;
+  color: var(--muted);
+  cursor: pointer;
+  opacity: 0.6;
+  vertical-align: middle;
+}
+.copy-btn:hover {
+  opacity: 1;
+  color: var(--accent);
+}
+
+/* ---------- WI-18: loading skeleton ---------- */
+.skeleton-container {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  width: 100%;
+  max-width: 600px;
+}
+.skeleton {
+  background: var(--border);
+  border-radius: 10px;
+  animation: skeleton-pulse 1.2s ease-in-out infinite;
+}
+.skeleton-header {
+  height: 48px;
+}
+.skeleton-card {
+  height: 72px;
+}
+.skeleton-card.short {
+  width: 60%;
+}
+@keyframes skeleton-pulse {
+  0%, 100% { opacity: 0.4; }
+  50% { opacity: 0.7; }
+}
+
 /* ---------- reduced motion ---------- */
 @media (prefers-reduced-motion: reduce) {
-  .toast {
+  .toast,
+  .toast.exiting {
+    animation: none;
+  }
+  .skeleton {
     animation: none;
   }
 }

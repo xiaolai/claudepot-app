@@ -1,6 +1,6 @@
 import { useCallback, useState } from "react";
 
-export type Toast = { id: number; kind: "info" | "error"; text: string };
+export type Toast = { id: number; kind: "info" | "error"; text: string; exiting?: boolean };
 
 let toastCounter = 0;
 
@@ -12,12 +12,14 @@ export function useToasts() {
     const id = toastCounter;
     setToasts((t) => [...t, { id, kind, text }]);
     if (kind === "info") {
-      setTimeout(() => setToasts((t) => t.filter((x) => x.id !== id)), 4000);
+      setTimeout(() => dismissToast(id), 4000);
     }
   }, []);
 
   const dismissToast = useCallback((id: number) => {
-    setToasts((t) => t.filter((x) => x.id !== id));
+    // Mark as exiting, then remove after animation
+    setToasts((t) => t.map((x) => (x.id === id ? { ...x, exiting: true } : x)));
+    setTimeout(() => setToasts((t) => t.filter((x) => x.id !== id)), 150);
   }, []);
 
   return { toasts, pushToast, dismissToast };
