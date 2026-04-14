@@ -563,7 +563,7 @@ describe("Active pills", () => {
 });
 
 describe("WI-13: AddAccountModal accessibility", () => {
-  it("AddAccountModal has role=dialog", async () => {
+  it("AddAccountModal has role=dialog with unique aria-labelledby", async () => {
     const user = userEvent.setup();
     await renderApp({
       app_status: () => sampleStatus({ account_count: 0 }),
@@ -576,7 +576,11 @@ describe("WI-13: AddAccountModal accessibility", () => {
 
     const dialog = await screen.findByRole("dialog");
     expect(dialog).toHaveAttribute("aria-modal", "true");
-    expect(dialog).toHaveAttribute("aria-labelledby", "add-account-title");
+    const labelledBy = dialog.getAttribute("aria-labelledby");
+    expect(labelledBy).toBeTruthy();
+    // Heading id must match aria-labelledby
+    const heading = dialog.querySelector("h2");
+    expect(heading?.id).toBe(labelledBy);
   });
 });
 
@@ -807,5 +811,103 @@ describe("WI-14: Token badge tooltip", () => {
 
     const badge = await screen.findByText(/valid · 47m/);
     expect(badge.getAttribute("title")).toMatch(/expires in 47 minutes/i);
+  });
+});
+
+describe("WI-3: Error boundary", () => {
+  it("renders fallback when a child throws", async () => {
+    // Suppress React error boundary console noise
+    const spy = vi.spyOn(console, "error").mockImplementation(() => {});
+
+    vi.doMock("@tauri-apps/api/core", () => ({
+      invoke: vi.fn(async () => {
+        throw new Error("boom");
+      }),
+    }));
+
+    // Import a component that will throw during render via the hook
+    const { ErrorBoundary } = await import("./ErrorBoundary");
+    const Bomb = () => { throw new Error("render crash"); };
+
+    render(
+      <ErrorBoundary>
+        <Bomb />
+      </ErrorBoundary>,
+    );
+
+    expect(await screen.findByText(/something went wrong/i)).toBeInTheDocument();
+    expect(screen.getByText("render crash")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /retry/i })).toBeInTheDocument();
+
+    spy.mockRestore();
+  });
+});
+
+describe("AccountDetail fields", () => {
+  it("renders all metadata fields", async () => {
+    const user = userEvent.setup();
+    await renderApp({
+      app_status: () => sampleStatus({ account_count: 1 }),
+      account_list: () => [sampleAccount({
+        last_cli_switch: new Date(Date.now() - 120000).toISOString(),
+        last_desktop_switch: null,
+        has_desktop_profile: false,
+      })],
+    });
+
+    const mainArea = (await screen.findByText("alice@example.com")).closest("[role='button']") as HTMLElement;
+    await user.click(mainArea);
+
+    // UUID
+    expect(await screen.findByText("aaaa1111-2222-4333-8444-555555555555")).toBeInTheDocument();
+    // Org
+    expect(screen.getByText("Alice Org")).toBeInTheDocument();
+    // Plan
+    const maxEls = screen.getAllByText("max");
+    expect(maxEls.length).toBeGreaterThanOrEqual(1);
+    // Relative time
+    expect(screen.getByText("2m ago")).toBeInTheDocument();
+    // Null timestamp
+    const dashes = screen.getAllByText("—");
+    expect(dashes.length).toBeGreaterThanOrEqual(1);
+    // Credential health
+    expect(screen.getByText("healthy")).toBeInTheDocument();
+    // Desktop profile
+    expect(screen.getByText("none")).toBeInTheDocument();
+  });
+});
+
+describe("Concurrent refresh guard", () => {
+  it("does not fire overlapping refresh calls", async () => {
+    const user = userEvent.setup();
+    let concurrentCalls = 0;
+    let maxConcurrent = 0;
+    await renderApp({
+      app_status: () => {
+        concurrentCalls += 1;
+        maxConcurrent = Math.max(maxConcurrent, concurrentCalls);
+        return new Promise(resolve => {
+          setTimeout(() => {
+            concurrentCalls -= 1;
+            resolve(sampleStatus({ account_count: 0 }));
+          }, 100);
+        });
+      },
+      account_list: () => [],
+    });
+
+    await screen.findByText(/No accounts yet/i);
+
+    // Rapid triple-click refresh
+    const btn = screen.getByRole("button", { name: /refresh/i });
+    await user.click(btn);
+    await user.click(btn);
+    await user.click(btn);
+
+    await waitFor(() => {
+      // Should never have more than 1 concurrent app_status call
+      // (first is initial load, subsequent are guarded)
+      expect(maxConcurrent).toBeLessThanOrEqual(1);
+    });
   });
 });

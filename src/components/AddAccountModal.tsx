@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useId, useState } from "react";
 import { api } from "../api";
 import { useFocusTrap } from "../hooks/useFocusTrap";
 
@@ -13,6 +13,7 @@ export function AddAccountModal({
 }) {
   const [busy, setBusy] = useState(false);
   const trapRef = useFocusTrap<HTMLDivElement>();
+  const titleId = useId();
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -37,8 +38,8 @@ export function AddAccountModal({
   return (
     <div className="modal-backdrop" onClick={onClose}>
       <div ref={trapRef} className="modal" role="dialog" aria-modal="true"
-        aria-labelledby="add-account-title" onClick={(e) => e.stopPropagation()}>
-        <h2 id="add-account-title">Add account</h2>
+        aria-labelledby={titleId} onClick={(e) => e.stopPropagation()}>
+        <h2 id={titleId}>Add account</h2>
         <div className="modal-body">
           <p className="muted">
             Imports whichever account Claude Code is currently signed into.
