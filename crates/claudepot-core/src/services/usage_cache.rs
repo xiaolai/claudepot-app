@@ -117,12 +117,12 @@ impl UsageCache {
     ) -> Result<Option<UsageResponse>, UsageFetchError> {
         // 1. Check cooldown (force does NOT bypass cooldown — never hammer a 429)
         {
+            let now = Instant::now();
             let cooldowns = self.cooldowns.lock().await;
             if let Some(&suppress_until) = cooldowns.get(&uuid) {
-                if Instant::now() < suppress_until {
-                    let remaining = suppress_until.duration_since(Instant::now()).as_secs();
+                if let Some(remaining) = suppress_until.checked_duration_since(now) {
                     return Err(UsageFetchError::Cooldown {
-                        remaining_secs: remaining,
+                        remaining_secs: remaining.as_secs(),
                     });
                 }
             }
@@ -138,41 +138,54 @@ impl UsageCache {
             }
         }
 
-        // 3. Check inflight — if someone else is already fetching, wait for them
-        {
-            let inflight = self.inflight.lock().await;
+        // 3. Check inflight AND register as initiator atomically (single lock scope)
+        //    This prevents two tasks from both deciding they are the initiator.
+        let tx = {
+            let mut inflight = self.inflight.lock().await;
             if let Some(rx) = inflight.get(&uuid) {
                 let mut rx = rx.clone();
                 drop(inflight); // release lock before await
-                // Wait for the initiator to finish
-                let _ = rx.changed().await;
+                // Wait for the initiator to finish. If sender was dropped (panic),
+                // changed() returns Err — we handle that explicitly.
+                if rx.changed().await.is_err() {
+                    return Err(UsageFetchError::FetchFailed(
+                        "inflight fetch was cancelled".into(),
+                    ));
+                }
                 let outcome = rx.borrow().clone();
                 return Self::outcome_to_result(outcome);
             }
-        }
-
-        // 4. We are the initiator — register a watch channel
-        let (tx, rx) = watch::channel(None);
-        {
-            let mut inflight = self.inflight.lock().await;
+            // We are the initiator — register watch channel under the same lock
+            let (tx, rx) = watch::channel(None);
             inflight.insert(uuid, rx);
-        }
+            tx
+        };
 
-        // 5. Load blob
+        // Drop guard: if anything below panics, ensure the inflight entry is
+        // cleaned up so the UUID isn't permanently broken.
+        let guard = InflightGuard {
+            uuid,
+            inflight: &self.inflight,
+            armed: true,
+        };
+
+        // 4. Load blob
         let access_token = match self.load_access_token(uuid) {
             Ok(Some(token)) => token,
             Ok(None) => {
-                self.cleanup_inflight(uuid, &tx).await;
+                guard.disarm_and_cleanup().await;
                 return Ok(None);
             }
             Err(e) => {
-                self.cleanup_inflight(uuid, &tx).await;
+                guard.disarm_and_cleanup().await;
                 return Err(e);
             }
         };
 
-        // 6. HTTP call
+        // 5. HTTP call
         let result = self.fetcher.fetch(&access_token).await;
+        guard.disarm_and_cleanup().await;
+
         match result {
             Ok(response) => {
                 {
@@ -186,7 +199,6 @@ impl UsageCache {
                     );
                 }
                 let _ = tx.send(Some(FetchOutcome::Success(response.clone())));
-                self.cleanup_inflight(uuid, &tx).await;
                 Ok(Some(response))
             }
             Err(OAuthError::RateLimited { retry_after_secs }) => {
@@ -198,13 +210,11 @@ impl UsageCache {
                     );
                 }
                 let _ = tx.send(Some(FetchOutcome::RateLimited { retry_after_secs }));
-                self.cleanup_inflight(uuid, &tx).await;
                 Err(UsageFetchError::RateLimited { retry_after_secs })
             }
             Err(e) => {
                 let msg = e.to_string();
                 let _ = tx.send(Some(FetchOutcome::Failed(msg.clone())));
-                self.cleanup_inflight(uuid, &tx).await;
                 Err(UsageFetchError::FetchFailed(msg))
             }
         }
@@ -227,7 +237,7 @@ impl UsageCache {
         out
     }
 
-    /// Evict cached result and cooldown for a UUID.
+    /// Evict cached result, cooldown, and inflight entry for a UUID.
     ///
     /// Call after credential changes (remove, reimport, login).
     pub async fn invalidate(&self, uuid: Uuid) {
@@ -238,6 +248,10 @@ impl UsageCache {
         {
             let mut cooldowns = self.cooldowns.lock().await;
             cooldowns.remove(&uuid);
+        }
+        {
+            let mut inflight = self.inflight.lock().await;
+            inflight.remove(&uuid);
         }
     }
 
@@ -259,15 +273,6 @@ impl UsageCache {
         Ok(Some(blob.claude_ai_oauth.access_token.clone()))
     }
 
-    async fn cleanup_inflight(
-        &self,
-        uuid: Uuid,
-        _tx: &watch::Sender<Option<FetchOutcome>>,
-    ) {
-        let mut inflight = self.inflight.lock().await;
-        inflight.remove(&uuid);
-    }
-
     fn outcome_to_result(
         outcome: Option<FetchOutcome>,
     ) -> Result<Option<UsageResponse>, UsageFetchError> {
@@ -280,6 +285,41 @@ impl UsageCache {
             None => Err(UsageFetchError::FetchFailed(
                 "inflight fetch did not produce a result".into(),
             )),
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// InflightGuard — panic-safe cleanup for inflight map entries
+// ---------------------------------------------------------------------------
+
+/// RAII guard that removes the inflight entry on drop (including panics).
+/// Call `disarm_and_cleanup()` on the normal path; if the code panics before
+/// that call, the `Drop` impl handles cleanup synchronously via `try_lock`.
+struct InflightGuard<'a> {
+    uuid: Uuid,
+    inflight: &'a Mutex<HashMap<Uuid, watch::Receiver<Option<FetchOutcome>>>>,
+    armed: bool,
+}
+
+impl<'a> InflightGuard<'a> {
+    async fn disarm_and_cleanup(mut self) {
+        self.armed = false;
+        let mut inflight = self.inflight.lock().await;
+        inflight.remove(&self.uuid);
+    }
+}
+
+impl<'a> Drop for InflightGuard<'a> {
+    fn drop(&mut self) {
+        if self.armed {
+            // Panic path: can't .await here, so use try_lock.
+            // If the lock is held (unlikely during unwind), the entry
+            // will be orphaned but the watch sender is also dropped,
+            // so waiters will get RecvError immediately.
+            if let Ok(mut inflight) = self.inflight.try_lock() {
+                inflight.remove(&self.uuid);
+            }
         }
     }
 }

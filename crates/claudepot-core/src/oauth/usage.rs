@@ -66,7 +66,8 @@ pub async fn fetch(access_token: &str) -> Result<UsageResponse, OAuthError> {
             .get("retry-after")
             .and_then(|v| v.to_str().ok())
             .and_then(|s| s.parse::<u64>().ok())
-            .unwrap_or(60);
+            .unwrap_or(60)
+            .min(300); // Cap at 5 minutes to prevent server-controlled DoS
         return Err(OAuthError::RateLimited {
             retry_after_secs: retry_after,
         });
