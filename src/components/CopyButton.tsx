@@ -1,18 +1,24 @@
 import { useState } from "react";
 
 export function CopyButton({ text }: { text: string }) {
-  const [copied, setCopied] = useState(false);
+  const [state, setState] = useState<"idle" | "copied" | "failed">("idle");
 
   const copy = async () => {
-    await navigator.clipboard.writeText(text);
-    setCopied(true);
-    setTimeout(() => setCopied(false), 1500);
+    try {
+      await navigator.clipboard.writeText(text);
+      setState("copied");
+    } catch {
+      setState("failed");
+    }
+    setTimeout(() => setState("idle"), 1500);
   };
+
+  const label = state === "copied" ? "✓" : state === "failed" ? "!" : "⎘";
 
   return (
     <button className="copy-btn" onClick={copy} title="Copy to clipboard"
       aria-label={`Copy ${text}`}>
-      {copied ? "✓" : "⎘"}
+      {label}
     </button>
   );
 }

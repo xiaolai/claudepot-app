@@ -47,6 +47,7 @@ export function AccountCard({
       aria-current={active ? "true" : undefined}>
       <div className="account-row">
         <div className="account-main" onClick={onToggleExpand} role="button" tabIndex={0}
+          aria-expanded={expanded}
           onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); onToggleExpand(); } }}
           title="Click to inspect account details">
           <div className="account-head">
