@@ -9,17 +9,15 @@ export function useFocusTrap<T extends HTMLElement>() {
     const el = ref.current;
     if (!el) return;
 
-    const focusable = () =>
-      Array.from(el.querySelectorAll<HTMLElement>(FOCUSABLE));
-
-    // Focus the autofocus element or the first focusable
-    const nodes = focusable();
+    // Focus the autofocus element or the first focusable on mount
+    const initialNodes = Array.from(el.querySelectorAll<HTMLElement>(FOCUSABLE));
     const auto = el.querySelector<HTMLElement>("[autofocus]");
-    (auto ?? nodes[0])?.focus();
+    (auto ?? initialNodes[0])?.focus();
 
     const onKey = (e: KeyboardEvent) => {
       if (e.key !== "Tab") return;
-      const items = focusable();
+      // Query fresh on each Tab press so dynamic content is captured
+      const items = Array.from(el.querySelectorAll<HTMLElement>(FOCUSABLE));
       if (items.length === 0) return;
       const first = items[0];
       const last = items[items.length - 1];
