@@ -15,7 +15,7 @@ pnpm tauri build --no-bundle         # GUI release binary (no .dmg)
 ## Test
 
 ```bash
-cargo test --workspace               # Rust (229 tests)
+cargo test --workspace               # Rust
 pnpm test                            # React (Vitest + RTL, jsdom)
 pnpm test:coverage                   # React with coverage report
 ```
@@ -44,7 +44,7 @@ ssh <user>@<host> "security unlock-keychain -p <password>; bash /tmp/claude-logi
 
 See `dev-docs/implementation-plan.md` for the full plan.
 
-- Three nouns: **account**, **cli**, **desktop**
+- Four nouns: **account**, **cli**, **desktop**, **project**
 - `claudepot-core` = pure Rust library, no Tauri dependency
 - `claudepot-cli` = thin clap wrapper over core
 - `src-tauri` = Tauri app consuming same core

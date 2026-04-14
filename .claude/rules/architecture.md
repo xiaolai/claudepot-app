@@ -5,11 +5,12 @@ globs: "**/*.rs"
 
 # Architecture
 
-## Domain model — three nouns, no more
+## Domain model — four nouns
 
 - **account** — a registered Anthropic identity. Email IS the name.
 - **cli** — the single slot CC reads credentials from.
 - **desktop** — the single slot Claude Desktop reads session files from.
+- **project** — a CC project session directory. CLI-only (not in GUI).
 
 CLI and Desktop are independent. Never couple them.
 

@@ -1,4 +1,5 @@
 pub mod credfile;
+pub mod storage;
 pub mod swap;
 
 #[cfg(target_os = "macos")]

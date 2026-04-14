@@ -16,6 +16,7 @@
     "codex-toolkit@xiaolai": true,
     "loc-guardian@xiaolai": true,
     "grill@xiaolai": true,
-    "tdd-guardian@xiaolai": true
+    "tdd-guardian@xiaolai": true,
+    "frontend-design@claude-code-plugins": true
   }
 }
