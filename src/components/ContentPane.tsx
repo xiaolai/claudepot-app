@@ -8,7 +8,6 @@ import {
   UserPlus,
 } from "@phosphor-icons/react";
 import type { AccountSummary, AccountUsage, AppStatus } from "../types";
-import { TokenBadge } from "./TokenBadge";
 import { AccountDetail } from "./AccountDetail";
 import { CopyButton } from "./CopyButton";
 
@@ -90,7 +89,6 @@ export function ContentPane({
           <div className="detail-badges">
             {a.is_cli_active && <span className="slot-badge cli">CLI</span>}
             {a.is_desktop_active && <span className="slot-badge desktop">Desktop</span>}
-            <TokenBadge status={a.token_status} mins={a.token_remaining_mins} />
           </div>
         </div>
       </div>

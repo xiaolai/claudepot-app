@@ -615,18 +615,6 @@ describe("WI-13: AddAccountModal accessibility", () => {
   });
 });
 
-describe("WI-14: Token badge tooltip", () => {
-  it("valid token badge has descriptive title", async () => {
-    await renderApp({
-      app_status: () => sampleStatus({ account_count: 1 }),
-      account_list: () => [sampleAccount()],
-    });
-
-    await selectAccount("alice@example.com");
-    const badge = await screen.findByText(/valid · 47m/);
-    expect(badge.getAttribute("title")).toMatch(/expires in 47 minutes/i);
-  });
-});
 
 describe("Add-account modal", () => {
   it("opens the modal when Add is clicked, closes on Cancel", async () => {
