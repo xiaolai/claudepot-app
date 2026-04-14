@@ -5,12 +5,31 @@
 //! Errors become user-facing strings at this boundary.
 
 use crate::dto::{AccountSummary, AppStatus, RegisterOutcome, RemoveOutcome};
-use claudepot_core::account::AccountStore;
+use claudepot_core::account::{Account, AccountStore};
 use claudepot_core::cli_backend;
 use claudepot_core::desktop_backend;
 use claudepot_core::paths;
 use claudepot_core::services;
 use uuid::Uuid;
+
+fn resolve_target(store: &AccountStore, email: &str) -> Result<Account, String> {
+    let target_email = claudepot_core::resolve::resolve_email(store, email)
+        .map_err(|e| format!("resolve failed: {e}"))?;
+    store
+        .find_by_email(&target_email)
+        .map_err(|e| format!("lookup failed: {e}"))?
+        .ok_or_else(|| format!("account not found: {target_email}"))
+}
+
+fn active_id<E>(
+    store: &AccountStore,
+    f: fn(&AccountStore) -> Result<Option<String>, E>,
+) -> Option<Uuid> {
+    f(store)
+        .ok()
+        .flatten()
+        .and_then(|s| Uuid::parse_str(&s).ok())
+}
 
 /// Open the production store (single instance per command). Cheap: a sqlite
 /// open + schema check. Keeps the command layer stateless.
@@ -42,28 +61,16 @@ pub fn app_status() -> Result<AppStatus, String> {
     let store = open_store()?;
     let accounts = store.list().map_err(|e| format!("list failed: {e}"))?;
 
-    let cli_active_email = store
-        .active_cli_uuid()
-        .ok()
-        .flatten()
-        .and_then(|s| Uuid::parse_str(&s).ok())
-        .and_then(|u| {
+    let email_for = |id: Option<Uuid>| -> Option<String> {
+        id.and_then(|u| {
             accounts
                 .iter()
                 .find(|a| a.uuid == u)
                 .map(|a| a.email.clone())
-        });
-    let desktop_active_email = store
-        .active_desktop_uuid()
-        .ok()
-        .flatten()
-        .and_then(|s| Uuid::parse_str(&s).ok())
-        .and_then(|u| {
-            accounts
-                .iter()
-                .find(|a| a.uuid == u)
-                .map(|a| a.email.clone())
-        });
+        })
+    };
+    let cli_active_email = email_for(active_id(&store, AccountStore::active_cli_uuid));
+    let desktop_active_email = email_for(active_id(&store, AccountStore::active_desktop_uuid));
 
     let desktop_installed = desktop_backend::create_platform()
         .and_then(|p| p.data_dir())
@@ -84,18 +91,8 @@ pub fn app_status() -> Result<AppStatus, String> {
 #[tauri::command]
 pub async fn cli_use(email: String) -> Result<(), String> {
     let store = open_store()?;
-    let target_email = claudepot_core::resolve::resolve_email(&store, &email)
-        .map_err(|e| format!("resolve failed: {e}"))?;
-    let target = store
-        .find_by_email(&target_email)
-        .map_err(|e| format!("lookup failed: {e}"))?
-        .ok_or_else(|| format!("account not found: {target_email}"))?;
-
-    let current_id = store
-        .active_cli_uuid()
-        .ok()
-        .flatten()
-        .and_then(|s| Uuid::parse_str(&s).ok());
+    let target = resolve_target(&store, &email)?;
+    let current_id = active_id(&store, AccountStore::active_cli_uuid);
 
     let platform = cli_backend::create_platform();
     let refresher = cli_backend::swap::DefaultRefresher;
@@ -124,19 +121,9 @@ pub async fn cli_clear() -> Result<(), String> {
 #[tauri::command]
 pub async fn desktop_use(email: String, no_launch: bool) -> Result<(), String> {
     let store = open_store()?;
-    let target_email = claudepot_core::resolve::resolve_email(&store, &email)
-        .map_err(|e| format!("resolve failed: {e}"))?;
-    let target = store
-        .find_by_email(&target_email)
-        .map_err(|e| format!("lookup failed: {e}"))?
-        .ok_or_else(|| format!("account not found: {target_email}"))?;
+    let target = resolve_target(&store, &email)?;
 
     // Preflight: refuse to quit Desktop if the target has no stored profile.
-    // Without this, switch() would quit Claude, snapshot the outgoing account,
-    // then fail on NoStoredProfile and leave the user without an open Desktop.
-    //
-    // The filesystem is authoritative — has_desktop_profile in the DB can lag
-    // (e.g. user deleted the profile directory manually). Check the dir.
     let target_profile_dir = paths::desktop_profile_dir(target.uuid);
     if !target_profile_dir.exists() {
         return Err(format!(
@@ -145,11 +132,7 @@ pub async fn desktop_use(email: String, no_launch: bool) -> Result<(), String> {
         ));
     }
 
-    let outgoing_id = store
-        .active_desktop_uuid()
-        .ok()
-        .flatten()
-        .and_then(|s| Uuid::parse_str(&s).ok());
+    let outgoing_id = active_id(&store, AccountStore::active_desktop_uuid);
 
     let platform = desktop_backend::create_platform()
         .ok_or_else(|| "Desktop not supported on this platform".to_string())?;
@@ -286,10 +269,11 @@ pub async fn account_add_from_current() -> Result<RegisterOutcome, String> {
 // token in JS.
 
 #[tauri::command]
-pub fn account_remove(uuid: String) -> Result<RemoveOutcome, String> {
+pub async fn account_remove(uuid: String) -> Result<RemoveOutcome, String> {
     let store = open_store()?;
     let id = Uuid::parse_str(&uuid).map_err(|e| format!("bad uuid: {e}"))?;
-    let result = services::account_service::remove_account(&store, id)
+    let result = services::account_service::remove_account(&store, id, None)
+        .await
         .map_err(|e| format!("remove failed: {e}"))?;
     Ok(RemoveOutcome {
         email: result.email,

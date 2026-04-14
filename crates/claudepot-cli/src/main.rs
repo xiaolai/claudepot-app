@@ -2,6 +2,7 @@ use anyhow::{Context, Result};
 use clap::{Parser, Subcommand};
 use claudepot_core::account::AccountStore;
 use claudepot_core::paths;
+use claudepot_core::services::usage_cache::UsageCache;
 
 mod commands;
 mod output;
@@ -166,6 +167,7 @@ enum DesktopAction {
 /// Shared context for all command handlers.
 pub struct AppContext {
     pub store: AccountStore,
+    pub usage_cache: UsageCache,
     pub json: bool,
     pub quiet: bool,
     pub yes: bool,
@@ -199,6 +201,7 @@ async fn main() -> Result<()> {
 
     let ctx = AppContext {
         store,
+        usage_cache: UsageCache::new(),
         json: cli.json,
         quiet: cli.quiet,
         yes: cli.yes,
@@ -206,12 +209,12 @@ async fn main() -> Result<()> {
 
     match cli.command {
         Commands::Account { action } => match action {
-            AccountAction::List => commands::account::list(&ctx)?,
+            AccountAction::List => commands::account::list(&ctx).await?,
             AccountAction::Add {
                 from_current,
                 from_token,
             } => commands::account::add(&ctx, from_current, from_token).await?,
-            AccountAction::Remove { email } => commands::account::remove(&ctx, &email)?,
+            AccountAction::Remove { email } => commands::account::remove(&ctx, &email).await?,
             AccountAction::Inspect { email } => commands::account::inspect(&ctx, &email).await?,
         },
         Commands::Cli { action } => match action {
