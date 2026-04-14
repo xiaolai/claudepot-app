@@ -15,12 +15,13 @@ function relativeTime(iso: string | null): string {
 
 export function AccountDetail({ account: a }: { account: AccountSummary }) {
   return (
-    <div className="account-detail">
+    <div className="detail-section">
+      <h3 className="detail-section-title">Details</h3>
       <dl className="detail-grid">
         <dt>Email</dt>
-        <dd>{a.email} <CopyButton text={a.email} /></dd>
+        <dd className="selectable">{a.email} <CopyButton text={a.email} /></dd>
         <dt>UUID</dt>
-        <dd className="mono">{a.uuid} <CopyButton text={a.uuid} /></dd>
+        <dd className="mono selectable">{a.uuid} <CopyButton text={a.uuid} /></dd>
         <dt>Org</dt>
         <dd>{a.org_name ?? "—"}</dd>
         <dt>Plan</dt>
