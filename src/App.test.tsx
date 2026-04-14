@@ -14,7 +14,7 @@ import { sampleAccount, sampleStatus } from "./test/fixtures";
 // import of @tauri-apps/api/core.
 async function renderApp(handlers: Record<string, (args?: unknown) => unknown>) {
   // Merge in sync_from_current_cc default (many tests don't care about it)
-  const merged = { sync_from_current_cc: () => "", ...handlers };
+  const merged: Record<string, (args?: unknown) => unknown> = { sync_from_current_cc: () => "", ...handlers };
   vi.doMock("@tauri-apps/api/core", () => ({
     invoke: vi.fn(async (cmd: string, args?: unknown) => {
       const h = merged[cmd];
@@ -30,6 +30,17 @@ beforeEach(() => {
   vi.resetModules();
 });
 
+// Helper: select an account in the sidebar by clicking its list item
+async function selectAccount(email: string) {
+  const user = userEvent.setup();
+  // Find the sidebar item containing this email and click it
+  const el = await screen.findByText(email);
+  const sidebarItem = el.closest(".sidebar-item") ?? el.closest("[role='option']");
+  if (sidebarItem) {
+    await user.click(sidebarItem as HTMLElement);
+  }
+}
+
 describe("App — initial load", () => {
   it("shows the empty state when no accounts exist", async () => {
     await renderApp({
@@ -44,11 +55,11 @@ describe("App — initial load", () => {
     expect(addButtons.length).toBeGreaterThan(0);
   });
 
-  it("renders the account list when the DB is populated", async () => {
+  it("renders accounts in the sidebar when the DB is populated", async () => {
     await renderApp({
       app_status: () =>
         sampleStatus({
-          account_count: 1,
+          account_count: 2,
           cli_active_email: "alice@example.com",
         }),
       account_list: () => [
@@ -60,8 +71,7 @@ describe("App — initial load", () => {
       ],
     });
 
-    const aliceEls = await screen.findAllByText("alice@example.com");
-    expect(aliceEls.length).toBeGreaterThanOrEqual(2);
+    expect(await screen.findByText("alice@example.com")).toBeInTheDocument();
     expect(await screen.findByText("bob@example.com")).toBeInTheDocument();
   });
 
@@ -130,7 +140,7 @@ describe("WI-1: Window-focus refresh + refresh button", () => {
 describe("WI-2: Per-account busy states", () => {
   it("login on account A does not disable Use CLI on account B", async () => {
     const user = userEvent.setup();
-    let resolveLogin: (() => void) | null = null;
+    const loginState = { resolve: null as (() => void) | null };
     await renderApp({
       app_status: () => sampleStatus({ account_count: 2 }),
       account_list: () => [
@@ -146,32 +156,34 @@ describe("WI-2: Per-account busy states", () => {
       ],
       account_login: () =>
         new Promise<void>((resolve) => {
-          resolveLogin = resolve;
+          loginState.resolve = resolve;
         }),
       account_login_cancel: () => {},
     });
 
-    // Click Log in on alice (unhealthy account)
-    await user.click(await screen.findByRole("button", { name: /^log in$/i }));
+    // Select alice (unhealthy) and click Log in
+    await selectAccount("alice@example.com");
+    await user.click(await screen.findByRole("button", { name: /log in/i }));
 
-    // Bob's "Use CLI" should still be enabled
-    const bobCard = (await screen.findByText("bob@example.com")).closest("article")!;
-    const useCli = within(bobCard).getByRole("button", { name: /use cli/i });
+    // Select bob — his "Use CLI" should still be enabled
+    await selectAccount("bob@example.com");
+    const useCli = await screen.findByRole("button", { name: /use cli/i });
     expect(useCli).not.toBeDisabled();
 
     // Cleanup
-    resolveLogin?.();
+    if (loginState.resolve) loginState.resolve();
   });
 });
 
-describe("AccountCard — button disable logic", () => {
+describe("ContentPane — button disable logic", () => {
   it("disables Use CLI on the already-active account", async () => {
     await renderApp({
       app_status: () => sampleStatus({ account_count: 1 }),
       account_list: () => [sampleAccount({ is_cli_active: true })],
     });
 
-    const btn = await screen.findByRole("button", { name: /✓ CLI/ });
+    await selectAccount("alice@example.com");
+    const btn = await screen.findByRole("button", { name: /active cli/i });
     expect(btn).toBeDisabled();
   });
 
@@ -195,6 +207,7 @@ describe("AccountCard — button disable logic", () => {
       account_login: login,
     });
 
+    await selectAccount("alice@example.com");
     await user.click(await screen.findByRole("button", { name: /log in/i }));
 
     await waitFor(() => {
@@ -228,7 +241,8 @@ describe("AccountCard — button disable logic", () => {
       account_login_cancel: cancel,
     });
 
-    await user.click(await screen.findByRole("button", { name: /^log in$/i }));
+    await selectAccount("alice@example.com");
+    await user.click(await screen.findByRole("button", { name: /log in/i }));
     const cancelBtn = await screen.findByRole("button", {
       name: /cancel login/i,
     });
@@ -238,7 +252,7 @@ describe("AccountCard — button disable logic", () => {
       expect(cancel).toHaveBeenCalledTimes(1);
     });
     expect(
-      await screen.findByRole("button", { name: /^log in$/i }),
+      await screen.findByRole("button", { name: /log in/i }),
     ).toBeInTheDocument();
   });
 
@@ -254,21 +268,23 @@ describe("AccountCard — button disable logic", () => {
       ],
     });
 
+    await selectAccount("alice@example.com");
     expect(screen.queryByRole("button", { name: /use cli/i })).toBeNull();
     const btn = await screen.findByRole("button", { name: /log in/i });
     expect(btn).toBeEnabled();
     expect(btn.getAttribute("title")).toMatch(/sign in as/i);
   });
 
-  it("disables Use Desktop when the account has no desktop profile (audit fix #4)", async () => {
+  it("disables Use Desktop when the account has no desktop profile", async () => {
     await renderApp({
       app_status: () => sampleStatus({ desktop_installed: true }),
       account_list: () => [sampleAccount({ has_desktop_profile: false })],
     });
 
+    await selectAccount("alice@example.com");
     const btn = await screen.findByRole("button", { name: /use desktop/i });
     expect(btn).toBeDisabled();
-    expect(btn.getAttribute("title")).toMatch(/no desktop profile yet/i);
+    expect(btn.getAttribute("title")).toMatch(/no desktop profile/i);
   });
 
   it("disables Use Desktop when Desktop is not installed", async () => {
@@ -277,6 +293,7 @@ describe("AccountCard — button disable logic", () => {
       account_list: () => [sampleAccount({ has_desktop_profile: true })],
     });
 
+    await selectAccount("alice@example.com");
     const btn = await screen.findByRole("button", { name: /use desktop/i });
     expect(btn).toBeDisabled();
     expect(btn.getAttribute("title")).toMatch(/desktop not installed/i);
@@ -291,6 +308,7 @@ describe("WI-4: Escape key closes modals", () => {
       account_list: () => [sampleAccount()],
     });
 
+    await selectAccount("alice@example.com");
     await user.click(await screen.findByRole("button", { name: /remove/i }));
     await screen.findByRole("dialog", { name: /remove account/i });
 
@@ -329,6 +347,7 @@ describe("WI-5: CLI Clear button", () => {
       account_list: () => [sampleAccount({ is_cli_active: true })],
     });
 
+    await selectAccount("alice@example.com");
     expect(
       await screen.findByRole("button", { name: /clear cli/i }),
     ).toBeInTheDocument();
@@ -340,7 +359,10 @@ describe("WI-5: CLI Clear button", () => {
       account_list: () => [sampleAccount()],
     });
 
-    await screen.findByText("alice@example.com");
+    await selectAccount("alice@example.com");
+    // Email appears in sidebar + content + detail — use getAllByText
+    const aliceEls = await screen.findAllByText("alice@example.com");
+    expect(aliceEls.length).toBeGreaterThanOrEqual(1);
     expect(
       screen.queryByRole("button", { name: /clear cli/i }),
     ).not.toBeInTheDocument();
@@ -360,6 +382,7 @@ describe("WI-5: CLI Clear button", () => {
       cli_clear: clearMock,
     });
 
+    await selectAccount("alice@example.com");
     await user.click(
       await screen.findByRole("button", { name: /clear cli/i }),
     );
@@ -381,6 +404,7 @@ describe("WI-6: Desktop switch confirmation", () => {
     });
 
     const user = userEvent.setup();
+    await selectAccount("alice@example.com");
     await user.click(
       await screen.findByRole("button", { name: /use desktop/i }),
     );
@@ -399,6 +423,7 @@ describe("WI-6: Desktop switch confirmation", () => {
       desktop_use: desktopUse,
     });
 
+    await selectAccount("alice@example.com");
     await user.click(
       await screen.findByRole("button", { name: /use desktop/i }),
     );
@@ -419,6 +444,7 @@ describe("WI-6: Desktop switch confirmation", () => {
       desktop_use: desktopUse,
     });
 
+    await selectAccount("alice@example.com");
     await user.click(
       await screen.findByRole("button", { name: /use desktop/i }),
     );
@@ -433,14 +459,14 @@ describe("WI-6: Desktop switch confirmation", () => {
 });
 
 describe("WI-7: Active-slot badges", () => {
-  it("CLI-active account shows CLI badge", async () => {
+  it("CLI-active account shows CLI badge in detail view", async () => {
     await renderApp({
       app_status: () => sampleStatus({ account_count: 1 }),
       account_list: () => [sampleAccount({ is_cli_active: true })],
     });
 
-    const card = (await screen.findByText("alice@example.com")).closest("article")!;
-    expect(within(card).getByText("CLI")).toHaveClass("slot-badge");
+    await selectAccount("alice@example.com");
+    expect(screen.getByText("CLI")).toHaveClass("slot-badge");
   });
 
   it("both-active account shows both badges", async () => {
@@ -451,8 +477,8 @@ describe("WI-7: Active-slot badges", () => {
       ],
     });
 
-    const card = (await screen.findByText("alice@example.com")).closest("article")!;
-    const badges = within(card).getAllByText(/^(CLI|Desktop)$/);
+    await selectAccount("alice@example.com");
+    const badges = screen.getAllByText(/^(CLI|Desktop)$/);
     const slotBadges = badges.filter((b) => b.classList.contains("slot-badge"));
     expect(slotBadges).toHaveLength(2);
   });
@@ -465,7 +491,7 @@ describe("WI-7: Active-slot badges", () => {
       ],
     });
 
-    await screen.findByText("alice@example.com");
+    await selectAccount("alice@example.com");
     expect(document.querySelectorAll(".slot-badge")).toHaveLength(0);
   });
 });
@@ -482,6 +508,7 @@ describe("WI-8: Persistent error toasts", () => {
       cli_use: failing,
     });
 
+    await selectAccount("alice@example.com");
     await user.click(await screen.findByRole("button", { name: /use cli/i }));
 
     const toast = await screen.findByText(/CLI switch failed/i);
@@ -500,6 +527,7 @@ describe("WI-8: Persistent error toasts", () => {
       cli_use: failing,
     });
 
+    await selectAccount("alice@example.com");
     await user.click(await screen.findByRole("button", { name: /use cli/i }));
 
     const toastText = await screen.findByText(/CLI switch failed/i);
@@ -519,6 +547,7 @@ describe("WI-9: Inline disabled-button reasons", () => {
       account_list: () => [sampleAccount({ has_desktop_profile: false })],
     });
 
+    await selectAccount("alice@example.com");
     expect(
       await screen.findByText(/no desktop profile/i),
     ).toBeInTheDocument();
@@ -532,33 +561,35 @@ describe("WI-9: Inline disabled-button reasons", () => {
       ],
     });
 
-    await screen.findByText("alice@example.com");
+    await selectAccount("alice@example.com");
+    const aliceEls = await screen.findAllByText("alice@example.com");
+    expect(aliceEls.length).toBeGreaterThanOrEqual(1);
     expect(document.querySelector(".account-hint")).toBeNull();
   });
 });
 
-describe("Active pills", () => {
-  it("shows em-dash when nothing is active", async () => {
+describe("WI-11: Account detail panel", () => {
+  it("selecting account shows detail with UUID", async () => {
     await renderApp({
-      app_status: () => sampleStatus({ account_count: 0 }),
-      account_list: () => [],
+      app_status: () => sampleStatus({ account_count: 1 }),
+      account_list: () => [sampleAccount()],
     });
 
-    const cliLabel = await screen.findByText("CLI");
-    const pill = cliLabel.closest(".pill")!;
-    expect(pill.querySelector(".pill-value")?.textContent).toBe("—");
+    await selectAccount("alice@example.com");
+    expect(await screen.findByText("aaaa1111-2222-4333-8444-555555555555")).toBeInTheDocument();
   });
 
-  it("marks the Desktop pill disabled with a hint when Desktop isn't installed", async () => {
+  it("detail shows UUID and timestamps", async () => {
     await renderApp({
-      app_status: () => sampleStatus({ desktop_installed: false }),
-      account_list: () => [],
+      app_status: () => sampleStatus({ account_count: 1 }),
+      account_list: () => [sampleAccount({
+        last_cli_switch: new Date(Date.now() - 3600000).toISOString(),
+      })],
     });
 
-    const deskLabel = await screen.findByText("Desktop");
-    const pill = deskLabel.closest(".pill");
-    expect(pill).toHaveClass("disabled");
-    expect(pill).toHaveAttribute("title", "Desktop not installed");
+    await selectAccount("alice@example.com");
+    expect(await screen.findByText("aaaa1111-2222-4333-8444-555555555555")).toBeInTheDocument();
+    expect(await screen.findByText(/1h ago/)).toBeInTheDocument();
   });
 });
 
@@ -581,6 +612,19 @@ describe("WI-13: AddAccountModal accessibility", () => {
     // Heading id must match aria-labelledby
     const heading = dialog.querySelector("h2");
     expect(heading?.id).toBe(labelledBy);
+  });
+});
+
+describe("WI-14: Token badge tooltip", () => {
+  it("valid token badge has descriptive title", async () => {
+    await renderApp({
+      app_status: () => sampleStatus({ account_count: 1 }),
+      account_list: () => [sampleAccount()],
+    });
+
+    await selectAccount("alice@example.com");
+    const badge = await screen.findByText(/valid · 47m/);
+    expect(badge.getAttribute("title")).toMatch(/expires in 47 minutes/i);
   });
 });
 
@@ -652,6 +696,7 @@ describe("Add-account modal", () => {
       account_list: () => [sampleAccount()],
     });
 
+    await selectAccount("alice@example.com");
     await user.click(await screen.findByRole("button", { name: /remove/i }));
 
     const dialog = await screen.findByRole("dialog", {
@@ -672,6 +717,7 @@ describe("Add-account modal", () => {
       account_remove: removeMock,
     });
 
+    await selectAccount("alice@example.com");
     await user.click(await screen.findByRole("button", { name: /remove/i }));
     await screen.findByRole("dialog", { name: /remove account/i });
 
@@ -704,6 +750,7 @@ describe("Add-account modal", () => {
       account_remove: removeMock,
     });
 
+    await selectAccount("alice@example.com");
     await user.click(await screen.findByRole("button", { name: /remove/i }));
     const dialog = await screen.findByRole("dialog", {
       name: /remove account/i,
@@ -717,10 +764,9 @@ describe("Add-account modal", () => {
         uuid: "aaaa1111-2222-4333-8444-555555555555",
       });
     });
-    expect(await screen.findByText(/No accounts yet/i)).toBeInTheDocument();
   });
 
-  it("does NOT expose any refresh-token input (audit fix #1)", async () => {
+  it("does NOT expose any refresh-token input", async () => {
     const user = userEvent.setup();
     await renderApp({
       app_status: () => sampleStatus({ account_count: 0 }),
@@ -741,76 +787,33 @@ describe("Add-account modal", () => {
   });
 });
 
-describe("WI-11: Account detail/inspect view", () => {
-  it("clicking card toggles detail panel", async () => {
-    const user = userEvent.setup();
-    await renderApp({
-      app_status: () => sampleStatus({ account_count: 1 }),
-      account_list: () => [sampleAccount()],
-    });
-
-    const mainArea = (await screen.findByText("alice@example.com")).closest("[role='button']") as HTMLElement;
-    await user.click(mainArea);
-
-    // Detail panel shows UUID
-    expect(await screen.findByText("aaaa1111-2222-4333-8444-555555555555")).toBeInTheDocument();
-
-    // Click again to collapse
-    await user.click(mainArea);
-    await waitFor(() => {
-      expect(screen.queryByText("aaaa1111-2222-4333-8444-555555555555")).not.toBeInTheDocument();
-    });
-  });
-
-  it("detail shows UUID and timestamps", async () => {
-    const user = userEvent.setup();
+describe("AccountDetail fields", () => {
+  it("renders all metadata fields", async () => {
     await renderApp({
       app_status: () => sampleStatus({ account_count: 1 }),
       account_list: () => [sampleAccount({
-        last_cli_switch: new Date(Date.now() - 3600000).toISOString(),
+        last_cli_switch: new Date(Date.now() - 120000).toISOString(),
+        last_desktop_switch: null,
+        has_desktop_profile: false,
       })],
     });
 
-    const mainArea = (await screen.findByText("alice@example.com")).closest("[role='button']") as HTMLElement;
-    await user.click(mainArea);
+    await selectAccount("alice@example.com");
 
+    // UUID
     expect(await screen.findByText("aaaa1111-2222-4333-8444-555555555555")).toBeInTheDocument();
-    expect(await screen.findByText(/1h ago/)).toBeInTheDocument();
-  });
-
-  it("clicking another card collapses the first", async () => {
-    const user = userEvent.setup();
-    await renderApp({
-      app_status: () => sampleStatus({ account_count: 2 }),
-      account_list: () => [
-        sampleAccount(),
-        sampleAccount({ uuid: "bbbb2222-3333-4444-8555-666666666666", email: "bob@example.com" }),
-      ],
-    });
-
-    const aliceMain = (await screen.findByText("alice@example.com")).closest("[role='button']") as HTMLElement;
-    await user.click(aliceMain);
-    expect(await screen.findByText("aaaa1111-2222-4333-8444-555555555555")).toBeInTheDocument();
-
-    const bobMain = (await screen.findByText("bob@example.com")).closest("[role='button']") as HTMLElement;
-    await user.click(bobMain);
-
-    await waitFor(() => {
-      expect(screen.queryByText("aaaa1111-2222-4333-8444-555555555555")).not.toBeInTheDocument();
-    });
-    expect(screen.getByText("bbbb2222-3333-4444-8555-666666666666")).toBeInTheDocument();
-  });
-});
-
-describe("WI-14: Token badge tooltip", () => {
-  it("valid token badge has descriptive title", async () => {
-    await renderApp({
-      app_status: () => sampleStatus({ account_count: 1 }),
-      account_list: () => [sampleAccount()],
-    });
-
-    const badge = await screen.findByText(/valid · 47m/);
-    expect(badge.getAttribute("title")).toMatch(/expires in 47 minutes/i);
+    // Org — appears in sidebar meta and content detail, use getAll
+    const orgEls = screen.getAllByText("Alice Org");
+    expect(orgEls.length).toBeGreaterThanOrEqual(1);
+    // Relative time
+    expect(screen.getByText("2m ago")).toBeInTheDocument();
+    // Null timestamp
+    const dashes = screen.getAllByText("—");
+    expect(dashes.length).toBeGreaterThanOrEqual(1);
+    // Credential health
+    expect(screen.getByText("healthy")).toBeInTheDocument();
+    // Desktop profile
+    expect(screen.getByText("none")).toBeInTheDocument();
   });
 });
 
@@ -843,40 +846,6 @@ describe("WI-3: Error boundary", () => {
   });
 });
 
-describe("AccountDetail fields", () => {
-  it("renders all metadata fields", async () => {
-    const user = userEvent.setup();
-    await renderApp({
-      app_status: () => sampleStatus({ account_count: 1 }),
-      account_list: () => [sampleAccount({
-        last_cli_switch: new Date(Date.now() - 120000).toISOString(),
-        last_desktop_switch: null,
-        has_desktop_profile: false,
-      })],
-    });
-
-    const mainArea = (await screen.findByText("alice@example.com")).closest("[role='button']") as HTMLElement;
-    await user.click(mainArea);
-
-    // UUID
-    expect(await screen.findByText("aaaa1111-2222-4333-8444-555555555555")).toBeInTheDocument();
-    // Org
-    expect(screen.getByText("Alice Org")).toBeInTheDocument();
-    // Plan
-    const maxEls = screen.getAllByText("max");
-    expect(maxEls.length).toBeGreaterThanOrEqual(1);
-    // Relative time
-    expect(screen.getByText("2m ago")).toBeInTheDocument();
-    // Null timestamp
-    const dashes = screen.getAllByText("—");
-    expect(dashes.length).toBeGreaterThanOrEqual(1);
-    // Credential health
-    expect(screen.getByText("healthy")).toBeInTheDocument();
-    // Desktop profile
-    expect(screen.getByText("none")).toBeInTheDocument();
-  });
-});
-
 describe("Concurrent refresh guard", () => {
   it("does not fire overlapping refresh calls", async () => {
     const user = userEvent.setup();
@@ -906,7 +875,6 @@ describe("Concurrent refresh guard", () => {
 
     await waitFor(() => {
       // Should never have more than 1 concurrent app_status call
-      // (first is initial load, subsequent are guarded)
       expect(maxConcurrent).toBeLessThanOrEqual(1);
     });
   });

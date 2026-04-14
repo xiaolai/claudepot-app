@@ -1,3 +1,4 @@
+import { X } from "@phosphor-icons/react";
 import type { Toast } from "../hooks/useToasts";
 
 export function ToastContainer({
@@ -18,7 +19,7 @@ export function ToastContainer({
             aria-label="Dismiss"
             title="Dismiss"
           >
-            ×
+            <X size={14} weight="bold" />
           </button>
         </div>
       ))}
