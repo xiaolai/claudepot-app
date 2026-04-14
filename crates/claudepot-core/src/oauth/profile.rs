@@ -32,8 +32,14 @@ pub async fn fetch(access_token: &str) -> Result<Profile, OAuthError> {
         ));
     }
     if status == 429 {
+        let retry_after = resp
+            .headers()
+            .get("retry-after")
+            .and_then(|v| v.to_str().ok())
+            .and_then(|s| s.parse::<u64>().ok())
+            .unwrap_or(60);
         return Err(OAuthError::RateLimited {
-            retry_after_secs: 60,
+            retry_after_secs: retry_after,
         });
     }
     if !status.is_success() {
