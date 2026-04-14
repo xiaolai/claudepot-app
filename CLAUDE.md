@@ -15,7 +15,7 @@ pnpm tauri build --no-bundle         # GUI release binary (no .dmg)
 ## Test
 
 ```bash
-cargo test --workspace               # Rust (229 tests)
+cargo test --workspace               # Rust
 pnpm test                            # React (Vitest + RTL, jsdom)
 pnpm test:coverage                   # React with coverage report
 ```
@@ -32,19 +32,19 @@ pnpm test:coverage                   # React with coverage report
 ```bash
 cargo build -p claudepot-cli
 scp target/debug/claudepot joker@192.0.2.1:/tmp/claudepot
-ssh joker@192.0.2.1 "security unlock-keychain -p xiaolai ~/Library/Keychains/login.keychain-db; /tmp/claudepot <command>"
+ssh joker@192.0.2.1 "security unlock-keychain -p <password> ~/Library/Keychains/login.keychain-db; /tmp/claudepot <command>"
 ```
 
 Automated login for setting up CC state on test-host:
 ```bash
-ssh joker@192.0.2.1 "security unlock-keychain -p xiaolai; bash /tmp/claude-login-local.sh <email>"
+ssh joker@192.0.2.1 "security unlock-keychain -p <password>; bash /tmp/claude-login-local.sh <email>"
 ```
 
 ## Architecture
 
 See `dev-docs/implementation-plan.md` for the full plan.
 
-- Three nouns: **account**, **cli**, **desktop**
+- Four nouns: **account**, **cli**, **desktop**, **project**
 - `claudepot-core` = pure Rust library, no Tauri dependency
 - `claudepot-cli` = thin clap wrapper over core
 - `src-tauri` = Tauri app consuming same core

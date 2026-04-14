@@ -1,6 +1,7 @@
 //! Mode A atomic swap primitive for CLI credentials.
 //! See reference.md §I.7.
 
+use super::storage;
 use super::CliPlatform;
 use crate::account::AccountStore;
 use crate::error::{OAuthError, SwapError};
@@ -134,7 +135,7 @@ pub(crate) async fn maybe_refresh_blob(
         .map_err(|e| SwapError::RefreshFailed(e.to_string()))?;
 
     let new_blob = crate::oauth::refresh::build_blob(&token_resp, Some(&blob));
-    save_private(account_id, &new_blob)?;
+    storage::save(account_id, &new_blob)?;
     Ok(new_blob)
 }
 
@@ -169,7 +170,7 @@ pub async fn switch(
     // Load target blob from Claudepot private storage first.
     // If it doesn't exist, fail before touching anything.
     tracing::debug!(target = %target_id, "loading target credentials");
-    let target_blob = load_private(target_id)?;
+    let target_blob = storage::load(target_id)?;
 
     // Conditionally refresh if expired/expiring and auto_refresh is enabled.
     let target_blob = if auto_refresh {
@@ -218,9 +219,9 @@ pub async fn switch(
                 Err(other) => return Err(other),
             };
 
-            let previous_private = load_private_opt(cur);
+            let previous_private = storage::load_opt(cur);
             if !skip_backup {
-                save_private(cur, &current_blob)?;
+                storage::save(cur, &current_blob)?;
             }
 
             // Write target to CC storage.
@@ -229,10 +230,10 @@ pub async fn switch(
                 if !skip_backup {
                     match previous_private {
                         Some(prev) => {
-                            let _ = save_private(cur, &prev);
+                            let _ = storage::save(cur, &prev);
                         }
                         None => {
-                            let _ = delete_private(cur);
+                            let _ = storage::delete(cur);
                         }
                     }
                 }
@@ -254,7 +255,7 @@ pub async fn switch(
     if let Err(e) = store.set_active_cli(target_id) {
         // Best-effort rollback: restore previous CC credentials
         if let Some(cur) = current_id {
-            if let Ok(prev_blob) = load_private(cur) {
+            if let Ok(prev_blob) = storage::load(cur) {
                 let _ = platform.write_default(&prev_blob).await;
             }
         }
@@ -266,322 +267,10 @@ pub async fn switch(
     Ok(())
 }
 
-// --- Private storage: Keychain on macOS (when available), files elsewhere ---
-//
-// On macOS with a valid code-signing identity, credentials are stored in the
-// login Keychain via the `keyring` crate. Unsigned/ad-hoc-signed debug builds
-// fall back silently to file storage so `cargo test` works without signing.
-//
-// On Linux/Windows and when CLAUDEPOT_CREDENTIAL_BACKEND=file, blobs live at:
-//   <claudepot_data_dir>/credentials/<uuid>.json  (0600 on Unix)
-//
-// Migration: load_private reads from Keychain first; on Keychain miss, if an
-// older file exists, it's imported into Keychain and the file is removed.
-
-#[cfg(target_os = "macos")]
-const KEYCHAIN_SERVICE: &str = "com.claudepot.credentials";
-
-/// Backend selector. Reads CLAUDEPOT_CREDENTIAL_BACKEND env var:
-/// - "file"    → always file, no Keychain attempts (used by tests)
-/// - "keyring" → always Keychain (fail closed if unavailable)
-/// - unset/other → auto: Keychain on macOS if it works, else file
-#[derive(Copy, Clone, PartialEq)]
-enum CredBackend {
-    FileOnly,
-    KeyringOnly,
-    Auto,
-}
-
-fn backend() -> CredBackend {
-    match std::env::var("CLAUDEPOT_CREDENTIAL_BACKEND")
-        .ok()
-        .as_deref()
-    {
-        Some("file") => CredBackend::FileOnly,
-        Some("keyring") => CredBackend::KeyringOnly,
-        _ => CredBackend::Auto,
-    }
-}
-
-fn private_path(account_id: Uuid) -> std::path::PathBuf {
-    crate::paths::claudepot_data_dir()
-        .join("credentials")
-        .join(format!("{}.json", account_id))
-}
-
-fn save_to_file(account_id: Uuid, blob: &str) -> Result<(), SwapError> {
-    let path = private_path(account_id);
-    if let Some(parent) = path.parent() {
-        std::fs::create_dir_all(parent)?;
-    }
-    let mut tmp =
-        tempfile::NamedTempFile::new_in(path.parent().unwrap_or(std::path::Path::new(".")))?;
-    std::io::Write::write_all(&mut tmp, blob.as_bytes())?;
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt;
-        tmp.as_file()
-            .set_permissions(std::fs::Permissions::from_mode(0o600))?;
-    }
-    tmp.persist(&path)
-        .map_err(|e| SwapError::WriteFailed(format!("persist failed: {e}")))?;
-    Ok(())
-}
-
-fn load_from_file(account_id: Uuid) -> Result<String, SwapError> {
-    let path = private_path(account_id);
-
-    // Verify file permissions before reading credentials — auto-repair 0600.
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt;
-        if let Ok(meta) = std::fs::metadata(&path) {
-            let mode = meta.permissions().mode() & 0o777;
-            if mode != 0o600 {
-                tracing::warn!(
-                    "credential file {} has permissions {:o} (expected 600), fixing",
-                    path.display(),
-                    mode
-                );
-                std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600))
-                    .map_err(SwapError::FileError)?;
-            }
-        }
-    }
-
-    std::fs::read_to_string(&path).map_err(|_| SwapError::NoStoredCredentials(account_id))
-}
-
-fn delete_file(account_id: Uuid) -> Result<(), SwapError> {
-    let path = private_path(account_id);
-    if path.exists() {
-        std::fs::remove_file(&path)?;
-    }
-    Ok(())
-}
-
-// Use /usr/bin/security directly — the `keyring` crate's SecItem-based
-// approach silently succeeds but writes to an ephemeral per-app keychain
-// on Developer ID-signed binaries without a provisioning profile.
-// /usr/bin/security is a trusted system binary that reliably targets the
-// login keychain and matches what other tools see via the `security` CLI.
-//
-// Only built on macOS — Linux/Windows fall back to file storage via the
-// backend() selector.
-
-#[cfg(target_os = "macos")]
-fn save_to_keyring(account_id: Uuid, blob: &str) -> std::io::Result<()> {
-    use std::process::Command;
-    // Delete any existing item first so our ACL flags always apply (the
-    // `-U` update path leaves a pre-existing ACL unchanged, which is what
-    // made reads fail from a GUI subprocess context — existing items had
-    // a per-app ACL that didn't cover the invoking process).
-    //
-    // Errors from delete are ignored: NotFound is fine, any other error
-    // will surface on the subsequent add anyway.
-    let _ = Command::new("/usr/bin/security")
-        .args([
-            "delete-generic-password",
-            "-a",
-            &account_id.to_string(),
-            "-s",
-            KEYCHAIN_SERVICE,
-        ])
-        .output();
-
-    // -A: grant access to all applications without prompting. Without this,
-    // the item's ACL lists only the signing identity that created it, which
-    // breaks reads from a GUI subprocess with errSecAuthFailed (code 36).
-    // The item itself stays protected by the login keychain being unlocked,
-    // so -A is a safe broadening.
-    let out = Command::new("/usr/bin/security")
-        .args([
-            "add-generic-password",
-            "-A", // always-allow: any app, no ACL prompts
-            "-a",
-            &account_id.to_string(),
-            "-s",
-            KEYCHAIN_SERVICE,
-            "-w",
-            blob,
-        ])
-        .output()?;
-    if !out.status.success() {
-        return Err(std::io::Error::other(format!(
-            "security add-generic-password failed: {}",
-            String::from_utf8_lossy(&out.stderr).trim()
-        )));
-    }
-    Ok(())
-}
-
-#[cfg(target_os = "macos")]
-fn load_from_keyring(account_id: Uuid) -> std::io::Result<Option<String>> {
-    use std::process::Command;
-    let out = Command::new("/usr/bin/security")
-        .args([
-            "find-generic-password",
-            "-a",
-            &account_id.to_string(),
-            "-s",
-            KEYCHAIN_SERVICE,
-            "-w",
-        ])
-        .output()?;
-    if out.status.success() {
-        let blob = String::from_utf8_lossy(&out.stdout).trim_end().to_string();
-        Ok(Some(blob))
-    } else {
-        // exit 44 = item not found, which is not an error here.
-        let code = out.status.code().unwrap_or(-1);
-        if code == 44 {
-            Ok(None)
-        } else if code == 36 {
-            // errSecAuthFailed — keychain is locked. Surface a clear
-            // message so the GUI can route the user to unlock instead of
-            // silently pretending the blob is missing.
-            Err(std::io::Error::other(
-                "macOS login keychain is locked — open Keychain Access and \
-                 unlock the \"login\" keychain, then retry",
-            ))
-        } else {
-            Err(std::io::Error::other(format!(
-                "security find-generic-password failed (code {code}): {}",
-                String::from_utf8_lossy(&out.stderr).trim()
-            )))
-        }
-    }
-}
-
-#[cfg(target_os = "macos")]
-fn delete_from_keyring(account_id: Uuid) -> std::io::Result<()> {
-    use std::process::Command;
-    let out = Command::new("/usr/bin/security")
-        .args([
-            "delete-generic-password",
-            "-a",
-            &account_id.to_string(),
-            "-s",
-            KEYCHAIN_SERVICE,
-        ])
-        .output()?;
-    // exit 44 = not found, treat as success (idempotent delete).
-    if out.status.success() || out.status.code() == Some(44) {
-        Ok(())
-    } else {
-        Err(std::io::Error::other(format!(
-            "security delete-generic-password failed: {}",
-            String::from_utf8_lossy(&out.stderr).trim()
-        )))
-    }
-}
-
-// Non-macOS: keyring backend is unavailable. Return errors; Auto mode falls
-// back to file. KeyringOnly mode errors out, as documented.
-#[cfg(not(target_os = "macos"))]
-fn save_to_keyring(_account_id: Uuid, _blob: &str) -> std::io::Result<()> {
-    Err(std::io::Error::other(
-        "keyring backend is only implemented on macOS",
-    ))
-}
-
-#[cfg(not(target_os = "macos"))]
-fn load_from_keyring(_account_id: Uuid) -> std::io::Result<Option<String>> {
-    Err(std::io::Error::other(
-        "keyring backend is only implemented on macOS",
-    ))
-}
-
-#[cfg(not(target_os = "macos"))]
-fn delete_from_keyring(_account_id: Uuid) -> std::io::Result<()> {
-    Err(std::io::Error::other(
-        "keyring backend is only implemented on macOS",
-    ))
-}
-
-pub fn save_private(account_id: Uuid, blob: &str) -> Result<(), SwapError> {
-    match backend() {
-        CredBackend::FileOnly => save_to_file(account_id, blob),
-        CredBackend::KeyringOnly => save_to_keyring(account_id, blob)
-            .map_err(|e| SwapError::WriteFailed(format!("keyring: {e}"))),
-        CredBackend::Auto => {
-            // Try Keychain first. If it succeeds, remove any stale file.
-            match save_to_keyring(account_id, blob) {
-                Ok(()) => {
-                    let _ = delete_file(account_id);
-                    Ok(())
-                }
-                Err(e) => {
-                    tracing::warn!("keyring save failed ({e}); falling back to file storage");
-                    save_to_file(account_id, blob)
-                }
-            }
-        }
-    }
-}
-
-pub fn load_private(account_id: Uuid) -> Result<String, SwapError> {
-    match backend() {
-        CredBackend::FileOnly => load_from_file(account_id),
-        CredBackend::KeyringOnly => match load_from_keyring(account_id) {
-            Ok(Some(blob)) => Ok(blob),
-            Ok(None) => Err(SwapError::NoStoredCredentials(account_id)),
-            Err(e) => Err(SwapError::WriteFailed(format!("keyring: {e}"))),
-        },
-        CredBackend::Auto => {
-            // Prefer Keychain. If missing but a file exists, migrate it.
-            match load_from_keyring(account_id) {
-                Ok(Some(blob)) => {
-                    let _ = delete_file(account_id);
-                    Ok(blob)
-                }
-                Ok(None) => {
-                    // Try file; if present, import into Keychain and remove file.
-                    match load_from_file(account_id) {
-                        Ok(blob) => {
-                            if save_to_keyring(account_id, &blob).is_ok() {
-                                let _ = delete_file(account_id);
-                            }
-                            Ok(blob)
-                        }
-                        Err(e) => Err(e),
-                    }
-                }
-                Err(e) => {
-                    // If the keychain is locked, don't silently mask it as
-                    // "missing credentials" — surface the lock message so
-                    // the UI can route the user to unlock. The file
-                    // fallback wouldn't help anyway when items are in
-                    // Keychain, and a stale file blob could be actively
-                    // misleading.
-                    let msg = e.to_string();
-                    if msg.contains("keychain is locked") {
-                        return Err(SwapError::KeychainError(msg));
-                    }
-                    tracing::warn!("keyring load failed ({e}); trying file storage");
-                    load_from_file(account_id)
-                }
-            }
-        }
-    }
-}
-
-fn load_private_opt(account_id: Uuid) -> Option<String> {
-    load_private(account_id).ok()
-}
-
-pub fn delete_private(account_id: Uuid) -> Result<(), SwapError> {
-    match backend() {
-        CredBackend::FileOnly => delete_file(account_id),
-        CredBackend::KeyringOnly => delete_from_keyring(account_id)
-            .map_err(|e| SwapError::WriteFailed(format!("keyring: {e}"))),
-        CredBackend::Auto => {
-            // Delete from both backends to avoid stale copies after migration.
-            let _ = delete_from_keyring(account_id);
-            delete_file(account_id)
-        }
-    }
-}
+// Re-export storage functions for external callers (account_service, etc.)
+#[cfg(test)]
+pub(crate) use storage::private_path;
+pub use storage::{delete as delete_private, load as load_private, save as save_private};
 
 #[cfg(test)]
 mod tests {
