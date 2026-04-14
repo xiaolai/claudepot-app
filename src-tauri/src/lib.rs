@@ -16,6 +16,51 @@ pub fn run() {
         .try_init();
 
     let mut builder = tauri::Builder::default()
+        .setup(|app| {
+            use tauri::{
+                image::Image,
+                tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent},
+                Manager,
+            };
+
+            // Menubar icon: monochrome template so macOS tints it for
+            // light/dark menu bars. Ship the @2x (44×44) PNG baked with
+            // 144 DPI metadata — NSImage reports its logical size as 22pt
+            // (44px ÷ 144/72), giving native 44px on Retina without
+            // upscaling, and a clean downsample on 1x displays. White
+            // pixels would get tinted like the body, so the "window"
+            // holes are genuinely transparent in the source PNG.
+            let icon_bytes = include_bytes!("../icons/tray-iconTemplate@2x.png");
+            let icon = Image::from_bytes(icon_bytes)?;
+
+            TrayIconBuilder::with_id("main")
+                .icon(icon)
+                .icon_as_template(true)
+                .tooltip("Claudepot")
+                .on_tray_icon_event(|tray, event| {
+                    if let TrayIconEvent::Click {
+                        button: MouseButton::Left,
+                        button_state: MouseButtonState::Up,
+                        ..
+                    } = event
+                    {
+                        let app = tray.app_handle();
+                        if let Some(window) = app.get_webview_window("main") {
+                            let visible = window.is_visible().unwrap_or(false);
+                            let focused = window.is_focused().unwrap_or(false);
+                            if visible && focused {
+                                let _ = window.hide();
+                            } else {
+                                let _ = window.show();
+                                let _ = window.set_focus();
+                            }
+                        }
+                    }
+                })
+                .build(app)?;
+
+            Ok(())
+        })
         .manage(state::LoginState::default())
         .manage(claudepot_core::services::usage_cache::UsageCache::new());
 

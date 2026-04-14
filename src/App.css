@@ -103,6 +103,24 @@ body {
   display: flex;
   height: 100vh;
   overflow: hidden;
+  position: relative;
+}
+
+/* Draggable strip spanning the top of the window so the user can move
+   the frameless/overlay window. Sits above content but below any buttons.
+   Starts past the traffic lights (16px + ~54px for the cluster). */
+.titlebar-drag {
+  position: fixed;
+  top: 0;
+  left: 80px;
+  right: 0;
+  height: 36px;
+  -webkit-app-region: drag;
+  z-index: 1;
+  pointer-events: auto;
+}
+.titlebar-drag * {
+  -webkit-app-region: no-drag;
 }
 
 /* ---------- sidebar ---------- */

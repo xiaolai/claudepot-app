@@ -73,6 +73,7 @@ function App() {
   return (
     <IconContext.Provider value={{ size: 16, weight: "light" }}>
       <div className="app-layout">
+        <div className="titlebar-drag" data-tauri-drag-region />
         <Sidebar
           accounts={accounts}
           usage={usage}
