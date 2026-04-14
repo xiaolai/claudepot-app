@@ -1,137 +1,31 @@
-import React, { useCallback, useEffect, useState } from "react";
+import { useState } from "react";
 import { api } from "./api";
-import type { AccountSummary, AppStatus } from "./types";
+import type { AccountSummary } from "./types";
+import { useToasts } from "./hooks/useToasts";
+import { useBusy } from "./hooks/useBusy";
+import { useRefresh } from "./hooks/useRefresh";
+import { useActions } from "./hooks/useActions";
+import { Header } from "./components/Header";
+import { AccountCard } from "./components/AccountCard";
+import { EmptyState } from "./components/EmptyState";
+import { AddAccountModal } from "./components/AddAccountModal";
+import { ConfirmDialog } from "./components/ConfirmDialog";
+import { ToastContainer } from "./components/ToastContainer";
+import { CopyButton } from "./components/CopyButton";
 import "./App.css";
 
-type Toast = { id: number; kind: "info" | "error"; text: string };
-
 function App() {
-  const [status, setStatus] = useState<AppStatus | null>(null);
-  const [accounts, setAccounts] = useState<AccountSummary[]>([]);
-  const [loadError, setLoadError] = useState<string | null>(null);
-  const [busy, setBusy] = useState<string | null>(null); // id of busy account
-  const [toasts, setToasts] = useState<Toast[]>([]);
+  const { toasts, pushToast, dismissToast } = useToasts();
+  const busy = useBusy();
+  const { status, accounts, loadError, keychainIssue, refresh } =
+    useRefresh(pushToast);
+  const actions = useActions({ pushToast, refresh, ...busy });
+
   const [showAdd, setShowAdd] = useState(false);
-  const [confirmRemove, setConfirmRemove] = useState<AccountSummary | null>(
-    null,
-  );
-  const [keychainIssue, setKeychainIssue] = useState<string | null>(null);
-
-  const pushToast = useCallback((kind: Toast["kind"], text: string) => {
-    const id = Date.now() + Math.random();
-    setToasts((t) => [...t, { id, kind, text }]);
-    setTimeout(() => setToasts((t) => t.filter((x) => x.id !== id)), 4000);
-  }, []);
-
-  const refresh = useCallback(async () => {
-    try {
-      // Let Claudepot adopt CC's current credentials first (idempotent).
-      // If it fails with a user-actionable error (keychain locked), we
-      // record the message so the UI can show a banner.
-      try {
-        await api.syncFromCurrentCc();
-        setKeychainIssue(null);
-      } catch (e) {
-        const msg = `${e}`;
-        if (msg.toLowerCase().includes("keychain is locked")) {
-          setKeychainIssue(msg);
-        } else {
-          setKeychainIssue(null);
-          // eslint-disable-next-line no-console
-          console.warn("sync_from_current_cc failed:", msg);
-        }
-      }
-      const [s, list] = await Promise.all([
-        api.appStatus(),
-        api.accountList(),
-      ]);
-      setStatus(s);
-      setAccounts(list);
-      setLoadError(null);
-    } catch (e) {
-      const msg = `${e}`;
-      setLoadError(msg);
-      pushToast("error", `refresh failed: ${msg}`);
-    }
-  }, [pushToast]);
-
-  useEffect(() => {
-    refresh();
-  }, [refresh]);
-
-  const withBusy = async <T,>(key: string, fn: () => Promise<T>) => {
-    setBusy(key);
-    try {
-      return await fn();
-    } finally {
-      setBusy(null);
-    }
-  };
-
-  const useCli = (a: AccountSummary) =>
-    withBusy(`cli-${a.uuid}`, async () => {
-      try {
-        await api.cliUse(a.email);
-        pushToast("info", `CLI switched to ${a.email}`);
-        await refresh();
-      } catch (e) {
-        pushToast("error", `CLI switch failed: ${e}`);
-      }
-    });
-
-  const login = (a: AccountSummary) =>
-    withBusy(`re-${a.uuid}`, async () => {
-      try {
-        // Opens the system browser via `claude auth login` and blocks until
-        // the user completes OAuth (up to several minutes). The returned
-        // blob is verified against `a.email` before being stored.
-        pushToast("info", `Opening browser — sign in as ${a.email}…`);
-        await api.accountLogin(a.uuid);
-        pushToast("info", `Signed in as ${a.email}`);
-        await refresh();
-      } catch (e) {
-        // Cancel produces a specific "login cancelled" string from Rust;
-        // present it as an info toast, not an error, since the user asked.
-        const msg = `${e}`;
-        if (msg.toLowerCase().includes("cancelled")) {
-          pushToast("info", "Login cancelled.");
-        } else {
-          pushToast("error", `Login failed: ${msg}`);
-        }
-      }
-    });
-
-  const cancelLogin = async () => {
-    try {
-      await api.accountLoginCancel();
-    } catch (e) {
-      pushToast("error", `Cancel failed: ${e}`);
-    }
-  };
-
-  const useDesktop = (a: AccountSummary) =>
-    withBusy(`desk-${a.uuid}`, async () => {
-      try {
-        await api.desktopUse(a.email, false);
-        pushToast("info", `Desktop switched to ${a.email}`);
-        await refresh();
-      } catch (e) {
-        pushToast("error", `Desktop switch failed: ${e}`);
-      }
-    });
-
-  const performRemove = (a: AccountSummary) =>
-    withBusy(`rm-${a.uuid}`, async () => {
-      try {
-        const r = await api.accountRemove(a.uuid);
-        pushToast("info", `Removed ${r.email}`);
-        if (r.warnings.length)
-          pushToast("error", `warnings: ${r.warnings.join(", ")}`);
-        await refresh();
-      } catch (e) {
-        pushToast("error", `remove failed: ${e}`);
-      }
-    });
+  const [confirmRemove, setConfirmRemove] = useState<AccountSummary | null>(null);
+  const [confirmDesktop, setConfirmDesktop] = useState<AccountSummary | null>(null);
+  const [confirmClear, setConfirmClear] = useState(false);
+  const [expandedUuid, setExpandedUuid] = useState<string | null>(null);
 
   if (!status) {
     if (loadError) {
@@ -140,63 +34,39 @@ function App() {
           <div className="empty">
             <h2>Couldn't load Claudepot</h2>
             <p className="muted mono">{loadError}</p>
-            <button className="primary" onClick={refresh}>
-              Retry
-            </button>
+            <button className="primary" onClick={refresh}>Retry</button>
           </div>
         </main>
       );
     }
     return (
       <main className="app loading">
-        <p>Loading…</p>
+        <div className="skeleton-container">
+          <div className="skeleton skeleton-header" />
+          <div className="skeleton skeleton-card" />
+          <div className="skeleton skeleton-card" />
+          <div className="skeleton skeleton-card short" />
+        </div>
       </main>
     );
   }
 
   return (
     <main className="app">
-      <header className="header">
-        <div className="brand">
-          <h1>Claudepot</h1>
-          <span className="muted">
-            {status.platform} / {status.arch} · {status.account_count}{" "}
-            account{status.account_count === 1 ? "" : "s"}
-          </span>
-        </div>
-        <div className="active-row">
-          <ActivePill label="CLI" email={status.cli_active_email} />
-          <ActivePill
-            label="Desktop"
-            email={status.desktop_active_email}
-            disabled={!status.desktop_installed}
-            disabledHint="Desktop not installed"
-          />
-        </div>
-      </header>
+      <Header status={status} onRefresh={refresh} />
 
       {keychainIssue && (
         <div className="banner warn" role="alert">
           <div>
             <strong>macOS Keychain is locked.</strong> Claudepot can't read
             credentials until you unlock it. Click <em>Unlock</em> — macOS
-            will show its standard password prompt (your password goes to
-            macOS, not Claudepot).
+            will show its standard password prompt.
           </div>
           <div className="banner-actions">
-            <button
-              className="primary"
-              onClick={async () => {
-                try {
-                  await api.unlockKeychain();
-                  await refresh();
-                } catch (e) {
-                  pushToast("error", `Unlock failed: ${e}`);
-                }
-              }}
-            >
-              Unlock
-            </button>
+            <button className="primary" onClick={async () => {
+              try { await api.unlockKeychain(); await refresh(); }
+              catch (e) { pushToast("error", `Unlock failed: ${e}`); }
+            }}>Unlock</button>
             <button onClick={refresh}>Retry</button>
           </div>
         </div>
@@ -207,327 +77,55 @@ function App() {
           <EmptyState onAdd={() => setShowAdd(true)} />
         ) : (
           accounts.map((a) => (
-            <AccountCard
-              key={a.uuid}
-              account={a}
+            <AccountCard key={a.uuid} account={a}
               desktopAvailable={status.desktop_installed}
-              busyKey={busy}
-              onUseCli={() => useCli(a)}
-              onUseDesktop={() => useDesktop(a)}
-              onLogin={() => login(a)}
-              onCancelLogin={cancelLogin}
-              onRemove={() => setConfirmRemove(a)}
-            />
+              busyKeys={busy.busyKeys} anyBusy={busy.anyBusy}
+              expanded={expandedUuid === a.uuid}
+              onToggleExpand={() => setExpandedUuid((prev) => prev === a.uuid ? null : a.uuid)}
+              onUseCli={() => actions.useCli(a)}
+              onUseDesktop={() => setConfirmDesktop(a)}
+              onLogin={() => actions.login(a)}
+              onCancelLogin={actions.cancelLogin}
+              onRemove={() => setConfirmRemove(a)} />
           ))
         )}
       </section>
 
       <footer className="footer">
-        <button className="primary" onClick={() => setShowAdd(true)}>
-          + Add account
-        </button>
-        <span className="muted mono">{status.data_dir}</span>
-      </footer>
-
-      {showAdd && (
-        <AddAccountModal
-          onClose={() => setShowAdd(false)}
-          onAdded={async () => {
-            setShowAdd(false);
-            await refresh();
-            pushToast("info", "Account added.");
-          }}
-          onError={(msg) => pushToast("error", msg)}
-        />
-      )}
-
-      {confirmRemove && (
-        <ConfirmDialog
-          title="Remove account?"
-          body={
-            <>
-              <p>
-                Remove <strong>{confirmRemove.email}</strong>?
-              </p>
-              <p className="muted small">
-                This deletes the credential blob and any saved Desktop
-                profile from this machine. Active CLI/Desktop pointers
-                will be cleared. The account on Anthropic's side is not
-                affected.
-              </p>
-            </>
-          }
-          confirmLabel="Remove"
-          confirmDanger
-          onCancel={() => setConfirmRemove(null)}
-          onConfirm={async () => {
-            const target = confirmRemove;
-            setConfirmRemove(null);
-            await performRemove(target);
-          }}
-        />
-      )}
-
-      <div className="toasts">
-        {toasts.map((t) => (
-          <div key={t.id} className={`toast ${t.kind}`}>
-            {t.text}
-          </div>
-        ))}
-      </div>
-    </main>
-  );
-}
-
-function ActivePill({
-  label,
-  email,
-  disabled,
-  disabledHint,
-}: {
-  label: string;
-  email: string | null;
-  disabled?: boolean;
-  disabledHint?: string;
-}) {
-  if (disabled) {
-    return (
-      <div className="pill disabled" title={disabledHint}>
-        <span className="pill-label">{label}</span>
-        <span className="pill-value muted">{disabledHint}</span>
-      </div>
-    );
-  }
-  return (
-    <div className={`pill ${email ? "active" : ""}`}>
-      <span className="pill-label">{label}</span>
-      <span className="pill-value">{email ?? "—"}</span>
-    </div>
-  );
-}
-
-function AccountCard({
-  account: a,
-  desktopAvailable,
-  busyKey,
-  onUseCli,
-  onUseDesktop,
-  onLogin,
-  onCancelLogin,
-  onRemove,
-}: {
-  account: AccountSummary;
-  desktopAvailable: boolean;
-  busyKey: string | null;
-  onUseCli: () => void;
-  onUseDesktop: () => void;
-  onLogin: () => void;
-  onCancelLogin: () => void;
-  onRemove: () => void;
-}) {
-  const cliBusy = busyKey === `cli-${a.uuid}`;
-  const deskBusy = busyKey === `desk-${a.uuid}`;
-  const reBusy = busyKey === `re-${a.uuid}`;
-  const rmBusy = busyKey === `rm-${a.uuid}`;
-  const anyBusy = busyKey !== null;
-
-  return (
-    <article
-      className={`account ${a.is_cli_active ? "cli-active" : ""} ${
-        a.is_desktop_active ? "desktop-active" : ""
-      }`}
-    >
-      <div className="account-main">
-        <div className="account-head">
-          <h3>{a.email}</h3>
-          <TokenBadge status={a.token_status} mins={a.token_remaining_mins} />
-        </div>
-        <div className="account-meta muted">
-          {a.org_name ?? "—"} · {a.subscription_type ?? "—"}
-        </div>
-      </div>
-      <div className="account-actions">
-        {a.credentials_healthy ? (
-          <button
-            onClick={onUseCli}
-            disabled={anyBusy || a.is_cli_active}
-            title={a.is_cli_active ? "Already active CLI" : "Use for CLI"}
-          >
-            {cliBusy ? "…" : a.is_cli_active ? "✓ CLI" : "Use CLI"}
-          </button>
-        ) : reBusy ? (
-          // Login in flight for this account — show Cancel so the user
-          // can abort if they closed the browser or changed their mind.
-          <button
-            onClick={onCancelLogin}
-            className="danger"
-            title="Cancel the in-flight browser login"
-          >
-            Cancel login
-          </button>
-        ) : (
-          <button
-            onClick={onLogin}
-            disabled={anyBusy}
-            className="warn"
-            title={`Sign in as ${a.email} — opens the browser, imports credentials.`}
-          >
-            Log in
+        <button className="primary" onClick={() => setShowAdd(true)}>+ Add account</button>
+        {status.cli_active_email && (
+          <button className="danger" onClick={() => setConfirmClear(true)}
+            disabled={busy.anyBusy} title="Sign CC out — clears credentials file">
+            Clear CLI
           </button>
         )}
-        <button
-          onClick={onUseDesktop}
-          disabled={
-            anyBusy ||
-            a.is_desktop_active ||
-            !desktopAvailable ||
-            !a.has_desktop_profile
-          }
-          title={
-            !desktopAvailable
-              ? "Desktop not installed"
-              : a.is_desktop_active
-              ? "Already active Desktop"
-              : !a.has_desktop_profile
-              ? "No Desktop profile yet — sign in via the Desktop app first"
-              : "Use for Desktop (quits + relaunches Claude)"
-          }
-        >
-          {deskBusy ? "…" : a.is_desktop_active ? "✓ Desktop" : "Use Desktop"}
-        </button>
-        <button
-          onClick={onRemove}
-          disabled={anyBusy}
-          className="danger"
-          title="Remove account, credentials, and profile"
-        >
-          {rmBusy ? "…" : "Remove"}
-        </button>
-      </div>
-    </article>
-  );
-}
+        <span className="muted mono">Data: {status.data_dir} <CopyButton text={status.data_dir} /></span>
+      </footer>
 
-function TokenBadge({
-  status,
-  mins,
-}: {
-  status: string;
-  mins: number | null;
-}) {
-  const kind = status.startsWith("valid")
-    ? "ok"
-    : status === "expired"
-    ? "bad"
-    : "warn";
-  const label = kind === "ok" && mins != null ? `valid · ${mins}m` : status;
-  return <span className={`token-badge ${kind}`}>{label}</span>;
-}
+      {showAdd && <AddAccountModal
+        onClose={() => setShowAdd(false)}
+        onAdded={async () => { setShowAdd(false); await refresh(); pushToast("info", "Account added."); }}
+        onError={(msg) => pushToast("error", msg)} />}
 
-function ConfirmDialog({
-  title,
-  body,
-  confirmLabel = "Confirm",
-  confirmDanger = false,
-  onCancel,
-  onConfirm,
-}: {
-  title: string;
-  body: React.ReactNode;
-  confirmLabel?: string;
-  confirmDanger?: boolean;
-  onCancel: () => void;
-  onConfirm: () => void;
-}) {
-  return (
-    <div className="modal-backdrop" onClick={onCancel}>
-      <div
-        className="modal"
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby="confirm-title"
-        onClick={(e) => e.stopPropagation()}
-      >
-        <h2 id="confirm-title">{title}</h2>
-        <div className="modal-body">{body}</div>
-        <div className="modal-actions">
-          <button onClick={onCancel}>Cancel</button>
-          <button
-            className={confirmDanger ? "danger primary" : "primary"}
-            onClick={onConfirm}
-            autoFocus
-          >
-            {confirmLabel}
-          </button>
-        </div>
-      </div>
-    </div>
-  );
-}
+      {confirmRemove && <ConfirmDialog title="Remove account?" confirmLabel="Remove" confirmDanger
+        body={<><p>Remove <strong>{confirmRemove.email}</strong>?</p>
+          <p className="muted small">This deletes the credential blob and any saved Desktop profile.
+          Active CLI/Desktop pointers will be cleared.</p></>}
+        onCancel={() => setConfirmRemove(null)}
+        onConfirm={async () => { const t = confirmRemove; setConfirmRemove(null); await actions.performRemove(t); }} />}
 
-function EmptyState({ onAdd }: { onAdd: () => void }) {
-  return (
-    <div className="empty">
-      <h2>No accounts yet</h2>
-      <p className="muted">
-        Add your first account — Claudepot will pick up whichever one Claude
-        Code is currently signed into.
-      </p>
-      <button className="primary" onClick={onAdd}>
-        + Add account
-      </button>
-    </div>
-  );
-}
+      {confirmDesktop && <ConfirmDialog title="Switch Desktop?" confirmLabel="Switch"
+        body={<p>Switch Desktop to <strong>{confirmDesktop.email}</strong>? Claude Desktop will quit and relaunch.</p>}
+        onCancel={() => setConfirmDesktop(null)}
+        onConfirm={async () => { const t = confirmDesktop; setConfirmDesktop(null); await actions.useDesktop(t); }} />}
 
-function AddAccountModal({
-  onClose,
-  onAdded,
-  onError,
-}: {
-  onClose: () => void;
-  onAdded: () => void;
-  onError: (msg: string) => void;
-}) {
-  const [busy, setBusy] = useState(false);
+      {confirmClear && <ConfirmDialog title="Sign out of Claude Code?" confirmLabel="Clear" confirmDanger
+        body={<p>This clears CC's credentials file. You'll need to sign in again.</p>}
+        onCancel={() => setConfirmClear(false)}
+        onConfirm={async () => { setConfirmClear(false); await actions.performClearCli(); }} />}
 
-  const submit = async () => {
-    setBusy(true);
-    try {
-      await api.accountAddFromCurrent();
-      onAdded();
-    } catch (e) {
-      onError(`add failed: ${e}`);
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  return (
-    <div className="modal-backdrop" onClick={onClose}>
-      <div className="modal" onClick={(e) => e.stopPropagation()}>
-        <h2>Add account</h2>
-        <div className="modal-body">
-          <p className="muted">
-            Imports whichever account Claude Code is currently signed into.
-            Log in with <code>claude auth login</code> first if needed.
-          </p>
-          <p className="muted small">
-            For headless or token-based onboarding, use the{" "}
-            <code>claudepot</code> CLI &mdash; refresh tokens never enter the
-            GUI to avoid leaking secrets through the webview.
-          </p>
-        </div>
-        <div className="modal-actions">
-          <button onClick={onClose} disabled={busy}>
-            Cancel
-          </button>
-          <button className="primary" onClick={submit} disabled={busy}>
-            {busy ? "Adding…" : "Add from current"}
-          </button>
-        </div>
-      </div>
-    </div>
+      <ToastContainer toasts={toasts} onDismiss={dismissToast} />
+    </main>
   );
 }
 
