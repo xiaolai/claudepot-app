@@ -5,6 +5,7 @@ import type {
   AppStatus,
   RegisterOutcome,
   RemoveOutcome,
+  UsageMap,
 } from "./types";
 
 export const api = {
@@ -33,4 +34,5 @@ export const api = {
   accountLoginCancel: () => invoke<void>("account_login_cancel"),
   accountRemove: (uuid: string) =>
     invoke<RemoveOutcome>("account_remove", { uuid }),
+  fetchAllUsage: () => invoke<UsageMap>("fetch_all_usage"),
 };

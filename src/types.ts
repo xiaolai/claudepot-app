@@ -39,3 +39,25 @@ export interface RemoveOutcome {
   had_desktop_profile: boolean;
   warnings: string[];
 }
+
+export interface UsageWindow {
+  utilization: number; // 0–100
+  resets_at: string; // RFC3339
+}
+
+export interface ExtraUsage {
+  is_enabled: boolean;
+  monthly_limit: number | null;
+  used_credits: number | null;
+}
+
+export interface AccountUsage {
+  five_hour: UsageWindow | null;
+  seven_day: UsageWindow | null;
+  seven_day_opus: UsageWindow | null;
+  seven_day_sonnet: UsageWindow | null;
+  extra_usage: ExtraUsage | null;
+}
+
+/** UUID string → usage data. Missing keys = no data available. */
+export type UsageMap = Record<string, AccountUsage>;

@@ -237,6 +237,40 @@ impl UsageCache {
         out
     }
 
+    /// Fetch usage gracefully: never returns rate-limit errors.
+    ///
+    /// On cooldown or rate-limit: returns the last cached value (even if
+    /// stale), or `None` if nothing was ever cached. The caller never
+    /// sees rate-limit state — designed for user-facing UIs.
+    pub async fn fetch_usage_graceful(&self, uuid: Uuid) -> Option<UsageResponse> {
+        match self.fetch_usage(uuid, false).await {
+            Ok(data) => data,
+            Err(UsageFetchError::Cooldown { .. }) | Err(UsageFetchError::RateLimited { .. }) => {
+                // Serve stale cache if available, otherwise None.
+                let results = self.results.lock().await;
+                results.get(&uuid).map(|c| c.response.clone())
+            }
+            Err(_) => None,
+        }
+    }
+
+    /// Batch-fetch for the GUI: never exposes rate-limit errors.
+    pub async fn fetch_batch_graceful(
+        &self,
+        uuids: &[Uuid],
+    ) -> HashMap<Uuid, Option<UsageResponse>> {
+        let mut out = HashMap::new();
+        let mut first = true;
+        for &uuid in uuids {
+            if !first {
+                tokio::time::sleep(BATCH_STAGGER).await;
+            }
+            first = false;
+            out.insert(uuid, self.fetch_usage_graceful(uuid).await);
+        }
+        out
+    }
+
     /// Evict cached result, cooldown, and inflight entry for a UUID.
     ///
     /// Call after credential changes (remove, reimport, login).
