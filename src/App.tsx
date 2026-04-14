@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { IconContext } from "@phosphor-icons/react";
 import { api } from "./api";
 import type { AccountSummary } from "./types";
@@ -26,6 +26,19 @@ function App() {
   const [confirmDesktop, setConfirmDesktop] = useState<AccountSummary | null>(null);
   const [confirmClear, setConfirmClear] = useState(false);
   const [selectedUuid, setSelectedUuid] = useState<string | null>(null);
+
+  // Auto-select an account on first load. Priority: active CLI > active
+  // Desktop > first account. Only fires while nothing is selected, so it
+  // won't fight a user click later. Re-runs after refresh if the selected
+  // account vanished (e.g. removed externally).
+  useEffect(() => {
+    if (accounts.length === 0) return;
+    const stillExists = selectedUuid && accounts.some((a) => a.uuid === selectedUuid);
+    if (stillExists) return;
+    const cliActive = accounts.find((a) => a.is_cli_active);
+    const desktopActive = accounts.find((a) => a.is_desktop_active);
+    setSelectedUuid((cliActive ?? desktopActive ?? accounts[0]).uuid);
+  }, [accounts, selectedUuid]);
 
   const selectedAccount = accounts.find((a) => a.uuid === selectedUuid) ?? null;
 
