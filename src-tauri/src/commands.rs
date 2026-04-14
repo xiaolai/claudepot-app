@@ -305,6 +305,12 @@ pub async fn fetch_all_usage(
         .map(|a| a.uuid)
         .collect();
 
+    tracing::info!(
+        total = accounts.len(),
+        with_creds = uuids.len(),
+        "fetch_all_usage starting"
+    );
+
     if uuids.is_empty() {
         return Ok(HashMap::new());
     }
@@ -313,8 +319,12 @@ pub async fn fetch_all_usage(
 
     let mut out = HashMap::new();
     for (uuid, maybe_response) in batch {
-        if let Some(response) = maybe_response {
-            out.insert(uuid.to_string(), AccountUsageDto::from_response(&response));
+        match maybe_response {
+            Some(response) => {
+                tracing::info!(account = %uuid, "usage fetched");
+                out.insert(uuid.to_string(), AccountUsageDto::from_response(&response));
+            }
+            None => tracing::warn!(account = %uuid, "usage returned None (no creds / refresh failed / fetch failed)"),
         }
     }
     Ok(out)

@@ -182,8 +182,20 @@ impl UsageCache {
             }
         };
 
-        // 5. HTTP call
-        let result = self.fetcher.fetch(&access_token).await;
+        // 5. HTTP call. If the server rejects the token (401) we try one
+        //    forced refresh and retry — "not yet expired locally but already
+        //    revoked upstream" happens whenever the user logs in elsewhere.
+        let mut result = self.fetcher.fetch(&access_token).await;
+        if matches!(&result, Err(OAuthError::AuthFailed(_))) {
+            tracing::info!(account = %uuid, "usage fetch got 401 — forcing refresh and retrying once");
+            match self.force_refresh(uuid).await {
+                Ok(Some(new_token)) => {
+                    result = self.fetcher.fetch(&new_token).await;
+                }
+                Ok(None) => tracing::warn!(account = %uuid, "force refresh returned None — giving up"),
+                Err(e) => tracing::warn!(account = %uuid, "force refresh errored: {e:?}"),
+            }
+        }
         guard.disarm_and_cleanup().await;
 
         match result {
@@ -290,6 +302,42 @@ impl UsageCache {
     }
 
     // -- private helpers --
+
+    /// Force a token refresh for `uuid` regardless of local expiry.
+    ///
+    /// Used when the server rejects a locally-"valid" access_token (401).
+    /// Returns `Ok(Some(new_token))` on success, `Ok(None)` if there is
+    /// nothing to refresh (no blob on disk) or if the refresh itself
+    /// failed silently.
+    async fn force_refresh(&self, uuid: Uuid) -> Result<Option<String>, UsageFetchError> {
+        use crate::oauth::refresh;
+
+        let blob_str = match swap::load_private(uuid) {
+            Ok(s) => s,
+            Err(_) => return Ok(None),
+        };
+        let mut blob = CredentialBlob::from_json(&blob_str)
+            .map_err(|e| UsageFetchError::FetchFailed(format!("corrupt blob: {e}")))?;
+        let rt = &blob.claude_ai_oauth.refresh_token;
+        let refreshed = match refresh::refresh(rt).await {
+            Ok(r) => r,
+            Err(OAuthError::RateLimited { retry_after_secs }) => {
+                return Err(UsageFetchError::RateLimited { retry_after_secs });
+            }
+            Err(e) => {
+                tracing::warn!(account = %uuid, "force refresh failed: {e}");
+                return Ok(None);
+            }
+        };
+        blob.claude_ai_oauth.access_token = refreshed.access_token.clone();
+        blob.claude_ai_oauth.refresh_token = refreshed.refresh_token;
+        let now_ms = chrono::Utc::now().timestamp_millis();
+        blob.claude_ai_oauth.expires_at = now_ms + (refreshed.expires_in as i64) * 1000;
+        if let Ok(j) = blob.to_json() {
+            let _ = swap::save_private(uuid, &j);
+        }
+        Ok(Some(refreshed.access_token))
+    }
 
     /// Load a usable access token for `uuid`.
     ///
