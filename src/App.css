@@ -100,6 +100,24 @@ body {
 .active-row {
   display: flex;
   gap: 10px;
+  align-items: center;
+}
+
+/* ---------- refresh button ---------- */
+.refresh-btn {
+  font-size: 16px;
+  padding: 4px 8px;
+  line-height: 1;
+  border: 1px solid var(--border-strong);
+  border-radius: 7px;
+  background: var(--surface);
+  color: var(--muted);
+  cursor: pointer;
+  transition: background 0.12s ease, border-color 0.12s ease;
+}
+.refresh-btn:hover {
+  background: var(--border);
+  color: var(--text);
 }
 
 .banner {
@@ -166,9 +184,7 @@ body {
 
 .account {
   display: flex;
-  justify-content: space-between;
-  align-items: center;
-  gap: 16px;
+  flex-direction: column;
   padding: 14px 16px;
   background: var(--surface);
   border: 1px solid var(--border);
@@ -181,9 +197,23 @@ body {
   border-color: var(--accent);
 }
 
+.account-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 16px;
+}
+
 .account-main {
   min-width: 0;
   flex: 1;
+  cursor: pointer;
+  user-select: none;
+}
+.account-main:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+  border-radius: 4px;
 }
 .account-head {
   display: flex;
@@ -207,6 +237,31 @@ body {
   display: flex;
   gap: 6px;
   flex-shrink: 0;
+}
+
+/* ---------- WI-7: slot badges ---------- */
+.slot-badge {
+  font-size: 10px;
+  padding: 1px 6px;
+  border-radius: 999px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+.slot-badge.cli {
+  background: var(--accent-weak);
+  color: var(--accent);
+}
+.slot-badge.desktop {
+  background: var(--ok-weak);
+  color: var(--ok);
+}
+
+/* ---------- WI-9: inline disabled hint ---------- */
+.account-hint {
+  font-size: 12px;
+  margin-top: 6px;
+  padding-left: 16px;
 }
 
 .token-badge {
@@ -366,6 +421,9 @@ button.danger.primary:hover:not(:disabled) {
   pointer-events: none;
 }
 .toast {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
   padding: 10px 14px;
   border-radius: 8px;
   background: var(--surface);
@@ -373,7 +431,26 @@ button.danger.primary:hover:not(:disabled) {
   box-shadow: 0 8px 24px rgba(0, 0, 0, 0.15);
   font-size: 13px;
   max-width: 360px;
+  pointer-events: auto;
   animation: toast-in 0.15s ease;
+}
+.toast-text {
+  flex: 1;
+}
+.toast-close {
+  font-size: 14px;
+  line-height: 1;
+  padding: 0 2px;
+  border: none;
+  background: none;
+  color: var(--muted);
+  cursor: pointer;
+  opacity: 0.7;
+  flex-shrink: 0;
+}
+.toast-close:hover {
+  opacity: 1;
+  color: var(--text);
 }
 .toast.error {
   border-color: var(--bad);
@@ -387,5 +464,124 @@ button.danger.primary:hover:not(:disabled) {
   from {
     opacity: 0;
     transform: translateY(8px);
+  }
+}
+/* WI-17: toast exit animation */
+.toast.exiting {
+  animation: toast-out 0.15s ease forwards;
+}
+@keyframes toast-out {
+  to {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+}
+
+/* ---------- WI-11: account detail panel ---------- */
+.account-detail {
+  margin-top: 12px;
+  padding-top: 12px;
+  border-top: 1px solid var(--border);
+}
+.detail-grid {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 4px 16px;
+  font-size: 12px;
+  margin: 0;
+}
+.detail-grid dt {
+  color: var(--muted);
+  font-weight: 600;
+  text-transform: uppercase;
+  font-size: 10px;
+  letter-spacing: 0.04em;
+  padding-top: 2px;
+}
+.detail-grid dd {
+  margin: 0;
+}
+
+/* ---------- focus visibility ---------- */
+button:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+/* ---------- WI-15: responsive layout ---------- */
+@media (max-width: 600px) {
+  .account-row {
+    flex-direction: column;
+    align-items: stretch;
+  }
+  .account-actions {
+    justify-content: flex-end;
+    flex-wrap: wrap;
+  }
+  .header {
+    flex-direction: column;
+  }
+  .active-row {
+    flex-wrap: wrap;
+  }
+}
+
+@media (max-width: 400px) {
+  .pill {
+    min-width: unset;
+  }
+}
+
+/* ---------- WI-16: copy button ---------- */
+.copy-btn {
+  font-size: 12px;
+  padding: 0 4px;
+  border: none;
+  background: none;
+  color: var(--muted);
+  cursor: pointer;
+  opacity: 0.6;
+  vertical-align: middle;
+}
+.copy-btn:hover {
+  opacity: 1;
+  color: var(--accent);
+}
+
+/* ---------- WI-18: loading skeleton ---------- */
+.skeleton-container {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  width: 100%;
+  max-width: 600px;
+}
+.skeleton {
+  background: var(--border);
+  border-radius: 10px;
+  animation: skeleton-pulse 1.2s ease-in-out infinite;
+}
+.skeleton-header {
+  height: 48px;
+}
+.skeleton-card {
+  height: 72px;
+}
+.skeleton-card.short {
+  width: 60%;
+}
+@keyframes skeleton-pulse {
+  0%, 100% { opacity: 0.4; }
+  50% { opacity: 0.7; }
+}
+
+/* ---------- reduced motion ---------- */
+@media (prefers-reduced-motion: reduce) {
+  .toast,
+  .toast.exiting {
+    animation: none;
+  }
+  .skeleton {
+    animation: none;
   }
 }
