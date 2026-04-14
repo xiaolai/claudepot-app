@@ -169,6 +169,13 @@ body {
   background: var(--selection);
 }
 
+.sidebar-item-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
 .sidebar-item-text {
   flex: 1;
   min-width: 0;
@@ -413,6 +420,19 @@ body {
 
 .slot-badge.desktop {
   background: var(--ok-weak);
+  color: var(--ok);
+}
+
+/* Sidebar slot icons — compact replacement for text badges */
+.slot-icon {
+  flex-shrink: 0;
+}
+
+.slot-icon.cli {
+  color: var(--accent);
+}
+
+.slot-icon.desktop {
   color: var(--ok);
 }
 

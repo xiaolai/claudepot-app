@@ -466,7 +466,9 @@ describe("WI-7: Active-slot badges", () => {
     });
 
     await selectAccount("alice@example.com");
+    // Detail header has text badge; sidebar uses an icon (aria-label).
     expect(screen.getByText("CLI")).toHaveClass("slot-badge");
+    expect(screen.getByLabelText("Active CLI account")).toBeInTheDocument();
   });
 
   it("both-active account shows both badges", async () => {
@@ -480,7 +482,10 @@ describe("WI-7: Active-slot badges", () => {
     await selectAccount("alice@example.com");
     const badges = screen.getAllByText(/^(CLI|Desktop)$/);
     const slotBadges = badges.filter((b) => b.classList.contains("slot-badge"));
-    expect(slotBadges).toHaveLength(2);
+    expect(slotBadges).toHaveLength(2); // detail-header text badges
+    // Sidebar icons checked by aria-label
+    expect(screen.getByLabelText("Active CLI account")).toBeInTheDocument();
+    expect(screen.getByLabelText("Active Desktop account")).toBeInTheDocument();
   });
 
   it("inactive account shows no slot badges", async () => {
