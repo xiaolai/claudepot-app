@@ -22,9 +22,8 @@
 use crate::account::{AccountStore, VerifyOutcome};
 use crate::blob::CredentialBlob;
 use crate::cli_backend::swap;
-use crate::cli_backend::swap::ProfileFetcher;
+use crate::cli_backend::swap::{DefaultRefresher, ProfileFetcher, TokenRefresher};
 use crate::error::OAuthError;
-use crate::oauth::refresh;
 use chrono::Utc;
 use uuid::Uuid;
 
@@ -70,6 +69,17 @@ pub async fn verify_account_identity(
     uuid: Uuid,
     fetcher: &dyn ProfileFetcher,
 ) -> Result<VerifyOutcome, VerifyError> {
+    verify_account_identity_with(store, uuid, fetcher, &DefaultRefresher).await
+}
+
+/// Testable variant: inject a [`TokenRefresher`] so the 401→refresh
+/// branch can be exercised without real HTTP.
+pub async fn verify_account_identity_with(
+    store: &AccountStore,
+    uuid: Uuid,
+    fetcher: &dyn ProfileFetcher,
+    refresher: &dyn TokenRefresher,
+) -> Result<VerifyOutcome, VerifyError> {
     let account = store
         .find_by_uuid(uuid)
         .map_err(|e| VerifyError::Store(e.to_string()))?
@@ -88,12 +98,48 @@ pub async fn verify_account_identity(
             // 401 — try one refresh, then re-check. If refresh fails, it's
             // Rejected. If refresh succeeds but the new profile email
             // doesn't match the label, Drift (and we DON'T save).
-            match try_refresh(uuid, &blob, fetcher).await {
+            match try_refresh(uuid, &blob, fetcher, refresher).await {
                 Ok(Some((new_blob_json, actual))) => {
                     let drift = !actual.eq_ignore_ascii_case(&account.email);
                     if !drift {
-                        // Safe to persist — label and server agree.
-                        let _ = swap::save_private(uuid, &new_blob_json);
+                        // Safe to persist — label and server agree. The
+                        // write is the load-bearing step: if it fails the
+                        // in-memory success is meaningless (next fetch
+                        // will hit the stale blob again), so surface it
+                        // instead of marking the row Ok.
+                        //
+                        // TOCTOU guard: only overwrite the slot if it
+                        // still holds the exact bytes we loaded earlier.
+                        // A concurrent reimport/sync/login that raced us
+                        // has already written the newer blob; our stale
+                        // rotation would clobber it. Skip the write in
+                        // that case and treat the fetched identity as
+                        // authoritative for this pass.
+                        match swap::load_private(uuid) {
+                            Ok(current) if current == blob_str => {
+                                if let Err(e) = swap::save_private(uuid, &new_blob_json) {
+                                    tracing::error!(
+                                        account = %uuid,
+                                        "persisting refreshed blob failed: {e}"
+                                    );
+                                    return Err(VerifyError::Store(format!(
+                                        "save_private failed: {e}"
+                                    )));
+                                }
+                            }
+                            Ok(_) => {
+                                tracing::info!(
+                                    account = %uuid,
+                                    "slot changed during refresh — skipping rotated-blob write to avoid clobbering concurrent update"
+                                );
+                            }
+                            Err(_) => {
+                                tracing::info!(
+                                    account = %uuid,
+                                    "slot removed during refresh — skipping rotated-blob write"
+                                );
+                            }
+                        }
                     } else {
                         tracing::warn!(
                             account = %uuid,
@@ -105,8 +151,10 @@ pub async fn verify_account_identity(
                     classify(&account.email, actual)
                 }
                 Ok(None) => VerifyOutcome::Rejected,
-                Err(OAuthError::RateLimited { .. }) => VerifyOutcome::NetworkError,
-                Err(_) => VerifyOutcome::Rejected,
+                // RateLimited + ServerError + transport errors are all
+                // transient. Only definitive RefreshFailed / AuthFailed
+                // (mapped to Ok(None) above) should ever produce Rejected.
+                Err(_) => VerifyOutcome::NetworkError,
             }
         }
         ProfileCheck::NetworkError => VerifyOutcome::NetworkError,
@@ -129,7 +177,8 @@ pub async fn verify_and_get_access_token(
     uuid: Uuid,
     fetcher: &dyn ProfileFetcher,
 ) -> Result<(VerifyOutcome, Option<String>), VerifyError> {
-    let outcome = verify_account_identity(store, uuid, fetcher).await?;
+    let outcome =
+        verify_account_identity_with(store, uuid, fetcher, &DefaultRefresher).await?;
     let token = if matches!(outcome, VerifyOutcome::Ok { .. }) {
         // Re-read the slot — it may have been rotated by a refresh inside
         // `verify_account_identity`.
@@ -168,7 +217,11 @@ async fn run_profile_check(blob: &CredentialBlob, fetcher: &dyn ProfileFetcher) 
         .await
     {
         Ok(email) => ProfileCheck::Ok(email),
+        // 401 only — genuine token rejection. Trigger refresh path.
         Err(OAuthError::AuthFailed(_)) => ProfileCheck::Rejected,
+        // Everything else (5xx via ServerError, reqwest transport,
+        // rate-limit, malformed response) is transient — do NOT refresh,
+        // do NOT mark as rejected. NetworkError preserves history.
         Err(_) => ProfileCheck::NetworkError,
     }
 }
@@ -182,11 +235,15 @@ async fn try_refresh(
     uuid: Uuid,
     blob: &CredentialBlob,
     fetcher: &dyn ProfileFetcher,
+    refresher: &dyn TokenRefresher,
 ) -> Result<Option<(String, String)>, OAuthError> {
     tracing::info!(account = %uuid, "profile returned 401 — attempting refresh_token exchange");
-    let refreshed = match refresh::refresh(&blob.claude_ai_oauth.refresh_token).await {
+    let refreshed = match refresher.refresh(&blob.claude_ai_oauth.refresh_token).await {
         Ok(r) => r,
-        Err(OAuthError::RefreshFailed(_)) | Err(OAuthError::AuthFailed(_)) => return Ok(None),
+        // Only RefreshFailed (400/401 from token endpoint) is a definitive
+        // "no". ServerError + reqwest errors propagate so the caller can
+        // map them to NetworkError instead of flipping status to Rejected.
+        Err(OAuthError::RefreshFailed(_)) => return Ok(None),
         Err(e) => return Err(e),
     };
 
@@ -252,6 +309,52 @@ mod tests {
         }
     }
 
+    /// Mock refresher: injectable TokenRefresher for the 401→refresh path.
+    /// Returns either a configured `TokenResponse` or an `OAuthError`.
+    struct MockRefresher {
+        result: Mutex<Option<Result<crate::oauth::refresh::TokenResponse, OAuthError>>>,
+    }
+
+    impl MockRefresher {
+        fn ok_with(access_token: &str, refresh_token: &str) -> Self {
+            Self {
+                result: Mutex::new(Some(Ok(crate::oauth::refresh::TokenResponse {
+                    access_token: access_token.to_string(),
+                    refresh_token: refresh_token.to_string(),
+                    expires_in: 3600,
+                    scope: None,
+                    token_type: None,
+                }))),
+            }
+        }
+        fn rejecting() -> Self {
+            // RefreshFailed = definitive "no" (token endpoint 400/401).
+            Self {
+                result: Mutex::new(Some(Err(OAuthError::RefreshFailed("revoked".into())))),
+            }
+        }
+        fn server_erroring() -> Self {
+            // ServerError = 5xx on the token endpoint — transient.
+            Self {
+                result: Mutex::new(Some(Err(OAuthError::ServerError("503".into())))),
+            }
+        }
+    }
+
+    #[async_trait::async_trait]
+    impl TokenRefresher for MockRefresher {
+        async fn refresh(
+            &self,
+            _refresh_token: &str,
+        ) -> Result<crate::oauth::refresh::TokenResponse, OAuthError> {
+            self.result
+                .lock()
+                .unwrap()
+                .take()
+                .expect("MockRefresher: second call without reconfigure")
+        }
+    }
+
     /// Caller MUST already hold the data-dir lock — std::sync::Mutex isn't
     /// reentrant, so taking it a second time on the same thread deadlocks.
     fn setup_account(email: &str) -> (AccountStore, tempfile::TempDir, Uuid) {
@@ -301,34 +404,114 @@ mod tests {
         swap::delete_private(uuid).unwrap();
     }
 
-    // Hits the real Anthropic refresh endpoint via `oauth::refresh::refresh`
-    // on the 401 → try-refresh branch. Injecting a mock refresher into
-    // this module is a follow-up refactor (parallel to ProfileFetcher);
-    // the three non-ignored tests already cover every branch that doesn't
-    // require network mocking.
+    /// 401 on /profile + definitive RefreshFailed on refresh → Rejected.
     #[tokio::test]
-    #[ignore]
-    async fn test_verify_rejected_when_token_refused_and_refresh_fails() {
+    async fn test_verify_rejected_when_token_refused_and_refresh_definitively_fails() {
         let _lock = crate::testing::lock_data_dir();
         let _env = crate::testing::setup_test_data_dir();
         let (store, _dir, uuid) = setup_account("alice@example.com");
         swap::save_private(uuid, &crate::testing::fresh_blob_json()).unwrap();
 
-        // First call 401s; refresh also fails (network path isn't mockable
-        // here, so we rely on the default fetcher returning 401 again).
         let fetcher = MockFetcher::rejecting();
-        let outcome = verify_account_identity(&store, uuid, &fetcher).await.unwrap();
-        // Refresh will hit the real endpoint with the test refresh_token and
-        // either fail (likely) or succeed. We accept either Rejected or
-        // NetworkError — both preserve verified_email (doesn't matter here
-        // since we never had one), and both mark status non-"ok".
-        assert!(
-            matches!(outcome, VerifyOutcome::Rejected | VerifyOutcome::NetworkError),
-            "expected Rejected or NetworkError, got {outcome:?}"
-        );
+        let refresher = MockRefresher::rejecting();
+        let outcome = verify_account_identity_with(&store, uuid, &fetcher, &refresher)
+            .await
+            .unwrap();
+        assert_eq!(outcome, VerifyOutcome::Rejected);
 
         let row = store.find_by_uuid(uuid).unwrap().unwrap();
-        assert_ne!(row.verify_status, "ok");
+        assert_eq!(row.verify_status, "rejected");
+        swap::delete_private(uuid).unwrap();
+    }
+
+    /// 401 on /profile + ServerError on refresh (5xx) → NetworkError, NOT
+    /// Rejected. Preserves history so a blip doesn't forget verified_email.
+    #[tokio::test]
+    async fn test_verify_refresh_server_error_is_transient_not_rejected() {
+        let _lock = crate::testing::lock_data_dir();
+        let _env = crate::testing::setup_test_data_dir();
+        let (store, _dir, uuid) = setup_account("alice@example.com");
+        swap::save_private(uuid, &crate::testing::fresh_blob_json()).unwrap();
+        store
+            .update_verification(
+                uuid,
+                &VerifyOutcome::Ok {
+                    email: "alice@example.com".into(),
+                },
+            )
+            .unwrap();
+
+        let fetcher = MockFetcher::rejecting();
+        let refresher = MockRefresher::server_erroring();
+        let outcome = verify_account_identity_with(&store, uuid, &fetcher, &refresher)
+            .await
+            .unwrap();
+        assert_eq!(outcome, VerifyOutcome::NetworkError);
+
+        let row = store.find_by_uuid(uuid).unwrap().unwrap();
+        assert_eq!(row.verify_status, "network_error");
+        // Previous verified_email must survive the transient error.
+        assert_eq!(row.verified_email.as_deref(), Some("alice@example.com"));
+        swap::delete_private(uuid).unwrap();
+    }
+
+    /// 401 → refresh succeeds → new profile matches stored email → the
+    /// rotated blob MUST be written to the slot and the row marked Ok.
+    #[tokio::test]
+    async fn test_verify_refresh_success_persists_rotated_blob() {
+        let _lock = crate::testing::lock_data_dir();
+        let _env = crate::testing::setup_test_data_dir();
+        let (store, _dir, uuid) = setup_account("alice@example.com");
+        let original_blob = crate::testing::fresh_blob_json();
+        swap::save_private(uuid, &original_blob).unwrap();
+
+        // /profile rejects first, then the post-refresh call returns the
+        // expected email.
+        let fetcher = MockFetcher {
+            email: Mutex::new(Some("alice@example.com".into())),
+            err: Mutex::new(Some(OAuthError::AuthFailed("401".into()))),
+        };
+        let refresher = MockRefresher::ok_with("sk-ant-oat01-new", "sk-ant-ort01-new");
+
+        let outcome = verify_account_identity_with(&store, uuid, &fetcher, &refresher)
+            .await
+            .unwrap();
+        assert_eq!(outcome, VerifyOutcome::Ok { email: "alice@example.com".into() });
+
+        // Slot must hold the rotated blob now — NOT the original.
+        let stored = swap::load_private(uuid).unwrap();
+        assert_ne!(stored, original_blob, "slot must hold the refreshed blob");
+        assert!(stored.contains("sk-ant-oat01-new"));
+        swap::delete_private(uuid).unwrap();
+    }
+
+    /// 401 → refresh succeeds → new profile returns DIFFERENT email →
+    /// Drift. The rotated blob must NOT be written (that would entrench
+    /// the misfiling with a fresh-but-wrong token — exactly the bug
+    /// that motivated this module).
+    #[tokio::test]
+    async fn test_verify_drift_after_refresh_does_not_persist() {
+        let _lock = crate::testing::lock_data_dir();
+        let _env = crate::testing::setup_test_data_dir();
+        let (store, _dir, uuid) = setup_account("alice@example.com");
+        let original_blob = crate::testing::fresh_blob_json();
+        swap::save_private(uuid, &original_blob).unwrap();
+
+        let fetcher = MockFetcher {
+            // 1st (pre-refresh) call: 401. 2nd (post-refresh) call: bob.
+            email: Mutex::new(Some("bob@example.com".into())),
+            err: Mutex::new(Some(OAuthError::AuthFailed("401".into()))),
+        };
+        let refresher = MockRefresher::ok_with("new-access", "new-refresh");
+
+        let outcome = verify_account_identity_with(&store, uuid, &fetcher, &refresher)
+            .await
+            .unwrap();
+        assert!(matches!(outcome, VerifyOutcome::Drift { .. }));
+
+        // Critical: the rotated blob must NOT have been written.
+        let stored = swap::load_private(uuid).unwrap();
+        assert_eq!(stored, original_blob, "drift must not persist the rotated blob");
         swap::delete_private(uuid).unwrap();
     }
 

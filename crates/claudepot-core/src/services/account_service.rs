@@ -427,6 +427,17 @@ pub(crate) async fn reimport_from_current_with(
     // Sync the flag — storage is now populated.
     let _ = store.update_credentials_flag(account_id, true);
 
+    // Profile fetch just confirmed label == blob identity. Persist that
+    // so the DB row reflects reality; otherwise a prior Drift/Rejected/
+    // NetworkError state would linger until the next verify pass even
+    // though re-login has already fixed things.
+    let _ = store.update_verification(
+        account_id,
+        &crate::account::VerifyOutcome::Ok {
+            email: prof.email.clone(),
+        },
+    );
+
     // Align Claudepot's active_cli with CC's reality: CC is now holding
     // this account's blob (that's the premise of re-import), so this
     // account IS the active CLI. Without this sync a subsequent swap

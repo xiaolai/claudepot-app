@@ -13,8 +13,30 @@ import { sampleAccount, sampleStatus } from "./test/fixtures";
 // Dynamic import so each test's mock takes effect before App loads its own
 // import of @tauri-apps/api/core.
 async function renderApp(handlers: Record<string, (args?: unknown) => unknown>) {
-  // Merge in sync_from_current_cc default (many tests don't care about it)
-  const merged: Record<string, (args?: unknown) => unknown> = { sync_from_current_cc: () => "", ...handlers };
+  // Merge defaults for commands most tests don't care about. `fetch_all_usage`
+  // and `verify_all_accounts` fire from useEffect on every mount — without a
+  // default they'd throw "unmocked command" in every test. verify_all_accounts
+  // returning [] means the sidebar keeps the DB-sourced list unchanged.
+  // Cache the LATEST account_list result so the default verify pass-through
+  // doesn't re-invoke counter-based handlers (many tests use a per-call
+  // counter to sequence "before" vs "after" states). After each account_list
+  // call we snapshot the result; the default verify_all_accounts returns
+  // the most recent snapshot, preserving whatever the test just set up.
+  let latestListSnapshot: unknown = [];
+  const wrappedAccountList = handlers.account_list
+    ? (args?: unknown) => {
+        const out = handlers.account_list!(args);
+        latestListSnapshot = out;
+        return out;
+      }
+    : undefined;
+  const merged: Record<string, (args?: unknown) => unknown> = {
+    sync_from_current_cc: () => "",
+    fetch_all_usage: () => ({}),
+    verify_all_accounts: () => latestListSnapshot,
+    ...handlers,
+    ...(wrappedAccountList ? { account_list: wrappedAccountList } : {}),
+  };
   vi.doMock("@tauri-apps/api/core", () => ({
     invoke: vi.fn(async (cmd: string, args?: unknown) => {
       const h = merged[cmd];
@@ -871,5 +893,64 @@ describe("Concurrent refresh guard", () => {
       // Should never have more than 1 concurrent app_status call
       expect(maxConcurrent).toBeLessThanOrEqual(1);
     });
+  });
+});
+
+describe("App — verified identity surface", () => {
+  it("renders the drift banner when any account has drift=true", async () => {
+    const driftedAccount = sampleAccount({
+      email: "lixiaolai@gmail.com",
+      verified_email: "xiaolaiapple@gmail.com",
+      verify_status: "drift",
+      drift: true,
+    });
+    await renderApp({
+      app_status: () => sampleStatus({ account_count: 1 }),
+      account_list: () => [driftedAccount],
+    });
+
+    // Banner text comes from App.tsx's drift alert block.
+    const banner = await screen.findByRole("alert");
+    expect(banner).toHaveTextContent(/account drift detected/i);
+    expect(banner).toHaveTextContent(
+      /lixiaolai@gmail\.com authenticates as xiaolaiapple@gmail\.com/i,
+    );
+  });
+
+  it("does not render the drift banner when all accounts have drift=false", async () => {
+    await renderApp({
+      app_status: () => sampleStatus({ account_count: 1 }),
+      account_list: () => [sampleAccount({ drift: false, verify_status: "ok" })],
+    });
+
+    await screen.findByText("alice@example.com");
+    // Keychain banner uses role="alert" too — assert on the drift text only.
+    expect(screen.queryByText(/account drift detected/i)).not.toBeInTheDocument();
+  });
+
+  it("sidebar status dot gets a DRIFT tooltip when the slot is misfiled", async () => {
+    const drifted = sampleAccount({
+      email: "lixiaolai@gmail.com",
+      verified_email: "xiaolaiapple@gmail.com",
+      verify_status: "drift",
+      drift: true,
+      token_status: "valid (7h 59m remaining)",
+    });
+    const { container } = await renderApp({
+      app_status: () => sampleStatus({ account_count: 1 }),
+      account_list: () => [drifted],
+    });
+
+    await screen.findByText("lixiaolai@gmail.com");
+    // status-dot sits inside .sidebar-item; title attr carries the tooltip.
+    const dot = container.querySelector(".sidebar-item .status-dot");
+    expect(dot).not.toBeNull();
+    expect(dot).toHaveAttribute(
+      "title",
+      expect.stringContaining("DRIFT — blob authenticates as xiaolaiapple@gmail.com"),
+    );
+    // Drift must override token_status for color: dot has .bad class
+    // regardless of the locally-valid token.
+    expect(dot?.className).toContain("bad");
   });
 });

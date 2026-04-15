@@ -428,13 +428,23 @@ pub async fn verify(ctx: &AppContext, email_input: Option<&str>) -> Result<()> {
         }
     }
 
-    // Exit code contract:
-    //   0 = all ok, 2 = drift, 3 = rejected or network error
+    // Exit-code contract (documented in `.claude/rules/commands.md`):
+    //   0 = every account returned Ok
+    //   2 = at least one drift (slot misfiled)
+    //   3 = at least one rejected OR network_error OR un-checkable slot
+    //
+    // 3 dominates 2: the "we couldn't confirm" condition is strictly
+    // worse than "we confirmed something is wrong", because scripts
+    // that branch on 2 to auto-remediate drift need to know they got
+    // a complete picture first. `no_creds` rows also count toward 3
+    // — they weren't checked, so the command cannot honestly report
+    // "all ok".
+    let no_creds = rows.iter().any(|(_, _, status, _)| status == "no_creds");
+    if rejected || net || no_creds {
+        std::process::exit(3);
+    }
     if drift {
         std::process::exit(2);
-    }
-    if rejected || net {
-        std::process::exit(3);
     }
     Ok(())
 }
