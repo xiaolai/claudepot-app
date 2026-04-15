@@ -187,21 +187,26 @@ pub async fn inspect(ctx: &AppContext, email_input: &str) -> Result<()> {
         });
         match &usage_result {
             Ok(Some(u)) => {
+                // Helper closure: the server may return `resets_at: null`
+                // for a window with no reset yet — preserve that shape
+                // downstream instead of letting serde_json panic on None.
+                let win_json = |w: &claudepot_core::oauth::usage::UsageWindow| {
+                    serde_json::json!({
+                        "utilization": w.utilization,
+                        "resets_at": w.resets_at.as_ref().map(|t| t.to_rfc3339()),
+                    })
+                };
                 if let Some(ref w) = u.five_hour {
-                    j["five_hour"] =
-                        serde_json::json!({"utilization": w.utilization, "resets_at": w.resets_at.to_rfc3339()});
+                    j["five_hour"] = win_json(w);
                 }
                 if let Some(ref w) = u.seven_day {
-                    j["seven_day"] =
-                        serde_json::json!({"utilization": w.utilization, "resets_at": w.resets_at.to_rfc3339()});
+                    j["seven_day"] = win_json(w);
                 }
                 if let Some(ref w) = u.seven_day_opus {
-                    j["seven_day_opus"] =
-                        serde_json::json!({"utilization": w.utilization, "resets_at": w.resets_at.to_rfc3339()});
+                    j["seven_day_opus"] = win_json(w);
                 }
                 if let Some(ref w) = u.seven_day_sonnet {
-                    j["seven_day_sonnet"] =
-                        serde_json::json!({"utilization": w.utilization, "resets_at": w.resets_at.to_rfc3339()});
+                    j["seven_day_sonnet"] = win_json(w);
                 }
                 if let Some(ref extra) = u.extra_usage {
                     j["extra_usage"] = serde_json::json!({
@@ -304,13 +309,20 @@ fn print_window(
     window: &Option<claudepot_core::oauth::usage::UsageWindow>,
 ) {
     if let Some(w) = window {
-        let local = w.resets_at.with_timezone(&chrono::Local);
-        println!(
-            "  {:<9}  {:.0}% (resets {})",
-            format!("{label}:"),
-            w.utilization,
-            format_local_time(&local)
-        );
+        match &w.resets_at {
+            Some(ts) => {
+                let local = ts.with_timezone(&chrono::Local);
+                println!(
+                    "  {:<9}  {:.0}% (resets {})",
+                    format!("{label}:"),
+                    w.utilization,
+                    format_local_time(&local)
+                );
+            }
+            None => {
+                println!("  {:<9}  {:.0}%", format!("{label}:"), w.utilization);
+            }
+        }
     }
 }
 

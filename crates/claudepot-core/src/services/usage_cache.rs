@@ -395,8 +395,9 @@ mod tests {
         UsageResponse {
             five_hour: Some(UsageWindow {
                 utilization,
-                resets_at: chrono::DateTime::parse_from_rfc3339("2026-04-13T10:00:00+00:00")
-                    .unwrap(),
+                resets_at: Some(
+                    chrono::DateTime::parse_from_rfc3339("2026-04-13T10:00:00+00:00").unwrap(),
+                ),
             }),
             seven_day: None,
             seven_day_oauth_apps: None,

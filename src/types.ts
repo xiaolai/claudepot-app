@@ -63,7 +63,8 @@ export interface RemoveOutcome {
 
 export interface UsageWindow {
   utilization: number; // 0–100
-  resets_at: string; // RFC3339
+  /** RFC3339, or null when the window has no reset timestamp yet. */
+  resets_at: string | null;
 }
 
 export interface ExtraUsage {
