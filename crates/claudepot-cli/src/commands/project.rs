@@ -188,7 +188,49 @@ pub fn list(ctx: &AppContext) -> Result<()> {
 pub fn show(ctx: &AppContext, path: &str) -> Result<()> {
     warn_pending_journals_banner();
     let config_dir = paths::claude_config_dir();
-    let detail = project::show_project(&config_dir, path)?;
+    let detail = match project::show_project(&config_dir, path) {
+        Ok(d) => d,
+        Err(claudepot_core::error::ProjectError::NotFound(p)) => {
+            // Hint: scan known projects for a basename match — common
+            // case after a rename where the user is still typing the
+            // old path.
+            let basename = std::path::Path::new(&p)
+                .file_name()
+                .map(|s| s.to_string_lossy().to_string())
+                .unwrap_or_default();
+            let suggestions: Vec<String> = if basename.is_empty() {
+                Vec::new()
+            } else {
+                project::list_projects(&config_dir)
+                    .ok()
+                    .unwrap_or_default()
+                    .into_iter()
+                    .filter(|info| {
+                        info.original_path != p
+                            && std::path::Path::new(&info.original_path)
+                                .file_name()
+                                .map(|s| {
+                                    let s = s.to_string_lossy();
+                                    s.starts_with(&basename) || basename.starts_with(s.as_ref())
+                                })
+                                .unwrap_or(false)
+                    })
+                    .map(|info| info.original_path)
+                    .take(5)
+                    .collect()
+            };
+            eprintln!("project not found: {p}");
+            if !suggestions.is_empty() {
+                eprintln!();
+                eprintln!("Did you mean one of these (basename match)?");
+                for s in &suggestions {
+                    eprintln!("  {s}");
+                }
+            }
+            anyhow::bail!("not found");
+        }
+        Err(e) => return Err(e.into()),
+    };
 
     if ctx.json {
         println!("{}", serde_json::to_string_pretty(&detail)?);
@@ -324,6 +366,49 @@ pub fn move_project(
             "  \u{2713} Updated {} history entries",
             result.history_lines_updated
         );
+    }
+    if result.jsonl_files_modified > 0 {
+        println!(
+            "  \u{2713} Rewrote {} cwd reference{} across {} session/subagent file{} (P6)",
+            result.jsonl_lines_rewritten,
+            if result.jsonl_lines_rewritten == 1 { "" } else { "s" },
+            result.jsonl_files_modified,
+            if result.jsonl_files_modified == 1 { "" } else { "s" },
+        );
+    }
+    if !result.jsonl_errors.is_empty() {
+        println!(
+            "  \u{26a0} {} P6 file(s) failed:",
+            result.jsonl_errors.len()
+        );
+        for (path, err) in &result.jsonl_errors {
+            println!("    {:?} \u{2014} {}", path, err);
+        }
+    }
+    if result.config_key_renamed {
+        let suffix = if result.config_had_collision {
+            format!(
+                " (collision: {} key(s) merged old-wins; snapshot at {:?})",
+                result.config_merged_keys.len(),
+                result.config_snapshot_path.as_ref()
+            )
+        } else if result.config_nested_rewrites > 0 {
+            format!(
+                " ({} nested path string(s) rewritten)",
+                result.config_nested_rewrites
+            )
+        } else {
+            String::new()
+        };
+        println!("  \u{2713} ~/.claude.json projects map key migrated (P7){suffix}");
+    }
+    if result.memory_dir_moved {
+        println!("  \u{2713} Auto-memory dir moved (P8)");
+    } else if result.memory_git_root_changed {
+        println!("  \u{2014} P8 skipped: git root changed but no auto-memory dir to move");
+    }
+    if result.project_settings_rewritten {
+        println!("  \u{2713} Project-local .claude/settings.json autoMemoryDirectory rewritten (P9)");
     }
 
     for warning in &result.warnings {
