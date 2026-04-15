@@ -64,9 +64,10 @@ pub(crate) fn compute_dry_run_plan(
     // map key rename is plausibly needed (old != new).
     let would_rewrite_claude_json = old_san != new_san;
 
-    // P8 preview: would auto-memory move? Only if the git root will
-    // change, which is true whenever the project is (or is inside)
-    // the git root and the path changes.
+    // P8 preview: would auto-memory move? Only if BOTH the git root
+    // will change AND a memory dir actually exists at the old git
+    // root's sanitized location. The first condition alone over-
+    // predicts (most projects never have auto-memory).
     let would_move_memory_dir = {
         let old_root = crate::project_memory::find_canonical_git_root(Path::new(old_norm))
             .map(|p| p.to_string_lossy().to_string())
@@ -74,7 +75,16 @@ pub(crate) fn compute_dry_run_plan(
         let new_root = crate::project_memory::find_canonical_git_root(Path::new(_new_norm))
             .map(|p| p.to_string_lossy().to_string())
             .unwrap_or_else(|| _new_norm.to_string());
-        old_root != new_root
+        if old_root == new_root {
+            false
+        } else {
+            let old_git_san = crate::project_sanitize::sanitize_path(&old_root);
+            config_dir
+                .join("projects")
+                .join(&old_git_san)
+                .join("memory")
+                .exists()
+        }
     };
 
     // P9 preview: would project-local settings.json rewrite? Check if
