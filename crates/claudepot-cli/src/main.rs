@@ -57,6 +57,13 @@ enum Commands {
     },
     /// Health check and diagnostics
     Doctor,
+    /// Ground-truth authentication status.
+    ///
+    /// Reads CC's shared credential slot, calls `/api/oauth/profile`,
+    /// compares the verified email to Claudepot's `active_cli` pointer.
+    /// Prints MATCH / DRIFT / NOT SIGNED IN. Exit code: 0 match,
+    /// 2 drift, 3 couldn't check.
+    Status,
 }
 
 #[derive(Subcommand)]
@@ -263,6 +270,7 @@ async fn main() -> Result<()> {
             ProjectAction::Clean { dry_run } => commands::project::clean(&ctx, dry_run)?,
         },
         Commands::Doctor => commands::doctor::run(&ctx).await?,
+        Commands::Status => commands::status::run(&ctx).await?,
     }
 
     Ok(())
