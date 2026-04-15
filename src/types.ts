@@ -23,6 +23,20 @@ export interface AccountSummary {
   drift: boolean;
 }
 
+/**
+ * Ground-truth "what is CC actually authenticated as" — the UI renders
+ * this directly in the top-of-window truth strip. Equivalent of running
+ * `claude auth status`.
+ */
+export interface CcIdentity {
+  /** Email /api/oauth/profile returned, or null if CC has no blob. */
+  email: string | null;
+  /** RFC3339 timestamp of when we ran the profile check. */
+  verified_at: string;
+  /** Populated when CC has a blob but /profile failed. */
+  error: string | null;
+}
+
 export interface AppStatus {
   platform: string; // "macos" | "linux" | "windows"
   arch: string;

@@ -83,6 +83,7 @@ pub fn run() {
             commands::account_remove,
             commands::fetch_all_usage,
             commands::verify_all_accounts,
+            commands::current_cc_identity,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

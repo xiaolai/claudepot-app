@@ -3,6 +3,7 @@ import { invoke } from "@tauri-apps/api/core";
 import type {
   AccountSummary,
   AppStatus,
+  CcIdentity,
   RegisterOutcome,
   RemoveOutcome,
   UsageMap,
@@ -40,4 +41,8 @@ export const api = {
   /// separate `accountList` round-trip. Slow — one HTTP call per account
   /// with credentials.
   verifyAllAccounts: () => invoke<AccountSummary[]>("verify_all_accounts"),
+  /// Ground-truth "what is CC currently authenticated as". Reads the
+  /// shared slot + calls /profile. Never throws — errors land in the
+  /// returned `error` field so the UI can render them as a banner.
+  currentCcIdentity: () => invoke<CcIdentity>("current_cc_identity"),
 };
