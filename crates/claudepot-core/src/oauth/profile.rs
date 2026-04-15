@@ -45,7 +45,7 @@ pub async fn fetch(access_token: &str) -> Result<Profile, OAuthError> {
     }
     if !status.is_success() {
         let _ = resp.text().await; // consume body without exposing it
-        return Err(OAuthError::AuthFailed(format!(
+        return Err(OAuthError::ServerError(format!(
             "profile API returned {status}"
         )));
     }

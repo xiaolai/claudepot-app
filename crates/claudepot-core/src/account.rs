@@ -305,8 +305,9 @@ impl AccountStore {
         self.db().execute(
             "INSERT INTO accounts (uuid, email, org_uuid, org_name, \
              subscription_type, rate_limit_tier, created_at, \
-             has_cli_credentials, has_desktop_profile) \
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
+             has_cli_credentials, has_desktop_profile, \
+             verified_email, verified_at, verify_status) \
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)",
             params![
                 account.uuid.to_string(),
                 account.email,
@@ -317,6 +318,9 @@ impl AccountStore {
                 account.created_at.to_rfc3339(),
                 account.has_cli_credentials,
                 account.has_desktop_profile,
+                account.verified_email,
+                account.verified_at.map(|t| t.to_rfc3339()),
+                account.verify_status,
             ],
         )?;
         Ok(())
@@ -331,70 +335,57 @@ impl AccountStore {
     }
 
     pub fn active_cli_uuid(&self) -> SqlResult<Option<String>> {
-        self.db()
-            .query_row(
-                "SELECT value FROM state WHERE key = 'active_cli'",
-                [],
-                |r| r.get(0),
-            )
-            .optional()
+        self.active_uuid("active_cli")
     }
 
     pub fn set_active_cli(&self, uuid: Uuid) -> SqlResult<()> {
-        let db = self.db();
-        let tx = db.unchecked_transaction()?;
-        let updated = tx.execute(
-            "UPDATE accounts SET last_cli_switch = ?1 WHERE uuid = ?2",
-            params![Utc::now().to_rfc3339(), uuid.to_string()],
-        )?;
-        if updated == 0 {
-            // Refuse to commit an orphan state pointer for a UUID that has
-            // no corresponding accounts row. Roll back the transaction.
-            return Err(rusqlite::Error::QueryReturnedNoRows);
-        }
-        tx.execute(
-            "INSERT OR REPLACE INTO state (key, value) VALUES ('active_cli', ?1)",
-            params![uuid.to_string()],
-        )?;
-        tx.commit()
+        self.set_active("active_cli", "last_cli_switch", uuid)
     }
 
     pub fn clear_active_cli(&self) -> SqlResult<()> {
-        self.db()
-            .execute("DELETE FROM state WHERE key = 'active_cli'", [])?;
-        Ok(())
+        self.clear_active("active_cli")
     }
 
     pub fn active_desktop_uuid(&self) -> SqlResult<Option<String>> {
+        self.active_uuid("active_desktop")
+    }
+
+    pub fn set_active_desktop(&self, uuid: Uuid) -> SqlResult<()> {
+        self.set_active("active_desktop", "last_desktop_switch", uuid)
+    }
+
+    pub fn clear_active_desktop(&self) -> SqlResult<()> {
+        self.clear_active("active_desktop")
+    }
+
+    fn active_uuid(&self, key: &str) -> SqlResult<Option<String>> {
         self.db()
             .query_row(
-                "SELECT value FROM state WHERE key = 'active_desktop'",
+                &format!("SELECT value FROM state WHERE key = '{key}'"),
                 [],
                 |r| r.get(0),
             )
             .optional()
     }
 
-    pub fn set_active_desktop(&self, uuid: Uuid) -> SqlResult<()> {
+    fn set_active(&self, key: &str, ts_column: &str, uuid: Uuid) -> SqlResult<()> {
         let db = self.db();
         let tx = db.unchecked_transaction()?;
-        let updated = tx.execute(
-            "UPDATE accounts SET last_desktop_switch = ?1 WHERE uuid = ?2",
-            params![Utc::now().to_rfc3339(), uuid.to_string()],
-        )?;
+        let sql = format!("UPDATE accounts SET {ts_column} = ?1 WHERE uuid = ?2");
+        let updated = tx.execute(&sql, params![Utc::now().to_rfc3339(), uuid.to_string()])?;
         if updated == 0 {
             return Err(rusqlite::Error::QueryReturnedNoRows);
         }
         tx.execute(
-            "INSERT OR REPLACE INTO state (key, value) VALUES ('active_desktop', ?1)",
+            &format!("INSERT OR REPLACE INTO state (key, value) VALUES ('{key}', ?1)"),
             params![uuid.to_string()],
         )?;
         tx.commit()
     }
 
-    pub fn clear_active_desktop(&self) -> SqlResult<()> {
+    fn clear_active(&self, key: &str) -> SqlResult<()> {
         self.db()
-            .execute("DELETE FROM state WHERE key = 'active_desktop'", [])?;
+            .execute(&format!("DELETE FROM state WHERE key = '{key}'"), [])?;
         Ok(())
     }
 

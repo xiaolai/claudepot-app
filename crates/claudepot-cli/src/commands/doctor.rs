@@ -26,6 +26,8 @@ pub async fn run(ctx: &AppContext) -> Result<()> {
                         "email": a.email,
                         "token_status": a.token_status,
                         "remaining_mins": a.remaining_mins,
+                        "verify_status": a.verify_status,
+                        "verified_email": a.verified_email,
                     })
                 }).collect::<Vec<_>>(),
             })
@@ -103,14 +105,45 @@ pub async fn run(ctx: &AppContext) -> Result<()> {
 
     // Account health
     let mut expired_accounts = 0;
+    let mut drift_accounts = 0;
     if !report.account_health.is_empty() {
         println!("\n  Account health:");
         for a in &report.account_health {
-            if a.remaining_mins.is_some_and(|m| m > 0) {
-                println!("    {}  ✓ {}", a.email, a.token_status);
+            let token_line = if a.remaining_mins.is_some_and(|m| m > 0) {
+                format!("    {}  ✓ {}", a.email, a.token_status)
             } else {
-                println!("    {}  ✗ {}", a.email, a.token_status);
                 expired_accounts += 1;
+                format!("    {}  ✗ {}", a.email, a.token_status)
+            };
+            println!("{token_line}");
+            // Verification state (populated by last `claudepot account
+            // verify` run; "never" means reconciliation has not run yet).
+            match a.verify_status.as_str() {
+                "never" => {
+                    println!("       verify: not yet run (run `claudepot account verify`)");
+                }
+                "ok" => {
+                    println!(
+                        "       verify: ✓ {} (last /profile match)",
+                        a.verified_email.as_deref().unwrap_or("—")
+                    );
+                }
+                "drift" => {
+                    drift_accounts += 1;
+                    println!(
+                        "       verify: ✗ DRIFT — authenticates as {}",
+                        a.verified_email.as_deref().unwrap_or("?")
+                    );
+                }
+                "rejected" => {
+                    println!("       verify: ✗ rejected (token revoked — re-login)");
+                }
+                "network_error" => {
+                    println!("       verify: ? could not reach /profile last time");
+                }
+                other => {
+                    println!("       verify: {other}");
+                }
             }
         }
     }
@@ -155,9 +188,19 @@ pub async fn run(ctx: &AppContext) -> Result<()> {
     if expired_accounts > 0 {
         warnings += expired_accounts;
     }
+    // Drift means a slot is authenticated as a different identity than
+    // its label — that's a correctness problem the user must fix, so
+    // doctor exits non-zero (2) rather than merely warning.
+    if drift_accounts > 0 {
+        errors += drift_accounts;
+    }
 
     if errors > 0 {
         println!("{} error(s), {} warning(s).", errors, warnings);
+        if drift_accounts > 0 {
+            std::process::exit(2);
+        }
+        std::process::exit(1);
     } else if warnings > 0 {
         println!("All checks passed ({} warning(s)).", warnings);
     } else {

@@ -67,6 +67,15 @@ pub enum OAuthError {
 
     #[error("authentication failed: {0}")]
     AuthFailed(String),
+
+    /// Non-401, non-429 non-2xx response from an OAuth endpoint. Separate
+    /// from AuthFailed so callers (identity verification in particular)
+    /// can distinguish "token is genuinely bad" from "the server had a
+    /// bad minute" — the former is a `Rejected` outcome requiring
+    /// re-login; the latter is `NetworkError` and should NOT wipe the
+    /// verified_email history.
+    #[error("OAuth server error: {0}")]
+    ServerError(String),
 }
 
 #[derive(Error, Debug)]
