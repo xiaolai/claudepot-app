@@ -45,9 +45,20 @@ pub async fn refresh(refresh_token: &str) -> Result<TokenResponse, OAuthError> {
             retry_after_secs: retry_after,
         });
     }
-    if !status.is_success() {
-        let _ = resp.text().await; // consume without exposing
+    if status == 400 || status == 401 {
+        // 400/401 = the refresh_token itself was refused (revoked,
+        // expired, or never valid). This is terminal — re-login needed.
+        let _ = resp.text().await;
         return Err(OAuthError::RefreshFailed(format!(
+            "token endpoint rejected refresh_token with {status}"
+        )));
+    }
+    if !status.is_success() {
+        // 5xx or unexpected non-2xx: transport / server-side trouble.
+        // Not a credential problem — treat as transient so callers can
+        // preserve verified_email history and retry later.
+        let _ = resp.text().await;
+        return Err(OAuthError::ServerError(format!(
             "token endpoint returned {status}"
         )));
     }
