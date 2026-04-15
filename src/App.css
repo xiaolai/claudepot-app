@@ -125,6 +125,83 @@ body {
   -webkit-app-region: no-drag;
 }
 
+/* ---------- section rail ---------- */
+
+.section-rail {
+  width: 48px;
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  /* 52px clears the overlay title bar / traffic lights */
+  padding: 52px 0 8px;
+  background: transparent;
+  border-right: 0.5px solid var(--border);
+  -webkit-app-region: drag;
+}
+
+.section-rail-item {
+  width: 32px;
+  height: 32px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: transparent;
+  border: 0;
+  border-radius: 6px;
+  color: var(--muted);
+  cursor: default;
+  -webkit-app-region: no-drag;
+}
+
+.section-rail-item:hover {
+  background: var(--accent-weak);
+  color: var(--text);
+}
+
+.section-rail-item.active {
+  background: var(--accent-weak);
+  color: var(--accent);
+}
+
+.section-rail-item:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+/* ---------- section submenu (popover) ---------- */
+
+.section-submenu {
+  position: fixed;
+  min-width: 180px;
+  padding: 4px;
+  background: var(--surface);
+  border: 0.5px solid var(--border);
+  border-radius: 8px;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.15);
+  z-index: 100;
+}
+
+.section-submenu-item {
+  display: block;
+  width: 100%;
+  padding: 6px 10px;
+  text-align: left;
+  background: transparent;
+  border: 0;
+  border-radius: 4px;
+  color: var(--text);
+  font-size: 13px;
+  cursor: default;
+}
+
+.section-submenu-item:hover,
+.section-submenu-item:focus-visible {
+  background: var(--accent-weak);
+  outline: none;
+}
+
 /* ---------- sidebar ---------- */
 
 .sidebar {
