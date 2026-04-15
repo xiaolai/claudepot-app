@@ -22,10 +22,9 @@ pub struct RewriteStats {
     pub lines_rewritten: usize,
 }
 
-/// Progress callback invoked after each file completes. `done` is a
-/// monotonically increasing count of files processed (not modified);
-/// `total` is the upfront file count.
-pub type ProgressCallback<'a> = &'a (dyn Fn(usize, usize) + Send + Sync);
+/// Re-export for callers that used the old name. New code should
+/// import `ProgressSink` from `project_progress` directly.
+pub use crate::project_progress::{NoopSink, PhaseStatus, ProgressSink};
 
 /// Rewrite `cwd` fields inside all jsonl + `.meta.json` files under
 /// `project_dir` that reference `old_path` (exact-match or prefix with
@@ -36,11 +35,15 @@ pub type ProgressCallback<'a> = &'a (dyn Fn(usize, usize) + Send + Sync);
 /// rewrites are still durable (atomic replace) so rollback can reverse
 /// them by calling this function again with `old_path` / `new_path`
 /// swapped.
+///
+/// The `sink.sub_progress("P6", done, total)` hook fires after each
+/// file completes. `done` is a monotonically increasing count of files
+/// processed (not modified); `total` is the upfront file count.
 pub fn rewrite_project_paths(
     project_dir: &Path,
     old_path: &str,
     new_path: &str,
-    progress: ProgressCallback<'_>,
+    sink: &dyn ProgressSink,
 ) -> Result<(RewriteStats, Vec<(PathBuf, ProjectError)>), ProjectError> {
     let files = collect_rewrite_targets(project_dir)?;
     let total = files.len();
@@ -86,7 +89,7 @@ pub fn rewrite_project_paths(
                 .push((path.clone(), e));
         }
         let n = done.fetch_add(1, std::sync::atomic::Ordering::Relaxed) + 1;
-        progress(n, total);
+        sink.sub_progress("P6", n, total);
     }));
 
     let stats = stats.into_inner().unwrap_or_else(|e| e.into_inner());
@@ -336,8 +339,8 @@ fn rewrite_strings_in_value(v: &mut Value, old_path: &str, new_path: &str) -> us
 mod tests {
     use super::*;
 
-    fn noop_progress() -> ProgressCallback<'static> {
-        &|_, _| {}
+    fn noop_progress() -> &'static dyn ProgressSink {
+        &NoopSink
     }
 
     #[test]
@@ -508,11 +511,19 @@ not json /a/b
 
     #[test]
     fn test_rewrite_progress_callback_fires() {
-        use std::sync::atomic::{AtomicUsize, Ordering};
-        let calls = AtomicUsize::new(0);
-        let cb: ProgressCallback = &|_done, _total| {
-            calls.fetch_add(1, Ordering::Relaxed);
-        };
+        use std::sync::Mutex;
+        #[derive(Default)]
+        struct CountingSink {
+            calls: Mutex<Vec<(String, usize, usize)>>,
+        }
+        impl ProgressSink for CountingSink {
+            fn phase(&self, _p: &str, _s: PhaseStatus) {}
+            fn sub_progress(&self, phase: &str, done: usize, total: usize) {
+                self.calls.lock().unwrap().push((phase.to_string(), done, total));
+            }
+        }
+
+        let sink = CountingSink::default();
 
         let tmp = tempfile::tempdir().unwrap();
         let proj = tmp.path().join("p");
@@ -520,8 +531,11 @@ not json /a/b
         fs::write(proj.join("a.jsonl"), r#"{"cwd":"/a"}"#).unwrap();
         fs::write(proj.join("b.jsonl"), r#"{"cwd":"/other"}"#).unwrap();
 
-        let (_, _) = rewrite_project_paths(&proj, "/a", "/z", cb).unwrap();
-        assert_eq!(calls.load(Ordering::Relaxed), 2);
+        let (_, _) = rewrite_project_paths(&proj, "/a", "/z", &sink).unwrap();
+        let calls = sink.calls.lock().unwrap();
+        assert_eq!(calls.len(), 2);
+        // All calls are for P6 with total=2.
+        assert!(calls.iter().all(|c| c.0 == "P6" && c.2 == 2));
     }
 
     #[test]
