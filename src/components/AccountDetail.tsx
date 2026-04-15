@@ -1,3 +1,4 @@
+import type * as React from "react";
 import type { AccountSummary, AccountUsage, UsageWindow } from "../types";
 import { CopyButton } from "./CopyButton";
 
@@ -11,6 +12,46 @@ function relativeTime(iso: string | null): string {
   if (hrs < 24) return `${hrs}h ago`;
   const days = Math.floor(hrs / 24);
   return `${days}d ago`;
+}
+
+/**
+ * Render the runtime-verified identity row. This is the other half of
+ * the Token row — Token answers "is the local clock past expiry", while
+ * Verified answers "did the server actually accept this blob last time
+ * we asked". They disagree when a token has been revoked server-side
+ * but hasn't reached its nominal expiry yet (the xiaolaiapple scenario).
+ */
+function renderVerified(a: AccountSummary): React.ReactNode {
+  const when = a.verified_at ? `· ${relativeTime(a.verified_at)}` : "";
+  switch (a.verify_status) {
+    case "ok":
+      return (
+        <span className="verify-line ok">
+          ✓ {a.verified_email ?? "—"} {when}
+        </span>
+      );
+    case "drift":
+      return (
+        <span className="verify-line bad">
+          DRIFT — blob authenticates as {a.verified_email ?? "?"} {when}
+        </span>
+      );
+    case "rejected":
+      return (
+        <span className="verify-line bad">
+          server rejected token — re-login required {when}
+        </span>
+      );
+    case "network_error":
+      return (
+        <span className="verify-line muted">
+          could not reach /profile {when} (last known: {a.verified_email ?? "—"})
+        </span>
+      );
+    case "never":
+    default:
+      return <span className="muted">not yet verified</span>;
+  }
 }
 
 function formatResetTime(iso: string): string {
@@ -79,8 +120,15 @@ export function AccountDetail({
           <dd>{relativeTime(a.last_cli_switch)}</dd>
           <dt>Last Desktop switch</dt>
           <dd>{relativeTime(a.last_desktop_switch)}</dd>
-          <dt>Token</dt>
-          <dd>{a.token_status}</dd>
+          <dt title="Local-clock check only — does not mean the server still accepts the token">Token</dt>
+          <dd>
+            {a.token_status}
+            {a.token_status.startsWith("valid") && (
+              <span className="muted verify-note"> (not past local expiry)</span>
+            )}
+          </dd>
+          <dt>Verified</dt>
+          <dd>{renderVerified(a)}</dd>
           <dt>Credentials</dt>
           <dd>{a.credentials_healthy ? "healthy" : "missing or corrupt"}</dd>
           <dt>Desktop profile</dt>

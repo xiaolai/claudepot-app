@@ -627,6 +627,77 @@ button.danger.primary:hover:not(:disabled) {
   }
 }
 
+/* ---------- cc truth strip ----------
+   One-line status bar at the top of the content pane showing what CC's
+   shared credential slot actually authenticates as (from /api/oauth/profile).
+   Provides ground truth next to Claudepot's DB-derived `active_cli` and
+   makes drift visible at a glance.
+*/
+
+.cc-truth-strip {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding: 6px 12px;
+  margin-bottom: 12px;
+  border-radius: 6px;
+  background: var(--surface);
+  border: 0.5px solid var(--border);
+  font-size: 11px;
+  color: var(--text);
+}
+
+.cc-truth-strip .tag {
+  display: inline-block;
+  padding: 1px 6px;
+  border-radius: 999px;
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.3px;
+  text-transform: uppercase;
+}
+
+.cc-truth-strip .tag.ok {
+  background: var(--ok-weak);
+  color: var(--ok);
+}
+
+.cc-truth-strip .tag.bad {
+  background: var(--bad-weak);
+  color: var(--bad);
+}
+
+.cc-truth-strip .bad {
+  color: var(--bad);
+}
+
+.cc-truth-strip .reconcile-chip {
+  font-style: italic;
+  margin-left: auto;
+  opacity: 0.8;
+}
+
+/* ---------- verified identity row in AccountDetail ---------- */
+
+.verify-line {
+  display: inline;
+}
+.verify-line.ok {
+  color: var(--ok);
+}
+.verify-line.bad {
+  color: var(--bad);
+  font-weight: 500;
+}
+.verify-line.muted {
+  color: var(--muted);
+}
+.verify-note {
+  font-size: 10px;
+  font-style: italic;
+}
+
 /* ---------- banner ---------- */
 
 .banner {

@@ -4,7 +4,7 @@
 //! command opens the store, calls a core function, and serializes the result.
 //! Errors become user-facing strings at this boundary.
 
-use crate::dto::{AccountSummary, AccountUsageDto, AppStatus, RegisterOutcome, RemoveOutcome};
+use crate::dto::{AccountSummary, AccountUsageDto, AppStatus, CcIdentity, RegisterOutcome, RemoveOutcome};
 use claudepot_core::account::{Account, AccountStore};
 use claudepot_core::cli_backend;
 use claudepot_core::desktop_backend;
@@ -383,4 +383,67 @@ pub async fn verify_all_accounts() -> Result<Vec<AccountSummary>, String> {
     // refresh rotated the access_token in between.
     let refreshed = store.list().map_err(|e| format!("list failed: {e}"))?;
     Ok(refreshed.iter().map(AccountSummary::from).collect())
+}
+
+/// Ground-truth "what is CC actually authenticated as".
+///
+/// Reads CC's shared credential slot (the `Claude Code-credentials`
+/// keychain item on macOS, file on Linux/Windows), calls
+/// `/api/oauth/profile`, returns the verified email. This is what
+/// `claude auth status` would print — useful when Claudepot's own
+/// `active_cli` pointer has drifted from reality.
+///
+/// Never returns an error to the frontend: all failure modes land in
+/// the `error` field of the returned DTO so the GUI can render them
+/// as a visible banner instead of a toast that might get dismissed.
+#[tauri::command]
+pub async fn current_cc_identity() -> Result<CcIdentity, String> {
+    use claudepot_core::blob::CredentialBlob;
+    use claudepot_core::cli_backend::swap::{DefaultProfileFetcher, ProfileFetcher};
+
+    let now = chrono::Utc::now();
+    let platform = cli_backend::create_platform();
+    let blob_str = match platform.read_default().await {
+        Ok(Some(s)) => s,
+        Ok(None) => {
+            return Ok(CcIdentity {
+                email: None,
+                verified_at: now,
+                error: None,
+            });
+        }
+        Err(e) => {
+            return Ok(CcIdentity {
+                email: None,
+                verified_at: now,
+                error: Some(format!("couldn't read CC credentials: {e}")),
+            });
+        }
+    };
+    let blob = match CredentialBlob::from_json(&blob_str) {
+        Ok(b) => b,
+        Err(e) => {
+            return Ok(CcIdentity {
+                email: None,
+                verified_at: now,
+                error: Some(format!("CC blob is not valid JSON: {e}")),
+            });
+        }
+    };
+    let fetcher = DefaultProfileFetcher;
+    match fetcher
+        .fetch_email(&blob.claude_ai_oauth.access_token)
+        .await
+    {
+        Ok(email) => Ok(CcIdentity {
+            email: Some(email),
+            verified_at: now,
+            error: None,
+        }),
+        Err(e) => Ok(CcIdentity {
+            email: None,
+            verified_at: now,
+            error: Some(format!("/profile returned error: {e}")),
+        }),
+    }
 }

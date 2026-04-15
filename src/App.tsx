@@ -16,8 +16,16 @@ import { ToastContainer } from "./components/ToastContainer";
 function App() {
   const { toasts, pushToast, dismissToast } = useToasts();
   const busy = useBusy();
-  const { status, accounts, loadError, keychainIssue, refresh } =
-    useRefresh(pushToast);
+  const {
+    status,
+    accounts,
+    loadError,
+    keychainIssue,
+    syncError,
+    ccIdentity,
+    verifying,
+    refresh,
+  } = useRefresh(pushToast);
   const { usage, refreshUsage } = useUsage();
   const actions = useActions({ pushToast, refresh, ...busy });
 
@@ -84,6 +92,48 @@ function App() {
         />
 
         <main className="content">
+          {(ccIdentity || verifying) && (
+            <div className="cc-truth-strip" aria-label="CC authentication status">
+              {ccIdentity?.email ? (
+                <>
+                  <span className="muted">CC:</span>{" "}
+                  <strong className="selectable">{ccIdentity.email}</strong>
+                  {status?.cli_active_email &&
+                    !ccIdentity.email.toLowerCase()
+                      .localeCompare(
+                        status.cli_active_email.toLowerCase(),
+                      ) && <span className="tag ok"> MATCH</span>}
+                  {status?.cli_active_email &&
+                    ccIdentity.email.toLowerCase() !==
+                      status.cli_active_email.toLowerCase() && (
+                      <span className="tag bad" title={`Claudepot active_cli: ${status.cli_active_email}`}>
+                        DRIFT
+                      </span>
+                    )}
+                </>
+              ) : ccIdentity?.error ? (
+                <span className="bad">
+                  CC: could not verify — {ccIdentity.error}
+                </span>
+              ) : ccIdentity ? (
+                <span className="muted">CC: not signed in</span>
+              ) : null}
+              {verifying && (
+                <span className="muted reconcile-chip">
+                  · Reconciling identities…
+                </span>
+              )}
+            </div>
+          )}
+          {syncError && (
+            <div className="banner warn" role="alert">
+              <div>
+                <strong>Couldn't sync with Claude Code.</strong>{" "}
+                {syncError}. Claudepot's active-CLI state may be stale —
+                the truth strip above shows what CC actually holds.
+              </div>
+            </div>
+          )}
           {accounts.some((a) => a.drift) && (
             <div className="banner warn" role="alert">
               <div>
