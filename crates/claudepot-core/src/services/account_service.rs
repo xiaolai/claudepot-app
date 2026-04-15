@@ -1079,8 +1079,12 @@ mod tests {
         let account = insert_account(&store, "alice@example.com");
         // DB flag was flipped off (e.g. reinstall wiped storage).
         let _ = store.update_credentials_flag(account.uuid, false);
+        // Capture the blob once — fresh_blob_json() uses Utc::now() so
+        // calling it twice returns JSON strings whose expiresAt differs
+        // by ~1ms, which makes the post-sync comparison flaky.
+        let cc_blob = fresh_blob_json();
         let platform = MockPlatform {
-            blob: Some(fresh_blob_json()),
+            blob: Some(cc_blob.clone()),
         };
         let fetcher = MockProfileFetcher::ok("alice@example.com");
 
@@ -1090,7 +1094,7 @@ mod tests {
 
         assert_eq!(synced, Some(account.uuid), "should report the synced uuid");
         // Blob now in Claudepot's storage.
-        assert_eq!(swap::load_private(account.uuid).unwrap(), fresh_blob_json());
+        assert_eq!(swap::load_private(account.uuid).unwrap(), cc_blob);
         // active_cli aligned with CC's current reality.
         assert_eq!(
             store.active_cli_uuid().unwrap(),
