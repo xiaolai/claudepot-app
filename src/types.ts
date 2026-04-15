@@ -14,6 +14,13 @@ export interface AccountSummary {
   token_status: string; // "valid (...)", "expired", "no credentials", ...
   token_remaining_mins: number | null;
   credentials_healthy: boolean; // true iff stored blob exists + parses
+  /** "never" | "ok" | "drift" | "rejected" | "network_error" */
+  verify_status: string;
+  /** Server-observed email for this slot (may differ from `email` → drift). */
+  verified_email: string | null;
+  verified_at: string | null; // RFC3339
+  /** True iff verified_email differs from email — misfiled slot. */
+  drift: boolean;
 }
 
 export interface AppStatus {

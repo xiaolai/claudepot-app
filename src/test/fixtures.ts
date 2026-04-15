@@ -31,5 +31,9 @@ export const sampleAccount = (
   token_status: "valid (47m remaining)",
   token_remaining_mins: 47,
   credentials_healthy: true,
+  verify_status: "ok",
+  verified_email: "alice@example.com",
+  verified_at: null,
+  drift: false,
   ...overrides,
 });

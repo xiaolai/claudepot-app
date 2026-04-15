@@ -329,3 +329,50 @@ pub async fn fetch_all_usage(
     }
     Ok(out)
 }
+
+/// Reconcile every account's blob identity against `/api/oauth/profile`.
+///
+/// Iterates all accounts with credentials, calls
+/// `services::identity::verify_account_identity` for each (staggered by
+/// the usage cache's BATCH_STAGGER so the endpoint doesn't see a burst),
+/// and returns the refreshed AccountSummary list so the GUI can re-render
+/// with new `verify_status` / `verified_email` / `drift` fields.
+///
+/// This is what the Refresh button calls; the GUI may also auto-invoke
+/// it on window focus (debounced) so drift surfaces without a click.
+#[tauri::command]
+pub async fn verify_all_accounts() -> Result<Vec<AccountSummary>, String> {
+    use claudepot_core::cli_backend::swap::DefaultProfileFetcher;
+    use claudepot_core::services::identity;
+    use std::time::Duration;
+
+    let store = open_store()?;
+    let accounts = store.list().map_err(|e| format!("list failed: {e}"))?;
+    let fetcher = DefaultProfileFetcher;
+
+    let mut first = true;
+    for account in &accounts {
+        if !account.has_cli_credentials {
+            continue;
+        }
+        if !first {
+            tokio::time::sleep(Duration::from_millis(200)).await;
+        }
+        first = false;
+        match identity::verify_account_identity(&store, account.uuid, &fetcher).await {
+            Ok(outcome) => tracing::info!(
+                account = %account.uuid,
+                status = outcome.as_str(),
+                "verify_all_accounts: result"
+            ),
+            Err(e) => tracing::warn!(
+                account = %account.uuid,
+                "verify_all_accounts: error {e}"
+            ),
+        }
+    }
+
+    // Re-list to pick up the freshly persisted verify_status columns.
+    let refreshed = store.list().map_err(|e| format!("list failed: {e}"))?;
+    Ok(refreshed.iter().map(AccountSummary::from).collect())
+}

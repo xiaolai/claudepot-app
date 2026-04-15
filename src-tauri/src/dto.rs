@@ -25,6 +25,17 @@ pub struct AccountSummary {
     /// not the DB flag. Used by the UI to gate the "Use CLI" button — the
     /// DB's has_cli_credentials can lie after external state changes.
     pub credentials_healthy: bool,
+    /// Last persisted verification outcome: "never" | "ok" | "drift" |
+    /// "rejected" | "network_error". Drives the drift badge in the UI.
+    pub verify_status: String,
+    /// When verify_status != "never", the actual email `/api/oauth/profile`
+    /// returned for THIS slot. Equals `email` when ok; differs on drift.
+    pub verified_email: Option<String>,
+    /// ISO-8601 timestamp of the last verification pass.
+    pub verified_at: Option<DateTime<Utc>>,
+    /// Computed: verified_email is set AND differs from `email`. Handy
+    /// for the GUI to avoid comparing strings itself.
+    pub drift: bool,
 }
 
 impl From<&claudepot_core::account::Account> for AccountSummary {
@@ -49,6 +60,14 @@ impl From<&claudepot_core::account::Account> for AccountSummary {
             token_status: health.status,
             token_remaining_mins: health.remaining_mins,
             credentials_healthy,
+            verify_status: a.verify_status.clone(),
+            verified_email: a.verified_email.clone(),
+            verified_at: a.verified_at,
+            drift: a
+                .verified_email
+                .as_ref()
+                .map(|v| !v.eq_ignore_ascii_case(&a.email))
+                .unwrap_or(false),
         }
     }
 }

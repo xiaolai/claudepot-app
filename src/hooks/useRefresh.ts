@@ -28,6 +28,7 @@ export function useRefresh(pushToast: (kind: "info" | "error", text: string) => 
           console.warn("sync_from_current_cc failed:", msg);
         }
       }
+      // First fetch: cheap, renders quickly from DB state.
       const [s, list] = await Promise.all([
         api.appStatus(),
         api.accountList(),
@@ -35,6 +36,18 @@ export function useRefresh(pushToast: (kind: "info" | "error", text: string) => 
       setStatus(s);
       setAccounts(list);
       setLoadError(null);
+
+      // Background reconciliation: verify every account's blob identity
+      // against /api/oauth/profile. Slow (one HTTP per account), so we
+      // don't block the initial render on it. Drift / rejected / network
+      // outcomes propagate into the next accounts state update.
+      api
+        .verifyAllAccounts()
+        .then((verified) => setAccounts(verified))
+        .catch((e) => {
+          // eslint-disable-next-line no-console
+          console.warn("verify_all_accounts failed:", e);
+        });
     } catch (e) {
       const msg = `${e}`;
       setLoadError(msg);
