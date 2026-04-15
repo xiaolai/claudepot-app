@@ -84,6 +84,21 @@ pub(crate) enum MoveScenario {
     AlreadyMoved,
 }
 
+/// Compute the dry-run plan for a prospective move without touching
+/// disk. Thin wrapper around `move_project` with `dry_run=true`:
+/// convenient for GUI callers that want the structured `DryRunPlan`
+/// rather than parsing the formatted `warnings[0]` string.
+pub fn plan_move(args: &MoveArgs) -> Result<DryRunPlan, ProjectError> {
+    let mut probe = args.clone();
+    probe.dry_run = true;
+    let result = move_project(&probe, &crate::project_progress::NoopSink)?;
+    result.dry_run_plan.ok_or_else(|| {
+        ProjectError::Ambiguous(
+            "internal: move_project(dry_run=true) returned no plan".to_string(),
+        )
+    })
+}
+
 /// Move/rename a project and migrate CC state. Callers MUST provide
 /// a `ProgressSink` (spec §8 Q3); pass `&NoopSink` if you genuinely
 /// don't want progress. Making it required keeps the API honest about
@@ -228,6 +243,7 @@ pub fn move_project(
         )?;
         return Ok(MoveResult {
             warnings: vec![format_dry_run_plan(&plan, &old_norm, &new_norm)],
+            dry_run_plan: Some(plan),
             ..Default::default()
         });
     }

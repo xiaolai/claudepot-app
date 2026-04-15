@@ -4,6 +4,11 @@ import type {
   AccountSummary,
   AppStatus,
   CcIdentity,
+  DryRunPlan,
+  JournalEntry,
+  MoveArgs,
+  ProjectDetail,
+  ProjectInfo,
   RegisterOutcome,
   RemoveOutcome,
   UsageMap,
@@ -45,4 +50,22 @@ export const api = {
   /// shared slot + calls /profile. Never throws — errors land in the
   /// returned `error` field so the UI can render them as a banner.
   currentCcIdentity: () => invoke<CcIdentity>("current_cc_identity"),
+
+  // ---------- Projects (read-only) ----------
+  /** List every CC project dir with size, session count, orphan flag. */
+  projectList: () => invoke<ProjectInfo[]>("project_list"),
+  /** Detail for a single project by original path (pre-sanitization). */
+  projectShow: (path: string) => invoke<ProjectDetail>("project_show", { path }),
+  /**
+   * Compute what a prospective rename would do, without touching disk.
+   * Debounce keystrokes before calling on long paths (spec §7.1).
+   */
+  projectMoveDryRun: (args: MoveArgs) =>
+    invoke<DryRunPlan>("project_move_dry_run", { args }),
+
+  // ---------- Repair (read-only) ----------
+  /** Every journal on disk with its classified status. Includes abandoned. */
+  repairList: () => invoke<JournalEntry[]>("repair_list"),
+  /** Count of *actionable* journals — for the pending-journals banner. */
+  repairPendingCount: () => invoke<number>("repair_pending_count"),
 };

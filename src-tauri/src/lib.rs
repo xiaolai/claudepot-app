@@ -85,6 +85,11 @@ pub fn run() {
             commands::fetch_all_usage,
             commands::verify_all_accounts,
             commands::current_cc_identity,
+            commands::project_list,
+            commands::project_show,
+            commands::project_move_dry_run,
+            commands::repair_list,
+            commands::repair_pending_count,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

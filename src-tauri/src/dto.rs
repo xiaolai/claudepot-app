@@ -4,7 +4,8 @@
 //! tokens to the webview. Only non-sensitive metadata leaves Rust.
 
 use chrono::{DateTime, Utc};
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
+use std::time::{SystemTime, UNIX_EPOCH};
 
 #[derive(Serialize)]
 pub struct AccountSummary {
@@ -170,4 +171,189 @@ pub struct CcIdentity {
     /// from `email=None` so the UI can distinguish "no CC credentials"
     /// from "couldn't reach the server" from "token revoked".
     pub error: Option<String>,
+}
+
+// ---------------------------------------------------------------------------
+// Project DTOs — read-only surface (Step 2 of gui-rename plan)
+// ---------------------------------------------------------------------------
+
+/// Millisecond epoch helper. SystemTime isn't directly serde-friendly
+/// for the JS heap; the webview wants a number it can pass to `new Date()`.
+fn system_time_to_ms(t: Option<SystemTime>) -> Option<i64> {
+    t.and_then(|st| st.duration_since(UNIX_EPOCH).ok())
+        .map(|d| d.as_millis() as i64)
+}
+
+#[derive(Serialize)]
+pub struct ProjectInfoDto {
+    pub sanitized_name: String,
+    pub original_path: String,
+    pub session_count: usize,
+    pub memory_file_count: usize,
+    pub total_size_bytes: u64,
+    /// ms since epoch; null if the dir has never been modified (new).
+    pub last_modified_ms: Option<i64>,
+    pub is_orphan: bool,
+}
+
+impl From<&claudepot_core::project_types::ProjectInfo> for ProjectInfoDto {
+    fn from(p: &claudepot_core::project_types::ProjectInfo) -> Self {
+        Self {
+            sanitized_name: p.sanitized_name.clone(),
+            original_path: p.original_path.clone(),
+            session_count: p.session_count,
+            memory_file_count: p.memory_file_count,
+            total_size_bytes: p.total_size_bytes,
+            last_modified_ms: system_time_to_ms(p.last_modified),
+            is_orphan: p.is_orphan,
+        }
+    }
+}
+
+#[derive(Serialize)]
+pub struct SessionInfoDto {
+    pub session_id: String,
+    pub file_size: u64,
+    pub last_modified_ms: Option<i64>,
+}
+
+impl From<&claudepot_core::project_types::SessionInfo> for SessionInfoDto {
+    fn from(s: &claudepot_core::project_types::SessionInfo) -> Self {
+        Self {
+            session_id: s.session_id.clone(),
+            file_size: s.file_size,
+            last_modified_ms: system_time_to_ms(s.last_modified),
+        }
+    }
+}
+
+#[derive(Serialize)]
+pub struct ProjectDetailDto {
+    pub info: ProjectInfoDto,
+    pub sessions: Vec<SessionInfoDto>,
+    pub memory_files: Vec<String>,
+}
+
+impl From<&claudepot_core::project_types::ProjectDetail> for ProjectDetailDto {
+    fn from(p: &claudepot_core::project_types::ProjectDetail) -> Self {
+        Self {
+            info: ProjectInfoDto::from(&p.info),
+            sessions: p.sessions.iter().map(SessionInfoDto::from).collect(),
+            memory_files: p.memory_files.clone(),
+        }
+    }
+}
+
+#[derive(Serialize)]
+pub struct DryRunPlanDto {
+    pub would_move_dir: bool,
+    pub old_cc_dir: String,
+    pub new_cc_dir: String,
+    pub session_count: usize,
+    pub cc_dir_size: u64,
+    pub estimated_history_lines: usize,
+    pub conflict: Option<String>,
+    pub estimated_jsonl_files: usize,
+    pub would_rewrite_claude_json: bool,
+    pub would_move_memory_dir: bool,
+    pub would_rewrite_project_settings: bool,
+}
+
+impl From<&claudepot_core::project_types::DryRunPlan> for DryRunPlanDto {
+    fn from(p: &claudepot_core::project_types::DryRunPlan) -> Self {
+        Self {
+            would_move_dir: p.would_move_dir,
+            old_cc_dir: p.old_cc_dir.clone(),
+            new_cc_dir: p.new_cc_dir.clone(),
+            session_count: p.session_count,
+            cc_dir_size: p.cc_dir_size,
+            estimated_history_lines: p.estimated_history_lines,
+            conflict: p.conflict.clone(),
+            estimated_jsonl_files: p.estimated_jsonl_files,
+            would_rewrite_claude_json: p.would_rewrite_claude_json,
+            would_move_memory_dir: p.would_move_memory_dir,
+            would_rewrite_project_settings: p.would_rewrite_project_settings,
+        }
+    }
+}
+
+/// Inbound args from the webview for a dry-run move. Mirrors the
+/// subset of `claudepot_core::project_types::MoveArgs` the UI controls;
+/// config/snapshot paths are filled server-side from `claude_config_dir`.
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MoveArgsDto {
+    pub old_path: String,
+    pub new_path: String,
+    #[serde(default)]
+    pub no_move: bool,
+    #[serde(default)]
+    pub merge: bool,
+    #[serde(default)]
+    pub overwrite: bool,
+    #[serde(default)]
+    pub force: bool,
+    #[serde(default)]
+    pub ignore_pending_journals: bool,
+}
+
+// ---------------------------------------------------------------------------
+// Repair DTOs
+// ---------------------------------------------------------------------------
+
+#[derive(Serialize)]
+pub struct JournalFlagsDto {
+    pub merge: bool,
+    pub overwrite: bool,
+    pub force: bool,
+    pub no_move: bool,
+}
+
+impl From<&claudepot_core::project_journal::JournalFlags> for JournalFlagsDto {
+    fn from(f: &claudepot_core::project_journal::JournalFlags) -> Self {
+        Self {
+            merge: f.merge,
+            overwrite: f.overwrite,
+            force: f.force,
+            no_move: f.no_move,
+        }
+    }
+}
+
+#[derive(Serialize)]
+pub struct JournalEntryDto {
+    pub id: String,
+    pub path: String,
+    pub status: String,
+    pub old_path: String,
+    pub new_path: String,
+    pub started_at: String,
+    pub started_unix_secs: u64,
+    pub phases_completed: Vec<String>,
+    pub snapshot_paths: Vec<String>,
+    pub last_error: Option<String>,
+    pub flags: JournalFlagsDto,
+}
+
+impl From<&claudepot_core::project_repair::JournalEntry> for JournalEntryDto {
+    fn from(e: &claudepot_core::project_repair::JournalEntry) -> Self {
+        Self {
+            id: e.id.clone(),
+            path: e.path.to_string_lossy().to_string(),
+            status: e.status.tag().to_string(),
+            old_path: e.journal.old_path.clone(),
+            new_path: e.journal.new_path.clone(),
+            started_at: e.journal.started_at.clone(),
+            started_unix_secs: e.journal.started_unix_secs,
+            phases_completed: e.journal.phases_completed.clone(),
+            snapshot_paths: e
+                .journal
+                .snapshot_paths
+                .iter()
+                .map(|p| p.to_string_lossy().to_string())
+                .collect(),
+            last_error: e.journal.last_error.clone(),
+            flags: JournalFlagsDto::from(&e.journal.flags),
+        }
+    }
 }
