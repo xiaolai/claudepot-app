@@ -1,6 +1,7 @@
 // Tests for the rail + useSection wiring. Uses a local registry so
 // the tests don't depend on AccountsSection's Tauri surface.
 
+import React from "react";
 import { describe, expect, it, beforeEach } from "vitest";
 import { render, screen, act } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
@@ -11,14 +12,19 @@ import { useSection } from "../hooks/useSection";
 import type { SectionDef } from "./registry";
 
 const fakeSections: SectionDef[] = [
-  { id: "accounts", label: "Accounts", icon: <User />, Component: () => <div>acc body</div> },
-  { id: "settings", label: "Settings", icon: <Gear />, Component: () => <div>settings body</div> },
+  { id: "accounts", label: "Accounts", icon: <User /> },
+  { id: "settings", label: "Settings", icon: <Gear /> },
 ];
+
+const bodies: Record<string, React.FC> = {
+  accounts: () => <div>acc body</div>,
+  settings: () => <div>settings body</div>,
+};
 
 function Harness() {
   const ids = fakeSections.map((s) => s.id);
   const { section, setSection } = useSection(ids[0], ids);
-  const Active = (fakeSections.find((s) => s.id === section) ?? fakeSections[0]).Component;
+  const Active = bodies[section] ?? bodies.accounts;
   return (
     <IconContext.Provider value={{ size: 16, weight: "light" }}>
       <SectionRail sections={fakeSections} active={section} onSelect={setSection} />

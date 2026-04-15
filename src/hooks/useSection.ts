@@ -1,40 +1,99 @@
 import { useCallback, useEffect, useState } from "react";
 
 const STORAGE_KEY = "claudepot.activeSection";
+const SUBROUTE_KEY_PREFIX = "claudepot.subRoute.";
+
+function safeGet(key: string): string | null {
+  try {
+    return localStorage.getItem(key);
+  } catch {
+    return null;
+  }
+}
+
+function safeSet(key: string, value: string): void {
+  try {
+    localStorage.setItem(key, value);
+  } catch {
+    // Persistence is best-effort.
+  }
+}
 
 /**
- * Track which top-level section is active. Persists the choice to
- * localStorage so reloads restore the user's last view, and binds
- * ⌘1..⌘9 (or Ctrl+1..9 on non-macOS) to the first nine sections.
+ * Track which top-level section is active, plus an optional per-section
+ * sub-route (e.g. `projects` has a `repair` subview). Both values are
+ * persisted to localStorage — the section under a single key, sub-routes
+ * under `claudepot.subRoute.<sectionId>` so switching sections doesn't
+ * trample another section's state.
+ *
+ * `setSection(id, subRoute)` can atomically set both — useful when
+ * deep-linking from a banner ("open Projects → repair" in one call).
  *
  * Callers pass the list of valid ids; unknown ids in localStorage are
  * silently replaced by `defaultId` so a stale key from an older build
- * doesn't wedge the UI.
+ * doesn't wedge the UI. Sub-route values are NOT validated — each
+ * section owns its own sub-route vocabulary.
+ *
+ * ⌘1..⌘9 binds to the first nine sections (ignored when other
+ * modifiers are present).
  */
 export function useSection<Id extends string>(
   defaultId: Id,
   ids: readonly Id[]
-): { section: Id; setSection: (id: Id) => void } {
+): {
+  section: Id;
+  subRoute: string | null;
+  setSection: (id: Id, subRoute?: string | null) => void;
+  setSubRoute: (subRoute: string | null) => void;
+} {
   const [section, setSectionState] = useState<Id>(() => {
-    try {
-      const stored = localStorage.getItem(STORAGE_KEY);
-      if (stored && (ids as readonly string[]).includes(stored)) {
-        return stored as Id;
-      }
-    } catch {
-      // localStorage may throw in private-mode or headless envs — fall
-      // through to the default.
+    const stored = safeGet(STORAGE_KEY);
+    if (stored && (ids as readonly string[]).includes(stored)) {
+      return stored as Id;
     }
     return defaultId;
   });
 
+  const [subRoute, setSubRouteState] = useState<string | null>(() =>
+    safeGet(SUBROUTE_KEY_PREFIX + section),
+  );
+
+  const setSubRoute = useCallback(
+    (next: string | null) => {
+      setSubRouteState(next);
+      if (next === null) {
+        try {
+          localStorage.removeItem(SUBROUTE_KEY_PREFIX + section);
+        } catch {
+          // ignore
+        }
+      } else {
+        safeSet(SUBROUTE_KEY_PREFIX + section, next);
+      }
+    },
+    [section],
+  );
+
   const setSection = useCallback(
-    (id: Id) => {
+    (id: Id, nextSubRoute?: string | null) => {
       setSectionState(id);
-      try {
-        localStorage.setItem(STORAGE_KEY, id);
-      } catch {
-        // Persistence is best-effort; swallow write failures.
+      safeSet(STORAGE_KEY, id);
+      // Load the per-section subroute from storage (caller override wins).
+      const resolved =
+        nextSubRoute !== undefined
+          ? nextSubRoute
+          : safeGet(SUBROUTE_KEY_PREFIX + id);
+      setSubRouteState(resolved);
+      if (nextSubRoute !== undefined) {
+        if (nextSubRoute === null) {
+          try {
+            localStorage.removeItem(SUBROUTE_KEY_PREFIX + id);
+          } catch {
+            // ignore
+          }
+        } else {
+          safeSet(SUBROUTE_KEY_PREFIX + id, nextSubRoute);
+        }
       }
     },
     [],
@@ -44,8 +103,6 @@ export function useSection<Id extends string>(
     const onKey = (e: KeyboardEvent) => {
       const mod = e.metaKey || e.ctrlKey;
       if (!mod || e.shiftKey || e.altKey) return;
-      // "1".."9" maps to ids[0..8]. Anything past the registered list
-      // is ignored.
       const n = Number.parseInt(e.key, 10);
       if (!Number.isInteger(n) || n < 1 || n > 9) return;
       const target = ids[n - 1];
@@ -57,5 +114,5 @@ export function useSection<Id extends string>(
     return () => window.removeEventListener("keydown", onKey);
   }, [ids, section, setSection]);
 
-  return { section, setSection };
+  return { section, subRoute, setSection, setSubRoute };
 }
