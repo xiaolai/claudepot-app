@@ -250,6 +250,52 @@ pub async fn switch(
     // Bump mtime for cross-process invalidation (best-effort).
     let _ = platform.touch_credfile().await;
 
+    // Post-switch verification: read CC's shared slot back, call /profile,
+    // confirm the identity matches the target's label. Catches the
+    // scenario where the write appeared to succeed but the OS / keychain
+    // returned a different blob (or CC grabbed it first with a rotated
+    // token), or where the target blob itself was already misfiled and
+    // only the PRE-write verify caught it with a cached /profile result.
+    //
+    // On mismatch we attempt best-effort rollback to the previous blob,
+    // then return PostSwitchMismatch so the caller can surface the
+    // failure instead of falsely reporting "switched".
+    match platform.read_default().await {
+        Ok(Some(after_blob)) => {
+            let target_email = store
+                .find_by_uuid(target_id)
+                .ok()
+                .flatten()
+                .map(|a| a.email)
+                .unwrap_or_default();
+            if let Err(e) = verify_blob_identity(&after_blob, &target_email, fetcher).await {
+                tracing::error!(
+                    target = %target_id,
+                    "post-switch identity check failed: {e}"
+                );
+                // Attempt rollback.
+                if let Some(cur) = current_id {
+                    if let Ok(prev_blob) = storage::load(cur) {
+                        let _ = platform.write_default(&prev_blob).await;
+                    }
+                }
+                return Err(e);
+            }
+        }
+        Ok(None) => {
+            tracing::warn!(
+                target = %target_id,
+                "post-switch read-back returned None \u{2014} skipping identity verification"
+            );
+        }
+        Err(e) => {
+            tracing::warn!(
+                target = %target_id,
+                "post-switch read-back errored: {e} \u{2014} skipping identity verification"
+            );
+        }
+    }
+
     // Update active pointer in account store.
     tracing::debug!(target = %target_id, "updating active CLI pointer");
     if let Err(e) = store.set_active_cli(target_id) {
@@ -1201,12 +1247,18 @@ mod tests {
         seed_account(&store, current_id);
         seed_account(&store, target_id);
 
-        save_private(target_id, &crate::testing::fresh_blob_json()).unwrap();
+        // Capture once: fresh_blob_json() uses Utc::now() internally, so
+        // back-to-back calls return different millisecond timestamps and
+        // the assert_eq below would flake ~30% of the time. Reuse the
+        // captured JSON for both the target private slot and the CC
+        // platform's current blob.
+        let target_blob = crate::testing::fresh_blob_json();
+        save_private(target_id, &target_blob).unwrap();
         // Pre-existing blob for current (a valid earlier backup). We'll
         // verify it stays UNCHANGED by this swap (we skipped the backup save).
         save_private(current_id, "original-current-backup").unwrap();
 
-        let cc_blob = crate::testing::fresh_blob_json();
+        let cc_blob = target_blob.clone();
         let platform = MockPlatform::new(Some(&cc_blob));
         let refresher = MockRefresher::success();
 
