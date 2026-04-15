@@ -74,6 +74,9 @@ mod tests {
                     has_desktop_profile: false,
                     is_cli_active: false,
                     is_desktop_active: false,
+                    verified_email: None,
+                    verified_at: None,
+                    verify_status: "never".to_string(),
                 })
                 .unwrap();
         }
