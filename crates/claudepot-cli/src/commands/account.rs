@@ -338,3 +338,103 @@ fn capitalize(s: &str) -> String {
         Some(f) => f.to_uppercase().to_string() + c.as_str(),
     }
 }
+
+/// Verify per-account blob identity against `/api/oauth/profile`.
+///
+/// Runs `services::identity::verify_account_identity` for each account
+/// (or just `email_input` if given) and prints a table (or JSON) of
+/// outcomes. Exit code is 2 on any drift, 3 on any rejection or
+/// network_error, 0 only when every account returns Ok — so scripts can
+/// distinguish "healthy" from "needs re-login" from "couldn't check".
+pub async fn verify(ctx: &AppContext, email_input: Option<&str>) -> Result<()> {
+    use claudepot_core::account::VerifyOutcome;
+    use claudepot_core::cli_backend::swap::DefaultProfileFetcher;
+    use claudepot_core::services::identity;
+
+    let accounts = if let Some(email) = email_input {
+        let resolved = claudepot_core::resolve::resolve_email(&ctx.store, email)?;
+        vec![ctx
+            .store
+            .find_by_email(&resolved)?
+            .expect("resolved email not in store")]
+    } else {
+        ctx.store.list()?
+    };
+
+    let fetcher = DefaultProfileFetcher;
+    let mut drift = false;
+    let mut rejected = false;
+    let mut net = false;
+    let mut rows: Vec<(String, String, String, Option<String>)> = Vec::new();
+
+    for account in &accounts {
+        if !account.has_cli_credentials {
+            rows.push((
+                account.email.clone(),
+                account.uuid.to_string(),
+                "no_creds".to_string(),
+                None,
+            ));
+            continue;
+        }
+        let outcome = identity::verify_account_identity(&ctx.store, account.uuid, &fetcher).await;
+        let (status, actual) = match outcome {
+            Ok(VerifyOutcome::Ok { email }) => ("ok".to_string(), Some(email)),
+            Ok(VerifyOutcome::Drift { actual_email, .. }) => {
+                drift = true;
+                ("drift".to_string(), Some(actual_email))
+            }
+            Ok(VerifyOutcome::Rejected) => {
+                rejected = true;
+                ("rejected".to_string(), None)
+            }
+            Ok(VerifyOutcome::NetworkError) => {
+                net = true;
+                ("network_error".to_string(), None)
+            }
+            Err(e) => {
+                net = true;
+                (format!("error: {e}"), None)
+            }
+        };
+        rows.push((account.email.clone(), account.uuid.to_string(), status, actual));
+    }
+
+    if ctx.json {
+        let json: Vec<_> = rows
+            .iter()
+            .map(|(email, uuid, status, actual)| {
+                serde_json::json!({
+                    "email": email,
+                    "uuid": uuid,
+                    "status": status,
+                    "actual_email": actual,
+                })
+            })
+            .collect();
+        println!("{}", serde_json::to_string_pretty(&json)?);
+    } else {
+        println!("{:<32} {:<8} {}", "ACCOUNT", "STATUS", "DETAIL");
+        for (email, _uuid, status, actual) in &rows {
+            let detail = match (status.as_str(), actual) {
+                ("drift", Some(a)) => format!("authenticates as {a}"),
+                ("ok", Some(a)) => format!("verified as {a}"),
+                ("rejected", _) => "token revoked — re-login required".to_string(),
+                ("network_error", _) => "could not reach /profile".to_string(),
+                ("no_creds", _) => "no credentials stored".to_string(),
+                _ => String::new(),
+            };
+            println!("{email:<32} {status:<8} {detail}");
+        }
+    }
+
+    // Exit code contract:
+    //   0 = all ok, 2 = drift, 3 = rejected or network error
+    if drift {
+        std::process::exit(2);
+    }
+    if rejected || net {
+        std::process::exit(3);
+    }
+    Ok(())
+}
