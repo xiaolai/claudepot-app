@@ -29,6 +29,7 @@ pub struct SessionInfo {
     pub last_modified: Option<SystemTime>,
 }
 
+#[derive(Debug, Clone)]
 pub struct MoveArgs {
     pub old_path: PathBuf,
     pub new_path: PathBuf,
@@ -54,6 +55,10 @@ pub struct MoveArgs {
 
 #[derive(Debug, Default, Serialize)]
 pub struct MoveResult {
+    /// When `dry_run=true` this is populated with the structured plan;
+    /// otherwise `None`. GUI callers prefer this over parsing the
+    /// formatted text in `warnings[0]`.
+    pub dry_run_plan: Option<DryRunPlan>,
     pub actual_dir_moved: bool,
     pub cc_dir_renamed: bool,
     pub old_sanitized: Option<String>,

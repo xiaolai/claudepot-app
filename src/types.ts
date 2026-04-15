@@ -83,3 +83,80 @@ export interface AccountUsage {
 
 /** UUID string → usage data. Missing keys = no data available. */
 export type UsageMap = Record<string, AccountUsage>;
+
+// ---------------------------------------------------------------------------
+// Project DTOs — mirror src-tauri/src/dto.rs ProjectInfoDto et al.
+// ---------------------------------------------------------------------------
+
+export interface ProjectInfo {
+  sanitized_name: string;
+  original_path: string;
+  session_count: number;
+  memory_file_count: number;
+  total_size_bytes: number;
+  /** ms since epoch (pass to `new Date(ms)`), or null if never modified. */
+  last_modified_ms: number | null;
+  is_orphan: boolean;
+}
+
+export interface SessionInfo {
+  session_id: string;
+  file_size: number;
+  last_modified_ms: number | null;
+}
+
+export interface ProjectDetail {
+  info: ProjectInfo;
+  sessions: SessionInfo[];
+  memory_files: string[];
+}
+
+export interface DryRunPlan {
+  would_move_dir: boolean;
+  old_cc_dir: string;
+  new_cc_dir: string;
+  session_count: number;
+  cc_dir_size: number;
+  estimated_history_lines: number;
+  /** Non-null when CC dir at target is non-empty without --merge/--overwrite. */
+  conflict: string | null;
+  estimated_jsonl_files: number;
+  would_rewrite_claude_json: boolean;
+  would_move_memory_dir: boolean;
+  would_rewrite_project_settings: boolean;
+}
+
+/** Args for the dry-run / rename commands. Serialized camelCase. */
+export interface MoveArgs {
+  oldPath: string;
+  newPath: string;
+  noMove?: boolean;
+  merge?: boolean;
+  overwrite?: boolean;
+  force?: boolean;
+  ignorePendingJournals?: boolean;
+}
+
+export interface JournalFlags {
+  merge: boolean;
+  overwrite: boolean;
+  force: boolean;
+  no_move: boolean;
+}
+
+/** One of "running" | "pending" | "stale" | "abandoned". */
+export type JournalStatus = "running" | "pending" | "stale" | "abandoned";
+
+export interface JournalEntry {
+  id: string;
+  path: string;
+  status: JournalStatus;
+  old_path: string;
+  new_path: string;
+  started_at: string;
+  started_unix_secs: number;
+  phases_completed: string[];
+  snapshot_paths: string[];
+  last_error: string | null;
+  flags: JournalFlags;
+}

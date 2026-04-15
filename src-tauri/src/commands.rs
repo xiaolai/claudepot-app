@@ -4,11 +4,16 @@
 //! command opens the store, calls a core function, and serializes the result.
 //! Errors become user-facing strings at this boundary.
 
-use crate::dto::{AccountSummary, AccountUsageDto, AppStatus, CcIdentity, RegisterOutcome, RemoveOutcome};
+use crate::dto::{
+    AccountSummary, AccountUsageDto, AppStatus, CcIdentity, DryRunPlanDto, JournalEntryDto,
+    MoveArgsDto, ProjectDetailDto, ProjectInfoDto, RegisterOutcome, RemoveOutcome,
+};
 use claudepot_core::account::{Account, AccountStore};
 use claudepot_core::cli_backend;
 use claudepot_core::desktop_backend;
 use claudepot_core::paths;
+use claudepot_core::project;
+use claudepot_core::project_repair;
 use claudepot_core::services;
 use claudepot_core::services::usage_cache::UsageCache;
 use std::collections::HashMap;
@@ -446,4 +451,77 @@ pub async fn current_cc_identity() -> Result<CcIdentity, String> {
             error: Some(format!("/profile returned error: {e}")),
         }),
     }
+}
+
+// ---------------------------------------------------------------------------
+// Project read-only surface (Step 2 of gui-rename plan)
+// ---------------------------------------------------------------------------
+
+/// Default journal nag threshold per spec §8 Q7 — mirrors the CLI.
+const JOURNAL_NAG_THRESHOLD_SECS: u64 = 86_400;
+
+fn claudepot_home_dirs() -> (std::path::PathBuf, std::path::PathBuf, std::path::PathBuf) {
+    let cfg = paths::claude_config_dir();
+    let base = cfg.join("claudepot");
+    (base.join("journals"), base.join("locks"), base.join("snapshots"))
+}
+
+#[tauri::command]
+pub fn project_list() -> Result<Vec<ProjectInfoDto>, String> {
+    let cfg = paths::claude_config_dir();
+    let projects = project::list_projects(&cfg).map_err(|e| format!("list failed: {e}"))?;
+    Ok(projects.iter().map(ProjectInfoDto::from).collect())
+}
+
+#[tauri::command]
+pub fn project_show(path: String) -> Result<ProjectDetailDto, String> {
+    let cfg = paths::claude_config_dir();
+    let detail =
+        project::show_project(&cfg, &path).map_err(|e| format!("show failed: {e}"))?;
+    Ok(ProjectDetailDto::from(&detail))
+}
+
+#[tauri::command]
+pub fn project_move_dry_run(args: MoveArgsDto) -> Result<DryRunPlanDto, String> {
+    let cfg = paths::claude_config_dir();
+    let claude_json_path = dirs::home_dir().map(|h| h.join(".claude.json"));
+    let snapshots_dir = Some(cfg.join("claudepot").join("snapshots"));
+    let core_args = project::MoveArgs {
+        old_path: args.old_path.into(),
+        new_path: args.new_path.into(),
+        config_dir: cfg,
+        claude_json_path,
+        snapshots_dir,
+        no_move: args.no_move,
+        merge: args.merge,
+        overwrite: args.overwrite,
+        force: args.force,
+        dry_run: true, // enforced; caller cannot turn this off
+        ignore_pending_journals: args.ignore_pending_journals,
+    };
+    let plan = project::plan_move(&core_args).map_err(|e| format!("dry-run failed: {e}"))?;
+    Ok(DryRunPlanDto::from(&plan))
+}
+
+#[tauri::command]
+pub fn repair_list() -> Result<Vec<JournalEntryDto>, String> {
+    let (journals, locks, _snaps) = claudepot_home_dirs();
+    let entries = project_repair::list_pending_with_status(
+        &journals,
+        &locks,
+        JOURNAL_NAG_THRESHOLD_SECS,
+    )
+    .map_err(|e| format!("repair list failed: {e}"))?;
+    Ok(entries.iter().map(JournalEntryDto::from).collect())
+}
+
+/// Cheap count for the PendingJournalsBanner. Only counts *actionable*
+/// entries — excludes the `abandoned` class so the banner doesn't
+/// perpetually nag about a user-dismissed entry.
+#[tauri::command]
+pub fn repair_pending_count() -> Result<usize, String> {
+    let (journals, locks, _snaps) = claudepot_home_dirs();
+    let entries = project_repair::list_actionable(&journals, &locks, JOURNAL_NAG_THRESHOLD_SECS)
+        .map_err(|e| format!("repair count failed: {e}"))?;
+    Ok(entries.len())
 }
