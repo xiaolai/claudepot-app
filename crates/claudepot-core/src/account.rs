@@ -33,37 +33,10 @@ pub struct Account {
     pub verify_status: String,
 }
 
-/// Result of an identity-verification pass against `/api/oauth/profile`.
-/// Persisted to the account row via [`AccountStore::update_verification`].
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum VerifyOutcome {
-    /// Server confirmed the blob authenticates as the stored email.
-    Ok { email: String },
-    /// Server returned a profile email that doesn't match the stored email.
-    /// The slot is misfiled — a refresh or switch could cross-contaminate.
-    Drift {
-        stored_email: String,
-        actual_email: String,
-    },
-    /// Server rejected the token (401). Local expiry may still pretend valid,
-    /// but the server has revoked the chain. Refresh can't fix it; re-login
-    /// is required.
-    Rejected,
-    /// Transient failure (network, timeout, 5xx). Preserves any prior
-    /// verified_email — a network blip must not wipe verification history.
-    NetworkError,
-}
-
-impl VerifyOutcome {
-    pub fn as_str(&self) -> &'static str {
-        match self {
-            VerifyOutcome::Ok { .. } => "ok",
-            VerifyOutcome::Drift { .. } => "drift",
-            VerifyOutcome::Rejected => "rejected",
-            VerifyOutcome::NetworkError => "network_error",
-        }
-    }
-}
+// VerifyOutcome + AccountStore::update_verification extracted to
+// `crate::account_verification`. Re-exported from the crate root so
+// `claudepot_core::account::VerifyOutcome` still resolves.
+pub use crate::account_verification::VerifyOutcome;
 
 pub struct AccountStore {
     /// rusqlite::Connection is !Send on its own. Wrapping in Mutex makes the
@@ -73,7 +46,10 @@ pub struct AccountStore {
 }
 
 impl AccountStore {
-    fn db(&self) -> MutexGuard<'_, Connection> {
+    /// Internal accessor — kept `pub(crate)` so sibling modules inside
+    /// `claudepot-core` (e.g. `account_verification`) can run their own
+    /// SQL without duplicating the lock/poisoning handling.
+    pub(crate) fn db(&self) -> MutexGuard<'_, Connection> {
         self.db.lock().expect("account store mutex poisoned")
     }
 
@@ -212,39 +188,8 @@ impl AccountStore {
         })
     }
 
-    /// Persist a verification outcome on the account row. Called by
-    /// `services::identity::verify_account_identity` after each `/profile`
-    /// check. `VerifyOutcome::NetworkError` preserves `verified_email` so a
-    /// transient blip doesn't wipe the last-known-good identity — only the
-    /// status is updated.
-    pub fn update_verification(&self, uuid: Uuid, outcome: &VerifyOutcome) -> SqlResult<()> {
-        let status = outcome.as_str();
-        let now = Utc::now().to_rfc3339();
-        match outcome {
-            VerifyOutcome::Ok { email } => {
-                self.db().execute(
-                    "UPDATE accounts SET verified_email = ?1, verified_at = ?2, \
-                     verify_status = ?3 WHERE uuid = ?4",
-                    params![email, now, status, uuid.to_string()],
-                )?;
-            }
-            VerifyOutcome::Drift { actual_email, .. } => {
-                self.db().execute(
-                    "UPDATE accounts SET verified_email = ?1, verified_at = ?2, \
-                     verify_status = ?3 WHERE uuid = ?4",
-                    params![actual_email, now, status, uuid.to_string()],
-                )?;
-            }
-            VerifyOutcome::Rejected | VerifyOutcome::NetworkError => {
-                self.db().execute(
-                    "UPDATE accounts SET verified_at = ?1, verify_status = ?2 \
-                     WHERE uuid = ?3",
-                    params![now, status, uuid.to_string()],
-                )?;
-            }
-        }
-        Ok(())
-    }
+    // `update_verification` moved to `crate::account_verification` —
+    // it's a sibling `impl AccountStore` block in that file.
 
     pub fn list(&self) -> SqlResult<Vec<Account>> {
         let active_cli = self.active_cli_uuid()?;

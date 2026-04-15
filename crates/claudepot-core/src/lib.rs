@@ -2,6 +2,7 @@
 pub mod testing;
 
 pub mod account;
+pub mod account_verification;
 pub mod blob;
 pub mod cli_backend;
 pub mod desktop_backend;
