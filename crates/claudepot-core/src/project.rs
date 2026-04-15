@@ -85,13 +85,15 @@ pub(crate) enum MoveScenario {
 }
 
 /// Move/rename a project and migrate CC state. Callers MUST provide
-/// a progress callback (spec §8 Q3); pass `&|_, _| {}` if you
-/// genuinely don't want progress. Making it required keeps the API
-/// honest about what it does internally (P6 touches many files).
+/// a `ProgressSink` (spec §8 Q3); pass `&NoopSink` if you genuinely
+/// don't want progress. Making it required keeps the API honest about
+/// what it does internally (P6 touches many files; phases emit events
+/// as they complete).
 pub fn move_project(
     args: &MoveArgs,
-    progress: crate::project_rewrite::ProgressCallback<'_>,
+    sink: &dyn crate::project_progress::ProgressSink,
 ) -> Result<MoveResult, ProjectError> {
+    use crate::project_progress::PhaseStatus;
     tracing::info!(old = ?args.old_path, new = ?args.new_path, "starting project move");
 
     let old_str = args
@@ -317,6 +319,7 @@ pub fn move_project(
         }
         result.actual_dir_moved = true;
         let _ = journal.mark_phase("P3");
+        sink.phase("P3", PhaseStatus::Complete);
     }
 
     // Phase 4: Rename CC project directory
@@ -425,6 +428,7 @@ pub fn move_project(
     }
     if result.cc_dir_renamed {
         let _ = journal.mark_phase("P4");
+        sink.phase("P4", PhaseStatus::Complete);
     }
 
     // Phase 5: Rewrite history.jsonl
@@ -435,6 +439,7 @@ pub fn move_project(
             tracing::debug!("rewriting history.jsonl");
             result.history_lines_updated = rewrite_history(&history_path, &old_norm, &new_norm)?;
             let _ = journal.mark_phase("P5");
+            sink.phase("P5", PhaseStatus::Complete);
         }
     }
 
@@ -458,7 +463,7 @@ pub fn move_project(
                 &cc_new_dir,
                 &old_norm,
                 &new_norm,
-                progress,
+                sink,
             )?;
             result.jsonl_files_scanned = stats.files_scanned;
             result.jsonl_files_modified = stats.files_modified;
@@ -477,6 +482,7 @@ pub fn move_project(
                 return Err(ProjectError::Ambiguous(summary));
             }
             let _ = journal.mark_phase("P6");
+            sink.phase("P6", PhaseStatus::Complete);
         }
     }
 
@@ -526,6 +532,7 @@ pub fn move_project(
                 }
                 if result.config_key_renamed {
                     let _ = journal.mark_phase("P7");
+                    sink.phase("P7", PhaseStatus::Complete);
                 }
             }
             Err(e) => {
@@ -566,6 +573,7 @@ pub fn move_project(
                 }
                 if result.memory_dir_moved {
                     let _ = journal.mark_phase("P8");
+                    sink.phase("P8", PhaseStatus::Complete);
                 }
             }
             Err(e) => {
@@ -592,6 +600,7 @@ pub fn move_project(
                 result.project_settings_rewritten = rewrote;
                 if rewrote {
                     let _ = journal.mark_phase("P9");
+                    sink.phase("P9", PhaseStatus::Complete);
                 }
             }
             Err(e) => {
@@ -981,7 +990,7 @@ mod tests {
             ignore_pending_journals: false,
         };
 
-        let result = move_project(&args, &|_, _| {});
+        let result = move_project(&args, &crate::project_progress::NoopSink);
         assert!(matches!(result, Err(ProjectError::SamePath)));
     }
 
@@ -1020,7 +1029,7 @@ mod tests {
             ignore_pending_journals: false,
         };
 
-        let result = move_project(&args, &|_, _| {}).unwrap();
+        let result = move_project(&args, &crate::project_progress::NoopSink).unwrap();
         assert!(result.actual_dir_moved);
         assert!(result.cc_dir_renamed);
         assert!(dst.exists());
@@ -1082,7 +1091,7 @@ mod tests {
             ignore_pending_journals: false,
         };
 
-        let result = move_project(&args, &|_, _| {}).unwrap();
+        let result = move_project(&args, &crate::project_progress::NoopSink).unwrap();
         assert!(result.actual_dir_moved, "disk dir should be moved");
         assert!(
             result.cc_dir_renamed,
@@ -1126,7 +1135,7 @@ mod tests {
 
             ignore_pending_journals: false,
         };
-        let err = move_project(&args, &|_, _| {}).unwrap_err();
+        let err = move_project(&args, &crate::project_progress::NoopSink).unwrap_err();
         assert!(matches!(err, ProjectError::Ambiguous(ref m) if m.contains("inside")));
     }
 
@@ -1152,7 +1161,7 @@ mod tests {
 
             ignore_pending_journals: false,
         };
-        let err = move_project(&args, &|_, _| {}).unwrap_err();
+        let err = move_project(&args, &crate::project_progress::NoopSink).unwrap_err();
         assert!(matches!(err, ProjectError::Ambiguous(_)));
     }
 
@@ -1211,7 +1220,7 @@ mod tests {
 
             ignore_pending_journals: false,
         };
-        let result = move_project(&args, &|_, _| {}).unwrap();
+        let result = move_project(&args, &crate::project_progress::NoopSink).unwrap();
 
         assert!(result.cc_dir_renamed);
         assert!(result.jsonl_files_scanned >= 2);
@@ -1278,7 +1287,7 @@ mod tests {
 
             ignore_pending_journals: false,
         };
-        let result = move_project(&args, &|_, _| {}).unwrap();
+        let result = move_project(&args, &crate::project_progress::NoopSink).unwrap();
 
         assert!(result.cc_dir_renamed);
         assert!(result.config_key_renamed);
@@ -1327,7 +1336,7 @@ mod tests {
 
             ignore_pending_journals: false,
         };
-        let result = move_project(&args, &|_, _| {}).unwrap();
+        let result = move_project(&args, &crate::project_progress::NoopSink).unwrap();
 
         assert!(result.cc_dir_renamed);
         assert!(!result.config_key_renamed);
@@ -1380,7 +1389,7 @@ mod tests {
             ignore_pending_journals: false,
         };
 
-        let result = move_project(&args, &|_, _| {}).unwrap();
+        let result = move_project(&args, &crate::project_progress::NoopSink).unwrap();
         assert_eq!(result.history_lines_updated, 2);
 
         // Verify history was rewritten by parsing each JSON line — raw string
@@ -1427,7 +1436,7 @@ mod tests {
             ignore_pending_journals: false,
         };
 
-        let result = move_project(&args, &|_, _| {}).unwrap();
+        let result = move_project(&args, &crate::project_progress::NoopSink).unwrap();
         // Dry run: nothing actually changed
         assert!(!result.actual_dir_moved);
         assert!(!result.cc_dir_renamed);
@@ -1504,7 +1513,7 @@ mod tests {
             ignore_pending_journals: false,
         };
 
-        let result = move_project(&args, &|_, _| {}).unwrap();
+        let result = move_project(&args, &crate::project_progress::NoopSink).unwrap();
         assert!(!result.actual_dir_moved); // didn't move dir (already moved)
         assert!(result.cc_dir_renamed); // but renamed CC state
     }
@@ -1541,7 +1550,7 @@ mod tests {
             ignore_pending_journals: false,
         };
 
-        let result = move_project(&args, &|_, _| {}).unwrap();
+        let result = move_project(&args, &crate::project_progress::NoopSink).unwrap();
         assert!(!result.actual_dir_moved);
         assert!(result.cc_dir_renamed);
         // Both dirs still exist (--no-move)
@@ -1810,7 +1819,7 @@ mod tests {
             ignore_pending_journals: false,
         };
 
-        let result = move_project(&args, &|_, _| {});
+        let result = move_project(&args, &crate::project_progress::NoopSink);
         assert!(matches!(result, Err(ProjectError::Ambiguous(_))));
         let msg = result.unwrap_err().to_string();
         assert!(msg.contains("both"));
@@ -1836,7 +1845,7 @@ mod tests {
             ignore_pending_journals: false,
         };
 
-        let result = move_project(&args, &|_, _| {});
+        let result = move_project(&args, &crate::project_progress::NoopSink);
         assert!(matches!(result, Err(ProjectError::Ambiguous(_))));
         let msg = result.unwrap_err().to_string();
         assert!(msg.contains("neither"));
@@ -1881,7 +1890,7 @@ mod tests {
             ignore_pending_journals: false,
         };
 
-        let result = move_project(&args, &|_, _| {}).unwrap();
+        let result = move_project(&args, &crate::project_progress::NoopSink).unwrap();
         assert!(result.cc_dir_renamed);
 
         // New CC dir has both sessions
@@ -1928,7 +1937,7 @@ mod tests {
             ignore_pending_journals: false,
         };
 
-        let result = move_project(&args, &|_, _| {}).unwrap();
+        let result = move_project(&args, &crate::project_progress::NoopSink).unwrap();
         assert!(result.cc_dir_renamed);
 
         // New CC dir has old's content, not the original new content
@@ -1976,7 +1985,7 @@ mod tests {
 
         // Spec §4.2 P1.7: non-empty CC target is a hard preflight
         // error without --merge/--overwrite.
-        let err = move_project(&args, &|_, _| {}).unwrap_err();
+        let err = move_project(&args, &crate::project_progress::NoopSink).unwrap_err();
         let ProjectError::Ambiguous(msg) = err else {
             panic!("expected Ambiguous, got {err:?}");
         };
@@ -2021,7 +2030,7 @@ mod tests {
             ignore_pending_journals: false,
         };
 
-        let result = move_project(&args, &|_, _| {}).unwrap();
+        let result = move_project(&args, &crate::project_progress::NoopSink).unwrap();
         // Dry run plan should mention conflict
         assert!(!result.warnings.is_empty());
         let plan = &result.warnings[0];
@@ -2067,7 +2076,7 @@ mod tests {
             ignore_pending_journals: false,
         };
 
-        let result = move_project(&args, &|_, _| {}).unwrap();
+        let result = move_project(&args, &crate::project_progress::NoopSink).unwrap();
         assert!(result.cc_dir_renamed);
         assert!(cc_new.join("s.jsonl").exists());
     }
@@ -2229,7 +2238,7 @@ mod tests {
 
         // With v2 hard-error preflight, the whole operation aborts
         // before P3/P4/P5 run. history.jsonl must be untouched.
-        let err = move_project(&args, &|_, _| {}).unwrap_err();
+        let err = move_project(&args, &crate::project_progress::NoopSink).unwrap_err();
         assert!(matches!(err, ProjectError::Ambiguous(_)));
 
         // Verify old path still in history on disk (parse-based).
@@ -2284,7 +2293,7 @@ mod tests {
             ignore_pending_journals: false,
         };
 
-        let result = move_project(&args, &|_, _| {}).unwrap();
+        let result = move_project(&args, &crate::project_progress::NoopSink).unwrap();
         assert!(result.cc_dir_renamed, "merge should resolve the conflict");
         assert_eq!(
             result.history_lines_updated, 1,
@@ -2391,7 +2400,7 @@ mod tests {
             ignore_pending_journals: false,
         };
 
-        let result = move_project(&args, &|_, _| {}).unwrap();
+        let result = move_project(&args, &crate::project_progress::NoopSink).unwrap();
         assert!(result.actual_dir_moved);
         assert!(dst.exists());
         assert!(!src.exists());
@@ -2438,7 +2447,7 @@ mod tests {
             ignore_pending_journals: false,
         };
 
-        let err = move_project(&args, &|_, _| {}).expect_err("must error on CC dir collision");
+        let err = move_project(&args, &crate::project_progress::NoopSink).expect_err("must error on CC dir collision");
         assert!(matches!(err, ProjectError::Ambiguous(_)));
         assert!(src.exists(), "disk dir untouched on preflight failure");
         assert!(!dst.exists(), "target not created on preflight failure");
