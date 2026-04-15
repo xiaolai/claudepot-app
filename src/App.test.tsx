@@ -1096,3 +1096,23 @@ describe("AccountDetail — Verified row", () => {
     expect(tokenDd).toHaveTextContent(/not past local expiry/i);
   });
 });
+
+describe("App — CC truth strip: not signed in state", () => {
+  it("shows 'CC: not signed in' when email and error are both null", async () => {
+    await renderApp({
+      app_status: () => sampleStatus({ account_count: 0 }),
+      account_list: () => [],
+      current_cc_identity: () => ({
+        email: null,
+        verified_at: new Date().toISOString(),
+        error: null,
+      }),
+    });
+
+    const strip = await screen.findByLabelText(/CC authentication status/i);
+    expect(strip).toHaveTextContent(/not signed in/i);
+    // Neither MATCH nor DRIFT tags should appear.
+    expect(within(strip).queryByText(/MATCH/i)).toBeNull();
+    expect(within(strip).queryByText(/DRIFT/i)).toBeNull();
+  });
+});

@@ -63,11 +63,14 @@ impl From<&claudepot_core::account::Account> for AccountSummary {
             verify_status: a.verify_status.clone(),
             verified_email: a.verified_email.clone(),
             verified_at: a.verified_at,
-            drift: a
-                .verified_email
-                .as_ref()
-                .map(|v| !v.eq_ignore_ascii_case(&a.email))
-                .unwrap_or(false),
+            // Derive from verify_status, not `verified_email != email`.
+            // update_verification() intentionally preserves
+            // verified_email across rejected/network_error so history
+            // isn't wiped by a blip — meaning a stored row where
+            // verified_email still points at the old drift target but
+            // verify_status has since moved to "network_error" would
+            // spuriously paint as drift if we compared emails.
+            drift: a.verify_status == "drift",
         }
     }
 }

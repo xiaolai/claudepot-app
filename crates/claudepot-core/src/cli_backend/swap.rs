@@ -55,6 +55,19 @@ impl ProfileFetcher for DefaultProfileFetcher {
 ///   fabricate full credentials).
 /// - `Err(IdentityMismatch)` on a verified mismatch (the corruption case).
 /// - `Err(IdentityVerificationFailed)` on network / server errors.
+///
+/// NOTE on deliberate asymmetry with `services::identity::
+/// verify_account_identity`: this function **does NOT refresh** the
+/// access_token on a 401 response. Refreshing inside `swap` would mean
+/// the act of switching accounts could silently rotate a token as a
+/// side effect — undesirable both for observability (the user didn't
+/// ask for a refresh) and for correctness (swap already holds the swap
+/// lock; a refresh inside that lock widens the critical section and
+/// creates TOCTOU surface vs. whoever holds the rotated blob's
+/// refresh_token). The refresh-aware path lives in
+/// `services::identity::verify_account_identity_with`, invoked from
+/// reconciliation passes, which is the intended recovery mechanism for
+/// an expired-but-refreshable blob that swap rejects.
 async fn verify_blob_identity(
     blob_str: &str,
     expected_email: &str,
@@ -197,8 +210,16 @@ pub async fn switch(
     // swap, we log + skip the backup save. The target-blob check still
     // runs unconditionally and will abort on a real target mismatch. Net
     // effect: drift is self-healing, never silently corrupting.
+    // Capture CC's shared slot state ONCE up front. Used twice below:
+    // (a) outgoing-backup identity check + conditional backup save; and
+    // (b) post-switch rollback so we can restore the exact pre-write
+    // contents even when `current_id` is None or its private slot was
+    // empty. Without this capture, a post-switch mismatch had no way
+    // to put CC back the way it was.
+    let pre_write_default = platform.read_default().await?;
+
     if let Some(cur) = current_id {
-        if let Some(current_blob) = platform.read_default().await? {
+        if let Some(current_blob) = pre_write_default.as_deref() {
             let cur_email = store
                 .find_by_uuid(cur)
                 .map_err(|e| SwapError::WriteFailed(format!("db lookup failed: {e}")))?
@@ -206,7 +227,7 @@ pub async fn switch(
                 .email;
             tracing::debug!(current = %cur, "verifying outgoing blob identity");
 
-            let skip_backup = match verify_blob_identity(&current_blob, &cur_email, fetcher).await {
+            let skip_backup = match verify_blob_identity(current_blob, &cur_email, fetcher).await {
                 Ok(()) => false,
                 Err(SwapError::IdentityMismatch { actual_email, .. }) => {
                     tracing::warn!(
@@ -221,7 +242,7 @@ pub async fn switch(
 
             let previous_private = storage::load_opt(cur);
             if !skip_backup {
-                storage::save(cur, &current_blob)?;
+                storage::save(cur, current_blob)?;
             }
 
             // Write target to CC storage.
@@ -251,48 +272,76 @@ pub async fn switch(
     let _ = platform.touch_credfile().await;
 
     // Post-switch verification: read CC's shared slot back, call /profile,
-    // confirm the identity matches the target's label. Catches the
-    // scenario where the write appeared to succeed but the OS / keychain
-    // returned a different blob (or CC grabbed it first with a rotated
-    // token), or where the target blob itself was already misfiled and
-    // only the PRE-write verify caught it with a cached /profile result.
+    // confirm the identity matches the target's label. If we can't
+    // verify (mismatch OR unreadable OR empty after write) we roll back
+    // to `pre_write_default` and return an error — reporting "switched"
+    // only after a confirmed verification.
     //
-    // On mismatch we attempt best-effort rollback to the previous blob,
-    // then return PostSwitchMismatch so the caller can surface the
-    // failure instead of falsely reporting "switched".
+    // Rollback helper: restore pre_write_default if we captured one;
+    // otherwise best-effort writes an empty blob. CliPlatform has no
+    // `clear_default` so fully rolling back to "no credentials at all"
+    // isn't possible from here — log and leave CC in whatever state
+    // write_default("") produces.
+    let rollback = || async {
+        match pre_write_default.as_deref() {
+            Some(prev) => {
+                if let Err(e) = platform.write_default(prev).await {
+                    tracing::error!(
+                        target = %target_id,
+                        "post-switch rollback write_default failed: {e}"
+                    );
+                }
+            }
+            None => {
+                // Pre-write state was empty — restore that cleanly via
+                // clear_default. Without this, our write_default left
+                // the target blob in a slot that should be empty.
+                if let Err(e) = platform.clear_default().await {
+                    tracing::error!(
+                        target = %target_id,
+                        "post-switch rollback clear_default failed: {e}"
+                    );
+                }
+            }
+        }
+    };
+
+    let target_email = store
+        .find_by_uuid(target_id)
+        .map_err(|e| SwapError::WriteFailed(format!("db lookup failed: {e}")))?
+        .ok_or_else(|| SwapError::WriteFailed(format!("target {target_id} not in DB")))?
+        .email;
+
     match platform.read_default().await {
         Ok(Some(after_blob)) => {
-            let target_email = store
-                .find_by_uuid(target_id)
-                .ok()
-                .flatten()
-                .map(|a| a.email)
-                .unwrap_or_default();
             if let Err(e) = verify_blob_identity(&after_blob, &target_email, fetcher).await {
                 tracing::error!(
                     target = %target_id,
                     "post-switch identity check failed: {e}"
                 );
-                // Attempt rollback.
-                if let Some(cur) = current_id {
-                    if let Ok(prev_blob) = storage::load(cur) {
-                        let _ = platform.write_default(&prev_blob).await;
-                    }
-                }
+                rollback().await;
                 return Err(e);
             }
         }
         Ok(None) => {
-            tracing::warn!(
+            tracing::error!(
                 target = %target_id,
-                "post-switch read-back returned None \u{2014} skipping identity verification"
+                "post-switch read-back returned None — CC's slot is empty after write_default claimed success"
             );
+            rollback().await;
+            return Err(SwapError::IdentityVerificationFailed(
+                "post-switch read-back returned empty slot".into(),
+            ));
         }
         Err(e) => {
-            tracing::warn!(
+            tracing::error!(
                 target = %target_id,
-                "post-switch read-back errored: {e} \u{2014} skipping identity verification"
+                "post-switch read-back errored: {e}"
             );
+            rollback().await;
+            return Err(SwapError::IdentityVerificationFailed(format!(
+                "post-switch read-back failed: {e}"
+            )));
         }
     }
 
@@ -1385,6 +1434,195 @@ mod tests {
             target_priv.contains("sk-ant-oat01-refreshed"),
             "refreshed token must remain in target's private storage after rollback"
         );
+
+        delete_private(current_id).unwrap();
+        delete_private(target_id).unwrap();
+    }
+
+    // ------- Post-switch verification tests (added by audit round 2) -------
+
+    /// Post-switch read-back returns None after a write that claimed
+    /// success — swap must roll back and return IdentityVerificationFailed,
+    /// not declare the switch complete.
+    struct MockPlatformDropsOnRead {
+        storage: std::sync::Mutex<Option<String>>,
+    }
+    impl MockPlatformDropsOnRead {
+        fn new(initial: Option<&str>) -> Self {
+            Self {
+                storage: std::sync::Mutex::new(initial.map(String::from)),
+            }
+        }
+        fn get(&self) -> Option<String> {
+            self.storage.lock().unwrap().clone()
+        }
+    }
+    #[async_trait::async_trait]
+    impl CliPlatform for MockPlatformDropsOnRead {
+        async fn read_default(&self) -> Result<Option<String>, SwapError> {
+            // First read (pre-write outgoing-check) returns whatever is
+            // in storage. After a write happens, subsequent reads return
+            // None as if CC's slot went empty under us.
+            Ok(self.storage.lock().unwrap().clone())
+        }
+        async fn write_default(&self, _blob: &str) -> Result<(), SwapError> {
+            *self.storage.lock().unwrap() = None;
+            Ok(())
+        }
+        async fn touch_credfile(&self) -> Result<(), SwapError> {
+            Ok(())
+        }
+        async fn clear_default(&self) -> Result<(), SwapError> {
+            *self.storage.lock().unwrap() = None;
+            Ok(())
+        }
+    }
+
+    #[tokio::test]
+    async fn test_switch_aborts_on_post_switch_read_returns_none() {
+        let _lock = crate::testing::lock_data_dir();
+        let _env = setup_test_data_dir();
+        let (store, _dir) = test_store();
+        let target_id = Uuid::new_v4();
+        seed_account(&store, target_id);
+        save_private(target_id, &crate::testing::fresh_blob_json()).unwrap();
+
+        let platform = MockPlatformDropsOnRead::new(None);
+        let refresher = MockRefresher::success();
+        let fetcher = MockProfileFetcher::returning(&format!("seed-{target_id}@example.com"));
+
+        let result = switch(
+            &store,
+            None,
+            target_id,
+            &platform,
+            false,
+            &refresher,
+            &fetcher,
+        )
+        .await;
+
+        assert!(
+            matches!(result, Err(SwapError::IdentityVerificationFailed(_))),
+            "expected IdentityVerificationFailed when post-switch read returns None, got {result:?}"
+        );
+        // active_cli must NOT have been set on failure.
+        assert!(store.active_cli_uuid().unwrap().is_none());
+        // Rollback path had no prior blob — platform stays empty.
+        assert!(platform.get().is_none());
+        delete_private(target_id).unwrap();
+    }
+
+    /// Post-switch read-back returns a DIFFERENT blob than the one we
+    /// wrote (the fetcher says it authenticates as someone else). Swap
+    /// must return IdentityMismatch and restore the previous CC blob.
+    struct MockPlatformReadReplacesBlob {
+        storage: std::sync::Mutex<Option<String>>,
+        replace_on_read_after_write: std::sync::Mutex<Option<String>>,
+        wrote: std::sync::Mutex<bool>,
+    }
+    impl MockPlatformReadReplacesBlob {
+        fn new(initial: &str, replace_with: &str) -> Self {
+            Self {
+                storage: std::sync::Mutex::new(Some(initial.to_string())),
+                replace_on_read_after_write: std::sync::Mutex::new(Some(
+                    replace_with.to_string(),
+                )),
+                wrote: std::sync::Mutex::new(false),
+            }
+        }
+        fn get(&self) -> Option<String> {
+            self.storage.lock().unwrap().clone()
+        }
+    }
+    #[async_trait::async_trait]
+    impl CliPlatform for MockPlatformReadReplacesBlob {
+        async fn read_default(&self) -> Result<Option<String>, SwapError> {
+            if *self.wrote.lock().unwrap() {
+                if let Some(r) = self.replace_on_read_after_write.lock().unwrap().take() {
+                    *self.storage.lock().unwrap() = Some(r);
+                }
+            }
+            Ok(self.storage.lock().unwrap().clone())
+        }
+        async fn write_default(&self, blob: &str) -> Result<(), SwapError> {
+            *self.storage.lock().unwrap() = Some(blob.to_string());
+            *self.wrote.lock().unwrap() = true;
+            Ok(())
+        }
+        async fn touch_credfile(&self) -> Result<(), SwapError> {
+            Ok(())
+        }
+    }
+
+    #[tokio::test]
+    async fn test_switch_aborts_and_rolls_back_on_post_switch_identity_mismatch() {
+        let _lock = crate::testing::lock_data_dir();
+        let _env = setup_test_data_dir();
+        let (store, _dir) = test_store();
+        let current_id = Uuid::new_v4();
+        let target_id = Uuid::new_v4();
+        seed_account(&store, current_id);
+        seed_account(&store, target_id);
+
+        let initial_cc_blob = crate::testing::fresh_blob_json();
+        let replacement = r#"{"claudeAiOauth":{"accessToken":"sk-ant-oat01-intruder","refreshToken":"sk-ant-ort01-intruder","expiresAt":9999999999999,"scopes":["user:inference"],"subscriptionType":"pro","rateLimitTier":"default_claude_pro"}}"#;
+
+        save_private(current_id, &initial_cc_blob).unwrap();
+        save_private(target_id, &crate::testing::fresh_blob_json()).unwrap();
+        store.set_active_cli(current_id).unwrap();
+
+        let platform = MockPlatformReadReplacesBlob::new(&initial_cc_blob, replacement);
+        let refresher = MockRefresher::success();
+        // First call (pre-write outgoing check) matches current_id;
+        // Second call (pre-write target check) matches target_id;
+        // Third call (post-write check) returns intruder email so it mismatches target.
+        struct PostSwitchMismatchFetcher {
+            calls: std::sync::Mutex<usize>,
+            current_email: String,
+            target_email: String,
+        }
+        #[async_trait::async_trait]
+        impl super::ProfileFetcher for PostSwitchMismatchFetcher {
+            async fn fetch_email(&self, _t: &str) -> Result<String, OAuthError> {
+                let mut c = self.calls.lock().unwrap();
+                *c += 1;
+                Ok(match *c {
+                    1 => self.current_email.clone(),
+                    2 => self.target_email.clone(),
+                    _ => "intruder@example.com".into(),
+                })
+            }
+        }
+        let fetcher = PostSwitchMismatchFetcher {
+            calls: std::sync::Mutex::new(0),
+            current_email: format!("seed-{current_id}@example.com"),
+            target_email: format!("seed-{target_id}@example.com"),
+        };
+
+        let result = switch(
+            &store,
+            Some(current_id),
+            target_id,
+            &platform,
+            false,
+            &refresher,
+            &fetcher,
+        )
+        .await;
+
+        assert!(
+            matches!(result, Err(SwapError::IdentityMismatch { .. })),
+            "expected IdentityMismatch on post-switch verification, got {result:?}"
+        );
+        // active_cli must still be current — not flipped to target.
+        assert_eq!(
+            store.active_cli_uuid().unwrap(),
+            Some(current_id.to_string()),
+            "active_cli must not flip on post-switch failure"
+        );
+        // Rollback restored the original CC blob (not the replacement).
+        assert_eq!(platform.get().as_deref(), Some(initial_cc_blob.as_str()));
 
         delete_private(current_id).unwrap();
         delete_private(target_id).unwrap();
