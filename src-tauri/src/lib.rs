@@ -16,6 +16,7 @@ pub fn run() {
         .try_init();
 
     let mut builder = tauri::Builder::default()
+        .plugin(tauri_plugin_dialog::init())
         .setup(|app| {
             use tauri::{
                 image::Image,
