@@ -121,6 +121,14 @@ enum AccountAction {
         /// Account email (prefix match)
         email: String,
     },
+    /// Verify each per-account blob's identity against `/api/oauth/profile`.
+    /// Detects misfiled slots where the stored blob authenticates as a
+    /// different account than the label claims. Exit code: 0 all-ok,
+    /// 2 drift, 3 rejected/network error.
+    Verify {
+        /// Account email (prefix match). Omit to verify every account.
+        email: Option<String>,
+    },
 }
 
 #[derive(Subcommand)]
@@ -216,6 +224,9 @@ async fn main() -> Result<()> {
             } => commands::account::add(&ctx, from_current, from_token).await?,
             AccountAction::Remove { email } => commands::account::remove(&ctx, &email).await?,
             AccountAction::Inspect { email } => commands::account::inspect(&ctx, &email).await?,
+            AccountAction::Verify { email } => {
+                commands::account::verify(&ctx, email.as_deref()).await?
+            }
         },
         Commands::Cli { action } => match action {
             CliAction::Status => commands::cli_ops::status(&ctx)?,
