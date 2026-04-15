@@ -67,8 +67,12 @@ function UsageRow({ label, window }: { label: string; window: UsageWindow | null
       <dt>{label}</dt>
       <dd>
         <span className={`usage-pct ${pct >= 80 ? "high" : ""}`}>{pct}%</span>
-        {" "}
-        <span className="muted">resets {formatResetTime(window.resets_at)}</span>
+        {window.resets_at && (
+          <>
+            {" "}
+            <span className="muted">resets {formatResetTime(window.resets_at)}</span>
+          </>
+        )}
       </dd>
     </>
   );

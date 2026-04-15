@@ -29,8 +29,16 @@ pub struct UsageResponse {
 
 #[derive(Debug, Clone, Deserialize)]
 pub struct UsageWindow {
+    #[serde(default)]
     pub utilization: f64,
-    pub resets_at: DateTime<FixedOffset>,
+    /// The server returns `null` for windows that have had no activity
+    /// yet (no reset timestamp to report). Older code made this a
+    /// required `DateTime` and the whole usage response failed to
+    /// parse whenever any window had a null reset — rendering usage
+    /// entirely blank for accounts whose 5h/7d windows haven't yet
+    /// ticked. Now optional; the DTO renders "—" when absent.
+    #[serde(default)]
+    pub resets_at: Option<DateTime<FixedOffset>>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -118,6 +126,37 @@ mod tests {
             r#"{"new_window": {"utilization": 99.0, "resets_at": "2026-04-13T10:00:00+00:00"}}"#;
         let usage: UsageResponse = serde_json::from_str(json).unwrap();
         assert!(usage.unknown.contains_key("new_window"));
+    }
+
+    /// Regression: the /usage endpoint returns `resets_at: null` for a
+    /// window that has had no activity yet. An earlier non-optional
+    /// type made the WHOLE response fail to parse — causing the
+    /// sidebar to show blank usage even though the server responded
+    /// 200 OK. Optional resets_at keeps the window parseable; callers
+    /// render "—" in place of the reset time.
+    #[test]
+    fn test_usage_window_accepts_null_resets_at() {
+        let json = r#"{
+            "five_hour": {"utilization": 0.0, "resets_at": null},
+            "seven_day": {"utilization": 12.5, "resets_at": "2026-04-19T00:00:00+00:00"}
+        }"#;
+        let usage: UsageResponse = serde_json::from_str(json).unwrap();
+        let fh = usage.five_hour.unwrap();
+        assert_eq!(fh.utilization, 0.0);
+        assert!(fh.resets_at.is_none());
+        let sd = usage.seven_day.unwrap();
+        assert!(sd.resets_at.is_some());
+    }
+
+    /// Regression: resets_at omitted entirely (vs. explicit null) — the
+    /// serde(default) attribute should yield None either way.
+    #[test]
+    fn test_usage_window_accepts_missing_resets_at() {
+        let json = r#"{"five_hour": {"utilization": 5.0}}"#;
+        let usage: UsageResponse = serde_json::from_str(json).unwrap();
+        let fh = usage.five_hour.unwrap();
+        assert_eq!(fh.utilization, 5.0);
+        assert!(fh.resets_at.is_none());
     }
 
     #[test]

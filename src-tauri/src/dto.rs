@@ -105,8 +105,10 @@ pub struct RemoveOutcome {
 /// A single usage window (utilization + reset time).
 #[derive(Serialize, Clone)]
 pub struct UsageWindowDto {
+    // resets_at is optional: the server returns null for windows with
+    // no activity yet. The frontend renders "\u2014" when missing.
     pub utilization: f64,
-    pub resets_at: String, // RFC3339
+    pub resets_at: Option<String>, // RFC3339; null when the window has no reset yet
 }
 
 /// Extra-usage (monthly overage billing) info.
@@ -133,7 +135,7 @@ impl AccountUsageDto {
         let map_window = |w: &Option<claudepot_core::oauth::usage::UsageWindow>| {
             w.as_ref().map(|w| UsageWindowDto {
                 utilization: w.utilization,
-                resets_at: w.resets_at.to_rfc3339(),
+                resets_at: w.resets_at.as_ref().map(|t| t.to_rfc3339()),
             })
         };
         Self {
