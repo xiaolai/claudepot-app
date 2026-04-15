@@ -229,6 +229,32 @@ impl super::CliPlatform for MacosKeychain {
         }
         Ok(())
     }
+
+    async fn clear_default(&self) -> Result<(), SwapError> {
+        // `security delete-generic-password -s "Claude Code-credentials"`.
+        // Treat "item doesn't exist" as success so the rollback path is
+        // idempotent regardless of what state CC was in.
+        use tokio::process::Command;
+        let out = Command::new("/usr/bin/security")
+            .args(["delete-generic-password", "-s", DEFAULT_SERVICE])
+            .output()
+            .await
+            .map_err(|e| SwapError::WriteFailed(format!("security spawn: {e}")))?;
+        if out.status.success() {
+            return Ok(());
+        }
+        let stderr = String::from_utf8_lossy(&out.stderr);
+        // Exit 44 / "SecKeychainSearchCopyNext: The specified item could
+        // not be found in the keychain." → nothing to delete, which is
+        // the intended post-condition.
+        if stderr.contains("could not be found") || out.status.code() == Some(44) {
+            return Ok(());
+        }
+        Err(SwapError::WriteFailed(format!(
+            "security delete-generic-password: {}",
+            stderr.trim()
+        )))
+    }
 }
 
 #[cfg(test)]
