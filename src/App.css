@@ -107,14 +107,16 @@ body {
 }
 
 /* Draggable strip spanning the top of the window so the user can move
-   the frameless/overlay window. Sits above content but below any buttons.
-   Starts past the traffic lights (16px + ~54px for the cluster). */
+   the frameless/overlay window. Full width so Windows (no traffic lights)
+   gets a draggable top-left corner; on macOS the native traffic lights are
+   composited above the webview and remain clickable. Height matches the
+   52px top padding used by sidebar/content. */
 .titlebar-drag {
   position: fixed;
   top: 0;
-  left: 80px;
+  left: 0;
   right: 0;
-  height: 36px;
+  height: 52px;
   -webkit-app-region: drag;
   z-index: 1;
   pointer-events: auto;
