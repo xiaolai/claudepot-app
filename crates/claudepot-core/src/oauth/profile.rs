@@ -57,7 +57,11 @@ pub async fn fetch(access_token: &str) -> Result<Profile, OAuthError> {
 
     let email = account["email"].as_str().unwrap_or("");
     if email.is_empty() {
-        return Err(OAuthError::AuthFailed(
+        // A malformed 2xx body (no `email` field) is a server-side
+        // glitch, not a credential problem. Mapping this to AuthFailed
+        // would cause `services::identity` to classify it as Rejected
+        // and prompt re-login over what is really a transient issue.
+        return Err(OAuthError::ServerError(
             "profile response missing email field".into(),
         ));
     }

@@ -126,18 +126,26 @@ pub async fn verify_account_identity_with(
                                         "save_private failed: {e}"
                                     )));
                                 }
+                                // Write stuck — label and server agree,
+                                // classify as Ok (falls through below).
+                                classify(&account.email, actual)
                             }
-                            Ok(_) => {
+                            Ok(_) | Err(_) => {
+                                // Slot changed mid-flight (concurrent
+                                // reimport/sync/login) — our rotated
+                                // blob is stale. We didn't write, so
+                                // don't persist an "ok" claim about a
+                                // slot we can't vouch for. Return
+                                // NetworkError so the UI shows "could
+                                // not confirm last pass" rather than
+                                // falsely green, and verified_email
+                                // history is preserved by
+                                // update_verification's blip semantics.
                                 tracing::info!(
                                     account = %uuid,
-                                    "slot changed during refresh — skipping rotated-blob write to avoid clobbering concurrent update"
+                                    "slot changed during refresh — classifying as NetworkError to avoid a stale Ok persistence"
                                 );
-                            }
-                            Err(_) => {
-                                tracing::info!(
-                                    account = %uuid,
-                                    "slot removed during refresh — skipping rotated-blob write"
-                                );
+                                VerifyOutcome::NetworkError
                             }
                         }
                     } else {
@@ -147,8 +155,8 @@ pub async fn verify_account_identity_with(
                             actual = %actual,
                             "drift detected after refresh — NOT persisting rotated blob"
                         );
+                        classify(&account.email, actual)
                     }
-                    classify(&account.email, actual)
                 }
                 Ok(None) => VerifyOutcome::Rejected,
                 // RateLimited + ServerError + transport errors are all
