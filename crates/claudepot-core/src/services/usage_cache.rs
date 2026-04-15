@@ -170,7 +170,7 @@ impl UsageCache {
         };
 
         // 4. Load blob
-        let access_token = match self.load_access_token(uuid).await {
+        let access_token = match self.load_access_token(uuid) {
             Ok(Some(token)) => token,
             Ok(None) => {
                 guard.disarm_and_cleanup().await;
@@ -182,20 +182,15 @@ impl UsageCache {
             }
         };
 
-        // 5. HTTP call. If the server rejects the token (401) we try one
-        //    forced refresh and retry — "not yet expired locally but already
-        //    revoked upstream" happens whenever the user logs in elsewhere.
-        let mut result = self.fetcher.fetch(&access_token).await;
-        if matches!(&result, Err(OAuthError::AuthFailed(_))) {
-            tracing::info!(account = %uuid, "usage fetch got 401 — forcing refresh and retrying once");
-            match self.force_refresh(uuid).await {
-                Ok(Some(new_token)) => {
-                    result = self.fetcher.fetch(&new_token).await;
-                }
-                Ok(None) => tracing::warn!(account = %uuid, "force refresh returned None — giving up"),
-                Err(e) => tracing::warn!(account = %uuid, "force refresh errored: {e:?}"),
-            }
-        }
+        // 5. HTTP call. If the server rejects the token (401) we surface
+        //    AuthFailed → graceful path returns None. Reconciliation
+        //    (`services::identity::verify_account_identity`) is the
+        //    authoritative refresh path — usage_cache used to do its own
+        //    refresh + retry here, but that ran without identity checks
+        //    and entrenched misfiled blobs by writing fresh-but-wrong
+        //    tokens to the slot. The systematic fix lives in `identity`;
+        //    UI-driven reconciliation triggers it on cadence.
+        let result = self.fetcher.fetch(&access_token).await;
         guard.disarm_and_cleanup().await;
 
         match result {
@@ -303,103 +298,35 @@ impl UsageCache {
 
     // -- private helpers --
 
-    /// Force a token refresh for `uuid` regardless of local expiry.
+    /// Load the access_token for `uuid` from its private slot.
     ///
-    /// Used when the server rejects a locally-"valid" access_token (401).
-    /// Returns `Ok(Some(new_token))` on success, `Ok(None)` if there is
-    /// nothing to refresh (no blob on disk) or if the refresh itself
-    /// failed silently.
-    async fn force_refresh(&self, uuid: Uuid) -> Result<Option<String>, UsageFetchError> {
-        use crate::oauth::refresh;
-
-        let blob_str = match swap::load_private(uuid) {
-            Ok(s) => s,
-            Err(_) => return Ok(None),
-        };
-        let mut blob = CredentialBlob::from_json(&blob_str)
-            .map_err(|e| UsageFetchError::FetchFailed(format!("corrupt blob: {e}")))?;
-        let rt = &blob.claude_ai_oauth.refresh_token;
-        let refreshed = match refresh::refresh(rt).await {
-            Ok(r) => r,
-            Err(OAuthError::RateLimited { retry_after_secs }) => {
-                return Err(UsageFetchError::RateLimited { retry_after_secs });
-            }
-            Err(e) => {
-                tracing::warn!(account = %uuid, "force refresh failed: {e}");
-                return Ok(None);
-            }
-        };
-        blob.claude_ai_oauth.access_token = refreshed.access_token.clone();
-        blob.claude_ai_oauth.refresh_token = refreshed.refresh_token;
-        let now_ms = chrono::Utc::now().timestamp_millis();
-        blob.claude_ai_oauth.expires_at = now_ms + (refreshed.expires_in as i64) * 1000;
-        if let Ok(j) = blob.to_json() {
-            let _ = swap::save_private(uuid, &j);
-        }
-        Ok(Some(refreshed.access_token))
-    }
-
-    /// Load a usable access token for `uuid`.
-    ///
-    /// Inactive accounts snapshot a blob at login/switch time, but CC never
-    /// refreshes their token afterwards — so without an in-app refresh, the
-    /// stored access_token expires in ~8h and `fetch_usage` would give up.
-    /// When the stored blob is expired we exchange its refresh_token for a
-    /// new access_token via `oauth::refresh`, persist the rotated blob back
-    /// to the account's private slot, and return the fresh access_token.
+    /// This is the fast read path: parse the blob, check local expiry,
+    /// return the stored token. If the token is past its local expiry
+    /// we return `TokenExpired` (graceful path → blank); the systematic
+    /// refresh + identity check belongs to
+    /// `services::identity::verify_account_identity`, which is invoked
+    /// by reconciliation passes (CLI / GUI) — not here. Doing both
+    /// refresh and usage in one place was how a misfiled blob got
+    /// re-saved with a fresh-but-wrong token.
     ///
     /// Failure modes:
-    /// - no blob on disk → `Ok(None)` (account has no CLI credentials)
-    /// - corrupt blob → `Err(FetchFailed)` (surfaced as fetch failure)
-    /// - refresh fails (revoked, network, etc.) → `Ok(None)` in the graceful
-    ///   path (usage appears blank rather than painting an error)
-    async fn load_access_token(
-        &self,
-        uuid: Uuid,
-    ) -> Result<Option<String>, UsageFetchError> {
-        use crate::oauth::refresh;
-
+    /// - no blob → `Ok(None)` (account has no CLI credentials)
+    /// - corrupt blob → `Err(FetchFailed)`
+    /// - blob expired → `Err(TokenExpired)` — caller's graceful path
+    ///   returns None so the UI shows blank until reconciliation rotates
+    ///   the slot
+    fn load_access_token(&self, uuid: Uuid) -> Result<Option<String>, UsageFetchError> {
         let blob_str = match swap::load_private(uuid) {
             Ok(s) => s,
             Err(_) => return Ok(None),
         };
-        let mut blob = CredentialBlob::from_json(&blob_str)
+        let blob = CredentialBlob::from_json(&blob_str)
             .map_err(|e| UsageFetchError::FetchFailed(format!("corrupt blob: {e}")))?;
 
-        if !blob.is_expired(0) {
-            return Ok(Some(blob.claude_ai_oauth.access_token.clone()));
+        if blob.is_expired(0) {
+            return Err(UsageFetchError::TokenExpired);
         }
-
-        // Expired — attempt refresh.
-        tracing::info!(account = %uuid, "access token expired, refreshing via refresh_token");
-        let rt = &blob.claude_ai_oauth.refresh_token;
-        let refreshed = match refresh::refresh(rt).await {
-            Ok(r) => r,
-            Err(OAuthError::RateLimited { retry_after_secs }) => {
-                return Err(UsageFetchError::RateLimited { retry_after_secs });
-            }
-            Err(e) => {
-                tracing::warn!(account = %uuid, "refresh failed: {e}");
-                return Ok(None);
-            }
-        };
-
-        // Rotate blob and persist.
-        blob.claude_ai_oauth.access_token = refreshed.access_token.clone();
-        blob.claude_ai_oauth.refresh_token = refreshed.refresh_token;
-        // expires_at is ms since epoch (i64). expires_in is seconds.
-        let now_ms = chrono::Utc::now().timestamp_millis();
-        blob.claude_ai_oauth.expires_at = now_ms + (refreshed.expires_in as i64) * 1000;
-        let new_json = blob
-            .to_json()
-            .map_err(|e| UsageFetchError::FetchFailed(format!("serialize blob: {e}")))?;
-        if let Err(e) = swap::save_private(uuid, &new_json) {
-            tracing::warn!(account = %uuid, "persisting refreshed blob failed: {e}");
-            // Still return the fresh token for this fetch — next call will
-            // re-refresh, which is merely suboptimal, not broken.
-        }
-
-        Ok(Some(refreshed.access_token))
+        Ok(Some(blob.claude_ai_oauth.access_token.clone()))
     }
 
     fn outcome_to_result(
