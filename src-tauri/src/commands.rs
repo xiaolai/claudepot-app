@@ -324,7 +324,7 @@ pub async fn fetch_all_usage(
                 tracing::info!(account = %uuid, "usage fetched");
                 out.insert(uuid.to_string(), AccountUsageDto::from_response(&response));
             }
-            None => tracing::warn!(account = %uuid, "usage returned None (no creds / refresh failed / fetch failed)"),
+            None => tracing::warn!(account = %uuid, "usage returned None (no creds / token expired / fetch failed — run verify_all_accounts to reconcile)"),
         }
     }
     Ok(out)
@@ -351,28 +351,36 @@ pub async fn verify_all_accounts() -> Result<Vec<AccountSummary>, String> {
     let fetcher = DefaultProfileFetcher;
 
     let mut first = true;
-    for account in &accounts {
-        if !account.has_cli_credentials {
-            continue;
-        }
+    // Single stagger counter; verify_account_identity already does its
+    // own DB read to check the latest row, so we only iterate UUIDs.
+    let uuids: Vec<uuid::Uuid> = accounts
+        .iter()
+        .filter(|a| a.has_cli_credentials)
+        .map(|a| a.uuid)
+        .collect();
+    for uuid in uuids {
         if !first {
             tokio::time::sleep(Duration::from_millis(200)).await;
         }
         first = false;
-        match identity::verify_account_identity(&store, account.uuid, &fetcher).await {
+        match identity::verify_account_identity(&store, uuid, &fetcher).await {
             Ok(outcome) => tracing::info!(
-                account = %account.uuid,
+                account = %uuid,
                 status = outcome.as_str(),
                 "verify_all_accounts: result"
             ),
             Err(e) => tracing::warn!(
-                account = %account.uuid,
+                account = %uuid,
                 "verify_all_accounts: error {e}"
             ),
         }
     }
 
-    // Re-list to pick up the freshly persisted verify_status columns.
+    // Re-list once to pick up the freshly persisted verify_status
+    // columns. DTO construction still recomputes token_health per row
+    // (reads each blob from disk once) — acceptable O(n) disk reads, and
+    // the values can differ from what verify_account_identity saw if a
+    // refresh rotated the access_token in between.
     let refreshed = store.list().map_err(|e| format!("list failed: {e}"))?;
     Ok(refreshed.iter().map(AccountSummary::from).collect())
 }

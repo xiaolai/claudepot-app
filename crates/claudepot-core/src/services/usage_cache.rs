@@ -650,4 +650,67 @@ mod tests {
         let r = UsageCache::outcome_to_result(None);
         assert!(matches!(r, Err(UsageFetchError::FetchFailed(_))));
     }
+
+    // -- Disk-backed tests for load_access_token, covering the branches
+    //    that got simplified when ad-hoc refresh was retired. We want
+    //    explicit coverage for "fresh → returns token", "expired →
+    //    TokenExpired", "missing → Ok(None)", "corrupt → FetchFailed".
+
+    #[test]
+    fn test_load_access_token_fresh_blob_returns_token() {
+        let _lock = crate::testing::lock_data_dir();
+        let _env = crate::testing::setup_test_data_dir();
+        let uuid = uuid::Uuid::new_v4();
+        crate::cli_backend::swap::save_private(uuid, &crate::testing::fresh_blob_json()).unwrap();
+
+        let (fetcher, _) = MockFetcher::new(0.0);
+        let cache = UsageCache::with_fetcher(Box::new(fetcher));
+        let token = cache.load_access_token(uuid).unwrap();
+        assert_eq!(token.as_deref(), Some("sk-ant-oat01-test"));
+        crate::cli_backend::swap::delete_private(uuid).unwrap();
+    }
+
+    #[test]
+    fn test_load_access_token_expired_blob_returns_token_expired() {
+        let _lock = crate::testing::lock_data_dir();
+        let _env = crate::testing::setup_test_data_dir();
+        let uuid = uuid::Uuid::new_v4();
+        crate::cli_backend::swap::save_private(uuid, &crate::testing::expired_blob_json()).unwrap();
+
+        let (fetcher, _) = MockFetcher::new(0.0);
+        let cache = UsageCache::with_fetcher(Box::new(fetcher));
+        assert!(matches!(
+            cache.load_access_token(uuid),
+            Err(UsageFetchError::TokenExpired)
+        ));
+        crate::cli_backend::swap::delete_private(uuid).unwrap();
+    }
+
+    #[test]
+    fn test_load_access_token_missing_blob_returns_ok_none() {
+        let _lock = crate::testing::lock_data_dir();
+        let _env = crate::testing::setup_test_data_dir();
+        let uuid = uuid::Uuid::new_v4();
+        // No save_private — slot is empty.
+
+        let (fetcher, _) = MockFetcher::new(0.0);
+        let cache = UsageCache::with_fetcher(Box::new(fetcher));
+        assert!(matches!(cache.load_access_token(uuid), Ok(None)));
+    }
+
+    #[test]
+    fn test_load_access_token_corrupt_blob_returns_fetch_failed() {
+        let _lock = crate::testing::lock_data_dir();
+        let _env = crate::testing::setup_test_data_dir();
+        let uuid = uuid::Uuid::new_v4();
+        crate::cli_backend::swap::save_private(uuid, "not-json-at-all").unwrap();
+
+        let (fetcher, _) = MockFetcher::new(0.0);
+        let cache = UsageCache::with_fetcher(Box::new(fetcher));
+        assert!(matches!(
+            cache.load_access_token(uuid),
+            Err(UsageFetchError::FetchFailed(_))
+        ));
+        crate::cli_backend::swap::delete_private(uuid).unwrap();
+    }
 }
