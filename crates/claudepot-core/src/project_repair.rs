@@ -1,0 +1,544 @@
+//! Repair orchestration for project rename journals.
+//!
+//! The CLI and GUI both call into these functions; the only things
+//! that stay CLI-side are user-confirmation prompts, pretty printing,
+//! and JSON output shaping. No I/O formatting happens here.
+//!
+//! Spec references:
+//! - §5.1 lock break + audit
+//! - §6 journal states (running / pending / stale / abandoned)
+//! - §6 resume/rollback/abandon semantics
+//! - §7 GC retention
+
+use crate::error::ProjectError;
+use crate::project::{self, MoveArgs, MoveResult};
+use crate::project_journal::{self, Journal, JournalStatus};
+use crate::project_lock::{self, Lock};
+use crate::project_rewrite::ProgressCallback;
+
+use std::fs;
+use std::path::{Path, PathBuf};
+use std::time::{SystemTime, UNIX_EPOCH};
+
+/// A journal file plus its classified status. The CLI and GUI both
+/// iterate over these rather than the raw `(PathBuf, Journal)` tuples.
+#[derive(Debug, Clone)]
+pub struct JournalEntry {
+    /// Stable identifier = the journal file stem (e.g. `move-1744800000-12345`).
+    pub id: String,
+    pub path: PathBuf,
+    pub journal: Journal,
+    pub status: JournalStatus,
+}
+
+impl JournalEntry {
+    fn stem(path: &Path) -> String {
+        path.file_stem()
+            .map(|s| s.to_string_lossy().to_string())
+            .unwrap_or_default()
+    }
+}
+
+/// Returned by [`gc`]. In `dry_run=true` mode, `entries_removed` is
+/// the set of paths that *would* be removed and the counters reflect
+/// projected deletes; in `dry_run=false` mode the counters reflect
+/// actually-removed files and `entries_removed` is empty.
+#[derive(Debug, Clone, Default)]
+pub struct GcResult {
+    pub removed_journals: usize,
+    pub removed_snapshots: usize,
+    pub bytes_freed: u64,
+    /// Only populated in dry-run mode.
+    pub would_remove: Vec<PathBuf>,
+}
+
+/// Audit record written by [`break_lock_with_audit`].
+#[derive(Debug, Clone)]
+pub struct BrokenLock {
+    pub prior: Lock,
+    pub audit_path: PathBuf,
+}
+
+/// List every journal on disk with its current status. This includes
+/// entries with an `.abandoned.json` sidecar — callers that only care
+/// about actionable work should use [`list_actionable`].
+pub fn list_pending_with_status(
+    journals_dir: &Path,
+    locks_dir: &Path,
+    nag_threshold_secs: u64,
+) -> Result<Vec<JournalEntry>, ProjectError> {
+    let now_unix = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0);
+
+    let raw = project_journal::list_pending(journals_dir)?;
+    let mut out = Vec::with_capacity(raw.len());
+    for (path, journal) in raw {
+        let lock_path = locks_dir.join(format!("{}.lock", journal.old_san));
+        let lock_live = match project_lock::read_lock(&lock_path) {
+            Ok(l) => project_lock::is_live(&l),
+            Err(_) => false,
+        };
+        let status =
+            project_journal::classify(&path, &journal, lock_live, now_unix, nag_threshold_secs);
+        let id = JournalEntry::stem(&path);
+        out.push(JournalEntry {
+            id,
+            path,
+            journal,
+            status,
+        });
+    }
+    Ok(out)
+}
+
+/// Only journals the user should act on — excludes those already
+/// marked `Abandoned` via a sidecar.
+pub fn list_actionable(
+    journals_dir: &Path,
+    locks_dir: &Path,
+    nag_threshold_secs: u64,
+) -> Result<Vec<JournalEntry>, ProjectError> {
+    Ok(list_pending_with_status(journals_dir, locks_dir, nag_threshold_secs)?
+        .into_iter()
+        .filter(|e| e.status != JournalStatus::Abandoned)
+        .collect())
+}
+
+/// Re-run the original move. The original journal is marked abandoned
+/// first so the pending-journal gate doesn't block the re-run. Phases
+/// are idempotent (spec §6).
+///
+/// The returned `MoveResult` carries a fresh journal path (the
+/// successor), not the old one.
+pub fn resume(
+    entry: &JournalEntry,
+    config_dir: PathBuf,
+    claude_json_path: Option<PathBuf>,
+    snapshots_dir: Option<PathBuf>,
+    progress: ProgressCallback<'_>,
+) -> Result<MoveResult, ProjectError> {
+    // Supersede the prior journal (audit trail preserved; gate ignores it).
+    let _ = project_journal::mark_abandoned(&entry.path);
+
+    let args = MoveArgs {
+        old_path: entry.journal.old_path.clone().into(),
+        new_path: entry.journal.new_path.clone().into(),
+        config_dir,
+        claude_json_path,
+        snapshots_dir,
+        no_move: entry.journal.flags.no_move,
+        merge: entry.journal.flags.merge,
+        overwrite: entry.journal.flags.overwrite,
+        force: entry.journal.flags.force,
+        dry_run: false,
+        ignore_pending_journals: true,
+    };
+    project::move_project(&args, progress)
+}
+
+/// Run the reverse move (new → old). Snapshots from destructive phases
+/// are NOT auto-restored — callers surface `entry.journal.snapshot_paths`
+/// for manual inspection.
+pub fn rollback(
+    entry: &JournalEntry,
+    config_dir: PathBuf,
+    claude_json_path: Option<PathBuf>,
+    snapshots_dir: Option<PathBuf>,
+    progress: ProgressCallback<'_>,
+) -> Result<MoveResult, ProjectError> {
+    let _ = project_journal::mark_abandoned(&entry.path);
+
+    let args = MoveArgs {
+        old_path: entry.journal.new_path.clone().into(),
+        new_path: entry.journal.old_path.clone().into(),
+        config_dir,
+        claude_json_path,
+        snapshots_dir,
+        no_move: entry.journal.flags.no_move,
+        merge: entry.journal.flags.merge,
+        overwrite: entry.journal.flags.overwrite,
+        force: entry.journal.flags.force,
+        dry_run: false,
+        ignore_pending_journals: true,
+    };
+    project::move_project(&args, progress)
+}
+
+/// Write the `.abandoned.json` sidecar. The journal itself is kept
+/// for audit.
+pub fn abandon(entry: &JournalEntry) -> Result<PathBuf, ProjectError> {
+    project_journal::mark_abandoned(&entry.path)
+}
+
+/// Force-break a lock file and write an audit record to the journals
+/// directory. Callers handle user confirmation before calling.
+pub fn break_lock_with_audit(
+    lock_path: &Path,
+    journals_dir: &Path,
+) -> Result<BrokenLock, ProjectError> {
+    let prior = project_lock::break_lock(lock_path)?;
+
+    fs::create_dir_all(journals_dir).map_err(ProjectError::Io)?;
+    let ts = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_millis())
+        .unwrap_or(0);
+    let audit_path = journals_dir.join(format!("broken-lock-{ts}.json"));
+    let body = serde_json::json!({
+        "broken_at": chrono::Utc::now().to_rfc3339(),
+        "reason": "manual --break-lock",
+        "prior_lock": &prior,
+        "broken_by_pid": std::process::id(),
+        "lock_path": lock_path,
+    });
+    fs::write(
+        &audit_path,
+        serde_json::to_string_pretty(&body).unwrap_or_else(|_| "{}".to_string()),
+    )
+    .map_err(ProjectError::Io)?;
+
+    Ok(BrokenLock { prior, audit_path })
+}
+
+/// Garbage-collect abandoned journals and snapshots older than
+/// `older_than_days`. With `dry_run=true` nothing is deleted and
+/// `would_remove` is populated with the candidate paths.
+pub fn gc(
+    journals_dir: &Path,
+    snapshots_dir: &Path,
+    older_than_days: u64,
+    dry_run: bool,
+) -> Result<GcResult, ProjectError> {
+    let cutoff_secs = older_than_days.saturating_mul(86_400);
+    let now_unix = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0);
+
+    let mut result = GcResult::default();
+
+    // Abandoned journals (identified by `.abandoned.json` sidecar).
+    if journals_dir.exists() {
+        for entry in fs::read_dir(journals_dir).map_err(ProjectError::Io)? {
+            let entry = entry.map_err(ProjectError::Io)?;
+            let name = entry.file_name().to_string_lossy().to_string();
+            if !name.ends_with(".abandoned.json") {
+                continue;
+            }
+            let base = name.trim_end_matches(".abandoned.json");
+            let journal_path = journals_dir.join(format!("{base}.json"));
+            let meta = entry.metadata().map_err(ProjectError::Io)?;
+            let age = meta
+                .modified()
+                .ok()
+                .and_then(|m| m.duration_since(UNIX_EPOCH).ok())
+                .map(|d| now_unix.saturating_sub(d.as_secs()))
+                .unwrap_or(0);
+            if age < cutoff_secs {
+                continue;
+            }
+            if dry_run {
+                result.would_remove.push(entry.path());
+                if journal_path.exists() {
+                    result.would_remove.push(journal_path);
+                }
+            } else {
+                result.bytes_freed += meta.len();
+                let _ = fs::remove_file(entry.path());
+                if journal_path.exists() {
+                    result.bytes_freed += fs::metadata(&journal_path)
+                        .map(|m| m.len())
+                        .unwrap_or(0);
+                    let _ = fs::remove_file(&journal_path);
+                }
+                result.removed_journals += 1;
+            }
+        }
+    }
+
+    // Snapshots older than cutoff.
+    if snapshots_dir.exists() {
+        for entry in fs::read_dir(snapshots_dir).map_err(ProjectError::Io)? {
+            let entry = entry.map_err(ProjectError::Io)?;
+            let meta = entry.metadata().map_err(ProjectError::Io)?;
+            let age = meta
+                .modified()
+                .ok()
+                .and_then(|m| m.duration_since(UNIX_EPOCH).ok())
+                .map(|d| now_unix.saturating_sub(d.as_secs()))
+                .unwrap_or(0);
+            if age < cutoff_secs {
+                continue;
+            }
+            if dry_run {
+                result.would_remove.push(entry.path());
+            } else {
+                result.bytes_freed += meta.len();
+                let _ = fs::remove_file(entry.path());
+                result.removed_snapshots += 1;
+            }
+        }
+    }
+
+    Ok(result)
+}
+
+/// Resolve a user-supplied project hint (sanitized or raw path) to a
+/// lock file. Returns `None` if no lock exists under either form.
+pub fn resolve_lock_file(locks_dir: &Path, project_hint: &str) -> Option<PathBuf> {
+    let san = project::sanitize_path(project_hint);
+    let primary = locks_dir.join(format!("{san}.lock"));
+    if primary.exists() {
+        return Some(primary);
+    }
+    let alt = locks_dir.join(format!("{project_hint}.lock"));
+    if alt.exists() {
+        return Some(alt);
+    }
+    None
+}
+
+// ---------------------------------------------------------------------------
+// Tests
+// ---------------------------------------------------------------------------
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::project_journal::JournalFlags;
+    use std::time::Duration;
+    use tempfile::TempDir;
+
+    fn write_journal(dir: &Path, id: &str, started_unix: u64) -> PathBuf {
+        let j = Journal {
+            version: 1,
+            started_at: "2026-04-15T00:00:00Z".to_string(),
+            started_unix_secs: started_unix,
+            pid: 12345,
+            hostname: "test-host".to_string(),
+            claudepot_version: "0.1.0".to_string(),
+            old_path: "/tmp/old".to_string(),
+            new_path: "/tmp/new".to_string(),
+            old_san: "-tmp-old".to_string(),
+            new_san: "-tmp-new".to_string(),
+            old_git_root: None,
+            new_git_root: None,
+            flags: JournalFlags::default(),
+            phases_completed: vec!["P3".to_string()],
+            snapshot_paths: vec![],
+            last_error: None,
+        };
+        let path = dir.join(format!("{id}.json"));
+        fs::write(&path, serde_json::to_string_pretty(&j).unwrap()).unwrap();
+        path
+    }
+
+    #[test]
+    fn test_list_pending_with_status_classifies_pending_vs_stale() {
+        let tmp = TempDir::new().unwrap();
+        let journals = tmp.path().join("journals");
+        let locks = tmp.path().join("locks");
+        fs::create_dir_all(&journals).unwrap();
+        fs::create_dir_all(&locks).unwrap();
+
+        let now = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_secs();
+        write_journal(&journals, "move-fresh", now - 60);
+        write_journal(&journals, "move-old", now - 3 * 86_400);
+
+        let entries = list_pending_with_status(&journals, &locks, 86_400).unwrap();
+        assert_eq!(entries.len(), 2);
+        let fresh = entries.iter().find(|e| e.id == "move-fresh").unwrap();
+        let old = entries.iter().find(|e| e.id == "move-old").unwrap();
+        assert_eq!(fresh.status, JournalStatus::Pending);
+        assert_eq!(old.status, JournalStatus::Stale);
+    }
+
+    #[test]
+    fn test_list_actionable_excludes_abandoned() {
+        let tmp = TempDir::new().unwrap();
+        let journals = tmp.path().join("journals");
+        let locks = tmp.path().join("locks");
+        fs::create_dir_all(&journals).unwrap();
+        fs::create_dir_all(&locks).unwrap();
+
+        let now = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_secs();
+        let a = write_journal(&journals, "move-a", now - 60);
+        let _b = write_journal(&journals, "move-b", now - 60);
+        project_journal::mark_abandoned(&a).unwrap();
+
+        let actionable = list_actionable(&journals, &locks, 86_400).unwrap();
+        assert_eq!(actionable.len(), 1);
+        assert_eq!(actionable[0].id, "move-b");
+    }
+
+    #[test]
+    fn test_abandon_writes_sidecar_and_preserves_journal() {
+        let tmp = TempDir::new().unwrap();
+        let journals = tmp.path().join("journals");
+        let locks = tmp.path().join("locks");
+        fs::create_dir_all(&journals).unwrap();
+        fs::create_dir_all(&locks).unwrap();
+
+        let now = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_secs();
+        write_journal(&journals, "move-x", now - 60);
+
+        let entries = list_actionable(&journals, &locks, 86_400).unwrap();
+        let sidecar = abandon(&entries[0]).unwrap();
+        assert!(sidecar.exists());
+        assert!(entries[0].path.exists(), "journal is preserved for audit");
+
+        // Second pass sees no actionable entries.
+        let after = list_actionable(&journals, &locks, 86_400).unwrap();
+        assert!(after.is_empty());
+    }
+
+    #[test]
+    fn test_break_lock_with_audit_writes_audit_record() {
+        let tmp = TempDir::new().unwrap();
+        let journals = tmp.path().join("journals");
+        let locks = tmp.path().join("locks");
+        fs::create_dir_all(&journals).unwrap();
+        fs::create_dir_all(&locks).unwrap();
+
+        // Fabricate a lock file directly.
+        let lock_path = locks.join("-tmp-foo.lock");
+        let lock = Lock {
+            version: 1,
+            pid: 99999,
+            hostname: "ghost-host".to_string(),
+            start_iso8601: "2026-04-15T00:00:00Z".to_string(),
+            start_unix_secs: 0,
+            claudepot_version: "0.1.0".to_string(),
+        };
+        fs::write(&lock_path, serde_json::to_string(&lock).unwrap()).unwrap();
+
+        let broken = break_lock_with_audit(&lock_path, &journals).unwrap();
+        assert!(!lock_path.exists(), "lock removed");
+        assert!(broken.audit_path.exists(), "audit written");
+        assert_eq!(broken.prior.pid, 99999);
+
+        let audit = fs::read_to_string(&broken.audit_path).unwrap();
+        assert!(audit.contains("\"reason\""));
+        assert!(audit.contains("manual --break-lock"));
+    }
+
+    #[test]
+    fn test_gc_dry_run_does_not_delete() {
+        let tmp = TempDir::new().unwrap();
+        let journals = tmp.path().join("journals");
+        let snaps = tmp.path().join("snapshots");
+        fs::create_dir_all(&journals).unwrap();
+        fs::create_dir_all(&snaps).unwrap();
+
+        // Seed an abandoned journal with an old mtime.
+        let now = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_secs();
+        let journal_path = write_journal(&journals, "move-old", now - 100 * 86_400);
+        project_journal::mark_abandoned(&journal_path).unwrap();
+        // Backdate sidecar mtime by 100 days.
+        let sidecar = journals.join("move-old.abandoned.json");
+        let old_time =
+            SystemTime::now().checked_sub(Duration::from_secs(100 * 86_400)).unwrap();
+        filetime::set_file_mtime(&sidecar, old_time.into()).ok();
+        filetime::set_file_mtime(&journal_path, old_time.into()).ok();
+
+        let result = gc(&journals, &snaps, 30, /* dry_run */ true).unwrap();
+        assert_eq!(result.removed_journals, 0);
+        assert!(!result.would_remove.is_empty());
+        assert!(sidecar.exists(), "dry-run preserves files");
+        assert!(journal_path.exists());
+    }
+
+    #[test]
+    fn test_gc_removes_abandoned_journals_older_than_cutoff() {
+        let tmp = TempDir::new().unwrap();
+        let journals = tmp.path().join("journals");
+        let snaps = tmp.path().join("snapshots");
+        fs::create_dir_all(&journals).unwrap();
+        fs::create_dir_all(&snaps).unwrap();
+
+        let now = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_secs();
+        let journal_path = write_journal(&journals, "move-old", now - 100 * 86_400);
+        project_journal::mark_abandoned(&journal_path).unwrap();
+        let sidecar = journals.join("move-old.abandoned.json");
+        let old_time =
+            SystemTime::now().checked_sub(Duration::from_secs(100 * 86_400)).unwrap();
+        filetime::set_file_mtime(&sidecar, old_time.into()).ok();
+        filetime::set_file_mtime(&journal_path, old_time.into()).ok();
+
+        let result = gc(&journals, &snaps, 30, /* dry_run */ false).unwrap();
+        assert_eq!(result.removed_journals, 1);
+        assert!(!sidecar.exists());
+        assert!(!journal_path.exists());
+        assert!(result.bytes_freed > 0);
+    }
+
+    #[test]
+    fn test_gc_leaves_recent_journals_alone() {
+        let tmp = TempDir::new().unwrap();
+        let journals = tmp.path().join("journals");
+        let snaps = tmp.path().join("snapshots");
+        fs::create_dir_all(&journals).unwrap();
+        fs::create_dir_all(&snaps).unwrap();
+
+        let now = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_secs();
+        let journal_path = write_journal(&journals, "move-new", now - 60);
+        project_journal::mark_abandoned(&journal_path).unwrap();
+
+        let result = gc(&journals, &snaps, 30, /* dry_run */ false).unwrap();
+        assert_eq!(result.removed_journals, 0);
+        assert!(journal_path.exists());
+    }
+
+    #[test]
+    fn test_resolve_lock_file_by_sanitized_path() {
+        let tmp = TempDir::new().unwrap();
+        let locks = tmp.path().join("locks");
+        fs::create_dir_all(&locks).unwrap();
+        let san = project::sanitize_path("/tmp/my-project");
+        let lock_path = locks.join(format!("{san}.lock"));
+        fs::write(&lock_path, "{}").unwrap();
+
+        let resolved = resolve_lock_file(&locks, "/tmp/my-project").unwrap();
+        assert_eq!(resolved, lock_path);
+    }
+
+    #[test]
+    fn test_resolve_lock_file_by_bare_sanitized_name() {
+        let tmp = TempDir::new().unwrap();
+        let locks = tmp.path().join("locks");
+        fs::create_dir_all(&locks).unwrap();
+        let lock_path = locks.join("-tmp-bare.lock");
+        fs::write(&lock_path, "{}").unwrap();
+
+        let resolved = resolve_lock_file(&locks, "-tmp-bare").unwrap();
+        assert_eq!(resolved, lock_path);
+    }
+
+    #[test]
+    fn test_resolve_lock_file_missing_returns_none() {
+        let tmp = TempDir::new().unwrap();
+        let locks = tmp.path().join("locks");
+        fs::create_dir_all(&locks).unwrap();
+        assert!(resolve_lock_file(&locks, "/nowhere").is_none());
+    }
+}
