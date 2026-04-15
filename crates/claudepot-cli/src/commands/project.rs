@@ -334,7 +334,7 @@ pub fn move_project(
         ignore_pending_journals,
     };
 
-    let result = project::move_project(&args, &|_, _| {})?;
+    let result = project::move_project(&args, &claudepot_core::project_progress::NoopSink)?;
 
     if ctx.json {
         println!("{}", serde_json::to_string_pretty(&result)?);
@@ -664,7 +664,7 @@ fn handle_resume(ctx: &AppContext, entry: &project_repair::JournalEntry) -> Resu
         anyhow::bail!("aborted (run with -y to confirm)");
     }
     let (config_dir, claude_json, snapshots) = repair_paths();
-    let result = project_repair::resume(entry, config_dir, claude_json, snapshots, &|_, _| {})?;
+    let result = project_repair::resume(entry, config_dir, claude_json, snapshots, &claudepot_core::project_progress::NoopSink)?;
     if ctx.json {
         println!("{}", serde_json::to_string_pretty(&result)?);
     } else {
@@ -698,7 +698,7 @@ fn handle_rollback(ctx: &AppContext, entry: &project_repair::JournalEntry) -> Re
         anyhow::bail!("aborted (run with -y to confirm)");
     }
     let (config_dir, claude_json, snapshots) = repair_paths();
-    let result = project_repair::rollback(entry, config_dir, claude_json, snapshots, &|_, _| {})?;
+    let result = project_repair::rollback(entry, config_dir, claude_json, snapshots, &claudepot_core::project_progress::NoopSink)?;
     if ctx.json {
         println!("{}", serde_json::to_string_pretty(&result)?);
     } else {
