@@ -43,8 +43,19 @@ export function Sidebar({
       <div className="sidebar-list" role="listbox" aria-label="Account list">
         {accounts.map((a) => {
           const active = selectedUuid === a.uuid;
-          const tokenKind = a.token_status.startsWith("valid")
-            ? "ok" : a.token_status === "expired" ? "bad" : "warn";
+          // Drift beats every other status signal — the slot is misfiled
+          // even when the local clock says the token is valid. Paint red
+          // and explain in the tooltip instead of lying green.
+          const tokenKind = a.drift
+            ? "bad"
+            : a.token_status.startsWith("valid")
+            ? "ok"
+            : a.token_status === "expired"
+            ? "bad"
+            : "warn";
+          const dotTitle = a.drift
+            ? `DRIFT — blob authenticates as ${a.verified_email}`
+            : a.token_status;
           const acctUsage = usage[a.uuid];
           const fiveHourPct = acctUsage?.five_hour?.utilization ?? null;
 
@@ -63,7 +74,7 @@ export function Sidebar({
               }}
               tabIndex={0}
             >
-              <span className={`status-dot ${tokenKind}`} />
+              <span className={`status-dot ${tokenKind}`} title={dotTitle} />
               <div style={{ flex: 1, minWidth: 0 }}>
                 <div className="sidebar-item-row">
                   <span className="sidebar-item-text">{a.email}</span>

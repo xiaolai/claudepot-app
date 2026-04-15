@@ -35,4 +35,9 @@ export const api = {
   accountRemove: (uuid: string) =>
     invoke<RemoveOutcome>("account_remove", { uuid }),
   fetchAllUsage: () => invoke<UsageMap>("fetch_all_usage"),
+  /// Reconcile every account's blob identity against `/api/oauth/profile`.
+  /// Returns the refreshed list so the caller can re-render without a
+  /// separate `accountList` round-trip. Slow — one HTTP call per account
+  /// with credentials.
+  verifyAllAccounts: () => invoke<AccountSummary[]>("verify_all_accounts"),
 };

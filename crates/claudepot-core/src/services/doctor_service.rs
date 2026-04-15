@@ -37,6 +37,13 @@ pub struct AccountHealth {
     pub email: String,
     pub token_status: String,
     pub remaining_mins: Option<i64>,
+    /// Last persisted verify_status on the account row: "never", "ok",
+    /// "drift", "rejected", "network_error". Populated from the DB — if
+    /// it says "drift", the doctor reports an error and exits non-zero.
+    /// Run `claudepot account verify` to refresh before trusting this
+    /// field as current.
+    pub verify_status: String,
+    pub verified_email: Option<String>,
 }
 
 #[derive(Debug)]
@@ -69,34 +76,8 @@ pub async fn check_health(store: &AccountStore) -> HealthReport {
         Ok(a) => (a, None),
         Err(e) => (vec![], Some(format!("failed to list accounts: {e}"))),
     };
-    let account_health: Vec<AccountHealth> = accounts
-        .iter()
-        .map(|a| {
-            let health =
-                crate::services::account_service::token_health(a.uuid, a.has_cli_credentials);
-            AccountHealth {
-                email: a.email.clone(),
-                token_status: health.status,
-                remaining_mins: health.remaining_mins,
-            }
-        })
-        .collect();
-
-    // Desktop profiles
-    let desktop_profiles: Vec<ProfileInfo> = accounts
-        .iter()
-        .map(|a| {
-            let p = crate::paths::desktop_profile_dir(a.uuid);
-            ProfileInfo {
-                email: a.email.clone(),
-                item_count: if p.exists() {
-                    std::fs::read_dir(&p).map(|d| d.count()).ok()
-                } else {
-                    None
-                },
-            }
-        })
-        .collect();
+    let account_health = build_account_health(&accounts);
+    let desktop_profiles = build_profile_info(&accounts);
 
     HealthReport {
         platform: std::env::consts::OS.to_string(),
@@ -187,8 +168,7 @@ async fn check_keychain() -> Option<Result<bool, String>> {
 }
 
 /// Build account health vector from a list of accounts (testable extraction).
-#[allow(dead_code)] // used from tests; inlined in check_health above
-pub(crate) fn build_account_health(accounts: &[crate::account::Account]) -> Vec<AccountHealth> {
+fn build_account_health(accounts: &[crate::account::Account]) -> Vec<AccountHealth> {
     accounts
         .iter()
         .map(|a| {
@@ -198,14 +178,15 @@ pub(crate) fn build_account_health(accounts: &[crate::account::Account]) -> Vec<
                 email: a.email.clone(),
                 token_status: health.status,
                 remaining_mins: health.remaining_mins,
+                verify_status: a.verify_status.clone(),
+                verified_email: a.verified_email.clone(),
             }
         })
         .collect()
 }
 
 /// Build desktop profile info from a list of accounts (testable extraction).
-#[allow(dead_code)] // used from tests; inlined in check_health above
-pub(crate) fn build_profile_info(accounts: &[crate::account::Account]) -> Vec<ProfileInfo> {
+fn build_profile_info(accounts: &[crate::account::Account]) -> Vec<ProfileInfo> {
     accounts
         .iter()
         .map(|a| {

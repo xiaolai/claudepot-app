@@ -84,6 +84,19 @@ function App() {
         />
 
         <main className="content">
+          {accounts.some((a) => a.drift) && (
+            <div className="banner warn" role="alert">
+              <div>
+                <strong>Account drift detected.</strong>{" "}
+                {accounts
+                  .filter((a) => a.drift)
+                  .map((a) => `${a.email} authenticates as ${a.verified_email}`)
+                  .join("; ")}
+                . Re-login the affected accounts or Remove + re-add to
+                clear the misfiled slot.
+              </div>
+            </div>
+          )}
           {keychainIssue && (
             <div className="banner warn" role="alert">
               <div>
