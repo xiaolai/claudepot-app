@@ -69,3 +69,9 @@ unicode-normalization = "0.1"
 # Utilities
 uuid = { version = "1", features = ["v4", "serde"] }
 dirs = "6"
+
+# Parallel data processing (per-file JSONL rewriting in project rename, §4.2 P6).
+# Chosen over tokio spawn_blocking for CPU-bound JSON parsing; thread pool
+# bounded by num_cpus automatically.
+rayon = "1.10"
+num_cpus = "1.16"

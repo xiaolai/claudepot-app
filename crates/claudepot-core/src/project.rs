@@ -84,7 +84,14 @@ pub(crate) enum MoveScenario {
     AlreadyMoved,
 }
 
-pub fn move_project(args: &MoveArgs) -> Result<MoveResult, ProjectError> {
+/// Move/rename a project and migrate CC state. Callers MUST provide
+/// a progress callback (spec §8 Q3); pass `&|_, _| {}` if you
+/// genuinely don't want progress. Making it required keeps the API
+/// honest about what it does internally (P6 touches many files).
+pub fn move_project(
+    args: &MoveArgs,
+    progress: crate::project_rewrite::ProgressCallback<'_>,
+) -> Result<MoveResult, ProjectError> {
     tracing::info!(old = ?args.old_path, new = ?args.new_path, "starting project move");
 
     let old_str = args
@@ -96,14 +103,91 @@ pub fn move_project(args: &MoveArgs) -> Result<MoveResult, ProjectError> {
         .to_str()
         .ok_or_else(|| ProjectError::Ambiguous("new path contains invalid UTF-8".to_string()))?;
     let old_norm = resolve_path(old_str)?;
-    let new_norm = resolve_path(new_str)?;
+    let new_norm_raw = resolve_path(new_str)?;
+
+    // Detect case-only rename BEFORE the SamePath check — on a
+    // case-insensitive FS, `old_str` and `new_str` that differ only
+    // in case will canonicalize to the same path, so a naive equality
+    // check would reject the rename. Honor the user's raw new_path
+    // intent instead.
+    let case_only_rename_requested =
+        old_str != new_str && old_str.eq_ignore_ascii_case(new_str);
+    let new_norm = if case_only_rename_requested {
+        // Use the user's explicitly-cased new path as the canonical.
+        // Resolve to an absolute form (no canonicalize(); that would
+        // flatten the case difference we're trying to preserve).
+        let p = std::path::PathBuf::from(new_str);
+        if p.is_absolute() {
+            new_str.to_string()
+        } else {
+            std::env::current_dir()
+                .map_err(ProjectError::Io)?
+                .join(p)
+                .to_string_lossy()
+                .to_string()
+        }
+    } else {
+        new_norm_raw
+    };
 
     if old_norm == new_norm {
         return Err(ProjectError::SamePath);
     }
 
+    // Structural guards per spec §7.1 / §4.3.  These are hard errors
+    // with no flag override — the user must fix the inputs.
+    //
+    // E1: new_path inside old_path. `fs::rename` cannot do this, and
+    //     the EXDEV copy fallback would recurse infinitely.
+    if path_is_inside(&new_norm, &old_norm) {
+        return Err(ProjectError::Ambiguous(format!(
+            "new path ({}) is inside old path ({}); \
+             pick a sibling or unrelated target",
+            new_norm, old_norm
+        )));
+    }
+    // E2: old_path inside new_path. `fs::rename` will fail;
+    //     ambiguous whether the user meant to nest or replace.
+    if path_is_inside(&old_norm, &new_norm) {
+        return Err(ProjectError::Ambiguous(format!(
+            "old path ({}) is inside new path ({}); \
+             move to a sibling first",
+            old_norm, new_norm
+        )));
+    }
+
     let old_san = sanitize_path(&old_norm);
     let new_san = sanitize_path(&new_norm);
+
+    // Preflight: CC target dir non-empty collision is a hard error
+    // unless the user opted into --merge or --overwrite (spec §4.2
+    // P1.7). Dry-run skips the hard error and reports via the plan
+    // (compute_dry_run_plan already populates `conflict`).
+    //
+    // Resolution uses the same δ prefix-fallback as P4 for long
+    // paths — a Bun-CLI-created target won't exact-match our djb2
+    // sanitized form.
+    if !args.dry_run && old_san != new_san && !args.merge && !args.overwrite {
+        let cc_new_exact = args.config_dir.join("projects").join(&new_san);
+        let cc_new_resolved = if cc_new_exact.exists() {
+            Some(cc_new_exact)
+        } else if new_san.len() >= MAX_SANITIZED_LENGTH {
+            find_project_dir_by_prefix(&args.config_dir, &new_san)?
+        } else {
+            None
+        };
+        if let Some(cc_new) = cc_new_resolved {
+            let is_empty = fs::read_dir(&cc_new)
+                .map(|mut d| d.next().is_none())
+                .unwrap_or(true);
+            if !is_empty {
+                return Err(ProjectError::Ambiguous(format!(
+                    "CC project data already exists at target ({cc_new:?}); \
+                     re-run with --merge or --overwrite"
+                )));
+            }
+        }
+    }
 
     let old_exists = Path::new(&old_norm).exists();
     let new_exists = Path::new(&new_norm).exists();
@@ -114,6 +198,10 @@ pub fn move_project(args: &MoveArgs) -> Result<MoveResult, ProjectError> {
         match (old_exists, new_exists) {
             (true, false) => MoveScenario::MoveAndUpdate,
             (false, true) => MoveScenario::AlreadyMoved,
+            // On case-insensitive FS, a case-only rename sees both
+            // "exist" because they resolve to the same inode. That's
+            // still a legitimate MoveAndUpdate.
+            (true, true) if case_only_rename_requested => MoveScenario::MoveAndUpdate,
             (true, true) => {
                 return Err(ProjectError::Ambiguous(
                     "both old and new paths exist on disk".to_string(),
@@ -144,24 +232,91 @@ pub fn move_project(args: &MoveArgs) -> Result<MoveResult, ProjectError> {
 
     let mut result = MoveResult::default();
 
-    // Phase 3: Move actual directory
-    if scenario == MoveScenario::MoveAndUpdate {
-        if !args.force && is_claude_running_in(&old_norm) {
+    // Open a lock + journal for recovery. Scope: everything below P3
+    // is protected; crashes before writing P3 leave no journal trail
+    // (nothing destructive has happened yet anyway).
+    let claudepot_home = args.config_dir.join("claudepot");
+    let locks_dir = claudepot_home.join("locks");
+    let journals_dir = claudepot_home.join("journals");
+    let (_lock, broken_lock_record) =
+        crate::project_lock::acquire(&locks_dir, &old_san)?;
+    let mut journal = crate::project_journal::open_journal(
+        &journals_dir,
+        crate::project_journal::new_initial_journal(
+            &old_norm,
+            &new_norm,
+            &old_san,
+            &new_san,
+            crate::project_memory::find_canonical_git_root(Path::new(&old_norm))
+                .map(|p| p.to_string_lossy().to_string()),
+            crate::project_memory::find_canonical_git_root(Path::new(&new_norm))
+                .map(|p| p.to_string_lossy().to_string()),
+            crate::project_journal::JournalFlags {
+                merge: args.merge,
+                overwrite: args.overwrite,
+                no_move: args.no_move,
+                force: args.force,
+                ignore_pending_journals: args.ignore_pending_journals,
+            },
+        ),
+    )?;
+
+    // Audit-log any stale lock we just broke (§5.1).
+    if let Some(ref rec) = broken_lock_record {
+        let _ = journal.note_broken_lock(rec);
+    }
+
+    // Live-session check for ALL scenarios, not just MoveAndUpdate.
+    // --force overrides; applies to old and new paths (spec §5, §7.5
+    // E32-E34).
+    if !args.force {
+        if live_session_present(&args.config_dir, &old_san, &old_norm)
+            || live_session_present(&args.config_dir, &new_san, &new_norm)
+        {
+            let _ = journal.mark_error("live CC session detected");
             return Err(ProjectError::ClaudeRunning(old_norm.clone()));
         }
+    }
+
+    // Phase 3: Move actual directory
+    if scenario == MoveScenario::MoveAndUpdate {
         if let Some(parent) = Path::new(&new_norm).parent() {
             fs::create_dir_all(parent).map_err(ProjectError::Io)?;
         }
-        match fs::rename(&old_norm, &new_norm) {
-            Ok(()) => {}
-            #[cfg(unix)]
-            Err(e) if e.raw_os_error() == Some(libc::EXDEV) => {
-                copy_dir_recursive(Path::new(&old_norm), Path::new(&new_norm))?;
-                fs::remove_dir_all(&old_norm).map_err(ProjectError::Io)?;
+        // E3: Case-only rename on case-insensitive FS needs a two-step
+        // via an intermediate name, else `fs::rename` is a no-op on
+        // APFS/NTFS.
+        let case_only = is_case_only_rename(&old_norm, &new_norm);
+        if case_only {
+            let tmp_name = format!(
+                "{}.claudepot-caserename-{}",
+                new_norm,
+                std::process::id()
+            );
+            fs::rename(&old_norm, &tmp_name).map_err(|e| {
+                let _ = journal.mark_error(&format!("P3 case-rename step 1 failed: {e}"));
+                ProjectError::Io(e)
+            })?;
+            fs::rename(&tmp_name, &new_norm).map_err(|e| {
+                let _ = journal.mark_error(&format!("P3 case-rename step 2 failed: {e}"));
+                ProjectError::Io(e)
+            })?;
+        } else {
+            match fs::rename(&old_norm, &new_norm) {
+                Ok(()) => {}
+                #[cfg(unix)]
+                Err(e) if e.raw_os_error() == Some(libc::EXDEV) => {
+                    copy_dir_recursive(Path::new(&old_norm), Path::new(&new_norm))?;
+                    fs::remove_dir_all(&old_norm).map_err(ProjectError::Io)?;
+                }
+                Err(e) => {
+                    let _ = journal.mark_error(&format!("P3 failed: {e}"));
+                    return Err(ProjectError::Io(e));
+                }
             }
-            Err(e) => return Err(ProjectError::Io(e)),
         }
         result.actual_dir_moved = true;
+        let _ = journal.mark_phase("P3");
     }
 
     // Phase 4: Rename CC project directory
@@ -169,8 +324,25 @@ pub fn move_project(args: &MoveArgs) -> Result<MoveResult, ProjectError> {
     result.new_sanitized = Some(new_san.clone());
     if old_san != new_san {
         let projects_base = args.config_dir.join("projects");
-        let cc_old = projects_base.join(&old_san);
         let cc_new = projects_base.join(&new_san);
+
+        // Resolve the source CC dir. For short paths (<= MAX) the exact
+        // sanitized name is authoritative. For long paths (> MAX), CC's
+        // CLI (Bun-compiled) uses Bun.hash (WyHash) for the hash suffix
+        // while claudepot computes djb2 — the trailing hash may differ.
+        // Fall back to prefix matching in that case (δ strategy per spec
+        // §2 sanitization formula; mirrors CC's own findProjectDir).
+        let cc_old_exact = projects_base.join(&old_san);
+        let cc_old = if cc_old_exact.exists() {
+            cc_old_exact
+        } else if old_san.len() >= MAX_SANITIZED_LENGTH {
+            match find_project_dir_by_prefix(&args.config_dir, &old_san)? {
+                Some(found) => found,
+                None => cc_old_exact, // will fail the .exists() check below
+            }
+        } else {
+            cc_old_exact
+        };
 
         if !cc_old.starts_with(&projects_base) || !cc_new.starts_with(&projects_base) {
             if result.actual_dir_moved {
@@ -198,21 +370,61 @@ pub fn move_project(args: &MoveArgs) -> Result<MoveResult, ProjectError> {
                     fs::remove_dir_all(&cc_old).map_err(ProjectError::Io)?;
                     result.cc_dir_renamed = true;
                 } else if args.overwrite {
+                    // Destructive: snapshot the target CC dir before
+                    // remove_dir_all so rollback/inspection is possible.
+                    // Snapshot failure MUST abort — we cannot remove
+                    // data we haven't safely preserved.
+                    let snaps = args
+                        .snapshots_dir
+                        .clone()
+                        .unwrap_or_else(|| args.config_dir.join("claudepot").join("snapshots"));
+                    let snap = snapshot_cc_dir(&snaps, &new_san, "P4", &cc_new)
+                        .map_err(|e| {
+                            let msg = format!(
+                                "P4 --overwrite refused: snapshot of {cc_new:?} failed: {e}"
+                            );
+                            let _ = journal.mark_error(&msg);
+                            ProjectError::Ambiguous(msg)
+                        })?;
+                    let _ = journal.record_snapshot(snap);
                     fs::remove_dir_all(&cc_new).map_err(ProjectError::Io)?;
                     fs::rename(&cc_old, &cc_new).map_err(ProjectError::Io)?;
                     result.cc_dir_renamed = true;
                 } else {
-                    result.warnings.push(
+                    // Unreachable in v2: the preflight above rejects
+                    // non-empty target without --merge/--overwrite.
+                    // Kept as a defensive assertion in case preflight
+                    // is ever reordered.
+                    return Err(ProjectError::Ambiguous(
                         "CC project data exists at both old and new paths. \
                          Use --merge or --overwrite to resolve."
                             .to_string(),
-                    );
+                    ));
                 }
             } else {
-                fs::rename(&cc_old, &cc_new).map_err(ProjectError::Io)?;
+                // E3: case-only rename on case-insensitive FS needs
+                // two-step here too (same as P3).
+                let cc_case_only = is_case_only_rename(
+                    &cc_old.to_string_lossy(),
+                    &cc_new.to_string_lossy(),
+                );
+                if cc_case_only {
+                    let tmp = projects_base.join(format!(
+                        "{}.claudepot-caserename-{}",
+                        new_san,
+                        std::process::id()
+                    ));
+                    fs::rename(&cc_old, &tmp).map_err(ProjectError::Io)?;
+                    fs::rename(&tmp, &cc_new).map_err(ProjectError::Io)?;
+                } else {
+                    fs::rename(&cc_old, &cc_new).map_err(ProjectError::Io)?;
+                }
                 result.cc_dir_renamed = true;
             }
         }
+    }
+    if result.cc_dir_renamed {
+        let _ = journal.mark_phase("P4");
     }
 
     // Phase 5: Rewrite history.jsonl
@@ -222,17 +434,252 @@ pub fn move_project(args: &MoveArgs) -> Result<MoveResult, ProjectError> {
         if history_path.exists() {
             tracing::debug!("rewriting history.jsonl");
             result.history_lines_updated = rewrite_history(&history_path, &old_norm, &new_norm)?;
+            let _ = journal.mark_phase("P5");
         }
     }
+
+    // Phase 6: Rewrite session + subagent jsonl cwd fields. Runs against
+    // the CC dir at its NEW sanitized location after phase 4. Preserves
+    // session resumability after rename (see spec §4.2 P6 and §8 Q4).
+    if !cc_dir_conflict && result.cc_dir_renamed {
+        let projects_base = args.config_dir.join("projects");
+        let cc_new_dir_exact = projects_base.join(&new_san);
+        let cc_new_dir = if cc_new_dir_exact.exists() {
+            cc_new_dir_exact
+        } else if new_san.len() >= MAX_SANITIZED_LENGTH {
+            find_project_dir_by_prefix(&args.config_dir, &new_san)?
+                .unwrap_or(cc_new_dir_exact)
+        } else {
+            cc_new_dir_exact
+        };
+        if cc_new_dir.exists() {
+            tracing::debug!(dir = ?cc_new_dir, "rewriting session jsonl paths");
+            let (stats, errors) = crate::project_rewrite::rewrite_project_paths(
+                &cc_new_dir,
+                &old_norm,
+                &new_norm,
+                progress,
+            )?;
+            result.jsonl_files_scanned = stats.files_scanned;
+            result.jsonl_files_modified = stats.files_modified;
+            result.jsonl_lines_rewritten = stats.lines_rewritten;
+            result.jsonl_errors = errors
+                .into_iter()
+                .map(|(p, e)| (p, e.to_string()))
+                .collect();
+            if !result.jsonl_errors.is_empty() {
+                let summary = format!(
+                    "P6 failed: {} file(s) did not rewrite. \
+                     Journal retained for `claudepot project repair`.",
+                    result.jsonl_errors.len()
+                );
+                let _ = journal.mark_error(&summary);
+                return Err(ProjectError::Ambiguous(summary));
+            }
+            let _ = journal.mark_phase("P6");
+        }
+    }
+
+    // Phase 7: Rewrite ~/.claude.json projects[<old_path>] key. Governed
+    // by the same --merge / --overwrite flags as P4, with old-wins merge
+    // semantics and 30-day snapshots for destructive cases (see spec
+    // §4.2 P7 and §8 Q2). Caller must pass `claude_json_path`; we do NOT
+    // default to the real home dir here so tests stay hermetic.
+    if let (false, Some(config_path)) =
+        (cc_dir_conflict, args.claude_json_path.clone())
+    {
+        let snapshots_dir = args
+            .snapshots_dir
+            .clone()
+            .unwrap_or_else(|| args.config_dir.join("claudepot").join("snapshots"));
+        let policy = if args.overwrite {
+            crate::project_config_rewrite::ConfigCollisionPolicy::Overwrite
+        } else if args.merge {
+            crate::project_config_rewrite::ConfigCollisionPolicy::Merge
+        } else {
+            crate::project_config_rewrite::ConfigCollisionPolicy::Error
+        };
+        match crate::project_config_rewrite::rewrite_claude_json(
+            &config_path,
+            &snapshots_dir,
+            &old_norm,
+            &new_norm,
+            &new_san,
+            policy,
+        ) {
+            Ok(r) => {
+                result.config_key_renamed = r.key_renamed;
+                result.config_had_collision = r.had_collision;
+                result.config_merged_keys = r.merged_keys;
+                result.config_snapshot_path = r.snapshot_path;
+                result.config_nested_rewrites = r.nested_rewrites;
+                if result.config_had_collision && !result.config_merged_keys.is_empty() {
+                    result.warnings.push(format!(
+                        "~/.claude.json collision: {} key(s) merged (old won); \
+                         pre-existing value snapshotted to {:?}",
+                        result.config_merged_keys.len(),
+                        result.config_snapshot_path.as_ref(),
+                    ));
+                }
+                if let Some(snap) = &result.config_snapshot_path {
+                    let _ = journal.record_snapshot(snap.clone());
+                }
+                if result.config_key_renamed {
+                    let _ = journal.mark_phase("P7");
+                }
+            }
+            Err(e) => {
+                let msg = format!("P7 (~/.claude.json) failed: {e}");
+                let _ = journal.mark_error(&msg);
+                return Err(ProjectError::Ambiguous(msg));
+            }
+        }
+    }
+
+    // Phase 8: Move auto-memory dir if git root changed. Safe no-op
+    // when the project is inside a git repo and the rename doesn't
+    // change the git root (e.g. renaming a subdir of a repo).
+    //
+    // Gated on scenario, not `actual_dir_moved` — AlreadyMoved and
+    // --no-move still need the migration (spec §4.2 P8).
+    if !cc_dir_conflict {
+        let snaps = args
+            .snapshots_dir
+            .clone()
+            .unwrap_or_else(|| args.config_dir.join("claudepot").join("snapshots"));
+        match crate::project_memory::move_memory_dir_if_needed(
+            &args.config_dir,
+            &old_norm,
+            &new_norm,
+            args.merge,
+            args.overwrite,
+            Some(&snaps),
+        ) {
+            Ok(r) => {
+                result.memory_git_root_changed = r.git_root_changed;
+                result.memory_dir_moved = r.memory_dir_moved;
+                if let Some(snap) = r.snapshot_path {
+                    let _ = journal.record_snapshot(snap);
+                }
+                for w in r.warnings {
+                    result.warnings.push(w);
+                }
+                if result.memory_dir_moved {
+                    let _ = journal.mark_phase("P8");
+                }
+            }
+            Err(e) => {
+                let msg = format!("P8 (auto-memory) failed: {e}");
+                let _ = journal.mark_error(&msg);
+                return Err(ProjectError::Ambiguous(msg));
+            }
+        }
+    }
+
+    // Phase 9: Rewrite <new_path>/.claude/settings.json autoMemoryDirectory
+    // if it is an absolute path anchored at old_path. Relative / ~-based
+    // paths are already path-portable (see spec §4.2 P9).
+    //
+    // Gated on scenario, not `actual_dir_moved` — AlreadyMoved still
+    // needs the rewrite because the new path now exists.
+    if !cc_dir_conflict {
+        match crate::project_config_rewrite::rewrite_project_settings(
+            &args.new_path,
+            &old_norm,
+            &new_norm,
+        ) {
+            Ok(rewrote) => {
+                result.project_settings_rewritten = rewrote;
+                if rewrote {
+                    let _ = journal.mark_phase("P9");
+                }
+            }
+            Err(e) => {
+                let msg = format!("P9 (.claude/settings.json) failed: {e}");
+                let _ = journal.mark_error(&msg);
+                return Err(ProjectError::Ambiguous(msg));
+            }
+        }
+    }
+
+    // All phases complete. Delete the journal. (Lock is released via
+    // RAII when `_lock` drops at end of scope.)
+    journal.finish()?;
 
     tracing::info!(
         moved = result.actual_dir_moved,
         renamed = result.cc_dir_renamed,
         history = result.history_lines_updated,
+        jsonl_files_modified = result.jsonl_files_modified,
+        jsonl_lines_rewritten = result.jsonl_lines_rewritten,
+        config_renamed = result.config_key_renamed,
+        config_collision = result.config_had_collision,
+        settings_rewritten = result.project_settings_rewritten,
         "project move complete"
     );
     Ok(result)
 }
+
+/// True iff `inner` is strictly inside `outer` (share prefix + at least
+/// one extra path component). Used by the E1/E2 structural guards.
+fn path_is_inside(inner: &str, outer: &str) -> bool {
+    let sep = std::path::MAIN_SEPARATOR;
+    let boundary = format!("{outer}{sep}");
+    inner.starts_with(&boundary) && inner != outer
+}
+
+/// True iff `old` and `new` differ only in ASCII letter case. Used to
+/// trigger the E3 two-step case-only rename on case-insensitive FS.
+fn is_case_only_rename(old: &str, new: &str) -> bool {
+    old != new && old.eq_ignore_ascii_case(new)
+}
+
+/// Live-session detection at a specific (config_dir, san, project_cwd)
+/// point. Checks both the CC project dir (for jsonl heartbeat + lsof)
+/// AND the project cwd (for lsof + process-name scan). Either hit
+/// counts as live.
+fn live_session_present(config_dir: &Path, san: &str, project_cwd: &str) -> bool {
+    let cc_dir = config_dir.join("projects").join(san);
+    if cc_dir.exists()
+        && crate::project_helpers::detect_live_session(&cc_dir, project_cwd, 120)
+    {
+        return true;
+    }
+    // Also probe the project cwd directly: if CC is running there but
+    // the CC dir hasn't been created yet (first-run), the cc_dir path
+    // misses. is_claude_running_in + an lsof probe catch this.
+    if Path::new(project_cwd).exists()
+        && crate::project_helpers::lsof_sees_open_file_pub(Path::new(project_cwd))
+    {
+        return true;
+    }
+    is_claude_running_in(project_cwd)
+}
+
+/// Snapshot a CC-state directory before destructive replacement.
+/// Copies the tree to
+/// `<snapshots_dir>/<ts>-<san>-<phase>.snap/`. Returns the snapshot
+/// path so the caller can record it in the journal.
+fn snapshot_cc_dir(
+    snapshots_dir: &Path,
+    san: &str,
+    phase: &str,
+    source: &Path,
+) -> Result<std::path::PathBuf, ProjectError> {
+    fs::create_dir_all(snapshots_dir).map_err(ProjectError::Io)?;
+    let ts = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_millis())
+        .unwrap_or(0);
+    let safe_san: String = san
+        .chars()
+        .map(|c| if c.is_ascii_alphanumeric() || c == '-' { c } else { '_' })
+        .collect();
+    let target = snapshots_dir.join(format!("{ts}-{safe_san}-{phase}.snap"));
+    copy_dir_recursive(source, &target)?;
+    Ok(target)
+}
+
 
 // ---------------------------------------------------------------------------
 // clean_orphans
@@ -523,14 +970,18 @@ mod tests {
             old_path: src.clone(),
             new_path: src.clone(),
             config_dir: tmp.path().to_path_buf(),
+            claude_json_path: None,
+            snapshots_dir: None,
             no_move: false,
             merge: false,
             overwrite: false,
             force: false,
             dry_run: false,
+
+            ignore_pending_journals: false,
         };
 
-        let result = move_project(&args);
+        let result = move_project(&args, &|_, _| {});
         assert!(matches!(result, Err(ProjectError::SamePath)));
     }
 
@@ -558,14 +1009,18 @@ mod tests {
             old_path: src.clone(),
             new_path: dst.clone(),
             config_dir: base.clone(),
+            claude_json_path: None,
+            snapshots_dir: None,
             no_move: false,
             merge: false,
             overwrite: false,
             force: true,
             dry_run: false,
+
+            ignore_pending_journals: false,
         };
 
-        let result = move_project(&args).unwrap();
+        let result = move_project(&args, &|_, _| {}).unwrap();
         assert!(result.actual_dir_moved);
         assert!(result.cc_dir_renamed);
         assert!(dst.exists());
@@ -579,6 +1034,308 @@ mod tests {
         let moved_session = projects_dir.join(&new_san).join("session.jsonl");
         assert!(moved_session.exists());
         assert_eq!(fs::read_to_string(moved_session).unwrap(), "{}");
+    }
+
+    /// When a long path's sanitized form exceeds MAX_SANITIZED_LENGTH, the
+    /// trailing hash suffix depends on runtime (Bun.hash vs djb2). If the
+    /// existing CC dir was created by the Bun-compiled CC CLI with a hash
+    /// suffix that doesn't match claudepot's djb2 output, move must still
+    /// find it via prefix scanning. This mirrors CC's own findProjectDir
+    /// tolerance (see sessionStoragePortable.ts:354-375).
+    #[test]
+    fn test_move_project_long_path_prefix_fallback() {
+        let tmp = tempfile::tempdir().unwrap();
+        let base = tmp.path().canonicalize().unwrap();
+
+        // Construct a >200-char source path
+        let deep = "a".repeat(210);
+        let src = base.join(&deep);
+        fs::create_dir(&src).unwrap();
+
+        // Simulate a CC-Bun-created dir: same 200-char prefix as
+        // claudepot would compute, but a DIFFERENT hash suffix than djb2.
+        let projects_dir = base.join("projects");
+        fs::create_dir(&projects_dir).unwrap();
+        let claudepot_san = sanitize_path(&src.to_string_lossy());
+        assert!(claudepot_san.len() > MAX_SANITIZED_LENGTH);
+        let prefix = &claudepot_san[..MAX_SANITIZED_LENGTH];
+        let bun_style_san = format!("{}-{}", prefix, "fakebunhashxyz");
+        assert_ne!(bun_style_san, claudepot_san); // hash suffixes differ
+        let cc_old = projects_dir.join(&bun_style_san);
+        fs::create_dir(&cc_old).unwrap();
+        fs::write(cc_old.join("session.jsonl"), r#"{"cwd":"x"}"#).unwrap();
+
+        let dst = base.join(&"b".repeat(210));
+
+        let args = MoveArgs {
+            old_path: src.clone(),
+            new_path: dst.clone(),
+            config_dir: base.clone(),
+            claude_json_path: None,
+            snapshots_dir: None,
+            no_move: false,
+            merge: false,
+            overwrite: false,
+            force: true,
+            dry_run: false,
+
+            ignore_pending_journals: false,
+        };
+
+        let result = move_project(&args, &|_, _| {}).unwrap();
+        assert!(result.actual_dir_moved, "disk dir should be moved");
+        assert!(
+            result.cc_dir_renamed,
+            "CC dir should be found via prefix fallback and renamed"
+        );
+
+        // Source CC dir should no longer exist at its old sanitized name
+        assert!(!cc_old.exists());
+        // Destination should exist at claudepot's new_san (the prefix
+        // portion must still match what CC would look up via findProjectDir)
+        let new_san = sanitize_path(&dst.to_string_lossy());
+        let new_prefix = &new_san[..MAX_SANITIZED_LENGTH];
+        let found_new = fs::read_dir(&projects_dir)
+            .unwrap()
+            .filter_map(|e| e.ok())
+            .find(|e| {
+                e.file_name()
+                    .to_string_lossy()
+                    .starts_with(new_prefix)
+            });
+        assert!(found_new.is_some(), "new CC dir should exist under the new prefix");
+    }
+
+    #[test]
+    fn test_move_rejects_new_inside_old() {
+        let tmp = tempfile::tempdir().unwrap();
+        let base = tmp.path().canonicalize().unwrap();
+        let src = base.join("proj");
+        fs::create_dir(&src).unwrap();
+        let args = MoveArgs {
+            old_path: src.clone(),
+            new_path: src.join("nested"),
+            config_dir: base,
+            claude_json_path: None,
+            snapshots_dir: None,
+            no_move: false,
+            merge: false,
+            overwrite: false,
+            force: true,
+            dry_run: false,
+
+            ignore_pending_journals: false,
+        };
+        let err = move_project(&args, &|_, _| {}).unwrap_err();
+        assert!(matches!(err, ProjectError::Ambiguous(ref m) if m.contains("inside")));
+    }
+
+    #[test]
+    fn test_move_rejects_old_inside_new() {
+        let tmp = tempfile::tempdir().unwrap();
+        let base = tmp.path().canonicalize().unwrap();
+        let outer = base.join("outer");
+        fs::create_dir(&outer).unwrap();
+        let inner = outer.join("inner");
+        fs::create_dir(&inner).unwrap();
+        let args = MoveArgs {
+            old_path: inner,
+            new_path: outer,
+            config_dir: base,
+            claude_json_path: None,
+            snapshots_dir: None,
+            no_move: false,
+            merge: false,
+            overwrite: false,
+            force: true,
+            dry_run: false,
+
+            ignore_pending_journals: false,
+        };
+        let err = move_project(&args, &|_, _| {}).unwrap_err();
+        assert!(matches!(err, ProjectError::Ambiguous(_)));
+    }
+
+    /// End-to-end verification that Phase 6 (session jsonl rewrite) runs
+    /// as part of move_project: stale `cwd` fields inside session jsonls
+    /// get rewritten to the new path, including `cd`-into-subdir entries
+    /// that use the boundary-prefix form.
+    #[test]
+    fn test_move_project_rewrites_session_jsonl_cwd() {
+        let tmp = tempfile::tempdir().unwrap();
+        let base = tmp.path().canonicalize().unwrap();
+
+        let src = base.join("old-project");
+        fs::create_dir(&src).unwrap();
+        let projects_dir = base.join("projects");
+        fs::create_dir(&projects_dir).unwrap();
+
+        let old_str = src.to_string_lossy().to_string();
+        let old_san = sanitize_path(&old_str);
+        let cc_old = projects_dir.join(&old_san);
+        fs::create_dir(&cc_old).unwrap();
+
+        // Main session jsonl with exact match and a subdir-cd case
+        let sep = std::path::MAIN_SEPARATOR;
+        let session_content = format!(
+            r#"{{"cwd":"{old}","i":1}}
+{{"cwd":"{old}{sep}src","i":2}}
+{{"cwd":"/elsewhere","i":3}}
+"#,
+            old = old_str
+        );
+        fs::write(cc_old.join("sess.jsonl"), &session_content).unwrap();
+
+        // Subagent jsonl
+        let subagent_dir = cc_old.join("sessA").join("subagents");
+        fs::create_dir_all(&subagent_dir).unwrap();
+        fs::write(
+            subagent_dir.join("agent-x.jsonl"),
+            format!(r#"{{"cwd":"{old}","agent":"x"}}
+"#, old = old_str),
+        )
+        .unwrap();
+
+        let dst = base.join("renamed-project");
+        let args = MoveArgs {
+            old_path: src.clone(),
+            new_path: dst.clone(),
+            config_dir: base.clone(),
+            claude_json_path: None,
+            snapshots_dir: None,
+            no_move: false,
+            merge: false,
+            overwrite: false,
+            force: true,
+            dry_run: false,
+
+            ignore_pending_journals: false,
+        };
+        let result = move_project(&args, &|_, _| {}).unwrap();
+
+        assert!(result.cc_dir_renamed);
+        assert!(result.jsonl_files_scanned >= 2);
+        assert!(result.jsonl_files_modified >= 2);
+        // 2 in main session + 1 in subagent = 3 cwd rewrites (the
+        // `/elsewhere` entry must NOT be rewritten).
+        assert_eq!(result.jsonl_lines_rewritten, 3);
+        assert!(result.jsonl_errors.is_empty());
+
+        let new_str = dst.to_string_lossy().to_string();
+        let new_san = sanitize_path(&new_str);
+        let cc_new = projects_dir.join(&new_san);
+        let after_main = fs::read_to_string(cc_new.join("sess.jsonl")).unwrap();
+        assert!(after_main.contains(&format!(r#""cwd":"{}""#, new_str)));
+        assert!(after_main.contains(&format!(r#""cwd":"{}{}src""#, new_str, sep)));
+        assert!(after_main.contains(r#""cwd":"/elsewhere""#)); // untouched
+        assert!(!after_main.contains(&format!(r#""cwd":"{}""#, old_str)));
+    }
+
+    /// End-to-end verification that Phase 7 (~/.claude.json projects map)
+    /// runs as part of move_project when claude_json_path is supplied:
+    /// the map key migrates from old_path to new_path, preserving value,
+    /// with no collision.
+    #[test]
+    fn test_move_project_rewrites_claude_json() {
+        let tmp = tempfile::tempdir().unwrap();
+        let base = tmp.path().canonicalize().unwrap();
+
+        let src = base.join("origproj");
+        fs::create_dir(&src).unwrap();
+        let projects_dir = base.join("projects");
+        fs::create_dir(&projects_dir).unwrap();
+
+        let old_str = src.to_string_lossy().to_string();
+        let old_san = sanitize_path(&old_str);
+        let cc_old = projects_dir.join(&old_san);
+        fs::create_dir(&cc_old).unwrap();
+
+        // Fake ~/.claude.json sibling file.
+        let claude_json = base.join("claude.json");
+        let cfg_before = serde_json::json!({
+            "projects": {
+                old_str.clone(): {"trust": true, "allowedTools": ["X"]}
+            }
+        });
+        fs::write(
+            &claude_json,
+            serde_json::to_string_pretty(&cfg_before).unwrap(),
+        )
+        .unwrap();
+
+        let dst = base.join("newproj");
+        let args = MoveArgs {
+            old_path: src.clone(),
+            new_path: dst.clone(),
+            config_dir: base.clone(),
+            claude_json_path: Some(claude_json.clone()),
+            snapshots_dir: Some(base.join("snaps")),
+            no_move: false,
+            merge: false,
+            overwrite: false,
+            force: true,
+            dry_run: false,
+
+            ignore_pending_journals: false,
+        };
+        let result = move_project(&args, &|_, _| {}).unwrap();
+
+        assert!(result.cc_dir_renamed);
+        assert!(result.config_key_renamed);
+        assert!(!result.config_had_collision);
+        assert!(result.config_snapshot_path.is_none());
+
+        // Verify the JSON was actually rewritten.
+        let cfg_after: serde_json::Value =
+            serde_json::from_str(&fs::read_to_string(&claude_json).unwrap()).unwrap();
+        let new_str = dst.to_string_lossy().to_string();
+        assert!(cfg_after["projects"].get(&old_str).is_none());
+        assert_eq!(cfg_after["projects"][&new_str]["trust"], serde_json::json!(true));
+        assert_eq!(
+            cfg_after["projects"][&new_str]["allowedTools"],
+            serde_json::json!(["X"])
+        );
+    }
+
+    /// Tests without claude_json_path should not touch any config file
+    /// (hermetic). Confirmed by no P7 fields being set and no file being
+    /// created.
+    #[test]
+    fn test_move_project_skips_p7_when_claude_json_path_is_none() {
+        let tmp = tempfile::tempdir().unwrap();
+        let base = tmp.path().canonicalize().unwrap();
+
+        let src = base.join("a");
+        fs::create_dir(&src).unwrap();
+        let projects_dir = base.join("projects");
+        fs::create_dir(&projects_dir).unwrap();
+        let old_san = sanitize_path(&src.to_string_lossy());
+        fs::create_dir(projects_dir.join(&old_san)).unwrap();
+
+        let dst = base.join("b");
+        let args = MoveArgs {
+            old_path: src,
+            new_path: dst,
+            config_dir: base.clone(),
+            claude_json_path: None,
+            snapshots_dir: None,
+            no_move: false,
+            merge: false,
+            overwrite: false,
+            force: true,
+            dry_run: false,
+
+            ignore_pending_journals: false,
+        };
+        let result = move_project(&args, &|_, _| {}).unwrap();
+
+        assert!(result.cc_dir_renamed);
+        assert!(!result.config_key_renamed);
+        assert!(!result.config_had_collision);
+        // No P7 snapshots specifically — journal + lock dirs are created
+        // by the always-on recovery infrastructure, but snapshots are
+        // only written when a destructive phase actually runs.
+        assert!(!base.join("claudepot").join("snapshots").exists());
     }
 
     #[test]
@@ -612,14 +1369,18 @@ mod tests {
             old_path: src.clone(),
             new_path: dst.clone(),
             config_dir: base.clone(),
+            claude_json_path: None,
+            snapshots_dir: None,
             no_move: false,
             merge: false,
             overwrite: false,
             force: true,
             dry_run: false,
+
+            ignore_pending_journals: false,
         };
 
-        let result = move_project(&args).unwrap();
+        let result = move_project(&args, &|_, _| {}).unwrap();
         assert_eq!(result.history_lines_updated, 2);
 
         // Verify history was rewritten by parsing each JSON line — raw string
@@ -655,14 +1416,18 @@ mod tests {
             old_path: src.clone(),
             new_path: dst.clone(),
             config_dir: base.clone(),
+            claude_json_path: None,
+            snapshots_dir: None,
             no_move: false,
             merge: false,
             overwrite: false,
             force: false,
             dry_run: true,
+
+            ignore_pending_journals: false,
         };
 
-        let result = move_project(&args).unwrap();
+        let result = move_project(&args, &|_, _| {}).unwrap();
         // Dry run: nothing actually changed
         assert!(!result.actual_dir_moved);
         assert!(!result.cc_dir_renamed);
@@ -728,14 +1493,18 @@ mod tests {
             old_path: src.clone(),
             new_path: dst.clone(),
             config_dir: base.clone(),
+            claude_json_path: None,
+            snapshots_dir: None,
             no_move: false,
             merge: false,
             overwrite: false,
             force: false,
             dry_run: false,
+
+            ignore_pending_journals: false,
         };
 
-        let result = move_project(&args).unwrap();
+        let result = move_project(&args, &|_, _| {}).unwrap();
         assert!(!result.actual_dir_moved); // didn't move dir (already moved)
         assert!(result.cc_dir_renamed); // but renamed CC state
     }
@@ -761,14 +1530,18 @@ mod tests {
             old_path: src.clone(),
             new_path: dst.clone(),
             config_dir: base.clone(),
+            claude_json_path: None,
+            snapshots_dir: None,
             no_move: true, // --no-move
             merge: false,
             overwrite: false,
             force: false,
             dry_run: false,
+
+            ignore_pending_journals: false,
         };
 
-        let result = move_project(&args).unwrap();
+        let result = move_project(&args, &|_, _| {}).unwrap();
         assert!(!result.actual_dir_moved);
         assert!(result.cc_dir_renamed);
         // Both dirs still exist (--no-move)
@@ -1026,14 +1799,18 @@ mod tests {
             old_path: src,
             new_path: dst,
             config_dir: base,
+            claude_json_path: None,
+            snapshots_dir: None,
             no_move: false,
             merge: false,
             overwrite: false,
             force: false,
             dry_run: false,
+
+            ignore_pending_journals: false,
         };
 
-        let result = move_project(&args);
+        let result = move_project(&args, &|_, _| {});
         assert!(matches!(result, Err(ProjectError::Ambiguous(_))));
         let msg = result.unwrap_err().to_string();
         assert!(msg.contains("both"));
@@ -1048,14 +1825,18 @@ mod tests {
             old_path: base.join("nonexistent1"),
             new_path: base.join("nonexistent2"),
             config_dir: base,
+            claude_json_path: None,
+            snapshots_dir: None,
             no_move: false,
             merge: false,
             overwrite: false,
             force: false,
             dry_run: false,
+
+            ignore_pending_journals: false,
         };
 
-        let result = move_project(&args);
+        let result = move_project(&args, &|_, _| {});
         assert!(matches!(result, Err(ProjectError::Ambiguous(_))));
         let msg = result.unwrap_err().to_string();
         assert!(msg.contains("neither"));
@@ -1089,14 +1870,18 @@ mod tests {
             old_path: src.clone(),
             new_path: dst.clone(),
             config_dir: base.clone(),
+            claude_json_path: None,
+            snapshots_dir: None,
             no_move: false,
             merge: true,
             overwrite: false,
             force: true,
             dry_run: false,
+
+            ignore_pending_journals: false,
         };
 
-        let result = move_project(&args).unwrap();
+        let result = move_project(&args, &|_, _| {}).unwrap();
         assert!(result.cc_dir_renamed);
 
         // New CC dir has both sessions
@@ -1132,14 +1917,18 @@ mod tests {
             old_path: src.clone(),
             new_path: dst.clone(),
             config_dir: base.clone(),
+            claude_json_path: None,
+            snapshots_dir: None,
             no_move: false,
             merge: false,
             overwrite: true,
             force: true,
             dry_run: false,
+
+            ignore_pending_journals: false,
         };
 
-        let result = move_project(&args).unwrap();
+        let result = move_project(&args, &|_, _| {}).unwrap();
         assert!(result.cc_dir_renamed);
 
         // New CC dir has old's content, not the original new content
@@ -1174,17 +1963,24 @@ mod tests {
             old_path: src,
             new_path: dst,
             config_dir: base,
+            claude_json_path: None,
+            snapshots_dir: None,
             no_move: false,
             merge: false,
             overwrite: false,
             force: true,
             dry_run: false,
+
+            ignore_pending_journals: false,
         };
 
-        let result = move_project(&args).unwrap();
-        assert!(!result.cc_dir_renamed); // no rename happened
-        assert!(!result.warnings.is_empty());
-        assert!(result.warnings[0].contains("--merge"));
+        // Spec §4.2 P1.7: non-empty CC target is a hard preflight
+        // error without --merge/--overwrite.
+        let err = move_project(&args, &|_, _| {}).unwrap_err();
+        let ProjectError::Ambiguous(msg) = err else {
+            panic!("expected Ambiguous, got {err:?}");
+        };
+        assert!(msg.contains("--merge") || msg.contains("--overwrite"));
     }
 
     #[test]
@@ -1214,14 +2010,18 @@ mod tests {
             old_path: src.clone(),
             new_path: dst.clone(),
             config_dir: base,
+            claude_json_path: None,
+            snapshots_dir: None,
             no_move: false,
             merge: false,
             overwrite: false,
             force: false,
             dry_run: true,
+
+            ignore_pending_journals: false,
         };
 
-        let result = move_project(&args).unwrap();
+        let result = move_project(&args, &|_, _| {}).unwrap();
         // Dry run plan should mention conflict
         assert!(!result.warnings.is_empty());
         let plan = &result.warnings[0];
@@ -1256,14 +2056,18 @@ mod tests {
             old_path: src,
             new_path: dst,
             config_dir: base,
+            claude_json_path: None,
+            snapshots_dir: None,
             no_move: false,
             merge: false,
             overwrite: false,
             force: true,
             dry_run: false,
+
+            ignore_pending_journals: false,
         };
 
-        let result = move_project(&args).unwrap();
+        let result = move_project(&args, &|_, _| {}).unwrap();
         assert!(result.cc_dir_renamed);
         assert!(cc_new.join("s.jsonl").exists());
     }
@@ -1412,26 +2216,22 @@ mod tests {
             old_path: src.clone(),
             new_path: dst.clone(),
             config_dir: base.clone(),
+            claude_json_path: None,
+            snapshots_dir: None,
             no_move: false,
             merge: false,
             overwrite: false,
             force: true,
             dry_run: false,
+
+            ignore_pending_journals: false,
         };
 
-        let result = move_project(&args).unwrap();
-        assert!(
-            !result.cc_dir_renamed,
-            "rename should be blocked by conflict"
-        );
-        assert!(
-            !result.warnings.is_empty(),
-            "must surface a conflict warning"
-        );
-        assert_eq!(
-            result.history_lines_updated, 0,
-            "history.jsonl must NOT be rewritten when CC dir conflict is unresolved"
-        );
+        // With v2 hard-error preflight, the whole operation aborts
+        // before P3/P4/P5 run. history.jsonl must be untouched.
+        let err = move_project(&args, &|_, _| {}).unwrap_err();
+        assert!(matches!(err, ProjectError::Ambiguous(_)));
+
         // Verify old path still in history on disk (parse-based).
         let content = fs::read_to_string(&history).unwrap();
         let src_str = src.to_string_lossy().to_string();
@@ -1473,14 +2273,18 @@ mod tests {
             old_path: src.clone(),
             new_path: dst.clone(),
             config_dir: base.clone(),
+            claude_json_path: None,
+            snapshots_dir: None,
             no_move: false,
             merge: true,
             overwrite: false,
             force: true,
             dry_run: false,
+
+            ignore_pending_journals: false,
         };
 
-        let result = move_project(&args).unwrap();
+        let result = move_project(&args, &|_, _| {}).unwrap();
         assert!(result.cc_dir_renamed, "merge should resolve the conflict");
         assert_eq!(
             result.history_lines_updated, 1,
@@ -1576,14 +2380,18 @@ mod tests {
             old_path: src.clone(),
             new_path: dst.clone(),
             config_dir: base.clone(),
+            claude_json_path: None,
+            snapshots_dir: None,
             no_move: false,
             merge: false,
             overwrite: false,
             force: true,
             dry_run: false,
+
+            ignore_pending_journals: false,
         };
 
-        let result = move_project(&args).unwrap();
+        let result = move_project(&args, &|_, _| {}).unwrap();
         assert!(result.actual_dir_moved);
         assert!(dst.exists());
         assert!(!src.exists());
@@ -1601,13 +2409,9 @@ mod tests {
 
     #[test]
     fn test_move_project_post_move_failure_becomes_warning() {
-        // After phase 3 (real dir moved), phase 4 failures should become
-        // warnings on the MoveResult instead of hard errors.
-        //
-        // Trigger: set up old_san != new_san, create cc_old, pre-create cc_new
-        // WITHOUT merge/overwrite — this becomes a conflict warning after the
-        // actual dir has already been moved. The caller still gets Ok(...)
-        // so they know the move succeeded even if the CC state is out of sync.
+        // v2 (spec §4.2 P1.7): non-empty CC target is a HARD preflight
+        // error before any disk mutation. This test now verifies the
+        // error-path instead of the old partial-success warning path.
         let (_tmp, src, dst, base) = mk_move_fixture();
         let old_san = sanitize_path(&src.to_string_lossy());
         let new_san = sanitize_path(&dst.to_string_lossy());
@@ -1623,24 +2427,20 @@ mod tests {
             old_path: src.clone(),
             new_path: dst.clone(),
             config_dir: base.clone(),
+            claude_json_path: None,
+            snapshots_dir: None,
             no_move: false,
             merge: false,
             overwrite: false,
             force: true,
             dry_run: false,
+
+            ignore_pending_journals: false,
         };
 
-        let result = move_project(&args).expect("must return Ok with warnings, not Err");
-        assert!(
-            result.actual_dir_moved,
-            "phase 3 actually moved the directory"
-        );
-        assert!(!result.cc_dir_renamed, "phase 4 blocked by conflict");
-        assert!(
-            !result.warnings.is_empty(),
-            "conflict must be surfaced as a warning"
-        );
-        assert!(dst.exists(), "new path on disk");
-        assert!(!src.exists(), "old path gone from disk");
+        let err = move_project(&args, &|_, _| {}).expect_err("must error on CC dir collision");
+        assert!(matches!(err, ProjectError::Ambiguous(_)));
+        assert!(src.exists(), "disk dir untouched on preflight failure");
+        assert!(!dst.exists(), "target not created on preflight failure");
     }
 }

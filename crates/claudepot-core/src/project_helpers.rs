@@ -236,8 +236,134 @@ pub(crate) fn is_claude_running_in(dir: &str) -> bool {
     false
 }
 
+/// Composite live-session detector per spec §5.
+///
+/// Two-signal rule: either lsof / process scan is a direct-kernel
+/// truth signal, OR heartbeat (mtime) combined with a confirming
+/// kernel signal. Heartbeat alone is NOT sufficient: fresh test
+/// fixtures and benign writers (backup tools, IDEs) all produce
+/// recent mtimes without implying a live CC session.
+///
+/// Signals:
+///   1. lsof: any process holding a file under the CC project dir
+///      open — direct kernel truth.
+///   2. Process scan: claude-named process with matching cwd —
+///      direct kernel truth.
+///   3. Heartbeat: newest `*.jsonl` mtime inside the CC project dir.
+///      Used to escalate the lsof check from optional to mandatory:
+///      if mtime is recent, we require lsof/process confirmation
+///      before declaring live. If lsof is unavailable and mtime is
+///      recent, report live on age alone as a conservative fallback.
+///
+/// Returns `true` iff a live session is plausibly present. `--force`
+/// callers should bypass this check, not ignore it.
+pub fn detect_live_session(
+    cc_project_dir: &Path,
+    project_cwd: &str,
+    heartbeat_window_secs: u64,
+) -> bool {
+    // Kernel signals (authoritative).
+    if lsof_sees_open_file(cc_project_dir) {
+        tracing::debug!(dir = ?cc_project_dir, "lsof signal: open file detected");
+        return true;
+    }
+    if is_claude_running_in(project_cwd) {
+        tracing::debug!(cwd = %project_cwd, "process scan: claude cwd match");
+        return true;
+    }
+    // Heartbeat as a conservative fallback: only use if the mtime is
+    // within the window AND at least one weaker signal confirms. On
+    // systems without lsof, fall back to mtime-alone after logging.
+    if let Some(newest_mtime) = newest_jsonl_mtime(cc_project_dir) {
+        let age = SystemTime::now()
+            .duration_since(newest_mtime)
+            .map(|d| d.as_secs())
+            .unwrap_or(u64::MAX);
+        if age <= heartbeat_window_secs && !lsof_available() {
+            tracing::debug!(
+                age_secs = age,
+                "heartbeat only — lsof unavailable, treating as live"
+            );
+            return true;
+        }
+    }
+    false
+}
+
+/// Detect whether `lsof` is available on PATH.
+fn lsof_available() -> bool {
+    std::process::Command::new("lsof")
+        .arg("-v")
+        .output()
+        .map(|o| o.status.success() || o.stderr.is_empty() == false)
+        .unwrap_or(false)
+}
+
+/// Return the most recent mtime among `.jsonl` files at any depth
+/// under the project dir. None if the dir is missing or empty.
+fn newest_jsonl_mtime(project_dir: &Path) -> Option<SystemTime> {
+    let mut newest: Option<SystemTime> = None;
+    walk_jsonl_mtime(project_dir, &mut newest);
+    newest
+}
+
+fn walk_jsonl_mtime(dir: &Path, newest: &mut Option<SystemTime>) {
+    let Ok(entries) = fs::read_dir(dir) else {
+        return;
+    };
+    for entry in entries.flatten() {
+        let path = entry.path();
+        let Ok(ft) = entry.file_type() else { continue };
+        if ft.is_dir() {
+            walk_jsonl_mtime(&path, newest);
+        } else if ft.is_file()
+            && path
+                .extension()
+                .map(|e| e == "jsonl")
+                .unwrap_or(false)
+        {
+            if let Ok(meta) = entry.metadata() {
+                if let Ok(mtime) = meta.modified() {
+                    if newest.map(|n| mtime > n).unwrap_or(true) {
+                        *newest = Some(mtime);
+                    }
+                }
+            }
+        }
+    }
+}
+
+/// Crate-public wrapper so `project::move_project` can probe a
+/// project cwd directly (spec §5 secondary signal).
+pub fn lsof_sees_open_file_pub(dir: &Path) -> bool {
+    lsof_sees_open_file(dir)
+}
+
+/// Use `lsof` to check if any process has a file under the given dir
+/// open. On platforms without `lsof` (or if it fails) returns false —
+/// heartbeat and process-scan signals remain the fallback.
+fn lsof_sees_open_file(dir: &Path) -> bool {
+    let dir_str = dir.to_string_lossy();
+    let output = std::process::Command::new("lsof")
+        .args(["+D", &dir_str])
+        .output();
+    match output {
+        Ok(out) if out.status.success() => {
+            // Any output line means an open handle exists.
+            !out.stdout.is_empty()
+        }
+        _ => false,
+    }
+}
+
 pub(crate) fn copy_dir_recursive(src: &Path, dst: &Path) -> Result<(), ProjectError> {
     crate::fs_utils::copy_dir_recursive(src, dst).map_err(ProjectError::Io)
+}
+
+/// Public wrapper for `merge_project_dirs`, exposed for P8's memory-dir
+/// merge case.
+pub fn merge_project_dirs_pub(src: &Path, dst: &Path) -> Result<(), ProjectError> {
+    merge_project_dirs(src, dst)
 }
 
 pub(crate) fn merge_project_dirs(src: &Path, dst: &Path) -> Result<(), ProjectError> {

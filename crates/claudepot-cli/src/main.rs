@@ -96,12 +96,46 @@ enum ProjectAction {
         /// Show what would happen without making changes
         #[arg(long)]
         dry_run: bool,
+        /// Proceed despite unresolved pending rename journals (last-resort)
+        #[arg(long)]
+        ignore_pending_journals: bool,
     },
     /// Remove orphaned project directories
     Clean {
         /// Show what would be removed without deleting
         #[arg(long)]
         dry_run: bool,
+        /// Proceed despite unresolved pending rename journals
+        #[arg(long)]
+        ignore_pending_journals: bool,
+    },
+    /// Repair or resolve pending / failed rename journals
+    Repair {
+        /// Finish remaining phases for a journal (id optional, use --all to target every one)
+        #[arg(long)]
+        resume: bool,
+        /// Reverse completed phases and restore snapshots
+        #[arg(long, conflicts_with = "resume")]
+        rollback: bool,
+        /// Mark a journal as abandoned (keeps audit trail, suppresses nags)
+        #[arg(long, conflicts_with_all = ["resume", "rollback"])]
+        abandon: bool,
+        /// Force-release a lock file whose staleness detection refuses auto-break
+        #[arg(long)]
+        break_lock: Option<String>,
+        /// Clean up abandoned journals and expired snapshots
+        #[arg(long)]
+        gc: bool,
+        /// For --gc: how many days old before cleanup (default 90)
+        #[arg(long, requires = "gc")]
+        older_than: Option<u64>,
+        /// Target journal id (filename without extension). If absent,
+        /// --resume/--rollback/--abandon require --all.
+        #[arg(long)]
+        id: Option<String>,
+        /// Apply to all matching journals
+        #[arg(long)]
+        all: bool,
     },
 }
 
@@ -264,10 +298,42 @@ async fn main() -> Result<()> {
                 overwrite,
                 force,
                 dry_run,
+                ignore_pending_journals,
             } => commands::project::move_project(
-                &ctx, &old_path, &new_path, no_move, merge, overwrite, force, dry_run,
+                &ctx,
+                &old_path,
+                &new_path,
+                no_move,
+                merge,
+                overwrite,
+                force,
+                dry_run,
+                ignore_pending_journals,
             )?,
-            ProjectAction::Clean { dry_run } => commands::project::clean(&ctx, dry_run)?,
+            ProjectAction::Clean {
+                dry_run,
+                ignore_pending_journals,
+            } => commands::project::clean(&ctx, dry_run, ignore_pending_journals)?,
+            ProjectAction::Repair {
+                resume,
+                rollback,
+                abandon,
+                break_lock,
+                gc,
+                older_than,
+                id,
+                all,
+            } => commands::project::repair(
+                &ctx,
+                resume,
+                rollback,
+                abandon,
+                break_lock.as_deref(),
+                gc,
+                older_than,
+                id.as_deref(),
+                all,
+            )?,
         },
         Commands::Doctor => commands::doctor::run(&ctx).await?,
         Commands::Status => commands::status::run(&ctx).await?,
