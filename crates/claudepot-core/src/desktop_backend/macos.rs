@@ -2,8 +2,6 @@ use crate::error::DesktopSwapError;
 use std::path::PathBuf;
 use std::time::{Duration, Instant};
 
-#[allow(dead_code)]
-const BUNDLE_ID: &str = "com.anthropic.claudefordesktop";
 const QUIT_TIMEOUT: Duration = Duration::from_secs(10);
 
 /// macOS session items — the 12 items Kannon swaps per account.
