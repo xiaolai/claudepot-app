@@ -1087,3 +1087,160 @@ button.danger.primary:hover:not(:disabled) {
     flex-wrap: wrap;
   }
 }
+
+/* ---------- projects section ---------- */
+
+.projects-sidebar .sidebar-list { padding-top: 4px; }
+
+.project-detail { padding-top: 52px; }
+
+.project-detail-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 0 20px 12px;
+  border-bottom: 0.5px solid var(--border);
+}
+
+.project-detail-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.project-detail-title h2 {
+  font-size: 16px;
+  font-weight: 600;
+  margin: 0;
+}
+
+.project-detail-actions {
+  display: flex;
+  gap: 8px;
+}
+
+.detail-grid {
+  padding: 16px 20px;
+  display: grid;
+  gap: 8px;
+}
+
+.detail-row {
+  display: grid;
+  grid-template-columns: 140px 1fr;
+  align-items: baseline;
+  gap: 8px;
+}
+
+.detail-label {
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: var(--muted);
+}
+
+.detail-value { font-size: 13px; }
+.detail-value.mono { font-family: "SF Mono", SFMono-Regular, ui-monospace, Menlo, monospace; font-size: 11px; }
+
+.detail-section {
+  padding: 12px 20px;
+  border-top: 0.5px solid var(--border);
+}
+
+.detail-section h3 {
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: var(--muted);
+  margin: 0 0 8px;
+}
+
+.detail-list { list-style: none; padding: 0; margin: 0; }
+.detail-list li { padding: 2px 0; }
+
+/* ---------- repair view ---------- */
+
+.repair-view { padding-top: 52px; }
+
+.repair-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0 20px 12px;
+  border-bottom: 0.5px solid var(--border);
+}
+
+.repair-header h2 {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 16px;
+  font-weight: 600;
+  margin: 0;
+}
+
+.repair-list { list-style: none; padding: 12px 20px; margin: 0; display: grid; gap: 10px; }
+
+.repair-entry {
+  padding: 10px 12px;
+  border: 0.5px solid var(--border);
+  border-radius: 6px;
+  display: grid;
+  gap: 4px;
+}
+
+.repair-entry-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.repair-entry-paths { line-height: 1.4; }
+.repair-entry-error { padding-top: 2px; }
+
+.repair-entry-actions {
+  padding-top: 6px;
+  border-top: 0.5px dashed var(--border);
+  font-style: italic;
+}
+
+/* ---------- pending journals banner ---------- */
+
+.global-banner-slot {
+  position: fixed;
+  bottom: 0;
+  left: 48px;  /* clears section rail */
+  right: 0;
+  z-index: 10;
+  display: flex;
+  justify-content: center;
+  padding: 8px 12px;
+  pointer-events: none;
+}
+
+.pending-journals-banner {
+  pointer-events: auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 12px;
+  background: var(--warn-weak, var(--accent-weak));
+  color: var(--text);
+  border: 0.5px solid var(--border);
+  border-radius: 999px;
+  font-size: 13px;
+  cursor: default;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+}
+
+.pending-journals-banner:hover {
+  background: var(--accent-weak);
+}
+
+.pending-journals-banner:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}

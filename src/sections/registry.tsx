@@ -1,28 +1,24 @@
-import type { ComponentType, ReactNode } from "react";
-import { User } from "@phosphor-icons/react";
-import { AccountsSection } from "./AccountsSection";
+import type { ReactNode } from "react";
+import { Folder, User } from "@phosphor-icons/react";
 
 /**
- * Every top-level section the rail can navigate to.
+ * Section metadata. The shell renders the matching body itself — the
+ * registry only carries the id, label, and rail icon so sections can
+ * expose whatever props shape they need without a common interface.
  *
  * Sections are ordered top-down; ⌘1..⌘N maps to the first N entries.
- * New sections append at the bottom. Keep `id` stable — it's used as
- * the localStorage key for the active-section pointer.
+ * Keep `id` stable — it's the localStorage key for the active section
+ * and for per-section sub-routes.
  */
 export interface SectionDef {
   id: string;
   label: string;
   icon: ReactNode;
-  Component: ComponentType;
 }
 
 export const sections: readonly SectionDef[] = [
-  {
-    id: "accounts",
-    label: "Accounts",
-    icon: <User />,
-    Component: AccountsSection,
-  },
+  { id: "accounts", label: "Accounts", icon: <User /> },
+  { id: "projects", label: "Projects", icon: <Folder /> },
 ];
 
 export const sectionIds = sections.map((s) => s.id);
