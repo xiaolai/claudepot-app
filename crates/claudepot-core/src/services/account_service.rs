@@ -296,6 +296,15 @@ pub(crate) async fn sync_from_current_cc_with(
         None => return Ok(None), // Unknown account — user hasn't added it yet.
     };
 
+    // Defensive: `find_by_email` returns an account whose email matches by
+    // construction, but make the invariant explicit at the callsite. If
+    // anyone ever changes the lookup to be a prefix or fuzzy match, this
+    // assertion fires before we mis-file CC's blob into the wrong slot.
+    debug_assert!(
+        account.email.eq_ignore_ascii_case(&email),
+        "find_by_email returned account whose email doesn't match query"
+    );
+
     // Write if the stored blob differs from or is missing vs. CC's current.
     let needs_write = match swap::load_private(account.uuid) {
         Ok(stored) => stored != blob_str,
@@ -306,6 +315,15 @@ pub(crate) async fn sync_from_current_cc_with(
             .map_err(|e| RegisterError::CredentialWrite(e.to_string()))?;
         let _ = store.update_credentials_flag(account.uuid, true);
     }
+
+    // Profile fetch just succeeded with a matching email — record the
+    // verification outcome so the account starts the session verified.
+    let _ = store.update_verification(
+        account.uuid,
+        &crate::account::VerifyOutcome::Ok {
+            email: email.clone(),
+        },
+    );
 
     // Always sync the active pointer so downstream swaps see the truth.
     if let Err(e) = store.set_active_cli(account.uuid) {
