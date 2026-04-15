@@ -14,7 +14,7 @@ use crate::error::ProjectError;
 use crate::project::{self, MoveArgs, MoveResult};
 use crate::project_journal::{self, Journal, JournalStatus};
 use crate::project_lock::{self, Lock};
-use crate::project_rewrite::ProgressCallback;
+use crate::project_progress::ProgressSink;
 
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -117,7 +117,7 @@ pub fn resume(
     config_dir: PathBuf,
     claude_json_path: Option<PathBuf>,
     snapshots_dir: Option<PathBuf>,
-    progress: ProgressCallback<'_>,
+    sink: &dyn ProgressSink,
 ) -> Result<MoveResult, ProjectError> {
     // Supersede the prior journal (audit trail preserved; gate ignores it).
     let _ = project_journal::mark_abandoned(&entry.path);
@@ -135,7 +135,7 @@ pub fn resume(
         dry_run: false,
         ignore_pending_journals: true,
     };
-    project::move_project(&args, progress)
+    project::move_project(&args, sink)
 }
 
 /// Run the reverse move (new → old). Snapshots from destructive phases
@@ -146,7 +146,7 @@ pub fn rollback(
     config_dir: PathBuf,
     claude_json_path: Option<PathBuf>,
     snapshots_dir: Option<PathBuf>,
-    progress: ProgressCallback<'_>,
+    sink: &dyn ProgressSink,
 ) -> Result<MoveResult, ProjectError> {
     let _ = project_journal::mark_abandoned(&entry.path);
 
@@ -163,7 +163,7 @@ pub fn rollback(
         dry_run: false,
         ignore_pending_journals: true,
     };
-    project::move_project(&args, progress)
+    project::move_project(&args, sink)
 }
 
 /// Write the `.abandoned.json` sidecar. The journal itself is kept
