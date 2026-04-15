@@ -32,6 +32,34 @@ pub async fn run(ctx: &AppContext) -> Result<()> {
                 }).collect::<Vec<_>>(),
             })
         );
+        // Text mode below computes errors+drift and exits non-zero; JSON
+        // mode must honor the same contract or scripts piping `doctor
+        // --json` will get misleading exit 0 alongside a drift payload.
+        let drift = report
+            .account_health
+            .iter()
+            .filter(|a| a.verify_status == "drift")
+            .count();
+        let expired = report
+            .account_health
+            .iter()
+            .filter(|a| !a.remaining_mins.is_some_and(|m| m > 0))
+            .count();
+        // Keep JSON-mode exit code in sync with text mode: drift → 2,
+        // any other error (DB, API unreachable, geo-blocked, expired
+        // tokens) → 1. Without API status in the mix, a piped
+        // `doctor --json` would tell a script "all good" during a
+        // network outage while the text mode said otherwise.
+        let api_error = matches!(
+            report.api_status,
+            doctor_service::ApiStatus::GeoBlocked | doctor_service::ApiStatus::Unreachable(_)
+        );
+        if drift > 0 {
+            std::process::exit(2);
+        }
+        if report.db_error.is_some() || expired > 0 || api_error {
+            std::process::exit(1);
+        }
         return Ok(());
     }
 

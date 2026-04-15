@@ -82,6 +82,16 @@ impl super::CliPlatform for CredentialFile {
     async fn touch_credfile(&self) -> Result<(), SwapError> {
         touch()
     }
+
+    async fn clear_default(&self) -> Result<(), SwapError> {
+        let path = paths::claude_credentials_file();
+        if path.exists() {
+            std::fs::remove_file(&path).map_err(|e| {
+                SwapError::WriteFailed(format!("clear_default remove_file: {e}"))
+            })?;
+        }
+        Ok(())
+    }
 }
 
 #[cfg(test)]
