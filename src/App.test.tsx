@@ -34,6 +34,13 @@ async function renderApp(handlers: Record<string, (args?: unknown) => unknown>) 
     sync_from_current_cc: () => "",
     fetch_all_usage: () => ({}),
     verify_all_accounts: () => latestListSnapshot,
+    // Default: CC has no blob. Tests that want the truth-strip to
+    // render a specific identity override this handler.
+    current_cc_identity: () => ({
+      email: null,
+      verified_at: new Date().toISOString(),
+      error: null,
+    }),
     ...handlers,
     ...(wrappedAccountList ? { account_list: wrappedAccountList } : {}),
   };
@@ -952,5 +959,140 @@ describe("App — verified identity surface", () => {
     // Drift must override token_status for color: dot has .bad class
     // regardless of the locally-valid token.
     expect(dot?.className).toContain("bad");
+  });
+});
+
+describe("App — CC truth strip + sync banner", () => {
+  it("renders CC identity in the truth strip when /profile returns an email", async () => {
+    await renderApp({
+      app_status: () =>
+        sampleStatus({
+          account_count: 1,
+          cli_active_email: "alice@example.com",
+        }),
+      account_list: () => [sampleAccount({ is_cli_active: true })],
+      current_cc_identity: () => ({
+        email: "alice@example.com",
+        verified_at: new Date().toISOString(),
+        error: null,
+      }),
+    });
+
+    const strip = await screen.findByLabelText(/CC authentication status/i);
+    expect(strip).toHaveTextContent(/alice@example\.com/);
+    expect(within(strip).getByText(/MATCH/i)).toBeInTheDocument();
+  });
+
+  it("truth strip shows DRIFT when CC identity differs from Claudepot's active_cli", async () => {
+    await renderApp({
+      app_status: () =>
+        sampleStatus({
+          account_count: 1,
+          cli_active_email: "lixiaolai@gmail.com",
+        }),
+      account_list: () => [sampleAccount({ is_cli_active: true })],
+      current_cc_identity: () => ({
+        email: "xiaolaiapple@gmail.com",
+        verified_at: new Date().toISOString(),
+        error: null,
+      }),
+    });
+
+    const strip = await screen.findByLabelText(/CC authentication status/i);
+    expect(strip).toHaveTextContent(/xiaolaiapple@gmail\.com/);
+    expect(within(strip).getByText(/DRIFT/i)).toBeInTheDocument();
+  });
+
+  it("truth strip surfaces a CC /profile error instead of staying silent", async () => {
+    await renderApp({
+      app_status: () => sampleStatus({ account_count: 0 }),
+      account_list: () => [],
+      current_cc_identity: () => ({
+        email: null,
+        verified_at: new Date().toISOString(),
+        error: "access token rejected by /api/oauth/profile",
+      }),
+    });
+
+    const strip = await screen.findByLabelText(/CC authentication status/i);
+    expect(strip).toHaveTextContent(
+      /could not verify.*access token rejected/i,
+    );
+  });
+
+  it("shows a sync-failure banner when sync_from_current_cc throws", async () => {
+    await renderApp({
+      sync_from_current_cc: () => {
+        throw new Error("access token rejected by /api/oauth/profile");
+      },
+      app_status: () => sampleStatus({ account_count: 0 }),
+      account_list: () => [],
+    });
+
+    const alerts = await screen.findAllByRole("alert");
+    const syncBanner = alerts.find((el) =>
+      /couldn't sync with claude code/i.test(el.textContent ?? ""),
+    );
+    expect(syncBanner).toBeDefined();
+    expect(syncBanner).toHaveTextContent(/access token rejected/);
+  });
+});
+
+describe("AccountDetail — Verified row", () => {
+  it("renders 'verified as X' when verify_status is ok", async () => {
+    await renderApp({
+      app_status: () => sampleStatus({ account_count: 1 }),
+      account_list: () => [
+        sampleAccount({
+          verify_status: "ok",
+          verified_email: "alice@example.com",
+          verified_at: new Date().toISOString(),
+        }),
+      ],
+    });
+
+    await selectAccount("alice@example.com");
+    // "Verified" dt label with a dd whose verify-line.ok span contains the email.
+    const verifiedDt = await screen.findByText(/^Verified$/i);
+    const verifiedDd = verifiedDt.nextElementSibling as HTMLElement;
+    expect(verifiedDd).toHaveTextContent(/alice@example\.com/);
+    expect(verifiedDd.querySelector(".verify-line.ok")).not.toBeNull();
+  });
+
+  it("renders DRIFT text in the Verified row when the slot is misfiled", async () => {
+    await renderApp({
+      app_status: () => sampleStatus({ account_count: 1 }),
+      account_list: () => [
+        sampleAccount({
+          email: "lixiaolai@gmail.com",
+          verify_status: "drift",
+          verified_email: "xiaolaiapple@gmail.com",
+          drift: true,
+          verified_at: new Date().toISOString(),
+        }),
+      ],
+    });
+
+    await selectAccount("lixiaolai@gmail.com");
+    const verifiedDt = await screen.findByText(/^Verified$/i);
+    const verifiedDd = verifiedDt.nextElementSibling as HTMLElement;
+    expect(verifiedDd).toHaveTextContent(
+      /DRIFT — blob authenticates as xiaolaiapple@gmail\.com/,
+    );
+    expect(verifiedDd.querySelector(".verify-line.bad")).not.toBeNull();
+  });
+
+  it("renders 'not past local expiry' qualifier on a valid token", async () => {
+    await renderApp({
+      app_status: () => sampleStatus({ account_count: 1 }),
+      account_list: () => [
+        sampleAccount({ token_status: "valid (7h 59m remaining)" }),
+      ],
+    });
+
+    await selectAccount("alice@example.com");
+    const tokenDt = await screen.findByText(/^Token$/i);
+    const tokenDd = tokenDt.nextElementSibling as HTMLElement;
+    expect(tokenDd).toHaveTextContent(/not past local expiry/i);
   });
 });

@@ -146,3 +146,23 @@ impl AccountUsageDto {
         }
     }
 }
+
+/// Ground-truth "what is CC actually authenticated as right now".
+///
+/// Produced by the `current_cc_identity` Tauri command: reads CC's
+/// shared credential slot, calls `/api/oauth/profile`, returns the
+/// email the server confirms. The GUI's top-of-window truth strip
+/// renders this directly — it's what `claude auth status` would print.
+#[derive(Serialize)]
+pub struct CcIdentity {
+    /// The email `/api/oauth/profile` returned. `None` if CC has no
+    /// stored blob or the blob is not parseable JSON.
+    pub email: Option<String>,
+    /// RFC3339 timestamp of when we ran the profile check. Lets the UI
+    /// show "verified Ns ago" staleness.
+    pub verified_at: chrono::DateTime<chrono::Utc>,
+    /// Populated when CC has a blob but `/profile` failed — separate
+    /// from `email=None` so the UI can distinguish "no CC credentials"
+    /// from "couldn't reach the server" from "token revoked".
+    pub error: Option<String>,
+}
