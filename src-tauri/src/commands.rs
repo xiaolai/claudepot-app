@@ -525,3 +525,166 @@ pub fn repair_pending_count() -> Result<usize, String> {
         .map_err(|e| format!("repair count failed: {e}"))?;
     Ok(entries.len())
 }
+
+// ---------------------------------------------------------------------------
+// Repair execution surface (Step 4 of gui-rename plan)
+// ---------------------------------------------------------------------------
+
+use crate::ops::{
+    emit_terminal, new_op_id, now_unix_secs, OpKind, OpStatus, RunningOpInfo, RunningOps,
+    TauriProgressSink,
+};
+use tauri::{AppHandle, State};
+
+#[derive(serde::Serialize)]
+pub struct BreakLockOutcomeDto {
+    pub prior_pid: u32,
+    pub prior_hostname: String,
+    pub prior_started: String,
+    pub audit_path: String,
+}
+
+#[derive(serde::Serialize)]
+pub struct GcOutcomeDto {
+    pub removed_journals: usize,
+    pub removed_snapshots: usize,
+    pub bytes_freed: u64,
+    pub would_remove: Vec<String>,
+}
+
+fn find_journal(id: &str) -> Result<claudepot_core::project_repair::JournalEntry, String> {
+    let (journals, locks, _snaps) = claudepot_home_dirs();
+    let entries = project_repair::list_pending_with_status(
+        &journals,
+        &locks,
+        JOURNAL_NAG_THRESHOLD_SECS,
+    )
+    .map_err(|e| format!("repair list failed: {e}"))?;
+    entries
+        .into_iter()
+        .find(|e| e.id == id)
+        .ok_or_else(|| format!("no journal with id '{id}'"))
+}
+
+fn spawn_repair_op(
+    app: AppHandle,
+    ops: RunningOps,
+    kind: OpKind,
+    entry: claudepot_core::project_repair::JournalEntry,
+) -> String {
+    let op_id = new_op_id();
+    let info = RunningOpInfo {
+        op_id: op_id.clone(),
+        kind,
+        old_path: entry.journal.old_path.clone(),
+        new_path: entry.journal.new_path.clone(),
+        current_phase: None,
+        sub_progress: None,
+        status: OpStatus::Running,
+        started_unix_secs: now_unix_secs(),
+        last_error: None,
+    };
+    ops.insert(info);
+
+    let app_for_task = app.clone();
+    let ops_for_task = ops.clone();
+    let op_id_for_task = op_id.clone();
+    tokio::task::spawn_blocking(move || {
+        let sink = TauriProgressSink {
+            app: app_for_task.clone(),
+            op_id: op_id_for_task.clone(),
+            ops: ops_for_task.clone(),
+        };
+        let cfg = paths::claude_config_dir();
+        let claude_json = dirs::home_dir().map(|h| h.join(".claude.json"));
+        let snaps = Some(cfg.join("claudepot").join("snapshots"));
+        let result = match kind {
+            OpKind::RepairResume => {
+                project_repair::resume(&entry, cfg, claude_json, snaps, &sink)
+            }
+            OpKind::RepairRollback => {
+                project_repair::rollback(&entry, cfg, claude_json, snaps, &sink)
+            }
+        };
+        let error = result.err().map(|e| e.to_string());
+        emit_terminal(&app_for_task, &ops_for_task, &op_id_for_task, error);
+    });
+
+    op_id
+}
+
+#[tauri::command]
+pub fn repair_resume_start(
+    id: String,
+    app: AppHandle,
+    ops: State<RunningOps>,
+) -> Result<String, String> {
+    let entry = find_journal(&id)?;
+    Ok(spawn_repair_op(
+        app,
+        ops.inner().clone(),
+        OpKind::RepairResume,
+        entry,
+    ))
+}
+
+#[tauri::command]
+pub fn repair_rollback_start(
+    id: String,
+    app: AppHandle,
+    ops: State<RunningOps>,
+) -> Result<String, String> {
+    let entry = find_journal(&id)?;
+    Ok(spawn_repair_op(
+        app,
+        ops.inner().clone(),
+        OpKind::RepairRollback,
+        entry,
+    ))
+}
+
+#[tauri::command]
+pub fn repair_abandon(id: String) -> Result<(), String> {
+    let entry = find_journal(&id)?;
+    project_repair::abandon(&entry).map_err(|e| format!("abandon failed: {e}"))?;
+    Ok(())
+}
+
+#[tauri::command]
+pub fn repair_break_lock(path: String) -> Result<BreakLockOutcomeDto, String> {
+    let (journals, locks, _snaps) = claudepot_home_dirs();
+    let lock_path = project_repair::resolve_lock_file(&locks, &path)
+        .ok_or_else(|| format!("no lock file found for '{path}'"))?;
+    let broken = project_repair::break_lock_with_audit(&lock_path, &journals)
+        .map_err(|e| format!("break-lock failed: {e}"))?;
+    Ok(BreakLockOutcomeDto {
+        prior_pid: broken.prior.pid,
+        prior_hostname: broken.prior.hostname,
+        prior_started: broken.prior.start_iso8601,
+        audit_path: broken.audit_path.to_string_lossy().to_string(),
+    })
+}
+
+#[tauri::command]
+pub fn repair_gc(older_than_days: u64, dry_run: bool) -> Result<GcOutcomeDto, String> {
+    let (journals, _locks, snapshots) = claudepot_home_dirs();
+    let result = project_repair::gc(&journals, &snapshots, older_than_days, dry_run)
+        .map_err(|e| format!("gc failed: {e}"))?;
+    Ok(GcOutcomeDto {
+        removed_journals: result.removed_journals,
+        removed_snapshots: result.removed_snapshots,
+        bytes_freed: result.bytes_freed,
+        would_remove: result
+            .would_remove
+            .into_iter()
+            .map(|p| p.to_string_lossy().to_string())
+            .collect(),
+    })
+}
+
+/// Snapshot of currently-tracked ops. UI's RunningOpStrip polls this
+/// as a backstop if events drop.
+#[tauri::command]
+pub fn running_ops_list(ops: State<RunningOps>) -> Result<Vec<RunningOpInfo>, String> {
+    Ok(ops.list())
+}

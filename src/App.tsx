@@ -1,11 +1,13 @@
 import { IconContext } from "@phosphor-icons/react";
 import { SectionRail } from "./components/SectionRail";
 import { PendingJournalsBanner } from "./components/PendingJournalsBanner";
+import { RunningOpStrip } from "./components/RunningOpStrip";
 import { sections, sectionIds } from "./sections/registry";
 import { AccountsSection } from "./sections/AccountsSection";
 import { ProjectsSection } from "./sections/ProjectsSection";
 import { useSection } from "./hooks/useSection";
 import { usePendingJournals } from "./hooks/usePendingJournals";
+import { useRunningOps } from "./hooks/useRunningOps";
 
 function App() {
   const { section, subRoute, setSection, setSubRoute } = useSection(
@@ -13,6 +15,7 @@ function App() {
     sectionIds,
   );
   const { count: pendingCount } = usePendingJournals();
+  const { ops: runningOps } = useRunningOps();
 
   // Hide the banner whenever the user is already looking at Repair —
   // no point nagging from the page they'd navigate to.
@@ -40,6 +43,17 @@ function App() {
             />
           </div>
         )}
+        <RunningOpStrip
+          ops={runningOps}
+          onReopen={(opId) => {
+            // Re-opening into an active modal comes in Step 6 when
+            // RenameProjectModal/OperationProgressModal wire by op-id
+            // through a shared context. For now just deep-link to
+            // Repair so the user sees the list.
+            console.info("[stub] reopen op", opId);
+            setSection("projects", "repair");
+          }}
+        />
       </div>
     </IconContext.Provider>
   );

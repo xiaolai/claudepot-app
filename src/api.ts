@@ -3,14 +3,17 @@ import { invoke } from "@tauri-apps/api/core";
 import type {
   AccountSummary,
   AppStatus,
+  BreakLockOutcome,
   CcIdentity,
   DryRunPlan,
+  GcOutcome,
   JournalEntry,
   MoveArgs,
   ProjectDetail,
   ProjectInfo,
   RegisterOutcome,
   RemoveOutcome,
+  RunningOpInfo,
   UsageMap,
 } from "./types";
 
@@ -68,4 +71,25 @@ export const api = {
   repairList: () => invoke<JournalEntry[]>("repair_list"),
   /** Count of *actionable* journals — for the pending-journals banner. */
   repairPendingCount: () => invoke<number>("repair_pending_count"),
+
+  // ---------- Repair (mutating) ----------
+  /**
+   * Kick off a resume in the background. Returns the op_id — caller
+   * subscribes to `op-progress::<op_id>` for phase events.
+   */
+  repairResumeStart: (id: string) => invoke<string>("repair_resume_start", { id }),
+  /** Kick off a rollback in the background. Returns op_id. */
+  repairRollbackStart: (id: string) => invoke<string>("repair_rollback_start", { id }),
+  /** Write the .abandoned.json sidecar. Synchronous; no events. */
+  repairAbandon: (id: string) => invoke<void>("repair_abandon", { id }),
+  /** Force-break a lock file (with audit). Synchronous. */
+  repairBreakLock: (path: string) =>
+    invoke<BreakLockOutcome>("repair_break_lock", { path }),
+  /** GC abandoned journals + old snapshots. dryRun=true reports only. */
+  repairGc: (olderThanDays: number, dryRun: boolean) =>
+    invoke<GcOutcome>("repair_gc", { olderThanDays, dryRun }),
+
+  // ---------- Op tracking ----------
+  /** Snapshot of currently-tracked ops. Backstop for event drops. */
+  runningOpsList: () => invoke<RunningOpInfo[]>("running_ops_list"),
 };
