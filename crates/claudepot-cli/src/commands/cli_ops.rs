@@ -131,10 +131,19 @@ pub async fn use_account(ctx: &AppContext, email_input: &str, no_refresh: bool, 
         if force && claudepot_core::cli_backend::swap::is_cc_process_running_public().await {
             eprintln!();
             eprintln!(
-                "\u{26a0}  Warning: Claude Code is running. Its next OAuth token refresh\n   \
-                 will overwrite this swap back to {from}. Quit Claude Code\n   \
-                 before the next refresh (typically within the hour) for the swap to stick."
+                "\u{26a0}  Warning: Claude Code is running. Restart it to apply this swap cleanly."
             );
+            eprintln!();
+            eprintln!("   Until you quit the running session, you'll see split-brain state:");
+            eprintln!("     • Session identity (header, org name) stays as {from}");
+            eprintln!("       — cached in memory at startup, can't be changed.");
+            eprintln!("     • API calls (/usage, completions, billing) use {email}");
+            eprintln!("       — they re-read the keychain on each request.");
+            eprintln!("     • Next OAuth token refresh (typically within the hour) will");
+            eprintln!("       overwrite the keychain back to {from}, silently reverting");
+            eprintln!("       this swap for future sessions too.");
+            eprintln!();
+            eprintln!("   Quit Claude Code before the next refresh for the swap to stick.");
         } else {
             eprintln!("\nNote: running claude processes will continue using the previous account until restarted.");
         }
