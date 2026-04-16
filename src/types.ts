@@ -152,7 +152,19 @@ export type OpKind = "repair_resume" | "repair_rollback" | "move_project";
 
 export type OpStatus = "running" | "complete" | "error";
 
-/** Snapshot returned by `running_ops_list`. */
+/** Populated on successful terminal events; null while running / on error. */
+export interface MoveResultSummary {
+  actual_dir_moved: boolean;
+  cc_dir_renamed: boolean;
+  jsonl_files_scanned: number;
+  jsonl_files_modified: number;
+  config_had_collision: boolean;
+  config_snapshot_path: string | null;
+  memory_dir_moved: boolean;
+  warnings: string[];
+}
+
+/** Snapshot returned by `running_ops_list` / `project_move_status`. */
 export interface RunningOpInfo {
   op_id: string;
   kind: OpKind;
@@ -164,6 +176,9 @@ export interface RunningOpInfo {
   status: OpStatus;
   started_unix_secs: number;
   last_error: string | null;
+  move_result: MoveResultSummary | null;
+  /** Journal id of a failed move so the UI can deep-link to Repair. */
+  failed_journal_id: string | null;
 }
 
 /** Event payload on `op-progress::<op_id>` channels. */

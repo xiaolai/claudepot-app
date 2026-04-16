@@ -583,12 +583,15 @@ fn spawn_repair_op(
         status: OpStatus::Running,
         started_unix_secs: now_unix_secs(),
         last_error: None,
+        move_result: None,
+        failed_journal_id: None,
     };
     ops.insert(info);
 
     let app_for_task = app.clone();
     let ops_for_task = ops.clone();
     let op_id_for_task = op_id.clone();
+    let old_path_for_task = entry.journal.old_path.clone();
     tokio::task::spawn_blocking(move || {
         let sink = TauriProgressSink {
             app: app_for_task.clone(),
@@ -605,12 +608,136 @@ fn spawn_repair_op(
             OpKind::RepairRollback => {
                 project_repair::rollback(&entry, cfg, claude_json, snaps, &sink)
             }
+            OpKind::MoveProject => unreachable!("wrong spawn path"),
         };
-        let error = result.err().map(|e| e.to_string());
-        emit_terminal(&app_for_task, &ops_for_task, &op_id_for_task, error);
+        finalize_op(
+            &app_for_task,
+            &ops_for_task,
+            &op_id_for_task,
+            &old_path_for_task,
+            result,
+        );
     });
 
     op_id
+}
+
+/// Shared finalizer for every op spawn: on Ok, stash the structured
+/// result so the UI can render snapshot paths; on Err, look up the
+/// newest journal whose `old_path` matches so the UI can deep-link
+/// "Open Repair" at the exact failed entry. Emits the terminal event
+/// either way.
+fn finalize_op(
+    app: &AppHandle,
+    ops: &RunningOps,
+    op_id: &str,
+    old_path: &str,
+    result: Result<claudepot_core::project::MoveResult, claudepot_core::error::ProjectError>,
+) {
+    match result {
+        Ok(mv) => {
+            let summary = crate::ops::MoveResultSummary::from_core(&mv);
+            ops.update(op_id, |op| op.move_result = Some(summary));
+            emit_terminal(app, ops, op_id, None);
+        }
+        Err(e) => {
+            let msg = e.to_string();
+            let journal_id = newest_journal_id_for(old_path);
+            ops.update(op_id, |op| op.failed_journal_id = journal_id.clone());
+            emit_terminal(app, ops, op_id, Some(msg));
+        }
+    }
+}
+
+/// Best-effort: scan the journals dir for the most recent journal
+/// whose old_path matches, and return its id. None on lookup failure —
+/// the UI falls back to "Open Repair" without a specific target.
+fn newest_journal_id_for(old_path: &str) -> Option<String> {
+    let (journals, locks, _snaps) = claudepot_home_dirs();
+    let entries = project_repair::list_pending_with_status(
+        &journals,
+        &locks,
+        JOURNAL_NAG_THRESHOLD_SECS,
+    )
+    .ok()?;
+    entries
+        .into_iter()
+        .filter(|e| e.journal.old_path == old_path)
+        .max_by_key(|e| e.journal.started_unix_secs)
+        .map(|e| e.id)
+}
+
+#[tauri::command]
+pub fn project_move_start(
+    args: MoveArgsDto,
+    app: AppHandle,
+    ops: State<RunningOps>,
+) -> Result<String, String> {
+    let cfg = paths::claude_config_dir();
+    let claude_json = dirs::home_dir().map(|h| h.join(".claude.json"));
+    let snaps = Some(cfg.join("claudepot").join("snapshots"));
+    // Defensive: ignore `dry_run` from the DTO — this endpoint always
+    // actually executes. Callers that want dry-run use
+    // `project_move_dry_run` instead.
+    let core_args = project::MoveArgs {
+        old_path: args.old_path.clone().into(),
+        new_path: args.new_path.clone().into(),
+        config_dir: cfg,
+        claude_json_path: claude_json,
+        snapshots_dir: snaps,
+        no_move: args.no_move,
+        merge: args.merge,
+        overwrite: args.overwrite,
+        force: args.force,
+        dry_run: false,
+        ignore_pending_journals: args.ignore_pending_journals,
+    };
+
+    let op_id = new_op_id();
+    let info = RunningOpInfo {
+        op_id: op_id.clone(),
+        kind: OpKind::MoveProject,
+        old_path: args.old_path.clone(),
+        new_path: args.new_path.clone(),
+        current_phase: None,
+        sub_progress: None,
+        status: OpStatus::Running,
+        started_unix_secs: now_unix_secs(),
+        last_error: None,
+        move_result: None,
+        failed_journal_id: None,
+    };
+    ops.insert(info);
+
+    let app_for_task = app.clone();
+    let ops_for_task = ops.inner().clone();
+    let op_id_for_task = op_id.clone();
+    let old_path_for_task = args.old_path.clone();
+    tokio::task::spawn_blocking(move || {
+        let sink = TauriProgressSink {
+            app: app_for_task.clone(),
+            op_id: op_id_for_task.clone(),
+            ops: ops_for_task.clone(),
+        };
+        let result = project::move_project(&core_args, &sink);
+        finalize_op(
+            &app_for_task,
+            &ops_for_task,
+            &op_id_for_task,
+            &old_path_for_task,
+            result,
+        );
+    });
+
+    Ok(op_id)
+}
+
+#[tauri::command]
+pub fn project_move_status(
+    op_id: String,
+    ops: State<RunningOps>,
+) -> Result<Option<RunningOpInfo>, String> {
+    Ok(ops.get(&op_id))
 }
 
 #[tauri::command]

@@ -1,6 +1,10 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useTauriEvent } from "../../hooks/useTauriEvent";
-import type { OperationProgressEvent } from "../../types";
+import { api } from "../../api";
+import type {
+  MoveResultSummary,
+  OperationProgressEvent,
+} from "../../types";
 
 const PHASES = ["P3", "P4", "P5", "P6", "P7", "P8", "P9"] as const;
 type Phase = (typeof PHASES)[number];
@@ -19,6 +23,7 @@ export function OperationProgressModal({
   onClose,
   onComplete,
   onError,
+  onOpenRepair,
 }: {
   opId: string;
   title: string;
@@ -27,6 +32,9 @@ export function OperationProgressModal({
   onComplete?: () => void;
   /** Fires once on terminal error with the detail string (if any). */
   onError?: (detail: string | null) => void;
+  /** Optional: navigate to Repair subview (enables the "Open Repair"
+   * button in the error state). If omitted, the button is hidden. */
+  onOpenRepair?: (failedJournalId: string | null) => void;
 }) {
   const channel = `op-progress::${opId}`;
   const [phases, setPhases] = useState<Record<Phase, PhaseState>>(
@@ -42,7 +50,9 @@ export function OperationProgressModal({
     total: number;
   } | null>(null);
   const [terminal, setTerminal] = useState<
-    { kind: "complete" } | { kind: "error"; detail: string | null } | null
+    | { kind: "complete"; result: MoveResultSummary | null }
+    | { kind: "error"; detail: string | null; failedJournalId: string | null }
+    | null
   >(null);
   const firedTerminal = useRef(false);
   const headingId = useRef(
@@ -54,16 +64,44 @@ export function OperationProgressModal({
       const ev = event.payload;
       if (ev.op_id !== opId) return;
       if (ev.phase === "op") {
-        // Terminal event.
+        // Terminal event. Fetch the structured result out-of-band —
+        // the event only carries a string detail, but the backend
+        // stored the MoveResultSummary in RunningOps.
         if (firedTerminal.current) return;
         firedTerminal.current = true;
-        if (ev.status === "complete") {
-          setTerminal({ kind: "complete" });
-          onComplete?.();
-        } else {
-          setTerminal({ kind: "error", detail: ev.detail ?? null });
-          onError?.(ev.detail ?? null);
-        }
+        const isComplete = ev.status === "complete";
+        api
+          .projectMoveStatus(opId)
+          .then((info) => {
+            if (isComplete) {
+              setTerminal({
+                kind: "complete",
+                result: info?.move_result ?? null,
+              });
+              onComplete?.();
+            } else {
+              setTerminal({
+                kind: "error",
+                detail: ev.detail ?? info?.last_error ?? null,
+                failedJournalId: info?.failed_journal_id ?? null,
+              });
+              onError?.(ev.detail ?? null);
+            }
+          })
+          .catch(() => {
+            // Fallback: show whatever the event carried.
+            if (isComplete) {
+              setTerminal({ kind: "complete", result: null });
+              onComplete?.();
+            } else {
+              setTerminal({
+                kind: "error",
+                detail: ev.detail ?? null,
+                failedJournalId: null,
+              });
+              onError?.(ev.detail ?? null);
+            }
+          });
         return;
       }
       const phase = ev.phase as Phase;
@@ -130,16 +168,70 @@ export function OperationProgressModal({
         {terminal?.kind === "complete" && (
           <div className="op-terminal ok">
             <strong>✓ Complete.</strong>
+            {terminal.result && (
+              <ul className="op-terminal-detail">
+                {terminal.result.actual_dir_moved && (
+                  <li>Source directory moved.</li>
+                )}
+                {terminal.result.cc_dir_renamed && (
+                  <li>
+                    CC project dir renamed;{" "}
+                    {terminal.result.jsonl_files_modified} of{" "}
+                    {terminal.result.jsonl_files_scanned} jsonl file
+                    {terminal.result.jsonl_files_scanned === 1 ? "" : "s"}{" "}
+                    rewritten.
+                  </li>
+                )}
+                {terminal.result.memory_dir_moved && (
+                  <li>Auto-memory directory moved.</li>
+                )}
+                {terminal.result.config_had_collision &&
+                  terminal.result.config_snapshot_path && (
+                    <li>
+                      Pre-existing data preserved at{" "}
+                      <code className="mono small">
+                        {terminal.result.config_snapshot_path}
+                      </code>
+                      . Retained 30 days.
+                    </li>
+                  )}
+                {terminal.result.warnings.length > 0 && (
+                  <li className="muted small">
+                    Warnings:
+                    <ul>
+                      {terminal.result.warnings.map((w, i) => (
+                        <li key={i}>{w}</li>
+                      ))}
+                    </ul>
+                  </li>
+                )}
+              </ul>
+            )}
           </div>
         )}
         {terminal?.kind === "error" && (
           <div className="op-terminal bad">
             <strong>Error.</strong>{" "}
             <span className="mono small">{terminal.detail ?? "unknown"}</span>
+            {terminal.failedJournalId && (
+              <p className="small muted">
+                Journal id:{" "}
+                <code className="mono">{terminal.failedJournalId}</code>
+              </p>
+            )}
           </div>
         )}
 
         <div className="modal-actions">
+          {terminal?.kind === "error" && onOpenRepair && (
+            <button
+              type="button"
+              className="primary"
+              onClick={() => onOpenRepair(terminal.failedJournalId)}
+            >
+              Open Repair
+            </button>
+          )}
           <button type="button" onClick={onClose}>
             {terminal ? "Close" : "Run in background"}
           </button>

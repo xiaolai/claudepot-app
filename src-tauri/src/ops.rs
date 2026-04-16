@@ -23,7 +23,40 @@ use tauri::{AppHandle, Emitter};
 pub enum OpKind {
     RepairResume,
     RepairRollback,
-    // Future: MoveProject — introduced by Step 6.
+    MoveProject,
+}
+
+/// Post-op summary surfaced to the UI on success, so we can render
+/// snapshot paths (plan §7.7 H6) and other structured outcomes
+/// without parsing the detail string.
+#[derive(Debug, Clone, Serialize, Default)]
+pub struct MoveResultSummary {
+    pub actual_dir_moved: bool,
+    pub cc_dir_renamed: bool,
+    pub jsonl_files_scanned: usize,
+    pub jsonl_files_modified: usize,
+    pub config_had_collision: bool,
+    pub config_snapshot_path: Option<String>,
+    pub memory_dir_moved: bool,
+    pub warnings: Vec<String>,
+}
+
+impl MoveResultSummary {
+    pub fn from_core(r: &claudepot_core::project::MoveResult) -> Self {
+        Self {
+            actual_dir_moved: r.actual_dir_moved,
+            cc_dir_renamed: r.cc_dir_renamed,
+            jsonl_files_scanned: r.jsonl_files_scanned,
+            jsonl_files_modified: r.jsonl_files_modified,
+            config_had_collision: r.config_had_collision,
+            config_snapshot_path: r
+                .config_snapshot_path
+                .as_ref()
+                .map(|p| p.to_string_lossy().to_string()),
+            memory_dir_moved: r.memory_dir_moved,
+            warnings: r.warnings.clone(),
+        }
+    }
 }
 
 /// Overall status of a running op, independent of phase.
@@ -70,6 +103,14 @@ pub struct RunningOpInfo {
     pub status: OpStatus,
     pub started_unix_secs: u64,
     pub last_error: Option<String>,
+    /// Populated on successful MoveProject / RepairResume / RepairRollback.
+    /// None while running or on error.
+    pub move_result: Option<MoveResultSummary>,
+    /// Journal id of a failed move, so the UI can deep-link "Open Repair"
+    /// and surface this exact entry. Populated opportunistically on error
+    /// — matches the newest journal whose `old_path == old_path` (the
+    /// journal is created during the move, so it will exist when we look).
+    pub failed_journal_id: Option<String>,
 }
 
 /// Shared map of live ops. Wrapped in `Arc<Mutex<_>>` so commands and
