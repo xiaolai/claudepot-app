@@ -1397,3 +1397,110 @@ button.danger.primary:hover:not(:disabled) {
   backdrop-filter: blur(10px);
   z-index: 20;
 }
+
+/* ---------- rename modal ---------- */
+
+.rename-modal { width: 560px; max-height: 85vh; overflow-y: auto; }
+
+.rename-modal .field-label {
+  display: block;
+  margin-top: 12px;
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: var(--muted);
+}
+
+.rename-modal .field-row {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  margin-top: 4px;
+}
+
+.rename-modal input[type="text"] {
+  flex: 1;
+  padding: 6px 8px;
+  font-size: 12px;
+  border: 0.5px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg);
+  color: var(--text);
+}
+
+.rename-modal input[type="text"]:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 0;
+}
+
+.rename-modal .field-group {
+  margin-top: 12px;
+  padding: 8px 10px;
+  border: 0.5px solid var(--border);
+  border-radius: 6px;
+}
+
+.rename-modal .field-group legend,
+.rename-modal .danger-zone legend {
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  padding: 0 6px;
+}
+
+.rename-modal .radio-row,
+.rename-modal .check-row {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  padding: 2px 0;
+  font-size: 13px;
+  cursor: default;
+}
+
+.rename-modal .check-row {
+  margin-top: 8px;
+}
+
+.danger-zone {
+  margin-top: 12px;
+  padding: 8px 10px;
+  border: 1px solid var(--bad, #c83030);
+  border-radius: 6px;
+  background: var(--bad-weak, rgba(200, 48, 48, 0.05));
+}
+
+.danger-zone legend {
+  color: var(--bad);
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.preview-pane {
+  margin-top: 16px;
+  padding: 10px 12px;
+  background: var(--surface);
+  border: 0.5px solid var(--border);
+  border-radius: 6px;
+}
+
+.preview-list {
+  list-style: none;
+  margin: 6px 0 0;
+  padding: 0;
+  display: grid;
+  gap: 3px;
+  font-size: 12px;
+}
+
+.preview-list li.bad { color: var(--bad); }
+.preview-list code.mono { font-size: 11px; }
+
+.submit-disclaimer {
+  margin: 0;
+  padding: 8px 0 0;
+  text-align: right;
+}
