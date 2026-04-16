@@ -80,14 +80,39 @@ pub(crate) fn compute_project_info(
     };
     let total_size_bytes = dir_size(dir);
     let last_modified = most_recent_mtime(dir);
-    // If we recovered cwd from sessions, trust it. Otherwise, the roundtrip
-    // check guards against false positives from truncated or ambiguous paths
-    // (e.g. hyphens in directory names).
-    let is_orphan = if recovered.is_some() {
-        !Path::new(&original_path).exists()
+
+    // Empty-dir heuristic: no sessions, no memory, and below one
+    // filesystem block (directory entries themselves take space, but
+    // a truly abandoned CC project dir stays under ~4 KiB). Empty dirs
+    // are always safe to remove regardless of path reachability.
+    let is_empty = session_count == 0 && memory_file_count == 0 && total_size_bytes < 4096;
+
+    // Reachability — can we definitively stat the source? `try_exists()`
+    // distinguishes NotFound (reachable, absent) from other I/O errors
+    // (unreachable). Then: a path under a known mount-root whose mount
+    // point itself is absent is unreachable, NOT absent.
+    let reachability = classify_reachability(&original_path);
+    let is_reachable = matches!(
+        reachability,
+        PathReachability::Exists | PathReachability::Absent
+    );
+    let source_confirmed_absent = matches!(reachability, PathReachability::Absent);
+
+    // Classification for `is_orphan` — a candidate for `project clean`:
+    //   1. Empty project dir: always. We can't misidentify the source
+    //      because there's nothing to lose.
+    //   2. Source confirmed absent AND roundtrip-safe: source was either
+    //      recovered from session.jsonl (authoritative) or the sanitized
+    //      name is a clean bijection. Unreachable paths never qualify.
+    let is_orphan = if is_empty {
+        true
+    } else if !is_reachable {
+        false
+    } else if recovered.is_some() {
+        source_confirmed_absent
     } else {
         let roundtrips = sanitize_path(&original_path) == sanitized_name;
-        roundtrips && !Path::new(&original_path).exists()
+        roundtrips && source_confirmed_absent
     };
 
     Ok(ProjectInfo {
@@ -98,7 +123,95 @@ pub(crate) fn compute_project_info(
         total_size_bytes,
         last_modified,
         is_orphan,
+        is_reachable,
+        is_empty,
     })
+}
+
+/// Three-state reachability of an arbitrary path.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum PathReachability {
+    /// Stat succeeded and the path is present.
+    Exists,
+    /// Stat succeeded and the path is absent; callers can safely treat
+    /// this as "deleted".
+    Absent,
+    /// Stat failed (permission denied, EIO) or the path sits under a
+    /// known removable-mount root whose mount point is missing. The
+    /// path's status is genuinely unknown — treating it as absent
+    /// would risk deleting data that's merely unplugged.
+    Unreachable,
+}
+
+pub(crate) fn classify_reachability(original_path: &str) -> PathReachability {
+    if original_path.is_empty() {
+        return PathReachability::Unreachable;
+    }
+
+    if is_under_absent_mount(original_path) {
+        return PathReachability::Unreachable;
+    }
+
+    match Path::new(original_path).try_exists() {
+        Ok(true) => PathReachability::Exists,
+        Ok(false) => PathReachability::Absent,
+        // Permission-denied / EIO / any other stat error. Path might or
+        // might not exist; we can't tell, so refuse to classify as absent.
+        Err(_) => PathReachability::Unreachable,
+    }
+}
+
+/// Is `path` anchored under a removable-mount root whose mount point
+/// itself is gone? If so, the mount is likely unplugged (external SSD,
+/// network share) and the path's absence tells us nothing about whether
+/// the source data still exists on that volume.
+fn is_under_absent_mount(path: &str) -> bool {
+    #[cfg(unix)]
+    {
+        // macOS: `/Volumes/<name>`; Linux: `/mnt/<name>`, `/media/<name>`,
+        // `/run/media/<user>/<name>`. Treat each as: strip root, the
+        // first segment is the mount dir.
+        const MOUNT_ROOTS: &[&str] = &["/Volumes/", "/mnt/", "/media/", "/run/media/"];
+        for root in MOUNT_ROOTS {
+            if let Some(rest) = path.strip_prefix(root) {
+                let first = rest.split('/').next().unwrap_or("");
+                if first.is_empty() {
+                    return false;
+                }
+                // `/run/media/<user>/<name>` — descend one more level.
+                let mount_point = if *root == "/run/media/" {
+                    let mut it = rest.splitn(3, '/');
+                    let (Some(u), Some(n)) = (it.next(), it.next()) else {
+                        return false;
+                    };
+                    if u.is_empty() || n.is_empty() {
+                        return false;
+                    }
+                    format!("{root}{u}/{n}")
+                } else {
+                    format!("{root}{first}")
+                };
+                return !Path::new(&mount_point).exists();
+            }
+        }
+    }
+    #[cfg(windows)]
+    {
+        // UNC: `\\host\share\...`. The mount point is `\\host\share`.
+        if let Some(rest) = path.strip_prefix("\\\\") {
+            let mut parts = rest.splitn(3, '\\');
+            let (Some(host), Some(share)) = (parts.next(), parts.next()) else {
+                return false;
+            };
+            if host.is_empty() || share.is_empty() {
+                return false;
+            }
+            let unc_root = format!("\\\\{host}\\{share}");
+            return !Path::new(&unc_root).exists();
+        }
+    }
+    let _ = path;
+    false
 }
 
 /// Recover the project's original cwd from any session.jsonl's `cwd` field.

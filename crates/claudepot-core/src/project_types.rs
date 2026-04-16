@@ -12,7 +12,20 @@ pub struct ProjectInfo {
     pub memory_file_count: usize,
     pub total_size_bytes: u64,
     pub last_modified: Option<SystemTime>,
+    /// True iff the project is safe to clean: either the source path is
+    /// confirmed absent AND reachable, or the CC project dir is
+    /// essentially empty (no sessions, no memory, tiny on disk).
     pub is_orphan: bool,
+    /// True iff we were able to definitively classify the source path's
+    /// existence. False when the path lives under an unmounted removable
+    /// volume, an offline network share, or an ancestor whose status
+    /// can't be stat'd (permission-denied, EIO). Unreachable projects
+    /// are NEVER auto-cleaned.
+    pub is_reachable: bool,
+    /// True iff the CC project dir contains no sessions and no memory
+    /// files and its total size is below one filesystem block. Empty
+    /// dirs are always safe to remove regardless of source existence.
+    pub is_empty: bool,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -90,6 +103,27 @@ pub struct CleanResult {
     pub orphans_found: usize,
     pub orphans_removed: usize,
     pub bytes_freed: u64,
+    /// Orphans skipped because a live CC session was detected against
+    /// their project dir (lsof / process scan / heartbeat).
+    pub orphans_skipped_live: usize,
+    /// Candidates not counted as orphans because we could not
+    /// definitively stat the source path (unmounted volume, permission
+    /// denied). Surfaces so callers can surface "please mount /Volumes/X
+    /// and re-run".
+    pub unreachable_skipped: usize,
+    /// `~/.claude.json` `projects[<original_path>]` entries removed.
+    pub claude_json_entries_removed: usize,
+    /// `~/.claude/history.jsonl` lines whose `project` field referenced
+    /// a cleaned orphan.
+    pub history_lines_removed: usize,
+    /// Claudepot-owned artifacts removed (stale snapshots, abandoned
+    /// journal sidecars whose sanitized name keys matched a cleaned
+    /// orphan). Never touches in-flight journals; those are gated
+    /// upstream.
+    pub claudepot_artifacts_removed: usize,
+    /// Paths of snapshots written during cleanup (config + history)
+    /// so callers can surface recovery hints.
+    pub snapshot_paths: Vec<PathBuf>,
 }
 
 #[derive(Debug, Clone, Serialize)]

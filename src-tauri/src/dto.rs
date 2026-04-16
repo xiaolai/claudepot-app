@@ -194,6 +194,15 @@ pub struct ProjectInfoDto {
     /// ms since epoch; null if the dir has never been modified (new).
     pub last_modified_ms: Option<i64>,
     pub is_orphan: bool,
+    /// Could the source path be definitively stat'd? False for projects
+    /// on unmounted removable volumes / offline shares / permission-
+    /// denied ancestors. The GUI should surface this instead of showing
+    /// a misleading "source missing" error.
+    pub is_reachable: bool,
+    /// CC project dir is effectively empty (no sessions, no memory).
+    /// Useful for callers that want to show a distinct "abandoned"
+    /// label from the standard "source deleted" orphan.
+    pub is_empty: bool,
 }
 
 impl From<&claudepot_core::project_types::ProjectInfo> for ProjectInfoDto {
@@ -206,6 +215,8 @@ impl From<&claudepot_core::project_types::ProjectInfo> for ProjectInfoDto {
             total_size_bytes: p.total_size_bytes,
             last_modified_ms: system_time_to_ms(p.last_modified),
             is_orphan: p.is_orphan,
+            is_reachable: p.is_reachable,
+            is_empty: p.is_empty,
         }
     }
 }

@@ -1,6 +1,6 @@
 use crate::error::ProjectError;
 use std::fs;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 // Re-export public API from submodules
 pub use crate::project_display::format_size;
@@ -710,31 +710,428 @@ fn snapshot_cc_dir(
 // clean_orphans
 // ---------------------------------------------------------------------------
 
+/// Heartbeat window for the live-session probe: if any `.jsonl` inside
+/// an orphan's CC dir has been written within this window AND a kernel
+/// signal confirms it, we refuse to remove it. 60 s is tight enough to
+/// cover "session just closed" bounces without flagging truly dead dirs.
+const CLEAN_LIVE_HEARTBEAT_SECS: u64 = 60;
+
+/// Key used for the process-wide `clean` lock. Reuses `project_lock`'s
+/// stale-detection and O_EXCL acquisition, so two concurrent cleans
+/// can't race on the same CC dir.
+const CLEAN_LOCK_KEY: &str = "__clean__";
+
+/// Find and remove orphan CC project dirs. In addition to the CC
+/// project dir itself, successful removal purges:
+///   * `projects[<original_path>]` in `~/.claude.json` (snapshot first)
+///   * matching lines in `~/.claude/history.jsonl` (snapshot of dropped
+///     lines)
+///   * claudepot-owned snapshots whose filename keys the orphan's
+///     sanitized name
+///   * abandoned journal sidecars keyed to the orphan's sanitized name
+///
+/// Sibling-state cleanup only runs for orphans whose `original_path` is
+/// authoritative — i.e. recovered from `session.jsonl` (`is_empty=false`
+/// case). Empty project dirs get their CC dir removed but NO sibling
+/// state is touched, because `original_path` for an empty dir comes
+/// from the lossy `unsanitize_path` fallback and may not be the real
+/// source.
+///
+/// `claude_json_path = None` skips the config-side rewrite entirely;
+/// tests use this to stay hermetic. `snapshots_dir` / `locks_dir`
+/// default to the standard layout under `config_dir/claudepot/` when
+/// `None`.
+///
+/// Unreachable projects (unmounted `/Volumes/*`, permission-denied
+/// source stat) are NEVER counted as orphans — their source may still
+/// exist on the absent volume. They are reported via
+/// `unreachable_skipped` so callers can surface "mount the drive and
+/// re-run".
 pub fn clean_orphans(
     config_dir: &Path,
+    claude_json_path: Option<&Path>,
+    snapshots_dir: Option<&Path>,
+    locks_dir: Option<&Path>,
     dry_run: bool,
 ) -> Result<(CleanResult, Vec<ProjectInfo>), ProjectError> {
     let projects = list_projects(config_dir)?;
-    let orphans: Vec<ProjectInfo> = projects.into_iter().filter(|p| p.is_orphan).collect();
+
+    let unreachable_skipped = projects.iter().filter(|p| !p.is_reachable).count();
+    let orphans: Vec<ProjectInfo> =
+        projects.into_iter().filter(|p| p.is_orphan).collect();
 
     let mut result = CleanResult {
         orphans_found: orphans.len(),
-        orphans_removed: 0,
-        bytes_freed: 0,
+        unreachable_skipped,
+        ..Default::default()
     };
 
-    if !dry_run {
-        for orphan in &orphans {
-            let dir = config_dir.join("projects").join(&orphan.sanitized_name);
-            if dir.exists() && !Path::new(&orphan.original_path).exists() {
-                result.bytes_freed += orphan.total_size_bytes;
-                fs::remove_dir_all(&dir).map_err(ProjectError::Io)?;
-                result.orphans_removed += 1;
+    if dry_run {
+        return Ok((result, orphans));
+    }
+
+    // Resolve defaults for optional paths. Kept hermetic for tests by
+    // allowing callers to pass explicit scratch dirs.
+    let snapshots_dir_owned: PathBuf = snapshots_dir
+        .map(|p| p.to_path_buf())
+        .unwrap_or_else(|| config_dir.join("claudepot").join("snapshots"));
+    let locks_dir_owned: PathBuf = locks_dir
+        .map(|p| p.to_path_buf())
+        .unwrap_or_else(|| config_dir.join("claudepot").join("locks"));
+
+    // Exclusive process-wide lock so two concurrent `claudepot project
+    // clean -y` invocations don't race on remove_dir_all + sibling-state
+    // rewrites. Honors the same stale-detection rules as `project move`.
+    let (lock_guard, _broken) =
+        crate::project_lock::acquire(&locks_dir_owned, CLEAN_LOCK_KEY)?;
+
+    for orphan in &orphans {
+        let dir = config_dir.join("projects").join(&orphan.sanitized_name);
+        if !dir.exists() {
+            continue;
+        }
+
+        // TOCTOU re-check: the source could have been restored (mount
+        // re-attached, user copied back) between `list_projects` and
+        // now. For empty-dir orphans we intentionally don't re-check
+        // the source path — the dir is empty and reclaim is always OK.
+        if !orphan.is_empty {
+            let reachability = classify_reachability(&orphan.original_path);
+            if reachability != PathReachability::Absent {
+                tracing::info!(
+                    path = %orphan.original_path,
+                    "skipping: source re-appeared or became unreachable since listing"
+                );
+                continue;
+            }
+        }
+
+        // Live-session guard: any lsof / process-scan hit inside the
+        // CC dir means CC (or something else holding the sessions
+        // open) is active. Deleting out from under it would corrupt
+        // the live session file on some platforms.
+        if detect_live_session(&dir, &orphan.original_path, CLEAN_LIVE_HEARTBEAT_SECS) {
+            tracing::warn!(
+                dir = ?dir,
+                "skipping: live session detected against orphan CC dir"
+            );
+            result.orphans_skipped_live += 1;
+            continue;
+        }
+
+        // 1. Sibling state first, while the CC dir still exists — the
+        //    original_path and sanitized_name are needed to find and
+        //    snapshot related entries. Only for authoritative orphans
+        //    (session-recovered cwd, i.e. not empty).
+        if !orphan.is_empty {
+            if let Some(config_path) = claude_json_path {
+                match remove_claude_json_entry(
+                    config_path,
+                    &snapshots_dir_owned,
+                    &orphan.original_path,
+                    &orphan.sanitized_name,
+                ) {
+                    Ok((removed, snap)) => {
+                        if removed {
+                            result.claude_json_entries_removed += 1;
+                        }
+                        if let Some(p) = snap {
+                            result.snapshot_paths.push(p);
+                        }
+                    }
+                    Err(e) => {
+                        tracing::warn!(err = %e, "~/.claude.json prune failed; continuing");
+                    }
+                }
+            }
+
+            let history_path = config_dir.join("history.jsonl");
+            if history_path.exists() {
+                match remove_history_lines_for_path(
+                    &history_path,
+                    &snapshots_dir_owned,
+                    &orphan.original_path,
+                    &orphan.sanitized_name,
+                ) {
+                    Ok((removed, snap)) => {
+                        result.history_lines_removed += removed;
+                        if let Some(p) = snap {
+                            result.snapshot_paths.push(p);
+                        }
+                    }
+                    Err(e) => {
+                        tracing::warn!(err = %e, "history.jsonl prune failed; continuing");
+                    }
+                }
+            }
+        }
+
+        // 2. Remove the CC dir itself. If this fails, the sibling
+        //    rewrites already ran — that's acceptable: a CC dir we
+        //    couldn't remove but whose config entry is gone is strictly
+        //    closer to clean than before. The user can re-run.
+        let bytes = orphan.total_size_bytes;
+        fs::remove_dir_all(&dir).map_err(ProjectError::Io)?;
+        result.orphans_removed += 1;
+        result.bytes_freed += bytes;
+
+        // 3. Claudepot-owned artifacts keyed on the sanitized name.
+        //    Runs AFTER the CC dir is gone so a mid-clean crash leaves
+        //    claudepot state pointing at a valid CC dir, never the
+        //    reverse.
+        result.claudepot_artifacts_removed += remove_claudepot_artifacts(
+            &snapshots_dir_owned,
+            &config_dir.join("claudepot").join("journals"),
+            &orphan.sanitized_name,
+        );
+    }
+
+    lock_guard.release()?;
+    Ok((result, orphans))
+}
+
+/// Remove `projects[<original_path>]` from `~/.claude.json`. Snapshots
+/// the pre-existing value to `<snapshots_dir>/<ts>-<sanitized>-clean-config.json`
+/// before deleting so the user can recover. Atomic replace.
+///
+/// Returns `(removed, snapshot_path)`. `removed=false` means the config
+/// file, the `projects` map, or the specific key was absent — each a
+/// benign no-op.
+fn remove_claude_json_entry(
+    config_path: &Path,
+    snapshots_dir: &Path,
+    original_path: &str,
+    sanitized_name: &str,
+) -> Result<(bool, Option<PathBuf>), ProjectError> {
+    if !config_path.exists() {
+        return Ok((false, None));
+    }
+
+    let contents = fs::read_to_string(config_path).map_err(ProjectError::Io)?;
+    let mut root: serde_json::Value = match serde_json::from_str(&contents) {
+        Ok(v) => v,
+        Err(e) => {
+            return Err(ProjectError::Ambiguous(format!(
+                "~/.claude.json is not valid JSON: {e}"
+            )));
+        }
+    };
+
+    let projects_map = match root.get_mut("projects") {
+        Some(serde_json::Value::Object(m)) => m,
+        _ => return Ok((false, None)),
+    };
+
+    let removed_value = match projects_map.remove(original_path) {
+        Some(v) => v,
+        None => return Ok((false, None)),
+    };
+
+    let snap = write_clean_snapshot(snapshots_dir, sanitized_name, "config", &removed_value)?;
+    write_json_atomic(config_path, &root)?;
+    Ok((true, Some(snap)))
+}
+
+/// Drop lines from `~/.claude/history.jsonl` whose `project` field
+/// equals `original_path`. Matching lines are written to a dropped-lines
+/// snapshot so they can be recovered if needed. Atomic replace of the
+/// history file. Unparseable lines are preserved verbatim (defensive:
+/// history is append-only and we don't want to corrupt a line we don't
+/// understand).
+fn remove_history_lines_for_path(
+    history_path: &Path,
+    snapshots_dir: &Path,
+    original_path: &str,
+    sanitized_name: &str,
+) -> Result<(usize, Option<PathBuf>), ProjectError> {
+    use std::io::{BufRead, BufReader, BufWriter, Write};
+
+    let file = fs::File::open(history_path).map_err(ProjectError::Io)?;
+    let reader = BufReader::new(file);
+
+    let parent = history_path.parent().unwrap_or_else(|| Path::new("."));
+    let tmp = tempfile::NamedTempFile::new_in(parent).map_err(ProjectError::Io)?;
+    let mut writer = BufWriter::new(&tmp);
+
+    let mut dropped: Vec<String> = Vec::new();
+
+    // Pre-filter by a cheap substring check — the full JSON-escaped
+    // form of original_path — before parsing, to avoid serde cost on
+    // lines that don't reference it at all.
+    let needle_owned = serde_json::to_string(original_path)
+        .unwrap_or_else(|_| format!("\"{original_path}\""));
+    let needle = needle_owned.trim_matches('"');
+
+    for line in reader.lines() {
+        let line = line.map_err(ProjectError::Io)?;
+        let mut keep = true;
+        if line.contains(needle) {
+            if let Ok(entry) = serde_json::from_str::<serde_json::Value>(&line) {
+                if entry.get("project").and_then(|v| v.as_str()) == Some(original_path) {
+                    keep = false;
+                }
+            }
+        }
+        if keep {
+            writeln!(writer, "{line}").map_err(ProjectError::Io)?;
+        } else {
+            dropped.push(line);
+        }
+    }
+
+    drop(writer);
+    if dropped.is_empty() {
+        // No-op: NamedTempFile is dropped, the original stays byte-for-
+        // byte untouched — preserves mtime for observability tools
+        // watching history.jsonl.
+        return Ok((0, None));
+    }
+
+    tmp.persist(history_path).map_err(|e| ProjectError::Io(e.error))?;
+
+    let count = dropped.len();
+    let payload = serde_json::Value::Array(
+        dropped.into_iter().map(serde_json::Value::String).collect(),
+    );
+    let snap = write_clean_snapshot(snapshots_dir, sanitized_name, "history", &payload)?;
+    Ok((count, Some(snap)))
+}
+
+/// Remove claudepot-owned artifacts keyed on the orphan's sanitized
+/// name:
+///   * snapshots at `<snapshots_dir>/<ts>-<san>-<phase>.<ext>`
+///   * abandoned journal sidecars at `<journals_dir>/*.abandoned.json`
+///     whose body references `<san>` as `old_san` or `new_san`
+/// Live journals are NEVER touched — the pending-journal gate in the
+/// CLI ensures this function is only reached when no journals are
+/// in-flight.
+///
+/// Returns the count of files removed.
+fn remove_claudepot_artifacts(
+    snapshots_dir: &Path,
+    journals_dir: &Path,
+    sanitized_name: &str,
+) -> usize {
+    let mut removed = 0;
+
+    // Snapshots. Naming convention from `project.rs::snapshot_phase`
+    // and `project_config_rewrite::write_snapshot`:
+    //   `<ts>-<safe_san>-<phase>.snap|json`
+    // Match by embedded `-<san>-`. `clean_orphans`'s own config/history
+    // snapshots are created with `-clean-<kind>.json` suffixes which
+    // also match this pattern and should be retained — exclude them
+    // explicitly so we don't eat our own recovery artifact.
+    if snapshots_dir.exists() {
+        let needle = format!("-{sanitized_name}-");
+        let skip_suffixes: &[&str] = &["-clean-config.json", "-clean-history.json"];
+        if let Ok(entries) = fs::read_dir(snapshots_dir) {
+            for e in entries.flatten() {
+                let name = e.file_name().to_string_lossy().to_string();
+                if !name.contains(&needle) {
+                    continue;
+                }
+                if skip_suffixes.iter().any(|s| name.ends_with(s)) {
+                    continue;
+                }
+                if fs::remove_file(e.path()).is_ok() {
+                    removed += 1;
+                }
             }
         }
     }
 
-    Ok((result, orphans))
+    // Abandoned journal sidecars. An in-flight journal (no sidecar)
+    // would have blocked the CLI before we got here, so we only expect
+    // `*.abandoned.json` files at this point.
+    if journals_dir.exists() {
+        if let Ok(entries) = fs::read_dir(journals_dir) {
+            for e in entries.flatten() {
+                let name = e.file_name().to_string_lossy().to_string();
+                if !name.ends_with(".abandoned.json") {
+                    continue;
+                }
+                let path = e.path();
+                let Ok(contents) = fs::read_to_string(&path) else {
+                    continue;
+                };
+                let Ok(body) = serde_json::from_str::<serde_json::Value>(&contents) else {
+                    continue;
+                };
+                let old_san = body.get("old_san").and_then(|v| v.as_str()).unwrap_or("");
+                let new_san = body.get("new_san").and_then(|v| v.as_str()).unwrap_or("");
+                if old_san == sanitized_name || new_san == sanitized_name {
+                    // Also remove the original journal alongside the
+                    // sidecar, if it still exists.
+                    let stem = path
+                        .file_name()
+                        .and_then(|n| n.to_str())
+                        .and_then(|n| n.strip_suffix(".abandoned.json"));
+                    if let Some(stem) = stem {
+                        let journal_path = journals_dir.join(format!("{stem}.json"));
+                        if fs::remove_file(&journal_path).is_ok() {
+                            removed += 1;
+                        }
+                    }
+                    if fs::remove_file(&path).is_ok() {
+                        removed += 1;
+                    }
+                }
+            }
+        }
+    }
+
+    removed
+}
+
+/// Write a cleanup-side snapshot. Filename:
+/// `<ts>-<safe_san>-clean-<kind>.json`. Mode 0600 on Unix because
+/// snapshots can contain project trust flags / MCP tokens / history.
+fn write_clean_snapshot(
+    snapshots_dir: &Path,
+    sanitized_name: &str,
+    kind: &str,
+    value: &serde_json::Value,
+) -> Result<PathBuf, ProjectError> {
+    fs::create_dir_all(snapshots_dir).map_err(ProjectError::Io)?;
+    let safe_san: String = sanitized_name
+        .chars()
+        .map(|c| if c.is_ascii_alphanumeric() || c == '-' { c } else { '_' })
+        .collect();
+    let ts = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_millis())
+        .unwrap_or(0);
+    let path = snapshots_dir.join(format!("{ts}-{safe_san}-clean-{kind}.json"));
+    let json = serde_json::to_string_pretty(value)
+        .map_err(|e| ProjectError::Io(std::io::Error::other(e.to_string())))?;
+    fs::write(&path, json).map_err(ProjectError::Io)?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let _ = fs::set_permissions(&path, fs::Permissions::from_mode(0o600));
+    }
+    Ok(path)
+}
+
+/// Atomic replace of a JSON file, preserving mode when possible.
+fn write_json_atomic(path: &Path, value: &serde_json::Value) -> Result<(), ProjectError> {
+    use std::io::Write;
+    let parent = path.parent().unwrap_or_else(|| Path::new("."));
+    let json = serde_json::to_string_pretty(value)
+        .map_err(|e| ProjectError::Io(std::io::Error::other(e.to_string())))?;
+    let mut tmp = tempfile::NamedTempFile::new_in(parent).map_err(ProjectError::Io)?;
+    tmp.write_all(json.as_bytes()).map_err(ProjectError::Io)?;
+    tmp.write_all(b"\n").map_err(ProjectError::Io)?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        if let Ok(meta) = fs::metadata(path) {
+            let mode = meta.permissions().mode();
+            let _ = fs::set_permissions(tmp.path(), fs::Permissions::from_mode(mode));
+        }
+    }
+    tmp.persist(path).map_err(|e| ProjectError::Io(e.error))?;
+    Ok(())
 }
 
 // ---------------------------------------------------------------------------
@@ -1472,7 +1869,7 @@ mod tests {
         fs::create_dir(&orphan).unwrap();
         fs::write(orphan.join("session.jsonl"), "{}").unwrap();
 
-        let (result, orphans) = clean_orphans(tmp.path(), true).unwrap();
+        let (result, orphans) = clean_orphans(tmp.path(), None, None, None, true).unwrap();
         assert_eq!(result.orphans_found, 1);
         assert_eq!(result.orphans_removed, 0); // dry run
         assert_eq!(orphans.len(), 1);
@@ -1490,10 +1887,286 @@ mod tests {
         fs::create_dir(&orphan).unwrap();
         fs::write(orphan.join("session.jsonl"), "{}").unwrap();
 
-        let (result, _) = clean_orphans(tmp.path(), false).unwrap();
+        let (result, _) = clean_orphans(tmp.path(), None, None, None, false).unwrap();
         assert_eq!(result.orphans_found, 1);
         assert_eq!(result.orphans_removed, 1);
         assert!(!orphan.exists());
+    }
+
+    // ----- clean edge cases added for fixes 1-6, 9 -----
+
+    /// Fix #1: paths under an absent `/Volumes/<drive>` mount point
+    /// must NOT be flagged orphan. The drive might be unplugged; the
+    /// data could still be present once remounted.
+    #[test]
+    #[cfg(unix)]
+    fn test_clean_skips_unreachable_mount_prefix() {
+        use crate::project_sanitize::sanitize_path;
+        // Pick a `/Volumes/<name>` that definitely doesn't exist on any
+        // test host. Anything unique is fine; macOS has an empty or
+        // near-empty `/Volumes`, Linux has no such root and the prefix
+        // is simply not matched.
+        let fake_source = "/Volumes/claudepot-test-never-exists-xyz/proj";
+        let san = sanitize_path(fake_source);
+
+        let tmp = tempfile::tempdir().unwrap();
+        let projects_dir = tmp.path().join("projects");
+        fs::create_dir(&projects_dir).unwrap();
+        let dir = projects_dir.join(&san);
+        fs::create_dir(&dir).unwrap();
+        // Put a real session.jsonl with the authoritative cwd so the
+        // recovered-cwd path is taken (same code path as a real CC dir).
+        fs::write(
+            dir.join("session.jsonl"),
+            format!("{{\"cwd\":\"{fake_source}\",\"type\":\"user\"}}\n"),
+        )
+        .unwrap();
+
+        let (result, orphans) = clean_orphans(tmp.path(), None, None, None, true).unwrap();
+
+        #[cfg(target_os = "macos")]
+        {
+            // On macOS, `/Volumes/claudepot-test-never-exists-xyz`
+            // mount point doesn't exist → unreachable → NOT orphan.
+            assert_eq!(result.orphans_found, 0);
+            assert_eq!(result.unreachable_skipped, 1);
+            let info = orphans
+                .iter()
+                .find(|p| p.sanitized_name == san)
+                .or_else(|| None);
+            // (orphans is the orphan list, so the unreachable project
+            // won't appear there; that's by design.)
+            assert!(info.is_none());
+        }
+        #[cfg(not(target_os = "macos"))]
+        {
+            // On Linux, `/Volumes/...` isn't a mount prefix we detect
+            // (we use `/mnt`, `/media`, `/run/media`), so the path
+            // classification falls back to regular `try_exists`. That
+            // still returns Absent, so the project is orphan. This
+            // test just confirms no regression; the cross-platform
+            // parity of the unreachable probe is a separate concern.
+            let _ = (result, orphans);
+        }
+    }
+
+    /// Fix #4a: when an orphan whose cwd was recovered authoritatively
+    /// is cleaned, any matching `~/.claude.json` `projects[<path>]`
+    /// entry must be removed with a snapshot written for recovery.
+    #[test]
+    fn test_clean_prunes_claude_json_entry_with_snapshot() {
+        use crate::project_sanitize::sanitize_path;
+        let tmp = tempfile::tempdir().unwrap();
+        let config_dir = tmp.path();
+        let projects_dir = config_dir.join("projects");
+        fs::create_dir(&projects_dir).unwrap();
+
+        // Orphan source path that we can safely assert doesn't exist.
+        let fake_source = tmp.path().join("deleted-workspace");
+        // DO NOT create `fake_source` — that's the whole point.
+        let fake_source_str = fake_source.to_string_lossy().to_string();
+        let san = sanitize_path(&fake_source_str);
+        let dir = projects_dir.join(&san);
+        fs::create_dir(&dir).unwrap();
+        fs::write(
+            dir.join("session.jsonl"),
+            format!("{{\"cwd\":\"{fake_source_str}\",\"type\":\"user\"}}\n"),
+        )
+        .unwrap();
+
+        // Seed ~/.claude.json with a matching entry.
+        let claude_json = tmp.path().join("claude.json");
+        fs::write(
+            &claude_json,
+            serde_json::to_string_pretty(&serde_json::json!({
+                "projects": {
+                    fake_source_str.clone(): {"trust": true, "allowedTools": ["Bash(git:*)"]},
+                    "/elsewhere/unrelated": {"trust": false}
+                },
+                "otherTop": 42
+            }))
+            .unwrap(),
+        )
+        .unwrap();
+
+        let snapshots = tmp.path().join("snaps");
+        let locks = tmp.path().join("locks");
+        let (result, _) = clean_orphans(
+            config_dir,
+            Some(claude_json.as_path()),
+            Some(snapshots.as_path()),
+            Some(locks.as_path()),
+            false,
+        )
+        .unwrap();
+
+        assert_eq!(result.orphans_removed, 1);
+        assert_eq!(result.claude_json_entries_removed, 1);
+        assert_eq!(result.snapshot_paths.len(), 1);
+
+        // Config entry gone, unrelated entries intact.
+        let after: serde_json::Value =
+            serde_json::from_str(&fs::read_to_string(&claude_json).unwrap()).unwrap();
+        assert!(after["projects"].get(&fake_source_str).is_none());
+        assert_eq!(
+            after["projects"]["/elsewhere/unrelated"]["trust"],
+            serde_json::json!(false)
+        );
+        assert_eq!(after["otherTop"], serde_json::json!(42));
+
+        // Snapshot captured the removed value.
+        let snap: serde_json::Value =
+            serde_json::from_str(&fs::read_to_string(&result.snapshot_paths[0]).unwrap())
+                .unwrap();
+        assert_eq!(snap["trust"], serde_json::json!(true));
+    }
+
+    /// Fix #4b: matching `history.jsonl` lines are removed and dropped
+    /// lines are captured in a snapshot so recovery is possible.
+    #[test]
+    fn test_clean_prunes_history_lines_with_snapshot() {
+        use crate::project_sanitize::sanitize_path;
+        let tmp = tempfile::tempdir().unwrap();
+        let config_dir = tmp.path();
+        let projects_dir = config_dir.join("projects");
+        fs::create_dir(&projects_dir).unwrap();
+
+        let fake_source = tmp.path().join("deleted-workspace2");
+        let fake_source_str = fake_source.to_string_lossy().to_string();
+        let san = sanitize_path(&fake_source_str);
+        let dir = projects_dir.join(&san);
+        fs::create_dir(&dir).unwrap();
+        fs::write(
+            dir.join("session.jsonl"),
+            format!("{{\"cwd\":\"{fake_source_str}\",\"type\":\"user\"}}\n"),
+        )
+        .unwrap();
+
+        // Seed history.jsonl with two lines for our orphan and one
+        // unrelated line.
+        let history = config_dir.join("history.jsonl");
+        let orphan_line_a = serde_json::json!({"display": "hello", "project": fake_source_str})
+            .to_string();
+        let orphan_line_b = serde_json::json!({"display": "again", "project": fake_source_str})
+            .to_string();
+        let other_line =
+            serde_json::json!({"display": "keep me", "project": "/other/project"}).to_string();
+        fs::write(
+            &history,
+            format!("{orphan_line_a}\n{orphan_line_b}\n{other_line}\n"),
+        )
+        .unwrap();
+
+        let snapshots = tmp.path().join("snaps");
+        let locks = tmp.path().join("locks");
+        let (result, _) = clean_orphans(
+            config_dir,
+            None, // skip claude.json to keep this test focused
+            Some(snapshots.as_path()),
+            Some(locks.as_path()),
+            false,
+        )
+        .unwrap();
+
+        assert_eq!(result.orphans_removed, 1);
+        assert_eq!(result.history_lines_removed, 2);
+
+        let after = fs::read_to_string(&history).unwrap();
+        assert!(!after.contains(&fake_source_str));
+        assert!(after.contains("/other/project"));
+
+        // Snapshot is a JSON array containing the two dropped lines.
+        let snap_path = result
+            .snapshot_paths
+            .iter()
+            .find(|p| p.to_string_lossy().contains("-clean-history"))
+            .expect("history snapshot should be present");
+        let snap: serde_json::Value =
+            serde_json::from_str(&fs::read_to_string(snap_path).unwrap()).unwrap();
+        assert_eq!(snap.as_array().unwrap().len(), 2);
+    }
+
+    /// Fix #6: a live `__clean__` lock must block a second call from
+    /// the same process (same-host + same pid = live).
+    #[test]
+    fn test_clean_takes_exclusive_lock() {
+        let tmp = tempfile::tempdir().unwrap();
+        let projects_dir = tmp.path().join("projects");
+        fs::create_dir(&projects_dir).unwrap();
+        let locks = tmp.path().join("locks");
+
+        // Acquire the clean lock manually using the same key so we
+        // simulate an in-flight clean, then verify a second call
+        // refuses.
+        let (_g, _broken) = crate::project_lock::acquire(&locks, "__clean__").unwrap();
+
+        let err = clean_orphans(
+            tmp.path(),
+            None,
+            None,
+            Some(locks.as_path()),
+            false,
+        )
+        .unwrap_err();
+        assert!(matches!(err, ProjectError::Ambiguous(_)));
+    }
+
+    /// Fix #9: a truly empty CC project dir (no sessions, no memory,
+    /// under one FS block) should be cleaned even when the source
+    /// sanitized name doesn't roundtrip (so we can't be certain about
+    /// the source path). The dir is reclaimed; no sibling state is
+    /// rewritten (safest choice when original_path is ambiguous).
+    #[test]
+    fn test_clean_removes_empty_project_dir() {
+        let tmp = tempfile::tempdir().unwrap();
+        let projects_dir = tmp.path().join("projects");
+        fs::create_dir(&projects_dir).unwrap();
+
+        // Name that deliberately doesn't roundtrip cleanly (contains a
+        // hyphen that unsanitize would misread as a path separator).
+        let ambiguous = projects_dir.join("-some-ambiguous-name-that-never-was-a-path");
+        fs::create_dir(&ambiguous).unwrap();
+
+        // Also seed a claude.json and history.jsonl; both must be
+        // LEFT ALONE for empty-dir cleanup since original_path is
+        // not authoritative.
+        let claude_json = tmp.path().join("claude.json");
+        fs::write(
+            &claude_json,
+            r#"{"projects":{"/real":{"trust":true}}}"#,
+        )
+        .unwrap();
+
+        let locks = tmp.path().join("locks");
+        let snaps = tmp.path().join("snaps");
+        let (result, _) = clean_orphans(
+            tmp.path(),
+            Some(claude_json.as_path()),
+            Some(snaps.as_path()),
+            Some(locks.as_path()),
+            false,
+        )
+        .unwrap();
+
+        assert_eq!(result.orphans_found, 1);
+        assert_eq!(result.orphans_removed, 1);
+        assert!(!ambiguous.exists());
+        // No sibling state touched: claude.json still intact.
+        assert_eq!(result.claude_json_entries_removed, 0);
+        let after = fs::read_to_string(&claude_json).unwrap();
+        assert!(after.contains("/real"));
+    }
+
+    /// Fix #2: when `try_exists()` returns an Err (we simulate this
+    /// indirectly by checking the `PathReachability::Unreachable`
+    /// classification on a path whose ancestor is an absent mount
+    /// root), the project must NOT be cleaned. Covered above by the
+    /// mount-prefix test on macOS; this additional check exercises
+    /// the empty-path early return.
+    #[test]
+    fn test_reachability_empty_path_is_unreachable() {
+        use crate::project_helpers::{classify_reachability, PathReachability};
+        assert_eq!(classify_reachability(""), PathReachability::Unreachable);
     }
 
     #[test]

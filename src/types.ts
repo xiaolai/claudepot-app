@@ -97,6 +97,14 @@ export interface ProjectInfo {
   /** ms since epoch (pass to `new Date(ms)`), or null if never modified. */
   last_modified_ms: number | null;
   is_orphan: boolean;
+  /**
+   * True when we could definitively stat the source path. False for
+   * projects whose source lives under an unmounted volume / offline
+   * share / permission-denied ancestor — these are NEVER auto-cleaned.
+   */
+  is_reachable: boolean;
+  /** CC project dir has no sessions, no memory, minimal disk footprint. */
+  is_empty: boolean;
 }
 
 export interface SessionInfo {
