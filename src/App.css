@@ -1244,3 +1244,156 @@ button.danger.primary:hover:not(:disabled) {
   outline: 2px solid var(--accent);
   outline-offset: 2px;
 }
+
+/* ---------- repair action buttons ---------- */
+
+.repair-entry-actions {
+  display: flex;
+  gap: 6px;
+  padding-top: 8px;
+  border-top: 0.5px solid var(--border);
+  font-style: normal;
+}
+
+.repair-entry-actions button {
+  font-size: 12px;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+/* ---------- type-to-confirm block ---------- */
+
+.type-to-confirm {
+  padding: 8px 0;
+  display: grid;
+  gap: 4px;
+}
+
+.type-to-confirm input {
+  width: 100%;
+  padding: 6px 8px;
+  font-family: "SF Mono", SFMono-Regular, ui-monospace, Menlo, monospace;
+  font-size: 12px;
+  border: 0.5px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg);
+  color: var(--text);
+}
+
+.type-to-confirm input:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 0;
+}
+
+/* ---------- op progress modal ---------- */
+
+.op-progress-modal { width: 480px; }
+
+.phase-list {
+  list-style: none;
+  padding: 8px 0;
+  margin: 0;
+  display: grid;
+  gap: 4px;
+}
+
+.phase {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  padding: 4px 8px;
+  border-radius: 4px;
+}
+
+.phase-tag {
+  font-family: "SF Mono", SFMono-Regular, ui-monospace, Menlo, monospace;
+  font-size: 11px;
+  font-weight: 600;
+  width: 24px;
+  color: var(--muted);
+}
+
+.phase-label {
+  font-size: 12px;
+  color: var(--muted);
+  text-transform: capitalize;
+}
+
+.phase-pending { opacity: 0.5; }
+.phase-running { background: var(--accent-weak); }
+.phase-running .phase-label { color: var(--accent); font-weight: 500; }
+.phase-complete .phase-label { color: var(--ok, var(--muted)); }
+.phase-error { background: var(--bad-weak, transparent); }
+.phase-error .phase-label { color: var(--bad); font-weight: 600; }
+
+.op-terminal {
+  padding: 10px 12px;
+  border-radius: 6px;
+  margin: 8px 0;
+}
+.op-terminal.ok { background: var(--ok-weak, transparent); color: var(--ok); }
+.op-terminal.bad { background: var(--bad-weak, transparent); color: var(--bad); }
+
+/* ---------- running-op strip ---------- */
+
+.running-op-strip {
+  position: fixed;
+  bottom: 8px;
+  left: 56px;  /* 48 rail + 8 gap */
+  right: 8px;
+  z-index: 9;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  pointer-events: none;
+}
+
+.running-op-strip-item {
+  pointer-events: auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 12px;
+  background: rgba(0, 0, 0, 0.8);
+  color: white;
+  border: 0;
+  border-radius: 999px;
+  font-size: 12px;
+  cursor: default;
+  backdrop-filter: blur(10px);
+}
+
+.running-op-spinner {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--accent);
+  animation: running-op-pulse 1.2s ease-in-out infinite;
+}
+
+@keyframes running-op-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.3; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .running-op-spinner { animation: none; }
+}
+
+/* ---------- inline toast (repair view) ---------- */
+
+.inline-toast {
+  position: fixed;
+  top: 60px;
+  left: 50%;
+  transform: translateX(-50%);
+  padding: 8px 14px;
+  background: rgba(0, 0, 0, 0.8);
+  color: white;
+  font-size: 12px;
+  border-radius: 999px;
+  cursor: default;
+  backdrop-filter: blur(10px);
+  z-index: 20;
+}
