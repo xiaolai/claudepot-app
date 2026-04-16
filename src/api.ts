@@ -65,6 +65,17 @@ export const api = {
    */
   projectMoveDryRun: (args: MoveArgs) =>
     invoke<DryRunPlan>("project_move_dry_run", { args }),
+  /**
+   * Kick off an actual rename in the background. Returns the op_id;
+   * subscribe to `op-progress::<op_id>` for phase events and call
+   * `projectMoveStatus(opId)` to fetch the structured result once
+   * the terminal event fires.
+   */
+  projectMoveStart: (args: MoveArgs) =>
+    invoke<string>("project_move_start", { args }),
+  /** Poll current state of an in-flight move. null if op_id unknown. */
+  projectMoveStatus: (opId: string) =>
+    invoke<RunningOpInfo | null>("project_move_status", { opId }),
 
   // ---------- Repair (read-only) ----------
   /** Every journal on disk with its classified status. Includes abandoned. */
