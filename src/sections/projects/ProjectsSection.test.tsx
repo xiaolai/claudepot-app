@@ -7,29 +7,58 @@ beforeEach(() => {
   localStorage.clear();
 });
 
+const summary = (p: number, s: number, r = 0) => ({
+  pending: p,
+  stale: s,
+  running: r,
+});
+
 describe("PendingJournalsBanner", () => {
-  it("renders nothing when count is zero", () => {
+  it("renders nothing when total is zero", () => {
     const { container } = render(
-      <PendingJournalsBanner count={0} onOpen={() => {}} />,
+      <PendingJournalsBanner summary={summary(0, 0)} onOpen={() => {}} />,
     );
     expect(container.firstChild).toBeNull();
   });
 
-  it("renders singular label for count=1", () => {
-    render(<PendingJournalsBanner count={1} onOpen={() => {}} />);
+  it("renders singular label for total=1", () => {
+    render(
+      <PendingJournalsBanner summary={summary(1, 0)} onOpen={() => {}} />,
+    );
     expect(screen.getByText(/1 pending rename journal/)).toBeInTheDocument();
   });
 
-  it("renders plural label for count>1", () => {
-    render(<PendingJournalsBanner count={3} onOpen={() => {}} />);
+  it("renders plural label for total>1", () => {
+    render(
+      <PendingJournalsBanner summary={summary(1, 2)} onOpen={() => {}} />,
+    );
     expect(screen.getByText(/3 pending rename journals/)).toBeInTheDocument();
+  });
+
+  it("adds .stale modifier when any stale entry exists", () => {
+    render(
+      <PendingJournalsBanner summary={summary(0, 1)} onOpen={() => {}} />,
+    );
+    const btn = screen.getByRole("button");
+    expect(btn.className).toContain("stale");
+  });
+
+  it("uses neutral tone when only pending entries exist", () => {
+    render(
+      <PendingJournalsBanner summary={summary(3, 0)} onOpen={() => {}} />,
+    );
+    const btn = screen.getByRole("button");
+    expect(btn.className).not.toContain("stale");
   });
 
   it("calls onOpen when clicked", async () => {
     const user = userEvent.setup();
     let opened = false;
     render(
-      <PendingJournalsBanner count={2} onOpen={() => { opened = true; }} />,
+      <PendingJournalsBanner
+        summary={summary(2, 0)}
+        onOpen={() => { opened = true; }}
+      />,
     );
     await user.click(screen.getByRole("button"));
     expect(opened).toBe(true);
@@ -117,7 +146,10 @@ describe("usePendingJournals", () => {
     const { vi } = await import("vitest");
     vi.resetModules();
     vi.doMock("../../api", () => ({
-      api: { repairPendingCount: () => Promise.resolve(getNext()) },
+      api: {
+        repairStatusSummary: () =>
+          Promise.resolve({ pending: getNext(), stale: 0, running: 0 }),
+      },
     }));
     const { usePendingJournals } = await import("../../hooks/usePendingJournals");
 
