@@ -111,8 +111,13 @@ describe("ProjectsList", () => {
     const unreachableChip = screen.getByRole("tab", { name: /Unreachable/ });
     expect(unreachableChip.textContent).toMatch(/1/);
 
+    // Non-selected chip with count=0 hides its count entirely — we
+    // don't want "Unreachable 0" and "Empty 0" visually competing
+    // with meaningful data. "All" always shows its total.
     const emptyChip = screen.getByRole("tab", { name: /Empty/ });
-    expect(emptyChip.textContent).toMatch(/0/);
+    expect(emptyChip.textContent).not.toMatch(/\d/);
+    const allChip = screen.getByRole("tab", { name: /All/ });
+    expect(allChip.textContent).toMatch(/4/);
   });
 
   it("invokes onFilterChange when a chip is clicked", async () => {

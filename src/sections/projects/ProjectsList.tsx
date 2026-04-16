@@ -1,5 +1,5 @@
 import { useMemo } from "react";
-import { Folder, Trash, Warning, WifiSlash } from "@phosphor-icons/react";
+import { Folder, Trash } from "@phosphor-icons/react";
 import type { ProjectInfo } from "../../types";
 import { classifyProject, type ProjectStatus } from "./projectStatus";
 
@@ -206,6 +206,9 @@ function FilterChip({
   onClick: (next: ProjectFilter) => void;
 }) {
   const selected = current === value;
+  // Zero counts on non-selected chips are noise — hide them. `All`
+  // always shows its total (that's its whole point).
+  const showCount = value === "all" || selected || count > 0;
   return (
     <button
       type="button"
@@ -215,35 +218,24 @@ function FilterChip({
       onClick={() => onClick(value)}
     >
       <span>{label}</span>
-      <span className="project-filter-count">{count}</span>
+      {showCount && <span className="project-filter-count">{count}</span>}
     </button>
   );
 }
 
+const STATUS_LABEL: Record<Exclude<ProjectStatus, "alive">, string> = {
+  orphan: "orphan — source dir missing",
+  unreachable: "unreachable — mount the source volume to re-check",
+  empty: "empty — CC project dir has no content",
+};
+
 function StatusBadge({ status }: { status: ProjectStatus }) {
   if (status === "alive") return null;
-  if (status === "orphan") {
-    return (
-      <Warning
-        className="project-status-icon orphan"
-        aria-label="orphan — source dir missing"
-      />
-    );
-  }
-  if (status === "unreachable") {
-    return (
-      <WifiSlash
-        className="project-status-icon unreachable"
-        aria-label="unreachable — mount the source volume to re-check"
-      />
-    );
-  }
-  // empty
   return (
     <span
-      className="project-status-dot empty"
-      aria-label="empty — CC project dir has no content"
-      title="empty — CC project dir has no content"
+      className={`project-status-dot ${status}`}
+      aria-label={STATUS_LABEL[status]}
+      title={STATUS_LABEL[status]}
     />
   );
 }

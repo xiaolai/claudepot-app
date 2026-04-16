@@ -1,11 +1,5 @@
 import { useEffect, useState } from "react";
-import {
-  Folder,
-  PencilSimple,
-  Warning,
-  WifiSlash,
-  CircleDashed,
-} from "@phosphor-icons/react";
+import { Folder, PencilSimple, WifiSlash } from "@phosphor-icons/react";
 import { api } from "../../api";
 import { CopyButton } from "../../components/CopyButton";
 import type { ProjectDetail as ProjectDetailData } from "../../types";
@@ -88,7 +82,7 @@ export function ProjectDetail({
               className="project-tag orphan"
               title="source directory does not exist"
             >
-              <Warning size={11} weight="bold" /> orphan
+              orphan
             </span>
           )}
           {status === "unreachable" && (
@@ -96,7 +90,7 @@ export function ProjectDetail({
               className="project-tag unreachable"
               title="source lives on an unmounted volume or permission-denied path"
             >
-              <WifiSlash size={11} weight="bold" /> unreachable
+              unreachable
             </span>
           )}
           {status === "empty" && (
@@ -104,7 +98,7 @@ export function ProjectDetail({
               className="project-tag empty"
               title="CC project dir has no sessions or memory files"
             >
-              <CircleDashed size={11} weight="bold" /> empty
+              empty
             </span>
           )}
         </div>
