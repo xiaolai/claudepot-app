@@ -754,6 +754,36 @@ pub fn clean_orphans(
     locks_dir: Option<&Path>,
     dry_run: bool,
 ) -> Result<(CleanResult, Vec<ProjectInfo>), ProjectError> {
+    clean_orphans_with_progress(
+        config_dir,
+        claude_json_path,
+        snapshots_dir,
+        locks_dir,
+        dry_run,
+        &crate::project_progress::NoopSink,
+    )
+}
+
+/// Progress-emitting variant of `clean_orphans`. Phases:
+///   * `batch-sibling` — running / complete after ~/.claude.json and
+///     history.jsonl are rewritten in one pass each. sub_progress
+///     reports (0, 2) → (1, 2) → (2, 2) as each file is touched.
+///   * `remove-dirs` — running / complete around the per-orphan
+///     remove_dir_all loop. sub_progress reports (done, total) so the
+///     UI can render a "N of M" counter.
+///
+/// The sink is free to drop events (e.g. `NoopSink`); the core never
+/// assumes the caller is subscribed.
+pub fn clean_orphans_with_progress(
+    config_dir: &Path,
+    claude_json_path: Option<&Path>,
+    snapshots_dir: Option<&Path>,
+    locks_dir: Option<&Path>,
+    dry_run: bool,
+    sink: &dyn crate::project_progress::ProgressSink,
+) -> Result<(CleanResult, Vec<ProjectInfo>), ProjectError> {
+    use crate::project_progress::PhaseStatus;
+
     let projects = list_projects(config_dir)?;
 
     let unreachable_skipped = projects.iter().filter(|p| !p.is_reachable).count();
@@ -770,8 +800,6 @@ pub fn clean_orphans(
         return Ok((result, orphans));
     }
 
-    // Resolve defaults for optional paths. Kept hermetic for tests by
-    // allowing callers to pass explicit scratch dirs.
     let snapshots_dir_owned: PathBuf = snapshots_dir
         .map(|p| p.to_path_buf())
         .unwrap_or_else(|| config_dir.join("claudepot").join("snapshots"));
@@ -779,22 +807,86 @@ pub fn clean_orphans(
         .map(|p| p.to_path_buf())
         .unwrap_or_else(|| config_dir.join("claudepot").join("locks"));
 
-    // Exclusive process-wide lock so two concurrent `claudepot project
-    // clean -y` invocations don't race on remove_dir_all + sibling-state
-    // rewrites. Honors the same stale-detection rules as `project move`.
     let (lock_guard, _broken) =
         crate::project_lock::acquire(&locks_dir_owned, CLEAN_LOCK_KEY)?;
 
-    for orphan in &orphans {
+    // Collect the set of authoritative source paths for orphans that
+    // are NOT empty. Empty-dir orphans are excluded from sibling
+    // rewrites: their `original_path` comes from the lossy
+    // `unsanitize_path` fallback, so acting on it risks deleting
+    // unrelated entries.
+    let authoritative_paths: Vec<String> = orphans
+        .iter()
+        .filter(|o| !o.is_empty)
+        .map(|o| o.original_path.clone())
+        .collect();
+
+    // Phase 1 — batch sibling-state rewrite. Single pass over each file
+    // removing every matching entry. Huge speedup vs the previous
+    // per-orphan loop, which re-read+rewrote history.jsonl N times
+    // (N passes × full file scan = O(N × size) I/O).
+    sink.phase("batch-sibling", PhaseStatus::Running);
+    sink.sub_progress("batch-sibling", 0, 2);
+
+    if !authoritative_paths.is_empty() {
+        if let Some(config_path) = claude_json_path {
+            match remove_claude_json_entries_batch(
+                config_path,
+                &snapshots_dir_owned,
+                &authoritative_paths,
+            ) {
+                Ok((removed, snap)) => {
+                    result.claude_json_entries_removed = removed;
+                    if let Some(p) = snap {
+                        result.snapshot_paths.push(p);
+                    }
+                }
+                Err(e) => {
+                    tracing::warn!(err = %e, "~/.claude.json batch prune failed; continuing");
+                }
+            }
+        }
+    }
+    sink.sub_progress("batch-sibling", 1, 2);
+
+    if !authoritative_paths.is_empty() {
+        let history_path = config_dir.join("history.jsonl");
+        if history_path.exists() {
+            match remove_history_lines_batch(
+                &history_path,
+                &snapshots_dir_owned,
+                &authoritative_paths,
+            ) {
+                Ok((removed, snap)) => {
+                    result.history_lines_removed = removed;
+                    if let Some(p) = snap {
+                        result.snapshot_paths.push(p);
+                    }
+                }
+                Err(e) => {
+                    tracing::warn!(err = %e, "history.jsonl batch prune failed; continuing");
+                }
+            }
+        }
+    }
+    sink.sub_progress("batch-sibling", 2, 2);
+    sink.phase("batch-sibling", PhaseStatus::Complete);
+
+    // Phase 2 — per-orphan CC-dir removal. Each step can be several
+    // hundred ms (remove_dir_all on a multi-GB tree), so we emit
+    // sub_progress after every one. Live-session and TOCTOU checks
+    // stay per-orphan.
+    let total = orphans.len();
+    sink.phase("remove-dirs", PhaseStatus::Running);
+    sink.sub_progress("remove-dirs", 0, total);
+
+    for (i, orphan) in orphans.iter().enumerate() {
         let dir = config_dir.join("projects").join(&orphan.sanitized_name);
         if !dir.exists() {
+            sink.sub_progress("remove-dirs", i + 1, total);
             continue;
         }
 
-        // TOCTOU re-check: the source could have been restored (mount
-        // re-attached, user copied back) between `list_projects` and
-        // now. For empty-dir orphans we intentionally don't re-check
-        // the source path — the dir is empty and reclaim is always OK.
         if !orphan.is_empty {
             let reachability = classify_reachability(&orphan.original_path);
             if reachability != PathReachability::Absent {
@@ -802,109 +894,54 @@ pub fn clean_orphans(
                     path = %orphan.original_path,
                     "skipping: source re-appeared or became unreachable since listing"
                 );
+                sink.sub_progress("remove-dirs", i + 1, total);
                 continue;
             }
         }
 
-        // Live-session guard: any lsof / process-scan hit inside the
-        // CC dir means CC (or something else holding the sessions
-        // open) is active. Deleting out from under it would corrupt
-        // the live session file on some platforms.
         if detect_live_session(&dir, &orphan.original_path, CLEAN_LIVE_HEARTBEAT_SECS) {
             tracing::warn!(
                 dir = ?dir,
                 "skipping: live session detected against orphan CC dir"
             );
             result.orphans_skipped_live += 1;
+            sink.sub_progress("remove-dirs", i + 1, total);
             continue;
         }
 
-        // 1. Sibling state first, while the CC dir still exists — the
-        //    original_path and sanitized_name are needed to find and
-        //    snapshot related entries. Only for authoritative orphans
-        //    (session-recovered cwd, i.e. not empty).
-        if !orphan.is_empty {
-            if let Some(config_path) = claude_json_path {
-                match remove_claude_json_entry(
-                    config_path,
-                    &snapshots_dir_owned,
-                    &orphan.original_path,
-                    &orphan.sanitized_name,
-                ) {
-                    Ok((removed, snap)) => {
-                        if removed {
-                            result.claude_json_entries_removed += 1;
-                        }
-                        if let Some(p) = snap {
-                            result.snapshot_paths.push(p);
-                        }
-                    }
-                    Err(e) => {
-                        tracing::warn!(err = %e, "~/.claude.json prune failed; continuing");
-                    }
-                }
-            }
-
-            let history_path = config_dir.join("history.jsonl");
-            if history_path.exists() {
-                match remove_history_lines_for_path(
-                    &history_path,
-                    &snapshots_dir_owned,
-                    &orphan.original_path,
-                    &orphan.sanitized_name,
-                ) {
-                    Ok((removed, snap)) => {
-                        result.history_lines_removed += removed;
-                        if let Some(p) = snap {
-                            result.snapshot_paths.push(p);
-                        }
-                    }
-                    Err(e) => {
-                        tracing::warn!(err = %e, "history.jsonl prune failed; continuing");
-                    }
-                }
-            }
-        }
-
-        // 2. Remove the CC dir itself. If this fails, the sibling
-        //    rewrites already ran — that's acceptable: a CC dir we
-        //    couldn't remove but whose config entry is gone is strictly
-        //    closer to clean than before. The user can re-run.
         let bytes = orphan.total_size_bytes;
         fs::remove_dir_all(&dir).map_err(ProjectError::Io)?;
         result.orphans_removed += 1;
         result.bytes_freed += bytes;
 
-        // 3. Claudepot-owned artifacts keyed on the sanitized name.
-        //    Runs AFTER the CC dir is gone so a mid-clean crash leaves
-        //    claudepot state pointing at a valid CC dir, never the
-        //    reverse.
         result.claudepot_artifacts_removed += remove_claudepot_artifacts(
             &snapshots_dir_owned,
             &config_dir.join("claudepot").join("journals"),
             &orphan.sanitized_name,
         );
+
+        sink.sub_progress("remove-dirs", i + 1, total);
     }
+    sink.phase("remove-dirs", PhaseStatus::Complete);
 
     lock_guard.release()?;
     Ok((result, orphans))
 }
 
-/// Remove `projects[<original_path>]` from `~/.claude.json`. Snapshots
-/// the pre-existing value to `<snapshots_dir>/<ts>-<sanitized>-clean-config.json`
-/// before deleting so the user can recover. Atomic replace.
+/// Batch: remove every `projects[<path>]` entry for the given list of
+/// paths in a single atomic read+write of `~/.claude.json`. Writes one
+/// consolidated snapshot of the removed map (keyed by path) so the
+/// user can recover any entry. Returns (count_removed, snapshot_path).
 ///
-/// Returns `(removed, snapshot_path)`. `removed=false` means the config
-/// file, the `projects` map, or the specific key was absent — each a
-/// benign no-op.
-fn remove_claude_json_entry(
+/// Preferred over calling `remove_claude_json_entry` in a loop — for
+/// N orphans we'd otherwise read+rewrite the whole config N times.
+fn remove_claude_json_entries_batch(
     config_path: &Path,
     snapshots_dir: &Path,
-    original_path: &str,
-    sanitized_name: &str,
-) -> Result<(bool, Option<PathBuf>), ProjectError> {
-    if !config_path.exists() {
-        return Ok((false, None));
+    paths: &[String],
+) -> Result<(usize, Option<PathBuf>), ProjectError> {
+    if !config_path.exists() || paths.is_empty() {
+        return Ok((0, None));
     }
 
     let contents = fs::read_to_string(config_path).map_err(ProjectError::Io)?;
@@ -919,32 +956,50 @@ fn remove_claude_json_entry(
 
     let projects_map = match root.get_mut("projects") {
         Some(serde_json::Value::Object(m)) => m,
-        _ => return Ok((false, None)),
+        _ => return Ok((0, None)),
     };
 
-    let removed_value = match projects_map.remove(original_path) {
-        Some(v) => v,
-        None => return Ok((false, None)),
-    };
+    let mut removed = serde_json::Map::new();
+    for p in paths {
+        if let Some(v) = projects_map.remove(p) {
+            removed.insert(p.clone(), v);
+        }
+    }
 
-    let snap = write_clean_snapshot(snapshots_dir, sanitized_name, "config", &removed_value)?;
+    if removed.is_empty() {
+        return Ok((0, None));
+    }
+
+    let count = removed.len();
+    let snap = write_clean_snapshot(
+        snapshots_dir,
+        "batch",
+        "config",
+        &serde_json::Value::Object(removed),
+    )?;
     write_json_atomic(config_path, &root)?;
-    Ok((true, Some(snap)))
+    Ok((count, Some(snap)))
 }
 
-/// Drop lines from `~/.claude/history.jsonl` whose `project` field
-/// equals `original_path`. Matching lines are written to a dropped-lines
-/// snapshot so they can be recovered if needed. Atomic replace of the
-/// history file. Unparseable lines are preserved verbatim (defensive:
-/// history is append-only and we don't want to corrupt a line we don't
-/// understand).
-fn remove_history_lines_for_path(
+/// Batch: drop every `history.jsonl` line whose `project` field matches
+/// any path in `paths`, in a SINGLE pass over the file. Writes one
+/// snapshot of all dropped lines. Returns (count_removed, snapshot_path).
+///
+/// Uses a `HashSet` lookup per line so per-line work stays O(1) in the
+/// number of target paths.
+fn remove_history_lines_batch(
     history_path: &Path,
     snapshots_dir: &Path,
-    original_path: &str,
-    sanitized_name: &str,
+    paths: &[String],
 ) -> Result<(usize, Option<PathBuf>), ProjectError> {
+    use std::collections::HashSet;
     use std::io::{BufRead, BufReader, BufWriter, Write};
+
+    if paths.is_empty() {
+        return Ok((0, None));
+    }
+
+    let targets: HashSet<&str> = paths.iter().map(String::as_str).collect();
 
     let file = fs::File::open(history_path).map_err(ProjectError::Io)?;
     let reader = BufReader::new(file);
@@ -955,20 +1010,18 @@ fn remove_history_lines_for_path(
 
     let mut dropped: Vec<String> = Vec::new();
 
-    // Pre-filter by a cheap substring check — the full JSON-escaped
-    // form of original_path — before parsing, to avoid serde cost on
-    // lines that don't reference it at all.
-    let needle_owned = serde_json::to_string(original_path)
-        .unwrap_or_else(|_| format!("\"{original_path}\""));
-    let needle = needle_owned.trim_matches('"');
-
     for line in reader.lines() {
         let line = line.map_err(ProjectError::Io)?;
         let mut keep = true;
-        if line.contains(needle) {
+        // Cheap pre-filter: skip the JSON parse unless the line carries
+        // the `"project":` key — otherwise it's a waste on every
+        // unrelated entry.
+        if line.contains("\"project\":") {
             if let Ok(entry) = serde_json::from_str::<serde_json::Value>(&line) {
-                if entry.get("project").and_then(|v| v.as_str()) == Some(original_path) {
-                    keep = false;
+                if let Some(p) = entry.get("project").and_then(|v| v.as_str()) {
+                    if targets.contains(p) {
+                        keep = false;
+                    }
                 }
             }
         }
@@ -981,9 +1034,6 @@ fn remove_history_lines_for_path(
 
     drop(writer);
     if dropped.is_empty() {
-        // No-op: NamedTempFile is dropped, the original stays byte-for-
-        // byte untouched — preserves mtime for observability tools
-        // watching history.jsonl.
         return Ok((0, None));
     }
 
@@ -993,7 +1043,7 @@ fn remove_history_lines_for_path(
     let payload = serde_json::Value::Array(
         dropped.into_iter().map(serde_json::Value::String).collect(),
     );
-    let snap = write_clean_snapshot(snapshots_dir, sanitized_name, "history", &payload)?;
+    let snap = write_clean_snapshot(snapshots_dir, "batch", "history", &payload)?;
     Ok((count, Some(snap)))
 }
 
@@ -2014,11 +2064,13 @@ mod tests {
         );
         assert_eq!(after["otherTop"], serde_json::json!(42));
 
-        // Snapshot captured the removed value.
+        // Snapshot captured the removed value. Batched snapshot
+        // shape is a map `{ <removed_path>: <value>, ... }` so all N
+        // dropped entries live in one file.
         let snap: serde_json::Value =
             serde_json::from_str(&fs::read_to_string(&result.snapshot_paths[0]).unwrap())
                 .unwrap();
-        assert_eq!(snap["trust"], serde_json::json!(true));
+        assert_eq!(snap[&fake_source_str]["trust"], serde_json::json!(true));
     }
 
     /// Fix #4b: matching `history.jsonl` lines are removed and dropped

@@ -5,7 +5,7 @@
 //! Errors become user-facing strings at this boundary.
 
 use crate::dto::{
-    AccountSummary, AccountUsageDto, AppStatus, CcIdentity, CleanPreviewDto, CleanResultDto,
+    AccountSummary, AccountUsageDto, AppStatus, CcIdentity, CleanPreviewDto,
     DryRunPlanDto, JournalEntryDto, MoveArgsDto, ProjectDetailDto, ProjectInfoDto,
     RegisterOutcome, RemoveOutcome,
 };
@@ -577,16 +577,22 @@ pub fn project_clean_preview() -> Result<CleanPreviewDto, String> {
     })
 }
 
-/// Execute the clean. Gated on no pending rename journals. Acquires a
-/// process-wide `__clean__` lock inside `clean_orphans` so two
-/// concurrent GUI invocations can't race; the second sees an
-/// Ambiguous error surfaced as a plain string to the UI.
+/// Kick off a clean in the background, returning the op_id the UI
+/// subscribes to on `op-progress::<op_id>`. Gated on no pending rename
+/// journals; the `__clean__` lock is acquired inside `clean_orphans`
+/// so two concurrent starts can't race (the loser errors out via the
+/// terminal op event).
+///
+/// Replaces the earlier synchronous `project_clean_execute` which
+/// blocked the Tauri worker and left the UI stuck without progress
+/// for multi-GB cleans.
 #[tauri::command]
-pub fn project_clean_execute() -> Result<CleanResultDto, String> {
+pub fn project_clean_start(
+    app: AppHandle,
+    ops: State<RunningOps>,
+) -> Result<String, String> {
     let (journals, locks, snaps) = claudepot_home_dirs();
 
-    // Mirror the CLI gate. Abandoned journals are filtered out by
-    // list_actionable — those are user-dismissed and shouldn't block.
     let actionable =
         project_repair::list_actionable(&journals, &locks, JOURNAL_NAG_THRESHOLD_SECS)
             .map_err(|e| format!("journal check failed: {e}"))?;
@@ -597,19 +603,86 @@ pub fn project_clean_execute() -> Result<CleanResultDto, String> {
         ));
     }
 
+    let op_id = new_op_id();
+    let info = RunningOpInfo {
+        op_id: op_id.clone(),
+        kind: OpKind::CleanProjects,
+        old_path: String::new(),
+        new_path: String::new(),
+        current_phase: None,
+        sub_progress: None,
+        status: OpStatus::Running,
+        started_unix_secs: now_unix_secs(),
+        last_error: None,
+        move_result: None,
+        clean_result: None,
+        failed_journal_id: None,
+    };
+    ops.insert(info);
+
+    let app_for_task = app.clone();
+    let ops_for_task = ops.inner().clone();
+    let op_id_for_task = op_id.clone();
     let cfg = paths::claude_config_dir();
     let claude_json = dirs::home_dir().map(|h| h.join(".claude.json"));
+    let snaps_for_task = snaps;
+    let locks_for_task = locks;
 
-    let (result, _orphans) = project::clean_orphans(
-        &cfg,
-        claude_json.as_deref(),
-        Some(snaps.as_path()),
-        Some(locks.as_path()),
-        false, // perform
-    )
-    .map_err(|e| format!("clean failed: {e}"))?;
+    // std::thread::spawn, not tokio::task::spawn_blocking — Tauri's
+    // sync #[command] runs outside a tokio runtime context on at least
+    // some dispatch paths, and `spawn_blocking` panics with "no reactor
+    // running" there. A plain OS thread is fine; our work is blocking
+    // I/O (fs scans, remove_dir_all) with no await points anyway.
+    std::thread::spawn(move || {
+        let sink = crate::ops::TauriProgressSink {
+            app: app_for_task.clone(),
+            op_id: op_id_for_task.clone(),
+            ops: ops_for_task.clone(),
+        };
+        let result = project::clean_orphans_with_progress(
+            &cfg,
+            claude_json.as_deref(),
+            Some(snaps_for_task.as_path()),
+            Some(locks_for_task.as_path()),
+            false,
+            &sink,
+        );
+        match result {
+            Ok((clean, _orphans)) => {
+                let summary = crate::ops::CleanResultSummary::from_core(&clean);
+                ops_for_task.update(&op_id_for_task, |op| {
+                    op.clean_result = Some(summary);
+                });
+                crate::ops::emit_terminal(
+                    &app_for_task,
+                    &ops_for_task,
+                    &op_id_for_task,
+                    None,
+                );
+            }
+            Err(e) => {
+                crate::ops::emit_terminal(
+                    &app_for_task,
+                    &ops_for_task,
+                    &op_id_for_task,
+                    Some(format!("clean failed: {e}")),
+                );
+            }
+        }
+    });
 
-    Ok(CleanResultDto::from(&result))
+    Ok(op_id)
+}
+
+/// Fetch the current state of an in-flight clean. Mirrors
+/// `project_move_status`. Returns `None` after the post-terminal
+/// grace window expires.
+#[tauri::command]
+pub fn project_clean_status(
+    op_id: String,
+    ops: State<RunningOps>,
+) -> Result<Option<RunningOpInfo>, String> {
+    Ok(ops.get(&op_id))
 }
 
 #[tauri::command]
@@ -727,6 +800,7 @@ fn spawn_repair_op(
         started_unix_secs: now_unix_secs(),
         last_error: None,
         move_result: None,
+        clean_result: None,
         failed_journal_id: None,
     };
     ops.insert(info);
@@ -735,7 +809,8 @@ fn spawn_repair_op(
     let ops_for_task = ops.clone();
     let op_id_for_task = op_id.clone();
     let old_path_for_task = entry.journal.old_path.clone();
-    tokio::task::spawn_blocking(move || {
+    // See `project_clean_start` for why this is std::thread::spawn.
+    std::thread::spawn(move || {
         let sink = TauriProgressSink {
             app: app_for_task.clone(),
             op_id: op_id_for_task.clone(),
@@ -751,7 +826,9 @@ fn spawn_repair_op(
             OpKind::RepairRollback => {
                 project_repair::rollback(&entry, cfg, claude_json, snaps, &sink)
             }
-            OpKind::MoveProject => unreachable!("wrong spawn path"),
+            OpKind::MoveProject | OpKind::CleanProjects => {
+                unreachable!("wrong spawn path")
+            }
         };
         finalize_op(
             &app_for_task,
@@ -848,6 +925,7 @@ pub fn project_move_start(
         started_unix_secs: now_unix_secs(),
         last_error: None,
         move_result: None,
+        clean_result: None,
         failed_journal_id: None,
     };
     ops.insert(info);
@@ -856,7 +934,9 @@ pub fn project_move_start(
     let ops_for_task = ops.inner().clone();
     let op_id_for_task = op_id.clone();
     let old_path_for_task = args.old_path.clone();
-    tokio::task::spawn_blocking(move || {
+    // See `project_clean_start` for why this is std::thread::spawn
+    // rather than tokio::task::spawn_blocking.
+    std::thread::spawn(move || {
         let sink = TauriProgressSink {
             app: app_for_task.clone(),
             op_id: op_id_for_task.clone(),

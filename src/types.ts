@@ -208,7 +208,11 @@ export interface JournalFlags {
 export type JournalStatus = "running" | "pending" | "stale" | "abandoned";
 
 /** Kind of long-running op currently tracked by the backend. */
-export type OpKind = "repair_resume" | "repair_rollback" | "move_project";
+export type OpKind =
+  | "repair_resume"
+  | "repair_rollback"
+  | "move_project"
+  | "clean_projects";
 
 export type OpStatus = "running" | "complete" | "error";
 
@@ -237,6 +241,8 @@ export interface RunningOpInfo {
   started_unix_secs: number;
   last_error: string | null;
   move_result: MoveResultSummary | null;
+  /** Populated on successful CleanProjects. Mirrors `CleanResult`. */
+  clean_result: CleanResult | null;
   /** Journal id of a failed move so the UI can deep-link to Repair. */
   failed_journal_id: string | null;
 }
