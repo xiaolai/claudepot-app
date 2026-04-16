@@ -32,6 +32,12 @@ pub enum SwapError {
         actual_email: String,
     },
 
+    #[error(
+        "a Claude Code process is running — its token refresh will overwrite this swap. \
+         Quit Claude Code first, or pass --force to proceed anyway."
+    )]
+    LiveSessionConflict,
+
     #[error("identity verification failed: {0}")]
     IdentityVerificationFailed(String),
 }

@@ -51,7 +51,7 @@ pub fn status(ctx: &AppContext) -> Result<()> {
     Ok(())
 }
 
-pub async fn use_account(ctx: &AppContext, email_input: &str, no_refresh: bool) -> Result<()> {
+pub async fn use_account(ctx: &AppContext, email_input: &str, no_refresh: bool, force: bool) -> Result<()> {
     use claudepot_core::cli_backend;
     use claudepot_core::resolve::resolve_email;
 
@@ -84,16 +84,19 @@ pub async fn use_account(ctx: &AppContext, email_input: &str, no_refresh: bool) 
     ctx.info(&format!("Switching CLI to {email}..."));
     let refresher = cli_backend::swap::DefaultRefresher;
     let fetcher = cli_backend::swap::DefaultProfileFetcher;
-    cli_backend::swap::switch(
-        &ctx.store,
-        current_uuid,
-        target.uuid,
-        platform.as_ref(),
-        !no_refresh,
-        &refresher,
-        &fetcher,
-    )
-    .await?;
+    if force {
+        cli_backend::swap::switch_force(
+            &ctx.store, current_uuid, target.uuid,
+            platform.as_ref(), !no_refresh, &refresher, &fetcher,
+        )
+        .await?;
+    } else {
+        cli_backend::swap::switch(
+            &ctx.store, current_uuid, target.uuid,
+            platform.as_ref(), !no_refresh, &refresher, &fetcher,
+        )
+        .await?;
+    }
 
     let from = current_uuid
         .and_then(|u| ctx.store.find_by_uuid(u).ok().flatten())

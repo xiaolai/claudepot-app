@@ -183,6 +183,10 @@ enum CliAction {
         /// Skip automatic token refresh during switch
         #[arg(long)]
         no_refresh: bool,
+        /// Proceed even if a Claude Code process is running (its token
+        /// refresh may silently revert the swap)
+        #[arg(long)]
+        force: bool,
     },
     /// Clear CC credentials (log out)
     Clear,
@@ -271,8 +275,8 @@ async fn main() -> Result<()> {
         },
         Commands::Cli { action } => match action {
             CliAction::Status => commands::cli_ops::status(&ctx)?,
-            CliAction::Use { email, no_refresh } => {
-                commands::cli_ops::use_account(&ctx, &email, no_refresh).await?
+            CliAction::Use { email, no_refresh, force } => {
+                commands::cli_ops::use_account(&ctx, &email, no_refresh, force).await?
             }
             CliAction::Clear => commands::cli_ops::clear(&ctx).await?,
             CliAction::Run {
