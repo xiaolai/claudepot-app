@@ -3,7 +3,7 @@ import { FolderOpen, Warning } from "@phosphor-icons/react";
 import { open as openDialog } from "@tauri-apps/plugin-dialog";
 import { api } from "../../api";
 import { useFocusTrap } from "../../hooks/useFocusTrap";
-import type { DryRunPlan, MoveArgs } from "../../types";
+import { DRY_RUN_SUPERSEDED, type DryRunPlan, type MoveArgs } from "../../types";
 
 const DEBOUNCE_MS = 300;
 
@@ -80,15 +80,23 @@ export function RenameProjectModal({
     }
     const myToken = ++reqToken.current;
     setPreview({ kind: "loading" });
+    // Send the token to the backend so it can short-circuit stale work
+    // on its side too (plan §7.1). Monotonic + shared process-wide is
+    // fine — the backend's DryRunRegistry uses fetch_max.
     api
-      .projectMoveDryRun(args)
+      .projectMoveDryRun({ ...args, cancelToken: myToken })
       .then((plan) => {
         if (myToken !== reqToken.current) return; // stale
         setPreview({ kind: "ok", plan });
       })
       .catch((e) => {
         if (myToken !== reqToken.current) return;
-        setPreview({ kind: "error", message: String(e) });
+        const msg = String(e);
+        // Backend sentinel: it noticed we were superseded and bailed.
+        // Leave the preview state as-is so the UI doesn't flash an
+        // error — a newer call is already in flight.
+        if (msg.includes(DRY_RUN_SUPERSEDED)) return;
+        setPreview({ kind: "error", message: msg });
       });
   }, [args, newPath]);
 

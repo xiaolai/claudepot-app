@@ -135,7 +135,26 @@ export interface MoveArgs {
   overwrite?: boolean;
   force?: boolean;
   ignorePendingJournals?: boolean;
+  /**
+   * Monotonic token for dry-run cancellation. Increment on every
+   * input change; the backend drops stale calls when a newer token
+   * arrives. Ignored by `project_move_start`.
+   */
+  cancelToken?: number;
 }
+
+/** Per-status journal counts surfaced by `repair_status_summary`. */
+export interface PendingJournalsSummary {
+  pending: number;
+  stale: number;
+  running: number;
+}
+
+/**
+ * Sentinel error string backend returns when a dry-run was superseded
+ * by a newer call (client is expected to silently discard the result).
+ */
+export const DRY_RUN_SUPERSEDED = "__claudepot_dry_run_superseded__";
 
 export interface JournalFlags {
   merge: boolean;
