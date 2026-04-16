@@ -8,7 +8,7 @@ import {
 } from "@phosphor-icons/react";
 import { api } from "../../api";
 import { ConfirmDangerousAction } from "../../components/ConfirmDangerousAction";
-import { OperationProgressModal } from "./OperationProgressModal";
+import { useOperations } from "../../hooks/useOperations";
 import type { JournalEntry, JournalStatus } from "../../types";
 
 const STATUS_COPY: Record<JournalStatus, string> = {
@@ -44,17 +44,20 @@ export function RepairView({
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [pending, setPending] = useState<PendingAction | null>(null);
-  const [activeOp, setActiveOp] = useState<
-    { opId: string; title: string } | null
-  >(null);
   const [toast, setToast] = useState<string | null>(null);
+  const { open: openOpModal } = useOperations();
 
   const refresh = useCallback(() => {
     setLoading(true);
     api
       .repairList()
       .then((es) => {
-        setEntries(es);
+        // Newest first so a just-failed rename appears at the top
+        // when a user clicks "Open Repair" from an error modal.
+        const sorted = [...es].sort(
+          (a, b) => b.started_unix_secs - a.started_unix_secs,
+        );
+        setEntries(sorted);
         setLoading(false);
         setError(null);
       })
@@ -68,11 +71,21 @@ export function RepairView({
     refresh();
   }, [refresh]);
 
+  const afterTerminal = () => {
+    setToast("Done.");
+    refresh();
+    onOpTerminated?.();
+  };
   const runResume = async (entry: JournalEntry) => {
     setPending(null);
     try {
       const opId = await api.repairResumeStart(entry.id);
-      setActiveOp({ opId, title: `Resuming ${entry.id}` });
+      openOpModal({
+        opId,
+        title: `Resuming ${entry.id}`,
+        onComplete: afterTerminal,
+        onError: afterTerminal,
+      });
     } catch (e) {
       setToast(`Resume failed: ${e}`);
     }
@@ -81,7 +94,12 @@ export function RepairView({
     setPending(null);
     try {
       const opId = await api.repairRollbackStart(entry.id);
-      setActiveOp({ opId, title: `Rolling back ${entry.id}` });
+      openOpModal({
+        opId,
+        title: `Rolling back ${entry.id}`,
+        onComplete: afterTerminal,
+        onError: afterTerminal,
+      });
     } catch (e) {
       setToast(`Rollback failed: ${e}`);
     }
@@ -261,24 +279,6 @@ export function RepairView({
           }
           onCancel={() => setPending(null)}
           onConfirm={() => runAbandon(pending.entry)}
-        />
-      )}
-
-      {activeOp && (
-        <OperationProgressModal
-          opId={activeOp.opId}
-          title={activeOp.title}
-          onClose={() => setActiveOp(null)}
-          onComplete={() => {
-            setToast("Complete.");
-            refresh();
-            onOpTerminated?.();
-          }}
-          onError={(detail) => {
-            setToast(`Failed: ${detail ?? "unknown"}`);
-            refresh();
-            onOpTerminated?.();
-          }}
         />
       )}
 

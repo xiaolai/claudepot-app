@@ -98,6 +98,8 @@ pub fn run() {
             commands::repair_break_lock,
             commands::repair_gc,
             commands::running_ops_list,
+            commands::project_move_start,
+            commands::project_move_status,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

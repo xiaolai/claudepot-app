@@ -91,6 +91,8 @@ function op(partial: Partial<RunningOpInfo> = {}): RunningOpInfo {
     status: "running",
     started_unix_secs: 0,
     last_error: null,
+    move_result: null,
+    failed_journal_id: null,
     ...partial,
   };
 }
