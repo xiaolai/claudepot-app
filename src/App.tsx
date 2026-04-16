@@ -17,7 +17,7 @@ function AppShell() {
     sectionIds[0],
     sectionIds,
   );
-  const { count: pendingCount, refresh: refreshPendingBanner } =
+  const { summary: pendingSummary, refresh: refreshPendingBanner } =
     usePendingJournals();
   const { ops: runningOps } = useRunningOps();
   const { active: activeOp, open: openOp, close: closeOp } = useOperations();
@@ -36,8 +36,12 @@ function AppShell() {
   // Hide the banner whenever the user is already looking at Repair —
   // no point nagging from the page they'd navigate to.
   const onRepairSubview = section === "projects" && subRoute === "repair";
+  const actionableTotal =
+    pendingSummary === null
+      ? 0
+      : pendingSummary.pending + pendingSummary.stale;
   const showBanner =
-    pendingCount !== null && pendingCount > 0 && !onRepairSubview;
+    pendingSummary !== null && actionableTotal > 0 && !onRepairSubview;
 
   return (
     <IconContext.Provider value={{ size: 16, weight: "light" }}>
@@ -51,10 +55,10 @@ function AppShell() {
             onSubRouteChange={setSubRoute}
           />
         )}
-        {showBanner && (
+        {showBanner && pendingSummary && (
           <div className="global-banner-slot">
             <PendingJournalsBanner
-              count={pendingCount}
+              summary={pendingSummary}
               onOpen={() => setSection("projects", "repair")}
             />
           </div>

@@ -277,6 +277,17 @@ impl From<&claudepot_core::project_types::DryRunPlan> for DryRunPlanDto {
     }
 }
 
+/// Per-status counts for the pending-journals banner. Pending +
+/// stale are the two actionable classes; abandoned is filtered out.
+/// `running` exists so the banner can suppress itself when the
+/// op is already visible in the RunningOpStrip.
+#[derive(Serialize)]
+pub struct PendingJournalsSummaryDto {
+    pub pending: usize,
+    pub stale: usize,
+    pub running: usize,
+}
+
 /// Inbound args from the webview for a dry-run move. Mirrors the
 /// subset of `claudepot_core::project_types::MoveArgs` the UI controls;
 /// config/snapshot paths are filled server-side from `claude_config_dir`.
@@ -295,6 +306,12 @@ pub struct MoveArgsDto {
     pub force: bool,
     #[serde(default)]
     pub ignore_pending_journals: bool,
+    /// Monotonically increasing token for dry-run cancellation. When
+    /// a newer token arrives during rapid typing, older in-flight
+    /// calls bail out instead of returning stale plans. Present only
+    /// on `project_move_dry_run`; other callers leave it None.
+    #[serde(default)]
+    pub cancel_token: Option<u64>,
 }
 
 // ---------------------------------------------------------------------------
