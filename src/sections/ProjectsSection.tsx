@@ -1,9 +1,10 @@
 import { useCallback, useEffect, useState } from "react";
 import { FolderSimple } from "@phosphor-icons/react";
 import { api } from "../api";
-import type { ProjectInfo } from "../types";
+import type { MoveArgs, ProjectInfo } from "../types";
 import { ProjectsList } from "./projects/ProjectsList";
 import { ProjectDetail } from "./projects/ProjectDetail";
+import { RenameProjectModal } from "./projects/RenameProjectModal";
 import { RepairView } from "./projects/RepairView";
 
 /**
@@ -27,6 +28,8 @@ export function ProjectsSection({
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [selectedPath, setSelectedPath] = useState<string | null>(null);
+  const [renameTarget, setRenameTarget] = useState<string | null>(null);
+  const [stubToast, setStubToast] = useState<string | null>(null);
 
   const refresh = useCallback(() => {
     setLoading(true);
@@ -104,14 +107,33 @@ export function ProjectsSection({
         <ProjectDetail
           key={selectedPath}
           path={selectedPath}
-          onRename={(path) => {
-            // Stub: Step 5 replaces this with the rename modal.
-            // Surfaced for now so the flow is reviewable end-to-end.
-            console.info("[stub] rename requested for", path);
-          }}
+          onRename={(path) => setRenameTarget(path)}
         />
       ) : (
         <main className="content" />
+      )}
+
+      {renameTarget && (
+        <RenameProjectModal
+          oldPath={renameTarget}
+          onClose={() => setRenameTarget(null)}
+          onSubmit={(args: MoveArgs) => {
+            // Step 6 replaces this with project_move_start + progress
+            // modal. For now we surface the pending args as a toast so
+            // the flow is reviewable end-to-end.
+            setRenameTarget(null);
+            setStubToast(
+              `Rename submission stubbed. Will run: ${args.oldPath} → ${args.newPath}`,
+            );
+            window.setTimeout(() => setStubToast(null), 4000);
+          }}
+        />
+      )}
+
+      {stubToast && (
+        <div className="inline-toast" role="status" onClick={() => setStubToast(null)}>
+          {stubToast}
+        </div>
       )}
     </>
   );
