@@ -1090,40 +1090,49 @@ button.danger.primary:hover:not(:disabled) {
 
 /* ---------- projects section ---------- */
 
-.projects-sidebar { display: flex; flex-direction: column; }
+/* Fallback bg so the vibrancy sidebar doesn't go pitch-black when
+   the window becomes inactive (macOS disengages vibrancy). Tuned so
+   it sits UNDER the vibrancy without muddying it when active. */
+.projects-sidebar {
+  display: flex;
+  flex-direction: column;
+  background: color-mix(in srgb, var(--bg) 88%, transparent);
+}
 .projects-sidebar .sidebar-list {
   padding-top: 4px;
   flex: 1;
   overflow-y: auto;
 }
 
+/* Filter chip row — tight, subtle segmented control. Counts are
+   hidden when zero on non-selected chips so "Unreachable 0" doesn't
+   visually compete with meaningful data. */
 .project-filter-row {
   display: flex;
   gap: 4px;
-  padding: 4px 12px 8px;
+  padding: 2px 8px 8px;
   flex-wrap: wrap;
 }
-
 .project-filter-chip {
   display: inline-flex;
   align-items: center;
-  gap: 6px;
-  height: 22px;
+  gap: 4px;
+  height: 20px;
   padding: 0 8px;
-  border: 0.5px solid var(--border);
+  border: none;
   border-radius: 999px;
   background: transparent;
   font-size: 11px;
+  font-weight: 500;
   color: var(--muted);
 }
 .project-filter-chip:hover:not(:disabled) {
-  background: var(--accent-weak);
+  background: color-mix(in srgb, var(--muted) 10%, transparent);
   color: var(--text);
 }
 .project-filter-chip.selected {
   background: var(--accent-weak);
   color: var(--text);
-  border-color: var(--accent);
 }
 .project-filter-chip:focus-visible {
   outline: 2px solid var(--accent);
@@ -1131,72 +1140,88 @@ button.danger.primary:hover:not(:disabled) {
 }
 .project-filter-count {
   font-variant-numeric: tabular-nums;
-  opacity: 0.7;
+  font-size: 10px;
+  color: var(--muted);
+  opacity: 0.8;
+}
+.project-filter-chip.selected .project-filter-count {
+  color: var(--text);
+  opacity: 1;
 }
 
-.project-status-icon {
-  flex-shrink: 0;
-  width: 14px;
-  height: 14px;
-}
-.project-status-icon.orphan { color: var(--warn); }
-.project-status-icon.unreachable { color: var(--muted); }
-
+/* List-row status indicator. A small leading dot replaces the
+   trailing warning triangle — in a dense list where 100+ rows are
+   orphan, triangles everywhere overwhelm the layout; a 6px dot
+   encodes status without stealing attention. */
 .project-status-dot {
   display: inline-block;
-  width: 8px;
-  height: 8px;
+  width: 6px;
+  height: 6px;
   border-radius: 999px;
-  background: var(--border);
   flex-shrink: 0;
+  margin-left: 4px;
+}
+.project-status-dot.orphan { background: var(--warn); }
+.project-status-dot.unreachable {
+  background: transparent;
+  border: 1px solid var(--muted);
+  opacity: 0.55;
 }
 .project-status-dot.empty {
   background: var(--muted);
-  opacity: 0.4;
+  opacity: 0.35;
 }
 
+/* Header tag — mirrors the pill aesthetic used by CLI / DESKTOP /
+   MATCH in the Accounts section. No background saturation, no
+   uppercase shout, just a small colored-text pill. */
 .project-tag {
   display: inline-flex;
   align-items: center;
   gap: 4px;
-  padding: 1px 8px;
-  border-radius: 999px;
-  font-size: 10px;
-  font-weight: 600;
-  letter-spacing: 0.3px;
-  text-transform: uppercase;
+  padding: 2px 8px;
+  border-radius: 4px;
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: 0.02em;
   white-space: nowrap;
+  border: 0.5px solid transparent;
 }
-.project-tag.orphan { background: var(--warn-weak); color: var(--warn); }
+.project-tag.orphan {
+  color: var(--warn);
+  background: var(--warn-weak);
+}
 .project-tag.unreachable {
-  background: color-mix(in srgb, var(--muted) 15%, transparent);
   color: var(--muted);
+  border-color: var(--border);
 }
 .project-tag.empty {
-  background: color-mix(in srgb, var(--muted) 10%, transparent);
   color: var(--muted);
   opacity: 0.8;
 }
+.project-tag svg { opacity: 0.85; }
 
 .project-hint {
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   gap: 8px;
   margin: 12px 20px 0;
   padding: 8px 12px;
   border-radius: 8px;
   font-size: 12px;
-  color: var(--text);
-}
-.project-hint.unreachable {
-  background: color-mix(in srgb, var(--muted) 8%, transparent);
-  border: 0.5px solid var(--border);
+  line-height: 1.5;
   color: var(--muted);
+  background: color-mix(in srgb, var(--muted) 6%, transparent);
+  border: 0.5px solid var(--border);
 }
+.project-hint svg { flex-shrink: 0; margin-top: 2px; }
 
+/* Pinned footer with the Clean action. Uses the neutral button
+   treatment so it reads as "utility" not "primary CTA". */
 .project-sidebar-actions {
-  padding: 8px 12px;
+  padding: 8px;
   border-top: 0.5px solid var(--border);
+  -webkit-app-region: no-drag;
 }
 .sidebar-action {
   display: inline-flex;
@@ -1208,12 +1233,13 @@ button.danger.primary:hover:not(:disabled) {
   border: 0.5px solid var(--border);
   border-radius: 6px;
   background: transparent;
-  font-size: 13px;
+  font-size: 12px;
+  font-weight: 500;
   color: var(--text);
   justify-content: center;
 }
 .sidebar-action:hover:not(:disabled) {
-  background: var(--accent-weak);
+  background: color-mix(in srgb, var(--muted) 10%, transparent);
 }
 .sidebar-action:focus-visible {
   outline: 2px solid var(--accent);
@@ -1566,8 +1592,8 @@ button.danger.primary:hover:not(:disabled) {
 .clean-orphan-list {
   list-style: none;
   padding: 0;
-  margin: 0 0 12px 0;
-  max-height: 260px;
+  margin: 0 0 10px 0;
+  max-height: 280px;
   overflow-y: auto;
   border: 0.5px solid var(--border);
   border-radius: 6px;
@@ -1578,15 +1604,15 @@ button.danger.primary:hover:not(:disabled) {
   align-items: center;
   justify-content: space-between;
   gap: 8px;
-  padding: 8px 10px;
+  padding: 5px 10px;
   border-bottom: 0.5px solid var(--border);
 }
 .clean-orphan-row:last-child { border-bottom: none; }
 
 .clean-orphan-main {
   display: flex;
-  flex-direction: column;
-  gap: 2px;
+  align-items: baseline;
+  gap: 10px;
   min-width: 0;
   flex: 1;
 }
@@ -1594,6 +1620,13 @@ button.danger.primary:hover:not(:disabled) {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+  font-size: 12px;
+  flex: 1;
+  min-width: 0;
+}
+.clean-orphan-main > .muted {
+  flex-shrink: 0;
+  font-variant-numeric: tabular-nums;
 }
 
 .clean-modal .clean-disclaimer {
