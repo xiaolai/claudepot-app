@@ -1,5 +1,6 @@
 mod commands;
 mod dto;
+mod ops;
 mod state;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -63,6 +64,7 @@ pub fn run() {
             Ok(())
         })
         .manage(state::LoginState::default())
+        .manage(ops::RunningOps::new())
         .manage(claudepot_core::services::usage_cache::UsageCache::new());
 
     #[cfg(debug_assertions)]
@@ -90,6 +92,12 @@ pub fn run() {
             commands::project_move_dry_run,
             commands::repair_list,
             commands::repair_pending_count,
+            commands::repair_resume_start,
+            commands::repair_rollback_start,
+            commands::repair_abandon,
+            commands::repair_break_lock,
+            commands::repair_gc,
+            commands::running_ops_list,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
