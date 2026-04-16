@@ -50,6 +50,16 @@ See `dev-docs/implementation-plan.md` for the full plan.
 - `src-tauri` = Tauri app consuming same core
 - Two separate keychain surfaces on macOS (see rules/architecture.md)
 - Account identity = email, resolved by prefix matching
+- GUI is section-based: 48px icon rail on the left + per-section
+  content pane. Sections live under `src/sections/`; the registry
+  (`src/sections/registry.tsx`) is the single source of truth for
+  the rail. Accounts and Projects are the current sections.
+- Long-running ops (project rename, repair resume/rollback) flow
+  through a single op-progress pipeline:
+  `Tauri *_start` cmd → spawns task → emits events on
+  `op-progress::<op_id>` channels → the op-progress modal subscribes
+  by op_id. The `RunningOps` map on the backend is the polling
+  backstop; see `src-tauri/src/ops.rs`.
 
 ## Reference
 
