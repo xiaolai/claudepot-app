@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useTauriEvent } from "../../hooks/useTauriEvent";
+import { useFocusTrap } from "../../hooks/useFocusTrap";
 import { api } from "../../api";
 import type {
   MoveResultSummary,
@@ -58,6 +59,7 @@ export function OperationProgressModal({
   const headingId = useRef(
     `op-progress-heading-${Math.random().toString(36).slice(2, 9)}`,
   );
+  const trapRef = useFocusTrap<HTMLDivElement>();
 
   const handler = useCallback(
     (event: { payload: OperationProgressEvent }) => {
@@ -141,10 +143,12 @@ export function OperationProgressModal({
   return (
     <div className="modal-backdrop" role="presentation">
       <div
+        ref={trapRef}
         className="modal op-progress-modal"
         role="dialog"
         aria-modal="true"
         aria-labelledby={headingId.current}
+        aria-busy={terminal === null}
       >
         <h2 id={headingId.current}>{title}</h2>
 

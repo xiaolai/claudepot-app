@@ -79,8 +79,16 @@ function AppShell() {
             opId={activeOp.opId}
             title={activeOp.title}
             onClose={closeOp}
-            onComplete={activeOp.onComplete}
-            onError={activeOp.onError}
+            // Every terminal event — whether repair or rename —
+            // invalidates the pending-journals banner (plan §7.5).
+            onComplete={() => {
+              activeOp.onComplete?.();
+              refreshPendingBanner();
+            }}
+            onError={(detail) => {
+              activeOp.onError?.(detail);
+              refreshPendingBanner();
+            }}
             onOpenRepair={() => {
               closeOp();
               setSection("projects", "repair");

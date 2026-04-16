@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { useFocusTrap } from "../hooks/useFocusTrap";
 
 /**
  * Consequence-explaining confirm dialog. Two variants:
@@ -39,6 +40,7 @@ export function ConfirmDangerousAction({
   const headingId = useRef(
     `cda-heading-${Math.random().toString(36).slice(2, 9)}`,
   );
+  const trapRef = useFocusTrap<HTMLDivElement>();
   const confirmDisabled =
     typeToConfirm !== undefined && typed !== typeToConfirm;
 
@@ -56,6 +58,7 @@ export function ConfirmDangerousAction({
   return (
     <div className="modal-backdrop" role="presentation">
       <div
+        ref={trapRef}
         className="modal"
         role="dialog"
         aria-modal="true"
