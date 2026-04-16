@@ -119,6 +119,39 @@ export interface ProjectDetail {
   memory_files: string[];
 }
 
+/**
+ * Preview of what `project_clean_execute` would delete. The UI
+ * renders this in the confirm modal before the user approves the
+ * actual run. `unreachable_skipped` surfaces projects whose source
+ * lives on an unmounted volume — they are NOT candidates for cleanup
+ * and shouldn't be in the list.
+ */
+export interface CleanPreview {
+  orphans: ProjectInfo[];
+  orphans_found: number;
+  unreachable_skipped: number;
+  total_bytes: number;
+}
+
+/**
+ * Outcome of a completed `project_clean_execute`. The modal renders
+ * every non-zero counter as a line item. `snapshot_paths` points at
+ * the recovery snapshots (~/.claude.json entry value, dropped
+ * history.jsonl lines) so the user can restore if the clean turned
+ * out to be wrong.
+ */
+export interface CleanResult {
+  orphans_found: number;
+  orphans_removed: number;
+  orphans_skipped_live: number;
+  unreachable_skipped: number;
+  bytes_freed: number;
+  claude_json_entries_removed: number;
+  history_lines_removed: number;
+  claudepot_artifacts_removed: number;
+  snapshot_paths: string[];
+}
+
 export interface DryRunPlan {
   would_move_dir: boolean;
   old_cc_dir: string;

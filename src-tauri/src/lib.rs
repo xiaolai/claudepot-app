@@ -91,6 +91,8 @@ pub fn run() {
             commands::project_list,
             commands::project_show,
             commands::project_move_dry_run,
+            commands::project_clean_preview,
+            commands::project_clean_execute,
             commands::repair_list,
             commands::repair_pending_count,
             commands::repair_resume_start,

@@ -5,8 +5,9 @@
 //! Errors become user-facing strings at this boundary.
 
 use crate::dto::{
-    AccountSummary, AccountUsageDto, AppStatus, CcIdentity, DryRunPlanDto, JournalEntryDto,
-    MoveArgsDto, ProjectDetailDto, ProjectInfoDto, RegisterOutcome, RemoveOutcome,
+    AccountSummary, AccountUsageDto, AppStatus, CcIdentity, CleanPreviewDto, CleanResultDto,
+    DryRunPlanDto, JournalEntryDto, MoveArgsDto, ProjectDetailDto, ProjectInfoDto,
+    RegisterOutcome, RemoveOutcome,
 };
 use claudepot_core::account::{Account, AccountStore};
 use claudepot_core::cli_backend;
@@ -544,6 +545,71 @@ pub fn project_move_dry_run(
     }
 
     Ok(DryRunPlanDto::from(&plan))
+}
+
+// ---------------------------------------------------------------------------
+// Project clean (orphan reclaim) surface
+// ---------------------------------------------------------------------------
+
+/// Return the set of projects that would be cleaned and the count of
+/// unreachable candidates skipped. Read-only: no lock, no deletion.
+/// The pending-journals gate is NOT applied here because this is just
+/// a preview — the gate fires on `project_clean_execute`.
+#[tauri::command]
+pub fn project_clean_preview() -> Result<CleanPreviewDto, String> {
+    let cfg = paths::claude_config_dir();
+    let (_journals, locks, snaps) = claudepot_home_dirs();
+    let (result, orphans) = project::clean_orphans(
+        &cfg,
+        None, // claude.json inspection during preview would be a read; skip for now — the execute path handles that and the preview just shows what will be removed.
+        Some(snaps.as_path()),
+        Some(locks.as_path()),
+        true, // dry run
+    )
+    .map_err(|e| format!("clean preview failed: {e}"))?;
+
+    let total_bytes = orphans.iter().map(|p| p.total_size_bytes).sum();
+    Ok(CleanPreviewDto {
+        orphans: orphans.iter().map(ProjectInfoDto::from).collect(),
+        orphans_found: result.orphans_found,
+        unreachable_skipped: result.unreachable_skipped,
+        total_bytes,
+    })
+}
+
+/// Execute the clean. Gated on no pending rename journals. Acquires a
+/// process-wide `__clean__` lock inside `clean_orphans` so two
+/// concurrent GUI invocations can't race; the second sees an
+/// Ambiguous error surfaced as a plain string to the UI.
+#[tauri::command]
+pub fn project_clean_execute() -> Result<CleanResultDto, String> {
+    let (journals, locks, snaps) = claudepot_home_dirs();
+
+    // Mirror the CLI gate. Abandoned journals are filtered out by
+    // list_actionable — those are user-dismissed and shouldn't block.
+    let actionable =
+        project_repair::list_actionable(&journals, &locks, JOURNAL_NAG_THRESHOLD_SECS)
+            .map_err(|e| format!("journal check failed: {e}"))?;
+    if !actionable.is_empty() {
+        return Err(format!(
+            "refusing to clean while {} rename journal(s) are pending. Resolve them in the Repair view first.",
+            actionable.len()
+        ));
+    }
+
+    let cfg = paths::claude_config_dir();
+    let claude_json = dirs::home_dir().map(|h| h.join(".claude.json"));
+
+    let (result, _orphans) = project::clean_orphans(
+        &cfg,
+        claude_json.as_deref(),
+        Some(snaps.as_path()),
+        Some(locks.as_path()),
+        false, // perform
+    )
+    .map_err(|e| format!("clean failed: {e}"))?;
+
+    Ok(CleanResultDto::from(&result))
 }
 
 #[tauri::command]

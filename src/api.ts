@@ -5,6 +5,8 @@ import type {
   AppStatus,
   BreakLockOutcome,
   CcIdentity,
+  CleanPreview,
+  CleanResult,
   DryRunPlan,
   GcOutcome,
   JournalEntry,
@@ -77,6 +79,20 @@ export const api = {
   /** Poll current state of an in-flight move. null if op_id unknown. */
   projectMoveStatus: (opId: string) =>
     invoke<RunningOpInfo | null>("project_move_status", { opId }),
+  /**
+   * Read-only preview of `projectCleanExecute`. Lists orphan CC project
+   * dirs whose source is confirmed absent, plus a count of unreachable
+   * candidates (unmounted volume / permission denied) that will NOT
+   * be cleaned. Safe to call on open of the confirm modal.
+   */
+  projectCleanPreview: () => invoke<CleanPreview>("project_clean_preview"),
+  /**
+   * Irreversible. Deletes every orphan CC project dir, purges
+   * matching `~/.claude.json` entries + `history.jsonl` lines (with
+   * recovery snapshots), and reclaims stale claudepot-owned
+   * artifacts. Gated on no pending rename journals.
+   */
+  projectCleanExecute: () => invoke<CleanResult>("project_clean_execute"),
 
   // ---------- Repair (read-only) ----------
   /** Every journal on disk with its classified status. Includes abandoned. */
