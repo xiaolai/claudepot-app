@@ -3,39 +3,48 @@ import { Trash, Warning, WifiSlash, CircleDashed } from "@phosphor-icons/react";
 import { api } from "../../api";
 import { CopyButton } from "../../components/CopyButton";
 import { useFocusTrap } from "../../hooks/useFocusTrap";
-import type { CleanPreview, CleanResult, ProjectInfo } from "../../types";
+import { useTauriEvent } from "../../hooks/useTauriEvent";
+import type {
+  CleanPreview,
+  CleanResult,
+  OperationProgressEvent,
+  ProjectInfo,
+} from "../../types";
 
 type State =
   | { kind: "loading" }
   | { kind: "preview"; data: CleanPreview }
-  | { kind: "running" }
+  | { kind: "running"; opId: string; phase: string; done: number; total: number }
   | { kind: "done"; result: CleanResult }
   | { kind: "error"; message: string };
 
 /**
- * Confirm + execute dialog for `project clean`. Three-phase flow:
+ * Confirm + execute dialog for `project clean`. Subscribes to
+ * `op-progress::<opId>` once the clean task is started so the
+ * user sees live "N of M" feedback instead of a mysterious spinner.
  *
+ * Lifecycle:
  *   1. loading  — fetch preview on mount. User sees a skeleton.
  *   2. preview  — list of orphan candidates + unreachable skip note.
- *                 Confirm button enabled only when there is at
- *                 least one candidate.
- *   3. running  — disabled spinner-style state while the backend
- *                 holds the clean lock and deletes.
- *   4. done     — counters panel with any recovery snapshot paths.
- *   5. error    — backend error (e.g. journal gate or lock race).
+ *                 Confirm enabled only when the orphan count > 0.
+ *   3. running  — progress bar driven by sub_progress events. The
+ *                 backend emits two phases: `batch-sibling` (single
+ *                 pass through history.jsonl + ~/.claude.json) and
+ *                 `remove-dirs` (per-orphan remove_dir_all). We
+ *                 surface the currently-active phase's progress.
+ *   4. done     — counters panel + recovery snapshot paths.
+ *   5. error    — backend error (journal gate, lock race, etc.).
  *
- * The dialog closes on Escape or backdrop click in preview / done /
- * error states. Running is NON-dismissable because the core is
- * already modifying disk — interrupting would leave state in a
- * half-cleaned form.
+ * The dialog is dismissable in every state EXCEPT running. Running
+ * is non-dismissable because the backend is holding the clean lock
+ * and actively mutating disk; abandoning mid-run would leave
+ * subsequent starts with a stale lock to break.
  */
 export function CleanOrphansModal({
   onClose,
   onDone,
 }: {
   onClose: () => void;
-  /** Fires after a successful clean so the parent can refresh the list
-   *  and surface a "X skipped due to live session" toast if applicable. */
   onDone: (result: CleanResult) => void;
 }) {
   const [state, setState] = useState<State>({ kind: "loading" });
@@ -43,9 +52,11 @@ export function CleanOrphansModal({
     `clean-heading-${Math.random().toString(36).slice(2, 9)}`,
   );
   const trapRef = useFocusTrap<HTMLDivElement>();
+  const firedTerminal = useRef(false);
 
   const loadPreview = useCallback(() => {
     setState({ kind: "loading" });
+    firedTerminal.current = false;
     api
       .projectCleanPreview()
       .then((data) => setState({ kind: "preview", data }))
@@ -67,13 +78,100 @@ export function CleanOrphansModal({
     return () => window.removeEventListener("keydown", onKey);
   }, [onClose, state.kind]);
 
+  // Subscribe to progress events only while a clean is running.
+  const channel =
+    state.kind === "running" ? `op-progress::${state.opId}` : null;
+  const opIdRef = useRef<string | null>(null);
+
+  const handleEvent = useCallback(
+    (event: { payload: OperationProgressEvent }) => {
+      const ev = event.payload;
+      if (ev.op_id !== opIdRef.current) return;
+
+      if (ev.phase === "op") {
+        if (firedTerminal.current) return;
+        firedTerminal.current = true;
+        const isComplete = ev.status === "complete";
+        api
+          .projectCleanStatus(ev.op_id)
+          .then((info) => {
+            if (isComplete && info?.clean_result) {
+              setState({ kind: "done", result: info.clean_result });
+              onDone(info.clean_result);
+            } else if (isComplete) {
+              // Terminal complete but poll missed the result — synthesize
+              // an empty one so the UI doesn't wedge.
+              const empty: CleanResult = {
+                orphans_found: 0,
+                orphans_removed: 0,
+                orphans_skipped_live: 0,
+                unreachable_skipped: 0,
+                bytes_freed: 0,
+                claude_json_entries_removed: 0,
+                history_lines_removed: 0,
+                claudepot_artifacts_removed: 0,
+                snapshot_paths: [],
+              };
+              setState({ kind: "done", result: empty });
+              onDone(empty);
+            } else {
+              setState({
+                kind: "error",
+                message: ev.detail ?? info?.last_error ?? "clean failed",
+              });
+            }
+          })
+          .catch(() => {
+            setState({
+              kind: "error",
+              message: ev.detail ?? "clean failed (unreachable status)",
+            });
+          });
+        return;
+      }
+
+      // Phase + sub_progress updates. Only advance the surfaced phase
+      // when we actually get a sub_progress tuple; pure status events
+      // ("batch-sibling complete" without done/total) flip the phase
+      // label and reset the counter.
+      if (typeof ev.done === "number" && typeof ev.total === "number") {
+        setState((prev) =>
+          prev.kind === "running"
+            ? {
+                kind: "running",
+                opId: prev.opId,
+                phase: ev.phase,
+                done: ev.done!,
+                total: ev.total!,
+              }
+            : prev,
+        );
+      } else if (ev.status === "running") {
+        setState((prev) =>
+          prev.kind === "running"
+            ? { ...prev, phase: ev.phase, done: 0, total: prev.total }
+            : prev,
+        );
+      }
+    },
+    [onDone],
+  );
+
+  useTauriEvent<OperationProgressEvent>(channel, handleEvent);
+
   const runClean = () => {
-    setState({ kind: "running" });
+    firedTerminal.current = false;
     api
-      .projectCleanExecute()
-      .then((result) => {
-        setState({ kind: "done", result });
-        onDone(result);
+      .projectCleanStart()
+      .then((opId) => {
+        opIdRef.current = opId;
+        setState({
+          kind: "running",
+          opId,
+          phase: "batch-sibling",
+          done: 0,
+          total: 0,
+        });
       })
       .catch((e) => setState({ kind: "error", message: String(e) }));
   };
@@ -108,13 +206,11 @@ export function CleanOrphansModal({
           )}
 
           {state.kind === "running" && (
-            <div className="clean-running" role="status">
-              <p>Cleaning…</p>
-              <p className="muted small">
-                Removing project dirs, pruning sibling state, writing
-                recovery snapshots.
-              </p>
-            </div>
+            <RunningView
+              phase={state.phase}
+              done={state.done}
+              total={state.total}
+            />
           )}
 
           {state.kind === "done" && <Result result={state.result} />}
@@ -266,6 +362,46 @@ function OrphanRow({ info }: { info: ProjectInfo }) {
         </span>
       )}
     </li>
+  );
+}
+
+const PHASE_LABEL: Record<string, string> = {
+  "batch-sibling": "Rewriting ~/.claude.json and history.jsonl",
+  "remove-dirs": "Removing project directories",
+};
+
+function RunningView({
+  phase,
+  done,
+  total,
+}: {
+  phase: string;
+  done: number;
+  total: number;
+}) {
+  const label = PHASE_LABEL[phase] ?? "Cleaning";
+  const pct =
+    total > 0 ? Math.round((Math.min(done, total) / total) * 100) : 0;
+  return (
+    <div className="clean-running" role="status" aria-live="polite">
+      <p>{label}…</p>
+      {total > 0 ? (
+        <>
+          <div className="clean-progress-track" aria-hidden="true">
+            <div
+              className="clean-progress-fill"
+              style={{ width: `${pct}%` }}
+            />
+          </div>
+          <p className="muted small">
+            {done} of {total}
+            {phase === "remove-dirs" ? " projects" : " steps"}
+          </p>
+        </>
+      ) : (
+        <div className="clean-spinner" aria-hidden="true" />
+      )}
+    </div>
   );
 }
 

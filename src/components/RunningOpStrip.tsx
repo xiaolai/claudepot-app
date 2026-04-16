@@ -8,10 +8,19 @@ function verb(kind: RunningOpInfo["kind"]): string {
       return "Rolling back";
     case "move_project":
       return "Renaming";
+    case "clean_projects":
+      return "Cleaning";
   }
 }
 
 function labelFor(op: RunningOpInfo): string {
+  if (op.kind === "clean_projects") {
+    if (op.current_phase && op.sub_progress) {
+      const [done, total] = op.sub_progress;
+      return `Cleaning projects (${done}/${total})`;
+    }
+    return "Cleaning projects";
+  }
   const base = `${verb(op.kind)} ${basename(op.old_path)} → ${basename(op.new_path)}`;
   if (op.current_phase && op.sub_progress) {
     const [done, total] = op.sub_progress;

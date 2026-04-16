@@ -270,44 +270,11 @@ pub struct CleanPreviewDto {
     pub total_bytes: u64,
 }
 
-/// What `project_clean_execute` returns after the actual deletion
-/// completes. Carries every counter the modal needs to render a
-/// result panel without a second round-trip.
-#[derive(Serialize)]
-pub struct CleanResultDto {
-    pub orphans_found: usize,
-    pub orphans_removed: usize,
-    pub orphans_skipped_live: usize,
-    pub unreachable_skipped: usize,
-    pub bytes_freed: u64,
-    pub claude_json_entries_removed: usize,
-    pub history_lines_removed: usize,
-    pub claudepot_artifacts_removed: usize,
-    /// Absolute paths to the recovery snapshots written during this
-    /// run. Paths are strings so the JS layer can render + copy them
-    /// without a custom PathBuf deserializer.
-    pub snapshot_paths: Vec<String>,
-}
-
-impl From<&claudepot_core::project_types::CleanResult> for CleanResultDto {
-    fn from(r: &claudepot_core::project_types::CleanResult) -> Self {
-        Self {
-            orphans_found: r.orphans_found,
-            orphans_removed: r.orphans_removed,
-            orphans_skipped_live: r.orphans_skipped_live,
-            unreachable_skipped: r.unreachable_skipped,
-            bytes_freed: r.bytes_freed,
-            claude_json_entries_removed: r.claude_json_entries_removed,
-            history_lines_removed: r.history_lines_removed,
-            claudepot_artifacts_removed: r.claudepot_artifacts_removed,
-            snapshot_paths: r
-                .snapshot_paths
-                .iter()
-                .map(|p| p.to_string_lossy().into_owned())
-                .collect(),
-        }
-    }
-}
+// Note: the post-clean result DTO lives in `ops::CleanResultSummary`
+// because the clean op is event-driven (tokio task + op-progress
+// events), so its result must attach to a `RunningOpInfo` rather than
+// being returned inline from a Tauri command. Keep the clean preview
+// DTO here (sync read-only call).
 
 #[derive(Serialize)]
 pub struct DryRunPlanDto {

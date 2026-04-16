@@ -1634,8 +1634,39 @@ button.danger.primary:hover:not(:disabled) {
 }
 
 .clean-modal .clean-running {
-  padding: 24px 0;
+  padding: 16px 0 8px;
   text-align: center;
+}
+.clean-modal .clean-running p { margin: 4px 0; }
+.clean-progress-track {
+  height: 6px;
+  margin: 12px auto;
+  max-width: 320px;
+  background: color-mix(in srgb, var(--muted) 15%, transparent);
+  border-radius: 999px;
+  overflow: hidden;
+}
+.clean-progress-fill {
+  height: 100%;
+  background: var(--accent);
+  border-radius: 999px;
+  transition: width 180ms ease;
+}
+.clean-spinner {
+  width: 18px;
+  height: 18px;
+  margin: 12px auto;
+  border: 2px solid color-mix(in srgb, var(--muted) 25%, transparent);
+  border-top-color: var(--accent);
+  border-radius: 999px;
+  animation: clean-spin 0.8s linear infinite;
+}
+@keyframes clean-spin {
+  to { transform: rotate(360deg); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .clean-spinner { animation: none; }
+  .clean-progress-fill { transition: none; }
 }
 
 .clean-modal .clean-error {

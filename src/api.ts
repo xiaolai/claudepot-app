@@ -6,7 +6,6 @@ import type {
   BreakLockOutcome,
   CcIdentity,
   CleanPreview,
-  CleanResult,
   DryRunPlan,
   GcOutcome,
   JournalEntry,
@@ -80,19 +79,28 @@ export const api = {
   projectMoveStatus: (opId: string) =>
     invoke<RunningOpInfo | null>("project_move_status", { opId }),
   /**
-   * Read-only preview of `projectCleanExecute`. Lists orphan CC project
+   * Read-only preview of `projectCleanStart`. Lists orphan CC project
    * dirs whose source is confirmed absent, plus a count of unreachable
    * candidates (unmounted volume / permission denied) that will NOT
    * be cleaned. Safe to call on open of the confirm modal.
    */
   projectCleanPreview: () => invoke<CleanPreview>("project_clean_preview"),
   /**
-   * Irreversible. Deletes every orphan CC project dir, purges
-   * matching `~/.claude.json` entries + `history.jsonl` lines (with
-   * recovery snapshots), and reclaims stale claudepot-owned
-   * artifacts. Gated on no pending rename journals.
+   * Irreversible. Kicks off the actual clean in the background,
+   * returning an op_id that the UI subscribes to on
+   * `op-progress::<op_id>` for phase + sub_progress events. Gated on
+   * no pending rename journals. Clean is async so large batches
+   * (hundreds of dirs, multi-GB) emit live progress instead of
+   * blocking the IPC worker.
    */
-  projectCleanExecute: () => invoke<CleanResult>("project_clean_execute"),
+  projectCleanStart: () => invoke<string>("project_clean_start"),
+  /**
+   * Poll the current state of an in-flight clean. Used as a backstop
+   * in case an op-progress event drops — the modal reads the final
+   * `clean_result` from here once the terminal event fires.
+   */
+  projectCleanStatus: (opId: string) =>
+    invoke<RunningOpInfo | null>("project_clean_status", { opId }),
 
   // ---------- Repair (read-only) ----------
   /** Every journal on disk with its classified status. Includes abandoned. */

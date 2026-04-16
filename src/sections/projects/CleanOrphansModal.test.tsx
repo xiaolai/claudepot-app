@@ -1,20 +1,40 @@
 import { describe, expect, it, vi, beforeEach } from "vitest";
-import { render, screen, waitFor } from "@testing-library/react";
+import { act, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 
-// Spies assigned per test; the mock resolves to whatever the spy returns.
+// API spies per command.
 const previewSpy = vi.fn();
-const executeSpy = vi.fn();
+const startSpy = vi.fn();
+const statusSpy = vi.fn();
 
 vi.mock("../../api", () => ({
   api: {
     projectCleanPreview: (...args: unknown[]) => previewSpy(...args),
-    projectCleanExecute: (...args: unknown[]) => executeSpy(...args),
+    projectCleanStart: (...args: unknown[]) => startSpy(...args),
+    projectCleanStatus: (...args: unknown[]) => statusSpy(...args),
   },
 }));
 
+// Fake Tauri event plumbing: useTauriEvent calls listen() from this
+// module. We capture the handler so the test can synthesize events.
+let capturedHandler: ((event: { payload: unknown }) => void) | null = null;
+vi.mock("@tauri-apps/api/event", () => ({
+  listen: vi.fn((_channel: string, handler: (e: { payload: unknown }) => void) => {
+    capturedHandler = handler;
+    return Promise.resolve(() => {
+      capturedHandler = null;
+    });
+  }),
+}));
+
 import { CleanOrphansModal } from "./CleanOrphansModal";
-import type { CleanPreview, CleanResult, ProjectInfo } from "../../types";
+import type {
+  CleanPreview,
+  CleanResult,
+  OperationProgressEvent,
+  ProjectInfo,
+  RunningOpInfo,
+} from "../../types";
 
 function makeProject(overrides: Partial<ProjectInfo> = {}): ProjectInfo {
   return {
@@ -56,9 +76,24 @@ function result(overrides: Partial<CleanResult> = {}): CleanResult {
   };
 }
 
+function emit(opId: string, payload: Partial<OperationProgressEvent>) {
+  if (!capturedHandler) throw new Error("no event handler captured");
+  const full: OperationProgressEvent = {
+    op_id: opId,
+    phase: payload.phase ?? "op",
+    status: payload.status ?? "complete",
+    done: payload.done,
+    total: payload.total,
+    detail: payload.detail,
+  };
+  capturedHandler({ payload: full });
+}
+
 beforeEach(() => {
   previewSpy.mockReset();
-  executeSpy.mockReset();
+  startSpy.mockReset();
+  statusSpy.mockReset();
+  capturedHandler = null;
 });
 
 describe("CleanOrphansModal", () => {
@@ -74,29 +109,26 @@ describe("CleanOrphansModal", () => {
 
     await waitFor(() => expect(previewSpy).toHaveBeenCalledTimes(1));
     expect(await screen.findByText("/tmp/gone-a")).toBeInTheDocument();
-    // Confirm button shows the count.
     expect(
       screen.getByRole("button", { name: /Remove 1 project$/ }),
     ).toBeEnabled();
   });
 
-  it("disables confirm when there are no orphans (only unreachable)", async () => {
+  it("disables Remove when preview shows only unreachable projects", async () => {
     previewSpy.mockResolvedValue(
       preview({ orphans: [], orphans_found: 0, unreachable_skipped: 2 }),
     );
     render(<CleanOrphansModal onClose={() => {}} onDone={() => {}} />);
 
     await waitFor(() => expect(previewSpy).toHaveBeenCalled());
-    // The unreachable notice is visible.
     expect(
       await screen.findByText(/unreachable source paths/),
     ).toBeInTheDocument();
-    // The Remove button is present (no orphan count) but disabled.
     const removeBtn = screen.getByRole("button", { name: /Remove$/ });
     expect(removeBtn).toBeDisabled();
   });
 
-  it("shows an 'empty' tag on empty orphans in the preview list", async () => {
+  it("flags empty orphans in the list with an 'empty' tag", async () => {
     previewSpy.mockResolvedValue(
       preview({
         orphans: [
@@ -104,7 +136,6 @@ describe("CleanOrphansModal", () => {
             original_path: "/tmp/abandoned",
             session_count: 0,
             is_empty: true,
-            is_orphan: true,
           }),
         ],
         orphans_found: 1,
@@ -116,7 +147,7 @@ describe("CleanOrphansModal", () => {
     expect(screen.getByText("empty")).toBeInTheDocument();
   });
 
-  it("runs clean on confirm and renders the result with snapshot paths", async () => {
+  it("kicks off a start request on confirm, then renders progress, then result", async () => {
     previewSpy.mockResolvedValue(
       preview({
         orphans: [makeProject()],
@@ -124,21 +155,85 @@ describe("CleanOrphansModal", () => {
         total_bytes: 1_024,
       }),
     );
-    executeSpy.mockResolvedValue(
-      result({
-        orphans_found: 1,
-        orphans_removed: 1,
-        bytes_freed: 1_024,
-        claude_json_entries_removed: 1,
-        history_lines_removed: 3,
-        snapshot_paths: [
-          "/home/u/.claude/claudepot/snapshots/1-abc-clean-config.json",
-          "/home/u/.claude/claudepot/snapshots/1-abc-clean-history.json",
-        ],
-      }),
-    );
+    startSpy.mockResolvedValue("op-test-123");
+    const finalResult = result({
+      orphans_removed: 1,
+      bytes_freed: 1_024,
+      claude_json_entries_removed: 1,
+      history_lines_removed: 3,
+      snapshot_paths: [
+        "/home/u/.claude/claudepot/snapshots/1-batch-clean-config.json",
+      ],
+    });
+    const statusInfo: RunningOpInfo = {
+      op_id: "op-test-123",
+      kind: "clean_projects",
+      old_path: "",
+      new_path: "",
+      current_phase: null,
+      sub_progress: null,
+      status: "complete",
+      started_unix_secs: 0,
+      last_error: null,
+      move_result: null,
+      clean_result: finalResult,
+      failed_journal_id: null,
+    };
+    statusSpy.mockResolvedValue(statusInfo);
+
     const onDone = vi.fn();
     render(<CleanOrphansModal onClose={() => {}} onDone={onDone} />);
+    await waitFor(() => expect(previewSpy).toHaveBeenCalled());
+
+    const user = userEvent.setup();
+    await user.click(
+      await screen.findByRole("button", { name: /Remove 1 project/ }),
+    );
+
+    await waitFor(() => expect(startSpy).toHaveBeenCalledTimes(1));
+    // Progress-phase label renders.
+    expect(await screen.findByText(/Rewriting/)).toBeInTheDocument();
+
+    // Mid-run sub_progress event → counter updates.
+    act(() => {
+      emit("op-test-123", {
+        phase: "remove-dirs",
+        status: "running",
+        done: 0,
+        total: 1,
+      });
+      emit("op-test-123", {
+        phase: "remove-dirs",
+        status: "running",
+        done: 1,
+        total: 1,
+      });
+    });
+    expect(await screen.findByText(/1 of 1 projects/)).toBeInTheDocument();
+
+    // Terminal event → fetches status → renders result.
+    act(() => {
+      emit("op-test-123", { phase: "op", status: "complete" });
+    });
+    await waitFor(() => expect(statusSpy).toHaveBeenCalledWith("op-test-123"));
+    expect(
+      await screen.findByText(/Removed/, { selector: ".clean-summary" }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByText(/1-batch-clean-config\.json/),
+    ).toBeInTheDocument();
+    expect(onDone).toHaveBeenCalledTimes(1);
+    expect(onDone.mock.calls[0][0].orphans_removed).toBe(1);
+  });
+
+  it("surfaces start errors (e.g. journal gate) as an alert", async () => {
+    previewSpy.mockResolvedValue(
+      preview({ orphans: [makeProject()], orphans_found: 1 }),
+    );
+    startSpy.mockRejectedValue(
+      "refusing to clean while 1 rename journal(s) are pending.",
+    );
+    render(<CleanOrphansModal onClose={() => {}} onDone={() => {}} />);
 
     await waitFor(() => expect(previewSpy).toHaveBeenCalled());
     const user = userEvent.setup();
@@ -146,62 +241,19 @@ describe("CleanOrphansModal", () => {
       await screen.findByRole("button", { name: /Remove 1 project/ }),
     );
 
-    // Result panel appears.
-    expect(
-      await screen.findByText(/Removed/, { selector: ".clean-summary" }),
-    ).toBeInTheDocument();
-    // Snapshot paths are listed.
-    expect(
-      screen.getByText(/1-abc-clean-config\.json/),
-    ).toBeInTheDocument();
-    expect(
-      screen.getByText(/1-abc-clean-history\.json/),
-    ).toBeInTheDocument();
-
-    // onDone callback fires with the result for the parent's toast.
-    expect(onDone).toHaveBeenCalledTimes(1);
-    expect(onDone.mock.calls[0][0].orphans_removed).toBe(1);
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      /refusing to clean/,
+    );
   });
 
-  it("surfaces backend errors (e.g. journal gate) in an alert", async () => {
-    previewSpy.mockResolvedValue(preview({ orphans_found: 0 }));
-    executeSpy.mockRejectedValue(
-      "refusing to clean while 1 rename journal(s) are pending.",
-    );
-    render(<CleanOrphansModal onClose={() => {}} onDone={() => {}} />);
-
-    await waitFor(() => expect(previewSpy).toHaveBeenCalled());
-    // No orphans: Remove is disabled; directly trigger execute via a seeded
-    // scenario. Simulate by starting from a preview that has orphans.
-    previewSpy.mockResolvedValueOnce(
-      preview({ orphans: [makeProject()], orphans_found: 1 }),
-    );
-    // Re-render with orphans so we can click Remove.
-    const { unmount } = render(
-      <CleanOrphansModal onClose={() => {}} onDone={() => {}} />,
-    );
-    const user = userEvent.setup();
-    const btn = await screen.findByRole("button", { name: /Remove 1 project/ });
-    await user.click(btn);
-
-    expect(
-      await screen.findByRole("alert"),
-    ).toHaveTextContent(/refusing to clean/);
-    unmount();
-  });
-
-  it("does NOT close on Escape while the clean is running", async () => {
+  it("blocks Escape close during the running phase", async () => {
     previewSpy.mockResolvedValue(
       preview({ orphans: [makeProject()], orphans_found: 1 }),
     );
-    // Make execute hang so we can inspect the running state.
-    let releaseExecute: (value: CleanResult) => void = () => {};
-    executeSpy.mockImplementation(
-      () =>
-        new Promise<CleanResult>((resolve) => {
-          releaseExecute = resolve;
-        }),
-    );
+    // start resolves but the terminal event never fires, keeping us
+    // stuck in the running state for this assertion.
+    startSpy.mockResolvedValue("op-stuck");
+
     const onClose = vi.fn();
     render(<CleanOrphansModal onClose={onClose} onDone={() => {}} />);
     await waitFor(() => expect(previewSpy).toHaveBeenCalled());
@@ -210,15 +262,9 @@ describe("CleanOrphansModal", () => {
     await user.click(
       await screen.findByRole("button", { name: /Remove 1 project/ }),
     );
+    expect(await screen.findByText(/Rewriting|Removing/)).toBeInTheDocument();
 
-    // Now in running state.
-    expect(await screen.findByText(/Cleaning…/)).toBeInTheDocument();
-
-    // Escape must be a no-op.
     await user.keyboard("{Escape}");
     expect(onClose).not.toHaveBeenCalled();
-
-    // Let the promise resolve to avoid a dangling timer.
-    releaseExecute(result());
   });
 });

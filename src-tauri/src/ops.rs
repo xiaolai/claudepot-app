@@ -24,6 +24,7 @@ pub enum OpKind {
     RepairResume,
     RepairRollback,
     MoveProject,
+    CleanProjects,
 }
 
 /// Post-op summary surfaced to the UI on success, so we can render
@@ -106,11 +107,52 @@ pub struct RunningOpInfo {
     /// Populated on successful MoveProject / RepairResume / RepairRollback.
     /// None while running or on error.
     pub move_result: Option<MoveResultSummary>,
+    /// Populated on successful CleanProjects. Carries the structured
+    /// CleanResult so the modal can render counters + snapshot paths
+    /// without a separate status poll.
+    pub clean_result: Option<CleanResultSummary>,
     /// Journal id of a failed move, so the UI can deep-link "Open Repair"
     /// and surface this exact entry. Populated opportunistically on error
     /// — matches the newest journal whose `old_path == old_path` (the
     /// journal is created during the move, so it will exist when we look).
     pub failed_journal_id: Option<String>,
+}
+
+/// Mirror of `claudepot_core::project_types::CleanResult` for JSON
+/// emission from the Tauri layer. Stored on `RunningOpInfo` so the
+/// terminal status poll returns the complete result, not just a
+/// success flag.
+#[derive(Debug, Clone, Serialize, Default)]
+pub struct CleanResultSummary {
+    pub orphans_found: usize,
+    pub orphans_removed: usize,
+    pub orphans_skipped_live: usize,
+    pub unreachable_skipped: usize,
+    pub bytes_freed: u64,
+    pub claude_json_entries_removed: usize,
+    pub history_lines_removed: usize,
+    pub claudepot_artifacts_removed: usize,
+    pub snapshot_paths: Vec<String>,
+}
+
+impl CleanResultSummary {
+    pub fn from_core(r: &claudepot_core::project_types::CleanResult) -> Self {
+        Self {
+            orphans_found: r.orphans_found,
+            orphans_removed: r.orphans_removed,
+            orphans_skipped_live: r.orphans_skipped_live,
+            unreachable_skipped: r.unreachable_skipped,
+            bytes_freed: r.bytes_freed,
+            claude_json_entries_removed: r.claude_json_entries_removed,
+            history_lines_removed: r.history_lines_removed,
+            claudepot_artifacts_removed: r.claudepot_artifacts_removed,
+            snapshot_paths: r
+                .snapshot_paths
+                .iter()
+                .map(|p| p.to_string_lossy().to_string())
+                .collect(),
+        }
+    }
 }
 
 /// Shared map of live ops. Wrapped in `Arc<Mutex<_>>` so commands and
@@ -147,11 +189,18 @@ impl RunningOps {
     /// Remove an op from the map after the grace window — keeps the
     /// terminal event visible to a slow listener. Call after emitting
     /// the op's final complete/error event.
+    ///
+    /// Uses `std::thread::spawn` rather than `tokio::spawn` so the
+    /// helper is safe to call from commands that run outside a tokio
+    /// runtime (plain sync `#[tauri::command]` handlers dispatched on
+    /// Tauri's own thread pool).
     pub fn remove_after_grace(&self, op_id: String) {
         let map = self.inner.clone();
-        tokio::spawn(async move {
-            tokio::time::sleep(Duration::from_secs(5)).await;
-            map.lock().unwrap().remove(&op_id);
+        std::thread::spawn(move || {
+            std::thread::sleep(Duration::from_secs(5));
+            if let Ok(mut guard) = map.lock() {
+                guard.remove(&op_id);
+            }
         });
     }
 }
