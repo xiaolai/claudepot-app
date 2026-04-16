@@ -147,6 +147,51 @@ export interface JournalFlags {
 /** One of "running" | "pending" | "stale" | "abandoned". */
 export type JournalStatus = "running" | "pending" | "stale" | "abandoned";
 
+/** Kind of long-running op currently tracked by the backend. */
+export type OpKind = "repair_resume" | "repair_rollback" | "move_project";
+
+export type OpStatus = "running" | "complete" | "error";
+
+/** Snapshot returned by `running_ops_list`. */
+export interface RunningOpInfo {
+  op_id: string;
+  kind: OpKind;
+  old_path: string;
+  new_path: string;
+  current_phase: string | null;
+  /** Tuple [done, total] when a phase reports sub-progress. */
+  sub_progress: [number, number] | null;
+  status: OpStatus;
+  started_unix_secs: number;
+  last_error: string | null;
+}
+
+/** Event payload on `op-progress::<op_id>` channels. */
+export interface OperationProgressEvent {
+  op_id: string;
+  /** "P3".."P9" for per-phase events; "op" for the terminal event. */
+  phase: string;
+  /** "running" | "complete" | "error" */
+  status: "running" | "complete" | "error";
+  done?: number;
+  total?: number;
+  detail?: string;
+}
+
+export interface BreakLockOutcome {
+  prior_pid: number;
+  prior_hostname: string;
+  prior_started: string;
+  audit_path: string;
+}
+
+export interface GcOutcome {
+  removed_journals: number;
+  removed_snapshots: number;
+  bytes_freed: number;
+  would_remove: string[];
+}
+
 export interface JournalEntry {
   id: string;
   path: string;
