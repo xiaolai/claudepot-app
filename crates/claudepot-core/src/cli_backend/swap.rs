@@ -1,6 +1,7 @@
 //! Mode A atomic swap primitive for CLI credentials.
 //! See reference.md §I.7.
 
+use super::claude_json;
 use super::storage;
 use super::CliPlatform;
 use crate::account::AccountStore;
@@ -30,6 +31,28 @@ impl TokenRefresher for DefaultRefresher {
 #[async_trait::async_trait]
 pub trait ProfileFetcher: Send + Sync {
     async fn fetch_email(&self, access_token: &str) -> Result<String, OAuthError>;
+
+    /// Full profile, for callers that need more than the email (e.g.
+    /// rewriting the `oauthAccount` block in `~/.claude.json`).
+    /// Default implementation degrades to a minimal Profile with only
+    /// the email populated — test mocks that only implement
+    /// `fetch_email` still work, but the oauthAccount rewrite gets
+    /// empty strings for org_name, uuids, etc.
+    async fn fetch_profile(
+        &self,
+        access_token: &str,
+    ) -> Result<crate::oauth::profile::Profile, OAuthError> {
+        let email = self.fetch_email(access_token).await?;
+        Ok(crate::oauth::profile::Profile {
+            email,
+            org_uuid: String::new(),
+            org_name: String::new(),
+            subscription_type: String::new(),
+            rate_limit_tier: None,
+            account_uuid: String::new(),
+            display_name: None,
+        })
+    }
 }
 
 /// Production profile fetcher that calls `/api/oauth/profile`.
@@ -38,9 +61,13 @@ pub struct DefaultProfileFetcher;
 #[async_trait::async_trait]
 impl ProfileFetcher for DefaultProfileFetcher {
     async fn fetch_email(&self, access_token: &str) -> Result<String, OAuthError> {
-        crate::oauth::profile::fetch(access_token)
-            .await
-            .map(|p| p.email)
+        self.fetch_profile(access_token).await.map(|p| p.email)
+    }
+    async fn fetch_profile(
+        &self,
+        access_token: &str,
+    ) -> Result<crate::oauth::profile::Profile, OAuthError> {
+        crate::oauth::profile::fetch(access_token).await
     }
 }
 
@@ -219,6 +246,7 @@ pub async fn switch(
 ) -> Result<(), SwapError> {
     switch_inner(
         store, current_id, target_id, platform, auto_refresh, false,
+        claude_json::default_path().as_deref(),
         refresher, fetcher,
     )
     .await
@@ -237,11 +265,13 @@ pub async fn switch_force(
 ) -> Result<(), SwapError> {
     switch_inner(
         store, current_id, target_id, platform, auto_refresh, true,
+        claude_json::default_path().as_deref(),
         refresher, fetcher,
     )
     .await
 }
 
+#[allow(clippy::too_many_arguments)]
 async fn switch_inner(
     store: &AccountStore,
     current_id: Option<Uuid>,
@@ -249,6 +279,7 @@ async fn switch_inner(
     platform: &dyn CliPlatform,
     auto_refresh: bool,
     force: bool,
+    claude_json_path: Option<&std::path::Path>,
     refresher: &dyn TokenRefresher,
     fetcher: &dyn ProfileFetcher,
 ) -> Result<(), SwapError> {
@@ -429,14 +460,74 @@ async fn switch_inner(
         }
     }
 
+    // Rewrite ~/.claude.json's oauthAccount block to match the new
+    // target. CC reads this file for its user-visible identity
+    // (`claude auth status`, in-app displays). Without this step, the
+    // keychain holds the new token but CC still reports the old
+    // account — a silent half-swap that looks broken from the user's
+    // side.
+    //
+    // Best-effort: if we can't fetch the full profile (network) or
+    // can't find ~/.claude.json (fresh install), we log + continue.
+    // The keychain swap has already succeeded; blocking on this
+    // cosmetic fix would be more disruptive than the stale display.
+    //
+    // Tests pass `claude_json_path = None` so they don't scribble on
+    // the real user file via dirs::home_dir().
+    let prior_oauth_account =
+        claude_json_path.and_then(|p| claude_json::read_oauth_account(p).ok().flatten());
+
+    if let Some(cj_path) = claude_json_path {
+        // Fetch the target's full profile via the already-verified
+        // access token. We re-read the blob rather than plumb the
+        // target_blob through — keeps the post-verify code unchanged.
+        let cj_update_result: Result<(), SwapError> = async {
+            let target_after = platform
+                .read_default()
+                .await?
+                .ok_or_else(|| SwapError::IdentityVerificationFailed(
+                    "post-write slot empty during oauthAccount rewrite".into(),
+                ))?;
+            let blob = crate::blob::CredentialBlob::from_json(&target_after)
+                .map_err(|e| SwapError::CorruptBlob(e.to_string()))?;
+            let profile = fetcher
+                .fetch_profile(&blob.claude_ai_oauth.access_token)
+                .await
+                .map_err(|e| SwapError::IdentityVerificationFailed(e.to_string()))?;
+            claude_json::update_oauth_account(cj_path, &profile)?;
+            Ok(())
+        }
+        .await;
+
+        if let Err(e) = cj_update_result {
+            // Don't roll back the successful keychain swap — the user
+            // would see the new token stop working AND the old
+            // displayed identity. Better to log and leave
+            // oauthAccount stale; `sync_from_current_cc` on the next
+            // run will still correct claudepot's DB pointer.
+            tracing::warn!(
+                "oauthAccount rewrite failed ({e}); keychain swap kept. \
+                 `claude auth status` may display the old account until \
+                 ~/.claude.json is updated manually or by the next swap."
+            );
+        }
+    }
+
     // Update active pointer in account store.
     tracing::debug!(target = %target_id, "updating active CLI pointer");
     if let Err(e) = store.set_active_cli(target_id) {
-        // Best-effort rollback: restore previous CC credentials
+        // Best-effort rollback: restore previous CC credentials AND
+        // the prior oauthAccount block so the two stay consistent.
         if let Some(cur) = current_id {
             if let Ok(prev_blob) = storage::load(cur) {
                 let _ = platform.write_default(&prev_blob).await;
             }
+        }
+        if let Some(cj_path) = claude_json_path {
+            let _ = claude_json::restore_oauth_account(
+                cj_path,
+                prior_oauth_account.as_ref(),
+            );
         }
         return Err(SwapError::WriteFailed(format!("db update failed: {e}")));
     }
@@ -444,6 +535,28 @@ async fn switch_inner(
     tracing::info!(target = %target_id, "swap complete");
     // _lock dropped here — releases the file lock.
     Ok(())
+}
+
+/// Test-only swap entry point that skips the oauthAccount rewrite so
+/// tests don't scribble on the real `~/.claude.json`. Production code
+/// MUST use [`switch`] / [`switch_force`] — they resolve the real path.
+#[cfg(test)]
+#[allow(clippy::too_many_arguments)]
+pub(crate) async fn switch_force_for_tests(
+    store: &AccountStore,
+    current_id: Option<Uuid>,
+    target_id: Uuid,
+    platform: &dyn CliPlatform,
+    auto_refresh: bool,
+    refresher: &dyn TokenRefresher,
+    fetcher: &dyn ProfileFetcher,
+) -> Result<(), SwapError> {
+    switch_inner(
+        store, current_id, target_id, platform, auto_refresh, true,
+        None, // don't touch ~/.claude.json in tests
+        refresher, fetcher,
+    )
+    .await
 }
 
 // Re-export storage functions for external callers (account_service, etc.)
@@ -679,7 +792,7 @@ mod tests {
 
         let platform = MockPlatform::new(None);
         let refresher = DefaultRefresher;
-        switch_force(
+        switch_force_for_tests(
             &store,
             None,
             target_id,
@@ -717,7 +830,7 @@ mod tests {
         let platform = MockPlatform::new(Some("refreshed_current_blob"));
         let refresher = DefaultRefresher;
 
-        switch_force(
+        switch_force_for_tests(
             &store,
             Some(current_id),
             target_id,
@@ -756,7 +869,7 @@ mod tests {
         *platform.storage.lock().unwrap() = Some("cc_current".to_string());
         let refresher = DefaultRefresher;
 
-        let result = switch_force(
+        let result = switch_force_for_tests(
             &store,
             Some(current_id),
             target_id,
@@ -785,7 +898,7 @@ mod tests {
         let platform = MockPlatform::new(None);
         let refresher = DefaultRefresher;
 
-        let result = switch_force(
+        let result = switch_force_for_tests(
             &store,
             None,
             target_id,
@@ -809,7 +922,7 @@ mod tests {
 
         let platform = MockPlatform::new(None);
         let refresher = DefaultRefresher;
-        switch_force(
+        switch_force_for_tests(
             &store,
             None,
             target_id,
@@ -847,7 +960,7 @@ mod tests {
         *platform.storage.lock().unwrap() = Some("cc".to_string());
         let refresher = DefaultRefresher;
 
-        let result = switch_force(
+        let result = switch_force_for_tests(
             &store,
             Some(current_id),
             target_id,
@@ -883,7 +996,7 @@ mod tests {
         *platform.storage.lock().unwrap() = Some("cc_blob".to_string());
         let refresher = DefaultRefresher;
 
-        let result = switch_force(
+        let result = switch_force_for_tests(
             &store,
             Some(current_id),
             target_id,
@@ -932,7 +1045,7 @@ mod tests {
         let platform = MockPlatform::new(Some("should-not-be-read"));
         let refresher = DefaultRefresher;
 
-        let result = switch_force(
+        let result = switch_force_for_tests(
             &store,
             None,
             target_id,
@@ -959,7 +1072,7 @@ mod tests {
 
         let platform = MockPlatform::new(None);
         let refresher = DefaultRefresher;
-        switch_force(
+        switch_force_for_tests(
             &store,
             None,
             target_id,
@@ -976,7 +1089,7 @@ mod tests {
         delete_private(target_id).unwrap();
     }
 
-    // --- switch_force() auto_refresh tests ---
+    // --- switch_force_for_tests() auto_refresh tests ---
 
     #[tokio::test]
     async fn test_swap_auto_refresh_writes_fresh_blob() {
@@ -993,7 +1106,7 @@ mod tests {
         let refresher = MockRefresher::success();
         let fetcher = MockProfileFetcher::returning(&format!("seed-{target_id}@example.com"));
 
-        switch_force(
+        switch_force_for_tests(
             &store, None, target_id, &platform, true, &refresher, &fetcher,
         )
         .await
@@ -1025,7 +1138,7 @@ mod tests {
         let refresher = MockRefresher::success();
         let fetcher = MockProfileFetcher::returning(&format!("seed-{target_id}@example.com"));
 
-        switch_force(
+        switch_force_for_tests(
             &store, None, target_id, &platform, true, &refresher, &fetcher,
         )
         .await
@@ -1055,7 +1168,7 @@ mod tests {
         let fetcher = MockProfileFetcher::returning(&format!("seed-{target_id}@example.com"));
 
         // auto_refresh = false — should NOT call refresher
-        switch_force(
+        switch_force_for_tests(
             &store, None, target_id, &platform, false, &refresher, &fetcher,
         )
         .await
@@ -1080,7 +1193,7 @@ mod tests {
         let platform = MockPlatform::new(Some("original-cc-blob"));
         let refresher = MockRefresher::failing("network error");
 
-        let result = switch_force(
+        let result = switch_force_for_tests(
             &store,
             None,
             target_id,
@@ -1114,7 +1227,7 @@ mod tests {
         *platform.storage.lock().unwrap() = Some("cc_current".to_string());
         let refresher = MockRefresher::success();
 
-        let result = switch_force(
+        let result = switch_force_for_tests(
             &store,
             Some(current_id),
             target_id,
@@ -1296,7 +1409,7 @@ mod tests {
         // Make set_active_cli fail while write_default remains working.
         store.corrupt_state_table_for_test();
 
-        let result = switch_force(
+        let result = switch_force_for_tests(
             &store,
             Some(current_id),
             target_id,
@@ -1328,7 +1441,7 @@ mod tests {
     async fn test_swap_aborts_when_target_blob_belongs_to_different_account() {
         // Regression guard for the "wrong blob under wrong UUID" corruption
         // that motivated the verification. The target's stored blob reports
-        // a different email than the target's DB record — switch_force() must
+        // a different email than the target's DB record — switch_force_for_tests() must
         // abort with IdentityMismatch before writing CC.
         let _lock = crate::testing::lock_data_dir();
         let _env = setup_test_data_dir();
@@ -1342,7 +1455,7 @@ mod tests {
         // Fetcher claims the blob is for someone else — the divergence case.
         let fetcher = MockProfileFetcher::returning("intruder@example.com");
 
-        let result = switch_force(
+        let result = switch_force_for_tests(
             &store, None, target_id, &platform, false, &refresher, &fetcher,
         )
         .await;
@@ -1399,7 +1512,7 @@ mod tests {
         // → target check passes; outgoing check sees drift (cur_email differs).
         let fetcher = MockProfileFetcher::returning(&format!("seed-{target_id}@example.com"));
 
-        let result = switch_force(
+        let result = switch_force_for_tests(
             &store,
             Some(current_id),
             target_id,
@@ -1449,7 +1562,7 @@ mod tests {
 
         store.corrupt_state_table_for_test();
 
-        let result = switch_force(
+        let result = switch_force_for_tests(
             &store,
             None,
             target_id,
@@ -1494,7 +1607,7 @@ mod tests {
 
         store.corrupt_state_table_for_test();
 
-        let result = switch_force(
+        let result = switch_force_for_tests(
             &store,
             Some(current_id),
             target_id,
@@ -1575,7 +1688,7 @@ mod tests {
         let refresher = MockRefresher::success();
         let fetcher = MockProfileFetcher::returning(&format!("seed-{target_id}@example.com"));
 
-        let result = switch_force(
+        let result = switch_force_for_tests(
             &store,
             None,
             target_id,
@@ -1684,7 +1797,7 @@ mod tests {
             target_email: format!("seed-{target_id}@example.com"),
         };
 
-        let result = switch_force(
+        let result = switch_force_for_tests(
             &store,
             Some(current_id),
             target_id,

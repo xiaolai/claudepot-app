@@ -1,3 +1,4 @@
+pub mod claude_json;
 pub mod credfile;
 pub mod storage;
 pub mod swap;
