@@ -5,17 +5,33 @@ import { RunningOpStrip } from "./components/RunningOpStrip";
 import { sections, sectionIds } from "./sections/registry";
 import { AccountsSection } from "./sections/AccountsSection";
 import { ProjectsSection } from "./sections/ProjectsSection";
+import { OperationProgressModal } from "./sections/projects/OperationProgressModal";
 import { useSection } from "./hooks/useSection";
 import { usePendingJournals } from "./hooks/usePendingJournals";
 import { useRunningOps } from "./hooks/useRunningOps";
+import { OperationsProvider, useOperations } from "./hooks/useOperations";
+import type { RunningOpInfo } from "./types";
 
-function App() {
+function AppShell() {
   const { section, subRoute, setSection, setSubRoute } = useSection(
     sectionIds[0],
     sectionIds,
   );
-  const { count: pendingCount } = usePendingJournals();
+  const { count: pendingCount, refresh: refreshPendingBanner } =
+    usePendingJournals();
   const { ops: runningOps } = useRunningOps();
+  const { active: activeOp, open: openOp, close: closeOp } = useOperations();
+
+  const labelFor = (op: RunningOpInfo): string => {
+    const verb =
+      op.kind === "repair_resume"
+        ? "Resuming"
+        : op.kind === "repair_rollback"
+          ? "Rolling back"
+          : "Renaming";
+    const base = (p: string) => p.split("/").filter(Boolean).pop() ?? p;
+    return `${verb} ${base(op.old_path)} → ${base(op.new_path)}`;
+  };
 
   // Hide the banner whenever the user is already looking at Repair —
   // no point nagging from the page they'd navigate to.
@@ -46,16 +62,41 @@ function App() {
         <RunningOpStrip
           ops={runningOps}
           onReopen={(opId) => {
-            // Re-opening into an active modal comes in Step 6 when
-            // RenameProjectModal/OperationProgressModal wire by op-id
-            // through a shared context. For now just deep-link to
-            // Repair so the user sees the list.
-            console.info("[stub] reopen op", opId);
-            setSection("projects", "repair");
+            const op = runningOps.find((o) => o.op_id === opId);
+            if (!op) return;
+            openOp({
+              opId,
+              title: labelFor(op),
+              onComplete: () => refreshPendingBanner(),
+              onError: () => refreshPendingBanner(),
+            });
           }}
         />
+
+        {activeOp && (
+          <OperationProgressModal
+            key={activeOp.opId}
+            opId={activeOp.opId}
+            title={activeOp.title}
+            onClose={closeOp}
+            onComplete={activeOp.onComplete}
+            onError={activeOp.onError}
+            onOpenRepair={() => {
+              closeOp();
+              setSection("projects", "repair");
+            }}
+          />
+        )}
       </div>
     </IconContext.Provider>
+  );
+}
+
+function App() {
+  return (
+    <OperationsProvider>
+      <AppShell />
+    </OperationsProvider>
   );
 }
 

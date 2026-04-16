@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { FolderSimple } from "@phosphor-icons/react";
 import { api } from "../api";
+import { useOperations } from "../hooks/useOperations";
 import type { MoveArgs, ProjectInfo } from "../types";
 import { ProjectsList } from "./projects/ProjectsList";
 import { ProjectDetail } from "./projects/ProjectDetail";
@@ -29,7 +30,8 @@ export function ProjectsSection({
   const [error, setError] = useState<string | null>(null);
   const [selectedPath, setSelectedPath] = useState<string | null>(null);
   const [renameTarget, setRenameTarget] = useState<string | null>(null);
-  const [stubToast, setStubToast] = useState<string | null>(null);
+  const [toast, setToast] = useState<string | null>(null);
+  const { open: openOpModal } = useOperations();
 
   const refresh = useCallback(() => {
     setLoading(true);
@@ -117,22 +119,34 @@ export function ProjectsSection({
         <RenameProjectModal
           oldPath={renameTarget}
           onClose={() => setRenameTarget(null)}
-          onSubmit={(args: MoveArgs) => {
-            // Step 6 replaces this with project_move_start + progress
-            // modal. For now we surface the pending args as a toast so
-            // the flow is reviewable end-to-end.
+          onSubmit={async (args: MoveArgs) => {
             setRenameTarget(null);
-            setStubToast(
-              `Rename submission stubbed. Will run: ${args.oldPath} → ${args.newPath}`,
-            );
-            window.setTimeout(() => setStubToast(null), 4000);
+            try {
+              const opId = await api.projectMoveStart(args);
+              const base = (p: string) =>
+                p.split("/").filter(Boolean).pop() ?? p;
+              openOpModal({
+                opId,
+                title: `Renaming ${base(args.oldPath)} → ${base(args.newPath)}`,
+                onComplete: () => {
+                  setToast("Rename complete.");
+                  refresh();
+                },
+                onError: (detail) => {
+                  setToast(`Rename failed: ${detail ?? "unknown"}`);
+                  refresh();
+                },
+              });
+            } catch (e) {
+              setToast(`Couldn't start rename: ${e}`);
+            }
           }}
         />
       )}
 
-      {stubToast && (
-        <div className="inline-toast" role="status" onClick={() => setStubToast(null)}>
-          {stubToast}
+      {toast && (
+        <div className="inline-toast" role="status" onClick={() => setToast(null)}>
+          {toast}
         </div>
       )}
     </>
