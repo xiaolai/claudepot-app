@@ -481,8 +481,37 @@ pub fn project_show(path: String) -> Result<ProjectDetailDto, String> {
     Ok(ProjectDetailDto::from(&detail))
 }
 
+/// Sentinel the client checks for and silently discards. Distinguished
+/// from real failures so the preview pane doesn't flash an error
+/// state just because the user kept typing.
+const DRY_RUN_SUPERSEDED: &str = "__claudepot_dry_run_superseded__";
+
 #[tauri::command]
-pub fn project_move_dry_run(args: MoveArgsDto) -> Result<DryRunPlanDto, String> {
+pub fn project_move_dry_run(
+    args: MoveArgsDto,
+    registry: State<crate::state::DryRunRegistry>,
+) -> Result<DryRunPlanDto, String> {
+    use std::sync::atomic::Ordering;
+
+    // Record this call's token as the latest. A later call with a
+    // greater token will overwrite it; we compare again at exit so
+    // we can bail on stale work without returning a misleading plan.
+    //
+    // `fetch_max` instead of `store`: if the client sends tokens out
+    // of order (rare but possible with async dispatch), we want to
+    // preserve the highest seen value so a "genuinely latest" call
+    // wins regardless of arrival order.
+    let my_token = args.cancel_token.unwrap_or(0);
+    if my_token > 0 {
+        registry.latest.fetch_max(my_token, Ordering::SeqCst);
+    }
+
+    // Short-circuit: if a newer token has already been seen before we
+    // even start, bail immediately. Saves work on rapid typing.
+    if my_token > 0 && registry.latest.load(Ordering::SeqCst) > my_token {
+        return Err(DRY_RUN_SUPERSEDED.to_string());
+    }
+
     let cfg = paths::claude_config_dir();
     let claude_json_path = dirs::home_dir().map(|h| h.join(".claude.json"));
     let snapshots_dir = Some(cfg.join("claudepot").join("snapshots"));
@@ -500,6 +529,14 @@ pub fn project_move_dry_run(args: MoveArgsDto) -> Result<DryRunPlanDto, String> 
         ignore_pending_journals: args.ignore_pending_journals,
     };
     let plan = project::plan_move(&core_args).map_err(|e| format!("dry-run failed: {e}"))?;
+
+    // Final check: a newer token arrived while we were computing. The
+    // plan is stale by definition — return the sentinel instead of
+    // the old plan so the UI doesn't render a mismatched preview.
+    if my_token > 0 && registry.latest.load(Ordering::SeqCst) > my_token {
+        return Err(DRY_RUN_SUPERSEDED.to_string());
+    }
+
     Ok(DryRunPlanDto::from(&plan))
 }
 
@@ -524,6 +561,40 @@ pub fn repair_pending_count() -> Result<usize, String> {
     let entries = project_repair::list_actionable(&journals, &locks, JOURNAL_NAG_THRESHOLD_SECS)
         .map_err(|e| format!("repair count failed: {e}"))?;
     Ok(entries.len())
+}
+
+/// Status-aware banner input: counts per journal class so the UI can
+/// pick a neutral / warning tone based on staleness. Abandoned entries
+/// are filtered out; running entries are surfaced separately so the
+/// banner can suppress itself for them (RunningOpStrip already shows
+/// the op live).
+#[tauri::command]
+pub fn repair_status_summary() -> Result<crate::dto::PendingJournalsSummaryDto, String> {
+    use claudepot_core::project_journal::JournalStatus;
+    let (journals, locks, _snaps) = claudepot_home_dirs();
+    let entries = project_repair::list_pending_with_status(
+        &journals,
+        &locks,
+        JOURNAL_NAG_THRESHOLD_SECS,
+    )
+    .map_err(|e| format!("repair summary failed: {e}"))?;
+
+    let mut pending = 0usize;
+    let mut stale = 0usize;
+    let mut running = 0usize;
+    for e in &entries {
+        match e.status {
+            JournalStatus::Pending => pending += 1,
+            JournalStatus::Stale => stale += 1,
+            JournalStatus::Running => running += 1,
+            JournalStatus::Abandoned => {} // filtered
+        }
+    }
+    Ok(crate::dto::PendingJournalsSummaryDto {
+        pending,
+        stale,
+        running,
+    })
 }
 
 // ---------------------------------------------------------------------------

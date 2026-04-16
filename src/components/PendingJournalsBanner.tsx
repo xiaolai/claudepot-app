@@ -1,36 +1,45 @@
-import { Wrench } from "@phosphor-icons/react";
+import { Warning, Wrench } from "@phosphor-icons/react";
+import type { PendingJournalsSummary } from "../types";
 
 /**
- * Global banner shown when actionable rename journals exist. Clicking
- * navigates to Projects → repair subview so the user can resolve them
- * without hunting for the entry point.
- *
- * Kept intentionally minimal: one row, neutral background (per plan
- * §7.5: status-aware variants come in Step 4 once we can distinguish
- * pending vs stale by polling `repair_list` instead of just the count).
+ * Global banner shown when actionable rename journals exist.
+ * Status-aware (plan §7.5):
+ * - `stale` (≥24h) → warning tone, "resolve" copy
+ * - `pending` (<24h, dead lock) → neutral tone, informational copy
+ * - `running` entries are excluded — they're already visible in
+ *   the RunningOpStrip, no point nagging about them.
  */
 export function PendingJournalsBanner({
-  count,
+  summary,
   onOpen,
 }: {
-  count: number;
+  summary: PendingJournalsSummary;
   onOpen: () => void;
 }) {
-  if (count <= 0) return null;
+  const total = summary.pending + summary.stale;
+  if (total <= 0) return null;
+
+  const hasStale = summary.stale > 0;
   const label =
-    count === 1
+    total === 1
       ? "1 pending rename journal"
-      : `${count} pending rename journals`;
+      : `${total} pending rename journals`;
+
   return (
     <button
       type="button"
-      className="pending-journals-banner"
+      className={`pending-journals-banner${hasStale ? " stale" : ""}`}
       aria-label={`${label}. Open Repair.`}
       onClick={onOpen}
     >
-      <Wrench />
+      {hasStale ? <Warning weight="bold" /> : <Wrench />}
       <span>
-        <strong>{label}.</strong> Click to resolve.
+        <strong>{label}.</strong>{" "}
+        {hasStale
+          ? summary.pending === 0
+            ? "All are ≥24h old — resolve them via Repair."
+            : `${summary.stale} stale ≥24h. Resolve via Repair.`
+          : "Click to resolve."}
       </span>
     </button>
   );

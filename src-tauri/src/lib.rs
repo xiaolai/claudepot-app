@@ -64,6 +64,7 @@ pub fn run() {
             Ok(())
         })
         .manage(state::LoginState::default())
+        .manage(state::DryRunRegistry::default())
         .manage(ops::RunningOps::new())
         .manage(claudepot_core::services::usage_cache::UsageCache::new());
 
@@ -100,6 +101,7 @@ pub fn run() {
             commands::running_ops_list,
             commands::project_move_start,
             commands::project_move_status,
+            commands::repair_status_summary,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

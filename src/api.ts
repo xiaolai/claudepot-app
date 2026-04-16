@@ -9,6 +9,7 @@ import type {
   GcOutcome,
   JournalEntry,
   MoveArgs,
+  PendingJournalsSummary,
   ProjectDetail,
   ProjectInfo,
   RegisterOutcome,
@@ -82,6 +83,13 @@ export const api = {
   repairList: () => invoke<JournalEntry[]>("repair_list"),
   /** Count of *actionable* journals — for the pending-journals banner. */
   repairPendingCount: () => invoke<number>("repair_pending_count"),
+  /**
+   * Per-status counts of pending journals. Banner uses this to pick
+   * tone (neutral for pending, warning for stale); running entries
+   * are surfaced separately so the banner can suppress itself for them.
+   */
+  repairStatusSummary: () =>
+    invoke<PendingJournalsSummary>("repair_status_summary"),
 
   // ---------- Repair (mutating) ----------
   /**

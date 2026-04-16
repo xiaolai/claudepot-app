@@ -1516,3 +1516,9 @@ button.danger.primary:hover:not(:disabled) {
 }
 
 .op-terminal-detail code.mono { font-size: 11px; }
+
+.pending-journals-banner.stale {
+  background: var(--warn-weak, rgba(230, 160, 30, 0.15));
+  border-color: var(--warn, #e6a01e);
+  color: var(--warn, inherit);
+}
