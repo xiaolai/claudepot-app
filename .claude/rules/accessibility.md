@@ -85,3 +85,51 @@ Respect `prefers-reduced-motion`. Wrap animations in:
   .toast { animation: toast-in 0.15s ease; }
 }
 ```
+
+## High contrast
+
+Respect `prefers-contrast: more`. When enabled, borders and separators
+must become more prominent. Text contrast must remain at WCAG AAA.
+
+```css
+@media (prefers-contrast: more) {
+  :root { --border: rgba(0, 0, 0, 0.30); }
+}
+@media (prefers-contrast: more) and (prefers-color-scheme: dark) {
+  :root { --border: rgba(255, 255, 255, 0.30); }
+}
+```
+
+Every new color token must have a `prefers-contrast: more` variant
+if the default value has low contrast against adjacent surfaces.
+
+## Reduced transparency
+
+Respect `prefers-reduced-transparency`. When enabled, translucent
+surfaces (vibrancy sidebar) must fall back to opaque:
+
+```css
+@media (prefers-reduced-transparency) {
+  .sidebar { background: var(--bg); }
+}
+```
+
+Tauri's `windowEffects` vibrancy is handled at the OS level, but the
+CSS transparent background would show nothing without vibrancy —
+the opaque fallback prevents a blank sidebar.
+
+## Context menus
+
+Every interactive object must have a right-click context menu with
+the most common actions for that object. macOS users expect this
+universally. Context menu items must be keyboard-navigable.
+
+## Keyboard shortcuts
+
+Standard macOS shortcuts (Cmd+Q, W, H, M) are provided by Tauri.
+App-specific shortcuts (Cmd+R refresh, Cmd+N add, Cmd+, settings)
+must be wired in the frontend. See `rules/ui-design-system.md` for
+the full shortcut table.
+
+All keyboard shortcuts must be discoverable: either shown in a menu
+bar or documented in tooltips on the corresponding buttons.

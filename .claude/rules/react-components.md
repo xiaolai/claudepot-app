@@ -68,6 +68,33 @@ on modals (role, aria-modal, Escape handler, focus trap).
 Never use `window.confirm()`, `window.alert()`, or `window.prompt()`.
 These are invisible in Tauri webviews. Always use in-app dialog components.
 
+## Context menus
+
+Every interactive object (account card, project row, token badge)
+must have an `onContextMenu` handler providing relevant actions.
+
+Pattern:
+```tsx
+const handleContextMenu = useCallback((e: React.MouseEvent) => {
+  e.preventDefault();
+  // Show custom context menu with actions relevant to this item
+}, []);
+```
+
+Use a shared `<ContextMenu>` component. Menu items must match the
+actions available via buttons/icons in the same view — context menus
+are a shortcut, not a separate feature surface.
+
+See `rules/ui-design-system.md` for the required menu items per object.
+
+## Keyboard shortcuts
+
+Wire app-level shortcuts via a `useKeyboardShortcuts` hook in App.tsx.
+Shortcuts must not fire when a modal is open or an input is focused
+(check `document.activeElement`).
+
+See `rules/ui-design-system.md` for the full shortcut table.
+
 ## Buttons
 
 - Always provide a `title` tooltip explaining the action.

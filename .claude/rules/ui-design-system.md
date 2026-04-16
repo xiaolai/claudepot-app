@@ -4,7 +4,7 @@ globs: ["src/**/*.tsx", "src/**/*.css"]
 
 # UI Design System — macOS Native
 
-All values pinned to AppKit/SwiftUI defaults (macOS Sonoma/Sequoia).
+All values pinned to AppKit/SwiftUI defaults (macOS Sonoma/Sequoia/Tahoe).
 Full reference: `dev-docs/macos-native-design-system.md`.
 
 ## Principles
@@ -16,6 +16,10 @@ Full reference: `dev-docs/macos-native-design-system.md`.
 5. Invisible borders at rest. Buttons show background fill on hover only.
 6. No box shadows on list items. Flat 0.5px separators.
 7. Vibrancy via Tauri `windowEffects`, not CSS backdrop-filter hacks.
+8. Respect all accessibility media queries: `prefers-reduced-motion`,
+   `prefers-contrast`, `prefers-reduced-transparency`.
+9. Context menus on every interactive object — macOS users expect them.
+10. Standard keyboard shortcuts — Cmd+R, Cmd+N, Cmd+, at minimum.
 
 ## Colors
 
@@ -57,17 +61,37 @@ Never mix icon libraries. All icons come from Phosphor.
 Font: `-apple-system, BlinkMacSystemFont, "Helvetica Neue", sans-serif`
 Mono: `"SF Mono", SFMono-Regular, ui-monospace, Menlo, monospace`
 
-| Element | Size | Weight |
-|---------|------|--------|
-| Body text | 13px | 400 |
-| Sidebar section header | 11px | 600, uppercase, 0.5px tracking |
-| Button label | 13px | 400 (500 for primary) |
-| Detail heading (h2) | 16px | 600 |
-| Section title (h3) | 11px | 600, uppercase |
-| Badge / tag | 10px | 600 |
-| Monospace | 11px | 400 |
-| Sidebar item meta | 11px | 400 |
-| Modal heading | 13px | 700 |
+### macOS text styles (NSFont.TextStyle reference)
+
+| HIG Style | Size | Weight | Claudepot usage |
+|-----------|------|--------|-----------------|
+| Large Title | 26px | 400 | — (reserved) |
+| Title 1 | 22px | 400 | — (reserved) |
+| Title 2 | 17px | 400 | — (reserved) |
+| Title 3 | 15px | 400 | Detail heading (h2) |
+| Headline | 13px | 600 | Selected sidebar item |
+| Body | 13px | 400 | Body text, buttons |
+| Callout | 12px | 400 | — (reserved) |
+| Subheadline | 11px | 400 | Sidebar meta, section headers |
+| Footnote | 10px | 400 | — (reserved) |
+| Caption 1 | 10px | 500 | Badges, tags |
+| Caption 2 | 10px | 400 | — (reserved) |
+
+### Claudepot element scale
+
+| Element | Size | Weight | HIG mapping |
+|---------|------|--------|-------------|
+| Body text | 13px | 400 | Body |
+| Sidebar section header | 11px | 600, uppercase, 0.5px tracking | Subheadline (bold) |
+| Button label | 13px | 400 (500 for primary) | Body |
+| Detail heading (h2) | 15px | 600 | Title 3 |
+| Section title (h3) | 11px | 600, uppercase | Subheadline (bold) |
+| Badge / tag | 10px | 600 | Caption 1 |
+| Monospace | 11px | 400 | Subheadline (mono) |
+| Sidebar item meta | 11px | 400 | Subheadline |
+| Modal heading | 13px | 700 | Headline |
+
+Note: detail heading was 16px, corrected to 15px to match HIG Title 3.
 
 ## Spacing
 
@@ -95,6 +119,10 @@ Hover = background fill, never border change.
 Focus = `var(--focus-ring)`.
 Icon-only = `.icon-btn` (28x28, no border, no shadow).
 
+Note: 28px is a conscious deviation from AppKit's regular control
+height (22pt). Web UIs need slightly larger targets; 28px matches
+Slack, VS Code, and 1Password on macOS.
+
 ## Modals
 
 Width 440px. Backdrop rgba(0,0,0,0.30). Radius 12px.
@@ -104,6 +132,74 @@ Button order: Cancel (left), Confirm (right) — macOS convention.
 
 Top-center HUD style. Dark translucent with backdrop-filter blur.
 Error toasts = red bg. All toasts have white text.
+
+## Context Menus
+
+macOS users expect right-click context menus on every interactive object.
+Use `onContextMenu` handler — never suppress the event without providing
+a custom menu.
+
+Required context menus:
+- Account cards: Copy email, Copy UUID, Set as CLI, Set as Desktop, Remove
+- Project rows: Open in Finder, Rename, Clean, Copy path
+- Token badges: Copy token (truncated), Refresh
+- Selectable text: system default (Copy)
+
+## Keyboard Shortcuts
+
+Standard macOS shortcuts must work. Tauri provides Cmd+Q/W/H/M by default.
+The app must wire these additional shortcuts:
+
+| Shortcut | Action |
+|----------|--------|
+| Cmd+R | Refresh accounts / projects |
+| Cmd+N | Add account |
+| Cmd+, | Open settings (when settings view exists) |
+| Cmd+1/2/… | Switch sections in the rail |
+| Cmd+F | Focus filter/search (when search exists) |
+| Escape | Close modal / deselect |
+
+## Accessibility Media Queries
+
+### `prefers-contrast: more`
+
+When Increase Contrast is enabled (System Settings > Accessibility >
+Display), borders and separators must become more prominent:
+```css
+@media (prefers-contrast: more) {
+  :root { --border: rgba(0, 0, 0, 0.30); }
+}
+@media (prefers-contrast: more) and (prefers-color-scheme: dark) {
+  :root { --border: rgba(255, 255, 255, 0.30); }
+}
+```
+
+### `prefers-reduced-transparency`
+
+When Reduce Transparency is enabled, the sidebar must have an opaque
+background instead of relying on vibrancy:
+```css
+@media (prefers-reduced-transparency) {
+  .sidebar { background: var(--bg); }
+}
+```
+
+## macOS Tahoe / Liquid Glass (forward-looking)
+
+macOS Tahoe (2025) introduced Liquid Glass. Key implications:
+- Toolbars and sidebars get glass automatically in native apps.
+- Explicit `NSVisualEffectView` in sidebars **blocks** glass — must be
+  removed when targeting Tahoe.
+- Tauri's `windowEffects: ["sidebar"]` may need removal once Tauri
+  adds Liquid Glass support.
+- CSS `background: transparent` on sidebar continues to work.
+- New control sizes: slightly taller mini/small/medium, new extra-large.
+- No glass-on-glass stacking — single `GlassEffectContainer` groups
+  multiple glass elements.
+- Accessibility is automatic: Reduce Transparency = frostier glass,
+  Increase Contrast = opaque with border.
+
+Do not refactor for Tahoe yet. Track Tauri 2 release notes for glass API.
 
 ## Anti-Patterns (never do these)
 
@@ -116,3 +212,7 @@ Error toasts = red bg. All toasts have white text.
 - 14px or 16px body font
 - Corner-positioned toasts
 - Hardcoded hex colors (use tokens)
+- Missing context menus on interactive objects
+- Suppressing right-click without providing a custom menu
+- Hardcoded font sizes outside the HIG text styles table
+- Missing `prefers-contrast` / `prefers-reduced-transparency` handling
