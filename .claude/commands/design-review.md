@@ -36,10 +36,12 @@ For each changed file, check:
 ### Design system compliance
 - [ ] Colors: all via `var(--token)`, no raw hex/rgb
 - [ ] Spacing: values on the 4px grid
-- [ ] Typography: font-size from the approved scale
-- [ ] Border radius: matches element type (7/10/12/999)
+- [ ] Typography: font-size from the HIG text styles table (10/11/13/15px)
+- [ ] Border radius: matches element type (6/8/10/12/999)
 - [ ] Transitions: 0.12s ease, no layout property animation
 - [ ] Dark mode: new tokens have both light and dark variants
+- [ ] Context menus: new interactive objects have `onContextMenu` handler
+- [ ] Keyboard shortcuts: new actions are wired to standard shortcuts
 
 ### Component conventions
 - [ ] One component per file, under 120 lines
@@ -56,6 +58,8 @@ For each changed file, check:
 - [ ] ARIA attributes on dynamic UI (modals, alerts, live regions)
 - [ ] Semantic HTML elements used correctly
 - [ ] `prefers-reduced-motion` media query wraps all new animations/transitions
+- [ ] `prefers-contrast: more` variant for any new border/separator tokens
+- [ ] `prefers-reduced-transparency` fallback for any new translucent surfaces
 
 ### Test coverage
 - [ ] New interactive behavior has a corresponding test
