@@ -1090,7 +1090,139 @@ button.danger.primary:hover:not(:disabled) {
 
 /* ---------- projects section ---------- */
 
-.projects-sidebar .sidebar-list { padding-top: 4px; }
+.projects-sidebar { display: flex; flex-direction: column; }
+.projects-sidebar .sidebar-list {
+  padding-top: 4px;
+  flex: 1;
+  overflow-y: auto;
+}
+
+.project-filter-row {
+  display: flex;
+  gap: 4px;
+  padding: 4px 12px 8px;
+  flex-wrap: wrap;
+}
+
+.project-filter-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 22px;
+  padding: 0 8px;
+  border: 0.5px solid var(--border);
+  border-radius: 999px;
+  background: transparent;
+  font-size: 11px;
+  color: var(--muted);
+}
+.project-filter-chip:hover:not(:disabled) {
+  background: var(--accent-weak);
+  color: var(--text);
+}
+.project-filter-chip.selected {
+  background: var(--accent-weak);
+  color: var(--text);
+  border-color: var(--accent);
+}
+.project-filter-chip:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+.project-filter-count {
+  font-variant-numeric: tabular-nums;
+  opacity: 0.7;
+}
+
+.project-status-icon {
+  flex-shrink: 0;
+  width: 14px;
+  height: 14px;
+}
+.project-status-icon.orphan { color: var(--warn); }
+.project-status-icon.unreachable { color: var(--muted); }
+
+.project-status-dot {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  border-radius: 999px;
+  background: var(--border);
+  flex-shrink: 0;
+}
+.project-status-dot.empty {
+  background: var(--muted);
+  opacity: 0.4;
+}
+
+.project-tag {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 1px 8px;
+  border-radius: 999px;
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.3px;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+.project-tag.orphan { background: var(--warn-weak); color: var(--warn); }
+.project-tag.unreachable {
+  background: color-mix(in srgb, var(--muted) 15%, transparent);
+  color: var(--muted);
+}
+.project-tag.empty {
+  background: color-mix(in srgb, var(--muted) 10%, transparent);
+  color: var(--muted);
+  opacity: 0.8;
+}
+
+.project-hint {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 12px 20px 0;
+  padding: 8px 12px;
+  border-radius: 8px;
+  font-size: 12px;
+  color: var(--text);
+}
+.project-hint.unreachable {
+  background: color-mix(in srgb, var(--muted) 8%, transparent);
+  border: 0.5px solid var(--border);
+  color: var(--muted);
+}
+
+.project-sidebar-actions {
+  padding: 8px 12px;
+  border-top: 0.5px solid var(--border);
+}
+.sidebar-action {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  height: 28px;
+  padding: 0 10px;
+  border: 0.5px solid var(--border);
+  border-radius: 6px;
+  background: transparent;
+  font-size: 13px;
+  color: var(--text);
+  justify-content: center;
+}
+.sidebar-action:hover:not(:disabled) {
+  background: var(--accent-weak);
+}
+.sidebar-action:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+.sidebar-action:disabled {
+  opacity: 0.45;
+  color: var(--muted);
+}
 
 .project-detail { padding-top: 52px; }
 
@@ -1401,6 +1533,141 @@ button.danger.primary:hover:not(:disabled) {
 /* ---------- rename modal ---------- */
 
 .rename-modal { width: 560px; max-height: 85vh; overflow-y: auto; }
+
+/* ---------- clean-orphans modal ---------- */
+
+.clean-modal { width: 560px; max-height: 85vh; overflow-y: auto; }
+
+.clean-modal .clean-summary {
+  font-size: 13px;
+  margin: 4px 0 8px;
+}
+
+.clean-modal .clean-empty {
+  padding: 16px 0;
+  text-align: center;
+}
+
+.clean-modal .clean-unreachable {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 8px 12px;
+  margin-bottom: 12px;
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--muted) 8%, transparent);
+  border: 0.5px solid var(--border);
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.5;
+}
+.clean-modal .clean-unreachable strong { color: var(--text); }
+
+.clean-orphan-list {
+  list-style: none;
+  padding: 0;
+  margin: 0 0 12px 0;
+  max-height: 260px;
+  overflow-y: auto;
+  border: 0.5px solid var(--border);
+  border-radius: 6px;
+}
+
+.clean-orphan-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 8px 10px;
+  border-bottom: 0.5px solid var(--border);
+}
+.clean-orphan-row:last-child { border-bottom: none; }
+
+.clean-orphan-main {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+  flex: 1;
+}
+.clean-orphan-main > .mono {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.clean-modal .clean-disclaimer {
+  margin-top: 8px;
+}
+
+.clean-modal .clean-running {
+  padding: 24px 0;
+  text-align: center;
+}
+
+.clean-modal .clean-error {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 10px 12px;
+  border-radius: 8px;
+  background: var(--bad-weak);
+  color: var(--bad);
+}
+.clean-modal .clean-error strong { display: block; margin-bottom: 4px; }
+.clean-modal .clean-error p { margin: 2px 0; }
+
+.clean-modal .clean-result-list {
+  margin: 8px 0;
+  padding-left: 18px;
+  font-size: 12px;
+}
+.clean-modal .clean-result-list li { margin: 2px 0; }
+
+.clean-modal .clean-snapshots {
+  margin-top: 12px;
+  padding-top: 12px;
+  border-top: 0.5px solid var(--border);
+}
+.clean-modal .clean-snapshots .field-label {
+  margin-bottom: 2px;
+}
+.clean-snapshot-list {
+  list-style: none;
+  padding: 0;
+  margin: 4px 0 0 0;
+}
+.clean-snapshot-list li {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 4px 0;
+}
+.clean-snapshot-list .mono {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  flex: 1;
+  min-width: 0;
+}
+
+.link-btn {
+  display: inline;
+  background: transparent;
+  border: none;
+  padding: 0;
+  color: var(--accent);
+  font: inherit;
+  cursor: default;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+.link-btn:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+  border-radius: 2px;
+}
 
 .rename-modal .field-label {
   display: block;

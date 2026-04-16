@@ -255,6 +255,60 @@ impl From<&claudepot_core::project_types::ProjectDetail> for ProjectDetailDto {
     }
 }
 
+/// What `project_clean_preview` returns — the list the user needs to
+/// see before confirming a destructive clean. Mirrors
+/// `CleanResult { orphans_found, unreachable_skipped, ... }` shape
+/// but also ships the per-project list so the UI can render badges.
+#[derive(Serialize)]
+pub struct CleanPreviewDto {
+    pub orphans: Vec<ProjectInfoDto>,
+    pub orphans_found: usize,
+    pub unreachable_skipped: usize,
+    /// Sum of `total_size_bytes` across the candidate orphans. The UI
+    /// displays this in the confirmation copy so users can judge the
+    /// impact before pressing Confirm.
+    pub total_bytes: u64,
+}
+
+/// What `project_clean_execute` returns after the actual deletion
+/// completes. Carries every counter the modal needs to render a
+/// result panel without a second round-trip.
+#[derive(Serialize)]
+pub struct CleanResultDto {
+    pub orphans_found: usize,
+    pub orphans_removed: usize,
+    pub orphans_skipped_live: usize,
+    pub unreachable_skipped: usize,
+    pub bytes_freed: u64,
+    pub claude_json_entries_removed: usize,
+    pub history_lines_removed: usize,
+    pub claudepot_artifacts_removed: usize,
+    /// Absolute paths to the recovery snapshots written during this
+    /// run. Paths are strings so the JS layer can render + copy them
+    /// without a custom PathBuf deserializer.
+    pub snapshot_paths: Vec<String>,
+}
+
+impl From<&claudepot_core::project_types::CleanResult> for CleanResultDto {
+    fn from(r: &claudepot_core::project_types::CleanResult) -> Self {
+        Self {
+            orphans_found: r.orphans_found,
+            orphans_removed: r.orphans_removed,
+            orphans_skipped_live: r.orphans_skipped_live,
+            unreachable_skipped: r.unreachable_skipped,
+            bytes_freed: r.bytes_freed,
+            claude_json_entries_removed: r.claude_json_entries_removed,
+            history_lines_removed: r.history_lines_removed,
+            claudepot_artifacts_removed: r.claudepot_artifacts_removed,
+            snapshot_paths: r
+                .snapshot_paths
+                .iter()
+                .map(|p| p.to_string_lossy().into_owned())
+                .collect(),
+        }
+    }
+}
+
 #[derive(Serialize)]
 pub struct DryRunPlanDto {
     pub would_move_dir: bool,

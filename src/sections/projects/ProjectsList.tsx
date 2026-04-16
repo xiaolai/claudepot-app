@@ -1,5 +1,7 @@
-import { Folder, Warning } from "@phosphor-icons/react";
+import { useMemo } from "react";
+import { Folder, Trash, Warning, WifiSlash } from "@phosphor-icons/react";
 import type { ProjectInfo } from "../../types";
+import { classifyProject, type ProjectStatus } from "./projectStatus";
 
 function formatSize(bytes: number): string {
   if (bytes < 1024) return `${bytes} B`;
@@ -17,20 +19,58 @@ function formatRelative(ms: number | null): string {
   return `${Math.floor(diff / 86_400_000)}d ago`;
 }
 
+export type ProjectFilter = "all" | "orphan" | "unreachable" | "empty";
+
 /**
- * Left-pane project list. Orphans (no source dir on disk) get a
- * warning icon and muted styling so users can triage stale entries.
- * Click selects; the right pane renders detail.
+ * Left-pane project list. Renders a filter chip row, the project
+ * list itself (each row carries its status badge), and a "Clean
+ * orphans…" action at the bottom.
+ *
+ * Status badges are the only surface that distinguishes:
+ *   * orphan       — amber, will be cleaned by the backend.
+ *   * unreachable  — neutral/grey, NOT cleaned (mount may come back).
+ *   * empty        — muted, stub dir with nothing to lose.
+ * "alive" projects render no badge at all.
  */
 export function ProjectsList({
   projects,
   selectedPath,
   onSelect,
+  filter,
+  onFilterChange,
+  onClean,
+  cleanCount,
 }: {
   projects: ProjectInfo[];
   selectedPath: string | null;
   onSelect: (path: string) => void;
+  filter: ProjectFilter;
+  onFilterChange: (next: ProjectFilter) => void;
+  onClean: () => void;
+  /**
+   * Count of projects that are actually candidates for cleanup —
+   * orphan or empty. Drives the "Clean…" button's enabled/disabled
+   * state and the number shown next to it. Computed by the parent
+   * so the modal and the button see identical numbers.
+   */
+  cleanCount: number;
 }) {
+  const { counts, filtered } = useMemo(() => {
+    const counts: Record<ProjectStatus, number> = {
+      alive: 0,
+      orphan: 0,
+      unreachable: 0,
+      empty: 0,
+    };
+    for (const p of projects) counts[classifyProject(p)] += 1;
+
+    const filtered =
+      filter === "all"
+        ? projects
+        : projects.filter((p) => classifyProject(p) === filter);
+    return { counts, filtered };
+  }, [projects, filter]);
+
   if (projects.length === 0) {
     return (
       <aside className="sidebar projects-sidebar">
@@ -50,47 +90,160 @@ export function ProjectsList({
         <div className="sidebar-title">Projects</div>
         <div className="sidebar-item-meta muted">{projects.length}</div>
       </div>
-      <ul className="sidebar-list" role="listbox" aria-label="Projects">
-        {projects.map((p) => {
-          const isActive = p.original_path === selectedPath;
-          return (
-            <li
-              key={p.sanitized_name}
-              role="option"
-              aria-selected={isActive}
-              className={`sidebar-item${isActive ? " active" : ""}`}
-              tabIndex={0}
-              onClick={() => onSelect(p.original_path)}
-              onKeyDown={(e) => {
-                if (e.key === "Enter" || e.key === " ") {
-                  e.preventDefault();
-                  onSelect(p.original_path);
-                }
-              }}
-            >
-              <div className="sidebar-item-row">
-                <div className="sidebar-item-text">
-                  <strong title={p.original_path}>
-                    {p.original_path.split("/").filter(Boolean).pop() ??
-                      p.sanitized_name}
-                  </strong>
-                  <div className="sidebar-item-meta muted">
-                    {p.session_count} session{p.session_count === 1 ? "" : "s"} ·{" "}
-                    {formatSize(p.total_size_bytes)} ·{" "}
-                    {formatRelative(p.last_modified_ms)}
+
+      <div
+        className="project-filter-row"
+        role="tablist"
+        aria-label="Filter projects by status"
+      >
+        <FilterChip
+          current={filter}
+          value="all"
+          label="All"
+          count={projects.length}
+          onClick={onFilterChange}
+        />
+        <FilterChip
+          current={filter}
+          value="orphan"
+          label="Orphan"
+          count={counts.orphan}
+          onClick={onFilterChange}
+        />
+        <FilterChip
+          current={filter}
+          value="unreachable"
+          label="Unreachable"
+          count={counts.unreachable}
+          onClick={onFilterChange}
+        />
+        <FilterChip
+          current={filter}
+          value="empty"
+          label="Empty"
+          count={counts.empty}
+          onClick={onFilterChange}
+        />
+      </div>
+
+      {filtered.length === 0 ? (
+        <div className="empty small muted">
+          <p>No projects in this filter.</p>
+        </div>
+      ) : (
+        <ul className="sidebar-list" role="listbox" aria-label="Projects">
+          {filtered.map((p) => {
+            const isActive = p.original_path === selectedPath;
+            const status = classifyProject(p);
+            return (
+              <li
+                key={p.sanitized_name}
+                role="option"
+                aria-selected={isActive}
+                className={`sidebar-item${isActive ? " active" : ""}`}
+                tabIndex={0}
+                onClick={() => onSelect(p.original_path)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter" || e.key === " ") {
+                    e.preventDefault();
+                    onSelect(p.original_path);
+                  }
+                }}
+              >
+                <div className="sidebar-item-row">
+                  <div className="sidebar-item-text">
+                    <strong title={p.original_path}>
+                      {p.original_path.split("/").filter(Boolean).pop() ??
+                        p.sanitized_name}
+                    </strong>
+                    <div className="sidebar-item-meta muted">
+                      {p.session_count} session{p.session_count === 1 ? "" : "s"} ·{" "}
+                      {formatSize(p.total_size_bytes)} ·{" "}
+                      {formatRelative(p.last_modified_ms)}
+                    </div>
                   </div>
+                  <StatusBadge status={status} />
                 </div>
-                {p.is_orphan && (
-                  <Warning
-                    className="warn"
-                    aria-label="orphan — source dir missing"
-                  />
-                )}
-              </div>
-            </li>
-          );
-        })}
-      </ul>
+              </li>
+            );
+          })}
+        </ul>
+      )}
+
+      <div className="project-sidebar-actions">
+        <button
+          type="button"
+          className="sidebar-action"
+          onClick={onClean}
+          disabled={cleanCount === 0}
+          title={
+            cleanCount === 0
+              ? "No orphans or empty projects to clean"
+              : `Review and remove ${cleanCount} project${cleanCount === 1 ? "" : "s"}`
+          }
+        >
+          <Trash size={14} weight="light" />
+          <span>
+            Clean{cleanCount > 0 ? ` (${cleanCount})` : ""}…
+          </span>
+        </button>
+      </div>
     </aside>
+  );
+}
+
+function FilterChip({
+  current,
+  value,
+  label,
+  count,
+  onClick,
+}: {
+  current: ProjectFilter;
+  value: ProjectFilter;
+  label: string;
+  count: number;
+  onClick: (next: ProjectFilter) => void;
+}) {
+  const selected = current === value;
+  return (
+    <button
+      type="button"
+      role="tab"
+      aria-selected={selected}
+      className={`project-filter-chip${selected ? " selected" : ""}`}
+      onClick={() => onClick(value)}
+    >
+      <span>{label}</span>
+      <span className="project-filter-count">{count}</span>
+    </button>
+  );
+}
+
+function StatusBadge({ status }: { status: ProjectStatus }) {
+  if (status === "alive") return null;
+  if (status === "orphan") {
+    return (
+      <Warning
+        className="project-status-icon orphan"
+        aria-label="orphan — source dir missing"
+      />
+    );
+  }
+  if (status === "unreachable") {
+    return (
+      <WifiSlash
+        className="project-status-icon unreachable"
+        aria-label="unreachable — mount the source volume to re-check"
+      />
+    );
+  }
+  // empty
+  return (
+    <span
+      className="project-status-dot empty"
+      aria-label="empty — CC project dir has no content"
+      title="empty — CC project dir has no content"
+    />
   );
 }

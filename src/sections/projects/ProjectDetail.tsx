@@ -1,8 +1,15 @@
 import { useEffect, useState } from "react";
-import { Folder, PencilSimple, Warning } from "@phosphor-icons/react";
+import {
+  Folder,
+  PencilSimple,
+  Warning,
+  WifiSlash,
+  CircleDashed,
+} from "@phosphor-icons/react";
 import { api } from "../../api";
 import { CopyButton } from "../../components/CopyButton";
 import type { ProjectDetail as ProjectDetailData } from "../../types";
+import { classifyProject } from "./projectStatus";
 
 /**
  * Right-pane detail view for the selected project. Shows paths, size,
@@ -66,6 +73,7 @@ export function ProjectDetail({
   if (!detail) return <main className="content" />;
 
   const { info, sessions, memory_files } = detail;
+  const status = classifyProject(info);
   return (
     <main className="content project-detail">
       <header className="project-detail-header">
@@ -75,9 +83,28 @@ export function ProjectDetail({
             {info.original_path.split("/").filter(Boolean).pop() ??
               info.sanitized_name}
           </h2>
-          {info.is_orphan && (
-            <span className="tag warn" title="source directory not found">
+          {status === "orphan" && (
+            <span
+              className="project-tag orphan"
+              title="source directory does not exist"
+            >
               <Warning size={11} weight="bold" /> orphan
+            </span>
+          )}
+          {status === "unreachable" && (
+            <span
+              className="project-tag unreachable"
+              title="source lives on an unmounted volume or permission-denied path"
+            >
+              <WifiSlash size={11} weight="bold" /> unreachable
+            </span>
+          )}
+          {status === "empty" && (
+            <span
+              className="project-tag empty"
+              title="CC project dir has no sessions or memory files"
+            >
+              <CircleDashed size={11} weight="bold" /> empty
             </span>
           )}
         </div>
@@ -92,6 +119,17 @@ export function ProjectDetail({
           </button>
         </div>
       </header>
+
+      {status === "unreachable" && (
+        <div className="project-hint unreachable" role="status">
+          <WifiSlash size={14} weight="light" />
+          <span>
+            Source path can't be checked right now (unmounted volume or
+            permission-denied ancestor). Mount the drive and click Refresh
+            to re-classify.
+          </span>
+        </div>
+      )}
 
       <section className="detail-grid">
         <div className="detail-row">
