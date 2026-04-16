@@ -102,6 +102,13 @@ async fn verify_blob_identity(
 /// false positives on "claude-desktop", grep pipelines, etc.). On
 /// non-Unix platforms: best-effort skip (returns false) since the
 /// primary risk is macOS/Linux where pgrep exists.
+/// Public wrapper around the live-session detector so the CLI's
+/// post-swap warning path can re-check without duplicating the
+/// `ps`/`pgrep` logic. Same cost as the gate check (one subprocess).
+pub async fn is_cc_process_running_public() -> bool {
+    is_cc_process_running().await
+}
+
 pub(crate) async fn is_cc_process_running() -> bool {
     #[cfg(unix)]
     {

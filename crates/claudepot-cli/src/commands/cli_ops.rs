@@ -54,6 +54,7 @@ pub fn status(ctx: &AppContext) -> Result<()> {
 pub async fn use_account(ctx: &AppContext, email_input: &str, no_refresh: bool, force: bool) -> Result<()> {
     use claudepot_core::cli_backend;
     use claudepot_core::resolve::resolve_email;
+    use claudepot_core::services::account_service;
 
     let email = resolve_email(&ctx.store, email_input).map_err(|e| anyhow::anyhow!("{e}"))?;
 
@@ -61,6 +62,20 @@ pub async fn use_account(ctx: &AppContext, email_input: &str, no_refresh: bool, 
         .store
         .find_by_email(&email)?
         .ok_or_else(|| anyhow::anyhow!("account not found: {email}"))?;
+
+    // Reconcile DB's active_cli pointer with CC's actual keychain state
+    // BEFORE checking "already active". Otherwise, if a running CC
+    // process refreshed its token and reverted a prior swap, our DB
+    // still thinks the old target is active — and this command would
+    // falsely report "Already active" without actually fixing the
+    // keychain. Best-effort; network/profile failures fall through.
+    if let Err(e) = account_service::sync_from_current_cc(&ctx.store).await {
+        if !ctx.quiet {
+            eprintln!(
+                "\u{26a0}  Couldn't verify CC state ({e}); proceeding with DB view."
+            );
+        }
+    }
 
     let current_uuid = ctx
         .store
@@ -113,7 +128,16 @@ pub async fn use_account(ctx: &AppContext, email_input: &str, no_refresh: bool, 
         );
     } else {
         println!("CLI: {from} → {email}");
-        eprintln!("\nNote: running claude processes will continue using the previous account until restarted.");
+        if force && claudepot_core::cli_backend::swap::is_cc_process_running_public().await {
+            eprintln!();
+            eprintln!(
+                "\u{26a0}  Warning: Claude Code is running. Its next OAuth token refresh\n   \
+                 will overwrite this swap back to {from}. Quit Claude Code\n   \
+                 before the next refresh (typically within the hour) for the swap to stick."
+            );
+        } else {
+            eprintln!("\nNote: running claude processes will continue using the previous account until restarted.");
+        }
     }
 
     Ok(())
