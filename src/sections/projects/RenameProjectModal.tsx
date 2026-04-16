@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { FolderOpen, Warning } from "@phosphor-icons/react";
 import { open as openDialog } from "@tauri-apps/plugin-dialog";
 import { api } from "../../api";
+import { useFocusTrap } from "../../hooks/useFocusTrap";
 import type { DryRunPlan, MoveArgs } from "../../types";
 
 const DEBOUNCE_MS = 300;
@@ -51,6 +52,7 @@ export function RenameProjectModal({
   const headingId = useRef(
     `rename-heading-${Math.random().toString(36).slice(2, 9)}`,
   );
+  const trapRef = useFocusTrap<HTMLDivElement>();
 
   // Used to drop stale preview responses: every keystroke increments
   // the token; on response we check ours still matches. Cheaper than
@@ -133,6 +135,7 @@ export function RenameProjectModal({
   return (
     <div className="modal-backdrop" role="presentation">
       <div
+        ref={trapRef}
         className="modal rename-modal"
         role="dialog"
         aria-modal="true"
