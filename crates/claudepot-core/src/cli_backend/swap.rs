@@ -94,6 +94,41 @@ async fn verify_blob_identity(
     }
 }
 
+/// Detect whether a Claude Code CLI process is currently running. If
+/// one is, its in-memory refresh token will eventually overwrite
+/// whatever we put in the keychain — making the swap silently revert.
+///
+/// Detection: `pgrep -x claude` on Unix (exact binary match — avoids
+/// false positives on "claude-desktop", grep pipelines, etc.). On
+/// non-Unix platforms: best-effort skip (returns false) since the
+/// primary risk is macOS/Linux where pgrep exists.
+pub(crate) async fn is_cc_process_running() -> bool {
+    #[cfg(unix)]
+    {
+        // macOS `pgrep` has trouble matching Mach-O binaries installed
+        // via symlink (e.g. ~/.local/bin/claude → versioned binary).
+        // `ps -axco comm` reliably lists the short process name and
+        // pipe-to-grep is simple enough for a pre-swap gate check.
+        let output = tokio::process::Command::new("ps")
+            .args(["-axco", "comm"])
+            .stdout(std::process::Stdio::piped())
+            .stderr(std::process::Stdio::null())
+            .output()
+            .await;
+        match output {
+            Ok(out) => {
+                let text = String::from_utf8_lossy(&out.stdout);
+                text.lines().any(|l| l.trim() == "claude")
+            }
+            Err(_) => false,
+        }
+    }
+    #[cfg(not(unix))]
+    {
+        false
+    }
+}
+
 /// Acquire an exclusive file lock for swap operations.
 /// Returns the locked file handle — lock is released when dropped.
 fn acquire_swap_lock() -> Result<fs::File, SwapError> {
@@ -175,6 +210,48 @@ pub async fn switch(
     refresher: &dyn TokenRefresher,
     fetcher: &dyn ProfileFetcher,
 ) -> Result<(), SwapError> {
+    switch_inner(
+        store, current_id, target_id, platform, auto_refresh, false,
+        refresher, fetcher,
+    )
+    .await
+}
+
+/// Like [`switch`] but bypasses the live-session gate. The `--force`
+/// flag in the CLI and the "Force switch" button in the GUI use this.
+pub async fn switch_force(
+    store: &AccountStore,
+    current_id: Option<Uuid>,
+    target_id: Uuid,
+    platform: &dyn CliPlatform,
+    auto_refresh: bool,
+    refresher: &dyn TokenRefresher,
+    fetcher: &dyn ProfileFetcher,
+) -> Result<(), SwapError> {
+    switch_inner(
+        store, current_id, target_id, platform, auto_refresh, true,
+        refresher, fetcher,
+    )
+    .await
+}
+
+async fn switch_inner(
+    store: &AccountStore,
+    current_id: Option<Uuid>,
+    target_id: Uuid,
+    platform: &dyn CliPlatform,
+    auto_refresh: bool,
+    force: bool,
+    refresher: &dyn TokenRefresher,
+    fetcher: &dyn ProfileFetcher,
+) -> Result<(), SwapError> {
+    // Gate: refuse if a CC process is running — its in-memory refresh
+    // token will overwrite the keychain on the next token refresh,
+    // silently reverting the swap.
+    if !force && is_cc_process_running().await {
+        return Err(SwapError::LiveSessionConflict);
+    }
+
     // Acquire exclusive lock — prevents concurrent swaps.
     tracing::debug!("acquiring swap lock...");
     let _lock = acquire_swap_lock()?;
@@ -595,7 +672,7 @@ mod tests {
 
         let platform = MockPlatform::new(None);
         let refresher = DefaultRefresher;
-        switch(
+        switch_force(
             &store,
             None,
             target_id,
@@ -633,7 +710,7 @@ mod tests {
         let platform = MockPlatform::new(Some("refreshed_current_blob"));
         let refresher = DefaultRefresher;
 
-        switch(
+        switch_force(
             &store,
             Some(current_id),
             target_id,
@@ -672,7 +749,7 @@ mod tests {
         *platform.storage.lock().unwrap() = Some("cc_current".to_string());
         let refresher = DefaultRefresher;
 
-        let result = switch(
+        let result = switch_force(
             &store,
             Some(current_id),
             target_id,
@@ -701,7 +778,7 @@ mod tests {
         let platform = MockPlatform::new(None);
         let refresher = DefaultRefresher;
 
-        let result = switch(
+        let result = switch_force(
             &store,
             None,
             target_id,
@@ -725,7 +802,7 @@ mod tests {
 
         let platform = MockPlatform::new(None);
         let refresher = DefaultRefresher;
-        switch(
+        switch_force(
             &store,
             None,
             target_id,
@@ -763,7 +840,7 @@ mod tests {
         *platform.storage.lock().unwrap() = Some("cc".to_string());
         let refresher = DefaultRefresher;
 
-        let result = switch(
+        let result = switch_force(
             &store,
             Some(current_id),
             target_id,
@@ -799,7 +876,7 @@ mod tests {
         *platform.storage.lock().unwrap() = Some("cc_blob".to_string());
         let refresher = DefaultRefresher;
 
-        let result = switch(
+        let result = switch_force(
             &store,
             Some(current_id),
             target_id,
@@ -848,7 +925,7 @@ mod tests {
         let platform = MockPlatform::new(Some("should-not-be-read"));
         let refresher = DefaultRefresher;
 
-        let result = switch(
+        let result = switch_force(
             &store,
             None,
             target_id,
@@ -875,7 +952,7 @@ mod tests {
 
         let platform = MockPlatform::new(None);
         let refresher = DefaultRefresher;
-        switch(
+        switch_force(
             &store,
             None,
             target_id,
@@ -892,7 +969,7 @@ mod tests {
         delete_private(target_id).unwrap();
     }
 
-    // --- switch() auto_refresh tests ---
+    // --- switch_force() auto_refresh tests ---
 
     #[tokio::test]
     async fn test_swap_auto_refresh_writes_fresh_blob() {
@@ -909,7 +986,7 @@ mod tests {
         let refresher = MockRefresher::success();
         let fetcher = MockProfileFetcher::returning(&format!("seed-{target_id}@example.com"));
 
-        switch(
+        switch_force(
             &store, None, target_id, &platform, true, &refresher, &fetcher,
         )
         .await
@@ -941,7 +1018,7 @@ mod tests {
         let refresher = MockRefresher::success();
         let fetcher = MockProfileFetcher::returning(&format!("seed-{target_id}@example.com"));
 
-        switch(
+        switch_force(
             &store, None, target_id, &platform, true, &refresher, &fetcher,
         )
         .await
@@ -971,7 +1048,7 @@ mod tests {
         let fetcher = MockProfileFetcher::returning(&format!("seed-{target_id}@example.com"));
 
         // auto_refresh = false — should NOT call refresher
-        switch(
+        switch_force(
             &store, None, target_id, &platform, false, &refresher, &fetcher,
         )
         .await
@@ -996,7 +1073,7 @@ mod tests {
         let platform = MockPlatform::new(Some("original-cc-blob"));
         let refresher = MockRefresher::failing("network error");
 
-        let result = switch(
+        let result = switch_force(
             &store,
             None,
             target_id,
@@ -1030,7 +1107,7 @@ mod tests {
         *platform.storage.lock().unwrap() = Some("cc_current".to_string());
         let refresher = MockRefresher::success();
 
-        let result = switch(
+        let result = switch_force(
             &store,
             Some(current_id),
             target_id,
@@ -1212,7 +1289,7 @@ mod tests {
         // Make set_active_cli fail while write_default remains working.
         store.corrupt_state_table_for_test();
 
-        let result = switch(
+        let result = switch_force(
             &store,
             Some(current_id),
             target_id,
@@ -1244,7 +1321,7 @@ mod tests {
     async fn test_swap_aborts_when_target_blob_belongs_to_different_account() {
         // Regression guard for the "wrong blob under wrong UUID" corruption
         // that motivated the verification. The target's stored blob reports
-        // a different email than the target's DB record — switch() must
+        // a different email than the target's DB record — switch_force() must
         // abort with IdentityMismatch before writing CC.
         let _lock = crate::testing::lock_data_dir();
         let _env = setup_test_data_dir();
@@ -1258,7 +1335,7 @@ mod tests {
         // Fetcher claims the blob is for someone else — the divergence case.
         let fetcher = MockProfileFetcher::returning("intruder@example.com");
 
-        let result = switch(
+        let result = switch_force(
             &store, None, target_id, &platform, false, &refresher, &fetcher,
         )
         .await;
@@ -1315,7 +1392,7 @@ mod tests {
         // → target check passes; outgoing check sees drift (cur_email differs).
         let fetcher = MockProfileFetcher::returning(&format!("seed-{target_id}@example.com"));
 
-        let result = switch(
+        let result = switch_force(
             &store,
             Some(current_id),
             target_id,
@@ -1365,7 +1442,7 @@ mod tests {
 
         store.corrupt_state_table_for_test();
 
-        let result = switch(
+        let result = switch_force(
             &store,
             None,
             target_id,
@@ -1410,7 +1487,7 @@ mod tests {
 
         store.corrupt_state_table_for_test();
 
-        let result = switch(
+        let result = switch_force(
             &store,
             Some(current_id),
             target_id,
@@ -1491,7 +1568,7 @@ mod tests {
         let refresher = MockRefresher::success();
         let fetcher = MockProfileFetcher::returning(&format!("seed-{target_id}@example.com"));
 
-        let result = switch(
+        let result = switch_force(
             &store,
             None,
             target_id,
@@ -1600,7 +1677,7 @@ mod tests {
             target_email: format!("seed-{target_id}@example.com"),
         };
 
-        let result = switch(
+        let result = switch_force(
             &store,
             Some(current_id),
             target_id,

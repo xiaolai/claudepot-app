@@ -95,8 +95,11 @@ pub fn app_status() -> Result<AppStatus, String> {
     })
 }
 
+/// `force` defaults to false from the existing GUI; the frontend
+/// can pass `true` to bypass the live-session gate after showing the
+/// user a warning.
 #[tauri::command]
-pub async fn cli_use(email: String) -> Result<(), String> {
+pub async fn cli_use(email: String, force: Option<bool>) -> Result<(), String> {
     let store = open_store()?;
     let target = resolve_target(&store, &email)?;
     let current_id = active_id(&store, AccountStore::active_cli_uuid);
@@ -104,16 +107,19 @@ pub async fn cli_use(email: String) -> Result<(), String> {
     let platform = cli_backend::create_platform();
     let refresher = cli_backend::swap::DefaultRefresher;
     let fetcher = cli_backend::swap::DefaultProfileFetcher;
-    cli_backend::swap::switch(
-        &store,
-        current_id,
-        target.uuid,
-        platform.as_ref(),
-        true,
-        &refresher,
-        &fetcher,
-    )
-    .await
+    if force.unwrap_or(false) {
+        cli_backend::swap::switch_force(
+            &store, current_id, target.uuid,
+            platform.as_ref(), true, &refresher, &fetcher,
+        )
+        .await
+    } else {
+        cli_backend::swap::switch(
+            &store, current_id, target.uuid,
+            platform.as_ref(), true, &refresher, &fetcher,
+        )
+        .await
+    }
     .map_err(|e| format!("cli switch failed: {e}"))
 }
 
