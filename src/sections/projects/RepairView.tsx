@@ -35,10 +35,13 @@ type PendingAction =
 export function RepairView({
   onBack,
   onOpTerminated,
+  embedded,
 }: {
   onBack: () => void;
   /** Fired when an op completes/errors so the parent can refresh banners. */
   onOpTerminated?: () => void;
+  /** When true, hides the header/back button (embedded in MaintenanceView). */
+  embedded?: boolean;
 }) {
   const [entries, setEntries] = useState<JournalEntry[]>([]);
   const [loading, setLoading] = useState(true);
@@ -116,22 +119,26 @@ export function RepairView({
     }
   };
 
+  const Wrapper = embedded ? "div" : "main";
+
   return (
-    <main className="content repair-view">
-      <header className="repair-header">
-        <button
-          type="button"
-          className="icon-btn"
-          onClick={onBack}
-          aria-label="Back to Projects"
-          title="Back to Projects"
-        >
-          <ArrowLeft />
-        </button>
-        <h2>
-          <Wrench /> Repair
-        </h2>
-      </header>
+    <Wrapper className={embedded ? "repair-view-embedded" : "content repair-view"}>
+      {!embedded && (
+        <header className="repair-header">
+          <button
+            type="button"
+            className="icon-btn"
+            onClick={onBack}
+            aria-label="Back to Projects"
+            title="Back to Projects"
+          >
+            <ArrowLeft />
+          </button>
+          <h2>
+            <Wrench /> Repair
+          </h2>
+        </header>
+      )}
 
       {loading && entries.length === 0 && (
         <div className="skeleton-container">
@@ -287,7 +294,7 @@ export function RepairView({
           {toast}
         </div>
       )}
-    </main>
+    </Wrapper>
   );
 }
 

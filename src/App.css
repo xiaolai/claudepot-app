@@ -1713,6 +1713,108 @@ button.danger.primary:hover:not(:disabled) {
   }
 }
 
+/* ---------- segmented control (P2.2) ---------- */
+
+.segmented-control {
+  display: flex;
+  border: 0.5px solid var(--border);
+  border-radius: 6px;
+  overflow: hidden;
+  background: color-mix(in srgb, var(--bg) 60%, transparent);
+}
+
+.segmented-control-item {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 24px;
+  padding: 0 12px;
+  border: none;
+  border-left: 0.5px solid var(--border);
+  border-radius: 0;
+  background: transparent;
+  font-size: 11px;
+  font-weight: 400;
+  color: var(--muted);
+  box-shadow: none;
+  white-space: nowrap;
+}
+
+.segmented-control-item:first-child {
+  border-left: none;
+}
+
+.segmented-control-item:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--muted) 8%, transparent);
+  color: var(--text);
+}
+
+.segmented-control-item.selected {
+  background: color-mix(in srgb, var(--accent) 14%, transparent);
+  color: var(--text);
+  font-weight: 500;
+}
+
+.segmented-control-item:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+}
+
+/* ---------- maintenance view (P2.2) ---------- */
+
+.maintenance-view {
+  padding-top: 52px;
+}
+
+.maintenance-section {
+  padding: 16px 24px;
+  border-bottom: 0.5px solid var(--border);
+}
+
+.maintenance-section:last-child {
+  border-bottom: none;
+}
+
+.maintenance-section-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.maintenance-section-header h2 {
+  font-size: 15px;
+  font-weight: 500;
+  margin: 0;
+}
+
+.maintenance-section-header svg.lucide {
+  color: var(--muted);
+}
+
+.maintenance-desc {
+  font-size: 12px;
+  margin: 0 0 12px;
+}
+
+.maintenance-toast {
+  margin-top: 8px;
+  padding: 6px 10px;
+  border-radius: 6px;
+  background: var(--ok-weak);
+  color: var(--ok);
+  font-size: 12px;
+}
+
+.repair-view-embedded {
+  padding: 0;
+}
+
+.repair-view-embedded .repair-list {
+  padding: 0;
+}
+
 /* ---------- projects section ---------- */
 
 /* Fallback bg so the vibrancy sidebar doesn't go pitch-black when

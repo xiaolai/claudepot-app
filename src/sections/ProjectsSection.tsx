@@ -3,22 +3,28 @@ import { Folder } from "lucide-react";
 import { api } from "../api";
 import { useOperations } from "../hooks/useOperations";
 import type { CleanResult, MoveArgs, ProjectInfo } from "../types";
+import { SegmentedControl } from "../components/SegmentedControl";
 import { ProjectsList, type ProjectFilter } from "./projects/ProjectsList";
 import { ProjectDetail } from "./projects/ProjectDetail";
 import { RenameProjectModal } from "./projects/RenameProjectModal";
 import { CleanOrphansModal } from "./projects/CleanOrphansModal";
-import { RepairView } from "./projects/RepairView";
+import { MaintenanceView } from "./projects/MaintenanceView";
 import { classifyProject } from "./projects/projectStatus";
 
+type ProjectsTab = "list" | "maintenance";
+const TABS = [
+  { id: "list" as const, label: "List" },
+  { id: "maintenance" as const, label: "Maintenance" },
+];
+
 /**
- * Projects section. Routes between:
- * - default list-view (ProjectsList + ProjectDetail split)
- * - repair subview (RepairView)
+ * Projects section. Segmented control switches between:
+ * - List tab: project list + detail split
+ * - Maintenance tab: Clean + Repair merged view (P2.2)
  *
- * `subRoute === "repair"` activates the subview; the shell is
- * responsible for setting this (e.g. via the global PendingJournalsBanner
- * deep-link). The section also exposes a "Back to Projects" affordance
- * via the subview so the user can return without digging into the rail.
+ * `subRoute === "repair"` or `subRoute === "maintenance"` activates
+ * the maintenance tab; the shell uses this for deep-links from the
+ * PendingJournalsBanner.
  */
 export function ProjectsSection({
   subRoute,
@@ -71,8 +77,27 @@ export function ProjectsSection({
     refresh();
   }, [refresh]);
 
-  if (subRoute === "repair") {
-    return <RepairView onBack={() => onSubRouteChange(null)} />;
+  const activeTab: ProjectsTab =
+    subRoute === "repair" || subRoute === "maintenance" ? "maintenance" : "list";
+
+  if (activeTab === "maintenance") {
+    return (
+      <>
+        <aside className="sidebar projects-sidebar">
+          <div className="sidebar-header">
+            <span className="sidebar-title">Projects</span>
+          </div>
+          <div style={{ padding: "0 8px 8px" }}>
+            <SegmentedControl
+              options={TABS}
+              value={activeTab}
+              onChange={(t) => onSubRouteChange(t === "list" ? null : "maintenance")}
+            />
+          </div>
+        </aside>
+        <MaintenanceView onOpTerminated={() => refresh()} />
+      </>
+    );
   }
 
   if (loading && projects.length === 0) {
@@ -123,6 +148,13 @@ export function ProjectsSection({
         onFilterChange={setFilter}
         onClean={() => setCleanOpen(true)}
         cleanCount={cleanCount}
+        segmentedControl={
+          <SegmentedControl
+            options={TABS}
+            value={activeTab}
+            onChange={(t) => onSubRouteChange(t === "list" ? null : "maintenance")}
+          />
+        }
       />
       {selectedPath ? (
         <ProjectDetail

@@ -40,6 +40,7 @@ export function ProjectsList({
   onFilterChange,
   onClean,
   cleanCount,
+  segmentedControl,
 }: {
   projects: ProjectInfo[];
   selectedPath: string | null;
@@ -47,13 +48,9 @@ export function ProjectsList({
   filter: ProjectFilter;
   onFilterChange: (next: ProjectFilter) => void;
   onClean: () => void;
-  /**
-   * Count of projects that are actually candidates for cleanup —
-   * orphan or empty. Drives the "Clean…" button's enabled/disabled
-   * state and the number shown next to it. Computed by the parent
-   * so the modal and the button see identical numbers.
-   */
   cleanCount: number;
+  /** Optional segmented control rendered below the sidebar header. */
+  segmentedControl?: ReactNode;
 }) {
   const { counts, filtered } = useMemo(() => {
     const counts: Record<ProjectStatus, number> = {
@@ -90,6 +87,12 @@ export function ProjectsList({
         <div className="sidebar-title">Projects</div>
         <div className="sidebar-item-meta muted">{projects.length}</div>
       </div>
+
+      {segmentedControl && (
+        <div style={{ padding: "0 8px 8px" }}>
+          {segmentedControl}
+        </div>
+      )}
 
       <div
         className="project-filter-row"
