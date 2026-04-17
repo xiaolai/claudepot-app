@@ -5,7 +5,8 @@ import { SidebarAccountItem } from "./SidebarAccountItem";
 
 export function Sidebar({
   accounts, usage, selectedUuid, busyKeys,
-  onSelect, onAdd, onRefresh, onSwitchCli, onLogin, onContextMenu,
+  onSelect, onAdd, onRefresh, onSwitchCli, onLogin,
+  onContextMenu, onBadgeContextMenu,
 }: {
   accounts: AccountSummary[];
   usage: UsageMap;
@@ -17,6 +18,7 @@ export function Sidebar({
   onSwitchCli: (a: AccountSummary) => void;
   onLogin: (a: AccountSummary) => void;
   onContextMenu?: (e: React.MouseEvent, a: AccountSummary) => void;
+  onBadgeContextMenu?: (e: React.MouseEvent, a: AccountSummary) => void;
 }) {
   const [filterText, setFilterText] = useState("");
   const filterRef = useRef<HTMLInputElement>(null);
@@ -82,6 +84,7 @@ export function Sidebar({
             onSwitchCli={() => onSwitchCli(a)}
             onLogin={() => onLogin(a)}
             onContextMenu={onContextMenu ? (e) => onContextMenu(e, a) : undefined}
+            onBadgeContextMenu={onBadgeContextMenu ? (e) => onBadgeContextMenu(e, a) : undefined}
           />
         ))}
       </div>

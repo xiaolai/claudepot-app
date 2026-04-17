@@ -425,6 +425,30 @@ pub async fn fetch_all_usage(
 ///
 /// This is what the Refresh button calls; the GUI may also auto-invoke
 /// it on window focus (debounced) so drift surfaces without a click.
+/// Reconcile a single account's stored blob against `/api/oauth/profile`.
+/// Mirrors `verify_all_accounts` but scoped — used by the per-account
+/// context-menu / palette "Verify now" action.
+///
+/// Returns the refreshed `AccountSummary` for the target account so the
+/// caller can patch the row without a full list round-trip.
+#[tauri::command]
+pub async fn verify_account(uuid: String) -> Result<AccountSummary, String> {
+    use claudepot_core::cli_backend::swap::DefaultProfileFetcher;
+    use claudepot_core::services::identity;
+
+    let store = open_store()?;
+    let id = Uuid::parse_str(&uuid).map_err(|e| format!("bad uuid: {e}"))?;
+    let fetcher = DefaultProfileFetcher;
+    identity::verify_account_identity(&store, id, &fetcher)
+        .await
+        .map_err(|e| format!("verify failed: {e}"))?;
+    let account = store
+        .find_by_uuid(id)
+        .map_err(|e| format!("lookup failed: {e}"))?
+        .ok_or_else(|| "account not found".to_string())?;
+    Ok(AccountSummary::from(&account))
+}
+
 #[tauri::command]
 pub async fn verify_all_accounts() -> Result<Vec<AccountSummary>, String> {
     use claudepot_core::cli_backend::swap::DefaultProfileFetcher;

@@ -9,7 +9,7 @@ function formatResetTime(iso: string): string {
 
 export function SidebarAccountItem({
   account: a, active, fiveHour, cliBusy, reBusy,
-  onSelect, onSwitchCli, onLogin, onContextMenu,
+  onSelect, onSwitchCli, onLogin, onContextMenu, onBadgeContextMenu,
 }: {
   account: AccountSummary;
   active: boolean;
@@ -20,6 +20,12 @@ export function SidebarAccountItem({
   onSwitchCli: () => void;
   onLogin: () => void;
   onContextMenu?: (e: React.MouseEvent) => void;
+  /**
+   * Right-click specifically on the status dot / usage bar. Distinct
+   * from the row's full-item menu so we can show token/usage-scoped
+   * actions (Verify now, Copy token status, Refresh usage).
+   */
+  onBadgeContextMenu?: (e: React.MouseEvent) => void;
 }) {
   const tokenKind = a.drift ? "bad"
     : a.token_status.startsWith("valid") ? "ok"
@@ -52,7 +58,18 @@ export function SidebarAccountItem({
       }}
       tabIndex={0}
     >
-      <span className={`status-dot ${tokenKind}`} title={dotTitle} />
+      <span
+        className={`status-dot ${tokenKind}`}
+        title={dotTitle}
+        onContextMenu={
+          onBadgeContextMenu
+            ? (e) => {
+                e.stopPropagation();
+                onBadgeContextMenu(e);
+              }
+            : undefined
+        }
+      />
       <div style={{ flex: 1, minWidth: 0 }}>
         <div className="sidebar-item-row">
           <span className="sidebar-item-text">{a.email}</span>
@@ -88,7 +105,17 @@ export function SidebarAccountItem({
           {a.subscription_type ? ` · ${a.subscription_type}` : ""}
         </div>
         {fiveHourPct !== null && (
-          <div className="usage-bar-row">
+          <div
+            className="usage-bar-row"
+            onContextMenu={
+              onBadgeContextMenu
+                ? (e) => {
+                    e.stopPropagation();
+                    onBadgeContextMenu(e);
+                  }
+                : undefined
+            }
+          >
             <div className="usage-bar-container">
               <div className={`usage-bar-fill ${fiveHourPct >= 80 ? "high" : ""}`}
                 style={{ width: `${Math.min(fiveHourPct, 100)}%` }} />

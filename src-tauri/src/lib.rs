@@ -96,6 +96,7 @@ pub fn run() {
             commands::account_remove,
             commands::fetch_all_usage,
             commands::verify_all_accounts,
+            commands::verify_account,
             commands::current_cc_identity,
             commands::project_list,
             commands::project_show,
