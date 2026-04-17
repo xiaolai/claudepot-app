@@ -320,13 +320,66 @@ button svg.lucide {
   white-space: nowrap;
 }
 
+/* ---------- sidebar inline switch button (P0.1) ---------- */
+
+.sidebar-switch-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  padding: 0;
+  border: none;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--muted);
+  box-shadow: none;
+  opacity: 0;
+  transition: opacity 0.1s ease;
+  flex-shrink: 0;
+}
+
+.sidebar-switch-btn svg.lucide {
+  margin-right: 0;
+}
+
+.sidebar-item:hover .sidebar-switch-btn,
+.sidebar-item:focus-within .sidebar-switch-btn {
+  opacity: 1;
+}
+
+.sidebar-switch-btn:hover:not(:disabled) {
+  background: var(--accent-weak);
+  color: var(--accent);
+}
+
+.sidebar-switch-btn.login {
+  color: var(--warn);
+}
+
+.sidebar-switch-btn.login:hover:not(:disabled) {
+  background: var(--warn-weak);
+  color: var(--warn);
+}
+
+.sidebar-switch-btn:disabled {
+  opacity: 0.3;
+}
+
 /* ---------- usage-bar (sidebar) ---------- */
+
+.usage-bar-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 4px;
+}
 
 .usage-bar-container {
   height: 3px;
   background: var(--border);
   border-radius: 999px;
-  margin-top: 4px;
+  flex: 1;
   overflow: hidden;
 }
 
@@ -343,6 +396,18 @@ button svg.lucide {
 
 .usage-bar-fill.high {
   background: var(--warn);
+}
+
+.usage-bar-label {
+  font-size: 10px;
+  font-variant-numeric: tabular-nums;
+  color: var(--muted);
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+.usage-bar-label.high {
+  color: var(--warn);
 }
 
 /* ---------- usage-pct (detail) ---------- */

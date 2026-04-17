@@ -190,13 +190,14 @@ describe("WI-2: Per-account busy states", () => {
       account_login_cancel: () => {},
     });
 
-    // Select alice (unhealthy) and click Log in
+    // Select alice (unhealthy) and click Log in in the detail pane
     await selectAccount("alice@example.com");
-    await user.click(await screen.findByRole("button", { name: /log in/i }));
+    const main1 = screen.getByRole("main");
+    await user.click(await within(main1).findByRole("button", { name: /log in/i }));
 
     // Select bob — his "Use CLI" should still be enabled
     await selectAccount("bob@example.com");
-    const useCli = await screen.findByRole("button", { name: /use cli/i });
+    const useCli = await within(main1).findByRole("button", { name: /use cli/i });
     expect(useCli).not.toBeDisabled();
 
     // Cleanup
@@ -237,7 +238,8 @@ describe("ContentPane — button disable logic", () => {
     });
 
     await selectAccount("alice@example.com");
-    await user.click(await screen.findByRole("button", { name: /log in/i }));
+    const main2 = screen.getByRole("main");
+    await user.click(await within(main2).findByRole("button", { name: /log in/i }));
 
     await waitFor(() => {
       expect(login).toHaveBeenCalledWith({
@@ -245,7 +247,7 @@ describe("ContentPane — button disable logic", () => {
       });
     });
     expect(
-      await screen.findByRole("button", { name: /use cli/i }),
+      await within(main2).findByRole("button", { name: /use cli/i }),
     ).toBeInTheDocument();
   });
 
@@ -271,8 +273,9 @@ describe("ContentPane — button disable logic", () => {
     });
 
     await selectAccount("alice@example.com");
-    await user.click(await screen.findByRole("button", { name: /log in/i }));
-    const cancelBtn = await screen.findByRole("button", {
+    const main3 = screen.getByRole("main");
+    await user.click(await within(main3).findByRole("button", { name: /log in/i }));
+    const cancelBtn = await within(main3).findByRole("button", {
       name: /cancel login/i,
     });
     await user.click(cancelBtn);
@@ -281,7 +284,7 @@ describe("ContentPane — button disable logic", () => {
       expect(cancel).toHaveBeenCalledTimes(1);
     });
     expect(
-      await screen.findByRole("button", { name: /log in/i }),
+      await within(main3).findByRole("button", { name: /log in/i }),
     ).toBeInTheDocument();
   });
 
@@ -298,8 +301,9 @@ describe("ContentPane — button disable logic", () => {
     });
 
     await selectAccount("alice@example.com");
-    expect(screen.queryByRole("button", { name: /use cli/i })).toBeNull();
-    const btn = await screen.findByRole("button", { name: /log in/i });
+    const main4 = screen.getByRole("main");
+    expect(within(main4).queryByRole("button", { name: /use cli/i })).toBeNull();
+    const btn = await within(main4).findByRole("button", { name: /log in/i });
     expect(btn).toBeEnabled();
     expect(btn.getAttribute("title")).toMatch(/sign in as/i);
   });
