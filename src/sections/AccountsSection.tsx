@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { User } from "lucide-react";
 import { api } from "../api";
 import type { AccountSummary } from "../types";
@@ -40,8 +40,8 @@ export function AccountsSection() {
 
   const [showAdd, setShowAdd] = useState(false);
   const [confirmRemove, setConfirmRemove] = useState<AccountSummary | null>(null);
-  const [confirmDesktop, setConfirmDesktop] = useState<AccountSummary | null>(null);
   const [confirmClear, setConfirmClear] = useState(false);
+  const pendingDesktopRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [selectedUuid, setSelectedUuid] = useState<string | null>(null);
   const [showPalette, setShowPalette] = useState(false);
   const [ctxMenu, setCtxMenu] = useState<{
@@ -57,6 +57,26 @@ export function AccountsSection() {
   );
 
   const closeCtxMenu = useCallback(() => setCtxMenu(null), []);
+
+  // Deferred Desktop switch with undo toast (P2.4)
+  const handleDesktopSwitch = useCallback(
+    (a: AccountSummary) => {
+      // Cancel any previous pending switch
+      if (pendingDesktopRef.current) clearTimeout(pendingDesktopRef.current);
+      let cancelled = false;
+      const timer = setTimeout(() => {
+        pendingDesktopRef.current = null;
+        if (!cancelled) actions.useDesktop(a);
+      }, 3000);
+      pendingDesktopRef.current = timer;
+      pushToast("info", `Switching Desktop to ${a.email}…`, () => {
+        cancelled = true;
+        clearTimeout(timer);
+        pendingDesktopRef.current = null;
+      });
+    },
+    [actions, pushToast],
+  );
 
   // Auto-select: active CLI > active Desktop > first account.
   useEffect(() => {
@@ -153,7 +173,7 @@ export function AccountsSection() {
           busyKeys={busy.busyKeys}
           anyBusy={busy.anyBusy}
           onUseCli={(a) => actions.useCli(a)}
-          onUseDesktop={(a) => setConfirmDesktop(a)}
+          onUseDesktop={(a) => handleDesktopSwitch(a)}
           onLogin={(a) => actions.login(a)}
           onCancelLogin={actions.cancelLogin}
           onRemove={(a) => setConfirmRemove(a)}
@@ -174,11 +194,6 @@ export function AccountsSection() {
         onCancel={() => setConfirmRemove(null)}
         onConfirm={async () => { const t = confirmRemove; setConfirmRemove(null); await actions.performRemove(t); }} />}
 
-      {confirmDesktop && <ConfirmDialog title="Switch Desktop?" confirmLabel="Switch"
-        body={<p>Switch Desktop to <strong>{confirmDesktop.email}</strong>? Claude Desktop will quit and relaunch.</p>}
-        onCancel={() => setConfirmDesktop(null)}
-        onConfirm={async () => { const t = confirmDesktop; setConfirmDesktop(null); await actions.useDesktop(t); }} />}
-
       {confirmClear && <ConfirmDialog title="Sign out of Claude Code?" confirmLabel="Clear" confirmDanger
         body={<p>Clears CC's credentials file. You'll need to sign in again.</p>}
         onCancel={() => setConfirmClear(false)}
@@ -190,7 +205,7 @@ export function AccountsSection() {
           status={status}
           onClose={() => setShowPalette(false)}
           onSwitchCli={(a) => actions.useCli(a)}
-          onSwitchDesktop={(a) => setConfirmDesktop(a)}
+          onSwitchDesktop={(a) => handleDesktopSwitch(a)}
           onAdd={() => setShowAdd(true)}
           onRefresh={() => { refresh(); refreshUsage(); }}
           onRemove={(a) => setConfirmRemove(a)}
@@ -211,7 +226,7 @@ export function AccountsSection() {
           {
             label: a.is_desktop_active ? "Active Desktop" : "Set as Desktop",
             disabled: a.is_desktop_active || !a.has_desktop_profile || !status.desktop_installed,
-            onClick: () => setConfirmDesktop(a),
+            onClick: () => handleDesktopSwitch(a),
           },
           { label: "", separator: true, onClick: () => {} },
           { label: "Remove", danger: true, onClick: () => setConfirmRemove(a) },
