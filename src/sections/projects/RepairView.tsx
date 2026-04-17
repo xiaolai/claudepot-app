@@ -1,11 +1,11 @@
 import { useCallback, useEffect, useState } from "react";
 import {
-  ArrowCounterClockwise,
+  RotateCcw,
   ArrowLeft,
-  ArrowUUpLeft,
-  Prohibit,
+  Undo2,
+  Ban,
   Wrench,
-} from "@phosphor-icons/react";
+} from "lucide-react";
 import { api } from "../../api";
 import { ConfirmDangerousAction } from "../../components/ConfirmDangerousAction";
 import { useOperations } from "../../hooks/useOperations";
@@ -150,7 +150,7 @@ export function RepairView({
 
       {!loading && !error && entries.length === 0 && (
         <div className="empty">
-          <Wrench size={32} weight="thin" />
+          <Wrench size={32} strokeWidth={1} />
           <h2>All clear</h2>
           <p className="muted">No pending rename journals.</p>
         </div>
@@ -191,14 +191,14 @@ export function RepairView({
                     title="Re-run the original rename"
                     onClick={() => setPending({ kind: "resume", entry: e })}
                   >
-                    <ArrowCounterClockwise /> Resume
+                    <RotateCcw /> Resume
                   </button>
                   <button
                     type="button"
                     title="Reverse the rename (runs new → old)"
                     onClick={() => setPending({ kind: "rollback", entry: e })}
                   >
-                    <ArrowUUpLeft /> Rollback
+                    <Undo2 /> Rollback
                   </button>
                   <button
                     type="button"
@@ -206,7 +206,7 @@ export function RepairView({
                     title="Stop nagging about this journal"
                     onClick={() => setPending({ kind: "abandon", entry: e })}
                   >
-                    <Prohibit /> Abandon
+                    <Ban /> Abandon
                   </button>
                 </div>
               )}

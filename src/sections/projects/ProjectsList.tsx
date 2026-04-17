@@ -1,5 +1,5 @@
-import { useMemo } from "react";
-import { Folder, Trash } from "@phosphor-icons/react";
+import { useMemo, type ReactNode } from "react";
+import { Folder, Trash2, List, Unlink, WifiOff, CircleDashed as CircleDashedIcon } from "lucide-react";
 import type { ProjectInfo } from "../../types";
 import { classifyProject, type ProjectStatus } from "./projectStatus";
 
@@ -78,7 +78,7 @@ export function ProjectsList({
           <div className="sidebar-title">Projects</div>
         </div>
         <div className="empty small muted">
-          <Folder size={28} weight="thin" />
+          <Folder size={28} strokeWidth={1} />
           <p>No CC projects yet.</p>
         </div>
       </aside>
@@ -99,28 +99,32 @@ export function ProjectsList({
         <FilterChip
           current={filter}
           value="all"
-          label="All"
+          icon={<List size={14} />}
+          tooltip="All projects"
           count={projects.length}
           onClick={onFilterChange}
         />
         <FilterChip
           current={filter}
           value="orphan"
-          label="Orphan"
+          icon={<Unlink size={14} />}
+          tooltip="Orphan — source dir missing"
           count={counts.orphan}
           onClick={onFilterChange}
         />
         <FilterChip
           current={filter}
           value="unreachable"
-          label="Unreachable"
+          icon={<WifiOff size={14} />}
+          tooltip="Unreachable — volume unmounted"
           count={counts.unreachable}
           onClick={onFilterChange}
         />
         <FilterChip
           current={filter}
           value="empty"
-          label="Empty"
+          icon={<CircleDashedIcon size={14} />}
+          tooltip="Empty — no sessions or memory"
           count={counts.empty}
           onClick={onFilterChange}
         />
@@ -182,7 +186,7 @@ export function ProjectsList({
               : `Review and remove ${cleanCount} project${cleanCount === 1 ? "" : "s"}`
           }
         >
-          <Trash size={14} weight="light" />
+          <Trash2 size={14} />
           <span>
             Clean{cleanCount > 0 ? ` (${cleanCount})` : ""}…
           </span>
@@ -195,13 +199,15 @@ export function ProjectsList({
 function FilterChip({
   current,
   value,
-  label,
+  icon,
+  tooltip,
   count,
   onClick,
 }: {
   current: ProjectFilter;
   value: ProjectFilter;
-  label: string;
+  icon: ReactNode;
+  tooltip: string;
   count: number;
   onClick: (next: ProjectFilter) => void;
 }) {
@@ -214,10 +220,12 @@ function FilterChip({
       type="button"
       role="tab"
       aria-selected={selected}
+      aria-label={tooltip}
+      title={tooltip}
       className={`project-filter-chip${selected ? " selected" : ""}`}
       onClick={() => onClick(value)}
     >
-      <span>{label}</span>
+      {icon}
       {showCount && <span className="project-filter-count">{count}</span>}
     </button>
   );

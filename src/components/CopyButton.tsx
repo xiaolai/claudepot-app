@@ -1,5 +1,5 @@
 import { useRef, useState } from "react";
-import { Copy, Check, Warning } from "@phosphor-icons/react";
+import { Copy, Check, AlertTriangle } from "lucide-react";
 
 export function CopyButton({ text }: { text: string }) {
   const [state, setState] = useState<"idle" | "copied" | "failed">("idle");
@@ -19,8 +19,8 @@ export function CopyButton({ text }: { text: string }) {
   return (
     <button className="copy-btn" onClick={copy} title="Copy to clipboard"
       aria-label={`Copy ${text}`}>
-      {state === "copied" ? <Check size={13} weight="bold" /> :
-       state === "failed" ? <Warning size={13} /> :
+      {state === "copied" ? <Check size={13} strokeWidth={2.5} /> :
+       state === "failed" ? <AlertTriangle size={13} /> :
        <Copy size={13} />}
     </button>
   );

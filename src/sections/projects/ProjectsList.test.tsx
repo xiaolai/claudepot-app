@@ -105,18 +105,18 @@ describe("ProjectsList", () => {
     );
 
     const orphanChip = screen.getByRole("tab", { name: /Orphan/ });
-    // Chip text is "Orphan 2" — verify the count is present.
+    // Chip shows icon + count — verify the count is present.
     expect(orphanChip.textContent).toMatch(/2/);
 
     const unreachableChip = screen.getByRole("tab", { name: /Unreachable/ });
     expect(unreachableChip.textContent).toMatch(/1/);
 
     // Non-selected chip with count=0 hides its count entirely — we
-    // don't want "Unreachable 0" and "Empty 0" visually competing
-    // with meaningful data. "All" always shows its total.
+    // don't want visible "0" badges visually competing with
+    // meaningful data. "All" always shows its total.
     const emptyChip = screen.getByRole("tab", { name: /Empty/ });
     expect(emptyChip.textContent).not.toMatch(/\d/);
-    const allChip = screen.getByRole("tab", { name: /All/ });
+    const allChip = screen.getByRole("tab", { name: /All projects/ });
     expect(allChip.textContent).toMatch(/4/);
   });
 

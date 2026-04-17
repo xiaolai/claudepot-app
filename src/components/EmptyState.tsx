@@ -1,9 +1,9 @@
-import { UserPlus } from "@phosphor-icons/react";
+import { UserPlus } from "lucide-react";
 
 export function EmptyState({ onAdd }: { onAdd: () => void }) {
   return (
     <div className="empty">
-      <UserPlus size={32} weight="thin" />
+      <UserPlus size={32} strokeWidth={1} />
       <h2>No accounts yet</h2>
       <p className="muted">
         Add your first account — Claudepot will pick up whichever one Claude

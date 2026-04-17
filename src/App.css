@@ -89,6 +89,30 @@ body {
   user-select: text;
 }
 
+/* ---------- lucide icons: global defaults ---------- */
+/* Lucide SVGs carry class="lucide". Set defaults here so
+   individual icons only need to specify overrides.
+   Default strokeWidth 1.5 approximates SF Symbols regular weight. */
+svg.lucide {
+  width: 16px;
+  height: 16px;
+  stroke-width: 1.5;
+}
+/* When a Lucide icon sits next to text inside a button, align it
+   to the text baseline and add a small gap. */
+button svg.lucide {
+  vertical-align: -2px;
+  margin-right: 4px;
+  flex-shrink: 0;
+}
+/* Icon-only buttons: no text margin */
+.icon-btn svg.lucide,
+.copy-btn svg.lucide,
+.toast-close svg.lucide,
+.project-filter-chip svg.lucide {
+  margin-right: 0;
+}
+
 /* ---------- utilities ---------- */
 
 .muted  { color: var(--muted); }
@@ -153,6 +177,12 @@ body {
   color: var(--muted);
   cursor: default;
   -webkit-app-region: no-drag;
+}
+/* Rail icons need heavier stroke to read against the translucent sidebar */
+.section-rail-item svg.lucide {
+  width: 18px;
+  height: 18px;
+  stroke-width: 1.75;
 }
 
 .section-rail-item:hover {
@@ -348,6 +378,7 @@ body {
 
 .content {
   flex: 1;
+  min-width: 0;          /* prevent flex child from overflowing */
   display: flex;
   flex-direction: column;
   background: var(--bg);
@@ -461,6 +492,12 @@ body {
   display: flex;
   gap: 8px;
 }
+/* Inline button icons: 14px per design system */
+.detail-actions svg.lucide,
+.project-detail-actions svg.lucide {
+  width: 14px;
+  height: 14px;
+}
 
 .detail-section {
   padding: 12px 0;
@@ -469,9 +506,9 @@ body {
 
 .detail-section-title {
   font-size: 11px;
-  font-weight: 600;
-  text-transform: uppercase;
-  letter-spacing: 0.5px;
+  font-weight: 500;
+  text-transform: none;
+  letter-spacing: 0;
   color: var(--muted);
   margin: 0 0 8px;
 }
@@ -488,11 +525,12 @@ body {
 
 .detail-grid dt {
   color: var(--muted);
-  font-weight: 600;
-  text-transform: uppercase;
-  font-size: 10px;
-  letter-spacing: 0.04em;
-  padding-top: 2px;
+  font-weight: 400;
+  text-transform: none;
+  font-size: 12px;
+  letter-spacing: 0;
+  text-align: right;
+  padding-top: 1px;
 }
 
 .detail-grid dd {
@@ -614,16 +652,26 @@ button:focus-visible {
   box-shadow: var(--focus-ring);
 }
 
+/* Primary push button — AppKit NSButton "BezelStyleRounded" feel.
+   Solid accent fill at default saturation; on hover the whole
+   button dims slightly, not a separate hover color. The subtle
+   inner highlight mimics the 1-px inner glow AppKit draws on
+   focused push buttons. */
 button.primary {
   background: var(--accent);
   color: var(--accent-text);
   font-weight: 500;
   border-color: transparent;
-  box-shadow: none;
+  box-shadow: inset 0 0.5px 0 rgba(255, 255, 255, 0.18);
 }
 
 button.primary:hover:not(:disabled) {
-  filter: brightness(0.92);
+  filter: brightness(0.94);
+  background: var(--accent);
+}
+
+button.primary:active:not(:disabled) {
+  filter: brightness(0.88);
   background: var(--accent);
 }
 
@@ -982,16 +1030,17 @@ button.danger.primary:hover:not(:disabled) {
   align-items: center;
   justify-content: center;
   font-size: 13px;
-  padding: 0;
+  padding: 2px;
   border: none;
   background: none;
   color: var(--muted);
-  opacity: 0.5;
+  opacity: 0.6;
   vertical-align: middle;
   width: auto;
   height: auto;
   min-width: 0;
   box-shadow: none;
+  margin-left: 4px;
 }
 
 .copy-btn:hover {
@@ -1104,49 +1153,63 @@ button.danger.primary:hover:not(:disabled) {
   overflow-y: auto;
 }
 
-/* Filter chip row — tight, subtle segmented control. Counts are
-   hidden when zero on non-selected chips so "Unreachable 0" doesn't
-   visually compete with meaningful data. */
+/* NSSegmentedControl-style filter bar. One connected unit with
+   hairline dividers between segments — the defining macOS pattern
+   for "pick one of N". Selected segment gets an accent-tinted
+   background with the hairline still visible so the unit reads as
+   a single control rather than disjoint chips. */
 .project-filter-row {
   display: flex;
-  gap: 4px;
-  padding: 2px 8px 8px;
-  flex-wrap: wrap;
+  margin: 0 8px 8px;
+  border: 0.5px solid var(--border);
+  border-radius: 6px;
+  overflow: hidden;
+  background: color-mix(in srgb, var(--bg) 60%, transparent);
+  -webkit-app-region: no-drag;
 }
 .project-filter-chip {
+  flex: 1;
   display: inline-flex;
   align-items: center;
-  gap: 4px;
-  height: 20px;
-  padding: 0 8px;
+  justify-content: center;
+  gap: 2px;
+  min-width: 0;              /* allow shrinking */
+  height: 22px;
+  padding: 0 4px;
   border: none;
-  border-radius: 999px;
+  border-left: 0.5px solid var(--border);
+  border-radius: 0;
   background: transparent;
-  font-size: 11px;
-  font-weight: 500;
+  font-size: 10px;
+  font-weight: 400;
   color: var(--muted);
+  box-shadow: none;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
+.project-filter-chip:first-child { border-left: none; }
 .project-filter-chip:hover:not(:disabled) {
-  background: color-mix(in srgb, var(--muted) 10%, transparent);
+  background: color-mix(in srgb, var(--muted) 8%, transparent);
   color: var(--text);
 }
 .project-filter-chip.selected {
-  background: var(--accent-weak);
+  background: color-mix(in srgb, var(--accent) 14%, transparent);
   color: var(--text);
+  font-weight: 500;
 }
 .project-filter-chip:focus-visible {
   outline: 2px solid var(--accent);
-  outline-offset: 1px;
+  outline-offset: -2px;
 }
 .project-filter-count {
   font-variant-numeric: tabular-nums;
   font-size: 10px;
   color: var(--muted);
-  opacity: 0.8;
 }
 .project-filter-chip.selected .project-filter-count {
   color: var(--text);
-  opacity: 1;
+  opacity: 0.75;
 }
 
 /* List-row status indicator. A small leading dot replaces the
@@ -1215,6 +1278,12 @@ button.danger.primary:hover:not(:disabled) {
   border: 0.5px solid var(--border);
 }
 .project-hint svg { flex-shrink: 0; margin-top: 2px; }
+.project-hint svg.lucide { margin-right: 0; }
+.project-hint.cleanup {
+  color: var(--warn);
+  background: var(--warn-weak);
+  border-color: color-mix(in srgb, var(--warn) 20%, transparent);
+}
 
 /* Pinned footer with the Clean action. Uses the neutral button
    treatment so it reads as "utility" not "primary CTA". */
@@ -1268,8 +1337,12 @@ button.danger.primary:hover:not(:disabled) {
 }
 
 .project-detail-title h2 {
-  font-size: 16px;
-  font-weight: 600;
+  /* AppKit title bar / inspector heading style: 15pt regular-weight
+     is the document-title feel (Preview, QuickLook, Get Info). The
+     earlier 16/600 read as a web-app "page heading". */
+  font-size: 15px;
+  font-weight: 500;
+  letter-spacing: -0.01em;
   margin: 0;
 }
 
@@ -1278,42 +1351,53 @@ button.danger.primary:hover:not(:disabled) {
   gap: 8px;
 }
 
-.detail-grid {
-  padding: 16px 20px;
+/* Project detail grid — reset the account-detail 2-column layout
+   so each .detail-row stacks vertically as its own row. */
+.project-detail .detail-grid {
+  padding: 14px 20px;
   display: grid;
-  gap: 8px;
+  grid-template-columns: auto 1fr;
+  gap: 4px 12px;
 }
 
 .detail-row {
-  display: grid;
-  grid-template-columns: 140px 1fr;
-  align-items: baseline;
-  gap: 8px;
+  display: contents;
 }
 
 .detail-label {
-  font-size: 11px;
-  font-weight: 600;
-  text-transform: uppercase;
-  letter-spacing: 0.5px;
+  font-size: 12px;
+  font-weight: 400;
   color: var(--muted);
+  text-align: right;
+  letter-spacing: 0;
+  text-transform: none;
+}
+/* Project detail labels get a colon suffix via CSS (not in JSX) */
+.project-detail .detail-label::after { content: ":"; }
+/* Account detail uses <dt> instead of .detail-label — no suffix needed */
+
+.detail-value {
+  font-size: 12px;
+  min-width: 0;            /* prevent grid blowout */
+  overflow-wrap: anywhere; /* break long paths */
+}
+.detail-value.mono {
+  font-family: "SF Mono", SFMono-Regular, ui-monospace, Menlo, monospace;
+  font-size: 11px;
 }
 
-.detail-value { font-size: 13px; }
-.detail-value.mono { font-family: "SF Mono", SFMono-Regular, ui-monospace, Menlo, monospace; font-size: 11px; }
-
 .detail-section {
-  padding: 12px 20px;
+  padding: 10px 20px 14px;
   border-top: 0.5px solid var(--border);
 }
 
 .detail-section h3 {
   font-size: 11px;
-  font-weight: 600;
-  text-transform: uppercase;
-  letter-spacing: 0.5px;
+  font-weight: 500;
+  text-transform: none;
+  letter-spacing: 0;
   color: var(--muted);
-  margin: 0 0 8px;
+  margin: 0 0 6px;
 }
 
 .detail-list { list-style: none; padding: 0; margin: 0; }

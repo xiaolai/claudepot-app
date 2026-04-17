@@ -5,15 +5,14 @@ import React from "react";
 import { describe, expect, it, beforeEach } from "vitest";
 import { render, screen, act } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { IconContext } from "@phosphor-icons/react";
-import { Gear, User } from "@phosphor-icons/react";
+import { Settings, User } from "lucide-react";
 import { SectionRail } from "../components/SectionRail";
 import { useSection } from "../hooks/useSection";
 import type { SectionDef } from "./registry";
 
 const fakeSections: SectionDef[] = [
   { id: "accounts", label: "Accounts", icon: <User /> },
-  { id: "settings", label: "Settings", icon: <Gear /> },
+  { id: "settings", label: "Settings", icon: <Settings /> },
 ];
 
 const bodies: Record<string, React.FC> = {
@@ -26,10 +25,10 @@ function Harness() {
   const { section, setSection } = useSection(ids[0], ids);
   const Active = bodies[section] ?? bodies.accounts;
   return (
-    <IconContext.Provider value={{ size: 16, weight: "light" }}>
+    <>
       <SectionRail sections={fakeSections} active={section} onSelect={setSection} />
       <Active />
-    </IconContext.Provider>
+    </>
   );
 }
 

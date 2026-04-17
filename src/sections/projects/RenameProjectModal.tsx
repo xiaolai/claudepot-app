@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { FolderOpen, Warning } from "@phosphor-icons/react";
+import { FolderOpen, AlertTriangle } from "lucide-react";
 import { open as openDialog } from "@tauri-apps/plugin-dialog";
 import { api } from "../../api";
 import { useFocusTrap } from "../../hooks/useFocusTrap";
@@ -230,7 +230,7 @@ export function RenameProjectModal({
 
           <fieldset className="danger-zone">
             <legend>
-              <Warning weight="bold" /> Danger zone
+              <AlertTriangle strokeWidth={2.5} /> Danger zone
             </legend>
             <label className="check-row">
               <input

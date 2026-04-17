@@ -45,16 +45,17 @@ Auto-adapt to light/dark, user accent color, and accessibility settings.
 
 ## Icons
 
-`@phosphor-icons/react`, `light` weight, 16px default.
-Never mix icon libraries. All icons come from Phosphor.
+`lucide-react`, stroke-based, 16px default via CSS (`svg.lucide`).
+Never mix icon libraries. All icons come from Lucide.
+No colored icons except status indicators (dots, badges).
 
-| Context | Weight | Size |
-|---------|--------|------|
-| Toolbar / sidebar | `light` | 16px |
-| Inline / buttons | `light` | 14px |
-| Active state | `fill` | same |
-| Copy indicators | `bold` | 13px |
-| Empty state | `thin` | 32px |
+| Context | strokeWidth | Size |
+|---------|-------------|------|
+| Toolbar / sidebar | 1.5 (CSS default) | 16px |
+| Inline / buttons | 1.5 | 14px |
+| Active state indicator | 2.5 | same |
+| Copy/toast emphasis | 2.5 | 13-14px |
+| Empty state | 1 | 28-32px |
 
 ## Typography
 
