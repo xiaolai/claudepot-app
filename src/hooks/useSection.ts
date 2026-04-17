@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 
 const STORAGE_KEY = "claudepot.activeSection";
+const START_KEY = "claudepot.startSection";
 const SUBROUTE_KEY_PREFIX = "claudepot.subRoute.";
 
 function safeGet(key: string): string | null {
@@ -47,6 +48,21 @@ export function useSection<Id extends string>(
   setSubRoute: (subRoute: string | null) => void;
 } {
   const [section, setSectionState] = useState<Id>(() => {
+    // Startup resolution:
+    //   1. `claudepot.startSection` if user chose an explicit "Open on launch"
+    //      preference in Settings — this is the authoritative startup value.
+    //   2. `claudepot.activeSection` — the section last navigated to in the
+    //      previous session. Used when the user has no explicit startup
+    //      preference (legacy behavior).
+    //   3. defaultId.
+    //
+    // `activeSection` is still written on every navigation so it stays
+    // accurate as a secondary fallback, but it NEVER overwrites the
+    // explicit startSection preference.
+    const start = safeGet(START_KEY);
+    if (start && (ids as readonly string[]).includes(start)) {
+      return start as Id;
+    }
     const stored = safeGet(STORAGE_KEY);
     if (stored && (ids as readonly string[]).includes(stored)) {
       return stored as Id;

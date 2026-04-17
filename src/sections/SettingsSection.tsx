@@ -11,15 +11,19 @@ const SECTION_OPTIONS = [
 
 export function SettingsSection() {
   const { toasts, pushToast, dismissToast } = useToasts();
+  // Separate from `claudepot.activeSection` (last-visited) — this one
+  // is the explicit "Open on launch" preference. Normal navigation must
+  // not overwrite it, otherwise clicking around the app silently
+  // changes what the user set here.
   const [startSection, setStartSection] = useState<string>(() => {
-    try { return localStorage.getItem("claudepot.activeSection") ?? "accounts"; }
+    try { return localStorage.getItem("claudepot.startSection") ?? "accounts"; }
     catch { return "accounts"; }
   });
   const gc = useSettingsActions(pushToast);
 
   const handleStartChange = useCallback((v: string) => {
     setStartSection(v);
-    try { localStorage.setItem("claudepot.activeSection", v); } catch { /* best-effort */ }
+    try { localStorage.setItem("claudepot.startSection", v); } catch { /* best-effort */ }
   }, []);
 
   return (
