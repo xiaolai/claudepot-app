@@ -100,13 +100,17 @@ async fn verify_blob_identity(
     expected_email: &str,
     fetcher: &dyn ProfileFetcher,
 ) -> Result<(), SwapError> {
-    let Ok(blob) = crate::blob::CredentialBlob::from_json(blob_str) else {
-        tracing::warn!(
-            "skipping identity verification — blob is not a recognisable \
-             credentials JSON"
-        );
-        return Ok(());
-    };
+    let blob = crate::blob::CredentialBlob::from_json(blob_str).map_err(|e| {
+        // An unparseable blob cannot be verified; the conservative
+        // answer is to REJECT, not to skip silently. Previously this
+        // returned Ok(()), which allowed a corrupted/non-JSON blob to
+        // pass both the pre-write and post-write verification gates
+        // and then be marked active in the DB — defeating the core
+        // invariant that `switch` only succeeds after identity
+        // verification.
+        tracing::warn!("rejecting swap: blob is not recognisable credential JSON ({e})");
+        SwapError::IdentityVerificationFailed(format!("blob parse failed: {e}"))
+    })?;
     let actual = fetcher
         .fetch_email(&blob.claude_ai_oauth.access_token)
         .await
@@ -286,6 +290,9 @@ async fn switch_inner(
     // Gate: refuse if a CC process is running — its in-memory refresh
     // token will overwrite the keychain on the next token refresh,
     // silently reverting the swap.
+    //
+    // Cheap pre-check BEFORE acquiring the swap lock so obvious
+    // conflicts fail fast without contending on the lock.
     if !force && is_cc_process_running().await {
         return Err(SwapError::LiveSessionConflict);
     }
@@ -294,6 +301,15 @@ async fn switch_inner(
     tracing::debug!("acquiring swap lock...");
     let _lock = acquire_swap_lock()?;
     tracing::debug!("swap lock acquired");
+
+    // Re-check AFTER acquiring the lock. Another swap could have been
+    // holding the lock while a CC process launched; the pre-lock check
+    // above doesn't cover the window between "pre-check passed" and
+    // "we own the lock". Without this second check, `force=false` can
+    // still mutate credentials while CC is live, losing the guarantee.
+    if !force && is_cc_process_running().await {
+        return Err(SwapError::LiveSessionConflict);
+    }
 
     // Load target blob from Claudepot private storage first.
     // If it doesn't exist, fail before touching anything.
@@ -349,6 +365,19 @@ async fn switch_inner(
                         "CC is currently signed in as {actual_email}, not {cur_email} \
                          (Claudepot's last-known active CLI). Skipping the outgoing backup \
                          to avoid mis-filing; proceeding with the target swap."
+                    );
+                    true
+                }
+                Err(SwapError::IdentityVerificationFailed(reason)) => {
+                    // Unparseable or otherwise-unverifiable outgoing blob.
+                    // Same treatment as IdentityMismatch: we cannot safely
+                    // attribute this blob to `cur`'s slot, so skip the
+                    // backup step rather than corrupt private storage.
+                    // The target-blob verify already ran and succeeded,
+                    // so the target swap itself is still safe to proceed.
+                    tracing::warn!(
+                        "outgoing blob for {cur_email} is unverifiable ({reason}); \
+                         skipping backup to avoid mis-filing"
                     );
                     true
                 }
@@ -687,11 +716,34 @@ mod tests {
         }
     }
 
-    /// Placeholder fetcher for tests whose blobs are opaque strings —
-    /// verify_blob_identity degrades open on unparseable blobs, so this is
-    /// never actually invoked. It exists to satisfy the type signature.
+    /// Placeholder fetcher used by tests that want verify_blob_identity
+    /// to always succeed against the seeded account. Returns the email
+    /// that `seed_account` writes for the given uuid, so the identity
+    /// check matches the store row. Previously `verify_blob_identity`
+    /// skipped on unparseable blobs and the name "noop_fetcher" fit —
+    /// after that security-relevant bypass was removed (audit H2),
+    /// swap tests need a real fetcher paired with valid blob JSON.
     fn noop_fetcher() -> MockProfileFetcher {
+        // Tests that still pass this accept any email — they assert on
+        // swap mechanics, not identity. The generic returning() value
+        // is intentionally a string the seeded accounts won't use, so
+        // tests that rely on verify-succeeds must switch to
+        // `matching_fetcher(uuid)` explicitly.
         MockProfileFetcher::returning("never-called@example.com")
+    }
+
+    /// Fetcher matched to `seed_account(uuid)` — returns the exact
+    /// email the store row carries so `verify_blob_identity` passes.
+    fn matching_fetcher(uuid: Uuid) -> MockProfileFetcher {
+        MockProfileFetcher::returning(&format!("seed-{uuid}@example.com"))
+    }
+
+    /// Minimal valid CredentialBlob JSON for tests that don't care
+    /// about token values. expires_at = year 2100 so blob never looks
+    /// expired. Paired with `matching_fetcher(uuid)` so the identity
+    /// check passes against the stored account email.
+    fn test_blob_json() -> String {
+        crate::testing::sample_blob_json(4_102_444_800_000)
     }
 
     fn test_store() -> (AccountStore, tempfile::TempDir) {
@@ -787,8 +839,10 @@ mod tests {
         let target_id = Uuid::new_v4();
         seed_account(&store, target_id);
 
-        // Pre-store target credentials
-        save_private(target_id, "target_blob").unwrap();
+        // Valid blob JSON — post-H2 verify_blob_identity REJECTS
+        // unparseable blobs instead of silently accepting them.
+        let target_blob = test_blob_json();
+        save_private(target_id, &target_blob).unwrap();
 
         let platform = MockPlatform::new(None);
         let refresher = DefaultRefresher;
@@ -799,12 +853,12 @@ mod tests {
             &platform,
             false,
             &refresher,
-            &noop_fetcher(),
+            &matching_fetcher(target_id),
         )
         .await
         .unwrap();
 
-        assert_eq!(platform.get(), Some("target_blob".to_string()));
+        assert_eq!(platform.get(), Some(target_blob));
         assert_eq!(
             store.active_cli_uuid().unwrap(),
             Some(target_id.to_string())
@@ -823,12 +877,44 @@ mod tests {
         seed_account(&store, current_id);
         seed_account(&store, target_id);
 
-        // Pre-store target credentials
-        save_private(target_id, "target_blob").unwrap();
+        // Both blobs must be valid JSON — post-H2, verify_blob_identity
+        // rejects unparseable blobs for both target (pre-write) and
+        // outgoing backup (skip_backup path). Making the outgoing blob
+        // parseable is what exercises the save-outgoing branch.
+        let target_blob = test_blob_json();
+        let refreshed_current = test_blob_json();
+        save_private(target_id, &target_blob).unwrap();
 
-        // Platform has current credentials (as if CC refreshed them)
-        let platform = MockPlatform::new(Some("refreshed_current_blob"));
+        let platform = MockPlatform::new(Some(&refreshed_current));
         let refresher = DefaultRefresher;
+
+        // Both current and target blobs authenticate as their seeded
+        // emails; since target_id != current_id, we need a fetcher that
+        // honors whichever token is queried. For this test the simplest
+        // is an email-dispatching stub: but since both blobs carry the
+        // same fixture token (sample_blob_json's constant), we instead
+        // use the matching fetcher for `current_id` so the outgoing
+        // backup path verifies and runs. The target verify uses a
+        // separate matching_fetcher in the pre-write call — we need
+        // one fetcher that returns the right email for each. Since
+        // test_blob_json shares the access_token across calls, split
+        // the responsibility by using two fetchers is not possible;
+        // use `EchoingFetcher` that returns different emails by uuid
+        // resolution via the store. Simpler: since `matching_fetcher`
+        // returns a single email and the two calls are sequential,
+        // run with a fetcher that returns current_email for the first
+        // call and target_email for the second. `MockProfileFetcher`
+        // doesn't support that, so use a round-robin fetcher helper.
+        // Three verify calls in order: (1) pre-write target, (2)
+        // outgoing backup against CC's current blob, (3) post-write
+        // read-back of target. The target_id blob is shared as the
+        // test_blob_json fixture but the fetcher is consulted by
+        // sequence, so we return the right email at each step.
+        let fetcher = RoundRobinFetcher::new(vec![
+            format!("seed-{target_id}@example.com"),  // (1) pre-write
+            format!("seed-{current_id}@example.com"), // (2) outgoing
+            format!("seed-{target_id}@example.com"),  // (3) post-write
+        ]);
 
         switch_force_for_tests(
             &store,
@@ -837,18 +923,46 @@ mod tests {
             &platform,
             false,
             &refresher,
-            &noop_fetcher(),
+            &fetcher,
         )
         .await
         .unwrap();
 
         // Current's credentials should be saved to private storage
-        assert_eq!(load_private(current_id).unwrap(), "refreshed_current_blob");
+        assert_eq!(load_private(current_id).unwrap(), refreshed_current);
         // Target should be in platform
-        assert_eq!(platform.get(), Some("target_blob".to_string()));
+        assert_eq!(platform.get(), Some(target_blob));
 
         delete_private(current_id).unwrap();
         delete_private(target_id).unwrap();
+    }
+
+    /// Test fetcher that cycles through a fixed list of emails so
+    /// sequential verify calls can return different identities. Used
+    /// by tests that exercise both the outgoing-backup identity check
+    /// and the post-write target identity check in one swap.
+    struct RoundRobinFetcher {
+        emails: Vec<String>,
+        idx: std::sync::atomic::AtomicUsize,
+    }
+
+    impl RoundRobinFetcher {
+        fn new(emails: Vec<String>) -> Self {
+            Self {
+                emails,
+                idx: std::sync::atomic::AtomicUsize::new(0),
+            }
+        }
+    }
+
+    #[async_trait::async_trait]
+    impl super::ProfileFetcher for RoundRobinFetcher {
+        async fn fetch_email(&self, _access_token: &str) -> Result<String, OAuthError> {
+            let i = self
+                .idx
+                .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            Ok(self.emails[i % self.emails.len()].clone())
+        }
     }
 
     #[tokio::test]
@@ -918,7 +1032,7 @@ mod tests {
         let (store, _dir) = test_store();
         let target_id = Uuid::new_v4();
         seed_account(&store, target_id);
-        save_private(target_id, "blob").unwrap();
+        save_private(target_id, &test_blob_json()).unwrap();
 
         let platform = MockPlatform::new(None);
         let refresher = DefaultRefresher;
@@ -929,7 +1043,7 @@ mod tests {
             &platform,
             false,
             &refresher,
-            &noop_fetcher(),
+            &matching_fetcher(target_id),
         )
         .await
         .unwrap();
@@ -1068,7 +1182,8 @@ mod tests {
         let (store, _dir) = test_store();
         let target_id = Uuid::new_v4();
         seed_account(&store, target_id);
-        save_private(target_id, "direct_blob").unwrap();
+        let direct_blob = test_blob_json();
+        save_private(target_id, &direct_blob).unwrap();
 
         let platform = MockPlatform::new(None);
         let refresher = DefaultRefresher;
@@ -1079,13 +1194,13 @@ mod tests {
             &platform,
             false,
             &refresher,
-            &noop_fetcher(),
+            &matching_fetcher(target_id),
         )
         .await
         .unwrap();
 
         // Target written directly, no outgoing save
-        assert_eq!(platform.get(), Some("direct_blob".to_string()));
+        assert_eq!(platform.get(), Some(direct_blob));
         delete_private(target_id).unwrap();
     }
 
