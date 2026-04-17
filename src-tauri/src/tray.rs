@@ -81,18 +81,23 @@ pub fn rebuild(app: &AppHandle) -> Result<(), String> {
 /// Handle a tray menu item click. Returns true if the event was handled.
 pub fn handle_menu_event(app: &AppHandle, id: &str) {
     if let Some(uuid_str) = id.strip_prefix("tray-switch-") {
-        // Find the email for this UUID and switch CLI
         let email = match find_email_for_uuid(uuid_str) {
             Some(e) => e,
-            None => return,
+            None => {
+                tracing::warn!("tray: no account found for UUID {uuid_str}");
+                return;
+            }
         };
         let app = app.clone();
         tauri::async_runtime::spawn(async move {
             match crate::commands::cli_use(email, None).await {
                 Ok(()) => {
-                    let _ = rebuild(&app);
-                    // Emit event so the frontend refreshes
-                    let _ = app.emit("tray-cli-switched", ());
+                    if let Err(e) = rebuild(&app) {
+                        tracing::warn!("tray rebuild after switch failed: {e}");
+                    }
+                    if let Err(e) = app.emit("tray-cli-switched", ()) {
+                        tracing::warn!("tray emit tray-cli-switched failed: {e}");
+                    }
                 }
                 Err(e) => {
                     tracing::warn!("tray cli_use failed: {e}");
@@ -105,8 +110,12 @@ pub fn handle_menu_event(app: &AppHandle, id: &str) {
             let _ = window.set_focus();
         }
     } else if id == "tray-refresh" {
-        let _ = rebuild(app);
-        let _ = app.emit("tray-refresh-requested", ());
+        if let Err(e) = rebuild(app) {
+            tracing::warn!("tray rebuild on refresh failed: {e}");
+        }
+        if let Err(e) = app.emit("tray-refresh-requested", ()) {
+            tracing::warn!("tray emit tray-refresh-requested failed: {e}");
+        }
     } else if id == "tray-quit" {
         app.exit(0);
     }

@@ -39,7 +39,8 @@ export function MaintenanceView({
           Remove CC project directories whose source folder no longer exists.
           Unreachable projects (unmounted volumes) are never auto-cleaned.
         </p>
-        <button className="primary" onClick={() => setCleanOpen(true)}>
+        <button className="primary" onClick={() => setCleanOpen(true)}
+          title="Preview which orphan projects would be removed">
           Preview cleanup…
         </button>
         {cleanToast && (
