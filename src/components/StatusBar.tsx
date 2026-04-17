@@ -6,8 +6,10 @@ import {
   Lock,
   RefreshCw,
   Shield,
+  X,
 } from "lucide-react";
 import { useStatusIssues, type StatusIssue } from "../hooks/useStatusIssues";
+import { useDismissedIssues } from "../hooks/useDismissedIssues";
 import type { AccountSummary, AppStatus, CcIdentity } from "../types";
 
 const severityIcon = {
@@ -25,6 +27,26 @@ function IssueAction({ action }: { action: StatusIssue["action"] }) {
   );
 }
 
+function IssueDismiss({
+  issue,
+  onDismiss,
+}: {
+  issue: StatusIssue;
+  onDismiss: (id: string) => void;
+}) {
+  if (!issue.dismissable) return null;
+  return (
+    <button
+      className="status-bar-dismiss icon-btn"
+      onClick={() => onDismiss(issue.id)}
+      title="Dismiss for 24 hours"
+      aria-label={`Dismiss ${issue.label} for 24 hours`}
+    >
+      <X size={12} strokeWidth={2.5} />
+    </button>
+  );
+}
+
 export function StatusBar({
   ccIdentity, status, syncError, keychainIssue, accounts, verifying, onUnlock,
   onSelectAccount, onReloginActive,
@@ -36,10 +58,12 @@ export function StatusBar({
   onReloginActive?: () => void;
 }) {
   const [expanded, setExpanded] = useState(false);
-  const issues = useStatusIssues({
+  const { isDismissed, dismiss } = useDismissedIssues();
+  const rawIssues = useStatusIssues({
     ccIdentity, status, syncError, keychainIssue, accounts, onUnlock,
     onSelectAccount, onReloginActive,
   });
+  const issues = rawIssues.filter((i) => !isDismissed(i.id));
   const toggle = useCallback(() => setExpanded((p) => !p), []);
 
   if (issues.length === 0 && !verifying) return null;
@@ -70,6 +94,7 @@ export function StatusBar({
           {issue.detail && <span className="status-bar-detail"> — {issue.detail}</span>}
         </span>
         <IssueAction action={issue.action} />
+        <IssueDismiss issue={issue} onDismiss={dismiss} />
         {verifyChip}
       </div>
     );
@@ -94,6 +119,7 @@ export function StatusBar({
                 {issue.detail && <span className="status-bar-detail">{issue.detail}</span>}
               </div>
               <IssueAction action={issue.action} />
+              <IssueDismiss issue={issue} onDismiss={dismiss} />
             </li>
           ))}
         </ul>
