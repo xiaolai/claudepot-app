@@ -186,6 +186,72 @@ pub async fn unlock_keychain() -> Result<(), String> {
     }
 }
 
+/// Reveal a path in the OS file manager. macOS: `open -R`, Linux:
+/// open the parent directory with xdg-open, Windows: `explorer /select`.
+/// Accepts an absolute path; returns an error if the path is empty or
+/// does not exist.
+#[tauri::command]
+pub async fn reveal_in_finder(path: String) -> Result<(), String> {
+    if path.is_empty() {
+        return Err("empty path".to_string());
+    }
+    let p = std::path::PathBuf::from(&path);
+    if !p.exists() {
+        // Walk up to the nearest existing ancestor so "Open in Finder" on a
+        // CC project whose source was deleted still opens the parent.
+        let mut cur: Option<&std::path::Path> = p.parent();
+        let fallback = loop {
+            match cur {
+                Some(parent) if parent.exists() => break Some(parent.to_path_buf()),
+                Some(parent) => cur = parent.parent(),
+                None => break None,
+            }
+        };
+        let Some(target) = fallback else {
+            return Err(format!("path does not exist: {path}"));
+        };
+        return spawn_reveal(&target).await;
+    }
+    spawn_reveal(&p).await
+}
+
+async fn spawn_reveal(p: &std::path::Path) -> Result<(), String> {
+    use tokio::process::Command;
+    #[cfg(target_os = "macos")]
+    {
+        let out = Command::new("/usr/bin/open")
+            .args(["-R"])
+            .arg(p)
+            .output()
+            .await
+            .map_err(|e| format!("open spawn failed: {e}"))?;
+        if !out.status.success() {
+            let stderr = String::from_utf8_lossy(&out.stderr);
+            return Err(format!("open exited: {}", stderr.trim()));
+        }
+    }
+    #[cfg(target_os = "linux")]
+    {
+        let target = if p.is_dir() { p.to_path_buf() } else {
+            p.parent().unwrap_or(p).to_path_buf()
+        };
+        Command::new("xdg-open")
+            .arg(&target)
+            .output()
+            .await
+            .map_err(|e| format!("xdg-open spawn failed: {e}"))?;
+    }
+    #[cfg(target_os = "windows")]
+    {
+        Command::new("explorer")
+            .arg(format!("/select,{}", p.display()))
+            .output()
+            .await
+            .map_err(|e| format!("explorer spawn failed: {e}"))?;
+    }
+    Ok(())
+}
+
 /// Idempotent startup sync: if CC is currently signed in as one of the
 /// registered Claudepot accounts, make sure Claudepot's stored blob
 /// and active_cli match. Lets users who ran `claude auth login`

@@ -85,6 +85,7 @@ pub fn run() {
             commands::app_status,
             commands::sync_from_current_cc,
             commands::unlock_keychain,
+            commands::reveal_in_finder,
             commands::account_list,
             commands::cli_use,
             commands::cli_clear,
