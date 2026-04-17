@@ -1,4 +1,4 @@
-import { RotateCcw, Undo2, Ban } from "lucide-react";
+import { RotateCcw, Undo2, Ban, Unlock } from "lucide-react";
 import type { JournalEntry, JournalStatus } from "../../types";
 
 const STATUS_COPY: Record<JournalStatus, string> = {
@@ -22,11 +22,19 @@ export function RepairEntry({
   onResume,
   onRollback,
   onAbandon,
+  onBreakLock,
 }: {
   entry: JournalEntry;
   onResume: () => void;
   onRollback: () => void;
   onAbandon: () => void;
+  /**
+   * Force-break the lock file owned by this journal's old_path.
+   * Surfaced only for stale entries, since a running entry's lock is
+   * legitimate and breaking it mid-run corrupts state. Rendered as a
+   * destructive action with a confirm dialog in the caller.
+   */
+  onBreakLock?: () => void;
 }) {
   return (
     <li
@@ -61,6 +69,16 @@ export function RepairEntry({
           <button type="button" title="Reverse the rename (runs new → old)" onClick={onRollback}>
             <Undo2 /> Rollback
           </button>
+          {e.status === "stale" && onBreakLock && (
+            <button
+              type="button"
+              className="warn"
+              title="Force-break the stale lock file so resume can proceed"
+              onClick={onBreakLock}
+            >
+              <Unlock /> Break lock
+            </button>
+          )}
           <button type="button" className="danger" title="Stop nagging about this journal" onClick={onAbandon}>
             <Ban /> Abandon
           </button>

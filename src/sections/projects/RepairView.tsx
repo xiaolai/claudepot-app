@@ -5,6 +5,7 @@ import { useOperations } from "../../hooks/useOperations";
 import type { JournalEntry } from "../../types";
 import { RepairEntry } from "./RepairEntry";
 import { RepairConfirmDialogs, type PendingAction } from "./RepairConfirmDialogs";
+import { ConfirmDangerousAction } from "../../components/ConfirmDangerousAction";
 
 export function RepairView({
   onBack,
@@ -19,6 +20,9 @@ export function RepairView({
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [pending, setPending] = useState<PendingAction | null>(null);
+  const [breakLockTarget, setBreakLockTarget] = useState<JournalEntry | null>(
+    null,
+  );
   const [toast, setToast] = useState<string | null>(null);
   const { open: openOpModal } = useOperations();
 
@@ -63,6 +67,20 @@ export function RepairView({
     } catch (e) { setToast(`Abandon failed: ${e}`); }
   };
 
+  const runBreakLock = async (entry: JournalEntry) => {
+    setBreakLockTarget(null);
+    try {
+      const outcome = await api.repairBreakLock(entry.old_path);
+      setToast(
+        `Lock broken — prior owner PID ${outcome.prior_pid} on ${outcome.prior_hostname}. Audit saved.`,
+      );
+      refresh();
+      onOpTerminated?.();
+    } catch (e) {
+      setToast(`Break lock failed: ${e}`);
+    }
+  };
+
   const Wrapper = embedded ? "div" : "main";
 
   return (
@@ -99,13 +117,39 @@ export function RepairView({
             <RepairEntry key={e.id} entry={e}
               onResume={() => setPending({ kind: "resume", entry: e })}
               onRollback={() => setPending({ kind: "rollback", entry: e })}
-              onAbandon={() => setPending({ kind: "abandon", entry: e })} />
+              onAbandon={() => setPending({ kind: "abandon", entry: e })}
+              onBreakLock={() => setBreakLockTarget(e)} />
           ))}
         </ul>
       )}
 
       <RepairConfirmDialogs pending={pending} onCancel={() => setPending(null)}
         onResume={runResume} onRollback={runRollback} onAbandon={runAbandon} />
+
+      {breakLockTarget && (
+        <ConfirmDangerousAction
+          title="Break lock?"
+          confirmLabel="Break lock"
+          consequences={
+            <>
+              <p>
+                Force-breaks the lock file for this journal and writes an
+                audit record. The prior owner (if still alive) will fail
+                on its next write.
+              </p>
+              <p className="mono small selectable">
+                {breakLockTarget.old_path}
+              </p>
+              <p className="muted small">
+                Safe when the journal is stale (≥24 h). Don't break a
+                running lock — that can corrupt in-flight state.
+              </p>
+            </>
+          }
+          onCancel={() => setBreakLockTarget(null)}
+          onConfirm={() => runBreakLock(breakLockTarget)}
+        />
+      )}
 
       {toast && (
         <div className="inline-toast" role="status" onClick={() => setToast(null)}>{toast}</div>
