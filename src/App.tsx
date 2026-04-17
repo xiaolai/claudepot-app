@@ -61,7 +61,7 @@ function AppShell() {
     <div className="app-layout">
       <div className="titlebar-drag" data-tauri-drag-region aria-hidden="true" />
       <SectionRail sections={sections} active={section} onSelect={setSection} />
-      {section === "accounts" && <AccountsSection />}
+      {section === "accounts" && <AccountsSection onNavigate={setSection} />}
       {section === "projects" && (
         <ProjectsSection
           subRoute={subRoute}

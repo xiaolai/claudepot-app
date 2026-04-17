@@ -5,8 +5,16 @@ export interface PaletteAction {
   id: string;
   label: string;
   detail?: string;
-  iconName: "terminal" | "monitor" | "user-plus" | "refresh-cw" | "trash";
-  category: "switch" | "action";
+  iconName:
+    | "terminal"
+    | "monitor"
+    | "user-plus"
+    | "refresh-cw"
+    | "trash"
+    | "folder"
+    | "wrench"
+    | "settings";
+  category: "switch" | "action" | "navigate";
   disabled?: boolean;
   onSelect: () => void;
 }
@@ -30,8 +38,19 @@ export function usePaletteActions(opts: {
   onAdd: () => void;
   onRefresh: () => void;
   onRemove: (a: AccountSummary) => void;
+  /** Jump to a top-level section — "accounts", "projects", "settings". */
+  onNavigate?: (section: string, subRoute?: string | null) => void;
 }) {
-  const { accounts, status, onSwitchCli, onSwitchDesktop, onAdd, onRefresh, onRemove } = opts;
+  const {
+    accounts,
+    status,
+    onSwitchCli,
+    onSwitchDesktop,
+    onAdd,
+    onRefresh,
+    onRemove,
+    onNavigate,
+  } = opts;
 
   const actions = useMemo(() => {
     const items: PaletteAction[] = [];
@@ -59,6 +78,30 @@ export function usePaletteActions(opts: {
         });
       }
     }
+    if (onNavigate) {
+      items.push({
+        id: "nav-projects",
+        label: "Open Projects",
+        iconName: "folder",
+        category: "navigate",
+        onSelect: () => onNavigate("projects"),
+      });
+      items.push({
+        id: "nav-maintenance",
+        label: "Open Maintenance",
+        detail: "Clean + Repair",
+        iconName: "wrench",
+        category: "navigate",
+        onSelect: () => onNavigate("projects", "maintenance"),
+      });
+      items.push({
+        id: "nav-settings",
+        label: "Open Settings",
+        iconName: "settings",
+        category: "navigate",
+        onSelect: () => onNavigate("settings"),
+      });
+    }
     items.push({ id: "add", label: "Add account", iconName: "user-plus", category: "action", onSelect: onAdd });
     items.push({ id: "refresh", label: "Refresh all", iconName: "refresh-cw", category: "action", onSelect: onRefresh });
     for (const a of accounts) {
@@ -72,7 +115,16 @@ export function usePaletteActions(opts: {
       });
     }
     return items;
-  }, [accounts, status, onSwitchCli, onSwitchDesktop, onAdd, onRefresh, onRemove]);
+  }, [
+    accounts,
+    status,
+    onSwitchCli,
+    onSwitchDesktop,
+    onAdd,
+    onRefresh,
+    onRemove,
+    onNavigate,
+  ]);
 
   return {
     actions,

@@ -1,5 +1,15 @@
 import { useState, useCallback, useEffect, useRef } from "react";
-import { Search, Terminal, Monitor, UserPlus, RefreshCw, Trash } from "lucide-react";
+import {
+  Search,
+  Terminal,
+  Monitor,
+  UserPlus,
+  RefreshCw,
+  Trash,
+  Folder,
+  Wrench,
+  Settings,
+} from "lucide-react";
 import { useFocusTrap } from "../hooks/useFocusTrap";
 import { usePaletteActions, type PaletteAction } from "../hooks/usePaletteActions";
 import type { AccountSummary, AppStatus } from "../types";
@@ -10,6 +20,9 @@ const iconMap = {
   "user-plus": <UserPlus size={14} />,
   "refresh-cw": <RefreshCw size={14} />,
   trash: <Trash size={14} />,
+  folder: <Folder size={14} />,
+  wrench: <Wrench size={14} />,
+  settings: <Settings size={14} />,
 };
 
 function PaletteItem({
@@ -36,13 +49,14 @@ function PaletteItem({
 
 export function CommandPalette({
   accounts, status, onClose,
-  onSwitchCli, onSwitchDesktop, onAdd, onRefresh, onRemove,
+  onSwitchCli, onSwitchDesktop, onAdd, onRefresh, onRemove, onNavigate,
 }: {
   accounts: AccountSummary[]; status: AppStatus; onClose: () => void;
   onSwitchCli: (a: AccountSummary) => void;
   onSwitchDesktop: (a: AccountSummary) => void;
   onAdd: () => void; onRefresh: () => void;
   onRemove: (a: AccountSummary) => void;
+  onNavigate?: (section: string, subRoute?: string | null) => void;
 }) {
   const [query, setQuery] = useState("");
   const [selectedIndex, setSelectedIndex] = useState(0);
@@ -50,7 +64,7 @@ export function CommandPalette({
   const listRef = useRef<HTMLDivElement>(null);
   const trapRef = useFocusTrap<HTMLDivElement>();
   const { filter } = usePaletteActions({
-    accounts, status, onSwitchCli, onSwitchDesktop, onAdd, onRefresh, onRemove,
+    accounts, status, onSwitchCli, onSwitchDesktop, onAdd, onRefresh, onRemove, onNavigate,
   });
 
   const filtered = filter(query);
@@ -69,6 +83,7 @@ export function CommandPalette({
   }, [filtered, selectedIndex, onClose]);
 
   const switchItems = filtered.filter((a) => a.category === "switch");
+  const navigateItems = filtered.filter((a) => a.category === "navigate");
   const actionItems = filtered.filter((a) => a.category === "action");
   let idx = 0;
 
@@ -89,6 +104,16 @@ export function CommandPalette({
             <>
               <div className="palette-group-label">Quick Switch</div>
               {switchItems.map((item) => {
+                const i = idx++;
+                return <PaletteItem key={item.id} item={item} selected={i === selectedIndex}
+                  onSelect={() => { item.onSelect(); onClose(); }} onHover={() => setSelectedIndex(i)} />;
+              })}
+            </>
+          )}
+          {navigateItems.length > 0 && (
+            <>
+              <div className="palette-group-label">Navigate</div>
+              {navigateItems.map((item) => {
                 const i = idx++;
                 return <PaletteItem key={item.id} item={item} selected={i === selectedIndex}
                   onSelect={() => { item.onSelect(); onClose(); }} onHover={() => setSelectedIndex(i)} />;
