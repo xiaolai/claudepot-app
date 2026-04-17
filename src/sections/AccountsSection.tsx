@@ -58,21 +58,7 @@ export function AccountsSection() {
 
   const closeCtxMenu = useCallback(() => setCtxMenu(null), []);
 
-  // Cmd+K to open command palette, Cmd+R to refresh, Cmd+N to add
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      if (!e.metaKey && !e.ctrlKey) return;
-      if (e.shiftKey || e.altKey) return;
-      if (e.key === "k") { e.preventDefault(); setShowPalette(true); }
-      if (e.key === "r") { e.preventDefault(); refresh(); refreshUsage(); }
-      if (e.key === "n") { e.preventDefault(); setShowAdd(true); }
-    };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [refresh, refreshUsage]);
-
-  // Auto-select: active CLI > active Desktop > first account. Re-runs
-  // if the selected account vanished externally.
+  // Auto-select: active CLI > active Desktop > first account.
   useEffect(() => {
     if (accounts.length === 0) return;
     const stillExists = selectedUuid && accounts.some((a) => a.uuid === selectedUuid);
@@ -83,6 +69,29 @@ export function AccountsSection() {
   }, [accounts, selectedUuid]);
 
   const selectedAccount = accounts.find((a) => a.uuid === selectedUuid) ?? null;
+
+  // Keyboard shortcuts
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      const mod = e.metaKey || e.ctrlKey;
+      // Cmd+Shift+C — copy selected email
+      if (mod && e.shiftKey && e.key === "c") {
+        e.preventDefault();
+        if (selectedAccount) {
+          navigator.clipboard.writeText(selectedAccount.email);
+          pushToast("info", `Copied ${selectedAccount.email}`);
+        }
+        return;
+      }
+      // Cmd+K/R/N — no shift/alt
+      if (!mod || e.shiftKey || e.altKey) return;
+      if (e.key === "k") { e.preventDefault(); setShowPalette(true); }
+      if (e.key === "r") { e.preventDefault(); refresh(); refreshUsage(); }
+      if (e.key === "n") { e.preventDefault(); setShowAdd(true); }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [refresh, refreshUsage, selectedAccount, pushToast]);
 
   if (!status) {
     if (loadError) {
