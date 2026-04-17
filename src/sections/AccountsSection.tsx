@@ -8,6 +8,7 @@ import { useRefresh } from "../hooks/useRefresh";
 import { useUsage } from "../hooks/useUsage";
 import { useActions } from "../hooks/useActions";
 import { useTauriEvent } from "../hooks/useTauriEvent";
+import { useGlobalShortcuts } from "../hooks/useGlobalShortcuts";
 import { Sidebar } from "../components/Sidebar";
 import { ContentPane } from "../components/ContentPane";
 import { StatusBar } from "../components/StatusBar";
@@ -116,28 +117,32 @@ export function AccountsSection() {
 
   const selectedAccount = accounts.find((a) => a.uuid === selectedUuid) ?? null;
 
-  // Keyboard shortcuts
+  // Cmd+Shift+C — copy selected email. Kept inline because
+  // useGlobalShortcuts handles the unmodified ⌘-letter shortcuts only;
+  // shift+letter is this section's own convention.
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       const mod = e.metaKey || e.ctrlKey;
-      // Cmd+Shift+C — copy selected email
       if (mod && e.shiftKey && e.key === "c") {
         e.preventDefault();
         if (selectedAccount) {
           navigator.clipboard.writeText(selectedAccount.email);
           pushToast("info", `Copied ${selectedAccount.email}`);
         }
-        return;
       }
-      // Cmd+K/R/N — no shift/alt
-      if (!mod || e.shiftKey || e.altKey) return;
-      if (e.key === "k") { e.preventDefault(); setShowPalette(true); }
-      if (e.key === "r") { e.preventDefault(); refresh(); refreshUsage(); }
-      if (e.key === "n") { e.preventDefault(); setShowAdd(true); }
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [refresh, refreshUsage, selectedAccount, pushToast]);
+  }, [selectedAccount, pushToast]);
+
+  useGlobalShortcuts({
+    onRefresh: () => {
+      refresh();
+      refreshUsage();
+    },
+    onAdd: () => setShowAdd(true),
+    onPalette: () => setShowPalette(true),
+  });
 
   // Refresh when the tray switches CLI or requests a refresh
   const trayRefresh = useCallback(() => { refresh(); refreshUsage(); }, [refresh, refreshUsage]);
