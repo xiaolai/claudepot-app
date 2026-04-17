@@ -3,11 +3,15 @@ import { ChevronRight } from "lucide-react";
 
 export function CollapsibleSection({
   title,
+  titleSuffix,
   defaultOpen = false,
   forceOpen,
   children,
 }: {
   title: string;
+  /** Optional inline node rendered alongside the title (e.g. a stale
+   *  indicator chip). Part of the toggle button so clicking still works. */
+  titleSuffix?: React.ReactNode;
   defaultOpen?: boolean;
   /** When true, section auto-opens (e.g. on anomaly). */
   forceOpen?: boolean;
@@ -43,6 +47,7 @@ export function CollapsibleSection({
           className={`collapsible-chevron ${open ? "open" : ""}`}
         />
         <span className="collapsible-section-title">{title}</span>
+        {titleSuffix}
       </button>
       {open && <div className="collapsible-section-body">{children}</div>}
     </div>

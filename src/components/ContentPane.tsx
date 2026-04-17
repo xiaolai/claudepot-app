@@ -1,16 +1,19 @@
 import { LogOut } from "lucide-react";
-import type { AccountSummary, AccountUsage, AppStatus } from "../types";
+import type { AccountSummary, AppStatus, UsageEntry } from "../types";
 import { AccountDetail } from "./AccountDetail";
 import { AccountActions } from "./AccountActions";
 import { EmptyState } from "./EmptyState";
 import { CopyButton } from "./CopyButton";
 
 export function ContentPane({
-  account, usage, status, busyKeys, anyBusy,
+  account, usageEntry, status, busyKeys, anyBusy,
   onUseCli, onUseDesktop, onLogin, onCancelLogin, onRemove, onClearCli, onAdd,
+  onRefreshUsage,
 }: {
   account: AccountSummary | null;
-  usage: AccountUsage | null;
+  /** Full usage entry (status + data). AccountDetail decides whether to
+   *  render the Usage card as numbers, stale-chip, or unavailable. */
+  usageEntry: UsageEntry | null;
   status: AppStatus;
   busyKeys: Set<string>;
   anyBusy: boolean;
@@ -21,6 +24,8 @@ export function ContentPane({
   onRemove: (a: AccountSummary) => void;
   onClearCli: () => void;
   onAdd: () => void;
+  /** Retry the usage fetch (wired into the Usage card's unavailable states). */
+  onRefreshUsage?: () => void;
 }) {
   if (!account) {
     return <EmptyState onAdd={onAdd} />;
@@ -49,7 +54,12 @@ export function ContentPane({
         onCancelLogin={onCancelLogin} onRemove={onRemove}
       />
 
-      <AccountDetail account={account} usage={usage} />
+      <AccountDetail
+        account={account}
+        usageEntry={usageEntry}
+        onRefreshUsage={onRefreshUsage}
+        onLogin={() => onLogin(account)}
+      />
 
       <div className="content-footer">
         {status.cli_active_email && (

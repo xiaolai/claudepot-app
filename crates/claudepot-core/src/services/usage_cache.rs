@@ -19,6 +19,39 @@ const BATCH_STAGGER: Duration = Duration::from_millis(200);
 // Public error type
 // ---------------------------------------------------------------------------
 
+/// Detailed per-account fetch result for UIs that want to explain to
+/// the user *why* usage is unavailable instead of silently hiding an
+/// account. Every failure mode has a distinct variant carrying just
+/// enough info for a useful inline message (retry timer, error text).
+#[derive(Debug, Clone)]
+pub enum UsageOutcome {
+    /// Data fetched within the CACHE_TTL window. `age_secs` is for UI
+    /// freshness indicators (e.g. "as of 14s ago"); typically small.
+    Fresh {
+        response: UsageResponse,
+        age_secs: u64,
+    },
+    /// Cached data served because the live fetch is on cooldown. The
+    /// UI should render the numbers but caption them with
+    /// "as of {age_secs}s ago".
+    Stale {
+        response: UsageResponse,
+        age_secs: u64,
+    },
+    /// No credential blob stored — account has never been signed in
+    /// via Claudepot. UI should prompt "Log in to see usage".
+    NoCredentials,
+    /// Local token is past expiry. UI should prompt "Token expired —
+    /// log in again" linking to the per-account login flow.
+    Expired,
+    /// Rate-limited with no stale cache to fall back to. UI should
+    /// show a countdown and retry automatically after `retry_after_secs`.
+    RateLimited { retry_after_secs: u64 },
+    /// Non-rate-limit failure (network, parse, 401). UI should show a
+    /// Retry button plus the short error for debugging.
+    Error(String),
+}
+
 #[derive(Debug, thiserror::Error)]
 pub enum UsageFetchError {
     #[error("rate limited — suppressed for {remaining_secs}s")]
@@ -276,6 +309,73 @@ impl UsageCache {
             out.insert(uuid, self.fetch_usage_graceful(uuid).await);
         }
         out
+    }
+
+    /// Detailed single-account fetch for UIs that want to SHOW the reason
+    /// usage is unavailable instead of silently hiding it. Never throws
+    /// — every failure mode is encoded in the returned variant.
+    pub async fn fetch_usage_detailed(&self, uuid: Uuid) -> UsageOutcome {
+        match self.fetch_usage(uuid, false).await {
+            Ok(Some(response)) => {
+                // Discriminate fresh-vs-stale: if the cache says the
+                // record is older than CACHE_TTL we are serving a
+                // served-from-inflight-fallback or raced write; treat
+                // as fresh by default, stale only on explicit cooldown
+                // path below.
+                let age_secs = self.cached_age_secs(uuid).await;
+                UsageOutcome::Fresh { response, age_secs }
+            }
+            Ok(None) => UsageOutcome::NoCredentials,
+            Err(UsageFetchError::Cooldown { .. })
+            | Err(UsageFetchError::RateLimited { .. }) => {
+                // Serve stale cache if we have one; otherwise signal
+                // rate-limited-without-fallback so the UI can render
+                // "retry in Ns".
+                let results = self.results.lock().await;
+                if let Some(cached) = results.get(&uuid) {
+                    let response = cached.response.clone();
+                    let age_secs = cached.fetched_at.elapsed().as_secs();
+                    return UsageOutcome::Stale { response, age_secs };
+                }
+                drop(results);
+                let retry_after_secs = match self.fetch_usage(uuid, false).await {
+                    Err(UsageFetchError::Cooldown { remaining_secs }) => remaining_secs,
+                    Err(UsageFetchError::RateLimited { retry_after_secs }) => retry_after_secs,
+                    _ => 60, // shouldn't happen; benign default
+                };
+                UsageOutcome::RateLimited { retry_after_secs }
+            }
+            Err(UsageFetchError::TokenExpired) => UsageOutcome::Expired,
+            Err(UsageFetchError::FetchFailed(msg)) => UsageOutcome::Error(msg),
+        }
+    }
+
+    /// Batch variant of `fetch_usage_detailed`. Every input uuid appears
+    /// in the output map — status is carried per entry so the UI can
+    /// render the exact reason each account is unavailable.
+    pub async fn fetch_batch_detailed(
+        &self,
+        uuids: &[Uuid],
+    ) -> HashMap<Uuid, UsageOutcome> {
+        let mut out = HashMap::new();
+        let mut first = true;
+        for &uuid in uuids {
+            if !first {
+                tokio::time::sleep(BATCH_STAGGER).await;
+            }
+            first = false;
+            out.insert(uuid, self.fetch_usage_detailed(uuid).await);
+        }
+        out
+    }
+
+    /// Peek cached age in seconds, or None if nothing cached.
+    async fn cached_age_secs(&self, uuid: Uuid) -> u64 {
+        let results = self.results.lock().await;
+        results
+            .get(&uuid)
+            .map(|c| c.fetched_at.elapsed().as_secs())
+            .unwrap_or(0)
     }
 
     /// Evict cached result, cooldown, and inflight entry for a UUID.

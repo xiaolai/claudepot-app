@@ -2,7 +2,7 @@
 // App.test.tsx (via vi.doMock before dynamic import), so tests can provide
 // per-command handlers without global state.
 
-import type { AccountSummary, AppStatus } from "../types";
+import type { AccountSummary, AppStatus, UsageEntry } from "../types";
 
 export const sampleStatus = (overrides?: Partial<AppStatus>): AppStatus => ({
   platform: "macos",
@@ -35,5 +35,24 @@ export const sampleAccount = (
   verified_email: "alice@example.com",
   verified_at: null,
   drift: false,
+  ...overrides,
+});
+
+/** Factory for UsageEntry fixtures. Every test that renders a usage
+ *  row can pick a status and supply overrides for the rest. */
+export const sampleUsageEntry = (
+  overrides?: Partial<UsageEntry>,
+): UsageEntry => ({
+  status: "ok",
+  usage: {
+    five_hour: { utilization: 42, resets_at: null },
+    seven_day: null,
+    seven_day_opus: null,
+    seven_day_sonnet: null,
+    extra_usage: null,
+  },
+  age_secs: 5,
+  retry_after_secs: null,
+  error_detail: null,
   ...overrides,
 });

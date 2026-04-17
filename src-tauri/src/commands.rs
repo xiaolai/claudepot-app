@@ -5,9 +5,9 @@
 //! Errors become user-facing strings at this boundary.
 
 use crate::dto::{
-    AccountSummary, AccountUsageDto, AppStatus, CcIdentity, CleanPreviewDto,
-    DryRunPlanDto, JournalEntryDto, MoveArgsDto, ProjectDetailDto, ProjectInfoDto,
-    RegisterOutcome, RemoveOutcome,
+    AccountSummary, AppStatus, CcIdentity, CleanPreviewDto, DryRunPlanDto,
+    JournalEntryDto, MoveArgsDto, ProjectDetailDto, ProjectInfoDto,
+    RegisterOutcome, RemoveOutcome, UsageEntryDto,
 };
 use claudepot_core::account::{Account, AccountStore};
 use claudepot_core::cli_backend;
@@ -389,16 +389,19 @@ pub async fn account_remove(uuid: String) -> Result<RemoveOutcome, String> {
     })
 }
 
-/// Fetch usage for all accounts that have credentials.
+/// Fetch usage for every account that has credentials. Every input
+/// account appears in the output map — accounts whose usage is
+/// unavailable carry a `status` explaining *why* so the GUI can
+/// render an inline placeholder ("Token expired", "Rate-limited",
+/// etc.) instead of silently hiding the row.
 ///
-/// Returns a map of UUID → usage data. Accounts with no credentials,
-/// expired tokens, or any error (including rate limits) are silently
-/// omitted — the UI sees `null` and shows nothing. Rate-limit errors
-/// are never exposed to the frontend.
+/// Accounts without credentials are NOT included here; the UI already
+/// knows this from `has_cli_credentials` on AccountSummary and handles
+/// it separately (the sidebar shows a Log-in button).
 #[tauri::command]
 pub async fn fetch_all_usage(
     cache: tauri::State<'_, UsageCache>,
-) -> Result<HashMap<String, AccountUsageDto>, String> {
+) -> Result<HashMap<String, UsageEntryDto>, String> {
     let store = open_store()?;
     let accounts = store.list().map_err(|e| format!("list failed: {e}"))?;
 
@@ -418,17 +421,13 @@ pub async fn fetch_all_usage(
         return Ok(HashMap::new());
     }
 
-    let batch = cache.fetch_batch_graceful(&uuids).await;
+    let batch = cache.fetch_batch_detailed(&uuids).await;
 
     let mut out = HashMap::new();
-    for (uuid, maybe_response) in batch {
-        match maybe_response {
-            Some(response) => {
-                tracing::info!(account = %uuid, "usage fetched");
-                out.insert(uuid.to_string(), AccountUsageDto::from_response(&response));
-            }
-            None => tracing::warn!(account = %uuid, "usage returned None (no creds / token expired / fetch failed — run verify_all_accounts to reconcile)"),
-        }
+    for (uuid, outcome) in batch {
+        let entry = UsageEntryDto::from_outcome(outcome);
+        tracing::info!(account = %uuid, status = %entry.status, "usage fetched");
+        out.insert(uuid.to_string(), entry);
     }
     Ok(out)
 }

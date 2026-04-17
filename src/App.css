@@ -514,6 +514,93 @@ button svg.lucide {
   color: var(--warn);
 }
 
+/* Cached-indicator chip, shown next to the 5h % label when the data
+   we're displaying is ≥60s old (served from cache during a live
+   fetch failure or rate-limit cooldown). */
+.usage-stale-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  margin-left: 4px;
+  padding: 1px 5px;
+  font-size: 9px;
+  font-weight: 500;
+  color: var(--muted);
+  background: var(--border);
+  border-radius: 999px;
+  vertical-align: baseline;
+}
+
+/* Inline placeholder row — occupies the same slot as the usage bar.
+   Layout must match .usage-bar-row so toggling between bar / placeholder
+   doesn't cause the sidebar to jump. */
+.usage-placeholder-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 4px;
+  min-height: 14px;
+}
+
+.usage-placeholder-msg {
+  flex: 1;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 10px;
+  line-height: 1.2;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.usage-placeholder-action {
+  flex-shrink: 0;
+  font-size: 10px;
+  padding: 0;
+  background: transparent;
+  border: 0;
+  color: var(--accent);
+  cursor: default;
+}
+.usage-placeholder-action:hover {
+  text-decoration: underline;
+}
+
+/* Detail-pane unavailable state — larger, more explanatory than the
+   sidebar placeholder. */
+.usage-unavailable {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px 12px;
+  background: var(--warn-weak);
+  border: 0.5px solid var(--border);
+  border-radius: 6px;
+}
+
+.usage-unavailable-body {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  font-size: 12px;
+  line-height: 1.4;
+}
+
+.usage-unavailable-body svg.lucide {
+  flex-shrink: 0;
+  margin-top: 1px;
+}
+
+.usage-unavailable-action {
+  align-self: flex-start;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  height: 24px;
+  font-size: 11px;
+}
+
 /* ---------- usage-pct (detail) ---------- */
 
 .usage-pct {

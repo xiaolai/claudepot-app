@@ -81,8 +81,37 @@ export interface AccountUsage {
   extra_usage: ExtraUsage | null;
 }
 
-/** UUID string → usage data. Missing keys = no data available. */
-export type UsageMap = Record<string, AccountUsage>;
+/**
+ * Per-account usage entry. Carries an explicit `status` so the UI can
+ * render an inline explanation when data is unavailable, instead of
+ * the old "silently omit the row" behavior.
+ *
+ * Status values:
+ *   - "ok"              — fresh data (use `usage`)
+ *   - "stale"           — cached data, see `age_secs` for staleness
+ *   - "no_credentials"  — account has no blob (rare; filtered upstream)
+ *   - "expired"         — token past local expiry → prompt re-login
+ *   - "rate_limited"    — cooldown, see `retry_after_secs`
+ *   - "error"           — other failure, see `error_detail`
+ */
+export interface UsageEntry {
+  status:
+    | "ok"
+    | "stale"
+    | "no_credentials"
+    | "expired"
+    | "rate_limited"
+    | "error";
+  usage: AccountUsage | null;
+  age_secs: number | null;
+  retry_after_secs: number | null;
+  error_detail: string | null;
+}
+
+/** UUID string → usage entry. Every account with credentials appears
+ *  here; the entry's `status` tells the UI whether to render data or
+ *  an inline placeholder. */
+export type UsageMap = Record<string, UsageEntry>;
 
 // ---------------------------------------------------------------------------
 // Project DTOs — mirror src-tauri/src/dto.rs ProjectInfoDto et al.
