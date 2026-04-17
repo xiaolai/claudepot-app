@@ -1,5 +1,5 @@
 import { useMemo, type ReactNode } from "react";
-import { Folder, Trash2, List, Unlink, WifiOff, CircleDashed as CircleDashedIcon } from "lucide-react";
+import { Folder, List, Unlink, WifiOff, CircleDashed as CircleDashedIcon } from "lucide-react";
 import type { ProjectInfo } from "../../types";
 import { classifyProject, type ProjectStatus } from "./projectStatus";
 
@@ -38,8 +38,6 @@ export function ProjectsList({
   onSelect,
   filter,
   onFilterChange,
-  onClean,
-  cleanCount,
   segmentedControl,
 }: {
   projects: ProjectInfo[];
@@ -47,8 +45,6 @@ export function ProjectsList({
   onSelect: (path: string) => void;
   filter: ProjectFilter;
   onFilterChange: (next: ProjectFilter) => void;
-  onClean: () => void;
-  cleanCount: number;
   /** Optional segmented control rendered below the sidebar header. */
   segmentedControl?: ReactNode;
 }) {
@@ -177,24 +173,6 @@ export function ProjectsList({
         </ul>
       )}
 
-      <div className="project-sidebar-actions">
-        <button
-          type="button"
-          className="sidebar-action"
-          onClick={onClean}
-          disabled={cleanCount === 0}
-          title={
-            cleanCount === 0
-              ? "No orphans or empty projects to clean"
-              : `Review and remove ${cleanCount} project${cleanCount === 1 ? "" : "s"}`
-          }
-        >
-          <Trash2 size={14} />
-          <span>
-            Clean{cleanCount > 0 ? ` (${cleanCount})` : ""}…
-          </span>
-        </button>
-      </div>
     </aside>
   );
 }
