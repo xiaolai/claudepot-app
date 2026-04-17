@@ -1713,6 +1713,128 @@ button.danger.primary:hover:not(:disabled) {
   }
 }
 
+/* ---------- settings section (P3.1) ---------- */
+
+.settings-view {
+  max-width: 520px;
+  padding-top: 52px;
+}
+
+.settings-heading {
+  font-size: 15px;
+  font-weight: 600;
+  margin: 0 0 16px;
+}
+
+.settings-group {
+  padding: 12px 0;
+  border-top: 0.5px solid var(--border);
+}
+
+.settings-group:first-of-type {
+  border-top: none;
+  padding-top: 0;
+}
+
+.settings-group-title {
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: var(--muted);
+  margin: 0 0 8px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.settings-group-title svg.lucide {
+  margin-right: 0;
+}
+
+.settings-desc {
+  font-size: 12px;
+  margin: 0 0 10px;
+}
+
+.settings-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  font-size: 13px;
+  padding: 4px 0;
+}
+
+.settings-select {
+  font: inherit;
+  font-size: 12px;
+  padding: 4px 8px;
+  border: 0.5px solid var(--border);
+  border-radius: 6px;
+  background: var(--surface);
+  color: var(--text);
+}
+
+.settings-input-group {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.settings-input {
+  font: inherit;
+  font-size: 12px;
+  padding: 4px 8px;
+  border: 0.5px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg);
+  color: var(--text);
+  width: 60px;
+}
+
+.settings-input.wide {
+  flex: 1;
+  width: auto;
+}
+
+.settings-input:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 0;
+}
+
+.settings-actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 8px;
+}
+
+.settings-result {
+  margin-top: 8px;
+  padding: 6px 10px;
+  border-radius: 6px;
+  background: var(--surface);
+  border: 0.5px solid var(--border);
+  font-size: 12px;
+}
+
+.settings-about-grid {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 4px 16px;
+  font-size: 12px;
+  margin: 0;
+}
+
+.settings-about-grid dt {
+  color: var(--muted);
+  text-align: right;
+}
+
+.settings-about-grid dd {
+  margin: 0;
+}
+
 /* ---------- segmented control (P2.2) ---------- */
 
 .segmented-control {

@@ -1,9 +1,11 @@
+import { useEffect } from "react";
 import { SectionRail } from "./components/SectionRail";
 import { PendingJournalsBanner } from "./components/PendingJournalsBanner";
 import { RunningOpStrip } from "./components/RunningOpStrip";
 import { sections, sectionIds } from "./sections/registry";
 import { AccountsSection } from "./sections/AccountsSection";
 import { ProjectsSection } from "./sections/ProjectsSection";
+import { SettingsSection } from "./sections/SettingsSection";
 import { OperationProgressModal } from "./sections/projects/OperationProgressModal";
 import { useSection } from "./hooks/useSection";
 import { usePendingJournals } from "./hooks/usePendingJournals";
@@ -32,9 +34,22 @@ function AppShell() {
     return `${verb} ${base(op.old_path)} → ${base(op.new_path)}`;
   };
 
+  // Cmd+, opens Settings (standard macOS shortcut)
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if ((e.metaKey || e.ctrlKey) && e.key === "," && !e.shiftKey && !e.altKey) {
+        e.preventDefault();
+        setSection("settings");
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [setSection]);
+
   // Hide the banner whenever the user is already looking at Repair —
   // no point nagging from the page they'd navigate to.
-  const onRepairSubview = section === "projects" && subRoute === "repair";
+  const onRepairSubview = section === "projects" &&
+    (subRoute === "repair" || subRoute === "maintenance");
   const actionableTotal =
     pendingSummary === null
       ? 0
@@ -53,6 +68,7 @@ function AppShell() {
           onSubRouteChange={setSubRoute}
         />
       )}
+      {section === "settings" && <SettingsSection />}
       {showBanner && pendingSummary && (
         <div className="global-banner-slot">
           <PendingJournalsBanner
