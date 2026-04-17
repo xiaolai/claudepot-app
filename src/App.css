@@ -1835,6 +1835,10 @@ button.danger.primary:hover:not(:disabled) {
   margin: 0;
 }
 
+.sidebar-segmented-slot {
+  padding: 0 8px 8px;
+}
+
 /* ---------- segmented control (P2.2) ---------- */
 
 .segmented-control {

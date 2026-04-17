@@ -16,6 +16,13 @@ export function SegmentedControl<T extends string>({
           aria-selected={opt.id === value}
           className={`segmented-control-item ${opt.id === value ? "selected" : ""}`}
           onClick={() => onChange(opt.id)}
+          title={opt.label}
+          onKeyDown={(e) => {
+            if (e.key === "Enter" || e.key === " ") {
+              e.preventDefault();
+              onChange(opt.id);
+            }
+          }}
         >
           {opt.label}
         </button>

@@ -87,7 +87,7 @@ export function ProjectsSection({
           <div className="sidebar-header">
             <span className="sidebar-title">Projects</span>
           </div>
-          <div style={{ padding: "0 8px 8px" }}>
+          <div className="sidebar-segmented-slot">
             <SegmentedControl
               options={TABS}
               value={activeTab}

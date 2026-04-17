@@ -89,7 +89,7 @@ export function ProjectsList({
       </div>
 
       {segmentedControl && (
-        <div style={{ padding: "0 8px 8px" }}>
+        <div className="sidebar-segmented-slot">
           {segmentedControl}
         </div>
       )}

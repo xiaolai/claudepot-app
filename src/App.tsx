@@ -59,7 +59,7 @@ function AppShell() {
 
   return (
     <div className="app-layout">
-      <div className="titlebar-drag" data-tauri-drag-region />
+      <div className="titlebar-drag" data-tauri-drag-region aria-hidden="true" />
       <SectionRail sections={sections} active={section} onSelect={setSection} />
       {section === "accounts" && <AccountsSection />}
       {section === "projects" && (
