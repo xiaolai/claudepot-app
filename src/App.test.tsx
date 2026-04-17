@@ -606,18 +606,28 @@ describe("WI-9: Inline disabled-button reasons", () => {
   });
 });
 
+/** Helper: expand a collapsible section by clicking its toggle button. */
+async function expandSection(name: string) {
+  const user = userEvent.setup();
+  const toggle = await screen.findByRole("button", { name });
+  if (toggle.getAttribute("aria-expanded") === "false") {
+    await user.click(toggle);
+  }
+}
+
 describe("WI-11: Account detail panel", () => {
-  it("selecting account shows detail with UUID", async () => {
+  it("selecting account shows detail with UUID in Identity section", async () => {
     await renderApp({
       app_status: () => sampleStatus({ account_count: 1 }),
       account_list: () => [sampleAccount()],
     });
 
     await selectAccount("alice@example.com");
+    await expandSection("Identity");
     expect(await screen.findByText("aaaa1111-2222-4333-8444-555555555555")).toBeInTheDocument();
   });
 
-  it("detail shows UUID and timestamps", async () => {
+  it("detail shows UUID and timestamps in Identity section", async () => {
     await renderApp({
       app_status: () => sampleStatus({ account_count: 1 }),
       account_list: () => [sampleAccount({
@@ -626,6 +636,7 @@ describe("WI-11: Account detail panel", () => {
     });
 
     await selectAccount("alice@example.com");
+    await expandSection("Identity");
     expect(await screen.findByText("aaaa1111-2222-4333-8444-555555555555")).toBeInTheDocument();
     expect(await screen.findByText(/1h ago/)).toBeInTheDocument();
   });
@@ -815,7 +826,7 @@ describe("Add-account modal", () => {
 });
 
 describe("AccountDetail fields", () => {
-  it("renders all metadata fields", async () => {
+  it("renders all metadata fields across collapsible sections", async () => {
     await renderApp({
       app_status: () => sampleStatus({ account_count: 1 }),
       account_list: () => [sampleAccount({
@@ -826,10 +837,13 @@ describe("AccountDetail fields", () => {
     });
 
     await selectAccount("alice@example.com");
+    // Expand both collapsed sections
+    await expandSection("Identity");
+    await expandSection("Health");
 
-    // UUID
+    // UUID (Identity section)
     expect(await screen.findByText("aaaa1111-2222-4333-8444-555555555555")).toBeInTheDocument();
-    // Org — appears in sidebar meta and content detail, use getAll
+    // Org — appears in sidebar meta and Identity section, use getAll
     const orgEls = screen.getAllByText("Alice Org");
     expect(orgEls.length).toBeGreaterThanOrEqual(1);
     // Relative time
@@ -837,9 +851,9 @@ describe("AccountDetail fields", () => {
     // Null timestamp
     const dashes = screen.getAllByText("—");
     expect(dashes.length).toBeGreaterThanOrEqual(1);
-    // Credential health
+    // Credential health (Health section)
     expect(screen.getByText("healthy")).toBeInTheDocument();
-    // Desktop profile
+    // Desktop profile (Health section)
     expect(screen.getByText("none")).toBeInTheDocument();
   });
 });
@@ -1033,7 +1047,7 @@ describe("AccountDetail — Verified row", () => {
     });
 
     await selectAccount("alice@example.com");
-    // "Verified" dt label with a dd whose verify-line.ok span contains the email.
+    await expandSection("Health");
     const verifiedDt = await screen.findByText(/^Verified$/i);
     const verifiedDd = verifiedDt.nextElementSibling as HTMLElement;
     expect(verifiedDd).toHaveTextContent(/alice@example\.com/);
@@ -1072,6 +1086,7 @@ describe("AccountDetail — Verified row", () => {
     });
 
     await selectAccount("alice@example.com");
+    await expandSection("Health");
     const tokenDt = await screen.findByText(/^Token$/i);
     const tokenDd = tokenDt.nextElementSibling as HTMLElement;
     expect(tokenDd).toHaveTextContent(/not past local expiry/i);
