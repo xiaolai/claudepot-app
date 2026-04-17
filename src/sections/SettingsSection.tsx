@@ -1,8 +1,10 @@
-import { useCallback, useState } from "react";
-import { Settings, Trash2, Lock, Info } from "lucide-react";
+import { useCallback, useEffect, useState } from "react";
+import { Settings, Trash2, Lock, Info, Stethoscope, Copy } from "lucide-react";
+import { api } from "../api";
 import { useToasts } from "../hooks/useToasts";
 import { useSettingsActions } from "../hooks/useSettingsActions";
 import { ToastContainer } from "../components/ToastContainer";
+import type { AppStatus, CcIdentity } from "../types";
 
 const SECTION_OPTIONS = [
   { value: "accounts", label: "Accounts" },
@@ -25,6 +27,52 @@ export function SettingsSection() {
     setStartSection(v);
     try { localStorage.setItem("claudepot.startSection", v); } catch { /* best-effort */ }
   }, []);
+
+  // Read-only diagnostics — equivalent of the CLI's `doctor` / `status`.
+  // Populated on mount; refresh via the panel's own button.
+  const [appStatus, setAppStatus] = useState<AppStatus | null>(null);
+  const [ccIdentity, setCcIdentity] = useState<CcIdentity | null>(null);
+  const [diagBusy, setDiagBusy] = useState(false);
+
+  const loadDiagnostics = useCallback(async () => {
+    setDiagBusy(true);
+    try {
+      const [s, cc] = await Promise.all([
+        api.appStatus(),
+        api.currentCcIdentity(),
+      ]);
+      setAppStatus(s);
+      setCcIdentity(cc);
+    } catch (e) {
+      pushToast("error", `Diagnostics failed: ${e}`);
+    } finally {
+      setDiagBusy(false);
+    }
+  }, [pushToast]);
+
+  useEffect(() => {
+    loadDiagnostics();
+  }, [loadDiagnostics]);
+
+  const copyDiagnostics = useCallback(() => {
+    if (!appStatus) return;
+    const lines = [
+      `Claudepot diagnostics`,
+      `Platform:          ${appStatus.platform}/${appStatus.arch}`,
+      `CLI active:        ${appStatus.cli_active_email ?? "—"}`,
+      `Desktop active:    ${appStatus.desktop_active_email ?? "—"}`,
+      `Desktop installed: ${appStatus.desktop_installed ? "yes" : "no"}`,
+      `Accounts:          ${appStatus.account_count}`,
+      `Data dir:          ${appStatus.data_dir}`,
+      `CC identity:       ${ccIdentity?.email ?? "(not signed in)"}`,
+      ...(ccIdentity?.error ? [`CC identity error: ${ccIdentity.error}`] : []),
+      ...(ccIdentity?.verified_at
+        ? [`CC verified at:    ${ccIdentity.verified_at}`]
+        : []),
+    ];
+    navigator.clipboard.writeText(lines.join("\n"));
+    pushToast("info", "Diagnostics copied.");
+  }, [appStatus, ccIdentity, pushToast]);
 
   return (
     <>
@@ -76,6 +124,61 @@ export function SettingsSection() {
               value={gc.lockPath} onChange={(e) => gc.setLockPath(e.target.value)} />
             <button onClick={gc.breakLock} disabled={gc.lockBusy || !gc.lockPath.trim()}
               title="Force-break the lock file and create an audit trail">Break</button>
+          </div>
+        </section>
+
+        <section className="settings-group">
+          <h3 className="settings-group-title">
+            <Stethoscope size={14} /> Diagnostics
+          </h3>
+          <p className="muted settings-desc">
+            Read-only view of platform, active slots, and the identity
+            Claude Code is currently authenticated as. Equivalent of the
+            CLI's <code>doctor</code> / <code>status</code> output.
+          </p>
+          {appStatus ? (
+            <dl className="settings-about-grid">
+              <dt>Platform</dt>
+              <dd className="mono selectable">
+                {appStatus.platform}/{appStatus.arch}
+              </dd>
+              <dt>CLI active</dt>
+              <dd className="selectable">
+                {appStatus.cli_active_email ?? "—"}
+              </dd>
+              <dt>Desktop active</dt>
+              <dd className="selectable">
+                {appStatus.desktop_active_email ?? "—"}
+              </dd>
+              <dt>Desktop installed</dt>
+              <dd>{appStatus.desktop_installed ? "yes" : "no"}</dd>
+              <dt>Accounts</dt>
+              <dd>{appStatus.account_count}</dd>
+              <dt>Data dir</dt>
+              <dd className="mono small selectable">{appStatus.data_dir}</dd>
+              <dt>CC identity</dt>
+              <dd className="selectable">
+                {ccIdentity?.email ?? <em className="muted">not signed in</em>}
+              </dd>
+              {ccIdentity?.error && (
+                <>
+                  <dt>CC error</dt>
+                  <dd className="mono small bad">{ccIdentity.error}</dd>
+                </>
+              )}
+            </dl>
+          ) : (
+            <p className="muted small">Loading…</p>
+          )}
+          <div className="settings-actions">
+            <button onClick={loadDiagnostics} disabled={diagBusy}
+              title="Re-fetch diagnostics">
+              Refresh
+            </button>
+            <button onClick={copyDiagnostics} disabled={!appStatus}
+              title="Copy all diagnostics to clipboard">
+              <Copy size={13} /> Copy
+            </button>
           </div>
         </section>
 
