@@ -84,9 +84,12 @@ export function AccountsSection() {
         accounts={accounts}
         usage={usage}
         selectedUuid={selectedUuid}
+        busyKeys={busy.busyKeys}
         onSelect={setSelectedUuid}
         onAdd={() => setShowAdd(true)}
         onRefresh={() => { refresh(); refreshUsage(); }}
+        onSwitchCli={(a) => actions.useCli(a)}
+        onLogin={(a) => actions.login(a)}
       />
 
       <main className="content">
