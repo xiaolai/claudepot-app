@@ -176,7 +176,13 @@ pub struct UsageEntryDto {
     pub age_secs: Option<u64>,
     /// For "rate_limited": seconds until the cooldown clears.
     pub retry_after_secs: Option<u64>,
-    /// For "error": short debug string (not shown verbatim to user).
+    /// For "error": a short technical string (e.g. "http 502",
+    /// "timeout", "invalid json"). **This IS rendered verbatim** in
+    /// the detail pane's UsageUnavailable block — keep the source
+    /// (`UsageFetchError::FetchFailed`) free of tokens, URLs, or
+    /// anything else that would be unsafe to show the user. The
+    /// source is already scrubbed: it mirrors the error chain from
+    /// the HTTP fetcher without request/response bodies.
     pub error_detail: Option<String>,
 }
 

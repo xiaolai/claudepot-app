@@ -24,6 +24,21 @@ export function useUsage() {
     }
   }, []);
 
+  /**
+   * Per-account refresh. Targets ONE uuid — doesn't retrigger fetches
+   * for the rest of the accounts. Used by row-level Retry buttons so
+   * clicking "Retry" on a rate-limited account doesn't spam healthy
+   * accounts with needless HTTP calls.
+   */
+  const refreshUsageFor = useCallback(async (uuid: string) => {
+    try {
+      const entry = await api.refreshUsageFor(uuid);
+      setUsage((prev) => ({ ...prev, [uuid]: entry }));
+    } catch {
+      // Silently ignore — stale entry stays in state.
+    }
+  }, []);
+
   useEffect(() => {
     refreshUsage();
     const onFocus = () => {
@@ -35,5 +50,5 @@ export function useUsage() {
     return () => window.removeEventListener("focus", onFocus);
   }, [refreshUsage]);
 
-  return { usage, refreshUsage };
+  return { usage, refreshUsage, refreshUsageFor };
 }

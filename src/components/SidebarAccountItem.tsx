@@ -175,19 +175,38 @@ function UsageRow({
       }
     : undefined;
 
-  if ((entry.status === "ok" || entry.status === "stale") && fiveHourPct !== null) {
+  if (entry.status === "ok" || entry.status === "stale") {
     const isStale = entry.status === "stale" && (entry.age_secs ?? 0) > 60;
-    return (
-      <div className="usage-bar-row" onContextMenu={ctxHandler}>
-        <div className="usage-bar-container">
-          <div className={`usage-bar-fill ${fiveHourPct >= 80 ? "high" : ""}`}
-            style={{ width: `${Math.min(fiveHourPct, 100)}%` }} />
+    if (fiveHourPct !== null) {
+      return (
+        <div className="usage-bar-row" onContextMenu={ctxHandler}>
+          <div className="usage-bar-container">
+            <div className={`usage-bar-fill ${fiveHourPct >= 80 ? "high" : ""}`}
+              style={{ width: `${Math.min(fiveHourPct, 100)}%` }} />
+          </div>
+          <span className={`usage-bar-label ${fiveHourPct >= 80 ? "high" : ""}`}>
+            {Math.round(fiveHourPct)}%
+            {resetsAt && <> · resets {formatResetTime(resetsAt)}</>}
+            {isStale && entry.age_secs !== null && (
+              <> <span className="usage-stale-chip" title="Showing cached data — Claudepot couldn't re-fetch just now">
+                <Clock size={9} strokeWidth={2.5} /> {formatAge(entry.age_secs)}
+              </span></>
+            )}
+          </span>
         </div>
-        <span className={`usage-bar-label ${fiveHourPct >= 80 ? "high" : ""}`}>
-          {Math.round(fiveHourPct)}%
-          {resetsAt && <> · resets {formatResetTime(resetsAt)}</>}
+      );
+    }
+    // Usage fetched successfully but the 5h window itself isn't
+    // reported — e.g. free-tier account, or a new account that has not
+    // yet run any requests in a 5h window. We explicitly must NOT
+    // silently hide the row here; the whole point of this component is
+    // to show state. The detail pane still renders the other windows.
+    return (
+      <div className="usage-placeholder-row" onContextMenu={ctxHandler}>
+        <span className="usage-placeholder-msg muted">
+          No activity in the last 5 hours
           {isStale && entry.age_secs !== null && (
-            <> <span className="usage-stale-chip" title="Showing cached data — Claudepot couldn't re-fetch just now">
+            <> <span className="usage-stale-chip" title="Showing cached data">
               <Clock size={9} strokeWidth={2.5} /> {formatAge(entry.age_secs)}
             </span></>
           )}

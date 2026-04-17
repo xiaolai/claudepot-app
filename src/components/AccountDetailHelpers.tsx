@@ -31,6 +31,14 @@ export function renderVerified(a: AccountSummary): React.ReactNode {
 }
 
 /**
+ * The app is English-only (copy, menus, a11y labels), so weekday /
+ * month formatting is fixed to en-US regardless of the host locale.
+ * Stabilizes the UI and lets tests assert on specific strings. If we
+ * ever localize the whole app this should become a runtime setting.
+ */
+const LOCALE = "en-US";
+
+/**
  * Format a usage-window reset timestamp. Smart date awareness — the old
  * "HH:mm" form was ambiguous for 7-day windows (reset could be days
  * away). Granularity slides with distance:
@@ -51,7 +59,11 @@ export function formatResetTime(iso: string): string {
   // Sub-hour: a countdown is more useful than wall-clock.
   if (diffMins < 60) return `in ${diffMins}m`;
 
-  const timeStr = d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+  const timeStr = d.toLocaleTimeString(LOCALE, {
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false,
+  });
   const sameDay = d.toDateString() === now.toDateString();
   if (sameDay) return timeStr;
 
@@ -65,11 +77,11 @@ export function formatResetTime(iso: string): string {
   );
 
   if (diffDays < 7) {
-    const weekday = d.toLocaleDateString([], { weekday: "short" });
+    const weekday = d.toLocaleDateString(LOCALE, { weekday: "short" });
     return `${weekday} ${timeStr}`;
   }
   return (
-    d.toLocaleDateString([], { month: "short", day: "numeric" }) +
+    d.toLocaleDateString(LOCALE, { month: "short", day: "numeric" }) +
     `, ${timeStr}`
   );
 }

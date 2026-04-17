@@ -118,6 +118,35 @@ describe("SidebarAccountItem — usage states", () => {
     expect(onRefresh).toHaveBeenCalledTimes(1);
   });
 
+  it("renders a 'no activity' placeholder when status is ok but five_hour is null", () => {
+    // Regression guard: the original bug this whole redesign fixed was
+    // accounts vanishing from the sidebar. If /usage returns ok but the
+    // 5h window is null (free-tier / new account), the row must still
+    // carry a message — never go blank.
+    render(
+      <SidebarAccountItem
+        account={sampleAccount()}
+        active={false}
+        usageEntry={sampleUsageEntry({
+          status: "ok",
+          usage: {
+            five_hour: null,
+            seven_day: { utilization: 12, resets_at: null },
+            seven_day_opus: null,
+            seven_day_sonnet: null,
+            extra_usage: null,
+          },
+        })}
+        cliBusy={false}
+        reBusy={false}
+        onSelect={() => {}}
+        onSwitchCli={() => {}}
+        onLogin={() => {}}
+      />,
+    );
+    expect(screen.getByText(/No activity in the last 5 hours/)).toBeInTheDocument();
+  });
+
   it("renders nothing in the usage slot when usageEntry is null", () => {
     render(
       <SidebarAccountItem
