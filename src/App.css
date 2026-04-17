@@ -269,6 +269,68 @@ button svg.lucide {
   gap: 2px;
 }
 
+/* ---------- sidebar search (P3.3) ---------- */
+
+.sidebar-search {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 0 8px 8px;
+  padding: 4px 8px;
+  border: 0.5px solid var(--border);
+  border-radius: 6px;
+  background: color-mix(in srgb, var(--bg) 60%, transparent);
+  -webkit-app-region: no-drag;
+}
+
+.sidebar-search-icon {
+  color: var(--muted);
+  flex-shrink: 0;
+}
+
+.sidebar-search-icon.lucide {
+  margin-right: 0;
+}
+
+.sidebar-search-input {
+  flex: 1;
+  border: none;
+  background: transparent;
+  font-size: 11px;
+  color: var(--text);
+  outline: none;
+  min-width: 0;
+  padding: 0;
+}
+
+.sidebar-search-input::placeholder {
+  color: var(--muted);
+}
+
+.sidebar-search-clear {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  padding: 0;
+  border: none;
+  border-radius: 50%;
+  background: var(--border);
+  color: var(--muted);
+  box-shadow: none;
+  flex-shrink: 0;
+}
+
+.sidebar-search-clear svg.lucide {
+  margin-right: 0;
+}
+
+.sidebar-search-clear:hover {
+  background: var(--muted);
+  color: var(--bg);
+}
+
 .sidebar-list {
   display: flex;
   flex-direction: column;
