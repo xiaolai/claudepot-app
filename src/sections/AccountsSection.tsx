@@ -9,6 +9,7 @@ import { useUsage } from "../hooks/useUsage";
 import { useActions } from "../hooks/useActions";
 import { Sidebar } from "../components/Sidebar";
 import { ContentPane } from "../components/ContentPane";
+import { StatusBar } from "../components/StatusBar";
 import { AddAccountModal } from "../components/AddAccountModal";
 import { ConfirmDialog } from "../components/ConfirmDialog";
 import { ToastContainer } from "../components/ToastContainer";
@@ -93,75 +94,18 @@ export function AccountsSection() {
       />
 
       <main className="content">
-        {(ccIdentity || verifying) && (
-          <div className="cc-truth-strip" aria-label="CC authentication status">
-            {ccIdentity?.email ? (
-              <>
-                <span className="muted">CC:</span>{" "}
-                <strong className="selectable">{ccIdentity.email}</strong>
-                {status?.cli_active_email &&
-                  !ccIdentity.email.toLowerCase()
-                    .localeCompare(
-                      status.cli_active_email.toLowerCase(),
-                    ) && <span className="tag ok"> MATCH</span>}
-                {status?.cli_active_email &&
-                  ccIdentity.email.toLowerCase() !==
-                    status.cli_active_email.toLowerCase() && (
-                    <span className="tag bad" title={`Claudepot active_cli: ${status.cli_active_email}`}>
-                      DRIFT
-                    </span>
-                  )}
-              </>
-            ) : ccIdentity?.error ? (
-              <span className="bad">
-                CC: could not verify — {ccIdentity.error}
-              </span>
-            ) : ccIdentity ? (
-              <span className="muted">CC: not signed in</span>
-            ) : null}
-            {verifying && (
-              <span className="muted reconcile-chip">
-                · Reconciling identities…
-              </span>
-            )}
-          </div>
-        )}
-        {syncError && (
-          <div className="banner warn" role="alert">
-            <div>
-              <strong>Couldn't sync with Claude Code.</strong>{" "}
-              {syncError}. Claudepot's active-CLI state may be stale —
-              the truth strip above shows what CC actually holds.
-            </div>
-          </div>
-        )}
-        {accounts.some((a) => a.drift) && (
-          <div className="banner warn" role="alert">
-            <div>
-              <strong>Account drift detected.</strong>{" "}
-              {accounts
-                .filter((a) => a.drift)
-                .map((a) => `${a.email} authenticates as ${a.verified_email}`)
-                .join("; ")}
-              . Re-login the affected accounts or Remove + re-add to
-              clear the misfiled slot.
-            </div>
-          </div>
-        )}
-        {keychainIssue && (
-          <div className="banner warn" role="alert">
-            <div>
-              <strong>Keychain locked.</strong> Click{" "}
-              <em>Unlock</em> to enter your macOS password.
-            </div>
-            <div className="banner-actions">
-              <button className="primary" onClick={async () => {
-                try { await api.unlockKeychain(); await refresh(); }
-                catch (e) { pushToast("error", `Unlock failed: ${e}`); }
-              }}>Unlock</button>
-            </div>
-          </div>
-        )}
+        <StatusBar
+          ccIdentity={ccIdentity}
+          status={status}
+          syncError={syncError}
+          keychainIssue={keychainIssue}
+          accounts={accounts}
+          verifying={verifying}
+          onUnlock={async () => {
+            try { await api.unlockKeychain(); await refresh(); }
+            catch (e) { pushToast("error", `Unlock failed: ${e}`); }
+          }}
+        />
 
         <ContentPane
           account={selectedAccount}

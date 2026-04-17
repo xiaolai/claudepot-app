@@ -908,7 +908,7 @@ describe("Concurrent refresh guard", () => {
 });
 
 describe("App — verified identity surface", () => {
-  it("renders the drift banner when any account has drift=true", async () => {
+  it("renders account drift in the unified status bar", async () => {
     const driftedAccount = sampleAccount({
       email: "lixiaolai@gmail.com",
       verified_email: "xiaolaiapple@gmail.com",
@@ -920,22 +920,20 @@ describe("App — verified identity surface", () => {
       account_list: () => [driftedAccount],
     });
 
-    // Banner text comes from App.tsx's drift alert block.
-    const banner = await screen.findByRole("alert");
-    expect(banner).toHaveTextContent(/account drift detected/i);
-    expect(banner).toHaveTextContent(
+    const bar = await screen.findByRole("alert");
+    expect(bar).toHaveTextContent(/account drift detected/i);
+    expect(bar).toHaveTextContent(
       /lixiaolai@gmail\.com authenticates as xiaolaiapple@gmail\.com/i,
     );
   });
 
-  it("does not render the drift banner when all accounts have drift=false", async () => {
+  it("does not render drift in the status bar when all accounts have drift=false", async () => {
     await renderApp({
       app_status: () => sampleStatus({ account_count: 1 }),
       account_list: () => [sampleAccount({ drift: false, verify_status: "ok" })],
     });
 
     await screen.findByText("alice@example.com");
-    // Keychain banner uses role="alert" too — assert on the drift text only.
     expect(screen.queryByText(/account drift detected/i)).not.toBeInTheDocument();
   });
 
@@ -966,8 +964,8 @@ describe("App — verified identity surface", () => {
   });
 });
 
-describe("App — CC truth strip + sync banner", () => {
-  it("renders CC identity in the truth strip when /profile returns an email", async () => {
+describe("App — unified status bar", () => {
+  it("shows no status bar when CC identity matches (happy path)", async () => {
     await renderApp({
       app_status: () =>
         sampleStatus({
@@ -982,12 +980,12 @@ describe("App — CC truth strip + sync banner", () => {
       }),
     });
 
-    const strip = await screen.findByLabelText(/CC authentication status/i);
-    expect(strip).toHaveTextContent(/alice@example\.com/);
-    expect(within(strip).getByText(/MATCH/i)).toBeInTheDocument();
+    await screen.findByText("alice@example.com");
+    // Anomaly-only: no status bar when everything matches.
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
   });
 
-  it("truth strip shows DRIFT when CC identity differs from Claudepot's active_cli", async () => {
+  it("shows CC slot drift in the status bar when CC identity differs from active_cli", async () => {
     await renderApp({
       app_status: () =>
         sampleStatus({
@@ -1002,29 +1000,12 @@ describe("App — CC truth strip + sync banner", () => {
       }),
     });
 
-    const strip = await screen.findByLabelText(/CC authentication status/i);
-    expect(strip).toHaveTextContent(/xiaolaiapple@gmail\.com/);
-    expect(within(strip).getByText(/DRIFT/i)).toBeInTheDocument();
+    const bar = await screen.findByRole("alert");
+    expect(bar).toHaveTextContent(/CC slot drift/i);
+    expect(bar).toHaveTextContent(/xiaolaiapple@gmail\.com/);
   });
 
-  it("truth strip surfaces a CC /profile error instead of staying silent", async () => {
-    await renderApp({
-      app_status: () => sampleStatus({ account_count: 0 }),
-      account_list: () => [],
-      current_cc_identity: () => ({
-        email: null,
-        verified_at: new Date().toISOString(),
-        error: "access token rejected by /api/oauth/profile",
-      }),
-    });
-
-    const strip = await screen.findByLabelText(/CC authentication status/i);
-    expect(strip).toHaveTextContent(
-      /could not verify.*access token rejected/i,
-    );
-  });
-
-  it("shows a sync-failure banner when sync_from_current_cc throws", async () => {
+  it("shows a sync-failure in the status bar when sync_from_current_cc throws", async () => {
     await renderApp({
       sync_from_current_cc: () => {
         throw new Error("access token rejected by /api/oauth/profile");
@@ -1033,12 +1014,8 @@ describe("App — CC truth strip + sync banner", () => {
       account_list: () => [],
     });
 
-    const alerts = await screen.findAllByRole("alert");
-    const syncBanner = alerts.find((el) =>
-      /couldn't sync with claude code/i.test(el.textContent ?? ""),
-    );
-    expect(syncBanner).toBeDefined();
-    expect(syncBanner).toHaveTextContent(/access token rejected/);
+    const bar = await screen.findByRole("alert");
+    expect(bar).toHaveTextContent(/couldn't sync with claude code/i);
   });
 });
 
@@ -1101,8 +1078,8 @@ describe("AccountDetail — Verified row", () => {
   });
 });
 
-describe("App — CC truth strip: not signed in state", () => {
-  it("shows 'CC: not signed in' when email and error are both null", async () => {
+describe("App — unified status bar: clean state", () => {
+  it("shows no status bar when CC is not signed in and there are no issues", async () => {
     await renderApp({
       app_status: () => sampleStatus({ account_count: 0 }),
       account_list: () => [],
@@ -1113,10 +1090,8 @@ describe("App — CC truth strip: not signed in state", () => {
       }),
     });
 
-    const strip = await screen.findByLabelText(/CC authentication status/i);
-    expect(strip).toHaveTextContent(/not signed in/i);
-    // Neither MATCH nor DRIFT tags should appear.
-    expect(within(strip).queryByText(/MATCH/i)).toBeNull();
-    expect(within(strip).queryByText(/DRIFT/i)).toBeNull();
+    await screen.findByText(/No accounts yet/i);
+    // Anomaly-only: no bar when nothing is wrong.
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
   });
 });
