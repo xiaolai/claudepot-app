@@ -1,15 +1,13 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { Folder } from "lucide-react";
 import { api } from "../api";
 import { useOperations } from "../hooks/useOperations";
-import type { CleanResult, MoveArgs, ProjectInfo } from "../types";
+import type { MoveArgs, ProjectInfo } from "../types";
 import { SegmentedControl } from "../components/SegmentedControl";
 import { ProjectsList, type ProjectFilter } from "./projects/ProjectsList";
 import { ProjectDetail } from "./projects/ProjectDetail";
 import { RenameProjectModal } from "./projects/RenameProjectModal";
-import { CleanOrphansModal } from "./projects/CleanOrphansModal";
 import { MaintenanceView } from "./projects/MaintenanceView";
-import { classifyProject } from "./projects/projectStatus";
 
 type ProjectsTab = "list" | "maintenance";
 const TABS = [
@@ -38,21 +36,9 @@ export function ProjectsSection({
   const [error, setError] = useState<string | null>(null);
   const [selectedPath, setSelectedPath] = useState<string | null>(null);
   const [renameTarget, setRenameTarget] = useState<string | null>(null);
-  const [cleanOpen, setCleanOpen] = useState(false);
   const [filter, setFilter] = useState<ProjectFilter>("all");
   const [toast, setToast] = useState<string | null>(null);
   const { open: openOpModal } = useOperations();
-
-  // Count of cleanable projects — orphan or empty. Computed once so
-  // the sidebar button and the preview modal agree on the number.
-  const cleanCount = useMemo(
-    () =>
-      projects.filter((p) => {
-        const s = classifyProject(p);
-        return s === "orphan" || s === "empty";
-      }).length,
-    [projects],
-  );
 
   const refresh = useCallback(() => {
     setLoading(true);
@@ -146,8 +132,6 @@ export function ProjectsSection({
         onSelect={setSelectedPath}
         filter={filter}
         onFilterChange={setFilter}
-        onClean={() => setCleanOpen(true)}
-        cleanCount={cleanCount}
         segmentedControl={
           <SegmentedControl
             options={TABS}
@@ -166,38 +150,6 @@ export function ProjectsSection({
         <main className="content" />
       )}
 
-
-      {cleanOpen && (
-        <CleanOrphansModal
-          onClose={() => setCleanOpen(false)}
-          onDone={(result: CleanResult) => {
-            refresh();
-            const parts: string[] = [];
-            if (result.orphans_removed > 0) {
-              parts.push(
-                `Removed ${result.orphans_removed} project${
-                  result.orphans_removed === 1 ? "" : "s"
-                }`,
-              );
-            }
-            if (result.orphans_skipped_live > 0) {
-              parts.push(
-                `skipped ${result.orphans_skipped_live} with live session${
-                  result.orphans_skipped_live === 1 ? "" : "s"
-                }`,
-              );
-            }
-            if (result.snapshot_paths.length > 0) {
-              parts.push(
-                `${result.snapshot_paths.length} recovery snapshot${
-                  result.snapshot_paths.length === 1 ? "" : "s"
-                } saved`,
-              );
-            }
-            if (parts.length > 0) setToast(parts.join(" — "));
-          }}
-        />
-      )}
 
       {renameTarget && (
         <RenameProjectModal
