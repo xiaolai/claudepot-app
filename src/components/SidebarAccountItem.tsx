@@ -33,6 +33,12 @@ export function SidebarAccountItem({
     (e: React.MouseEvent, fn: () => void) => { e.stopPropagation(); fn(); },
     [],
   );
+  // Enter/Space on a focusable child (switch-CLI button, login button)
+  // must not bubble to the parent item's own Enter/Space handler,
+  // otherwise the user triggers select+action simultaneously.
+  const stopKeyActivation = useCallback((e: React.KeyboardEvent) => {
+    if (e.key === "Enter" || e.key === " ") e.stopPropagation();
+  }, []);
 
   return (
     <div
@@ -62,6 +68,7 @@ export function SidebarAccountItem({
             {!a.is_cli_active && a.credentials_healthy && (
               <button className="sidebar-switch-btn" disabled={cliBusy}
                 onClick={(e) => stopClick(e, onSwitchCli)}
+                onKeyDown={stopKeyActivation}
                 title="Switch CLI to this account" aria-label={`Switch CLI to ${a.email}`}>
                 <Play size={11} strokeWidth={2.5} />
               </button>
@@ -69,6 +76,7 @@ export function SidebarAccountItem({
             {!a.credentials_healthy && !a.is_cli_active && (
               <button className="sidebar-switch-btn login" disabled={reBusy}
                 onClick={(e) => stopClick(e, onLogin)}
+                onKeyDown={stopKeyActivation}
                 title={`Log in as ${a.email}`} aria-label={`Log in as ${a.email}`}>
                 <LogIn size={11} strokeWidth={2} />
               </button>
