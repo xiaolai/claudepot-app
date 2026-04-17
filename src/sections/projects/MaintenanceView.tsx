@@ -1,6 +1,8 @@
 import { useCallback, useState } from "react";
 import { Trash2, Wrench } from "lucide-react";
 import type { CleanResult } from "../../types";
+import { useToasts } from "../../hooks/useToasts";
+import { ToastContainer } from "../../components/ToastContainer";
 import { RepairView } from "./RepairView";
 import { CleanOrphansModal } from "./CleanOrphansModal";
 
@@ -14,18 +16,27 @@ export function MaintenanceView({
   onOpTerminated?: () => void;
 }) {
   const [cleanOpen, setCleanOpen] = useState(false);
-  const [cleanToast, setCleanToast] = useState<string | null>(null);
+  const { toasts, pushToast, dismissToast } = useToasts();
 
-  const handleCleanDone = useCallback((result: CleanResult) => {
-    const parts: string[] = [];
-    if (result.orphans_removed > 0)
-      parts.push(`Removed ${result.orphans_removed} project${result.orphans_removed === 1 ? "" : "s"}`);
-    if (result.orphans_skipped_live > 0)
-      parts.push(`skipped ${result.orphans_skipped_live} with live sessions`);
-    if (result.snapshot_paths.length > 0)
-      parts.push(`${result.snapshot_paths.length} recovery snapshots saved`);
-    if (parts.length > 0) setCleanToast(parts.join(" — "));
-  }, []);
+  const handleCleanDone = useCallback(
+    (result: CleanResult) => {
+      const parts: string[] = [];
+      if (result.orphans_removed > 0)
+        parts.push(
+          `Removed ${result.orphans_removed} project${result.orphans_removed === 1 ? "" : "s"}`,
+        );
+      if (result.orphans_skipped_live > 0)
+        parts.push(
+          `skipped ${result.orphans_skipped_live} with live sessions`,
+        );
+      if (result.snapshot_paths.length > 0)
+        parts.push(
+          `${result.snapshot_paths.length} recovery snapshots saved`,
+        );
+      if (parts.length > 0) pushToast("info", parts.join(" — "));
+    },
+    [pushToast],
+  );
 
   return (
     <main className="content maintenance-view">
@@ -43,11 +54,6 @@ export function MaintenanceView({
           title="Preview which orphan projects would be removed">
           Preview cleanup…
         </button>
-        {cleanToast && (
-          <div className="maintenance-toast" role="status" onClick={() => setCleanToast(null)}>
-            {cleanToast}
-          </div>
-        )}
       </section>
 
       {/* Repair section — reuse existing RepairView without the back button */}
@@ -65,6 +71,8 @@ export function MaintenanceView({
           onDone={(result) => { handleCleanDone(result); }}
         />
       )}
+
+      <ToastContainer toasts={toasts} onDismiss={dismissToast} />
     </main>
   );
 }
