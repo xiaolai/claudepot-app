@@ -1,4 +1,4 @@
-import { Warning, Wrench } from "@phosphor-icons/react";
+import { AlertTriangle, Wrench } from "lucide-react";
 import type { PendingJournalsSummary } from "../types";
 
 /**
@@ -32,7 +32,7 @@ export function PendingJournalsBanner({
       aria-label={`${label}. Open Repair.`}
       onClick={onOpen}
     >
-      {hasStale ? <Warning weight="bold" /> : <Wrench />}
+      {hasStale ? <AlertTriangle strokeWidth={2.5} /> : <Wrench />}
       <span>
         <strong>{label}.</strong>{" "}
         {hasStale

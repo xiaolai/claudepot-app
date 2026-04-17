@@ -1,4 +1,4 @@
-import { X } from "@phosphor-icons/react";
+import { X } from "lucide-react";
 import type { Toast } from "../hooks/useToasts";
 
 export function ToastContainer({
@@ -19,7 +19,7 @@ export function ToastContainer({
             aria-label="Dismiss"
             title="Dismiss"
           >
-            <X size={14} weight="bold" />
+            <X size={14} strokeWidth={2.5} />
           </button>
         </div>
       ))}

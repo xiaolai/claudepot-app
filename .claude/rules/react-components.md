@@ -36,7 +36,8 @@ src/
 - No default exports except `App.tsx`. Use named exports everywhere else.
 - Co-locate component CSS classes in `App.css` under a section comment
   (`/* ---------- component-name ---------- */`).
-- All icons from `@phosphor-icons/react`. Never use emoji or text for icons.
+- All icons from `lucide-react`. Never use emoji or text for icons.
+  Global defaults (16px, strokeWidth 1.5) set via CSS on `svg.lucide`.
 
 ## Layout
 

@@ -6,9 +6,9 @@ import type { SectionDef } from "../sections/registry";
  * `aria-current="page"` + a visible fill; others are flat icon
  * buttons.
  *
- * Icons are Phosphor light-weight (set via IconContext in the shell);
- * active state is rendered via CSS, not by swapping to a fill-weight
- * icon — simpler and matches existing `.icon-btn` patterns.
+ * Icons are Lucide (stroke-based, defaults set via CSS on svg.lucide);
+ * active state is rendered via CSS, not by swapping icons — simpler
+ * and matches existing `.icon-btn` patterns.
  */
 export function SectionRail({
   sections,

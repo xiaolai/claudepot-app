@@ -1,4 +1,3 @@
-import { IconContext } from "@phosphor-icons/react";
 import { SectionRail } from "./components/SectionRail";
 import { PendingJournalsBanner } from "./components/PendingJournalsBanner";
 import { RunningOpStrip } from "./components/RunningOpStrip";
@@ -44,63 +43,61 @@ function AppShell() {
     pendingSummary !== null && actionableTotal > 0 && !onRepairSubview;
 
   return (
-    <IconContext.Provider value={{ size: 16, weight: "light" }}>
-      <div className="app-layout">
-        <div className="titlebar-drag" data-tauri-drag-region />
-        <SectionRail sections={sections} active={section} onSelect={setSection} />
-        {section === "accounts" && <AccountsSection />}
-        {section === "projects" && (
-          <ProjectsSection
-            subRoute={subRoute}
-            onSubRouteChange={setSubRoute}
+    <div className="app-layout">
+      <div className="titlebar-drag" data-tauri-drag-region />
+      <SectionRail sections={sections} active={section} onSelect={setSection} />
+      {section === "accounts" && <AccountsSection />}
+      {section === "projects" && (
+        <ProjectsSection
+          subRoute={subRoute}
+          onSubRouteChange={setSubRoute}
+        />
+      )}
+      {showBanner && pendingSummary && (
+        <div className="global-banner-slot">
+          <PendingJournalsBanner
+            summary={pendingSummary}
+            onOpen={() => setSection("projects", "repair")}
           />
-        )}
-        {showBanner && pendingSummary && (
-          <div className="global-banner-slot">
-            <PendingJournalsBanner
-              summary={pendingSummary}
-              onOpen={() => setSection("projects", "repair")}
-            />
-          </div>
-        )}
-        <RunningOpStrip
-          ops={runningOps}
-          onReopen={(opId) => {
-            const op = runningOps.find((o) => o.op_id === opId);
-            if (!op) return;
-            openOp({
-              opId,
-              title: labelFor(op),
-              onComplete: () => refreshPendingBanner(),
-              onError: () => refreshPendingBanner(),
-            });
+        </div>
+      )}
+      <RunningOpStrip
+        ops={runningOps}
+        onReopen={(opId) => {
+          const op = runningOps.find((o) => o.op_id === opId);
+          if (!op) return;
+          openOp({
+            opId,
+            title: labelFor(op),
+            onComplete: () => refreshPendingBanner(),
+            onError: () => refreshPendingBanner(),
+          });
+        }}
+      />
+
+      {activeOp && (
+        <OperationProgressModal
+          key={activeOp.opId}
+          opId={activeOp.opId}
+          title={activeOp.title}
+          onClose={closeOp}
+          // Every terminal event — whether repair or rename —
+          // invalidates the pending-journals banner (plan §7.5).
+          onComplete={() => {
+            activeOp.onComplete?.();
+            refreshPendingBanner();
+          }}
+          onError={(detail) => {
+            activeOp.onError?.(detail);
+            refreshPendingBanner();
+          }}
+          onOpenRepair={() => {
+            closeOp();
+            setSection("projects", "repair");
           }}
         />
-
-        {activeOp && (
-          <OperationProgressModal
-            key={activeOp.opId}
-            opId={activeOp.opId}
-            title={activeOp.title}
-            onClose={closeOp}
-            // Every terminal event — whether repair or rename —
-            // invalidates the pending-journals banner (plan §7.5).
-            onComplete={() => {
-              activeOp.onComplete?.();
-              refreshPendingBanner();
-            }}
-            onError={(detail) => {
-              activeOp.onError?.(detail);
-              refreshPendingBanner();
-            }}
-            onOpenRepair={() => {
-              closeOp();
-              setSection("projects", "repair");
-            }}
-          />
-        )}
-      </div>
-    </IconContext.Provider>
+      )}
+    </div>
   );
 }
 

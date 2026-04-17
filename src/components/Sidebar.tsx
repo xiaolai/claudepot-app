@@ -1,4 +1,4 @@
-import { ArrowsClockwise, Desktop, Plus, Terminal } from "@phosphor-icons/react";
+import { RefreshCw, Monitor, Plus, Terminal } from "lucide-react";
 import type { AccountSummary, UsageMap } from "../types";
 
 export function Sidebar({
@@ -27,7 +27,7 @@ export function Sidebar({
             title="Refresh"
             aria-label="Refresh account data"
           >
-            <ArrowsClockwise />
+            <RefreshCw />
           </button>
           <button
             className="icon-btn"
@@ -82,29 +82,27 @@ export function Sidebar({
                     {a.is_cli_active ? (
                       <Terminal
                         size={13}
-                        weight="fill"
+                        strokeWidth={2.5}
                         className="slot-icon cli active"
                         aria-label="Active CLI account"
                       />
                     ) : a.credentials_healthy ? (
                       <Terminal
                         size={13}
-                        weight="light"
                         className="slot-icon cli available"
                         aria-label="CLI credentials available"
                       />
                     ) : null}
                     {a.is_desktop_active ? (
-                      <Desktop
+                      <Monitor
                         size={13}
-                        weight="fill"
+                        strokeWidth={2.5}
                         className="slot-icon desktop active"
                         aria-label="Active Desktop account"
                       />
                     ) : a.has_desktop_profile ? (
-                      <Desktop
+                      <Monitor
                         size={13}
-                        weight="light"
                         className="slot-icon desktop available"
                         aria-label="Desktop profile available"
                       />

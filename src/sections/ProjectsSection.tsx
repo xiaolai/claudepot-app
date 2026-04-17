@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { FolderSimple } from "@phosphor-icons/react";
+import { Folder } from "lucide-react";
 import { api } from "../api";
 import { useOperations } from "../hooks/useOperations";
 import type { CleanResult, MoveArgs, ProjectInfo } from "../types";
@@ -103,7 +103,7 @@ export function ProjectsSection({
     return (
       <main className="content">
         <div className="empty">
-          <FolderSimple size={32} weight="thin" />
+          <Folder size={32} strokeWidth={1} />
           <h2>No CC projects</h2>
           <p className="muted">
             Run Claude Code in any directory to create a project.

@@ -1,5 +1,5 @@
 import type { ReactNode } from "react";
-import { Folder, User } from "@phosphor-icons/react";
+import { Folder, User } from "lucide-react";
 
 /**
  * Section metadata. The shell renders the matching body itself — the

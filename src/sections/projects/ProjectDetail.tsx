@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { Folder, PencilSimple, WifiSlash } from "@phosphor-icons/react";
+import { Pencil, WifiOff, Trash2, Info } from "lucide-react";
 import { api } from "../../api";
 import { CopyButton } from "../../components/CopyButton";
 import type { ProjectDetail as ProjectDetailData } from "../../types";
@@ -68,55 +68,43 @@ export function ProjectDetail({
 
   const { info, sessions, memory_files } = detail;
   const status = classifyProject(info);
+  const noContent = info.session_count === 0 && info.memory_file_count === 0;
+
   return (
     <main className="content project-detail">
       <header className="project-detail-header">
         <div className="project-detail-title">
-          <Folder />
           <h2 className="selectable" title={info.original_path}>
             {info.original_path.split("/").filter(Boolean).pop() ??
               info.sanitized_name}
           </h2>
           {status === "orphan" && (
-            <span
-              className="project-tag orphan"
-              title="source directory does not exist"
-            >
+            <span className="project-tag orphan" title="source directory does not exist">
               orphan
             </span>
           )}
           {status === "unreachable" && (
-            <span
-              className="project-tag unreachable"
-              title="source lives on an unmounted volume or permission-denied path"
-            >
+            <span className="project-tag unreachable" title="source lives on an unmounted volume or permission-denied path">
               unreachable
             </span>
           )}
           {status === "empty" && (
-            <span
-              className="project-tag empty"
-              title="CC project dir has no sessions or memory files"
-            >
+            <span className="project-tag empty" title="CC project dir has no sessions or memory files">
               empty
             </span>
           )}
         </div>
         <div className="project-detail-actions">
-          <button
-            type="button"
-            className="primary"
-            title="Rename this project"
-            onClick={() => onRename(info.original_path)}
-          >
-            <PencilSimple /> Rename…
+          <button type="button" title="Rename this project"
+            onClick={() => onRename(info.original_path)}>
+            <Pencil size={14} /> Rename…
           </button>
         </div>
       </header>
 
       {status === "unreachable" && (
         <div className="project-hint unreachable" role="status">
-          <WifiSlash size={14} weight="light" />
+          <WifiOff size={14} />
           <span>
             Source path can't be checked right now (unmounted volume or
             permission-denied ancestor). Mount the drive and click Refresh
@@ -126,38 +114,42 @@ export function ProjectDetail({
       )}
 
       <section className="detail-grid">
-        <div className="detail-row">
-          <span className="detail-label">Original path</span>
-          <span className="detail-value mono selectable">
-            {info.original_path}
-            <CopyButton text={info.original_path} />
-          </span>
-        </div>
-        <div className="detail-row">
-          <span className="detail-label">Sanitized name</span>
-          <span className="detail-value mono selectable">
-            {info.sanitized_name}
-          </span>
-        </div>
-        <div className="detail-row">
-          <span className="detail-label">Size</span>
-          <span className="detail-value">
-            {formatSize(info.total_size_bytes)}
-          </span>
-        </div>
-        <div className="detail-row">
-          <span className="detail-label">Sessions</span>
-          <span className="detail-value">{info.session_count}</span>
-        </div>
-        <div className="detail-row">
-          <span className="detail-label">Memory files</span>
-          <span className="detail-value">{info.memory_file_count}</span>
-        </div>
+        <span className="detail-label">Path</span>
+        <span className="detail-value mono selectable">
+          {info.original_path} <CopyButton text={info.original_path} />
+        </span>
+        <span className="detail-label">Key</span>
+        <span className="detail-value mono selectable">{info.sanitized_name}</span>
+        <span className="detail-label">Size</span>
+        <span className="detail-value">{formatSize(info.total_size_bytes)}</span>
+        <span className="detail-label">Sessions</span>
+        <span className="detail-value">{info.session_count}</span>
+        <span className="detail-label">Memory</span>
+        <span className="detail-value">{info.memory_file_count} file{info.memory_file_count === 1 ? "" : "s"}</span>
       </section>
+
+      {noContent && status === "alive" && (
+        <div className="project-hint cleanup" role="status">
+          <Trash2 size={14} />
+          <span>
+            No sessions or memory files.{" "}
+            {info.total_size_bytes > 4096
+              ? `${formatSize(info.total_size_bytes)} of CC internal state — consider cleaning.`
+              : "This project can be safely cleaned."}
+          </span>
+        </div>
+      )}
+
+      {noContent && status !== "alive" && status !== "unreachable" && (
+        <div className="project-hint cleanup" role="status">
+          <Info size={14} />
+          <span>No sessions or memory. This project is a cleanup candidate.</span>
+        </div>
+      )}
 
       {memory_files.length > 0 && (
         <section className="detail-section">
-          <h3>Memory files</h3>
+          <h3>Memory</h3>
           <ul className="detail-list mono small">
             {memory_files.map((m) => (
               <li key={m}>{m}</li>
@@ -168,7 +160,7 @@ export function ProjectDetail({
 
       {sessions.length > 0 && (
         <section className="detail-section">
-          <h3>Sessions ({sessions.length})</h3>
+          <h3>Sessions · {sessions.length}</h3>
           <ul className="detail-list mono small">
             {sessions.slice(0, 20).map((s) => (
               <li key={s.session_id}>

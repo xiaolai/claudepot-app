@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { User } from "@phosphor-icons/react";
+import { User } from "lucide-react";
 import { api } from "../api";
 import type { AccountSummary } from "../types";
 import { useToasts } from "../hooks/useToasts";
