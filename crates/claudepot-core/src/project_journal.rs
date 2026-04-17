@@ -4,7 +4,10 @@
 //! snapshot paths for destructive operations, and the originating PID
 //! so `project repair` can decide finish-forward vs. rollback.
 //!
-//! Layout: `~/.claude/claudepot/journals/move-<epoch_ms>-<pid>.json`.
+//! Layout: `~/.claude/claudepot/journals/move-<secs>-<pid>-<suffix>.json`.
+//! The 6-char suffix disambiguates concurrent moves started by the
+//! same process in the same wall-clock second (Tauri runs multiple
+//! moves concurrently; locks are per-project, not global).
 //! On successful completion the journal is deleted. Failed runs leave
 //! the journal for user inspection.
 
@@ -128,21 +131,74 @@ impl JournalHandle {
 /// Open a fresh journal. Writes the initial file atomically before
 /// returning — if the caller later crashes, the journal is already on
 /// disk for `project repair` to find.
+///
+/// Filename carries seconds + PID + 6-char random suffix. The suffix
+/// exists because Tauri can start multiple project moves concurrently
+/// in the same process (locks are per-project, not global), and
+/// `started_unix_secs` is second-granularity — two moves started by
+/// the same process within the same wall-clock second would otherwise
+/// collide and the second `write_atomic` would overwrite the first,
+/// erasing its phases / snapshot paths / error state.
 pub fn open_journal(
     journals_dir: &Path,
     initial: Journal,
 ) -> Result<JournalHandle, ProjectError> {
     fs::create_dir_all(journals_dir).map_err(ProjectError::Io)?;
-    let path = journals_dir.join(format!(
-        "move-{}-{}.json",
-        initial.started_unix_secs,
-        initial.pid
-    ));
+    // Build the uniquified filename. If the caller happens to collide
+    // on the first random draw (cosmically unlikely at 6 lowercase+digit
+    // = ~2 billion space, but possible during tests that share the
+    // journals_dir), retry up to 5 times before giving up.
+    let mut attempts = 0;
+    let path = loop {
+        let suffix = random_suffix(6);
+        let candidate = journals_dir.join(format!(
+            "move-{}-{}-{}.json",
+            initial.started_unix_secs, initial.pid, suffix
+        ));
+        if !candidate.exists() {
+            break candidate;
+        }
+        attempts += 1;
+        if attempts >= 5 {
+            return Err(ProjectError::Io(std::io::Error::new(
+                std::io::ErrorKind::AlreadyExists,
+                format!(
+                    "failed to generate unique journal filename after {attempts} attempts"
+                ),
+            )));
+        }
+    };
     write_atomic(&path, &initial)?;
     Ok(JournalHandle {
         path,
         journal: initial,
     })
+}
+
+/// Tiny ASCII-only random suffix for journal filenames. Uses
+/// `SystemTime::now().subsec_nanos()` as a cheap entropy source plus
+/// a per-call counter — avoids pulling in the `rand` crate just for
+/// filename uniqueness. 6 chars over [0-9a-z] = ~36^6 ≈ 2.2B; far
+/// more than enough to disambiguate concurrent moves in the same
+/// second from the same process.
+fn random_suffix(len: usize) -> String {
+    use std::sync::atomic::{AtomicU64, Ordering};
+    static COUNTER: AtomicU64 = AtomicU64::new(0);
+    let bump = COUNTER.fetch_add(1, Ordering::Relaxed);
+    let nanos = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.subsec_nanos() as u64)
+        .unwrap_or(0);
+    let mut mix = nanos
+        .wrapping_mul(6364136223846793005)
+        .wrapping_add(bump.wrapping_mul(1442695040888963407));
+    let alphabet = b"0123456789abcdefghijklmnopqrstuvwxyz";
+    let mut s = String::with_capacity(len);
+    for _ in 0..len {
+        s.push(alphabet[(mix as usize) % alphabet.len()] as char);
+        mix = mix.wrapping_mul(6364136223846793005).wrapping_add(1);
+    }
+    s
 }
 
 /// Build an initial journal from a MoveArgs-like set of values.
@@ -365,6 +421,22 @@ mod tests {
         h.finish().unwrap();
         // Dir stays, file gone.
         assert!(dir.exists());
+    }
+
+    #[test]
+    fn test_open_journal_unique_filename_same_second_same_pid() {
+        // Regression guard for audit H5. Two moves started in the
+        // same wall-clock second by the same process must get
+        // distinct journal filenames — otherwise the second open
+        // would silently overwrite the first.
+        let tmp = tempfile::tempdir().unwrap();
+        let dir = tmp.path().join("journals");
+        let j = mkjournal("/a", "/b", 1000);
+        let h1 = open_journal(&dir, j.clone()).unwrap();
+        let h2 = open_journal(&dir, j).unwrap();
+        assert_ne!(h1.path, h2.path, "journal filenames must be unique");
+        assert!(h1.path.exists());
+        assert!(h2.path.exists());
     }
 
     #[test]
