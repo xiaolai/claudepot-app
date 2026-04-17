@@ -94,7 +94,7 @@ export function ProjectsList({
 
       <div
         className="project-filter-row"
-        role="tablist"
+        role="toolbar"
         aria-label="Filter projects by status"
       >
         <FilterChip
@@ -204,8 +204,7 @@ function FilterChip({
   return (
     <button
       type="button"
-      role="tab"
-      aria-selected={selected}
+      aria-pressed={selected}
       aria-label={tooltip}
       title={tooltip}
       className={`project-filter-chip${selected ? " selected" : ""}`}
