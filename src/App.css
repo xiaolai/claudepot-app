@@ -61,6 +61,48 @@
   }
 }
 
+/* ---------- accessibility media queries ---------- */
+
+/* System Settings ▸ Accessibility ▸ Display ▸ Increase contrast.
+   Borders and separators must become visibly prominent, text
+   contrast stays at WCAG AAA. */
+@media (prefers-contrast: more) {
+  :root {
+    --border:          rgba(0, 0, 0, 0.30);
+    --muted:           rgba(0, 0, 0, 0.75);
+    --tertiary:        rgba(0, 0, 0, 0.65);
+    --accent-weak:     rgba(0, 122, 255, 0.22);
+    --focus-ring:      0 0 0 3px rgba(0, 122, 255, 0.55);
+  }
+}
+@media (prefers-contrast: more) and (prefers-color-scheme: dark) {
+  :root {
+    --border:          rgba(255, 255, 255, 0.30);
+    --muted:           rgba(255, 255, 255, 0.82);
+    --tertiary:        rgba(255, 255, 255, 0.65);
+    --accent-weak:     rgba(10, 132, 255, 0.28);
+    --focus-ring:      0 0 0 3px rgba(10, 132, 255, 0.60);
+  }
+}
+
+/* System Settings ▸ Accessibility ▸ Display ▸ Reduce transparency.
+   The sidebar leans on Tauri vibrancy (transparent background). When
+   vibrancy is disabled by OS policy, the transparent pane would show
+   nothing, so fall back to the opaque --bg. */
+@media (prefers-reduced-transparency) {
+  .sidebar {
+    background: var(--bg);
+  }
+  /* Translucent overlays also get fully opaque fallbacks. */
+  .palette,
+  .toast,
+  .modal {
+    backdrop-filter: none;
+    -webkit-backdrop-filter: none;
+    background: var(--surface);
+  }
+}
+
 /* ---------- global resets ---------- */
 
 * {
