@@ -167,7 +167,9 @@ export function RenameProjectModal({
               spellCheck={false}
               autoCapitalize="off"
               autoComplete="off"
-              autoFocus
+              // useFocusTrap picks this up via [autofocus]; the native
+              // `autoFocus` attribute on top of that caused a double
+              // focus-set on mount.
               onChange={(e) => setNewPath(e.target.value)}
             />
             <button
