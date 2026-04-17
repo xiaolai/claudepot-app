@@ -44,19 +44,45 @@ export function AccountsSection() {
   const [confirmClear, setConfirmClear] = useState(false);
   const [selectedUuid, setSelectedUuid] = useState<string | null>(null);
   const [showPalette, setShowPalette] = useState(false);
-  const [ctxMenu, setCtxMenu] = useState<{
-    x: number; y: number; account: AccountSummary;
-  } | null>(null);
+  // Two parallel menu anchors: the row menu (broader scope) and the
+  // badge menu (token/usage-scoped). A discriminant so one render
+  // function can handle both without conditionals in the JSX.
+  const [ctxMenu, setCtxMenu] = useState<
+    | { kind: "row"; x: number; y: number; account: AccountSummary }
+    | { kind: "badge"; x: number; y: number; account: AccountSummary }
+    | null
+  >(null);
 
   const handleContextMenu = useCallback(
     (e: React.MouseEvent, a: AccountSummary) => {
       e.preventDefault();
-      setCtxMenu({ x: e.clientX, y: e.clientY, account: a });
+      setCtxMenu({ kind: "row", x: e.clientX, y: e.clientY, account: a });
+    },
+    [],
+  );
+
+  const handleBadgeContextMenu = useCallback(
+    (e: React.MouseEvent, a: AccountSummary) => {
+      e.preventDefault();
+      setCtxMenu({ kind: "badge", x: e.clientX, y: e.clientY, account: a });
     },
     [],
   );
 
   const closeCtxMenu = useCallback(() => setCtxMenu(null), []);
+
+  const runVerifyAccount = useCallback(
+    async (a: AccountSummary) => {
+      try {
+        await api.verifyAccount(a.uuid);
+        pushToast("info", `Verified ${a.email}`);
+        refresh();
+      } catch (e) {
+        pushToast("error", `Verify failed: ${e}`);
+      }
+    },
+    [pushToast, refresh],
+  );
 
   // Deferred Desktop switch with undo toast (P2.4). The action commit
   // is driven by the toast's auto-dismiss (`onCommit`), so the Undo
@@ -155,6 +181,7 @@ export function AccountsSection() {
         onSwitchCli={(a) => actions.useCli(a)}
         onLogin={(a) => actions.login(a)}
         onContextMenu={handleContextMenu}
+        onBadgeContextMenu={handleBadgeContextMenu}
       />
 
       <main className="content">
@@ -219,23 +246,77 @@ export function AccountsSection() {
 
       {ctxMenu && (() => {
         const a = ctxMenu.account;
-        const items: ContextMenuItem[] = [
-          { label: "Copy email", onClick: () => navigator.clipboard.writeText(a.email) },
-          { label: "Copy UUID", onClick: () => navigator.clipboard.writeText(a.uuid) },
-          { label: "", separator: true, onClick: () => {} },
-          {
-            label: a.is_cli_active ? "Active CLI" : "Set as CLI",
-            disabled: a.is_cli_active || !a.credentials_healthy,
-            onClick: () => actions.useCli(a),
-          },
-          {
-            label: a.is_desktop_active ? "Active Desktop" : "Set as Desktop",
-            disabled: a.is_desktop_active || !a.has_desktop_profile || !status.desktop_installed,
-            onClick: () => handleDesktopSwitch(a),
-          },
-          { label: "", separator: true, onClick: () => {} },
-          { label: "Remove", danger: true, onClick: () => setConfirmRemove(a) },
-        ];
+        const items: ContextMenuItem[] =
+          ctxMenu.kind === "badge"
+            ? [
+                {
+                  label: "Copy verified email",
+                  disabled: !a.verified_email,
+                  onClick: () => {
+                    if (a.verified_email)
+                      navigator.clipboard.writeText(a.verified_email);
+                  },
+                },
+                {
+                  label: "Copy token status",
+                  onClick: () =>
+                    navigator.clipboard.writeText(a.token_status),
+                },
+                { label: "", separator: true, onClick: () => {} },
+                {
+                  label: "Verify now",
+                  disabled: !a.credentials_healthy,
+                  onClick: () => runVerifyAccount(a),
+                },
+                {
+                  label: "Refresh usage",
+                  onClick: () => refreshUsage(),
+                },
+                { label: "", separator: true, onClick: () => {} },
+                {
+                  label: "Log in again…",
+                  disabled: busy.busyKeys.has(`re-${a.uuid}`),
+                  onClick: () => actions.login(a),
+                },
+              ]
+            : [
+                {
+                  label: "Copy email",
+                  onClick: () => navigator.clipboard.writeText(a.email),
+                },
+                {
+                  label: "Copy UUID",
+                  onClick: () => navigator.clipboard.writeText(a.uuid),
+                },
+                { label: "", separator: true, onClick: () => {} },
+                {
+                  label: a.is_cli_active ? "Active CLI" : "Set as CLI",
+                  disabled: a.is_cli_active || !a.credentials_healthy,
+                  onClick: () => actions.useCli(a),
+                },
+                {
+                  label: a.is_desktop_active
+                    ? "Active Desktop"
+                    : "Set as Desktop",
+                  disabled:
+                    a.is_desktop_active ||
+                    !a.has_desktop_profile ||
+                    !status.desktop_installed,
+                  onClick: () => handleDesktopSwitch(a),
+                },
+                { label: "", separator: true, onClick: () => {} },
+                {
+                  label: "Verify now",
+                  disabled: !a.credentials_healthy,
+                  onClick: () => runVerifyAccount(a),
+                },
+                { label: "", separator: true, onClick: () => {} },
+                {
+                  label: "Remove",
+                  danger: true,
+                  onClick: () => setConfirmRemove(a),
+                },
+              ];
         return (
           <ContextMenu x={ctxMenu.x} y={ctxMenu.y} items={items} onClose={closeCtxMenu} />
         );

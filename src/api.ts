@@ -55,6 +55,10 @@ export const api = {
   /// separate `accountList` round-trip. Slow — one HTTP call per account
   /// with credentials.
   verifyAllAccounts: () => invoke<AccountSummary[]>("verify_all_accounts"),
+  /// Verify a single account — fast, single /profile round-trip. Used
+  /// by the per-row context menu and command palette.
+  verifyAccount: (uuid: string) =>
+    invoke<AccountSummary>("verify_account", { uuid }),
   /// Ground-truth "what is CC currently authenticated as". Reads the
   /// shared slot + calls /profile. Never throws — errors land in the
   /// returned `error` field so the UI can render them as a banner.
