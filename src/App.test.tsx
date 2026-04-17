@@ -654,6 +654,13 @@ describe("Add-account modal", () => {
     let listCalls = 0;
     await renderApp({
       app_status: () => sampleStatus({ account_count: 0 }),
+      // Preflight: CC must report a signed-in account or the modal hides
+      // the "Add from current" button in favor of a Retry + instructions.
+      current_cc_identity: () => ({
+        email: "newly-added@example.com",
+        verified_at: new Date().toISOString(),
+        error: null,
+      }),
       account_list: () => {
         listCalls += 1;
         return listCalls === 1
