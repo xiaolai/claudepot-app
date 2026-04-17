@@ -1,5 +1,5 @@
-import { useCallback } from "react";
-import { RefreshCw, Monitor, Plus, Terminal, Play, LogIn } from "lucide-react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { RefreshCw, Monitor, Plus, Terminal, Play, LogIn, Search, X } from "lucide-react";
 import type { AccountSummary, UsageMap } from "../types";
 
 function formatResetTime(iso: string): string {
@@ -30,6 +30,9 @@ export function Sidebar({
   onLogin: (a: AccountSummary) => void;
   onContextMenu?: (e: React.MouseEvent, a: AccountSummary) => void;
 }) {
+  const [filterText, setFilterText] = useState("");
+  const filterRef = useRef<HTMLInputElement>(null);
+
   const handleSwitchClick = useCallback(
     (e: React.MouseEvent, a: AccountSummary) => {
       e.stopPropagation();
@@ -45,6 +48,31 @@ export function Sidebar({
     },
     [onLogin],
   );
+
+  // Cmd+F focuses the search input
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if ((e.metaKey || e.ctrlKey) && e.key === "f" && !e.shiftKey && !e.altKey) {
+        if (filterRef.current) {
+          e.preventDefault();
+          filterRef.current.focus();
+          filterRef.current.select();
+        }
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, []);
+
+  const filtered = useMemo(() => {
+    if (!filterText.trim()) return accounts;
+    const q = filterText.toLowerCase();
+    return accounts.filter(
+      (a) =>
+        a.email.toLowerCase().includes(q) ||
+        (a.org_name && a.org_name.toLowerCase().includes(q)),
+    );
+  }, [accounts, filterText]);
 
   return (
     <aside className="sidebar">
@@ -70,8 +98,33 @@ export function Sidebar({
         </div>
       </div>
 
+      {accounts.length > 3 && (
+        <div className="sidebar-search">
+          <Search size={12} className="sidebar-search-icon" />
+          <input
+            ref={filterRef}
+            className="sidebar-search-input"
+            type="text"
+            placeholder="Filter accounts…"
+            value={filterText}
+            onChange={(e) => setFilterText(e.target.value)}
+            aria-label="Filter accounts"
+          />
+          {filterText && (
+            <button
+              className="sidebar-search-clear"
+              onClick={() => { setFilterText(""); filterRef.current?.focus(); }}
+              aria-label="Clear filter"
+              title="Clear"
+            >
+              <X size={10} strokeWidth={2.5} />
+            </button>
+          )}
+        </div>
+      )}
+
       <div className="sidebar-list" role="listbox" aria-label="Account list">
-        {accounts.map((a) => {
+        {filtered.map((a) => {
           const active = selectedUuid === a.uuid;
           const tokenKind = a.drift
             ? "bad"
