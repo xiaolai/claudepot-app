@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { User } from "lucide-react";
 import { api } from "../api";
 import type { AccountSummary } from "../types";
@@ -9,6 +9,9 @@ import { useUsage } from "../hooks/useUsage";
 import { useActions } from "../hooks/useActions";
 import { Sidebar } from "../components/Sidebar";
 import { ContentPane } from "../components/ContentPane";
+import { StatusBar } from "../components/StatusBar";
+import { ContextMenu, type ContextMenuItem } from "../components/ContextMenu";
+import { CommandPalette } from "../components/CommandPalette";
 import { AddAccountModal } from "../components/AddAccountModal";
 import { ConfirmDialog } from "../components/ConfirmDialog";
 import { ToastContainer } from "../components/ToastContainer";
@@ -37,12 +40,45 @@ export function AccountsSection() {
 
   const [showAdd, setShowAdd] = useState(false);
   const [confirmRemove, setConfirmRemove] = useState<AccountSummary | null>(null);
-  const [confirmDesktop, setConfirmDesktop] = useState<AccountSummary | null>(null);
   const [confirmClear, setConfirmClear] = useState(false);
+  const pendingDesktopRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [selectedUuid, setSelectedUuid] = useState<string | null>(null);
+  const [showPalette, setShowPalette] = useState(false);
+  const [ctxMenu, setCtxMenu] = useState<{
+    x: number; y: number; account: AccountSummary;
+  } | null>(null);
 
-  // Auto-select: active CLI > active Desktop > first account. Re-runs
-  // if the selected account vanished externally.
+  const handleContextMenu = useCallback(
+    (e: React.MouseEvent, a: AccountSummary) => {
+      e.preventDefault();
+      setCtxMenu({ x: e.clientX, y: e.clientY, account: a });
+    },
+    [],
+  );
+
+  const closeCtxMenu = useCallback(() => setCtxMenu(null), []);
+
+  // Deferred Desktop switch with undo toast (P2.4)
+  const handleDesktopSwitch = useCallback(
+    (a: AccountSummary) => {
+      // Cancel any previous pending switch
+      if (pendingDesktopRef.current) clearTimeout(pendingDesktopRef.current);
+      let cancelled = false;
+      const timer = setTimeout(() => {
+        pendingDesktopRef.current = null;
+        if (!cancelled) actions.useDesktop(a);
+      }, 3000);
+      pendingDesktopRef.current = timer;
+      pushToast("info", `Switching Desktop to ${a.email}…`, () => {
+        cancelled = true;
+        clearTimeout(timer);
+        pendingDesktopRef.current = null;
+      });
+    },
+    [actions, pushToast],
+  );
+
+  // Auto-select: active CLI > active Desktop > first account.
   useEffect(() => {
     if (accounts.length === 0) return;
     const stillExists = selectedUuid && accounts.some((a) => a.uuid === selectedUuid);
@@ -53,6 +89,29 @@ export function AccountsSection() {
   }, [accounts, selectedUuid]);
 
   const selectedAccount = accounts.find((a) => a.uuid === selectedUuid) ?? null;
+
+  // Keyboard shortcuts
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      const mod = e.metaKey || e.ctrlKey;
+      // Cmd+Shift+C — copy selected email
+      if (mod && e.shiftKey && e.key === "c") {
+        e.preventDefault();
+        if (selectedAccount) {
+          navigator.clipboard.writeText(selectedAccount.email);
+          pushToast("info", `Copied ${selectedAccount.email}`);
+        }
+        return;
+      }
+      // Cmd+K/R/N — no shift/alt
+      if (!mod || e.shiftKey || e.altKey) return;
+      if (e.key === "k") { e.preventDefault(); setShowPalette(true); }
+      if (e.key === "r") { e.preventDefault(); refresh(); refreshUsage(); }
+      if (e.key === "n") { e.preventDefault(); setShowAdd(true); }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [refresh, refreshUsage, selectedAccount, pushToast]);
 
   if (!status) {
     if (loadError) {
@@ -84,81 +143,28 @@ export function AccountsSection() {
         accounts={accounts}
         usage={usage}
         selectedUuid={selectedUuid}
+        busyKeys={busy.busyKeys}
         onSelect={setSelectedUuid}
         onAdd={() => setShowAdd(true)}
         onRefresh={() => { refresh(); refreshUsage(); }}
+        onSwitchCli={(a) => actions.useCli(a)}
+        onLogin={(a) => actions.login(a)}
+        onContextMenu={handleContextMenu}
       />
 
       <main className="content">
-        {(ccIdentity || verifying) && (
-          <div className="cc-truth-strip" aria-label="CC authentication status">
-            {ccIdentity?.email ? (
-              <>
-                <span className="muted">CC:</span>{" "}
-                <strong className="selectable">{ccIdentity.email}</strong>
-                {status?.cli_active_email &&
-                  !ccIdentity.email.toLowerCase()
-                    .localeCompare(
-                      status.cli_active_email.toLowerCase(),
-                    ) && <span className="tag ok"> MATCH</span>}
-                {status?.cli_active_email &&
-                  ccIdentity.email.toLowerCase() !==
-                    status.cli_active_email.toLowerCase() && (
-                    <span className="tag bad" title={`Claudepot active_cli: ${status.cli_active_email}`}>
-                      DRIFT
-                    </span>
-                  )}
-              </>
-            ) : ccIdentity?.error ? (
-              <span className="bad">
-                CC: could not verify — {ccIdentity.error}
-              </span>
-            ) : ccIdentity ? (
-              <span className="muted">CC: not signed in</span>
-            ) : null}
-            {verifying && (
-              <span className="muted reconcile-chip">
-                · Reconciling identities…
-              </span>
-            )}
-          </div>
-        )}
-        {syncError && (
-          <div className="banner warn" role="alert">
-            <div>
-              <strong>Couldn't sync with Claude Code.</strong>{" "}
-              {syncError}. Claudepot's active-CLI state may be stale —
-              the truth strip above shows what CC actually holds.
-            </div>
-          </div>
-        )}
-        {accounts.some((a) => a.drift) && (
-          <div className="banner warn" role="alert">
-            <div>
-              <strong>Account drift detected.</strong>{" "}
-              {accounts
-                .filter((a) => a.drift)
-                .map((a) => `${a.email} authenticates as ${a.verified_email}`)
-                .join("; ")}
-              . Re-login the affected accounts or Remove + re-add to
-              clear the misfiled slot.
-            </div>
-          </div>
-        )}
-        {keychainIssue && (
-          <div className="banner warn" role="alert">
-            <div>
-              <strong>Keychain locked.</strong> Click{" "}
-              <em>Unlock</em> to enter your macOS password.
-            </div>
-            <div className="banner-actions">
-              <button className="primary" onClick={async () => {
-                try { await api.unlockKeychain(); await refresh(); }
-                catch (e) { pushToast("error", `Unlock failed: ${e}`); }
-              }}>Unlock</button>
-            </div>
-          </div>
-        )}
+        <StatusBar
+          ccIdentity={ccIdentity}
+          status={status}
+          syncError={syncError}
+          keychainIssue={keychainIssue}
+          accounts={accounts}
+          verifying={verifying}
+          onUnlock={async () => {
+            try { await api.unlockKeychain(); await refresh(); }
+            catch (e) { pushToast("error", `Unlock failed: ${e}`); }
+          }}
+        />
 
         <ContentPane
           account={selectedAccount}
@@ -167,7 +173,7 @@ export function AccountsSection() {
           busyKeys={busy.busyKeys}
           anyBusy={busy.anyBusy}
           onUseCli={(a) => actions.useCli(a)}
-          onUseDesktop={(a) => setConfirmDesktop(a)}
+          onUseDesktop={(a) => handleDesktopSwitch(a)}
           onLogin={(a) => actions.login(a)}
           onCancelLogin={actions.cancelLogin}
           onRemove={(a) => setConfirmRemove(a)}
@@ -188,15 +194,47 @@ export function AccountsSection() {
         onCancel={() => setConfirmRemove(null)}
         onConfirm={async () => { const t = confirmRemove; setConfirmRemove(null); await actions.performRemove(t); }} />}
 
-      {confirmDesktop && <ConfirmDialog title="Switch Desktop?" confirmLabel="Switch"
-        body={<p>Switch Desktop to <strong>{confirmDesktop.email}</strong>? Claude Desktop will quit and relaunch.</p>}
-        onCancel={() => setConfirmDesktop(null)}
-        onConfirm={async () => { const t = confirmDesktop; setConfirmDesktop(null); await actions.useDesktop(t); }} />}
-
       {confirmClear && <ConfirmDialog title="Sign out of Claude Code?" confirmLabel="Clear" confirmDanger
         body={<p>Clears CC's credentials file. You'll need to sign in again.</p>}
         onCancel={() => setConfirmClear(false)}
         onConfirm={async () => { setConfirmClear(false); await actions.performClearCli(); }} />}
+
+      {showPalette && status && (
+        <CommandPalette
+          accounts={accounts}
+          status={status}
+          onClose={() => setShowPalette(false)}
+          onSwitchCli={(a) => actions.useCli(a)}
+          onSwitchDesktop={(a) => handleDesktopSwitch(a)}
+          onAdd={() => setShowAdd(true)}
+          onRefresh={() => { refresh(); refreshUsage(); }}
+          onRemove={(a) => setConfirmRemove(a)}
+        />
+      )}
+
+      {ctxMenu && (() => {
+        const a = ctxMenu.account;
+        const items: ContextMenuItem[] = [
+          { label: "Copy email", onClick: () => navigator.clipboard.writeText(a.email) },
+          { label: "Copy UUID", onClick: () => navigator.clipboard.writeText(a.uuid) },
+          { label: "", separator: true, onClick: () => {} },
+          {
+            label: a.is_cli_active ? "Active CLI" : "Set as CLI",
+            disabled: a.is_cli_active || !a.credentials_healthy,
+            onClick: () => actions.useCli(a),
+          },
+          {
+            label: a.is_desktop_active ? "Active Desktop" : "Set as Desktop",
+            disabled: a.is_desktop_active || !a.has_desktop_profile || !status.desktop_installed,
+            onClick: () => handleDesktopSwitch(a),
+          },
+          { label: "", separator: true, onClick: () => {} },
+          { label: "Remove", danger: true, onClick: () => setConfirmRemove(a) },
+        ];
+        return (
+          <ContextMenu x={ctxMenu.x} y={ctxMenu.y} items={items} onClose={closeCtxMenu} />
+        );
+      })()}
 
       <ToastContainer toasts={toasts} onDismiss={dismissToast} />
     </>

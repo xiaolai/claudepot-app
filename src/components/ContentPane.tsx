@@ -5,10 +5,10 @@ import {
   Trash2,
   LogOut,
   XCircle,
-  UserPlus,
 } from "lucide-react";
 import type { AccountSummary, AccountUsage, AppStatus } from "../types";
 import { AccountDetail } from "./AccountDetail";
+import { EmptyState } from "./EmptyState";
 import { CopyButton } from "./CopyButton";
 
 function getDesktopDisabledHint(a: AccountSummary, desktopInstalled: boolean): string | null {
@@ -46,16 +46,7 @@ export function ContentPane({
   onAdd: () => void;
 }) {
   if (!account) {
-    return (
-      <div className="empty">
-        <UserPlus size={32} strokeWidth={1} />
-        <h2>Select an account</h2>
-        <p className="muted">
-          Choose an account from the sidebar, or add one to get started.
-        </p>
-        <button className="primary" onClick={onAdd}>Add account</button>
-      </div>
-    );
+    return <EmptyState onAdd={onAdd} />;
   }
 
   const a = account;

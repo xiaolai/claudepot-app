@@ -1,5 +1,6 @@
 import type * as React from "react";
 import type { AccountSummary, AccountUsage, UsageWindow } from "../types";
+import { CollapsibleSection } from "./CollapsibleSection";
 import { CopyButton } from "./CopyButton";
 
 function relativeTime(iso: string | null): string {
@@ -14,13 +15,6 @@ function relativeTime(iso: string | null): string {
   return `${days}d ago`;
 }
 
-/**
- * Render the runtime-verified identity row. This is the other half of
- * the Token row — Token answers "is the local clock past expiry", while
- * Verified answers "did the server actually accept this blob last time
- * we asked". They disagree when a token has been revoked server-side
- * but hasn't reached its nominal expiry yet (the xiaolaiapple scenario).
- */
 function renderVerified(a: AccountSummary): React.ReactNode {
   const when = a.verified_at ? `· ${relativeTime(a.verified_at)}` : "";
   switch (a.verify_status) {
@@ -85,11 +79,18 @@ export function AccountDetail({
   account: AccountSummary;
   usage: AccountUsage | null;
 }) {
+  const hasAnomaly =
+    a.drift ||
+    a.verify_status === "rejected" ||
+    a.verify_status === "drift" ||
+    a.token_status === "expired" ||
+    !a.credentials_healthy;
+
   return (
     <>
+      {/* Usage — always expanded (most-viewed data) */}
       {usage && (
-        <div className="detail-section">
-          <h3 className="detail-section-title">Usage</h3>
+        <CollapsibleSection title="Usage" defaultOpen>
           <dl className="detail-grid">
             <UsageRow label="5h window" window={usage.five_hour} />
             <UsageRow label="7d window" window={usage.seven_day} />
@@ -106,11 +107,11 @@ export function AccountDetail({
               </>
             )}
           </dl>
-        </div>
+        </CollapsibleSection>
       )}
 
-      <div className="detail-section">
-        <h3 className="detail-section-title">Details</h3>
+      {/* Identity — collapsed by default */}
+      <CollapsibleSection title="Identity">
         <dl className="detail-grid">
           <dt>Email</dt>
           <dd className="selectable">{a.email} <CopyButton text={a.email} /></dd>
@@ -124,6 +125,12 @@ export function AccountDetail({
           <dd>{relativeTime(a.last_cli_switch)}</dd>
           <dt>Last Desktop switch</dt>
           <dd>{relativeTime(a.last_desktop_switch)}</dd>
+        </dl>
+      </CollapsibleSection>
+
+      {/* Health — collapsed by default, auto-expands on anomaly */}
+      <CollapsibleSection title="Health" forceOpen={hasAnomaly}>
+        <dl className="detail-grid">
           <dt title="Local-clock check only — does not mean the server still accepts the token">Token</dt>
           <dd>
             {a.token_status}
@@ -138,7 +145,7 @@ export function AccountDetail({
           <dt>Desktop profile</dt>
           <dd>{a.has_desktop_profile ? "present" : "none"}</dd>
         </dl>
-      </div>
+      </CollapsibleSection>
     </>
   );
 }
