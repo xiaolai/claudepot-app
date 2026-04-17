@@ -1037,6 +1037,19 @@ button.danger.primary:hover:not(:disabled) {
   border-color: transparent;
 }
 
+/* 24 h snooze button on dismissable status issues. Kept compact so
+   it doesn't compete with the action button for attention. */
+.status-bar-dismiss {
+  width: 18px;
+  height: 18px;
+  padding: 0;
+  flex-shrink: 0;
+  opacity: 0.6;
+}
+.status-bar-dismiss:hover {
+  opacity: 1;
+}
+
 .status-bar-toggle {
   display: flex;
   align-items: center;

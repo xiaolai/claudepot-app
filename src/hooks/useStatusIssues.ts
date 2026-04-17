@@ -7,6 +7,13 @@ export interface StatusIssue {
   label: string;
   detail?: string;
   action?: { label: string; onClick: () => void };
+  /**
+   * True if this issue supports being dismissed ("snoozed") for 24 h.
+   * Used for nuisance warnings the user has acknowledged and accepted
+   * (e.g. an intentional drift pending cleanup). Errors should NOT be
+   * dismissable — they always require resolution.
+   */
+  dismissable?: boolean;
 }
 
 export function useStatusIssues(opts: {
@@ -85,6 +92,7 @@ export function useStatusIssues(opts: {
         severity: "warning",
         label: "Couldn't sync with Claude Code",
         detail: syncError,
+        dismissable: true,
       });
     }
 
@@ -112,6 +120,7 @@ export function useStatusIssues(opts: {
             : onReloginActive
               ? { label: "Re-login active", onClick: onReloginActive }
               : undefined,
+        dismissable: true,
       });
     }
 
