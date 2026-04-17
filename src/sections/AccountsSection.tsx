@@ -196,6 +196,11 @@ export function AccountsSection() {
             try { await api.unlockKeychain(); await refresh(); }
             catch (e) { pushToast("error", `Unlock failed: ${e}`); }
           }}
+          onSelectAccount={setSelectedUuid}
+          onReloginActive={() => {
+            const active = accounts.find((a) => a.is_cli_active);
+            if (active) actions.login(active);
+          }}
         />
 
         <ContentPane
