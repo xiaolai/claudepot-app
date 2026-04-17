@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { User } from "lucide-react";
 import { api } from "../api";
 import type { AccountSummary } from "../types";
@@ -10,6 +10,7 @@ import { useActions } from "../hooks/useActions";
 import { Sidebar } from "../components/Sidebar";
 import { ContentPane } from "../components/ContentPane";
 import { StatusBar } from "../components/StatusBar";
+import { ContextMenu, type ContextMenuItem } from "../components/ContextMenu";
 import { AddAccountModal } from "../components/AddAccountModal";
 import { ConfirmDialog } from "../components/ConfirmDialog";
 import { ToastContainer } from "../components/ToastContainer";
@@ -41,6 +42,19 @@ export function AccountsSection() {
   const [confirmDesktop, setConfirmDesktop] = useState<AccountSummary | null>(null);
   const [confirmClear, setConfirmClear] = useState(false);
   const [selectedUuid, setSelectedUuid] = useState<string | null>(null);
+  const [ctxMenu, setCtxMenu] = useState<{
+    x: number; y: number; account: AccountSummary;
+  } | null>(null);
+
+  const handleContextMenu = useCallback(
+    (e: React.MouseEvent, a: AccountSummary) => {
+      e.preventDefault();
+      setCtxMenu({ x: e.clientX, y: e.clientY, account: a });
+    },
+    [],
+  );
+
+  const closeCtxMenu = useCallback(() => setCtxMenu(null), []);
 
   // Auto-select: active CLI > active Desktop > first account. Re-runs
   // if the selected account vanished externally.
@@ -91,6 +105,7 @@ export function AccountsSection() {
         onRefresh={() => { refresh(); refreshUsage(); }}
         onSwitchCli={(a) => actions.useCli(a)}
         onLogin={(a) => actions.login(a)}
+        onContextMenu={handleContextMenu}
       />
 
       <main className="content">
@@ -144,6 +159,30 @@ export function AccountsSection() {
         body={<p>Clears CC's credentials file. You'll need to sign in again.</p>}
         onCancel={() => setConfirmClear(false)}
         onConfirm={async () => { setConfirmClear(false); await actions.performClearCli(); }} />}
+
+      {ctxMenu && (() => {
+        const a = ctxMenu.account;
+        const items: ContextMenuItem[] = [
+          { label: "Copy email", onClick: () => navigator.clipboard.writeText(a.email) },
+          { label: "Copy UUID", onClick: () => navigator.clipboard.writeText(a.uuid) },
+          { label: "", separator: true, onClick: () => {} },
+          {
+            label: a.is_cli_active ? "Active CLI" : "Set as CLI",
+            disabled: a.is_cli_active || !a.credentials_healthy,
+            onClick: () => actions.useCli(a),
+          },
+          {
+            label: a.is_desktop_active ? "Active Desktop" : "Set as Desktop",
+            disabled: a.is_desktop_active || !a.has_desktop_profile || !status.desktop_installed,
+            onClick: () => setConfirmDesktop(a),
+          },
+          { label: "", separator: true, onClick: () => {} },
+          { label: "Remove", danger: true, onClick: () => setConfirmRemove(a) },
+        ];
+        return (
+          <ContextMenu x={ctxMenu.x} y={ctxMenu.y} items={items} onClose={closeCtxMenu} />
+        );
+      })()}
 
       <ToastContainer toasts={toasts} onDismiss={dismissToast} />
     </>
