@@ -236,7 +236,10 @@ pub async fn account_login(
 
     let notify = std::sync::Arc::new(tokio::sync::Notify::new());
     {
-        let mut slot = state.active.lock().unwrap();
+        let mut slot = state
+            .active
+            .lock()
+            .map_err(|e| format!("login state lock poisoned: {e}"))?;
         if slot.is_some() {
             return Err("a login is already in progress".to_string());
         }
@@ -246,7 +249,9 @@ pub async fn account_login(
     let result = services::account_service::login_and_reimport(&store, id, Some(notify)).await;
 
     // Clear the slot regardless of outcome so the next login can run.
-    state.active.lock().unwrap().take();
+    if let Ok(mut slot) = state.active.lock() {
+        slot.take();
+    }
 
     result.map_err(|e| format!("login failed: {e}"))
 }
@@ -257,8 +262,10 @@ pub async fn account_login(
 pub fn account_login_cancel(
     state: tauri::State<'_, crate::state::LoginState>,
 ) -> Result<(), String> {
-    if let Some(notify) = state.active.lock().unwrap().as_ref() {
-        notify.notify_one();
+    if let Ok(guard) = state.active.lock() {
+        if let Some(notify) = guard.as_ref() {
+            notify.notify_one();
+        }
     }
     Ok(())
 }
