@@ -16,6 +16,7 @@ import type {
   RegisterOutcome,
   RemoveOutcome,
   RunningOpInfo,
+  UsageEntry,
   UsageMap,
 } from "./types";
 
@@ -51,6 +52,10 @@ export const api = {
   accountRemove: (uuid: string) =>
     invoke<RemoveOutcome>("account_remove", { uuid }),
   fetchAllUsage: () => invoke<UsageMap>("fetch_all_usage"),
+  /// Invalidate cache + cooldown for a single account then refetch.
+  /// Scoped alternative to fetchAllUsage for per-row Retry buttons.
+  refreshUsageFor: (uuid: string) =>
+    invoke<UsageEntry>("refresh_usage_for", { uuid }),
   /// Reconcile every account's blob identity against `/api/oauth/profile`.
   /// Returns the refreshed list so the caller can re-render without a
   /// separate `accountList` round-trip. Slow — one HTTP call per account

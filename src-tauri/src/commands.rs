@@ -389,6 +389,21 @@ pub async fn account_remove(uuid: String) -> Result<RemoveOutcome, String> {
     })
 }
 
+/// Invalidate cache + cooldown for a single account, then refetch.
+/// Used by per-row "Retry" affordances when one account is rate-limited
+/// or failing while others are fine — refetching everyone would be
+/// wasteful and can itself trigger rate limits on healthy accounts.
+#[tauri::command]
+pub async fn refresh_usage_for(
+    uuid: String,
+    cache: tauri::State<'_, UsageCache>,
+) -> Result<UsageEntryDto, String> {
+    let id = Uuid::parse_str(&uuid).map_err(|e| format!("bad uuid: {e}"))?;
+    cache.invalidate(id).await;
+    let outcome = cache.fetch_usage_detailed(id).await;
+    Ok(UsageEntryDto::from_outcome(outcome))
+}
+
 /// Fetch usage for every account that has credentials. Every input
 /// account appears in the output map — accounts whose usage is
 /// unavailable carry a `status` explaining *why* so the GUI can

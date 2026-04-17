@@ -42,7 +42,7 @@ export function AccountsSection({
     verifying,
     refresh,
   } = useRefresh(pushToast);
-  const { usage, refreshUsage } = useUsage();
+  const { usage, refreshUsage, refreshUsageFor } = useUsage();
   const actions = useActions({ pushToast, refresh, ...busy });
 
   const [showAdd, setShowAdd] = useState(false);
@@ -198,7 +198,7 @@ export function AccountsSection({
         onRefresh={() => { refresh(); refreshUsage(); }}
         onSwitchCli={(a) => actions.useCli(a)}
         onLogin={(a) => actions.login(a)}
-        onRefreshUsage={refreshUsage}
+        onRefreshUsageFor={refreshUsageFor}
         onContextMenu={handleContextMenu}
         onBadgeContextMenu={handleBadgeContextMenu}
       />
@@ -235,7 +235,9 @@ export function AccountsSection({
           onRemove={(a) => setConfirmRemove(a)}
           onClearCli={() => setConfirmClear(true)}
           onAdd={() => setShowAdd(true)}
-          onRefreshUsage={refreshUsage}
+          onRefreshUsage={
+            selectedAccount ? () => refreshUsageFor(selectedAccount.uuid) : undefined
+          }
         />
       </main>
 

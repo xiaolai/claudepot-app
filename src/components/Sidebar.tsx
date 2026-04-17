@@ -5,7 +5,7 @@ import { SidebarAccountItem } from "./SidebarAccountItem";
 
 export function Sidebar({
   accounts, usage, selectedUuid, busyKeys,
-  onSelect, onAdd, onRefresh, onSwitchCli, onLogin, onRefreshUsage,
+  onSelect, onAdd, onRefresh, onSwitchCli, onLogin, onRefreshUsageFor,
   onContextMenu, onBadgeContextMenu,
 }: {
   accounts: AccountSummary[];
@@ -17,8 +17,12 @@ export function Sidebar({
   onRefresh: () => void;
   onSwitchCli: (a: AccountSummary) => void;
   onLogin: (a: AccountSummary) => void;
-  /** Forwarded to each row so the "Retry" inline placeholder can call it. */
-  onRefreshUsage?: () => void;
+  /**
+   * Per-account usage refresh. Scoped to the clicked row's uuid so
+   * Retry on a rate-limited account doesn't refetch healthy accounts.
+   * Each row calls its own bound closure.
+   */
+  onRefreshUsageFor?: (uuid: string) => void;
   onContextMenu?: (e: React.MouseEvent, a: AccountSummary) => void;
   onBadgeContextMenu?: (e: React.MouseEvent, a: AccountSummary) => void;
 }) {
@@ -85,7 +89,9 @@ export function Sidebar({
             onSelect={() => onSelect(a.uuid)}
             onSwitchCli={() => onSwitchCli(a)}
             onLogin={() => onLogin(a)}
-            onRefreshUsage={onRefreshUsage}
+            onRefreshUsage={
+              onRefreshUsageFor ? () => onRefreshUsageFor(a.uuid) : undefined
+            }
             onContextMenu={onContextMenu ? (e) => onContextMenu(e, a) : undefined}
             onBadgeContextMenu={onBadgeContextMenu ? (e) => onBadgeContextMenu(e, a) : undefined}
           />
