@@ -1071,6 +1071,64 @@ button.danger.primary:hover:not(:disabled) {
   flex-shrink: 0;
 }
 
+/* ---------- context menu (P1.4) ---------- */
+
+.context-menu {
+  position: fixed;
+  min-width: 180px;
+  padding: 4px;
+  background: var(--surface);
+  border: 0.5px solid var(--border);
+  border-radius: 6px;
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.18);
+  z-index: 200;
+}
+
+@media (prefers-color-scheme: dark) {
+  .context-menu {
+    box-shadow: 0 6px 20px rgba(0, 0, 0, 0.45);
+  }
+}
+
+.context-menu-item {
+  display: block;
+  width: 100%;
+  padding: 5px 10px;
+  text-align: left;
+  background: transparent;
+  border: 0;
+  border-radius: 4px;
+  color: var(--text);
+  font-size: 13px;
+  height: auto;
+  box-shadow: none;
+}
+
+.context-menu-item:hover:not(:disabled) {
+  background: var(--accent);
+  color: var(--accent-text);
+}
+
+.context-menu-item:disabled {
+  color: var(--muted);
+  opacity: 0.5;
+}
+
+.context-menu-item.danger {
+  color: var(--bad);
+}
+
+.context-menu-item.danger:hover:not(:disabled) {
+  background: var(--bad);
+  color: #fff;
+}
+
+.context-menu-separator {
+  height: 0.5px;
+  margin: 4px 8px;
+  background: var(--border);
+}
+
 /* ---------- empty state ---------- */
 
 .empty {
