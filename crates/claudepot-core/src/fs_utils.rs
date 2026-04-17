@@ -3,12 +3,19 @@
 use std::path::{Path, PathBuf};
 
 /// Recursively copy a directory, skipping symlinks.
+///
+/// Uses `DirEntry::file_type` (not `metadata`) so symlinks are
+/// identified as symlinks instead of being resolved to their target's
+/// type — the previous code used `entry.metadata()?.file_type()` which
+/// silently followed the link and could copy through it (a symlink to
+/// a regular file looked like a regular file, a symlink to a directory
+/// could trigger unbounded recursion outside the source tree).
 pub fn copy_dir_recursive(src: &Path, dst: &Path) -> std::io::Result<()> {
     std::fs::create_dir_all(dst)?;
     for entry in std::fs::read_dir(src)? {
         let entry = entry?;
         let dst_path = dst.join(entry.file_name());
-        let ft = entry.metadata()?.file_type();
+        let ft = entry.file_type()?;
         if ft.is_symlink() {
             continue;
         } else if ft.is_dir() {
@@ -16,6 +23,54 @@ pub fn copy_dir_recursive(src: &Path, dst: &Path) -> std::io::Result<()> {
         } else {
             std::fs::copy(entry.path(), &dst_path)?;
         }
+    }
+    Ok(())
+}
+
+/// Atomically write `contents` to `path`: write to a sibling temp file,
+/// `fsync` it, then rename into place. On Unix, the final file is
+/// chmodded to `0o600` (owner read/write only) because every caller we
+/// have writes credential-adjacent data.
+///
+/// Centralizes the temp+rename+chmod pattern that was previously
+/// duplicated in `cli_backend/storage.rs` and `cli_backend/credfile.rs`.
+pub fn atomic_write(path: &Path, contents: &[u8]) -> std::io::Result<()> {
+    use std::io::Write;
+    let parent = path.parent().ok_or_else(|| {
+        std::io::Error::new(
+            std::io::ErrorKind::InvalidInput,
+            format!("atomic_write target has no parent: {}", path.display()),
+        )
+    })?;
+    std::fs::create_dir_all(parent)?;
+
+    // Sibling temp so rename stays atomic (same filesystem).
+    let tmp = parent.join(format!(
+        ".{}.tmp.{}",
+        path.file_name()
+            .and_then(|s| s.to_str())
+            .unwrap_or("claudepot"),
+        std::process::id()
+    ));
+
+    // Write + fsync under a scope so the file handle is closed before rename.
+    {
+        let mut f = std::fs::File::create(&tmp)?;
+        f.write_all(contents)?;
+        f.sync_all()?;
+    }
+
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(&tmp, std::fs::Permissions::from_mode(0o600))?;
+    }
+
+    // rename is atomic within a filesystem. If it fails, clean up the
+    // temp to avoid littering.
+    if let Err(e) = std::fs::rename(&tmp, path) {
+        let _ = std::fs::remove_file(&tmp);
+        return Err(e);
     }
     Ok(())
 }
@@ -164,5 +219,55 @@ mod tests {
         let tmp = tempfile::tempdir().unwrap();
         let result = copy_dir_recursive(&tmp.path().join("nonexistent"), &tmp.path().join("dst"));
         assert!(result.is_err());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn test_copy_dir_recursive_does_not_follow_directory_symlinks() {
+        // Regression guard for the audit finding H8: metadata() followed
+        // the link, so a symlinked directory looked like a directory and
+        // recursion could escape the source tree.
+        let tmp = tempfile::tempdir().unwrap();
+        let src = tmp.path().join("src");
+        let escape = tmp.path().join("escape");
+        fs::create_dir(&src).unwrap();
+        fs::create_dir(&escape).unwrap();
+        fs::write(escape.join("outside.txt"), "OOPS").unwrap();
+        std::os::unix::fs::symlink(&escape, src.join("link-dir")).unwrap();
+
+        let dst = tmp.path().join("dst");
+        copy_dir_recursive(&src, &dst).unwrap();
+
+        // Nothing under dst/link-dir should exist — the symlink must be skipped.
+        assert!(!dst.join("link-dir").exists());
+        assert!(!dst.join("link-dir/outside.txt").exists());
+    }
+
+    #[test]
+    fn test_atomic_write_creates_file_with_contents() {
+        let tmp = tempfile::tempdir().unwrap();
+        let target = tmp.path().join("nested/sub/file.json");
+        atomic_write(&target, b"{\"k\":1}").unwrap();
+        assert_eq!(fs::read(&target).unwrap(), b"{\"k\":1}");
+    }
+
+    #[test]
+    fn test_atomic_write_overwrites_existing() {
+        let tmp = tempfile::tempdir().unwrap();
+        let target = tmp.path().join("file.txt");
+        fs::write(&target, b"old").unwrap();
+        atomic_write(&target, b"new").unwrap();
+        assert_eq!(fs::read(&target).unwrap(), b"new");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn test_atomic_write_sets_0600_permissions() {
+        use std::os::unix::fs::PermissionsExt;
+        let tmp = tempfile::tempdir().unwrap();
+        let target = tmp.path().join("secret");
+        atomic_write(&target, b"shh").unwrap();
+        let mode = fs::metadata(&target).unwrap().permissions().mode() & 0o777;
+        assert_eq!(mode, 0o600);
     }
 }
