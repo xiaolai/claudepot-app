@@ -1,4 +1,4 @@
-import { useEffect, useRef, useCallback } from "react";
+import { useEffect, useRef, useState, useCallback } from "react";
 
 export interface ContextMenuItem {
   label: string;
@@ -20,24 +20,51 @@ export function ContextMenu({
   onClose: () => void;
 }) {
   const menuRef = useRef<HTMLDivElement>(null);
+  const actionItems = items.filter((i) => !i.separator);
+  const [focusIdx, setFocusIdx] = useState(0);
 
-  // Close on outside click or Escape
+  // Close on outside click
   useEffect(() => {
     const onClick = (e: MouseEvent) => {
       if (menuRef.current && !menuRef.current.contains(e.target as Node)) {
         onClose();
       }
     };
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") onClose();
-    };
     document.addEventListener("mousedown", onClick);
-    document.addEventListener("keydown", onKey);
-    return () => {
-      document.removeEventListener("mousedown", onClick);
-      document.removeEventListener("keydown", onKey);
-    };
+    return () => document.removeEventListener("mousedown", onClick);
   }, [onClose]);
+
+  // Keyboard: Escape, Arrow keys, Enter/Space
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      switch (e.key) {
+        case "Escape":
+          e.preventDefault();
+          onClose();
+          break;
+        case "ArrowDown":
+          e.preventDefault();
+          setFocusIdx((i) => Math.min(i + 1, actionItems.length - 1));
+          break;
+        case "ArrowUp":
+          e.preventDefault();
+          setFocusIdx((i) => Math.max(i - 1, 0));
+          break;
+        case "Enter":
+        case " ": {
+          e.preventDefault();
+          const item = actionItems[focusIdx];
+          if (item && !item.disabled) {
+            item.onClick();
+            onClose();
+          }
+          break;
+        }
+      }
+    };
+    document.addEventListener("keydown", onKey);
+    return () => document.removeEventListener("keydown", onKey);
+  }, [onClose, actionItems, focusIdx]);
 
   // Prevent menu from going off-screen
   useEffect(() => {
@@ -67,22 +94,27 @@ export function ContextMenu({
       className="context-menu"
       style={{ left: x, top: y }}
       role="menu"
+      aria-label="Context menu"
     >
-      {items.map((item, i) =>
-        item.separator ? (
-          <div key={i} className="context-menu-separator" role="separator" />
-        ) : (
-          <button
-            key={i}
-            className={`context-menu-item ${item.danger ? "danger" : ""}`}
-            role="menuitem"
-            disabled={item.disabled}
-            onClick={() => handleItemClick(item)}
-          >
-            {item.label}
-          </button>
-        ),
-      )}
+      {(() => {
+        let actionIdx = 0;
+        return items.map((item, i) =>
+          item.separator ? (
+            <div key={i} className="context-menu-separator" role="separator" />
+          ) : (
+            <button
+              key={i}
+              className={`context-menu-item ${item.danger ? "danger" : ""} ${actionIdx === focusIdx ? "focused" : ""}`}
+              role="menuitem"
+              tabIndex={actionIdx++ === focusIdx ? 0 : -1}
+              disabled={item.disabled}
+              onClick={() => handleItemClick(item)}
+            >
+              {item.label}
+            </button>
+          ),
+        );
+      })()}
     </div>
   );
 }

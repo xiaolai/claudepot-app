@@ -105,10 +105,11 @@ export function Sidebar({
             ref={filterRef}
             className="sidebar-search-input"
             type="text"
-            placeholder="Filter accounts…"
+            placeholder="Filter accounts… (⌘F)"
             value={filterText}
             onChange={(e) => setFilterText(e.target.value)}
             aria-label="Filter accounts"
+            aria-controls="account-listbox"
           />
           {filterText && (
             <button
@@ -123,7 +124,7 @@ export function Sidebar({
         </div>
       )}
 
-      <div className="sidebar-list" role="listbox" aria-label="Account list">
+      <div className="sidebar-list" role="listbox" id="account-listbox" aria-label="Account list">
         {filtered.map((a) => {
           const active = selectedUuid === a.uuid;
           const tokenKind = a.drift
@@ -235,7 +236,7 @@ export function Sidebar({
 
       {accounts.length === 0 && (
         <div className="sidebar-footer">
-          <p className="muted" style={{ fontSize: 11, textAlign: "center", padding: "8px 0" }}>
+          <p className="muted sidebar-empty-hint">
             No accounts yet
           </p>
         </div>
