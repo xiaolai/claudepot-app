@@ -19,9 +19,12 @@ pub fn rebuild(app: &AppHandle) -> Result<(), String> {
 
     let mut builder = MenuBuilder::new(app);
 
-    // Account items
+    // Account items — use AppKit's native checked-state so alignment
+    // is handled by the menu system instead of fake leading spaces
+    // (which don't align across proportional fonts of varying email
+    // lengths).
+    use tauri::menu::CheckMenuItemBuilder;
     for s in &summaries {
-        let prefix = if s.is_cli_active { "✓ " } else { "   " };
         let suffix = if !s.credentials_healthy {
             " ⚠"
         } else if s.is_desktop_active {
@@ -29,11 +32,12 @@ pub fn rebuild(app: &AppHandle) -> Result<(), String> {
         } else {
             ""
         };
-        let label = format!("{}{}{}", prefix, s.email, suffix);
-        let item = MenuItemBuilder::with_id(
+        let label = format!("{}{}", s.email, suffix);
+        let item = CheckMenuItemBuilder::with_id(
             format!("tray-switch-{}", s.uuid),
             &label,
         )
+        .checked(s.is_cli_active)
         .enabled(!s.is_cli_active && s.credentials_healthy)
         .build(app)
         .map_err(|e| format!("menu item: {e}"))?;

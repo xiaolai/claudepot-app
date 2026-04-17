@@ -24,7 +24,12 @@ import { ToastContainer } from "../components/ToastContainer";
  * rail. Nothing here knows about the rail itself — the shell is
  * responsible for placement.
  */
-export function AccountsSection() {
+export function AccountsSection({
+  onNavigate,
+}: {
+  /** Optional: route to another section from the command palette. */
+  onNavigate?: (section: string, subRoute?: string | null) => void;
+}) {
   const { toasts, pushToast, dismissToast } = useToasts();
   const busy = useBusy();
   const {
@@ -251,6 +256,7 @@ export function AccountsSection() {
           onAdd={() => setShowAdd(true)}
           onRefresh={() => { refresh(); refreshUsage(); }}
           onRemove={(a) => setConfirmRemove(a)}
+          onNavigate={onNavigate}
         />
       )}
 
