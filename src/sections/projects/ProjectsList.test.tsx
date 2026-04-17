@@ -62,15 +62,19 @@ describe("ProjectsList", () => {
       />,
     );
 
-    const orphanChip = screen.getByRole("tab", { name: /Orphan/ });
+    // Filter chips are toggle buttons inside a role=toolbar — not
+    // tabs, since the list pane is always visible regardless of which
+    // chip is selected (a toggled chip filters an existing panel,
+    // rather than swapping between disjoint panels as tabs do).
+    const orphanChip = screen.getByRole("button", { name: /Orphan/ });
     expect(orphanChip.textContent).toMatch(/2/);
 
-    const unreachableChip = screen.getByRole("tab", { name: /Unreachable/ });
+    const unreachableChip = screen.getByRole("button", { name: /Unreachable/ });
     expect(unreachableChip.textContent).toMatch(/1/);
 
-    const emptyChip = screen.getByRole("tab", { name: /Empty/ });
+    const emptyChip = screen.getByRole("button", { name: /Empty/ });
     expect(emptyChip.textContent).not.toMatch(/\d/);
-    const allChip = screen.getByRole("tab", { name: /All projects/ });
+    const allChip = screen.getByRole("button", { name: /All projects/ });
     expect(allChip.textContent).toMatch(/4/);
   });
 
@@ -86,7 +90,7 @@ describe("ProjectsList", () => {
         onFilterChange={spy}
       />,
     );
-    await user.click(screen.getByRole("tab", { name: /Orphan/ }));
+    await user.click(screen.getByRole("button", { name: /Orphan/ }));
     expect(spy).toHaveBeenCalledWith("orphan");
   });
 });
