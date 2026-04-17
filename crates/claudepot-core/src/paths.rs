@@ -38,18 +38,19 @@ pub fn claude_desktop_data_dir() -> Option<PathBuf> {
     }
 }
 
-/// Claudepot's own private data root. Honors `$CLAUDEPOT_DATA_DIR`.
+/// Claudepot's own private data root. Honors `$CLAUDEPOT_DATA_DIR`,
+/// defaults to `$HOME/.claudepot` per the repository contract. The
+/// previous implementation used `dirs::data_dir()/Claudepot` (resolving
+/// to `~/Library/Application Support/Claudepot` on macOS), which split
+/// state across machines and violated every path reference elsewhere
+/// in the codebase.
 pub fn claudepot_data_dir() -> PathBuf {
     std::env::var_os("CLAUDEPOT_DATA_DIR")
         .map(PathBuf::from)
         .unwrap_or_else(|| {
-            dirs::data_dir()
-                .unwrap_or_else(|| {
-                    dirs::home_dir()
-                        .unwrap_or_else(|| PathBuf::from("/tmp"))
-                        .join(".local/share")
-                })
-                .join("Claudepot")
+            dirs::home_dir()
+                .unwrap_or_else(|| PathBuf::from("/tmp"))
+                .join(".claudepot")
         })
 }
 
@@ -102,15 +103,28 @@ mod tests {
     }
 
     #[test]
-    fn test_claudepot_data_dir_default_contains_claudepot() {
+    fn test_claudepot_data_dir_default_is_home_dot_claudepot() {
         let _lock = lock_data_dir();
         std::env::remove_var("CLAUDEPOT_DATA_DIR");
         let result = claudepot_data_dir();
+        // Must be exactly $HOME/.claudepot per the repo contract —
+        // not dirs::data_dir()/Claudepot, which was the prior default
+        // and diverges from every other path reference in the codebase.
         assert!(
-            result.to_string_lossy().contains("Claudepot"),
+            result.ends_with(".claudepot"),
             "got: {}",
             result.display()
         );
+        // Verify it's in the home tree, not Library/Application Support
+        // or similar platform-specific app-data location.
+        if let Some(home) = dirs::home_dir() {
+            assert!(
+                result.starts_with(&home),
+                "expected under {}, got {}",
+                home.display(),
+                result.display()
+            );
+        }
     }
 
     #[test]
