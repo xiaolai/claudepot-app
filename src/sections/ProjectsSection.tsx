@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from "react";
 import { Folder } from "lucide-react";
 import { api } from "../api";
 import { useOperations } from "../hooks/useOperations";
+import { useGlobalShortcuts } from "../hooks/useGlobalShortcuts";
 import type { MoveArgs, ProjectInfo } from "../types";
 import { SegmentedControl } from "../components/SegmentedControl";
 import { ContextMenu, type ContextMenuItem } from "../components/ContextMenu";
@@ -77,6 +78,11 @@ export function ProjectsSection({
   useEffect(() => {
     refresh();
   }, [refresh]);
+
+  // ⌘R refreshes the project list from anywhere in the Projects section
+  // (maintenance tab included). Matches the macOS "Reload" idiom and
+  // fixes the P2 audit bug where shortcuts were Accounts-scoped only.
+  useGlobalShortcuts({ onRefresh: refresh });
 
   const activeTab: ProjectsTab =
     subRoute === "repair" || subRoute === "maintenance" ? "maintenance" : "list";
