@@ -1,5 +1,5 @@
 import type { ReactNode } from "react";
-import { Folder, User } from "lucide-react";
+import { Folder, Settings, User } from "lucide-react";
 
 /**
  * Section metadata. The shell renders the matching body itself — the
@@ -19,6 +19,7 @@ export interface SectionDef {
 export const sections: readonly SectionDef[] = [
   { id: "accounts", label: "Accounts", icon: <User /> },
   { id: "projects", label: "Projects", icon: <Folder /> },
+  { id: "settings", label: "Settings", icon: <Settings /> },
 ];
 
 export const sectionIds = sections.map((s) => s.id);
