@@ -1,11 +1,7 @@
 import { useCallback } from "react";
 import { Monitor, Terminal, Play, LogIn, AlertCircle, Clock } from "lucide-react";
 import type { AccountSummary, UsageEntry } from "../types";
-
-function formatResetTime(iso: string): string {
-  const d = new Date(iso);
-  return d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
-}
+import { formatResetTime } from "./AccountDetailHelpers";
 
 function formatAge(secs: number): string {
   if (secs < 60) return `${Math.max(1, Math.round(secs))}s ago`;
