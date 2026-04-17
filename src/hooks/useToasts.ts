@@ -7,6 +7,12 @@ export type Toast = {
   exiting: boolean;
   /** Optional undo callback — shown as a button on the toast. */
   onUndo?: () => void;
+  /**
+   * Internal: fires when the toast auto-dismisses *without* the user
+   * clicking Undo. Consumers use this to commit deferred actions so
+   * the Undo-vs-commit race is eliminated by construction.
+   */
+  onCommit?: () => void;
 };
 
 let toastCounter = 0;
@@ -39,15 +45,49 @@ export function useToasts() {
     setTimeout(() => removeToast(id), 150);
   }, [removeToast]);
 
-  const pushToast = useCallback((kind: Toast["kind"], text: string, onUndo?: () => void) => {
-    toastCounter += 1;
-    const id = toastCounter;
-    setToasts((t) => [...t, { id, kind, text, exiting: false, onUndo }]);
-    if (kind === "info") {
-      const timer = setTimeout(() => dismissToast(id), onUndo ? 3000 : 4000);
-      timersRef.current.set(id, timer);
-    }
-  }, [dismissToast]);
+  /**
+   * Push a toast. Options:
+   *   - `onUndo` — renders an Undo button. The toast sticks around for
+   *     the `undoMs` window (default 3000 ms) before auto-dismissing.
+   *   - `onCommit` — a callback fired iff the toast auto-dismisses
+   *     WITHOUT the user clicking Undo. This is the idiomatic way to
+   *     schedule a deferred action: the commit and the dismissal are
+   *     the same event, so "Undo is clickable ↔ action hasn't fired".
+   *     Clicking Undo cancels the commit.
+   */
+  const pushToast = useCallback(
+    (
+      kind: Toast["kind"],
+      text: string,
+      onUndo?: () => void,
+      opts?: { undoMs?: number; onCommit?: () => void },
+    ) => {
+      toastCounter += 1;
+      const id = toastCounter;
+      const wrappedUndo = onUndo
+        ? () => {
+            onUndo();
+          }
+        : undefined;
+      setToasts((t) => [
+        ...t,
+        { id, kind, text, exiting: false, onUndo: wrappedUndo, onCommit: opts?.onCommit },
+      ]);
+      if (kind === "info") {
+        const delay = onUndo ? opts?.undoMs ?? 3000 : 4000;
+        const timer = setTimeout(() => {
+          // If the user never clicked Undo, run the commit callback
+          // just before dismissing. This makes "toast visible ⇔ Undo
+          // still effective" an invariant, eliminating the prior race
+          // between a parallel action timer and the toast lifetime.
+          opts?.onCommit?.();
+          dismissToast(id);
+        }, delay);
+        timersRef.current.set(id, timer);
+      }
+    },
+    [dismissToast],
+  );
 
   return { toasts, pushToast, dismissToast };
 }
