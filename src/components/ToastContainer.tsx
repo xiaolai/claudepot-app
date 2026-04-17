@@ -21,7 +21,7 @@ export function ToastContainer({
                 onDismiss(t.id);
               }}
             >
-              Undo
+              {t.undoLabel ?? "Undo"}
             </button>
           )}
           <button

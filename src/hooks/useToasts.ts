@@ -7,6 +7,8 @@ export type Toast = {
   exiting: boolean;
   /** Optional undo callback — shown as a button on the toast. */
   onUndo?: () => void;
+  /** Label of the undo button. Defaults to "Undo". */
+  undoLabel?: string;
   /**
    * Internal: fires when the toast auto-dismisses *without* the user
    * clicking Undo. Consumers use this to commit deferred actions so
@@ -60,7 +62,11 @@ export function useToasts() {
       kind: Toast["kind"],
       text: string,
       onUndo?: () => void,
-      opts?: { undoMs?: number; onCommit?: () => void },
+      opts?: {
+        undoMs?: number;
+        undoLabel?: string;
+        onCommit?: () => void;
+      },
     ) => {
       toastCounter += 1;
       const id = toastCounter;
@@ -71,7 +77,15 @@ export function useToasts() {
         : undefined;
       setToasts((t) => [
         ...t,
-        { id, kind, text, exiting: false, onUndo: wrappedUndo, onCommit: opts?.onCommit },
+        {
+          id,
+          kind,
+          text,
+          exiting: false,
+          onUndo: wrappedUndo,
+          undoLabel: opts?.undoLabel,
+          onCommit: opts?.onCommit,
+        },
       ]);
       if (kind === "info") {
         const delay = onUndo ? opts?.undoMs ?? 3000 : 4000;

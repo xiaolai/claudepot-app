@@ -34,7 +34,8 @@ export const api = {
   /// exact path is gone (orphan projects still "open parent").
   revealInFinder: (path: string) => invoke<void>("reveal_in_finder", { path }),
   accountList: () => invoke<AccountSummary[]>("account_list"),
-  cliUse: (email: string) => invoke<void>("cli_use", { email }),
+  cliUse: (email: string, force = false) =>
+    invoke<void>("cli_use", { email, force }),
   cliClear: () => invoke<void>("cli_clear"),
   desktopUse: (email: string, noLaunch: boolean) =>
     invoke<void>("desktop_use", { email, noLaunch }),

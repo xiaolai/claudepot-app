@@ -6,7 +6,12 @@ import type { AccountSummary } from "../types";
 const rebuildTray = () => emit("rebuild-tray-menu").catch(() => {});
 
 interface Deps {
-  pushToast: (kind: "info" | "error", text: string) => void;
+  pushToast: (
+    kind: "info" | "error",
+    text: string,
+    onUndo?: () => void,
+    opts?: { undoMs?: number; undoLabel?: string; onCommit?: () => void },
+  ) => void;
   refresh: () => Promise<void>;
   withBusy: <T>(key: string, fn: () => Promise<T>) => Promise<T>;
   addBusy: (key: string) => void;
@@ -14,15 +19,29 @@ interface Deps {
 }
 
 export function useActions({ pushToast, refresh, withBusy, addBusy, removeBusy }: Deps) {
-  const useCli = (a: AccountSummary) =>
+  const useCli = (a: AccountSummary, force = false) =>
     withBusy(`cli-${a.uuid}`, async () => {
       try {
-        await api.cliUse(a.email);
+        await api.cliUse(a.email, force);
         pushToast("info", `CLI switched to ${a.email}`);
         await refresh();
         rebuildTray();
       } catch (e) {
-        pushToast("error", `CLI switch failed: ${e}`);
+        const msg = `${e}`;
+        // LiveSessionConflict from swap.rs — offer a force retry as an
+        // Undo affordance on the error toast. Declining (letting the
+        // toast expire) leaves the swap uncommitted; clicking Undo is
+        // the explicit "retry with --force" action.
+        if (msg.toLowerCase().includes("claude code process is running")) {
+          pushToast(
+            "error",
+            `Claude Code is running — its token refresh can revert the swap. Quit CC first, or override.`,
+            () => useCli(a, true),
+            { undoLabel: "Override" },
+          );
+          return;
+        }
+        pushToast("error", `CLI switch failed: ${msg}`);
       }
     });
 
