@@ -27,13 +27,19 @@ function IssueAction({ action }: { action: StatusIssue["action"] }) {
 
 export function StatusBar({
   ccIdentity, status, syncError, keychainIssue, accounts, verifying, onUnlock,
+  onSelectAccount, onReloginActive,
 }: {
   ccIdentity: CcIdentity | null; status: AppStatus | null;
   syncError: string | null; keychainIssue: string | null;
   accounts: AccountSummary[]; verifying: boolean; onUnlock: () => void;
+  onSelectAccount?: (uuid: string) => void;
+  onReloginActive?: () => void;
 }) {
   const [expanded, setExpanded] = useState(false);
-  const issues = useStatusIssues({ ccIdentity, status, syncError, keychainIssue, accounts, onUnlock });
+  const issues = useStatusIssues({
+    ccIdentity, status, syncError, keychainIssue, accounts, onUnlock,
+    onSelectAccount, onReloginActive,
+  });
   const toggle = useCallback(() => setExpanded((p) => !p), []);
 
   if (issues.length === 0 && !verifying) return null;
