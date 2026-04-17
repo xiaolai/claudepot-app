@@ -94,6 +94,10 @@ export function AccountsSection({
   // is driven by the toast's auto-dismiss (`onCommit`), so the Undo
   // button is effective ↔ the toast is still visible. No parallel
   // timers, no race between Undo click and action fire.
+  //
+  // `dedupeKey: "desktop-switch"` guarantees only the LATEST pending
+  // switch commits. Rapid-fire A → B → C supersede each other by
+  // cancelling the previous toast's timer, so only C runs.
   const handleDesktopSwitch = useCallback(
     (a: AccountSummary) => {
       pushToast(
@@ -104,7 +108,11 @@ export function AccountsSection({
            * tears down the commit timer inside useToasts. Nothing
            * else is needed here — declining to commit IS the undo. */
         },
-        { undoMs: 3000, onCommit: () => actions.useDesktop(a) },
+        {
+          undoMs: 3000,
+          dedupeKey: "desktop-switch",
+          onCommit: () => actions.useDesktop(a),
+        },
       );
     },
     [actions, pushToast],

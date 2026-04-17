@@ -232,22 +232,40 @@ async fn spawn_reveal(p: &std::path::Path) -> Result<(), String> {
     }
     #[cfg(target_os = "linux")]
     {
-        let target = if p.is_dir() { p.to_path_buf() } else {
+        let target = if p.is_dir() {
+            p.to_path_buf()
+        } else {
             p.parent().unwrap_or(p).to_path_buf()
         };
-        Command::new("xdg-open")
+        let out = Command::new("xdg-open")
             .arg(&target)
             .output()
             .await
             .map_err(|e| format!("xdg-open spawn failed: {e}"))?;
+        if !out.status.success() {
+            let stderr = String::from_utf8_lossy(&out.stderr);
+            return Err(format!("xdg-open exited: {}", stderr.trim()));
+        }
     }
     #[cfg(target_os = "windows")]
     {
-        Command::new("explorer")
+        // `explorer /select,<path>` quirks: it returns exit code 1 even
+        // on success in some Windows versions, so we can't rely on the
+        // status as strictly as macOS/Linux. Still check that spawning
+        // worked, but fall through on non-zero rather than masking a
+        // successful reveal with an error toast.
+        let out = Command::new("explorer")
             .arg(format!("/select,{}", p.display()))
             .output()
             .await
             .map_err(|e| format!("explorer spawn failed: {e}"))?;
+        let code = out.status.code().unwrap_or(0);
+        // Only bail on known-fatal exit codes. Explorer commonly returns
+        // 1 on success.
+        if code > 1 {
+            let stderr = String::from_utf8_lossy(&out.stderr);
+            return Err(format!("explorer exited {code}: {}", stderr.trim()));
+        }
     }
     Ok(())
 }

@@ -9,6 +9,7 @@ import type { AppStatus, CcIdentity } from "../types";
 const SECTION_OPTIONS = [
   { value: "accounts", label: "Accounts" },
   { value: "projects", label: "Projects" },
+  { value: "settings", label: "Settings" },
 ] as const;
 
 export function SettingsSection() {
