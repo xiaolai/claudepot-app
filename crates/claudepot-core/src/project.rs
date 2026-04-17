@@ -324,8 +324,47 @@ pub fn move_project(
                 Ok(()) => {}
                 #[cfg(unix)]
                 Err(e) if e.raw_os_error() == Some(libc::EXDEV) => {
-                    copy_dir_recursive(Path::new(&old_norm), Path::new(&new_norm))?;
-                    fs::remove_dir_all(&old_norm).map_err(ProjectError::Io)?;
+                    // Cross-device move: rename(2) can't; we must copy+remove.
+                    // The naive form `copy_dir_recursive(old, new)` had a
+                    // TOCTOU window — between the preflight `new_exists`
+                    // check and this copy, another process could create
+                    // or populate `new_norm`, and the copy would merge
+                    // into it before we deleted the source. Data-loss
+                    // potential (audit H6).
+                    //
+                    // Safe pattern: copy into a uniquely-named sibling
+                    // staging dir, then atomically rename staging -> new_norm.
+                    // fs::rename fails if the target is a non-empty
+                    // directory, so if another process claimed new_norm
+                    // between preflight and now we surface an error
+                    // instead of silently merging. Only after the rename
+                    // succeeds do we remove the source.
+                    let staging = format!(
+                        "{}.claudepot-xdev-{}-{}",
+                        new_norm,
+                        std::process::id(),
+                        chrono::Utc::now().timestamp_nanos_opt().unwrap_or(0)
+                    );
+                    copy_dir_recursive(Path::new(&old_norm), Path::new(&staging))?;
+                    match fs::rename(&staging, &new_norm) {
+                        Ok(()) => {
+                            // Source still intact; now safe to remove.
+                            fs::remove_dir_all(&old_norm).map_err(ProjectError::Io)?;
+                        }
+                        Err(rename_err) => {
+                            // Target got claimed in the race. Roll back
+                            // the staging copy and abort — source is
+                            // untouched.
+                            let cleanup_err =
+                                fs::remove_dir_all(&staging).err();
+                            let _ = journal.mark_error(&format!(
+                                "P3 EXDEV rename-into-place failed: {rename_err} \
+                                 (staging cleanup: {:?})",
+                                cleanup_err
+                            ));
+                            return Err(ProjectError::Io(rename_err));
+                        }
+                    }
                 }
                 Err(e) => {
                     let _ = journal.mark_error(&format!("P3 failed: {e}"));
