@@ -115,5 +115,8 @@ pub fn run() {
             commands::repair_status_summary,
         ])
         .run(tauri::generate_context!())
-        .expect("error while running tauri application");
+        .unwrap_or_else(|e| {
+            eprintln!("fatal: tauri application failed to start: {e}");
+            std::process::exit(1);
+        });
 }
