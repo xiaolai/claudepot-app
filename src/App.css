@@ -1071,6 +1071,154 @@ button.danger.primary:hover:not(:disabled) {
   flex-shrink: 0;
 }
 
+/* ---------- command palette (P1.1) ---------- */
+
+.palette-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.25);
+  display: flex;
+  justify-content: center;
+  padding-top: 80px;
+  z-index: 150;
+}
+
+.palette {
+  width: 480px;
+  max-width: calc(100vw - 48px);
+  max-height: 400px;
+  background: var(--surface);
+  border: 0.5px solid var(--border);
+  border-radius: 10px;
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.25);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  align-self: flex-start;
+}
+
+.palette-input-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 14px;
+  border-bottom: 0.5px solid var(--border);
+}
+
+.palette-search-icon {
+  color: var(--muted);
+  flex-shrink: 0;
+}
+
+.palette-search-icon.lucide {
+  margin-right: 0;
+}
+
+.palette-input {
+  flex: 1;
+  border: none;
+  background: transparent;
+  font-size: 14px;
+  color: var(--text);
+  outline: none;
+  min-width: 0;
+}
+
+.palette-input::placeholder {
+  color: var(--muted);
+}
+
+.palette-kbd {
+  font-size: 10px;
+  padding: 2px 6px;
+  border: 0.5px solid var(--border);
+  border-radius: 4px;
+  color: var(--muted);
+  font-family: "SF Mono", SFMono-Regular, ui-monospace, Menlo, monospace;
+  flex-shrink: 0;
+}
+
+.palette-list {
+  overflow-y: auto;
+  padding: 4px;
+}
+
+.palette-empty {
+  padding: 16px;
+  text-align: center;
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.palette-group-label {
+  font-size: 10px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: var(--muted);
+  padding: 8px 10px 4px;
+}
+
+.palette-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 6px 10px;
+  text-align: left;
+  background: transparent;
+  border: 0;
+  border-radius: 6px;
+  color: var(--text);
+  font-size: 13px;
+  height: auto;
+  box-shadow: none;
+}
+
+.palette-item svg.lucide {
+  margin-right: 0;
+  flex-shrink: 0;
+  color: var(--muted);
+}
+
+.palette-item.selected {
+  background: var(--accent);
+  color: var(--accent-text);
+}
+
+.palette-item.selected svg.lucide {
+  color: var(--accent-text);
+}
+
+.palette-item:hover:not(:disabled):not(.selected) {
+  background: rgba(0, 0, 0, 0.04);
+}
+
+@media (prefers-color-scheme: dark) {
+  .palette-item:hover:not(:disabled):not(.selected) {
+    background: rgba(255, 255, 255, 0.06);
+  }
+}
+
+.palette-item-label {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.palette-item-detail {
+  font-size: 11px;
+  color: var(--muted);
+  flex-shrink: 0;
+}
+
+.palette-item.selected .palette-item-detail {
+  color: var(--accent-text);
+  opacity: 0.75;
+}
+
 /* ---------- context menu (P1.4) ---------- */
 
 .context-menu {
