@@ -246,8 +246,17 @@ export function CleanOrphansModal({
                 type="button"
                 onClick={closeSafe}
                 disabled={state.kind === "running"}
+                title={
+                  state.kind === "running"
+                    ? "Can't cancel mid-run — the backend is holding the clean lock"
+                    : undefined
+                }
               >
-                {state.kind === "error" ? "Close" : "Cancel"}
+                {state.kind === "running"
+                  ? "Running…"
+                  : state.kind === "error"
+                    ? "Close"
+                    : "Cancel"}
               </button>
               <button
                 type="button"
