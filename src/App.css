@@ -1300,6 +1300,67 @@ button.danger.primary:hover:not(:disabled) {
   max-width: 280px;
 }
 
+/* ---------- onboarding empty state (P3.2) ---------- */
+
+.onboarding-steps {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  margin: 8px 0 16px;
+  text-align: left;
+  max-width: 280px;
+  width: 100%;
+}
+
+.onboarding-step {
+  display: flex;
+  gap: 10px;
+  align-items: flex-start;
+}
+
+.onboarding-step-number {
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  background: var(--accent-weak);
+  color: var(--accent);
+  font-size: 12px;
+  font-weight: 600;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  margin-top: 1px;
+}
+
+.onboarding-step-title {
+  margin: 0;
+  font-size: 13px;
+  font-weight: 500;
+  max-width: none;
+}
+
+.onboarding-step-detail {
+  margin: 2px 0 0;
+  font-size: 11px;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  max-width: none;
+}
+
+.onboarding-step-detail code {
+  font-family: "SF Mono", SFMono-Regular, ui-monospace, Menlo, monospace;
+  font-size: 11px;
+  background: var(--surface);
+  padding: 1px 6px;
+  border-radius: 4px;
+}
+
+.onboarding-step-detail svg.lucide {
+  margin-right: 0;
+}
+
 /* ---------- modal ---------- */
 
 .modal-backdrop {
