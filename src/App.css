@@ -495,6 +495,12 @@ button svg.lucide {
   -webkit-app-region: no-drag;
 }
 
+.sidebar-empty-hint {
+  font-size: 11px;
+  text-align: center;
+  padding: 8px 0;
+}
+
 @media (prefers-color-scheme: dark) {
   .sidebar-item:hover {
     background: rgba(255, 255, 255, 0.05);
@@ -1314,7 +1320,14 @@ button.danger.primary:hover:not(:disabled) {
   box-shadow: none;
 }
 
-.context-menu-item:hover:not(:disabled) {
+.context-menu-item:hover:not(:disabled),
+.context-menu-item.focused:not(:disabled) {
+  background: var(--accent);
+  color: var(--accent-text);
+}
+
+.context-menu-item:focus-visible {
+  outline: none;
   background: var(--accent);
   color: var(--accent-text);
 }
@@ -1421,6 +1434,11 @@ button.danger.primary:hover:not(:disabled) {
 
 .onboarding-step-detail svg.lucide {
   margin-right: 0;
+}
+
+.onboarding-repeat-hint {
+  font-size: 11px;
+  margin-top: 4px;
 }
 
 /* ---------- modal ---------- */

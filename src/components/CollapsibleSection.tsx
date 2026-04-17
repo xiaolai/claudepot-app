@@ -35,6 +35,7 @@ export function CollapsibleSection({
         className="collapsible-section-toggle"
         onClick={toggle}
         aria-expanded={open}
+        title={`${open ? "Collapse" : "Expand"} ${title}`}
       >
         <ChevronRight
           size={12}

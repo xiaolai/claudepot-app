@@ -31,7 +31,7 @@ export function EmptyState({ onAdd }: { onAdd: () => void }) {
       <button className="primary" onClick={onAdd}>
         Add current account
       </button>
-      <p className="muted" style={{ fontSize: 11, marginTop: 4 }}>
+      <p className="muted onboarding-repeat-hint">
         Repeat for each account you use.
       </p>
     </div>
