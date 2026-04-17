@@ -23,12 +23,18 @@ export function useStatusIssues(opts: {
     const issues: StatusIssue[] = [];
 
     if (keychainIssue) {
+      // `unlock_keychain` is macOS-only — the Rust command returns
+      // an error on other platforms. Hide the button so users aren't
+      // led into a dead-end click.
+      const isMac = status?.platform === "macos";
       issues.push({
         id: "keychain",
         severity: "error",
         label: "Keychain locked",
-        detail: "Click Unlock to enter your macOS password.",
-        action: { label: "Unlock", onClick: onUnlock },
+        detail: isMac
+          ? "Click Unlock to enter your macOS password."
+          : "Unlock the system keychain, then click Refresh.",
+        action: isMac ? { label: "Unlock", onClick: onUnlock } : undefined,
       });
     }
 
