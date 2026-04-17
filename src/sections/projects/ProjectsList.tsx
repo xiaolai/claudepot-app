@@ -36,6 +36,7 @@ export function ProjectsList({
   projects,
   selectedPath,
   onSelect,
+  onContextMenu,
   filter,
   onFilterChange,
   segmentedControl,
@@ -43,6 +44,7 @@ export function ProjectsList({
   projects: ProjectInfo[];
   selectedPath: string | null;
   onSelect: (path: string) => void;
+  onContextMenu?: (e: React.MouseEvent, p: ProjectInfo) => void;
   filter: ProjectFilter;
   onFilterChange: (next: ProjectFilter) => void;
   /** Optional segmented control rendered below the sidebar header. */
@@ -146,6 +148,9 @@ export function ProjectsList({
                 className={`sidebar-item${isActive ? " active" : ""}`}
                 tabIndex={0}
                 onClick={() => onSelect(p.original_path)}
+                onContextMenu={
+                  onContextMenu ? (e) => onContextMenu(e, p) : undefined
+                }
                 onKeyDown={(e) => {
                   if (e.key === "Enter" || e.key === " ") {
                     e.preventDefault();

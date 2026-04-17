@@ -4,6 +4,7 @@ import { api } from "../api";
 import { useOperations } from "../hooks/useOperations";
 import type { MoveArgs, ProjectInfo } from "../types";
 import { SegmentedControl } from "../components/SegmentedControl";
+import { ContextMenu, type ContextMenuItem } from "../components/ContextMenu";
 import { ProjectsList, type ProjectFilter } from "./projects/ProjectsList";
 import { ProjectDetail } from "./projects/ProjectDetail";
 import { RenameProjectModal } from "./projects/RenameProjectModal";
@@ -38,7 +39,21 @@ export function ProjectsSection({
   const [renameTarget, setRenameTarget] = useState<string | null>(null);
   const [filter, setFilter] = useState<ProjectFilter>("all");
   const [toast, setToast] = useState<string | null>(null);
+  const [ctxMenu, setCtxMenu] = useState<{
+    x: number;
+    y: number;
+    project: ProjectInfo;
+  } | null>(null);
   const { open: openOpModal } = useOperations();
+
+  const handleContextMenu = useCallback(
+    (e: React.MouseEvent, p: ProjectInfo) => {
+      e.preventDefault();
+      setCtxMenu({ x: e.clientX, y: e.clientY, project: p });
+    },
+    [],
+  );
+  const closeCtxMenu = useCallback(() => setCtxMenu(null), []);
 
   const refresh = useCallback(() => {
     setLoading(true);
@@ -130,6 +145,7 @@ export function ProjectsSection({
         projects={projects}
         selectedPath={selectedPath}
         onSelect={setSelectedPath}
+        onContextMenu={handleContextMenu}
         filter={filter}
         onFilterChange={setFilter}
         segmentedControl={
@@ -185,6 +201,52 @@ export function ProjectsSection({
           {toast}
         </div>
       )}
+
+      {ctxMenu && (() => {
+        const p = ctxMenu.project;
+        const items: ContextMenuItem[] = [
+          {
+            label: "Open in Finder",
+            onClick: () => {
+              api.revealInFinder(p.original_path).catch((e) => {
+                setToast(`Couldn't reveal: ${e}`);
+              });
+            },
+          },
+          { label: "", separator: true, onClick: () => {} },
+          {
+            label: "Rename…",
+            onClick: () => setRenameTarget(p.original_path),
+          },
+          {
+            label: "Clean orphans…",
+            onClick: () => onSubRouteChange("maintenance"),
+          },
+          { label: "", separator: true, onClick: () => {} },
+          {
+            label: "Copy path",
+            onClick: () => {
+              navigator.clipboard.writeText(p.original_path);
+              setToast("Copied path.");
+            },
+          },
+          {
+            label: "Copy key",
+            onClick: () => {
+              navigator.clipboard.writeText(p.sanitized_name);
+              setToast("Copied key.");
+            },
+          },
+        ];
+        return (
+          <ContextMenu
+            x={ctxMenu.x}
+            y={ctxMenu.y}
+            items={items}
+            onClose={closeCtxMenu}
+          />
+        );
+      })()}
     </>
   );
 }

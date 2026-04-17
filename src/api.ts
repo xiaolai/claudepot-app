@@ -29,6 +29,10 @@ export const api = {
   /// password is entered directly into macOS's own trusted prompt and
   /// never reaches Claudepot.
   unlockKeychain: () => invoke<void>("unlock_keychain"),
+  /// Reveal a path in the native file manager (Finder / Explorer /
+  /// file manager). Walks up to the nearest existing parent if the
+  /// exact path is gone (orphan projects still "open parent").
+  revealInFinder: (path: string) => invoke<void>("reveal_in_finder", { path }),
   accountList: () => invoke<AccountSummary[]>("account_list"),
   cliUse: (email: string) => invoke<void>("cli_use", { email }),
   cliClear: () => invoke<void>("cli_clear"),
