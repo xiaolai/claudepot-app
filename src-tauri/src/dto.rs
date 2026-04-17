@@ -153,6 +153,85 @@ impl AccountUsageDto {
     }
 }
 
+/// Per-account usage entry for the GUI. Carries enough state so the
+/// UI can render an inline explanation when usage is unavailable
+/// instead of silently dropping the account.
+///
+/// Status values (string-typed so the TS side can narrow on them):
+///   - "ok"            — fresh data
+///   - "stale"         — cached data, see `age_secs`
+///   - "no_credentials"— account has no stored blob (shouldn't happen
+///                       for has_cli_credentials=true, included for
+///                       completeness)
+///   - "expired"       — token past local expiry
+///   - "rate_limited"  — on cooldown, no cache fallback
+///   - "error"         — see `error_detail`
+#[derive(Serialize, Clone)]
+pub struct UsageEntryDto {
+    pub status: String,
+    /// Populated for "ok" and "stale".
+    pub usage: Option<AccountUsageDto>,
+    /// Seconds since the cache entry was written. Populated for "stale"
+    /// and (approximately 0) for "ok".
+    pub age_secs: Option<u64>,
+    /// For "rate_limited": seconds until the cooldown clears.
+    pub retry_after_secs: Option<u64>,
+    /// For "error": short debug string (not shown verbatim to user).
+    pub error_detail: Option<String>,
+}
+
+impl UsageEntryDto {
+    pub fn from_outcome(
+        outcome: claudepot_core::services::usage_cache::UsageOutcome,
+    ) -> Self {
+        use claudepot_core::services::usage_cache::UsageOutcome;
+        match outcome {
+            UsageOutcome::Fresh { response, age_secs } => Self {
+                status: "ok".to_string(),
+                usage: Some(AccountUsageDto::from_response(&response)),
+                age_secs: Some(age_secs),
+                retry_after_secs: None,
+                error_detail: None,
+            },
+            UsageOutcome::Stale { response, age_secs } => Self {
+                status: "stale".to_string(),
+                usage: Some(AccountUsageDto::from_response(&response)),
+                age_secs: Some(age_secs),
+                retry_after_secs: None,
+                error_detail: None,
+            },
+            UsageOutcome::NoCredentials => Self {
+                status: "no_credentials".to_string(),
+                usage: None,
+                age_secs: None,
+                retry_after_secs: None,
+                error_detail: None,
+            },
+            UsageOutcome::Expired => Self {
+                status: "expired".to_string(),
+                usage: None,
+                age_secs: None,
+                retry_after_secs: None,
+                error_detail: None,
+            },
+            UsageOutcome::RateLimited { retry_after_secs } => Self {
+                status: "rate_limited".to_string(),
+                usage: None,
+                age_secs: None,
+                retry_after_secs: Some(retry_after_secs),
+                error_detail: None,
+            },
+            UsageOutcome::Error(msg) => Self {
+                status: "error".to_string(),
+                usage: None,
+                age_secs: None,
+                retry_after_secs: None,
+                error_detail: Some(msg),
+            },
+        }
+    }
+}
+
 /// Ground-truth "what is CC actually authenticated as right now".
 ///
 /// Produced by the `current_cc_identity` Tauri command: reads CC's

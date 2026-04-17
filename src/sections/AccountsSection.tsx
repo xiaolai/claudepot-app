@@ -198,6 +198,7 @@ export function AccountsSection({
         onRefresh={() => { refresh(); refreshUsage(); }}
         onSwitchCli={(a) => actions.useCli(a)}
         onLogin={(a) => actions.login(a)}
+        onRefreshUsage={refreshUsage}
         onContextMenu={handleContextMenu}
         onBadgeContextMenu={handleBadgeContextMenu}
       />
@@ -223,7 +224,7 @@ export function AccountsSection({
 
         <ContentPane
           account={selectedAccount}
-          usage={selectedAccount ? usage[selectedAccount.uuid] ?? null : null}
+          usageEntry={selectedAccount ? usage[selectedAccount.uuid] ?? null : null}
           status={status}
           busyKeys={busy.busyKeys}
           anyBusy={busy.anyBusy}
@@ -234,6 +235,7 @@ export function AccountsSection({
           onRemove={(a) => setConfirmRemove(a)}
           onClearCli={() => setConfirmClear(true)}
           onAdd={() => setShowAdd(true)}
+          onRefreshUsage={refreshUsage}
         />
       </main>
 
