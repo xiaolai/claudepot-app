@@ -10,7 +10,12 @@ interface Deps {
     kind: "info" | "error",
     text: string,
     onUndo?: () => void,
-    opts?: { undoMs?: number; undoLabel?: string; onCommit?: () => void },
+    opts?: {
+      undoMs?: number;
+      undoLabel?: string;
+      onCommit?: () => void;
+      dedupeKey?: string;
+    },
   ) => void;
   refresh: () => Promise<void>;
   withBusy: <T>(key: string, fn: () => Promise<T>) => Promise<T>;

@@ -15,6 +15,14 @@ export type Toast = {
    * the Undo-vs-commit race is eliminated by construction.
    */
   onCommit?: () => void;
+  /**
+   * Optional dedupe key. If a new toast is pushed with the same
+   * `dedupeKey` as an existing one, the older toast is dismissed
+   * silently (without running its onCommit) before the new one is
+   * shown. Used for deferred actions that supersede each other —
+   * e.g. rapid-fire Desktop switches.
+   */
+  dedupeKey?: string;
 };
 
 let toastCounter = 0;
@@ -66,6 +74,7 @@ export function useToasts() {
         undoMs?: number;
         undoLabel?: string;
         onCommit?: () => void;
+        dedupeKey?: string;
       },
     ) => {
       toastCounter += 1;
@@ -75,6 +84,23 @@ export function useToasts() {
             onUndo();
           }
         : undefined;
+      // Dedupe: cancel any prior toast with the same dedupeKey. We
+      // must also clear its timer so its onCommit doesn't still fire.
+      // Callers rely on this for "latest wins" semantics (rapid-fire
+      // Desktop switches must not all commit).
+      if (opts?.dedupeKey) {
+        setToasts((prev) => {
+          const stale = prev.filter((t) => t.dedupeKey === opts.dedupeKey);
+          for (const s of stale) {
+            const timer = timersRef.current.get(s.id);
+            if (timer) {
+              clearTimeout(timer);
+              timersRef.current.delete(s.id);
+            }
+          }
+          return prev.filter((t) => t.dedupeKey !== opts.dedupeKey);
+        });
+      }
       setToasts((t) => [
         ...t,
         {
@@ -85,6 +111,7 @@ export function useToasts() {
           onUndo: wrappedUndo,
           undoLabel: opts?.undoLabel,
           onCommit: opts?.onCommit,
+          dedupeKey: opts?.dedupeKey,
         },
       ]);
       if (kind === "info") {

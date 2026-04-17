@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { render, screen } from "@testing-library/react";
+import { fireEvent, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 
 import { ProjectsList } from "./ProjectsList";
@@ -92,5 +92,49 @@ describe("ProjectsList", () => {
     );
     await user.click(screen.getByRole("button", { name: /Orphan/ }));
     expect(spy).toHaveBeenCalledWith("orphan");
+  });
+
+  it("fires onContextMenu with the project when a row is right-clicked", () => {
+    const spy = vi.fn();
+    const project = mk({
+      sanitized_name: "-click-me",
+      original_path: "/tmp/click-me",
+    });
+    render(
+      <ProjectsList
+        projects={[project]}
+        selectedPath={null}
+        onSelect={() => {}}
+        onContextMenu={spy}
+        filter="all"
+        onFilterChange={() => {}}
+      />,
+    );
+    const row = screen.getByRole("option", { name: /click-me/ });
+    // fireEvent.contextMenu bypasses the pointer-event stack userEvent
+    // would require and maps cleanly to React's onContextMenu handler.
+    fireEvent.contextMenu(row);
+    expect(spy).toHaveBeenCalledTimes(1);
+    // Second arg is the ProjectInfo; assert by original_path to keep
+    // the test robust against shape changes that don't affect behavior.
+    expect(spy.mock.calls[0][1].original_path).toBe("/tmp/click-me");
+  });
+
+  it("omits onContextMenu handler when no callback is provided", () => {
+    // Regression guard: the row must not throw when the optional prop
+    // is omitted (the detail pane may be rendered outside a section
+    // that wires context menus).
+    render(
+      <ProjectsList
+        projects={[mk({ sanitized_name: "-a", original_path: "/a" })]}
+        selectedPath={null}
+        onSelect={() => {}}
+        filter="all"
+        onFilterChange={() => {}}
+      />,
+    );
+    const row = screen.getByRole("option");
+    // Should not throw — default browser menu appears.
+    fireEvent.contextMenu(row);
   });
 });

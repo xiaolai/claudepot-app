@@ -70,7 +70,12 @@ export function CommandPalette({
   const filtered = filter(query);
   useEffect(() => { setSelectedIndex(0); }, [query]);
   useEffect(() => {
-    const el = listRef.current?.children[selectedIndex] as HTMLElement | undefined;
+    // Query `.palette-item` specifically — `children` also contains
+    // `.palette-group-label` dividers (Quick Switch / Navigate /
+    // Actions). Indexing against the full children list scrolls a
+    // heading into view instead of the selected command.
+    const el = listRef.current
+      ?.querySelectorAll<HTMLElement>(".palette-item")[selectedIndex];
     el?.scrollIntoView({ block: "nearest" });
   }, [selectedIndex]);
   useEffect(() => { inputRef.current?.focus(); }, []);

@@ -87,8 +87,11 @@ export function useStatusIssues(opts: {
     }
 
     if (syncError) {
+      // Key by the specific error payload so snoozing one sync failure
+      // doesn't suppress a later, genuinely different failure. The
+      // dismissedIssues store's 24 h expiry still applies per key.
       issues.push({
-        id: "sync",
+        id: `sync:${syncError}`,
         severity: "warning",
         label: "Couldn't sync with Claude Code",
         detail: syncError,
@@ -108,7 +111,10 @@ export function useStatusIssues(opts: {
         (a) => a.email.toLowerCase() === ccIdentity.email!.toLowerCase(),
       );
       issues.push({
-        id: "cc-drift",
+        // Key by the email pair so snoozing drift-for-A-vs-B doesn't
+        // suppress a later drift-for-C-vs-D. Lower-case to match the
+        // email comparison above.
+        id: `cc-drift:${ccIdentity.email.toLowerCase()}:${status.cli_active_email.toLowerCase()}`,
         severity: "warning",
         label: `CC slot drift — CC authenticates as ${ccIdentity.email}, Claudepot expects ${status.cli_active_email}`,
         action:
