@@ -7,6 +7,7 @@ import { useBusy } from "../hooks/useBusy";
 import { useRefresh } from "../hooks/useRefresh";
 import { useUsage } from "../hooks/useUsage";
 import { useActions } from "../hooks/useActions";
+import { useTauriEvent } from "../hooks/useTauriEvent";
 import { Sidebar } from "../components/Sidebar";
 import { ContentPane } from "../components/ContentPane";
 import { StatusBar } from "../components/StatusBar";
@@ -112,6 +113,11 @@ export function AccountsSection() {
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, [refresh, refreshUsage, selectedAccount, pushToast]);
+
+  // Refresh when the tray switches CLI or requests a refresh
+  const trayRefresh = useCallback(() => { refresh(); refreshUsage(); }, [refresh, refreshUsage]);
+  useTauriEvent("tray-cli-switched", trayRefresh);
+  useTauriEvent("tray-refresh-requested", trayRefresh);
 
   if (!status) {
     if (loadError) {

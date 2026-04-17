@@ -2,6 +2,7 @@ mod commands;
 mod dto;
 mod ops;
 mod state;
+mod tray;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
@@ -21,17 +22,11 @@ pub fn run() {
         .setup(|app| {
             use tauri::{
                 image::Image,
+                menu::MenuEvent,
                 tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent},
-                Manager,
+                Listener, Manager,
             };
 
-            // Menubar icon: monochrome template so macOS tints it for
-            // light/dark menu bars. Ship the @2x (44×44) PNG baked with
-            // 144 DPI metadata — NSImage reports its logical size as 22pt
-            // (44px ÷ 144/72), giving native 44px on Retina without
-            // upscaling, and a clean downsample on 1x displays. White
-            // pixels would get tinted like the body, so the "window"
-            // holes are genuinely transparent in the source PNG.
             let icon_bytes = include_bytes!("../icons/tray-iconTemplate@2x.png");
             let icon = Image::from_bytes(icon_bytes)?;
 
@@ -59,7 +54,20 @@ pub fn run() {
                         }
                     }
                 })
+                .on_menu_event(|app, event: MenuEvent| {
+                    tray::handle_menu_event(app, event.id().as_ref());
+                })
                 .build(app)?;
+
+            // Build initial tray menu from current accounts
+            let handle = app.handle().clone();
+            let _ = tray::rebuild(&handle);
+
+            // Listen for frontend requests to rebuild the tray menu
+            let handle2 = app.handle().clone();
+            app.listen("rebuild-tray-menu", move |_| {
+                let _ = tray::rebuild(&handle2);
+            });
 
             Ok(())
         })

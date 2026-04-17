@@ -1,5 +1,9 @@
+import { emit } from "@tauri-apps/api/event";
 import { api } from "../api";
 import type { AccountSummary } from "../types";
+
+/** Tell the Rust tray module to rebuild the account menu. */
+const rebuildTray = () => emit("rebuild-tray-menu").catch(() => {});
 
 interface Deps {
   pushToast: (kind: "info" | "error", text: string) => void;
@@ -16,6 +20,7 @@ export function useActions({ pushToast, refresh, withBusy, addBusy, removeBusy }
         await api.cliUse(a.email);
         pushToast("info", `CLI switched to ${a.email}`);
         await refresh();
+        rebuildTray();
       } catch (e) {
         pushToast("error", `CLI switch failed: ${e}`);
       }
@@ -28,6 +33,7 @@ export function useActions({ pushToast, refresh, withBusy, addBusy, removeBusy }
         await api.accountLogin(a.uuid);
         pushToast("info", `Signed in as ${a.email}`);
         await refresh();
+        rebuildTray();
       } catch (e) {
         const msg = `${e}`;
         if (msg.toLowerCase().includes("cancelled")) {
@@ -52,6 +58,7 @@ export function useActions({ pushToast, refresh, withBusy, addBusy, removeBusy }
         await api.desktopUse(a.email, false);
         pushToast("info", `Desktop switched to ${a.email}`);
         await refresh();
+        rebuildTray();
       } catch (e) {
         pushToast("error", `Desktop switch failed: ${e}`);
       }
@@ -65,6 +72,7 @@ export function useActions({ pushToast, refresh, withBusy, addBusy, removeBusy }
         if (r.warnings.length)
           pushToast("error", `warnings: ${r.warnings.join(", ")}`);
         await refresh();
+        rebuildTray();
       } catch (e) {
         pushToast("error", `remove failed: ${e}`);
       }
@@ -76,6 +84,7 @@ export function useActions({ pushToast, refresh, withBusy, addBusy, removeBusy }
       await api.cliClear();
       pushToast("info", "CLI signed out.");
       await refresh();
+      rebuildTray();
     } catch (e) {
       pushToast("error", `Clear CLI failed: ${e}`);
     } finally {

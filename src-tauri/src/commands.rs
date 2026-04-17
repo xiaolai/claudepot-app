@@ -41,7 +41,7 @@ fn active_id<E>(
 
 /// Open the production store (single instance per command). Cheap: a sqlite
 /// open + schema check. Keeps the command layer stateless.
-fn open_store() -> Result<AccountStore, String> {
+pub(crate) fn open_store() -> Result<AccountStore, String> {
     let db = paths::claudepot_data_dir().join("accounts.db");
     AccountStore::open(&db).map_err(|e| format!("store open failed: {e}"))
 }
