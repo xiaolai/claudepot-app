@@ -71,11 +71,16 @@ export function useActions({ pushToast, refresh, withBusy, addBusy, removeBusy }
     }
   };
 
-  const useDesktop = (a: AccountSummary) =>
+  const useDesktop = (a: AccountSummary, noLaunch = false) =>
     withBusy(`desk-${a.uuid}`, async () => {
       try {
-        await api.desktopUse(a.email, false);
-        pushToast("info", `Desktop switched to ${a.email}`);
+        await api.desktopUse(a.email, noLaunch);
+        pushToast(
+          "info",
+          noLaunch
+            ? `Desktop set to ${a.email} (not launched)`
+            : `Desktop switched to ${a.email}`,
+        );
         await refresh();
         rebuildTray();
       } catch (e) {

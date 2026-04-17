@@ -320,6 +320,14 @@ export function AccountsSection({
                     !status.desktop_installed,
                   onClick: () => handleDesktopSwitch(a),
                 },
+                {
+                  label: "Set as Desktop (don't relaunch)",
+                  disabled:
+                    a.is_desktop_active ||
+                    !a.has_desktop_profile ||
+                    !status.desktop_installed,
+                  onClick: () => actions.useDesktop(a, true),
+                },
                 { label: "", separator: true, onClick: () => {} },
                 {
                   label: "Verify now",
