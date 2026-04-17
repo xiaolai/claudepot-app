@@ -190,13 +190,14 @@ describe("WI-2: Per-account busy states", () => {
       account_login_cancel: () => {},
     });
 
-    // Select alice (unhealthy) and click Log in
+    // Select alice (unhealthy) and click Log in in the detail pane
     await selectAccount("alice@example.com");
-    await user.click(await screen.findByRole("button", { name: /log in/i }));
+    const main1 = screen.getByRole("main");
+    await user.click(await within(main1).findByRole("button", { name: /log in/i }));
 
     // Select bob — his "Use CLI" should still be enabled
     await selectAccount("bob@example.com");
-    const useCli = await screen.findByRole("button", { name: /use cli/i });
+    const useCli = await within(main1).findByRole("button", { name: /use cli/i });
     expect(useCli).not.toBeDisabled();
 
     // Cleanup
@@ -237,7 +238,8 @@ describe("ContentPane — button disable logic", () => {
     });
 
     await selectAccount("alice@example.com");
-    await user.click(await screen.findByRole("button", { name: /log in/i }));
+    const main2 = screen.getByRole("main");
+    await user.click(await within(main2).findByRole("button", { name: /log in/i }));
 
     await waitFor(() => {
       expect(login).toHaveBeenCalledWith({
@@ -245,7 +247,7 @@ describe("ContentPane — button disable logic", () => {
       });
     });
     expect(
-      await screen.findByRole("button", { name: /use cli/i }),
+      await within(main2).findByRole("button", { name: /use cli/i }),
     ).toBeInTheDocument();
   });
 
@@ -271,8 +273,9 @@ describe("ContentPane — button disable logic", () => {
     });
 
     await selectAccount("alice@example.com");
-    await user.click(await screen.findByRole("button", { name: /log in/i }));
-    const cancelBtn = await screen.findByRole("button", {
+    const main3 = screen.getByRole("main");
+    await user.click(await within(main3).findByRole("button", { name: /log in/i }));
+    const cancelBtn = await within(main3).findByRole("button", {
       name: /cancel login/i,
     });
     await user.click(cancelBtn);
@@ -281,7 +284,7 @@ describe("ContentPane — button disable logic", () => {
       expect(cancel).toHaveBeenCalledTimes(1);
     });
     expect(
-      await screen.findByRole("button", { name: /log in/i }),
+      await within(main3).findByRole("button", { name: /log in/i }),
     ).toBeInTheDocument();
   });
 
@@ -298,8 +301,9 @@ describe("ContentPane — button disable logic", () => {
     });
 
     await selectAccount("alice@example.com");
-    expect(screen.queryByRole("button", { name: /use cli/i })).toBeNull();
-    const btn = await screen.findByRole("button", { name: /log in/i });
+    const main4 = screen.getByRole("main");
+    expect(within(main4).queryByRole("button", { name: /use cli/i })).toBeNull();
+    const btn = await within(main4).findByRole("button", { name: /log in/i });
     expect(btn).toBeEnabled();
     expect(btn.getAttribute("title")).toMatch(/sign in as/i);
   });
@@ -425,65 +429,24 @@ describe("WI-5: CLI Clear button", () => {
   });
 });
 
-describe("WI-6: Desktop switch confirmation", () => {
-  it("Use Desktop opens confirm dialog", async () => {
+describe("WI-6: Desktop switch — undo toast", () => {
+  it("Use Desktop shows undo toast instead of confirm dialog", async () => {
+    const user = userEvent.setup();
     await renderApp({
       app_status: () => sampleStatus({ desktop_installed: true }),
       account_list: () => [sampleAccount({ has_desktop_profile: true })],
-    });
-
-    const user = userEvent.setup();
-    await selectAccount("alice@example.com");
-    await user.click(
-      await screen.findByRole("button", { name: /use desktop/i }),
-    );
-
-    expect(
-      await screen.findByRole("dialog", { name: /switch desktop/i }),
-    ).toBeInTheDocument();
-  });
-
-  it("confirm calls desktop_use", async () => {
-    const user = userEvent.setup();
-    const desktopUse = vi.fn();
-    await renderApp({
-      app_status: () => sampleStatus({ desktop_installed: true }),
-      account_list: () => [sampleAccount({ has_desktop_profile: true })],
-      desktop_use: desktopUse,
     });
 
     await selectAccount("alice@example.com");
     await user.click(
       await screen.findByRole("button", { name: /use desktop/i }),
     );
-    const dialog = await screen.findByRole("dialog");
-    await user.click(within(dialog).getByRole("button", { name: /switch/i }));
 
-    await waitFor(() => {
-      expect(desktopUse).toHaveBeenCalled();
-    });
-  });
-
-  it("cancel closes dialog without calling desktop_use", async () => {
-    const user = userEvent.setup();
-    const desktopUse = vi.fn();
-    await renderApp({
-      app_status: () => sampleStatus({ desktop_installed: true }),
-      account_list: () => [sampleAccount({ has_desktop_profile: true })],
-      desktop_use: desktopUse,
-    });
-
-    await selectAccount("alice@example.com");
-    await user.click(
-      await screen.findByRole("button", { name: /use desktop/i }),
-    );
-    const dialog = await screen.findByRole("dialog");
-    await user.click(within(dialog).getByRole("button", { name: /cancel/i }));
-
-    await waitFor(() => {
-      expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
-    });
-    expect(desktopUse).not.toHaveBeenCalled();
+    // No dialog — undo toast instead
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    expect(await screen.findByText(/switching desktop to/i)).toBeInTheDocument();
+    // Undo button is present
+    expect(screen.getByText("Undo")).toBeInTheDocument();
   });
 });
 
@@ -602,18 +565,28 @@ describe("WI-9: Inline disabled-button reasons", () => {
   });
 });
 
+/** Helper: expand a collapsible section by clicking its toggle button. */
+async function expandSection(name: string) {
+  const user = userEvent.setup();
+  const toggle = await screen.findByRole("button", { name });
+  if (toggle.getAttribute("aria-expanded") === "false") {
+    await user.click(toggle);
+  }
+}
+
 describe("WI-11: Account detail panel", () => {
-  it("selecting account shows detail with UUID", async () => {
+  it("selecting account shows detail with UUID in Identity section", async () => {
     await renderApp({
       app_status: () => sampleStatus({ account_count: 1 }),
       account_list: () => [sampleAccount()],
     });
 
     await selectAccount("alice@example.com");
+    await expandSection("Identity");
     expect(await screen.findByText("aaaa1111-2222-4333-8444-555555555555")).toBeInTheDocument();
   });
 
-  it("detail shows UUID and timestamps", async () => {
+  it("detail shows UUID and timestamps in Identity section", async () => {
     await renderApp({
       app_status: () => sampleStatus({ account_count: 1 }),
       account_list: () => [sampleAccount({
@@ -622,6 +595,7 @@ describe("WI-11: Account detail panel", () => {
     });
 
     await selectAccount("alice@example.com");
+    await expandSection("Identity");
     expect(await screen.findByText("aaaa1111-2222-4333-8444-555555555555")).toBeInTheDocument();
     expect(await screen.findByText(/1h ago/)).toBeInTheDocument();
   });
@@ -811,7 +785,7 @@ describe("Add-account modal", () => {
 });
 
 describe("AccountDetail fields", () => {
-  it("renders all metadata fields", async () => {
+  it("renders all metadata fields across collapsible sections", async () => {
     await renderApp({
       app_status: () => sampleStatus({ account_count: 1 }),
       account_list: () => [sampleAccount({
@@ -822,10 +796,13 @@ describe("AccountDetail fields", () => {
     });
 
     await selectAccount("alice@example.com");
+    // Expand both collapsed sections
+    await expandSection("Identity");
+    await expandSection("Health");
 
-    // UUID
+    // UUID (Identity section)
     expect(await screen.findByText("aaaa1111-2222-4333-8444-555555555555")).toBeInTheDocument();
-    // Org — appears in sidebar meta and content detail, use getAll
+    // Org — appears in sidebar meta and Identity section, use getAll
     const orgEls = screen.getAllByText("Alice Org");
     expect(orgEls.length).toBeGreaterThanOrEqual(1);
     // Relative time
@@ -833,9 +810,9 @@ describe("AccountDetail fields", () => {
     // Null timestamp
     const dashes = screen.getAllByText("—");
     expect(dashes.length).toBeGreaterThanOrEqual(1);
-    // Credential health
+    // Credential health (Health section)
     expect(screen.getByText("healthy")).toBeInTheDocument();
-    // Desktop profile
+    // Desktop profile (Health section)
     expect(screen.getByText("none")).toBeInTheDocument();
   });
 });
@@ -904,7 +881,7 @@ describe("Concurrent refresh guard", () => {
 });
 
 describe("App — verified identity surface", () => {
-  it("renders the drift banner when any account has drift=true", async () => {
+  it("renders account drift in the unified status bar", async () => {
     const driftedAccount = sampleAccount({
       email: "lixiaolai@gmail.com",
       verified_email: "xiaolaiapple@gmail.com",
@@ -916,22 +893,20 @@ describe("App — verified identity surface", () => {
       account_list: () => [driftedAccount],
     });
 
-    // Banner text comes from App.tsx's drift alert block.
-    const banner = await screen.findByRole("alert");
-    expect(banner).toHaveTextContent(/account drift detected/i);
-    expect(banner).toHaveTextContent(
+    const bar = await screen.findByRole("alert");
+    expect(bar).toHaveTextContent(/account drift detected/i);
+    expect(bar).toHaveTextContent(
       /lixiaolai@gmail\.com authenticates as xiaolaiapple@gmail\.com/i,
     );
   });
 
-  it("does not render the drift banner when all accounts have drift=false", async () => {
+  it("does not render drift in the status bar when all accounts have drift=false", async () => {
     await renderApp({
       app_status: () => sampleStatus({ account_count: 1 }),
       account_list: () => [sampleAccount({ drift: false, verify_status: "ok" })],
     });
 
     await screen.findByText("alice@example.com");
-    // Keychain banner uses role="alert" too — assert on the drift text only.
     expect(screen.queryByText(/account drift detected/i)).not.toBeInTheDocument();
   });
 
@@ -962,8 +937,8 @@ describe("App — verified identity surface", () => {
   });
 });
 
-describe("App — CC truth strip + sync banner", () => {
-  it("renders CC identity in the truth strip when /profile returns an email", async () => {
+describe("App — unified status bar", () => {
+  it("shows no status bar when CC identity matches (happy path)", async () => {
     await renderApp({
       app_status: () =>
         sampleStatus({
@@ -978,12 +953,12 @@ describe("App — CC truth strip + sync banner", () => {
       }),
     });
 
-    const strip = await screen.findByLabelText(/CC authentication status/i);
-    expect(strip).toHaveTextContent(/alice@example\.com/);
-    expect(within(strip).getByText(/MATCH/i)).toBeInTheDocument();
+    await screen.findByText("alice@example.com");
+    // Anomaly-only: no status bar when everything matches.
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
   });
 
-  it("truth strip shows DRIFT when CC identity differs from Claudepot's active_cli", async () => {
+  it("shows CC slot drift in the status bar when CC identity differs from active_cli", async () => {
     await renderApp({
       app_status: () =>
         sampleStatus({
@@ -998,29 +973,12 @@ describe("App — CC truth strip + sync banner", () => {
       }),
     });
 
-    const strip = await screen.findByLabelText(/CC authentication status/i);
-    expect(strip).toHaveTextContent(/xiaolaiapple@gmail\.com/);
-    expect(within(strip).getByText(/DRIFT/i)).toBeInTheDocument();
+    const bar = await screen.findByRole("alert");
+    expect(bar).toHaveTextContent(/CC slot drift/i);
+    expect(bar).toHaveTextContent(/xiaolaiapple@gmail\.com/);
   });
 
-  it("truth strip surfaces a CC /profile error instead of staying silent", async () => {
-    await renderApp({
-      app_status: () => sampleStatus({ account_count: 0 }),
-      account_list: () => [],
-      current_cc_identity: () => ({
-        email: null,
-        verified_at: new Date().toISOString(),
-        error: "access token rejected by /api/oauth/profile",
-      }),
-    });
-
-    const strip = await screen.findByLabelText(/CC authentication status/i);
-    expect(strip).toHaveTextContent(
-      /could not verify.*access token rejected/i,
-    );
-  });
-
-  it("shows a sync-failure banner when sync_from_current_cc throws", async () => {
+  it("shows a sync-failure in the status bar when sync_from_current_cc throws", async () => {
     await renderApp({
       sync_from_current_cc: () => {
         throw new Error("access token rejected by /api/oauth/profile");
@@ -1029,12 +987,8 @@ describe("App — CC truth strip + sync banner", () => {
       account_list: () => [],
     });
 
-    const alerts = await screen.findAllByRole("alert");
-    const syncBanner = alerts.find((el) =>
-      /couldn't sync with claude code/i.test(el.textContent ?? ""),
-    );
-    expect(syncBanner).toBeDefined();
-    expect(syncBanner).toHaveTextContent(/access token rejected/);
+    const bar = await screen.findByRole("alert");
+    expect(bar).toHaveTextContent(/couldn't sync with claude code/i);
   });
 });
 
@@ -1052,7 +1006,7 @@ describe("AccountDetail — Verified row", () => {
     });
 
     await selectAccount("alice@example.com");
-    // "Verified" dt label with a dd whose verify-line.ok span contains the email.
+    await expandSection("Health");
     const verifiedDt = await screen.findByText(/^Verified$/i);
     const verifiedDd = verifiedDt.nextElementSibling as HTMLElement;
     expect(verifiedDd).toHaveTextContent(/alice@example\.com/);
@@ -1091,14 +1045,15 @@ describe("AccountDetail — Verified row", () => {
     });
 
     await selectAccount("alice@example.com");
+    await expandSection("Health");
     const tokenDt = await screen.findByText(/^Token$/i);
     const tokenDd = tokenDt.nextElementSibling as HTMLElement;
     expect(tokenDd).toHaveTextContent(/not past local expiry/i);
   });
 });
 
-describe("App — CC truth strip: not signed in state", () => {
-  it("shows 'CC: not signed in' when email and error are both null", async () => {
+describe("App — unified status bar: clean state", () => {
+  it("shows no status bar when CC is not signed in and there are no issues", async () => {
     await renderApp({
       app_status: () => sampleStatus({ account_count: 0 }),
       account_list: () => [],
@@ -1109,10 +1064,8 @@ describe("App — CC truth strip: not signed in state", () => {
       }),
     });
 
-    const strip = await screen.findByLabelText(/CC authentication status/i);
-    expect(strip).toHaveTextContent(/not signed in/i);
-    // Neither MATCH nor DRIFT tags should appear.
-    expect(within(strip).queryByText(/MATCH/i)).toBeNull();
-    expect(within(strip).queryByText(/DRIFT/i)).toBeNull();
+    await screen.findByText(/No accounts yet/i);
+    // Anomaly-only: no bar when nothing is wrong.
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
   });
 });
