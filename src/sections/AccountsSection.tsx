@@ -11,6 +11,7 @@ import { Sidebar } from "../components/Sidebar";
 import { ContentPane } from "../components/ContentPane";
 import { StatusBar } from "../components/StatusBar";
 import { ContextMenu, type ContextMenuItem } from "../components/ContextMenu";
+import { CommandPalette } from "../components/CommandPalette";
 import { AddAccountModal } from "../components/AddAccountModal";
 import { ConfirmDialog } from "../components/ConfirmDialog";
 import { ToastContainer } from "../components/ToastContainer";
@@ -42,6 +43,7 @@ export function AccountsSection() {
   const [confirmDesktop, setConfirmDesktop] = useState<AccountSummary | null>(null);
   const [confirmClear, setConfirmClear] = useState(false);
   const [selectedUuid, setSelectedUuid] = useState<string | null>(null);
+  const [showPalette, setShowPalette] = useState(false);
   const [ctxMenu, setCtxMenu] = useState<{
     x: number; y: number; account: AccountSummary;
   } | null>(null);
@@ -55,6 +57,19 @@ export function AccountsSection() {
   );
 
   const closeCtxMenu = useCallback(() => setCtxMenu(null), []);
+
+  // Cmd+K to open command palette, Cmd+R to refresh, Cmd+N to add
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (!e.metaKey && !e.ctrlKey) return;
+      if (e.shiftKey || e.altKey) return;
+      if (e.key === "k") { e.preventDefault(); setShowPalette(true); }
+      if (e.key === "r") { e.preventDefault(); refresh(); refreshUsage(); }
+      if (e.key === "n") { e.preventDefault(); setShowAdd(true); }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [refresh, refreshUsage]);
 
   // Auto-select: active CLI > active Desktop > first account. Re-runs
   // if the selected account vanished externally.
@@ -159,6 +174,19 @@ export function AccountsSection() {
         body={<p>Clears CC's credentials file. You'll need to sign in again.</p>}
         onCancel={() => setConfirmClear(false)}
         onConfirm={async () => { setConfirmClear(false); await actions.performClearCli(); }} />}
+
+      {showPalette && status && (
+        <CommandPalette
+          accounts={accounts}
+          status={status}
+          onClose={() => setShowPalette(false)}
+          onSwitchCli={(a) => actions.useCli(a)}
+          onSwitchDesktop={(a) => setConfirmDesktop(a)}
+          onAdd={() => setShowAdd(true)}
+          onRefresh={() => { refresh(); refreshUsage(); }}
+          onRemove={(a) => setConfirmRemove(a)}
+        />
+      )}
 
       {ctxMenu && (() => {
         const a = ctxMenu.account;
