@@ -272,8 +272,53 @@ pub fn delete(account_id: Uuid) -> Result<(), SwapError> {
         CredBackend::KeyringOnly => delete_from_keyring(account_id)
             .map_err(|e| SwapError::WriteFailed(format!("keyring: {e}"))),
         CredBackend::Auto => {
-            let _ = delete_from_keyring(account_id);
-            delete_file(account_id)
+            // Try both backends. On macOS the private slot lives in
+            // Keychain; on Linux/headless it's a file. A keychain
+            // delete can fail if the keychain is locked or the
+            // `security` subprocess errors. Previously the Auto path
+            // used `let _ = delete_from_keyring(...)` and returned the
+            // file-delete result, silently dropping keychain errors —
+            // callers believed the secret was gone but it could still
+            // live in the keychain slot.
+            //
+            // New policy: attempt both, accumulate errors, and return
+            // Err iff BOTH backends errored. "Entry not found" from
+            // either side is treated as success (idempotent delete).
+            let keyring_result = delete_from_keyring(account_id);
+            let file_result = delete_file(account_id);
+
+            let keyring_ok = keyring_result.is_ok();
+            let file_ok = file_result.is_ok();
+            if keyring_ok || file_ok {
+                // At least one backend reported success. Surface the
+                // other's error as a log warning but don't fail the
+                // call — the typical case is "this account was stored
+                // in only one of the two backends anyway."
+                if let Err(e) = &keyring_result {
+                    tracing::warn!(
+                        account = %account_id,
+                        "keyring delete reported error (file: {}): {e}",
+                        if file_ok { "deleted" } else { "also failed" }
+                    );
+                }
+                if let Err(e) = &file_result {
+                    tracing::debug!(
+                        account = %account_id,
+                        "file delete reported error (keyring: deleted): {e}"
+                    );
+                }
+                Ok(())
+            } else {
+                // Both backends errored — propagate. This is the case
+                // the old code silently hid: user thought the delete
+                // succeeded because only the file-delete result was
+                // consulted, even when the keychain held the real blob.
+                Err(SwapError::WriteFailed(format!(
+                    "both storage backends errored: keyring={}, file={}",
+                    keyring_result.err().map(|e| e.to_string()).unwrap_or_default(),
+                    file_result.err().map(|e| e.to_string()).unwrap_or_default()
+                )))
+            }
         }
     }
 }
