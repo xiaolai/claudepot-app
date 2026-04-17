@@ -429,65 +429,24 @@ describe("WI-5: CLI Clear button", () => {
   });
 });
 
-describe("WI-6: Desktop switch confirmation", () => {
-  it("Use Desktop opens confirm dialog", async () => {
+describe("WI-6: Desktop switch — undo toast", () => {
+  it("Use Desktop shows undo toast instead of confirm dialog", async () => {
+    const user = userEvent.setup();
     await renderApp({
       app_status: () => sampleStatus({ desktop_installed: true }),
       account_list: () => [sampleAccount({ has_desktop_profile: true })],
-    });
-
-    const user = userEvent.setup();
-    await selectAccount("alice@example.com");
-    await user.click(
-      await screen.findByRole("button", { name: /use desktop/i }),
-    );
-
-    expect(
-      await screen.findByRole("dialog", { name: /switch desktop/i }),
-    ).toBeInTheDocument();
-  });
-
-  it("confirm calls desktop_use", async () => {
-    const user = userEvent.setup();
-    const desktopUse = vi.fn();
-    await renderApp({
-      app_status: () => sampleStatus({ desktop_installed: true }),
-      account_list: () => [sampleAccount({ has_desktop_profile: true })],
-      desktop_use: desktopUse,
     });
 
     await selectAccount("alice@example.com");
     await user.click(
       await screen.findByRole("button", { name: /use desktop/i }),
     );
-    const dialog = await screen.findByRole("dialog");
-    await user.click(within(dialog).getByRole("button", { name: /switch/i }));
 
-    await waitFor(() => {
-      expect(desktopUse).toHaveBeenCalled();
-    });
-  });
-
-  it("cancel closes dialog without calling desktop_use", async () => {
-    const user = userEvent.setup();
-    const desktopUse = vi.fn();
-    await renderApp({
-      app_status: () => sampleStatus({ desktop_installed: true }),
-      account_list: () => [sampleAccount({ has_desktop_profile: true })],
-      desktop_use: desktopUse,
-    });
-
-    await selectAccount("alice@example.com");
-    await user.click(
-      await screen.findByRole("button", { name: /use desktop/i }),
-    );
-    const dialog = await screen.findByRole("dialog");
-    await user.click(within(dialog).getByRole("button", { name: /cancel/i }));
-
-    await waitFor(() => {
-      expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
-    });
-    expect(desktopUse).not.toHaveBeenCalled();
+    // No dialog — undo toast instead
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    expect(await screen.findByText(/switching desktop to/i)).toBeInTheDocument();
+    // Undo button is present
+    expect(screen.getByText("Undo")).toBeInTheDocument();
   });
 });
 

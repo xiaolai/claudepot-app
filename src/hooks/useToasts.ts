@@ -1,6 +1,13 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 
-export type Toast = { id: number; kind: "info" | "error"; text: string; exiting: boolean };
+export type Toast = {
+  id: number;
+  kind: "info" | "error";
+  text: string;
+  exiting: boolean;
+  /** Optional undo callback — shown as a button on the toast. */
+  onUndo?: () => void;
+};
 
 let toastCounter = 0;
 
@@ -32,12 +39,12 @@ export function useToasts() {
     setTimeout(() => removeToast(id), 150);
   }, [removeToast]);
 
-  const pushToast = useCallback((kind: Toast["kind"], text: string) => {
+  const pushToast = useCallback((kind: Toast["kind"], text: string, onUndo?: () => void) => {
     toastCounter += 1;
     const id = toastCounter;
-    setToasts((t) => [...t, { id, kind, text, exiting: false }]);
+    setToasts((t) => [...t, { id, kind, text, exiting: false, onUndo }]);
     if (kind === "info") {
-      const timer = setTimeout(() => dismissToast(id), 4000);
+      const timer = setTimeout(() => dismissToast(id), onUndo ? 3000 : 4000);
       timersRef.current.set(id, timer);
     }
   }, [dismissToast]);

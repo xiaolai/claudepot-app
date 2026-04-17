@@ -13,6 +13,17 @@ export function ToastContainer({
       {toasts.map((t) => (
         <div key={t.id} className={`toast ${t.kind} ${t.exiting ? "exiting" : ""}`}>
           <span className="toast-text">{t.text}</span>
+          {t.onUndo && (
+            <button
+              className="toast-undo"
+              onClick={() => {
+                t.onUndo?.();
+                onDismiss(t.id);
+              }}
+            >
+              Undo
+            </button>
+          )}
           <button
             className="toast-close"
             onClick={() => onDismiss(t.id)}

@@ -1396,6 +1396,23 @@ button.danger.primary:hover:not(:disabled) {
   flex: 1;
 }
 
+.toast-undo {
+  font-size: 12px;
+  font-weight: 600;
+  padding: 2px 8px;
+  border: 0.5px solid rgba(255, 255, 255, 0.3);
+  border-radius: 4px;
+  background: rgba(255, 255, 255, 0.15);
+  color: #fff;
+  height: auto;
+  box-shadow: none;
+  flex-shrink: 0;
+}
+
+.toast-undo:hover {
+  background: rgba(255, 255, 255, 0.25);
+}
+
 .toast-close {
   font-size: 13px;
   line-height: 1;
