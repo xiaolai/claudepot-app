@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { User } from "lucide-react";
 import { api } from "../api";
 import type { AccountSummary } from "../types";
@@ -42,7 +42,6 @@ export function AccountsSection() {
   const [showAdd, setShowAdd] = useState(false);
   const [confirmRemove, setConfirmRemove] = useState<AccountSummary | null>(null);
   const [confirmClear, setConfirmClear] = useState(false);
-  const pendingDesktopRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [selectedUuid, setSelectedUuid] = useState<string | null>(null);
   const [showPalette, setShowPalette] = useState(false);
   const [ctxMenu, setCtxMenu] = useState<{
@@ -59,22 +58,22 @@ export function AccountsSection() {
 
   const closeCtxMenu = useCallback(() => setCtxMenu(null), []);
 
-  // Deferred Desktop switch with undo toast (P2.4)
+  // Deferred Desktop switch with undo toast (P2.4). The action commit
+  // is driven by the toast's auto-dismiss (`onCommit`), so the Undo
+  // button is effective ↔ the toast is still visible. No parallel
+  // timers, no race between Undo click and action fire.
   const handleDesktopSwitch = useCallback(
     (a: AccountSummary) => {
-      // Cancel any previous pending switch
-      if (pendingDesktopRef.current) clearTimeout(pendingDesktopRef.current);
-      let cancelled = false;
-      const timer = setTimeout(() => {
-        pendingDesktopRef.current = null;
-        if (!cancelled) actions.useDesktop(a);
-      }, 3000);
-      pendingDesktopRef.current = timer;
-      pushToast("info", `Switching Desktop to ${a.email}…`, () => {
-        cancelled = true;
-        clearTimeout(timer);
-        pendingDesktopRef.current = null;
-      });
+      pushToast(
+        "info",
+        `Switching Desktop to ${a.email}…`,
+        () => {
+          /* Undo click: the toast's own dismiss-on-click handler
+           * tears down the commit timer inside useToasts. Nothing
+           * else is needed here — declining to commit IS the undo. */
+        },
+        { undoMs: 3000, onCommit: () => actions.useDesktop(a) },
+      );
     },
     [actions, pushToast],
   );
