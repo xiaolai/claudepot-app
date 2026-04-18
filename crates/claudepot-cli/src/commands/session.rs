@@ -13,6 +13,12 @@ use claudepot_core::session_move::{
 use std::path::{Path, PathBuf};
 use uuid::Uuid;
 
+/// CC stores `.claude.json` at `$HOME/.claude.json` — a sibling of
+/// `~/.claude/`, not inside. Central accessor so CLI and Tauri agree.
+fn claude_json_path() -> Option<PathBuf> {
+    dirs::home_dir().map(|h| h.join(".claude.json"))
+}
+
 /// List projects whose internal `cwd` no longer exists on disk. These
 /// are the adoption candidates — typically sessions orphaned by
 /// `git worktree remove`.
@@ -54,6 +60,7 @@ pub fn move_cmd(
         force_live_session: force_live,
         force_sync_conflict: force_conflict,
         cleanup_source_if_empty: cleanup_source,
+        claude_json_path: claude_json_path(),
     };
     let report = move_session(
         &config_dir,
@@ -84,7 +91,7 @@ pub fn adopt_orphan_cmd(
         bail!("target cwd does not exist: {target_cwd}");
     }
 
-    let report = adopt_orphan_project(&config_dir, orphan_slug, target)
+    let report = adopt_orphan_project(&config_dir, orphan_slug, target, claude_json_path())
         .with_context(|| format!("failed to adopt {orphan_slug} into {target_cwd}"))?;
 
     if ctx.json {
@@ -288,10 +295,3 @@ fn format_bytes(n: u64) -> String {
     }
 }
 
-// Kept as a breadcrumb: the CLI delegates all FS work to core. If a
-// handler ever needs a local fallback (e.g., canonicalize without the
-// core's normalization quirks), it lives here.
-#[allow(dead_code)]
-fn _placeholder_cli_local(_p: &Path) -> PathBuf {
-    PathBuf::new()
-}
