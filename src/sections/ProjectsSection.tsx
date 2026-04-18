@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { Folder } from "lucide-react";
 import { api } from "../api";
 import { useOperations } from "../hooks/useOperations";
@@ -56,12 +56,31 @@ export function ProjectsSection({
   );
   const closeCtxMenu = useCallback(() => setCtxMenu(null), []);
 
+  // Audit M15: token-sequenced refresh. Mount, ⌘R, maintenance
+  // callbacks, and rename completion can all call refresh() — without
+  // a token, an older slower response can resolve AFTER a newer
+  // response and overwrite fresher state. Each call increments the
+  // token; a response is applied only if its token is still the
+  // latest on resolution. Also provides an unmount guard: on unmount
+  // we bump `mountedRef` to false so any in-flight response is
+  // discarded.
+  const refreshTokenRef = useRef(0);
+  const mountedRef = useRef(true);
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+    };
+  }, []);
+
   const refresh = useCallback(() => {
+    const myToken = ++refreshTokenRef.current;
     setLoading(true);
     setError(null);
     api
       .projectList()
       .then((ps) => {
+        if (!mountedRef.current || myToken !== refreshTokenRef.current) return;
         setProjects(ps);
         setLoading(false);
         setSelectedPath((prev) => {
@@ -70,6 +89,7 @@ export function ProjectsSection({
         });
       })
       .catch((e) => {
+        if (!mountedRef.current || myToken !== refreshTokenRef.current) return;
         setError(String(e));
         setLoading(false);
       });
