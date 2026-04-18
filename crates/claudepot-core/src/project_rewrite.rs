@@ -273,7 +273,21 @@ fn rewrite_meta_json(
     new_path: &str,
 ) -> Result<usize, ProjectError> {
     let contents = fs::read_to_string(path).map_err(ProjectError::Io)?;
-    if !contents.contains(old_path) {
+    // Audit M11: use the JSON-escaped needle for the fast path.
+    // `contents` is JSON, so Windows paths appear with backslashes
+    // escaped as `\\`. A raw-string `contains(old_path)` check missed
+    // every Windows path, causing the sidecar to be silently skipped
+    // even when P6 reported a clean pass. JSONL uses the same
+    // escaped needle; this aligns both file formats.
+    let old_escaped = serde_json::to_string(old_path)
+        .unwrap_or_else(|_| format!("\"{old_path}\""));
+    let needle = old_escaped.trim_matches('"');
+    if !contents.contains(needle) && !contents.contains(old_path) {
+        // Also accept the raw form so non-Windows callers keep working
+        // when the path has no escape-worthy characters and the two
+        // forms happen to be equal. (In practice both branches hit
+        // the same needle string on Unix; Windows is the case this
+        // fix targets.)
         return Ok(0);
     }
     let mut value: Value = match serde_json::from_str(&contents) {
