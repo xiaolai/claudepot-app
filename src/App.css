@@ -218,25 +218,6 @@ button .icon {
   position: relative;
 }
 
-/* Draggable strip spanning the top of the window so the user can move
-   the frameless/overlay window. Full width so Windows (no traffic lights)
-   gets a draggable top-left corner; on macOS the native traffic lights are
-   composited above the webview and remain clickable. Height matches the
-   52px top padding used by sidebar/content. */
-.titlebar-drag {
-  position: fixed;
-  top: 0;
-  left: 0;
-  right: 0;
-  height: 52px;
-  -webkit-app-region: drag;
-  z-index: 1;
-  pointer-events: auto;
-}
-.titlebar-drag * {
-  -webkit-app-region: no-drag;
-}
-
 /* ---------- section rail ---------- */
 
 .section-rail {
@@ -247,13 +228,11 @@ button .icon {
   flex-direction: column;
   align-items: center;
   gap: 4px;
-  /* 52px clears the overlay title bar / traffic lights */
-  padding: 52px 0 8px;
+  padding: 12px 0 8px;
   background: var(--chrome);
   /* No right border — rail and sidebar share --chrome and should read
      as one continuous surface. The only visible vertical separator in
      the chrome is the one between sidebar and content. */
-  -webkit-app-region: drag;
 }
 
 /* The button is purely a click target — no visual chrome. The active
@@ -275,7 +254,6 @@ button .icon {
   box-shadow: none;
   color: var(--muted);
   cursor: default;
-  -webkit-app-region: no-drag;
 }
 .section-rail-item:focus-visible {
   outline: none;            /* focus ring lives on the .icon */
@@ -359,10 +337,7 @@ button .icon {
   background: var(--chrome);
   border-right: 0.5px solid var(--border);
   overflow-y: auto;
-  padding: 0 8px 8px;
-  /* 52px clears the overlay title bar / traffic lights */
-  padding-top: 52px;
-  -webkit-app-region: drag;
+  padding: 12px 8px 8px;
 }
 
 .sidebar-header {
@@ -370,7 +345,6 @@ button .icon {
   align-items: center;
   justify-content: space-between;
   padding: 4px 8px 12px;
-  -webkit-app-region: no-drag;
 }
 
 .sidebar-title {
@@ -397,7 +371,6 @@ button .icon {
   border: 0.5px solid var(--border);
   border-radius: 6px;
   background: color-mix(in srgb, var(--bg) 60%, transparent);
-  -webkit-app-region: no-drag;
 }
 
 .sidebar-search-icon {
@@ -465,7 +438,6 @@ button .icon {
   padding: 6px 8px;
   border-radius: 6px;
   cursor: default;
-  -webkit-app-region: no-drag;
   transition: background 0.1s ease;
   min-height: 32px;
 }
@@ -710,7 +682,6 @@ button .icon {
 .sidebar-footer {
   margin-top: auto;
   padding: 8px 0 0;
-  -webkit-app-region: no-drag;
 }
 
 .sidebar-empty-hint {
@@ -734,8 +705,8 @@ button .icon {
   flex-direction: column;
   background: var(--bg);
   overflow-y: auto;
-  /* 52px top to align with toolbar area */
-  padding: 52px 24px 20px;
+  
+  padding: 16px 24px 20px;
 }
 
 .content.loading {
@@ -1933,7 +1904,7 @@ button.danger.primary:hover:not(:disabled) {
     max-height: 200px;
     border-right: none;
     border-bottom: 0.5px solid var(--border);
-    padding-top: 52px;
+    padding-top: 16px;
   }
   .content {
     padding-top: 16px;
@@ -1950,7 +1921,7 @@ button.danger.primary:hover:not(:disabled) {
      can't fill the window and the transparent body reveals the OS
      chrome on wide displays. Reading width is capped on each inner
      element instead — the pane's --bg reaches the window edge. */
-  padding: 52px 24px 24px;
+  padding: 16px 24px 24px;
 }
 
 .settings-view > * {
@@ -2127,7 +2098,7 @@ button.danger.primary:hover:not(:disabled) {
 /* ---------- maintenance view (P2.2) ---------- */
 
 .maintenance-view {
-  padding-top: 52px;
+  padding-top: 16px;
 }
 
 .maintenance-section {
@@ -2204,7 +2175,6 @@ button.danger.primary:hover:not(:disabled) {
   border-radius: 6px;
   overflow: hidden;
   background: color-mix(in srgb, var(--bg) 60%, transparent);
-  -webkit-app-region: no-drag;
 }
 /* Two-line layout: icon on top, label+count below. Icons alone failed
    the five-second test (design-principles §8); labels now carry the
@@ -2351,7 +2321,6 @@ button.danger.primary:hover:not(:disabled) {
 .project-sidebar-actions {
   padding: 8px;
   border-top: 0.5px solid var(--border);
-  -webkit-app-region: no-drag;
 }
 .sidebar-action {
   display: inline-flex;
@@ -2380,7 +2349,7 @@ button.danger.primary:hover:not(:disabled) {
   color: var(--muted);
 }
 
-.project-detail { padding-top: 52px; }
+.project-detail { padding-top: 16px; }
 
 .project-detail-header {
   display: flex;
@@ -2466,7 +2435,7 @@ button.danger.primary:hover:not(:disabled) {
 
 /* ---------- repair view ---------- */
 
-.repair-view { padding-top: 52px; }
+.repair-view { padding-top: 16px; }
 
 .repair-header {
   display: flex;

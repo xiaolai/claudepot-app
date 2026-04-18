@@ -39,7 +39,8 @@ nav.
 
 ```
 ┌───────────────────────────────────────────────────┐
-│ ● ● ●    (traffic lights float on nav rail)       │
+│ ● ● ●    Claudepot            [native title bar]  │
+├───────────────────────────────────────────────────┤
 │┌─┬────────────┬────────────────────────────────┐  │
 ││ │            │                                │  │
 ││R│  LIST      │        DETAIL PANE             │  │
@@ -65,17 +66,21 @@ sizes (900–1600 px). If you find yourself increasing either cap,
 stop — tighter chrome is the house style.
 
 - Rail and list share `var(--chrome)` (unified chrome surface, subtly
-  distinct from content). Traffic lights float over the rail's top
-  ~52 px. First icon sits at that offset.
+  distinct from content). They start below the OS-drawn title bar
+  with a small top padding (~12 px) for breathing room.
 - Detail pane is `var(--bg)` (the document surface), brighter than
   chrome so the left-chrome vs. right-document split is visible.
 - Separators are 0.5 px `var(--border)`, vertical, uninterrupted
   top-to-bottom. No horizontal separator in window chrome.
 
-Tauri config: `titleBarStyle: "Overlay"`, `hiddenTitle: true`,
-`trafficLightPosition: { x: 16, y: 18 }`. We no longer use vibrancy
-— `--chrome` is a solid color — so the `windowEffects: ["sidebar"]`
-entry is kept only as a hint to macOS for window-chrome treatment.
+**Window chrome is native.** The Tauri window uses default
+`titleBarStyle` and `decorations: true` — every OS draws its own
+title bar (traffic lights on macOS, caption buttons on Windows,
+WM-provided chrome on Linux). No custom drag regions, no
+`trafficLightPosition`, no platform-specific padding for chrome
+clearance. This is a deliberate choice: the aesthetic tax of a
+standard title bar is far smaller than the maintenance tax of
+supporting a custom overlay across three OSes.
 
 ## Selectable list row (listbox option)
 
@@ -539,12 +544,10 @@ promotes all of them to BLOCK.
 3. **Zero-state metadata** — rendering `0 sessions · …` at all.
 4. **Internal identifiers** in the primary detail grid (principle §1).
 5. **Disabled buttons without inline reason** (principle §3).
-6. **Horizontal separator across the traffic-light zone** — breaks
-   unified title bar.
-7. **Scroll container clipping the first row** — sticky filter bar
+6. **Scroll container clipping the first row** — sticky filter bar
    plus scrollable list requires the list's top padding to equal the
    sticky bar's height.
-8. **Status spray** — same event firing toast + banner + strip.
-9. **Toasting a persistent state** — locked keychain as a 4-second
+7. **Status spray** — same event firing toast + banner + strip.
+8. **Toasting a persistent state** — locked keychain as a 4-second
    toast.
-10. **Silent long op** — background op with no `RunningOpStrip` entry.
+9. **Silent long op** — background op with no `RunningOpStrip` entry.

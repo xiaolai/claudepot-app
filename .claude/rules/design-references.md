@@ -84,13 +84,14 @@ stars. Stay monochromatic.
 
 ### Finder — the chrome baseline
 
-**Study:** sidebar vibrancy, traffic lights floating on the sidebar's
-vibrant background, the vertical separator that runs uninterrupted
-top-to-bottom, zero ornamentation on the content pane.
+**Study:** sidebar structure, the vertical separator that runs
+uninterrupted top-to-bottom below the title bar, zero ornamentation
+on the content pane.
 
-**Steal:** unified title bar. Traffic lights sit over the rail's
-vibrancy, no horizontal separator in the rail's top zone. Rail extends
-y=0 to bottom.
+**Steal:** the sidebar/content proportions, the quiet visual tier
+between chrome and document. Claudepot uses a *native* title bar
+(OS-drawn) above the rail/sidebar, unlike Finder's unified title
+bar — we accept that aesthetic tax for Windows/Linux portability.
 
 **Don't steal:** Finder's toolbar icon density or content layout.
 

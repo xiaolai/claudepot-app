@@ -192,16 +192,13 @@ Cmd+Q/W/H/M come free from Tauri.
 
 ## macOS Tahoe / Liquid Glass — future work
 
-These numeric defaults (13 px body, 6 px radius, 0.5 px borders) are
-current house style for macOS Sonoma/Sequoia, **not** timeless native
-truth. When macOS Tahoe's Liquid Glass API lands in Tauri:
+These numeric defaults (12 px body, 6 px radius, 0.5 px borders) are
+current house style, versioned against today's macOS. Re-baseline when
+macOS ships a major release (Tahoe etc.). Do not refactor preemptively.
 
-1. Remove `windowEffects: ["sidebar"]`; let the OS provide glass.
-2. Re-baseline sizes against Tahoe control metrics (controls are
-   slightly taller).
-3. Audit this file; mark which values changed.
-
-Do not refactor preemptively. Watch Tauri 2 release notes.
+Claudepot uses a native OS-drawn title bar (not overlay/unified), so
+Liquid Glass treatment of the title bar is automatic once the OS
+supports it — no Tauri config change needed on our side.
 
 ## Shortlist of anti-patterns
 
@@ -213,7 +210,6 @@ in `design-patterns.md`. BLOCK-level unless noted.
 - Zero-value metadata (`0 sessions · …`).
 - Internal identifiers on the primary detail grid.
 - Disabled buttons without inline reason.
-- Horizontal separator in the nav rail's top zone (breaks unified title bar).
 - Raw hex / rgb colors in component CSS.
 - `cursor: pointer` on buttons; `::-webkit-scrollbar` overrides.
 - Box shadows on list items; radius > 8 px on non-modals (WARN).
