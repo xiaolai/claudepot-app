@@ -480,54 +480,109 @@ warm.
 .empty-state-hint { font-size: 11px; }
 ```
 
-## Buttons
+## Buttons — five canonical variants
 
-28 px height. 0.5 px border. 6 px radius. Background fill on hover,
-never border change.
+Taxonomy modeled on shadcn/ui so anyone who's touched a modern web
+design system recognizes it: `primary · default · outline · ghost ·
+danger`. Never invent a sixth — if a new case appears, map it to one
+of the five plus a modifier class.
+
+Base — shared by every variant:
 
 ```css
 .btn {
   height: 28px; padding: 0 12px;
-  border: 0.5px solid var(--border);
   border-radius: 6px;
-  background: var(--bg);
-  color: var(--text);
-  font-size: 13px;
+  font-size: 12px;
+  font-family: var(--font);
   cursor: default;
   display: inline-flex; align-items: center; gap: 6px;
+  transition: background var(--dur-base) var(--ease-out),
+              color var(--dur-base) var(--ease-out);
 }
-.btn:hover { background: var(--hover-bg); }
+.btn:focus-visible {
+  outline: none;
+  box-shadow: var(--focus-ring);
+}
+.btn:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
+/* 1. Default — surface fill, hairline border (most buttons) */
+.btn {
+  background: var(--bg);
+  color: var(--text);
+  border: 0.5px solid var(--border);
+}
+.btn:hover:not(:disabled) { background: var(--hover-bg); }
+
+/* 2. Primary — accent fill, white-ish text. ONE per view. */
 .btn.primary {
   background: var(--accent);
   color: var(--accent-text);
   border-color: transparent;
   font-weight: 500;
 }
+.btn.primary:hover:not(:disabled) { filter: brightness(1.05); }
+
+/* 3. Outline — transparent fill, border-colored text */
+.btn.outline {
+  background: transparent;
+  color: var(--muted);
+  border: 0.5px solid var(--border);
+}
+.btn.outline:hover:not(:disabled) {
+  background: var(--hover-bg);
+  color: var(--text);
+}
+
+/* 4. Ghost — no chrome at rest, fill on hover (toolbar, icon-only) */
+.btn.ghost {
+  background: transparent;
+  color: var(--text);
+  border: 0;
+}
+.btn.ghost:hover:not(:disabled) { background: var(--hover-bg); }
+
+/* 5. Danger — bad-colored for destructive actions */
 .btn.danger {
   color: var(--bad);
-  border-color: var(--bad);
+  border: 0.5px solid var(--bad);
+  background: transparent;
 }
+.btn.danger:hover:not(:disabled) { background: var(--bad-weak); }
 .btn.danger.primary {
   background: var(--bad);
   color: white;
   border-color: transparent;
 }
-.btn:focus-visible {
-  outline: 3px solid var(--focus-ring);
-  outline-offset: 2px;
-}
-.btn.icon-only {
-  width: 28px; padding: 0; justify-content: center;
-}
+
+/* Size modifiers */
+.btn.sm { height: 24px; padding: 0 10px; font-size: 11px; }
+.btn.lg { height: 32px; padding: 0 16px; font-size: 13px; }
+.btn.icon-only { width: 28px; padding: 0; justify-content: center; }
+.btn.sm.icon-only { width: 24px; }
+.btn.lg.icon-only { width: 32px; }
 ```
 
-Only one `.btn.primary` visible at a time.
+**Rules:**
+
+- One `.btn.primary` per view. Two primaries means you haven't
+  decided which action matters.
+- Destructive actions use `.danger`. If it's irreversible and global,
+  use `.danger.primary` (solid fill) — make the consequence loud.
+- Toolbars and icon-rails use `.ghost.icon-only`.
+- Form "Cancel" is `.btn` (default). "Submit" / "Save" is `.primary`.
+
+Reference: *shadcn/ui — Button*
+([ui.shadcn.com/docs/components/button](https://ui.shadcn.com/docs/components/button)).
 
 ## Density defaults
 
-- **Padding up before padding down.** When cramped, add space. The
-  references are airier than you think.
-- **Sizes 11 / 13 / 15 / 22.** Don't invent sizes between these.
+- **Padding up before padding down.** When cramped, add space.
+- **Sizes on the scale.** 10 / 11 / 12 / 13 / 14. Invented sizes are
+  a review finding.
 - **0.5 px borders.** On retina, 1 px reads as truck-sized.
 - **Hover reveals detail.** At rest, rows are quiet. Hover adds tint
   and surfaces menu triggers. Resist showing everything at rest.

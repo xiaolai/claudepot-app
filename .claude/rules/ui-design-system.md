@@ -60,13 +60,121 @@ change if the platform or our taste changes.
 
 | Token | Derivation | Purpose |
 |---|---|---|
-| `--chrome` | `--surface` | Unified rail + sidebar background |
+| `--chrome` | `color-mix(--bg 90 %, --muted)` | Rail + sidebar (subtly distinct from content) |
 | `--hover-bg` | accent at 6 % | List row hover |
 | `--accent-weak` | accent at 12–18 % | Active-state background |
 | `--ok-weak` | green at 12 % | Success badge background |
 | `--bad-weak` | red at 12 % | Error badge background |
 | `--warn-weak` | orange at 12 % | Warning badge background |
-| `--focus-ring` | accent at 30 %, 3 px | macOS focus ring |
+| `--focus-ring` | accent at 30 %, 3 px | Focus ring |
+
+## Mental model: the 12-step scale (Radix)
+
+When you reach for a new shade, think in terms of the 12-step semantic
+scale Radix Colors pioneered and the whole modern web has adopted.
+Each step has a specific role; a color without a role is noise.
+
+| Step | Role | Claudepot example |
+|---|---|---|
+| 1 | **App background** | `--bg` |
+| 2 | **Subtle background** | `--chrome` (rail/sidebar) |
+| 3 | **UI element bg — rest** | button default bg |
+| 4 | **UI element bg — hover** | `--hover-bg` |
+| 5 | **UI element bg — active / selected** | `--accent-weak` (selected row) |
+| 6 | **Subtle border, non-interactive** | `--border` (0.5 px separators) |
+| 7 | **UI element border, focus rings** | (accent, used for focus) |
+| 8 | **Hovered UI element border** | (not yet used; future) |
+| 9 | **Solid background (high chroma)** | `--accent` (primary button fill) |
+| 10 | **Hovered solid** | `--accent` × 1.05 brightness |
+| 11 | **Low-contrast text** | `--muted` |
+| 12 | **High-contrast text** | `--text` |
+
+Rule: before adding a new color, identify which step it occupies. If
+it doesn't fit a step, it's probably the wrong color. Two colors
+at the same step for the same semantic role is duplication — merge.
+
+Reference: *Radix Colors — Understanding the Scale*
+([radix-ui.com/colors/docs/palette-composition/understanding-the-scale](https://www.radix-ui.com/colors/docs/palette-composition/understanding-the-scale)).
+
+## Semantic-pair pattern (shadcn/ui)
+
+Every background token has a paired foreground for text/icons that
+sit on it. Name them as a pair so you can't apply a background
+without thinking about readable content on top.
+
+| Background | Foreground | Usage |
+|---|---|---|
+| `--bg` | `--text` | Content surface |
+| `--chrome` | `--text` | Rail + sidebar |
+| `--surface` | `--text` | Modals, cards |
+| `--accent` | `--accent-text` | Primary button fill |
+| `--bad` | `white` | Destructive button fill |
+
+Rule: if you introduce a new surface token `--X`, also define (or
+confirm) the foreground. Inaccessible contrast (< WCAG AA 4.5:1) is
+a BLOCK finding in review.
+
+Reference: *shadcn/ui — Theming*
+([ui.shadcn.com/docs/theming](https://ui.shadcn.com/docs/theming)).
+
+## State suffix convention (Primer)
+
+Interactive component tokens use explicit state suffixes. Name the
+state; don't encode it only in selector context.
+
+Allowed suffixes: `-rest`, `-hover`, `-active`, `-disabled`.
+
+Example:
+
+```css
+--btn-default-bg-rest:     var(--surface);
+--btn-default-bg-hover:    var(--hover-bg);
+--btn-default-bg-active:   var(--accent-weak);
+--btn-default-bg-disabled: color-mix(in srgb, var(--surface) 60%, transparent);
+```
+
+For Claudepot we don't yet ship per-component tokens (our class-
+scoped CSS handles it), but when the app grows to where it matters
+— theme switching, multiple button variants — follow this pattern.
+
+Reference: *Primer Foundations — Color*
+([primer.style/foundations/primitives/color](https://primer.style/foundations/primitives/color)).
+
+## Motion tokens
+
+Duration scale — three values, one role each:
+
+| Token | Value | Use |
+|---|---|---|
+| `--dur-fast` | 80 ms | Hover/focus state changes |
+| `--dur-base` | 120 ms | Standard transitions (backgrounds, color) |
+| `--dur-slow` | 240 ms | Modals, large surfaces entering/leaving |
+
+Easing — three values:
+
+| Token | Value | Use |
+|---|---|---|
+| `--ease-out` | `cubic-bezier(0.2, 0.8, 0.2, 1)` | Default; feels responsive |
+| `--ease-in-out` | `cubic-bezier(0.4, 0, 0.2, 1)` | Symmetric (loading spinners) |
+| `--ease-in` | `cubic-bezier(0.4, 0, 1, 1)` | Exit/dismiss |
+
+Rule: animate only `opacity` and `transform`. Wrap all new animations
+in `@media (prefers-reduced-motion: no-preference)`.
+
+## Elevation (shadow) tokens
+
+Four levels — flat by default; elevate only where it communicates
+hierarchy.
+
+| Token | Value | Use |
+|---|---|---|
+| `--shadow-0` | none | Default (list rows, chrome) |
+| `--shadow-1` | `0 0.5px 1px rgba(0,0,0,.06)` | Banners, inline callouts |
+| `--shadow-2` | `0 4px 16px rgba(0,0,0,.15)` | Popovers, dropdowns, context menus |
+| `--shadow-3` | `0 20px 60px rgba(0,0,0,.20)` | Modals |
+
+Never use shadows on list rows, detail grid rows, or anything that
+should read as flat. List hover is color fill, never shadow.
 
 ## Rule: no raw colors
 
@@ -101,14 +209,14 @@ in review.
 | Role | Size | Weight |
 |---|---|---|
 | Page title | 14 px | 600 |
-| Section heading | 13 px | 600 |
-| Subheading / sidebar label | 11 px | 600 uppercase, 0.04em tracking |
-| Body / button | 12 px | 400 (500 for primary) |
-| List row primary | 12 px | 500 (600 when selected) |
-| Metadata / hint | 11 px | 400 |
-| Badge / tag | 10 px | 600 |
+| Section heading | 12 px | 600 |
+| Subheading / sidebar label | 10 px | 600 uppercase, 0.04em tracking |
+| Body / button | 11 px | 400 (500 for primary) |
+| List row primary | 11 px | 500 (600 when selected) |
+| Metadata / hint | 10 px | 400 |
+| Badge / tag | 9 px | 600 |
 
-Scale: `10 · 11 · 12 · 13 · 14`. Five sizes, no more.
+Scale: `9 · 10 · 11 · 12 · 14`. Five sizes, no more.
 
 **Line-height — exactly three values:**
 - `1.0` — icons, badges, single-line chrome
@@ -151,24 +259,50 @@ House style.
 
 ## Transitions
 
-`0.12s ease`. Only animate `opacity` and `transform`. Layout
-properties (width, height, padding, margin) are never animated.
+Use the `--dur-*` and `--ease-*` tokens. Default is
+`var(--dur-base) var(--ease-out)` — i.e., 120 ms, feels responsive.
+Only animate `opacity` and `transform`; never layout properties.
 
 Wrap all animations in `@media (prefers-reduced-motion: no-preference)`.
 
+## Button variants
+
+Exactly five canonical variants — match shadcn/ui / Radix / Primer
+naming so the taxonomy is familiar to anyone who's touched a modern
+web design system.
+
+| Variant | Visual | When |
+|---|---|---|
+| `.btn.primary` | Accent fill, white text | The one primary action of the view |
+| `.btn` (default) | Surface fill, 0.5 px border | Secondary / neutral action |
+| `.btn.outline` | Transparent fill, 0.5 px border, border-colored text | Tertiary / alternate action |
+| `.btn.ghost` | Transparent at rest, hover fill only | Toolbar icon buttons, overflow menus |
+| `.btn.danger` | Bad fill or bad-colored border | Destructive action (delete, clean, reset) |
+
+Height scale: `sm` 24 px, `md` 28 px (default), `lg` 32 px. No `xl`.
+
+Rule: exactly **one** `.btn.primary` visible per view. Two primaries
+means you haven't decided which action matters.
+
+Reference: *shadcn/ui — Button*
+([ui.shadcn.com/docs/components/button](https://ui.shadcn.com/docs/components/button)).
+
 ## Icons
 
-`lucide-react`, stroke-based. 16 px default via CSS (`svg.lucide`).
+Nerd Font glyphs via the `<Icon>` component (`src/components/Icon.tsx`),
+drawn from the 39-entry map in `src/icons.ts`. Size via the `size`
+prop, color inherits.
 
-| Context | Stroke | Size |
-|---|---|---|
-| Toolbar / sidebar | 1.5 | 16 px |
-| Inline / buttons | 1.5 | 14 px |
-| Active indicator | 2.5 | same |
-| Empty state | 1 | 28–32 px |
+| Context | Size |
+|---|---|
+| Nav rail | 18 px |
+| Toolbar / section heading | 14 px |
+| Inline / buttons | 14 px |
+| List row accent | 12–13 px |
+| Empty state | 28–32 px |
 
-No emoji in place of icons. No mixing icon libraries. No colored icons
-outside the semantic set (`ok` / `bad` / `warn`).
+No emoji in place of icons. No mixing icon libraries. No colored
+icons outside the semantic set (`ok` / `bad` / `warn`).
 
 ## Cursor and selection
 

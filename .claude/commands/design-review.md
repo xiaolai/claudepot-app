@@ -156,6 +156,10 @@ Mechanical. A linter could do this — run it consistently.
 ### BLOCK-level
 
 - [ ] No raw hex/rgb/hsl colors in component CSS; every color via `var(--token)`
+- [ ] Every new color token has a paired foreground (semantic-pair pattern)
+- [ ] Every new color token has a dark-mode equivalent (principle §9)
+- [ ] New color tokens occupy a defined step on the 12-step scale
+      (see `ui-design-system.md`); no colors without a semantic role
 - [ ] No `window.confirm/alert/prompt`
 - [ ] Modals: `role="dialog"`, `aria-modal`, `aria-labelledby`, Escape handler, focus trap
 - [ ] Icon-only buttons: `aria-label` present
@@ -163,16 +167,28 @@ Mechanical. A linter could do this — run it consistently.
 - [ ] `:focus-visible` outline present on new interactives
 - [ ] Color is never the sole indicator of state
 
+### Buttons (BLOCK)
+
+- [ ] New buttons use one of the five canonical variants:
+      `primary · default · outline · ghost · danger`. No novel
+      variants unless extending `design-patterns.md` first.
+- [ ] Exactly one `.btn.primary` visible per view
+- [ ] Destructive irreversible-global actions use `.danger.primary`
+      with consequence copy inline (principle §3)
+
 ### WARN-level
 
-- [ ] Font sizes from the scale in `ui-design-system.md`
+- [ ] Font sizes from the scale `9 · 10 · 11 · 12 · 14`
 - [ ] Spacing on the 4 px grid
 - [ ] Border radius matches element type (6 / 8 / 10 / 12 / 999)
-- [ ] Transitions: 0.12 s ease; animates only `opacity` / `transform`
+- [ ] Transitions use `--dur-*` / `--ease-*` tokens, not raw values
+- [ ] Animations only `opacity` / `transform`, never layout props
 - [ ] No `cursor: pointer` outside `<a>` tags
 - [ ] No `::-webkit-scrollbar` overrides
-- [ ] No box shadows on list items
-- [ ] Dark-mode variants present for any new token
+- [ ] No box shadows on list items (use `--shadow-0` default)
+- [ ] Elevation uses `--shadow-1 / 2 / 3` tokens
+- [ ] Interactive component tokens use state-suffix naming
+      (`-rest` / `-hover` / `-active` / `-disabled`)
 - [ ] New animations wrapped in `prefers-reduced-motion: no-preference`
 - [ ] New border/separator tokens have `prefers-contrast: more` variant
 - [ ] New translucent surfaces have `prefers-reduced-transparency` fallback
@@ -182,7 +198,8 @@ Mechanical. A linter could do this — run it consistently.
 - [ ] One component per file, under 120 lines
 - [ ] Props interface inline above the component
 - [ ] Named export
-- [ ] Icons from `lucide-react` only
+- [ ] Icons via `<Icon>` component from `src/components/Icon.tsx`
+      (Nerd Font glyphs from `src/icons.ts`); no mixed libraries
 - [ ] Data via `src/api.ts`, not direct `invoke()`
 - [ ] State across `await`: functional updater
 
