@@ -26,3 +26,7 @@ pub mod project_sanitize;
 pub mod project_types;
 pub mod resolve;
 pub mod services;
+pub mod session_move;
+pub mod session_move_helpers;
+pub mod session_move_jsonl;
+pub mod session_move_types;
