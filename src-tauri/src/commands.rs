@@ -1181,3 +1181,61 @@ pub fn repair_gc(older_than_days: u64, dry_run: bool) -> Result<GcOutcomeDto, St
 pub fn running_ops_list(ops: State<RunningOps>) -> Result<Vec<RunningOpInfo>, String> {
     Ok(ops.list())
 }
+
+// ---------------------------------------------------------------------------
+// Session move commands
+// ---------------------------------------------------------------------------
+
+#[tauri::command]
+pub fn session_list_orphans() -> Result<Vec<crate::dto::OrphanedProjectDto>, String> {
+    let cfg = paths::claude_config_dir();
+    let orphans = claudepot_core::session_move::detect_orphaned_projects(&cfg)
+        .map_err(|e| format!("orphan scan failed: {e}"))?;
+    Ok(orphans
+        .iter()
+        .map(crate::dto::OrphanedProjectDto::from)
+        .collect())
+}
+
+#[tauri::command]
+pub fn session_move(
+    session_id: String,
+    from_cwd: String,
+    to_cwd: String,
+    force_live: bool,
+    force_conflict: bool,
+    cleanup_source: bool,
+) -> Result<crate::dto::MoveSessionReportDto, String> {
+    let sid = Uuid::parse_str(&session_id)
+        .map_err(|e| format!("invalid session id: {e}"))?;
+    let cfg = paths::claude_config_dir();
+    let opts = claudepot_core::session_move::MoveSessionOpts {
+        force_live_session: force_live,
+        force_sync_conflict: force_conflict,
+        cleanup_source_if_empty: cleanup_source,
+    };
+    let report = claudepot_core::session_move::move_session(
+        &cfg,
+        sid,
+        std::path::Path::new(&from_cwd),
+        std::path::Path::new(&to_cwd),
+        opts,
+    )
+    .map_err(|e| format!("move failed: {e}"))?;
+    Ok(crate::dto::MoveSessionReportDto::from(&report))
+}
+
+#[tauri::command]
+pub fn session_adopt_orphan(
+    slug: String,
+    target_cwd: String,
+) -> Result<crate::dto::AdoptReportDto, String> {
+    let cfg = paths::claude_config_dir();
+    let target = std::path::Path::new(&target_cwd);
+    if !target.is_dir() {
+        return Err(format!("target cwd does not exist: {target_cwd}"));
+    }
+    let report = claudepot_core::session_move::adopt_orphan_project(&cfg, &slug, target)
+        .map_err(|e| format!("adopt failed: {e}"))?;
+    Ok(crate::dto::AdoptReportDto::from(&report))
+}

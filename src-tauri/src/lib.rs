@@ -116,6 +116,9 @@ pub fn run() {
             commands::project_move_start,
             commands::project_move_status,
             commands::repair_status_summary,
+            commands::session_list_orphans,
+            commands::session_move,
+            commands::session_adopt_orphan,
         ])
         .run(tauri::generate_context!())
         .unwrap_or_else(|e| {
