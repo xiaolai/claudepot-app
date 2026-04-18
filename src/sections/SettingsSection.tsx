@@ -12,8 +12,23 @@ const SECTION_OPTIONS = [
   { value: "settings", label: "Settings" },
 ] as const;
 
+type SettingsPane = "startup" | "cleanup" | "locks" | "diagnostics" | "about";
+
+const SETTINGS_PANES: ReadonlyArray<{
+  id: SettingsPane;
+  label: string;
+  icon: "play" | "trash-2" | "lock" | "stethoscope" | "info";
+}> = [
+  { id: "startup", label: "Startup", icon: "play" },
+  { id: "cleanup", label: "Cleanup", icon: "trash-2" },
+  { id: "locks", label: "Locks", icon: "lock" },
+  { id: "diagnostics", label: "Diagnostics", icon: "stethoscope" },
+  { id: "about", label: "About", icon: "info" },
+];
+
 export function SettingsSection() {
   const { toasts, pushToast, dismissToast } = useToasts();
+  const [pane, setPane] = useState<SettingsPane>("startup");
   // Separate from `claudepot.activeSection` (last-visited) — this one
   // is the explicit "Open on launch" preference. Normal navigation must
   // not overwrite it, otherwise clicking around the app silently
@@ -93,121 +108,157 @@ export function SettingsSection() {
     pushToast("info", "Diagnostics copied.");
   }, [appStatus, ccIdentity, pushToast]);
 
+  const activePaneDef = SETTINGS_PANES.find((p) => p.id === pane) ?? SETTINGS_PANES[0];
+
   return (
     <>
+      <aside className="sidebar settings-sidebar">
+        <div className="sidebar-header">
+          <div className="sidebar-title">Settings</div>
+        </div>
+        <ul className="sidebar-list" role="listbox" aria-label="Settings panes">
+          {SETTINGS_PANES.map((p) => {
+            const isActive = p.id === pane;
+            return (
+              <li
+                key={p.id}
+                role="option"
+                aria-selected={isActive}
+                className={`sidebar-item${isActive ? " active" : ""}`}
+                tabIndex={0}
+                onClick={() => setPane(p.id)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter" || e.key === " ") {
+                    e.preventDefault();
+                    setPane(p.id);
+                  }
+                }}
+              >
+                <div className="sidebar-item-row">
+                  <Icon name={p.icon} size={12} />
+                  <span className="sidebar-item-name">{p.label}</span>
+                </div>
+              </li>
+            );
+          })}
+        </ul>
+      </aside>
       <main className="content settings-view">
-        <h2 className="settings-heading">Settings</h2>
+        <h2 className="settings-heading">{activePaneDef.label}</h2>
 
-        <section className="settings-group">
-          <h3 className="settings-group-title">Startup</h3>
-          <label className="settings-row">
-            <span>Open on launch</span>
-            <select className="settings-select" value={startSection}
-              onChange={(e) => handleStartChange(e.target.value)}>
-              {SECTION_OPTIONS.map((o) => (
-                <option key={o.value} value={o.value}>{o.label}</option>
-              ))}
-            </select>
-          </label>
-        </section>
+        {pane === "startup" && (
+          <section className="settings-group">
+            <label className="settings-row">
+              <span>Open on launch</span>
+              <select className="settings-select" value={startSection}
+                onChange={(e) => handleStartChange(e.target.value)}>
+                {SECTION_OPTIONS.map((o) => (
+                  <option key={o.value} value={o.value}>{o.label}</option>
+                ))}
+              </select>
+            </label>
+          </section>
+        )}
 
-        <section className="settings-group">
-          <h3 className="settings-group-title"><Icon name="trash-2" size={14} /> Garbage Collection</h3>
-          <p className="muted settings-desc">Remove abandoned journals and old recovery snapshots.</p>
-          <label className="settings-row">
-            <span>Older than</span>
-            <div className="settings-input-group">
-              <input type="number" className="settings-input" min={1} max={365}
-                value={gc.gcDays} onChange={(e) => gc.setGcDays(Number(e.target.value))} />
-              <span className="muted">days</span>
+        {pane === "cleanup" && (
+          <section className="settings-group">
+            <p className="muted settings-desc">Remove abandoned journals and old recovery snapshots.</p>
+            <label className="settings-row">
+              <span>Older than</span>
+              <div className="settings-input-group">
+                <input type="number" className="settings-input" min={1} max={365}
+                  value={gc.gcDays} onChange={(e) => gc.setGcDays(Number(e.target.value))} />
+                <span className="muted">days</span>
+              </div>
+            </label>
+            <div className="settings-actions">
+              <button onClick={gc.gcDryRun} disabled={gc.gcBusy}
+                title="Preview what GC would remove without deleting">Preview</button>
+              <button className="danger" onClick={gc.gcExecute} disabled={gc.gcBusy || !gc.gcResult}
+                title="Permanently remove abandoned journals and old snapshots">Execute GC</button>
             </div>
-          </label>
-          <div className="settings-actions">
-            <button onClick={gc.gcDryRun} disabled={gc.gcBusy}
-              title="Preview what GC would remove without deleting">Preview</button>
-            <button className="danger" onClick={gc.gcExecute} disabled={gc.gcBusy || !gc.gcResult}
-              title="Permanently remove abandoned journals and old snapshots">Execute GC</button>
-          </div>
-          {gc.gcResult && (
-            <div className="settings-result">
-              Would remove: {gc.gcResult.removed_journals} journals, {gc.gcResult.removed_snapshots} snapshots
+            {gc.gcResult && (
+              <div className="settings-result">
+                Would remove: {gc.gcResult.removed_journals} journals, {gc.gcResult.removed_snapshots} snapshots
+              </div>
+            )}
+          </section>
+        )}
+
+        {pane === "locks" && (
+          <section className="settings-group">
+            <p className="muted settings-desc">Force-break a lock file left by a crashed rename.</p>
+            <div className="settings-row">
+              <input type="text" className="settings-input wide" placeholder="Lock file path…"
+                value={gc.lockPath} onChange={(e) => gc.setLockPath(e.target.value)} />
+              <button onClick={gc.breakLock} disabled={gc.lockBusy || !gc.lockPath.trim()}
+                title="Force-break the lock file and create an audit trail">Break</button>
             </div>
-          )}
-        </section>
+          </section>
+        )}
 
-        <section className="settings-group">
-          <h3 className="settings-group-title"><Icon name="lock" size={14} /> Break Stale Lock</h3>
-          <p className="muted settings-desc">Force-break a lock file left by a crashed rename.</p>
-          <div className="settings-row">
-            <input type="text" className="settings-input wide" placeholder="Lock file path…"
-              value={gc.lockPath} onChange={(e) => gc.setLockPath(e.target.value)} />
-            <button onClick={gc.breakLock} disabled={gc.lockBusy || !gc.lockPath.trim()}
-              title="Force-break the lock file and create an audit trail">Break</button>
-          </div>
-        </section>
+        {pane === "diagnostics" && (
+          <section className="settings-group">
+            <p className="muted settings-desc">
+              Read-only view of platform, active slots, and the identity
+              Claude Code is currently authenticated as. Equivalent of the
+              CLI's <code>doctor</code> / <code>status</code> output.
+            </p>
+            {appStatus ? (
+              <dl className="settings-about-grid">
+                <dt>Platform</dt>
+                <dd className="mono selectable">
+                  {appStatus.platform}/{appStatus.arch}
+                </dd>
+                <dt>CLI active</dt>
+                <dd className="selectable">
+                  {appStatus.cli_active_email ?? "—"}
+                </dd>
+                <dt>Desktop active</dt>
+                <dd className="selectable">
+                  {appStatus.desktop_active_email ?? "—"}
+                </dd>
+                <dt>Desktop installed</dt>
+                <dd>{appStatus.desktop_installed ? "yes" : "no"}</dd>
+                <dt>Accounts</dt>
+                <dd>{appStatus.account_count}</dd>
+                <dt>Data dir</dt>
+                <dd className="mono small selectable">{appStatus.data_dir}</dd>
+                <dt>CC identity</dt>
+                <dd className="selectable">
+                  {ccIdentity?.email ?? <em className="muted">not signed in</em>}
+                </dd>
+                {ccIdentity?.error && (
+                  <>
+                    <dt>CC error</dt>
+                    <dd className="mono small bad">{ccIdentity.error}</dd>
+                  </>
+                )}
+              </dl>
+            ) : (
+              <p className="muted small">Loading…</p>
+            )}
+            <div className="settings-actions">
+              <button onClick={loadDiagnostics} disabled={diagBusy}
+                title="Re-fetch diagnostics">
+                Refresh
+              </button>
+              <button onClick={copyDiagnostics} disabled={!appStatus}
+                title="Copy all diagnostics to clipboard">
+                <Icon name="copy" size={13} /> Copy
+              </button>
+            </div>
+          </section>
+        )}
 
-        <section className="settings-group">
-          <h3 className="settings-group-title">
-            <Icon name="stethoscope" size={14} /> Diagnostics
-          </h3>
-          <p className="muted settings-desc">
-            Read-only view of platform, active slots, and the identity
-            Claude Code is currently authenticated as. Equivalent of the
-            CLI's <code>doctor</code> / <code>status</code> output.
-          </p>
-          {appStatus ? (
+        {pane === "about" && (
+          <section className="settings-group about">
             <dl className="settings-about-grid">
-              <dt>Platform</dt>
-              <dd className="mono selectable">
-                {appStatus.platform}/{appStatus.arch}
-              </dd>
-              <dt>CLI active</dt>
-              <dd className="selectable">
-                {appStatus.cli_active_email ?? "—"}
-              </dd>
-              <dt>Desktop active</dt>
-              <dd className="selectable">
-                {appStatus.desktop_active_email ?? "—"}
-              </dd>
-              <dt>Desktop installed</dt>
-              <dd>{appStatus.desktop_installed ? "yes" : "no"}</dd>
-              <dt>Accounts</dt>
-              <dd>{appStatus.account_count}</dd>
-              <dt>Data dir</dt>
-              <dd className="mono small selectable">{appStatus.data_dir}</dd>
-              <dt>CC identity</dt>
-              <dd className="selectable">
-                {ccIdentity?.email ?? <em className="muted">not signed in</em>}
-              </dd>
-              {ccIdentity?.error && (
-                <>
-                  <dt>CC error</dt>
-                  <dd className="mono small bad">{ccIdentity.error}</dd>
-                </>
-              )}
+              <dt>App</dt><dd>Claudepot</dd>
+              <dt>Version</dt><dd className="mono">0.1.0</dd>
             </dl>
-          ) : (
-            <p className="muted small">Loading…</p>
-          )}
-          <div className="settings-actions">
-            <button onClick={loadDiagnostics} disabled={diagBusy}
-              title="Re-fetch diagnostics">
-              Refresh
-            </button>
-            <button onClick={copyDiagnostics} disabled={!appStatus}
-              title="Copy all diagnostics to clipboard">
-              <Icon name="copy" size={13} /> Copy
-            </button>
-          </div>
-        </section>
-
-        <section className="settings-group about">
-          <h3 className="settings-group-title"><Icon name="info" size={14} /> About</h3>
-          <dl className="settings-about-grid">
-            <dt>App</dt><dd>Claudepot</dd>
-            <dt>Version</dt><dd className="mono">0.1.0</dd>
-          </dl>
-        </section>
+          </section>
+        )}
       </main>
       <ToastContainer toasts={toasts} onDismiss={dismissToast} />
     </>
