@@ -3,13 +3,15 @@ import { Icon } from "../components/Icon";
 import { api } from "../api";
 import { useOperations } from "../hooks/useOperations";
 import { useGlobalShortcuts } from "../hooks/useGlobalShortcuts";
-import type { MoveArgs, ProjectInfo } from "../types";
+import type { MoveArgs, OrphanedProject, ProjectInfo } from "../types";
 import { SegmentedControl } from "../components/SegmentedControl";
 import { ContextMenu, type ContextMenuItem } from "../components/ContextMenu";
 import { ProjectsList, type ProjectFilter } from "./projects/ProjectsList";
 import { ProjectDetail } from "./projects/ProjectDetail";
 import { RenameProjectModal } from "./projects/RenameProjectModal";
 import { MaintenanceView } from "./projects/MaintenanceView";
+import { OrphanBanner } from "./projects/OrphanBanner";
+import { AdoptOrphansModal } from "./projects/AdoptOrphansModal";
 
 type ProjectsTab = "list" | "maintenance";
 const TABS = [
@@ -34,6 +36,8 @@ export function ProjectsSection({
   onSubRouteChange: (next: string | null) => void;
 }) {
   const [projects, setProjects] = useState<ProjectInfo[]>([]);
+  const [orphans, setOrphans] = useState<OrphanedProject[]>([]);
+  const [adoptOpen, setAdoptOpen] = useState(false);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [selectedPath, setSelectedPath] = useState<string | null>(null);
@@ -92,6 +96,19 @@ export function ProjectsSection({
         if (!mountedRef.current || myToken !== refreshTokenRef.current) return;
         setError(String(e));
         setLoading(false);
+      });
+    // Orphan scan is independent of projectList — fire in parallel and
+    // let each render when ready. An orphan-scan failure shouldn't
+    // block the main list; log and leave the banner empty.
+    api
+      .sessionListOrphans()
+      .then((os) => {
+        if (!mountedRef.current || myToken !== refreshTokenRef.current) return;
+        setOrphans(os);
+      })
+      .catch(() => {
+        if (!mountedRef.current || myToken !== refreshTokenRef.current) return;
+        setOrphans([]);
       });
   }, []);
 
@@ -183,13 +200,41 @@ export function ProjectsSection({
         }
       />
       {selectedPath ? (
-        <ProjectDetail
-          key={selectedPath}
-          path={selectedPath}
-          onRename={(path) => setRenameTarget(path)}
-        />
+        <div className="content-with-banner">
+          {orphans.length > 0 && (
+            <div className="content-banner-slot">
+              <OrphanBanner
+                orphans={orphans}
+                onAdopt={() => setAdoptOpen(true)}
+              />
+            </div>
+          )}
+          <ProjectDetail
+            key={selectedPath}
+            path={selectedPath}
+            onRename={(path) => setRenameTarget(path)}
+          />
+        </div>
       ) : (
-        <main className="content" />
+        <main className="content">
+          {orphans.length > 0 && (
+            <OrphanBanner
+              orphans={orphans}
+              onAdopt={() => setAdoptOpen(true)}
+            />
+          )}
+        </main>
+      )}
+
+      {adoptOpen && (
+        <AdoptOrphansModal
+          orphans={orphans}
+          onClose={() => setAdoptOpen(false)}
+          onCompleted={() => {
+            setToast("Adoption done.");
+            refresh();
+          }}
+        />
       )}
 
 
