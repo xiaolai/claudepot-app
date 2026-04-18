@@ -110,13 +110,17 @@ surfaces (vibrancy sidebar) must fall back to opaque:
 
 ```css
 @media (prefers-reduced-transparency) {
-  .sidebar { background: var(--bg); }
+  .palette, .toast, .modal {
+    backdrop-filter: none;
+    -webkit-backdrop-filter: none;
+    background: var(--surface);
+  }
 }
 ```
 
-Tauri's `windowEffects` vibrancy is handled at the OS level, but the
-CSS transparent background would show nothing without vibrancy —
-the opaque fallback prevents a blank sidebar.
+The rail and sidebar are already opaque (`var(--chrome)`) so they need
+no override. Translucent overlays (command palette, toasts, modals) do
+— fall back to an opaque surface when the OS disables transparency.
 
 ## Context menus
 

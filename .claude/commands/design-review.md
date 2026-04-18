@@ -128,8 +128,8 @@ compare to the selection table in `feedback-ladder.md`.
 
 ### Window chrome (screenshot required)
 
-- [ ] Title bar unified with nav rail. Traffic lights float on rail
-  vibrancy. No horizontal separator in the rail's top zone.
+- [ ] Title bar is native (OS-drawn). We do not use custom overlay
+  title bars — keeping chrome cross-platform simple.
 - [ ] First list row not clipped by sticky filter bar.
 - [ ] Vertical separators run uninterrupted top-to-bottom.
 
