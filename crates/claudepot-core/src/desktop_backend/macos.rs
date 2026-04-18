@@ -71,11 +71,24 @@ impl super::DesktopPlatform for MacosDesktop {
     }
 
     async fn launch(&self) -> Result<(), DesktopSwapError> {
-        tokio::process::Command::new("open")
+        // Audit M8: check exit status. `open -a Claude` returns
+        // non-zero if the app isn't installed / the bundle can't be
+        // resolved. Previously we returned Ok regardless, so the
+        // caller recorded a successful switch even when Claude
+        // never launched.
+        let out = tokio::process::Command::new("open")
             .args(["-a", "Claude"])
             .output()
             .await
             .map_err(DesktopSwapError::Io)?;
+        if !out.status.success() {
+            let stderr = String::from_utf8_lossy(&out.stderr);
+            return Err(DesktopSwapError::Io(std::io::Error::other(format!(
+                "open -a Claude failed ({}): {}",
+                out.status,
+                stderr.trim()
+            ))));
+        }
         Ok(())
     }
 }
