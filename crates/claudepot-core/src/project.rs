@@ -501,7 +501,18 @@ pub fn move_project(
     // Phase 6: Rewrite session + subagent jsonl cwd fields. Runs against
     // the CC dir at its NEW sanitized location after phase 4. Preserves
     // session resumability after rename (see spec §4.2 P6 and §8 Q4).
-    if !cc_dir_conflict && result.cc_dir_renamed {
+    //
+    // Audit M10: also run when old_san == new_san (lossy sanitization
+    // collapsed both paths to the same name) but the source paths
+    // differ — the CC dir wasn't renamed, but session JSONL files
+    // still carry the OLD cwd and must be rewritten to the NEW one.
+    // Without this, a rename like `/tmp/a.b -> /tmp/a-b` (both
+    // sanitize to `-tmp-a-b`) left stale cwd in session files and
+    // session resumption opened the wrong project.
+    let p6_needed = !cc_dir_conflict
+        && (result.cc_dir_renamed
+            || (old_norm != new_norm && scenario != MoveScenario::StateOnly));
+    if p6_needed {
         let projects_base = args.config_dir.join("projects");
         let cc_new_dir_exact = projects_base.join(&new_san);
         let cc_new_dir = if cc_new_dir_exact.exists() {
