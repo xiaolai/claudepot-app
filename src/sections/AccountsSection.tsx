@@ -1,5 +1,4 @@
 import { useCallback, useEffect, useState } from "react";
-import { User } from "lucide-react";
 import { api } from "../api";
 import type { AccountSummary } from "../types";
 import { useToasts } from "../hooks/useToasts";
@@ -161,6 +160,13 @@ export function AccountsSection({
   const trayRefresh = useCallback(() => { refresh(); refreshUsage(); }, [refresh, refreshUsage]);
   useTauriEvent("tray-cli-switched", trayRefresh);
   useTauriEvent("tray-refresh-requested", trayRefresh);
+  // Audit Low: surface tray-triggered errors. Without this, a tray
+  // quick-switch that failed (live-session conflict, keychain issue)
+  // disappeared into backend logs; user thought nothing happened.
+  useTauriEvent<string>("tray-cli-switch-failed", (e) => {
+    const detail = typeof e?.payload === "string" ? e.payload : "unknown";
+    pushToast("error", `Tray switch failed: ${detail}`);
+  });
 
   if (!status) {
     if (loadError) {
@@ -363,5 +369,3 @@ export function AccountsSection({
   );
 }
 
-AccountsSection.icon = <User />;
-AccountsSection.label = "Accounts";

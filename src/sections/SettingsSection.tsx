@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Settings, Trash2, Lock, Info, Stethoscope, Copy } from "lucide-react";
+import { Trash2, Lock, Info, Stethoscope, Copy } from "lucide-react";
 import { api } from "../api";
 import { useToasts } from "../hooks/useToasts";
 import { useSettingsActions } from "../hooks/useSettingsActions";
@@ -214,5 +214,3 @@ export function SettingsSection() {
   );
 }
 
-SettingsSection.icon = <Settings />;
-SettingsSection.label = "Settings";

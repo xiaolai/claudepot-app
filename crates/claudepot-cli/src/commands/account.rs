@@ -385,10 +385,19 @@ pub async fn verify(ctx: &AppContext, email_input: Option<&str>) -> Result<()> {
 
     let accounts = if let Some(email) = email_input {
         let resolved = claudepot_core::resolve::resolve_email(&ctx.store, email)?;
-        vec![ctx
+        // Audit Low: previously `.expect("resolved email not in store")`.
+        // A concurrent `account remove` between resolve and lookup
+        // turns a normal user error into a process panic. Convert to
+        // a regular error like every other lookup path.
+        let acct = ctx
             .store
             .find_by_email(&resolved)?
-            .expect("resolved email not in store")]
+            .ok_or_else(|| {
+                anyhow::anyhow!(
+                    "resolved email '{resolved}' not found (removed concurrently?)"
+                )
+            })?;
+        vec![acct]
     } else {
         ctx.store.list()?
     };

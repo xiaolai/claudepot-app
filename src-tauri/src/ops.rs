@@ -168,20 +168,36 @@ impl RunningOps {
         Self::default()
     }
 
+    /// Low-audit guard: recover from a poisoned Mutex rather than
+    /// panicking. If an earlier panic poisoned the map, the ops
+    /// pipeline would propagate the panic forever — this turns a
+    /// single transient panic into a logged-and-continue condition.
+    fn guard(
+        &self,
+    ) -> std::sync::MutexGuard<'_, HashMap<String, RunningOpInfo>> {
+        match self.inner.lock() {
+            Ok(g) => g,
+            Err(poisoned) => {
+                tracing::error!("RunningOps mutex was poisoned; recovering");
+                poisoned.into_inner()
+            }
+        }
+    }
+
     pub fn insert(&self, op: RunningOpInfo) {
-        self.inner.lock().unwrap().insert(op.op_id.clone(), op);
+        self.guard().insert(op.op_id.clone(), op);
     }
 
     pub fn get(&self, op_id: &str) -> Option<RunningOpInfo> {
-        self.inner.lock().unwrap().get(op_id).cloned()
+        self.guard().get(op_id).cloned()
     }
 
     pub fn list(&self) -> Vec<RunningOpInfo> {
-        self.inner.lock().unwrap().values().cloned().collect()
+        self.guard().values().cloned().collect()
     }
 
     pub fn update<F: FnOnce(&mut RunningOpInfo)>(&self, op_id: &str, f: F) {
-        if let Some(op) = self.inner.lock().unwrap().get_mut(op_id) {
+        if let Some(op) = self.guard().get_mut(op_id) {
             f(op);
         }
     }

@@ -39,11 +39,15 @@ pub async fn get_access_token(account_id: Uuid) -> Result<String, LauncherError>
 /// Spawn a child process with CLAUDE_CODE_OAUTH_TOKEN injected.
 /// Returns the child's exit code.
 pub async fn run(account_id: Uuid, args: &[String]) -> Result<i32, LauncherError> {
-    let access_token = get_access_token(account_id).await?;
-
+    // Audit Low: validate args BEFORE touching credentials. Previously
+    // this fetched + possibly refreshed the token first, then
+    // discovered args were empty — wasteful I/O and the error was
+    // NoStoredCredentials instead of the more accurate NoCommand.
     if args.is_empty() {
         return Err(LauncherError::NoCommand);
     }
+
+    let access_token = get_access_token(account_id).await?;
 
     let (cmd, cmd_args) = args.split_first().ok_or(LauncherError::NoCommand)?;
 

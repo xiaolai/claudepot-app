@@ -12,13 +12,6 @@ use std::path::PathBuf;
 /// GUI stuck on a spinner forever. Matches Kannon's 10-minute window.
 pub const LOGIN_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(600);
 
-/// Run `claude auth login` against the user's real CC config dir (no env
-/// override). Convenience wrapper: no cancellation channel, only the
-/// hard timeout applies.
-pub async fn run_auth_login_in_place() -> Result<(), OnboardError> {
-    run_auth_login_in_place_cancellable(None).await
-}
-
 /// Cancellable variant: pass a shared `Notify`; when another task calls
 /// `notify.notify_one()`, the subprocess is killed and this function
 /// returns `AuthLoginCancelled`. Used by the GUI's Cancel button.

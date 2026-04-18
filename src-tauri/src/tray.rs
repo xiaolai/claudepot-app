@@ -105,6 +105,14 @@ pub fn handle_menu_event(app: &AppHandle, id: &str) {
                 }
                 Err(e) => {
                     tracing::warn!("tray cli_use failed: {e}");
+                    // Audit Low: emit a frontend event so the window
+                    // (if open) can toast the failure instead of it
+                    // disappearing into tracing logs. The frontend
+                    // listens on `tray-cli-switch-failed` and shows
+                    // an error toast; if the window is closed the
+                    // event is dropped, which is the same behavior
+                    // as before (tray stays silent).
+                    let _ = app.emit("tray-cli-switch-failed", e.to_string());
                 }
             }
         });
