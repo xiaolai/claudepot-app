@@ -2,6 +2,7 @@
 import { invoke } from "@tauri-apps/api/core";
 import type {
   AccountSummary,
+  AdoptReport,
   AppStatus,
   BreakLockOutcome,
   CcIdentity,
@@ -10,6 +11,8 @@ import type {
   GcOutcome,
   JournalEntry,
   MoveArgs,
+  MoveSessionReport,
+  OrphanedProject,
   PendingJournalsSummary,
   ProjectDetail,
   ProjectInfo,
@@ -149,4 +152,42 @@ export const api = {
   // ---------- Op tracking ----------
   /** Snapshot of currently-tracked ops. Backstop for event drops. */
   runningOpsList: () => invoke<RunningOpInfo[]>("running_ops_list"),
+
+  // ---------- Session move ----------
+  /**
+   * Scan ~/.claude/projects for slugs whose internal cwd no longer
+   * exists on disk. Returns the set of adoption candidates — the
+   * primary surface of the orphan-rescue flow.
+   */
+  sessionListOrphans: () => invoke<OrphanedProject[]>("session_list_orphans"),
+  /**
+   * Move a single session transcript from one project cwd to another.
+   * Surfaces touched: primary JSONL (cwd rewrite every line), the
+   * session's subagents/remote-agents subdir, history.jsonl entries
+   * keyed by sessionId, and .claude.json's lastSessionId /
+   * activeWorktreeSession.sessionId pointers for the source cwd.
+   */
+  sessionMove: (args: {
+    sessionId: string;
+    fromCwd: string;
+    toCwd: string;
+    forceLive?: boolean;
+    forceConflict?: boolean;
+    cleanupSource?: boolean;
+  }) =>
+    invoke<MoveSessionReport>("session_move", {
+      sessionId: args.sessionId,
+      fromCwd: args.fromCwd,
+      toCwd: args.toCwd,
+      forceLive: args.forceLive ?? false,
+      forceConflict: args.forceConflict ?? false,
+      cleanupSource: args.cleanupSource ?? false,
+    }),
+  /**
+   * Move every session under an orphaned slug into a live target cwd.
+   * Force-bypasses the live-mtime guard since an orphan's cwd is gone
+   * by definition.
+   */
+  sessionAdoptOrphan: (slug: string, targetCwd: string) =>
+    invoke<AdoptReport>("session_adopt_orphan", { slug, targetCwd }),
 };
