@@ -206,6 +206,42 @@ pub fn move_project(
         }
     }
 
+    // Audit H1: pending-journal gate lives in core, not in each caller.
+    // Previously the CLI enforced this via gate_on_pending_journals()
+    // but the Tauri `project_move_start` command didn't — so the GUI
+    // could start a rename while actionable journals were still
+    // unresolved. Centralizing the check here makes CLI and Tauri
+    // share one enforcement point. `args.ignore_pending_journals`
+    // honors the user's escape hatch. Dry-run is exempt (it's
+    // non-mutating) so the GUI preview still works during a pending
+    // journal situation.
+    if !args.dry_run && !args.ignore_pending_journals {
+        let claudepot_home = args.config_dir.join("claudepot");
+        let journals_dir = claudepot_home.join("journals");
+        let locks_dir = claudepot_home.join("locks");
+        if journals_dir.exists() {
+            // Same threshold the CLI and Tauri both use for the nag
+            // banner — 24 h. We list actionable journals (pending +
+            // stale, excluding running + abandoned) so a repair
+            // currently executing in another thread doesn't block a
+            // fresh move against a DIFFERENT project.
+            let actionable = crate::project_repair::list_actionable(
+                &journals_dir,
+                &locks_dir,
+                86_400,
+            )?;
+            if !actionable.is_empty() {
+                return Err(ProjectError::Ambiguous(format!(
+                    "refusing to move: {} actionable rename journal(s) on disk. \
+                     Resolve via `claudepot project repair` (or the Repair view \
+                     in the GUI), or pass --ignore-pending-journals if you \
+                     know what you're doing.",
+                    actionable.len()
+                )));
+            }
+        }
+    }
+
     let old_exists = Path::new(&old_norm).exists();
     let new_exists = Path::new(&new_norm).exists();
 
