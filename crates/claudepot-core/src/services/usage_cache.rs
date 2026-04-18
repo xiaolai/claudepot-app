@@ -96,9 +96,21 @@ struct CachedUsage {
 }
 
 /// Outcome shared with waiting receivers via watch channel.
+///
+/// Every control-flow path that reaches the inflight registration step
+/// MUST publish one of these before dropping the tx, otherwise waiting
+/// receivers get `changed()` = Err and translate that into
+/// "inflight fetch was cancelled" — misleading when the initiator
+/// merely returned early with no-blob / token-expired.
+///
+/// The identity gate runs OUTSIDE this state machine — it refuses to
+/// register as initiator at all when the stored verify_status is
+/// drift/rejected, so no variant is needed here for gate failures.
 #[derive(Clone, Debug)]
 enum FetchOutcome {
     Success(UsageResponse),
+    NoBlob,
+    TokenExpired,
     RateLimited { retry_after_secs: u64 },
     Failed(String),
 }
@@ -202,16 +214,28 @@ impl UsageCache {
             armed: true,
         };
 
-        // 4. Load blob
+        // 4. Load blob. Early returns MUST publish a FetchOutcome on
+        //    `tx` before dropping it, else waiters receive a spurious
+        //    "inflight fetch was cancelled" (audit M9). We also delay
+        //    the inflight-cleanup to AFTER the broadcast so new callers
+        //    don't slip past the dedupe and duplicate the work.
         let access_token = match self.load_access_token(uuid) {
             Ok(Some(token)) => token,
             Ok(None) => {
+                let _ = tx.send(Some(FetchOutcome::NoBlob));
                 guard.disarm_and_cleanup().await;
                 return Ok(None);
             }
-            Err(e) => {
+            Err(UsageFetchError::TokenExpired) => {
+                let _ = tx.send(Some(FetchOutcome::TokenExpired));
                 guard.disarm_and_cleanup().await;
-                return Err(e);
+                return Err(UsageFetchError::TokenExpired);
+            }
+            Err(e) => {
+                let msg = e.to_string();
+                let _ = tx.send(Some(FetchOutcome::Failed(msg.clone())));
+                guard.disarm_and_cleanup().await;
+                return Err(UsageFetchError::FetchFailed(msg));
             }
         };
 
@@ -223,8 +247,11 @@ impl UsageCache {
         //    and entrenched misfiled blobs by writing fresh-but-wrong
         //    tokens to the slot. The systematic fix lives in `identity`;
         //    UI-driven reconciliation triggers it on cadence.
+        //
+        //    M9 fix: publish outcome BEFORE inflight cleanup so concurrent
+        //    callers that arrive during cleanup don't miss the dedupe
+        //    window and launch a duplicate request.
         let result = self.fetcher.fetch(&access_token).await;
-        guard.disarm_and_cleanup().await;
 
         match result {
             Ok(response) => {
@@ -239,6 +266,7 @@ impl UsageCache {
                     );
                 }
                 let _ = tx.send(Some(FetchOutcome::Success(response.clone())));
+                guard.disarm_and_cleanup().await;
                 Ok(Some(response))
             }
             Err(OAuthError::RateLimited { retry_after_secs }) => {
@@ -250,11 +278,13 @@ impl UsageCache {
                     );
                 }
                 let _ = tx.send(Some(FetchOutcome::RateLimited { retry_after_secs }));
+                guard.disarm_and_cleanup().await;
                 Err(UsageFetchError::RateLimited { retry_after_secs })
             }
             Err(e) => {
                 let msg = e.to_string();
                 let _ = tx.send(Some(FetchOutcome::Failed(msg.clone())));
+                guard.disarm_and_cleanup().await;
                 Err(UsageFetchError::FetchFailed(msg))
             }
         }
@@ -275,6 +305,56 @@ impl UsageCache {
             out.insert(uuid, self.fetch_usage(uuid, false).await);
         }
         out
+    }
+
+    /// Check the store's recorded identity-verification status before
+    /// serving a usage token. Refuses when the slot is known-misfiled
+    /// ("drift") or the token was server-rejected ("rejected") — in
+    /// both cases the access token in the slot DOES NOT belong to
+    /// the labelled account, so serving /usage against it would
+    /// attribute another person's numbers to this UUID (audit H4,
+    /// privacy bug).
+    ///
+    /// "never" (first-time, no verify yet) and "network_error" are
+    /// allowed — the periodic reconciliation pass (`verify_all_accounts`
+    /// in the GUI, `account verify` in the CLI) will update the
+    /// status shortly. Blocking those would stall the UI on every
+    /// new account.
+    fn identity_gate(
+        store: &crate::account::AccountStore,
+        uuid: Uuid,
+    ) -> Result<(), UsageFetchError> {
+        match store.find_by_uuid(uuid) {
+            Ok(Some(acct)) => match acct.verify_status.as_str() {
+                "drift" | "rejected" => Err(UsageFetchError::FetchFailed(format!(
+                    "identity gate: verify_status={}; run verify to reconcile",
+                    acct.verify_status
+                ))),
+                _ => Ok(()),
+            },
+            Ok(None) => Err(UsageFetchError::FetchFailed(
+                "identity gate: account not in store".to_string(),
+            )),
+            Err(e) => Err(UsageFetchError::FetchFailed(format!(
+                "identity gate: store lookup failed: {e}"
+            ))),
+        }
+    }
+
+    /// Identity-gated variant of `fetch_usage`. Refuses to serve when
+    /// the stored slot's `verify_status` is drift/rejected, preventing
+    /// /usage from being called with a misfiled token (H4). The
+    /// authoritative reconciliation path is
+    /// `services::identity::verify_account_identity`; callers who see
+    /// this error should run it and retry.
+    pub async fn fetch_usage_verified(
+        &self,
+        store: &crate::account::AccountStore,
+        uuid: Uuid,
+        force: bool,
+    ) -> Result<Option<UsageResponse>, UsageFetchError> {
+        Self::identity_gate(store, uuid)?;
+        self.fetch_usage(uuid, force).await
     }
 
     /// Fetch usage gracefully: never returns rate-limit errors.
@@ -307,6 +387,33 @@ impl UsageCache {
             }
             first = false;
             out.insert(uuid, self.fetch_usage_graceful(uuid).await);
+        }
+        out
+    }
+
+    /// Identity-gated batch detailed fetch. Every input uuid goes
+    /// through `identity_gate` before its fetch; gate failures produce
+    /// `UsageOutcome::Error` entries so the UI can render "drift —
+    /// reconcile first" instead of silently attributing data to the
+    /// wrong slot (H4).
+    pub async fn fetch_batch_detailed_verified(
+        &self,
+        store: &crate::account::AccountStore,
+        uuids: &[Uuid],
+    ) -> HashMap<Uuid, UsageOutcome> {
+        let mut out = HashMap::new();
+        let mut first = true;
+        for &uuid in uuids {
+            if !first {
+                tokio::time::sleep(BATCH_STAGGER).await;
+            }
+            first = false;
+            let outcome = match Self::identity_gate(store, uuid) {
+                Ok(()) => self.fetch_usage_detailed(uuid).await,
+                Err(UsageFetchError::FetchFailed(msg)) => UsageOutcome::Error(msg),
+                Err(e) => UsageOutcome::Error(e.to_string()),
+            };
+            out.insert(uuid, outcome);
         }
         out
     }
@@ -434,6 +541,8 @@ impl UsageCache {
     ) -> Result<Option<UsageResponse>, UsageFetchError> {
         match outcome {
             Some(FetchOutcome::Success(r)) => Ok(Some(r)),
+            Some(FetchOutcome::NoBlob) => Ok(None),
+            Some(FetchOutcome::TokenExpired) => Err(UsageFetchError::TokenExpired),
             Some(FetchOutcome::RateLimited { retry_after_secs }) => {
                 Err(UsageFetchError::RateLimited { retry_after_secs })
             }
