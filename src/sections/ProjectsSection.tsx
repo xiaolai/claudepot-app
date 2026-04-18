@@ -212,7 +212,12 @@ export function ProjectsSection({
           <ProjectDetail
             key={selectedPath}
             path={selectedPath}
+            projects={projects}
             onRename={(path) => setRenameTarget(path)}
+            onMoved={() => {
+              setToast("Session moved.");
+              refresh();
+            }}
           />
         </div>
       ) : (

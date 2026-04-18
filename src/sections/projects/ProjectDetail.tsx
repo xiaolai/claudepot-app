@@ -1,26 +1,46 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { Icon } from "../../components/Icon";
 import { api } from "../../api";
 import { CopyButton } from "../../components/CopyButton";
-import type { ProjectDetail as ProjectDetailData } from "../../types";
+import { ContextMenu, type ContextMenuItem } from "../../components/ContextMenu";
+import type { ProjectDetail as ProjectDetailData, ProjectInfo } from "../../types";
 import { classifyProject } from "./projectStatus";
 import { formatSize } from "./format";
+import { MoveSessionModal } from "./MoveSessionModal";
 
 /**
  * Right-pane detail view for the selected project. Shows paths, size,
- * session count, memory files. The Rename button is a stub until
- * Step 5 (rename modal + live dry-run).
+ * session count, memory files, plus a session list with a right-click
+ * "Move to another project…" action per row.
  */
 export function ProjectDetail({
   path,
+  projects,
   onRename,
+  onMoved,
 }: {
   path: string;
+  /** Live list of projects — powers the session-move target picker. */
+  projects: ProjectInfo[];
   onRename: (path: string) => void;
+  /** Fires after a session move succeeds so the caller can refresh. */
+  onMoved: () => void;
 }) {
   const [detail, setDetail] = useState<ProjectDetailData | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
+  const [ctxMenu, setCtxMenu] = useState<
+    { x: number; y: number; sessionId: string } | null
+  >(null);
+  const [moveTarget, setMoveTarget] = useState<string | null>(null);
+
+  const onSessionContextMenu = useCallback(
+    (e: React.MouseEvent, sessionId: string) => {
+      e.preventDefault();
+      setCtxMenu({ x: e.clientX, y: e.clientY, sessionId });
+    },
+    [],
+  );
 
   useEffect(() => {
     let cancelled = false;
@@ -172,7 +192,12 @@ export function ProjectDetail({
           <h3>Sessions · {sessions.length}</h3>
           <ul className="detail-list mono small">
             {sessions.slice(0, 20).map((s) => (
-              <li key={s.session_id}>
+              <li
+                key={s.session_id}
+                className="session-row"
+                onContextMenu={(e) => onSessionContextMenu(e, s.session_id)}
+                title="Right-click for actions"
+              >
                 <span className="muted">{s.session_id.slice(0, 8)}</span> —{" "}
                 {formatSize(s.file_size)}
               </li>
@@ -184,6 +209,44 @@ export function ProjectDetail({
             )}
           </ul>
         </section>
+      )}
+
+      {ctxMenu &&
+        (() => {
+          const items: ContextMenuItem[] = [
+            {
+              label: "Move to another project…",
+              onClick: () => setMoveTarget(ctxMenu.sessionId),
+            },
+            { label: "", separator: true, onClick: () => {} },
+            {
+              label: "Copy session ID",
+              onClick: () => {
+                navigator.clipboard.writeText(ctxMenu.sessionId);
+              },
+            },
+          ];
+          return (
+            <ContextMenu
+              x={ctxMenu.x}
+              y={ctxMenu.y}
+              items={items}
+              onClose={() => setCtxMenu(null)}
+            />
+          );
+        })()}
+
+      {moveTarget && (
+        <MoveSessionModal
+          sessionId={moveTarget}
+          fromCwd={info.original_path}
+          projects={projects}
+          onClose={() => setMoveTarget(null)}
+          onCompleted={() => {
+            setMoveTarget(null);
+            onMoved();
+          }}
+        />
       )}
     </main>
   );
