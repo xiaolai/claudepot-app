@@ -400,7 +400,17 @@ pub async fn refresh_usage_for(
 ) -> Result<UsageEntryDto, String> {
     let id = Uuid::parse_str(&uuid).map_err(|e| format!("bad uuid: {e}"))?;
     cache.invalidate(id).await;
-    let outcome = cache.fetch_usage_detailed(id).await;
+    // Identity-gated fetch: refuses to serve when the stored slot's
+    // verify_status is drift/rejected so we never attribute another
+    // account's usage to this UUID (audit H4).
+    let store = open_store()?;
+    let batch = cache.fetch_batch_detailed_verified(&store, &[id]).await;
+    let outcome = batch
+        .into_values()
+        .next()
+        .unwrap_or(claudepot_core::services::usage_cache::UsageOutcome::Error(
+            "no outcome produced".to_string(),
+        ));
     Ok(UsageEntryDto::from_outcome(outcome))
 }
 
@@ -436,7 +446,11 @@ pub async fn fetch_all_usage(
         return Ok(HashMap::new());
     }
 
-    let batch = cache.fetch_batch_detailed(&uuids).await;
+    // Identity-gated batch: any uuid whose stored verify_status is
+    // drift/rejected returns an Error outcome instead of being served
+    // against a misfiled token (audit H4 privacy bug). The UI renders
+    // the gate failure as "Couldn't fetch usage" with the detail.
+    let batch = cache.fetch_batch_detailed_verified(&store, &uuids).await;
 
     let mut out = HashMap::new();
     for (uuid, outcome) in batch {
