@@ -3112,15 +3112,80 @@ button.danger.primary:hover:not(:disabled) {
 .adopt-orphans-row-status.ok { color: var(--ok); }
 .adopt-orphans-row-status.bad { color: var(--bad); }
 
-/* Right-click affordance on session rows. Cursor stays `default` (per
- * global rule) but hover fill tells the user something is clickable. */
+/* Session list inside ProjectDetail.
+ * Mirrors the project-list `.sidebar-item` rhythm so users read
+ * sessions as interactive rows rather than as inert data. The
+ * trailing ⋯ button is the explicit affordance (macOS convention
+ * doesn't reliably teach right-click). */
+.session-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
 .session-row {
-  border-radius: 4px;
-  padding: 2px 6px;
-  margin: 0 -6px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 6px 10px;
+  margin: 0 -10px;
+  border-radius: 6px;
+  transition: background var(--dur-fast, 80ms) var(--ease-out, ease-out);
 }
 .session-row:hover {
   background: var(--hover-bg);
+}
+.session-row-text {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+.session-row-name {
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--text);
+  line-height: 1.3;
+}
+.session-row-meta {
+  font-size: 10px;
+  color: var(--muted);
+  line-height: 1.3;
+}
+.session-row-menu-btn {
+  flex: 0 0 auto;
+  width: 22px;
+  height: 22px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 0;
+  background: transparent;
+  color: var(--muted);
+  border-radius: 4px;
+  opacity: 0;
+  transition: opacity var(--dur-fast, 80ms) var(--ease-out, ease-out),
+              background var(--dur-fast, 80ms) var(--ease-out, ease-out);
+}
+.session-row:hover .session-row-menu-btn,
+.session-row:focus-within .session-row-menu-btn {
+  opacity: 1;
+}
+.session-row-menu-btn:hover {
+  background: var(--accent-weak);
+  color: var(--text);
+}
+.session-row-menu-btn:focus-visible {
+  opacity: 1;
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+.session-row-more {
+  padding: 6px 10px;
+  font-size: 10px;
 }
 
 .move-session-modal {

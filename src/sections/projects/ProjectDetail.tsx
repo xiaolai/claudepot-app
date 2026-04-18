@@ -5,7 +5,7 @@ import { CopyButton } from "../../components/CopyButton";
 import { ContextMenu, type ContextMenuItem } from "../../components/ContextMenu";
 import type { ProjectDetail as ProjectDetailData, ProjectInfo } from "../../types";
 import { classifyProject } from "./projectStatus";
-import { formatSize } from "./format";
+import { formatRelativeTime, formatSize } from "./format";
 import { MoveSessionModal } from "./MoveSessionModal";
 
 /**
@@ -44,6 +44,17 @@ export function ProjectDetail({
     (e: React.MouseEvent, sessionId: string) => {
       e.preventDefault();
       setCtxMenu({ x: e.clientX, y: e.clientY, sessionId });
+    },
+    [],
+  );
+  const onSessionMenuButton = useCallback(
+    (e: React.MouseEvent, sessionId: string) => {
+      e.stopPropagation();
+      // Anchor the menu to the button's bottom-left so the menu
+      // appears predictably below the row rather than wherever the
+      // cursor happened to be.
+      const r = (e.currentTarget as HTMLElement).getBoundingClientRect();
+      setCtxMenu({ x: r.left, y: r.bottom + 2, sessionId });
     },
     [],
   );
@@ -196,20 +207,37 @@ export function ProjectDetail({
       {sessions.length > 0 && (
         <section className="detail-section">
           <h3>Sessions · {sessions.length}</h3>
-          <ul className="detail-list mono small">
+          <ul className="session-list" role="list">
             {sessions.slice(0, 20).map((s) => (
               <li
                 key={s.session_id}
                 className="session-row"
                 onContextMenu={(e) => onSessionContextMenu(e, s.session_id)}
-                title="Right-click for actions"
               >
-                <span className="muted">{s.session_id.slice(0, 8)}</span> —{" "}
-                {formatSize(s.file_size)}
+                <div className="session-row-text">
+                  <span className="session-row-name mono">
+                    {s.session_id.slice(0, 8)}
+                  </span>
+                  <span className="session-row-meta">
+                    {formatSize(s.file_size)}
+                    {s.last_modified_ms != null && (
+                      <>{" · "}{formatRelativeTime(s.last_modified_ms)}</>
+                    )}
+                  </span>
+                </div>
+                <button
+                  type="button"
+                  className="session-row-menu-btn"
+                  aria-label="Session actions"
+                  title="Actions"
+                  onClick={(e) => onSessionMenuButton(e, s.session_id)}
+                >
+                  <Icon name="more-vertical" size={12} />
+                </button>
               </li>
             ))}
             {sessions.length > 20 && (
-              <li className="muted">
+              <li className="session-row-more muted">
                 … {sessions.length - 20} more not shown
               </li>
             )}
