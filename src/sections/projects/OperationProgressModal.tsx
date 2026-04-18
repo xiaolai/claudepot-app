@@ -61,14 +61,30 @@ export function OperationProgressModal({
   );
   const trapRef = useFocusTrap<HTMLDivElement>();
 
+  // Audit H9: the handler used to close over `sub?.phase`, making its
+  // identity change every time a sub-progress update arrived. The
+  // inner `useTauriEvent(channel, handler)` subscribed by
+  // [channel, handler], so the subscription torn down and re-attached
+  // on every phase transition. Because `listen()` is async, that
+  // created a gap in which a terminal `op` event could land and be
+  // missed, leaving the modal stuck in a non-terminal state.
+  //
+  // Fix: stabilize handler identity. All mutable state accessed by
+  // the handler goes through refs, so the deps array shrinks to [].
+  // Callback identity is constant for the modal's lifetime; the
+  // subscription attaches once on mount and detaches once on unmount.
+  const subRef = useRef<{ phase: Phase; done: number; total: number } | null>(null);
+  subRef.current = sub;
+  const onCompleteRef = useRef(onComplete);
+  onCompleteRef.current = onComplete;
+  const onErrorRef = useRef(onError);
+  onErrorRef.current = onError;
+
   const handler = useCallback(
     (event: { payload: OperationProgressEvent }) => {
       const ev = event.payload;
       if (ev.op_id !== opId) return;
       if (ev.phase === "op") {
-        // Terminal event. Fetch the structured result out-of-band —
-        // the event only carries a string detail, but the backend
-        // stored the MoveResultSummary in RunningOps.
         if (firedTerminal.current) return;
         firedTerminal.current = true;
         const isComplete = ev.status === "complete";
@@ -80,28 +96,27 @@ export function OperationProgressModal({
                 kind: "complete",
                 result: info?.move_result ?? null,
               });
-              onComplete?.();
+              onCompleteRef.current?.();
             } else {
               setTerminal({
                 kind: "error",
                 detail: ev.detail ?? info?.last_error ?? null,
                 failedJournalId: info?.failed_journal_id ?? null,
               });
-              onError?.(ev.detail ?? null);
+              onErrorRef.current?.(ev.detail ?? null);
             }
           })
           .catch(() => {
-            // Fallback: show whatever the event carried.
             if (isComplete) {
               setTerminal({ kind: "complete", result: null });
-              onComplete?.();
+              onCompleteRef.current?.();
             } else {
               setTerminal({
                 kind: "error",
                 detail: ev.detail ?? null,
                 failedJournalId: null,
               });
-              onError?.(ev.detail ?? null);
+              onErrorRef.current?.(ev.detail ?? null);
             }
           });
         return;
@@ -117,14 +132,17 @@ export function OperationProgressModal({
       }
       if (ev.status === "complete") {
         setPhases((prev) => ({ ...prev, [phase]: "complete" }));
-        if (sub?.phase === phase) setSub(null);
+        if (subRef.current?.phase === phase) setSub(null);
       } else if (ev.status === "error") {
         setPhases((prev) => ({ ...prev, [phase]: "error" }));
       } else {
         setPhases((prev) => ({ ...prev, [phase]: "running" }));
       }
     },
-    [opId, onComplete, onError, sub?.phase],
+    // Intentionally empty — handler reads mutable state via refs so
+    // its identity stays stable for the modal's lifetime.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [opId],
   );
 
   useTauriEvent<OperationProgressEvent>(channel, handler);
