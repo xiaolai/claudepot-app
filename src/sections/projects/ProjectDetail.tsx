@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { Pencil, WifiOff, Trash2, Info } from "lucide-react";
+import { Icon } from "../../components/Icon";
 import { api } from "../../api";
 import { CopyButton } from "../../components/CopyButton";
 import type { ProjectDetail as ProjectDetailData } from "../../types";
@@ -98,14 +98,14 @@ export function ProjectDetail({
         <div className="project-detail-actions">
           <button type="button" title="Rename this project"
             onClick={() => onRename(info.original_path)}>
-            <Pencil size={14} /> Rename…
+            <Icon name="pencil" size={14} /> Rename…
           </button>
         </div>
       </header>
 
       {status === "unreachable" && (
         <div className="project-hint unreachable" role="status">
-          <WifiOff size={14} />
+          <Icon name="wifi-off" size={14} />
           <span>
             Source path can't be checked right now (unmounted volume or
             permission-denied ancestor). Mount the drive and click Refresh
@@ -119,19 +119,27 @@ export function ProjectDetail({
         <span className="detail-value mono selectable">
           {info.original_path} <CopyButton text={info.original_path} />
         </span>
-        <span className="detail-label">Key</span>
-        <span className="detail-value mono selectable">{info.sanitized_name}</span>
         <span className="detail-label">Size</span>
         <span className="detail-value">{formatSize(info.total_size_bytes)}</span>
-        <span className="detail-label">Sessions</span>
-        <span className="detail-value">{info.session_count}</span>
-        <span className="detail-label">Memory</span>
-        <span className="detail-value">{info.memory_file_count} file{info.memory_file_count === 1 ? "" : "s"}</span>
+        {info.session_count > 0 && (
+          <>
+            <span className="detail-label">Sessions</span>
+            <span className="detail-value">{info.session_count}</span>
+          </>
+        )}
+        {info.memory_file_count > 0 && (
+          <>
+            <span className="detail-label">Memory</span>
+            <span className="detail-value">
+              {info.memory_file_count} file{info.memory_file_count === 1 ? "" : "s"}
+            </span>
+          </>
+        )}
       </section>
 
       {noContent && status === "alive" && (
         <div className="project-hint cleanup" role="status">
-          <Trash2 size={14} />
+          <Icon name="trash-2" size={14} />
           <span>
             No sessions or memory files.{" "}
             {info.total_size_bytes > 4096
@@ -143,7 +151,7 @@ export function ProjectDetail({
 
       {noContent && status !== "alive" && status !== "unreachable" && (
         <div className="project-hint cleanup" role="status">
-          <Info size={14} />
+          <Icon name="info" size={14} />
           <span>No sessions or memory. This project is a cleanup candidate.</span>
         </div>
       )}

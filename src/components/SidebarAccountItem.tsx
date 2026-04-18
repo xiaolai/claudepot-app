@@ -1,5 +1,5 @@
 import { useCallback } from "react";
-import { Monitor, Terminal, Play, LogIn, AlertCircle, Clock } from "lucide-react";
+import { Icon } from "./Icon";
 import type { AccountSummary, UsageEntry } from "../types";
 import { formatResetTime } from "./AccountDetailHelpers";
 
@@ -91,11 +91,11 @@ export function SidebarAccountItem({
           <span className="sidebar-item-text">{a.email}</span>
           <span className="sidebar-item-badges">
             {a.is_cli_active && (
-              <Terminal size={13} strokeWidth={2.5} className="slot-icon cli active"
+              <Icon name="terminal" size={13} className="slot-icon cli active"
                 aria-label="Active CLI account" />
             )}
             {a.is_desktop_active && (
-              <Monitor size={13} strokeWidth={2.5} className="slot-icon desktop active"
+              <Icon name="monitor" size={13} className="slot-icon desktop active"
                 aria-label="Active Desktop account" />
             )}
             {!a.is_cli_active && a.credentials_healthy && (
@@ -103,7 +103,7 @@ export function SidebarAccountItem({
                 onClick={(e) => stopClick(e, onSwitchCli)}
                 onKeyDown={stopKeyActivation}
                 title="Switch CLI to this account" aria-label={`Switch CLI to ${a.email}`}>
-                <Play size={11} strokeWidth={2.5} />
+                <Icon name="play" size={11} />
               </button>
             )}
             {!a.credentials_healthy && !a.is_cli_active && (
@@ -111,7 +111,7 @@ export function SidebarAccountItem({
                 onClick={(e) => stopClick(e, onLogin)}
                 onKeyDown={stopKeyActivation}
                 title={`Log in as ${a.email}`} aria-label={`Log in as ${a.email}`}>
-                <LogIn size={11} strokeWidth={2} />
+                <Icon name="log-in" size={11} />
               </button>
             )}
           </span>
@@ -189,7 +189,7 @@ function UsageRow({
             {resetsAt && <> · resets {formatResetTime(resetsAt)}</>}
             {isStale && entry.age_secs !== null && (
               <> <span className="usage-stale-chip" title="Showing cached data — Claudepot couldn't re-fetch just now">
-                <Clock size={9} strokeWidth={2.5} /> {formatAge(entry.age_secs)}
+                <Icon name="clock" size={9} /> {formatAge(entry.age_secs)}
               </span></>
             )}
           </span>
@@ -207,7 +207,7 @@ function UsageRow({
           No activity in the last 5 hours
           {isStale && entry.age_secs !== null && (
             <> <span className="usage-stale-chip" title="Showing cached data">
-              <Clock size={9} strokeWidth={2.5} /> {formatAge(entry.age_secs)}
+              <Icon name="clock" size={9} /> {formatAge(entry.age_secs)}
             </span></>
           )}
         </span>
@@ -224,7 +224,7 @@ function UsageRow({
   if (status === "expired") {
     message = (
       <>
-        <AlertCircle size={11} strokeWidth={2.5} /> Token expired
+        <Icon name="alert-circle" size={11} /> Token expired
       </>
     );
     action = { label: "Log in again", onClick: onLogin };
@@ -233,7 +233,7 @@ function UsageRow({
     const hint = s > 60 ? `retry in ${Math.ceil(s / 60)}m` : `retry in ${s}s`;
     message = (
       <>
-        <Clock size={11} strokeWidth={2.5} /> Rate-limited · {hint}
+        <Icon name="clock" size={11} /> Rate-limited · {hint}
       </>
     );
     action = onRefreshUsage
@@ -242,7 +242,7 @@ function UsageRow({
   } else if (status === "error") {
     message = (
       <>
-        <AlertCircle size={11} strokeWidth={2.5} /> Couldn't fetch usage
+        <Icon name="alert-circle" size={11} /> Couldn't fetch usage
       </>
     );
     action = onRefreshUsage
@@ -253,7 +253,7 @@ function UsageRow({
     // upstream filters these — but render a reasonable fallback.
     message = (
       <>
-        <AlertCircle size={11} strokeWidth={2.5} /> No credentials
+        <Icon name="alert-circle" size={11} /> No credentials
       </>
     );
     action = { label: "Log in", onClick: onLogin };

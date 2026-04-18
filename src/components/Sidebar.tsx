@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { RefreshCw, Plus, Search, X } from "lucide-react";
+import { Icon } from "./Icon";
 import type { AccountSummary, UsageMap } from "../types";
 import { SidebarAccountItem } from "./SidebarAccountItem";
 
@@ -53,17 +53,17 @@ export function Sidebar({
         <span className="sidebar-title">Accounts</span>
         <div className="sidebar-actions">
           <button className="icon-btn" onClick={onRefresh} title="Refresh (⌘R)" aria-label="Refresh account data">
-            <RefreshCw />
+            <Icon name="refresh" />
           </button>
           <button className="icon-btn" onClick={onAdd} title="Add account (⌘N)" aria-label="Add account">
-            <Plus />
+            <Icon name="plus" />
           </button>
         </div>
       </div>
 
       {accounts.length > 3 && (
         <div className="sidebar-search">
-          <Search size={12} className="sidebar-search-icon" />
+          <Icon name="search" size={12} className="sidebar-search-icon" />
           <input ref={filterRef} className="sidebar-search-input" type="text"
             placeholder="Filter accounts… (⌘F)" value={filterText}
             onChange={(e) => setFilterText(e.target.value)}
@@ -71,7 +71,7 @@ export function Sidebar({
           {filterText && (
             <button className="sidebar-search-clear" aria-label="Clear filter" title="Clear"
               onClick={() => { setFilterText(""); filterRef.current?.focus(); }}>
-              <X size={10} strokeWidth={2.5} />
+              <Icon name="x" size={10} />
             </button>
           )}
         </div>

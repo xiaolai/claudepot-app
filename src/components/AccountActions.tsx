@@ -1,4 +1,4 @@
-import { Terminal, Monitor, LogIn, Trash2, XCircle } from "lucide-react";
+import { Icon } from "./Icon";
 import type { AccountSummary, AppStatus } from "../types";
 
 function getDesktopDisabledHint(a: AccountSummary, desktopInstalled: boolean): string | null {
@@ -44,28 +44,28 @@ export function AccountActions({
         {a.credentials_healthy ? (
           <button onClick={() => onUseCli(a)} disabled={selfBusy || a.is_cli_active}
             title={a.is_cli_active ? "Already active CLI" : "Use for CLI"}>
-            <Terminal size={14} />
+            <Icon name="terminal" size={14} />
             {cliBusy ? "Switching…" : a.is_cli_active ? "Active CLI" : "Use CLI"}
           </button>
         ) : reBusy ? (
           <button onClick={onCancelLogin} className="danger" title="Cancel login">
-            <XCircle size={14} /> Cancel login
+            <Icon name="x-circle" size={14} /> Cancel login
           </button>
         ) : (
           <button onClick={() => onLogin(a)} disabled={selfBusy} className="warn"
             title={`Sign in as ${a.email}`}>
-            <LogIn size={14} /> Log in
+            <Icon name="log-in" size={14} /> Log in
           </button>
         )}
 
         <button onClick={() => onUseDesktop(a)} disabled={desktopDisabled} title={deskTitle}>
-          <Monitor size={14} />
+          <Icon name="monitor" size={14} />
           {deskBusy ? "Switching…" : a.is_desktop_active ? "Active Desktop" : "Use Desktop"}
         </button>
 
         <button onClick={() => onRemove(a)} disabled={selfBusy || anyBusy}
           className="danger" title="Remove account">
-          <Trash2 size={14} /> {rmBusy ? "Removing…" : "Remove"}
+          <Icon name="trash-2" size={14} /> {rmBusy ? "Removing…" : "Remove"}
         </button>
       </div>
       {deskHint && <div className="account-hint">{deskHint}</div>}

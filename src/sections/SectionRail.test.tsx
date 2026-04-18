@@ -5,14 +5,14 @@ import React from "react";
 import { describe, expect, it, beforeEach } from "vitest";
 import { render, screen, act } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { Settings, User } from "lucide-react";
+import { Icon } from "../components/Icon";
 import { SectionRail } from "../components/SectionRail";
 import { useSection } from "../hooks/useSection";
 import type { SectionDef } from "./registry";
 
 const fakeSections: SectionDef[] = [
-  { id: "accounts", label: "Accounts", icon: <User /> },
-  { id: "settings", label: "Settings", icon: <Settings /> },
+  { id: "accounts", label: "Accounts", icon: <Icon name="user" size={18} /> },
+  { id: "settings", label: "Settings", icon: <Icon name="settings" size={18} /> },
 ];
 
 const bodies: Record<string, React.FC> = {

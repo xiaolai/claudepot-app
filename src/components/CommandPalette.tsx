@@ -1,28 +1,18 @@
 import { useState, useCallback, useEffect, useRef } from "react";
-import {
-  Search,
-  Terminal,
-  Monitor,
-  UserPlus,
-  RefreshCw,
-  Trash,
-  Folder,
-  Wrench,
-  Settings,
-} from "lucide-react";
+import { Icon } from "./Icon";
 import { useFocusTrap } from "../hooks/useFocusTrap";
 import { usePaletteActions, type PaletteAction } from "../hooks/usePaletteActions";
 import type { AccountSummary, AppStatus } from "../types";
 
 const iconMap = {
-  terminal: <Terminal size={14} />,
-  monitor: <Monitor size={14} />,
-  "user-plus": <UserPlus size={14} />,
-  "refresh-cw": <RefreshCw size={14} />,
-  trash: <Trash size={14} />,
-  folder: <Folder size={14} />,
-  wrench: <Wrench size={14} />,
-  settings: <Settings size={14} />,
+  terminal: <Icon name="terminal" size={14} />,
+  monitor: <Icon name="monitor" size={14} />,
+  "user-plus": <Icon name="user-plus" size={14} />,
+  "refresh-cw": <Icon name="refresh" size={14} />,
+  trash: <Icon name="trash" size={14} />,
+  folder: <Icon name="folder" size={14} />,
+  wrench: <Icon name="wrench" size={14} />,
+  settings: <Icon name="settings" size={14} />,
 };
 
 function PaletteItem({
@@ -97,7 +87,7 @@ export function CommandPalette({
       <div ref={trapRef} className="palette" onClick={(e) => e.stopPropagation()}
         onKeyDown={handleKeyDown} role="dialog" aria-modal="true" aria-label="Command palette">
         <div className="palette-input-row">
-          <Search size={16} className="palette-search-icon" />
+          <Icon name="search" size={16} className="palette-search-icon" />
           <input ref={inputRef} className="palette-input" type="text"
             placeholder="Search accounts, actions…" value={query}
             onChange={(e) => setQuery(e.target.value)} aria-label="Search accounts and actions" />

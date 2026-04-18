@@ -1,4 +1,4 @@
-import { LogOut } from "lucide-react";
+import { Icon } from "./Icon";
 import type { AccountSummary, AppStatus, UsageEntry } from "../types";
 import { AccountDetail } from "./AccountDetail";
 import { AccountActions } from "./AccountActions";
@@ -65,7 +65,7 @@ export function ContentPane({
         {status.cli_active_email && (
           <button className="danger" onClick={onClearCli}
             disabled={anyBusy} title="Sign CC out — clears credentials file">
-            <LogOut size={14} /> Clear CLI
+            <Icon name="log-out" size={14} /> Clear CLI
           </button>
         )}
         <span className="muted mono selectable">

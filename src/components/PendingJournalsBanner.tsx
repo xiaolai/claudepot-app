@@ -1,4 +1,4 @@
-import { AlertTriangle, Wrench } from "lucide-react";
+import { Icon } from "./Icon";
 import type { PendingJournalsSummary } from "../types";
 
 /**
@@ -32,7 +32,7 @@ export function PendingJournalsBanner({
       aria-label={`${label}. Open Repair.`}
       onClick={onOpen}
     >
-      {hasStale ? <AlertTriangle strokeWidth={2.5} /> : <Wrench />}
+      {hasStale ? <Icon name="alert-triangle" size={14} /> : <Icon name="wrench" size={14} />}
       <span>
         <strong>{label}.</strong>{" "}
         {hasStale

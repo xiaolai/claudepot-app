@@ -1,4 +1,4 @@
-import { RotateCcw, Undo2, Ban, Unlock } from "lucide-react";
+import { Icon } from "../../components/Icon";
 import type { JournalEntry, JournalStatus } from "../../types";
 
 const STATUS_COPY: Record<JournalStatus, string> = {
@@ -64,10 +64,10 @@ export function RepairEntry({
       {e.status !== "abandoned" && (
         <div className="repair-entry-actions">
           <button type="button" title="Re-run the original rename" onClick={onResume}>
-            <RotateCcw /> Resume
+            <Icon name="rotate-ccw" size={14} /> Resume
           </button>
           <button type="button" title="Reverse the rename (runs new → old)" onClick={onRollback}>
-            <Undo2 /> Rollback
+            <Icon name="undo" size={14} /> Rollback
           </button>
           {e.status === "stale" && onBreakLock && (
             <button
@@ -76,11 +76,11 @@ export function RepairEntry({
               title="Force-break the stale lock file so resume can proceed"
               onClick={onBreakLock}
             >
-              <Unlock /> Break lock
+              <Icon name="unlock" size={14} /> Break lock
             </button>
           )}
           <button type="button" className="danger" title="Stop nagging about this journal" onClick={onAbandon}>
-            <Ban /> Abandon
+            <Icon name="ban" size={14} /> Abandon
           </button>
         </div>
       )}
