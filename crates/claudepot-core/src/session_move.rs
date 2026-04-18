@@ -35,9 +35,19 @@
 //!   `~/.claude/paste-cache/`, `~/.claude/shell-snapshots/`,
 //!   `~/.claude/todos/` (dead in current CC).
 
+use crate::project_sanitize::sanitize_path;
+use std::fs;
+use std::io::{BufRead, BufReader, Write};
 use std::path::{Path, PathBuf};
+use std::time::{Duration, SystemTime};
 use thiserror::Error;
 use uuid::Uuid;
+
+/// Threshold below which we treat the source session file as "live" —
+/// i.e., CC may currently be writing to it. Matches the project_lock
+/// heartbeat semantics elsewhere in the crate (2s is aggressive but safe
+/// given CC's per-turn flush cadence).
+const LIVE_SESSION_MTIME_THRESHOLD: Duration = Duration::from_secs(2);
 
 // ---------------------------------------------------------------------------
 // Public API
@@ -130,13 +140,500 @@ pub fn canonicalize_cc_path(p: &Path) -> PathBuf {
 /// same move twice returns `SessionNotFound` on the second call (the
 /// file no longer exists in the source slug).
 pub fn move_session(
-    _config_dir: &Path,
-    _session_id: Uuid,
-    _from_cwd: &Path,
-    _to_cwd: &Path,
-    _opts: MoveSessionOpts,
+    config_dir: &Path,
+    session_id: Uuid,
+    from_cwd: &Path,
+    to_cwd: &Path,
+    opts: MoveSessionOpts,
 ) -> Result<MoveSessionReport, MoveSessionError> {
-    todo!("see surface map in module docs")
+    if !config_dir.is_dir() {
+        return Err(MoveSessionError::InvalidConfigDir(config_dir.to_path_buf()));
+    }
+
+    let from_canonical = canonicalize_cc_path(from_cwd);
+    let to_canonical = canonicalize_cc_path(to_cwd);
+    if from_canonical == to_canonical {
+        return Err(MoveSessionError::SameCwd);
+    }
+
+    let projects_dir = config_dir.join("projects");
+    let from_slug = sanitize_path(&from_canonical.to_string_lossy());
+    let to_slug = sanitize_path(&to_canonical.to_string_lossy());
+    let from_proj = projects_dir.join(&from_slug);
+    let to_proj = projects_dir.join(&to_slug);
+
+    let session_file_name = format!("{session_id}.jsonl");
+    let from_session = from_proj.join(&session_file_name);
+    if !from_session.is_file() {
+        return Err(MoveSessionError::SessionNotFound(
+            session_id,
+            from_proj.clone(),
+        ));
+    }
+
+    // Guard: sync-conflict siblings. Any file whose name starts with
+    // `<session>.sync-conflict-` is a Syncthing artifact and signals
+    // unresolved divergence between nodes. Refuse to move — we'd silently
+    // orphan the conflict copy in the source slug.
+    if !opts.force_sync_conflict && has_sync_conflict(&from_proj, session_id)? {
+        return Err(MoveSessionError::SyncConflictPresent(session_id));
+    }
+
+    // Guard: live session. mtime freshness is an approximation of "CC
+    // may still be writing". Not perfect — a crashed session looks live
+    // for the first few seconds — but matches the CC flush cadence.
+    if !opts.force_live_session && is_recently_modified(&from_session)? {
+        return Err(MoveSessionError::LiveSession(session_id));
+    }
+
+    // Guard: target collision. Overwriting a same-uuid file in the target
+    // would fuse two histories silently.
+    let to_session = to_proj.join(&session_file_name);
+    if to_session.exists() {
+        return Err(MoveSessionError::TargetCollision(session_id));
+    }
+
+    fs::create_dir_all(&to_proj)?;
+
+    // Phase 1: rewrite + place the primary JSONL atomically in the target.
+    // We stream from source → target tempfile, then rename into place,
+    // then unlink the source. That ordering means a crash mid-way leaves
+    // the source intact (worst case: an orphaned tempfile in the target).
+    let from_str = from_canonical.to_string_lossy();
+    let to_str = to_canonical.to_string_lossy();
+    let lines_rewritten = stream_rewrite_jsonl(&from_session, &to_session, &from_str, &to_str)?;
+
+    // Phase 2: sibling per-session dir (subagents/, remote-agents/).
+    let from_sub = from_proj.join(session_id.to_string());
+    let (subagent_files_moved, remote_agent_files_moved) = if from_sub.is_dir() {
+        let to_sub = to_proj.join(session_id.to_string());
+        move_session_subdir(&from_sub, &to_sub)?
+    } else {
+        (0, 0)
+    };
+
+    // Phase 3: history.jsonl — rewrite lines keyed by sessionId.
+    // Also counts lines that look like ours (project matches source_cwd)
+    // but lack sessionId, so we can report "some history couldn't be
+    // attributed" up to the caller.
+    let history_path = config_dir.join("history.jsonl");
+    let (history_entries_moved, history_entries_unmapped) = if history_path.is_file() {
+        rewrite_history_jsonl(&history_path, session_id, &from_str, &to_str)?
+    } else {
+        (0, 0)
+    };
+
+    // Phase 4: .claude.json session pointers. Two slots, both optional.
+    // CC stores claude.json as a sibling of ~/.claude (not inside), but
+    // we accept either layout for flexibility — callers in tests put it
+    // inside config_dir for isolation.
+    let claude_json_pointers_cleared = clear_claude_json_session_pointers(
+        &config_dir.join("claude.json"),
+        &config_dir.join(".claude.json"),
+        &from_canonical,
+        session_id,
+    )?;
+
+    // Now it's safe to unlink the source JSONL. If anything above failed
+    // we returned early and the source is preserved.
+    fs::remove_file(&from_session)?;
+
+    // Phase 5: optional cleanup of an empty source project dir.
+    let source_dir_removed =
+        opts.cleanup_source_if_empty && remove_if_empty(&from_proj)?;
+
+    Ok(MoveSessionReport {
+        session_id: Some(session_id),
+        from_slug,
+        to_slug,
+        jsonl_lines_rewritten: lines_rewritten,
+        subagent_files_moved,
+        remote_agent_files_moved,
+        history_entries_moved,
+        history_entries_unmapped,
+        claude_json_pointers_cleared,
+        source_dir_removed,
+    })
+}
+
+// ---------------------------------------------------------------------------
+// Internal helpers
+// ---------------------------------------------------------------------------
+
+fn has_sync_conflict(project_dir: &Path, session_id: Uuid) -> Result<bool, MoveSessionError> {
+    let prefix = format!("{session_id}.sync-conflict-");
+    for entry in fs::read_dir(project_dir)? {
+        let entry = entry?;
+        let name = entry.file_name();
+        let name = name.to_string_lossy();
+        if name.starts_with(&prefix) {
+            return Ok(true);
+        }
+    }
+    Ok(false)
+}
+
+fn is_recently_modified(path: &Path) -> Result<bool, MoveSessionError> {
+    let meta = fs::metadata(path)?;
+    let mtime = meta.modified()?;
+    match SystemTime::now().duration_since(mtime) {
+        Ok(age) => Ok(age < LIVE_SESSION_MTIME_THRESHOLD),
+        // Clock skew: mtime is in the future. Treat as live to err
+        // on the side of not corrupting a concurrent writer.
+        Err(_) => Ok(true),
+    }
+}
+
+/// Stream-copy a JSONL from `src` to `dst`, rewriting the `cwd` field of
+/// every object line whose current value equals `from_cwd`. Byte-exact
+/// for all other content: we do not reparse + reserialize (which would
+/// reorder keys under BTreeMap-backed `serde_json::Map`).
+///
+/// Returns the number of lines whose `cwd` was rewritten. Lines with a
+/// different cwd (mid-session cd, rare but real — CC's own transcript
+/// grep found 9/386 sessions in the wild) pass through verbatim.
+fn stream_rewrite_jsonl(
+    src: &Path,
+    dst: &Path,
+    from_cwd: &str,
+    to_cwd: &str,
+) -> Result<usize, MoveSessionError> {
+    let parent = dst
+        .parent()
+        .ok_or_else(|| std::io::Error::other("dst has no parent"))?;
+    fs::create_dir_all(parent)?;
+
+    let src_file = fs::File::open(src)?;
+    let reader = BufReader::new(src_file);
+
+    let mut tmp = tempfile::NamedTempFile::new_in(parent)?;
+    // JSON-encode both values so embedded special chars (quotes,
+    // backslashes, control characters) are represented the same way CC's
+    // JSON.stringify would write them — that's the form we match against.
+    let old_kv = format!(r#""cwd":{}"#, serde_json::to_string(from_cwd).unwrap());
+    let new_kv = format!(r#""cwd":{}"#, serde_json::to_string(to_cwd).unwrap());
+
+    let mut rewritten = 0usize;
+    for line in reader.lines() {
+        let line = line?;
+        let (out, changed) = rewrite_cwd_in_line(&line, from_cwd, &old_kv, &new_kv);
+        if changed {
+            rewritten += 1;
+        }
+        writeln!(tmp, "{out}")?;
+    }
+    tmp.flush()?;
+    tmp.persist(dst).map_err(|e| e.error)?;
+    Ok(rewritten)
+}
+
+/// Rewrite a single JSONL line: if the top-level object has `cwd ==
+/// from_cwd`, replace that field's encoded form. Otherwise return the
+/// line unchanged. Handles both compact (`"cwd":"…"`) and spaced
+/// (`"cwd": "…"`) JSON outputs to accommodate writers that differ from
+/// CC's default compact form.
+fn rewrite_cwd_in_line(
+    line: &str,
+    from_cwd: &str,
+    old_kv_compact: &str,
+    new_kv_compact: &str,
+) -> (String, bool) {
+    // Fast reject: parse first, confirm it's an object with the matching
+    // cwd. This guards against a needle appearing inside user-quoted
+    // content (message text, tool input, etc.).
+    let parsed: serde_json::Value = match serde_json::from_str(line) {
+        Ok(v) => v,
+        Err(_) => return (line.to_string(), false),
+    };
+    let Some(obj) = parsed.as_object() else {
+        return (line.to_string(), false);
+    };
+    let Some(cwd_str) = obj.get("cwd").and_then(|v| v.as_str()) else {
+        return (line.to_string(), false);
+    };
+    if cwd_str != from_cwd {
+        return (line.to_string(), false);
+    }
+    // Try compact form first (CC's default).
+    if let Some(idx) = line.find(old_kv_compact) {
+        let mut out = String::with_capacity(line.len() + new_kv_compact.len());
+        out.push_str(&line[..idx]);
+        out.push_str(new_kv_compact);
+        out.push_str(&line[idx + old_kv_compact.len()..]);
+        return (out, true);
+    }
+    // Spaced form fallback (`"cwd": "…"`).
+    let old_encoded = serde_json::to_string(from_cwd).unwrap();
+    let spaced_old = format!(r#""cwd": {old_encoded}"#);
+    let new_encoded = serde_json::to_string(&rebuild_to_cwd(old_kv_compact, new_kv_compact))
+        .unwrap_or_else(|_| new_kv_compact.to_string());
+    let spaced_new = format!(r#""cwd": {new_encoded}"#);
+    if let Some(idx) = line.find(&spaced_old) {
+        let mut out = String::with_capacity(line.len() + spaced_new.len());
+        out.push_str(&line[..idx]);
+        out.push_str(&spaced_new);
+        out.push_str(&line[idx + spaced_old.len()..]);
+        return (out, true);
+    }
+    // Unusual whitespace we don't recognize — parse validated but splice
+    // failed. Leave the line alone rather than risk a wrong rewrite.
+    (line.to_string(), false)
+}
+
+/// Extract the to_cwd value from the pre-built new_kv for use in the
+/// spaced-form fallback. Parses `"cwd":"<value>"` and returns `<value>`.
+fn rebuild_to_cwd(_old_kv: &str, new_kv: &str) -> String {
+    // new_kv is `"cwd":"<escaped>"` — strip the `"cwd":` prefix, parse
+    // the remainder as a JSON string.
+    let after_colon = match new_kv.splitn(2, ':').nth(1) {
+        Some(s) => s,
+        None => return String::new(),
+    };
+    serde_json::from_str::<String>(after_colon).unwrap_or_default()
+}
+
+/// Move a per-session dir (containing subagents/ and/or remote-agents/)
+/// to its new parent, reporting the count of files in each subtree.
+/// Uses rename when the src and dst share a filesystem (the common case
+/// — both under ~/.claude); falls back to copy-then-remove if rename
+/// fails with EXDEV.
+fn move_session_subdir(
+    from_sub: &Path,
+    to_sub: &Path,
+) -> Result<(usize, usize), MoveSessionError> {
+    let subagent_count = count_files(&from_sub.join("subagents"))?;
+    let remote_agent_count = count_files(&from_sub.join("remote-agents"))?;
+
+    if let Some(parent) = to_sub.parent() {
+        fs::create_dir_all(parent)?;
+    }
+    if to_sub.exists() {
+        // Unusual but possible if the target slug had residue from a
+        // prior partial move. Merge by moving files individually rather
+        // than refusing — the session-file collision check upstream is
+        // the real gate.
+        copy_tree_then_remove(from_sub, to_sub)?;
+    } else {
+        if let Err(err) = fs::rename(from_sub, to_sub) {
+            // Cross-device rename is the only expected failure mode.
+            // Fall through to copy+delete.
+            if err.raw_os_error() == Some(libc::EXDEV) {
+                copy_tree_then_remove(from_sub, to_sub)?;
+            } else {
+                return Err(err.into());
+            }
+        }
+    }
+
+    Ok((subagent_count, remote_agent_count))
+}
+
+fn count_files(dir: &Path) -> Result<usize, MoveSessionError> {
+    if !dir.is_dir() {
+        return Ok(0);
+    }
+    let mut n = 0usize;
+    for entry in fs::read_dir(dir)? {
+        let entry = entry?;
+        let ft = entry.file_type()?;
+        if ft.is_dir() {
+            n += count_files(&entry.path())?;
+        } else if ft.is_file() {
+            n += 1;
+        }
+    }
+    Ok(n)
+}
+
+fn copy_tree_then_remove(from: &Path, to: &Path) -> Result<(), MoveSessionError> {
+    fs::create_dir_all(to)?;
+    for entry in fs::read_dir(from)? {
+        let entry = entry?;
+        let src = entry.path();
+        let dst = to.join(entry.file_name());
+        let ft = entry.file_type()?;
+        if ft.is_dir() {
+            copy_tree_then_remove(&src, &dst)?;
+        } else {
+            fs::copy(&src, &dst)?;
+        }
+    }
+    fs::remove_dir_all(from)?;
+    Ok(())
+}
+
+/// Rewrite `project` fields in `history.jsonl` for lines whose
+/// `sessionId` matches `session_id` AND whose `project` matches
+/// `from_cwd`. Returns `(rewritten, unmapped)` where `unmapped` is lines
+/// whose `project` matches `from_cwd` but which lack a `sessionId`
+/// field — typically pre-sessionId CC writes. Those are left alone
+/// (we cannot attribute them to a single session).
+///
+/// Byte-exact for non-target lines: the same surgical-splice strategy
+/// as the primary JSONL rewriter.
+fn rewrite_history_jsonl(
+    path: &Path,
+    session_id: Uuid,
+    from_cwd: &str,
+    to_cwd: &str,
+) -> Result<(usize, usize), MoveSessionError> {
+    let contents = fs::read_to_string(path)?;
+    let parent = path
+        .parent()
+        .ok_or_else(|| std::io::Error::other("history.jsonl has no parent"))?;
+    let mut tmp = tempfile::NamedTempFile::new_in(parent)?;
+
+    let old_kv = format!(r#""project":{}"#, serde_json::to_string(from_cwd).unwrap());
+    let new_kv = format!(r#""project":{}"#, serde_json::to_string(to_cwd).unwrap());
+    let sid_str = session_id.to_string();
+
+    let mut rewritten = 0usize;
+    let mut unmapped = 0usize;
+
+    // Preserve the trailing newline convention of the source: if the
+    // original ended with a newline, emit one per line via writeln!;
+    // if not, the final line has no trailing \n. We use writeln! for
+    // all lines (the common case) and accept that an input that ended
+    // without a newline will gain one — that matches CC's append-mode
+    // writer behavior.
+    for line in contents.lines() {
+        let parsed: serde_json::Value = match serde_json::from_str(line) {
+            Ok(v) => v,
+            Err(_) => {
+                writeln!(tmp, "{line}")?;
+                continue;
+            }
+        };
+        let Some(obj) = parsed.as_object() else {
+            writeln!(tmp, "{line}")?;
+            continue;
+        };
+        let project_matches = obj.get("project").and_then(|v| v.as_str()) == Some(from_cwd);
+        let sid_matches = obj.get("sessionId").and_then(|v| v.as_str()) == Some(&sid_str);
+
+        if project_matches && sid_matches {
+            // Rewrite project field in place.
+            if let Some(idx) = line.find(&old_kv) {
+                let mut out = String::with_capacity(line.len() + new_kv.len());
+                out.push_str(&line[..idx]);
+                out.push_str(&new_kv);
+                out.push_str(&line[idx + old_kv.len()..]);
+                writeln!(tmp, "{out}")?;
+                rewritten += 1;
+                continue;
+            }
+            // Fallback: spaced form.
+            let old_spaced =
+                format!(r#""project": {}"#, serde_json::to_string(from_cwd).unwrap());
+            let new_spaced =
+                format!(r#""project": {}"#, serde_json::to_string(to_cwd).unwrap());
+            if let Some(idx) = line.find(&old_spaced) {
+                let mut out = String::with_capacity(line.len() + new_spaced.len());
+                out.push_str(&line[..idx]);
+                out.push_str(&new_spaced);
+                out.push_str(&line[idx + old_spaced.len()..]);
+                writeln!(tmp, "{out}")?;
+                rewritten += 1;
+                continue;
+            }
+            // Couldn't splice deterministically; leave as-is.
+            writeln!(tmp, "{line}")?;
+        } else if project_matches && !obj.contains_key("sessionId") {
+            unmapped += 1;
+            writeln!(tmp, "{line}")?;
+        } else {
+            writeln!(tmp, "{line}")?;
+        }
+    }
+    tmp.flush()?;
+    tmp.persist(path).map_err(|e| e.error)?;
+    Ok((rewritten, unmapped))
+}
+
+/// Clear per-project session pointers in `~/.claude.json` when they
+/// reference the moved session. Checks two possible config-file
+/// locations (caller passes both; first-found wins). Returns 0/1/2 —
+/// the count of pointers actually cleared.
+fn clear_claude_json_session_pointers(
+    primary: &Path,
+    secondary: &Path,
+    from_cwd: &Path,
+    session_id: Uuid,
+) -> Result<u8, MoveSessionError> {
+    let path = if primary.is_file() {
+        primary
+    } else if secondary.is_file() {
+        secondary
+    } else {
+        return Ok(0);
+    };
+
+    let contents = fs::read_to_string(path)?;
+    let mut root: serde_json::Value = match serde_json::from_str(&contents) {
+        Ok(v) => v,
+        Err(_) => return Ok(0),
+    };
+
+    let from_key = from_cwd.to_string_lossy().to_string();
+    let sid_str = session_id.to_string();
+    let mut cleared = 0u8;
+
+    if let Some(projects) = root.get_mut("projects").and_then(|v| v.as_object_mut()) {
+        if let Some(entry) = projects.get_mut(&from_key).and_then(|v| v.as_object_mut()) {
+            // lastSessionId — clear if it matches.
+            if entry
+                .get("lastSessionId")
+                .and_then(|v| v.as_str())
+                == Some(&sid_str)
+            {
+                entry.insert("lastSessionId".to_string(), serde_json::Value::Null);
+                cleared += 1;
+            }
+            // activeWorktreeSession.sessionId — clear if it matches.
+            if let Some(aws) = entry
+                .get_mut("activeWorktreeSession")
+                .and_then(|v| v.as_object_mut())
+            {
+                if aws.get("sessionId").and_then(|v| v.as_str()) == Some(&sid_str) {
+                    aws.insert("sessionId".to_string(), serde_json::Value::Null);
+                    cleared += 1;
+                }
+            }
+        }
+    }
+
+    if cleared == 0 {
+        return Ok(0);
+    }
+
+    // Atomic replace: tempfile in the same dir, then rename. This
+    // matches project_config_rewrite.rs's approach — and accepts the
+    // same tradeoff (serde_json's BTreeMap-backed Map will reorder
+    // keys on output; acceptable since CC itself rewrites this file
+    // freely).
+    let parent = path.parent().unwrap_or_else(|| Path::new("."));
+    let mut tmp = tempfile::NamedTempFile::new_in(parent)?;
+    let new_json = serde_json::to_string_pretty(&root)
+        .map_err(|e| std::io::Error::other(e.to_string()))?;
+    tmp.write_all(new_json.as_bytes())?;
+    tmp.write_all(b"\n")?;
+    tmp.flush()?;
+    tmp.persist(path).map_err(|e| e.error)?;
+    Ok(cleared)
+}
+
+/// Remove a directory if it contains no files or non-empty subdirs.
+/// Returns true iff removal happened.
+fn remove_if_empty(dir: &Path) -> Result<bool, MoveSessionError> {
+    if !dir.is_dir() {
+        return Ok(false);
+    }
+    let empty = fs::read_dir(dir)?.next().is_none();
+    if empty {
+        fs::remove_dir(dir)?;
+        return Ok(true);
+    }
+    Ok(false)
 }
 
 /// A project directory whose internal `cwd` refers to a non-existent
@@ -158,9 +655,107 @@ pub struct OrphanedProject {
 }
 
 pub fn detect_orphaned_projects(
-    _config_dir: &Path,
+    config_dir: &Path,
 ) -> Result<Vec<OrphanedProject>, MoveSessionError> {
-    todo!("scan projects/, stat each internal cwd, cross-check git worktree list")
+    let projects_dir = config_dir.join("projects");
+    if !projects_dir.is_dir() {
+        return Ok(Vec::new());
+    }
+
+    let mut out = Vec::new();
+    for entry in fs::read_dir(&projects_dir)? {
+        let entry = entry?;
+        let ft = entry.file_type()?;
+        if !ft.is_dir() {
+            continue;
+        }
+        let slug_path = entry.path();
+        let slug = entry.file_name().to_string_lossy().to_string();
+
+        let sessions = list_sessions_in_slug(&slug_path)?;
+        if sessions.is_empty() {
+            // Empty project dir — degenerate orphan. Don't surface here;
+            // that's the existing project-cleanup flow's responsibility.
+            continue;
+        }
+
+        let cwd_from_transcript = read_first_cwd(&sessions[0]).ok().flatten();
+        let is_orphan = match &cwd_from_transcript {
+            Some(cwd) => !cwd.is_dir(),
+            // No parseable cwd but the slug has sessions — treat as
+            // orphan so the user can rescue the transcripts.
+            None => true,
+        };
+        if !is_orphan {
+            continue;
+        }
+
+        let total_size_bytes = sessions
+            .iter()
+            .map(|p| fs::metadata(p).map(|m| m.len()).unwrap_or(0))
+            .sum();
+
+        out.push(OrphanedProject {
+            slug,
+            cwd_from_transcript,
+            session_count: sessions.len(),
+            total_size_bytes,
+            // TODO: git-worktree-aware target suggestion. For now we
+            // leave it to the caller — the UX can pre-fill from recently
+            // used projects or let the user pick.
+            suggested_adoption_target: None,
+        });
+    }
+    Ok(out)
+}
+
+fn list_sessions_in_slug(slug_dir: &Path) -> Result<Vec<PathBuf>, MoveSessionError> {
+    let mut out = Vec::new();
+    for entry in fs::read_dir(slug_dir)? {
+        let entry = entry?;
+        let ft = entry.file_type()?;
+        if !ft.is_file() {
+            continue;
+        }
+        let p = entry.path();
+        if p.extension().and_then(|s| s.to_str()) != Some("jsonl") {
+            continue;
+        }
+        // Skip Syncthing conflict copies — they're repair targets, not
+        // primary sessions.
+        let name = p.file_name().and_then(|s| s.to_str()).unwrap_or("");
+        if name.contains(".sync-conflict-") {
+            continue;
+        }
+        out.push(p);
+    }
+    // Deterministic order for tests and caller display.
+    out.sort();
+    Ok(out)
+}
+
+fn read_first_cwd(jsonl: &Path) -> Result<Option<PathBuf>, MoveSessionError> {
+    let f = fs::File::open(jsonl)?;
+    let reader = BufReader::new(f);
+    for line in reader.lines() {
+        let line = line?;
+        if line.trim().is_empty() {
+            continue;
+        }
+        let parsed: serde_json::Value = match serde_json::from_str(&line) {
+            Ok(v) => v,
+            Err(_) => continue,
+        };
+        if let Some(cwd) = parsed.get("cwd").and_then(|v| v.as_str()) {
+            return Ok(Some(PathBuf::from(cwd)));
+        }
+    }
+    Ok(None)
+}
+
+fn extract_session_id_from_path(jsonl: &Path) -> Option<Uuid> {
+    let stem = jsonl.file_stem()?.to_str()?;
+    Uuid::parse_str(stem).ok()
 }
 
 #[derive(Debug, Default, Clone)]
@@ -178,11 +773,90 @@ pub struct AdoptReport {
 /// (not actually orphaned) or if `target_cwd` is the same as the orphan's
 /// cwd.
 pub fn adopt_orphan_project(
-    _config_dir: &Path,
-    _orphan_slug: &str,
-    _target_cwd: &Path,
+    config_dir: &Path,
+    orphan_slug: &str,
+    target_cwd: &Path,
 ) -> Result<AdoptReport, MoveSessionError> {
-    todo!("iterate *.jsonl in orphan slug, call move_session for each")
+    let projects_dir = config_dir.join("projects");
+    let orphan_dir = projects_dir.join(orphan_slug);
+    if !orphan_dir.is_dir() {
+        return Err(MoveSessionError::InvalidConfigDir(orphan_dir));
+    }
+
+    let sessions = list_sessions_in_slug(&orphan_dir)?;
+    // Derive the orphan's cwd from its first session so we can pass the
+    // correct `from_cwd` to move_session (the slug itself is lossy for
+    // any path containing non-alnum chars).
+    let orphan_cwd = sessions
+        .iter()
+        .find_map(|p| read_first_cwd(p).ok().flatten())
+        .ok_or_else(|| {
+            MoveSessionError::InvalidConfigDir(orphan_dir.clone())
+        })?;
+
+    let mut report = AdoptReport::default();
+    report.sessions_attempted = sessions.len();
+
+    for jsonl in &sessions {
+        let sid = match extract_session_id_from_path(jsonl) {
+            Some(id) => id,
+            None => {
+                // Filenames that aren't <uuid>.jsonl — skip with a
+                // diagnostic. The user can rename them manually if
+                // they want them adopted.
+                continue;
+            }
+        };
+        // Force past the live-session mtime guard: orphan adoption
+        // targets sessions in a slug whose original cwd doesn't exist,
+        // so they can't be live by definition. We still honor
+        // sync-conflict refusal — those require manual resolution.
+        let opts = MoveSessionOpts {
+            force_live_session: true,
+            force_sync_conflict: false,
+            cleanup_source_if_empty: false,
+        };
+        match move_session(config_dir, sid, &orphan_cwd, target_cwd, opts) {
+            Ok(r) => {
+                report.sessions_moved += 1;
+                report.per_session.push(r);
+            }
+            Err(e) => {
+                report.sessions_failed.push((sid, e.to_string()));
+            }
+        }
+    }
+
+    // Clean up the orphan slug dir if every session moved successfully.
+    if report.sessions_failed.is_empty() {
+        // Remove any remaining per-session subdirs that lost their
+        // primary .jsonl sibling — these are leftovers from older CC
+        // layouts or manual state. Conservative: only remove if the dir
+        // is itself empty after `move_session` already swept matching
+        // sid subdirs.
+        let _ = remove_empty_subdirs(&orphan_dir);
+        if remove_if_empty(&orphan_dir)? {
+            report.source_dir_removed = true;
+        }
+    }
+
+    Ok(report)
+}
+
+fn remove_empty_subdirs(dir: &Path) -> Result<(), MoveSessionError> {
+    if !dir.is_dir() {
+        return Ok(());
+    }
+    for entry in fs::read_dir(dir)? {
+        let entry = entry?;
+        let ft = entry.file_type()?;
+        if ft.is_dir() {
+            let p = entry.path();
+            remove_empty_subdirs(&p)?;
+            let _ = remove_if_empty(&p);
+        }
+    }
+    Ok(())
 }
 
 // ---------------------------------------------------------------------------
@@ -265,6 +939,10 @@ mod tests {
 
         /// Write a session JSONL with one `user`/`assistant` pair, both
         /// carrying `cwd` fields. Returns the written path.
+        ///
+        /// Ages the mtime to an hour ago so the live-session mtime guard
+        /// lets the move through by default. Tests that specifically
+        /// exercise the live-session refusal bump the mtime back to now.
         fn write_session(&self, cwd: &Path, sid: Uuid, line_count: usize) -> PathBuf {
             let slug = self.ensure_slug(cwd);
             let path = slug.join(format!("{sid}.jsonl"));
@@ -278,6 +956,8 @@ mod tests {
                 )
                 .unwrap();
             }
+            drop(f);
+            self.set_mtime(&path, SystemTime::now() - Duration::from_secs(3600));
             path
         }
 
@@ -491,6 +1171,9 @@ mod tests {
         let slug = f.ensure_slug(&from);
         let path = slug.join(format!("{sid}.jsonl"));
         fs::write(&path, format!("{line}\n")).unwrap();
+        // Age past the live-session guard (the fixture helper is
+        // bypassed in this test, so we do it manually).
+        f.set_mtime(&path, SystemTime::now() - Duration::from_secs(3600));
 
         move_session(
             f.config_dir(),
