@@ -104,12 +104,25 @@ export function useStatusIssues(opts: {
       status?.cli_active_email &&
       ccIdentity.email.toLowerCase() !== status.cli_active_email.toLowerCase()
     ) {
-      // Try to match CC's verified email to a registered account so
-      // the action can route the user to the right slot. Prefix match
-      // mirrors the CLI's resolve logic.
-      const target = accounts.find(
-        (a) => a.email.toLowerCase() === ccIdentity.email!.toLowerCase(),
+      // Audit M20: match via unique-prefix semantics, mirroring the
+      // CLI's resolve_email rule. The previous exact-email match
+      // missed resolvable accounts — e.g. ccIdentity is "alice@"
+      // (partial) or the stored email has a case difference beyond
+      // ASCII. Accept only a unique prefix; if multiple accounts
+      // match or none, fall back to the re-login action path.
+      const q = ccIdentity.email!.toLowerCase();
+      const exactMatches = accounts.filter(
+        (a) => a.email.toLowerCase() === q,
       );
+      const prefixMatches = accounts.filter((a) =>
+        a.email.toLowerCase().startsWith(q),
+      );
+      const target =
+        exactMatches.length === 1
+          ? exactMatches[0]
+          : prefixMatches.length === 1
+            ? prefixMatches[0]
+            : undefined;
       issues.push({
         // Key by the email pair so snoozing drift-for-A-vs-B doesn't
         // suppress a later drift-for-C-vs-D. Lower-case to match the
