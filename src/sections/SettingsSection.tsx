@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { Settings, Trash2, Lock, Info, Stethoscope, Copy } from "lucide-react";
 import { api } from "../api";
 import { useToasts } from "../hooks/useToasts";
@@ -35,19 +35,37 @@ export function SettingsSection() {
   const [ccIdentity, setCcIdentity] = useState<CcIdentity | null>(null);
   const [diagBusy, setDiagBusy] = useState(false);
 
+  // Audit M16: token-sequenced + unmount-guarded reload. Diagnostics
+  // can be triggered on mount and again from the Refresh button; a
+  // slower earlier Promise.all could resolve after a newer one and
+  // replace fresher data. Also protect against setState after unmount.
+  const diagTokenRef = useRef(0);
+  const diagMountedRef = useRef(true);
+  useEffect(() => {
+    diagMountedRef.current = true;
+    return () => {
+      diagMountedRef.current = false;
+    };
+  }, []);
+
   const loadDiagnostics = useCallback(async () => {
+    const myToken = ++diagTokenRef.current;
     setDiagBusy(true);
     try {
       const [s, cc] = await Promise.all([
         api.appStatus(),
         api.currentCcIdentity(),
       ]);
+      if (!diagMountedRef.current || myToken !== diagTokenRef.current) return;
       setAppStatus(s);
       setCcIdentity(cc);
     } catch (e) {
+      if (!diagMountedRef.current || myToken !== diagTokenRef.current) return;
       pushToast("error", `Diagnostics failed: ${e}`);
     } finally {
-      setDiagBusy(false);
+      if (diagMountedRef.current && myToken === diagTokenRef.current) {
+        setDiagBusy(false);
+      }
     }
   }, [pushToast]);
 
