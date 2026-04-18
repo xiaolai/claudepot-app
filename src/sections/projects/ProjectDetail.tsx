@@ -16,12 +16,18 @@ import { MoveSessionModal } from "./MoveSessionModal";
 export function ProjectDetail({
   path,
   projects,
+  refreshSignal,
   onRename,
   onMoved,
 }: {
   path: string;
   /** Live list of projects — powers the session-move target picker. */
   projects: ProjectInfo[];
+  /** Bumped by the parent whenever external state changes mean this
+   * pane's cached detail is stale — e.g. after a session moves out
+   * of this project. The effect includes it as a dep so the refetch
+   * fires even when `path` itself hasn't changed. */
+  refreshSignal: number;
   onRename: (path: string) => void;
   /** Fires after a session move succeeds so the caller can refresh. */
   onMoved: () => void;
@@ -63,7 +69,7 @@ export function ProjectDetail({
     return () => {
       cancelled = true;
     };
-  }, [path]);
+  }, [path, refreshSignal]);
 
   if (loading && !detail) {
     return (
