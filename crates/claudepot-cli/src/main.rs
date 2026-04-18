@@ -55,6 +55,11 @@ enum Commands {
         #[command(subcommand)]
         action: ProjectAction,
     },
+    /// Manage CC session transcripts (move between projects, rescue orphans)
+    Session {
+        #[command(subcommand)]
+        action: SessionAction,
+    },
     /// Health check and diagnostics
     Doctor,
     /// Ground-truth authentication status.
@@ -64,6 +69,41 @@ enum Commands {
     /// Prints MATCH / DRIFT / NOT SIGNED IN. Exit code: 0 match,
     /// 2 drift, 3 couldn't check.
     Status,
+}
+
+#[derive(Subcommand)]
+enum SessionAction {
+    /// List projects whose cwd no longer exists on disk (adoption candidates).
+    ListOrphans,
+    /// Move a single session transcript from one project cwd to another.
+    Move {
+        /// Session UUID (the `.jsonl` filename without extension).
+        session_id: String,
+        /// Current cwd this session lives under.
+        #[arg(long)]
+        from: String,
+        /// Target cwd to move the session to.
+        #[arg(long)]
+        to: String,
+        /// Proceed even if the source JSONL was modified recently
+        /// (treated as potentially live).
+        #[arg(long)]
+        force_live: bool,
+        /// Proceed even if a Syncthing `.sync-conflict-*` sibling exists.
+        #[arg(long)]
+        force_conflict: bool,
+        /// Remove the source project dir if it is empty after the move.
+        #[arg(long)]
+        cleanup_source: bool,
+    },
+    /// Move every session under an orphaned slug into a live target cwd.
+    AdoptOrphan {
+        /// The slug directory name under `~/.claude/projects/`.
+        slug: String,
+        /// Live target cwd to adopt into.
+        #[arg(long)]
+        target: String,
+    },
 }
 
 #[derive(Subcommand)]
@@ -341,6 +381,28 @@ async fn main() -> Result<()> {
         },
         Commands::Doctor => commands::doctor::run(&ctx).await?,
         Commands::Status => commands::status::run(&ctx).await?,
+        Commands::Session { action } => match action {
+            SessionAction::ListOrphans => commands::session::list_orphans(&ctx)?,
+            SessionAction::Move {
+                session_id,
+                from,
+                to,
+                force_live,
+                force_conflict,
+                cleanup_source,
+            } => commands::session::move_cmd(
+                &ctx,
+                &session_id,
+                &from,
+                &to,
+                force_live,
+                force_conflict,
+                cleanup_source,
+            )?,
+            SessionAction::AdoptOrphan { slug, target } => {
+                commands::session::adopt_orphan_cmd(&ctx, &slug, &target)?
+            }
+        },
     }
 
     Ok(())
