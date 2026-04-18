@@ -3002,3 +3002,112 @@ button.danger.primary:hover:not(:disabled) {
   border-color: var(--warn, #e6a01e);
   color: var(--warn, inherit);
 }
+
+/* ---------- orphan banner + adoption modal ---------- */
+
+/* Content wrapper that stacks the banner above the detail pane so the
+ * banner is always visible without scrolling the detail. Drops in as
+ * a direct replacement for `.content` when orphans are present. */
+.content-with-banner {
+  flex: 1 1 76%;
+  min-width: 400px;
+  display: flex;
+  flex-direction: column;
+  background: var(--bg);
+  overflow: hidden;
+}
+.content-banner-slot {
+  flex: 0 0 auto;
+  padding: 16px 24px 0;
+}
+/* The inner ProjectDetail component renders its own <main class="content">,
+ * which already handles scroll + padding. */
+.content-with-banner > .content {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.banner-warn {
+  background: var(--warn-weak);
+  border-color: var(--warn);
+}
+.banner-bad {
+  background: var(--bad-weak);
+  border-color: var(--bad);
+}
+.banner-body {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+.banner-body strong {
+  font-size: 13px;
+  font-weight: 600;
+}
+.banner-hint {
+  font-size: 11px;
+  color: var(--muted);
+}
+
+.adopt-orphans-modal {
+  width: min(680px, calc(100vw - 48px));
+  max-height: calc(100vh - 80px);
+}
+.adopt-orphans-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  max-height: 50vh;
+  overflow-y: auto;
+}
+.adopt-orphans-row {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 10px 12px;
+  border: 0.5px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface);
+}
+.adopt-orphans-row-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+}
+.adopt-orphans-row-head code {
+  font-family: var(--mono);
+  font-size: 11px;
+  word-break: break-all;
+}
+.adopt-orphans-row-input {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+.adopt-orphans-row-input .path-input {
+  flex: 1;
+  min-width: 0;
+  height: 28px;
+  padding: 0 10px;
+  border: 0.5px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg);
+  color: var(--text);
+  font-family: var(--mono);
+  font-size: 11px;
+}
+.adopt-orphans-row-status {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 0;
+  font-size: 11px;
+}
+.adopt-orphans-row-status.ok { color: var(--ok); }
+.adopt-orphans-row-status.bad { color: var(--bad); }

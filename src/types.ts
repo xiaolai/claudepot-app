@@ -315,3 +315,39 @@ export interface JournalEntry {
   last_error: string | null;
   flags: JournalFlags;
 }
+
+// ---------- Session move ----------
+
+export interface OrphanedProject {
+  slug: string;
+  cwdFromTranscript: string | null;
+  sessionCount: number;
+  totalSizeBytes: number;
+  suggestedAdoptionTarget: string | null;
+}
+
+export interface MoveSessionReport {
+  sessionId: string | null;
+  fromSlug: string;
+  toSlug: string;
+  jsonlLinesRewritten: number;
+  subagentFilesMoved: number;
+  remoteAgentFilesMoved: number;
+  historyEntriesMoved: number;
+  historyEntriesUnmapped: number;
+  claudeJsonPointersCleared: number;
+  sourceDirRemoved: boolean;
+}
+
+export interface AdoptFailure {
+  sessionId: string;
+  error: string;
+}
+
+export interface AdoptReport {
+  sessionsAttempted: number;
+  sessionsMoved: number;
+  sessionsFailed: AdoptFailure[];
+  sourceDirRemoved: boolean;
+  perSession: MoveSessionReport[];
+}
