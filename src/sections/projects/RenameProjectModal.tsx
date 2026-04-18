@@ -75,6 +75,12 @@ export function RenameProjectModal({
 
   const runPreview = useCallback(() => {
     if (!newPath.trim()) {
+      // Audit M17: advance the token even on the empty-input branch.
+      // Previously the token only incremented inside the non-empty
+      // path, so if the user cleared the input while a request was
+      // in flight, that in-flight response could still arrive and
+      // repopulate the preview for an empty input (stale-data leak).
+      ++reqToken.current;
       setPreview({ kind: "idle" });
       return;
     }
@@ -104,6 +110,16 @@ export function RenameProjectModal({
     const handle = window.setTimeout(runPreview, DEBOUNCE_MS);
     return () => window.clearTimeout(handle);
   }, [runPreview]);
+
+  // Audit M17: invalidate the last token when the modal closes so
+  // any in-flight dry-run can't call setPreview after unmount.
+  useEffect(() => {
+    return () => {
+      // Bumping the token past any in-flight call's value guarantees
+      // the stale-response guard fails for responses that land post-unmount.
+      reqToken.current += 1;
+    };
+  }, []);
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
