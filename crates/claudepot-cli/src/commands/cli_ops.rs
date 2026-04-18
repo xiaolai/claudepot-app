@@ -1,7 +1,18 @@
 use crate::AppContext;
 use anyhow::Result;
 
-pub fn status(ctx: &AppContext) -> Result<()> {
+pub async fn status(ctx: &AppContext) -> Result<()> {
+    // Audit M1: reconcile DB pointer with CC's shared slot before
+    // reporting, so external state changes (`claude auth login` / a
+    // running Claude that rotated tokens) are reflected. Previously
+    // `cli status` read the stored pointer directly and could report
+    // the wrong active account. Best-effort — on keychain-locked or
+    // other sync failures we still report what the DB knows.
+    if let Err(e) =
+        claudepot_core::services::account_service::sync_from_current_cc(&ctx.store).await
+    {
+        tracing::debug!("cli status: sync_from_current_cc best-effort failure: {e}");
+    }
     let active_uuid = ctx.store.active_cli_uuid()?;
     match active_uuid {
         None => {

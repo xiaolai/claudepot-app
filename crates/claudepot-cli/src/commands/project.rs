@@ -847,21 +847,39 @@ fn handle_gc(
     let dry_run = !ctx.yes;
     let result = project_repair::gc(journals_dir, snapshots_dir, older_than_days, dry_run)?;
 
+    // Audit M3: `--json` must produce structured output on EVERY path
+    // including dry-run. Previously the dry-run branch printed plain
+    // text regardless of the flag, so `gc --json` (without -y) returned
+    // unparseable output — breaking scripted callers that use the
+    // dry-run mode as a "what would happen" preview.
+    if ctx.json {
+        let payload = if dry_run {
+            serde_json::json!({
+                "dry_run": true,
+                "would_remove": result
+                    .would_remove
+                    .iter()
+                    .map(|p| p.to_string_lossy().to_string())
+                    .collect::<Vec<_>>(),
+            })
+        } else {
+            serde_json::json!({
+                "dry_run": false,
+                "removed_journals": result.removed_journals,
+                "removed_snapshots": result.removed_snapshots,
+                "bytes_freed": result.bytes_freed,
+            })
+        };
+        println!("{payload}");
+        return Ok(());
+    }
+
     if dry_run {
         for p in &result.would_remove {
             println!("would gc {:?}", p);
         }
         println!();
         println!("Dry run. Re-run with -y to perform cleanup.");
-    } else if ctx.json {
-        println!(
-            "{}",
-            serde_json::json!({
-                "removed_journals": result.removed_journals,
-                "removed_snapshots": result.removed_snapshots,
-                "bytes_freed": result.bytes_freed,
-            })
-        );
     } else {
         println!(
             "\u{2713} Removed {} journal(s), {} snapshot(s), freed {}.",

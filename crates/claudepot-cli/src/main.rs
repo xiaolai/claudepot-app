@@ -274,7 +274,7 @@ async fn main() -> Result<()> {
             }
         },
         Commands::Cli { action } => match action {
-            CliAction::Status => commands::cli_ops::status(&ctx)?,
+            CliAction::Status => commands::cli_ops::status(&ctx).await?,
             CliAction::Use { email, no_refresh, force } => {
                 commands::cli_ops::use_account(&ctx, &email, no_refresh, force).await?
             }

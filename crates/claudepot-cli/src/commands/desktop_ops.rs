@@ -87,7 +87,23 @@ pub async fn use_account(ctx: &AppContext, email_input: &str, no_launch: bool) -
         .and_then(|s| s.parse::<uuid::Uuid>().ok());
 
     if current_uuid == Some(target.uuid) {
-        ctx.info(&format!("Already active: {email}"));
+        // Audit M2: in --json mode, emit a structured payload so
+        // scripted callers can distinguish "already active" from an
+        // empty/failed command. Previously `ctx.info` printed to
+        // stderr and the command returned no stdout at all under
+        // --json, which is indistinguishable from a crash to anything
+        // parsing stdout as JSON.
+        if ctx.json {
+            println!(
+                "{}",
+                serde_json::json!({
+                    "already_active": true,
+                    "email": email,
+                })
+            );
+        } else {
+            ctx.info(&format!("Already active: {email}"));
+        }
         return Ok(());
     }
 
