@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Trash2, AlertTriangle, WifiOff, CircleDashed } from "lucide-react";
+import { Icon } from "../../components/Icon";
 import { api } from "../../api";
 import { CopyButton } from "../../components/CopyButton";
 import { useFocusTrap } from "../../hooks/useFocusTrap";
@@ -218,7 +218,7 @@ export function CleanOrphansModal({
 
           {state.kind === "error" && (
             <div className="clean-error" role="alert">
-              <AlertTriangle size={16} strokeWidth={2.5} />
+              <Icon name="alert-triangle" size={14} />
               <div>
                 <strong>Couldn't clean.</strong>
                 <p className="mono small">{state.message}</p>
@@ -267,7 +267,7 @@ export function CleanOrphansModal({
                 }
                 onClick={runClean}
               >
-                <Trash2 size={13} />
+                <Icon name="trash-2" size={13} />
                 {state.kind === "preview" && state.data.orphans_found > 0
                   ? `Remove ${state.data.orphans_found} project${
                       state.data.orphans_found === 1 ? "" : "s"
@@ -319,7 +319,7 @@ function Preview({
 
       {data.unreachable_skipped > 0 && (
         <div className="clean-unreachable" role="status">
-          <WifiOff size={14} />
+          <Icon name="wifi-off" size={14} />
           <span>
             <strong>{data.unreachable_skipped}</strong> project
             {data.unreachable_skipped === 1 ? "" : "s"} with unreachable
@@ -368,7 +368,7 @@ function OrphanRow({ info }: { info: ProjectInfo }) {
       </div>
       {info.is_empty && (
         <span className="project-tag empty" title="empty project dir">
-          <CircleDashed size={11} strokeWidth={2.5} /> empty
+          <Icon name="circle-dashed" size={11} /> empty
         </span>
       )}
     </li>
@@ -426,7 +426,7 @@ function Result({ result }: { result: CleanResult }) {
 
       {result.orphans_skipped_live > 0 && (
         <div className="clean-unreachable" role="status">
-          <AlertTriangle size={14} />
+          <Icon name="alert-triangle" size={14} />
           <span>
             <strong>{result.orphans_skipped_live}</strong> project
             {result.orphans_skipped_live === 1 ? "" : "s"} skipped because a

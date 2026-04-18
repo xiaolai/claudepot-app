@@ -1,4 +1,4 @@
-import { AlertCircle, Clock, RefreshCw } from "lucide-react";
+import { Icon } from "./Icon";
 import type { AccountSummary, UsageEntry } from "../types";
 import { CollapsibleSection } from "./CollapsibleSection";
 import { CopyButton } from "./CopyButton";
@@ -52,7 +52,7 @@ export function AccountDetail({
                 className="usage-stale-chip"
                 title="Showing cached data — Claudepot couldn't re-fetch just now"
               >
-                <Clock size={10} strokeWidth={2.5} /> {formatAge(usageEntry!.age_secs!)}
+                <Icon name="clock" size={10} /> {formatAge(usageEntry!.age_secs!)}
               </span>
             ) : null
           }
@@ -146,7 +146,7 @@ function UsageUnavailable({
     case "expired":
       body = (
         <>
-          <AlertCircle size={14} strokeWidth={2.5} />
+          <Icon name="alert-circle" size={14} />
           <span>
             Token expired. Log in again to refresh usage — the refresh token
             is rotated during login.
@@ -160,32 +160,32 @@ function UsageUnavailable({
       const hint = s > 60 ? `~${Math.ceil(s / 60)} minutes` : `${s} seconds`;
       body = (
         <>
-          <Clock size={14} strokeWidth={2.5} />
+          <Icon name="clock" size={14} />
           <span>
             Usage endpoint is rate-limiting Claudepot. Auto-retry in {hint}.
             Usage numbers reappear automatically once the cooldown clears.
           </span>
         </>
       );
-      if (onRefresh) action = { label: "Retry now", onClick: onRefresh, icon: <RefreshCw size={13} /> };
+      if (onRefresh) action = { label: "Retry now", onClick: onRefresh, icon: <Icon name="refresh" size={13} /> };
       break;
     }
     case "error":
       body = (
         <>
-          <AlertCircle size={14} strokeWidth={2.5} />
+          <Icon name="alert-circle" size={14} />
           <span>
             Couldn't fetch usage.{" "}
             <code className="mono small">{entry.error_detail ?? "unknown"}</code>
           </span>
         </>
       );
-      if (onRefresh) action = { label: "Retry", onClick: onRefresh, icon: <RefreshCw size={13} /> };
+      if (onRefresh) action = { label: "Retry", onClick: onRefresh, icon: <Icon name="refresh" size={13} /> };
       break;
     case "no_credentials":
       body = (
         <>
-          <AlertCircle size={14} strokeWidth={2.5} />
+          <Icon name="alert-circle" size={14} />
           <span>
             No credentials stored for this account. Log in to populate usage.
           </span>

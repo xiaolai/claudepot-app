@@ -1,9 +1,9 @@
-import { Terminal, UserPlus } from "lucide-react";
+import { Icon } from "./Icon";
 
 export function EmptyState({ onAdd }: { onAdd: () => void }) {
   return (
     <div className="empty onboarding">
-      <UserPlus size={32} strokeWidth={1} />
+      <Icon name="user-plus" size={32} />
       <h2>Get started with Claudepot</h2>
 
       <div className="onboarding-steps">
@@ -12,7 +12,7 @@ export function EmptyState({ onAdd }: { onAdd: () => void }) {
           <div>
             <p className="onboarding-step-title">Sign into Claude Code</p>
             <p className="muted onboarding-step-detail">
-              <Terminal size={12} />{" "}
+              <Icon name="terminal" size={12} />{" "}
               <code>claude auth login</code>
             </p>
           </div>

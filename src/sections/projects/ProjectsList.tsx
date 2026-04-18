@@ -1,17 +1,30 @@
 import { useMemo, type ReactNode } from "react";
-import { Folder, List, Unlink, WifiOff, CircleDashed as CircleDashedIcon } from "lucide-react";
+import { Icon } from "../../components/Icon";
 import type { ProjectInfo } from "../../types";
 import { classifyProject, type ProjectStatus } from "./projectStatus";
 
 import { formatSize } from "./format";
 
-function formatRelative(ms: number | null): string {
-  if (ms === null) return "—";
+function formatRelative(ms: number | null): string | null {
+  if (ms === null) return null;
   const diff = Date.now() - ms;
   if (diff < 60_000) return "just now";
   if (diff < 3_600_000) return `${Math.floor(diff / 60_000)}m ago`;
   if (diff < 86_400_000) return `${Math.floor(diff / 3_600_000)}h ago`;
   return `${Math.floor(diff / 86_400_000)}d ago`;
+}
+
+// Zero-state metadata filter (design-principles.md §8 / design-patterns.md).
+// Dropping zero sessions stops the `0 sessions · 33.8 MB · 21d ago` noise.
+function formatRowMeta(p: ProjectInfo): string | null {
+  const parts = [
+    p.total_size_bytes > 0 ? formatSize(p.total_size_bytes) : null,
+    formatRelative(p.last_modified_ms),
+    p.session_count > 0
+      ? `${p.session_count} session${p.session_count === 1 ? "" : "s"}`
+      : null,
+  ].filter((v): v is string => v !== null);
+  return parts.length === 0 ? null : parts.join(" · ");
 }
 
 export type ProjectFilter = "all" | "orphan" | "unreachable" | "empty";
@@ -68,7 +81,7 @@ export function ProjectsList({
           <div className="sidebar-title">Projects</div>
         </div>
         <div className="empty small muted">
-          <Folder size={28} strokeWidth={1} />
+          <Icon name="folder" size={28} />
           <p>No CC projects yet.</p>
         </div>
       </aside>
@@ -95,7 +108,8 @@ export function ProjectsList({
         <FilterChip
           current={filter}
           value="all"
-          icon={<List size={14} />}
+          icon={<Icon name="list" size={14} />}
+          label="All"
           tooltip="All projects"
           count={projects.length}
           onClick={onFilterChange}
@@ -103,7 +117,8 @@ export function ProjectsList({
         <FilterChip
           current={filter}
           value="orphan"
-          icon={<Unlink size={14} />}
+          icon={<Icon name="unlink" size={14} />}
+          label="Orphan"
           tooltip="Orphan — source dir missing"
           count={counts.orphan}
           onClick={onFilterChange}
@@ -111,15 +126,17 @@ export function ProjectsList({
         <FilterChip
           current={filter}
           value="unreachable"
-          icon={<WifiOff size={14} />}
-          tooltip="Unreachable — volume unmounted"
+          icon={<Icon name="wifi-off" size={14} />}
+          label="Offline"
+          tooltip="Unreachable — volume unmounted or permission-denied"
           count={counts.unreachable}
           onClick={onFilterChange}
         />
         <FilterChip
           current={filter}
           value="empty"
-          icon={<CircleDashedIcon size={14} />}
+          icon={<Icon name="circle-dashed" size={14} />}
+          label="Empty"
           tooltip="Empty — no sessions or memory"
           count={counts.empty}
           onClick={onFilterChange}
@@ -155,15 +172,16 @@ export function ProjectsList({
               >
                 <div className="sidebar-item-row">
                   <div className="sidebar-item-text">
-                    <strong title={p.original_path}>
+                    <span className="sidebar-item-name" title={p.original_path}>
                       {p.original_path.split("/").filter(Boolean).pop() ??
                         p.sanitized_name}
-                    </strong>
-                    <div className="sidebar-item-meta muted">
-                      {p.session_count} session{p.session_count === 1 ? "" : "s"} ·{" "}
-                      {formatSize(p.total_size_bytes)} ·{" "}
-                      {formatRelative(p.last_modified_ms)}
-                    </div>
+                    </span>
+                    {(() => {
+                      const meta = formatRowMeta(p);
+                      return meta ? (
+                        <div className="sidebar-item-meta muted">{meta}</div>
+                      ) : null;
+                    })()}
                   </div>
                   <StatusBadge status={status} />
                 </div>
@@ -181,6 +199,7 @@ function FilterChip({
   current,
   value,
   icon,
+  label,
   tooltip,
   count,
   onClick,
@@ -188,6 +207,7 @@ function FilterChip({
   current: ProjectFilter;
   value: ProjectFilter;
   icon: ReactNode;
+  label: string;
   tooltip: string;
   count: number;
   onClick: (next: ProjectFilter) => void;
@@ -206,7 +226,10 @@ function FilterChip({
       onClick={() => onClick(value)}
     >
       {icon}
-      {showCount && <span className="project-filter-count">{count}</span>}
+      <span className="project-filter-chip-text">
+        <span className="project-filter-label">{label}</span>
+        {showCount && <span className="project-filter-count">{count}</span>}
+      </span>
     </button>
   );
 }

@@ -13,9 +13,9 @@ import type { SectionDef } from "../sections/registry";
  *   - Home / End jump to first / last.
  *   - ⌘1..⌘9 activates a section globally (bound in useSection).
  *
- * Icons are Lucide (stroke-based, defaults set via CSS on svg.lucide);
- * active state is rendered via CSS, not by swapping icons — simpler
- * and matches existing `.icon-btn` patterns.
+ * Icons are Nerd Font glyphs (defaults set via CSS on `.icon`); active
+ * state is rendered via CSS, not by swapping icons — simpler and
+ * matches existing `.icon-btn` patterns.
  */
 export function SectionRail({
   sections,

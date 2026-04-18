@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Trash2, Lock, Info, Stethoscope, Copy } from "lucide-react";
+import { Icon } from "../components/Icon";
 import { api } from "../api";
 import { useToasts } from "../hooks/useToasts";
 import { useSettingsActions } from "../hooks/useSettingsActions";
@@ -112,7 +112,7 @@ export function SettingsSection() {
         </section>
 
         <section className="settings-group">
-          <h3 className="settings-group-title"><Trash2 size={14} /> Garbage Collection</h3>
+          <h3 className="settings-group-title"><Icon name="trash-2" size={14} /> Garbage Collection</h3>
           <p className="muted settings-desc">Remove abandoned journals and old recovery snapshots.</p>
           <label className="settings-row">
             <span>Older than</span>
@@ -136,7 +136,7 @@ export function SettingsSection() {
         </section>
 
         <section className="settings-group">
-          <h3 className="settings-group-title"><Lock size={14} /> Break Stale Lock</h3>
+          <h3 className="settings-group-title"><Icon name="lock" size={14} /> Break Stale Lock</h3>
           <p className="muted settings-desc">Force-break a lock file left by a crashed rename.</p>
           <div className="settings-row">
             <input type="text" className="settings-input wide" placeholder="Lock file path…"
@@ -148,7 +148,7 @@ export function SettingsSection() {
 
         <section className="settings-group">
           <h3 className="settings-group-title">
-            <Stethoscope size={14} /> Diagnostics
+            <Icon name="stethoscope" size={14} /> Diagnostics
           </h3>
           <p className="muted settings-desc">
             Read-only view of platform, active slots, and the identity
@@ -196,13 +196,13 @@ export function SettingsSection() {
             </button>
             <button onClick={copyDiagnostics} disabled={!appStatus}
               title="Copy all diagnostics to clipboard">
-              <Copy size={13} /> Copy
+              <Icon name="copy" size={13} /> Copy
             </button>
           </div>
         </section>
 
         <section className="settings-group about">
-          <h3 className="settings-group-title"><Info size={14} /> About</h3>
+          <h3 className="settings-group-title"><Icon name="info" size={14} /> About</h3>
           <dl className="settings-about-grid">
             <dt>App</dt><dd>Claudepot</dd>
             <dt>Version</dt><dd className="mono">0.1.0</dd>

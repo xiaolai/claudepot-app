@@ -1,21 +1,13 @@
 import { useState, useCallback } from "react";
-import {
-  AlertTriangle,
-  ChevronDown,
-  ChevronRight,
-  Lock,
-  RefreshCw,
-  Shield,
-  X,
-} from "lucide-react";
+import { Icon } from "./Icon";
 import { useStatusIssues, type StatusIssue } from "../hooks/useStatusIssues";
 import { useDismissedIssues } from "../hooks/useDismissedIssues";
 import type { AccountSummary, AppStatus, CcIdentity } from "../types";
 
 const severityIcon = {
-  error: <AlertTriangle size={14} strokeWidth={2} />,
-  warning: <Shield size={14} strokeWidth={2} />,
-  info: <RefreshCw size={14} strokeWidth={2} />,
+  error: <Icon name="alert-triangle" size={14} />,
+  warning: <Icon name="shield" size={14} />,
+  info: <Icon name="refresh" size={14} />,
 };
 
 function IssueAction({ action }: { action: StatusIssue["action"] }) {
@@ -42,7 +34,7 @@ function IssueDismiss({
       title="Dismiss for 24 hours"
       aria-label={`Dismiss ${issue.label} for 24 hours`}
     >
-      <X size={12} strokeWidth={2.5} />
+      <Icon name="x" size={12} />
     </button>
   );
 }
@@ -71,7 +63,7 @@ export function StatusBar({
   if (issues.length === 0 && verifying) {
     return (
       <div className="status-bar info" role="status" aria-live="polite">
-        <RefreshCw size={14} className="status-bar-spin" />
+        <Icon name="refresh" size={14} className="status-bar-spin" />
         <span className="status-bar-text">Reconciling identities…</span>
       </div>
     );
@@ -80,7 +72,7 @@ export function StatusBar({
   const topSeverity = issues.some((i) => i.severity === "error") ? "error" : "warning";
   const verifyChip = verifying && (
     <span className="status-bar-verifying">
-      <RefreshCw size={12} className="status-bar-spin" /> Reconciling…
+      <Icon name="refresh" size={12} className="status-bar-spin" /> Reconciling…
     </span>
   );
 
@@ -88,7 +80,7 @@ export function StatusBar({
     const issue = issues[0];
     return (
       <div className={`status-bar ${issue.severity}`} role="alert" aria-live="assertive">
-        {issue.severity === "error" ? <Lock size={14} strokeWidth={2} /> : severityIcon[issue.severity]}
+        {issue.severity === "error" ? <Icon name="lock" size={14} /> : severityIcon[issue.severity]}
         <span className="status-bar-text">
           {issue.label}
           {issue.detail && <span className="status-bar-detail"> — {issue.detail}</span>}
@@ -104,9 +96,9 @@ export function StatusBar({
     <div className={`status-bar ${topSeverity}`} role="alert" aria-live="assertive">
       <button className="status-bar-toggle" onClick={toggle}
         aria-expanded={expanded} title={expanded ? "Collapse issues" : "Expand issues"}>
-        <AlertTriangle size={14} strokeWidth={2} />
+        <Icon name="alert-triangle" size={14} />
         <span className="status-bar-text">{issues.length} issues</span>
-        {expanded ? <ChevronDown size={12} /> : <ChevronRight size={12} />}
+        {expanded ? <Icon name="chevron-down" size={12} /> : <Icon name="chevron-right" size={12} />}
       </button>
       {verifyChip}
       {expanded && (

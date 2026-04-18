@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { FolderOpen, AlertTriangle } from "lucide-react";
+import { Icon } from "../../components/Icon";
 import { open as openDialog } from "@tauri-apps/plugin-dialog";
 import { api } from "../../api";
 import { useFocusTrap } from "../../hooks/useFocusTrap";
@@ -195,7 +195,7 @@ export function RenameProjectModal({
               aria-label="Browse for parent folder"
               onClick={browseParent}
             >
-              <FolderOpen />
+              <Icon name="folder-open" size={14} />
             </button>
           </div>
           <p className="muted small">
@@ -248,7 +248,7 @@ export function RenameProjectModal({
 
           <fieldset className="danger-zone">
             <legend>
-              <AlertTriangle strokeWidth={2.5} /> Danger zone
+              <Icon name="alert-triangle" size={14} /> Danger zone
             </legend>
             <label className="check-row">
               <input

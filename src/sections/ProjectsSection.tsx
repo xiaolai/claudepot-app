@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Folder } from "lucide-react";
+import { Icon } from "../components/Icon";
 import { api } from "../api";
 import { useOperations } from "../hooks/useOperations";
 import { useGlobalShortcuts } from "../hooks/useGlobalShortcuts";
@@ -155,7 +155,7 @@ export function ProjectsSection({
     return (
       <main className="content">
         <div className="empty">
-          <Folder size={32} strokeWidth={1} />
+          <Icon name="folder" size={32} />
           <h2>No CC projects</h2>
           <p className="muted">
             Run Claude Code in any directory to create a project.

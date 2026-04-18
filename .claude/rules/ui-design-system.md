@@ -2,218 +2,216 @@
 globs: ["src/**/*.tsx", "src/**/*.css"]
 ---
 
-# UI Design System — macOS Native
+# UI Design System — Tokens and Defaults
 
-All values pinned to AppKit/SwiftUI defaults (macOS Sonoma/Sequoia/Tahoe).
-Full reference: `dev-docs/macos-native-design-system.md`.
+This is the base layer: tokens, current numeric defaults, and the index
+to the rest of the system. Everything here is either platform-inherited
+(and therefore stable) or Claudepot house style (and therefore
+versioned — re-baseline when macOS ships a major release).
 
-## Principles
+## Register: macOS dialect, not strict HIG
 
-1. System colors over hardcoded hex. Use `-apple-system-*` tokens.
-2. 13px base font (macOS native). Not 14px, not 16px.
-3. `cursor: default` everywhere. Pointer cursor is for hyperlinks only.
-4. `user-select: none` on UI chrome. Only content text (`.selectable`).
-5. Invisible borders at rest. Buttons show background fill on hover only.
-6. No box shadows on list items. Flat 0.5px separators.
-7. Vibrancy via Tauri `windowEffects`, not CSS backdrop-filter hacks.
-8. Respect all accessibility media queries: `prefers-reduced-motion`,
-   `prefers-contrast`, `prefers-reduced-transparency`.
-9. Context menus on every interactive object — macOS users expect them.
-10. Standard keyboard shortcuts — Cmd+R, Cmd+N, Cmd+, at minimum.
+Claudepot is a Tauri-based dev utility, not an AppKit app. We stopped
+pretending to be 100% native — that pretense is where the uncanny-valley
+output came from. The register is *quiet dev dialect*: platform color
+tokens for light/dark/accent, but typography and chrome are our own
+— JetBrainsMono Nerd Font Mono everywhere, with a compact, deliberate
+size rhythm. Precedents: Warp terminal, Zed, Lapce, 1Password 8.
 
-## Colors
+## Load order
 
-All colors via CSS custom properties backed by `-apple-system-*` tokens.
-Auto-adapt to light/dark, user accent color, and accessibility settings.
+| Layer | File | Authority |
+|---|---|---|
+| Why | `design-principles.md` | Non-negotiable. Wins conflicts. |
+| What to imitate | `design-references.md` | Scoped to typography, chrome, proportions. |
+| Which surface | `feedback-ladder.md` | Deterministic state-to-surface mapping. |
+| How to compose | `design-patterns.md` | Recipes you can copy. |
+| Which tokens | this file | Current defaults. |
+| A11y floor | `accessibility.md` | Not the ceiling. |
+| Code conventions | `react-components.md` | Component file shape. |
+
+Read top to bottom for new work. For a small fix, start at the layer
+that matches the problem.
+
+## Tokens — platform-inherited
+
+These are backed by `-apple-system-*` CSS tokens. They auto-adapt to
+light/dark, the user's accent, and accessibility settings. Do not
+hardcode values for any of these.
 
 | Token | Source | Purpose |
-|-------|--------|---------|
+|---|---|---|
 | `--bg` | `-apple-system-background` | Content background |
-| `--surface` | `-apple-system-secondary-background` | Modal/card background |
-| `--border` | `-apple-system-separator` | Borders (0.5px) |
+| `--surface` | `-apple-system-secondary-background` | Modal / card |
+| `--border` | `-apple-system-separator` | 0.5 px borders |
 | `--text` | `-apple-system-label` | Primary text |
-| `--muted` | `-apple-system-secondary-label` | Secondary text |
-| `--accent` | `AccentColor` | User's system accent |
-| `--accent-weak` | accent at 12-18% opacity | Active state bg |
-| `--ok` / `--ok-weak` | `-apple-system-green` | Success |
-| `--bad` / `--bad-weak` | `-apple-system-red` | Error |
-| `--warn` / `--warn-weak` | `-apple-system-orange` | Warning |
-| `--focus-ring` | 3px accent at 30% | macOS focus ring |
+| `--muted` | `-apple-system-secondary-label` | Metadata, labels |
+| `--tertiary` | `-apple-system-tertiary-label` | Disabled, placeholders |
+| `--accent` | `AccentColor` | Active state, primary action |
+| `--accent-text` | `AccentColorText` | Text on accent fill |
+| `--ok` | `-apple-system-green` | Success only |
+| `--bad` | `-apple-system-red` | Error only |
+| `--warn` | `-apple-system-orange` | Warning only |
 
-`color-scheme: light dark` on `:root`. Dark values auto-adjusted via
-`@media (prefers-color-scheme: dark)`.
+## Tokens — Claudepot-derived
 
-## Icons
+These are our house style, derived from the platform tokens. They
+change if the platform or our taste changes.
 
-`lucide-react`, stroke-based, 16px default via CSS (`svg.lucide`).
-Never mix icon libraries. All icons come from Lucide.
-No colored icons except status indicators (dots, badges).
+| Token | Derivation | Purpose |
+|---|---|---|
+| `--hover-bg` | accent at 6 % | List row hover |
+| `--accent-weak` | accent at 12–18 % | Active-state background |
+| `--ok-weak` | green at 12 % | Success badge background |
+| `--bad-weak` | red at 12 % | Error badge background |
+| `--warn-weak` | orange at 12 % | Warning badge background |
+| `--focus-ring` | accent at 30 %, 3 px | macOS focus ring |
 
-| Context | strokeWidth | Size |
-|---------|-------------|------|
-| Toolbar / sidebar | 1.5 (CSS default) | 16px |
-| Inline / buttons | 1.5 | 14px |
-| Active state indicator | 2.5 | same |
-| Copy/toast emphasis | 2.5 | 13-14px |
-| Empty state | 1 | 28-32px |
+## Rule: no raw colors
+
+Every color in component CSS comes from the tables above. No raw hex,
+rgb, hsl, or named colors. This is a BLOCK-level rule in
+`design-review.md`.
+
+If a needed color isn't here, add it to the table with justification
+before using it.
 
 ## Typography
 
-Font: `-apple-system, BlinkMacSystemFont, "Helvetica Neue", sans-serif`
-Mono: `"SF Mono", SFMono-Regular, ui-monospace, Menlo, monospace`
+**One family, everywhere.** JetBrainsMono Nerd Font Mono. The `Mono`
+suffix means every glyph — including the ~9,000 Nerd Font icons —
+is forced to the monospace cell, so lists and columns align
+predictably.
 
-### macOS text styles (NSFont.TextStyle reference)
+```
+--font:      "JetBrainsMono NF", ui-monospace, "SF Mono",
+             SFMono-Regular, Menlo, monospace;
+--font-mono: (same — body IS mono)
+```
 
-| HIG Style | Size | Weight | Claudepot usage |
-|-----------|------|--------|-----------------|
-| Large Title | 26px | 400 | — (reserved) |
-| Title 1 | 22px | 400 | — (reserved) |
-| Title 2 | 17px | 400 | — (reserved) |
-| Title 3 | 15px | 400 | Detail heading (h2) |
-| Headline | 13px | 600 | Selected sidebar item |
-| Body | 13px | 400 | Body text, buttons |
-| Callout | 12px | 400 | — (reserved) |
-| Subheadline | 11px | 400 | Sidebar meta, section headers |
-| Footnote | 10px | 400 | — (reserved) |
-| Caption 1 | 10px | 500 | Badges, tags |
-| Caption 2 | 10px | 400 | — (reserved) |
+Font files live in `public/fonts/JetBrainsMonoNerdFontMono-*.woff2`
+at weights 400, 500, 600, 700. No proportional fallback — the mono
+body is the aesthetic signal. This is the dev-dialect register (Warp,
+Zed, Lapce), not a retreat from taste.
 
-### Claudepot element scale
+Size scale — current house style. Invented sizes are a BLOCK finding
+in review.
 
-| Element | Size | Weight | HIG mapping |
-|---------|------|--------|-------------|
-| Body text | 13px | 400 | Body |
-| Sidebar section header | 11px | 600, uppercase, 0.5px tracking | Subheadline (bold) |
-| Button label | 13px | 400 (500 for primary) | Body |
-| Detail heading (h2) | 15px | 600 | Title 3 |
-| Section title (h3) | 11px | 600, uppercase | Subheadline (bold) |
-| Badge / tag | 10px | 600 | Caption 1 |
-| Monospace | 11px | 400 | Subheadline (mono) |
-| Sidebar item meta | 11px | 400 | Subheadline |
-| Modal heading | 13px | 700 | Headline |
+| Role | Size | Weight |
+|---|---|---|
+| Page title | 18 px | 600 |
+| Section heading | 14 px | 600 |
+| Subheading / sidebar label | 11 px | 600 uppercase, 0.04em tracking |
+| Body / button | 13 px | 400 (500 for primary) |
+| List row primary | 13 px | 500 (600 when selected) |
+| Metadata / hint | 11 px | 400 |
+| Badge / tag | 10 px | 600 |
 
-Note: detail heading was 16px, corrected to 15px to match HIG Title 3.
+**Line-height — exactly three values:**
+- `1.0` — icons, badges, single-line chrome
+- `1.3` — body, list rows
+- `1.5` — paragraphs, empty-state copy, descriptions
+
+**Letter-spacing — exactly three values:**
+- `-0.01em` — titles, section headings (slight tightening)
+- `0` — body (default)
+- `0.04em` — uppercase labels
+
+**Baseline applied to `<body>`:**
+```css
+-webkit-font-smoothing: antialiased;
+-moz-osx-font-smoothing: grayscale;
+text-rendering: optimizeLegibility;
+font-feature-settings: "kern", "liga", "calt";
+font-variant-numeric: tabular-nums;
+```
+Global `tabular-nums` means every number in the UI lines up in columns
+by default — no per-class opt-in needed.
 
 ## Spacing
 
-4px grid: `2 · 4 · 6 · 8 · 10 · 12 · 16 · 20 · 24 · 32`
+4 px grid: `2 · 4 · 6 · 8 · 10 · 12 · 16 · 20 · 24 · 32`.
 
-## Border Radius
+House style. Violations are WARN, not BLOCK, in review.
+
+## Border radius
 
 | Element | Radius |
-|---------|--------|
-| Buttons, inputs, sidebar items | 6px |
-| Banners | 8px |
-| Toasts | 10px |
-| Modals | 12px |
-| Pills, badges | 999px |
+|---|---|
+| Buttons, inputs, list rows | 6 px |
+| Banners | 8 px |
+| Toasts | 10 px |
+| Modals | 12 px |
+| Pills, badges | 999 px |
 
-## Layout
+House style.
 
-Sidebar (240px, transparent) + Content pane (opaque `var(--bg)`).
-52px top padding clears the overlay title bar / traffic lights.
+## Transitions
 
-## Buttons
+`0.12s ease`. Only animate `opacity` and `transform`. Layout
+properties (width, height, padding, margin) are never animated.
 
-Height 28px. Border 0.5px var(--border). Border-radius 6px.
-Hover = background fill, never border change.
-Focus = `var(--focus-ring)`.
-Icon-only = `.icon-btn` (28x28, no border, no shadow).
+Wrap all animations in `@media (prefers-reduced-motion: no-preference)`.
 
-Note: 28px is a conscious deviation from AppKit's regular control
-height (22pt). Web UIs need slightly larger targets; 28px matches
-Slack, VS Code, and 1Password on macOS.
+## Icons
 
-## Modals
+`lucide-react`, stroke-based. 16 px default via CSS (`svg.lucide`).
 
-Width 440px. Backdrop rgba(0,0,0,0.30). Radius 12px.
-Button order: Cancel (left), Confirm (right) — macOS convention.
+| Context | Stroke | Size |
+|---|---|---|
+| Toolbar / sidebar | 1.5 | 16 px |
+| Inline / buttons | 1.5 | 14 px |
+| Active indicator | 2.5 | same |
+| Empty state | 1 | 28–32 px |
 
-## Toasts
+No emoji in place of icons. No mixing icon libraries. No colored icons
+outside the semantic set (`ok` / `bad` / `warn`).
 
-Top-center HUD style. Dark translucent with backdrop-filter blur.
-Error toasts = red bg. All toasts have white text.
+## Cursor and selection
 
-## Context Menus
+- `cursor: default` globally. Pointer cursor is for hyperlinks only.
+- `user-select: none` on UI chrome. Only content text (paths, tokens,
+  `.selectable`) is selectable.
 
-macOS users expect right-click context menus on every interactive object.
-Use `onContextMenu` handler — never suppress the event without providing
-a custom menu.
-
-Required context menus:
-- Account cards: Copy email, Copy UUID, Set as CLI, Set as Desktop, Remove
-- Project rows: Open in Finder, Rename, Clean, Copy path
-- Token badges: Copy token (truncated), Refresh
-- Selectable text: system default (Copy)
-
-## Keyboard Shortcuts
-
-Standard macOS shortcuts must work. Tauri provides Cmd+Q/W/H/M by default.
-The app must wire these additional shortcuts:
+## Keyboard shortcuts
 
 | Shortcut | Action |
-|----------|--------|
-| Cmd+R | Refresh accounts / projects |
-| Cmd+N | Add account |
-| Cmd+, | Open settings (when settings view exists) |
-| Cmd+1/2/… | Switch sections in the rail |
-| Cmd+F | Focus filter/search (when search exists) |
-| Escape | Close modal / deselect |
+|---|---|
+| Cmd+R | Refresh |
+| Cmd+N | Add (account) |
+| Cmd+, | Settings |
+| Cmd+1/2/3… | Switch section |
+| Cmd+F | Focus search |
+| Escape | Close modal |
 
-## Accessibility Media Queries
+Do not fire while a modal is open or an input has focus. Standard
+Cmd+Q/W/H/M come free from Tauri.
 
-### `prefers-contrast: more`
+## macOS Tahoe / Liquid Glass — future work
 
-When Increase Contrast is enabled (System Settings > Accessibility >
-Display), borders and separators must become more prominent:
-```css
-@media (prefers-contrast: more) {
-  :root { --border: rgba(0, 0, 0, 0.30); }
-}
-@media (prefers-contrast: more) and (prefers-color-scheme: dark) {
-  :root { --border: rgba(255, 255, 255, 0.30); }
-}
-```
+These numeric defaults (13 px body, 6 px radius, 0.5 px borders) are
+current house style for macOS Sonoma/Sequoia, **not** timeless native
+truth. When macOS Tahoe's Liquid Glass API lands in Tauri:
 
-### `prefers-reduced-transparency`
+1. Remove `windowEffects: ["sidebar"]`; let the OS provide glass.
+2. Re-baseline sizes against Tahoe control metrics (controls are
+   slightly taller).
+3. Audit this file; mark which values changed.
 
-When Reduce Transparency is enabled, the sidebar must have an opaque
-background instead of relying on vibrancy:
-```css
-@media (prefers-reduced-transparency) {
-  .sidebar { background: var(--bg); }
-}
-```
+Do not refactor preemptively. Watch Tauri 2 release notes.
 
-## macOS Tahoe / Liquid Glass (forward-looking)
+## Shortlist of anti-patterns
 
-macOS Tahoe (2025) introduced Liquid Glass. Key implications:
-- Toolbars and sidebars get glass automatically in native apps.
-- Explicit `NSVisualEffectView` in sidebars **blocks** glass — must be
-  removed when targeting Tahoe.
-- Tauri's `windowEffects: ["sidebar"]` may need removal once Tauri
-  adds Liquid Glass support.
-- CSS `background: transparent` on sidebar continues to work.
-- New control sizes: slightly taller mini/small/medium, new extra-large.
-- No glass-on-glass stacking — single `GlassEffectContainer` groups
-  multiple glass elements.
-- Accessibility is automatic: Reduce Transparency = frostier glass,
-  Increase Contrast = opaque with border.
+Design-level failures — the full list with replacement recipes lives
+in `design-patterns.md`. BLOCK-level unless noted.
 
-Do not refactor for Tahoe yet. Track Tauri 2 release notes for glass API.
-
-## Anti-Patterns (never do these)
-
-- `cursor: pointer` on buttons
-- `::-webkit-scrollbar` overrides
-- Box shadows on list items
-- `border-radius > 8px` on non-modal elements
-- Visible button borders at rest
-- Modal backdrop > 0.30 opacity
-- 14px or 16px body font
-- Corner-positioned toasts
-- Hardcoded hex colors (use tokens)
-- Missing context menus on interactive objects
-- Suppressing right-click without providing a custom menu
-- Hardcoded font sizes outside the HIG text styles table
-- Missing `prefers-contrast` / `prefers-reduced-transparency` handling
+- Two navigation surfaces competing.
+- Icon-only segmented controls without visible labels.
+- Zero-value metadata (`0 sessions · …`).
+- Internal identifiers on the primary detail grid.
+- Disabled buttons without inline reason.
+- Horizontal separator in the nav rail's top zone (breaks unified title bar).
+- Raw hex / rgb colors in component CSS.
+- `cursor: pointer` on buttons; `::-webkit-scrollbar` overrides.
+- Box shadows on list items; radius > 8 px on non-modals (WARN).
+- Invented font sizes outside the scale above (WARN).

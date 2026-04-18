@@ -1,5 +1,5 @@
 import { useState, useCallback, useEffect, useRef } from "react";
-import { ChevronRight } from "lucide-react";
+import { Icon } from "./Icon";
 
 export function CollapsibleSection({
   title,
@@ -41,9 +41,9 @@ export function CollapsibleSection({
         aria-expanded={open}
         title={`${open ? "Collapse" : "Expand"} ${title}`}
       >
-        <ChevronRight
+        <Icon
+          name="chevron-right"
           size={12}
-          strokeWidth={2}
           className={`collapsible-chevron ${open ? "open" : ""}`}
         />
         <span className="collapsible-section-title">{title}</span>

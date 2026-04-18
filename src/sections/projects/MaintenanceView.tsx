@@ -1,5 +1,5 @@
 import { useCallback, useState } from "react";
-import { Trash2, Wrench } from "lucide-react";
+import { Icon } from "../../components/Icon";
 import type { CleanResult } from "../../types";
 import { useToasts } from "../../hooks/useToasts";
 import { ToastContainer } from "../../components/ToastContainer";
@@ -43,7 +43,7 @@ export function MaintenanceView({
       {/* Clean section */}
       <section className="maintenance-section">
         <div className="maintenance-section-header">
-          <Trash2 size={16} />
+          <Icon name="trash-2" size={14} />
           <h2>Clean Orphan Projects</h2>
         </div>
         <p className="muted maintenance-desc">
@@ -59,7 +59,7 @@ export function MaintenanceView({
       {/* Repair section — reuse existing RepairView without the back button */}
       <section className="maintenance-section">
         <div className="maintenance-section-header">
-          <Wrench size={16} />
+          <Icon name="wrench" size={14} />
           <h2>Repair Queue</h2>
         </div>
         <RepairView onBack={() => {}} embedded onOpTerminated={onOpTerminated} />

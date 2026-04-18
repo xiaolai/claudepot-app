@@ -1,4 +1,4 @@
-import { X } from "lucide-react";
+import { Icon } from "./Icon";
 import type { Toast } from "../hooks/useToasts";
 
 export function ToastContainer({
@@ -30,7 +30,7 @@ export function ToastContainer({
             aria-label="Dismiss"
             title="Dismiss"
           >
-            <X size={14} strokeWidth={2.5} />
+            <Icon name="x" size={14} />
           </button>
         </div>
       ))}

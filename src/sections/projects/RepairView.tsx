@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
-import { ArrowLeft, Wrench } from "lucide-react";
+import { Icon } from "../../components/Icon";
 import { api } from "../../api";
 import { useOperations } from "../../hooks/useOperations";
 import type { JournalEntry } from "../../types";
@@ -112,9 +112,9 @@ export function RepairView({
         <header className="repair-header">
           <button type="button" className="icon-btn" onClick={onBack}
             aria-label="Back to Projects" title="Back to Projects">
-            <ArrowLeft />
+            <Icon name="arrow-left" size={14} />
           </button>
-          <h2><Wrench /> Repair</h2>
+          <h2><Icon name="wrench" size={14} /> Repair</h2>
         </header>
       )}
 
@@ -128,7 +128,7 @@ export function RepairView({
       )}
       {!loading && !error && entries.length === 0 && (
         <div className="empty">
-          <Wrench size={32} strokeWidth={1} />
+          <Icon name="wrench" size={32} />
           <h2>All clear</h2>
           <p className="muted">No pending rename journals.</p>
         </div>
