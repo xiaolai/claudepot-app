@@ -125,6 +125,30 @@ for the first time and within five seconds can say out loud:
 If any of those is unclear, the design is not done. This replaces any
 weaker "does it look native" test.
 
+## 9. Dark-first parity
+
+Modern dev tools are used in dark mode by default — Linear, Warp,
+Raycast, Arc, Zed, Cursor, VS Code all launched dark-first and their
+light modes feel secondary. Claudepot supports both, but every design
+decision must be tested in both and neither may feel like an
+afterthought.
+
+- Every new color token must have an explicit light and dark value
+  (the platform `-apple-system-*` tokens adapt automatically; derived
+  tokens using `color-mix` with `--muted` or `--text` adapt because
+  those adapt).
+- Screenshot-required checks in review (`design-review.md` Pass B)
+  must be performed in both modes when the change touches color,
+  contrast, or chrome.
+- Prefer monochromatic-plus-one-accent palettes. Rainbow state colors
+  make dark-mode parity harder and usually indicate missing
+  hierarchy.
+
+This is why we follow the 12-step semantic scale in
+`ui-design-system.md` — it forces you to name the role of every
+color, which is the only way light and dark can mirror each other
+without manual per-mode tuning.
+
 ---
 
 ## How these principles interact with the rest of the system

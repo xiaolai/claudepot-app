@@ -134,6 +134,82 @@ same.
 **Don't steal:** Disk Utility's dated layout. Study the flow, not the
 frame.
 
+## External references — modern web design systems
+
+These are for the *vocabulary* of modern component design: token
+names, state conventions, taxonomy. We don't adopt their visual style
+(most are web-SaaS-coded) but their naming and structural decisions
+are the current industry lingua franca and worth following so any dev
+can read our code without a decoder ring.
+
+### Radix Colors — the semantic token vocabulary
+
+[radix-ui.com/colors](https://www.radix-ui.com/colors)
+
+The 12-step scale (step 1 = app bg, step 5 = active UI bg, step 9 =
+solid high-chroma, step 12 = primary text, etc.) is the mental model
+adopted by almost every modern web design system: shadcn/ui, Vercel
+Geist, Linear, Arc Browser all use a variant.
+
+**Steal:** the semantic roles of steps 1–12 when you name new color
+tokens. Full table in `ui-design-system.md`.
+
+### shadcn/ui — the React pattern library
+
+[ui.shadcn.com](https://ui.shadcn.com)
+
+The copy-paste component library most React devs reach for in 2026.
+Not a dependency — you copy the source into your app. We follow its
+**semantic-pair naming** (every `--bg` has a paired `--fg`) and its
+**button variant taxonomy** (primary / default / outline / ghost /
+destructive). Full details in `ui-design-system.md`.
+
+**Steal:** token naming conventions, button variant names,
+component anatomy (how a button, input, modal is composed of
+structural parts).
+
+**Don't steal:** the default Tailwind-opinioned visual look
+(slightly-rounded, gray-slate palette, Inter typography) — Claudepot
+has its own register.
+
+### Primer (GitHub) — the dev-utility design system
+
+[primer.style](https://primer.style)
+
+GitHub's design system. Mature, dev-audience-tested, explicit about
+functional state tokens.
+
+**Steal:** the state-suffix convention (`-rest` / `-hover` /
+`-active` / `-disabled`) for interactive component tokens.
+Consistent across the entire Primer surface.
+
+**Don't steal:** Primer's density and typography — they're tuned for
+GitHub's information density, which is heavier than Claudepot's.
+
+### Vercel Geist — the modern minimal aesthetic
+
+[vercel.com/geist](https://vercel.com/geist)
+
+Vercel's design system, paired with Geist Sans / Geist Mono type.
+Most relevant for its commitment to monochrome minimalism and its
+icon set "tailored for developer tools."
+
+**Steal:** the restraint (few colors, one accent), the content-first
+spatial approach.
+
+**Don't steal:** the Geist typeface itself — we committed to JetBrains
+Mono Nerd Font for its symbol richness. But the aesthetic direction
+is aligned.
+
+### Anti-references from the web world
+
+- **Material Design (Google)** — too ornamented (ripples, elevation
+  shadows, FABs), too opinionated about motion and colors.
+- **Ant Design** — enterprise density done wrong; rows stacked like
+  spreadsheet cells with no visual breathing room.
+- **Bootstrap** — the beige of web design; every Bootstrap app looks
+  like every other Bootstrap app.
+
 ## Anti-references
 
 If any of these aesthetics creep in, back up:
