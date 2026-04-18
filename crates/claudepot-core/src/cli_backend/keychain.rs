@@ -39,7 +39,11 @@ pub async fn read(service: &str) -> Result<Option<String>, SwapError> {
 
     if !output.status.success() {
         let stderr = String::from_utf8_lossy(&output.stderr);
-        if stderr.contains("could not be found") {
+        // Audit Low: accept both the English stderr match AND exit
+        // code 44 (errSecItemNotFound). The stderr-text check was
+        // fragile on localized or version-changed macOS output; the
+        // numeric exit code is stable across locales.
+        if output.status.code() == Some(44) || stderr.contains("could not be found") {
             return Ok(None);
         }
         // Exit 36 = errSecAuthFailed — on macOS this is nearly always "the
@@ -188,7 +192,12 @@ pub async fn delete(service: &str) -> Result<(), SwapError> {
 
     if !output.status.success() {
         let stderr = String::from_utf8_lossy(&output.stderr);
-        if !stderr.contains("could not be found") {
+        // Exit 44 = errSecItemNotFound. Also accept the English
+        // stderr phrase for backward compat on older macOS without
+        // the numeric exit conventions.
+        let not_found = output.status.code() == Some(44)
+            || stderr.contains("could not be found");
+        if !not_found {
             return Err(SwapError::KeychainError(format!(
                 "security delete-generic-password failed: {stderr}"
             )));

@@ -30,6 +30,13 @@ pub struct MemoryMoveResult {
     pub old_memory_dir: Option<PathBuf>,
     pub new_memory_dir: Option<PathBuf>,
     pub snapshot_path: Option<PathBuf>,
+    /// Non-fatal issues encountered during memory-dir move. Currently
+    /// always empty — the existing implementation either succeeds or
+    /// returns a hard Err, no half-success cases. Kept on the struct
+    /// so the move pipeline's result type can accumulate warnings if
+    /// we later add partial-failure modes (e.g. old-wins merge
+    /// conflicts). If this field is still empty after a release or
+    /// two, drop it.
     pub warnings: Vec<String>,
 }
 

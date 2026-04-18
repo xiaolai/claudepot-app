@@ -277,4 +277,3 @@ export function ProjectsSection({
   );
 }
 
-ProjectsSection.label = "Projects";

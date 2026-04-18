@@ -4,6 +4,7 @@ import { api } from "../../api";
 import { CopyButton } from "../../components/CopyButton";
 import type { ProjectDetail as ProjectDetailData } from "../../types";
 import { classifyProject } from "./projectStatus";
+import { formatSize } from "./format";
 
 /**
  * Right-pane detail view for the selected project. Shows paths, size,
@@ -180,10 +181,3 @@ export function ProjectDetail({
   );
 }
 
-function formatSize(bytes: number): string {
-  if (bytes < 1024) return `${bytes} B`;
-  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
-  if (bytes < 1024 * 1024 * 1024)
-    return `${(bytes / 1024 / 1024).toFixed(1)} MB`;
-  return `${(bytes / 1024 / 1024 / 1024).toFixed(2)} GB`;
-}

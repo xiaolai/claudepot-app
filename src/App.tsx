@@ -82,11 +82,13 @@ function AppShell() {
         onReopen={(opId) => {
           const op = runningOps.find((o) => o.op_id === opId);
           if (!op) return;
+          // Audit Low: don't call refreshPendingBanner here. The
+          // modal's own onComplete/onError below already does it;
+          // duplicating it caused two invalidations per terminal
+          // event when reopening a running op.
           openOp({
             opId,
             title: labelFor(op),
-            onComplete: () => refreshPendingBanner(),
-            onError: () => refreshPendingBanner(),
           });
         }}
       />
