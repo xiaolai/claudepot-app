@@ -1197,6 +1197,12 @@ pub fn session_list_orphans() -> Result<Vec<crate::dto::OrphanedProjectDto>, Str
         .collect())
 }
 
+/// CC stores `.claude.json` at `$HOME/.claude.json` — a sibling of
+/// `~/.claude/`. Central accessor so the Tauri layer agrees with CLI.
+fn claude_json_path() -> Option<std::path::PathBuf> {
+    dirs::home_dir().map(|h| h.join(".claude.json"))
+}
+
 #[tauri::command]
 pub fn session_move(
     session_id: String,
@@ -1213,6 +1219,7 @@ pub fn session_move(
         force_live_session: force_live,
         force_sync_conflict: force_conflict,
         cleanup_source_if_empty: cleanup_source,
+        claude_json_path: claude_json_path(),
     };
     let report = claudepot_core::session_move::move_session(
         &cfg,
@@ -1235,7 +1242,8 @@ pub fn session_adopt_orphan(
     if !target.is_dir() {
         return Err(format!("target cwd does not exist: {target_cwd}"));
     }
-    let report = claudepot_core::session_move::adopt_orphan_project(&cfg, &slug, target)
-        .map_err(|e| format!("adopt failed: {e}"))?;
+    let report =
+        claudepot_core::session_move::adopt_orphan_project(&cfg, &slug, target, claude_json_path())
+            .map_err(|e| format!("adopt failed: {e}"))?;
     Ok(crate::dto::AdoptReportDto::from(&report))
 }

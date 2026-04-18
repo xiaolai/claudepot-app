@@ -1,5 +1,6 @@
 import { Icon } from "../../components/Icon";
 import type { OrphanedProject } from "../../types";
+import { formatSize } from "./format";
 
 /**
  * Persistent banner surfaced whenever `~/.claude/projects/` contains
@@ -20,7 +21,7 @@ export function OrphanBanner({
 
   const sessionTotal = orphans.reduce((n, o) => n + o.sessionCount, 0);
   const byteTotal = orphans.reduce((n, o) => n + o.totalSizeBytes, 0);
-  const sizeLabel = formatBytes(byteTotal);
+  const sizeLabel = formatSize(byteTotal);
   const label =
     orphans.length === 1
       ? `1 orphaned project (${sessionTotal} session${sessionTotal === 1 ? "" : "s"}, ${sizeLabel})`
@@ -43,10 +44,3 @@ export function OrphanBanner({
   );
 }
 
-function formatBytes(n: number): string {
-  const KB = 1024, MB = KB * 1024, GB = MB * 1024;
-  if (n >= GB) return `${(n / GB).toFixed(1)} GB`;
-  if (n >= MB) return `${(n / MB).toFixed(1)} MB`;
-  if (n >= KB) return `${(n / KB).toFixed(1)} KB`;
-  return `${n} B`;
-}

@@ -4,12 +4,41 @@
 //! Crate-public so `session_move.rs` can call them; not part of the
 //! external API.
 
-use crate::session_move_types::{MoveSessionError, LIVE_SESSION_MTIME_THRESHOLD};
+use crate::session_move_types::{MoveSessionError, INVALID_SLUG_MSG, LIVE_SESSION_MTIME_THRESHOLD};
 use std::fs;
 use std::io::{BufRead, BufReader, Write};
 use std::path::{Path, PathBuf};
 use std::time::SystemTime;
 use uuid::Uuid;
+
+// ---------------------------------------------------------------------------
+// Input validation
+// ---------------------------------------------------------------------------
+
+/// Reject slugs that would escape `<config_dir>/projects/` when joined.
+/// CC's `sanitize_path` only ever emits `[A-Za-z0-9-]+`; any string
+/// with a separator, a `..` component, or control characters is
+/// untrusted input (likely a traversal attempt via CLI/GUI) and must
+/// be rejected at the library boundary even if the joined path happens
+/// to be a real directory on disk.
+pub(crate) fn validate_slug(slug: &str) -> Result<(), MoveSessionError> {
+    let invalid = slug.is_empty()
+        || slug == "."
+        || slug == ".."
+        || slug.contains('/')
+        || slug.contains('\\')
+        || slug.contains('\0')
+        || slug
+            .chars()
+            .any(|c| !c.is_ascii_alphanumeric() && c != '-' && c != '_');
+    if invalid {
+        return Err(MoveSessionError::InvalidSlug(
+            slug.to_string(),
+            INVALID_SLUG_MSG,
+        ));
+    }
+    Ok(())
+}
 
 // ---------------------------------------------------------------------------
 // Guards
@@ -119,22 +148,17 @@ fn copy_tree_then_remove(from: &Path, to: &Path) -> Result<(), MoveSessionError>
 // ---------------------------------------------------------------------------
 
 /// Clear per-project session pointers in `~/.claude.json` when they
-/// reference the moved session. Checks two possible config-file
-/// locations (caller passes both; first-found wins). Returns 0/1/2 —
-/// the count of pointers actually cleared.
+/// reference the moved session. Returns 0/1/2 — the count of pointers
+/// actually cleared. No-op when the file is missing (e.g. a first-run
+/// CC install where the config hasn't been written yet).
 pub(crate) fn clear_claude_json_session_pointers(
-    primary: &Path,
-    secondary: &Path,
+    path: &Path,
     from_cwd: &Path,
     session_id: Uuid,
 ) -> Result<u8, MoveSessionError> {
-    let path = if primary.is_file() {
-        primary
-    } else if secondary.is_file() {
-        secondary
-    } else {
+    if !path.is_file() {
         return Ok(0);
-    };
+    }
 
     let contents = fs::read_to_string(path)?;
     let mut root: serde_json::Value = match serde_json::from_str(&contents) {
