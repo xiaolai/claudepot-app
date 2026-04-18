@@ -3166,20 +3166,19 @@ button.danger.primary:hover:not(:disabled) {
   background: transparent;
   color: var(--muted);
   border-radius: 4px;
-  opacity: 0;
-  transition: opacity var(--dur-fast, 80ms) var(--ease-out, ease-out),
-              background var(--dur-fast, 80ms) var(--ease-out, ease-out);
+  transition: background var(--dur-fast, 80ms) var(--ease-out, ease-out),
+              color var(--dur-fast, 80ms) var(--ease-out, ease-out);
 }
-.session-row:hover .session-row-menu-btn,
-.session-row:focus-within .session-row-menu-btn {
-  opacity: 1;
+/* Visible at rest so the affordance is not hidden behind hover.
+ * Darkens slightly on row hover to reinforce the active row. */
+.session-row:hover .session-row-menu-btn {
+  color: var(--text);
 }
 .session-row-menu-btn:hover {
   background: var(--accent-weak);
   color: var(--text);
 }
 .session-row-menu-btn:focus-visible {
-  opacity: 1;
   outline: 2px solid var(--accent);
   outline-offset: 1px;
 }
