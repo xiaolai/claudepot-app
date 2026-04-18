@@ -23,7 +23,18 @@ export function useRefresh(pushToast: (kind: "info" | "error", text: string) => 
   const [keychainIssue, setKeychainIssue] = useState<string | null>(null);
   const [syncError, setSyncError] = useState<string | null>(null);
   const [ccIdentity, setCcIdentity] = useState<CcIdentity | null>(null);
-  const [verifying, setVerifying] = useState(false);
+  // Audit H10: `verifying` used to be a plain boolean cleared by the
+  // initiating refresh's finally, guarded by generation check. If a
+  // later refresh decided verification WASN'T needed, it never
+  // cleared the flag, and the initiator's finally refused to clear
+  // (stale gen) — the chip stuck forever.
+  //
+  // Fix: count concurrent verifies. Each verify start increments,
+  // each finally decrements, unconditionally. `verifying` is derived
+  // from count > 0 so there's no stuck state no matter how refreshes
+  // overlap.
+  const [verifyingCount, setVerifyingCount] = useState(0);
+  const verifying = verifyingCount > 0;
   const lastRefreshRef = useRef(0);
   const refreshingRef = useRef(false);
   // Generation token — every call to refresh() bumps this. Background
@@ -98,7 +109,12 @@ export function useRefresh(pushToast: (kind: "info" | "error", text: string) => 
         return age >= VERIFY_TTL_MS || a.verify_status === "never";
       });
       if (needsVerify) {
-        setVerifying(true);
+        // Count-based verifying flag (H10): increment on start,
+        // decrement ALWAYS in finally. The accounts-patch write still
+        // gates on gen to avoid stale data overwriting fresher data,
+        // but the flag itself is now a simple ref-count — can't get
+        // stuck on an orphaned set.
+        setVerifyingCount((n) => n + 1);
         api
           .verifyAllAccounts()
           .then((verified) => {
@@ -109,10 +125,7 @@ export function useRefresh(pushToast: (kind: "info" | "error", text: string) => 
             console.warn("verify_all_accounts failed:", e);
           })
           .finally(() => {
-            // Only clear `verifying` if this IS the latest refresh. An
-            // older pass finishing shouldn't remove the chip while a
-            // newer one is still in flight.
-            if (gen === refreshGenRef.current) setVerifying(false);
+            setVerifyingCount((n) => Math.max(0, n - 1));
           });
       }
     } catch (e) {
