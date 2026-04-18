@@ -42,6 +42,7 @@ export const ICONS = {
   "wrench":         "\uf0ad",
   "stethoscope":    "\uf0f1",
   "play":           "\uf04b",
+  "more-vertical":  "\uf142",     // ellipsis-v — per-row menu trigger
 
   // --- Identity / files / devices
   "user":           "\uf007",

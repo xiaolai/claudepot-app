@@ -1,5 +1,6 @@
 import { describe, expect, it, vi, beforeEach } from "vitest";
 import { render, screen, waitFor } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 
 import type { ProjectDetail as ProjectDetailData, ProjectInfo } from "../../types";
 
@@ -88,5 +89,48 @@ describe("ProjectDetail", () => {
       ).toBeInTheDocument(),
     );
     expect(showSpy).toHaveBeenCalledTimes(2);
+  });
+
+  it("each session row exposes a visible menu button with aria-label", async () => {
+    showSpy.mockResolvedValue(
+      mkDetail([
+        { id: "aaaa0000-0000-0000-0000-000000000000", size: 123 },
+        { id: "bbbb0000-0000-0000-0000-000000000000", size: 456 },
+      ]),
+    );
+    render(
+      <ProjectDetail
+        path="/p"
+        projects={projects}
+        refreshSignal={0}
+        onRename={() => {}}
+        onMoved={() => {}}
+      />,
+    );
+    const buttons = await screen.findAllByRole("button", {
+      name: /session actions/i,
+    });
+    expect(buttons).toHaveLength(2);
+  });
+
+  it("menu button opens the context menu with a Move action", async () => {
+    showSpy.mockResolvedValue(
+      mkDetail([{ id: "aaaa0000-0000-0000-0000-000000000000", size: 123 }]),
+    );
+    const user = userEvent.setup();
+    render(
+      <ProjectDetail
+        path="/p"
+        projects={projects}
+        refreshSignal={0}
+        onRename={() => {}}
+        onMoved={() => {}}
+      />,
+    );
+    const btn = await screen.findByRole("button", { name: /session actions/i });
+    await user.click(btn);
+    expect(
+      screen.getByText(/move to another project/i),
+    ).toBeInTheDocument();
   });
 });
