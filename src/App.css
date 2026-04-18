@@ -3111,3 +3111,85 @@ button.danger.primary:hover:not(:disabled) {
 }
 .adopt-orphans-row-status.ok { color: var(--ok); }
 .adopt-orphans-row-status.bad { color: var(--bad); }
+
+/* Right-click affordance on session rows. Cursor stays `default` (per
+ * global rule) but hover fill tells the user something is clickable. */
+.session-row {
+  border-radius: 4px;
+  padding: 2px 6px;
+  margin: 0 -6px;
+}
+.session-row:hover {
+  background: var(--hover-bg);
+}
+
+.move-session-modal {
+  width: min(540px, calc(100vw - 48px));
+}
+.move-session-form {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.move-session-label {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-size: 11px;
+  color: var(--muted);
+}
+.move-session-label select {
+  height: 28px;
+  padding: 0 8px;
+  border: 0.5px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg);
+  color: var(--text);
+  font-family: var(--mono);
+  font-size: 11px;
+}
+.move-session-advanced {
+  padding: 8px 0;
+  border-top: 0.5px solid var(--border);
+}
+.move-session-advanced summary {
+  cursor: default;
+  font-size: 11px;
+  color: var(--muted);
+  padding: 4px 0;
+}
+.move-session-check {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  padding: 4px 0;
+  font-size: 11px;
+}
+.move-session-check .muted {
+  font-size: 10px;
+}
+.move-session-error {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 0;
+  padding: 8px 10px;
+  border: 0.5px solid var(--bad);
+  background: var(--bad-weak);
+  color: var(--bad);
+  border-radius: 6px;
+  font-size: 11px;
+}
+.move-session-done {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.move-session-done-line {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 0;
+  font-size: 13px;
+  color: var(--ok);
+}
