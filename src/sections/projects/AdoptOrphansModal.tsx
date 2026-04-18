@@ -4,6 +4,7 @@ import { Icon } from "../../components/Icon";
 import { api } from "../../api";
 import { useFocusTrap } from "../../hooks/useFocusTrap";
 import type { AdoptReport, OrphanedProject } from "../../types";
+import { formatSize } from "./format";
 
 type RowState =
   | { kind: "idle" }
@@ -118,7 +119,7 @@ export function AdoptOrphansModal({
                   <span className="muted">
                     {o.sessionCount} session{o.sessionCount === 1 ? "" : "s"}
                     {" · "}
-                    {formatBytes(o.totalSizeBytes)}
+                    {formatSize(o.totalSizeBytes)}
                   </span>
                 </div>
 
@@ -183,10 +184,3 @@ export function AdoptOrphansModal({
   );
 }
 
-function formatBytes(n: number): string {
-  const KB = 1024, MB = KB * 1024, GB = MB * 1024;
-  if (n >= GB) return `${(n / GB).toFixed(1)} GB`;
-  if (n >= MB) return `${(n / MB).toFixed(1)} MB`;
-  if (n >= KB) return `${(n / KB).toFixed(1)} KB`;
-  return `${n} B`;
-}

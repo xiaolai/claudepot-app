@@ -39,11 +39,12 @@ use crate::project_sanitize::sanitize_path;
 use crate::session_move_helpers::{
     clear_claude_json_session_pointers, extract_session_id_from_path, has_sync_conflict,
     is_recently_modified, list_sessions_in_slug, move_session_subdir, read_first_cwd,
-    remove_empty_subdirs, remove_if_empty,
+    remove_empty_subdirs, remove_if_empty, validate_slug,
 };
 use crate::session_move_jsonl::{rewrite_history_jsonl, stream_rewrite_jsonl};
 pub use crate::session_move_types::{
     AdoptReport, MoveSessionError, MoveSessionOpts, MoveSessionReport, OrphanedProject,
+    INVALID_SLUG_MSG,
 };
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -157,16 +158,14 @@ pub fn move_session(
         (0, 0)
     };
 
-    // Phase 4: .claude.json session pointers. Two slots, both optional.
-    // CC stores claude.json as a sibling of ~/.claude (not inside), but
-    // we accept either layout for flexibility — callers in tests put it
-    // inside config_dir for isolation.
-    let claude_json_pointers_cleared = clear_claude_json_session_pointers(
-        &config_dir.join("claude.json"),
-        &config_dir.join(".claude.json"),
-        &from_canonical,
-        session_id,
-    )?;
+    // Phase 4: .claude.json session pointers. CC stores this file at
+    // `$HOME/.claude.json` — a sibling of `$HOME/.claude/`, NOT inside
+    // config_dir. The caller is responsible for passing the correct
+    // path; if they don't (`None`), Phase 4 is skipped.
+    let claude_json_pointers_cleared = match opts.claude_json_path.as_deref() {
+        Some(path) => clear_claude_json_session_pointers(path, &from_canonical, session_id)?,
+        None => 0,
+    };
 
     // Now it's safe to unlink the source JSONL. If anything above failed
     // we returned early and the source is preserved.
@@ -250,14 +249,21 @@ pub fn detect_orphaned_projects(
 
 /// Move every session under `<config_dir>/projects/<orphan_slug>/` into
 /// `target_cwd`'s project dir. Returns aggregate counts plus per-session
-/// detail. Refuses if the orphan slug still resolves to a live directory
-/// (not actually orphaned) or if `target_cwd` is the same as the orphan's
+/// detail. Refuses if the orphan slug contains path separators or `..`
+/// (which would escape `projects_dir`), if the resolved dir is not an
+/// actual project dir, or if `target_cwd` is the same as the orphan's
 /// cwd.
+///
+/// `claude_json_path`: where to find CC's `~/.claude.json` (see
+/// `MoveSessionOpts::claude_json_path`). Threaded through to each
+/// per-session `move_session` call so Phase 4 runs in production.
 pub fn adopt_orphan_project(
     config_dir: &Path,
     orphan_slug: &str,
     target_cwd: &Path,
+    claude_json_path: Option<PathBuf>,
 ) -> Result<AdoptReport, MoveSessionError> {
+    validate_slug(orphan_slug)?;
     let projects_dir = config_dir.join("projects");
     let orphan_dir = projects_dir.join(orphan_slug);
     if !orphan_dir.is_dir() {
@@ -295,6 +301,7 @@ pub fn adopt_orphan_project(
             force_live_session: true,
             force_sync_conflict: false,
             cleanup_source_if_empty: false,
+            claude_json_path: claude_json_path.clone(),
         };
         match move_session(config_dir, sid, &orphan_cwd, target_cwd, opts) {
             Ok(r) => {
@@ -873,7 +880,10 @@ mod tests {
             sid,
             &from,
             &to,
-            MoveSessionOpts::default(),
+            MoveSessionOpts {
+                claude_json_path: Some(f.claude_json_path()),
+                ..Default::default()
+            },
         )
         .expect("claude.json update");
 
@@ -929,7 +939,10 @@ mod tests {
             sid,
             &from,
             &to,
-            MoveSessionOpts::default(),
+            MoveSessionOpts {
+                claude_json_path: Some(f.claude_json_path()),
+                ..Default::default()
+            },
         )
         .expect("activeWorktreeSession clear");
 
@@ -968,6 +981,35 @@ mod tests {
     }
 
     #[test]
+    fn adopt_orphan_project_rejects_traversal_slug() {
+        // Library-level defense: slugs from CLI/Tauri are user input
+        // that must NEVER be able to escape <config_dir>/projects/.
+        // CC's real slugs are all `[A-Za-z0-9-]+`; anything else is
+        // rejected regardless of whether the joined path happens to
+        // exist on disk.
+        let f = Fixture::new();
+        let target = f.make_live_cwd("main");
+        let bad_slugs = [
+            "..",
+            "../outside",
+            "/etc",
+            "a/b",
+            "a\\b",
+            "",
+            ".",
+            "foo\0bar",
+            "has space",
+            "has:colon",
+        ];
+        for slug in bad_slugs {
+            let err = adopt_orphan_project(f.config_dir(), slug, &target, None)
+                .expect_err(&format!("must reject slug {slug:?}"));
+            let matched = matches!(&err, MoveSessionError::InvalidSlug(got, _) if got == slug);
+            assert!(matched, "expected InvalidSlug for {slug:?}, got {err:?}");
+        }
+    }
+
+    #[test]
     fn adopt_orphan_project_moves_all_sessions_and_removes_empty_source() {
         let f = Fixture::new();
         let dead_cwd = PathBuf::from("/was/a/worktree/but/is/gone");
@@ -985,7 +1027,7 @@ mod tests {
             &dead_cwd.to_string_lossy(),
         );
 
-        let report = adopt_orphan_project(f.config_dir(), &from_slug, &target)
+        let report = adopt_orphan_project(f.config_dir(), &from_slug, &target, None)
             .expect("adopt should succeed");
 
         assert_eq!(report.sessions_attempted, 3);
