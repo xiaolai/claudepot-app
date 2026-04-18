@@ -44,6 +44,9 @@ export function ProjectsSection({
   const [renameTarget, setRenameTarget] = useState<string | null>(null);
   const [filter, setFilter] = useState<ProjectFilter>("all");
   const [toast, setToast] = useState<string | null>(null);
+  /** Bumped on every completed session move so ProjectDetail's
+   * useEffect refetches even though `path` didn't change. */
+  const [detailRefreshSignal, setDetailRefreshSignal] = useState(0);
   const [ctxMenu, setCtxMenu] = useState<{
     x: number;
     y: number;
@@ -213,9 +216,11 @@ export function ProjectsSection({
             key={selectedPath}
             path={selectedPath}
             projects={projects}
+            refreshSignal={detailRefreshSignal}
             onRename={(path) => setRenameTarget(path)}
             onMoved={() => {
               setToast("Session moved.");
+              setDetailRefreshSignal((n) => n + 1);
               refresh();
             }}
           />
