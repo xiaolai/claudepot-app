@@ -60,6 +60,7 @@ change if the platform or our taste changes.
 
 | Token | Derivation | Purpose |
 |---|---|---|
+| `--chrome` | `--surface` | Unified rail + sidebar background |
 | `--hover-bg` | accent at 6 % | List row hover |
 | `--accent-weak` | accent at 12–18 % | Active-state background |
 | `--ok-weak` | green at 12 % | Success badge background |
@@ -99,13 +100,15 @@ in review.
 
 | Role | Size | Weight |
 |---|---|---|
-| Page title | 18 px | 600 |
-| Section heading | 14 px | 600 |
+| Page title | 14 px | 600 |
+| Section heading | 13 px | 600 |
 | Subheading / sidebar label | 11 px | 600 uppercase, 0.04em tracking |
-| Body / button | 13 px | 400 (500 for primary) |
-| List row primary | 13 px | 500 (600 when selected) |
+| Body / button | 12 px | 400 (500 for primary) |
+| List row primary | 12 px | 500 (600 when selected) |
 | Metadata / hint | 11 px | 400 |
 | Badge / tag | 10 px | 600 |
+
+Scale: `10 · 11 · 12 · 13 · 14`. Five sizes, no more.
 
 **Line-height — exactly three values:**
 - `1.0` — icons, badges, single-line chrome

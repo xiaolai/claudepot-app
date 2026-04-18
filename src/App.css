@@ -82,6 +82,12 @@
   --font-mono: "JetBrainsMono NF", ui-monospace, "SF Mono",
                SFMono-Regular, Menlo, monospace;
 
+  /* Chrome = nav rail + sidebar. Subtly darker than --bg in light mode,
+     subtly lighter in dark mode. --muted adapts per color scheme, so
+     the mix always moves the chrome in the "distinct from content"
+     direction. Tune the 90/10 ratio to taste. */
+  --chrome: color-mix(in srgb, var(--bg) 90%, var(--muted));
+
   font-family: var(--font);
 }
 
@@ -124,15 +130,9 @@
 }
 
 /* System Settings ▸ Accessibility ▸ Display ▸ Reduce transparency.
-   The nav rail leans on Tauri vibrancy (transparent background). When
-   vibrancy is disabled by OS policy, the transparent pane would show
-   nothing, so fall back to the opaque --bg. The list pane is already
-   opaque (see .sidebar) so it needs no override. */
+   The chrome (nav rail + sidebar) now uses a solid --chrome color so
+   it needs no override. Translucent overlays (palette/toast/modal) do. */
 @media (prefers-reduced-transparency) {
-  .section-rail {
-    background: var(--bg);
-  }
-  /* Translucent overlays also get fully opaque fallbacks. */
   .palette,
   .toast,
   .modal {
@@ -158,7 +158,7 @@ html, body, #root {
 
 body {
   font-family: var(--font);
-  font-size: 13px;
+  font-size: 12px;
   line-height: 1.4;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
@@ -240,50 +240,77 @@ button .icon {
 /* ---------- section rail ---------- */
 
 .section-rail {
-  width: 48px;
-  flex-shrink: 0;
+  flex: 0 0 4%;
+  min-width: 44px;
+  max-width: 52px;
   display: flex;
   flex-direction: column;
   align-items: center;
   gap: 4px;
   /* 52px clears the overlay title bar / traffic lights */
   padding: 52px 0 8px;
-  background: transparent;
-  border-right: 0.5px solid var(--border);
+  background: var(--chrome);
+  /* No right border — rail and sidebar share --chrome and should read
+     as one continuous surface. The only visible vertical separator in
+     the chrome is the one between sidebar and content. */
   -webkit-app-region: drag;
 }
 
+/* The button is purely a click target — no visual chrome. The active
+   fill, hover tint, and focus ring all live on the inner .icon span,
+   so they hug the glyph tightly rather than painting a large empty
+   box around it. Font-baseline offset then becomes invisible because
+   there's no "dead space" in the indicator to reveal it. */
 .section-rail-item {
   width: 32px;
   height: 32px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  background: transparent;
+  display: grid;
+  place-items: center;
+  padding: 0;
+  margin: 0;
+  appearance: none;
+  -webkit-appearance: none;
+  background: transparent !important;
   border: 0;
-  border-radius: 6px;
+  box-shadow: none;
   color: var(--muted);
   cursor: default;
   -webkit-app-region: no-drag;
 }
-/* Rail icons are slightly larger (18 px) for navigation prominence. */
-.section-rail-item .icon {
-  font-size: 18px;
+.section-rail-item:focus-visible {
+  outline: none;            /* focus ring lives on the .icon */
 }
 
-.section-rail-item:hover {
+/* The span carries the visual indicator and is a grid container so
+   the glyph lands at the geometric center regardless of font metrics.
+   !important on the sizing/centering rules because the inline styles
+   from <Icon size={18}> override font-size — we don't care, our grid
+   sizing wins. */
+.section-rail-item .icon {
+  font-size: 18px !important;
+  line-height: 1 !important;
+  width: 24px !important;
+  height: 24px !important;
+  display: grid !important;
+  place-items: center !important;
+  border-radius: 6px;
+  vertical-align: 0;
+  transition: background 0.1s ease, color 0.1s ease;
+}
+
+.section-rail-item:hover .icon {
   background: var(--accent-weak);
   color: var(--text);
 }
 
-.section-rail-item.active {
+.section-rail-item.active .icon {
   background: var(--accent-weak);
   color: var(--accent);
 }
 
-.section-rail-item:focus-visible {
-  outline: 2px solid var(--accent);
-  outline-offset: 2px;
+.section-rail-item:focus-visible .icon {
+  outline: 1px solid color-mix(in srgb, var(--accent) 55%, transparent);
+  outline-offset: 1px;
 }
 
 /* ---------- section submenu (popover) ---------- */
@@ -308,7 +335,7 @@ button .icon {
   border: 0;
   border-radius: 4px;
   color: var(--text);
-  font-size: 13px;
+  font-size: 12px;
   cursor: default;
 }
 
@@ -320,16 +347,16 @@ button .icon {
 
 /* ---------- sidebar ---------- */
 
-/* List pane — opaque, part of the content area. The nav rail to the
-   left carries the vibrancy; the list pane is a solid column so the
-   "rail vs list" distinction reads clearly (1Password 8 pattern).
-   See design-references.md and design-patterns.md / Window shell. */
+/* List pane — shares the rail's chrome color so they read as a single
+   navigation surface on the left edge; the content pane to the right is
+   the document surface with its own brighter --bg. */
 .sidebar {
-  width: 260px;
-  min-width: 220px;
+  flex: 0 0 20%;
+  min-width: 200px;
+  max-width: 280px;
   display: flex;
   flex-direction: column;
-  background: var(--bg);
+  background: var(--chrome);
   border-right: 0.5px solid var(--border);
   overflow-y: auto;
   padding: 0 8px 8px;
@@ -464,7 +491,7 @@ button .icon {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  font-size: 13px;
+  font-size: 12px;
 }
 
 /* Row name — medium weight by default, semibold only on the selected
@@ -585,7 +612,7 @@ button .icon {
   gap: 2px;
   margin-left: 4px;
   padding: 1px 5px;
-  font-size: 9px;
+  font-size: 10px;
   font-weight: 500;
   color: var(--muted);
   background: var(--border);
@@ -701,8 +728,8 @@ button .icon {
 /* ---------- content pane ---------- */
 
 .content {
-  flex: 1;
-  min-width: 0;          /* prevent flex child from overflowing */
+  flex: 1 1 76%;
+  min-width: 400px;      /* content floor */
   display: flex;
   flex-direction: column;
   background: var(--bg);
@@ -728,7 +755,7 @@ button .icon {
 }
 
 .toolbar-title {
-  font-size: 13px;
+  font-size: 12px;
   font-weight: 600;
   flex: 1;
 }
@@ -795,7 +822,7 @@ button .icon {
 }
 
 .detail-email {
-  font-size: 16px;
+  font-size: 14px;
   font-weight: 600;
   margin: 0;
 }
@@ -998,7 +1025,7 @@ button .icon {
 
 button {
   font: inherit;
-  font-size: 13px;
+  font-size: 12px;
   font-weight: 400;
   height: 28px;
   padding: 1px 12px;
@@ -1418,7 +1445,7 @@ button.danger.primary:hover:not(:disabled) {
   padding: 16px;
   text-align: center;
   color: var(--muted);
-  font-size: 13px;
+  font-size: 12px;
 }
 
 .palette-group-label {
@@ -1441,7 +1468,7 @@ button.danger.primary:hover:not(:disabled) {
   border: 0;
   border-radius: 6px;
   color: var(--text);
-  font-size: 13px;
+  font-size: 12px;
   height: auto;
   box-shadow: none;
 }
@@ -1518,7 +1545,7 @@ button.danger.primary:hover:not(:disabled) {
   border: 0;
   border-radius: 4px;
   color: var(--text);
-  font-size: 13px;
+  font-size: 12px;
   height: auto;
   box-shadow: none;
 }
@@ -1570,7 +1597,7 @@ button.danger.primary:hover:not(:disabled) {
 
 .empty h2 {
   margin: 0;
-  font-size: 16px;
+  font-size: 14px;
   font-weight: 600;
 }
 
@@ -1613,7 +1640,7 @@ button.danger.primary:hover:not(:disabled) {
 
 .onboarding-step-title {
   margin: 0;
-  font-size: 13px;
+  font-size: 12px;
   font-weight: 500;
   max-width: none;
 }
@@ -1668,12 +1695,12 @@ button.danger.primary:hover:not(:disabled) {
 
 .modal h2 {
   margin: 0 0 8px;
-  font-size: 13px;
+  font-size: 12px;
   font-weight: 700;
 }
 
 .modal-body {
-  font-size: 13px;
+  font-size: 12px;
   color: var(--muted);
 }
 
@@ -1729,7 +1756,7 @@ button.danger.primary:hover:not(:disabled) {
   -webkit-backdrop-filter: blur(20px);
   backdrop-filter: blur(20px);
   box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
-  font-size: 13px;
+  font-size: 12px;
   color: #fff;
   max-width: 320px;
   pointer-events: auto;
@@ -1758,7 +1785,7 @@ button.danger.primary:hover:not(:disabled) {
 }
 
 .toast-close {
-  font-size: 13px;
+  font-size: 12px;
   line-height: 1;
   padding: 0;
   border: none;
@@ -1808,7 +1835,7 @@ button.danger.primary:hover:not(:disabled) {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  font-size: 13px;
+  font-size: 12px;
   padding: 2px;
   border: none;
   background: none;
@@ -1919,12 +1946,19 @@ button.danger.primary:hover:not(:disabled) {
 /* ---------- settings section (P3.1) ---------- */
 
 .settings-view {
+  /* No max-width on the flex child itself, otherwise the content pane
+     can't fill the window and the transparent body reveals the OS
+     chrome on wide displays. Reading width is capped on each inner
+     element instead — the pane's --bg reaches the window edge. */
+  padding: 52px 24px 24px;
+}
+
+.settings-view > * {
   max-width: 520px;
-  padding-top: 52px;
 }
 
 .settings-heading {
-  font-size: 15px;
+  font-size: 13px;
   font-weight: 600;
   margin: 0 0 16px;
 }
@@ -1965,7 +1999,7 @@ button.danger.primary:hover:not(:disabled) {
   align-items: center;
   justify-content: space-between;
   gap: 12px;
-  font-size: 13px;
+  font-size: 12px;
   padding: 4px 0;
 }
 
@@ -2113,7 +2147,7 @@ button.danger.primary:hover:not(:disabled) {
 }
 
 .maintenance-section-header h2 {
-  font-size: 15px;
+  font-size: 13px;
   font-weight: 500;
   margin: 0;
 }
@@ -2367,7 +2401,7 @@ button.danger.primary:hover:not(:disabled) {
   /* AppKit title bar / inspector heading style: 15pt regular-weight
      is the document-title feel (Preview, QuickLook, Get Info). The
      earlier 16/600 read as a web-app "page heading". */
-  font-size: 15px;
+  font-size: 13px;
   font-weight: 500;
   letter-spacing: -0.01em;
   margin: 0;
@@ -2446,7 +2480,7 @@ button.danger.primary:hover:not(:disabled) {
   display: flex;
   align-items: center;
   gap: 6px;
-  font-size: 16px;
+  font-size: 14px;
   font-weight: 600;
   margin: 0;
 }
@@ -2500,7 +2534,7 @@ button.danger.primary:hover:not(:disabled) {
   color: var(--text);
   border: 0.5px solid var(--border);
   border-radius: 999px;
-  font-size: 13px;
+  font-size: 12px;
   cursor: default;
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
 }
@@ -2676,7 +2710,7 @@ button.danger.primary:hover:not(:disabled) {
 .clean-modal { width: 560px; max-height: 85vh; overflow-y: auto; }
 
 .clean-modal .clean-summary {
-  font-size: 13px;
+  font-size: 12px;
   margin: 4px 0 8px;
 }
 
@@ -2898,7 +2932,7 @@ button.danger.primary:hover:not(:disabled) {
   align-items: baseline;
   gap: 8px;
   padding: 2px 0;
-  font-size: 13px;
+  font-size: 12px;
   cursor: default;
 }
 

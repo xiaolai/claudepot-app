@@ -40,25 +40,42 @@ nav.
 ```
 ┌───────────────────────────────────────────────────┐
 │ ● ● ●    (traffic lights float on nav rail)       │
-│┌──┬──────────────┬──────────────────────────────┐ │
-││  │              │                              │ │
-││R │  LIST PANE   │        DETAIL PANE           │ │
-││48│  240–320     │        flex: 1               │ │
-││  │              │                              │ │
-│└──┴──────────────┴──────────────────────────────┘ │
+│┌─┬────────────┬────────────────────────────────┐  │
+││ │            │                                │  │
+││R│  LIST      │        DETAIL PANE             │  │
+││ │  PANE      │                                │  │
+││4│    20 %    │           76 %                 │  │
+││ │            │                                │  │
+│└─┴────────────┴────────────────────────────────┘  │
 └───────────────────────────────────────────────────┘
 ```
 
-- **Nav rail** (48 px): vibrancy, runs y=0 to bottom. First icon at
-  ~52 px to clear traffic lights.
-- **List pane** (240–320 px): opaque `var(--bg)`.
-- **Detail pane**: flex: 1, opaque `var(--bg)`.
-- **Separators**: 0.5 px `var(--border)`, vertical, uninterrupted
+Proportions are percentage-based with tight min/max caps so chrome
+never dominates the document — the user comes for the content, not the
+navigation.
+
+| Column | flex-basis | min | max | Background |
+|---|---|---|---|---|
+| Nav rail | 4 % | 44 px | 52 px | `var(--chrome)` |
+| List pane | 20 % | 200 px | 280 px | `var(--chrome)` |
+| Detail pane | 76 % | 400 px | — | `var(--bg)` |
+
+Target total chrome share: ~22–27 % of window width at typical desktop
+sizes (900–1600 px). If you find yourself increasing either cap,
+stop — tighter chrome is the house style.
+
+- Rail and list share `var(--chrome)` (unified chrome surface, subtly
+  distinct from content). Traffic lights float over the rail's top
+  ~52 px. First icon sits at that offset.
+- Detail pane is `var(--bg)` (the document surface), brighter than
+  chrome so the left-chrome vs. right-document split is visible.
+- Separators are 0.5 px `var(--border)`, vertical, uninterrupted
   top-to-bottom. No horizontal separator in window chrome.
 
-Tauri config: `titleBarStyle: "Overlay"`, `windowEffects: ["sidebar"]`
-on the rail. Do not emulate vibrancy with CSS `backdrop-filter` — use
-the OS.
+Tauri config: `titleBarStyle: "Overlay"`, `hiddenTitle: true`,
+`trafficLightPosition: { x: 16, y: 18 }`. We no longer use vibrancy
+— `--chrome` is a solid color — so the `windowEffects: ["sidebar"]`
+entry is kept only as a hint to macOS for window-chrome treatment.
 
 ## Selectable list row (listbox option)
 
