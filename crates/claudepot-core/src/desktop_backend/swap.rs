@@ -7,6 +7,12 @@ use std::path::Path;
 use uuid::Uuid;
 
 /// Snapshot the current Desktop session items into the profile dir for `account_id`.
+///
+/// Audit M6: if an item existed in a previous snapshot but is absent
+/// from the current `data_dir`, we MUST delete it from the profile so
+/// it doesn't resurrect on the next `restore`. Without this, clearing
+/// cookies / signing out / etc. in Desktop left the stale data in the
+/// per-account profile dir, and swap-back reintroduced it.
 pub fn snapshot(
     data_dir: &Path,
     account_id: Uuid,
@@ -29,8 +35,19 @@ pub fn snapshot(
                 std::fs::create_dir_all(parent)?;
             }
             std::fs::copy(&src, &dst)?;
+        } else {
+            // Missing in current session — purge any prior snapshot of
+            // this item so the profile matches live state. Silent on
+            // failure (permission / IO): the stale record is a bug but
+            // purging is best-effort; restore()'s phase 3 only copies
+            // items that exist in the profile so a leftover entry does
+            // less damage than a failing snapshot.
+            if dst.is_dir() {
+                let _ = std::fs::remove_dir_all(&dst);
+            } else if dst.is_file() {
+                let _ = std::fs::remove_file(&dst);
+            }
         }
-        // Missing items are OK — not all items exist on all platforms
     }
 
     Ok(())
@@ -187,10 +204,47 @@ pub async fn switch(
     tracing::info!("restoring profile for target account...");
     restore(&data_dir, target_id, items)?;
 
-    // Update active pointer in store (before relaunch so state is consistent)
-    store.set_active_desktop(target_id).map_err(|e| {
-        DesktopSwapError::Io(std::io::Error::other(format!("db update failed: {e}")))
-    })?;
+    // Update active pointer in store AFTER disk restore so metadata
+    // matches on-disk reality. If the DB write fails here, disk is
+    // already at target but the store still says outgoing — drift.
+    // Audit M7: attempt to roll the DISK back to the outgoing snapshot
+    // we just took, so the pair (disk, pointer) stays consistent
+    // regardless of outcome. If the disk rollback also fails, surface
+    // a combined error that names the drift so the user can reconcile.
+    if let Err(db_err) = store.set_active_desktop(target_id) {
+        tracing::error!(
+            target = %target_id,
+            "DB set_active_desktop failed after disk restore; attempting disk rollback: {db_err}"
+        );
+        if let Some(out_id) = outgoing_id {
+            match restore(&data_dir, out_id, items) {
+                Ok(()) => {
+                    tracing::warn!(
+                        "disk rolled back to outgoing account; state is consistent with DB"
+                    );
+                    return Err(DesktopSwapError::Io(std::io::Error::other(format!(
+                        "db update failed (disk rolled back): {db_err}"
+                    ))));
+                }
+                Err(rb_err) => {
+                    tracing::error!(
+                        "disk rollback also failed — manual reconciliation needed: {rb_err}"
+                    );
+                    return Err(DesktopSwapError::Io(std::io::Error::other(format!(
+                        "db update failed: {db_err}; disk rollback failed: {rb_err}; \
+                         Desktop is at {target_id} but DB still points to previous account — \
+                         run switch again or reconcile manually"
+                    ))));
+                }
+            }
+        } else {
+            // No outgoing snapshot to roll back to. Drift is real:
+            // disk is at target, DB pointer is still whatever it was.
+            return Err(DesktopSwapError::Io(std::io::Error::other(format!(
+                "db update failed (no outgoing snapshot to roll back to): {db_err}"
+            ))));
+        }
+    }
 
     // Relaunch
     if !no_launch {
@@ -283,6 +337,47 @@ mod tests {
         let profile = crate::paths::desktop_profile_dir(account_id);
         assert!(profile.join("config.json").exists());
         assert!(!profile.join("Cookies").exists());
+    }
+
+    #[test]
+    fn test_snapshot_purges_items_absent_from_current_session() {
+        // Audit M6 regression guard. If a prior snapshot captured
+        // `Cookies` but the user then cleared cookies in Desktop and
+        // we snapshot again, the profile dir MUST NOT retain the
+        // stale cookies — otherwise a later restore resurrects them.
+        let _lock = crate::testing::lock_data_dir();
+        let _env_dir = setup_test_data_dir();
+        let data_dir = _env_dir.path().join("Claude");
+        fs::create_dir_all(&data_dir).unwrap();
+
+        let account_id = Uuid::new_v4();
+        let profile = crate::paths::desktop_profile_dir(account_id);
+
+        // Round 1: data_dir has all three items → snapshot captures all.
+        fs::write(data_dir.join("config.json"), "v1").unwrap();
+        fs::write(data_dir.join("Cookies"), "yum").unwrap();
+        fs::create_dir_all(data_dir.join("Local Storage")).unwrap();
+        fs::write(data_dir.join("Local Storage/data.dat"), "ls").unwrap();
+        snapshot(&data_dir, account_id, TEST_ITEMS).unwrap();
+        assert!(profile.join("Cookies").exists());
+        assert!(profile.join("Local Storage").is_dir());
+
+        // Round 2: Cookies and Local Storage removed from data_dir.
+        fs::remove_file(data_dir.join("Cookies")).unwrap();
+        fs::remove_dir_all(data_dir.join("Local Storage")).unwrap();
+        snapshot(&data_dir, account_id, TEST_ITEMS).unwrap();
+
+        // Stale entries must be purged from the profile.
+        assert!(
+            !profile.join("Cookies").exists(),
+            "stale Cookies not purged"
+        );
+        assert!(
+            !profile.join("Local Storage").exists(),
+            "stale Local Storage dir not purged"
+        );
+        // config.json still present in data_dir → still in profile.
+        assert_eq!(fs::read_to_string(profile.join("config.json")).unwrap(), "v1");
     }
 
     #[test]
