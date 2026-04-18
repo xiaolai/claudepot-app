@@ -39,13 +39,31 @@ export function RepairView({
 
   useEffect(() => { refresh(); }, [refresh]);
 
-  const afterTerminal = () => { setToast("Done."); refresh(); onOpTerminated?.(); };
+  // Audit M18: distinct terminal handlers so a failed repair doesn't
+  // show a "Done." toast. Previously both onComplete and onError
+  // pointed at the same afterTerminal which always set "Done." —
+  // indistinguishable from success at the page level.
+  const afterComplete = (kind: "Resume" | "Rollback", id: string) => {
+    setToast(`${kind} complete: ${id}`);
+    refresh();
+    onOpTerminated?.();
+  };
+  const afterError = (kind: "Resume" | "Rollback", id: string, detail: string | null) => {
+    setToast(`${kind} failed: ${detail ?? id}`);
+    refresh();
+    onOpTerminated?.();
+  };
 
   const runResume = async (entry: JournalEntry) => {
     setPending(null);
     try {
       const opId = await api.repairResumeStart(entry.id);
-      openOpModal({ opId, title: `Resuming ${entry.id}`, onComplete: afterTerminal, onError: afterTerminal });
+      openOpModal({
+        opId,
+        title: `Resuming ${entry.id}`,
+        onComplete: () => afterComplete("Resume", entry.id),
+        onError: (detail) => afterError("Resume", entry.id, detail),
+      });
     } catch (e) { setToast(`Resume failed: ${e}`); }
   };
 
@@ -53,7 +71,12 @@ export function RepairView({
     setPending(null);
     try {
       const opId = await api.repairRollbackStart(entry.id);
-      openOpModal({ opId, title: `Rolling back ${entry.id}`, onComplete: afterTerminal, onError: afterTerminal });
+      openOpModal({
+        opId,
+        title: `Rolling back ${entry.id}`,
+        onComplete: () => afterComplete("Rollback", entry.id),
+        onError: (detail) => afterError("Rollback", entry.id, detail),
+      });
     } catch (e) { setToast(`Rollback failed: ${e}`); }
   };
 
