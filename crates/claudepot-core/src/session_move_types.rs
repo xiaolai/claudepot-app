@@ -8,6 +8,15 @@ use std::time::Duration;
 use thiserror::Error;
 use uuid::Uuid;
 
+/// Invalid-slug sentinel used by both the library guard and the CLI/Tauri
+/// wrappers. Slugs are produced by `sanitize_path`, which emits only
+/// `[A-Za-z0-9-]+`. Any slug outside that alphabet is untrusted input
+/// (most likely a path-traversal attempt); callers must be rejected at
+/// the library boundary regardless of whether the resulting path happens
+/// to be a real directory. See `session_move::validate_slug`.
+pub const INVALID_SLUG_MSG: &str = "slug must be a single non-empty directory name \
+containing only alphanumerics, hyphens, or underscores";
+
 /// Threshold below which we treat the source session file as "live" —
 /// i.e., CC may currently be writing to it. Matches the project_lock
 /// heartbeat semantics elsewhere in the crate (2s is aggressive but safe
@@ -25,6 +34,13 @@ pub struct MoveSessionOpts {
     /// After a successful move, remove the source project dir if it now
     /// contains no JSONL files and no session subdirs.
     pub cleanup_source_if_empty: bool,
+    /// Path to the `~/.claude.json` config file where CC stores per-project
+    /// metadata (including `lastSessionId` and
+    /// `activeWorktreeSession.sessionId` session pointers). The caller
+    /// must supply this — there is no "default" location because
+    /// production is `$HOME/.claude.json` (a sibling of `$HOME/.claude/`)
+    /// while tests locate it elsewhere. `None` skips Phase 4 entirely.
+    pub claude_json_path: Option<PathBuf>,
 }
 
 #[derive(Debug, Default, Clone)]
@@ -58,6 +74,9 @@ pub struct MoveSessionReport {
 pub enum MoveSessionError {
     #[error("session {0} not found under project dir {1:?}")]
     SessionNotFound(Uuid, PathBuf),
+
+    #[error("invalid slug {0:?}: {1}")]
+    InvalidSlug(String, &'static str),
 
     #[error("sync-conflict sibling present for session {0} — resolve manually or pass force_sync_conflict")]
     SyncConflictPresent(Uuid),
