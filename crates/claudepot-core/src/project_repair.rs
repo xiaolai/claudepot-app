@@ -245,15 +245,24 @@ pub fn gc(
                     result.would_remove.push(journal_path);
                 }
             } else {
-                result.bytes_freed += meta.len();
-                let _ = fs::remove_file(entry.path());
-                if journal_path.exists() {
-                    result.bytes_freed += fs::metadata(&journal_path)
-                        .map(|m| m.len())
-                        .unwrap_or(0);
-                    let _ = fs::remove_file(&journal_path);
+                // Audit M12: only count files we actually removed. The
+                // previous implementation incremented bytes_freed and
+                // removed_journals unconditionally even when fs::remove_file
+                // errored (permission denied, race). The CLI + GUI both
+                // reported deletions that didn't happen.
+                let sidecar_size = meta.len();
+                if fs::remove_file(entry.path()).is_ok() {
+                    result.bytes_freed += sidecar_size;
+                    if journal_path.exists() {
+                        let journal_size = fs::metadata(&journal_path)
+                            .map(|m| m.len())
+                            .unwrap_or(0);
+                        if fs::remove_file(&journal_path).is_ok() {
+                            result.bytes_freed += journal_size;
+                        }
+                    }
+                    result.removed_journals += 1;
                 }
-                result.removed_journals += 1;
             }
         }
     }
@@ -275,9 +284,12 @@ pub fn gc(
             if dry_run {
                 result.would_remove.push(entry.path());
             } else {
-                result.bytes_freed += meta.len();
-                let _ = fs::remove_file(entry.path());
-                result.removed_snapshots += 1;
+                // M12: same honesty requirement as above.
+                let size = meta.len();
+                if fs::remove_file(entry.path()).is_ok() {
+                    result.bytes_freed += size;
+                    result.removed_snapshots += 1;
+                }
             }
         }
     }

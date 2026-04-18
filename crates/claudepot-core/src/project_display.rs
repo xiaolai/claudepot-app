@@ -61,8 +61,13 @@ pub(crate) fn compute_dry_run_plan(
 
     // P7 preview: would the ~/.claude.json key rename fire? We don't
     // have the path here (caller-provided), so leave it true if the
-    // map key rename is plausibly needed (old != new).
-    let would_rewrite_claude_json = old_san != new_san;
+    // map key rename is plausibly needed. Audit M13: the prior
+    // check (old_san != new_san) under-reported for renames where
+    // sanitization collapses both sides to the same name (lossy,
+    // e.g. `/tmp/a.b` + `/tmp/a-b` → `-tmp-a-b`) but the raw paths
+    // differ and `~/.claude.json` still stores the raw path as a key.
+    // Align with project.rs P7 gate: rewrite when old_norm != new_norm.
+    let would_rewrite_claude_json = old_norm != _new_norm;
 
     // P8 preview: would auto-memory move? Only if BOTH the git root
     // will change AND a memory dir actually exists at the old git
@@ -89,10 +94,18 @@ pub(crate) fn compute_dry_run_plan(
 
     // P9 preview: would project-local settings.json rewrite? Check if
     // the source project has a .claude/settings.json at all.
+    // Audit M13: in AlreadyMoved scenarios the old dir no longer
+    // exists (the rename happened externally); P9 then runs against
+    // the NEW dir. Check both so the dry-run reports "rewrite"
+    // instead of false "skip" in that case.
     let would_rewrite_project_settings = Path::new(old_norm)
         .join(".claude")
         .join("settings.json")
-        .exists();
+        .exists()
+        || Path::new(_new_norm)
+            .join(".claude")
+            .join("settings.json")
+            .exists();
 
     Ok(DryRunPlan {
         would_move_dir: *scenario == super::project::MoveScenario::MoveAndUpdate,
