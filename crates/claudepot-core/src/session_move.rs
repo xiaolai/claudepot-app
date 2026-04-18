@@ -1367,14 +1367,19 @@ mod tests {
         );
         // Relative order of lines must be preserved (history is read
         // newest-first but lines have their own timestamps; stable order
-        // avoids confusing the Up-arrow reader).
-        let positions: Vec<usize> = ["p1", "p2", "p3", "p4"]
-            .iter()
-            .map(|tag| after.find(tag).unwrap_or(usize::MAX))
+        // avoids confusing the Up-arrow reader). We check the visible
+        // `timestamp` sequence in the output rather than finding short
+        // tag strings — the random tempdir path can contain any digit
+        // by coincidence and produce spurious find-hits.
+        let timestamps: Vec<i64> = after
+            .lines()
+            .filter_map(|l| serde_json::from_str::<serde_json::Value>(l).ok())
+            .filter_map(|v| v.get("timestamp").and_then(|t| t.as_i64()))
             .collect();
-        assert!(
-            positions.windows(2).all(|w| w[0] < w[1]),
-            "history line order must be preserved: {positions:?}"
+        assert_eq!(
+            timestamps,
+            vec![1, 2, 3, 4],
+            "history line order must be preserved"
         );
     }
 
