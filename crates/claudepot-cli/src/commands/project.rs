@@ -435,12 +435,28 @@ pub fn clean(ctx: &AppContext, dry_run: bool, ignore_pending_journals: bool) -> 
     // early on the dry preview and never deleted).
     let perform = !dry_run && ctx.yes;
 
-    let (result, orphans) = project::clean_orphans(
+    // Resolve user-managed protected paths (defaults + user deltas).
+    // A read failure shouldn't block the clean — log and proceed
+    // unprotected so a corrupt prefs file doesn't pin the user out
+    // of cleanup. The protection is a safety net, not a gate.
+    let protected = match claudepot_core::protected_paths::resolved_set(
+        &paths::claudepot_data_dir(),
+    ) {
+        Ok(set) => set,
+        Err(e) => {
+            eprintln!("warning: protected-paths read failed: {e}");
+            std::collections::HashSet::new()
+        }
+    };
+
+    let (result, orphans) = project::clean_orphans_with_progress(
         &config_dir,
         claude_json_path.as_deref(),
         Some(snaps.as_path()),
         Some(locks.as_path()),
+        &protected,
         !perform,
+        &claudepot_core::project_progress::NoopSink,
     )?;
 
     if ctx.json {
