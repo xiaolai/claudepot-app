@@ -6,7 +6,7 @@
 
 use crate::dto::{
     AccountSummary, AppStatus, CcIdentity, CleanPreviewDto, DryRunPlanDto,
-    JournalEntryDto, MoveArgsDto, ProjectDetailDto, ProjectInfoDto,
+    JournalEntryDto, MoveArgsDto, ProjectDetailDto, ProjectInfoDto, ProtectedPathDto,
     RegisterOutcome, RemoveOutcome, UsageEntryDto,
 };
 use claudepot_core::account::{Account, AccountStore};
@@ -770,6 +770,20 @@ pub fn project_clean_start(
     let claude_json = dirs::home_dir().map(|h| h.join(".claude.json"));
     let snaps_for_task = snaps;
     let locks_for_task = locks;
+    // Resolve protected paths once on the spawning thread so the
+    // background task gets a snapshot — list mutations during a
+    // multi-second clean must not change the rules mid-flight. A
+    // failed read is treated as an empty set (no protection) and logged;
+    // refusing to clean over a settings-file glitch would be worse.
+    let protected = match claudepot_core::protected_paths::resolved_set(
+        &paths::claudepot_data_dir(),
+    ) {
+        Ok(set) => set,
+        Err(e) => {
+            tracing::warn!(err = %e, "protected-paths read failed; cleaning without protection");
+            std::collections::HashSet::new()
+        }
+    };
 
     // std::thread::spawn, not tokio::task::spawn_blocking — Tauri's
     // sync #[command] runs outside a tokio runtime context on at least
@@ -787,6 +801,7 @@ pub fn project_clean_start(
             claude_json.as_deref(),
             Some(snaps_for_task.as_path()),
             Some(locks_for_task.as_path()),
+            &protected,
             false,
             &sink,
         );
@@ -1246,4 +1261,50 @@ pub fn session_adopt_orphan(
         claudepot_core::session_move::adopt_orphan_project(&cfg, &slug, target, claude_json_path())
             .map_err(|e| format!("adopt failed: {e}"))?;
     Ok(crate::dto::AdoptReportDto::from(&report))
+}
+
+// ---------------------------------------------------------------------------
+// Protected paths — Settings → Protected pane
+// ---------------------------------------------------------------------------
+
+/// Materialized list (defaults minus removed_defaults, plus user
+/// entries). UI renders this directly.
+#[tauri::command]
+pub fn protected_paths_list() -> Result<Vec<ProtectedPathDto>, String> {
+    let dir = paths::claudepot_data_dir();
+    let list = claudepot_core::protected_paths::list(&dir)
+        .map_err(|e| format!("protected paths list failed: {e}"))?;
+    Ok(list.iter().map(ProtectedPathDto::from).collect())
+}
+
+/// Add a path. Returns the materialized entry (so the UI knows which
+/// badge — default-revived vs new user — to render). Validation is in
+/// core; map errors to user-facing strings here.
+#[tauri::command]
+pub fn protected_paths_add(path: String) -> Result<ProtectedPathDto, String> {
+    let dir = paths::claudepot_data_dir();
+    let added = claudepot_core::protected_paths::add(&dir, &path)
+        .map_err(|e| format!("{e}"))?;
+    Ok(ProtectedPathDto::from(&added))
+}
+
+/// Remove a path. Defaults are tombstoned; user entries are dropped.
+#[tauri::command]
+pub fn protected_paths_remove(path: String) -> Result<(), String> {
+    let dir = paths::claudepot_data_dir();
+    claudepot_core::protected_paths::remove(&dir, &path)
+        .map_err(|e| format!("{e}"))
+}
+
+/// Restore the implicit defaults — clears both `removed_defaults` and
+/// `user`. Returns the resulting materialized list so the UI can
+/// refresh in one round-trip.
+#[tauri::command]
+pub fn protected_paths_reset() -> Result<Vec<ProtectedPathDto>, String> {
+    let dir = paths::claudepot_data_dir();
+    claudepot_core::protected_paths::reset(&dir)
+        .map_err(|e| format!("protected paths reset failed: {e}"))?;
+    let list = claudepot_core::protected_paths::list(&dir)
+        .map_err(|e| format!("protected paths list failed: {e}"))?;
+    Ok(list.iter().map(ProtectedPathDto::from).collect())
 }
