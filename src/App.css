@@ -1525,20 +1525,25 @@ button.danger.primary:hover:not(:disabled) {
 
 /* ---------- context menu (P1.4) ---------- */
 
+/* Chrome: borderless, rounded, shadow-2 carries the elevation cue now
+ * that the border is gone. Shape follows design-system token guidance
+ * for popovers / dropdowns / context menus. */
 .context-menu {
   position: fixed;
   min-width: 180px;
   padding: 4px;
   background: var(--surface);
-  border: 0.5px solid var(--border);
-  border-radius: 6px;
-  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.18);
+  border: 0;
+  border-radius: 8px;
+  box-shadow: var(--shadow-2);
   z-index: 200;
 }
 
 @media (prefers-color-scheme: dark) {
   .context-menu {
-    box-shadow: 0 6px 20px rgba(0, 0, 0, 0.45);
+    /* Shadow-2 is tuned for light mode; dark needs more absolute
+     * contrast since the surface itself is already dark. */
+    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.45);
   }
 }
 
@@ -1551,21 +1556,27 @@ button.danger.primary:hover:not(:disabled) {
   border: 0;
   border-radius: 4px;
   color: var(--text);
-  font-size: 12px;
+  font-size: 11px;
+  font-weight: 400;
   height: auto;
   box-shadow: none;
 }
 
+/* Hover/focused: subtle neutral gray derived from the text color so it
+ * stays tonally correct in both light and dark modes. No accent tint —
+ * the row color alone is the hover signal. */
 .context-menu-item:hover:not(:disabled),
 .context-menu-item.focused:not(:disabled) {
-  background: var(--accent);
-  color: var(--accent-text);
+  background: color-mix(in srgb, var(--text) 10%, transparent);
+  color: var(--text);
 }
 
 .context-menu-item:focus-visible {
   outline: none;
-  background: var(--accent);
-  color: var(--accent-text);
+  /* Slightly stronger than hover so keyboard focus is distinguishable
+   * from mouse-over without introducing a second color dimension. */
+  background: color-mix(in srgb, var(--text) 15%, transparent);
+  color: var(--text);
 }
 
 .context-menu-item:disabled {
@@ -1577,9 +1588,12 @@ button.danger.primary:hover:not(:disabled) {
   color: var(--bad);
 }
 
+/* Destructive items keep the red FOREGROUND as the semantic signal.
+ * Background follows the same neutral hover rhythm as other items —
+ * the color is on the text, not the fill. */
 .context-menu-item.danger:hover:not(:disabled) {
-  background: var(--bad);
-  color: #fff;
+  background: color-mix(in srgb, var(--bad) 10%, transparent);
+  color: var(--bad);
 }
 
 .context-menu-separator {
