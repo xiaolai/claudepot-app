@@ -223,6 +223,7 @@ export function ProjectsSection({
               setDetailRefreshSignal((n) => n + 1);
               refresh();
             }}
+            onError={(msg) => setToast(msg)}
           />
         </div>
       ) : (
