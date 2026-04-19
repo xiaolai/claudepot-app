@@ -124,6 +124,13 @@ pub struct CleanResult {
     /// Paths of snapshots written during cleanup (config + history)
     /// so callers can surface recovery hints.
     pub snapshot_paths: Vec<PathBuf>,
+    /// Number of orphans whose authoritative `original_path` matched
+    /// the user's protected-paths set. The CC artifact dirs were still
+    /// removed; sibling state (`~/.claude.json` + `history.jsonl`) was
+    /// left intact, with a read-only recovery snapshot written so the
+    /// user can restore the affected entries manually if they ever
+    /// remove the path from the protected list.
+    pub protected_paths_skipped: usize,
 }
 
 #[derive(Debug, Clone, Serialize)]
