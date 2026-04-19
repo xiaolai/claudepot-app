@@ -34,11 +34,13 @@ use std::path::{Path, PathBuf};
 
 const STORE_FILENAME: &str = "protected-paths.json";
 
-/// Built-in protected paths. Cross-platform constant: paths that don't
-/// apply to the current OS are simply absent from the live filesystem
-/// and stay benign in the resolved set.
+/// Built-in protected paths. Platform-conditional: a macOS user should
+/// not see `C:\\Users` in their pane, and a Windows user should not see
+/// `/etc`. Audit fix — the cross-platform list confused both pane
+/// rendering (un-removable phantom rows) and validate() (case/separator
+/// mismatch on the wrong OS).
+#[cfg(unix)]
 pub const DEFAULT_PATHS: &[&str] = &[
-    // POSIX system roots
     "/",
     "~",
     "/Users",
@@ -49,14 +51,18 @@ pub const DEFAULT_PATHS: &[&str] = &[
     "/etc",
     "/opt",
     "/usr",
-    // Windows drive roots and system dirs (stored verbatim; case is
-    // preserved on disk and matched literally — Windows paths in CC's
-    // sanitized form already preserve case).
+    "/private",
+];
+
+#[cfg(windows)]
+pub const DEFAULT_PATHS: &[&str] = &[
     "C:\\",
+    "~",
     "C:\\Users",
     "C:\\Windows",
     "C:\\Program Files",
     "C:\\Program Files (x86)",
+    "C:\\ProgramData",
 ];
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -184,6 +190,40 @@ pub fn resolved_set(data_dir: &Path) -> Result<HashSet<String>, ProtectedPathsEr
     Ok(set)
 }
 
+/// Same shape as `resolved_set`, but using ONLY the built-in defaults
+/// — no on-disk read, can't fail. Use this as a fail-safe fallback when
+/// the user's `protected-paths.json` is unreadable: protection should
+/// degrade to "built-in defaults" (still guards `/`, `~`, `/Users`,
+/// `C:\Users`, etc.), never to "no protection at all".
+pub fn default_resolved_set() -> HashSet<String> {
+    let mut set = HashSet::new();
+    for d in DEFAULT_PATHS {
+        set.insert((*d).to_string());
+        if let Some(expanded) = expand_tilde(d) {
+            set.insert(expanded);
+        }
+    }
+    set
+}
+
+/// Best-effort load: returns the user-merged set on success, or the
+/// built-in defaults if the store can't be read (logged via tracing
+/// at warn level). Callers in destructive paths (clean_orphans) should
+/// prefer this over `resolved_set` so a corrupt prefs file doesn't
+/// silently disable all protection.
+pub fn resolved_set_or_defaults(data_dir: &Path) -> HashSet<String> {
+    match resolved_set(data_dir) {
+        Ok(set) => set,
+        Err(e) => {
+            tracing::warn!(
+                err = %e,
+                "protected-paths read failed; falling back to built-in defaults"
+            );
+            default_resolved_set()
+        }
+    }
+}
+
 /// Expand `~` or `~/x` against the current `$HOME`. Returns `None` if
 /// the input doesn't start with `~` or if `$HOME` is unavailable.
 fn expand_tilde(p: &str) -> Option<String> {
@@ -206,13 +246,34 @@ fn validate(input: &str) -> Result<String, ProtectedPathsError> {
     if !is_tilde && !is_absolute {
         return Err(ProtectedPathsError::NotAbsolute(trimmed.to_string()));
     }
-    // Normalize trailing slash, except for "/" itself which IS the slash.
-    let normalized = if trimmed.len() > 1 && trimmed.ends_with('/') {
-        trimmed.trim_end_matches('/').to_string()
-    } else {
-        trimmed.to_string()
-    };
+    let normalized = normalize(trimmed);
     Ok(normalized)
+}
+
+/// Platform-aware path normalization. On Unix: strip a trailing `/`
+/// unless the input *is* `/`. On Windows: also collapse forward slashes
+/// to backslashes and strip trailing separator unless the input is a
+/// drive root (`C:\\`).
+#[cfg(unix)]
+fn normalize(input: &str) -> String {
+    if input.len() > 1 && input.ends_with('/') {
+        input.trim_end_matches('/').to_string()
+    } else {
+        input.to_string()
+    }
+}
+
+#[cfg(windows)]
+fn normalize(input: &str) -> String {
+    let with_backslashes: String = input.chars().map(|c| if c == '/' { '\\' } else { c }).collect();
+    // Drive root like `C:\\` — keep the trailing separator.
+    let is_drive_root =
+        with_backslashes.len() == 3 && with_backslashes.ends_with(":\\");
+    if !is_drive_root && with_backslashes.len() > 1 && with_backslashes.ends_with('\\') {
+        with_backslashes.trim_end_matches('\\').to_string()
+    } else {
+        with_backslashes
+    }
 }
 
 /// Add a user-supplied path. If the path matches a default that was
@@ -308,12 +369,34 @@ mod tests {
         assert!(got.iter().any(|q| q.path == "/Volumes/work" && q.source == PathSource::User));
     }
 
+    #[cfg(unix)]
     #[test]
     fn add_normalizes_trailing_slash() {
         let d = tmp_dir();
         add(d.path(), "/Volumes/work/").unwrap();
         let got = list(d.path()).unwrap();
         assert!(got.iter().any(|q| q.path == "/Volumes/work"));
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn add_normalizes_windows_separator_and_trailing() {
+        let d = tmp_dir();
+        // Forward slashes get folded; trailing backslash stripped except
+        // on a drive root.
+        add(d.path(), "D:/work/").unwrap();
+        let got = list(d.path()).unwrap();
+        assert!(got.iter().any(|q| q.path == "D:\\work"));
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn add_drive_root_keeps_trailing_separator() {
+        let d = tmp_dir();
+        // C:\\ is already a default; D:\\ is fresh.
+        add(d.path(), "D:\\").unwrap();
+        let got = list(d.path()).unwrap();
+        assert!(got.iter().any(|q| q.path == "D:\\"));
     }
 
     #[test]
@@ -441,6 +524,26 @@ mod tests {
         fs::write(store_path(d.path()), "not json").unwrap();
         let err = list(d.path()).unwrap_err();
         assert!(matches!(err, ProtectedPathsError::InvalidJson { .. }));
+    }
+
+    #[test]
+    fn default_resolved_set_contains_root_and_home_expansion() {
+        let set = default_resolved_set();
+        assert!(set.contains("/") || set.contains("C:\\")); // platform-dependent root
+        // "~" default contributes its expanded HOME path.
+        if let Some(home) = dirs::home_dir() {
+            assert!(set.contains(home.to_string_lossy().as_ref()));
+        }
+    }
+
+    #[test]
+    fn resolved_set_or_defaults_falls_back_on_corrupt_store() {
+        let d = tmp_dir();
+        // Seed an unparseable store. resolved_set() would Err.
+        fs::write(store_path(d.path()), "not json").unwrap();
+        let set = resolved_set_or_defaults(d.path());
+        // Got the defaults despite the corruption — root is in there.
+        assert!(set.contains("/") || set.contains("C:\\"));
     }
 
     #[test]

@@ -712,11 +712,23 @@ pub fn project_clean_preview() -> Result<CleanPreviewDto, String> {
     .map_err(|e| format!("clean preview failed: {e}"))?;
 
     let total_bytes = orphans.iter().map(|p| p.total_size_bytes).sum();
+    // Disclose how many candidates fall under protection so the
+    // confirmation modal can hint that sibling state will be preserved
+    // for those (audit fix). Resolution uses the same fail-safe
+    // fallback as the execute path so preview and execute agree.
+    let protected = claudepot_core::protected_paths::resolved_set_or_defaults(
+        &paths::claudepot_data_dir(),
+    );
+    let protected_count = orphans
+        .iter()
+        .filter(|p| !p.is_empty && protected.contains(&p.original_path))
+        .count();
     Ok(CleanPreviewDto {
         orphans: orphans.iter().map(ProjectInfoDto::from).collect(),
         orphans_found: result.orphans_found,
         unreachable_skipped: result.unreachable_skipped,
         total_bytes,
+        protected_count,
     })
 }
 
@@ -772,18 +784,13 @@ pub fn project_clean_start(
     let locks_for_task = locks;
     // Resolve protected paths once on the spawning thread so the
     // background task gets a snapshot — list mutations during a
-    // multi-second clean must not change the rules mid-flight. A
-    // failed read is treated as an empty set (no protection) and logged;
-    // refusing to clean over a settings-file glitch would be worse.
-    let protected = match claudepot_core::protected_paths::resolved_set(
+    // multi-second clean must not change the rules mid-flight. On
+    // read failure, fall back to built-in defaults (audit fix: an
+    // empty set would silently disable protection for `/`, `~`,
+    // `/Users`, etc.).
+    let protected = claudepot_core::protected_paths::resolved_set_or_defaults(
         &paths::claudepot_data_dir(),
-    ) {
-        Ok(set) => set,
-        Err(e) => {
-            tracing::warn!(err = %e, "protected-paths read failed; cleaning without protection");
-            std::collections::HashSet::new()
-        }
-    };
+    );
 
     // std::thread::spawn, not tokio::task::spawn_blocking — Tauri's
     // sync #[command] runs outside a tokio runtime context on at least

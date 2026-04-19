@@ -2126,7 +2126,7 @@ button.danger.primary:hover:not(:disabled) {
 }
 
 .protected-row:hover {
-  background: color-mix(in srgb, var(--accent) 6%, transparent);
+  background: var(--hover-bg);
 }
 
 .protected-empty {
@@ -2161,6 +2161,11 @@ button.danger.primary:hover:not(:disabled) {
   margin: 6px 0 0;
   font-size: 11px;
   color: var(--bad);
+}
+
+.settings-inline-hint {
+  margin: 6px 0 0;
+  font-size: 11px;
 }
 
 .sidebar-segmented-slot {

@@ -898,31 +898,75 @@ pub fn clean_orphans_with_progress(
     let (lock_guard, _broken) =
         crate::project_lock::acquire(&locks_dir_owned, CLEAN_LOCK_KEY)?;
 
-    // Partition orphans' authoritative source paths into:
-    //   * `rewrite_paths`     — sibling state (`~/.claude.json`,
-    //     `history.jsonl`) WILL be mutated for these.
-    //   * `protected_paths_hit` — protected per the user's protected-
-    //     paths config (e.g. `/`, `~`, `/Users`, custom entries). The
-    //     CC artifact dir is still removed, but sibling rewrites are
-    //     skipped — the would-be-removed entries are snapshotted to a
-    //     recovery file so the user can restore manually.
+    // Phase 0 — preflight. Per-orphan TOCTOU + live-session validation
+    // happens BEFORE any sibling-state mutation. Without this, a batch
+    // prune of `~/.claude.json` / `history.jsonl` could strip entries
+    // for an orphan whose CC dir we then refuse to delete (because the
+    // source re-appeared, or a live session showed up). That left the
+    // user's config wiped while the artifact dir survived — irreversible
+    // sibling-state loss for an artifact we ended up keeping.
     //
-    // Empty-dir orphans are excluded from BOTH lists: their
-    // `original_path` comes from the lossy `unsanitize_path` fallback,
-    // so acting on it risks deleting unrelated entries.
+    // Decision per orphan is one of:
+    //   * Remove           — passes all checks, will delete and (if
+    //                        non-empty + non-protected) prune siblings.
+    //   * SkipMissing      — CC dir already gone; nothing to do.
+    //   * SkipReappeared   — source came back since listing.
+    //   * SkipLive         — live session detected.
+    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+    enum Decision {
+        Remove,
+        SkipMissing,
+        SkipReappeared,
+        SkipLive,
+    }
+    let decisions: Vec<Decision> = orphans
+        .iter()
+        .map(|orphan| {
+            let dir = config_dir.join("projects").join(&orphan.sanitized_name);
+            if !dir.exists() {
+                return Decision::SkipMissing;
+            }
+            if !orphan.is_empty
+                && classify_reachability(&orphan.original_path)
+                    != PathReachability::Absent
+            {
+                return Decision::SkipReappeared;
+            }
+            if detect_live_session(&dir, &orphan.original_path, CLEAN_LIVE_HEARTBEAT_SECS)
+            {
+                return Decision::SkipLive;
+            }
+            Decision::Remove
+        })
+        .collect();
+
+    result.orphans_skipped_live = decisions
+        .iter()
+        .filter(|d| **d == Decision::SkipLive)
+        .count();
+
+    // Partition orphans that will actually be removed (and have an
+    // authoritative cwd) into:
+    //   * `authoritative_paths` — sibling state WILL be rewritten.
+    //   * `protected_paths_hit` — protected per the user's config; the
+    //     CC artifact dir still goes, sibling state is preserved.
+    //
+    // Empty-dir orphans are excluded from BOTH lists: `original_path`
+    // is from the lossy `unsanitize_path` fallback, so acting on it
+    // risks deleting unrelated entries.
     let mut authoritative_paths: Vec<String> = Vec::new();
-    let mut protected_paths_hit: Vec<String> = Vec::new();
-    for o in &orphans {
-        if o.is_empty {
+    let mut protected_paths_hit_count: usize = 0;
+    for (orphan, decision) in orphans.iter().zip(decisions.iter()) {
+        if *decision != Decision::Remove || orphan.is_empty {
             continue;
         }
-        if protected_paths.contains(&o.original_path) {
-            protected_paths_hit.push(o.original_path.clone());
+        if protected_paths.contains(&orphan.original_path) {
+            protected_paths_hit_count += 1;
         } else {
-            authoritative_paths.push(o.original_path.clone());
+            authoritative_paths.push(orphan.original_path.clone());
         }
     }
-    result.protected_paths_skipped = protected_paths_hit.len();
+    result.protected_paths_skipped = protected_paths_hit_count;
 
     // Phase 1 — batch sibling-state rewrite. Single pass over each file
     // removing every matching entry. Huge speedup vs the previous
@@ -975,54 +1019,43 @@ pub fn clean_orphans_with_progress(
     sink.sub_progress("batch-sibling", 2, 2);
     sink.phase("batch-sibling", PhaseStatus::Complete);
 
-    // Phase 2 — per-orphan CC-dir removal. Each step can be several
-    // hundred ms (remove_dir_all on a multi-GB tree), so we emit
-    // sub_progress after every one. Live-session and TOCTOU checks
-    // stay per-orphan.
+    // Phase 2 — per-orphan CC-dir removal driven by the preflight
+    // decision vector. The validation already happened; here we only
+    // act. Per-orphan logging keeps the existing skip messages so log
+    // consumers don't lose context.
     let total = orphans.len();
     sink.phase("remove-dirs", PhaseStatus::Running);
     sink.sub_progress("remove-dirs", 0, total);
 
-    for (i, orphan) in orphans.iter().enumerate() {
-        let dir = config_dir.join("projects").join(&orphan.sanitized_name);
-        if !dir.exists() {
-            sink.sub_progress("remove-dirs", i + 1, total);
-            continue;
-        }
-
-        if !orphan.is_empty {
-            let reachability = classify_reachability(&orphan.original_path);
-            if reachability != PathReachability::Absent {
+    for (i, (orphan, decision)) in orphans.iter().zip(decisions.iter()).enumerate() {
+        match decision {
+            Decision::SkipMissing => {}
+            Decision::SkipReappeared => {
                 tracing::info!(
                     path = %orphan.original_path,
                     "skipping: source re-appeared or became unreachable since listing"
                 );
-                sink.sub_progress("remove-dirs", i + 1, total);
-                continue;
+            }
+            Decision::SkipLive => {
+                tracing::warn!(
+                    dir = ?config_dir.join("projects").join(&orphan.sanitized_name),
+                    "skipping: live session detected against orphan CC dir"
+                );
+            }
+            Decision::Remove => {
+                let dir = config_dir.join("projects").join(&orphan.sanitized_name);
+                let bytes = orphan.total_size_bytes;
+                fs::remove_dir_all(&dir).map_err(ProjectError::Io)?;
+                result.orphans_removed += 1;
+                result.bytes_freed += bytes;
+
+                result.claudepot_artifacts_removed += remove_claudepot_artifacts(
+                    &snapshots_dir_owned,
+                    &config_dir.join("claudepot").join("journals"),
+                    &orphan.sanitized_name,
+                );
             }
         }
-
-        if detect_live_session(&dir, &orphan.original_path, CLEAN_LIVE_HEARTBEAT_SECS) {
-            tracing::warn!(
-                dir = ?dir,
-                "skipping: live session detected against orphan CC dir"
-            );
-            result.orphans_skipped_live += 1;
-            sink.sub_progress("remove-dirs", i + 1, total);
-            continue;
-        }
-
-        let bytes = orphan.total_size_bytes;
-        fs::remove_dir_all(&dir).map_err(ProjectError::Io)?;
-        result.orphans_removed += 1;
-        result.bytes_freed += bytes;
-
-        result.claudepot_artifacts_removed += remove_claudepot_artifacts(
-            &snapshots_dir_owned,
-            &config_dir.join("claudepot").join("journals"),
-            &orphan.sanitized_name,
-        );
-
         sink.sub_progress("remove-dirs", i + 1, total);
     }
     sink.phase("remove-dirs", PhaseStatus::Complete);
@@ -2420,6 +2453,82 @@ mod tests {
         let hist_after = fs::read_to_string(&history).unwrap();
         assert!(hist_after.contains(&protected_str));
         assert!(!hist_after.contains(&normal_str));
+    }
+
+    /// Regression for the audit-flagged HIGH bug: sibling state must
+    /// NOT be pruned for an orphan whose source path has re-appeared
+    /// since `list_projects` ran (TOCTOU). Phase 0's preflight catches
+    /// the reappearance and excludes the orphan from `authoritative_paths`,
+    /// so neither `~/.claude.json` nor `history.jsonl` are touched.
+    #[test]
+    fn test_clean_skips_sibling_rewrite_when_source_reappeared() {
+        use crate::project_sanitize::sanitize_path;
+        use std::collections::HashSet;
+
+        let tmp = tempfile::tempdir().unwrap();
+        let config_dir = tmp.path();
+        let projects_dir = config_dir.join("projects");
+        fs::create_dir(&projects_dir).unwrap();
+
+        // The "orphan" — list_projects() will see this as orphan because
+        // we'll seed session.jsonl with a cwd that doesn't exist YET.
+        // Then we'll create the cwd before clean runs, simulating TOCTOU.
+        let reappeared = tmp.path().join("reappeared-workspace");
+        let reappeared_str = reappeared.to_string_lossy().to_string();
+        let san = sanitize_path(&reappeared_str);
+        let cc_dir = projects_dir.join(&san);
+        fs::create_dir(&cc_dir).unwrap();
+        fs::write(
+            cc_dir.join("session.jsonl"),
+            format!("{{\"cwd\":\"{reappeared_str}\",\"type\":\"user\"}}\n"),
+        )
+        .unwrap();
+
+        // Seed sibling state.
+        let claude_json = config_dir.join("claude.json");
+        fs::write(
+            &claude_json,
+            serde_json::to_string_pretty(&serde_json::json!({
+                "projects": { reappeared_str.clone(): {"trust": true} }
+            }))
+            .unwrap(),
+        )
+        .unwrap();
+        let history = config_dir.join("history.jsonl");
+        let line =
+            serde_json::json!({"display": "x", "project": reappeared_str}).to_string();
+        fs::write(&history, format!("{line}\n")).unwrap();
+
+        // Capture the listing (orphan), THEN make the source reappear.
+        // The clean runs after — preflight should detect this and skip
+        // both the artifact dir and the sibling prune.
+        let listing = list_projects(config_dir).unwrap();
+        assert!(listing.iter().any(|p| p.is_orphan && p.original_path == reappeared_str));
+        fs::create_dir(&reappeared).unwrap();
+
+        let snaps = tmp.path().join("snaps");
+        let locks = tmp.path().join("locks");
+        let (result, _) = clean_orphans_with_progress(
+            config_dir,
+            Some(claude_json.as_path()),
+            Some(snaps.as_path()),
+            Some(locks.as_path()),
+            &HashSet::new(),
+            false,
+            &crate::project_progress::NoopSink,
+        )
+        .unwrap();
+
+        // Artifact dir survived (preflight refused).
+        assert!(cc_dir.exists());
+        assert_eq!(result.orphans_removed, 0);
+        // Sibling state survived too — this is the regression guard.
+        assert_eq!(result.claude_json_entries_removed, 0);
+        assert_eq!(result.history_lines_removed, 0);
+        let cj_after = fs::read_to_string(&claude_json).unwrap();
+        assert!(cj_after.contains(&reappeared_str));
+        let hist_after = fs::read_to_string(&history).unwrap();
+        assert!(hist_after.contains(&reappeared_str));
     }
 
     /// Empty-dir orphans are excluded from BOTH the rewrite list and

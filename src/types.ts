@@ -160,6 +160,13 @@ export interface CleanPreview {
   orphans_found: number;
   unreachable_skipped: number;
   total_bytes: number;
+  /**
+   * Count of candidates whose authoritative `original_path` is in the
+   * user's protected-paths set. Their CC artifact dir will still be
+   * removed; only sibling state (`~/.claude.json`, `history.jsonl`) is
+   * preserved for them.
+   */
+  protected_count: number;
 }
 
 /**

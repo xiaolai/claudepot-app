@@ -353,6 +353,13 @@ pub struct CleanPreviewDto {
     /// displays this in the confirmation copy so users can judge the
     /// impact before pressing Confirm.
     pub total_bytes: u64,
+    /// How many of the listed candidates have an authoritative source
+    /// path that's in the user's protected-paths set. Their CC artifact
+    /// dir will still be removed, but `~/.claude.json` and
+    /// `history.jsonl` entries for those paths will be preserved. The
+    /// confirmation modal uses this to disclose the carve-out before
+    /// Confirm.
+    pub protected_count: usize,
 }
 
 // Note: the post-clean result DTO lives in `ops::CleanResultSummary`
