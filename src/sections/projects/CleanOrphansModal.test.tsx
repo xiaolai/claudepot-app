@@ -72,6 +72,7 @@ function result(overrides: Partial<CleanResult> = {}): CleanResult {
     history_lines_removed: 0,
     claudepot_artifacts_removed: 0,
     snapshot_paths: [],
+    protected_paths_skipped: 0,
     ...overrides,
   };
 }

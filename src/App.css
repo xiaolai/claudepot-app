@@ -2098,6 +2098,71 @@ button.danger.primary:hover:not(:disabled) {
   margin: 0;
 }
 
+/* ---------- protected paths pane ---------- */
+
+.protected-list {
+  list-style: none;
+  margin: 8px 0 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  border: 0.5px solid var(--border);
+  border-radius: 6px;
+  max-height: 320px;
+  overflow-y: auto;
+}
+
+.protected-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 10px;
+  border-bottom: 0.5px solid var(--border);
+}
+
+.protected-row:last-child {
+  border-bottom: none;
+}
+
+.protected-row:hover {
+  background: color-mix(in srgb, var(--accent) 6%, transparent);
+}
+
+.protected-empty {
+  justify-content: center;
+  padding: 16px;
+}
+
+.protected-path {
+  flex: 1;
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--text);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  background: transparent;
+  padding: 0;
+}
+
+.protected-add-form {
+  display: flex;
+  gap: 8px;
+  margin-top: 12px;
+  align-items: center;
+}
+
+.protected-add-form .settings-input.wide {
+  flex: 1;
+}
+
+.settings-inline-error {
+  margin: 6px 0 0;
+  font-size: 11px;
+  color: var(--bad);
+}
+
 .sidebar-segmented-slot {
   padding: 0 8px 8px;
 }

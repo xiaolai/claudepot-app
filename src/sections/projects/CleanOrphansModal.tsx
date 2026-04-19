@@ -112,6 +112,7 @@ export function CleanOrphansModal({
                 history_lines_removed: 0,
                 claudepot_artifacts_removed: 0,
                 snapshot_paths: [],
+                protected_paths_skipped: 0,
               };
               setState({ kind: "done", result: empty });
               onDone(empty);
@@ -455,6 +456,14 @@ function Result({ result }: { result: CleanResult }) {
           <li>
             Removed {result.claudepot_artifacts_removed} stale claudepot
             artifact{result.claudepot_artifacts_removed === 1 ? "" : "s"}
+          </li>
+        )}
+        {result.protected_paths_skipped > 0 && (
+          <li>
+            Preserved sibling state for {result.protected_paths_skipped}{" "}
+            protected path{result.protected_paths_skipped === 1 ? "" : "s"}{" "}
+            (CC artifact dir{result.protected_paths_skipped === 1 ? "" : "s"}{" "}
+            still removed)
           </li>
         )}
       </ul>

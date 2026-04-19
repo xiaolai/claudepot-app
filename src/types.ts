@@ -179,6 +179,22 @@ export interface CleanResult {
   history_lines_removed: number;
   claudepot_artifacts_removed: number;
   snapshot_paths: string[];
+  /**
+   * Count of orphans whose `original_path` matched the user's
+   * protected-paths set. Their CC artifact dirs were removed; sibling
+   * state in `~/.claude.json` and `history.jsonl` was left intact.
+   */
+  protected_paths_skipped: number;
+}
+
+/**
+ * One row in the protected-paths Settings list. `source` drives the
+ * badge: `"default"` rows came from the built-in DEFAULT_PATHS;
+ * `"user"` rows are user-added.
+ */
+export interface ProtectedPath {
+  path: string;
+  source: "default" | "user";
 }
 
 export interface DryRunPlan {

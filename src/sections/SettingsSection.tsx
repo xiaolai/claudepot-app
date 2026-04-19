@@ -4,6 +4,7 @@ import { api } from "../api";
 import { useToasts } from "../hooks/useToasts";
 import { useSettingsActions } from "../hooks/useSettingsActions";
 import { ToastContainer } from "../components/ToastContainer";
+import { ProtectedPathsPane } from "./settings/ProtectedPathsPane";
 import type { AppStatus, CcIdentity } from "../types";
 
 const SECTION_OPTIONS = [
@@ -12,15 +13,22 @@ const SECTION_OPTIONS = [
   { value: "settings", label: "Settings" },
 ] as const;
 
-type SettingsPane = "startup" | "cleanup" | "locks" | "diagnostics" | "about";
+type SettingsPane =
+  | "startup"
+  | "cleanup"
+  | "protected"
+  | "locks"
+  | "diagnostics"
+  | "about";
 
 const SETTINGS_PANES: ReadonlyArray<{
   id: SettingsPane;
   label: string;
-  icon: "play" | "trash-2" | "lock" | "stethoscope" | "info";
+  icon: "play" | "trash-2" | "shield" | "lock" | "stethoscope" | "info";
 }> = [
   { id: "startup", label: "Startup", icon: "play" },
   { id: "cleanup", label: "Cleanup", icon: "trash-2" },
+  { id: "protected", label: "Protected", icon: "shield" },
   { id: "locks", label: "Locks", icon: "lock" },
   { id: "diagnostics", label: "Diagnostics", icon: "stethoscope" },
   { id: "about", label: "About", icon: "info" },
@@ -184,6 +192,8 @@ export function SettingsSection() {
             )}
           </section>
         )}
+
+        {pane === "protected" && <ProtectedPathsPane pushToast={pushToast} />}
 
         {pane === "locks" && (
           <section className="settings-group">
