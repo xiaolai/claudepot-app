@@ -16,6 +16,7 @@ import type {
   PendingJournalsSummary,
   ProjectDetail,
   ProjectInfo,
+  ProtectedPath,
   RegisterOutcome,
   RemoveOutcome,
   RunningOpInfo,
@@ -190,4 +191,27 @@ export const api = {
    */
   sessionAdoptOrphan: (slug: string, targetCwd: string) =>
     invoke<AdoptReport>("session_adopt_orphan", { slug, targetCwd }),
+
+  // ---------- Protected paths (Settings → Protected pane) ----------
+  /**
+   * Materialized list — defaults (minus removed_defaults) followed by
+   * user-added entries in insertion order. Order is stable so the UI
+   * can render without sorting.
+   */
+  protectedPathsList: () => invoke<ProtectedPath[]>("protected_paths_list"),
+  /**
+   * Add a path. Validates and persists. Returns the new entry; if the
+   * path matches a previously-removed default, the entry comes back
+   * with `source: "default"` (un-tombstoned, not duplicated under user).
+   */
+  protectedPathsAdd: (path: string) =>
+    invoke<ProtectedPath>("protected_paths_add", { path }),
+  /**
+   * Remove a path. Defaults are tombstoned (so reset() brings them
+   * back); user entries are dropped.
+   */
+  protectedPathsRemove: (path: string) =>
+    invoke<void>("protected_paths_remove", { path }),
+  /** Restore the implicit defaults; returns the resulting list. */
+  protectedPathsReset: () => invoke<ProtectedPath[]>("protected_paths_reset"),
 };
