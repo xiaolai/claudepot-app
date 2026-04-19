@@ -119,6 +119,10 @@ pub fn run() {
             commands::session_list_orphans,
             commands::session_move,
             commands::session_adopt_orphan,
+            commands::protected_paths_list,
+            commands::protected_paths_add,
+            commands::protected_paths_remove,
+            commands::protected_paths_reset,
         ])
         .run(tauri::generate_context!())
         .unwrap_or_else(|e| {

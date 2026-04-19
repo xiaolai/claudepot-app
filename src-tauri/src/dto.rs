@@ -591,3 +591,27 @@ impl From<&claudepot_core::session_move::AdoptReport> for AdoptReportDto {
         }
     }
 }
+
+/// One row in the protected-paths Settings list. `source` tells the
+/// UI which badge to render (`default` | `user`).
+#[derive(Serialize)]
+pub struct ProtectedPathDto {
+    pub path: String,
+    /// Lowercase string: `"default"` or `"user"`. We don't expose the
+    /// Rust enum variant names directly so the JS side doesn't need to
+    /// keep its discriminant in lockstep with the core enum.
+    pub source: String,
+}
+
+impl From<&claudepot_core::protected_paths::ProtectedPath> for ProtectedPathDto {
+    fn from(p: &claudepot_core::protected_paths::ProtectedPath) -> Self {
+        let source = match p.source {
+            claudepot_core::protected_paths::PathSource::Default => "default",
+            claudepot_core::protected_paths::PathSource::User => "user",
+        };
+        Self {
+            path: p.path.clone(),
+            source: source.to_string(),
+        }
+    }
+}

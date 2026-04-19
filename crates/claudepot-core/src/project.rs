@@ -845,6 +845,7 @@ pub fn clean_orphans(
         claude_json_path,
         snapshots_dir,
         locks_dir,
+        &std::collections::HashSet::new(),
         dry_run,
         &crate::project_progress::NoopSink,
     )
@@ -865,6 +866,7 @@ pub fn clean_orphans_with_progress(
     claude_json_path: Option<&Path>,
     snapshots_dir: Option<&Path>,
     locks_dir: Option<&Path>,
+    protected_paths: &std::collections::HashSet<String>,
     dry_run: bool,
     sink: &dyn crate::project_progress::ProgressSink,
 ) -> Result<(CleanResult, Vec<ProjectInfo>), ProjectError> {
@@ -896,16 +898,31 @@ pub fn clean_orphans_with_progress(
     let (lock_guard, _broken) =
         crate::project_lock::acquire(&locks_dir_owned, CLEAN_LOCK_KEY)?;
 
-    // Collect the set of authoritative source paths for orphans that
-    // are NOT empty. Empty-dir orphans are excluded from sibling
-    // rewrites: their `original_path` comes from the lossy
-    // `unsanitize_path` fallback, so acting on it risks deleting
-    // unrelated entries.
-    let authoritative_paths: Vec<String> = orphans
-        .iter()
-        .filter(|o| !o.is_empty)
-        .map(|o| o.original_path.clone())
-        .collect();
+    // Partition orphans' authoritative source paths into:
+    //   * `rewrite_paths`     — sibling state (`~/.claude.json`,
+    //     `history.jsonl`) WILL be mutated for these.
+    //   * `protected_paths_hit` — protected per the user's protected-
+    //     paths config (e.g. `/`, `~`, `/Users`, custom entries). The
+    //     CC artifact dir is still removed, but sibling rewrites are
+    //     skipped — the would-be-removed entries are snapshotted to a
+    //     recovery file so the user can restore manually.
+    //
+    // Empty-dir orphans are excluded from BOTH lists: their
+    // `original_path` comes from the lossy `unsanitize_path` fallback,
+    // so acting on it risks deleting unrelated entries.
+    let mut authoritative_paths: Vec<String> = Vec::new();
+    let mut protected_paths_hit: Vec<String> = Vec::new();
+    for o in &orphans {
+        if o.is_empty {
+            continue;
+        }
+        if protected_paths.contains(&o.original_path) {
+            protected_paths_hit.push(o.original_path.clone());
+        } else {
+            authoritative_paths.push(o.original_path.clone());
+        }
+    }
+    result.protected_paths_skipped = protected_paths_hit.len();
 
     // Phase 1 — batch sibling-state rewrite. Single pass over each file
     // removing every matching entry. Huge speedup vs the previous
@@ -2305,6 +2322,140 @@ mod tests {
     fn test_reachability_empty_path_is_unreachable() {
         use crate::project_helpers::{classify_reachability, PathReachability};
         assert_eq!(classify_reachability(""), PathReachability::Unreachable);
+    }
+
+    /// Protected-paths guard: when an orphan's authoritative source
+    /// path is in the protected set, the CC artifact dir is still
+    /// removed, but `~/.claude.json` and `history.jsonl` entries for
+    /// that path are LEFT INTACT. `protected_paths_skipped` reflects
+    /// the count.
+    #[test]
+    fn test_clean_protected_path_skips_sibling_rewrites() {
+        use crate::project_sanitize::sanitize_path;
+        use std::collections::HashSet;
+
+        let tmp = tempfile::tempdir().unwrap();
+        let config_dir = tmp.path();
+        let projects_dir = config_dir.join("projects");
+        fs::create_dir(&projects_dir).unwrap();
+
+        // Two orphans — one protected, one not. Both have an
+        // authoritative cwd recovered from session.jsonl.
+        let protected_src = tmp.path().join("guarded-workspace");
+        let protected_str = protected_src.to_string_lossy().to_string();
+        let san_protected = sanitize_path(&protected_str);
+        let dir_p = projects_dir.join(&san_protected);
+        fs::create_dir(&dir_p).unwrap();
+        fs::write(
+            dir_p.join("session.jsonl"),
+            format!("{{\"cwd\":\"{protected_str}\",\"type\":\"user\"}}\n"),
+        )
+        .unwrap();
+
+        let normal_src = tmp.path().join("normal-workspace");
+        let normal_str = normal_src.to_string_lossy().to_string();
+        let san_normal = sanitize_path(&normal_str);
+        let dir_n = projects_dir.join(&san_normal);
+        fs::create_dir(&dir_n).unwrap();
+        fs::write(
+            dir_n.join("session.jsonl"),
+            format!("{{\"cwd\":\"{normal_str}\",\"type\":\"user\"}}\n"),
+        )
+        .unwrap();
+
+        // Seed claude.json and history.jsonl with entries for BOTH.
+        let claude_json = tmp.path().join("claude.json");
+        fs::write(
+            &claude_json,
+            serde_json::to_string_pretty(&serde_json::json!({
+                "projects": {
+                    protected_str.clone(): {"trust": true, "note": "keep"},
+                    normal_str.clone():    {"trust": false}
+                }
+            }))
+            .unwrap(),
+        )
+        .unwrap();
+
+        let history = config_dir.join("history.jsonl");
+        let line_p =
+            serde_json::json!({"display": "p", "project": protected_str}).to_string();
+        let line_n =
+            serde_json::json!({"display": "n", "project": normal_str}).to_string();
+        fs::write(&history, format!("{line_p}\n{line_n}\n")).unwrap();
+
+        let snapshots = tmp.path().join("snaps");
+        let locks = tmp.path().join("locks");
+        let mut protected: HashSet<String> = HashSet::new();
+        protected.insert(protected_str.clone());
+
+        let (result, _) = clean_orphans_with_progress(
+            config_dir,
+            Some(claude_json.as_path()),
+            Some(snapshots.as_path()),
+            Some(locks.as_path()),
+            &protected,
+            false,
+            &crate::project_progress::NoopSink,
+        )
+        .unwrap();
+
+        // Both CC artifact dirs are removed.
+        assert_eq!(result.orphans_found, 2);
+        assert_eq!(result.orphans_removed, 2);
+        assert!(!dir_p.exists());
+        assert!(!dir_n.exists());
+
+        // Sibling state: only the normal one was rewritten.
+        assert_eq!(result.claude_json_entries_removed, 1);
+        assert_eq!(result.history_lines_removed, 1);
+        assert_eq!(result.protected_paths_skipped, 1);
+
+        // The protected entries are still present in both files.
+        let cj_after: serde_json::Value =
+            serde_json::from_str(&fs::read_to_string(&claude_json).unwrap()).unwrap();
+        assert!(cj_after["projects"].get(&protected_str).is_some());
+        assert!(cj_after["projects"].get(&normal_str).is_none());
+
+        let hist_after = fs::read_to_string(&history).unwrap();
+        assert!(hist_after.contains(&protected_str));
+        assert!(!hist_after.contains(&normal_str));
+    }
+
+    /// Empty-dir orphans are excluded from BOTH the rewrite list and
+    /// the protected-skip count: their `original_path` is from the
+    /// lossy fallback and they were never authoritative to begin with.
+    #[test]
+    fn test_clean_empty_dir_not_counted_as_protected() {
+        use std::collections::HashSet;
+
+        let tmp = tempfile::tempdir().unwrap();
+        let projects_dir = tmp.path().join("projects");
+        fs::create_dir(&projects_dir).unwrap();
+
+        let amb = projects_dir.join("-some-ambiguous-path");
+        fs::create_dir(&amb).unwrap();
+
+        let mut protected: HashSet<String> = HashSet::new();
+        // unsanitize gives "/some/ambiguous/path" — protect it just to
+        // ensure the empty-dir branch ignores the protected check.
+        protected.insert("/some/ambiguous/path".to_string());
+
+        let locks = tmp.path().join("locks");
+        let snaps = tmp.path().join("snaps");
+        let (result, _) = clean_orphans_with_progress(
+            tmp.path(),
+            None,
+            Some(snaps.as_path()),
+            Some(locks.as_path()),
+            &protected,
+            false,
+            &crate::project_progress::NoopSink,
+        )
+        .unwrap();
+
+        assert_eq!(result.orphans_removed, 1);
+        assert_eq!(result.protected_paths_skipped, 0);
     }
 
     #[test]

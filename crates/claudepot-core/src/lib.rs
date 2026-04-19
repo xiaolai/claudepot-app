@@ -24,6 +24,7 @@ pub mod project_repair;
 pub mod project_rewrite;
 pub mod project_sanitize;
 pub mod project_types;
+pub mod protected_paths;
 pub mod resolve;
 pub mod services;
 pub mod session_move;
