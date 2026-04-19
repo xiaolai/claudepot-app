@@ -481,8 +481,13 @@ button .icon {
   background: rgba(0, 0, 0, 0.04);
 }
 
+/* Selected state: same neutral-gray rhythm as the context menu.
+ * Unmistakability still survives prefers-contrast: more because the
+ * name weight jumps to 600 below — selection is fill + weight, not
+ * fill alone. No accent tint; the entire row hierarchy now reads as
+ * calm monochrome with a weight bump on the selected row. */
 .sidebar-item.active {
-  background: var(--selection);
+  background: color-mix(in srgb, var(--text) 14%, transparent);
 }
 
 .sidebar-item-row {
@@ -1596,10 +1601,11 @@ button.danger.primary:hover:not(:disabled) {
   color: var(--bad);
 }
 
+/* Separators hidden per user decision (2026-04-19). Kept in the
+ * markup so menu definitions in ProjectsSection / ProjectDetail don't
+ * need to be reorganized when a future tweak brings them back. */
 .context-menu-separator {
-  height: 0.5px;
-  margin: 4px 8px;
-  background: var(--border);
+  display: none;
 }
 
 /* ---------- empty state ---------- */
