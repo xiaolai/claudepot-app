@@ -133,6 +133,7 @@ pub struct CleanResultSummary {
     pub history_lines_removed: usize,
     pub claudepot_artifacts_removed: usize,
     pub snapshot_paths: Vec<String>,
+    pub protected_paths_skipped: usize,
 }
 
 impl CleanResultSummary {
@@ -151,6 +152,7 @@ impl CleanResultSummary {
                 .iter()
                 .map(|p| p.to_string_lossy().to_string())
                 .collect(),
+            protected_paths_skipped: r.protected_paths_skipped,
         }
     }
 }
