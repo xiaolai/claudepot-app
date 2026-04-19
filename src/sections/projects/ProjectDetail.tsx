@@ -19,6 +19,7 @@ export function ProjectDetail({
   refreshSignal,
   onRename,
   onMoved,
+  onError,
 }: {
   path: string;
   /** Live list of projects — powers the session-move target picker. */
@@ -31,6 +32,10 @@ export function ProjectDetail({
   onRename: (path: string) => void;
   /** Fires after a session move succeeds so the caller can refresh. */
   onMoved: () => void;
+  /** Optional error sink for fire-and-forget ops (e.g. Reveal in Finder
+   * when the native open fails). Parent typically wires this to its
+   * toast state. Missing → errors are logged and swallowed. */
+  onError?: (msg: string) => void;
 }) {
   const [detail, setDetail] = useState<ProjectDetailData | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -133,6 +138,19 @@ export function ProjectDetail({
           )}
         </div>
         <div className="project-detail-actions">
+          <button
+            type="button"
+            title="Reveal this project's directory in the native file manager"
+            onClick={() => {
+              api.revealInFinder(info.original_path).catch((e) => {
+                const msg = `Couldn't reveal: ${e}`;
+                if (onError) onError(msg);
+                else console.error(msg);
+              });
+            }}
+          >
+            <Icon name="folder-open" size={14} /> Open in Finder
+          </button>
           <button type="button" title="Rename this project"
             onClick={() => onRename(info.original_path)}>
             <Icon name="pencil" size={14} /> Rename…

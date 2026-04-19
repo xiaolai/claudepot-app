@@ -5,9 +5,11 @@ import userEvent from "@testing-library/user-event";
 import type { ProjectDetail as ProjectDetailData, ProjectInfo } from "../../types";
 
 const showSpy = vi.fn();
+const revealSpy = vi.fn();
 vi.mock("../../api", () => ({
   api: {
     projectShow: (...args: unknown[]) => showSpy(...args),
+    revealInFinder: (...args: unknown[]) => revealSpy(...args),
   },
 }));
 
@@ -38,7 +40,10 @@ function mkDetail(sessions: { id: string; size: number }[]): ProjectDetailData {
 const projects: ProjectInfo[] = [];
 
 describe("ProjectDetail", () => {
-  beforeEach(() => showSpy.mockReset());
+  beforeEach(() => {
+    showSpy.mockReset();
+    revealSpy.mockReset();
+  });
 
   it("refetches when refreshSignal changes even if path is unchanged", async () => {
     // First response: two sessions. Second response: one session.
@@ -132,5 +137,46 @@ describe("ProjectDetail", () => {
     expect(
       screen.getByText(/move to another project/i),
     ).toBeInTheDocument();
+  });
+
+  it("Open in Finder button calls revealInFinder with the fetched project's path", async () => {
+    // The button uses info.original_path from the fetched ProjectDetail
+    // (which may differ from the `path` prop under rename-in-flight).
+    // mkDetail's fixture has original_path="/p".
+    showSpy.mockResolvedValue(mkDetail([]));
+    revealSpy.mockResolvedValue(undefined);
+    const user = userEvent.setup();
+    render(
+      <ProjectDetail
+        path="/p"
+        projects={projects}
+        refreshSignal={0}
+        onRename={() => {}}
+        onMoved={() => {}}
+      />,
+    );
+    const btn = await screen.findByRole("button", { name: /open in finder/i });
+    await user.click(btn);
+    expect(revealSpy).toHaveBeenCalledWith("/p");
+  });
+
+  it("routes reveal errors to onError when provided", async () => {
+    showSpy.mockResolvedValue(mkDetail([]));
+    revealSpy.mockRejectedValue("permission denied");
+    const onError = vi.fn();
+    const user = userEvent.setup();
+    render(
+      <ProjectDetail
+        path="/p"
+        projects={projects}
+        refreshSignal={0}
+        onRename={() => {}}
+        onMoved={() => {}}
+        onError={onError}
+      />,
+    );
+    await user.click(await screen.findByRole("button", { name: /open in finder/i }));
+    await waitFor(() => expect(onError).toHaveBeenCalled());
+    expect(onError.mock.calls[0][0]).toMatch(/permission denied/);
   });
 });
