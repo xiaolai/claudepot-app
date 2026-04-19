@@ -436,18 +436,13 @@ pub fn clean(ctx: &AppContext, dry_run: bool, ignore_pending_journals: bool) -> 
     let perform = !dry_run && ctx.yes;
 
     // Resolve user-managed protected paths (defaults + user deltas).
-    // A read failure shouldn't block the clean — log and proceed
-    // unprotected so a corrupt prefs file doesn't pin the user out
-    // of cleanup. The protection is a safety net, not a gate.
-    let protected = match claudepot_core::protected_paths::resolved_set(
+    // On read failure, fall back to the built-in DEFAULTS (audit fix:
+    // an empty set would silently disable even `/`, `~`, `/Users` —
+    // worse than blocking the clean. Built-in defaults are always
+    // available since they're a compile-time constant).
+    let protected = claudepot_core::protected_paths::resolved_set_or_defaults(
         &paths::claudepot_data_dir(),
-    ) {
-        Ok(set) => set,
-        Err(e) => {
-            eprintln!("warning: protected-paths read failed: {e}");
-            std::collections::HashSet::new()
-        }
-    };
+    );
 
     let (result, orphans) = project::clean_orphans_with_progress(
         &config_dir,

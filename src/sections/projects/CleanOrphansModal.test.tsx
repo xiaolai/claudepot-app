@@ -57,6 +57,7 @@ function preview(overrides: Partial<CleanPreview> = {}): CleanPreview {
     orphans_found: 0,
     unreachable_skipped: 0,
     total_bytes: 0,
+    protected_count: 0,
     ...overrides,
   };
 }
@@ -245,6 +246,76 @@ describe("CleanOrphansModal", () => {
     expect(await screen.findByRole("alert")).toHaveTextContent(
       /refusing to clean/,
     );
+  });
+
+  it("renders the protected-paths preserved line when the count is non-zero", async () => {
+    // Preview shows 2 orphans, 1 protected. Confirm copy must mention
+    // the carve-out so the user knows sibling state will be preserved
+    // for protected entries before they press Confirm.
+    previewSpy.mockResolvedValue(
+      preview({
+        orphans: [makeProject(), makeProject({ sanitized_name: "-other" })],
+        orphans_found: 2,
+        total_bytes: 2_048,
+        protected_count: 1,
+      }),
+    );
+    render(<CleanOrphansModal onClose={() => {}} onDone={() => {}} />);
+    await waitFor(() => expect(previewSpy).toHaveBeenCalled());
+
+    expect(
+      await screen.findByText(
+        /on your protected list/i,
+      ),
+    ).toBeInTheDocument();
+  });
+
+  it("renders the protected-skipped result line after a clean", async () => {
+    // Drives the post-clean modal branch: result.protected_paths_skipped > 0
+    // must produce a "Preserved sibling state for N protected paths" line.
+    previewSpy.mockResolvedValue(
+      preview({
+        orphans: [makeProject()],
+        orphans_found: 1,
+        total_bytes: 512,
+      }),
+    );
+    startSpy.mockResolvedValue("op-protected-1");
+    const finalResult = result({
+      orphans_removed: 1,
+      bytes_freed: 512,
+      protected_paths_skipped: 1,
+    });
+    statusSpy.mockResolvedValue({
+      op_id: "op-protected-1",
+      kind: "clean_projects",
+      old_path: "",
+      new_path: "",
+      current_phase: null,
+      sub_progress: null,
+      status: "complete",
+      started_unix_secs: 0,
+      last_error: null,
+      move_result: null,
+      clean_result: finalResult,
+      failed_journal_id: null,
+    });
+
+    render(<CleanOrphansModal onClose={() => {}} onDone={() => {}} />);
+    await waitFor(() => expect(previewSpy).toHaveBeenCalled());
+
+    const user = userEvent.setup();
+    await user.click(
+      await screen.findByRole("button", { name: /Remove 1 project/ }),
+    );
+
+    act(() => {
+      emit("op-protected-1", { phase: "op", status: "complete" });
+    });
+    await waitFor(() => expect(statusSpy).toHaveBeenCalled());
+    expect(
+      await screen.findByText(/Preserved sibling state for 1 protected path/i),
+    ).toBeInTheDocument();
   });
 
   it("blocks Escape close during the running phase", async () => {

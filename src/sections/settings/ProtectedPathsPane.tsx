@@ -163,11 +163,18 @@ export function ProtectedPathsPane({ pushToast }: Props) {
           Add
         </button>
       </div>
-      {addError && (
+      {addError ? (
         <p id="protected-add-error" className="settings-inline-error" role="alert">
           {addError}
         </p>
-      )}
+      ) : draft.trim().length === 0 ? (
+        // Disabled-Add hint per design-principles §3 — surface the
+        // reason the primary action is disabled instead of leaving the
+        // user to guess.
+        <p className="muted small settings-inline-hint">
+          Enter an absolute path (or one starting with <code>~</code>) to enable Add.
+        </p>
+      ) : null}
 
       <div className="settings-actions">
         <button
@@ -179,6 +186,11 @@ export function ProtectedPathsPane({ pushToast }: Props) {
         >
           Reset to defaults
         </button>
+        {(busy || loading) && (
+          <span className="muted small settings-inline-hint">
+            {loading ? "Loading…" : "Working…"}
+          </span>
+        )}
       </div>
     </section>
   );

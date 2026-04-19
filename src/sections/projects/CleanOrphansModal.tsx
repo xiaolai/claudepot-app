@@ -351,6 +351,16 @@ function Preview({
         <code>history.jsonl</code>. Recovery snapshots are written before
         anything is deleted.
       </p>
+
+      {data.protected_count > 0 && (
+        <p className="muted small clean-disclaimer">
+          <strong>{data.protected_count}</strong> of these{" "}
+          {data.protected_count === 1 ? "is" : "are"} on your protected list
+          — its CC artifact directory will be removed, but{" "}
+          <code>~/.claude.json</code> and <code>history.jsonl</code> entries
+          for that path will be preserved.
+        </p>
+      )}
     </>
   );
 }
