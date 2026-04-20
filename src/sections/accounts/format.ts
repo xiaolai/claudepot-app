@@ -22,7 +22,7 @@ export function relTime(iso: string | null | undefined): string {
  *    < 60m          → "in 42m"              (pure relative)
  *    later today    → "today 17:30"          (wall clock + anchor)
  *    tomorrow       → "tomorrow 14:30"       (wall clock + anchor)
- *    ≥ 2 days out   → "Apr 23"               (locale-aware date only)
+ *    ≥ 2 days out   → "Apr 23 14:30"         (locale-aware date + time)
  *
  * Inline form stays terse; `formatResetTooltip` carries the full
  * absolute `Apr 23, 2026, 14:30 GMT+08:00` on hover. Weekday labels
@@ -57,12 +57,15 @@ export function formatResetTime(iso: string | null | undefined): string {
 
   if (diffDays === 0) return `today ${time}`;
   if (diffDays === 1) return `tomorrow ${time}`;
-  // For 2+ days out the exact time is rarely actionable — the tooltip
-  // carries it. Inline shows a compact locale-aware date.
-  return d.toLocaleDateString(undefined, {
+  // For 2+ days out the exact time matters for planning — "resets
+  // Apr 23 at 00:00 UTC" vs "Apr 23 14:30" are different decisions.
+  // Space-separated so the form matches today/tomorrow idiom and
+  // stays compact in the 96px reset column.
+  const date = d.toLocaleDateString(undefined, {
     month: "short",
     day: "numeric",
   });
+  return `${date} ${time}`;
 }
 
 /**
