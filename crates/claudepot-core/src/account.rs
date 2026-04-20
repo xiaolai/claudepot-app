@@ -316,6 +316,27 @@ impl AccountStore {
     fn set_active(&self, key: &str, ts_column: &str, uuid: Uuid) -> SqlResult<()> {
         let db = self.db();
         let tx = db.unchecked_transaction()?;
+
+        // Idempotent no-op when the pointer already matches. Three
+        // callers reach this path on every tick even when nothing
+        // changed — sync_from_current_cc (window focus / refresh),
+        // login_and_reimport (re-login for the already-active account),
+        // and occasionally swap::switch. Before this guard each of
+        // those pushed `last_*_switch` forward to "now", which the GUI
+        // read as "CLI switch just now" after inactivity. Now the
+        // timestamp only moves when the active account genuinely
+        // changes.
+        let existing: Option<String> = tx
+            .query_row(
+                "SELECT value FROM state WHERE key = ?1",
+                params![key],
+                |r| r.get(0),
+            )
+            .optional()?;
+        if existing.as_deref() == Some(uuid.to_string().as_str()) {
+            return Ok(());
+        }
+
         let sql = format!("UPDATE accounts SET {ts_column} = ?1 WHERE uuid = ?2");
         let updated = tx.execute(&sql, params![Utc::now().to_rfc3339(), uuid.to_string()])?;
         if updated == 0 {
@@ -594,6 +615,80 @@ mod tests {
         assert!(
             row.last_cli_switch.is_some(),
             "accounts.last_cli_switch updated in the same transaction"
+        );
+    }
+
+    #[test]
+    fn test_set_active_cli_same_uuid_is_noop() {
+        // Regression: sync_from_current_cc and login_and_reimport call
+        // set_active_cli on every tick, often with the already-active
+        // UUID. Before the idempotent guard, each call pushed
+        // last_cli_switch forward to Utc::now() — the GUI then showed
+        // "CLI switch just now" even when nothing changed. set_active
+        // must now leave the timestamp alone when the pointer already
+        // matches the incoming UUID.
+        let (store, _dir) = test_store();
+        let account = make_account("noop@example.com");
+        store.insert(&account).unwrap();
+
+        store.set_active_cli(account.uuid).unwrap();
+        let first = store
+            .find_by_uuid(account.uuid)
+            .unwrap()
+            .unwrap()
+            .last_cli_switch
+            .expect("first set populates timestamp");
+
+        // Pause so a spurious write would produce a strictly-greater
+        // timestamp (the idempotent guard should prevent this).
+        std::thread::sleep(std::time::Duration::from_millis(20));
+
+        store.set_active_cli(account.uuid).unwrap();
+        let second = store
+            .find_by_uuid(account.uuid)
+            .unwrap()
+            .unwrap()
+            .last_cli_switch
+            .expect("second set leaves timestamp populated");
+
+        assert_eq!(
+            first, second,
+            "set_active_cli(same_uuid) must not bump last_cli_switch"
+        );
+    }
+
+    #[test]
+    fn test_set_active_cli_different_uuid_bumps_timestamp() {
+        // Complementary guard: when the pointer does change, the
+        // timestamp MUST move. Otherwise a real swap would look
+        // indistinguishable from the idle sync path.
+        let (store, _dir) = test_store();
+        let a = make_account("a@example.com");
+        let b = make_account("b@example.com");
+        store.insert(&a).unwrap();
+        store.insert(&b).unwrap();
+
+        store.set_active_cli(a.uuid).unwrap();
+        let t_a = store
+            .find_by_uuid(a.uuid)
+            .unwrap()
+            .unwrap()
+            .last_cli_switch
+            .expect("timestamp after first set");
+
+        std::thread::sleep(std::time::Duration::from_millis(20));
+
+        store.set_active_cli(b.uuid).unwrap();
+        let t_b = store
+            .find_by_uuid(b.uuid)
+            .unwrap()
+            .unwrap()
+            .last_cli_switch
+            .expect("timestamp after swap to b");
+
+        assert!(
+            t_b > t_a,
+            "set_active_cli(new_uuid) must bump last_cli_switch for the new target"
         );
     }
 }
