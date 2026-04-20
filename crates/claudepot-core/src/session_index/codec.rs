@@ -65,6 +65,7 @@ pub(super) fn walk_fs(config_dir: &Path) -> Result<WalkOutcome, SessionIndexErro
             };
             let size = meta.len();
             let mtime_ns = mtime_ns_of(&meta);
+            let inode = inode_of(&meta);
             let file_path = path.to_string_lossy().into_owned();
             entries.push(FsEntry {
                 slug: slug.clone(),
@@ -73,6 +74,7 @@ pub(super) fn walk_fs(config_dir: &Path) -> Result<WalkOutcome, SessionIndexErro
                     file_path,
                     size,
                     mtime_ns,
+                    inode,
                 },
             });
         }
@@ -92,16 +94,19 @@ pub(super) struct FsEntry {
     pub tuple: IndexTuple,
 }
 
-/// Read every `(file_path, size, mtime_ns)` triple from the cache.
-/// Ordering is not meaningful here — the diff fn rebuilds hashmaps.
+/// Read every `(file_path, size, mtime_ns, inode)` tuple from the
+/// cache. Ordering is not meaningful here — the diff fn rebuilds
+/// hashmaps.
 pub(super) fn load_db_tuples(db: &Connection) -> Result<Vec<IndexTuple>, SessionIndexError> {
-    let mut stmt =
-        db.prepare("SELECT file_path, file_size_bytes, file_mtime_ns FROM sessions")?;
+    let mut stmt = db.prepare(
+        "SELECT file_path, file_size_bytes, file_mtime_ns, file_inode FROM sessions",
+    )?;
     let rows = stmt.query_map([], |r| {
         Ok(IndexTuple {
             file_path: r.get::<_, String>(0)?,
             size: u64::try_from(r.get::<_, i64>(1)?).unwrap_or(0),
             mtime_ns: r.get::<_, i64>(2)?,
+            inode: u64::try_from(r.get::<_, i64>(3)?).unwrap_or(0),
         })
     })?;
     Ok(rows.collect::<Result<Vec<_>, _>>()?)
@@ -126,6 +131,14 @@ pub(super) fn upsert_row(
         .last_modified
         .map(mtime_ns_of_systemtime)
         .unwrap_or(0);
+    // Inode is read from the file on disk at UPSERT time (cheap stat)
+    // so callers don't need to thread it through SessionRow, which is
+    // the public session API type. Missing → 0, which matches the
+    // non-Unix degraded-mode contract.
+    let inode: i64 = std::fs::metadata(&row.file_path)
+        .ok()
+        .map(|m| i64::try_from(inode_of(&m)).unwrap_or(0))
+        .unwrap_or(0);
     let models_json = serde_json::to_string(&row.models)?;
     let first_user_prompt = row.first_user_prompt.as_deref().map(redact_secrets);
 
@@ -137,6 +150,7 @@ pub(super) fn upsert_row(
             row.session_id,
             i64::try_from(row.file_size_bytes).unwrap_or(i64::MAX),
             mtime_ns,
+            inode,
             row.project_path,
             row.project_from_transcript as i64,
             row.first_ts.map(|t| t.timestamp_millis()),
@@ -160,6 +174,17 @@ pub(super) fn upsert_row(
         ],
     )?;
     Ok(())
+}
+
+#[cfg(unix)]
+fn inode_of(meta: &fs::Metadata) -> u64 {
+    use std::os::unix::fs::MetadataExt;
+    meta.ino()
+}
+
+#[cfg(not(unix))]
+fn inode_of(_meta: &fs::Metadata) -> u64 {
+    0
 }
 
 /// Replace any `sk-ant-*` token run with `sk-ant-****` so pasted
@@ -327,7 +352,7 @@ fn ms_to_dt(ms: i64) -> Option<DateTime<Utc>> {
 
 const SQL_UPSERT: &str = r#"
 INSERT INTO sessions (
-    file_path, slug, session_id, file_size_bytes, file_mtime_ns,
+    file_path, slug, session_id, file_size_bytes, file_mtime_ns, file_inode,
     project_path, project_from_transcript, first_ts_ms, last_ts_ms,
     event_count, message_count, user_message_count, assistant_message_count,
     first_user_prompt, models_json,
@@ -336,13 +361,14 @@ INSERT INTO sessions (
     indexed_at_ms
 ) VALUES (
     ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15,
-    ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23, ?24, ?25
+    ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23, ?24, ?25, ?26
 )
 ON CONFLICT(file_path) DO UPDATE SET
     slug                     = excluded.slug,
     session_id               = excluded.session_id,
     file_size_bytes          = excluded.file_size_bytes,
     file_mtime_ns            = excluded.file_mtime_ns,
+    file_inode               = excluded.file_inode,
     project_path             = excluded.project_path,
     project_from_transcript  = excluded.project_from_transcript,
     first_ts_ms              = excluded.first_ts_ms,
