@@ -12,6 +12,22 @@ vi.mock("../../api", () => ({
     revealInFinder: (...args: unknown[]) => revealSpy(...args),
   },
 }));
+// Stub the app-state provider so ProjectDetail's useAppState() returns
+// a minimal shape without having to mount the full provider.
+vi.mock("../../providers/AppStateProvider", () => ({
+  useAppState: () => ({
+    status: {
+      platform: "macos",
+      arch: "aarch64",
+      cli_active_email: null,
+      desktop_active_email: null,
+      desktop_installed: true,
+      data_dir: "/tmp/claudepot-test",
+      cc_config_dir: "/tmp/claudepot-test/.claude",
+      account_count: 0,
+    },
+  }),
+}));
 
 import { ProjectDetail } from "./ProjectDetail";
 
@@ -158,6 +174,112 @@ describe("ProjectDetail", () => {
     const btn = await screen.findByRole("button", { name: /open in finder/i });
     await user.click(btn);
     expect(revealSpy).toHaveBeenCalledWith("/p");
+  });
+
+  it("context menu exposes Reveal transcript + Copy transcript path (B4/G6)", async () => {
+    showSpy.mockResolvedValue(
+      mkDetail([{ id: "aaaa0000-0000-0000-0000-000000000000", size: 10 }]),
+    );
+    revealSpy.mockResolvedValue(undefined);
+    const user = userEvent.setup();
+    const writeText = vi.fn();
+    Object.defineProperty(navigator, "clipboard", {
+      value: { writeText },
+      configurable: true,
+    });
+
+    render(
+      <ProjectDetail
+        path="/p"
+        projects={projects}
+        refreshSignal={0}
+        onRename={() => {}}
+        onMoved={() => {}}
+      />,
+    );
+    await user.click(
+      await screen.findByRole("button", { name: /session actions/i }),
+    );
+
+    await user.click(screen.getByText(/reveal transcript in finder/i));
+    expect(revealSpy).toHaveBeenCalledWith(
+      "/tmp/claudepot-test/.claude/projects/-p/aaaa0000-0000-0000-0000-000000000000.jsonl",
+    );
+
+    // Re-open the menu and copy the path.
+    await user.click(
+      screen.getByRole("button", { name: /session actions/i }),
+    );
+    await user.click(screen.getByText(/copy transcript path/i));
+    expect(writeText).toHaveBeenCalledWith(
+      "/tmp/claudepot-test/.claude/projects/-p/aaaa0000-0000-0000-0000-000000000000.jsonl",
+    );
+  });
+
+  it("session list paginates past 20 with Show more (B3)", async () => {
+    const many = Array.from({ length: 25 }, (_, i) => ({
+      id: `${String(i).padStart(4, "0")}0000-0000-0000-0000-000000000000`,
+      size: 10 + i,
+    }));
+    showSpy.mockResolvedValue(mkDetail(many));
+    const user = userEvent.setup();
+
+    render(
+      <ProjectDetail
+        path="/p"
+        projects={projects}
+        refreshSignal={0}
+        onRename={() => {}}
+        onMoved={() => {}}
+      />,
+    );
+    const firstBatch = await screen.findAllByRole("option");
+    expect(firstBatch).toHaveLength(20);
+    expect(screen.getByText(/5 more hidden/)).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: /show 5 more/i }));
+    const after = await screen.findAllByRole("option");
+    expect(after).toHaveLength(25);
+  });
+
+  it("session list filters by id prefix (B3)", async () => {
+    const sessions = [
+      { id: "aaaa0000-0000-0000-0000-000000000000", size: 10 },
+      { id: "bbbb0000-0000-0000-0000-000000000000", size: 20 },
+      { id: "cccc0000-0000-0000-0000-000000000000", size: 30 },
+    ];
+    showSpy.mockResolvedValue(mkDetail(sessions));
+    const user = userEvent.setup();
+    render(
+      <ProjectDetail
+        path="/p"
+        projects={projects}
+        refreshSignal={0}
+        onRename={() => {}}
+        onMoved={() => {}}
+      />,
+    );
+    await screen.findAllByRole("option");
+    await user.type(screen.getByLabelText(/filter sessions/i), "bbbb");
+    const filtered = await screen.findAllByRole("option");
+    expect(filtered).toHaveLength(1);
+  });
+
+  it("session rows are keyboard-reachable (G16)", async () => {
+    showSpy.mockResolvedValue(
+      mkDetail([{ id: "aaaa0000-0000-0000-0000-000000000000", size: 10 }]),
+    );
+    render(
+      <ProjectDetail
+        path="/p"
+        projects={projects}
+        refreshSignal={0}
+        onRename={() => {}}
+        onMoved={() => {}}
+      />,
+    );
+    const row = await screen.findByRole("option");
+    expect(row).toHaveAttribute("tabIndex", "0");
   });
 
   it("routes reveal errors to onError when provided", async () => {
