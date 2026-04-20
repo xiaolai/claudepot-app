@@ -177,6 +177,14 @@ export function ProjectDetail({
         </span>
         <span className="detail-label">Size</span>
         <span className="detail-value">{formatSize(info.total_size_bytes)}</span>
+        {info.last_modified_ms != null && (
+          <>
+            <span className="detail-label">Last touched</span>
+            <span className="detail-value">
+              {formatRelativeTime(info.last_modified_ms)}
+            </span>
+          </>
+        )}
         {info.session_count > 0 && (
           <>
             <span className="detail-label">Sessions</span>
