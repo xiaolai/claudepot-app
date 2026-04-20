@@ -317,10 +317,14 @@
 
   --scrim:       oklch(0% 0 0 / 0.55);
 
-  --accent:        oklch(74% 0.13 45);
-  --accent-soft:   oklch(74% 0.13 45 / 0.16);
-  --accent-border: oklch(74% 0.13 45 / 0.35);
-  --accent-ink:    oklch(80% 0.12 45);
+  /* Dark accent: chroma bumped 0.13 → 0.17 and L tuned to 72% so
+     the solid fill reads at the same visual saturation weight as
+     the light-mode accent against an ink-paper background. Raw
+     0.13 chroma at L=74% renders milky/desaturated on dark. */
+  --accent:        oklch(72% 0.17 45);
+  --accent-soft:   oklch(72% 0.17 45 / 0.18);
+  --accent-border: oklch(72% 0.17 45 / 0.38);
+  --accent-ink:    oklch(82% 0.14 45);
 
   --shadow-sm: 0 1px 0 oklch(0% 0 0 / 0.2);
   --shadow-md: 0 2px 8px oklch(0% 0 0 / 0.3);
