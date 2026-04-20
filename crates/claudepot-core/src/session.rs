@@ -38,6 +38,11 @@ pub enum SessionError {
     NotFound(String),
     #[error("invalid session path: {0}")]
     InvalidPath(String),
+    /// Stringified `SessionIndexError` — kept as `String` to avoid a
+    /// cycle with `session_index::SessionIndexError`, which already
+    /// wraps `SessionError` for its scan-failure variant.
+    #[error("session index: {0}")]
+    Index(String),
 }
 
 // ---------------------------------------------------------------------------
@@ -207,9 +212,29 @@ pub struct SessionDetail {
 /// the JSONL to produce rich metadata. Returns rows sorted newest-first
 /// by `last_ts` (falling back to file mtime).
 ///
-/// A session directory with no JSONL files is silently skipped — those
-/// are handled by the orphan-detection pipeline, not here.
+/// Delegates to the persistent `SessionIndex` cache at
+/// `<claudepot_data_dir>/sessions.db`. Cold first run folds every
+/// transcript; subsequent calls touch only `stat()` + the rows whose
+/// `(size, mtime_ns)` changed. A session directory with no JSONL
+/// files is silently skipped — those are handled by the
+/// orphan-detection pipeline, not here.
 pub fn list_all_sessions(config_dir: &Path) -> Result<Vec<SessionRow>, SessionError> {
+    let data_dir = crate::paths::claudepot_data_dir();
+    let db_path = data_dir.join("sessions.db");
+    let idx = crate::session_index::SessionIndex::open(&db_path)
+        .map_err(|e| SessionError::Index(e.to_string()))?;
+    idx.list_all(config_dir)
+        .map_err(|e| SessionError::Index(e.to_string()))
+}
+
+/// Direct (uncached) scan — used by tests that want to verify the
+/// JSONL-folding logic without pulling SQLite and the global data-dir
+/// lock into every unit test. Production callers go through
+/// `list_all_sessions`, which wraps the persistent index.
+#[cfg(test)]
+pub(crate) fn scan_all_sessions_uncached(
+    config_dir: &Path,
+) -> Result<Vec<SessionRow>, SessionError> {
     let projects_dir = config_dir.join("projects");
     if !projects_dir.exists() {
         return Ok(vec![]);
@@ -240,9 +265,6 @@ pub fn list_all_sessions(config_dir: &Path) -> Result<Vec<SessionRow>, SessionEr
         .filter_map(|(slug, path)| scan_session(slug, path).ok())
         .collect();
 
-    // Newest first. Sessions that never produced a dated event still
-    // carry file mtime from `scan_session`, so the comparison has a
-    // sensible fallback.
     rows.sort_by(|a, b| {
         let ak = a.last_ts.map(|t| t.timestamp_millis()).unwrap_or_else(|| {
             a.last_modified
@@ -869,7 +891,7 @@ mod tests {
     #[test]
     fn empty_projects_dir_is_ok() {
         let tmp = TempDir::new().unwrap();
-        let rows = list_all_sessions(tmp.path()).unwrap();
+        let rows = scan_all_sessions_uncached(tmp.path()).unwrap();
         assert!(rows.is_empty());
     }
 
@@ -882,7 +904,7 @@ mod tests {
 
         write_session(tmp.path(), "-repo-foo", "AAA", &[user1, asst1, tool]);
 
-        let rows = list_all_sessions(tmp.path()).unwrap();
+        let rows = scan_all_sessions_uncached(tmp.path()).unwrap();
         assert_eq!(rows.len(), 1);
         let r = &rows[0];
         assert_eq!(r.session_id, "AAA");
@@ -912,7 +934,7 @@ mod tests {
         let tool = r#"{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"t1","content":"x","is_error":false}]},"timestamp":"2026-04-10T10:00:01Z","cwd":"/a","sessionId":"S1"}"#;
         let real = r#"{"type":"user","message":{"role":"user","content":[{"type":"text","text":"the real question"}]},"timestamp":"2026-04-10T10:00:02Z","cwd":"/a","sessionId":"S1"}"#;
         write_session(tmp.path(), "-a", "S1", &[caveat, tool, real]);
-        let rows = list_all_sessions(tmp.path()).unwrap();
+        let rows = scan_all_sessions_uncached(tmp.path()).unwrap();
         assert_eq!(rows[0].first_user_prompt.as_deref(), Some("the real question"));
     }
 
@@ -922,7 +944,7 @@ mod tests {
         let bad = "{not valid json";
         let good = r#"{"type":"user","message":{"role":"user","content":"hi"},"timestamp":"2026-04-10T10:00:00Z","cwd":"/z","sessionId":"S1"}"#;
         write_session(tmp.path(), "-z", "S1", &[bad, good]);
-        let rows = list_all_sessions(tmp.path()).unwrap();
+        let rows = scan_all_sessions_uncached(tmp.path()).unwrap();
         assert_eq!(rows.len(), 1);
         // event_count counts ALL non-empty lines, including malformed.
         assert_eq!(rows[0].event_count, 2);
@@ -937,7 +959,7 @@ mod tests {
         let newer = r#"{"type":"user","message":{"role":"user","content":"new"},"timestamp":"2026-04-20T00:00:00Z","cwd":"/b","sessionId":"B"}"#;
         write_session(tmp.path(), "-a", "A", &[older]);
         write_session(tmp.path(), "-b", "B", &[newer]);
-        let rows = list_all_sessions(tmp.path()).unwrap();
+        let rows = scan_all_sessions_uncached(tmp.path()).unwrap();
         assert_eq!(rows.len(), 2);
         assert_eq!(rows[0].session_id, "B");
         assert_eq!(rows[1].session_id, "A");
@@ -1043,7 +1065,7 @@ mod tests {
         let tmp = TempDir::new().unwrap();
         let asst = r#"{"type":"assistant","message":{"role":"assistant","model":"m","content":[{"type":"text","text":"x"}]},"timestamp":"2026-04-10T10:00:00Z","sessionId":"S"}"#;
         write_session(tmp.path(), "-Users-joker-repo", "S", &[asst]);
-        let rows = list_all_sessions(tmp.path()).unwrap();
+        let rows = scan_all_sessions_uncached(tmp.path()).unwrap();
         assert_eq!(rows.len(), 1);
         assert!(!rows[0].project_from_transcript);
         // unsanitize_path turns "-Users-joker-repo" back into an absolute path
