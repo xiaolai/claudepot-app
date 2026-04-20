@@ -161,6 +161,7 @@ pub fn run() {
             commands::session_list_all,
             commands::session_read,
             commands::session_read_path,
+            commands::session_index_rebuild,
             commands::protected_paths_list,
             commands::protected_paths_add,
             commands::protected_paths_remove,

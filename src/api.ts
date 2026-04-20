@@ -209,9 +209,18 @@ export const api = {
    * Walk every `~/.claude/projects/<slug>/<session>.jsonl` and produce
    * list rows with token totals, models seen, first-prompt preview,
    * and CC version. Newest-first by the last-event timestamp (falling
-   * back to file mtime). Parallel file scan under the hood.
+   * back to file mtime). Backed by a persistent SQLite cache in
+   * `~/.claudepot/sessions.db` — cold first call folds every
+   * transcript; subsequent calls touch only `stat()` and the delta.
    */
   sessionListAll: () => invoke<SessionRow[]>("session_list_all"),
+  /**
+   * Truncate the session-index cache and force the next `sessionListAll`
+   * to re-parse every transcript from cold. Escape hatch for cases the
+   * `(size, mtime)` guard can't see. Safe to call — no data loss; only
+   * derived cache rows are dropped.
+   */
+  sessionIndexRebuild: () => invoke<void>("session_index_rebuild"),
   /**
    * Full transcript + row metadata for one session, keyed by its
    * UUID. Locates the slug by filename match, then streams the JSONL
