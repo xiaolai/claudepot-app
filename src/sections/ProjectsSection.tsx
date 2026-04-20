@@ -396,6 +396,7 @@ export function ProjectsSection({
                   refresh();
                 }}
                 onError={(msg) => setToast(msg)}
+                onOpenMaintenance={() => onSubRouteChange("maintenance")}
               />
             </aside>
           )}
