@@ -1,24 +1,21 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import type { AccountSummary, AppStatus } from "../types";
+import type { AccountSummary } from "../types";
 import { useBusy } from "../hooks/useBusy";
 import { useUsage } from "../hooks/useUsage";
 import { useActions } from "../hooks/useActions";
 import { useTauriEvent } from "../hooks/useTauriEvent";
 import { useGlobalShortcuts } from "../hooks/useGlobalShortcuts";
 import { useAppState } from "../providers/AppStateProvider";
-import { ContextMenu } from "../components/ContextMenu";
 import { CommandPalette } from "../components/CommandPalette";
 import { ConfirmDialog } from "../components/ConfirmDialog";
 import { Button } from "../components/primitives/Button";
-import { Glyph } from "../components/primitives/Glyph";
-import { Input } from "../components/primitives/Input";
 import { NF } from "../icons";
 import { ScreenHeader } from "../shell/ScreenHeader";
-import { AccountCard } from "./accounts/AccountCard";
+import { AccountsGrid } from "./accounts/AccountsGrid";
 import { AddAccountModal } from "./accounts/AddAccountModal";
 import { isAnomaly } from "./accounts/AnomalyBanner";
 import { SplitBrainConfirm } from "./accounts/SplitBrainConfirm";
-import { useAccountContextMenu } from "./accounts/useAccountContextMenu";
+import { CtxMenuForAccount } from "./accounts/useAccountContextMenu";
 import { useAccountHandlers } from "./accounts/useAccountHandlers";
 
 /**
@@ -247,106 +244,17 @@ export function AccountsSection({
         }
       />
 
-      {/* Filter input only earns its row when there are enough
-          accounts to usefully narrow. With 1–3 accounts the input
-          is pure chrome. Once a 4th lands, the filter appears. */}
-      {accounts.length > 3 && (
-        <div
-          style={{
-            padding: "var(--sp-14) var(--sp-32)",
-            borderBottom: "var(--bw-hair) solid var(--line)",
-            display: "flex",
-            gap: "var(--sp-12)",
-            alignItems: "center",
-            background: "var(--bg)",
-          }}
-        >
-          <Input
-            glyph={NF.search}
-            placeholder="Filter accounts"
-            value={filter}
-            onChange={(e) => setFilter(e.target.value)}
-            style={{ width: "var(--filter-input-width)" }}
-            aria-label="Filter accounts"
-          />
-          {filter.trim() !== "" && (
-            <span
-              className="mono-cap"
-              style={{
-                color: "var(--fg-faint)",
-                marginLeft: "var(--sp-4)",
-              }}
-            >
-              {`${shown.length} / ${accounts.length}`}
-            </span>
-          )}
-          <div style={{ flex: 1 }} />
-        </div>
-      )}
-
-      <div
-        style={{
-          padding: "var(--sp-20) var(--sp-32) var(--sp-40)",
-          display: "grid",
-          gridTemplateColumns:
-            "repeat(auto-fill, minmax(var(--content-cap-sm), 1fr))",
-          gap: "var(--sp-16)",
-        }}
-      >
-        {shown.map((a) => (
-          <AccountCard
-            key={a.uuid}
-            account={a}
-            usageEntry={usage[a.uuid] ?? null}
-            loginBusy={busy.busyKeys.has(`re-${a.uuid}`)}
-            onRemove={(x) => setConfirmRemove(x)}
-            onLogin={(x) => actions.login(x)}
-            onContextMenu={handleContextMenu}
-          />
-        ))}
-        {shown.length === 0 && accounts.length > 0 && (
-          <div
-            style={{
-              gridColumn: "1 / -1",
-              padding: "var(--sp-60)",
-              textAlign: "center",
-              color: "var(--fg-faint)",
-              fontSize: "var(--fs-sm)",
-            }}
-          >
-            No accounts match "{filter}".
-          </div>
-        )}
-        {accounts.length === 0 && (
-          <div
-            style={{
-              gridColumn: "1 / -1",
-              padding: "var(--sp-60)",
-              textAlign: "center",
-              color: "var(--fg-faint)",
-              fontSize: "var(--fs-sm)",
-              display: "flex",
-              flexDirection: "column",
-              gap: "var(--sp-10)",
-              alignItems: "center",
-            }}
-          >
-            <Glyph g={NF.users} size="var(--sp-32)" color="var(--fg-ghost)" />
-            <p style={{ margin: 0 }}>No accounts yet.</p>
-            <p
-              style={{
-                margin: 0,
-                fontSize: "var(--fs-xs)",
-                color: "var(--fg-faint)",
-              }}
-            >
-              {"Click "}
-              <b>Add account</b>
-              {" to import Claude Code's current session."}
-            </p>
-          </div>
-        )}
-      </div>
+      <AccountsGrid
+        accounts={accounts}
+        shown={shown}
+        usage={usage}
+        busyKeys={busy.busyKeys}
+        filter={filter}
+        onFilterChange={setFilter}
+        onRemove={setConfirmRemove}
+        onLogin={actions.login}
+        onContextMenu={handleContextMenu}
+      />
 
       <AddAccountModal
         open={showAdd}
@@ -451,56 +359,5 @@ export function AccountsSection({
       )}
 
     </>
-  );
-}
-
-/**
- * Small hook wrapper. The menu-item set is computed via
- * `useAccountContextMenu` which can only run inside a component;
- * splitting it out keeps the main `AccountsSection` under the LOC
- * limit without adding a provider.
- */
-function CtxMenuForAccount({
-  menu,
-  status,
-  busyKeys,
-  onSwitchCli,
-  onSwitchDesktop,
-  onSwitchDesktopNoLaunch,
-  onVerify,
-  onRefreshUsageFor,
-  onRefreshUsageAll,
-  onLogin,
-  onRemove,
-  onClose,
-}: {
-  menu: { x: number; y: number; account: AccountSummary };
-  status: AppStatus;
-  busyKeys: Set<string>;
-  onSwitchCli: (a: AccountSummary) => void;
-  onSwitchDesktop: (a: AccountSummary) => void;
-  onSwitchDesktopNoLaunch: (a: AccountSummary) => void;
-  onVerify: (a: AccountSummary) => void;
-  onRefreshUsageFor: (a: AccountSummary) => void;
-  onRefreshUsageAll: () => void;
-  onLogin: (a: AccountSummary) => void;
-  onRemove: (a: AccountSummary) => void;
-  onClose: () => void;
-}) {
-  const items = useAccountContextMenu({
-    account: menu.account,
-    status,
-    busyKeys,
-    onSwitchCli,
-    onSwitchDesktop,
-    onSwitchDesktopNoLaunch,
-    onVerify,
-    onRefreshUsageFor,
-    onRefreshUsageAll,
-    onLogin,
-    onRemove,
-  });
-  return (
-    <ContextMenu x={menu.x} y={menu.y} items={items} onClose={onClose} />
   );
 }
