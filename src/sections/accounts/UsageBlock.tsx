@@ -235,11 +235,15 @@ function SegBar({ pct, high }: { pct: number; high: boolean }) {
           key={i}
           style={{
             flex: 1,
+            // Filled segments read as data (muted ink-on-paper), not
+            // brand — terracotta is reserved for the primary CTA and
+            // selected state. Warn tone kicks in at >=80% so a
+            // critical bar still jumps.
             background:
               i < filled
                 ? high
                   ? "var(--warn)"
-                  : "var(--accent)"
+                  : "var(--fg-muted)"
                 : "var(--bg-active)",
             borderRadius: "var(--sp-px)",
             opacity: i < filled ? 1 : "var(--opacity-segbar)",

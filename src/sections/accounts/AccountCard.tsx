@@ -40,11 +40,10 @@ export function AccountCard({
   const bound = a.is_cli_active || a.is_desktop_active;
   const severe = isAnomaly(a);
 
-  const borderColor = severe
-    ? "var(--warn)"
-    : bound
-      ? "var(--accent-border)"
-      : "var(--line)";
+  // One signal per state — never both. Severe dominates (full warn
+  // ring). Bound shows as a left accent bar with the rest at
+  // hairline. Healthy-unbound is flat line on all edges.
+  const borderColor = severe ? "var(--warn)" : "var(--line)";
   const leftBorder = severe
     ? "var(--bw-accent) solid var(--warn)"
     : bound

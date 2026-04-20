@@ -173,7 +173,6 @@ export function ProjectsSection({
   return (
     <>
       <ScreenHeader
-        crumbs={["claudepot", "projects"]}
         title="Projects"
         subtitle={subtitle}
         actions={
