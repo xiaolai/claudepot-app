@@ -1,5 +1,4 @@
-import { useEffect } from "react";
-import { SectionRail } from "./components/SectionRail";
+import { useCallback, useEffect, useMemo } from "react";
 import { PendingJournalsBanner } from "./components/PendingJournalsBanner";
 import { RunningOpStrip } from "./components/RunningOpStrip";
 import { sections, sectionIds } from "./sections/registry";
@@ -7,11 +6,16 @@ import { AccountsSection } from "./sections/AccountsSection";
 import { ProjectsSection } from "./sections/ProjectsSection";
 import { SettingsSection } from "./sections/SettingsSection";
 import { OperationProgressModal } from "./sections/projects/OperationProgressModal";
+import { SessionsSection } from "./sections/SessionsSection";
 import { useSection } from "./hooks/useSection";
 import { usePendingJournals } from "./hooks/usePendingJournals";
 import { useRunningOps } from "./hooks/useRunningOps";
+import { useAccounts, bindingFrom } from "./hooks/useAccounts";
+import { useTheme } from "./hooks/useTheme";
 import { OperationsProvider, useOperations } from "./hooks/useOperations";
+import { api } from "./api";
 import type { RunningOpInfo } from "./types";
+import { WindowChrome, AppSidebar, AppStatusBar } from "./shell";
 
 function AppShell() {
   const { section, subRoute, setSection, setSubRoute } = useSection(
@@ -22,6 +26,14 @@ function AppShell() {
     usePendingJournals();
   const { ops: runningOps } = useRunningOps();
   const { active: activeOp, open: openOp, close: closeOp } = useOperations();
+  const { accounts, refresh: refreshAccounts } = useAccounts();
+  const { resolved: themeResolved, toggle: toggleTheme } = useTheme();
+
+  // Binding derived from the same source of truth AccountsSection
+  // uses — the active flags on each account. When the user binds via
+  // the sidebar switcher, we call cli_use / desktop_use on the
+  // backend and then re-fetch to pick up the new flags.
+  const binding = useMemo(() => bindingFrom(accounts), [accounts]);
 
   const labelFor = (op: RunningOpInfo): string => {
     const verb =
@@ -37,7 +49,12 @@ function AppShell() {
   // Cmd+, opens Settings (standard macOS shortcut)
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if ((e.metaKey || e.ctrlKey) && e.key === "," && !e.shiftKey && !e.altKey) {
+      if (
+        (e.metaKey || e.ctrlKey) &&
+        e.key === "," &&
+        !e.shiftKey &&
+        !e.altKey
+      ) {
         e.preventDefault();
         setSection("settings");
       }
@@ -46,9 +63,8 @@ function AppShell() {
     return () => window.removeEventListener("keydown", onKey);
   }, [setSection]);
 
-  // Hide the banner whenever the user is already looking at Repair —
-  // no point nagging from the page they'd navigate to.
-  const onRepairSubview = section === "projects" &&
+  const onRepairSubview =
+    section === "projects" &&
     (subRoute === "repair" || subRoute === "maintenance");
   const actionableTotal =
     pendingSummary === null
@@ -57,38 +73,135 @@ function AppShell() {
   const showBanner =
     pendingSummary !== null && actionableTotal > 0 && !onRepairSubview;
 
+  const handleBind = useCallback(
+    async (target: "cli" | "desktop", uuid: string) => {
+      const account = accounts.find((a) => a.uuid === uuid);
+      if (!account) return;
+      try {
+        if (target === "cli") {
+          await api.cliUse(account.email, false);
+        } else {
+          await api.desktopUse(account.email, true);
+        }
+        await refreshAccounts();
+      } catch (e) {
+        // Surface on console for now — the Accounts screen carries
+        // the full error UI. Future: hoist toast system into a
+        // global provider so the shell can push errors too.
+        // eslint-disable-next-line no-console
+        console.error(`${target}_use failed:`, e);
+      }
+    },
+    [accounts, refreshAccounts],
+  );
+
+  // Breadcrumb tail mirrors the active section.
+  const cwd = useMemo(
+    () => sections.find((s) => s.id === section)?.label.toLowerCase() ?? section,
+    [section],
+  );
+
+  const openPalette = useCallback(() => {
+    // The command palette currently lives inside AccountsSection (it
+    // owns the account-level actions). As a minimal bridge, dispatch
+    // a window event that AccountsSection already listens for.
+    window.dispatchEvent(new CustomEvent("cp-open-palette"));
+  }, []);
+
   return (
-    <div className="app-layout">
-      <SectionRail sections={sections} active={section} onSelect={setSection} />
-      {section === "accounts" && <AccountsSection onNavigate={setSection} />}
-      {section === "projects" && (
-        <ProjectsSection
-          subRoute={subRoute}
-          onSubRouteChange={setSubRoute}
+    <div
+      style={{
+        display: "flex",
+        flexDirection: "column",
+        height: "100vh",
+        background: "var(--bg)",
+        color: "var(--fg)",
+        fontFamily: "var(--font)",
+        fontSize: "var(--fs-base)",
+      }}
+    >
+      <WindowChrome
+        cwd={cwd}
+        theme={themeResolved}
+        onToggleTheme={toggleTheme}
+        onCmdK={openPalette}
+      />
+
+      <div
+        style={{
+          flex: 1,
+          display: "flex",
+          minHeight: 0,
+          overflow: "hidden",
+        }}
+      >
+        <AppSidebar
+          sections={sections}
+          active={section}
+          onSelect={(id) => setSection(id)}
+          accounts={accounts}
+          binding={binding}
+          onBind={handleBind}
+          badges={{
+            accounts: accounts.length || undefined,
+          }}
+          version="v0.4.2"
+          synced
         />
-      )}
-      {section === "settings" && <SettingsSection />}
-      {showBanner && pendingSummary && (
-        <div className="global-banner-slot">
-          <PendingJournalsBanner
-            summary={pendingSummary}
-            onOpen={() => setSection("projects", "repair")}
+
+        <main
+          style={{
+            flex: 1,
+            minWidth: 0,
+            display: "flex",
+            flexDirection: "column",
+            overflow: "hidden",
+            position: "relative",
+          }}
+        >
+          {showBanner && pendingSummary && (
+            <div style={{ padding: "var(--sp-12) var(--sp-16) 0" }}>
+              <PendingJournalsBanner
+                summary={pendingSummary}
+                onOpen={() => setSection("projects", "repair")}
+              />
+            </div>
+          )}
+
+          <div style={{ flex: 1, minHeight: 0, overflow: "auto" }}>
+            {section === "accounts" && (
+              <AccountsSection onNavigate={setSection} />
+            )}
+            {section === "projects" && (
+              <ProjectsSection
+                subRoute={subRoute}
+                onSubRouteChange={setSubRoute}
+              />
+            )}
+            {section === "sessions" && <SessionsSection />}
+            {section === "settings" && <SettingsSection />}
+          </div>
+
+          <RunningOpStrip
+            ops={runningOps}
+            onReopen={(opId) => {
+              const op = runningOps.find((o) => o.op_id === opId);
+              if (!op) return;
+              openOp({
+                opId,
+                title: labelFor(op),
+              });
+            }}
           />
-        </div>
-      )}
-      <RunningOpStrip
-        ops={runningOps}
-        onReopen={(opId) => {
-          const op = runningOps.find((o) => o.op_id === opId);
-          if (!op) return;
-          // Audit Low: don't call refreshPendingBanner here. The
-          // modal's own onComplete/onError below already does it;
-          // duplicating it caused two invalidations per terminal
-          // event when reopening a running op.
-          openOp({
-            opId,
-            title: labelFor(op),
-          });
+        </main>
+      </div>
+
+      <AppStatusBar
+        stats={{
+          branch: "main",
+          projects: null,
+          sessions: null,
+          model: "claude-sonnet-4-5",
         }}
       />
 
@@ -98,8 +211,6 @@ function AppShell() {
           opId={activeOp.opId}
           title={activeOp.title}
           onClose={closeOp}
-          // Every terminal event — whether repair or rename —
-          // invalidates the pending-journals banner (plan §7.5).
           onComplete={() => {
             activeOp.onComplete?.();
             refreshPendingBanner();

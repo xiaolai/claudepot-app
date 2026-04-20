@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { api } from "../api";
 import type { AccountSummary } from "../types";
 import { useToasts } from "../hooks/useToasts";
@@ -8,25 +8,30 @@ import { useUsage } from "../hooks/useUsage";
 import { useActions } from "../hooks/useActions";
 import { useTauriEvent } from "../hooks/useTauriEvent";
 import { useGlobalShortcuts } from "../hooks/useGlobalShortcuts";
-import { Sidebar } from "../components/Sidebar";
-import { ContentPane } from "../components/ContentPane";
-import { StatusBar } from "../components/StatusBar";
 import { ContextMenu, type ContextMenuItem } from "../components/ContextMenu";
 import { CommandPalette } from "../components/CommandPalette";
-import { AddAccountModal } from "../components/AddAccountModal";
 import { ConfirmDialog } from "../components/ConfirmDialog";
 import { ToastContainer } from "../components/ToastContainer";
+import { Button } from "../components/primitives/Button";
+import { Glyph } from "../components/primitives/Glyph";
+import { Input } from "../components/primitives/Input";
+import { NF } from "../icons";
+import { ScreenHeader } from "../shell/ScreenHeader";
+import { AccountCard } from "./accounts/AccountCard";
+import { AddAccountModal } from "./accounts/AddAccountModal";
+import { isAnomaly } from "./accounts/AnomalyBanner";
 
 /**
- * Accounts section. Owns all account-related state, data fetching,
- * and modals. Rendered as the body of the Accounts tab in the section
- * rail. Nothing here knows about the rail itself — the shell is
- * responsible for placement.
+ * Accounts section. Renders the header, filter bar, and the card grid.
+ * State (accounts, usage, verify, toasts, busy-keys, modals, palette,
+ * context menus) still lives here since the hooks were authored for
+ * this scope — a future cleanup can hoist it into context providers,
+ * but the shell's `useAccounts` already re-fetches on window focus so
+ * the App-level copy stays close to this section's copy.
  */
 export function AccountsSection({
   onNavigate,
 }: {
-  /** Optional: route to another section from the command palette. */
   onNavigate?: (section: string, subRoute?: string | null) => void;
 }) {
   const { toasts, pushToast, dismissToast } = useToasts();
@@ -35,26 +40,21 @@ export function AccountsSection({
     status,
     accounts,
     loadError,
-    keychainIssue,
-    syncError,
-    ccIdentity,
-    verifying,
+    ccIdentity: _ccIdentity,
     refresh,
   } = useRefresh(pushToast);
   const { usage, refreshUsage, refreshUsageFor } = useUsage();
   const actions = useActions({ pushToast, refresh, ...busy });
 
   const [showAdd, setShowAdd] = useState(false);
-  const [confirmRemove, setConfirmRemove] = useState<AccountSummary | null>(null);
+  const [confirmRemove, setConfirmRemove] = useState<AccountSummary | null>(
+    null,
+  );
   const [confirmClear, setConfirmClear] = useState(false);
-  const [selectedUuid, setSelectedUuid] = useState<string | null>(null);
   const [showPalette, setShowPalette] = useState(false);
-  // Two parallel menu anchors: the row menu (broader scope) and the
-  // badge menu (token/usage-scoped). A discriminant so one render
-  // function can handle both without conditionals in the JSX.
+  const [filter, setFilter] = useState("");
   const [ctxMenu, setCtxMenu] = useState<
     | { kind: "row"; x: number; y: number; account: AccountSummary }
-    | { kind: "badge"; x: number; y: number; account: AccountSummary }
     | null
   >(null);
 
@@ -62,14 +62,6 @@ export function AccountsSection({
     (e: React.MouseEvent, a: AccountSummary) => {
       e.preventDefault();
       setCtxMenu({ kind: "row", x: e.clientX, y: e.clientY, account: a });
-    },
-    [],
-  );
-
-  const handleBadgeContextMenu = useCallback(
-    (e: React.MouseEvent, a: AccountSummary) => {
-      e.preventDefault();
-      setCtxMenu({ kind: "badge", x: e.clientX, y: e.clientY, account: a });
     },
     [],
   );
@@ -89,63 +81,36 @@ export function AccountsSection({
     [pushToast, refresh],
   );
 
-  // Deferred Desktop switch with undo toast (P2.4). The action commit
-  // is driven by the toast's auto-dismiss (`onCommit`), so the Undo
-  // button is effective ↔ the toast is still visible. No parallel
-  // timers, no race between Undo click and action fire.
-  //
-  // `dedupeKey: "desktop-switch"` guarantees only the LATEST pending
-  // switch commits. Rapid-fire A → B → C supersede each other by
-  // cancelling the previous toast's timer, so only C runs.
   const handleDesktopSwitch = useCallback(
     (a: AccountSummary) => {
-      pushToast(
-        "info",
-        `Switching Desktop to ${a.email}…`,
-        () => {
-          /* Undo click: the toast's own dismiss-on-click handler
-           * tears down the commit timer inside useToasts. Nothing
-           * else is needed here — declining to commit IS the undo. */
-        },
-        {
-          undoMs: 3000,
-          dedupeKey: "desktop-switch",
-          onCommit: () => actions.useDesktop(a),
-        },
-      );
+      pushToast("info", `Switching Desktop to ${a.email}…`, () => {}, {
+        undoMs: 3000,
+        dedupeKey: "desktop-switch",
+        onCommit: () => actions.useDesktop(a),
+      });
     },
     [actions, pushToast],
   );
 
-  // Auto-select: active CLI > active Desktop > first account.
-  useEffect(() => {
-    if (accounts.length === 0) return;
-    const stillExists = selectedUuid && accounts.some((a) => a.uuid === selectedUuid);
-    if (stillExists) return;
-    const cliActive = accounts.find((a) => a.is_cli_active);
-    const desktopActive = accounts.find((a) => a.is_desktop_active);
-    setSelectedUuid((cliActive ?? desktopActive ?? accounts[0]).uuid);
-  }, [accounts, selectedUuid]);
-
-  const selectedAccount = accounts.find((a) => a.uuid === selectedUuid) ?? null;
-
-  // Cmd+Shift+C — copy selected email. Kept inline because
-  // useGlobalShortcuts handles the unmodified ⌘-letter shortcuts only;
-  // shift+letter is this section's own convention.
+  // Cmd+Shift+C — copy first matching email when a filter is active,
+  // else the first account in the list.
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       const mod = e.metaKey || e.ctrlKey;
       if (mod && e.shiftKey && e.key === "c") {
         e.preventDefault();
-        if (selectedAccount) {
-          navigator.clipboard.writeText(selectedAccount.email);
-          pushToast("info", `Copied ${selectedAccount.email}`);
+        const target = shown[0];
+        if (target) {
+          navigator.clipboard.writeText(target.email);
+          pushToast("info", `Copied ${target.email}`);
         }
       }
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [selectedAccount, pushToast]);
+    // `shown` is computed below — tracked by accounts/filter deps.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [accounts, filter, pushToast]);
 
   useGlobalShortcuts({
     onRefresh: () => {
@@ -156,113 +121,289 @@ export function AccountsSection({
     onPalette: () => setShowPalette(true),
   });
 
-  // Refresh when the tray switches CLI or requests a refresh
-  const trayRefresh = useCallback(() => { refresh(); refreshUsage(); }, [refresh, refreshUsage]);
+  // Command palette bridge — WindowChrome dispatches this event when
+  // the ⌘K hint is clicked. App.tsx can't open the palette directly
+  // because the palette component currently lives inside this section.
+  useEffect(() => {
+    const onOpen = () => setShowPalette(true);
+    window.addEventListener("cp-open-palette", onOpen);
+    return () => window.removeEventListener("cp-open-palette", onOpen);
+  }, []);
+
+  const trayRefresh = useCallback(() => {
+    refresh();
+    refreshUsage();
+  }, [refresh, refreshUsage]);
   useTauriEvent("tray-cli-switched", trayRefresh);
   useTauriEvent("tray-refresh-requested", trayRefresh);
-  // Audit Low: surface tray-triggered errors. Without this, a tray
-  // quick-switch that failed (live-session conflict, keychain issue)
-  // disappeared into backend logs; user thought nothing happened.
   useTauriEvent<string>("tray-cli-switch-failed", (e) => {
     const detail = typeof e?.payload === "string" ? e.payload : "unknown";
     pushToast("error", `Tray switch failed: ${detail}`);
   });
 
+  const shown = useMemo(() => {
+    if (!filter.trim()) return accounts;
+    const q = filter.toLowerCase();
+    return accounts.filter(
+      (a) =>
+        a.email.toLowerCase().includes(q) ||
+        a.org_name?.toLowerCase().includes(q),
+    );
+  }, [accounts, filter]);
+
+  const anomalyCount = useMemo(
+    () => accounts.filter(isAnomaly).length,
+    [accounts],
+  );
+
   if (!status) {
     if (loadError) {
       return (
-        <div className="content loading">
-          <div className="empty">
-            <h2>Couldn't load Claudepot</h2>
-            <p className="muted mono">{loadError}</p>
-            <button className="primary" onClick={refresh}>Retry</button>
-          </div>
+        <div
+          style={{
+            padding: "var(--sp-48)",
+            display: "flex",
+            flexDirection: "column",
+            alignItems: "center",
+            gap: "var(--sp-12)",
+          }}
+        >
+          <h2
+            style={{
+              fontSize: "var(--fs-lg)",
+              fontWeight: 600,
+              color: "var(--fg)",
+              margin: 0,
+            }}
+          >
+            Couldn't load Claudepot
+          </h2>
+          <p
+            style={{
+              color: "var(--fg-muted)",
+              fontSize: "var(--fs-xs)",
+              margin: 0,
+            }}
+          >
+            {loadError}
+          </p>
+          <Button variant="solid" onClick={() => refresh()}>
+            Retry
+          </Button>
         </div>
       );
     }
     return (
-      <div className="content loading">
-        <div className="skeleton-container">
-          <div className="skeleton skeleton-header" />
-          <div className="skeleton skeleton-card" />
-          <div className="skeleton skeleton-card" />
-          <div className="skeleton skeleton-card short" />
-        </div>
+      <div
+        style={{
+          padding: "var(--sp-48)",
+          color: "var(--fg-muted)",
+          fontSize: "var(--fs-sm)",
+        }}
+      >
+        Loading accounts…
       </div>
     );
   }
 
+  const subtitle = (() => {
+    const n = accounts.length;
+    if (n === 0) return "No accounts registered yet.";
+    const accountsLabel = `${n} account${n === 1 ? "" : "s"}`;
+    return anomalyCount > 0
+      ? `${accountsLabel} · ${anomalyCount} need${anomalyCount === 1 ? "s" : ""} attention`
+      : `${accountsLabel} · all healthy`;
+  })();
+
   return (
     <>
-      <Sidebar
-        accounts={accounts}
-        usage={usage}
-        selectedUuid={selectedUuid}
-        busyKeys={busy.busyKeys}
-        onSelect={setSelectedUuid}
-        onAdd={() => setShowAdd(true)}
-        onRefresh={() => { refresh(); refreshUsage(); }}
-        onSwitchCli={(a) => actions.useCli(a)}
-        onLogin={(a) => actions.login(a)}
-        onRefreshUsageFor={refreshUsageFor}
-        onContextMenu={handleContextMenu}
-        onBadgeContextMenu={handleBadgeContextMenu}
+      <ScreenHeader
+        crumbs={["claudepot", "accounts"]}
+        title="Accounts"
+        subtitle={subtitle}
+        actions={
+          <>
+            <Button
+              variant="ghost"
+              glyph={NF.refresh}
+              onClick={() => {
+                refresh();
+                refreshUsage();
+              }}
+              title="Refresh (⌘R)"
+            >
+              Refresh usage
+            </Button>
+            <Button
+              variant="solid"
+              glyph={NF.plus}
+              onClick={() => setShowAdd(true)}
+              title="Add account (⌘N)"
+            >
+              Add account
+            </Button>
+          </>
+        }
       />
 
-      <main className="content">
-        <StatusBar
-          ccIdentity={ccIdentity}
-          status={status}
-          syncError={syncError}
-          keychainIssue={keychainIssue}
-          accounts={accounts}
-          verifying={verifying}
-          onUnlock={async () => {
-            try { await api.unlockKeychain(); await refresh(); }
-            catch (e) { pushToast("error", `Unlock failed: ${e}`); }
-          }}
-          onSelectAccount={setSelectedUuid}
-          onReloginActive={() => {
-            const active = accounts.find((a) => a.is_cli_active);
-            if (active) actions.login(active);
-          }}
+      <div
+        style={{
+          padding: "var(--sp-14) var(--sp-32)",
+          borderBottom: "var(--bw-hair) solid var(--line)",
+          display: "flex",
+          gap: "var(--sp-12)",
+          alignItems: "center",
+          background: "var(--bg)",
+        }}
+      >
+        <Input
+          glyph={NF.search}
+          placeholder="Filter accounts"
+          value={filter}
+          onChange={(e) => setFilter(e.target.value)}
+          style={{ width: "var(--filter-input-width)" }}
+          aria-label="Filter accounts"
         />
+        <span
+          className="mono-cap"
+          style={{ color: "var(--fg-faint)", marginLeft: "var(--sp-4)" }}
+        >
+          {`${shown.length} / ${accounts.length}`}
+        </span>
+        <div style={{ flex: 1 }} />
+        <span
+          style={{
+            fontSize: "var(--fs-xs)",
+            color: "var(--fg-faint)",
+            display: "flex",
+            alignItems: "center",
+            gap: "var(--sp-6)",
+          }}
+        >
+          <Glyph g={NF.info} />
+          Swap CLI / Desktop bindings from the sidebar
+        </span>
+      </div>
 
-        <ContentPane
-          account={selectedAccount}
-          usageEntry={selectedAccount ? usage[selectedAccount.uuid] ?? null : null}
-          status={status}
-          busyKeys={busy.busyKeys}
-          anyBusy={busy.anyBusy}
-          onUseCli={(a) => actions.useCli(a)}
-          onUseDesktop={(a) => handleDesktopSwitch(a)}
-          onLogin={(a) => actions.login(a)}
-          onCancelLogin={actions.cancelLogin}
-          onRemove={(a) => setConfirmRemove(a)}
-          onClearCli={() => setConfirmClear(true)}
-          onAdd={() => setShowAdd(true)}
-          onRefreshUsage={
-            selectedAccount ? () => refreshUsageFor(selectedAccount.uuid) : undefined
-          }
-        />
-      </main>
+      <div
+        style={{
+          padding: "var(--sp-20) var(--sp-32) var(--sp-40)",
+          display: "grid",
+          gridTemplateColumns:
+            "repeat(auto-fill, minmax(var(--content-cap-sm), 1fr))",
+          gap: "var(--sp-16)",
+        }}
+      >
+        {shown.map((a) => (
+          <AccountCard
+            key={a.uuid}
+            account={a}
+            usageEntry={usage[a.uuid] ?? null}
+            loginBusy={busy.busyKeys.has(`re-${a.uuid}`)}
+            onRemove={(x) => setConfirmRemove(x)}
+            onLogin={(x) => actions.login(x)}
+            onContextMenu={handleContextMenu}
+          />
+        ))}
+        {shown.length === 0 && accounts.length > 0 && (
+          <div
+            style={{
+              gridColumn: "1 / -1",
+              padding: "var(--sp-60)",
+              textAlign: "center",
+              color: "var(--fg-faint)",
+              fontSize: "var(--fs-sm)",
+            }}
+          >
+            No accounts match "{filter}".
+          </div>
+        )}
+        {accounts.length === 0 && (
+          <div
+            style={{
+              gridColumn: "1 / -1",
+              padding: "var(--sp-60)",
+              textAlign: "center",
+              color: "var(--fg-faint)",
+              fontSize: "var(--fs-sm)",
+              display: "flex",
+              flexDirection: "column",
+              gap: "var(--sp-10)",
+              alignItems: "center",
+            }}
+          >
+            <Glyph g={NF.users} size="var(--sp-32)" color="var(--fg-ghost)" />
+            <p style={{ margin: 0 }}>No accounts yet.</p>
+            <p
+              style={{
+                margin: 0,
+                fontSize: "var(--fs-xs)",
+                color: "var(--fg-faint)",
+              }}
+            >
+              {"Click "}
+              <b>Add account</b>
+              {" to import Claude Code's current session."}
+            </p>
+          </div>
+        )}
+      </div>
 
-      {showAdd && <AddAccountModal
+      <AddAccountModal
+        open={showAdd}
         onClose={() => setShowAdd(false)}
-        onAdded={async () => { setShowAdd(false); await refresh(); pushToast("info", "Account added."); }}
-        onError={(msg) => pushToast("error", msg)} />}
+        accounts={accounts}
+        onAdded={async () => {
+          setShowAdd(false);
+          await refresh();
+          pushToast("info", "Account added.");
+        }}
+        onError={(msg) => pushToast("error", msg)}
+      />
 
-      {confirmRemove && <ConfirmDialog title="Remove account?" confirmLabel="Remove" confirmDanger
-        body={<><p>Remove <strong>{confirmRemove.email}</strong>?</p>
-          <p className="muted small">Deletes credentials and Desktop profile.
-          Active CLI/Desktop pointers will be cleared.</p></>}
-        onCancel={() => setConfirmRemove(null)}
-        onConfirm={async () => { const t = confirmRemove; setConfirmRemove(null); await actions.performRemove(t); }} />}
+      {confirmRemove && (
+        <ConfirmDialog
+          title="Remove account?"
+          confirmLabel="Remove"
+          confirmDanger
+          body={
+            <>
+              <p>
+                Remove <strong>{confirmRemove.email}</strong>?
+              </p>
+              <p className="muted small">
+                Deletes credentials and Desktop profile. Active
+                CLI/Desktop pointers will be cleared.
+              </p>
+            </>
+          }
+          onCancel={() => setConfirmRemove(null)}
+          onConfirm={async () => {
+            const t = confirmRemove;
+            setConfirmRemove(null);
+            await actions.performRemove(t);
+          }}
+        />
+      )}
 
-      {confirmClear && <ConfirmDialog title="Sign out of Claude Code?" confirmLabel="Clear" confirmDanger
-        body={<p>Clears CC's credentials file. You'll need to sign in again.</p>}
-        onCancel={() => setConfirmClear(false)}
-        onConfirm={async () => { setConfirmClear(false); await actions.performClearCli(); }} />}
+      {confirmClear && (
+        <ConfirmDialog
+          title="Sign out of Claude Code?"
+          confirmLabel="Clear"
+          confirmDanger
+          body={
+            <p>
+              Clears CC's credentials file. You'll need to sign in
+              again.
+            </p>
+          }
+          onCancel={() => setConfirmClear(false)}
+          onConfirm={async () => {
+            setConfirmClear(false);
+            await actions.performClearCli();
+          }}
+        />
+      )}
 
       {showPalette && status && (
         <CommandPalette
@@ -272,100 +413,88 @@ export function AccountsSection({
           onSwitchCli={(a) => actions.useCli(a)}
           onSwitchDesktop={(a) => handleDesktopSwitch(a)}
           onAdd={() => setShowAdd(true)}
-          onRefresh={() => { refresh(); refreshUsage(); }}
+          onRefresh={() => {
+            refresh();
+            refreshUsage();
+          }}
           onRemove={(a) => setConfirmRemove(a)}
           onNavigate={onNavigate}
         />
       )}
 
-      {ctxMenu && (() => {
-        const a = ctxMenu.account;
-        const items: ContextMenuItem[] =
-          ctxMenu.kind === "badge"
-            ? [
-                {
-                  label: "Copy verified email",
-                  disabled: !a.verified_email,
-                  onClick: () => {
-                    if (a.verified_email)
-                      navigator.clipboard.writeText(a.verified_email);
-                  },
-                },
-                {
-                  label: "Copy token status",
-                  onClick: () =>
-                    navigator.clipboard.writeText(a.token_status),
-                },
-                { label: "", separator: true, onClick: () => {} },
-                {
-                  label: "Verify now",
-                  disabled: !a.credentials_healthy,
-                  onClick: () => runVerifyAccount(a),
-                },
-                {
-                  label: "Refresh usage",
-                  onClick: () => refreshUsage(),
-                },
-                { label: "", separator: true, onClick: () => {} },
-                {
-                  label: "Log in again…",
-                  disabled: busy.busyKeys.has(`re-${a.uuid}`),
-                  onClick: () => actions.login(a),
-                },
-              ]
-            : [
-                {
-                  label: "Copy email",
-                  onClick: () => navigator.clipboard.writeText(a.email),
-                },
-                {
-                  label: "Copy UUID",
-                  onClick: () => navigator.clipboard.writeText(a.uuid),
-                },
-                { label: "", separator: true, onClick: () => {} },
-                {
-                  label: a.is_cli_active ? "Active CLI" : "Set as CLI",
-                  disabled: a.is_cli_active || !a.credentials_healthy,
-                  onClick: () => actions.useCli(a),
-                },
-                {
-                  label: a.is_desktop_active
-                    ? "Active Desktop"
-                    : "Set as Desktop",
-                  disabled:
-                    a.is_desktop_active ||
-                    !a.has_desktop_profile ||
-                    !status.desktop_installed,
-                  onClick: () => handleDesktopSwitch(a),
-                },
-                {
-                  label: "Set as Desktop (don't relaunch)",
-                  disabled:
-                    a.is_desktop_active ||
-                    !a.has_desktop_profile ||
-                    !status.desktop_installed,
-                  onClick: () => actions.useDesktop(a, true),
-                },
-                { label: "", separator: true, onClick: () => {} },
-                {
-                  label: "Verify now",
-                  disabled: !a.credentials_healthy,
-                  onClick: () => runVerifyAccount(a),
-                },
-                { label: "", separator: true, onClick: () => {} },
-                {
-                  label: "Remove",
-                  danger: true,
-                  onClick: () => setConfirmRemove(a),
-                },
-              ];
-        return (
-          <ContextMenu x={ctxMenu.x} y={ctxMenu.y} items={items} onClose={closeCtxMenu} />
-        );
-      })()}
+      {ctxMenu &&
+        (() => {
+          const a = ctxMenu.account;
+          const items: ContextMenuItem[] = [
+            {
+              label: "Copy email",
+              onClick: () => navigator.clipboard.writeText(a.email),
+            },
+            {
+              label: "Copy UUID",
+              onClick: () => navigator.clipboard.writeText(a.uuid),
+            },
+            { label: "", separator: true, onClick: () => {} },
+            {
+              label: a.is_cli_active ? "Active CLI" : "Set as CLI",
+              disabled: a.is_cli_active || !a.credentials_healthy,
+              onClick: () => actions.useCli(a),
+            },
+            {
+              label: a.is_desktop_active
+                ? "Active Desktop"
+                : "Set as Desktop",
+              disabled:
+                a.is_desktop_active ||
+                !a.has_desktop_profile ||
+                !status.desktop_installed,
+              onClick: () => handleDesktopSwitch(a),
+            },
+            {
+              label: "Set as Desktop (don't relaunch)",
+              disabled:
+                a.is_desktop_active ||
+                !a.has_desktop_profile ||
+                !status.desktop_installed,
+              onClick: () => actions.useDesktop(a, true),
+            },
+            { label: "", separator: true, onClick: () => {} },
+            {
+              label: "Verify now",
+              disabled: !a.credentials_healthy,
+              onClick: () => runVerifyAccount(a),
+            },
+            {
+              label: "Refresh usage",
+              onClick: () => {
+                if (a.credentials_healthy) refreshUsageFor(a.uuid);
+                else refreshUsage();
+              },
+            },
+            { label: "", separator: true, onClick: () => {} },
+            {
+              label: "Log in again…",
+              disabled: busy.busyKeys.has(`re-${a.uuid}`),
+              onClick: () => actions.login(a),
+            },
+            { label: "", separator: true, onClick: () => {} },
+            {
+              label: "Remove",
+              danger: true,
+              onClick: () => setConfirmRemove(a),
+            },
+          ];
+          return (
+            <ContextMenu
+              x={ctxMenu.x}
+              y={ctxMenu.y}
+              items={items}
+              onClose={closeCtxMenu}
+            />
+          );
+        })()}
 
       <ToastContainer toasts={toasts} onDismiss={dismissToast} />
     </>
   );
 }
-

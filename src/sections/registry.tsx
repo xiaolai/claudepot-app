@@ -1,25 +1,26 @@
-import type { ReactNode } from "react";
-import { Icon } from "../components/Icon";
+import { NF } from "../icons";
 
 /**
- * Section metadata. The shell renders the matching body itself — the
- * registry only carries the id, label, and rail icon so sections can
- * expose whatever props shape they need without a common interface.
+ * Primary-nav section metadata. The shell's Sidebar renders these in
+ * order; ⌘1..⌘N maps to the first N entries. Keep `id` stable — it's
+ * the localStorage key for the active section and for per-section
+ * sub-routes.
  *
- * Sections are ordered top-down; ⌘1..⌘N maps to the first N entries.
- * Keep `id` stable — it's the localStorage key for the active section
- * and for per-section sub-routes.
+ * The `glyph` field is an NF codepoint (see `src/icons.ts`). Rendered
+ * by the new paper-mono primitives via `<Glyph g={section.glyph} />`;
+ * no SVG icons allowed.
  */
 export interface SectionDef {
   id: string;
   label: string;
-  icon: ReactNode;
+  glyph: string;
 }
 
 export const sections: readonly SectionDef[] = [
-  { id: "accounts", label: "Accounts", icon: <Icon name="user" size={18} /> },
-  { id: "projects", label: "Projects", icon: <Icon name="folder" size={18} /> },
-  { id: "settings", label: "Settings", icon: <Icon name="settings" size={18} /> },
+  { id: "accounts", label: "Accounts", glyph: NF.users },
+  { id: "projects", label: "Projects", glyph: NF.folder },
+  { id: "sessions", label: "Sessions", glyph: NF.chatAlt },
+  { id: "settings", label: "Settings", glyph: NF.sliders },
 ];
 
 export const sectionIds = sections.map((s) => s.id);

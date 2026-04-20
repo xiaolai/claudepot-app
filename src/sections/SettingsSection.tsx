@@ -1,67 +1,489 @@
-import { useCallback, useEffect, useRef, useState } from "react";
-import { Icon } from "../components/Icon";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { api } from "../api";
-import { useToasts } from "../hooks/useToasts";
+import { Button } from "../components/primitives/Button";
+import { Glyph } from "../components/primitives/Glyph";
+import { Tag } from "../components/primitives/Tag";
+import { useDevMode } from "../hooks/useDevMode";
 import { useSettingsActions } from "../hooks/useSettingsActions";
+import { useTheme, type ThemeMode } from "../hooks/useTheme";
+import { useToasts } from "../hooks/useToasts";
+import { NF } from "../icons";
 import { ToastContainer } from "../components/ToastContainer";
+import { ScreenHeader } from "../shell/ScreenHeader";
 import { ProtectedPathsPane } from "./settings/ProtectedPathsPane";
 import type { AppStatus, CcIdentity } from "../types";
 
-const SECTION_OPTIONS = [
-  { value: "accounts", label: "Accounts" },
-  { value: "projects", label: "Projects" },
-  { value: "settings", label: "Settings" },
-] as const;
-
-type SettingsPane =
-  | "startup"
-  | "cleanup"
+type Tab =
+  | "general"
+  | "appearance"
+  | "claudemd"
+  | "mcp"
+  | "apikeys"
   | "protected"
+  | "cleanup"
   | "locks"
   | "diagnostics"
   | "about";
 
-const SETTINGS_PANES: ReadonlyArray<{
-  id: SettingsPane;
+const TAB_DEFS: ReadonlyArray<{
+  id: Tab;
   label: string;
-  icon: "play" | "trash-2" | "shield" | "lock" | "stethoscope" | "info";
+  glyph: string;
+  group: "core" | "prefs" | "advanced";
 }> = [
-  { id: "startup", label: "Startup", icon: "play" },
-  { id: "cleanup", label: "Cleanup", icon: "trash-2" },
-  { id: "protected", label: "Protected", icon: "shield" },
-  { id: "locks", label: "Locks", icon: "lock" },
-  { id: "diagnostics", label: "Diagnostics", icon: "stethoscope" },
-  { id: "about", label: "About", icon: "info" },
+  { id: "general",     label: "General",        glyph: NF.sliders,  group: "core" },
+  { id: "appearance",  label: "Appearance",     glyph: NF.sun,      group: "core" },
+  { id: "claudemd",    label: "CLAUDE.md",      glyph: NF.fileMd,   group: "core" },
+  { id: "mcp",         label: "MCP servers",    glyph: NF.server,   group: "core" },
+  { id: "apikeys",     label: "API keys",       glyph: NF.key,      group: "core" },
+  { id: "protected",   label: "Protected paths", glyph: NF.shield,  group: "advanced" },
+  { id: "cleanup",     label: "Cleanup",        glyph: NF.trash,    group: "advanced" },
+  { id: "locks",       label: "Locks",          glyph: NF.lock,     group: "advanced" },
+  { id: "diagnostics", label: "Diagnostics",    glyph: NF.wrench,   group: "advanced" },
+  { id: "about",       label: "About",          glyph: NF.info,     group: "advanced" },
 ];
+
+const SECTION_OPTIONS = [
+  { value: "accounts", label: "Accounts" },
+  { value: "projects", label: "Projects" },
+  { value: "sessions", label: "Sessions" },
+  { value: "settings", label: "Settings" },
+] as const;
 
 export function SettingsSection() {
   const { toasts, pushToast, dismissToast } = useToasts();
-  const [pane, setPane] = useState<SettingsPane>("startup");
-  // Separate from `claudepot.activeSection` (last-visited) — this one
-  // is the explicit "Open on launch" preference. Normal navigation must
-  // not overwrite it, otherwise clicking around the app silently
-  // changes what the user set here.
+  const [tab, setTab] = useState<Tab>("general");
+  const active = TAB_DEFS.find((t) => t.id === tab) ?? TAB_DEFS[0];
+
+  return (
+    <>
+      <ScreenHeader
+        crumbs={["claudepot", "settings"]}
+        title="Settings"
+        subtitle="Preferences, data, and diagnostics."
+      />
+
+      <div style={{ flex: 1, display: "flex", minHeight: 0 }}>
+        <SettingsNav active={tab} onSelect={setTab} />
+
+        <main
+          style={{
+            flex: 1,
+            minWidth: 0,
+            overflow: "auto",
+            padding: "var(--sp-24) var(--sp-32) var(--sp-40)",
+          }}
+        >
+          <h2
+            style={{
+              fontSize: "var(--fs-lg)",
+              fontWeight: 600,
+              letterSpacing: "var(--ls-tight)",
+              margin: 0,
+              marginBottom: "var(--sp-16)",
+            }}
+          >
+            {active.label}
+          </h2>
+
+          {tab === "general" && <GeneralPane pushToast={pushToast} />}
+          {tab === "appearance" && <AppearancePane />}
+          {tab === "claudemd" && <StubPane name="CLAUDE.md editor" />}
+          {tab === "mcp" && <StubPane name="MCP servers" />}
+          {tab === "apikeys" && <StubPane name="API keys" />}
+          {tab === "protected" && <ProtectedPathsPane pushToast={pushToast} />}
+          {tab === "cleanup" && <CleanupPane pushToast={pushToast} />}
+          {tab === "locks" && <LocksPane pushToast={pushToast} />}
+          {tab === "diagnostics" && <DiagnosticsPane pushToast={pushToast} />}
+          {tab === "about" && <AboutPane />}
+        </main>
+      </div>
+
+      <ToastContainer toasts={toasts} onDismiss={dismissToast} />
+    </>
+  );
+}
+
+/* ──────────────────────────────────────────────────────────── */
+/*                         Nav                                 */
+/* ──────────────────────────────────────────────────────────── */
+
+function SettingsNav({
+  active,
+  onSelect,
+}: {
+  active: Tab;
+  onSelect: (t: Tab) => void;
+}) {
+  const groups: { label: string; items: typeof TAB_DEFS }[] = useMemo(
+    () => [
+      { label: "", items: TAB_DEFS.filter((t) => t.group === "core") },
+      {
+        label: "Advanced",
+        items: TAB_DEFS.filter((t) => t.group === "advanced"),
+      },
+    ],
+    [],
+  );
+
+  return (
+    <aside
+      style={{
+        width: "var(--settings-nav-width)",
+        flexShrink: 0,
+        borderRight: "var(--bw-hair) solid var(--line)",
+        background: "var(--bg-sunken)",
+        padding: "var(--sp-16) 0",
+        overflow: "auto",
+      }}
+    >
+      {groups.map((group, gi) => (
+        <div key={gi} style={{ marginBottom: "var(--sp-16)" }}>
+          {group.label && (
+            <div
+              className="mono-cap"
+              style={{
+                padding: "var(--sp-6) var(--sp-16)",
+                color: "var(--fg-ghost)",
+              }}
+            >
+              {group.label}
+            </div>
+          )}
+          {group.items.map((t) => {
+            const isActive = t.id === active;
+            return (
+              <button
+                key={t.id}
+                type="button"
+                onClick={() => onSelect(t.id)}
+                aria-current={isActive ? "page" : undefined}
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  gap: "var(--sp-10)",
+                  width: "100%",
+                  padding: "var(--sp-7) var(--sp-16)",
+                  fontSize: "var(--fs-sm)",
+                  fontWeight: isActive ? 600 : 500,
+                  color: isActive ? "var(--fg)" : "var(--fg-muted)",
+                  background: isActive ? "var(--bg-active)" : "transparent",
+                  border: "none",
+                  borderLeft: isActive
+                    ? "var(--bw-strong) solid var(--accent)"
+                    : "var(--bw-strong) solid transparent",
+                  textAlign: "left",
+                  cursor: "pointer",
+                }}
+              >
+                <Glyph
+                  g={t.glyph}
+                  color={isActive ? "var(--accent)" : "currentColor"}
+                  style={{ fontSize: "var(--fs-base)" }}
+                />
+                <span>{t.label}</span>
+              </button>
+            );
+          })}
+        </div>
+      ))}
+    </aside>
+  );
+}
+
+/* ──────────────────────────────────────────────────────────── */
+/*                       General pane                          */
+/* ──────────────────────────────────────────────────────────── */
+
+function GeneralPane({
+  pushToast,
+}: {
+  pushToast: (t: "info" | "error", msg: string) => void;
+}) {
   const [startSection, setStartSection] = useState<string>(() => {
-    try { return localStorage.getItem("claudepot.startSection") ?? "accounts"; }
-    catch { return "accounts"; }
+    try {
+      return localStorage.getItem("claudepot.startSection") ?? "accounts";
+    } catch {
+      return "accounts";
+    }
   });
+  const [devMode, setDevMode] = useDevMode();
+
+  const changeStart = useCallback(
+    (v: string) => {
+      setStartSection(v);
+      try {
+        localStorage.setItem("claudepot.startSection", v);
+        pushToast("info", `Open on launch: ${v}`);
+      } catch {
+        // best-effort persistence
+      }
+    },
+    [pushToast],
+  );
+
+  return (
+    <SettingsGroup
+      desc="Behavior that runs when Claudepot starts up, plus the diagnostic overlays you can opt into."
+    >
+      <Row label="Open on launch">
+        <select
+          value={startSection}
+          onChange={(e) => changeStart(e.target.value)}
+          style={selectStyle}
+        >
+          {SECTION_OPTIONS.map((o) => (
+            <option key={o.value} value={o.value}>
+              {o.label}
+            </option>
+          ))}
+        </select>
+      </Row>
+      <Row
+        label="Developer mode"
+        hint="Reveals backend command names, raw paths, and internal identifiers next to their human-facing labels."
+      >
+        <Toggle on={devMode} onChange={setDevMode} />
+      </Row>
+    </SettingsGroup>
+  );
+}
+
+/* ──────────────────────────────────────────────────────────── */
+/*                     Appearance pane                         */
+/* ──────────────────────────────────────────────────────────── */
+
+function AppearancePane() {
+  const { mode, resolved, setMode } = useTheme();
+  const options: { value: ThemeMode; label: string; glyph?: string }[] = [
+    { value: null, label: "System", glyph: NF.cpu },
+    { value: "light", label: "Light", glyph: NF.sun },
+    { value: "dark", label: "Dark", glyph: NF.moon },
+  ];
+  return (
+    <SettingsGroup desc="Theme controls flow through CSS variables on the html element; no component code is aware of the active mode.">
+      <Row label="Theme">
+        <div
+          style={{
+            display: "flex",
+            gap: "var(--sp-2)",
+            padding: "var(--sp-2)",
+            background: "var(--bg-sunken)",
+            border: "var(--bw-hair) solid var(--line)",
+            borderRadius: "var(--r-2)",
+          }}
+        >
+          {options.map((opt) => {
+            const current = mode === opt.value;
+            return (
+              <button
+                key={String(opt.value ?? "system")}
+                type="button"
+                onClick={() => setMode(opt.value)}
+                aria-pressed={current}
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  gap: "var(--sp-6)",
+                  padding: "var(--sp-4) var(--sp-10)",
+                  fontSize: "var(--fs-xs)",
+                  fontWeight: 500,
+                  letterSpacing: "var(--ls-wide)",
+                  textTransform: "uppercase",
+                  color: current ? "var(--fg)" : "var(--fg-muted)",
+                  background: current
+                    ? "var(--bg-raised)"
+                    : "transparent",
+                  border: current
+                    ? "var(--bw-hair) solid var(--line)"
+                    : "var(--bw-hair) solid transparent",
+                  borderRadius: "var(--r-1)",
+                  cursor: "pointer",
+                }}
+              >
+                {opt.glyph && <Glyph g={opt.glyph} />}
+                {opt.label}
+              </button>
+            );
+          })}
+        </div>
+      </Row>
+      <Row label="Effective" hint="Which palette the app is rendering right now.">
+        <Tag tone="accent" glyph={resolved === "dark" ? NF.moon : NF.sun}>
+          {resolved}
+        </Tag>
+      </Row>
+    </SettingsGroup>
+  );
+}
+
+/* ──────────────────────────────────────────────────────────── */
+/*                     Unbacked stubs                          */
+/* ──────────────────────────────────────────────────────────── */
+
+function StubPane({ name }: { name: string }) {
+  return (
+    <div
+      role="status"
+      style={{
+        padding: "var(--sp-48) var(--sp-24)",
+        textAlign: "center",
+        color: "var(--fg-muted)",
+        display: "flex",
+        flexDirection: "column",
+        gap: "var(--sp-8)",
+        alignItems: "center",
+      }}
+    >
+      <Glyph g={NF.wrench} size="var(--sp-32)" color="var(--fg-ghost)" />
+      <p style={{ margin: 0, fontSize: "var(--fs-base)" }}>
+        {name} — not yet implemented.
+      </p>
+      <p
+        style={{
+          margin: 0,
+          fontSize: "var(--fs-xs)",
+          color: "var(--fg-faint)",
+          maxWidth: "var(--content-cap-sm)",
+          lineHeight: "var(--lh-body)",
+        }}
+      >
+        Reserved for a future phase; the backend doesn't expose the
+        underlying surfaces yet.
+      </p>
+    </div>
+  );
+}
+
+/* ──────────────────────────────────────────────────────────── */
+/*                      Cleanup pane                           */
+/* ──────────────────────────────────────────────────────────── */
+
+function CleanupPane({
+  pushToast,
+}: {
+  pushToast: (t: "info" | "error", msg: string) => void;
+}) {
   const gc = useSettingsActions(pushToast);
+  return (
+    <SettingsGroup desc="Remove abandoned rename journals and old recovery snapshots. Preview first — the delete is irreversible.">
+      <Row label="Older than">
+        <div
+          style={{
+            display: "flex",
+            alignItems: "center",
+            gap: "var(--sp-8)",
+          }}
+        >
+          <input
+            type="number"
+            min={1}
+            max={365}
+            value={gc.gcDays}
+            onChange={(e) => gc.setGcDays(Number(e.target.value))}
+            style={{ ...inputStyle, width: "var(--sp-80)" }}
+          />
+          <span className="mono-faint">days</span>
+        </div>
+      </Row>
+      <div style={actionsStyle}>
+        <Button
+          variant="subtle"
+          onClick={gc.gcDryRun}
+          disabled={gc.gcBusy}
+          title="Preview what GC would remove"
+        >
+          Preview
+        </Button>
+        <Button
+          variant="solid"
+          danger
+          onClick={gc.gcExecute}
+          disabled={gc.gcBusy || !gc.gcResult}
+          title="Permanently remove abandoned journals and old snapshots"
+        >
+          Execute GC
+        </Button>
+      </div>
+      {gc.gcResult && (
+        <div
+          style={{
+            padding: "var(--sp-10) var(--sp-12)",
+            background: "var(--bg-sunken)",
+            border: "var(--bw-hair) solid var(--line)",
+            borderRadius: "var(--r-2)",
+            fontSize: "var(--fs-xs)",
+            color: "var(--fg-muted)",
+          }}
+        >
+          Would remove:{" "}
+          <strong style={{ color: "var(--fg)" }}>
+            {gc.gcResult.removed_journals}
+          </strong>{" "}
+          journals,{" "}
+          <strong style={{ color: "var(--fg)" }}>
+            {gc.gcResult.removed_snapshots}
+          </strong>{" "}
+          snapshots
+        </div>
+      )}
+    </SettingsGroup>
+  );
+}
 
-  const handleStartChange = useCallback((v: string) => {
-    setStartSection(v);
-    try { localStorage.setItem("claudepot.startSection", v); } catch { /* best-effort */ }
-  }, []);
+/* ──────────────────────────────────────────────────────────── */
+/*                        Locks pane                           */
+/* ──────────────────────────────────────────────────────────── */
 
-  // Read-only diagnostics — equivalent of the CLI's `doctor` / `status`.
-  // Populated on mount; refresh via the panel's own button.
+function LocksPane({
+  pushToast,
+}: {
+  pushToast: (t: "info" | "error", msg: string) => void;
+}) {
+  const gc = useSettingsActions(pushToast);
+  return (
+    <SettingsGroup desc="Force-break a stale lock file left behind by a crashed rename. Generates an audit trail.">
+      <Row label="Lock file path">
+        <input
+          type="text"
+          placeholder="/absolute/path/to/lockfile"
+          value={gc.lockPath}
+          onChange={(e) => gc.setLockPath(e.target.value)}
+          style={{
+            ...inputStyle,
+            minWidth: "var(--filter-input-width)",
+            width: "100%",
+          }}
+        />
+      </Row>
+      <div style={actionsStyle}>
+        <Button
+          variant="solid"
+          danger
+          onClick={gc.breakLock}
+          disabled={gc.lockBusy || !gc.lockPath.trim()}
+          title="Force-break the lock file and create an audit trail"
+        >
+          Break lock
+        </Button>
+      </div>
+    </SettingsGroup>
+  );
+}
+
+/* ──────────────────────────────────────────────────────────── */
+/*                    Diagnostics pane                         */
+/* ──────────────────────────────────────────────────────────── */
+
+function DiagnosticsPane({
+  pushToast,
+}: {
+  pushToast: (t: "info" | "error", msg: string) => void;
+}) {
   const [appStatus, setAppStatus] = useState<AppStatus | null>(null);
   const [ccIdentity, setCcIdentity] = useState<CcIdentity | null>(null);
   const [diagBusy, setDiagBusy] = useState(false);
 
-  // Audit M16: token-sequenced + unmount-guarded reload. Diagnostics
-  // can be triggered on mount and again from the Refresh button; a
-  // slower earlier Promise.all could resolve after a newer one and
-  // replace fresher data. Also protect against setState after unmount.
   const diagTokenRef = useRef(0);
   const diagMountedRef = useRef(true);
   useEffect(() => {
@@ -79,11 +501,13 @@ export function SettingsSection() {
         api.appStatus(),
         api.currentCcIdentity(),
       ]);
-      if (!diagMountedRef.current || myToken !== diagTokenRef.current) return;
+      if (!diagMountedRef.current || myToken !== diagTokenRef.current)
+        return;
       setAppStatus(s);
       setCcIdentity(cc);
     } catch (e) {
-      if (!diagMountedRef.current || myToken !== diagTokenRef.current) return;
+      if (!diagMountedRef.current || myToken !== diagTokenRef.current)
+        return;
       pushToast("error", `Diagnostics failed: ${e}`);
     } finally {
       if (diagMountedRef.current && myToken === diagTokenRef.current) {
@@ -116,162 +540,253 @@ export function SettingsSection() {
     pushToast("info", "Diagnostics copied.");
   }, [appStatus, ccIdentity, pushToast]);
 
-  const activePaneDef = SETTINGS_PANES.find((p) => p.id === pane) ?? SETTINGS_PANES[0];
+  return (
+    <SettingsGroup desc="Read-only view of platform, active slots, and the identity Claude Code is currently authenticated as.">
+      {appStatus ? (
+        <dl style={gridStyle}>
+          <Kv label="Platform" value={`${appStatus.platform}/${appStatus.arch}`} mono />
+          <Kv label="CLI active" value={appStatus.cli_active_email ?? "—"} />
+          <Kv label="Desktop active" value={appStatus.desktop_active_email ?? "—"} />
+          <Kv label="Desktop installed" value={appStatus.desktop_installed ? "yes" : "no"} />
+          <Kv label="Accounts" value={String(appStatus.account_count)} />
+          <Kv label="Data dir" value={appStatus.data_dir} mono />
+          <Kv label="CC identity" value={ccIdentity?.email ?? "(not signed in)"} />
+          {ccIdentity?.error && (
+            <Kv label="CC error" value={ccIdentity.error} mono tone="warn" />
+          )}
+        </dl>
+      ) : (
+        <p className="mono-muted" style={{ fontSize: "var(--fs-xs)" }}>
+          Loading…
+        </p>
+      )}
+      <div style={actionsStyle}>
+        <Button
+          variant="subtle"
+          glyph={NF.refresh}
+          onClick={loadDiagnostics}
+          disabled={diagBusy}
+        >
+          Refresh
+        </Button>
+        <Button
+          variant="ghost"
+          glyph={NF.copy}
+          onClick={copyDiagnostics}
+          disabled={!appStatus}
+        >
+          Copy
+        </Button>
+      </div>
+    </SettingsGroup>
+  );
+}
 
+/* ──────────────────────────────────────────────────────────── */
+/*                        About pane                           */
+/* ──────────────────────────────────────────────────────────── */
+
+function AboutPane() {
+  return (
+    <SettingsGroup>
+      <dl style={gridStyle}>
+        <Kv label="App" value="Claudepot" />
+        <Kv label="Version" value="0.1.0" mono />
+        <Kv
+          label="Design"
+          value="paper-mono — JetBrains Mono NF, OKLCH palette"
+        />
+      </dl>
+    </SettingsGroup>
+  );
+}
+
+/* ──────────────────────────────────────────────────────────── */
+/*                        Shared bits                          */
+/* ──────────────────────────────────────────────────────────── */
+
+function SettingsGroup({
+  desc,
+  children,
+}: {
+  desc?: string;
+  children: React.ReactNode;
+}) {
+  return (
+    <section
+      style={{
+        display: "flex",
+        flexDirection: "column",
+        gap: "var(--sp-14)",
+        maxWidth: "var(--content-cap-md)",
+      }}
+    >
+      {desc && (
+        <p
+          style={{
+            color: "var(--fg-muted)",
+            fontSize: "var(--fs-xs)",
+            margin: 0,
+            lineHeight: "var(--lh-body)",
+          }}
+        >
+          {desc}
+        </p>
+      )}
+      {children}
+    </section>
+  );
+}
+
+function Row({
+  label,
+  hint,
+  children,
+}: {
+  label: string;
+  hint?: string;
+  children: React.ReactNode;
+}) {
+  return (
+    <div
+      style={{
+        display: "grid",
+        gridTemplateColumns: "var(--settings-label-col) 1fr",
+        gap: "var(--sp-16)",
+        alignItems: "start",
+        padding: "var(--sp-8) 0",
+        borderBottom: "var(--bw-hair) solid var(--line)",
+      }}
+    >
+      <div>
+        <div style={{ fontSize: "var(--fs-sm)", color: "var(--fg)" }}>
+          {label}
+        </div>
+        {hint && (
+          <div
+            style={{
+              fontSize: "var(--fs-xs)",
+              color: "var(--fg-faint)",
+              marginTop: "var(--sp-3)",
+              lineHeight: "var(--lh-body)",
+            }}
+          >
+            {hint}
+          </div>
+        )}
+      </div>
+      <div style={{ display: "flex", alignItems: "center" }}>{children}</div>
+    </div>
+  );
+}
+
+function Kv({
+  label,
+  value,
+  mono,
+  tone,
+}: {
+  label: string;
+  value: React.ReactNode;
+  mono?: boolean;
+  tone?: "warn";
+}) {
   return (
     <>
-      <aside className="sidebar settings-sidebar">
-        <div className="sidebar-header">
-          <div className="sidebar-title">Settings</div>
-        </div>
-        <ul className="sidebar-list" role="listbox" aria-label="Settings panes">
-          {SETTINGS_PANES.map((p) => {
-            const isActive = p.id === pane;
-            return (
-              <li
-                key={p.id}
-                role="option"
-                aria-selected={isActive}
-                className={`sidebar-item${isActive ? " active" : ""}`}
-                tabIndex={0}
-                onClick={() => setPane(p.id)}
-                onKeyDown={(e) => {
-                  if (e.key === "Enter" || e.key === " ") {
-                    e.preventDefault();
-                    setPane(p.id);
-                  }
-                }}
-              >
-                <div className="sidebar-item-row">
-                  <Icon name={p.icon} size={12} />
-                  <span className="sidebar-item-name">{p.label}</span>
-                </div>
-              </li>
-            );
-          })}
-        </ul>
-      </aside>
-      <main className="content settings-view">
-        <h2 className="settings-heading">{activePaneDef.label}</h2>
-
-        {pane === "startup" && (
-          <section className="settings-group">
-            <label className="settings-row">
-              <span>Open on launch</span>
-              <select className="settings-select" value={startSection}
-                onChange={(e) => handleStartChange(e.target.value)}>
-                {SECTION_OPTIONS.map((o) => (
-                  <option key={o.value} value={o.value}>{o.label}</option>
-                ))}
-              </select>
-            </label>
-          </section>
-        )}
-
-        {pane === "cleanup" && (
-          <section className="settings-group">
-            <p className="muted settings-desc">Remove abandoned journals and old recovery snapshots.</p>
-            <label className="settings-row">
-              <span>Older than</span>
-              <div className="settings-input-group">
-                <input type="number" className="settings-input" min={1} max={365}
-                  value={gc.gcDays} onChange={(e) => gc.setGcDays(Number(e.target.value))} />
-                <span className="muted">days</span>
-              </div>
-            </label>
-            <div className="settings-actions">
-              <button onClick={gc.gcDryRun} disabled={gc.gcBusy}
-                title="Preview what GC would remove without deleting">Preview</button>
-              <button className="danger" onClick={gc.gcExecute} disabled={gc.gcBusy || !gc.gcResult}
-                title="Permanently remove abandoned journals and old snapshots">Execute GC</button>
-            </div>
-            {gc.gcResult && (
-              <div className="settings-result">
-                Would remove: {gc.gcResult.removed_journals} journals, {gc.gcResult.removed_snapshots} snapshots
-              </div>
-            )}
-          </section>
-        )}
-
-        {pane === "protected" && <ProtectedPathsPane pushToast={pushToast} />}
-
-        {pane === "locks" && (
-          <section className="settings-group">
-            <p className="muted settings-desc">Force-break a lock file left by a crashed rename.</p>
-            <div className="settings-row">
-              <input type="text" className="settings-input wide" placeholder="Lock file path…"
-                value={gc.lockPath} onChange={(e) => gc.setLockPath(e.target.value)} />
-              <button onClick={gc.breakLock} disabled={gc.lockBusy || !gc.lockPath.trim()}
-                title="Force-break the lock file and create an audit trail">Break</button>
-            </div>
-          </section>
-        )}
-
-        {pane === "diagnostics" && (
-          <section className="settings-group">
-            <p className="muted settings-desc">
-              Read-only view of platform, active slots, and the identity
-              Claude Code is currently authenticated as. Equivalent of the
-              CLI's <code>doctor</code> / <code>status</code> output.
-            </p>
-            {appStatus ? (
-              <dl className="settings-about-grid">
-                <dt>Platform</dt>
-                <dd className="mono selectable">
-                  {appStatus.platform}/{appStatus.arch}
-                </dd>
-                <dt>CLI active</dt>
-                <dd className="selectable">
-                  {appStatus.cli_active_email ?? "—"}
-                </dd>
-                <dt>Desktop active</dt>
-                <dd className="selectable">
-                  {appStatus.desktop_active_email ?? "—"}
-                </dd>
-                <dt>Desktop installed</dt>
-                <dd>{appStatus.desktop_installed ? "yes" : "no"}</dd>
-                <dt>Accounts</dt>
-                <dd>{appStatus.account_count}</dd>
-                <dt>Data dir</dt>
-                <dd className="mono small selectable">{appStatus.data_dir}</dd>
-                <dt>CC identity</dt>
-                <dd className="selectable">
-                  {ccIdentity?.email ?? <em className="muted">not signed in</em>}
-                </dd>
-                {ccIdentity?.error && (
-                  <>
-                    <dt>CC error</dt>
-                    <dd className="mono small bad">{ccIdentity.error}</dd>
-                  </>
-                )}
-              </dl>
-            ) : (
-              <p className="muted small">Loading…</p>
-            )}
-            <div className="settings-actions">
-              <button onClick={loadDiagnostics} disabled={diagBusy}
-                title="Re-fetch diagnostics">
-                Refresh
-              </button>
-              <button onClick={copyDiagnostics} disabled={!appStatus}
-                title="Copy all diagnostics to clipboard">
-                <Icon name="copy" size={13} /> Copy
-              </button>
-            </div>
-          </section>
-        )}
-
-        {pane === "about" && (
-          <section className="settings-group about">
-            <dl className="settings-about-grid">
-              <dt>App</dt><dd>Claudepot</dd>
-              <dt>Version</dt><dd className="mono">0.1.0</dd>
-            </dl>
-          </section>
-        )}
-      </main>
-      <ToastContainer toasts={toasts} onDismiss={dismissToast} />
+      <dt
+        style={{
+          fontSize: "var(--fs-xs)",
+          color: "var(--fg-muted)",
+          textAlign: "right",
+        }}
+      >
+        {label}
+      </dt>
+      <dd
+        style={{
+          margin: 0,
+          fontSize: "var(--fs-sm)",
+          color: tone === "warn" ? "var(--warn)" : "var(--fg)",
+          userSelect: "text",
+          fontFamily: mono ? "var(--font)" : undefined,
+          wordBreak: "break-all",
+        }}
+      >
+        {value}
+      </dd>
     </>
   );
 }
 
+function Toggle({
+  on,
+  onChange,
+}: {
+  on: boolean;
+  onChange: (next: boolean) => void;
+}) {
+  return (
+    <button
+      type="button"
+      role="switch"
+      aria-checked={on}
+      onClick={() => onChange(!on)}
+      style={{
+        width: "var(--toggle-track-w)",
+        height: "var(--toggle-track-h)",
+        borderRadius: "var(--r-pill)",
+        background: on ? "var(--accent)" : "var(--bg-active)",
+        border: `var(--bw-hair) solid ${on ? "var(--accent)" : "var(--line-strong)"}`,
+        position: "relative",
+        cursor: "pointer",
+        transition: "background var(--dur-base) var(--ease-linear)",
+      }}
+    >
+      <span
+        aria-hidden
+        style={{
+          position: "absolute",
+          top: "var(--toggle-thumb-off)",
+          left: on ? "var(--toggle-thumb-on)" : "var(--toggle-thumb-off)",
+          width: "var(--toggle-thumb-d)",
+          height: "var(--toggle-thumb-d)",
+          borderRadius: "50%",
+          background: "var(--bg-raised)",
+          boxShadow: "var(--shadow-thumb)",
+          transition: "left var(--dur-base) var(--ease-linear)",
+        }}
+      />
+    </button>
+  );
+}
+
+const inputStyle: React.CSSProperties = {
+  height: "var(--row-height)",
+  padding: "0 var(--sp-10)",
+  fontFamily: "var(--font)",
+  fontSize: "var(--fs-sm)",
+  color: "var(--fg)",
+  background: "var(--bg-raised)",
+  border: "var(--bw-hair) solid var(--line)",
+  borderRadius: "var(--r-2)",
+  outline: "none",
+};
+
+const selectStyle: React.CSSProperties = {
+  ...inputStyle,
+  appearance: "auto",
+};
+
+const actionsStyle: React.CSSProperties = {
+  display: "flex",
+  gap: "var(--sp-8)",
+  alignItems: "center",
+};
+
+const gridStyle: React.CSSProperties = {
+  display: "grid",
+  gridTemplateColumns: "minmax(var(--settings-kv-col), max-content) 1fr",
+  columnGap: "var(--sp-16)",
+  rowGap: "var(--sp-10)",
+  margin: 0,
+};

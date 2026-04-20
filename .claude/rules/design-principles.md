@@ -1,15 +1,30 @@
----
-globs: ["src/**/*.tsx", "src/**/*.css"]
----
+# Design Principles — paper-mono
 
-# Design Principles
-
-This is the top layer of the Claudepot design system. References, patterns,
-and tokens all derive from these principles — they are not a separate
+This is the top layer of the Claudepot design system. Tokens, patterns,
+and references all derive from these principles — they are not a separate
 layer of obedience, they are the *why*.
 
 When a rule here conflicts with a recipe in `design-patterns.md` or a
 token in `ui-design-system.md`, the principle wins. Rewrite the recipe.
+
+## Register: paper-mono, dev-dialect
+
+Claudepot is a Tauri desktop utility for managing Claude identities,
+projects, and credentials. The register is **paper-mono**:
+
+- **One typeface, every glyph.** JetBrains Mono Nerd Font — body text,
+  chrome, and iconography. No proportional fallback, no secondary
+  family, no SVG icon library.
+- **Warm paper surfaces.** Light mode is warm paper-white; dark mode
+  is ink paper. OKLCH palette with low chroma for neutrals and a
+  single terracotta accent.
+- **Small radii, hairline borders.** Mono typography reads flat;
+  large rounding and heavy shadows fight the aesthetic. Max 10px
+  radius, 1px borders.
+- **Dev-dialect, not native-mimic.** We do not pretend to be an
+  AppKit app. Precedents: Warp, Zed, Lapce, Linear, Arc. The custom
+  `WindowChrome` breadcrumb bar is deliberate — it carries the
+  `⌘K` surface and the theme toggle.
 
 ## 1. Implementation detail never outranks user identity
 
@@ -18,26 +33,22 @@ Emails, project names, dates, sizes, counts. Never DB keys, sanitized
 slugs, UUIDs, internal paths, or any identifier the user did not
 choose.
 
-- If an internal identifier is actually useful (for debugging or
-  support), put it behind a disclosure, a context-menu "Copy ID," or
-  the detail pane's footer — never in the primary grid.
+- If an internal identifier is useful for debugging, put it behind a
+  disclosure, a context-menu "Copy ID," or a `DevBadge` that only
+  appears when Developer mode is on.
 - If an identifier is never useful to the user, delete it from the
   view entirely. Tests should catch that it is gone.
 
-**Current failure:** the `Key: -Users-joker-github-xiaolai-myprojects-tepub`
-row in the project detail pane. This slug is a DB key, not a project.
-
 ## 2. Selected object is unmistakable
 
-One element on the screen is the current subject. A cold user should be
-able to tell which one in under a second.
+One element on the screen is the current subject. A cold user should
+be able to tell which one in under a second.
 
 - Exactly one accent-colored item visible at rest.
-- Contrast is structural — background fill + weight change — not just
-  border or color alone.
-- The selected state must survive `prefers-contrast: more` and still
-  read as selected. Accent-weak backgrounds fail this; add a weight or
-  icon change.
+- Contrast is structural — left-border 2–3px accent + background fill
+  + weight change — not just color alone.
+- The selected state must survive dark mode and `prefers-contrast:
+  more` and still read as selected.
 
 ## 3. Destructive actions state consequence inline
 
@@ -47,14 +58,10 @@ can be undone — before the confirmation modal appears, not inside it.
 
 - Button label: include the object and, when finite, the count.
   `Clean 14 projects` beats `Clean…`.
-- Inline hint text: one line under or next to the button,
-  `Removes 32.4 MB of session data. Cannot be undone.` Not a tooltip
-  — tooltips do not exist on macOS for mouse users without hover.
+- Inline hint text under or next to the button. No tooltip-only
+  disclosures.
 - Confirmation modals repeat the consequence in the primary verb.
   Not `OK`. `Delete 14 projects`.
-
-**Current failure:** the disabled `Clean…` button with no inline reason
-and no consequence copy.
 
 ## 4. State legibility beats chrome restraint
 
@@ -68,22 +75,17 @@ even if it costs visual quiet.
 - If the chrome feels "too loud," question the state itself — maybe
   the state is the problem, not the banner.
 
-This principle outranks the aesthetic direction in `design-references.md`.
-Prefer clarity.
-
 ## 5. One signal per surface
 
 Every state change needs a single canonical feedback surface, not
-three echoes. See `feedback-ladder.md` for the mapping.
+three echoes. Every new state surface maps to exactly one of: toast,
+banner, inline note, `RunningOpStrip`, modal. See `design-patterns.md`
+for the selection table.
 
 - Do not show the same event as a toast *and* a banner *and* a
-  running-op strip *and* an inline note. Pick the right surface
-  per the ladder and commit.
-- Exception: logging the event to stderr or an audit log is not a
-  user-facing signal and does not count.
-
-**Current failure (latent):** long-running ops have both `RunningOpStrip`
-and toasts; rename completion fires both. Choose one.
+  running-op strip *and* an inline note. Pick one and commit.
+- Logging the event to stderr or an audit log is not a user-facing
+  signal and does not count.
 
 ## 6. Reversibility shapes friction
 
@@ -107,7 +109,8 @@ The user cannot trust an app that hides whether it is locked, whether
 its credentials are valid, or whether its last sync succeeded.
 
 - Keychain lock state, credential freshness, last-sync-age belong in
-  persistent chrome, not a settings panel.
+  persistent chrome (the bottom `StatusBar` sync dot, the card
+  `AnomalyBanner`), not a settings panel.
 - When a credential is expired, stale, or missing, the affected
   surface says so inline — not only in the error path.
 - Never log, toast, or display a full credential. Truncation rules
@@ -122,45 +125,56 @@ for the first time and within five seconds can say out loud:
 2. What state is it in?
 3. What will happen if they click the biggest button?
 
-If any of those is unclear, the design is not done. This replaces any
-weaker "does it look native" test.
+If any of those is unclear, the design is not done.
 
 ## 9. Dark-first parity
 
-Modern dev tools are used in dark mode by default — Linear, Warp,
-Raycast, Arc, Zed, Cursor, VS Code all launched dark-first and their
-light modes feel secondary. Claudepot supports both, but every design
-decision must be tested in both and neither may feel like an
-afterthought.
+Every design decision must be tested in both light and dark and
+neither may feel like an afterthought. Our OKLCH palette is authored
+so dark mode mirrors light via the same semantic variable names
+(`--bg`, `--fg`, `--line`, `--accent`) — changing the theme attribute
+on `<html>` flips the palette without any component code change.
 
-- Every new color token must have an explicit light and dark value
-  (the platform `-apple-system-*` tokens adapt automatically; derived
-  tokens using `color-mix` with `--muted` or `--text` adapt because
-  those adapt).
-- Screenshot-required checks in review (`design-review.md` Pass B)
-  must be performed in both modes when the change touches color,
-  contrast, or chrome.
+- Every new color must be a variable, not a raw hex/rgb/oklch literal
+  in a component.
 - Prefer monochromatic-plus-one-accent palettes. Rainbow state colors
   make dark-mode parity harder and usually indicate missing
   hierarchy.
+- `Tag` tones: `neutral | accent | ok | warn | danger | ghost`. No
+  other color roles.
 
-This is why we follow the 12-step semantic scale in
-`ui-design-system.md` — it forces you to name the role of every
-color, which is the only way light and dark can mirror each other
-without manual per-mode tuning.
+## 10. No emoji, no icon library
+
+Every glyph is a Nerd Font codepoint drawn via the `Glyph` primitive
+(`src/components/primitives/Glyph.tsx`), looked up in the NF map in
+`src/icons.ts`. No lucide, heroicons, Font Awesome SVGs, or emoji in
+UI. If you need a new icon, find the NF codepoint on the Nerd Fonts
+cheat sheet and add it to the map.
+
+This is what gives the app its visual identity. A single SVG icon
+mixed in breaks the aesthetic instantly.
 
 ---
 
-## How these principles interact with the rest of the system
+## Layer interaction
 
 ```
 design-principles.md         ← WHY (this file)
     │
-    ├── design-references.md ← WHAT to imitate (scoped to typography, chrome, proportions)
-    ├── feedback-ladder.md   ← WHEN to use which surface
-    ├── design-patterns.md   ← HOW to compose a specific element
-    └── ui-design-system.md  ← WHICH tokens and current defaults
+    └── design-patterns.md   ← HOW to compose a specific element
+         │
+         └── ui-design-system.md  ← WHICH tokens and current defaults
+              │
+              └── accessibility.md  ← a11y floor (not the ceiling)
 ```
 
-`design-review.md` checks every PR against the principles *first*, then
-patterns, then tokens. Principle violation is always BLOCK.
+`design-review.md` (if present) checks PRs against the principles
+*first*, then patterns, then tokens. Principle violation is always
+BLOCK.
+
+## Legacy
+
+Previous native-macOS design rules are archived under
+`.claude/rules/_legacy/`. They describe a superseded aesthetic (`-apple-system-*`
+tokens, native chrome, 48px icon rail). Do not consult them for new
+work. They remain for archaeology only.

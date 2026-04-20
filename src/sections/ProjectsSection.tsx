@@ -1,32 +1,40 @@
-import { useCallback, useEffect, useRef, useState } from "react";
-import { Icon } from "../components/Icon";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { api } from "../api";
 import { useOperations } from "../hooks/useOperations";
 import { useGlobalShortcuts } from "../hooks/useGlobalShortcuts";
 import type { MoveArgs, OrphanedProject, ProjectInfo } from "../types";
-import { SegmentedControl } from "../components/SegmentedControl";
 import { ContextMenu, type ContextMenuItem } from "../components/ContextMenu";
-import { ProjectsList, type ProjectFilter } from "./projects/ProjectsList";
+import { Button } from "../components/primitives/Button";
+import { Glyph } from "../components/primitives/Glyph";
+import { Input } from "../components/primitives/Input";
+import { NF } from "../icons";
+import { ScreenHeader } from "../shell/ScreenHeader";
+import {
+  ProjectsTable,
+  countByStatus,
+  type ProjectFilter,
+} from "./projects/ProjectsTable";
 import { ProjectDetail } from "./projects/ProjectDetail";
 import { RenameProjectModal } from "./projects/RenameProjectModal";
 import { MaintenanceView } from "./projects/MaintenanceView";
 import { OrphanBanner } from "./projects/OrphanBanner";
 import { AdoptOrphansModal } from "./projects/AdoptOrphansModal";
 
-type ProjectsTab = "list" | "maintenance";
-const TABS = [
-  { id: "list" as const, label: "List" },
-  { id: "maintenance" as const, label: "Maintenance" },
+const SEG_OPTIONS: { id: "all" | "orphan" | "unreachable" | "empty"; label: string }[] = [
+  { id: "all", label: "All" },
+  { id: "orphan", label: "Orphan" },
+  { id: "unreachable", label: "Offline" },
+  { id: "empty", label: "Empty" },
 ];
 
 /**
- * Projects section. Segmented control switches between:
- * - List tab: project list + detail split
- * - Maintenance tab: Clean + Repair merged view (P2.2)
+ * Projects section. Three sub-routes:
+ *  - null / "list": ScreenHeader + filter/segmented + ProjectsTable
+ *    + right-pane ProjectDetail (when a row is selected).
+ *  - "maintenance" / "repair": MaintenanceView (unchanged).
  *
- * `subRoute === "repair"` or `subRoute === "maintenance"` activates
- * the maintenance tab; the shell uses this for deep-links from the
- * PendingJournalsBanner.
+ * Rename, adopt-orphans, and context-menu flows work as before; they
+ * just render into the new shell instead of the old sidebar chrome.
  */
 export function ProjectsSection({
   subRoute,
@@ -43,9 +51,8 @@ export function ProjectsSection({
   const [selectedPath, setSelectedPath] = useState<string | null>(null);
   const [renameTarget, setRenameTarget] = useState<string | null>(null);
   const [filter, setFilter] = useState<ProjectFilter>("all");
+  const [nameFilter, setNameFilter] = useState("");
   const [toast, setToast] = useState<string | null>(null);
-  /** Bumped on every completed session move so ProjectDetail's
-   * useEffect refetches even though `path` didn't change. */
   const [detailRefreshSignal, setDetailRefreshSignal] = useState(0);
   const [ctxMenu, setCtxMenu] = useState<{
     x: number;
@@ -63,14 +70,6 @@ export function ProjectsSection({
   );
   const closeCtxMenu = useCallback(() => setCtxMenu(null), []);
 
-  // Audit M15: token-sequenced refresh. Mount, ⌘R, maintenance
-  // callbacks, and rename completion can all call refresh() — without
-  // a token, an older slower response can resolve AFTER a newer
-  // response and overwrite fresher state. Each call increments the
-  // token; a response is applied only if its token is still the
-  // latest on resolution. Also provides an unmount guard: on unmount
-  // we bump `mountedRef` to false so any in-flight response is
-  // discarded.
   const refreshTokenRef = useRef(0);
   const mountedRef = useRef(true);
   useEffect(() => {
@@ -92,7 +91,7 @@ export function ProjectsSection({
         setLoading(false);
         setSelectedPath((prev) => {
           if (prev && ps.some((p) => p.original_path === prev)) return prev;
-          return ps[0]?.original_path ?? null;
+          return null;
         });
       })
       .catch((e) => {
@@ -100,9 +99,6 @@ export function ProjectsSection({
         setError(String(e));
         setLoading(false);
       });
-    // Orphan scan is independent of projectList — fire in parallel and
-    // let each render when ready. An orphan-scan failure shouldn't
-    // block the main list; log and leave the banner empty.
     api
       .sessionListOrphans()
       .then((os) => {
@@ -119,122 +115,255 @@ export function ProjectsSection({
     refresh();
   }, [refresh]);
 
-  // ⌘R refreshes the project list from anywhere in the Projects section
-  // (maintenance tab included). Matches the macOS "Reload" idiom and
-  // fixes the P2 audit bug where shortcuts were Accounts-scoped only.
   useGlobalShortcuts({ onRefresh: refresh });
 
-  const activeTab: ProjectsTab =
-    subRoute === "repair" || subRoute === "maintenance" ? "maintenance" : "list";
+  const counts = useMemo(() => countByStatus(projects), [projects]);
+  const filteredByName = useMemo(() => {
+    if (!nameFilter.trim()) return projects;
+    const q = nameFilter.toLowerCase();
+    return projects.filter(
+      (p) =>
+        p.original_path.toLowerCase().includes(q) ||
+        p.sanitized_name.toLowerCase().includes(q),
+    );
+  }, [projects, nameFilter]);
+
+  const activeTab: "list" | "maintenance" =
+    subRoute === "repair" || subRoute === "maintenance"
+      ? "maintenance"
+      : "list";
 
   if (activeTab === "maintenance") {
     return (
       <>
-        <aside className="sidebar projects-sidebar">
-          <div className="sidebar-header">
-            <span className="sidebar-title">Projects</span>
-          </div>
-          <div className="sidebar-segmented-slot">
-            <SegmentedControl
-              options={TABS}
-              value={activeTab}
-              onChange={(t) => onSubRouteChange(t === "list" ? null : "maintenance")}
-            />
-          </div>
-        </aside>
+        <ScreenHeader
+          crumbs={["claudepot", "projects", "maintenance"]}
+          title="Maintenance"
+          subtitle="Clean orphaned projects and resume pending rename journals."
+          actions={
+            <Button
+              variant="ghost"
+              glyph={NF.arrowR}
+              onClick={() => onSubRouteChange(null)}
+              title="Back to project list"
+            >
+              Back to list
+            </Button>
+          }
+        />
         <MaintenanceView onOpTerminated={() => refresh()} />
       </>
     );
   }
 
-  if (loading && projects.length === 0) {
-    return (
-      <main className="content">
-        <div className="skeleton-container">
-          <div className="skeleton skeleton-header" />
-          <div className="skeleton skeleton-card" />
-          <div className="skeleton skeleton-card" />
-        </div>
-      </main>
-    );
-  }
-
-  if (error && projects.length === 0) {
-    return (
-      <main className="content">
-        <div className="empty">
-          <h2>Couldn't load projects</h2>
-          <p className="muted mono">{error}</p>
-          <button className="primary" onClick={refresh}>Retry</button>
-        </div>
-      </main>
-    );
-  }
-
-  if (projects.length === 0) {
-    return (
-      <main className="content">
-        <div className="empty">
-          <Icon name="folder" size={32} />
-          <h2>No CC projects</h2>
-          <p className="muted">
-            Run Claude Code in any directory to create a project.
-          </p>
-        </div>
-      </main>
-    );
-  }
+  const subtitle = (() => {
+    const n = projects.length;
+    if (n === 0) return "~/.claude/projects is empty.";
+    const actionable = counts.orphan + counts.unreachable + counts.empty;
+    if (actionable === 0) {
+      return `${n} project${n === 1 ? "" : "s"} · all healthy`;
+    }
+    const pieces: string[] = [];
+    if (counts.orphan) pieces.push(`${counts.orphan} orphan`);
+    if (counts.unreachable) pieces.push(`${counts.unreachable} offline`);
+    if (counts.empty) pieces.push(`${counts.empty} empty`);
+    return `${n} project${n === 1 ? "" : "s"} · ${pieces.join(" · ")}`;
+  })();
 
   return (
     <>
-      <ProjectsList
-        projects={projects}
-        selectedPath={selectedPath}
-        onSelect={setSelectedPath}
-        onContextMenu={handleContextMenu}
-        filter={filter}
-        onFilterChange={setFilter}
-        segmentedControl={
-          <SegmentedControl
-            options={TABS}
-            value={activeTab}
-            onChange={(t) => onSubRouteChange(t === "list" ? null : "maintenance")}
-          />
+      <ScreenHeader
+        crumbs={["claudepot", "projects"]}
+        title="Projects"
+        subtitle={subtitle}
+        actions={
+          <>
+            <Button
+              variant="ghost"
+              glyph={NF.wrench}
+              onClick={() => onSubRouteChange("maintenance")}
+              title="Maintenance: clean + repair"
+            >
+              Maintenance
+            </Button>
+            <Button
+              variant="ghost"
+              glyph={NF.refresh}
+              onClick={refresh}
+              title="Refresh (⌘R)"
+            >
+              Refresh
+            </Button>
+          </>
         }
       />
-      {selectedPath ? (
-        <div className="content-with-banner">
-          {orphans.length > 0 && (
-            <div className="content-banner-slot">
-              <OrphanBanner
-                orphans={orphans}
-                onAdopt={() => setAdoptOpen(true)}
-              />
-            </div>
-          )}
-          <ProjectDetail
-            key={selectedPath}
-            path={selectedPath}
-            projects={projects}
-            refreshSignal={detailRefreshSignal}
-            onRename={(path) => setRenameTarget(path)}
-            onMoved={() => {
-              setToast("Session moved.");
-              setDetailRefreshSignal((n) => n + 1);
-              refresh();
-            }}
-            onError={(msg) => setToast(msg)}
+
+      {orphans.length > 0 && (
+        <div style={{ padding: "var(--sp-12) var(--sp-32) 0" }}>
+          <OrphanBanner
+            orphans={orphans}
+            onAdopt={() => setAdoptOpen(true)}
           />
         </div>
+      )}
+
+      {/* filter bar */}
+      <div
+        style={{
+          padding: "var(--sp-14) var(--sp-32)",
+          borderBottom: "var(--bw-hair) solid var(--line)",
+          display: "flex",
+          gap: "var(--sp-12)",
+          alignItems: "center",
+          background: "var(--bg)",
+          flexShrink: 0,
+        }}
+      >
+        <Input
+          glyph={NF.search}
+          placeholder="Filter by name or path"
+          value={nameFilter}
+          onChange={(e) => setNameFilter(e.target.value)}
+          style={{ width: "var(--filter-input-width)" }}
+          aria-label="Filter projects by name or path"
+        />
+
+        <div
+          role="tablist"
+          style={{
+            display: "flex",
+            gap: "var(--sp-2)",
+            padding: "var(--sp-2)",
+            background: "var(--bg-sunken)",
+            border: "var(--bw-hair) solid var(--line)",
+            borderRadius: "var(--r-2)",
+          }}
+        >
+          {SEG_OPTIONS.map((opt) => {
+            const current = filter === opt.id;
+            const count =
+              opt.id === "all"
+                ? projects.length
+                : counts[opt.id as keyof typeof counts];
+            return (
+              <button
+                key={opt.id}
+                type="button"
+                role="tab"
+                aria-selected={current}
+                onClick={() => setFilter(opt.id)}
+                style={{
+                  padding: "var(--sp-4) var(--sp-10)",
+                  fontSize: "var(--fs-xs)",
+                  fontWeight: 500,
+                  color: current ? "var(--fg)" : "var(--fg-muted)",
+                  background: current
+                    ? "var(--bg-raised)"
+                    : "transparent",
+                  border: current
+                    ? "var(--bw-hair) solid var(--line)"
+                    : "var(--bw-hair) solid transparent",
+                  borderRadius: "var(--r-1)",
+                  letterSpacing: "var(--ls-wide)",
+                  textTransform: "uppercase",
+                  cursor: "pointer",
+                }}
+              >
+                {opt.label} · {count}
+              </button>
+            );
+          })}
+        </div>
+
+        <div style={{ flex: 1 }} />
+        {loading && projects.length > 0 && (
+          <span
+            style={{
+              fontSize: "var(--fs-xs)",
+              color: "var(--fg-faint)",
+              display: "flex",
+              alignItems: "center",
+              gap: "var(--sp-6)",
+            }}
+          >
+            <Glyph g={NF.refresh} />
+            Refreshing…
+          </span>
+        )}
+      </div>
+
+      {error && projects.length === 0 ? (
+        <div
+          style={{
+            padding: "var(--sp-48)",
+            display: "flex",
+            flexDirection: "column",
+            alignItems: "center",
+            gap: "var(--sp-12)",
+          }}
+        >
+          <h2 style={{ fontSize: "var(--fs-lg)", margin: 0 }}>
+            Couldn't load projects
+          </h2>
+          <p
+            style={{
+              color: "var(--fg-muted)",
+              fontSize: "var(--fs-xs)",
+              margin: 0,
+            }}
+          >
+            {error}
+          </p>
+          <Button variant="solid" onClick={refresh}>
+            Retry
+          </Button>
+        </div>
       ) : (
-        <main className="content">
-          {orphans.length > 0 && (
-            <OrphanBanner
-              orphans={orphans}
-              onAdopt={() => setAdoptOpen(true)}
+        <div style={{ display: "flex", minHeight: 0, flex: 1 }}>
+          <div
+            style={{
+              flex: 1,
+              minWidth: 0,
+              overflow: "auto",
+              display: "flex",
+              flexDirection: "column",
+            }}
+          >
+            <ProjectsTable
+              projects={filteredByName}
+              filter={filter}
+              selectedPath={selectedPath}
+              onSelect={setSelectedPath}
+              onContextMenu={handleContextMenu}
             />
+          </div>
+
+          {selectedPath && (
+            <aside
+              style={{
+                width: "var(--project-detail-width)",
+                flexShrink: 0,
+                borderLeft: "var(--bw-hair) solid var(--line)",
+                background: "var(--bg-sunken)",
+                overflow: "auto",
+              }}
+            >
+              <ProjectDetail
+                key={selectedPath}
+                path={selectedPath}
+                projects={projects}
+                refreshSignal={detailRefreshSignal}
+                onRename={(path) => setRenameTarget(path)}
+                onMoved={() => {
+                  setToast("Session moved.");
+                  setDetailRefreshSignal((n) => n + 1);
+                  refresh();
+                }}
+                onError={(msg) => setToast(msg)}
+              />
+            </aside>
           )}
-        </main>
+        </div>
       )}
 
       {adoptOpen && (
@@ -247,7 +376,6 @@ export function ProjectsSection({
           }}
         />
       )}
-
 
       {renameTarget && (
         <RenameProjectModal
@@ -279,57 +407,76 @@ export function ProjectsSection({
       )}
 
       {toast && (
-        <div className="inline-toast" role="status" onClick={() => setToast(null)}>
+        <div
+          className="inline-toast"
+          role="status"
+          onClick={() => setToast(null)}
+          style={{
+            position: "fixed",
+            bottom: "var(--sp-40)",
+            left: "50%",
+            transform: "translateX(-50%)",
+            padding: "var(--sp-10) var(--sp-16)",
+            background: "var(--bg-raised)",
+            border: "var(--bw-hair) solid var(--line-strong)",
+            borderRadius: "var(--r-2)",
+            fontSize: "var(--fs-sm)",
+            color: "var(--fg)",
+            boxShadow: "var(--shadow-md)",
+            cursor: "pointer",
+            zIndex: "var(--z-toast)" as unknown as number,
+          }}
+        >
           {toast}
         </div>
       )}
 
-      {ctxMenu && (() => {
-        const p = ctxMenu.project;
-        const items: ContextMenuItem[] = [
-          {
-            label: "Open in Finder",
-            onClick: () => {
-              api.revealInFinder(p.original_path).catch((e) => {
-                setToast(`Couldn't reveal: ${e}`);
-              });
+      {ctxMenu &&
+        (() => {
+          const p = ctxMenu.project;
+          const items: ContextMenuItem[] = [
+            {
+              label: "Open in Finder",
+              onClick: () => {
+                api.revealInFinder(p.original_path).catch((e) => {
+                  setToast(`Couldn't reveal: ${e}`);
+                });
+              },
             },
-          },
-          { label: "", separator: true, onClick: () => {} },
-          {
-            label: "Rename…",
-            onClick: () => setRenameTarget(p.original_path),
-          },
-          {
-            label: "Clean orphans…",
-            onClick: () => onSubRouteChange("maintenance"),
-          },
-          { label: "", separator: true, onClick: () => {} },
-          {
-            label: "Copy path",
-            onClick: () => {
-              navigator.clipboard.writeText(p.original_path);
-              setToast("Copied path.");
+            { label: "", separator: true, onClick: () => {} },
+            {
+              label: "Rename…",
+              onClick: () => setRenameTarget(p.original_path),
             },
-          },
-          {
-            label: "Copy key",
-            onClick: () => {
-              navigator.clipboard.writeText(p.sanitized_name);
-              setToast("Copied key.");
+            {
+              label: "Clean orphans…",
+              onClick: () => onSubRouteChange("maintenance"),
             },
-          },
-        ];
-        return (
-          <ContextMenu
-            x={ctxMenu.x}
-            y={ctxMenu.y}
-            items={items}
-            onClose={closeCtxMenu}
-          />
-        );
-      })()}
+            { label: "", separator: true, onClick: () => {} },
+            {
+              label: "Copy path",
+              onClick: () => {
+                navigator.clipboard.writeText(p.original_path);
+                setToast("Copied path.");
+              },
+            },
+            {
+              label: "Copy key",
+              onClick: () => {
+                navigator.clipboard.writeText(p.sanitized_name);
+                setToast("Copied key.");
+              },
+            },
+          ];
+          return (
+            <ContextMenu
+              x={ctxMenu.x}
+              y={ctxMenu.y}
+              items={items}
+              onClose={closeCtxMenu}
+            />
+          );
+        })()}
     </>
   );
 }
-
