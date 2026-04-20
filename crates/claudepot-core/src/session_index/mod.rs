@@ -86,8 +86,14 @@ impl SessionIndex {
     /// Internal accessor. Kept `pub(crate)` so sibling helpers (the
     /// diff-and-refresh logic, eventually FTS) can share the lock
     /// without re-wrapping.
+    ///
+    /// Recovers from poisoning by taking the inner guard — SQLite's
+    /// on-disk state is transactionally consistent even if a Rust
+    /// panic blew up a caller mid-operation, so there's nothing to
+    /// roll back at this layer. Project rules ("no `expect` in core")
+    /// make the previous `.expect(...)` a hard violation.
     pub(crate) fn db(&self) -> MutexGuard<'_, Connection> {
-        self.db.lock().expect("session index mutex poisoned")
+        self.db.lock().unwrap_or_else(|p| p.into_inner())
     }
 
     /// Return the stored `meta.schema_version`. Primarily a test hook
@@ -117,13 +123,13 @@ impl SessionIndex {
     /// single SQLite transaction.
     ///
     /// Cold first run parses everything; subsequent runs cost one
-    /// `stat` per file plus a tiny SQL read. Errors on individual
-    /// transcripts are swallowed (matching `session::scan_session`'s
-    /// existing tolerance) so a single malformed JSONL never blocks
-    /// the whole index.
+    /// `stat` per file plus a tiny SQL read. Per-file errors are
+    /// collected into `RefreshStats.failed` with their path and error
+    /// string so callers can surface partial degradation instead of
+    /// masquerading a broken transcript as a clean refresh.
     pub fn refresh(&self, config_dir: &Path) -> Result<RefreshStats, SessionIndexError> {
         let started_at = std::time::Instant::now();
-        let fs_entries = codec::walk_fs(config_dir)?;
+        let walk = codec::walk_fs(config_dir)?;
 
         // Snapshot the DB side of the diff under a short-lived lock
         // so the rayon scan that follows runs without holding it.
@@ -133,48 +139,77 @@ impl SessionIndex {
         };
 
         let fs_tuples: Vec<diff::IndexTuple> =
-            fs_entries.iter().map(|e| e.tuple.clone()).collect();
+            walk.entries.iter().map(|e| e.tuple.clone()).collect();
         let plan = diff::diff_fs_vs_db(&fs_tuples, &db_tuples);
 
         // Build a `file_path -> &FsEntry` lookup so the upsert loop
         // can recover the slug + absolute path for each scan.
-        let by_path: std::collections::HashMap<&str, &codec::FsEntry> = fs_entries
+        let by_path: std::collections::HashMap<&str, &codec::FsEntry> = walk
+            .entries
             .iter()
             .map(|e| (e.tuple.file_path.as_str(), e))
             .collect();
 
-        // Parallel re-scan for the delta. Per-file errors land as
-        // `None` and get dropped — the file will be retried on the
-        // next refresh because its tuple is still absent/different.
-        let scanned: Vec<SessionRow> = plan
+        // Parallel re-scan for the delta. Per-file errors are
+        // captured with their path + message so the caller can log /
+        // surface them; the file will also be retried on the next
+        // refresh because its tuple stays absent or different.
+        let scan_results: Vec<Result<SessionRow, (std::path::PathBuf, String)>> = plan
             .to_upsert
             .par_iter()
             .filter_map(|path_key| {
-                by_path
-                    .get(path_key.as_str())
-                    .and_then(|entry| scan_session(&entry.slug, &entry.path).ok())
+                by_path.get(path_key.as_str()).map(|entry| {
+                    scan_session(&entry.slug, &entry.path)
+                        .map_err(|e| (entry.path.clone(), e.to_string()))
+                })
             })
             .collect();
+
+        let mut scanned: Vec<SessionRow> = Vec::with_capacity(scan_results.len());
+        let mut failed: Vec<(std::path::PathBuf, String)> = walk.stat_failed;
+        for r in scan_results {
+            match r {
+                Ok(row) => scanned.push(row),
+                Err((path, msg)) => {
+                    tracing::warn!(path = %path.display(), error = %msg, "session_index: scan failed");
+                    failed.push((path, msg));
+                }
+            }
+        }
 
         // Single write transaction: upserts + deletes. If anything
         // fails, nothing is committed and the cache stays consistent.
         let indexed_at_ms = Utc::now().timestamp_millis();
-        let mut db = self.db();
-        let tx = db.transaction()?;
         let scanned_count = scanned.len();
-        for row in &scanned {
-            codec::upsert_row(&tx, row, indexed_at_ms)?;
+        let deleted_count = plan.to_delete.len();
+        {
+            let mut db = self.db();
+            let tx = db.transaction()?;
+            for row in &scanned {
+                codec::upsert_row(&tx, row, indexed_at_ms)?;
+            }
+            for gone in &plan.to_delete {
+                codec::delete_row(&tx, gone)?;
+            }
+            tx.commit()?;
         }
-        for gone in &plan.to_delete {
-            codec::delete_row(&tx, gone)?;
-        }
-        tx.commit()?;
+
+        let elapsed = started_at.elapsed();
+        tracing::info!(
+            scanned = scanned_count,
+            deleted = deleted_count,
+            failed = failed.len(),
+            total_on_disk = walk.entries.len(),
+            elapsed_ms = elapsed.as_millis() as u64,
+            "session_index: refresh complete"
+        );
 
         Ok(RefreshStats {
             scanned: scanned_count,
-            deleted: plan.to_delete.len(),
-            total_on_disk: fs_entries.len(),
-            elapsed: started_at.elapsed(),
+            deleted: deleted_count,
+            total_on_disk: walk.entries.len(),
+            failed,
+            elapsed,
         })
     }
 
@@ -212,6 +247,11 @@ pub struct RefreshStats {
     pub deleted: usize,
     /// Number of transcripts visible on disk after the walk.
     pub total_on_disk: usize,
+    /// Per-file failures — both stat() errors during the walk and
+    /// scan failures during the parallel fold. Each entry is
+    /// `(path, error_string)`. A non-empty list means the cache is
+    /// incomplete; callers can surface this via the UI or logs.
+    pub failed: Vec<(std::path::PathBuf, String)>,
     pub elapsed: std::time::Duration,
 }
 
