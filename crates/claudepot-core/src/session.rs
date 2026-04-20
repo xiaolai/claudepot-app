@@ -16,6 +16,7 @@
 //! malformed lines — so do we.
 
 use chrono::{DateTime, Utc};
+#[cfg(test)]
 use rayon::prelude::*;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
