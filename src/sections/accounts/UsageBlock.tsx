@@ -224,7 +224,12 @@ function UsageRow({
 
 function SegBar({ pct, high }: { pct: number; high: boolean }) {
   const segs = 20;
-  const filled = Math.round((pct / 100) * segs);
+  // At 20 segments each is 5% of the total, so any utilization
+  // below 2.5% rounds to zero filled — the bar reads as "no data"
+  // instead of "low usage". Floor a non-zero pct to at least one
+  // filled segment so the signal survives the low end.
+  const raw = Math.round((pct / 100) * segs);
+  const filled = pct > 0 ? Math.max(1, raw) : 0;
   return (
     <div
       style={{ display: "flex", gap: "var(--sp-2)", height: "var(--sp-8)" }}

@@ -15,6 +15,13 @@ interface ButtonProps {
   size?: ButtonSize;
   /** NF codepoint (decorative leading icon). */
   glyph?: string;
+  /**
+   * Override the glyph's color. Defaults to the button's text color
+   * (via `currentColor`). Useful for utility actions where the
+   * label should read neutral but the glyph should sit a tier
+   * fainter, e.g. `"var(--fg-muted)"` on a ghost-variant Refresh.
+   */
+  glyphColor?: string;
   children?: ReactNode;
   onClick?: () => void;
   active?: boolean;
@@ -50,6 +57,7 @@ export function Button({
   variant = "ghost",
   size = "md",
   glyph,
+  glyphColor,
   children,
   onClick,
   active,
@@ -105,7 +113,7 @@ export function Button({
         ...style,
       }}
     >
-      {glyph && <Glyph g={glyph} />}
+      {glyph && <Glyph g={glyph} color={glyphColor} />}
       {children}
     </button>
   );

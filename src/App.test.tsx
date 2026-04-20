@@ -121,37 +121,30 @@ describe("App shell — paper-mono", () => {
   });
 
   it("filters cards by email", async () => {
-    const alice = sampleAccount({
-      uuid: "u1",
-      email: "alice@example.com",
-      org_name: "Alice Org",
-    });
-    // override org_name — sampleAccount's default "Alice Org" would
-    // otherwise cause bob to match the "alice" filter through the
-    // org-name branch and skew the counter.
-    const bob = sampleAccount({
-      uuid: "u2",
-      email: "bob@example.com",
-      org_name: "Bob Org",
-    });
+    // AccountsSection gates the filter row to accounts.length > 3 —
+    // the input is pure chrome with 1–3 accounts. Seed four so the
+    // filter appears and we can exercise it.
+    const [alice, bob, carol, dave] = [
+      { uuid: "u1", email: "alice@example.com", org_name: "Alice Org" },
+      { uuid: "u2", email: "bob@example.com",   org_name: "Bob Org" },
+      { uuid: "u3", email: "carol@example.com", org_name: "Carol Org" },
+      { uuid: "u4", email: "dave@example.com",  org_name: "Dave Org" },
+    ].map((o) => sampleAccount(o));
+
     await renderApp({
-      app_status: () => sampleStatus({ account_count: 2 }),
-      account_list: () => [alice, bob],
+      app_status: () => sampleStatus({ account_count: 4 }),
+      account_list: () => [alice, bob, carol, dave],
     });
 
-    // Wait for both cards.
     await screen.findAllByText("alice@example.com");
 
     const user = userEvent.setup();
     const filter = screen.getByLabelText("Filter accounts");
     await user.type(filter, "alice");
 
-    // bob should no longer have a card; alice should still be there.
-    // The "N / total" filter counter is the cleanest way to observe
-    // the filter: a function matcher handles either whitespace
-    // variant jsdom may produce.
+    // Only alice matches; counter reads "1 / 4".
     const counter = await screen.findByText((text) =>
-      text.replace(/\s+/g, "") === "1/2",
+      text.replace(/\s+/g, "") === "1/4",
     );
     expect(counter).toBeInTheDocument();
   });

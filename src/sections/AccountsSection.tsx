@@ -225,6 +225,7 @@ export function AccountsSection({
             <Button
               variant="ghost"
               glyph={NF.refresh}
+              glyphColor="var(--fg-muted)"
               onClick={() => {
                 refresh();
                 refreshUsage();
@@ -245,37 +246,42 @@ export function AccountsSection({
         }
       />
 
-      <div
-        style={{
-          padding: "var(--sp-14) var(--sp-32)",
-          borderBottom: "var(--bw-hair) solid var(--line)",
-          display: "flex",
-          gap: "var(--sp-12)",
-          alignItems: "center",
-          background: "var(--bg)",
-        }}
-      >
-        <Input
-          glyph={NF.search}
-          placeholder="Filter accounts"
-          value={filter}
-          onChange={(e) => setFilter(e.target.value)}
-          style={{ width: "var(--filter-input-width)" }}
-          aria-label="Filter accounts"
-        />
-        {filter.trim() !== "" && (
-          <span
-            className="mono-cap"
-            style={{
-              color: "var(--fg-faint)",
-              marginLeft: "var(--sp-4)",
-            }}
-          >
-            {`${shown.length} / ${accounts.length}`}
-          </span>
-        )}
-        <div style={{ flex: 1 }} />
-      </div>
+      {/* Filter input only earns its row when there are enough
+          accounts to usefully narrow. With 1–3 accounts the input
+          is pure chrome. Once a 4th lands, the filter appears. */}
+      {accounts.length > 3 && (
+        <div
+          style={{
+            padding: "var(--sp-14) var(--sp-32)",
+            borderBottom: "var(--bw-hair) solid var(--line)",
+            display: "flex",
+            gap: "var(--sp-12)",
+            alignItems: "center",
+            background: "var(--bg)",
+          }}
+        >
+          <Input
+            glyph={NF.search}
+            placeholder="Filter accounts"
+            value={filter}
+            onChange={(e) => setFilter(e.target.value)}
+            style={{ width: "var(--filter-input-width)" }}
+            aria-label="Filter accounts"
+          />
+          {filter.trim() !== "" && (
+            <span
+              className="mono-cap"
+              style={{
+                color: "var(--fg-faint)",
+                marginLeft: "var(--sp-4)",
+              }}
+            >
+              {`${shown.length} / ${accounts.length}`}
+            </span>
+          )}
+          <div style={{ flex: 1 }} />
+        </div>
+      )}
 
       <div
         style={{

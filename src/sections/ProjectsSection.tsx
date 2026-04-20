@@ -180,6 +180,7 @@ export function ProjectsSection({
             <Button
               variant="ghost"
               glyph={NF.wrench}
+              glyphColor="var(--fg-muted)"
               onClick={() => onSubRouteChange("maintenance")}
               title="Maintenance: clean + repair"
             >
@@ -188,6 +189,7 @@ export function ProjectsSection({
             <Button
               variant="ghost"
               glyph={NF.refresh}
+              glyphColor="var(--fg-muted)"
               onClick={refresh}
               title="Refresh (⌘R)"
             >

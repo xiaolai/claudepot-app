@@ -69,10 +69,11 @@ export function Avatar({
   const initial = name?.[0]?.toUpperCase() || "?";
   const { dim, initial: fs } = resolveAvatar(size);
   // CSS grid + place-items + line-height:1 gives us pixel-exact
-  // centering regardless of the JetBrains Mono NF cap-height
-  // asymmetry. Without it, the initial sits high-left in the
-  // colored square — a small miss repeated on every avatar in the
-  // app.
+  // box centering. The inner wrapper then applies
+  // --avatar-optical-nudge to shift the ink DOWN — JetBrains Mono
+  // NF caps sit visibly high in the em box, so geometric centre is
+  // not optical centre. Nudging only the inner content keeps the
+  // border + background perfectly aligned with surrounding layout.
   return (
     <span
       style={{
@@ -89,9 +90,17 @@ export function Avatar({
         border: color ? "none" : "var(--bw-hair) solid var(--line)",
         flexShrink: 0,
         letterSpacing: 0,
+        overflow: "hidden",
       }}
     >
-      {glyph ? <Glyph g={glyph} /> : initial}
+      <span
+        style={{
+          display: "inline-block",
+          transform: "translateY(var(--avatar-optical-nudge))",
+        }}
+      >
+        {glyph ? <Glyph g={glyph} /> : initial}
+      </span>
     </span>
   );
 }

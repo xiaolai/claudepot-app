@@ -81,9 +81,20 @@ export function AppStatusBar({ stats }: { stats: AppStatusBarStats }) {
       <span style={{ flex: 1 }} />
 
       {/* Model name is reference info, not a notification — subtle
-          text, no accent color, no glyph. */}
+          text, no accent color, no glyph. Uppercase + letter-spacing
+          from the parent makes the string feel louder than its tone,
+          so we drop those for the model segment and render it in
+          --fg-ghost to sit quietly. */}
       {stats.model && (
-        <span style={{ color: "var(--fg-faint)" }}>{stats.model}</span>
+        <span
+          style={{
+            color: "var(--fg-ghost)",
+            textTransform: "none",
+            letterSpacing: "var(--ls-normal)",
+          }}
+        >
+          {stats.model}
+        </span>
       )}
     </div>
   );
