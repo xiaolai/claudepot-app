@@ -1,13 +1,12 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { api } from "../api";
-import type { AccountSummary } from "../types";
+import type { AccountSummary, AppStatus } from "../types";
 import { useBusy } from "../hooks/useBusy";
 import { useUsage } from "../hooks/useUsage";
 import { useActions } from "../hooks/useActions";
 import { useTauriEvent } from "../hooks/useTauriEvent";
 import { useGlobalShortcuts } from "../hooks/useGlobalShortcuts";
 import { useAppState } from "../providers/AppStateProvider";
-import { ContextMenu, type ContextMenuItem } from "../components/ContextMenu";
+import { ContextMenu } from "../components/ContextMenu";
 import { CommandPalette } from "../components/CommandPalette";
 import { ConfirmDialog } from "../components/ConfirmDialog";
 import { Button } from "../components/primitives/Button";
@@ -18,6 +17,9 @@ import { ScreenHeader } from "../shell/ScreenHeader";
 import { AccountCard } from "./accounts/AccountCard";
 import { AddAccountModal } from "./accounts/AddAccountModal";
 import { isAnomaly } from "./accounts/AnomalyBanner";
+import { SplitBrainConfirm } from "./accounts/SplitBrainConfirm";
+import { useAccountContextMenu } from "./accounts/useAccountContextMenu";
+import { useAccountHandlers } from "./accounts/useAccountHandlers";
 
 /**
  * Accounts section. Renders the header, filter bar, and the card grid.
@@ -50,28 +52,18 @@ export function AccountsSection({
     | null
   >(null);
 
-  /**
-   * Wrap CLI swap with a preflight. When a live `claude` process is
-   * running, present the split-brain warning *before* the swap (matches
-   * the CLI's post-swap advisory) instead of letting the error path
-   * turn into an Undo-shaped retry. On confirm, proceed with force=true.
-   */
-  const guardedUseCli = useCallback(
-    async (a: AccountSummary) => {
-      try {
-        const running = await api.cliIsCcRunning();
-        if (running) {
-          setConfirmSplitBrain(a);
-          return;
-        }
-      } catch {
-        // If preflight fails, fall through to the regular swap; the
-        // server-side gate in swap.rs still rejects live conflicts.
-      }
-      actions.useCli(a);
-    },
-    [actions],
-  );
+  const {
+    runVerifyAccount,
+    runVerifyAll,
+    handleDesktopSwitch,
+    guardedUseCli,
+  } = useAccountHandlers({
+    pushToast,
+    refresh,
+    useDesktop: actions.useDesktop,
+    useCli: actions.useCli,
+    setConfirmSplitBrain,
+  });
 
   const handleContextMenu = useCallback(
     (e: React.MouseEvent, a: AccountSummary) => {
@@ -82,78 +74,6 @@ export function AccountsSection({
   );
 
   const closeCtxMenu = useCallback(() => setCtxMenu(null), []);
-
-  const runVerifyAccount = useCallback(
-    async (a: AccountSummary) => {
-      try {
-        const updated = await api.verifyAccount(a.uuid);
-        // Verify doesn't throw on drift/rejected — it returns the new
-        // summary. Tone the toast to match the outcome instead of
-        // unconditionally reporting "Verified ✓".
-        switch (updated.verify_status) {
-          case "ok":
-            pushToast("info", `Verified ${a.email}`);
-            break;
-          case "drift":
-            pushToast(
-              "error",
-              `Drift: ${a.email} actually authenticates as ${updated.verified_email ?? "unknown"}`,
-            );
-            break;
-          case "rejected":
-            pushToast(
-              "error",
-              `Server rejected ${a.email} — re-login required`,
-            );
-            break;
-          case "network_error":
-            pushToast(
-              "error",
-              `Couldn't verify ${a.email} — /profile unreachable`,
-            );
-            break;
-          default:
-            pushToast("info", `Verified ${a.email}`);
-        }
-        refresh();
-      } catch (e) {
-        pushToast("error", `Verify failed: ${e}`);
-      }
-    },
-    [pushToast, refresh],
-  );
-
-  const runVerifyAll = useCallback(async () => {
-    try {
-      const verified = await api.verifyAllAccounts();
-      const drift = verified.filter((a) => a.verify_status === "drift").length;
-      const rejected = verified.filter(
-        (a) => a.verify_status === "rejected",
-      ).length;
-      if (drift + rejected === 0) {
-        pushToast("info", `All ${verified.length} accounts verified.`);
-      } else {
-        pushToast(
-          "error",
-          `Verify: ${drift} drift, ${rejected} rejected — see card banners.`,
-        );
-      }
-      await refresh();
-    } catch (e) {
-      pushToast("error", `Verify-all failed: ${e}`);
-    }
-  }, [pushToast, refresh]);
-
-  const handleDesktopSwitch = useCallback(
-    (a: AccountSummary) => {
-      pushToast("info", `Switching Desktop to ${a.email}…`, () => {}, {
-        undoMs: 3000,
-        dedupeKey: "desktop-switch",
-        onCommit: () => actions.useDesktop(a),
-      });
-    },
-    [actions, pushToast],
-  );
 
   // Cmd+Shift+C — copy first matching email when a filter is active,
   // else the first account in the list.
@@ -485,43 +405,13 @@ export function AccountsSection({
       )}
 
       {confirmSplitBrain && (
-        <ConfirmDialog
-          title="Claude Code is running"
-          confirmLabel={`Swap to ${confirmSplitBrain.email} anyway`}
-          confirmDanger
-          body={
-            <>
-              <p>
-                A running Claude Code session is using the current
-                account. Until you quit it you'll see split-brain
-                state:
-              </p>
-              <ul className="muted small" style={{ paddingLeft: 18 }}>
-                <li>
-                  Session identity (header, org name) stays as the old
-                  account — cached at startup.
-                </li>
-                <li>
-                  API calls (/usage, completions, billing) switch to{" "}
-                  <strong>{confirmSplitBrain.email}</strong> immediately.
-                </li>
-                <li>
-                  The next OAuth refresh (typically within the hour)
-                  may overwrite the keychain back to the old account,
-                  silently reverting this swap.
-                </li>
-              </ul>
-              <p className="muted small">
-                Safest: quit Claude Code first, then swap. This action
-                proceeds with <code>--force</code>.
-              </p>
-            </>
-          }
+        <SplitBrainConfirm
+          account={confirmSplitBrain}
           onCancel={() => setConfirmSplitBrain(null)}
-          onConfirm={async () => {
+          onConfirm={() => {
             const target = confirmSplitBrain;
             setConfirmSplitBrain(null);
-            await actions.useCli(target, true);
+            void actions.useCli(target, true);
           }}
         />
       )}
@@ -543,114 +433,74 @@ export function AccountsSection({
         />
       )}
 
-      {ctxMenu &&
-        (() => {
-          const a = ctxMenu.account;
-          const desktopReason = !status.desktop_installed
-            ? "Claude Desktop not installed"
-            : !a.has_desktop_profile
-              ? "sign in via Desktop app first"
-              : a.is_desktop_active
-                ? "already active"
-                : undefined;
-          const cliReason = a.is_cli_active
-            ? "already active"
-            : !a.credentials_healthy
-              ? "credentials missing or corrupt"
-              : undefined;
-          const items: ContextMenuItem[] = [
-            {
-              label: "Copy email",
-              onClick: () => navigator.clipboard.writeText(a.email),
-            },
-            // UUID is an internal identifier — dev-mode only per
-            // design.md ("no internal identifiers in primary UI").
-            {
-              label: "Copy UUID",
-              devOnly: true,
-              onClick: () => navigator.clipboard.writeText(a.uuid),
-            },
-            { label: "", separator: true, onClick: () => {} },
-            {
-              label: a.is_cli_active ? "Active CLI" : "Set as CLI",
-              disabled: a.is_cli_active || !a.credentials_healthy,
-              disabledReason: cliReason,
-              onClick: () => guardedUseCli(a),
-            },
-            {
-              label: a.is_desktop_active
-                ? "Active Desktop"
-                : "Set as Desktop",
-              disabled:
-                a.is_desktop_active ||
-                !a.has_desktop_profile ||
-                !status.desktop_installed,
-              disabledReason: desktopReason,
-              onClick: () => handleDesktopSwitch(a),
-            },
-            {
-              label: "Set as Desktop (don't relaunch)",
-              disabled:
-                a.is_desktop_active ||
-                !a.has_desktop_profile ||
-                !status.desktop_installed,
-              disabledReason: desktopReason,
-              onClick: () => actions.useDesktop(a, true),
-            },
-            { label: "", separator: true, onClick: () => {} },
-            {
-              label: "Verify now",
-              disabled: !a.credentials_healthy,
-              disabledReason: !a.credentials_healthy
-                ? "no credentials to verify"
-                : undefined,
-              onClick: () => runVerifyAccount(a),
-            },
-            {
-              label: "Refresh usage",
-              onClick: () => {
-                if (a.credentials_healthy) refreshUsageFor(a.uuid);
-                else refreshUsage();
-              },
-            },
-            { label: "", separator: true, onClick: () => {} },
-            // Launch-CC-as needs a new-terminal-window spawn that varies
-            // per OS (osascript on mac, cmd /c start on win, xterm/alacritty
-            // on linux). Stub behind dev-mode until that Tauri surface lands;
-            // devs can use `claudepot cli run <email> claude` from a shell.
-            {
-              label: "Launch CC as…",
-              devOnly: true,
-              disabled: true,
-              disabledReason: "use `claudepot cli run` from your shell",
-              onClick: () => {},
-            },
-            { label: "", separator: true, onClick: () => {} },
-            {
-              label: "Log in again…",
-              disabled: busy.busyKeys.has(`re-${a.uuid}`),
-              disabledReason: busy.busyKeys.has(`re-${a.uuid}`)
-                ? "login in progress"
-                : undefined,
-              onClick: () => actions.login(a),
-            },
-            { label: "", separator: true, onClick: () => {} },
-            {
-              label: "Remove",
-              danger: true,
-              onClick: () => setConfirmRemove(a),
-            },
-          ];
-          return (
-            <ContextMenu
-              x={ctxMenu.x}
-              y={ctxMenu.y}
-              items={items}
-              onClose={closeCtxMenu}
-            />
-          );
-        })()}
+      {ctxMenu && (
+        <CtxMenuForAccount
+          menu={ctxMenu}
+          status={status}
+          busyKeys={busy.busyKeys}
+          onSwitchCli={guardedUseCli}
+          onSwitchDesktop={handleDesktopSwitch}
+          onSwitchDesktopNoLaunch={(a) => actions.useDesktop(a, true)}
+          onVerify={runVerifyAccount}
+          onRefreshUsageFor={(a) => refreshUsageFor(a.uuid)}
+          onRefreshUsageAll={refreshUsage}
+          onLogin={actions.login}
+          onRemove={setConfirmRemove}
+          onClose={closeCtxMenu}
+        />
+      )}
 
     </>
+  );
+}
+
+/**
+ * Small hook wrapper. The menu-item set is computed via
+ * `useAccountContextMenu` which can only run inside a component;
+ * splitting it out keeps the main `AccountsSection` under the LOC
+ * limit without adding a provider.
+ */
+function CtxMenuForAccount({
+  menu,
+  status,
+  busyKeys,
+  onSwitchCli,
+  onSwitchDesktop,
+  onSwitchDesktopNoLaunch,
+  onVerify,
+  onRefreshUsageFor,
+  onRefreshUsageAll,
+  onLogin,
+  onRemove,
+  onClose,
+}: {
+  menu: { x: number; y: number; account: AccountSummary };
+  status: AppStatus;
+  busyKeys: Set<string>;
+  onSwitchCli: (a: AccountSummary) => void;
+  onSwitchDesktop: (a: AccountSummary) => void;
+  onSwitchDesktopNoLaunch: (a: AccountSummary) => void;
+  onVerify: (a: AccountSummary) => void;
+  onRefreshUsageFor: (a: AccountSummary) => void;
+  onRefreshUsageAll: () => void;
+  onLogin: (a: AccountSummary) => void;
+  onRemove: (a: AccountSummary) => void;
+  onClose: () => void;
+}) {
+  const items = useAccountContextMenu({
+    account: menu.account,
+    status,
+    busyKeys,
+    onSwitchCli,
+    onSwitchDesktop,
+    onSwitchDesktopNoLaunch,
+    onVerify,
+    onRefreshUsageFor,
+    onRefreshUsageAll,
+    onLogin,
+    onRemove,
+  });
+  return (
+    <ContextMenu x={menu.x} y={menu.y} items={items} onClose={onClose} />
   );
 }
