@@ -3,6 +3,7 @@ import { PendingJournalsBanner } from "./components/PendingJournalsBanner";
 import { RunningOpStrip } from "./components/RunningOpStrip";
 import { StatusIssuesBanner } from "./components/StatusIssuesBanner";
 import { ToastContainer } from "./components/ToastContainer";
+import { SplitBrainConfirm } from "./sections/accounts/SplitBrainConfirm";
 import { sections, sectionIds } from "./sections/registry";
 import { AccountsSection } from "./sections/AccountsSection";
 import { ProjectsSection } from "./sections/ProjectsSection";
@@ -42,6 +43,11 @@ function AppShell() {
     pushToast,
     isDismissed,
     dismiss,
+    actions,
+    requestCliSwap,
+    splitBrainPending,
+    dismissSplitBrain,
+    confirmSplitBrain,
   } = useAppState();
   const { resolved: themeResolved, toggle: toggleTheme } = useTheme();
 
@@ -93,29 +99,28 @@ function AppShell() {
     async (target: "cli" | "desktop", uuid: string) => {
       const account = accounts.find((a) => a.uuid === uuid);
       if (!account) return;
-      try {
-        if (target === "cli") {
-          await api.cliUse(account.email, false);
-        } else {
-          await api.desktopUse(account.email, true);
-        }
-        await refreshAccounts();
-      } catch (e) {
-        pushToast("error", `${target === "cli" ? "CLI" : "Desktop"} swap failed: ${e}`);
+      // Route through the shared action helpers so sidebar binds pick
+      // up the same split-brain preflight, busy-keyring, toast queue,
+      // and tray-refresh that the Accounts page uses.
+      if (target === "cli") {
+        await requestCliSwap(account);
+      } else {
+        await actions.useDesktop(account, true);
       }
     },
-    [accounts, refreshAccounts, pushToast],
+    [accounts, actions, requestCliSwap],
   );
 
-  // Jump to Accounts and select a specific account row. Used by the
-  // status banner's drift / keychain actions to deep-link into the row
-  // the user needs to act on.
+  // Jump to Accounts and pass the UUID so the section can scroll to
+  // (or highlight) the flagged row. Deep-link plumbing is currently a
+  // section jump — AccountsSection subscribes to this event and owns
+  // the row-level focus.
   const onSelectAccount = useCallback(
-    (_uuid: string) => {
+    (uuid: string) => {
       setSection("accounts");
-      // Row-level focus is the responsibility of AccountsSection; for
-      // now we just jump to the section. A future scrollIntoView on
-      // the target card can hook off the uuid.
+      window.dispatchEvent(
+        new CustomEvent("cp-focus-account", { detail: uuid }),
+      );
     },
     [setSection],
   );
@@ -129,21 +134,16 @@ function AppShell() {
     }
   }, [pushToast, refreshAccounts]);
 
-  const onReloginActive = useCallback(async () => {
+  const onReloginActive = useCallback(() => {
     const active = accounts.find((a) => a.is_cli_active);
     if (!active) {
       pushToast("error", "No active CLI account to re-login.");
       return;
     }
-    try {
-      pushToast("info", `Opening browser — sign in as ${active.email}…`);
-      await api.accountLogin(active.uuid);
-      pushToast("info", `Signed in as ${active.email}`);
-      await refreshAccounts();
-    } catch (e) {
-      pushToast("error", `Login failed: ${e}`);
-    }
-  }, [accounts, pushToast, refreshAccounts]);
+    // Shared login helper owns the busy keyring, cancel affordance,
+    // and tray refresh — no reason to re-implement it inline.
+    void actions.login(active);
+  }, [accounts, actions, pushToast]);
 
   const rawIssues = useStatusIssues({
     ccIdentity,
@@ -290,6 +290,14 @@ function AppShell() {
             closeOp();
             setSection("projects", "repair");
           }}
+        />
+      )}
+
+      {splitBrainPending && (
+        <SplitBrainConfirm
+          account={splitBrainPending}
+          onCancel={dismissSplitBrain}
+          onConfirm={confirmSplitBrain}
         />
       )}
 
