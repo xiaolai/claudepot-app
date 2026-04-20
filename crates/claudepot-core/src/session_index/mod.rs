@@ -24,15 +24,20 @@
 //! transcript metadata are in scope though, so the DB file is chmod
 //! 0600 on Unix (matching `accounts.db`).
 
+mod codec;
 pub mod diff;
 pub mod error;
 pub mod schema;
 
 pub use error::SessionIndexError;
 
+use chrono::Utc;
+use rayon::prelude::*;
 use rusqlite::{params, Connection};
 use std::path::Path;
 use std::sync::{Mutex, MutexGuard};
+
+use crate::session::{scan_session, SessionRow};
 
 /// Handle to the persistent session index.
 ///
@@ -105,6 +110,96 @@ impl SessionIndex {
         let n: i64 = db.query_row("SELECT COUNT(*) FROM sessions", [], |r| r.get(0))?;
         Ok(n)
     }
+
+    /// Converge the cache with `<config_dir>/projects/`. Walks the
+    /// filesystem, diffs against the cache, re-scans only the files
+    /// whose `(size, mtime_ns)` moved, and applies the result in a
+    /// single SQLite transaction.
+    ///
+    /// Cold first run parses everything; subsequent runs cost one
+    /// `stat` per file plus a tiny SQL read. Errors on individual
+    /// transcripts are swallowed (matching `session::scan_session`'s
+    /// existing tolerance) so a single malformed JSONL never blocks
+    /// the whole index.
+    pub fn refresh(&self, config_dir: &Path) -> Result<RefreshStats, SessionIndexError> {
+        let started_at = std::time::Instant::now();
+        let fs_entries = codec::walk_fs(config_dir)?;
+
+        // Snapshot the DB side of the diff under a short-lived lock
+        // so the rayon scan that follows runs without holding it.
+        let db_tuples = {
+            let db = self.db();
+            codec::load_db_tuples(&db)?
+        };
+
+        let fs_tuples: Vec<diff::IndexTuple> =
+            fs_entries.iter().map(|e| e.tuple.clone()).collect();
+        let plan = diff::diff_fs_vs_db(&fs_tuples, &db_tuples);
+
+        // Build a `file_path -> &FsEntry` lookup so the upsert loop
+        // can recover the slug + absolute path for each scan.
+        let by_path: std::collections::HashMap<&str, &codec::FsEntry> = fs_entries
+            .iter()
+            .map(|e| (e.tuple.file_path.as_str(), e))
+            .collect();
+
+        // Parallel re-scan for the delta. Per-file errors land as
+        // `None` and get dropped — the file will be retried on the
+        // next refresh because its tuple is still absent/different.
+        let scanned: Vec<SessionRow> = plan
+            .to_upsert
+            .par_iter()
+            .filter_map(|path_key| {
+                by_path
+                    .get(path_key.as_str())
+                    .and_then(|entry| scan_session(&entry.slug, &entry.path).ok())
+            })
+            .collect();
+
+        // Single write transaction: upserts + deletes. If anything
+        // fails, nothing is committed and the cache stays consistent.
+        let indexed_at_ms = Utc::now().timestamp_millis();
+        let mut db = self.db();
+        let tx = db.transaction()?;
+        let scanned_count = scanned.len();
+        for row in &scanned {
+            codec::upsert_row(&tx, row, indexed_at_ms)?;
+        }
+        for gone in &plan.to_delete {
+            codec::delete_row(&tx, gone)?;
+        }
+        tx.commit()?;
+
+        Ok(RefreshStats {
+            scanned: scanned_count,
+            deleted: plan.to_delete.len(),
+            total_on_disk: fs_entries.len(),
+            elapsed: started_at.elapsed(),
+        })
+    }
+
+    /// Refresh the cache against `config_dir` and return every row,
+    /// newest-first. This is the replacement for
+    /// `session::list_all_sessions` — same output contract, but the
+    /// fold cost is paid only on the delta.
+    pub fn list_all(&self, config_dir: &Path) -> Result<Vec<SessionRow>, SessionIndexError> {
+        self.refresh(config_dir)?;
+        let db = self.db();
+        codec::load_all_rows(&db)
+    }
+}
+
+/// Summary of a single `refresh` call. Exposed for diagnostics and
+/// future progress-UI integration; not wired to the frontend yet.
+#[derive(Debug, Clone, Default)]
+pub struct RefreshStats {
+    /// Number of transcripts that were (re-)parsed this pass.
+    pub scanned: usize,
+    /// Number of cache rows removed because the file vanished on disk.
+    pub deleted: usize,
+    /// Number of transcripts visible on disk after the walk.
+    pub total_on_disk: usize,
+    pub elapsed: std::time::Duration,
 }
 
 fn apply_schema(db: &Connection) -> Result<(), SessionIndexError> {
@@ -119,7 +214,39 @@ fn apply_schema(db: &Connection) -> Result<(), SessionIndexError> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::io::Write;
+    use std::path::PathBuf;
     use tempfile::TempDir;
+
+    // A single well-formed user/assistant pair. Reused across several
+    // tests so the scan produces a predictable SessionRow shape.
+    fn sample_lines(cwd: &str, session_id: &str) -> Vec<String> {
+        vec![
+            format!(
+                r#"{{"type":"user","message":{{"role":"user","content":"hi"}},"timestamp":"2026-04-10T10:00:00Z","cwd":"{cwd}","sessionId":"{session_id}"}}"#
+            ),
+            format!(
+                r#"{{"type":"assistant","message":{{"role":"assistant","model":"claude-opus-4-7","content":[{{"type":"text","text":"hey"}}],"usage":{{"input_tokens":1,"output_tokens":1}}}},"timestamp":"2026-04-10T10:00:01Z","cwd":"{cwd}","sessionId":"{session_id}"}}"#
+            ),
+        ]
+    }
+
+    fn write_session(cfg: &std::path::Path, slug: &str, id: &str, lines: &[String]) -> PathBuf {
+        let dir = cfg.join("projects").join(slug);
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join(format!("{id}.jsonl"));
+        let mut f = std::fs::File::create(&path).unwrap();
+        for l in lines {
+            writeln!(f, "{l}").unwrap();
+        }
+        path
+    }
+
+    fn open_index() -> (SessionIndex, TempDir) {
+        let tmp = TempDir::new().unwrap();
+        let idx = SessionIndex::open(&tmp.path().join("sessions.db")).unwrap();
+        (idx, tmp)
+    }
 
     #[test]
     fn open_creates_file_and_tables() {
@@ -174,5 +301,194 @@ mod tests {
             .unwrap();
         assert!(names.contains(&"meta".to_string()));
         assert!(names.contains(&"sessions".to_string()));
+    }
+
+    // -----------------------------------------------------------------
+    // refresh() tests
+    // -----------------------------------------------------------------
+
+    #[test]
+    fn refresh_empty_projects_dir_is_noop() {
+        let (idx, _tmp) = open_index();
+        let cfg = TempDir::new().unwrap();
+        let stats = idx.refresh(cfg.path()).unwrap();
+        assert_eq!(stats.scanned, 0);
+        assert_eq!(stats.deleted, 0);
+        assert_eq!(stats.total_on_disk, 0);
+        assert_eq!(idx.row_count().unwrap(), 0);
+    }
+
+    #[test]
+    fn refresh_cold_parses_all_files() {
+        let (idx, _tmp) = open_index();
+        let cfg = TempDir::new().unwrap();
+        let path_a = write_session(cfg.path(), "-a", "S1", &sample_lines("/a", "S1"));
+        let path_b = write_session(cfg.path(), "-b", "S2", &sample_lines("/b", "S2"));
+
+        let stats = idx.refresh(cfg.path()).unwrap();
+        assert_eq!(stats.scanned, 2);
+        assert_eq!(stats.deleted, 0);
+        assert_eq!(stats.total_on_disk, 2);
+        assert_eq!(idx.row_count().unwrap(), 2);
+
+        // Verify one row round-tripped correctly.
+        let db = idx.db();
+        let row = codec::get_row_by_path(&db, &path_a.to_string_lossy())
+            .unwrap()
+            .expect("row a should be cached");
+        assert_eq!(row.session_id, "S1");
+        assert_eq!(row.project_path, "/a");
+        assert_eq!(row.user_message_count, 1);
+        assert_eq!(row.assistant_message_count, 1);
+        drop(db);
+
+        let db = idx.db();
+        let row = codec::get_row_by_path(&db, &path_b.to_string_lossy())
+            .unwrap()
+            .expect("row b should be cached");
+        assert_eq!(row.session_id, "S2");
+    }
+
+    #[test]
+    fn refresh_warm_is_a_noop() {
+        let (idx, _tmp) = open_index();
+        let cfg = TempDir::new().unwrap();
+        write_session(cfg.path(), "-a", "S1", &sample_lines("/a", "S1"));
+        idx.refresh(cfg.path()).unwrap();
+
+        let stats = idx.refresh(cfg.path()).unwrap();
+        assert_eq!(stats.scanned, 0, "warm refresh must not re-scan");
+        assert_eq!(stats.deleted, 0);
+        assert_eq!(stats.total_on_disk, 1);
+        assert_eq!(idx.row_count().unwrap(), 1);
+    }
+
+    #[test]
+    fn refresh_rescans_when_mtime_changes() {
+        let (idx, _tmp) = open_index();
+        let cfg = TempDir::new().unwrap();
+        let path = write_session(cfg.path(), "-a", "S1", &sample_lines("/a", "S1"));
+        idx.refresh(cfg.path()).unwrap();
+
+        // Append a new user line. Different size AND mtime, so the
+        // guard trips either way.
+        let extra = format!(
+            r#"{{"type":"user","message":{{"role":"user","content":"second turn"}},"timestamp":"2026-04-10T10:01:00Z","cwd":"/a","sessionId":"S1"}}"#
+        );
+        let mut f = std::fs::OpenOptions::new()
+            .append(true)
+            .open(&path)
+            .unwrap();
+        writeln!(f, "{extra}").unwrap();
+        drop(f);
+
+        let stats = idx.refresh(cfg.path()).unwrap();
+        assert_eq!(stats.scanned, 1);
+        assert_eq!(stats.deleted, 0);
+
+        let db = idx.db();
+        let row = codec::get_row_by_path(&db, &path.to_string_lossy())
+            .unwrap()
+            .unwrap();
+        assert_eq!(row.user_message_count, 2, "second turn must be visible");
+    }
+
+    #[test]
+    fn refresh_deletes_rows_for_missing_files() {
+        let (idx, _tmp) = open_index();
+        let cfg = TempDir::new().unwrap();
+        let path = write_session(cfg.path(), "-a", "S1", &sample_lines("/a", "S1"));
+        idx.refresh(cfg.path()).unwrap();
+        assert_eq!(idx.row_count().unwrap(), 1);
+
+        std::fs::remove_file(&path).unwrap();
+        let stats = idx.refresh(cfg.path()).unwrap();
+        assert_eq!(stats.scanned, 0);
+        assert_eq!(stats.deleted, 1);
+        assert_eq!(idx.row_count().unwrap(), 0);
+    }
+
+    #[test]
+    fn refresh_tolerates_malformed_jsonl() {
+        let (idx, _tmp) = open_index();
+        let cfg = TempDir::new().unwrap();
+        // One good file, one with junk lines. Neither should abort.
+        write_session(cfg.path(), "-a", "S1", &sample_lines("/a", "S1"));
+        let bad = vec!["{garbage".to_string(), "also bad".to_string()];
+        write_session(cfg.path(), "-b", "S2", &bad);
+
+        let stats = idx.refresh(cfg.path()).unwrap();
+        // Malformed lines still count as events; the scan succeeds.
+        assert_eq!(stats.scanned, 2);
+        assert_eq!(idx.row_count().unwrap(), 2);
+    }
+
+    // -----------------------------------------------------------------
+    // list_all() tests
+    // -----------------------------------------------------------------
+
+    #[test]
+    fn list_all_returns_newest_first() {
+        let (idx, _tmp) = open_index();
+        let cfg = TempDir::new().unwrap();
+        // S1 at 2026-04-01, S2 at 2026-04-20 — S2 should come first.
+        let older = format!(
+            r#"{{"type":"user","message":{{"role":"user","content":"old"}},"timestamp":"2026-04-01T00:00:00Z","cwd":"/a","sessionId":"S1"}}"#
+        );
+        let newer = format!(
+            r#"{{"type":"user","message":{{"role":"user","content":"new"}},"timestamp":"2026-04-20T00:00:00Z","cwd":"/b","sessionId":"S2"}}"#
+        );
+        write_session(cfg.path(), "-a", "S1", &vec![older]);
+        write_session(cfg.path(), "-b", "S2", &vec![newer]);
+
+        let rows = idx.list_all(cfg.path()).unwrap();
+        assert_eq!(rows.len(), 2);
+        assert_eq!(rows[0].session_id, "S2");
+        assert_eq!(rows[1].session_id, "S1");
+    }
+
+    #[test]
+    fn list_all_round_trips_all_row_fields() {
+        let (idx, _tmp) = open_index();
+        let cfg = TempDir::new().unwrap();
+        let user = r#"{"type":"user","message":{"role":"user","content":"Fix the build"},"timestamp":"2026-04-10T10:00:00Z","cwd":"/repo/foo","gitBranch":"main","version":"2.1.97","sessionId":"AAA","slug":"brave-otter"}"#;
+        let asst = r#"{"type":"assistant","message":{"role":"assistant","model":"claude-opus-4-7","content":[{"type":"text","text":"OK"}],"usage":{"input_tokens":100,"output_tokens":50,"cache_creation_input_tokens":10,"cache_read_input_tokens":200}},"timestamp":"2026-04-10T10:00:05Z","cwd":"/repo/foo","sessionId":"AAA"}"#;
+        write_session(
+            cfg.path(),
+            "-repo-foo",
+            "AAA",
+            &vec![user.to_string(), asst.to_string()],
+        );
+
+        let rows = idx.list_all(cfg.path()).unwrap();
+        assert_eq!(rows.len(), 1);
+        let r = &rows[0];
+        assert_eq!(r.session_id, "AAA");
+        assert_eq!(r.project_path, "/repo/foo");
+        assert!(r.project_from_transcript);
+        assert_eq!(r.first_user_prompt.as_deref(), Some("Fix the build"));
+        assert_eq!(r.models, vec!["claude-opus-4-7".to_string()]);
+        assert_eq!(r.tokens.input, 100);
+        assert_eq!(r.tokens.output, 50);
+        assert_eq!(r.tokens.cache_creation, 10);
+        assert_eq!(r.tokens.cache_read, 200);
+        assert_eq!(r.git_branch.as_deref(), Some("main"));
+        assert_eq!(r.cc_version.as_deref(), Some("2.1.97"));
+        assert_eq!(r.display_slug.as_deref(), Some("brave-otter"));
+        assert!(r.last_modified.is_some(), "mtime round-trips");
+    }
+
+    #[test]
+    fn refresh_handles_second_file_after_initial_cache() {
+        let (idx, _tmp) = open_index();
+        let cfg = TempDir::new().unwrap();
+        write_session(cfg.path(), "-a", "S1", &sample_lines("/a", "S1"));
+        idx.refresh(cfg.path()).unwrap();
+
+        write_session(cfg.path(), "-b", "S2", &sample_lines("/b", "S2"));
+        let stats = idx.refresh(cfg.path()).unwrap();
+        assert_eq!(stats.scanned, 1, "only the new file re-scans");
+        assert_eq!(stats.deleted, 0);
+        assert_eq!(idx.row_count().unwrap(), 2);
     }
 }
