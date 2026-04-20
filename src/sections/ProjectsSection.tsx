@@ -2,10 +2,12 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { api } from "../api";
 import { useOperations } from "../hooks/useOperations";
 import { useGlobalShortcuts } from "../hooks/useGlobalShortcuts";
+import { useCompactHeader } from "../hooks/useWindowWidth";
 import type { MoveArgs, OrphanedProject, ProjectInfo } from "../types";
 import { ContextMenu, type ContextMenuItem } from "../components/ContextMenu";
 import { Button } from "../components/primitives/Button";
 import { Glyph } from "../components/primitives/Glyph";
+import { IconButton } from "../components/primitives/IconButton";
 import { Input } from "../components/primitives/Input";
 import { NF } from "../icons";
 import { ScreenHeader } from "../shell/ScreenHeader";
@@ -156,6 +158,8 @@ export function ProjectsSection({
     );
   }
 
+  const compact = useCompactHeader();
+
   const subtitle = (() => {
     const n = projects.length;
     if (n === 0) return "~/.claude/projects is empty.";
@@ -176,26 +180,43 @@ export function ProjectsSection({
         title="Projects"
         subtitle={subtitle}
         actions={
-          <>
-            <Button
-              variant="ghost"
-              glyph={NF.wrench}
-              glyphColor="var(--fg-muted)"
-              onClick={() => onSubRouteChange("maintenance")}
-              title="Maintenance: clean + repair"
-            >
-              Maintenance
-            </Button>
-            <Button
-              variant="ghost"
-              glyph={NF.refresh}
-              glyphColor="var(--fg-muted)"
-              onClick={refresh}
-              title="Refresh (⌘R)"
-            >
-              Refresh
-            </Button>
-          </>
+          compact ? (
+            <>
+              <IconButton
+                glyph={NF.wrench}
+                onClick={() => onSubRouteChange("maintenance")}
+                title="Maintenance — clean + repair"
+                aria-label="Maintenance"
+              />
+              <IconButton
+                glyph={NF.refresh}
+                onClick={refresh}
+                title="Refresh (⌘R)"
+                aria-label="Refresh projects"
+              />
+            </>
+          ) : (
+            <>
+              <Button
+                variant="ghost"
+                glyph={NF.wrench}
+                glyphColor="var(--fg-muted)"
+                onClick={() => onSubRouteChange("maintenance")}
+                title="Maintenance: clean + repair"
+              >
+                Maintenance
+              </Button>
+              <Button
+                variant="ghost"
+                glyph={NF.refresh}
+                glyphColor="var(--fg-muted)"
+                onClick={refresh}
+                title="Refresh (⌘R)"
+              >
+                Refresh
+              </Button>
+            </>
+          )
         }
       />
 

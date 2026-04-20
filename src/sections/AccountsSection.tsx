@@ -3,10 +3,12 @@ import type { AccountSummary } from "../types";
 import { useUsage } from "../hooks/useUsage";
 import { useTauriEvent } from "../hooks/useTauriEvent";
 import { useGlobalShortcuts } from "../hooks/useGlobalShortcuts";
+import { useCompactHeader } from "../hooks/useWindowWidth";
 import { useAppState } from "../providers/AppStateProvider";
 import { CommandPalette } from "../components/CommandPalette";
 import { ConfirmDialog } from "../components/ConfirmDialog";
 import { Button } from "../components/primitives/Button";
+import { IconButton } from "../components/primitives/IconButton";
 import { NF } from "../icons";
 import { ScreenHeader } from "../shell/ScreenHeader";
 import { AccountsGrid } from "./accounts/AccountsGrid";
@@ -38,6 +40,7 @@ export function AccountsSection({
     requestCliSwap,
   } = useAppState();
   const { usage, refreshUsage, refreshUsageFor } = useUsage();
+  const compact = useCompactHeader();
 
   const [showAdd, setShowAdd] = useState(false);
   const [confirmRemove, setConfirmRemove] = useState<AccountSummary | null>(
@@ -205,36 +208,64 @@ export function AccountsSection({
         subtitle={<HealthChips accounts={accounts} />}
         actions={
           <>
-            <Button
-              variant="ghost"
-              glyph={NF.shield}
-              glyphColor="var(--fg-muted)"
-              onClick={runVerifyAll}
-              title="Verify every account against /profile"
-            >
-              Verify all
-            </Button>
-            <Button
-              variant="ghost"
-              glyph={NF.refresh}
-              glyphColor="var(--fg-muted)"
-              onClick={() => {
-                refresh();
-                refreshUsage();
-              }}
-              title="Refresh (⌘R)"
-            >
-              Refresh usage
-            </Button>
-            <Button
-              variant="ghost"
-              glyph={NF.unlock}
-              glyphColor="var(--fg-muted)"
-              onClick={() => setConfirmClear(true)}
-              title="Clear Claude Code's stored credentials"
-            >
-              Sign out CC
-            </Button>
+            {compact ? (
+              <>
+                <IconButton
+                  glyph={NF.shield}
+                  onClick={runVerifyAll}
+                  title="Verify all — check every account against /profile"
+                  aria-label="Verify all accounts"
+                />
+                <IconButton
+                  glyph={NF.refresh}
+                  onClick={() => {
+                    refresh();
+                    refreshUsage();
+                  }}
+                  title="Refresh usage (⌘R)"
+                  aria-label="Refresh usage"
+                />
+                <IconButton
+                  glyph={NF.unlock}
+                  onClick={() => setConfirmClear(true)}
+                  title="Sign out of Claude Code — clear its stored credentials"
+                  aria-label="Sign out of Claude Code"
+                />
+              </>
+            ) : (
+              <>
+                <Button
+                  variant="ghost"
+                  glyph={NF.shield}
+                  glyphColor="var(--fg-muted)"
+                  onClick={runVerifyAll}
+                  title="Verify every account against /profile"
+                >
+                  Verify all
+                </Button>
+                <Button
+                  variant="ghost"
+                  glyph={NF.refresh}
+                  glyphColor="var(--fg-muted)"
+                  onClick={() => {
+                    refresh();
+                    refreshUsage();
+                  }}
+                  title="Refresh (⌘R)"
+                >
+                  Refresh usage
+                </Button>
+                <Button
+                  variant="ghost"
+                  glyph={NF.unlock}
+                  glyphColor="var(--fg-muted)"
+                  onClick={() => setConfirmClear(true)}
+                  title="Clear Claude Code's stored credentials"
+                >
+                  Sign out CC
+                </Button>
+              </>
+            )}
             <Button
               variant="solid"
               glyph={NF.plus}
