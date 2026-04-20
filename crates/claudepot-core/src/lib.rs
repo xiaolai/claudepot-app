@@ -28,6 +28,7 @@ pub mod protected_paths;
 pub mod resolve;
 pub mod services;
 pub mod session;
+pub mod session_index;
 pub mod session_move;
 pub mod session_move_helpers;
 pub mod session_move_jsonl;
