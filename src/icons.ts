@@ -68,3 +68,107 @@ export const ICONS = {
 } as const;
 
 export type IconName = keyof typeof ICONS;
+
+/**
+ * Paper-mono Nerd Font map — the camelCase surface used by the
+ * new primitives (`Glyph`, `SidebarItem`, `Button`, etc.). Superset
+ * of the kebab-case `ICONS` map above; new code should reach for
+ * `NF.xxx` directly.
+ */
+export const NF = {
+  // --- nav
+  dashboard:  "\uf0e4",
+  folder:     "\uf07b",
+  folderOpen: "\uf07c",
+  chat:       "\uf075",
+  chatAlt:    "\uf4ad",
+  settings:   "\uf013",
+  sliders:    "\uf1de",
+  user:       "\uf007",
+  users:      "\uf0c0",
+  key:        "\uf084",
+  terminal:   "\uf120",
+  book:       "\uf02d",
+  server:     "\uf233",
+  tools:      "\uf7d9",
+  package:    "\uf487",
+  git:        "\ue702",
+
+  // --- actions
+  search:     "\uf002",
+  plus:       "\uf067",
+  minus:      "\uf068",
+  x:          "\uf00d",
+  check:      "\uf00c",
+  chevronR:   "\uf054",
+  chevronD:   "\uf078",
+  chevronL:   "\uf053",
+  chevronU:   "\uf077",
+  ellipsis:   "\uf141",
+  arrowR:     "\uf061",
+  arrowUpR:   "\uf08e",
+  copy:       "\uf0c5",
+  trash:      "\uf1f8",
+  edit:       "\uf044",
+  refresh:    "\uf021",
+  download:   "\uf019",
+  upload:     "\uf093",
+
+  // --- status
+  dot:        "\uf111",
+  dotCircle:  "\uf192",
+  circle:     "\uf10c",
+  star:       "\uf005",
+  starO:      "\uf006",
+  pin:        "\uf08d",
+  lock:       "\uf023",
+  unlock:     "\uf09c",
+  eye:        "\uf06e",
+  eyeSlash:   "\uf070",
+  warn:       "\uf071",
+  info:       "\uf05a",
+  bolt:       "\uf0e7",
+  clock:      "\uf017",
+  calendar:   "\uf073",
+
+  // --- files
+  file:       "\uf15b",
+  fileCode:   "\uf1c9",
+  fileText:   "\uf15c",
+  fileMd:     "\ue73e",
+  fileJson:   "\ue60b",
+  fileJs:     "\ue781",
+  fileTs:     "\ue628",
+  filePy:     "\ue73c",
+  fileRs:     "\ue7a8",
+  fileGo:     "\ue626",
+
+  // --- theme
+  sun:        "\uf185",
+  moon:       "\uf186",
+
+  // --- misc
+  home:       "\uf015",
+  inbox:      "\uf01c",
+  archive:    "\uf187",
+  filter:     "\uf0b0",
+  sort:       "\uf0dc",
+  tag:        "\uf02b",
+  tags:       "\uf02c",
+  link:       "\uf0c1",
+  grip:       "\uf58e",
+  layers:     "\uf5fd",
+  zap:        "\uf0e7",
+  cpu:        "\uf85a",
+  globe:      "\uf0ac",
+  api:        "\uf085",
+  branch:     "\ue725",
+  signIn:     "\uf090",
+  signOut:    "\uf08b",
+  wrench:     "\uf0ad",
+  shield:     "\uf132",
+  userPlus:   "\uf234",
+} as const;
+
+export type NfGlyph = (typeof NF)[keyof typeof NF];
+

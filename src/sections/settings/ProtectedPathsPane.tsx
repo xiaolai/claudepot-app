@@ -12,9 +12,9 @@ interface Props {
  *
  * Renders the materialized list (defaults minus tombstones, then user
  * additions). Add/remove/reset are immediate; errors surface inline
- * (per `feedback-ladder.md` — invalid input is a local error, not a
- * toast). Successful reset uses a toast because it's a global state
- * change the user will want to confirm landed.
+ * (per the feedback ladder in `design-patterns.md` — invalid input is
+ * a local error, not a toast). Successful reset uses a toast because
+ * it's a global state change the user will want to confirm landed.
  */
 export function ProtectedPathsPane({ pushToast }: Props) {
   const [items, setItems] = useState<ProtectedPath[]>([]);

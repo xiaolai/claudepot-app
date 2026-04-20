@@ -1,0 +1,474 @@
+/* ─────────────────────────────────────────────────────────────────────────
+   claudepot — paper-mono design tokens
+   Single source of truth. Every color, size, shadow, duration, and
+   dimension in a component comes from a variable below.
+
+   Hard rule: components must not contain raw hex / rgb / hsl / oklch
+   literals, raw pixel numbers on style properties, or raw ms / easing
+   literals. See `.claude/rules/no-raw-values.md`.
+   ───────────────────────────────────────────────────────────────────────── */
+
+/* ── Fonts — JetBrains Mono Nerd Font Mono ────────────────── */
+@font-face {
+  font-family: 'JetBrainsMonoNF';
+  src: url('/fonts/JetBrainsMonoNerdFontMono-Regular.woff2') format('woff2');
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+}
+@font-face {
+  font-family: 'JetBrainsMonoNF';
+  src: url('/fonts/JetBrainsMonoNerdFontMono-Medium.woff2') format('woff2');
+  font-weight: 500;
+  font-style: normal;
+  font-display: swap;
+}
+@font-face {
+  font-family: 'JetBrainsMonoNF';
+  src: url('/fonts/JetBrainsMonoNerdFontMono-SemiBold.woff2') format('woff2');
+  font-weight: 600;
+  font-style: normal;
+  font-display: swap;
+}
+@font-face {
+  font-family: 'JetBrainsMonoNF';
+  src: url('/fonts/JetBrainsMonoNerdFontMono-Bold.woff2') format('woff2');
+  font-weight: 700;
+  font-style: normal;
+  font-display: swap;
+}
+
+:root {
+  /* ── Claude accent (terracotta) ─────────────────────────── */
+  --accent:        oklch(68% 0.13 45);
+  --accent-soft:   oklch(68% 0.13 45 / 0.12);
+  --accent-border: oklch(68% 0.13 45 / 0.28);
+  --accent-ink:    oklch(42% 0.10 45);
+
+  /* ── Semantic (used sparingly) ──────────────────────────── */
+  --ok:     oklch(62% 0.10 150);
+  --warn:   oklch(72% 0.12 80);
+  --danger: oklch(60% 0.14 25);
+
+  /* ── "On color" text — white in both themes, for use as the
+        foreground on filled accent / danger surfaces where the
+        theme-sensitive --fg would fail contrast ─────────────── */
+  --on-color: oklch(100% 0 0);
+
+  /* ── Avatar derivation — used by avatarColorFor(seed) to
+        produce a deterministic per-user color. The L/C values
+        sit close to the accent's chroma so the palette stays
+        cohesive across many accounts. ────────────────────────── */
+  --avatar-derived-l: 62%;
+  --avatar-derived-c: 0.12;
+
+  /* ── Pixel scale (every raw px value the UI uses) ─────────
+        Naming: `--sp-N` where N is the px value. Components
+        reference these instead of inline numeric literals. */
+  --sp-0:    0;
+  --sp-px:   1px;
+  --sp-half: 2px;
+  --sp-1:    1px;
+  --sp-2:    2px;
+  --sp-3:    3px;
+  --sp-4:    4px;
+  --sp-5:    5px;
+  --sp-6:    6px;
+  --sp-7:    7px;
+  --sp-8:    8px;
+  --sp-9:    9px;
+  --sp-10:   10px;
+  --sp-11:   11px;
+  --sp-12:   12px;
+  --sp-13:   13px;
+  --sp-14:   14px;
+  --sp-16:   16px;
+  --sp-17:   17px;
+  --sp-18:   18px;
+  --sp-20:   20px;
+  --sp-22:   22px;
+  --sp-24:   24px;
+  --sp-26:   26px;
+  --sp-28:   28px;
+  --sp-30:   30px;
+  --sp-32:   32px;
+  --sp-36:   36px;
+  --sp-38:   38px;
+  --sp-40:   40px;
+  --sp-44:   44px;
+  --sp-48:   48px;
+  --sp-50:   50px;
+  --sp-60:   60px;
+  --sp-64:   64px;
+  --sp-72:   72px;
+  --sp-80:   80px;
+
+  /* ── 4px-grid shortcuts — for recipes that prefer grid-step
+        naming. These alias the --sp-N scale. ─────────────────── */
+  --s-0:  var(--sp-0);
+  --s-1:  var(--sp-4);
+  --s-2:  var(--sp-8);
+  --s-3:  var(--sp-12);
+  --s-4:  var(--sp-16);
+  --s-5:  var(--sp-20);
+  --s-6:  var(--sp-24);
+  --s-8:  var(--sp-32);
+  --s-10: var(--sp-40);
+  --s-12: var(--sp-48);
+  --s-16: var(--sp-64);
+
+  /* ── Type scale (all mono) ──────────────────────────────── */
+  --fs-4xs:  8px;   /* dot glyph, finest decoration */
+  --fs-3xs:  9px;   /* badge glyphs, breadcrumb chevrons */
+  --fs-2xs:  10px;  /* Kbd, mono-cap labels, statusbar counts */
+  --fs-xs:   11px;  /* meta, statusbar items */
+  --fs-sm:   12px;  /* dense body, button text */
+  --fs-base: 13px;  /* body, list rows */
+  --fs-md:   14px;  /* emphasis, card glyphs, anomaly banner */
+  --fs-md-lg:15px;  /* screen sub-emphasis (reserved) */
+  --fs-lg:   18px;  /* section titles */
+  --fs-xl:   22px;  /* screen titles */
+  --fs-2xl:  28px;  /* hero */
+
+  /* ── Line heights ───────────────────────────────────────── */
+  --lh-flat:  1;      /* icons, badges, glyph cells */
+  --lh-tight: 1.25;
+  --lh-body:  1.5;
+  --lh-loose: 1.7;
+
+  /* ── Letter spacing ─────────────────────────────────────── */
+  --ls-tight:  -0.01em;
+  --ls-normal:  0;
+  --ls-wide:    0.08em;
+  --ls-wider:   0.14em;
+
+  /* ── Radii (small — mono reads flatter) ─────────────────── */
+  --r-0:    0;
+  --r-1:    3px;
+  --r-2:    6px;
+  --r-3:    10px;
+  --r-pill: 999px;
+
+  /* ── Border widths ──────────────────────────────────────── */
+  --bw-hair:   1px;    /* every hairline border / divider */
+  --bw-kbd:    1.5px;  /* Kbd "pressed-key" bottom border */
+  --bw-strong: 2px;    /* active-state left border on rows/nav */
+  --bw-accent: 3px;    /* accent bar on selected cards */
+
+  /* ── Opacity steps ──────────────────────────────────────── */
+  --opacity-disabled: 0.45;
+  --opacity-dimmed:   0.68;  /* known/already-managed rows */
+  --opacity-quiet:    0.7;   /* secondary previews */
+  --opacity-segbar:   0.6;   /* empty segments in usage bars */
+
+  /* ── Z-index layers ─────────────────────────────────────── */
+  --z-sticky:  1;   /* table headers that pin under chrome */
+  --z-popover: 40;
+  --z-strip:   50;
+  --z-toast:   100;
+  --z-modal:   200;
+
+  /* ── Sub-pixel transform offset (Button press) ──────────── */
+  --press-shift: 0.5px;
+
+  /* ── Component dimensions — semantic, not on the sp scale
+        because the element is what it is (240px sidebar,
+        38px chrome, 36px big avatar). ─────────────────────── */
+  --chrome-height:         38px;
+  --statusbar-height:      24px;
+  --sidebar-width:         240px;
+  --settings-nav-width:    200px;
+  --project-detail-width:  420px;
+  --palette-width:         580px;
+  --modal-width-sm:        440px;
+  --modal-width-md:        480px;
+  --modal-width-lg:        520px;
+  --content-cap-sm:        400px;
+  --content-cap-md:        640px;
+  --filter-input-width:    300px;
+  --banner-min-width:      180px;
+
+  --row-height:            28px;
+  --row-height-tall:       32px;
+  --input-height:          32px;
+  --btn-h-sm:              24px;
+  --btn-h-md:              30px;
+  --btn-h-lg:              36px;
+  --icon-btn-sm:           22px;
+  --icon-btn-md:           28px;
+  --icon-btn-lg:           32px;
+
+  --avatar-2xs:            14px;
+  --avatar-xs:             18px;
+  --avatar-sm:             20px;
+  --avatar-md:             22px;
+  --avatar-lg:             28px;
+  --avatar-xl:             36px;
+
+  /* Avatar initial font size — half the avatar dimension. */
+  --avatar-initial-2xs:    7px;
+  --avatar-initial-xs:     9px;
+  --avatar-initial-sm:     10px;
+  --avatar-initial-md:     11px;
+  --avatar-initial-lg:     14px;
+  --avatar-initial-xl:     18px;
+
+  --kbd-min-w:             18px;
+  --kbd-h:                 18px;
+
+  /* Settings row label column. */
+  --settings-label-col:    160px;
+  --settings-kv-col:       140px;
+
+  /* Toggle switch (Settings → General → Developer mode). */
+  --toggle-track-w:        36px;
+  --toggle-track-h:        20px;
+  --toggle-thumb-d:        16px;
+  --toggle-thumb-off:      1px;
+  --toggle-thumb-on:       17px;
+
+  /* Left padding on WindowChrome to clear the native traffic lights. */
+  --chrome-inset-left:     80px;
+
+  /* ── Durations ──────────────────────────────────────────── */
+  --dur-fast:    80ms;
+  --dur-base:    120ms;
+  --dur-slow:    240ms;
+  --dur-hover:   100ms;  /* AccountCard / ActionCard hover crossfade */
+
+  /* ── Easings ────────────────────────────────────────────── */
+  --ease-linear: linear;
+  --ease-out:    cubic-bezier(0.2, 0.8, 0.2, 1);
+  --ease-in-out: cubic-bezier(0.4, 0, 0.2, 1);
+  --ease-in:     cubic-bezier(0.4, 0, 1, 1);
+
+  /* ── Backdrop blur ──────────────────────────────────────── */
+  --backdrop-blur-sm: 2px;
+  --backdrop-blur-md: 3px;
+
+  /* ── Glyph vertical-align shift (NF Mono baseline metric) ── */
+  --glyph-baseline-shift: -0.08em;
+
+  /* ── Font stack ─────────────────────────────────────────── */
+  --font:      'JetBrainsMonoNF', 'JetBrains Mono', ui-monospace, Menlo, monospace;
+  --font-mono: var(--font);
+}
+
+/* ── LIGHT (warm paper) — default ─────────────────────────── */
+:root,
+[data-theme="light"] {
+  --bg:          oklch(99% 0.003 60);
+  --bg-raised:   oklch(100% 0 0);
+  --bg-sunken:   oklch(97% 0.004 60);
+  --bg-hover:    oklch(95% 0.005 60);
+  --bg-active:   oklch(93% 0.008 60);
+
+  --fg:          oklch(22% 0.008 60);
+  --fg-muted:    oklch(50% 0.008 60);
+  --fg-faint:    oklch(65% 0.006 60);
+  --fg-ghost:    oklch(78% 0.004 60);
+
+  --line:        oklch(92% 0.005 60);
+  --line-strong: oklch(85% 0.006 60);
+
+  --scrim:       oklch(30% 0.01 60 / 0.28);
+
+  --shadow-sm: 0 1px 0 oklch(0% 0 0 / 0.02);
+  --shadow-md: 0 2px 8px oklch(0% 0 0 / 0.04);
+
+  /* Composed elevation — named by surface role */
+  --shadow-popover:  0 10px 30px oklch(0% 0 0 / 0.15);
+  --shadow-modal:    0 16px 48px oklch(0% 0 0 / 0.18),
+                     0 2px 8px   oklch(0% 0 0 / 0.08);
+  --shadow-thumb:    0 1px 2px   oklch(0% 0 0 / 0.20);
+  --shadow-overlay:  0 20px 60px oklch(0% 0 0 / 0.20);
+}
+
+/* ── DARK (ink paper) ─────────────────────────────────────── */
+[data-theme="dark"] {
+  --bg:          oklch(16% 0.006 60);
+  --bg-raised:   oklch(19% 0.006 60);
+  --bg-sunken:   oklch(13% 0.005 60);
+  --bg-hover:    oklch(23% 0.007 60);
+  --bg-active:   oklch(27% 0.008 60);
+
+  --fg:          oklch(92% 0.006 60);
+  --fg-muted:    oklch(70% 0.008 60);
+  --fg-faint:    oklch(55% 0.008 60);
+  --fg-ghost:    oklch(40% 0.006 60);
+
+  --line:        oklch(26% 0.008 60);
+  --line-strong: oklch(34% 0.010 60);
+
+  --scrim:       oklch(0% 0 0 / 0.55);
+
+  --accent:        oklch(74% 0.13 45);
+  --accent-soft:   oklch(74% 0.13 45 / 0.16);
+  --accent-border: oklch(74% 0.13 45 / 0.35);
+  --accent-ink:    oklch(80% 0.12 45);
+
+  --shadow-sm: 0 1px 0 oklch(0% 0 0 / 0.2);
+  --shadow-md: 0 2px 8px oklch(0% 0 0 / 0.3);
+
+  --shadow-popover:  0 10px 30px oklch(0% 0 0 / 0.40);
+  --shadow-modal:    0 16px 48px oklch(0% 0 0 / 0.50),
+                     0 2px 8px   oklch(0% 0 0 / 0.30);
+  --shadow-thumb:    0 1px 2px   oklch(0% 0 0 / 0.45);
+  --shadow-overlay:  0 20px 60px oklch(0% 0 0 / 0.45);
+}
+
+/* ── Follow OS when no explicit theme is set ──────────────── */
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme]) {
+    --bg:          oklch(16% 0.006 60);
+    --bg-raised:   oklch(19% 0.006 60);
+    --bg-sunken:   oklch(13% 0.005 60);
+    --bg-hover:    oklch(23% 0.007 60);
+    --bg-active:   oklch(27% 0.008 60);
+
+    --fg:          oklch(92% 0.006 60);
+    --fg-muted:    oklch(70% 0.008 60);
+    --fg-faint:    oklch(55% 0.008 60);
+    --fg-ghost:    oklch(40% 0.006 60);
+
+    --line:        oklch(26% 0.008 60);
+    --line-strong: oklch(34% 0.010 60);
+
+    --scrim:       oklch(0% 0 0 / 0.55);
+
+    --accent:        oklch(74% 0.13 45);
+    --accent-soft:   oklch(74% 0.13 45 / 0.16);
+    --accent-border: oklch(74% 0.13 45 / 0.35);
+    --accent-ink:    oklch(80% 0.12 45);
+
+    --shadow-sm: 0 1px 0 oklch(0% 0 0 / 0.2);
+    --shadow-md: 0 2px 8px oklch(0% 0 0 / 0.3);
+
+    --shadow-popover:  0 10px 30px oklch(0% 0 0 / 0.40);
+    --shadow-modal:    0 16px 48px oklch(0% 0 0 / 0.50),
+                       0 2px 8px   oklch(0% 0 0 / 0.30);
+    --shadow-thumb:    0 1px 2px   oklch(0% 0 0 / 0.45);
+    --shadow-overlay:  0 20px 60px oklch(0% 0 0 / 0.45);
+  }
+}
+
+/* ─── Legacy token aliases ────────────────────────────────────
+   Unported components (banners, running-op strip, confirm-dangerous,
+   rename/clean/adopt/move modals, repair view, operation-progress)
+   still read the previous rule-set's names. Alias them to the
+   closest paper-mono equivalent so they keep rendering during the
+   port without a color rewrite. As each component migrates, drop
+   its legacy-alias use; when the last reference is gone, delete
+   the alias block below.
+   ──────────────────────────────────────────────────────────── */
+:root {
+  /* Surfaces */
+  --surface:     var(--bg-raised);
+  --chrome:      var(--bg-sunken);
+  --border:      var(--line);
+  --hover-bg:    var(--bg-hover);
+
+  /* Text */
+  --text:        var(--fg);
+  --muted:       var(--fg-muted);
+  --tertiary:    var(--fg-ghost);
+
+  /* Accent family */
+  --accent-weak: var(--accent-soft);
+  --accent-text: var(--bg-raised);
+
+  /* Status (old naming) */
+  --bad:         var(--danger);
+  --bad-weak:    color-mix(in oklch, var(--danger) 12%, transparent);
+  --ok-weak:     color-mix(in oklch, var(--ok) 12%, transparent);
+  --warn-weak:   color-mix(in oklch, var(--warn) 12%, transparent);
+
+  /* Focus ring — previous system shipped a single combined variable */
+  --focus-ring: 0 0 0 3px var(--accent-border);
+
+  /* Elevation (old naming) */
+  --shadow-0: none;
+  --shadow-1: var(--shadow-sm);
+  --shadow-2: var(--shadow-md);
+  --shadow-3: var(--shadow-overlay);
+}
+
+/* ─── Base reset ──────────────────────────────────────────── */
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+html,
+body {
+  height: 100%;
+}
+
+body {
+  background: var(--bg);
+  color: var(--fg);
+  font-family: var(--font);
+  font-size: var(--fs-base);
+  line-height: var(--lh-body);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  text-rendering: optimizeLegibility;
+  font-feature-settings: "calt" 1, "liga" 1, "kern" 1;
+  font-variant-numeric: tabular-nums;
+}
+
+button {
+  font: inherit;
+  color: inherit;
+  background: none;
+  border: none;
+  cursor: pointer;
+}
+
+input,
+textarea {
+  font: inherit;
+  color: inherit;
+}
+
+::selection {
+  background: var(--accent-soft);
+  color: var(--fg);
+}
+
+/* ─── Scrollbars (custom, mono-style) ─────────────────────── */
+::-webkit-scrollbar {
+  width: var(--sp-10);
+  height: var(--sp-10);
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: var(--line-strong);
+  border: var(--sp-3) solid var(--bg);
+  border-radius: 5px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: var(--fg-ghost);
+}
+
+/* ─── Utility classes ─────────────────────────────────────── */
+.mono-cap {
+  text-transform: uppercase;
+  letter-spacing: var(--ls-wider);
+  font-size: var(--fs-xs);
+  font-weight: 500;
+  color: var(--fg-muted);
+}
+.mono-faint  { color: var(--fg-faint); }
+.mono-muted  { color: var(--fg-muted); }
+.mono-accent { color: var(--accent-ink); }
+.nf {
+  font-family: var(--font);
+  font-feature-settings: normal;
+  display: inline-block;
+}
