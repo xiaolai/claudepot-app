@@ -96,6 +96,15 @@ pub fn app_status() -> Result<AppStatus, String> {
     })
 }
 
+/// Preflight probe: is a `claude` process currently running? The GUI
+/// uses this before `cli_use` to raise a split-brain confirmation
+/// instead of letting the swap silently race with a live session's
+/// next token refresh.
+#[tauri::command]
+pub async fn cli_is_cc_running() -> bool {
+    claudepot_core::cli_backend::swap::is_cc_process_running_public().await
+}
+
 /// `force` defaults to false from the existing GUI; the frontend
 /// can pass `true` to bypass the live-session gate after showing the
 /// user a warning.

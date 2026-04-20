@@ -41,6 +41,9 @@ export const api = {
   accountList: () => invoke<AccountSummary[]>("account_list"),
   cliUse: (email: string, force = false) =>
     invoke<void>("cli_use", { email, force }),
+  /// Cheap preflight used before cli_use to decide whether to raise
+  /// the split-brain confirmation dialog.
+  cliIsCcRunning: () => invoke<boolean>("cli_is_cc_running"),
   cliClear: () => invoke<void>("cli_clear"),
   desktopUse: (email: string, noLaunch: boolean) =>
     invoke<void>("desktop_use", { email, noLaunch }),

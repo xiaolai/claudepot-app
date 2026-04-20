@@ -88,6 +88,7 @@ pub fn run() {
             commands::reveal_in_finder,
             commands::account_list,
             commands::cli_use,
+            commands::cli_is_cc_running,
             commands::cli_clear,
             commands::desktop_use,
             commands::account_add_from_current,
