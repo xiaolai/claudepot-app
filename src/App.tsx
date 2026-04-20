@@ -244,6 +244,28 @@ function AppShell() {
     void actions.login(active);
   }, [accounts, actions, pushToast]);
 
+  // Adopt CC's currently-authenticated login as a new Claudepot
+  // account. Surfaced by the CC-slot-drift banner when the drifted
+  // email isn't already registered — saves a Sign-out → Add → OAuth
+  // round-trip because the credential already exists.
+  const onImportCurrent = useCallback(
+    async (email: string) => {
+      try {
+        const outcome = await api.accountAddFromCurrent();
+        pushToast("info", `Imported ${outcome.email}`);
+        await refreshAccounts();
+      } catch (e) {
+        const msg = e instanceof Error ? e.message : String(e);
+        pushToast("error", `Import failed: ${msg}`);
+      }
+      // `email` is intentionally unused — supplied by the hook so the
+      // button label can show the address, but the backend reads CC's
+      // current state directly.
+      void email;
+    },
+    [pushToast, refreshAccounts],
+  );
+
   const rawIssues = useStatusIssues({
     ccIdentity,
     status: appStatus,
@@ -253,6 +275,7 @@ function AppShell() {
     onUnlock: onUnlockKeychain,
     onSelectAccount,
     onReloginActive,
+    onImportCurrent,
   });
   const visibleIssues = useMemo(
     () => rawIssues.filter((i) => !(i.dismissable && isDismissed(i.id))),

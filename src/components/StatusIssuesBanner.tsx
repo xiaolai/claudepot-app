@@ -118,6 +118,25 @@ function BannerRow({
           {issue.action.label}
         </button>
       )}
+      {issue.action2 && (
+        <button
+          type="button"
+          onClick={issue.action2.onClick}
+          style={{
+            padding: "var(--sp-3) var(--sp-8)",
+            fontSize: "var(--fs-xs)",
+            background: "transparent",
+            border: "var(--bw-hair) solid var(--line)",
+            borderRadius: "var(--r-1)",
+            color: "var(--fg-muted)",
+            cursor: "pointer",
+            whiteSpace: "nowrap",
+            fontFamily: "inherit",
+          }}
+        >
+          {issue.action2.label}
+        </button>
+      )}
       {onDismiss && (
         <button
           type="button"

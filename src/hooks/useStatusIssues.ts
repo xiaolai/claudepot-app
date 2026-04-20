@@ -1,12 +1,26 @@
 import { useMemo } from "react";
 import type { AccountSummary, AppStatus, CcIdentity } from "../types";
 
+export interface StatusAction {
+  label: string;
+  onClick: () => void;
+}
+
 export interface StatusIssue {
   id: string;
   severity: "error" | "warning" | "info";
   label: string;
   detail?: string;
-  action?: { label: string; onClick: () => void };
+  /** Primary action — rendered with accent weight. */
+  action?: StatusAction;
+  /**
+   * Optional secondary action — rendered ghost-weight next to the
+   * primary. Used when a condition has two meaningful resolutions
+   * (e.g. CC-slot drift: import the current login OR re-login the
+   * expected one). Banner always renders `action` first when both
+   * are present.
+   */
+  action2?: StatusAction;
   /**
    * True if this issue supports being dismissed ("snoozed") for 24 h.
    * Used for nuisance warnings the user has acknowledged and accepted
@@ -35,6 +49,14 @@ export function useStatusIssues(opts: {
    * user knows which account should own the slot.
    */
   onReloginActive?: () => void;
+  /**
+   * Register CC's currently-authenticated email as a new Claudepot
+   * account (via `account_add_from_current`). Wired so the
+   * CC-slot-drift banner can offer the opposite reconciliation when
+   * the drifted email isn't registered yet. `email` is passed through
+   * purely for the button label; the backend reads whatever CC has.
+   */
+  onImportCurrent?: (email: string) => void;
 }): StatusIssue[] {
   const {
     ccIdentity,
@@ -45,6 +67,7 @@ export function useStatusIssues(opts: {
     onUnlock,
     onSelectAccount,
     onReloginActive,
+    onImportCurrent,
   } = opts;
 
   return useMemo(() => {
@@ -123,6 +146,49 @@ export function useStatusIssues(opts: {
           : prefixMatches.length === 1
             ? prefixMatches[0]
             : undefined;
+      // Action shape depends on whether CC's current email resolves
+      // to a registered Claudepot account.
+      //
+      //   • resolves  → single action ("Open matching account"); the
+      //                 per-row AnomalyBanner already offers re-login
+      //                 and there's no import to do. If the consumer
+      //                 didn't wire `onSelectAccount` (tests, or an
+      //                 embedding without a sidebar), leave the
+      //                 banner action-less — never fall through to
+      //                 "Import", because the email is already
+      //                 registered and re-importing would duplicate.
+      //   • unknown   → two actions: primary "Import {email}" (adopt
+      //                 the drifted login as a new account) and
+      //                 secondary "Re-login active" (overwrite CC
+      //                 with the expected email). Both are valid
+      //                 resolutions — the user picks direction.
+      let action: StatusAction | undefined;
+      let action2: StatusAction | undefined;
+      if (target) {
+        if (onSelectAccount) {
+          action = {
+            label: "Open matching account",
+            onClick: () => onSelectAccount(target.uuid),
+          };
+        }
+      } else {
+        if (onImportCurrent) {
+          const email = ccIdentity.email;
+          action = {
+            label: `Import ${email}`,
+            onClick: () => onImportCurrent(email),
+          };
+        }
+        if (onReloginActive) {
+          action2 = { label: "Re-login active", onClick: onReloginActive };
+        }
+        // If only re-login is wired, promote it to primary so the
+        // banner still has a primary-weight action.
+        if (!action && action2) {
+          action = action2;
+          action2 = undefined;
+        }
+      }
       issues.push({
         // Key by the email pair so snoozing drift-for-A-vs-B doesn't
         // suppress a later drift-for-C-vs-D. Lower-case to match the
@@ -130,15 +196,8 @@ export function useStatusIssues(opts: {
         id: `cc-drift:${ccIdentity.email.toLowerCase()}:${status.cli_active_email.toLowerCase()}`,
         severity: "warning",
         label: `CC slot drift — CC authenticates as ${ccIdentity.email}, Claudepot expects ${status.cli_active_email}`,
-        action:
-          target && onSelectAccount
-            ? {
-                label: "Open matching account",
-                onClick: () => onSelectAccount(target.uuid),
-              }
-            : onReloginActive
-              ? { label: "Re-login active", onClick: onReloginActive }
-              : undefined,
+        action,
+        action2,
         dismissable: true,
       });
     }
@@ -153,5 +212,6 @@ export function useStatusIssues(opts: {
     onUnlock,
     onSelectAccount,
     onReloginActive,
+    onImportCurrent,
   ]);
 }
