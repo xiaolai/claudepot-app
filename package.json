@@ -14,8 +14,10 @@
   },
   "dependencies": {
     "@tauri-apps/api": "^2",
+    "@tauri-apps/plugin-autostart": "^2.5.1",
     "@tauri-apps/plugin-dialog": "^2.7.0",
     "@tauri-apps/plugin-opener": "^2",
+    "lucide-react": "^1.8.0",
     "react": "^19.1.0",
     "react-dom": "^19.1.0"
   },
@@ -29,6 +31,7 @@
     "@vitejs/plugin-react": "^4.6.0",
     "@vitest/coverage-v8": "^4.1.4",
     "jsdom": "^29.0.2",
+    "lucide-static": "^1.8.0",
     "typescript": "~5.8.3",
     "vite": "^7.0.4",
     "vitest": "^4.1.4"

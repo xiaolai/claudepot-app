@@ -1,4 +1,5 @@
 import { type ReactNode, useEffect, useId, useState } from "react";
+import type { NfIcon } from "../../icons";
 import { api } from "../../api";
 import { Button } from "../../components/primitives/Button";
 import { Glyph } from "../../components/primitives/Glyph";
@@ -267,7 +268,7 @@ export function AddAccountModal({
 }
 
 function summaryFor(p: Preflight): {
-  glyph: string;
+  glyph: NfIcon;
   tone: string;
   text: ReactNode;
 } {

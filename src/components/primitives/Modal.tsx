@@ -1,4 +1,6 @@
 import { type ReactNode, useEffect } from "react";
+import type { NfIcon } from "../../icons";
+import { Glyph } from "./Glyph";
 import { IconButton } from "./IconButton";
 import { NF } from "../../icons";
 
@@ -93,7 +95,7 @@ export function Modal({
 }
 
 interface ModalHeaderProps {
-  glyph?: string;
+  glyph?: NfIcon;
   title: ReactNode;
   onClose?: () => void;
   /** Anchor for `aria-labelledby`. */
@@ -112,13 +114,11 @@ export function ModalHeader({ glyph, title, onClose, id }: ModalHeaderProps) {
       }}
     >
       {glyph && (
-        <span
-          className="nf"
-          aria-hidden
-          style={{ color: "var(--fg-muted)", fontSize: "var(--fs-sm)" }}
-        >
-          {glyph}
-        </span>
+        <Glyph
+          g={glyph}
+          color="var(--fg-muted)"
+          size="var(--fs-sm)"
+        />
       )}
       <span
         id={id}

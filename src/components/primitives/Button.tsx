@@ -1,4 +1,5 @@
 import { type CSSProperties, type ReactNode, useState } from "react";
+import type { NfIcon } from "../../icons";
 import { Glyph } from "./Glyph";
 
 export type ButtonVariant =
@@ -14,7 +15,7 @@ interface ButtonProps {
   variant?: ButtonVariant;
   size?: ButtonSize;
   /** NF codepoint (decorative leading icon). */
-  glyph?: string;
+  glyph?: NfIcon;
   /**
    * Override the glyph's color. Defaults to the button's text color
    * (via `currentColor`). Useful for utility actions where the

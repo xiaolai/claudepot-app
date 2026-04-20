@@ -7,8 +7,8 @@ globs: "src/**/*.{tsx,ts,css}"
 
 ## Register
 
-One typeface (JetBrainsMono Nerd Font) for every glyph, text and
-icon. Warm OKLCH palette, single terracotta accent. Hairline borders
+One typeface (JetBrainsMono Nerd Font) for text. Icons are Lucide
+SVG. Warm OKLCH palette, single terracotta accent. Hairline borders
 (1px), small radii (≤10px), flat list rows — elevation is reserved
 for popovers and modals.
 
@@ -27,10 +27,17 @@ If a value you need doesn't exist, add a semantic token to
 
 ## Icons
 
-Nerd Font codepoints only, via `<Glyph g={NF.x} />`
-(`src/components/primitives/Glyph.tsx`). No `lucide`, `heroicons`,
-Font Awesome SVG, or emoji. New icons are added to the `NF` map in
-`src/icons.ts`.
+Lucide SVG icons only, via `<Glyph g={NF.x} />` from
+`src/components/primitives/Glyph.tsx`. The call shape is kept from
+the older Nerd Font pipeline — `NF.*` now maps each semantic name
+to a `lucide-react` component reference. No Heroicons, Font Awesome,
+emoji, or hand-authored SVGs. New icons are added to the `NF` map
+in `src/icons.ts` by picking a Lucide import.
+
+`Glyph` pins `strokeWidth={1.75}` and centers the SVG in a square
+inline-flex box so icons track the surrounding font-size. For the
+tray/menubar (AppKit NSImage, not React), PNGs are pre-rasterized
+from the matching Lucide SVG in `src-tauri/icons/menu/`.
 
 ## Primitives
 

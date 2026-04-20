@@ -1,4 +1,5 @@
 import type { CSSProperties, ReactNode } from "react";
+import type { NfIcon } from "../../icons";
 import { Glyph } from "./Glyph";
 
 export type TagTone =
@@ -11,7 +12,7 @@ export type TagTone =
 
 interface TagProps {
   tone?: TagTone;
-  glyph?: string;
+  glyph?: NfIcon;
   children: ReactNode;
   style?: CSSProperties;
   title?: string;

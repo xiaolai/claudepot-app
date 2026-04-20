@@ -1,4 +1,5 @@
 import { useState } from "react";
+import type { NfIcon } from "../icons";
 import { Divider } from "../components/primitives/Divider";
 import { Glyph } from "../components/primitives/Glyph";
 import { SectionLabel } from "../components/primitives/SectionLabel";
@@ -33,7 +34,7 @@ interface AppSidebarProps {
 
 const FILESYSTEM_ROWS: {
   id: string;
-  glyph: string;
+  glyph: NfIcon;
   label: string;
   targetSection?: string;
 }[] = [
@@ -197,7 +198,7 @@ function FsTreeRow({
   onClick,
   title,
 }: {
-  glyph: string;
+  glyph: NfIcon;
   label: string;
   onClick?: () => void;
   title?: string;
