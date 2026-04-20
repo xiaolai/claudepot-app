@@ -22,9 +22,14 @@ import { MaintenanceView } from "./projects/MaintenanceView";
 import { OrphanBanner } from "./projects/OrphanBanner";
 import { AdoptOrphansModal } from "./projects/AdoptOrphansModal";
 
+// "orphan" here = ProjectInfo.is_orphan — source directory no longer
+// exists on a reachable filesystem. Distinct from the OrphanBanner's
+// transcript-level orphans (slugs whose internal cwd is gone), which
+// is why the chip reads "Source gone" rather than "Orphan" — avoid
+// one word for two concepts.
 const SEG_OPTIONS: { id: "all" | "orphan" | "unreachable" | "empty"; label: string }[] = [
   { id: "all", label: "All" },
-  { id: "orphan", label: "Orphan" },
+  { id: "orphan", label: "Source gone" },
   { id: "unreachable", label: "Offline" },
   { id: "empty", label: "Empty" },
 ];
@@ -161,17 +166,23 @@ export function ProjectsSection({
   const compact = useCompactHeader();
 
   const subtitle = (() => {
-    const n = projects.length;
-    if (n === 0) return "~/.claude/projects is empty.";
+    const total = projects.length;
+    if (total === 0) {
+      return "No CC projects yet — run `claude` in any directory to create one.";
+    }
+    const narrowed = nameFilter.trim() && filteredByName.length !== total;
+    if (narrowed) {
+      return `${filteredByName.length} of ${total} project${total === 1 ? "" : "s"} shown`;
+    }
     const actionable = counts.orphan + counts.unreachable + counts.empty;
     if (actionable === 0) {
-      return `${n} project${n === 1 ? "" : "s"} · all healthy`;
+      return `${total} project${total === 1 ? "" : "s"} · all healthy`;
     }
     const pieces: string[] = [];
     if (counts.orphan) pieces.push(`${counts.orphan} orphan`);
     if (counts.unreachable) pieces.push(`${counts.unreachable} offline`);
     if (counts.empty) pieces.push(`${counts.empty} empty`);
-    return `${n} project${n === 1 ? "" : "s"} · ${pieces.join(" · ")}`;
+    return `${total} project${total === 1 ? "" : "s"} · ${pieces.join(" · ")}`;
   })();
 
   return (
@@ -377,11 +388,15 @@ export function ProjectsSection({
                 refreshSignal={detailRefreshSignal}
                 onRename={(path) => setRenameTarget(path)}
                 onMoved={() => {
-                  setToast("Session moved.");
+                  // One signal per surface (design §Non-negotiables).
+                  // The MoveSessionModal's own done-state carries the
+                  // detailed report; firing a toast here would be a
+                  // second signal for the same event.
                   setDetailRefreshSignal((n) => n + 1);
                   refresh();
                 }}
                 onError={(msg) => setToast(msg)}
+                onOpenMaintenance={() => onSubRouteChange("maintenance")}
               />
             </aside>
           )}
@@ -393,7 +408,7 @@ export function ProjectsSection({
           orphans={orphans}
           onClose={() => setAdoptOpen(false)}
           onCompleted={() => {
-            setToast("Adoption done.");
+            // Per-row status lives inside the modal; don't double-signal.
             refresh();
           }}
         />

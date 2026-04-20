@@ -44,6 +44,9 @@ export interface AppStatus {
   desktop_active_email: string | null;
   desktop_installed: boolean;
   data_dir: string;
+  /** Absolute path of `~/.claude`. Used to build session file paths
+   * for Reveal-in-Finder without the webview guessing the home dir. */
+  cc_config_dir: string;
   account_count: number;
 }
 
