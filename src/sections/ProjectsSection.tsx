@@ -383,7 +383,10 @@ export function ProjectsSection({
                 refreshSignal={detailRefreshSignal}
                 onRename={(path) => setRenameTarget(path)}
                 onMoved={() => {
-                  setToast("Session moved.");
+                  // One signal per surface (design §Non-negotiables).
+                  // The MoveSessionModal's own done-state carries the
+                  // detailed report; firing a toast here would be a
+                  // second signal for the same event.
                   setDetailRefreshSignal((n) => n + 1);
                   refresh();
                 }}
@@ -399,7 +402,7 @@ export function ProjectsSection({
           orphans={orphans}
           onClose={() => setAdoptOpen(false)}
           onCompleted={() => {
-            setToast("Adoption done.");
+            // Per-row status lives inside the modal; don't double-signal.
             refresh();
           }}
         />
