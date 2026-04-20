@@ -187,6 +187,19 @@ impl SessionIndex {
         let db = self.db();
         codec::load_all_rows(&db)
     }
+
+    /// Truncate the cache. Intended as the escape hatch for cases the
+    /// `(size, mtime)` guard can't see — filesystems with coarse
+    /// mtime resolution, clock skew, a JSONL edited in-place with
+    /// `truncate` + identical byte count. Caller should follow with
+    /// `list_all` / `refresh` to repopulate.
+    ///
+    /// Does not drop the DB file or touch the schema — just the rows.
+    pub fn rebuild(&self) -> Result<(), SessionIndexError> {
+        let db = self.db();
+        db.execute("DELETE FROM sessions", [])?;
+        Ok(())
+    }
 }
 
 /// Summary of a single `refresh` call. Exposed for diagnostics and
@@ -476,6 +489,34 @@ mod tests {
         assert_eq!(r.cc_version.as_deref(), Some("2.1.97"));
         assert_eq!(r.display_slug.as_deref(), Some("brave-otter"));
         assert!(r.last_modified.is_some(), "mtime round-trips");
+    }
+
+    // -----------------------------------------------------------------
+    // rebuild() tests
+    // -----------------------------------------------------------------
+
+    #[test]
+    fn rebuild_empty_is_noop() {
+        let (idx, _tmp) = open_index();
+        idx.rebuild().unwrap();
+        assert_eq!(idx.row_count().unwrap(), 0);
+    }
+
+    #[test]
+    fn rebuild_clears_rows_then_refresh_repopulates() {
+        let (idx, _tmp) = open_index();
+        let cfg = TempDir::new().unwrap();
+        write_session(cfg.path(), "-a", "S1", &sample_lines("/a", "S1"));
+        write_session(cfg.path(), "-b", "S2", &sample_lines("/b", "S2"));
+        idx.refresh(cfg.path()).unwrap();
+        assert_eq!(idx.row_count().unwrap(), 2);
+
+        idx.rebuild().unwrap();
+        assert_eq!(idx.row_count().unwrap(), 0);
+
+        let stats = idx.refresh(cfg.path()).unwrap();
+        assert_eq!(stats.scanned, 2, "all files re-scan after rebuild");
+        assert_eq!(idx.row_count().unwrap(), 2);
     }
 
     #[test]
