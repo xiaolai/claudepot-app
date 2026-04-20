@@ -18,15 +18,28 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use super::diff::IndexTuple;
 use super::SessionIndexError;
 
+/// Result of walking the filesystem: everything that could be stat'd,
+/// plus a list of files that were visible but wouldn't stat. Callers
+/// surface the latter through `RefreshStats.failed` so transient
+/// ENOENT / EACCES don't turn into silent "gone from cache" outcomes.
+pub(super) struct WalkOutcome {
+    pub entries: Vec<FsEntry>,
+    pub stat_failed: Vec<(PathBuf, String)>,
+}
+
 /// Walk `<config_dir>/projects/*/*.jsonl` and return `(slug, absolute_path,
 /// IndexTuple)` triples. The triple layout lets the refresh path feed the
 /// pure diff fn without re-walking to recover the slug later.
-pub(super) fn walk_fs(config_dir: &Path) -> Result<Vec<FsEntry>, SessionIndexError> {
+pub(super) fn walk_fs(config_dir: &Path) -> Result<WalkOutcome, SessionIndexError> {
     let projects_dir = config_dir.join("projects");
     if !projects_dir.exists() {
-        return Ok(Vec::new());
+        return Ok(WalkOutcome {
+            entries: Vec::new(),
+            stat_failed: Vec::new(),
+        });
     }
-    let mut out = Vec::new();
+    let mut entries = Vec::new();
+    let mut stat_failed: Vec<(PathBuf, String)> = Vec::new();
     for slug_entry in fs::read_dir(&projects_dir)? {
         let slug_entry = slug_entry?;
         if !slug_entry.file_type()?.is_dir() {
@@ -40,17 +53,20 @@ pub(super) fn walk_fs(config_dir: &Path) -> Result<Vec<FsEntry>, SessionIndexErr
                 continue;
             }
             let path = session_entry.path();
-            // stat() errors: skip the file rather than aborting the whole
-            // walk. Matches the tolerance CC itself extends to its own
-            // transcript store.
+            // stat() errors: record them rather than silently dropping
+            // so callers can distinguish "transcript genuinely gone"
+            // from "transient ENOENT/EACCES during walk".
             let meta = match fs::metadata(&path) {
                 Ok(m) => m,
-                Err(_) => continue,
+                Err(e) => {
+                    stat_failed.push((path, e.to_string()));
+                    continue;
+                }
             };
             let size = meta.len();
             let mtime_ns = mtime_ns_of(&meta);
             let file_path = path.to_string_lossy().into_owned();
-            out.push(FsEntry {
+            entries.push(FsEntry {
                 slug: slug.clone(),
                 path,
                 tuple: IndexTuple {
@@ -61,7 +77,10 @@ pub(super) fn walk_fs(config_dir: &Path) -> Result<Vec<FsEntry>, SessionIndexErr
             });
         }
     }
-    Ok(out)
+    Ok(WalkOutcome {
+        entries,
+        stat_failed,
+    })
 }
 
 /// One discovered transcript on disk, carrying everything the refresh
