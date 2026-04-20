@@ -3,7 +3,7 @@ import { Glyph } from "../../components/primitives/Glyph";
 import { Tag } from "../../components/primitives/Tag";
 import { NF } from "../../icons";
 import type { ProjectInfo } from "../../types";
-import { formatSize } from "./format";
+import { formatRelativeTime, formatSize } from "./format";
 import { classifyProject, type ProjectStatus } from "./projectStatus";
 
 export type ProjectFilter = "all" | "orphan" | "unreachable" | "empty";
@@ -236,7 +236,7 @@ function ProjectRow({
           textOverflow: "ellipsis",
         }}
       >
-        {formatRelative(p.last_modified_ms) ?? "—"}
+        {p.last_modified_ms != null ? formatRelativeTime(p.last_modified_ms) : "—"}
       </span>
 
       <span>
@@ -295,15 +295,6 @@ function EmptyRow({ children }: { children: React.ReactNode }) {
       {children}
     </div>
   );
-}
-
-function formatRelative(ms: number | null): string | null {
-  if (ms === null) return null;
-  const diff = Date.now() - ms;
-  if (diff < 60_000) return "just now";
-  if (diff < 3_600_000) return `${Math.floor(diff / 60_000)}m ago`;
-  if (diff < 86_400_000) return `${Math.floor(diff / 3_600_000)}h ago`;
-  return `${Math.floor(diff / 86_400_000)}d ago`;
 }
 
 /**
