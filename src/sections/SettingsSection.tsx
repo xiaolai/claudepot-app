@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { NfIcon } from "../icons";
 import { api } from "../api";
 import { Button } from "../components/primitives/Button";
+import { ConfirmDialog } from "../components/ConfirmDialog";
 import { Glyph } from "../components/primitives/Glyph";
 import { Tag } from "../components/primitives/Tag";
 import { useDevMode } from "../hooks/useDevMode";
@@ -446,68 +447,131 @@ function CleanupPane({
 }) {
   const gc = useSettingsActions(pushToast);
   return (
-    <SettingsGroup desc="Remove abandoned rename journals and old recovery snapshots. Preview first — the delete is irreversible.">
-      <Row label="Older than">
-        <div
-          style={{
-            display: "flex",
-            alignItems: "center",
-            gap: "var(--sp-8)",
-          }}
-        >
-          <input
-            type="number"
-            min={1}
-            max={365}
-            value={gc.gcDays}
-            onChange={(e) => gc.setGcDays(Number(e.target.value))}
-            style={{ ...inputStyle, width: "var(--sp-80)" }}
-          />
-          <span className="mono-faint">days</span>
+    <div style={{ display: "flex", flexDirection: "column", gap: "var(--sp-32)" }}>
+      <SettingsGroup desc="Remove abandoned rename journals and old recovery snapshots. Preview first — the delete is irreversible.">
+        <Row label="Older than">
+          <div
+            style={{
+              display: "flex",
+              alignItems: "center",
+              gap: "var(--sp-8)",
+            }}
+          >
+            <input
+              type="number"
+              min={1}
+              max={365}
+              value={gc.gcDays}
+              onChange={(e) => gc.setGcDays(Number(e.target.value))}
+              style={{ ...inputStyle, width: "var(--sp-80)" }}
+            />
+            <span className="mono-faint">days</span>
+          </div>
+        </Row>
+        <div style={actionsStyle}>
+          <Button
+            variant="subtle"
+            onClick={gc.gcDryRun}
+            disabled={gc.gcBusy}
+            title="Preview what GC would remove"
+          >
+            Preview
+          </Button>
+          <Button
+            variant="solid"
+            danger
+            onClick={gc.gcExecute}
+            disabled={gc.gcBusy || !gc.gcResult}
+            title="Permanently remove abandoned journals and old snapshots"
+          >
+            Execute GC
+          </Button>
         </div>
-      </Row>
-      <div style={actionsStyle}>
-        <Button
-          variant="subtle"
-          onClick={gc.gcDryRun}
-          disabled={gc.gcBusy}
-          title="Preview what GC would remove"
-        >
-          Preview
-        </Button>
-        <Button
-          variant="solid"
-          danger
-          onClick={gc.gcExecute}
-          disabled={gc.gcBusy || !gc.gcResult}
-          title="Permanently remove abandoned journals and old snapshots"
-        >
-          Execute GC
-        </Button>
-      </div>
-      {gc.gcResult && (
-        <div
-          style={{
-            padding: "var(--sp-10) var(--sp-12)",
-            background: "var(--bg-sunken)",
-            border: "var(--bw-hair) solid var(--line)",
-            borderRadius: "var(--r-2)",
-            fontSize: "var(--fs-xs)",
-            color: "var(--fg-muted)",
-          }}
-        >
-          Would remove:{" "}
-          <strong style={{ color: "var(--fg)" }}>
-            {gc.gcResult.removed_journals}
-          </strong>{" "}
-          journals,{" "}
-          <strong style={{ color: "var(--fg)" }}>
-            {gc.gcResult.removed_snapshots}
-          </strong>{" "}
-          snapshots
+        {gc.gcResult && (
+          <div
+            style={{
+              padding: "var(--sp-10) var(--sp-12)",
+              background: "var(--bg-sunken)",
+              border: "var(--bw-hair) solid var(--line)",
+              borderRadius: "var(--r-2)",
+              fontSize: "var(--fs-xs)",
+              color: "var(--fg-muted)",
+            }}
+          >
+            Would remove:{" "}
+            <strong style={{ color: "var(--fg)" }}>
+              {gc.gcResult.removed_journals}
+            </strong>{" "}
+            journals,{" "}
+            <strong style={{ color: "var(--fg)" }}>
+              {gc.gcResult.removed_snapshots}
+            </strong>{" "}
+            snapshots
+          </div>
+        )}
+      </SettingsGroup>
+
+      <SessionIndexRebuildGroup pushToast={pushToast} />
+    </div>
+  );
+}
+
+function SessionIndexRebuildGroup({
+  pushToast,
+}: {
+  pushToast: (t: "info" | "error", msg: string) => void;
+}) {
+  const [busy, setBusy] = useState(false);
+  const [confirming, setConfirming] = useState(false);
+
+  const rebuild = useCallback(async () => {
+    setConfirming(false);
+    setBusy(true);
+    try {
+      await api.sessionIndexRebuild();
+      pushToast(
+        "info",
+        "Session index cleared. The next Sessions-tab load will re-parse every transcript.",
+      );
+    } catch (e) {
+      pushToast("error", `Rebuild failed: ${e}`);
+    } finally {
+      setBusy(false);
+    }
+  }, [pushToast]);
+
+  return (
+    <>
+      <SettingsGroup desc="Drop every cached row in ~/.claudepot/sessions.db. Safe — no transcripts or credentials are touched; only derived rows are removed. The next Sessions-tab open re-parses from cold, which can take tens of seconds on a large account.">
+        <div style={actionsStyle}>
+          <Button
+            variant="subtle"
+            onClick={() => setConfirming(true)}
+            disabled={busy}
+            title="Truncate the session index cache"
+          >
+            Rebuild session index
+          </Button>
         </div>
+      </SettingsGroup>
+      {confirming && (
+        <ConfirmDialog
+          title="Rebuild session index?"
+          body={
+            <p style={{ margin: 0 }}>
+              This clears the persistent cache at{" "}
+              <code>~/.claudepot/sessions.db</code>. Nothing under{" "}
+              <code>~/.claude/projects/</code> is modified. The next open
+              of the Sessions tab will be slow while every transcript is
+              re-parsed.
+            </p>
+          }
+          confirmLabel="Rebuild"
+          onCancel={() => setConfirming(false)}
+          onConfirm={rebuild}
+        />
       )}
-    </SettingsGroup>
+    </>
   );
 }
 

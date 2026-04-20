@@ -105,6 +105,10 @@ enum SessionAction {
         #[arg(long)]
         target: String,
     },
+    /// Truncate the persistent session-index cache at
+    /// `~/.claudepot/sessions.db`. Next list/GUI refresh rebuilds it
+    /// from scratch. Safe — no transcripts or credentials are touched.
+    RebuildIndex,
 }
 
 #[derive(Subcommand)]
@@ -407,6 +411,7 @@ async fn main() -> Result<()> {
             SessionAction::AdoptOrphan { slug, target } => {
                 commands::session::adopt_orphan_cmd(&ctx, &slug, &target)?
             }
+            SessionAction::RebuildIndex => commands::session::rebuild_index_cmd(&ctx)?,
         },
     }
 
