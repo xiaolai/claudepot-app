@@ -1,5 +1,6 @@
 import { type MouseEvent, useState } from "react";
 import { Avatar, avatarColorFor } from "../../components/primitives/Avatar";
+import { Glyph } from "../../components/primitives/Glyph";
 import { Tag } from "../../components/primitives/Tag";
 import { NF } from "../../icons";
 import type { AccountSummary, UsageEntry } from "../../types";
@@ -36,6 +37,8 @@ export function AccountCard({
   onContextMenu,
 }: AccountCardProps) {
   const [hovered, setHovered] = useState(false);
+  const [removeFocused, setRemoveFocused] = useState(false);
+  const removeVisible = hovered || removeFocused;
 
   const bound = a.is_cli_active || a.is_desktop_active;
   const severe = isAnomaly(a);
@@ -68,13 +71,16 @@ export function AccountCard({
         flexDirection: "column",
       }}
     >
-      {/* remove ✕ — hover-revealed */}
+      {/* remove ✕ — revealed on hover OR keyboard focus so
+          keyboard users can reach it without a mouse. */}
       <button
         type="button"
         onClick={(e) => {
           e.stopPropagation();
           onRemove(a);
         }}
+        onFocus={() => setRemoveFocused(true)}
+        onBlur={() => setRemoveFocused(false)}
         title={`Remove ${a.email} — logs out and deletes credentials`}
         aria-label={`Remove ${a.email}`}
         style={{
@@ -86,21 +92,25 @@ export function AccountCard({
           display: "flex",
           alignItems: "center",
           justifyContent: "center",
-          background: hovered ? "var(--bg-active)" : "transparent",
-          color: hovered ? "var(--fg-muted)" : "var(--fg-ghost)",
+          background: removeVisible ? "var(--bg-active)" : "transparent",
+          color: removeVisible ? "var(--fg-muted)" : "var(--fg-ghost)",
           border: "none",
           borderRadius: "var(--r-1)",
           fontFamily: "inherit",
           fontSize: "var(--fs-xs)",
           lineHeight: "var(--lh-flat)",
           cursor: "pointer",
-          opacity: hovered ? 1 : 0,
+          opacity: removeVisible ? 1 : 0,
+          // Keyboard focus is a11y-critical — keep the button reachable
+          // even when opacity is 0 (Tab should still land on it, then
+          // onFocus flips removeVisible so it becomes visible).
+          pointerEvents: "auto",
           transition:
             "opacity var(--dur-base) var(--ease-linear), color var(--dur-hover) var(--ease-linear), background var(--dur-hover) var(--ease-linear)",
           zIndex: "var(--z-popover)" as unknown as number,
         }}
       >
-        ✕
+        <Glyph g={NF.x} />
       </button>
 
       {/* identity header */}
