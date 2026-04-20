@@ -36,11 +36,27 @@ export function usePendingJournals(): {
   }, []);
 
   useEffect(() => {
-    refresh();
+    // Yield to the shell's first paint before hitting Tauri — the
+    // journal banner is a background concern, not a critical-path
+    // widget. requestIdleCallback with a timeout fallback keeps us
+    // responsive on Safari/WebKit (Tauri on macOS) which still doesn't
+    // expose rIC.
+    const rIC: (cb: () => void) => number =
+      (window as typeof window & {
+        requestIdleCallback?: (cb: () => void) => number;
+      }).requestIdleCallback ??
+      ((cb) => window.setTimeout(cb, 250));
+    const cIC: (h: number) => void =
+      (window as typeof window & {
+        cancelIdleCallback?: (h: number) => void;
+      }).cancelIdleCallback ?? window.clearTimeout;
+
+    const idleHandle = rIC(() => refresh());
     const id = window.setInterval(refresh, POLL_INTERVAL_MS);
     const onFocus = () => refresh();
     window.addEventListener("focus", onFocus);
     return () => {
+      cIC(idleHandle);
       window.clearInterval(id);
       window.removeEventListener("focus", onFocus);
     };

@@ -2,13 +2,83 @@
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
-    <link rel="icon" type="image/svg+xml" href="/vite.svg" />
+    <link rel="icon" type="image/svg+xml" href="/logo.svg" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Tauri + React + Typescript</title>
+    <title>Claudepot</title>
+
+    <!-- Warm the two font weights the shell paints with during the first
+         second; the other two (SemiBold, Bold) load on-demand once the
+         UI actually uses them. /. -->
+    <link rel="preload" as="font" type="font/woff2"
+          href="/fonts/JetBrainsMonoNerdFontMono-Regular.woff2" crossorigin />
+    <link rel="preload" as="font" type="font/woff2"
+          href="/fonts/JetBrainsMonoNerdFontMono-Medium.woff2" crossorigin />
+
+    <!-- First-paint skeleton. Lives inline (no external CSS fetch) so the
+         webview paints the shell background the instant the HTML lands
+         instead of showing white for the multi-second module-graph cold
+         compile on dev + JS-bundle parse on release. Theme matches
+         tokens.css; replaced the moment React mounts. -->
+    <style>
+      html, body { height: 100%; margin: 0; }
+      body {
+        background: oklch(99% 0.003 60);
+        color: oklch(22% 0.008 60);
+        font-family: 'JetBrains Mono', ui-monospace, Menlo, monospace;
+        font-size: 13px;
+      }
+      @media (prefers-color-scheme: dark) {
+        body { background: oklch(16% 0.006 60); color: oklch(92% 0.006 60); }
+      }
+      html[data-theme="dark"] body {
+        background: oklch(16% 0.006 60); color: oklch(92% 0.006 60);
+      }
+      html[data-theme="light"] body {
+        background: oklch(99% 0.003 60); color: oklch(22% 0.008 60);
+      }
+      #cp-boot {
+        position: fixed; inset: 0;
+        display: flex; align-items: center; justify-content: center;
+        flex-direction: column; gap: 10px;
+        color: oklch(65% 0.006 60);
+        letter-spacing: 0.08em; text-transform: uppercase;
+        font-size: 10px;
+      }
+      #cp-boot .dot {
+        width: 6px; height: 6px; border-radius: 50%;
+        background: oklch(68% 0.13 45);
+        animation: cp-pulse 1.2s ease-in-out infinite;
+      }
+      @keyframes cp-pulse {
+        0%, 100% { opacity: 0.25; transform: scale(0.9); }
+        50%      { opacity: 1;    transform: scale(1.1); }
+      }
+      @media (prefers-reduced-motion: reduce) {
+        #cp-boot .dot { animation: none; opacity: 0.7; }
+      }
+    </style>
+
+    <!-- Apply the persisted theme before React mounts so the skeleton
+         matches the user's choice (prevents a light → dark flash). -->
+    <script>
+      (function () {
+        try {
+          var t = localStorage.getItem('cp-theme');
+          if (t === 'light' || t === 'dark') {
+            document.documentElement.dataset.theme = t;
+          }
+        } catch (_) {}
+      })();
+    </script>
   </head>
 
   <body>
-    <div id="root"></div>
+    <div id="root">
+      <div id="cp-boot">
+        <span class="dot"></span>
+        <span>claudepot</span>
+      </div>
+    </div>
     <script type="module" src="/src/main.tsx"></script>
   </body>
 </html>

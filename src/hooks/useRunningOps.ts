@@ -30,10 +30,26 @@ export function useRunningOps(): {
   }, []);
 
   useEffect(() => {
-    refresh();
+    // Defer the first tick past first paint (see usePendingJournals).
+    // The running-op strip only lights up when an op is in flight —
+    // we can wait one idle slot for it on cold start.
+    const rIC: (cb: () => void) => number =
+      (window as typeof window & {
+        requestIdleCallback?: (cb: () => void) => number;
+      }).requestIdleCallback ??
+      ((cb) => window.setTimeout(cb, 250));
+    const cIC: (h: number) => void =
+      (window as typeof window & {
+        cancelIdleCallback?: (h: number) => void;
+      }).cancelIdleCallback ?? window.clearTimeout;
+
+    const idleHandle = rIC(() => refresh());
     // Always poll — ops may be started from elsewhere (CLI, another window).
     const id = window.setInterval(refresh, POLL_INTERVAL_MS);
-    return () => window.clearInterval(id);
+    return () => {
+      cIC(idleHandle);
+      window.clearInterval(id);
+    };
   }, [refresh]);
 
   return { ops, refresh };

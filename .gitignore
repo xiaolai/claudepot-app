@@ -27,6 +27,7 @@ Cargo.lock
 *.sln
 *.sw?
 typescript
+*.tsbuildinfo
 /scripts/
 dev-docs/
 

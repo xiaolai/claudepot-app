@@ -1,15 +1,48 @@
-import { useCallback, useEffect, useMemo } from "react";
+import { lazy, Suspense, useCallback, useEffect, useMemo } from "react";
 import { PendingJournalsBanner } from "./components/PendingJournalsBanner";
 import { RunningOpStrip } from "./components/RunningOpStrip";
 import { StatusIssuesBanner } from "./components/StatusIssuesBanner";
 import { ToastContainer } from "./components/ToastContainer";
 import { SplitBrainConfirm } from "./sections/accounts/SplitBrainConfirm";
 import { sections, sectionIds } from "./sections/registry";
+// Sections are code-split. The initial paint ships just the shell +
+// AccountsSection (the default landing tab); Projects / Sessions /
+// Settings + their heavy modal trees load on first navigation. Saves
+// ~70 % of the JS that used to block first paint.
 import { AccountsSection } from "./sections/AccountsSection";
-import { ProjectsSection } from "./sections/ProjectsSection";
-import { SettingsSection } from "./sections/SettingsSection";
-import { OperationProgressModal } from "./sections/projects/OperationProgressModal";
-import { SessionsSection } from "./sections/SessionsSection";
+// Named import promises so we can both hand them to React.lazy AND
+// trigger them early for preload-on-mount (see `preloadSavedSection`
+// below). Sharing the same factory ensures the bundler caches the
+// module once — `React.lazy`'s first invocation and our preload call
+// resolve to the same promise.
+const importProjects = () =>
+  import("./sections/ProjectsSection").then((m) => ({ default: m.ProjectsSection }));
+const importSettings = () =>
+  import("./sections/SettingsSection").then((m) => ({ default: m.SettingsSection }));
+const importSessions = () =>
+  import("./sections/SessionsSection").then((m) => ({ default: m.SessionsSection }));
+const ProjectsSection = lazy(importProjects);
+const SettingsSection = lazy(importSettings);
+const SessionsSection = lazy(importSessions);
+const OperationProgressModal = lazy(() =>
+  import("./sections/projects/OperationProgressModal").then((m) => ({
+    default: m.OperationProgressModal,
+  })),
+);
+
+/** Kick off the saved section's chunk in parallel with first paint. */
+function preloadSavedSection(): void {
+  try {
+    const id =
+      localStorage.getItem("claudepot.startSection") ||
+      localStorage.getItem("claudepot.activeSection");
+    if (id === "projects") void importProjects();
+    else if (id === "sessions") void importSessions();
+    else if (id === "settings") void importSettings();
+  } catch {
+    // localStorage unavailable — nothing to preload.
+  }
+}
 import { useSection } from "./hooks/useSection";
 import { usePendingJournals } from "./hooks/usePendingJournals";
 import { useRunningOps } from "./hooks/useRunningOps";
@@ -67,6 +100,13 @@ function AppShell() {
     const base = (p: string) => p.split("/").filter(Boolean).pop() ?? p;
     return `${verb} ${base(op.old_path)} → ${base(op.new_path)}`;
   };
+
+  // Kick off the saved section's lazy chunk the moment the shell
+  // mounts, so the import is in flight (or already cached) by the
+  // time useSection's idle callback swaps to it. Runs once per mount.
+  useEffect(() => {
+    preloadSavedSection();
+  }, []);
 
   // Cmd+, opens Settings (standard macOS shortcut)
   useEffect(() => {
@@ -244,17 +284,19 @@ function AppShell() {
               overflow: "hidden",
             }}
           >
-            {section === "accounts" && (
-              <AccountsSection onNavigate={setSection} />
-            )}
-            {section === "projects" && (
-              <ProjectsSection
-                subRoute={subRoute}
-                onSubRouteChange={setSubRoute}
-              />
-            )}
-            {section === "sessions" && <SessionsSection />}
-            {section === "settings" && <SettingsSection />}
+            <Suspense fallback={null}>
+              {section === "accounts" && (
+                <AccountsSection onNavigate={setSection} />
+              )}
+              {section === "projects" && (
+                <ProjectsSection
+                  subRoute={subRoute}
+                  onSubRouteChange={setSubRoute}
+                />
+              )}
+              {section === "sessions" && <SessionsSection />}
+              {section === "settings" && <SettingsSection />}
+            </Suspense>
           </div>
 
           <RunningOpStrip
@@ -281,24 +323,26 @@ function AppShell() {
       />
 
       {activeOp && (
-        <OperationProgressModal
-          key={activeOp.opId}
-          opId={activeOp.opId}
-          title={activeOp.title}
-          onClose={closeOp}
-          onComplete={() => {
-            activeOp.onComplete?.();
-            refreshPendingBanner();
-          }}
-          onError={(detail) => {
-            activeOp.onError?.(detail);
-            refreshPendingBanner();
-          }}
-          onOpenRepair={() => {
-            closeOp();
-            setSection("projects", "repair");
-          }}
-        />
+        <Suspense fallback={null}>
+          <OperationProgressModal
+            key={activeOp.opId}
+            opId={activeOp.opId}
+            title={activeOp.title}
+            onClose={closeOp}
+            onComplete={() => {
+              activeOp.onComplete?.();
+              refreshPendingBanner();
+            }}
+            onError={(detail) => {
+              activeOp.onError?.(detail);
+              refreshPendingBanner();
+            }}
+            onOpenRepair={() => {
+              closeOp();
+              setSection("projects", "repair");
+            }}
+          />
+        </Suspense>
       )}
 
       {splitBrainPending && (

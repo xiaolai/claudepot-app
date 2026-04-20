@@ -51,26 +51,44 @@ export function useRefresh(pushToast: (kind: "info" | "error", text: string) => 
     refreshGenRef.current += 1;
     const gen = refreshGenRef.current;
     try {
-      try {
-        await api.syncFromCurrentCc();
-        setKeychainIssue(null);
-        setSyncError(null);
-      } catch (e) {
-        const msg = `${e}`;
-        if (msg.toLowerCase().includes("keychain is locked")) {
-          setKeychainIssue(msg);
-          setSyncError(null);
-        } else {
+      // Fire sync_from_current_cc in parallel with the list fetches —
+      // it costs a keychain read + HTTP /profile roundtrip (~1-2 s),
+      // which used to block first paint. The UI can safely render the
+      // stored DB state immediately; if the sync later flips
+      // active_cli or heals a credential flag, the subsequent
+      // verifyAllAccounts pass picks up the delta.
+      const syncPromise = api
+        .syncFromCurrentCc()
+        .then(async (syncedEmail) => {
+          if (gen !== refreshGenRef.current) return;
           setKeychainIssue(null);
-          // Surface this to the UI instead of just logging — silent sync
-          // failures were how drift used to hide from users. The banner
-          // tells them Claudepot's active_cli may be stale and offers
-          // context so they can decide what to do.
-          setSyncError(msg);
-          // eslint-disable-next-line no-console
-          console.warn("sync_from_current_cc failed:", msg);
-        }
-      }
+          setSyncError(null);
+          // If the sync actually adopted a blob, re-pull the list so
+          // the freshly-healed `has_cli_credentials` / active_cli flags
+          // reach the UI without a second user-triggered refresh.
+          if (syncedEmail) {
+            try {
+              const refreshed = await api.accountList();
+              if (gen === refreshGenRef.current) setAccounts(refreshed);
+            } catch {
+              /* non-fatal — next tick picks it up */
+            }
+          }
+        })
+        .catch((e) => {
+          if (gen !== refreshGenRef.current) return;
+          const msg = `${e}`;
+          if (msg.toLowerCase().includes("keychain is locked")) {
+            setKeychainIssue(msg);
+            setSyncError(null);
+          } else {
+            setKeychainIssue(null);
+            setSyncError(msg);
+            // eslint-disable-next-line no-console
+            console.warn("sync_from_current_cc failed:", msg);
+          }
+        });
+
       const [s, list] = await Promise.all([
         api.appStatus(),
         api.accountList(),
@@ -78,6 +96,11 @@ export function useRefresh(pushToast: (kind: "info" | "error", text: string) => 
       setStatus(s);
       setAccounts(list);
       setLoadError(null);
+
+      // Wait for the sync to finish AFTER we've already painted a full
+      // list — any flag/active-pointer flips it writes will show up on
+      // the next refresh() tick (focus event, explicit action).
+      void syncPromise;
 
       // Ground-truth CC identity + background reconciliation run in
       // parallel — both are slow (network), both are decorative next to

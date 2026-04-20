@@ -47,32 +47,51 @@ export function useSection<Id extends string>(
   setSection: (id: Id, subRoute?: string | null) => void;
   setSubRoute: (subRoute: string | null) => void;
 } {
-  const [section, setSectionState] = useState<Id>(() => {
-    // Startup resolution:
-    //   1. `claudepot.startSection` if user chose an explicit "Open on launch"
-    //      preference in Settings — this is the authoritative startup value.
-    //   2. `claudepot.activeSection` — the section last navigated to in the
-    //      previous session. Used when the user has no explicit startup
-    //      preference (legacy behavior).
-    //   3. defaultId.
-    //
-    // `activeSection` is still written on every navigation so it stays
-    // accurate as a secondary fallback, but it NEVER overwrites the
-    // explicit startSection preference.
-    const start = safeGet(START_KEY);
-    if (start && (ids as readonly string[]).includes(start)) {
-      return start as Id;
-    }
-    const stored = safeGet(STORAGE_KEY);
-    if (stored && (ids as readonly string[]).includes(stored)) {
-      return stored as Id;
-    }
-    return defaultId;
-  });
-
+  // Always mount on `defaultId` (Accounts) for the first paint —
+  // Accounts is bundled into the main chunk so the shell lands with
+  // real content in one round-trip, without waiting for a lazy chunk
+  // fetch (Projects / Sessions / Settings) to resolve. The persisted
+  // "Open on launch" / last-active section is restored on the next
+  // idle tick, after first paint has committed.
+  const [section, setSectionState] = useState<Id>(defaultId);
   const [subRoute, setSubRouteState] = useState<string | null>(() =>
-    safeGet(SUBROUTE_KEY_PREFIX + section),
+    safeGet(SUBROUTE_KEY_PREFIX + defaultId),
   );
+
+  useEffect(() => {
+    // Startup resolution (deferred to post-paint):
+    //   1. `claudepot.startSection` if user chose an explicit "Open on
+    //      launch" preference in Settings — authoritative.
+    //   2. `claudepot.activeSection` — the section last navigated to.
+    //   3. defaultId (already active, nothing to do).
+    const start = safeGet(START_KEY);
+    const stored = safeGet(STORAGE_KEY);
+    const target: Id | null =
+      start && (ids as readonly string[]).includes(start)
+        ? (start as Id)
+        : stored && (ids as readonly string[]).includes(stored)
+          ? (stored as Id)
+          : null;
+    if (!target || target === defaultId) return;
+
+    const rIC: (cb: () => void) => number =
+      (window as typeof window & {
+        requestIdleCallback?: (cb: () => void) => number;
+      }).requestIdleCallback ?? ((cb) => window.setTimeout(cb, 0));
+    const cIC: (h: number) => void =
+      (window as typeof window & {
+        cancelIdleCallback?: (h: number) => void;
+      }).cancelIdleCallback ?? window.clearTimeout;
+
+    const handle = rIC(() => {
+      setSectionState(target);
+      setSubRouteState(safeGet(SUBROUTE_KEY_PREFIX + target));
+    });
+    return () => cIC(handle);
+    // Only resolves once per mount — saved prefs are static for this
+    // session, and `defaultId` / `ids` don't change at runtime.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const setSubRoute = useCallback(
     (next: string | null) => {
