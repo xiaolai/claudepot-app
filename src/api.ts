@@ -41,13 +41,22 @@ export const api = {
   accountList: () => invoke<AccountSummary[]>("account_list"),
   cliUse: (email: string, force = false) =>
     invoke<void>("cli_use", { email, force }),
+  /// Cheap preflight used before cli_use to decide whether to raise
+  /// the split-brain confirmation dialog.
+  cliIsCcRunning: () => invoke<boolean>("cli_is_cc_running"),
   cliClear: () => invoke<void>("cli_clear"),
   desktopUse: (email: string, noLaunch: boolean) =>
     invoke<void>("desktop_use", { email, noLaunch }),
   accountAddFromCurrent: () =>
     invoke<RegisterOutcome>("account_add_from_current"),
+  /// Browser OAuth onboarding — spawns `claude auth login` in a temp
+  /// config dir, returns when the user finishes (or errors). The
+  /// refresh token never crosses the IPC bridge; everything is handled
+  /// by claudepot-core on the Rust side.
+  accountRegisterFromBrowser: () =>
+    invoke<RegisterOutcome>("account_register_from_browser"),
   // Token-based onboarding is CLI-only — the refresh token must never enter
-  // the webview JS heap. Use a future browser-flow command instead.
+  // the webview JS heap. Browser onboarding above is the GUI equivalent.
   /// Re-log in via browser (opens Claude's OAuth flow) and imports the
   /// resulting blob into the given account's slot. Can take several
   /// minutes while the user completes auth in the browser.
