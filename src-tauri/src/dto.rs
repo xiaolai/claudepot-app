@@ -84,6 +84,13 @@ pub struct AppStatus {
     pub desktop_active_email: Option<String>,
     pub desktop_installed: bool,
     pub data_dir: String,
+    /// Absolute path of CC's config dir (`~/.claude`). The webview uses
+    /// this to construct paths it hands straight back to
+    /// `reveal_in_finder` — for example the session transcript at
+    /// `<cc_config_dir>/projects/<slug>/<session_id>.jsonl`. Read-only
+    /// metadata; shares code with `paths::claude_config_dir()` so the
+    /// JS side never has to guess the home directory.
+    pub cc_config_dir: String,
     pub account_count: usize,
 }
 

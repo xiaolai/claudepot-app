@@ -92,6 +92,7 @@ pub fn app_status() -> Result<AppStatus, String> {
         desktop_active_email,
         desktop_installed,
         data_dir: paths::claudepot_data_dir().display().to_string(),
+        cc_config_dir: paths::claude_config_dir().display().to_string(),
         account_count: accounts.len(),
     })
 }
