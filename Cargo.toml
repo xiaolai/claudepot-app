@@ -75,3 +75,27 @@ dirs = "6"
 # bounded by num_cpus automatically.
 rayon = "1.10"
 num_cpus = "1.16"
+
+# ─── Build profiles ──────────────────────────────────────────────────────
+# Release: thin-LTO + single codegen unit. Cuts binary size and — more
+# importantly for startup — lets rustc inline across crates, which the
+# hot Tauri command path benefits from. `opt-level = 3` is the default
+# for release; we restate it to keep the profile self-documenting.
+[profile.release]
+opt-level = 3
+lto = "thin"
+codegen-units = 1
+strip = "symbols"
+panic = "abort"
+
+# Dev: turn on some optimisation for our deps (they never change in a
+# hot loop) but keep our own crates un-optimised so incremental rebuilds
+# stay fast. Speeds up `pnpm tauri dev` cold starts noticeably — the
+# first launch still pays the compile cost, but subsequent runs benefit
+# because dependencies are already optimised.
+[profile.dev]
+opt-level = 0
+debug = true
+
+[profile.dev.package."*"]
+opt-level = 2
