@@ -144,9 +144,10 @@ export const NF = {
   fileRs:     "\ue7a8",
   fileGo:     "\ue626",
 
-  // --- theme
-  sun:        "\uf185",
-  moon:       "\uf186",
+  // --- theme — nf-weather pair renders crisper than fa4-sun_o / moon_o,
+  // whose fine rays read as a gear shape at chrome icon sizes.
+  sun:        "\ue30d",   // nf-weather-day_sunny
+  moon:       "\ue32b",   // nf-weather-night_clear
 
   // --- misc
   home:       "\uf015",

@@ -1,7 +1,6 @@
 import type { MouseEvent } from "react";
 import { Glyph } from "../components/primitives/Glyph";
 import { IconButton } from "../components/primitives/IconButton";
-import { Kbd } from "../components/primitives/Kbd";
 import { NF } from "../icons";
 
 interface WindowChromeProps {
@@ -87,7 +86,9 @@ export function WindowChrome({
 
       <div style={{ flex: 1 }} />
 
-      {/* command palette hint */}
+      {/* command palette hint — no fill, hairline side rules only
+          (left + right), ⌘K reads as flat text. Border-radius
+          preserves the rounded cap on each vertical stroke. */}
       <button
         type="button"
         onClick={onCmdK}
@@ -101,8 +102,10 @@ export function WindowChrome({
           padding: "0 var(--sp-8) 0 var(--sp-10)",
           fontSize: "var(--fs-xs)",
           color: "var(--fg-faint)",
-          background: "var(--bg-sunken)",
-          border: "var(--bw-hair) solid var(--line)",
+          background: "transparent",
+          border: "none",
+          borderLeft: "var(--bw-hair) solid var(--line)",
+          borderRight: "var(--bw-hair) solid var(--line)",
           borderRadius: "var(--r-2)",
           minWidth: "var(--banner-min-width)",
           cursor: "pointer",
@@ -110,7 +113,16 @@ export function WindowChrome({
       >
         <Glyph g={NF.search} />
         <span style={{ flex: 1, textAlign: "left" }}>Jump to anything</span>
-        <Kbd>⌘K</Kbd>
+        <span
+          style={{
+            fontFamily: "var(--font)",
+            fontSize: "var(--fs-2xs)",
+            fontWeight: 500,
+            color: "var(--fg-muted)",
+          }}
+        >
+          ⌘K
+        </span>
       </button>
 
       <IconButton
@@ -121,6 +133,10 @@ export function WindowChrome({
         aria-label={
           theme === "dark" ? "Switch to light mode" : "Switch to dark mode"
         }
+        // Glyph scales off the button's own font-size (1.2em default),
+        // so bumping fontSize here enlarges the icon without growing
+        // the clickable square.
+        style={{ fontSize: "var(--fs-xl)" }}
       />
     </div>
   );
