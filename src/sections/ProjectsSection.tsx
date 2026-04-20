@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { api } from "../api";
 import { useOperations } from "../hooks/useOperations";
 import { useGlobalShortcuts } from "../hooks/useGlobalShortcuts";
-import { useCompactHeader } from "../hooks/useWindowWidth";
+import { useCompactHeader, useSplitView } from "../hooks/useWindowWidth";
 import type { MoveArgs, OrphanedProject, ProjectInfo } from "../types";
 import { ContextMenu, type ContextMenuItem } from "../components/ContextMenu";
 import { Button } from "../components/primitives/Button";
@@ -164,6 +164,13 @@ export function ProjectsSection({
   }
 
   const compact = useCompactHeader();
+  // When the window is too narrow to give both the table and the 420px
+  // detail aside enough room, collapse to a single-pane master/detail
+  // flow. Selecting a project replaces the table with the detail view;
+  // the detail's Back button restores the table.
+  const splitView = useSplitView();
+  const showDetail = selectedPath !== null;
+  const showTable = splitView || selectedPath === null;
 
   const subtitle = (() => {
     const total = projects.length;
@@ -240,12 +247,15 @@ export function ProjectsSection({
         </div>
       )}
 
-      {/* filter bar */}
+      {/* Filter bar — only when the table is showing. In single-pane
+          detail view we hide it so the detail has the full column. */}
+      {showTable && (
       <div
         style={{
           padding: "var(--sp-14) var(--sp-32)",
           borderBottom: "var(--bw-hair) solid var(--line)",
           display: "flex",
+          flexWrap: "wrap",
           gap: "var(--sp-12)",
           alignItems: "center",
           background: "var(--bg)",
@@ -257,7 +267,13 @@ export function ProjectsSection({
           placeholder="Filter by name or path"
           value={nameFilter}
           onChange={(e) => setNameFilter(e.target.value)}
-          style={{ width: "var(--filter-input-width)" }}
+          style={{
+            // Grow into available space; shrink to a sane minimum when
+            // the segmented chips and "Refreshing…" share the row.
+            flex: "1 1 var(--filter-input-width)",
+            minWidth: "160px",
+            maxWidth: "var(--filter-input-width)",
+          }}
           aria-label="Filter projects by name or path"
         />
 
@@ -324,6 +340,7 @@ export function ProjectsSection({
           </span>
         )}
       </div>
+      )}
 
       {error && projects.length === 0 ? (
         <div
@@ -353,32 +370,41 @@ export function ProjectsSection({
         </div>
       ) : (
         <div style={{ display: "flex", minHeight: 0, flex: 1 }}>
-          <div
-            style={{
-              flex: 1,
-              minWidth: 0,
-              overflow: "auto",
-              display: "flex",
-              flexDirection: "column",
-            }}
-          >
-            <ProjectsTable
-              projects={filteredByName}
-              filter={filter}
-              selectedPath={selectedPath}
-              onSelect={setSelectedPath}
-              onContextMenu={handleContextMenu}
-            />
-          </div>
+          {showTable && (
+            <div
+              style={{
+                flex: 1,
+                minWidth: 0,
+                overflow: "auto",
+                display: "flex",
+                flexDirection: "column",
+              }}
+            >
+              <ProjectsTable
+                projects={filteredByName}
+                filter={filter}
+                selectedPath={selectedPath}
+                onSelect={setSelectedPath}
+                onContextMenu={handleContextMenu}
+              />
+            </div>
+          )}
 
-          {selectedPath && (
+          {showDetail && selectedPath && (
             <aside
               style={{
-                width: "var(--project-detail-width)",
-                flexShrink: 0,
-                borderLeft: "var(--bw-hair) solid var(--line)",
-                background: "var(--bg-sunken)",
+                // Split mode: fixed 420 px so the table keeps a stable
+                // width. Single-pane (narrow window): detail replaces
+                // the table and takes the whole content column.
+                width: splitView ? "var(--project-detail-width)" : "100%",
+                flex: splitView ? "0 0 auto" : "1 1 auto",
+                flexShrink: splitView ? 0 : 1,
+                borderLeft: splitView
+                  ? "var(--bw-hair) solid var(--line)"
+                  : "none",
+                background: splitView ? "var(--bg-sunken)" : "var(--bg)",
                 overflow: "auto",
+                minWidth: 0,
               }}
             >
               <ProjectDetail
@@ -397,6 +423,7 @@ export function ProjectsSection({
                 }}
                 onError={(msg) => setToast(msg)}
                 onOpenMaintenance={() => onSubRouteChange("maintenance")}
+                onBack={splitView ? undefined : () => setSelectedPath(null)}
               />
             </aside>
           )}
