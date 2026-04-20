@@ -91,6 +91,7 @@ pub fn run() {
             commands::cli_clear,
             commands::desktop_use,
             commands::account_add_from_current,
+            commands::account_register_from_browser,
             commands::account_login,
             commands::account_login_cancel,
             commands::account_remove,
