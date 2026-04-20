@@ -41,12 +41,37 @@ export function AccountsSection({
     null,
   );
   const [confirmClear, setConfirmClear] = useState(false);
+  const [confirmSplitBrain, setConfirmSplitBrain] =
+    useState<AccountSummary | null>(null);
   const [showPalette, setShowPalette] = useState(false);
   const [filter, setFilter] = useState("");
   const [ctxMenu, setCtxMenu] = useState<
     | { kind: "row"; x: number; y: number; account: AccountSummary }
     | null
   >(null);
+
+  /**
+   * Wrap CLI swap with a preflight. When a live `claude` process is
+   * running, present the split-brain warning *before* the swap (matches
+   * the CLI's post-swap advisory) instead of letting the error path
+   * turn into an Undo-shaped retry. On confirm, proceed with force=true.
+   */
+  const guardedUseCli = useCallback(
+    async (a: AccountSummary) => {
+      try {
+        const running = await api.cliIsCcRunning();
+        if (running) {
+          setConfirmSplitBrain(a);
+          return;
+        }
+      } catch {
+        // If preflight fails, fall through to the regular swap; the
+        // server-side gate in swap.rs still rejects live conflicts.
+      }
+      actions.useCli(a);
+    },
+    [actions],
+  );
 
   const handleContextMenu = useCallback(
     (e: React.MouseEvent, a: AccountSummary) => {
@@ -459,12 +484,54 @@ export function AccountsSection({
         />
       )}
 
+      {confirmSplitBrain && (
+        <ConfirmDialog
+          title="Claude Code is running"
+          confirmLabel={`Swap to ${confirmSplitBrain.email} anyway`}
+          confirmDanger
+          body={
+            <>
+              <p>
+                A running Claude Code session is using the current
+                account. Until you quit it you'll see split-brain
+                state:
+              </p>
+              <ul className="muted small" style={{ paddingLeft: 18 }}>
+                <li>
+                  Session identity (header, org name) stays as the old
+                  account — cached at startup.
+                </li>
+                <li>
+                  API calls (/usage, completions, billing) switch to{" "}
+                  <strong>{confirmSplitBrain.email}</strong> immediately.
+                </li>
+                <li>
+                  The next OAuth refresh (typically within the hour)
+                  may overwrite the keychain back to the old account,
+                  silently reverting this swap.
+                </li>
+              </ul>
+              <p className="muted small">
+                Safest: quit Claude Code first, then swap. This action
+                proceeds with <code>--force</code>.
+              </p>
+            </>
+          }
+          onCancel={() => setConfirmSplitBrain(null)}
+          onConfirm={async () => {
+            const target = confirmSplitBrain;
+            setConfirmSplitBrain(null);
+            await actions.useCli(target, true);
+          }}
+        />
+      )}
+
       {showPalette && status && (
         <CommandPalette
           accounts={accounts}
           status={status}
           onClose={() => setShowPalette(false)}
-          onSwitchCli={(a) => actions.useCli(a)}
+          onSwitchCli={(a) => guardedUseCli(a)}
           onSwitchDesktop={(a) => handleDesktopSwitch(a)}
           onAdd={() => setShowAdd(true)}
           onRefresh={() => {
@@ -508,7 +575,7 @@ export function AccountsSection({
               label: a.is_cli_active ? "Active CLI" : "Set as CLI",
               disabled: a.is_cli_active || !a.credentials_healthy,
               disabledReason: cliReason,
-              onClick: () => actions.useCli(a),
+              onClick: () => guardedUseCli(a),
             },
             {
               label: a.is_desktop_active
