@@ -67,6 +67,16 @@ impl SessionIndex {
         // GUI co-access doesn't immediately SQLITE_BUSY.
         db.busy_timeout(std::time::Duration::from_secs(5))?;
         apply_schema(&db)?;
+        // Force WAL/SHM sidecars to materialize NOW (via a cheap write
+        // that hits the journal) so the chmod loop below can actually
+        // set their perms. Without this, the sidecars don't exist
+        // yet at open() time and subsequent writes create them with
+        // the process umask (typically 0644) — leaking prompt text
+        // and token totals to other local users.
+        db.execute_batch(
+            "BEGIN IMMEDIATE; INSERT OR IGNORE INTO meta (k, v) VALUES ('_touch','1'); \
+             DELETE FROM meta WHERE k='_touch'; COMMIT;",
+        )?;
 
         #[cfg(unix)]
         {
@@ -339,6 +349,27 @@ mod tests {
         assert_eq!(mode, 0o600, "db file must be 0600 on Unix");
     }
 
+    #[cfg(unix)]
+    #[test]
+    fn open_sets_0600_on_wal_and_shm_sidecars() {
+        use std::os::unix::fs::PermissionsExt;
+        let tmp = TempDir::new().unwrap();
+        let path = tmp.path().join("sessions.db");
+        let _idx = SessionIndex::open(&path).unwrap();
+
+        // WAL mode + the touch write in open() both force sidecar
+        // creation. If either is missing, prompt text leaks to other
+        // local users.
+        let wal = path.with_extension("db-wal");
+        let shm = path.with_extension("db-shm");
+        assert!(wal.exists(), "WAL sidecar must exist after open");
+        assert!(shm.exists(), "SHM sidecar must exist after open");
+        for p in [wal, shm] {
+            let mode = std::fs::metadata(&p).unwrap().permissions().mode() & 0o777;
+            assert_eq!(mode, 0o600, "sidecar {} must be 0600", p.display());
+        }
+    }
+
     #[test]
     fn schema_tables_exist() {
         let tmp = TempDir::new().unwrap();
@@ -498,6 +529,29 @@ mod tests {
         assert_eq!(rows.len(), 2);
         assert_eq!(rows[0].session_id, "S2");
         assert_eq!(rows[1].session_id, "S1");
+    }
+
+    #[test]
+    fn refresh_redacts_sk_ant_tokens_in_first_user_prompt() {
+        let (idx, _tmp) = open_index();
+        let cfg = TempDir::new().unwrap();
+        let prompt = r#"debug this token: sk-ant-oat01-AbC_xyZ-123 please"#;
+        let line = format!(
+            r#"{{"type":"user","message":{{"role":"user","content":"{prompt}"}},"timestamp":"2026-04-10T10:00:00Z","cwd":"/x","sessionId":"S1"}}"#
+        );
+        write_session(cfg.path(), "-x", "S1", &vec![line]);
+
+        let rows = idx.list_all(cfg.path()).unwrap();
+        assert_eq!(rows.len(), 1);
+        let stored = rows[0].first_user_prompt.as_deref().unwrap();
+        assert!(
+            !stored.contains("sk-ant-oat01-AbC_xyZ-123"),
+            "raw token must NOT survive into the cache; got {stored:?}"
+        );
+        assert!(
+            stored.contains("sk-ant-****"),
+            "redacted form must appear; got {stored:?}"
+        );
     }
 
     #[test]
