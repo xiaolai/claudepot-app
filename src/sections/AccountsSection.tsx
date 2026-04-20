@@ -61,8 +61,35 @@ export function AccountsSection({
   const runVerifyAccount = useCallback(
     async (a: AccountSummary) => {
       try {
-        await api.verifyAccount(a.uuid);
-        pushToast("info", `Verified ${a.email}`);
+        const updated = await api.verifyAccount(a.uuid);
+        // Verify doesn't throw on drift/rejected — it returns the new
+        // summary. Tone the toast to match the outcome instead of
+        // unconditionally reporting "Verified ✓".
+        switch (updated.verify_status) {
+          case "ok":
+            pushToast("info", `Verified ${a.email}`);
+            break;
+          case "drift":
+            pushToast(
+              "error",
+              `Drift: ${a.email} actually authenticates as ${updated.verified_email ?? "unknown"}`,
+            );
+            break;
+          case "rejected":
+            pushToast(
+              "error",
+              `Server rejected ${a.email} — re-login required`,
+            );
+            break;
+          case "network_error":
+            pushToast(
+              "error",
+              `Couldn't verify ${a.email} — /profile unreachable`,
+            );
+            break;
+          default:
+            pushToast("info", `Verified ${a.email}`);
+        }
         refresh();
       } catch (e) {
         pushToast("error", `Verify failed: ${e}`);
@@ -70,6 +97,27 @@ export function AccountsSection({
     },
     [pushToast, refresh],
   );
+
+  const runVerifyAll = useCallback(async () => {
+    try {
+      const verified = await api.verifyAllAccounts();
+      const drift = verified.filter((a) => a.verify_status === "drift").length;
+      const rejected = verified.filter(
+        (a) => a.verify_status === "rejected",
+      ).length;
+      if (drift + rejected === 0) {
+        pushToast("info", `All ${verified.length} accounts verified.`);
+      } else {
+        pushToast(
+          "error",
+          `Verify: ${drift} drift, ${rejected} rejected — see card banners.`,
+        );
+      }
+      await refresh();
+    } catch (e) {
+      pushToast("error", `Verify-all failed: ${e}`);
+    }
+  }, [pushToast, refresh]);
 
   const handleDesktopSwitch = useCallback(
     (a: AccountSummary) => {
@@ -214,6 +262,15 @@ export function AccountsSection({
           <>
             <Button
               variant="ghost"
+              glyph={NF.shield}
+              glyphColor="var(--fg-muted)"
+              onClick={runVerifyAll}
+              title="Verify every account against /profile"
+            >
+              Verify all
+            </Button>
+            <Button
+              variant="ghost"
               glyph={NF.refresh}
               glyphColor="var(--fg-muted)"
               onClick={() => {
@@ -223,6 +280,15 @@ export function AccountsSection({
               title="Refresh (⌘R)"
             >
               Refresh usage
+            </Button>
+            <Button
+              variant="ghost"
+              glyph={NF.unlock}
+              glyphColor="var(--fg-muted)"
+              onClick={() => setConfirmClear(true)}
+              title="Clear Claude Code's stored credentials"
+            >
+              Sign out CC
             </Button>
             <Button
               variant="solid"
@@ -413,19 +479,35 @@ export function AccountsSection({
       {ctxMenu &&
         (() => {
           const a = ctxMenu.account;
+          const desktopReason = !status.desktop_installed
+            ? "Claude Desktop not installed"
+            : !a.has_desktop_profile
+              ? "sign in via Desktop app first"
+              : a.is_desktop_active
+                ? "already active"
+                : undefined;
+          const cliReason = a.is_cli_active
+            ? "already active"
+            : !a.credentials_healthy
+              ? "credentials missing or corrupt"
+              : undefined;
           const items: ContextMenuItem[] = [
             {
               label: "Copy email",
               onClick: () => navigator.clipboard.writeText(a.email),
             },
+            // UUID is an internal identifier — dev-mode only per
+            // design.md ("no internal identifiers in primary UI").
             {
               label: "Copy UUID",
+              devOnly: true,
               onClick: () => navigator.clipboard.writeText(a.uuid),
             },
             { label: "", separator: true, onClick: () => {} },
             {
               label: a.is_cli_active ? "Active CLI" : "Set as CLI",
               disabled: a.is_cli_active || !a.credentials_healthy,
+              disabledReason: cliReason,
               onClick: () => actions.useCli(a),
             },
             {
@@ -436,6 +518,7 @@ export function AccountsSection({
                 a.is_desktop_active ||
                 !a.has_desktop_profile ||
                 !status.desktop_installed,
+              disabledReason: desktopReason,
               onClick: () => handleDesktopSwitch(a),
             },
             {
@@ -444,12 +527,16 @@ export function AccountsSection({
                 a.is_desktop_active ||
                 !a.has_desktop_profile ||
                 !status.desktop_installed,
+              disabledReason: desktopReason,
               onClick: () => actions.useDesktop(a, true),
             },
             { label: "", separator: true, onClick: () => {} },
             {
               label: "Verify now",
               disabled: !a.credentials_healthy,
+              disabledReason: !a.credentials_healthy
+                ? "no credentials to verify"
+                : undefined,
               onClick: () => runVerifyAccount(a),
             },
             {
@@ -463,6 +550,9 @@ export function AccountsSection({
             {
               label: "Log in again…",
               disabled: busy.busyKeys.has(`re-${a.uuid}`),
+              disabledReason: busy.busyKeys.has(`re-${a.uuid}`)
+                ? "login in progress"
+                : undefined,
               onClick: () => actions.login(a),
             },
             { label: "", separator: true, onClick: () => {} },
