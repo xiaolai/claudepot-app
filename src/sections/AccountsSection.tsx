@@ -1,8 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import type { AccountSummary } from "../types";
-import { useBusy } from "../hooks/useBusy";
 import { useUsage } from "../hooks/useUsage";
-import { useActions } from "../hooks/useActions";
 import { useTauriEvent } from "../hooks/useTauriEvent";
 import { useGlobalShortcuts } from "../hooks/useGlobalShortcuts";
 import { useAppState } from "../providers/AppStateProvider";
@@ -14,7 +12,6 @@ import { ScreenHeader } from "../shell/ScreenHeader";
 import { AccountsGrid } from "./accounts/AccountsGrid";
 import { AddAccountModal } from "./accounts/AddAccountModal";
 import { isAnomaly } from "./accounts/AnomalyBanner";
-import { SplitBrainConfirm } from "./accounts/SplitBrainConfirm";
 import { CtxMenuForAccount } from "./accounts/useAccountContextMenu";
 import { useAccountHandlers } from "./accounts/useAccountHandlers";
 
@@ -30,18 +27,23 @@ export function AccountsSection({
 }: {
   onNavigate?: (section: string, subRoute?: string | null) => void;
 }) {
-  const { pushToast, status, accounts, loadError, refresh } = useAppState();
-  const busy = useBusy();
+  const {
+    pushToast,
+    status,
+    accounts,
+    loadError,
+    refresh,
+    actions,
+    busyKeys,
+    requestCliSwap,
+  } = useAppState();
   const { usage, refreshUsage, refreshUsageFor } = useUsage();
-  const actions = useActions({ pushToast, refresh, ...busy });
 
   const [showAdd, setShowAdd] = useState(false);
   const [confirmRemove, setConfirmRemove] = useState<AccountSummary | null>(
     null,
   );
   const [confirmClear, setConfirmClear] = useState(false);
-  const [confirmSplitBrain, setConfirmSplitBrain] =
-    useState<AccountSummary | null>(null);
   const [showPalette, setShowPalette] = useState(false);
   const [filter, setFilter] = useState("");
   const [ctxMenu, setCtxMenu] = useState<
@@ -49,18 +51,12 @@ export function AccountsSection({
     | null
   >(null);
 
-  const {
-    runVerifyAccount,
-    runVerifyAll,
-    handleDesktopSwitch,
-    guardedUseCli,
-  } = useAccountHandlers({
-    pushToast,
-    refresh,
-    useDesktop: actions.useDesktop,
-    useCli: actions.useCli,
-    setConfirmSplitBrain,
-  });
+  const { runVerifyAccount, runVerifyAll, handleDesktopSwitch } =
+    useAccountHandlers({
+      pushToast,
+      refresh,
+      useDesktop: actions.useDesktop,
+    });
 
   const handleContextMenu = useCallback(
     (e: React.MouseEvent, a: AccountSummary) => {
@@ -108,6 +104,27 @@ export function AccountsSection({
     const onOpen = () => setShowPalette(true);
     window.addEventListener("cp-open-palette", onOpen);
     return () => window.removeEventListener("cp-open-palette", onOpen);
+  }, []);
+
+  // Shell-level drift banners deep-link into a specific account via
+  // `cp-focus-account`. The CustomEvent payload is the target UUID;
+  // we find the matching card by data attribute and bring it into view.
+  useEffect(() => {
+    const onFocus = (e: Event) => {
+      const uuid = (e as CustomEvent<string>).detail;
+      if (!uuid) return;
+      // Clear any filter that would hide the target row so the scroll
+      // target is actually mounted.
+      setFilter("");
+      requestAnimationFrame(() => {
+        const el = document.querySelector<HTMLElement>(
+          `[data-account-uuid="${uuid}"]`,
+        );
+        el?.scrollIntoView({ block: "center", behavior: "smooth" });
+      });
+    };
+    window.addEventListener("cp-focus-account", onFocus);
+    return () => window.removeEventListener("cp-focus-account", onFocus);
   }, []);
 
   const trayRefresh = useCallback(() => {
@@ -248,7 +265,7 @@ export function AccountsSection({
         accounts={accounts}
         shown={shown}
         usage={usage}
-        busyKeys={busy.busyKeys}
+        busyKeys={busyKeys}
         filter={filter}
         onFilterChange={setFilter}
         onRemove={setConfirmRemove}
@@ -312,24 +329,12 @@ export function AccountsSection({
         />
       )}
 
-      {confirmSplitBrain && (
-        <SplitBrainConfirm
-          account={confirmSplitBrain}
-          onCancel={() => setConfirmSplitBrain(null)}
-          onConfirm={() => {
-            const target = confirmSplitBrain;
-            setConfirmSplitBrain(null);
-            void actions.useCli(target, true);
-          }}
-        />
-      )}
-
       {showPalette && status && (
         <CommandPalette
           accounts={accounts}
           status={status}
           onClose={() => setShowPalette(false)}
-          onSwitchCli={(a) => guardedUseCli(a)}
+          onSwitchCli={(a) => requestCliSwap(a)}
           onSwitchDesktop={(a) => handleDesktopSwitch(a)}
           onAdd={() => setShowAdd(true)}
           onRefresh={() => {
@@ -345,8 +350,8 @@ export function AccountsSection({
         <CtxMenuForAccount
           menu={ctxMenu}
           status={status}
-          busyKeys={busy.busyKeys}
-          onSwitchCli={guardedUseCli}
+          busyKeys={busyKeys}
+          onSwitchCli={requestCliSwap}
           onSwitchDesktop={handleDesktopSwitch}
           onSwitchDesktopNoLaunch={(a) => actions.useDesktop(a, true)}
           onVerify={runVerifyAccount}

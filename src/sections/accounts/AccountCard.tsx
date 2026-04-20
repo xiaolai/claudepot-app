@@ -57,6 +57,7 @@ export function AccountCard({
 
   return (
     <article
+      data-account-uuid={a.uuid}
       onMouseEnter={() => setHovered(true)}
       onMouseLeave={() => setHovered(false)}
       onContextMenu={onContextMenu ? (e) => onContextMenu(e, a) : undefined}

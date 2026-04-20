@@ -18,21 +18,18 @@ interface Args {
   pushToast: Push;
   refresh: () => Promise<void>;
   useDesktop: (a: AccountSummary, noLaunch?: boolean) => Promise<void>;
-  useCli: (a: AccountSummary, force?: boolean) => Promise<void>;
-  setConfirmSplitBrain: (a: AccountSummary | null) => void;
 }
 
 /**
- * The long-tail of AccountsSection handlers — verify (single + all),
- * the desktop-switch undo, and the split-brain preflight. Lifted out
- * so AccountsSection stays under the per-file LOC budget.
+ * The long-tail of AccountsSection handlers — verify (single + all)
+ * and the desktop-switch undo toast. The split-brain preflight now
+ * lives in AppStateProvider so sidebar binds share it; this hook
+ * stays lean.
  */
 export function useAccountHandlers({
   pushToast,
   refresh,
   useDesktop,
-  useCli,
-  setConfirmSplitBrain,
 }: Args) {
   const runVerifyAccount = useCallback(
     async (a: AccountSummary) => {
@@ -99,27 +96,5 @@ export function useAccountHandlers({
     [pushToast, useDesktop],
   );
 
-  /**
-   * Wrap CLI swap with a preflight. When a live `claude` process is
-   * running, present the split-brain warning *before* the swap — the
-   * user makes the trade-off knowingly rather than recovering from it.
-   */
-  const guardedUseCli = useCallback(
-    async (a: AccountSummary) => {
-      try {
-        const running = await api.cliIsCcRunning();
-        if (running) {
-          setConfirmSplitBrain(a);
-          return;
-        }
-      } catch {
-        // Preflight failure falls through; the server-side swap gate
-        // still rejects live conflicts.
-      }
-      await useCli(a);
-    },
-    [setConfirmSplitBrain, useCli],
-  );
-
-  return { runVerifyAccount, runVerifyAll, handleDesktopSwitch, guardedUseCli };
+  return { runVerifyAccount, runVerifyAll, handleDesktopSwitch };
 }
