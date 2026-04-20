@@ -350,7 +350,10 @@ fn locate_session(config_dir: &Path, session_id: &str) -> Result<(String, PathBu
 /// Single streaming scan that folds every field we care about into a
 /// `SessionRow`. Malformed lines are counted toward `event_count` but
 /// contribute nothing else — matching CC's own tolerance.
-fn scan_session(slug: &str, path: &Path) -> Result<SessionRow, SessionError> {
+///
+/// Exposed to `session_index` so the persistent cache can reuse the
+/// same JSONL-folding logic without copy-pasting the match tree.
+pub(crate) fn scan_session(slug: &str, path: &Path) -> Result<SessionRow, SessionError> {
     let meta = fs::metadata(path)?;
     let file = fs::File::open(path)?;
     let reader = BufReader::new(file);
