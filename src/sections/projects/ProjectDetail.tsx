@@ -38,6 +38,7 @@ export function ProjectDetail({
   onMoved,
   onError,
   onOpenMaintenance,
+  onBack,
 }: {
   path: string;
   /** Live list of projects — powers the session-move target picker. */
@@ -57,6 +58,10 @@ export function ProjectDetail({
   /** When set, empty-project hints get a clickable "Go to Maintenance"
    * nudge so the user doesn't have to navigate manually (G8). */
   onOpenMaintenance?: () => void;
+  /** Single-pane mode: render a Back button so the user can return to
+   * the project list on narrow windows. When omitted the header reads
+   * as detail-first (the surrounding layout is already a split). */
+  onBack?: () => void;
 }) {
   const [detail, setDetail] = useState<ProjectDetailData | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -139,6 +144,17 @@ export function ProjectDetail({
     <main className="content project-detail">
       <header className="project-detail-header">
         <div className="project-detail-title">
+          {onBack && (
+            <button
+              type="button"
+              className="icon-btn"
+              onClick={onBack}
+              aria-label="Back to project list"
+              title="Back to project list"
+            >
+              <Icon name="arrow-left" size={14} />
+            </button>
+          )}
           <h2 className="selectable" title={info.original_path}>
             {info.original_path.split("/").filter(Boolean).pop() ??
               info.sanitized_name}
