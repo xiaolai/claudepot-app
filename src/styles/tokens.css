@@ -387,10 +387,16 @@
   --focus-ring: 0 0 0 3px var(--accent-border);
 
   /* Elevation (old naming) */
-  --shadow-0: none;
-  --shadow-1: var(--shadow-sm);
-  --shadow-2: var(--shadow-md);
-  --shadow-3: var(--shadow-overlay);
+  --shadow-0:      none;
+  --shadow-1:      var(--shadow-sm);
+  --shadow-2:      var(--shadow-md);
+  --shadow-3:      var(--shadow-overlay);
+  --shadow-subtle: var(--shadow-sm);
+
+  /* Selection / grouped bg — legacy component references */
+  --selection:           var(--accent-soft);
+  --selection-inactive:  var(--bg-hover);
+  --grouped-bg:          var(--bg-sunken);
 }
 
 /* ─── Base reset ──────────────────────────────────────────── */

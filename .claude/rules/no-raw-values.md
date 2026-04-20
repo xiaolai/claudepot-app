@@ -252,12 +252,40 @@ literals are explicitly OK and should not be flagged:
 
 | Path | Policy |
 |---|---|
-| `src/styles/tokens.css` | **Only place** raw values live. Every token has both light and dark variants. |
+| `src/styles/tokens.css` | **Only place** raw values live. Every token has both light and dark variants. **The only file allowed to open a `:root { }` block.** |
 | `src/components/primitives/**` | All internal styles must cite tokens. Prop APIs may accept numbers as identifiers (e.g., `Avatar.size`) that resolve to tokens internally. |
 | `src/shell/**` | Full token compliance — no escape hatch. |
 | `src/sections/**` (paper-mono) | Full token compliance. |
-| `src/components/*.tsx` (legacy, unported) | Exempt until migrated. These read legacy aliases (`--surface`, `--border`, `--text`) from `tokens.css`. |
-| `src/App.css` | Legacy surface. New CSS classes are not added here; prefer inline styles + tokens. |
+| `src/components/*.tsx` (legacy, unported) | Full token compliance via the legacy-alias block in `tokens.css`. These files read `--surface`, `--border`, `--text`, etc. which are aliases — they must not introduce raw values. |
+| `src/App.css` | Container for legacy **component classes only**. Must not declare tokens, open `:root`, or contain raw `rgba`/`#hex` literals outside of values that are themselves being migrated. The file is scheduled for piecewise deletion as its consumers migrate to inline tokenized styles. |
+
+## Only `tokens.css` declares tokens
+
+Declaring `:root { --x: ...; }` in any file other than `tokens.css`
+creates a cascade collision: two competing declarations of the same
+custom property, with the last-loaded one winning. That's what
+broke the accent in the first rollout — `src/App.css` declared
+`--accent: AccentColor` on `:root`, and since Vite happened to load
+it after `tokens.css`, every component reading `var(--accent)` got
+the OS system-accent (blue) instead of the paper-mono terracotta.
+
+**The one-declaration rule:** tokens are declared exactly once, in
+`src/styles/tokens.css`. Every other file reads. No `:root { ... }`
+block anywhere else. `@media (prefers-color-scheme: dark) :root { }`
+token overrides also live only in `tokens.css`.
+
+This is BLOCK-level in `/design-review` Pass C. Grep:
+
+```bash
+# Must return zero:
+rg -n ":root\s*\{" src/ --glob '!src/styles/tokens.css'
+
+# App.css must not re-declare any of the canonical tokens.
+# The trailing `:` requirement matches declaration syntax
+# (`  --accent: value;`) and skips prose inside comments.
+rg -n "^\s*--(accent|bg|surface|border|text|ok|bad|warn|focus-ring|shadow|font|dur-|ease-|selection|chrome|grouped-bg)[a-z0-9-]*\s*:" \
+   src/App.css
+```
 
 ## How to extend the token set
 
@@ -277,17 +305,28 @@ If you need a value not yet in `tokens.css`:
 
 ## How to audit
 
-`rg` can catch most violations. Run this before opening a PR:
+`rg` can catch most violations. Run all four before opening a PR.
 
 ```bash
-# Raw hex / rgb / hsl / oklch literals (excluding tokens.css):
+# 1. No :root {} outside tokens.css — enforces one-declaration.
+rg -n ":root\s*\{" src/ --glob '!src/styles/tokens.css'
+
+# 2. App.css must not re-declare canonical tokens.
+rg -n "^\s*--(accent|bg|surface|border|text|ok|bad|warn|focus-ring|shadow|font|dur-|ease-|selection|chrome|grouped-bg)\b" \
+  src/App.css
+
+# 3. Raw hex / rgb / hsl / oklch literals in component code.
+#    App.css still hosts legacy rgba literals inside component rules
+#    (being migrated); exempt it here and the next grep. Paper-mono
+#    directories (primitives, shell, sections) must be clean.
 rg -nE "(#[0-9a-fA-F]{3,8}\b|(rgba?|hsla?|oklch)\s*\()" \
   --glob '!src/styles/tokens.css' \
   --glob '!src/App.css' \
   --glob '!src/components/*.tsx' \
   src/
 
-# Numeric fontSize / padding / margin / gap / width / height:
+# 4. Numeric fontSize / padding / margin / gap / dimension in
+#    paper-mono component code.
 rg -nE "(fontSize|padding|margin|gap|width|height|borderRadius|lineHeight|zIndex|opacity):\s*['\"]?[1-9]" \
   --glob '!src/styles/tokens.css' \
   --glob '!src/App.css' \
@@ -296,8 +335,13 @@ rg -nE "(fontSize|padding|margin|gap|width|height|borderRadius|lineHeight|zIndex
   | rg -v "var\(--"
 ```
 
-Anything the second command flags that isn't in the "allowed
-literals" list above is a BLOCK finding.
+Greps 1 and 2 must return zero hits. Anything grep 3 or 4 surfaces
+that isn't in the "allowed literals" list above is a BLOCK finding.
+
+App.css's broader exemption (for rgba color literals inside
+component classes) is temporary and shrinks each time a class
+migrates. When the last paper-mono legacy alias is gone, delete
+both App.css and the exemption line above.
 
 ## Review integration
 
