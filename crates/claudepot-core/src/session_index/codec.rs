@@ -110,6 +110,12 @@ pub(super) fn load_db_tuples(db: &Connection) -> Result<Vec<IndexTuple>, Session
 /// Full UPSERT. `indexed_at_ms` is passed in so a single refresh pass
 /// stamps all rows with the same wall-clock value — useful for
 /// diagnostics ("which pass wrote this row").
+///
+/// Redacts any `sk-ant-*` token that happens to appear in
+/// `first_user_prompt` before persisting. The on-disk JSONL already
+/// contains that data and redaction there is out of scope, but
+/// copying it verbatim into a secondary cache that a user might
+/// include in a bug report / backup would compound the exposure.
 pub(super) fn upsert_row(
     db: &Connection,
     row: &SessionRow,
@@ -121,6 +127,7 @@ pub(super) fn upsert_row(
         .map(mtime_ns_of_systemtime)
         .unwrap_or(0);
     let models_json = serde_json::to_string(&row.models)?;
+    let first_user_prompt = row.first_user_prompt.as_deref().map(redact_secrets);
 
     db.execute(
         SQL_UPSERT,
@@ -138,7 +145,7 @@ pub(super) fn upsert_row(
             row.message_count as i64,
             row.user_message_count as i64,
             row.assistant_message_count as i64,
-            row.first_user_prompt,
+            first_user_prompt,
             models_json,
             i64::try_from(row.tokens.input).unwrap_or(i64::MAX),
             i64::try_from(row.tokens.output).unwrap_or(i64::MAX),
@@ -153,6 +160,73 @@ pub(super) fn upsert_row(
         ],
     )?;
     Ok(())
+}
+
+/// Replace any `sk-ant-*` token run with `sk-ant-****` so pasted
+/// credentials don't survive into `sessions.db`. A token is
+/// `sk-ant-` followed by one or more `[A-Za-z0-9_-]`.
+fn redact_secrets(input: &str) -> String {
+    const NEEDLE: &str = "sk-ant-";
+    const REPLACEMENT: &str = "sk-ant-****";
+    if !input.contains(NEEDLE) {
+        return input.to_string();
+    }
+    let mut out = String::with_capacity(input.len());
+    let mut rest = input;
+    while let Some(idx) = rest.find(NEEDLE) {
+        out.push_str(&rest[..idx]);
+        out.push_str(REPLACEMENT);
+        let after = &rest[idx + NEEDLE.len()..];
+        // Skip the token body (continuation chars allowed in sk-ant-*).
+        let tail_start = after
+            .char_indices()
+            .find(|(_, c)| !is_token_char(*c))
+            .map(|(i, _)| i)
+            .unwrap_or(after.len());
+        rest = &after[tail_start..];
+    }
+    out.push_str(rest);
+    out
+}
+
+fn is_token_char(c: char) -> bool {
+    c.is_ascii_alphanumeric() || c == '_' || c == '-'
+}
+
+#[cfg(test)]
+mod redact_tests {
+    use super::redact_secrets;
+
+    #[test]
+    fn passthrough_when_no_token() {
+        assert_eq!(redact_secrets("debug this"), "debug this");
+    }
+
+    #[test]
+    fn redacts_a_bare_token() {
+        let out = redact_secrets("here is sk-ant-oat01-AbC123_-xYz end");
+        assert_eq!(out, "here is sk-ant-**** end");
+    }
+
+    #[test]
+    fn redacts_multiple_tokens() {
+        let out = redact_secrets("sk-ant-one sk-ant-two_-MixEd");
+        assert_eq!(out, "sk-ant-**** sk-ant-****");
+    }
+
+    #[test]
+    fn redacts_at_string_boundaries() {
+        assert_eq!(redact_secrets("sk-ant-Abc"), "sk-ant-****");
+        assert_eq!(redact_secrets("sk-ant-Abc\n"), "sk-ant-****\n");
+    }
+
+    #[test]
+    fn leaves_the_bare_prefix_alone_when_not_a_token() {
+        // An `sk-ant-` with no continuation chars becomes the redacted
+        // form anyway (still matches the prefix), which is fine —
+        // better to over-redact than leak.
+        assert_eq!(redact_secrets("sk-ant- space"), "sk-ant-**** space");
+    }
 }
 
 /// Remove one row by path. Used for files that vanished from disk.
