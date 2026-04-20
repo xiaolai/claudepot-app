@@ -50,10 +50,27 @@ export function useActions({ pushToast, refresh, withBusy, addBusy, removeBusy }
       }
     });
 
+  const cancelLogin = async () => {
+    try {
+      await api.accountLoginCancel();
+    } catch (e) {
+      pushToast("error", `Cancel failed: ${e}`);
+    }
+  };
+
   const login = (a: AccountSummary) =>
     withBusy(`re-${a.uuid}`, async () => {
       try {
-        pushToast("info", `Opening browser — sign in as ${a.email}…`);
+        // The "Opening browser…" toast is error-tone because the login
+        // subprocess is long-running and we want the Cancel affordance
+        // (Undo button) to stay visible until the user clicks it OR
+        // the subprocess terminates. Error toasts don't auto-dismiss.
+        pushToast(
+          "error",
+          `Opening browser — sign in as ${a.email}…`,
+          cancelLogin,
+          { undoLabel: "Cancel" },
+        );
         await api.accountLogin(a.uuid);
         pushToast("info", `Signed in as ${a.email}`);
         await refresh();
@@ -67,14 +84,6 @@ export function useActions({ pushToast, refresh, withBusy, addBusy, removeBusy }
         }
       }
     });
-
-  const cancelLogin = async () => {
-    try {
-      await api.accountLoginCancel();
-    } catch (e) {
-      pushToast("error", `Cancel failed: ${e}`);
-    }
-  };
 
   const useDesktop = (a: AccountSummary, noLaunch = false) =>
     withBusy(`desk-${a.uuid}`, async () => {
