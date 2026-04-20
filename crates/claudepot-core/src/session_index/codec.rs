@@ -10,7 +10,7 @@
 
 use crate::session::{SessionRow, TokenUsage};
 use chrono::{DateTime, Utc};
-use rusqlite::{params, Connection, OptionalExtension};
+use rusqlite::{params, Connection};
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -158,6 +158,7 @@ pub(super) fn get_row_by_path(
     db: &Connection,
     file_path: &str,
 ) -> Result<Option<SessionRow>, SessionIndexError> {
+    use rusqlite::OptionalExtension;
     let mut stmt = db.prepare(&format!(
         "{SQL_SELECT_ALL} WHERE file_path = ?1 LIMIT 1"
     ))?;
@@ -271,6 +272,7 @@ ON CONFLICT(file_path) DO UPDATE SET
     indexed_at_ms            = excluded.indexed_at_ms
 "#;
 
+#[cfg(test)]
 const SQL_SELECT_ALL: &str = r#"
 SELECT
     file_path, slug, session_id, file_size_bytes, file_mtime_ns,
