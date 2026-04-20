@@ -32,6 +32,7 @@ const ICON_REFRESH: &[u8] = include_bytes!("../icons/menu/refresh.png");
 const ICON_HOME: &[u8] = include_bytes!("../icons/menu/home.png");
 const ICON_SLIDERS: &[u8] = include_bytes!("../icons/menu/sliders.png");
 const ICON_CHECK: &[u8] = include_bytes!("../icons/menu/check.png");
+const ICON_POWER: &[u8] = include_bytes!("../icons/menu/power.png");
 
 /// Build an icon menu item from pre-rendered PNG bytes.
 fn icon_item(
@@ -117,9 +118,14 @@ pub fn rebuild(app: &AppHandle) -> Result<(), String> {
     let show_item = icon_item(app, ID_SHOW, "Show Claudepot", ICON_HOME)?;
     let settings_item = icon_item(app, ID_SETTINGS, "Settings…", ICON_SLIDERS)?;
 
-    // Quit is intentionally plain — macOS convention reserves no icon
-    // for standard Quit items (see App > Quit in every native app).
-    let quit_item = MenuItemBuilder::with_id(ID_QUIT, "Quit Claudepot")
+    // Quit carries a power glyph for column consistency with the
+    // rest of the stack. macOS convention leaves system Quit items
+    // bare, but here every other row is iconized and a lone
+    // text-only Quit row misaligned the whole menu.
+    let quit_icon = Image::from_bytes(ICON_POWER)
+        .map_err(|e| format!("power icon: {e}"))?;
+    let quit_item = IconMenuItemBuilder::with_id(ID_QUIT, "Quit Claudepot")
+        .icon(quit_icon)
         .accelerator("CmdOrCtrl+Q")
         .build(app)
         .map_err(|e| format!("quit: {e}"))?;
