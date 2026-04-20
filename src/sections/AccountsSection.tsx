@@ -11,7 +11,7 @@ import { NF } from "../icons";
 import { ScreenHeader } from "../shell/ScreenHeader";
 import { AccountsGrid } from "./accounts/AccountsGrid";
 import { AddAccountModal } from "./accounts/AddAccountModal";
-import { isAnomaly } from "./accounts/AnomalyBanner";
+import { HealthChips } from "./accounts/HealthChips";
 import { CtxMenuForAccount } from "./accounts/useAccountContextMenu";
 import { useAccountHandlers } from "./accounts/useAccountHandlers";
 
@@ -148,11 +148,6 @@ export function AccountsSection({
     );
   }, [accounts, filter]);
 
-  const anomalyCount = useMemo(
-    () => accounts.filter(isAnomaly).length,
-    [accounts],
-  );
-
   if (!status) {
     if (loadError) {
       return (
@@ -203,20 +198,11 @@ export function AccountsSection({
     );
   }
 
-  const subtitle = (() => {
-    const n = accounts.length;
-    if (n === 0) return "No accounts registered yet.";
-    const accountsLabel = `${n} account${n === 1 ? "" : "s"}`;
-    return anomalyCount > 0
-      ? `${accountsLabel} · ${anomalyCount} need${anomalyCount === 1 ? "s" : ""} attention`
-      : `${accountsLabel} · all healthy`;
-  })();
-
   return (
     <>
       <ScreenHeader
         title="Accounts"
-        subtitle={subtitle}
+        subtitle={<HealthChips accounts={accounts} />}
         actions={
           <>
             <Button
