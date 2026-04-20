@@ -98,34 +98,35 @@ function anomalyCopy(
 ): { title: string; detail: React.ReactNode } | null {
   if (a.drift) {
     return {
-      title: "Drift detected",
+      title: "Wrong account on this slot",
       detail: (
         <>
-          Blob authenticates as{" "}
+          The credentials saved here actually belong to{" "}
           <strong style={{ color: "var(--fg)" }}>
-            {a.verified_email || "?"}
-          </strong>{" "}
-          — slot is misfiled.
+            {a.verified_email || "another account"}
+          </strong>
+          . Log in again to fix this, or remove this account.
         </>
       ),
     };
   }
   if (a.verify_status === "rejected") {
     return {
-      title: "Server rejected token",
-      detail: "Refresh token is invalid — re-login required.",
+      title: "Server rejected the saved login",
+      detail: "The stored login is no longer valid — log in again to fix.",
     };
   }
   if (a.token_status === "expired") {
     return {
-      title: "Token expired",
-      detail: "Log in again to refresh usage.",
+      title: "Session expired",
+      detail: "Log in again to refresh usage for this account.",
     };
   }
   if (!a.credentials_healthy) {
     return {
-      title: "Credentials missing or corrupt",
-      detail: "Stored blob failed to parse.",
+      title: "Saved login is missing or broken",
+      detail:
+        "The stored credential file couldn't be read. Log in again or remove.",
     };
   }
   return null;

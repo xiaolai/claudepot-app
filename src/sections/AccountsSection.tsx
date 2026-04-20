@@ -457,10 +457,10 @@ export function AccountsSection({
             </>
           }
           onCancel={() => setConfirmRemove(null)}
-          onConfirm={async () => {
+          onConfirm={() => {
             const t = confirmRemove;
             setConfirmRemove(null);
-            await actions.performRemove(t);
+            actions.performRemove(t);
           }}
         />
       )}

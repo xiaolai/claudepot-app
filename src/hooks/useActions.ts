@@ -102,19 +102,50 @@ export function useActions({ pushToast, refresh, withBusy, addBusy, removeBusy }
       }
     });
 
-  const performRemove = (a: AccountSummary) =>
+  const performRemoveImmediate = (a: AccountSummary) =>
     withBusy(`rm-${a.uuid}`, async () => {
       try {
         const r = await api.accountRemove(a.uuid);
         pushToast("info", `Removed ${r.email}`);
-        if (r.warnings.length)
-          pushToast("error", `warnings: ${r.warnings.join(", ")}`);
+        if (r.warnings.length) {
+          // Cleanup warnings are non-fatal (stale Desktop profile file,
+          // etc.) — the account row was still removed successfully.
+          // Use info tone so the surface matches the severity.
+          pushToast("info", `Note: ${r.warnings.join(", ")}`);
+        }
         await refresh();
         rebuildTray();
       } catch (e) {
-        pushToast("error", `remove failed: ${e}`);
+        pushToast("error", `Remove failed: ${e}`);
       }
     });
+
+  /**
+   * 5s undo window before removal. The toast carries both the Undo
+   * affordance and the onCommit callback — tapping Undo cancels the
+   * commit; letting the toast age out triggers the actual
+   * `accountRemove` call. "Undo clickable ⇔ account still exists" is
+   * the invariant, shared with the desktop-switch undo pattern.
+   */
+  const performRemove = (a: AccountSummary) => {
+    let undone = false;
+    pushToast(
+      "info",
+      `Removing ${a.email}…`,
+      () => {
+        undone = true;
+      },
+      {
+        undoMs: 5000,
+        undoLabel: "Undo",
+        dedupeKey: `rm-${a.uuid}`,
+        onCommit: () => {
+          if (undone) return;
+          void performRemoveImmediate(a);
+        },
+      },
+    );
+  };
 
   const performClearCli = async () => {
     addBusy("cli-clear");
