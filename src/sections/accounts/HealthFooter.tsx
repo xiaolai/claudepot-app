@@ -72,15 +72,18 @@ export function HealthFooter({ account: a }: HealthFooterProps) {
           color="var(--fg-faint)"
           style={{ fontSize: "var(--fs-2xs)" }}
         />
-        <span>
+        {/* token_status already carries the remaining-time phrase
+            ("valid (6h 11m remaining)"); appending "· 371m left"
+            was the same data in a different unit. Line stays on
+            one row and reads cleanly. */}
+        <span
+          style={{
+            whiteSpace: "nowrap",
+            overflow: "hidden",
+            textOverflow: "ellipsis",
+          }}
+        >
           token {a.token_status}
-          {a.token_remaining_mins != null &&
-            a.token_status.startsWith("valid") && (
-              <span style={{ color: "var(--fg-faint)" }}>
-                {" · "}
-                {a.token_remaining_mins}m left
-              </span>
-            )}
         </span>
       </Cell>
 

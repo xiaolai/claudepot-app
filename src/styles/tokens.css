@@ -213,6 +213,12 @@
   --avatar-initial-lg:     14px;
   --avatar-initial-xl:     18px;
 
+  /* JetBrains Mono NF has a top-heavy cap-height — even with
+     grid + place-items:center and line-height:1 the glyph ink sits
+     ~6–8% above the geometric centre. A small translateY on an
+     inner wrapper brings the optical weight to the middle. */
+  --avatar-optical-nudge:  6%;
+
   --kbd-min-w:             18px;
   --kbd-h:                 18px;
 

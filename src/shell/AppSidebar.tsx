@@ -131,7 +131,12 @@ export function AppSidebar({
 
       <Divider style={{ margin: "var(--sp-8) var(--sp-12)" }} />
 
-      <SectionLabel>~/.claude</SectionLabel>
+      {/* ~/.claude is reference, not interactive — label a tier
+          fainter than SWAP TARGETS so the eye ranks sections by
+          what it can do with them. */}
+      <SectionLabel>
+        <span style={{ color: "var(--fg-ghost)" }}>~/.claude</span>
+      </SectionLabel>
       <div style={{ padding: "0 var(--sp-8)" }}>
         {FILESYSTEM_ROWS.map((row) => (
           <FsTreeRow
