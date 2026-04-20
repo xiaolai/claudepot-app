@@ -1,17 +1,15 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { api } from "../api";
 import type { AccountSummary } from "../types";
-import { useToasts } from "../hooks/useToasts";
 import { useBusy } from "../hooks/useBusy";
-import { useRefresh } from "../hooks/useRefresh";
 import { useUsage } from "../hooks/useUsage";
 import { useActions } from "../hooks/useActions";
 import { useTauriEvent } from "../hooks/useTauriEvent";
 import { useGlobalShortcuts } from "../hooks/useGlobalShortcuts";
+import { useAppState } from "../providers/AppStateProvider";
 import { ContextMenu, type ContextMenuItem } from "../components/ContextMenu";
 import { CommandPalette } from "../components/CommandPalette";
 import { ConfirmDialog } from "../components/ConfirmDialog";
-import { ToastContainer } from "../components/ToastContainer";
 import { Button } from "../components/primitives/Button";
 import { Glyph } from "../components/primitives/Glyph";
 import { Input } from "../components/primitives/Input";
@@ -23,26 +21,18 @@ import { isAnomaly } from "./accounts/AnomalyBanner";
 
 /**
  * Accounts section. Renders the header, filter bar, and the card grid.
- * State (accounts, usage, verify, toasts, busy-keys, modals, palette,
- * context menus) still lives here since the hooks were authored for
- * this scope — a future cleanup can hoist it into context providers,
- * but the shell's `useAccounts` already re-fetches on window focus so
- * the App-level copy stays close to this section's copy.
+ * Refresh/toast state is lifted to `AppStateProvider` — the shell-level
+ * `StatusIssuesBanner` and this section share the same `/profile` and
+ * `verify_all_accounts` traffic off one useRefresh instance. Per-view
+ * state (usage cache, busy keys, modals, palette) stays local.
  */
 export function AccountsSection({
   onNavigate,
 }: {
   onNavigate?: (section: string, subRoute?: string | null) => void;
 }) {
-  const { toasts, pushToast, dismissToast } = useToasts();
+  const { pushToast, status, accounts, loadError, refresh } = useAppState();
   const busy = useBusy();
-  const {
-    status,
-    accounts,
-    loadError,
-    ccIdentity: _ccIdentity,
-    refresh,
-  } = useRefresh(pushToast);
   const { usage, refreshUsage, refreshUsageFor } = useUsage();
   const actions = useActions({ pushToast, refresh, ...busy });
 
@@ -492,7 +482,6 @@ export function AccountsSection({
           );
         })()}
 
-      <ToastContainer toasts={toasts} onDismiss={dismissToast} />
     </>
   );
 }
