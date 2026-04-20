@@ -276,6 +276,31 @@ function StatusLine({
   );
 }
 
+/**
+ * Color bands for the seg bar and the pct text. Boundaries are fixed
+ * at 20/40/60/80 — the bar transitions through each band visually as
+ * utilization rises, so the stage is readable without reading the
+ * number. Grey ramp for the first three bands (no color drama until
+ * you need it), amber at 60%, red at 80%.
+ */
+const BAND_COLORS = [
+  "var(--fg-faint)", // 0–19%  — plenty of room
+  "var(--fg-muted)", // 20–39% — light use
+  "var(--fg)",       // 40–59% — half used
+  "var(--warn)",     // 60–79% — heads up
+  "var(--danger)",   // 80–100% — critical
+] as const;
+
+function bandIndexForPct(pct: number): number {
+  // Clamp to [0, 4] regardless of input so a 110% server value still lands
+  // in the critical band instead of past the end of the array.
+  return Math.min(BAND_COLORS.length - 1, Math.max(0, Math.floor(pct / 20)));
+}
+
+function colorForPct(pct: number): string {
+  return BAND_COLORS[bandIndexForPct(pct)];
+}
+
 function UsageRow({
   label,
   w,
@@ -288,7 +313,9 @@ function UsageRow({
   labelTooltip?: string;
 }) {
   const pct = Math.round(w.utilization);
-  const high = pct >= 80;
+  const pctColor = colorForPct(pct);
+  // `emph` bumps weight for the 5h row; color follows the band so all
+  // four rows speak the same visual language.
   const resetTip = formatResetTooltip(w.resets_at);
   return (
     <div
@@ -321,17 +348,16 @@ function UsageRow({
       >
         {label}
       </span>
-      <SegBar pct={pct} high={high} />
+      <SegBar pct={pct} />
       <span
         style={{
           fontVariantNumeric: "tabular-nums",
           textAlign: "right",
           fontWeight: 600,
-          color: high
-            ? "var(--warn)"
-            : emph
-              ? "var(--fg)"
-              : "var(--fg-muted)",
+          // Low bands fall back to the emph/ink convention so a calm
+          // bar doesn't suddenly pale the pct text. Only the 60%+
+          // bands (warn/danger) override.
+          color: pct >= 60 ? pctColor : emph ? "var(--fg)" : "var(--fg-muted)",
         }}
       >
         {pct}%
@@ -354,7 +380,7 @@ function UsageRow({
   );
 }
 
-function SegBar({ pct, high }: { pct: number; high: boolean }) {
+function SegBar({ pct }: { pct: number }) {
   const segs = 20;
   // At 20 segments each is 5% of the total, so any utilization
   // below 2.5% rounds to zero filled — the bar reads as "no data"
@@ -367,26 +393,28 @@ function SegBar({ pct, high }: { pct: number; high: boolean }) {
       style={{ display: "flex", gap: "var(--sp-2)", height: "var(--sp-8)" }}
       aria-hidden
     >
-      {Array.from({ length: segs }).map((_, i) => (
-        <div
-          key={i}
-          style={{
-            flex: 1,
-            // Filled segments read as data (muted ink-on-paper), not
-            // brand — terracotta is reserved for the primary CTA and
-            // selected state. Warn tone kicks in at >=80% so a
-            // critical bar still jumps.
-            background:
-              i < filled
-                ? high
-                  ? "var(--warn)"
-                  : "var(--fg-muted)"
-                : "var(--bg-active)",
-            borderRadius: "var(--sp-px)",
-            opacity: i < filled ? 1 : "var(--opacity-segbar)",
-          }}
-        />
-      ))}
+      {Array.from({ length: segs }).map((_, i) => {
+        // Each segment is colored by its *position* on the scale, not
+        // the current pct. At 65% fill, segments in the 60-80% band
+        // glow amber; at 85% the last four segments glow red. The
+        // gradient-through-fill encodes the stage visually without
+        // requiring the user to read the number.
+        const segPct = (i / segs) * 100;
+        const band = BAND_COLORS[bandIndexForPct(segPct)];
+        const isFilled = i < filled;
+        return (
+          <div
+            key={i}
+            style={{
+              flex: 1,
+              background: isFilled ? band : "var(--bg-active)",
+              borderRadius: "var(--sp-px)",
+              opacity: isFilled ? 1 : "var(--opacity-segbar)",
+              transition: "background var(--dur-fast) var(--ease-linear)",
+            }}
+          />
+        );
+      })}
     </div>
   );
 }
