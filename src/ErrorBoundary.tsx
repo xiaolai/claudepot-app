@@ -22,7 +22,7 @@ export class ErrorBoundary extends React.Component<
             <h2>Something went wrong</h2>
             <p className="muted mono">{this.state.error}</p>
             <button
-              className="primary"
+              className="btn primary"
               onClick={() => window.location.reload()}
             >
               Retry

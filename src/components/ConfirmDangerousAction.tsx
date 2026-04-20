@@ -84,12 +84,12 @@ export function ConfirmDangerousAction({
           </div>
         )}
         <div className="modal-actions">
-          <button type="button" onClick={onCancel}>
+          <button type="button" className="btn" onClick={onCancel}>
             Cancel
           </button>
           <button
             type="button"
-            className={danger ? "danger primary" : "primary"}
+            className={danger ? "btn danger primary" : "btn primary"}
             disabled={confirmDisabled}
             onClick={onConfirm}
             autoFocus={typeToConfirm === undefined}

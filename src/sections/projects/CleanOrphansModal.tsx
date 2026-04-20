@@ -236,7 +236,7 @@ export function CleanOrphansModal({
           {state.kind === "done" ? (
             <button
               type="button"
-              className="primary"
+              className="btn primary"
               onClick={closeSafe}
               autoFocus
             >
@@ -246,6 +246,7 @@ export function CleanOrphansModal({
             <>
               <button
                 type="button"
+                className="btn"
                 onClick={closeSafe}
                 disabled={state.kind === "running"}
                 title={
@@ -262,7 +263,7 @@ export function CleanOrphansModal({
               </button>
               <button
                 type="button"
-                className="danger primary"
+                className="btn danger primary"
                 disabled={
                   !(state.kind === "preview" && state.data.orphans_found > 0)
                 }

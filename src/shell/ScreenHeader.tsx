@@ -88,8 +88,9 @@ export function ScreenHeader({
             style={{
               fontSize: "var(--fs-xl)",
               fontWeight: 600,
-              letterSpacing: "var(--ls-tight)",
-              color: "var(--fg)",
+              letterSpacing: "var(--ls-wider)",
+              textTransform: "uppercase",
+              color: "var(--accent-ink)",
               margin: 0,
             }}
           >

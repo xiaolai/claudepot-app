@@ -345,12 +345,12 @@ export function RenameProjectModal({
         </div>
 
         <div className="modal-actions">
-          <button type="button" onClick={onClose}>
+          <button type="button" className="btn" onClick={onClose}>
             Cancel
           </button>
           <button
             type="button"
-            className="primary"
+            className="btn primary"
             disabled={submitDisabled}
             onClick={() => onSubmit(args)}
           >

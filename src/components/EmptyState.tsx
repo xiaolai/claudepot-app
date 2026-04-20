@@ -28,7 +28,7 @@ export function EmptyState({ onAdd }: { onAdd: () => void }) {
         </div>
       </div>
 
-      <button className="primary" onClick={onAdd}>
+      <button className="btn primary" onClick={onAdd}>
         Add current account
       </button>
       <p className="muted onboarding-repeat-hint">
