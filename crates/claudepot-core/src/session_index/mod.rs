@@ -57,26 +57,28 @@ impl SessionIndex {
     /// Creates the parent directory, applies the schema, and enforces
     /// 0600 perms on Unix. Idempotent — re-opening an existing DB is
     /// a no-op save for the schema check.
+    ///
+    /// If the DB file exists but is corrupt (`SQLITE_NOTADB`,
+    /// `SQLITE_CORRUPT`), the bad file is moved aside as
+    /// `sessions.db.corrupt-<epoch_ms>` and a fresh one is created.
+    /// The session index is a pure cache — wipe-and-rebuild is
+    /// always a safe recovery here.
     pub fn open(path: &Path) -> Result<Self, SessionIndexError> {
         if let Some(parent) = path.parent() {
             std::fs::create_dir_all(parent)?;
         }
-        let db = Connection::open(path)?;
-        db.execute_batch("PRAGMA journal_mode=WAL;")?;
-        // Match accounts.db: wait up to 5 s under contention so CLI +
-        // GUI co-access doesn't immediately SQLITE_BUSY.
-        db.busy_timeout(std::time::Duration::from_secs(5))?;
-        apply_schema(&db)?;
-        // Force WAL/SHM sidecars to materialize NOW (via a cheap write
-        // that hits the journal) so the chmod loop below can actually
-        // set their perms. Without this, the sidecars don't exist
-        // yet at open() time and subsequent writes create them with
-        // the process umask (typically 0644) — leaking prompt text
-        // and token totals to other local users.
-        db.execute_batch(
-            "BEGIN IMMEDIATE; INSERT OR IGNORE INTO meta (k, v) VALUES ('_touch','1'); \
-             DELETE FROM meta WHERE k='_touch'; COMMIT;",
-        )?;
+        // `Connection::open` is lazy — it doesn't validate the file
+        // header until the first query. Wrap the full initialization
+        // sequence so corruption detected mid-init (on PRAGMA or
+        // schema apply) also triggers the quarantine path.
+        let db = match Self::init_connection(path) {
+            Ok(c) => c,
+            Err(SessionIndexError::Sql(e)) if is_corrupt_error(&e) => {
+                quarantine_corrupt_db(path)?;
+                Self::init_connection(path)?
+            }
+            Err(e) => return Err(e),
+        };
 
         #[cfg(unix)]
         {
@@ -91,6 +93,27 @@ impl SessionIndex {
         }
 
         Ok(Self { db: Mutex::new(db) })
+    }
+
+    /// Run the full open / pragma / schema / touch dance. Extracted
+    /// so the outer `open()` can retry this whole sequence after
+    /// quarantining a corrupt DB — corruption can first surface on
+    /// PRAGMA or schema DDL, not just at `Connection::open`.
+    fn init_connection(path: &Path) -> Result<Connection, SessionIndexError> {
+        let db = Connection::open(path)?;
+        db.execute_batch("PRAGMA journal_mode=WAL;")?;
+        db.busy_timeout(std::time::Duration::from_secs(5))?;
+        apply_schema(&db)?;
+        // Force WAL/SHM sidecars to materialize NOW so the chmod
+        // loop in open() can narrow their perms. Without this, the
+        // sidecars don't exist yet and later writes create them with
+        // the process umask (typically 0644) — leaking prompt text
+        // and token totals to other local users.
+        db.execute_batch(
+            "BEGIN IMMEDIATE; INSERT OR IGNORE INTO meta (k, v) VALUES ('_touch','1'); \
+             DELETE FROM meta WHERE k='_touch'; COMMIT;",
+        )?;
+        Ok(db)
     }
 
     /// Internal accessor. Kept `pub(crate)` so sibling helpers (the
@@ -274,6 +297,44 @@ fn apply_schema(db: &Connection) -> Result<(), SessionIndexError> {
     Ok(())
 }
 
+/// Detect the two rusqlite error codes that mean "the file isn't a
+/// usable SQLite database". Anything else (I/O, locking, etc.)
+/// propagates — we don't want to quarantine a DB just because the
+/// disk is full.
+fn is_corrupt_error(err: &rusqlite::Error) -> bool {
+    if let rusqlite::Error::SqliteFailure(info, _) = err {
+        matches!(
+            info.code,
+            rusqlite::ErrorCode::NotADatabase | rusqlite::ErrorCode::DatabaseCorrupt
+        )
+    } else {
+        false
+    }
+}
+
+/// Move a corrupt DB (plus any WAL/SHM sidecars) aside so `open()`
+/// can create fresh files without risking data loss — the index is
+/// a cache, so "recovered" just means "rebuild from disk on next
+/// refresh". The quarantined file is preserved (not deleted) so the
+/// user can hand it to support if they care.
+fn quarantine_corrupt_db(path: &Path) -> Result<(), SessionIndexError> {
+    let stamp = chrono::Utc::now().timestamp_millis();
+    let corrupt_path = path.with_extension(format!("db.corrupt-{stamp}"));
+    tracing::warn!(
+        from = %path.display(),
+        to = %corrupt_path.display(),
+        "session_index: quarantining corrupt DB and rebuilding"
+    );
+    std::fs::rename(path, &corrupt_path)?;
+    for sidecar_ext in ["db-wal", "db-shm"] {
+        let side = path.with_extension(sidecar_ext);
+        if side.exists() {
+            let _ = std::fs::remove_file(side);
+        }
+    }
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -437,14 +498,40 @@ mod tests {
     fn refresh_warm_is_a_noop() {
         let (idx, _tmp) = open_index();
         let cfg = TempDir::new().unwrap();
-        write_session(cfg.path(), "-a", "S1", &sample_lines("/a", "S1"));
+        let path = write_session(cfg.path(), "-a", "S1", &sample_lines("/a", "S1"));
         idx.refresh(cfg.path()).unwrap();
+
+        // Snapshot the indexed_at_ms so we can prove the warm refresh
+        // didn't actually re-upsert. scanned==0 alone only proves the
+        // diff returned zero, not that the row was left untouched.
+        let before_indexed_at = read_indexed_at_ms(&idx, &path.to_string_lossy());
+
+        // Same-millisecond successive refreshes would pass anyway;
+        // sleep a tick so "indexed_at_ms unchanged" is a real test.
+        std::thread::sleep(std::time::Duration::from_millis(5));
 
         let stats = idx.refresh(cfg.path()).unwrap();
         assert_eq!(stats.scanned, 0, "warm refresh must not re-scan");
         assert_eq!(stats.deleted, 0);
+        assert_eq!(stats.failed.len(), 0);
         assert_eq!(stats.total_on_disk, 1);
         assert_eq!(idx.row_count().unwrap(), 1);
+
+        let after_indexed_at = read_indexed_at_ms(&idx, &path.to_string_lossy());
+        assert_eq!(
+            before_indexed_at, after_indexed_at,
+            "warm refresh must NOT rewrite the row (indexed_at_ms drift proves an upsert)"
+        );
+    }
+
+    fn read_indexed_at_ms(idx: &SessionIndex, file_path: &str) -> i64 {
+        let db = idx.db();
+        db.query_row(
+            "SELECT indexed_at_ms FROM sessions WHERE file_path = ?1",
+            [file_path],
+            |r| r.get::<_, i64>(0),
+        )
+        .unwrap()
     }
 
     #[test]
@@ -532,6 +619,59 @@ mod tests {
     }
 
     #[test]
+    fn list_all_round_trips_null_and_empty_optional_fields() {
+        // A single malformed JSONL line: no valid events, no cwd, no
+        // timestamps, no models, no git_branch, no cc_version, no
+        // display_slug. Every Optional<_> field should round-trip as
+        // None, not be silently defaulted to a bogus non-None.
+        let (idx, _tmp) = open_index();
+        let cfg = TempDir::new().unwrap();
+        let junk = vec!["{not valid json".to_string()];
+        let path = write_session(cfg.path(), "-junk", "J1", &junk);
+
+        let rows = idx.list_all(cfg.path()).unwrap();
+        assert_eq!(rows.len(), 1);
+        let r = &rows[0];
+        assert_eq!(r.session_id, "J1");
+        assert_eq!(r.event_count, 1, "malformed line still counts as an event");
+        assert_eq!(r.user_message_count, 0);
+        assert_eq!(r.assistant_message_count, 0);
+        assert!(r.first_user_prompt.is_none());
+        assert!(r.models.is_empty());
+        assert!(r.first_ts.is_none());
+        assert!(r.last_ts.is_none());
+        assert!(r.git_branch.is_none());
+        assert!(r.cc_version.is_none());
+        assert!(r.display_slug.is_none());
+        assert!(!r.has_error);
+        // file_size + mtime still populate from fs::metadata.
+        assert!(r.file_size_bytes > 0);
+        assert!(r.last_modified.is_some());
+        // project_path falls back to unsanitize(slug) when no cwd.
+        assert!(r.project_from_transcript == false);
+        // Path round-trips byte-exactly.
+        assert_eq!(r.file_path, path);
+    }
+
+    #[test]
+    fn list_all_round_trips_non_ascii_text() {
+        let (idx, _tmp) = open_index();
+        let cfg = TempDir::new().unwrap();
+        // Chinese + emoji + accented Latin. If any column gets
+        // round-tripped through a latin-1 path or corrupts the bytes,
+        // the assertion will fire.
+        let line = r#"{"type":"user","message":{"role":"user","content":"修复 build 🐛 café"},"timestamp":"2026-04-10T10:00:00Z","cwd":"/á","gitBranch":"feature/中文-branch","sessionId":"N1"}"#;
+        write_session(cfg.path(), "-accented", "N1", &vec![line.to_string()]);
+
+        let rows = idx.list_all(cfg.path()).unwrap();
+        assert_eq!(rows.len(), 1);
+        let r = &rows[0];
+        assert_eq!(r.first_user_prompt.as_deref(), Some("修复 build 🐛 café"));
+        assert_eq!(r.project_path, "/á");
+        assert_eq!(r.git_branch.as_deref(), Some("feature/中文-branch"));
+    }
+
+    #[test]
     fn refresh_redacts_sk_ant_tokens_in_first_user_prompt() {
         let (idx, _tmp) = open_index();
         let cfg = TempDir::new().unwrap();
@@ -588,6 +728,35 @@ mod tests {
     // -----------------------------------------------------------------
     // rebuild() tests
     // -----------------------------------------------------------------
+
+    #[test]
+    fn open_quarantines_corrupt_db_and_creates_fresh() {
+        use std::io::Write as _;
+        let tmp = TempDir::new().unwrap();
+        let path = tmp.path().join("sessions.db");
+        // Plant a non-SQLite file at the expected path.
+        let mut f = std::fs::File::create(&path).unwrap();
+        f.write_all(b"this is not a sqlite database").unwrap();
+        drop(f);
+
+        let idx = SessionIndex::open(&path).expect("open should recover");
+        assert_eq!(idx.row_count().unwrap(), 0);
+        assert_eq!(
+            idx.schema_version().unwrap().as_deref(),
+            Some(schema::SCHEMA_VERSION)
+        );
+
+        // A quarantined file must exist alongside for manual forensics.
+        let siblings: Vec<_> = std::fs::read_dir(tmp.path())
+            .unwrap()
+            .filter_map(|e| e.ok())
+            .map(|e| e.file_name().to_string_lossy().into_owned())
+            .collect();
+        assert!(
+            siblings.iter().any(|n| n.starts_with("sessions.db.corrupt-")),
+            "quarantined file must exist; saw {siblings:?}"
+        );
+    }
 
     #[test]
     fn rebuild_empty_is_noop() {
