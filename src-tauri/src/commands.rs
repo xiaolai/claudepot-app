@@ -1339,6 +1339,21 @@ pub fn session_read_path(file_path: String) -> Result<crate::dto::SessionDetailD
     Ok(crate::dto::SessionDetailDto::from(&detail))
 }
 
+/// Drop every cached row in `sessions.db` and repopulate from disk.
+/// The (size, mtime_ns) guard handles ~every realistic transcript
+/// edit; this is the escape hatch for filesystems with coarse mtime
+/// resolution, clock skew, or anything that defeats the guard. The
+/// next `session_list_all` call re-scans everything from cold.
+#[tauri::command]
+pub fn session_index_rebuild() -> Result<(), String> {
+    let data_dir = paths::claudepot_data_dir();
+    let db_path = data_dir.join("sessions.db");
+    let idx = claudepot_core::session_index::SessionIndex::open(&db_path)
+        .map_err(|e| format!("open session index: {e}"))?;
+    idx.rebuild()
+        .map_err(|e| format!("rebuild session index: {e}"))
+}
+
 // ---------------------------------------------------------------------------
 // Protected paths — Settings → Protected pane
 // ---------------------------------------------------------------------------
