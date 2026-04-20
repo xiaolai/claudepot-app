@@ -26,6 +26,12 @@ pnpm test:coverage                   # React with coverage report
 - `src-tauri/src/dto.rs` — serde DTOs crossing to JS. Credentials never cross.
 - `src/App.tsx` + `src/api.ts` + `src/types.ts` — React UI, plain CSS.
 - `AccountStore.db` is `Mutex<Connection>` so stores can cross `await` points in Tauri commands.
+- Two SQLite files live in `~/.claudepot/` (override with `CLAUDEPOT_DATA_DIR`):
+  - `accounts.db` — authoritative account + verification state, linked to Keychain.
+  - `sessions.db` — persistent cache for the Sessions tab. One row per
+    `.jsonl` transcript, keyed by file_path; `(size, mtime_ns)` is the
+    re-parse guard. Owned by `claudepot-core::session_index`. Rebuild
+    via Settings → Cleanup or `claudepot session rebuild-index`.
 
 ## Test on test-host
 
