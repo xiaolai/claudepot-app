@@ -255,8 +255,14 @@
   --backdrop-blur-sm: 2px;
   --backdrop-blur-md: 3px;
 
-  /* ── Glyph vertical-align shift (NF Mono baseline metric) ── */
+  /* ── Glyph optical nudge (NF Mono baseline metric) ──────────
+     --glyph-baseline-shift is negative for use with `vertical-align`
+     (lowers the inline-level glyph), --glyph-optical-nudge is its
+     positive counterpart for use with `transform: translateY(...)`
+     in flex/grid contexts where vertical-align is a no-op. Same
+     magnitude, opposite sign, same visual effect. */
   --glyph-baseline-shift: -0.08em;
+  --glyph-optical-nudge:   0.08em;
 
   /* ── Font stack ─────────────────────────────────────────── */
   --font:      'JetBrainsMonoNF', 'JetBrains Mono', ui-monospace, Menlo, monospace;
