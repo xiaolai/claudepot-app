@@ -52,6 +52,7 @@ import { useTheme } from "./hooks/useTheme";
 import { OperationsProvider, useOperations } from "./hooks/useOperations";
 import { AppStateProvider, useAppState } from "./providers/AppStateProvider";
 import { api } from "./api";
+import { listen } from "@tauri-apps/api/event";
 import type { RunningOpInfo } from "./types";
 import { WindowChrome, AppSidebar, AppStatusBar } from "./shell";
 
@@ -124,6 +125,64 @@ function AppShell() {
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, [setSection]);
+
+  // App menu bar + tray menu both emit `app-menu` with a string id as
+  // payload. Routing lives here (not in the section) because nav items
+  // need the shell-level setSection. Action items delegate to the
+  // section via window events to avoid entangling state trees.
+  useEffect(() => {
+    const unlistenPromise = listen<string>("app-menu", (event) => {
+      const cmd = event.payload;
+      if (cmd.startsWith("app-menu:nav:")) {
+        const sub = cmd.substring("app-menu:nav:".length).split(":")[0];
+        if (sectionIds.includes(sub)) setSection(sub);
+        return;
+      }
+      if (cmd === "app-menu:view:toggle-theme") {
+        toggleTheme();
+        return;
+      }
+      if (cmd === "app-menu:view:reload") {
+        void refreshAccounts();
+        return;
+      }
+      if (cmd === "app-menu:account:login-browser") {
+        setSection("accounts");
+        window.dispatchEvent(new CustomEvent("cp-open-add"));
+        return;
+      }
+      if (cmd === "app-menu:account:sync-cc") {
+        api
+          .syncFromCurrentCc()
+          .then((email) =>
+            pushToast(
+              "info",
+              email ? `Synced ${email} from CC.` : "Nothing to sync.",
+            ),
+          )
+          .catch((e) => pushToast("error", `Sync failed: ${e}`));
+        return;
+      }
+      if (cmd === "app-menu:account:verify-all") {
+        api
+          .verifyAllAccounts()
+          .then(() => {
+            pushToast("info", "Verify all complete.");
+            void refreshAccounts();
+          })
+          .catch((e) => pushToast("error", `Verify failed: ${e}`));
+        return;
+      }
+      if (cmd === "app-menu:help:copy-diag") {
+        setSection("settings");
+        pushToast("info", "Open Settings → Diagnostics and press Copy.");
+        return;
+      }
+    });
+    return () => {
+      void unlistenPromise.then((f) => f());
+    };
+  }, [setSection, toggleTheme, refreshAccounts, pushToast]);
 
   const onRepairSubview =
     section === "projects" &&

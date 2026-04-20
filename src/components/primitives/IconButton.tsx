@@ -1,8 +1,9 @@
 import { type CSSProperties, type MouseEvent, useState } from "react";
+import type { NfIcon } from "../../icons";
 import { Glyph } from "./Glyph";
 
 interface IconButtonProps {
-  glyph: string;
+  glyph: NfIcon;
   onClick?: () => void;
   /**
    * Passthrough for `mousedown` — mainly for Tauri drag regions,

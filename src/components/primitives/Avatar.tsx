@@ -1,4 +1,5 @@
 import { Glyph } from "./Glyph";
+import type { NfIcon } from "../../icons";
 
 export type AvatarSize = "2xs" | "xs" | "sm" | "md" | "lg" | "xl";
 
@@ -13,7 +14,7 @@ interface AvatarProps {
    */
   size?: AvatarSize | number;
   /** NF codepoint to render instead of the initial. */
-  glyph?: string;
+  glyph?: NfIcon;
 }
 
 const SIZE_TOKEN: Record<

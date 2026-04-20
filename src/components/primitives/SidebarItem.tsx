@@ -1,8 +1,9 @@
 import { type ReactNode, useState } from "react";
+import type { NfIcon } from "../../icons";
 import { Glyph } from "./Glyph";
 
 interface SidebarItemProps {
-  glyph?: string;
+  glyph?: NfIcon;
   label: string;
   active?: boolean;
   badge?: ReactNode;

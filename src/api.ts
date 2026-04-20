@@ -16,6 +16,7 @@ import type {
   PendingJournalsSummary,
   ProjectDetail,
   ProjectInfo,
+  Preferences,
   ProtectedPath,
   RegisterOutcome,
   RemoveOutcome,
@@ -249,4 +250,15 @@ export const api = {
     invoke<void>("protected_paths_remove", { path }),
   /** Restore the implicit defaults; returns the resulting list. */
   protectedPathsReset: () => invoke<ProtectedPath[]>("protected_paths_reset"),
+
+  // ---------- Preferences (Settings → General) ----------
+  /** Read the current persisted UI preferences. */
+  preferencesGet: () => invoke<Preferences>("preferences_get"),
+  /**
+   * Toggle hide-dock-icon. Applies `set_activation_policy` immediately
+   * on macOS (Accessory = tray-only; Regular = dock + menu bar), then
+   * persists the boolean. No-op on Windows/Linux.
+   */
+  preferencesSetHideDockIcon: (hide: boolean) =>
+    invoke<void>("preferences_set_hide_dock_icon", { hide }),
 };

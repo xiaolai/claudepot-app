@@ -6,10 +6,11 @@ import {
   type ReactNode,
   useState,
 } from "react";
+import type { NfIcon } from "../../icons";
 import { Glyph } from "./Glyph";
 
 interface InputProps {
-  glyph?: string;
+  glyph?: NfIcon;
   placeholder?: string;
   value?: string;
   onChange?: (e: ChangeEvent<HTMLInputElement>) => void;

@@ -1,4 +1,5 @@
 import { Glyph } from "../../components/primitives/Glyph";
+import type { NfIcon } from "../../icons";
 import { NF } from "../../icons";
 import type { UsageEntry, UsageWindow } from "../../types";
 import { formatResetTime, formatResetTooltip } from "./format";
@@ -254,7 +255,7 @@ function StatusLine({
   tone,
   children,
 }: {
-  glyph: string;
+  glyph: NfIcon;
   tone: "muted" | "warn";
   children: React.ReactNode;
 }) {

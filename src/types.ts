@@ -213,6 +213,16 @@ export interface ProtectedPath {
   source: "default" | "user";
 }
 
+/**
+ * Persisted UI preferences. Backed by `preferences.json` in the
+ * Claudepot data dir; read synchronously at Rust startup.
+ */
+export interface Preferences {
+  /** macOS-only: when true, the app runs tray-only (no dock icon, no
+   *  Cmd+Tab, no app menu bar). No-op on Windows/Linux. */
+  hide_dock_icon: boolean;
+}
+
 export interface DryRunPlan {
   would_move_dir: boolean;
   old_cc_dir: string;

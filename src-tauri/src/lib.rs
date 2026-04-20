@@ -1,6 +1,8 @@
+mod app_menu;
 mod commands;
 mod dto;
 mod ops;
+mod preferences;
 mod state;
 mod tray;
 
@@ -17,15 +19,44 @@ pub fn run() {
         )
         .try_init();
 
+    // Load persisted preferences BEFORE the builder constructs anything
+    // that might need them. `hide_dock_icon` in particular must reach
+    // `set_activation_policy()` inside the very first `setup()` tick to
+    // avoid a visible dock-icon flash on cold launch.
+    let prefs = preferences::Preferences::load();
+    let hide_dock = prefs.hide_dock_icon;
+
+    // `mut` is only consumed by the debug-only plugin block below;
+    // release builds don't touch it. Silence the release warning here.
+    #[cfg_attr(not(debug_assertions), allow(unused_mut))]
     let mut builder = tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
-        .setup(|app| {
+        .plugin(tauri_plugin_autostart::init(
+            tauri_plugin_autostart::MacosLauncher::LaunchAgent,
+            None,
+        ))
+        .setup(move |app| {
             use tauri::{
                 image::Image,
                 menu::MenuEvent,
                 tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent},
                 Listener, Manager,
             };
+
+            // First priority: apply activation policy before the window
+            // is materialized. On macOS this hides the dock icon and
+            // removes the app from Cmd+Tab.
+            #[cfg(target_os = "macos")]
+            if hide_dock {
+                let _ = app.set_activation_policy(tauri::ActivationPolicy::Accessory);
+            }
+
+            // Application menu bar (macOS top-of-screen; Windows/Linux
+            // per-window). Accessory-mode apps on macOS don't render a
+            // menu bar regardless, but Setting it is still safe.
+            if let Err(e) = app_menu::install(app.handle()) {
+                tracing::warn!("app menu install failed: {e}");
+            }
 
             let icon_bytes = include_bytes!("../icons/tray-iconTemplate@2x.png");
             let icon = Image::from_bytes(icon_bytes)?;
@@ -55,7 +86,12 @@ pub fn run() {
                     }
                 })
                 .on_menu_event(|app, event: MenuEvent| {
-                    tray::handle_menu_event(app, event.id().as_ref());
+                    let id = event.id().as_ref();
+                    if id.starts_with("app-menu:") {
+                        app_menu::handle_menu_event(app, id);
+                    } else {
+                        tray::handle_menu_event(app, id);
+                    }
                 })
                 .build(app)?;
 
@@ -74,6 +110,7 @@ pub fn run() {
         .manage(state::LoginState::default())
         .manage(state::DryRunRegistry::default())
         .manage(ops::RunningOps::new())
+        .manage(preferences::PreferencesState::new(prefs))
         .manage(claudepot_core::services::usage_cache::UsageCache::new());
 
     #[cfg(debug_assertions)]
@@ -128,6 +165,8 @@ pub fn run() {
             commands::protected_paths_add,
             commands::protected_paths_remove,
             commands::protected_paths_reset,
+            commands::preferences_get,
+            commands::preferences_set_hide_dock_icon,
         ])
         .run(tauri::generate_context!())
         .unwrap_or_else(|e| {

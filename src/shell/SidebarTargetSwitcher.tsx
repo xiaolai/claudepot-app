@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import type { NfIcon } from "../icons";
 import { Avatar, avatarColorFor } from "../components/primitives/Avatar";
 import { Glyph } from "../components/primitives/Glyph";
 import { NF } from "../icons";
@@ -9,7 +10,7 @@ export type SwapTargetId = "cli" | "desktop";
 interface SwapTarget {
   id: SwapTargetId;
   label: string;
-  glyph: string;
+  glyph: NfIcon;
 }
 
 interface SidebarTargetSwitcherProps {

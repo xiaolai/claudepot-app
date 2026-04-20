@@ -1,11 +1,12 @@
 import type { ReactNode } from "react";
+import type { NfIcon } from "../../icons";
 import { Button } from "../../components/primitives/Button";
 import { DevBadge } from "../../components/primitives/DevBadge";
 import { Glyph } from "../../components/primitives/Glyph";
 import { NF } from "../../icons";
 
 interface ActionCardProps {
-  glyph: string;
+  glyph: NfIcon;
   title: string;
   subtitle: ReactNode;
   /** Backend command name, shown as a DevBadge when Developer mode is on. */
@@ -15,7 +16,7 @@ interface ActionCardProps {
   disabledHint?: string;
   onClick?: () => void;
   cta: string;
-  ctaGlyph?: string;
+  ctaGlyph?: NfIcon;
   /** Accent styling — used for the primary action in a modal. */
   accent?: boolean;
   children?: ReactNode;

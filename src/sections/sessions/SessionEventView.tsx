@@ -1,4 +1,5 @@
 import { type CSSProperties, useState } from "react";
+import type { NfIcon } from "../../icons";
 import { Glyph } from "../../components/primitives/Glyph";
 import { Tag } from "../../components/primitives/Tag";
 import { NF } from "../../icons";
@@ -284,7 +285,7 @@ function MiniLine({
   tone,
   children,
 }: {
-  glyph: string;
+  glyph: NfIcon;
   tone: "muted" | "ghost" | "warn";
   children: React.ReactNode;
 }) {

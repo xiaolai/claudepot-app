@@ -109,6 +109,14 @@ export function AccountsSection({
     return () => window.removeEventListener("cp-open-palette", onOpen);
   }, []);
 
+  // Add-account bridge — the macOS app menu and the tray menu both
+  // dispatch this to open the AddAccountModal from outside the section.
+  useEffect(() => {
+    const onOpen = () => setShowAdd(true);
+    window.addEventListener("cp-open-add", onOpen);
+    return () => window.removeEventListener("cp-open-add", onOpen);
+  }, []);
+
   // Shell-level drift banners deep-link into a specific account via
   // `cp-focus-account`. The CustomEvent payload is the target UUID;
   // we find the matching card by data attribute and bring it into view.

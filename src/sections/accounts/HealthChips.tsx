@@ -1,4 +1,5 @@
 import { Glyph } from "../../components/primitives/Glyph";
+import type { NfIcon } from "../../icons";
 import { NF } from "../../icons";
 import type { AccountSummary } from "../../types";
 
@@ -39,7 +40,7 @@ function count(
 }
 
 interface ChipDef {
-  glyph: string;
+  glyph: NfIcon;
   tone: string;
   count: number;
   title: string;

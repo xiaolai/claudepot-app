@@ -1384,3 +1384,47 @@ pub fn protected_paths_reset() -> Result<Vec<ProtectedPathDto>, String> {
         .map_err(|e| format!("protected paths list failed: {e}"))?;
     Ok(list.iter().map(ProtectedPathDto::from).collect())
 }
+
+// ---------------------------------------------------------------------------
+// Preferences — Settings → General pane
+// ---------------------------------------------------------------------------
+
+/// Read the current preferences snapshot. Cheap — a clone of the
+/// mutex-guarded record.
+#[tauri::command]
+pub fn preferences_get(
+    state: tauri::State<'_, crate::preferences::PreferencesState>,
+) -> Result<crate::preferences::Preferences, String> {
+    Ok(state
+        .0
+        .lock()
+        .map_err(|e| format!("preferences lock: {e}"))?
+        .clone())
+}
+
+/// Toggle the dock-icon visibility (macOS only). On non-macOS platforms
+/// the call still persists the boolean so the UI round-trips cleanly,
+/// but the activation policy is a no-op.
+#[tauri::command]
+pub fn preferences_set_hide_dock_icon(
+    #[allow(unused_variables)] app: tauri::AppHandle,
+    state: tauri::State<'_, crate::preferences::PreferencesState>,
+    hide: bool,
+) -> Result<(), String> {
+    #[cfg(target_os = "macos")]
+    {
+        let policy = if hide {
+            tauri::ActivationPolicy::Accessory
+        } else {
+            tauri::ActivationPolicy::Regular
+        };
+        app.set_activation_policy(policy)
+            .map_err(|e| format!("set_activation_policy: {e}"))?;
+    }
+    let mut p = state
+        .0
+        .lock()
+        .map_err(|e| format!("preferences lock: {e}"))?;
+    p.hide_dock_icon = hide;
+    p.save()
+}

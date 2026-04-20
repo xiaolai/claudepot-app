@@ -1,56 +1,51 @@
 import type { CSSProperties } from "react";
+import type { NfIcon } from "../../icons";
 
 interface GlyphProps {
-  /** NF codepoint (string). Use `import { NF } from '@/icons'`. */
-  g: string;
+  /** Lucide icon component (e.g. `NF.user`). */
+  g: NfIcon;
   /**
-   * Optional override size. Accepts a CSS length string
-   * (`"var(--sp-32)"` — preferred) or a raw px number (escape
-   * hatch). When omitted, the glyph inherits the surrounding
-   * element's font-size.
+   * Render size. Accepts a CSS length string (`"var(--sp-32)"`) or a
+   * raw px number. Defaults to `1em` so the icon picks up the
+   * surrounding font-size.
    */
   size?: number | string;
   /** Override color. Defaults to `currentColor`. */
   color?: CSSProperties["color"];
+  /** Override stroke width. Lucide's default is 2; we use 1.75 to
+   * match paper-mono's lighter register. */
+  strokeWidth?: number;
   className?: string;
   style?: CSSProperties;
-  /** Accessible label. Omit for decorative glyphs (aria-hidden). */
+  /** Accessible label. Omit for decorative icons (aria-hidden). */
   "aria-label"?: string;
   title?: string;
 }
 
 /**
- * Mono-rendered Nerd Font icon. By default the glyph is rendered at
- * `1.2em` — NF Mono's visible ink sits in the upper half of the em
- * cell, so matching surrounding font-size verbatim makes icons read
- * visibly smaller than the text cap-height next to them. The 20%
- * bump brings glyph ink to roughly the same visual weight as body
- * caps. Pass `size` to override (explicit CSS length or raw px).
- * Color inherits.
+ * Thin wrapper around a Lucide icon component. Enforces paper-mono's
+ * neutral stroke weight and inherits the surrounding font color by
+ * default. The inline-block wrapper keeps vertical alignment
+ * consistent with adjacent text (Lucide's SVG is centered on the
+ * text baseline only when the parent sets `line-height: 1`).
  */
 export function Glyph({
-  g,
+  g: Icon,
   size,
   color,
+  strokeWidth = 1.75,
   className,
   style,
   "aria-label": ariaLabel,
   title,
 }: GlyphProps) {
   const decorative = ariaLabel === undefined;
-  // fontSize controls the glyph's actual rendered cell height.
-  // When no size is passed we scale up to 1.2em so the icon ink
-  // matches the visual weight of surrounding text; explicit sizes
-  // (string or number) win.
-  const fontSize =
+  const sizeStr =
     size == null
-      ? "1.2em"
+      ? "1em"
       : typeof size === "number"
         ? `${size}px`
         : size;
-  // Width is 1em of the element's own (now-scaled) font-size. This
-  // keeps a fixed aspect-ratio monospace cell (so list icon columns
-  // still line up) without re-widening by an extra 20%.
   return (
     <span
       aria-hidden={decorative || undefined}
@@ -59,20 +54,23 @@ export function Glyph({
       title={title}
       className={className}
       style={{
-        fontFamily: "var(--font)",
-        fontSize,
+        display: "inline-flex",
+        alignItems: "center",
+        justifyContent: "center",
+        width: sizeStr,
+        height: sizeStr,
         color,
-        display: "inline-block",
-        width: "1em",
-        textAlign: "center",
-        lineHeight: "var(--lh-flat)",
-        fontFeatureSettings: "normal",
-        verticalAlign: "var(--glyph-baseline-shift)",
         flexShrink: 0,
+        verticalAlign: "var(--glyph-baseline-shift, -0.1em)",
         ...style,
       }}
     >
-      {g}
+      <Icon
+        size="100%"
+        strokeWidth={strokeWidth}
+        absoluteStrokeWidth={false}
+        aria-hidden="true"
+      />
     </span>
   );
 }

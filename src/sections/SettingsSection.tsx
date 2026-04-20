@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import type { NfIcon } from "../icons";
 import { api } from "../api";
 import { Button } from "../components/primitives/Button";
 import { Glyph } from "../components/primitives/Glyph";
@@ -28,7 +29,7 @@ type Tab =
 const TAB_DEFS: ReadonlyArray<{
   id: Tab;
   label: string;
-  glyph: string;
+  glyph: NfIcon;
   group: "core" | "prefs" | "advanced";
 }> = [
   { id: "general",     label: "General",        glyph: NF.sliders,  group: "core" },
@@ -207,6 +208,35 @@ function GeneralPane({
     }
   });
   const [devMode, setDevMode] = useDevMode();
+  const [hideDock, setHideDock] = useState<boolean | null>(null);
+  const [launchAtLogin, setLaunchAtLogin] = useState<boolean | null>(null);
+  const [isMac, setIsMac] = useState<boolean>(false);
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const [prefs, status, { isEnabled }] = await Promise.all([
+          api.preferencesGet(),
+          api.appStatus(),
+          import("@tauri-apps/plugin-autostart"),
+        ]);
+        if (cancelled) return;
+        setHideDock(prefs.hide_dock_icon);
+        setIsMac(status.platform === "macos");
+        try {
+          setLaunchAtLogin(await isEnabled());
+        } catch {
+          setLaunchAtLogin(false);
+        }
+      } catch (e) {
+        if (!cancelled) pushToast("error", `Preferences load failed: ${e}`);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [pushToast]);
 
   const changeStart = useCallback(
     (v: string) => {
@@ -219,6 +249,40 @@ function GeneralPane({
       }
     },
     [pushToast],
+  );
+
+  const toggleHideDock = useCallback(
+    async (next: boolean) => {
+      const prev = hideDock;
+      setHideDock(next);
+      try {
+        await api.preferencesSetHideDockIcon(next);
+        pushToast(
+          "info",
+          next ? "Dock icon hidden — tray-only mode." : "Dock icon restored.",
+        );
+      } catch (e) {
+        setHideDock(prev);
+        pushToast("error", `Toggle failed: ${e}`);
+      }
+    },
+    [hideDock, pushToast],
+  );
+
+  const toggleLaunchAtLogin = useCallback(
+    async (next: boolean) => {
+      const prev = launchAtLogin;
+      setLaunchAtLogin(next);
+      try {
+        const mod = await import("@tauri-apps/plugin-autostart");
+        if (next) await mod.enable();
+        else await mod.disable();
+      } catch (e) {
+        setLaunchAtLogin(prev);
+        pushToast("error", `Launch-at-login toggle failed: ${e}`);
+      }
+    },
+    [launchAtLogin, pushToast],
   );
 
   return (
@@ -239,6 +303,23 @@ function GeneralPane({
         </select>
       </Row>
       <Row
+        label="Launch at login"
+        hint="Claudepot starts automatically when you log in."
+      >
+        <Toggle
+          on={launchAtLogin === true}
+          onChange={toggleLaunchAtLogin}
+        />
+      </Row>
+      {isMac && (
+        <Row
+          label="Hide dock icon"
+          hint="Tray-only mode: no dock icon, no Cmd+Tab, no app menu bar. The window still opens from the tray."
+        >
+          <Toggle on={hideDock === true} onChange={toggleHideDock} />
+        </Row>
+      )}
+      <Row
         label="Developer mode"
         hint="Reveals backend command names, raw paths, and internal identifiers next to their human-facing labels."
       >
@@ -254,7 +335,7 @@ function GeneralPane({
 
 function AppearancePane() {
   const { mode, resolved, setMode } = useTheme();
-  const options: { value: ThemeMode; label: string; glyph?: string }[] = [
+  const options: { value: ThemeMode; label: string; glyph?: NfIcon }[] = [
     { value: null, label: "System", glyph: NF.cpu },
     { value: "light", label: "Light", glyph: NF.sun },
     { value: "dark", label: "Dark", glyph: NF.moon },

@@ -1,4 +1,5 @@
 import { NF } from "../icons";
+import type { NfIcon } from "../icons";
 
 /**
  * Primary-nav section metadata. The shell's Sidebar renders these in
@@ -13,7 +14,7 @@ import { NF } from "../icons";
 export interface SectionDef {
   id: string;
   label: string;
-  glyph: string;
+  glyph: NfIcon;
 }
 
 export const sections: readonly SectionDef[] = [
