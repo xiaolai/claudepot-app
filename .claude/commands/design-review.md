@@ -185,12 +185,30 @@ Mechanical. A linter could do this — run it consistently.
 
 ### BLOCK-level
 
+- [ ] **Only `tokens.css` declares tokens.** A `:root { }` block (or a
+  `@media … :root { }` token override) in any other file creates a
+  cascade collision with the paper-mono system. This is the
+  root-cause bug the design team called out after the first
+  rollout: `src/App.css` had `:root { --accent: AccentColor; … }`
+  which resolved to the OS system accent (blue), stomping the
+  terracotta. Grep must return zero:
+  ```
+  rg -n ":root\s*\{" src/ --glob '!src/styles/tokens.css'
+  ```
+
+- [ ] **App.css does not redeclare canonical tokens.** The legacy
+  container is allowed to carry component classes only. Grep:
+  ```
+  rg -n "^\s*--(accent|bg|surface|border|text|ok|bad|warn|focus-ring|shadow|font|dur-|ease-|selection|chrome|grouped-bg)[a-z0-9-]*\s*:" \
+    src/App.css
+  ```
+  Must return zero.
+
 - [ ] **No raw values anywhere in paper-mono code.** Per
   `no-raw-values.md`, every color, font size, spacing, dimension,
   shadow, radius, duration, easing, opacity, border width, line
   height, letter spacing, and z-index comes from a token in
-  `src/styles/tokens.css`. Run the audit greps in that rule file
-  before approving:
+  `src/styles/tokens.css`. Run the audit greps:
   ```
   rg -nE "(#[0-9a-fA-F]{3,8}\b|(rgba?|hsla?|oklch)\s*\()" \
     --glob '!src/styles/tokens.css' --glob '!src/App.css' \
@@ -201,8 +219,8 @@ Mechanical. A linter could do this — run it consistently.
   ```
   Anything surfaced that is not on the allow-list in
   `no-raw-values.md` (0, keywords, percentages, fr, font weights) is
-  BLOCK. Legacy unported components under `src/components/*.tsx`
-  and `src/App.css` are currently exempt and thus excluded above.
+  BLOCK. The `App.css` exemption above covers only rgba literals
+  inside component classes, not token declarations.
 - [ ] Every new color token has both light and dark values defined
   in `src/styles/tokens.css` (principle §9).
 - [ ] New color tokens occupy a defined role (background / surface /

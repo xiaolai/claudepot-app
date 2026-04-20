@@ -1,147 +1,25 @@
 /* ==========================================================================
-   Claudepot — macOS Dialect (quiet dev register)
-   System color tokens + JetBrainsMono Nerd Font Mono everywhere.
-   Not strict HIG: this is a dev utility, not an AppKit app pretending.
+   Claudepot — legacy component styles
+
+   Paper-mono tokens (colors, spacing, type, shadows, motion) live in
+   src/styles/tokens.css. This file now holds only component classes
+   for unported surfaces (banners, running-op strip, confirm-dangerous,
+   rename/clean/adopt/move modals, repair view, operation-progress,
+   context menu, command palette, toasts, etc.).
+
+   HARD RULE: this file must not open a :root block or declare any
+   global design token (--accent, --bg, --surface, --border, --text,
+   --ok, --bad, --warn, --focus-ring, --shadow-*, --font, --font-mono,
+   --dur-*, --ease-*). tokens.css owns every one of those.
+
+   Lint (design-review.md Pass C, no-raw-values.md):
+     rg -n ":root\s*\{" src/ --glob '!src/styles/tokens.css'     # must be empty
+     rg -n "^\s*--(accent|bg|surface|border|text|ok|bad|warn|\
+focus-ring|shadow|font|dur-|ease-)" src/App.css                   # must be empty
+
+   Component classes here are gradually migrating to paper-mono
+   primitives + inline tokenized styles. Do not grow this file.
    ========================================================================== */
-
-/* ---------- font-face: JetBrainsMono Nerd Font Mono ---------- */
-/* Mono variant = every glyph (including ~9000 Nerd Font icons) forced
-   to the monospace cell so lists and columns align predictably. */
-@font-face {
-  font-family: "JetBrainsMono NF";
-  src: url("/fonts/JetBrainsMonoNerdFontMono-Regular.woff2") format("woff2");
-  font-weight: 400;
-  font-style: normal;
-  font-display: swap;
-}
-@font-face {
-  font-family: "JetBrainsMono NF";
-  src: url("/fonts/JetBrainsMonoNerdFontMono-Medium.woff2") format("woff2");
-  font-weight: 500;
-  font-style: normal;
-  font-display: swap;
-}
-@font-face {
-  font-family: "JetBrainsMono NF";
-  src: url("/fonts/JetBrainsMonoNerdFontMono-SemiBold.woff2") format("woff2");
-  font-weight: 600;
-  font-style: normal;
-  font-display: swap;
-}
-@font-face {
-  font-family: "JetBrainsMono NF";
-  src: url("/fonts/JetBrainsMonoNerdFontMono-Bold.woff2") format("woff2");
-  font-weight: 700;
-  font-style: normal;
-  font-display: swap;
-}
-
-:root {
-  color-scheme: light dark;
-
-  /* --- Backgrounds --- */
-  --bg:              -apple-system-background;
-  --surface:         -apple-system-secondary-background;
-  --grouped-bg:      -apple-system-grouped-background;
-
-  /* --- Text --- */
-  --text:            -apple-system-label;
-  --muted:           -apple-system-secondary-label;
-  --tertiary:        -apple-system-tertiary-label;
-
-  /* --- Borders --- */
-  --border:          -apple-system-separator;
-
-  /* --- Accent (follows user's System Settings) --- */
-  --accent:          AccentColor;
-  --accent-weak:     rgba(0, 122, 255, 0.12);
-  --accent-text:     AccentColorText;
-
-  /* --- Semantic --- */
-  --ok:              -apple-system-green;
-  --ok-weak:         rgba(52, 199, 89, 0.12);
-  --bad:             -apple-system-red;
-  --bad-weak:        rgba(255, 59, 48, 0.10);
-  --warn:            -apple-system-orange;
-  --warn-weak:       rgba(255, 149, 0, 0.10);
-
-  /* --- Selection --- */
-  --selection:       rgba(0, 122, 255, 0.15);
-  --selection-inactive: rgba(0, 0, 0, 0.05);
-
-  /* --- Focus ring --- */
-  --focus-ring:      0 0 0 3px rgba(0, 122, 255, 0.30);
-
-  /* --- Elevation (shadow scale) --- */
-  --shadow-0:        none;
-  --shadow-1:        0 0.5px 1px rgba(0, 0, 0, 0.06);
-  --shadow-2:        0 4px 16px rgba(0, 0, 0, 0.15);
-  --shadow-3:        0 20px 60px rgba(0, 0, 0, 0.20);
-  /* Legacy aliases for existing callers; prefer the numeric scale. */
-  --shadow-subtle:   var(--shadow-1);
-  --shadow-modal:    var(--shadow-3);
-
-  /* --- Motion --- */
-  --dur-fast:        80ms;
-  --dur-base:        120ms;
-  --dur-slow:        240ms;
-  --ease-out:        cubic-bezier(0.2, 0.8, 0.2, 1);
-  --ease-in-out:     cubic-bezier(0.4, 0, 0.2, 1);
-  --ease-in:         cubic-bezier(0.4, 0, 1, 1);
-
-  /* --- Font stacks (single source of truth) --- */
-  --font:      "JetBrainsMono NF", ui-monospace, "SF Mono",
-               SFMono-Regular, Menlo, monospace;
-  --font-mono: "JetBrainsMono NF", ui-monospace, "SF Mono",
-               SFMono-Regular, Menlo, monospace;
-
-  /* Chrome = nav rail + sidebar. Subtly darker than --bg in light mode,
-     subtly lighter in dark mode. --muted adapts per color scheme, so
-     the mix always moves the chrome in the "distinct from content"
-     direction. Tune the 90/10 ratio to taste. */
-  --chrome: color-mix(in srgb, var(--bg) 90%, var(--muted));
-
-  font-family: var(--font);
-}
-
-@media (prefers-color-scheme: dark) {
-  :root {
-    --accent-weak:     rgba(10, 132, 255, 0.18);
-    --ok-weak:         rgba(48, 209, 88, 0.15);
-    --bad-weak:        rgba(255, 69, 58, 0.12);
-    --warn-weak:       rgba(255, 159, 10, 0.12);
-    --selection:       rgba(10, 132, 255, 0.22);
-    --selection-inactive: rgba(255, 255, 255, 0.06);
-    --focus-ring:      0 0 0 3px rgba(10, 132, 255, 0.35);
-    --shadow-1:        0 0.5px 2px rgba(0, 0, 0, 0.25);
-    --shadow-2:        0 4px 16px rgba(0, 0, 0, 0.35);
-    --shadow-3:        0 20px 60px rgba(0, 0, 0, 0.45);
-  }
-}
-
-/* ---------- accessibility media queries ---------- */
-
-/* System Settings ▸ Accessibility ▸ Display ▸ Increase contrast.
-   Borders and separators must become visibly prominent, text
-   contrast stays at WCAG AAA. */
-@media (prefers-contrast: more) {
-  :root {
-    --border:          rgba(0, 0, 0, 0.30);
-    --muted:           rgba(0, 0, 0, 0.75);
-    --tertiary:        rgba(0, 0, 0, 0.65);
-    --accent-weak:     rgba(0, 122, 255, 0.22);
-    --focus-ring:      0 0 0 3px rgba(0, 122, 255, 0.55);
-  }
-}
-@media (prefers-contrast: more) and (prefers-color-scheme: dark) {
-  :root {
-    --border:          rgba(255, 255, 255, 0.30);
-    --muted:           rgba(255, 255, 255, 0.82);
-    --tertiary:        rgba(255, 255, 255, 0.65);
-    --accent-weak:     rgba(10, 132, 255, 0.28);
-    --focus-ring:      0 0 0 3px rgba(10, 132, 255, 0.60);
-  }
-}
 
 /* System Settings ▸ Accessibility ▸ Display ▸ Reduce transparency.
    The chrome (nav rail + sidebar) now uses a solid --chrome color so
@@ -2136,7 +2014,7 @@ button.danger.primary:hover:not(:disabled) {
 
 .protected-path {
   flex: 1;
-  font-family: var(--mono);
+  font-family: var(--font-mono);
   font-size: 11px;
   color: var(--text);
   white-space: nowrap;
@@ -3171,7 +3049,7 @@ button.danger.primary:hover:not(:disabled) {
   gap: 12px;
 }
 .adopt-orphans-row-head code {
-  font-family: var(--mono);
+  font-family: var(--font-mono);
   font-size: 11px;
   word-break: break-all;
 }
@@ -3189,7 +3067,7 @@ button.danger.primary:hover:not(:disabled) {
   border-radius: 6px;
   background: var(--bg);
   color: var(--text);
-  font-family: var(--mono);
+  font-family: var(--font-mono);
   font-size: 11px;
 }
 .adopt-orphans-row-status {
@@ -3299,7 +3177,7 @@ button.danger.primary:hover:not(:disabled) {
   border-radius: 6px;
   background: var(--bg);
   color: var(--text);
-  font-family: var(--mono);
+  font-family: var(--font-mono);
   font-size: 11px;
 }
 .move-session-advanced {
