@@ -282,6 +282,44 @@ describe("ProjectDetail", () => {
     expect(row).toHaveAttribute("tabIndex", "0");
   });
 
+  it("omits the Back button when onBack is not supplied (split-pane)", async () => {
+    showSpy.mockResolvedValue(mkDetail([]));
+    render(
+      <ProjectDetail
+        path="/p"
+        projects={projects}
+        refreshSignal={0}
+        onRename={() => {}}
+        onMoved={() => {}}
+      />,
+    );
+    await screen.findByRole("button", { name: /open in finder/i });
+    expect(
+      screen.queryByRole("button", { name: /back to project list/i }),
+    ).toBeNull();
+  });
+
+  it("renders a Back button that fires onBack (single-pane)", async () => {
+    showSpy.mockResolvedValue(mkDetail([]));
+    const onBack = vi.fn();
+    const user = userEvent.setup();
+    render(
+      <ProjectDetail
+        path="/p"
+        projects={projects}
+        refreshSignal={0}
+        onRename={() => {}}
+        onMoved={() => {}}
+        onBack={onBack}
+      />,
+    );
+    const back = await screen.findByRole("button", {
+      name: /back to project list/i,
+    });
+    await user.click(back);
+    expect(onBack).toHaveBeenCalledTimes(1);
+  });
+
   it("routes reveal errors to onError when provided", async () => {
     showSpy.mockResolvedValue(mkDetail([]));
     revealSpy.mockRejectedValue("permission denied");
