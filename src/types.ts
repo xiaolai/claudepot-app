@@ -71,6 +71,8 @@ export interface ExtraUsage {
   is_enabled: boolean;
   monthly_limit: number | null;
   used_credits: number | null;
+  /** Server-computed utilization percent — prefer over used/limit ratio. */
+  utilization: number | null;
 }
 
 export interface AccountUsage {
@@ -78,6 +80,10 @@ export interface AccountUsage {
   seven_day: UsageWindow | null;
   seven_day_opus: UsageWindow | null;
   seven_day_sonnet: UsageWindow | null;
+  /** Third-party OAuth-app usage against this account (render-if-nonzero). */
+  seven_day_oauth_apps: UsageWindow | null;
+  /** Cowork / shared-seat usage pool (render-if-nonzero). */
+  seven_day_cowork: UsageWindow | null;
   extra_usage: ExtraUsage | null;
 }
 

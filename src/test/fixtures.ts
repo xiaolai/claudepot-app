@@ -49,6 +49,8 @@ export const sampleUsageEntry = (
     seven_day: null,
     seven_day_opus: null,
     seven_day_sonnet: null,
+    seven_day_oauth_apps: null,
+    seven_day_cowork: null,
     extra_usage: null,
   },
   age_secs: 5,
