@@ -367,11 +367,28 @@ pub async fn account_add_from_current() -> Result<RegisterOutcome, String> {
     })
 }
 
+/// Browser-OAuth onboarding: spawn `claude auth login` in a temp
+/// config dir, wait for the user to finish, then register the fresh
+/// identity. The refresh token never crosses the IPC bridge — the
+/// blob is read directly on the Rust side.
+#[tauri::command]
+pub async fn account_register_from_browser() -> Result<RegisterOutcome, String> {
+    let store = open_store()?;
+    let result = services::account_service::register_from_browser(&store)
+        .await
+        .map_err(|e| format!("register failed: {e}"))?;
+    Ok(RegisterOutcome {
+        email: result.email,
+        org_name: result.org_name,
+        subscription_type: result.subscription_type,
+    })
+}
+
 // Intentionally NOT exposed to the webview: a command that accepts a raw
 // refresh token would force the secret through JS memory and the IPC bridge.
-// Token-based onboarding stays CLI-only; the GUI will support it via a future
-// core-owned browser flow (register_from_browser) that never materializes the
-// token in JS.
+// Token-based onboarding stays CLI-only. `account_register_from_browser`
+// above is the GUI-side equivalent — the OAuth flow runs entirely in core,
+// so the refresh token never materialises in JS.
 
 #[tauri::command]
 pub async fn account_remove(uuid: String) -> Result<RemoveOutcome, String> {

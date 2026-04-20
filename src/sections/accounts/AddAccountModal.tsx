@@ -54,6 +54,7 @@ export function AddAccountModal({
   accounts,
 }: AddAccountModalProps) {
   const [importing, setImporting] = useState(false);
+  const [browserLoggingIn, setBrowserLoggingIn] = useState(false);
   const [preflight, setPreflight] = useState<Preflight>({ kind: "checking" });
   const trapRef = useFocusTrap<HTMLDivElement>();
   const titleId = useId();
@@ -117,6 +118,19 @@ export function AddAccountModal({
       onError(e instanceof Error ? e.message : String(e));
     } finally {
       setImporting(false);
+    }
+  };
+
+  const handleBrowserLogin = async () => {
+    setBrowserLoggingIn(true);
+    try {
+      const outcome = await api.accountRegisterFromBrowser();
+      onAdded(outcome.email);
+      onClose();
+    } catch (e) {
+      onError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setBrowserLoggingIn(false);
     }
   };
 
@@ -223,18 +237,22 @@ export function AddAccountModal({
             />
           </div>
 
-          {/* Action 2 — Browser login. Disabled until register_from_browser
-              is exposed from src-tauri/src/commands.rs. The existing
-              account_login command is for RE-logging, not creating. */}
+          {/* Action 2 — Browser login. Wired through
+              account_register_from_browser; the core service owns the
+              subprocess so the refresh token never enters JS. */}
           <ActionCard
             glyph={NF.user}
             title="Log in with a new account…"
-            subtitle="Open a browser, complete OAuth, then import the result into a fresh slot."
-            command="register_from_browser"
-            disabled
-            disabledHint="Not yet wired to the GUI. Use `claudepot account add` in your terminal."
-            cta="Log in"
-            ctaGlyph={NF.arrowUpR}
+            subtitle={
+              browserLoggingIn
+                ? "Waiting for you to finish in the browser…"
+                : "Open a browser, complete OAuth, then register the result as a fresh account."
+            }
+            command="account_register_from_browser"
+            disabled={browserLoggingIn || importing}
+            onClick={handleBrowserLogin}
+            cta={browserLoggingIn ? "Waiting…" : "Log in"}
+            ctaGlyph={browserLoggingIn ? NF.clock : NF.arrowUpR}
           />
         </ModalBody>
 
