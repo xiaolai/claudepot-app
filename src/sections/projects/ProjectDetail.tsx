@@ -37,6 +37,7 @@ export function ProjectDetail({
   onRename,
   onMoved,
   onError,
+  onOpenMaintenance,
 }: {
   path: string;
   /** Live list of projects — powers the session-move target picker. */
@@ -53,6 +54,9 @@ export function ProjectDetail({
    * when the native open fails). Parent typically wires this to its
    * toast state. Missing → errors are logged and swallowed. */
   onError?: (msg: string) => void;
+  /** When set, empty-project hints get a clickable "Go to Maintenance"
+   * nudge so the user doesn't have to navigate manually (G8). */
+  onOpenMaintenance?: () => void;
 }) {
   const [detail, setDetail] = useState<ProjectDetailData | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -228,6 +232,16 @@ export function ProjectDetail({
               ? `${formatSize(info.total_size_bytes)} of CC internal state — consider cleaning.`
               : "This project can be safely cleaned."}
           </span>
+          {onOpenMaintenance && (
+            <button
+              type="button"
+              className="btn"
+              onClick={onOpenMaintenance}
+              title="Open Maintenance to clean orphan projects"
+            >
+              Go to Maintenance
+            </button>
+          )}
         </div>
       )}
 
@@ -235,6 +249,16 @@ export function ProjectDetail({
         <div className="project-hint cleanup" role="status">
           <Icon name="info" size={14} />
           <span>No sessions or memory. This project is a cleanup candidate.</span>
+          {onOpenMaintenance && (
+            <button
+              type="button"
+              className="btn"
+              onClick={onOpenMaintenance}
+              title="Open Maintenance to clean orphan projects"
+            >
+              Go to Maintenance
+            </button>
+          )}
         </div>
       )}
 
