@@ -1,5 +1,5 @@
 import { useMemo } from "react";
-import type { ContextMenuItem } from "../../components/ContextMenu";
+import { ContextMenu, type ContextMenuItem } from "../../components/ContextMenu";
 import type { AccountSummary, AppStatus } from "../../types";
 
 interface Args {
@@ -138,4 +138,55 @@ export function useAccountContextMenu({
     onLogin,
     onRemove,
   ]);
+}
+
+/**
+ * Small hook wrapper that turns the menu-item set into a live
+ * ContextMenu. Hook calls must live inside a component — keeping the
+ * wrapper next to the hook itself avoids scattering the menu logic
+ * across two files.
+ */
+export function CtxMenuForAccount({
+  menu,
+  status,
+  busyKeys,
+  onSwitchCli,
+  onSwitchDesktop,
+  onSwitchDesktopNoLaunch,
+  onVerify,
+  onRefreshUsageFor,
+  onRefreshUsageAll,
+  onLogin,
+  onRemove,
+  onClose,
+}: {
+  menu: { x: number; y: number; account: AccountSummary };
+  status: AppStatus;
+  busyKeys: Set<string>;
+  onSwitchCli: (a: AccountSummary) => void;
+  onSwitchDesktop: (a: AccountSummary) => void;
+  onSwitchDesktopNoLaunch: (a: AccountSummary) => void;
+  onVerify: (a: AccountSummary) => void;
+  onRefreshUsageFor: (a: AccountSummary) => void;
+  onRefreshUsageAll: () => void;
+  onLogin: (a: AccountSummary) => void;
+  onRemove: (a: AccountSummary) => void;
+  onClose: () => void;
+}) {
+  const items = useAccountContextMenu({
+    account: menu.account,
+    status,
+    busyKeys,
+    onSwitchCli,
+    onSwitchDesktop,
+    onSwitchDesktopNoLaunch,
+    onVerify,
+    onRefreshUsageFor,
+    onRefreshUsageAll,
+    onLogin,
+    onRemove,
+  });
+  return (
+    <ContextMenu x={menu.x} y={menu.y} items={items} onClose={onClose} />
+  );
 }
