@@ -41,7 +41,12 @@ pub async fn status(ctx: &AppContext) -> Result<()> {
                             println!("  Plan: {plan}");
                         }
                         if let Some(ref ts) = account.last_cli_switch {
-                            println!("  Switched: {}", ts.format("%Y-%m-%d %H:%M"));
+                            println!(
+                                "  Switched: {}",
+                                crate::time_fmt::format_local_datetime(
+                                    &ts.with_timezone(&chrono::Local)
+                                )
+                            );
                         }
                     }
                 }
@@ -139,28 +144,67 @@ pub async fn use_account(ctx: &AppContext, email_input: &str, no_refresh: bool, 
         );
     } else {
         println!("CLI: {from} → {email}");
-        if force && claudepot_core::cli_backend::swap::is_cc_process_running_public().await {
-            eprintln!();
-            eprintln!(
-                "\u{26a0}  Warning: Claude Code is running. Restart it to apply this swap cleanly."
-            );
-            eprintln!();
-            eprintln!("   Until you quit the running session, you'll see split-brain state:");
-            eprintln!("     • Session identity (header, org name) stays as {from}");
-            eprintln!("       — cached in memory at startup, can't be changed.");
-            eprintln!("     • API calls (/usage, completions, billing) use {email}");
-            eprintln!("       — they re-read the keychain on each request.");
-            eprintln!("     • Next OAuth token refresh (typically within the hour) will");
-            eprintln!("       overwrite the keychain back to {from}, silently reverting");
-            eprintln!("       this swap for future sessions too.");
-            eprintln!();
-            eprintln!("   Quit Claude Code before the next refresh for the swap to stick.");
-        } else {
-            eprintln!("\nNote: running claude processes will continue using the previous account until restarted.");
+        // Ask the core whether a CC process is alive only once, then
+        // decide what to print. Skipping the probe entirely on non-force
+        // paths (the old behaviour) meant we printed the "running
+        // claude processes will continue" note even when no CC was
+        // running — misleading.
+        let cc_running =
+            claudepot_core::cli_backend::swap::is_cc_process_running_public().await;
+        match swap_completion_note(force, cc_running) {
+            SwapNote::ForceWithRunning => {
+                eprintln!();
+                eprintln!(
+                    "\u{26a0}  Warning: Claude Code is running. Restart it to apply this swap cleanly."
+                );
+                eprintln!();
+                eprintln!("   Until you quit the running session, you'll see split-brain state:");
+                eprintln!("     • Session identity (header, org name) stays as {from}");
+                eprintln!("       — cached in memory at startup, can't be changed.");
+                eprintln!("     • API calls (/usage, completions, billing) use {email}");
+                eprintln!("       — they re-read the keychain on each request.");
+                eprintln!("     • Next OAuth token refresh (typically within the hour) will");
+                eprintln!("       overwrite the keychain back to {from}, silently reverting");
+                eprintln!("       this swap for future sessions too.");
+                eprintln!();
+                eprintln!("   Quit Claude Code before the next refresh for the swap to stick.");
+            }
+            SwapNote::BackgroundProcess => {
+                eprintln!(
+                    "\nNote: a running Claude Code process will keep using {from} until restarted."
+                );
+            }
+            SwapNote::Silent => {}
         }
     }
 
     Ok(())
+}
+
+/// Post-swap advisory classification. Pure function so the decision
+/// table is unit-testable without mocking process-lookup.
+#[derive(Debug, PartialEq, Eq)]
+pub(crate) enum SwapNote {
+    /// `--force` *and* CC is running — full split-brain warning.
+    ForceWithRunning,
+    /// CC is running (no force flag) — short "will keep using old
+    /// until restart" note.
+    BackgroundProcess,
+    /// Nothing to warn about: CC isn't running at all.
+    Silent,
+}
+
+pub(crate) fn swap_completion_note(force: bool, cc_running: bool) -> SwapNote {
+    if !cc_running {
+        // A `--force` swap with no CC process running is functionally
+        // identical to a normal swap — no split-brain risk, no process
+        // to restart. Emit nothing rather than a misleading note.
+        SwapNote::Silent
+    } else if force {
+        SwapNote::ForceWithRunning
+    } else {
+        SwapNote::BackgroundProcess
+    }
 }
 
 pub async fn clear(ctx: &AppContext) -> Result<()> {
@@ -197,23 +241,167 @@ pub async fn run(
         anyhow::bail!("no credentials stored for {email}");
     }
 
-    if print_token {
-        eprintln!("⚠ WARNING: outputting raw access token. Do not log or share this value.");
-        let token = launcher::get_access_token(account.uuid)
-            .await
-            .map_err(|e| anyhow::anyhow!("{e}"))?;
-        println!("{token}");
-        return Ok(());
+    match classify_run_mode(print_token, args).map_err(|e| anyhow::anyhow!("{e}"))? {
+        RunMode::PrintToken => {
+            eprintln!(
+                "⚠ WARNING: outputting raw access token. Do not log or share this value."
+            );
+            let token = launcher::get_access_token(account.uuid)
+                .await
+                .map_err(|e| anyhow::anyhow!("{e}"))?;
+            println!("{token}");
+            Ok(())
+        }
+        RunMode::Exec => {
+            // Drop the internal "Mode D" jargon — users shouldn't need
+            // to know the implementation-plan's mode-letter taxonomy to
+            // read a progress line. Show the bin name instead.
+            let bin = args
+                .first()
+                .map(String::as_str)
+                .unwrap_or("<cmd>");
+            ctx.info(&format!("Running {bin} as {email}..."));
+            let exit_code = launcher::run(account.uuid, args)
+                .await
+                .map_err(|e| anyhow::anyhow!("{e}"))?;
+            std::process::exit(exit_code);
+        }
+    }
+}
+
+/// What `cli run` should do given the flag + argv combination. Pure,
+/// testable, no I/O.
+#[derive(Debug, PartialEq, Eq)]
+pub(crate) enum RunMode {
+    /// `--print-token` alone: refresh + print the access token.
+    PrintToken,
+    /// At least one positional arg: env-inject + exec.
+    Exec,
+}
+
+/// Mis-combined `cli run` flags. Each variant has a stable `Display`
+/// impl that maps 1:1 to a user-visible CLI error.
+#[derive(Debug, PartialEq, Eq)]
+pub(crate) enum RunArgsError {
+    /// `--print-token` was passed alongside a command. Previously these
+    /// extra args were silently dropped; we now refuse to hide the
+    /// mismatch.
+    PrintTokenWithArgs,
+    /// No `--print-token` and no command — nothing to do.
+    NoCommand,
+}
+
+impl std::fmt::Display for RunArgsError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::PrintTokenWithArgs => write!(
+                f,
+                "--print-token does not take a command; remove the extra args \
+                 or drop --print-token"
+            ),
+            Self::NoCommand => write!(
+                f,
+                "no command specified. Usage: claudepot cli run <email> [--] <cmd...>"
+            ),
+        }
+    }
+}
+impl std::error::Error for RunArgsError {}
+
+pub(crate) fn classify_run_mode(
+    print_token: bool,
+    args: &[String],
+) -> Result<RunMode, RunArgsError> {
+    match (print_token, args.is_empty()) {
+        (true, true) => Ok(RunMode::PrintToken),
+        (true, false) => Err(RunArgsError::PrintTokenWithArgs),
+        (false, true) => Err(RunArgsError::NoCommand),
+        (false, false) => Ok(RunMode::Exec),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // ---- classify_run_mode ---------------------------------------
+
+    #[test]
+    fn test_run_mode_print_token_alone_is_print_token() {
+        assert_eq!(classify_run_mode(true, &[]), Ok(RunMode::PrintToken));
     }
 
-    if args.is_empty() {
-        anyhow::bail!("no command specified. Usage: claudepot cli run <email> [--] <cmd...>");
+    #[test]
+    fn test_run_mode_args_without_print_token_is_exec() {
+        let args = vec!["echo".to_string(), "hi".to_string()];
+        assert_eq!(classify_run_mode(false, &args), Ok(RunMode::Exec));
     }
 
-    ctx.info(&format!("Running as {} (Mode D)...", email));
-    let exit_code = launcher::run(account.uuid, args)
-        .await
-        .map_err(|e| anyhow::anyhow!("{e}"))?;
+    #[test]
+    fn test_run_mode_print_token_with_args_errors() {
+        // Regression guard: old code silently ignored `echo hi` here.
+        // The user might reasonably think the command ran as them, but
+        // nothing actually ran. Refuse instead.
+        let args = vec!["echo".to_string(), "hi".to_string()];
+        assert_eq!(
+            classify_run_mode(true, &args),
+            Err(RunArgsError::PrintTokenWithArgs)
+        );
+    }
 
-    std::process::exit(exit_code);
+    #[test]
+    fn test_run_mode_no_print_token_no_args_is_no_command() {
+        assert_eq!(classify_run_mode(false, &[]), Err(RunArgsError::NoCommand));
+    }
+
+    #[test]
+    fn test_run_args_error_messages_are_stable() {
+        // User-facing error strings — locked down so future edits don't
+        // silently reshape script-visible error output.
+        assert_eq!(
+            RunArgsError::NoCommand.to_string(),
+            "no command specified. Usage: claudepot cli run <email> [--] <cmd...>"
+        );
+        let msg = RunArgsError::PrintTokenWithArgs.to_string();
+        assert!(msg.starts_with("--print-token does not take a command"));
+    }
+
+    // ---- swap_completion_note ------------------------------------
+
+    #[test]
+    fn test_swap_note_force_and_running_shows_split_brain_warning() {
+        // Full 13-line warning — the only state worth interrupting the
+        // user with, since the swap genuinely may be reverted by CC.
+        assert_eq!(
+            swap_completion_note(true, true),
+            SwapNote::ForceWithRunning
+        );
+    }
+
+    #[test]
+    fn test_swap_note_running_without_force_is_short_note() {
+        // Normal case when CC happens to be running in the background
+        // — short reminder that in-process sessions won't pick up the
+        // new token until restart.
+        assert_eq!(
+            swap_completion_note(false, true),
+            SwapNote::BackgroundProcess
+        );
+    }
+
+    #[test]
+    fn test_swap_note_force_no_running_is_silent() {
+        // Regression guard: `--force` with no CC running is equivalent
+        // to a normal swap. Old behaviour printed the "running claude
+        // processes" note regardless — misleading.
+        assert_eq!(swap_completion_note(true, false), SwapNote::Silent);
+    }
+
+    #[test]
+    fn test_swap_note_nothing_running_is_silent() {
+        // Regression guard: the old behaviour printed "running claude
+        // processes will continue using the previous account" even
+        // when no CC process existed. Must be silent.
+        assert_eq!(swap_completion_note(false, false), SwapNote::Silent);
+    }
 }
