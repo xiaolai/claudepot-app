@@ -5,10 +5,13 @@
 //! transcripts can legitimately share a `session_id` after an
 //! interrupted rescue/adopt.
 //!
-//! The `(file_size_bytes, file_mtime_ns)` pair is the re-parse guard:
-//! when both match what's currently on disk, we trust the cached row
-//! and skip the JSONL fold. Mtime nanos (not ms) so an event burst
-//! that updates a file within the same millisecond still invalidates.
+//! The `(file_size_bytes, file_mtime_ns, file_inode)` triple is the
+//! re-parse guard: if any of the three diverges from what the fs
+//! reports, the row is re-scanned. Inode catches in-place rewrites
+//! (e.g. `session_move` replacing a transcript atomically via
+//! create-temp-and-rename) that happen to preserve size+mtime. On
+//! platforms where the metadata API doesn't expose an inode (non-Unix),
+//! the column is stored as 0 and the guard degrades to (size, mtime_ns).
 //!
 //! Token counts and message counts are stored as INTEGER. SQLite's
 //! i64 upper bound (≈9.2e18) is fine for both — even a session with
@@ -32,6 +35,7 @@ CREATE TABLE IF NOT EXISTS sessions (
     session_id               TEXT    NOT NULL,
     file_size_bytes          INTEGER NOT NULL,
     file_mtime_ns            INTEGER NOT NULL,
+    file_inode               INTEGER NOT NULL,
     project_path             TEXT    NOT NULL,
     project_from_transcript  INTEGER NOT NULL,
     first_ts_ms              INTEGER,

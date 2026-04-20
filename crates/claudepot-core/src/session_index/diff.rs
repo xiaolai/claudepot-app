@@ -4,21 +4,26 @@
 //! path in `mod.rs` stays readable. No I/O, no SQLite, no file
 //! system — just the tuple-level comparison.
 //!
-//! Guard granularity is `(size, mtime_ns)`. Content hashes would be
-//! ideal but too expensive; `(size, mtime_ns)` catches every realistic
-//! edit because CC rewrites a transcript in-place on every turn,
-//! bumping mtime. The escape hatch for "the clock lied" lives in
+//! Guard granularity is `(size, mtime_ns, inode)`. Content hashes
+//! would be ideal but too expensive; the triple catches every
+//! realistic edit: CC append-rewrites bump mtime + size, while
+//! `session_move` atomic-swaps bump inode even when size + mtime
+//! happen to match. On non-Unix platforms inode is always 0 and the
+//! guard degrades to `(size, mtime_ns)`. The escape hatch for
+//! pathological "all three collided" scenarios is
 //! `SessionIndex::rebuild`.
 
 use std::collections::HashMap;
 
-/// One `(path, size, mtime)` tuple — same shape for both the fs
-/// side and the cached side of the comparison.
+/// One `(path, size, mtime, inode)` tuple — same shape for both the
+/// fs side and the cached side of the comparison. `inode` is 0 on
+/// platforms / filesystems where it's not available.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct IndexTuple {
     pub file_path: String,
     pub size: u64,
     pub mtime_ns: i64,
+    pub inode: u64,
 }
 
 /// What the refresh pass needs to do to converge the cache with disk.
@@ -44,7 +49,11 @@ pub fn diff_fs_vs_db(fs: &[IndexTuple], db: &[IndexTuple]) -> DiffPlan {
     for t in fs {
         match db_by_path.get(t.file_path.as_str()) {
             None => to_upsert.push(t.file_path.clone()),
-            Some(cached) if cached.size != t.size || cached.mtime_ns != t.mtime_ns => {
+            Some(cached)
+                if cached.size != t.size
+                    || cached.mtime_ns != t.mtime_ns
+                    || cached.inode != t.inode =>
+            {
                 to_upsert.push(t.file_path.clone());
             }
             _ => {}
@@ -70,10 +79,15 @@ mod tests {
     use super::*;
 
     fn t(path: &str, size: u64, mtime_ns: i64) -> IndexTuple {
+        ti(path, size, mtime_ns, 0)
+    }
+
+    fn ti(path: &str, size: u64, mtime_ns: i64, inode: u64) -> IndexTuple {
         IndexTuple {
             file_path: path.into(),
             size,
             mtime_ns,
+            inode,
         }
     }
 
@@ -142,6 +156,16 @@ mod tests {
         let plan = diff_fs_vs_db(&fs, &db);
         assert_eq!(plan.to_upsert, vec!["/bumped.jsonl", "/new.jsonl"]);
         assert_eq!(plan.to_delete, vec!["/gone.jsonl"]);
+    }
+
+    #[test]
+    fn inode_bump_triggers_upsert_even_when_size_and_mtime_match() {
+        // session_move rewrites a transcript via create-temp-and-rename.
+        // Size and mtime can match by chance; inode tells the truth.
+        let fs = vec![ti("/a.jsonl", 10, 1, 999)];
+        let db = vec![ti("/a.jsonl", 10, 1, 42)];
+        let plan = diff_fs_vs_db(&fs, &db);
+        assert_eq!(plan.to_upsert, vec!["/a.jsonl"]);
     }
 
     #[test]
