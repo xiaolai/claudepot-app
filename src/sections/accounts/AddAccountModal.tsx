@@ -1,6 +1,5 @@
 import { type ReactNode, useEffect, useId, useState } from "react";
 import { api } from "../../api";
-import { Avatar, avatarColorFor } from "../../components/primitives/Avatar";
 import { Button } from "../../components/primitives/Button";
 import { Glyph } from "../../components/primitives/Glyph";
 import {
@@ -14,6 +13,7 @@ import { useFocusTrap } from "../../hooks/useFocusTrap";
 import { NF } from "../../icons";
 import type { AccountSummary } from "../../types";
 import { ActionCard } from "./ActionCard";
+import { IdentityPreview } from "./IdentityPreview";
 
 interface AddAccountModalProps {
   open: boolean;
@@ -54,6 +54,7 @@ export function AddAccountModal({
   accounts,
 }: AddAccountModalProps) {
   const [importing, setImporting] = useState(false);
+  const [browserLoggingIn, setBrowserLoggingIn] = useState(false);
   const [preflight, setPreflight] = useState<Preflight>({ kind: "checking" });
   const trapRef = useFocusTrap<HTMLDivElement>();
   const titleId = useId();
@@ -117,6 +118,19 @@ export function AddAccountModal({
       onError(e instanceof Error ? e.message : String(e));
     } finally {
       setImporting(false);
+    }
+  };
+
+  const handleBrowserLogin = async () => {
+    setBrowserLoggingIn(true);
+    try {
+      const outcome = await api.accountRegisterFromBrowser();
+      onAdded(outcome.email);
+      onClose();
+    } catch (e) {
+      onError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setBrowserLoggingIn(false);
     }
   };
 
@@ -223,18 +237,22 @@ export function AddAccountModal({
             />
           </div>
 
-          {/* Action 2 — Browser login. Disabled until register_from_browser
-              is exposed from src-tauri/src/commands.rs. The existing
-              account_login command is for RE-logging, not creating. */}
+          {/* Action 2 — Browser login. Wired through
+              account_register_from_browser; the core service owns the
+              subprocess so the refresh token never enters JS. */}
           <ActionCard
             glyph={NF.user}
             title="Log in with a new account…"
-            subtitle="Open a browser, complete OAuth, then import the result into a fresh slot."
-            command="register_from_browser"
-            disabled
-            disabledHint="Not yet wired to the GUI. Use `claudepot account add` in your terminal."
-            cta="Log in"
-            ctaGlyph={NF.arrowUpR}
+            subtitle={
+              browserLoggingIn
+                ? "Waiting for you to finish in the browser…"
+                : "Open a browser, complete OAuth, then register the result as a fresh account."
+            }
+            command="account_register_from_browser"
+            disabled={browserLoggingIn || importing}
+            onClick={handleBrowserLogin}
+            cta={browserLoggingIn ? "Waiting…" : "Log in"}
+            ctaGlyph={browserLoggingIn ? NF.clock : NF.arrowUpR}
           />
         </ModalBody>
 
@@ -318,86 +336,3 @@ function importSubtitle(p: Preflight): string {
   }
 }
 
-function IdentityPreview({
-  email,
-  subscription,
-  orgName,
-  dimmed,
-  badge,
-}: {
-  email: string;
-  subscription: string | null;
-  orgName: string | null;
-  dimmed?: boolean;
-  badge?: ReactNode;
-}) {
-  return (
-    <div
-      style={{
-        marginTop: "var(--sp-10)",
-        padding: "var(--sp-10) var(--sp-12)",
-        background: "var(--bg)",
-        border: "var(--bw-hair) solid var(--line)",
-        borderRadius: "var(--r-2)",
-        display: "flex",
-        alignItems: "center",
-        gap: "var(--sp-10)",
-        opacity: dimmed ? "var(--opacity-quiet)" : 1,
-      }}
-    >
-      <Avatar name={email} color={avatarColorFor(email)} size="lg" />
-      <div style={{ flex: 1, minWidth: 0 }}>
-        <div
-          style={{
-            fontSize: "var(--fs-sm)",
-            fontWeight: 600,
-            display: "flex",
-            gap: "var(--sp-8)",
-            alignItems: "center",
-            overflow: "hidden",
-          }}
-        >
-          <span
-            style={{
-              overflow: "hidden",
-              textOverflow: "ellipsis",
-              whiteSpace: "nowrap",
-            }}
-          >
-            {email}
-          </span>
-          {subscription && (
-            <span
-              className="mono-cap"
-              style={{
-                fontSize: "var(--fs-2xs)",
-                color: "var(--fg-ghost)",
-              }}
-            >
-              {subscription}
-            </span>
-          )}
-        </div>
-        {orgName && (
-          <div
-            style={{
-              fontSize: "var(--fs-xs)",
-              color: "var(--fg-faint)",
-              marginTop: "var(--sp-px)",
-              overflow: "hidden",
-              textOverflow: "ellipsis",
-              whiteSpace: "nowrap",
-            }}
-          >
-            {orgName}
-          </div>
-        )}
-      </div>
-      {badge ?? (
-        <Tag tone="ok" glyph={NF.check}>
-          verified
-        </Tag>
-      )}
-    </div>
-  );
-}

@@ -13,19 +13,25 @@ interface HealthFooterProps {
  * so cards align.
  */
 export function HealthFooter({ account: a }: HealthFooterProps) {
+  // Accent (--accent-ink / terracotta) is reserved for the primary CTA
+  // and selected state per design.md. A green check plus --ok tone
+  // reads as "healthy" without over-claiming brand attention.
   const verifyTone =
     a.verify_status === "ok"
-      ? "var(--accent-ink)"
+      ? "var(--ok)"
       : a.verify_status === "drift" || a.verify_status === "rejected"
         ? "var(--warn)"
         : "var(--fg-faint)";
 
   // Identity lives in the card header — don't repeat the email here.
   // Drift keeps the target email because that's the load-bearing
-  // signal (slot is misfiled to another email).
+  // signal (slot is misfiled to another email). For "ok" we append a
+  // freshness suffix so a 3-day-old "verified" doesn't read as
+  // reassurance.
+  const verifiedAgo = a.verified_at ? ` · ${relTime(a.verified_at)}` : "";
   const verifyLabel =
     a.verify_status === "ok"
-      ? "verified"
+      ? `verified${verifiedAgo}`
       : a.verify_status === "drift"
         ? `drift → ${a.verified_email ?? "?"}`
         : a.verify_status === "rejected"

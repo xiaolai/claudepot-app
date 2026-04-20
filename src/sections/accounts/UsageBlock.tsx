@@ -5,6 +5,13 @@ import { formatResetTime } from "./format";
 
 interface UsageBlockProps {
   entry: UsageEntry | null;
+  /**
+   * True when the card-level AnomalyBanner is already showing an alert
+   * for this account (drift/rejected/expired/unhealthy). We suppress
+   * the redundant "token expired" / "no credentials" StatusLine in
+   * that case so there's only one signal per surface.
+   */
+  anomalyShown?: boolean;
 }
 
 /**
@@ -13,8 +20,9 @@ interface UsageBlockProps {
  * inline status message when the entry is expired / rate-limited /
  * error instead of the rows.
  */
-export function UsageBlock({ entry }: UsageBlockProps) {
+export function UsageBlock({ entry, anomalyShown }: UsageBlockProps) {
   if (!entry || entry.status === "no_credentials") {
+    if (anomalyShown) return null;
     return (
       <StatusLine glyph={NF.info} tone="muted">
         Usage unavailable — no credentials.
@@ -22,6 +30,7 @@ export function UsageBlock({ entry }: UsageBlockProps) {
     );
   }
   if (entry.status === "expired") {
+    if (anomalyShown) return null;
     return (
       <StatusLine glyph={NF.info} tone="muted">
         Usage unavailable — token expired.

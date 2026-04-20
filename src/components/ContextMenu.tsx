@@ -1,10 +1,23 @@
-import { useEffect, useRef, useState, useCallback } from "react";
+import { useEffect, useMemo, useRef, useState, useCallback } from "react";
+import { useDevMode } from "../hooks/useDevMode";
 
 export interface ContextMenuItem {
   label: string;
   disabled?: boolean;
+  /**
+   * Short reason to show beside a disabled item so the user knows why
+   * they can't pick it. Matches `design.md`: "Disabled buttons state a
+   * reason inline". Only rendered when `disabled` is true.
+   */
+  disabledReason?: string;
   danger?: boolean;
   separator?: boolean;
+  /**
+   * True for items that should only appear when Developer mode is on
+   * (internal identifiers, raw paths, etc.). Honours the same
+   * `cp-dev-mode` toggle the DevBadge primitive uses.
+   */
+  devOnly?: boolean;
   onClick: () => void;
 }
 
@@ -20,7 +33,14 @@ export function ContextMenu({
   onClose: () => void;
 }) {
   const menuRef = useRef<HTMLDivElement>(null);
-  const actionItems = items.filter((i) => !i.separator);
+  const [devMode] = useDevMode();
+  // Dev-only items are dropped entirely when the toggle is off, so
+  // they never appear in the focus sequence or the visible list.
+  const visibleItems = useMemo(
+    () => items.filter((i) => !i.devOnly || devMode),
+    [items, devMode],
+  );
+  const actionItems = visibleItems.filter((i) => !i.separator);
   const [focusIdx, setFocusIdx] = useState(0);
 
   // Close on outside click
@@ -98,7 +118,7 @@ export function ContextMenu({
     >
       {(() => {
         let actionIdx = 0;
-        return items.map((item, i) =>
+        return visibleItems.map((item, i) =>
           item.separator ? (
             <div key={i} className="context-menu-separator" role="separator" />
           ) : (
@@ -108,9 +128,23 @@ export function ContextMenu({
               role="menuitem"
               tabIndex={actionIdx++ === focusIdx ? 0 : -1}
               disabled={item.disabled}
+              title={item.disabled ? item.disabledReason : undefined}
               onClick={() => handleItemClick(item)}
             >
-              {item.label}
+              <span className="context-menu-label">{item.label}</span>
+              {item.disabled && item.disabledReason && (
+                <span
+                  className="context-menu-reason"
+                  style={{
+                    marginLeft: "var(--sp-8)",
+                    color: "var(--fg-faint)",
+                    fontSize: "var(--fs-2xs)",
+                    fontStyle: "italic",
+                  }}
+                >
+                  {item.disabledReason}
+                </span>
+              )}
             </button>
           ),
         );

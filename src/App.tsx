@@ -1,6 +1,9 @@
 import { useCallback, useEffect, useMemo } from "react";
 import { PendingJournalsBanner } from "./components/PendingJournalsBanner";
 import { RunningOpStrip } from "./components/RunningOpStrip";
+import { StatusIssuesBanner } from "./components/StatusIssuesBanner";
+import { ToastContainer } from "./components/ToastContainer";
+import { SplitBrainConfirm } from "./sections/accounts/SplitBrainConfirm";
 import { sections, sectionIds } from "./sections/registry";
 import { AccountsSection } from "./sections/AccountsSection";
 import { ProjectsSection } from "./sections/ProjectsSection";
@@ -10,9 +13,11 @@ import { SessionsSection } from "./sections/SessionsSection";
 import { useSection } from "./hooks/useSection";
 import { usePendingJournals } from "./hooks/usePendingJournals";
 import { useRunningOps } from "./hooks/useRunningOps";
-import { useAccounts, bindingFrom } from "./hooks/useAccounts";
+import { bindingFrom } from "./hooks/useAccounts";
+import { useStatusIssues } from "./hooks/useStatusIssues";
 import { useTheme } from "./hooks/useTheme";
 import { OperationsProvider, useOperations } from "./hooks/useOperations";
+import { AppStateProvider, useAppState } from "./providers/AppStateProvider";
 import { api } from "./api";
 import type { RunningOpInfo } from "./types";
 import { WindowChrome, AppSidebar, AppStatusBar } from "./shell";
@@ -26,7 +31,24 @@ function AppShell() {
     usePendingJournals();
   const { ops: runningOps } = useRunningOps();
   const { active: activeOp, open: openOp, close: closeOp } = useOperations();
-  const { accounts, refresh: refreshAccounts } = useAccounts();
+  const {
+    accounts,
+    status: appStatus,
+    ccIdentity,
+    syncError,
+    keychainIssue,
+    refresh: refreshAccounts,
+    toasts,
+    dismissToast,
+    pushToast,
+    isDismissed,
+    dismiss,
+    actions,
+    requestCliSwap,
+    splitBrainPending,
+    dismissSplitBrain,
+    confirmSplitBrain,
+  } = useAppState();
   const { resolved: themeResolved, toggle: toggleTheme } = useTheme();
 
   // Binding derived from the same source of truth AccountsSection
@@ -77,22 +99,65 @@ function AppShell() {
     async (target: "cli" | "desktop", uuid: string) => {
       const account = accounts.find((a) => a.uuid === uuid);
       if (!account) return;
-      try {
-        if (target === "cli") {
-          await api.cliUse(account.email, false);
-        } else {
-          await api.desktopUse(account.email, true);
-        }
-        await refreshAccounts();
-      } catch (e) {
-        // Surface on console for now — the Accounts screen carries
-        // the full error UI. Future: hoist toast system into a
-        // global provider so the shell can push errors too.
-        // eslint-disable-next-line no-console
-        console.error(`${target}_use failed:`, e);
+      // Route through the shared action helpers so sidebar binds pick
+      // up the same split-brain preflight, busy-keyring, toast queue,
+      // and tray-refresh that the Accounts page uses.
+      if (target === "cli") {
+        await requestCliSwap(account);
+      } else {
+        await actions.useDesktop(account, true);
       }
     },
-    [accounts, refreshAccounts],
+    [accounts, actions, requestCliSwap],
+  );
+
+  // Jump to Accounts and pass the UUID so the section can scroll to
+  // (or highlight) the flagged row. Deep-link plumbing is currently a
+  // section jump — AccountsSection subscribes to this event and owns
+  // the row-level focus.
+  const onSelectAccount = useCallback(
+    (uuid: string) => {
+      setSection("accounts");
+      window.dispatchEvent(
+        new CustomEvent("cp-focus-account", { detail: uuid }),
+      );
+    },
+    [setSection],
+  );
+
+  const onUnlockKeychain = useCallback(async () => {
+    try {
+      await api.unlockKeychain();
+      await refreshAccounts();
+    } catch (e) {
+      pushToast("error", `Unlock failed: ${e}`);
+    }
+  }, [pushToast, refreshAccounts]);
+
+  const onReloginActive = useCallback(() => {
+    const active = accounts.find((a) => a.is_cli_active);
+    if (!active) {
+      pushToast("error", "No active CLI account to re-login.");
+      return;
+    }
+    // Shared login helper owns the busy keyring, cancel affordance,
+    // and tray refresh — no reason to re-implement it inline.
+    void actions.login(active);
+  }, [accounts, actions, pushToast]);
+
+  const rawIssues = useStatusIssues({
+    ccIdentity,
+    status: appStatus,
+    syncError,
+    keychainIssue,
+    accounts,
+    onUnlock: onUnlockKeychain,
+    onSelectAccount,
+    onReloginActive,
+  });
+  const visibleIssues = useMemo(
+    () => rawIssues.filter((i) => !(i.dismissable && isDismissed(i.id))),
+    [rawIssues, isDismissed],
   );
 
   // Breadcrumb tail mirrors the active section.
@@ -159,6 +224,8 @@ function AppShell() {
             position: "relative",
           }}
         >
+          <StatusIssuesBanner issues={visibleIssues} onDismiss={dismiss} />
+
           {showBanner && pendingSummary && (
             <div style={{ padding: "var(--sp-12) var(--sp-16) 0" }}>
               <PendingJournalsBanner
@@ -225,6 +292,16 @@ function AppShell() {
           }}
         />
       )}
+
+      {splitBrainPending && (
+        <SplitBrainConfirm
+          account={splitBrainPending}
+          onCancel={dismissSplitBrain}
+          onConfirm={confirmSplitBrain}
+        />
+      )}
+
+      <ToastContainer toasts={toasts} onDismiss={dismissToast} />
     </div>
   );
 }
@@ -232,7 +309,9 @@ function AppShell() {
 function App() {
   return (
     <OperationsProvider>
-      <AppShell />
+      <AppStateProvider>
+        <AppShell />
+      </AppStateProvider>
     </OperationsProvider>
   );
 }
