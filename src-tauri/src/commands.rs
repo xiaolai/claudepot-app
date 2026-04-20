@@ -1298,6 +1298,48 @@ pub fn session_adopt_orphan(
 }
 
 // ---------------------------------------------------------------------------
+// Session index — Sessions tab list + per-session detail (transcript).
+// ---------------------------------------------------------------------------
+
+/// Walk `<config>/projects/*/*.jsonl` and produce rich list rows with
+/// token totals, first-prompt previews, and model sets. Returned
+/// newest-first.
+#[tauri::command]
+pub fn session_list_all() -> Result<Vec<crate::dto::SessionRowDto>, String> {
+    let cfg = paths::claude_config_dir();
+    let rows = claudepot_core::session::list_all_sessions(&cfg)
+        .map_err(|e| format!("session list failed: {e}"))?;
+    Ok(rows.iter().map(crate::dto::SessionRowDto::from).collect())
+}
+
+/// Full JSONL parse for a single session, keyed by its UUID. Returns
+/// the same row metadata as `session_list_all` plus the normalized
+/// event stream for transcript rendering.
+#[tauri::command]
+pub fn session_read(session_id: String) -> Result<crate::dto::SessionDetailDto, String> {
+    let cfg = paths::claude_config_dir();
+    let detail = claudepot_core::session::read_session_detail(&cfg, &session_id)
+        .map_err(|e| format!("session read failed: {e}"))?;
+    Ok(crate::dto::SessionDetailDto::from(&detail))
+}
+
+/// Full JSONL parse keyed by the transcript's on-disk path. Preferred
+/// over `session_read` from the GUI because list rows point at a
+/// specific file and two rows can legitimately share a session_id
+/// (interrupted rescue or adopt). Path must live under
+/// `<config>/projects/` and must end in `.jsonl`.
+#[tauri::command]
+pub fn session_read_path(file_path: String) -> Result<crate::dto::SessionDetailDto, String> {
+    let cfg = paths::claude_config_dir();
+    let detail = claudepot_core::session::read_session_detail_at_path(
+        &cfg,
+        std::path::Path::new(&file_path),
+    )
+    .map_err(|e| format!("session read failed: {e}"))?;
+    Ok(crate::dto::SessionDetailDto::from(&detail))
+}
+
+// ---------------------------------------------------------------------------
 // Protected paths — Settings → Protected pane
 // ---------------------------------------------------------------------------
 

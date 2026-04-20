@@ -20,6 +20,8 @@ import type {
   RegisterOutcome,
   RemoveOutcome,
   RunningOpInfo,
+  SessionDetail,
+  SessionRow,
   UsageEntry,
   UsageMap,
 } from "./types";
@@ -200,6 +202,30 @@ export const api = {
    */
   sessionAdoptOrphan: (slug: string, targetCwd: string) =>
     invoke<AdoptReport>("session_adopt_orphan", { slug, targetCwd }),
+
+  // ---------- Session index (Sessions tab) ----------
+  /**
+   * Walk every `~/.claude/projects/<slug>/<session>.jsonl` and produce
+   * list rows with token totals, models seen, first-prompt preview,
+   * and CC version. Newest-first by the last-event timestamp (falling
+   * back to file mtime). Parallel file scan under the hood.
+   */
+  sessionListAll: () => invoke<SessionRow[]>("session_list_all"),
+  /**
+   * Full transcript + row metadata for one session, keyed by its
+   * UUID. Locates the slug by filename match, then streams the JSONL
+   * into normalized `SessionEvent`s.
+   */
+  sessionRead: (sessionId: string) =>
+    invoke<SessionDetail>("session_read", { sessionId }),
+  /**
+   * Preferred over `sessionRead` from the Sessions tab — reading by
+   * path disambiguates the rare case where two .jsonl files share one
+   * session_id (interrupted adopt/rescue). Path must live under
+   * `<config>/projects/`.
+   */
+  sessionReadPath: (filePath: string) =>
+    invoke<SessionDetail>("session_read_path", { filePath }),
 
   // ---------- Protected paths (Settings → Protected pane) ----------
   /**
