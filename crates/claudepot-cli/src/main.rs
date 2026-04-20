@@ -6,6 +6,7 @@ use claudepot_core::services::usage_cache::UsageCache;
 
 mod commands;
 mod output;
+mod time_fmt;
 
 #[derive(Parser)]
 #[command(
@@ -279,9 +280,13 @@ async fn main() -> Result<()> {
     let cli = Cli::parse();
 
     if cli.verbose {
-        tracing_subscriber::fmt()
-            .with_env_filter("claudepot=debug")
-            .init();
+        // RUST_LOG wins when set — lets users pin noisy modules on the
+        // fly (e.g. `RUST_LOG=claudepot_core::cli_backend=trace`).
+        // Falls back to `claudepot=debug` when RUST_LOG is unset or
+        // unparseable, preserving the prior default.
+        let filter = tracing_subscriber::EnvFilter::try_from_default_env()
+            .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("claudepot=debug"));
+        tracing_subscriber::fmt().with_env_filter(filter).init();
     }
 
     let data_dir = paths::claudepot_data_dir();
