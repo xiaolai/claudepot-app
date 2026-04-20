@@ -14,6 +14,9 @@
       {
         "title": "Claudepot",
         "decorations": true,
+        "titleBarStyle": "Overlay",
+        "hiddenTitle": true,
+        "trafficLightPosition": { "x": 12, "y": 13 },
         "width": 900,
         "height": 640,
         "minWidth": 720,
