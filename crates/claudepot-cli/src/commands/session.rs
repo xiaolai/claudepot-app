@@ -102,6 +102,24 @@ pub fn adopt_orphan_cmd(
     Ok(())
 }
 
+/// Truncate the persistent session-index cache. Leaves the DB file
+/// and schema intact; only the row data is dropped. The next
+/// `session_list_all` (from the GUI or another CLI) re-scans every
+/// transcript.
+pub fn rebuild_index_cmd(ctx: &AppContext) -> Result<()> {
+    let db_path = paths::claudepot_data_dir().join("sessions.db");
+    let idx = claudepot_core::session_index::SessionIndex::open(&db_path)
+        .context("open session index")?;
+    idx.rebuild().context("rebuild session index")?;
+    if ctx.json {
+        println!(r#"{{"status":"ok","path":{:?}}}"#, db_path.display().to_string());
+    } else {
+        eprintln!("Session index cleared at {}", db_path.display());
+        eprintln!("Next `session` list will re-parse every transcript.");
+    }
+    Ok(())
+}
+
 // ---------------------------------------------------------------------------
 // Output formatting
 // ---------------------------------------------------------------------------
