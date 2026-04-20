@@ -4,11 +4,11 @@ description: Scaffold a new React component grounded in the paper-mono primitive
 
 # Scaffold Component
 
-Create a new React component grounded in a specific kind from
-`design-patterns.md`. The scaffold emits **only what the kind
-requires** — no TODO placeholders, no speculative props, no
-"fill it in later" CSS. Subtraction from a full recipe produces
-vestigial code; we avoid that entirely.
+Create a new React component grounded in one of the kinds below.
+The scaffold emits **only what the kind requires** — no TODO
+placeholders, no speculative props, no "fill it in later" CSS.
+Subtraction from a full recipe produces vestigial code; we avoid
+that entirely.
 
 ## Inputs
 
@@ -27,34 +27,33 @@ the exact failure mode we're replacing.
 
 ## Kinds
 
-Every kind below maps to a recipe in `.claude/rules/design-patterns.md`
-and, where applicable, a live paper-mono component in `src/`.
+Every kind below points to a live paper-mono component in `src/`
+that the scaffold must mirror.
 
-| Kind | Recipe anchor (design-patterns.md) | Live reference |
-|---|---|---|
-| `list-row-selectable` | "Selectable list row" | `src/sections/projects/ProjectsTable.tsx` |
-| `sidebar-item` | "Window shell" + `SidebarItem` primitive | `src/components/primitives/SidebarItem.tsx`, `src/shell/AppSidebar.tsx` |
-| `card` | (compose from primitives) | `src/sections/accounts/AccountCard.tsx` |
-| `detail-grid` | "Detail grid" | `src/sections/SettingsSection.tsx` (`Kv` rows) |
-| `banner` | "Banner (persistent state)" | `src/components/PendingJournalsBanner.tsx`, `src/sections/accounts/AnomalyBanner.tsx` |
-| `toolbar` | "Window shell" actions row | `src/shell/ScreenHeader.tsx` (actions slot) |
-| `filter-bar` | "Segmented / filter bar" | `src/sections/AccountsSection.tsx` (filter row), `src/sections/ProjectsSection.tsx` |
-| `segmented-control` | "Segmented / filter bar" | `src/sections/SettingsSection.tsx` (Appearance theme picker) |
-| `modal` | "Modal" | `src/components/primitives/Modal.tsx`, `src/sections/accounts/AddAccountModal.tsx` |
-| `confirm-destructive` | "Destructive button with inline consequence" + "Modal" | `src/components/ConfirmDangerousAction.tsx` |
-| `empty-state` | "Empty state" | `src/sections/SessionsSection.tsx` |
-| `status-tag` | "Status tag / badge" | `src/components/primitives/Tag.tsx` |
-| `search-field` | (Input primitive with `glyph={NF.search}`) | `src/sections/AccountsSection.tsx` filter input |
-| `context-menu` | "Context menu" | `src/components/ContextMenu.tsx` |
-| `collapsible-section` | (legacy, optional) | `src/components/CollapsibleSection.tsx` |
-| `running-op-entry` | "Running-op strip" | `src/components/RunningOpStrip.tsx` |
-| `usage-row` | (composed from primitives) | `src/sections/accounts/UsageBlock.tsx` |
-| `action-card` | (composed from primitives) | `src/sections/accounts/ActionCard.tsx` |
-| `screen-header` | (use the primitive as-is) | `src/shell/ScreenHeader.tsx` |
+| Kind | Live reference |
+|---|---|
+| `list-row-selectable` | `src/sections/projects/ProjectsTable.tsx` |
+| `sidebar-item` | `src/components/primitives/SidebarItem.tsx`, `src/shell/AppSidebar.tsx` |
+| `card` | `src/sections/accounts/AccountCard.tsx` |
+| `detail-grid` | `src/sections/SettingsSection.tsx` (`Kv` rows) |
+| `banner` | `src/components/PendingJournalsBanner.tsx`, `src/sections/accounts/AnomalyBanner.tsx` |
+| `toolbar` | `src/shell/ScreenHeader.tsx` (actions slot) |
+| `filter-bar` | `src/sections/AccountsSection.tsx`, `src/sections/ProjectsSection.tsx` |
+| `segmented-control` | `src/sections/SettingsSection.tsx` (Appearance theme picker) |
+| `modal` | `src/components/primitives/Modal.tsx`, `src/sections/accounts/AddAccountModal.tsx` |
+| `confirm-destructive` | `src/components/ConfirmDangerousAction.tsx` |
+| `empty-state` | `src/sections/SessionsSection.tsx` |
+| `status-tag` | `src/components/primitives/Tag.tsx` |
+| `search-field` | `src/sections/AccountsSection.tsx` filter input |
+| `context-menu` | `src/components/ContextMenu.tsx` |
+| `collapsible-section` | `src/components/CollapsibleSection.tsx` |
+| `running-op-entry` | `src/components/RunningOpStrip.tsx` |
+| `usage-row` | `src/sections/accounts/UsageBlock.tsx` |
+| `action-card` | `src/sections/accounts/ActionCard.tsx` |
+| `screen-header` | `src/shell/ScreenHeader.tsx` |
 
-If the kind you need isn't here, the work is novel. Stop, add a
-recipe to `design-patterns.md` first, then update this table and
-scaffold.
+If the kind you need isn't here, the work is novel. Stop and
+discuss the structure with the user before scaffolding.
 
 ## Step 1 · Validate
 
@@ -74,21 +73,10 @@ scaffold.
 
 ## Step 2 · Load the design system
 
-Read in this order (same as design-review):
-
-1. `.claude/rules/design-principles.md` — why
-2. `.claude/rules/design-patterns.md` — composition recipes and
-   feedback ladder
-3. `.claude/rules/ui-design-system.md` — tokens and defaults
-4. `.claude/rules/no-raw-values.md` — hard ban on raw
-   hex / rgb / oklch / numeric fontSize / numeric padding / numeric
-   dimension in paper-mono code. Every CSS value comes from a token
-   in `src/styles/tokens.css`.
-5. `.claude/rules/accessibility.md` — a11y floor
-6. `.claude/rules/react-components.md` — file-shape conventions
-
-Legacy native-macOS rules sit under `.claude/rules/_legacy/` for
-archaeology only — do **not** read them when scaffolding new work.
+Read `.claude/rules/design.md` — that's the single source for the
+paper-mono register, token discipline, icon policy, accessibility
+floor, and non-negotiables. Also read `src/styles/tokens.css` to
+know which tokens exist.
 
 ## Step 3 · Read the live reference
 
@@ -96,9 +84,9 @@ Open the live component named in the Kinds table and copy its
 **actual current structure**. This is the anti-drift rule: the
 scaffold mirrors what exists, not what documentation remembers.
 
-If the kind has no live reference, follow the recipe in
-`design-patterns.md` literally and reach for primitives in
-`src/components/primitives/` rather than rolling raw HTML.
+Reach for primitives in `src/components/primitives/` (`Button`,
+`IconButton`, `Glyph`, `Avatar`, `Tag`, `Modal`, `SidebarItem`,
+`SectionLabel`) rather than rolling raw HTML.
 
 ## Step 4 · Emit the component
 
@@ -112,8 +100,8 @@ Generate the file in the directory chosen in Step 1 — e.g.,
   scaffolding.
 - No empty `<div>` as the root.
 - No speculative CSS classes or invented inline color/size values.
-  Use tokens (`var(--accent)`, `var(--fs-sm)`, `var(--r-2)`) — see
-  `ui-design-system.md`.
+  Use tokens from `src/styles/tokens.css`
+  (`var(--accent)`, `var(--fs-sm)`, `var(--r-2)`).
 - Props types are concrete. Never `any`. Never `Partial<unknown>`.
 - Icons via `Glyph` from `src/components/primitives/Glyph.tsx`,
   reading codepoints from `NF` in `src/icons.ts`. Never lucide,
@@ -122,8 +110,9 @@ Generate the file in the directory chosen in Step 1 — e.g.,
   `Modal` trio. Tags via `Tag`.
 - For kinds with feedback-surface implications (`banner`,
   `running-op-entry`, `modal`, `confirm-destructive`), include a
-  one-line comment above the component citing which row in the
-  feedback ladder (in `design-patterns.md`) this surface satisfies.
+  one-line comment above the component naming the canonical
+  surface this state uses (toast, banner, inline note, running-op
+  strip, or modal — see `design.md`'s "One signal per surface").
 
 Example output for kind `banner`:
 
@@ -216,7 +205,7 @@ describe("{Name}", () => {
 ```
 
 Tests assert on visible text / ARIA roles, never CSS classes or
-internal state (per `react-components.md`).
+internal state.
 
 ## Step 6 · Tokens — reuse before invent
 
@@ -230,8 +219,7 @@ Before writing new tokens or styles:
    light and dark themes must be defined; `prefers-contrast: more`
    if relevant.
 3. If the component genuinely introduces a new visual pattern, stop
-   and add a recipe to `design-patterns.md` first — then come back
-   and scaffold.
+   and discuss it with the user first.
 
 Do not write to `src/App.css` for new components. That file holds
 legacy class-based styles for unported components only and is
@@ -242,7 +230,7 @@ gradually shrinking. Inline styles + tokens are the paper-mono norm.
 Print:
 
 - Files created, with paths.
-- The kind used and the recipe anchor in `design-patterns.md`.
+- The kind used and the live reference mirrored.
 - The live reference component, if any.
 - Whether `tokens.css` was modified (and which token was added,
   with both light and dark values).
