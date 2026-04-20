@@ -614,6 +614,18 @@ export function AccountsSection({
               },
             },
             { label: "", separator: true, onClick: () => {} },
+            // Launch-CC-as needs a new-terminal-window spawn that varies
+            // per OS (osascript on mac, cmd /c start on win, xterm/alacritty
+            // on linux). Stub behind dev-mode until that Tauri surface lands;
+            // devs can use `claudepot cli run <email> claude` from a shell.
+            {
+              label: "Launch CC as…",
+              devOnly: true,
+              disabled: true,
+              disabledReason: "use `claudepot cli run` from your shell",
+              onClick: () => {},
+            },
+            { label: "", separator: true, onClick: () => {} },
             {
               label: "Log in again…",
               disabled: busy.busyKeys.has(`re-${a.uuid}`),
