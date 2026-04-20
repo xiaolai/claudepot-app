@@ -129,6 +129,7 @@ export const NF = {
   warn:       "\uf071",
   info:       "\uf05a",
   bolt:       "\uf0e7",
+  ban:        "\uf05e",   // no-entry — used for "broken/dead credentials"
   clock:      "\uf017",
   calendar:   "\uf073",
 
