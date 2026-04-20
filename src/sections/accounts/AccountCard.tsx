@@ -199,7 +199,7 @@ export function AccountCard({
         />
       )}
 
-      <UsageBlock entry={usageEntry} />
+      <UsageBlock entry={usageEntry} anomalyShown={severe} />
       <HealthFooter account={a} />
     </article>
   );
