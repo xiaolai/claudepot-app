@@ -79,6 +79,96 @@ describe("MoveSessionModal", () => {
     expect(values).toContain("__other__");
   });
 
+  it("excludes orphan / unreachable / empty projects from targets (B1)", () => {
+    render(
+      <MoveSessionModal
+        sessionId={baseProps.sessionId}
+        fromCwd={baseProps.fromCwd}
+        projects={[
+          mkProject({ original_path: "/from", sanitized_name: "-from" }),
+          mkProject({ original_path: "/live/ok", sanitized_name: "-live-ok" }),
+          mkProject({
+            original_path: "/live/dead",
+            sanitized_name: "-live-dead",
+            is_orphan: true,
+          }),
+          mkProject({
+            original_path: "/live/offline",
+            sanitized_name: "-live-offline",
+            is_reachable: false,
+          }),
+          mkProject({
+            original_path: "/live/empty",
+            sanitized_name: "-live-empty",
+            is_empty: true,
+          }),
+        ]}
+        onClose={() => {}}
+        onCompleted={() => {}}
+      />,
+    );
+    const select = screen.getByRole("combobox") as HTMLSelectElement;
+    const values = Array.from(select.options).map((o) => o.value);
+    expect(values).toContain("/live/ok");
+    expect(values).not.toContain("/live/dead");
+    expect(values).not.toContain("/live/offline");
+    expect(values).not.toContain("/live/empty");
+  });
+
+  it("defaults to the most-recently-touched alive project (B11)", () => {
+    render(
+      <MoveSessionModal
+        sessionId={baseProps.sessionId}
+        fromCwd={baseProps.fromCwd}
+        projects={[
+          mkProject({ original_path: "/from", sanitized_name: "-from" }),
+          mkProject({
+            original_path: "/old",
+            sanitized_name: "-old",
+            last_modified_ms: 1_000,
+          }),
+          mkProject({
+            original_path: "/fresh",
+            sanitized_name: "-fresh",
+            last_modified_ms: 9_999_999_999,
+          }),
+          mkProject({
+            original_path: "/mid",
+            sanitized_name: "-mid",
+            last_modified_ms: 5_000,
+          }),
+        ]}
+        onClose={() => {}}
+        onCompleted={() => {}}
+      />,
+    );
+    const select = screen.getByRole("combobox") as HTMLSelectElement;
+    expect(select.value).toBe("/fresh");
+  });
+
+  it("threads cleanupSource from the Advanced toggle (B6)", async () => {
+    moveSpy.mockResolvedValue(mkReport());
+    const user = userEvent.setup();
+    render(
+      <MoveSessionModal
+        {...baseProps}
+        onClose={() => {}}
+        onCompleted={() => {}}
+      />,
+    );
+    await user.click(screen.getByText("Advanced"));
+    await user.click(
+      screen.getByLabelText(/remove source project dir if it's empty/i),
+    );
+    await user.click(screen.getByRole("button", { name: /Move to/i }));
+
+    await waitFor(() =>
+      expect(moveSpy).toHaveBeenCalledWith(
+        expect.objectContaining({ cleanupSource: true }),
+      ),
+    );
+  });
+
   it("calls the api with the selected target and reports success inline", async () => {
     moveSpy.mockResolvedValue(mkReport());
     const onCompleted = vi.fn();
@@ -101,6 +191,7 @@ describe("MoveSessionModal", () => {
         toCwd: "/live/other",
         forceLive: false,
         forceConflict: false,
+        cleanupSource: false,
       }),
     );
     await waitFor(() => expect(screen.getByText(/^Moved\.$/)).toBeInTheDocument());
