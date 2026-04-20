@@ -102,6 +102,7 @@
   --sp-64:   64px;
   --sp-72:   72px;
   --sp-80:   80px;
+  --sp-96:   96px;
 
   /* ── 4px-grid shortcuts — for recipes that prefer grid-step
         naming. These alias the --sp-N scale. ─────────────────── */
