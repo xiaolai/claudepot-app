@@ -294,7 +294,12 @@ function UsageRow({
     <div
       style={{
         display: "grid",
-        gridTemplateColumns: "var(--sp-80) 1fr var(--sp-40) var(--sp-72)",
+        // Reset column widened from --sp-72 to --sp-96 so the new
+        // "tomorrow HH:MM" phrasing fits without clipping. Labels and
+        // pct keep their existing widths; the seg bar (1fr) gives up
+        // ~24px on the narrowest card — still ≥100px at the 400px
+        // card minimum, comfortably above the 5px/segment floor.
+        gridTemplateColumns: "var(--sp-80) 1fr var(--sp-40) var(--sp-96)",
         gap: "var(--sp-10)",
         alignItems: "center",
         fontSize: "var(--fs-xs)",

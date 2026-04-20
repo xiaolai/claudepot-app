@@ -16,12 +16,18 @@ export function relTime(iso: string | null | undefined): string {
 }
 
 /**
- * Rate-limit reset time formatter. "due" if already past,
- * "in 42m" within the next hour, clock time same day, weekday+time
- * within the week, month/day for further out.
+ * Rate-limit reset time — calendar-app idiom, no weekday abbreviations.
  *
- * This is the compact inline form. Pair with {@link formatResetTooltip}
- * on a `title` attribute so hover surfaces the absolute date + offset.
+ *    past           → "due"
+ *    < 60m          → "in 42m"              (pure relative)
+ *    later today    → "today 17:30"          (wall clock + anchor)
+ *    tomorrow       → "tomorrow 14:30"       (wall clock + anchor)
+ *    ≥ 2 days out   → "Apr 23"               (locale-aware date only)
+ *
+ * Inline form stays terse; `formatResetTooltip` carries the full
+ * absolute `Apr 23, 2026, 14:30 GMT+08:00` on hover. Weekday labels
+ * ("Mon 14:30") were dropped because they're English-only, force a
+ * mental weekday→date step, and add no info the date itself doesn't.
  */
 export function formatResetTime(iso: string | null | undefined): string {
   if (!iso) return "—";
@@ -31,27 +37,32 @@ export function formatResetTime(iso: string | null | undefined): string {
   if (diffMs <= 0) return "due";
   const diffMins = Math.floor(diffMs / 60_000);
   if (diffMins < 60) return `in ${diffMins}m`;
-  const t = d.toLocaleTimeString("en-US", {
+
+  const time = d.toLocaleTimeString(undefined, {
     hour: "2-digit",
     minute: "2-digit",
     hour12: false,
   });
-  const sameDay = d.toDateString() === now.toDateString();
-  if (sameDay) return t;
-  const sot = new Date(now);
-  sot.setHours(0, 0, 0, 0);
-  const sor = new Date(d);
-  sor.setHours(0, 0, 0, 0);
-  const diffDays = Math.round((sor.getTime() - sot.getTime()) / 86_400_000);
-  if (diffDays < 7) {
-    const weekday = d.toLocaleDateString("en-US", { weekday: "short" });
-    return `${weekday} ${t}`;
-  }
-  const md = d.toLocaleDateString("en-US", {
+
+  // Calendar-day diff in the user's local zone — *not* time-of-day
+  // arithmetic. 23:50 → 00:10 the next morning is "tomorrow", not
+  // "today" plus 20 minutes.
+  const startOfToday = new Date(now);
+  startOfToday.setHours(0, 0, 0, 0);
+  const startOfResetDay = new Date(d);
+  startOfResetDay.setHours(0, 0, 0, 0);
+  const diffDays = Math.round(
+    (startOfResetDay.getTime() - startOfToday.getTime()) / 86_400_000,
+  );
+
+  if (diffDays === 0) return `today ${time}`;
+  if (diffDays === 1) return `tomorrow ${time}`;
+  // For 2+ days out the exact time is rarely actionable — the tooltip
+  // carries it. Inline shows a compact locale-aware date.
+  return d.toLocaleDateString(undefined, {
     month: "short",
     day: "numeric",
   });
-  return `${md}, ${t}`;
 }
 
 /**
