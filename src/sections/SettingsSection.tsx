@@ -58,7 +58,6 @@ export function SettingsSection() {
   return (
     <>
       <ScreenHeader
-        crumbs={["claudepot", "settings"]}
         title="Settings"
         subtitle="Preferences, data, and diagnostics."
       />

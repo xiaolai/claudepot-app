@@ -80,21 +80,10 @@ export function AppStatusBar({ stats }: { stats: AppStatusBarStats }) {
 
       <span style={{ flex: 1 }} />
 
+      {/* Model name is reference info, not a notification — subtle
+          text, no accent color, no glyph. */}
       {stats.model && (
-        <span
-          style={{
-            display: "flex",
-            alignItems: "center",
-            gap: "var(--sp-6)",
-          }}
-        >
-          <Glyph
-            g={NF.bolt}
-            color="var(--accent)"
-            style={{ fontSize: "var(--fs-2xs)" }}
-          />
-          {stats.model}
-        </span>
+        <span style={{ color: "var(--fg-faint)" }}>{stats.model}</span>
       )}
     </div>
   );

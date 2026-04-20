@@ -218,7 +218,6 @@ export function AccountsSection({
   return (
     <>
       <ScreenHeader
-        crumbs={["claudepot", "accounts"]}
         title="Accounts"
         subtitle={subtitle}
         actions={
@@ -264,25 +263,18 @@ export function AccountsSection({
           style={{ width: "var(--filter-input-width)" }}
           aria-label="Filter accounts"
         />
-        <span
-          className="mono-cap"
-          style={{ color: "var(--fg-faint)", marginLeft: "var(--sp-4)" }}
-        >
-          {`${shown.length} / ${accounts.length}`}
-        </span>
+        {filter.trim() !== "" && (
+          <span
+            className="mono-cap"
+            style={{
+              color: "var(--fg-faint)",
+              marginLeft: "var(--sp-4)",
+            }}
+          >
+            {`${shown.length} / ${accounts.length}`}
+          </span>
+        )}
         <div style={{ flex: 1 }} />
-        <span
-          style={{
-            fontSize: "var(--fs-xs)",
-            color: "var(--fg-faint)",
-            display: "flex",
-            alignItems: "center",
-            gap: "var(--sp-6)",
-          }}
-        >
-          <Glyph g={NF.info} />
-          Swap CLI / Desktop bindings from the sidebar
-        </span>
       </div>
 
       <div

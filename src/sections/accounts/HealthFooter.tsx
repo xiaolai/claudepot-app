@@ -20,9 +20,12 @@ export function HealthFooter({ account: a }: HealthFooterProps) {
         ? "var(--warn)"
         : "var(--fg-faint)";
 
+  // Identity lives in the card header — don't repeat the email here.
+  // Drift keeps the target email because that's the load-bearing
+  // signal (slot is misfiled to another email).
   const verifyLabel =
     a.verify_status === "ok"
-      ? `verified${a.verified_email ? ` · ${a.verified_email}` : ""}`
+      ? "verified"
       : a.verify_status === "drift"
         ? `drift → ${a.verified_email ?? "?"}`
         : a.verify_status === "rejected"
@@ -81,23 +84,30 @@ export function HealthFooter({ account: a }: HealthFooterProps) {
         </span>
       </Cell>
 
-      <Cell tone="var(--fg-muted)">
-        <Glyph
-          g={NF.terminal}
-          color="var(--fg-faint)"
-          style={{ fontSize: "var(--fs-2xs)" }}
-        />
-        <span>CLI switch {relTime(a.last_cli_switch)}</span>
-      </Cell>
+      {/* Empty switch values render as nothing — an em-dash is noise,
+          not information. Cells drop cleanly when the account has
+          never been bound to that target. */}
+      {a.last_cli_switch && (
+        <Cell tone="var(--fg-muted)">
+          <Glyph
+            g={NF.terminal}
+            color="var(--fg-faint)"
+            style={{ fontSize: "var(--fs-2xs)" }}
+          />
+          <span>CLI switch {relTime(a.last_cli_switch)}</span>
+        </Cell>
+      )}
 
-      <Cell tone="var(--fg-muted)">
-        <Glyph
-          g={NF.users}
-          color="var(--fg-faint)"
-          style={{ fontSize: "var(--fs-2xs)" }}
-        />
-        <span>Desktop switch {relTime(a.last_desktop_switch)}</span>
-      </Cell>
+      {a.last_desktop_switch && (
+        <Cell tone="var(--fg-muted)">
+          <Glyph
+            g={NF.users}
+            color="var(--fg-faint)"
+            style={{ fontSize: "var(--fs-2xs)" }}
+          />
+          <span>Desktop switch {relTime(a.last_desktop_switch)}</span>
+        </Cell>
+      )}
     </div>
   );
 }

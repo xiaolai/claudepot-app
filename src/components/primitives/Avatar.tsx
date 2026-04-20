@@ -68,18 +68,23 @@ export function Avatar({
 }: AvatarProps) {
   const initial = name?.[0]?.toUpperCase() || "?";
   const { dim, initial: fs } = resolveAvatar(size);
+  // CSS grid + place-items + line-height:1 gives us pixel-exact
+  // centering regardless of the JetBrains Mono NF cap-height
+  // asymmetry. Without it, the initial sits high-left in the
+  // colored square — a small miss repeated on every avatar in the
+  // app.
   return (
     <span
       style={{
         width: dim,
         height: dim,
-        display: "inline-flex",
-        alignItems: "center",
-        justifyContent: "center",
+        display: "grid",
+        placeItems: "center",
         borderRadius: "var(--r-2)",
         background: color || "var(--bg-sunken)",
         color: color ? "var(--on-color)" : "var(--fg-muted)",
         fontSize: fs,
+        lineHeight: "var(--lh-flat)",
         fontWeight: 600,
         border: color ? "none" : "var(--bw-hair) solid var(--line)",
         flexShrink: 0,

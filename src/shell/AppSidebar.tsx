@@ -1,3 +1,4 @@
+import { useState } from "react";
 import { Divider } from "../components/primitives/Divider";
 import { Glyph } from "../components/primitives/Glyph";
 import { SectionLabel } from "../components/primitives/SectionLabel";
@@ -133,11 +134,10 @@ export function AppSidebar({
       <SectionLabel>~/.claude</SectionLabel>
       <div style={{ padding: "0 var(--sp-8)" }}>
         {FILESYSTEM_ROWS.map((row) => (
-          <SidebarItem
+          <FsTreeRow
             key={row.id}
             glyph={row.glyph}
             label={row.label}
-            indent={1}
             onClick={
               row.targetSection
                 ? () => onSelect(row.targetSection!)
@@ -176,5 +176,71 @@ export function AppSidebar({
         {version && <span>{version}</span>}
       </div>
     </aside>
+  );
+}
+
+/**
+ * Filesystem-tree row under `~/.claude`. Intentionally demoted so it
+ * reads as reference, not navigation — smaller font, faint color, no
+ * background fill, no left border. Clickable rows get a subtle color
+ * bump on hover so the target ones still afford a press; informational
+ * rows stay flat.
+ */
+function FsTreeRow({
+  glyph,
+  label,
+  onClick,
+  title,
+}: {
+  glyph: string;
+  label: string;
+  onClick?: () => void;
+  title?: string;
+}) {
+  const [hover, setHover] = useState(false);
+  const clickable = onClick !== undefined;
+  return (
+    <button
+      type="button"
+      title={title}
+      onClick={onClick}
+      onMouseEnter={() => setHover(true)}
+      onMouseLeave={() => setHover(false)}
+      disabled={!clickable}
+      style={{
+        width: "100%",
+        display: "flex",
+        alignItems: "center",
+        gap: "var(--sp-8)",
+        padding: "var(--sp-3) var(--sp-10) var(--sp-3) var(--sp-24)",
+        fontSize: "var(--fs-xs)",
+        fontWeight: 400,
+        color:
+          clickable && hover
+            ? "var(--fg-muted)"
+            : "var(--fg-faint)",
+        background: "transparent",
+        border: "none",
+        textAlign: "left",
+        cursor: clickable ? "pointer" : "default",
+        transition: "color var(--dur-fast) var(--ease-linear)",
+      }}
+    >
+      <Glyph
+        g={glyph}
+        color="var(--fg-ghost)"
+        style={{ fontSize: "var(--fs-2xs)" }}
+      />
+      <span
+        style={{
+          flex: 1,
+          overflow: "hidden",
+          textOverflow: "ellipsis",
+          whiteSpace: "nowrap",
+        }}
+      >
+        {label}
+      </span>
+    </button>
   );
 }

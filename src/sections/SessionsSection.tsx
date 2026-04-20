@@ -20,7 +20,6 @@ export function SessionsSection() {
       }}
     >
       <ScreenHeader
-        crumbs={["claudepot", "sessions"]}
         title="Sessions"
         subtitle="Recent Claude Code conversations by project"
       />
