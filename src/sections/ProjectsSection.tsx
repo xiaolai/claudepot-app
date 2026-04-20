@@ -161,17 +161,23 @@ export function ProjectsSection({
   const compact = useCompactHeader();
 
   const subtitle = (() => {
-    const n = projects.length;
-    if (n === 0) return "~/.claude/projects is empty.";
+    const total = projects.length;
+    if (total === 0) {
+      return "No CC projects yet — run `claude` in any directory to create one.";
+    }
+    const narrowed = nameFilter.trim() && filteredByName.length !== total;
+    if (narrowed) {
+      return `${filteredByName.length} of ${total} project${total === 1 ? "" : "s"} shown`;
+    }
     const actionable = counts.orphan + counts.unreachable + counts.empty;
     if (actionable === 0) {
-      return `${n} project${n === 1 ? "" : "s"} · all healthy`;
+      return `${total} project${total === 1 ? "" : "s"} · all healthy`;
     }
     const pieces: string[] = [];
     if (counts.orphan) pieces.push(`${counts.orphan} orphan`);
     if (counts.unreachable) pieces.push(`${counts.unreachable} offline`);
     if (counts.empty) pieces.push(`${counts.empty} empty`);
-    return `${n} project${n === 1 ? "" : "s"} · ${pieces.join(" · ")}`;
+    return `${total} project${total === 1 ? "" : "s"} · ${pieces.join(" · ")}`;
   })();
 
   return (
