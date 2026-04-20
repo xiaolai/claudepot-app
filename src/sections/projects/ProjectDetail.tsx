@@ -3,10 +3,27 @@ import { Icon } from "../../components/Icon";
 import { api } from "../../api";
 import { CopyButton } from "../../components/CopyButton";
 import { ContextMenu, type ContextMenuItem } from "../../components/ContextMenu";
+import { useAppState } from "../../providers/AppStateProvider";
 import type { ProjectDetail as ProjectDetailData, ProjectInfo } from "../../types";
 import { classifyProject } from "./projectStatus";
 import { formatRelativeTime, formatSize } from "./format";
 import { MoveSessionModal } from "./MoveSessionModal";
+
+/**
+ * Build the on-disk path of a session transcript given the containing
+ * project's sanitized slug. Returns null if we don't yet know where CC
+ * stores its config (AppStatus hasn't loaded) — callers then skip
+ * "reveal" affordances that need the absolute path.
+ */
+function sessionFilePath(
+  ccConfigDir: string | undefined,
+  sanitizedName: string,
+  sessionId: string,
+): string | null {
+  if (!ccConfigDir) return null;
+  const joiner = ccConfigDir.endsWith("/") ? "" : "/";
+  return `${ccConfigDir}${joiner}projects/${sanitizedName}/${sessionId}.jsonl`;
+}
 
 /**
  * Right-pane detail view for the selected project. Shows paths, size,
@@ -20,6 +37,7 @@ export function ProjectDetail({
   onRename,
   onMoved,
   onError,
+  onOpenMaintenance,
 }: {
   path: string;
   /** Live list of projects — powers the session-move target picker. */
@@ -36,6 +54,9 @@ export function ProjectDetail({
    * when the native open fails). Parent typically wires this to its
    * toast state. Missing → errors are logged and swallowed. */
   onError?: (msg: string) => void;
+  /** When set, empty-project hints get a clickable "Go to Maintenance"
+   * nudge so the user doesn't have to navigate manually (G8). */
+  onOpenMaintenance?: () => void;
 }) {
   const [detail, setDetail] = useState<ProjectDetailData | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -44,6 +65,7 @@ export function ProjectDetail({
     { x: number; y: number; sessionId: string } | null
   >(null);
   const [moveTarget, setMoveTarget] = useState<string | null>(null);
+  const { status: appStatus } = useAppState();
 
   const onSessionContextMenu = useCallback(
     (e: React.MouseEvent, sessionId: string) => {
@@ -177,6 +199,14 @@ export function ProjectDetail({
         </span>
         <span className="detail-label">Size</span>
         <span className="detail-value">{formatSize(info.total_size_bytes)}</span>
+        {info.last_modified_ms != null && (
+          <>
+            <span className="detail-label">Last touched</span>
+            <span className="detail-value">
+              {formatRelativeTime(info.last_modified_ms)}
+            </span>
+          </>
+        )}
         {info.session_count > 0 && (
           <>
             <span className="detail-label">Sessions</span>
@@ -202,6 +232,16 @@ export function ProjectDetail({
               ? `${formatSize(info.total_size_bytes)} of CC internal state — consider cleaning.`
               : "This project can be safely cleaned."}
           </span>
+          {onOpenMaintenance && (
+            <button
+              type="button"
+              className="btn"
+              onClick={onOpenMaintenance}
+              title="Open Maintenance to clean orphan projects"
+            >
+              Go to Maintenance
+            </button>
+          )}
         </div>
       )}
 
@@ -209,6 +249,16 @@ export function ProjectDetail({
         <div className="project-hint cleanup" role="status">
           <Icon name="info" size={14} />
           <span>No sessions or memory. This project is a cleanup candidate.</span>
+          {onOpenMaintenance && (
+            <button
+              type="button"
+              className="btn"
+              onClick={onOpenMaintenance}
+              title="Open Maintenance to clean orphan projects"
+            >
+              Go to Maintenance
+            </button>
+          )}
         </div>
       )}
 
@@ -224,53 +274,46 @@ export function ProjectDetail({
       )}
 
       {sessions.length > 0 && (
-        <section className="detail-section">
-          <h3>Sessions · {sessions.length}</h3>
-          <ul className="session-list" role="list">
-            {sessions.slice(0, 20).map((s) => (
-              <li
-                key={s.session_id}
-                className="session-row"
-                onContextMenu={(e) => onSessionContextMenu(e, s.session_id)}
-              >
-                <div className="session-row-text">
-                  <span className="session-row-name mono">
-                    {s.session_id.slice(0, 8)}
-                  </span>
-                  <span className="session-row-meta">
-                    {formatSize(s.file_size)}
-                    {s.last_modified_ms != null && (
-                      <>{" · "}{formatRelativeTime(s.last_modified_ms)}</>
-                    )}
-                  </span>
-                </div>
-                <button
-                  type="button"
-                  className="session-row-menu-btn"
-                  aria-label="Session actions"
-                  title="Actions"
-                  onClick={(e) => onSessionMenuButton(e, s.session_id)}
-                >
-                  <Icon name="more-vertical" size={12} />
-                </button>
-              </li>
-            ))}
-            {sessions.length > 20 && (
-              <li className="session-row-more muted">
-                … {sessions.length - 20} more not shown
-              </li>
-            )}
-          </ul>
-        </section>
+        <SessionListPane
+          sessions={sessions}
+          onContextMenu={onSessionContextMenu}
+          onMenuButton={onSessionMenuButton}
+        />
       )}
 
       {ctxMenu &&
         (() => {
+          const transcriptPath = sessionFilePath(
+            appStatus?.cc_config_dir,
+            info.sanitized_name,
+            ctxMenu.sessionId,
+          );
           const items: ContextMenuItem[] = [
             {
               label: "Move to another project…",
               onClick: () => setMoveTarget(ctxMenu.sessionId),
             },
+            ...(transcriptPath
+              ? ([
+                  { label: "", separator: true, onClick: () => {} },
+                  {
+                    label: "Reveal transcript in Finder",
+                    onClick: () => {
+                      api.revealInFinder(transcriptPath).catch((e) => {
+                        const msg = `Couldn't reveal: ${e}`;
+                        if (onError) onError(msg);
+                        else console.error(msg);
+                      });
+                    },
+                  },
+                  {
+                    label: "Copy transcript path",
+                    onClick: () => {
+                      navigator.clipboard.writeText(transcriptPath);
+                    },
+                  },
+                ] as ContextMenuItem[])
+              : []),
             { label: "", separator: true, onClick: () => {} },
             {
               label: "Copy session ID",
@@ -302,6 +345,119 @@ export function ProjectDetail({
         />
       )}
     </main>
+  );
+}
+
+const PAGE_SIZE = 20;
+
+/**
+ * Session list with id-prefix search and incremental pagination.
+ *
+ * The previous implementation hard-capped at 20 rows with no recourse —
+ * so sessions 21+ were unreachable from the GUI. This version renders
+ * the first PAGE_SIZE by default, offers a "Show more" button that
+ * grows the window, and lets the user filter by session-id prefix to
+ * drill straight to a specific transcript.
+ *
+ * Rows are keyboard-reachable (role=option + tabIndex + Enter/Space
+ * opens the actions menu) so this satisfies the design-rules
+ * accessibility floor the old implementation silently missed.
+ */
+function SessionListPane({
+  sessions,
+  onContextMenu,
+  onMenuButton,
+}: {
+  sessions: ProjectDetailData["sessions"];
+  onContextMenu: (e: React.MouseEvent, sid: string) => void;
+  onMenuButton: (e: React.MouseEvent, sid: string) => void;
+}) {
+  const [query, setQuery] = useState("");
+  const [limit, setLimit] = useState(PAGE_SIZE);
+
+  const q = query.trim().toLowerCase();
+  const filtered = q
+    ? sessions.filter((s) => s.session_id.toLowerCase().includes(q))
+    : sessions;
+  const visible = filtered.slice(0, limit);
+  const hiddenCount = Math.max(0, filtered.length - visible.length);
+
+  const handleKeyDown = (e: React.KeyboardEvent, sid: string) => {
+    if (e.key === "Enter" || e.key === " ") {
+      e.preventDefault();
+      onMenuButton(e as unknown as React.MouseEvent, sid);
+    }
+  };
+
+  return (
+    <section className="detail-section">
+      <div className="session-list-header">
+        <h3>Sessions · {sessions.length}</h3>
+        <input
+          type="search"
+          className="session-filter mono"
+          placeholder="Filter by id prefix"
+          value={query}
+          onChange={(e) => {
+            setQuery(e.target.value);
+            setLimit(PAGE_SIZE);
+          }}
+          aria-label="Filter sessions by id prefix"
+        />
+      </div>
+      {filtered.length === 0 ? (
+        <p className="muted small">No sessions match that filter.</p>
+      ) : (
+        <ul className="session-list" role="listbox" aria-label="Sessions">
+          {visible.map((s) => (
+            <li
+              key={s.session_id}
+              className="session-row"
+              role="option"
+              aria-selected={false}
+              tabIndex={0}
+              onContextMenu={(e) => onContextMenu(e, s.session_id)}
+              onKeyDown={(e) => handleKeyDown(e, s.session_id)}
+            >
+              <div className="session-row-text">
+                <span className="session-row-name mono">
+                  {s.session_id.slice(0, 8)}
+                </span>
+                <span className="session-row-meta">
+                  {formatSize(s.file_size)}
+                  {s.last_modified_ms != null && (
+                    <>{" · "}{formatRelativeTime(s.last_modified_ms)}</>
+                  )}
+                </span>
+              </div>
+              <button
+                type="button"
+                className="session-row-menu-btn"
+                aria-label="Session actions"
+                title="Actions"
+                onClick={(e) => onMenuButton(e, s.session_id)}
+              >
+                <Icon name="more-vertical" size={12} />
+              </button>
+            </li>
+          ))}
+        </ul>
+      )}
+      {hiddenCount > 0 && (
+        <div className="session-list-more">
+          <button
+            type="button"
+            className="btn"
+            onClick={() => setLimit((n) => n + PAGE_SIZE)}
+          >
+            Show {Math.min(hiddenCount, PAGE_SIZE)} more
+          </button>
+          <span className="muted small">
+            {hiddenCount} more hidden
+          </span>
+        </div>
+      )}
+    </section>
   );
 }
 

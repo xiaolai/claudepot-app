@@ -4,6 +4,7 @@ import { Icon } from "../../components/Icon";
 import { api } from "../../api";
 import { useFocusTrap } from "../../hooks/useFocusTrap";
 import type { MoveSessionReport, ProjectInfo } from "../../types";
+import { classifyProject } from "./projectStatus";
 
 type Phase =
   | { kind: "idle" }
@@ -48,10 +49,23 @@ export function MoveSessionModal({
   );
   const trapRef = useFocusTrap<HTMLDivElement>();
 
-  // Dropdown options: every known project whose cwd isn't the source.
-  // "__other__" is a sentinel for the native directory picker.
+  // Dropdown options: only "alive" projects — picking an orphan /
+  // unreachable / empty target would either fail the backend or
+  // rewrite cwd to a path that doesn't exist. "Other…" is always
+  // available as the free-form escape hatch.
+  //
+  // Sort: most-recently-touched first so the default selection is
+  // the one the user almost certainly wants (B1, B11).
   const options = useMemo(
-    () => projects.filter((p) => p.original_path !== fromCwd),
+    () =>
+      projects
+        .filter(
+          (p) =>
+            p.original_path !== fromCwd && classifyProject(p) === "alive",
+        )
+        .sort(
+          (a, b) => (b.last_modified_ms ?? 0) - (a.last_modified_ms ?? 0),
+        ),
     [projects, fromCwd],
   );
   const [selection, setSelection] = useState<string>(
@@ -60,6 +74,7 @@ export function MoveSessionModal({
   const [customCwd, setCustomCwd] = useState("");
   const [forceLive, setForceLive] = useState(false);
   const [forceConflict, setForceConflict] = useState(false);
+  const [cleanupSource, setCleanupSource] = useState(false);
   const [phase, setPhase] = useState<Phase>({ kind: "idle" });
 
   const target = selection === "__other__" ? customCwd.trim() : selection;
@@ -96,6 +111,7 @@ export function MoveSessionModal({
         toCwd: target,
         forceLive,
         forceConflict,
+        cleanupSource,
       });
       setPhase({ kind: "done", report });
       onCompleted(report);
@@ -143,11 +159,19 @@ export function MoveSessionModal({
                   onChange={(e) => setSelection(e.target.value)}
                   disabled={phase.kind === "moving"}
                 >
-                  {options.map((p) => (
-                    <option key={p.original_path} value={p.original_path}>
-                      {p.original_path}
+                  {options.length === 0 && (
+                    <option value="__other__" disabled>
+                      No live project targets — pick Other…
                     </option>
-                  ))}
+                  )}
+                  {options.map((p) => {
+                    const base = basename(p.original_path) ?? p.original_path;
+                    return (
+                      <option key={p.original_path} value={p.original_path}>
+                        {base} — {p.original_path}
+                      </option>
+                    );
+                  })}
                   <option value="__other__">Other…</option>
                 </select>
               </label>
@@ -196,6 +220,18 @@ export function MoveSessionModal({
                   Force past Syncthing <code>.sync-conflict-*</code>
                   <span className="muted">
                     (will silently orphan the conflict copy)
+                  </span>
+                </label>
+                <label className="move-session-check">
+                  <input
+                    type="checkbox"
+                    checked={cleanupSource}
+                    onChange={(e) => setCleanupSource(e.target.checked)}
+                    disabled={phase.kind === "moving"}
+                  />
+                  Remove source project dir if it's empty after the move
+                  <span className="muted">
+                    (was the last session here? tidy up the husk)
                   </span>
                 </label>
               </details>
@@ -264,6 +300,12 @@ export function MoveSessionModal({
                       <code className="mono">.claude.json</code> pointers cleared
                     </dt>
                     <dd>{phase.report.claudeJsonPointersCleared}</dd>
+                  </>
+                )}
+                {phase.report.sourceDirRemoved && (
+                  <>
+                    <dt>Source project dir</dt>
+                    <dd>removed (was empty)</dd>
                   </>
                 )}
               </dl>

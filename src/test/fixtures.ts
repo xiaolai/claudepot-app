@@ -11,6 +11,7 @@ export const sampleStatus = (overrides?: Partial<AppStatus>): AppStatus => ({
   desktop_active_email: null,
   desktop_installed: true,
   data_dir: "/tmp/claudepot-test",
+  cc_config_dir: "/tmp/claudepot-test/.claude",
   account_count: 0,
   ...overrides,
 });
