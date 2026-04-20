@@ -118,6 +118,11 @@ pub struct ExtraUsageDto {
     pub is_enabled: bool,
     pub monthly_limit: Option<f64>,
     pub used_credits: Option<f64>,
+    /// Server-computed utilization percent (0–100). Preferred over a
+    /// client-side `used / limit` recompute since the server knows
+    /// about rollover, prorated credits, and grace adjustments the
+    /// bare ratio misses.
+    pub utilization: Option<f64>,
 }
 
 /// Per-account usage data. `None` fields mean the window is not active
@@ -128,6 +133,13 @@ pub struct AccountUsageDto {
     pub seven_day: Option<UsageWindowDto>,
     pub seven_day_opus: Option<UsageWindowDto>,
     pub seven_day_sonnet: Option<UsageWindowDto>,
+    /// Usage attributed to third-party OAuth apps authorized against
+    /// this account (IDEs, tools, etc). Null on plans that don't
+    /// split this out; GUI renders render-if-nonzero.
+    pub seven_day_oauth_apps: Option<UsageWindowDto>,
+    /// Usage attributed to cowork / shared-seat pool. Null on
+    /// personal plans; GUI renders render-if-nonzero.
+    pub seven_day_cowork: Option<UsageWindowDto>,
     pub extra_usage: Option<ExtraUsageDto>,
 }
 
@@ -144,10 +156,13 @@ impl AccountUsageDto {
             seven_day: map_window(&r.seven_day),
             seven_day_opus: map_window(&r.seven_day_opus),
             seven_day_sonnet: map_window(&r.seven_day_sonnet),
+            seven_day_oauth_apps: map_window(&r.seven_day_oauth_apps),
+            seven_day_cowork: map_window(&r.seven_day_cowork),
             extra_usage: r.extra_usage.as_ref().map(|e| ExtraUsageDto {
                 is_enabled: e.is_enabled,
                 monthly_limit: e.monthly_limit,
                 used_credits: e.used_credits,
+                utilization: e.utilization,
             }),
         }
     }

@@ -1,7 +1,7 @@
 import { Glyph } from "../../components/primitives/Glyph";
 import { NF } from "../../icons";
 import type { UsageEntry, UsageWindow } from "../../types";
-import { formatResetTime } from "./format";
+import { formatResetTime, formatResetTooltip } from "./format";
 
 interface UsageBlockProps {
   entry: UsageEntry | null;
@@ -62,12 +62,32 @@ export function UsageBlock({ entry, anomalyShown }: UsageBlockProps) {
     );
   }
 
-  const rows: { label: string; w: UsageWindow; emph: boolean }[] = [
+  // Row set in display order. `tooltip` only populates for the two
+  // plan-level rows that aren't self-evident (OAuth apps / cowork).
+  const rows: {
+    label: string;
+    w: UsageWindow;
+    emph: boolean;
+    tooltip?: string;
+  }[] = [
     { label: "5h window", w: usage.five_hour!, emph: true },
     { label: "7d all", w: usage.seven_day!, emph: false },
     { label: "7d Sonnet", w: usage.seven_day_sonnet!, emph: false },
     { label: "7d Opus", w: usage.seven_day_opus!, emph: false },
-  ].filter((r) => r.w) as { label: string; w: UsageWindow; emph: boolean }[];
+    {
+      label: "7d apps",
+      w: usage.seven_day_oauth_apps!,
+      emph: false,
+      tooltip:
+        "Third-party OAuth apps authorized against this account (IDEs, tools, etc).",
+    },
+    {
+      label: "7d cowork",
+      w: usage.seven_day_cowork!,
+      emph: false,
+      tooltip: "Cowork / shared-seat pool usage.",
+    },
+  ].filter((r) => r.w) as typeof rows;
 
   return (
     <div style={{ padding: "var(--sp-14) var(--sp-18) var(--sp-12)" }}>
@@ -80,25 +100,25 @@ export function UsageBlock({ entry, anomalyShown }: UsageBlockProps) {
         }}
       >
         <span className="mono-cap">Rate-limit windows</span>
-        {entry.status === "stale" &&
-          entry.age_secs != null &&
-          entry.age_secs > 60 && (
-            <span
+        {entry.status === "stale" && entry.age_secs != null && (
+          <span
+            title={`Cached — last fetched ${formatAgeAbsolute(entry.age_secs)}`}
+            style={{
+              fontSize: "var(--fs-2xs)",
+              color: "var(--fg-faint)",
+              fontVariantNumeric: "tabular-nums",
+            }}
+          >
+            <Glyph
+              g={NF.clock}
               style={{
-                fontSize: "var(--fs-2xs)",
-                color: "var(--fg-faint)",
+                fontSize: "var(--fs-3xs)",
+                marginRight: "var(--sp-4)",
               }}
-            >
-              <Glyph
-                g={NF.clock}
-                style={{
-                  fontSize: "var(--fs-3xs)",
-                  marginRight: "var(--sp-4)",
-                }}
-              />
-              as of {Math.round(entry.age_secs / 60)}m ago
-            </span>
-          )}
+            />
+            {formatAgeShort(entry.age_secs)} old
+          </span>
+        )}
       </div>
       <div
         style={{
@@ -108,40 +128,125 @@ export function UsageBlock({ entry, anomalyShown }: UsageBlockProps) {
         }}
       >
         {rows.map((r) => (
-          <UsageRow key={r.label} label={r.label} w={r.w} emph={r.emph} />
+          <UsageRow
+            key={r.label}
+            label={r.label}
+            w={r.w}
+            emph={r.emph}
+            labelTooltip={r.tooltip}
+          />
         ))}
       </div>
 
-      {usage.extra_usage?.is_enabled && (
-        <div
-          style={{
-            marginTop: "var(--sp-12)",
-            paddingTop: "var(--sp-10)",
-            borderTop: "var(--bw-hair) dashed var(--line)",
-            display: "flex",
-            justifyContent: "space-between",
-            fontSize: "var(--fs-xs)",
-          }}
-        >
-          <span className="mono-cap">Extra usage</span>
-          <span
-            style={{
-              fontVariantNumeric: "tabular-nums",
-              color: "var(--fg)",
-            }}
-          >
-            <b>
-              ${(usage.extra_usage.used_credits ?? 0).toFixed(2)}
-            </b>
-            <span style={{ color: "var(--fg-faint)" }}>
-              {" / $"}
-              {(usage.extra_usage.monthly_limit ?? 0).toFixed(2)}
-            </span>
-          </span>
-        </div>
-      )}
+      {usage.extra_usage && <ExtraUsageRow extra={usage.extra_usage} />}
     </div>
   );
+}
+
+/**
+ * Extras row. Three visual states:
+ *   1. Enabled & billing    → `$12.50 / $50.00 · 25%`  (server utilization preferred)
+ *   2. Enabled, no spend    → `$0.00 / $50.00` (no percent)
+ *   3. Disabled             → faint "off" marker on the divider line
+ */
+function ExtraUsageRow({ extra }: { extra: NonNullable<UsageEntry["usage"]>["extra_usage"] }) {
+  if (!extra) return null;
+
+  if (!extra.is_enabled) {
+    return (
+      <div
+        title="Extras (overage billing) is disabled for this account. Enable in the Anthropic console if you need headroom past the monthly limit."
+        style={{
+          marginTop: "var(--sp-12)",
+          paddingTop: "var(--sp-10)",
+          borderTop: "var(--bw-hair) dashed var(--line)",
+          display: "flex",
+          justifyContent: "space-between",
+          alignItems: "baseline",
+          fontSize: "var(--fs-xs)",
+          color: "var(--fg-faint)",
+        }}
+      >
+        <span className="mono-cap">Extra usage</span>
+        <span className="mono-cap">off</span>
+      </div>
+    );
+  }
+
+  const used = extra.used_credits ?? 0;
+  const limit = extra.monthly_limit ?? 0;
+  // Prefer server-side utilization when present — it accounts for
+  // rollover, prorated credits, and grace adjustments that a
+  // client-side used/limit ratio misses. Fall back to the ratio when
+  // the server omits the field.
+  const serverPct = extra.utilization;
+  const pct =
+    serverPct != null
+      ? Math.round(serverPct)
+      : limit > 0
+        ? Math.round((used / limit) * 100)
+        : null;
+  const high = pct != null && pct >= 80;
+
+  return (
+    <div
+      style={{
+        marginTop: "var(--sp-12)",
+        paddingTop: "var(--sp-10)",
+        borderTop: "var(--bw-hair) dashed var(--line)",
+        display: "flex",
+        justifyContent: "space-between",
+        alignItems: "baseline",
+        fontSize: "var(--fs-xs)",
+      }}
+    >
+      <span className="mono-cap">Extra usage</span>
+      <span
+        style={{
+          fontVariantNumeric: "tabular-nums",
+          color: "var(--fg)",
+          display: "inline-flex",
+          gap: "var(--sp-6)",
+          alignItems: "baseline",
+        }}
+      >
+        <b>${used.toFixed(2)}</b>
+        <span style={{ color: "var(--fg-faint)" }}>
+          / ${limit.toFixed(2)}
+        </span>
+        {pct != null && used > 0 && (
+          <span
+            style={{
+              color: high ? "var(--warn)" : "var(--fg-muted)",
+              fontWeight: 600,
+              marginLeft: "var(--sp-4)",
+            }}
+          >
+            {pct}%
+          </span>
+        )}
+      </span>
+    </div>
+  );
+}
+
+function formatAgeShort(ageSecs: number): string {
+  if (ageSecs < 60) return `${Math.max(1, Math.round(ageSecs))}s`;
+  const mins = Math.round(ageSecs / 60);
+  if (mins < 60) return `${mins}m`;
+  const hrs = Math.round(mins / 60);
+  return `${hrs}h`;
+}
+
+function formatAgeAbsolute(ageSecs: number): string {
+  const date = new Date(Date.now() - ageSecs * 1000);
+  return new Intl.DateTimeFormat(undefined, {
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+    hour12: false,
+    timeZoneName: "shortOffset",
+  }).format(date);
 }
 
 function StatusLine({
@@ -175,13 +280,16 @@ function UsageRow({
   label,
   w,
   emph,
+  labelTooltip,
 }: {
   label: string;
   w: UsageWindow;
   emph: boolean;
+  labelTooltip?: string;
 }) {
   const pct = Math.round(w.utilization);
   const high = pct >= 80;
+  const resetTip = formatResetTooltip(w.resets_at);
   return (
     <div
       style={{
@@ -193,9 +301,17 @@ function UsageRow({
       }}
     >
       <span
+        title={labelTooltip}
         style={{
           color: emph ? "var(--fg)" : "var(--fg-muted)",
           fontWeight: emph ? 600 : 500,
+          // Dotted underline signals "hoverable for more info" on the
+          // rows that carry it (apps / cowork). Others stay plain.
+          textDecoration: labelTooltip
+            ? "underline dotted var(--fg-ghost)"
+            : undefined,
+          textUnderlineOffset: "0.2em",
+          cursor: labelTooltip ? "help" : "default",
         }}
       >
         {label}
@@ -216,6 +332,7 @@ function UsageRow({
         {pct}%
       </span>
       <span
+        title={resetTip}
         style={{
           textAlign: "right",
           color: "var(--fg-faint)",
@@ -223,6 +340,7 @@ function UsageRow({
           whiteSpace: "nowrap",
           overflow: "hidden",
           textOverflow: "ellipsis",
+          cursor: "help",
         }}
       >
         {formatResetTime(w.resets_at)}
