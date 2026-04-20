@@ -227,8 +227,11 @@
   --toggle-thumb-off:      1px;
   --toggle-thumb-on:       17px;
 
-  /* Left padding on WindowChrome to clear the native traffic lights. */
-  --chrome-inset-left:     80px;
+  /* Left padding on WindowChrome to clear the native traffic lights.
+     Lights start at x=20 (see src-tauri/tauri.conf.json) and the
+     group spans ~58px; 88px leaves ~10px breathing room before the
+     breadcrumb icon. */
+  --chrome-inset-left:     88px;
 
   /* ── Durations ──────────────────────────────────────────── */
   --dur-fast:    80ms;
