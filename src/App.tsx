@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useMemo } from "react";
 import { PendingJournalsBanner } from "./components/PendingJournalsBanner";
 import { RunningOpStrip } from "./components/RunningOpStrip";
+import { StatusIssuesBanner } from "./components/StatusIssuesBanner";
+import { ToastContainer } from "./components/ToastContainer";
 import { sections, sectionIds } from "./sections/registry";
 import { AccountsSection } from "./sections/AccountsSection";
 import { ProjectsSection } from "./sections/ProjectsSection";
@@ -10,9 +12,11 @@ import { SessionsSection } from "./sections/SessionsSection";
 import { useSection } from "./hooks/useSection";
 import { usePendingJournals } from "./hooks/usePendingJournals";
 import { useRunningOps } from "./hooks/useRunningOps";
-import { useAccounts, bindingFrom } from "./hooks/useAccounts";
+import { bindingFrom } from "./hooks/useAccounts";
+import { useStatusIssues } from "./hooks/useStatusIssues";
 import { useTheme } from "./hooks/useTheme";
 import { OperationsProvider, useOperations } from "./hooks/useOperations";
+import { AppStateProvider, useAppState } from "./providers/AppStateProvider";
 import { api } from "./api";
 import type { RunningOpInfo } from "./types";
 import { WindowChrome, AppSidebar, AppStatusBar } from "./shell";
@@ -26,7 +30,19 @@ function AppShell() {
     usePendingJournals();
   const { ops: runningOps } = useRunningOps();
   const { active: activeOp, open: openOp, close: closeOp } = useOperations();
-  const { accounts, refresh: refreshAccounts } = useAccounts();
+  const {
+    accounts,
+    status: appStatus,
+    ccIdentity,
+    syncError,
+    keychainIssue,
+    refresh: refreshAccounts,
+    toasts,
+    dismissToast,
+    pushToast,
+    isDismissed,
+    dismiss,
+  } = useAppState();
   const { resolved: themeResolved, toggle: toggleTheme } = useTheme();
 
   // Binding derived from the same source of truth AccountsSection
@@ -85,14 +101,63 @@ function AppShell() {
         }
         await refreshAccounts();
       } catch (e) {
-        // Surface on console for now — the Accounts screen carries
-        // the full error UI. Future: hoist toast system into a
-        // global provider so the shell can push errors too.
-        // eslint-disable-next-line no-console
-        console.error(`${target}_use failed:`, e);
+        pushToast("error", `${target === "cli" ? "CLI" : "Desktop"} swap failed: ${e}`);
       }
     },
-    [accounts, refreshAccounts],
+    [accounts, refreshAccounts, pushToast],
+  );
+
+  // Jump to Accounts and select a specific account row. Used by the
+  // status banner's drift / keychain actions to deep-link into the row
+  // the user needs to act on.
+  const onSelectAccount = useCallback(
+    (_uuid: string) => {
+      setSection("accounts");
+      // Row-level focus is the responsibility of AccountsSection; for
+      // now we just jump to the section. A future scrollIntoView on
+      // the target card can hook off the uuid.
+    },
+    [setSection],
+  );
+
+  const onUnlockKeychain = useCallback(async () => {
+    try {
+      await api.unlockKeychain();
+      await refreshAccounts();
+    } catch (e) {
+      pushToast("error", `Unlock failed: ${e}`);
+    }
+  }, [pushToast, refreshAccounts]);
+
+  const onReloginActive = useCallback(async () => {
+    const active = accounts.find((a) => a.is_cli_active);
+    if (!active) {
+      pushToast("error", "No active CLI account to re-login.");
+      return;
+    }
+    try {
+      pushToast("info", `Opening browser — sign in as ${active.email}…`);
+      await api.accountLogin(active.uuid);
+      pushToast("info", `Signed in as ${active.email}`);
+      await refreshAccounts();
+    } catch (e) {
+      pushToast("error", `Login failed: ${e}`);
+    }
+  }, [accounts, pushToast, refreshAccounts]);
+
+  const rawIssues = useStatusIssues({
+    ccIdentity,
+    status: appStatus,
+    syncError,
+    keychainIssue,
+    accounts,
+    onUnlock: onUnlockKeychain,
+    onSelectAccount,
+    onReloginActive,
+  });
+  const visibleIssues = useMemo(
+    () => rawIssues.filter((i) => !(i.dismissable && isDismissed(i.id))),
+    [rawIssues, isDismissed],
   );
 
   // Breadcrumb tail mirrors the active section.
@@ -159,6 +224,8 @@ function AppShell() {
             position: "relative",
           }}
         >
+          <StatusIssuesBanner issues={visibleIssues} onDismiss={dismiss} />
+
           {showBanner && pendingSummary && (
             <div style={{ padding: "var(--sp-12) var(--sp-16) 0" }}>
               <PendingJournalsBanner
@@ -225,6 +292,8 @@ function AppShell() {
           }}
         />
       )}
+
+      <ToastContainer toasts={toasts} onDismiss={dismissToast} />
     </div>
   );
 }
@@ -232,7 +301,9 @@ function AppShell() {
 function App() {
   return (
     <OperationsProvider>
-      <AppShell />
+      <AppStateProvider>
+        <AppShell />
+      </AppStateProvider>
     </OperationsProvider>
   );
 }
