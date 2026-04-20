@@ -345,6 +345,9 @@ export function ProjectsSection({
       {error && projects.length === 0 ? (
         <div
           style={{
+            flex: 1,
+            minHeight: 0,
+            overflow: "auto",
             padding: "var(--sp-48)",
             display: "flex",
             flexDirection: "column",

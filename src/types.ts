@@ -383,3 +383,130 @@ export interface AdoptReport {
   sourceDirRemoved: boolean;
   perSession: MoveSessionReport[];
 }
+
+// ---------- Session index (Sessions tab) ----------
+
+export interface TokenUsage {
+  input: number;
+  output: number;
+  cache_creation: number;
+  cache_read: number;
+  total: number;
+}
+
+/**
+ * One row in the Sessions tab. Produced by a full-file scan of the
+ * JSONL, so counts and token totals are authoritative. `project_path`
+ * comes from the first JSONL `cwd` field when available; otherwise
+ * from a lossy `unsanitize(slug)` fallback (hence
+ * `project_from_transcript` as the reliability flag).
+ */
+export interface SessionRow {
+  session_id: string;
+  slug: string;
+  file_path: string;
+  file_size_bytes: number;
+  last_modified_ms: number | null;
+  project_path: string;
+  project_from_transcript: boolean;
+  /** RFC3339 of the earliest dated event. Null for empty sessions. */
+  first_ts: string | null;
+  last_ts: string | null;
+  event_count: number;
+  message_count: number;
+  user_message_count: number;
+  assistant_message_count: number;
+  first_user_prompt: string | null;
+  models: string[];
+  tokens: TokenUsage;
+  git_branch: string | null;
+  cc_version: string | null;
+  /** CC's internal display slug (e.g. "brave-otter-88"). */
+  display_slug: string | null;
+  has_error: boolean;
+  is_sidechain: boolean;
+}
+
+/** Discriminated union over the JSONL event types CC writes. */
+export type SessionEvent =
+  | {
+      kind: "userText";
+      ts: string | null;
+      uuid: string | null;
+      text: string;
+    }
+  | {
+      kind: "userToolResult";
+      ts: string | null;
+      uuid: string | null;
+      tool_use_id: string;
+      content: string;
+      is_error: boolean;
+    }
+  | {
+      kind: "assistantText";
+      ts: string | null;
+      uuid: string | null;
+      model: string | null;
+      text: string;
+      usage: TokenUsage | null;
+      stop_reason: string | null;
+    }
+  | {
+      kind: "assistantToolUse";
+      ts: string | null;
+      uuid: string | null;
+      model: string | null;
+      tool_name: string;
+      tool_use_id: string;
+      input_preview: string;
+    }
+  | {
+      kind: "assistantThinking";
+      ts: string | null;
+      uuid: string | null;
+      text: string;
+    }
+  | {
+      kind: "summary";
+      ts: string | null;
+      uuid: string | null;
+      text: string;
+    }
+  | {
+      kind: "system";
+      ts: string | null;
+      uuid: string | null;
+      subtype: string | null;
+      detail: string;
+    }
+  | {
+      kind: "attachment";
+      ts: string | null;
+      uuid: string | null;
+      name: string | null;
+      mime: string | null;
+    }
+  | {
+      kind: "fileSnapshot";
+      ts: string | null;
+      uuid: string | null;
+      file_count: number;
+    }
+  | {
+      kind: "other";
+      ts: string | null;
+      uuid: string | null;
+      raw_type: string;
+    }
+  | {
+      kind: "malformed";
+      line_number: number;
+      error: string;
+      preview: string;
+    };
+
+export interface SessionDetail {
+  row: SessionRow;
+  events: SessionEvent[];
+}

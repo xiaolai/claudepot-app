@@ -1,69 +1,440 @@
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { api } from "../api";
+import { ContextMenu, type ContextMenuItem } from "../components/ContextMenu";
+import { Button } from "../components/primitives/Button";
 import { Glyph } from "../components/primitives/Glyph";
+import { IconButton } from "../components/primitives/IconButton";
+import { Input } from "../components/primitives/Input";
+import { useGlobalShortcuts } from "../hooks/useGlobalShortcuts";
+import { useCompactHeader, useSplitView } from "../hooks/useWindowWidth";
 import { NF } from "../icons";
 import { ScreenHeader } from "../shell/ScreenHeader";
+import type { ProjectInfo, SessionRow } from "../types";
+import { MoveSessionModal } from "./projects/MoveSessionModal";
+import { SessionDetail } from "./sessions/SessionDetail";
+import {
+  SessionsTable,
+  countSessionStatus,
+  type SessionFilter,
+} from "./sessions/SessionsTable";
+
+const SEG_OPTIONS: { id: SessionFilter; label: string }[] = [
+  { id: "all", label: "All" },
+  { id: "errors", label: "Errors" },
+  { id: "sidechain", label: "Agents" },
+];
 
 /**
- * Placeholder for the Sessions screen. The backend doesn't yet
- * expose a "list all sessions" surface (only orphan detection), so
- * this view reserves the route and tells the user where to look in
- * the meantime. Fleshed out in a future phase once the backend
- * surfaces `session_list` / `session_show`.
+ * Sessions tab — a flat, cross-project index of every CC session on
+ * disk. Mirrors the Projects section's layout: table on the left,
+ * detail (transcript) on the right, with a single-pane master/detail
+ * flow below `useSplitView()`'s minimum width.
+ *
+ * Data sources:
+ *  - `api.sessionListAll()` → full metadata row per `.jsonl` (backed
+ *    by a parallel rayon scan in Rust). Powers the table.
+ *  - `api.sessionRead(sessionId)` → full transcript events for the
+ *    selected row. Lazy per-selection, not prefetched.
+ *  - `api.projectList()` → feeds the MoveSessionModal target picker.
+ *
+ * The `refresh()` handler re-pulls sessions AND projects in parallel
+ * so the Move modal's target list stays fresh after a move.
  */
 export function SessionsSection() {
+  const [sessions, setSessions] = useState<SessionRow[]>([]);
+  const [projects, setProjects] = useState<ProjectInfo[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  /** The file_path of the selected row — globally unique on disk.
+   * We key selection by path (not session_id) because CC can end up
+   * with two .jsonl files that share a session_id (e.g. an interrupted
+   * adopt_orphan left the source file behind). */
+  const [selectedPath, setSelectedPath] = useState<string | null>(null);
+  const [filter, setFilter] = useState<SessionFilter>("all");
+  const [query, setQuery] = useState("");
+  const [detailRefreshSignal, setDetailRefreshSignal] = useState(0);
+  const [toast, setToast] = useState<string | null>(null);
+  const [ctxMenu, setCtxMenu] = useState<{
+    x: number;
+    y: number;
+    session: SessionRow;
+  } | null>(null);
+  const [moveSession, setMoveSession] = useState<SessionRow | null>(null);
+
+  const tokenRef = useRef(0);
+  const mountedRef = useRef(true);
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+    };
+  }, []);
+
+  const refresh = useCallback(() => {
+    const myToken = ++tokenRef.current;
+    setLoading(true);
+    setError(null);
+    Promise.all([api.sessionListAll(), api.projectList()])
+      .then(([ss, ps]) => {
+        if (!mountedRef.current || myToken !== tokenRef.current) return;
+        setSessions(ss);
+        setProjects(ps);
+        setLoading(false);
+        // Drop the selection if it no longer exists.
+        setSelectedPath((prev) =>
+          prev && ss.some((s) => s.file_path === prev) ? prev : null,
+        );
+      })
+      .catch((e) => {
+        if (!mountedRef.current || myToken !== tokenRef.current) return;
+        setError(String(e));
+        setLoading(false);
+      });
+  }, []);
+
+  useEffect(() => {
+    refresh();
+  }, [refresh]);
+
+  useGlobalShortcuts({ onRefresh: refresh });
+
+  const counts = useMemo(() => countSessionStatus(sessions), [sessions]);
+
+  // Table-level name filter: matches on project basename, project path,
+  // first prompt, session id prefix, model, or git branch. Cheap substring.
+  const filteredByQuery = useMemo(() => {
+    const q = query.trim().toLowerCase();
+    if (!q) return sessions;
+    return sessions.filter((s) => {
+      if (s.session_id.toLowerCase().startsWith(q)) return true;
+      if (s.project_path.toLowerCase().includes(q)) return true;
+      if ((s.first_user_prompt ?? "").toLowerCase().includes(q)) return true;
+      if (s.models.some((m) => m.toLowerCase().includes(q))) return true;
+      if ((s.git_branch ?? "").toLowerCase().includes(q)) return true;
+      return false;
+    });
+  }, [sessions, query]);
+
+  const handleContextMenu = useCallback(
+    (e: React.MouseEvent, s: SessionRow) => {
+      e.preventDefault();
+      setCtxMenu({ x: e.clientX, y: e.clientY, session: s });
+    },
+    [],
+  );
+  const closeCtxMenu = useCallback(() => setCtxMenu(null), []);
+
+  const compact = useCompactHeader();
+  const splitView = useSplitView();
+  const showDetail = selectedPath !== null;
+  const showTable = splitView || selectedPath === null;
+
+  const subtitle = (() => {
+    if (error && sessions.length === 0) return "Couldn't load sessions.";
+    const total = sessions.length;
+    if (total === 0) return "No sessions yet. Run `claude` to start one.";
+    const narrowed = query.trim() && filteredByQuery.length !== total;
+    if (narrowed) {
+      return `${filteredByQuery.length} of ${total} session${
+        total === 1 ? "" : "s"
+      } shown`;
+    }
+    const pieces: string[] = [`${total} session${total === 1 ? "" : "s"}`];
+    if (counts.errors > 0) pieces.push(`${counts.errors} with errors`);
+    if (counts.sidechain > 0) pieces.push(`${counts.sidechain} agent`);
+    return pieces.join(" · ");
+  })();
+
   return (
-    <div
-      style={{
-        display: "flex",
-        flexDirection: "column",
-        flex: 1,
-        minHeight: 0,
-      }}
-    >
+    <>
       <ScreenHeader
         title="Sessions"
-        subtitle="Recent Claude Code conversations by project"
+        subtitle={subtitle}
+        actions={
+          compact ? (
+            <IconButton
+              glyph={NF.refresh}
+              onClick={refresh}
+              title="Refresh (⌘R)"
+              aria-label="Refresh sessions"
+            />
+          ) : (
+            <Button
+              variant="ghost"
+              glyph={NF.refresh}
+              glyphColor="var(--fg-muted)"
+              onClick={refresh}
+              title="Refresh (⌘R)"
+            >
+              Refresh
+            </Button>
+          )
+        }
       />
-      <div
-        style={{
-          flex: 1,
-          display: "flex",
-          alignItems: "center",
-          justifyContent: "center",
-          padding: "var(--sp-48)",
-        }}
-      >
+
+      {showTable && (
         <div
-          role="status"
           style={{
+            padding: "var(--sp-14) var(--sp-32)",
+            borderBottom: "var(--bw-hair) solid var(--line)",
+            display: "flex",
+            flexWrap: "wrap",
+            gap: "var(--sp-12)",
+            alignItems: "center",
+            background: "var(--bg)",
+            flexShrink: 0,
+          }}
+        >
+          <Input
+            glyph={NF.search}
+            placeholder="Filter by project, prompt, model, or id"
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            style={{
+              flex: "1 1 var(--filter-input-width)",
+              minWidth: "160px",
+              maxWidth: "var(--filter-input-width)",
+            }}
+            aria-label="Filter sessions"
+          />
+
+          <div
+            role="tablist"
+            style={{
+              display: "flex",
+              gap: "var(--sp-2)",
+              padding: "var(--sp-2)",
+              background: "var(--bg-sunken)",
+              border: "var(--bw-hair) solid var(--line)",
+              borderRadius: "var(--r-2)",
+            }}
+          >
+            {SEG_OPTIONS.map((opt) => {
+              const current = filter === opt.id;
+              const count = counts[opt.id];
+              return (
+                <button
+                  key={opt.id}
+                  type="button"
+                  role="tab"
+                  aria-selected={current}
+                  onClick={() => setFilter(opt.id)}
+                  style={{
+                    padding: "var(--sp-4) var(--sp-10)",
+                    fontSize: "var(--fs-xs)",
+                    fontWeight: 500,
+                    color: current ? "var(--fg)" : "var(--fg-muted)",
+                    background: current ? "var(--bg-raised)" : "transparent",
+                    border: current
+                      ? "var(--bw-hair) solid var(--line)"
+                      : "var(--bw-hair) solid transparent",
+                    borderRadius: "var(--r-1)",
+                    letterSpacing: "var(--ls-wide)",
+                    textTransform: "uppercase",
+                    cursor: "pointer",
+                  }}
+                >
+                  {opt.label} · {count}
+                </button>
+              );
+            })}
+          </div>
+
+          <div style={{ flex: 1 }} />
+          {loading && sessions.length > 0 && (
+            <span
+              style={{
+                fontSize: "var(--fs-xs)",
+                color: "var(--fg-faint)",
+                display: "flex",
+                alignItems: "center",
+                gap: "var(--sp-6)",
+              }}
+            >
+              <Glyph g={NF.refresh} />
+              Refreshing…
+            </span>
+          )}
+        </div>
+      )}
+
+      {error && sessions.length === 0 ? (
+        <div
+          style={{
+            flex: 1,
+            minHeight: 0,
+            overflow: "auto",
+            padding: "var(--sp-48)",
             display: "flex",
             flexDirection: "column",
             alignItems: "center",
-            gap: "var(--sp-8)",
-            maxWidth: "var(--content-cap-sm)",
-            textAlign: "center",
-            color: "var(--fg-muted)",
+            gap: "var(--sp-12)",
           }}
         >
-          <Glyph g={NF.chatAlt} size="var(--sp-32)" color="var(--fg-ghost)" />
-          <p style={{ margin: 0, fontSize: "var(--fs-base)" }}>
-            Sessions view coming soon.
-          </p>
+          <h2 style={{ fontSize: "var(--fs-lg)", margin: 0 }}>
+            Couldn't load sessions
+          </h2>
           <p
             style={{
-              margin: 0,
+              color: "var(--fg-muted)",
               fontSize: "var(--fs-xs)",
-              color: "var(--fg-faint)",
+              margin: 0,
             }}
           >
-            Session transcripts live under{" "}
-            <code style={{ fontFamily: "var(--font)" }}>
-              ~/.claude/projects/&lt;slug&gt;/
-            </code>
-            . Open the Projects screen to navigate to a project and
-            inspect its sessions.
+            {error}
           </p>
+          <Button variant="solid" onClick={refresh}>
+            Retry
+          </Button>
         </div>
-      </div>
-    </div>
+      ) : (
+        <div style={{ display: "flex", minHeight: 0, flex: 1 }}>
+          {showTable && (
+            <div
+              style={{
+                flex: 1,
+                minWidth: 0,
+                overflow: "auto",
+                display: "flex",
+                flexDirection: "column",
+              }}
+            >
+              <SessionsTable
+                sessions={filteredByQuery}
+                filter={filter}
+                selectedId={selectedPath}
+                onSelect={setSelectedPath}
+                onContextMenu={handleContextMenu}
+              />
+            </div>
+          )}
+
+          {showDetail && selectedPath && (
+            <aside
+              style={{
+                width: splitView ? "var(--project-detail-width)" : "100%",
+                flex: splitView ? "0 0 auto" : "1 1 auto",
+                flexShrink: splitView ? 0 : 1,
+                borderLeft: splitView
+                  ? "var(--bw-hair) solid var(--line)"
+                  : "none",
+                background: splitView ? "var(--bg-sunken)" : "var(--bg)",
+                overflow: "hidden",
+                minWidth: 0,
+                display: "flex",
+                flexDirection: "column",
+              }}
+            >
+              <SessionDetail
+                key={selectedPath}
+                filePath={selectedPath}
+                projects={projects}
+                refreshSignal={detailRefreshSignal}
+                onMoved={() => {
+                  setDetailRefreshSignal((n) => n + 1);
+                  refresh();
+                }}
+                onError={(msg) => setToast(msg)}
+                onBack={splitView ? undefined : () => setSelectedPath(null)}
+              />
+            </aside>
+          )}
+        </div>
+      )}
+
+      {moveSession && (
+        <MoveSessionModal
+          sessionId={moveSession.session_id}
+          fromCwd={moveSession.project_path}
+          projects={projects}
+          onClose={() => setMoveSession(null)}
+          onCompleted={() => {
+            setMoveSession(null);
+            setDetailRefreshSignal((n) => n + 1);
+            refresh();
+          }}
+        />
+      )}
+
+      {toast && (
+        <div
+          className="inline-toast"
+          role="status"
+          onClick={() => setToast(null)}
+          style={{
+            position: "fixed",
+            bottom: "var(--sp-40)",
+            left: "50%",
+            transform: "translateX(-50%)",
+            padding: "var(--sp-10) var(--sp-16)",
+            background: "var(--bg-raised)",
+            border: "var(--bw-hair) solid var(--line-strong)",
+            borderRadius: "var(--r-2)",
+            fontSize: "var(--fs-sm)",
+            color: "var(--fg)",
+            boxShadow: "var(--shadow-md)",
+            cursor: "pointer",
+            zIndex: "var(--z-toast)" as unknown as number,
+          }}
+        >
+          {toast}
+        </div>
+      )}
+
+      {ctxMenu &&
+        (() => {
+          const s = ctxMenu.session;
+          const items: ContextMenuItem[] = [
+            {
+              label: "Open in Finder",
+              onClick: () => {
+                api.revealInFinder(s.file_path).catch((e) => {
+                  setToast(`Couldn't reveal: ${e}`);
+                });
+              },
+            },
+            {
+              label: "Open in detail",
+              onClick: () => setSelectedPath(s.file_path),
+            },
+            { label: "", separator: true, onClick: () => {} },
+            {
+              label: "Move to project…",
+              onClick: () => {
+                if (!s.project_from_transcript) {
+                  setToast(
+                    "Can't move: this session has no cwd recorded in the transcript.",
+                  );
+                  return;
+                }
+                setMoveSession(s);
+              },
+            },
+            { label: "", separator: true, onClick: () => {} },
+            {
+              label: "Copy session id",
+              onClick: () => {
+                navigator.clipboard.writeText(s.session_id);
+                setToast("Copied session id.");
+              },
+            },
+            {
+              label: "Copy project path",
+              onClick: () => {
+                navigator.clipboard.writeText(s.project_path);
+                setToast("Copied project path.");
+              },
+            },
+          ];
+          return (
+            <ContextMenu
+              x={ctxMenu.x}
+              y={ctxMenu.y}
+              items={items}
+              onClose={closeCtxMenu}
+            />
+          );
+        })()}
+    </>
   );
 }

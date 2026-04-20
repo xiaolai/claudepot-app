@@ -74,11 +74,19 @@ export function AccountsGrid({
 
       <div
         style={{
+          // Flex child of the shell's flex-column main. `flex: 1` +
+          // `minHeight: 0` + `overflow: auto` keep scroll contained
+          // here so ScreenHeader and the filter bar stay pinned
+          // when the card list overflows.
+          flex: 1,
+          minHeight: 0,
+          overflow: "auto",
           padding: "var(--sp-20) var(--sp-32) var(--sp-40)",
           display: "grid",
           gridTemplateColumns:
             "repeat(auto-fill, minmax(var(--content-cap-sm), 1fr))",
           gap: "var(--sp-16)",
+          alignContent: "start",
         }}
       >
         {shown.map((a) => (
