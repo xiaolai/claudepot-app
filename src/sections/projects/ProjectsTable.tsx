@@ -8,7 +8,35 @@ import { classifyProject, type ProjectStatus } from "./projectStatus";
 
 export type ProjectFilter = "all" | "orphan" | "unreachable" | "empty";
 
+/**
+ * Columns a user can sort by. `path` sorts by the project basename
+ * (case-insensitive) — what the user reads, not the slug. Status
+ * and the leading icon aren't sortable.
+ */
+export type SortKey = "path" | "session_count" | "size" | "last_touched";
+export type SortDir = "asc" | "desc";
+
 const COLS = "var(--sp-20) 1.6fr 0.9fr 0.9fr 0.8fr 1fr var(--sp-24)";
+
+function projectBasename(p: ProjectInfo): string {
+  return (
+    p.original_path.split("/").filter(Boolean).pop() ?? p.sanitized_name
+  ).toLowerCase();
+}
+
+function compareProjects(a: ProjectInfo, b: ProjectInfo, key: SortKey): number {
+  switch (key) {
+    case "path":
+      return projectBasename(a).localeCompare(projectBasename(b));
+    case "session_count":
+      return a.session_count - b.session_count;
+    case "size":
+      return Number(a.total_size_bytes) - Number(b.total_size_bytes);
+    case "last_touched":
+      // null last_modified sorts to the bottom ascending.
+      return (a.last_modified_ms ?? 0) - (b.last_modified_ms ?? 0);
+  }
+}
 
 /**
  * Full-width project table. Replaces the previous sidebar-style
@@ -32,10 +60,32 @@ export function ProjectsTable({
   onSelect: (path: string) => void;
   onContextMenu?: (e: MouseEvent, p: ProjectInfo) => void;
 }) {
+  // Default: last_touched desc — freshest work on top. Clicking a
+  // sortable column cycles that column through asc → desc → default.
+  const [sort, setSort] = useState<{ key: SortKey; dir: SortDir }>({
+    key: "last_touched",
+    dir: "desc",
+  });
+
+  const toggleSort = (key: SortKey) => {
+    setSort((prev) => {
+      if (prev.key !== key) return { key, dir: "asc" };
+      if (prev.dir === "asc") return { key, dir: "desc" };
+      return { key: "last_touched", dir: "desc" };
+    });
+  };
+
   const shown = useMemo(() => {
-    if (filter === "all") return projects;
-    return projects.filter((p) => classifyProject(p) === filter);
-  }, [projects, filter]);
+    const filtered =
+      filter === "all"
+        ? projects
+        : projects.filter((p) => classifyProject(p) === filter);
+    const sorted = [...filtered].sort((a, b) =>
+      compareProjects(a, b, sort.key),
+    );
+    if (sort.dir === "desc") sorted.reverse();
+    return sorted;
+  }, [projects, filter, sort]);
 
   if (projects.length === 0) {
     return (
@@ -60,6 +110,7 @@ export function ProjectsTable({
     <>
       {/* table header */}
       <div
+        role="row"
         style={{
           display: "grid",
           gridTemplateColumns: COLS,
@@ -78,11 +129,35 @@ export function ProjectsTable({
         }}
       >
         <span />
-        <span>Project</span>
-        <span>Sessions</span>
-        <span>Size</span>
+        <SortHeader
+          label="Project"
+          col="path"
+          currentKey={sort.key}
+          currentDir={sort.dir}
+          onToggle={toggleSort}
+        />
+        <SortHeader
+          label="Sessions"
+          col="session_count"
+          currentKey={sort.key}
+          currentDir={sort.dir}
+          onToggle={toggleSort}
+        />
+        <SortHeader
+          label="Size"
+          col="size"
+          currentKey={sort.key}
+          currentDir={sort.dir}
+          onToggle={toggleSort}
+        />
         <span>Status</span>
-        <span>Last touched</span>
+        <SortHeader
+          label="Last touched"
+          col="last_touched"
+          currentKey={sort.key}
+          currentDir={sort.dir}
+          onToggle={toggleSort}
+        />
         <span />
       </div>
 
@@ -249,6 +324,64 @@ function ProjectRow({
         )}
       </span>
     </li>
+  );
+}
+
+/**
+ * Clickable column header. Shows a direction arrow when this column
+ * is the active sort; otherwise the column reads as plain label but
+ * stays discoverable via the button semantics.
+ */
+function SortHeader({
+  label,
+  col,
+  currentKey,
+  currentDir,
+  onToggle,
+}: {
+  label: string;
+  col: SortKey;
+  currentKey: SortKey;
+  currentDir: SortDir;
+  onToggle: (key: SortKey) => void;
+}) {
+  const active = currentKey === col;
+  const aria: "ascending" | "descending" | "none" = active
+    ? currentDir === "asc"
+      ? "ascending"
+      : "descending"
+    : "none";
+  return (
+    <button
+      type="button"
+      role="columnheader"
+      aria-sort={aria}
+      onClick={() => onToggle(col)}
+      title={`Sort by ${label.toLowerCase()}`}
+      style={{
+        background: "transparent",
+        border: 0,
+        padding: 0,
+        font: "inherit",
+        color: active ? "var(--fg)" : "var(--fg-faint)",
+        letterSpacing: "var(--ls-wide)",
+        textTransform: "uppercase",
+        textAlign: "left",
+        cursor: "pointer",
+        display: "inline-flex",
+        alignItems: "center",
+        gap: "var(--sp-4)",
+      }}
+    >
+      <span>{label}</span>
+      {active && (
+        <Glyph
+          g={currentDir === "asc" ? NF.chevronU : NF.chevronD}
+          color="var(--fg-muted)"
+          style={{ fontSize: "var(--fs-2xs)" }}
+        />
+      )}
+    </button>
   );
 }
 

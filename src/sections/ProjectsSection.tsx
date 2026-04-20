@@ -22,9 +22,14 @@ import { MaintenanceView } from "./projects/MaintenanceView";
 import { OrphanBanner } from "./projects/OrphanBanner";
 import { AdoptOrphansModal } from "./projects/AdoptOrphansModal";
 
+// "orphan" here = ProjectInfo.is_orphan — source directory no longer
+// exists on a reachable filesystem. Distinct from the OrphanBanner's
+// transcript-level orphans (slugs whose internal cwd is gone), which
+// is why the chip reads "Source gone" rather than "Orphan" — avoid
+// one word for two concepts.
 const SEG_OPTIONS: { id: "all" | "orphan" | "unreachable" | "empty"; label: string }[] = [
   { id: "all", label: "All" },
-  { id: "orphan", label: "Orphan" },
+  { id: "orphan", label: "Source gone" },
   { id: "unreachable", label: "Offline" },
   { id: "empty", label: "Empty" },
 ];
