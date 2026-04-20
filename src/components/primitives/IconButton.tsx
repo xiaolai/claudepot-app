@@ -1,9 +1,15 @@
-import { type CSSProperties, useState } from "react";
+import { type CSSProperties, type MouseEvent, useState } from "react";
 import { Glyph } from "./Glyph";
 
 interface IconButtonProps {
   glyph: string;
   onClick?: () => void;
+  /**
+   * Passthrough for `mousedown` — mainly for Tauri drag regions,
+   * where an interactive child must stop propagation so the
+   * surrounding `data-tauri-drag-region` doesn't swallow the click.
+   */
+  onMouseDown?: (e: MouseEvent<HTMLButtonElement>) => void;
   active?: boolean;
   disabled?: boolean;
   /**
@@ -43,6 +49,7 @@ function resolveSize(size: IconButtonProps["size"]): string {
 export function IconButton({
   glyph,
   onClick,
+  onMouseDown,
   active,
   disabled,
   size = "md",
@@ -58,6 +65,7 @@ export function IconButton({
       title={title}
       disabled={disabled}
       onClick={disabled ? undefined : onClick}
+      onMouseDown={onMouseDown}
       onMouseEnter={() => setHover(true)}
       onMouseLeave={() => setHover(false)}
       {...aria}

@@ -88,6 +88,7 @@ export const NF = {
   users:      "\uf0c0",
   key:        "\uf084",
   terminal:   "\uf120",
+  desktop:    "\uf108",   // Desktop / monitor — the Claude Desktop target
   book:       "\uf02d",
   server:     "\uf233",
   tools:      "\uf7d9",

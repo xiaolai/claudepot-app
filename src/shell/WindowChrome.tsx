@@ -1,3 +1,4 @@
+import type { MouseEvent } from "react";
 import { Glyph } from "../components/primitives/Glyph";
 import { IconButton } from "../components/primitives/IconButton";
 import { Kbd } from "../components/primitives/Kbd";
@@ -16,8 +17,11 @@ interface WindowChromeProps {
 /**
  * Top chrome (height `--chrome-height`, 38px): breadcrumb on the
  * left, ⌘K palette hint center-right, theme toggle far right.
- * `data-tauri-drag-region` makes the whole strip a window-drag
- * handle; buttons opt out via stopPropagation on their own events.
+ * `data-tauri-drag-region` on the outer strip makes every pixel a
+ * window-drag handle; interactive children stop mousedown from
+ * propagating so they behave as buttons, not drag seeds. The
+ * breadcrumb inherits drag from the parent without needing its own
+ * attribute, so the text stays selectable.
  * Left padding clears the OS traffic lights via `--chrome-inset-left`.
  */
 export function WindowChrome({
@@ -26,6 +30,7 @@ export function WindowChrome({
   onToggleTheme,
   onCmdK,
 }: WindowChromeProps) {
+  const stopDrag = (e: MouseEvent) => e.stopPropagation();
   return (
     <div
       data-tauri-drag-region
@@ -33,8 +38,14 @@ export function WindowChrome({
         height: "var(--chrome-height)",
         display: "flex",
         alignItems: "center",
+        // The hairline border-bottom eats 1px from the content box
+        // under `box-sizing: border-box`; mirroring it with
+        // padding-top restores a symmetric content box so
+        // `alignItems: center` lands on the true chrome centerline
+        // (y=19 in a 38px strip) — which is where the OS centers
+        // the traffic lights via `trafficLightPosition.y`.
         padding:
-          "0 var(--sp-12) 0 var(--chrome-inset-left)",
+          "var(--bw-hair) var(--sp-12) 0 var(--chrome-inset-left)",
         borderBottom: "var(--bw-hair) solid var(--line)",
         background: "var(--bg)",
         flexShrink: 0,
@@ -42,34 +53,45 @@ export function WindowChrome({
         userSelect: "none",
       }}
     >
-      {/* breadcrumb / cwd */}
+      {/* breadcrumb / cwd — drag inherits from the outer strip */}
       <div
-        data-tauri-drag-region
         style={{
           display: "flex",
           alignItems: "center",
           gap: "var(--sp-6)",
           fontSize: "var(--fs-sm)",
+          lineHeight: "var(--lh-flat)",
           color: "var(--fg-muted)",
-          pointerEvents: "none",
         }}
       >
-        <Glyph g={NF.home} color="var(--fg-faint)" />
+        {/* NF glyph ink sits ~6–8% above the geometric centre of its
+            em-box; verticalAlign on Glyph is a no-op in flex, so we
+            apply the baseline nudge here via transform to re-center
+            the ink against the traffic-light row and the text. */}
+        <Glyph
+          g={NF.home}
+          color="var(--fg-faint)"
+          style={{ transform: "translateY(0.08em)" }}
+        />
         <span>~/.claude</span>
         <Glyph
           g={NF.chevronR}
           color="var(--fg-ghost)"
-          style={{ fontSize: "var(--fs-2xs)" }}
+          style={{
+            fontSize: "var(--fs-xs)",
+            transform: "translateY(0.08em)",
+          }}
         />
         <span style={{ color: "var(--fg)", fontWeight: 500 }}>{cwd}</span>
       </div>
 
-      <div data-tauri-drag-region style={{ flex: 1 }} />
+      <div style={{ flex: 1 }} />
 
       {/* command palette hint */}
       <button
         type="button"
         onClick={onCmdK}
+        onMouseDown={stopDrag}
         aria-label="Open command palette"
         style={{
           display: "flex",
@@ -94,6 +116,7 @@ export function WindowChrome({
       <IconButton
         glyph={theme === "dark" ? NF.sun : NF.moon}
         onClick={onToggleTheme}
+        onMouseDown={stopDrag}
         title="Toggle theme"
         aria-label={
           theme === "dark" ? "Switch to light mode" : "Switch to dark mode"

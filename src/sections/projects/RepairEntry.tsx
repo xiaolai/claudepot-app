@@ -63,23 +63,23 @@ export function RepairEntry({
       )}
       {e.status !== "abandoned" && (
         <div className="repair-entry-actions">
-          <button type="button" title="Re-run the original rename" onClick={onResume}>
+          <button type="button" className="btn" title="Re-run the original rename" onClick={onResume}>
             <Icon name="rotate-ccw" size={14} /> Resume
           </button>
-          <button type="button" title="Reverse the rename (runs new → old)" onClick={onRollback}>
+          <button type="button" className="btn" title="Reverse the rename (runs new → old)" onClick={onRollback}>
             <Icon name="undo" size={14} /> Rollback
           </button>
           {e.status === "stale" && onBreakLock && (
             <button
               type="button"
-              className="warn"
+              className="btn warn"
               title="Force-break the stale lock file so resume can proceed"
               onClick={onBreakLock}
             >
               <Icon name="unlock" size={14} /> Break lock
             </button>
           )}
-          <button type="button" className="danger" title="Stop nagging about this journal" onClick={onAbandon}>
+          <button type="button" className="btn danger" title="Stop nagging about this journal" onClick={onAbandon}>
             <Icon name="ban" size={14} /> Abandon
           </button>
         </div>

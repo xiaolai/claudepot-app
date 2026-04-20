@@ -73,7 +73,7 @@ export function SidebarTargetSwitcher({
           display: "flex",
           alignItems: "center",
           gap: "var(--sp-10)",
-          padding: "var(--sp-7) var(--sp-10)",
+          padding: "var(--sp-11) var(--sp-10)",
           background: open ? "var(--bg-active)" : "var(--bg-raised)",
           border: `var(--bw-hair) solid ${open ? "var(--accent-border)" : "var(--line)"}`,
           borderRadius: "var(--r-2)",
@@ -84,7 +84,7 @@ export function SidebarTargetSwitcher({
         <Glyph
           g={target.glyph}
           color="var(--fg-muted)"
-          style={{ fontSize: "var(--fs-base)" }}
+          style={{ fontSize: "var(--fs-xl)" }}
         />
         <div
           style={{

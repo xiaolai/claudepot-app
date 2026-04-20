@@ -34,8 +34,8 @@ export function ConfirmDialog({
         <h2 id={titleId}>{title}</h2>
         <div className="modal-body">{body}</div>
         <div className="modal-actions">
-          <button onClick={onCancel}>Cancel</button>
-          <button className={confirmDanger ? "danger primary" : "primary"}
+          <button className="btn" onClick={onCancel}>Cancel</button>
+          <button className={confirmDanger ? "btn danger primary" : "btn primary"}
             onClick={onConfirm} autoFocus>{confirmLabel}</button>
         </div>
       </div>

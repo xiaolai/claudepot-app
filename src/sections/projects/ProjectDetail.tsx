@@ -140,6 +140,7 @@ export function ProjectDetail({
         <div className="project-detail-actions">
           <button
             type="button"
+            className="btn"
             title="Reveal this project's directory in the native file manager"
             onClick={() => {
               api.revealInFinder(info.original_path).catch((e) => {
@@ -151,7 +152,7 @@ export function ProjectDetail({
           >
             <Icon name="folder-open" size={14} /> Open in Finder
           </button>
-          <button type="button" title="Rename this project"
+          <button type="button" className="btn" title="Rename this project"
             onClick={() => onRename(info.original_path)}>
             <Icon name="pencil" size={14} /> Rename…
           </button>

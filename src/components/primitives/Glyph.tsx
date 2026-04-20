@@ -20,10 +20,13 @@ interface GlyphProps {
 }
 
 /**
- * Mono-rendered Nerd Font icon. Size follows font-size by default;
- * pass `size` to force a specific px height. Color inherits. The NF
- * Mono build forces every icon glyph into the monospace cell, so the
- * explicit `width` here keeps lists and columns aligned.
+ * Mono-rendered Nerd Font icon. By default the glyph is rendered at
+ * `1.2em` — NF Mono's visible ink sits in the upper half of the em
+ * cell, so matching surrounding font-size verbatim makes icons read
+ * visibly smaller than the text cap-height next to them. The 20%
+ * bump brings glyph ink to roughly the same visual weight as body
+ * caps. Pass `size` to override (explicit CSS length or raw px).
+ * Color inherits.
  */
 export function Glyph({
   g,
@@ -35,12 +38,19 @@ export function Glyph({
   title,
 }: GlyphProps) {
   const decorative = ariaLabel === undefined;
-  const dim =
+  // fontSize controls the glyph's actual rendered cell height.
+  // When no size is passed we scale up to 1.2em so the icon ink
+  // matches the visual weight of surrounding text; explicit sizes
+  // (string or number) win.
+  const fontSize =
     size == null
       ? "1.2em"
       : typeof size === "number"
         ? `${size}px`
         : size;
+  // Width is 1em of the element's own (now-scaled) font-size. This
+  // keeps a fixed aspect-ratio monospace cell (so list icon columns
+  // still line up) without re-widening by an extra 20%.
   return (
     <span
       aria-hidden={decorative || undefined}
@@ -50,10 +60,10 @@ export function Glyph({
       className={className}
       style={{
         fontFamily: "var(--font)",
-        fontSize: size,
+        fontSize,
         color,
         display: "inline-block",
-        width: dim,
+        width: "1em",
         textAlign: "center",
         lineHeight: "var(--lh-flat)",
         fontFeatureSettings: "normal",

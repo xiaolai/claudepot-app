@@ -248,13 +248,13 @@ export function OperationProgressModal({
           {terminal?.kind === "error" && onOpenRepair && (
             <button
               type="button"
-              className="primary"
+              className="btn primary"
               onClick={() => onOpenRepair(terminal.failedJournalId)}
             >
               Open Repair
             </button>
           )}
-          <button type="button" onClick={onClose}>
+          <button type="button" className="btn" onClick={onClose}>
             {terminal ? "Close" : "Run in background"}
           </button>
         </div>

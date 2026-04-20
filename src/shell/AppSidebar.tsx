@@ -67,7 +67,7 @@ export function AppSidebar({
 }: AppSidebarProps) {
   const targets = [
     { id: "cli" as const, label: "CLI", glyph: NF.terminal },
-    { id: "desktop" as const, label: "Desktop", glyph: NF.users },
+    { id: "desktop" as const, label: "Desktop", glyph: NF.desktop },
   ];
 
   return (
