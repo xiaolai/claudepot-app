@@ -9,4 +9,6 @@
 //! state machine, tail reader, and PID registry poller. Watcher,
 //! runtime, and Tauri/React surfaces land in follow-on milestones.
 
+pub mod bus;
 pub mod redact;
+pub mod types;
