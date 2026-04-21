@@ -1,4 +1,9 @@
 import { useEffect, useRef } from "react";
+import {
+  isPermissionGranted,
+  requestPermission,
+  sendNotification,
+} from "@tauri-apps/plugin-notification";
 import { api } from "../api";
 import { useSessionLive } from "./useSessionLive";
 import type { LiveSessionSummary, Preferences } from "../types";
@@ -49,6 +54,9 @@ export function useActivityNotifications(pushToast: ToastPusher): void {
   const sessions = useSessionLive();
   const memoRef = useRef(new Map<string, SessionMemo>());
   const prefsRef = useRef<Preferences | null>(null);
+  const osPermissionRef = useRef<"granted" | "denied" | "unknown">(
+    "unknown",
+  );
 
   // Load prefs once + refresh every 10s. The triggers are a user
   // configuration; getting a fresh read once per 10s is far cheaper
@@ -59,8 +67,26 @@ export function useActivityNotifications(pushToast: ToastPusher): void {
     const load = () => {
       api
         .preferencesGet()
-        .then((p) => {
-          if (!cancelled) prefsRef.current = p;
+        .then(async (p) => {
+          if (cancelled) return;
+          prefsRef.current = p;
+          // Probe OS-notification permission the first time any
+          // notification pref is flipped on. No request until a
+          // trigger actually fires, so a cautious user who never
+          // enables alerts never sees the OS prompt.
+          const wantsOs =
+            p.notify_on_error ||
+            p.notify_on_idle_done ||
+            p.notify_on_stuck_minutes != null ||
+            p.notify_on_spend_usd != null;
+          if (wantsOs && osPermissionRef.current === "unknown") {
+            try {
+              const granted = await isPermissionGranted();
+              osPermissionRef.current = granted ? "granted" : "denied";
+            } catch {
+              osPermissionRef.current = "denied";
+            }
+          }
         })
         .catch(() => {
           /* no-tauri env */
@@ -81,6 +107,44 @@ export function useActivityNotifications(pushToast: ToastPusher): void {
     const now = Date.now();
     const RATE_LIMIT_MS = 60_000;
 
+    /** Fire both the in-app toast and (if the user has OS
+     *  permission) a system notification. The OS path is
+     *  fire-and-forget; any error is swallowed so a denied
+     *  permission never breaks the in-app toast flow. */
+    const alert = (
+      kind: "info" | "error",
+      title: string,
+      body: string,
+      dedupeKey: string,
+    ) => {
+      pushToast(kind, `${title} — ${body}`, undefined, { dedupeKey });
+      if (osPermissionRef.current === "granted") {
+        try {
+          sendNotification({ title, body });
+        } catch {
+          /* swallow */
+        }
+      } else if (osPermissionRef.current === "unknown") {
+        // Ask on-demand at the first trigger, since the initial
+        // pref load may not have reached this code yet.
+        requestPermission()
+          .then((perm) => {
+            osPermissionRef.current =
+              perm === "granted" ? "granted" : "denied";
+            if (perm === "granted") {
+              try {
+                sendNotification({ title, body });
+              } catch {
+                /* swallow */
+              }
+            }
+          })
+          .catch(() => {
+            osPermissionRef.current = "denied";
+          });
+      }
+    };
+
     const seen = new Set<string>();
     for (const s of sessions) {
       seen.add(s.session_id);
@@ -92,6 +156,8 @@ export function useActivityNotifications(pushToast: ToastPusher): void {
 
       const canFire = (prev?.lastFiredMs ?? 0) + RATE_LIMIT_MS <= now;
 
+      const project = projectBasename(s.cwd);
+
       // Error-burst transition
       if (
         prefs.notify_on_error &&
@@ -99,11 +165,11 @@ export function useActivityNotifications(pushToast: ToastPusher): void {
         !(prev?.lastErrored ?? false) &&
         canFire
       ) {
-        pushToast(
+        alert(
           "error",
-          `${projectBasename(s.cwd)} — multiple errors in the last minute`,
-          undefined,
-          { dedupeKey: `activity-error-${s.session_id}` },
+          project,
+          "multiple errors in the last minute",
+          `activity-error-${s.session_id}`,
         );
         memo.set(s.session_id, nextMemo(s, busyStartedMs, now));
         continue;
@@ -116,11 +182,11 @@ export function useActivityNotifications(pushToast: ToastPusher): void {
         !(prev?.lastStuck ?? false) &&
         canFire
       ) {
-        pushToast(
+        alert(
           "error",
-          `${projectBasename(s.cwd)} — possibly stuck (tool call > 10 min)`,
-          undefined,
-          { dedupeKey: `activity-stuck-${s.session_id}` },
+          project,
+          "possibly stuck (tool call > 10 min)",
+          `activity-stuck-${s.session_id}`,
         );
         memo.set(s.session_id, nextMemo(s, busyStartedMs, now));
         continue;
@@ -136,11 +202,11 @@ export function useActivityNotifications(pushToast: ToastPusher): void {
         canFire
       ) {
         const minutes = Math.floor((now - prev.busyStartedMs) / 60_000);
-        pushToast(
+        alert(
           "info",
-          `${projectBasename(s.cwd)} — done (${minutes}m)`,
-          undefined,
-          { dedupeKey: `activity-idle-${s.session_id}` },
+          project,
+          `done (${minutes}m)`,
+          `activity-idle-${s.session_id}`,
         );
         memo.set(s.session_id, nextMemo(s, busyStartedMs, now));
         continue;

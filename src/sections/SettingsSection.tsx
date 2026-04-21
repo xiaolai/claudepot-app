@@ -18,6 +18,7 @@ import type { AppStatus, CcIdentity } from "../types";
 type Tab =
   | "general"
   | "appearance"
+  | "activity"
   | "claudemd"
   | "mcp"
   | "protected"
@@ -34,6 +35,7 @@ const TAB_DEFS: ReadonlyArray<{
 }> = [
   { id: "general",     label: "General",        glyph: NF.sliders,  group: "core" },
   { id: "appearance",  label: "Appearance",     glyph: NF.sun,      group: "core" },
+  { id: "activity",    label: "Activity",       glyph: NF.bolt,     group: "core" },
   { id: "claudemd",    label: "CLAUDE.md",      glyph: NF.fileMd,   group: "core" },
   { id: "mcp",         label: "MCP servers",    glyph: NF.server,   group: "core" },
   { id: "protected",   label: "Protected paths", glyph: NF.shield,  group: "advanced" },
@@ -88,6 +90,7 @@ export function SettingsSection() {
 
           {tab === "general" && <GeneralPane pushToast={pushToast} />}
           {tab === "appearance" && <AppearancePane />}
+          {tab === "activity" && <ActivityPane pushToast={pushToast} />}
           {tab === "claudemd" && <StubPane name="CLAUDE.md editor" />}
           {tab === "mcp" && <StubPane name="MCP servers" />}
           {tab === "protected" && <ProtectedPathsPane pushToast={pushToast} />}
@@ -740,6 +743,240 @@ function AboutPane() {
         />
       </dl>
     </SettingsGroup>
+  );
+}
+
+/* ──────────────────────────────────────────────────────────── */
+/*                        Activity pane                        */
+/* ──────────────────────────────────────────────────────────── */
+
+function ActivityPane({
+  pushToast,
+}: {
+  pushToast: (k: "info" | "error", t: string) => void;
+}) {
+  const [loaded, setLoaded] = useState(false);
+  const [enabled, setEnabled] = useState(false);
+  const [hideThinking, setHideThinking] = useState(true);
+  const [notifyError, setNotifyError] = useState(false);
+  const [notifyIdleDone, setNotifyIdleDone] = useState(false);
+  const [notifyStuckMin, setNotifyStuckMin] = useState<number | null>(null);
+  const [notifySpendUsd, setNotifySpendUsd] = useState<number | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    api
+      .preferencesGet()
+      .then((p) => {
+        if (cancelled) return;
+        setEnabled(p.activity_enabled);
+        setHideThinking(p.activity_hide_thinking);
+        setNotifyError(p.notify_on_error);
+        setNotifyIdleDone(p.notify_on_idle_done);
+        setNotifyStuckMin(p.notify_on_stuck_minutes);
+        setNotifySpendUsd(p.notify_on_spend_usd);
+        setLoaded(true);
+      })
+      .catch((e) =>
+        pushToast("error", `Preferences load failed: ${e}`),
+      );
+    return () => {
+      cancelled = true;
+    };
+  }, [pushToast]);
+
+  const toggleEnabled = useCallback(
+    async (next: boolean) => {
+      const prev = enabled;
+      setEnabled(next);
+      try {
+        await api.preferencesSetActivity({ enabled: next });
+        if (next) await api.sessionLiveStart();
+        else await api.sessionLiveStop();
+        pushToast(
+          "info",
+          next ? "Activity feature enabled." : "Activity feature disabled.",
+        );
+      } catch (e) {
+        setEnabled(prev);
+        pushToast("error", `Toggle failed: ${e}`);
+      }
+    },
+    [enabled, pushToast],
+  );
+
+  const toggleHideThinking = useCallback(
+    async (next: boolean) => {
+      const prev = hideThinking;
+      setHideThinking(next);
+      try {
+        await api.preferencesSetActivity({ hideThinking: next });
+      } catch (e) {
+        setHideThinking(prev);
+        pushToast("error", `Toggle failed: ${e}`);
+      }
+    },
+    [hideThinking, pushToast],
+  );
+
+  const setNotifyBool = useCallback(
+    async (
+      key: "onError" | "onIdleDone",
+      setter: (v: boolean) => void,
+      prev: boolean,
+      next: boolean,
+    ) => {
+      setter(next);
+      try {
+        await api.preferencesSetNotifications({ [key]: next });
+      } catch (e) {
+        setter(prev);
+        pushToast("error", `Toggle failed: ${e}`);
+      }
+    },
+    [pushToast],
+  );
+
+  const setStuckMin = useCallback(
+    async (raw: string) => {
+      const parsed = raw === "" ? null : Number(raw);
+      const normalized =
+        parsed !== null && Number.isFinite(parsed) && parsed > 0
+          ? Math.floor(parsed)
+          : null;
+      const prev = notifyStuckMin;
+      setNotifyStuckMin(normalized);
+      try {
+        await api.preferencesSetNotifications({
+          onStuckMinutes: normalized,
+        });
+      } catch (e) {
+        setNotifyStuckMin(prev);
+        pushToast("error", `Save failed: ${e}`);
+      }
+    },
+    [notifyStuckMin, pushToast],
+  );
+
+  const setSpendUsd = useCallback(
+    async (raw: string) => {
+      const parsed = raw === "" ? null : Number(raw);
+      const normalized =
+        parsed !== null && Number.isFinite(parsed) && parsed > 0
+          ? parsed
+          : null;
+      const prev = notifySpendUsd;
+      setNotifySpendUsd(normalized);
+      try {
+        await api.preferencesSetNotifications({
+          onSpendUsd: normalized,
+        });
+      } catch (e) {
+        setNotifySpendUsd(prev);
+        pushToast("error", `Save failed: ${e}`);
+      }
+    },
+    [notifySpendUsd, pushToast],
+  );
+
+  if (!loaded) {
+    return (
+      <div style={{ color: "var(--fg-faint)", fontSize: "var(--fs-sm)" }}>
+        Loading…
+      </div>
+    );
+  }
+
+  return (
+    <>
+      <SettingsGroup desc="The live Activity feature watches the transcript files Claude Code already writes, so you can see which of your sessions are busy, waiting, or idle at a glance. Nothing is sent anywhere; all data stays on this Mac.">
+        <Row
+          label="Enable Activity"
+          hint="Start the live runtime. Turning this off stops all polling and clears the LIVE strip."
+        >
+          <Toggle on={enabled} onChange={toggleEnabled} />
+        </Row>
+        <Row
+          label="Hide thinking by default"
+          hint="Thinking blocks render as 'redacted · N chars' until you click to reveal. Privacy-forward."
+        >
+          <Toggle
+            on={hideThinking}
+            onChange={toggleHideThinking}
+          />
+        </Row>
+      </SettingsGroup>
+
+      <SettingsGroup desc="Toast alerts when a live session crosses one of these thresholds. One per session per minute, hard-capped. All default off.">
+        <Row
+          label="Alert on error burst"
+          hint="At least two tool results with is_error=true inside a 60-second window."
+        >
+          <Toggle
+            on={notifyError}
+            onChange={(next) =>
+              setNotifyBool("onError", setNotifyError, notifyError, next)
+            }
+          />
+        </Row>
+        <Row
+          label="Alert when work completes"
+          hint="A session that was busy for 2+ minutes transitions to idle."
+        >
+          <Toggle
+            on={notifyIdleDone}
+            onChange={(next) =>
+              setNotifyBool(
+                "onIdleDone",
+                setNotifyIdleDone,
+                notifyIdleDone,
+                next,
+              )
+            }
+          />
+        </Row>
+        <Row
+          label="Alert when stuck"
+          hint="Empty = off. Number = alert after this many minutes with no tool result. The backend uses its own 10-minute threshold; this number is advisory for the toast copy."
+        >
+          <input
+            type="number"
+            min="1"
+            step="1"
+            inputMode="numeric"
+            placeholder="off"
+            value={notifyStuckMin ?? ""}
+            onChange={(e) => setStuckMin(e.target.value)}
+            style={{
+              ...selectStyle,
+              width: "80px",
+              textAlign: "right",
+              fontVariantNumeric: "tabular-nums",
+            }}
+          />
+        </Row>
+        <Row
+          label="Alert on spend"
+          hint="Empty = off. Dollar amount to alert at when a session exceeds that cumulative spend. Requires the pricing module (ships with estimated rates for Opus / Sonnet / Haiku 4.x)."
+        >
+          <input
+            type="number"
+            min="0.01"
+            step="0.01"
+            inputMode="decimal"
+            placeholder="off"
+            value={notifySpendUsd ?? ""}
+            onChange={(e) => setSpendUsd(e.target.value)}
+            style={{
+              ...selectStyle,
+              width: "80px",
+              textAlign: "right",
+              fontVariantNumeric: "tabular-nums",
+            }}
+          />
+        </Row>
+      </SettingsGroup>
+    </>
   );
 }
 

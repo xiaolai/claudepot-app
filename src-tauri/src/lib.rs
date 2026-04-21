@@ -39,6 +39,7 @@ pub fn run() {
     #[cfg_attr(not(debug_assertions), allow(unused_mut))]
     let mut builder = tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
+        .plugin(tauri_plugin_notification::init())
         .plugin(tauri_plugin_autostart::init(
             tauri_plugin_autostart::MacosLauncher::LaunchAgent,
             None,
@@ -210,6 +211,7 @@ pub fn run() {
             commands::session_live_snapshot,
             commands::session_live_session_snapshot,
             commands::session_live_subscribe,
+            commands::activity_trends,
         ])
         .run(tauri::generate_context!())
         .unwrap_or_else(|e| {

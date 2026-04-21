@@ -775,3 +775,15 @@ export type LiveDelta = LiveDeltaKind & {
   produced_at_ms: number;
   resync_required: boolean;
 };
+
+/** Time-series snapshot for the Activity Trends view. Matches
+ *  `ActivityTrendsDto` on the Rust side. `active_series[i]` is the
+ *  number of distinct live sessions observed during bucket `i`
+ *  (bucket_width_ms wide, starting at `from_ms`). */
+export interface ActivityTrends {
+  from_ms: number;
+  to_ms: number;
+  bucket_width_ms: number;
+  active_series: number[];
+  error_count: number;
+}
