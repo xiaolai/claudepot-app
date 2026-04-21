@@ -1,0 +1,12 @@
+{
+  "pid": 99835,
+  "sessionId": "5b9bcfdbe280c2610000000000000000",
+  "cwd": "/tmp/project-8a5e6b2273d70d45",
+  "startedAt": 1776737310837,
+  "version": "2.1.116",
+  "peerProtocol": 1,
+  "kind": "interactive",
+  "entrypoint": "cli",
+  "name": "fixture-5f2c33ed",
+  "updatedAt": 1776758112263
+}

@@ -1,0 +1,12 @@
+{
+  "pid": 99003,
+  "sessionId": "cccccccccccccccc0000000000000000",
+  "cwd": "/tmp/project-bg-idle",
+  "startedAt": 1776700000000,
+  "updatedAt": 1776755000000,
+  "version": "2.1.116",
+  "peerProtocol": 1,
+  "kind": "interactive",
+  "entrypoint": "cli",
+  "status": "idle"
+}
