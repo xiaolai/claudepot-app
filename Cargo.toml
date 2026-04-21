@@ -83,11 +83,11 @@ num_cpus = "1.16"
 regex = "1"
 once_cell = "1"
 
-# Filesystem event watcher for session_live::watcher. Used to observe
-# ~/.claude/sessions (PID registry) and ~/.claude/projects (transcripts)
-# so we react to CC's writes without a hot poll loop. macro_use disabled;
-# the crate is self-contained.
-notify = "7"
+# The `notify` filesystem-watcher crate was reserved for an event-driven
+# tail path, but the shipped runtime is pure 500ms polling (sub-second
+# latency already meets the plan's M1 target). Dependency removed on
+# audit to avoid carrying an unused workspace dep — re-add when the
+# watcher-backed path actually lands.
 
 # ─── Build profiles ──────────────────────────────────────────────────────
 # Release: thin-LTO + single codegen unit. Cuts binary size and — more

@@ -1671,6 +1671,7 @@ pub fn preferences_get(
 #[tauri::command]
 pub fn preferences_set_activity(
     state: tauri::State<'_, crate::preferences::PreferencesState>,
+    live: tauri::State<'_, crate::state::LiveSessionState>,
     enabled: Option<bool>,
     consent_seen: Option<bool>,
     hide_thinking: Option<bool>,
@@ -1690,7 +1691,16 @@ pub fn preferences_set_activity(
         prefs.activity_hide_thinking = v;
     }
     if let Some(v) = excluded_paths {
-        prefs.activity_excluded_paths = v;
+        prefs.activity_excluded_paths = v.clone();
+        // Propagate to the running runtime so the change takes
+        // effect on the next tick instead of requiring a restart.
+        // `set_excluded_paths` is async, so we fire-and-forget via
+        // the tauri async runtime handle; the command itself stays
+        // sync to keep its signature minimal.
+        let runtime = live.runtime.clone();
+        tauri::async_runtime::spawn(async move {
+            runtime.set_excluded_paths(v).await;
+        });
     }
     prefs.save()?;
     Ok(prefs.clone())
@@ -2086,11 +2096,30 @@ pub async fn key_oauth_usage(
 /// successful start return `Ok(())` without re-spawning. The poll
 /// loop publishes aggregate updates via the `live-all` event channel
 /// and per-session deltas via `live::<sessionId>`.
+///
+/// **Consent gate — trust boundary**: the runtime only starts if the
+/// user has explicitly enabled the Activity feature via the consent
+/// modal or Settings. A request to start while `activity_enabled ==
+/// false` returns `Ok(())` silently (so accidental callers don't
+/// break) but the runtime stays off. The frontend check at the
+/// consent-modal layer is backed up by this server-side guard so
+/// future callers (e.g. a rogue hook or a CLI command) also respect
+/// the user's choice.
 #[tauri::command]
 pub async fn session_live_start(
     state: tauri::State<'_, crate::state::LiveSessionState>,
+    prefs: tauri::State<'_, crate::preferences::PreferencesState>,
     app: tauri::AppHandle,
 ) -> Result<(), String> {
+    // Consent check MUST precede the started flag flip, or a user
+    // who opted out after opting in would still get a running
+    // runtime from a stale `started = true`.
+    {
+        let p = prefs.0.lock().map_err(|e| format!("prefs lock: {e}"))?;
+        if !p.activity_enabled {
+            return Ok(());
+        }
+    }
     {
         let mut started = state.started.lock().map_err(|e| e.to_string())?;
         if *started {
@@ -2109,16 +2138,37 @@ pub async fn session_live_start(
     // this coalesces bursts of "session appeared/disappeared" into
     // a single rebuild, which matters on AppKit where menu rebuilds
     // are synchronous and visible.
+    // Apply the user's current excluded-paths preference to the
+    // runtime before it starts ticking. Without this the first
+    // tick could publish a now-excluded project's live state.
+    // Read-and-release the sync prefs lock in a short scope so no
+    // std::sync guard lives across the .await below.
+    let excluded: Vec<String> = {
+        let p = prefs
+            .0
+            .lock()
+            .map_err(|e| format!("prefs lock: {e}"))?;
+        p.activity_excluded_paths.clone()
+    };
+    state.runtime.set_excluded_paths(excluded).await;
+
     let runtime = std::sync::Arc::clone(&state.runtime);
     let mut rx = runtime.subscribe_aggregate();
     let app_for_bridge = app.clone();
-    tokio::spawn(async move {
+    let aggregate_handle = tokio::spawn(async move {
+        use tokio::sync::Mutex as AsyncMutex;
         // Track the last-seen set of session IDs so we only rebuild
         // the tray when membership changes, not on every status
         // transition (which don't affect the top-level menu).
         let mut last_ids: std::collections::BTreeSet<String> =
             std::collections::BTreeSet::new();
-        let mut rebuild_pending = false;
+        // True debounce: a single shared pending flag that flips
+        // off only AFTER the delayed rebuild actually runs, so
+        // repeat membership changes within the window don't
+        // schedule a second rebuild. Earlier impl reset the flag
+        // in the same loop iteration that scheduled — no debounce
+        // at all.
+        let rebuild_pending = std::sync::Arc::new(AsyncMutex::new(false));
         loop {
             if rx.changed().await.is_err() {
                 break;
@@ -2136,31 +2186,46 @@ pub async fn session_live_start(
                 .iter()
                 .map(|s| s.session_id.clone())
                 .collect();
-            if current_ids != last_ids && !rebuild_pending {
-                rebuild_pending = true;
-                let handle = app_for_bridge.clone();
-                tauri::async_runtime::spawn(async move {
-                    tokio::time::sleep(std::time::Duration::from_secs(1)).await;
-                    if let Err(e) = crate::tray::rebuild(&handle).await {
-                        tracing::warn!(
-                            "activity tray rebuild failed: {e}"
-                        );
-                    }
-                });
-            }
             if current_ids != last_ids {
                 last_ids = current_ids;
-            }
-            // The flag resets naturally after the spawned rebuild —
-            // we reset it here on the next membership change because
-            // the rebuild itself may race with another change, and
-            // worst case we coalesce two rebuilds into one. The 1s
-            // debounce keeps the cadence bounded.
-            if rebuild_pending {
-                rebuild_pending = false;
+                let mut guard = rebuild_pending.lock().await;
+                if !*guard {
+                    *guard = true;
+                    drop(guard);
+                    let handle = app_for_bridge.clone();
+                    let pending = rebuild_pending.clone();
+                    tauri::async_runtime::spawn(async move {
+                        tokio::time::sleep(
+                            std::time::Duration::from_secs(1),
+                        )
+                        .await;
+                        // Clear the pending flag ONLY after the
+                        // delay fires so another membership change
+                        // inside the window is folded into this
+                        // rebuild instead of scheduling a new one.
+                        if let Err(e) = crate::tray::rebuild(&handle).await {
+                            tracing::warn!(
+                                "activity tray rebuild failed: {e}"
+                            );
+                        }
+                        let mut g = pending.lock().await;
+                        *g = false;
+                    });
+                }
             }
         }
     });
+
+    // Stash the aggregate-bridge handle so session_live_stop can
+    // abort it — without this, start/stop/start cycles accumulate
+    // zombie emitters.
+    {
+        let mut tasks = state
+            .bridge_tasks
+            .lock()
+            .map_err(|e| format!("bridge lock: {e}"))?;
+        tasks.aggregate = Some(aggregate_handle);
+    }
 
     // Start the poll loop.
     let _handle = std::sync::Arc::clone(&state.runtime).start();
@@ -2168,14 +2233,50 @@ pub async fn session_live_start(
 }
 
 /// Stop the live runtime. Idempotent: stopping an already-stopped
-/// runtime is a no-op. Drops all detail subscribers.
+/// runtime is a no-op. Aborts every bridge task spawned by
+/// `session_live_start` (aggregate → live-all, and each
+/// per-session → live::<sid>) so a subsequent start begins from a
+/// clean task set instead of accumulating ghost emitters.
 #[tauri::command]
 pub async fn session_live_stop(
     state: tauri::State<'_, crate::state::LiveSessionState>,
 ) -> Result<(), String> {
     state.runtime.stop();
+    {
+        let mut tasks = state
+            .bridge_tasks
+            .lock()
+            .map_err(|e| format!("bridge lock: {e}"))?;
+        tasks.abort_all();
+    }
     let mut started = state.started.lock().map_err(|e| e.to_string())?;
     *started = false;
+    Ok(())
+}
+
+/// Explicit unsubscribe for a per-session detail stream. The Tauri
+/// event listener on the JS side has no way to tell the backend
+/// "stop forwarding" without this — dropping the listener alone
+/// leaves the spawned task alive until the session ends.
+#[tauri::command]
+pub async fn session_live_unsubscribe(
+    session_id: String,
+    state: tauri::State<'_, crate::state::LiveSessionState>,
+) -> Result<(), String> {
+    // Abort the backend bridge task inside a short scope so the
+    // std::sync Mutex guard is dropped before we .await.
+    {
+        let mut tasks = state
+            .bridge_tasks
+            .lock()
+            .map_err(|e| format!("bridge lock: {e}"))?;
+        if let Some(h) = tasks.details.remove(&session_id) {
+            h.abort();
+        }
+    }
+    // Drop the backend-side slot in the DetailBus so a future
+    // subscribe rebuilds cleanly without an AlreadySubscribed error.
+    state.runtime.detail_end_session(&session_id).await;
     Ok(())
 }
 
@@ -2255,7 +2356,9 @@ pub fn activity_trends(
 /// Subscribe to per-session deltas. Spawns a task that forwards
 /// every received delta as a `live::<sessionId>` event. Single-
 /// subscriber per session — concurrent calls with the same id
-/// return `BusError::AlreadySubscribed`.
+/// return `BusError::AlreadySubscribed`. The JS side should call
+/// `session_live_unsubscribe` before dropping its listener so the
+/// backend-side task doesn't outlive the frontend.
 #[tauri::command]
 pub async fn session_live_subscribe(
     session_id: String,
@@ -2268,11 +2371,22 @@ pub async fn session_live_subscribe(
         .await
         .map_err(|e| e.to_string())?;
     let channel = format!("live::{session_id}");
-    tokio::spawn(async move {
+    let handle = tokio::spawn(async move {
         while let Some(delta) = rx.recv().await {
             let dto = crate::dto::LiveDeltaDto::from(delta);
             let _ = tauri::Emitter::emit(&app, &channel, dto);
         }
     });
+    // Track the handle so session_live_unsubscribe (or _stop) can
+    // abort it. Dropping the frontend listener alone keeps this
+    // task alive until the session itself ends; with the explicit
+    // unsubscribe path it goes away immediately.
+    let mut tasks = state
+        .bridge_tasks
+        .lock()
+        .map_err(|e| format!("bridge lock: {e}"))?;
+    if let Some(prev) = tasks.details.insert(session_id, handle) {
+        prev.abort();
+    }
     Ok(())
 }

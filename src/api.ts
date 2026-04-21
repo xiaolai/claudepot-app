@@ -422,6 +422,13 @@ export const api = {
   sessionLiveSubscribe: (sessionId: string) =>
     invoke<void>("session_live_subscribe", { sessionId }),
 
+  /** Paired unsubscribe. Frontend listeners MUST call this before
+   *  dropping their Tauri event listener — otherwise the backend
+   *  task keeps forwarding until the session itself ends, and a
+   *  re-subscribe on remount fails with AlreadySubscribed. */
+  sessionLiveUnsubscribe: (sessionId: string) =>
+    invoke<void>("session_live_unsubscribe", { sessionId }),
+
   /** Query the durable activity metrics store for the Trends view.
    *  Returns bucketed active-session counts + an error total for the
    *  requested window. Safe to call with `bucketCount: 0` → empty

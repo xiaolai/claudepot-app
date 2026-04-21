@@ -56,6 +56,11 @@ pub struct FileTail {
     /// Size of the last-seen file, used to detect truncation
     /// regardless of platform.
     last_size: Option<u64>,
+    /// Sticky flag: set true once the file has been seen; persists
+    /// across a missing → present transition so the reappearance
+    /// is reported as a rotation. Without this, delete/recreate
+    /// flows silently resumed with stale status/error state.
+    was_present: bool,
 }
 
 /// Outcome of one `poll` call. `new_lines` contains zero or more
@@ -90,6 +95,7 @@ impl FileTail {
             offset: md.len(),
             rotation_token: rotation_token(&md),
             last_size: Some(md.len()),
+            was_present: true,
         })
     }
 
@@ -104,6 +110,7 @@ impl FileTail {
             offset: 0,
             rotation_token: rotation_token(&md),
             last_size: Some(md.len()),
+            was_present: true,
         })
     }
 
@@ -115,6 +122,7 @@ impl FileTail {
             offset: 0,
             rotation_token: None,
             last_size: None,
+            was_present: false,
         }
     }
 
@@ -127,6 +135,8 @@ impl FileTail {
         let file = match File::open(&self.path) {
             Ok(f) => f,
             Err(e) if e.kind() == io::ErrorKind::NotFound => {
+                // Clear the token/size but preserve `was_present` so
+                // the reappearance (if any) is detected as rotation.
                 self.rotation_token = None;
                 self.last_size = None;
                 self.offset = 0;
@@ -148,6 +158,7 @@ impl FileTail {
         let lines = self.read_from_offset(file, md.len())?;
         self.last_size = Some(md.len());
         self.rotation_token = rotation_token(&md);
+        self.was_present = true;
         Ok(TailProgress {
             new_lines: lines,
             rotated,
@@ -169,6 +180,13 @@ impl FileTail {
             // If we can't read the current token (rare — permission
             // issue on the creation-time field), fall back to the
             // truncation-only heuristic below.
+        } else if self.was_present {
+            // The file disappeared and has now reappeared. Treat
+            // this as a rotation so the caller resets per-session
+            // state (status machine, unmatched tool-uses) —
+            // otherwise stale interpretation persists across a
+            // delete / recreate cycle.
+            return true;
         } else {
             // First sighting of the file — by convention we treat
             // `pending → present` as a non-rotation; the caller
@@ -372,6 +390,26 @@ mod tests {
         let p = t.poll().unwrap();
         assert!(p.missing);
         assert!(p.new_lines.is_empty());
+    }
+
+    #[test]
+    fn delete_then_recreate_reports_rotation() {
+        // Covers the tombstone path: a file that went missing and
+        // reappears at the same path must be flagged `rotated` so
+        // downstream state (status machine, open tool-uses) resets.
+        let dir = tmp();
+        let path = dir.path().join("s.jsonl");
+        write_all(&path, "{\"original\":1}\n");
+        let mut t = FileTail::at_start(&path).unwrap();
+        let _ = t.poll().unwrap();
+        std::fs::remove_file(&path).unwrap();
+        let missing = t.poll().unwrap();
+        assert!(missing.missing);
+        // Recreate with fresh content.
+        write_all(&path, "{\"fresh\":1}\n");
+        let p = t.poll().unwrap();
+        assert!(p.rotated, "reappearance must be flagged as rotation");
+        assert_eq!(p.new_lines, vec!["{\"fresh\":1}"]);
     }
 
     // ── Large lines (boundary) ─────────────────────────────────────

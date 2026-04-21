@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { api } from "../../api";
 import { Glyph } from "../../components/primitives/Glyph";
@@ -35,24 +35,100 @@ export function LiveStatusHeader({ sessionId }: Props) {
   const [liveCurrentAction, setLiveCurrentAction] = useState<string | null>(
     null,
   );
+  // Detail-channel overrides that beat the 500ms aggregate
+  // republish. Cleared (null) when the detail channel hasn't
+  // published a fresher value; the aggregate summary is used in
+  // that case. seq-guarded so a late out-of-order delivery can't
+  // un-fresh a newer value we already applied.
+  const [liveStatus, setLiveStatus] =
+    useState<LiveSessionSummary["status"] | null>(null);
+  const [liveWaitingFor, setLiveWaitingFor] = useState<string | null>(null);
+  const [liveModel, setLiveModel] = useState<string | null>(null);
+  const [liveOverlay, setLiveOverlay] =
+    useState<{ errored: boolean; stuck: boolean } | null>(null);
+  const lastSeqRef = useRef<number>(0);
 
-  // Subscribe to the per-session detail channel so we get TaskSummary
-  // deltas faster than the 500ms aggregate republish. Best-effort —
-  // if the backend rejects with AlreadySubscribed (another pane is
-  // already listening), fall back to the aggregate-only view.
+  // Subscribe to the per-session detail channel so we get
+  // TaskSummary deltas faster than the 500ms aggregate republish.
+  // Handle every delta kind (not just TaskSummary + Ended) so a
+  // live-header that missed intermediate aggregate emits stays in
+  // sync. On `resync_required`, re-pull the session's snapshot to
+  // reset local state; on `ended`, drop local overrides.
+  //
+  // Cleanup path calls session_live_unsubscribe so the backend
+  // bridge task is cancelled when the pane unmounts — otherwise
+  // a remount hits AlreadySubscribed.
   useEffect(() => {
     let cancelled = false;
     let unlisten: UnlistenFn | null = null;
+    // Reset all per-session overrides + seq gate on sessionId
+    // change so a remount on a different session doesn't drop
+    // deltas whose seq happens to be lower than the previous
+    // session's terminal seq, and doesn't render stale overrides.
+    lastSeqRef.current = 0;
+    setLiveCurrentAction(null);
+    setLiveStatus(null);
+    setLiveWaitingFor(null);
+    setLiveModel(null);
+    setLiveOverlay(null);
 
     api
       .sessionLiveSubscribe(sessionId)
-      .then(() => listen<LiveDelta>(`live::${sessionId}`, (ev) => {
+      .then(() => listen<LiveDelta>(`live::${sessionId}`, async (ev) => {
         if (cancelled) return;
         const d = ev.payload;
-        if (d.kind === "task_summary_changed") {
-          setLiveCurrentAction(d.summary);
-        } else if (d.kind === "ended") {
+        if (d.resync_required) {
+          // Discard every local override and rehydrate from the
+          // authoritative session snapshot. The snapshot carries
+          // the full post-redaction surface, so a resync cannot
+          // leave stale status/model/overlay state behind.
+          lastSeqRef.current = 0;
           setLiveCurrentAction(null);
+          setLiveStatus(null);
+          setLiveWaitingFor(null);
+          setLiveModel(null);
+          setLiveOverlay(null);
+          try {
+            const snap = await api.sessionLiveSessionSnapshot(sessionId);
+            if (!cancelled && snap) {
+              setLiveCurrentAction(snap.current_action);
+              setLiveStatus(snap.status);
+              setLiveWaitingFor(snap.waiting_for);
+              setLiveModel(snap.model);
+              setLiveOverlay({
+                errored: snap.errored,
+                stuck: snap.stuck,
+              });
+            }
+          } catch {
+            /* aggregate fallback still carries the real state */
+          }
+        }
+        // seq guard so a late out-of-order delivery can't overwrite
+        // a newer state. Resync already reset the refs above.
+        if (d.seq <= lastSeqRef.current && !d.resync_required) return;
+        lastSeqRef.current = d.seq;
+        switch (d.kind) {
+          case "task_summary_changed":
+            setLiveCurrentAction(d.summary);
+            break;
+          case "status_changed":
+            setLiveStatus(d.status);
+            setLiveWaitingFor(d.waiting_for);
+            break;
+          case "overlay_changed":
+            setLiveOverlay({ errored: d.errored, stuck: d.stuck });
+            break;
+          case "model_changed":
+            setLiveModel(d.model);
+            break;
+          case "ended":
+            setLiveCurrentAction(null);
+            setLiveStatus(null);
+            setLiveWaitingFor(null);
+            setLiveModel(null);
+            setLiveOverlay(null);
+            break;
         }
       }))
       .then((fn) => {
@@ -71,11 +147,27 @@ export function LiveStatusHeader({ sessionId }: Props) {
     return () => {
       cancelled = true;
       if (unlisten) unlisten();
+      // Ask the backend to drop its forwarding task so a later
+      // remount can re-subscribe cleanly.
+      api.sessionLiveUnsubscribe(sessionId).catch(() => {
+        /* best-effort */
+      });
     };
   }, [sessionId]);
 
   // Nothing to render if this session isn't currently live.
   if (!summary) return null;
+
+  // Merge the aggregate snapshot with any detail-channel overrides
+  // that beat the 500ms republish. Priority: detail channel wins
+  // over aggregate for fields it has emitted; aggregate fills the
+  // rest.
+  const status = liveStatus ?? summary.status;
+  const waitingFor = liveWaitingFor ?? summary.waiting_for;
+  const model = liveModel ?? summary.model;
+  const errored = liveOverlay?.errored ?? summary.errored;
+  const stuck = liveOverlay?.stuck ?? summary.stuck;
+  const currentAction = liveCurrentAction ?? summary.current_action;
 
   return (
     <section
@@ -89,14 +181,20 @@ export function LiveStatusHeader({ sessionId }: Props) {
         background: "var(--bg-raised)",
       }}
     >
-      <StatusChipRow summary={summary} />
-      <CurrentActionCard
-        action={liveCurrentAction ?? summary.current_action}
-        status={summary.status}
-        waitingFor={summary.waiting_for}
+      <StatusChipRow
+        status={status}
+        model={model}
+        waitingFor={waitingFor}
+        errored={errored}
+        idleMs={summary.idle_ms}
       />
-      {summary.errored || summary.stuck ? (
-        <OverlayBanner errored={summary.errored} stuck={summary.stuck} />
+      <CurrentActionCard
+        action={currentAction}
+        status={status}
+        waitingFor={waitingFor}
+      />
+      {errored || stuck ? (
+        <OverlayBanner errored={errored} stuck={stuck} />
       ) : null}
     </section>
   );
@@ -104,8 +202,22 @@ export function LiveStatusHeader({ sessionId }: Props) {
 
 // ── Bits ──────────────────────────────────────────────────────────
 
-function StatusChipRow({ summary }: { summary: LiveSessionSummary }) {
-  const statusTone = STATUS_TONE[summary.status];
+interface StatusChipRowProps {
+  status: LiveSessionSummary["status"];
+  model: string | null;
+  waitingFor: string | null;
+  errored: boolean;
+  idleMs: number;
+}
+
+function StatusChipRow({
+  status,
+  model,
+  waitingFor,
+  errored,
+  idleMs,
+}: StatusChipRowProps) {
+  const statusTone: ChipTone = errored ? "warn" : STATUS_TONE[status];
   return (
     <div
       style={{
@@ -119,13 +231,11 @@ function StatusChipRow({ summary }: { summary: LiveSessionSummary }) {
         textTransform: "uppercase",
       }}
     >
-      <Chip tone={statusTone}>{summary.status}</Chip>
-      {summary.model ? <Chip tone="neutral">{summary.model}</Chip> : null}
-      {summary.waiting_for ? (
-        <Chip tone="neutral">{summary.waiting_for}</Chip>
-      ) : null}
+      <Chip tone={statusTone}>{status}</Chip>
+      {model ? <Chip tone="neutral">{model}</Chip> : null}
+      {waitingFor ? <Chip tone="neutral">{waitingFor}</Chip> : null}
       <div style={{ flex: 1 }} />
-      <ElapsedCounter idleMs={summary.idle_ms} />
+      <ElapsedCounter idleMs={idleMs} />
     </div>
   );
 }
@@ -191,10 +301,10 @@ function OverlayBanner({ errored, stuck }: { errored: boolean; stuck: boolean })
       role="alert"
       style={{
         padding: "var(--sp-6) var(--sp-10)",
-        border: "var(--bw-hair) solid var(--accent-warn, orange)",
+        border: "var(--bw-hair) solid var(--warn)",
         borderRadius: "var(--r-1)",
         fontSize: "var(--fs-xs)",
-        color: "var(--accent-warn, orange)",
+        color: "var(--warn)",
         background: "var(--bg)",
       }}
     >
@@ -252,8 +362,8 @@ function Chip({ tone, children }: { tone: ChipTone; children: string }) {
   const palette: Record<ChipTone, { fg: string; border: string }> = {
     accent: { fg: "var(--accent)", border: "var(--accent)" },
     warn: {
-      fg: "var(--accent-warn, orange)",
-      border: "var(--accent-warn, orange)",
+      fg: "var(--warn)",
+      border: "var(--warn)",
     },
     neutral: { fg: "var(--fg-muted)", border: "var(--line)" },
   };

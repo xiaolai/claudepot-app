@@ -61,6 +61,12 @@ pub struct LiveRuntime {
     /// fatal. Lives behind `Arc` so the aggregate handle can fan it
     /// out to background tasks if needed.
     metrics: Option<Arc<MetricsStore>>,
+    /// Paths that the user has asked the runtime to ignore (via
+    /// `preferences.activity_excluded_paths`). Compared as prefix
+    /// matches against `PidRecord.cwd`. Mutable so the Tauri
+    /// command layer can update it when the user edits the pref
+    /// without tearing down the runtime.
+    excluded_paths: Arc<Mutex<Vec<String>>>,
     /// Cancellation flag set by `stop`; the poll loop checks it.
     running: Arc<AtomicBool>,
 }
@@ -81,6 +87,20 @@ struct SessionState {
     last_task_summary: Option<String>,
     last_errored: bool,
     last_stuck: bool,
+    /// What the metrics store last saw for this session — used to
+    /// gate writes to transition + heartbeat. `None` means no tick
+    /// has been written yet; the next tick always writes (so every
+    /// new session is represented in the store regardless of which
+    /// Status it happens to land on first).
+    last_metrics_status: Option<Status>,
+    last_metrics_errored: bool,
+    last_metrics_stuck: bool,
+    /// Last-seen model id in metrics; drives ModelChanged emission.
+    last_metrics_model: Option<String>,
+    /// Ticks elapsed since the last metrics write for this session.
+    /// Resets to 0 on every write; forces a heartbeat write when it
+    /// crosses HEARTBEAT_TICKS (defined in `tick`).
+    ticks_since_metrics: u64,
 }
 
 impl LiveRuntime {
@@ -106,6 +126,7 @@ impl LiveRuntime {
             detail: DetailBus::new(),
             state: Arc::new(Mutex::new(HashMap::new())),
             metrics,
+            excluded_paths: Arc::new(Mutex::new(Vec::new())),
             running: Arc::new(AtomicBool::new(false)),
         })
     }
@@ -127,8 +148,20 @@ impl LiveRuntime {
             detail: DetailBus::new(),
             state: Arc::new(Mutex::new(HashMap::new())),
             metrics: None,
+            excluded_paths: Arc::new(Mutex::new(Vec::new())),
             running: Arc::new(AtomicBool::new(false)),
         })
+    }
+
+    /// Replace the excluded-paths list. Called by the Tauri command
+    /// layer whenever the user edits the `activity_excluded_paths`
+    /// preference. Any PID record whose `cwd` is prefix-matched by
+    /// an entry in this list is skipped by `tick()` — it never
+    /// appears in the aggregate snapshot and no transcript tail is
+    /// opened.
+    pub async fn set_excluded_paths(&self, paths: Vec<String>) {
+        let mut w = self.excluded_paths.lock().await;
+        *w = paths;
     }
 
     /// Reference to the metrics store. Consumed by the Tauri command
@@ -185,6 +218,13 @@ impl LiveRuntime {
         self.detail.subscribe(session_id).await
     }
 
+    /// Explicitly end a per-session detail subscription. Called by
+    /// the Tauri `session_live_unsubscribe` command so the backend-
+    /// side slot is torn down when the frontend listener goes away.
+    pub async fn detail_end_session(&self, session_id: &str) {
+        self.detail.end_session(session_id).await;
+    }
+
     /// Current aggregate snapshot — cheap, synchronous.
     pub fn snapshot(&self) -> Arc<Vec<LiveSessionSummary>> {
         self.aggregate.snapshot()
@@ -206,6 +246,19 @@ impl LiveRuntime {
         // Sweep stale PID files (non-WSL only — the poller respects
         // that guard internally).
         registry::sweep_stale(&outcome);
+
+        // Filter the registry output against the excluded-paths
+        // preference BEFORE we do anything else — excluded sessions
+        // must never appear in the aggregate, never get a tail
+        // opened, never fire a delta. Prefix match on `cwd`.
+        let excluded = self.excluded_paths.lock().await.clone();
+        let mut filtered = outcome;
+        if !excluded.is_empty() {
+            filtered.live.retain(|r| {
+                !excluded.iter().any(|p| r.cwd.starts_with(p))
+            });
+        }
+        let outcome = filtered;
 
         let now_ms = Utc::now().timestamp_millis();
         let mut state = self.state.lock().await;
@@ -372,6 +425,29 @@ impl LiveRuntime {
                 s.last_errored = new_errored;
                 s.last_stuck = new_stuck;
             }
+            // ModelChanged emission — fires when the model id
+            // observed in the latest assistant fragment differs
+            // from the last one we announced. Without this, the
+            // frontend's liveModel override (wired for task parity)
+            // would be dead code.
+            if snap.model != s.last_metrics_model {
+                if let Some(new_model) = snap.model.clone() {
+                    s.seq += 1;
+                    let _ = self
+                        .detail
+                        .publish_delta(LiveDelta {
+                            session_id: s.session_id.clone(),
+                            seq: s.seq,
+                            produced_at_ms: now_ms,
+                            kind: LiveDeltaKind::ModelChanged {
+                                model: new_model,
+                            },
+                            resync_required: false,
+                        })
+                        .await;
+                }
+                s.last_metrics_model = snap.model.clone();
+            }
         }
 
         // 4. Republish the aggregate list. Idempotent — watch
@@ -382,16 +458,57 @@ impl LiveRuntime {
             .collect();
         drop(state);
 
-        // 5. Record tick to the durable metrics store (if available).
-        // Best-effort; a failed write is logged and swallowed so the
-        // rest of the runtime keeps ticking.
+        // 5. Record to the durable metrics store. Two write paths:
+        //
+        //   a) On transition (status / errored / stuck change) —
+        //      the edge the Trends view really cares about.
+        //   b) On heartbeat (every HEARTBEAT_TICKS ticks) — preserves
+        //      per-bucket density so `active_series` still sees each
+        //      long-running session represented in every time bucket.
+        //      Without this, a session busy for 30 min would only
+        //      land rows at its transitions and vanish from buckets
+        //      in between.
+        //
+        // Transition-only by itself broke active_series carry-forward
+        // semantics (reported by the audit). The heartbeat is the
+        // fix: bounded writes (~1/30s/session at a 500ms tick), but
+        // every bucket longer than the heartbeat interval still
+        // sees each live session.
+        const HEARTBEAT_TICKS: u64 = 60; // 30s at a 500ms cadence
+        let mut to_write: Vec<LiveSessionSummary> = Vec::new();
+        let mut state_for_marks = self.state.lock().await;
+        for row in &list {
+            let Some(ss) = state_for_marks.get_mut(&row.session_id) else {
+                continue;
+            };
+            let first_tick = ss.last_metrics_status.is_none();
+            let transitioned = ss
+                .last_metrics_status
+                .map(|s| s != row.status)
+                .unwrap_or(false)
+                || row.errored != ss.last_metrics_errored
+                || row.stuck != ss.last_metrics_stuck;
+            let is_heartbeat = ss.ticks_since_metrics >= HEARTBEAT_TICKS;
+            if transitioned || is_heartbeat || first_tick {
+                ss.last_metrics_status = Some(row.status);
+                ss.last_metrics_errored = row.errored;
+                ss.last_metrics_stuck = row.stuck;
+                ss.ticks_since_metrics = 0;
+                to_write.push(row.clone());
+            } else {
+                ss.ticks_since_metrics = ss.ticks_since_metrics.saturating_add(1);
+            }
+        }
+        drop(state_for_marks);
         if let Some(ref m) = self.metrics {
-            if let Err(e) = m.record_tick(now_ms, &list) {
-                tracing::debug!(
-                    target = "session_live::runtime",
-                    error = %e,
-                    "metrics tick write failed (non-fatal)"
-                );
+            if !to_write.is_empty() {
+                if let Err(e) = m.record_tick(now_ms, &to_write) {
+                    tracing::debug!(
+                        target = "session_live::runtime",
+                        error = %e,
+                        "metrics tick write failed (non-fatal)"
+                    );
+                }
             }
         }
 
@@ -440,13 +557,25 @@ impl SessionState {
             last_task_summary: None,
             last_errored: false,
             last_stuck: false,
+            // `None` means no write yet — the first tick always
+            // lands a row regardless of which Status this session
+            // arrives on. Using a real Status as a sentinel
+            // collides with the steady-state value of that status
+            // (a legitimate Waiting session would write every tick).
+            last_metrics_status: None,
+            last_metrics_errored: false,
+            last_metrics_stuck: false,
+            last_metrics_model: None,
+            ticks_since_metrics: 0,
         })
     }
 }
 
 /// Derive a `LiveSessionSummary` from the per-session state. Every
-/// user-content string gets a redaction pass before we hand it to
-/// the DTO layer.
+/// user-content string — including the path fields — passes through
+/// the redactor before we hand it to the DTO layer. A cwd like
+/// `/private/customer-secrets/foo` should not leak through the
+/// peripheral surface even though the path itself isn't a token.
 fn summary_from_state(s: &SessionState, now_ms: i64) -> LiveSessionSummary {
     let snap = s.machine.snapshot();
     let idle_ms = snap
@@ -456,8 +585,10 @@ fn summary_from_state(s: &SessionState, now_ms: i64) -> LiveSessionSummary {
     LiveSessionSummary {
         session_id: s.session_id.clone(),
         pid: s.pid,
-        cwd: s.cwd.clone(),
-        transcript_path: Some(s.transcript_path.to_string_lossy().into_owned()),
+        cwd: crate::session_live::redact::redact_secrets(&s.cwd),
+        transcript_path: Some(crate::session_live::redact::redact_secrets(
+            &s.transcript_path.to_string_lossy(),
+        )),
         status: snap.status,
         current_action: snap.current_action.map(|a| redact_secrets_opt(Some(&a))),
         model: snap.model,

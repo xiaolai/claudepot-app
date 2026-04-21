@@ -39,6 +39,32 @@ pub struct LiveSessionState {
     /// multiple times in quick succession (React StrictMode
     /// double-mount, dev hot reload).
     pub started: Mutex<bool>,
+    /// Handles to the bridge tasks spawned by `session_live_start`
+    /// (aggregate → live-all emit, per-session → live::<sid>). Each
+    /// `session_live_stop` aborts and clears them so a subsequent
+    /// `start` doesn't accumulate ghost emitters. The session-detail
+    /// handle is keyed by session_id so `session_live_unsubscribe`
+    /// can cancel one subscriber without tearing down the aggregate
+    /// bridge.
+    pub bridge_tasks: Mutex<BridgeTasks>,
+}
+
+/// Handles owned by the state so lifecycle commands can cancel them.
+#[derive(Default)]
+pub struct BridgeTasks {
+    pub aggregate: Option<tokio::task::JoinHandle<()>>,
+    pub details: std::collections::HashMap<String, tokio::task::JoinHandle<()>>,
+}
+
+impl BridgeTasks {
+    pub fn abort_all(&mut self) {
+        if let Some(h) = self.aggregate.take() {
+            h.abort();
+        }
+        for (_, h) in self.details.drain() {
+            h.abort();
+        }
+    }
 }
 
 impl Default for LiveSessionState {
@@ -46,6 +72,7 @@ impl Default for LiveSessionState {
         Self {
             runtime: claudepot_core::session_live::LiveRuntime::new(),
             started: Mutex::new(false),
+            bridge_tasks: Mutex::new(BridgeTasks::default()),
         }
     }
 }
