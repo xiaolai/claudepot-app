@@ -69,6 +69,7 @@ import { OperationsProvider, useOperations } from "./hooks/useOperations";
 import { AppStateProvider, useAppState } from "./providers/AppStateProvider";
 import { api } from "./api";
 import { ConsentLiveModal } from "./components/ConsentLiveModal";
+import { useActivityNotifications } from "./hooks/useActivityNotifications";
 import { listen } from "@tauri-apps/api/event";
 import type { RunningOpInfo } from "./types";
 import { WindowChrome, AppSidebar, AppStatusBar } from "./shell";
@@ -252,6 +253,12 @@ function AppShell() {
     window.addEventListener("cp-goto-session", onGoto);
     return () => window.removeEventListener("cp-goto-session", onGoto);
   }, [setSection]);
+
+  // Activity notifications — observes aggregate transitions and
+  // pushes toasts for user-enabled trigger classes (error burst,
+  // idle-after-work, stuck). All default-off; the hook is a no-op
+  // until the user flips a pref. One toast per session per 60s.
+  useActivityNotifications(pushToast);
 
   // ⌘⇧L — focus the first SidebarLiveStrip row. Light-weight
   // fallback until the Activity section lands (M4) and claims this
