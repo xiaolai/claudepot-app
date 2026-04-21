@@ -55,6 +55,45 @@ fn append_transcript(projects_dir: &std::path::Path, cwd: &str, sid: &str, body:
     f.write_all(body.as_bytes()).unwrap();
 }
 
+/// Transcript path for assertions and mtime bumps. Mirrors
+/// `runtime.rs::transcript_path` one for one — kept local so tests
+/// don't depend on a private helper.
+fn transcript_path(
+    projects_dir: &std::path::Path,
+    cwd: &str,
+    sid: &str,
+) -> std::path::PathBuf {
+    projects_dir.join(sanitize_path(cwd)).join(format!("{sid}.jsonl"))
+}
+
+/// Set the mtime relative to now. `offset_secs` may be negative to
+/// place the mtime in the past. Used by resolver-adjacent tests
+/// where file-ordering is the whole point — relying on natural
+/// file-creation ordering would be both flaky and coarser than the
+/// tests need (macOS HFS mtime resolution is seconds).
+fn bump_mtime(path: &std::path::Path, offset_secs: i64) {
+    let now = std::time::SystemTime::now();
+    let target = if offset_secs >= 0 {
+        now + std::time::Duration::from_secs(offset_secs as u64)
+    } else {
+        now - std::time::Duration::from_secs((-offset_secs) as u64)
+    };
+    filetime::set_file_mtime(
+        path,
+        filetime::FileTime::from_system_time(target),
+    )
+    .unwrap();
+}
+
+/// Format an ms-since-epoch timestamp as RFC-3339 for embedding in
+/// fixture JSONL lines. `chrono`'s formatter is already a workspace
+/// dep so this costs nothing.
+fn iso_ms(ms: i64) -> String {
+    chrono::DateTime::<chrono::Utc>::from_timestamp_millis(ms)
+        .unwrap_or_else(chrono::Utc::now)
+        .to_rfc3339_opts(chrono::SecondsFormat::Millis, true)
+}
+
 struct Fixture {
     _td: TempDir,
     sessions_dir: std::path::PathBuf,
@@ -360,6 +399,181 @@ async fn excluded_paths_are_skipped_by_tick() {
     let snap = f.runtime.snapshot();
     assert_eq!(snap.len(), 1);
     assert_eq!(snap[0].session_id, "sess-kept");
+}
+
+/// Mid-run `/clear` — CC forks a new transcript but leaves the
+/// PID file's `sessionId` stale. The resolver must catch the
+/// sibling `.jsonl`, the old session must drop out of the
+/// aggregate (emitting `Ended`), and the new one must attach.
+///
+/// This reproduces the lixiaolai.com bug observed in the field
+/// on 2026-04-21: a PID that had been `/clear`ed twice was still
+/// reported as idle because we were tailing the original (stale)
+/// transcript whose final `end_turn` was 1h+ old.
+#[tokio::test]
+async fn clear_rotation_rebinds_to_the_active_transcript() {
+    let f = fixture();
+
+    // Timeline: PID started 10 min ago, initial transcript written
+    // at +5s, user /cleared 5 min later to a new transcript.
+    let started_at_ms = chrono::Utc::now().timestamp_millis() - 10 * 60 * 1000;
+    let t0_iso = iso_ms(started_at_ms + 5_000);
+    let t1_iso = iso_ms(started_at_ms + 5 * 60 * 1000);
+
+    write_pid_file(
+        &f.sessions_dir,
+        12345,
+        &format!(
+            r#"{{"pid":12345,"sessionId":"stale-sid","cwd":"/tmp/proj","startedAt":{started_at_ms}}}"#,
+        ),
+    );
+    // Declared (stale) transcript — CC wrote its first event right
+    // after startup; nothing since.
+    write_transcript(
+        &f.projects_dir,
+        "/tmp/proj",
+        "stale-sid",
+        &format!(
+            r#"{{"type":"custom-title","sessionId":"stale-sid","timestamp":"{t0_iso}"}}
+"#,
+        ),
+    );
+    bump_mtime(
+        &transcript_path(&f.projects_dir, "/tmp/proj", "stale-sid"),
+        -500,
+    );
+    f.check.set_alive(&[12345]);
+
+    // First tick binds to the declared transcript — PID-file match
+    // wins because no sibling exists yet.
+    f.runtime.tick().await.unwrap();
+    assert_eq!(f.runtime.snapshot().len(), 1);
+    assert_eq!(f.runtime.snapshot()[0].session_id, "stale-sid");
+
+    // Subscribe BEFORE the /clear so we can assert `Ended` fires for
+    // the stale session when the resolver rotates us to the fresh
+    // one. Drain any prior deltas first — the first tick's initial
+    // StatusChanged would otherwise block our Ended assertion by
+    // returning first.
+    let mut rx_stale = f.runtime.subscribe_detail("stale-sid").await.unwrap();
+    let _ = tokio::time::timeout(std::time::Duration::from_millis(50), rx_stale.recv()).await;
+
+    // Simulate `/clear`: CC starts writing a new transcript next to
+    // the old one, but does NOT update the PID file (because
+    // `regenerateSessionId` skips the sessionSwitched hook). The
+    // new transcript's first line carries a timestamp from within
+    // this PID's lifetime and its mtime is fresher than the stale
+    // one.
+    write_transcript(
+        &f.projects_dir,
+        "/tmp/proj",
+        "fresh-sid",
+        &format!(
+            r#"{{"type":"custom-title","sessionId":"fresh-sid","timestamp":"{t1_iso}"}}
+"#,
+        ),
+    );
+    bump_mtime(
+        &transcript_path(&f.projects_dir, "/tmp/proj", "fresh-sid"),
+        -1,
+    );
+
+    f.runtime.tick().await.unwrap();
+
+    // Aggregate now shows the fresh session; the stale sessionId
+    // must be gone (the whole point of the fix).
+    let snap = f.runtime.snapshot();
+    assert_eq!(snap.len(), 1, "still exactly one live session per PID");
+    assert_eq!(snap[0].session_id, "fresh-sid");
+    assert_eq!(snap[0].pid, 12345);
+
+    // The stale subscriber should have received an `Ended` delta —
+    // that's how detail consumers know to unmount.
+    let d = tokio::time::timeout(
+        std::time::Duration::from_millis(200),
+        rx_stale.recv(),
+    )
+    .await
+    .expect("Ended delta should arrive on stale session")
+    .expect("channel open");
+    assert!(
+        matches!(d.kind, LiveDeltaKind::Ended),
+        "expected Ended, got {:?}",
+        d.kind
+    );
+}
+
+/// Once bound to the fresh post-`/clear` transcript, tailing new
+/// lines must drive the status machine as usual — a regression here
+/// would mean we rotated correctly but then never surfaced actual
+/// work.
+#[tokio::test]
+async fn post_clear_session_receives_normal_status_transitions() {
+    let f = fixture();
+    let started_at_ms = chrono::Utc::now().timestamp_millis() - 5 * 60 * 1000;
+    let t0_iso = iso_ms(started_at_ms + 1_000);
+    let t1_iso = iso_ms(started_at_ms + 60_000);
+
+    write_pid_file(
+        &f.sessions_dir,
+        12345,
+        &format!(
+            r#"{{"pid":12345,"sessionId":"stale-sid","cwd":"/tmp/proj","startedAt":{started_at_ms}}}"#,
+        ),
+    );
+    write_transcript(
+        &f.projects_dir,
+        "/tmp/proj",
+        "stale-sid",
+        &format!(
+            r#"{{"type":"custom-title","sessionId":"stale-sid","timestamp":"{t0_iso}"}}
+"#,
+        ),
+    );
+    bump_mtime(
+        &transcript_path(&f.projects_dir, "/tmp/proj", "stale-sid"),
+        -200,
+    );
+    write_transcript(
+        &f.projects_dir,
+        "/tmp/proj",
+        "fresh-sid",
+        &format!(
+            r#"{{"type":"custom-title","sessionId":"fresh-sid","timestamp":"{t1_iso}"}}
+"#,
+        ),
+    );
+    bump_mtime(
+        &transcript_path(&f.projects_dir, "/tmp/proj", "fresh-sid"),
+        -1,
+    );
+    f.check.set_alive(&[12345]);
+
+    // First tick: resolver picks fresh-sid (newest mtime). Tail
+    // opens at EOF, status is Idle.
+    f.runtime.tick().await.unwrap();
+    assert_eq!(f.runtime.snapshot()[0].session_id, "fresh-sid");
+    assert_eq!(f.runtime.snapshot()[0].status, Status::Idle);
+
+    // CC appends to the fresh transcript — a user turn starting.
+    append_transcript(
+        &f.projects_dir,
+        "/tmp/proj",
+        "fresh-sid",
+        &format!(
+            concat!(
+                r#"{{"parentUuid":null,"isSidechain":false,"userType":"external","cwd":"/tmp/p","sessionId":"fresh-sid","version":"2.1","timestamp":"{ts}","uuid":"u1","type":"user","message":{{"role":"user","content":"go"}}}}"#,
+                "\n",
+            ),
+            ts = iso_ms(started_at_ms + 120_000),
+        ),
+    );
+    bump_mtime(
+        &transcript_path(&f.projects_dir, "/tmp/proj", "fresh-sid"),
+        0,
+    );
+    f.runtime.tick().await.unwrap();
+    assert_eq!(f.runtime.snapshot()[0].status, Status::Busy);
 }
 
 #[tokio::test]

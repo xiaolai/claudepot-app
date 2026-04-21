@@ -36,6 +36,7 @@ use crate::session_live::redact::redact_secrets_opt;
 use crate::session_live::registry::{self, ProcessCheck, SysinfoCheck};
 use crate::session_live::status::StatusMachine;
 use crate::session_live::tail::FileTail;
+use crate::session_live::transcript_resolver::TranscriptResolver;
 use crate::session_live::types::{
     LiveDelta, LiveDeltaKind, LiveSessionSummary, PidRecord, Status,
 };
@@ -67,6 +68,11 @@ pub struct LiveRuntime {
     /// command layer can update it when the user edits the pref
     /// without tearing down the runtime.
     excluded_paths: Arc<Mutex<Vec<String>>>,
+    /// Works around CC's stale `PidRecord.session_id` after `/clear`
+    /// by pointing every live PID at the transcript it's actually
+    /// writing to on each tick. See `transcript_resolver` for the
+    /// ownership rules and CC source references.
+    resolver: Arc<Mutex<TranscriptResolver>>,
     /// Cancellation flag set by `stop`; the poll loop checks it.
     running: Arc<AtomicBool>,
 }
@@ -127,6 +133,7 @@ impl LiveRuntime {
             state: Arc::new(Mutex::new(HashMap::new())),
             metrics,
             excluded_paths: Arc::new(Mutex::new(Vec::new())),
+            resolver: Arc::new(Mutex::new(TranscriptResolver::new())),
             running: Arc::new(AtomicBool::new(false)),
         })
     }
@@ -149,6 +156,7 @@ impl LiveRuntime {
             state: Arc::new(Mutex::new(HashMap::new())),
             metrics: None,
             excluded_paths: Arc::new(Mutex::new(Vec::new())),
+            resolver: Arc::new(Mutex::new(TranscriptResolver::new())),
             running: Arc::new(AtomicBool::new(false)),
         })
     }
@@ -258,7 +266,37 @@ impl LiveRuntime {
                 !excluded.iter().any(|p| r.cwd.starts_with(p))
             });
         }
-        let outcome = filtered;
+        let mut outcome = filtered;
+
+        // Remap each live record's `session_id` to the transcript the
+        // process is ACTUALLY writing to. CC's PID file leaks a stale
+        // sessionId after `/clear` (regenerateSessionId skips the
+        // switchSession emitter — see `transcript_resolver` for the
+        // upstream reference). The remap is transparent to the
+        // prune/attach/tail pipeline below: if the resolved id
+        // differs, the old sid drops out of `live_ids` on this tick,
+        // fires `Ended`, and we attach the new one.
+        {
+            let mut resolver = self.resolver.lock().await;
+            for rec in outcome.live.iter_mut() {
+                if let Some(sid) = resolver.resolve(rec, &self.projects_dir) {
+                    if sid != rec.session_id {
+                        tracing::debug!(
+                            target = "session_live::runtime",
+                            pid = rec.pid,
+                            declared = %rec.session_id,
+                            resolved = %sid,
+                            "pid-file sessionId is stale; rebinding to active transcript"
+                        );
+                        rec.session_id = sid;
+                    }
+                }
+                // `None` leaves `rec.session_id` as the PID-declared
+                // value. The try_attach call below will retry next
+                // tick once the transcript's first line hits disk.
+            }
+        }
+        let outcome = outcome;
 
         let now_ms = Utc::now().timestamp_millis();
         let mut state = self.state.lock().await;
