@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { api } from "../../api";
 import { Glyph } from "../../components/primitives/Glyph";
@@ -35,6 +35,18 @@ export function LiveStatusHeader({ sessionId }: Props) {
   const [liveCurrentAction, setLiveCurrentAction] = useState<string | null>(
     null,
   );
+  // Detail-channel overrides that beat the 500ms aggregate
+  // republish. Cleared (null) when the detail channel hasn't
+  // published a fresher value; the aggregate summary is used in
+  // that case. seq-guarded so a late out-of-order delivery can't
+  // un-fresh a newer value we already applied.
+  const [liveStatus, setLiveStatus] =
+    useState<LiveSessionSummary["status"] | null>(null);
+  const [liveWaitingFor, setLiveWaitingFor] = useState<string | null>(null);
+  const [liveModel, setLiveModel] = useState<string | null>(null);
+  const [liveOverlay, setLiveOverlay] =
+    useState<{ errored: boolean; stuck: boolean } | null>(null);
+  const lastSeqRef = useRef<number>(0);
 
   // Subscribe to the per-session detail channel so we get
   // TaskSummary deltas faster than the 500ms aggregate republish.
@@ -67,20 +79,30 @@ export function LiveStatusHeader({ sessionId }: Props) {
             /* fall through */
           }
         }
+        // seq guard so a late out-of-order delivery can't overwrite
+        // a newer state. Resync already reset the refs above.
+        if (d.seq <= lastSeqRef.current && !d.resync_required) return;
+        lastSeqRef.current = d.seq;
         switch (d.kind) {
           case "task_summary_changed":
             setLiveCurrentAction(d.summary);
             break;
+          case "status_changed":
+            setLiveStatus(d.status);
+            setLiveWaitingFor(d.waiting_for);
+            break;
+          case "overlay_changed":
+            setLiveOverlay({ errored: d.errored, stuck: d.stuck });
+            break;
+          case "model_changed":
+            setLiveModel(d.model);
+            break;
           case "ended":
             setLiveCurrentAction(null);
-            break;
-          case "status_changed":
-          case "overlay_changed":
-          case "model_changed":
-            // Status / overlay / model transitions are reflected
-            // through the aggregate bus at 500ms; we don't need
-            // to maintain a second copy here. The aggregate hook
-            // (useSessionLive) drives the chip row.
+            setLiveStatus(null);
+            setLiveWaitingFor(null);
+            setLiveModel(null);
+            setLiveOverlay(null);
             break;
         }
       }))
@@ -111,6 +133,17 @@ export function LiveStatusHeader({ sessionId }: Props) {
   // Nothing to render if this session isn't currently live.
   if (!summary) return null;
 
+  // Merge the aggregate snapshot with any detail-channel overrides
+  // that beat the 500ms republish. Priority: detail channel wins
+  // over aggregate for fields it has emitted; aggregate fills the
+  // rest.
+  const status = liveStatus ?? summary.status;
+  const waitingFor = liveWaitingFor ?? summary.waiting_for;
+  const model = liveModel ?? summary.model;
+  const errored = liveOverlay?.errored ?? summary.errored;
+  const stuck = liveOverlay?.stuck ?? summary.stuck;
+  const currentAction = liveCurrentAction ?? summary.current_action;
+
   return (
     <section
       aria-label="Live session status"
@@ -123,14 +156,20 @@ export function LiveStatusHeader({ sessionId }: Props) {
         background: "var(--bg-raised)",
       }}
     >
-      <StatusChipRow summary={summary} />
-      <CurrentActionCard
-        action={liveCurrentAction ?? summary.current_action}
-        status={summary.status}
-        waitingFor={summary.waiting_for}
+      <StatusChipRow
+        status={status}
+        model={model}
+        waitingFor={waitingFor}
+        errored={errored}
+        idleMs={summary.idle_ms}
       />
-      {summary.errored || summary.stuck ? (
-        <OverlayBanner errored={summary.errored} stuck={summary.stuck} />
+      <CurrentActionCard
+        action={currentAction}
+        status={status}
+        waitingFor={waitingFor}
+      />
+      {errored || stuck ? (
+        <OverlayBanner errored={errored} stuck={stuck} />
       ) : null}
     </section>
   );
@@ -138,8 +177,22 @@ export function LiveStatusHeader({ sessionId }: Props) {
 
 // ── Bits ──────────────────────────────────────────────────────────
 
-function StatusChipRow({ summary }: { summary: LiveSessionSummary }) {
-  const statusTone = STATUS_TONE[summary.status];
+interface StatusChipRowProps {
+  status: LiveSessionSummary["status"];
+  model: string | null;
+  waitingFor: string | null;
+  errored: boolean;
+  idleMs: number;
+}
+
+function StatusChipRow({
+  status,
+  model,
+  waitingFor,
+  errored,
+  idleMs,
+}: StatusChipRowProps) {
+  const statusTone: ChipTone = errored ? "warn" : STATUS_TONE[status];
   return (
     <div
       style={{
@@ -153,13 +206,11 @@ function StatusChipRow({ summary }: { summary: LiveSessionSummary }) {
         textTransform: "uppercase",
       }}
     >
-      <Chip tone={statusTone}>{summary.status}</Chip>
-      {summary.model ? <Chip tone="neutral">{summary.model}</Chip> : null}
-      {summary.waiting_for ? (
-        <Chip tone="neutral">{summary.waiting_for}</Chip>
-      ) : null}
+      <Chip tone={statusTone}>{status}</Chip>
+      {model ? <Chip tone="neutral">{model}</Chip> : null}
+      {waitingFor ? <Chip tone="neutral">{waitingFor}</Chip> : null}
       <div style={{ flex: 1 }} />
-      <ElapsedCounter idleMs={summary.idle_ms} />
+      <ElapsedCounter idleMs={idleMs} />
     </div>
   );
 }

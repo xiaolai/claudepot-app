@@ -88,11 +88,16 @@ struct SessionState {
     last_errored: bool,
     last_stuck: bool,
     /// What the metrics store last saw for this session — used to
-    /// gate writes to "on transition only" so the table doesn't
-    /// accumulate redundant rows every 500ms tick.
+    /// gate writes to transition + heartbeat so the table doesn't
+    /// accumulate redundant rows every 500ms tick but still keeps
+    /// per-bucket density.
     last_metrics_status: Status,
     last_metrics_errored: bool,
     last_metrics_stuck: bool,
+    /// Ticks elapsed since the last metrics write for this session.
+    /// Resets to 0 on every write; forces a heartbeat write when it
+    /// crosses HEARTBEAT_TICKS (defined in `tick`).
+    ticks_since_metrics: u64,
 }
 
 impl LiveRuntime {
@@ -427,15 +432,24 @@ impl LiveRuntime {
             .collect();
         drop(state);
 
-        // 5. Record to the durable metrics store, but ONLY sessions
-        // whose visible state changed this tick — status, errored,
-        // or stuck transition. Writing every session every tick
-        // produced ~1.7M rows/day on a 10-session load; the Trends
-        // view only needs transition points to render its histogram
-        // correctly. Non-transitioning sessions keep their prior
-        // point; the active_series query's bucket-width de-dup
-        // (HashSet per bucket) still attributes them.
-        let mut changed: Vec<LiveSessionSummary> = Vec::new();
+        // 5. Record to the durable metrics store. Two write paths:
+        //
+        //   a) On transition (status / errored / stuck change) —
+        //      the edge the Trends view really cares about.
+        //   b) On heartbeat (every HEARTBEAT_TICKS ticks) — preserves
+        //      per-bucket density so `active_series` still sees each
+        //      long-running session represented in every time bucket.
+        //      Without this, a session busy for 30 min would only
+        //      land rows at its transitions and vanish from buckets
+        //      in between.
+        //
+        // Transition-only by itself broke active_series carry-forward
+        // semantics (reported by the audit). The heartbeat is the
+        // fix: bounded writes (~1/30s/session at a 500ms tick), but
+        // every bucket longer than the heartbeat interval still
+        // sees each live session.
+        const HEARTBEAT_TICKS: u64 = 60; // 30s at a 500ms cadence
+        let mut to_write: Vec<LiveSessionSummary> = Vec::new();
         let mut state_for_marks = self.state.lock().await;
         for row in &list {
             let Some(ss) = state_for_marks.get_mut(&row.session_id) else {
@@ -444,19 +458,22 @@ impl LiveRuntime {
             let transitioned = row.status != ss.last_metrics_status
                 || row.errored != ss.last_metrics_errored
                 || row.stuck != ss.last_metrics_stuck;
-            if transitioned || ss.last_metrics_status == Status::Idle
-                && !changed.iter().any(|c| c.session_id == row.session_id)
-            {
+            let is_heartbeat = ss.ticks_since_metrics >= HEARTBEAT_TICKS;
+            let first_tick = ss.last_metrics_status == Status::Waiting;
+            if transitioned || is_heartbeat || first_tick {
                 ss.last_metrics_status = row.status;
                 ss.last_metrics_errored = row.errored;
                 ss.last_metrics_stuck = row.stuck;
-                changed.push(row.clone());
+                ss.ticks_since_metrics = 0;
+                to_write.push(row.clone());
+            } else {
+                ss.ticks_since_metrics = ss.ticks_since_metrics.saturating_add(1);
             }
         }
         drop(state_for_marks);
         if let Some(ref m) = self.metrics {
-            if !changed.is_empty() {
-                if let Err(e) = m.record_tick(now_ms, &changed) {
+            if !to_write.is_empty() {
+                if let Err(e) = m.record_tick(now_ms, &to_write) {
                     tracing::debug!(
                         target = "session_live::runtime",
                         error = %e,
@@ -514,10 +531,11 @@ impl SessionState {
             // Seed with a sentinel different from the actual first
             // snapshot's likely value so the first published row
             // lands (every new session should have at least one
-            // metrics point; from there it's transition-only).
+            // metrics point; from there it's transition + heartbeat).
             last_metrics_status: Status::Waiting,
             last_metrics_errored: false,
             last_metrics_stuck: false,
+            ticks_since_metrics: 0,
         })
     }
 }
