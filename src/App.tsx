@@ -260,6 +260,39 @@ function AppShell() {
   // until the user flips a pref. One toast per session per 60s.
   useActivityNotifications(pushToast);
 
+  // Tray → Activity row click lands on the Tauri event
+  // `cp-activity-open-session` with the session id as payload.
+  // Resolve to a transcript path via the live runtime's snapshot so
+  // the existing Sessions deep-link pipe handles routing. If the
+  // session isn't in the snapshot (already ended between click and
+  // handler), just switch to Sessions.
+  useEffect(() => {
+    let unlisten: (() => void) | null = null;
+    listen<string>("cp-activity-open-session", async (ev) => {
+      const sid = ev.payload;
+      if (!sid) return;
+      try {
+        const snap = await api.sessionLiveSnapshot();
+        const row = snap.find((s) => s.session_id === sid);
+        if (row?.transcript_path) {
+          setPendingSessionPath(row.transcript_path);
+        }
+      } catch {
+        /* fallback to just switching */
+      }
+      setSection("sessions");
+    })
+      .then((fn) => {
+        unlisten = fn;
+      })
+      .catch(() => {
+        /* no-tauri env */
+      });
+    return () => {
+      unlisten?.();
+    };
+  }, [setSection]);
+
   // ⌘⇧L — focus the first SidebarLiveStrip row. Light-weight
   // fallback until the Activity section lands (M4) and claims this
   // shortcut. Ignores editable focus so typing "L" in the command
