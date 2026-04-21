@@ -109,6 +109,40 @@ enum SessionAction {
     /// `~/.claudepot/sessions.db`. Next list/GUI refresh rebuilds it
     /// from scratch. Safe — no transcripts or credentials are touched.
     RebuildIndex,
+    /// Inspect one transcript: classification, chunks, linked tool
+    /// calls, subagents, phases, context attribution. Read-only.
+    View {
+        /// Session UUID (filename stem) OR absolute `.jsonl` path.
+        target: String,
+        /// Render mode. `summary` prints human-readable pieces;
+        /// `chunks|tools|classify|subagents|phases|context` emit the
+        /// JSON payload a GUI or script would consume.
+        #[arg(long, default_value = "summary", value_parser = ["summary", "chunks", "tools", "classify", "subagents", "phases", "context"])]
+        show: String,
+    },
+    /// Export a session transcript to Markdown or JSON. Redacts
+    /// `sk-ant-*` tokens automatically.
+    Export {
+        /// Session UUID or absolute `.jsonl` path.
+        target: String,
+        /// Output format.
+        #[arg(long, default_value = "md", value_parser = ["md", "markdown", "json"])]
+        format: String,
+        /// Optional output file. Writes stdout when omitted.
+        #[arg(long)]
+        output: Option<String>,
+    },
+    /// Cross-session text search. Scans first-user-prompts and
+    /// assistant/user turns case-insensitively.
+    Search {
+        /// Query string (case-insensitive, ≥2 chars).
+        query: String,
+        /// Maximum hits to return.
+        #[arg(long, default_value_t = 25)]
+        limit: usize,
+    },
+    /// Group sessions by git repository (collapses worktrees).
+    Worktrees,
 }
 
 #[derive(Subcommand)]
@@ -412,6 +446,18 @@ async fn main() -> Result<()> {
                 commands::session::adopt_orphan_cmd(&ctx, &slug, &target)?
             }
             SessionAction::RebuildIndex => commands::session::rebuild_index_cmd(&ctx)?,
+            SessionAction::View { target, show } => {
+                commands::session::view_cmd(&ctx, &target, &show)?
+            }
+            SessionAction::Export {
+                target,
+                format,
+                output,
+            } => commands::session::export_cmd(&ctx, &target, &format, output.as_deref())?,
+            SessionAction::Search { query, limit } => {
+                commands::session::search_cmd(&ctx, &query, limit)?
+            }
+            SessionAction::Worktrees => commands::session::worktrees_cmd(&ctx)?,
         },
     }
 
