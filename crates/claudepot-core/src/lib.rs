@@ -34,6 +34,7 @@ pub mod session_context;
 pub mod session_export;
 pub mod session_index;
 pub mod session_phases;
+pub mod session_search;
 pub mod session_subagents;
 pub mod session_tool_link;
 pub mod session_worktree;

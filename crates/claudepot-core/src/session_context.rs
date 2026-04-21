@@ -21,7 +21,7 @@
 //! breakdown; the UI is free to render categories as bars, stacks, or
 //! rankings.
 
-use crate::session::{SessionEvent, TokenUsage};
+use crate::session::SessionEvent;
 use crate::session_phases::{compute_phases, ContextPhase};
 use crate::session_tool_link::link_tools;
 use serde::Serialize;
@@ -391,6 +391,7 @@ fn event_ts(ev: &SessionEvent) -> Option<chrono::DateTime<chrono::Utc>> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::session::TokenUsage;
 
     fn user(text: &str) -> SessionEvent {
         SessionEvent::UserText {
