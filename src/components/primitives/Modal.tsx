@@ -1,4 +1,4 @@
-import { type ReactNode, useEffect } from "react";
+import { type ReactNode, useEffect, useRef } from "react";
 import type { NfIcon } from "../../icons";
 import { Glyph } from "./Glyph";
 import { IconButton } from "./IconButton";
@@ -42,14 +42,67 @@ export function Modal({
   children,
   ...aria
 }: ModalProps) {
+  const dialogRef = useRef<HTMLDivElement | null>(null);
+  const prevFocusRef = useRef<HTMLElement | null>(null);
+
   useEffect(() => {
     if (!open) return;
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") onClose?.();
+      if (e.key === "Escape") {
+        onClose?.();
+        return;
+      }
+      if (e.key !== "Tab") return;
+      // Focus-trap: keep Tab inside the dialog.
+      const dlg = dialogRef.current;
+      if (!dlg) return;
+      const focusable = dlg.querySelectorAll<HTMLElement>(
+        'button:not([disabled]), [href], input:not([disabled]), ' +
+          'select:not([disabled]), textarea:not([disabled]), ' +
+          '[tabindex]:not([tabindex="-1"])',
+      );
+      if (focusable.length === 0) return;
+      const first = focusable[0];
+      const last = focusable[focusable.length - 1];
+      const active = document.activeElement as HTMLElement | null;
+      if (e.shiftKey && active === first) {
+        e.preventDefault();
+        last.focus();
+      } else if (!e.shiftKey && active === last) {
+        e.preventDefault();
+        first.focus();
+      } else if (active && !dlg.contains(active)) {
+        e.preventDefault();
+        first.focus();
+      }
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, [open, onClose]);
+
+  // On open: remember the previously-focused element, place
+  // initial focus on the first focusable control inside the
+  // dialog. On close: restore focus to the pre-open element so
+  // keyboard users land back where they were.
+  useEffect(() => {
+    if (!open) return;
+    prevFocusRef.current = document.activeElement as HTMLElement | null;
+    // Next tick so the dialog is mounted.
+    queueMicrotask(() => {
+      const dlg = dialogRef.current;
+      if (!dlg) return;
+      const first = dlg.querySelector<HTMLElement>(
+        'button:not([disabled]), [href], input:not([disabled]), ' +
+          'select:not([disabled]), textarea:not([disabled]), ' +
+          '[tabindex]:not([tabindex="-1"])',
+      );
+      (first ?? dlg).focus();
+    });
+    return () => {
+      const prev = prevFocusRef.current;
+      prev?.focus?.();
+    };
+  }, [open]);
 
   if (!open) return null;
 
@@ -70,6 +123,8 @@ export function Modal({
       }}
     >
       <div
+        ref={dialogRef}
+        tabIndex={-1}
         onClick={(e) => e.stopPropagation()}
         role="dialog"
         aria-modal="true"
@@ -86,6 +141,7 @@ export function Modal({
           flexDirection: "column",
           overflow: "hidden",
           fontFamily: "var(--font)",
+          outline: "none",
         }}
       >
         {children}

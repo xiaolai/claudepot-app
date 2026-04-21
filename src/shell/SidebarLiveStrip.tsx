@@ -204,7 +204,7 @@ interface DotProps {
 
 function StatusDot({ status, errored }: DotProps) {
   const palette = STATUS_DOT[status];
-  const ring = errored ? "var(--accent-warn, orange)" : palette.outline;
+  const ring = errored ? "var(--warn)" : palette.outline;
   return (
     <span
       aria-hidden

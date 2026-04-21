@@ -225,10 +225,10 @@ function OverlayBanner({ errored, stuck }: { errored: boolean; stuck: boolean })
       role="alert"
       style={{
         padding: "var(--sp-6) var(--sp-10)",
-        border: "var(--bw-hair) solid var(--accent-warn, orange)",
+        border: "var(--bw-hair) solid var(--warn)",
         borderRadius: "var(--r-1)",
         fontSize: "var(--fs-xs)",
-        color: "var(--accent-warn, orange)",
+        color: "var(--warn)",
         background: "var(--bg)",
       }}
     >
@@ -286,8 +286,8 @@ function Chip({ tone, children }: { tone: ChipTone; children: string }) {
   const palette: Record<ChipTone, { fg: string; border: string }> = {
     accent: { fg: "var(--accent)", border: "var(--accent)" },
     warn: {
-      fg: "var(--accent-warn, orange)",
-      border: "var(--accent-warn, orange)",
+      fg: "var(--warn)",
+      border: "var(--warn)",
     },
     neutral: { fg: "var(--fg-muted)", border: "var(--line)" },
   };

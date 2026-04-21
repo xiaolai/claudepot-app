@@ -54,9 +54,16 @@ export function useActivityNotifications(pushToast: ToastPusher): void {
   const sessions = useSessionLive();
   const memoRef = useRef(new Map<string, SessionMemo>());
   const prefsRef = useRef<Preferences | null>(null);
-  const osPermissionRef = useRef<"granted" | "denied" | "unknown">(
-    "unknown",
-  );
+  // Three-state permission machine:
+  //   * "unknown": no probe yet — ask on next pref-enabled tick
+  //   * "not-requested": probed isPermissionGranted, got false, but
+  //     no requestPermission call has fired. First trigger will ask.
+  //   * "granted" / "denied": terminal after requestPermission
+  //     result. "denied" sticks for the session — we never
+  //     re-prompt; user opts back in via System Settings.
+  const osPermissionRef = useRef<
+    "unknown" | "not-requested" | "granted" | "denied"
+  >("unknown");
 
   // Load prefs once + refresh every 10s. The triggers are a user
   // configuration; getting a fresh read once per 10s is far cheaper
@@ -82,7 +89,15 @@ export function useActivityNotifications(pushToast: ToastPusher): void {
           if (wantsOs && osPermissionRef.current === "unknown") {
             try {
               const granted = await isPermissionGranted();
-              osPermissionRef.current = granted ? "granted" : "denied";
+              // If not yet granted, leave as "not-requested" so the
+              // next trigger does a user-facing requestPermission.
+              // isPermissionGranted returns false BEFORE any prompt
+              // has been shown, so treating that as terminal
+              // "denied" would silently suppress all future OS
+              // notifications on a fresh install.
+              osPermissionRef.current = granted
+                ? "granted"
+                : "not-requested";
             } catch {
               osPermissionRef.current = "denied";
             }
@@ -124,9 +139,13 @@ export function useActivityNotifications(pushToast: ToastPusher): void {
         } catch {
           /* swallow */
         }
-      } else if (osPermissionRef.current === "unknown") {
-        // Ask on-demand at the first trigger, since the initial
-        // pref load may not have reached this code yet.
+      } else if (
+        osPermissionRef.current === "unknown" ||
+        osPermissionRef.current === "not-requested"
+      ) {
+        // First trigger after pref-enable: ask for permission. If
+        // the user grants it, fire this alert AND every future
+        // one. If they deny, stay denied for the session.
         requestPermission()
           .then((perm) => {
             osPermissionRef.current =

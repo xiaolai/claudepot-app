@@ -2156,12 +2156,19 @@ pub async fn session_live_start(
     let mut rx = runtime.subscribe_aggregate();
     let app_for_bridge = app.clone();
     let aggregate_handle = tokio::spawn(async move {
+        use tokio::sync::Mutex as AsyncMutex;
         // Track the last-seen set of session IDs so we only rebuild
         // the tray when membership changes, not on every status
         // transition (which don't affect the top-level menu).
         let mut last_ids: std::collections::BTreeSet<String> =
             std::collections::BTreeSet::new();
-        let mut rebuild_pending = false;
+        // True debounce: a single shared pending flag that flips
+        // off only AFTER the delayed rebuild actually runs, so
+        // repeat membership changes within the window don't
+        // schedule a second rebuild. Earlier impl reset the flag
+        // in the same loop iteration that scheduled — no debounce
+        // at all.
+        let rebuild_pending = std::sync::Arc::new(AsyncMutex::new(false));
         loop {
             if rx.changed().await.is_err() {
                 break;
@@ -2179,28 +2186,32 @@ pub async fn session_live_start(
                 .iter()
                 .map(|s| s.session_id.clone())
                 .collect();
-            if current_ids != last_ids && !rebuild_pending {
-                rebuild_pending = true;
-                let handle = app_for_bridge.clone();
-                tauri::async_runtime::spawn(async move {
-                    tokio::time::sleep(std::time::Duration::from_secs(1)).await;
-                    if let Err(e) = crate::tray::rebuild(&handle).await {
-                        tracing::warn!(
-                            "activity tray rebuild failed: {e}"
-                        );
-                    }
-                });
-            }
             if current_ids != last_ids {
                 last_ids = current_ids;
-            }
-            // The flag resets naturally after the spawned rebuild —
-            // we reset it here on the next membership change because
-            // the rebuild itself may race with another change, and
-            // worst case we coalesce two rebuilds into one. The 1s
-            // debounce keeps the cadence bounded.
-            if rebuild_pending {
-                rebuild_pending = false;
+                let mut guard = rebuild_pending.lock().await;
+                if !*guard {
+                    *guard = true;
+                    drop(guard);
+                    let handle = app_for_bridge.clone();
+                    let pending = rebuild_pending.clone();
+                    tauri::async_runtime::spawn(async move {
+                        tokio::time::sleep(
+                            std::time::Duration::from_secs(1),
+                        )
+                        .await;
+                        // Clear the pending flag ONLY after the
+                        // delay fires so another membership change
+                        // inside the window is folded into this
+                        // rebuild instead of scheduling a new one.
+                        if let Err(e) = crate::tray::rebuild(&handle).await {
+                            tracing::warn!(
+                                "activity tray rebuild failed: {e}"
+                            );
+                        }
+                        let mut g = pending.lock().await;
+                        *g = false;
+                    });
+                }
             }
         }
     });
