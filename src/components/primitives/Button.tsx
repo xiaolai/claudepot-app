@@ -90,6 +90,7 @@ export function Button({
       }}
       onMouseDown={() => setPress(true)}
       onMouseUp={() => setPress(false)}
+      className="pm-focus"
       {...aria}
       style={{
         display: "inline-flex",

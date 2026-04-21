@@ -952,6 +952,18 @@ body {
   box-shadow: var(--focus-ring);
 }
 
+/* Paper-mono primitives (Button / IconButton / SidebarItem) —
+ * inline-styled React components can't express `:focus-visible`
+ * themselves, so they carry this class to surface the design
+ * system's standard keyboard-focus ring. Matches `.btn`'s ring
+ * exactly so consumers mixing the legacy and paper-mono systems
+ * see one consistent shape. `border-radius: inherit` lets the
+ * ring match the rounded corners each primitive picks. */
+.pm-focus:focus-visible {
+  outline: none;
+  box-shadow: var(--focus-ring);
+}
+
 /* Primary push button — AppKit NSButton "BezelStyleRounded" feel.
    Solid accent fill at default saturation; on hover the whole
    button dims slightly, not a separate hover color. The subtle

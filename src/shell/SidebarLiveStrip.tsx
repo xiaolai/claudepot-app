@@ -128,6 +128,7 @@ const LiveRow = forwardRef<HTMLButtonElement, RowProps>(function LiveRow(
       aria-label={`${label}: ${statusTitle}`}
       onClick={onClick}
       onFocus={onFocus}
+      className="pm-focus"
       style={{
         display: "flex",
         alignItems: "center",
