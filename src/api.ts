@@ -354,6 +354,38 @@ export const api = {
    * no-ops. The backend emits aggregate updates on the `live-all`
    * event channel and per-session deltas on `live::<sessionId>`.
    */
+  /**
+   * Partial update of the `activity_*` preference block. Any field
+   * left undefined is preserved; the returned value is the refreshed
+   * snapshot so the UI can round-trip without a separate GET.
+   */
+  preferencesSetActivity: (patch: {
+    enabled?: boolean;
+    consentSeen?: boolean;
+    hideThinking?: boolean;
+    excludedPaths?: string[];
+  }) =>
+    invoke<Preferences>("preferences_set_activity", {
+      enabled: patch.enabled,
+      consentSeen: patch.consentSeen,
+      hideThinking: patch.hideThinking,
+      excludedPaths: patch.excludedPaths,
+    }),
+
+  /** Partial update of the `notify_*` preference block. */
+  preferencesSetNotifications: (patch: {
+    onError?: boolean;
+    onIdleDone?: boolean;
+    onStuckMinutes?: number | null;
+    onSpendUsd?: number | null;
+  }) =>
+    invoke<Preferences>("preferences_set_notifications", {
+      onError: patch.onError,
+      onIdleDone: patch.onIdleDone,
+      onStuckMinutes: patch.onStuckMinutes,
+      onSpendUsd: patch.onSpendUsd,
+    }),
+
   sessionLiveStart: () => invoke<void>("session_live_start"),
 
   /** Stop the live runtime. Drops all detail subscribers. */

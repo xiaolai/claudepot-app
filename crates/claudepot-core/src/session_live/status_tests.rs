@@ -353,7 +353,11 @@ fn late_straggler_tool_result_does_not_pin_busy() {
 fn current_action_redacts_leaked_keys() {
     // Anthropic's own prefix in a Bash arg — happens when a user
     // pastes `curl -H 'Authorization: Bearer sk-ant-...'`. The
-    // peripheral current_action surface MUST redact.
+    // peripheral current_action surface MUST redact. Since M2, the
+    // Authorization-header family swallows the entire bearer body
+    // BEFORE the sk-ant pass runs, so the visible mask is
+    // `Authorization: Bearer ***` (the sk-ant-*** fallback mask is
+    // only used for bare sk-ant-... tokens not wrapped in a header).
     let mut m = machine();
     m.ingest(&SessionEvent::AssistantToolUse {
         ts: ts(10, 0, 10),
@@ -369,6 +373,29 @@ fn current_action_redacts_leaked_keys() {
         !ca.contains("sk-ant-Abc123DEF456_xyz"),
         "raw key leaked into current_action: {ca}"
     );
+    // Either mask form is acceptable; neither form reveals the body.
+    assert!(
+        ca.contains("Authorization: Bearer ***") || ca.contains("sk-ant-***"),
+        "expected redaction marker, got: {ca}"
+    );
+}
+
+#[test]
+fn current_action_redacts_bare_sk_ant_token() {
+    // Same prefix, but NOT wrapped in an Authorization header — the
+    // sk-ant pass is the only family that fires. Asserts the
+    // classic sk-ant-*** shape still works for bare tokens.
+    let mut m = machine();
+    m.ingest(&SessionEvent::AssistantToolUse {
+        ts: ts(10, 0, 10),
+        uuid: None,
+        model: None,
+        tool_name: "Bash".into(),
+        tool_use_id: "tu".into(),
+        input_preview: r#"{"command":"echo sk-ant-Abc123DEF456_xyz"}"#.into(),
+    });
+    let ca = m.snapshot().current_action.unwrap();
+    assert!(!ca.contains("Abc123DEF456_xyz"));
     assert!(ca.contains("sk-ant-***"));
 }
 

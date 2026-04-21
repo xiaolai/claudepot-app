@@ -62,6 +62,10 @@ pub fn classify_event(event: &SessionEvent) -> MessageCategory {
             MessageCategory::HardNoise
         }
         SessionEvent::UserText { text, .. } => classify_user_text(text),
+        // Task-summary is CC-internal bookkeeping for `claude ps` —
+        // not something to render in the transcript view. HardNoise
+        // so the chunk builder filters it out.
+        SessionEvent::TaskSummary { .. } => MessageCategory::HardNoise,
         SessionEvent::UserToolResult { .. }
         | SessionEvent::AssistantText { .. }
         | SessionEvent::AssistantToolUse { .. }
