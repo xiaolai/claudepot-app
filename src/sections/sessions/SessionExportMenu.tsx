@@ -56,7 +56,14 @@ export function SessionExportMenu({
             ],
           });
         } catch (e) {
-          onError?.(`Couldn't open save dialog: ${String(e)}`);
+          // Tauri's raw error includes plugin-identifier strings
+          // ("dialog.save not allowed. Permissions associated with
+          // this command: dialog:allow-save, …"). Those are an
+          // internal detail — surface a clean line to the user and
+          // log the full payload for developer diagnosis.
+          // eslint-disable-next-line no-console
+          console.error("save() failed:", e);
+          onError?.("Couldn't open the save dialog. Please retry.");
           return;
         }
         if (target === null) return; // user cancelled — silent

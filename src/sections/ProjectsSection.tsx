@@ -9,6 +9,7 @@ import { Button } from "../components/primitives/Button";
 import { Glyph } from "../components/primitives/Glyph";
 import { IconButton } from "../components/primitives/IconButton";
 import { Input } from "../components/primitives/Input";
+import { Toast } from "../components/primitives/Toast";
 import { NF } from "../icons";
 import { ScreenHeader } from "../shell/ScreenHeader";
 import {
@@ -473,30 +474,7 @@ export function ProjectsSection({
         />
       )}
 
-      {toast && (
-        <div
-          className="inline-toast"
-          role="status"
-          onClick={() => setToast(null)}
-          style={{
-            position: "fixed",
-            bottom: "var(--sp-40)",
-            left: "50%",
-            transform: "translateX(-50%)",
-            padding: "var(--sp-10) var(--sp-16)",
-            background: "var(--bg-raised)",
-            border: "var(--bw-hair) solid var(--line-strong)",
-            borderRadius: "var(--r-2)",
-            fontSize: "var(--fs-sm)",
-            color: "var(--fg)",
-            boxShadow: "var(--shadow-md)",
-            cursor: "pointer",
-            zIndex: "var(--z-toast)" as unknown as number,
-          }}
-        >
-          {toast}
-        </div>
-      )}
+      <Toast message={toast} onDismiss={() => setToast(null)} />
 
       {ctxMenu &&
         (() => {
