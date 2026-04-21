@@ -26,6 +26,7 @@ import { SessionChunkView } from "./SessionChunkView";
 import { SessionContextPanel } from "./SessionContextPanel";
 import { SessionEventView } from "./SessionEventView";
 import { SessionExportMenu } from "./SessionExportMenu";
+import { LiveStatusHeader } from "./LiveStatusHeader";
 
 const INITIAL_EVENT_LIMIT = 500;
 const EVENT_PAGE = 500;
@@ -243,6 +244,11 @@ export function SessionDetail({
           minHeight: 0,
         }}
       >
+      {/* Live status header — renders only when the selected session
+           is currently in the LiveRuntime's aggregate list.
+           Cheap no-op otherwise (the component returns null). */}
+      <LiveStatusHeader sessionId={row.session_id} />
+
       {/* Header strip ---------------------------------------------------- */}
       <div
         style={{

@@ -21,6 +21,7 @@ pub(super) fn event_ts(event: &SessionEvent) -> Option<DateTime<Utc>> {
         | SessionEvent::System { ts, .. }
         | SessionEvent::Attachment { ts, .. }
         | SessionEvent::FileHistorySnapshot { ts, .. }
+        | SessionEvent::TaskSummary { ts, .. }
         | SessionEvent::Other { ts, .. } => *ts,
         SessionEvent::Malformed { .. } => None,
     }

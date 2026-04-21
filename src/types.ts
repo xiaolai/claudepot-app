@@ -227,6 +227,31 @@ export interface Preferences {
   /** macOS-only: when true, the app runs tray-only (no dock icon, no
    *  Cmd+Tab, no app menu bar). No-op on Windows/Linux. */
   hide_dock_icon: boolean;
+
+  /** User opted in to the live Activity feature. Gate for starting
+   *  the LiveRuntime. Defaults to false until the consent modal is
+   *  accepted. */
+  activity_enabled: boolean;
+
+  /** First-run consent modal has been seen (accepted OR declined).
+   *  Separate from activity_enabled so a user who declined once
+   *  isn't re-prompted every launch. */
+  activity_consent_seen: boolean;
+
+  /** Thinking blocks render redacted-by-default with a "▸ reveal"
+   *  affordance. Defaults to true — privacy-forward. */
+  activity_hide_thinking: boolean;
+
+  /** Project paths the live runtime should ignore. Path-prefix
+   *  matched against PidRecord.cwd. */
+  activity_excluded_paths: string[];
+
+  notify_on_error: boolean;
+  notify_on_idle_done: boolean;
+  /** null = feature off; number = fire after N minutes stuck. */
+  notify_on_stuck_minutes: number | null;
+  /** null = feature off; number = fire when session spend >= $. */
+  notify_on_spend_usd: number | null;
 }
 
 export interface DryRunPlan {

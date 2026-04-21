@@ -72,6 +72,7 @@ struct SessionState {
     /// Last-published summary, used to suppress redundant deltas.
     last_status: Status,
     last_current_action: Option<String>,
+    last_task_summary: Option<String>,
     last_errored: bool,
     last_stuck: bool,
 }
@@ -292,6 +293,33 @@ impl LiveRuntime {
             if new_action != s.last_current_action {
                 s.last_current_action = new_action;
             }
+            // Emit TaskSummaryChanged when CC wrote a new
+            // `task-summary` entry. Use the raw task_summary field
+            // (pre-redaction — it's already a human description,
+            // not a tool arg) so subscribers can render it verbatim
+            // in the live-pane current-action card. Redaction on
+            // the content happens at the DTO boundary in
+            // summary_from_state → current_action.
+            if snap.task_summary != s.last_task_summary {
+                if let Some(summary_text) = &snap.task_summary {
+                    let redacted =
+                        crate::session_live::redact::redact_secrets(summary_text);
+                    s.seq += 1;
+                    let _ = self
+                        .detail
+                        .publish_delta(LiveDelta {
+                            session_id: s.session_id.clone(),
+                            seq: s.seq,
+                            produced_at_ms: now_ms,
+                            kind: LiveDeltaKind::TaskSummaryChanged {
+                                summary: redacted,
+                            },
+                            resync_required: false,
+                        })
+                        .await;
+                }
+                s.last_task_summary = snap.task_summary.clone();
+            }
             if new_errored != s.last_errored || new_stuck != s.last_stuck {
                 s.seq += 1;
                 let _ = self
@@ -361,6 +389,7 @@ impl SessionState {
             seq: 0,
             last_status: Status::Idle,
             last_current_action: None,
+            last_task_summary: None,
             last_errored: false,
             last_stuck: false,
         })

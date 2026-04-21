@@ -203,6 +203,8 @@ pub fn run() {
             commands::key_oauth_copy,
             commands::key_oauth_probe,
             commands::key_oauth_usage,
+            commands::preferences_set_activity,
+            commands::preferences_set_notifications,
             commands::session_live_start,
             commands::session_live_stop,
             commands::session_live_snapshot,
