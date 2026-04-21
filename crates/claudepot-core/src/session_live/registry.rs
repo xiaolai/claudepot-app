@@ -58,8 +58,18 @@ pub struct PollOutcome {
 
 /// Trait injected into the poller so tests can feed synthetic
 /// process lists without touching real PIDs.
+///
+/// The production impl (`SysinfoCheck`) caches a `sysinfo::System`
+/// across calls; `prime` refreshes the cache with the exact PIDs
+/// the caller is about to check, turning each `is_running` into an
+/// O(1) membership check. Fake checks can ignore `prime` (default
+/// no-op) since they don't read the live process table.
 pub trait ProcessCheck: Send + Sync {
     fn is_running(&self, pid: u32) -> bool;
+
+    /// Prime the check with the full set of PIDs about to be
+    /// probed. Default is a no-op for fakes.
+    fn prime(&self, _pids: &[u32]) {}
 }
 
 /// Production check via `sysinfo`. Caches the `System` behind a
@@ -101,6 +111,10 @@ impl ProcessCheck for SysinfoCheck {
         use sysinfo::Pid;
         let Ok(sys) = self.sys.lock() else { return false };
         sys.process(Pid::from_u32(pid)).is_some()
+    }
+
+    fn prime(&self, pids: &[u32]) {
+        self.refresh_for(pids);
     }
 }
 
@@ -154,31 +168,41 @@ pub fn poll_dir(dir: &Path, check: &dyn ProcessCheck) -> io::Result<PollOutcome>
         Err(e) => return Err(e),
     };
 
-    let mut live = Vec::new();
-    let mut stale_paths = Vec::new();
-    let mut unparseable_paths = Vec::new();
-    let on_wsl = is_wsl();
-
+    // First pass: enumerate candidate PIDs from filenames. Second
+    // pass: probe. Splitting the passes lets the caller prime its
+    // process table once with every PID we'll probe, turning the
+    // N `is_running` calls into cheap membership checks. Without
+    // this primer `SysinfoCheck::is_running` walks an empty cached
+    // `System` — every probe returns false and live registry files
+    // look stale.
+    let mut candidates: Vec<(u32, std::path::PathBuf)> = Vec::new();
     for entry in read {
         let entry = match entry {
             Ok(e) => e,
-            Err(_) => continue, // one bad entry shouldn't blind us to the rest
+            Err(_) => continue,
         };
         let name = entry.file_name();
         let name_str = name.to_string_lossy();
         if !PID_FILENAME_RE.is_match(&name_str) {
-            continue; // strict guard
+            continue;
         }
-        // Parse the pid from the stem. The regex already guaranteed
-        // the shape, so the only way this fails is an overflow
-        // past u32 — treat that as invalid and skip.
         let stem = &name_str[..name_str.len() - ".json".len()];
         let pid: u32 = match stem.parse() {
             Ok(p) => p,
             Err(_) => continue,
         };
-        let path = entry.path();
+        candidates.push((pid, entry.path()));
+    }
+    // Prime the check with every PID we're about to probe.
+    let pids: Vec<u32> = candidates.iter().map(|(p, _)| *p).collect();
+    check.prime(&pids);
 
+    let mut live = Vec::new();
+    let mut stale_paths = Vec::new();
+    let mut unparseable_paths = Vec::new();
+    let on_wsl = is_wsl();
+
+    for (pid, path) in candidates {
         if !check.is_running(pid) {
             if !on_wsl {
                 stale_paths.push(path);
