@@ -63,6 +63,7 @@ import { useTheme } from "./hooks/useTheme";
 import { OperationsProvider, useOperations } from "./hooks/useOperations";
 import { AppStateProvider, useAppState } from "./providers/AppStateProvider";
 import { api } from "./api";
+import { ConsentLiveModal } from "./components/ConsentLiveModal";
 import { listen } from "@tauri-apps/api/event";
 import type { RunningOpInfo } from "./types";
 import { WindowChrome, AppSidebar, AppStatusBar } from "./shell";
@@ -82,6 +83,31 @@ function AppShell() {
   const [pendingSessionPath, setPendingSessionPath] = useState<string | null>(
     null,
   );
+
+  // Live Activity consent. On cold launch we ask the backend once
+  // whether the consent modal still needs to fire. `true` = modal
+  // open; `false` = either already accepted/declined, or the prefs
+  // fetch failed (fail-closed: no modal means no surprise reads).
+  const [showConsentModal, setShowConsentModal] = useState(false);
+  useEffect(() => {
+    let cancelled = false;
+    api
+      .preferencesGet()
+      .then((p) => {
+        if (cancelled) return;
+        if (!p.activity_consent_seen) setShowConsentModal(true);
+        else if (p.activity_enabled) {
+          // Already opted-in on a prior run — start the runtime.
+          api.sessionLiveStart().catch(() => {});
+        }
+      })
+      .catch(() => {
+        // Prefs fetch failed (non-Tauri env). Leave modal closed.
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
   const { summary: pendingSummary, refresh: refreshPendingBanner } =
     usePendingJournals();
   const { ops: runningOps } = useRunningOps();
@@ -492,6 +518,14 @@ function AppShell() {
       )}
 
       <ToastContainer toasts={toasts} onDismiss={dismissToast} />
+
+      {/* First-run gate for the live Activity feature. Re-opens
+          only if the backend prefs report consent still hasn't
+          been seen. */}
+      <ConsentLiveModal
+        open={showConsentModal}
+        onDismiss={() => setShowConsentModal(false)}
+      />
     </div>
   );
 }
