@@ -61,6 +61,12 @@ pub struct LiveRuntime {
     /// fatal. Lives behind `Arc` so the aggregate handle can fan it
     /// out to background tasks if needed.
     metrics: Option<Arc<MetricsStore>>,
+    /// Paths that the user has asked the runtime to ignore (via
+    /// `preferences.activity_excluded_paths`). Compared as prefix
+    /// matches against `PidRecord.cwd`. Mutable so the Tauri
+    /// command layer can update it when the user edits the pref
+    /// without tearing down the runtime.
+    excluded_paths: Arc<Mutex<Vec<String>>>,
     /// Cancellation flag set by `stop`; the poll loop checks it.
     running: Arc<AtomicBool>,
 }
@@ -106,6 +112,7 @@ impl LiveRuntime {
             detail: DetailBus::new(),
             state: Arc::new(Mutex::new(HashMap::new())),
             metrics,
+            excluded_paths: Arc::new(Mutex::new(Vec::new())),
             running: Arc::new(AtomicBool::new(false)),
         })
     }
@@ -127,8 +134,20 @@ impl LiveRuntime {
             detail: DetailBus::new(),
             state: Arc::new(Mutex::new(HashMap::new())),
             metrics: None,
+            excluded_paths: Arc::new(Mutex::new(Vec::new())),
             running: Arc::new(AtomicBool::new(false)),
         })
+    }
+
+    /// Replace the excluded-paths list. Called by the Tauri command
+    /// layer whenever the user edits the `activity_excluded_paths`
+    /// preference. Any PID record whose `cwd` is prefix-matched by
+    /// an entry in this list is skipped by `tick()` — it never
+    /// appears in the aggregate snapshot and no transcript tail is
+    /// opened.
+    pub async fn set_excluded_paths(&self, paths: Vec<String>) {
+        let mut w = self.excluded_paths.lock().await;
+        *w = paths;
     }
 
     /// Reference to the metrics store. Consumed by the Tauri command
@@ -185,6 +204,13 @@ impl LiveRuntime {
         self.detail.subscribe(session_id).await
     }
 
+    /// Explicitly end a per-session detail subscription. Called by
+    /// the Tauri `session_live_unsubscribe` command so the backend-
+    /// side slot is torn down when the frontend listener goes away.
+    pub async fn detail_end_session(&self, session_id: &str) {
+        self.detail.end_session(session_id).await;
+    }
+
     /// Current aggregate snapshot — cheap, synchronous.
     pub fn snapshot(&self) -> Arc<Vec<LiveSessionSummary>> {
         self.aggregate.snapshot()
@@ -206,6 +232,19 @@ impl LiveRuntime {
         // Sweep stale PID files (non-WSL only — the poller respects
         // that guard internally).
         registry::sweep_stale(&outcome);
+
+        // Filter the registry output against the excluded-paths
+        // preference BEFORE we do anything else — excluded sessions
+        // must never appear in the aggregate, never get a tail
+        // opened, never fire a delta. Prefix match on `cwd`.
+        let excluded = self.excluded_paths.lock().await.clone();
+        let mut filtered = outcome;
+        if !excluded.is_empty() {
+            filtered.live.retain(|r| {
+                !excluded.iter().any(|p| r.cwd.starts_with(p))
+            });
+        }
+        let outcome = filtered;
 
         let now_ms = Utc::now().timestamp_millis();
         let mut state = self.state.lock().await;
@@ -445,8 +484,10 @@ impl SessionState {
 }
 
 /// Derive a `LiveSessionSummary` from the per-session state. Every
-/// user-content string gets a redaction pass before we hand it to
-/// the DTO layer.
+/// user-content string — including the path fields — passes through
+/// the redactor before we hand it to the DTO layer. A cwd like
+/// `/private/customer-secrets/foo` should not leak through the
+/// peripheral surface even though the path itself isn't a token.
 fn summary_from_state(s: &SessionState, now_ms: i64) -> LiveSessionSummary {
     let snap = s.machine.snapshot();
     let idle_ms = snap
@@ -456,8 +497,10 @@ fn summary_from_state(s: &SessionState, now_ms: i64) -> LiveSessionSummary {
     LiveSessionSummary {
         session_id: s.session_id.clone(),
         pid: s.pid,
-        cwd: s.cwd.clone(),
-        transcript_path: Some(s.transcript_path.to_string_lossy().into_owned()),
+        cwd: crate::session_live::redact::redact_secrets(&s.cwd),
+        transcript_path: Some(crate::session_live::redact::redact_secrets(
+            &s.transcript_path.to_string_lossy(),
+        )),
         status: snap.status,
         current_action: snap.current_action.map(|a| redact_secrets_opt(Some(&a))),
         model: snap.model,

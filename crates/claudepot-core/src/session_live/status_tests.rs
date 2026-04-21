@@ -453,6 +453,39 @@ fn current_action_none_when_no_open_tool() {
 // ── PID override ───────────────────────────────────────────────
 
 #[test]
+fn fallback_waiting_on_permission_mode_event() {
+    // When BG_SESSIONS is off, CC writes a permission-mode entry
+    // while waiting for approval. The transcript-derived fallback
+    // must return Waiting in that case instead of inventing Idle.
+    let mut m = machine();
+    m.ingest(&SessionEvent::AssistantToolUse {
+        ts: ts(10, 0, 1),
+        uuid: None,
+        model: None,
+        tool_name: "Bash".into(),
+        tool_use_id: "tu".into(),
+        input_preview: "rm -rf /".into(),
+    });
+    // Busy initially (open tool_use).
+    assert_eq!(m.snapshot().status, Status::Busy);
+    // CC writes the permission-mode entry → fallback flips to Waiting.
+    m.ingest(&SessionEvent::Other {
+        ts: ts(10, 0, 2),
+        uuid: None,
+        raw_type: "permission-mode".into(),
+    });
+    assert_eq!(m.snapshot().status, Status::Waiting);
+    // User approves → next UserText clears the flag.
+    m.ingest(&SessionEvent::UserText {
+        ts: ts(10, 0, 3),
+        uuid: None,
+        text: "yes".into(),
+    });
+    // Back to Busy (the open tool still hasn't completed).
+    assert_eq!(m.snapshot().status, Status::Busy);
+}
+
+#[test]
 fn pid_waiting_overrides_derived_busy() {
     let mut m = machine();
     m.ingest(&SessionEvent::AssistantToolUse {

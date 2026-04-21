@@ -30,8 +30,8 @@ let pending: LiveSessionSummary[] | null = null;
 let rafHandle: number | null = null;
 const listeners = new Set<Listener>();
 let hydrated = false;
-let backendStarted = false;
 let unlistenEvent: UnlistenFn | null = null;
+let unlistenPromise: Promise<UnlistenFn> | null = null;
 
 /** Apply a new value to the store, coalesced to one RAF tick. */
 function scheduleCommit(next: LiveSessionSummary[]): void {
@@ -70,8 +70,8 @@ function getSnapshot(): LiveSessionSummary[] {
 
 function wireBackend(): void {
   // Hydrate synchronously-ish: fire off the snapshot call; commit on
-  // resolve. If Tauri isn't available (unit test without mock),
-  // catch and leave the store empty.
+  // resolve. The backend returns an empty list if the runtime isn't
+  // running, so this is safe before consent — no files are touched.
   if (!hydrated) {
     api
       .sessionLiveSnapshot()
@@ -83,20 +83,31 @@ function wireBackend(): void {
         // Runtime not started yet, or no Tauri env.
       });
   }
-  // Start the backend runtime. Idempotent on the Rust side.
-  if (!backendStarted) {
-    backendStarted = true;
-    api.sessionLiveStart().catch(() => {
-      // Leave started=true so we don't thrash retry; the runtime
-      // itself is idempotent and the user can retry via a refresh.
-    });
-  }
-  // Subscribe to the aggregate channel.
-  listen<LiveSessionSummary[]>("live-all", (event) => {
+  // Subscribe to the aggregate channel so any updates the
+  // backend emits (once it's started via the consent-driven path
+  // in App.tsx) reach us without re-wiring. DO NOT call
+  // sessionLiveStart() here — the runtime must only start after
+  // the user has accepted the consent modal (or opted in
+  // previously). Auto-starting on first subscriber bypasses the
+  // trust boundary.
+  //
+  // Guard against the StrictMode double-mount race: if listen()
+  // resolves AFTER teardownBackend() has already run, we'd leak
+  // a listener. Track the in-flight promise and null it out on
+  // teardown; resolve the returned unlisten fn only if the
+  // promise is still "current."
+  const current = listen<LiveSessionSummary[]>("live-all", (event) => {
     scheduleCommit(event.payload);
-  })
+  });
+  unlistenPromise = current;
+  current
     .then((fn) => {
-      unlistenEvent = fn;
+      if (unlistenPromise !== current) {
+        // Teardown raced — drop the listener immediately.
+        fn();
+      } else {
+        unlistenEvent = fn;
+      }
     })
     .catch(() => {
       // Non-Tauri env — swallow.
@@ -108,16 +119,16 @@ function teardownBackend(): void {
     unlistenEvent();
     unlistenEvent = null;
   }
+  // Null out the in-flight promise so any still-pending listen()
+  // resolve recognizes it as stale and drops its own fn.
+  unlistenPromise = null;
   if (rafHandle !== null) {
     cancelAnimationFrame(rafHandle);
     rafHandle = null;
   }
   pending = null;
-  // Intentionally leave `backendStarted = true`. The runtime is
-  // cheap to keep alive between mounts; re-wiring on every
-  // StrictMode double-mount in dev would thrash the poll task.
-  // A full stop happens via `api.sessionLiveStop()`, which the
-  // hook never calls on its own.
+  // A full stop (session_live_stop) happens via the App-level
+  // lifecycle hook only — the hook never calls it on its own.
 }
 
 /** Returns the current live session list, re-rendering the caller
@@ -134,20 +145,12 @@ export function useSessionLive(): LiveSessionSummary[] {
 const EMPTY: LiveSessionSummary[] = [];
 const EMPTY_SERVER_SNAPSHOT = (): LiveSessionSummary[] => EMPTY;
 
-/** Lifecycle hook — calls `session_live_stop` when the host
- *  component unmounts. Use at the App root, not per-surface, so a
- *  feature teardown cascades cleanly. */
+/** Lifecycle hook — no-op today; App.tsx owns the
+ *  sessionLiveStop call path on unmount when applicable. Kept as a
+ *  named export so consumer components don't need to rethread
+ *  imports if we later restore the auto-stop behavior. */
 export function useSessionLiveLifecycle(): void {
-  useEffect(() => {
-    return () => {
-      if (backendStarted) {
-        api.sessionLiveStop().catch(() => {
-          /* best-effort */
-        });
-        backendStarted = false;
-      }
-    };
-  }, []);
+  useEffect(() => undefined, []);
 }
 
 /** Test-only: reset the module-scoped store. Not exported from
@@ -162,6 +165,6 @@ export function __resetForTests(): void {
   }
   listeners.clear();
   hydrated = false;
-  backendStarted = false;
   unlistenEvent = null;
+  unlistenPromise = null;
 }

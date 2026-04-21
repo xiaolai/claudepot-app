@@ -36,23 +36,52 @@ export function LiveStatusHeader({ sessionId }: Props) {
     null,
   );
 
-  // Subscribe to the per-session detail channel so we get TaskSummary
-  // deltas faster than the 500ms aggregate republish. Best-effort —
-  // if the backend rejects with AlreadySubscribed (another pane is
-  // already listening), fall back to the aggregate-only view.
+  // Subscribe to the per-session detail channel so we get
+  // TaskSummary deltas faster than the 500ms aggregate republish.
+  // Handle every delta kind (not just TaskSummary + Ended) so a
+  // live-header that missed intermediate aggregate emits stays in
+  // sync. On `resync_required`, re-pull the session's snapshot to
+  // reset local state; on `ended`, drop local overrides.
+  //
+  // Cleanup path calls session_live_unsubscribe so the backend
+  // bridge task is cancelled when the pane unmounts — otherwise
+  // a remount hits AlreadySubscribed.
   useEffect(() => {
     let cancelled = false;
     let unlisten: UnlistenFn | null = null;
 
     api
       .sessionLiveSubscribe(sessionId)
-      .then(() => listen<LiveDelta>(`live::${sessionId}`, (ev) => {
+      .then(() => listen<LiveDelta>(`live::${sessionId}`, async (ev) => {
         if (cancelled) return;
         const d = ev.payload;
-        if (d.kind === "task_summary_changed") {
-          setLiveCurrentAction(d.summary);
-        } else if (d.kind === "ended") {
-          setLiveCurrentAction(null);
+        if (d.resync_required) {
+          // Pull the authoritative session snapshot and resync
+          // local state from it before applying the delta payload.
+          try {
+            const snap = await api.sessionLiveSessionSnapshot(sessionId);
+            if (!cancelled && snap) {
+              setLiveCurrentAction(snap.current_action);
+            }
+          } catch {
+            /* fall through */
+          }
+        }
+        switch (d.kind) {
+          case "task_summary_changed":
+            setLiveCurrentAction(d.summary);
+            break;
+          case "ended":
+            setLiveCurrentAction(null);
+            break;
+          case "status_changed":
+          case "overlay_changed":
+          case "model_changed":
+            // Status / overlay / model transitions are reflected
+            // through the aggregate bus at 500ms; we don't need
+            // to maintain a second copy here. The aggregate hook
+            // (useSessionLive) drives the chip row.
+            break;
         }
       }))
       .then((fn) => {
@@ -71,6 +100,11 @@ export function LiveStatusHeader({ sessionId }: Props) {
     return () => {
       cancelled = true;
       if (unlisten) unlisten();
+      // Ask the backend to drop its forwarding task so a later
+      // remount can re-subscribe cleanly.
+      api.sessionLiveUnsubscribe(sessionId).catch(() => {
+        /* best-effort */
+      });
     };
   }, [sessionId]);
 
