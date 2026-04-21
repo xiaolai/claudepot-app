@@ -14,13 +14,12 @@ import { ToastContainer } from "../components/ToastContainer";
 import { ScreenHeader } from "../shell/ScreenHeader";
 import { ProtectedPathsPane } from "./settings/ProtectedPathsPane";
 import type { AppStatus, CcIdentity } from "../types";
+import { APP_VERSION } from "../version";
 
 type Tab =
   | "general"
   | "appearance"
   | "activity"
-  | "claudemd"
-  | "mcp"
   | "protected"
   | "cleanup"
   | "locks"
@@ -36,8 +35,6 @@ const TAB_DEFS: ReadonlyArray<{
   { id: "general",     label: "General",        glyph: NF.sliders,  group: "core" },
   { id: "appearance",  label: "Appearance",     glyph: NF.sun,      group: "core" },
   { id: "activity",    label: "Activity",       glyph: NF.bolt,     group: "core" },
-  { id: "claudemd",    label: "CLAUDE.md",      glyph: NF.fileMd,   group: "core" },
-  { id: "mcp",         label: "MCP servers",    glyph: NF.server,   group: "core" },
   { id: "protected",   label: "Protected paths", glyph: NF.shield,  group: "advanced" },
   { id: "cleanup",     label: "Cleanup",        glyph: NF.trash,    group: "advanced" },
   { id: "locks",       label: "Locks",          glyph: NF.lock,     group: "advanced" },
@@ -49,6 +46,7 @@ const SECTION_OPTIONS = [
   { value: "accounts", label: "Accounts" },
   { value: "projects", label: "Projects" },
   { value: "sessions", label: "Sessions" },
+  { value: "activity", label: "Activity" },
   { value: "keys",     label: "Keys"     },
   { value: "settings", label: "Settings" },
 ] as const;
@@ -91,8 +89,6 @@ export function SettingsSection() {
           {tab === "general" && <GeneralPane pushToast={pushToast} />}
           {tab === "appearance" && <AppearancePane />}
           {tab === "activity" && <ActivityPane pushToast={pushToast} />}
-          {tab === "claudemd" && <StubPane name="CLAUDE.md editor" />}
-          {tab === "mcp" && <StubPane name="MCP servers" />}
           {tab === "protected" && <ProtectedPathsPane pushToast={pushToast} />}
           {tab === "cleanup" && <CleanupPane pushToast={pushToast} />}
           {tab === "locks" && <LocksPane pushToast={pushToast} />}
@@ -400,44 +396,6 @@ function AppearancePane() {
 }
 
 /* ──────────────────────────────────────────────────────────── */
-/*                     Unbacked stubs                          */
-/* ──────────────────────────────────────────────────────────── */
-
-function StubPane({ name }: { name: string }) {
-  return (
-    <div
-      role="status"
-      style={{
-        padding: "var(--sp-48) var(--sp-24)",
-        textAlign: "center",
-        color: "var(--fg-muted)",
-        display: "flex",
-        flexDirection: "column",
-        gap: "var(--sp-8)",
-        alignItems: "center",
-      }}
-    >
-      <Glyph g={NF.wrench} size="var(--sp-32)" color="var(--fg-ghost)" />
-      <p style={{ margin: 0, fontSize: "var(--fs-base)" }}>
-        {name} — not yet implemented.
-      </p>
-      <p
-        style={{
-          margin: 0,
-          fontSize: "var(--fs-xs)",
-          color: "var(--fg-faint)",
-          maxWidth: "var(--content-cap-sm)",
-          lineHeight: "var(--lh-body)",
-        }}
-      >
-        Reserved for a future phase; the backend doesn't expose the
-        underlying surfaces yet.
-      </p>
-    </div>
-  );
-}
-
-/* ──────────────────────────────────────────────────────────── */
 /*                      Cleanup pane                           */
 /* ──────────────────────────────────────────────────────────── */
 
@@ -736,7 +694,7 @@ function AboutPane() {
     <SettingsGroup>
       <dl style={gridStyle}>
         <Kv label="App" value="Claudepot" />
-        <Kv label="Version" value="0.1.0" mono />
+        <Kv label="Version" value={APP_VERSION} mono />
         <Kv
           label="Design"
           value="paper-mono — JetBrains Mono NF, OKLCH palette"
@@ -937,7 +895,7 @@ function ActivityPane({
         </Row>
         <Row
           label="Alert when stuck"
-          hint="Empty = off. Number = alert after this many minutes with no tool result. The backend uses its own 10-minute threshold; this number is advisory for the toast copy."
+          hint="Empty = off. Fires 10 minutes after the last tool result; this value is shown in the toast copy only."
         >
           <input
             type="number"

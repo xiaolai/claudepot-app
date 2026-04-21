@@ -18,7 +18,13 @@ import type { ActivityTrends, LiveSessionSummary } from "../types";
  */
 type Mode = "now" | "trends";
 
-export function ActivitySection() {
+interface ActivitySectionProps {
+  /** Optional: route to the Sessions deep-link (M1) or live pane
+   *  (M2+) when the user clicks a live-session card. */
+  onOpenSession?: (s: LiveSessionSummary) => void;
+}
+
+export function ActivitySection({ onOpenSession }: ActivitySectionProps) {
   const live = useSessionLive();
   const [mode, setMode] = useState<Mode>("now");
 
@@ -60,7 +66,10 @@ export function ActivitySection() {
             <EmptyState />
           ) : (
             <>
-              <LiveSessionCards sessions={sortSessions(live)} />
+              <LiveSessionCards
+                sessions={sortSessions(live)}
+                onOpenSession={onOpenSession}
+              />
               <AggregateStats sessions={live} />
             </>
           )
@@ -159,11 +168,19 @@ function EmptyState() {
 
 // ── Session cards ──────────────────────────────────────────────────
 
-function LiveSessionCards({ sessions }: { sessions: LiveSessionSummary[] }) {
+function LiveSessionCards({
+  sessions,
+  onOpenSession,
+}: {
+  sessions: LiveSessionSummary[];
+  onOpenSession?: (s: LiveSessionSummary) => void;
+}) {
   return (
     <section>
       <Heading>Live now</Heading>
       <div
+        role={onOpenSession ? "listbox" : undefined}
+        aria-label={onOpenSession ? "Live sessions" : undefined}
         style={{
           display: "flex",
           flexDirection: "column",
@@ -171,18 +188,47 @@ function LiveSessionCards({ sessions }: { sessions: LiveSessionSummary[] }) {
         }}
       >
         {sessions.map((s) => (
-          <SessionCard key={s.session_id} summary={s} />
+          <SessionCard
+            key={s.session_id}
+            summary={s}
+            onOpen={onOpenSession}
+          />
         ))}
       </div>
     </section>
   );
 }
 
-function SessionCard({ summary }: { summary: LiveSessionSummary }) {
+function SessionCard({
+  summary,
+  onOpen,
+}: {
+  summary: LiveSessionSummary;
+  onOpen?: (s: LiveSessionSummary) => void;
+}) {
   const label = projectLabel(summary.cwd);
   const alerting = summary.errored || summary.stuck;
+  const interactive = !!onOpen && !!summary.transcript_path;
+  const handleActivate = () => {
+    if (interactive) onOpen!(summary);
+  };
   return (
     <article
+      role={interactive ? "option" : undefined}
+      tabIndex={interactive ? 0 : undefined}
+      aria-selected={interactive ? false : undefined}
+      onClick={interactive ? handleActivate : undefined}
+      onKeyDown={
+        interactive
+          ? (e) => {
+              if (e.key === "Enter" || e.key === " ") {
+                e.preventDefault();
+                handleActivate();
+              }
+            }
+          : undefined
+      }
+      className={interactive ? "pm-focus" : undefined}
       style={{
         display: "grid",
         gridTemplateColumns: "8px 1fr auto",
@@ -195,6 +241,7 @@ function SessionCard({ summary }: { summary: LiveSessionSummary }) {
           : "var(--bw-hair) solid var(--line)",
         borderRadius: "var(--r-2)",
         background: "var(--bg)",
+        cursor: interactive ? "pointer" : "default",
       }}
     >
       <StatusDot status={summary.status} errored={summary.errored} />
@@ -318,21 +365,13 @@ function AggregateStats({ sessions }: { sessions: LiveSessionSummary[] }) {
           value={String(sessions.length)}
           sub={statusBreakdown(sessions)}
         />
-        <StatCard
-          label="Model mix"
-          value={mix[0] ?? "—"}
-          sub={mix.slice(1).join(" · ") || "single family"}
-        />
-        <StatCard
-          label="Spend / h"
-          value="—"
-          sub="pricing available; per-hour rate needs token burn rate (follow-on)"
-        />
-        <StatCard
-          label="Cache-hit %"
-          value="—"
-          sub="exposed once usage deltas carry cache_read_tokens"
-        />
+        {mix.length > 0 && (
+          <StatCard
+            label="Model mix"
+            value={mix[0] ?? ""}
+            sub={mix.slice(1).join(" · ") || "single family"}
+          />
+        )}
       </div>
     </section>
   );
@@ -716,6 +755,7 @@ export function aggregateModelMix(
 ): string[] {
   const counts = new Map<string, number>();
   for (const s of sessions) {
+    if (!s.model) continue;
     const k = familyShort(s.model);
     counts.set(k, (counts.get(k) ?? 0) + 1);
   }

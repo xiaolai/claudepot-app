@@ -71,8 +71,9 @@ import { api } from "./api";
 import { ConsentLiveModal } from "./components/ConsentLiveModal";
 import { useActivityNotifications } from "./hooks/useActivityNotifications";
 import { listen } from "@tauri-apps/api/event";
-import type { RunningOpInfo } from "./types";
+import type { LiveSessionSummary, RunningOpInfo } from "./types";
 import { WindowChrome, AppSidebar, AppStatusBar } from "./shell";
+import { APP_VERSION } from "./version";
 
 function AppShell() {
   const { section, subRoute, setSection, setSubRoute } = useSection(
@@ -429,6 +430,16 @@ function AppShell() {
     window.dispatchEvent(new CustomEvent("cp-open-palette"));
   }, []);
 
+  const openLiveSession = useCallback(
+    (s: LiveSessionSummary) => {
+      if (s.transcript_path) {
+        setPendingSessionPath(s.transcript_path);
+        setSection("sessions");
+      }
+    },
+    [setSection],
+  );
+
   return (
     <div
       style={{
@@ -467,19 +478,10 @@ function AppShell() {
             accounts: accounts.length || undefined,
             activity: activityAlerts || undefined,
           }}
-          version="v0.4.2"
+          version={APP_VERSION}
           synced
           data-sidebar-root
-          onOpenLiveSession={(s) => {
-            // M1: strip rows deep-link to the static Sessions
-            // browser via the existing cp-goto-session bus. The
-            // live pane (WI-M2) will intercept this route when it
-            // lands; for now the user sees the historical detail.
-            if (s.transcript_path) {
-              setPendingSessionPath(s.transcript_path);
-              setSection("sessions");
-            }
-          }}
+          onOpenLiveSession={openLiveSession}
         />
 
         <main
@@ -530,7 +532,9 @@ function AppShell() {
                   }
                 />
               )}
-              {section === "activity" && <ActivitySection />}
+              {section === "activity" && (
+                <ActivitySection onOpenSession={openLiveSession} />
+              )}
               {section === "keys" && <KeysSection />}
               {section === "settings" && <SettingsSection />}
             </Suspense>
@@ -555,7 +559,6 @@ function AppShell() {
           branch: "main",
           projects: null,
           sessions: null,
-          model: "claude-sonnet-4-5",
         }}
       />
 
