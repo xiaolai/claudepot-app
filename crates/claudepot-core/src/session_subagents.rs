@@ -22,11 +22,11 @@
 //! `SubagentLocator` + `SubagentResolver`.
 
 use crate::session::{SessionError, SessionEvent, TokenUsage};
-use crate::session_chunks::ChunkMetrics;
+use crate::session_chunks::{should_charge_usage, ChunkMetrics};
 use chrono::{DateTime, Utc};
 use serde::Serialize;
 use serde_json::Value;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::io::{BufRead, BufReader};
 use std::path::{Path, PathBuf};
@@ -95,6 +95,11 @@ pub fn resolve_subagents(
         return Ok(Vec::new());
     }
 
+    // `fs::read_dir` ordering is filesystem-dependent. Sort by path so
+    // the positional fallback linker in `link_parent_tasks` pairs the
+    // same subagent with the same Task call across runs.
+    files.sort();
+
     let mut agents: Vec<Subagent> = Vec::with_capacity(files.len());
     for path in files {
         match parse_subagent_file(&path) {
@@ -106,6 +111,17 @@ pub fn resolve_subagents(
             }
         }
     }
+
+    // Stable ordering for linking: oldest subagent first, then id as
+    // tiebreaker. Parent Task calls in the parent transcript are also
+    // in chronological order — pairing them head-to-head gives the
+    // most natural mapping when agent_id isn't available.
+    agents.sort_by(|a, b| match (a.start_ts, b.start_ts) {
+        (Some(x), Some(y)) => x.cmp(&y).then(a.id.cmp(&b.id)),
+        (Some(_), None) => std::cmp::Ordering::Less,
+        (None, Some(_)) => std::cmp::Ordering::Greater,
+        (None, None) => a.id.cmp(&b.id),
+    });
 
     mark_parallel(&mut agents);
     Ok(agents)
@@ -232,14 +248,17 @@ fn collect_agent_files(dir: &Path, out: &mut Vec<PathBuf>) {
 }
 
 fn file_belongs_to_session(path: &Path, session_id: &str) -> bool {
-    // Cheap filter — read up to the first JSON line, look at sessionId.
+    // Keep scanning until we find a sessionId field or hit EOF.
+    // Earlier versions capped at 4 lines, but some legacy agent files
+    // open with a few malformed / annotation lines that push the
+    // sessionId off the front — truncating the scan silently dropped
+    // valid transcripts.
     let Ok(file) = fs::File::open(path) else {
         return false;
     };
     let reader = BufReader::new(file);
-    for line in reader.lines().take(4) {
-        let Ok(l) = line else { continue };
-        let Ok(v) = serde_json::from_str::<Value>(&l) else {
+    for line in reader.lines().map_while(Result::ok) {
+        let Ok(v) = serde_json::from_str::<Value>(&line) else {
             continue;
         };
         if let Some(sid) = v.get("sessionId").and_then(Value::as_str) {
@@ -288,6 +307,11 @@ fn parse_subagent_file(path: &Path) -> Result<Subagent, SessionError> {
     let mut metrics = ChunkMetrics::default();
     let mut first_user_prompt: Option<String> = None;
 
+    // One assistant JSONL line can fan out into multiple events (text +
+    // thinking + tool_use + ...), all sharing the same `usage` and the
+    // same uuid. Charge `usage` once per uuid.
+    let mut usage_counted: HashSet<String> = HashSet::new();
+
     for ev in &events {
         if let Some(ts) = event_ts(ev) {
             if start_ts.is_none_or(|s| ts < s) {
@@ -307,10 +331,12 @@ fn parse_subagent_file(path: &Path) -> Result<Subagent, SessionError> {
                     }
                 }
             }
-            SessionEvent::AssistantText { usage, .. } => {
+            SessionEvent::AssistantText { usage, uuid, .. } => {
                 metrics.message_count += 1;
                 if let Some(u) = usage {
-                    add_usage(&mut metrics.tokens, u);
+                    if should_charge_usage(uuid, &mut usage_counted) {
+                        add_usage(&mut metrics.tokens, u);
+                    }
                 }
             }
             SessionEvent::AssistantThinking { .. } => {
@@ -645,6 +671,27 @@ mod tests {
         ];
         link_parent_tasks(&parent_events, &mut agents);
         assert_eq!(agents[0].parent_task_id.as_deref(), Some("call_outer"));
+    }
+
+    #[test]
+    fn legacy_subagent_with_leading_noise_is_matched() {
+        // Reproduces a real-world case: the first few lines of the
+        // agent file are malformed JSON or metadata annotations, and
+        // the first line with `sessionId` appears later. The earlier
+        // 4-line cap caused such files to be silently filtered out.
+        let tmp = TempDir::new().unwrap();
+        let slug_dir = tmp.path().join("projects").join("-r");
+        mkdir(&slug_dir);
+        let mut lines: Vec<String> = Vec::new();
+        for _ in 0..6 {
+            lines.push("# annotation line with no JSON".into());
+        }
+        lines.push(user_line("2026-04-10T10:00:00Z", "real turn", "S1"));
+        let refs: Vec<&str> = lines.iter().map(|s| s.as_str()).collect();
+        write_file(&slug_dir.join("agent-late.jsonl"), &refs);
+        let agents = resolve_subagents(tmp.path(), "-r", "S1").unwrap();
+        assert_eq!(agents.len(), 1);
+        assert_eq!(agents[0].id, "late");
     }
 
     #[test]

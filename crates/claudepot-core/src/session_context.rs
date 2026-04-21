@@ -22,6 +22,7 @@
 //! rankings.
 
 use crate::session::SessionEvent;
+use crate::session_chunks::should_charge_usage;
 use crate::session_phases::{compute_phases, ContextPhase};
 use crate::session_tool_link::link_tools;
 use serde::Serialize;
@@ -35,6 +36,10 @@ const TEAM_COORDINATION_TOOLS: &[&str] = &[
     "TaskUpdate",
     "TaskList",
     "TaskGet",
+    // `Task` spawns a subagent — the call + result crosses the
+    // context boundary as "team-coordination overhead", not a regular
+    // tool call whose output is rendered to the user.
+    "Task",
 ];
 
 /// Six buckets used for token attribution.
@@ -141,6 +146,10 @@ pub fn attribute_context(events: &[SessionEvent]) -> ContextStats {
     let mut totals = TokensByCategory::default();
     let mut injections: Vec<ContextInjection> = Vec::new();
     let mut reported_total_tokens: u64 = 0;
+    // See session_chunks::should_charge_usage — assistant turns fan out
+    // into multiple events that share the same `usage`. Charge once per
+    // uuid so the reported-total number is honest.
+    let mut usage_counted: HashSet<String> = HashSet::new();
 
     for (idx, ev) in events.iter().enumerate() {
         let phase = phase_of.get(&idx).copied().unwrap_or(0);
@@ -181,11 +190,23 @@ pub fn attribute_context(events: &[SessionEvent]) -> ContextStats {
                     phase,
                 });
             }
-            SessionEvent::AssistantText { text, usage, .. } => {
+            SessionEvent::AssistantText {
+                text, usage, uuid, ..
+            } => {
+                // Per-message usage charges only once per source UUID —
+                // same rule as reported_total_tokens and chunks. When a
+                // turn fans out into multiple text fragments we charge
+                // the aggregate `usage.output` once, then estimate the
+                // remaining fragments from their length only. Missing
+                // usage always falls back to estimate_tokens.
                 let tokens = match usage {
                     Some(u) => {
-                        reported_total_tokens += u.total();
-                        u.output.max(estimate_tokens(text))
+                        if should_charge_usage(uuid, &mut usage_counted) {
+                            reported_total_tokens += u.total();
+                            u.output.max(estimate_tokens(text))
+                        } else {
+                            estimate_tokens(text)
+                        }
                     }
                     None => estimate_tokens(text),
                 };
@@ -416,6 +437,21 @@ mod tests {
         }
     }
 
+    fn assistant_with_uuid(uuid: &str, text: &str, output_tokens: u64) -> SessionEvent {
+        SessionEvent::AssistantText {
+            ts: None,
+            uuid: Some(uuid.into()),
+            model: None,
+            text: text.into(),
+            usage: Some(TokenUsage {
+                input: 10,
+                output: output_tokens,
+                ..TokenUsage::default()
+            }),
+            stop_reason: None,
+        }
+    }
+
     fn thinking(text: &str) -> SessionEvent {
         SessionEvent::AssistantThinking {
             ts: None,
@@ -500,6 +536,21 @@ mod tests {
     }
 
     #[test]
+    fn task_tool_is_team_coordination() {
+        let events = vec![
+            tool_use(
+                "t1",
+                "Task",
+                r#"{"subagent_type":"Explore","description":"find thing"}"#,
+            ),
+            tool_result("t1", "done"),
+        ];
+        let stats = attribute_context(&events);
+        assert!(stats.totals.team_coordination > 0);
+        assert_eq!(stats.totals.tool_output, 0);
+    }
+
+    #[test]
     fn team_tools_land_in_team_coordination() {
         let events = vec![
             tool_use("t1", "SendMessage", r#"{"to":"teammate"}"#),
@@ -526,6 +577,36 @@ mod tests {
         let stats = attribute_context(&events);
         // Each assistant turn adds 10 input + output + 0 cache = 110 and 60.
         assert_eq!(stats.reported_total_tokens, 10 + 100 + 10 + 50);
+    }
+
+    #[test]
+    fn multi_fragment_assistant_counts_reported_usage_once() {
+        // Same uuid across two fragments — reported_total_tokens must
+        // count usage exactly once.
+        let events = vec![
+            assistant_with_uuid("a1", "first", 100),
+            assistant_with_uuid("a1", "second", 100),
+        ];
+        let stats = attribute_context(&events);
+        // 10 input + 100 output = 110, exactly once.
+        assert_eq!(stats.reported_total_tokens, 110);
+    }
+
+    #[test]
+    fn multi_fragment_assistant_thinking_text_not_doubled() {
+        // Same uuid across three text fragments of a single turn: the
+        // first fragment is charged the full `usage.output`, the
+        // remaining fragments only pay their text-length estimate.
+        // The test ensures we don't 3x-count the `usage.output` value.
+        let events = vec![
+            assistant_with_uuid("a1", "aaa", 1_000),
+            assistant_with_uuid("a1", "bbb", 1_000),
+            assistant_with_uuid("a1", "ccc", 1_000),
+        ];
+        let stats = attribute_context(&events);
+        // First fragment: max(1000 output, ceil("aaa".len/4)) = 1000
+        // Second + third: estimate_tokens("bbb") = ceil(3/4) = 1 each.
+        assert_eq!(stats.totals.thinking_text, 1000 + 1 + 1);
     }
 
     #[test]

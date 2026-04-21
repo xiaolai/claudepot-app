@@ -532,6 +532,11 @@ export type MessageCategory =
   | "hardNoise"
   | "ai";
 
+/**
+ * Paired tool call + result. Emitted as part of `SessionChunk["ai"]`'s
+ * `tool_executions`; also consumed directly by the specialized tool
+ * viewers (Edit / Read / Write / Bash).
+ */
 export interface LinkedTool {
   tool_use_id: string;
   tool_name: string;
@@ -553,6 +558,8 @@ export interface ChunkMetrics {
     output: number;
     cache_creation: number;
     cache_read: number;
+    /** Rust DTO adds `total` as a computed convenience. */
+    total?: number;
   };
   message_count: number;
   tool_call_count: number;

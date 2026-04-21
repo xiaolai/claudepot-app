@@ -114,7 +114,9 @@ export function CommandPalette({
           <kbd className="palette-kbd">esc</kbd>
         </div>
         <div className="palette-list" ref={listRef} role="listbox">
-          {filtered.length === 0 && <div className="palette-empty">No matches</div>}
+          {filtered.length === 0 && sessionHits.length === 0 && !sessionSearch.loading && (
+            <div className="palette-empty">No matches</div>
+          )}
           {switchItems.length > 0 && (
             <>
               <div className="palette-group-label">Quick Switch</div>
@@ -153,9 +155,13 @@ export function CommandPalette({
                   <span style={{ color: "var(--fg-faint)" }}>…searching</span>
                 )}
               </div>
-              {sessionHits.length === 0 && !sessionSearch.loading && (
-                <div className="palette-empty">No session matches</div>
-              )}
+              {/* Empty session section — only show when there are ALSO no
+                  action hits, so mixed results aren't labeled "empty". */}
+              {sessionHits.length === 0 &&
+                !sessionSearch.loading &&
+                filtered.length === 0 && (
+                  <div className="palette-empty">No session matches</div>
+                )}
               {sessionHits.map((hit, hi) => {
                 const i = filtered.length + hi;
                 return (

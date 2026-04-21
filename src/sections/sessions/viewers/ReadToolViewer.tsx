@@ -1,9 +1,38 @@
 import type { LinkedTool } from "../../../types";
 import { Glyph } from "../../../components/primitives/Glyph";
 import { NF } from "../../../icons";
+import { redactSecrets } from "./redact";
 import { parseToolInput, type ReadInput } from "./toolInput";
 
 const MAX_LINES = 200;
+
+interface NumberedLine {
+  lineNumber: number;
+  text: string;
+}
+
+/**
+ * Detect CC's "line-number + tab + content" format. Returns parsed
+ * lines when the first 20 non-empty lines all match; otherwise `null`
+ * so the caller falls back to plain-text numbering from the offset.
+ */
+function parseNumberedLines(body: string): NumberedLine[] | null {
+  const raw = body.split("\n");
+  // Empty body: nothing to parse, caller handles.
+  if (raw.length === 0) return null;
+  const probe = raw.filter((l) => l.length > 0).slice(0, 20);
+  if (probe.length === 0) return null;
+  const re = /^(\d+)\t(.*)$/;
+  if (!probe.every((l) => re.test(l))) return null;
+  return raw
+    .map((l) => {
+      if (l.length === 0) return { lineNumber: NaN, text: "" };
+      const m = re.exec(l);
+      if (!m) return { lineNumber: NaN, text: l };
+      return { lineNumber: Number(m[1]), text: m[2] ?? "" };
+    })
+    .filter((x) => Number.isFinite(x.lineNumber));
+}
 
 /**
  * Read tool viewer — renders the requested file path + range header
@@ -12,14 +41,30 @@ const MAX_LINES = 200;
  * split by newline and preserve the original numbering.
  */
 export function ReadToolViewer({ tool }: { tool: LinkedTool }) {
-  const parsed = parseToolInput<ReadInput>(tool.input_preview);
-  const input = parsed.ok ? parsed.value : {};
+  const parsedInput = parseToolInput<ReadInput>(tool.input_preview);
+  const input = parsedInput.ok ? parsedInput.value : {};
   const path = input.file_path ?? "(unknown file)";
 
-  const body = tool.result_content ?? "";
-  const lines = body.split("\n");
-  const shown = lines.slice(0, MAX_LINES);
-  const hidden = Math.max(0, lines.length - shown.length);
+  const body = redactSecrets(tool.result_content ?? "");
+  // CC's Read tool already prefixes each line with its 1-based line
+  // number + a tab when the result is file content. If every line we
+  // see matches that shape, strip the prefix and use the embedded
+  // numbers as the display numbers — that's authoritative and handles
+  // offset reads correctly. Otherwise fall back to counting from
+  // `offset + 1` if the caller passed one, else from 1.
+  const firstLineNumber =
+    typeof input.offset === "number" && input.offset > 0
+      ? input.offset + 1
+      : 1;
+  const parsed = parseNumberedLines(body);
+  const displayLines = parsed
+    ? parsed.slice(0, MAX_LINES)
+    : body
+        .split("\n")
+        .slice(0, MAX_LINES)
+        .map((text, i) => ({ lineNumber: firstLineNumber + i, text }));
+  const totalLines = (parsed ?? body.split("\n")).length;
+  const hidden = Math.max(0, totalLines - displayLines.length);
 
   return (
     <div
@@ -84,18 +129,18 @@ export function ReadToolViewer({ tool }: { tool: LinkedTool }) {
             lineHeight: 1.5,
           }}
         >
-          {shown.map((line, i) => (
+          {displayLines.map((l, i) => (
             <div
               key={i}
               style={{
                 display: "grid",
-                gridTemplateColumns: "4ch 1fr",
+                gridTemplateColumns: "5ch 1fr",
                 gap: "var(--sp-6)",
               }}
             >
-              <span style={{ color: "var(--fg-ghost)" }}>{i + 1}</span>
+              <span style={{ color: "var(--fg-ghost)" }}>{l.lineNumber}</span>
               <span style={{ whiteSpace: "pre", overflowX: "auto" }}>
-                {line}
+                {l.text}
               </span>
             </div>
           ))}

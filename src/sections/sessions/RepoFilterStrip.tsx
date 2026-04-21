@@ -9,8 +9,11 @@ import type { RepositoryGroup, SessionRow } from "../../types";
  * the Rust `session_worktree::group_by_repo` pipeline did that work.
  *
  * The parent owns both `groups` and `activeRepo` state so the filter
- * survives re-renders. See `filterSessionsByRepo` for the companion
- * pure-function that applies the active label to a row list.
+ * survives re-renders. `activeRepo` identifies a group by
+ * `groupId(group)` — basename-based labels aren't unique (two repos
+ * named `docs/` would collide), so we key on the canonical `repo_root`
+ * when present, falling back to the label string for the "no repo"
+ * bucket.
  */
 export function RepoFilterStrip({
   groups,
@@ -19,7 +22,7 @@ export function RepoFilterStrip({
 }: {
   groups: RepositoryGroup[] | null;
   activeRepo: string | null;
-  onChange: (repoLabel: string | null) => void;
+  onChange: (repoId: string | null) => void;
 }) {
   if (!groups || groups.length < 2) return null;
 
@@ -43,19 +46,32 @@ export function RepoFilterStrip({
         count={groups.reduce((n, g) => n + g.sessions.length, 0)}
         onClick={() => onChange(null)}
       />
-      {groups.map((g) => (
-        <RepoPill
-          key={g.label}
-          active={activeRepo === g.label}
-          label={g.label}
-          count={g.sessions.length}
-          worktrees={g.worktree_paths.length}
-          branches={g.branches}
-          onClick={() => onChange(activeRepo === g.label ? null : g.label)}
-        />
-      ))}
+      {groups.map((g) => {
+        const id = groupId(g);
+        return (
+          <RepoPill
+            key={id}
+            active={activeRepo === id}
+            label={g.label}
+            count={g.sessions.length}
+            worktrees={g.worktree_paths.length}
+            branches={g.branches}
+            onClick={() => onChange(activeRepo === id ? null : id)}
+          />
+        );
+      })}
     </div>
   );
+}
+
+/**
+ * Stable identifier for a group. Two repos can share a basename label
+ * (two different folders both called `docs`), so we key off the
+ * canonical `repo_root` when git located one. The "no repo" bucket is
+ * unique, so its label suffices.
+ */
+function groupId(g: RepositoryGroup): string {
+  return g.repo_root ?? g.label;
 }
 
 function RepoPill({
@@ -124,10 +140,10 @@ function RepoPill({
 export function filterSessionsByRepo(
   sessions: SessionRow[],
   groups: RepositoryGroup[] | null,
-  repoLabel: string | null,
+  repoId: string | null,
 ): SessionRow[] {
-  if (!repoLabel || !groups) return sessions;
-  const g = groups.find((g) => g.label === repoLabel);
+  if (!repoId || !groups) return sessions;
+  const g = groups.find((g) => groupId(g) === repoId);
   if (!g) return sessions;
   const wt = new Set(g.worktree_paths);
   return sessions.filter((s) => wt.has(s.project_path));

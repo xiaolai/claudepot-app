@@ -41,7 +41,10 @@ export function SessionExportMenu({
       setOpen(false);
       try {
         const defaultName = suggestName(filePath, format);
-        let target: string | null = null;
+        // `save()` returns `null` for user-cancel, throws for plugin /
+        // permission failures. Treating every throw as a cancel hid
+        // real errors; now we only silently bail on a `null` result.
+        let target: string | null;
         try {
           target = await save({
             defaultPath: defaultName,
@@ -52,10 +55,11 @@ export function SessionExportMenu({
               },
             ],
           });
-        } catch {
-          target = null;
+        } catch (e) {
+          onError?.(`Couldn't open save dialog: ${String(e)}`);
+          return;
         }
-        if (!target) return; // user cancelled — silent
+        if (target === null) return; // user cancelled — silent
         try {
           await api.sessionExportToFile(filePath, format, target);
         } catch (e) {
@@ -132,7 +136,11 @@ const menuItemStyle: React.CSSProperties = {
 };
 
 function suggestName(filePath: string, format: "md" | "json"): string {
-  const base = filePath.split("/").pop() ?? "session";
+  // Handle both POSIX and Windows separators. We can't rely on the
+  // host OS because Tauri on Windows sometimes normalizes to forward
+  // slashes and vice-versa.
+  const parts = filePath.split(/[\\/]/);
+  const base = parts[parts.length - 1] || "session";
   const stem = base.replace(/\.jsonl$/, "");
   const ext = format === "md" ? "md" : "json";
   return `${stem}.${ext}`;

@@ -123,10 +123,11 @@ fn render_chunk(s: &mut String, chunk: &SessionChunk, events: &[SessionEvent]) {
         }
         SessionChunk::System { event_index, .. } => {
             if let Some(SessionEvent::UserText { text, .. }) = events.get(*event_index) {
+                let stdout = extract_local_command_stdout(text).unwrap_or(text.as_str());
                 let _ = writeln!(s, "### ⎘ System output");
                 let _ = writeln!(s);
                 let _ = writeln!(s, "```");
-                let _ = writeln!(s, "{}", redact_secrets(text.trim()));
+                let _ = writeln!(s, "{}", redact_secrets(stdout.trim()));
                 let _ = writeln!(s, "```");
                 let _ = writeln!(s);
             }
@@ -232,6 +233,20 @@ fn render_ai_event(
     }
 }
 
+/// Pull the payload out of a `<local-command-stdout>...</local-command-stdout>`
+/// wrapper, returning `None` when the input doesn't contain one. CC uses this
+/// wrapper for slash-command output; the tag itself is metadata, the user
+/// only wants to see the payload.
+pub fn extract_local_command_stdout(text: &str) -> Option<&str> {
+    const OPEN: &str = "<local-command-stdout>";
+    const CLOSE: &str = "</local-command-stdout>";
+    let start = text.find(OPEN)?;
+    let body_start = start + OPEN.len();
+    let rest = &text[body_start..];
+    let close_rel = rest.find(CLOSE)?;
+    Some(&rest[..close_rel])
+}
+
 fn short_id(s: &str) -> String {
     if s.len() > 8 {
         s[..8].to_string()
@@ -300,9 +315,32 @@ fn mask(token: &str) -> String {
 }
 
 fn redact_in_place(detail: &mut SessionDetail) {
-    if let Some(p) = &mut detail.row.first_user_prompt {
+    // Row-level strings that might accidentally echo credentials if a
+    // user pasted one into their project path, branch name, or slug.
+    // Redaction is idempotent and cheap — just run it everywhere the
+    // JSON export serializes a String.
+    let r = &mut detail.row;
+    r.session_id = redact_secrets(&r.session_id);
+    r.slug = redact_secrets(&r.slug);
+    r.project_path = redact_secrets(&r.project_path);
+    if let Some(p) = &mut r.first_user_prompt {
         *p = redact_secrets(p);
     }
+    for m in &mut r.models {
+        *m = redact_secrets(m);
+    }
+    if let Some(b) = &mut r.git_branch {
+        *b = redact_secrets(b);
+    }
+    if let Some(v) = &mut r.cc_version {
+        *v = redact_secrets(v);
+    }
+    if let Some(s) = &mut r.display_slug {
+        *s = redact_secrets(s);
+    }
+    // Redact every free-form string field on every event variant.
+    // Exhaustive match so future variants can't silently bypass — the
+    // compiler will flag them when added.
     for ev in &mut detail.events {
         match ev {
             SessionEvent::UserText { text, .. }
@@ -314,10 +352,40 @@ fn redact_in_place(detail: &mut SessionDetail) {
             SessionEvent::UserToolResult { content, .. } => {
                 *content = redact_secrets(content);
             }
-            SessionEvent::AssistantToolUse { input_preview, .. } => {
+            SessionEvent::AssistantToolUse {
+                input_preview,
+                tool_name,
+                ..
+            } => {
                 *input_preview = redact_secrets(input_preview);
+                // Tool names are tokens from CC (Read/Bash/…), not
+                // user-controlled, but run them through the helper
+                // anyway — costs nothing and closes the door on
+                // future custom tool names that might echo secrets.
+                *tool_name = redact_secrets(tool_name);
             }
-            _ => {}
+            SessionEvent::System { detail, subtype, .. } => {
+                *detail = redact_secrets(detail);
+                if let Some(s) = subtype {
+                    *s = redact_secrets(s);
+                }
+            }
+            SessionEvent::Attachment { name, mime, .. } => {
+                if let Some(s) = name {
+                    *s = redact_secrets(s);
+                }
+                if let Some(s) = mime {
+                    *s = redact_secrets(s);
+                }
+            }
+            SessionEvent::Other { raw_type, .. } => {
+                *raw_type = redact_secrets(raw_type);
+            }
+            SessionEvent::Malformed { error, preview, .. } => {
+                *error = redact_secrets(error);
+                *preview = redact_secrets(preview);
+            }
+            SessionEvent::FileHistorySnapshot { .. } => {}
         }
     }
 }
@@ -469,6 +537,67 @@ mod tests {
         let out = export_json(&d);
         assert!(!out.contains("sk-ant-oat01-AbcdWxYz0000"));
         assert!(out.contains("sk-ant-***0000"));
+    }
+
+    #[test]
+    fn json_export_redacts_malformed_preview_and_other_variants() {
+        let mut d = sample_detail();
+        d.events.push(SessionEvent::Malformed {
+            line_number: 99,
+            error: "bad json".into(),
+            preview: "stray sk-ant-oat01-Abcd9999 in bad line".into(),
+        });
+        d.events.push(SessionEvent::System {
+            ts: None,
+            uuid: None,
+            subtype: Some("leak sk-ant-oat01-AbcdAAAA".into()),
+            detail: "info".into(),
+        });
+        d.events.push(SessionEvent::Attachment {
+            ts: None,
+            uuid: None,
+            name: Some("secret sk-ant-oat01-AbcdBBBB.txt".into()),
+            mime: None,
+        });
+        let out = export_json(&d);
+        assert!(!out.contains("sk-ant-oat01-Abcd9999"));
+        assert!(!out.contains("sk-ant-oat01-AbcdAAAA"));
+        assert!(!out.contains("sk-ant-oat01-AbcdBBBB"));
+        assert!(out.contains("sk-ant-***9999"));
+    }
+
+    #[test]
+    fn markdown_export_strips_local_command_stdout_wrapper() {
+        let row = sample_detail().row;
+        let events = vec![
+            SessionEvent::UserText {
+                ts: None,
+                uuid: None,
+                text: "/foo".into(),
+            },
+            SessionEvent::UserText {
+                ts: None,
+                uuid: None,
+                text: "<local-command-stdout>ACTUAL OUTPUT</local-command-stdout>".into(),
+            },
+        ];
+        let d = SessionDetail { row, events };
+        let out = export_markdown(&d);
+        assert!(out.contains("ACTUAL OUTPUT"));
+        assert!(!out.contains("<local-command-stdout>"));
+    }
+
+    #[test]
+    fn extract_local_command_stdout_returns_none_when_no_wrapper() {
+        assert!(extract_local_command_stdout("nothing here").is_none());
+    }
+
+    #[test]
+    fn extract_local_command_stdout_reads_payload() {
+        let got = extract_local_command_stdout(
+            "<local-command-stdout>body\nmore</local-command-stdout>",
+        );
+        assert_eq!(got, Some("body\nmore"));
     }
 
     #[test]

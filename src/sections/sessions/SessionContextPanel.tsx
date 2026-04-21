@@ -61,6 +61,48 @@ export function SessionContextPanel({
     return stats.injections.filter((i) => i.phase === phaseFilter);
   }, [stats, phaseFilter]);
 
+  /**
+   * Totals narrow with the phase picker so the bars, percentages, and
+   * the "Visible tokens" number all reflect the same slice. Without
+   * this the picker was a lie: it filtered the list underneath but
+   * left whole-session totals up top.
+   */
+  const filteredTotals = useMemo(() => {
+    if (!stats) return null;
+    if (phaseFilter == null) return stats.totals;
+    const t: typeof stats.totals = {
+      claude_md: 0,
+      mentioned_file: 0,
+      tool_output: 0,
+      thinking_text: 0,
+      team_coordination: 0,
+      user_message: 0,
+    };
+    for (const inj of filteredInjections) {
+      switch (inj.category) {
+        case "claude-md":
+          t.claude_md += inj.tokens;
+          break;
+        case "mentioned-file":
+          t.mentioned_file += inj.tokens;
+          break;
+        case "tool-output":
+          t.tool_output += inj.tokens;
+          break;
+        case "thinking-text":
+          t.thinking_text += inj.tokens;
+          break;
+        case "team-coordination":
+          t.team_coordination += inj.tokens;
+          break;
+        case "user-message":
+          t.user_message += inj.tokens;
+          break;
+      }
+    }
+    return t;
+  }, [stats, phaseFilter, filteredInjections]);
+
   return (
     <aside
       data-testid="session-context-panel"
@@ -112,9 +154,19 @@ export function SessionContextPanel({
       >
         {loading && <LoadingLine text="Computing context…" />}
         {error && <ErrorLine text={error} />}
-        {stats && (
+        {stats && filteredTotals && (
           <>
-            <Totals stats={stats} />
+            <Totals
+              totals={filteredTotals}
+              // The backend only gives us a whole-session
+              // reported-total; when the user filters to a single
+              // phase, showing that number alongside the phase's
+              // own bars was misleading. Hide it for phase view.
+              reportedTotal={
+                phaseFilter == null ? stats.reported_total_tokens : null
+              }
+              phaseLabel={phaseFilter}
+            />
             <PhasePicker
               stats={stats}
               value={phaseFilter}
@@ -128,8 +180,18 @@ export function SessionContextPanel({
   );
 }
 
-function Totals({ stats }: { stats: ContextStats }) {
-  const t = stats.totals;
+function Totals({
+  totals,
+  reportedTotal,
+  phaseLabel,
+}: {
+  totals: ContextStats["totals"];
+  /** Whole-session usage total. `null` when a phase is selected. */
+  reportedTotal: number | null;
+  /** 0-based phase number, `null` for "all phases". */
+  phaseLabel: number | null;
+}) {
+  const t = totals;
   const total =
     t.claude_md +
     t.mentioned_file +
@@ -215,7 +277,9 @@ function Totals({ stats }: { stats: ContextStats }) {
           textTransform: "uppercase",
         }}
       >
-        Model reported {stats.reported_total_tokens.toLocaleString()} total
+        {reportedTotal != null
+          ? `Model reported ${reportedTotal.toLocaleString()} total`
+          : `Phase #${phaseLabel} (session total hidden)`}
       </div>
     </section>
   );

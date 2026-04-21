@@ -64,19 +64,41 @@ describe("Edit viewer", () => {
 });
 
 describe("Read viewer", () => {
-  it("renders line numbers alongside the body", () => {
+  it("honors embedded line numbers from CC", () => {
+    // Live CC result: "<line>\t<content>" on each line. Numbering
+    // should reflect the embedded values, not an arbitrary count.
     const tool = mk({
       tool_name: "Read",
-      input_preview: JSON.stringify({ file_path: "/repo/main.rs" }),
-      result_content: "fn main() {}\nprintln!()",
+      input_preview: JSON.stringify({
+        file_path: "/repo/main.rs",
+        offset: 10,
+      }),
+      result_content: "11\tfn main() {}\n12\tprintln!()",
     });
     render(<ToolExecutionView tool={tool} />);
     expect(screen.getByTestId("read-tool-viewer")).toBeInTheDocument();
     expect(screen.getByText("/repo/main.rs")).toBeInTheDocument();
     expect(screen.getByText("fn main() {}")).toBeInTheDocument();
-    // Both line numbers are present.
-    expect(screen.getByText("1")).toBeInTheDocument();
-    expect(screen.getByText("2")).toBeInTheDocument();
+    // Embedded numbers surface, not 1/2 from the front.
+    expect(screen.getByText("11")).toBeInTheDocument();
+    expect(screen.getByText("12")).toBeInTheDocument();
+  });
+
+  it("falls back to offset-based numbering for unnumbered bodies", () => {
+    // Plain text body (no tab prefixes). The viewer should start
+    // numbering from offset + 1 instead of pretending it's line 1.
+    const tool = mk({
+      tool_name: "Read",
+      input_preview: JSON.stringify({
+        file_path: "/no-numbers.txt",
+        offset: 99,
+      }),
+      result_content: "first\nsecond",
+    });
+    render(<ToolExecutionView tool={tool} />);
+    expect(screen.getByText("100")).toBeInTheDocument();
+    expect(screen.getByText("101")).toBeInTheDocument();
+    expect(screen.getByText("first")).toBeInTheDocument();
   });
 
   it("shows a placeholder when there's no result yet", () => {
@@ -108,11 +130,12 @@ describe("Write viewer", () => {
 });
 
 describe("Bash viewer", () => {
-  it("splits stdout and stderr when the result is JSON", () => {
+  it("splits stdout and stderr when the result is JSON (cmd field)", () => {
     const tool = mk({
       tool_name: "Bash",
       input_preview: JSON.stringify({
-        command: "cargo test",
+        // Live CC transcripts use `cmd`.
+        cmd: "cargo test",
         description: "run tests",
       }),
       result_content: JSON.stringify({
@@ -130,10 +153,20 @@ describe("Bash viewer", () => {
     expect(screen.getByText(/exit 0/i)).toBeInTheDocument();
   });
 
+  it("falls back to legacy `command` field when `cmd` is absent", () => {
+    const tool = mk({
+      tool_name: "Bash",
+      input_preview: JSON.stringify({ command: "ls -la" }),
+      result_content: "a\nb",
+    });
+    render(<ToolExecutionView tool={tool} />);
+    expect(screen.getByText("$ ls -la")).toBeInTheDocument();
+  });
+
   it("treats plain-text result as stdout", () => {
     const tool = mk({
       tool_name: "Bash",
-      input_preview: JSON.stringify({ command: "echo hi" }),
+      input_preview: JSON.stringify({ cmd: "echo hi" }),
       result_content: "hi",
     });
     render(<ToolExecutionView tool={tool} />);

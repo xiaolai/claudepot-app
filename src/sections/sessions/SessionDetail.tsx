@@ -104,12 +104,22 @@ export function SessionDetail({
     const myToken = ++tokenRef.current;
     setLoading(true);
     setError(null);
-    // Fetch detail + chunks in parallel — both hit the same JSONL but
-    // Tauri serializes invokes, so the second one is cheap. Chunks may
-    // fail (older Tauri build) — we degrade to raw event mode.
+    // Fetch detail + chunks in parallel. Both open the same JSONL, so
+    // this doubles IO; the cheapest shared-state fix is to do both here
+    // rather than chain them, and to rely on the OS page cache for the
+    // second open — typical sessions are <1 MB.
+    //
+    // Chunks may legitimately fail on an older Tauri binary that
+    // doesn't ship the `session_chunks` command. We distinguish that
+    // compatibility case (the invoke error mentions an unknown command
+    // or missing handler) from real failures. Everything else is
+    // surfaced so we don't silently hide debugger breakage.
     Promise.all([
       api.sessionReadPath(filePath),
-      api.sessionChunks(filePath).catch(() => null),
+      api.sessionChunks(filePath).catch((e: unknown) => {
+        if (isUnknownCommandError(e)) return null;
+        throw e;
+      }),
     ])
       .then(([d, c]) => {
         if (myToken !== tokenRef.current) return;
@@ -647,6 +657,24 @@ function EmptyState({ children }: { children: React.ReactNode }) {
     >
       {children}
     </div>
+  );
+}
+
+/**
+ * Tauri emits command-not-found errors in a small set of shapes. We
+ * match only those exact shapes — specifically, a "not found" wording
+ * scoped to a command context — so genuine I/O errors that happen to
+ * contain the substring "not found" (e.g. "file not found at <path>")
+ * do NOT get classified as a compatibility miss. Unknown real errors
+ * must surface to the user, not silently collapse the debugger into
+ * raw-event mode.
+ */
+function isUnknownCommandError(e: unknown): boolean {
+  const msg = String(e ?? "");
+  return (
+    /unknown command\b/i.test(msg) ||
+    /\bcommand\s+[`"']?session_chunks[`"']?\s+not\s+found/i.test(msg) ||
+    /not a registered command/i.test(msg)
   );
 }
 
