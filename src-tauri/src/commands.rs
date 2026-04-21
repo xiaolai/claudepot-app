@@ -1428,6 +1428,30 @@ pub fn session_export_text(file_path: String, format: String) -> Result<String, 
     Ok(claudepot_core::session_export::export(&detail, fmt))
 }
 
+/// Export transcript directly to disk. The UI hands us an
+/// absolute path chosen by the user via the native save dialog;
+/// we write the rendered body with 0600 permissions on Unix so the
+/// on-disk copy matches the Rust conventions guarding credential files.
+#[tauri::command]
+pub fn session_export_to_file(
+    file_path: String,
+    format: String,
+    output_path: String,
+) -> Result<usize, String> {
+    let body = session_export_text(file_path, format)?;
+    std::fs::write(&output_path, &body)
+        .map_err(|e| format!("write {output_path}: {e}"))?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let _ = std::fs::set_permissions(
+            &output_path,
+            std::fs::Permissions::from_mode(0o600),
+        );
+    }
+    Ok(body.len())
+}
+
 /// Cross-session text search. Returns up to `limit` hits.
 #[tauri::command]
 pub fn session_search(
