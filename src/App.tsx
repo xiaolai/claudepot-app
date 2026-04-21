@@ -70,6 +70,7 @@ import { AppStateProvider, useAppState } from "./providers/AppStateProvider";
 import { api } from "./api";
 import { ConsentLiveModal } from "./components/ConsentLiveModal";
 import { useActivityNotifications } from "./hooks/useActivityNotifications";
+import { useSessionLive } from "./hooks/useSessionLive";
 import { listen } from "@tauri-apps/api/event";
 import type { RunningOpInfo } from "./types";
 import { WindowChrome, AppSidebar, AppStatusBar } from "./shell";
@@ -254,11 +255,15 @@ function AppShell() {
     return () => window.removeEventListener("cp-goto-session", onGoto);
   }, [setSection]);
 
-  // Activity notifications — observes aggregate transitions and
-  // pushes toasts for user-enabled trigger classes (error burst,
-  // idle-after-work, stuck). All default-off; the hook is a no-op
-  // until the user flips a pref. One toast per session per 60s.
-  useActivityNotifications(pushToast);
+  // Activity notifications — fires OS notifications for user-enabled
+  // trigger classes (error burst, idle-after-work, stuck). In-app
+  // signal lives on the session row and the Activity nav badge.
+  useActivityNotifications();
+
+  // Badge count: sessions that are errored or stuck surface on the
+  // Activity nav item so the user sees the count from any section.
+  const liveSessions = useSessionLive();
+  const activityAlerts = liveSessions.filter((s) => s.errored || s.stuck).length;
 
   // Tray → Activity row click lands on the Tauri event
   // `cp-activity-open-session` with the session id as payload.
@@ -465,6 +470,7 @@ function AppShell() {
           onBind={handleBind}
           badges={{
             accounts: accounts.length || undefined,
+            activity: activityAlerts || undefined,
           }}
           version="v0.4.2"
           synced

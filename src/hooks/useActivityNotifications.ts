@@ -10,37 +10,31 @@ import type { LiveSessionSummary, Preferences } from "../types";
 
 /**
  * `useActivityNotifications` — observe aggregate transitions and
- * surface in-app toasts for the user-enabled trigger classes.
+ * fire OS notifications for user-enabled trigger classes.
  *
  * Detection rules:
  *   * `on_error`: `errored` overlay flipped false → true on any
- *     session. One toast per session per 60 s, hard-capped.
+ *     session. One notification per session per 60 s, hard-capped.
  *   * `on_idle_done`: a session that had been `busy` for ≥ 2 min
  *     transitioned to `idle`. Same 60-s-per-session rate limit.
  *   * `on_stuck_minutes`: `stuck` overlay fires when a tool call
  *     has been open longer than the configured threshold. Backend
  *     already computes the `stuck` bool using its own threshold
- *     (STUCK_THRESHOLD = 10 min); this toast fires on the false →
- *     true transition. Pref is Option<u32> meaning "enable when
- *     value is set"; the threshold number itself is advisory and
- *     only used in the toast copy, not for client-side detection.
+ *     (STUCK_THRESHOLD = 10 min); this notification fires on the
+ *     false → true transition. Pref is Option<u32> meaning "enable
+ *     when value is set"; the threshold number itself is advisory
+ *     and only used in the notification copy, not for client-side
+ *     detection.
+ *
+ * In-app signal lives on the session row itself (errored border +
+ * tag) and the Activity nav badge — not in ephemeral toasts.
+ * Toasts are reserved for user-action acknowledgements.
  *
  * Uses the existing useSessionLive aggregate snapshot — no extra
  * backend round-trip. A per-render ref tracks the previous state
  * keyed by session_id so we can compute transitions without fighting
  * React's render semantics.
  */
-
-/** Matches the shape of `useToasts().pushToast` — two-kind palette
- *  (info / error). Activity uses `info` for successful transitions
- *  (done, idle-after-work) and `error` for the alerting states
- *  (errored burst, stuck tool call). */
-export type ToastPusher = (
-  kind: "info" | "error",
-  text: string,
-  onUndo?: () => void,
-  opts?: { dedupeKey?: string },
-) => void;
 
 interface SessionMemo {
   lastStatus: LiveSessionSummary["status"];
@@ -50,7 +44,7 @@ interface SessionMemo {
   lastFiredMs: number;
 }
 
-export function useActivityNotifications(pushToast: ToastPusher): void {
+export function useActivityNotifications(): void {
   const sessions = useSessionLive();
   const memoRef = useRef(new Map<string, SessionMemo>());
   const prefsRef = useRef<Preferences | null>(null);
@@ -122,21 +116,14 @@ export function useActivityNotifications(pushToast: ToastPusher): void {
     const now = Date.now();
     const RATE_LIMIT_MS = 60_000;
 
-    /** Fire both the in-app toast and (if the user has OS
-     *  permission) a system notification. The OS path is
-     *  fire-and-forget; any error is swallowed so a denied
-     *  permission never breaks the in-app toast flow.
+    /** Fire an OS notification for the given transition.
+     *  Fire-and-forget; any error is swallowed so a denied
+     *  permission never interrupts the detection loop.
      *
      *  Named `dispatch` deliberately — `alert` would shadow
      *  `window.alert` and set a footgun for any future
      *  `globalThis.alert(...)` audit grep. */
-    const dispatch = (
-      kind: "info" | "error",
-      title: string,
-      body: string,
-      dedupeKey: string,
-    ) => {
-      pushToast(kind, `${title} — ${body}`, undefined, { dedupeKey });
+    const dispatch = (title: string, body: string) => {
       if (osPermissionRef.current === "granted") {
         try {
           sendNotification({ title, body });
@@ -188,12 +175,7 @@ export function useActivityNotifications(pushToast: ToastPusher): void {
         !(prev?.lastErrored ?? false) &&
         canFire
       ) {
-        dispatch(
-          "error",
-          project,
-          "multiple errors in the last minute",
-          `activity-error-${s.session_id}`,
-        );
+        dispatch(project, "multiple errors in the last minute");
         memo.set(s.session_id, nextMemo(s, busyStartedMs, now));
         continue;
       }
@@ -205,12 +187,7 @@ export function useActivityNotifications(pushToast: ToastPusher): void {
         !(prev?.lastStuck ?? false) &&
         canFire
       ) {
-        dispatch(
-          "error",
-          project,
-          "possibly stuck (tool call > 10 min)",
-          `activity-stuck-${s.session_id}`,
-        );
+        dispatch(project, "possibly stuck (tool call > 10 min)");
         memo.set(s.session_id, nextMemo(s, busyStartedMs, now));
         continue;
       }
@@ -225,12 +202,7 @@ export function useActivityNotifications(pushToast: ToastPusher): void {
         canFire
       ) {
         const minutes = Math.floor((now - prev.busyStartedMs) / 60_000);
-        dispatch(
-          "info",
-          project,
-          `done (${minutes}m)`,
-          `activity-idle-${s.session_id}`,
-        );
+        dispatch(project, `done (${minutes}m)`);
         memo.set(s.session_id, nextMemo(s, busyStartedMs, now));
         continue;
       }
@@ -245,7 +217,7 @@ export function useActivityNotifications(pushToast: ToastPusher): void {
     for (const id of [...memo.keys()]) {
       if (!seen.has(id)) memo.delete(id);
     }
-  }, [sessions, pushToast]);
+  }, [sessions]);
 }
 
 function nextMemo(
