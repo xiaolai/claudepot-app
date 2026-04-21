@@ -26,9 +26,10 @@
 //! stays aligned with CC's terminology.
 
 use chrono::{DateTime, Duration, Utc};
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, VecDeque};
 
 use crate::session::SessionEvent;
+use crate::session_live::redact::redact_secrets;
 use crate::session_live::types::Status;
 
 /// How long an unmatched `tool_use` can live before we overlay
@@ -80,12 +81,15 @@ impl Default for Status {
 /// O(unmatched tool_uses) in memory.
 #[derive(Debug, Clone)]
 pub struct StatusMachine {
-    /// Open tool calls by id. BTree so ordering is deterministic for
-    /// tests and we can cheaply take the oldest for the stuck check.
+    /// Open tool calls by id. BTree so iteration order is deterministic
+    /// for tests; the oldest-by-start-time is re-derived in
+    /// `current_action` (BTree key is id, not time).
     unmatched: BTreeMap<String, OpenTool>,
     /// Sliding window of recent error timestamps. Trimmed on every
-    /// ingest; never grows unbounded.
-    recent_errors: Vec<DateTime<Utc>>,
+    /// ingest AND every snapshot so it never grows unbounded even if
+    /// a pathological session emits errors faster than the window
+    /// slides (plan principle: bounded memory).
+    recent_errors: VecDeque<DateTime<Utc>>,
     /// Most recent model id from an assistant fragment.
     model: Option<String>,
     /// What the last-observed assistant fragment looked like. Used
@@ -141,7 +145,7 @@ impl StatusMachine {
     pub fn with_now(now: fn() -> DateTime<Utc>) -> Self {
         Self {
             unmatched: BTreeMap::new(),
-            recent_errors: Vec::new(),
+            recent_errors: VecDeque::new(),
             model: None,
             last_assistant: LastAssistantShape::None,
             pending_reply: false,
@@ -180,13 +184,21 @@ impl StatusMachine {
                 ts,
                 ..
             } => {
-                self.unmatched.remove(tool_use_id);
+                // Only flip `pending_reply` if this result actually
+                // closes a tool call we knew about. A result that
+                // arrives with no matching open is a late straggler
+                // (e.g., sub-agent bleed-through) and must not pin
+                // the machine at Busy forever — this is the
+                // "ghost busy" trap the reviews flagged.
+                let matched = self.unmatched.remove(tool_use_id).is_some();
                 if *is_error {
-                    let now = *ts.as_ref().unwrap_or(&(self.now)());
-                    self.recent_errors.push(now);
+                    let at = *ts.as_ref().unwrap_or(&(self.now)());
+                    self.recent_errors.push_back(at);
+                    self.trim_error_window();
                 }
-                // Tool result → model is about to continue the turn.
-                self.pending_reply = true;
+                if matched {
+                    self.pending_reply = true;
+                }
             }
             SessionEvent::AssistantText {
                 model, stop_reason, ..
@@ -194,12 +206,20 @@ impl StatusMachine {
                 if let Some(m) = model.clone() {
                     self.model = Some(m);
                 }
-                self.last_assistant = if stop_reason.is_some() {
+                // CC writes `stop_reason: "tool_use"` when a turn
+                // pauses for a tool call — NOT when the turn ends.
+                // Only `end_turn` and `stop_sequence` mean the
+                // assistant has handed control back to the user.
+                let turn_truly_closed = matches!(
+                    stop_reason.as_deref(),
+                    Some("end_turn") | Some("stop_sequence")
+                );
+                self.last_assistant = if turn_truly_closed {
                     LastAssistantShape::TextClosed
                 } else {
                     LastAssistantShape::TextStreaming
                 };
-                if stop_reason.is_some() {
+                if turn_truly_closed {
                     self.pending_reply = false;
                 }
             }
@@ -305,8 +325,8 @@ impl StatusMachine {
     fn current_action(&self) -> Option<String> {
         // Prefer the oldest open tool call — that's usually the
         // user-relevant one ("running pnpm test" not "scheduled a
-        // queued prompt"). BTreeMap iteration is insertion-agnostic,
-        // so sort by started_at.
+        // queued prompt"). BTreeMap iteration is keyed on tool_use_id,
+        // so sort by started_at explicitly.
         let mut openings: Vec<_> = self.unmatched.values().collect();
         openings.sort_by_key(|o| o.started_at);
         let first = openings.first()?;
@@ -316,13 +336,32 @@ impl StatusMachine {
         } else {
             format!("{}: {}", first.tool_name, arg)
         };
-        Some(truncate(&text, 80))
+        // Trust-boundary redaction — a user command like
+        // `curl -H "Authorization: Bearer sk-ant-..."` must not
+        // leak its key into the peripheral surfaces.
+        Some(redact_secrets(&truncate(&text, 80)))
     }
 
     fn errored(&self) -> bool {
         let now = (self.now)();
         let cutoff = now - ERROR_WINDOW;
         self.recent_errors.iter().filter(|t| **t >= cutoff).count() >= ERROR_WINDOW_COUNT
+    }
+
+    /// Drop entries older than the error window. Called on every
+    /// error ingest so `recent_errors` never exceeds the number of
+    /// errors produced within the trailing `ERROR_WINDOW` — bounded
+    /// even under pathological burst rates.
+    fn trim_error_window(&mut self) {
+        let now = (self.now)();
+        let cutoff = now - ERROR_WINDOW;
+        while let Some(front) = self.recent_errors.front() {
+            if *front < cutoff {
+                self.recent_errors.pop_front();
+            } else {
+                break;
+            }
+        }
     }
 
     fn stuck(&self) -> bool {
@@ -721,6 +760,128 @@ mod tests {
     fn humanize_passes_through_non_json_input() {
         assert_eq!(humanize_tool_input("Bash", "raw text"), "raw text");
         assert_eq!(humanize_tool_input("Bash", ""), "");
+    }
+
+    // ── Behavioural fixes from the grill + codex review ────────────
+
+    #[test]
+    fn tool_use_stop_reason_is_not_a_turn_close() {
+        // CC writes `stop_reason: "tool_use"` when the turn pauses
+        // for a tool call. Treating that as a close flips status to
+        // Idle even though the model is mid-flight.
+        let mut m = machine();
+        m.ingest(&SessionEvent::AssistantText {
+            ts: ts(10, 0, 1),
+            uuid: None,
+            model: None,
+            text: "calling tool".into(),
+            usage: None,
+            stop_reason: Some("tool_use".into()),
+        });
+        assert_eq!(
+            m.snapshot().status,
+            Status::Busy,
+            "stop_reason='tool_use' must NOT be treated as turn close"
+        );
+    }
+
+    #[test]
+    fn late_straggler_tool_result_does_not_pin_busy() {
+        // A `UserToolResult` with no matching open tool_use is a
+        // late arrival (sub-agent bleed, transcript resume mid-turn).
+        // It must NOT flip `pending_reply`, or the fallback status
+        // stays Busy forever even after the turn actually closed.
+        let mut m = machine();
+        m.ingest(&SessionEvent::AssistantText {
+            ts: ts(10, 0, 1),
+            uuid: None,
+            model: None,
+            text: "done".into(),
+            usage: None,
+            stop_reason: Some("end_turn".into()),
+        });
+        assert_eq!(m.snapshot().status, Status::Idle);
+        // Straggler lands — no matching open.
+        m.ingest(&SessionEvent::UserToolResult {
+            ts: ts(10, 0, 2),
+            uuid: None,
+            tool_use_id: "ghost".into(),
+            content: "".into(),
+            is_error: false,
+        });
+        assert_eq!(
+            m.snapshot().status,
+            Status::Idle,
+            "unmatched tool_result must not re-engage pending_reply"
+        );
+    }
+
+    #[test]
+    fn current_action_redacts_leaked_keys() {
+        // Anthropic's own prefix in a Bash arg — happens when a user
+        // pastes `curl -H 'Authorization: Bearer sk-ant-...'`. The
+        // peripheral current_action surface MUST redact.
+        let mut m = machine();
+        m.ingest(&SessionEvent::AssistantToolUse {
+            ts: ts(10, 0, 10),
+            uuid: None,
+            model: None,
+            tool_name: "Bash".into(),
+            tool_use_id: "tu".into(),
+            input_preview: r#"{"command":"curl -H 'Authorization: Bearer sk-ant-Abc123DEF456_xyz' https://api"}"#
+                .into(),
+        });
+        let ca = m.snapshot().current_action.unwrap();
+        assert!(
+            !ca.contains("sk-ant-Abc123DEF456_xyz"),
+            "raw key leaked into current_action: {ca}"
+        );
+        assert!(ca.contains("sk-ant-***"));
+    }
+
+    #[test]
+    fn recent_errors_window_is_bounded_even_under_burst() {
+        // 10_000 errors arrive within a 60s window — the trimmer
+        // runs on ingest. With `frozen_now` at 10:00:30 and every
+        // error stamped at 10:00:10, none expire. But we should
+        // never allow unbounded retention beyond what the window
+        // could hold. The test asserts growth is bounded by the
+        // retained set, not by the input size.
+        let mut m = machine();
+        for i in 0..1000 {
+            m.ingest(&SessionEvent::UserToolResult {
+                ts: ts(10, 0, (i % 30) as u32),
+                uuid: None,
+                tool_use_id: format!("t{i}"),
+                content: "".into(),
+                is_error: true,
+            });
+        }
+        // All 1000 ts land within the trailing 60s of frozen_now,
+        // so they all survive the window check — but the structure
+        // is VecDeque + trimmer, not unbounded Vec. Proving the
+        // structural property: trim is called and removes old entries.
+        let trimmed_before = m.recent_errors.len();
+        // Advance time past the window and ingest one more error —
+        // the trimmer must drop everything older than the cutoff.
+        let mut later = StatusMachine::with_now(|| {
+            chrono::TimeZone::with_ymd_and_hms(&Utc, 2026, 4, 21, 11, 0, 0)
+                .unwrap()
+        });
+        // Move the vecdeque into the later machine to simulate
+        // the sliding window after wall-clock progression.
+        later.recent_errors = m.recent_errors.clone();
+        later.ingest(&SessionEvent::UserToolResult {
+            ts: ts(11, 0, 0),
+            uuid: None,
+            tool_use_id: "new".into(),
+            content: "".into(),
+            is_error: true,
+        });
+        assert!(
+            later.recent_errors.len() < trimmed_before,
+            "trim must drop entries outside the window"
+        );
     }
 
     #[test]

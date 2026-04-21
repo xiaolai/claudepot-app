@@ -20,8 +20,27 @@
 
 use std::fs::{File, Metadata};
 use std::io::{self, BufRead, BufReader, Read, Seek, SeekFrom};
-use std::os::unix::fs::MetadataExt;
 use std::path::{Path, PathBuf};
+
+/// Best-effort rotation token. On Unix we have a real inode; on
+/// Windows we fall back to the file creation time (less precise —
+/// a replace that preserves the timestamp would slip through, but
+/// CC's `fs.appendFileSync` never does that, so the gap is
+/// theoretical). Truncation is always caught by the size comparison
+/// regardless of platform.
+#[cfg(unix)]
+fn rotation_token(md: &Metadata) -> Option<u64> {
+    use std::os::unix::fs::MetadataExt;
+    Some(md.ino())
+}
+
+#[cfg(not(unix))]
+fn rotation_token(md: &Metadata) -> Option<u64> {
+    md.created()
+        .ok()
+        .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+        .map(|d| d.as_nanos() as u64)
+}
 
 /// Stateful tail reader for one JSONL file. One instance per tracked
 /// transcript; the runtime owns a `HashMap<file_path, FileTail>`.
@@ -30,10 +49,12 @@ pub struct FileTail {
     path: PathBuf,
     /// Byte offset we've already consumed up to (exclusive).
     offset: u64,
-    /// Inode of the last-seen file, used to detect rotation (the
-    /// file was replaced even if its path is unchanged).
-    inode: Option<u64>,
-    /// Size of the last-seen file, used to detect truncation.
+    /// Platform-specific rotation token of the last-seen file
+    /// (inode on Unix, creation-time on Windows). `None` until the
+    /// file has been observed at least once.
+    rotation_token: Option<u64>,
+    /// Size of the last-seen file, used to detect truncation
+    /// regardless of platform.
     last_size: Option<u64>,
 }
 
@@ -67,7 +88,7 @@ impl FileTail {
         Ok(Self {
             path,
             offset: md.len(),
-            inode: Some(md.ino()),
+            rotation_token: rotation_token(&md),
             last_size: Some(md.len()),
         })
     }
@@ -81,7 +102,7 @@ impl FileTail {
         Ok(Self {
             path,
             offset: 0,
-            inode: Some(md.ino()),
+            rotation_token: rotation_token(&md),
             last_size: Some(md.len()),
         })
     }
@@ -92,7 +113,7 @@ impl FileTail {
         Self {
             path: path.into(),
             offset: 0,
-            inode: None,
+            rotation_token: None,
             last_size: None,
         }
     }
@@ -106,7 +127,7 @@ impl FileTail {
         let file = match File::open(&self.path) {
             Ok(f) => f,
             Err(e) if e.kind() == io::ErrorKind::NotFound => {
-                self.inode = None;
+                self.rotation_token = None;
                 self.last_size = None;
                 self.offset = 0;
                 return Ok(TailProgress {
@@ -121,12 +142,12 @@ impl FileTail {
         let rotated = self.detect_rotation(&md);
         if rotated {
             self.offset = 0;
-            self.inode = Some(md.ino());
+            self.rotation_token = rotation_token(&md);
             self.last_size = Some(md.len());
         }
         let lines = self.read_from_offset(file, md.len())?;
         self.last_size = Some(md.len());
-        self.inode = Some(md.ino());
+        self.rotation_token = rotation_token(&md);
         Ok(TailProgress {
             new_lines: lines,
             rotated,
@@ -134,14 +155,20 @@ impl FileTail {
         })
     }
 
-    /// Heuristic: the file rotated if its inode changed, OR its size
-    /// shrank below our last-seen offset. The second condition
-    /// catches truncation-in-place (`> file` in the shell).
+    /// Heuristic: the file rotated if its rotation token changed
+    /// (inode on Unix; creation-time on Windows), OR its size shrank
+    /// below our last-seen offset. The second condition catches
+    /// truncation-in-place (`> file` in the shell) on every platform.
     fn detect_rotation(&self, md: &Metadata) -> bool {
-        if let Some(prev_inode) = self.inode {
-            if prev_inode != md.ino() {
-                return true;
+        if let Some(prev) = self.rotation_token {
+            if let Some(cur) = rotation_token(md) {
+                if cur != prev {
+                    return true;
+                }
             }
+            // If we can't read the current token (rare — permission
+            // issue on the creation-time field), fall back to the
+            // truncation-only heuristic below.
         } else {
             // First sighting of the file — by convention we treat
             // `pending → present` as a non-rotation; the caller

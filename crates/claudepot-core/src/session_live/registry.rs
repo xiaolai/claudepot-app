@@ -79,15 +79,34 @@ impl ProcessCheck for SysinfoCheck {
 
 /// Platform detector. On WSL the sweep is a no-op to mirror CC's own
 /// `getPlatform() !== 'wsl'` carve-out at `concurrentSessions.ts:196`.
-fn is_wsl() -> bool {
-    // The canonical WSL signal: /proc/version mentions Microsoft.
-    // Fails silently off-Linux and returns false, which is correct.
-    fs::read_to_string("/proc/version")
-        .map(|s| {
-            let l = s.to_lowercase();
-            l.contains("microsoft") || l.contains("wsl")
-        })
-        .unwrap_or(false)
+///
+/// Three independent signals, any one enough to flip to WSL. The
+/// reviews flagged that `/proc/version` alone misses custom kernels
+/// and some distros — `osrelease` + `$WSL_DISTRO_NAME` fill those
+/// gaps. On non-Linux platforms this is a compile-time no-op because
+/// the sweep-on-WSL hazard (deleting a PID file visible only to the
+/// other side of the WSL boundary) cannot exist when we're native.
+#[cfg(target_os = "linux")]
+pub(crate) fn is_wsl() -> bool {
+    if std::env::var_os("WSL_DISTRO_NAME").is_some()
+        || std::env::var_os("WSL_INTEROP").is_some()
+    {
+        return true;
+    }
+    let check = |path: &str| -> bool {
+        fs::read_to_string(path)
+            .map(|s| {
+                let l = s.to_lowercase();
+                l.contains("microsoft") || l.contains("wsl")
+            })
+            .unwrap_or(false)
+    };
+    check("/proc/sys/kernel/osrelease") || check("/proc/version")
+}
+
+#[cfg(not(target_os = "linux"))]
+pub(crate) fn is_wsl() -> bool {
+    false
 }
 
 /// Default sessions directory — `~/.claude/sessions`.
