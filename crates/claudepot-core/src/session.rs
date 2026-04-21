@@ -573,98 +573,109 @@ fn parse_events(path: &Path) -> Result<Vec<SessionEvent>, SessionError> {
                 continue;
             }
         };
-        if line.trim().is_empty() {
-            continue;
-        }
-        let v = match serde_json::from_str::<Value>(&line) {
-            Ok(v) => v,
-            Err(e) => {
-                events.push(SessionEvent::Malformed {
-                    line_number,
-                    error: e.to_string(),
-                    preview: truncate_prompt(&line),
-                });
-                continue;
-            }
-        };
-
-        let ts = v
-            .get("timestamp")
-            .and_then(Value::as_str)
-            .and_then(|s| DateTime::parse_from_rfc3339(s).ok())
-            .map(|d| d.with_timezone(&Utc));
-        let uuid = v
-            .get("uuid")
-            .and_then(Value::as_str)
-            .map(|s| s.to_string());
-
-        let event_type = v.get("type").and_then(Value::as_str).unwrap_or("");
-        match event_type {
-            "user" => emit_user_events(&mut events, &v, ts, uuid),
-            "assistant" => emit_assistant_events(&mut events, &v, ts, uuid),
-            "summary" => {
-                let text = v
-                    .get("summary")
-                    .and_then(Value::as_str)
-                    .map(|s| s.to_string())
-                    .unwrap_or_default();
-                events.push(SessionEvent::Summary { ts, uuid, text });
-            }
-            "system" => {
-                let subtype = v
-                    .get("subtype")
-                    .and_then(Value::as_str)
-                    .map(|s| s.to_string());
-                let detail = v
-                    .get("level")
-                    .and_then(Value::as_str)
-                    .map(|s| s.to_string())
-                    .unwrap_or_default();
-                events.push(SessionEvent::System {
-                    ts,
-                    uuid,
-                    subtype,
-                    detail,
-                });
-            }
-            "attachment" => {
-                let name = v
-                    .get("name")
-                    .and_then(Value::as_str)
-                    .or_else(|| v.get("filename").and_then(Value::as_str))
-                    .map(|s| s.to_string());
-                let mime = v
-                    .get("mimeType")
-                    .and_then(Value::as_str)
-                    .map(|s| s.to_string());
-                events.push(SessionEvent::Attachment {
-                    ts,
-                    uuid,
-                    name,
-                    mime,
-                });
-            }
-            "file-history-snapshot" => {
-                let file_count = v
-                    .get("files")
-                    .and_then(Value::as_array)
-                    .map(|a| a.len())
-                    .unwrap_or(0);
-                events.push(SessionEvent::FileHistorySnapshot {
-                    ts,
-                    uuid,
-                    file_count,
-                });
-            }
-            other => events.push(SessionEvent::Other {
-                ts,
-                uuid,
-                raw_type: other.to_string(),
-            }),
-        }
+        parse_line_into(&mut events, &line, line_number);
     }
 
     Ok(events)
+}
+
+/// Parse a single JSONL line and append the resulting zero-or-more
+/// `SessionEvent`s to `out`. Empty lines are silently skipped;
+/// malformed JSON yields a `Malformed` event with the line number.
+///
+/// Exposed crate-visible so `session_live::runtime` can feed events
+/// one line at a time as the tail reader surfaces them, without
+/// re-parsing the whole transcript.
+pub(crate) fn parse_line_into(out: &mut Vec<SessionEvent>, line: &str, line_number: usize) {
+    if line.trim().is_empty() {
+        return;
+    }
+    let v = match serde_json::from_str::<Value>(line) {
+        Ok(v) => v,
+        Err(e) => {
+            out.push(SessionEvent::Malformed {
+                line_number,
+                error: e.to_string(),
+                preview: truncate_prompt(line),
+            });
+            return;
+        }
+    };
+
+    let ts = v
+        .get("timestamp")
+        .and_then(Value::as_str)
+        .and_then(|s| DateTime::parse_from_rfc3339(s).ok())
+        .map(|d| d.with_timezone(&Utc));
+    let uuid = v
+        .get("uuid")
+        .and_then(Value::as_str)
+        .map(|s| s.to_string());
+
+    let event_type = v.get("type").and_then(Value::as_str).unwrap_or("");
+    match event_type {
+        "user" => emit_user_events(out, &v, ts, uuid),
+        "assistant" => emit_assistant_events(out, &v, ts, uuid),
+        "summary" => {
+            let text = v
+                .get("summary")
+                .and_then(Value::as_str)
+                .map(|s| s.to_string())
+                .unwrap_or_default();
+            out.push(SessionEvent::Summary { ts, uuid, text });
+        }
+        "system" => {
+            let subtype = v
+                .get("subtype")
+                .and_then(Value::as_str)
+                .map(|s| s.to_string());
+            let detail = v
+                .get("level")
+                .and_then(Value::as_str)
+                .map(|s| s.to_string())
+                .unwrap_or_default();
+            out.push(SessionEvent::System {
+                ts,
+                uuid,
+                subtype,
+                detail,
+            });
+        }
+        "attachment" => {
+            let name = v
+                .get("name")
+                .and_then(Value::as_str)
+                .or_else(|| v.get("filename").and_then(Value::as_str))
+                .map(|s| s.to_string());
+            let mime = v
+                .get("mimeType")
+                .and_then(Value::as_str)
+                .map(|s| s.to_string());
+            out.push(SessionEvent::Attachment {
+                ts,
+                uuid,
+                name,
+                mime,
+            });
+        }
+        "file-history-snapshot" => {
+            let file_count = v
+                .get("files")
+                .and_then(Value::as_array)
+                .map(|a| a.len())
+                .unwrap_or(0);
+            out.push(SessionEvent::FileHistorySnapshot {
+                ts,
+                uuid,
+                file_count,
+            });
+        }
+        other => out.push(SessionEvent::Other {
+            ts,
+            uuid,
+            raw_type: other.to_string(),
+        }),
+    }
 }
 
 fn emit_user_events(
