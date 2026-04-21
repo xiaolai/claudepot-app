@@ -8,35 +8,11 @@
    literals. See `.claude/rules/no-raw-values.md`.
    ───────────────────────────────────────────────────────────────────────── */
 
-/* ── Fonts — JetBrains Mono Nerd Font Mono ────────────────── */
-@font-face {
-  font-family: 'JetBrainsMonoNF';
-  src: url('/fonts/JetBrainsMonoNerdFontMono-Regular.woff2') format('woff2');
-  font-weight: 400;
-  font-style: normal;
-  font-display: swap;
-}
-@font-face {
-  font-family: 'JetBrainsMonoNF';
-  src: url('/fonts/JetBrainsMonoNerdFontMono-Medium.woff2') format('woff2');
-  font-weight: 500;
-  font-style: normal;
-  font-display: swap;
-}
-@font-face {
-  font-family: 'JetBrainsMonoNF';
-  src: url('/fonts/JetBrainsMonoNerdFontMono-SemiBold.woff2') format('woff2');
-  font-weight: 600;
-  font-style: normal;
-  font-display: swap;
-}
-@font-face {
-  font-family: 'JetBrainsMonoNF';
-  src: url('/fonts/JetBrainsMonoNerdFontMono-Bold.woff2') format('woff2');
-  font-weight: 700;
-  font-style: normal;
-  font-display: swap;
-}
+/* @font-face declarations for JetBrainsMonoNF live inline in
+   `index.html` so they register at HTML-parse time and the preloaded
+   woff2 assets connect before the Vite module graph finishes
+   compiling. See the comment next to the <link rel="preload"> tags
+   for the full rationale. */
 
 :root {
   /* ── Claude accent (terracotta) ─────────────────────────── */
