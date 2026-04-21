@@ -180,6 +180,7 @@ function LiveSessionCards({ sessions }: { sessions: LiveSessionSummary[] }) {
 
 function SessionCard({ summary }: { summary: LiveSessionSummary }) {
   const label = projectLabel(summary.cwd);
+  const alerting = summary.errored || summary.stuck;
   return (
     <article
       style={{
@@ -189,6 +190,9 @@ function SessionCard({ summary }: { summary: LiveSessionSummary }) {
         columnGap: "var(--sp-12)",
         padding: "var(--sp-12) var(--sp-16)",
         border: "var(--bw-hair) solid var(--line)",
+        borderLeft: alerting
+          ? "2px solid var(--warn)"
+          : "var(--bw-hair) solid var(--line)",
         borderRadius: "var(--r-2)",
         background: "var(--bg)",
       }}
@@ -228,6 +232,32 @@ function SessionCard({ summary }: { summary: LiveSessionSummary }) {
         }}
       >
         <span>{formatElapsedMs(summary.idle_ms)}</span>
+        {summary.errored && (
+          <span
+            style={{
+              color: "var(--warn)",
+              fontWeight: 600,
+              fontSize: "var(--fs-2xs)",
+              letterSpacing: "var(--ls-wide)",
+              textTransform: "uppercase",
+            }}
+          >
+            errors ↑
+          </span>
+        )}
+        {summary.stuck && !summary.errored && (
+          <span
+            style={{
+              color: "var(--warn)",
+              fontWeight: 600,
+              fontSize: "var(--fs-2xs)",
+              letterSpacing: "var(--ls-wide)",
+              textTransform: "uppercase",
+            }}
+          >
+            stuck
+          </span>
+        )}
         <span style={{ color: "var(--fg-faint)" }}>
           {familyShort(summary.model)}
         </span>
