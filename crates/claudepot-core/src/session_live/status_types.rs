@@ -32,10 +32,16 @@ pub struct StatusSnapshot {
     pub waiting_for: Option<String>,
     /// Most recently observed model id from `assistant.message.model`.
     pub model: Option<String>,
-    /// One-line description of the open tool call (if any), sourced
-    /// from the oldest unmatched `tool_use`. Format: `"<tool>: <arg>"`.
-    /// Capped at 80 chars for the peripheral surfaces.
+    /// One-line description of what the session is doing now. Prefers
+    /// the most recent `task-summary` entry (CC's own natural-language
+    /// string designed for `claude ps`); falls back to the oldest
+    /// open `tool_use` formatted as `"<tool>: <arg>"`. Capped at 80
+    /// chars for the peripheral surfaces.
     pub current_action: Option<String>,
+    /// Raw task-summary text seen most recently. Exposed separately
+    /// so the runtime can emit a `TaskSummaryChanged` delta without
+    /// having to re-parse the `current_action` mixed field.
+    pub task_summary: Option<String>,
     /// ≥ `ERROR_WINDOW_COUNT` `is_error=true` results in the trailing
     /// `ERROR_WINDOW`. Reset automatically when the window slides past.
     pub errored: bool,

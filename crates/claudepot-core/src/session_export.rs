@@ -386,6 +386,14 @@ fn redact_in_place(detail: &mut SessionDetail) {
                 *preview = redact_secrets(preview);
             }
             SessionEvent::FileHistorySnapshot { .. } => {}
+            SessionEvent::TaskSummary { summary, .. } => {
+                // The text is CC-generated and describes what the
+                // agent is doing — nothing a user typed directly,
+                // but a Bash step that echoed a secret could have
+                // surfaced in the summary. Redact to match the
+                // belt-and-braces posture on every other field.
+                *summary = redact_secrets(summary);
+            }
         }
     }
 }

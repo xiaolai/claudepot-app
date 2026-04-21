@@ -56,6 +56,10 @@ pub struct StatusMachine {
     recent_errors: VecDeque<DateTime<Utc>>,
     /// Most recent model id from an assistant fragment.
     model: Option<String>,
+    /// Most recent `task-summary` entry's text. Preferred over the
+    /// tool head-line in `current_action` because CC wrote it
+    /// explicitly to describe what the session is doing.
+    last_task_summary: Option<String>,
     /// What the last-observed assistant fragment looked like.
     last_assistant: LastAssistantShape,
     /// Whether we've seen any user-originated event since the last
@@ -87,6 +91,7 @@ impl StatusMachine {
             unmatched: BTreeMap::new(),
             recent_errors: VecDeque::new(),
             model: None,
+            last_task_summary: None,
             last_assistant: LastAssistantShape::None,
             pending_reply: false,
             pid_status: None,
@@ -198,6 +203,12 @@ impl StatusMachine {
                     // the open call and status stays `busy`.
                 }
             }
+            SessionEvent::TaskSummary { summary, .. } => {
+                // CC's own "what am I doing now" snapshot. Latched
+                // into `last_task_summary` so `current_action`
+                // prefers it over the tool head-line.
+                self.last_task_summary = Some(summary.clone());
+            }
             SessionEvent::Summary { .. }
             | SessionEvent::Attachment { .. }
             | SessionEvent::FileHistorySnapshot { .. }
@@ -227,6 +238,7 @@ impl StatusMachine {
             waiting_for,
             model: self.model.clone(),
             current_action: self.current_action(),
+            task_summary: self.last_task_summary.clone(),
             errored: self.errored(),
             stuck: self.stuck(),
             last_activity_ts: self.last_activity_ts,
@@ -263,10 +275,19 @@ impl StatusMachine {
     }
 
     fn current_action(&self) -> Option<String> {
-        // Prefer the oldest open tool call — that's usually the
-        // user-relevant one ("running pnpm test" not "scheduled a
-        // queued prompt"). BTreeMap iteration is keyed on tool_use_id,
-        // so sort by started_at explicitly.
+        // Preference order:
+        //   1. CC's own `task-summary` text (designed for `claude ps`)
+        //   2. The oldest open tool call, formatted as "<tool>: <arg>"
+        // Both pass through redact_secrets before leaving the core —
+        // CC's natural-language summaries can quote Bash commands
+        // that contain sk-ant-* tokens, and user-command args
+        // frequently do too.
+        if let Some(summary) = &self.last_task_summary {
+            let trimmed = summary.trim();
+            if !trimmed.is_empty() {
+                return Some(redact_secrets(&truncate(trimmed, 80)));
+            }
+        }
         let mut openings: Vec<_> = self.unmatched.values().collect();
         openings.sort_by_key(|o| o.started_at);
         let first = openings.first()?;
@@ -276,9 +297,6 @@ impl StatusMachine {
         } else {
             format!("{}: {}", first.tool_name, arg)
         };
-        // Trust-boundary redaction — a user command like
-        // `curl -H "Authorization: Bearer sk-ant-..."` must not
-        // leak its key into the peripheral surfaces.
         Some(redact_secrets(&truncate(&text, 80)))
     }
 
