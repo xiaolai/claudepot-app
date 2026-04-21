@@ -62,18 +62,45 @@ pub trait ProcessCheck: Send + Sync {
     fn is_running(&self, pid: u32) -> bool;
 }
 
-/// Production check via `sysinfo`. Rebuilds the process list on
-/// every call — the poller runs at ~2 Hz at most, and `sysinfo` is
-/// what CC itself uses for cross-platform process probes.
-pub struct SysinfoCheck;
+/// Production check via `sysinfo`. Caches the `System` behind a
+/// `Mutex` so consecutive calls from the same poll tick reuse one
+/// process list instead of rebuilding it per probe. Call
+/// [`SysinfoCheck::refresh_for`] once per tick to prime the cache
+/// with the exact PIDs the caller is about to check — that turns
+/// the N-probe cost into a single system call.
+pub struct SysinfoCheck {
+    sys: std::sync::Mutex<sysinfo::System>,
+}
+
+impl Default for SysinfoCheck {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl SysinfoCheck {
+    pub fn new() -> Self {
+        Self {
+            sys: std::sync::Mutex::new(sysinfo::System::new()),
+        }
+    }
+
+    /// Prime the cached `System` with the given PIDs. Callers should
+    /// invoke this once per poll tick before running `poll_dir` so
+    /// each `is_running` call is a cheap HashMap lookup.
+    pub fn refresh_for(&self, pids: &[u32]) {
+        use sysinfo::{Pid, ProcessesToUpdate};
+        let handles: Vec<Pid> = pids.iter().map(|p| Pid::from_u32(*p)).collect();
+        let Ok(mut sys) = self.sys.lock() else { return };
+        sys.refresh_processes(ProcessesToUpdate::Some(&handles), true);
+    }
+}
 
 impl ProcessCheck for SysinfoCheck {
     fn is_running(&self, pid: u32) -> bool {
-        use sysinfo::{Pid, ProcessesToUpdate, System};
-        let mut sys = System::new();
-        let target = Pid::from_u32(pid);
-        sys.refresh_processes(ProcessesToUpdate::Some(&[target]), true);
-        sys.process(target).is_some()
+        use sysinfo::Pid;
+        let Ok(sys) = self.sys.lock() else { return false };
+        sys.process(Pid::from_u32(pid)).is_some()
     }
 }
 

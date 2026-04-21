@@ -30,3 +30,4 @@ rayon.workspace = true
 num_cpus.workspace = true
 regex.workspace = true
 once_cell.workspace = true
+notify.workspace = true
