@@ -2674,23 +2674,6 @@ body {
   .running-op-spinner { animation: none; }
 }
 
-/* ---------- inline toast (repair view) ---------- */
-
-.inline-toast {
-  position: fixed;
-  top: 60px;
-  left: 50%;
-  transform: translateX(-50%);
-  padding: 8px 14px;
-  background: rgba(0, 0, 0, 0.8);
-  color: white;
-  font-size: 12px;
-  border-radius: 999px;
-  cursor: default;
-  backdrop-filter: blur(10px);
-  z-index: 20;
-}
-
 /* ---------- rename modal ---------- */
 
 .rename-modal { width: 560px; max-height: 85vh; overflow-y: auto; }

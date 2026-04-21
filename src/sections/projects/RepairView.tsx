@@ -6,6 +6,7 @@ import type { JournalEntry } from "../../types";
 import { RepairEntry } from "./RepairEntry";
 import { RepairConfirmDialogs, type PendingAction } from "./RepairConfirmDialogs";
 import { ConfirmDangerousAction } from "../../components/ConfirmDangerousAction";
+import { Toast } from "../../components/primitives/Toast";
 
 export function RepairView({
   onBack,
@@ -174,9 +175,7 @@ export function RepairView({
         />
       )}
 
-      {toast && (
-        <div className="inline-toast" role="status" onClick={() => setToast(null)}>{toast}</div>
-      )}
+      <Toast message={toast} onDismiss={() => setToast(null)} />
     </Wrapper>
   );
 }
