@@ -2209,6 +2209,49 @@ pub async fn session_live_session_snapshot(
         .map(crate::dto::LiveSessionSummaryDto::from))
 }
 
+/// Query the durable activity metrics store for the time-series
+/// Trends view. Returns active-session counts bucketed across the
+/// requested window plus a simple error-count total. An unavailable
+/// metrics store (first-launch race, permission issue) returns an
+/// all-zero series rather than an error — the Trends view is
+/// non-critical.
+#[tauri::command]
+pub fn activity_trends(
+    state: tauri::State<'_, crate::state::LiveSessionState>,
+    from_ms: i64,
+    to_ms: i64,
+    bucket_count: u32,
+) -> Result<crate::dto::ActivityTrendsDto, String> {
+    let buckets = bucket_count as usize;
+    let bucket_width = if buckets > 0 && to_ms > from_ms {
+        (to_ms - from_ms) / buckets as i64
+    } else {
+        0
+    };
+    let Some(store) = state.runtime.metrics() else {
+        return Ok(crate::dto::ActivityTrendsDto {
+            from_ms,
+            to_ms,
+            bucket_width_ms: bucket_width,
+            active_series: vec![0; buckets],
+            error_count: 0,
+        });
+    };
+    let active_series = store
+        .active_series(from_ms, to_ms, buckets)
+        .map_err(|e| format!("active_series: {e}"))?;
+    let error_count = store
+        .error_count(from_ms, to_ms)
+        .map_err(|e| format!("error_count: {e}"))?;
+    Ok(crate::dto::ActivityTrendsDto {
+        from_ms,
+        to_ms,
+        bucket_width_ms: bucket_width,
+        active_series,
+        error_count,
+    })
+}
+
 /// Subscribe to per-session deltas. Spawns a task that forwards
 /// every received delta as a `live::<sessionId>` event. Single-
 /// subscriber per session — concurrent calls with the same id

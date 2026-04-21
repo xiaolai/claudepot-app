@@ -211,6 +211,7 @@ pub fn run() {
             commands::session_live_snapshot,
             commands::session_live_session_snapshot,
             commands::session_live_subscribe,
+            commands::activity_trends,
         ])
         .run(tauri::generate_context!())
         .unwrap_or_else(|e| {

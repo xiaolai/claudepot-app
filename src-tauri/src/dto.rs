@@ -1407,6 +1407,19 @@ pub struct LiveDeltaDto {
     pub resync_required: bool,
 }
 
+/// Time-series snapshot for the Activity Trends view. A histogram of
+/// distinct live-session counts per time bucket plus the total error
+/// count inside the window. Buckets are returned in chronological
+/// order; `bucket_width_ms = (to_ms - from_ms) / series.len()`.
+#[derive(Serialize, Clone)]
+pub struct ActivityTrendsDto {
+    pub from_ms: i64,
+    pub to_ms: i64,
+    pub bucket_width_ms: i64,
+    pub active_series: Vec<u64>,
+    pub error_count: u64,
+}
+
 impl From<claudepot_core::session_live::types::LiveDelta> for LiveDeltaDto {
     fn from(d: claudepot_core::session_live::types::LiveDelta) -> Self {
         use claudepot_core::session_live::types::{LiveDeltaKind, Status};
