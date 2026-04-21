@@ -1,3 +1,4 @@
+import { useState } from "react";
 import type { LinkedTool } from "../../../types";
 import { Glyph } from "../../../components/primitives/Glyph";
 import { NF } from "../../../icons";
@@ -5,6 +6,9 @@ import { BashToolViewer } from "./BashToolViewer";
 import { EditToolViewer } from "./EditToolViewer";
 import { ReadToolViewer } from "./ReadToolViewer";
 import { WriteToolViewer } from "./WriteToolViewer";
+import { redactSecrets } from "./redact";
+
+const GENERIC_CLAMP = 4000;
 
 /**
  * Dispatcher — chooses the specialized tool viewer by tool name and
@@ -90,20 +94,65 @@ function GenericToolView({ tool }: { tool: LinkedTool }) {
         }}
       >
         <div style={{ color: "var(--fg-ghost)" }}>input</div>
-        <pre style={{ margin: 0, whiteSpace: "pre-wrap", wordBreak: "break-word" }}>
-          {tool.input_preview}
-        </pre>
+        <ClampedPre text={redactSecrets(tool.input_preview)} />
         {tool.result_content != null && (
           <>
             <div style={{ color: "var(--fg-ghost)", marginTop: "var(--sp-6)" }}>
               result
             </div>
-            <pre style={{ margin: 0, whiteSpace: "pre-wrap", wordBreak: "break-word" }}>
-              {tool.result_content}
-            </pre>
+            <ClampedPre text={redactSecrets(tool.result_content)} />
           </>
         )}
       </div>
+    </div>
+  );
+}
+
+/**
+ * `<pre>` with a soft cap on rendered length. An unknown tool can dump
+ * megabytes into `result_content`; rendering all of it in the transcript
+ * pane freezes the webview. We cut at GENERIC_CLAMP chars by default
+ * and let the user opt-in to the full body.
+ */
+function ClampedPre({ text }: { text: string }) {
+  const [expanded, setExpanded] = useState(false);
+  const clamp = text.length > GENERIC_CLAMP && !expanded;
+  const shown = clamp ? text.slice(0, GENERIC_CLAMP) : text;
+  const hidden = text.length - shown.length;
+  return (
+    <div>
+      <pre
+        style={{
+          margin: 0,
+          whiteSpace: "pre-wrap",
+          wordBreak: "break-word",
+          maxHeight: "400px",
+          overflow: "auto",
+        }}
+      >
+        {shown}
+        {clamp && `\n… ${hidden} chars hidden`}
+      </pre>
+      {text.length > GENERIC_CLAMP && (
+        <button
+          type="button"
+          onClick={() => setExpanded((v) => !v)}
+          style={{
+            marginTop: "var(--sp-4)",
+            background: "transparent",
+            border: "var(--bw-hair) solid var(--line)",
+            borderRadius: "var(--r-1)",
+            color: "var(--fg-muted)",
+            fontSize: "var(--fs-xs)",
+            padding: "var(--sp-2) var(--sp-8)",
+            cursor: "pointer",
+            letterSpacing: "var(--ls-wide)",
+            textTransform: "uppercase",
+          }}
+        >
+          {expanded ? "Collapse" : `Show ${hidden} more chars`}
+        </button>
+      )}
     </div>
   );
 }

@@ -108,6 +108,73 @@ describe("SessionContextPanel", () => {
     expect(close).toHaveBeenCalledOnce();
   });
 
+  it("totals follow the selected phase", async () => {
+    __mockSessionContextAttribution.mockResolvedValueOnce(
+      stats({
+        totals: {
+          claude_md: 0,
+          mentioned_file: 0,
+          tool_output: 1000,
+          thinking_text: 0,
+          team_coordination: 0,
+          user_message: 500,
+        },
+        injections: [
+          {
+            event_index: 0,
+            category: "tool-output",
+            label: "Read",
+            tokens: 1000,
+            ts: null,
+            phase: 0,
+          },
+          {
+            event_index: 1,
+            category: "user-message",
+            label: "user",
+            tokens: 500,
+            ts: null,
+            phase: 1,
+          },
+        ],
+        phases: [
+          {
+            phase_number: 0,
+            start_index: 0,
+            end_index: 1,
+            start_ts: null,
+            end_ts: null,
+            summary: null,
+          },
+          {
+            phase_number: 1,
+            start_index: 2,
+            end_index: 3,
+            start_ts: null,
+            end_ts: null,
+            summary: "compacted",
+          },
+        ],
+      }),
+    );
+    render(
+      <SessionContextPanel
+        filePath="/t.jsonl"
+        onClose={() => {}}
+        refreshSignal={0}
+      />,
+    );
+    // Wait for initial render and confirm aggregate totals show up.
+    const pill0 = await screen.findByRole("button", { name: "#0" });
+    await userEvent.click(pill0);
+    // After selecting phase 0, the phase injection tokens should match.
+    // The tool-output category should show 1000 tokens, user-message 0.
+    // The simplest deterministic assertion: the category row for
+    // user-message should now show "0" tokens.
+    const userRow = screen.getByTestId("category-user-message");
+    expect(userRow.textContent ?? "").toMatch(/\b0\b/);
+  });
+
   it("shows phase picker only when more than one phase exists", async () => {
     __mockSessionContextAttribution.mockResolvedValueOnce(
       stats({

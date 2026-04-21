@@ -44,7 +44,18 @@ const SEG_OPTIONS: { id: SessionFilter; label: string }[] = [
  * The `refresh()` handler re-pulls sessions AND projects in parallel
  * so the Move modal's target list stays fresh after a move.
  */
-export function SessionsSection() {
+export interface SessionsSectionProps {
+  /**
+   * Path the caller wants pre-selected (e.g. from a cross-session
+   * command-palette hit). Consumed exactly once on mount; use a
+   * parent-owned key/state rotation to re-prime.
+   */
+  initialSelectedPath?: string | null;
+  onInitialSelectedPathConsumed?: () => void;
+}
+
+export function SessionsSection(props: SessionsSectionProps = {}) {
+  const { initialSelectedPath = null, onInitialSelectedPathConsumed } = props;
   const [sessions, setSessions] = useState<SessionRow[]>([]);
   const [projects, setProjects] = useState<ProjectInfo[]>([]);
   const [repoGroups, setRepoGroups] = useState<RepositoryGroup[] | null>(null);
@@ -95,9 +106,14 @@ export function SessionsSection() {
         setSelectedPath((prev) =>
           prev && ss.some((s) => s.file_path === prev) ? prev : null,
         );
-        // Drop the active repo if the new groups don't contain it.
+        // Drop the active repo id if the new groups don't contain it.
+        // Id is `repo_root` for git-tracked repos, `label` for no-repo.
         setActiveRepo((prev) =>
-          prev && groups && groups.some((g) => g.label === prev) ? prev : null,
+          prev &&
+          groups &&
+          groups.some((g) => (g.repo_root ?? g.label) === prev)
+            ? prev
+            : null,
         );
       })
       .catch((e) => {
@@ -111,21 +127,16 @@ export function SessionsSection() {
     refresh();
   }, [refresh]);
 
-  // Listen for deep-link requests from the command palette's session
-  // search. The search dispatches a `sessions-select-path` event with
-  // the `file_path`; we honor it whenever the target session is in
-  // our current list. If it's not, we kick a refresh first so a newly
-  // discovered transcript (post-index-rebuild) still resolves.
+  // Consume the deep-link path from `initialSelectedPath` exactly once
+  // per mount. Runs when the prop flips from falsy to a value — the
+  // parent state rotation is the trigger, not a timer.
   useEffect(() => {
-    function onSelect(ev: Event) {
-      const detail = (ev as CustomEvent<{ filePath: string }>).detail;
-      if (!detail?.filePath) return;
-      setSelectedPath(detail.filePath);
+    if (initialSelectedPath) {
+      setSelectedPath(initialSelectedPath);
       setActiveRepo(null); // clear repo filter so the selection is visible
+      onInitialSelectedPathConsumed?.();
     }
-    window.addEventListener("sessions-select-path", onSelect);
-    return () => window.removeEventListener("sessions-select-path", onSelect);
-  }, []);
+  }, [initialSelectedPath, onInitialSelectedPathConsumed]);
 
   useGlobalShortcuts({ onRefresh: refresh });
 

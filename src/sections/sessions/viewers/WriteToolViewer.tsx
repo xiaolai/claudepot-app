@@ -1,6 +1,7 @@
 import type { LinkedTool } from "../../../types";
 import { Glyph } from "../../../components/primitives/Glyph";
 import { NF } from "../../../icons";
+import { redactSecrets } from "./redact";
 import { parseToolInput, type WriteInput } from "./toolInput";
 
 const CONTENT_CLAMP = 4000;
@@ -14,7 +15,7 @@ export function WriteToolViewer({ tool }: { tool: LinkedTool }) {
   const parsed = parseToolInput<WriteInput>(tool.input_preview);
   const input = parsed.ok ? parsed.value : {};
   const path = input.file_path ?? "(unknown file)";
-  const content = input.content ?? "";
+  const content = redactSecrets(input.content ?? "");
   const shown = content.slice(0, CONTENT_CLAMP);
   const clamped = content.length > CONTENT_CLAMP;
 

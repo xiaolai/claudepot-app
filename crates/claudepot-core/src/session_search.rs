@@ -15,6 +15,7 @@
 //! The search is read-only; there's no mutation on disk.
 
 use crate::session::{SessionError, SessionEvent, SessionRow};
+use crate::session_export::redact_secrets;
 use serde::Serialize;
 use std::fs;
 use std::io::{BufRead, BufReader};
@@ -47,28 +48,24 @@ pub fn search_rows(
     if query.trim().len() < 2 {
         return Ok(Vec::new());
     }
-    let needle = query.to_ascii_lowercase();
+    let needle = query.to_lowercase();
     let mut hits = Vec::new();
 
     for row in rows {
         if hits.len() >= limit {
             break;
         }
-        // Fast-path: row-level fields (first_user_prompt, display_slug)
-        // give us a synthetic hit without opening the file.
+        // Fast-path: row-level fields (first_user_prompt) give us a
+        // synthetic hit without opening the file.
         if let Some(fp) = &row.first_user_prompt {
-            if fp.to_ascii_lowercase().contains(&needle) {
-                let offset = fp.to_ascii_lowercase().find(&needle).unwrap_or(0);
-                hits.push(SearchHit {
-                    session_id: row.session_id.clone(),
-                    slug: row.slug.clone(),
-                    file_path: row.file_path.clone(),
-                    project_path: row.project_path.clone(),
-                    role: "user".into(),
-                    snippet: make_snippet(fp, offset, needle.len()),
-                    match_offset: offset,
-                    last_ts: row.last_ts,
-                });
+            if let Some(offset) = find_case_insensitive(fp, &needle) {
+                hits.push(make_hit(
+                    row,
+                    "user",
+                    fp,
+                    offset,
+                    needle_char_len(&needle),
+                ));
                 if hits.len() >= limit {
                     break;
                 }
@@ -80,6 +77,63 @@ pub fn search_rows(
     }
 
     Ok(hits)
+}
+
+/// Case-insensitive substring scan that handles Unicode. Matches are
+/// found in the lowercased haystack, then remapped to the original
+/// string by tracking how many source chars produced each lowercase
+/// char. This survives **expanding case folds** — e.g. `İ` (U+0130)
+/// lowercases to `i\u{0307}` (two chars), so a naive "count lowercase
+/// chars before the match, then walk original chars" is off by one for
+/// every expansion in the prefix.
+///
+/// Returns the byte offset of the first match in the original string.
+fn find_case_insensitive(haystack: &str, needle_lower: &str) -> Option<usize> {
+    if needle_lower.is_empty() {
+        return None;
+    }
+
+    // Build the lowercased haystack alongside a parallel array that
+    // records, for each byte in the lowercased form, the byte offset
+    // of the *source* character in the original string. That gives us
+    // a direct byte->byte map even when case folding expands chars.
+    let mut lower = String::with_capacity(haystack.len());
+    let mut src_byte_of_lower_byte: Vec<usize> = Vec::with_capacity(haystack.len());
+    for (src_idx, c) in haystack.char_indices() {
+        for lc in c.to_lowercase() {
+            let before = lower.len();
+            lower.push(lc);
+            for _ in before..lower.len() {
+                src_byte_of_lower_byte.push(src_idx);
+            }
+        }
+    }
+
+    let lower_off = lower.find(needle_lower)?;
+    Some(src_byte_of_lower_byte[lower_off])
+}
+
+fn needle_char_len(needle_lower: &str) -> usize {
+    needle_lower.chars().count()
+}
+
+fn make_hit(
+    row: &SessionRow,
+    role: &str,
+    text: &str,
+    byte_off: usize,
+    needle_char_len: usize,
+) -> SearchHit {
+    SearchHit {
+        session_id: row.session_id.clone(),
+        slug: row.slug.clone(),
+        file_path: row.file_path.clone(),
+        project_path: row.project_path.clone(),
+        role: role.into(),
+        snippet: redact_secrets(&make_snippet_chars(text, byte_off, needle_char_len)),
+        match_offset: byte_off,
+        last_ts: row.last_ts,
+    }
 }
 
 /// Open the JSONL and scan every user / assistant turn for matches.
@@ -114,18 +168,8 @@ fn scan_file(
             _ => continue,
         };
         let Some(text) = text else { continue };
-        let lower = text.to_ascii_lowercase();
-        if let Some(off) = lower.find(needle) {
-            hits.push(SearchHit {
-                session_id: row.session_id.clone(),
-                slug: row.slug.clone(),
-                file_path: row.file_path.clone(),
-                project_path: row.project_path.clone(),
-                role: role.into(),
-                snippet: make_snippet(&text, off, needle.len()),
-                match_offset: off,
-                last_ts: row.last_ts,
-            });
+        if let Some(off) = find_case_insensitive(&text, needle) {
+            hits.push(make_hit(row, role, &text, off, needle_char_len(needle)));
             return Ok(());
         }
         if hits.len() >= limit {
@@ -135,20 +179,31 @@ fn scan_file(
     Ok(())
 }
 
-/// Pull out the user's typed prompt, skipping tool-result arrays.
+/// Pull out every user text block in a single turn (skipping
+/// tool_result entries). Joined with a space so a later match in the
+/// same turn is still reachable.
 fn extract_user_text(v: &serde_json::Value) -> Option<String> {
     let msg = v.get("message")?;
     match msg.get("content")? {
         serde_json::Value::String(s) => Some(s.clone()),
-        serde_json::Value::Array(parts) => parts
-            .iter()
-            .find_map(|p| {
-                if p.get("type").and_then(|t| t.as_str()) == Some("text") {
-                    p.get("text").and_then(|t| t.as_str()).map(String::from)
-                } else {
-                    None
-                }
-            }),
+        serde_json::Value::Array(parts) => {
+            let joined: String = parts
+                .iter()
+                .filter_map(|p| {
+                    if p.get("type").and_then(|t| t.as_str()) == Some("text") {
+                        p.get("text").and_then(|t| t.as_str())
+                    } else {
+                        None
+                    }
+                })
+                .collect::<Vec<_>>()
+                .join(" ");
+            if joined.is_empty() {
+                None
+            } else {
+                Some(joined)
+            }
+        }
         _ => None,
     }
 }
@@ -175,32 +230,31 @@ fn extract_assistant_text(v: &serde_json::Value) -> Option<String> {
     }
 }
 
-fn make_snippet(text: &str, offset: usize, needle_len: usize) -> String {
+/// Build a ±WINDOW-char snippet around a match, counted in **chars**
+/// (Unicode scalar values). Input is the original haystack string and
+/// the byte offset of the match within it; we convert to a char index
+/// correctly for multi-byte code points.
+///
+/// Replaces `\n`/`\r` with spaces so the preview fits on one line.
+fn make_snippet_chars(text: &str, byte_off: usize, needle_char_len: usize) -> String {
     const WINDOW: usize = 48;
-    // Work on chars, not bytes, to avoid slicing multi-byte code points.
-    let chars: Vec<char> = text.chars().collect();
-    // Approximate char-offset from byte-offset by counting chars up to offset.
-    let byte_off = offset;
-    let mut char_off = 0usize;
-    let mut cum = 0usize;
-    for (i, c) in text.char_indices() {
-        if i >= byte_off {
-            char_off = cum;
-            break;
-        }
-        cum = i + c.len_utf8();
-    }
-    if char_off == 0 {
-        char_off = cum;
-    }
-    let char_off = char_off.min(chars.len());
+    // Count the characters strictly before `byte_off`. Walking
+    // char_indices() lands on each code-point boundary, so the count
+    // of boundaries with `idx < byte_off` is the char index.
+    let char_off = text
+        .char_indices()
+        .position(|(idx, _)| idx >= byte_off)
+        .unwrap_or_else(|| text.chars().count());
+    let total_chars = text.chars().count();
     let start = char_off.saturating_sub(WINDOW);
-    let end = (char_off + needle_len + WINDOW).min(chars.len());
+    let end = (char_off + needle_char_len + WINDOW).min(total_chars);
     let prefix = if start > 0 { "…" } else { "" };
-    let suffix = if end < chars.len() { "…" } else { "" };
-    let body: String = chars[start..end]
-        .iter()
-        .map(|c| if *c == '\n' || *c == '\r' { ' ' } else { *c })
+    let suffix = if end < total_chars { "…" } else { "" };
+    let body: String = text
+        .chars()
+        .skip(start)
+        .take(end - start)
+        .map(|c| if c == '\n' || c == '\r' { ' ' } else { c })
         .collect();
     format!("{prefix}{body}{suffix}")
 }
@@ -216,7 +270,7 @@ pub fn search_events<'a>(
     if query.trim().len() < 2 {
         return Vec::new();
     }
-    let needle = query.to_ascii_lowercase();
+    let needle = query.to_lowercase();
     let mut out = Vec::new();
     for (i, ev) in events.iter().enumerate() {
         let text = match ev {
@@ -229,9 +283,16 @@ pub fn search_events<'a>(
             _ => None,
         };
         let Some(text) = text else { continue };
-        let lower = text.to_ascii_lowercase();
-        if let Some(off) = lower.find(&needle) {
-            out.push((i, ev, make_snippet(text, off, needle.len())));
+        if let Some(off) = find_case_insensitive(text, &needle) {
+            out.push((
+                i,
+                ev,
+                redact_secrets(&make_snippet_chars(
+                    text,
+                    off,
+                    needle_char_len(&needle),
+                )),
+            ));
         }
     }
     out
@@ -433,5 +494,75 @@ mod tests {
         assert_eq!(hits.len(), 1);
         assert!(!hits[0].2.contains('\n'));
         assert!(hits[0].2.contains('…')); // bounded
+    }
+
+    #[test]
+    fn search_redacts_sk_ant_tokens_in_snippet() {
+        let events = vec![SessionEvent::AssistantText {
+            ts: None,
+            uuid: None,
+            model: None,
+            text: "leaked sk-ant-oat01-AbcdWxYz0000 keep searching".into(),
+            usage: None,
+            stop_reason: None,
+        }];
+        let hits = search_events(&events, "keep");
+        assert_eq!(hits.len(), 1);
+        assert!(!hits[0].2.contains("sk-ant-oat01-AbcdWxYz0000"));
+        assert!(hits[0].2.contains("sk-ant-***0000"));
+    }
+
+    #[test]
+    fn search_finds_match_in_second_user_text_block() {
+        let tmp = TempDir::new().unwrap();
+        let path = tmp.path().join("multi.jsonl");
+        write_jsonl(
+            &path,
+            &[
+                r#"{"type":"user","message":{"role":"user","content":[{"type":"text","text":"first block unrelated"},{"type":"text","text":"second block has widget"}]},"sessionId":"m"}"#,
+            ],
+        );
+        let hits = search_rows(
+            &[row("m", "-r", path, Some("unrelated"), None)],
+            "widget",
+            5,
+        )
+        .unwrap();
+        assert_eq!(hits.len(), 1);
+        assert!(hits[0].snippet.contains("widget"));
+    }
+
+    #[test]
+    fn search_handles_expanding_case_fold_prefixes() {
+        // `İ` lowercases to `i\u{0307}` — the case fold produces more
+        // chars than the source. A naive byte-offset remap would point
+        // past the `İ` into the following character, producing a
+        // snippet that starts at the wrong place.
+        let events = vec![SessionEvent::UserText {
+            ts: None,
+            uuid: None,
+            text: "İstanbul recipe".into(),
+        }];
+        let hits = search_events(&events, "recipe");
+        assert_eq!(hits.len(), 1);
+        assert!(hits[0].2.contains("recipe"));
+        // The whole source line is short enough to fit the window, so
+        // the snippet should start from the original start, not halfway
+        // into `İstanbul`.
+        assert!(hits[0].2.starts_with("İstanbul") || hits[0].2.starts_with("…"));
+    }
+
+    #[test]
+    fn search_is_unicode_case_insensitive() {
+        let events = vec![SessionEvent::UserText {
+            ts: None,
+            uuid: None,
+            text: "Café opens early".into(),
+        }];
+        // Lowercase `é` in the query matches capital `É` implicitly by
+        // Unicode lowercase folding.
+        let hits = search_events(&events, "café");
+        assert_eq!(hits.len(), 1);
+        assert!(hits[0].2.contains("Café"));
     }
 }

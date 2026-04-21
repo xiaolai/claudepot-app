@@ -1,7 +1,14 @@
 import type { LinkedTool } from "../../../types";
 import { Glyph } from "../../../components/primitives/Glyph";
 import { NF } from "../../../icons";
-import { parseToolInput, tryParseResult, type BashInput, type BashResult } from "./toolInput";
+import { redactSecrets } from "./redact";
+import {
+  bashCommand,
+  parseToolInput,
+  tryParseResult,
+  type BashInput,
+  type BashResult,
+} from "./toolInput";
 
 const OUTPUT_CLAMP = 4000;
 
@@ -12,12 +19,17 @@ const OUTPUT_CLAMP = 4000;
  */
 export function BashToolViewer({ tool }: { tool: LinkedTool }) {
   const parsed = parseToolInput<BashInput>(tool.input_preview);
-  const input = parsed.ok ? parsed.value : {};
+  const input: BashInput = parsed.ok ? parsed.value : {};
+  const cmd = bashCommand(input);
   const resultRaw = tool.result_content ?? "";
   const result = tryParseResult<BashResult>(resultRaw);
 
-  const stdout = result.ok ? (result.value.stdout ?? "") : resultRaw;
-  const stderr = result.ok ? (result.value.stderr ?? "") : "";
+  const stdout = redactSecrets(
+    result.ok ? (result.value.stdout ?? "") : resultRaw,
+  );
+  const stderr = redactSecrets(
+    result.ok ? (result.value.stderr ?? "") : "",
+  );
   const exit = result.ok ? result.value.exit_code : undefined;
   const interrupted = result.ok ? result.value.interrupted : undefined;
 
@@ -42,8 +54,8 @@ export function BashToolViewer({ tool }: { tool: LinkedTool }) {
         }}
       >
         <Glyph g={NF.terminal} style={{ fontSize: "var(--fs-sm)" }} />
-        <span className="mono" style={{ flex: 1 }} title={input.command ?? ""}>
-          $ {input.command ?? "(no command)"}
+        <span className="mono" style={{ flex: 1 }} title={cmd}>
+          $ {cmd || "(no command)"}
         </span>
         {typeof exit === "number" && (
           <span

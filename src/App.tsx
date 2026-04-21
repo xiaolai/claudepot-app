@@ -1,4 +1,11 @@
-import { lazy, Suspense, useCallback, useEffect, useMemo } from "react";
+import {
+  lazy,
+  Suspense,
+  useCallback,
+  useEffect,
+  useMemo,
+  useState,
+} from "react";
 import { PendingJournalsBanner } from "./components/PendingJournalsBanner";
 import { RunningOpStrip } from "./components/RunningOpStrip";
 import { StatusIssuesBanner } from "./components/StatusIssuesBanner";
@@ -60,6 +67,16 @@ function AppShell() {
   const { section, subRoute, setSection, setSubRoute } = useSection(
     sectionIds[0],
     sectionIds,
+  );
+  /**
+   * Path to select when the Sessions tab next mounts. Written by the
+   * cross-session command-palette bridge; cleared by SessionsSection
+   * the first time it mounts with a pending value. This replaces an
+   * earlier setTimeout(0) dispatch that could drop the selection if
+   * the lazy section hadn't finished mounting.
+   */
+  const [pendingSessionPath, setPendingSessionPath] = useState<string | null>(
+    null,
   );
   const { summary: pendingSummary, refresh: refreshPendingBanner } =
     usePendingJournals();
@@ -185,22 +202,17 @@ function AppShell() {
   }, [setSection, toggleTheme, refreshAccounts, pushToast]);
 
   // Bridge from the command palette's cross-session search: when the
-  // user selects a session hit, jump to the Sessions tab and pass the
-  // file_path through a second event that `SessionsSection` listens
-  // for on mount.
+  // user selects a session hit, stash the target path and jump to the
+  // Sessions tab. `SessionsSection` reads the pending path on mount —
+  // so the selection is guaranteed to be consumed even if the section
+  // wasn't already rendered. Previous implementation raced via
+  // `setTimeout(0)` and could drop the selection on slow mounts.
   useEffect(() => {
     function onGoto(ev: Event) {
       const detail = (ev as CustomEvent<{ filePath: string }>).detail;
       if (!detail?.filePath) return;
+      setPendingSessionPath(detail.filePath);
       setSection("sessions");
-      // Give the section a tick to mount, then hand it the path.
-      setTimeout(() => {
-        window.dispatchEvent(
-          new CustomEvent("sessions-select-path", {
-            detail: { filePath: detail.filePath },
-          }),
-        );
-      }, 0);
     }
     window.addEventListener("cp-goto-session", onGoto);
     return () => window.removeEventListener("cp-goto-session", onGoto);
@@ -398,7 +410,14 @@ function AppShell() {
                   onSubRouteChange={setSubRoute}
                 />
               )}
-              {section === "sessions" && <SessionsSection />}
+              {section === "sessions" && (
+                <SessionsSection
+                  initialSelectedPath={pendingSessionPath}
+                  onInitialSelectedPathConsumed={() =>
+                    setPendingSessionPath(null)
+                  }
+                />
+              )}
               {section === "settings" && <SettingsSection />}
             </Suspense>
           </div>

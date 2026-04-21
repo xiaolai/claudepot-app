@@ -1362,63 +1362,27 @@ pub fn session_index_rebuild() -> Result<(), String> {
 /// Chunked event stream plus per-chunk linked tools — the shape the
 /// Sessions transcript renders from.
 #[tauri::command]
-pub fn session_chunks(
-    file_path: String,
-) -> Result<Vec<claudepot_core::session_chunks::SessionChunk>, String> {
+pub fn session_chunks(file_path: String) -> Result<Vec<crate::dto::SessionChunkDto>, String> {
     let detail = load_detail_by_path(&file_path)?;
-    Ok(claudepot_core::session_chunks::build_chunks(&detail.events))
-}
-
-/// Flat list of paired tool calls and results for one transcript.
-#[tauri::command]
-pub fn session_linked_tools(
-    file_path: String,
-) -> Result<Vec<claudepot_core::session_tool_link::LinkedTool>, String> {
-    let detail = load_detail_by_path(&file_path)?;
-    Ok(claudepot_core::session_tool_link::link_tools(&detail.events))
-}
-
-/// Subagent transcripts for a parent session, pre-linked against the
-/// parent's Task calls.
-#[tauri::command]
-pub fn session_subagents(
-    file_path: String,
-) -> Result<Vec<claudepot_core::session_subagents::Subagent>, String> {
-    let detail = load_detail_by_path(&file_path)?;
-    let cfg = paths::claude_config_dir();
-    let mut agents = claudepot_core::session_subagents::resolve_subagents(
-        &cfg,
-        &detail.row.slug,
-        &detail.row.session_id,
-    )
-    .map_err(|e| format!("resolve subagents: {e}"))?;
-    claudepot_core::session_subagents::link_parent_tasks(&detail.events, &mut agents);
-    Ok(agents)
-}
-
-/// Phase breakdown — one entry per compaction boundary.
-#[tauri::command]
-pub fn session_phases(
-    file_path: String,
-) -> Result<claudepot_core::session_phases::ContextPhaseInfo, String> {
-    let detail = load_detail_by_path(&file_path)?;
-    Ok(claudepot_core::session_phases::compute_phases(&detail.events))
+    let chunks = claudepot_core::session_chunks::build_chunks(&detail.events);
+    Ok(chunks.iter().map(crate::dto::SessionChunkDto::from).collect())
 }
 
 /// Visible-context token attribution across six categories.
 #[tauri::command]
 pub fn session_context_attribution(
     file_path: String,
-) -> Result<claudepot_core::session_context::ContextStats, String> {
+) -> Result<crate::dto::ContextStatsDto, String> {
     let detail = load_detail_by_path(&file_path)?;
-    Ok(claudepot_core::session_context::attribute_context(
-        &detail.events,
-    ))
+    let stats = claudepot_core::session_context::attribute_context(&detail.events);
+    Ok((&stats).into())
 }
 
-/// Export transcript to Markdown or JSON (sk-ant-* redacted).
-#[tauri::command]
-pub fn session_export_text(file_path: String, format: String) -> Result<String, String> {
+/// Export transcript to Markdown or JSON (sk-ant-* redacted). Kept as
+/// an internal helper for `session_export_to_file` — not exposed
+/// separately until the UI has a "copy to clipboard" flow that needs
+/// the raw body.
+fn session_export_text(file_path: String, format: String) -> Result<String, String> {
     let detail = load_detail_by_path(&file_path)?;
     let fmt = match format.as_str() {
         "md" | "markdown" => claudepot_core::session_export::ExportFormat::Markdown,
@@ -1428,27 +1392,138 @@ pub fn session_export_text(file_path: String, format: String) -> Result<String, 
     Ok(claudepot_core::session_export::export(&detail, fmt))
 }
 
-/// Export transcript directly to disk. The UI hands us an
-/// absolute path chosen by the user via the native save dialog;
-/// we write the rendered body with 0600 permissions on Unix so the
-/// on-disk copy matches the Rust conventions guarding credential files.
+/// Export transcript directly to disk. The UI hands us an absolute
+/// path chosen by the user via the native save dialog; we validate,
+/// then create the file atomically with restrictive permissions.
+///
+/// Boundary checks:
+/// * `output_path` must be absolute and may not contain any `..`
+///   component (defence against UI-side bugs that would allow a
+///   compromised webview to write outside the user's chosen dir).
+/// * The file is created with `CREATE | TRUNCATE` and — on Unix —
+///   an O_NOFOLLOW-like intent enforced by `OpenOptions.mode(0o600)`
+///   *before* any bytes are written, so the window where the file
+///   could be world-readable is closed.
+/// * A pre-existing symlink at `output_path` is refused; if the user
+///   really wants to overwrite a symlink target they can delete it
+///   first.
+/// * Chmod failure after the fact is treated as fatal (we'd otherwise
+///   fail open on a filesystem that silently ignored the mode bits).
 #[tauri::command]
 pub fn session_export_to_file(
     file_path: String,
     format: String,
     output_path: String,
 ) -> Result<usize, String> {
+    let output = std::path::Path::new(&output_path);
+    if !output.is_absolute() {
+        return Err(format!("output path must be absolute: {output_path}"));
+    }
+    if output
+        .components()
+        .any(|c| matches!(c, std::path::Component::ParentDir))
+    {
+        return Err(format!(
+            "output path must not contain `..`: {output_path}"
+        ));
+    }
+    // Refuse to overwrite a symlink — the user's chosen filesystem
+    // might resolve to somewhere unexpected under our permissions.
+    match std::fs::symlink_metadata(output) {
+        Ok(meta) if meta.file_type().is_symlink() => {
+            return Err(format!(
+                "refusing to overwrite symlink: {output_path}"
+            ));
+        }
+        _ => {}
+    }
+
     let body = session_export_text(file_path, format)?;
-    std::fs::write(&output_path, &body)
-        .map_err(|e| format!("write {output_path}: {e}"))?;
+
+    // Atomic write: render into a sibling temp file, fsync, then
+    // rename into place. On Unix `rename(2)` is atomic within the same
+    // filesystem. If we crash mid-write the user still sees the
+    // previous file (or no file) — never a half-written transcript.
+    let parent = output
+        .parent()
+        .ok_or_else(|| format!("output has no parent directory: {output_path}"))?;
+    let final_name = output
+        .file_name()
+        .and_then(|s| s.to_str())
+        .ok_or_else(|| format!("output has no filename: {output_path}"))?;
+
+    // Unique per-call suffix so concurrent exports don't stomp each other.
+    let nonce = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_nanos())
+        .unwrap_or(0);
+    let tmp_path = parent.join(format!(".{final_name}.claudepot-tmp-{nonce}"));
+
+    let mut opts = std::fs::OpenOptions::new();
+    opts.write(true).create_new(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        // create_new + mode == file is born with 0600 on filesystems
+        // that honor it. Filesystems that silently ignore mode still
+        // benefit from the `unreadable-until-rename` property via umask,
+        // and the post-write chmod fallback below catches the rest.
+        opts.mode(0o600);
+    }
+    let mut file = opts
+        .open(&tmp_path)
+        .map_err(|e| format!("open tmp {}: {e}", tmp_path.display()))?;
+
+    use std::io::Write as _;
+    if let Err(e) = (|| -> std::io::Result<()> {
+        file.write_all(body.as_bytes())?;
+        file.sync_all()?;
+        Ok(())
+    })() {
+        // Best-effort cleanup; ignore secondary errors.
+        drop(file);
+        let _ = std::fs::remove_file(&tmp_path);
+        return Err(format!("write tmp {}: {e}", tmp_path.display()));
+    }
+    drop(file);
+
+    // Belt-and-braces permission check before the rename. If we can't
+    // enforce 0600, delete the tmp file and refuse the export.
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;
-        let _ = std::fs::set_permissions(
-            &output_path,
-            std::fs::Permissions::from_mode(0o600),
-        );
+        let meta = std::fs::metadata(&tmp_path)
+            .map_err(|e| format!("stat tmp: {e}"))?;
+        if meta.permissions().mode() & 0o077 != 0 {
+            if let Err(e) = std::fs::set_permissions(
+                &tmp_path,
+                std::fs::Permissions::from_mode(0o600),
+            ) {
+                let _ = std::fs::remove_file(&tmp_path);
+                return Err(format!("chmod tmp: {e}"));
+            }
+            let mode2 = std::fs::metadata(&tmp_path)
+                .map_err(|e| format!("re-stat tmp: {e}"))?
+                .permissions()
+                .mode();
+            if mode2 & 0o077 != 0 {
+                let _ = std::fs::remove_file(&tmp_path);
+                return Err(format!(
+                    "filesystem does not enforce 0600 permissions at {output_path}"
+                ));
+            }
+        }
     }
+
+    // Rename into place. Atomic on POSIX when src + dst are on the
+    // same filesystem; Windows' `rename` is also atomic per MSFT docs
+    // on the same volume. We prepared `tmp_path` in `parent`, so this
+    // is always same-filesystem.
+    if let Err(e) = std::fs::rename(&tmp_path, output) {
+        let _ = std::fs::remove_file(&tmp_path);
+        return Err(format!("rename into {output_path}: {e}"));
+    }
+
     Ok(body.len())
 }
 
@@ -1457,23 +1532,28 @@ pub fn session_export_to_file(
 pub fn session_search(
     query: String,
     limit: Option<usize>,
-) -> Result<Vec<claudepot_core::session_search::SearchHit>, String> {
+) -> Result<Vec<crate::dto::SearchHitDto>, String> {
     let cfg = paths::claude_config_dir();
     let rows = claudepot_core::session::list_all_sessions(&cfg)
         .map_err(|e| format!("list sessions: {e}"))?;
-    claudepot_core::session_search::search_rows(&rows, &query, limit.unwrap_or(25))
-        .map_err(|e| format!("search sessions: {e}"))
+    let hits =
+        claudepot_core::session_search::search_rows(&rows, &query, limit.unwrap_or(25))
+            .map_err(|e| format!("search sessions: {e}"))?;
+    Ok(hits.iter().map(crate::dto::SearchHitDto::from).collect())
 }
 
 /// Group all sessions by git repository (collapses worktrees into a
 /// single repository row).
 #[tauri::command]
-pub fn session_worktree_groups(
-) -> Result<Vec<claudepot_core::session_worktree::RepositoryGroup>, String> {
+pub fn session_worktree_groups() -> Result<Vec<crate::dto::RepositoryGroupDto>, String> {
     let cfg = paths::claude_config_dir();
     let rows = claudepot_core::session::list_all_sessions(&cfg)
         .map_err(|e| format!("list sessions: {e}"))?;
-    Ok(claudepot_core::session_worktree::group_by_repo(rows))
+    let groups = claudepot_core::session_worktree::group_by_repo(rows);
+    Ok(groups
+        .iter()
+        .map(crate::dto::RepositoryGroupDto::from)
+        .collect())
 }
 
 fn load_detail_by_path(

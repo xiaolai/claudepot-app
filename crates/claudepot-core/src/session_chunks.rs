@@ -23,6 +23,7 @@ use crate::session_classify::{classify_event, MessageCategory};
 use crate::session_tool_link::{link_tools, LinkedTool};
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
+use std::collections::HashSet;
 
 /// Rolled-up metrics for a chunk. Mirrors claude-devtools'
 /// `SessionMetrics` in spirit but uses the `TokenUsage` breakdown we
@@ -167,6 +168,12 @@ struct AiInProgress {
     start_ts: Option<DateTime<Utc>>,
     end_ts: Option<DateTime<Utc>>,
     metrics: ChunkMetrics,
+    /// UUIDs we've already charged `usage` for. One assistant JSONL
+    /// line expands into N `AssistantText`/`ToolUse`/`Thinking`
+    /// events, all carrying the same usage field — we only want to
+    /// add it to the running total once per source message. Events
+    /// without a UUID (rare) are always charged.
+    usage_counted_uuids: HashSet<String>,
 }
 
 impl AiInProgress {
@@ -177,6 +184,7 @@ impl AiInProgress {
             start_ts: None,
             end_ts: None,
             metrics: ChunkMetrics::default(),
+            usage_counted_uuids: HashSet::new(),
         }
     }
 
@@ -185,9 +193,13 @@ impl AiInProgress {
         self.metrics.message_count += 1;
         match ev {
             SessionEvent::AssistantText {
-                usage: Some(u), ..
+                usage: Some(u),
+                uuid,
+                ..
             } => {
-                add_usage(&mut self.metrics.tokens, u);
+                if should_charge_usage(uuid, &mut self.usage_counted_uuids) {
+                    add_usage(&mut self.metrics.tokens, u);
+                }
             }
             SessionEvent::AssistantThinking { .. } => {
                 self.metrics.thinking_count += 1;
@@ -258,6 +270,9 @@ fn metrics_for_single(ev: &SessionEvent) -> ChunkMetrics {
         message_count: 1,
         ..ChunkMetrics::default()
     };
+    // Only AssistantText carries usage, and single-event chunks are
+    // non-AI categories anyway, so the usage sum here is essentially
+    // cosmetic. Left in place for consistency with AiInProgress.
     if let SessionEvent::AssistantText { usage: Some(u), .. } = ev {
         add_usage(&mut m.tokens, u);
     }
@@ -269,6 +284,20 @@ fn add_usage(acc: &mut TokenUsage, u: &TokenUsage) {
     acc.output += u.output;
     acc.cache_creation += u.cache_creation;
     acc.cache_read += u.cache_read;
+}
+
+/// Return `true` when this `uuid` hasn't been charged yet, and record
+/// it as charged. `None` UUIDs are always charged — they're rare
+/// enough that a single fragment per missing-UUID turn won't matter
+/// in practice, and we'd rather over-count than silently drop data.
+pub(crate) fn should_charge_usage(
+    uuid: &Option<String>,
+    seen: &mut HashSet<String>,
+) -> bool {
+    match uuid {
+        Some(u) => seen.insert(u.clone()),
+        None => true,
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -490,6 +519,85 @@ mod tests {
         let chunks = build_chunks(&events);
         let ids: Vec<usize> = chunks.iter().map(|c| c.header().id).collect();
         assert_eq!(ids, vec![0, 1, 2, 3]);
+    }
+
+    #[test]
+    fn multi_fragment_assistant_message_counts_usage_once() {
+        // A single JSONL line produces two AssistantText events that
+        // share the same uuid and usage. The aggregated chunk should
+        // NOT double-count tokens.
+        let events = vec![
+            user("hi", None),
+            SessionEvent::AssistantText {
+                ts: None,
+                uuid: Some("asst-1".into()),
+                model: None,
+                text: "part one".into(),
+                usage: Some(TokenUsage {
+                    input: 100,
+                    output: 50,
+                    ..TokenUsage::default()
+                }),
+                stop_reason: None,
+            },
+            SessionEvent::AssistantText {
+                ts: None,
+                uuid: Some("asst-1".into()),
+                model: None,
+                text: "part two".into(),
+                usage: Some(TokenUsage {
+                    input: 100,
+                    output: 50,
+                    ..TokenUsage::default()
+                }),
+                stop_reason: None,
+            },
+        ];
+        let chunks = build_chunks(&events);
+        if let SessionChunk::Ai { header, .. } = &chunks[1] {
+            assert_eq!(header.metrics.tokens.input, 100);
+            assert_eq!(header.metrics.tokens.output, 50);
+        } else {
+            panic!("expected Ai chunk");
+        }
+    }
+
+    #[test]
+    fn missing_uuid_still_charges_usage() {
+        // Defensive: events without a uuid (rare) should still be
+        // aggregated so we don't lose data entirely.
+        let events = vec![
+            user("hi", None),
+            SessionEvent::AssistantText {
+                ts: None,
+                uuid: None,
+                model: None,
+                text: "x".into(),
+                usage: Some(TokenUsage {
+                    output: 7,
+                    ..TokenUsage::default()
+                }),
+                stop_reason: None,
+            },
+            SessionEvent::AssistantText {
+                ts: None,
+                uuid: None,
+                model: None,
+                text: "y".into(),
+                usage: Some(TokenUsage {
+                    output: 11,
+                    ..TokenUsage::default()
+                }),
+                stop_reason: None,
+            },
+        ];
+        let chunks = build_chunks(&events);
+        if let SessionChunk::Ai { header, .. } = &chunks[1] {
+            // Each fragment counted because we can't dedupe without a key.
+            assert_eq!(header.metrics.tokens.output, 18);
+        } else {
+            panic!("expected Ai chunk");
+        }
     }
 
     #[test]

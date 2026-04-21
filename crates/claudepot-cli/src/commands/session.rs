@@ -529,7 +529,7 @@ pub fn export_cmd(
     let body = claudepot_core::session_export::export(&detail, fmt);
     match output {
         Some(path) => {
-            std::fs::write(path, &body)
+            write_export_file(path, body.as_bytes())
                 .with_context(|| format!("write {path}"))?;
             eprintln!("Wrote {} bytes to {path}", body.len());
         }
@@ -537,6 +537,25 @@ pub fn export_cmd(
             print!("{body}");
         }
     }
+    Ok(())
+}
+
+/// Create the export file with 0600 mode on Unix — the file may carry
+/// secrets from the transcript even after redaction (user-supplied
+/// content that never passes through the redactor), and the rule is
+/// "minimum permissions on credential-adjacent data".
+fn write_export_file(path: &str, bytes: &[u8]) -> std::io::Result<()> {
+    let mut opts = std::fs::OpenOptions::new();
+    opts.write(true).create(true).truncate(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        opts.mode(0o600);
+    }
+    let mut file = opts.open(path)?;
+    use std::io::Write as _;
+    file.write_all(bytes)?;
+    file.sync_all()?;
     Ok(())
 }
 

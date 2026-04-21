@@ -8,7 +8,9 @@ import { Glyph } from "../../components/primitives/Glyph";
 import { Tag } from "../../components/primitives/Tag";
 import { NF } from "../../icons";
 import { ToolExecutionView } from "./viewers";
+import { redactSecrets } from "./viewers/redact";
 import { formatTokens, modelBadge } from "./format";
+import { stripLocalCommandStdout } from "./localCommandStdout";
 
 const TEXT_CLAMP = 4000;
 
@@ -38,13 +40,14 @@ export function SessionChunkView({
       return (
         <Bubble side="left" tone="sunken">
           {renderHeader("You", ts)}
-          <Body text={text} searchTerm={searchTerm} />
+          <Body text={redactSecrets(text)} searchTerm={searchTerm} />
         </Bubble>
       );
     }
     case "system": {
       const ev = events[chunk.event_index];
-      const text = ev && "text" in ev && typeof ev.text === "string" ? ev.text : "";
+      const raw = ev && "text" in ev && typeof ev.text === "string" ? ev.text : "";
+      const text = redactSecrets(stripLocalCommandStdout(raw));
       const ts = ev && "ts" in ev ? ev.ts : null;
       return (
         <Bubble side="left" tone="faint" mono>
@@ -61,7 +64,7 @@ export function SessionChunkView({
           <Tag tone="accent" glyph={NF.archive}>
             Compacted
           </Tag>
-          <Body text={text} searchTerm={searchTerm} tone="ghost" />
+          <Body text={redactSecrets(text)} searchTerm={searchTerm} tone="ghost" />
         </Divider>
       );
     }
@@ -159,7 +162,7 @@ function EventInlineView({
               {modelBadge([model])}
             </div>
           )}
-          <Body text={event.text} searchTerm={searchTerm} />
+          <Body text={redactSecrets(event.text)} searchTerm={searchTerm} />
         </div>
       );
     }
@@ -184,7 +187,7 @@ function EventInlineView({
             <Glyph g={NF.bolt} style={{ fontSize: "var(--fs-2xs)" }} /> Thinking
           </summary>
           <div style={{ marginTop: "var(--sp-4)" }}>
-            <Body text={event.text} searchTerm={searchTerm} tone="ghost" />
+            <Body text={redactSecrets(event.text)} searchTerm={searchTerm} tone="ghost" />
           </div>
         </details>
       );
@@ -200,7 +203,7 @@ function EventInlineView({
             color: "var(--fg-muted)",
           }}
         >
-          🔧 {event.tool_name} <span className="mono">{event.tool_use_id.slice(0, 8)}</span> · (no result)
+          🔧 {redactSecrets(event.tool_name)} <span className="mono">{event.tool_use_id.slice(0, 8)}</span> · (no result)
         </div>
       );
     case "userToolResult":
@@ -217,16 +220,48 @@ function EventInlineView({
           }}
         >
           {event.is_error ? "⚠ " : "↩ "}
-          {event.content.slice(0, 400)}
+          {redactSecrets(event.content.slice(0, 400))}
         </div>
       );
     case "malformed":
       return (
         <div style={{ color: "var(--warn)", fontSize: "var(--fs-xs)" }}>
-          Malformed line {event.line_number}: {event.error}
+          Malformed line {event.line_number}: {redactSecrets(event.error)}
+        </div>
+      );
+    case "attachment":
+      return (
+        <div
+          style={{
+            padding: "var(--sp-6) var(--sp-10)",
+            fontSize: "var(--fs-xs)",
+            color: "var(--fg-muted)",
+            border: "var(--bw-hair) dashed var(--line)",
+            borderRadius: "var(--r-2)",
+          }}
+        >
+          📎 Attachment {event.name ? redactSecrets(event.name) : "(unnamed)"}
+          {event.mime ? ` · ${redactSecrets(event.mime)}` : ""}
+        </div>
+      );
+    case "other":
+      return (
+        <div
+          style={{
+            padding: "var(--sp-4) var(--sp-10)",
+            fontSize: "var(--fs-3xs)",
+            color: "var(--fg-ghost)",
+            letterSpacing: "var(--ls-wide)",
+            textTransform: "uppercase",
+          }}
+        >
+          {redactSecrets(event.raw_type)}
         </div>
       );
     default:
+      // Exhaustiveness guard: make TypeScript flag any future variant
+      // that we forget to render inside an AI chunk instead of silently
+      // hiding it.
       return null;
   }
 }

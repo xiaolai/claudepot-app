@@ -101,10 +101,15 @@ pub fn group_by_repo(rows: Vec<SessionRow>) -> Vec<RepositoryGroup> {
 /// real git dir, but the *parent* of the pointer is still the effective
 /// worktree root, which is what we want for grouping.
 ///
-/// Returns `None` when no ancestor contains `.git`, or when `start`
-/// doesn't exist on disk.
+/// Returns `None` when:
+/// * `start` doesn't exist on disk (orphaned CC projects whose cwd was
+///   deleted — we shouldn't synthesize an ancestor walk of a fake path),
+/// * no ancestor contains `.git`.
 pub fn find_repo_root(start: &Path) -> Option<PathBuf> {
-    let canonical = fs::canonicalize(start).ok().unwrap_or(start.to_path_buf());
+    // Orphaned project paths that no longer exist must NOT be walked;
+    // their `ancestors()` can fortuitously land on a live repo above,
+    // which would mis-group the orphan.
+    let canonical = fs::canonicalize(start).ok()?;
     for ancestor in canonical.ancestors() {
         let git = ancestor.join(".git");
         if git.exists() {
@@ -135,9 +140,24 @@ fn read_gitdir_pointer(git_file: &Path) -> Option<PathBuf> {
     let line = content.lines().find(|l| l.starts_with("gitdir:"))?;
     let pointed = line.trim_start_matches("gitdir:").trim();
     let p = Path::new(pointed);
+
+    // Git writes the pointer as an absolute path in most deployments,
+    // but `git worktree add --relative` produces entries like
+    // `gitdir: ../.git/worktrees/foo`. Resolve relative pointers
+    // against the .git file's own parent — *not* the process cwd,
+    // which has no relationship to the worktree.
+    let abs = if p.is_absolute() {
+        p.to_path_buf()
+    } else {
+        match git_file.parent() {
+            Some(base) => base.join(p),
+            None => return None,
+        }
+    };
+
     // Expected shape: `/.../.git/worktrees/<name>` → parent is `worktrees`,
     // its parent is `.git`, its parent is the main repo root.
-    let wt = p.parent()?; // worktrees
+    let wt = abs.parent()?; // worktrees
     let git_dir = wt.parent()?; // .git
     let main_root = git_dir.parent()?; // /.../repo
     // Canonicalize so matches stay stable across symlinked tempdirs
@@ -313,6 +333,37 @@ mod tests {
         let mut b = groups[0].branches.clone();
         b.sort();
         assert_eq!(b, vec!["feature".to_string(), "main".to_string()]);
+    }
+
+    #[test]
+    fn relative_gitdir_pointer_resolves_against_the_git_file_parent() {
+        let tmp = TempDir::new().unwrap();
+        let main = tmp.path().join("repo");
+        let wt = tmp.path().join("repo-wt");
+        fs::create_dir_all(&main).unwrap();
+        fs::create_dir_all(&wt).unwrap();
+        fs::create_dir(main.join(".git")).unwrap();
+        fs::create_dir_all(main.join(".git").join("worktrees").join("feature"))
+            .unwrap();
+        // Relative pointer — git worktree add --relative.
+        // git_file is at `<tmp>/repo-wt/.git`, so `../repo/.git/worktrees/feature`
+        // resolves back to the main repo.
+        fs::write(
+            wt.join(".git"),
+            "gitdir: ../repo/.git/worktrees/feature\n",
+        )
+        .unwrap();
+
+        let rows = vec![
+            row(main.to_str().unwrap(), Some("main"), ts("2026-04-10T10:00:00Z")),
+            row(wt.to_str().unwrap(), Some("feature"), ts("2026-04-10T11:00:00Z")),
+        ];
+        let groups = group_by_repo(rows);
+        assert_eq!(
+            groups.len(),
+            1,
+            "relative-pointer worktree must share root with its main repo"
+        );
     }
 
     #[test]

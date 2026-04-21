@@ -37,9 +37,21 @@ export interface WriteInput {
 }
 
 export interface BashInput {
+  /** Canonical field name in live CC transcripts. */
+  cmd?: string;
+  /**
+   * Legacy/alternate name seen in some older transcripts and in the
+   * claude-devtools documentation. The viewer prefers `cmd` but
+   * falls back to `command` if `cmd` is missing.
+   */
   command?: string;
   description?: string;
   timeout?: number;
+}
+
+/** Resolve the command string from either spelling. */
+export function bashCommand(input: BashInput): string {
+  return input.cmd ?? input.command ?? "";
 }
 
 export interface BashResult {
