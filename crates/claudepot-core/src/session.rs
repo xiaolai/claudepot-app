@@ -179,6 +179,18 @@ pub enum SessionEvent {
         name: Option<String>,
         mime: Option<String>,
     },
+    /// `task-summary` — CC's periodic fork-generated natural-language
+    /// summary of what the agent is currently doing. Written every
+    /// min(5 steps, 2 min) specifically for `claude ps` / the
+    /// Activity current-action card. See
+    /// ~/github/claude_code_src/src/types/logs.ts (TaskSummaryMessage)
+    /// and sessionStorage.ts (saveTaskSummary).
+    #[serde(rename = "taskSummary")]
+    TaskSummary {
+        ts: Option<DateTime<Utc>>,
+        uuid: Option<String>,
+        summary: String,
+    },
     #[serde(rename = "fileSnapshot")]
     FileHistorySnapshot {
         ts: Option<DateTime<Utc>>,
@@ -669,6 +681,14 @@ pub(crate) fn parse_line_into(out: &mut Vec<SessionEvent>, line: &str, line_numb
                 uuid,
                 file_count,
             });
+        }
+        "task-summary" => {
+            let summary = v
+                .get("summary")
+                .and_then(Value::as_str)
+                .map(|s| s.to_string())
+                .unwrap_or_default();
+            out.push(SessionEvent::TaskSummary { ts, uuid, summary });
         }
         other => out.push(SessionEvent::Other {
             ts,

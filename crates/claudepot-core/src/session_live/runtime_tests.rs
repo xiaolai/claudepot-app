@@ -280,6 +280,63 @@ async fn session_snapshot_returns_live_record_only() {
 }
 
 #[tokio::test]
+async fn task_summary_drives_current_action_and_emits_delta() {
+    let f = fixture();
+    write_pid_file(
+        &f.sessions_dir,
+        12345,
+        r#"{"pid":12345,"sessionId":"sess-a","cwd":"/tmp/proj","startedAt":1000}"#,
+    );
+    write_transcript(&f.projects_dir, "/tmp/proj", "sess-a", "");
+    f.check.set_alive(&[12345]);
+    f.runtime.tick().await.unwrap();
+
+    let mut rx = f.runtime.subscribe_detail("sess-a").await.unwrap();
+
+    // CC writes a task-summary while a tool-use is also pending.
+    // The task-summary text should win over the tool head-line in
+    // current_action AND a TaskSummaryChanged delta must fire.
+    append_transcript(
+        &f.projects_dir,
+        "/tmp/proj",
+        "sess-a",
+        concat!(
+            r#"{"parentUuid":null,"isSidechain":false,"userType":"external","cwd":"/tmp/p","sessionId":"sess-a","version":"2.1","timestamp":"2026-04-21T10:00:00.000Z","uuid":"u1","type":"assistant","message":{"id":"m1","role":"assistant","model":"claude-opus-4-7","content":[{"type":"tool_use","id":"tu1","name":"Bash","input":{"command":"pnpm test"}}]}}"#,
+            "\n",
+            r#"{"type":"task-summary","sessionId":"sess-a","timestamp":"2026-04-21T10:00:01.000Z","summary":"running the test suite after repo-filter change"}"#,
+            "\n",
+        ),
+    );
+    f.runtime.tick().await.unwrap();
+
+    let s = &f.runtime.snapshot()[0];
+    assert_eq!(
+        s.current_action.as_deref(),
+        Some("running the test suite after repo-filter change")
+    );
+
+    // Drain deltas and confirm at least one TaskSummaryChanged
+    // arrived with the expected text.
+    let mut saw_task_summary = false;
+    while let Ok(d) = tokio::time::timeout(
+        std::time::Duration::from_millis(200),
+        rx.recv(),
+    )
+    .await
+    {
+        let Some(d) = d else { break };
+        if let LiveDeltaKind::TaskSummaryChanged { summary } = &d.kind {
+            assert!(summary.contains("running the test suite"));
+            saw_task_summary = true;
+        }
+    }
+    assert!(
+        saw_task_summary,
+        "expected at least one TaskSummaryChanged delta"
+    );
+}
+
+#[tokio::test]
 async fn redaction_applied_to_current_action() {
     let f = fixture();
     write_pid_file(
