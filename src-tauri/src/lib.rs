@@ -128,6 +128,7 @@ pub fn run() {
         })
         .manage(state::LoginState::default())
         .manage(state::DryRunRegistry::default())
+        .manage(state::LiveSessionState::default())
         .manage(ops::RunningOps::new())
         .manage(preferences::PreferencesState::new(prefs))
         .manage(claudepot_core::services::usage_cache::UsageCache::new());
@@ -202,6 +203,11 @@ pub fn run() {
             commands::key_oauth_copy,
             commands::key_oauth_probe,
             commands::key_oauth_usage,
+            commands::session_live_start,
+            commands::session_live_stop,
+            commands::session_live_snapshot,
+            commands::session_live_session_snapshot,
+            commands::session_live_subscribe,
         ])
         .run(tauri::generate_context!())
         .unwrap_or_else(|e| {

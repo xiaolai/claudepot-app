@@ -25,3 +25,27 @@ pub struct LoginState {
 pub struct DryRunRegistry {
     pub latest: AtomicU64,
 }
+
+/// Wraps `LiveRuntime` so Tauri commands can reach it via
+/// `State<LiveSessionState>`. The runtime itself is `Arc`-wrapped, so
+/// cloning the handle is cheap. `Mutex<bool>` guards the start/stop
+/// lifecycle flag — hot-path reads (`snapshot`, `subscribe_aggregate`)
+/// go through the runtime's internal `Arc` state directly.
+pub struct LiveSessionState {
+    pub runtime: Arc<claudepot_core::session_live::LiveRuntime>,
+    /// Has `session_live_start` been called yet? The runtime's own
+    /// `start` is idempotent, but tracking the flag here lets the
+    /// command skip the spawn cost when the webview invokes it
+    /// multiple times in quick succession (React StrictMode
+    /// double-mount, dev hot reload).
+    pub started: Mutex<bool>,
+}
+
+impl Default for LiveSessionState {
+    fn default() -> Self {
+        Self {
+            runtime: claudepot_core::session_live::LiveRuntime::new(),
+            started: Mutex::new(false),
+        }
+    }
+}
