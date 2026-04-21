@@ -220,24 +220,26 @@ export function KeysSection() {
   );
 }
 
-const CLIPBOARD_CLEAR_MS = 30_000;
+export const CLIPBOARD_CLEAR_MS = 30_000;
 
 /** Overwrite the clipboard with an empty string 30s after a secret
  *  was copied, but only if the clipboard still holds that exact
- *  token — avoids stomping on whatever the user copied next. If the
- *  webview denies `readText`, fall back to a best-effort overwrite. */
-function scheduleClipboardClear(token: string): void {
+ *  token — avoids stomping on whatever the user copied next. If
+ *  `readText` is denied we can't verify the clipboard still holds
+ *  our token, so we abort rather than blind-clear whatever replaced
+ *  it. The toast already told the user to expect a 30s clear; a
+ *  no-op beats clobbering their next copy.
+ *
+ *  Exported so the behavior is unit-testable with fake timers. */
+export function scheduleClipboardClear(token: string): void {
   window.setTimeout(async () => {
     try {
       const current = await navigator.clipboard.readText();
       if (current !== token) return;
       await navigator.clipboard.writeText("");
     } catch {
-      try {
-        await navigator.clipboard.writeText("");
-      } catch {
-        // Clipboard permission denied — nothing we can do.
-      }
+      // readback denied — can't prove the clipboard still holds the
+      // token, so don't risk clobbering whatever's there now.
     }
   }, CLIPBOARD_CLEAR_MS);
 }
