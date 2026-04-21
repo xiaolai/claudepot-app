@@ -30,10 +30,15 @@ const importSessions = () =>
   import("./sections/SessionsSection").then((m) => ({ default: m.SessionsSection }));
 const importKeys = () =>
   import("./sections/KeysSection").then((m) => ({ default: m.KeysSection }));
+const importActivity = () =>
+  import("./sections/ActivitySection").then((m) => ({
+    default: m.ActivitySection,
+  }));
 const ProjectsSection = lazy(importProjects);
 const SettingsSection = lazy(importSettings);
 const SessionsSection = lazy(importSessions);
 const KeysSection = lazy(importKeys);
+const ActivitySection = lazy(importActivity);
 const OperationProgressModal = lazy(() =>
   import("./sections/projects/OperationProgressModal").then((m) => ({
     default: m.OperationProgressModal,
@@ -64,6 +69,7 @@ import { OperationsProvider, useOperations } from "./hooks/useOperations";
 import { AppStateProvider, useAppState } from "./providers/AppStateProvider";
 import { api } from "./api";
 import { ConsentLiveModal } from "./components/ConsentLiveModal";
+import { useActivityNotifications } from "./hooks/useActivityNotifications";
 import { listen } from "@tauri-apps/api/event";
 import type { RunningOpInfo } from "./types";
 import { WindowChrome, AppSidebar, AppStatusBar } from "./shell";
@@ -248,6 +254,37 @@ function AppShell() {
     return () => window.removeEventListener("cp-goto-session", onGoto);
   }, [setSection]);
 
+  // Activity notifications — observes aggregate transitions and
+  // pushes toasts for user-enabled trigger classes (error burst,
+  // idle-after-work, stuck). All default-off; the hook is a no-op
+  // until the user flips a pref. One toast per session per 60s.
+  useActivityNotifications(pushToast);
+
+  // ⌘⇧L — focus the first SidebarLiveStrip row. Light-weight
+  // fallback until the Activity section lands (M4) and claims this
+  // shortcut. Ignores editable focus so typing "L" in the command
+  // palette isn't hijacked.
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      const mod = e.metaKey || e.ctrlKey;
+      if (!mod || !e.shiftKey || e.altKey) return;
+      if (e.key !== "l" && e.key !== "L") return;
+      const el = document.activeElement as HTMLElement | null;
+      const tag = el?.tagName?.toLowerCase();
+      if (tag === "input" || tag === "textarea" || el?.isContentEditable) {
+        return;
+      }
+      e.preventDefault();
+      // The strip renders with role=listbox; focus the first option.
+      const firstRow = document.querySelector<HTMLButtonElement>(
+        '[aria-label="Live Claude sessions"] [role="option"]',
+      );
+      firstRow?.focus();
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, []);
+
   const onRepairSubview =
     section === "projects" &&
     (subRoute === "repair" || subRoute === "maintenance");
@@ -398,6 +435,7 @@ function AppShell() {
           }}
           version="v0.4.2"
           synced
+          data-sidebar-root
           onOpenLiveSession={(s) => {
             // M1: strip rows deep-link to the static Sessions
             // browser via the existing cp-goto-session bus. The
@@ -458,6 +496,7 @@ function AppShell() {
                   }
                 />
               )}
+              {section === "activity" && <ActivitySection />}
               {section === "keys" && <KeysSection />}
               {section === "settings" && <SettingsSection />}
             </Suspense>
