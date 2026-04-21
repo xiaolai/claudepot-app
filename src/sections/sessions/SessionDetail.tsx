@@ -23,6 +23,7 @@ import {
   shortSessionId,
 } from "./format";
 import { SessionChunkView } from "./SessionChunkView";
+import { SessionContextPanel } from "./SessionContextPanel";
 import { SessionEventView } from "./SessionEventView";
 import { SessionExportMenu } from "./SessionExportMenu";
 
@@ -30,6 +31,30 @@ const INITIAL_EVENT_LIMIT = 500;
 const EVENT_PAGE = 500;
 const INITIAL_CHUNK_LIMIT = 150;
 const CHUNK_PAGE = 150;
+
+/**
+ * Hook: when `el` scrolls into the viewport, call `onReach`. Used to
+ * auto-page older chunks when the user scrolls to the top of the
+ * transcript. `prefers-reduced-motion` users still get the behavior
+ * — it's not animation, just pagination.
+ */
+function useReachTop(
+  el: HTMLElement | null,
+  enabled: boolean,
+  onReach: () => void,
+) {
+  useEffect(() => {
+    if (!el || !enabled) return;
+    const io = new IntersectionObserver(
+      (entries) => {
+        if (entries.some((e) => e.isIntersecting)) onReach();
+      },
+      { threshold: 0 },
+    );
+    io.observe(el);
+    return () => io.disconnect();
+  }, [el, enabled, onReach]);
+}
 
 type ViewMode = "chunks" | "raw";
 
@@ -70,8 +95,10 @@ export function SessionDetail({
   const [visibleCount, setVisibleCount] = useState(INITIAL_EVENT_LIMIT);
   const [visibleChunks, setVisibleChunks] = useState(INITIAL_CHUNK_LIMIT);
   const [viewMode, setViewMode] = useState<ViewMode>("chunks");
+  const [contextOpen, setContextOpen] = useState(false);
   const [moveOpen, setMoveOpen] = useState(false);
   const tokenRef = useRef(0);
+  const topSentinelRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
     const myToken = ++tokenRef.current;
@@ -135,6 +162,17 @@ export function SessionDetail({
     return chunksFiltered.slice(chunksFiltered.length - visibleChunks);
   }, [chunksFiltered, visibleChunks]);
 
+  // Auto-page older chunks when the top sentinel scrolls into view.
+  const hasMoreChunks =
+    !!chunksFiltered &&
+    !!visibleChunksList &&
+    chunksFiltered.length > visibleChunksList.length;
+  useReachTop(
+    topSentinelRef.current,
+    viewMode === "chunks" && hasMoreChunks,
+    () => setVisibleChunks((n) => n + CHUNK_PAGE),
+  );
+
   const handleCopyFirstPrompt = useCallback(() => {
     const text = detail?.row.first_user_prompt;
     if (!text) return;
@@ -183,11 +221,18 @@ export function SessionDetail({
     <div
       style={{
         display: "flex",
-        flexDirection: "column",
         flex: 1,
         minHeight: 0,
       }}
     >
+      <div
+        style={{
+          display: "flex",
+          flexDirection: "column",
+          flex: 1,
+          minHeight: 0,
+        }}
+      >
       {/* Header strip ---------------------------------------------------- */}
       <div
         style={{
@@ -400,6 +445,16 @@ export function SessionDetail({
               {viewMode === "chunks" ? "Raw events" : "Chunked"}
             </Button>
           )}
+          <Button
+            variant="ghost"
+            glyph={NF.sliders}
+            glyphColor="var(--fg-muted)"
+            onClick={() => setContextOpen((v) => !v)}
+            aria-pressed={contextOpen}
+            title="Toggle visible-context panel"
+          >
+            {contextOpen ? "Hide context" : "Context"}
+          </Button>
         </div>
       </div>
 
@@ -454,6 +509,12 @@ export function SessionDetail({
             </EmptyState>
           ) : (
             <>
+              <div
+                ref={topSentinelRef}
+                data-testid="chunks-top-sentinel"
+                aria-hidden
+                style={{ height: 1 }}
+              />
               {chunksFiltered &&
                 chunksFiltered.length > visibleChunksList.length && (
                   <div
@@ -536,6 +597,15 @@ export function SessionDetail({
             setMoveOpen(false);
             onMoved();
           }}
+        />
+      )}
+      </div>
+
+      {contextOpen && (
+        <SessionContextPanel
+          filePath={row.file_path}
+          onClose={() => setContextOpen(false)}
+          refreshSignal={refreshSignal}
         />
       )}
     </div>
