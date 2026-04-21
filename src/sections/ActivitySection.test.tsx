@@ -6,6 +6,7 @@ import {
   familyShort,
   formatElapsedMs,
   projectLabel,
+  sortSessions,
   statusBreakdown,
 } from "./ActivitySection";
 import type { LiveSessionSummary } from "../types";
@@ -151,6 +152,54 @@ describe("ActivitySection helpers", () => {
         "HAI 1",
         "SON 1",
       ]);
+    });
+  });
+
+  describe("sortSessions", () => {
+    it("alerting > busy > waiting > idle", () => {
+      const sessions = [
+        mkSession({ session_id: "idle", status: "idle", idle_ms: 1000 }),
+        mkSession({ session_id: "busy", status: "busy", idle_ms: 500 }),
+        mkSession({ session_id: "waiting", status: "waiting", idle_ms: 200 }),
+        mkSession({ session_id: "errored", status: "busy", errored: true, idle_ms: 2000 }),
+        mkSession({ session_id: "stuck", status: "busy", stuck: true, idle_ms: 3000 }),
+      ];
+      const ids = sortSessions(sessions).map((s) => s.session_id);
+      expect(ids.indexOf("errored")).toBeLessThan(ids.indexOf("busy"));
+      expect(ids.indexOf("stuck")).toBeLessThan(ids.indexOf("busy"));
+      expect(ids.indexOf("busy")).toBeLessThan(ids.indexOf("waiting"));
+      expect(ids.indexOf("waiting")).toBeLessThan(ids.indexOf("idle"));
+    });
+
+    it("within a tier, ascending idle_ms (most recently active first)", () => {
+      const sessions = [
+        mkSession({ session_id: "a", status: "busy", idle_ms: 5000 }),
+        mkSession({ session_id: "b", status: "busy", idle_ms: 100 }),
+        mkSession({ session_id: "c", status: "busy", idle_ms: 2000 }),
+      ];
+      const ids = sortSessions(sessions).map((s) => s.session_id);
+      expect(ids).toEqual(["b", "c", "a"]);
+    });
+
+    it("does not mutate the input array", () => {
+      const sessions = [
+        mkSession({ session_id: "z", status: "idle", idle_ms: 1 }),
+        mkSession({ session_id: "a", status: "busy", idle_ms: 1 }),
+      ];
+      const original = [...sessions];
+      sortSessions(sessions);
+      expect(sessions.map((s) => s.session_id)).toEqual(
+        original.map((s) => s.session_id),
+      );
+    });
+
+    it("errored sessions in idle tier still sort to the top", () => {
+      const sessions = [
+        mkSession({ session_id: "idle-ok", status: "idle", idle_ms: 10 }),
+        mkSession({ session_id: "idle-err", status: "idle", errored: true, idle_ms: 9999 }),
+      ];
+      const ids = sortSessions(sessions).map((s) => s.session_id);
+      expect(ids[0]).toBe("idle-err");
     });
   });
 });
