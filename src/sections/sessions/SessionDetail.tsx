@@ -9,6 +9,7 @@ import { CopyButton } from "../../components/CopyButton";
 import { NF } from "../../icons";
 import type {
   ProjectInfo,
+  SessionChunk,
   SessionDetail as SessionDetailData,
   SessionEvent,
 } from "../../types";
@@ -21,10 +22,16 @@ import {
   projectBasename,
   shortSessionId,
 } from "./format";
+import { SessionChunkView } from "./SessionChunkView";
 import { SessionEventView } from "./SessionEventView";
+import { SessionExportMenu } from "./SessionExportMenu";
 
 const INITIAL_EVENT_LIMIT = 500;
 const EVENT_PAGE = 500;
+const INITIAL_CHUNK_LIMIT = 150;
+const CHUNK_PAGE = 150;
+
+type ViewMode = "chunks" | "raw";
 
 /**
  * Right-pane transcript viewer. Loads the full JSONL for the selected
@@ -56,10 +63,13 @@ export function SessionDetail({
   onBack?: () => void;
 }) {
   const [detail, setDetail] = useState<SessionDetailData | null>(null);
+  const [chunks, setChunks] = useState<SessionChunk[] | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [search, setSearch] = useState("");
   const [visibleCount, setVisibleCount] = useState(INITIAL_EVENT_LIMIT);
+  const [visibleChunks, setVisibleChunks] = useState(INITIAL_CHUNK_LIMIT);
+  const [viewMode, setViewMode] = useState<ViewMode>("chunks");
   const [moveOpen, setMoveOpen] = useState(false);
   const tokenRef = useRef(0);
 
@@ -67,11 +77,17 @@ export function SessionDetail({
     const myToken = ++tokenRef.current;
     setLoading(true);
     setError(null);
-    api
-      .sessionReadPath(filePath)
-      .then((d) => {
+    // Fetch detail + chunks in parallel — both hit the same JSONL but
+    // Tauri serializes invokes, so the second one is cheap. Chunks may
+    // fail (older Tauri build) — we degrade to raw event mode.
+    Promise.all([
+      api.sessionReadPath(filePath),
+      api.sessionChunks(filePath).catch(() => null),
+    ])
+      .then(([d, c]) => {
         if (myToken !== tokenRef.current) return;
         setDetail(d);
+        setChunks(c);
         setLoading(false);
       })
       .catch((e) => {
@@ -105,6 +121,19 @@ export function SessionDetail({
     if (filtered.length <= visibleCount) return filtered;
     return filtered.slice(filtered.length - visibleCount);
   }, [filtered, visibleCount]);
+
+  // Chunks: same "newest N" pagination semantics.
+  const chunksFiltered = useMemo(() => {
+    if (!chunks) return null;
+    if (!search.trim() || search.trim().length < 2) return chunks;
+    const q = search.toLowerCase();
+    return chunks.filter((c) => chunkMatchesSearch(c, events, q));
+  }, [chunks, search, events]);
+  const visibleChunksList = useMemo(() => {
+    if (!chunksFiltered) return null;
+    if (chunksFiltered.length <= visibleChunks) return chunksFiltered;
+    return chunksFiltered.slice(chunksFiltered.length - visibleChunks);
+  }, [chunksFiltered, visibleChunks]);
 
   const handleCopyFirstPrompt = useCallback(() => {
     const text = detail?.row.first_user_prompt;
@@ -353,6 +382,24 @@ export function SessionDetail({
               Copy first prompt
             </Button>
           )}
+          <SessionExportMenu filePath={row.file_path} onError={onError} />
+          {chunks !== null && (
+            <Button
+              variant="ghost"
+              glyph={viewMode === "chunks" ? NF.layers : NF.fileText}
+              glyphColor="var(--fg-muted)"
+              onClick={() =>
+                setViewMode((m) => (m === "chunks" ? "raw" : "chunks"))
+              }
+              title={
+                viewMode === "chunks"
+                  ? "Switch to raw event stream"
+                  : "Switch to chunked view"
+              }
+            >
+              {viewMode === "chunks" ? "Raw events" : "Chunked"}
+            </Button>
+          )}
         </div>
       </div>
 
@@ -397,7 +444,52 @@ export function SessionDetail({
           padding: "var(--sp-18) var(--sp-28)",
         }}
       >
-        {filtered.length === 0 ? (
+        {viewMode === "chunks" && visibleChunksList ? (
+          visibleChunksList.length === 0 ? (
+            <EmptyState>
+              <Glyph g={NF.chatAlt} color="var(--fg-ghost)" />
+              {search.trim()
+                ? "Nothing matches that query."
+                : "This session has no events yet."}
+            </EmptyState>
+          ) : (
+            <>
+              {chunksFiltered &&
+                chunksFiltered.length > visibleChunksList.length && (
+                  <div
+                    style={{
+                      display: "flex",
+                      justifyContent: "center",
+                      marginBottom: "var(--sp-14)",
+                    }}
+                  >
+                    <Button
+                      variant="ghost"
+                      onClick={() => setVisibleChunks((n) => n + CHUNK_PAGE)}
+                    >
+                      Show{" "}
+                      {Math.min(
+                        chunksFiltered.length - visibleChunksList.length,
+                        CHUNK_PAGE,
+                      )}{" "}
+                      older chunk
+                      {chunksFiltered.length - visibleChunksList.length === 1
+                        ? ""
+                        : "s"}
+                    </Button>
+                  </div>
+                )}
+              {visibleChunksList.map((c) => (
+                <SessionChunkView
+                  key={c.id}
+                  chunk={c}
+                  events={events}
+                  searchTerm={search.trim()}
+                />
+              ))}
+            </>
+          )
+        ) : filtered.length === 0 ? (
           <EmptyState>
             <Glyph g={NF.chatAlt} color="var(--fg-ghost)" />
             {search.trim()
@@ -486,6 +578,34 @@ function EmptyState({ children }: { children: React.ReactNode }) {
       {children}
     </div>
   );
+}
+
+function chunkMatchesSearch(
+  chunk: SessionChunk,
+  events: SessionEvent[],
+  q: string,
+): boolean {
+  const indices =
+    chunk.chunkType === "ai"
+      ? chunk.event_indices
+      : [chunk.event_index];
+  for (const idx of indices) {
+    const ev = events[idx];
+    if (ev && eventMatchesSearch(ev, q)) return true;
+  }
+  // AI chunks: also match against linked tool calls.
+  if (chunk.chunkType === "ai") {
+    for (const t of chunk.tool_executions) {
+      if (
+        t.tool_name.toLowerCase().includes(q) ||
+        t.input_preview.toLowerCase().includes(q) ||
+        (t.result_content ?? "").toLowerCase().includes(q)
+      ) {
+        return true;
+      }
+    }
+  }
+  return false;
 }
 
 function eventMatchesSearch(e: SessionEvent, q: string): boolean {

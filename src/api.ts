@@ -263,6 +263,17 @@ export const api = {
   /** Export transcript as Markdown or JSON (sk-ant-* redacted). */
   sessionExportText: (filePath: string, format: "md" | "json") =>
     invoke<string>("session_export_text", { filePath, format }),
+  /** Export transcript and write to disk (0600 on Unix). Returns bytes written. */
+  sessionExportToFile: (
+    filePath: string,
+    format: "md" | "json",
+    outputPath: string,
+  ) =>
+    invoke<number>("session_export_to_file", {
+      filePath,
+      format,
+      outputPath,
+    }),
   /** Cross-session text search. Returns ranked hits. */
   sessionSearch: (query: string, limit = 25) =>
     invoke<SearchHit[]>("session_search", { query, limit }),

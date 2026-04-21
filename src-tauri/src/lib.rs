@@ -168,6 +168,7 @@ pub fn run() {
             commands::session_phases,
             commands::session_context_attribution,
             commands::session_export_text,
+            commands::session_export_to_file,
             commands::session_search,
             commands::session_worktree_groups,
             commands::protected_paths_list,
