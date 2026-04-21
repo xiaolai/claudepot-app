@@ -61,6 +61,16 @@ export function LiveStatusHeader({ sessionId }: Props) {
   useEffect(() => {
     let cancelled = false;
     let unlisten: UnlistenFn | null = null;
+    // Reset all per-session overrides + seq gate on sessionId
+    // change so a remount on a different session doesn't drop
+    // deltas whose seq happens to be lower than the previous
+    // session's terminal seq, and doesn't render stale overrides.
+    lastSeqRef.current = 0;
+    setLiveCurrentAction(null);
+    setLiveStatus(null);
+    setLiveWaitingFor(null);
+    setLiveModel(null);
+    setLiveOverlay(null);
 
     api
       .sessionLiveSubscribe(sessionId)
@@ -68,15 +78,30 @@ export function LiveStatusHeader({ sessionId }: Props) {
         if (cancelled) return;
         const d = ev.payload;
         if (d.resync_required) {
-          // Pull the authoritative session snapshot and resync
-          // local state from it before applying the delta payload.
+          // Discard every local override and rehydrate from the
+          // authoritative session snapshot. The snapshot carries
+          // the full post-redaction surface, so a resync cannot
+          // leave stale status/model/overlay state behind.
+          lastSeqRef.current = 0;
+          setLiveCurrentAction(null);
+          setLiveStatus(null);
+          setLiveWaitingFor(null);
+          setLiveModel(null);
+          setLiveOverlay(null);
           try {
             const snap = await api.sessionLiveSessionSnapshot(sessionId);
             if (!cancelled && snap) {
               setLiveCurrentAction(snap.current_action);
+              setLiveStatus(snap.status);
+              setLiveWaitingFor(snap.waiting_for);
+              setLiveModel(snap.model);
+              setLiveOverlay({
+                errored: snap.errored,
+                stuck: snap.stuck,
+              });
             }
           } catch {
-            /* fall through */
+            /* aggregate fallback still carries the real state */
           }
         }
         // seq guard so a late out-of-order delivery can't overwrite
