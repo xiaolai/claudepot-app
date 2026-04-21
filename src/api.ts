@@ -21,8 +21,15 @@ import type {
   RegisterOutcome,
   RemoveOutcome,
   RunningOpInfo,
+  ContextStats,
+  ContextPhaseInfo,
+  LinkedTool,
+  RepositoryGroup,
+  SearchHit,
+  SessionChunk,
   SessionDetail,
   SessionRow,
+  Subagent,
   UsageEntry,
   UsageMap,
 } from "./types";
@@ -236,6 +243,43 @@ export const api = {
    */
   sessionReadPath: (filePath: string) =>
     invoke<SessionDetail>("session_read_path", { filePath }),
+
+  // ---------- Session debugger (Tier 1-3 port from claude-devtools) ----------
+  /** Chunked event stream (User/Ai/System/Compact) with per-chunk linked tools. */
+  sessionChunks: (filePath: string) =>
+    invoke<SessionChunk[]>("session_chunks", { filePath }),
+  /** Paired tool calls and results for one transcript. */
+  sessionLinkedTools: (filePath: string) =>
+    invoke<LinkedTool[]>("session_linked_tools", { filePath }),
+  /** Subagent transcripts attached to a parent session. */
+  sessionSubagents: (filePath: string) =>
+    invoke<Subagent[]>("session_subagents", { filePath }),
+  /** Compaction phase breakdown. One phase per context window. */
+  sessionPhases: (filePath: string) =>
+    invoke<ContextPhaseInfo>("session_phases", { filePath }),
+  /** Visible-context token attribution across six categories. */
+  sessionContextAttribution: (filePath: string) =>
+    invoke<ContextStats>("session_context_attribution", { filePath }),
+  /** Export transcript as Markdown or JSON (sk-ant-* redacted). */
+  sessionExportText: (filePath: string, format: "md" | "json") =>
+    invoke<string>("session_export_text", { filePath, format }),
+  /** Export transcript and write to disk (0600 on Unix). Returns bytes written. */
+  sessionExportToFile: (
+    filePath: string,
+    format: "md" | "json",
+    outputPath: string,
+  ) =>
+    invoke<number>("session_export_to_file", {
+      filePath,
+      format,
+      outputPath,
+    }),
+  /** Cross-session text search. Returns ranked hits. */
+  sessionSearch: (query: string, limit = 25) =>
+    invoke<SearchHit[]>("session_search", { query, limit }),
+  /** Group all sessions by git repository (collapses worktrees). */
+  sessionWorktreeGroups: () =>
+    invoke<RepositoryGroup[]>("session_worktree_groups"),
 
   // ---------- Protected paths (Settings → Protected pane) ----------
   /**

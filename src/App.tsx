@@ -184,6 +184,28 @@ function AppShell() {
     };
   }, [setSection, toggleTheme, refreshAccounts, pushToast]);
 
+  // Bridge from the command palette's cross-session search: when the
+  // user selects a session hit, jump to the Sessions tab and pass the
+  // file_path through a second event that `SessionsSection` listens
+  // for on mount.
+  useEffect(() => {
+    function onGoto(ev: Event) {
+      const detail = (ev as CustomEvent<{ filePath: string }>).detail;
+      if (!detail?.filePath) return;
+      setSection("sessions");
+      // Give the section a tick to mount, then hand it the path.
+      setTimeout(() => {
+        window.dispatchEvent(
+          new CustomEvent("sessions-select-path", {
+            detail: { filePath: detail.filePath },
+          }),
+        );
+      }, 0);
+    }
+    window.addEventListener("cp-goto-session", onGoto);
+    return () => window.removeEventListener("cp-goto-session", onGoto);
+  }, [setSection]);
+
   const onRepairSubview =
     section === "projects" &&
     (subRoute === "repair" || subRoute === "maintenance");
