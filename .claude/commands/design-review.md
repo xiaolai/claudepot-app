@@ -55,9 +55,12 @@ Score every finding as **BLOCK** or **WARN**.
   ```bash
   rg -n "^\s*--(accent|bg|surface|border|text|ok|bad|warn|focus-ring|shadow|font|dur-|ease-|selection|chrome|grouped-bg)\b" src/App.css
   ```
-- **SVG icon library or emoji.** No `lucide-react`, `heroicons`,
-  `@phosphor-icons`, Font Awesome SVG, or emoji in UI. Every glyph
-  is NF via `<Glyph>`.
+- **Off-system icon source or emoji.** Icons come only from
+  `lucide-react`, routed through `<Glyph g={NF.x} />` (the `NF.*`
+  map in `src/icons.ts` is the semantic name → Lucide component
+  shim, kept from the older Nerd Font pipeline). No `heroicons`,
+  `@phosphor-icons`, Font Awesome, hand-authored SVGs, or emoji
+  in the UI.
 - **Internal identifier on a primary surface.** DB keys, slugs,
   UUIDs, internal paths — must be behind `DevBadge` or removed.
 - **Destructive action without inline consequence.** Verb-and-count
