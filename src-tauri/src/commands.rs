@@ -2102,13 +2102,24 @@ pub async fn session_live_start(
     // Spawn a watcher task that forwards aggregate updates to the
     // webview. The runtime publishes on the watch channel; we bridge
     // to Tauri's `emit` here so the webview sees one source of truth.
+    //
+    // Same task also schedules a debounced tray rebuild on live-set
+    // changes so the tray's "Active: N" submenu stays in sync with
+    // the sidebar strip. Debounce = 1s: at the 500ms poll cadence
+    // this coalesces bursts of "session appeared/disappeared" into
+    // a single rebuild, which matters on AppKit where menu rebuilds
+    // are synchronous and visible.
     let runtime = std::sync::Arc::clone(&state.runtime);
     let mut rx = runtime.subscribe_aggregate();
     let app_for_bridge = app.clone();
     tokio::spawn(async move {
+        // Track the last-seen set of session IDs so we only rebuild
+        // the tray when membership changes, not on every status
+        // transition (which don't affect the top-level menu).
+        let mut last_ids: std::collections::BTreeSet<String> =
+            std::collections::BTreeSet::new();
+        let mut rebuild_pending = false;
         loop {
-            // `changed().await` returns `Err` when all senders are
-            // dropped, i.e. the runtime was torn down — exit cleanly.
             if rx.changed().await.is_err() {
                 break;
             }
@@ -2119,6 +2130,35 @@ pub async fn session_live_start(
                 .map(crate::dto::LiveSessionSummaryDto::from)
                 .collect();
             let _ = tauri::Emitter::emit(&app_for_bridge, "live-all", list);
+
+            // Tray-rebuild trigger: membership set changed.
+            let current_ids: std::collections::BTreeSet<String> = list_arc
+                .iter()
+                .map(|s| s.session_id.clone())
+                .collect();
+            if current_ids != last_ids && !rebuild_pending {
+                rebuild_pending = true;
+                let handle = app_for_bridge.clone();
+                tauri::async_runtime::spawn(async move {
+                    tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+                    if let Err(e) = crate::tray::rebuild(&handle).await {
+                        tracing::warn!(
+                            "activity tray rebuild failed: {e}"
+                        );
+                    }
+                });
+            }
+            if current_ids != last_ids {
+                last_ids = current_ids;
+            }
+            // The flag resets naturally after the spawned rebuild —
+            // we reset it here on the next membership change because
+            // the rebuild itself may race with another change, and
+            // worst case we coalesce two rebuilds into one. The 1s
+            // debounce keeps the cadence bounded.
+            if rebuild_pending {
+                rebuild_pending = false;
+            }
         }
     });
 

@@ -58,8 +58,12 @@ const ID_ADD: &str = "tray:add-account";
 const ID_SYNC: &str = "tray:sync-cc";
 const ID_ACTIVE_DISPLAY: &str = "tray:active-display";
 const ID_USAGE_REFRESH: &str = "tray:usage:refresh";
-const PREFIX_CLI: &str = "tray:cli-switch:";
-const PREFIX_DESKTOP: &str = "tray:desktop-switch:";
+pub const PREFIX_CLI: &str = "tray:cli-switch:";
+pub const PREFIX_DESKTOP: &str = "tray:desktop-switch:";
+/// Prefix for per-session rows in the Live submenu. Suffix is the
+/// sessionId — the menu-event handler routes by this prefix and
+/// opens the window with that session selected.
+pub const PREFIX_LIVE: &str = "tray:live:";
 
 /// Build and set the tray menu from the current account state.
 ///
@@ -143,6 +147,12 @@ pub async fn rebuild(app: &AppHandle) -> Result<(), String> {
     //     a "Refresh" footer triggers a fresh fetch + tray rebuild.
     let usage_submenu = build_usage_submenu(app, &usage_snapshots)?;
 
+    // 3c. Live sessions submenu — reads the current aggregate from
+    //     LiveSessionState. One row per live session (project · model
+    //     · current action · elapsed). Empty → submenu itself is
+    //     hidden (render-if-nonzero on the menu level).
+    let live_submenu = build_live_submenu(app)?;
+
     // 4. Standalone items. macOS gets IconMenuItem + a pre-rendered
     // Nerd Font PNG so the whole tray carries the same paper-mono
     // register as the webview. Windows/Linux fall back to plain
@@ -176,11 +186,15 @@ pub async fn rebuild(app: &AppHandle) -> Result<(), String> {
     // separators — one below the account group, one below the
     // actions group. No separator before Quit; matches the layout
     // used by common status-bar apps (Tailscale, Raycast).
-    let menu = MenuBuilder::new(app)
+    let mut menu_builder = MenuBuilder::new(app)
         .item(&active_item)
         .item(&cli_submenu)
         .item(&desktop_submenu)
-        .item(&usage_submenu)
+        .item(&usage_submenu);
+    if let Some(ref ls) = live_submenu {
+        menu_builder = menu_builder.item(ls);
+    }
+    let menu = menu_builder
         .item(&sep1)
         .item(&add_item)
         .item(&sync_item)
@@ -333,6 +347,96 @@ fn build_usage_submenu(
     builder.build().map_err(|e| format!("usage submenu: {e}"))
 }
 
+/// Build the Live sessions submenu from the current aggregate
+/// snapshot exposed by `LiveSessionState`. Returns `Ok(None)` when
+/// no sessions are live — the caller omits the menu item entirely,
+/// preserving the "render-if-nonzero" rule. Each row is disabled
+/// (display-only) EXCEPT for the per-session opener, which routes
+/// via `PREFIX_LIVE<sessionId>` in the menu-event handler.
+fn build_live_submenu(
+    app: &AppHandle,
+) -> Result<Option<tauri::menu::Submenu<tauri::Wry>>, String> {
+    let Some(state) = app.try_state::<crate::state::LiveSessionState>() else {
+        return Ok(None);
+    };
+    let list = state.runtime.snapshot();
+    if list.is_empty() {
+        return Ok(None);
+    }
+    let label = format!("Active: {}", list.len());
+    let mut builder = SubmenuBuilder::new(app, &label);
+    for s in list.iter() {
+        let action = s
+            .current_action
+            .clone()
+            .unwrap_or_else(|| match s.status {
+                claudepot_core::session_live::types::Status::Waiting => {
+                    if let Some(w) = &s.waiting_for {
+                        format!("waiting — {w}")
+                    } else {
+                        "waiting".to_string()
+                    }
+                }
+                claudepot_core::session_live::types::Status::Idle => {
+                    "idle".to_string()
+                }
+                claudepot_core::session_live::types::Status::Busy => {
+                    "working".to_string()
+                }
+            });
+        let line = format_live_row(&s.cwd, s.model.as_deref(), &action, s.idle_ms);
+        let item =
+            MenuItemBuilder::with_id(format!("{}{}", PREFIX_LIVE, s.session_id), line)
+                .build(app)
+                .map_err(|e| format!("live item: {e}"))?;
+        builder = builder.item(&item);
+    }
+    Ok(Some(
+        builder.build().map_err(|e| format!("live submenu: {e}"))?,
+    ))
+}
+
+/// Format a single live-session row for the tray. Tray rows are
+/// plain `&str` — no rich formatting available — so we pack
+/// `project · model · action · elapsed` into a compact one-liner.
+fn format_live_row(cwd: &str, model: Option<&str>, action: &str, idle_ms: i64) -> String {
+    let project = cwd.rsplit('/').find(|s| !s.is_empty()).unwrap_or(cwd);
+    let family = match model {
+        Some(m) if m.contains("opus") => "OPUS",
+        Some(m) if m.contains("sonnet") => "SON",
+        Some(m) if m.contains("haiku") => "HAI",
+        Some(_) => "?",
+        None => "?",
+    };
+    let elapsed = format_elapsed_short(idle_ms);
+    // Clip action to 32 chars so the tray row doesn't wrap.
+    let clipped: String = if action.chars().count() > 32 {
+        let mut s: String = action.chars().take(31).collect();
+        s.push('…');
+        s
+    } else {
+        action.to_string()
+    };
+    format!("{project} · {family} · {clipped} · {elapsed}")
+}
+
+fn format_elapsed_short(ms: i64) -> String {
+    if ms < 1_000 {
+        return "—".to_string();
+    }
+    let secs = ms / 1_000;
+    if secs < 60 {
+        return format!("{secs}s");
+    }
+    let m = secs / 60;
+    let s = secs % 60;
+    if m < 60 {
+        return format!("{m}:{s:02}");
+    }
+    let h = m / 60;
+    format!("{h}h{}m", m % 60)
+}
+
 /// Compact one-liner for a tray row. `5h 77% · 7d 33% · Extra 100%`.
 /// Only non-null windows contribute; extras appears only when enabled.
 /// Returns a "(no data)" sentinel when the snapshot is None so the row
@@ -394,6 +498,16 @@ pub fn handle_menu_event(app: &AppHandle, id: &str) {
         handle_cli_switch(app, uuid_str);
     } else if let Some(uuid_str) = id.strip_prefix(PREFIX_DESKTOP) {
         handle_desktop_switch(app, uuid_str);
+    } else if let Some(sid) = id.strip_prefix(PREFIX_LIVE) {
+        // Open the window and forward the session id to the React
+        // side so it can route to Sessions with that session selected.
+        // The existing `cp-goto-session` event bus takes a file_path,
+        // not a session id — so we pair with a new event the JS App
+        // listens to.
+        show_window(app);
+        if let Err(e) = app.emit("cp-activity-open-session", sid) {
+            tracing::warn!("emit activity-open-session failed: {e}");
+        }
     } else if id == ID_SHOW {
         show_window(app);
     } else if id == ID_SETTINGS {
