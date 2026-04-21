@@ -709,3 +709,44 @@ export interface OauthTokenSummary {
   last_probed_at: string | null;
   last_probe_status: string | null;
 }
+
+/** Canonical live-status vocabulary — matches CC's own
+ * `concurrentSessions::SessionStatus`. Extra overlays (`errored`,
+ * `stuck`) live as separate booleans on `LiveSessionSummary`. */
+export type LiveStatus = "busy" | "idle" | "waiting";
+
+/** One row in the live session list. Mirrors
+ * `LiveSessionSummaryDto` on the Rust side. Every user-content field
+ * (`current_action`) has already passed through the redactor before
+ * crossing the IPC boundary — the webview never sees unredacted
+ * tokens. */
+export interface LiveSessionSummary {
+  session_id: string;
+  pid: number;
+  cwd: string;
+  transcript_path: string | null;
+  status: LiveStatus;
+  current_action: string | null;
+  model: string | null;
+  waiting_for: string | null;
+  errored: boolean;
+  stuck: boolean;
+  idle_ms: number;
+  seq: number;
+}
+
+/** Per-session delta kind. Discriminated on `kind` (snake_case on
+ * the wire), matching the Rust `LiveDeltaKindDto` serde layout. */
+export type LiveDeltaKind =
+  | { kind: "status_changed"; status: LiveStatus; waiting_for: string | null }
+  | { kind: "task_summary_changed"; summary: string }
+  | { kind: "model_changed"; model: string }
+  | { kind: "overlay_changed"; errored: boolean; stuck: boolean }
+  | { kind: "ended" };
+
+export type LiveDelta = LiveDeltaKind & {
+  session_id: string;
+  seq: number;
+  produced_at_ms: number;
+  resync_required: boolean;
+};

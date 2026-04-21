@@ -2010,3 +2010,122 @@ pub async fn key_oauth_usage(
         }
     }
 }
+
+// ─── session_live commands ──────────────────────────────────────────
+//
+// The live Activity feature. `LiveRuntime` polls ~/.claude/sessions
+// and tails each transcript; Tauri commands expose snapshot + subscribe
+// semantics. Aggregate updates fire on the `live-all` event channel;
+// per-session deltas fire on `live::<sessionId>`.
+
+/// Start the live runtime. Idempotent: repeated calls after a first
+/// successful start return `Ok(())` without re-spawning. The poll
+/// loop publishes aggregate updates via the `live-all` event channel
+/// and per-session deltas via `live::<sessionId>`.
+#[tauri::command]
+pub async fn session_live_start(
+    state: tauri::State<'_, crate::state::LiveSessionState>,
+    app: tauri::AppHandle,
+) -> Result<(), String> {
+    {
+        let mut started = state.started.lock().map_err(|e| e.to_string())?;
+        if *started {
+            return Ok(());
+        }
+        *started = true;
+    }
+
+    // Spawn a watcher task that forwards aggregate updates to the
+    // webview. The runtime publishes on the watch channel; we bridge
+    // to Tauri's `emit` here so the webview sees one source of truth.
+    let runtime = std::sync::Arc::clone(&state.runtime);
+    let mut rx = runtime.subscribe_aggregate();
+    let app_for_bridge = app.clone();
+    tokio::spawn(async move {
+        loop {
+            // `changed().await` returns `Err` when all senders are
+            // dropped, i.e. the runtime was torn down — exit cleanly.
+            if rx.changed().await.is_err() {
+                break;
+            }
+            let list_arc = rx.borrow_and_update().clone();
+            let list: Vec<crate::dto::LiveSessionSummaryDto> = list_arc
+                .iter()
+                .cloned()
+                .map(crate::dto::LiveSessionSummaryDto::from)
+                .collect();
+            let _ = tauri::Emitter::emit(&app_for_bridge, "live-all", list);
+        }
+    });
+
+    // Start the poll loop.
+    let _handle = std::sync::Arc::clone(&state.runtime).start();
+    Ok(())
+}
+
+/// Stop the live runtime. Idempotent: stopping an already-stopped
+/// runtime is a no-op. Drops all detail subscribers.
+#[tauri::command]
+pub async fn session_live_stop(
+    state: tauri::State<'_, crate::state::LiveSessionState>,
+) -> Result<(), String> {
+    state.runtime.stop();
+    let mut started = state.started.lock().map_err(|e| e.to_string())?;
+    *started = false;
+    Ok(())
+}
+
+/// Synchronous snapshot of currently-live sessions. Used by the
+/// webview on first mount before the first `live-all` event arrives,
+/// and as the resync answer after a gap.
+#[tauri::command]
+pub fn session_live_snapshot(
+    state: tauri::State<'_, crate::state::LiveSessionState>,
+) -> Vec<crate::dto::LiveSessionSummaryDto> {
+    state
+        .runtime
+        .snapshot()
+        .iter()
+        .cloned()
+        .map(crate::dto::LiveSessionSummaryDto::from)
+        .collect()
+}
+
+/// One-session snapshot for resync after `resync_required`. Returns
+/// `None` if the session is not currently live.
+#[tauri::command]
+pub async fn session_live_session_snapshot(
+    session_id: String,
+    state: tauri::State<'_, crate::state::LiveSessionState>,
+) -> Result<Option<crate::dto::LiveSessionSummaryDto>, String> {
+    Ok(state
+        .runtime
+        .session_snapshot(&session_id)
+        .await
+        .map(crate::dto::LiveSessionSummaryDto::from))
+}
+
+/// Subscribe to per-session deltas. Spawns a task that forwards
+/// every received delta as a `live::<sessionId>` event. Single-
+/// subscriber per session — concurrent calls with the same id
+/// return `BusError::AlreadySubscribed`.
+#[tauri::command]
+pub async fn session_live_subscribe(
+    session_id: String,
+    state: tauri::State<'_, crate::state::LiveSessionState>,
+    app: tauri::AppHandle,
+) -> Result<(), String> {
+    let mut rx = state
+        .runtime
+        .subscribe_detail(&session_id)
+        .await
+        .map_err(|e| e.to_string())?;
+    let channel = format!("live::{session_id}");
+    tokio::spawn(async move {
+        while let Some(delta) = rx.recv().await {
+            let dto = crate::dto::LiveDeltaDto::from(delta);
+            let _ = tauri::Emitter::emit(&app, &channel, dto);
+        }
+    });
+    Ok(())
+}

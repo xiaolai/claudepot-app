@@ -6,7 +6,8 @@ import { SectionLabel } from "../components/primitives/SectionLabel";
 import { SidebarItem } from "../components/primitives/SidebarItem";
 import { NF } from "../icons";
 import type { SectionDef } from "../sections/registry";
-import type { AccountSummary } from "../types";
+import type { AccountSummary, LiveSessionSummary } from "../types";
+import { SidebarLiveStrip } from "./SidebarLiveStrip";
 import {
   SidebarTargetSwitcher,
   type SwapTargetId,
@@ -30,6 +31,11 @@ interface AppSidebarProps {
   version?: string;
   /** Whether the sync is healthy — drives the dot color. */
   synced?: boolean;
+
+  /** Invoked when a user activates a row in the live Activity strip.
+   * The parent routes to the Sessions deep-link (M1) or the live
+   * pane (M2+). Optional so existing callers needn't change. */
+  onOpenLiveSession?: (session: LiveSessionSummary) => void;
 }
 
 const FILESYSTEM_ROWS: {
@@ -65,6 +71,7 @@ export function AppSidebar({
   badges,
   version,
   synced = true,
+  onOpenLiveSession,
 }: AppSidebarProps) {
   const targets = [
     { id: "cli" as const, label: "CLI", glyph: NF.terminal },
@@ -131,6 +138,12 @@ export function AppSidebar({
       </div>
 
       <Divider style={{ margin: "var(--sp-8) var(--sp-12)" }} />
+
+      {/* Live Activity strip — render-if-nonzero, so the divider
+          and label disappear together when no sessions are active. */}
+      {onOpenLiveSession && (
+        <SidebarLiveStrip onOpenSession={onOpenLiveSession} />
+      )}
 
       {/* ~/.claude is reference, not interactive — label a tier
           fainter than SWAP TARGETS so the eye ranks sections by

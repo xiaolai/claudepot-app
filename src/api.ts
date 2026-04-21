@@ -12,6 +12,7 @@ import type {
   DryRunPlan,
   GcOutcome,
   JournalEntry,
+  LiveSessionSummary,
   MoveArgs,
   MoveSessionReport,
   OauthTokenSummary,
@@ -344,4 +345,47 @@ export const api = {
    */
   keyOauthUsage: (uuid: string) =>
     invoke<AccountUsage>("key_oauth_usage", { uuid }),
+
+  // ─── session_live (Activity feature) ─────────────────────────────
+
+  /**
+   * Start the live runtime (poll ~/.claude/sessions + tail transcripts).
+   * Idempotent: repeated calls after a first successful start are
+   * no-ops. The backend emits aggregate updates on the `live-all`
+   * event channel and per-session deltas on `live::<sessionId>`.
+   */
+  sessionLiveStart: () => invoke<void>("session_live_start"),
+
+  /** Stop the live runtime. Drops all detail subscribers. */
+  sessionLiveStop: () => invoke<void>("session_live_stop"),
+
+  /**
+   * Synchronous snapshot of currently-live sessions. Used by
+   * `useSessionLive` on first mount (before the first `live-all`
+   * event arrives) and as the resync answer after a gap.
+   */
+  sessionLiveSnapshot: () =>
+    invoke<LiveSessionSummary[]>("session_live_snapshot"),
+
+  /**
+   * One-session snapshot for resync after `resync_required`.
+   * Returns `null` when the session is no longer live.
+   */
+  sessionLiveSessionSnapshot: (sessionId: string) =>
+    invoke<LiveSessionSummary | null>("session_live_session_snapshot", {
+      sessionId,
+    }),
+
+  /**
+   * Subscribe to per-session detail deltas. Backend forwards every
+   * delta as a `live::<sessionId>` Tauri event; the caller listens
+   * via `useTauriEvent` or raw `listen`.
+   *
+   * Single-subscriber per session — concurrent calls for the same
+   * id will reject. Callers must call `session_live_stop` then
+   * `session_live_start` again to detach, or simply drop the local
+   * listener (the backend detects the channel close on next send).
+   */
+  sessionLiveSubscribe: (sessionId: string) =>
+    invoke<void>("session_live_subscribe", { sessionId }),
 };
