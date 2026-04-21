@@ -88,12 +88,15 @@ struct SessionState {
     last_errored: bool,
     last_stuck: bool,
     /// What the metrics store last saw for this session — used to
-    /// gate writes to transition + heartbeat so the table doesn't
-    /// accumulate redundant rows every 500ms tick but still keeps
-    /// per-bucket density.
-    last_metrics_status: Status,
+    /// gate writes to transition + heartbeat. `None` means no tick
+    /// has been written yet; the next tick always writes (so every
+    /// new session is represented in the store regardless of which
+    /// Status it happens to land on first).
+    last_metrics_status: Option<Status>,
     last_metrics_errored: bool,
     last_metrics_stuck: bool,
+    /// Last-seen model id in metrics; drives ModelChanged emission.
+    last_metrics_model: Option<String>,
     /// Ticks elapsed since the last metrics write for this session.
     /// Resets to 0 on every write; forces a heartbeat write when it
     /// crosses HEARTBEAT_TICKS (defined in `tick`).
@@ -422,6 +425,29 @@ impl LiveRuntime {
                 s.last_errored = new_errored;
                 s.last_stuck = new_stuck;
             }
+            // ModelChanged emission — fires when the model id
+            // observed in the latest assistant fragment differs
+            // from the last one we announced. Without this, the
+            // frontend's liveModel override (wired for task parity)
+            // would be dead code.
+            if snap.model != s.last_metrics_model {
+                if let Some(new_model) = snap.model.clone() {
+                    s.seq += 1;
+                    let _ = self
+                        .detail
+                        .publish_delta(LiveDelta {
+                            session_id: s.session_id.clone(),
+                            seq: s.seq,
+                            produced_at_ms: now_ms,
+                            kind: LiveDeltaKind::ModelChanged {
+                                model: new_model,
+                            },
+                            resync_required: false,
+                        })
+                        .await;
+                }
+                s.last_metrics_model = snap.model.clone();
+            }
         }
 
         // 4. Republish the aggregate list. Idempotent — watch
@@ -455,13 +481,16 @@ impl LiveRuntime {
             let Some(ss) = state_for_marks.get_mut(&row.session_id) else {
                 continue;
             };
-            let transitioned = row.status != ss.last_metrics_status
+            let first_tick = ss.last_metrics_status.is_none();
+            let transitioned = ss
+                .last_metrics_status
+                .map(|s| s != row.status)
+                .unwrap_or(false)
                 || row.errored != ss.last_metrics_errored
                 || row.stuck != ss.last_metrics_stuck;
             let is_heartbeat = ss.ticks_since_metrics >= HEARTBEAT_TICKS;
-            let first_tick = ss.last_metrics_status == Status::Waiting;
             if transitioned || is_heartbeat || first_tick {
-                ss.last_metrics_status = row.status;
+                ss.last_metrics_status = Some(row.status);
                 ss.last_metrics_errored = row.errored;
                 ss.last_metrics_stuck = row.stuck;
                 ss.ticks_since_metrics = 0;
@@ -528,13 +557,15 @@ impl SessionState {
             last_task_summary: None,
             last_errored: false,
             last_stuck: false,
-            // Seed with a sentinel different from the actual first
-            // snapshot's likely value so the first published row
-            // lands (every new session should have at least one
-            // metrics point; from there it's transition + heartbeat).
-            last_metrics_status: Status::Waiting,
+            // `None` means no write yet — the first tick always
+            // lands a row regardless of which Status this session
+            // arrives on. Using a real Status as a sentinel
+            // collides with the steady-state value of that status
+            // (a legitimate Waiting session would write every tick).
+            last_metrics_status: None,
             last_metrics_errored: false,
             last_metrics_stuck: false,
+            last_metrics_model: None,
             ticks_since_metrics: 0,
         })
     }
