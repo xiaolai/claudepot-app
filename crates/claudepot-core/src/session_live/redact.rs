@@ -60,10 +60,18 @@ static JWT_RE: Lazy<Regex> = Lazy::new(|| {
 /// Key=value pairs with a sensitive-looking key name. The delimiter
 /// may be `=` (query/form) or `:` with a space (YAML/JSON-ish). The
 /// key-name alternation is intentionally narrow so generic names
-/// like `data` or `content` don't trigger.
+/// like `data` or `content` don't trigger. Matches case-insensitively
+/// via the `(?i)` flag, so `PASSWORD=`, `Api_Key=`, etc. all hit.
+///
+/// The bare `token` keyword catches `token=...` and `AUTHORIZATION:
+/// Token ...` forms the narrower Authorization regex would miss.
 static SENSITIVE_KV_RE: Lazy<Regex> = Lazy::new(|| {
+    // `Authorization:` is handled by the outer AUTH_HEADER_RE pass
+    // specifically so we can preserve the `Authorization: Bearer ***`
+    // shape; don't duplicate `auth(orization)?` here or it would
+    // overwrite the structured mask with the generic one.
     Regex::new(
-        r#"(?i)\b(password|passwd|api[_-]?key|access[_-]?token|refresh[_-]?token|secret|bearer)\s*[:=]\s*"?([^"\s&;,}]+)"?"#,
+        r#"(?i)\b(password|passwd|api[_-]?key|access[_-]?token|refresh[_-]?token|secret|bearer|token)\s*[:=]\s*"?([^"\s&;,}]+)"?"#,
     )
     .expect("static regex")
 });
@@ -89,20 +97,23 @@ const SHORT_TOKEN_THRESHOLD: usize = 12;
 /// Redact every supported secret family in `text`. Fast-path skips
 /// regex work when no prefix/sentinel is present (common case for
 /// bulk transcript content that contains none of these patterns).
+/// All sentinel probes are case-insensitive so `PASSWORD=`,
+/// `AUTHORIZATION:`, and `TOKEN=` all hit the slow path.
 pub fn redact_secrets(text: &str) -> String {
     let lowered_hint = text.to_ascii_lowercase();
-    let needs_work = text.contains("sk-ant-")
+    let needs_work = lowered_hint.contains("sk-ant-")
         || lowered_hint.contains("authorization")
         || lowered_hint.contains("cookie")
         || text.contains("eyJ")
-        || text.contains("password")
-        || text.contains("passwd")
+        || lowered_hint.contains("password")
+        || lowered_hint.contains("passwd")
         || lowered_hint.contains("api_key")
         || lowered_hint.contains("api-key")
         || lowered_hint.contains("apikey")
         || lowered_hint.contains("access_token")
         || lowered_hint.contains("refresh_token")
-        || text.contains("secret")
+        || lowered_hint.contains("secret")
+        || lowered_hint.contains("token")
         || lowered_hint.contains("bearer");
     if !needs_work {
         return text.to_string();
@@ -237,13 +248,30 @@ mod tests {
 
     #[test]
     fn oauth_variant_is_redacted() {
-        // OAuth access tokens share the `sk-ant-` prefix via `oat01-`
-        // — they MUST be caught by the same pattern.
+        // OAuth access tokens share the `sk-ant-` prefix via `oat01-`.
+        // Post-M2 the `token=` prefix itself triggers SENSITIVE_KV
+        // masking (`token=***`), which is strictly stronger than
+        // the `sk-ant-***Lxyz`-style suffix-preserving mask — the
+        // raw body must not appear in either case.
         let tok = "sk-ant-oat01-Abc_123-DEFghiJKL-xyz";
         let out = redact_secrets(&format!("token={tok}"));
         assert!(!out.contains(tok));
-        assert!(out.starts_with("token=sk-ant-***"));
-        assert!(out.ends_with("-xyz"));
+        // Either mask form is acceptable; both hide the body.
+        assert!(
+            out.contains("token=***") || out.contains("sk-ant-***"),
+            "expected redaction marker, got: {out}"
+        );
+    }
+
+    #[test]
+    fn bare_sk_ant_still_gets_suffix_mask() {
+        // When there's no `token=` / `Authorization:` wrapper, the
+        // sk-ant pass is the last-mile fallback and should preserve
+        // the last-4 suffix so different leaks stay distinguishable.
+        let out = redact_secrets(
+            "stray sk-ant-Abc123DEF456_ghiJKLxyz trailing",
+        );
+        assert!(out.contains("sk-ant-***Lxyz"));
     }
 
     #[test]
@@ -406,6 +434,34 @@ mod tests {
                 "variant {variant} leaked"
             );
         }
+    }
+
+    #[test]
+    fn uppercase_sentinel_words_take_the_slow_path() {
+        // Every sentinel word the redactor guards must trigger on
+        // both cases. Fast-path mis-case would let uppercase
+        // PASSWORD= / TOKEN= slip through the whole pipeline.
+        let cases = [
+            "PASSWORD=hunter2",
+            "TOKEN=abc123def",
+            "API_KEY=XYZLeak",
+            "SECRET=omgno",
+        ];
+        for input in &cases {
+            let out = redact_secrets(input);
+            assert!(
+                !out.contains(&input[input.find('=').unwrap() + 1..]),
+                "uppercase variant {input} leaked"
+            );
+        }
+    }
+
+    #[test]
+    fn generic_token_key_gets_masked() {
+        // The bare `token=...` key was not covered by the earlier
+        // regex; the M2-review expansion added it.
+        let out = redact_secrets("token=abc-DEF_leakme");
+        assert!(!out.contains("abc-DEF_leakme"));
     }
 
     #[test]

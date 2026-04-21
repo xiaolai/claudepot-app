@@ -87,6 +87,12 @@ struct SessionState {
     last_task_summary: Option<String>,
     last_errored: bool,
     last_stuck: bool,
+    /// What the metrics store last saw for this session — used to
+    /// gate writes to "on transition only" so the table doesn't
+    /// accumulate redundant rows every 500ms tick.
+    last_metrics_status: Status,
+    last_metrics_errored: bool,
+    last_metrics_stuck: bool,
 }
 
 impl LiveRuntime {
@@ -421,16 +427,42 @@ impl LiveRuntime {
             .collect();
         drop(state);
 
-        // 5. Record tick to the durable metrics store (if available).
-        // Best-effort; a failed write is logged and swallowed so the
-        // rest of the runtime keeps ticking.
+        // 5. Record to the durable metrics store, but ONLY sessions
+        // whose visible state changed this tick — status, errored,
+        // or stuck transition. Writing every session every tick
+        // produced ~1.7M rows/day on a 10-session load; the Trends
+        // view only needs transition points to render its histogram
+        // correctly. Non-transitioning sessions keep their prior
+        // point; the active_series query's bucket-width de-dup
+        // (HashSet per bucket) still attributes them.
+        let mut changed: Vec<LiveSessionSummary> = Vec::new();
+        let mut state_for_marks = self.state.lock().await;
+        for row in &list {
+            let Some(ss) = state_for_marks.get_mut(&row.session_id) else {
+                continue;
+            };
+            let transitioned = row.status != ss.last_metrics_status
+                || row.errored != ss.last_metrics_errored
+                || row.stuck != ss.last_metrics_stuck;
+            if transitioned || ss.last_metrics_status == Status::Idle
+                && !changed.iter().any(|c| c.session_id == row.session_id)
+            {
+                ss.last_metrics_status = row.status;
+                ss.last_metrics_errored = row.errored;
+                ss.last_metrics_stuck = row.stuck;
+                changed.push(row.clone());
+            }
+        }
+        drop(state_for_marks);
         if let Some(ref m) = self.metrics {
-            if let Err(e) = m.record_tick(now_ms, &list) {
-                tracing::debug!(
-                    target = "session_live::runtime",
-                    error = %e,
-                    "metrics tick write failed (non-fatal)"
-                );
+            if !changed.is_empty() {
+                if let Err(e) = m.record_tick(now_ms, &changed) {
+                    tracing::debug!(
+                        target = "session_live::runtime",
+                        error = %e,
+                        "metrics tick write failed (non-fatal)"
+                    );
+                }
             }
         }
 
@@ -479,6 +511,13 @@ impl SessionState {
             last_task_summary: None,
             last_errored: false,
             last_stuck: false,
+            // Seed with a sentinel different from the actual first
+            // snapshot's likely value so the first published row
+            // lands (every new session should have at least one
+            // metrics point; from there it's transition-only).
+            last_metrics_status: Status::Waiting,
+            last_metrics_errored: false,
+            last_metrics_stuck: false,
         })
     }
 }
