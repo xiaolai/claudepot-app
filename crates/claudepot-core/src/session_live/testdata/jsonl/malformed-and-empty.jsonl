@@ -1,0 +1,4 @@
+{"type":"custom-title","customTitle":"fixture-malformed","sessionId":"s5"}
+this line is not json and must be tolerated
+{"broken": "trailing comma"
+{"type":"last-prompt","lastPrompt":"after malformed","sessionId":"s5"}

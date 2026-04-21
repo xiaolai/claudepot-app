@@ -1,0 +1,16 @@
+{"type":"custom-title","customTitle":"fixture-noise","sessionId":"s4"}
+{"type":"ai-title","aiTitle":"auto-generated","sessionId":"s4"}
+{"type":"last-prompt","lastPrompt":"fix it","sessionId":"s4"}
+{"type":"task-summary","summary":"running the test suite after the repo-filter change","sessionId":"s4","timestamp":"2026-04-21T10:00:00.000Z"}
+{"type":"tag","tag":"review","sessionId":"s4"}
+{"type":"agent-name","agentName":"fixture-session","sessionId":"s4"}
+{"type":"agent-color","agentColor":"orange","sessionId":"s4"}
+{"type":"agent-setting","agentSetting":"auto","sessionId":"s4"}
+{"type":"file-history-snapshot","messageId":"fh1","snapshot":{"messageId":"fh1","trackedFileBackups":{},"timestamp":"2026-04-21T10:00:00.000Z"},"isSnapshotUpdate":false}
+{"type":"queue-operation","sessionId":"s4","op":"enqueue","item":{"text":"queued prompt"}}
+{"type":"summary","leafUuid":"leaf-1","summary":"conversation boundary"}
+{"type":"mode","mode":"normal","sessionId":"s4"}
+{"parentUuid":null,"isSidechain":false,"type":"system","subtype":"stop_hook_summary","hookCount":1,"hookInfos":[],"hookErrors":[],"preventedContinuation":false,"stopReason":"end_turn","hasOutput":false,"level":"info","timestamp":"2026-04-21T10:00:01.000Z","uuid":"hs1"}
+{"parentUuid":null,"isSidechain":false,"type":"system","subtype":"away_summary","content":"Goal: fix the test; Status: done","timestamp":"2026-04-21T10:00:02.000Z","uuid":"as1","isMeta":false}
+{"parentUuid":null,"isSidechain":false,"type":"system","subtype":"local_command","content":"<command-name>/clear</command-name>","timestamp":"2026-04-21T10:00:03.000Z","uuid":"lc1","level":"info"}
+{"parentUuid":null,"isSidechain":false,"type":"system","subtype":"api_error","content":"transient 429","timestamp":"2026-04-21T10:00:04.000Z","uuid":"ae1","level":"warning"}

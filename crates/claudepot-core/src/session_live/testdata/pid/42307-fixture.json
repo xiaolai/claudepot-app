@@ -1,0 +1,10 @@
+{
+  "pid": 99477,
+  "sessionId": "db5d5a047172364c0000000000000000",
+  "cwd": "/tmp/project-28e7966b32836e1d",
+  "startedAt": 1776480629065,
+  "version": "2.1.114",
+  "kind": "interactive",
+  "entrypoint": "cli",
+  "name": "fixture-bf48c442"
+}
