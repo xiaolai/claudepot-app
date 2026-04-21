@@ -774,6 +774,12 @@ pub enum SessionEventDto {
         uuid: Option<String>,
         file_count: usize,
     },
+    #[serde(rename = "taskSummary")]
+    TaskSummary {
+        ts: Option<DateTime<Utc>>,
+        uuid: Option<String>,
+        summary: String,
+    },
     #[serde(rename = "other")]
     Other {
         ts: Option<DateTime<Utc>>,
@@ -880,6 +886,11 @@ impl From<&claudepot_core::session::SessionEvent> for SessionEventDto {
                 ts: *ts,
                 uuid: uuid.clone(),
                 file_count: *file_count,
+            },
+            E::TaskSummary { ts, uuid, summary } => Self::TaskSummary {
+                ts: *ts,
+                uuid: uuid.clone(),
+                summary: summary.clone(),
             },
             E::Other {
                 ts,
