@@ -366,5 +366,10 @@ async fn redaction_applied_to_current_action() {
         !ca.contains("sk-ant-Abc123DEF456_xyz"),
         "raw key leaked through aggregate DTO: {ca}"
     );
-    assert!(ca.contains("sk-ant-***"));
+    // M2: whole-bearer redaction is stronger than sk-ant-specific.
+    // Accept either mask shape; both protect the token body.
+    assert!(
+        ca.contains("Authorization: Bearer ***") || ca.contains("sk-ant-***"),
+        "expected redaction marker, got: {ca}"
+    );
 }
