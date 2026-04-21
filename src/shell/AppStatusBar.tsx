@@ -1,5 +1,7 @@
 import { Glyph } from "../components/primitives/Glyph";
+import { useSessionLive } from "../hooks/useSessionLive";
 import { NF } from "../icons";
+import type { LiveSessionSummary } from "../types";
 
 export interface AppStatusBarStats {
   /** Git branch name or similar. Undefined hides the branch segment. */
@@ -20,7 +22,11 @@ export interface AppStatusBarStats {
  * render "0 projects · 0 sessions".
  */
 export function AppStatusBar({ stats }: { stats: AppStatusBarStats }) {
+  const live = useSessionLive();
+  const liveSegment = formatLiveSegment(live);
+
   const segments: (string | null)[] = [
+    liveSegment,
     stats.projects != null && stats.projects > 0
       ? `${stats.projects} project${stats.projects === 1 ? "" : "s"}`
       : null,
@@ -98,4 +104,39 @@ export function AppStatusBar({ stats }: { stats: AppStatusBarStats }) {
       )}
     </div>
   );
+}
+
+/** Build the "● N live · Opus 2, Sonnet 1" segment. Returns null
+ *  when no sessions are live so the segment is render-if-nonzero. */
+export function formatLiveSegment(
+  sessions: LiveSessionSummary[],
+): string | null {
+  if (sessions.length === 0) return null;
+  const mix = modelMix(sessions);
+  if (mix.length === 0) {
+    return `● ${sessions.length} live`;
+  }
+  return `● ${sessions.length} live · ${mix.join(", ")}`;
+}
+
+/** Group live sessions by 3-letter model family and format as
+ *  "OPUS 2, SON 1" in descending count order. Unknown models
+ *  cluster under their raw id trimmed to 8 chars. */
+export function modelMix(sessions: LiveSessionSummary[]): string[] {
+  const counts = new Map<string, number>();
+  for (const s of sessions) {
+    const key = familyKey(s.model);
+    counts.set(key, (counts.get(key) ?? 0) + 1);
+  }
+  return [...counts.entries()]
+    .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))
+    .map(([k, n]) => `${k} ${n}`);
+}
+
+function familyKey(model: string | null): string {
+  if (!model) return "?";
+  if (model.includes("opus")) return "OPUS";
+  if (model.includes("sonnet")) return "SON";
+  if (model.includes("haiku")) return "HAI";
+  return model.length > 8 ? model.slice(0, 7) + "…" : model;
 }
