@@ -154,12 +154,28 @@ export function AddAccountModal({
     }
   };
 
+  /**
+   * Wrap every dismiss route (Esc / scrim / header-X / footer Close)
+   * so we always cancel the backend before the modal disappears.
+   * Without this, a close while `browserLoggingIn` leaves the
+   * `claude auth login` subprocess running invisibly in the
+   * background, which is exactly the original bug this feature was
+   * meant to fix. Cancel is fire-and-forget so dismissal is still
+   * instant from the user's perspective.
+   */
+  const handleRequestClose = () => {
+    if (browserLoggingIn) {
+      void handleCancelBrowserLogin();
+    }
+    onClose();
+  };
+
   const summary = summaryFor(preflight);
 
   return (
     <Modal
       open={open}
-      onClose={onClose}
+      onClose={handleRequestClose}
       width="lg"
       aria-labelledby={titleId}
     >
@@ -167,7 +183,7 @@ export function AddAccountModal({
         <ModalHeader
           glyph={NF.plus}
           title="Add account"
-          onClose={onClose}
+          onClose={handleRequestClose}
           id={titleId}
         />
 
@@ -321,7 +337,7 @@ export function AddAccountModal({
               Cancel login
             </Button>
           ) : (
-            <Button variant="ghost" onClick={onClose}>
+            <Button variant="ghost" onClick={handleRequestClose}>
               Close
             </Button>
           )}

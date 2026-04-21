@@ -117,13 +117,21 @@ pub async fn run_auth_login() -> Result<PathBuf, OnboardError> {
 pub async fn run_auth_login_cancellable(
     cancel: Option<std::sync::Arc<tokio::sync::Notify>>,
 ) -> Result<PathBuf, OnboardError> {
+    let claude_path = which_claude()?;
+    run_auth_login_cancellable_with_binary(&claude_path, cancel).await
+}
+
+/// Internal seam: accepts an explicit binary path so tests can point
+/// the loop at a controllable stub process. Not re-exported.
+pub(crate) async fn run_auth_login_cancellable_with_binary(
+    claude_path: &std::path::Path,
+    cancel: Option<std::sync::Arc<tokio::sync::Notify>>,
+) -> Result<PathBuf, OnboardError> {
     let temp_dir = tempfile::Builder::new()
         .prefix("claudepot-onboard-")
         .tempdir()
         .map_err(OnboardError::Io)?;
     let config_dir = temp_dir.path().to_path_buf();
-
-    let claude_path = which_claude()?;
 
     tracing::info!(
         binary = %claude_path.display(),
@@ -132,7 +140,7 @@ pub async fn run_auth_login_cancellable(
         "spawning `claude auth login` in temp dir"
     );
 
-    let mut child = tokio::process::Command::new(&claude_path)
+    let mut child = tokio::process::Command::new(claude_path)
         .arg("auth")
         .arg("login")
         .env("CLAUDE_CONFIG_DIR", &config_dir)
@@ -186,14 +194,25 @@ pub async fn run_auth_login_cancellable(
 
     match outcome {
         Ok(()) => {
-            // Keep the tempdir alive for the caller; they clean it up.
+            // Keep the tempdir alive for the caller; they clean it up
+            // after reading credentials.
             Ok(temp_dir.keep())
         }
         Err(e) => {
-            // On any failure we drop the TempDir so its Drop impl
-            // removes the directory — no need for caller-side cleanup
-            // when there's nothing to import.
-            drop(temp_dir);
+            // `claude auth login` can write credentials to two places:
+            // the temp `.credentials.json` file *and*, on macOS, a
+            // hashed Keychain entry keyed off the temp dir's path. If
+            // OAuth completed in the browser milliseconds before the
+            // user clicked Cancel (or the timeout elapsed), the child
+            // may have already written into both. `TempDir::drop`
+            // only removes the directory; the Keychain item would be
+            // orphaned. Route cleanup through `cleanup()` which knows
+            // about both surfaces.
+            let config_dir = temp_dir.path().to_path_buf();
+            // Release the TempDir handle first so its Drop doesn't
+            // race with the explicit `remove_dir_all` inside cleanup.
+            let _ = temp_dir.keep();
+            cleanup(&config_dir).await;
             Err(e)
         }
     }
@@ -266,5 +285,93 @@ mod tests {
         // user can diagnose (e.g. 1 = generic CC failure).
         let err = OnboardError::AuthLoginFailed(1);
         assert!(err.to_string().contains("1"));
+    }
+
+    /// Smoke test for the cancel path. The real `claude` binary isn't
+    /// reliably installed in CI, so we stand in with a tiny shell
+    /// stub that `exec`s into `sleep 30`. The stub ignores the
+    /// `auth login` argv injected by the runner — it just needs to
+    /// stay alive long enough for the test to fire the Notify. The
+    /// test asserts that cancel resolves quickly with
+    /// `AuthLoginCancelled` and that the temp dir no longer exists
+    /// after the error-path cleanup.
+    #[tokio::test]
+    #[cfg(unix)]
+    async fn cancel_kills_child_and_cleans_tempdir() {
+        use std::os::unix::fs::PermissionsExt;
+        use std::sync::Arc;
+        use std::time::Duration;
+        use tokio::sync::Notify;
+
+        // Write a stub binary to a tempdir and make it executable.
+        let stub_dir = tempfile::tempdir().expect("mk stub tempdir");
+        let stub = stub_dir.path().join("claude-stub.sh");
+        std::fs::write(&stub, "#!/bin/sh\nexec sleep 30\n")
+            .expect("write stub");
+        let mut perms = std::fs::metadata(&stub).unwrap().permissions();
+        perms.set_mode(0o755);
+        std::fs::set_permissions(&stub, perms).unwrap();
+
+        // Snapshot any pre-existing `claudepot-onboard-*` directories
+        // so stale state (from previous failed runs or parallel tests)
+        // doesn't confuse the post-cleanup assertion below.
+        let temp_root = std::env::temp_dir();
+        let before: std::collections::HashSet<std::ffi::OsString> =
+            std::fs::read_dir(&temp_root)
+                .map(|it| {
+                    it.filter_map(|e| e.ok())
+                        .map(|e| e.file_name())
+                        .filter(|n| {
+                            n.to_string_lossy()
+                                .starts_with("claudepot-onboard-")
+                        })
+                        .collect()
+                })
+                .unwrap_or_default();
+
+        let notify = Arc::new(Notify::new());
+        let notify_clone = notify.clone();
+        let stub_path = stub.clone();
+
+        let task = tokio::spawn(async move {
+            run_auth_login_cancellable_with_binary(&stub_path, Some(notify_clone))
+                .await
+        });
+
+        // Let the child actually spawn before we fire the Notify so
+        // the tokio::select! is parked on child.wait() when the
+        // cancel arm resolves.
+        tokio::time::sleep(Duration::from_millis(150)).await;
+        notify.notify_one();
+
+        let outcome = tokio::time::timeout(Duration::from_secs(5), task)
+            .await
+            .expect("cancel should complete within 5s")
+            .expect("join handle should not panic");
+        assert!(
+            matches!(outcome, Err(OnboardError::AuthLoginCancelled)),
+            "expected AuthLoginCancelled, got {outcome:?}"
+        );
+
+        // New tempdirs created by *this* test run must all be gone
+        // after the awaited cleanup. Tempdirs from prior runs /
+        // parallel tests are filtered out via the `before` snapshot.
+        let after: std::collections::HashSet<std::ffi::OsString> =
+            std::fs::read_dir(&temp_root)
+                .map(|it| {
+                    it.filter_map(|e| e.ok())
+                        .map(|e| e.file_name())
+                        .filter(|n| {
+                            n.to_string_lossy()
+                                .starts_with("claudepot-onboard-")
+                        })
+                        .collect()
+                })
+                .unwrap_or_default();
+        let new_leftovers: Vec<_> = after.difference(&before).collect();
+        assert!(
+            new_leftovers.is_empty(),
+            "cleanup should remove onboarding tempdirs created by this test run, still have: {new_leftovers:?}"
+        );
     }
 }
