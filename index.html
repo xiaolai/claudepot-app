@@ -8,23 +8,48 @@
 
     <!-- Warm the two font weights the shell paints with during the first
          second; the other two (SemiBold, Bold) load on-demand once the
-         UI actually uses them. /. -->
+         UI actually uses them. The matching @font-face rules are inline
+         below so the preload connects at HTML-parse time — keeping them
+         in tokens.css delayed the declarations until the module graph
+         finished compiling, leaving the preloaded fonts "unused" during
+         the window.load threshold and WebKit would warn. -->
     <link rel="preload" as="font" type="font/woff2"
           href="/fonts/JetBrainsMonoNerdFontMono-Regular.woff2" crossorigin />
     <link rel="preload" as="font" type="font/woff2"
           href="/fonts/JetBrainsMonoNerdFontMono-Medium.woff2" crossorigin />
 
-    <!-- First-paint skeleton. Lives inline (no external CSS fetch) so the
-         webview paints the shell background the instant the HTML lands
-         instead of showing white for the multi-second module-graph cold
-         compile on dev + JS-bundle parse on release. Theme matches
-         tokens.css; replaced the moment React mounts. -->
+    <!-- First-paint skeleton + font-face declarations. Lives inline (no
+         external CSS fetch) so the webview paints the shell background
+         the instant the HTML lands instead of showing white for the
+         multi-second module-graph cold compile on dev + JS-bundle parse
+         on release. Theme matches tokens.css; replaced the moment React
+         mounts. -->
     <style>
+      @font-face {
+        font-family: 'JetBrainsMonoNF';
+        src: url('/fonts/JetBrainsMonoNerdFontMono-Regular.woff2') format('woff2');
+        font-weight: 400; font-style: normal; font-display: swap;
+      }
+      @font-face {
+        font-family: 'JetBrainsMonoNF';
+        src: url('/fonts/JetBrainsMonoNerdFontMono-Medium.woff2') format('woff2');
+        font-weight: 500; font-style: normal; font-display: swap;
+      }
+      @font-face {
+        font-family: 'JetBrainsMonoNF';
+        src: url('/fonts/JetBrainsMonoNerdFontMono-SemiBold.woff2') format('woff2');
+        font-weight: 600; font-style: normal; font-display: swap;
+      }
+      @font-face {
+        font-family: 'JetBrainsMonoNF';
+        src: url('/fonts/JetBrainsMonoNerdFontMono-Bold.woff2') format('woff2');
+        font-weight: 700; font-style: normal; font-display: swap;
+      }
       html, body { height: 100%; margin: 0; }
       body {
         background: oklch(99% 0.003 60);
         color: oklch(22% 0.008 60);
-        font-family: 'JetBrains Mono', ui-monospace, Menlo, monospace;
+        font-family: 'JetBrainsMonoNF', 'JetBrains Mono', ui-monospace, Menlo, monospace;
         font-size: 13px;
       }
       @media (prefers-color-scheme: dark) {
