@@ -1,21 +1,27 @@
 //! M1 redaction floor — exact port of
 //! `src/sections/sessions/viewers/redact.ts`.
 //!
-//! Matches `sk-ant-<tokenchars>` where tokenchars are alphanumerics,
-//! `-`, or `_`. Short tokens (≤12 chars including prefix) are masked
-//! completely; longer tokens keep their last four characters so two
-//! different leaks remain distinguishable.
+//! **Scope is deliberately narrow.** This module matches one secret
+//! family: `sk-ant-<tokenchars>` where tokenchars are alphanumerics,
+//! `-`, or `_` (covers API keys and OAuth `sk-ant-oat01-*` variants).
+//! Short tokens (≤12 chars including prefix) are masked completely;
+//! longer tokens keep their last four characters so two different
+//! leaks remain distinguishable.
 //!
-//! This is the canonical trust boundary. Every field that crosses
-//! out of `claudepot-core::session_live` into the Tauri DTO layer
-//! must pass through `redact` (or a later family that extends it).
-//! Tauri-side and TS-side redaction remain as belt-and-braces, not
-//! as the authority.
+//! **What this does NOT cover (M2 work):** Bearer/JWT tokens not
+//! prefixed with `sk-ant-`, raw `Authorization: Bearer ...` headers
+//! with arbitrary token shapes, `password=...` / `api_key=...`
+//! query or body params, Set-Cookie / Cookie headers, AWS / GCP /
+//! other vendor key prefixes. Each of those families lands in M2
+//! with fixtures covering positive and negative cases. See plan §7.
 //!
-//! Extended redaction families (Bearer/JWT, Authorization headers,
-//! password/api_key params, cookies) are deliberately deferred to
-//! M2 and will each ship with fixtures covering both positive and
-//! negative cases. See plan §7.
+//! **Trust boundary positioning.** The boundary is the IPC layer —
+//! Tauri commands that emit `LiveSessionSummary` / `LiveDelta` DTOs.
+//! This module is one policy that boundary calls; it is NOT a
+//! complete sanitizer on its own. Constructors of the DTO types
+//! are responsible for invoking it on every user-content string.
+//! The compile-time `Redacted<String>` newtype that would make this
+//! structural is planned for M2.
 
 use once_cell::sync::Lazy;
 use regex::Regex;

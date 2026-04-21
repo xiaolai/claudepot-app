@@ -92,9 +92,13 @@ pub struct LiveSessionSummary {
     /// most recent `task-summary`, falls back to "<tool>: <first-arg>"
     /// when derivable, otherwise `None`.
     pub current_action: Option<String>,
-    /// Last model id seen in `assistant.message.model`. Canonicalized
-    /// (e.g. `claude-haiku-4-5-20251001` → `claude-haiku-4-5`) by
-    /// `pricing::canonicalize_model_id` (lands M4).
+    /// Last model id seen in `assistant.message.model`. In M1 this
+    /// is the **raw transcript value** — e.g., you may see
+    /// `claude-haiku-4-5-20251001` verbatim. The `pricing` module
+    /// (M4) introduces `canonicalize_model_id` that collapses dated
+    /// variants to `claude-haiku-4-5` for cost lookup; callers that
+    /// just want to display the model should keep using this raw
+    /// field.
     pub model: Option<String>,
     /// CC's own `waitingFor` string when status == Waiting.
     pub waiting_for: Option<String>,

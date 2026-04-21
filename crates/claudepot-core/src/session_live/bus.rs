@@ -120,30 +120,40 @@ impl DetailBus {
         Self::default()
     }
 
-    /// Subscribe to a session's detail stream. Creates the channel
-    /// if this is the first subscriber. Dropping the returned
-    /// `Receiver` does NOT remove the slot immediately; the slot is
-    /// cleaned up by the next failing `publish_delta` when the send
-    /// half returns `SendError::Closed`.
-    pub async fn subscribe(&self, session_id: &str) -> mpsc::Receiver<LiveDelta> {
+    /// Subscribe to a session's detail stream. The contract is
+    /// **single-subscriber per session** — if a slot already has a
+    /// live `Sender` (receiver not dropped), this returns
+    /// [`BusError::AlreadySubscribed`] so callers cannot
+    /// accidentally replace the channel and silently detach the
+    /// previous reader. Callers that legitimately want to re-attach
+    /// must call [`end_session`] first.
+    ///
+    /// When no slot exists, or the previous receiver has been
+    /// dropped (detected via `Sender::is_closed`), a fresh channel
+    /// is created. The returned `Receiver` is live at that instant;
+    /// dropping it does not remove the slot from the map — the slot
+    /// is reaped lazily on the next `publish_delta` that encounters
+    /// `TrySendError::Closed`.
+    pub async fn subscribe(
+        &self,
+        session_id: &str,
+    ) -> Result<mpsc::Receiver<LiveDelta>, BusError> {
         let mut map = self.inner.lock().await;
-        let entry = map.entry(session_id.to_string()).or_insert_with(|| {
-            let (tx, _) = mpsc::channel(DETAIL_CHANNEL_CAPACITY);
+        if let Some(slot) = map.get(session_id) {
+            if !slot.tx.is_closed() {
+                return Err(BusError::AlreadySubscribed);
+            }
+        }
+        let (tx, rx) = mpsc::channel(DETAIL_CHANNEL_CAPACITY);
+        map.insert(
+            session_id.to_string(),
             DetailSlot {
                 tx,
                 pending_resync: false,
                 dropped: 0,
-            }
-        });
-        // Fresh receiver — we have to rebuild the channel because
-        // `Sender::subscribe` doesn't exist for mpsc. In practice M1
-        // has only one subscriber per session (the GUI), so the
-        // rebuild on re-subscribe is acceptable.
-        let (tx, rx) = mpsc::channel(DETAIL_CHANNEL_CAPACITY);
-        entry.tx = tx;
-        entry.pending_resync = false;
-        entry.dropped = 0;
-        rx
+            },
+        );
+        Ok(rx)
     }
 
     /// Publish a delta. Sets `resync_required` on the outgoing delta
@@ -202,14 +212,21 @@ impl DetailBus {
     }
 }
 
-/// Errors the bus surfaces to callers. Silent drops are not errors —
-/// they are a deliberate design choice when the subscriber is slow.
-#[derive(Debug, thiserror::Error)]
+/// Errors the bus surfaces to callers. Silent drops under channel
+/// saturation are not errors — they're a deliberate backpressure
+/// choice surfaced via `resync_required` on the next delta.
+#[derive(Debug, thiserror::Error, PartialEq, Eq)]
 pub enum BusError {
     /// The session's subscriber has been dropped. The slot has been
     /// reaped; the next subscribe will rebuild it.
     #[error("subscriber for session has been dropped")]
     SubscriberGone,
+    /// A live subscriber already exists for this session id.
+    /// Callers must `end_session(sid)` first if they want to
+    /// re-attach — silent replacement would orphan the original
+    /// receiver with no error and no resync signal.
+    #[error("session already has an active subscriber")]
+    AlreadySubscribed,
 }
 
 #[cfg(test)]
@@ -256,7 +273,7 @@ mod tests {
     #[tokio::test]
     async fn detail_bus_delivers_in_order() {
         let bus = DetailBus::new();
-        let mut rx = bus.subscribe("s1").await;
+        let mut rx = bus.subscribe("s1").await.unwrap();
         for i in 1..=5 {
             assert!(
                 bus.publish_delta(status_delta("s1", i, Status::Busy))
@@ -272,61 +289,20 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn detail_bus_flags_resync_after_overflow() {
-        let bus = DetailBus::new();
-        let _rx = bus.subscribe("s1").await;
-        // Fill the channel without reading — saturation.
-        let mut delivered = 0u64;
-        for i in 0..(DETAIL_CHANNEL_CAPACITY + 10) as u64 {
-            if bus
-                .publish_delta(status_delta("s1", i, Status::Busy))
-                .await
-                .unwrap()
-            {
-                delivered += 1;
-            }
-        }
-        assert_eq!(
-            delivered, DETAIL_CHANNEL_CAPACITY as u64,
-            "only the bounded capacity should have landed"
-        );
-        assert!(bus.dropped_count("s1").await >= 10);
-
-        // Drain one — frees a slot — then send one more. That next
-        // delivery MUST carry `resync_required = true`.
-        let mut rx = bus.subscribe("s1").await; // fresh channel; prior drops still counted? no — we rebuild. Use old receiver path instead.
-        // Re-subscribe tears down; we need a different test strategy.
-        // So: re-publish on the rebuilt slot and confirm the flag
-        // has been reset to false, because re-subscribe is a fresh
-        // contract per doc comment.
-        assert!(
-            bus.publish_delta(status_delta("s1", 9999, Status::Busy))
-                .await
-                .unwrap()
-        );
-        let d = rx.recv().await.unwrap();
-        assert_eq!(d.seq, 9999);
-        assert!(
-            !d.resync_required,
-            "re-subscribe should reset the resync flag"
-        );
-    }
-
-    #[tokio::test]
     async fn detail_bus_resync_flag_on_surviving_receiver() {
-        // Same as above but WITHOUT rebuilding the channel — the
-        // original receiver must observe `resync_required=true` on
-        // the next delivered delta after a drop.
+        // The core invariant: after the channel overflows and drops
+        // one or more deltas, the NEXT successfully delivered delta
+        // on the ORIGINAL receiver carries `resync_required = true`.
         let bus = DetailBus::new();
-        let mut rx = bus.subscribe("s2").await;
+        let mut rx = bus.subscribe("s2").await.unwrap();
         for i in 0..(DETAIL_CHANNEL_CAPACITY + 5) as u64 {
             let _ = bus
                 .publish_delta(status_delta("s2", i, Status::Busy))
                 .await
                 .unwrap();
         }
-        // Drain all queued — the last few were dropped so the queue
-        // only holds CAPACITY items from the front of the range.
+        // Drain queued items; once drained, the next publish lands
+        // with the resync flag set.
         let mut last_seen = None;
         while let Ok(d) =
             tokio::time::timeout(std::time::Duration::from_millis(50), rx.recv()).await
@@ -335,7 +311,6 @@ mod tests {
         }
         assert!(last_seen.is_some());
 
-        // Send one more — this one MUST flag resync.
         assert!(
             bus.publish_delta(status_delta("s2", 100_000, Status::Idle))
                 .await
@@ -347,6 +322,34 @@ mod tests {
             d.resync_required,
             "delta after a drop must flag resync_required"
         );
+    }
+
+    #[tokio::test]
+    async fn subscribe_returns_already_subscribed_when_live_receiver_exists() {
+        let bus = DetailBus::new();
+        let _rx = bus.subscribe("s1").await.unwrap();
+        let err = bus.subscribe("s1").await.unwrap_err();
+        assert_eq!(err, BusError::AlreadySubscribed);
+    }
+
+    #[tokio::test]
+    async fn subscribe_reattaches_after_end_session() {
+        let bus = DetailBus::new();
+        let _rx = bus.subscribe("s1").await.unwrap();
+        bus.end_session("s1").await;
+        // Now a fresh subscribe is allowed.
+        let _rx2 = bus.subscribe("s1").await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn subscribe_reattaches_after_receiver_drop() {
+        let bus = DetailBus::new();
+        let rx = bus.subscribe("s1").await.unwrap();
+        drop(rx);
+        // Once the previous receiver is dropped, the sender-closed
+        // check lets us subscribe again without an explicit
+        // `end_session`.
+        let _rx2 = bus.subscribe("s1").await.unwrap();
     }
 
     #[tokio::test]
@@ -364,7 +367,7 @@ mod tests {
         // Regression target: 10k deltas should not starve the
         // receiver nor deadlock the producer, given we drain as we go.
         let bus = DetailBus::new();
-        let mut rx = bus.subscribe("s3").await;
+        let mut rx = bus.subscribe("s3").await.unwrap();
         let producer = {
             let bus = bus.clone();
             tokio::spawn(async move {
@@ -397,7 +400,7 @@ mod tests {
     #[tokio::test]
     async fn detail_bus_end_session_tears_down_slot() {
         let bus = DetailBus::new();
-        let _rx = bus.subscribe("gone").await;
+        let _rx = bus.subscribe("gone").await.unwrap();
         bus.end_session("gone").await;
         let ok = bus
             .publish_delta(status_delta("gone", 1, Status::Idle))
