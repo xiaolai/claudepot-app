@@ -1,5 +1,31 @@
 import { describe, expect, it } from "vitest";
-import { formatElapsed, projectLabel, shortenModel } from "./SidebarLiveStrip";
+import {
+  STRIP_IDLE_VISIBLE_MS,
+  formatElapsed,
+  isStripActive,
+  projectLabel,
+  shortenModel,
+  sortForStrip,
+} from "./SidebarLiveStrip";
+import type { LiveSessionSummary } from "../types";
+
+function session(over: Partial<LiveSessionSummary> = {}): LiveSessionSummary {
+  return {
+    session_id: "s",
+    pid: 1,
+    cwd: "/tmp/x",
+    transcript_path: null,
+    status: "idle",
+    current_action: null,
+    model: null,
+    waiting_for: null,
+    errored: false,
+    stuck: false,
+    idle_ms: 0,
+    seq: 0,
+    ...over,
+  };
+}
 
 describe("SidebarLiveStrip helpers", () => {
   describe("projectLabel", () => {
@@ -59,6 +85,101 @@ describe("SidebarLiveStrip helpers", () => {
 
     it("returns empty for null", () => {
       expect(shortenModel(null)).toBe("");
+    });
+  });
+
+  describe("isStripActive", () => {
+    it("keeps busy sessions regardless of idle_ms", () => {
+      expect(isStripActive(session({ status: "busy", idle_ms: 0 }))).toBe(true);
+    });
+
+    it("keeps waiting sessions regardless of idle_ms", () => {
+      expect(isStripActive(session({ status: "waiting", idle_ms: 0 }))).toBe(
+        true,
+      );
+    });
+
+    it("keeps recent-idle sessions below the threshold", () => {
+      expect(
+        isStripActive(
+          session({ status: "idle", idle_ms: STRIP_IDLE_VISIBLE_MS - 1 }),
+        ),
+      ).toBe(true);
+    });
+
+    it("drops idle sessions at or past the threshold", () => {
+      expect(
+        isStripActive(
+          session({ status: "idle", idle_ms: STRIP_IDLE_VISIBLE_MS }),
+        ),
+      ).toBe(false);
+      expect(
+        isStripActive(session({ status: "idle", idle_ms: 82 * 60 * 60_000 })),
+      ).toBe(false);
+    });
+
+    it("keeps alerting (errored/stuck) sessions past the threshold", () => {
+      expect(
+        isStripActive(
+          session({
+            status: "idle",
+            idle_ms: 10 * 60 * 60_000,
+            errored: true,
+          }),
+        ),
+      ).toBe(true);
+      expect(
+        isStripActive(
+          session({
+            status: "idle",
+            idle_ms: 10 * 60 * 60_000,
+            stuck: true,
+          }),
+        ),
+      ).toBe(true);
+    });
+  });
+
+  describe("sortForStrip", () => {
+    it("orders alerting → busy → waiting → idle", () => {
+      const input = [
+        session({ session_id: "idle", status: "idle", idle_ms: 0 }),
+        session({ session_id: "wait", status: "waiting", idle_ms: 0 }),
+        session({ session_id: "busy", status: "busy", idle_ms: 0 }),
+        session({
+          session_id: "alert",
+          status: "busy",
+          idle_ms: 0,
+          errored: true,
+        }),
+      ];
+      expect(sortForStrip(input).map((s) => s.session_id)).toEqual([
+        "alert",
+        "busy",
+        "wait",
+        "idle",
+      ]);
+    });
+
+    it("breaks ties by ascending idle_ms within a tier", () => {
+      const input = [
+        session({ session_id: "old", status: "idle", idle_ms: 5_000 }),
+        session({ session_id: "new", status: "idle", idle_ms: 1_000 }),
+      ];
+      expect(sortForStrip(input).map((s) => s.session_id)).toEqual([
+        "new",
+        "old",
+      ]);
+    });
+
+    it("does not mutate its input", () => {
+      const input = [
+        session({ session_id: "a", status: "idle", idle_ms: 9 }),
+        session({ session_id: "b", status: "busy", idle_ms: 0 }),
+      ];
+      const snapshot = input.map((s) => s.session_id);
+      sortForStrip(input);
+      expect(input.map((s) => s.session_id)).toEqual(snapshot);
     });
   });
 });
