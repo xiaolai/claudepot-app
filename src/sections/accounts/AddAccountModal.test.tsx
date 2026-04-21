@@ -111,6 +111,48 @@ describe("AddAccountModal — browser login cancel", () => {
     expect(onError).not.toHaveBeenCalled();
   });
 
+  it("cancels the backend when the modal is dismissed mid-login", async () => {
+    // User clicks Log in, then tries to close the modal some other way
+    // (Esc key → onClose passthrough in the real Modal component; we
+    // trigger it here by calling the onClose prop directly via the
+    // "Cancel login" button's sibling path — the footer still wires
+    // through the same handleRequestClose).
+    let resolveLogin!: (v: unknown) => void;
+    mockApi.accountRegisterFromBrowser.mockImplementation(
+      () =>
+        new Promise((r) => {
+          resolveLogin = r;
+        }),
+    );
+    mockApi.accountLoginCancel.mockResolvedValue(undefined);
+    const onClose = vi.fn();
+
+    render(
+      <AddAccountModal
+        open
+        onClose={onClose}
+        onAdded={() => {}}
+        onError={() => {}}
+        accounts={[]}
+      />,
+    );
+
+    const loginBtn = await screen.findByRole("button", { name: /log in/i });
+    await userEvent.click(loginBtn);
+
+    // Simulate Esc via the modal's document-level Escape handler.
+    await userEvent.keyboard("{Escape}");
+
+    // Both the cancel command AND the parent's onClose must fire so
+    // the subprocess stops AND the modal disappears.
+    await waitFor(() => {
+      expect(mockApi.accountLoginCancel).toHaveBeenCalledOnce();
+      expect(onClose).toHaveBeenCalled();
+    });
+
+    resolveLogin({ email: "" });
+  });
+
   it("surfaces non-cancel errors via onError", async () => {
     mockApi.accountRegisterFromBrowser.mockRejectedValue(
       new Error("register failed: claude binary not found"),
