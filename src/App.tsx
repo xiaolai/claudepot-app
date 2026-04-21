@@ -372,6 +372,16 @@ function AppShell() {
           }}
           version="v0.4.2"
           synced
+          onOpenLiveSession={(s) => {
+            // M1: strip rows deep-link to the static Sessions
+            // browser via the existing cp-goto-session bus. The
+            // live pane (WI-M2) will intercept this route when it
+            // lands; for now the user sees the historical detail.
+            if (s.transcript_path) {
+              setPendingSessionPath(s.transcript_path);
+              setSection("sessions");
+            }
+          }}
         />
 
         <main
