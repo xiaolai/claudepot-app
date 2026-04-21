@@ -134,6 +134,7 @@ pub fn resume(
         force: entry.journal.flags.force,
         dry_run: false,
         ignore_pending_journals: true,
+        claudepot_state_dir: None,
     };
     project::move_project(&args, sink)
 }
@@ -162,6 +163,7 @@ pub fn rollback(
         force: entry.journal.flags.force,
         dry_run: false,
         ignore_pending_journals: true,
+        claudepot_state_dir: None,
     };
     project::move_project(&args, sink)
 }

@@ -667,9 +667,7 @@ pub async fn current_cc_identity() -> Result<CcIdentity, String> {
 const JOURNAL_NAG_THRESHOLD_SECS: u64 = 86_400;
 
 fn claudepot_home_dirs() -> (std::path::PathBuf, std::path::PathBuf, std::path::PathBuf) {
-    let cfg = paths::claude_config_dir();
-    let base = cfg.join("claudepot");
-    (base.join("journals"), base.join("locks"), base.join("snapshots"))
+    paths::claudepot_repair_dirs()
 }
 
 #[tauri::command]
@@ -720,7 +718,8 @@ pub fn project_move_dry_run(
 
     let cfg = paths::claude_config_dir();
     let claude_json_path = dirs::home_dir().map(|h| h.join(".claude.json"));
-    let snapshots_dir = Some(cfg.join("claudepot").join("snapshots"));
+    let repair_root = paths::claudepot_repair_dir();
+    let snapshots_dir = Some(repair_root.join("snapshots"));
     let core_args = project::MoveArgs {
         old_path: args.old_path.into(),
         new_path: args.new_path.into(),
@@ -733,6 +732,7 @@ pub fn project_move_dry_run(
         force: args.force,
         dry_run: true, // enforced; caller cannot turn this off
         ignore_pending_journals: args.ignore_pending_journals,
+        claudepot_state_dir: Some(repair_root),
     };
     let plan = project::plan_move(&core_args).map_err(|e| format!("dry-run failed: {e}"))?;
 
@@ -859,11 +859,13 @@ pub fn project_clean_start(
             op_id: op_id_for_task.clone(),
             ops: ops_for_task.clone(),
         };
+        let repair_root = paths::claudepot_repair_dir();
         let result = project::clean_orphans_with_progress(
             &cfg,
             claude_json.as_deref(),
             Some(snaps_for_task.as_path()),
             Some(locks_for_task.as_path()),
+            Some(repair_root.as_path()),
             &protected,
             false,
             &sink,
@@ -1039,7 +1041,7 @@ fn spawn_repair_op(
         };
         let cfg = paths::claude_config_dir();
         let claude_json = dirs::home_dir().map(|h| h.join(".claude.json"));
-        let snaps = Some(cfg.join("claudepot").join("snapshots"));
+        let snaps = Some(paths::claudepot_repair_dir().join("snapshots"));
         let result = match kind {
             OpKind::RepairResume => {
                 project_repair::resume(&entry, cfg, claude_json, snaps, &sink)
@@ -1116,7 +1118,8 @@ pub fn project_move_start(
 ) -> Result<String, String> {
     let cfg = paths::claude_config_dir();
     let claude_json = dirs::home_dir().map(|h| h.join(".claude.json"));
-    let snaps = Some(cfg.join("claudepot").join("snapshots"));
+    let repair_root = paths::claudepot_repair_dir();
+    let snaps = Some(repair_root.join("snapshots"));
     // Defensive: ignore `dry_run` from the DTO — this endpoint always
     // actually executes. Callers that want dry-run use
     // `project_move_dry_run` instead.
@@ -1132,6 +1135,7 @@ pub fn project_move_start(
         force: args.force,
         dry_run: false,
         ignore_pending_journals: args.ignore_pending_journals,
+        claudepot_state_dir: Some(repair_root),
     };
 
     let op_id = new_op_id();
@@ -1684,4 +1688,325 @@ pub fn preferences_set_hide_dock_icon(
         .map_err(|e| format!("preferences lock: {e}"))?;
     p.hide_dock_icon = hide;
     p.save()
+}
+
+// ---------------------------------------------------------------------------
+// Keys — ANTHROPIC_API_KEY + CLAUDE_CODE_OAUTH_TOKEN management.
+//
+// Metadata lives in `~/.claudepot/keys.db`; secrets live in the OS
+// keychain via the `keyring` crate. The plaintext token crosses the
+// Tauri bridge ONLY on deliberate `*_copy` / `*_add` — never on list,
+// probe, or usage fetch.
+// ---------------------------------------------------------------------------
+
+use crate::dto::{ApiKeySummaryDto, OauthTokenSummaryDto};
+use claudepot_core::keys::{
+    classify_token, delete_api_secret, delete_oauth_secret, read_api_secret,
+    read_oauth_secret, token_preview, write_api_secret, write_oauth_secret, KeyPrefix,
+    KeyStore, OAUTH_TOKEN_VALIDITY_DAYS,
+};
+
+fn open_keys_store() -> Result<KeyStore, String> {
+    let db = paths::claudepot_data_dir().join("keys.db");
+    KeyStore::open(&db).map_err(|e| format!("keys store open failed: {e}"))
+}
+
+/// Build `uuid → email` from a single `accounts.list()` call so N-row
+/// key tables don't fire N SELECTs when rendering the Keys section.
+fn account_email_map(
+    store: &AccountStore,
+) -> Result<HashMap<Uuid, String>, String> {
+    let accounts = store.list().map_err(|e| format!("list failed: {e}"))?;
+    Ok(accounts.into_iter().map(|a| (a.uuid, a.email)).collect())
+}
+
+fn parse_account_uuid(s: &str, email_map: &HashMap<Uuid, String>) -> Result<Uuid, String> {
+    let id = Uuid::parse_str(s).map_err(|_| format!("invalid account uuid: {s}"))?;
+    if !email_map.contains_key(&id) {
+        return Err(format!("no registered account with uuid {s}"));
+    }
+    Ok(id)
+}
+
+fn oauth_summary(
+    t: claudepot_core::keys::OauthToken,
+    email_map: &HashMap<Uuid, String>,
+) -> OauthTokenSummaryDto {
+    let expires_at = t.created_at + chrono::Duration::days(OAUTH_TOKEN_VALIDITY_DAYS);
+    // Ceil the remaining time so a token with 12 hours left reads
+    // "1d left" instead of collapsing to 0 and tripping the UI's
+    // `<= 0` Expired check. Past-expiry deltas stay negative.
+    let secs_remaining = (expires_at - chrono::Utc::now()).num_seconds();
+    let days_remaining = if secs_remaining > 0 {
+        (secs_remaining + 86_399) / 86_400
+    } else {
+        secs_remaining / 86_400
+    };
+    OauthTokenSummaryDto {
+        account_email: email_map.get(&t.account_uuid).cloned(),
+        uuid: t.uuid.to_string(),
+        label: t.label,
+        token_preview: t.token_preview,
+        account_uuid: t.account_uuid.to_string(),
+        created_at: t.created_at,
+        expires_at,
+        days_remaining,
+        last_probed_at: t.last_probed_at,
+        last_probe_status: t.last_probe_status,
+    }
+}
+
+fn api_summary(
+    k: claudepot_core::keys::ApiKey,
+    email_map: &HashMap<Uuid, String>,
+) -> ApiKeySummaryDto {
+    ApiKeySummaryDto {
+        account_email: email_map.get(&k.account_uuid).cloned(),
+        uuid: k.uuid.to_string(),
+        label: k.label,
+        token_preview: k.token_preview,
+        account_uuid: k.account_uuid.to_string(),
+        created_at: k.created_at,
+        last_probed_at: k.last_probed_at,
+        last_probe_status: k.last_probe_status,
+    }
+}
+
+#[tauri::command]
+pub fn key_api_list() -> Result<Vec<ApiKeySummaryDto>, String> {
+    let keys = open_keys_store()?;
+    let accounts = open_store()?;
+    let email_map = account_email_map(&accounts)?;
+    let rows = keys
+        .list_api_keys()
+        .map_err(|e| format!("list api keys: {e}"))?;
+    Ok(rows.into_iter().map(|k| api_summary(k, &email_map)).collect())
+}
+
+#[tauri::command]
+pub fn key_oauth_list() -> Result<Vec<OauthTokenSummaryDto>, String> {
+    let keys = open_keys_store()?;
+    let accounts = open_store()?;
+    let email_map = account_email_map(&accounts)?;
+    let rows = keys
+        .list_oauth_tokens()
+        .map_err(|e| format!("list oauth tokens: {e}"))?;
+    Ok(rows
+        .into_iter()
+        .map(|t| oauth_summary(t, &email_map))
+        .collect())
+}
+
+/// Add an `ANTHROPIC_API_KEY`. `account_uuid` is required — every key
+/// was created under some account, and recording that makes the row
+/// findable by account later. The "no account" case isn't a real state
+/// we need to model.
+#[tauri::command]
+pub fn key_api_add(
+    label: String,
+    token: String,
+    account_uuid: String,
+) -> Result<ApiKeySummaryDto, String> {
+    let label = label.trim();
+    if label.is_empty() {
+        return Err("label is required".to_string());
+    }
+    let token = token.trim();
+    if !matches!(classify_token(token), Some(KeyPrefix::ApiKey)) {
+        return Err(
+            "not an API key — expected a value starting with `sk-ant-api03-`".to_string(),
+        );
+    }
+
+    let accounts = open_store()?;
+    let email_map = account_email_map(&accounts)?;
+    let account_id = parse_account_uuid(&account_uuid, &email_map)?;
+
+    let preview = token_preview(token);
+    let keys = open_keys_store()?;
+    let row = keys
+        .insert_api_key(label, &preview, account_id)
+        .map_err(|e| format!("insert: {e}"))?;
+
+    // Secret goes to the keychain. If this fails, tear the row back
+    // out so the DB never shows a key whose value we can't recover.
+    // If the tear-out also fails, surface it — an orphan row the user
+    // can see (preview, no secret) is worse when it's silent.
+    if let Err(e) = write_api_secret(row.uuid, token) {
+        if let Err(rollback) = keys.remove_api_key(row.uuid) {
+            tracing::error!(
+                uuid = %row.uuid,
+                keychain_error = %e,
+                rollback_error = %rollback,
+                "api key keychain write failed AND rollback failed — orphan row"
+            );
+            return Err(format!(
+                "keychain write failed: {e}; rollback also failed: {rollback} — remove the orphan row manually"
+            ));
+        }
+        return Err(format!("keychain write failed: {e}"));
+    }
+    Ok(api_summary(row, &email_map))
+}
+
+/// Add a `CLAUDE_CODE_OAUTH_TOKEN`. Account tag is required — the user
+/// picks the account they ran `claude setup-token` against.
+#[tauri::command]
+pub fn key_oauth_add(
+    label: String,
+    token: String,
+    account_uuid: String,
+) -> Result<OauthTokenSummaryDto, String> {
+    let label = label.trim();
+    if label.is_empty() {
+        return Err("label is required".to_string());
+    }
+    let token = token.trim();
+    if !matches!(classify_token(token), Some(KeyPrefix::OauthToken)) {
+        return Err(
+            "not an OAuth token — expected a value starting with `sk-ant-oat01-`".to_string(),
+        );
+    }
+
+    let accounts = open_store()?;
+    let email_map = account_email_map(&accounts)?;
+    let account_id = parse_account_uuid(&account_uuid, &email_map)?;
+
+    let preview = token_preview(token);
+    let keys = open_keys_store()?;
+    let row = keys
+        .insert_oauth_token(label, &preview, account_id)
+        .map_err(|e| format!("insert: {e}"))?;
+
+    if let Err(e) = write_oauth_secret(row.uuid, token) {
+        if let Err(rollback) = keys.remove_oauth_token(row.uuid) {
+            tracing::error!(
+                uuid = %row.uuid,
+                keychain_error = %e,
+                rollback_error = %rollback,
+                "oauth token keychain write failed AND rollback failed — orphan row"
+            );
+            return Err(format!(
+                "keychain write failed: {e}; rollback also failed: {rollback} — remove the orphan row manually"
+            ));
+        }
+        return Err(format!("keychain write failed: {e}"));
+    }
+    Ok(oauth_summary(row, &email_map))
+}
+
+#[tauri::command]
+pub fn key_api_remove(uuid: String) -> Result<(), String> {
+    let id = Uuid::parse_str(&uuid).map_err(|e| format!("bad uuid: {e}"))?;
+    // Keychain first — if the DB row is gone but the secret lingers,
+    // we have a stranded keychain item the user can't see or purge
+    // without Keychain Access. The reverse orphan (DB row, no secret)
+    // is at least visible and manually removable from the Keys list.
+    delete_api_secret(id).map_err(|e| format!("keychain delete: {e}"))?;
+    let keys = open_keys_store()?;
+    keys.remove_api_key(id).map_err(|e| format!("{e}"))
+}
+
+#[tauri::command]
+pub fn key_oauth_remove(uuid: String) -> Result<(), String> {
+    let id = Uuid::parse_str(&uuid).map_err(|e| format!("bad uuid: {e}"))?;
+    delete_oauth_secret(id).map_err(|e| format!("keychain delete: {e}"))?;
+    let keys = open_keys_store()?;
+    keys.remove_oauth_token(id).map_err(|e| format!("{e}"))
+}
+
+/// Return the full API-key secret for clipboard copy. Deliberately
+/// distinct from `key_api_list` which only returns the preview.
+#[tauri::command]
+pub fn key_api_copy(uuid: String) -> Result<String, String> {
+    let id = Uuid::parse_str(&uuid).map_err(|e| format!("bad uuid: {e}"))?;
+    read_api_secret(id).map_err(|e| format!("keychain read: {e}"))
+}
+
+#[tauri::command]
+pub fn key_oauth_copy(uuid: String) -> Result<String, String> {
+    let id = Uuid::parse_str(&uuid).map_err(|e| format!("bad uuid: {e}"))?;
+    read_oauth_secret(id).map_err(|e| format!("keychain read: {e}"))
+}
+
+/// Call `/api/oauth/usage` with the stored token to verify it's still
+/// valid and update the probe fields. Returns the refreshed summary.
+/// A 401 sets status="unauthorized" (authoritative signal that the
+/// token has been revoked or has expired ahead of our 365-day proxy).
+#[tauri::command]
+pub async fn key_oauth_probe(uuid: String) -> Result<OauthTokenSummaryDto, String> {
+    use claudepot_core::error::OAuthError;
+
+    let id = Uuid::parse_str(&uuid).map_err(|e| format!("bad uuid: {e}"))?;
+    let token = read_oauth_secret(id).map_err(|e| format!("keychain read: {e}"))?;
+
+    let status = match claudepot_core::oauth::usage::fetch(&token).await {
+        Ok(_) => "ok".to_string(),
+        Err(OAuthError::AuthFailed(_)) => "unauthorized".to_string(),
+        Err(OAuthError::RateLimited { retry_after_secs }) => {
+            format!("rate_limited:{retry_after_secs}")
+        }
+        Err(e) => format!("error:{e}"),
+    };
+
+    let keys = open_keys_store()?;
+    keys.update_oauth_token_probe(id, &status)
+        .map_err(|e| format!("update probe: {e}"))?;
+
+    let row = keys
+        .find_oauth_token(id)
+        .map_err(|e| format!("reload: {e}"))?
+        .ok_or_else(|| "token disappeared after probe".to_string())?;
+    let accounts = open_store()?;
+    let email_map = account_email_map(&accounts)?;
+    Ok(oauth_summary(row, &email_map))
+}
+
+/// Fetch the full usage breakdown for a stored OAuth token. Mirrors
+/// `fetch_all_usage` / `refresh_usage_for` for accounts, but keyed on
+/// a Keys-section row instead of an Account. Also updates the token's
+/// probe status as a side effect so the days-left chip reflects the
+/// latest known state without a second round-trip.
+#[tauri::command]
+pub async fn key_oauth_usage(
+    uuid: String,
+) -> Result<crate::dto::AccountUsageDto, String> {
+    use claudepot_core::error::OAuthError;
+
+    let id = Uuid::parse_str(&uuid).map_err(|e| format!("bad uuid: {e}"))?;
+    let token = read_oauth_secret(id).map_err(|e| format!("keychain read: {e}"))?;
+
+    let keys = open_keys_store()?;
+    match claudepot_core::oauth::usage::fetch(&token).await {
+        Ok(response) => {
+            if let Err(dbe) = keys.update_oauth_token_probe(id, "ok") {
+                // Non-fatal: the usage fetch succeeded, we just can't
+                // persist the "ok" probe marker. Log at warn so the
+                // days-left chip going stale isn't silent.
+                tracing::warn!(
+                    uuid = %id,
+                    error = %dbe,
+                    "key_oauth_usage: probe persist failed on success path"
+                );
+            }
+            Ok(crate::dto::AccountUsageDto::from_response(&response))
+        }
+        Err(e) => {
+            let status = match &e {
+                OAuthError::AuthFailed(_) => "unauthorized".to_string(),
+                OAuthError::RateLimited { retry_after_secs } => {
+                    format!("rate_limited:{retry_after_secs}")
+                }
+                other => format!("error:{other}"),
+            };
+            if let Err(dbe) = keys.update_oauth_token_probe(id, &status) {
+                tracing::warn!(
+                    uuid = %id,
+                    error = %dbe,
+                    "key_oauth_usage: probe persist failed on error path"
+                );
+            }
+            Err(format!("usage fetch failed: {e}"))
+        }
+    }
 }

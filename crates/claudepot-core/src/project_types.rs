@@ -54,8 +54,14 @@ pub struct MoveArgs {
     pub claude_json_path: Option<PathBuf>,
     /// Directory for destructive-phase snapshots. Used by Phase 7 (and
     /// future P4-overwrite / P8). If `None`, snapshots go to
-    /// `<config_dir>/claudepot/snapshots/`.
+    /// `<claudepot_state_dir>/snapshots/` (see field below).
     pub snapshots_dir: Option<PathBuf>,
+    /// Root of the Claudepot repair tree — parent of `journals/`,
+    /// `locks/`, and (when `snapshots_dir` is `None`) `snapshots/`.
+    /// Production callers pass `paths::claudepot_repair_dir()`. Tests
+    /// may leave this `None` to keep the historical
+    /// `<config_dir>/claudepot/` layout rooted in their tmp dir.
+    pub claudepot_state_dir: Option<PathBuf>,
     pub no_move: bool,
     pub merge: bool,
     pub overwrite: bool,

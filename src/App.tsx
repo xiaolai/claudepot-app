@@ -28,9 +28,12 @@ const importSettings = () =>
   import("./sections/SettingsSection").then((m) => ({ default: m.SettingsSection }));
 const importSessions = () =>
   import("./sections/SessionsSection").then((m) => ({ default: m.SessionsSection }));
+const importKeys = () =>
+  import("./sections/KeysSection").then((m) => ({ default: m.KeysSection }));
 const ProjectsSection = lazy(importProjects);
 const SettingsSection = lazy(importSettings);
 const SessionsSection = lazy(importSessions);
+const KeysSection = lazy(importKeys);
 const OperationProgressModal = lazy(() =>
   import("./sections/projects/OperationProgressModal").then((m) => ({
     default: m.OperationProgressModal,
@@ -45,6 +48,7 @@ function preloadSavedSection(): void {
       localStorage.getItem("claudepot.activeSection");
     if (id === "projects") void importProjects();
     else if (id === "sessions") void importSessions();
+    else if (id === "keys") void importKeys();
     else if (id === "settings") void importSettings();
   } catch {
     // localStorage unavailable — nothing to preload.
@@ -418,6 +422,7 @@ function AppShell() {
                   }
                 />
               )}
+              {section === "keys" && <KeysSection />}
               {section === "settings" && <SettingsSection />}
             </Suspense>
           </div>

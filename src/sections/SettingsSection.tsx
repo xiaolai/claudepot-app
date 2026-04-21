@@ -20,7 +20,6 @@ type Tab =
   | "appearance"
   | "claudemd"
   | "mcp"
-  | "apikeys"
   | "protected"
   | "cleanup"
   | "locks"
@@ -37,7 +36,6 @@ const TAB_DEFS: ReadonlyArray<{
   { id: "appearance",  label: "Appearance",     glyph: NF.sun,      group: "core" },
   { id: "claudemd",    label: "CLAUDE.md",      glyph: NF.fileMd,   group: "core" },
   { id: "mcp",         label: "MCP servers",    glyph: NF.server,   group: "core" },
-  { id: "apikeys",     label: "API keys",       glyph: NF.key,      group: "core" },
   { id: "protected",   label: "Protected paths", glyph: NF.shield,  group: "advanced" },
   { id: "cleanup",     label: "Cleanup",        glyph: NF.trash,    group: "advanced" },
   { id: "locks",       label: "Locks",          glyph: NF.lock,     group: "advanced" },
@@ -49,6 +47,7 @@ const SECTION_OPTIONS = [
   { value: "accounts", label: "Accounts" },
   { value: "projects", label: "Projects" },
   { value: "sessions", label: "Sessions" },
+  { value: "keys",     label: "Keys"     },
   { value: "settings", label: "Settings" },
 ] as const;
 
@@ -91,7 +90,6 @@ export function SettingsSection() {
           {tab === "appearance" && <AppearancePane />}
           {tab === "claudemd" && <StubPane name="CLAUDE.md editor" />}
           {tab === "mcp" && <StubPane name="MCP servers" />}
-          {tab === "apikeys" && <StubPane name="API keys" />}
           {tab === "protected" && <ProtectedPathsPane pushToast={pushToast} />}
           {tab === "cleanup" && <CleanupPane pushToast={pushToast} />}
           {tab === "locks" && <LocksPane pushToast={pushToast} />}
