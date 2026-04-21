@@ -44,9 +44,19 @@ pub struct UsageWindow {
 #[derive(Debug, Clone, Deserialize)]
 pub struct ExtraUsage {
     pub is_enabled: bool,
+    /// Monthly cap in MINOR units (e.g. pence for GBP, cents for USD).
+    /// Divide by 100 for display. Confirmed against live /api/oauth/usage:
+    /// `monthly_limit: 15000` corresponds to the £150 limit shown in the
+    /// Anthropic billing UI for a GBP-billed account.
     pub monthly_limit: Option<f64>,
+    /// Amount spent this period in MINOR units (same basis as
+    /// `monthly_limit`). Divide by 100 for display.
     pub used_credits: Option<f64>,
     pub utilization: Option<f64>,
+    /// ISO 4217 currency code — "USD", "GBP", "EUR", etc. Missing on
+    /// older responses; frontend falls back to USD when absent.
+    #[serde(default)]
+    pub currency: Option<String>,
 }
 
 pub async fn fetch(access_token: &str) -> Result<UsageResponse, OAuthError> {
@@ -167,5 +177,33 @@ mod tests {
         assert!(extra.is_enabled);
         assert_eq!(extra.monthly_limit, Some(100.0));
         assert_eq!(extra.used_credits, Some(25.0));
+        // No `currency` on this older-shape payload — Option stays None.
+        assert!(extra.currency.is_none());
+    }
+
+    /// Captures the real /api/oauth/usage shape for a GBP-billed
+    /// account: amounts in MINOR units (pence), `currency` field
+    /// present. `monthly_limit: 15000` maps to £150; `used_credits:
+    /// 1911` maps to £19.11. Display-layer divides by 100 and uses
+    /// the ISO code for the symbol. Regression guard for the bug
+    /// where the GUI showed $15000 / $1911 because the currency
+    /// field was dropped and values were treated as major units.
+    #[test]
+    fn test_extra_usage_deserialize_gbp_minor_units() {
+        let json = r#"{
+            "extra_usage": {
+                "is_enabled": true,
+                "monthly_limit": 15000,
+                "used_credits": 1911.0,
+                "utilization": 12.74,
+                "currency": "GBP"
+            }
+        }"#;
+        let usage: UsageResponse = serde_json::from_str(json).unwrap();
+        let extra = usage.extra_usage.unwrap();
+        assert!(extra.is_enabled);
+        assert_eq!(extra.monthly_limit, Some(15000.0));
+        assert_eq!(extra.used_credits, Some(1911.0));
+        assert_eq!(extra.currency.as_deref(), Some("GBP"));
     }
 }

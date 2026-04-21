@@ -292,11 +292,16 @@ pub async fn inspect(ctx: &AppContext, email_input: &str) -> Result<()> {
                     j["seven_day_sonnet"] = win_json(w);
                 }
                 if let Some(ref extra) = u.extra_usage {
+                    // monthly_limit / used_credits are passed through
+                    // in MINOR units (pence/cents) to match the raw
+                    // API. Consumers of --json that render amounts
+                    // must divide by 100 and pair with `currency`.
                     j["extra_usage"] = serde_json::json!({
                         "is_enabled": extra.is_enabled,
                         "monthly_limit": extra.monthly_limit,
                         "used_credits": extra.used_credits,
                         "utilization": extra.utilization,
+                        "currency": extra.currency,
                     });
                 }
             }
@@ -359,12 +364,20 @@ pub async fn inspect(ctx: &AppContext, email_input: &str) -> Result<()> {
                 print_window("7d sonnet", &u.seven_day_sonnet);
                 if let Some(ref extra) = u.extra_usage {
                     if extra.is_enabled {
-                        let used = extra.used_credits.unwrap_or(0.0);
-                        let limit = extra.monthly_limit.unwrap_or(0.0);
+                        // API returns amounts in MINOR units (pence/cents).
+                        let used = extra.used_credits.unwrap_or(0.0) / 100.0;
+                        let limit = extra.monthly_limit.unwrap_or(0.0) / 100.0;
+                        let sym = currency_symbol(extra.currency.as_deref());
                         if limit > 0.0 {
-                            println!("  Extra:     ${used:.2} / ${limit:.2} ({:.0}%)", (used / limit) * 100.0);
+                            let pct = extra
+                                .utilization
+                                .unwrap_or_else(|| (used / limit) * 100.0);
+                            let balance = (limit - used).max(0.0);
+                            println!(
+                                "  Extra:     {pct:.0}% used · {sym}{used:.2} / {sym}{limit:.2} · {sym}{balance:.2} left"
+                            );
                         } else {
-                            println!("  Extra:     enabled (${used:.2} used)");
+                            println!("  Extra:     enabled ({sym}{used:.2} used)");
                         }
                     } else {
                         println!("  Extra:     disabled");
@@ -416,6 +429,20 @@ fn capitalize(s: &str) -> String {
     match c.next() {
         None => String::new(),
         Some(f) => f.to_uppercase().to_string() + c.as_str(),
+    }
+}
+
+/// Map an ISO 4217 currency code to its common symbol for terminal
+/// display. Unknown / missing codes fall through to "$" (matches the
+/// Anthropic console default for USD-billed accounts).
+fn currency_symbol(code: Option<&str>) -> &'static str {
+    match code.map(str::to_ascii_uppercase).as_deref() {
+        Some("GBP") => "£",
+        Some("EUR") => "€",
+        Some("JPY") => "¥",
+        Some("CNY") => "¥",
+        Some("AUD") | Some("CAD") | Some("USD") | None => "$",
+        _ => "$",
     }
 }
 

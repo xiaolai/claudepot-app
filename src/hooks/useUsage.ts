@@ -1,3 +1,4 @@
+import { emit, listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { api } from "../api";
 import type { UsageMap } from "../types";
@@ -17,6 +18,10 @@ export function useUsage() {
     try {
       const data = await api.fetchAllUsage();
       setUsage(data);
+      // Keep the tray's Usage submenu in sync with what the cards show.
+      // Best-effort: swallow failures so a missing window/tray doesn't
+      // break the happy path.
+      emit("rebuild-tray-menu").catch(() => {});
     } catch {
       // Silently ignore — stale data stays in state.
     } finally {
@@ -34,6 +39,7 @@ export function useUsage() {
     try {
       const entry = await api.refreshUsageFor(uuid);
       setUsage((prev) => ({ ...prev, [uuid]: entry }));
+      emit("rebuild-tray-menu").catch(() => {});
     } catch {
       // Silently ignore — stale entry stays in state.
     }
@@ -47,7 +53,23 @@ export function useUsage() {
       }
     };
     window.addEventListener("focus", onFocus);
-    return () => window.removeEventListener("focus", onFocus);
+
+    // When the user clicks "Refresh" in the tray's Usage submenu,
+    // the backend re-fetches and emits tray-usage-refreshed. Pull the
+    // fresh cache into the webview so the card values match the tray.
+    let unlisten: UnlistenFn | undefined;
+    listen("tray-usage-refreshed", () => {
+      refreshUsage();
+    })
+      .then((fn) => {
+        unlisten = fn;
+      })
+      .catch(() => {});
+
+    return () => {
+      window.removeEventListener("focus", onFocus);
+      unlisten?.();
+    };
   }, [refreshUsage]);
 
   return { usage, refreshUsage, refreshUsageFor };

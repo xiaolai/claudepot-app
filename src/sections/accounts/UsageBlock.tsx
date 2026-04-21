@@ -146,9 +146,17 @@ export function UsageBlock({ entry, anomalyShown }: UsageBlockProps) {
 
 /**
  * Extras row. Three visual states:
- *   1. Enabled & billing    → `$12.50 / $50.00 · 25%`  (server utilization preferred)
- *   2. Enabled, no spend    → `$0.00 / $50.00` (no percent)
+ *   1. Enabled & billing    → `13% used · £19.11 / £150.00 · £130.89 left`
+ *      (server utilization preferred; `left` is `limit - used`; the
+ *      percent leads because it's the at-a-glance signal for headroom)
+ *   2. Enabled, no spend    → `£0.00 / £150.00 · £150.00 left`
+ *      (percent suppressed until there's spend to percentage)
  *   3. Disabled             → faint "off" marker on the divider line
+ *
+ * `monthly_limit` and `used_credits` arrive in MINOR currency units
+ * (pence/cents). We divide by 100 before formatting. The currency
+ * symbol comes from the ISO code in `extra.currency`; we fall back to
+ * USD when the server omits it (older responses).
  */
 function ExtraUsageRow({ extra }: { extra: NonNullable<UsageEntry["usage"]>["extra_usage"] }) {
   if (!extra) return null;
@@ -174,8 +182,11 @@ function ExtraUsageRow({ extra }: { extra: NonNullable<UsageEntry["usage"]>["ext
     );
   }
 
-  const used = extra.used_credits ?? 0;
-  const limit = extra.monthly_limit ?? 0;
+  // API returns amounts in minor units (pence for GBP, cents for USD).
+  const usedMinor = extra.used_credits ?? 0;
+  const limitMinor = extra.monthly_limit ?? 0;
+  const used = usedMinor / 100;
+  const limit = limitMinor / 100;
   // Prefer server-side utilization when present — it accounts for
   // rollover, prorated credits, and grace adjustments that a
   // client-side used/limit ratio misses. Fall back to the ratio when
@@ -188,6 +199,9 @@ function ExtraUsageRow({ extra }: { extra: NonNullable<UsageEntry["usage"]>["ext
         ? Math.round((used / limit) * 100)
         : null;
   const high = pct != null && pct >= 80;
+
+  const currency = extra.currency ?? "USD";
+  const fmt = formatCurrency(currency);
 
   return (
     <div
@@ -211,24 +225,60 @@ function ExtraUsageRow({ extra }: { extra: NonNullable<UsageEntry["usage"]>["ext
           alignItems: "baseline",
         }}
       >
-        <b>${used.toFixed(2)}</b>
-        <span style={{ color: "var(--fg-faint)" }}>
-          / ${limit.toFixed(2)}
-        </span>
         {pct != null && used > 0 && (
           <span
             style={{
               color: high ? "var(--warn)" : "var(--fg-muted)",
               fontWeight: 600,
+              marginRight: "var(--sp-4)",
+            }}
+          >
+            {pct}% used
+          </span>
+        )}
+        <b>{fmt.format(used)}</b>
+        <span style={{ color: "var(--fg-faint)" }}>
+          / {fmt.format(limit)}
+        </span>
+        {limit > 0 && (
+          <span
+            title="Remaining balance for this period (monthly limit minus spend)."
+            style={{
+              color: "var(--fg-muted)",
               marginLeft: "var(--sp-4)",
             }}
           >
-            {pct}%
+            · {fmt.format(Math.max(0, limit - used))} left
           </span>
         )}
       </span>
     </div>
   );
+}
+
+/**
+ * Currency-aware formatter. Uses Intl.NumberFormat so "GBP" → "£",
+ * "USD" → "$", "EUR" → "€", etc. without a handwritten symbol map.
+ * Falls back to a plain `$X.XX` pattern if the ISO code is unknown
+ * to the runtime (shouldn't happen for Anthropic's supported set,
+ * but keeps the card from crashing on odd server responses).
+ */
+function formatCurrency(code: string): Intl.NumberFormat {
+  try {
+    return new Intl.NumberFormat(undefined, {
+      style: "currency",
+      currency: code,
+      minimumFractionDigits: 2,
+      maximumFractionDigits: 2,
+    });
+  } catch {
+    return new Intl.NumberFormat(undefined, {
+      style: "currency",
+      currency: "USD",
+      minimumFractionDigits: 2,
+      maximumFractionDigits: 2,
+    });
+  }
 }
 
 function formatAgeShort(ageSecs: number): string {

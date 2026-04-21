@@ -85,6 +85,14 @@ export function AccountsGrid({
           display: "grid",
           gridTemplateColumns:
             "repeat(auto-fill, minmax(var(--content-cap-sm), 1fr))",
+          // Items use `overflow: hidden` to clip border-radius, which
+          // drops their min-content contribution to row sizing. Without
+          // `max-content` the grid compresses auto rows to equal
+          // shares of its height and clips card content. Explicit
+          // `max-content` keeps rows at their intrinsic height so the
+          // full UsageBlock + HealthFooter render; the grid's own
+          // `overflow: auto` above handles pane-level scroll.
+          gridAutoRows: "max-content",
           gap: "var(--sp-16)",
           alignContent: "start",
         }}
