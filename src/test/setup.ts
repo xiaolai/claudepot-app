@@ -15,3 +15,9 @@ afterEach(() => {
 
 // Silence jsdom's "Not implemented: window.alert" for confirm() prompts.
 globalThis.confirm = () => true;
+
+// jsdom doesn't implement Element.scrollIntoView — stub it so components
+// that call it (e.g. CommandPalette keyboard navigation) don't crash.
+if (!Element.prototype.scrollIntoView) {
+  Element.prototype.scrollIntoView = () => {};
+}
