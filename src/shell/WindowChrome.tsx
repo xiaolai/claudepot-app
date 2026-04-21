@@ -72,15 +72,6 @@ export function WindowChrome({
           color="var(--fg-faint)"
           style={{ transform: "translateY(var(--glyph-optical-nudge))" }}
         />
-        <span>~/.claude</span>
-        <Glyph
-          g={NF.chevronR}
-          color="var(--fg-ghost)"
-          style={{
-            fontSize: "var(--fs-xs)",
-            transform: "translateY(var(--glyph-optical-nudge))",
-          }}
-        />
         <span style={{ color: "var(--fg)", fontWeight: 500 }}>{cwd}</span>
       </div>
 
