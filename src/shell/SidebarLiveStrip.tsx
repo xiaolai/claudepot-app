@@ -1,4 +1,4 @@
-import { forwardRef, useCallback, useEffect, useRef, useState } from "react";
+import { forwardRef, useCallback, useRef, useState } from "react";
 import { SectionLabel } from "../components/primitives/SectionLabel";
 import { useSessionLive } from "../hooks/useSessionLive";
 import type { LiveSessionSummary, LiveStatus } from "../types";
@@ -38,17 +38,14 @@ export function SidebarLiveStrip({ onOpenSession }: Props) {
 
   const count = sessions.length;
 
-  // Keyboard navigation. Only fires when the strip has rows AND the
-  // focus is NOT inside an input/textarea (so typing "j" in the
-  // command palette never hijacks the strip).
-  useEffect(() => {
-    if (count === 0) return;
-    const handler = (e: KeyboardEvent) => {
-      const target = e.target as HTMLElement | null;
-      const tag = target?.tagName?.toLowerCase();
-      if (tag === "input" || tag === "textarea" || target?.isContentEditable) {
-        return;
-      }
+  // Keyboard navigation. Local onKeyDown on the listbox — no
+  // window-level listener — so `j` / `k` pressed anywhere outside
+  // the strip (browse-mode screen readers, prose in form fields,
+  // mini-editors in other surfaces) is never intercepted. Only
+  // active while a row inside the listbox owns focus.
+  const handleKeyDown = useCallback(
+    (e: React.KeyboardEvent) => {
+      if (count === 0) return;
       if (e.key !== "j" && e.key !== "k") return;
       e.preventDefault();
       setFocusedIdx((prev) => {
@@ -60,10 +57,9 @@ export function SidebarLiveStrip({ onOpenSession }: Props) {
         rowRefs.current[next]?.focus();
         return next;
       });
-    };
-    window.addEventListener("keydown", handler);
-    return () => window.removeEventListener("keydown", handler);
-  }, [count]);
+    },
+    [count],
+  );
 
   const openByIndex = useCallback(
     (idx: number) => {
@@ -87,6 +83,7 @@ export function SidebarLiveStrip({ onOpenSession }: Props) {
       <div
         role="listbox"
         aria-label="Live Claude sessions"
+        onKeyDown={handleKeyDown}
         style={{ padding: "0 var(--sp-8)", marginBottom: "var(--sp-8)" }}
       >
         {sessions.map((s, i) => (
