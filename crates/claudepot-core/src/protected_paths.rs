@@ -22,9 +22,8 @@
 //! out via `removed_defaults` and add their own via `user`.
 //!
 //! Persisted at `<data_dir>/protected-paths.json`. `data_dir` is
-//! Claudepot's private root (`paths::claudepot_data_dir()`), not the
-//! shared `~/.claude/claudepot/` tree — these are user preferences,
-//! not CC artifacts.
+//! Claudepot's private root (`paths::claudepot_data_dir()`); these are
+//! user preferences, not operational state like the repair tree.
 
 use serde::{Deserialize, Serialize};
 use std::collections::HashSet;

@@ -9,19 +9,15 @@ use std::time::SystemTime;
 const JOURNAL_NAG_THRESHOLD_SECS: u64 = 86_400; // 24h
 
 fn journals_dir() -> std::path::PathBuf {
-    paths::claude_config_dir()
-        .join("claudepot")
-        .join("journals")
+    paths::claudepot_repair_dir().join("journals")
 }
 
 fn locks_dir() -> std::path::PathBuf {
-    paths::claude_config_dir().join("claudepot").join("locks")
+    paths::claudepot_repair_dir().join("locks")
 }
 
 fn snapshots_dir() -> std::path::PathBuf {
-    paths::claude_config_dir()
-        .join("claudepot")
-        .join("snapshots")
+    paths::claudepot_repair_dir().join("snapshots")
 }
 
 /// Check whether a journal has been explicitly abandoned via a
@@ -317,8 +313,9 @@ pub fn move_project(
     let config_dir = paths::claude_config_dir();
     // `~/.claude.json` is the sibling config file to `~/.claude/`.
     let claude_json_path = dirs::home_dir().map(|h| h.join(".claude.json"));
-    // Default snapshot location per spec §6.
-    let snapshots_dir = Some(config_dir.join("claudepot").join("snapshots"));
+    // Default snapshot location per spec §6 — now rooted under
+    // Claudepot's repair tree rather than `<config_dir>/claudepot/`.
+    let snapshots_dir = Some(paths::claudepot_repair_dir().join("snapshots"));
 
     let args = project::MoveArgs {
         old_path: old_path.into(),
@@ -332,6 +329,7 @@ pub fn move_project(
         force,
         dry_run,
         ignore_pending_journals,
+        claudepot_state_dir: Some(paths::claudepot_repair_dir()),
     };
 
     let result = project::move_project(&args, &claudepot_core::project_progress::NoopSink)?;
@@ -444,11 +442,13 @@ pub fn clean(ctx: &AppContext, dry_run: bool, ignore_pending_journals: bool) -> 
         &paths::claudepot_data_dir(),
     );
 
+    let repair_root = paths::claudepot_repair_dir();
     let (result, orphans) = project::clean_orphans_with_progress(
         &config_dir,
         claude_json_path.as_deref(),
         Some(snaps.as_path()),
         Some(locks.as_path()),
+        Some(repair_root.as_path()),
         &protected,
         !perform,
         &claudepot_core::project_progress::NoopSink,
@@ -714,7 +714,7 @@ fn list_journals(ctx: &AppContext, entries: &[project_repair::JournalEntry]) -> 
 fn repair_paths() -> (std::path::PathBuf, Option<std::path::PathBuf>, Option<std::path::PathBuf>) {
     let config_dir = paths::claude_config_dir();
     let claude_json_path = dirs::home_dir().map(|h| h.join(".claude.json"));
-    let snapshots = Some(config_dir.join("claudepot").join("snapshots"));
+    let snapshots = Some(paths::claudepot_repair_dir().join("snapshots"));
     (config_dir, claude_json_path, snapshots)
 }
 

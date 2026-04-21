@@ -4,7 +4,9 @@
 //! snapshot paths for destructive operations, and the originating PID
 //! so `project repair` can decide finish-forward vs. rollback.
 //!
-//! Layout: `~/.claude/claudepot/journals/move-<secs>-<pid>-<suffix>.json`.
+//! Layout: `~/.claudepot/repair/journals/move-<secs>-<pid>-<suffix>.json`
+//! (legacy location `~/.claude/claudepot/journals/…` is migrated in
+//! place on first boot — see `migrations::migrate_repair_tree`).
 //! The 6-char suffix disambiguates concurrent moves started by the
 //! same process in the same wall-clock second (Tauri runs multiple
 //! moves concurrently; locks are per-project, not global).

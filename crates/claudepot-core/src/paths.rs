@@ -61,6 +61,29 @@ pub fn desktop_profile_dir(account_id: uuid::Uuid) -> PathBuf {
         .join(account_id.to_string())
 }
 
+/// Claudepot's repair tree — canonical home for rename journals, per-
+/// project locks, and pre-rename / pre-clean snapshots.
+///
+/// Lived at `<claude_config_dir>/claudepot/` in early builds (co-located
+/// with CC's project tree). Consolidated into `<claudepot_data_dir>/repair/`
+/// so everything Claudepot writes lives under one root. See
+/// `migrations::migrate_repair_tree` for the one-time move at startup.
+pub fn claudepot_repair_dir() -> PathBuf {
+    claudepot_data_dir().join("repair")
+}
+
+/// `(journals, locks, snapshots)` triple rooted at `claudepot_repair_dir()`.
+/// Callers that need all three prefer this over re-deriving each subdir
+/// to keep the layout single-sourced.
+pub fn claudepot_repair_dirs() -> (PathBuf, PathBuf, PathBuf) {
+    let base = claudepot_repair_dir();
+    (
+        base.join("journals"),
+        base.join("locks"),
+        base.join("snapshots"),
+    )
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

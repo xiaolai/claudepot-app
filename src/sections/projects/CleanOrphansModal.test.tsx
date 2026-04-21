@@ -164,7 +164,7 @@ describe("CleanOrphansModal", () => {
       claude_json_entries_removed: 1,
       history_lines_removed: 3,
       snapshot_paths: [
-        "/home/u/.claude/claudepot/snapshots/1-batch-clean-config.json",
+        "/home/u/.claudepot/repair/snapshots/1-batch-clean-config.json",
       ],
     });
     const statusInfo: RunningOpInfo = {

@@ -11,6 +11,26 @@ pub use crate::project_types::*;
 use crate::project_display::{compute_dry_run_plan, format_dry_run_plan};
 use crate::project_helpers::*;
 use crate::project_sanitize::MAX_SANITIZED_LENGTH;
+
+/// Root of the Claudepot repair tree for a move operation — honors the
+/// per-args override (production code passes
+/// `paths::claudepot_repair_dir()`) and falls back to the legacy
+/// `<config_dir>/claudepot/` layout so tests that construct `MoveArgs`
+/// against a tmp dir keep working without setting `CLAUDEPOT_DATA_DIR`.
+fn repair_root(args: &MoveArgs) -> PathBuf {
+    args.claudepot_state_dir
+        .clone()
+        .unwrap_or_else(|| args.config_dir.join("claudepot"))
+}
+
+/// Same override semantics as `repair_root` but keyed on a plain
+/// `config_dir` + optional override, for the `clean_orphans` path which
+/// doesn't carry a `MoveArgs`.
+fn repair_root_from(config_dir: &Path, override_dir: Option<&Path>) -> PathBuf {
+    override_dir
+        .map(|p| p.to_path_buf())
+        .unwrap_or_else(|| config_dir.join("claudepot"))
+}
 #[cfg(test)]
 use crate::project_sanitize::{djb2_hash, format_radix};
 
@@ -216,7 +236,7 @@ pub fn move_project(
     // non-mutating) so the GUI preview still works during a pending
     // journal situation.
     if !args.dry_run && !args.ignore_pending_journals {
-        let claudepot_home = args.config_dir.join("claudepot");
+        let claudepot_home = repair_root(args);
         let journals_dir = claudepot_home.join("journals");
         let locks_dir = claudepot_home.join("locks");
         if journals_dir.exists() {
@@ -289,7 +309,7 @@ pub fn move_project(
     // Open a lock + journal for recovery. Scope: everything below P3
     // is protected; crashes before writing P3 leave no journal trail
     // (nothing destructive has happened yet anyway).
-    let claudepot_home = args.config_dir.join("claudepot");
+    let claudepot_home = repair_root(args);
     let locks_dir = claudepot_home.join("locks");
     let journals_dir = claudepot_home.join("journals");
     let (_lock, broken_lock_record) =
@@ -471,7 +491,7 @@ pub fn move_project(
                     let snaps = args
                         .snapshots_dir
                         .clone()
-                        .unwrap_or_else(|| args.config_dir.join("claudepot").join("snapshots"));
+                        .unwrap_or_else(|| repair_root(args).join("snapshots"));
                     let snap = snapshot_cc_dir(&snaps, &new_san, "P4", &cc_new)
                         .map_err(|e| {
                             let msg = format!(
@@ -599,7 +619,7 @@ pub fn move_project(
         let snapshots_dir = args
             .snapshots_dir
             .clone()
-            .unwrap_or_else(|| args.config_dir.join("claudepot").join("snapshots"));
+            .unwrap_or_else(|| repair_root(args).join("snapshots"));
         let policy = if args.overwrite {
             crate::project_config_rewrite::ConfigCollisionPolicy::Overwrite
         } else if args.merge {
@@ -655,7 +675,7 @@ pub fn move_project(
         let snaps = args
             .snapshots_dir
             .clone()
-            .unwrap_or_else(|| args.config_dir.join("claudepot").join("snapshots"));
+            .unwrap_or_else(|| repair_root(args).join("snapshots"));
         match crate::project_memory::move_memory_dir_if_needed(
             &args.config_dir,
             &old_norm,
@@ -845,6 +865,7 @@ pub fn clean_orphans(
         claude_json_path,
         snapshots_dir,
         locks_dir,
+        None,
         &std::collections::HashSet::new(),
         dry_run,
         &crate::project_progress::NoopSink,
@@ -861,11 +882,17 @@ pub fn clean_orphans(
 ///
 /// The sink is free to drop events (e.g. `NoopSink`); the core never
 /// assumes the caller is subscribed.
+// `claudepot_state_dir`: root of Claudepot's repair tree, used for
+// journals and as the fallback parent for snapshots/locks. Production
+// callers pass `Some(paths::claudepot_repair_dir())`; `None` falls back
+// to the legacy `<config_dir>/claudepot/` layout so tests keep working
+// without touching `CLAUDEPOT_DATA_DIR`.
 pub fn clean_orphans_with_progress(
     config_dir: &Path,
     claude_json_path: Option<&Path>,
     snapshots_dir: Option<&Path>,
     locks_dir: Option<&Path>,
+    claudepot_state_dir: Option<&Path>,
     protected_paths: &std::collections::HashSet<String>,
     dry_run: bool,
     sink: &dyn crate::project_progress::ProgressSink,
@@ -888,12 +915,13 @@ pub fn clean_orphans_with_progress(
         return Ok((result, orphans));
     }
 
+    let state_root = repair_root_from(config_dir, claudepot_state_dir);
     let snapshots_dir_owned: PathBuf = snapshots_dir
         .map(|p| p.to_path_buf())
-        .unwrap_or_else(|| config_dir.join("claudepot").join("snapshots"));
+        .unwrap_or_else(|| state_root.join("snapshots"));
     let locks_dir_owned: PathBuf = locks_dir
         .map(|p| p.to_path_buf())
-        .unwrap_or_else(|| config_dir.join("claudepot").join("locks"));
+        .unwrap_or_else(|| state_root.join("locks"));
 
     let (lock_guard, _broken) =
         crate::project_lock::acquire(&locks_dir_owned, CLEAN_LOCK_KEY)?;
@@ -1051,7 +1079,7 @@ pub fn clean_orphans_with_progress(
 
                 result.claudepot_artifacts_removed += remove_claudepot_artifacts(
                     &snapshots_dir_owned,
-                    &config_dir.join("claudepot").join("journals"),
+                    &state_root.join("journals"),
                     &orphan.sanitized_name,
                 );
             }
@@ -1587,6 +1615,7 @@ mod tests {
             dry_run: false,
 
             ignore_pending_journals: false,
+            claudepot_state_dir: None,
         };
 
         let result = move_project(&args, &crate::project_progress::NoopSink);
@@ -1626,6 +1655,7 @@ mod tests {
             dry_run: false,
 
             ignore_pending_journals: false,
+            claudepot_state_dir: None,
         };
 
         let result = move_project(&args, &crate::project_progress::NoopSink).unwrap();
@@ -1688,6 +1718,7 @@ mod tests {
             dry_run: false,
 
             ignore_pending_journals: false,
+            claudepot_state_dir: None,
         };
 
         let result = move_project(&args, &crate::project_progress::NoopSink).unwrap();
@@ -1733,6 +1764,7 @@ mod tests {
             dry_run: false,
 
             ignore_pending_journals: false,
+            claudepot_state_dir: None,
         };
         let err = move_project(&args, &crate::project_progress::NoopSink).unwrap_err();
         assert!(matches!(err, ProjectError::Ambiguous(ref m) if m.contains("inside")));
@@ -1759,6 +1791,7 @@ mod tests {
             dry_run: false,
 
             ignore_pending_journals: false,
+            claudepot_state_dir: None,
         };
         let err = move_project(&args, &crate::project_progress::NoopSink).unwrap_err();
         assert!(matches!(err, ProjectError::Ambiguous(_)));
@@ -1818,6 +1851,7 @@ mod tests {
             dry_run: false,
 
             ignore_pending_journals: false,
+            claudepot_state_dir: None,
         };
         let result = move_project(&args, &crate::project_progress::NoopSink).unwrap();
 
@@ -1885,6 +1919,7 @@ mod tests {
             dry_run: false,
 
             ignore_pending_journals: false,
+            claudepot_state_dir: None,
         };
         let result = move_project(&args, &crate::project_progress::NoopSink).unwrap();
 
@@ -1934,6 +1969,7 @@ mod tests {
             dry_run: false,
 
             ignore_pending_journals: false,
+            claudepot_state_dir: None,
         };
         let result = move_project(&args, &crate::project_progress::NoopSink).unwrap();
 
@@ -1986,6 +2022,7 @@ mod tests {
             dry_run: false,
 
             ignore_pending_journals: false,
+            claudepot_state_dir: None,
         };
 
         let result = move_project(&args, &crate::project_progress::NoopSink).unwrap();
@@ -2033,6 +2070,7 @@ mod tests {
             dry_run: true,
 
             ignore_pending_journals: false,
+            claudepot_state_dir: None,
         };
 
         let result = move_project(&args, &crate::project_progress::NoopSink).unwrap();
@@ -2427,6 +2465,7 @@ mod tests {
             Some(claude_json.as_path()),
             Some(snapshots.as_path()),
             Some(locks.as_path()),
+            None,
             &protected,
             false,
             &crate::project_progress::NoopSink,
@@ -2513,6 +2552,7 @@ mod tests {
             Some(claude_json.as_path()),
             Some(snaps.as_path()),
             Some(locks.as_path()),
+            None,
             &HashSet::new(),
             false,
             &crate::project_progress::NoopSink,
@@ -2557,6 +2597,7 @@ mod tests {
             None,
             Some(snaps.as_path()),
             Some(locks.as_path()),
+            None,
             &protected,
             false,
             &crate::project_progress::NoopSink,
@@ -2598,6 +2639,7 @@ mod tests {
             dry_run: false,
 
             ignore_pending_journals: false,
+            claudepot_state_dir: None,
         };
 
         let result = move_project(&args, &crate::project_progress::NoopSink).unwrap();
@@ -2635,6 +2677,7 @@ mod tests {
             dry_run: false,
 
             ignore_pending_journals: false,
+            claudepot_state_dir: None,
         };
 
         let result = move_project(&args, &crate::project_progress::NoopSink).unwrap();
@@ -2904,6 +2947,7 @@ mod tests {
             dry_run: false,
 
             ignore_pending_journals: false,
+            claudepot_state_dir: None,
         };
 
         let result = move_project(&args, &crate::project_progress::NoopSink);
@@ -2930,6 +2974,7 @@ mod tests {
             dry_run: false,
 
             ignore_pending_journals: false,
+            claudepot_state_dir: None,
         };
 
         let result = move_project(&args, &crate::project_progress::NoopSink);
@@ -2975,6 +3020,7 @@ mod tests {
             dry_run: false,
 
             ignore_pending_journals: false,
+            claudepot_state_dir: None,
         };
 
         let result = move_project(&args, &crate::project_progress::NoopSink).unwrap();
@@ -3022,6 +3068,7 @@ mod tests {
             dry_run: false,
 
             ignore_pending_journals: false,
+            claudepot_state_dir: None,
         };
 
         let result = move_project(&args, &crate::project_progress::NoopSink).unwrap();
@@ -3068,6 +3115,7 @@ mod tests {
             dry_run: false,
 
             ignore_pending_journals: false,
+            claudepot_state_dir: None,
         };
 
         // Spec §4.2 P1.7: non-empty CC target is a hard preflight
@@ -3115,6 +3163,7 @@ mod tests {
             dry_run: true,
 
             ignore_pending_journals: false,
+            claudepot_state_dir: None,
         };
 
         let result = move_project(&args, &crate::project_progress::NoopSink).unwrap();
@@ -3161,6 +3210,7 @@ mod tests {
             dry_run: false,
 
             ignore_pending_journals: false,
+            claudepot_state_dir: None,
         };
 
         let result = move_project(&args, &crate::project_progress::NoopSink).unwrap();
@@ -3321,6 +3371,7 @@ mod tests {
             dry_run: false,
 
             ignore_pending_journals: false,
+            claudepot_state_dir: None,
         };
 
         // With v2 hard-error preflight, the whole operation aborts
@@ -3378,6 +3429,7 @@ mod tests {
             dry_run: false,
 
             ignore_pending_journals: false,
+            claudepot_state_dir: None,
         };
 
         let result = move_project(&args, &crate::project_progress::NoopSink).unwrap();
@@ -3485,6 +3537,7 @@ mod tests {
             dry_run: false,
 
             ignore_pending_journals: false,
+            claudepot_state_dir: None,
         };
 
         let result = move_project(&args, &crate::project_progress::NoopSink).unwrap();
@@ -3532,6 +3585,7 @@ mod tests {
             dry_run: false,
 
             ignore_pending_journals: false,
+            claudepot_state_dir: None,
         };
 
         let err = move_project(&args, &crate::project_progress::NoopSink).expect_err("must error on CC dir collision");

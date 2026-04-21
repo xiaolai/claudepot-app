@@ -331,6 +331,14 @@ async fn main() -> Result<()> {
     std::fs::create_dir_all(&data_dir)
         .with_context(|| format!("failed to create data dir: {}", data_dir.display()))?;
 
+    // One-time: migrate the legacy `~/.claude/claudepot/` repair tree
+    // into `~/.claudepot/repair/`. Idempotent; safe on every invocation.
+    // Non-fatal: log on failure but continue — falling back to reading
+    // the old layout is fine since core still recognizes it.
+    if let Err(e) = claudepot_core::migrations::migrate_repair_tree() {
+        tracing::warn!("repair tree migration failed: {e}");
+    }
+
     let db_path = data_dir.join("accounts.db");
     let store = AccountStore::open(&db_path)
         .with_context(|| format!("failed to open account store: {}", db_path.display()))?;

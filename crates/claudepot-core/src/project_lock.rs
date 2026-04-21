@@ -2,7 +2,9 @@
 //!
 //! One lockfile per in-flight rename, keyed on the source CC project
 //! dir's sanitized name. Stored at
-//! `~/.claude/claudepot/locks/<old_san>.lock`.
+//! `~/.claudepot/repair/locks/<old_san>.lock` (the legacy location was
+//! `~/.claude/claudepot/locks/…`; `migrations::migrate_repair_tree`
+//! moves it on first boot).
 //!
 //! Staleness rules (Q6):
 //!   - Same hostname as current: `kill(pid, 0)` distinguishes

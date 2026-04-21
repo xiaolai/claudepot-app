@@ -2,7 +2,9 @@
 import { invoke } from "@tauri-apps/api/core";
 import type {
   AccountSummary,
+  AccountUsage,
   AdoptReport,
+  ApiKeySummary,
   AppStatus,
   BreakLockOutcome,
   CcIdentity,
@@ -12,6 +14,7 @@ import type {
   JournalEntry,
   MoveArgs,
   MoveSessionReport,
+  OauthTokenSummary,
   OrphanedProject,
   PendingJournalsSummary,
   ProjectDetail,
@@ -299,4 +302,46 @@ export const api = {
    */
   preferencesSetHideDockIcon: (hide: boolean) =>
     invoke<void>("preferences_set_hide_dock_icon", { hide }),
+
+  // ---------- Keys (API keys + OAuth tokens) ----------
+  /** List every stored ANTHROPIC_API_KEY — previews only, no secrets. */
+  keyApiList: () => invoke<ApiKeySummary[]>("key_api_list"),
+  /**
+   * Add a new API key. Account is required — every key was created
+   * under *some* account, and leaving that blank makes the row
+   * un-findable by account later.
+   */
+  keyApiAdd: (label: string, token: string, accountUuid: string) =>
+    invoke<ApiKeySummary>("key_api_add", { label, token, accountUuid }),
+  keyApiRemove: (uuid: string) => invoke<void>("key_api_remove", { uuid }),
+  /** Pull the full plaintext secret out for clipboard. Sparingly. */
+  keyApiCopy: (uuid: string) => invoke<string>("key_api_copy", { uuid }),
+
+  /** List every stored CLAUDE_CODE_OAUTH_TOKEN — previews only. */
+  keyOauthList: () => invoke<OauthTokenSummary[]>("key_oauth_list"),
+  /**
+   * Add a new OAuth token. Account tag is mandatory — the user picks
+   * the account they ran `claude setup-token` against when created.
+   */
+  keyOauthAdd: (label: string, token: string, accountUuid: string) =>
+    invoke<OauthTokenSummary>("key_oauth_add", {
+      label,
+      token,
+      accountUuid,
+    }),
+  keyOauthRemove: (uuid: string) => invoke<void>("key_oauth_remove", { uuid }),
+  keyOauthCopy: (uuid: string) => invoke<string>("key_oauth_copy", { uuid }),
+  /**
+   * Hit `/api/oauth/usage` with the stored token to verify and update
+   * the probe fields. Returns the refreshed summary (so the days-left
+   * chip can flip on a 401 without a second round-trip).
+   */
+  keyOauthProbe: (uuid: string) =>
+    invoke<OauthTokenSummary>("key_oauth_probe", { uuid }),
+  /**
+   * Full usage breakdown for the mini-usage modal that opens when the
+   * user clicks an OAuth token's account tag.
+   */
+  keyOauthUsage: (uuid: string) =>
+    invoke<AccountUsage>("key_oauth_usage", { uuid }),
 };

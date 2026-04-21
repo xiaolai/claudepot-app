@@ -19,6 +19,14 @@ pub fn run() {
         )
         .try_init();
 
+    // One-time: move the legacy `~/.claude/claudepot/` repair tree into
+    // `~/.claudepot/repair/`. Idempotent and safe to run on every boot;
+    // any error here is non-fatal — the app still works against whatever
+    // layout is currently on disk.
+    if let Err(e) = claudepot_core::migrations::migrate_repair_tree() {
+        tracing::warn!("repair tree migration failed: {e}");
+    }
+
     // Load persisted preferences BEFORE the builder constructs anything
     // that might need them. `hide_dock_icon` in particular must reach
     // `set_activation_policy()` inside the very first `setup()` tick to
@@ -184,6 +192,16 @@ pub fn run() {
             commands::protected_paths_reset,
             commands::preferences_get,
             commands::preferences_set_hide_dock_icon,
+            commands::key_api_list,
+            commands::key_api_add,
+            commands::key_api_remove,
+            commands::key_api_copy,
+            commands::key_oauth_list,
+            commands::key_oauth_add,
+            commands::key_oauth_remove,
+            commands::key_oauth_copy,
+            commands::key_oauth_probe,
+            commands::key_oauth_usage,
         ])
         .run(tauri::generate_context!())
         .unwrap_or_else(|e| {
