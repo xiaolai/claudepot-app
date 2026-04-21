@@ -104,8 +104,11 @@ Generate the file in the directory chosen in Step 1 — e.g.,
   (`var(--accent)`, `var(--fs-sm)`, `var(--r-2)`).
 - Props types are concrete. Never `any`. Never `Partial<unknown>`.
 - Icons via `Glyph` from `src/components/primitives/Glyph.tsx`,
-  reading codepoints from `NF` in `src/icons.ts`. Never lucide,
-  heroicons, emoji, or raw SVGs.
+  passing a `lucide-react` component reference via the `NF` map in
+  `src/icons.ts`. The `NF.*` shim keeps the call shape stable from
+  the older Nerd Font pipeline; add new icons by importing a
+  Lucide component and registering it under a semantic name. Never
+  heroicons, phosphor, emoji, or hand-authored SVGs.
 - Buttons via `Button` / `IconButton` primitives. Modals via the
   `Modal` trio. Tags via `Tag`.
 - For kinds with feedback-surface implications (`banner`,
