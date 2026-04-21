@@ -70,7 +70,6 @@ import { AppStateProvider, useAppState } from "./providers/AppStateProvider";
 import { api } from "./api";
 import { ConsentLiveModal } from "./components/ConsentLiveModal";
 import { useActivityNotifications } from "./hooks/useActivityNotifications";
-import { useSessionLive } from "./hooks/useSessionLive";
 import { listen } from "@tauri-apps/api/event";
 import type { RunningOpInfo } from "./types";
 import { WindowChrome, AppSidebar, AppStatusBar } from "./shell";
@@ -256,14 +255,10 @@ function AppShell() {
   }, [setSection]);
 
   // Activity notifications — fires OS notifications for user-enabled
-  // trigger classes (error burst, idle-after-work, stuck). In-app
-  // signal lives on the session row and the Activity nav badge.
-  useActivityNotifications();
-
-  // Badge count: sessions that are errored or stuck surface on the
-  // Activity nav item so the user sees the count from any section.
-  const liveSessions = useSessionLive();
-  const activityAlerts = liveSessions.filter((s) => s.errored || s.stuck).length;
+  // trigger classes (error burst, idle-after-work, stuck). Returns the
+  // count of alerting sessions (errored/stuck) for the nav badge,
+  // reusing the hook's internal useSessionLive subscription.
+  const activityAlerts = useActivityNotifications();
 
   // Tray → Activity row click lands on the Tauri event
   // `cp-activity-open-session` with the session id as payload.

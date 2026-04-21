@@ -650,10 +650,11 @@ export function sortSessions(
 }
 
 export function projectLabel(cwd: string): string {
-  const trimmed = cwd.replace(/\/+$/, "");
-  const idx = trimmed.lastIndexOf("/");
+  const trimmed = cwd.replace(/[/\\]+$/, "");
+  if (!trimmed) return cwd;
+  const idx = Math.max(trimmed.lastIndexOf("/"), trimmed.lastIndexOf("\\"));
   const base = idx >= 0 ? trimmed.slice(idx + 1) : trimmed;
-  return base || cwd;
+  return base || trimmed;
 }
 
 export function familyShort(model: string | null): string {
