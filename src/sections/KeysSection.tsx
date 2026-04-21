@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
+import { openUrl } from "@tauri-apps/plugin-opener";
 import { api } from "../api";
 import { Button } from "../components/primitives/Button";
 import { ConfirmDialog } from "../components/ConfirmDialog";
@@ -59,14 +60,23 @@ export function KeysSection() {
   }, [refresh]);
 
   const onCopy = useCallback(
-    async (kind: "api" | "oauth", uuid: string, label: string) => {
+    async (
+      kind: "api" | "oauth",
+      uuid: string,
+      label: string,
+      preview: string,
+    ) => {
       try {
         const token =
           kind === "api"
             ? await api.keyApiCopy(uuid)
             : await api.keyOauthCopy(uuid);
         await navigator.clipboard.writeText(token);
-        pushToast("info", `Copied ${label} to clipboard.`);
+        pushToast(
+          "info",
+          `Copied ${label} (${preview}) — clipboard clears in 30s.`,
+        );
+        scheduleClipboardClear(token);
       } catch (e) {
         pushToast("error", `Copy failed: ${e}`);
       }
@@ -149,14 +159,18 @@ export function KeysSection() {
         <ApiKeysTable
           rows={apiKeys}
           loading={loading}
-          onCopy={(row) => void onCopy("api", row.uuid, row.label)}
+          onCopy={(row) =>
+            void onCopy("api", row.uuid, row.label, row.token_preview)
+          }
           onRemove={(row) => setPendingRemoval({ kind: "api", row })}
         />
 
         <OauthTokensTable
           rows={oauthTokens}
           loading={loading}
-          onCopy={(row) => void onCopy("oauth", row.uuid, row.label)}
+          onCopy={(row) =>
+            void onCopy("oauth", row.uuid, row.label, row.token_preview)
+          }
           onRemove={(row) => setPendingRemoval({ kind: "oauth", row })}
           onProbe={onProbe}
           onOpenUsage={setUsageModalFor}
@@ -206,6 +220,28 @@ export function KeysSection() {
   );
 }
 
+const CLIPBOARD_CLEAR_MS = 30_000;
+
+/** Overwrite the clipboard with an empty string 30s after a secret
+ *  was copied, but only if the clipboard still holds that exact
+ *  token — avoids stomping on whatever the user copied next. If the
+ *  webview denies `readText`, fall back to a best-effort overwrite. */
+function scheduleClipboardClear(token: string): void {
+  window.setTimeout(async () => {
+    try {
+      const current = await navigator.clipboard.readText();
+      if (current !== token) return;
+      await navigator.clipboard.writeText("");
+    } catch {
+      try {
+        await navigator.clipboard.writeText("");
+      } catch {
+        // Clipboard permission denied — nothing we can do.
+      }
+    }
+  }, CLIPBOARD_CLEAR_MS);
+}
+
 function describeProbe(status: string | null): string {
   if (!status) return "no probe yet";
   if (status === "ok") return "token is valid";
@@ -253,7 +289,11 @@ function ApiKeysTable({
         <EmptyHint>Loading…</EmptyHint>
       ) : rows.length === 0 ? (
         <EmptyHint>
-          No API keys yet. Add one from your Anthropic console.
+          No API keys yet. Add one from your{" "}
+          <ExternalLink href="https://console.anthropic.com/settings/keys">
+            Anthropic console
+          </ExternalLink>
+          .
         </EmptyHint>
       ) : (
         <Table>
@@ -564,6 +604,34 @@ function RowActions({ children }: { children: React.ReactNode }) {
     >
       {children}
     </span>
+  );
+}
+
+function ExternalLink({
+  href,
+  children,
+}: {
+  href: string;
+  children: React.ReactNode;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={() => {
+        void openUrl(href).catch(() => {});
+      }}
+      style={{
+        background: "transparent",
+        border: "none",
+        padding: 0,
+        color: "var(--accent)",
+        textDecoration: "underline",
+        cursor: "pointer",
+        font: "inherit",
+      }}
+    >
+      {children}
+    </button>
   );
 }
 

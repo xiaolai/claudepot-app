@@ -147,7 +147,10 @@ export function CommandPalette({
               })}
             </>
           )}
-          {query.trim().length >= 2 && (
+          {query.trim().length >= 2 &&
+            (sessionSearch.loading ||
+              sessionHits.length > 0 ||
+              filtered.length === 0) && (
             <>
               <div className="palette-group-label">
                 Sessions{" "}
@@ -155,8 +158,10 @@ export function CommandPalette({
                   <span style={{ color: "var(--fg-faint)" }}>…searching</span>
                 )}
               </div>
-              {/* Empty session section — only show when there are ALSO no
-                  action hits, so mixed results aren't labeled "empty". */}
+              {/* Empty session section — only when the whole palette is
+                  otherwise empty. When there are nav/action hits, a bare
+                  "Sessions" header with no children would look broken, so
+                  the outer guard hides the whole block in that case. */}
               {sessionHits.length === 0 &&
                 !sessionSearch.loading &&
                 filtered.length === 0 && (

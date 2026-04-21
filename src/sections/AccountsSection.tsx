@@ -234,7 +234,7 @@ export function AccountsSection({
                   aria-label="Refresh usage"
                 />
                 <IconButton
-                  glyph={NF.unlock}
+                  glyph={NF.signOut}
                   onClick={() => setConfirmClear(true)}
                   title="Sign out of Claude Code — clear its stored credentials"
                   aria-label="Sign out of Claude Code"
@@ -265,7 +265,7 @@ export function AccountsSection({
                 </Button>
                 <Button
                   variant="ghost"
-                  glyph={NF.unlock}
+                  glyph={NF.signOut}
                   glyphColor="var(--fg-muted)"
                   onClick={() => setConfirmClear(true)}
                   title="Clear Claude Code's stored credentials"
