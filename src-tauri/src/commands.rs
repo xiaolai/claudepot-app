@@ -1355,6 +1355,115 @@ pub fn session_index_rebuild() -> Result<(), String> {
 }
 
 // ---------------------------------------------------------------------------
+// Session debugger — chunks, linked tools, subagents, phases, context,
+// export, search, worktree grouping. All read-only.
+// ---------------------------------------------------------------------------
+
+/// Chunked event stream plus per-chunk linked tools — the shape the
+/// Sessions transcript renders from.
+#[tauri::command]
+pub fn session_chunks(
+    file_path: String,
+) -> Result<Vec<claudepot_core::session_chunks::SessionChunk>, String> {
+    let detail = load_detail_by_path(&file_path)?;
+    Ok(claudepot_core::session_chunks::build_chunks(&detail.events))
+}
+
+/// Flat list of paired tool calls and results for one transcript.
+#[tauri::command]
+pub fn session_linked_tools(
+    file_path: String,
+) -> Result<Vec<claudepot_core::session_tool_link::LinkedTool>, String> {
+    let detail = load_detail_by_path(&file_path)?;
+    Ok(claudepot_core::session_tool_link::link_tools(&detail.events))
+}
+
+/// Subagent transcripts for a parent session, pre-linked against the
+/// parent's Task calls.
+#[tauri::command]
+pub fn session_subagents(
+    file_path: String,
+) -> Result<Vec<claudepot_core::session_subagents::Subagent>, String> {
+    let detail = load_detail_by_path(&file_path)?;
+    let cfg = paths::claude_config_dir();
+    let mut agents = claudepot_core::session_subagents::resolve_subagents(
+        &cfg,
+        &detail.row.slug,
+        &detail.row.session_id,
+    )
+    .map_err(|e| format!("resolve subagents: {e}"))?;
+    claudepot_core::session_subagents::link_parent_tasks(&detail.events, &mut agents);
+    Ok(agents)
+}
+
+/// Phase breakdown — one entry per compaction boundary.
+#[tauri::command]
+pub fn session_phases(
+    file_path: String,
+) -> Result<claudepot_core::session_phases::ContextPhaseInfo, String> {
+    let detail = load_detail_by_path(&file_path)?;
+    Ok(claudepot_core::session_phases::compute_phases(&detail.events))
+}
+
+/// Visible-context token attribution across six categories.
+#[tauri::command]
+pub fn session_context_attribution(
+    file_path: String,
+) -> Result<claudepot_core::session_context::ContextStats, String> {
+    let detail = load_detail_by_path(&file_path)?;
+    Ok(claudepot_core::session_context::attribute_context(
+        &detail.events,
+    ))
+}
+
+/// Export transcript to Markdown or JSON (sk-ant-* redacted).
+#[tauri::command]
+pub fn session_export_text(file_path: String, format: String) -> Result<String, String> {
+    let detail = load_detail_by_path(&file_path)?;
+    let fmt = match format.as_str() {
+        "md" | "markdown" => claudepot_core::session_export::ExportFormat::Markdown,
+        "json" => claudepot_core::session_export::ExportFormat::Json,
+        other => return Err(format!("unknown format: {other}")),
+    };
+    Ok(claudepot_core::session_export::export(&detail, fmt))
+}
+
+/// Cross-session text search. Returns up to `limit` hits.
+#[tauri::command]
+pub fn session_search(
+    query: String,
+    limit: Option<usize>,
+) -> Result<Vec<claudepot_core::session_search::SearchHit>, String> {
+    let cfg = paths::claude_config_dir();
+    let rows = claudepot_core::session::list_all_sessions(&cfg)
+        .map_err(|e| format!("list sessions: {e}"))?;
+    claudepot_core::session_search::search_rows(&rows, &query, limit.unwrap_or(25))
+        .map_err(|e| format!("search sessions: {e}"))
+}
+
+/// Group all sessions by git repository (collapses worktrees into a
+/// single repository row).
+#[tauri::command]
+pub fn session_worktree_groups(
+) -> Result<Vec<claudepot_core::session_worktree::RepositoryGroup>, String> {
+    let cfg = paths::claude_config_dir();
+    let rows = claudepot_core::session::list_all_sessions(&cfg)
+        .map_err(|e| format!("list sessions: {e}"))?;
+    Ok(claudepot_core::session_worktree::group_by_repo(rows))
+}
+
+fn load_detail_by_path(
+    file_path: &str,
+) -> Result<claudepot_core::session::SessionDetail, String> {
+    let cfg = paths::claude_config_dir();
+    claudepot_core::session::read_session_detail_at_path(
+        &cfg,
+        std::path::Path::new(file_path),
+    )
+    .map_err(|e| format!("session read failed: {e}"))
+}
+
+// ---------------------------------------------------------------------------
 // Protected paths — Settings → Protected pane
 // ---------------------------------------------------------------------------
 
