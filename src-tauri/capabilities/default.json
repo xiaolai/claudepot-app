@@ -18,8 +18,7 @@
     {
       "identifier": "opener:allow-open-url",
       "allow": [
-        { "url": "https://console.anthropic.com/*" },
-        { "url": "https://docs.anthropic.com/*" }
+        { "url": "https://console.anthropic.com/settings/keys" }
       ]
     }
   ]
