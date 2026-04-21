@@ -95,37 +95,108 @@ async fn pipe_to_tracing<R: tokio::io::AsyncRead + Unpin + Send + 'static>(
 
 /// Run `claude auth login` with a temporary config dir.
 /// Returns the path to the temp dir (caller is responsible for cleanup).
+///
+/// Non-cancellable — prefer `run_auth_login_cancellable` when a user
+/// might close the browser mid-flow.
 pub async fn run_auth_login() -> Result<PathBuf, OnboardError> {
+    run_auth_login_cancellable(None).await
+}
+
+/// Cancellable temp-dir variant of `run_auth_login`.
+///
+/// Pass a shared `Notify`; when another task calls `notify.notify_one()`,
+/// the child `claude auth login` process is killed and this function
+/// returns `AuthLoginCancelled`. The temp config dir is returned either
+/// way so the caller can inspect it (credential read) or clean it up
+/// (cancelled / failed).
+///
+/// Error cases mirror `run_auth_login_in_place_cancellable`:
+/// * `AuthLoginCancelled` — user clicked Cancel
+/// * `AuthLoginFailed(-2)` — hit `LOGIN_TIMEOUT`
+/// * `AuthLoginFailed(code)` — subprocess exited with failure
+pub async fn run_auth_login_cancellable(
+    cancel: Option<std::sync::Arc<tokio::sync::Notify>>,
+) -> Result<PathBuf, OnboardError> {
     let temp_dir = tempfile::Builder::new()
         .prefix("claudepot-onboard-")
         .tempdir()
         .map_err(OnboardError::Io)?;
     let config_dir = temp_dir.path().to_path_buf();
 
-    // Find claude binary
     let claude_path = which_claude()?;
 
-    tracing::debug!("onboarding with CLAUDE_CONFIG_DIR={}", config_dir.display());
+    tracing::info!(
+        binary = %claude_path.display(),
+        config_dir = %config_dir.display(),
+        timeout_secs = LOGIN_TIMEOUT.as_secs(),
+        "spawning `claude auth login` in temp dir"
+    );
 
-    let status = tokio::process::Command::new(&claude_path)
+    let mut child = tokio::process::Command::new(&claude_path)
         .arg("auth")
         .arg("login")
         .env("CLAUDE_CONFIG_DIR", &config_dir)
-        .stdin(std::process::Stdio::inherit())
-        .stdout(std::process::Stdio::inherit())
-        .stderr(std::process::Stdio::inherit())
-        .status()
-        .await
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
+        .spawn()
         .map_err(OnboardError::Io)?;
 
-    if !status.success() {
-        return Err(OnboardError::AuthLoginFailed(status.code().unwrap_or(-1)));
+    // Mirror run_auth_login_in_place_cancellable's drain-to-tracing
+    // pattern. Stdout/stderr piped so a closed terminal doesn't lose
+    // diagnostic output.
+    if let Some(stdout) = child.stdout.take() {
+        tokio::spawn(pipe_to_tracing(stdout, "claude-stdout"));
+    }
+    if let Some(stderr) = child.stderr.take() {
+        tokio::spawn(pipe_to_tracing(stderr, "claude-stderr"));
     }
 
-    // The temp dir must NOT be dropped here — caller reads credentials from it.
-    // Leak the TempDir so it persists; caller cleans up.
-    let path = temp_dir.keep();
-    Ok(path)
+    let cancel_fut = async {
+        match cancel.as_ref() {
+            Some(n) => n.notified().await,
+            None => std::future::pending::<()>().await,
+        }
+    };
+
+    let outcome = tokio::select! {
+        exit = child.wait() => {
+            match exit {
+                Ok(status) if status.success() => Ok(()),
+                Ok(status) => Err(OnboardError::AuthLoginFailed(
+                    status.code().unwrap_or(-1),
+                )),
+                Err(e) => Err(OnboardError::Io(e)),
+            }
+        }
+        _ = tokio::time::sleep(LOGIN_TIMEOUT) => {
+            tracing::warn!(
+                "`claude auth login` exceeded {}s — killing child",
+                LOGIN_TIMEOUT.as_secs()
+            );
+            let _ = child.kill().await;
+            Err(OnboardError::AuthLoginFailed(-2))
+        }
+        _ = cancel_fut => {
+            tracing::info!("browser login cancelled by user — killing child");
+            let _ = child.kill().await;
+            Err(OnboardError::AuthLoginCancelled)
+        }
+    };
+
+    match outcome {
+        Ok(()) => {
+            // Keep the tempdir alive for the caller; they clean it up.
+            Ok(temp_dir.keep())
+        }
+        Err(e) => {
+            // On any failure we drop the TempDir so its Drop impl
+            // removes the directory — no need for caller-side cleanup
+            // when there's nothing to import.
+            drop(temp_dir);
+            Err(e)
+        }
+    }
 }
 
 /// Read the credential blob from a temp config dir (file fallback).

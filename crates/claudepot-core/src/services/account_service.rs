@@ -167,10 +167,26 @@ pub(crate) async fn register_from_token_with(
 /// Register an account via browser-based OAuth login.
 /// Runs `claude auth login` in a temp config dir, reads credentials,
 /// fetches profile, and registers the account.
+///
+/// Non-cancellable convenience wrapper. Callers that want to wire a
+/// Cancel button should call [`register_from_browser_cancellable`]
+/// with an `Arc<Notify>` shared with the UI.
 pub async fn register_from_browser(store: &AccountStore) -> Result<RegisterResult, RegisterError> {
+    register_from_browser_cancellable(store, None).await
+}
+
+/// Cancellable variant of [`register_from_browser`]. When `cancel`
+/// fires, the in-flight `claude auth login` subprocess is killed and
+/// the temp config dir is dropped, producing
+/// `RegisterError::CredentialRead` with the onboarding layer's
+/// "cancelled" message.
+pub async fn register_from_browser_cancellable(
+    store: &AccountStore,
+    cancel: Option<std::sync::Arc<tokio::sync::Notify>>,
+) -> Result<RegisterResult, RegisterError> {
     use crate::onboard;
 
-    let config_dir = onboard::run_auth_login()
+    let config_dir = onboard::run_auth_login_cancellable(cancel)
         .await
         .map_err(|e| RegisterError::CredentialRead(e.to_string()))?;
 
