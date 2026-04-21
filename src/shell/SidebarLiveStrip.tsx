@@ -15,10 +15,13 @@ import type { LiveSessionSummary, LiveStatus } from "../types";
  * windows, not live work — they stay discoverable via the full
  * Sessions/Activity surfaces.
  *
- * Each row shows: status dot · project basename · model · current
- * tool · elapsed. Click opens the corresponding session via the
- * `onOpenSession` callback; the parent decides whether to route to
- * the static Sessions browser (M1) or the Live pane (M2+).
+ * Each row shows: status dot · project basename · model. The row is
+ * a presence indicator, not a dashboard — ticking fields (elapsed,
+ * current tool) deliberately don't render so the strip doesn't churn
+ * at backend-event rate. Click opens the corresponding session via
+ * `onOpenSession`; the parent chooses the Sessions deep-link (M1) or
+ * the Live pane (M2+). Full state is available to screen readers via
+ * `aria-label`.
  *
  * Keyboard: `j` and `k` cycle focus up and down within the strip
  * when it's mounted and the user isn't editing an input. Enter and
@@ -81,11 +84,8 @@ export function SidebarLiveStrip({ onOpenSession }: Props) {
 
   return (
     <>
-      <SectionLabel>
-        <span style={{ display: "flex", justifyContent: "space-between", width: "100%" }}>
-          <span style={{ color: "var(--fg-ghost)" }}>LIVE</span>
-          <span style={{ color: "var(--fg-faint)" }}>{count}</span>
-        </span>
+      <SectionLabel right={<span style={{ color: "var(--fg-faint)" }}>{count}</span>}>
+        LIVE
       </SectionLabel>
       <div
         role="listbox"
@@ -122,7 +122,6 @@ const LiveRow = forwardRef<HTMLButtonElement, RowProps>(function LiveRow(
   ref,
 ) {
   const label = projectLabel(summary.cwd);
-  const elapsed = formatElapsed(summary.idle_ms);
   const model = shortenModel(summary.model);
   const statusTitle = buildStatusTitle(summary);
 
@@ -181,23 +180,6 @@ const LiveRow = forwardRef<HTMLButtonElement, RowProps>(function LiveRow(
           {model}
         </span>
       ) : null}
-      <span style={{ color: "var(--fg-muted)", fontVariantNumeric: "tabular-nums" }}>
-        {summary.status === "waiting" && summary.waiting_for
-          ? summary.waiting_for
-          : summary.current_action
-            ? truncate(summary.current_action, 22)
-            : summary.status}
-      </span>
-      <span
-        style={{
-          color: "var(--fg-ghost)",
-          fontVariantNumeric: "tabular-nums",
-          minWidth: "3ch",
-          textAlign: "right",
-        }}
-      >
-        {elapsed}
-      </span>
     </button>
   );
 });
@@ -303,11 +285,6 @@ export function shortenModel(model: string | null): string {
   if (model.includes("sonnet")) return "SON";
   if (model.includes("haiku")) return "HAI";
   return model.length > 10 ? model.slice(0, 8) + "…" : model;
-}
-
-function truncate(s: string, max: number): string {
-  if (s.length <= max) return s;
-  return s.slice(0, max - 1) + "…";
 }
 
 function buildStatusTitle(s: LiveSessionSummary): string {
