@@ -1,8 +1,14 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useId, useRef, useState } from "react";
 import { Icon } from "../../components/Icon";
 import { api } from "../../api";
 import { CopyButton } from "../../components/CopyButton";
-import { useFocusTrap } from "../../hooks/useFocusTrap";
+import { Button } from "../../components/primitives/Button";
+import {
+  Modal,
+  ModalHeader,
+  ModalBody,
+  ModalFooter,
+} from "../../components/primitives/Modal";
 import { useTauriEvent } from "../../hooks/useTauriEvent";
 import type {
   CleanPreview,
@@ -11,6 +17,7 @@ import type {
   ProjectInfo,
 } from "../../types";
 import { formatSize } from "./format";
+import { NF } from "../../icons";
 
 type State =
   | { kind: "loading" }
@@ -49,10 +56,7 @@ export function CleanOrphansModal({
   onDone: (result: CleanResult) => void;
 }) {
   const [state, setState] = useState<State>({ kind: "loading" });
-  const headingId = useRef(
-    `clean-heading-${Math.random().toString(36).slice(2, 9)}`,
-  );
-  const trapRef = useFocusTrap<HTMLDivElement>();
+  const headingId = useId();
   const firedTerminal = useRef(false);
 
   const loadPreview = useCallback(() => {
@@ -68,16 +72,6 @@ export function CleanOrphansModal({
     loadPreview();
   }, [loadPreview]);
 
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape" && state.kind !== "running") {
-        e.stopPropagation();
-        onClose();
-      }
-    };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [onClose, state.kind]);
 
   // Subscribe to progress events only while a clean is running.
   const channel =
@@ -184,103 +178,85 @@ export function CleanOrphansModal({
   };
 
   return (
-    <div
-      className="modal-backdrop"
-      role="presentation"
-      onClick={(e) => {
-        if (e.target === e.currentTarget) closeSafe();
-      }}
-    >
-      <div
-        ref={trapRef}
-        className="modal clean-modal"
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby={headingId.current}
-      >
-        <h2 id={headingId.current}>Clean project data</h2>
+    <Modal open onClose={closeSafe} width="lg" aria-labelledby={headingId}>
+      <ModalHeader
+        title="Clean project data"
+        id={headingId}
+        onClose={closeSafe}
+      />
+      <ModalBody>
+        {state.kind === "loading" && <SkeletonPreview />}
 
-        <div className="modal-body">
-          {state.kind === "loading" && <SkeletonPreview />}
+        {state.kind === "preview" && (
+          <Preview data={state.data} onRefresh={loadPreview} />
+        )}
 
-          {state.kind === "preview" && (
-            <Preview data={state.data} onRefresh={loadPreview} />
-          )}
+        {state.kind === "running" && (
+          <RunningView
+            phase={state.phase}
+            done={state.done}
+            total={state.total}
+          />
+        )}
 
-          {state.kind === "running" && (
-            <RunningView
-              phase={state.phase}
-              done={state.done}
-              total={state.total}
-            />
-          )}
+        {state.kind === "done" && <Result result={state.result} />}
 
-          {state.kind === "done" && <Result result={state.result} />}
-
-          {state.kind === "error" && (
-            <div className="clean-error" role="alert">
-              <Icon name="alert-triangle" size={14} />
-              <div>
-                <strong>Couldn't clean.</strong>
-                <p className="mono small">{state.message}</p>
-                <p className="muted small">
-                  If pending rename journals are blocking, resolve them
-                  in the Repair view first.
-                </p>
-              </div>
+        {state.kind === "error" && (
+          <div className="clean-error" role="alert">
+            <Icon name="alert-triangle" size={14} />
+            <div>
+              <strong>Couldn't clean.</strong>
+              <p className="mono small">{state.message}</p>
+              <p className="muted small">
+                If pending rename journals are blocking, resolve them
+                in the Repair view first.
+              </p>
             </div>
-          )}
-        </div>
-
-        <div className="modal-actions">
-          {state.kind === "done" ? (
-            <button
-              type="button"
-              className="btn primary"
+          </div>
+        )}
+      </ModalBody>
+      <ModalFooter>
+        {state.kind === "done" ? (
+          <Button variant="solid" onClick={closeSafe} autoFocus>
+            Close
+          </Button>
+        ) : (
+          <>
+            <Button
+              variant="ghost"
               onClick={closeSafe}
-              autoFocus
+              disabled={state.kind === "running"}
+              title={
+                state.kind === "running"
+                  ? "Can't cancel mid-run — the backend is holding the clean lock"
+                  : undefined
+              }
             >
-              Close
-            </button>
-          ) : (
-            <>
-              <button
-                type="button"
-                className="btn"
-                onClick={closeSafe}
-                disabled={state.kind === "running"}
-                title={
-                  state.kind === "running"
-                    ? "Can't cancel mid-run — the backend is holding the clean lock"
-                    : undefined
-                }
-              >
-                {state.kind === "running"
-                  ? "Running…"
-                  : state.kind === "error"
-                    ? "Close"
-                    : "Cancel"}
-              </button>
-              <button
-                type="button"
-                className="btn danger primary"
-                disabled={
-                  !(state.kind === "preview" && state.data.orphans_found > 0)
-                }
-                onClick={runClean}
-              >
-                <Icon name="trash-2" size={13} />
-                {state.kind === "preview" && state.data.orphans_found > 0
-                  ? `Remove ${state.data.orphans_found} project${
-                      state.data.orphans_found === 1 ? "" : "s"
-                    }`
-                  : "Remove"}
-              </button>
-            </>
-          )}
-        </div>
-      </div>
-    </div>
+              {state.kind === "running"
+                ? "Running…"
+                : state.kind === "error"
+                  ? "Close"
+                  : "Cancel"}
+            </Button>
+            <Button
+              variant="solid"
+              danger
+              disabled={
+                !(state.kind === "preview" && state.data.orphans_found > 0)
+              }
+              onClick={runClean}
+              glyph={NF.trash}
+            >
+              {state.kind === "preview" && state.data.orphans_found > 0
+                ? `Remove ${state.data.orphans_found} project${
+                    state.data.orphans_found === 1 ? "" : "s"
+                  }`
+                : "Remove"}
+            </Button>
+          </>
+        )}
+      </ModalFooter>
+    </Modal>
   );
 }
 

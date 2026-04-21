@@ -248,7 +248,7 @@ export function SessionsSection(props: SessionsSectionProps = {}) {
             onChange={(e) => setQuery(e.target.value)}
             style={{
               flex: "1 1 var(--filter-input-width)",
-              minWidth: "160px",
+              minWidth: "var(--filter-input-min)",
               maxWidth: "var(--filter-input-width)",
             }}
             aria-label="Filter sessions"

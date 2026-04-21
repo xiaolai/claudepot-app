@@ -1,8 +1,14 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useId, useState } from "react";
 import { open as openDialog } from "@tauri-apps/plugin-dialog";
 import { Icon } from "../../components/Icon";
 import { api } from "../../api";
-import { useFocusTrap } from "../../hooks/useFocusTrap";
+import { Button } from "../../components/primitives/Button";
+import {
+  Modal,
+  ModalHeader,
+  ModalBody,
+  ModalFooter,
+} from "../../components/primitives/Modal";
 import type { AdoptReport, OrphanedProject } from "../../types";
 import { formatSize } from "./format";
 
@@ -34,24 +40,14 @@ export function AdoptOrphansModal({
   /** Called after every user adoption so the section can refresh. */
   onCompleted: () => void;
 }) {
-  const headingId = useRef(`adopt-heading-${Math.random().toString(36).slice(2, 9)}`);
-  const trapRef = useFocusTrap<HTMLDivElement>();
+  const headingId = useId();
 
-  // Per-orphan row state + per-row target cwd input.
   const initialTargets: Record<string, string> = {};
   orphans.forEach((o) => {
     initialTargets[o.slug] = o.suggestedAdoptionTarget ?? "";
   });
   const [targets, setTargets] = useState<Record<string, string>>(initialTargets);
   const [states, setStates] = useState<Record<string, RowState>>({});
-
-  useEffect(() => {
-    const onEsc = (e: KeyboardEvent) => {
-      if (e.key === "Escape") onClose();
-    };
-    window.addEventListener("keydown", onEsc);
-    return () => window.removeEventListener("keydown", onEsc);
-  }, [onClose]);
 
   const browse = useCallback(async (slug: string) => {
     const picked = await openDialog({
@@ -84,21 +80,14 @@ export function AdoptOrphansModal({
   );
 
   return (
-    <div
-      className="modal-backdrop"
-      onClick={(e) => {
-        if (e.target === e.currentTarget) onClose();
-      }}
-    >
-      <div
-        ref={trapRef}
-        className="modal adopt-orphans-modal"
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby={headingId.current}
-      >
-        <h2 id={headingId.current}>Adopt orphaned projects</h2>
-        <p className="muted">
+    <Modal open onClose={onClose} width="lg" aria-labelledby={headingId}>
+      <ModalHeader
+        title="Adopt orphaned projects"
+        id={headingId}
+        onClose={onClose}
+      />
+      <ModalBody>
+        <p className="muted" style={{ marginTop: 0 }}>
           Each orphan's original cwd no longer exists. Choose a live
           target cwd to adopt sessions into. Every session transcript
           is rewritten so <code>--resume</code> will cd into the new
@@ -126,7 +115,7 @@ export function AdoptOrphansModal({
                 <div className="adopt-orphans-row-input">
                   <input
                     type="text"
-                    className="path-input"
+                    className="path-input pm-focus"
                     placeholder="Target cwd (absolute path)"
                     value={target}
                     onChange={(e) =>
@@ -134,20 +123,20 @@ export function AdoptOrphansModal({
                     }
                     disabled={disabled}
                   />
-                  <button
-                    className="btn"
+                  <Button
+                    variant="ghost"
                     onClick={() => browse(o.slug)}
                     disabled={disabled}
                   >
                     Browse…
-                  </button>
-                  <button
-                    className="btn primary"
+                  </Button>
+                  <Button
+                    variant="solid"
                     onClick={() => adopt(o.slug)}
                     disabled={disabled || !target.trim()}
                   >
                     {state.kind === "adopting" ? "Adopting…" : "Adopt"}
-                  </button>
+                  </Button>
                 </div>
 
                 {state.kind === "done" && (
@@ -173,14 +162,12 @@ export function AdoptOrphansModal({
             );
           })}
         </ul>
-
-        <div className="modal-actions">
-          <button className="btn" onClick={onClose}>
-            Close
-          </button>
-        </div>
-      </div>
-    </div>
+      </ModalBody>
+      <ModalFooter>
+        <Button variant="ghost" onClick={onClose}>
+          Close
+        </Button>
+      </ModalFooter>
+    </Modal>
   );
 }
-

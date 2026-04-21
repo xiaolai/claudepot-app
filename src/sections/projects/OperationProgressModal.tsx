@@ -1,7 +1,13 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useId, useRef, useState } from "react";
 import { useTauriEvent } from "../../hooks/useTauriEvent";
-import { useFocusTrap } from "../../hooks/useFocusTrap";
 import { api } from "../../api";
+import { Button } from "../../components/primitives/Button";
+import {
+  Modal,
+  ModalHeader,
+  ModalBody,
+  ModalFooter,
+} from "../../components/primitives/Modal";
 import type {
   MoveResultSummary,
   OperationProgressEvent,
@@ -56,10 +62,7 @@ export function OperationProgressModal({
     | null
   >(null);
   const firedTerminal = useRef(false);
-  const headingId = useRef(
-    `op-progress-heading-${Math.random().toString(36).slice(2, 9)}`,
-  );
-  const trapRef = useFocusTrap<HTMLDivElement>();
+  const headingId = useId();
 
   // Audit H9: the handler used to close over `sub?.phase`, making its
   // identity change every time a sub-progress update arrived. The
@@ -147,29 +150,10 @@ export function OperationProgressModal({
 
   useTauriEvent<OperationProgressEvent>(channel, handler);
 
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") {
-        e.stopPropagation();
-        onClose();
-      }
-    };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [onClose]);
-
   return (
-    <div className="modal-backdrop" role="presentation">
-      <div
-        ref={trapRef}
-        className="modal op-progress-modal"
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby={headingId.current}
-        aria-busy={terminal === null}
-      >
-        <h2 id={headingId.current}>{title}</h2>
-
+    <Modal open onClose={onClose} aria-labelledby={headingId}>
+      <ModalHeader title={title} id={headingId} onClose={onClose} />
+      <ModalBody>
         <ul className="phase-list">
           {PHASES.map((p) => {
             const state = phases[p];
@@ -244,21 +228,20 @@ export function OperationProgressModal({
           </div>
         )}
 
-        <div className="modal-actions">
-          {terminal?.kind === "error" && onOpenRepair && (
-            <button
-              type="button"
-              className="btn primary"
-              onClick={() => onOpenRepair(terminal.failedJournalId)}
-            >
-              Open Repair
-            </button>
-          )}
-          <button type="button" className="btn" onClick={onClose}>
-            {terminal ? "Close" : "Run in background"}
-          </button>
-        </div>
-      </div>
-    </div>
+      </ModalBody>
+      <ModalFooter>
+        <Button variant="ghost" onClick={onClose}>
+          {terminal ? "Close" : "Run in background"}
+        </Button>
+        {terminal?.kind === "error" && onOpenRepair && (
+          <Button
+            variant="solid"
+            onClick={() => onOpenRepair(terminal.failedJournalId)}
+          >
+            Open Repair
+          </Button>
+        )}
+      </ModalFooter>
+    </Modal>
   );
 }

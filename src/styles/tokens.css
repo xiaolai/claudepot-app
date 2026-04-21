@@ -187,7 +187,15 @@
   --content-cap-sm:        400px;
   --content-cap-md:        640px;
   --filter-input-width:    300px;
+  --filter-input-min:      160px;   /* shrink floor for the Sessions/Projects name-filter input */
+  --input-width-compact:    80px;   /* short number inputs (Activity stuck-minutes, spend-$) */
   --banner-min-width:      180px;
+
+  /* ── Viewer max-heights — tool-result expanders (Bash / Write /
+   *    generic). Kept as two steps so Bash stdout can breathe a
+   *    touch less tall than a file diff. */
+  --viewer-max-height:     400px;
+  --viewer-max-height-sm:  300px;
 
   --row-height:            28px;
   --row-height-tall:       32px;

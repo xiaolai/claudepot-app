@@ -1,8 +1,14 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useId, useMemo, useState } from "react";
 import { open as openDialog } from "@tauri-apps/plugin-dialog";
 import { Icon } from "../../components/Icon";
 import { api } from "../../api";
-import { useFocusTrap } from "../../hooks/useFocusTrap";
+import { Button } from "../../components/primitives/Button";
+import {
+  Modal,
+  ModalHeader,
+  ModalBody,
+  ModalFooter,
+} from "../../components/primitives/Modal";
 import type { MoveSessionReport, ProjectInfo } from "../../types";
 import { classifyProject } from "./projectStatus";
 
@@ -44,10 +50,7 @@ export function MoveSessionModal({
   /** Called after a successful move so the caller can refresh. */
   onCompleted: (report: MoveSessionReport) => void;
 }) {
-  const headingId = useRef(
-    `move-session-heading-${Math.random().toString(36).slice(2, 9)}`,
-  );
-  const trapRef = useFocusTrap<HTMLDivElement>();
+  const headingId = useId();
 
   // Dropdown options: only "alive" projects — picking an orphan /
   // unreachable / empty target would either fail the backend or
@@ -81,13 +84,11 @@ export function MoveSessionModal({
   const canSubmit =
     phase.kind === "idle" && target !== "" && target !== fromCwd;
 
-  useEffect(() => {
-    const onEsc = (e: KeyboardEvent) => {
-      if (e.key === "Escape" && phase.kind !== "moving") onClose();
-    };
-    window.addEventListener("keydown", onEsc);
-    return () => window.removeEventListener("keydown", onEsc);
-  }, [onClose, phase.kind]);
+  // Escape is suppressed while a move is in flight — Modal wires
+  // its own Escape handler, so we gate the onClose callback.
+  const handleClose = () => {
+    if (phase.kind !== "moving") onClose();
+  };
 
   async function browse() {
     const picked = await openDialog({
@@ -125,23 +126,14 @@ export function MoveSessionModal({
   const shortTo = target ? (basename(target) ?? target) : "";
 
   return (
-    <div
-      className="modal-backdrop"
-      onClick={(e) => {
-        if (e.target === e.currentTarget && phase.kind !== "moving") onClose();
-      }}
-    >
-      <div
-        ref={trapRef}
-        className="modal move-session-modal"
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby={headingId.current}
-      >
-        <h2 id={headingId.current}>
-          Move session <code className="mono">{shortSid}</code>
-        </h2>
-        <p className="muted">
+    <Modal open onClose={handleClose} aria-labelledby={headingId}>
+      <ModalHeader
+        title={`Move session ${shortSid}`}
+        id={headingId}
+        onClose={handleClose}
+      />
+      <ModalBody>
+        <p className="muted" style={{ marginTop: 0 }}>
           From <strong className="mono">{shortFrom}</strong> to the target
           you pick. Every transcript line's <code>cwd</code> is rewritten
           so <code>--resume</code> will cd into the new project.
@@ -180,19 +172,19 @@ export function MoveSessionModal({
                 <div className="adopt-orphans-row-input">
                   <input
                     type="text"
-                    className="path-input"
+                    className="path-input pm-focus"
                     placeholder="Target cwd (absolute path)"
                     value={customCwd}
                     onChange={(e) => setCustomCwd(e.target.value)}
                     disabled={phase.kind === "moving"}
                   />
-                  <button
-                    className="btn"
+                  <Button
+                    variant="ghost"
                     onClick={browse}
                     disabled={phase.kind === "moving"}
                   >
                     Browse…
-                  </button>
+                  </Button>
                 </div>
               )}
 
@@ -242,83 +234,83 @@ export function MoveSessionModal({
                 <Icon name="alert-circle" size={12} /> {phase.message}
               </p>
             )}
-
-            <div className="modal-actions">
-              <button
-                className="btn"
-                onClick={onClose}
-                disabled={phase.kind === "moving"}
-              >
-                Cancel
-              </button>
-              <button
-                className="btn primary"
-                onClick={submit}
-                disabled={!canSubmit}
-                autoFocus
-              >
-                {phase.kind === "moving"
-                  ? "Moving…"
-                  : `Move to ${shortTo || "…"}`}
-              </button>
-            </div>
           </>
         ) : (
-          <>
-            <div className="move-session-done">
-              <p className="move-session-done-line">
-                <Icon name="check" size={14} /> Moved.
-              </p>
-              <dl className="detail-grid">
-                <dt>Transcript lines rewritten</dt>
-                <dd>{phase.report.jsonlLinesRewritten}</dd>
-                {phase.report.subagentFilesMoved > 0 && (
-                  <>
-                    <dt>Subagent files moved</dt>
-                    <dd>{phase.report.subagentFilesMoved}</dd>
-                  </>
+          <div className="move-session-done">
+            <p className="move-session-done-line">
+              <Icon name="check" size={14} /> Moved.
+            </p>
+            <dl className="detail-grid">
+              <dt>Transcript lines rewritten</dt>
+              <dd>{phase.report.jsonlLinesRewritten}</dd>
+              {phase.report.subagentFilesMoved > 0 && (
+                <>
+                  <dt>Subagent files moved</dt>
+                  <dd>{phase.report.subagentFilesMoved}</dd>
+                </>
+              )}
+              {phase.report.remoteAgentFilesMoved > 0 && (
+                <>
+                  <dt>Remote-agent files moved</dt>
+                  <dd>{phase.report.remoteAgentFilesMoved}</dd>
+                </>
+              )}
+              <dt>History entries followed</dt>
+              <dd>
+                {phase.report.historyEntriesMoved}
+                {phase.report.historyEntriesUnmapped > 0 && (
+                  <span className="muted">
+                    {" · "}
+                    {phase.report.historyEntriesUnmapped} stayed (pre-sessionId)
+                  </span>
                 )}
-                {phase.report.remoteAgentFilesMoved > 0 && (
-                  <>
-                    <dt>Remote-agent files moved</dt>
-                    <dd>{phase.report.remoteAgentFilesMoved}</dd>
-                  </>
-                )}
-                <dt>History entries followed</dt>
-                <dd>
-                  {phase.report.historyEntriesMoved}
-                  {phase.report.historyEntriesUnmapped > 0 && (
-                    <span className="muted">
-                      {" · "}
-                      {phase.report.historyEntriesUnmapped} stayed (pre-sessionId)
-                    </span>
-                  )}
-                </dd>
-                {phase.report.claudeJsonPointersCleared > 0 && (
-                  <>
-                    <dt>
-                      <code className="mono">.claude.json</code> pointers cleared
-                    </dt>
-                    <dd>{phase.report.claudeJsonPointersCleared}</dd>
-                  </>
-                )}
-                {phase.report.sourceDirRemoved && (
-                  <>
-                    <dt>Source project dir</dt>
-                    <dd>removed (was empty)</dd>
-                  </>
-                )}
-              </dl>
-            </div>
-            <div className="modal-actions">
-              <button className="btn primary" onClick={onClose} autoFocus>
-                Close
-              </button>
-            </div>
-          </>
+              </dd>
+              {phase.report.claudeJsonPointersCleared > 0 && (
+                <>
+                  <dt>
+                    <code className="mono">.claude.json</code> pointers cleared
+                  </dt>
+                  <dd>{phase.report.claudeJsonPointersCleared}</dd>
+                </>
+              )}
+              {phase.report.sourceDirRemoved && (
+                <>
+                  <dt>Source project dir</dt>
+                  <dd>removed (was empty)</dd>
+                </>
+              )}
+            </dl>
+          </div>
         )}
-      </div>
-    </div>
+      </ModalBody>
+      <ModalFooter>
+        {phase.kind !== "done" ? (
+          <>
+            <Button
+              variant="ghost"
+              onClick={handleClose}
+              disabled={phase.kind === "moving"}
+            >
+              Cancel
+            </Button>
+            <Button
+              variant="solid"
+              onClick={submit}
+              disabled={!canSubmit}
+              autoFocus
+            >
+              {phase.kind === "moving"
+                ? "Moving…"
+                : `Move to ${shortTo || "…"}`}
+            </Button>
+          </>
+        ) : (
+          <Button variant="solid" onClick={onClose} autoFocus>
+            Close
+          </Button>
+        )}
+      </ModalFooter>
+    </Modal>
   );
 }
 

@@ -1,5 +1,6 @@
-import { useEffect, useRef, useState } from "react";
-import { useFocusTrap } from "../hooks/useFocusTrap";
+import { useId, useState } from "react";
+import { Button } from "./primitives/Button";
+import { Modal, ModalHeader, ModalBody, ModalFooter } from "./primitives/Modal";
 
 /**
  * Consequence-explaining confirm dialog. Two variants:
@@ -11,10 +12,11 @@ import { useFocusTrap } from "../hooks/useFocusTrap";
  *   that must match the expected string before the Confirm button
  *   enables. Used for Abandon, which destroys the audit trail.
  *
- * All modals follow accessibility.md: role=dialog + aria-modal,
- * Escape closes, focus trap via tabindex on the modal, backdrop click
- * closes. (Backdrop click intentionally skipped here because
- * destructive actions should require an explicit Cancel click.)
+ * Built on the paper-mono `<Modal>` primitive. Destructive actions
+ * intentionally keep backdrop-click disabled here — Modal's default
+ * `onClose` fires on scrim click AND Escape; we only wire Escape by
+ * passing `onClose={onCancel}` and let the user's explicit Cancel
+ * button be the mouse path.
  */
 export function ConfirmDangerousAction({
   title,
@@ -37,39 +39,49 @@ export function ConfirmDangerousAction({
   danger?: boolean;
 }) {
   const [typed, setTyped] = useState("");
-  const headingId = useRef(
-    `cda-heading-${Math.random().toString(36).slice(2, 9)}`,
-  );
-  const trapRef = useFocusTrap<HTMLDivElement>();
+  const headingId = useId();
   const confirmDisabled =
     typeToConfirm !== undefined && typed !== typeToConfirm;
 
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") {
-        e.stopPropagation();
-        onCancel();
-      }
-    };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [onCancel]);
-
   return (
-    <div className="modal-backdrop" role="presentation">
-      <div
-        ref={trapRef}
-        className="modal"
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby={headingId.current}
-      >
-        <h2 id={headingId.current}>{title}</h2>
-        <div className="modal-body">{consequences}</div>
+    <Modal open onClose={onCancel} aria-labelledby={headingId}>
+      <ModalHeader title={title} id={headingId} onClose={onCancel} />
+      <ModalBody>
+        {consequences}
         {typeToConfirm !== undefined && (
-          <div className="type-to-confirm">
-            <label className="detail-label" htmlFor="type-to-confirm-input">
-              Type <code className="mono">{typeToConfirm}</code> to confirm
+          <div
+            style={{
+              marginTop: "var(--sp-16)",
+              display: "flex",
+              flexDirection: "column",
+              gap: "var(--sp-6)",
+            }}
+          >
+            <label
+              htmlFor="type-to-confirm-input"
+              style={{
+                fontSize: "var(--fs-xs)",
+                color: "var(--fg-muted)",
+                letterSpacing: "var(--ls-wide)",
+                textTransform: "uppercase",
+              }}
+            >
+              Type{" "}
+              <code
+                style={{
+                  fontFamily: "var(--font-mono, var(--font))",
+                  color: "var(--fg)",
+                  textTransform: "none",
+                  letterSpacing: 0,
+                  padding: "0 var(--sp-4)",
+                  background: "var(--bg-sunken)",
+                  border: "var(--bw-hair) solid var(--line)",
+                  borderRadius: "var(--r-1)",
+                }}
+              >
+                {typeToConfirm}
+              </code>{" "}
+              to confirm
             </label>
             <input
               id="type-to-confirm-input"
@@ -80,24 +92,36 @@ export function ConfirmDangerousAction({
               value={typed}
               onChange={(e) => setTyped(e.target.value)}
               autoFocus
+              style={{
+                height: "var(--input-height)",
+                padding: "0 var(--sp-10)",
+                background: "var(--bg-raised)",
+                border: "var(--bw-hair) solid var(--line)",
+                borderRadius: "var(--r-2)",
+                fontFamily: "var(--font)",
+                fontSize: "var(--fs-sm)",
+                color: "var(--fg)",
+                outline: "none",
+              }}
+              className="pm-focus"
             />
           </div>
         )}
-        <div className="modal-actions">
-          <button type="button" className="btn" onClick={onCancel}>
-            Cancel
-          </button>
-          <button
-            type="button"
-            className={danger ? "btn danger primary" : "btn primary"}
-            disabled={confirmDisabled}
-            onClick={onConfirm}
-            autoFocus={typeToConfirm === undefined}
-          >
-            {confirmLabel}
-          </button>
-        </div>
-      </div>
-    </div>
+      </ModalBody>
+      <ModalFooter>
+        <Button variant="ghost" onClick={onCancel}>
+          Cancel
+        </Button>
+        <Button
+          variant="solid"
+          danger={danger}
+          disabled={confirmDisabled}
+          onClick={onConfirm}
+          autoFocus={typeToConfirm === undefined}
+        >
+          {confirmLabel}
+        </Button>
+      </ModalFooter>
+    </Modal>
   );
 }

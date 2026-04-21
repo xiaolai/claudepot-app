@@ -126,7 +126,7 @@ function ClampedPre({ text }: { text: string }) {
           margin: 0,
           whiteSpace: "pre-wrap",
           wordBreak: "break-word",
-          maxHeight: "400px",
+          maxHeight: "var(--viewer-max-height)",
           overflow: "auto",
         }}
       >

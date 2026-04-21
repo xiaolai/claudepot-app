@@ -1,6 +1,14 @@
-import React, { useEffect, useId } from "react";
-import { useFocusTrap } from "../hooks/useFocusTrap";
+import React, { useId } from "react";
+import { Button } from "./primitives/Button";
+import { Modal, ModalHeader, ModalBody, ModalFooter } from "./primitives/Modal";
 
+/**
+ * Lightweight yes/no confirm. Built on the paper-mono `<Modal>`
+ * primitive, which provides the backdrop, Escape-to-close, focus
+ * trap, initial-focus, and focus-restore for free. Use for
+ * non-destructive confirmations; reach for `ConfirmDangerousAction`
+ * when the confirm has a type-to-confirm gate.
+ */
 export function ConfirmDialog({
   title,
   body,
@@ -16,29 +24,24 @@ export function ConfirmDialog({
   onCancel: () => void;
   onConfirm: () => void;
 }) {
-  const trapRef = useFocusTrap<HTMLDivElement>();
   const titleId = useId();
-
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") onCancel();
-    };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [onCancel]);
-
   return (
-    <div className="modal-backdrop" onClick={onCancel}>
-      <div ref={trapRef} className="modal" role="dialog" aria-modal="true"
-        aria-labelledby={titleId} onClick={(e) => e.stopPropagation()}>
-        <h2 id={titleId}>{title}</h2>
-        <div className="modal-body">{body}</div>
-        <div className="modal-actions">
-          <button className="btn" onClick={onCancel}>Cancel</button>
-          <button className={confirmDanger ? "btn danger primary" : "btn primary"}
-            onClick={onConfirm} autoFocus>{confirmLabel}</button>
-        </div>
-      </div>
-    </div>
+    <Modal open onClose={onCancel} aria-labelledby={titleId}>
+      <ModalHeader title={title} id={titleId} onClose={onCancel} />
+      <ModalBody>{body}</ModalBody>
+      <ModalFooter>
+        <Button variant="ghost" onClick={onCancel}>
+          Cancel
+        </Button>
+        <Button
+          variant="solid"
+          danger={confirmDanger}
+          onClick={onConfirm}
+          autoFocus
+        >
+          {confirmLabel}
+        </Button>
+      </ModalFooter>
+    </Modal>
   );
 }

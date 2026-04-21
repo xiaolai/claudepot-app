@@ -949,7 +949,7 @@ function ActivityPane({
             onChange={(e) => setStuckMin(e.target.value)}
             style={{
               ...selectStyle,
-              width: "80px",
+              width: "var(--input-width-compact)",
               textAlign: "right",
               fontVariantNumeric: "tabular-nums",
             }}
@@ -969,7 +969,7 @@ function ActivityPane({
             onChange={(e) => setSpendUsd(e.target.value)}
             style={{
               ...selectStyle,
-              width: "80px",
+              width: "var(--input-width-compact)",
               textAlign: "right",
               fontVariantNumeric: "tabular-nums",
             }}
