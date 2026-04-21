@@ -30,10 +30,15 @@ const importSessions = () =>
   import("./sections/SessionsSection").then((m) => ({ default: m.SessionsSection }));
 const importKeys = () =>
   import("./sections/KeysSection").then((m) => ({ default: m.KeysSection }));
+const importActivity = () =>
+  import("./sections/ActivitySection").then((m) => ({
+    default: m.ActivitySection,
+  }));
 const ProjectsSection = lazy(importProjects);
 const SettingsSection = lazy(importSettings);
 const SessionsSection = lazy(importSessions);
 const KeysSection = lazy(importKeys);
+const ActivitySection = lazy(importActivity);
 const OperationProgressModal = lazy(() =>
   import("./sections/projects/OperationProgressModal").then((m) => ({
     default: m.OperationProgressModal,
@@ -484,6 +489,7 @@ function AppShell() {
                   }
                 />
               )}
+              {section === "activity" && <ActivitySection />}
               {section === "keys" && <KeysSection />}
               {section === "settings" && <SettingsSection />}
             </Suspense>
