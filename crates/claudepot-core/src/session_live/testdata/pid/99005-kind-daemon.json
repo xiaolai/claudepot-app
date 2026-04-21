@@ -1,0 +1,11 @@
+{
+  "pid": 99005,
+  "sessionId": "eeeeeeeeeeeeeeee0000000000000000",
+  "cwd": "/tmp/project-daemon",
+  "startedAt": 1776700000000,
+  "updatedAt": 1776755000000,
+  "version": "2.1.116",
+  "peerProtocol": 1,
+  "kind": "daemon",
+  "entrypoint": "sdk-ts"
+}

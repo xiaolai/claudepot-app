@@ -1,0 +1,12 @@
+{
+  "pid": 99004,
+  "sessionId": "dddddddddddddddd0000000000000000",
+  "cwd": "/tmp/project-kind-bg",
+  "startedAt": 1776700000000,
+  "updatedAt": 1776755000000,
+  "version": "2.1.116",
+  "peerProtocol": 1,
+  "kind": "bg",
+  "entrypoint": "cli",
+  "name": "fixture-bg-kind"
+}

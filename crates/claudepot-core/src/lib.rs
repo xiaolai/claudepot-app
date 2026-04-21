@@ -32,6 +32,7 @@ pub mod services;
 pub mod session;
 pub mod session_chunks;
 pub mod session_classify;
+pub mod session_live;
 pub mod session_context;
 pub mod session_export;
 pub mod session_index;

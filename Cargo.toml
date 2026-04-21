@@ -76,6 +76,13 @@ dirs = "6"
 rayon = "1.10"
 num_cpus = "1.16"
 
+# Redaction (session_live::redact) — one compiled regex in a `once_cell`
+# static. No runtime pattern mutation; `regex` is Cargo-cached across the
+# workspace and already transitively pulled in by tracing-subscriber, so
+# the marginal cost is small.
+regex = "1"
+once_cell = "1"
+
 # ─── Build profiles ──────────────────────────────────────────────────────
 # Release: thin-LTO + single codegen unit. Cuts binary size and — more
 # importantly for startup — lets rustc inline across crates, which the
