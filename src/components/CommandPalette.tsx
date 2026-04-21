@@ -2,7 +2,8 @@ import { useState, useCallback, useEffect, useRef } from "react";
 import { Icon } from "./Icon";
 import { useFocusTrap } from "../hooks/useFocusTrap";
 import { usePaletteActions, type PaletteAction } from "../hooks/usePaletteActions";
-import type { AccountSummary, AppStatus } from "../types";
+import { useSessionSearch } from "../hooks/useSessionSearch";
+import type { AccountSummary, AppStatus, SearchHit } from "../types";
 
 const iconMap = {
   terminal: <Icon name="terminal" size={14} />,
@@ -58,6 +59,8 @@ export function CommandPalette({
   });
 
   const filtered = filter(query);
+  const sessionSearch = useSessionSearch(query);
+  const sessionHits: SearchHit[] = sessionSearch.hits;
   useEffect(() => { setSelectedIndex(0); }, [query]);
   useEffect(() => {
     // Query `.palette-item` specifically — `children` also contains
@@ -70,12 +73,29 @@ export function CommandPalette({
   }, [selectedIndex]);
   useEffect(() => { inputRef.current?.focus(); }, []);
 
+  const totalItems = filtered.length + sessionHits.length;
   const handleKeyDown = useCallback((e: React.KeyboardEvent) => {
-    if (e.key === "ArrowDown") { e.preventDefault(); setSelectedIndex((i) => Math.min(i + 1, filtered.length - 1)); }
+    if (e.key === "ArrowDown") { e.preventDefault(); setSelectedIndex((i) => Math.min(i + 1, totalItems - 1)); }
     else if (e.key === "ArrowUp") { e.preventDefault(); setSelectedIndex((i) => Math.max(i - 1, 0)); }
-    else if (e.key === "Enter") { e.preventDefault(); if (filtered[selectedIndex]) { filtered[selectedIndex].onSelect(); onClose(); } }
+    else if (e.key === "Enter") {
+      e.preventDefault();
+      if (selectedIndex < filtered.length) {
+        const item = filtered[selectedIndex];
+        if (item) { item.onSelect(); onClose(); }
+      } else {
+        const hit = sessionHits[selectedIndex - filtered.length];
+        if (hit) {
+          window.dispatchEvent(
+            new CustomEvent("cp-goto-session", {
+              detail: { filePath: hit.file_path },
+            }),
+          );
+          onClose();
+        }
+      }
+    }
     else if (e.key === "Escape") { e.preventDefault(); onClose(); }
-  }, [filtered, selectedIndex, onClose]);
+  }, [filtered, sessionHits, selectedIndex, totalItems, onClose]);
 
   const switchItems = filtered.filter((a) => a.category === "switch");
   const navigateItems = filtered.filter((a) => a.category === "navigate");
@@ -125,8 +145,74 @@ export function CommandPalette({
               })}
             </>
           )}
+          {query.trim().length >= 2 && (
+            <>
+              <div className="palette-group-label">
+                Sessions{" "}
+                {sessionSearch.loading && (
+                  <span style={{ color: "var(--fg-faint)" }}>…searching</span>
+                )}
+              </div>
+              {sessionHits.length === 0 && !sessionSearch.loading && (
+                <div className="palette-empty">No session matches</div>
+              )}
+              {sessionHits.map((hit, hi) => {
+                const i = filtered.length + hi;
+                return (
+                  <SessionHitItem
+                    key={hit.file_path + hi}
+                    hit={hit}
+                    selected={i === selectedIndex}
+                    onSelect={() => {
+                      window.dispatchEvent(
+                        new CustomEvent("cp-goto-session", {
+                          detail: { filePath: hit.file_path },
+                        }),
+                      );
+                      onClose();
+                    }}
+                    onHover={() => setSelectedIndex(i)}
+                  />
+                );
+              })}
+            </>
+          )}
         </div>
       </div>
     </div>
   );
+}
+
+function SessionHitItem({
+  hit,
+  selected,
+  onSelect,
+  onHover,
+}: {
+  hit: SearchHit;
+  selected: boolean;
+  onSelect: () => void;
+  onHover: () => void;
+}) {
+  return (
+    <button
+      className={`palette-item ${selected ? "selected" : ""}`}
+      role="option"
+      aria-selected={selected}
+      onClick={onSelect}
+      onMouseEnter={onHover}
+    >
+      <Icon name="folder" size={14} />
+      <span className="palette-item-label">
+        {hit.snippet}
+      </span>
+      <span className="palette-item-detail">
+        {hit.role} · {shortSessionId(hit.session_id)}
+      </span>
+    </button>
+  );
+}
+
+function shortSessionId(id: string): string {
+  return id.length >= 8 ? id.slice(0, 8) : id;
 }

@@ -520,3 +520,138 @@ export interface SessionDetail {
   row: SessionRow;
   events: SessionEvent[];
 }
+
+// ---------------------------------------------------------------------------
+// Session debugger (Tier 1-3 port)
+// ---------------------------------------------------------------------------
+
+export type MessageCategory =
+  | "user"
+  | "system"
+  | "compact"
+  | "hardNoise"
+  | "ai";
+
+export interface LinkedTool {
+  tool_use_id: string;
+  tool_name: string;
+  model: string | null;
+  call_ts: string | null;
+  input_preview: string;
+  result_ts: string | null;
+  result_content: string | null;
+  is_error: boolean;
+  duration_ms: number | null;
+  call_index: number;
+  result_index: number | null;
+}
+
+export interface ChunkMetrics {
+  duration_ms: number;
+  tokens: {
+    input: number;
+    output: number;
+    cache_creation: number;
+    cache_read: number;
+  };
+  message_count: number;
+  tool_call_count: number;
+  thinking_count: number;
+}
+
+interface BaseChunk {
+  id: number;
+  start_ts: string | null;
+  end_ts: string | null;
+  metrics: ChunkMetrics;
+}
+
+export type SessionChunk =
+  | (BaseChunk & { chunkType: "user"; event_index: number })
+  | (BaseChunk & {
+      chunkType: "ai";
+      event_indices: number[];
+      tool_executions: LinkedTool[];
+    })
+  | (BaseChunk & { chunkType: "system"; event_index: number })
+  | (BaseChunk & { chunkType: "compact"; event_index: number });
+
+export interface Subagent {
+  id: string;
+  file_path: string;
+  file_size_bytes: number;
+  start_ts: string | null;
+  end_ts: string | null;
+  metrics: ChunkMetrics;
+  parent_task_id: string | null;
+  agent_type: string | null;
+  description: string | null;
+  is_parallel: boolean;
+  events: SessionEvent[];
+}
+
+export interface ContextPhase {
+  phase_number: number;
+  start_index: number;
+  end_index: number;
+  start_ts: string | null;
+  end_ts: string | null;
+  summary: string | null;
+}
+
+export interface ContextPhaseInfo {
+  phases: ContextPhase[];
+  compaction_count: number;
+}
+
+export type ContextCategory =
+  | "claude-md"
+  | "mentioned-file"
+  | "tool-output"
+  | "thinking-text"
+  | "team-coordination"
+  | "user-message";
+
+export interface TokensByCategory {
+  claude_md: number;
+  mentioned_file: number;
+  tool_output: number;
+  thinking_text: number;
+  team_coordination: number;
+  user_message: number;
+}
+
+export interface ContextInjection {
+  event_index: number;
+  category: ContextCategory;
+  label: string;
+  tokens: number;
+  ts: string | null;
+  phase: number;
+}
+
+export interface ContextStats {
+  totals: TokensByCategory;
+  injections: ContextInjection[];
+  phases: ContextPhase[];
+  reported_total_tokens: number;
+}
+
+export interface SearchHit {
+  session_id: string;
+  slug: string;
+  file_path: string;
+  project_path: string;
+  role: "user" | "assistant";
+  snippet: string;
+  match_offset: number;
+  last_ts: string | null;
+}
+
+export interface RepositoryGroup {
+  repo_root: string | null;
+  label: string;
+  sessions: SessionRow[];
+  branches: string[];
+  worktree_paths: string[];
+}

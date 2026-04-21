@@ -544,6 +544,14 @@ pub(crate) fn scan_session(slug: &str, path: &Path) -> Result<SessionRow, Sessio
     })
 }
 
+/// Crate-visible wrapper so `session_subagents` can parse an
+/// `agent-*.jsonl` without duplicating the tolerant reader. Exposed
+/// only within the crate — external callers go through
+/// `read_session_detail_at_path`.
+pub(crate) fn parse_events_public(path: &Path) -> Result<Vec<SessionEvent>, SessionError> {
+    parse_events(path)
+}
+
 /// Full-fidelity parse. Lines we don't recognize land in `Other`;
 /// invalid JSON lands in `Malformed` with the line number so the UI
 /// can show "CC wrote a bad line on turn 42" without hiding it.

@@ -9,8 +9,12 @@ import { useGlobalShortcuts } from "../hooks/useGlobalShortcuts";
 import { useCompactHeader, useSplitView } from "../hooks/useWindowWidth";
 import { NF } from "../icons";
 import { ScreenHeader } from "../shell/ScreenHeader";
-import type { ProjectInfo, SessionRow } from "../types";
+import type { ProjectInfo, RepositoryGroup, SessionRow } from "../types";
 import { MoveSessionModal } from "./projects/MoveSessionModal";
+import {
+  RepoFilterStrip,
+  filterSessionsByRepo,
+} from "./sessions/RepoFilterStrip";
 import { SessionDetail } from "./sessions/SessionDetail";
 import {
   SessionsTable,
@@ -43,6 +47,8 @@ const SEG_OPTIONS: { id: SessionFilter; label: string }[] = [
 export function SessionsSection() {
   const [sessions, setSessions] = useState<SessionRow[]>([]);
   const [projects, setProjects] = useState<ProjectInfo[]>([]);
+  const [repoGroups, setRepoGroups] = useState<RepositoryGroup[] | null>(null);
+  const [activeRepo, setActiveRepo] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   /** The file_path of the selected row — globally unique on disk.
@@ -74,15 +80,24 @@ export function SessionsSection() {
     const myToken = ++tokenRef.current;
     setLoading(true);
     setError(null);
-    Promise.all([api.sessionListAll(), api.projectList()])
-      .then(([ss, ps]) => {
+    Promise.all([
+      api.sessionListAll(),
+      api.projectList(),
+      api.sessionWorktreeGroups().catch(() => null),
+    ])
+      .then(([ss, ps, groups]) => {
         if (!mountedRef.current || myToken !== tokenRef.current) return;
         setSessions(ss);
         setProjects(ps);
+        setRepoGroups(groups);
         setLoading(false);
         // Drop the selection if it no longer exists.
         setSelectedPath((prev) =>
           prev && ss.some((s) => s.file_path === prev) ? prev : null,
+        );
+        // Drop the active repo if the new groups don't contain it.
+        setActiveRepo((prev) =>
+          prev && groups && groups.some((g) => g.label === prev) ? prev : null,
         );
       })
       .catch((e) => {
@@ -96,16 +111,38 @@ export function SessionsSection() {
     refresh();
   }, [refresh]);
 
+  // Listen for deep-link requests from the command palette's session
+  // search. The search dispatches a `sessions-select-path` event with
+  // the `file_path`; we honor it whenever the target session is in
+  // our current list. If it's not, we kick a refresh first so a newly
+  // discovered transcript (post-index-rebuild) still resolves.
+  useEffect(() => {
+    function onSelect(ev: Event) {
+      const detail = (ev as CustomEvent<{ filePath: string }>).detail;
+      if (!detail?.filePath) return;
+      setSelectedPath(detail.filePath);
+      setActiveRepo(null); // clear repo filter so the selection is visible
+    }
+    window.addEventListener("sessions-select-path", onSelect);
+    return () => window.removeEventListener("sessions-select-path", onSelect);
+  }, []);
+
   useGlobalShortcuts({ onRefresh: refresh });
 
   const counts = useMemo(() => countSessionStatus(sessions), [sessions]);
 
   // Table-level name filter: matches on project basename, project path,
   // first prompt, session id prefix, model, or git branch. Cheap substring.
+  // Stacks on top of the repo filter so "lixiaolai.com / feature/x" is
+  // trivially reachable.
+  const scoped = useMemo(
+    () => filterSessionsByRepo(sessions, repoGroups, activeRepo),
+    [sessions, repoGroups, activeRepo],
+  );
   const filteredByQuery = useMemo(() => {
     const q = query.trim().toLowerCase();
-    if (!q) return sessions;
-    return sessions.filter((s) => {
+    if (!q) return scoped;
+    return scoped.filter((s) => {
       if (s.session_id.toLowerCase().startsWith(q)) return true;
       if (s.project_path.toLowerCase().includes(q)) return true;
       if ((s.first_user_prompt ?? "").toLowerCase().includes(q)) return true;
@@ -113,7 +150,7 @@ export function SessionsSection() {
       if ((s.git_branch ?? "").toLowerCase().includes(q)) return true;
       return false;
     });
-  }, [sessions, query]);
+  }, [scoped, query]);
 
   const handleContextMenu = useCallback(
     (e: React.MouseEvent, s: SessionRow) => {
@@ -171,6 +208,14 @@ export function SessionsSection() {
           )
         }
       />
+
+      {showTable && (
+        <RepoFilterStrip
+          groups={repoGroups}
+          activeRepo={activeRepo}
+          onChange={setActiveRepo}
+        />
+      )}
 
       {showTable && (
         <div
