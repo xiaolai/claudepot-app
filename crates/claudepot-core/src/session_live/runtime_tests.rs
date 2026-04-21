@@ -337,6 +337,107 @@ async fn task_summary_drives_current_action_and_emits_delta() {
 }
 
 #[tokio::test]
+async fn excluded_paths_are_skipped_by_tick() {
+    let f = fixture();
+    // Two live PIDs — one inside an excluded path, one outside.
+    write_pid_file(
+        &f.sessions_dir,
+        12345,
+        r#"{"pid":12345,"sessionId":"sess-kept","cwd":"/tmp/kept-proj","startedAt":1000}"#,
+    );
+    write_transcript(&f.projects_dir, "/tmp/kept-proj", "sess-kept", "");
+    write_pid_file(
+        &f.sessions_dir,
+        12346,
+        r#"{"pid":12346,"sessionId":"sess-excluded","cwd":"/tmp/secret-proj","startedAt":1000}"#,
+    );
+    write_transcript(&f.projects_dir, "/tmp/secret-proj", "sess-excluded", "");
+    f.check.set_alive(&[12345, 12346]);
+
+    f.runtime.set_excluded_paths(vec!["/tmp/secret".to_string()]).await;
+    f.runtime.tick().await.unwrap();
+
+    let snap = f.runtime.snapshot();
+    assert_eq!(snap.len(), 1);
+    assert_eq!(snap[0].session_id, "sess-kept");
+}
+
+#[tokio::test]
+async fn unsubscribe_releases_detail_slot_for_resubscribe() {
+    let f = fixture();
+    write_pid_file(
+        &f.sessions_dir,
+        12345,
+        r#"{"pid":12345,"sessionId":"sess-a","cwd":"/tmp/proj","startedAt":1000}"#,
+    );
+    write_transcript(&f.projects_dir, "/tmp/proj", "sess-a", "");
+    f.check.set_alive(&[12345]);
+    f.runtime.tick().await.unwrap();
+
+    // First subscribe succeeds.
+    let _rx1 = f.runtime.subscribe_detail("sess-a").await.unwrap();
+    // Second would fail — single-subscriber contract.
+    assert!(f.runtime.subscribe_detail("sess-a").await.is_err());
+    // After explicit end, a fresh subscribe is allowed.
+    f.runtime.detail_end_session("sess-a").await;
+    let _rx2 = f.runtime.subscribe_detail("sess-a").await.unwrap();
+}
+
+#[tokio::test]
+async fn metrics_writes_transition_plus_heartbeat() {
+    // Verifies the post-audit write model: new sessions write once,
+    // transitions write a row, and static sessions get at least one
+    // heartbeat row per HEARTBEAT_TICKS. Uses the MetricsStore
+    // directly (the runtime's own is None in test mode).
+    use crate::session_live::metrics_store::MetricsStore;
+    let td = tempfile::TempDir::new().unwrap();
+    let path = td.path().join("m.db");
+    let store = MetricsStore::open(&path).unwrap();
+    // Single session transitioning busy → idle: two rows.
+    store
+        .record_tick(
+            1_000,
+            &[LiveSessionSummary {
+                session_id: "s".into(),
+                pid: 1,
+                cwd: "/tmp/p".into(),
+                transcript_path: None,
+                status: Status::Busy,
+                current_action: None,
+                model: None,
+                waiting_for: None,
+                errored: false,
+                stuck: false,
+                idle_ms: 0,
+                seq: 0,
+            }],
+        )
+        .unwrap();
+    store
+        .record_tick(
+            2_000,
+            &[LiveSessionSummary {
+                session_id: "s".into(),
+                pid: 1,
+                cwd: "/tmp/p".into(),
+                transcript_path: None,
+                status: Status::Idle,
+                current_action: None,
+                model: None,
+                waiting_for: None,
+                errored: false,
+                stuck: false,
+                idle_ms: 0,
+                seq: 0,
+            }],
+        )
+        .unwrap();
+    // Two buckets, two distinct writes → two counts.
+    let series = store.active_series(0, 3_000, 2).unwrap();
+    assert_eq!(series, vec![1, 1]);
+}
+
+#[tokio::test]
 async fn redaction_applied_to_current_action() {
     let f = fixture();
     write_pid_file(

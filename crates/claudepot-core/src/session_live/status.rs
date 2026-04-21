@@ -60,6 +60,13 @@ pub struct StatusMachine {
     /// tool head-line in `current_action` because CC wrote it
     /// explicitly to describe what the session is doing.
     last_task_summary: Option<String>,
+    /// Transcript-derived waiting flag. CC emits a `permission-mode`
+    /// entry when a tool call is pending user approval; that entry
+    /// parses as `SessionEvent::Other` with raw_type = "permission-mode".
+    /// We latch this flag when we see one and clear it on the next
+    /// user / assistant event, so derived_status can return Waiting
+    /// when BG_SESSIONS is off and the PID file carries no status.
+    fallback_waiting: bool,
     /// What the last-observed assistant fragment looked like.
     last_assistant: LastAssistantShape,
     /// Whether we've seen any user-originated event since the last
@@ -92,6 +99,7 @@ impl StatusMachine {
             recent_errors: VecDeque::new(),
             model: None,
             last_task_summary: None,
+            fallback_waiting: false,
             last_assistant: LastAssistantShape::None,
             pending_reply: false,
             pid_status: None,
@@ -122,6 +130,7 @@ impl StatusMachine {
                 // turn-close is irrelevant now.
                 self.last_assistant = LastAssistantShape::None;
                 self.pending_reply = true;
+                self.fallback_waiting = false;
             }
             SessionEvent::UserToolResult {
                 tool_use_id,
@@ -151,6 +160,7 @@ impl StatusMachine {
                 if let Some(m) = model.clone() {
                     self.model = Some(m);
                 }
+                self.fallback_waiting = false;
                 // CC writes `stop_reason: "tool_use"` when a turn
                 // pauses for a tool call — NOT when the turn ends.
                 // Only `end_turn` and `stop_sequence` mean the
@@ -182,6 +192,7 @@ impl StatusMachine {
                 if let Some(m) = model.clone() {
                     self.model = Some(m);
                 }
+                self.fallback_waiting = false;
                 self.last_assistant = LastAssistantShape::ToolUse;
                 self.unmatched.insert(
                     tool_use_id.clone(),
@@ -209,10 +220,17 @@ impl StatusMachine {
                 // prefers it over the tool head-line.
                 self.last_task_summary = Some(summary.clone());
             }
+            SessionEvent::Other { raw_type, .. } => {
+                // `permission-mode` carries approval state for the
+                // transcript-derived fallback path. Anything else is
+                // noise for status purposes.
+                if raw_type == "permission-mode" {
+                    self.fallback_waiting = true;
+                }
+            }
             SessionEvent::Summary { .. }
             | SessionEvent::Attachment { .. }
             | SessionEvent::FileHistorySnapshot { .. }
-            | SessionEvent::Other { .. }
             | SessionEvent::Malformed { .. } => {
                 // Noise for status purposes.
             }
@@ -248,6 +266,9 @@ impl StatusMachine {
     /// Current base status derived from the event stream (PID-file
     /// override not applied — that's `snapshot`'s job).
     fn derived_status(&self) -> Status {
+        if self.fallback_waiting {
+            return Status::Waiting;
+        }
         if !self.unmatched.is_empty() {
             return Status::Busy;
         }

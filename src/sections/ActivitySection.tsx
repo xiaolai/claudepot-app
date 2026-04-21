@@ -252,7 +252,7 @@ function StatusDot({
     status === "idle"
       ? "var(--fg-faint)"
       : errored
-        ? "var(--accent-warn, orange)"
+        ? "var(--warn)"
         : "var(--accent)";
   return (
     <span

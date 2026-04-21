@@ -165,16 +165,33 @@ async fn synthetic_session_appears_and_transitions_within_1s() {
         other => panic!("expected StatusChanged, got {other:?}"),
     }
 
-    // Simulate the session ending. Expect an Ended delta and the
-    // aggregate drops to empty.
+    // Simulate the session ending. Expect an Ended delta (possibly
+    // interleaved with a late Overlay/Status transition from the
+    // prior tick) and the aggregate drops to empty.
     check.set_alive(&[]);
     runtime.tick().await.unwrap();
     assert!(runtime.snapshot().is_empty());
-    let ended = tokio::time::timeout(Duration::from_millis(500), rx.recv())
+
+    // Drain deltas until we see Ended, with a bounded timeout.
+    // Intermediate StatusChanged / OverlayChanged deltas from the
+    // second tick are fine — they just happen before the end.
+    let mut saw_ended = false;
+    for _ in 0..8 {
+        match tokio::time::timeout(
+            Duration::from_millis(200),
+            rx.recv(),
+        )
         .await
-        .expect("Ended delta should arrive")
-        .unwrap();
-    assert!(matches!(ended.kind, LiveDeltaKind::Ended));
+        {
+            Ok(Some(d)) if matches!(d.kind, LiveDeltaKind::Ended) => {
+                saw_ended = true;
+                break;
+            }
+            Ok(Some(_)) => continue,
+            Ok(None) | Err(_) => break,
+        }
+    }
+    assert!(saw_ended, "Ended delta did not arrive within window");
 }
 
 /// E2E for the task-summary path: CC writes a type:"task-summary"
