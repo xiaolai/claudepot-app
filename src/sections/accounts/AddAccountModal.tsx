@@ -129,9 +129,28 @@ export function AddAccountModal({
       onAdded(outcome.email);
       onClose();
     } catch (e) {
-      onError(e instanceof Error ? e.message : String(e));
+      // Cancelled flows produce `register failed: claude auth login was
+      // cancelled by the user` from core. Suppress the toast in that
+      // case — the user just clicked Cancel, they don't need a warning.
+      const msg = e instanceof Error ? e.message : String(e);
+      if (!/cancel/i.test(msg)) {
+        onError(msg);
+      }
     } finally {
       setBrowserLoggingIn(false);
+    }
+  };
+
+  const handleCancelBrowserLogin = async () => {
+    // Fire-and-forget: the command never errors, and the awaited
+    // `handleBrowserLogin` promise is what actually surfaces the
+    // cancellation result back to state.
+    try {
+      await api.accountLoginCancel();
+    } catch {
+      // The backend treats "nothing running" as a no-op. Anything
+      // else is the lock-poisoning corner case — not worth a toast
+      // when the user is trying to back out of the flow.
     }
   };
 
@@ -240,7 +259,10 @@ export function AddAccountModal({
 
           {/* Action 2 — Browser login. Wired through
               account_register_from_browser; the core service owns the
-              subprocess so the refresh token never enters JS. */}
+              subprocess so the refresh token never enters JS. While the
+              flow is waiting for the browser, the card disables itself
+              and a prominent Cancel appears in the footer (plus a
+              secondary Cancel inline for discoverability). */}
           <ActionCard
             glyph={NF.user}
             title="Log in with a new account…"
@@ -254,13 +276,55 @@ export function AddAccountModal({
             onClick={handleBrowserLogin}
             cta={browserLoggingIn ? "Waiting…" : "Log in"}
             ctaGlyph={browserLoggingIn ? NF.clock : NF.arrowUpR}
-          />
+          >
+            {browserLoggingIn && (
+              <div
+                style={{
+                  marginTop: "var(--sp-10)",
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "space-between",
+                  gap: "var(--sp-10)",
+                  padding: "var(--sp-8) var(--sp-10)",
+                  borderRadius: "var(--r-2)",
+                  background: "var(--bg-sunken)",
+                  border: "var(--bw-hair) solid var(--line)",
+                  fontSize: "var(--fs-xs)",
+                  color: "var(--fg-muted)",
+                }}
+                aria-live="polite"
+              >
+                <span>
+                  Finish sign-in in your browser, or stop waiting if you
+                  already cancelled there.
+                </span>
+                <Button
+                  variant="ghost"
+                  glyph={NF.x}
+                  onClick={handleCancelBrowserLogin}
+                  aria-label="Cancel browser login"
+                >
+                  Cancel login
+                </Button>
+              </div>
+            )}
+          </ActionCard>
         </ModalBody>
 
         <ModalFooter>
-          <Button variant="ghost" onClick={onClose}>
-            Close
-          </Button>
+          {browserLoggingIn ? (
+            <Button
+              variant="solid"
+              glyph={NF.x}
+              onClick={handleCancelBrowserLogin}
+            >
+              Cancel login
+            </Button>
+          ) : (
+            <Button variant="ghost" onClick={onClose}>
+              Close
+            </Button>
+          )}
         </ModalFooter>
       </div>
     </Modal>

@@ -381,17 +381,46 @@ pub async fn account_add_from_current() -> Result<RegisterOutcome, String> {
 /// config dir, wait for the user to finish, then register the fresh
 /// identity. The refresh token never crosses the IPC bridge — the
 /// blob is read directly on the Rust side.
+///
+/// Registers a cancellation `Notify` in `LoginState` so the existing
+/// `account_login_cancel` command aborts this flow too. Only one
+/// browser login (register or re-login) may run at a time; concurrent
+/// calls are rejected with a descriptive error instead of silently
+/// sharing the same temp dir.
 #[tauri::command]
-pub async fn account_register_from_browser() -> Result<RegisterOutcome, String> {
+pub async fn account_register_from_browser(
+    state: tauri::State<'_, crate::state::LoginState>,
+) -> Result<RegisterOutcome, String> {
     let store = open_store()?;
-    let result = services::account_service::register_from_browser(&store)
-        .await
-        .map_err(|e| format!("register failed: {e}"))?;
-    Ok(RegisterOutcome {
-        email: result.email,
-        org_name: result.org_name,
-        subscription_type: result.subscription_type,
-    })
+
+    let notify = std::sync::Arc::new(tokio::sync::Notify::new());
+    {
+        let mut slot = state
+            .active
+            .lock()
+            .map_err(|e| format!("login state lock poisoned: {e}"))?;
+        if slot.is_some() {
+            return Err("a login is already in progress".to_string());
+        }
+        *slot = Some(notify.clone());
+    }
+
+    let result =
+        services::account_service::register_from_browser_cancellable(&store, Some(notify)).await;
+
+    // Clear the slot regardless of outcome so the next login can run.
+    if let Ok(mut slot) = state.active.lock() {
+        slot.take();
+    }
+
+    match result {
+        Ok(r) => Ok(RegisterOutcome {
+            email: r.email,
+            org_name: r.org_name,
+            subscription_type: r.subscription_type,
+        }),
+        Err(e) => Err(format!("register failed: {e}")),
+    }
 }
 
 // Intentionally NOT exposed to the webview: a command that accepts a raw
