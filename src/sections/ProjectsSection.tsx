@@ -271,7 +271,7 @@ export function ProjectsSection({
             // Grow into available space; shrink to a sane minimum when
             // the segmented chips and "Refreshing…" share the row.
             flex: "1 1 var(--filter-input-width)",
-            minWidth: "160px",
+            minWidth: "var(--filter-input-min)",
             maxWidth: "var(--filter-input-width)",
           }}
           aria-label="Filter projects by name or path"

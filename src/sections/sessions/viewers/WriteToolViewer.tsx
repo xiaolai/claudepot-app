@@ -68,7 +68,7 @@ export function WriteToolViewer({ tool }: { tool: LinkedTool }) {
           color: "var(--fg)",
           whiteSpace: "pre-wrap",
           wordBreak: "break-word",
-          maxHeight: "400px",
+          maxHeight: "var(--viewer-max-height)",
           overflow: "auto",
         }}
       >

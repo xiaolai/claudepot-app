@@ -80,17 +80,23 @@ export function Modal({
     return () => window.removeEventListener("keydown", onKey);
   }, [open, onClose]);
 
-  // On open: remember the previously-focused element, place
-  // initial focus on the first focusable control inside the
-  // dialog. On close: restore focus to the pre-open element so
-  // keyboard users land back where they were.
+  // On open: remember the previously-focused element. If a child
+  // already claimed focus via `autoFocus` (React sets this
+  // synchronously during mount), leave it alone — the consumer
+  // explicitly picked the initial target. Otherwise, move focus
+  // to the first focusable inside the dialog so keyboard users
+  // land somewhere useful. On close: restore focus to the
+  // pre-open element.
   useEffect(() => {
     if (!open) return;
     prevFocusRef.current = document.activeElement as HTMLElement | null;
-    // Next tick so the dialog is mounted.
     queueMicrotask(() => {
       const dlg = dialogRef.current;
       if (!dlg) return;
+      // If React's autoFocus already placed focus inside the
+      // dialog, don't override it.
+      const active = document.activeElement as HTMLElement | null;
+      if (active && dlg.contains(active) && active !== dlg) return;
       const first = dlg.querySelector<HTMLElement>(
         'button:not([disabled]), [href], input:not([disabled]), ' +
           'select:not([disabled]), textarea:not([disabled]), ' +
@@ -176,17 +182,19 @@ export function ModalHeader({ glyph, title, onClose, id }: ModalHeaderProps) {
           size="var(--fs-sm)"
         />
       )}
-      <span
+      <h2
         id={id}
         className="mono-cap"
         style={{
           flex: 1,
           color: "var(--fg)",
           fontSize: "var(--fs-xs)",
+          fontWeight: 500,
+          margin: 0,
         }}
       >
         {title}
-      </span>
+      </h2>
       {onClose && (
         <IconButton
           glyph={NF.x}

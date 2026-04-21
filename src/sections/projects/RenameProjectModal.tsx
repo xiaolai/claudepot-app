@@ -1,8 +1,16 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useId, useMemo, useRef, useState } from "react";
 import { Icon } from "../../components/Icon";
 import { open as openDialog } from "@tauri-apps/plugin-dialog";
 import { api } from "../../api";
-import { useFocusTrap } from "../../hooks/useFocusTrap";
+import { Button } from "../../components/primitives/Button";
+import { IconButton } from "../../components/primitives/IconButton";
+import {
+  Modal,
+  ModalHeader,
+  ModalBody,
+  ModalFooter,
+} from "../../components/primitives/Modal";
+import { NF } from "../../icons";
 import { DRY_RUN_SUPERSEDED, type DryRunPlan, type MoveArgs } from "../../types";
 
 const DEBOUNCE_MS = 300;
@@ -49,10 +57,7 @@ export function RenameProjectModal({
   const [noMove, setNoMove] = useState(false);
   const [preview, setPreview] = useState<PreviewState>({ kind: "idle" });
 
-  const headingId = useRef(
-    `rename-heading-${Math.random().toString(36).slice(2, 9)}`,
-  );
-  const trapRef = useFocusTrap<HTMLDivElement>();
+  const headingId = useId();
 
   // Used to drop stale preview responses: every keystroke increments
   // the token; on response we check ours still matches. Cheaper than
@@ -121,17 +126,6 @@ export function RenameProjectModal({
     };
   }, []);
 
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") {
-        e.stopPropagation();
-        onClose();
-      }
-    };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [onClose]);
-
   const browseParent = async () => {
     try {
       const result = await openDialog({
@@ -157,17 +151,14 @@ export function RenameProjectModal({
     conflictNeedsPolicy;
 
   return (
-    <div className="modal-backdrop" role="presentation">
-      <div
-        ref={trapRef}
-        className="modal rename-modal"
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby={headingId.current}
-      >
-        <h2 id={headingId.current}>Rename project</h2>
-
-        <div className="modal-body">
+    <Modal open onClose={onClose} width="lg" aria-labelledby={headingId}>
+      <ModalHeader
+        title="Rename project"
+        id={headingId}
+        onClose={onClose}
+      />
+      <ModalBody>
+        <div className="rename-modal-inner">
           <label className="field-label">Current path</label>
           <div className="mono small selectable muted">{oldPath}</div>
 
@@ -178,25 +169,20 @@ export function RenameProjectModal({
             <input
               id="rename-new-path"
               type="text"
-              className="mono"
+              className="mono pm-focus"
               value={newPath}
               spellCheck={false}
               autoCapitalize="off"
               autoComplete="off"
-              // useFocusTrap picks this up via [autofocus]; the native
-              // `autoFocus` attribute on top of that caused a double
-              // focus-set on mount.
+              autoFocus
               onChange={(e) => setNewPath(e.target.value)}
             />
-            <button
-              type="button"
-              className="icon-btn"
+            <IconButton
+              glyph={NF.folder}
               title="Browse for parent folder"
               aria-label="Browse for parent folder"
               onClick={browseParent}
-            >
-              <Icon name="folder-open" size={14} />
-            </button>
+            />
           </div>
           <p className="muted small">
             Different case = case-only rename (handled via two-step on
@@ -343,26 +329,33 @@ export function RenameProjectModal({
             )}
           </div>
         </div>
-
-        <div className="modal-actions">
-          <button type="button" className="btn" onClick={onClose}>
-            Cancel
-          </button>
-          <button
-            type="button"
-            className="btn primary"
-            disabled={submitDisabled}
-            onClick={() => onSubmit(args)}
-          >
-            Rename
-          </button>
-        </div>
-        <p className="muted small submit-disclaimer">
+      </ModalBody>
+      <ModalFooter>
+        <p
+          className="muted small"
+          style={{
+            flex: 1,
+            textAlign: "left",
+            fontSize: "var(--fs-xs)",
+            color: "var(--fg-faint)",
+            margin: 0,
+          }}
+        >
           Preview is approximate. Live-session and pending-journal checks
           happen at apply time.
         </p>
-      </div>
-    </div>
+        <Button variant="ghost" onClick={onClose}>
+          Cancel
+        </Button>
+        <Button
+          variant="solid"
+          disabled={submitDisabled}
+          onClick={() => onSubmit(args)}
+        >
+          Rename
+        </Button>
+      </ModalFooter>
+    </Modal>
   );
 }
 

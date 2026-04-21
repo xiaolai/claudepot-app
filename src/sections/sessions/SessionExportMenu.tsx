@@ -95,7 +95,7 @@ export function SessionExportMenu({
             background: "var(--bg-raised)",
             border: "var(--bw-hair) solid var(--line)",
             borderRadius: "var(--r-2)",
-            boxShadow: "var(--shadow-popover, 0 4px 12px rgba(0,0,0,0.15))",
+            boxShadow: "var(--shadow-popover)",
             padding: "var(--sp-4) 0",
             fontSize: "var(--fs-sm)",
           }}

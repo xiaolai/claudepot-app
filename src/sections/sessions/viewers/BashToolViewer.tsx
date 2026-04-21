@@ -163,7 +163,7 @@ function Block({
           color: tone === "warn" ? "var(--warn)" : "var(--fg)",
           whiteSpace: "pre-wrap",
           wordBreak: "break-word",
-          maxHeight: "300px",
+          maxHeight: "var(--viewer-max-height-sm)",
           overflow: "auto",
         }}
       >
