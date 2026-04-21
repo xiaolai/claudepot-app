@@ -82,10 +82,15 @@ export function SidebarTargetSwitcher({
           cursor: "pointer",
         }}
       >
+        {/* Lead glyph was --fs-xl (22px) in the Nerd Font era; an
+            NF glyph renders at ~65% of its font-size so that was
+            visually ~14px. Lucide SVGs fill the full box, so the
+            same token-value reads 50% larger. --fs-md matches the
+            prior visual weight against the 10/11px label stack. */}
         <Glyph
           g={target.glyph}
           color="var(--fg-muted)"
-          style={{ fontSize: "var(--fs-xl)" }}
+          style={{ fontSize: "var(--fs-md)" }}
         />
         <div
           style={{
