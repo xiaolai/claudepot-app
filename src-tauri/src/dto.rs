@@ -7,7 +7,7 @@ use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use std::time::{SystemTime, UNIX_EPOCH};
 
-#[derive(Serialize)]
+#[derive(Serialize, Clone)]
 pub struct AccountSummary {
     pub uuid: String,
     pub email: String,
@@ -123,6 +123,9 @@ pub struct UsageWindowDto {
 #[derive(Serialize, Clone)]
 pub struct ExtraUsageDto {
     pub is_enabled: bool,
+    /// Monthly cap and spend are returned in MINOR currency units
+    /// (e.g. pence for GBP, cents for USD). Frontend divides by 100
+    /// before rendering.
     pub monthly_limit: Option<f64>,
     pub used_credits: Option<f64>,
     /// Server-computed utilization percent (0–100). Preferred over a
@@ -130,6 +133,9 @@ pub struct ExtraUsageDto {
     /// about rollover, prorated credits, and grace adjustments the
     /// bare ratio misses.
     pub utilization: Option<f64>,
+    /// ISO 4217 currency code ("USD", "GBP", …). None on older
+    /// responses; frontend falls back to USD.
+    pub currency: Option<String>,
 }
 
 /// Per-account usage data. `None` fields mean the window is not active
@@ -170,6 +176,7 @@ impl AccountUsageDto {
                 monthly_limit: e.monthly_limit,
                 used_credits: e.used_credits,
                 utilization: e.utilization,
+                currency: e.currency.clone(),
             }),
         }
     }

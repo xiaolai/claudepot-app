@@ -485,6 +485,18 @@ impl UsageCache {
             .unwrap_or(0)
     }
 
+    /// Return the cached usage response for `uuid` without triggering
+    /// a fetch. Intended for readers that must complete in the system
+    /// tray rebuild (a sub-second budget) without blocking on the
+    /// network; callers accept stale data or None when nothing has been
+    /// fetched yet. No TTL enforcement — `CACHE_TTL` only governs
+    /// fetch-time refresh decisions, and a stale peek is strictly
+    /// better than no data on the tray.
+    pub async fn peek_cached(&self, uuid: Uuid) -> Option<UsageResponse> {
+        let results = self.results.lock().await;
+        results.get(&uuid).map(|c| c.response.clone())
+    }
+
     /// Evict cached result, cooldown, and inflight entry for a UUID.
     ///
     /// Call after credential changes (remove, reimport, login).

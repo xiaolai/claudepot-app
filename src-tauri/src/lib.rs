@@ -95,14 +95,25 @@ pub fn run() {
                 })
                 .build(app)?;
 
-            // Build initial tray menu from current accounts
+            // Build initial tray menu from current accounts. Rebuild
+            // is async (it peeks the UsageCache for the new Usage
+            // submenu); spawn so setup returns immediately.
             let handle = app.handle().clone();
-            let _ = tray::rebuild(&handle);
+            tauri::async_runtime::spawn(async move {
+                if let Err(e) = tray::rebuild(&handle).await {
+                    tracing::warn!("initial tray rebuild failed: {e}");
+                }
+            });
 
             // Listen for frontend requests to rebuild the tray menu
             let handle2 = app.handle().clone();
             app.listen("rebuild-tray-menu", move |_| {
-                let _ = tray::rebuild(&handle2);
+                let handle = handle2.clone();
+                tauri::async_runtime::spawn(async move {
+                    if let Err(e) = tray::rebuild(&handle).await {
+                        tracing::warn!("rebuild-tray-menu failed: {e}");
+                    }
+                });
             });
 
             Ok(())

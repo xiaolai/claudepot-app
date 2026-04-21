@@ -12,6 +12,8 @@
 //! in-app refresh.
 
 use crate::dto::AccountSummary;
+use claudepot_core::oauth::usage::UsageResponse;
+use claudepot_core::services::usage_cache::UsageCache;
 use tauri::image::Image;
 use tauri::menu::{
     IconMenuItemBuilder, MenuBuilder, MenuItemBuilder, PredefinedMenuItem, SubmenuBuilder,
@@ -33,6 +35,7 @@ const ICON_HOME: &[u8] = include_bytes!("../icons/menu/home.png");
 const ICON_SLIDERS: &[u8] = include_bytes!("../icons/menu/sliders.png");
 const ICON_CHECK: &[u8] = include_bytes!("../icons/menu/check.png");
 const ICON_POWER: &[u8] = include_bytes!("../icons/menu/power.png");
+const ICON_BAR_CHART: &[u8] = include_bytes!("../icons/menu/bar-chart.png");
 
 /// Build an icon menu item from pre-rendered PNG bytes.
 fn icon_item(
@@ -54,17 +57,50 @@ const ID_QUIT: &str = "tray:quit";
 const ID_ADD: &str = "tray:add-account";
 const ID_SYNC: &str = "tray:sync-cc";
 const ID_ACTIVE_DISPLAY: &str = "tray:active-display";
+const ID_USAGE_REFRESH: &str = "tray:usage:refresh";
 const PREFIX_CLI: &str = "tray:cli-switch:";
 const PREFIX_DESKTOP: &str = "tray:desktop-switch:";
 
 /// Build and set the tray menu from the current account state.
-pub fn rebuild(app: &AppHandle) -> Result<(), String> {
+///
+/// Async because the Usage submenu peeks the UsageCache (tokio Mutex).
+/// The peek is sub-millisecond when uncontended and never blocks on
+/// network — the submenu only renders cached snapshots, never forces a
+/// refetch. Callers from sync contexts (setup hook, event listener)
+/// should wrap in `tauri::async_runtime::spawn`.
+pub async fn rebuild(app: &AppHandle) -> Result<(), String> {
     let store = crate::commands::open_store()?;
     let accounts = store.list().map_err(|e| format!("list: {e}"))?;
     let summaries: Vec<AccountSummary> = accounts.iter().map(AccountSummary::from).collect();
 
     let cli_active = summaries.iter().find(|a| a.is_cli_active);
     let desktop_active = summaries.iter().find(|a| a.is_desktop_active);
+
+    // Peek usage cache for every account with credentials. Unmanaged
+    // state is possible during test harness use; fall through with an
+    // empty map in that case so the tray still builds.
+    let usage_snapshots: Vec<(AccountSummary, Option<UsageResponse>)> =
+        if let Some(cache) = app.try_state::<UsageCache>() {
+            let mut pairs = Vec::with_capacity(summaries.len());
+            for s in &summaries {
+                let snapshot = if s.credentials_healthy {
+                    // Summary carries uuid as a String for JS; parse
+                    // back to Uuid for the cache key. A malformed
+                    // string here would mean an upstream bug, so fall
+                    // through to None rather than panic.
+                    match uuid::Uuid::parse_str(&s.uuid) {
+                        Ok(id) => cache.peek_cached(id).await,
+                        Err(_) => None,
+                    }
+                } else {
+                    None
+                };
+                pairs.push((s.clone(), snapshot));
+            }
+            pairs
+        } else {
+            summaries.iter().cloned().map(|s| (s, None)).collect()
+        };
 
     // 1. Active-account row (display-only — disabled). Uses
     // IconMenuItem with a check glyph instead of CheckMenuItem so
@@ -100,6 +136,12 @@ pub fn rebuild(app: &AppHandle) -> Result<(), String> {
 
     // 3. Set Desktop submenu.
     let desktop_submenu = build_desktop_submenu(app, &summaries)?;
+
+    // 3b. Usage report submenu — cached snapshot of 5h / 7d / extras per
+    //     account. "Briefly" per the feature request: one line per
+    //     account, no chrome. Always reflects whatever was last cached;
+    //     a "Refresh" footer triggers a fresh fetch + tray rebuild.
+    let usage_submenu = build_usage_submenu(app, &usage_snapshots)?;
 
     // 4. Standalone items. macOS gets IconMenuItem + a pre-rendered
     // Nerd Font PNG so the whole tray carries the same paper-mono
@@ -138,6 +180,7 @@ pub fn rebuild(app: &AppHandle) -> Result<(), String> {
         .item(&active_item)
         .item(&cli_submenu)
         .item(&desktop_submenu)
+        .item(&usage_submenu)
         .item(&sep1)
         .item(&add_item)
         .item(&sync_item)
@@ -233,6 +276,102 @@ fn build_desktop_submenu(
         .map_err(|e| format!("desktop submenu: {e}"))
 }
 
+/// One submenu row per account with credentials:
+///   - Label: `email — 5h N% · 7d N% · Extra NN%/off`
+///   - Disabled (display-only): clicking opens nothing, the value IS
+///     the content. Entries without a cached snapshot render with a
+///     "no data yet" suffix so the row doesn't lie.
+///
+/// Footer: a single "Refresh" item that triggers a fresh batch fetch
+/// and rebuild, so users can top up the numbers without opening the
+/// main window.
+fn build_usage_submenu(
+    app: &AppHandle,
+    snapshots: &[(AccountSummary, Option<UsageResponse>)],
+) -> Result<tauri::menu::Submenu<tauri::Wry>, String> {
+    let mut builder = SubmenuBuilder::new(app, "Usage");
+    if let Ok(img) = Image::from_bytes(ICON_BAR_CHART) {
+        builder = builder.submenu_icon(img);
+    }
+
+    let mut any = false;
+    for (s, snap) in snapshots {
+        if !s.credentials_healthy {
+            // Accounts without creds can't have usage; skip rather
+            // than render a dead row. The active-account line above
+            // already surfaces the "re-auth needed" signal.
+            continue;
+        }
+        any = true;
+        let label = format_usage_line(&s.email, snap.as_ref());
+        let item = MenuItemBuilder::with_id(format!("tray:usage:row:{}", s.uuid), label)
+            .enabled(false) // display-only; the line IS the information
+            .build(app)
+            .map_err(|e| format!("usage item: {e}"))?;
+        builder = builder.item(&item);
+    }
+
+    if !any {
+        let empty = MenuItemBuilder::with_id("tray:usage:empty", "No accounts with credentials")
+            .enabled(false)
+            .build(app)
+            .map_err(|e| format!("usage empty: {e}"))?;
+        builder = builder.item(&empty);
+    } else {
+        let sep =
+            PredefinedMenuItem::separator(app).map_err(|e| format!("usage sep: {e}"))?;
+        builder = builder.item(&sep);
+        let refresh_img =
+            Image::from_bytes(ICON_REFRESH).map_err(|e| format!("usage refresh icon: {e}"))?;
+        let refresh_item = IconMenuItemBuilder::with_id(ID_USAGE_REFRESH, "Refresh")
+            .icon(refresh_img)
+            .build(app)
+            .map_err(|e| format!("usage refresh: {e}"))?;
+        builder = builder.item(&refresh_item);
+    }
+
+    builder.build().map_err(|e| format!("usage submenu: {e}"))
+}
+
+/// Compact one-liner for a tray row. `5h 77% · 7d 33% · Extra 100%`.
+/// Only non-null windows contribute; extras appears only when enabled.
+/// Returns a "(no data)" sentinel when the snapshot is None so the row
+/// doesn't pretend to have information.
+fn format_usage_line(email: &str, snap: Option<&UsageResponse>) -> String {
+    let Some(u) = snap else {
+        return format!("{email} — (no data — click Refresh)");
+    };
+    let mut parts: Vec<String> = Vec::new();
+    if let Some(w) = u.five_hour.as_ref() {
+        parts.push(format!("5h {}%", w.utilization.round() as i64));
+    }
+    if let Some(w) = u.seven_day.as_ref() {
+        parts.push(format!("7d {}%", w.utilization.round() as i64));
+    }
+    if let Some(extra) = u.extra_usage.as_ref() {
+        if extra.is_enabled {
+            let pct = extra
+                .utilization
+                .or_else(|| match (extra.used_credits, extra.monthly_limit) {
+                    (Some(used), Some(limit)) if limit > 0.0 => Some((used / limit) * 100.0),
+                    _ => None,
+                })
+                .map(|p| p.round() as i64);
+            match pct {
+                Some(p) => parts.push(format!("Extra {p}%")),
+                None => parts.push("Extra on".to_string()),
+            }
+        } else {
+            parts.push("Extra off".to_string());
+        }
+    }
+    if parts.is_empty() {
+        format!("{email} — (no windows reported)")
+    } else {
+        format!("{email} — {}", parts.join(" · "))
+    }
+}
+
 fn build_tooltip(
     cli_active: Option<&AccountSummary>,
     desktop_active: Option<&AccountSummary>,
@@ -271,9 +410,57 @@ pub fn handle_menu_event(app: &AppHandle, id: &str) {
         if let Err(e) = app.emit("app-menu", "app-menu:account:sync-cc") {
             tracing::warn!("emit sync-cc failed: {e}");
         }
+    } else if id == ID_USAGE_REFRESH {
+        handle_usage_refresh(app);
     } else if id == ID_QUIT {
         app.exit(0);
     }
+}
+
+/// Force-fetch usage for every credential-bearing account and rebuild
+/// the tray with the fresh snapshot. The tray itself blocks only on
+/// the peek; the fetch runs off the UI thread and rebuilds on
+/// completion. Notifies the main window so its usage cards stay in
+/// sync with the tray view.
+fn handle_usage_refresh(app: &AppHandle) {
+    let app = app.clone();
+    tauri::async_runtime::spawn(async move {
+        let Some(cache) = app.try_state::<UsageCache>() else {
+            tracing::warn!("tray usage refresh: UsageCache not managed");
+            return;
+        };
+        let store = match crate::commands::open_store() {
+            Ok(s) => s,
+            Err(e) => {
+                tracing::warn!("tray usage refresh: open_store failed: {e}");
+                return;
+            }
+        };
+        let accounts = match store.list() {
+            Ok(a) => a,
+            Err(e) => {
+                tracing::warn!("tray usage refresh: list failed: {e}");
+                return;
+            }
+        };
+        let uuids: Vec<uuid::Uuid> = accounts
+            .iter()
+            .filter(|a| a.has_cli_credentials)
+            .map(|a| a.uuid)
+            .collect();
+        // Invalidate first so the batch actually refetches instead of
+        // replaying a stale cached response.
+        for id in &uuids {
+            cache.invalidate(*id).await;
+        }
+        let _ = cache.fetch_batch_detailed_verified(&store, &uuids).await;
+        if let Err(e) = rebuild(&app).await {
+            tracing::warn!("tray rebuild after usage refresh failed: {e}");
+        }
+        // Let the webview know so its cards re-query /oauth/usage and
+        // pick up the same fresh values from the cache.
+        let _ = app.emit("tray-usage-refreshed", ());
+    });
 }
 
 fn handle_cli_switch(app: &AppHandle, uuid_str: &str) {
@@ -288,7 +475,7 @@ fn handle_cli_switch(app: &AppHandle, uuid_str: &str) {
     tauri::async_runtime::spawn(async move {
         match crate::commands::cli_use(email, None).await {
             Ok(()) => {
-                if let Err(e) = rebuild(&app) {
+                if let Err(e) = rebuild(&app).await {
                     tracing::warn!("tray rebuild after cli switch failed: {e}");
                 }
                 let _ = app.emit("tray-cli-switched", ());
@@ -315,7 +502,7 @@ fn handle_desktop_switch(app: &AppHandle, uuid_str: &str) {
         // forcing Claude Desktop to relaunch from the tray.
         match crate::commands::desktop_use(email, true).await {
             Ok(()) => {
-                if let Err(e) = rebuild(&app) {
+                if let Err(e) = rebuild(&app).await {
                     tracing::warn!("tray rebuild after desktop switch failed: {e}");
                 }
                 let _ = app.emit("tray-desktop-switched", ());

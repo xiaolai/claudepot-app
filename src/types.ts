@@ -72,10 +72,16 @@ export interface UsageWindow {
 
 export interface ExtraUsage {
   is_enabled: boolean;
+  /** Monthly cap in minor currency units (pence for GBP, cents for
+   *  USD). Divide by 100 for display. */
   monthly_limit: number | null;
+  /** Period spend in minor units (same basis as `monthly_limit`). */
   used_credits: number | null;
   /** Server-computed utilization percent — prefer over used/limit ratio. */
   utilization: number | null;
+  /** ISO 4217 currency code ("USD", "GBP", …). Null on older
+   *  responses; renderer falls back to USD. */
+  currency: string | null;
 }
 
 export interface AccountUsage {
