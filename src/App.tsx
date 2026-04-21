@@ -248,6 +248,31 @@ function AppShell() {
     return () => window.removeEventListener("cp-goto-session", onGoto);
   }, [setSection]);
 
+  // ⌘⇧L — focus the first SidebarLiveStrip row. Light-weight
+  // fallback until the Activity section lands (M4) and claims this
+  // shortcut. Ignores editable focus so typing "L" in the command
+  // palette isn't hijacked.
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      const mod = e.metaKey || e.ctrlKey;
+      if (!mod || !e.shiftKey || e.altKey) return;
+      if (e.key !== "l" && e.key !== "L") return;
+      const el = document.activeElement as HTMLElement | null;
+      const tag = el?.tagName?.toLowerCase();
+      if (tag === "input" || tag === "textarea" || el?.isContentEditable) {
+        return;
+      }
+      e.preventDefault();
+      // The strip renders with role=listbox; focus the first option.
+      const firstRow = document.querySelector<HTMLButtonElement>(
+        '[aria-label="Live Claude sessions"] [role="option"]',
+      );
+      firstRow?.focus();
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, []);
+
   const onRepairSubview =
     section === "projects" &&
     (subRoute === "repair" || subRoute === "maintenance");
@@ -398,6 +423,7 @@ function AppShell() {
           }}
           version="v0.4.2"
           synced
+          data-sidebar-root
           onOpenLiveSession={(s) => {
             // M1: strip rows deep-link to the static Sessions
             // browser via the existing cp-goto-session bus. The
