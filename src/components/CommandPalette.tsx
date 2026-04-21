@@ -75,10 +75,15 @@ export function CommandPalette({
 
   const totalItems = filtered.length + sessionHits.length;
   const handleKeyDown = useCallback((e: React.KeyboardEvent) => {
-    if (e.key === "ArrowDown") { e.preventDefault(); setSelectedIndex((i) => Math.min(i + 1, totalItems - 1)); }
+    if (e.key === "ArrowDown") {
+      e.preventDefault();
+      if (totalItems === 0) return;
+      setSelectedIndex((i) => Math.min(i + 1, totalItems - 1));
+    }
     else if (e.key === "ArrowUp") { e.preventDefault(); setSelectedIndex((i) => Math.max(i - 1, 0)); }
     else if (e.key === "Enter") {
       e.preventDefault();
+      if (totalItems === 0) return;
       if (selectedIndex < filtered.length) {
         const item = filtered[selectedIndex];
         if (item) { item.onSelect(); onClose(); }

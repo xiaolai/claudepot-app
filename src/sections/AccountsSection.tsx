@@ -26,8 +26,15 @@ import { useAccountHandlers } from "./accounts/useAccountHandlers";
  */
 export function AccountsSection({
   onNavigate,
+  pendingOpenPalette = false,
+  onPaletteOpened,
 }: {
   onNavigate?: (section: string, subRoute?: string | null) => void;
+  /** Shell-raised flag — when true, open the palette on next render
+   *  and call `onPaletteOpened` to clear it. Lets ⌘K fire from any
+   *  section, not just Accounts. */
+  pendingOpenPalette?: boolean;
+  onPaletteOpened?: () => void;
 }) {
   const {
     pushToast,
@@ -79,10 +86,11 @@ export function AccountsSection({
       if (mod && e.shiftKey && e.key === "c") {
         e.preventDefault();
         const target = shown[0];
-        if (target) {
-          navigator.clipboard.writeText(target.email);
-          pushToast("info", `Copied ${target.email}`);
-        }
+        if (!target) return;
+        void navigator.clipboard
+          .writeText(target.email)
+          .then(() => pushToast("info", `Copied ${target.email}`))
+          .catch((err) => pushToast("error", `Copy failed: ${err}`));
       }
     };
     window.addEventListener("keydown", onKey);
@@ -100,14 +108,17 @@ export function AccountsSection({
     onPalette: () => setShowPalette(true),
   });
 
-  // Command palette bridge — WindowChrome dispatches this event when
-  // the ⌘K hint is clicked. App.tsx can't open the palette directly
-  // because the palette component currently lives inside this section.
+  // Command palette bridge — AppShell raises `pendingOpenPalette`
+  // when ⌘K fires from any section. We open the palette on the next
+  // render and drain the flag. The palette component lives here
+  // because it owns the account-level actions; keeping it section-
+  // local avoids lifting all the swap/add/remove plumbing to App.
   useEffect(() => {
-    const onOpen = () => setShowPalette(true);
-    window.addEventListener("cp-open-palette", onOpen);
-    return () => window.removeEventListener("cp-open-palette", onOpen);
-  }, []);
+    if (pendingOpenPalette) {
+      setShowPalette(true);
+      onPaletteOpened?.();
+    }
+  }, [pendingOpenPalette, onPaletteOpened]);
 
   // Add-account bridge — the macOS app menu and the tray menu both
   // dispatch this to open the AddAccountModal from outside the section.

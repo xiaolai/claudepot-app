@@ -639,8 +639,10 @@ function DiagnosticsPane({
         ? [`CC verified at:    ${ccIdentity.verified_at}`]
         : []),
     ];
-    navigator.clipboard.writeText(lines.join("\n"));
-    pushToast("info", "Diagnostics copied.");
+    void navigator.clipboard
+      .writeText(lines.join("\n"))
+      .then(() => pushToast("info", "Diagnostics copied."))
+      .catch((err) => pushToast("error", `Copy failed: ${err}`));
   }, [appStatus, ccIdentity, pushToast]);
 
   return (
@@ -735,9 +737,14 @@ function ActivityPane({
         setNotifySpendUsd(p.notify_on_spend_usd);
         setLoaded(true);
       })
-      .catch((e) =>
-        pushToast("error", `Preferences load failed: ${e}`),
-      );
+      .catch((e) => {
+        if (cancelled) return;
+        pushToast("error", `Preferences load failed: ${e}`);
+        // Flip loaded anyway — otherwise the pane is stuck on
+        // "Loading…" forever after one backend hiccup. Toggles stay
+        // at their safe defaults (all off) until the user interacts.
+        setLoaded(true);
+      });
     return () => {
       cancelled = true;
     };

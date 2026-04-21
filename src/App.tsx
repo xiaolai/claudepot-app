@@ -55,6 +55,7 @@ function preloadSavedSection(): void {
     else if (id === "sessions") void importSessions();
     else if (id === "keys") void importKeys();
     else if (id === "settings") void importSettings();
+    else if (id === "activity") void importActivity();
   } catch {
     // localStorage unavailable — nothing to preload.
   }
@@ -90,6 +91,16 @@ function AppShell() {
   const [pendingSessionPath, setPendingSessionPath] = useState<string | null>(
     null,
   );
+  /**
+   * Pending flag that opens the command palette as soon as the
+   * Accounts section is mounted. WindowChrome's ⌘K hint is global,
+   * but the palette component currently lives inside AccountsSection
+   * because it owns the account-level actions. This flag lets the
+   * shell navigate to Accounts first, then AccountsSection drains
+   * the flag and opens the palette. Without this, ⌘K was a silent
+   * no-op on every non-Accounts section.
+   */
+  const [pendingOpenPalette, setPendingOpenPalette] = useState(false);
 
   // Live Activity consent. On cold launch we ask the backend once
   // whether the consent modal still needs to fire. `true` = modal
@@ -424,11 +435,13 @@ function AppShell() {
   );
 
   const openPalette = useCallback(() => {
-    // The command palette currently lives inside AccountsSection (it
-    // owns the account-level actions). As a minimal bridge, dispatch
-    // a window event that AccountsSection already listens for.
-    window.dispatchEvent(new CustomEvent("cp-open-palette"));
-  }, []);
+    // Navigate to Accounts (if not already there) and raise the flag
+    // — AccountsSection opens the palette when it next mounts or
+    // re-renders and clears the flag. Without the navigation step,
+    // ⌘K was a silent no-op on every other section.
+    setSection("accounts");
+    setPendingOpenPalette(true);
+  }, [setSection]);
 
   const openLiveSession = useCallback(
     (s: LiveSessionSummary) => {
@@ -516,7 +529,11 @@ function AppShell() {
           >
             <Suspense fallback={null}>
               {section === "accounts" && (
-                <AccountsSection onNavigate={setSection} />
+                <AccountsSection
+                  onNavigate={setSection}
+                  pendingOpenPalette={pendingOpenPalette}
+                  onPaletteOpened={() => setPendingOpenPalette(false)}
+                />
               )}
               {section === "projects" && (
                 <ProjectsSection
@@ -556,7 +573,6 @@ function AppShell() {
 
       <AppStatusBar
         stats={{
-          branch: "main",
           projects: null,
           sessions: null,
         }}

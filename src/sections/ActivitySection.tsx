@@ -5,16 +5,12 @@ import { useSessionLive } from "../hooks/useSessionLive";
 import type { ActivityTrends, LiveSessionSummary } from "../types";
 
 /**
- * Activity section — `⌘5`. M4 ships the "Now" view only: a list of
- * currently-live sessions plus live aggregates (token burn, model
- * mix, spend-per-hour).
+ * Activity section — `⌘5`. Two views: "Now" lists currently-live
+ * sessions with live aggregates (token burn, model mix); "Trends"
+ * shows 24h / 7d / 30d rollups from the metrics store.
  *
- * The "Trends" view (24h / 7d / 30d) lands later — it needs a
- * durable metrics store (`sessions.db` columns or a new time-series
- * file) that's out of scope for this push.
- *
- * Paper-mono: one primary concept per card, hairline borders, semantic
- * tokens only, no charts until we have real data to plot.
+ * Paper-mono: one primary concept per card, hairline borders,
+ * semantic tokens only.
  */
 type Mode = "now" | "trends";
 
@@ -231,13 +227,13 @@ function SessionCard({
       className={interactive ? "pm-focus" : undefined}
       style={{
         display: "grid",
-        gridTemplateColumns: "8px 1fr auto",
+        gridTemplateColumns: "var(--sp-8) 1fr auto",
         alignItems: "center",
         columnGap: "var(--sp-12)",
         padding: "var(--sp-12) var(--sp-16)",
         border: "var(--bw-hair) solid var(--line)",
         borderLeft: alerting
-          ? "2px solid var(--warn)"
+          ? "var(--bw-strong) solid var(--warn)"
           : "var(--bw-hair) solid var(--line)",
         borderRadius: "var(--r-2)",
         background: "var(--bg)",
@@ -340,7 +336,7 @@ function StatusDot({
         height: "var(--sp-8)",
         borderRadius: "50%",
         background: palette[status],
-        border: `1.5px solid ${ring}`,
+        border: `var(--bw-kbd) solid ${ring}`,
       }}
     />
   );
@@ -502,7 +498,7 @@ function TrendsPane() {
                 aria-selected={current}
                 onClick={() => setWindow(w)}
                 style={{
-                  padding: "2px var(--sp-8)",
+                  padding: "var(--sp-2) var(--sp-8)",
                   fontSize: "var(--fs-2xs)",
                   color: current ? "var(--fg)" : "var(--fg-muted)",
                   background: current ? "var(--bg-raised)" : "transparent",
@@ -583,11 +579,13 @@ function TrendsCards({ trends }: { trends: ActivityTrends }) {
           gap: "var(--sp-10)",
         }}
       >
-        <StatCard
-          label="Error ticks"
-          value={String(trends.error_count)}
-          sub="ticks where the errored overlay was on"
-        />
+        {trends.error_count > 0 && (
+          <StatCard
+            label="Error ticks"
+            value={String(trends.error_count)}
+            sub="ticks where the errored overlay was on"
+          />
+        )}
         <StatCard
           label="Window"
           value={formatRange(trends.from_ms, trends.to_ms)}
