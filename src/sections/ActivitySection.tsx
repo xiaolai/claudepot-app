@@ -60,7 +60,7 @@ export function ActivitySection() {
             <EmptyState />
           ) : (
             <>
-              <LiveSessionCards sessions={live} />
+              <LiveSessionCards sessions={sortSessions(live)} />
               <AggregateStats sessions={live} />
             </>
           )
@@ -623,6 +623,31 @@ function Heading({ children }: { children: string }) {
 }
 
 // ── Pure helpers (exported for unit tests) ─────────────────────────
+
+/** Priority tier for live-session sorting.
+ *  0 = alerting (errored/stuck) — needs attention now
+ *  1 = busy — actively working
+ *  2 = waiting — paused for user input
+ *  3 = idle — parked */
+function sessionTier(s: LiveSessionSummary): number {
+  if (s.errored || s.stuck) return 0;
+  if (s.status === "busy") return 1;
+  if (s.status === "waiting") return 2;
+  return 3;
+}
+
+/** Sort live sessions: alerting → busy → waiting → idle.
+ *  Within each tier, ascending idle_ms so the most recently
+ *  active session floats to the top. Pure — returns a new array. */
+export function sortSessions(
+  sessions: LiveSessionSummary[],
+): LiveSessionSummary[] {
+  return [...sessions].sort((a, b) => {
+    const dt = sessionTier(a) - sessionTier(b);
+    if (dt !== 0) return dt;
+    return a.idle_ms - b.idle_ms;
+  });
+}
 
 export function projectLabel(cwd: string): string {
   const trimmed = cwd.replace(/\/+$/, "");
