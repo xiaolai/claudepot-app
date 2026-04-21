@@ -40,6 +40,7 @@ export function SidebarItem({
       onMouseEnter={() => setHover(true)}
       onMouseLeave={() => setHover(false)}
       aria-current={active ? "page" : undefined}
+      className="pm-focus"
       style={{
         width: "100%",
         display: "flex",

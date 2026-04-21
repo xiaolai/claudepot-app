@@ -69,6 +69,7 @@ export function IconButton({
       onMouseDown={onMouseDown}
       onMouseEnter={() => setHover(true)}
       onMouseLeave={() => setHover(false)}
+      className="pm-focus"
       {...aria}
       style={{
         width: dim,
