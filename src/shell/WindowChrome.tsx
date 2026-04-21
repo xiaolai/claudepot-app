@@ -133,10 +133,12 @@ export function WindowChrome({
         aria-label={
           theme === "dark" ? "Switch to light mode" : "Switch to dark mode"
         }
-        // Glyph scales off the button's own font-size (1.2em default),
-        // so bumping fontSize here enlarges the icon without growing
-        // the clickable square.
-        style={{ fontSize: "var(--fs-xl)" }}
+        // Glyph scales off the button's own font-size. --fs-xl (22px)
+        // was correct in the Nerd Font era — NF glyphs rendered at
+        // ~65% of font-size, so that read as ~14px inside the 28px
+        // square. Lucide SVGs fill the full box, so --fs-md (14px)
+        // restores the prior half-of-button proportion.
+        style={{ fontSize: "var(--fs-md)" }}
       />
     </div>
   );

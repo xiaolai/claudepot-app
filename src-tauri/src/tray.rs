@@ -36,6 +36,7 @@ const ICON_SLIDERS: &[u8] = include_bytes!("../icons/menu/sliders.png");
 const ICON_CHECK: &[u8] = include_bytes!("../icons/menu/check.png");
 const ICON_POWER: &[u8] = include_bytes!("../icons/menu/power.png");
 const ICON_BAR_CHART: &[u8] = include_bytes!("../icons/menu/bar-chart.png");
+const ICON_BOLT: &[u8] = include_bytes!("../icons/menu/bolt.png");
 
 /// Build an icon menu item from pre-rendered PNG bytes.
 fn icon_item(
@@ -365,6 +366,9 @@ fn build_live_submenu(
     }
     let label = format!("Active: {}", list.len());
     let mut builder = SubmenuBuilder::new(app, &label);
+    if let Ok(img) = Image::from_bytes(ICON_BOLT) {
+        builder = builder.submenu_icon(img);
+    }
     for s in list.iter() {
         let action = s
             .current_action
