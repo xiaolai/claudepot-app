@@ -210,7 +210,7 @@ function SessionCard({ summary }: { summary: LiveSessionSummary }) {
           style={{
             fontSize: "var(--fs-xs)",
             color: "var(--fg-muted)",
-            marginTop: "2px",
+            marginTop: "var(--sp-2)",
           }}
         >
           {describeAction(summary)}
@@ -221,7 +221,7 @@ function SessionCard({ summary }: { summary: LiveSessionSummary }) {
           display: "flex",
           flexDirection: "column",
           alignItems: "flex-end",
-          gap: "2px",
+          gap: "var(--sp-2)",
           fontSize: "var(--fs-xs)",
           color: "var(--fg-muted)",
           fontVariantNumeric: "tabular-nums",
@@ -259,8 +259,8 @@ function StatusDot({
       aria-hidden
       style={{
         display: "inline-block",
-        width: "8px",
-        height: "8px",
+        width: "var(--sp-8)",
+        height: "var(--sp-8)",
         borderRadius: "50%",
         background: palette[status],
         border: `1.5px solid ${ring}`,
@@ -286,7 +286,7 @@ function AggregateStats({ sessions }: { sessions: LiveSessionSummary[] }) {
         <StatCard
           label="Live sessions"
           value={String(sessions.length)}
-          sub={`${countByStatus(sessions, "busy")} busy · ${countByStatus(sessions, "waiting")} waiting · ${countByStatus(sessions, "idle")} idle`}
+          sub={statusBreakdown(sessions)}
         />
         <StatCard
           label="Model mix"
@@ -326,7 +326,7 @@ function StatCard({
         background: "var(--bg)",
         display: "flex",
         flexDirection: "column",
-        gap: "2px",
+        gap: "var(--sp-2)",
       }}
     >
       <span
@@ -548,7 +548,7 @@ function Sparkline({
       preserveAspectRatio="none"
       role="img"
       aria-label={`${values.length}-bucket sparkline, peak ${peak}`}
-      style={{ display: "block", height: "40px" }}
+      style={{ display: "block", height: "var(--sp-40)" }}
     >
       {values.map((v, i) => {
         const h = peak > 0 ? (v / peak) * (height - 4) : 0;
@@ -632,6 +632,22 @@ export function countByStatus(
   status: LiveSessionSummary["status"],
 ): number {
   return sessions.filter((s) => s.status === status).length;
+}
+
+/** Render-if-nonzero status breakdown: joins only non-zero counts
+ *  so we never ship "0 busy · 0 waiting · 3 idle" — per design.md,
+ *  zero-valued segments get filtered before the join. Falls back
+ *  to an em dash when every count is zero (the parent gates on
+ *  sessions.length > 0, so this branch is defensive only). */
+export function statusBreakdown(sessions: LiveSessionSummary[]): string {
+  const parts: string[] = [];
+  const busy = countByStatus(sessions, "busy");
+  const waiting = countByStatus(sessions, "waiting");
+  const idle = countByStatus(sessions, "idle");
+  if (busy > 0) parts.push(`${busy} busy`);
+  if (waiting > 0) parts.push(`${waiting} waiting`);
+  if (idle > 0) parts.push(`${idle} idle`);
+  return parts.length > 0 ? parts.join(" · ") : "—";
 }
 
 /** Same shape as AppStatusBar.modelMix but formatted for the

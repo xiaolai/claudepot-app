@@ -271,7 +271,7 @@ function CurrentActionCard({
       <span
         aria-hidden
         style={{
-          marginTop: "2px",
+          marginTop: "var(--sp-2)",
           color:
             status === "busy" ? "var(--accent)" : "var(--fg-faint)",
         }}

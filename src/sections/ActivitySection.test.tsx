@@ -6,6 +6,7 @@ import {
   familyShort,
   formatElapsedMs,
   projectLabel,
+  statusBreakdown,
 } from "./ActivitySection";
 import type { LiveSessionSummary } from "../types";
 
@@ -106,6 +107,34 @@ describe("ActivitySection helpers", () => {
       expect(countByStatus(sessions, "busy")).toBe(2);
       expect(countByStatus(sessions, "waiting")).toBe(1);
       expect(countByStatus(sessions, "idle")).toBe(1);
+    });
+  });
+
+  describe("statusBreakdown (render-if-nonzero)", () => {
+    it("drops zero-count segments", () => {
+      // Three waiting, zero busy, zero idle → no 'busy'/'idle'
+      // terms in the joined string (design.md rule).
+      const sessions = [
+        mkSession({ status: "waiting" }),
+        mkSession({ status: "waiting" }),
+        mkSession({ status: "waiting" }),
+      ];
+      expect(statusBreakdown(sessions)).toBe("3 waiting");
+    });
+
+    it("joins present counts in busy/waiting/idle order", () => {
+      const sessions = [
+        mkSession({ status: "busy" }),
+        mkSession({ status: "busy" }),
+        mkSession({ status: "idle" }),
+      ];
+      expect(statusBreakdown(sessions)).toBe("2 busy · 1 idle");
+    });
+
+    it("falls back to em dash when every status is zero", () => {
+      // Defensive — parents gate on length > 0, but the helper
+      // should not produce a stray "" string.
+      expect(statusBreakdown([])).toBe("—");
     });
   });
 

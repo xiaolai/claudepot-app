@@ -125,8 +125,12 @@ export function useActivityNotifications(pushToast: ToastPusher): void {
     /** Fire both the in-app toast and (if the user has OS
      *  permission) a system notification. The OS path is
      *  fire-and-forget; any error is swallowed so a denied
-     *  permission never breaks the in-app toast flow. */
-    const alert = (
+     *  permission never breaks the in-app toast flow.
+     *
+     *  Named `dispatch` deliberately — `alert` would shadow
+     *  `window.alert` and set a footgun for any future
+     *  `globalThis.alert(...)` audit grep. */
+    const dispatch = (
       kind: "info" | "error",
       title: string,
       body: string,
@@ -184,7 +188,7 @@ export function useActivityNotifications(pushToast: ToastPusher): void {
         !(prev?.lastErrored ?? false) &&
         canFire
       ) {
-        alert(
+        dispatch(
           "error",
           project,
           "multiple errors in the last minute",
@@ -201,7 +205,7 @@ export function useActivityNotifications(pushToast: ToastPusher): void {
         !(prev?.lastStuck ?? false) &&
         canFire
       ) {
-        alert(
+        dispatch(
           "error",
           project,
           "possibly stuck (tool call > 10 min)",
@@ -221,7 +225,7 @@ export function useActivityNotifications(pushToast: ToastPusher): void {
         canFire
       ) {
         const minutes = Math.floor((now - prev.busyStartedMs) / 60_000);
-        alert(
+        dispatch(
           "info",
           project,
           `done (${minutes}m)`,

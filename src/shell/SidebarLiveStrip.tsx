@@ -168,7 +168,7 @@ const LiveRow = forwardRef<HTMLButtonElement, RowProps>(function LiveRow(
             color: "var(--fg-faint)",
             textTransform: "uppercase",
             letterSpacing: "var(--ls-wide)",
-            fontSize: "10px",
+            fontSize: "var(--fs-2xs)",
           }}
         >
           {model}
@@ -207,8 +207,8 @@ function StatusDot({ status, errored }: DotProps) {
     <span
       aria-hidden
       style={{
-        width: "8px",
-        height: "8px",
+        width: "var(--sp-8)",
+        height: "var(--sp-8)",
         borderRadius: "50%",
         background: palette.color,
         border: `1.5px solid ${ring}`,
