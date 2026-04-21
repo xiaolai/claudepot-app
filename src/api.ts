@@ -3,6 +3,7 @@ import { invoke } from "@tauri-apps/api/core";
 import type {
   AccountSummary,
   AccountUsage,
+  ActivityTrends,
   AdoptReport,
   ApiKeySummary,
   AppStatus,
@@ -420,4 +421,20 @@ export const api = {
    */
   sessionLiveSubscribe: (sessionId: string) =>
     invoke<void>("session_live_subscribe", { sessionId }),
+
+  /** Query the durable activity metrics store for the Trends view.
+   *  Returns bucketed active-session counts + an error total for the
+   *  requested window. Safe to call with `bucketCount: 0` → empty
+   *  series. Unavailable metrics store → all-zero series, not
+   *  an error. */
+  activityTrends: (
+    fromMs: number,
+    toMs: number,
+    bucketCount: number,
+  ) =>
+    invoke<ActivityTrends>("activity_trends", {
+      fromMs,
+      toMs,
+      bucketCount,
+    }),
 };

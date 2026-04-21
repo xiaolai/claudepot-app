@@ -31,6 +31,7 @@ use crate::paths;
 use crate::project_sanitize::sanitize_path;
 use crate::session::{parse_line_into, SessionEvent};
 use crate::session_live::bus::{AggregateBus, BusError, DetailBus};
+use crate::session_live::metrics_store::MetricsStore;
 use crate::session_live::redact::redact_secrets_opt;
 use crate::session_live::registry::{self, ProcessCheck, SysinfoCheck};
 use crate::session_live::status::StatusMachine;
@@ -55,6 +56,11 @@ pub struct LiveRuntime {
     aggregate: AggregateBus,
     detail: DetailBus,
     state: Arc<Mutex<HashMap<String, SessionState>>>,
+    /// Durable metrics — `None` means the store failed to open; the
+    /// runtime still functions, Trends just sees no new data. Never
+    /// fatal. Lives behind `Arc` so the aggregate handle can fan it
+    /// out to background tasks if needed.
+    metrics: Option<Arc<MetricsStore>>,
     /// Cancellation flag set by `stop`; the poll loop checks it.
     running: Arc<AtomicBool>,
 }
@@ -83,10 +89,31 @@ impl LiveRuntime {
     pub fn new() -> Arc<Self> {
         let check: Arc<dyn ProcessCheck> = Arc::new(SysinfoCheck::new());
         let cfg = paths::claude_config_dir();
-        Self::with_dirs(check, cfg.join("sessions"), cfg.join("projects"))
+        let metrics = MetricsStore::open_default()
+            .ok()
+            .map(Arc::new);
+        if metrics.is_none() {
+            tracing::warn!(
+                target = "session_live::runtime",
+                "activity metrics store unavailable — Trends view will show no data"
+            );
+        }
+        Arc::new(Self {
+            check,
+            sessions_dir: cfg.join("sessions"),
+            projects_dir: cfg.join("projects"),
+            aggregate: AggregateBus::new(),
+            detail: DetailBus::new(),
+            state: Arc::new(Mutex::new(HashMap::new())),
+            metrics,
+            running: Arc::new(AtomicBool::new(false)),
+        })
     }
 
     /// Test constructor — inject arbitrary dirs and a `ProcessCheck`.
+    /// The metrics store is disabled in this mode; tests that want
+    /// metrics coverage construct a `MetricsStore` directly against
+    /// a tempdir and call it out-of-band.
     pub fn with_dirs(
         check: Arc<dyn ProcessCheck>,
         sessions_dir: PathBuf,
@@ -99,8 +126,15 @@ impl LiveRuntime {
             aggregate: AggregateBus::new(),
             detail: DetailBus::new(),
             state: Arc::new(Mutex::new(HashMap::new())),
+            metrics: None,
             running: Arc::new(AtomicBool::new(false)),
         })
+    }
+
+    /// Reference to the metrics store. Consumed by the Tauri command
+    /// layer for the Trends view queries.
+    pub fn metrics(&self) -> Option<Arc<MetricsStore>> {
+        self.metrics.clone()
     }
 
     /// Spawn the poll loop. Idempotent: calling start twice when
@@ -347,6 +381,20 @@ impl LiveRuntime {
             .map(|s| summary_from_state(s, now_ms))
             .collect();
         drop(state);
+
+        // 5. Record tick to the durable metrics store (if available).
+        // Best-effort; a failed write is logged and swallowed so the
+        // rest of the runtime keeps ticking.
+        if let Some(ref m) = self.metrics {
+            if let Err(e) = m.record_tick(now_ms, &list) {
+                tracing::debug!(
+                    target = "session_live::runtime",
+                    error = %e,
+                    "metrics tick write failed (non-fatal)"
+                );
+            }
+        }
+
         self.aggregate.publish(list);
         Ok(())
     }

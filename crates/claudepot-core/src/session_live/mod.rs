@@ -10,6 +10,7 @@
 //! runtime, and Tauri/React surfaces land in follow-on milestones.
 
 pub mod bus;
+pub mod metrics_store;
 pub mod pricing;
 pub mod redact;
 pub mod registry;
