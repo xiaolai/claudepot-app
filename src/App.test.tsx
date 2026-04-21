@@ -13,7 +13,7 @@
 // (ProjectsList.test.tsx is gone; AccountCard/AddAccountModal could
 // gain focused tests in a follow-up).
 import { describe, expect, it, vi, beforeEach } from "vitest";
-import { render, screen, within } from "@testing-library/react";
+import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { sampleAccount, sampleStatus } from "./test/fixtures";
 
@@ -198,5 +198,41 @@ describe("App shell — paper-mono", () => {
       name: /Switch to (light|dark) mode/,
     });
     expect(toggle).toBeInTheDocument();
+  });
+
+  it("shows the activity badge when a session is errored", async () => {
+    await renderApp({
+      app_status: () => sampleStatus({ account_count: 0 }),
+      account_list: () => [],
+      session_live_snapshot: () => [
+        {
+          session_id: "s1",
+          pid: 1,
+          cwd: "/proj",
+          transcript_path: null,
+          status: "busy",
+          current_action: null,
+          model: null,
+          waiting_for: null,
+          errored: true,
+          stuck: false,
+          idle_ms: 0,
+          seq: 0,
+        },
+      ],
+      preferences_get: () => ({
+        notify_on_error: false,
+        notify_on_idle_done: false,
+        notify_on_stuck_minutes: null,
+        notify_on_spend_usd: null,
+      }),
+    });
+
+    // Wait for the Activity nav item to render; the badge should show "1"
+    // inside the same button because one session is errored.
+    const activityBtn = await screen.findByRole("button", { name: "Activity" });
+    await waitFor(() => {
+      expect(within(activityBtn).getByText("1")).toBeInTheDocument();
+    });
   });
 });

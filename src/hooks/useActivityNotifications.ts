@@ -1,4 +1,4 @@
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   isPermissionGranted,
   requestPermission,
@@ -44,10 +44,18 @@ interface SessionMemo {
   lastFiredMs: number;
 }
 
-export function useActivityNotifications(): void {
+/** Returns the count of sessions currently in an alerting state
+ *  (errored or stuck). Used by AppShell to drive the Activity nav
+ *  badge without a second useSessionLive subscription at shell level. */
+export function useActivityNotifications(): number {
   const sessions = useSessionLive();
   const memoRef = useRef(new Map<string, SessionMemo>());
   const prefsRef = useRef<Preferences | null>(null);
+  // Bumped on every successful preferencesGet() resolve so the
+  // notification effect re-runs when prefs first load — without this,
+  // transitions that arrive before the first prefsGet round-trip are
+  // silently dropped because the effect exits early on prefs === null.
+  const [prefsVersion, setPrefsVersion] = useState(0);
   // Three-state permission machine:
   //   * "unknown": no probe yet — ask on next pref-enabled tick
   //   * "not-requested": probed isPermissionGranted, got false, but
@@ -71,6 +79,7 @@ export function useActivityNotifications(): void {
         .then(async (p) => {
           if (cancelled) return;
           prefsRef.current = p;
+          setPrefsVersion((v) => v + 1);
           // Probe OS-notification permission the first time any
           // notification pref is flipped on. No request until a
           // trigger actually fires, so a cautious user who never
@@ -187,7 +196,7 @@ export function useActivityNotifications(): void {
         !(prev?.lastStuck ?? false) &&
         canFire
       ) {
-        dispatch(project, "possibly stuck (tool call > 10 min)");
+        dispatch(project, `possibly stuck (tool call > ${prefs.notify_on_stuck_minutes ?? 10} min)`);
         memo.set(s.session_id, nextMemo(s, busyStartedMs, now));
         continue;
       }
@@ -217,7 +226,9 @@ export function useActivityNotifications(): void {
     for (const id of [...memo.keys()]) {
       if (!seen.has(id)) memo.delete(id);
     }
-  }, [sessions]);
+  }, [sessions, prefsVersion]);
+
+  return sessions.filter((s) => s.errored || s.stuck).length;
 }
 
 function nextMemo(
@@ -234,8 +245,10 @@ function nextMemo(
   };
 }
 
-function projectBasename(cwd: string): string {
-  const trimmed = cwd.replace(/\/+$/, "");
-  const idx = trimmed.lastIndexOf("/");
-  return idx >= 0 ? trimmed.slice(idx + 1) : trimmed;
+export function projectBasename(cwd: string): string {
+  const trimmed = cwd.replace(/[/\\]+$/, "");
+  if (!trimmed) return cwd;
+  const idx = Math.max(trimmed.lastIndexOf("/"), trimmed.lastIndexOf("\\"));
+  const base = idx >= 0 ? trimmed.slice(idx + 1) : trimmed;
+  return base || trimmed;
 }

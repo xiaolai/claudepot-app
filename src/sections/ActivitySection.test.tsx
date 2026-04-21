@@ -38,6 +38,13 @@ describe("ActivitySection helpers", () => {
     it("strips trailing slashes", () => {
       expect(projectLabel("/tmp/project/")).toBe("project");
     });
+    it("falls back to full path for root or empty-segment", () => {
+      expect(projectLabel("/")).toBe("/");
+    });
+    it("handles Windows-style backslash paths", () => {
+      expect(projectLabel("C:\\work\\myproject")).toBe("myproject");
+      expect(projectLabel("C:\\work\\myproject\\")).toBe("myproject");
+    });
   });
 
   describe("familyShort", () => {
