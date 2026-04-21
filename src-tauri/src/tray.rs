@@ -37,6 +37,14 @@ const ICON_CHECK: &[u8] = include_bytes!("../icons/menu/check.png");
 const ICON_POWER: &[u8] = include_bytes!("../icons/menu/power.png");
 const ICON_BAR_CHART: &[u8] = include_bytes!("../icons/menu/bar-chart.png");
 const ICON_BOLT: &[u8] = include_bytes!("../icons/menu/bolt.png");
+// Per-row glyphs. Usage rows carry a single account-identity anchor
+// (circle-user); Live/Activity rows vary by status so the user can
+// scan "what's actually happening" from the tray without opening
+// the window — play = busy, pause = waiting, dot = idle.
+const ICON_CIRCLE_USER: &[u8] = include_bytes!("../icons/menu/circle-user.png");
+const ICON_CIRCLE_PLAY: &[u8] = include_bytes!("../icons/menu/circle-play.png");
+const ICON_CIRCLE_PAUSE: &[u8] = include_bytes!("../icons/menu/circle-pause.png");
+const ICON_CIRCLE_DOT: &[u8] = include_bytes!("../icons/menu/circle-dot.png");
 
 /// Build an icon menu item from pre-rendered PNG bytes.
 fn icon_item(
@@ -319,11 +327,29 @@ fn build_usage_submenu(
         }
         any = true;
         let label = format_usage_line(&s.email, snap.as_ref());
-        let item = MenuItemBuilder::with_id(format!("tray:usage:row:{}", s.uuid), label)
-            .enabled(false) // display-only; the line IS the information
-            .build(app)
-            .map_err(|e| format!("usage item: {e}"))?;
-        builder = builder.item(&item);
+        let id = format!("tray:usage:row:{}", s.uuid);
+        // Icon is best-effort — a broken asset must not take down
+        // the whole submenu. Fall back to a plain text row. Each
+        // branch is self-contained because IconMenuItem and
+        // MenuItem are distinct concrete types — the builder's
+        // `item(&dyn IsMenuItem<_>)` signature is polymorphic.
+        match Image::from_bytes(ICON_CIRCLE_USER) {
+            Ok(img) => {
+                let item = IconMenuItemBuilder::with_id(&id, label)
+                    .icon(img)
+                    .enabled(false)
+                    .build(app)
+                    .map_err(|e| format!("usage item: {e}"))?;
+                builder = builder.item(&item);
+            }
+            Err(_) => {
+                let item = MenuItemBuilder::with_id(&id, label)
+                    .enabled(false)
+                    .build(app)
+                    .map_err(|e| format!("usage item: {e}"))?;
+                builder = builder.item(&item);
+            }
+        }
     }
 
     if !any {
@@ -370,30 +396,46 @@ fn build_live_submenu(
         builder = builder.submenu_icon(img);
     }
     for s in list.iter() {
+        use claudepot_core::session_live::types::Status;
         let action = s
             .current_action
             .clone()
             .unwrap_or_else(|| match s.status {
-                claudepot_core::session_live::types::Status::Waiting => {
+                Status::Waiting => {
                     if let Some(w) = &s.waiting_for {
                         format!("waiting — {w}")
                     } else {
                         "waiting".to_string()
                     }
                 }
-                claudepot_core::session_live::types::Status::Idle => {
-                    "idle".to_string()
-                }
-                claudepot_core::session_live::types::Status::Busy => {
-                    "working".to_string()
-                }
+                Status::Idle => "idle".to_string(),
+                Status::Busy => "working".to_string(),
             });
         let line = format_live_row(&s.cwd, s.model.as_deref(), &action, s.idle_ms);
-        let item =
-            MenuItemBuilder::with_id(format!("{}{}", PREFIX_LIVE, s.session_id), line)
-                .build(app)
-                .map_err(|e| format!("live item: {e}"))?;
-        builder = builder.item(&item);
+        let id = format!("{}{}", PREFIX_LIVE, s.session_id);
+        // Status-varied per-row glyph so the tray conveys
+        // "what's happening" without requiring the user to parse
+        // the text after each label.
+        let icon_bytes: &[u8] = match s.status {
+            Status::Busy => ICON_CIRCLE_PLAY,
+            Status::Waiting => ICON_CIRCLE_PAUSE,
+            Status::Idle => ICON_CIRCLE_DOT,
+        };
+        match Image::from_bytes(icon_bytes) {
+            Ok(img) => {
+                let item = IconMenuItemBuilder::with_id(&id, line)
+                    .icon(img)
+                    .build(app)
+                    .map_err(|e| format!("live item: {e}"))?;
+                builder = builder.item(&item);
+            }
+            Err(_) => {
+                let item = MenuItemBuilder::with_id(&id, line)
+                    .build(app)
+                    .map_err(|e| format!("live item: {e}"))?;
+                builder = builder.item(&item);
+            }
+        }
     }
     Ok(Some(
         builder.build().map_err(|e| format!("live submenu: {e}"))?,
