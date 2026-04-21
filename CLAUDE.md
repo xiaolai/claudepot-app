@@ -58,8 +58,8 @@ See `dev-docs/implementation-plan.md` for the full plan.
 - Account identity = email, resolved by prefix matching
 - GUI is paper-mono shell: custom 38px `WindowChrome` at top
   (breadcrumb + ⌘K palette hint + theme toggle), 240px `Sidebar`
-  on the left (swap targets + primary nav + `~/.claude` tree +
-  synced strip), content column, 24px `StatusBar` at bottom.
+  on the left (swap targets + primary nav + live Activity strip
+  + synced strip), content column, 24px `StatusBar` at bottom.
   Primitives live in `src/components/primitives/`. Sections live
   under `src/sections/`; the registry (`src/sections/registry.tsx`)
   is the single source of truth for primary nav. Accounts, Projects,
