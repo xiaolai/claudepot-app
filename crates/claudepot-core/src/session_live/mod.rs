@@ -12,4 +12,5 @@
 pub mod bus;
 pub mod redact;
 pub mod status;
+pub mod tail;
 pub mod types;
