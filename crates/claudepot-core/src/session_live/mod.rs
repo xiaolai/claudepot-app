@@ -19,6 +19,7 @@ pub mod status;
 mod status_helpers;
 mod status_types;
 pub mod tail;
+pub mod transcript_resolver;
 pub mod types;
 
 pub use runtime::LiveRuntime;
