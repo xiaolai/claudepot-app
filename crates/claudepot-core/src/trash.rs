@@ -93,7 +93,12 @@ pub struct TrashEntry {
 /// One-shot input for `write`. Borrows the path so callers don't have
 /// to clone on the hot path.
 pub struct TrashPut<'a> {
+    /// File to move *into* the trash. The source of the move.
     pub orig_path: &'a Path,
+    /// Where `restore` should put the file back. Defaults to
+    /// `orig_path` — set this explicitly when `orig_path` is a
+    /// throwaway snapshot filename (e.g. `session.jsonl.pre-slim`).
+    pub restore_path: Option<&'a Path>,
     pub kind: TrashKind,
     pub cwd: Option<&'a Path>,
     pub reason: Option<String>,
@@ -183,7 +188,10 @@ pub fn write(data_dir: &Path, put: TrashPut<'_>) -> Result<TrashEntry, TrashErro
     let entry = TrashEntry {
         id: batch_id.clone(),
         manifest_id: batch_id.clone(),
-        orig_path: src.to_path_buf(),
+        // Restore-target path, not the source-of-move path. Defaults
+        // to `orig_path` (prune's common case). `slim` overrides to
+        // point at the real session path.
+        orig_path: put.restore_path.unwrap_or(src).to_path_buf(),
         kind: put.kind,
         size,
         ts_ms: now_ms(),
@@ -416,6 +424,7 @@ mod tests {
             &data_dir,
             TrashPut {
                 orig_path: &src,
+                restore_path: None,
                 kind: TrashKind::Prune,
                 cwd: None,
                 reason: None,
@@ -441,6 +450,7 @@ mod tests {
             &data_dir,
             TrashPut {
                 orig_path: &src,
+                restore_path: None,
                 kind: TrashKind::Prune,
                 cwd: None,
                 reason: None,
@@ -465,6 +475,7 @@ mod tests {
             &data_dir,
             TrashPut {
                 orig_path: &src,
+                restore_path: None,
                 kind: TrashKind::Prune,
                 cwd: None,
                 reason: None,
@@ -486,6 +497,7 @@ mod tests {
             &data_dir,
             TrashPut {
                 orig_path: &src,
+                restore_path: None,
                 kind: TrashKind::Prune,
                 cwd: None,
                 reason: None,
@@ -508,6 +520,7 @@ mod tests {
             &data_dir,
             TrashPut {
                 orig_path: &s1,
+                restore_path: None,
                 kind: TrashKind::Prune,
                 cwd: None,
                 reason: None,
@@ -518,6 +531,7 @@ mod tests {
             &data_dir,
             TrashPut {
                 orig_path: &s2,
+                restore_path: None,
                 kind: TrashKind::Slim,
                 cwd: None,
                 reason: None,
@@ -546,6 +560,7 @@ mod tests {
             &data_dir,
             TrashPut {
                 orig_path: &s1,
+                restore_path: None,
                 kind: TrashKind::Prune,
                 cwd: None,
                 reason: None,
@@ -556,6 +571,7 @@ mod tests {
             &data_dir,
             TrashPut {
                 orig_path: &s2,
+                restore_path: None,
                 kind: TrashKind::Prune,
                 cwd: None,
                 reason: None,
@@ -578,6 +594,7 @@ mod tests {
             &data_dir,
             TrashPut {
                 orig_path: &src,
+                restore_path: None,
                 kind: TrashKind::Prune,
                 cwd: None,
                 reason: None,
@@ -609,6 +626,7 @@ mod tests {
             &data_dir,
             TrashPut {
                 orig_path: &missing,
+                restore_path: None,
                 kind: TrashKind::Prune,
                 cwd: None,
                 reason: None,
@@ -638,6 +656,7 @@ mod tests {
             &data_dir,
             TrashPut {
                 orig_path: &src,
+                restore_path: None,
                 kind: TrashKind::Prune,
                 cwd: None,
                 reason: None,
@@ -685,6 +704,7 @@ mod tests {
             &data_dir,
             TrashPut {
                 orig_path: &src,
+                restore_path: None,
                 kind: TrashKind::Prune,
                 cwd: Some(Path::new(r"\\server\share\project")),
                 reason: None,

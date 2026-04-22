@@ -2476,6 +2476,8 @@ pub fn session_slim_plan(
     let opts = claudepot_core::session_slim::SlimOpts {
         drop_tool_results_over_bytes: opts.drop_tool_results_over_bytes,
         exclude_tools: opts.exclude_tools,
+        strip_images: opts.strip_images,
+        strip_documents: opts.strip_documents,
     };
     let plan = claudepot_core::session_slim::plan_slim(std::path::Path::new(&path), &opts)
         .map_err(|e| format!("plan_slim: {e}"))?;
@@ -2492,6 +2494,8 @@ pub fn session_slim_start(
     let opts = claudepot_core::session_slim::SlimOpts {
         drop_tool_results_over_bytes: opts.drop_tool_results_over_bytes,
         exclude_tools: opts.exclude_tools,
+        strip_images: opts.strip_images,
+        strip_documents: opts.strip_documents,
     };
     let path_buf = std::path::PathBuf::from(&path);
     let op_id = new_op_id();
