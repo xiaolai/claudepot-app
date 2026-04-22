@@ -5,6 +5,12 @@ import { Glyph } from "../../components/primitives/Glyph";
 import { NF } from "../../icons";
 import { useSessionLive } from "../../hooks/useSessionLive";
 import type { LiveDelta, LiveSessionSummary } from "../../types";
+import {
+  Chip,
+  type ChipTone,
+  ElapsedCounter,
+  STATUS_TONE,
+} from "./components/liveStatusBits";
 
 /**
  * LiveStatusHeader — rendered above the historical `SessionDetail`
@@ -313,76 +319,3 @@ function OverlayBanner({ errored, stuck }: { errored: boolean; stuck: boolean })
   );
 }
 
-function ElapsedCounter({ idleMs }: { idleMs: number }) {
-  // Base on the timestamp the backend published, then locally
-  // advance via rAF so the display updates every second without
-  // requiring a backend tick. When the backend publishes a new
-  // idle_ms the base resets.
-  const [tickMs, setTickMs] = useState(0);
-  useEffect(() => {
-    setTickMs(0);
-    const start = performance.now();
-    let rafId: number | null = null;
-    const tick = () => {
-      setTickMs(performance.now() - start);
-      rafId = requestAnimationFrame(tick);
-    };
-    rafId = requestAnimationFrame(tick);
-    return () => {
-      if (rafId !== null) cancelAnimationFrame(rafId);
-    };
-  }, [idleMs]);
-  const totalSec = Math.floor((idleMs + tickMs) / 1000);
-  const m = Math.floor(totalSec / 60);
-  const s = totalSec % 60;
-  const text = m > 0 ? `${m}:${String(s).padStart(2, "0")}` : `${s}s`;
-  return (
-    <span
-      style={{
-        fontVariantNumeric: "tabular-nums",
-        color: "var(--fg-muted)",
-      }}
-    >
-      {text}
-    </span>
-  );
-}
-
-// ── Styling helpers ───────────────────────────────────────────────
-
-type ChipTone = "accent" | "neutral" | "warn";
-
-const STATUS_TONE: Record<LiveSessionSummary["status"], ChipTone> = {
-  busy: "accent",
-  waiting: "warn",
-  idle: "neutral",
-};
-
-function Chip({ tone, children }: { tone: ChipTone; children: string }) {
-  const palette: Record<ChipTone, { fg: string; border: string }> = {
-    accent: { fg: "var(--accent)", border: "var(--accent)" },
-    warn: {
-      fg: "var(--warn)",
-      border: "var(--warn)",
-    },
-    neutral: { fg: "var(--fg-muted)", border: "var(--line)" },
-  };
-  const p = palette[tone];
-  return (
-    <span
-      style={{
-        display: "inline-flex",
-        alignItems: "center",
-        padding: "2px var(--sp-6)",
-        border: `var(--bw-hair) solid ${p.border}`,
-        borderRadius: "var(--r-1)",
-        color: p.fg,
-        fontSize: "var(--fs-xs)",
-        fontWeight: 500,
-        letterSpacing: "var(--ls-wide)",
-      }}
-    >
-      {children}
-    </span>
-  );
-}
