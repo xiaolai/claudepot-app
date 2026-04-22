@@ -54,6 +54,10 @@ pub enum SlimError {
         #[source]
         source: serde_json::Error,
     },
+    #[error("empty filter — at least one criterion must be set for --all")]
+    EmptyFilter,
+    #[error("listing sessions failed: {0}")]
+    Session(#[from] crate::session::SessionError),
 }
 
 impl SlimError {
@@ -454,6 +458,154 @@ fn rewrite_line(v: &mut serde_json::Value, opts: &SlimOpts) -> (String, LineStat
         }
     }
     (serde_json::to_string(v).unwrap_or_default(), stats)
+}
+
+// ---------------------------------------------------------------------------
+// Bulk slim — filter-driven over the whole session index.
+// ---------------------------------------------------------------------------
+
+/// One row of a bulk plan. Carries the filter-row identity plus the
+/// per-file `SlimPlan` so the CLI/GUI can show per-session projections
+/// before execute.
+#[derive(Debug, Clone, Serialize)]
+pub struct BulkSlimEntry {
+    pub session_id: String,
+    pub file_path: PathBuf,
+    pub project_path: String,
+    pub plan: SlimPlan,
+}
+
+/// Plan for a bulk `session slim --all`. Rows sorted by projected
+/// bytes saved (descending).
+#[derive(Debug, Clone, Serialize)]
+pub struct BulkSlimPlan {
+    pub entries: Vec<BulkSlimEntry>,
+    pub total_bytes_saved: u64,
+    pub total_image_redacts: u32,
+    pub total_document_redacts: u32,
+    pub total_tool_result_redacts: u32,
+}
+
+/// Bulk execute outcome. `skipped_live` is its own bucket: those are
+/// not failures — the session was being written to and slim bailed
+/// cleanly. A retry after the session goes idle will pick them up.
+#[derive(Debug, Clone, Serialize)]
+pub struct BulkSlimReport {
+    pub succeeded: Vec<(PathBuf, SlimReport)>,
+    pub skipped_live: Vec<PathBuf>,
+    pub failed: Vec<(PathBuf, String)>,
+    pub total_bytes_saved: u64,
+    pub total_image_redacts: u32,
+    pub total_document_redacts: u32,
+    pub total_tool_result_redacts: u32,
+}
+
+/// Pure plan builder given a pre-scanned row list. `filter.validate()`
+/// still applies — bulk slim refuses to run on an empty filter for
+/// the same reason bulk prune does: a user almost certainly did not
+/// mean "every session".
+pub fn plan_slim_all_from_rows(
+    rows: &[crate::session::SessionRow],
+    filter: &crate::session_prune::PruneFilter,
+    opts: &SlimOpts,
+    now_ms: i64,
+) -> Result<BulkSlimPlan, SlimError> {
+    filter
+        .validate()
+        .map_err(|_| SlimError::EmptyFilter)?;
+    let mut entries: Vec<BulkSlimEntry> = Vec::new();
+    for row in rows.iter().filter(|r| filter.matches(r, now_ms)) {
+        let plan = match plan_slim(&row.file_path, opts) {
+            Ok(p) => p,
+            // Don't fail the whole plan on a single unreadable file —
+            // surface it as a failed entry at execute time instead.
+            Err(_) => continue,
+        };
+        entries.push(BulkSlimEntry {
+            session_id: row.session_id.clone(),
+            file_path: row.file_path.clone(),
+            project_path: row.project_path.clone(),
+            plan,
+        });
+    }
+    // Sort by projected bytes-saved descending. Biggest wins first.
+    entries.sort_by(|a, b| b.plan.bytes_saved().cmp(&a.plan.bytes_saved()));
+    let total_bytes_saved = entries.iter().map(|e| e.plan.bytes_saved()).sum();
+    let total_image_redacts = entries.iter().map(|e| e.plan.image_redact_count).sum();
+    let total_document_redacts = entries.iter().map(|e| e.plan.document_redact_count).sum();
+    let total_tool_result_redacts = entries.iter().map(|e| e.plan.redact_count).sum();
+    Ok(BulkSlimPlan {
+        entries,
+        total_bytes_saved,
+        total_image_redacts,
+        total_document_redacts,
+        total_tool_result_redacts,
+    })
+}
+
+/// Scan the session index and build a bulk plan. Touches disk only
+/// to list sessions and to size each candidate file.
+pub fn plan_slim_all(
+    config_dir: &Path,
+    filter: &crate::session_prune::PruneFilter,
+    opts: &SlimOpts,
+) -> Result<BulkSlimPlan, SlimError> {
+    let rows = crate::session::list_all_sessions(config_dir).map_err(SlimError::Session)?;
+    plan_slim_all_from_rows(
+        &rows,
+        filter,
+        opts,
+        chrono::Utc::now().timestamp_millis(),
+    )
+}
+
+/// Execute a bulk plan. One file at a time, failures collected
+/// per-file so one bad (or still-live) session does not abort the
+/// batch.
+pub fn execute_slim_all(
+    data_dir: &Path,
+    plan: &BulkSlimPlan,
+    opts: &SlimOpts,
+    sink: &dyn ProgressSink,
+) -> BulkSlimReport {
+    sink.phase("plan-validated", PhaseStatus::Complete);
+    let total = plan.entries.len();
+    let mut succeeded: Vec<(PathBuf, SlimReport)> = Vec::new();
+    let mut skipped_live: Vec<PathBuf> = Vec::new();
+    let mut failed: Vec<(PathBuf, String)> = Vec::new();
+    let mut bytes_saved: u64 = 0;
+    let mut images: u32 = 0;
+    let mut documents: u32 = 0;
+    let mut tool_result_redacts: u32 = 0;
+    for (i, e) in plan.entries.iter().enumerate() {
+        sink.sub_progress("slimming", i, total);
+        match execute_slim(data_dir, &e.file_path, opts, &crate::project_progress::NoopSink) {
+            Ok(r) => {
+                bytes_saved = bytes_saved.saturating_add(r.bytes_saved());
+                images = images.saturating_add(r.image_redact_count);
+                documents = documents.saturating_add(r.document_redact_count);
+                tool_result_redacts = tool_result_redacts.saturating_add(r.redact_count);
+                succeeded.push((e.file_path.clone(), r));
+            }
+            Err(SlimError::LiveWriteDetected) => {
+                skipped_live.push(e.file_path.clone());
+            }
+            Err(err) => {
+                failed.push((e.file_path.clone(), err.to_string()));
+            }
+        }
+    }
+    sink.sub_progress("slimming", total, total);
+    sink.phase("complete", PhaseStatus::Complete);
+    BulkSlimReport {
+        succeeded,
+        skipped_live,
+        failed,
+        total_bytes_saved: bytes_saved,
+        total_image_redacts: images,
+        total_document_redacts: documents,
+        total_tool_result_redacts: tool_result_redacts,
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -1232,5 +1384,183 @@ mod tests {
         let listing = trash::list(&data_dir, Default::default()).unwrap();
         assert_eq!(listing.entries.len(), 1);
         assert_eq!(listing.entries[0].kind, TrashKind::Slim);
+    }
+
+    // ---------------- Bulk slim (--all) ----------------
+
+    fn mk_image_session_on_disk(
+        tmp: &Path,
+        slug_suffix: &str,
+        uuid: &str,
+        num_images: usize,
+        img_payload_len: usize,
+        last_ts_offset_sec: i64,
+    ) -> crate::session::SessionRow {
+        let slug = format!("-p{slug_suffix}");
+        let dir = tmp.join("projects").join(&slug);
+        fs::create_dir_all(&dir).unwrap();
+        let path = dir.join(format!("{uuid}.jsonl"));
+        // Build N user lines each carrying one top-level image block.
+        let mut body = String::new();
+        let b64 = "A".repeat(img_payload_len);
+        for i in 0..num_images {
+            let line = format!(
+                r#"{{"type":"user","uuid":"{uuid}-{i}","sessionId":"{uuid}","message":{{"role":"user","content":[{{"type":"image","source":{{"type":"base64","media_type":"image/png","data":"{b64}"}}}}]}}}}"#
+            );
+            body.push_str(&line);
+            body.push('\n');
+        }
+        fs::write(&path, &body).unwrap();
+        let size = fs::metadata(&path).unwrap().len();
+        let now = chrono::Utc::now();
+        crate::session::SessionRow {
+            session_id: uuid.to_string(),
+            slug,
+            file_path: path,
+            file_size_bytes: size,
+            last_modified: Some(SystemTime::now()),
+            project_path: format!("/repo/p{slug_suffix}"),
+            project_from_transcript: true,
+            first_ts: None,
+            last_ts: Some(now - chrono::Duration::seconds(last_ts_offset_sec)),
+            event_count: num_images,
+            message_count: num_images,
+            user_message_count: num_images,
+            assistant_message_count: 0,
+            first_user_prompt: None,
+            models: vec![],
+            tokens: crate::session::TokenUsage::default(),
+            git_branch: None,
+            cc_version: None,
+            display_slug: None,
+            has_error: false,
+            is_sidechain: false,
+        }
+    }
+
+    fn bulk_opts() -> SlimOpts {
+        SlimOpts {
+            strip_images: true,
+            strip_documents: true,
+            ..SlimOpts::default()
+        }
+    }
+
+    #[test]
+    fn bulk_plan_rejects_empty_filter() {
+        let rows: Vec<crate::session::SessionRow> = Vec::new();
+        let filter = crate::session_prune::PruneFilter::default();
+        let err = plan_slim_all_from_rows(&rows, &filter, &bulk_opts(), 0)
+            .expect_err("empty filter must be rejected");
+        assert!(matches!(err, SlimError::EmptyFilter));
+    }
+
+    #[test]
+    fn bulk_plan_matches_filter_and_sorts_by_bytes_saved_desc() {
+        let tmp = TempDir::new().unwrap();
+        let small = mk_image_session_on_disk(tmp.path(), "a", "aaa", 2, 256, 10 * 86_400); // ~10 days old
+        let huge = mk_image_session_on_disk(tmp.path(), "b", "bbb", 20, 4096, 30 * 86_400);
+        let too_new = mk_image_session_on_disk(tmp.path(), "c", "ccc", 10, 2048, 1); // 1s old
+        let rows = vec![small, huge, too_new];
+        let filter = crate::session_prune::PruneFilter {
+            older_than: Some(std::time::Duration::from_secs(7 * 86_400)),
+            ..Default::default()
+        };
+        let plan = plan_slim_all_from_rows(
+            &rows,
+            &filter,
+            &bulk_opts(),
+            chrono::Utc::now().timestamp_millis(),
+        )
+        .unwrap();
+        // too_new filtered out; huge first (biggest savings).
+        assert_eq!(plan.entries.len(), 2);
+        assert_eq!(plan.entries[0].session_id, "bbb");
+        assert_eq!(plan.entries[1].session_id, "aaa");
+        assert!(plan.entries[0].plan.bytes_saved() >= plan.entries[1].plan.bytes_saved());
+        assert_eq!(plan.total_image_redacts, 20 + 2);
+    }
+
+    #[test]
+    fn bulk_execute_slims_every_matched_file_and_sums_totals() {
+        let tmp = TempDir::new().unwrap();
+        let a = mk_image_session_on_disk(tmp.path(), "a", "aaa", 3, 1024, 10 * 86_400);
+        let b = mk_image_session_on_disk(tmp.path(), "b", "bbb", 5, 1024, 10 * 86_400);
+        let rows = vec![a.clone(), b.clone()];
+        let filter = crate::session_prune::PruneFilter {
+            older_than: Some(std::time::Duration::from_secs(7 * 86_400)),
+            ..Default::default()
+        };
+        let opts = bulk_opts();
+        let plan = plan_slim_all_from_rows(
+            &rows,
+            &filter,
+            &opts,
+            chrono::Utc::now().timestamp_millis(),
+        )
+        .unwrap();
+        let data_dir = tmp.path().join("data");
+        fs::create_dir_all(&data_dir).unwrap();
+        let report = execute_slim_all(&data_dir, &plan, &opts, &NoopSink);
+        assert_eq!(report.succeeded.len(), 2);
+        assert!(report.skipped_live.is_empty());
+        assert!(report.failed.is_empty());
+        assert_eq!(report.total_image_redacts, 8);
+        // Each session's file shrank.
+        for row in [&a, &b] {
+            let body = fs::read_to_string(&row.file_path).unwrap();
+            assert!(!body.contains(&"A".repeat(1024)), "base64 payload must be gone");
+            assert!(body.contains("\"[image]\""));
+        }
+        // Each has its own trash entry.
+        let listing = trash::list(&data_dir, Default::default()).unwrap();
+        assert_eq!(listing.entries.len(), 2);
+    }
+
+    #[test]
+    fn bulk_execute_isolates_failures_per_file() {
+        // One existing file, one missing path. The missing-path entry
+        // is forcibly inserted via a hand-built BulkSlimEntry so we
+        // don't depend on the planner filtering it (the planner drops
+        // unreadables during planning).
+        let tmp = TempDir::new().unwrap();
+        let good = mk_image_session_on_disk(tmp.path(), "g", "good", 2, 512, 10 * 86_400);
+        let missing_path = tmp.path().join("nonexistent.jsonl");
+        let plan = BulkSlimPlan {
+            entries: vec![
+                BulkSlimEntry {
+                    session_id: "good".to_string(),
+                    file_path: good.file_path.clone(),
+                    project_path: good.project_path.clone(),
+                    plan: plan_slim(&good.file_path, &bulk_opts()).unwrap(),
+                },
+                BulkSlimEntry {
+                    session_id: "missing".to_string(),
+                    file_path: missing_path.clone(),
+                    project_path: "/dev/null".to_string(),
+                    // Reuse the good entry's plan numbers; the file
+                    // will fail at execute-time on the NotFound path.
+                    plan: SlimPlan {
+                        original_bytes: 0,
+                        projected_bytes: 0,
+                        redact_count: 0,
+                        image_redact_count: 0,
+                        document_redact_count: 0,
+                        tools_affected: vec![],
+                    },
+                },
+            ],
+            total_bytes_saved: 0,
+            total_image_redacts: 0,
+            total_document_redacts: 0,
+            total_tool_result_redacts: 0,
+        };
+        let data_dir = tmp.path().join("data");
+        fs::create_dir_all(&data_dir).unwrap();
+        let report = execute_slim_all(&data_dir, &plan, &bulk_opts(), &NoopSink);
+        assert_eq!(report.succeeded.len(), 1);
+        assert_eq!(report.failed.len(), 1);
+        assert!(report.skipped_live.is_empty());
+        assert_eq!(report.failed[0].0, missing_path);
     }
 }

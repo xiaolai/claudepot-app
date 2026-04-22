@@ -300,6 +300,136 @@ fn slim_strip_images_execute_rewrites_and_removes_base64() {
 }
 
 #[test]
+fn slim_all_without_filter_is_rejected() {
+    let tmp = TempDir::new().unwrap();
+    let config = tmp.path().join("cfg");
+    let data = tmp.path().join("data");
+    fs::create_dir_all(&config).unwrap();
+    fs::create_dir_all(&data).unwrap();
+    // --all with no filter: empty filter is rejected by the core planner.
+    let (_stdout, stderr, code) = run(
+        &config,
+        &data,
+        &[
+            "session",
+            "slim",
+            "--all",
+            "--strip-images",
+        ],
+    );
+    assert_ne!(code, 0, "empty filter must fail; stderr={stderr}");
+    assert!(
+        stderr.contains("empty filter") || stderr.contains("criterion must be set"),
+        "stderr should mention empty filter: {stderr}"
+    );
+}
+
+#[test]
+fn slim_all_dry_run_lists_top_entries() {
+    let tmp = TempDir::new().unwrap();
+    let config = tmp.path().join("cfg");
+    let data = tmp.path().join("data");
+    fs::create_dir_all(&config).unwrap();
+    fs::create_dir_all(&data).unwrap();
+    // Three image sessions with different ages. `--older-than 1s` matches all.
+    mk_image_session(&config, "-slug-1", "01111111-1111-1111-1111-000000000001", 2048, 0);
+    mk_image_session(&config, "-slug-2", "02222222-2222-2222-2222-000000000002", 2048, 0);
+    mk_image_session(&config, "-slug-3", "03333333-3333-3333-3333-000000000003", 2048, 0);
+    // Wait a moment so `last_ts > 1s ago` matches.
+    std::thread::sleep(std::time::Duration::from_millis(1100));
+    let (stdout, stderr, code) = run(
+        &config,
+        &data,
+        &[
+            "session",
+            "slim",
+            "--all",
+            "--older-than",
+            "1s",
+            "--strip-images",
+        ],
+    );
+    assert_eq!(code, 0, "stderr={stderr}");
+    assert!(stdout.contains("Plan (dry-run)"));
+    assert!(stdout.contains("session(s)"));
+    assert!(stdout.contains("Images to redact"));
+    assert!(stdout.contains("Bytes saved"));
+    assert!(stdout.contains("Top"));
+    assert!(stdout.contains("Run with --execute"));
+}
+
+#[test]
+fn slim_all_execute_slims_matching_sessions() {
+    let tmp = TempDir::new().unwrap();
+    let config = tmp.path().join("cfg");
+    let data = tmp.path().join("data");
+    fs::create_dir_all(&config).unwrap();
+    fs::create_dir_all(&data).unwrap();
+    let p1 = mk_image_session(&config, "-sA", "aaaaaaaa-aaaa-aaaa-aaaa-000000000001", 2048, 2048);
+    let p2 = mk_image_session(&config, "-sB", "bbbbbbbb-bbbb-bbbb-bbbb-000000000002", 2048, 2048);
+    let before1 = fs::read_to_string(&p1).unwrap();
+    let before2 = fs::read_to_string(&p2).unwrap();
+    assert!(before1.contains(&"A".repeat(2048)));
+    assert!(before2.contains(&"A".repeat(2048)));
+    std::thread::sleep(std::time::Duration::from_millis(1100));
+    let (stdout, stderr, code) = run(
+        &config,
+        &data,
+        &[
+            "session",
+            "slim",
+            "--all",
+            "--older-than",
+            "1s",
+            "--strip-images",
+            "--execute",
+        ],
+    );
+    assert_eq!(code, 0, "stderr={stderr}");
+    assert!(stdout.contains("Bulk slim: 2 succeeded"));
+    let after1 = fs::read_to_string(&p1).unwrap();
+    let after2 = fs::read_to_string(&p2).unwrap();
+    assert!(!after1.contains(&"A".repeat(2048)));
+    assert!(!after2.contains(&"A".repeat(2048)));
+    // Two separate trash entries.
+    let (stdout, _, _) = run(&config, &data, &["--json", "session", "trash", "list"]);
+    let listing: serde_json::Value = serde_json::from_str(&stdout).unwrap();
+    let slim_entries: Vec<_> = listing["entries"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter(|e| e["kind"].as_str() == Some("slim"))
+        .collect();
+    assert_eq!(slim_entries.len(), 2);
+}
+
+#[test]
+fn slim_all_conflicts_with_positional_target() {
+    let tmp = TempDir::new().unwrap();
+    let config = tmp.path().join("cfg");
+    let data = tmp.path().join("data");
+    fs::create_dir_all(&config).unwrap();
+    fs::create_dir_all(&data).unwrap();
+    let (_stdout, stderr, code) = run(
+        &config,
+        &data,
+        &[
+            "session",
+            "slim",
+            "some-target.jsonl",
+            "--all",
+            "--older-than",
+            "7d",
+        ],
+    );
+    assert_ne!(code, 0);
+    assert!(
+        stderr.contains("cannot be used with") || stderr.contains("conflicts"),
+        "stderr should name the conflict: {stderr}"
+    );
+}
+
+#[test]
 fn slim_baseline_without_new_flags_unchanged() {
     // When neither --strip-images nor --strip-documents is passed and
     // no oversized tool_results exist, the output shape is identical
