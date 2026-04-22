@@ -107,6 +107,19 @@ jobs:
             --team-id "$APPLE_TEAM_ID" \
             --wait
 
+      # Stage the freshly-built CLI as a Tauri externalBin so the GUI
+      # bundle below includes it at Contents/MacOS/claudepot-cli-<triple>.
+      # The Homebrew cask references this path and symlinks it as
+      # /opt/homebrew/bin/claudepot, so `brew install --cask claudepot`
+      # gives users both the GUI and the CLI in one step.
+      - name: Stage CLI into Tauri externalBin slot
+        run: |
+          set -eu
+          mkdir -p src-tauri/binaries
+          cp "target/${{ matrix.target }}/release/claudepot" \
+             "src-tauri/binaries/claudepot-cli-${{ matrix.target }}"
+          chmod +x "src-tauri/binaries/claudepot-cli-${{ matrix.target }}"
+
       # ----- GUI bundle (.app + .dmg). Tauri auto-signs and notarizes via env vars. -----
 
       - name: Build GUI bundle (Tauri)
@@ -364,7 +377,7 @@ jobs:
           \) -exec cp {} release/ \;
           ls -la release/
 
-      - name: Create release
+      - name: Create release (draft)
         uses: softprops/action-gh-release@v2
         with:
           files: release/*
@@ -384,3 +397,25 @@ jobs:
             ### Windows
             - **GUI** (x86_64): `Claudepot-x86_64.msi` or `Claudepot-x86_64-setup.exe` — unsigned (Windows SmartScreen will warn)
             - **CLI**: `claudepot-x86_64-windows.zip`
+
+      # Homebrew can't fetch draft release assets (they require auth),
+      # so the tap-update workflow needs a published release. Comment
+      # the next two steps out if you want a manual review gate instead.
+      - name: Publish release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ github.event.inputs.tag || github.ref_name }}
+        run: |
+          gh release edit "$TAG" --draft=false --repo "$GITHUB_REPOSITORY"
+
+      - name: Trigger Homebrew tap update
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ github.event.inputs.tag || github.ref_name }}
+        run: |
+          VERSION_NUM="${TAG#v}"
+          gh workflow run update-homebrew.yml \
+            --repo "$GITHUB_REPOSITORY" \
+            -f version="$VERSION_NUM"
+          echo "Triggered Homebrew tap update for $VERSION_NUM"

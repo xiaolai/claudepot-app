@@ -1,0 +1,196 @@
+name: Update Homebrew Tap
+
+# Triggered by release.yml via `gh workflow run` after the release is
+# published (not by the release event directly, to avoid racing with
+# asset uploads). Can also be invoked manually with a version input
+# if the automation ever misses.
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version to publish (e.g. 0.0.2 — no leading v)'
+        required: true
+
+permissions:
+  contents: read
+
+jobs:
+  update-tap:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      VERSION: ${{ github.event.inputs.version }}
+      REPO: xiaolai/com.claudepot.app
+    steps:
+      - name: Wait for release assets to be available
+        run: |
+          set -eu
+          BASE="https://github.com/${REPO}/releases/download/v${VERSION}"
+          # macOS users get the CLI bundled inside the .app (via the
+          # cask's binary stanza), so the Homebrew workflow only needs
+          # the two DMGs and the two Linux CLI tarballs.
+          ASSETS=(
+            "claudepot-aarch64-linux.tar.gz"
+            "claudepot-x86_64-linux.tar.gz"
+            "Claudepot-aarch64.dmg"
+            "Claudepot-x86_64.dmg"
+          )
+
+          for attempt in $(seq 1 30); do
+            all_ok=1
+            for asset in "${ASSETS[@]}"; do
+              code=$(curl -sI -o /dev/null -w "%{http_code}" -L "$BASE/$asset")
+              case "$code" in
+                200|302) ;;
+                *) all_ok=0; echo "  $asset: HTTP $code" ;;
+              esac
+            done
+            if [ "$all_ok" -eq 1 ]; then
+              echo "All four assets available."
+              exit 0
+            fi
+            echo "Attempt ${attempt}/30 — waiting 30s…"
+            sleep 30
+          done
+
+          echo "Assets not available after 15 minutes" >&2
+          exit 1
+
+      - name: Download assets and compute sha256
+        id: sha256
+        run: |
+          set -eu
+          BASE="https://github.com/${REPO}/releases/download/v${VERSION}"
+
+          compute() {
+            local name="$1" outvar="$2"
+            curl -sL -o "/tmp/$name" "$BASE/$name"
+            local sum
+            sum=$(sha256sum "/tmp/$name" | cut -d ' ' -f 1)
+            echo "  $name → $sum"
+            echo "${outvar}=${sum}" >> "$GITHUB_OUTPUT"
+            rm "/tmp/$name"
+          }
+
+          compute "claudepot-aarch64-linux.tar.gz" cli_linux_arm
+          compute "claudepot-x86_64-linux.tar.gz"  cli_linux_intel
+          compute "Claudepot-aarch64.dmg"          dmg_arm
+          compute "Claudepot-x86_64.dmg"           dmg_intel
+
+      - name: Checkout homebrew-tap
+        uses: actions/checkout@v4
+        with:
+          repository: xiaolai/homebrew-tap
+          token: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+          path: homebrew-tap
+
+      # The formula is Linux-only: macOS users get the CLI bundled
+      # inside the GUI cask (see below), so `brew install claudepot`
+      # is the right install on Linux and `brew install --cask claudepot`
+      # is the right install on macOS.
+      - name: Generate Formula/claudepot.rb
+        env:
+          CLI_LINUX_ARM:   ${{ steps.sha256.outputs.cli_linux_arm }}
+          CLI_LINUX_INTEL: ${{ steps.sha256.outputs.cli_linux_intel }}
+        run: |
+          cat > homebrew-tap/Formula/claudepot.rb <<RUBY
+          class Claudepot < Formula
+            desc "Multi-account Claude Code / Claude Desktop switcher (CLI)"
+            homepage "https://github.com/${REPO}"
+            version "${VERSION}"
+            license "MIT"
+
+            depends_on :linux
+
+            on_linux do
+              if Hardware::CPU.arm?
+                url "https://github.com/${REPO}/releases/download/v#{version}/claudepot-aarch64-linux.tar.gz"
+                sha256 "${CLI_LINUX_ARM}"
+              else
+                url "https://github.com/${REPO}/releases/download/v#{version}/claudepot-x86_64-linux.tar.gz"
+                sha256 "${CLI_LINUX_INTEL}"
+              end
+            end
+
+            def install
+              bin.install "claudepot"
+            end
+
+            test do
+              assert_match "Multi-account Claude Code", shell_output("#{bin}/claudepot --help")
+            end
+          end
+          RUBY
+          echo "Generated Formula/claudepot.rb:"
+          cat homebrew-tap/Formula/claudepot.rb
+
+      # The cask ships the GUI **and** the CLI. Tauri's externalBin
+      # packs `claudepot-cli-<triple>` into Contents/MacOS/ and signs
+      # it as part of the bundle; the `binary` stanza symlinks it as
+      # /opt/homebrew/bin/claudepot so a single
+      # `brew install --cask claudepot` gives users both.
+      - name: Generate Casks/claudepot.rb
+        env:
+          DMG_ARM:   ${{ steps.sha256.outputs.dmg_arm }}
+          DMG_INTEL: ${{ steps.sha256.outputs.dmg_intel }}
+        run: |
+          cat > homebrew-tap/Casks/claudepot.rb <<RUBY
+          cask "claudepot" do
+            version "${VERSION}"
+
+            on_arm do
+              sha256 "${DMG_ARM}"
+
+              url "https://github.com/${REPO}/releases/download/v#{version}/Claudepot-aarch64.dmg"
+
+              binary "#{appdir}/Claudepot.app/Contents/MacOS/claudepot-cli-aarch64-apple-darwin",
+                     target: "claudepot"
+            end
+            on_intel do
+              sha256 "${DMG_INTEL}"
+
+              url "https://github.com/${REPO}/releases/download/v#{version}/Claudepot-x86_64.dmg"
+
+              binary "#{appdir}/Claudepot.app/Contents/MacOS/claudepot-cli-x86_64-apple-darwin",
+                     target: "claudepot"
+            end
+
+            name "Claudepot"
+            desc "Multi-account Claude Code / Claude Desktop switcher"
+            homepage "https://github.com/${REPO}"
+
+            livecheck do
+              url :homepage
+              strategy :github_latest
+            end
+
+            depends_on macos: ">= :catalina"
+
+            app "Claudepot.app"
+
+            zap trash: [
+              "~/.claudepot",
+              "~/Library/Caches/com.claudepot.app",
+              "~/Library/Preferences/com.claudepot.app.plist",
+              "~/Library/Saved Application State/com.claudepot.app.savedState",
+              "~/Library/WebKit/com.claudepot.app",
+            ]
+          end
+          RUBY
+          echo "Generated Casks/claudepot.rb:"
+          cat homebrew-tap/Casks/claudepot.rb
+
+      - name: Commit and push
+        run: |
+          set -eu
+          cd homebrew-tap
+          git config user.name  "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add Formula/claudepot.rb Casks/claudepot.rb
+          if git diff --staged --quiet; then
+            echo "No changes to publish."
+            exit 0
+          fi
+          git commit -m "Update claudepot to ${VERSION}"
+          git push
