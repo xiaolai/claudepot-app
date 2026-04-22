@@ -23,6 +23,7 @@ type Tab =
   | "activity"
   | "protected"
   | "cleanup"
+  | "github"
   | "locks"
   | "diagnostics"
   | "about";
@@ -38,6 +39,7 @@ const TAB_DEFS: ReadonlyArray<{
   { id: "activity",    label: "Activity",       glyph: NF.bolt,     group: "core" },
   { id: "protected",   label: "Protected paths", glyph: NF.shield,  group: "advanced" },
   { id: "cleanup",     label: "Cleanup",        glyph: NF.trash,    group: "advanced" },
+  { id: "github",      label: "GitHub",         glyph: NF.key,      group: "advanced" },
   { id: "locks",       label: "Locks",          glyph: NF.lock,     group: "advanced" },
   { id: "diagnostics", label: "Diagnostics",    glyph: NF.wrench,   group: "advanced" },
   { id: "about",       label: "About",          glyph: NF.info,     group: "advanced" },
@@ -92,6 +94,7 @@ export function SettingsSection() {
           {tab === "activity" && <ActivityPane pushToast={pushToast} />}
           {tab === "protected" && <ProtectedPathsPane pushToast={pushToast} />}
           {tab === "cleanup" && <CleanupPane pushToast={pushToast} />}
+          {tab === "github" && <GithubPane pushToast={pushToast} />}
           {tab === "locks" && <LocksPane pushToast={pushToast} />}
           {tab === "diagnostics" && <DiagnosticsPane pushToast={pushToast} />}
           {tab === "about" && <AboutPane />}
@@ -959,6 +962,101 @@ function ActivityPane({
         </Row>
       </SettingsGroup>
     </>
+  );
+}
+
+/* ──────────────────────────────────────────────────────────── */
+/*                         GitHub                              */
+/* ──────────────────────────────────────────────────────────── */
+
+function GithubPane({
+  pushToast,
+}: {
+  pushToast: (t: "info" | "error", msg: string) => void;
+}) {
+  const [status, setStatus] = useState<{
+    present: boolean;
+    last4: string | null;
+  } | null>(null);
+  const [input, setInput] = useState("");
+  const [busy, setBusy] = useState(false);
+
+  const refresh = useCallback(async () => {
+    try {
+      setStatus(await api.settingsGithubTokenGet());
+    } catch (e) {
+      pushToast("error", String(e));
+    }
+  }, [pushToast]);
+
+  useEffect(() => {
+    refresh();
+  }, [refresh]);
+
+  const save = async () => {
+    if (!input.trim()) return;
+    setBusy(true);
+    try {
+      // Never retain the raw token in React state; pass once, clear
+      // the input, fetch the status back.
+      await api.settingsGithubTokenSet(input.trim());
+      setInput("");
+      await refresh();
+      pushToast("info", "GitHub token saved.");
+    } catch (e) {
+      pushToast("error", String(e));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const clear = async () => {
+    setBusy(true);
+    try {
+      await api.settingsGithubTokenClear();
+      setInput("");
+      await refresh();
+      pushToast("info", "GitHub token cleared.");
+    } catch (e) {
+      pushToast("error", String(e));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <SettingsGroup desc="Personal Access Token for publishing session exports as gists. Stored in the Keychain; only the last four characters are ever shown.">
+      <Row label="Status">
+        {status?.present ? (
+          <code data-testid="github-token-last4">
+            …{status.last4 ?? "????"}
+          </code>
+        ) : (
+          <span style={{ color: "var(--fg-muted)" }}>No token stored</span>
+        )}
+      </Row>
+      <Row label="Token">
+        <input
+          type="password"
+          aria-label="GitHub token"
+          value={input}
+          onChange={(e) => setInput(e.target.value)}
+          placeholder="ghp_…"
+          style={inputStyle}
+          autoComplete="off"
+        />
+      </Row>
+      <div style={actionsStyle}>
+        <Button variant="solid" onClick={save} disabled={busy || !input.trim()}>
+          {busy ? "Saving…" : status?.present ? "Replace" : "Save"}
+        </Button>
+        {status?.present && (
+          <Button variant="ghost" onClick={clear} disabled={busy}>
+            Clear
+          </Button>
+        )}
+      </div>
+    </SettingsGroup>
   );
 }
 
