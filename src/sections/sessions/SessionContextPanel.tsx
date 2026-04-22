@@ -4,10 +4,11 @@ import { Glyph } from "../../components/primitives/Glyph";
 import { IconButton } from "../../components/primitives/IconButton";
 import { NF } from "../../icons";
 import type {
-  ContextCategory,
   ContextInjection,
   ContextStats,
 } from "../../types";
+import { ContextPhasePicker } from "./components/ContextPhasePicker";
+import { ContextTotals, colorFor } from "./components/ContextTotals";
 import { formatTokens } from "./format";
 
 /**
@@ -156,7 +157,7 @@ export function SessionContextPanel({
         {error && <ErrorLine text={error} />}
         {stats && filteredTotals && (
           <>
-            <Totals
+            <ContextTotals
               totals={filteredTotals}
               // The backend only gives us a whole-session
               // reported-total; when the user filters to a single
@@ -167,7 +168,7 @@ export function SessionContextPanel({
               }
               phaseLabel={phaseFilter}
             />
-            <PhasePicker
+            <ContextPhasePicker
               stats={stats}
               value={phaseFilter}
               onChange={setPhaseFilter}
@@ -180,180 +181,6 @@ export function SessionContextPanel({
   );
 }
 
-function Totals({
-  totals,
-  reportedTotal,
-  phaseLabel,
-}: {
-  totals: ContextStats["totals"];
-  /** Whole-session usage total. `null` when a phase is selected. */
-  reportedTotal: number | null;
-  /** 0-based phase number, `null` for "all phases". */
-  phaseLabel: number | null;
-}) {
-  const t = totals;
-  const total =
-    t.claude_md +
-    t.mentioned_file +
-    t.tool_output +
-    t.thinking_text +
-    t.team_coordination +
-    t.user_message;
-  const rows: { key: ContextCategory; label: string; value: number }[] = [
-    { key: "claude-md", label: "CLAUDE.md", value: t.claude_md },
-    { key: "mentioned-file", label: "Mentioned files", value: t.mentioned_file },
-    { key: "tool-output", label: "Tool output", value: t.tool_output },
-    { key: "thinking-text", label: "Thinking/text", value: t.thinking_text },
-    {
-      key: "team-coordination",
-      label: "Team coord.",
-      value: t.team_coordination,
-    },
-    { key: "user-message", label: "User messages", value: t.user_message },
-  ];
-
-  return (
-    <section style={{ marginBottom: "var(--sp-18)" }}>
-      <div
-        style={{
-          display: "flex",
-          justifyContent: "space-between",
-          marginBottom: "var(--sp-10)",
-          fontSize: "var(--fs-xs)",
-          color: "var(--fg-muted)",
-        }}
-      >
-        <span>Visible</span>
-        <span className="mono">{formatTokens(total)} tok</span>
-      </div>
-      {rows.map((row) => {
-        const pct = total > 0 ? (row.value / total) * 100 : 0;
-        return (
-          <div
-            key={row.key}
-            data-testid={`category-${row.key}`}
-            style={{ marginBottom: "var(--sp-6)" }}
-          >
-            <div
-              style={{
-                display: "flex",
-                justifyContent: "space-between",
-                fontSize: "var(--fs-xs)",
-                color: "var(--fg)",
-                marginBottom: 2,
-              }}
-            >
-              <span>{row.label}</span>
-              <span className="mono" style={{ color: "var(--fg-muted)" }}>
-                {formatTokens(row.value)} · {pct.toFixed(1)}%
-              </span>
-            </div>
-            <div
-              style={{
-                height: 4,
-                background: "var(--bg-sunken)",
-                borderRadius: "var(--r-1)",
-                overflow: "hidden",
-              }}
-              aria-hidden
-            >
-              <div
-                style={{
-                  width: `${Math.max(pct, row.value > 0 ? 1 : 0)}%`,
-                  height: "100%",
-                  background: colorFor(row.key),
-                }}
-              />
-            </div>
-          </div>
-        );
-      })}
-      <div
-        style={{
-          marginTop: "var(--sp-10)",
-          fontSize: "var(--fs-3xs)",
-          color: "var(--fg-faint)",
-          letterSpacing: "var(--ls-wide)",
-          textTransform: "uppercase",
-        }}
-      >
-        {reportedTotal != null
-          ? `Model reported ${reportedTotal.toLocaleString()} total`
-          : `Phase #${phaseLabel} (session total hidden)`}
-      </div>
-    </section>
-  );
-}
-
-function PhasePicker({
-  stats,
-  value,
-  onChange,
-}: {
-  stats: ContextStats;
-  value: number | null;
-  onChange: (v: number | null) => void;
-}) {
-  if (stats.phases.length <= 1) return null;
-  return (
-    <section style={{ marginBottom: "var(--sp-18)" }}>
-      <div
-        style={{
-          fontSize: "var(--fs-3xs)",
-          color: "var(--fg-faint)",
-          letterSpacing: "var(--ls-wide)",
-          textTransform: "uppercase",
-          marginBottom: "var(--sp-6)",
-        }}
-      >
-        Phase
-      </div>
-      <div style={{ display: "flex", flexWrap: "wrap", gap: "var(--sp-4)" }}>
-        <PhaseButton
-          active={value == null}
-          onClick={() => onChange(null)}
-          label="All"
-        />
-        {stats.phases.map((p) => (
-          <PhaseButton
-            key={p.phase_number}
-            active={value === p.phase_number}
-            onClick={() => onChange(p.phase_number)}
-            label={`#${p.phase_number}`}
-          />
-        ))}
-      </div>
-    </section>
-  );
-}
-
-function PhaseButton({
-  active,
-  onClick,
-  label,
-}: {
-  active: boolean;
-  onClick: () => void;
-  label: string;
-}) {
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      style={{
-        padding: "var(--sp-2) var(--sp-8)",
-        fontSize: "var(--fs-xs)",
-        border: "var(--bw-hair) solid var(--line)",
-        borderRadius: "var(--r-1)",
-        background: active ? "var(--accent-soft)" : "transparent",
-        color: active ? "var(--accent-ink)" : "var(--fg-muted)",
-        cursor: "pointer",
-      }}
-    >
-      {label}
-    </button>
-  );
-}
 
 function InjectionList({ injections }: { injections: ContextInjection[] }) {
   if (injections.length === 0) {
@@ -445,19 +272,3 @@ function ErrorLine({ text }: { text: string }) {
   );
 }
 
-function colorFor(cat: ContextCategory): string {
-  switch (cat) {
-    case "claude-md":
-      return "var(--accent)";
-    case "mentioned-file":
-      return "var(--ok)";
-    case "tool-output":
-      return "var(--info, var(--fg-muted))";
-    case "thinking-text":
-      return "var(--fg-muted)";
-    case "team-coordination":
-      return "var(--warn)";
-    case "user-message":
-      return "var(--fg)";
-  }
-}

@@ -6,8 +6,9 @@ import {
   useRef,
   useState,
 } from "react";
-import { api } from "../api";
-import { ContextMenu, type ContextMenuItem } from "../components/ContextMenu";
+import { copyToClipboard } from "../lib/copyToClipboard";
+import { useSessionsData } from "../hooks/useSessionsData";
+import { ContextMenu } from "../components/ContextMenu";
 import { Button } from "../components/primitives/Button";
 import { FilterChip } from "../components/primitives/FilterChip";
 import { Glyph } from "../components/primitives/Glyph";
@@ -19,9 +20,11 @@ import { useSessionSearch } from "../hooks/useSessionSearch";
 import { useCompactHeader, useSplitView } from "../hooks/useWindowWidth";
 import { NF } from "../icons";
 import { ScreenHeader } from "../shell/ScreenHeader";
-import type { ProjectInfo, RepositoryGroup, SessionRow } from "../types";
+import type { SessionRow } from "../types";
 import { MoveSessionModal } from "./projects/MoveSessionModal";
 import { CleanupPane } from "./sessions/CleanupPane";
+import { SectionTab } from "./sessions/components/SectionTab";
+import { buildSessionContextMenuItems } from "./sessions/sessionsContextMenu";
 import {
   RepoFilterStrip,
   filterSessionsByRepo,
@@ -77,12 +80,7 @@ export interface SessionsSectionProps {
 
 export function SessionsSection(props: SessionsSectionProps = {}) {
   const { initialSelectedPath = null, onInitialSelectedPathConsumed } = props;
-  const [sessions, setSessions] = useState<SessionRow[]>([]);
-  const [projects, setProjects] = useState<ProjectInfo[]>([]);
-  const [repoGroups, setRepoGroups] = useState<RepositoryGroup[] | null>(null);
   const [activeRepo, setActiveRepo] = useState<string | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
   /** The file_path of the selected row — globally unique on disk.
    * We key selection by path (not session_id) because CC can end up
    * with two .jsonl files that share a session_id (e.g. an interrupted
@@ -100,94 +98,36 @@ export function SessionsSection(props: SessionsSectionProps = {}) {
   } | null>(null);
   const [moveSession, setMoveSession] = useState<SessionRow | null>(null);
 
-  const tokenRef = useRef(0);
-  const mountedRef = useRef(true);
+  // Data lifecycle (refresh + Promise.allSettled + cancellation token)
+  // lives in the hook. The hook surfaces secondary-fetch failures via
+  // the `onSecondaryError` callback, which we bridge to the toast.
+  const {
+    sessions,
+    projects,
+    repoGroups,
+    loading,
+    error,
+    refresh,
+  } = useSessionsData({ onSecondaryError: setToast });
+
+  // Selection / repo-filter pruning lives here (not in the hook)
+  // because both are owned by this component. Run as effects on the
+  // dataset, so a stale selection or repo id from a prior dataset
+  // self-clears once `sessions` / `repoGroups` lands.
   useEffect(() => {
-    mountedRef.current = true;
-    return () => {
-      mountedRef.current = false;
-    };
-  }, []);
-
-  const refresh = useCallback(() => {
-    const myToken = ++tokenRef.current;
-    setLoading(true);
-    setError(null);
-    // Use allSettled so a failure in projectList or sessionWorktreeGroups
-    // doesn't blank the whole Sessions section. The session list is the
-    // only mandatory dependency — if it loads, the table renders.
-    // Secondary failures degrade their corresponding UI surface
-    // (RepoFilterStrip vanishes, MoveSessionModal target list is empty)
-    // and surface as a single inline toast.
-    Promise.allSettled([
-      api.sessionListAll(),
-      api.projectList(),
-      api.sessionWorktreeGroups(),
-    ])
-      .then(([ssRes, psRes, groupsRes]) => {
-        if (!mountedRef.current || myToken !== tokenRef.current) return;
-
-        // Mandatory: the session list. If this rejects, we can't
-        // render the table and must surface the error inline.
-        if (ssRes.status === "rejected") {
-          setError(String(ssRes.reason));
-          setLoading(false);
-          return;
-        }
-        const ss = ssRes.value;
-        setSessions(ss);
-
-        // Secondary: projects (target list for Move modal). On
-        // rejection we fall back to an empty list and toast once.
-        if (psRes.status === "fulfilled") {
-          setProjects(psRes.value);
-        } else {
-          setProjects([]);
-          setToast(`Couldn't load projects: ${String(psRes.reason)}`);
-          if (import.meta.env.DEV) {
-            // eslint-disable-next-line no-console
-            console.warn("[SessionsSection] projectList failed", psRes.reason);
-          }
-        }
-
-        // Tertiary: worktree groups (powers RepoFilterStrip). Already
-        // designed to be optional — rejection just hides the strip.
-        if (groupsRes.status === "fulfilled") {
-          setRepoGroups(groupsRes.value);
-        } else {
-          setRepoGroups(null);
-          if (import.meta.env.DEV) {
-            // eslint-disable-next-line no-console
-            console.warn(
-              "[SessionsSection] sessionWorktreeGroups failed; " +
-                "RepoFilterStrip will not render",
-              groupsRes.reason,
-            );
-          }
-        }
-
-        setLoading(false);
-        // Drop the selection if it no longer exists.
-        setSelectedPath((prev) =>
-          prev && ss.some((s) => s.file_path === prev) ? prev : null,
-        );
-        // Drop the active repo id if the new groups don't contain it.
-        // Id is `repo_root` for git-tracked repos, `label` for no-repo.
-        const groups =
-          groupsRes.status === "fulfilled" ? groupsRes.value : null;
-        setActiveRepo((prev) =>
-          prev &&
-          groups &&
-          groups.some((g) => (g.repo_root ?? g.label) === prev)
-            ? prev
-            : null,
-        );
-      });
-  }, []);
-
+    setSelectedPath((prev) =>
+      prev && sessions.some((s) => s.file_path === prev) ? prev : null,
+    );
+  }, [sessions]);
   useEffect(() => {
-    refresh();
-  }, [refresh]);
+    setActiveRepo((prev) =>
+      prev &&
+      repoGroups &&
+      repoGroups.some((g) => (g.repo_root ?? g.label) === prev)
+        ? prev
+        : null,
+    );
+  }, [repoGroups]);
 
   // Consume the deep-link path from `initialSelectedPath` exactly once
   // per mount. Runs when the prop flips from falsy to a value — the
@@ -610,144 +550,22 @@ export function SessionsSection(props: SessionsSectionProps = {}) {
 
       <Toast message={toast} onDismiss={() => setToast(null)} />
 
-      {ctxMenu &&
-        (() => {
-          const s = ctxMenu.session;
-          const items: ContextMenuItem[] = [
-            {
-              label: "Open in Finder",
-              onClick: () => {
-                api.revealInFinder(s.file_path).catch((e) => {
-                  setToast(`Couldn't reveal: ${e}`);
-                });
-              },
-            },
-            {
-              label: "Open in detail",
-              onClick: () => setSelectedPath(s.file_path),
-            },
-            { label: "", separator: true, onClick: () => {} },
-            {
-              // Identity tuple for the move is `(session_id, from_cwd)`
-              // — sufficient because the backend resolves to
-              // `~/.claude/projects/{sanitize(from_cwd)}/{session_id}.jsonl`,
-              // which is a single on-disk file. The only failure mode
-              // would be a from_cwd derived via the lossy `unsanitize`
-              // fallback (`.claude/rules/paths.md`), which is exactly
-              // what the `project_from_transcript` guard rules out here.
-              label: "Move to project…",
-              onClick: () => {
-                if (!s.project_from_transcript) {
-                  setToast(
-                    "Can't move: this session has no cwd recorded in the transcript.",
-                  );
-                  return;
-                }
-                setMoveSession(s);
-              },
-            },
-            { label: "", separator: true, onClick: () => {} },
-            {
-              label: "Copy session id",
-              onClick: () => {
-                copyToClipboard(s.session_id, "session id", setToast);
-              },
-            },
-            {
-              label: "Copy project path",
-              onClick: () => {
-                copyToClipboard(s.project_path, "project path", setToast);
-              },
-            },
-          ];
-          return (
-            <ContextMenu
-              x={ctxMenu.x}
-              y={ctxMenu.y}
-              items={items}
-              onClose={closeCtxMenu}
-            />
-          );
-        })()}
+      {ctxMenu && (
+        <ContextMenu
+          x={ctxMenu.x}
+          y={ctxMenu.y}
+          items={buildSessionContextMenuItems({
+            session: ctxMenu.session,
+            setToast,
+            setSelectedPath,
+            setMoveSession,
+            copyToClipboard: (text, label) =>
+              copyToClipboard(text, label, setToast),
+          })}
+          onClose={closeCtxMenu}
+        />
+      )}
     </>
   );
 }
 
-/**
- * Copy text to the clipboard, surfacing both success and failure as
- * toasts. The native `navigator.clipboard.writeText` rejects in
- * narrow but real cases (no document focus, HTTPS-only contexts in
- * some browsers, Tauri webview policies) — silently toasting success
- * lies to the user. We `void`-type the promise to satisfy the no-
- * floating-promises lint while keeping the call site synchronous.
- */
-function copyToClipboard(
-  text: string,
-  label: string,
-  setToast: (msg: string) => void,
-): void {
-  void navigator.clipboard.writeText(text).then(
-    () => setToast(`Copied ${label}.`),
-    (e) => setToast(`Couldn't copy ${label}: ${e instanceof Error ? e.message : String(e)}`),
-  );
-}
-
-/**
- * Proper `role="tab"` button for the Sessions/Cleanup tab strip. The
- * pre-existing FilterChip uses `role="switch"`, which conflicts with
- * `role="tablist"` parents — assistive tech announces them as toggle
- * switches instead of tabs. This thin button mirrors FilterChip's
- * paper-mono styling but emits the correct ARIA contract: `role=tab`,
- * `aria-selected`, `aria-controls` linking to the tabpanel.
- */
-function SectionTab({
-  id,
-  panelId,
-  label,
-  active,
-  onSelect,
-}: {
-  id: string;
-  panelId: string;
-  label: string;
-  active: boolean;
-  onSelect: () => void;
-}) {
-  return (
-    <button
-      id={id}
-      type="button"
-      role="tab"
-      aria-selected={active}
-      aria-controls={panelId}
-      tabIndex={active ? 0 : -1}
-      onClick={onSelect}
-      onKeyDown={(e) => {
-        if (e.key === "Enter" || e.key === " ") {
-          e.preventDefault();
-          onSelect();
-        }
-      }}
-      style={{
-        display: "inline-flex",
-        alignItems: "center",
-        gap: "var(--sp-6)",
-        height: "var(--sp-24)",
-        padding: "0 var(--sp-10)",
-        fontSize: "var(--fs-xs)",
-        fontWeight: 500,
-        letterSpacing: "var(--ls-wide)",
-        textTransform: "uppercase",
-        color: active ? "var(--accent-ink)" : "var(--fg-muted)",
-        background: active ? "var(--accent-soft)" : "var(--bg-sunken)",
-        border: `var(--bw-hair) solid ${active ? "var(--accent-border)" : "var(--line)"}`,
-        borderRadius: "var(--r-1)",
-        cursor: "pointer",
-        whiteSpace: "nowrap",
-        outlineOffset: 2,
-      }}
-    >
-      {label}
-    </button>
-  );
-}
