@@ -25,6 +25,8 @@ pub enum OpKind {
     RepairRollback,
     MoveProject,
     CleanProjects,
+    SessionPrune,
+    SessionSlim,
 }
 
 /// Post-op summary surfaced to the UI on success, so we can render

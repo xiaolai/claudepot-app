@@ -14,6 +14,7 @@ import { NF } from "../icons";
 import { ScreenHeader } from "../shell/ScreenHeader";
 import type { ProjectInfo, RepositoryGroup, SessionRow } from "../types";
 import { MoveSessionModal } from "./projects/MoveSessionModal";
+import { CleanupPane } from "./sessions/CleanupPane";
 import {
   RepoFilterStrip,
   filterSessionsByRepo,
@@ -24,6 +25,7 @@ import {
   countSessionStatus,
   type SessionFilter,
 } from "./sessions/SessionsTable";
+import { TrashDrawer } from "./sessions/TrashDrawer";
 
 /**
  * Toggleable chips: each flips the filter between "all" and its own
@@ -77,6 +79,7 @@ export function SessionsSection(props: SessionsSectionProps = {}) {
   const [selectedPath, setSelectedPath] = useState<string | null>(null);
   const [filter, setFilter] = useState<SessionFilter>("all");
   const [query, setQuery] = useState("");
+  const [tab, setTab] = useState<"sessions" | "cleanup">("sessions");
   const [detailRefreshSignal, setDetailRefreshSignal] = useState(0);
   const [toast, setToast] = useState<string | null>(null);
   const [ctxMenu, setCtxMenu] = useState<{
@@ -248,7 +251,50 @@ export function SessionsSection(props: SessionsSectionProps = {}) {
         }
       />
 
-      {showTable && (
+      <div
+        role="tablist"
+        aria-label="Sessions view"
+        style={{
+          display: "flex",
+          gap: "var(--sp-6)",
+          padding: "var(--sp-8) var(--sp-32)",
+          borderBottom: "var(--bw-hair) solid var(--line)",
+          background: "var(--bg)",
+        }}
+      >
+        <FilterChip
+          active={tab === "sessions"}
+          onToggle={() => setTab("sessions")}
+        >
+          Sessions
+        </FilterChip>
+        <FilterChip
+          active={tab === "cleanup"}
+          onToggle={() => setTab("cleanup")}
+        >
+          Cleanup
+        </FilterChip>
+      </div>
+
+      {tab === "cleanup" && (
+        <div
+          style={{
+            display: "flex",
+            flex: 1,
+            minHeight: 0,
+            overflow: "auto",
+          }}
+        >
+          <div style={{ flex: 2, minWidth: 0, borderRight: "var(--bw-hair) solid var(--line)" }}>
+            <CleanupPane onTrashChanged={refresh} />
+          </div>
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <TrashDrawer onChange={refresh} />
+          </div>
+        </div>
+      )}
+
+      {tab === "sessions" && showTable && (
         <RepoFilterStrip
           groups={repoGroups}
           activeRepo={activeRepo}
@@ -256,7 +302,7 @@ export function SessionsSection(props: SessionsSectionProps = {}) {
         />
       )}
 
-      {showTable && (
+      {tab === "sessions" && showTable && (
         <div
           style={{
             padding: "var(--sp-14) var(--sp-32)",
@@ -331,7 +377,7 @@ export function SessionsSection(props: SessionsSectionProps = {}) {
         </div>
       )}
 
-      {error && sessions.length === 0 ? (
+      {tab === "sessions" && error && sessions.length === 0 ? (
         <div
           style={{
             flex: 1,
@@ -360,7 +406,7 @@ export function SessionsSection(props: SessionsSectionProps = {}) {
             Retry
           </Button>
         </div>
-      ) : (
+      ) : tab === "sessions" ? (
         <div style={{ display: "flex", minHeight: 0, flex: 1 }}>
           {showTable && (
             <div
@@ -416,7 +462,7 @@ export function SessionsSection(props: SessionsSectionProps = {}) {
             </aside>
           )}
         </div>
-      )}
+      ) : null}
 
       {moveSession && (
         <MoveSessionModal
