@@ -5,7 +5,7 @@
 
 ## What it encodes
 
-Three lines covering every place CC puts images or documents in its
+Four lines covering every place CC puts images or documents in its
 session transcripts, per `compact.ts:145-199`
 (`stripImagesFromMessages`):
 
@@ -23,6 +23,14 @@ session transcripts, per `compact.ts:145-199`
    `[document]` text stub; the `tool_result` envelope
    (`tool_use_id`, `tool`, `is_error`) and any adjacent text blocks
    are preserved.
+
+4. **User message with a `tool_result` *sibling* to top-level image
+   and document blocks**
+   `message.content = [ {type:"tool_result", content:"..."}, {type:"image"...}, {type:"document"...} ]`
+   CC produces this shape when a tool rejects and the user re-sends
+   attachments alongside the rejection reply. The `tool_result`
+   (with its `content` as a string, not an array) is untouched; the
+   sibling image/document blocks are stripped.
 
 The session envelope fields (`uuid`, `parentUuid`, `sessionId`,
 `timestamp`, `type`, `cwd`) are preserved byte-identical in intent —
