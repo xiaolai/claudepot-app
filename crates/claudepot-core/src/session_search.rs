@@ -17,6 +17,7 @@
 use crate::session::{SessionError, SessionEvent, SessionRow};
 use crate::session_export::redact_secrets;
 use serde::Serialize;
+use std::cmp::Ordering;
 use std::fs;
 use std::io::{BufRead, BufReader};
 
@@ -35,6 +36,72 @@ pub struct SearchHit {
     pub match_offset: usize,
     /// `last_ts` from the row, for sorting on caller side.
     pub last_ts: Option<chrono::DateTime<chrono::Utc>>,
+    /// Relevance score in [0.0, 1.0]. Higher is better. Rules:
+    /// 1.0 = match is bounded by non-word chars on both sides (exact phrase);
+    /// 0.7 = match starts at a word boundary (word-prefix);
+    /// 0.4 = match is inside a word (pure substring).
+    pub score: f32,
+}
+
+/// Validated user query. Rejects trimmed length < 2 so callers see the
+/// same guard the CLI and UI already apply.
+#[derive(Debug, Clone)]
+pub struct SearchQuery {
+    pub text: String,
+    pub limit: usize,
+}
+
+impl SearchQuery {
+    /// Build a query. Trims the text, returns `None` if too short.
+    /// `limit == 0` is coerced to 1 — zero-limit calls are never useful.
+    pub fn new(text: impl Into<String>, limit: usize) -> Option<Self> {
+        let text = text.into();
+        if text.trim().len() < 2 {
+            return None;
+        }
+        Some(Self {
+            text,
+            limit: limit.max(1),
+        })
+    }
+}
+
+/// Score classes. Kept internal; the externally visible number is on
+/// `SearchHit.score`.
+const SCORE_PHRASE: f32 = 1.0;
+const SCORE_PREFIX: f32 = 0.7;
+const SCORE_SUBSTRING: f32 = 0.4;
+
+/// Classify a match at `byte_off` in `haystack` given the matched byte
+/// length. "Word boundary" means the adjacent character is not
+/// alphanumeric (Unicode-aware).
+fn classify_match(haystack: &str, byte_off: usize, byte_len: usize) -> f32 {
+    let before_is_boundary = match haystack[..byte_off].chars().last() {
+        None => true,
+        Some(c) => !c.is_alphanumeric(),
+    };
+    let after_off = byte_off + byte_len;
+    let after_is_boundary = match haystack[after_off..].chars().next() {
+        None => true,
+        Some(c) => !c.is_alphanumeric(),
+    };
+    match (before_is_boundary, after_is_boundary) {
+        (true, true) => SCORE_PHRASE,
+        (true, false) => SCORE_PREFIX,
+        _ => SCORE_SUBSTRING,
+    }
+}
+
+/// Stable sort by score desc, then `last_ts` desc (newer first; `None`
+/// treated as oldest). Stable so ties in both keep input order.
+pub fn rank_hits(mut hits: Vec<SearchHit>) -> Vec<SearchHit> {
+    hits.sort_by(|a, b| {
+        b.score
+            .partial_cmp(&a.score)
+            .unwrap_or(Ordering::Equal)
+            .then_with(|| b.last_ts.cmp(&a.last_ts))
+    });
+    hits
 }
 
 /// Run a query across `rows`. Stops collecting once `limit` hits have
@@ -58,13 +125,14 @@ pub fn search_rows(
         // Fast-path: row-level fields (first_user_prompt) give us a
         // synthetic hit without opening the file.
         if let Some(fp) = &row.first_user_prompt {
-            if let Some(offset) = find_case_insensitive(fp, &needle) {
+            if let Some((off, end)) = find_case_insensitive(fp, &needle) {
                 hits.push(make_hit(
                     row,
                     "user",
                     fp,
-                    offset,
+                    off,
                     needle_char_len(&needle),
+                    end - off,
                 ));
                 if hits.len() >= limit {
                     break;
@@ -76,19 +144,19 @@ pub fn search_rows(
         scan_file(row, &needle, limit, &mut hits)?;
     }
 
-    Ok(hits)
+    Ok(rank_hits(hits))
 }
 
-/// Case-insensitive substring scan that handles Unicode. Matches are
-/// found in the lowercased haystack, then remapped to the original
-/// string by tracking how many source chars produced each lowercase
-/// char. This survives **expanding case folds** — e.g. `İ` (U+0130)
-/// lowercases to `i\u{0307}` (two chars), so a naive "count lowercase
-/// chars before the match, then walk original chars" is off by one for
-/// every expansion in the prefix.
+/// Case-insensitive substring scan that handles Unicode. Returns
+/// `(byte_start, byte_end)` in the **original** haystack string.
 ///
-/// Returns the byte offset of the first match in the original string.
-fn find_case_insensitive(haystack: &str, needle_lower: &str) -> Option<usize> {
+/// Matches are found in the lowercased haystack, then remapped to the
+/// original string by tracking how many source chars produced each
+/// lowercase char. This survives **expanding case folds** — e.g. `İ`
+/// (U+0130) lowercases to `i\u{0307}` (two chars), so a naive "count
+/// lowercase chars before the match, then walk original chars" is off
+/// by one for every expansion in the prefix.
+fn find_case_insensitive(haystack: &str, needle_lower: &str) -> Option<(usize, usize)> {
     if needle_lower.is_empty() {
         return None;
     }
@@ -110,7 +178,14 @@ fn find_case_insensitive(haystack: &str, needle_lower: &str) -> Option<usize> {
     }
 
     let lower_off = lower.find(needle_lower)?;
-    Some(src_byte_of_lower_byte[lower_off])
+    let lower_end = lower_off + needle_lower.len();
+    let src_start = src_byte_of_lower_byte[lower_off];
+    let src_end = if lower_end >= src_byte_of_lower_byte.len() {
+        haystack.len()
+    } else {
+        src_byte_of_lower_byte[lower_end]
+    };
+    Some((src_start, src_end))
 }
 
 fn needle_char_len(needle_lower: &str) -> usize {
@@ -123,6 +198,7 @@ fn make_hit(
     text: &str,
     byte_off: usize,
     needle_char_len: usize,
+    needle_byte_len: usize,
 ) -> SearchHit {
     SearchHit {
         session_id: row.session_id.clone(),
@@ -133,6 +209,7 @@ fn make_hit(
         snippet: redact_secrets(&make_snippet_chars(text, byte_off, needle_char_len)),
         match_offset: byte_off,
         last_ts: row.last_ts,
+        score: classify_match(text, byte_off, needle_byte_len),
     }
 }
 
@@ -168,8 +245,15 @@ fn scan_file(
             _ => continue,
         };
         let Some(text) = text else { continue };
-        if let Some(off) = find_case_insensitive(&text, needle) {
-            hits.push(make_hit(row, role, &text, off, needle_char_len(needle)));
+        if let Some((off, end)) = find_case_insensitive(&text, needle) {
+            hits.push(make_hit(
+                row,
+                role,
+                &text,
+                off,
+                needle_char_len(needle),
+                end - off,
+            ));
             return Ok(());
         }
         if hits.len() >= limit {
@@ -283,7 +367,7 @@ pub fn search_events<'a>(
             _ => None,
         };
         let Some(text) = text else { continue };
-        if let Some(off) = find_case_insensitive(text, &needle) {
+        if let Some((off, _end)) = find_case_insensitive(text, &needle) {
             out.push((
                 i,
                 ev,
@@ -550,6 +634,153 @@ mod tests {
         // the snippet should start from the original start, not halfway
         // into `İstanbul`.
         assert!(hits[0].2.starts_with("İstanbul") || hits[0].2.starts_with("…"));
+    }
+
+    fn synthetic_hit(score: f32, last_ts: Option<DateTime<Utc>>, id: &str) -> SearchHit {
+        SearchHit {
+            session_id: id.into(),
+            slug: "-r".into(),
+            file_path: PathBuf::from("/x"),
+            project_path: "/repo".into(),
+            role: "user".into(),
+            snippet: String::new(),
+            match_offset: 0,
+            last_ts,
+            score,
+        }
+    }
+
+    #[test]
+    fn search_query_new_rejects_short_input() {
+        assert!(SearchQuery::new("", 10).is_none());
+        assert!(SearchQuery::new(" ", 10).is_none());
+        assert!(SearchQuery::new("x", 10).is_none());
+        assert!(SearchQuery::new(" x ", 10).is_none());
+        assert!(SearchQuery::new("ok", 10).is_some());
+    }
+
+    #[test]
+    fn search_query_coerces_zero_limit_to_one() {
+        let q = SearchQuery::new("auth", 0).unwrap();
+        assert_eq!(q.limit, 1);
+    }
+
+    #[test]
+    fn classify_match_scores_phrase_prefix_substring() {
+        // "auth" as the whole word — phrase
+        assert_eq!(classify_match("auth is cool", 0, 4), SCORE_PHRASE);
+        // "auth" at start of "authentication" — word-prefix
+        assert_eq!(classify_match("authentication rules", 0, 4), SCORE_PREFIX);
+        // "auth" inside "unauthorized" — substring
+        assert_eq!(classify_match("unauthorized now", 2, 4), SCORE_SUBSTRING);
+        // "auth" bounded by punctuation — phrase
+        assert_eq!(classify_match("(auth).", 1, 4), SCORE_PHRASE);
+        // "auth" bounded by end of string — phrase
+        assert_eq!(classify_match("no auth", 3, 4), SCORE_PHRASE);
+    }
+
+    #[test]
+    fn classify_match_treats_unicode_alphanumerics_as_word_chars() {
+        // `é` is alphanumeric, so "caf" in "café latte" starts at a word
+        // boundary but ends inside a word → prefix, not phrase.
+        assert_eq!(classify_match("café latte", 0, 3), SCORE_PREFIX);
+        // "afé" inside "cafés" — inside a word on both sides.
+        assert_eq!(classify_match("cafés wars", 1, 4), SCORE_SUBSTRING);
+        // `·` (middle dot, non-alphanumeric) serves as a boundary, so
+        // "auth" between two of them is phrase-bounded.
+        assert_eq!(classify_match("a·auth·z", 3, 4), SCORE_PHRASE);
+    }
+
+    #[test]
+    fn rank_hits_sorts_by_score_then_recency() {
+        let new_ts = ts("2026-04-10T10:00:00Z");
+        let old_ts = ts("2020-01-01T00:00:00Z");
+        let hits = vec![
+            synthetic_hit(0.4, old_ts, "sub-old"),
+            synthetic_hit(1.0, old_ts, "phrase-old"),
+            synthetic_hit(1.0, new_ts, "phrase-new"),
+            synthetic_hit(0.7, new_ts, "prefix-new"),
+        ];
+        let ranked = rank_hits(hits);
+        let ids: Vec<_> = ranked.iter().map(|h| h.session_id.as_str()).collect();
+        assert_eq!(ids, vec!["phrase-new", "phrase-old", "prefix-new", "sub-old"]);
+    }
+
+    #[test]
+    fn rank_hits_is_stable_for_equal_keys() {
+        let t = ts("2026-04-10T10:00:00Z");
+        let hits = vec![
+            synthetic_hit(1.0, t, "a"),
+            synthetic_hit(1.0, t, "b"),
+            synthetic_hit(1.0, t, "c"),
+        ];
+        let ranked = rank_hits(hits);
+        // All keys equal — input order preserved.
+        let ids: Vec<_> = ranked.iter().map(|h| h.session_id.as_str()).collect();
+        assert_eq!(ids, vec!["a", "b", "c"]);
+    }
+
+    #[test]
+    fn rank_hits_puts_none_ts_after_some_ts() {
+        let t = ts("2026-04-10T10:00:00Z");
+        let hits = vec![
+            synthetic_hit(1.0, None, "none"),
+            synthetic_hit(1.0, t, "has-ts"),
+        ];
+        let ranked = rank_hits(hits);
+        let ids: Vec<_> = ranked.iter().map(|h| h.session_id.as_str()).collect();
+        assert_eq!(ids, vec!["has-ts", "none"]);
+    }
+
+    #[test]
+    fn rank_hits_empty_input_is_noop() {
+        let out = rank_hits(Vec::<SearchHit>::new());
+        assert!(out.is_empty());
+    }
+
+    #[test]
+    fn search_rows_returns_ranked_output_phrase_before_substring() {
+        let tmp = TempDir::new().unwrap();
+        let phrase_path = tmp.path().join("phrase.jsonl");
+        let sub_path = tmp.path().join("sub.jsonl");
+        // Both files contain the query, but `phrase.jsonl` has it as a
+        // standalone word; `sub.jsonl` has it inside another word.
+        write_jsonl(
+            &phrase_path,
+            &[r#"{"type":"user","message":{"role":"user","content":"discuss auth today"},"sessionId":"p"}"#],
+        );
+        write_jsonl(
+            &sub_path,
+            &[r#"{"type":"user","message":{"role":"user","content":"unauthorized access"},"sessionId":"s"}"#],
+        );
+        // Feed substring-match first so recency/input order alone would
+        // rank it first. Ranking should flip the order by score.
+        let rows = vec![
+            row("s", "-r", sub_path, None, ts("2026-04-10T10:00:00Z")),
+            row("p", "-r", phrase_path, None, ts("2020-01-01T00:00:00Z")),
+        ];
+        let hits = search_rows(&rows, "auth", 10).unwrap();
+        assert_eq!(hits.len(), 2);
+        assert_eq!(hits[0].session_id, "p");
+        assert!(hits[0].score > hits[1].score);
+    }
+
+    #[test]
+    fn search_rows_recency_breaks_ties_among_equal_scores() {
+        let older = row("old", "-r", PathBuf::new(), Some("auth matters"), ts("2020-01-01T00:00:00Z"));
+        let newer = row("new", "-r", PathBuf::new(), Some("auth matters"), ts("2026-04-10T10:00:00Z"));
+        let hits = search_rows(&[older, newer], "auth", 10).unwrap();
+        assert_eq!(hits.len(), 2);
+        assert_eq!(hits[0].session_id, "new");
+        assert_eq!(hits[1].session_id, "old");
+    }
+
+    #[test]
+    fn search_rows_populates_score_between_zero_and_one() {
+        let r = row("s", "-r", PathBuf::new(), Some("auth wins"), None);
+        let hits = search_rows(&[r], "auth", 10).unwrap();
+        assert_eq!(hits.len(), 1);
+        assert!(hits[0].score > 0.0 && hits[0].score <= 1.0);
     }
 
     #[test]
