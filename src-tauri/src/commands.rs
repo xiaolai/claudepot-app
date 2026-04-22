@@ -2614,8 +2614,31 @@ pub fn session_slim_start_all(
                 return;
             }
         };
-        let _ = claudepot_core::session_slim::execute_slim_all(&data_dir, &plan, &opts, &sink);
-        emit_terminal(&app_c, &ops_c, &op_id_c, None);
+        let report =
+            claudepot_core::session_slim::execute_slim_all(&data_dir, &plan, &opts, &sink);
+        // Propagate per-file failures to the UI. Planning errors
+        // (rows that couldn't be scanned) and execute failures are
+        // both reported — a partial success with any failures is not
+        // a clean `complete`.
+        let mut problems: Vec<String> = Vec::new();
+        for (p, e) in &plan.failed_to_plan {
+            problems.push(format!("plan {}: {e}", p.display()));
+        }
+        for (p, e) in &report.failed {
+            problems.push(format!("exec {}: {e}", p.display()));
+        }
+        let err_msg = if problems.is_empty() {
+            None
+        } else {
+            Some(format!(
+                "bulk slim finished with {} success, {} skipped, {} failed:\n{}",
+                report.succeeded.len(),
+                report.skipped_live.len(),
+                problems.len(),
+                problems.join("\n"),
+            ))
+        };
+        emit_terminal(&app_c, &ops_c, &op_id_c, err_msg);
     });
     Ok(op_id)
 }

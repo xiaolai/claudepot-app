@@ -867,16 +867,9 @@ export interface BulkSlimEntry {
 
 export interface BulkSlimPlan {
   entries: BulkSlimEntry[];
-  total_bytes_saved: number;
-  total_image_redacts: number;
-  total_document_redacts: number;
-  total_tool_result_redacts: number;
-}
-
-export interface BulkSlimReport {
-  succeeded_paths: string[];
-  skipped_live: string[];
-  failed: [string, string][];
+  /** Matched rows whose plan_slim() call errored. Surfaced so
+   *  unreadable sessions don't silently disappear from the preview. */
+  failed_to_plan: [string, string][];
   total_bytes_saved: number;
   total_image_redacts: number;
   total_document_redacts: number;
