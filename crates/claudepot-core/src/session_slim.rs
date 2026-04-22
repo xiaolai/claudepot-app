@@ -476,10 +476,18 @@ pub struct BulkSlimEntry {
 }
 
 /// Plan for a bulk `session slim --all`. Rows sorted by projected
-/// bytes saved (descending).
+/// bytes saved (descending). Entries are only the matched files where
+/// slim would actually change bytes or redact content — matched rows
+/// whose slim would be a pure no-op are dropped here, not at execute
+/// time, so the dry-run preview accurately reflects what Execute will
+/// touch.
 #[derive(Debug, Clone, Serialize)]
 pub struct BulkSlimPlan {
     pub entries: Vec<BulkSlimEntry>,
+    /// Matched files whose `plan_slim()` call itself errored (not
+    /// found, I/O, JSON parse at scan). Surfaced so one unreadable
+    /// row does not disappear from the report.
+    pub failed_to_plan: Vec<(PathBuf, String)>,
     pub total_bytes_saved: u64,
     pub total_image_redacts: u32,
     pub total_document_redacts: u32,
@@ -514,19 +522,36 @@ pub fn plan_slim_all_from_rows(
         .validate()
         .map_err(|_| SlimError::EmptyFilter)?;
     let mut entries: Vec<BulkSlimEntry> = Vec::new();
+    let mut failed_to_plan: Vec<(PathBuf, String)> = Vec::new();
     for row in rows.iter().filter(|r| filter.matches(r, now_ms)) {
-        let plan = match plan_slim(&row.file_path, opts) {
-            Ok(p) => p,
-            // Don't fail the whole plan on a single unreadable file —
-            // surface it as a failed entry at execute time instead.
-            Err(_) => continue,
-        };
-        entries.push(BulkSlimEntry {
-            session_id: row.session_id.clone(),
-            file_path: row.file_path.clone(),
-            project_path: row.project_path.clone(),
-            plan,
-        });
+        match plan_slim(&row.file_path, opts) {
+            Ok(plan) => {
+                // Skip matched rows where slim would be a no-op —
+                // no bytes to save, no blocks to redact. Execute
+                // would rewrite them anyway (churning mtime and
+                // producing empty trash entries), and the user sees
+                // a noisy preview listing files that didn't need to
+                // be there.
+                let has_effect = plan.bytes_saved() > 0
+                    || plan.redact_count > 0
+                    || plan.image_redact_count > 0
+                    || plan.document_redact_count > 0;
+                if !has_effect {
+                    continue;
+                }
+                entries.push(BulkSlimEntry {
+                    session_id: row.session_id.clone(),
+                    file_path: row.file_path.clone(),
+                    project_path: row.project_path.clone(),
+                    plan,
+                });
+            }
+            Err(e) => {
+                // Don't disappear unreadable rows — the caller can
+                // still see them in the report and decide.
+                failed_to_plan.push((row.file_path.clone(), e.to_string()));
+            }
+        }
     }
     // Sort by projected bytes-saved descending. Biggest wins first.
     entries.sort_by(|a, b| b.plan.bytes_saved().cmp(&a.plan.bytes_saved()));
@@ -536,6 +561,7 @@ pub fn plan_slim_all_from_rows(
     let total_tool_result_redacts = entries.iter().map(|e| e.plan.redact_count).sum();
     Ok(BulkSlimPlan {
         entries,
+        failed_to_plan,
         total_bytes_saved,
         total_image_redacts,
         total_document_redacts,
@@ -1519,10 +1545,9 @@ mod tests {
 
     #[test]
     fn bulk_execute_isolates_failures_per_file() {
-        // One existing file, one missing path. The missing-path entry
-        // is forcibly inserted via a hand-built BulkSlimEntry so we
-        // don't depend on the planner filtering it (the planner drops
-        // unreadables during planning).
+        // Start from a good file, then build a plan by hand containing
+        // a matching row plus a hand-inserted "missing" row. Covers
+        // the isolation contract at execute time specifically.
         let tmp = TempDir::new().unwrap();
         let good = mk_image_session_on_disk(tmp.path(), "g", "good", 2, 512, 10 * 86_400);
         let missing_path = tmp.path().join("nonexistent.jsonl");
@@ -1550,6 +1575,7 @@ mod tests {
                     },
                 },
             ],
+            failed_to_plan: vec![],
             total_bytes_saved: 0,
             total_image_redacts: 0,
             total_document_redacts: 0,
@@ -1562,5 +1588,99 @@ mod tests {
         assert_eq!(report.failed.len(), 1);
         assert!(report.skipped_live.is_empty());
         assert_eq!(report.failed[0].0, missing_path);
+    }
+
+    #[test]
+    fn bulk_plan_surfaces_unreadable_rows_via_failed_to_plan() {
+        // The planner previously silently dropped rows whose
+        // `plan_slim()` errored — that contradicted the per-file
+        // isolation contract. Now those rows end up in
+        // `failed_to_plan` so the user sees them in the report.
+        let tmp = TempDir::new().unwrap();
+        let good = mk_image_session_on_disk(tmp.path(), "a", "aaa", 2, 512, 10 * 86_400);
+        // A row whose file does not exist at all. list_all_sessions
+        // could not produce one in practice, but this covers the
+        // contract: if plan_slim errors for any reason, the row is
+        // reported.
+        let mut missing_row = good.clone();
+        missing_row.session_id = "missing".to_string();
+        missing_row.file_path = tmp.path().join("absent.jsonl");
+        let rows = vec![good.clone(), missing_row];
+        let filter = crate::session_prune::PruneFilter {
+            older_than: Some(std::time::Duration::from_secs(7 * 86_400)),
+            ..Default::default()
+        };
+        let plan = plan_slim_all_from_rows(
+            &rows,
+            &filter,
+            &bulk_opts(),
+            chrono::Utc::now().timestamp_millis(),
+        )
+        .unwrap();
+        assert_eq!(plan.entries.len(), 1, "only the good row plans successfully");
+        assert_eq!(plan.failed_to_plan.len(), 1);
+        assert!(plan.failed_to_plan[0].0.ends_with("absent.jsonl"));
+    }
+
+    #[test]
+    fn bulk_plan_drops_matched_rows_with_zero_slim_effect() {
+        // A session with no images and no oversized tool_results
+        // matches the filter but would be a pure no-op under slim.
+        // Those rows must NOT appear in the plan — executing them
+        // would churn mtime and create empty trash entries.
+        let tmp = TempDir::new().unwrap();
+        // Build a plain-text-only session (no images, no tool_results).
+        let dir = tmp.path().join("projects").join("-pP");
+        fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("plain-uuid.jsonl");
+        fs::write(
+            &path,
+            r#"{"type":"user","uuid":"u1","sessionId":"plain-uuid","message":{"role":"user","content":"hi"}}
+{"type":"assistant","uuid":"a1","sessionId":"plain-uuid","message":{"role":"assistant","content":[{"type":"text","text":"hello"}]}}
+"#,
+        )
+        .unwrap();
+        let size = fs::metadata(&path).unwrap().len();
+        let now = chrono::Utc::now();
+        let plain_row = crate::session::SessionRow {
+            session_id: "plain-uuid".to_string(),
+            slug: "-pP".to_string(),
+            file_path: path,
+            file_size_bytes: size,
+            last_modified: Some(SystemTime::now()),
+            project_path: "/repo/pP".to_string(),
+            project_from_transcript: true,
+            first_ts: None,
+            last_ts: Some(now - chrono::Duration::seconds(10 * 86_400)),
+            event_count: 2,
+            message_count: 2,
+            user_message_count: 1,
+            assistant_message_count: 1,
+            first_user_prompt: None,
+            models: vec![],
+            tokens: crate::session::TokenUsage::default(),
+            git_branch: None,
+            cc_version: None,
+            display_slug: None,
+            has_error: false,
+            is_sidechain: false,
+        };
+        let img_row = mk_image_session_on_disk(tmp.path(), "i", "img", 2, 512, 10 * 86_400);
+        let rows = vec![plain_row, img_row];
+        let filter = crate::session_prune::PruneFilter {
+            older_than: Some(std::time::Duration::from_secs(7 * 86_400)),
+            ..Default::default()
+        };
+        let plan = plan_slim_all_from_rows(
+            &rows,
+            &filter,
+            &bulk_opts(),
+            chrono::Utc::now().timestamp_millis(),
+        )
+        .unwrap();
+        // Only the image session is actually slimmable.
+        assert_eq!(plan.entries.len(), 1);
+        assert_eq!(plan.entries[0].session_id, "img");
+        assert!(plan.failed_to_plan.is_empty());
     }
 }
