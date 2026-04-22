@@ -157,3 +157,176 @@ fn slim_json_emits_plan_struct_on_dry_run() {
     assert!(plan.get("redact_count").is_some());
     assert!(plan.get("tools_affected").is_some());
 }
+
+// -- strip-images / strip-documents --------------------------------
+
+fn mk_image_session(
+    config: &std::path::Path,
+    slug: &str,
+    uuid: &str,
+    img_b64_len: usize,
+    doc_b64_len: usize,
+) -> PathBuf {
+    let dir = config.join("projects").join(slug);
+    fs::create_dir_all(&dir).unwrap();
+    let path = dir.join(format!("{uuid}.jsonl"));
+    let img = "A".repeat(img_b64_len);
+    let doc = "B".repeat(doc_b64_len);
+    // Three lines: plain user text, top-level user image, top-level
+    // user document. Mirrors the fixture layout.
+    let body = format!(
+        r#"{{"type":"user","uuid":"u1","sessionId":"{uuid}","message":{{"role":"user","content":"hi"}}}}
+{{"type":"user","uuid":"u2","parentUuid":"u1","sessionId":"{uuid}","message":{{"role":"user","content":[{{"type":"image","source":{{"type":"base64","media_type":"image/png","data":"{img}"}}}}]}}}}
+{{"type":"user","uuid":"u3","parentUuid":"u2","sessionId":"{uuid}","message":{{"role":"user","content":[{{"type":"document","source":{{"type":"base64","media_type":"application/pdf","data":"{doc}"}}}}]}}}}
+"#
+    );
+    fs::write(&path, body).unwrap();
+    path
+}
+
+#[test]
+fn slim_strip_images_dry_run_prints_image_count() {
+    let tmp = TempDir::new().unwrap();
+    let config = tmp.path().join("cfg");
+    let data = tmp.path().join("data");
+    fs::create_dir_all(&config).unwrap();
+    fs::create_dir_all(&data).unwrap();
+    let path = mk_image_session(
+        &config,
+        "-slug-img",
+        "eeeeeeee-eeee-eeee-eeee-000000000005",
+        512,
+        512,
+    );
+    let (stdout, _stderr, code) = run(
+        &config,
+        &data,
+        &[
+            "session",
+            "slim",
+            path.to_str().unwrap(),
+            "--strip-images",
+        ],
+    );
+    assert_eq!(code, 0, "stdout={stdout}");
+    assert!(stdout.contains("Plan (dry-run)"));
+    assert!(
+        stdout.contains("Images redacted:     1"),
+        "stdout missing image line:\n{stdout}"
+    );
+    assert!(
+        !stdout.contains("Documents redacted:"),
+        "docs line must not appear when --strip-documents is off"
+    );
+}
+
+#[test]
+fn slim_strip_documents_dry_run_prints_document_count() {
+    let tmp = TempDir::new().unwrap();
+    let config = tmp.path().join("cfg");
+    let data = tmp.path().join("data");
+    fs::create_dir_all(&config).unwrap();
+    fs::create_dir_all(&data).unwrap();
+    let path = mk_image_session(
+        &config,
+        "-slug-doc",
+        "ffffffff-ffff-ffff-ffff-000000000006",
+        512,
+        512,
+    );
+    let (stdout, _stderr, code) = run(
+        &config,
+        &data,
+        &[
+            "session",
+            "slim",
+            path.to_str().unwrap(),
+            "--strip-documents",
+        ],
+    );
+    assert_eq!(code, 0, "stdout={stdout}");
+    assert!(stdout.contains("Documents redacted:  1"));
+    assert!(!stdout.contains("Images redacted:"));
+}
+
+#[test]
+fn slim_strip_images_execute_rewrites_and_removes_base64() {
+    let tmp = TempDir::new().unwrap();
+    let config = tmp.path().join("cfg");
+    let data = tmp.path().join("data");
+    fs::create_dir_all(&config).unwrap();
+    fs::create_dir_all(&data).unwrap();
+    let path = mk_image_session(
+        &config,
+        "-slug-exec",
+        "aaaaaaaa-bbbb-cccc-dddd-000000000007",
+        4096,
+        4096,
+    );
+    let before = fs::read_to_string(&path).unwrap();
+    assert!(before.contains(&"A".repeat(4096)));
+    let (stdout, _stderr, code) = run(
+        &config,
+        &data,
+        &[
+            "session",
+            "slim",
+            path.to_str().unwrap(),
+            "--strip-images",
+            "--strip-documents",
+            "--execute",
+        ],
+    );
+    assert_eq!(code, 0, "stdout={stdout}");
+    assert!(stdout.contains("Images redacted:     1"));
+    assert!(stdout.contains("Documents redacted:  1"));
+    let after = fs::read_to_string(&path).unwrap();
+    // Base64 payloads gone; stubs present.
+    assert!(!after.contains(&"A".repeat(4096)));
+    assert!(!after.contains(&"B".repeat(4096)));
+    assert!(after.contains("\"[image]\""));
+    assert!(after.contains("\"[document]\""));
+    // UUID chain preserved.
+    for uuid in ["u1", "u2", "u3"] {
+        assert!(after.contains(&format!("\"{uuid}\"")));
+    }
+    // Trash carries the pre-slim snapshot.
+    let (stdout, _, _) = run(&config, &data, &["--json", "session", "trash", "list"]);
+    let listing: serde_json::Value = serde_json::from_str(&stdout).unwrap();
+    let entries = listing["entries"].as_array().unwrap();
+    assert!(entries
+        .iter()
+        .any(|e| e["kind"].as_str().unwrap() == "slim"));
+}
+
+#[test]
+fn slim_baseline_without_new_flags_unchanged() {
+    // When neither --strip-images nor --strip-documents is passed and
+    // no oversized tool_results exist, the output shape is identical
+    // to the pre-flag behavior.
+    let tmp = TempDir::new().unwrap();
+    let config = tmp.path().join("cfg");
+    let data = tmp.path().join("data");
+    fs::create_dir_all(&config).unwrap();
+    fs::create_dir_all(&data).unwrap();
+    let path = mk_image_session(
+        &config,
+        "-slug-base",
+        "11111111-2222-3333-4444-000000000008",
+        256,
+        256,
+    );
+    let (stdout, _stderr, code) = run(
+        &config,
+        &data,
+        &[
+            "session",
+            "slim",
+            path.to_str().unwrap(),
+        ],
+    );
+    assert_eq!(code, 0);
+    assert!(stdout.contains("Plan (dry-run)"));
+    assert!(!stdout.contains("Images redacted:"));
+    assert!(!stdout.contains("Documents redacted:"));
+}

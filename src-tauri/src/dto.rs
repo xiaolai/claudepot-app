@@ -1581,6 +1581,10 @@ pub struct SlimOptsDto {
     pub drop_tool_results_over_bytes: u64,
     #[serde(default)]
     pub exclude_tools: Vec<String>,
+    #[serde(default)]
+    pub strip_images: bool,
+    #[serde(default)]
+    pub strip_documents: bool,
 }
 
 #[derive(Serialize)]
@@ -1588,6 +1592,8 @@ pub struct SlimPlanDto {
     pub original_bytes: u64,
     pub projected_bytes: u64,
     pub redact_count: u32,
+    pub image_redact_count: u32,
+    pub document_redact_count: u32,
     pub tools_affected: Vec<String>,
     pub bytes_saved: u64,
 }
@@ -1597,6 +1603,8 @@ pub struct SlimReportDto {
     pub original_bytes: u64,
     pub final_bytes: u64,
     pub redact_count: u32,
+    pub image_redact_count: u32,
+    pub document_redact_count: u32,
     pub trashed_original: String,
     pub bytes_saved: u64,
 }
@@ -1607,6 +1615,8 @@ impl From<&claudepot_core::session_slim::SlimPlan> for SlimPlanDto {
             original_bytes: p.original_bytes,
             projected_bytes: p.projected_bytes,
             redact_count: p.redact_count,
+            image_redact_count: p.image_redact_count,
+            document_redact_count: p.document_redact_count,
             tools_affected: p.tools_affected.clone(),
             bytes_saved: p.bytes_saved(),
         }
@@ -1619,6 +1629,8 @@ impl From<&claudepot_core::session_slim::SlimReport> for SlimReportDto {
             original_bytes: r.original_bytes,
             final_bytes: r.final_bytes,
             redact_count: r.redact_count,
+            image_redact_count: r.image_redact_count,
+            document_redact_count: r.document_redact_count,
             trashed_original: r.trashed_original.to_string_lossy().to_string(),
             bytes_saved: r.bytes_saved(),
         }
