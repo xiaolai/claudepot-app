@@ -2538,6 +2538,89 @@ pub fn session_slim_start(
 }
 
 #[tauri::command]
+pub fn session_slim_plan_all(
+    filter: crate::dto::PruneFilterDto,
+    opts: crate::dto::SlimOptsDto,
+) -> Result<crate::dto::BulkSlimPlanDto, String> {
+    let filter = claudepot_core::session_prune::PruneFilter {
+        older_than: filter.older_than_secs.map(std::time::Duration::from_secs),
+        larger_than: filter.larger_than_bytes,
+        project: filter.project.into_iter().map(std::path::PathBuf::from).collect(),
+        has_error: filter.has_error,
+        is_sidechain: filter.is_sidechain,
+    };
+    let opts = claudepot_core::session_slim::SlimOpts {
+        drop_tool_results_over_bytes: opts.drop_tool_results_over_bytes,
+        exclude_tools: opts.exclude_tools,
+        strip_images: opts.strip_images,
+        strip_documents: opts.strip_documents,
+    };
+    let config_dir = paths::claude_config_dir();
+    let plan = claudepot_core::session_slim::plan_slim_all(&config_dir, &filter, &opts)
+        .map_err(|e| format!("plan_slim_all: {e}"))?;
+    Ok((&plan).into())
+}
+
+#[tauri::command]
+pub fn session_slim_start_all(
+    filter: crate::dto::PruneFilterDto,
+    opts: crate::dto::SlimOptsDto,
+    app: AppHandle,
+    ops: State<RunningOps>,
+) -> Result<String, String> {
+    let filter = claudepot_core::session_prune::PruneFilter {
+        older_than: filter.older_than_secs.map(std::time::Duration::from_secs),
+        larger_than: filter.larger_than_bytes,
+        project: filter.project.into_iter().map(std::path::PathBuf::from).collect(),
+        has_error: filter.has_error,
+        is_sidechain: filter.is_sidechain,
+    };
+    let opts = claudepot_core::session_slim::SlimOpts {
+        drop_tool_results_over_bytes: opts.drop_tool_results_over_bytes,
+        exclude_tools: opts.exclude_tools,
+        strip_images: opts.strip_images,
+        strip_documents: opts.strip_documents,
+    };
+    let op_id = new_op_id();
+    ops.insert(RunningOpInfo {
+        op_id: op_id.clone(),
+        kind: OpKind::SessionSlim,
+        old_path: "--all".to_string(),
+        new_path: "--all".to_string(),
+        current_phase: None,
+        sub_progress: None,
+        status: OpStatus::Running,
+        started_unix_secs: now_unix_secs(),
+        last_error: None,
+        move_result: None,
+        clean_result: None,
+        failed_journal_id: None,
+    });
+    let app_c = app.clone();
+    let ops_c = ops.inner().clone();
+    let op_id_c = op_id.clone();
+    std::thread::spawn(move || {
+        let sink = TauriProgressSink {
+            app: app_c.clone(),
+            op_id: op_id_c.clone(),
+            ops: ops_c.clone(),
+        };
+        let config_dir = paths::claude_config_dir();
+        let data_dir = paths::claudepot_data_dir();
+        let plan = match claudepot_core::session_slim::plan_slim_all(&config_dir, &filter, &opts) {
+            Ok(p) => p,
+            Err(e) => {
+                emit_terminal(&app_c, &ops_c, &op_id_c, Some(e.to_string()));
+                return;
+            }
+        };
+        let _ = claudepot_core::session_slim::execute_slim_all(&data_dir, &plan, &opts, &sink);
+        emit_terminal(&app_c, &ops_c, &op_id_c, None);
+    });
+    Ok(op_id)
+}
+
+#[tauri::command]
 pub fn session_trash_list(
     older_than_secs: Option<u64>,
 ) -> Result<crate::dto::TrashListingDto, String> {
