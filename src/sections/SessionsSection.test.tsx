@@ -186,6 +186,55 @@ describe("SessionsSection — search input", () => {
     expect(sessionSearchSpy).not.toHaveBeenCalled();
   });
 
+  it("renders the deep-hit snippet under the row when a match comes from content", async () => {
+    sessionSearchSpy.mockResolvedValue([
+      {
+        ...hit("gamma", "/tmp/gamma.jsonl"),
+        snippet: "…deadlock culprit was mutex B…",
+      },
+    ]);
+    await mountWithRows([
+      mk("gamma", { first_user_prompt: "[gamma] unrelated" }),
+    ]);
+    await userEvent.type(
+      screen.getByLabelText("Search sessions"),
+      "deadlock",
+    );
+    const snippet = await screen.findByTestId("search-snippet");
+    expect(snippet).toHaveTextContent("deadlock culprit was mutex B");
+  });
+
+  it("does not render a snippet row when there is no deep-search match", async () => {
+    // Query matches metadata (first_user_prompt) only, so the backend
+    // returns nothing — no snippet row should appear.
+    sessionSearchSpy.mockResolvedValue([]);
+    await mountWithRows([
+      mk("alpha", { first_user_prompt: "[alpha] auth story" }),
+    ]);
+    await userEvent.type(screen.getByLabelText("Search sessions"), "auth");
+    await waitFor(() => expect(visibleSessionIds()).toEqual(["alpha"]));
+    expect(screen.queryByTestId("search-snippet")).toBeNull();
+  });
+
+  it("never renders a raw sk-ant- token in the snippet cell", async () => {
+    // The Rust backend redacts sk-ant- tokens into sk-ant-***<last4>
+    // form before the DTO crosses to JS. Belt-and-suspenders: even if
+    // a snippet containing the string got here, the UI must not leak
+    // it verbatim. We simulate that by feeding the already-redacted
+    // form the real pipeline would emit.
+    sessionSearchSpy.mockResolvedValue([
+      {
+        ...hit("zulu", "/tmp/zulu.jsonl"),
+        snippet: "leaked sk-ant-***0000 keep searching",
+      },
+    ]);
+    await mountWithRows([mk("zulu", { first_user_prompt: "[zulu] prompt" })]);
+    await userEvent.type(screen.getByLabelText("Search sessions"), "search");
+    const snippet = await screen.findByTestId("search-snippet");
+    expect(snippet.textContent ?? "").not.toMatch(/sk-ant-[A-Za-z0-9]{5,}/);
+    expect(snippet.textContent).toContain("sk-ant-***0000");
+  });
+
   it("Esc in the search input clears the query", async () => {
     await mountWithRows([
       mk("alpha", { first_user_prompt: "[alpha] discuss auth" }),

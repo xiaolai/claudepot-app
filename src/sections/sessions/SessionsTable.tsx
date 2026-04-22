@@ -34,6 +34,7 @@ export function SessionsTable({
   selectedId,
   onSelect,
   onContextMenu,
+  searchSnippets,
 }: {
   sessions: SessionRow[];
   filter: SessionFilter;
@@ -44,6 +45,12 @@ export function SessionsTable({
   /** Called with `file_path` (unique per row on disk). */
   onSelect: (filePath: string) => void;
   onContextMenu?: (e: MouseEvent, s: SessionRow) => void;
+  /**
+   * Optional map from `file_path` → snippet (already redacted by the
+   * backend). Rows whose path appears here show the snippet beneath
+   * the metadata line; rows that aren't in the map render unchanged.
+   */
+  searchSnippets?: Map<string, string>;
 }) {
   const [sort, setSort] = useState<{ key: SortKey; dir: SortDir }>({
     key: "last_active",
@@ -176,6 +183,7 @@ export function SessionsTable({
               active={s.file_path === selectedId}
               onSelect={onSelect}
               onContextMenu={onContextMenu}
+              snippet={searchSnippets?.get(s.file_path)}
             />
           ))}
         </ul>
@@ -189,11 +197,15 @@ function SessionRowView({
   active,
   onSelect,
   onContextMenu,
+  snippet,
 }: {
   session: SessionRow;
   active: boolean;
   onSelect: (filePath: string) => void;
   onContextMenu?: (e: MouseEvent, s: SessionRow) => void;
+  /** Redacted match snippet from the deep search; rendered under the
+   * metadata line when present. */
+  snippet?: string;
 }) {
   const [hover, setHover] = useState(false);
   const lastTs = bestTimestampMs(s.last_ts, s.last_modified_ms);
@@ -318,6 +330,23 @@ function SessionRowView({
             </>
           )}
         </div>
+        {snippet && (
+          <div
+            data-testid="search-snippet"
+            title={snippet}
+            style={{
+              marginTop: "var(--sp-4)",
+              color: "var(--fg-muted)",
+              fontSize: "var(--fs-xs)",
+              whiteSpace: "nowrap",
+              overflow: "hidden",
+              textOverflow: "ellipsis",
+              fontStyle: "italic",
+            }}
+          >
+            {snippet}
+          </div>
+        )}
       </div>
 
       <div style={{ minWidth: 0, overflow: "hidden" }}>
