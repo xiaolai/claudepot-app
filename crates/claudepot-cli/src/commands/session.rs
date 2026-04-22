@@ -582,7 +582,7 @@ pub fn search_cmd(ctx: &AppContext, query: &str, limit: usize) -> Result<()> {
     );
     println!();
     for h in &hits {
-        println!("{}  [{}]", h.session_id, h.role);
+        println!("{}  [{}]  score={:.2}", h.session_id, h.role, h.score);
         println!("  path:   {}", h.file_path.display());
         println!("  match:  {}", h.snippet);
         println!();
