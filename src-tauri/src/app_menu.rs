@@ -24,7 +24,7 @@ pub fn install<R: Runtime>(app: &AppHandle<R>) -> Result<(), String> {
         .name(Some("Claudepot"))
         .version(Some(env!("CARGO_PKG_VERSION")))
         .copyright(Some("© HANDO K.K."))
-        .website(Some("https://github.com/xiaolai/com.claudepot.app"))
+        .website(Some("https://github.com/xiaolai/claudepot-app"))
         .website_label(Some("GitHub"))
         .build();
 
@@ -184,7 +184,7 @@ pub fn handle_menu_event<R: Runtime>(app: &AppHandle<R>, id: &str) {
         return;
     }
     if id == "app-menu:help:github" {
-        let url = "https://github.com/xiaolai/com.claudepot.app";
+        let url = "https://github.com/xiaolai/claudepot-app";
         #[cfg(target_os = "macos")]
         let _ = std::process::Command::new("open").arg(url).spawn();
         #[cfg(target_os = "linux")]
