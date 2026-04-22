@@ -6,48 +6,33 @@ import {
   useRef,
   useState,
 } from "react";
-import { api } from "../api";
-import { ContextMenu, type ContextMenuItem } from "../components/ContextMenu";
+import { copyToClipboard } from "../lib/copyToClipboard";
+import { useSessionsData } from "../hooks/useSessionsData";
+import { ContextMenu } from "../components/ContextMenu";
 import { Button } from "../components/primitives/Button";
-import { FilterChip } from "../components/primitives/FilterChip";
-import { Glyph } from "../components/primitives/Glyph";
 import { IconButton } from "../components/primitives/IconButton";
-import { Input } from "../components/primitives/Input";
 import { Toast } from "../components/primitives/Toast";
 import { useGlobalShortcuts } from "../hooks/useGlobalShortcuts";
 import { useSessionSearch } from "../hooks/useSessionSearch";
 import { useCompactHeader, useSplitView } from "../hooks/useWindowWidth";
 import { NF } from "../icons";
 import { ScreenHeader } from "../shell/ScreenHeader";
-import type { ProjectInfo, RepositoryGroup, SessionRow } from "../types";
+import type { SessionRow } from "../types";
 import { MoveSessionModal } from "./projects/MoveSessionModal";
 import { CleanupPane } from "./sessions/CleanupPane";
-import {
-  RepoFilterStrip,
-  filterSessionsByRepo,
-} from "./sessions/RepoFilterStrip";
-import { SessionDetail } from "./sessions/SessionDetail";
+import { SectionTab } from "./sessions/components/SectionTab";
+import { SessionsTabPanel } from "./sessions/components/SessionsTabPanel";
+import { buildSessionContextMenuItems } from "./sessions/sessionsContextMenu";
+import { filterSessionsByRepo } from "./sessions/RepoFilterStrip";
 import {
   buildSessionSearchHaystack,
   matchesQuery,
 } from "./sessions/sessionSearchIndex";
 import {
-  SessionsTable,
   countSessionStatus,
   type SessionFilter,
 } from "./sessions/SessionsTable";
 import { TrashDrawer } from "./sessions/TrashDrawer";
-
-/**
- * Toggleable chips: each flips the filter between "all" and its own
- * value. Two chips active at once is not a supported state — picking
- * one deselects the other (mutual exclusion preserves the existing
- * `SessionFilter` enum shape).
- */
-const FILTER_CHIPS: { id: Exclude<SessionFilter, "all">; label: string }[] = [
-  { id: "errors", label: "Errors" },
-  { id: "sidechain", label: "Agents" },
-];
 
 /**
  * Sessions tab — a flat, cross-project index of every CC session on
@@ -77,12 +62,7 @@ export interface SessionsSectionProps {
 
 export function SessionsSection(props: SessionsSectionProps = {}) {
   const { initialSelectedPath = null, onInitialSelectedPathConsumed } = props;
-  const [sessions, setSessions] = useState<SessionRow[]>([]);
-  const [projects, setProjects] = useState<ProjectInfo[]>([]);
-  const [repoGroups, setRepoGroups] = useState<RepositoryGroup[] | null>(null);
   const [activeRepo, setActiveRepo] = useState<string | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
   /** The file_path of the selected row — globally unique on disk.
    * We key selection by path (not session_id) because CC can end up
    * with two .jsonl files that share a session_id (e.g. an interrupted
@@ -100,68 +80,36 @@ export function SessionsSection(props: SessionsSectionProps = {}) {
   } | null>(null);
   const [moveSession, setMoveSession] = useState<SessionRow | null>(null);
 
-  const tokenRef = useRef(0);
-  const mountedRef = useRef(true);
-  useEffect(() => {
-    mountedRef.current = true;
-    return () => {
-      mountedRef.current = false;
-    };
-  }, []);
+  // Data lifecycle (refresh + Promise.allSettled + cancellation token)
+  // lives in the hook. The hook surfaces secondary-fetch failures via
+  // the `onSecondaryError` callback, which we bridge to the toast.
+  const {
+    sessions,
+    projects,
+    repoGroups,
+    loading,
+    error,
+    refresh,
+  } = useSessionsData({ onSecondaryError: setToast });
 
-  const refresh = useCallback(() => {
-    const myToken = ++tokenRef.current;
-    setLoading(true);
-    setError(null);
-    Promise.all([
-      api.sessionListAll(),
-      api.projectList(),
-      // Worktree grouping is optional — the table still works without
-      // it, so a failure degrades to a missing RepoFilterStrip rather
-      // than a top-level error. Log it in dev so the absence is
-      // observable during diagnosis.
-      api.sessionWorktreeGroups().catch((e) => {
-        if (import.meta.env.DEV) {
-          // eslint-disable-next-line no-console
-          console.warn(
-            "[SessionsSection] sessionWorktreeGroups failed; " +
-              "RepoFilterStrip will not render",
-            e,
-          );
-        }
-        return null;
-      }),
-    ])
-      .then(([ss, ps, groups]) => {
-        if (!mountedRef.current || myToken !== tokenRef.current) return;
-        setSessions(ss);
-        setProjects(ps);
-        setRepoGroups(groups);
-        setLoading(false);
-        // Drop the selection if it no longer exists.
-        setSelectedPath((prev) =>
-          prev && ss.some((s) => s.file_path === prev) ? prev : null,
-        );
-        // Drop the active repo id if the new groups don't contain it.
-        // Id is `repo_root` for git-tracked repos, `label` for no-repo.
-        setActiveRepo((prev) =>
-          prev &&
-          groups &&
-          groups.some((g) => (g.repo_root ?? g.label) === prev)
-            ? prev
-            : null,
-        );
-      })
-      .catch((e) => {
-        if (!mountedRef.current || myToken !== tokenRef.current) return;
-        setError(String(e));
-        setLoading(false);
-      });
-  }, []);
-
+  // Selection / repo-filter pruning lives here (not in the hook)
+  // because both are owned by this component. Run as effects on the
+  // dataset, so a stale selection or repo id from a prior dataset
+  // self-clears once `sessions` / `repoGroups` lands.
   useEffect(() => {
-    refresh();
-  }, [refresh]);
+    setSelectedPath((prev) =>
+      prev && sessions.some((s) => s.file_path === prev) ? prev : null,
+    );
+  }, [sessions]);
+  useEffect(() => {
+    setActiveRepo((prev) =>
+      prev &&
+      repoGroups &&
+      repoGroups.some((g) => (g.repo_root ?? g.label) === prev)
+        ? prev
+        : null,
+    );
+  }, [repoGroups]);
 
   // Consume the deep-link path from `initialSelectedPath` exactly once
   // per mount. Runs when the prop flips from falsy to a value — the
@@ -267,16 +215,34 @@ export function SessionsSection(props: SessionsSectionProps = {}) {
   const showDetail = selectedPath !== null;
   const showTable = splitView || selectedPath === null;
 
+  // Count the rows the table will actually render. Includes every
+  // narrowing the user applied: repo (scoped), query (deferred +
+  // deep-hit), AND the status chip (`filter`). Without this last
+  // step the subtitle would announce a global count while the table
+  // is scoped to one status filter — a UI lie. Counting here mirrors
+  // the same predicate the table uses; the duplication is intentional
+  // because `SessionsTable` owns the sort, not the filter, and we
+  // need the count before the sort runs.
+  const visibleCount = useMemo(() => {
+    if (filter === "all") return filteredByQuery.length;
+    return filteredByQuery.reduce((n, s) => {
+      if (filter === "errors" && s.has_error) return n + 1;
+      if (filter === "sidechain" && s.is_sidechain) return n + 1;
+      return n;
+    }, 0);
+  }, [filteredByQuery, filter]);
+
   const subtitle = (() => {
     if (error && sessions.length === 0) return "Couldn't load sessions.";
     const total = sessions.length;
     if (total === 0) return "No sessions yet. Run `claude` to start one.";
-    // Subtitle narrows off the deferred value so it stays stable with
-    // the visible list — showing "12 of 9321" while the table still
-    // has 9321 rows (one tick behind) would lie about the UI state.
-    const narrowed = deferredQuery.trim() && filteredByQuery.length !== total;
+    // Narrowed if any of: query, repo, or status filter is active.
+    // Use deferredQuery (not raw query) for the same reason the table
+    // does — a one-tick discrepancy between subtitle and visible rows
+    // would lie about the UI state.
+    const narrowed = visibleCount !== total;
     if (narrowed) {
-      return `${filteredByQuery.length} of ${total} session${
+      return `${visibleCount} of ${total} session${
         total === 1 ? "" : "s"
       } shown`;
     }
@@ -324,22 +290,27 @@ export function SessionsSection(props: SessionsSectionProps = {}) {
           background: "var(--bg)",
         }}
       >
-        <FilterChip
+        <SectionTab
+          id="sessions-tab-sessions"
+          panelId="sessions-tab-panel-sessions"
+          label="Sessions"
           active={tab === "sessions"}
-          onToggle={() => setTab("sessions")}
-        >
-          Sessions
-        </FilterChip>
-        <FilterChip
+          onSelect={() => setTab("sessions")}
+        />
+        <SectionTab
+          id="sessions-tab-cleanup"
+          panelId="sessions-tab-panel-cleanup"
+          label="Cleanup"
           active={tab === "cleanup"}
-          onToggle={() => setTab("cleanup")}
-        >
-          Cleanup
-        </FilterChip>
+          onSelect={() => setTab("cleanup")}
+        />
       </div>
 
       {tab === "cleanup" && (
         <div
+          id="sessions-tab-panel-cleanup"
+          role="tabpanel"
+          aria-labelledby="sessions-tab-cleanup"
           style={{
             display: "flex",
             flex: 1,
@@ -356,179 +327,34 @@ export function SessionsSection(props: SessionsSectionProps = {}) {
         </div>
       )}
 
-      {tab === "sessions" && showTable && (
-        <RepoFilterStrip
-          groups={repoGroups}
+      {tab === "sessions" && (
+        <SessionsTabPanel
+          showTable={showTable}
+          showDetail={showDetail}
+          splitView={splitView}
+          repoGroups={repoGroups}
           activeRepo={activeRepo}
-          onChange={setActiveRepo}
+          setActiveRepo={setActiveRepo}
+          query={query}
+          setQuery={setQuery}
+          filter={filter}
+          setFilter={setFilter}
+          counts={counts}
+          loading={loading}
+          error={error}
+          sessions={sessions}
+          filteredByQuery={filteredByQuery}
+          searchSnippets={searchSnippets}
+          selectedPath={selectedPath}
+          setSelectedPath={setSelectedPath}
+          projects={projects}
+          detailRefreshSignal={detailRefreshSignal}
+          setDetailRefreshSignal={setDetailRefreshSignal}
+          onContextMenu={handleContextMenu}
+          onRefresh={refresh}
+          setToast={setToast}
         />
       )}
-
-      {tab === "sessions" && showTable && (
-        <div
-          style={{
-            padding: "var(--sp-14) var(--sp-32)",
-            borderBottom: "var(--bw-hair) solid var(--line)",
-            display: "flex",
-            flexWrap: "wrap",
-            gap: "var(--sp-12)",
-            alignItems: "center",
-            background: "var(--bg)",
-            flexShrink: 0,
-          }}
-        >
-          <Input
-            glyph={NF.search}
-            placeholder="Search project, prompt, content, model, or id"
-            value={query}
-            onChange={(e) => setQuery(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === "Escape" && query.length > 0) {
-                e.preventDefault();
-                e.stopPropagation();
-                setQuery("");
-              }
-            }}
-            style={{
-              flex: "1 1 var(--filter-input-width)",
-              minWidth: "var(--filter-input-min)",
-              maxWidth: "var(--filter-input-width)",
-            }}
-            aria-label="Search sessions"
-          />
-
-          <div
-            role="group"
-            aria-label="Session filters"
-            style={{
-              display: "flex",
-              gap: "var(--sp-6)",
-            }}
-          >
-            {FILTER_CHIPS.map((opt) => {
-              const active = filter === opt.id;
-              const count = counts[opt.id];
-              return (
-                <FilterChip
-                  key={opt.id}
-                  active={active}
-                  count={count}
-                  onToggle={() => setFilter(active ? "all" : opt.id)}
-                >
-                  {opt.label}
-                </FilterChip>
-              );
-            })}
-          </div>
-
-          <div style={{ flex: 1 }} />
-          {loading && sessions.length > 0 && (
-            <span
-              style={{
-                fontSize: "var(--fs-xs)",
-                color: "var(--fg-faint)",
-                display: "flex",
-                alignItems: "center",
-                gap: "var(--sp-6)",
-              }}
-            >
-              <Glyph g={NF.refresh} />
-              Refreshing…
-            </span>
-          )}
-        </div>
-      )}
-
-      {tab === "sessions" && error && sessions.length === 0 ? (
-        <div
-          style={{
-            flex: 1,
-            minHeight: 0,
-            overflow: "auto",
-            padding: "var(--sp-48)",
-            display: "flex",
-            flexDirection: "column",
-            alignItems: "center",
-            gap: "var(--sp-12)",
-          }}
-        >
-          <h2 style={{ fontSize: "var(--fs-lg)", margin: 0 }}>
-            Couldn't load sessions
-          </h2>
-          <p
-            style={{
-              color: "var(--fg-muted)",
-              fontSize: "var(--fs-xs)",
-              margin: 0,
-            }}
-          >
-            {error}
-          </p>
-          <Button variant="solid" onClick={refresh}>
-            Retry
-          </Button>
-        </div>
-      ) : tab === "sessions" ? (
-        <div style={{ display: "flex", minHeight: 0, flex: 1 }}>
-          {showTable && (
-            // SessionsTable owns its own scroll container so the row
-            // virtualizer has a stable parent to observe. This wrapper
-            // only contributes flex sizing; `minHeight: 0` is what
-            // lets the inner scroller actually shrink below content.
-            <div
-              style={{
-                flex: 1,
-                minWidth: 0,
-                minHeight: 0,
-                display: "flex",
-                flexDirection: "column",
-              }}
-            >
-              <SessionsTable
-                sessions={filteredByQuery}
-                filter={filter}
-                selectedId={selectedPath}
-                onSelect={setSelectedPath}
-                onContextMenu={handleContextMenu}
-                searchSnippets={
-                  searchSnippets.size > 0 ? searchSnippets : undefined
-                }
-              />
-            </div>
-          )}
-
-          {showDetail && selectedPath && (
-            <aside
-              style={{
-                width: splitView ? "var(--project-detail-width)" : "100%",
-                flex: splitView ? "0 0 auto" : "1 1 auto",
-                flexShrink: splitView ? 0 : 1,
-                borderLeft: splitView
-                  ? "var(--bw-hair) solid var(--line)"
-                  : "none",
-                background: splitView ? "var(--bg-sunken)" : "var(--bg)",
-                overflow: "hidden",
-                minWidth: 0,
-                display: "flex",
-                flexDirection: "column",
-              }}
-            >
-              <SessionDetail
-                key={selectedPath}
-                filePath={selectedPath}
-                projects={projects}
-                refreshSignal={detailRefreshSignal}
-                onMoved={() => {
-                  setDetailRefreshSignal((n) => n + 1);
-                  refresh();
-                }}
-                onError={(msg) => setToast(msg)}
-                onBack={splitView ? undefined : () => setSelectedPath(null)}
-              />
-            </aside>
-          )}
-        </div>
-      ) : null}
 
       {moveSession && (
         <MoveSessionModal
@@ -546,60 +372,22 @@ export function SessionsSection(props: SessionsSectionProps = {}) {
 
       <Toast message={toast} onDismiss={() => setToast(null)} />
 
-      {ctxMenu &&
-        (() => {
-          const s = ctxMenu.session;
-          const items: ContextMenuItem[] = [
-            {
-              label: "Open in Finder",
-              onClick: () => {
-                api.revealInFinder(s.file_path).catch((e) => {
-                  setToast(`Couldn't reveal: ${e}`);
-                });
-              },
-            },
-            {
-              label: "Open in detail",
-              onClick: () => setSelectedPath(s.file_path),
-            },
-            { label: "", separator: true, onClick: () => {} },
-            {
-              label: "Move to project…",
-              onClick: () => {
-                if (!s.project_from_transcript) {
-                  setToast(
-                    "Can't move: this session has no cwd recorded in the transcript.",
-                  );
-                  return;
-                }
-                setMoveSession(s);
-              },
-            },
-            { label: "", separator: true, onClick: () => {} },
-            {
-              label: "Copy session id",
-              onClick: () => {
-                navigator.clipboard.writeText(s.session_id);
-                setToast("Copied session id.");
-              },
-            },
-            {
-              label: "Copy project path",
-              onClick: () => {
-                navigator.clipboard.writeText(s.project_path);
-                setToast("Copied project path.");
-              },
-            },
-          ];
-          return (
-            <ContextMenu
-              x={ctxMenu.x}
-              y={ctxMenu.y}
-              items={items}
-              onClose={closeCtxMenu}
-            />
-          );
-        })()}
+      {ctxMenu && (
+        <ContextMenu
+          x={ctxMenu.x}
+          y={ctxMenu.y}
+          items={buildSessionContextMenuItems({
+            session: ctxMenu.session,
+            setToast,
+            setSelectedPath,
+            setMoveSession,
+            copyToClipboard: (text, label) =>
+              copyToClipboard(text, label, setToast),
+          })}
+          onClose={closeCtxMenu}
+        />
+      )}
     </>
   );
 }
+

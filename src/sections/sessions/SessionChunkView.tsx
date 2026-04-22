@@ -1,4 +1,3 @@
-import { type CSSProperties, useState } from "react";
 import type {
   LinkedTool,
   SessionChunk,
@@ -7,6 +6,7 @@ import type {
 import { Glyph } from "../../components/primitives/Glyph";
 import { Tag } from "../../components/primitives/Tag";
 import { NF } from "../../icons";
+import { Body, Bubble, Divider } from "./components/transcriptAtoms";
 import { ToolExecutionView } from "./viewers";
 import { redactSecrets } from "./viewers/redact";
 import { formatTokens, modelBadge } from "./format";
@@ -40,7 +40,11 @@ export function SessionChunkView({
       return (
         <Bubble side="left" tone="sunken">
           {renderHeader("You", ts)}
-          <Body text={redactSecrets(text)} searchTerm={searchTerm} />
+          <Body
+            text={redactSecrets(text)}
+            searchTerm={searchTerm}
+            clamp={TEXT_CLAMP}
+          />
         </Bubble>
       );
     }
@@ -52,7 +56,13 @@ export function SessionChunkView({
       return (
         <Bubble side="left" tone="faint" mono>
           {renderHeader("System output", ts)}
-          <Body text={text} searchTerm={searchTerm} mono tone="ghost" />
+          <Body
+            text={text}
+            searchTerm={searchTerm}
+            clamp={TEXT_CLAMP}
+            mono
+            tone="ghost"
+          />
         </Bubble>
       );
     }
@@ -64,7 +74,12 @@ export function SessionChunkView({
           <Tag tone="accent" glyph={NF.archive}>
             Compacted
           </Tag>
-          <Body text={redactSecrets(text)} searchTerm={searchTerm} tone="ghost" />
+          <Body
+            text={redactSecrets(text)}
+            searchTerm={searchTerm}
+            clamp={TEXT_CLAMP}
+            tone="ghost"
+          />
         </Divider>
       );
     }
@@ -162,7 +177,11 @@ function EventInlineView({
               {modelBadge([model])}
             </div>
           )}
-          <Body text={redactSecrets(event.text)} searchTerm={searchTerm} />
+          <Body
+            text={redactSecrets(event.text)}
+            searchTerm={searchTerm}
+            clamp={TEXT_CLAMP}
+          />
         </div>
       );
     }
@@ -187,7 +206,12 @@ function EventInlineView({
             <Glyph g={NF.bolt} style={{ fontSize: "var(--fs-2xs)" }} /> Thinking
           </summary>
           <div style={{ marginTop: "var(--sp-4)" }}>
-            <Body text={redactSecrets(event.text)} searchTerm={searchTerm} tone="ghost" />
+            <Body
+              text={redactSecrets(event.text)}
+              searchTerm={searchTerm}
+              clamp={TEXT_CLAMP}
+              tone="ghost"
+            />
           </div>
         </details>
       );
@@ -266,87 +290,6 @@ function EventInlineView({
   }
 }
 
-// ---------------------------------------------------------------------------
-// Atoms (kept locally to avoid touching SessionEventView.tsx which is still
-// used as a fallback when chunks fail to load).
-// ---------------------------------------------------------------------------
-
-type BubbleTone = "sunken" | "accent" | "faint" | "ghost";
-
-function Bubble({
-  side,
-  tone,
-  mono,
-  children,
-}: {
-  side: "left" | "right";
-  tone: BubbleTone;
-  mono?: boolean;
-  children: React.ReactNode;
-}) {
-  const palette: Record<BubbleTone, { bg: string; bd: string }> = {
-    sunken: { bg: "var(--bg-sunken)", bd: "var(--line)" },
-    accent: { bg: "var(--accent-soft)", bd: "var(--accent-border)" },
-    faint: { bg: "var(--bg-raised)", bd: "var(--line)" },
-    ghost: { bg: "transparent", bd: "var(--line)" },
-  };
-  const p = palette[tone];
-  return (
-    <div
-      style={{
-        display: "flex",
-        justifyContent: side === "right" ? "flex-end" : "flex-start",
-        marginBottom: "var(--sp-10)",
-      }}
-    >
-      <div
-        style={{
-          maxWidth: "min(var(--content-cap-lg), 92%)",
-          minWidth: "min(280px, 60%)",
-          padding: "var(--sp-10) var(--sp-14)",
-          background: p.bg,
-          border: `var(--bw-hair) solid ${p.bd}`,
-          borderRadius: "var(--r-2)",
-          fontFamily: mono ? "var(--font)" : undefined,
-          fontSize: "var(--fs-sm)",
-          color: "var(--fg)",
-          whiteSpace: "pre-wrap",
-          wordBreak: "break-word",
-        }}
-      >
-        {children}
-      </div>
-    </div>
-  );
-}
-
-function Divider({ children }: { children: React.ReactNode }) {
-  return (
-    <div
-      style={{
-        display: "flex",
-        alignItems: "center",
-        gap: "var(--sp-10)",
-        margin: "var(--sp-14) 0",
-      }}
-    >
-      <div style={{ flex: 1, height: 1, background: "var(--line)" }} />
-      <div
-        style={{
-          display: "flex",
-          alignItems: "center",
-          gap: "var(--sp-6)",
-          color: "var(--fg-faint)",
-          fontSize: "var(--fs-xs)",
-        }}
-      >
-        {children}
-      </div>
-      <div style={{ flex: 1, height: 1, background: "var(--line)" }} />
-    </div>
-  );
-}
-
 function renderHeader(
   label: string,
   ts: string | null | undefined,
@@ -372,94 +315,3 @@ function renderHeader(
   );
 }
 
-function Body({
-  text,
-  searchTerm,
-  mono,
-  tone,
-}: {
-  text: string;
-  searchTerm: string;
-  mono?: boolean;
-  tone?: "ghost" | "warn";
-}) {
-  const [expanded, setExpanded] = useState(false);
-  const trimmed = text ?? "";
-  const overflow = trimmed.length > TEXT_CLAMP;
-  const visible =
-    expanded || !overflow ? trimmed : trimmed.slice(0, TEXT_CLAMP);
-  const baseStyle: CSSProperties = {
-    fontFamily: mono ? "var(--font)" : undefined,
-    fontSize: mono ? "var(--fs-xs)" : "var(--fs-sm)",
-    color:
-      tone === "warn"
-        ? "var(--warn)"
-        : tone === "ghost"
-          ? "var(--fg-muted)"
-          : "var(--fg)",
-    whiteSpace: "pre-wrap",
-    wordBreak: "break-word",
-  };
-  return (
-    <>
-      <div style={baseStyle}>{highlight(visible, searchTerm)}</div>
-      {overflow && (
-        <button
-          type="button"
-          onClick={() => setExpanded((v) => !v)}
-          style={{
-            marginTop: "var(--sp-4)",
-            background: "transparent",
-            border: "var(--bw-hair) solid var(--line)",
-            borderRadius: "var(--r-1)",
-            color: "var(--fg-muted)",
-            fontSize: "var(--fs-xs)",
-            padding: "var(--sp-2) var(--sp-8)",
-            cursor: "pointer",
-            letterSpacing: "var(--ls-wide)",
-            textTransform: "uppercase",
-          }}
-        >
-          {expanded
-            ? "Collapse"
-            : `Show ${trimmed.length - TEXT_CLAMP} more chars`}
-        </button>
-      )}
-    </>
-  );
-}
-
-function highlight(text: string, term: string): React.ReactNode {
-  if (!term || term.length < 2) return text;
-  try {
-    const pattern = new RegExp(escapeRegex(term), "gi");
-    const parts: React.ReactNode[] = [];
-    let lastIdx = 0;
-    let match: RegExpExecArray | null;
-    let key = 0;
-    while ((match = pattern.exec(text)) !== null) {
-      if (match.index > lastIdx) parts.push(text.slice(lastIdx, match.index));
-      parts.push(
-        <mark
-          key={`h${key++}`}
-          style={{
-            background: "var(--accent-soft)",
-            color: "var(--accent-ink)",
-          }}
-        >
-          {match[0]}
-        </mark>,
-      );
-      lastIdx = match.index + match[0].length;
-      if (match.index === pattern.lastIndex) pattern.lastIndex += 1;
-    }
-    if (lastIdx < text.length) parts.push(text.slice(lastIdx));
-    return parts;
-  } catch {
-    return text;
-  }
-}
-
-function escapeRegex(s: string): string {
-  return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-}
