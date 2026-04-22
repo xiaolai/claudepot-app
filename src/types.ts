@@ -858,6 +858,31 @@ export interface SlimReport {
   bytes_saved: number;
 }
 
+export interface BulkSlimEntry {
+  session_id: string;
+  file_path: string;
+  project_path: string;
+  plan: SlimPlan;
+}
+
+export interface BulkSlimPlan {
+  entries: BulkSlimEntry[];
+  total_bytes_saved: number;
+  total_image_redacts: number;
+  total_document_redacts: number;
+  total_tool_result_redacts: number;
+}
+
+export interface BulkSlimReport {
+  succeeded_paths: string[];
+  skipped_live: string[];
+  failed: [string, string][];
+  total_bytes_saved: number;
+  total_image_redacts: number;
+  total_document_redacts: number;
+  total_tool_result_redacts: number;
+}
+
 export interface TrashEntry {
   id: string;
   kind: "prune" | "slim";
