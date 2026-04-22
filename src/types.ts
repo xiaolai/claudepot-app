@@ -792,3 +792,72 @@ export interface ActivityTrends {
   active_series: number[];
   error_count: number;
 }
+
+// ---------------------------------------------------------------------------
+// Session prune / slim / trash
+// ---------------------------------------------------------------------------
+
+export interface PruneFilterInput {
+  older_than_secs?: number | null;
+  larger_than_bytes?: number | null;
+  project: string[];
+  has_error?: boolean | null;
+  is_sidechain?: boolean | null;
+}
+
+export interface PruneEntry {
+  session_id: string;
+  file_path: string;
+  project_path: string;
+  size_bytes: number;
+  last_ts_ms: number | null;
+  has_error: boolean;
+  is_sidechain: boolean;
+}
+
+export interface PrunePlan {
+  entries: PruneEntry[];
+  total_bytes: number;
+}
+
+export interface PruneReport {
+  moved: string[];
+  failed: [string, string][];
+  freed_bytes: number;
+}
+
+export interface SlimOptsInput {
+  drop_tool_results_over_bytes: number;
+  exclude_tools: string[];
+}
+
+export interface SlimPlan {
+  original_bytes: number;
+  projected_bytes: number;
+  redact_count: number;
+  tools_affected: string[];
+  bytes_saved: number;
+}
+
+export interface SlimReport {
+  original_bytes: number;
+  final_bytes: number;
+  redact_count: number;
+  trashed_original: string;
+  bytes_saved: number;
+}
+
+export interface TrashEntry {
+  id: string;
+  kind: "prune" | "slim";
+  orig_path: string;
+  size: number;
+  ts_ms: number;
+  cwd: string | null;
+  reason: string | null;
+}
+
+export interface TrashListing {
+  entries: TrashEntry[];
+  total_bytes: number;
+}

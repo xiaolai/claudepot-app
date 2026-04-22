@@ -34,6 +34,11 @@ import type {
   SessionRow,
   UsageEntry,
   UsageMap,
+  PruneFilterInput,
+  PrunePlan,
+  SlimOptsInput,
+  SlimPlan,
+  TrashListing,
 } from "./types";
 
 export const api = {
@@ -270,6 +275,36 @@ export const api = {
   /** Group all sessions by git repository (collapses worktrees). */
   sessionWorktreeGroups: () =>
     invoke<RepositoryGroup[]>("session_worktree_groups"),
+
+  // ---------- Prune / slim / trash ----------
+  /** Preview which sessions match a prune filter. Pure — no disk writes. */
+  sessionPrunePlan: (filter: PruneFilterInput) =>
+    invoke<PrunePlan>("session_prune_plan", { filter }),
+  /** Start an async prune op; returns an op_id to subscribe on. */
+  sessionPruneStart: (filter: PruneFilterInput) =>
+    invoke<string>("session_prune_start", { filter }),
+  /** Preview a slim rewrite without touching disk. */
+  sessionSlimPlan: (path: string, opts: SlimOptsInput) =>
+    invoke<SlimPlan>("session_slim_plan", { path, opts }),
+  /** Start an async slim op; returns an op_id to subscribe on. */
+  sessionSlimStart: (path: string, opts: SlimOptsInput) =>
+    invoke<string>("session_slim_start", { path, opts }),
+  /** List trash batches. */
+  sessionTrashList: (olderThanSecs?: number) =>
+    invoke<TrashListing>("session_trash_list", {
+      olderThanSecs: olderThanSecs ?? null,
+    }),
+  /** Restore a trashed batch to its original cwd or an override. */
+  sessionTrashRestore: (entryId: string, overrideCwd?: string) =>
+    invoke<string>("session_trash_restore", {
+      entryId,
+      overrideCwd: overrideCwd ?? null,
+    }),
+  /** Permanently delete trash batches. Returns bytes freed. */
+  sessionTrashEmpty: (olderThanSecs?: number) =>
+    invoke<number>("session_trash_empty", {
+      olderThanSecs: olderThanSecs ?? null,
+    }),
 
   // ---------- Protected paths (Settings → Protected pane) ----------
   /**

@@ -214,6 +214,13 @@ pub fn run() {
             commands::session_live_subscribe,
             commands::session_live_unsubscribe,
             commands::activity_trends,
+            commands::session_prune_plan,
+            commands::session_prune_start,
+            commands::session_slim_plan,
+            commands::session_slim_start,
+            commands::session_trash_list,
+            commands::session_trash_restore,
+            commands::session_trash_empty,
         ])
         .run(tauri::generate_context!())
         .unwrap_or_else(|e| {
