@@ -1168,17 +1168,21 @@ fn format_ts_ms(ms: i64) -> String {
         .unwrap_or_else(|| "—".to_string())
 }
 
+#[allow(clippy::too_many_arguments)]
 pub fn slim_cmd(
     ctx: &AppContext,
-    target: &str,
+    target: Option<&str>,
+    all: bool,
+    older_than: Option<&str>,
+    larger_than: Option<&str>,
+    project: Vec<String>,
     drop_over: Option<&str>,
     exclude_tool: Vec<String>,
     strip_images: bool,
     strip_documents: bool,
     execute: bool,
 ) -> Result<()> {
-    use claudepot_core::session_slim::{execute_slim, plan_slim, SlimOpts};
-    let path = resolve_session_path(target)?;
+    use claudepot_core::session_slim::SlimOpts;
     let mut opts = SlimOpts {
         exclude_tools: exclude_tool,
         strip_images,
@@ -1188,7 +1192,31 @@ pub fn slim_cmd(
     if let Some(s) = drop_over {
         opts.drop_tool_results_over_bytes = parse_size(s)?;
     }
-    let plan = plan_slim(&path, &opts).context("plan slim")?;
+    if all {
+        return slim_all_cmd(
+            ctx,
+            older_than,
+            larger_than,
+            project,
+            &opts,
+            execute,
+        );
+    }
+    let Some(t) = target else {
+        bail!("session slim requires either <target> or --all")
+    };
+    slim_single_cmd(ctx, t, &opts, execute)
+}
+
+fn slim_single_cmd(
+    ctx: &AppContext,
+    target: &str,
+    opts: &claudepot_core::session_slim::SlimOpts,
+    execute: bool,
+) -> Result<()> {
+    use claudepot_core::session_slim::{execute_slim, plan_slim};
+    let path = resolve_session_path(target)?;
+    let plan = plan_slim(&path, opts).context("plan slim")?;
     if !execute {
         if ctx.json {
             print_json(&plan);
@@ -1201,10 +1229,10 @@ pub fn slim_cmd(
             format_size(plan.bytes_saved()),
             plan.redact_count
         );
-        if strip_images {
+        if opts.strip_images {
             println!("Images redacted:     {}", plan.image_redact_count);
         }
-        if strip_documents {
+        if opts.strip_documents {
             println!("Documents redacted:  {}", plan.document_redact_count);
         }
         if !plan.tools_affected.is_empty() {
@@ -1215,7 +1243,7 @@ pub fn slim_cmd(
     }
     let data_dir = paths::claudepot_data_dir();
     let sink = claudepot_core::project_progress::NoopSink;
-    let report = execute_slim(&data_dir, &path, &opts, &sink).context("execute slim")?;
+    let report = execute_slim(&data_dir, &path, opts, &sink).context("execute slim")?;
     if ctx.json {
         print_json(&report);
         return Ok(());
@@ -1228,11 +1256,98 @@ pub fn slim_cmd(
         report.redact_count,
         report.trashed_original.display(),
     );
-    if strip_images {
+    if opts.strip_images {
         println!("Images redacted:     {}", report.image_redact_count);
     }
-    if strip_documents {
+    if opts.strip_documents {
         println!("Documents redacted:  {}", report.document_redact_count);
+    }
+    Ok(())
+}
+
+fn slim_all_cmd(
+    ctx: &AppContext,
+    older_than: Option<&str>,
+    larger_than: Option<&str>,
+    project: Vec<String>,
+    opts: &claudepot_core::session_slim::SlimOpts,
+    execute: bool,
+) -> Result<()> {
+    use claudepot_core::session_prune::PruneFilter;
+    use claudepot_core::session_slim::{execute_slim_all, plan_slim_all};
+    let filter = PruneFilter {
+        older_than: older_than.map(parse_duration).transpose()?,
+        larger_than: larger_than.map(parse_size).transpose()?,
+        project: project.into_iter().map(std::path::PathBuf::from).collect(),
+        has_error: None,
+        is_sidechain: None,
+    };
+    let config_dir = paths::claude_config_dir();
+    let plan = plan_slim_all(&config_dir, &filter, opts).context("plan slim --all")?;
+
+    if !execute {
+        if ctx.json {
+            print_json(&plan);
+            return Ok(());
+        }
+        println!("Plan (dry-run): {} session(s)", plan.entries.len());
+        if opts.strip_images {
+            println!("  Images to redact:     {}", plan.total_image_redacts);
+        }
+        if opts.strip_documents {
+            println!("  Documents to redact:  {}", plan.total_document_redacts);
+        }
+        if opts.drop_tool_results_over_bytes < u64::MAX {
+            println!("  Tool-result redacts:  {}", plan.total_tool_result_redacts);
+        }
+        println!("  Bytes saved:          {}", format_size(plan.total_bytes_saved));
+        // Show top 10 by bytes saved.
+        if !plan.entries.is_empty() {
+            println!("\nTop {}:", plan.entries.len().min(10));
+            for e in plan.entries.iter().take(10) {
+                println!(
+                    "  {:>10}  imgs={:<3} docs={:<3}  {}",
+                    format_size(e.plan.bytes_saved()),
+                    e.plan.image_redact_count,
+                    e.plan.document_redact_count,
+                    e.file_path.display()
+                );
+            }
+        }
+        println!("\nRun with --execute to apply. Originals kept in trash for 7 days.");
+        return Ok(());
+    }
+    let data_dir = paths::claudepot_data_dir();
+    let sink = claudepot_core::project_progress::NoopSink;
+    let report = execute_slim_all(&data_dir, &plan, opts, &sink);
+    if ctx.json {
+        print_json(&report);
+        return Ok(());
+    }
+    println!(
+        "Bulk slim: {} succeeded, {} skipped (live), {} failed",
+        report.succeeded.len(),
+        report.skipped_live.len(),
+        report.failed.len()
+    );
+    if opts.strip_images {
+        println!("Images redacted:     {}", report.total_image_redacts);
+    }
+    if opts.strip_documents {
+        println!("Documents redacted:  {}", report.total_document_redacts);
+    }
+    println!("Bytes saved:         {}", format_size(report.total_bytes_saved));
+    if !report.skipped_live.is_empty() {
+        eprintln!("\nSkipped (still being written to):");
+        for p in &report.skipped_live {
+            eprintln!("  {}", p.display());
+        }
+    }
+    if !report.failed.is_empty() {
+        eprintln!("\nFailed:");
+        for (p, err) in &report.failed {
+            eprintln!("  {}: {err}", p.display());
+        }
     }
     Ok(())
 }

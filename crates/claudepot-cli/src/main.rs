@@ -198,8 +198,24 @@ enum SessionAction {
     /// and, optionally, base64 image/document payloads.
     /// Dry-run by default — pass `--execute` to rewrite in place.
     Slim {
-        /// Session UUID or absolute `.jsonl` path.
-        target: String,
+        /// Session UUID or absolute `.jsonl` path. Omit with `--all`.
+        #[arg(conflicts_with = "all")]
+        target: Option<String>,
+        /// Run against every session matching the filter flags below.
+        /// Mutually exclusive with `<target>`.
+        #[arg(long)]
+        all: bool,
+        /// Filter: only sessions whose last_ts is older than this (e.g. `7d`, `30d`).
+        /// Only meaningful with `--all`.
+        #[arg(long)]
+        older_than: Option<String>,
+        /// Filter: only sessions at least this size (`1MB`, `500KB`).
+        /// Only meaningful with `--all`.
+        #[arg(long)]
+        larger_than: Option<String>,
+        /// Filter: repeatable project path filter. Only meaningful with `--all`.
+        #[arg(long)]
+        project: Vec<String>,
         /// Drop tool_result payloads larger than this. Accepts
         /// `1MB`, `500KB`, `1024`. Default: 1MiB.
         #[arg(long)]
@@ -604,6 +620,10 @@ async fn main() -> Result<()> {
             )?,
             SessionAction::Slim {
                 target,
+                all,
+                older_than,
+                larger_than,
+                project,
                 drop_tool_results_over,
                 exclude_tool,
                 strip_images,
@@ -611,7 +631,11 @@ async fn main() -> Result<()> {
                 execute,
             } => commands::session::slim_cmd(
                 &ctx,
-                &target,
+                target.as_deref(),
+                all,
+                older_than.as_deref(),
+                larger_than.as_deref(),
+                project,
                 drop_tool_results_over.as_deref(),
                 exclude_tool,
                 strip_images,
