@@ -194,7 +194,8 @@ enum SessionAction {
         #[command(subcommand)]
         action: TrashAction,
     },
-    /// Rewrite a transcript, dropping oversized tool_result payloads.
+    /// Rewrite a transcript, dropping oversized tool_result payloads
+    /// and, optionally, base64 image/document payloads.
     /// Dry-run by default — pass `--execute` to rewrite in place.
     Slim {
         /// Session UUID or absolute `.jsonl` path.
@@ -206,6 +207,15 @@ enum SessionAction {
         /// Repeatable: tool names whose results to preserve regardless.
         #[arg(long)]
         exclude_tool: Vec<String>,
+        /// Replace base64 image blocks with `[image]` text stubs.
+        /// Saves ~2000 tokens/image on `claude --resume` of this
+        /// session.
+        #[arg(long)]
+        strip_images: bool,
+        /// Replace document (PDF etc.) blocks with `[document]` text
+        /// stubs. Same ~2000-token-per-block accounting as images.
+        #[arg(long)]
+        strip_documents: bool,
         /// Actually rewrite the file. Without this, slim only plans.
         #[arg(long)]
         execute: bool,
@@ -596,12 +606,16 @@ async fn main() -> Result<()> {
                 target,
                 drop_tool_results_over,
                 exclude_tool,
+                strip_images,
+                strip_documents,
                 execute,
             } => commands::session::slim_cmd(
                 &ctx,
                 &target,
                 drop_tool_results_over.as_deref(),
                 exclude_tool,
+                strip_images,
+                strip_documents,
                 execute,
             )?,
             SessionAction::Trash { action } => match action {

@@ -187,6 +187,7 @@ pub fn execute_prune(
         sink.sub_progress("moving", i, total);
         let put = TrashPut {
             orig_path: &e.file_path,
+            restore_path: None,
             kind: TrashKind::Prune,
             cwd: Some(Path::new(&e.project_path)),
             reason: Some(format!("prune session {}", e.session_id)),
