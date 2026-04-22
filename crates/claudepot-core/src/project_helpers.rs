@@ -1,6 +1,7 @@
 //! Private helper functions for the project module.
 
 use crate::error::ProjectError;
+use crate::path_utils::simplify_windows_path;
 use crate::project_sanitize::{sanitize_path, unsanitize_path, MAX_SANITIZED_LENGTH};
 use crate::project_types::*;
 use std::fs;
@@ -21,7 +22,11 @@ pub(crate) fn resolve_path(path: &str) -> Result<String, ProjectError> {
     } else {
         abs
     };
-    Ok(resolved.to_string_lossy().nfc().collect::<String>())
+    // Windows `canonicalize` returns `\\?\C:\...` (or `\\?\UNC\...`);
+    // CC never uses the verbatim form, so strip it before sanitizing.
+    // No-op on Unix.
+    let simplified = simplify_windows_path(&resolved.to_string_lossy());
+    Ok(simplified.nfc().collect::<String>())
 }
 
 pub(crate) fn find_project_dir_by_prefix(

@@ -1400,21 +1400,69 @@ mod tests {
         assert_eq!(sanitize_path("/tmp/\u{00e9}l\u{00e8}ve"), "-tmp--l-ve");
     }
 
+    #[cfg(not(target_os = "windows"))]
     #[test]
-    fn test_unsanitize_roundtrip_simple() {
+    fn test_unsanitize_roundtrip_simple_unix() {
         let original = "/Users/joker/project";
         let sanitized = sanitize_path(original);
         let unsanitized = unsanitize_path(&sanitized);
         assert_eq!(unsanitized, original);
     }
 
+    #[cfg(not(target_os = "windows"))]
     #[test]
-    fn test_unsanitize_lossy() {
+    fn test_unsanitize_lossy_unix() {
         // Hyphens and underscores both become `-`, so unsanitize is lossy
         let sanitized = sanitize_path("/my-project");
         let unsanitized = unsanitize_path(&sanitized);
         // Original was /my-project, sanitized to -my-project, unsanitized to /my/project
         assert_eq!(unsanitized, "/my/project");
+    }
+
+    #[test]
+    fn test_unsanitize_windows_drive_letter_roundtrip() {
+        // The `<alpha>--` shape is unambiguous: no Unix-sanitized slug
+        // can start with an ASCII letter followed by two hyphens (a
+        // leading `-` in a Unix slug means the first char of the
+        // original was a separator, not a letter). So we recover the
+        // Windows form on any host OS.
+        let original = r"C:\Users\joker\project";
+        let sanitized = sanitize_path(original);
+        assert_eq!(sanitized, "C--Users-joker-project");
+        let unsanitized = unsanitize_path(&sanitized);
+        assert_eq!(unsanitized, original);
+    }
+
+    #[test]
+    fn test_unsanitize_windows_drive_letter_lowercase() {
+        let original = r"d:\work\repo";
+        let sanitized = sanitize_path(original);
+        assert_eq!(sanitized, "d--work-repo");
+        let unsanitized = unsanitize_path(&sanitized);
+        assert_eq!(unsanitized, original);
+    }
+
+    #[cfg(target_os = "windows")]
+    #[test]
+    fn test_unsanitize_windows_unc_roundtrip_on_windows() {
+        // UNC slug `--server-share-project` is ambiguous with a Unix
+        // path whose first component starts with `-`. On Windows we
+        // resolve to UNC; on Unix we keep the `/` convention.
+        let original = r"\\server\share\project";
+        let sanitized = sanitize_path(original);
+        assert_eq!(sanitized, "--server-share-project");
+        let unsanitized = unsanitize_path(&sanitized);
+        assert_eq!(unsanitized, original);
+    }
+
+    #[cfg(target_os = "windows")]
+    #[test]
+    fn test_unsanitize_unix_slug_on_windows_uses_backslash() {
+        // On Windows, a Unix-shaped slug gets `\` as the fallback
+        // separator — matching the host filesystem convention.
+        let sanitized = "-Users-joker-project";
+        let unsanitized = unsanitize_path(sanitized);
+        assert_eq!(unsanitized, r"\Users\joker\project");
     }
 
     #[test]
@@ -2686,6 +2734,32 @@ mod tests {
         // Both dirs still exist (--no-move)
         assert!(src.exists());
         assert!(dst.exists());
+    }
+
+    #[cfg(target_os = "windows")]
+    #[test]
+    fn test_resolve_path_strips_windows_verbatim_prefix() {
+        // On Windows, `std::fs::canonicalize` returns `\\?\C:\...` for
+        // existing paths. `resolve_path` must strip that prefix so the
+        // sanitized slug matches what CC writes (CC never uses verbatim
+        // paths in session cwd or project slugs).
+        let tmp = tempfile::tempdir().unwrap();
+        let dir = tmp.path().join("resolve-verbatim-test");
+        fs::create_dir(&dir).unwrap();
+        let resolved = resolve_path(dir.to_str().unwrap()).unwrap();
+        assert!(
+            !resolved.starts_with(r"\\?\"),
+            "resolve_path must not return a verbatim path, got: {}",
+            resolved
+        );
+        // Slug parity: sanitizing a canonicalized Windows path must not
+        // include the `?` or the extra leading separators.
+        let san = sanitize_path(&resolved);
+        assert!(
+            !san.starts_with("--?-"),
+            "sanitized slug leaked verbatim prefix: {}",
+            san
+        );
     }
 
     #[test]
