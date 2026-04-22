@@ -116,7 +116,21 @@ export function SessionsSection(props: SessionsSectionProps = {}) {
     Promise.all([
       api.sessionListAll(),
       api.projectList(),
-      api.sessionWorktreeGroups().catch(() => null),
+      // Worktree grouping is optional — the table still works without
+      // it, so a failure degrades to a missing RepoFilterStrip rather
+      // than a top-level error. Log it in dev so the absence is
+      // observable during diagnosis.
+      api.sessionWorktreeGroups().catch((e) => {
+        if (import.meta.env.DEV) {
+          // eslint-disable-next-line no-console
+          console.warn(
+            "[SessionsSection] sessionWorktreeGroups failed; " +
+              "RepoFilterStrip will not render",
+            e,
+          );
+        }
+        return null;
+      }),
     ])
       .then(([ss, ps, groups]) => {
         if (!mountedRef.current || myToken !== tokenRef.current) return;
@@ -191,9 +205,30 @@ export function SessionsSection(props: SessionsSectionProps = {}) {
 
   // Deep content search (useSessionSearch): scans transcript bodies so
   // a query like "deadlock" surfaces sessions whose metadata doesn't
-  // mention the word. Debounced + 2-char min inside the hook. Driven by
-  // the deferred value so fast typing doesn't pile up network calls.
-  const { hits: deepHits } = useSessionSearch(deferredQuery, 50);
+  // mention the word. Debounced + 2-char min inside the hook. Driven
+  // by the deferred value so the heavy client-side filter re-render
+  // doesn't retrigger the hook's own debounce timer on every frame
+  // under load; the hook's `requestSeqRef` guard still handles
+  // out-of-order IPC responses.
+  const { hits: deepHits, error: deepSearchError } = useSessionSearch(
+    deferredQuery,
+    50,
+  );
+
+  // Surface deep-search IPC failures. The hook reports one error per
+  // query that rejects; bridging it to the toast surface keeps
+  // "silent empty results" from looking like a legitimate zero-hit
+  // search. We de-dupe on the string so a stable error from a stuck
+  // query doesn't re-toast on every re-render.
+  const lastReportedDeepErr = useRef<string | null>(null);
+  useEffect(() => {
+    if (deepSearchError && deepSearchError !== lastReportedDeepErr.current) {
+      lastReportedDeepErr.current = deepSearchError;
+      setToast(`Couldn't search sessions: ${deepSearchError}`);
+    } else if (!deepSearchError) {
+      lastReportedDeepErr.current = null;
+    }
+  }, [deepSearchError]);
   const deepHitPaths = useMemo(
     () => new Set(deepHits.map((h) => h.file_path)),
     [deepHits],

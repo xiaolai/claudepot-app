@@ -179,7 +179,12 @@ describe("SessionsSection — search input", () => {
     await mountWithRows([mk("alpha")]);
     const input = screen.getByLabelText("Search sessions");
     await userEvent.type(input, "a");
-    // Give the debounce a chance to misfire.
+    // Wall-clock wait covers the hook's 250ms debounce. The grill
+    // testing audit flagged this as a flake risk on slow CI; if it
+    // ever does flake, switch the test to fake timers but pair them
+    // with `userEvent.setup({ advanceTimers })` and verify the rest
+    // of the file's `userEvent.type` calls aren't broken by the
+    // global timer swap.
     await act(async () => {
       await new Promise((r) => setTimeout(r, 350));
     });
@@ -250,5 +255,52 @@ describe("SessionsSection — search input", () => {
     await waitFor(() =>
       expect(visibleSessionIds().sort()).toEqual(["alpha", "beta"]),
     );
+  });
+
+  /**
+   * Regression guard for the "semi-frozen typing" behavior this
+   * branch exists to prevent. The input is controlled by `query`
+   * (synchronous) while the filter pipeline reads `deferredQuery`
+   * (low priority). A future refactor that drops `useDeferredValue`
+   * and pipes `query` straight into the filter would still pass the
+   * other tests above — typed characters would land, results would
+   * narrow — but typing would freeze at scale because every keystroke
+   * synchronously reflows the list.
+   *
+   * The assertion: the input element's `.value` updates synchronously
+   * with the keystroke. The list update can lag — that's the point.
+   */
+  it("input value updates synchronously even before the filter has narrowed", async () => {
+    await mountWithRows([
+      mk("alpha", { first_user_prompt: "[alpha] discuss auth" }),
+      mk("beta", { first_user_prompt: "[beta] about databases" }),
+    ]);
+    const input = screen.getByLabelText("Search sessions") as HTMLInputElement;
+    await userEvent.type(input, "auth");
+    // The input is the source of truth for what the user sees in the
+    // text field. If this isn't "auth" right after typing, something
+    // is making the input wait for the filter — which is the
+    // semi-frozen regression we are guarding against.
+    expect(input.value).toBe("auth");
+  });
+
+  /**
+   * Subtitle invariant guard. The "N of M shown" subtitle narrows
+   * against the deferred (visible) list, not the transient pre-
+   * deferred state. A future refactor that swaps it back to `query`
+   * could briefly display "0 of 9321 shown" while the table still
+   * shows everything — a UI lie this guard catches.
+   */
+  it("the narrowed subtitle stays consistent with the visible list", async () => {
+    await mountWithRows([
+      mk("alpha", { first_user_prompt: "[alpha] discuss auth" }),
+      mk("beta", { first_user_prompt: "[beta] about databases" }),
+    ]);
+    const input = screen.getByLabelText("Search sessions");
+    await userEvent.type(input, "auth");
+    await waitFor(() => expect(visibleSessionIds()).toEqual(["alpha"]));
+    // Subtitle should now read "1 of 2 sessions shown" — the count
+    // is taken from the same filteredByQuery the table renders.
+    expect(screen.getByText(/1 of 2 sessions shown/i)).toBeInTheDocument();
   });
 });

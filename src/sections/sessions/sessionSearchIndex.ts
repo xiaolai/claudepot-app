@@ -10,9 +10,29 @@ import type { SessionRow } from "../../types";
  * row objects — rows cross the Tauri boundary as frozen-by-convention
  * DTOs, and inline caches on them would leak into the detail panel
  * and break React reconciliation keys.
+ *
+ * Fields are joined with a `\n` separator to prevent substring matches
+ * that straddle two fields (e.g. the tail of `project_path` merging
+ * with the head of `first_user_prompt` into a spurious hit). `\n` is
+ * cheap and will never appear inside a CC-emitted cwd, branch name, or
+ * model id.
  */
 export interface SessionSearchHaystack {
   get(filePath: string): string | undefined;
+}
+
+/** Field separator for the concatenated haystack. See module doc. */
+const FIELD_SEP = "\n";
+
+/**
+ * Coerce any value to a safe lowercase string. Absorbs null/undefined
+ * that could sneak across the Tauri boundary despite the TypeScript
+ * contract, rather than throwing inside a hot-path `useMemo`. Zero
+ * trust at boundaries is cheaper than a crashed section.
+ */
+function safeLower(v: unknown): string {
+  if (v == null) return "";
+  return String(v).toLowerCase();
 }
 
 export function buildSessionSearchHaystack(
@@ -21,13 +41,17 @@ export function buildSessionSearchHaystack(
   const map = new Map<string, string>();
   for (const s of sessions) {
     const parts: string[] = [
-      s.session_id,
-      s.project_path,
-      s.first_user_prompt ?? "",
-      s.git_branch ?? "",
+      safeLower(s.session_id),
+      safeLower(s.project_path),
+      safeLower(s.first_user_prompt),
+      safeLower(s.git_branch),
     ];
-    for (const m of s.models) parts.push(m);
-    map.set(s.file_path, parts.join("").toLowerCase());
+    // `s.models` is `string[]` at the type level but the Tauri DTO
+    // could drop to null on an older binary — a null iterable would
+    // throw and crash the memo. Coerce defensively.
+    const models = Array.isArray(s.models) ? s.models : [];
+    for (const m of models) parts.push(safeLower(m));
+    map.set(s.file_path, parts.join(FIELD_SEP));
   }
   return {
     get: (filePath) => map.get(filePath),
@@ -37,7 +61,7 @@ export function buildSessionSearchHaystack(
 /**
  * Pure filter. `sessionIdPrefix` runs first because the CC id space is
  * dense and a matched prefix is an exact signal. The haystack match is
- * a substring over the concatenated lowercased fields.
+ * a substring over the separator-joined lowercased fields.
  */
 export function matchesQuery(
   session: SessionRow,
@@ -45,7 +69,7 @@ export function matchesQuery(
   qLower: string,
 ): boolean {
   if (qLower.length === 0) return true;
-  if (session.session_id.toLowerCase().startsWith(qLower)) return true;
+  if (safeLower(session.session_id).startsWith(qLower)) return true;
   const hay = haystack.get(session.file_path);
   if (hay !== undefined && hay.includes(qLower)) return true;
   return false;
