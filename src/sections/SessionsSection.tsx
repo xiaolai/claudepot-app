@@ -10,10 +10,7 @@ import { copyToClipboard } from "../lib/copyToClipboard";
 import { useSessionsData } from "../hooks/useSessionsData";
 import { ContextMenu } from "../components/ContextMenu";
 import { Button } from "../components/primitives/Button";
-import { FilterChip } from "../components/primitives/FilterChip";
-import { Glyph } from "../components/primitives/Glyph";
 import { IconButton } from "../components/primitives/IconButton";
-import { Input } from "../components/primitives/Input";
 import { Toast } from "../components/primitives/Toast";
 import { useGlobalShortcuts } from "../hooks/useGlobalShortcuts";
 import { useSessionSearch } from "../hooks/useSessionSearch";
@@ -24,33 +21,18 @@ import type { SessionRow } from "../types";
 import { MoveSessionModal } from "./projects/MoveSessionModal";
 import { CleanupPane } from "./sessions/CleanupPane";
 import { SectionTab } from "./sessions/components/SectionTab";
+import { SessionsTabPanel } from "./sessions/components/SessionsTabPanel";
 import { buildSessionContextMenuItems } from "./sessions/sessionsContextMenu";
-import {
-  RepoFilterStrip,
-  filterSessionsByRepo,
-} from "./sessions/RepoFilterStrip";
-import { SessionDetail } from "./sessions/SessionDetail";
+import { filterSessionsByRepo } from "./sessions/RepoFilterStrip";
 import {
   buildSessionSearchHaystack,
   matchesQuery,
 } from "./sessions/sessionSearchIndex";
 import {
-  SessionsTable,
   countSessionStatus,
   type SessionFilter,
 } from "./sessions/SessionsTable";
 import { TrashDrawer } from "./sessions/TrashDrawer";
-
-/**
- * Toggleable chips: each flips the filter between "all" and its own
- * value. Two chips active at once is not a supported state — picking
- * one deselects the other (mutual exclusion preserves the existing
- * `SessionFilter` enum shape).
- */
-const FILTER_CHIPS: { id: Exclude<SessionFilter, "all">; label: string }[] = [
-  { id: "errors", label: "Errors" },
-  { id: "sidechain", label: "Agents" },
-];
 
 /**
  * Sessions tab — a flat, cross-project index of every CC session on
@@ -346,192 +328,32 @@ export function SessionsSection(props: SessionsSectionProps = {}) {
       )}
 
       {tab === "sessions" && (
-        // Single tabpanel wrapping all sessions-tab content. We use
-        // `display: contents` so the existing column-of-flex-children
-        // layout (RepoFilterStrip + filter row + error pane / table+
-        // detail) survives the wrapping div without any flex-sizing
-        // adjustment. Modern AT (NVDA, JAWS, VoiceOver) treats the
-        // ARIA role as authoritative regardless of the layout box.
-        <div
-          id="sessions-tab-panel-sessions"
-          role="tabpanel"
-          aria-labelledby="sessions-tab-sessions"
-          style={{ display: "contents" }}
-        >
-      {showTable && (
-        <RepoFilterStrip
-          groups={repoGroups}
+        <SessionsTabPanel
+          showTable={showTable}
+          showDetail={showDetail}
+          splitView={splitView}
+          repoGroups={repoGroups}
           activeRepo={activeRepo}
-          onChange={setActiveRepo}
+          setActiveRepo={setActiveRepo}
+          query={query}
+          setQuery={setQuery}
+          filter={filter}
+          setFilter={setFilter}
+          counts={counts}
+          loading={loading}
+          error={error}
+          sessions={sessions}
+          filteredByQuery={filteredByQuery}
+          searchSnippets={searchSnippets}
+          selectedPath={selectedPath}
+          setSelectedPath={setSelectedPath}
+          projects={projects}
+          detailRefreshSignal={detailRefreshSignal}
+          setDetailRefreshSignal={setDetailRefreshSignal}
+          onContextMenu={handleContextMenu}
+          onRefresh={refresh}
+          setToast={setToast}
         />
-      )}
-
-      {showTable && (
-        <div
-          style={{
-            padding: "var(--sp-14) var(--sp-32)",
-            borderBottom: "var(--bw-hair) solid var(--line)",
-            display: "flex",
-            flexWrap: "wrap",
-            gap: "var(--sp-12)",
-            alignItems: "center",
-            background: "var(--bg)",
-            flexShrink: 0,
-          }}
-        >
-          <Input
-            glyph={NF.search}
-            placeholder="Search project, prompt, content, model, or id"
-            value={query}
-            onChange={(e) => setQuery(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === "Escape" && query.length > 0) {
-                e.preventDefault();
-                e.stopPropagation();
-                setQuery("");
-              }
-            }}
-            style={{
-              flex: "1 1 var(--filter-input-width)",
-              minWidth: "var(--filter-input-min)",
-              maxWidth: "var(--filter-input-width)",
-            }}
-            aria-label="Search sessions"
-          />
-
-          <div
-            role="group"
-            aria-label="Session filters"
-            style={{
-              display: "flex",
-              gap: "var(--sp-6)",
-            }}
-          >
-            {FILTER_CHIPS.map((opt) => {
-              const active = filter === opt.id;
-              const count = counts[opt.id];
-              return (
-                <FilterChip
-                  key={opt.id}
-                  active={active}
-                  count={count}
-                  onToggle={() => setFilter(active ? "all" : opt.id)}
-                >
-                  {opt.label}
-                </FilterChip>
-              );
-            })}
-          </div>
-
-          <div style={{ flex: 1 }} />
-          {loading && sessions.length > 0 && (
-            <span
-              style={{
-                fontSize: "var(--fs-xs)",
-                color: "var(--fg-faint)",
-                display: "flex",
-                alignItems: "center",
-                gap: "var(--sp-6)",
-              }}
-            >
-              <Glyph g={NF.refresh} />
-              Refreshing…
-            </span>
-          )}
-        </div>
-      )}
-
-      {error && sessions.length === 0 ? (
-        <div
-          style={{
-            flex: 1,
-            minHeight: 0,
-            overflow: "auto",
-            padding: "var(--sp-48)",
-            display: "flex",
-            flexDirection: "column",
-            alignItems: "center",
-            gap: "var(--sp-12)",
-          }}
-        >
-          <h2 style={{ fontSize: "var(--fs-lg)", margin: 0 }}>
-            Couldn't load sessions
-          </h2>
-          <p
-            style={{
-              color: "var(--fg-muted)",
-              fontSize: "var(--fs-xs)",
-              margin: 0,
-            }}
-          >
-            {error}
-          </p>
-          <Button variant="solid" onClick={refresh}>
-            Retry
-          </Button>
-        </div>
-      ) : (
-        <div style={{ display: "flex", minHeight: 0, flex: 1 }}>
-          {showTable && (
-            // SessionsTable owns its own scroll container so the row
-            // virtualizer has a stable parent to observe. This wrapper
-            // only contributes flex sizing; `minHeight: 0` is what
-            // lets the inner scroller actually shrink below content.
-            <div
-              style={{
-                flex: 1,
-                minWidth: 0,
-                minHeight: 0,
-                display: "flex",
-                flexDirection: "column",
-              }}
-            >
-              <SessionsTable
-                sessions={filteredByQuery}
-                filter={filter}
-                selectedId={selectedPath}
-                onSelect={setSelectedPath}
-                onContextMenu={handleContextMenu}
-                searchSnippets={
-                  searchSnippets.size > 0 ? searchSnippets : undefined
-                }
-              />
-            </div>
-          )}
-
-          {showDetail && selectedPath && (
-            <aside
-              style={{
-                width: splitView ? "var(--project-detail-width)" : "100%",
-                flex: splitView ? "0 0 auto" : "1 1 auto",
-                flexShrink: splitView ? 0 : 1,
-                borderLeft: splitView
-                  ? "var(--bw-hair) solid var(--line)"
-                  : "none",
-                background: splitView ? "var(--bg-sunken)" : "var(--bg)",
-                overflow: "hidden",
-                minWidth: 0,
-                display: "flex",
-                flexDirection: "column",
-              }}
-            >
-              <SessionDetail
-                key={selectedPath}
-                filePath={selectedPath}
-                projects={projects}
-                refreshSignal={detailRefreshSignal}
-                onMoved={() => {
-                  setDetailRefreshSignal((n) => n + 1);
-                  refresh();
-                }}
-                onError={(msg) => setToast(msg)}
-                onBack={splitView ? undefined : () => setSelectedPath(null)}
-              />
-            </aside>
-          )}
-        </div>
-      )}
-        </div>
       )}
 
       {moveSession && (

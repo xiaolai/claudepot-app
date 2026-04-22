@@ -2,10 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { api } from "../../api";
 import { Button } from "../../components/primitives/Button";
 import { Glyph } from "../../components/primitives/Glyph";
-import { IconButton } from "../../components/primitives/IconButton";
 import { Input } from "../../components/primitives/Input";
-import { Tag } from "../../components/primitives/Tag";
-import { CopyButton } from "../../components/CopyButton";
 import { useReachTop } from "../../hooks/useReachTop";
 import { NF } from "../../icons";
 import type {
@@ -13,19 +10,11 @@ import type {
   SessionChunk,
   SessionDetail as SessionDetailData,
 } from "../../types";
-import { formatRelativeTime, formatSize } from "../projects/format";
 import { MoveSessionModal } from "../projects/MoveSessionModal";
-import {
-  bestTimestampMs,
-  formatTokens,
-  modelBadge,
-  projectBasename,
-  shortSessionId,
-} from "./format";
 import { SessionChunkView } from "./SessionChunkView";
 import { SessionContextPanel } from "./SessionContextPanel";
+import { SessionDetailHeader } from "./components/SessionDetailHeader";
 import { SessionEventView } from "./SessionEventView";
-import { SessionExportMenu } from "./SessionExportMenu";
 import { LiveStatusHeader } from "./LiveStatusHeader";
 import { EmptyState, LoadingPane } from "./components/SessionDetailStates";
 import {
@@ -206,9 +195,6 @@ export function SessionDetail({
   if (!detail) return null;
 
   const row = detail.row;
-  const lastTs = bestTimestampMs(row.last_ts, row.last_modified_ms);
-  const firstTs = row.first_ts ? Date.parse(row.first_ts) : null;
-  const project = projectBasename(row.project_path) || row.slug;
   const hidden = Math.max(0, filtered.length - visible.length);
 
   return (
@@ -232,230 +218,21 @@ export function SessionDetail({
            Cheap no-op otherwise (the component returns null). */}
       <LiveStatusHeader sessionId={row.session_id} />
 
-      {/* Header strip ---------------------------------------------------- */}
-      <div
-        style={{
-          padding: "var(--sp-20) var(--sp-28) var(--sp-14)",
-          borderBottom: "var(--bw-hair) solid var(--line)",
-          flexShrink: 0,
-          background: "var(--bg)",
-        }}
-      >
-        <div
-          style={{
-            display: "flex",
-            alignItems: "center",
-            gap: "var(--sp-8)",
-            marginBottom: "var(--sp-6)",
-          }}
-        >
-          {onBack && (
-            <IconButton
-              glyph={NF.chevronL}
-              onClick={onBack}
-              title="Back to session list"
-              aria-label="Back to session list"
-            />
-          )}
-          <div
-            style={{
-              fontSize: "var(--fs-2xs)",
-              color: "var(--fg-faint)",
-              letterSpacing: "var(--ls-wide)",
-              textTransform: "uppercase",
-              display: "flex",
-              alignItems: "center",
-              gap: "var(--sp-6)",
-            }}
-          >
-            <span>{project}</span>
-            <Glyph g={NF.chevronR} style={{ fontSize: "var(--fs-3xs)" }} />
-            <span className="mono" title={row.session_id}>
-              {shortSessionId(row.session_id)}
-            </span>
-            <CopyButton text={row.session_id} />
-          </div>
-        </div>
-
-        <h2
-          style={{
-            margin: 0,
-            fontSize: "var(--fs-lg)",
-            fontWeight: 600,
-            color: "var(--fg)",
-            letterSpacing: "var(--ls-normal)",
-            textTransform: "none",
-            overflow: "hidden",
-            textOverflow: "ellipsis",
-            display: "-webkit-box",
-            WebkitLineClamp: 2,
-            WebkitBoxOrient: "vertical",
-          }}
-          title={row.first_user_prompt ?? undefined}
-        >
-          {row.first_user_prompt?.trim() ||
-            (row.is_sidechain ? "Agent subsession" : "(untitled session)")}
-        </h2>
-
-        <div
-          style={{
-            marginTop: "var(--sp-10)",
-            display: "flex",
-            flexWrap: "wrap",
-            gap: "var(--sp-8)",
-          }}
-        >
-          {row.has_error && (
-            <Tag tone="warn" glyph={NF.warn}>
-              error
-            </Tag>
-          )}
-          {row.is_sidechain && <Tag tone="ghost">agent</Tag>}
-          {row.models.length > 0 && (
-            <Tag tone="accent" title={row.models.join(", ")}>
-              {modelBadge(row.models)}
-            </Tag>
-          )}
-          {row.git_branch && (
-            <Tag tone="neutral" glyph={NF.branch}>
-              {row.git_branch}
-            </Tag>
-          )}
-          {row.cc_version && <Tag tone="ghost">cc {row.cc_version}</Tag>}
-          {row.tokens.total > 0 && (
-            <Tag
-              tone="neutral"
-              title={`input ${row.tokens.input} · output ${row.tokens.output} · cache r/w ${row.tokens.cache_read}/${row.tokens.cache_creation}`}
-            >
-              {formatTokens(row.tokens.total)} tok
-            </Tag>
-          )}
-          {row.message_count > 0 && (
-            <Tag tone="neutral">
-              {row.message_count} turn{row.message_count === 1 ? "" : "s"}
-            </Tag>
-          )}
-          <Tag tone="ghost">{formatSize(row.file_size_bytes)}</Tag>
-        </div>
-
-        <div
-          style={{
-            marginTop: "var(--sp-10)",
-            display: "flex",
-            flexWrap: "wrap",
-            gap: "var(--sp-12) var(--sp-16)",
-            alignItems: "center",
-            color: "var(--fg-muted)",
-            fontSize: "var(--fs-xs)",
-          }}
-        >
-          <span
-            title={row.project_path}
-            style={{
-              display: "inline-flex",
-              alignItems: "center",
-              gap: "var(--sp-6)",
-              maxWidth: "100%",
-              overflow: "hidden",
-              textOverflow: "ellipsis",
-              whiteSpace: "nowrap",
-            }}
-          >
-            <Glyph g={NF.folder} style={{ fontSize: "var(--fs-2xs)" }} />
-            <span
-              className="mono"
-              style={{
-                overflow: "hidden",
-                textOverflow: "ellipsis",
-                whiteSpace: "nowrap",
-              }}
-            >
-              {row.project_path}
-            </span>
-            <CopyButton text={row.project_path} />
-          </span>
-          {firstTs != null && (
-            <span title={row.first_ts ?? ""}>
-              Started {formatRelativeTime(firstTs)}
-            </span>
-          )}
-          {lastTs != null && (
-            <span title={row.last_ts ?? ""}>
-              Last event {formatRelativeTime(lastTs)}
-            </span>
-          )}
-        </div>
-
-        <div
-          style={{
-            marginTop: "var(--sp-14)",
-            display: "flex",
-            flexWrap: "wrap",
-            gap: "var(--sp-8)",
-          }}
-        >
-          <Button
-            variant="ghost"
-            glyph={NF.folderOpen}
-            glyphColor="var(--fg-muted)"
-            onClick={handleReveal}
-          >
-            Reveal
-          </Button>
-          <Button
-            variant="ghost"
-            glyph={NF.arrowR}
-            glyphColor="var(--fg-muted)"
-            onClick={() => setMoveOpen(true)}
-            disabled={!row.project_from_transcript}
-            title={
-              row.project_from_transcript
-                ? "Move this session's transcript to another project"
-                : "Can't move: no cwd recorded in the transcript"
-            }
-          >
-            Move to project…
-          </Button>
-          {row.first_user_prompt && (
-            <Button
-              variant="ghost"
-              glyph={NF.copy}
-              glyphColor="var(--fg-muted)"
-              onClick={handleCopyFirstPrompt}
-            >
-              Copy first prompt
-            </Button>
-          )}
-          <SessionExportMenu filePath={row.file_path} onError={onError} />
-          {chunks !== null && (
-            <Button
-              variant="ghost"
-              glyph={viewMode === "chunks" ? NF.layers : NF.fileText}
-              glyphColor="var(--fg-muted)"
-              onClick={() =>
-                setViewMode((m) => (m === "chunks" ? "raw" : "chunks"))
-              }
-              title={
-                viewMode === "chunks"
-                  ? "Switch to raw event stream"
-                  : "Switch to chunked view"
-              }
-            >
-              {viewMode === "chunks" ? "Raw events" : "Chunked"}
-            </Button>
-          )}
-          <Button
-            variant="ghost"
-            glyph={NF.sliders}
-            glyphColor="var(--fg-muted)"
-            onClick={() => setContextOpen((v) => !v)}
-            aria-pressed={contextOpen}
-            title="Toggle visible-context panel"
-          >
-            {contextOpen ? "Hide context" : "Context"}
-          </Button>
-        </div>
-      </div>
+      <SessionDetailHeader
+        row={row}
+        chunks={chunks}
+        viewMode={viewMode}
+        contextOpen={contextOpen}
+        onBack={onBack}
+        onReveal={handleReveal}
+        onCopyFirstPrompt={handleCopyFirstPrompt}
+        onMoveClick={() => setMoveOpen(true)}
+        onToggleViewMode={() =>
+          setViewMode((m) => (m === "chunks" ? "raw" : "chunks"))
+        }
+        onToggleContext={() => setContextOpen((v) => !v)}
+        onError={onError}
+      />
 
       {/* Search bar ------------------------------------------------------ */}
       <div
