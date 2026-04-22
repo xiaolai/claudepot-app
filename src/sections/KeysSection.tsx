@@ -1,8 +1,8 @@
 import { useCallback, useEffect, useState } from "react";
-import { openUrl } from "@tauri-apps/plugin-opener";
 import { api } from "../api";
 import { Button } from "../components/primitives/Button";
 import { ConfirmDialog } from "../components/ConfirmDialog";
+import { ExternalLink } from "../components/primitives/ExternalLink";
 import { Glyph } from "../components/primitives/Glyph";
 import { IconButton } from "../components/primitives/IconButton";
 import { SectionLabel } from "../components/primitives/SectionLabel";
@@ -606,34 +606,6 @@ function RowActions({ children }: { children: React.ReactNode }) {
     >
       {children}
     </span>
-  );
-}
-
-function ExternalLink({
-  href,
-  children,
-}: {
-  href: string;
-  children: React.ReactNode;
-}) {
-  return (
-    <button
-      type="button"
-      onClick={() => {
-        void openUrl(href).catch(() => {});
-      }}
-      style={{
-        background: "transparent",
-        border: "none",
-        padding: 0,
-        color: "var(--accent)",
-        textDecoration: "underline",
-        cursor: "pointer",
-        font: "inherit",
-      }}
-    >
-      {children}
-    </button>
   );
 }
 

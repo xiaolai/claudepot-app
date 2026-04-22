@@ -14,3 +14,4 @@ export { Modal, ModalHeader, ModalBody, ModalFooter } from "./Modal";
 export { DevBadge } from "./DevBadge";
 export { Toast } from "./Toast";
 export type { ToastProps } from "./Toast";
+export { ExternalLink } from "./ExternalLink";

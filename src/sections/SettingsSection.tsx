@@ -3,6 +3,7 @@ import type { NfIcon } from "../icons";
 import { api } from "../api";
 import { Button } from "../components/primitives/Button";
 import { ConfirmDialog } from "../components/ConfirmDialog";
+import { ExternalLink } from "../components/primitives/ExternalLink";
 import { Glyph } from "../components/primitives/Glyph";
 import { Tag } from "../components/primitives/Tag";
 import { useDevMode } from "../hooks/useDevMode";
@@ -697,6 +698,22 @@ function AboutPane() {
       <dl style={gridStyle}>
         <Kv label="App" value="Claudepot" />
         <Kv label="Version" value={APP_VERSION} mono />
+        <Kv
+          label="Author"
+          value={
+            <ExternalLink href="https://github.com/xiaolai">
+              @xiaolai
+            </ExternalLink>
+          }
+        />
+        <Kv
+          label="Website"
+          value={
+            <ExternalLink href="https://claudepot.com">
+              claudepot.com
+            </ExternalLink>
+          }
+        />
         <Kv
           label="Design"
           value="paper-mono — JetBrains Mono NF, OKLCH palette"

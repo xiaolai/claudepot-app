@@ -18,7 +18,10 @@
     {
       "identifier": "opener:allow-open-url",
       "allow": [
-        { "url": "https://console.anthropic.com/settings/keys" }
+        { "url": "https://console.anthropic.com/settings/keys" },
+        { "url": "https://github.com/xiaolai" },
+        { "url": "https://claudepot.com" },
+        { "url": "https://claudepot.com/" }
       ]
     }
   ]
