@@ -9,6 +9,9 @@ authors.workspace = true
 name = "claudepot"
 path = "src/main.rs"
 
+[dev-dependencies]
+tempfile.workspace = true
+
 [dependencies]
 claudepot-core = { path = "../claudepot-core" }
 tokio.workspace = true

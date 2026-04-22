@@ -1231,6 +1231,7 @@ pub struct SearchHitDto {
     pub snippet: String,
     pub match_offset: usize,
     pub last_ts: Option<DateTime<Utc>>,
+    pub score: f32,
 }
 
 impl From<&claudepot_core::session_search::SearchHit> for SearchHitDto {
@@ -1244,7 +1245,48 @@ impl From<&claudepot_core::session_search::SearchHit> for SearchHitDto {
             snippet: h.snippet.clone(),
             match_offset: h.match_offset,
             last_ts: h.last_ts,
+            score: h.score,
         }
+    }
+}
+
+#[cfg(test)]
+mod search_hit_dto_tests {
+    use super::*;
+
+    fn sample_core_hit() -> claudepot_core::session_search::SearchHit {
+        claudepot_core::session_search::SearchHit {
+            session_id: "abc".into(),
+            slug: "-r".into(),
+            file_path: std::path::PathBuf::from("/tmp/x.jsonl"),
+            project_path: "/repo".into(),
+            role: "user".into(),
+            snippet: "hello world".into(),
+            match_offset: 3,
+            last_ts: None,
+            score: 0.7,
+        }
+    }
+
+    #[test]
+    fn search_hit_dto_roundtrips_score_field() {
+        let dto: SearchHitDto = (&sample_core_hit()).into();
+        let json = serde_json::to_string(&dto).unwrap();
+        assert!(json.contains("\"score\":0.7"), "missing score: {json}");
+    }
+
+    #[test]
+    fn search_hit_dto_converts_all_fields_from_core() {
+        let dto: SearchHitDto = (&sample_core_hit()).into();
+        assert_eq!(dto.session_id, "abc");
+        assert_eq!(dto.slug, "-r");
+        assert_eq!(dto.file_path, "/tmp/x.jsonl");
+        assert_eq!(dto.project_path, "/repo");
+        assert_eq!(dto.role, "user");
+        assert_eq!(dto.snippet, "hello world");
+        assert_eq!(dto.match_offset, 3);
+        assert!(dto.last_ts.is_none());
+        assert!((dto.score - 0.7).abs() < f32::EPSILON);
     }
 }
 

@@ -2,11 +2,13 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { api } from "../api";
 import { ContextMenu, type ContextMenuItem } from "../components/ContextMenu";
 import { Button } from "../components/primitives/Button";
+import { FilterChip } from "../components/primitives/FilterChip";
 import { Glyph } from "../components/primitives/Glyph";
 import { IconButton } from "../components/primitives/IconButton";
 import { Input } from "../components/primitives/Input";
 import { Toast } from "../components/primitives/Toast";
 import { useGlobalShortcuts } from "../hooks/useGlobalShortcuts";
+import { useSessionSearch } from "../hooks/useSessionSearch";
 import { useCompactHeader, useSplitView } from "../hooks/useWindowWidth";
 import { NF } from "../icons";
 import { ScreenHeader } from "../shell/ScreenHeader";
@@ -23,8 +25,13 @@ import {
   type SessionFilter,
 } from "./sessions/SessionsTable";
 
-const SEG_OPTIONS: { id: SessionFilter; label: string }[] = [
-  { id: "all", label: "All" },
+/**
+ * Toggleable chips: each flips the filter between "all" and its own
+ * value. Two chips active at once is not a supported state — picking
+ * one deselects the other (mutual exclusion preserves the existing
+ * `SessionFilter` enum shape).
+ */
+const FILTER_CHIPS: { id: Exclude<SessionFilter, "all">; label: string }[] = [
   { id: "errors", label: "Errors" },
   { id: "sidechain", label: "Agents" },
 ];
@@ -151,6 +158,24 @@ export function SessionsSection(props: SessionsSectionProps = {}) {
     () => filterSessionsByRepo(sessions, repoGroups, activeRepo),
     [sessions, repoGroups, activeRepo],
   );
+
+  // Deep content search (useSessionSearch): scans transcript bodies so
+  // a query like "deadlock" surfaces sessions whose metadata doesn't
+  // mention the word. Debounced + 2-char min inside the hook.
+  const { hits: deepHits } = useSessionSearch(query, 50);
+  const deepHitPaths = useMemo(
+    () => new Set(deepHits.map((h) => h.file_path)),
+    [deepHits],
+  );
+  /** `file_path → snippet` map used by the table to show match context.
+   * Snippets are already redacted by the backend (see
+   * session_search::make_hit → redact_secrets), so sk-ant- substrings
+   * never reach the DOM. */
+  const searchSnippets = useMemo(() => {
+    const m = new Map<string, string>();
+    for (const h of deepHits) m.set(h.file_path, h.snippet);
+    return m;
+  }, [deepHits]);
   const filteredByQuery = useMemo(() => {
     const q = query.trim().toLowerCase();
     if (!q) return scoped;
@@ -160,9 +185,11 @@ export function SessionsSection(props: SessionsSectionProps = {}) {
       if ((s.first_user_prompt ?? "").toLowerCase().includes(q)) return true;
       if (s.models.some((m) => m.toLowerCase().includes(q))) return true;
       if ((s.git_branch ?? "").toLowerCase().includes(q)) return true;
+      // Deep content hit from the backend search.
+      if (deepHitPaths.has(s.file_path)) return true;
       return false;
     });
-  }, [scoped, query]);
+  }, [scoped, query, deepHitPaths]);
 
   const handleContextMenu = useCallback(
     (e: React.MouseEvent, s: SessionRow) => {
@@ -244,55 +271,44 @@ export function SessionsSection(props: SessionsSectionProps = {}) {
         >
           <Input
             glyph={NF.search}
-            placeholder="Filter by project, prompt, model, or id"
+            placeholder="Search project, prompt, content, model, or id"
             value={query}
             onChange={(e) => setQuery(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Escape" && query.length > 0) {
+                e.preventDefault();
+                e.stopPropagation();
+                setQuery("");
+              }
+            }}
             style={{
               flex: "1 1 var(--filter-input-width)",
               minWidth: "var(--filter-input-min)",
               maxWidth: "var(--filter-input-width)",
             }}
-            aria-label="Filter sessions"
+            aria-label="Search sessions"
           />
 
           <div
-            role="tablist"
+            role="group"
+            aria-label="Session filters"
             style={{
               display: "flex",
-              gap: "var(--sp-2)",
-              padding: "var(--sp-2)",
-              background: "var(--bg-sunken)",
-              border: "var(--bw-hair) solid var(--line)",
-              borderRadius: "var(--r-2)",
+              gap: "var(--sp-6)",
             }}
           >
-            {SEG_OPTIONS.map((opt) => {
-              const current = filter === opt.id;
+            {FILTER_CHIPS.map((opt) => {
+              const active = filter === opt.id;
               const count = counts[opt.id];
               return (
-                <button
+                <FilterChip
                   key={opt.id}
-                  type="button"
-                  role="tab"
-                  aria-selected={current}
-                  onClick={() => setFilter(opt.id)}
-                  style={{
-                    padding: "var(--sp-4) var(--sp-10)",
-                    fontSize: "var(--fs-xs)",
-                    fontWeight: 500,
-                    color: current ? "var(--fg)" : "var(--fg-muted)",
-                    background: current ? "var(--bg-raised)" : "transparent",
-                    border: current
-                      ? "var(--bw-hair) solid var(--line)"
-                      : "var(--bw-hair) solid transparent",
-                    borderRadius: "var(--r-1)",
-                    letterSpacing: "var(--ls-wide)",
-                    textTransform: "uppercase",
-                    cursor: "pointer",
-                  }}
+                  active={active}
+                  count={count}
+                  onToggle={() => setFilter(active ? "all" : opt.id)}
                 >
-                  {opt.label} · {count}
-                </button>
+                  {opt.label}
+                </FilterChip>
               );
             })}
           </div>
@@ -362,6 +378,9 @@ export function SessionsSection(props: SessionsSectionProps = {}) {
                 selectedId={selectedPath}
                 onSelect={setSelectedPath}
                 onContextMenu={handleContextMenu}
+                searchSnippets={
+                  searchSnippets.size > 0 ? searchSnippets : undefined
+                }
               />
             </div>
           )}
