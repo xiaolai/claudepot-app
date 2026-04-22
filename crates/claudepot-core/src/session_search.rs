@@ -16,8 +16,8 @@
 
 use crate::session::{SessionError, SessionEvent, SessionRow};
 use crate::session_export::redact_secrets;
+use crate::session_search_ranking::{classify_match, rank_hits};
 use serde::Serialize;
-use std::cmp::Ordering;
 use std::fs;
 use std::io::{BufRead, BufReader};
 
@@ -64,44 +64,6 @@ impl SearchQuery {
             limit: limit.max(1),
         })
     }
-}
-
-/// Score classes. Kept internal; the externally visible number is on
-/// `SearchHit.score`.
-const SCORE_PHRASE: f32 = 1.0;
-const SCORE_PREFIX: f32 = 0.7;
-const SCORE_SUBSTRING: f32 = 0.4;
-
-/// Classify a match at `byte_off` in `haystack` given the matched byte
-/// length. "Word boundary" means the adjacent character is not
-/// alphanumeric (Unicode-aware).
-fn classify_match(haystack: &str, byte_off: usize, byte_len: usize) -> f32 {
-    let before_is_boundary = match haystack[..byte_off].chars().last() {
-        None => true,
-        Some(c) => !c.is_alphanumeric(),
-    };
-    let after_off = byte_off + byte_len;
-    let after_is_boundary = match haystack[after_off..].chars().next() {
-        None => true,
-        Some(c) => !c.is_alphanumeric(),
-    };
-    match (before_is_boundary, after_is_boundary) {
-        (true, true) => SCORE_PHRASE,
-        (true, false) => SCORE_PREFIX,
-        _ => SCORE_SUBSTRING,
-    }
-}
-
-/// Stable sort by score desc, then `last_ts` desc (newer first; `None`
-/// treated as oldest). Stable so ties in both keep input order.
-pub fn rank_hits(mut hits: Vec<SearchHit>) -> Vec<SearchHit> {
-    hits.sort_by(|a, b| {
-        b.score
-            .partial_cmp(&a.score)
-            .unwrap_or(Ordering::Equal)
-            .then_with(|| b.last_ts.cmp(&a.last_ts))
-    });
-    hits
 }
 
 /// Run a query across `rows`. Stops collecting once `limit` hits have
@@ -636,20 +598,6 @@ mod tests {
         assert!(hits[0].2.starts_with("İstanbul") || hits[0].2.starts_with("…"));
     }
 
-    fn synthetic_hit(score: f32, last_ts: Option<DateTime<Utc>>, id: &str) -> SearchHit {
-        SearchHit {
-            session_id: id.into(),
-            slug: "-r".into(),
-            file_path: PathBuf::from("/x"),
-            project_path: "/repo".into(),
-            role: "user".into(),
-            snippet: String::new(),
-            match_offset: 0,
-            last_ts,
-            score,
-        }
-    }
-
     #[test]
     fn search_query_new_rejects_short_input() {
         assert!(SearchQuery::new("", 10).is_none());
@@ -663,79 +611,6 @@ mod tests {
     fn search_query_coerces_zero_limit_to_one() {
         let q = SearchQuery::new("auth", 0).unwrap();
         assert_eq!(q.limit, 1);
-    }
-
-    #[test]
-    fn classify_match_scores_phrase_prefix_substring() {
-        // "auth" as the whole word — phrase
-        assert_eq!(classify_match("auth is cool", 0, 4), SCORE_PHRASE);
-        // "auth" at start of "authentication" — word-prefix
-        assert_eq!(classify_match("authentication rules", 0, 4), SCORE_PREFIX);
-        // "auth" inside "unauthorized" — substring
-        assert_eq!(classify_match("unauthorized now", 2, 4), SCORE_SUBSTRING);
-        // "auth" bounded by punctuation — phrase
-        assert_eq!(classify_match("(auth).", 1, 4), SCORE_PHRASE);
-        // "auth" bounded by end of string — phrase
-        assert_eq!(classify_match("no auth", 3, 4), SCORE_PHRASE);
-    }
-
-    #[test]
-    fn classify_match_treats_unicode_alphanumerics_as_word_chars() {
-        // `é` is alphanumeric, so "caf" in "café latte" starts at a word
-        // boundary but ends inside a word → prefix, not phrase.
-        assert_eq!(classify_match("café latte", 0, 3), SCORE_PREFIX);
-        // "afé" inside "cafés" — inside a word on both sides.
-        assert_eq!(classify_match("cafés wars", 1, 4), SCORE_SUBSTRING);
-        // `·` (middle dot, non-alphanumeric) serves as a boundary, so
-        // "auth" between two of them is phrase-bounded.
-        assert_eq!(classify_match("a·auth·z", 3, 4), SCORE_PHRASE);
-    }
-
-    #[test]
-    fn rank_hits_sorts_by_score_then_recency() {
-        let new_ts = ts("2026-04-10T10:00:00Z");
-        let old_ts = ts("2020-01-01T00:00:00Z");
-        let hits = vec![
-            synthetic_hit(0.4, old_ts, "sub-old"),
-            synthetic_hit(1.0, old_ts, "phrase-old"),
-            synthetic_hit(1.0, new_ts, "phrase-new"),
-            synthetic_hit(0.7, new_ts, "prefix-new"),
-        ];
-        let ranked = rank_hits(hits);
-        let ids: Vec<_> = ranked.iter().map(|h| h.session_id.as_str()).collect();
-        assert_eq!(ids, vec!["phrase-new", "phrase-old", "prefix-new", "sub-old"]);
-    }
-
-    #[test]
-    fn rank_hits_is_stable_for_equal_keys() {
-        let t = ts("2026-04-10T10:00:00Z");
-        let hits = vec![
-            synthetic_hit(1.0, t, "a"),
-            synthetic_hit(1.0, t, "b"),
-            synthetic_hit(1.0, t, "c"),
-        ];
-        let ranked = rank_hits(hits);
-        // All keys equal — input order preserved.
-        let ids: Vec<_> = ranked.iter().map(|h| h.session_id.as_str()).collect();
-        assert_eq!(ids, vec!["a", "b", "c"]);
-    }
-
-    #[test]
-    fn rank_hits_puts_none_ts_after_some_ts() {
-        let t = ts("2026-04-10T10:00:00Z");
-        let hits = vec![
-            synthetic_hit(1.0, None, "none"),
-            synthetic_hit(1.0, t, "has-ts"),
-        ];
-        let ranked = rank_hits(hits);
-        let ids: Vec<_> = ranked.iter().map(|h| h.session_id.as_str()).collect();
-        assert_eq!(ids, vec!["has-ts", "none"]);
-    }
-
-    #[test]
-    fn rank_hits_empty_input_is_noop() {
-        let out = rank_hits(Vec::<SearchHit>::new());
-        assert!(out.is_empty());
     }
 
     #[test]
