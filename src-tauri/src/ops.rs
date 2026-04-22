@@ -27,6 +27,9 @@ pub enum OpKind {
     CleanProjects,
     SessionPrune,
     SessionSlim,
+    /// Gist upload — tracked separately from SessionSlim so the UI
+    /// label reads "Sharing" rather than "Slimming".
+    SessionShare,
 }
 
 /// Post-op summary surfaced to the UI on success, so we can render

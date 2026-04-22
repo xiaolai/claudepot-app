@@ -1052,7 +1052,8 @@ fn spawn_repair_op(
             OpKind::MoveProject
             | OpKind::CleanProjects
             | OpKind::SessionPrune
-            | OpKind::SessionSlim => {
+            | OpKind::SessionSlim
+            | OpKind::SessionShare => {
                 unreachable!("wrong spawn path")
             }
         };
@@ -2639,6 +2640,16 @@ fn format_from_dto(f: ExportFormatDto) -> claudepot_core::session_export::Export
     }
 }
 
+/// File extension matching the requested export format. Used by gist
+/// uploads so the uploaded file is named with the right suffix.
+fn export_extension(f: &ExportFormatDto) -> &'static str {
+    match f {
+        ExportFormatDto::Markdown | ExportFormatDto::MarkdownSlim => "md",
+        ExportFormatDto::Json => "json",
+        ExportFormatDto::Html { .. } => "html",
+    }
+}
+
 fn resolve_session_detail(
     target: &str,
 ) -> Result<claudepot_core::session::SessionDetail, String> {
@@ -2674,16 +2685,17 @@ pub fn session_share_gist_start(
     ops: State<RunningOps>,
 ) -> Result<String, String> {
     let detail = resolve_session_detail(&target)?;
+    let ext = export_extension(&format);
     let fmt = format_from_dto(format);
     let pol = policy_from_dto(policy);
     let body = claudepot_core::session_export::export_with(&detail, fmt, &pol);
-    let filename = format!("session-{}.md", detail.row.session_id);
+    let filename = format!("session-{}.{}", detail.row.session_id, ext);
     let description = format!("Claudepot session export: {}", detail.row.session_id);
-    let token = github_token_get_internal()?;
+    let token = github_token_for_upload()?;
     let op_id = new_op_id();
     ops.insert(RunningOpInfo {
         op_id: op_id.clone(),
-        kind: OpKind::SessionSlim, // reuse; no SessionShare variant yet
+        kind: OpKind::SessionShare,
         old_path: detail.row.session_id.clone(),
         new_path: String::new(),
         current_phase: None,
@@ -2734,7 +2746,11 @@ pub fn session_share_gist_start(
 const GH_TOKEN_SERVICE: &str = "claudepot";
 const GH_TOKEN_ENTRY: &str = "github-token";
 
-fn github_token_get_internal() -> Result<String, String> {
+/// Token used by gist uploads: env var wins over keychain, same as
+/// the CLI. Kept private — the settings UI never sees this directly;
+/// it operates on the keychain slot only, so Save/Clear aren't
+/// silent no-ops when the env var is also set.
+fn github_token_for_upload() -> Result<String, String> {
     if let Ok(v) = std::env::var("GITHUB_TOKEN") {
         if !v.trim().is_empty() {
             return Ok(v);
@@ -2747,29 +2763,54 @@ fn github_token_get_internal() -> Result<String, String> {
         .map_err(|_| "no GitHub token stored".to_string())
 }
 
+/// Read only the keychain-backed token. Returns `None` when absent.
+fn github_token_keychain_read() -> Result<Option<String>, String> {
+    let entry = keyring::Entry::new(GH_TOKEN_SERVICE, GH_TOKEN_ENTRY)
+        .map_err(|e| format!("keychain init: {e}"))?;
+    match entry.get_password() {
+        Ok(v) => Ok(Some(v)),
+        Err(_) => Ok(None),
+    }
+}
+
 #[derive(serde::Serialize)]
 pub struct GithubTokenStatus {
+    /// True iff a value lives in the Claudepot keychain slot.
     pub present: bool,
+    /// Last four chars of the keychain value, if present.
     pub last4: Option<String>,
+    /// True when `GITHUB_TOKEN` env var is set — the CLI and the
+    /// gist uploader both prefer it over the keychain value. The UI
+    /// can surface this so users understand why "Clear" didn't take
+    /// effect for an upload.
+    pub env_override: bool,
+}
+
+fn last4_of(s: &str) -> Option<String> {
+    if s.len() >= 4 {
+        Some(s[s.len() - 4..].to_string())
+    } else if !s.is_empty() {
+        Some(s.to_string())
+    } else {
+        None
+    }
 }
 
 #[tauri::command]
 pub fn settings_github_token_get() -> Result<GithubTokenStatus, String> {
-    match github_token_get_internal() {
-        Ok(t) => {
-            let last4 = if t.len() >= 4 {
-                Some(t[t.len() - 4..].to_string())
-            } else {
-                Some(t.clone())
-            };
-            Ok(GithubTokenStatus {
-                present: true,
-                last4,
-            })
-        }
-        Err(_) => Ok(GithubTokenStatus {
+    let env_override = std::env::var("GITHUB_TOKEN")
+        .map(|v| !v.trim().is_empty())
+        .unwrap_or(false);
+    match github_token_keychain_read()? {
+        Some(t) => Ok(GithubTokenStatus {
+            present: true,
+            last4: last4_of(&t),
+            env_override,
+        }),
+        None => Ok(GithubTokenStatus {
             present: false,
             last4: None,
+            env_override,
         }),
     }
 }
@@ -2781,14 +2822,13 @@ pub fn settings_github_token_set(value: String) -> Result<GithubTokenStatus, Str
     entry
         .set_password(&value)
         .map_err(|e| format!("keychain set: {e}"))?;
-    let last4 = if value.len() >= 4 {
-        Some(value[value.len() - 4..].to_string())
-    } else {
-        Some(value.clone())
-    };
+    let env_override = std::env::var("GITHUB_TOKEN")
+        .map(|v| !v.trim().is_empty())
+        .unwrap_or(false);
     Ok(GithubTokenStatus {
         present: true,
-        last4,
+        last4: last4_of(&value),
+        env_override,
     })
 }
 

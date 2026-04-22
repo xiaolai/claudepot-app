@@ -314,7 +314,10 @@ export type OpKind =
   | "repair_resume"
   | "repair_rollback"
   | "move_project"
-  | "clean_projects";
+  | "clean_projects"
+  | "session_prune"
+  | "session_slim"
+  | "session_share";
 
 export type OpStatus = "running" | "complete" | "error";
 
@@ -884,4 +887,10 @@ export interface RedactionPolicyInput {
 export interface GithubTokenStatus {
   present: boolean;
   last4: string | null;
+  /**
+   * When true, the GITHUB_TOKEN env var is set and overrides the
+   * keychain slot for gist uploads. Surface this so users know why
+   * Clear may not take effect for an upload.
+   */
+  env_override: boolean;
 }

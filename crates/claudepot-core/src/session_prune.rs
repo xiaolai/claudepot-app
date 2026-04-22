@@ -43,10 +43,15 @@ pub struct PruneFilter {
 
 impl PruneFilter {
     /// Reject an entirely empty filter — the user almost certainly
-    /// didn't mean "prune everything".
+    /// didn't mean "prune everything". Zero-valued `older_than`
+    /// (0 seconds) and `larger_than` (0 bytes) count as "not set",
+    /// because they would match every session and silently defeat the
+    /// guard.
     pub fn validate(&self) -> Result<(), PruneError> {
-        let any = self.older_than.is_some()
-            || self.larger_than.is_some()
+        let has_older = matches!(self.older_than, Some(d) if !d.is_zero());
+        let has_larger = matches!(self.larger_than, Some(n) if n > 0);
+        let any = has_older
+            || has_larger
             || !self.project.is_empty()
             || self.has_error.is_some()
             || self.is_sidechain.is_some();
@@ -267,6 +272,19 @@ mod tests {
     fn empty_filter_rejected() {
         let f = PruneFilter::default();
         assert!(matches!(f.validate(), Err(PruneError::EmptyFilter)));
+    }
+
+    #[test]
+    fn zero_valued_older_than_and_larger_than_count_as_empty() {
+        let f = PruneFilter {
+            older_than: Some(Duration::from_secs(0)),
+            larger_than: Some(0),
+            ..PruneFilter::default()
+        };
+        assert!(
+            matches!(f.validate(), Err(PruneError::EmptyFilter)),
+            "zero-valued numeric filters must be treated as empty"
+        );
     }
 
     #[test]
