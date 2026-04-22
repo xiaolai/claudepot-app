@@ -167,6 +167,15 @@ export function SessionsSection(props: SessionsSectionProps = {}) {
     () => new Set(deepHits.map((h) => h.file_path)),
     [deepHits],
   );
+  /** `file_path → snippet` map used by the table to show match context.
+   * Snippets are already redacted by the backend (see
+   * session_search::make_hit → redact_secrets), so sk-ant- substrings
+   * never reach the DOM. */
+  const searchSnippets = useMemo(() => {
+    const m = new Map<string, string>();
+    for (const h of deepHits) m.set(h.file_path, h.snippet);
+    return m;
+  }, [deepHits]);
   const filteredByQuery = useMemo(() => {
     const q = query.trim().toLowerCase();
     if (!q) return scoped;
@@ -369,6 +378,9 @@ export function SessionsSection(props: SessionsSectionProps = {}) {
                 selectedId={selectedPath}
                 onSelect={setSelectedPath}
                 onContextMenu={handleContextMenu}
+                searchSnippets={
+                  searchSnippets.size > 0 ? searchSnippets : undefined
+                }
               />
             </div>
           )}
