@@ -38,6 +38,7 @@ import type {
   PrunePlan,
   SlimOptsInput,
   SlimPlan,
+  BulkSlimPlan,
   TrashListing,
   ExportFormatInput,
   RedactionPolicyInput,
@@ -292,6 +293,12 @@ export const api = {
   /** Start an async slim op; returns an op_id to subscribe on. */
   sessionSlimStart: (path: string, opts: SlimOptsInput) =>
     invoke<string>("session_slim_start", { path, opts }),
+  /** Preview a bulk slim across every session matching the filter. */
+  sessionSlimPlanAll: (filter: PruneFilterInput, opts: SlimOptsInput) =>
+    invoke<BulkSlimPlan>("session_slim_plan_all", { filter, opts }),
+  /** Start an async bulk slim op; returns an op_id to subscribe on. */
+  sessionSlimStartAll: (filter: PruneFilterInput, opts: SlimOptsInput) =>
+    invoke<string>("session_slim_start_all", { filter, opts }),
   /** List trash batches. */
   sessionTrashList: (olderThanSecs?: number) =>
     invoke<TrashListing>("session_trash_list", {
