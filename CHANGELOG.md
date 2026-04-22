@@ -6,6 +6,34 @@ Versioning scheme:
 - `0.1.x` — beta
 - `1.0.0+` — stable
 
+## 0.0.3 — alpha (unreleased)
+
+### Added
+
+- **`session slim --strip-images` / `--strip-documents`**: drop
+  base64 image and document payloads from closed session transcripts,
+  replacing each block with a `[image]` / `[document]` text stub.
+  Mirrors Claude Code's own `stripImagesFromMessages` transform, so
+  `claude --resume` loads cleanly minus the ~2000-token-per-image
+  cost. Reuses the existing `TrashKind::Slim` pre-slim snapshot for
+  reversibility. Only touches `message.content` blocks that reach
+  the API — `toolUseResult` display-only sidecars are intentionally
+  left intact so the transcript viewer still renders images.
+
+### Fixed
+
+- **Slim reversibility**: `session slim --execute` previously stored
+  the throwaway snapshot temp path in the trash manifest, so
+  `session trash restore` would have recreated the file at
+  `<session>.pre-slim.jsonl` instead of overwriting the real
+  session. `TrashPut` now carries a separate `restore_path`
+  field for this case. Any slim entries produced before this fix
+  restore to the wrong path — empty the trash if you have any.
+- **Slim atomicity**: a second `(size, mtime_ns)` re-stat now runs
+  immediately before the atomic rename, narrowing the TOCTOU window
+  against a concurrent Claude Code appender. Temp files and snapshot
+  files are cleaned up via RAII guards on every error path.
+
 ## 0.0.2 — alpha (unreleased)
 
 ### Added
