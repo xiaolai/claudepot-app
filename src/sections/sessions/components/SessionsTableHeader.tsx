@@ -3,11 +3,15 @@ import { NF } from "../../../icons";
 import { COLS, type SortDir, type SortKey } from "../sessionsTable.shared";
 
 /**
- * Sticky header row for the sessions table. Columns whose order is
- * meaningful (project, turns, tokens, last-active) are sortable
- * `<button role="columnheader">` controls; the leading glyph and
- * trailing chevron columns are placeholders to keep the grid template
- * in sync with each row.
+ * Sticky header row for the sessions table. The body below is a
+ * `<ul role="listbox">`, so the header is presentational only — we
+ * deliberately do NOT use `role="row"` / `role="columnheader"` /
+ * `aria-sort` here, because those imply a `grid` / `table` parent
+ * and would mislead screen readers about the table's structure.
+ *
+ * Sort controls are plain `<button>`s that announce the current sort
+ * state through `aria-label` ("Sort by project (currently ascending,
+ * click to switch to descending)") and a visible direction glyph.
  */
 export function SessionsTableHeader({
   sort,
@@ -18,7 +22,6 @@ export function SessionsTableHeader({
 }) {
   return (
     <div
-      role="row"
       style={{
         display: "grid",
         gridTemplateColumns: COLS,
@@ -85,18 +88,25 @@ function SortHeader({
   onToggle: (key: SortKey) => void;
 }) {
   const active = currentKey === col;
-  const aria: "ascending" | "descending" | "none" = active
+  // Clicking advances the cycle: asc → desc → unsorted (default).
+  // We surface that explicitly in the label so screen readers
+  // announce both the current state and what clicking will do.
+  const nextStateLabel = active
     ? currentDir === "asc"
-      ? "ascending"
-      : "descending"
-    : "none";
+      ? "click to sort descending"
+      : "click to clear sort"
+    : "click to sort ascending";
+  const currentStateLabel = active
+    ? currentDir === "asc"
+      ? "currently ascending"
+      : "currently descending"
+    : "not sorted";
   return (
     <button
       type="button"
-      role="columnheader"
-      aria-sort={aria}
       onClick={() => onToggle(col)}
       title={`Sort by ${label.toLowerCase()}`}
+      aria-label={`Sort by ${label.toLowerCase()} (${currentStateLabel}, ${nextStateLabel})`}
       style={{
         background: "transparent",
         border: 0,

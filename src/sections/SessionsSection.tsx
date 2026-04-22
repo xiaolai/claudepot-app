@@ -368,22 +368,27 @@ export function SessionsSection(props: SessionsSectionProps = {}) {
           background: "var(--bg)",
         }}
       >
-        <FilterChip
+        <SectionTab
+          id="sessions-tab-sessions"
+          panelId="sessions-tab-panel-sessions"
+          label="Sessions"
           active={tab === "sessions"}
-          onToggle={() => setTab("sessions")}
-        >
-          Sessions
-        </FilterChip>
-        <FilterChip
+          onSelect={() => setTab("sessions")}
+        />
+        <SectionTab
+          id="sessions-tab-cleanup"
+          panelId="sessions-tab-panel-cleanup"
+          label="Cleanup"
           active={tab === "cleanup"}
-          onToggle={() => setTab("cleanup")}
-        >
-          Cleanup
-        </FilterChip>
+          onSelect={() => setTab("cleanup")}
+        />
       </div>
 
       {tab === "cleanup" && (
         <div
+          id="sessions-tab-panel-cleanup"
+          role="tabpanel"
+          aria-labelledby="sessions-tab-cleanup"
           style={{
             display: "flex",
             flex: 1,
@@ -400,7 +405,20 @@ export function SessionsSection(props: SessionsSectionProps = {}) {
         </div>
       )}
 
-      {tab === "sessions" && showTable && (
+      {tab === "sessions" && (
+        // Single tabpanel wrapping all sessions-tab content. We use
+        // `display: contents` so the existing column-of-flex-children
+        // layout (RepoFilterStrip + filter row + error pane / table+
+        // detail) survives the wrapping div without any flex-sizing
+        // adjustment. Modern AT (NVDA, JAWS, VoiceOver) treats the
+        // ARIA role as authoritative regardless of the layout box.
+        <div
+          id="sessions-tab-panel-sessions"
+          role="tabpanel"
+          aria-labelledby="sessions-tab-sessions"
+          style={{ display: "contents" }}
+        >
+      {showTable && (
         <RepoFilterStrip
           groups={repoGroups}
           activeRepo={activeRepo}
@@ -408,7 +426,7 @@ export function SessionsSection(props: SessionsSectionProps = {}) {
         />
       )}
 
-      {tab === "sessions" && showTable && (
+      {showTable && (
         <div
           style={{
             padding: "var(--sp-14) var(--sp-32)",
@@ -483,7 +501,7 @@ export function SessionsSection(props: SessionsSectionProps = {}) {
         </div>
       )}
 
-      {tab === "sessions" && error && sessions.length === 0 ? (
+      {error && sessions.length === 0 ? (
         <div
           style={{
             flex: 1,
@@ -512,7 +530,7 @@ export function SessionsSection(props: SessionsSectionProps = {}) {
             Retry
           </Button>
         </div>
-      ) : tab === "sessions" ? (
+      ) : (
         <div style={{ display: "flex", minHeight: 0, flex: 1 }}>
           {showTable && (
             // SessionsTable owns its own scroll container so the row
@@ -572,7 +590,9 @@ export function SessionsSection(props: SessionsSectionProps = {}) {
             </aside>
           )}
         </div>
-      ) : null}
+      )}
+        </div>
+      )}
 
       {moveSession && (
         <MoveSessionModal
@@ -662,5 +682,65 @@ function copyToClipboard(
   void navigator.clipboard.writeText(text).then(
     () => setToast(`Copied ${label}.`),
     (e) => setToast(`Couldn't copy ${label}: ${e instanceof Error ? e.message : String(e)}`),
+  );
+}
+
+/**
+ * Proper `role="tab"` button for the Sessions/Cleanup tab strip. The
+ * pre-existing FilterChip uses `role="switch"`, which conflicts with
+ * `role="tablist"` parents — assistive tech announces them as toggle
+ * switches instead of tabs. This thin button mirrors FilterChip's
+ * paper-mono styling but emits the correct ARIA contract: `role=tab`,
+ * `aria-selected`, `aria-controls` linking to the tabpanel.
+ */
+function SectionTab({
+  id,
+  panelId,
+  label,
+  active,
+  onSelect,
+}: {
+  id: string;
+  panelId: string;
+  label: string;
+  active: boolean;
+  onSelect: () => void;
+}) {
+  return (
+    <button
+      id={id}
+      type="button"
+      role="tab"
+      aria-selected={active}
+      aria-controls={panelId}
+      tabIndex={active ? 0 : -1}
+      onClick={onSelect}
+      onKeyDown={(e) => {
+        if (e.key === "Enter" || e.key === " ") {
+          e.preventDefault();
+          onSelect();
+        }
+      }}
+      style={{
+        display: "inline-flex",
+        alignItems: "center",
+        gap: "var(--sp-6)",
+        height: "var(--sp-24)",
+        padding: "0 var(--sp-10)",
+        fontSize: "var(--fs-xs)",
+        fontWeight: 500,
+        letterSpacing: "var(--ls-wide)",
+        textTransform: "uppercase",
+        color: active ? "var(--accent-ink)" : "var(--fg-muted)",
+        background: active ? "var(--accent-soft)" : "var(--bg-sunken)",
+        border: `var(--bw-hair) solid ${active ? "var(--accent-border)" : "var(--line)"}`,
+        borderRadius: "var(--r-1)",
+        cursor: "pointer",
+        whiteSpace: "nowrap",
+        outlineOffset: 2,
+      }}
+    >
+      {label}
+    </button>
   );
 }
