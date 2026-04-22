@@ -1,11 +1,9 @@
 import { useVirtualizer } from "@tanstack/react-virtual";
-import {
+import React, {
   memo,
   type CSSProperties,
   type MouseEvent,
-  useCallback,
   useMemo,
-  useRef,
   useState,
 } from "react";
 import { Glyph } from "../../components/primitives/Glyph";
@@ -38,24 +36,30 @@ export type SortDir = "asc" | "desc";
 const COLS = "var(--sp-20) 2fr 1.1fr 0.6fr 0.7fr 0.9fr var(--sp-24)";
 
 /**
- * Above this count, switch to row-level virtualization. Below it we
- * render every row — the virtualizer's measurement loop has a small
- * fixed cost that isn't worth paying for short lists. 80 is the
- * empirical crossover on a 2021 MBP in paper-mono markup.
+ * Above this count, switch to row-level virtualization.
  *
- * jsdom returns 0 for layout metrics, so tests that mount fewer than
- * this many rows stay on the simple path and assert real DOM. A
- * dedicated virtualization test mocks layout to exercise the
- * virtualized path explicitly.
+ * Math: at ~72px per row the non-virtualized list still renders fine
+ * up to a couple of laptop viewports' worth of work; past that, every
+ * row is off-screen DOM the browser paints for nothing, which is the
+ * condition virtualization wins on. 80 rows × 72 px ≈ 5760 px — above
+ * any realistic viewport, so the crossover matches the paint budget.
+ *
+ * Secondary factor: jsdom returns 0 for layout metrics, so tests that
+ * mount fewer than this many rows stay on the plain path and assert
+ * real DOM. A dedicated virtualization test mocks layout to exercise
+ * the virtualized path explicitly.
  */
-const VIRTUALIZE_THRESHOLD = 80;
+export const VIRTUALIZE_THRESHOLD = 80;
 
 /**
- * Estimated row height used by the virtualizer before the real height
- * is measured. Matches the common "metadata line only" row; rows that
- * also show a deep-search snippet are measured and corrected on paint.
+ * Initial row-height estimate used by the virtualizer before each row's
+ * real height is measured. Biased above the common "metadata line
+ * only" row (~58px) so that rows that also show a deep-search snippet
+ * (~85px) don't jolt the scrollbar thumb on first paint. The real
+ * height is measured post-paint via `measureElement`, so this only
+ * controls the first frame.
  */
-const ESTIMATED_ROW_PX = 64;
+const ESTIMATED_ROW_PX = 72;
 
 export function SessionsTable({
   sessions,
@@ -85,6 +89,17 @@ export function SessionsTable({
     key: "last_active",
     dir: "desc",
   });
+
+  /**
+   * Scroll-parent reference passed to `VirtualList` via callback ref +
+   * state. We can't use a plain `useRef` here: the parent's ref is set
+   * during commit, but a child component's `useLayoutEffect` (where
+   * `useVirtualizer` calls `getScrollElement`) may already have run
+   * with `ref.current === null` in React 19. Holding the element in
+   * state guarantees the child re-renders once the element exists, so
+   * `useVirtualizer` sees a non-null scroll parent on its second pass.
+   */
+  const [scrollEl, setScrollEl] = useState<HTMLDivElement | null>(null);
 
   const toggleSort = (key: SortKey) => {
     setSort((prev) => {
@@ -144,40 +159,8 @@ export function SessionsTable({
   }
 
   return (
-    <TableScroller>
-      <Header sort={sort} onToggle={toggleSort} />
-      {shown.length === 0 ? (
-        <EmptyRow>No sessions match this filter.</EmptyRow>
-      ) : shown.length > VIRTUALIZE_THRESHOLD ? (
-        <VirtualList
-          shown={shown}
-          selectedId={selectedId}
-          onSelect={onSelect}
-          onContextMenu={onContextMenu}
-          searchSnippets={searchSnippets}
-        />
-      ) : (
-        <PlainList
-          shown={shown}
-          selectedId={selectedId}
-          onSelect={onSelect}
-          onContextMenu={onContextMenu}
-          searchSnippets={searchSnippets}
-        />
-      )}
-    </TableScroller>
-  );
-}
-
-/**
- * Owned scroll container. Virtualization needs a stable scroll parent
- * whose height is determined by flex, not content; the table puts the
- * sticky header and the listbox inside this element so `top: 0` pins
- * the header against the same scroller the virtualizer is watching.
- */
-function TableScroller({ children }: { children: React.ReactNode }) {
-  return (
     <div
+      ref={setScrollEl}
       data-testid="sessions-table-scroll"
       style={{
         flex: 1,
@@ -187,7 +170,42 @@ function TableScroller({ children }: { children: React.ReactNode }) {
         flexDirection: "column",
       }}
     >
-      {children}
+      <Header sort={sort} onToggle={toggleSort} />
+      {shown.length === 0 ? (
+        <EmptyRow>No sessions match this filter.</EmptyRow>
+      ) : shown.length > VIRTUALIZE_THRESHOLD ? (
+        // Degrade to PlainList if the virtualizer throws on layout —
+        // a single bad row height would otherwise bubble to the app-
+        // level ErrorBoundary and blank the whole window.
+        <VirtualFallbackBoundary
+          fallback={
+            <PlainList
+              shown={shown}
+              selectedId={selectedId}
+              onSelect={onSelect}
+              onContextMenu={onContextMenu}
+              searchSnippets={searchSnippets}
+            />
+          }
+        >
+          <VirtualList
+            shown={shown}
+            selectedId={selectedId}
+            onSelect={onSelect}
+            onContextMenu={onContextMenu}
+            searchSnippets={searchSnippets}
+            scrollEl={scrollEl}
+          />
+        </VirtualFallbackBoundary>
+      ) : (
+        <PlainList
+          shown={shown}
+          selectedId={selectedId}
+          onSelect={onSelect}
+          onContextMenu={onContextMenu}
+          searchSnippets={searchSnippets}
+        />
+      )}
     </div>
   );
 }
@@ -264,8 +282,7 @@ interface ListProps {
 
 /**
  * Straight `<ul>` render. Used below the virtualization threshold and
- * in tests (jsdom has no layout, so the virtualizer would collapse
- * the list to zero items).
+ * as the fallback when the virtualizer boundary catches an error.
  */
 function PlainList({
   shown,
@@ -307,28 +324,11 @@ function VirtualList({
   onSelect,
   onContextMenu,
   searchSnippets,
-}: ListProps) {
-  // The scroll container is the nearest ancestor with `overflow: auto`
-  // — `TableScroller` above. We reach for it by DOM traversal rather
-  // than threading a ref, because TableScroller is a sibling in the
-  // JSX tree and a ref prop would couple the two components tighter
-  // than the paper-mono composition calls for.
-  const ulRef = useRef<HTMLUListElement | null>(null);
-
-  const getScrollElement = useCallback(() => {
-    // Walk up from the <ul> until we find the scroller. The data-testid
-    // makes the target deterministic across refactors of surrounding
-    // layout. Returns null before mount, which useVirtualizer tolerates.
-    let node: HTMLElement | null = ulRef.current;
-    while (node && node.dataset?.testid !== "sessions-table-scroll") {
-      node = node.parentElement;
-    }
-    return node;
-  }, []);
-
+  scrollEl,
+}: ListProps & { scrollEl: HTMLDivElement | null }) {
   const rowVirtualizer = useVirtualizer({
     count: shown.length,
-    getScrollElement,
+    getScrollElement: () => scrollEl,
     estimateSize: () => ESTIMATED_ROW_PX,
     overscan: 8,
     getItemKey: (index) => shown[index].file_path,
@@ -338,7 +338,6 @@ function VirtualList({
 
   return (
     <ul
-      ref={ulRef}
       role="listbox"
       aria-label="Sessions"
       style={{
@@ -359,20 +358,51 @@ function VirtualList({
             onSelect={onSelect}
             onContextMenu={onContextMenu}
             snippet={searchSnippets?.get(s.file_path)}
-            virtualStyle={{
-              position: "absolute",
-              top: 0,
-              left: 0,
-              width: "100%",
-              transform: `translateY(${virtualRow.start}px)`,
-            }}
-            measureRef={rowVirtualizer.measureElement}
+            // Primitive props keep `React.memo`'s shallow equality
+            // effective on the virtualized path. An inline style
+            // object literal here would change identity every render
+            // and defeat memo for every visible row.
+            virtualStart={virtualRow.start}
             virtualIndex={virtualRow.index}
+            measureRef={rowVirtualizer.measureElement}
           />
         );
       })}
     </ul>
   );
+}
+
+/**
+ * Local error boundary for `VirtualList`. The virtualizer can, in rare
+ * cases, throw during its measurement pass — a bad `ResizeObserver`
+ * callback, a disconnected node, a `NaN` height. Without this boundary
+ * the error bubbles to the top-level `ErrorBoundary` and blanks the
+ * whole app window. We catch it here and drop back to the plain list,
+ * losing virtualization but preserving functionality.
+ */
+interface VirtualFallbackState {
+  failed: boolean;
+}
+class VirtualFallbackBoundary extends React.Component<
+  { children: React.ReactNode; fallback: React.ReactNode },
+  VirtualFallbackState
+> {
+  state: VirtualFallbackState = { failed: false };
+  static getDerivedStateFromError(): VirtualFallbackState {
+    return { failed: true };
+  }
+  componentDidCatch(err: unknown): void {
+    if (import.meta.env.DEV) {
+      // eslint-disable-next-line no-console
+      console.error(
+        "[SessionsTable] virtualizer threw — falling back to PlainList",
+        err,
+      );
+    }
+  }
+  render(): React.ReactNode {
+    return this.state.failed ? this.props.fallback : this.props.children;
+  }
 }
 
 interface SessionRowProps {
@@ -381,9 +411,11 @@ interface SessionRowProps {
   onSelect: (filePath: string) => void;
   onContextMenu?: (e: MouseEvent, s: SessionRow) => void;
   snippet?: string;
-  /** When rendered under the virtualizer, the row is absolutely
-   * positioned and its vertical offset flows through inline styles. */
-  virtualStyle?: CSSProperties;
+  /** When rendered under the virtualizer, `virtualStart` is the pixel
+   * offset this row translates to. Passed as a primitive so
+   * `React.memo`'s shallow equality works — a style object literal
+   * here would change identity every render. */
+  virtualStart?: number;
   /** Virtualizer's measurement callback — must be attached as a ref so
    * the library records each row's real height on paint. */
   measureRef?: (el: HTMLElement | null) => void;
@@ -398,7 +430,7 @@ const SessionRowView = memo(function SessionRowView({
   onSelect,
   onContextMenu,
   snippet,
-  virtualStyle,
+  virtualStart,
   measureRef,
   virtualIndex,
 }: SessionRowProps) {
@@ -410,6 +442,21 @@ const SessionRowView = memo(function SessionRowView({
     (s.is_sidechain ? "Agent subsession" : shortSessionId(s.session_id));
   const model = modelBadge(s.models);
   const tokens = formatTokens(s.tokens.total);
+
+  // `virtualStart` decides whether this row is rendered under the
+  // virtualizer. When it is, the style object is constructed here
+  // from primitives so it can be recomputed cheaply when needed and
+  // referentially stable when unchanged.
+  const virtualStyle: CSSProperties | undefined =
+    virtualStart !== undefined
+      ? {
+          position: "absolute",
+          top: 0,
+          left: 0,
+          width: "100%",
+          transform: `translateY(${virtualStart}px)`,
+        }
+      : undefined;
 
   return (
     <li
