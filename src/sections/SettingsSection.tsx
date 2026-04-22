@@ -977,6 +977,7 @@ function GithubPane({
   const [status, setStatus] = useState<{
     present: boolean;
     last4: string | null;
+    env_override: boolean;
   } | null>(null);
   const [input, setInput] = useState("");
   const [busy, setBusy] = useState(false);
@@ -1035,6 +1036,17 @@ function GithubPane({
           <span style={{ color: "var(--fg-muted)" }}>No token stored</span>
         )}
       </Row>
+      {status?.env_override && (
+        <Row label="Override">
+          <span
+            data-testid="github-env-override-note"
+            style={{ color: "var(--warn)", fontSize: "var(--fs-xs)" }}
+          >
+            GITHUB_TOKEN env var is set — it overrides the stored token for
+            uploads. Unset the env var if you want Save/Clear to take effect.
+          </span>
+        </Row>
+      )}
       <Row label="Token">
         <input
           type="password"

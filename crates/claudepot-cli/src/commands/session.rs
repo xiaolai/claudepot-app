@@ -685,6 +685,12 @@ fn write_to_clipboard(body: &str) -> Result<()> {
 /// secrets from the transcript even after redaction (user-supplied
 /// content that never passes through the redactor), and the rule is
 /// "minimum permissions on credential-adjacent data".
+///
+/// `OpenOptions::mode(0o600)` only applies on file creation, so an
+/// existing file with relaxed perms would keep them on overwrite.
+/// We explicitly `set_permissions(0o600)` after opening so the
+/// invariant holds whether the file is new or being replaced. On
+/// Windows we tighten the DACL so only the current user can read.
 fn write_export_file(path: &str, bytes: &[u8]) -> std::io::Result<()> {
     let mut opts = std::fs::OpenOptions::new();
     opts.write(true).create(true).truncate(true);
@@ -694,9 +700,75 @@ fn write_export_file(path: &str, bytes: &[u8]) -> std::io::Result<()> {
         opts.mode(0o600);
     }
     let mut file = opts.open(path)?;
+
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let perms = std::fs::Permissions::from_mode(0o600);
+        // Apply unconditionally — `opts.mode` above only covers the
+        // create path; existing files must be narrowed here.
+        std::fs::set_permissions(path, perms)?;
+    }
     use std::io::Write as _;
     file.write_all(bytes)?;
     file.sync_all()?;
+
+    #[cfg(windows)]
+    {
+        // Apply a strict DACL via `icacls`: disable inheritance and
+        // grant only the current user full control. `icacls` is a
+        // Windows system binary always present since XP; shelling
+        // out avoids pulling a Rust ACL crate into the dep graph.
+        harden_windows_acl(path)?;
+    }
+
+    Ok(())
+}
+
+/// Tighten the DACL on `path` to the Windows equivalent of `0600`.
+///
+/// The goal is the POSIX semantic "not world-readable" — which on
+/// Windows means no Everyone / Users / Authenticated Users ACE. We
+/// deliberately do **not** remove grants for `BUILTIN\Administrators`
+/// or `NT AUTHORITY\SYSTEM`: those principals can read any file on the
+/// machine anyway, so removing them is security theater for this
+/// threat model. The user's goal is protection from peer user accounts
+/// on a shared machine, not from the OS administrator.
+#[cfg(windows)]
+fn harden_windows_acl(path: &str) -> std::io::Result<()> {
+    use std::process::Command;
+    let user = std::env::var("USERNAME").unwrap_or_default();
+    if user.is_empty() {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::Other,
+            "could not resolve %USERNAME% for ACL hardening",
+        ));
+    }
+    // Sequence:
+    //  1. /inheritance:r  — strip inherited ACEs entirely
+    //  2. /remove:g <peer-groups> — drop any surviving explicit grants
+    //     for Everyone / Users / Authenticated Users
+    //  3. /grant:r USER:F — replace the user ACE with exactly full control
+    // `/remove:g <name>` is a no-op when the ACE isn't present.
+    let run = |args: &[&str]| -> std::io::Result<()> {
+        let out = Command::new("icacls").args(args).output()?;
+        if !out.status.success() {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::Other,
+                format!(
+                    "icacls {args:?} failed for {path}: status={:?} stderr={}",
+                    out.status.code(),
+                    String::from_utf8_lossy(&out.stderr).trim()
+                ),
+            ));
+        }
+        Ok(())
+    };
+    run(&[path, "/inheritance:r"])?;
+    run(&[path, "/remove:g", "Everyone"])?;
+    run(&[path, "/remove:g", "Users"])?;
+    run(&[path, "/remove:g", "Authenticated Users"])?;
+    run(&[path, "/grant:r", &format!("{user}:F")])?;
     Ok(())
 }
 

@@ -51,7 +51,7 @@ beforeEach(() => {
 import { SettingsSection } from "../SettingsSection";
 
 async function mountAndOpenGithubTab() {
-  getSpy.mockResolvedValue({ present: false, last4: null });
+  getSpy.mockResolvedValue({ present: false, last4: null, env_override: false });
   render(<SettingsSection />);
   // Click the "GitHub" nav button.
   const nav = await screen.findByRole("button", { name: /GitHub/i });
@@ -68,9 +68,9 @@ describe("Settings → GitHub", () => {
 
   it("calls settingsGithubTokenSet with the input and clears the field", async () => {
     getSpy
-      .mockResolvedValueOnce({ present: false, last4: null })
-      .mockResolvedValueOnce({ present: true, last4: "1234" });
-    setSpy.mockResolvedValue({ present: true, last4: "1234" });
+      .mockResolvedValueOnce({ present: false, last4: null, env_override: false })
+      .mockResolvedValueOnce({ present: true, last4: "1234", env_override: false });
+    setSpy.mockResolvedValue({ present: true, last4: "1234", env_override: false });
     await mountAndOpenGithubTab();
     const input = await screen.findByLabelText("GitHub token");
     await userEvent.type(input, "ghp_abcdefghij1234");
@@ -90,10 +90,31 @@ describe("Settings → GitHub", () => {
     expect(document.body.textContent ?? "").not.toContain("ghp_abcdefghij1234");
   });
 
+  it("surfaces a warning when GITHUB_TOKEN env var is set", async () => {
+    // `mountAndOpenGithubTab` primes the first call; we want the
+    // *second* call (fired when the nav is clicked) to be the env-set
+    // one — but in practice the pane only fetches once on mount.
+    // So override the default mock before mounting.
+    getSpy.mockReset();
+    getSpy.mockResolvedValue({
+      present: true,
+      last4: "1234",
+      env_override: true,
+    });
+    render(<SettingsSection />);
+    const nav = await screen.findByRole("button", { name: /GitHub/i });
+    await userEvent.click(nav);
+    await waitFor(() =>
+      expect(
+        screen.getByTestId("github-env-override-note"),
+      ).toBeInTheDocument(),
+    );
+  });
+
   it("Clear calls settingsGithubTokenClear and refreshes", async () => {
     getSpy
-      .mockResolvedValueOnce({ present: true, last4: "9999" })
-      .mockResolvedValueOnce({ present: false, last4: null });
+      .mockResolvedValueOnce({ present: true, last4: "9999", env_override: false })
+      .mockResolvedValueOnce({ present: false, last4: null, env_override: false });
     clearSpy.mockResolvedValue(undefined);
     await mountAndOpenGithubTab();
     await screen.findByTestId("github-token-last4");

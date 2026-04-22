@@ -243,19 +243,19 @@ fn temp_path_next_to(p: &Path) -> PathBuf {
 }
 
 fn same_mtime(a: SystemTime, b: SystemTime) -> bool {
-    // Compare to the second. Nanosecond precision varies across
-    // filesystems; a one-second window is enough to detect a live
-    // write without false-positiving on timezone drift. This is a
-    // strict less-than-guard: the slim is aborted when mtime changes.
-    let da = a
-        .duration_since(std::time::UNIX_EPOCH)
-        .map(|d| d.as_secs())
-        .unwrap_or(0);
-    let db = b
-        .duration_since(std::time::UNIX_EPOCH)
-        .map(|d| d.as_secs())
-        .unwrap_or(0);
-    da == db
+    // Compare the full duration since epoch with platform-native
+    // precision. A whole-second compare would let a concurrent CC
+    // append inside the same second slip past the guard and get
+    // clobbered. Filesystems vary in precision (nanosecond on macOS
+    // APFS and modern Linux, 100ns on NTFS), but equality of the
+    // full Duration is the strongest check we can make from std.
+    match (
+        a.duration_since(std::time::UNIX_EPOCH),
+        b.duration_since(std::time::UNIX_EPOCH),
+    ) {
+        (Ok(da), Ok(db)) => da == db,
+        _ => false,
+    }
 }
 
 struct LineStats {
@@ -560,6 +560,18 @@ mod tests {
         assert!(!unchanged, "guard condition must trip");
         // Silence unused import warning in non-cfg-test builds.
         let _ = meta.ino();
+    }
+
+    #[test]
+    fn same_mtime_distinguishes_different_subsecond_values() {
+        use std::time::{Duration, UNIX_EPOCH};
+        let t1 = UNIX_EPOCH + Duration::new(1_700_000_000, 100_000_000);
+        let t2 = UNIX_EPOCH + Duration::new(1_700_000_000, 200_000_000);
+        // Same second, different nanoseconds — must be treated as
+        // different so a live write is detected.
+        assert!(!same_mtime(t1, t2));
+        // Identical values still equal.
+        assert!(same_mtime(t1, t1));
     }
 
     #[test]

@@ -281,8 +281,43 @@ pub fn list(data_dir: &Path, filter: TrashFilter) -> Result<TrashListing, TrashE
     })
 }
 
+/// A valid batch id is exactly `YYYYMMDDTHHMMSSZ-<8 hex>`. Anything
+/// else — separators, `..`, absolute prefixes — is rejected so
+/// `trash_root.join(entry_id)` can't escape the trash directory.
+fn is_valid_batch_id(s: &str) -> bool {
+    // 16 chars for the timestamp + '-' + 8 hex chars = 25 total.
+    if s.len() != 16 + 1 + 8 {
+        return false;
+    }
+    let bytes = s.as_bytes();
+    // Timestamp prefix: 8 digits + 'T' + 6 digits + 'Z'
+    let digits_ok = |range: std::ops::Range<usize>| -> bool {
+        range.into_iter().all(|i| bytes[i].is_ascii_digit())
+    };
+    if !digits_ok(0..8) || bytes[8] != b'T' || !digits_ok(9..15) || bytes[15] != b'Z' {
+        return false;
+    }
+    if bytes[16] != b'-' {
+        return false;
+    }
+    bytes[17..25]
+        .iter()
+        .all(|b| b.is_ascii_hexdigit() && !b.is_ascii_uppercase())
+}
+
 fn find_batch(data_dir: &Path, entry_id: &str) -> Result<(PathBuf, TrashEntry), TrashError> {
-    let batch_dir = trash_root(data_dir).join(entry_id);
+    if !is_valid_batch_id(entry_id) {
+        return Err(TrashError::EntryNotFound(entry_id.to_string()));
+    }
+    let root = trash_root(data_dir);
+    let batch_dir = root.join(entry_id);
+    // Defense in depth: after join(), confirm the result is a direct
+    // child of the trash root. If someone finds a way past the id
+    // validator this still blocks escape.
+    match batch_dir.parent() {
+        Some(parent) if parent == root => {}
+        _ => return Err(TrashError::EntryNotFound(entry_id.to_string())),
+    }
     if !batch_dir.exists() {
         return Err(TrashError::EntryNotFound(entry_id.to_string()));
     }
@@ -590,6 +625,53 @@ mod tests {
         // Sanity: this millisecond value corresponds to 2026 April.
         let dt = DateTime::<Utc>::from_timestamp_millis(ms).unwrap();
         assert_eq!(dt.format("%Y-%m").to_string(), "2026-04");
+    }
+
+    #[test]
+    fn restore_rejects_path_traversal_in_entry_id() {
+        let tmp = TempDir::new().unwrap();
+        let data_dir = tmp.path().join("data");
+        fs::create_dir_all(&data_dir).unwrap();
+        // Legitimate trashed file so the root dir exists.
+        let src = mk_file(tmp.path(), "x.jsonl", b"body\n");
+        write(
+            &data_dir,
+            TrashPut {
+                orig_path: &src,
+                kind: TrashKind::Prune,
+                cwd: None,
+                reason: None,
+            },
+        )
+        .unwrap();
+
+        let bad_ids = [
+            "../../../etc/passwd",
+            "..",
+            "",
+            "/",
+            "/absolute/path",
+            "..\\windows\\path",
+            "20260422T120000Z-deadbeef/../other",
+            "malformed",
+            "20260422T120000Z", // missing suffix
+        ];
+        for bad in bad_ids {
+            let err = restore(&data_dir, bad, None).unwrap_err();
+            assert!(
+                matches!(err, TrashError::EntryNotFound(_)),
+                "expected EntryNotFound for bad id {bad:?}, got {err:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn is_valid_batch_id_accepts_canonical_shape() {
+        assert!(is_valid_batch_id("20260422T153045Z-deadbeef"));
+        assert!(is_valid_batch_id("20260422T153045Z-00000000"));
+        assert!(!is_valid_batch_id("20260422T153045Z-DEADBEEF")); // uppercase hex rejected
+        assert!(!is_valid_batch_id("20260422T153045Z-dead"));      // too short
+        assert!(!is_valid_batch_id("20260422X153045Z-deadbeef"));  // wrong separator
     }
 
     #[test]

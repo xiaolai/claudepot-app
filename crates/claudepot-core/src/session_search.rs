@@ -66,9 +66,17 @@ impl SearchQuery {
     }
 }
 
-/// Run a query across `rows`. Stops collecting once `limit` hits have
-/// accumulated — the caller is expected to pre-sort rows the way they
-/// want matches prioritized (e.g., newest-first).
+/// Run a query across `rows`.
+///
+/// Scans every row, collects all hits, ranks by `(score desc, last_ts desc)`,
+/// then truncates to `limit`. This ensures the globally best-scoring
+/// matches win even when more than `limit` candidates exist — applying
+/// the cap before ranking would drop better phrase matches in favor of
+/// earlier substring hits.
+///
+/// For very large deployments this could be bounded by a max-scan
+/// budget; today the scanner already stops at the first match per
+/// file, so the work is O(rows) and fine.
 pub fn search_rows(
     rows: &[SessionRow],
     query: &str,
@@ -81,9 +89,6 @@ pub fn search_rows(
     let mut hits = Vec::new();
 
     for row in rows {
-        if hits.len() >= limit {
-            break;
-        }
         // Fast-path: row-level fields (first_user_prompt) give us a
         // synthetic hit without opening the file.
         if let Some(fp) = &row.first_user_prompt {
@@ -96,17 +101,20 @@ pub fn search_rows(
                     needle_char_len(&needle),
                     end - off,
                 ));
-                if hits.len() >= limit {
-                    break;
-                }
                 continue; // don't also scan the file for this session
             }
         }
 
-        scan_file(row, &needle, limit, &mut hits)?;
+        // `scan_file` still stops at the first match per file — one
+        // hit per session keeps the result set compact. We pass
+        // `usize::MAX` as the internal cap so scan_file doesn't cut
+        // us off before the global ranking stage.
+        scan_file(row, &needle, usize::MAX, &mut hits)?;
     }
 
-    Ok(rank_hits(hits))
+    let mut ranked = rank_hits(hits);
+    ranked.truncate(limit);
+    Ok(ranked)
 }
 
 /// Case-insensitive substring scan that handles Unicode. Returns
@@ -487,6 +495,57 @@ mod tests {
         }
         let hits = search_rows(&rows, "widget", 3).unwrap();
         assert_eq!(hits.len(), 3);
+    }
+
+    #[test]
+    fn search_ranks_globally_not_per_limit_window() {
+        // Three substring matches followed by one phrase match. With
+        // limit=3, a naive "stop at limit then rank" would drop the
+        // phrase hit; the fix must scan everything first and truncate
+        // after ranking.
+        let sub1 = row(
+            "sub1",
+            "-r",
+            PathBuf::new(),
+            Some("unauthorized first"),
+            ts("2026-04-10T10:00:00Z"),
+        );
+        let sub2 = row(
+            "sub2",
+            "-r",
+            PathBuf::new(),
+            Some("unauthorized second"),
+            ts("2026-04-10T11:00:00Z"),
+        );
+        let sub3 = row(
+            "sub3",
+            "-r",
+            PathBuf::new(),
+            Some("unauthorized third"),
+            ts("2026-04-10T12:00:00Z"),
+        );
+        let phrase = row(
+            "phrase",
+            "-r",
+            PathBuf::new(),
+            Some("auth here"),
+            ts("2020-01-01T00:00:00Z"),
+        );
+        let hits = search_rows(
+            &[sub1, sub2, sub3, phrase],
+            "auth",
+            3,
+        )
+        .unwrap();
+        assert_eq!(hits.len(), 3);
+        // The phrase match must survive the limit — it's the best score.
+        assert!(
+            hits.iter().any(|h| h.session_id == "phrase"),
+            "phrase hit must win against three substring hits, got ids {:?}",
+            hits.iter().map(|h| &h.session_id).collect::<Vec<_>>()
+        );
+        // And it must be first.
+        assert_eq!(hits[0].session_id, "phrase");
     }
 
     #[test]

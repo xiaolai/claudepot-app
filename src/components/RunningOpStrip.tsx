@@ -10,6 +10,12 @@ function verb(kind: RunningOpInfo["kind"]): string {
       return "Renaming";
     case "clean_projects":
       return "Cleaning";
+    case "session_prune":
+      return "Pruning";
+    case "session_slim":
+      return "Slimming";
+    case "session_share":
+      return "Sharing";
   }
 }
 
@@ -20,6 +26,23 @@ function labelFor(op: RunningOpInfo): string {
       return `Cleaning projects (${done}/${total})`;
     }
     return "Cleaning projects";
+  }
+  if (op.kind === "session_prune") {
+    const suffix = op.sub_progress
+      ? ` (${op.sub_progress[0]}/${op.sub_progress[1]})`
+      : "";
+    return `Pruning sessions${suffix}`;
+  }
+  if (op.kind === "session_slim") {
+    const file = basename(op.old_path) || "session";
+    return op.current_phase
+      ? `Slimming ${file} (${op.current_phase})`
+      : `Slimming ${file}`;
+  }
+  if (op.kind === "session_share") {
+    return op.current_phase
+      ? `Sharing (${op.current_phase})`
+      : "Sharing session";
   }
   const base = `${verb(op.kind)} ${basename(op.old_path)} → ${basename(op.new_path)}`;
   if (op.current_phase && op.sub_progress) {
