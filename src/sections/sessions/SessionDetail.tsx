@@ -1,8 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { api } from "../../api";
-import { Button } from "../../components/primitives/Button";
 import { Glyph } from "../../components/primitives/Glyph";
-import { Input } from "../../components/primitives/Input";
 import { useReachTop } from "../../hooks/useReachTop";
 import { NF } from "../../icons";
 import type {
@@ -11,12 +9,11 @@ import type {
   SessionDetail as SessionDetailData,
 } from "../../types";
 import { MoveSessionModal } from "../projects/MoveSessionModal";
-import { SessionChunkView } from "./SessionChunkView";
 import { SessionContextPanel } from "./SessionContextPanel";
+import { SessionDetailBody } from "./components/SessionDetailBody";
 import { SessionDetailHeader } from "./components/SessionDetailHeader";
-import { SessionEventView } from "./SessionEventView";
 import { LiveStatusHeader } from "./LiveStatusHeader";
-import { EmptyState, LoadingPane } from "./components/SessionDetailStates";
+import { LoadingPane } from "./components/SessionDetailStates";
 import {
   chunkMatchesSearch,
   eventMatchesSearch,
@@ -234,134 +231,22 @@ export function SessionDetail({
         onError={onError}
       />
 
-      {/* Search bar ------------------------------------------------------ */}
-      <div
-        style={{
-          padding: "var(--sp-10) var(--sp-28)",
-          borderBottom: "var(--bw-hair) solid var(--line)",
-          display: "flex",
-          alignItems: "center",
-          gap: "var(--sp-10)",
-          flexShrink: 0,
-        }}
-      >
-        <Input
-          glyph={NF.search}
-          placeholder="Search within transcript"
-          value={search}
-          onChange={(e) => setSearch(e.target.value)}
-          style={{ flex: 1 }}
-          aria-label="Search within transcript"
-        />
-        {search.trim().length >= 2 && (
-          <span
-            style={{
-              fontSize: "var(--fs-xs)",
-              color: "var(--fg-faint)",
-              whiteSpace: "nowrap",
-            }}
-          >
-            {filtered.length} match{filtered.length === 1 ? "" : "es"}
-          </span>
-        )}
-      </div>
-
-      {/* Transcript ------------------------------------------------------ */}
-      <div
-        style={{
-          flex: 1,
-          minHeight: 0,
-          overflow: "auto",
-          padding: "var(--sp-18) var(--sp-28)",
-        }}
-      >
-        {viewMode === "chunks" && visibleChunksList ? (
-          visibleChunksList.length === 0 ? (
-            <EmptyState>
-              <Glyph g={NF.chatAlt} color="var(--fg-ghost)" />
-              {search.trim()
-                ? "Nothing matches that query."
-                : "This session has no events yet."}
-            </EmptyState>
-          ) : (
-            <>
-              <div
-                ref={topSentinelRef}
-                data-testid="chunks-top-sentinel"
-                aria-hidden
-                style={{ height: 1 }}
-              />
-              {chunksFiltered &&
-                chunksFiltered.length > visibleChunksList.length && (
-                  <div
-                    style={{
-                      display: "flex",
-                      justifyContent: "center",
-                      marginBottom: "var(--sp-14)",
-                    }}
-                  >
-                    <Button
-                      variant="ghost"
-                      onClick={() => setVisibleChunks((n) => n + CHUNK_PAGE)}
-                    >
-                      Show{" "}
-                      {Math.min(
-                        chunksFiltered.length - visibleChunksList.length,
-                        CHUNK_PAGE,
-                      )}{" "}
-                      older chunk
-                      {chunksFiltered.length - visibleChunksList.length === 1
-                        ? ""
-                        : "s"}
-                    </Button>
-                  </div>
-                )}
-              {visibleChunksList.map((c) => (
-                <SessionChunkView
-                  key={c.id}
-                  chunk={c}
-                  events={events}
-                  searchTerm={search.trim()}
-                />
-              ))}
-            </>
-          )
-        ) : filtered.length === 0 ? (
-          <EmptyState>
-            <Glyph g={NF.chatAlt} color="var(--fg-ghost)" />
-            {search.trim()
-              ? "Nothing matches that query."
-              : "This session has no events yet."}
-          </EmptyState>
-        ) : (
-          <>
-            {hidden > 0 && (
-              <div
-                style={{
-                  display: "flex",
-                  justifyContent: "center",
-                  marginBottom: "var(--sp-14)",
-                }}
-              >
-                <Button
-                  variant="ghost"
-                  onClick={() => setVisibleCount((n) => n + EVENT_PAGE)}
-                >
-                  Show {Math.min(hidden, EVENT_PAGE)} older event
-                  {hidden === 1 ? "" : "s"}
-                </Button>
-              </div>
-            )}
-            {visible.map(({ e, i }) => (
-              <SessionEventView
-                key={i}
-                event={e}
-                searchTerm={search.trim()}
-              />
-            ))}
-          </>
-        )}
-      </div>
+      <SessionDetailBody
+        viewMode={viewMode}
+        events={events}
+        visible={visible}
+        hidden={hidden}
+        matchCount={filtered.length}
+        visibleChunksList={visibleChunksList}
+        chunksFiltered={chunksFiltered}
+        search={search}
+        setSearch={setSearch}
+        topSentinelRef={topSentinelRef}
+        onLoadMoreEvents={() => setVisibleCount((n) => n + EVENT_PAGE)}
+        onLoadMoreChunks={() => setVisibleChunks((n) => n + CHUNK_PAGE)}
+        eventPage={EVENT_PAGE}
+        chunkPage={CHUNK_PAGE}
+      />
 
       {moveOpen && row.project_from_transcript && (
         <MoveSessionModal
