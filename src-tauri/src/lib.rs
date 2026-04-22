@@ -218,6 +218,8 @@ pub fn run() {
             commands::session_prune_start,
             commands::session_slim_plan,
             commands::session_slim_start,
+            commands::session_slim_plan_all,
+            commands::session_slim_start_all,
             commands::session_trash_list,
             commands::session_trash_restore,
             commands::session_trash_empty,

@@ -1638,6 +1638,83 @@ impl From<&claudepot_core::session_slim::SlimReport> for SlimReportDto {
 }
 
 #[derive(Serialize)]
+pub struct BulkSlimEntryDto {
+    pub session_id: String,
+    pub file_path: String,
+    pub project_path: String,
+    pub plan: SlimPlanDto,
+}
+
+#[derive(Serialize)]
+pub struct BulkSlimPlanDto {
+    pub entries: Vec<BulkSlimEntryDto>,
+    pub total_bytes_saved: u64,
+    pub total_image_redacts: u32,
+    pub total_document_redacts: u32,
+    pub total_tool_result_redacts: u32,
+}
+
+#[derive(Serialize)]
+pub struct BulkSlimReportDto {
+    pub succeeded_paths: Vec<String>,
+    pub skipped_live: Vec<String>,
+    pub failed: Vec<(String, String)>,
+    pub total_bytes_saved: u64,
+    pub total_image_redacts: u32,
+    pub total_document_redacts: u32,
+    pub total_tool_result_redacts: u32,
+}
+
+impl From<&claudepot_core::session_slim::BulkSlimEntry> for BulkSlimEntryDto {
+    fn from(e: &claudepot_core::session_slim::BulkSlimEntry) -> Self {
+        Self {
+            session_id: e.session_id.clone(),
+            file_path: e.file_path.to_string_lossy().to_string(),
+            project_path: e.project_path.clone(),
+            plan: (&e.plan).into(),
+        }
+    }
+}
+
+impl From<&claudepot_core::session_slim::BulkSlimPlan> for BulkSlimPlanDto {
+    fn from(p: &claudepot_core::session_slim::BulkSlimPlan) -> Self {
+        Self {
+            entries: p.entries.iter().map(Into::into).collect(),
+            total_bytes_saved: p.total_bytes_saved,
+            total_image_redacts: p.total_image_redacts,
+            total_document_redacts: p.total_document_redacts,
+            total_tool_result_redacts: p.total_tool_result_redacts,
+        }
+    }
+}
+
+impl From<&claudepot_core::session_slim::BulkSlimReport> for BulkSlimReportDto {
+    fn from(r: &claudepot_core::session_slim::BulkSlimReport) -> Self {
+        Self {
+            succeeded_paths: r
+                .succeeded
+                .iter()
+                .map(|(p, _)| p.to_string_lossy().to_string())
+                .collect(),
+            skipped_live: r
+                .skipped_live
+                .iter()
+                .map(|p| p.to_string_lossy().to_string())
+                .collect(),
+            failed: r
+                .failed
+                .iter()
+                .map(|(p, e)| (p.to_string_lossy().to_string(), e.clone()))
+                .collect(),
+            total_bytes_saved: r.total_bytes_saved,
+            total_image_redacts: r.total_image_redacts,
+            total_document_redacts: r.total_document_redacts,
+            total_tool_result_redacts: r.total_tool_result_redacts,
+        }
+    }
+}
+
+#[derive(Serialize)]
 pub struct TrashEntryDto {
     pub id: String,
     pub kind: String,
