@@ -741,3 +741,223 @@ fn print_json<T: serde::Serialize>(value: &T) {
     }
 }
 
+// ---------------------------------------------------------------------------
+// Prune + trash
+// ---------------------------------------------------------------------------
+
+fn parse_duration(s: &str) -> Result<std::time::Duration> {
+    let t = s.trim();
+    if t.is_empty() {
+        bail!("empty duration");
+    }
+    let (num_part, unit) = t.split_at(
+        t.find(|c: char| c.is_ascii_alphabetic()).unwrap_or(t.len()),
+    );
+    let n: u64 = num_part
+        .parse()
+        .with_context(|| format!("invalid duration: {s}"))?;
+    let secs = match unit {
+        "" | "s" => n,
+        "m" => n * 60,
+        "h" => n * 3600,
+        "d" => n * 86400,
+        _ => bail!("unknown duration unit in {s:?} (use s/m/h/d)"),
+    };
+    Ok(std::time::Duration::from_secs(secs))
+}
+
+fn parse_size(s: &str) -> Result<u64> {
+    let t = s.trim().to_ascii_uppercase();
+    if t.is_empty() {
+        bail!("empty size");
+    }
+    let (num_part, unit) = t.split_at(
+        t.find(|c: char| c.is_ascii_alphabetic()).unwrap_or(t.len()),
+    );
+    let n: u64 = num_part
+        .parse()
+        .with_context(|| format!("invalid size: {s}"))?;
+    let mult: u64 = match unit {
+        "" | "B" => 1,
+        "KB" => 1_000,
+        "MB" => 1_000_000,
+        "GB" => 1_000_000_000,
+        "KIB" => 1024,
+        "MIB" => 1024 * 1024,
+        "GIB" => 1024 * 1024 * 1024,
+        _ => bail!("unknown size unit in {s:?} (use B/KB/MB/GB/KiB/MiB/GiB)"),
+    };
+    Ok(n.saturating_mul(mult))
+}
+
+#[allow(clippy::too_many_arguments)]
+pub fn prune_cmd(
+    ctx: &AppContext,
+    older_than: Option<&str>,
+    larger_than: Option<&str>,
+    project: Vec<String>,
+    has_error: bool,
+    sidechain: bool,
+    execute: bool,
+) -> Result<()> {
+    use claudepot_core::session_prune::{execute_prune, plan_prune, PruneFilter};
+    let mut filter = PruneFilter::default();
+    if let Some(s) = older_than {
+        filter.older_than = Some(parse_duration(s)?);
+    }
+    if let Some(s) = larger_than {
+        filter.larger_than = Some(parse_size(s)?);
+    }
+    filter.project = project.iter().map(PathBuf::from).collect();
+    filter.has_error = if has_error { Some(true) } else { None };
+    filter.is_sidechain = if sidechain { Some(true) } else { None };
+
+    let cfg = paths::claude_config_dir();
+    let plan = plan_prune(&cfg, &filter).context("plan prune")?;
+
+    if plan.entries.is_empty() {
+        if ctx.json {
+            print_json(&plan);
+        } else {
+            println!("No sessions match the filter.");
+        }
+        return Ok(());
+    }
+
+    if !execute {
+        if ctx.json {
+            print_json(&plan);
+            return Ok(());
+        }
+        println!("Plan (dry-run):");
+        for e in &plan.entries {
+            println!(
+                "  - {}    {}    {}",
+                e.file_path.display(),
+                format_size(e.size_bytes),
+                e.last_ts_ms
+                    .map(format_ts_ms)
+                    .unwrap_or_else(|| "—".to_string())
+            );
+        }
+        println!(
+            "Total: {} file(s), {} → trash",
+            plan.entries.len(),
+            format_size(plan.total_bytes)
+        );
+        println!("Run with --execute to apply. Trash retained for 7 days.");
+        return Ok(());
+    }
+
+    let data_dir = paths::claudepot_data_dir();
+    let sink = claudepot_core::project_progress::NoopSink;
+    let report = execute_prune(&data_dir, &plan, &sink).context("execute prune")?;
+    if ctx.json {
+        print_json(&report);
+        return Ok(());
+    }
+    println!(
+        "Moved {} file(s) to trash, {} freed.",
+        report.moved.len(),
+        format_size(report.freed_bytes)
+    );
+    for (p, reason) in &report.failed {
+        eprintln!("  ✗ {}: {}", p.display(), reason);
+    }
+    Ok(())
+}
+
+pub fn trash_list_cmd(ctx: &AppContext, older_than: Option<&str>) -> Result<()> {
+    use claudepot_core::trash::{self, TrashFilter};
+    let filter = TrashFilter {
+        older_than: older_than.map(parse_duration).transpose()?,
+        kind: None,
+    };
+    let data_dir = paths::claudepot_data_dir();
+    let listing = trash::list(&data_dir, filter).context("list trash")?;
+    if ctx.json {
+        print_json(&listing);
+        return Ok(());
+    }
+    if listing.entries.is_empty() {
+        println!("Trash is empty.");
+        return Ok(());
+    }
+    for e in &listing.entries {
+        println!(
+            "{}  {:?}  {}  {}",
+            e.id,
+            e.kind,
+            format_size(e.size),
+            e.orig_path.display()
+        );
+    }
+    println!(
+        "Total: {} entry(ies), {}",
+        listing.entries.len(),
+        format_size(listing.total_bytes)
+    );
+    Ok(())
+}
+
+pub fn trash_restore_cmd(ctx: &AppContext, id: &str, to: Option<&str>) -> Result<()> {
+    use claudepot_core::trash;
+    let data_dir = paths::claudepot_data_dir();
+    let cwd = to.map(Path::new);
+    let restored = trash::restore(&data_dir, id, cwd).context("restore trash")?;
+    if ctx.json {
+        print_json(&serde_json::json!({ "restored": restored }));
+    } else {
+        println!("Restored to {}", restored.display());
+    }
+    Ok(())
+}
+
+pub fn trash_empty_cmd(ctx: &AppContext, older_than: Option<&str>) -> Result<()> {
+    use claudepot_core::trash::{self, TrashFilter};
+    // Refuse on a TTY without --yes.
+    if !ctx.yes && atty_like() {
+        bail!("`trash empty` requires --yes on a TTY. Pass -y to confirm.");
+    }
+    let filter = TrashFilter {
+        older_than: older_than.map(parse_duration).transpose()?,
+        kind: None,
+    };
+    let data_dir = paths::claudepot_data_dir();
+    let freed = trash::empty(&data_dir, filter).context("empty trash")?;
+    if ctx.json {
+        print_json(&serde_json::json!({ "freed_bytes": freed }));
+    } else {
+        println!("Emptied. Freed {}.", format_size(freed));
+    }
+    Ok(())
+}
+
+fn format_size(bytes: u64) -> String {
+    const KB: f64 = 1024.0;
+    const MB: f64 = KB * 1024.0;
+    const GB: f64 = MB * 1024.0;
+    let b = bytes as f64;
+    if b >= GB {
+        format!("{:.1} GiB", b / GB)
+    } else if b >= MB {
+        format!("{:.1} MiB", b / MB)
+    } else if b >= KB {
+        format!("{:.1} KiB", b / KB)
+    } else {
+        format!("{bytes} B")
+    }
+}
+
+fn format_ts_ms(ms: i64) -> String {
+    chrono::DateTime::<chrono::Utc>::from_timestamp_millis(ms)
+        .map(|dt| dt.format("%Y-%m-%d").to_string())
+        .unwrap_or_else(|| "—".to_string())
+}
+
+fn atty_like() -> bool {
+    // Used by `trash empty` to refuse without `--yes`. On a non-TTY
+    // (pipe, CI, test harness) we don't demand the confirmation.
+    std::io::IsTerminal::is_terminal(&std::io::stdin())
+}
+

@@ -143,6 +143,60 @@ enum SessionAction {
     },
     /// Group sessions by git repository (collapses worktrees).
     Worktrees,
+    /// Bulk delete session transcripts into the reversible trash.
+    /// Dry-run by default — pass `--execute` to actually move files.
+    Prune {
+        /// Match sessions whose last activity is older than the given
+        /// duration. Accepts `7d`, `24h`, `90m`, `3600s`.
+        #[arg(long)]
+        older_than: Option<String>,
+        /// Match sessions whose size is at least the given value.
+        /// Accepts `10MB`, `500KB`, `1024`.
+        #[arg(long)]
+        larger_than: Option<String>,
+        /// Repeatable: narrow to sessions whose cwd equals one of these.
+        #[arg(long)]
+        project: Vec<String>,
+        /// Only include sessions that recorded an error.
+        #[arg(long)]
+        has_error: bool,
+        /// Only include sidechain (subagent) sessions.
+        #[arg(long)]
+        sidechain: bool,
+        /// Actually move files into the trash. Without this flag,
+        /// prune only prints the plan.
+        #[arg(long)]
+        execute: bool,
+    },
+    /// Reversible trash for prune/slim operations.
+    Trash {
+        #[command(subcommand)]
+        action: TrashAction,
+    },
+}
+
+#[derive(Subcommand)]
+enum TrashAction {
+    /// List current trash batches.
+    List {
+        /// Only show entries older than the given duration.
+        #[arg(long)]
+        older_than: Option<String>,
+    },
+    /// Restore a trash batch by its id.
+    Restore {
+        /// Batch id (from `trash list`).
+        id: String,
+        /// Override destination cwd (parent dir) instead of the original.
+        #[arg(long)]
+        to: Option<String>,
+    },
+    /// Empty the trash. Honors the global `--yes` when on a TTY.
+    Empty {
+        /// Only empty entries older than the given duration.
+        #[arg(long)]
+        older_than: Option<String>,
+    },
 }
 
 #[derive(Subcommand)]
@@ -466,6 +520,33 @@ async fn main() -> Result<()> {
                 commands::session::search_cmd(&ctx, &query, limit)?
             }
             SessionAction::Worktrees => commands::session::worktrees_cmd(&ctx)?,
+            SessionAction::Prune {
+                older_than,
+                larger_than,
+                project,
+                has_error,
+                sidechain,
+                execute,
+            } => commands::session::prune_cmd(
+                &ctx,
+                older_than.as_deref(),
+                larger_than.as_deref(),
+                project,
+                has_error,
+                sidechain,
+                execute,
+            )?,
+            SessionAction::Trash { action } => match action {
+                TrashAction::List { older_than } => {
+                    commands::session::trash_list_cmd(&ctx, older_than.as_deref())?
+                }
+                TrashAction::Restore { id, to } => {
+                    commands::session::trash_restore_cmd(&ctx, &id, to.as_deref())?
+                }
+                TrashAction::Empty { older_than } => {
+                    commands::session::trash_empty_cmd(&ctx, older_than.as_deref())?
+                }
+            },
         },
     }
 
