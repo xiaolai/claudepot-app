@@ -173,6 +173,22 @@ enum SessionAction {
         #[command(subcommand)]
         action: TrashAction,
     },
+    /// Rewrite a transcript, dropping oversized tool_result payloads.
+    /// Dry-run by default — pass `--execute` to rewrite in place.
+    Slim {
+        /// Session UUID or absolute `.jsonl` path.
+        target: String,
+        /// Drop tool_result payloads larger than this. Accepts
+        /// `1MB`, `500KB`, `1024`. Default: 1MiB.
+        #[arg(long)]
+        drop_tool_results_over: Option<String>,
+        /// Repeatable: tool names whose results to preserve regardless.
+        #[arg(long)]
+        exclude_tool: Vec<String>,
+        /// Actually rewrite the file. Without this, slim only plans.
+        #[arg(long)]
+        execute: bool,
+    },
 }
 
 #[derive(Subcommand)]
@@ -534,6 +550,18 @@ async fn main() -> Result<()> {
                 project,
                 has_error,
                 sidechain,
+                execute,
+            )?,
+            SessionAction::Slim {
+                target,
+                drop_tool_results_over,
+                exclude_tool,
+                execute,
+            } => commands::session::slim_cmd(
+                &ctx,
+                &target,
+                drop_tool_results_over.as_deref(),
+                exclude_tool,
                 execute,
             )?,
             SessionAction::Trash { action } => match action {
