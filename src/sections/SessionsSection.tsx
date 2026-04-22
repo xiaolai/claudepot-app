@@ -7,6 +7,7 @@ import { IconButton } from "../components/primitives/IconButton";
 import { Input } from "../components/primitives/Input";
 import { Toast } from "../components/primitives/Toast";
 import { useGlobalShortcuts } from "../hooks/useGlobalShortcuts";
+import { useSessionSearch } from "../hooks/useSessionSearch";
 import { useCompactHeader, useSplitView } from "../hooks/useWindowWidth";
 import { NF } from "../icons";
 import { ScreenHeader } from "../shell/ScreenHeader";
@@ -151,6 +152,15 @@ export function SessionsSection(props: SessionsSectionProps = {}) {
     () => filterSessionsByRepo(sessions, repoGroups, activeRepo),
     [sessions, repoGroups, activeRepo],
   );
+
+  // Deep content search (useSessionSearch): scans transcript bodies so
+  // a query like "deadlock" surfaces sessions whose metadata doesn't
+  // mention the word. Debounced + 2-char min inside the hook.
+  const { hits: deepHits } = useSessionSearch(query, 50);
+  const deepHitPaths = useMemo(
+    () => new Set(deepHits.map((h) => h.file_path)),
+    [deepHits],
+  );
   const filteredByQuery = useMemo(() => {
     const q = query.trim().toLowerCase();
     if (!q) return scoped;
@@ -160,9 +170,11 @@ export function SessionsSection(props: SessionsSectionProps = {}) {
       if ((s.first_user_prompt ?? "").toLowerCase().includes(q)) return true;
       if (s.models.some((m) => m.toLowerCase().includes(q))) return true;
       if ((s.git_branch ?? "").toLowerCase().includes(q)) return true;
+      // Deep content hit from the backend search.
+      if (deepHitPaths.has(s.file_path)) return true;
       return false;
     });
-  }, [scoped, query]);
+  }, [scoped, query, deepHitPaths]);
 
   const handleContextMenu = useCallback(
     (e: React.MouseEvent, s: SessionRow) => {
@@ -244,15 +256,22 @@ export function SessionsSection(props: SessionsSectionProps = {}) {
         >
           <Input
             glyph={NF.search}
-            placeholder="Filter by project, prompt, model, or id"
+            placeholder="Search project, prompt, content, model, or id"
             value={query}
             onChange={(e) => setQuery(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Escape" && query.length > 0) {
+                e.preventDefault();
+                e.stopPropagation();
+                setQuery("");
+              }
+            }}
             style={{
               flex: "1 1 var(--filter-input-width)",
               minWidth: "var(--filter-input-min)",
               maxWidth: "var(--filter-input-width)",
             }}
-            aria-label="Filter sessions"
+            aria-label="Search sessions"
           />
 
           <div
