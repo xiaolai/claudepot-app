@@ -107,7 +107,10 @@ describe("SessionsTable", () => {
         onSelect={() => {}}
       />,
     );
-    await user.click(screen.getByRole("columnheader", { name: /Turns/i }));
+    // Sort buttons are plain buttons (not columnheader/grid) because
+    // the body is a listbox, not a grid. The aria-label is a full
+    // sentence describing both current state and click outcome.
+    await user.click(screen.getByRole("button", { name: /Sort by turns/i }));
     expect(sessionOrder()).toEqual([
       "prompt for gamma",
       "prompt for alpha",
