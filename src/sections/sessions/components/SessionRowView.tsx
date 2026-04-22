@@ -1,0 +1,301 @@
+import {
+  memo,
+  type CSSProperties,
+  type MouseEvent,
+  useState,
+} from "react";
+import { Glyph } from "../../../components/primitives/Glyph";
+import { Tag } from "../../../components/primitives/Tag";
+import { NF } from "../../../icons";
+import type { SessionRow } from "../../../types";
+import { formatRelativeTime, formatSize } from "../../projects/format";
+import {
+  bestTimestampMs,
+  formatTokens,
+  modelBadge,
+  projectBasename,
+  shortSessionId,
+} from "../format";
+import { COLS } from "../sessionsTable.shared";
+
+interface SessionRowProps {
+  session: SessionRow;
+  active: boolean;
+  onSelect: (filePath: string) => void;
+  onContextMenu?: (e: MouseEvent, s: SessionRow) => void;
+  snippet?: string;
+  /** When rendered under the virtualizer, `virtualStart` is the pixel
+   * offset this row translates to. Passed as a primitive so
+   * `React.memo`'s shallow equality works — a style object literal
+   * here would change identity every render. */
+  virtualStart?: number;
+  /** Virtualizer's measurement callback — must be attached as a ref so
+   * the library records each row's real height on paint. */
+  measureRef?: (el: HTMLElement | null) => void;
+  /** Index in the virtualized sequence. Required by `measureElement`
+   * to reconcile the measured node back to its virtual row. Also
+   * exposed as `aria-posinset` so screen readers say "row X of Y"
+   * even when the DOM only carries the viewport's worth of items. */
+  virtualIndex?: number;
+  /** Total option count for the listbox — emitted as `aria-setsize`
+   * on virtualized rows so assistive tech sees the full set, not
+   * just the mounted window. Plain-path rows leave this undefined
+   * since the DOM already carries every option. */
+  virtualSetSize?: number;
+}
+
+/**
+ * One row in the Sessions table. Memoized so that unrelated parent
+ * state changes (toast, ctx menu, refresh spinner) don't re-render
+ * the visible row set. All props are either primitives or
+ * referentially stable (Map, callbacks via state setter / useCallback)
+ * so shallow equality holds in practice.
+ */
+export const SessionRowView = memo(function SessionRowView({
+  session: s,
+  active,
+  onSelect,
+  onContextMenu,
+  snippet,
+  virtualStart,
+  measureRef,
+  virtualIndex,
+  virtualSetSize,
+}: SessionRowProps) {
+  const [hover, setHover] = useState(false);
+  const lastTs = bestTimestampMs(s.last_ts, s.last_modified_ms);
+  const project = projectBasename(s.project_path) || s.slug;
+  const headline =
+    s.first_user_prompt?.trim() ||
+    (s.is_sidechain ? "Agent subsession" : shortSessionId(s.session_id));
+  const model = modelBadge(s.models);
+  const tokens = formatTokens(s.tokens.total);
+
+  // `virtualStart` decides whether this row is rendered under the
+  // virtualizer. When it is, the style object is constructed here
+  // from primitives so it can be recomputed cheaply when needed and
+  // referentially stable when unchanged.
+  const virtualStyle: CSSProperties | undefined =
+    virtualStart !== undefined
+      ? {
+          position: "absolute",
+          top: 0,
+          left: 0,
+          width: "100%",
+          transform: `translateY(${virtualStart}px)`,
+        }
+      : undefined;
+
+  return (
+    <li
+      ref={measureRef}
+      data-index={virtualIndex}
+      role="option"
+      aria-selected={active}
+      aria-posinset={
+        virtualIndex !== undefined ? virtualIndex + 1 : undefined
+      }
+      aria-setsize={virtualSetSize}
+      tabIndex={0}
+      onClick={() => onSelect(s.file_path)}
+      onContextMenu={onContextMenu ? (e) => onContextMenu(e, s) : undefined}
+      onMouseEnter={() => setHover(true)}
+      onMouseLeave={() => setHover(false)}
+      onKeyDown={(e) => {
+        if (e.key === "Enter" || e.key === " ") {
+          e.preventDefault();
+          onSelect(s.file_path);
+        }
+      }}
+      style={{
+        display: "grid",
+        gridTemplateColumns: COLS,
+        padding: "var(--sp-12) var(--sp-32)",
+        gap: "var(--sp-16)",
+        alignItems: "center",
+        borderBottom: "var(--bw-hair) solid var(--line)",
+        background: active
+          ? "var(--bg-active)"
+          : hover
+            ? "var(--bg-hover)"
+            : "transparent",
+        borderLeft: active
+          ? "var(--bw-strong) solid var(--accent)"
+          : "var(--bw-strong) solid transparent",
+        cursor: "pointer",
+        fontSize: "var(--fs-sm)",
+        outline: "none",
+        ...virtualStyle,
+      }}
+    >
+      <span aria-hidden>
+        <Glyph
+          g={s.has_error ? NF.warn : NF.chatAlt}
+          color={s.has_error ? "var(--warn)" : "var(--fg-muted)"}
+          style={{ fontSize: "var(--fs-md)" }}
+        />
+      </span>
+
+      <div style={{ minWidth: 0, overflow: "hidden" }}>
+        <div
+          style={{
+            display: "flex",
+            alignItems: "center",
+            gap: "var(--sp-8)",
+            fontSize: "var(--fs-base)",
+            color: "var(--fg)",
+            fontWeight: active ? 600 : 500,
+            minWidth: 0,
+          }}
+        >
+          <span
+            title={s.first_user_prompt ?? s.session_id}
+            style={{
+              whiteSpace: "nowrap",
+              overflow: "hidden",
+              textOverflow: "ellipsis",
+            }}
+          >
+            {headline}
+          </span>
+          {s.is_sidechain && (
+            <Tag tone="ghost" title="Agent subsession">
+              agent
+            </Tag>
+          )}
+          {s.has_error && (
+            <Tag tone="warn" glyph={NF.warn} title="This session had an error">
+              error
+            </Tag>
+          )}
+        </div>
+        <div
+          style={{
+            marginTop: "var(--sp-2)",
+            color: "var(--fg-faint)",
+            fontSize: "var(--fs-xs)",
+            display: "flex",
+            gap: "var(--sp-8)",
+            whiteSpace: "nowrap",
+            overflow: "hidden",
+            textOverflow: "ellipsis",
+          }}
+        >
+          <span className="mono">{shortSessionId(s.session_id)}</span>
+          {model && (
+            <>
+              <span>·</span>
+              <span>{model}</span>
+            </>
+          )}
+          {s.git_branch && (
+            <>
+              <span>·</span>
+              <span style={{ display: "inline-flex", gap: "var(--sp-4)" }}>
+                <Glyph
+                  g={NF.branch}
+                  style={{ fontSize: "var(--fs-2xs)" }}
+                />
+                {s.git_branch}
+              </span>
+            </>
+          )}
+          {s.file_size_bytes > 0 && (
+            <>
+              <span>·</span>
+              <span>{formatSize(s.file_size_bytes)}</span>
+            </>
+          )}
+        </div>
+        {snippet && (
+          <div
+            data-testid="search-snippet"
+            title={snippet}
+            style={{
+              marginTop: "var(--sp-4)",
+              color: "var(--fg-muted)",
+              fontSize: "var(--fs-xs)",
+              whiteSpace: "nowrap",
+              overflow: "hidden",
+              textOverflow: "ellipsis",
+              fontStyle: "italic",
+            }}
+          >
+            {snippet}
+          </div>
+        )}
+      </div>
+
+      <div style={{ minWidth: 0, overflow: "hidden" }}>
+        <div
+          title={s.project_path}
+          style={{
+            color: "var(--fg-muted)",
+            whiteSpace: "nowrap",
+            overflow: "hidden",
+            textOverflow: "ellipsis",
+          }}
+        >
+          {project}
+        </div>
+        {!s.project_from_transcript && (
+          <div
+            style={{
+              marginTop: "var(--sp-2)",
+              color: "var(--fg-ghost)",
+              fontSize: "var(--fs-xs)",
+            }}
+            title="Decoded from the on-disk slug — the transcript didn't carry a cwd field"
+          >
+            decoded from slug
+          </div>
+        )}
+      </div>
+
+      <span
+        style={{
+          color: s.message_count > 0 ? "var(--fg-muted)" : "var(--fg-ghost)",
+          fontVariantNumeric: "tabular-nums",
+        }}
+        title={`${s.user_message_count} user · ${s.assistant_message_count} assistant`}
+      >
+        {s.message_count > 0 ? s.message_count : "—"}
+      </span>
+
+      <span
+        style={{
+          color: s.tokens.total > 0 ? "var(--fg-muted)" : "var(--fg-ghost)",
+          fontVariantNumeric: "tabular-nums",
+        }}
+        title={
+          s.tokens.total > 0
+            ? `input ${s.tokens.input} · output ${s.tokens.output} · cache r/w ${s.tokens.cache_read}/${s.tokens.cache_creation}`
+            : undefined
+        }
+      >
+        {tokens || "—"}
+      </span>
+
+      <span
+        style={{
+          color: "var(--fg-faint)",
+          whiteSpace: "nowrap",
+          overflow: "hidden",
+          textOverflow: "ellipsis",
+        }}
+      >
+        {lastTs != null ? formatRelativeTime(lastTs) : "—"}
+      </span>
+
+      <span>
+        {(hover || active) && (
+          <Glyph
+            g={NF.chevronR}
+            color={active ? "var(--accent)" : "var(--fg-faint)"}
+            style={{ fontSize: "var(--fs-xs)" }}
+          />
+        )}
+      </span>
+    </li>
+  );
+});
