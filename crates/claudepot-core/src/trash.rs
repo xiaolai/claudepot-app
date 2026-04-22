@@ -130,6 +130,7 @@ fn now_ms() -> i64 {
         .unwrap_or(0)
 }
 
+#[cfg(test)]
 fn batch_ms(id: &str) -> Option<i64> {
     // Parse the leading `YYYYMMDDTHHMMSSZ` prefix before the `-`.
     let ts_part = id.split('-').next()?;
