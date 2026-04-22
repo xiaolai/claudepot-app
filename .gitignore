@@ -16,6 +16,9 @@ dist-ssr
 target/
 Cargo.lock
 
+# Tauri externalBin staging (populated by CI; never committed)
+src-tauri/binaries/
+
 # Editor directories and files
 .vscode/*
 !.vscode/extensions.json
