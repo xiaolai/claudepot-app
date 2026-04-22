@@ -1341,8 +1341,17 @@ pub fn session_adopt_orphan(
 /// Walk `<config>/projects/*/*.jsonl` and produce rich list rows with
 /// token totals, first-prompt previews, and model sets. Returned
 /// newest-first.
+///
+/// `async fn` is load-bearing: Tauri 2 dispatches sync `#[command] fn`
+/// handlers on the main thread (the same thread that runs the OS
+/// event loop and serves the webview). A sync handler that does
+/// blocking I/O — and `list_all_sessions` reads from sessions.db and
+/// can fall back to a full JSONL scan — would freeze the entire
+/// window for the duration of the call. With `async fn`, Tauri runs
+/// the body on a Tokio worker; the sync I/O blocks that worker but
+/// the main thread stays free for the webview to keep painting.
 #[tauri::command]
-pub fn session_list_all() -> Result<Vec<crate::dto::SessionRowDto>, String> {
+pub async fn session_list_all() -> Result<Vec<crate::dto::SessionRowDto>, String> {
     let cfg = paths::claude_config_dir();
     let rows = claudepot_core::session::list_all_sessions(&cfg)
         .map_err(|e| format!("session list failed: {e}"))?;
@@ -1352,8 +1361,11 @@ pub fn session_list_all() -> Result<Vec<crate::dto::SessionRowDto>, String> {
 /// Full JSONL parse for a single session, keyed by its UUID. Returns
 /// the same row metadata as `session_list_all` plus the normalized
 /// event stream for transcript rendering.
+///
+/// `async fn` to keep the JSONL parse off Tauri's main thread — see
+/// `session_list_all` for the full rationale.
 #[tauri::command]
-pub fn session_read(session_id: String) -> Result<crate::dto::SessionDetailDto, String> {
+pub async fn session_read(session_id: String) -> Result<crate::dto::SessionDetailDto, String> {
     let cfg = paths::claude_config_dir();
     let detail = claudepot_core::session::read_session_detail(&cfg, &session_id)
         .map_err(|e| format!("session read failed: {e}"))?;
@@ -1365,8 +1377,12 @@ pub fn session_read(session_id: String) -> Result<crate::dto::SessionDetailDto, 
 /// specific file and two rows can legitimately share a session_id
 /// (interrupted rescue or adopt). Path must live under
 /// `<config>/projects/` and must end in `.jsonl`.
+///
+/// `async fn` for the same off-main-thread reason as `session_read`.
 #[tauri::command]
-pub fn session_read_path(file_path: String) -> Result<crate::dto::SessionDetailDto, String> {
+pub async fn session_read_path(
+    file_path: String,
+) -> Result<crate::dto::SessionDetailDto, String> {
     let cfg = paths::claude_config_dir();
     let detail = claudepot_core::session::read_session_detail_at_path(
         &cfg,
@@ -1398,16 +1414,22 @@ pub fn session_index_rebuild() -> Result<(), String> {
 
 /// Chunked event stream plus per-chunk linked tools — the shape the
 /// Sessions transcript renders from.
+///
+/// `async fn` because it parses the full JSONL via `load_detail_by_path`.
 #[tauri::command]
-pub fn session_chunks(file_path: String) -> Result<Vec<crate::dto::SessionChunkDto>, String> {
+pub async fn session_chunks(
+    file_path: String,
+) -> Result<Vec<crate::dto::SessionChunkDto>, String> {
     let detail = load_detail_by_path(&file_path)?;
     let chunks = claudepot_core::session_chunks::build_chunks(&detail.events);
     Ok(chunks.iter().map(crate::dto::SessionChunkDto::from).collect())
 }
 
 /// Visible-context token attribution across six categories.
+///
+/// `async fn` because it parses the full JSONL via `load_detail_by_path`.
 #[tauri::command]
-pub fn session_context_attribution(
+pub async fn session_context_attribution(
     file_path: String,
 ) -> Result<crate::dto::ContextStatsDto, String> {
     let detail = load_detail_by_path(&file_path)?;
@@ -1565,8 +1587,17 @@ pub fn session_export_to_file(
 }
 
 /// Cross-session text search. Returns up to `limit` hits.
+///
+/// `async fn` is mandatory here. The body opens every `.jsonl` that
+/// doesn't match via the row-level fast path and scans line by line —
+/// for a multi-thousand-session corpus this is many seconds of pure
+/// blocking I/O. Run on Tauri's main thread (the default for sync
+/// commands) it would freeze the OS event loop and the webview for
+/// the duration; under `async fn` Tauri dispatches to a Tokio worker
+/// and the webview keeps repainting. See `session_list_all` for the
+/// same rationale.
 #[tauri::command]
-pub fn session_search(
+pub async fn session_search(
     query: String,
     limit: Option<usize>,
 ) -> Result<Vec<crate::dto::SearchHitDto>, String> {
@@ -1581,8 +1612,13 @@ pub fn session_search(
 
 /// Group all sessions by git repository (collapses worktrees into a
 /// single repository row).
+///
+/// `async fn` for the same reason as `session_list_all` — this calls
+/// `list_all_sessions` itself, then runs a pure-Rust grouping pass.
+/// Sync dispatch would block the main thread for the SQLite read /
+/// JSONL fallback.
 #[tauri::command]
-pub fn session_worktree_groups() -> Result<Vec<crate::dto::RepositoryGroupDto>, String> {
+pub async fn session_worktree_groups() -> Result<Vec<crate::dto::RepositoryGroupDto>, String> {
     let cfg = paths::claude_config_dir();
     let rows = claudepot_core::session::list_all_sessions(&cfg)
         .map_err(|e| format!("list sessions: {e}"))?;
