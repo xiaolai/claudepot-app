@@ -40,6 +40,7 @@ pub mod session_index;
 pub mod session_phases;
 pub mod session_prune;
 pub mod session_search;
+pub mod session_slim;
 pub mod session_search_ranking;
 pub mod session_subagents;
 pub mod trash;

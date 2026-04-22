@@ -955,6 +955,81 @@ fn format_ts_ms(ms: i64) -> String {
         .unwrap_or_else(|| "—".to_string())
 }
 
+pub fn slim_cmd(
+    ctx: &AppContext,
+    target: &str,
+    drop_over: Option<&str>,
+    exclude_tool: Vec<String>,
+    execute: bool,
+) -> Result<()> {
+    use claudepot_core::session_slim::{execute_slim, plan_slim, SlimOpts};
+    let path = resolve_session_path(target)?;
+    let mut opts = SlimOpts {
+        exclude_tools: exclude_tool,
+        ..SlimOpts::default()
+    };
+    if let Some(s) = drop_over {
+        opts.drop_tool_results_over_bytes = parse_size(s)?;
+    }
+    let plan = plan_slim(&path, &opts).context("plan slim")?;
+    if !execute {
+        if ctx.json {
+            print_json(&plan);
+            return Ok(());
+        }
+        println!(
+            "Plan (dry-run): {} → {} ({} saved, {} tool_result redactions)",
+            format_size(plan.original_bytes),
+            format_size(plan.projected_bytes),
+            format_size(plan.bytes_saved()),
+            plan.redact_count
+        );
+        if !plan.tools_affected.is_empty() {
+            println!("Tools affected: {}", plan.tools_affected.join(", "));
+        }
+        println!("Run with --execute to rewrite. Original kept in trash for 7 days.");
+        return Ok(());
+    }
+    let data_dir = paths::claudepot_data_dir();
+    let sink = claudepot_core::project_progress::NoopSink;
+    let report = execute_slim(&data_dir, &path, &opts, &sink).context("execute slim")?;
+    if ctx.json {
+        print_json(&report);
+        return Ok(());
+    }
+    println!(
+        "Slimmed: {} → {} ({} saved, {} redactions). Trash id: {}",
+        format_size(report.original_bytes),
+        format_size(report.final_bytes),
+        format_size(report.bytes_saved()),
+        report.redact_count,
+        report.trashed_original.display(),
+    );
+    Ok(())
+}
+
+/// Accept either a bare UUID (looked up against the index) or an
+/// absolute `.jsonl` path.
+fn resolve_session_path(target: &str) -> Result<PathBuf> {
+    if target.ends_with(".jsonl") {
+        let p = PathBuf::from(target);
+        if !p.exists() {
+            bail!("not found: {}", p.display());
+        }
+        return Ok(p);
+    }
+    // Treat as UUID — search the index.
+    let cfg = paths::claude_config_dir();
+    let rows = claudepot_core::session::list_all_sessions(&cfg)?;
+    let row = rows
+        .iter()
+        .find(|r| r.session_id == target || r.session_id.starts_with(target));
+    match row {
+        Some(r) => Ok(r.file_path.clone()),
+        None => bail!("no session found for {target}"),
+    }
+}
+
 fn atty_like() -> bool {
     // Used by `trash empty` to refuse without `--yes`. On a non-TTY
     // (pipe, CI, test harness) we don't demand the confirmation.
