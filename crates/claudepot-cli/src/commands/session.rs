@@ -1202,6 +1202,24 @@ pub fn slim_cmd(
             execute,
         );
     }
+    // Bulk-only filter flags are meaningless without --all. If the
+    // user passed one, reject rather than silently ignore it — a
+    // single-target slim that quietly drops your filter is a
+    // footgun.
+    let stray_filters: Vec<&str> = [
+        ("--older-than", older_than.is_some()),
+        ("--larger-than", larger_than.is_some()),
+        ("--project", !project.is_empty()),
+    ]
+    .iter()
+    .filter_map(|(name, set)| if *set { Some(*name) } else { None })
+    .collect();
+    if !stray_filters.is_empty() {
+        bail!(
+            "{} requires --all (filter flags are bulk-only)",
+            stray_filters.join(", ")
+        );
+    }
     let Some(t) = target else {
         bail!("session slim requires either <target> or --all")
     };
@@ -1312,6 +1330,17 @@ fn slim_all_cmd(
                     e.plan.document_redact_count,
                     e.file_path.display()
                 );
+            }
+        }
+        // Surface matched rows that couldn't be scanned so the user
+        // sees them instead of silently dropping them from the preview.
+        if !plan.failed_to_plan.is_empty() {
+            eprintln!(
+                "\nCould not plan {} session(s) (unreadable / parse error):",
+                plan.failed_to_plan.len()
+            );
+            for (p, err) in &plan.failed_to_plan {
+                eprintln!("  {}: {err}", p.display());
             }
         }
         println!("\nRun with --execute to apply. Originals kept in trash for 7 days.");

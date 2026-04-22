@@ -123,12 +123,17 @@ export function CleanupPane({
     }
   }, [slimPlan, buildFilter, stripImages, stripDocuments, onOpChange, onTrashChanged]);
 
+  // Split invalidation: prune preview only depends on the filter,
+  // slim preview depends on the filter AND the slim flags. Toggling
+  // a slim flag must NOT wipe a valid prune preview.
   useEffect(() => {
-    // Always keep stale previews clear when the filter or flags
-    // change so the user doesn't execute against an outdated plan.
     setPlan(null);
     setSlimPlan(null);
-  }, [olderThanDays, largerThanMb, hasError, sidechain, stripImages, stripDocuments]);
+  }, [olderThanDays, largerThanMb, hasError, sidechain]);
+
+  useEffect(() => {
+    setSlimPlan(null);
+  }, [stripImages, stripDocuments]);
 
   const anyFilter =
     olderThanDays.trim() !== "" ||
@@ -381,8 +386,12 @@ export function CleanupPane({
             >
               Slim · {slimPlan.entries.length} file(s) ·{" "}
               {formatSize(slimPlan.total_bytes_saved)} saved
-              {stripImages ? ` · ${slimPlan.total_image_redacts} images` : ""}
-              {stripDocuments ? ` · ${slimPlan.total_document_redacts} docs` : ""}
+              {slimPlan.total_image_redacts > 0
+                ? ` · ${slimPlan.total_image_redacts} images`
+                : ""}
+              {slimPlan.total_document_redacts > 0
+                ? ` · ${slimPlan.total_document_redacts} docs`
+                : ""}
               {slimPlan.entries.length === 0 ? " · nothing to slim" : ""}
             </div>
             <ul style={{ listStyle: "none", margin: 0, padding: 0 }}>
@@ -428,6 +437,33 @@ export function CleanupPane({
                 }}
               >
                 … and {slimPlan.entries.length - 50} more
+              </div>
+            )}
+            {slimPlan.failed_to_plan.length > 0 && (
+              <div
+                data-testid="slim-failed-to-plan"
+                style={{
+                  padding: "var(--sp-8) var(--sp-16)",
+                  borderTop: "var(--bw-hair) solid var(--line)",
+                  fontSize: "var(--fs-xs)",
+                  color: "var(--danger)",
+                  background: "var(--bg-sunken)",
+                }}
+              >
+                Could not scan {slimPlan.failed_to_plan.length} session
+                {slimPlan.failed_to_plan.length === 1 ? "" : "s"}:
+                <ul style={{ margin: "var(--sp-4) 0 0", paddingInlineStart: "var(--sp-16)" }}>
+                  {slimPlan.failed_to_plan.slice(0, 10).map(([p, err]) => (
+                    <li key={p} title={err}>
+                      {p}
+                    </li>
+                  ))}
+                  {slimPlan.failed_to_plan.length > 10 && (
+                    <li style={{ color: "var(--fg-faint)" }}>
+                      … and {slimPlan.failed_to_plan.length - 10} more
+                    </li>
+                  )}
+                </ul>
               </div>
             )}
           </div>
