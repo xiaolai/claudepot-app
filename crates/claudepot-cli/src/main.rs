@@ -206,14 +206,14 @@ enum SessionAction {
         #[arg(long)]
         all: bool,
         /// Filter: only sessions whose last_ts is older than this (e.g. `7d`, `30d`).
-        /// Only meaningful with `--all`.
+        /// Requires `--all`.
         #[arg(long)]
         older_than: Option<String>,
         /// Filter: only sessions at least this size (`1MB`, `500KB`).
-        /// Only meaningful with `--all`.
+        /// Requires `--all`.
         #[arg(long)]
         larger_than: Option<String>,
-        /// Filter: repeatable project path filter. Only meaningful with `--all`.
+        /// Filter: repeatable project path filter. Requires `--all`.
         #[arg(long)]
         project: Vec<String>,
         /// Drop tool_result payloads larger than this. Accepts

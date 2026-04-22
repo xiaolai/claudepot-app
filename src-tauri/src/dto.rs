@@ -1648,17 +1648,9 @@ pub struct BulkSlimEntryDto {
 #[derive(Serialize)]
 pub struct BulkSlimPlanDto {
     pub entries: Vec<BulkSlimEntryDto>,
-    pub total_bytes_saved: u64,
-    pub total_image_redacts: u32,
-    pub total_document_redacts: u32,
-    pub total_tool_result_redacts: u32,
-}
-
-#[derive(Serialize)]
-pub struct BulkSlimReportDto {
-    pub succeeded_paths: Vec<String>,
-    pub skipped_live: Vec<String>,
-    pub failed: Vec<(String, String)>,
+    /// Matched rows whose `plan_slim()` call errored — surfaced so
+    /// the user sees unreadable sessions in the preview.
+    pub failed_to_plan: Vec<(String, String)>,
     pub total_bytes_saved: u64,
     pub total_image_redacts: u32,
     pub total_document_redacts: u32,
@@ -1680,6 +1672,11 @@ impl From<&claudepot_core::session_slim::BulkSlimPlan> for BulkSlimPlanDto {
     fn from(p: &claudepot_core::session_slim::BulkSlimPlan) -> Self {
         Self {
             entries: p.entries.iter().map(Into::into).collect(),
+            failed_to_plan: p
+                .failed_to_plan
+                .iter()
+                .map(|(p, e)| (p.to_string_lossy().to_string(), e.clone()))
+                .collect(),
             total_bytes_saved: p.total_bytes_saved,
             total_image_redacts: p.total_image_redacts,
             total_document_redacts: p.total_document_redacts,
@@ -1687,32 +1684,10 @@ impl From<&claudepot_core::session_slim::BulkSlimPlan> for BulkSlimPlanDto {
         }
     }
 }
-
-impl From<&claudepot_core::session_slim::BulkSlimReport> for BulkSlimReportDto {
-    fn from(r: &claudepot_core::session_slim::BulkSlimReport) -> Self {
-        Self {
-            succeeded_paths: r
-                .succeeded
-                .iter()
-                .map(|(p, _)| p.to_string_lossy().to_string())
-                .collect(),
-            skipped_live: r
-                .skipped_live
-                .iter()
-                .map(|p| p.to_string_lossy().to_string())
-                .collect(),
-            failed: r
-                .failed
-                .iter()
-                .map(|(p, e)| (p.to_string_lossy().to_string(), e.clone()))
-                .collect(),
-            total_bytes_saved: r.total_bytes_saved,
-            total_image_redacts: r.total_image_redacts,
-            total_document_redacts: r.total_document_redacts,
-            total_tool_result_redacts: r.total_tool_result_redacts,
-        }
-    }
-}
+// BulkSlimReportDto was removed — the bulk-start worker emits a
+// string error summary via emit_terminal, so the structured report
+// has no consumer yet. Reintroduce when the GUI needs per-file
+// success/failure structures.
 
 #[derive(Serialize)]
 pub struct TrashEntryDto {

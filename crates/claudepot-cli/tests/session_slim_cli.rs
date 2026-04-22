@@ -404,6 +404,35 @@ fn slim_all_execute_slims_matching_sessions() {
 }
 
 #[test]
+fn slim_single_target_rejects_bulk_only_filter_flags() {
+    // `--older-than` on a single-target slim is nonsense — it would
+    // parse but silently be ignored. Handler enforces the "requires
+    // --all" rule explicitly (clap `requires` doesn't fire for a
+    // default-false bool flag the way you'd expect).
+    let tmp = TempDir::new().unwrap();
+    let config = tmp.path().join("cfg");
+    let data = tmp.path().join("data");
+    fs::create_dir_all(&config).unwrap();
+    fs::create_dir_all(&data).unwrap();
+    let (_stdout, stderr, code) = run(
+        &config,
+        &data,
+        &[
+            "session",
+            "slim",
+            "some-target.jsonl",
+            "--older-than",
+            "7d",
+        ],
+    );
+    assert_ne!(code, 0);
+    assert!(
+        stderr.contains("requires --all") || stderr.contains("bulk-only"),
+        "stderr should explain that --older-than requires --all: {stderr}"
+    );
+}
+
+#[test]
 fn slim_all_conflicts_with_positional_target() {
     let tmp = TempDir::new().unwrap();
     let config = tmp.path().join("cfg");
