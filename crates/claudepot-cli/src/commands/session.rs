@@ -512,32 +512,173 @@ pub fn view_cmd(ctx: &AppContext, target: &str, show: &str) -> Result<()> {
     Ok(())
 }
 
-/// `claudepot session export <target> --format md|json [--output FILE]`
+/// `claudepot session export <target> --format fmt --to dest [flags]`
+#[allow(clippy::too_many_arguments)]
 pub fn export_cmd(
     ctx: &AppContext,
     target: &str,
     format: &str,
+    to: &str,
     output: Option<&str>,
+    public: bool,
+    redact_paths: &str,
+    redact_emails: bool,
+    redact_env: bool,
+    redact_regex: Vec<String>,
+    html_no_js: bool,
 ) -> Result<()> {
-    let _ = ctx; // --json flag doesn't apply here
+    let _ = ctx;
     let detail = resolve_detail(target)?;
     let fmt = match format {
         "md" | "markdown" => claudepot_core::session_export::ExportFormat::Markdown,
+        "markdown-slim" => claudepot_core::session_export::ExportFormat::MarkdownSlim,
         "json" => claudepot_core::session_export::ExportFormat::Json,
+        "html" => claudepot_core::session_export::ExportFormat::Html {
+            no_js: html_no_js,
+        },
         other => bail!("unknown format: {other}"),
     };
-    let body = claudepot_core::session_export::export(&detail, fmt);
-    match output {
-        Some(path) => {
+    let policy = build_policy(redact_paths, redact_emails, redact_env, redact_regex)?;
+    let body =
+        claudepot_core::session_export::export_with(&detail, fmt.clone(), &policy);
+    match to {
+        "file" => {
+            let path = output.ok_or_else(|| anyhow::anyhow!("--output required for --to file"))?;
             write_export_file(path, body.as_bytes())
                 .with_context(|| format!("write {path}"))?;
             eprintln!("Wrote {} bytes to {path}", body.len());
         }
-        None => {
-            print!("{body}");
+        "clipboard" => {
+            write_to_clipboard(&body)
+                .with_context(|| "copy to clipboard")?;
+            eprintln!("Copied {} bytes to clipboard", body.len());
         }
+        "gist" => {
+            let token = resolve_github_token()?;
+            let filename = default_gist_filename(&detail, format);
+            let description = format!(
+                "Claudepot session export: {}",
+                detail.row.session_id
+            );
+            let result = tokio::runtime::Builder::new_current_thread()
+                .enable_all()
+                .build()
+                .context("build tokio runtime")?
+                .block_on(async {
+                    claudepot_core::session_share::share_gist(
+                        &body,
+                        &filename,
+                        &description,
+                        public,
+                        &token,
+                        &claudepot_core::project_progress::NoopSink,
+                    )
+                    .await
+                })?;
+            eprintln!("Uploaded to {}", result.url);
+            println!("{}", result.url);
+        }
+        other => bail!("unknown destination: {other}"),
     }
     Ok(())
+}
+
+fn build_policy(
+    redact_paths: &str,
+    redact_emails: bool,
+    redact_env: bool,
+    redact_regex: Vec<String>,
+) -> Result<claudepot_core::redaction::RedactionPolicy> {
+    use claudepot_core::redaction::{PathStrategy, RedactionPolicy};
+    let paths = match redact_paths {
+        "off" => PathStrategy::Off,
+        "relative" => PathStrategy::Relative {
+            root: dirs::home_dir().unwrap_or_else(|| std::path::PathBuf::from("/")),
+        },
+        "hash" => PathStrategy::Hash,
+        other => bail!("unknown redact-paths strategy: {other}"),
+    };
+    Ok(RedactionPolicy {
+        anthropic_keys: true,
+        paths,
+        emails: redact_emails,
+        env_assignments: redact_env,
+        custom_regex: redact_regex,
+    })
+}
+
+fn default_gist_filename(
+    detail: &claudepot_core::session::SessionDetail,
+    format: &str,
+) -> String {
+    let ext = match format {
+        "html" => "html",
+        "json" => "json",
+        _ => "md",
+    };
+    format!("session-{}.{ext}", short_hash_id(&detail.row.session_id))
+}
+
+fn short_hash_id(s: &str) -> String {
+    let mut h: u64 = 0xcbf29ce484222325;
+    for b in s.bytes() {
+        h ^= b as u64;
+        h = h.wrapping_mul(0x100000001b3);
+    }
+    format!("{:08x}", (h & 0xffff_ffff) as u32)
+}
+
+fn resolve_github_token() -> Result<String> {
+    if let Ok(t) = std::env::var("GITHUB_TOKEN") {
+        if !t.trim().is_empty() {
+            return Ok(t);
+        }
+    }
+    // Keychain fallback (the GUI may have stored a PAT under
+    // `claudepot.github-token`). CLI-only for now — never prints the
+    // value back to the user.
+    if let Ok(kr) = keyring::Entry::new("claudepot", "github-token") {
+        if let Ok(val) = kr.get_password() {
+            return Ok(val);
+        }
+    }
+    bail!(
+        "no GitHub token. Set GITHUB_TOKEN or run Claudepot → Settings → GitHub."
+    )
+}
+
+fn write_to_clipboard(body: &str) -> Result<()> {
+    use std::process::{Command, Stdio};
+    // macOS, Linux (wl-copy / xclip), Windows (clip.exe). Try each in
+    // order; return the first one that accepts stdin.
+    let candidates: &[(&str, &[&str])] = &[
+        ("pbcopy", &[][..]),
+        ("wl-copy", &[][..]),
+        ("xclip", &["-selection", "clipboard"][..]),
+        ("clip.exe", &[][..]),
+    ];
+    for (cmd, args) in candidates {
+        let mut child = match Command::new(cmd)
+            .args(args.iter().copied())
+            .stdin(Stdio::piped())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .spawn()
+        {
+            Ok(c) => c,
+            Err(_) => continue,
+        };
+        if let Some(mut stdin) = child.stdin.take() {
+            use std::io::Write;
+            stdin.write_all(body.as_bytes())?;
+            drop(stdin);
+        }
+        let status = child.wait()?;
+        if status.success() {
+            return Ok(());
+        }
+    }
+    bail!("no clipboard command available (tried pbcopy, wl-copy, xclip, clip.exe)")
 }
 
 /// Create the export file with 0600 mode on Unix — the file may carry

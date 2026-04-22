@@ -25,3 +25,4 @@ serde_json.workspace = true
 chrono.workspace = true
 reqwest.workspace = true
 dirs.workspace = true
+keyring.workspace = true
