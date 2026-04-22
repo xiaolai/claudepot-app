@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { api } from "../api";
 import { ContextMenu, type ContextMenuItem } from "../components/ContextMenu";
 import { Button } from "../components/primitives/Button";
+import { FilterChip } from "../components/primitives/FilterChip";
 import { Glyph } from "../components/primitives/Glyph";
 import { IconButton } from "../components/primitives/IconButton";
 import { Input } from "../components/primitives/Input";
@@ -24,8 +25,13 @@ import {
   type SessionFilter,
 } from "./sessions/SessionsTable";
 
-const SEG_OPTIONS: { id: SessionFilter; label: string }[] = [
-  { id: "all", label: "All" },
+/**
+ * Toggleable chips: each flips the filter between "all" and its own
+ * value. Two chips active at once is not a supported state — picking
+ * one deselects the other (mutual exclusion preserves the existing
+ * `SessionFilter` enum shape).
+ */
+const FILTER_CHIPS: { id: Exclude<SessionFilter, "all">; label: string }[] = [
   { id: "errors", label: "Errors" },
   { id: "sidechain", label: "Agents" },
 ];
@@ -275,43 +281,25 @@ export function SessionsSection(props: SessionsSectionProps = {}) {
           />
 
           <div
-            role="tablist"
+            role="group"
+            aria-label="Session filters"
             style={{
               display: "flex",
-              gap: "var(--sp-2)",
-              padding: "var(--sp-2)",
-              background: "var(--bg-sunken)",
-              border: "var(--bw-hair) solid var(--line)",
-              borderRadius: "var(--r-2)",
+              gap: "var(--sp-6)",
             }}
           >
-            {SEG_OPTIONS.map((opt) => {
-              const current = filter === opt.id;
+            {FILTER_CHIPS.map((opt) => {
+              const active = filter === opt.id;
               const count = counts[opt.id];
               return (
-                <button
+                <FilterChip
                   key={opt.id}
-                  type="button"
-                  role="tab"
-                  aria-selected={current}
-                  onClick={() => setFilter(opt.id)}
-                  style={{
-                    padding: "var(--sp-4) var(--sp-10)",
-                    fontSize: "var(--fs-xs)",
-                    fontWeight: 500,
-                    color: current ? "var(--fg)" : "var(--fg-muted)",
-                    background: current ? "var(--bg-raised)" : "transparent",
-                    border: current
-                      ? "var(--bw-hair) solid var(--line)"
-                      : "var(--bw-hair) solid transparent",
-                    borderRadius: "var(--r-1)",
-                    letterSpacing: "var(--ls-wide)",
-                    textTransform: "uppercase",
-                    cursor: "pointer",
-                  }}
+                  active={active}
+                  count={count}
+                  onToggle={() => setFilter(active ? "all" : opt.id)}
                 >
-                  {opt.label} · {count}
-                </button>
+                  {opt.label}
+                </FilterChip>
               );
             })}
           </div>
