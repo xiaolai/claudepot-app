@@ -414,11 +414,13 @@ describe("SessionsTable virtualization", () => {
     expect(list.querySelector("[data-index]")).not.toBeNull();
   });
 
-  it("clicking a virtualized row fires onSelect with its file_path", async () => {
+  it("clicking a virtualized row fires onSelect with its exact file_path", async () => {
     const user = userEvent.setup();
     const calls: string[] = [];
+    // Distinct timestamps make the sort (last_active desc) deterministic:
+    // shown[0] = mk(`row${499}`), shown[i] = mk(`row${499 - i}`).
     const rows: SessionRow[] = Array.from({ length: 500 }, (_, i) =>
-      mk(`row${i}`),
+      mk(`row${i}`, { last_modified_ms: 1_000_000 + i }),
     );
     render(
       <SessionsTable
@@ -430,13 +432,104 @@ describe("SessionsTable virtualization", () => {
     );
     const list = screen.getByRole("listbox", { name: "Sessions" });
     const first = within(list).getAllByRole("option")[0];
+    const idx = Number(first.getAttribute("data-index"));
+    expect(Number.isInteger(idx)).toBe(true);
+    expect(idx).toBeGreaterThanOrEqual(0);
     await user.click(first);
-    // file_path defaulted by mk() is `/tmp/${id}.jsonl`. The first
-    // row in last_active-desc order is whatever sorts last; with all
-    // identical timestamps the sort is stable on input order, so
-    // `row0` lands first.
-    expect(calls).toHaveLength(1);
-    expect(calls[0]).toMatch(/\/tmp\/row\d+\.jsonl/);
+    // shown[idx] under "last_active desc" with row${i}.timestamp = 1M+i
+    // is row(499 - idx).
+    expect(calls).toEqual([`/tmp/row${499 - idx}.jsonl`]);
+  });
+
+  it("emits aria-setsize and aria-posinset on virtualized rows", () => {
+    const rows: SessionRow[] = Array.from({ length: 500 }, (_, i) =>
+      mk(`row${i}`),
+    );
+    render(
+      <SessionsTable
+        sessions={rows}
+        filter="all"
+        selectedId={null}
+        onSelect={() => {}}
+      />,
+    );
+    const list = screen.getByRole("listbox", { name: "Sessions" });
+    const opts = within(list).getAllByRole("option");
+    // Every mounted virtualized row must declare the full set size so
+    // screen readers don't think there are only ~18 sessions when the
+    // viewport mounts only the visible window.
+    for (const opt of opts) {
+      expect(opt.getAttribute("aria-setsize")).toBe("500");
+      const pos = Number(opt.getAttribute("aria-posinset"));
+      expect(pos).toBeGreaterThanOrEqual(1);
+      expect(pos).toBeLessThanOrEqual(500);
+    }
+  });
+
+  it("renders deep-search snippets verbatim on the virtualized path", () => {
+    // The Rust backend redacts `sk-ant-*` substrings into the
+    // `sk-ant-***<last4>` form before emitting the snippet. The UI's
+    // contract is "render as text"; this guards the virtualized
+    // render path against any future regression that would inline a
+    // dangerouslySetInnerHTML "highlight match" wrapper and unmask
+    // the token. We feed the already-redacted form (the only form
+    // the wire emits) and assert it survives the round-trip without
+    // a raw token reappearing.
+    // Distinct timestamps + key the snippet onto the row that lands
+    // first in shown[] (highest timestamp under desc sort = row499)
+    // so it's guaranteed to be in the initial virtualizer window.
+    const rows: SessionRow[] = Array.from({ length: 500 }, (_, i) =>
+      mk(`row${i}`, { last_modified_ms: 1_000_000 + i }),
+    );
+    const snippets = new Map<string, string>([
+      ["/tmp/row499.jsonl", "leaked sk-ant-***0000 keep searching"],
+    ]);
+    render(
+      <SessionsTable
+        sessions={rows}
+        filter="all"
+        selectedId={null}
+        onSelect={() => {}}
+        searchSnippets={snippets}
+      />,
+    );
+    const snippet = screen.getByTestId("search-snippet");
+    expect(snippet.textContent).toContain("sk-ant-***0000");
+    expect(snippet.textContent ?? "").not.toMatch(/sk-ant-[A-Za-z0-9]{5,}/);
+  });
+
+  it("recovers selection across the virtualized→plain transition", () => {
+    // Start above the threshold (virtualized), then narrow below it
+    // (plain). Both paths must function across the rerender boundary
+    // and the parent-owned selection must survive.
+    const big: SessionRow[] = Array.from({ length: 200 }, (_, i) =>
+      mk(`row${i}`),
+    );
+    const { rerender } = render(
+      <SessionsTable
+        sessions={big}
+        filter="all"
+        selectedId="/tmp/row5.jsonl"
+        onSelect={() => {}}
+      />,
+    );
+    let list = screen.getByRole("listbox", { name: "Sessions" });
+    expect(list.style.height).not.toBe(""); // virtualized path
+    // Narrow to 30 — drops to PlainList.
+    const small = big.slice(0, 30);
+    rerender(
+      <SessionsTable
+        sessions={small}
+        filter="all"
+        selectedId="/tmp/row5.jsonl"
+        onSelect={() => {}}
+      />,
+    );
+    list = screen.getByRole("listbox", { name: "Sessions" });
+    expect(list.style.height).toBe(""); // plain path
+    expect(within(list).queryAllByRole("option")).toHaveLength(30);
+    const selected = within(list).getByRole("option", { selected: true });
+    expect(selected.textContent).toContain("row5");
   });
 });
 

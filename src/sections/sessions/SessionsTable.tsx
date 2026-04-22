@@ -176,8 +176,11 @@ export function SessionsTable({
       ) : shown.length > VIRTUALIZE_THRESHOLD ? (
         // Degrade to PlainList if the virtualizer throws on layout —
         // a single bad row height would otherwise bubble to the app-
-        // level ErrorBoundary and blank the whole window.
+        // level ErrorBoundary and blank the whole window. The
+        // `resetKey` reuses the dataset's reference identity so a
+        // refresh / filter / sort change retries virtualization.
         <VirtualFallbackBoundary
+          resetKey={shown}
           fallback={
             <PlainList
               shown={shown}
@@ -364,6 +367,7 @@ function VirtualList({
             // and defeat memo for every visible row.
             virtualStart={virtualRow.start}
             virtualIndex={virtualRow.index}
+            virtualSetSize={shown.length}
             measureRef={rowVirtualizer.measureElement}
           />
         );
@@ -379,17 +383,40 @@ function VirtualList({
  * the error bubbles to the top-level `ErrorBoundary` and blanks the
  * whole app window. We catch it here and drop back to the plain list,
  * losing virtualization but preserving functionality.
+ *
+ * `resetKey` lets the boundary recover. A measurement glitch is often
+ * tied to one specific dataset shape; once `sessions` changes (filter,
+ * sort, refresh) we get another shot at virtualization. Without this,
+ * a single transient error would latch the section to PlainList until
+ * the user navigates away.
  */
+interface VirtualFallbackProps {
+  children: React.ReactNode;
+  fallback: React.ReactNode;
+  /** Bumping this resets the failed state so the next paint can retry
+   * the virtualized path. Pass something tied to the dataset shape. */
+  resetKey: unknown;
+}
 interface VirtualFallbackState {
   failed: boolean;
+  resetKey: unknown;
 }
 class VirtualFallbackBoundary extends React.Component<
-  { children: React.ReactNode; fallback: React.ReactNode },
+  VirtualFallbackProps,
   VirtualFallbackState
 > {
-  state: VirtualFallbackState = { failed: false };
-  static getDerivedStateFromError(): VirtualFallbackState {
+  state: VirtualFallbackState = { failed: false, resetKey: this.props.resetKey };
+  static getDerivedStateFromError(): Pick<VirtualFallbackState, "failed"> {
     return { failed: true };
+  }
+  static getDerivedStateFromProps(
+    props: VirtualFallbackProps,
+    state: VirtualFallbackState,
+  ): Partial<VirtualFallbackState> | null {
+    if (props.resetKey !== state.resetKey) {
+      return { failed: false, resetKey: props.resetKey };
+    }
+    return null;
   }
   componentDidCatch(err: unknown): void {
     if (import.meta.env.DEV) {
@@ -420,8 +447,15 @@ interface SessionRowProps {
    * the library records each row's real height on paint. */
   measureRef?: (el: HTMLElement | null) => void;
   /** Index in the virtualized sequence. Required by `measureElement`
-   * to reconcile the measured node back to its virtual row. */
+   * to reconcile the measured node back to its virtual row. Also
+   * exposed as `aria-posinset` so screen readers say "row X of Y"
+   * even when the DOM only carries the viewport's worth of items. */
   virtualIndex?: number;
+  /** Total option count for the listbox — emitted as `aria-setsize`
+   * on virtualized rows so assistive tech sees the full set, not
+   * just the mounted window. Plain-path rows leave this undefined
+   * since the DOM already carries every option. */
+  virtualSetSize?: number;
 }
 
 const SessionRowView = memo(function SessionRowView({
@@ -433,6 +467,7 @@ const SessionRowView = memo(function SessionRowView({
   virtualStart,
   measureRef,
   virtualIndex,
+  virtualSetSize,
 }: SessionRowProps) {
   const [hover, setHover] = useState(false);
   const lastTs = bestTimestampMs(s.last_ts, s.last_modified_ms);
@@ -464,6 +499,10 @@ const SessionRowView = memo(function SessionRowView({
       data-index={virtualIndex}
       role="option"
       aria-selected={active}
+      aria-posinset={
+        virtualIndex !== undefined ? virtualIndex + 1 : undefined
+      }
+      aria-setsize={virtualSetSize}
       tabIndex={0}
       onClick={() => onSelect(s.file_path)}
       onContextMenu={onContextMenu ? (e) => onContextMenu(e, s) : undefined}
