@@ -120,17 +120,38 @@ enum SessionAction {
         #[arg(long, default_value = "summary", value_parser = ["summary", "chunks", "tools", "classify", "subagents", "phases", "context"])]
         show: String,
     },
-    /// Export a session transcript to Markdown or JSON. Redacts
-    /// `sk-ant-*` tokens automatically.
+    /// Export a session transcript. Redacts sk-ant-* tokens by default.
     Export {
         /// Session UUID or absolute `.jsonl` path.
         target: String,
         /// Output format.
-        #[arg(long, default_value = "md", value_parser = ["md", "markdown", "json"])]
+        #[arg(long, default_value = "md", value_parser = ["md", "markdown", "markdown-slim", "json", "html"])]
         format: String,
-        /// Optional output file. Writes stdout when omitted.
+        /// Destination. `file` requires --output; clipboard copies;
+        /// gist uploads via GITHUB_TOKEN env or keychain.
+        #[arg(long, default_value = "file", value_parser = ["file", "clipboard", "gist"])]
+        to: String,
+        /// Output file path (for --to file).
         #[arg(long)]
         output: Option<String>,
+        /// Make the gist public (for --to gist). Default is secret.
+        #[arg(long)]
+        public: bool,
+        /// Redact absolute paths: off | relative | hash.
+        #[arg(long, default_value = "off", value_parser = ["off", "relative", "hash"])]
+        redact_paths: String,
+        /// Mask email-like strings with <email-redacted>.
+        #[arg(long)]
+        redact_emails: bool,
+        /// Drop lines that look like FOO=bar env assignments.
+        #[arg(long)]
+        redact_env: bool,
+        /// Repeatable: extra literal substrings to redact.
+        #[arg(long)]
+        redact_regex: Vec<String>,
+        /// Strip the copy-buttons script from HTML output.
+        #[arg(long)]
+        html_no_js: bool,
     },
     /// Cross-session text search. Scans first-user-prompts and
     /// assistant/user turns case-insensitively.
@@ -530,8 +551,27 @@ async fn main() -> Result<()> {
             SessionAction::Export {
                 target,
                 format,
+                to,
                 output,
-            } => commands::session::export_cmd(&ctx, &target, &format, output.as_deref())?,
+                public,
+                redact_paths,
+                redact_emails,
+                redact_env,
+                redact_regex,
+                html_no_js,
+            } => commands::session::export_cmd(
+                &ctx,
+                &target,
+                &format,
+                &to,
+                output.as_deref(),
+                public,
+                &redact_paths,
+                redact_emails,
+                redact_env,
+                redact_regex,
+                html_no_js,
+            )?,
             SessionAction::Search { query, limit } => {
                 commands::session::search_cmd(&ctx, &query, limit)?
             }
