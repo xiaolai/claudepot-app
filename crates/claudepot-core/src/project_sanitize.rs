@@ -27,10 +27,41 @@ pub fn sanitize_path(name: &str) -> String {
     }
 }
 
-/// Best-effort reverse of `sanitize_path`. Lossy: hyphens could have been
-/// any non-alphanumeric char. Used for display only.
+/// Best-effort reverse of `sanitize_path`. Lossy by design: every `-` in
+/// the slug could have been any non-alphanumeric char in the original.
+/// Used for display fallback only — always prefer the authoritative
+/// `cwd` field from a session.jsonl when one exists.
+///
+/// Platform handling:
+/// * `<alpha>--...` is an unambiguous Windows drive-letter slug and is
+///   always rendered as `X:\...` regardless of host OS (no Unix path
+///   can produce this shape).
+/// * Leading `--` is resolved as a Windows UNC path (`\\server\share`)
+///   on Windows, and kept as a single `/` separator on Unix.
+/// * Otherwise, `-` → host separator (`\` on Windows, `/` on Unix).
 pub fn unsanitize_path(sanitized: &str) -> String {
-    sanitized.replace('-', "/")
+    let bytes = sanitized.as_bytes();
+    if bytes.len() >= 3
+        && bytes[0].is_ascii_alphabetic()
+        && bytes[1] == b'-'
+        && bytes[2] == b'-'
+    {
+        let drive = bytes[0] as char;
+        let rest = sanitized[3..].replace('-', "\\");
+        return format!("{}:\\{}", drive, rest);
+    }
+
+    #[cfg(target_os = "windows")]
+    {
+        if let Some(rest) = sanitized.strip_prefix("--") {
+            return format!(r"\\{}", rest.replace('-', "\\"));
+        }
+        sanitized.replace('-', "\\")
+    }
+    #[cfg(not(target_os = "windows"))]
+    {
+        sanitized.replace('-', "/")
+    }
 }
 
 /// CC's djb2 hash — matches `djb2Hash()` in CC's `hash.ts`.

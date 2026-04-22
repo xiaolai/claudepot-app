@@ -52,7 +52,11 @@ pub fn find_canonical_git_root(start: &Path) -> Option<PathBuf> {
     };
     loop {
         if cur.join(".git").exists() {
-            return cur.canonicalize().ok();
+            let canon = cur.canonicalize().ok()?;
+            // Strip Windows verbatim prefix (`\\?\`) so the returned
+            // path feeds `sanitize_path` in the same form CC uses.
+            let simplified = crate::path_utils::simplify_windows_path(&canon.to_string_lossy());
+            return Some(PathBuf::from(simplified));
         }
         if !cur.pop() {
             return None;

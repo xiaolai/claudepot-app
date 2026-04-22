@@ -13,6 +13,7 @@ pub mod launcher;
 pub mod migrations;
 pub mod oauth;
 pub mod onboard;
+pub mod path_utils;
 pub mod paths;
 pub mod project;
 pub mod project_display;
