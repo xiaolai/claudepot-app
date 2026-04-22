@@ -1,4 +1,13 @@
-import { type MouseEvent, useMemo, useState } from "react";
+import { useVirtualizer } from "@tanstack/react-virtual";
+import {
+  memo,
+  type CSSProperties,
+  type MouseEvent,
+  useCallback,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import { Glyph } from "../../components/primitives/Glyph";
 import { Tag } from "../../components/primitives/Tag";
 import { NF } from "../../icons";
@@ -27,6 +36,26 @@ export type SortDir = "asc" | "desc";
  *   glyph | session preview | project | turns | tokens | last-active | chevron
  */
 const COLS = "var(--sp-20) 2fr 1.1fr 0.6fr 0.7fr 0.9fr var(--sp-24)";
+
+/**
+ * Above this count, switch to row-level virtualization. Below it we
+ * render every row — the virtualizer's measurement loop has a small
+ * fixed cost that isn't worth paying for short lists. 80 is the
+ * empirical crossover on a 2021 MBP in paper-mono markup.
+ *
+ * jsdom returns 0 for layout metrics, so tests that mount fewer than
+ * this many rows stay on the simple path and assert real DOM. A
+ * dedicated virtualization test mocks layout to exercise the
+ * virtualized path explicitly.
+ */
+const VIRTUALIZE_THRESHOLD = 80;
+
+/**
+ * Estimated row height used by the virtualizer before the real height
+ * is measured. Matches the common "metadata line only" row; rows that
+ * also show a deep-search snippet are measured and corrected on paint.
+ */
+const ESTIMATED_ROW_PX = 64;
 
 export function SessionsTable({
   sessions,
@@ -115,98 +144,264 @@ export function SessionsTable({
   }
 
   return (
-    <>
-      <div
-        role="row"
-        style={{
-          display: "grid",
-          gridTemplateColumns: COLS,
-          padding: "var(--sp-8) var(--sp-32)",
-          fontSize: "var(--fs-xs)",
-          color: "var(--fg-faint)",
-          letterSpacing: "var(--ls-wide)",
-          textTransform: "uppercase",
-          gap: "var(--sp-16)",
-          borderBottom: "var(--bw-hair) solid var(--line)",
-          background: "var(--bg-sunken)",
-          alignItems: "center",
-          position: "sticky",
-          top: 0,
-          zIndex: "var(--z-sticky)" as unknown as number,
-        }}
-      >
-        <span />
-        <span>Session</span>
-        <SortHeader
-          label="Project"
-          col="project"
-          currentKey={sort.key}
-          currentDir={sort.dir}
-          onToggle={toggleSort}
-        />
-        <SortHeader
-          label="Turns"
-          col="turns"
-          currentKey={sort.key}
-          currentDir={sort.dir}
-          onToggle={toggleSort}
-        />
-        <SortHeader
-          label="Tokens"
-          col="tokens"
-          currentKey={sort.key}
-          currentDir={sort.dir}
-          onToggle={toggleSort}
-        />
-        <SortHeader
-          label="Last active"
-          col="last_active"
-          currentKey={sort.key}
-          currentDir={sort.dir}
-          onToggle={toggleSort}
-        />
-        <span />
-      </div>
-
+    <TableScroller>
+      <Header sort={sort} onToggle={toggleSort} />
       {shown.length === 0 ? (
         <EmptyRow>No sessions match this filter.</EmptyRow>
+      ) : shown.length > VIRTUALIZE_THRESHOLD ? (
+        <VirtualList
+          shown={shown}
+          selectedId={selectedId}
+          onSelect={onSelect}
+          onContextMenu={onContextMenu}
+          searchSnippets={searchSnippets}
+        />
       ) : (
-        <ul
-          role="listbox"
-          aria-label="Sessions"
-          style={{ listStyle: "none", margin: 0, padding: 0 }}
-        >
-          {shown.map((s) => (
-            <SessionRowView
-              key={s.file_path}
-              session={s}
-              active={s.file_path === selectedId}
-              onSelect={onSelect}
-              onContextMenu={onContextMenu}
-              snippet={searchSnippets?.get(s.file_path)}
-            />
-          ))}
-        </ul>
+        <PlainList
+          shown={shown}
+          selectedId={selectedId}
+          onSelect={onSelect}
+          onContextMenu={onContextMenu}
+          searchSnippets={searchSnippets}
+        />
       )}
-    </>
+    </TableScroller>
   );
 }
 
-function SessionRowView({
+/**
+ * Owned scroll container. Virtualization needs a stable scroll parent
+ * whose height is determined by flex, not content; the table puts the
+ * sticky header and the listbox inside this element so `top: 0` pins
+ * the header against the same scroller the virtualizer is watching.
+ */
+function TableScroller({ children }: { children: React.ReactNode }) {
+  return (
+    <div
+      data-testid="sessions-table-scroll"
+      style={{
+        flex: 1,
+        minHeight: 0,
+        overflow: "auto",
+        display: "flex",
+        flexDirection: "column",
+      }}
+    >
+      {children}
+    </div>
+  );
+}
+
+function Header({
+  sort,
+  onToggle,
+}: {
+  sort: { key: SortKey; dir: SortDir };
+  onToggle: (key: SortKey) => void;
+}) {
+  return (
+    <div
+      role="row"
+      style={{
+        display: "grid",
+        gridTemplateColumns: COLS,
+        padding: "var(--sp-8) var(--sp-32)",
+        fontSize: "var(--fs-xs)",
+        color: "var(--fg-faint)",
+        letterSpacing: "var(--ls-wide)",
+        textTransform: "uppercase",
+        gap: "var(--sp-16)",
+        borderBottom: "var(--bw-hair) solid var(--line)",
+        background: "var(--bg-sunken)",
+        alignItems: "center",
+        position: "sticky",
+        top: 0,
+        zIndex: "var(--z-sticky)" as unknown as number,
+      }}
+    >
+      <span />
+      <span>Session</span>
+      <SortHeader
+        label="Project"
+        col="project"
+        currentKey={sort.key}
+        currentDir={sort.dir}
+        onToggle={onToggle}
+      />
+      <SortHeader
+        label="Turns"
+        col="turns"
+        currentKey={sort.key}
+        currentDir={sort.dir}
+        onToggle={onToggle}
+      />
+      <SortHeader
+        label="Tokens"
+        col="tokens"
+        currentKey={sort.key}
+        currentDir={sort.dir}
+        onToggle={onToggle}
+      />
+      <SortHeader
+        label="Last active"
+        col="last_active"
+        currentKey={sort.key}
+        currentDir={sort.dir}
+        onToggle={onToggle}
+      />
+      <span />
+    </div>
+  );
+}
+
+interface ListProps {
+  shown: SessionRow[];
+  selectedId: string | null;
+  onSelect: (filePath: string) => void;
+  onContextMenu?: (e: MouseEvent, s: SessionRow) => void;
+  searchSnippets?: Map<string, string>;
+}
+
+/**
+ * Straight `<ul>` render. Used below the virtualization threshold and
+ * in tests (jsdom has no layout, so the virtualizer would collapse
+ * the list to zero items).
+ */
+function PlainList({
+  shown,
+  selectedId,
+  onSelect,
+  onContextMenu,
+  searchSnippets,
+}: ListProps) {
+  return (
+    <ul
+      role="listbox"
+      aria-label="Sessions"
+      style={{ listStyle: "none", margin: 0, padding: 0 }}
+    >
+      {shown.map((s) => (
+        <SessionRowView
+          key={s.file_path}
+          session={s}
+          active={s.file_path === selectedId}
+          onSelect={onSelect}
+          onContextMenu={onContextMenu}
+          snippet={searchSnippets?.get(s.file_path)}
+        />
+      ))}
+    </ul>
+  );
+}
+
+/**
+ * Virtualized render. The `<ul>` sits inside the scroll container and
+ * acts as the virtualizer's content element — its height is the total
+ * virtual size, and each mounted `<li>` is absolutely positioned via
+ * translateY. Listbox semantics survive because every child remains a
+ * direct `<li role="option">` of the `<ul>`.
+ */
+function VirtualList({
+  shown,
+  selectedId,
+  onSelect,
+  onContextMenu,
+  searchSnippets,
+}: ListProps) {
+  // The scroll container is the nearest ancestor with `overflow: auto`
+  // — `TableScroller` above. We reach for it by DOM traversal rather
+  // than threading a ref, because TableScroller is a sibling in the
+  // JSX tree and a ref prop would couple the two components tighter
+  // than the paper-mono composition calls for.
+  const ulRef = useRef<HTMLUListElement | null>(null);
+
+  const getScrollElement = useCallback(() => {
+    // Walk up from the <ul> until we find the scroller. The data-testid
+    // makes the target deterministic across refactors of surrounding
+    // layout. Returns null before mount, which useVirtualizer tolerates.
+    let node: HTMLElement | null = ulRef.current;
+    while (node && node.dataset?.testid !== "sessions-table-scroll") {
+      node = node.parentElement;
+    }
+    return node;
+  }, []);
+
+  const rowVirtualizer = useVirtualizer({
+    count: shown.length,
+    getScrollElement,
+    estimateSize: () => ESTIMATED_ROW_PX,
+    overscan: 8,
+    getItemKey: (index) => shown[index].file_path,
+  });
+
+  const items = rowVirtualizer.getVirtualItems();
+
+  return (
+    <ul
+      ref={ulRef}
+      role="listbox"
+      aria-label="Sessions"
+      style={{
+        listStyle: "none",
+        margin: 0,
+        padding: 0,
+        position: "relative",
+        height: rowVirtualizer.getTotalSize(),
+      }}
+    >
+      {items.map((virtualRow) => {
+        const s = shown[virtualRow.index];
+        return (
+          <SessionRowView
+            key={s.file_path}
+            session={s}
+            active={s.file_path === selectedId}
+            onSelect={onSelect}
+            onContextMenu={onContextMenu}
+            snippet={searchSnippets?.get(s.file_path)}
+            virtualStyle={{
+              position: "absolute",
+              top: 0,
+              left: 0,
+              width: "100%",
+              transform: `translateY(${virtualRow.start}px)`,
+            }}
+            measureRef={rowVirtualizer.measureElement}
+            virtualIndex={virtualRow.index}
+          />
+        );
+      })}
+    </ul>
+  );
+}
+
+interface SessionRowProps {
+  session: SessionRow;
+  active: boolean;
+  onSelect: (filePath: string) => void;
+  onContextMenu?: (e: MouseEvent, s: SessionRow) => void;
+  snippet?: string;
+  /** When rendered under the virtualizer, the row is absolutely
+   * positioned and its vertical offset flows through inline styles. */
+  virtualStyle?: CSSProperties;
+  /** Virtualizer's measurement callback — must be attached as a ref so
+   * the library records each row's real height on paint. */
+  measureRef?: (el: HTMLElement | null) => void;
+  /** Index in the virtualized sequence. Required by `measureElement`
+   * to reconcile the measured node back to its virtual row. */
+  virtualIndex?: number;
+}
+
+const SessionRowView = memo(function SessionRowView({
   session: s,
   active,
   onSelect,
   onContextMenu,
   snippet,
-}: {
-  session: SessionRow;
-  active: boolean;
-  onSelect: (filePath: string) => void;
-  onContextMenu?: (e: MouseEvent, s: SessionRow) => void;
-  /** Redacted match snippet from the deep search; rendered under the
-   * metadata line when present. */
-  snippet?: string;
-}) {
+  virtualStyle,
+  measureRef,
+  virtualIndex,
+}: SessionRowProps) {
   const [hover, setHover] = useState(false);
   const lastTs = bestTimestampMs(s.last_ts, s.last_modified_ms);
   const project = projectBasename(s.project_path) || s.slug;
@@ -218,6 +413,8 @@ function SessionRowView({
 
   return (
     <li
+      ref={measureRef}
+      data-index={virtualIndex}
       role="option"
       aria-selected={active}
       tabIndex={0}
@@ -249,6 +446,7 @@ function SessionRowView({
         cursor: "pointer",
         fontSize: "var(--fs-sm)",
         outline: "none",
+        ...virtualStyle,
       }}
     >
       <span aria-hidden>
@@ -421,7 +619,7 @@ function SessionRowView({
       </span>
     </li>
   );
-}
+});
 
 function SortHeader({
   label,

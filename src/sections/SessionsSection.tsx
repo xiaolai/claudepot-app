@@ -1,4 +1,11 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import {
+  useCallback,
+  useDeferredValue,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import { api } from "../api";
 import { ContextMenu, type ContextMenuItem } from "../components/ContextMenu";
 import { Button } from "../components/primitives/Button";
@@ -20,6 +27,10 @@ import {
   filterSessionsByRepo,
 } from "./sessions/RepoFilterStrip";
 import { SessionDetail } from "./sessions/SessionDetail";
+import {
+  buildSessionSearchHaystack,
+  matchesQuery,
+} from "./sessions/sessionSearchIndex";
 import {
   SessionsTable,
   countSessionStatus,
@@ -153,6 +164,22 @@ export function SessionsSection(props: SessionsSectionProps = {}) {
 
   const counts = useMemo(() => countSessionStatus(sessions), [sessions]);
 
+  // `useDeferredValue` decouples the filter + deep-search pipeline from
+  // keystrokes. The input stays instant because its controlled value is
+  // the raw `query`; the filter recomputes at a lower priority, which
+  // React interrupts when a newer keystroke arrives. The result: no
+  // "semi-frozen" typing even when `sessions` is several thousand rows.
+  const deferredQuery = useDeferredValue(query);
+
+  // Pre-lowercased haystack for the filter. Rebuilt only when
+  // `sessions` changes, not on every keystroke — so each keystroke
+  // walks the list in O(n) substring-checks against cached strings
+  // instead of re-lowercasing 5–6 fields per row.
+  const haystack = useMemo(
+    () => buildSessionSearchHaystack(sessions),
+    [sessions],
+  );
+
   // Table-level name filter: matches on project basename, project path,
   // first prompt, session id prefix, model, or git branch. Cheap substring.
   // Stacks on top of the repo filter so "lixiaolai.com / feature/x" is
@@ -164,8 +191,9 @@ export function SessionsSection(props: SessionsSectionProps = {}) {
 
   // Deep content search (useSessionSearch): scans transcript bodies so
   // a query like "deadlock" surfaces sessions whose metadata doesn't
-  // mention the word. Debounced + 2-char min inside the hook.
-  const { hits: deepHits } = useSessionSearch(query, 50);
+  // mention the word. Debounced + 2-char min inside the hook. Driven by
+  // the deferred value so fast typing doesn't pile up network calls.
+  const { hits: deepHits } = useSessionSearch(deferredQuery, 50);
   const deepHitPaths = useMemo(
     () => new Set(deepHits.map((h) => h.file_path)),
     [deepHits],
@@ -180,19 +208,15 @@ export function SessionsSection(props: SessionsSectionProps = {}) {
     return m;
   }, [deepHits]);
   const filteredByQuery = useMemo(() => {
-    const q = query.trim().toLowerCase();
+    const q = deferredQuery.trim().toLowerCase();
     if (!q) return scoped;
-    return scoped.filter((s) => {
-      if (s.session_id.toLowerCase().startsWith(q)) return true;
-      if (s.project_path.toLowerCase().includes(q)) return true;
-      if ((s.first_user_prompt ?? "").toLowerCase().includes(q)) return true;
-      if (s.models.some((m) => m.toLowerCase().includes(q))) return true;
-      if ((s.git_branch ?? "").toLowerCase().includes(q)) return true;
-      // Deep content hit from the backend search.
-      if (deepHitPaths.has(s.file_path)) return true;
-      return false;
-    });
-  }, [scoped, query, deepHitPaths]);
+    return scoped.filter(
+      (s) =>
+        matchesQuery(s, haystack, q) ||
+        // Deep content hit from the backend search.
+        deepHitPaths.has(s.file_path),
+    );
+  }, [scoped, deferredQuery, deepHitPaths, haystack]);
 
   const handleContextMenu = useCallback(
     (e: React.MouseEvent, s: SessionRow) => {
@@ -212,7 +236,10 @@ export function SessionsSection(props: SessionsSectionProps = {}) {
     if (error && sessions.length === 0) return "Couldn't load sessions.";
     const total = sessions.length;
     if (total === 0) return "No sessions yet. Run `claude` to start one.";
-    const narrowed = query.trim() && filteredByQuery.length !== total;
+    // Subtitle narrows off the deferred value so it stays stable with
+    // the visible list — showing "12 of 9321" while the table still
+    // has 9321 rows (one tick behind) would lie about the UI state.
+    const narrowed = deferredQuery.trim() && filteredByQuery.length !== total;
     if (narrowed) {
       return `${filteredByQuery.length} of ${total} session${
         total === 1 ? "" : "s"
@@ -409,11 +436,15 @@ export function SessionsSection(props: SessionsSectionProps = {}) {
       ) : tab === "sessions" ? (
         <div style={{ display: "flex", minHeight: 0, flex: 1 }}>
           {showTable && (
+            // SessionsTable owns its own scroll container so the row
+            // virtualizer has a stable parent to observe. This wrapper
+            // only contributes flex sizing; `minHeight: 0` is what
+            // lets the inner scroller actually shrink below content.
             <div
               style={{
                 flex: 1,
                 minWidth: 0,
-                overflow: "auto",
+                minHeight: 0,
                 display: "flex",
                 flexDirection: "column",
               }}

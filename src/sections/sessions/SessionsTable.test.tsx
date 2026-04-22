@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 
@@ -192,5 +192,156 @@ describe("countSessionStatus", () => {
       errors: 2,
       sidechain: 2,
     });
+  });
+});
+
+/**
+ * Virtualization guard. Above 80 rows the table flips to
+ * `@tanstack/react-virtual` so the DOM stays O(viewport) instead of
+ * O(total). jsdom has no layout, so we stub `getBoundingClientRect` +
+ * the Element size properties to hand the virtualizer a realistic
+ * 600-tall container with ~64px rows; that lets it compute a virtual
+ * window and render far fewer `<li>`s than the input array.
+ */
+describe("SessionsTable virtualization", () => {
+  const realGBCR = Element.prototype.getBoundingClientRect;
+  const realClientHeight = Object.getOwnPropertyDescriptor(
+    HTMLElement.prototype,
+    "clientHeight",
+  );
+  const realOffsetHeight = Object.getOwnPropertyDescriptor(
+    HTMLElement.prototype,
+    "offsetHeight",
+  );
+
+  beforeEach(() => {
+    // 64px per row; 600px scroll container.
+    Element.prototype.getBoundingClientRect = function (): DOMRect {
+      const tag = (this as HTMLElement).tagName.toLowerCase();
+      const testid = (this as HTMLElement).dataset?.testid;
+      if (testid === "sessions-table-scroll") {
+        return {
+          x: 0,
+          y: 0,
+          width: 1000,
+          height: 600,
+          top: 0,
+          left: 0,
+          right: 1000,
+          bottom: 600,
+          toJSON() {
+            return {};
+          },
+        } as DOMRect;
+      }
+      if (tag === "li") {
+        return {
+          x: 0,
+          y: 0,
+          width: 1000,
+          height: 64,
+          top: 0,
+          left: 0,
+          right: 1000,
+          bottom: 64,
+          toJSON() {
+            return {};
+          },
+        } as DOMRect;
+      }
+      return {
+        x: 0,
+        y: 0,
+        width: 0,
+        height: 0,
+        top: 0,
+        left: 0,
+        right: 0,
+        bottom: 0,
+        toJSON() {
+          return {};
+        },
+      } as DOMRect;
+    };
+    Object.defineProperty(HTMLElement.prototype, "clientHeight", {
+      configurable: true,
+      get(): number {
+        return this.dataset?.testid === "sessions-table-scroll" ? 600 : 0;
+      },
+    });
+    Object.defineProperty(HTMLElement.prototype, "offsetHeight", {
+      configurable: true,
+      get(): number {
+        return this.dataset?.testid === "sessions-table-scroll"
+          ? 600
+          : this.tagName === "LI"
+            ? 64
+            : 0;
+      },
+    });
+    // ResizeObserver is referenced by the virtualizer — jsdom doesn't
+    // ship one. A no-op stub is enough because we never resize in the
+    // test; the virtualizer falls back to the cached element sizes.
+    (
+      globalThis as unknown as { ResizeObserver: typeof ResizeObserver }
+    ).ResizeObserver = class {
+      observe() {}
+      unobserve() {}
+      disconnect() {}
+    } as unknown as typeof ResizeObserver;
+  });
+
+  afterEach(() => {
+    Element.prototype.getBoundingClientRect = realGBCR;
+    if (realClientHeight)
+      Object.defineProperty(
+        HTMLElement.prototype,
+        "clientHeight",
+        realClientHeight,
+      );
+    if (realOffsetHeight)
+      Object.defineProperty(
+        HTMLElement.prototype,
+        "offsetHeight",
+        realOffsetHeight,
+      );
+    vi.restoreAllMocks();
+  });
+
+  it("renders fewer than the total row count once past the threshold", () => {
+    const rows: SessionRow[] = Array.from({ length: 500 }, (_, i) =>
+      mk(`row${i}`),
+    );
+    render(
+      <SessionsTable
+        sessions={rows}
+        filter="all"
+        selectedId={null}
+        onSelect={() => {}}
+      />,
+    );
+    const list = screen.getByRole("listbox", { name: "Sessions" });
+    const rendered = within(list).queryAllByRole("option").length;
+    // 600 / 64 ≈ 10 visible + overscan (8 before + 8 after). Anything
+    // substantially smaller than the input length proves we're not
+    // rendering the full list.
+    expect(rendered).toBeGreaterThan(0);
+    expect(rendered).toBeLessThan(rows.length / 2);
+  });
+
+  it("keeps small lists on the non-virtualized path", () => {
+    const rows: SessionRow[] = Array.from({ length: 10 }, (_, i) =>
+      mk(`row${i}`),
+    );
+    render(
+      <SessionsTable
+        sessions={rows}
+        filter="all"
+        selectedId={null}
+        onSelect={() => {}}
+      />,
+    );
+    const list = screen.getByRole("listbox", { name: "Sessions" });
+    expect(within(list).queryAllByRole("option")).toHaveLength(10);
   });
 });
