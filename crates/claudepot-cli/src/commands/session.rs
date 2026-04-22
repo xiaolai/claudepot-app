@@ -1173,12 +1173,16 @@ pub fn slim_cmd(
     target: &str,
     drop_over: Option<&str>,
     exclude_tool: Vec<String>,
+    strip_images: bool,
+    strip_documents: bool,
     execute: bool,
 ) -> Result<()> {
     use claudepot_core::session_slim::{execute_slim, plan_slim, SlimOpts};
     let path = resolve_session_path(target)?;
     let mut opts = SlimOpts {
         exclude_tools: exclude_tool,
+        strip_images,
+        strip_documents,
         ..SlimOpts::default()
     };
     if let Some(s) = drop_over {
@@ -1197,6 +1201,12 @@ pub fn slim_cmd(
             format_size(plan.bytes_saved()),
             plan.redact_count
         );
+        if strip_images {
+            println!("Images redacted:     {}", plan.image_redact_count);
+        }
+        if strip_documents {
+            println!("Documents redacted:  {}", plan.document_redact_count);
+        }
         if !plan.tools_affected.is_empty() {
             println!("Tools affected: {}", plan.tools_affected.join(", "));
         }
@@ -1218,6 +1228,12 @@ pub fn slim_cmd(
         report.redact_count,
         report.trashed_original.display(),
     );
+    if strip_images {
+        println!("Images redacted:     {}", report.image_redact_count);
+    }
+    if strip_documents {
+        println!("Documents redacted:  {}", report.document_redact_count);
+    }
     Ok(())
 }
 
