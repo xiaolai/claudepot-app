@@ -1,7 +1,7 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
   "productName": "Claudepot",
-  "version": "0.0.2",
+  "version": "0.0.3",
   "identifier": "com.claudepot.app",
   "build": {
     "beforeDevCommand": "pnpm dev",
@@ -37,7 +37,7 @@
     "shortDescription": "Multi-account Claude Code / Desktop switcher",
     "longDescription": "Manage multiple Anthropic Claude Code and Claude Desktop accounts. Switch the active account in seconds without re-authenticating.",
     "publisher": "HANDO K.K.",
-    "homepage": "https://github.com/xiaolai/com.claudepot.app",
+    "homepage": "https://github.com/xiaolai/claudepot-app",
     "macOS": {
       "minimumSystemVersion": "10.15"
     },
