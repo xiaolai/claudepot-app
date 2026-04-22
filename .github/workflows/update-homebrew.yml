@@ -21,7 +21,7 @@ jobs:
     timeout-minutes: 30
     env:
       VERSION: ${{ github.event.inputs.version }}
-      REPO: xiaolai/com.claudepot.app
+      REPO: xiaolai/claudepot-app
     steps:
       - name: Wait for release assets to be available
         run: |

@@ -102,7 +102,7 @@ during CI.
    for f in claudepot-aarch64-linux.tar.gz claudepot-x86_64-linux.tar.gz \
             Claudepot-aarch64.dmg Claudepot-x86_64.dmg; do
      curl -sL -o "/tmp/$f" \
-       "https://github.com/xiaolai/com.claudepot.app/releases/download/v0.0.2/$f"
+       "https://github.com/xiaolai/claudepot-app/releases/download/v0.0.2/$f"
      echo "$f: $(sha256sum "/tmp/$f" | cut -d' ' -f1)"
    done
    ```
