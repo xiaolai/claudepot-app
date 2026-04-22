@@ -2,11 +2,13 @@ import {
   memo,
   type CSSProperties,
   type MouseEvent,
+  useMemo,
   useState,
 } from "react";
 import { Glyph } from "../../../components/primitives/Glyph";
 import { Tag } from "../../../components/primitives/Tag";
 import { NF } from "../../../icons";
+import { maybeRedact, redactSecrets } from "../../../lib/redactSecrets";
 import type { SessionRow } from "../../../types";
 import { formatRelativeTime, formatSize } from "../../projects/format";
 import {
@@ -64,9 +66,26 @@ export const SessionRowView = memo(function SessionRowView({
 }: SessionRowProps) {
   const [hover, setHover] = useState(false);
   const lastTs = bestTimestampMs(s.last_ts, s.last_modified_ms);
-  const project = projectBasename(s.project_path) || s.slug;
+  // Defense in depth: even though the Rust side redacts
+  // `first_user_prompt` at codec.rs::upsert_row, every render of a
+  // user-controlled string runs through `redactSecrets` so a backend
+  // regression can't surface a raw token in the DOM. Memoized per
+  // row so we only pay the scan when the row's identity changes.
+  // Other user-controllable fields (`project_path`, `git_branch`,
+  // models) are redacted at their render sites below — they aren't
+  // run through the Rust redactor at upsert.
+  const safePrompt = useMemo(
+    () => maybeRedact(s.first_user_prompt),
+    [s.first_user_prompt],
+  );
+  const project = redactSecrets(projectBasename(s.project_path) || s.slug);
+  const projectTitle = useMemo(
+    () => redactSecrets(s.project_path),
+    [s.project_path],
+  );
+  const safeBranch = useMemo(() => maybeRedact(s.git_branch), [s.git_branch]);
   const headline =
-    s.first_user_prompt?.trim() ||
+    safePrompt?.trim() ||
     (s.is_sidechain ? "Agent subsession" : shortSessionId(s.session_id));
   const model = modelBadge(s.models);
   const tokens = formatTokens(s.tokens.total);
@@ -149,7 +168,7 @@ export const SessionRowView = memo(function SessionRowView({
           }}
         >
           <span
-            title={s.first_user_prompt ?? s.session_id}
+            title={safePrompt ?? s.session_id}
             style={{
               whiteSpace: "nowrap",
               overflow: "hidden",
@@ -188,7 +207,7 @@ export const SessionRowView = memo(function SessionRowView({
               <span>{model}</span>
             </>
           )}
-          {s.git_branch && (
+          {safeBranch && (
             <>
               <span>·</span>
               <span style={{ display: "inline-flex", gap: "var(--sp-4)" }}>
@@ -196,7 +215,7 @@ export const SessionRowView = memo(function SessionRowView({
                   g={NF.branch}
                   style={{ fontSize: "var(--fs-2xs)" }}
                 />
-                {s.git_branch}
+                {safeBranch}
               </span>
             </>
           )}
@@ -207,28 +226,34 @@ export const SessionRowView = memo(function SessionRowView({
             </>
           )}
         </div>
-        {snippet && (
-          <div
-            data-testid="search-snippet"
-            title={snippet}
-            style={{
-              marginTop: "var(--sp-4)",
-              color: "var(--fg-muted)",
-              fontSize: "var(--fs-xs)",
-              whiteSpace: "nowrap",
-              overflow: "hidden",
-              textOverflow: "ellipsis",
-              fontStyle: "italic",
-            }}
-          >
-            {snippet}
-          </div>
-        )}
+        {snippet && (() => {
+          // Defense in depth: backend already redacts via
+          // session_search::make_hit, but if a future regression ever
+          // bypassed that, the UI must not surface the raw token.
+          const safeSnippet = redactSecrets(snippet);
+          return (
+            <div
+              data-testid="search-snippet"
+              title={safeSnippet}
+              style={{
+                marginTop: "var(--sp-4)",
+                color: "var(--fg-muted)",
+                fontSize: "var(--fs-xs)",
+                whiteSpace: "nowrap",
+                overflow: "hidden",
+                textOverflow: "ellipsis",
+                fontStyle: "italic",
+              }}
+            >
+              {safeSnippet}
+            </div>
+          );
+        })()}
       </div>
 
       <div style={{ minWidth: 0, overflow: "hidden" }}>
         <div
-          title={s.project_path}
+          title={projectTitle}
           style={{
             color: "var(--fg-muted)",
             whiteSpace: "nowrap",

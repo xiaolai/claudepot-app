@@ -107,7 +107,10 @@ describe("SessionsTable", () => {
         onSelect={() => {}}
       />,
     );
-    await user.click(screen.getByRole("columnheader", { name: /Turns/i }));
+    // Sort buttons are plain buttons (not columnheader/grid) because
+    // the body is a listbox, not a grid. The aria-label is a full
+    // sentence describing both current state and click outcome.
+    await user.click(screen.getByRole("button", { name: /Sort by turns/i }));
     expect(sessionOrder()).toEqual([
       "prompt for gamma",
       "prompt for alpha",
@@ -530,6 +533,96 @@ describe("SessionsTable virtualization", () => {
     expect(within(list).queryAllByRole("option")).toHaveLength(30);
     const selected = within(list).getByRole("option", { selected: true });
     expect(selected.textContent).toContain("row5");
+  });
+});
+
+/**
+ * UI-side defense-in-depth redaction. The Rust side normally redacts
+ * `first_user_prompt` / `git_branch` / `project_path` shaped fields
+ * before they cross the IPC boundary, but the UI now also runs them
+ * through `redactSecrets` at every render site. These tests simulate a
+ * backend regression by feeding raw `sk-ant-*` tokens directly and
+ * asserting the UI masks them.
+ */
+describe("SessionsTable defense-in-depth redaction", () => {
+  it("masks a raw sk-ant- token in the prompt headline + tooltip", () => {
+    const row = mk("z", {
+      first_user_prompt: "leaked sk-ant-oat01-AbcdWxYz0000 keep going",
+    });
+    render(
+      <SessionsTable
+        sessions={[row]}
+        filter="all"
+        selectedId={null}
+        onSelect={() => {}}
+      />,
+    );
+    const list = screen.getByRole("listbox", { name: "Sessions" });
+    const opt = within(list).getByRole("option");
+    expect(opt.textContent ?? "").not.toMatch(/sk-ant-[A-Za-z0-9]{5,}/);
+    expect(opt.textContent).toContain("sk-ant-***0000");
+    // The tooltip lives on the headline span — also redacted.
+    const headline = opt.querySelector("span[title]");
+    expect(headline?.getAttribute("title") ?? "").not.toMatch(
+      /sk-ant-[A-Za-z0-9]{5,}/,
+    );
+  });
+
+  it("masks a raw sk-ant- token in the git branch", () => {
+    const row = mk("z", {
+      git_branch: "feature/sk-ant-api03-XYZwxyz9876",
+    });
+    render(
+      <SessionsTable
+        sessions={[row]}
+        filter="all"
+        selectedId={null}
+        onSelect={() => {}}
+      />,
+    );
+    const opt = screen.getByRole("option");
+    expect(opt.textContent ?? "").not.toMatch(/sk-ant-[A-Za-z0-9]{5,}/);
+    expect(opt.textContent).toContain("sk-ant-***9876");
+  });
+
+  it("masks a raw sk-ant- token in the project path tooltip", () => {
+    const row = mk("z", {
+      project_path: "/tmp/sk-ant-oat01-leakedleaked4321/repo",
+    });
+    render(
+      <SessionsTable
+        sessions={[row]}
+        filter="all"
+        selectedId={null}
+        onSelect={() => {}}
+      />,
+    );
+    const titles = Array.from(
+      document.querySelectorAll<HTMLElement>("[title]"),
+    )
+      .map((el) => el.getAttribute("title") ?? "")
+      .join("\n");
+    expect(titles).not.toMatch(/sk-ant-[A-Za-z0-9]{5,}/);
+    expect(titles).toContain("sk-ant-***4321");
+  });
+
+  it("masks a raw sk-ant- token in a deep-search snippet (PlainList path)", () => {
+    const row = mk("z");
+    const snippets = new Map<string, string>([
+      ["/tmp/z.jsonl", "leaked sk-ant-oat01-rawrawrawrawraw7777 found"],
+    ]);
+    render(
+      <SessionsTable
+        sessions={[row]}
+        filter="all"
+        selectedId={null}
+        onSelect={() => {}}
+        searchSnippets={snippets}
+      />,
+    );
+    const snippet = screen.getByTestId("search-snippet");
+    expect(snippet.textContent ?? "").not.toMatch(/sk-ant-[A-Za-z0-9]{5,}/);
+    expect(snippet.textContent).toContain("sk-ant-***7777");
   });
 });
 
