@@ -113,30 +113,59 @@ export function SessionsSection(props: SessionsSectionProps = {}) {
     const myToken = ++tokenRef.current;
     setLoading(true);
     setError(null);
-    Promise.all([
+    // Use allSettled so a failure in projectList or sessionWorktreeGroups
+    // doesn't blank the whole Sessions section. The session list is the
+    // only mandatory dependency — if it loads, the table renders.
+    // Secondary failures degrade their corresponding UI surface
+    // (RepoFilterStrip vanishes, MoveSessionModal target list is empty)
+    // and surface as a single inline toast.
+    Promise.allSettled([
       api.sessionListAll(),
       api.projectList(),
-      // Worktree grouping is optional — the table still works without
-      // it, so a failure degrades to a missing RepoFilterStrip rather
-      // than a top-level error. Log it in dev so the absence is
-      // observable during diagnosis.
-      api.sessionWorktreeGroups().catch((e) => {
-        if (import.meta.env.DEV) {
-          // eslint-disable-next-line no-console
-          console.warn(
-            "[SessionsSection] sessionWorktreeGroups failed; " +
-              "RepoFilterStrip will not render",
-            e,
-          );
-        }
-        return null;
-      }),
+      api.sessionWorktreeGroups(),
     ])
-      .then(([ss, ps, groups]) => {
+      .then(([ssRes, psRes, groupsRes]) => {
         if (!mountedRef.current || myToken !== tokenRef.current) return;
+
+        // Mandatory: the session list. If this rejects, we can't
+        // render the table and must surface the error inline.
+        if (ssRes.status === "rejected") {
+          setError(String(ssRes.reason));
+          setLoading(false);
+          return;
+        }
+        const ss = ssRes.value;
         setSessions(ss);
-        setProjects(ps);
-        setRepoGroups(groups);
+
+        // Secondary: projects (target list for Move modal). On
+        // rejection we fall back to an empty list and toast once.
+        if (psRes.status === "fulfilled") {
+          setProjects(psRes.value);
+        } else {
+          setProjects([]);
+          setToast(`Couldn't load projects: ${String(psRes.reason)}`);
+          if (import.meta.env.DEV) {
+            // eslint-disable-next-line no-console
+            console.warn("[SessionsSection] projectList failed", psRes.reason);
+          }
+        }
+
+        // Tertiary: worktree groups (powers RepoFilterStrip). Already
+        // designed to be optional — rejection just hides the strip.
+        if (groupsRes.status === "fulfilled") {
+          setRepoGroups(groupsRes.value);
+        } else {
+          setRepoGroups(null);
+          if (import.meta.env.DEV) {
+            // eslint-disable-next-line no-console
+            console.warn(
+              "[SessionsSection] sessionWorktreeGroups failed; " +
+                "RepoFilterStrip will not render",
+              groupsRes.reason,
+            );
+          }
+        }
+
         setLoading(false);
         // Drop the selection if it no longer exists.
         setSelectedPath((prev) =>
@@ -144,6 +173,8 @@ export function SessionsSection(props: SessionsSectionProps = {}) {
         );
         // Drop the active repo id if the new groups don't contain it.
         // Id is `repo_root` for git-tracked repos, `label` for no-repo.
+        const groups =
+          groupsRes.status === "fulfilled" ? groupsRes.value : null;
         setActiveRepo((prev) =>
           prev &&
           groups &&
@@ -151,11 +182,6 @@ export function SessionsSection(props: SessionsSectionProps = {}) {
             ? prev
             : null,
         );
-      })
-      .catch((e) => {
-        if (!mountedRef.current || myToken !== tokenRef.current) return;
-        setError(String(e));
-        setLoading(false);
       });
   }, []);
 
@@ -267,16 +293,34 @@ export function SessionsSection(props: SessionsSectionProps = {}) {
   const showDetail = selectedPath !== null;
   const showTable = splitView || selectedPath === null;
 
+  // Count the rows the table will actually render. Includes every
+  // narrowing the user applied: repo (scoped), query (deferred +
+  // deep-hit), AND the status chip (`filter`). Without this last
+  // step the subtitle would announce a global count while the table
+  // is scoped to one status filter — a UI lie. Counting here mirrors
+  // the same predicate the table uses; the duplication is intentional
+  // because `SessionsTable` owns the sort, not the filter, and we
+  // need the count before the sort runs.
+  const visibleCount = useMemo(() => {
+    if (filter === "all") return filteredByQuery.length;
+    return filteredByQuery.reduce((n, s) => {
+      if (filter === "errors" && s.has_error) return n + 1;
+      if (filter === "sidechain" && s.is_sidechain) return n + 1;
+      return n;
+    }, 0);
+  }, [filteredByQuery, filter]);
+
   const subtitle = (() => {
     if (error && sessions.length === 0) return "Couldn't load sessions.";
     const total = sessions.length;
     if (total === 0) return "No sessions yet. Run `claude` to start one.";
-    // Subtitle narrows off the deferred value so it stays stable with
-    // the visible list — showing "12 of 9321" while the table still
-    // has 9321 rows (one tick behind) would lie about the UI state.
-    const narrowed = deferredQuery.trim() && filteredByQuery.length !== total;
+    // Narrowed if any of: query, repo, or status filter is active.
+    // Use deferredQuery (not raw query) for the same reason the table
+    // does — a one-tick discrepancy between subtitle and visible rows
+    // would lie about the UI state.
+    const narrowed = visibleCount !== total;
     if (narrowed) {
-      return `${filteredByQuery.length} of ${total} session${
+      return `${visibleCount} of ${total} session${
         total === 1 ? "" : "s"
       } shown`;
     }
@@ -579,15 +623,13 @@ export function SessionsSection(props: SessionsSectionProps = {}) {
             {
               label: "Copy session id",
               onClick: () => {
-                navigator.clipboard.writeText(s.session_id);
-                setToast("Copied session id.");
+                copyToClipboard(s.session_id, "session id", setToast);
               },
             },
             {
               label: "Copy project path",
               onClick: () => {
-                navigator.clipboard.writeText(s.project_path);
-                setToast("Copied project path.");
+                copyToClipboard(s.project_path, "project path", setToast);
               },
             },
           ];
@@ -601,5 +643,24 @@ export function SessionsSection(props: SessionsSectionProps = {}) {
           );
         })()}
     </>
+  );
+}
+
+/**
+ * Copy text to the clipboard, surfacing both success and failure as
+ * toasts. The native `navigator.clipboard.writeText` rejects in
+ * narrow but real cases (no document focus, HTTPS-only contexts in
+ * some browsers, Tauri webview policies) — silently toasting success
+ * lies to the user. We `void`-type the promise to satisfy the no-
+ * floating-promises lint while keeping the call site synchronous.
+ */
+function copyToClipboard(
+  text: string,
+  label: string,
+  setToast: (msg: string) => void,
+): void {
+  void navigator.clipboard.writeText(text).then(
+    () => setToast(`Copied ${label}.`),
+    (e) => setToast(`Couldn't copy ${label}: ${e instanceof Error ? e.message : String(e)}`),
   );
 }
