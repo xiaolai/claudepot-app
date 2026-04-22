@@ -628,6 +628,13 @@ export function SessionsSection(props: SessionsSectionProps = {}) {
             },
             { label: "", separator: true, onClick: () => {} },
             {
+              // Identity tuple for the move is `(session_id, from_cwd)`
+              // — sufficient because the backend resolves to
+              // `~/.claude/projects/{sanitize(from_cwd)}/{session_id}.jsonl`,
+              // which is a single on-disk file. The only failure mode
+              // would be a from_cwd derived via the lossy `unsanitize`
+              // fallback (`.claude/rules/paths.md`), which is exactly
+              // what the `project_from_transcript` guard rules out here.
               label: "Move to project…",
               onClick: () => {
                 if (!s.project_from_transcript) {
