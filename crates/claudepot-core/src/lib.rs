@@ -41,6 +41,7 @@ pub mod session_phases;
 pub mod session_search;
 pub mod session_search_ranking;
 pub mod session_subagents;
+pub mod trash;
 pub mod session_tool_link;
 pub mod session_worktree;
 pub mod session_move;
