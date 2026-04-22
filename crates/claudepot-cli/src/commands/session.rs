@@ -512,32 +512,173 @@ pub fn view_cmd(ctx: &AppContext, target: &str, show: &str) -> Result<()> {
     Ok(())
 }
 
-/// `claudepot session export <target> --format md|json [--output FILE]`
+/// `claudepot session export <target> --format fmt --to dest [flags]`
+#[allow(clippy::too_many_arguments)]
 pub fn export_cmd(
     ctx: &AppContext,
     target: &str,
     format: &str,
+    to: &str,
     output: Option<&str>,
+    public: bool,
+    redact_paths: &str,
+    redact_emails: bool,
+    redact_env: bool,
+    redact_regex: Vec<String>,
+    html_no_js: bool,
 ) -> Result<()> {
-    let _ = ctx; // --json flag doesn't apply here
+    let _ = ctx;
     let detail = resolve_detail(target)?;
     let fmt = match format {
         "md" | "markdown" => claudepot_core::session_export::ExportFormat::Markdown,
+        "markdown-slim" => claudepot_core::session_export::ExportFormat::MarkdownSlim,
         "json" => claudepot_core::session_export::ExportFormat::Json,
+        "html" => claudepot_core::session_export::ExportFormat::Html {
+            no_js: html_no_js,
+        },
         other => bail!("unknown format: {other}"),
     };
-    let body = claudepot_core::session_export::export(&detail, fmt);
-    match output {
-        Some(path) => {
+    let policy = build_policy(redact_paths, redact_emails, redact_env, redact_regex)?;
+    let body =
+        claudepot_core::session_export::export_with(&detail, fmt.clone(), &policy);
+    match to {
+        "file" => {
+            let path = output.ok_or_else(|| anyhow::anyhow!("--output required for --to file"))?;
             write_export_file(path, body.as_bytes())
                 .with_context(|| format!("write {path}"))?;
             eprintln!("Wrote {} bytes to {path}", body.len());
         }
-        None => {
-            print!("{body}");
+        "clipboard" => {
+            write_to_clipboard(&body)
+                .with_context(|| "copy to clipboard")?;
+            eprintln!("Copied {} bytes to clipboard", body.len());
         }
+        "gist" => {
+            let token = resolve_github_token()?;
+            let filename = default_gist_filename(&detail, format);
+            let description = format!(
+                "Claudepot session export: {}",
+                detail.row.session_id
+            );
+            let result = tokio::runtime::Builder::new_current_thread()
+                .enable_all()
+                .build()
+                .context("build tokio runtime")?
+                .block_on(async {
+                    claudepot_core::session_share::share_gist(
+                        &body,
+                        &filename,
+                        &description,
+                        public,
+                        &token,
+                        &claudepot_core::project_progress::NoopSink,
+                    )
+                    .await
+                })?;
+            eprintln!("Uploaded to {}", result.url);
+            println!("{}", result.url);
+        }
+        other => bail!("unknown destination: {other}"),
     }
     Ok(())
+}
+
+fn build_policy(
+    redact_paths: &str,
+    redact_emails: bool,
+    redact_env: bool,
+    redact_regex: Vec<String>,
+) -> Result<claudepot_core::redaction::RedactionPolicy> {
+    use claudepot_core::redaction::{PathStrategy, RedactionPolicy};
+    let paths = match redact_paths {
+        "off" => PathStrategy::Off,
+        "relative" => PathStrategy::Relative {
+            root: dirs::home_dir().unwrap_or_else(|| std::path::PathBuf::from("/")),
+        },
+        "hash" => PathStrategy::Hash,
+        other => bail!("unknown redact-paths strategy: {other}"),
+    };
+    Ok(RedactionPolicy {
+        anthropic_keys: true,
+        paths,
+        emails: redact_emails,
+        env_assignments: redact_env,
+        custom_regex: redact_regex,
+    })
+}
+
+fn default_gist_filename(
+    detail: &claudepot_core::session::SessionDetail,
+    format: &str,
+) -> String {
+    let ext = match format {
+        "html" => "html",
+        "json" => "json",
+        _ => "md",
+    };
+    format!("session-{}.{ext}", short_hash_id(&detail.row.session_id))
+}
+
+fn short_hash_id(s: &str) -> String {
+    let mut h: u64 = 0xcbf29ce484222325;
+    for b in s.bytes() {
+        h ^= b as u64;
+        h = h.wrapping_mul(0x100000001b3);
+    }
+    format!("{:08x}", (h & 0xffff_ffff) as u32)
+}
+
+fn resolve_github_token() -> Result<String> {
+    if let Ok(t) = std::env::var("GITHUB_TOKEN") {
+        if !t.trim().is_empty() {
+            return Ok(t);
+        }
+    }
+    // Keychain fallback (the GUI may have stored a PAT under
+    // `claudepot.github-token`). CLI-only for now — never prints the
+    // value back to the user.
+    if let Ok(kr) = keyring::Entry::new("claudepot", "github-token") {
+        if let Ok(val) = kr.get_password() {
+            return Ok(val);
+        }
+    }
+    bail!(
+        "no GitHub token. Set GITHUB_TOKEN or run Claudepot → Settings → GitHub."
+    )
+}
+
+fn write_to_clipboard(body: &str) -> Result<()> {
+    use std::process::{Command, Stdio};
+    // macOS, Linux (wl-copy / xclip), Windows (clip.exe). Try each in
+    // order; return the first one that accepts stdin.
+    let candidates: &[(&str, &[&str])] = &[
+        ("pbcopy", &[][..]),
+        ("wl-copy", &[][..]),
+        ("xclip", &["-selection", "clipboard"][..]),
+        ("clip.exe", &[][..]),
+    ];
+    for (cmd, args) in candidates {
+        let mut child = match Command::new(cmd)
+            .args(args.iter().copied())
+            .stdin(Stdio::piped())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .spawn()
+        {
+            Ok(c) => c,
+            Err(_) => continue,
+        };
+        if let Some(mut stdin) = child.stdin.take() {
+            use std::io::Write;
+            stdin.write_all(body.as_bytes())?;
+            drop(stdin);
+        }
+        let status = child.wait()?;
+        if status.success() {
+            return Ok(());
+        }
+    }
+    bail!("no clipboard command available (tried pbcopy, wl-copy, xclip, clip.exe)")
 }
 
 /// Create the export file with 0600 mode on Unix — the file may carry
@@ -739,5 +880,300 @@ fn print_json<T: serde::Serialize>(value: &T) {
         Ok(s) => println!("{s}"),
         Err(e) => eprintln!("json serialization failed: {e}"),
     }
+}
+
+// ---------------------------------------------------------------------------
+// Prune + trash
+// ---------------------------------------------------------------------------
+
+fn parse_duration(s: &str) -> Result<std::time::Duration> {
+    let t = s.trim();
+    if t.is_empty() {
+        bail!("empty duration");
+    }
+    let (num_part, unit) = t.split_at(
+        t.find(|c: char| c.is_ascii_alphabetic()).unwrap_or(t.len()),
+    );
+    let n: u64 = num_part
+        .parse()
+        .with_context(|| format!("invalid duration: {s}"))?;
+    let secs = match unit {
+        "" | "s" => n,
+        "m" => n * 60,
+        "h" => n * 3600,
+        "d" => n * 86400,
+        _ => bail!("unknown duration unit in {s:?} (use s/m/h/d)"),
+    };
+    Ok(std::time::Duration::from_secs(secs))
+}
+
+fn parse_size(s: &str) -> Result<u64> {
+    let t = s.trim().to_ascii_uppercase();
+    if t.is_empty() {
+        bail!("empty size");
+    }
+    let (num_part, unit) = t.split_at(
+        t.find(|c: char| c.is_ascii_alphabetic()).unwrap_or(t.len()),
+    );
+    let n: u64 = num_part
+        .parse()
+        .with_context(|| format!("invalid size: {s}"))?;
+    let mult: u64 = match unit {
+        "" | "B" => 1,
+        "KB" => 1_000,
+        "MB" => 1_000_000,
+        "GB" => 1_000_000_000,
+        "KIB" => 1024,
+        "MIB" => 1024 * 1024,
+        "GIB" => 1024 * 1024 * 1024,
+        _ => bail!("unknown size unit in {s:?} (use B/KB/MB/GB/KiB/MiB/GiB)"),
+    };
+    Ok(n.saturating_mul(mult))
+}
+
+#[allow(clippy::too_many_arguments)]
+pub fn prune_cmd(
+    ctx: &AppContext,
+    older_than: Option<&str>,
+    larger_than: Option<&str>,
+    project: Vec<String>,
+    has_error: bool,
+    sidechain: bool,
+    execute: bool,
+) -> Result<()> {
+    use claudepot_core::session_prune::{execute_prune, plan_prune, PruneFilter};
+    let mut filter = PruneFilter::default();
+    if let Some(s) = older_than {
+        filter.older_than = Some(parse_duration(s)?);
+    }
+    if let Some(s) = larger_than {
+        filter.larger_than = Some(parse_size(s)?);
+    }
+    filter.project = project.iter().map(PathBuf::from).collect();
+    filter.has_error = if has_error { Some(true) } else { None };
+    filter.is_sidechain = if sidechain { Some(true) } else { None };
+
+    let cfg = paths::claude_config_dir();
+    let plan = plan_prune(&cfg, &filter).context("plan prune")?;
+
+    if plan.entries.is_empty() {
+        if ctx.json {
+            print_json(&plan);
+        } else {
+            println!("No sessions match the filter.");
+        }
+        return Ok(());
+    }
+
+    if !execute {
+        if ctx.json {
+            print_json(&plan);
+            return Ok(());
+        }
+        println!("Plan (dry-run):");
+        for e in &plan.entries {
+            println!(
+                "  - {}    {}    {}",
+                e.file_path.display(),
+                format_size(e.size_bytes),
+                e.last_ts_ms
+                    .map(format_ts_ms)
+                    .unwrap_or_else(|| "—".to_string())
+            );
+        }
+        println!(
+            "Total: {} file(s), {} → trash",
+            plan.entries.len(),
+            format_size(plan.total_bytes)
+        );
+        println!("Run with --execute to apply. Trash retained for 7 days.");
+        return Ok(());
+    }
+
+    let data_dir = paths::claudepot_data_dir();
+    let sink = claudepot_core::project_progress::NoopSink;
+    let report = execute_prune(&data_dir, &plan, &sink).context("execute prune")?;
+    if ctx.json {
+        print_json(&report);
+        return Ok(());
+    }
+    println!(
+        "Moved {} file(s) to trash, {} freed.",
+        report.moved.len(),
+        format_size(report.freed_bytes)
+    );
+    for (p, reason) in &report.failed {
+        eprintln!("  ✗ {}: {}", p.display(), reason);
+    }
+    Ok(())
+}
+
+pub fn trash_list_cmd(ctx: &AppContext, older_than: Option<&str>) -> Result<()> {
+    use claudepot_core::trash::{self, TrashFilter};
+    let filter = TrashFilter {
+        older_than: older_than.map(parse_duration).transpose()?,
+        kind: None,
+    };
+    let data_dir = paths::claudepot_data_dir();
+    let listing = trash::list(&data_dir, filter).context("list trash")?;
+    if ctx.json {
+        print_json(&listing);
+        return Ok(());
+    }
+    if listing.entries.is_empty() {
+        println!("Trash is empty.");
+        return Ok(());
+    }
+    for e in &listing.entries {
+        println!(
+            "{}  {:?}  {}  {}",
+            e.id,
+            e.kind,
+            format_size(e.size),
+            e.orig_path.display()
+        );
+    }
+    println!(
+        "Total: {} entry(ies), {}",
+        listing.entries.len(),
+        format_size(listing.total_bytes)
+    );
+    Ok(())
+}
+
+pub fn trash_restore_cmd(ctx: &AppContext, id: &str, to: Option<&str>) -> Result<()> {
+    use claudepot_core::trash;
+    let data_dir = paths::claudepot_data_dir();
+    let cwd = to.map(Path::new);
+    let restored = trash::restore(&data_dir, id, cwd).context("restore trash")?;
+    if ctx.json {
+        print_json(&serde_json::json!({ "restored": restored }));
+    } else {
+        println!("Restored to {}", restored.display());
+    }
+    Ok(())
+}
+
+pub fn trash_empty_cmd(ctx: &AppContext, older_than: Option<&str>) -> Result<()> {
+    use claudepot_core::trash::{self, TrashFilter};
+    // Refuse on a TTY without --yes.
+    if !ctx.yes && atty_like() {
+        bail!("`trash empty` requires --yes on a TTY. Pass -y to confirm.");
+    }
+    let filter = TrashFilter {
+        older_than: older_than.map(parse_duration).transpose()?,
+        kind: None,
+    };
+    let data_dir = paths::claudepot_data_dir();
+    let freed = trash::empty(&data_dir, filter).context("empty trash")?;
+    if ctx.json {
+        print_json(&serde_json::json!({ "freed_bytes": freed }));
+    } else {
+        println!("Emptied. Freed {}.", format_size(freed));
+    }
+    Ok(())
+}
+
+fn format_size(bytes: u64) -> String {
+    const KB: f64 = 1024.0;
+    const MB: f64 = KB * 1024.0;
+    const GB: f64 = MB * 1024.0;
+    let b = bytes as f64;
+    if b >= GB {
+        format!("{:.1} GiB", b / GB)
+    } else if b >= MB {
+        format!("{:.1} MiB", b / MB)
+    } else if b >= KB {
+        format!("{:.1} KiB", b / KB)
+    } else {
+        format!("{bytes} B")
+    }
+}
+
+fn format_ts_ms(ms: i64) -> String {
+    chrono::DateTime::<chrono::Utc>::from_timestamp_millis(ms)
+        .map(|dt| dt.format("%Y-%m-%d").to_string())
+        .unwrap_or_else(|| "—".to_string())
+}
+
+pub fn slim_cmd(
+    ctx: &AppContext,
+    target: &str,
+    drop_over: Option<&str>,
+    exclude_tool: Vec<String>,
+    execute: bool,
+) -> Result<()> {
+    use claudepot_core::session_slim::{execute_slim, plan_slim, SlimOpts};
+    let path = resolve_session_path(target)?;
+    let mut opts = SlimOpts {
+        exclude_tools: exclude_tool,
+        ..SlimOpts::default()
+    };
+    if let Some(s) = drop_over {
+        opts.drop_tool_results_over_bytes = parse_size(s)?;
+    }
+    let plan = plan_slim(&path, &opts).context("plan slim")?;
+    if !execute {
+        if ctx.json {
+            print_json(&plan);
+            return Ok(());
+        }
+        println!(
+            "Plan (dry-run): {} → {} ({} saved, {} tool_result redactions)",
+            format_size(plan.original_bytes),
+            format_size(plan.projected_bytes),
+            format_size(plan.bytes_saved()),
+            plan.redact_count
+        );
+        if !plan.tools_affected.is_empty() {
+            println!("Tools affected: {}", plan.tools_affected.join(", "));
+        }
+        println!("Run with --execute to rewrite. Original kept in trash for 7 days.");
+        return Ok(());
+    }
+    let data_dir = paths::claudepot_data_dir();
+    let sink = claudepot_core::project_progress::NoopSink;
+    let report = execute_slim(&data_dir, &path, &opts, &sink).context("execute slim")?;
+    if ctx.json {
+        print_json(&report);
+        return Ok(());
+    }
+    println!(
+        "Slimmed: {} → {} ({} saved, {} redactions). Trash id: {}",
+        format_size(report.original_bytes),
+        format_size(report.final_bytes),
+        format_size(report.bytes_saved()),
+        report.redact_count,
+        report.trashed_original.display(),
+    );
+    Ok(())
+}
+
+/// Accept either a bare UUID (looked up against the index) or an
+/// absolute `.jsonl` path.
+fn resolve_session_path(target: &str) -> Result<PathBuf> {
+    if target.ends_with(".jsonl") {
+        let p = PathBuf::from(target);
+        if !p.exists() {
+            bail!("not found: {}", p.display());
+        }
+        return Ok(p);
+    }
+    // Treat as UUID — search the index.
+    let cfg = paths::claude_config_dir();
+    let rows = claudepot_core::session::list_all_sessions(&cfg)?;
+    let row = rows
+        .iter()
+        .find(|r| r.session_id == target || r.session_id.starts_with(target));
+    match row {
+        Some(r) => Ok(r.file_path.clone()),
+        None => bail!("no session found for {target}"),
+    }
+}
+
+fn atty_like() -> bool {
+    // Used by `trash empty` to refuse without `--yes`. On a non-TTY
+    // (pipe, CI, test harness) we don't demand the confirmation.
+    std::io::IsTerminal::is_terminal(&std::io::stdin())
 }
 

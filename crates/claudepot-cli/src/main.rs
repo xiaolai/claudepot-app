@@ -120,17 +120,38 @@ enum SessionAction {
         #[arg(long, default_value = "summary", value_parser = ["summary", "chunks", "tools", "classify", "subagents", "phases", "context"])]
         show: String,
     },
-    /// Export a session transcript to Markdown or JSON. Redacts
-    /// `sk-ant-*` tokens automatically.
+    /// Export a session transcript. Redacts sk-ant-* tokens by default.
     Export {
         /// Session UUID or absolute `.jsonl` path.
         target: String,
         /// Output format.
-        #[arg(long, default_value = "md", value_parser = ["md", "markdown", "json"])]
+        #[arg(long, default_value = "md", value_parser = ["md", "markdown", "markdown-slim", "json", "html"])]
         format: String,
-        /// Optional output file. Writes stdout when omitted.
+        /// Destination. `file` requires --output; clipboard copies;
+        /// gist uploads via GITHUB_TOKEN env or keychain.
+        #[arg(long, default_value = "file", value_parser = ["file", "clipboard", "gist"])]
+        to: String,
+        /// Output file path (for --to file).
         #[arg(long)]
         output: Option<String>,
+        /// Make the gist public (for --to gist). Default is secret.
+        #[arg(long)]
+        public: bool,
+        /// Redact absolute paths: off | relative | hash.
+        #[arg(long, default_value = "off", value_parser = ["off", "relative", "hash"])]
+        redact_paths: String,
+        /// Mask email-like strings with <email-redacted>.
+        #[arg(long)]
+        redact_emails: bool,
+        /// Drop lines that look like FOO=bar env assignments.
+        #[arg(long)]
+        redact_env: bool,
+        /// Repeatable: extra literal substrings to redact.
+        #[arg(long)]
+        redact_regex: Vec<String>,
+        /// Strip the copy-buttons script from HTML output.
+        #[arg(long)]
+        html_no_js: bool,
     },
     /// Cross-session text search. Scans first-user-prompts and
     /// assistant/user turns case-insensitively.
@@ -143,6 +164,76 @@ enum SessionAction {
     },
     /// Group sessions by git repository (collapses worktrees).
     Worktrees,
+    /// Bulk delete session transcripts into the reversible trash.
+    /// Dry-run by default — pass `--execute` to actually move files.
+    Prune {
+        /// Match sessions whose last activity is older than the given
+        /// duration. Accepts `7d`, `24h`, `90m`, `3600s`.
+        #[arg(long)]
+        older_than: Option<String>,
+        /// Match sessions whose size is at least the given value.
+        /// Accepts `10MB`, `500KB`, `1024`.
+        #[arg(long)]
+        larger_than: Option<String>,
+        /// Repeatable: narrow to sessions whose cwd equals one of these.
+        #[arg(long)]
+        project: Vec<String>,
+        /// Only include sessions that recorded an error.
+        #[arg(long)]
+        has_error: bool,
+        /// Only include sidechain (subagent) sessions.
+        #[arg(long)]
+        sidechain: bool,
+        /// Actually move files into the trash. Without this flag,
+        /// prune only prints the plan.
+        #[arg(long)]
+        execute: bool,
+    },
+    /// Reversible trash for prune/slim operations.
+    Trash {
+        #[command(subcommand)]
+        action: TrashAction,
+    },
+    /// Rewrite a transcript, dropping oversized tool_result payloads.
+    /// Dry-run by default — pass `--execute` to rewrite in place.
+    Slim {
+        /// Session UUID or absolute `.jsonl` path.
+        target: String,
+        /// Drop tool_result payloads larger than this. Accepts
+        /// `1MB`, `500KB`, `1024`. Default: 1MiB.
+        #[arg(long)]
+        drop_tool_results_over: Option<String>,
+        /// Repeatable: tool names whose results to preserve regardless.
+        #[arg(long)]
+        exclude_tool: Vec<String>,
+        /// Actually rewrite the file. Without this, slim only plans.
+        #[arg(long)]
+        execute: bool,
+    },
+}
+
+#[derive(Subcommand)]
+enum TrashAction {
+    /// List current trash batches.
+    List {
+        /// Only show entries older than the given duration.
+        #[arg(long)]
+        older_than: Option<String>,
+    },
+    /// Restore a trash batch by its id.
+    Restore {
+        /// Batch id (from `trash list`).
+        id: String,
+        /// Override destination cwd (parent dir) instead of the original.
+        #[arg(long)]
+        to: Option<String>,
+    },
+    /// Empty the trash. Honors the global `--yes` when on a TTY.
+    Empty {
+        /// Only empty entries older than the given duration.
+        #[arg(long)]
+        older_than: Option<String>,
+    },
 }
 
 #[derive(Subcommand)]
@@ -460,12 +551,70 @@ async fn main() -> Result<()> {
             SessionAction::Export {
                 target,
                 format,
+                to,
                 output,
-            } => commands::session::export_cmd(&ctx, &target, &format, output.as_deref())?,
+                public,
+                redact_paths,
+                redact_emails,
+                redact_env,
+                redact_regex,
+                html_no_js,
+            } => commands::session::export_cmd(
+                &ctx,
+                &target,
+                &format,
+                &to,
+                output.as_deref(),
+                public,
+                &redact_paths,
+                redact_emails,
+                redact_env,
+                redact_regex,
+                html_no_js,
+            )?,
             SessionAction::Search { query, limit } => {
                 commands::session::search_cmd(&ctx, &query, limit)?
             }
             SessionAction::Worktrees => commands::session::worktrees_cmd(&ctx)?,
+            SessionAction::Prune {
+                older_than,
+                larger_than,
+                project,
+                has_error,
+                sidechain,
+                execute,
+            } => commands::session::prune_cmd(
+                &ctx,
+                older_than.as_deref(),
+                larger_than.as_deref(),
+                project,
+                has_error,
+                sidechain,
+                execute,
+            )?,
+            SessionAction::Slim {
+                target,
+                drop_tool_results_over,
+                exclude_tool,
+                execute,
+            } => commands::session::slim_cmd(
+                &ctx,
+                &target,
+                drop_tool_results_over.as_deref(),
+                exclude_tool,
+                execute,
+            )?,
+            SessionAction::Trash { action } => match action {
+                TrashAction::List { older_than } => {
+                    commands::session::trash_list_cmd(&ctx, older_than.as_deref())?
+                }
+                TrashAction::Restore { id, to } => {
+                    commands::session::trash_restore_cmd(&ctx, &id, to.as_deref())?
+                }
+                TrashAction::Empty { older_than } => {
+                    commands::session::trash_empty_cmd(&ctx, older_than.as_deref())?
+                }
+            },
         },
     }
 
