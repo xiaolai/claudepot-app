@@ -832,12 +832,18 @@ export interface PruneReport {
 export interface SlimOptsInput {
   drop_tool_results_over_bytes: number;
   exclude_tools: string[];
+  /** Replace base64 image blocks with `[image]` text stubs. */
+  strip_images?: boolean;
+  /** Replace base64 document blocks with `[document]` text stubs. */
+  strip_documents?: boolean;
 }
 
 export interface SlimPlan {
   original_bytes: number;
   projected_bytes: number;
   redact_count: number;
+  image_redact_count: number;
+  document_redact_count: number;
   tools_affected: string[];
   bytes_saved: number;
 }
@@ -846,6 +852,8 @@ export interface SlimReport {
   original_bytes: number;
   final_bytes: number;
   redact_count: number;
+  image_redact_count: number;
+  document_redact_count: number;
   trashed_original: string;
   bytes_saved: number;
 }
