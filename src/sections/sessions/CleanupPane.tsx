@@ -5,6 +5,8 @@ import { FilterChip } from "../../components/primitives/FilterChip";
 import { Input } from "../../components/primitives/Input";
 import { NF } from "../../icons";
 import type { BulkSlimPlan, PruneFilterInput, PrunePlan } from "../../types";
+import { formatSize } from "../projects/format";
+import { CleanupPlanPreview } from "./components/CleanupPlanPreview";
 
 /**
  * Cleanup tab inside Sessions — builds a PruneFilter, previews the
@@ -222,73 +224,18 @@ export function CleanupPane({
       )}
 
       {plan && (
-        <div
-          data-testid="prune-preview"
-          style={{
-            border: "var(--bw-hair) solid var(--line)",
-            borderRadius: "var(--r-2)",
-            overflow: "hidden",
-          }}
-        >
-          <div
-            style={{
-              padding: "var(--sp-12) var(--sp-16)",
-              background: "var(--bg-sunken)",
-              fontSize: "var(--fs-xs)",
-              color: "var(--fg-muted)",
-              letterSpacing: "var(--ls-wide)",
-              textTransform: "uppercase",
-            }}
-          >
-            Plan · {plan.entries.length} file(s) · {formatSize(plan.total_bytes)}
-            {plan.entries.length === 0 ? " · nothing to prune" : ""}
-          </div>
-          <ul style={{ listStyle: "none", margin: 0, padding: 0 }}>
-            {plan.entries.slice(0, 50).map((e) => (
-              <li
-                key={e.file_path}
-                style={{
-                  padding: "var(--sp-8) var(--sp-16)",
-                  borderBottom: "var(--bw-hair) solid var(--line)",
-                  fontSize: "var(--fs-sm)",
-                  display: "grid",
-                  gridTemplateColumns: "1fr auto",
-                  gap: "var(--sp-16)",
-                }}
-              >
-                <span
-                  title={e.file_path}
-                  style={{
-                    whiteSpace: "nowrap",
-                    overflow: "hidden",
-                    textOverflow: "ellipsis",
-                  }}
-                >
-                  {e.file_path}
-                </span>
-                <span
-                  style={{
-                    fontVariantNumeric: "tabular-nums",
-                    color: "var(--fg-muted)",
-                  }}
-                >
-                  {formatSize(e.size_bytes)}
-                </span>
-              </li>
-            ))}
-          </ul>
-          {plan.entries.length > 50 && (
-            <div
-              style={{
-                padding: "var(--sp-8) var(--sp-16)",
-                fontSize: "var(--fs-xs)",
-                color: "var(--fg-faint)",
-              }}
-            >
-              … and {plan.entries.length - 50} more
-            </div>
-          )}
-        </div>
+        <CleanupPlanPreview
+          testid="prune-preview"
+          summaryText={
+            `Plan · ${plan.entries.length} file(s) · ${formatSize(plan.total_bytes)}` +
+            (plan.entries.length === 0 ? " · nothing to prune" : "")
+          }
+          rows={plan.entries.map((e) => ({
+            id: e.file_path,
+            leftText: e.file_path,
+            rightText: formatSize(e.size_bytes),
+          }))}
+        />
       )}
 
       {/* Bulk slim — "reclaim image tokens" path. Uses the same filter
@@ -365,117 +312,57 @@ export function CleanupPane({
         </div>
 
         {slimPlan && (
-          <div
-            data-testid="slim-preview"
-            style={{
-              border: "var(--bw-hair) solid var(--line)",
-              borderRadius: "var(--r-2)",
-              overflow: "hidden",
-              marginTop: "var(--sp-8)",
-            }}
-          >
-            <div
-              style={{
-                padding: "var(--sp-12) var(--sp-16)",
-                background: "var(--bg-sunken)",
-                fontSize: "var(--fs-xs)",
-                color: "var(--fg-muted)",
-                letterSpacing: "var(--ls-wide)",
-                textTransform: "uppercase",
-              }}
-            >
-              Slim · {slimPlan.entries.length} file(s) ·{" "}
-              {formatSize(slimPlan.total_bytes_saved)} saved
-              {slimPlan.total_image_redacts > 0
+          <CleanupPlanPreview
+            testid="slim-preview"
+            marginTop="var(--sp-8)"
+            summaryText={
+              `Slim · ${slimPlan.entries.length} file(s) · ${formatSize(slimPlan.total_bytes_saved)} saved` +
+              (slimPlan.total_image_redacts > 0
                 ? ` · ${slimPlan.total_image_redacts} images`
-                : ""}
-              {slimPlan.total_document_redacts > 0
+                : "") +
+              (slimPlan.total_document_redacts > 0
                 ? ` · ${slimPlan.total_document_redacts} docs`
-                : ""}
-              {slimPlan.entries.length === 0 ? " · nothing to slim" : ""}
-            </div>
-            <ul style={{ listStyle: "none", margin: 0, padding: 0 }}>
-              {slimPlan.entries.slice(0, 50).map((e) => (
-                <li
-                  key={e.file_path}
+                : "") +
+              (slimPlan.entries.length === 0 ? " · nothing to slim" : "")
+            }
+            rows={slimPlan.entries.map((e) => ({
+              id: e.file_path,
+              leftText: e.file_path,
+              rightText: formatSize(e.plan.bytes_saved),
+            }))}
+            extrasFooter={
+              slimPlan.failed_to_plan.length > 0 ? (
+                <div
+                  data-testid="slim-failed-to-plan"
                   style={{
                     padding: "var(--sp-8) var(--sp-16)",
-                    borderBottom: "var(--bw-hair) solid var(--line)",
-                    fontSize: "var(--fs-sm)",
-                    display: "grid",
-                    gridTemplateColumns: "1fr auto",
-                    gap: "var(--sp-16)",
+                    borderTop: "var(--bw-hair) solid var(--line)",
+                    fontSize: "var(--fs-xs)",
+                    color: "var(--danger)",
+                    background: "var(--bg-sunken)",
                   }}
                 >
-                  <span
-                    title={e.file_path}
-                    style={{
-                      whiteSpace: "nowrap",
-                      overflow: "hidden",
-                      textOverflow: "ellipsis",
-                    }}
-                  >
-                    {e.file_path}
-                  </span>
-                  <span
-                    style={{
-                      fontVariantNumeric: "tabular-nums",
-                      color: "var(--fg-muted)",
-                    }}
-                  >
-                    {formatSize(e.plan.bytes_saved)}
-                  </span>
-                </li>
-              ))}
-            </ul>
-            {slimPlan.entries.length > 50 && (
-              <div
-                style={{
-                  padding: "var(--sp-8) var(--sp-16)",
-                  fontSize: "var(--fs-xs)",
-                  color: "var(--fg-faint)",
-                }}
-              >
-                … and {slimPlan.entries.length - 50} more
-              </div>
-            )}
-            {slimPlan.failed_to_plan.length > 0 && (
-              <div
-                data-testid="slim-failed-to-plan"
-                style={{
-                  padding: "var(--sp-8) var(--sp-16)",
-                  borderTop: "var(--bw-hair) solid var(--line)",
-                  fontSize: "var(--fs-xs)",
-                  color: "var(--danger)",
-                  background: "var(--bg-sunken)",
-                }}
-              >
-                Could not scan {slimPlan.failed_to_plan.length} session
-                {slimPlan.failed_to_plan.length === 1 ? "" : "s"}:
-                <ul style={{ margin: "var(--sp-4) 0 0", paddingInlineStart: "var(--sp-16)" }}>
-                  {slimPlan.failed_to_plan.slice(0, 10).map(([p, err]) => (
-                    <li key={p} title={err}>
-                      {p}
-                    </li>
-                  ))}
-                  {slimPlan.failed_to_plan.length > 10 && (
-                    <li style={{ color: "var(--fg-faint)" }}>
-                      … and {slimPlan.failed_to_plan.length - 10} more
-                    </li>
-                  )}
-                </ul>
-              </div>
-            )}
-          </div>
+                  Could not scan {slimPlan.failed_to_plan.length} session
+                  {slimPlan.failed_to_plan.length === 1 ? "" : "s"}:
+                  <ul style={{ margin: "var(--sp-4) 0 0", paddingInlineStart: "var(--sp-16)" }}>
+                    {slimPlan.failed_to_plan.slice(0, 10).map(([p, err]) => (
+                      <li key={p} title={err}>
+                        {p}
+                      </li>
+                    ))}
+                    {slimPlan.failed_to_plan.length > 10 && (
+                      <li style={{ color: "var(--fg-faint)" }}>
+                        … and {slimPlan.failed_to_plan.length - 10} more
+                      </li>
+                    )}
+                  </ul>
+                </div>
+              ) : null
+            }
+          />
         )}
       </div>
     </section>
   );
 }
 
-function formatSize(bytes: number): string {
-  if (bytes >= 1_000_000_000) return `${(bytes / 1_000_000_000).toFixed(1)} GB`;
-  if (bytes >= 1_000_000) return `${(bytes / 1_000_000).toFixed(1)} MB`;
-  if (bytes >= 1000) return `${(bytes / 1000).toFixed(1)} KB`;
-  return `${bytes} B`;
-}
