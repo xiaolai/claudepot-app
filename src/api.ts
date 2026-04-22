@@ -39,6 +39,9 @@ import type {
   SlimOptsInput,
   SlimPlan,
   TrashListing,
+  ExportFormatInput,
+  RedactionPolicyInput,
+  GithubTokenStatus,
 } from "./types";
 
 export const api = {
@@ -305,6 +308,38 @@ export const api = {
     invoke<number>("session_trash_empty", {
       olderThanSecs: olderThanSecs ?? null,
     }),
+
+  // ---------- Export preview / share (Phase 3) ----------
+  /** Pure preview — identical to what a file export would write. */
+  sessionExportPreview: (
+    target: string,
+    format: ExportFormatInput,
+    policy?: RedactionPolicyInput,
+  ) =>
+    invoke<string>("session_export_preview", {
+      target,
+      format,
+      policy: policy ?? null,
+    }),
+  /** Start a gist upload; returns an op_id. */
+  sessionShareGistStart: (
+    target: string,
+    format: ExportFormatInput,
+    policy: RedactionPolicyInput | undefined,
+    isPublic: boolean,
+  ) =>
+    invoke<string>("session_share_gist_start", {
+      target,
+      format,
+      policy: policy ?? null,
+      public: isPublic,
+    }),
+  /** GitHub PAT management — last4 is the only value that ever crosses. */
+  settingsGithubTokenGet: () =>
+    invoke<GithubTokenStatus>("settings_github_token_get"),
+  settingsGithubTokenSet: (value: string) =>
+    invoke<GithubTokenStatus>("settings_github_token_set", { value }),
+  settingsGithubTokenClear: () => invoke<void>("settings_github_token_clear"),
 
   // ---------- Protected paths (Settings → Protected pane) ----------
   /**

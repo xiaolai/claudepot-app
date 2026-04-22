@@ -861,3 +861,27 @@ export interface TrashListing {
   entries: TrashEntry[];
   total_bytes: number;
 }
+
+export type ExportFormatInput =
+  | { kind: "markdown" }
+  | { kind: "markdown_slim" }
+  | { kind: "json" }
+  | { kind: "html"; no_js?: boolean };
+
+export type PathStrategyInput =
+  | { kind: "off" }
+  | { kind: "relative"; root: string }
+  | { kind: "hash" };
+
+export interface RedactionPolicyInput {
+  anthropic_keys?: boolean;
+  paths?: PathStrategyInput;
+  emails?: boolean;
+  env_assignments?: boolean;
+  custom_regex?: string[];
+}
+
+export interface GithubTokenStatus {
+  present: boolean;
+  last4: string | null;
+}

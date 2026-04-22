@@ -221,6 +221,11 @@ pub fn run() {
             commands::session_trash_list,
             commands::session_trash_restore,
             commands::session_trash_empty,
+            commands::session_export_preview,
+            commands::session_share_gist_start,
+            commands::settings_github_token_get,
+            commands::settings_github_token_set,
+            commands::settings_github_token_clear,
         ])
         .run(tauri::generate_context!())
         .unwrap_or_else(|e| {
