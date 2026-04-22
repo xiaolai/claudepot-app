@@ -684,6 +684,11 @@ export interface SearchHit {
   snippet: string;
   match_offset: number;
   last_ts: string | null;
+  /**
+   * Relevance score in (0, 1]. Higher = better.
+   * 1.0 phrase match · 0.7 word-prefix · 0.4 substring.
+   */
+  score: number;
 }
 
 export interface RepositoryGroup {
