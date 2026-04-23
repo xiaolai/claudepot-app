@@ -12,6 +12,7 @@ pub mod mask;
 pub mod merge;
 pub mod model;
 pub mod parse;
+pub mod plugin_base;
 pub mod policy;
 pub mod provenance;
 pub mod redacted_claude_json;

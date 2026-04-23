@@ -335,6 +335,79 @@ fn walk_memory_dir(dir: &Path, out: &mut Vec<FileNode>) {
     }
 }
 
+/// Enabled plugin scan (marketplaces + builtins). Returns a list of
+/// per-plugin file nodes (manifest + settings) for display, plus a
+/// `Vec<plugin_base::Plugin>` the merge cascade will consume.
+pub fn collect_plugins() -> (Vec<FileNode>, Vec<crate::config_view::plugin_base::Plugin>) {
+    use crate::config_view::plugin_base::{load_plugin_manifest, load_plugin_settings, Plugin, PluginSourceDisplay};
+
+    let home = claude_config_dir();
+    let root = home.join("plugins").join("repos");
+    let mut files = Vec::new();
+    let mut plugins = Vec::new();
+    let Ok(rd) = std::fs::read_dir(&root) else {
+        return (files, plugins);
+    };
+    for marketplace in rd.flatten() {
+        if !marketplace.path().is_dir() {
+            continue;
+        }
+        let Ok(plug_rd) = std::fs::read_dir(marketplace.path()) else {
+            continue;
+        };
+        for plug in plug_rd.flatten() {
+            let plug_root = plug.path();
+            if !plug_root.is_dir() {
+                continue;
+            }
+            let manifest = match load_plugin_manifest(&plug_root) {
+                Ok(m) => m,
+                Err(_) => continue,
+            };
+            let settings = load_plugin_settings(&plug_root);
+            let id = plug
+                .file_name()
+                .to_string_lossy()
+                .into_owned();
+            let marketplace_name = marketplace
+                .file_name()
+                .to_string_lossy()
+                .into_owned();
+
+            // Emit the manifest node for UI.
+            let manifest_path = if plug_root.join("plugin.json").is_file() {
+                plug_root.join("plugin.json")
+            } else {
+                plug_root.join(".claude-plugin").join("plugin.json")
+            };
+            if let Some(f) = maybe_file(
+                manifest_path,
+                Kind::Plugin,
+                Scope::Plugin {
+                    id: id.clone(),
+                    source: crate::config_view::model::PluginSource::Marketplace {
+                        spec: format!("{id}@{marketplace_name}"),
+                    },
+                },
+            ) {
+                files.push(f);
+            }
+
+            plugins.push(Plugin {
+                id: id.clone(),
+                root: plug_root,
+                manifest,
+                enabled: true,
+                settings,
+                source: PluginSourceDisplay::Marketplace {
+                    spec: format!("{id}@{marketplace_name}"),
+                },
+            });
+        }
+    }
+    (files, plugins)
+}
+
 /// Managed settings composite — `managed-settings.json` + any drop-ins
 /// under `managed-settings.d/`. Surfaces one `FileNode` per file so the
 /// user can inspect each contributor; the effective composite is resolved
@@ -563,6 +636,23 @@ pub fn assemble_tree(cwd: &Path) -> ConfigTree {
             },
             "Policy (managed-settings)",
             policy_files.into_iter().map(Node::File).collect(),
+        ));
+    }
+
+    let (plugin_files, _plugins) = collect_plugins();
+    if !plugin_files.is_empty() {
+        // Group under a single Plugin scope for the tree — per-plugin
+        // breakdown lives inside plugin renderers.
+        scopes.push(scope_node(
+            "scope:plugins",
+            Scope::Plugin {
+                id: "all".to_string(),
+                source: crate::config_view::model::PluginSource::Marketplace {
+                    spec: "all".to_string(),
+                },
+            },
+            "Plugins",
+            plugin_files.into_iter().map(Node::File).collect(),
         ));
     }
 
