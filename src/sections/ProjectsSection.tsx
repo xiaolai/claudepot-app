@@ -230,9 +230,9 @@ export function ProjectsSection({
                 glyph={NF.refresh}
                 glyphColor="var(--fg-muted)"
                 onClick={refresh}
-                title="Refresh (⌘R)"
+                title="Refresh project list (⌘R)"
               >
-                Refresh
+                Refresh projects
               </Button>
             </>
           )

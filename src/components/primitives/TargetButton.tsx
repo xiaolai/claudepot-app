@@ -20,6 +20,11 @@ interface TargetButtonProps {
   menu?: ContextMenuItem[];
   /** Override the default aria-label. */
   "aria-label"?: string;
+  /** Short reason rendered as a caption underneath the button when
+   *  the state is `disabled`. Honors design.md: disabled buttons
+   *  state their reason inline, not via a tooltip. Keep it under
+   *  ~24 characters — longer copy belongs in an AnomalyBanner. */
+  disabledReason?: string;
 }
 
 /**
@@ -51,6 +56,7 @@ export function TargetButton({
   primaryTitle,
   menu,
   "aria-label": ariaLabel,
+  disabledReason,
 }: TargetButtonProps) {
   const chevronRef = useRef<HTMLButtonElement>(null);
   const [menuPos, setMenuPos] = useState<{ x: number; y: number } | null>(null);
@@ -58,6 +64,7 @@ export function TargetButton({
   const paint = paintFor(state);
   const hasMenu = !!menu && menu.length > 0;
   const bodyInert = state === "active" || state === "disabled" || !onPrimary;
+  const showCaption = state === "disabled" && !!disabledReason;
 
   const toggleMenu = () => {
     if (menuPos) {
@@ -80,6 +87,14 @@ export function TargetButton({
 
   return (
     <>
+      <span
+        style={{
+          display: "inline-flex",
+          flexDirection: "column",
+          alignItems: "stretch",
+          gap: "var(--sp-2)",
+        }}
+      >
       <span
         style={{
           display: "inline-flex",
@@ -166,6 +181,21 @@ export function TargetButton({
             </button>
           </>
         )}
+      </span>
+      {showCaption && (
+        <span
+          role="note"
+          style={{
+            fontSize: "var(--fs-2xs)",
+            color: "var(--fg-faint)",
+            textAlign: "center",
+            letterSpacing: "0.02em",
+            lineHeight: 1.2,
+          }}
+        >
+          {disabledReason}
+        </span>
+      )}
       </span>
       {menuPos && menu && (
         <ContextMenu

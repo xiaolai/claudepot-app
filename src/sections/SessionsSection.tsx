@@ -271,9 +271,9 @@ export function SessionsSection(props: SessionsSectionProps = {}) {
               glyph={NF.refresh}
               glyphColor="var(--fg-muted)"
               onClick={refresh}
-              title="Refresh (⌘R)"
+              title="Refresh session list (⌘R)"
             >
-              Refresh
+              Refresh sessions
             </Button>
           )
         }
