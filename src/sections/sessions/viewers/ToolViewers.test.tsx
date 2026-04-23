@@ -6,20 +6,28 @@ import { ToolExecutionView } from "./index";
 import { computeDiff } from "./toolInput";
 
 function mk(overrides: Partial<LinkedTool>): LinkedTool {
-  return {
+  const base: LinkedTool = {
     tool_use_id: "toolu_test01",
     tool_name: "Read",
     model: null,
     call_ts: null,
     input_preview: "{}",
+    input_full: "{}",
     result_ts: null,
     result_content: null,
     is_error: false,
     duration_ms: null,
     call_index: 0,
     result_index: null,
-    ...overrides,
   };
+  // If the override supplied `input_preview` but not `input_full`,
+  // mirror it so the fixture stays internally consistent (real
+  // backend events guarantee `full` is a superset of `preview`).
+  const merged = { ...base, ...overrides };
+  if (overrides.input_preview !== undefined && overrides.input_full === undefined) {
+    merged.input_full = overrides.input_preview;
+  }
+  return merged;
 }
 
 describe("Edit viewer", () => {

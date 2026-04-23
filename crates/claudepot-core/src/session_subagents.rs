@@ -601,18 +601,20 @@ mod tests {
             &[&user_line("2026-04-10T10:00:00Z", "go", "S1")],
         );
         let mut agents = resolve_subagents(tmp.path(), "-r", "S1").unwrap();
+        let parent_input = json!({
+            "subagent_type": "Explore",
+            "description": "Find thing",
+            "agent_id": "aaa",
+        })
+        .to_string();
         let parent_events = vec![SessionEvent::AssistantToolUse {
             ts: None,
             uuid: None,
             model: None,
             tool_name: "Task".into(),
             tool_use_id: "toolu_parent".into(),
-            input_preview: json!({
-                "subagent_type": "Explore",
-                "description": "Find thing",
-                "agent_id": "aaa",
-            })
-            .to_string(),
+            input_preview: parent_input.clone(),
+            input_full: parent_input,
         }];
         link_parent_tasks(&parent_events, &mut agents);
         assert_eq!(agents[0].parent_task_id.as_deref(), Some("toolu_parent"));
@@ -637,6 +639,7 @@ mod tests {
             tool_name: "Task".into(),
             tool_use_id: "toolu_only".into(),
             input_preview: r#"{"subagent_type":"Plan","description":"Plan it"}"#.into(),
+            input_full: r#"{"subagent_type":"Plan","description":"Plan it"}"#.into(),
         }];
         link_parent_tasks(&parent_events, &mut agents);
         assert_eq!(agents[0].parent_task_id.as_deref(), Some("toolu_only"));
@@ -661,6 +664,7 @@ mod tests {
                 tool_name: "Task".into(),
                 tool_use_id: "call_outer".into(),
                 input_preview: r#"{"description":"X"}"#.into(),
+                input_full: r#"{"description":"X"}"#.into(),
             },
             SessionEvent::UserToolResult {
                 ts: None,

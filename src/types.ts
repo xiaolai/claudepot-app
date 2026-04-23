@@ -503,7 +503,10 @@ export type SessionEvent =
       model: string | null;
       tool_name: string;
       tool_use_id: string;
+      /** Trimmed, newline-collapsed, 240-char cap. Use for display. */
       input_preview: string;
+      /** Raw JSON of the tool input. Use for substring search only. */
+      input_full: string;
     }
   | {
       kind: "assistantThinking";
@@ -576,7 +579,10 @@ export interface LinkedTool {
   tool_name: string;
   model: string | null;
   call_ts: string | null;
+  /** Trimmed, newline-collapsed, 240-char cap. Use for display. */
   input_preview: string;
+  /** Raw JSON of the tool input. Use for substring search only. */
+  input_full: string;
   result_ts: string | null;
   result_content: string | null;
   is_error: boolean;

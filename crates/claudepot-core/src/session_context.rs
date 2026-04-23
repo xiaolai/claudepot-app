@@ -469,6 +469,7 @@ mod tests {
             tool_name: name.into(),
             tool_use_id: id.into(),
             input_preview: preview.into(),
+            input_full: preview.into(),
         }
     }
 

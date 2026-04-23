@@ -150,10 +150,28 @@ fn find_case_insensitive(haystack: &str, needle_lower: &str) -> Option<(usize, u
     let lower_off = lower.find(needle_lower)?;
     let lower_end = lower_off + needle_lower.len();
     let src_start = src_byte_of_lower_byte[lower_off];
-    let src_end = if lower_end >= src_byte_of_lower_byte.len() {
-        haystack.len()
+    // The last contributing lower byte belongs to some source char;
+    // if that source char has an *expanding* lowercase fold (e.g. `İ`
+    // → `i\u{307}`) the plain lookup `src_byte_of_lower_byte[lower_end]`
+    // can return the *start* byte of the same source char instead of
+    // the byte after it, collapsing the span. Walk forward past every
+    // lower byte that still maps to that same source char so `src_end`
+    // points to the start of the NEXT source char (or past-the-end).
+    let src_end = if lower_end == 0 {
+        src_start
     } else {
-        src_byte_of_lower_byte[lower_end]
+        let last_contributing_src = src_byte_of_lower_byte[lower_end - 1];
+        let mut k = lower_end;
+        while k < src_byte_of_lower_byte.len()
+            && src_byte_of_lower_byte[k] == last_contributing_src
+        {
+            k += 1;
+        }
+        if k >= src_byte_of_lower_byte.len() {
+            haystack.len()
+        } else {
+            src_byte_of_lower_byte[k]
+        }
     };
     Some((src_start, src_end))
 }
@@ -233,54 +251,85 @@ fn scan_file(
     Ok(())
 }
 
-/// Pull out every user text block in a single turn (skipping
-/// tool_result entries). Joined with a space so a later match in the
-/// same turn is still reachable.
+/// Pull every searchable byte out of a user turn. Includes plain text
+/// blocks **and** tool_result bodies (string or array-of-text shapes),
+/// because in tool-heavy projects the query term often lives only in
+/// command output — a scanner that ignores tool_result makes most of
+/// the corpus invisible. Blocks are joined with a space so a later
+/// match in the same turn is still reachable.
 fn extract_user_text(v: &serde_json::Value) -> Option<String> {
     let msg = v.get("message")?;
     match msg.get("content")? {
         serde_json::Value::String(s) => Some(s.clone()),
         serde_json::Value::Array(parts) => {
-            let joined: String = parts
-                .iter()
-                .filter_map(|p| {
-                    if p.get("type").and_then(|t| t.as_str()) == Some("text") {
-                        p.get("text").and_then(|t| t.as_str())
-                    } else {
-                        None
+            let mut pieces: Vec<String> = Vec::new();
+            for p in parts {
+                let kind = p.get("type").and_then(|t| t.as_str()).unwrap_or("");
+                match kind {
+                    "text" => {
+                        if let Some(t) = p.get("text").and_then(|t| t.as_str()) {
+                            pieces.push(t.to_string());
+                        }
                     }
-                })
-                .collect::<Vec<_>>()
-                .join(" ");
-            if joined.is_empty() {
+                    "tool_result" => match p.get("content") {
+                        Some(serde_json::Value::String(s)) => pieces.push(s.clone()),
+                        Some(serde_json::Value::Array(inner)) => {
+                            for ip in inner {
+                                if let Some(t) = ip.get("text").and_then(|t| t.as_str()) {
+                                    pieces.push(t.to_string());
+                                }
+                            }
+                        }
+                        _ => {}
+                    },
+                    _ => {}
+                }
+            }
+            if pieces.is_empty() {
                 None
             } else {
-                Some(joined)
+                Some(pieces.join(" "))
             }
         }
         _ => None,
     }
 }
 
-/// Concatenate the assistant's final text blocks for one turn.
+/// Pull every searchable byte out of an assistant turn. Covers plain
+/// `text` blocks, `thinking` (the model's internal reasoning), and
+/// `tool_use.input` (serialized as JSON so Bash commands, file paths,
+/// and other tool arguments are reachable by substring). The parity
+/// target is `search_events`, which already surfaces these shapes for
+/// in-memory callers.
 fn extract_assistant_text(v: &serde_json::Value) -> Option<String> {
     let msg = v.get("message")?;
     let parts = msg.get("content").and_then(|c| c.as_array())?;
-    let joined: String = parts
-        .iter()
-        .filter_map(|p| {
-            if p.get("type").and_then(|t| t.as_str()) == Some("text") {
-                p.get("text").and_then(|t| t.as_str())
-            } else {
-                None
+    let mut pieces: Vec<String> = Vec::new();
+    for p in parts {
+        let kind = p.get("type").and_then(|t| t.as_str()).unwrap_or("");
+        match kind {
+            "text" => {
+                if let Some(t) = p.get("text").and_then(|t| t.as_str()) {
+                    pieces.push(t.to_string());
+                }
             }
-        })
-        .collect::<Vec<_>>()
-        .join(" ");
-    if joined.is_empty() {
+            "thinking" => {
+                if let Some(t) = p.get("thinking").and_then(|t| t.as_str()) {
+                    pieces.push(t.to_string());
+                }
+            }
+            "tool_use" => {
+                if let Some(input) = p.get("input") {
+                    pieces.push(input.to_string());
+                }
+            }
+            _ => {}
+        }
+    }
+    if pieces.is_empty() {
         None
     } else {
-        Some(joined)
+        Some(pieces.join(" "))
     }
 }
 
@@ -461,6 +510,106 @@ mod tests {
     }
 
     #[test]
+    fn search_matches_tool_result_string_content() {
+        // A CC user message whose only content is a tool_result with a
+        // plain string body — the shape emitted for Bash/Read output
+        // whose stdout fits in one string. Before the fix, the scanner
+        // skipped these entirely, so any session whose mention of the
+        // query only appeared in command output was invisible.
+        let tmp = TempDir::new().unwrap();
+        let path = tmp.path().join("tr_str.jsonl");
+        write_jsonl(
+            &path,
+            &[
+                r#"{"type":"user","message":{"role":"user","content":"unrelated intro"},"sessionId":"s"}"#,
+                r#"{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"t1","content":"src-tauri/src/commands.rs line 42","is_error":false}]},"sessionId":"s"}"#,
+            ],
+        );
+        let hits = search_rows(
+            &[row("s", "-r", path, Some("unrelated"), None)],
+            "tauri",
+            10,
+        )
+        .unwrap();
+        assert_eq!(hits.len(), 1);
+        assert!(hits[0].snippet.contains("tauri"));
+    }
+
+    #[test]
+    fn search_matches_tool_result_array_content() {
+        // A tool_result with array-shaped content (CC emits this when
+        // the tool stitches together multiple text blocks, e.g. a Read
+        // that returns line-numbered text). Match the inner `text` of
+        // any part.
+        let tmp = TempDir::new().unwrap();
+        let path = tmp.path().join("tr_arr.jsonl");
+        write_jsonl(
+            &path,
+            &[
+                r#"{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"t1","content":[{"type":"text","text":"nothing to see"},{"type":"text","text":"pnpm tauri dev finished"}],"is_error":false}]},"sessionId":"s"}"#,
+            ],
+        );
+        let hits = search_rows(
+            &[row("s", "-r", path, None, None)],
+            "tauri",
+            10,
+        )
+        .unwrap();
+        assert_eq!(hits.len(), 1);
+        assert!(hits[0].snippet.contains("tauri"));
+    }
+
+    #[test]
+    fn search_matches_assistant_tool_use_input() {
+        // The assistant invokes Bash with `pnpm tauri dev` as the
+        // command argument. "tauri" never appears in any plain text
+        // block, only inside the serialized tool input. Before the fix
+        // this session was invisible to the scanner.
+        let tmp = TempDir::new().unwrap();
+        let path = tmp.path().join("tu.jsonl");
+        write_jsonl(
+            &path,
+            &[
+                r#"{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"let me check"},{"type":"tool_use","id":"t1","name":"Bash","input":{"command":"pnpm tauri dev","description":"start dev server"}}]},"sessionId":"s"}"#,
+            ],
+        );
+        let hits = search_rows(
+            &[row("s", "-r", path, None, None)],
+            "tauri",
+            10,
+        )
+        .unwrap();
+        assert_eq!(hits.len(), 1);
+        assert_eq!(hits[0].role, "assistant");
+        assert!(hits[0].snippet.contains("tauri"));
+    }
+
+    #[test]
+    fn search_matches_assistant_thinking_block() {
+        // Assistant `thinking` blocks carry the model's internal
+        // reasoning. Users searching for a topic they mulled over want
+        // these to count — the in-memory `search_events` helper already
+        // includes them, so `search_rows` must match.
+        let tmp = TempDir::new().unwrap();
+        let path = tmp.path().join("think.jsonl");
+        write_jsonl(
+            &path,
+            &[
+                r#"{"type":"assistant","message":{"role":"assistant","content":[{"type":"thinking","thinking":"I should inspect the tauri config next"}]},"sessionId":"s"}"#,
+            ],
+        );
+        let hits = search_rows(
+            &[row("s", "-r", path, None, None)],
+            "tauri",
+            10,
+        )
+        .unwrap();
+        assert_eq!(hits.len(), 1);
+        assert_eq!(hits[0].role, "assistant");
+        assert!(hits[0].snippet.contains("tauri"));
+    }
+
+    #[test]
     fn match_can_come_from_assistant_text() {
         let tmp = TempDir::new().unwrap();
         let path = tmp.path().join("s.jsonl");
@@ -635,6 +784,65 @@ mod tests {
         .unwrap();
         assert_eq!(hits.len(), 1);
         assert!(hits[0].snippet.contains("widget"));
+    }
+
+    #[test]
+    fn search_spans_the_full_source_char_when_match_ends_mid_expansion_fold() {
+        // Lowercase of `İ` (U+0130) is `i\u{307}` — 2 lowercase chars
+        // from a single source char. Searching `"xi"` inside `"Xİ …"`
+        // finds the "xi" in the lowered haystack; the match's end
+        // byte sits on the first byte of the combining-mark expansion,
+        // which belongs to the SAME source char as its neighbor.
+        //
+        // The remap must treat the source char as atomic: the span
+        // must extend to the byte AFTER `İ`, not stop inside it. If
+        // the span collapses to just `"X"` (1 byte) then
+        // `classify_match` sees `İ` as the "after" char (alphanumeric)
+        // and scores SUBSTRING instead of PHRASE, which mis-ranks the
+        // hit against other substring matches.
+        //
+        // The text here ends right after `İ` so the correct boundary
+        // is "no alphanumeric follows" → SCORE_PHRASE.
+        let text_only_phrase = "Xİ"; // X + İ
+        let events = vec![SessionEvent::UserText {
+            ts: None,
+            uuid: None,
+            text: text_only_phrase.into(),
+        }];
+        let hits = search_events(&events, "xi");
+        assert_eq!(hits.len(), 1);
+        // With the buggy remap the span is 1 byte (`X`) and
+        // classify_match sees `İ` trailing the match → SUBSTRING.
+        // A correct remap spans both `X` and `İ` (3 bytes total) →
+        // the remaining haystack is empty → PHRASE.
+        //
+        // Go through the rows API so `classify_match` actually runs;
+        // `search_events` skips scoring.
+        let tmp = TempDir::new().unwrap();
+        let path = tmp.path().join("fold.jsonl");
+        write_jsonl(
+            &path,
+            &[
+                &format!(
+                    r#"{{"type":"user","message":{{"role":"user","content":"{}"}},"sessionId":"s"}}"#,
+                    text_only_phrase
+                ),
+            ],
+        );
+        let hits = search_rows(
+            &[row("s", "-r", path, None, ts("2026-04-10T10:00:00Z"))],
+            "xi",
+            10,
+        )
+        .unwrap();
+        assert_eq!(hits.len(), 1);
+        // 1.0 == SCORE_PHRASE. An off-by-one span collapse produces
+        // 0.4 (SCORE_SUBSTRING); an off-by-one prefix keeps 0.7.
+        assert!(
+            (hits[0].score - 1.0).abs() < f32::EPSILON,
+            "expected phrase score 1.0, got {}",
+            hits[0].score
+        );
     }
 
     #[test]

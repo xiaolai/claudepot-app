@@ -10,7 +10,6 @@
 //! The base URL is injectable so test code can point at a mock server
 //! without stubbing the whole client.
 
-use std::fmt;
 use std::time::Duration;
 
 use serde::{Deserialize, Serialize};
@@ -48,14 +47,6 @@ pub fn scrub_token(s: &str, token: &str) -> String {
 pub struct GistResult {
     pub url: String,
     pub id: String,
-}
-
-struct Progress<'a>(&'a dyn ProgressSink);
-
-impl fmt::Debug for Progress<'_> {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str("Progress")
-    }
 }
 
 /// Upload `content` as a single-file gist named `filename`.

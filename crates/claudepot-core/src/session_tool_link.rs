@@ -28,6 +28,10 @@ pub struct LinkedTool {
     pub call_ts: Option<DateTime<Utc>>,
     /// Truncated preview of the input JSON.
     pub input_preview: String,
+    /// Raw JSON of the tool input, untruncated. Feeds the detail-level
+    /// substring search; never rendered verbatim.
+    #[serde(default)]
+    pub input_full: String,
     /// When the matching result arrived. `None` → orphaned call.
     pub result_ts: Option<DateTime<Utc>>,
     /// Raw result payload (string form). `None` → orphaned call.
@@ -88,6 +92,7 @@ pub fn link_tools(events: &[SessionEvent]) -> Vec<LinkedTool> {
             tool_name,
             tool_use_id,
             input_preview,
+            input_full,
             ..
         } = ev
         {
@@ -109,6 +114,7 @@ pub fn link_tools(events: &[SessionEvent]) -> Vec<LinkedTool> {
                 model: model.clone(),
                 call_ts: *ts,
                 input_preview: input_preview.clone(),
+                input_full: input_full.clone(),
                 result_ts,
                 result_content,
                 is_error,
@@ -233,13 +239,15 @@ mod tests {
     }
 
     fn tool_use(id: &str, name: &str, t: Option<DateTime<Utc>>) -> SessionEvent {
+        let input = format!("{{\"for\":\"{id}\"}}");
         SessionEvent::AssistantToolUse {
             ts: t,
             uuid: None,
             model: Some("claude-opus-4-7".into()),
             tool_name: name.into(),
             tool_use_id: id.into(),
-            input_preview: format!("{{\"for\":\"{id}\"}}"),
+            input_preview: input.clone(),
+            input_full: input,
         }
     }
 
