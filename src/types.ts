@@ -1014,3 +1014,58 @@ export interface GithubTokenStatus {
    */
   env_override: boolean;
 }
+
+// ---------- Config section --------------------------------------------
+
+/** Matches `claudepot_core::config_view::model::Kind` serde string form. */
+export type ConfigKind =
+  | "claude_md"
+  | "settings"
+  | "settings_local"
+  | "managed_settings"
+  | "redacted_user_config"
+  | "mcp_json"
+  | "managed_mcp_json"
+  | "agent"
+  | "skill"
+  | "command"
+  | "rule"
+  | "hook"
+  | "memory"
+  | "memory_index"
+  | "plugin"
+  | "keybindings"
+  | "statusline"
+  | "effective_settings"
+  | "effective_mcp"
+  | "other";
+
+export interface ConfigTreeDto {
+  scopes: unknown[];
+  cwd: string;
+  project_root: string;
+  memory_slug: string;
+  memory_slug_lossy: boolean;
+}
+
+export interface EditorCandidateDto {
+  id: string;
+  label: string;
+  binary_path: string | null;
+  bundle_id: string | null;
+  launch_kind: "direct" | "macos-open-a" | "env-editor" | "system-handler";
+  detected_via:
+    | "path-binary"
+    | "macos-app"
+    | "windows-registry"
+    | "linux-desktop-file"
+    | "env-var"
+    | "system-default"
+    | "user-picked";
+  supports_kinds: ConfigKind[] | null;
+}
+
+export interface EditorDefaultsDto {
+  by_kind: Record<string, string>;
+  fallback: string;
+}

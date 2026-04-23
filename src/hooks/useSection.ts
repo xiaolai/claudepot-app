@@ -138,6 +138,18 @@ export function useSection<Id extends string>(
     const onKey = (e: KeyboardEvent) => {
       const mod = e.metaKey || e.ctrlKey;
       if (!mod || e.shiftKey || e.altKey) return;
+      // rules/design.md: shortcuts never fire while an input is
+      // focused or a modal is open.
+      const el = document.activeElement as HTMLElement | null;
+      const tag = el?.tagName?.toLowerCase();
+      const editable =
+        tag === "input" ||
+        tag === "textarea" ||
+        tag === "select" ||
+        el?.isContentEditable === true ||
+        el?.getAttribute?.("contenteditable") === "true";
+      if (editable) return;
+      if (document.querySelector('[role="dialog"]')) return;
       const n = Number.parseInt(e.key, 10);
       if (!Number.isInteger(n) || n < 1 || n > 9) return;
       const target = ids[n - 1];
