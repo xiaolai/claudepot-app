@@ -17,6 +17,12 @@ CLI and Desktop are independent. Never couple them.
 Credential, Profile, Usage are internal — not user-facing nouns.
 Do not add new top-level nouns without explicit discussion.
 
+**Domain nouns vs tool surfaces.** The four nouns (account, cli,
+desktop, project) describe the user's mental model. Read-only
+introspection surfaces (Sessions, Config) are presentation layers
+over those nouns and CC's filesystem. They do not appear in
+`claudepot-core` as domain types.
+
 ## Crate separation
 
 - `claudepot-core` — pure Rust library. NO Tauri dependency. All

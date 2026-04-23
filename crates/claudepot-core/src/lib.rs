@@ -5,6 +5,7 @@ pub mod account;
 pub mod account_verification;
 pub mod blob;
 pub mod cli_backend;
+pub mod config_view;
 pub mod desktop_backend;
 pub mod desktop_identity;
 pub mod desktop_lock;
