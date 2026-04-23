@@ -36,6 +36,7 @@ export function AccountsSection({
     pushToast,
     status,
     accounts,
+    ccIdentity,
     loadError,
     refresh,
     actions,
@@ -304,6 +305,18 @@ export function AccountsSection({
         onContextMenu={handleContextMenu}
         cliHandlers={cliHandlers}
         desktopHandlers={desktopHandlers}
+        ccIdentity={ccIdentity}
+        onAdd={() => setShowAdd(true)}
+        onAdoptCurrent={async () => {
+          try {
+            const outcome = await api.accountAddFromCurrent();
+            pushToast("info", `Adopted ${outcome.email}.`);
+            await refresh();
+          } catch (e) {
+            const msg = e instanceof Error ? e.message : String(e);
+            pushToast("error", `Couldn't adopt current session: ${msg}`);
+          }
+        }}
       />
 
       <AddAccountModal

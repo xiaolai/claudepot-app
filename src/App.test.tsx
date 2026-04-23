@@ -178,7 +178,10 @@ describe("App shell — paper-mono", () => {
 
     await screen.findByText(/No accounts yet/i);
     const user = userEvent.setup();
-    const addBtn = screen.getByRole("button", { name: /Add account/i });
+    // Two "Add account" buttons exist: one in the header and one in
+    // the empty-state CTA. Either opens the same modal — the header
+    // comes first, so click that.
+    const [addBtn] = screen.getAllByRole("button", { name: /Add account/i });
     await user.click(addBtn);
 
     const dialog = await screen.findByRole("dialog");

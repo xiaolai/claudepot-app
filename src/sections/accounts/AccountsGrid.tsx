@@ -1,8 +1,9 @@
 import { type MouseEvent } from "react";
+import { Button } from "../../components/primitives/Button";
 import { Glyph } from "../../components/primitives/Glyph";
 import { Input } from "../../components/primitives/Input";
 import { NF } from "../../icons";
-import type { AccountSummary, AppStatus, UsageMap } from "../../types";
+import type { AccountSummary, AppStatus, CcIdentity, UsageMap } from "../../types";
 import { AccountCard } from "./AccountCard";
 import type {
   CliTargetHandlers,
@@ -21,6 +22,18 @@ interface Props {
   onContextMenu: (e: MouseEvent, a: AccountSummary) => void;
   cliHandlers: CliTargetHandlers;
   desktopHandlers: DesktopTargetHandlers;
+  /** Claude Code's current signed-in identity, used to pre-fill an
+   *  adopt CTA in the empty state. When present with an email and no
+   *  error, the first-run prompt offers a single click to register
+   *  that session as a Claudepot account. */
+  ccIdentity?: CcIdentity | null;
+  /** Fires the adopt flow — imports CC's current credentials into a
+   *  new Claudepot account. Wired to `api.accountAddFromCurrent` by
+   *  the section. */
+  onAdoptCurrent?: () => void;
+  /** Opens the AddAccountModal. Used by the empty state when no CC
+   *  session is available to adopt. */
+  onAdd: () => void;
 }
 
 /**
@@ -40,7 +53,17 @@ export function AccountsGrid({
   onContextMenu,
   cliHandlers,
   desktopHandlers,
+  ccIdentity,
+  onAdoptCurrent,
+  onAdd,
 }: Props) {
+  // Pre-fill adoption when CC is already signed in. `error` null +
+  // non-empty email covers the 0- or 1-account case where Claudepot
+  // opens on a clean profile but the user's CLI is already authed.
+  const ccSignedInEmail =
+    ccIdentity && !ccIdentity.error && ccIdentity.email
+      ? ccIdentity.email
+      : null;
   return (
     <>
       {/* Filter input only earns its row when there are enough
@@ -141,23 +164,75 @@ export function AccountsGrid({
               fontSize: "var(--fs-sm)",
               display: "flex",
               flexDirection: "column",
-              gap: "var(--sp-10)",
+              gap: "var(--sp-14)",
               alignItems: "center",
             }}
           >
             <Glyph g={NF.users} size="var(--sp-32)" color="var(--fg-ghost)" />
-            <p style={{ margin: 0 }}>No accounts yet.</p>
             <p
               style={{
                 margin: 0,
-                fontSize: "var(--fs-xs)",
-                color: "var(--fg-faint)",
+                fontSize: "var(--fs-md)",
+                color: "var(--fg)",
+                fontWeight: 500,
               }}
             >
-              {"Click "}
-              <b>Add account</b>
-              {" to import Claude Code's current session."}
+              No accounts yet.
             </p>
+            {ccSignedInEmail ? (
+              <>
+                <p
+                  style={{
+                    margin: 0,
+                    fontSize: "var(--fs-xs)",
+                    color: "var(--fg-muted)",
+                    maxWidth: "var(--content-cap-sm)",
+                  }}
+                >
+                  Claude Code is already signed in as{" "}
+                  <strong style={{ color: "var(--fg)" }}>
+                    {ccSignedInEmail}
+                  </strong>
+                  . Adopt this session as your first Claudepot account?
+                </p>
+                <div
+                  style={{
+                    display: "flex",
+                    gap: "var(--sp-8)",
+                    alignItems: "center",
+                  }}
+                >
+                  <Button
+                    variant="solid"
+                    glyph={NF.check}
+                    onClick={onAdoptCurrent}
+                  >
+                    {`Adopt ${ccSignedInEmail}`}
+                  </Button>
+                  <Button variant="ghost" glyph={NF.plus} onClick={onAdd}>
+                    Add a different account
+                  </Button>
+                </div>
+              </>
+            ) : (
+              <>
+                <p
+                  style={{
+                    margin: 0,
+                    fontSize: "var(--fs-xs)",
+                    color: "var(--fg-muted)",
+                    maxWidth: "var(--content-cap-sm)",
+                  }}
+                >
+                  Claudepot manages multiple Anthropic logins for Claude
+                  Code and Claude Desktop. Sign in with a browser OAuth
+                  flow to get started.
+                </p>
+                <Button variant="solid" glyph={NF.plus} onClick={onAdd}>
+                  Add account
+                </Button>
+              </>
+            )}
           </div>
         )}
       </div>

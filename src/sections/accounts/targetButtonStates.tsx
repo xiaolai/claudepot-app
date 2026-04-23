@@ -54,6 +54,18 @@ export function cliTargetProps(
       ? `Switch CLI to ${a.email}`
       : "Credentials missing — re-login from the menu";
 
+  // Short inline caption shown beneath the button when disabled — the
+  // AnomalyBanner further down the card carries the full explanation.
+  const disabledReason = !healthy
+    ? a.drift
+      ? "Wrong account — re-login"
+      : a.verify_status === "rejected"
+        ? "Rejected — re-login"
+        : a.token_status === "expired"
+          ? "Session expired"
+          : "No credentials — re-login"
+    : undefined;
+
   return {
     icon: NF.terminal,
     label: "CLI",
@@ -61,6 +73,7 @@ export function cliTargetProps(
     onPrimary: state === "available" ? () => h.switchCli(a) : undefined,
     primaryTitle,
     menu,
+    disabledReason,
   };
 }
 
