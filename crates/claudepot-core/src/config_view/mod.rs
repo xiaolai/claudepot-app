@@ -9,6 +9,7 @@ pub mod launcher;
 pub mod mask;
 pub mod model;
 pub mod parse;
+pub mod policy;
 pub mod redacted_claude_json;
 pub mod search;
 
