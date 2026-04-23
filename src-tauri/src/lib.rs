@@ -252,6 +252,8 @@ pub fn run() {
             commands_config::config_open_in_editor_path,
             commands_config::config_search_start,
             commands_config::config_search_cancel,
+            commands_config::config_effective_settings,
+            commands_config::config_effective_mcp,
         ])
         .run(tauri::generate_context!())
         .unwrap_or_else(|e| {

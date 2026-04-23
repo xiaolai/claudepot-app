@@ -1090,6 +1090,45 @@ export interface ConfigSearchSummaryDto {
   cancelled: boolean;
 }
 
+export interface ConfigProvenanceLeafDto {
+  path: string;
+  winner: string;
+  contributors: string[];
+  suppressed: boolean;
+}
+
+export interface ConfigPolicyErrorDto {
+  origin: string;
+  message: string;
+}
+
+export interface ConfigEffectiveSettingsDto {
+  merged: unknown;
+  provenance: ConfigProvenanceLeafDto[];
+  policy_winner: string | null;
+  policy_errors: ConfigPolicyErrorDto[];
+}
+
+export type McpSimulationMode =
+  | "interactive"
+  | "non_interactive"
+  | "skip_permissions";
+
+export interface ConfigEffectiveMcpServerDto {
+  name: string;
+  source_scope: string;
+  contributors: string[];
+  approval: "approved" | "rejected" | "pending" | "auto_approved";
+  approval_reason: string | null;
+  blocked_by: string | null;
+  masked: unknown;
+}
+
+export interface ConfigEffectiveMcpDto {
+  enterprise_lockout: boolean;
+  servers: ConfigEffectiveMcpServerDto[];
+}
+
 export interface EditorCandidateDto {
   id: string;
   label: string;

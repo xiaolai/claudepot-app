@@ -53,8 +53,11 @@ import type {
   ConfigTreeDto,
   ConfigPreviewDto,
   ConfigKind,
+  ConfigEffectiveSettingsDto,
+  ConfigEffectiveMcpDto,
   EditorCandidateDto,
   EditorDefaultsDto,
+  McpSimulationMode,
 } from "./types";
 
 export const api = {
@@ -606,6 +609,15 @@ export const api = {
   ) => invoke<void>("config_search_start", { searchId, query }),
   configSearchCancel: (searchId: string) =>
     invoke<void>("config_search_cancel", { searchId }),
+  configEffectiveSettings: (cwd?: string | null) =>
+    invoke<ConfigEffectiveSettingsDto>("config_effective_settings", {
+      cwd: cwd ?? null,
+    }),
+  configEffectiveMcp: (mode: McpSimulationMode, cwd?: string | null) =>
+    invoke<ConfigEffectiveMcpDto>("config_effective_mcp", {
+      cwd: cwd ?? null,
+      mode,
+    }),
   configListEditors: (force?: boolean) =>
     invoke<EditorCandidateDto[]>("config_list_editors", { force: !!force }),
   configGetEditorDefaults: () =>
