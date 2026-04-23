@@ -7,6 +7,7 @@ import { NF } from "../../icons";
 import type { PruneFilterInput, PrunePlan } from "../../types";
 import { formatSize } from "../projects/format";
 import { CleanupPlanPreview } from "./components/CleanupPlanPreview";
+import { SessionIndexRebuild } from "./components/SessionIndexRebuild";
 import { SlimSubsection } from "./components/SlimSubsection";
 
 /**
@@ -20,11 +21,17 @@ import { SlimSubsection } from "./components/SlimSubsection";
 export function CleanupPane({
   onOpChange,
   onTrashChanged,
+  setToast,
 }: {
   /** Called with the op_id when a prune starts. */
   onOpChange?: (opId: string | null) => void;
   /** Called after a prune is dispatched so the parent can nudge refreshes. */
   onTrashChanged?: () => void;
+  /** Sessions-section toast setter, used by the SessionIndexRebuild
+   *  subsection (the existing prune/slim flows surface errors
+   *  inline). Optional so callers that don't need Rebuild still
+   *  compile. */
+  setToast?: (msg: string) => void;
 }) {
   const [olderThanDays, setOlderThanDays] = useState<string>("");
   const [largerThanMb, setLargerThanMb] = useState<string>("");
@@ -198,6 +205,8 @@ export function CleanupPane({
         onOpChange={onOpChange}
         onTrashChanged={onTrashChanged}
       />
+
+      {setToast && <SessionIndexRebuild setToast={setToast} />}
     </section>
   );
 }

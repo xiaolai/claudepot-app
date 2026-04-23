@@ -426,6 +426,7 @@ export function SessionsSection(props: SessionsSectionProps = {}) {
                 refresh();
                 refreshTrash();
               }}
+              setToast={setToast}
             />
           </div>
           <div style={{ flex: 1, minWidth: 0 }}>
