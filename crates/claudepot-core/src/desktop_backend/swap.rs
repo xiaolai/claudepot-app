@@ -183,6 +183,23 @@ pub async fn switch(
 
     let items = platform.session_items();
 
+    // Windows DPAPI precheck (Phase 6 + Tier 1): if the stored
+    // profile's ciphertext was encrypted under a different DPAPI
+    // master key than the one this Windows session holds, Chromium
+    // will reject the restored cookies/tokens on next launch.
+    // Surface this BEFORE quitting Desktop so the user isn't left
+    // with a dead session. macOS is always Ok — the probe is a
+    // no-op there.
+    match crate::services::desktop_service::check_profile_dpapi_valid(platform, target_id).await {
+        Ok(true) => {}
+        Ok(false) => return Err(DesktopSwapError::DpapiInvalidated),
+        Err(e) => {
+            tracing::warn!(
+                "DPAPI precheck returned error — proceeding optimistically: {e}"
+            );
+        }
+    }
+
     // Quit Desktop if running
     if platform.is_running().await {
         tracing::info!("quitting Claude Desktop...");

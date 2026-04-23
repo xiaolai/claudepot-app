@@ -52,7 +52,24 @@ interface AppStateValue {
   splitBrainPending: AccountSummary | null;
   dismissSplitBrain: () => void;
   confirmSplitBrain: () => void;
+
+  /**
+   * Pending destructive Desktop confirmation. The shell renders
+   * `<DesktopConfirmDialog>` when this is non-null. The three
+   * variants mirror the three destructive-confirm surfaces Codex
+   * flagged in the follow-up review: sign-out, bind-overwrite, and
+   * (future-reserved) swap-with-live-session.
+   */
+  desktopConfirmPending: DesktopConfirmRequest | null;
+  requestDesktopSignOut: () => void;
+  requestDesktopOverwrite: (a: AccountSummary) => void;
+  dismissDesktopConfirm: () => void;
+  confirmDesktopPending: () => void;
 }
+
+export type DesktopConfirmRequest =
+  | { kind: "sign_out" }
+  | { kind: "overwrite_profile"; account: AccountSummary };
 
 const AppStateContext = createContext<AppStateValue | null>(null);
 
@@ -112,6 +129,35 @@ export function AppStateProvider({ children }: { children: ReactNode }) {
     if (target) void actions.useCli(target, true);
   }, [actions, splitBrainPending]);
 
+  const [desktopConfirmPending, setDesktopConfirmPending] =
+    useState<DesktopConfirmRequest | null>(null);
+  const requestDesktopSignOut = useCallback(
+    () => setDesktopConfirmPending({ kind: "sign_out" }),
+    [],
+  );
+  const requestDesktopOverwrite = useCallback(
+    (account: AccountSummary) =>
+      setDesktopConfirmPending({ kind: "overwrite_profile", account }),
+    [],
+  );
+  const dismissDesktopConfirm = useCallback(
+    () => setDesktopConfirmPending(null),
+    [],
+  );
+  const confirmDesktopPending = useCallback(() => {
+    const req = desktopConfirmPending;
+    setDesktopConfirmPending(null);
+    if (!req) return;
+    switch (req.kind) {
+      case "sign_out":
+        void actions.clearDesktopConfirmed(true);
+        break;
+      case "overwrite_profile":
+        void actions.adoptDesktopForce(req.account, true);
+        break;
+    }
+  }, [actions, desktopConfirmPending]);
+
   const value = useMemo<AppStateValue>(
     () => ({
       toasts,
@@ -134,6 +180,11 @@ export function AppStateProvider({ children }: { children: ReactNode }) {
       splitBrainPending,
       dismissSplitBrain,
       confirmSplitBrain,
+      desktopConfirmPending,
+      requestDesktopSignOut,
+      requestDesktopOverwrite,
+      dismissDesktopConfirm,
+      confirmDesktopPending,
     }),
     [
       toasts,
@@ -156,6 +207,11 @@ export function AppStateProvider({ children }: { children: ReactNode }) {
       splitBrainPending,
       dismissSplitBrain,
       confirmSplitBrain,
+      desktopConfirmPending,
+      requestDesktopSignOut,
+      requestDesktopOverwrite,
+      dismissDesktopConfirm,
+      confirmDesktopPending,
     ],
   );
 
