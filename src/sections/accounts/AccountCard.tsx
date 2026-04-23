@@ -1,21 +1,27 @@
-import { type MouseEvent, useState } from "react";
+import { type MouseEvent } from "react";
 import { Avatar, avatarColorFor } from "../../components/primitives/Avatar";
-import { Glyph } from "../../components/primitives/Glyph";
-import { Tag } from "../../components/primitives/Tag";
-import { NF } from "../../icons";
-import type { AccountSummary, UsageEntry } from "../../types";
+import { TargetButton } from "../../components/primitives/TargetButton";
+import type { AccountSummary, AppStatus, UsageEntry } from "../../types";
 import { AnomalyBanner, isAnomaly } from "./AnomalyBanner";
 import { HealthFooter } from "./HealthFooter";
 import { UsageBlock } from "./UsageBlock";
+import {
+  cliTargetProps,
+  desktopTargetProps,
+  type CliTargetHandlers,
+  type DesktopTargetHandlers,
+} from "./targetButtonStates";
 
 interface AccountCardProps {
   account: AccountSummary;
   usageEntry: UsageEntry | null;
+  status: AppStatus;
   /** True while a long op is running against this account (login). */
   loginBusy?: boolean;
-  onRemove: (a: AccountSummary) => void;
   onLogin: (a: AccountSummary) => void;
   onContextMenu?: (e: MouseEvent, a: AccountSummary) => void;
+  cliHandlers: CliTargetHandlers;
+  desktopHandlers: DesktopTargetHandlers;
 }
 
 /**
@@ -24,22 +30,21 @@ interface AccountCardProps {
  *   - bound to a swap target: `--bw-accent` accent left border
  *   - has anomaly: `--bw-accent` warn left border + --warn full border
  *
- * The Remove button is hover-revealed and pinned top-right. The
- * anomaly banner includes its own Re-login CTA that fires the same
- * `onLogin` handler exposed at the card level.
+ * The top-right rail carries two `TargetButton`s — CLI + Desktop —
+ * which encode both the slot's activeness *and* the binding verbs.
+ * The AnomalyBanner still shows up for drift / rejected / bad creds
+ * and fires the same `onLogin` handler.
  */
 export function AccountCard({
   account: a,
   usageEntry,
+  status,
   loginBusy,
-  onRemove,
   onLogin,
   onContextMenu,
+  cliHandlers,
+  desktopHandlers,
 }: AccountCardProps) {
-  const [hovered, setHovered] = useState(false);
-  const [removeFocused, setRemoveFocused] = useState(false);
-  const removeVisible = hovered || removeFocused;
-
   const bound = a.is_cli_active || a.is_desktop_active;
   const severe = isAnomaly(a);
 
@@ -54,12 +59,12 @@ export function AccountCard({
       : "var(--bw-hair) solid var(--line)";
 
   const color = avatarColorFor(a.email);
+  const cliProps = cliTargetProps(a, cliHandlers);
+  const desktopProps = desktopTargetProps(a, status, desktopHandlers);
 
   return (
     <article
       data-account-uuid={a.uuid}
-      onMouseEnter={() => setHovered(true)}
-      onMouseLeave={() => setHovered(false)}
       onContextMenu={onContextMenu ? (e) => onContextMenu(e, a) : undefined}
       style={{
         position: "relative",
@@ -72,55 +77,13 @@ export function AccountCard({
         flexDirection: "column",
       }}
     >
-      {/* remove ✕ — revealed on hover OR keyboard focus so
-          keyboard users can reach it without a mouse. */}
-      <button
-        type="button"
-        onClick={(e) => {
-          e.stopPropagation();
-          onRemove(a);
-        }}
-        onFocus={() => setRemoveFocused(true)}
-        onBlur={() => setRemoveFocused(false)}
-        title={`Remove ${a.email} — logs out and deletes credentials`}
-        aria-label={`Remove ${a.email}`}
-        style={{
-          position: "absolute",
-          top: "var(--sp-10)",
-          right: "var(--sp-10)",
-          width: "var(--icon-btn-sm)",
-          height: "var(--icon-btn-sm)",
-          display: "flex",
-          alignItems: "center",
-          justifyContent: "center",
-          background: removeVisible ? "var(--bg-active)" : "transparent",
-          color: removeVisible ? "var(--fg-muted)" : "var(--fg-ghost)",
-          border: "none",
-          borderRadius: "var(--r-1)",
-          fontFamily: "inherit",
-          fontSize: "var(--fs-xs)",
-          lineHeight: "var(--lh-flat)",
-          cursor: "pointer",
-          opacity: removeVisible ? 1 : 0,
-          // Keyboard focus is a11y-critical — keep the button reachable
-          // even when opacity is 0 (Tab should still land on it, then
-          // onFocus flips removeVisible so it becomes visible).
-          pointerEvents: "auto",
-          transition:
-            "opacity var(--dur-base) var(--ease-linear), color var(--dur-hover) var(--ease-linear), background var(--dur-hover) var(--ease-linear)",
-          zIndex: "var(--z-popover)" as unknown as number,
-        }}
-      >
-        <Glyph g={NF.x} />
-      </button>
-
       {/* identity header */}
       <div
         style={{
           display: "flex",
           alignItems: "flex-start",
           gap: "var(--sp-12)",
-          padding: "var(--sp-16) var(--sp-40) var(--sp-14) var(--sp-18)",
+          padding: "var(--sp-16) var(--sp-18) var(--sp-14) var(--sp-18)",
           borderBottom: "var(--bw-hair) solid var(--line)",
         }}
       >
@@ -175,30 +138,13 @@ export function AccountCard({
         <div
           style={{
             display: "flex",
-            gap: "var(--sp-4)",
+            gap: "var(--sp-6)",
             flexShrink: 0,
+            alignItems: "center",
           }}
         >
-          {a.is_cli_active && (
-            <Tag tone="accent" glyph={NF.terminal}>
-              CLI
-            </Tag>
-          )}
-          {a.is_desktop_active && (
-            <Tag tone="accent" glyph={NF.users}>
-              Desktop
-            </Tag>
-          )}
-          {/* Profile-available state (not active). Uses the disk-truth
-              field per plan v2 D18 — so a stale DB flag cannot flip
-              the tag on for an account whose snapshot was deleted
-              out-of-band. Ghost tone keeps it distinct from the
-              active-Desktop accent. */}
-          {!a.is_desktop_active && a.desktop_profile_on_disk && (
-            <Tag tone="ghost" glyph={NF.users}>
-              profile
-            </Tag>
-          )}
+          <TargetButton {...cliProps} />
+          {desktopProps && <TargetButton {...desktopProps} />}
         </div>
       </div>
 

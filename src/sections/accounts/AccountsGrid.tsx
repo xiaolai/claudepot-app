@@ -2,19 +2,25 @@ import { type MouseEvent } from "react";
 import { Glyph } from "../../components/primitives/Glyph";
 import { Input } from "../../components/primitives/Input";
 import { NF } from "../../icons";
-import type { AccountSummary, UsageMap } from "../../types";
+import type { AccountSummary, AppStatus, UsageMap } from "../../types";
 import { AccountCard } from "./AccountCard";
+import type {
+  CliTargetHandlers,
+  DesktopTargetHandlers,
+} from "./targetButtonStates";
 
 interface Props {
   accounts: AccountSummary[];
   shown: AccountSummary[];
   usage: UsageMap;
+  status: AppStatus;
   busyKeys: Set<string>;
   filter: string;
   onFilterChange: (value: string) => void;
-  onRemove: (a: AccountSummary) => void;
   onLogin: (a: AccountSummary) => void;
   onContextMenu: (e: MouseEvent, a: AccountSummary) => void;
+  cliHandlers: CliTargetHandlers;
+  desktopHandlers: DesktopTargetHandlers;
 }
 
 /**
@@ -26,12 +32,14 @@ export function AccountsGrid({
   accounts,
   shown,
   usage,
+  status,
   busyKeys,
   filter,
   onFilterChange,
-  onRemove,
   onLogin,
   onContextMenu,
+  cliHandlers,
+  desktopHandlers,
 }: Props) {
   return (
     <>
@@ -102,10 +110,12 @@ export function AccountsGrid({
             key={a.uuid}
             account={a}
             usageEntry={usage[a.uuid] ?? null}
+            status={status}
             loginBusy={busyKeys.has(`re-${a.uuid}`)}
-            onRemove={onRemove}
             onLogin={onLogin}
             onContextMenu={onContextMenu}
+            cliHandlers={cliHandlers}
+            desktopHandlers={desktopHandlers}
           />
         ))}
         {shown.length === 0 && accounts.length > 0 && (

@@ -17,6 +17,10 @@ import { AddAccountModal } from "./accounts/AddAccountModal";
 import { HealthChips } from "./accounts/HealthChips";
 import { CtxMenuForAccount } from "./accounts/useAccountContextMenu";
 import { useAccountHandlers } from "./accounts/useAccountHandlers";
+import type {
+  CliTargetHandlers,
+  DesktopTargetHandlers,
+} from "./accounts/targetButtonStates";
 
 /**
  * Accounts section. Renders the header, filter bar, and the card grid.
@@ -56,7 +60,6 @@ export function AccountsSection({
   const [confirmRemove, setConfirmRemove] = useState<AccountSummary | null>(
     null,
   );
-  const [confirmClear, setConfirmClear] = useState(false);
   const [showPalette, setShowPalette] = useState(false);
   const [filter, setFilter] = useState("");
   const [ctxMenu, setCtxMenu] = useState<
@@ -173,6 +176,31 @@ export function AccountsSection({
     );
   }, [accounts, filter]);
 
+  // Handler bags routed into each AccountCard's TargetButtons. The
+  // adopt path still branches on `desktop_profile_on_disk` the same
+  // way CtxMenuForAccount does — when a snapshot already exists the
+  // shell-level overwrite confirm owns the decision.
+  const cliHandlers: CliTargetHandlers = useMemo(
+    () => ({
+      switchCli: (a) => requestCliSwap(a),
+      verify: (a) => runVerifyAccount(a),
+      login: (a) => actions.login(a),
+    }),
+    [requestCliSwap, runVerifyAccount, actions],
+  );
+  const desktopHandlers: DesktopTargetHandlers = useMemo(
+    () => ({
+      switchDesktop: (a) => handleDesktopSwitch(a),
+      switchDesktopNoLaunch: (a) => void actions.useDesktop(a, true),
+      launchDesktop: () => void api.desktopLaunch(),
+      adoptDesktop: (a) => {
+        if (a.desktop_profile_on_disk) requestDesktopOverwrite(a);
+        else void actions.adoptDesktop(a);
+      },
+    }),
+    [handleDesktopSwitch, actions, requestDesktopOverwrite],
+  );
+
   if (!status) {
     if (loadError) {
       return (
@@ -247,12 +275,6 @@ export function AccountsSection({
                   title="Refresh usage (⌘R)"
                   aria-label="Refresh usage"
                 />
-                <IconButton
-                  glyph={NF.signOut}
-                  onClick={() => setConfirmClear(true)}
-                  title="Sign out of Claude Code — clear its stored credentials"
-                  aria-label="Sign out of Claude Code"
-                />
               </>
             ) : (
               <>
@@ -277,15 +299,6 @@ export function AccountsSection({
                 >
                   Refresh usage
                 </Button>
-                <Button
-                  variant="ghost"
-                  glyph={NF.signOut}
-                  glyphColor="var(--fg-muted)"
-                  onClick={() => setConfirmClear(true)}
-                  title="Clear Claude Code's stored credentials"
-                >
-                  Sign out CC
-                </Button>
               </>
             )}
             <Button
@@ -304,12 +317,14 @@ export function AccountsSection({
         accounts={accounts}
         shown={shown}
         usage={usage}
+        status={status}
         busyKeys={busyKeys}
         filter={filter}
         onFilterChange={setFilter}
-        onRemove={setConfirmRemove}
         onLogin={actions.login}
         onContextMenu={handleContextMenu}
+        cliHandlers={cliHandlers}
+        desktopHandlers={desktopHandlers}
       />
 
       <AddAccountModal
@@ -345,25 +360,6 @@ export function AccountsSection({
             const t = confirmRemove;
             setConfirmRemove(null);
             actions.performRemove(t);
-          }}
-        />
-      )}
-
-      {confirmClear && (
-        <ConfirmDialog
-          title="Sign out of Claude Code?"
-          confirmLabel="Clear"
-          confirmDanger
-          body={
-            <p>
-              Clears CC's credentials file. You'll need to sign in
-              again.
-            </p>
-          }
-          onCancel={() => setConfirmClear(false)}
-          onConfirm={async () => {
-            setConfirmClear(false);
-            await actions.performClearCli();
           }}
         />
       )}
@@ -412,7 +408,6 @@ export function AccountsSection({
             if (a.desktop_profile_on_disk) requestDesktopOverwrite(a);
             else void actions.adoptDesktop(a);
           }}
-          onClearDesktop={requestDesktopSignOut}
           onClose={closeCtxMenu}
         />
       )}

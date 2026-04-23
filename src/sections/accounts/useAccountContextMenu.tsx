@@ -16,8 +16,6 @@ interface Args {
   onRemove: (a: AccountSummary) => void;
   /** "Bind current Desktop session to this account" — Phase 3+. */
   onAdoptDesktop?: (a: AccountSummary) => void;
-  /** "Sign Desktop out" — works regardless of row (single action). */
-  onClearDesktop?: () => void;
 }
 
 /**
@@ -39,7 +37,6 @@ export function useAccountContextMenu({
   onLogin,
   onRemove,
   onAdoptDesktop,
-  onClearDesktop,
 }: Args): ContextMenuItem[] {
   return useMemo(() => {
     // `desktop_profile_on_disk` is the disk truth; we prefer it over
@@ -104,18 +101,6 @@ export function useAccountContextMenu({
         disabledReason: adoptDesktopReason,
         onClick: () => onAdoptDesktop?.(a),
       },
-      ...(onClearDesktop
-        ? [
-            {
-              label: "Sign Desktop out",
-              disabled: !status.desktop_installed,
-              disabledReason: !status.desktop_installed
-                ? "Claude Desktop not installed"
-                : undefined,
-              onClick: onClearDesktop,
-            } as ContextMenuItem,
-          ]
-        : []),
       { label: "", separator: true, onClick: () => {} },
       {
         label: "Verify now",
@@ -168,7 +153,6 @@ export function useAccountContextMenu({
     onLogin,
     onRemove,
     onAdoptDesktop,
-    onClearDesktop,
   ]);
 }
 
@@ -191,7 +175,6 @@ export function CtxMenuForAccount({
   onLogin,
   onRemove,
   onAdoptDesktop,
-  onClearDesktop,
   onClose,
 }: {
   menu: { x: number; y: number; account: AccountSummary };
@@ -206,7 +189,6 @@ export function CtxMenuForAccount({
   onLogin: (a: AccountSummary) => void;
   onRemove: (a: AccountSummary) => void;
   onAdoptDesktop?: (a: AccountSummary) => void;
-  onClearDesktop?: () => void;
   onClose: () => void;
 }) {
   const items = useAccountContextMenu({
@@ -222,7 +204,6 @@ export function CtxMenuForAccount({
     onLogin,
     onRemove,
     onAdoptDesktop,
-    onClearDesktop,
   });
   return (
     <ContextMenu x={menu.x} y={menu.y} items={items} onClose={onClose} />
