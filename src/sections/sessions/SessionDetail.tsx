@@ -16,8 +16,10 @@ import { LiveStatusHeader } from "./LiveStatusHeader";
 import { LoadingPane } from "./components/SessionDetailStates";
 import {
   chunkMatchesSearch,
+  classifyMetaMatch,
   eventMatchesSearch,
   isUnknownCommandError,
+  normalizeDetailQuery,
 } from "./sessionDetail.search";
 
 const INITIAL_EVENT_LIMIT = 500;
@@ -42,6 +44,7 @@ export function SessionDetail({
   filePath,
   projects,
   refreshSignal,
+  initialSearch,
   onMoved,
   onError,
   onBack,
@@ -53,6 +56,14 @@ export function SessionDetail({
   projects: ProjectInfo[];
   /** Bumped by the parent so the detail refetches after a move. */
   refreshSignal: number;
+  /**
+   * Seed for the detail's search input. Carried in from the list-level
+   * filter so a user who lands here via a query doesn't have to retype.
+   * Only read at mount — the parent passes `key={filePath}` to remount
+   * on selection change, so subsequent keystrokes in the list filter
+   * don't clobber an edit the user has already made in the detail.
+   */
+  initialSearch?: string;
   onMoved: () => void;
   onError?: (msg: string) => void;
   onBack?: () => void;
@@ -61,7 +72,7 @@ export function SessionDetail({
   const [chunks, setChunks] = useState<SessionChunk[] | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [search, setSearch] = useState("");
+  const [search, setSearch] = useState<string>(() => initialSearch ?? "");
   const [visibleCount, setVisibleCount] = useState(INITIAL_EVENT_LIMIT);
   const [visibleChunks, setVisibleChunks] = useState(INITIAL_CHUNK_LIMIT);
   const [viewMode, setViewMode] = useState<ViewMode>("chunks");
@@ -107,6 +118,19 @@ export function SessionDetail({
   const events = detail?.events ?? [];
 
   /**
+   * One canonical form of the user's query, shared by every predicate
+   * that narrows the view. Derived through `normalizeDetailQuery` —
+   * see `sessionDetail.search.ts` for the length floor and trim/case
+   * rules. A single source of truth prevents the "0 matches + meta
+   * banner" trap that used to fire when one path trimmed and another
+   * didn't.
+   */
+  const normalizedQuery = useMemo(
+    () => normalizeDetailQuery(search),
+    [search],
+  );
+
+  /**
    * A single JSONL assistant line can expand into multiple
    * `SessionEvent`s (e.g. `assistantText` + `assistantToolUse`),
    * and they all share one CC `uuid`. Using `kind+uuid` as the
@@ -117,10 +141,9 @@ export function SessionDetail({
    */
   const filtered = useMemo(() => {
     const indexed = events.map((e, i) => ({ e, i }));
-    if (!search.trim() || search.trim().length < 2) return indexed;
-    const q = search.toLowerCase();
-    return indexed.filter(({ e }) => eventMatchesSearch(e, q));
-  }, [events, search]);
+    if (normalizedQuery === null) return indexed;
+    return indexed.filter(({ e }) => eventMatchesSearch(e, normalizedQuery));
+  }, [events, normalizedQuery]);
 
   // Show the newest N events first (they're at the tail of the array);
   // "Show older" expands upward.
@@ -129,13 +152,23 @@ export function SessionDetail({
     return filtered.slice(filtered.length - visibleCount);
   }, [filtered, visibleCount]);
 
+  // When the transcript has zero matches but the list-level filter
+  // landed the user here anyway, explain why — project_path / branch /
+  // model / session-id live on the row, not on events, so the detail
+  // search would otherwise show a bare "Nothing matches that query".
+  // Computed once per (row, query) — cheap, and the empty-state
+  // branch relies on it.
+  const metaMatches = useMemo(() => {
+    if (!detail || normalizedQuery === null) return [];
+    return classifyMetaMatch(detail.row, normalizedQuery);
+  }, [detail, normalizedQuery]);
+
   // Chunks: same "newest N" pagination semantics.
   const chunksFiltered = useMemo(() => {
     if (!chunks) return null;
-    if (!search.trim() || search.trim().length < 2) return chunks;
-    const q = search.toLowerCase();
-    return chunks.filter((c) => chunkMatchesSearch(c, events, q));
-  }, [chunks, search, events]);
+    if (normalizedQuery === null) return chunks;
+    return chunks.filter((c) => chunkMatchesSearch(c, events, normalizedQuery));
+  }, [chunks, normalizedQuery, events]);
   const visibleChunksList = useMemo(() => {
     if (!chunksFiltered) return null;
     if (chunksFiltered.length <= visibleChunks) return chunksFiltered;
@@ -237,6 +270,7 @@ export function SessionDetail({
         visible={visible}
         hidden={hidden}
         matchCount={filtered.length}
+        metaMatches={metaMatches}
         visibleChunksList={visibleChunksList}
         chunksFiltered={chunksFiltered}
         search={search}

@@ -741,6 +741,10 @@ pub enum SessionEventDto {
         tool_name: String,
         tool_use_id: String,
         input_preview: String,
+        /// Raw JSON of the tool input, untruncated. Only the detail
+        /// search reads this; list views and display paths stay on
+        /// `input_preview`.
+        input_full: String,
     },
     #[serde(rename = "assistantThinking")]
     AssistantThinking {
@@ -838,6 +842,7 @@ impl From<&claudepot_core::session::SessionEvent> for SessionEventDto {
                 tool_name,
                 tool_use_id,
                 input_preview,
+                input_full,
             } => Self::AssistantToolUse {
                 ts: *ts,
                 uuid: uuid.clone(),
@@ -845,6 +850,7 @@ impl From<&claudepot_core::session::SessionEvent> for SessionEventDto {
                 tool_name: tool_name.clone(),
                 tool_use_id: tool_use_id.clone(),
                 input_preview: input_preview.clone(),
+                input_full: input_full.clone(),
             },
             E::AssistantThinking { ts, uuid, text } => Self::AssistantThinking {
                 ts: *ts,
@@ -992,6 +998,7 @@ pub struct LinkedToolDto {
     pub model: Option<String>,
     pub call_ts: Option<DateTime<Utc>>,
     pub input_preview: String,
+    pub input_full: String,
     pub result_ts: Option<DateTime<Utc>>,
     pub result_content: Option<String>,
     pub is_error: bool,
@@ -1008,6 +1015,7 @@ impl From<&claudepot_core::session_tool_link::LinkedTool> for LinkedToolDto {
             model: t.model.clone(),
             call_ts: t.call_ts,
             input_preview: t.input_preview.clone(),
+            input_full: t.input_full.clone(),
             result_ts: t.result_ts,
             result_content: t.result_content.clone(),
             is_error: t.is_error,
@@ -1532,12 +1540,10 @@ pub struct PrunePlanDto {
     pub total_bytes: u64,
 }
 
-#[derive(Serialize)]
-pub struct PruneReportDto {
-    pub moved: Vec<String>,
-    pub failed: Vec<(String, String)>,
-    pub freed_bytes: u64,
-}
+// PruneReportDto was removed — `session_prune_start` discards the
+// structured report and emits a string error summary via
+// emit_terminal instead. Reintroduce when the GUI needs per-path
+// success/failure structures.
 
 impl From<&claudepot_core::session_prune::PruneEntry> for PruneEntryDto {
     fn from(e: &claudepot_core::session_prune::PruneEntry) -> Self {
@@ -1558,20 +1564,6 @@ impl From<&claudepot_core::session_prune::PrunePlan> for PrunePlanDto {
         Self {
             entries: p.entries.iter().map(Into::into).collect(),
             total_bytes: p.total_bytes,
-        }
-    }
-}
-
-impl From<&claudepot_core::session_prune::PruneReport> for PruneReportDto {
-    fn from(r: &claudepot_core::session_prune::PruneReport) -> Self {
-        Self {
-            moved: r.moved.iter().map(|p| p.to_string_lossy().to_string()).collect(),
-            failed: r
-                .failed
-                .iter()
-                .map(|(p, e)| (p.to_string_lossy().to_string(), e.clone()))
-                .collect(),
-            freed_bytes: r.freed_bytes,
         }
     }
 }
@@ -1598,16 +1590,10 @@ pub struct SlimPlanDto {
     pub bytes_saved: u64,
 }
 
-#[derive(Serialize)]
-pub struct SlimReportDto {
-    pub original_bytes: u64,
-    pub final_bytes: u64,
-    pub redact_count: u32,
-    pub image_redact_count: u32,
-    pub document_redact_count: u32,
-    pub trashed_original: String,
-    pub bytes_saved: u64,
-}
+// SlimReportDto was removed — `session_slim_start` discards the
+// structured report and emits a string error summary via
+// emit_terminal. Reintroduce when the GUI surfaces per-op byte
+// deltas after completion.
 
 impl From<&claudepot_core::session_slim::SlimPlan> for SlimPlanDto {
     fn from(p: &claudepot_core::session_slim::SlimPlan) -> Self {
@@ -1623,19 +1609,6 @@ impl From<&claudepot_core::session_slim::SlimPlan> for SlimPlanDto {
     }
 }
 
-impl From<&claudepot_core::session_slim::SlimReport> for SlimReportDto {
-    fn from(r: &claudepot_core::session_slim::SlimReport) -> Self {
-        Self {
-            original_bytes: r.original_bytes,
-            final_bytes: r.final_bytes,
-            redact_count: r.redact_count,
-            image_redact_count: r.image_redact_count,
-            document_redact_count: r.document_redact_count,
-            trashed_original: r.trashed_original.to_string_lossy().to_string(),
-            bytes_saved: r.bytes_saved(),
-        }
-    }
-}
 
 #[derive(Serialize)]
 pub struct BulkSlimEntryDto {

@@ -309,6 +309,7 @@ mod tests {
             tool_name: "Read".into(),
             tool_use_id: "t1".into(),
             input_preview: "{}".into(),
+            input_full: "{}".into(),
         };
         let res_ev = SessionEvent::UserToolResult {
             ts: None,

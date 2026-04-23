@@ -108,6 +108,7 @@ fn unmatched_tool_use_keeps_busy_even_after_text_close() {
         tool_name: "Bash".into(),
         tool_use_id: "tu1".into(),
         input_preview: "pnpm test".into(),
+        input_full: "pnpm test".into(),
     });
     assert_eq!(m.snapshot().status, Status::Busy);
 }
@@ -122,6 +123,7 @@ fn tool_result_closes_open_tool() {
         tool_name: "Bash".into(),
         tool_use_id: "tu1".into(),
         input_preview: "pnpm test".into(),
+        input_full: "pnpm test".into(),
     });
     assert_eq!(m.snapshot().status, Status::Busy);
     m.ingest(&SessionEvent::UserToolResult {
@@ -156,6 +158,7 @@ fn system_turn_duration_alone_does_not_clear_open_tool() {
         tool_name: "Bash".into(),
         tool_use_id: "tu1".into(),
         input_preview: "sleep".into(),
+        input_full: "sleep".into(),
     });
     m.ingest(&SessionEvent::System {
         ts: ts(10, 0, 2),
@@ -222,6 +225,7 @@ fn stuck_overlay_triggers_on_ancient_open_tool() {
         tool_name: "Bash".into(),
         tool_use_id: "tu1".into(),
         input_preview: "long".into(),
+        input_full: "long".into(),
     });
     let snap = m.snapshot();
     assert_eq!(snap.status, Status::Busy);
@@ -238,6 +242,7 @@ fn stuck_does_not_trigger_on_young_tool() {
         tool_name: "Bash".into(),
         tool_use_id: "tu1".into(),
         input_preview: "quick".into(),
+        input_full: "quick".into(),
     });
     assert!(!m.snapshot().stuck);
 }
@@ -254,6 +259,7 @@ fn current_action_is_oldest_open_tool() {
         tool_name: "Bash".into(),
         tool_use_id: "tu1".into(),
         input_preview: "pnpm test".into(),
+        input_full: "pnpm test".into(),
     });
     m.ingest(&SessionEvent::AssistantToolUse {
         ts: ts(10, 0, 11),
@@ -262,6 +268,7 @@ fn current_action_is_oldest_open_tool() {
         tool_name: "Read".into(),
         tool_use_id: "tu2".into(),
         input_preview: "src/foo.rs".into(),
+        input_full: "src/foo.rs".into(),
     });
     assert_eq!(
         m.snapshot().current_action.as_deref(),
@@ -281,7 +288,8 @@ fn current_action_truncates_long_args() {
         model: None,
         tool_name: "MysteryTool".into(),
         tool_use_id: "tu".into(),
-        input_preview: long,
+        input_preview: long.clone(),
+        input_full: long,
     });
     let ca = m.snapshot().current_action.unwrap();
     assert!(
@@ -367,6 +375,8 @@ fn current_action_redacts_leaked_keys() {
         tool_use_id: "tu".into(),
         input_preview: r#"{"command":"curl -H 'Authorization: Bearer sk-ant-Abc123DEF456_xyz' https://api"}"#
             .into(),
+        input_full: r#"{"command":"curl -H 'Authorization: Bearer sk-ant-Abc123DEF456_xyz' https://api"}"#
+            .into(),
     });
     let ca = m.snapshot().current_action.unwrap();
     assert!(
@@ -393,6 +403,7 @@ fn current_action_redacts_bare_sk_ant_token() {
         tool_name: "Bash".into(),
         tool_use_id: "tu".into(),
         input_preview: r#"{"command":"echo sk-ant-Abc123DEF456_xyz"}"#.into(),
+        input_full: r#"{"command":"echo sk-ant-Abc123DEF456_xyz"}"#.into(),
     });
     let ca = m.snapshot().current_action.unwrap();
     assert!(!ca.contains("Abc123DEF456_xyz"));
@@ -465,6 +476,7 @@ fn fallback_waiting_on_permission_mode_event() {
         tool_name: "Bash".into(),
         tool_use_id: "tu".into(),
         input_preview: "rm -rf /".into(),
+        input_full: "rm -rf /".into(),
     });
     // Busy initially (open tool_use).
     assert_eq!(m.snapshot().status, Status::Busy);
@@ -495,6 +507,7 @@ fn pid_waiting_overrides_derived_busy() {
         tool_name: "Bash".into(),
         tool_use_id: "tu".into(),
         input_preview: "cmd".into(),
+        input_full: "cmd".into(),
     });
     assert_eq!(m.snapshot().status, Status::Busy);
     m.set_pid_status(Some(Status::Waiting), Some("approve Bash".into()));

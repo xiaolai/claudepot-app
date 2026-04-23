@@ -254,6 +254,7 @@ export function SessionsTabPanel({
                 filePath={selectedPath}
                 projects={projects}
                 refreshSignal={detailRefreshSignal}
+                initialSearch={query.trim() ? query.trim() : undefined}
                 onMoved={() => {
                   setDetailRefreshSignal((n) => n + 1);
                   onRefresh();

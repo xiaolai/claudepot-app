@@ -709,6 +709,7 @@ mod tests {
                 tool_name: "Bash".into(),
                 tool_use_id: "toolu_abcd1234".into(),
                 input_preview: r#"{"cmd":"ls"}"#.into(),
+                input_full: r#"{"cmd":"ls"}"#.into(),
             },
             SessionEvent::UserToolResult {
                 ts: ts("2026-04-10T10:00:02Z"),

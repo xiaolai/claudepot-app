@@ -151,7 +151,16 @@ pub enum SessionEvent {
         model: Option<String>,
         tool_name: String,
         tool_use_id: String,
+        /// Display-only preview: trimmed, newlines collapsed, capped at
+        /// 240 chars. Render this in lists / compact UI.
         input_preview: String,
+        /// Raw serialized JSON of the tool input (untruncated). Powers
+        /// the detail-level substring search so a match deeper than
+        /// `input_preview`'s 240-char cap (e.g. inside a long Write
+        /// `content` or Edit `new_string`) is reachable. Never render
+        /// verbatim — preview is the display form.
+        #[serde(default)]
+        input_full: String,
     },
     #[serde(rename = "assistantThinking")]
     AssistantThinking {
@@ -831,10 +840,11 @@ fn emit_assistant_events(
                     .and_then(Value::as_str)
                     .unwrap_or("")
                     .to_string();
-                let input_preview = part
+                let input_raw = part
                     .get("input")
-                    .map(|i| truncate_prompt(&i.to_string()))
+                    .map(|i| i.to_string())
                     .unwrap_or_default();
+                let input_preview = truncate_prompt(&input_raw);
                 out.push(SessionEvent::AssistantToolUse {
                     ts,
                     uuid: uuid.clone(),
@@ -842,6 +852,7 @@ fn emit_assistant_events(
                     tool_name,
                     tool_use_id,
                     input_preview,
+                    input_full: input_raw,
                 });
             }
             _ => {}
