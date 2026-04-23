@@ -385,6 +385,25 @@ export function SessionsSection(props: SessionsSectionProps = {}) {
                 {elapsedLabel}
               </span>
             )}
+            {trashCount > 0 &&
+              (compact ? (
+                <IconButton
+                  glyph={NF.trash}
+                  onClick={() => setTab("cleanup")}
+                  title={`Trash · ${trashCount} item${trashCount === 1 ? "" : "s"}`}
+                  aria-label={`Open trash (${trashCount} item${trashCount === 1 ? "" : "s"})`}
+                />
+              ) : (
+                <Button
+                  variant="ghost"
+                  glyph={NF.trash}
+                  glyphColor="var(--fg-muted)"
+                  onClick={() => setTab("cleanup")}
+                  title="Open the Cleanup tab"
+                >
+                  Trash · {trashCount}
+                </Button>
+              ))}
             {compact ? (
               <IconButton
                 glyph={NF.refresh}

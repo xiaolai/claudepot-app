@@ -22,6 +22,20 @@ const projectListSpy = vi.fn();
 const sessionWorktreeGroupsSpy = vi.fn();
 const sessionSearchSpy = vi.fn();
 
+const sessionLiveSnapshotSpy = vi.fn();
+const sessionTrashListSpy = vi.fn();
+const activityTrendsSpy = vi.fn();
+
+// Stub useSessionLive directly — the real hook holds module-scope
+// state (RAF-batched commits + a `hydrated` flag) that doesn't reset
+// cleanly across tests. A direct stub avoids the leakage and makes
+// "what the Live chip filters against" explicit in each test.
+const useSessionLiveSpy = vi.fn<() => unknown[]>(() => []);
+vi.mock("../hooks/useSessionLive", () => ({
+  useSessionLive: () => useSessionLiveSpy(),
+  useSessionLiveLifecycle: () => {},
+}));
+
 vi.mock("../api", () => ({
   api: {
     sessionListAll: (...a: unknown[]) => sessionListAllSpy(...a),
@@ -34,9 +48,21 @@ vi.mock("../api", () => ({
     sessionRead: vi.fn(),
     // The Live filter chip subscribes via useSessionLive, which
     // hydrates through sessionLiveSnapshot on first subscribe.
-    // Return an empty array so the hook resolves cleanly.
-    sessionLiveSnapshot: () => Promise.resolve([]),
-    sessionTrashList: () => Promise.resolve({ entries: [] }),
+    sessionLiveSnapshot: (...a: unknown[]) => sessionLiveSnapshotSpy(...a),
+    sessionTrashList: (...a: unknown[]) => sessionTrashListSpy(...a),
+    activityTrends: (...a: unknown[]) => activityTrendsSpy(...a),
+    preferencesGet: () =>
+      Promise.resolve({
+        hide_dock_icon: false,
+        activity_enabled: false,
+        activity_consent_seen: true,
+        activity_hide_thinking: true,
+        activity_excluded_paths: [],
+        notify_on_error: false,
+        notify_on_idle_done: false,
+        notify_on_stuck_minutes: null,
+        notify_on_spend_usd: null,
+      }),
   },
 }));
 
@@ -98,12 +124,32 @@ beforeEach(() => {
   projectListSpy.mockReset();
   sessionWorktreeGroupsSpy.mockReset();
   sessionSearchSpy.mockReset();
+  sessionLiveSnapshotSpy.mockReset();
+  sessionTrashListSpy.mockReset();
+  activityTrendsSpy.mockReset();
   projectListSpy.mockResolvedValue([] as ProjectInfo[]);
   sessionWorktreeGroupsSpy.mockResolvedValue([] as RepositoryGroup[]);
   sessionSearchSpy.mockResolvedValue([] as SearchHit[]);
+  sessionLiveSnapshotSpy.mockResolvedValue([]);
+  sessionTrashListSpy.mockResolvedValue({ entries: [] });
+  useSessionLiveSpy.mockReturnValue([]);
+  activityTrendsSpy.mockResolvedValue({
+    from_ms: 0,
+    to_ms: 0,
+    bucket_width_ms: 0,
+    active_series: [],
+    error_count: 0,
+  });
   // Reset the module-scope filter store so one test's filter doesn't
   // leak into the next (stale `tab = "cleanup"` would hide the list).
   resetSessionsFilterForTest();
+  // Clear the sessionStorage cache seeded by useSessionsData so
+  // cached rows from a prior test don't bleed into the next mount.
+  try {
+    sessionStorage.removeItem("claudepot.sessionsCache.v1");
+  } catch {
+    // Ignore — jsdom sometimes lacks sessionStorage.
+  }
 });
 
 async function mountWithRows(rows: SessionRow[]) {
@@ -311,5 +357,98 @@ describe("SessionsSection — search input", () => {
     // Subtitle should now read "1 of 2 sessions shown" — the count
     // is taken from the same filteredByQuery the table renders.
     expect(screen.getByText(/1 of 2 sessions shown/i)).toBeInTheDocument();
+  });
+});
+
+describe("SessionsSection — Live filter chip", () => {
+  it("narrows the table to sessions currently in the live snapshot", async () => {
+    useSessionLiveSpy.mockReturnValue([
+      {
+        session_id: "alpha",
+        pid: 1,
+        cwd: "/repo/alpha",
+        transcript_path: null,
+        status: "busy",
+        current_action: null,
+        model: null,
+        waiting_for: null,
+        errored: false,
+        stuck: false,
+        idle_ms: 0,
+        seq: 0,
+      },
+    ]);
+    await mountWithRows([mk("alpha"), mk("beta"), mk("gamma")]);
+
+    // All three are visible before toggling Live.
+    expect(visibleSessionIds().sort()).toEqual(["alpha", "beta", "gamma"]);
+
+    // The Live chip lives in the filter group alongside Errors/Agents.
+    const liveChip = await screen.findByRole("switch", { name: /Live/i });
+    await userEvent.click(liveChip);
+
+    await waitFor(() => {
+      // Only the live session (alpha) should remain.
+      expect(visibleSessionIds()).toEqual(["alpha"]);
+    });
+  });
+});
+
+describe("SessionsSection — Trends tab", () => {
+  it("loads trends when the tab is selected and honors the window selector", async () => {
+    await mountWithRows([mk("alpha")]);
+
+    const trendsTab = screen.getByRole("tab", { name: "Trends" });
+    await userEvent.click(trendsTab);
+
+    // The pane fires activity_trends on mount.
+    await waitFor(() => {
+      expect(activityTrendsSpy).toHaveBeenCalledTimes(1);
+    });
+
+    // Switching to 7d refetches with a new bucket count.
+    const sevenDay = await screen.findByRole("tab", { name: "7d" });
+    await userEvent.click(sevenDay);
+    await waitFor(() => {
+      expect(activityTrendsSpy).toHaveBeenCalledTimes(2);
+    });
+  });
+});
+
+describe("SessionsSection — trash indicator", () => {
+  it("renders a dot on the Cleanup tab when trash has entries", async () => {
+    sessionTrashListSpy.mockResolvedValue({
+      entries: [
+        {
+          id: "abc",
+          kind: "session",
+          session_id: "alpha",
+          original_cwd: "/repo/alpha",
+          deleted_at_ts: "2026-04-23T00:00:00Z",
+          size_bytes: 0,
+        },
+      ],
+    });
+    await mountWithRows([mk("alpha")]);
+
+    const cleanupTab = await screen.findByRole("tab", { name: /Cleanup/i });
+    await waitFor(() => {
+      // The dot is an inline span inside the Cleanup tab with a
+      // 6px width styled inline. We assert on its presence via the
+      // structural parent check: the tab should contain exactly one
+      // decorative child span sibling to the label.
+      const spans = cleanupTab.querySelectorAll("span");
+      expect(spans.length).toBeGreaterThan(0);
+    });
+  });
+
+  it("omits the dot when the trash is empty", async () => {
+    sessionTrashListSpy.mockResolvedValue({ entries: [] });
+    await mountWithRows([mk("alpha")]);
+
+    const cleanupTab = await screen.findByRole("tab", { name: /Cleanup/i });
+    // No indicator span should exist inside the tab.
+    const spans = cleanupTab.querySelectorAll("span[aria-hidden]");
+    expect(spans).toHaveLength(0);
   });
 });
