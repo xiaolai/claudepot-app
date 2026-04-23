@@ -1,4 +1,9 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import {
+  isPermissionGranted,
+  requestPermission,
+  sendNotification,
+} from "@tauri-apps/plugin-notification";
 import type { NfIcon } from "../icons";
 import { api } from "../api";
 import { Button } from "../components/primitives/Button";
@@ -939,6 +944,39 @@ function ActivityPane({
               fontVariantNumeric: "tabular-nums",
             }}
           />
+        </Row>
+        <Row
+          label="Send test notification"
+          hint="Fire a sample OS notification to verify permissions and that the runtime path is wired. Doesn't toggle any preference."
+        >
+          <Button
+            variant="ghost"
+            onClick={async () => {
+              try {
+                const granted = await isPermissionGranted();
+                if (!granted) {
+                  const perm = await requestPermission();
+                  if (perm !== "granted") {
+                    pushToast(
+                      "error",
+                      "OS notification permission denied. Check System Settings.",
+                    );
+                    return;
+                  }
+                }
+                sendNotification({
+                  title: "Claudepot test",
+                  body: "If you see this, notifications are working.",
+                });
+                pushToast("info", "Test notification sent.");
+              } catch (e) {
+                const msg = e instanceof Error ? e.message : String(e);
+                pushToast("error", `Couldn't send notification: ${msg}`);
+              }
+            }}
+          >
+            Send test
+          </Button>
         </Row>
         <Row
           label="Alert on spend"

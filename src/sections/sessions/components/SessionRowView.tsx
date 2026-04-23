@@ -6,6 +6,7 @@ import {
   useState,
 } from "react";
 import { Glyph } from "../../../components/primitives/Glyph";
+import { IconButton } from "../../../components/primitives/IconButton";
 import { Tag } from "../../../components/primitives/Tag";
 import { NF } from "../../../icons";
 import { maybeRedact, redactSecrets } from "../../../lib/redactSecrets";
@@ -312,7 +313,42 @@ export const SessionRowView = memo(function SessionRowView({
         {lastTs != null ? formatRelativeTime(lastTs) : "—"}
       </span>
 
-      <span>
+      <span
+        style={{
+          display: "inline-flex",
+          alignItems: "center",
+          gap: "var(--sp-2)",
+          justifyContent: "flex-end",
+        }}
+      >
+        {(hover || active) && onContextMenu && (
+          <span
+            onClick={(e) => e.stopPropagation()}
+            onMouseDown={(e) => e.stopPropagation()}
+            style={{ display: "inline-flex" }}
+          >
+            <IconButton
+              glyph={NF.ellipsis}
+              size="sm"
+              onClick={() => {
+                const el = document.activeElement as HTMLElement | null;
+                const rect = el?.getBoundingClientRect();
+                onContextMenu(
+                  {
+                    preventDefault: () => {},
+                    stopPropagation: () => {},
+                    clientX: rect ? rect.right : 0,
+                    clientY: rect ? rect.bottom : 0,
+                  } as unknown as MouseEvent,
+                  s,
+                );
+              }}
+              title="More actions"
+              aria-label={`More actions for this session`}
+              aria-haspopup="menu"
+            />
+          </span>
+        )}
         {(hover || active) && (
           <Glyph
             g={NF.chevronR}

@@ -45,8 +45,20 @@ export function AccountsSection({
     requestRemoveAccount,
     requestDesktopOverwrite,
   } = useAppState();
-  const { usage, refreshUsage, refreshUsageFor } = useUsage();
+  const { usage, refreshUsage, refreshUsageFor, lastFetchedAt } = useUsage();
   const compact = useCompactHeader();
+
+  // Tick once a minute so the "updated Xm ago" label ages without a
+  // full section re-render. Cheap — a single state bump per tick.
+  const [, setNowTick] = useState(0);
+  useEffect(() => {
+    const id = window.setInterval(() => setNowTick((n) => n + 1), 60_000);
+    return () => window.clearInterval(id);
+  }, []);
+  const usageAgeLabel = useMemo(
+    () => formatUsageAge(lastFetchedAt),
+    [lastFetchedAt],
+  );
 
   const [showAdd, setShowAdd] = useState(false);
   const [filter, setFilter] = useState("");
@@ -267,6 +279,23 @@ export function AccountsSection({
                 >
                   Verify all
                 </Button>
+                {usageAgeLabel && (
+                  <span
+                    className="mono-cap"
+                    style={{
+                      fontSize: "var(--fs-2xs)",
+                      color: "var(--fg-faint)",
+                      letterSpacing: "0.03em",
+                    }}
+                    title={
+                      lastFetchedAt
+                        ? new Date(lastFetchedAt).toLocaleString()
+                        : undefined
+                    }
+                  >
+                    {usageAgeLabel}
+                  </span>
+                )}
                 <Button
                   variant="ghost"
                   glyph={NF.refresh}
@@ -359,4 +388,23 @@ export function AccountsSection({
 
     </>
   );
+}
+
+/**
+ * Compact "updated 12m ago" label for the Accounts header. Returns
+ * null when no fetch has happened yet, "just now" for < 30 s, else
+ * minutes/hours. Seconds are suppressed on purpose — the label is a
+ * freshness cue, not a stopwatch.
+ */
+function formatUsageAge(lastFetchedAt: number | null): string | null {
+  if (!lastFetchedAt) return null;
+  const deltaMs = Date.now() - lastFetchedAt;
+  if (deltaMs < 30_000) return "updated just now";
+  const minutes = Math.floor(deltaMs / 60_000);
+  if (minutes < 1) return "updated just now";
+  if (minutes < 60) return `updated ${minutes}m ago`;
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) return `updated ${hours}h ago`;
+  const days = Math.floor(hours / 24);
+  return `updated ${days}d ago`;
 }
