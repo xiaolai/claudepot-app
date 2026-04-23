@@ -33,6 +33,19 @@ impl super::DesktopPlatform for MacosDesktop {
         SESSION_ITEMS
     }
 
+    fn is_installed(&self) -> bool {
+        // Authoritative on macOS: the app bundle lives at a fixed
+        // path. `/Applications/Claude.app` existing is sufficient —
+        // we don't need to launch it, load Info.plist, or touch
+        // LaunchServices. A user-installed copy under
+        // ~/Applications is also accepted, mirroring how macOS
+        // treats per-user installs.
+        std::path::Path::new("/Applications/Claude.app").is_dir()
+            || dirs::home_dir()
+                .map(|h| h.join("Applications/Claude.app").is_dir())
+                .unwrap_or(false)
+    }
+
     async fn is_running(&self) -> bool {
         // Use pgrep instead of sysinfo — sysinfo's exe() returns None
         // for some processes on macOS when running over SSH.
@@ -90,5 +103,24 @@ impl super::DesktopPlatform for MacosDesktop {
             ))));
         }
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::desktop_backend::DesktopPlatform;
+
+    #[test]
+    fn test_is_installed_returns_bool() {
+        // We can't assume Claude.app is present on every CI host, but
+        // we can assert the call is well-formed and stable. The result
+        // must match whichever of the two candidate paths exists.
+        let p = MacosDesktop;
+        let system = std::path::Path::new("/Applications/Claude.app").is_dir();
+        let user = dirs::home_dir()
+            .map(|h| h.join("Applications/Claude.app").is_dir())
+            .unwrap_or(false);
+        assert_eq!(p.is_installed(), system || user);
     }
 }
