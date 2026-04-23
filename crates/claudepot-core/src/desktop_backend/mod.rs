@@ -4,7 +4,9 @@ pub mod macos;
 #[cfg(target_os = "windows")]
 pub mod windows;
 
+pub mod crypto;
 pub mod swap;
+pub mod token_cache;
 
 use crate::error::DesktopSwapError;
 use std::path::PathBuf;
@@ -31,6 +33,30 @@ pub trait DesktopPlatform: Send + Sync {
     /// falls back to data-dir existence when AppX APIs aren't
     /// reachable from the current process).
     fn is_installed(&self) -> bool;
+
+    /// Fetch the OS-scoped encryption secret Electron's safeStorage
+    /// was keyed against. Feeds directly into `crypto::decrypt`.
+    ///
+    /// macOS: value of `Claude Safe Storage / Claude Key` keychain
+    /// item (retrieved via `/usr/bin/security find-generic-password`).
+    /// Windows: 32-byte master key produced by DPAPI-unprotecting the
+    /// `encrypted_key` field of `Local State`.
+    ///
+    /// Consumers must treat the returned bytes as SENSITIVE — never
+    /// log, never forward across IPC, never serialize.
+    async fn safe_storage_secret(&self) -> Result<Vec<u8>, DesktopKeyError>;
+}
+
+#[derive(Debug, thiserror::Error)]
+pub enum DesktopKeyError {
+    #[error("macOS keychain lookup failed: {0}")]
+    KeychainRead(String),
+    #[error("Windows DPAPI unprotect failed: {0}")]
+    DpapiFailed(String),
+    #[error("Windows Local State missing or unreadable: {0}")]
+    LocalState(String),
+    #[error("platform does not implement Desktop safeStorage")]
+    Unsupported,
 }
 
 pub fn create_platform() -> Option<Box<dyn DesktopPlatform>> {
