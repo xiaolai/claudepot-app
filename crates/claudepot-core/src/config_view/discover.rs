@@ -665,6 +665,20 @@ pub fn assemble_tree(cwd: &Path) -> ConfigTree {
         ));
     }
 
+    let other_slugs = crate::config_view::memory_other::scan_other_memory_dirs(&memory_slug);
+    if !other_slugs.is_empty() {
+        let files: Vec<FileNode> = other_slugs
+            .iter()
+            .map(crate::config_view::memory_other::make_slug_file_node)
+            .collect();
+        scopes.push(scope_node(
+            "scope:memory-other",
+            Scope::Other,
+            "Memory (other projects)",
+            files.into_iter().map(Node::File).collect(),
+        ));
+    }
+
     ConfigTree {
         scopes,
         scanned_at_unix_ns: current_unix_ns(),

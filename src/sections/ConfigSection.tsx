@@ -56,6 +56,22 @@ export function ConfigSection({ subRoute, onSubRouteChange }: ConfigSectionProps
   const [searchSummary, setSearchSummary] =
     useState<ConfigSearchSummaryDto | null>(null);
   const searchIdRef = useRef<string | null>(null);
+  const searchInputRef = useRef<HTMLInputElement | null>(null);
+
+  // ⌘F focuses the content-search input. Esc clears it.
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if ((e.metaKey || e.ctrlKey) && e.key === "f" && !e.shiftKey && !e.altKey) {
+        // Respect the modal / input focus gate (same rule as useSection).
+        if (document.querySelector('[role="dialog"]')) return;
+        e.preventDefault();
+        searchInputRef.current?.focus();
+        searchInputRef.current?.select();
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, []);
 
   const refreshTree = useCallback(async () => {
     try {
@@ -343,6 +359,7 @@ export function ConfigSection({ subRoute, onSubRouteChange }: ConfigSectionProps
             }}
           >
             <input
+              ref={searchInputRef}
               type="search"
               placeholder="Search contents…"
               value={searchQuery}
