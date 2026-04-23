@@ -187,4 +187,4 @@ Path-handling code (sanitize, unsanitize, canonicalize) is the highest-risk surf
 
 ## License
 
-MIT.
+ISC — see [LICENSE](./LICENSE).

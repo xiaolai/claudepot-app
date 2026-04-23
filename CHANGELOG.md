@@ -6,6 +6,85 @@ Versioning scheme:
 - `0.1.x` — beta
 - `1.0.0+` — stable
 
+## 0.0.5 — alpha (unreleased)
+
+### Added
+
+- **Keyboard shortcuts modal** — `⌘/` opens a full reference grouped
+  by scope (nav / global actions / modals / palette / live strip).
+  Also reachable from the command palette via "Show keyboard
+  shortcuts."
+- **Adopt-current-session CTA** on the Accounts empty state — when
+  CC is already signed in, clicking the primary button imports that
+  account into Claudepot without a browser round-trip.
+- **Account-to-tokens link** — each AccountCard shows a "N tokens"
+  chip when the account owns stored API keys / OAuth tokens.
+  Clicking jumps to Keys pre-filtered to that account.
+- **Sessions section: Live filter + Trends tab** — the old Activity
+  section is folded in. A "Live" chip filters the table to running
+  sessions; a "Trends" tab shows bucketed active-session counts
+  over 24h / 7d / 30d with an inline sparkline.
+- **Trash dot + header button in Sessions** — the Cleanup tab
+  renders a small accent dot when trash is non-empty, and the
+  Sessions header grows a "Trash · N" button that jumps straight
+  to the Cleanup tab.
+- **"Updated Xm ago" label** next to the Accounts usage refresh.
+- **"Send test notification" button** in Settings → Activity.
+- **Sessions loading UX** — rows are cached in `sessionStorage` and
+  painted immediately on mount; the header shows "Updating… Ns"
+  while the cold fetch runs.
+- **Per-account context-menu kebab** (`⋯`) on AccountCard, Projects
+  rows, and Session rows — same items as right-click, reachable by
+  keyboard users.
+
+### Changed
+
+- **Command palette hoisted to the shell.** `⌘K` no longer forces a
+  navigation to Accounts; the palette, remove-confirm dialog, and
+  shortcuts modal all mount at the AppShell level.
+- **Sidebar collapses to 5 sections** (Accounts / Projects /
+  Sessions / Keys / Settings). Activity is gone; `⌘4` is Keys,
+  `⌘5` is Settings. The first-run Live-runtime consent modal still
+  fires at shell level.
+- **Cleanup surfaces consolidated.** Settings → Cleanup tab removed.
+  GC (abandoned journals + snapshots) moved to Projects →
+  Maintenance as a new `GcCard`. Rebuild-session-index moved to
+  Sessions → Cleanup.
+- **Projects filter chips** relabeled from "Source gone / Offline /
+  Empty" to "Missing directory / Unreachable path / Empty project."
+- **Refresh buttons** renamed per section ("Refresh projects",
+  "Refresh sessions", "Refresh usage") so `⌘R` scope is obvious.
+- **Desktop trust-tier copy** drops the "candidate-only / decrypt
+  token" jargon in favor of "Couldn't confirm which account Claude
+  Desktop is signed in as. Open Claude Desktop once, then try
+  again."
+- **OperationProgressModal** humanizes phase names (P3 → "Moving
+  source directory", P6 → "Rewriting session transcripts", etc.).
+  Raw ids remain visible in the row's title tooltip.
+- **Design rule added** (`.claude/rules/design.md`): "Cards vs.
+  tables — pick by primary verb (browse+act vs scan+drill), not
+  count." Codifies current placements and guides future components.
+
+### Fixed
+
+- **`activity_hide_thinking` preference is now load-bearing.**
+  SessionEventView renders thinking blocks as "Thinking · N chars
+  — click to reveal" when the pref is on; Settings dispatches
+  `cp-activity-prefs-changed` so open transcripts refresh without
+  polling.
+- **Inline reason on disabled `TargetButton`** — the CLI slot's
+  disabled state now says "Session expired" / "Rejected — re-login"
+  / "No credentials — re-login" under the button, honoring
+  design.md's "disabled buttons state a reason inline" rule.
+- **Sessions filter state persists across section hops** — a
+  `sessionsFilterStore` (module-scope) keeps query / filter /
+  repo / selected-path / tab / live-filter alive when the
+  Sessions section unmounts and remounts.
+- **Activity off-state** is no longer silent — `ActivitySection`
+  (now in the Sessions "Live" filter path) renders an inline
+  "Enable Activity" button when the runtime is off, instead of
+  sending the user to Settings.
+
 ## 0.0.4 — alpha (unreleased)
 
 ### Added
