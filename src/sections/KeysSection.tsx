@@ -92,6 +92,18 @@ export function KeysSection() {
     void refresh();
   }, [refresh]);
 
+  // Cross-section deep-link: AccountCard's "N tokens" chip dispatches
+  // `cp-keys-filter` so this section can land pre-filtered to an
+  // account. Payload is the literal filter query (typically an email).
+  useEffect(() => {
+    const onFilter = (e: Event) => {
+      const detail = (e as CustomEvent<{ query: string }>).detail;
+      if (typeof detail?.query === "string") setFilter(detail.query);
+    };
+    window.addEventListener("cp-keys-filter", onFilter);
+    return () => window.removeEventListener("cp-keys-filter", onFilter);
+  }, []);
+
   const onCopy = useCallback(
     async (
       kind: "api" | "oauth",

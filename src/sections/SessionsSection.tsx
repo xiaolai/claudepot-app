@@ -89,8 +89,27 @@ export function SessionsSection(props: SessionsSectionProps = {}) {
     repoGroups,
     loading,
     error,
+    servedFromCache,
+    fetchStartedAt,
     refresh,
   } = useSessionsData({ onSecondaryError: setToast });
+
+  // Tick once a second while a fetch is in flight so the "Updating…
+  // Ns" elapsed-time label ages without re-rendering the whole table
+  // between ticks. Only runs while `fetchStartedAt` is non-null — no
+  // idle polling cost.
+  const [, setElapsedTick] = useState(0);
+  useEffect(() => {
+    if (fetchStartedAt === null) return;
+    const id = window.setInterval(() => setElapsedTick((n) => n + 1), 1000);
+    return () => window.clearInterval(id);
+  }, [fetchStartedAt]);
+  const elapsedLabel = useMemo(() => {
+    if (fetchStartedAt === null) return null;
+    const secs = Math.max(0, Math.floor((Date.now() - fetchStartedAt) / 1000));
+    if (secs < 1) return "Updating…";
+    return `Updating… ${secs}s`;
+  }, [fetchStartedAt]);
 
   // Selection / repo-filter pruning lives here (not in the hook)
   // because both are owned by this component. Run as effects on the
@@ -258,24 +277,46 @@ export function SessionsSection(props: SessionsSectionProps = {}) {
         title="Sessions"
         subtitle={subtitle}
         actions={
-          compact ? (
-            <IconButton
-              glyph={NF.refresh}
-              onClick={refresh}
-              title="Refresh (⌘R)"
-              aria-label="Refresh sessions"
-            />
-          ) : (
-            <Button
-              variant="ghost"
-              glyph={NF.refresh}
-              glyphColor="var(--fg-muted)"
-              onClick={refresh}
-              title="Refresh session list (⌘R)"
-            >
-              Refresh sessions
-            </Button>
-          )
+          <>
+            {elapsedLabel && (
+              <span
+                className="mono-cap"
+                aria-live="polite"
+                style={{
+                  fontSize: "var(--fs-2xs)",
+                  color: servedFromCache
+                    ? "var(--fg-faint)"
+                    : "var(--fg-ghost)",
+                  letterSpacing: "0.03em",
+                }}
+                title={
+                  servedFromCache
+                    ? "Showing cached rows while we re-scan transcripts"
+                    : undefined
+                }
+              >
+                {elapsedLabel}
+              </span>
+            )}
+            {compact ? (
+              <IconButton
+                glyph={NF.refresh}
+                onClick={refresh}
+                title="Refresh (⌘R)"
+                aria-label="Refresh sessions"
+              />
+            ) : (
+              <Button
+                variant="ghost"
+                glyph={NF.refresh}
+                glyphColor="var(--fg-muted)"
+                onClick={refresh}
+                title="Refresh session list (⌘R)"
+              >
+                Refresh sessions
+              </Button>
+            )}
+          </>
         }
       />
 

@@ -22,6 +22,12 @@ interface Props {
   onContextMenu: (e: MouseEvent, a: AccountSummary) => void;
   cliHandlers: CliTargetHandlers;
   desktopHandlers: DesktopTargetHandlers;
+  /** Token counts keyed by account UUID. Missing / 0 keys are simply
+   *  not displayed. */
+  tokenCounts?: Record<string, number>;
+  /** Click handler for the "N tokens" chip. Navigates to Keys
+   *  pre-filtered to the account's email. */
+  onOpenTokens?: (accountEmail: string) => void;
   /** Claude Code's current signed-in identity, used to pre-fill an
    *  adopt CTA in the empty state. When present with an email and no
    *  error, the first-run prompt offers a single click to register
@@ -56,6 +62,8 @@ export function AccountsGrid({
   ccIdentity,
   onAdoptCurrent,
   onAdd,
+  tokenCounts,
+  onOpenTokens,
 }: Props) {
   // Pre-fill adoption when CC is already signed in. `error` null +
   // non-empty email covers the 0- or 1-account case where Claudepot
@@ -139,6 +147,8 @@ export function AccountsGrid({
             onContextMenu={onContextMenu}
             cliHandlers={cliHandlers}
             desktopHandlers={desktopHandlers}
+            tokenCount={tokenCounts?.[a.uuid]}
+            onOpenTokens={onOpenTokens}
           />
         ))}
         {shown.length === 0 && accounts.length > 0 && (
