@@ -1,6 +1,8 @@
 import { type MouseEvent } from "react";
 import { Avatar, avatarColorFor } from "../../components/primitives/Avatar";
+import { IconButton } from "../../components/primitives/IconButton";
 import { TargetButton } from "../../components/primitives/TargetButton";
+import { NF } from "../../icons";
 import type { AccountSummary, AppStatus, UsageEntry } from "../../types";
 import { AnomalyBanner, isAnomaly } from "./AnomalyBanner";
 import { HealthFooter } from "./HealthFooter";
@@ -22,6 +24,12 @@ interface AccountCardProps {
   onContextMenu?: (e: MouseEvent, a: AccountSummary) => void;
   cliHandlers: CliTargetHandlers;
   desktopHandlers: DesktopTargetHandlers;
+  /** Number of API keys + OAuth tokens stored for this account.
+   *  Missing or 0 renders nothing — render-if-nonzero. */
+  tokenCount?: number;
+  /** Opens Keys pre-filtered to this account. Optional so callers
+   *  that don't wire navigation still compile cleanly. */
+  onOpenTokens?: (accountEmail: string) => void;
 }
 
 /**
@@ -44,6 +52,8 @@ export function AccountCard({
   onContextMenu,
   cliHandlers,
   desktopHandlers,
+  tokenCount,
+  onOpenTokens,
 }: AccountCardProps) {
   const bound = a.is_cli_active || a.is_desktop_active;
   const severe = isAnomaly(a);
@@ -151,19 +161,58 @@ export function AccountCard({
               </span>
             )}
           </div>
-          {a.org_name && (
-            <div
-              style={{
-                fontSize: "var(--fs-xs)",
-                color: "var(--fg-faint)",
-                overflow: "hidden",
-                textOverflow: "ellipsis",
-                whiteSpace: "nowrap",
-              }}
-            >
-              {a.org_name}
-            </div>
-          )}
+          <div
+            style={{
+              display: "flex",
+              alignItems: "center",
+              gap: "var(--sp-8)",
+              minWidth: 0,
+            }}
+          >
+            {a.org_name && (
+              <span
+                style={{
+                  fontSize: "var(--fs-xs)",
+                  color: "var(--fg-faint)",
+                  overflow: "hidden",
+                  textOverflow: "ellipsis",
+                  whiteSpace: "nowrap",
+                  flexShrink: 1,
+                  minWidth: 0,
+                }}
+              >
+                {a.org_name}
+              </span>
+            )}
+            {tokenCount !== undefined && tokenCount > 0 && (
+              <button
+                type="button"
+                onClick={() => onOpenTokens?.(a.email)}
+                className="pm-focus"
+                style={{
+                  flexShrink: 0,
+                  fontSize: "var(--fs-2xs)",
+                  letterSpacing: "0.03em",
+                  color: "var(--fg-muted)",
+                  background: "var(--bg-sunken)",
+                  border: "var(--bw-hair) solid var(--line)",
+                  borderRadius: "var(--r-1)",
+                  padding: "0 var(--sp-6)",
+                  height: "var(--kbd-h)",
+                  cursor: onOpenTokens ? "pointer" : "default",
+                  display: "inline-flex",
+                  alignItems: "center",
+                  gap: "var(--sp-4)",
+                  textTransform: "uppercase",
+                  fontFamily: "var(--font)",
+                }}
+                title={`Open Keys filtered to ${a.email}`}
+                aria-label={`Open Keys filtered to ${a.email} (${tokenCount} token${tokenCount === 1 ? "" : "s"})`}
+              >
+                {tokenCount} token{tokenCount === 1 ? "" : "s"}
+              </button>
+            )}
+          </div>
         </div>
         <div
           style={{
@@ -175,6 +224,30 @@ export function AccountCard({
         >
           <TargetButton {...cliProps} />
           {desktopProps && <TargetButton {...desktopProps} />}
+          {onContextMenu && (
+            <IconButton
+              glyph={NF.ellipsis}
+              size="sm"
+              onClick={() => {
+                // Anchor the menu at the button's position — the
+                // click event's synthetic coords are enough to land
+                // the popover near where the user expects.
+                const el = document.activeElement as HTMLElement | null;
+                const rect = el?.getBoundingClientRect();
+                onContextMenu(
+                  {
+                    preventDefault: () => {},
+                    clientX: rect ? rect.right : 0,
+                    clientY: rect ? rect.bottom : 0,
+                  } as unknown as MouseEvent,
+                  a,
+                );
+              }}
+              title="More actions"
+              aria-label={`More actions for ${a.email}`}
+              aria-haspopup="menu"
+            />
+          )}
         </div>
       </div>
 

@@ -119,7 +119,7 @@ export function DesktopImportCard({
       return {
         kind: "error",
         message:
-          "Live Desktop identity could not be verified (candidate-only). Open Claude Desktop once so Claudepot can decrypt the live token.",
+          "Couldn't confirm which account Claude Desktop is signed in as. Open Claude Desktop once, then try again.",
       };
     }
     const match = accounts.find(

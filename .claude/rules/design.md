@@ -47,6 +47,24 @@ Paper-mono primitives in `src/components/primitives/` — `Button`,
 are the norm; class-based CSS in `App.css` is legacy (opt-in via
 `.btn` for the pre-paper-mono chrome).
 
+## Cards vs. tables
+
+Pick the container by the primary verb, not the row count.
+
+- **Cards** — the user's job is _browse + act_. Each row carries
+  multiple primary actions (switch, verify, remove) and shows an
+  identity (avatar, name, email, status at a glance). The user
+  rarely scans past the first screenful. Example: Accounts.
+- **Tables** — the user's job is _scan + drill_. Rows have one
+  primary verb (click to open). Secondary actions hide behind a
+  kebab or context menu. The user expects dense scanning with
+  sortable columns. Examples: Projects, Sessions, Keys.
+
+A section with "multiple in-row verbs AND likely N > 20" is a
+hybrid — render as a table and lift the verbs into a row kebab
+(`NF.ellipsis`). Don't add a density toggle: one container per
+section keeps the design pass cheap and the a11y story simple.
+
 ## Non-negotiables
 
 - **One primary action per view** (one `solid` / one `.btn.primary`).

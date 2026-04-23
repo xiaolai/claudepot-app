@@ -31,6 +31,13 @@ export interface UseSessionsDataResult {
   repoGroups: RepositoryGroup[] | null;
   loading: boolean;
   error: string | null;
+  /** `true` when the visible rows came from the sessionStorage
+   * snapshot rather than a fresh IPC round. The UI surfaces an
+   * "Updating…" overlay while this holds alongside `loading=true`. */
+  servedFromCache: boolean;
+  /** Timestamp (ms) when the current fetch started. `null` when idle.
+   * The UI ticks off "Updating… Ns" from this. */
+  fetchStartedAt: number | null;
   /** Refetch all three. Each call bumps a monotonic token; older
    * in-flight responses bail out on arrival. */
   refresh: () => void;
@@ -42,14 +49,48 @@ export interface UseSessionsDataResult {
   >;
 }
 
+const CACHE_KEY = "claudepot.sessionsCache.v1";
+
+function loadSessionCache(): SessionRow[] | null {
+  try {
+    const raw = sessionStorage.getItem(CACHE_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw);
+    if (!Array.isArray(parsed)) return null;
+    return parsed as SessionRow[];
+  } catch {
+    return null;
+  }
+}
+
+function saveSessionCache(rows: SessionRow[]): void {
+  try {
+    sessionStorage.setItem(CACHE_KEY, JSON.stringify(rows));
+  } catch {
+    // Quota exceeded or sessionStorage disabled — drop silently; the
+    // cache is an optimization, not a correctness boundary.
+  }
+}
+
 export function useSessionsData(
   opts: UseSessionsDataOptions,
 ): UseSessionsDataResult {
-  const [sessions, setSessions] = useState<SessionRow[]>([]);
+  // Seed from sessionStorage so the table paints immediately on
+  // re-entry, instead of rendering a blank "Loading…" state while the
+  // backend parses cold. Stale rows beat a blank table — the fetch
+  // still runs in parallel and replaces the data.
+  const cachedOnMount = useRef<SessionRow[] | null>(loadSessionCache());
+  const [sessions, setSessions] = useState<SessionRow[]>(
+    () => cachedOnMount.current ?? [],
+  );
   const [projects, setProjects] = useState<ProjectInfo[]>([]);
   const [repoGroups, setRepoGroups] = useState<RepositoryGroup[] | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [servedFromCache, setServedFromCache] = useState<boolean>(
+    () => cachedOnMount.current !== null,
+  );
+  const [fetchStartedAt, setFetchStartedAt] = useState<number | null>(null);
 
   const tokenRef = useRef(0);
   const mountedRef = useRef(true);
@@ -72,6 +113,7 @@ export function useSessionsData(
   const refresh = useCallback(() => {
     const myToken = ++tokenRef.current;
     setLoading(true);
+    setFetchStartedAt(Date.now());
     setError(null);
     Promise.allSettled([
       api.sessionListAll(),
@@ -84,9 +126,12 @@ export function useSessionsData(
       if (ssRes.status === "rejected") {
         setError(String(ssRes.reason));
         setLoading(false);
+        setFetchStartedAt(null);
         return;
       }
       setSessions(ssRes.value);
+      setServedFromCache(false);
+      saveSessionCache(ssRes.value);
 
       // Secondary: projects.
       if (psRes.status === "fulfilled") {
@@ -118,6 +163,7 @@ export function useSessionsData(
       }
 
       setLoading(false);
+      setFetchStartedAt(null);
     });
   }, []);
 
@@ -132,6 +178,8 @@ export function useSessionsData(
     repoGroups,
     loading,
     error,
+    servedFromCache,
+    fetchStartedAt,
     refresh,
     setSessions,
     setRepoGroups,

@@ -11,6 +11,9 @@ import { PendingJournalsBanner } from "./components/PendingJournalsBanner";
 import { RunningOpStrip } from "./components/RunningOpStrip";
 import { StatusIssuesBanner } from "./components/StatusIssuesBanner";
 import { ToastContainer } from "./components/ToastContainer";
+import { CommandPalette } from "./components/CommandPalette";
+import { ConfirmDialog } from "./components/ConfirmDialog";
+import { ShortcutsModal } from "./components/ShortcutsModal";
 import { SplitBrainConfirm } from "./sections/accounts/SplitBrainConfirm";
 import { DesktopConfirmDialog } from "./sections/accounts/DesktopConfirmDialog";
 import { sections, sectionIds } from "./sections/registry";
@@ -32,15 +35,10 @@ const importSessions = () =>
   import("./sections/SessionsSection").then((m) => ({ default: m.SessionsSection }));
 const importKeys = () =>
   import("./sections/KeysSection").then((m) => ({ default: m.KeysSection }));
-const importActivity = () =>
-  import("./sections/ActivitySection").then((m) => ({
-    default: m.ActivitySection,
-  }));
 const ProjectsSection = lazy(importProjects);
 const SettingsSection = lazy(importSettings);
 const SessionsSection = lazy(importSessions);
 const KeysSection = lazy(importKeys);
-const ActivitySection = lazy(importActivity);
 const OperationProgressModal = lazy(() =>
   import("./sections/projects/OperationProgressModal").then((m) => ({
     default: m.OperationProgressModal,
@@ -57,7 +55,6 @@ function preloadSavedSection(): void {
     else if (id === "sessions") void importSessions();
     else if (id === "keys") void importKeys();
     else if (id === "settings") void importSettings();
-    else if (id === "activity") void importActivity();
   } catch {
     // localStorage unavailable — nothing to preload.
   }
@@ -93,22 +90,21 @@ function AppShell() {
   const [pendingSessionPath, setPendingSessionPath] = useState<string | null>(
     null,
   );
-  /**
-   * Pending flag that opens the command palette as soon as the
-   * Accounts section is mounted. WindowChrome's ⌘K hint is global,
-   * but the palette component currently lives inside AccountsSection
-   * because it owns the account-level actions. This flag lets the
-   * shell navigate to Accounts first, then AccountsSection drains
-   * the flag and opens the palette. Without this, ⌘K was a silent
-   * no-op on every non-Accounts section.
-   */
-  const [pendingOpenPalette, setPendingOpenPalette] = useState(false);
+  // Palette + shortcuts modal live at shell level so ⌘K / ⌘/ open
+  // without forcing a section switch.
+  const [showPalette, setShowPalette] = useState(false);
+  const [showShortcuts, setShowShortcuts] = useState(false);
 
   // Live Activity consent. On cold launch we ask the backend once
   // whether the consent modal still needs to fire. `true` = modal
   // open; `false` = either already accepted/declined, or the prefs
   // fetch failed (fail-closed: no modal means no surprise reads).
   const [showConsentModal, setShowConsentModal] = useState(false);
+  // On cold launch: fire the consent modal if the user has never been
+  // asked, otherwise start the live runtime when activity is enabled.
+  // The former sidebar "Off" chip (for the dedicated Activity row)
+  // went away with the C-1 A consolidation — Sessions' Live filter
+  // covers the same "is the runtime on" signal indirectly.
   useEffect(() => {
     let cancelled = false;
     api
@@ -117,7 +113,6 @@ function AppShell() {
         if (cancelled) return;
         if (!p.activity_consent_seen) setShowConsentModal(true);
         else if (p.activity_enabled) {
-          // Already opted-in on a prior run — start the runtime.
           api.sessionLiveStart().catch(() => {});
         }
       })
@@ -154,6 +149,10 @@ function AppShell() {
     requestDesktopOverwrite,
     dismissDesktopConfirm,
     confirmDesktopPending,
+    removeConfirmPending,
+    requestRemoveAccount,
+    dismissRemoveConfirm,
+    confirmRemoveAccount,
   } = useAppState();
   const { resolved: themeResolved, toggle: toggleTheme } = useTheme();
 
@@ -181,17 +180,33 @@ function AppShell() {
     preloadSavedSection();
   }, []);
 
-  // Cmd+, opens Settings (standard macOS shortcut)
+  // Shell-level keyboard shortcuts: ⌘, opens Settings, ⌘K opens the
+  // palette, ⌘/ opens the shortcuts reference. All three skip editable
+  // focus so typing inside an input doesn't hijack them.
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if (
-        (e.metaKey || e.ctrlKey) &&
-        e.key === "," &&
-        !e.shiftKey &&
-        !e.altKey
-      ) {
+      const mod = e.metaKey || e.ctrlKey;
+      if (!mod || e.altKey) return;
+      const el = document.activeElement as HTMLElement | null;
+      const tag = el?.tagName?.toLowerCase();
+      const editable =
+        tag === "input" || tag === "textarea" || el?.isContentEditable;
+
+      if (e.key === "," && !e.shiftKey) {
         e.preventDefault();
         setSection("settings");
+        return;
+      }
+      if ((e.key === "k" || e.key === "K") && !e.shiftKey) {
+        if (editable) return;
+        e.preventDefault();
+        setShowPalette(true);
+        return;
+      }
+      if (e.key === "/" && !e.shiftKey) {
+        if (editable) return;
+        e.preventDefault();
+        setShowShortcuts(true);
       }
     };
     window.addEventListener("keydown", onKey);
@@ -549,14 +564,7 @@ function AppShell() {
     [section],
   );
 
-  const openPalette = useCallback(() => {
-    // Navigate to Accounts (if not already there) and raise the flag
-    // — AccountsSection opens the palette when it next mounts or
-    // re-renders and clears the flag. Without the navigation step,
-    // ⌘K was a silent no-op on every other section.
-    setSection("accounts");
-    setPendingOpenPalette(true);
-  }, [setSection]);
+  const openPalette = useCallback(() => setShowPalette(true), []);
 
   const openLiveSession = useCallback(
     (s: LiveSessionSummary) => {
@@ -604,7 +612,9 @@ function AppShell() {
           onBind={handleBind}
           badges={{
             accounts: accounts.length || undefined,
-            activity: activityAlerts || undefined,
+            // Activity alerts propagate to the Sessions nav row now
+            // that Activity is folded into Sessions' "Live" filter.
+            sessions: activityAlerts || undefined,
           }}
           version={APP_VERSION}
           synced
@@ -644,11 +654,7 @@ function AppShell() {
           >
             <Suspense fallback={null}>
               {section === "accounts" && (
-                <AccountsSection
-                  onNavigate={setSection}
-                  pendingOpenPalette={pendingOpenPalette}
-                  onPaletteOpened={() => setPendingOpenPalette(false)}
-                />
+                <AccountsSection onNavigate={setSection} />
               )}
               {section === "projects" && (
                 <ProjectsSection
@@ -663,9 +669,6 @@ function AppShell() {
                     setPendingSessionPath(null)
                   }
                 />
-              )}
-              {section === "activity" && (
-                <ActivitySection onOpenSession={openLiveSession} />
               )}
               {section === "keys" && <KeysSection />}
               {section === "settings" && <SettingsSection />}
@@ -730,6 +733,61 @@ function AppShell() {
           onCancel={dismissDesktopConfirm}
           onConfirm={confirmDesktopPending}
         />
+      )}
+
+      {removeConfirmPending && (
+        <ConfirmDialog
+          title="Remove account?"
+          confirmLabel="Remove"
+          confirmDanger
+          body={
+            <>
+              <p>
+                Remove <strong>{removeConfirmPending.email}</strong>?
+              </p>
+              <p className="muted small">
+                Deletes credentials and Desktop profile. Active
+                CLI/Desktop pointers will be cleared. You'll have a few
+                seconds to undo from the toast.
+              </p>
+            </>
+          }
+          onCancel={dismissRemoveConfirm}
+          onConfirm={confirmRemoveAccount}
+        />
+      )}
+
+      {showPalette && appStatus && (
+        <CommandPalette
+          accounts={accounts}
+          status={appStatus}
+          onClose={() => setShowPalette(false)}
+          onSwitchCli={(a) => void requestCliSwap(a)}
+          onSwitchDesktop={(a) => void actions.useDesktop(a)}
+          onAdd={() => {
+            setSection("accounts");
+            window.dispatchEvent(new CustomEvent("cp-open-add"));
+          }}
+          onRefresh={() => void refreshAccounts()}
+          onRemove={(a) => requestRemoveAccount(a)}
+          onAdoptDesktop={(a) => {
+            if (a.desktop_profile_on_disk) requestDesktopOverwrite(a);
+            else void actions.adoptDesktop(a);
+          }}
+          onClearDesktop={requestDesktopSignOut}
+          onLaunchDesktop={() => {
+            api.desktopLaunch().catch((e) => {
+              const msg = e instanceof Error ? e.message : String(e);
+              pushToast("error", `Desktop launch failed: ${msg}`);
+            });
+          }}
+          onNavigate={setSection}
+          onShowShortcuts={() => setShowShortcuts(true)}
+        />
+      )}
+
+      {showShortcuts && (
+        <ShortcutsModal onClose={() => setShowShortcuts(false)} />
       )}
 
       <ToastContainer toasts={toasts} onDismiss={dismissToast} />

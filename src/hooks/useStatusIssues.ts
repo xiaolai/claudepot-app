@@ -276,8 +276,8 @@ export function useStatusIssues(opts: {
           issues.push({
             id: `desktop-candidate:${email.toLowerCase()}`,
             severity: "warning",
-            label: `Claude Desktop identity not verified`,
-            detail: `Possible match: ${email}. Open Claude Desktop once to refresh the verified identity.`,
+            label: "Couldn't confirm Claude Desktop's current account",
+            detail: `The most likely match is ${email}. Open Claude Desktop once to refresh this.`,
             dismissable: true,
           });
           break;

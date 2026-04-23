@@ -19,6 +19,22 @@ type Phase = (typeof PHASES)[number];
 type PhaseState = "pending" | "running" | "complete" | "error";
 
 /**
+ * User-facing label for each phase identifier. Source: the phase
+ * emitter in `crates/claudepot-core/src/project.rs` — one entry per
+ * `sink.phase("Pn", …)` call site. Keep the labels short so the row
+ * reads well at the modal's default width.
+ */
+const PHASE_LABEL: Record<Phase, string> = {
+  P3: "Moving source directory",
+  P4: "Renaming Claude Code project",
+  P5: "Updating history.jsonl",
+  P6: "Rewriting session transcripts",
+  P7: "Updating Claude Code config",
+  P8: "Moving auto-memory directory",
+  P9: "Updating project settings",
+};
+
+/**
  * Subscribes to `op-progress::<opId>` and renders a phase-by-phase
  * progress view. Serves resume, rollback, and (in Step 6) fresh
  * rename. Closing mid-op only hides the modal — the op keeps running
@@ -159,7 +175,9 @@ export function OperationProgressModal({
             const state = phases[p];
             return (
               <li key={p} className={`phase phase-${state}`}>
-                <span className="phase-tag">{p}</span>
+                <span className="phase-tag" title={`Internal id: ${p}`}>
+                  {PHASE_LABEL[p]}
+                </span>
                 <span className="phase-label">{state}</span>
                 {sub && sub.phase === p && (
                   <span className="phase-progress mono small muted">

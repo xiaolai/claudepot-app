@@ -1,3 +1,4 @@
+import type React from "react";
 import { Divider } from "../components/primitives/Divider";
 import { Glyph } from "../components/primitives/Glyph";
 import { SectionLabel } from "../components/primitives/SectionLabel";
@@ -22,8 +23,9 @@ interface AppSidebarProps {
   binding: { cli: string | null; desktop: string | null };
   onBind: (target: SwapTargetId, uuid: string) => void;
 
-  /** Counts shown on the right side of primary-nav rows. */
-  badges?: Partial<Record<string, number>>;
+  /** Trailing content for primary-nav rows. Numbers render as plain
+   *  counts; any other ReactNode (e.g. "Off" chip) renders verbatim. */
+  badges?: Partial<Record<string, React.ReactNode>>;
 
   /** Small text shown below the sync dot. */
   version?: string;

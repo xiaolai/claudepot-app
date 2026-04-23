@@ -13,7 +13,8 @@ export interface PaletteAction {
     | "trash"
     | "folder"
     | "wrench"
-    | "settings";
+    | "settings"
+    | "help";
   category: "switch" | "action" | "navigate";
   disabled?: boolean;
   onSelect: () => void;
@@ -46,6 +47,8 @@ export function usePaletteActions(opts: {
   onLaunchDesktop?: () => void;
   /** Jump to a top-level section — "accounts", "projects", "settings". */
   onNavigate?: (section: string, subRoute?: string | null) => void;
+  /** Open the global keyboard shortcuts reference modal. */
+  onShowShortcuts?: () => void;
 }) {
   const {
     accounts,
@@ -59,6 +62,7 @@ export function usePaletteActions(opts: {
     onClearDesktop,
     onLaunchDesktop,
     onNavigate,
+    onShowShortcuts,
   } = opts;
 
   const actions = useMemo(() => {
@@ -148,6 +152,16 @@ export function usePaletteActions(opts: {
     }
     items.push({ id: "add", label: "Add account", iconName: "user-plus", category: "action", onSelect: onAdd });
     items.push({ id: "refresh", label: "Refresh all", iconName: "refresh-cw", category: "action", onSelect: onRefresh });
+    if (onShowShortcuts) {
+      items.push({
+        id: "shortcuts",
+        label: "Show keyboard shortcuts",
+        detail: "⌘ /",
+        iconName: "help",
+        category: "action",
+        onSelect: onShowShortcuts,
+      });
+    }
     for (const a of accounts) {
       items.push({
         id: `rm-${a.uuid}`,
@@ -171,6 +185,7 @@ export function usePaletteActions(opts: {
     onClearDesktop,
     onLaunchDesktop,
     onNavigate,
+    onShowShortcuts,
   ]);
 
   return {

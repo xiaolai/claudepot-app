@@ -1,8 +1,12 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import {
+  isPermissionGranted,
+  requestPermission,
+  sendNotification,
+} from "@tauri-apps/plugin-notification";
 import type { NfIcon } from "../icons";
 import { api } from "../api";
 import { Button } from "../components/primitives/Button";
-import { ConfirmDialog } from "../components/ConfirmDialog";
 import { ExternalLink } from "../components/primitives/ExternalLink";
 import { Glyph } from "../components/primitives/Glyph";
 import { Tag } from "../components/primitives/Tag";
@@ -22,12 +26,15 @@ type Tab =
   | "appearance"
   | "activity"
   | "protected"
-  | "cleanup"
   | "github"
   | "locks"
   | "diagnostics"
   | "about";
 
+// Cleanup was removed in the C-1 E consolidation: GC moved to
+// Projects → Maintenance (GcCard), Rebuild session index moved to
+// Sessions → Cleanup (SessionIndexRebuild). Settings no longer owns
+// any repair/cleanup surfaces.
 const TAB_DEFS: ReadonlyArray<{
   id: Tab;
   label: string;
@@ -38,7 +45,6 @@ const TAB_DEFS: ReadonlyArray<{
   { id: "appearance",  label: "Appearance",     glyph: NF.sun,      group: "core" },
   { id: "activity",    label: "Activity",       glyph: NF.bolt,     group: "core" },
   { id: "protected",   label: "Protected paths", glyph: NF.shield,  group: "advanced" },
-  { id: "cleanup",     label: "Cleanup",        glyph: NF.trash,    group: "advanced" },
   { id: "github",      label: "GitHub",         glyph: NF.key,      group: "advanced" },
   { id: "locks",       label: "Locks",          glyph: NF.lock,     group: "advanced" },
   { id: "diagnostics", label: "Diagnostics",    glyph: NF.wrench,   group: "advanced" },
@@ -49,7 +55,6 @@ const SECTION_OPTIONS = [
   { value: "accounts", label: "Accounts" },
   { value: "projects", label: "Projects" },
   { value: "sessions", label: "Sessions" },
-  { value: "activity", label: "Activity" },
   { value: "keys",     label: "Keys"     },
   { value: "settings", label: "Settings" },
 ] as const;
@@ -93,7 +98,6 @@ export function SettingsSection() {
           {tab === "appearance" && <AppearancePane />}
           {tab === "activity" && <ActivityPane pushToast={pushToast} />}
           {tab === "protected" && <ProtectedPathsPane pushToast={pushToast} />}
-          {tab === "cleanup" && <CleanupPane pushToast={pushToast} />}
           {tab === "github" && <GithubPane pushToast={pushToast} />}
           {tab === "locks" && <LocksPane pushToast={pushToast} />}
           {tab === "diagnostics" && <DiagnosticsPane pushToast={pushToast} />}
@@ -400,145 +404,6 @@ function AppearancePane() {
 }
 
 /* ──────────────────────────────────────────────────────────── */
-/*                      Cleanup pane                           */
-/* ──────────────────────────────────────────────────────────── */
-
-function CleanupPane({
-  pushToast,
-}: {
-  pushToast: (t: "info" | "error", msg: string) => void;
-}) {
-  const gc = useSettingsActions(pushToast);
-  return (
-    <div style={{ display: "flex", flexDirection: "column", gap: "var(--sp-32)" }}>
-      <SettingsGroup desc="Remove abandoned rename journals and old recovery snapshots. Preview first — the delete is irreversible.">
-        <Row label="Older than">
-          <div
-            style={{
-              display: "flex",
-              alignItems: "center",
-              gap: "var(--sp-8)",
-            }}
-          >
-            <input
-              type="number"
-              min={1}
-              max={365}
-              value={gc.gcDays}
-              onChange={(e) => gc.setGcDays(Number(e.target.value))}
-              style={{ ...inputStyle, width: "var(--sp-80)" }}
-            />
-            <span className="mono-faint">days</span>
-          </div>
-        </Row>
-        <div style={actionsStyle}>
-          <Button
-            variant="subtle"
-            onClick={gc.gcDryRun}
-            disabled={gc.gcBusy}
-            title="Preview what GC would remove"
-          >
-            Preview
-          </Button>
-          <Button
-            variant="solid"
-            danger
-            onClick={gc.gcExecute}
-            disabled={gc.gcBusy || !gc.gcResult}
-            title="Permanently remove abandoned journals and old snapshots"
-          >
-            Execute GC
-          </Button>
-        </div>
-        {gc.gcResult && (
-          <div
-            style={{
-              padding: "var(--sp-10) var(--sp-12)",
-              background: "var(--bg-sunken)",
-              border: "var(--bw-hair) solid var(--line)",
-              borderRadius: "var(--r-2)",
-              fontSize: "var(--fs-xs)",
-              color: "var(--fg-muted)",
-            }}
-          >
-            Would remove:{" "}
-            <strong style={{ color: "var(--fg)" }}>
-              {gc.gcResult.removed_journals}
-            </strong>{" "}
-            journals,{" "}
-            <strong style={{ color: "var(--fg)" }}>
-              {gc.gcResult.removed_snapshots}
-            </strong>{" "}
-            snapshots
-          </div>
-        )}
-      </SettingsGroup>
-
-      <SessionIndexRebuildGroup pushToast={pushToast} />
-    </div>
-  );
-}
-
-function SessionIndexRebuildGroup({
-  pushToast,
-}: {
-  pushToast: (t: "info" | "error", msg: string) => void;
-}) {
-  const [busy, setBusy] = useState(false);
-  const [confirming, setConfirming] = useState(false);
-
-  const rebuild = useCallback(async () => {
-    setConfirming(false);
-    setBusy(true);
-    try {
-      await api.sessionIndexRebuild();
-      pushToast(
-        "info",
-        "Session index cleared. The next Sessions-tab load will re-parse every transcript.",
-      );
-    } catch (e) {
-      pushToast("error", `Rebuild failed: ${e}`);
-    } finally {
-      setBusy(false);
-    }
-  }, [pushToast]);
-
-  return (
-    <>
-      <SettingsGroup desc="Drop every cached row in ~/.claudepot/sessions.db. Safe — no transcripts or credentials are touched; only derived rows are removed. The next Sessions-tab open re-parses from cold, which can take tens of seconds on a large account.">
-        <div style={actionsStyle}>
-          <Button
-            variant="subtle"
-            onClick={() => setConfirming(true)}
-            disabled={busy}
-            title="Truncate the session index cache"
-          >
-            Rebuild session index
-          </Button>
-        </div>
-      </SettingsGroup>
-      {confirming && (
-        <ConfirmDialog
-          title="Rebuild session index?"
-          body={
-            <p style={{ margin: 0 }}>
-              This clears the persistent cache at{" "}
-              <code>~/.claudepot/sessions.db</code>. Nothing under{" "}
-              <code>~/.claude/projects/</code> is modified. The next open
-              of the Sessions tab will be slow while every transcript is
-              re-parsed.
-            </p>
-          }
-          confirmLabel="Rebuild"
-          onCancel={() => setConfirming(false)}
-          onConfirm={rebuild}
-        />
-      )}
-    </>
-  );
-}
-
-/* ──────────────────────────────────────────────────────────── */
 /*                        Locks pane                           */
 /* ──────────────────────────────────────────────────────────── */
 
@@ -778,6 +643,9 @@ function ActivityPane({
         await api.preferencesSetActivity({ enabled: next });
         if (next) await api.sessionLiveStart();
         else await api.sessionLiveStop();
+        // Sessions section's transcript viewer + any other consumer
+        // of `useActivityPrefs` picks up the change without polling.
+        window.dispatchEvent(new CustomEvent("cp-activity-prefs-changed"));
         pushToast(
           "info",
           next ? "Activity feature enabled." : "Activity feature disabled.",
@@ -796,6 +664,7 @@ function ActivityPane({
       setHideThinking(next);
       try {
         await api.preferencesSetActivity({ hideThinking: next });
+        window.dispatchEvent(new CustomEvent("cp-activity-prefs-changed"));
       } catch (e) {
         setHideThinking(prev);
         pushToast("error", `Toggle failed: ${e}`);
@@ -939,6 +808,39 @@ function ActivityPane({
               fontVariantNumeric: "tabular-nums",
             }}
           />
+        </Row>
+        <Row
+          label="Send test notification"
+          hint="Fire a sample OS notification to verify permissions and that the runtime path is wired. Doesn't toggle any preference."
+        >
+          <Button
+            variant="ghost"
+            onClick={async () => {
+              try {
+                const granted = await isPermissionGranted();
+                if (!granted) {
+                  const perm = await requestPermission();
+                  if (perm !== "granted") {
+                    pushToast(
+                      "error",
+                      "OS notification permission denied. Check System Settings.",
+                    );
+                    return;
+                  }
+                }
+                sendNotification({
+                  title: "Claudepot test",
+                  body: "If you see this, notifications are working.",
+                });
+                pushToast("info", "Test notification sent.");
+              } catch (e) {
+                const msg = e instanceof Error ? e.message : String(e);
+                pushToast("error", `Couldn't send notification: ${msg}`);
+              }
+            }}
+          >
+            Send test
+          </Button>
         </Row>
         <Row
           label="Alert on spend"
