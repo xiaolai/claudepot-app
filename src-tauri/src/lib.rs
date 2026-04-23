@@ -1,5 +1,6 @@
 mod app_menu;
 mod commands;
+mod commands_config;
 mod dto;
 mod ops;
 mod preferences;
@@ -241,6 +242,11 @@ pub fn run() {
             commands::settings_github_token_get,
             commands::settings_github_token_set,
             commands::settings_github_token_clear,
+            commands_config::config_scan,
+            commands_config::config_list_editors,
+            commands_config::config_get_editor_defaults,
+            commands_config::config_set_editor_default,
+            commands_config::config_open_in_editor_path,
         ])
         .run(tauri::generate_context!())
         .unwrap_or_else(|e| {

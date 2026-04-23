@@ -50,6 +50,10 @@ import type {
   ExportFormatInput,
   RedactionPolicyInput,
   GithubTokenStatus,
+  ConfigTreeDto,
+  ConfigKind,
+  EditorCandidateDto,
+  EditorDefaultsDto,
 } from "./types";
 
 export const api = {
@@ -583,5 +587,25 @@ export const api = {
       fromMs,
       toMs,
       bucketCount,
+    }),
+
+  // Config section — P0 surface.
+  configScan: (cwd?: string | null) =>
+    invoke<ConfigTreeDto>("config_scan", { cwd: cwd ?? null }),
+  configListEditors: (force?: boolean) =>
+    invoke<EditorCandidateDto[]>("config_list_editors", { force: !!force }),
+  configGetEditorDefaults: () =>
+    invoke<EditorDefaultsDto>("config_get_editor_defaults"),
+  configSetEditorDefault: (kind: ConfigKind | null, editorId: string) =>
+    invoke<void>("config_set_editor_default", { kind, editorId }),
+  configOpenInEditorPath: (
+    path: string,
+    editorId: string | null,
+    kindHint: ConfigKind | null,
+  ) =>
+    invoke<void>("config_open_in_editor_path", {
+      path,
+      editorId,
+      kindHint,
     }),
 };

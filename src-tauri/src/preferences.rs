@@ -5,6 +5,7 @@
 //! avoid a visible dock-icon flash on cold launch. Any preference that
 //! the CLI doesn't care about belongs here, not in `claudepot-core`.
 
+use claudepot_core::config_view::model::EditorDefaults;
 use claudepot_core::paths;
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
@@ -48,6 +49,13 @@ pub struct Preferences {
     /// None = feature off; Some(x) = fire when session spend ≥ $x.
     /// Populated once the pricing module lands in M4.
     pub notify_on_spend_usd: Option<f32>,
+
+    /// Config section — per-kind "Open in…" editor preferences. Defaults
+    /// to an empty `by_kind` + `fallback = "system"`, meaning the OS
+    /// default handler is used until the user sets a preference. Never
+    /// written to CC configuration.
+    #[serde(default)]
+    pub editor_defaults: EditorDefaults,
 }
 
 /// Helper for serde's `#[serde(default = "...")]` on a bool field.
