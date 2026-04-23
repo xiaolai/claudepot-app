@@ -1,6 +1,8 @@
 import { type MouseEvent } from "react";
 import { Avatar, avatarColorFor } from "../../components/primitives/Avatar";
+import { IconButton } from "../../components/primitives/IconButton";
 import { TargetButton } from "../../components/primitives/TargetButton";
+import { NF } from "../../icons";
 import type { AccountSummary, AppStatus, UsageEntry } from "../../types";
 import { AnomalyBanner, isAnomaly } from "./AnomalyBanner";
 import { HealthFooter } from "./HealthFooter";
@@ -175,6 +177,30 @@ export function AccountCard({
         >
           <TargetButton {...cliProps} />
           {desktopProps && <TargetButton {...desktopProps} />}
+          {onContextMenu && (
+            <IconButton
+              glyph={NF.ellipsis}
+              size="sm"
+              onClick={() => {
+                // Anchor the menu at the button's position — the
+                // click event's synthetic coords are enough to land
+                // the popover near where the user expects.
+                const el = document.activeElement as HTMLElement | null;
+                const rect = el?.getBoundingClientRect();
+                onContextMenu(
+                  {
+                    preventDefault: () => {},
+                    clientX: rect ? rect.right : 0,
+                    clientY: rect ? rect.bottom : 0,
+                  } as unknown as MouseEvent,
+                  a,
+                );
+              }}
+              title="More actions"
+              aria-label={`More actions for ${a.email}`}
+              aria-haspopup="menu"
+            />
+          )}
         </div>
       </div>
 

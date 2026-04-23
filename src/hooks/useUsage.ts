@@ -8,6 +8,7 @@ import type { UsageMap } from "../types";
  *  silently swallowed (the backend already absorbs rate-limit states). */
 export function useUsage() {
   const [usage, setUsage] = useState<UsageMap>({});
+  const [lastFetchedAt, setLastFetchedAt] = useState<number | null>(null);
   const lastRef = useRef(0);
   const fetchingRef = useRef(false);
 
@@ -18,6 +19,7 @@ export function useUsage() {
     try {
       const data = await api.fetchAllUsage();
       setUsage(data);
+      setLastFetchedAt(Date.now());
       // Keep the tray's Usage submenu in sync with what the cards show.
       // Best-effort: swallow failures so a missing window/tray doesn't
       // break the happy path.
@@ -39,6 +41,7 @@ export function useUsage() {
     try {
       const entry = await api.refreshUsageFor(uuid);
       setUsage((prev) => ({ ...prev, [uuid]: entry }));
+      setLastFetchedAt(Date.now());
       emit("rebuild-tray-menu").catch(() => {});
     } catch {
       // Silently ignore — stale entry stays in state.
@@ -72,5 +75,5 @@ export function useUsage() {
     };
   }, [refreshUsage]);
 
-  return { usage, refreshUsage, refreshUsageFor };
+  return { usage, refreshUsage, refreshUsageFor, lastFetchedAt };
 }
