@@ -168,16 +168,34 @@ pub async fn adopt_current(
         platform.quit().await?;
     }
 
-    // Overwrite: wipe the existing profile dir so the new snapshot is
-    // authoritative. snapshot()'s own purge-missing logic would
-    // eventually converge, but a fresh tree is simpler and avoids any
-    // partial-read race if the profile was mid-restore.
-    if profile_dir.exists() {
+    // Overwrite-safe: stage the old profile into a temp dir first so
+    // we can roll back if snapshot() fails. Codex follow-up review:
+    // previous code unconditionally purged the old profile before
+    // writing the new one, so a snapshot failure left the user with
+    // NO profile at all.
+    let stash = if profile_dir.exists() {
+        let staging = tempfile::Builder::new()
+            .prefix("claudepot-adopt-prev-")
+            .tempdir()
+            .map_err(|e| AdoptError::Sidecar(format!("staging dir: {e}")))?;
+        let dst = staging.path().join("profile");
+        crate::fs_utils::copy_dir_recursive(&profile_dir, &dst)
+            .map_err(|e| AdoptError::Sidecar(format!("stashing old profile: {e}")))?;
         std::fs::remove_dir_all(&profile_dir)
             .map_err(|e| AdoptError::Sidecar(format!("purging old profile: {e}")))?;
-    }
+        Some((staging, dst))
+    } else {
+        None
+    };
 
-    swap::snapshot(&data_dir, target_uuid, items)?;
+    if let Err(e) = swap::snapshot(&data_dir, target_uuid, items) {
+        // Roll the staged old profile back into place so the user
+        // isn't left with a deleted profile after a failed adopt.
+        if let Some((_holder, staged)) = stash {
+            let _ = crate::fs_utils::copy_dir_recursive(&staged, &profile_dir);
+        }
+        return Err(e.into());
+    }
 
     // Count + size for the outcome DTO. Cheap because we just wrote
     // the files — everything is already in the filesystem cache.
