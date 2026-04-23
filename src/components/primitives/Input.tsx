@@ -4,6 +4,7 @@ import {
   type FocusEvent,
   type KeyboardEvent,
   type ReactNode,
+  type Ref,
   useState,
 } from "react";
 import type { NfIcon } from "../../icons";
@@ -22,6 +23,12 @@ interface InputProps {
   autoFocus?: boolean;
   disabled?: boolean;
   style?: CSSProperties;
+  /**
+   * Forward a ref to the inner `<input>` element. Callers programmatic-
+   * ally focus the field (e.g. ⌘F in the Config section) by assigning
+   * the ref and calling `.focus()` / `.select()`.
+   */
+  inputRef?: Ref<HTMLInputElement>;
   "aria-label"?: string;
 }
 
@@ -43,6 +50,7 @@ export function Input({
   autoFocus,
   disabled,
   style,
+  inputRef,
   ...aria
 }: InputProps) {
   const [focused, setFocused] = useState(false);
@@ -64,6 +72,7 @@ export function Input({
     >
       {glyph && <Glyph g={glyph} color="var(--fg-faint)" />}
       <input
+        ref={inputRef}
         value={value ?? ""}
         onChange={onChange}
         onKeyDown={onKeyDown}

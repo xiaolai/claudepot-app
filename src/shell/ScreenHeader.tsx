@@ -79,7 +79,7 @@ export function ScreenHeader({
       <div
         style={{
           display: "flex",
-          alignItems: "flex-end",
+          alignItems: "center",
           gap: "var(--sp-16)",
         }}
       >
@@ -112,6 +112,7 @@ export function ScreenHeader({
           <div
             style={{
               display: "flex",
+              alignItems: "center",
               gap: "var(--sp-8)",
               flexShrink: 0,
             }}

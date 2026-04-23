@@ -20,7 +20,7 @@ describe("EffectiveMcpRenderer", () => {
       expect(configEffectiveMcpSpy).toHaveBeenCalledWith("interactive", "/");
     });
 
-    const niBtn = screen.getByRole("radio", { name: /non-interactive/i });
+    const niBtn = screen.getByRole("tab", { name: /non-interactive/i });
     await userEvent.click(niBtn);
     await waitFor(() => {
       expect(configEffectiveMcpSpy).toHaveBeenCalledWith(

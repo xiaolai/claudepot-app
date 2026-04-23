@@ -267,6 +267,8 @@ function Value({ value, suppressed }: { value: unknown; suppressed: boolean }) {
 }
 
 function ScopeBadge({ label }: { label: string }) {
+  // Lightweight mono badge — Tag is too heavy for a dense inline
+  // annotation on every primitive leaf. Keeps visual noise low.
   return (
     <span
       style={{
@@ -277,6 +279,7 @@ function ScopeBadge({ label }: { label: string }) {
         border: "var(--bw-hair) solid var(--line)",
         borderRadius: "var(--r-1)",
         fontFamily: "var(--mono)",
+        whiteSpace: "nowrap",
       }}
     >
       {label}

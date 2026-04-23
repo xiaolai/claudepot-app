@@ -40,6 +40,13 @@ vi.mock("@tauri-apps/plugin-dialog", () => ({
   open: vi.fn(),
 }));
 
+// ConfigSection pulls pushToast from AppStateProvider; mock the hook
+// directly so tests don't need to mount the whole provider tree.
+const pushToastSpy = vi.fn();
+vi.mock("../providers/AppStateProvider", () => ({
+  useAppState: () => ({ pushToast: pushToastSpy }),
+}));
+
 // Import after the mocks so the mocked api is captured.
 import { ConfigSection } from "./ConfigSection";
 

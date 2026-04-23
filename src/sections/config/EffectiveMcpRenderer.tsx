@@ -5,24 +5,22 @@ import type {
   ConfigEffectiveMcpServerDto,
   McpSimulationMode,
 } from "../../types";
+import { Tag, type TagTone } from "../../components/primitives/Tag";
+import { SegmentedControl } from "../../components/SegmentedControl";
 
-const MODES: { value: McpSimulationMode; label: string; title: string }[] = [
-  {
-    value: "interactive",
-    label: "interactive",
-    title: "Default — approval prompts shown on startup.",
-  },
-  {
-    value: "non_interactive",
-    label: "non-interactive",
-    title: "SDK / `claude -p` / piped input. Auto-approves project servers when projectSettings is enabled.",
-  },
-  {
-    value: "skip_permissions",
-    label: "skip-permissions",
-    title: "--dangerously-skip-permissions. Auto-approves project servers when projectSettings is enabled.",
-  },
-];
+const MODES: readonly { id: McpSimulationMode; label: string }[] = [
+  { id: "interactive", label: "interactive" },
+  { id: "non_interactive", label: "non-interactive" },
+  { id: "skip_permissions", label: "skip-permissions" },
+] as const;
+
+const MODE_TITLES: Record<McpSimulationMode, string> = {
+  interactive: "Default — approval prompts shown on startup.",
+  non_interactive:
+    "SDK / `claude -p` / piped input. Auto-approves project servers when projectSettings is enabled.",
+  skip_permissions:
+    "--dangerously-skip-permissions. Auto-approves project servers when projectSettings is enabled.",
+};
 
 /**
  * Effective MCP view — shows every MCP server CC would consider, the
@@ -63,7 +61,7 @@ export function EffectiveMcpRenderer({ cwd }: { cwd: string | null }) {
         minHeight: 0,
       }}
     >
-      <ModePill mode={mode} onChange={setMode} />
+      <ModeBar mode={mode} onChange={setMode} />
       {data?.enterprise_lockout && <EnterpriseBanner />}
       <div style={{ flex: 1, minHeight: 0, overflow: "auto" }}>
         {error ? (
@@ -99,7 +97,7 @@ export function EffectiveMcpRenderer({ cwd }: { cwd: string | null }) {
   );
 }
 
-function ModePill({
+function ModeBar({
   mode,
   onChange,
 }: {
@@ -108,51 +106,27 @@ function ModePill({
 }) {
   return (
     <div
-      role="radiogroup"
-      aria-label="MCP simulation mode"
       style={{
         display: "flex",
-        gap: "var(--sp-4)",
+        alignItems: "center",
+        gap: "var(--sp-10)",
         padding: "var(--sp-8) var(--sp-16)",
         borderBottom: "var(--bw-hair) solid var(--line)",
-        alignItems: "center",
       }}
+      title={MODE_TITLES[mode]}
     >
       <span
+        className="mono-cap"
         style={{
           fontSize: "var(--fs-2xs)",
           color: "var(--fg-faint)",
-          marginRight: "var(--sp-4)",
+          letterSpacing: "var(--ls-wide)",
+          textTransform: "uppercase",
         }}
       >
-        simulate:
+        Simulate
       </span>
-      {MODES.map((m) => {
-        const active = m.value === mode;
-        return (
-          <button
-            key={m.value}
-            type="button"
-            role="radio"
-            aria-checked={active}
-            title={m.title}
-            onClick={() => onChange(m.value)}
-            className="pm-focus"
-            style={{
-              padding: "var(--sp-3) var(--sp-10)",
-              fontSize: "var(--fs-2xs)",
-              fontFamily: "var(--mono)",
-              background: active ? "var(--accent-soft)" : "transparent",
-              color: active ? "var(--accent-ink)" : "var(--fg-muted)",
-              border: "var(--bw-hair) solid var(--line)",
-              borderRadius: "var(--r-2)",
-              cursor: "pointer",
-            }}
-          >
-            {m.label}
-          </button>
-        );
-      })}
+      <SegmentedControl options={MODES} value={mode} onChange={onChange} />
     </div>
   );
 }
@@ -186,8 +160,15 @@ function ServerTable({
         width: "100%",
         borderCollapse: "collapse",
         fontSize: "var(--fs-xs)",
+        tableLayout: "fixed",
       }}
     >
+      <colgroup>
+        <col />
+        <col style={{ width: "30%" }} />
+        <col style={{ width: "var(--config-cmd-col-max)" }} />
+        <col style={{ width: "20%" }} />
+      </colgroup>
       <thead>
         <tr
           style={{
@@ -203,10 +184,10 @@ function ServerTable({
             Source
           </th>
           <th style={{ padding: "var(--sp-6) var(--sp-12)", fontWeight: 500 }}>
-            Approval
+            Command
           </th>
           <th style={{ padding: "var(--sp-6) var(--sp-12)", fontWeight: 500 }}>
-            Command
+            Approval
           </th>
         </tr>
       </thead>
@@ -232,7 +213,14 @@ function ServerRow({ server }: { server: ConfigEffectiveMcpServerDto }) {
         }}
         onClick={() => setOpen((v) => !v)}
       >
-        <td style={{ padding: "var(--sp-6) var(--sp-12)" }}>
+        <td
+          style={{
+            padding: "var(--sp-6) var(--sp-12)",
+            overflow: "hidden",
+            textOverflow: "ellipsis",
+            whiteSpace: "nowrap",
+          }}
+        >
           <span style={{ fontWeight: 500 }}>{server.name}</span>
           {server.contributors.length > 1 && (
             <span
@@ -253,16 +241,13 @@ function ServerRow({ server }: { server: ConfigEffectiveMcpServerDto }) {
             fontFamily: "var(--mono)",
             fontSize: "var(--fs-2xs)",
             color: "var(--fg-muted)",
+            overflow: "hidden",
+            textOverflow: "ellipsis",
+            whiteSpace: "nowrap",
           }}
+          title={server.source_scope}
         >
           {server.source_scope}
-        </td>
-        <td style={{ padding: "var(--sp-6) var(--sp-12)" }}>
-          <ApprovalBadge
-            approval={server.approval}
-            reason={server.approval_reason}
-            blockedBy={server.blocked_by}
-          />
         </td>
         <td
           style={{
@@ -273,11 +258,17 @@ function ServerRow({ server }: { server: ConfigEffectiveMcpServerDto }) {
             overflow: "hidden",
             textOverflow: "ellipsis",
             whiteSpace: "nowrap",
-            maxWidth: 240,
           }}
           title={cmd}
         >
           {cmd}
+        </td>
+        <td style={{ padding: "var(--sp-6) var(--sp-12)" }}>
+          <ApprovalBadge
+            approval={server.approval}
+            reason={server.approval_reason}
+            blockedBy={server.blocked_by}
+          />
         </td>
       </tr>
       {open && (
@@ -291,6 +282,7 @@ function ServerRow({ server }: { server: ConfigEffectiveMcpServerDto }) {
                 fontSize: "var(--fs-2xs)",
                 color: "var(--fg-muted)",
                 whiteSpace: "pre-wrap",
+                overflowWrap: "anywhere",
               }}
             >
               {JSON.stringify(server.masked, null, 2)}
@@ -311,13 +303,14 @@ function ApprovalBadge({
   reason: string | null;
   blockedBy: string | null;
 }) {
-  const colorMap: Record<typeof approval, { bg: string; fg: string }> = {
-    approved: { bg: "var(--accent-soft)", fg: "var(--accent-ink)" },
-    auto_approved: { bg: "var(--accent-soft)", fg: "var(--accent-ink)" },
-    pending: { bg: "var(--bg-sunken)", fg: "var(--fg-muted)" },
-    rejected: { bg: "var(--bg-sunken)", fg: "var(--danger)" },
-  };
-  const c = colorMap[approval];
+  const tone: TagTone =
+    approval === "approved"
+      ? "ok"
+      : approval === "auto_approved"
+        ? "accent"
+        : approval === "rejected"
+          ? "danger"
+          : "neutral";
   const label = approval.replace(/_/g, " ");
   const title =
     blockedBy != null
@@ -326,20 +319,8 @@ function ApprovalBadge({
         ? `reason: ${reason}`
         : undefined;
   return (
-    <span
-      title={title}
-      style={{
-        display: "inline-block",
-        padding: "0 var(--sp-6)",
-        fontSize: "var(--fs-2xs)",
-        fontFamily: "var(--mono)",
-        color: c.fg,
-        background: c.bg,
-        borderRadius: "var(--r-1)",
-        border: "var(--bw-hair) solid var(--line)",
-      }}
-    >
+    <Tag tone={tone} title={title}>
       {label}
-    </span>
+    </Tag>
   );
 }

@@ -41,7 +41,11 @@ interface PreviewHeaderProps {
  * `$EDITOR` + system default + "Other…" + "Set as default for
  * <Kind>" / "Set as fallback default" + "Refresh editor list".
  *
- * One primary action per view — the split-button. Design.md preserved.
+ * One primary action per view — the split-button. design.md preserved.
+ *
+ * The split-button group caps its label at `--config-cmd-col-max`
+ * with ellipsis, so long editor names ("Visual Studio Code") never
+ * push the group beyond its grid column.
  */
 export function PreviewHeader({
   title,
@@ -58,7 +62,11 @@ export function PreviewHeader({
   style,
 }: PreviewHeaderProps) {
   const [menuOpen, setMenuOpen] = useState(false);
+  const [menuMaxHeight, setMenuMaxHeight] = useState<string>(
+    "var(--config-menu-max-height)",
+  );
   const menuRef = useRef<HTMLDivElement | null>(null);
+  const splitRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
     if (!menuOpen) return;
@@ -78,6 +86,21 @@ export function PreviewHeader({
     };
   }, [menuOpen]);
 
+  // When the menu opens, measure the anchor against the viewport so we
+  // can cap max-height at (viewport-bottom - anchor-bottom - padding).
+  // Falls back to the token ceiling when the measurement would leave
+  // too little room.
+  useEffect(() => {
+    if (!menuOpen || !splitRef.current) return;
+    const r = splitRef.current.getBoundingClientRect();
+    const available = window.innerHeight - r.bottom - 24;
+    if (available < 200) {
+      setMenuMaxHeight("var(--config-menu-max-height)");
+      return;
+    }
+    setMenuMaxHeight(`min(var(--config-menu-max-height), ${available}px)`);
+  }, [menuOpen]);
+
   const resolvedLabel = useMemo(() => {
     if (!editors || !defaults) return "Open in…";
     const byKindId = kind ? defaults.by_kind[kind] : undefined;
@@ -90,6 +113,7 @@ export function PreviewHeader({
 
   const disabled = !path;
   const loading = !editors || !defaults;
+  const buttonLabel = loading ? "Detecting editors…" : resolvedLabel;
 
   return (
     <header
@@ -108,6 +132,7 @@ export function PreviewHeader({
           alignItems: "flex-start",
           justifyContent: "space-between",
           gap: "var(--sp-16)",
+          minWidth: 0,
         }}
       >
         <div style={{ minWidth: 0, flex: 1 }}>
@@ -145,25 +170,38 @@ export function PreviewHeader({
                 overflow: "hidden",
                 textOverflow: "ellipsis",
                 whiteSpace: "nowrap",
+                direction: "rtl",
+                textAlign: "left",
               }}
               title={path}
             >
-              {path}
+              {/* dir="ltr" wrapper preserves the leading slash sign while
+                   direction:rtl causes ellipsis to bite off the LEFT
+                   (start) of the path — so the filename stays visible
+                   when the column is narrow. */}
+              <bdi dir="ltr">{path}</bdi>
             </div>
           )}
         </div>
 
         <div
           ref={menuRef}
-          style={{ position: "relative", display: "flex", alignItems: "center" }}
+          style={{
+            position: "relative",
+            display: "flex",
+            alignItems: "center",
+            flexShrink: 0,
+          }}
         >
           <div
+            ref={splitRef}
             style={{
               display: "inline-flex",
               alignItems: "stretch",
               borderRadius: "var(--r-2)",
               overflow: "hidden",
               boxShadow: "0 0 0 var(--bw-hair) var(--accent)",
+              maxWidth: "var(--config-cmd-col-max)",
             }}
           >
             <Button
@@ -171,10 +209,19 @@ export function PreviewHeader({
               size="md"
               disabled={disabled || loading}
               onClick={() => onOpen(null)}
-              aria-label={resolvedLabel}
-              style={{ borderRadius: 0, border: "none" }}
+              aria-label={buttonLabel}
+              style={{
+                borderRadius: 0,
+                border: "none",
+                minWidth: 0,
+                overflow: "hidden",
+                display: "block",
+                textOverflow: "ellipsis",
+                whiteSpace: "nowrap",
+              }}
+              title={buttonLabel}
             >
-              {loading ? "Opening…" : resolvedLabel}
+              {buttonLabel}
             </Button>
             <button
               type="button"
@@ -192,9 +239,11 @@ export function PreviewHeader({
                 background: "var(--accent)",
                 color: "var(--on-color)",
                 border: "none",
-                borderLeft: "var(--bw-hair) solid rgba(0,0,0,0.2)",
+                borderLeft:
+                  "var(--bw-hair) solid var(--accent-divider-ink)",
                 cursor: disabled || loading ? "not-allowed" : "pointer",
                 opacity: disabled || loading ? "var(--opacity-disabled)" : 1,
+                flexShrink: 0,
               }}
             >
               <Glyph g={NF.chevronD} />
@@ -206,6 +255,7 @@ export function PreviewHeader({
               editors={editors}
               defaults={defaults}
               kind={kind}
+              maxHeight={menuMaxHeight}
               onOpen={(editorId) => {
                 setMenuOpen(false);
                 onOpen(editorId);
@@ -247,6 +297,7 @@ function EditorMenu({
   editors,
   defaults,
   kind,
+  maxHeight,
   onOpen,
   onPickOther,
   onSetDefault,
@@ -255,6 +306,7 @@ function EditorMenu({
   editors: EditorCandidateDto[];
   defaults: EditorDefaultsDto;
   kind: ConfigKind | null;
+  maxHeight: string;
   onOpen: (editorId: string) => void;
   onPickOther: () => void;
   onSetDefault: (kind: ConfigKind | null, editorId: string) => void;
@@ -275,13 +327,13 @@ function EditorMenu({
         top: "calc(100% + var(--sp-4))",
         right: 0,
         zIndex: 10,
-        minWidth: 280,
-        maxHeight: "60vh",
+        minWidth: "var(--config-menu-min-width)",
+        maxHeight,
         overflowY: "auto",
-        background: "var(--bg)",
+        background: "var(--bg-raised)",
         border: "var(--bw-hair) solid var(--line-strong)",
         borderRadius: "var(--r-2)",
-        boxShadow: "var(--shadow-md)",
+        boxShadow: "var(--shadow-popover)",
         padding: "var(--sp-4) 0",
       }}
     >
@@ -320,6 +372,7 @@ function EditorMenu({
       )}
       <div
         role="separator"
+        aria-orientation="horizontal"
         style={{
           height: "var(--bw-hair)",
           background: "var(--line)",
@@ -357,12 +410,13 @@ function MenuGroup({
   return (
     <div>
       <div
+        className="mono-cap"
         style={{
           padding: "var(--sp-6) var(--sp-12) var(--sp-4)",
           fontSize: "var(--fs-2xs)",
           color: "var(--fg-faint)",
           textTransform: "uppercase",
-          letterSpacing: "0.05em",
+          letterSpacing: "var(--ls-wide)",
         }}
       >
         {label}
@@ -386,7 +440,14 @@ function EditorRow({
   return (
     <div style={{ display: "flex", alignItems: "stretch" }}>
       <MenuItem onClick={() => onOpen(candidate.id)} style={{ flex: 1 }}>
-        <span style={{ flex: 1, overflow: "hidden", textOverflow: "ellipsis" }}>
+        <span
+          style={{
+            flex: 1,
+            overflow: "hidden",
+            textOverflow: "ellipsis",
+            whiteSpace: "nowrap",
+          }}
+        >
           {candidate.label}
         </span>
       </MenuItem>
@@ -426,6 +487,11 @@ function EditorRow({
   );
 }
 
+/**
+ * Menu row with CSS-based hover — no per-row useState. Paper-mono
+ * convention uses the shared `.pm-menu-item` class (declared in
+ * `App.css`) to render the hover background via pseudo-class.
+ */
 function MenuItem({
   children,
   onClick,
@@ -439,24 +505,21 @@ function MenuItem({
   style?: CSSProperties;
   "aria-label"?: string;
 }) {
-  const [hover, setHover] = useState(false);
   return (
     <button
       type="button"
       role="menuitem"
       aria-label={ariaLabel}
       onClick={onClick}
-      onMouseEnter={() => setHover(true)}
-      onMouseLeave={() => setHover(false)}
       title={title}
-      className="pm-focus"
+      className="pm-focus pm-menu-item"
       style={{
         display: "flex",
         alignItems: "center",
         gap: "var(--sp-8)",
         width: "100%",
         padding: "var(--sp-6) var(--sp-12)",
-        background: hover ? "var(--bg-hover)" : "transparent",
+        background: "transparent",
         color: "var(--fg)",
         border: "none",
         textAlign: "left",
