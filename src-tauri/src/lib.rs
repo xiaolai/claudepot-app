@@ -150,6 +150,8 @@ pub fn run() {
             commands::cli_is_cc_running,
             commands::cli_clear,
             commands::desktop_use,
+            commands::current_desktop_identity,
+            commands::desktop_reconcile,
             commands::account_add_from_current,
             commands::account_register_from_browser,
             commands::account_login,

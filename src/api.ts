@@ -10,6 +10,8 @@ import type {
   BreakLockOutcome,
   CcIdentity,
   CleanPreview,
+  DesktopIdentity,
+  DesktopReconcileOutcome,
   DryRunPlan,
   GcOutcome,
   JournalEntry,
@@ -68,6 +70,18 @@ export const api = {
   cliClear: () => invoke<void>("cli_clear"),
   desktopUse: (email: string, noLaunch: boolean) =>
     invoke<void>("desktop_use", { email, noLaunch }),
+  /// Ground-truth "who is Claude Desktop signed in as". Phase 1
+  /// returns `org_uuid_candidate` (NOT verified) or `none`; the
+  /// `decrypted` trust tier lands in Phase 2. UI must gate mutating
+  /// affordances on `probe_method === "decrypted"`.
+  currentDesktopIdentity: () =>
+    invoke<DesktopIdentity>("current_desktop_identity"),
+  /// Explicit reconcile: flip `has_desktop_profile` to match on-disk
+  /// truth + clear orphan `state.active_desktop` pointer. The same
+  /// logic runs opportunistically inside `accountList` — this
+  /// command surfaces the outcome for "Reconcile now" affordances.
+  desktopReconcile: () =>
+    invoke<DesktopReconcileOutcome>("desktop_reconcile"),
   accountAddFromCurrent: () =>
     invoke<RegisterOutcome>("account_add_from_current"),
   /// Browser OAuth onboarding — spawns `claude auth login` in a temp
