@@ -548,6 +548,14 @@ mod tests {
             // Mock: "installed" iff we were given a data_dir path.
             self.data_dir_path.is_some()
         }
+        async fn safe_storage_secret(
+            &self,
+        ) -> Result<Vec<u8>, crate::desktop_backend::DesktopKeyError> {
+            // Mock: tests that exercise identity/adopt/clear override
+            // via a concrete fake — this trait impl exists only so
+            // unrelated switch tests compile.
+            Err(crate::desktop_backend::DesktopKeyError::Unsupported)
+        }
     }
 
     #[tokio::test]
