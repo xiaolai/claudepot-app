@@ -106,12 +106,17 @@ function AppShell() {
   // open; `false` = either already accepted/declined, or the prefs
   // fetch failed (fail-closed: no modal means no surprise reads).
   const [showConsentModal, setShowConsentModal] = useState(false);
+  // Activity runtime state — drives the sidebar "Off" chip and the
+  // ActivitySection's disabled empty-state. null = unknown (prefs not
+  // fetched yet), true/false = last-known pref value.
+  const [activityEnabled, setActivityEnabled] = useState<boolean | null>(null);
   useEffect(() => {
     let cancelled = false;
     api
       .preferencesGet()
       .then((p) => {
         if (cancelled) return;
+        setActivityEnabled(p.activity_enabled);
         if (!p.activity_consent_seen) setShowConsentModal(true);
         else if (p.activity_enabled) {
           // Already opted-in on a prior run — start the runtime.
@@ -124,6 +129,19 @@ function AppShell() {
     return () => {
       cancelled = true;
     };
+  }, []);
+  // Sections dispatch this after flipping activity_enabled so the
+  // shell's sidebar indicator refreshes without a polling round-trip.
+  useEffect(() => {
+    const onChange = (e: Event) => {
+      const detail = (e as CustomEvent<{ enabled: boolean }>).detail;
+      if (typeof detail?.enabled === "boolean") {
+        setActivityEnabled(detail.enabled);
+      }
+    };
+    window.addEventListener("cp-activity-enabled-changed", onChange);
+    return () =>
+      window.removeEventListener("cp-activity-enabled-changed", onChange);
   }, []);
   const { summary: pendingSummary, refresh: refreshPendingBanner } =
     usePendingJournals();
@@ -614,7 +632,21 @@ function AppShell() {
           onBind={handleBind}
           badges={{
             accounts: accounts.length || undefined,
-            activity: activityAlerts || undefined,
+            activity:
+              activityEnabled === false ? (
+                <span
+                  style={{
+                    fontSize: "var(--fs-2xs)",
+                    color: "var(--fg-faint)",
+                    letterSpacing: "0.04em",
+                    textTransform: "uppercase",
+                  }}
+                >
+                  Off
+                </span>
+              ) : (
+                activityAlerts || undefined
+              ),
           }}
           version={APP_VERSION}
           synced
