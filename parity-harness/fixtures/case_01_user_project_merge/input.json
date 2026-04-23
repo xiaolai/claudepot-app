@@ -1,0 +1,20 @@
+{
+  "plugin_base": null,
+  "user": {
+    "theme": "dark",
+    "verbose": true,
+    "cleanupPeriodDays": 7
+  },
+  "project": {
+    "theme": "light",
+    "diffTool": "delta"
+  },
+  "local": null,
+  "flag": null,
+  "policy": [
+    {"origin": "remote",                 "value": null},
+    {"origin": "mdm_admin",              "value": null},
+    {"origin": "managed_file_composite", "value": null},
+    {"origin": "hkcu_user",              "value": null}
+  ]
+}

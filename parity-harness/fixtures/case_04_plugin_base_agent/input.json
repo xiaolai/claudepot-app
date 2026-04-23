@@ -1,0 +1,19 @@
+{
+  "plugin_base": {
+    "agent": {"model": "haiku", "tools": ["Bash"]}
+  },
+  "user": {
+    "theme": "dark"
+  },
+  "project": {
+    "agent": {"model": "sonnet"}
+  },
+  "local":   null,
+  "flag":    null,
+  "policy": [
+    {"origin": "remote",                 "value": null},
+    {"origin": "mdm_admin",              "value": null},
+    {"origin": "managed_file_composite", "value": null},
+    {"origin": "hkcu_user",              "value": null}
+  ]
+}

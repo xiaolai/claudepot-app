@@ -4,6 +4,7 @@ members = [
     "src-tauri",
     "crates/claudepot-core",
     "crates/claudepot-cli",
+    "crates/xtask",
 ]
 
 [workspace.package]

@@ -1,0 +1,9 @@
+# Workspace aliases.
+#
+# `cargo xtask <sub>` forwards to the xtask crate's binary. Used by
+# the CC-parity harness (see parity-harness/README.md). Keep this
+# file minimal — cargo aliases here are global to every invocation
+# inside the workspace.
+
+[alias]
+xtask = "run --quiet --package xtask --"

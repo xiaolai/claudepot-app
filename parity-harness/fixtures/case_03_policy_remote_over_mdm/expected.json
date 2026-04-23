@@ -1,0 +1,5 @@
+{
+  "theme": "policy-remote",
+  "permissions": {"defaultMode": "ask"},
+  "verbose": true
+}

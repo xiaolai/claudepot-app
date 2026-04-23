@@ -13,11 +13,11 @@ use crate::config_view::{
     effective_mcp::{McpLayer, McpSourceBundle},
     effective_settings::EffectiveSettingsInput,
     model::{PolicyOrigin, Scope},
-    plugin_base::{self, load_plugin_manifest, load_plugin_settings},
+    plugin_base,
     policy::{self, PolicySource},
 };
 use crate::paths::claude_config_dir;
-use serde_json::{Map, Value};
+use serde_json::Value;
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
@@ -225,6 +225,7 @@ fn collect_plugin_mcp_servers() -> BTreeMap<String, Value> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use serde_json::Map;
 
     #[test]
     fn non_empty_or_none_rejects_empty_object() {

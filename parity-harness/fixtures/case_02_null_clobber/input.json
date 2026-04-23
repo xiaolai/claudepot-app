@@ -1,0 +1,22 @@
+{
+  "plugin_base": null,
+  "user": {
+    "hooks": {
+      "PreToolUse": [
+        {"matcher": "Bash(git *)", "command": "echo pre"}
+      ]
+    },
+    "theme": "dark"
+  },
+  "project": {
+    "hooks": null
+  },
+  "local": null,
+  "flag": null,
+  "policy": [
+    {"origin": "remote",                 "value": null},
+    {"origin": "mdm_admin",              "value": null},
+    {"origin": "managed_file_composite", "value": null},
+    {"origin": "hkcu_user",              "value": null}
+  ]
+}

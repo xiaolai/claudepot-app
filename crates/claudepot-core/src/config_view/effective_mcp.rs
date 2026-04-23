@@ -114,7 +114,7 @@ pub fn compute(bundle: &McpSourceBundle, mode: McpSimulationMode) -> Vec<Effecti
     // Per-server aggregation. Precedence (low → high): user, project (shallow→deep),
     // local, plugin. Enterprise supersedes everything when active.
     let mut map: BTreeMap<String, (Scope, Value, Vec<Scope>)> = BTreeMap::new();
-    let mut ingest = |scope: Scope, name: String, value: Value, map: &mut BTreeMap<String, (Scope, Value, Vec<Scope>)>| {
+    let ingest = |scope: Scope, name: String, value: Value, map: &mut BTreeMap<String, (Scope, Value, Vec<Scope>)>| {
         let entry = map.entry(name).or_insert_with(|| (scope.clone(), value.clone(), vec![scope.clone()]));
         // Overwrite — later source wins.
         entry.0 = scope.clone();
