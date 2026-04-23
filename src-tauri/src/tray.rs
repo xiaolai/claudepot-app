@@ -65,6 +65,10 @@ const ID_SETTINGS: &str = "tray:settings";
 const ID_QUIT: &str = "tray:quit";
 const ID_ADD: &str = "tray:add-account";
 const ID_SYNC: &str = "tray:sync-cc";
+const ID_DESKTOP_BIND: &str = "tray:desktop-bind";
+const ID_DESKTOP_CLEAR: &str = "tray:desktop-clear";
+const ID_DESKTOP_RECONCILE: &str = "tray:desktop-reconcile";
+const ID_DESKTOP_LAUNCH: &str = "tray:desktop-launch";
 const ID_ACTIVE_DISPLAY: &str = "tray:active-display";
 const ID_USAGE_REFRESH: &str = "tray:usage:refresh";
 pub const PREFIX_CLI: &str = "tray:cli-switch:";
@@ -121,12 +125,20 @@ pub async fn rebuild(app: &AppHandle) -> Result<(), String> {
     // AppKit renders CheckMenuItem.state in its own (leftmost)
     // slot, which visually misaligned the active row from the
     // icon stack below it.
-    let active_label = match cli_active {
-        Some(a) if !a.credentials_healthy => format!("{} — re-auth needed", a.email),
-        Some(a) => a.email.clone(),
-        None => "No CLI account active".to_string(),
+    // Active-account display priority (Codex G7 — v1 showed CLI only,
+    // leaving Desktop bindings invisible in the menu header when CLI
+    // was unbound):
+    //   CLI bound → show CLI (existing behavior)
+    //   CLI unbound + Desktop bound → show Desktop
+    //   neither → "No accounts active"
+    let active_label = match (cli_active, desktop_active) {
+        (Some(a), _) if !a.credentials_healthy => format!("{} — re-auth needed", a.email),
+        (Some(a), _) => a.email.clone(),
+        (None, Some(d)) => format!("{} (Desktop)", d.email),
+        (None, None) => "No accounts active".to_string(),
     };
-    let active_item = if cli_active.is_some() {
+    let has_active = cli_active.is_some() || desktop_active.is_some();
+    let active_item = if has_active {
         let img = Image::from_bytes(ICON_CHECK)
             .map_err(|e| format!("check icon: {e}"))?;
         IconMenuItemBuilder::with_id(ID_ACTIVE_DISPLAY, active_label)
@@ -268,20 +280,47 @@ fn build_desktop_submenu(
     if let Ok(img) = Image::from_bytes(ICON_DESKTOP) {
         builder = builder.submenu_icon(img);
     }
+
+    // Phase 5 header items — unconditional utilities that apply to
+    // the live Desktop session regardless of which account is
+    // targeted. Placing them above the per-account switch list keeps
+    // the account rows as the "pick one" block.
+    let bind_item = MenuItemBuilder::with_id(ID_DESKTOP_BIND, "Bind current Desktop session")
+        .enabled(true)
+        .build(app)
+        .map_err(|e| format!("desktop bind: {e}"))?;
+    let clear_item = MenuItemBuilder::with_id(ID_DESKTOP_CLEAR, "Sign Desktop out")
+        .enabled(true)
+        .build(app)
+        .map_err(|e| format!("desktop clear: {e}"))?;
+    let launch_item = MenuItemBuilder::with_id(ID_DESKTOP_LAUNCH, "Launch Claude Desktop")
+        .enabled(true)
+        .build(app)
+        .map_err(|e| format!("desktop launch: {e}"))?;
+    let reconcile_item = MenuItemBuilder::with_id(ID_DESKTOP_RECONCILE, "Reconcile profile flags")
+        .enabled(true)
+        .build(app)
+        .map_err(|e| format!("desktop reconcile: {e}"))?;
+    let header_sep = tauri::menu::PredefinedMenuItem::separator(app)
+        .map_err(|e| format!("desktop header sep: {e}"))?;
+    builder = builder.item(&bind_item).item(&clear_item).item(&launch_item).item(&reconcile_item).item(&header_sep);
+
     let mut any = false;
     for s in summaries {
         if s.is_desktop_active {
             continue;
         }
         any = true;
-        let label = if s.has_desktop_profile {
+        // Gate on disk truth (plan v2 D18). The DB flag can be
+        // stale; desktop_profile_on_disk tracks reality.
+        let label = if s.desktop_profile_on_disk {
             s.email.clone()
         } else {
-            format!("{} (no Desktop profile)", s.email)
+            format!("{} (no profile)", s.email)
         };
         let item =
             MenuItemBuilder::with_id(format!("{PREFIX_DESKTOP}{}", s.uuid), label)
-                .enabled(s.has_desktop_profile)
+                .enabled(s.desktop_profile_on_disk)
                 .build(app)
                 .map_err(|e| format!("desktop item: {e}"))?;
         builder = builder.item(&item);
@@ -572,9 +611,91 @@ pub fn handle_menu_event(app: &AppHandle, id: &str) {
         }
     } else if id == ID_USAGE_REFRESH {
         handle_usage_refresh(app);
+    } else if id == ID_DESKTOP_BIND {
+        // Open the main window + route to Accounts — the user picks
+        // which account to bind into. (Tray action alone can't know
+        // the target; the match requires a /profile round-trip.)
+        show_window(app);
+        if let Err(e) = app.emit("cp-tray-desktop-bind", ()) {
+            tracing::warn!("emit desktop-bind failed: {e}");
+        }
+    } else if id == ID_DESKTOP_CLEAR {
+        handle_desktop_clear(app);
+    } else if id == ID_DESKTOP_LAUNCH {
+        handle_desktop_launch(app);
+    } else if id == ID_DESKTOP_RECONCILE {
+        handle_desktop_reconcile(app);
     } else if id == ID_QUIT {
         app.exit(0);
     }
+}
+
+fn handle_desktop_clear(app: &AppHandle) {
+    let app = app.clone();
+    tauri::async_runtime::spawn(async move {
+        let lock = match app.try_state::<crate::state::DesktopOpState>() {
+            Some(l) => l,
+            None => return,
+        };
+        let _guard = lock.0.lock().await;
+        let store = match crate::commands::open_store() {
+            Ok(s) => s,
+            Err(e) => {
+                tracing::warn!("tray desktop-clear: open_store: {e}");
+                return;
+            }
+        };
+        let Some(platform) = claudepot_core::desktop_backend::create_platform() else {
+            return;
+        };
+        // keep_snapshot=true so a tray-driven clear is always
+        // recoverable via a subsequent switch.
+        match claudepot_core::services::desktop_service::clear_session(&*platform, &store, true).await {
+            Ok(_) => {
+                let _ = rebuild(&app).await;
+                let _ = app.emit("desktop-cleared", ());
+            }
+            Err(e) => {
+                tracing::warn!("tray desktop-clear failed: {e}");
+                let _ = app.emit("tray-desktop-clear-failed", e.to_string());
+            }
+        }
+    });
+}
+
+fn handle_desktop_launch(app: &AppHandle) {
+    let app = app.clone();
+    tauri::async_runtime::spawn(async move {
+        let Some(platform) = claudepot_core::desktop_backend::create_platform() else {
+            return;
+        };
+        if let Err(e) = platform.launch().await {
+            tracing::warn!("tray desktop-launch failed: {e}");
+            let _ = app.emit("tray-desktop-launch-failed", e.to_string());
+        }
+    });
+}
+
+fn handle_desktop_reconcile(app: &AppHandle) {
+    let app = app.clone();
+    tauri::async_runtime::spawn(async move {
+        let store = match crate::commands::open_store() {
+            Ok(s) => s,
+            Err(e) => {
+                tracing::warn!("tray desktop-reconcile: open_store: {e}");
+                return;
+            }
+        };
+        match claudepot_core::services::desktop_service::reconcile_flags(&store) {
+            Ok(outcome) => {
+                if !outcome.flag_flips.is_empty() || outcome.orphan_pointer_cleared {
+                    let _ = rebuild(&app).await;
+                }
+                let _ = app.emit("desktop-reconciled", outcome.flag_flips.len());
+            }
+            Err(e) => tracing::warn!("tray desktop-reconcile failed: {e}"),
+        }
+    });
 }
 
 /// Force-fetch usage for every credential-bearing account and rebuild
