@@ -6,8 +6,11 @@
 
 pub mod discover;
 pub mod launcher;
+pub mod mask;
 pub mod model;
 pub mod parse;
+pub mod redacted_claude_json;
+pub mod search;
 
 use std::path::Path;
 

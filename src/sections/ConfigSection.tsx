@@ -1,11 +1,14 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { open as openDialog } from "@tauri-apps/plugin-dialog";
+import { listen } from "@tauri-apps/api/event";
 import { api } from "../api";
 import type {
   ConfigFileNodeDto,
   ConfigKind,
   ConfigPreviewDto,
   ConfigScopeNodeDto,
+  ConfigSearchHitDto,
+  ConfigSearchSummaryDto,
   ConfigTreeDto,
   EditorCandidateDto,
   EditorDefaultsDto,
@@ -45,6 +48,14 @@ export function ConfigSection({ subRoute, onSubRouteChange }: ConfigSectionProps
     if (!subRoute?.startsWith("node:")) return null;
     return subRoute.slice("node:".length);
   }, [subRoute]);
+
+  const [searchQuery, setSearchQuery] = useState<string>("");
+  const [searchRegex, setSearchRegex] = useState<boolean>(false);
+  const [searchActive, setSearchActive] = useState<boolean>(false);
+  const [searchHits, setSearchHits] = useState<ConfigSearchHitDto[]>([]);
+  const [searchSummary, setSearchSummary] =
+    useState<ConfigSearchSummaryDto | null>(null);
+  const searchIdRef = useRef<string | null>(null);
 
   const refreshTree = useCallback(async () => {
     try {
@@ -120,6 +131,91 @@ export function ConfigSection({ subRoute, onSubRouteChange }: ConfigSectionProps
       .then(setEditors)
       .catch(() => setEditors([]));
   }, []);
+
+  const startSearch = useCallback(async () => {
+    const trimmed = searchQuery.trim();
+    if (!trimmed) {
+      setSearchActive(false);
+      setSearchHits([]);
+      setSearchSummary(null);
+      return;
+    }
+    // Cancel any in-flight search.
+    if (searchIdRef.current) {
+      try {
+        await api.configSearchCancel(searchIdRef.current);
+      } catch {
+        // ignore
+      }
+    }
+    const id = `search-${Date.now()}`;
+    searchIdRef.current = id;
+    setSearchActive(true);
+    setSearchHits([]);
+    setSearchSummary(null);
+    try {
+      await api.configSearchStart(id, {
+        text: trimmed,
+        regex: searchRegex,
+        case_sensitive: false,
+      });
+    } catch (e) {
+      setToast(`Search failed: ${e}`);
+      setSearchActive(false);
+    }
+  }, [searchQuery, searchRegex]);
+
+  const cancelSearch = useCallback(async () => {
+    if (searchIdRef.current) {
+      try {
+        await api.configSearchCancel(searchIdRef.current);
+      } catch {
+        // ignore
+      }
+    }
+    searchIdRef.current = null;
+    setSearchActive(false);
+  }, []);
+
+  // Subscribe to streaming events for the active search.
+  useEffect(() => {
+    const id = searchIdRef.current;
+    if (!searchActive || !id) return;
+    let unlisten1: (() => void) | null = null;
+    let unlisten2: (() => void) | null = null;
+    let cancelled = false;
+    void listen<ConfigSearchHitDto>(
+      `config-search-hit::${id}`,
+      (ev) => {
+        if (cancelled) return;
+        setSearchHits((prev) => [...prev, ev.payload]);
+      },
+    ).then((u) => {
+      if (cancelled) {
+        u();
+      } else {
+        unlisten1 = u;
+      }
+    });
+    void listen<ConfigSearchSummaryDto>(
+      `config-search-done::${id}`,
+      (ev) => {
+        if (cancelled) return;
+        setSearchSummary(ev.payload);
+      },
+    ).then((u) => {
+      if (cancelled) {
+        u();
+      } else {
+        unlisten2 = u;
+      }
+    });
+    return () => {
+      cancelled = true;
+      unlisten1?.();
+      unlisten2?.();
+    };
+  }, [searchActive]);
 
   const selectedFile = useMemo<ConfigFileNodeDto | null>(() => {
     if (!tree || !selectedId) return null;
@@ -225,16 +321,109 @@ export function ConfigSection({ subRoute, onSubRouteChange }: ConfigSectionProps
         style={{
           flex: 1,
           display: "grid",
-          gridTemplateColumns: "280px 1fr",
+          gridTemplateColumns: "320px 1fr",
           minHeight: 0,
         }}
       >
-        <ConfigTreePane
-          tree={tree}
-          loadError={loadError}
-          selectedId={selectedId}
-          onSelect={(id) => onSubRouteChange(id ? `node:${id}` : null)}
-        />
+        <div
+          style={{
+            display: "flex",
+            flexDirection: "column",
+            minHeight: 0,
+            background: "var(--bg-sunken)",
+          }}
+        >
+          <div
+            style={{
+              padding: "var(--sp-8) var(--sp-12)",
+              borderBottom: "var(--bw-hair) solid var(--line)",
+              display: "flex",
+              gap: "var(--sp-6)",
+              alignItems: "center",
+            }}
+          >
+            <input
+              type="search"
+              placeholder="Search contents…"
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") void startSearch();
+                if (e.key === "Escape") {
+                  setSearchQuery("");
+                  void cancelSearch();
+                }
+              }}
+              aria-label="Search contents"
+              style={{
+                flex: 1,
+                padding: "var(--sp-4) var(--sp-8)",
+                fontSize: "var(--fs-xs)",
+                background: "var(--bg)",
+                border: "var(--bw-hair) solid var(--line)",
+                borderRadius: "var(--r-2)",
+                color: "var(--fg)",
+              }}
+            />
+            <button
+              type="button"
+              onClick={() => setSearchRegex((v) => !v)}
+              title="Toggle regex mode"
+              aria-pressed={searchRegex}
+              className="pm-focus"
+              style={{
+                padding: "0 var(--sp-6)",
+                fontSize: "var(--fs-2xs)",
+                fontFamily: "var(--mono)",
+                background: searchRegex
+                  ? "var(--accent-soft)"
+                  : "transparent",
+                color: searchRegex ? "var(--accent-ink)" : "var(--fg-muted)",
+                border: "var(--bw-hair) solid var(--line)",
+                borderRadius: "var(--r-2)",
+                cursor: "pointer",
+              }}
+            >
+              .*
+            </button>
+            {searchActive && (
+              <button
+                type="button"
+                onClick={() => void cancelSearch()}
+                title="Cancel search"
+                className="pm-focus"
+                style={{
+                  padding: "0 var(--sp-6)",
+                  fontSize: "var(--fs-2xs)",
+                  background: "transparent",
+                  color: "var(--fg-muted)",
+                  border: "var(--bw-hair) solid var(--line)",
+                  borderRadius: "var(--r-2)",
+                  cursor: "pointer",
+                }}
+              >
+                ×
+              </button>
+            )}
+          </div>
+
+          {searchActive ? (
+            <SearchResultsPane
+              hits={searchHits}
+              summary={searchSummary}
+              tree={tree}
+              selectedId={selectedId}
+              onSelect={(id) => onSubRouteChange(id ? `node:${id}` : null)}
+            />
+          ) : (
+            <ConfigTreePane
+              tree={tree}
+              loadError={loadError}
+              selectedId={selectedId}
+              onSelect={(id) => onSubRouteChange(id ? `node:${id}` : null)}
+            />
+          )}
+        </div>
 
         <div
           style={{
@@ -357,9 +546,10 @@ function ConfigTreePane({
       role="tree"
       aria-label="Config scopes"
       style={{
+        flex: 1,
+        minHeight: 0,
         overflowY: "auto",
         padding: "var(--sp-8) 0",
-        background: "var(--bg-sunken)",
       }}
     >
       {tree.scopes.map((s) => (
@@ -652,4 +842,129 @@ const KIND_LABELS: Record<string, string> = {
 
 function kindLabel(kind: string): string {
   return KIND_LABELS[kind] ?? kind;
+}
+
+function SearchResultsPane({
+  hits,
+  summary,
+  tree,
+  selectedId,
+  onSelect,
+}: {
+  hits: ConfigSearchHitDto[];
+  summary: ConfigSearchSummaryDto | null;
+  tree: ConfigTreeDto | null;
+  selectedId: string | null;
+  onSelect: (id: string | null) => void;
+}) {
+  const idToLabel = useMemo(() => {
+    const m = new Map<string, string>();
+    if (!tree) return m;
+    for (const s of tree.scopes) {
+      for (const f of s.files) {
+        m.set(f.id, f.summary_title ?? f.display_path);
+      }
+    }
+    return m;
+  }, [tree]);
+
+  return (
+    <div
+      role="listbox"
+      aria-label="Search results"
+      style={{
+        flex: 1,
+        minHeight: 0,
+        overflowY: "auto",
+      }}
+    >
+      <div
+        style={{
+          padding: "var(--sp-6) var(--sp-12)",
+          borderBottom: "var(--bw-hair) solid var(--line)",
+          fontSize: "var(--fs-2xs)",
+          color: "var(--fg-faint)",
+        }}
+      >
+        {summary
+          ? `${summary.total_hits} ${summary.capped ? "(capped) " : ""}hit${summary.total_hits === 1 ? "" : "s"}${summary.skipped_large > 0 ? ` · ${summary.skipped_large} file${summary.skipped_large === 1 ? "" : "s"} skipped (>2MB)` : ""}${summary.cancelled ? " · cancelled" : ""}`
+          : `${hits.length} hit${hits.length === 1 ? "" : "s"} so far…`}
+      </div>
+      {hits.length === 0 && summary && summary.total_hits === 0 && (
+        <div
+          style={{
+            padding: "var(--sp-20)",
+            color: "var(--fg-faint)",
+            fontSize: "var(--fs-sm)",
+          }}
+        >
+          No matches.
+        </div>
+      )}
+      {hits.map((hit, i) => (
+        <button
+          key={`${hit.node_id}-${i}-${hit.line_number}`}
+          type="button"
+          role="option"
+          aria-selected={selectedId === hit.node_id}
+          onClick={() => onSelect(hit.node_id)}
+          className="pm-focus"
+          style={{
+            display: "block",
+            width: "100%",
+            textAlign: "left",
+            padding: "var(--sp-6) var(--sp-12)",
+            background:
+              selectedId === hit.node_id ? "var(--bg-active)" : "transparent",
+            color: "var(--fg)",
+            border: "none",
+            borderBottom: "var(--bw-hair) solid var(--line)",
+            cursor: "pointer",
+            fontSize: "var(--fs-xs)",
+          }}
+        >
+          <div
+            style={{
+              display: "flex",
+              gap: "var(--sp-6)",
+              alignItems: "baseline",
+            }}
+          >
+            <span
+              style={{
+                flex: 1,
+                overflow: "hidden",
+                textOverflow: "ellipsis",
+                whiteSpace: "nowrap",
+              }}
+            >
+              {idToLabel.get(hit.node_id) ?? hit.node_id}
+            </span>
+            <span
+              style={{
+                fontSize: "var(--fs-2xs)",
+                color: "var(--fg-faint)",
+                fontFamily: "var(--mono)",
+              }}
+            >
+              :{hit.line_number}
+            </span>
+          </div>
+          <pre
+            style={{
+              margin: "var(--sp-3) 0 0 0",
+              fontFamily: "var(--mono)",
+              fontSize: "var(--fs-2xs)",
+              color: "var(--fg-muted)",
+              whiteSpace: "pre-wrap",
+              overflow: "hidden",
+              maxHeight: "3.6em",
+            }}
+          >
+            {hit.snippet}
+          </pre>
+        </button>
+      ))}
+    </div>
+  );
 }

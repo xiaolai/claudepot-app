@@ -1074,6 +1074,22 @@ export interface ConfigPreviewDto {
   truncated: boolean;
 }
 
+export interface ConfigSearchHitDto {
+  search_id: string;
+  node_id: string;
+  line_number: number;
+  snippet: string;
+  match_count_in_file: number;
+}
+
+export interface ConfigSearchSummaryDto {
+  search_id: string;
+  total_hits: number;
+  capped: boolean;
+  skipped_large: number;
+  cancelled: boolean;
+}
+
 export interface EditorCandidateDto {
   id: string;
   label: string;
