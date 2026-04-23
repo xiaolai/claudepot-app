@@ -20,6 +20,11 @@
   --accent-soft:   oklch(68% 0.13 45 / 0.12);
   --accent-border: oklch(68% 0.13 45 / 0.28);
   --accent-ink:    oklch(42% 0.10 45);
+  /* Divider color painted ON TOP of the accent fill — used by
+     composite controls like the PreviewHeader split-button so the
+     two halves remain visually separable without dropping to a
+     theme-agnostic rgba literal. */
+  --accent-divider-ink: oklch(100% 0 0 / 0.22);
 
   /* ── Semantic (used sparingly) ──────────────────────────── */
   --ok:     oklch(62% 0.10 150);
@@ -168,6 +173,16 @@
   --banner-min-width:      180px;
   --toast-max-width:       min(560px, calc(100vw - var(--sp-48)));
 
+  /* Config section — scope-first tree + editor-picker menu + preview.
+     Width is responsive: floor 240px (readable) / ideal 30% of pane
+     / ceiling 360px (caps before crowding the preview). */
+  --config-tree-width:     clamp(240px, 30%, 360px);
+  --config-menu-min-width: 280px;
+  --config-menu-max-height: min(60vh, 420px);
+  --config-cmd-col-max:    240px;
+  --config-snippet-max-h:  calc(var(--fs-2xs) * 3 * 1.4);
+  --config-path-max:       var(--content-cap-md);
+
   /* ── Viewer max-heights — tool-result expanders (Bash / Write /
    *    generic). Kept as two steps so Bash stdout can breathe a
    *    touch less tall than a file diff. */
@@ -260,6 +275,7 @@
 [data-theme="light"] {
   --bg:          oklch(99% 0.003 60);
   --bg-raised:   oklch(100% 0 0);
+  --bg-elev:     oklch(100% 0 0);
   --bg-sunken:   oklch(97% 0.004 60);
   --bg-hover:    oklch(95% 0.005 60);
   --bg-active:   oklch(93% 0.008 60);
@@ -289,6 +305,7 @@
 [data-theme="dark"] {
   --bg:          oklch(16% 0.006 60);
   --bg-raised:   oklch(19% 0.006 60);
+  --bg-elev:     oklch(22% 0.007 60);
   --bg-sunken:   oklch(13% 0.005 60);
   --bg-hover:    oklch(23% 0.007 60);
   --bg-active:   oklch(27% 0.008 60);
@@ -327,6 +344,7 @@
   :root:not([data-theme]) {
     --bg:          oklch(16% 0.006 60);
     --bg-raised:   oklch(19% 0.006 60);
+    --bg-elev:     oklch(22% 0.007 60);
     --bg-sunken:   oklch(13% 0.005 60);
     --bg-hover:    oklch(23% 0.007 60);
     --bg-active:   oklch(27% 0.008 60);

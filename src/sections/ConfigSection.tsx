@@ -1,13 +1,7 @@
-import {
-  type ReactNode,
-  useCallback,
-  useEffect,
-  useMemo,
-  useRef,
-  useState,
-} from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { open as openDialog } from "@tauri-apps/plugin-dialog";
 import { listen } from "@tauri-apps/api/event";
+import { useVirtualizer } from "@tanstack/react-virtual";
 import { api } from "../api";
 import type {
   ConfigFileNodeDto,
@@ -23,13 +17,41 @@ import type {
 import { ScreenHeader } from "../shell/ScreenHeader";
 import { PreviewHeader } from "../components/primitives/PreviewHeader";
 import { Button } from "../components/primitives/Button";
+import { IconButton } from "../components/primitives/IconButton";
+import { FilterChip } from "../components/primitives/FilterChip";
+import { Input } from "../components/primitives/Input";
+import { Glyph } from "../components/primitives/Glyph";
 import { NF } from "../icons";
 import { EffectiveRenderer } from "./config/EffectiveRenderer";
 import { EffectiveMcpRenderer } from "./config/EffectiveMcpRenderer";
+import { MarkdownRenderer } from "./config/MarkdownRenderer";
+import { JsonTreeRenderer } from "./config/JsonTreeRenderer";
 import { useConfigTree } from "../hooks/useConfigTree";
+import { useAppState } from "../providers/AppStateProvider";
 
 const EFFECTIVE_SETTINGS_ROUTE = "virtual:effective-settings";
 const EFFECTIVE_MCP_ROUTE = "virtual:effective-mcp";
+
+const MARKDOWN_KINDS: readonly ConfigKind[] = [
+  "claude_md",
+  "agent",
+  "skill",
+  "command",
+  "rule",
+  "memory",
+  "memory_index",
+] as const;
+
+const JSON_KINDS: readonly ConfigKind[] = [
+  "settings",
+  "settings_local",
+  "managed_settings",
+  "mcp_json",
+  "managed_mcp_json",
+  "keybindings",
+  "plugin",
+  "redacted_user_config",
+] as const;
 
 interface ConfigSectionProps {
   subRoute: string | null;
@@ -39,14 +61,16 @@ interface ConfigSectionProps {
 /**
  * Config section — read-only browser over CC's filesystem artifacts.
  *
- * P1 ships the scope-first tree (User / Project / Local / Memory /
- * CLAUDE.md walks) + a minimal preview pane. Later phases layer in
- * secret masking, merge/provenance, effective settings, MCP, plugins,
- * watcher, and the CC-parity harness (see
- * `dev-docs/config-section-plan.md` §15 for the full roadmap).
+ * Grid: two columns, both with `minWidth: 0` so long file paths and
+ * long editor labels can't push the right column beyond the viewport.
+ * Tree pane width is `--config-tree-width` (responsive clamp). Both
+ * panes share a single virtualized tree via `@tanstack/react-virtual`
+ * so the User scope's 50+ agents don't render as 50+ DOM nodes.
  *
- * `subRoute` format: `node:<id>` where `<id>` is a FileNode.id. Persists
- * the selection so a return to the section lands on the same row.
+ * `subRoute` format: `node:<id>` where `<id>` is either a FileNode.id
+ * or a `virtual:*` route (Effective settings / Effective MCP). Stale
+ * concrete ids are cleared after rescans; virtual ids always remain
+ * valid.
  */
 export function ConfigSection({ subRoute, onSubRouteChange }: ConfigSectionProps) {
   const {
@@ -55,10 +79,10 @@ export function ConfigSection({ subRoute, onSubRouteChange }: ConfigSectionProps
     setTree,
     orphanPatchSignal,
   } = useConfigTree(null);
+  const { pushToast } = useAppState();
   const [loadError, setLoadError] = useState<string | null>(null);
   const [editors, setEditors] = useState<EditorCandidateDto[] | null>(null);
   const [defaults, setDefaults] = useState<EditorDefaultsDto | null>(null);
-  const [toast, setToast] = useState<string | null>(null);
   const [preview, setPreview] = useState<ConfigPreviewDto | null>(null);
   const [previewError, setPreviewError] = useState<string | null>(null);
 
@@ -84,16 +108,19 @@ export function ConfigSection({ subRoute, onSubRouteChange }: ConfigSectionProps
     useState<ConfigSearchSummaryDto | null>(null);
   const searchInputRef = useRef<HTMLInputElement | null>(null);
 
-  // ⌘F focuses the content-search input. Esc clears it.
+  // ⌘F focuses the content-search input. Esc clears it. Respects the
+  // same modal / input gate as useSection so shortcuts never fire
+  // over a modal or while typing in a text field.
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if ((e.metaKey || e.ctrlKey) && e.key === "f" && !e.shiftKey && !e.altKey) {
-        // Respect the modal / input focus gate (same rule as useSection).
-        if (document.querySelector('[role="dialog"]')) return;
-        e.preventDefault();
-        searchInputRef.current?.focus();
-        searchInputRef.current?.select();
-      }
+      if (!(e.metaKey || e.ctrlKey) || e.shiftKey || e.altKey) return;
+      if (e.key !== "f") return;
+      if (document.querySelector('[role="dialog"]')) return;
+      const el = document.activeElement as HTMLElement | null;
+      if (el === searchInputRef.current) return; // already there
+      e.preventDefault();
+      searchInputRef.current?.focus();
+      searchInputRef.current?.select();
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
@@ -107,6 +134,14 @@ export function ConfigSection({ subRoute, onSubRouteChange }: ConfigSectionProps
     } catch (e) {
       setLoadError(String(e));
     }
+  }, [setTree]);
+
+  const refreshEditors = useCallback(() => {
+    setEditors(null);
+    void api
+      .configListEditors(true)
+      .then(setEditors)
+      .catch(() => setEditors([]));
   }, []);
 
   useEffect(() => {
@@ -131,26 +166,14 @@ export function ConfigSection({ subRoute, onSubRouteChange }: ConfigSectionProps
     };
   }, [refreshTree]);
 
-  // Recovery: if the watcher emits a patch before a baseline snapshot
-  // is in hand (initial configScan failed, or raced ahead of the
-  // watcher's first full_snapshot), re-run the scan so subsequent
-  // patches have something to apply to. Gate on orphanPatchSignal
-  // changing so a steady stream of orphans only triggers one recovery
-  // per signal bump.
+  // Recovery: orphan watcher patches without a baseline trigger a
+  // fresh scan so subsequent patches have a tree to apply to.
   useEffect(() => {
     if (orphanPatchSignal === 0) return;
     void refreshTree();
   }, [orphanPatchSignal, refreshTree]);
 
-  useEffect(() => {
-    if (!toast) return;
-    const h = window.setTimeout(() => setToast(null), 4000);
-    return () => window.clearTimeout(h);
-  }, [toast]);
-
-  // Repair stale subRoute: if the selected id is gone after a rescan,
-  // clear it so the preview doesn't hang on a dead target. Virtual
-  // routes (effective views) bypass this check — they're always live.
+  // Repair stale subRoute. Virtual routes are always valid.
   useEffect(() => {
     if (!tree || !selectedId) return;
     if (selectedId.startsWith("virtual:")) return;
@@ -188,14 +211,6 @@ export function ConfigSection({ subRoute, onSubRouteChange }: ConfigSectionProps
     };
   }, [selectedId]);
 
-  const refreshEditors = useCallback(() => {
-    setEditors(null);
-    void api
-      .configListEditors(true)
-      .then(setEditors)
-      .catch(() => setEditors([]));
-  }, []);
-
   const startSearch = useCallback(async () => {
     const trimmed = searchQuery.trim();
     if (!trimmed) {
@@ -205,7 +220,9 @@ export function ConfigSection({ subRoute, onSubRouteChange }: ConfigSectionProps
       setSearchSummary(null);
       return;
     }
-    // Cancel any in-flight search.
+    // Await cancellation of any in-flight search before starting a
+    // new one — prevents the backend from briefly scoring hits on the
+    // old search after it's been logically replaced.
     if (activeSearchId) {
       try {
         await api.configSearchCancel(activeSearchId);
@@ -225,11 +242,11 @@ export function ConfigSection({ subRoute, onSubRouteChange }: ConfigSectionProps
         case_sensitive: false,
       });
     } catch (e) {
-      setToast(`Search failed: ${e}`);
+      pushToast("error", `Search failed: ${e}`);
       setSearchActive(false);
       setActiveSearchId(null);
     }
-  }, [searchQuery, searchRegex, activeSearchId]);
+  }, [searchQuery, searchRegex, activeSearchId, pushToast]);
 
   const cancelSearch = useCallback(async () => {
     if (activeSearchId) {
@@ -243,10 +260,13 @@ export function ConfigSection({ subRoute, onSubRouteChange }: ConfigSectionProps
     setSearchActive(false);
   }, [activeSearchId]);
 
-  // Subscribe to streaming events for the active search. Keying on
-  // `activeSearchId` ensures a new search tears down listeners for
-  // the previous one (which would otherwise keep firing until the
-  // Tauri channel closes).
+  const clearSearch = useCallback(async () => {
+    await cancelSearch();
+    setSearchQuery("");
+    setSearchHits([]);
+    setSearchSummary(null);
+  }, [cancelSearch]);
+
   useEffect(() => {
     if (!activeSearchId) return;
     let unlisten1: (() => void) | null = null;
@@ -259,11 +279,8 @@ export function ConfigSection({ subRoute, onSubRouteChange }: ConfigSectionProps
         setSearchHits((prev) => [...prev, ev.payload]);
       },
     ).then((u) => {
-      if (cancelled) {
-        u();
-      } else {
-        unlisten1 = u;
-      }
+      if (cancelled) u();
+      else unlisten1 = u;
     });
     void listen<ConfigSearchSummaryDto>(
       `config-search-done::${activeSearchId}`,
@@ -272,11 +289,8 @@ export function ConfigSection({ subRoute, onSubRouteChange }: ConfigSectionProps
         setSearchSummary(ev.payload);
       },
     ).then((u) => {
-      if (cancelled) {
-        u();
-      } else {
-        unlisten2 = u;
-      }
+      if (cancelled) u();
+      else unlisten2 = u;
     });
     return () => {
       cancelled = true;
@@ -304,10 +318,10 @@ export function ConfigSection({ subRoute, onSubRouteChange }: ConfigSectionProps
           selectedFile.kind as ConfigKind,
         );
       } catch (err) {
-        setToast(String(err));
+        pushToast("error", String(err));
       }
     },
-    [selectedFile],
+    [selectedFile, pushToast],
   );
 
   const openConfigHome = useCallback(
@@ -316,10 +330,10 @@ export function ConfigSection({ subRoute, onSubRouteChange }: ConfigSectionProps
       try {
         await api.configOpenInEditorPath(tree.config_home_dir, editorId, null);
       } catch (err) {
-        setToast(String(err));
+        pushToast("error", String(err));
       }
     },
-    [tree?.cwd],
+    [tree?.config_home_dir, pushToast],
   );
 
   const pickOther = useCallback(async () => {
@@ -329,11 +343,11 @@ export function ConfigSection({ subRoute, onSubRouteChange }: ConfigSectionProps
         title: "Choose editor binary",
       });
       if (typeof picked !== "string") return;
-      setToast(`Custom editor paths land with P8: ${picked}`);
+      pushToast("info", `Custom editor support lands with P8: ${picked}`);
     } catch {
-      setToast("Could not open file picker");
+      pushToast("error", "Could not open file picker");
     }
-  }, []);
+  }, [pushToast]);
 
   const setDefault = useCallback(
     async (kind: ConfigKind | null, editorId: string) => {
@@ -341,16 +355,17 @@ export function ConfigSection({ subRoute, onSubRouteChange }: ConfigSectionProps
         await api.configSetEditorDefault(kind, editorId);
         const next = await api.configGetEditorDefaults();
         setDefaults(next);
-        setToast(
+        pushToast(
+          "info",
           kind
             ? `Default editor for ${kind} set to ${editorId}`
             : `Fallback editor set to ${editorId}`,
         );
       } catch (err) {
-        setToast(String(err));
+        pushToast("error", String(err));
       }
     },
-    [],
+    [pushToast],
   );
 
   return (
@@ -373,10 +388,7 @@ export function ConfigSection({ subRoute, onSubRouteChange }: ConfigSectionProps
           <Button
             variant="ghost"
             glyph={NF.refresh}
-            onClick={() => {
-              void refreshTree();
-              refreshEditors();
-            }}
+            onClick={() => void refreshTree()}
             title="Re-scan on-disk artifacts"
           >
             Refresh
@@ -388,7 +400,7 @@ export function ConfigSection({ subRoute, onSubRouteChange }: ConfigSectionProps
         style={{
           flex: 1,
           display: "grid",
-          gridTemplateColumns: "320px 1fr",
+          gridTemplateColumns: "var(--config-tree-width) minmax(0, 1fr)",
           minHeight: 0,
         }}
       >
@@ -397,83 +409,20 @@ export function ConfigSection({ subRoute, onSubRouteChange }: ConfigSectionProps
             display: "flex",
             flexDirection: "column",
             minHeight: 0,
+            minWidth: 0,
             background: "var(--bg-sunken)",
           }}
         >
-          <div
-            style={{
-              padding: "var(--sp-8) var(--sp-12)",
-              borderBottom: "var(--bw-hair) solid var(--line)",
-              display: "flex",
-              gap: "var(--sp-6)",
-              alignItems: "center",
-            }}
-          >
-            <input
-              ref={searchInputRef}
-              type="search"
-              placeholder="Search contents…"
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === "Enter") void startSearch();
-                if (e.key === "Escape") {
-                  setSearchQuery("");
-                  void cancelSearch();
-                }
-              }}
-              aria-label="Search contents"
-              style={{
-                flex: 1,
-                padding: "var(--sp-4) var(--sp-8)",
-                fontSize: "var(--fs-xs)",
-                background: "var(--bg)",
-                border: "var(--bw-hair) solid var(--line)",
-                borderRadius: "var(--r-2)",
-                color: "var(--fg)",
-              }}
-            />
-            <button
-              type="button"
-              onClick={() => setSearchRegex((v) => !v)}
-              title="Toggle regex mode"
-              aria-pressed={searchRegex}
-              className="pm-focus"
-              style={{
-                padding: "0 var(--sp-6)",
-                fontSize: "var(--fs-2xs)",
-                fontFamily: "var(--mono)",
-                background: searchRegex
-                  ? "var(--accent-soft)"
-                  : "transparent",
-                color: searchRegex ? "var(--accent-ink)" : "var(--fg-muted)",
-                border: "var(--bw-hair) solid var(--line)",
-                borderRadius: "var(--r-2)",
-                cursor: "pointer",
-              }}
-            >
-              .*
-            </button>
-            {searchActive && (
-              <button
-                type="button"
-                onClick={() => void cancelSearch()}
-                title="Cancel search"
-                className="pm-focus"
-                style={{
-                  padding: "0 var(--sp-6)",
-                  fontSize: "var(--fs-2xs)",
-                  background: "transparent",
-                  color: "var(--fg-muted)",
-                  border: "var(--bw-hair) solid var(--line)",
-                  borderRadius: "var(--r-2)",
-                  cursor: "pointer",
-                }}
-              >
-                ×
-              </button>
-            )}
-          </div>
+          <SearchBar
+            value={searchQuery}
+            onChange={setSearchQuery}
+            regex={searchRegex}
+            onToggleRegex={() => setSearchRegex((v) => !v)}
+            onSubmit={() => void startSearch()}
+            onClear={() => void clearSearch()}
+            inputRef={searchInputRef}
+            active={searchActive}
+          />
 
           {searchActive ? (
             <SearchResultsPane
@@ -498,6 +447,7 @@ export function ConfigSection({ subRoute, onSubRouteChange }: ConfigSectionProps
             display: "flex",
             flexDirection: "column",
             minHeight: 0,
+            minWidth: 0,
             borderLeft: "var(--bw-hair) solid var(--line)",
           }}
         >
@@ -540,31 +490,88 @@ export function ConfigSection({ subRoute, onSubRouteChange }: ConfigSectionProps
           )}
         </div>
       </div>
-
-      {toast && (
-        <div
-          role="status"
-          aria-live="polite"
-          style={{
-            position: "fixed",
-            bottom: "var(--sp-24)",
-            right: "var(--sp-24)",
-            padding: "var(--sp-8) var(--sp-12)",
-            background: "var(--bg-elev)",
-            border: "var(--bw-hair) solid var(--line-strong)",
-            borderRadius: "var(--r-2)",
-            fontSize: "var(--fs-xs)",
-            color: "var(--fg)",
-            boxShadow: "var(--shadow-md)",
-            maxWidth: 360,
-          }}
-        >
-          {toast}
-        </div>
-      )}
     </div>
   );
 }
+
+// ---------- Search bar -----------------------------------------------
+
+function SearchBar({
+  value,
+  onChange,
+  regex,
+  onToggleRegex,
+  onSubmit,
+  onClear,
+  inputRef,
+  active,
+}: {
+  value: string;
+  onChange: (v: string) => void;
+  regex: boolean;
+  onToggleRegex: () => void;
+  onSubmit: () => void;
+  onClear: () => void;
+  inputRef: React.RefObject<HTMLInputElement | null>;
+  active: boolean;
+}) {
+  return (
+    <div
+      style={{
+        padding: "var(--sp-8) var(--sp-12)",
+        borderBottom: "var(--bw-hair) solid var(--line)",
+        display: "flex",
+        gap: "var(--sp-6)",
+        alignItems: "center",
+        flexShrink: 0,
+      }}
+    >
+      <div style={{ flex: 1, minWidth: 0 }}>
+        <Input
+          glyph={NF.search}
+          placeholder="Search contents…"
+          value={value}
+          onChange={(e) => onChange(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === "Enter") onSubmit();
+            if (e.key === "Escape") onClear();
+          }}
+          aria-label="Search contents"
+          inputRef={inputRef}
+          suffix={
+            value || active ? (
+              <IconButton
+                glyph={NF.x}
+                onClick={onClear}
+                size="sm"
+                title="Clear search"
+                aria-label="Clear search"
+              />
+            ) : undefined
+          }
+        />
+      </div>
+      <FilterChip
+        active={regex}
+        onToggle={onToggleRegex}
+        title="Toggle regex mode"
+        aria-label="Regex mode"
+      >
+        .*
+      </FilterChip>
+    </div>
+  );
+}
+
+// ---------- Tree pane (virtualized) ----------------------------------
+
+type TreeRow =
+  | { kind: "scope"; scope: ConfigScopeNodeDto; expanded: boolean }
+  | { kind: "virtual-scope"; label: string; expanded: boolean }
+  | { kind: "virtual-row"; id: string; label: string }
+  | { kind: "file"; file: ConfigFileNodeDto };
+
+const ROW_HEIGHT = 26;
 
 function ConfigTreePane({
   tree,
@@ -578,6 +585,8 @@ function ConfigTreePane({
   onSelect: (id: string | null) => void;
 }) {
   const [expanded, setExpanded] = useState<Record<string, boolean>>({});
+  const [effectiveExpanded, setEffectiveExpanded] = useState(true);
+  const parentRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
     if (!tree) return;
@@ -589,6 +598,31 @@ function ConfigTreePane({
       return next;
     });
   }, [tree]);
+
+  const rows: TreeRow[] = useMemo(() => {
+    const out: TreeRow[] = [];
+    out.push({ kind: "virtual-scope", label: "Effective", expanded: effectiveExpanded });
+    if (effectiveExpanded) {
+      out.push({ kind: "virtual-row", id: EFFECTIVE_SETTINGS_ROUTE, label: "Effective settings" });
+      out.push({ kind: "virtual-row", id: EFFECTIVE_MCP_ROUTE, label: "Effective MCP" });
+    }
+    if (!tree) return out;
+    for (const scope of tree.scopes) {
+      const open = !!expanded[scope.id];
+      out.push({ kind: "scope", scope, expanded: open });
+      if (open) {
+        for (const f of scope.files) out.push({ kind: "file", file: f });
+      }
+    }
+    return out;
+  }, [tree, expanded, effectiveExpanded]);
+
+  const virt = useVirtualizer({
+    count: rows.length,
+    getScrollElement: () => parentRef.current,
+    estimateSize: () => ROW_HEIGHT,
+    overscan: 12,
+  });
 
   if (loadError) {
     return (
@@ -623,8 +657,10 @@ function ConfigTreePane({
       </div>
     );
   }
+
   return (
-    <nav
+    <div
+      ref={parentRef}
       role="tree"
       aria-label="Config scopes"
       style={{
@@ -634,244 +670,214 @@ function ConfigTreePane({
         padding: "var(--sp-8) 0",
       }}
     >
-      <VirtualScope
-        id="scope:virtual:effective"
-        label="Effective"
-        rows={[
-          {
-            id: EFFECTIVE_SETTINGS_ROUTE,
-            label: "Effective settings",
-          },
-          { id: EFFECTIVE_MCP_ROUTE, label: "Effective MCP" },
-        ]}
-        selectedId={selectedId}
-        onSelect={onSelect}
-      />
-      {tree.scopes.map((s) => (
-        <ScopeRow
-          key={s.id}
-          scope={s}
-          expanded={!!expanded[s.id]}
-          selectedId={selectedId}
-          onToggle={() =>
-            setExpanded((p) => ({ ...p, [s.id]: !p[s.id] }))
-          }
-          onSelect={onSelect}
-        />
-      ))}
-    </nav>
-  );
-}
-
-function VirtualScope({
-  id,
-  label,
-  rows,
-  selectedId,
-  onSelect,
-}: {
-  id: string;
-  label: string;
-  rows: { id: string; label: string }[];
-  selectedId: string | null;
-  onSelect: (id: string | null) => void;
-}) {
-  const [expanded, setExpanded] = useState(true);
-  return (
-    <div role="treeitem" aria-expanded={expanded}>
-      <button
-        type="button"
-        onClick={() => setExpanded((v) => !v)}
-        className="pm-focus"
+      <div
         style={{
-          display: "flex",
-          alignItems: "center",
+          position: "relative",
+          height: `${virt.getTotalSize()}px`,
           width: "100%",
-          gap: "var(--sp-6)",
-          padding: "var(--sp-4) var(--sp-12)",
-          background: "transparent",
-          border: "none",
-          cursor: "pointer",
-          color: "var(--fg)",
-          fontSize: "var(--fs-xs)",
-          fontWeight: 600,
-          textAlign: "left",
         }}
       >
-        <span style={{ width: 12, display: "inline-block", textAlign: "center" }}>
-          {expanded ? "▾" : "▸"}
-        </span>
-        <span style={{ flex: 1 }}>{label}</span>
-        <span
-          style={{
-            fontSize: "var(--fs-2xs)",
-            color: "var(--fg-faint)",
-            fontWeight: 400,
-          }}
-        >
-          {rows.length}
-        </span>
-      </button>
-      {expanded && (
-        <ul role="group" style={{ listStyle: "none", padding: 0, margin: 0 }}>
-          {rows.map((r) => (
-            <li key={r.id}>
-              <button
-                type="button"
-                role="treeitem"
-                aria-selected={selectedId === r.id}
-                onClick={() => onSelect(r.id)}
-                className="pm-focus"
-                style={{
-                  display: "flex",
-                  alignItems: "center",
-                  width: "100%",
-                  gap: "var(--sp-6)",
-                  padding: "var(--sp-3) var(--sp-12) var(--sp-3) var(--sp-28)",
-                  background:
-                    selectedId === r.id ? "var(--bg-active)" : "transparent",
-                  color:
-                    selectedId === r.id ? "var(--accent-ink)" : "var(--fg)",
-                  border: "none",
-                  cursor: "pointer",
-                  fontSize: "var(--fs-xs)",
-                  textAlign: "left",
+        {virt.getVirtualItems().map((vi) => {
+          const row = rows[vi.index];
+          return (
+            <div
+              key={vi.key}
+              style={{
+                position: "absolute",
+                top: 0,
+                left: 0,
+                right: 0,
+                transform: `translateY(${vi.start}px)`,
+                height: `${ROW_HEIGHT}px`,
+              }}
+            >
+              <TreeRowView
+                row={row}
+                selectedId={selectedId}
+                onSelect={onSelect}
+                onToggle={(id) => {
+                  if (id === "virtual") {
+                    setEffectiveExpanded((v) => !v);
+                  } else {
+                    setExpanded((p) => ({ ...p, [id]: !p[id] }));
+                  }
                 }}
-              >
-                <span
-                  style={{
-                    flex: 1,
-                    overflow: "hidden",
-                    textOverflow: "ellipsis",
-                    whiteSpace: "nowrap",
-                  }}
-                >
-                  {r.label}
-                </span>
-              </button>
-            </li>
-          ))}
-        </ul>
-      )}
-      <div aria-hidden style={{ padding: "var(--sp-2) 0" }} />
-      <div aria-hidden style={{ paddingBottom: "var(--sp-4)" }}>
-        <div
-          style={{
-            height: 0,
-            borderTop: "var(--bw-hair) solid var(--line)",
-            margin: "0 var(--sp-12)",
-          }}
-        />
+              />
+            </div>
+          );
+        })}
       </div>
-      <div style={{ display: "none" }}>{id}</div>
     </div>
   );
 }
 
-function ScopeRow({
-  scope,
-  expanded,
+function TreeRowView({
+  row,
   selectedId,
-  onToggle,
   onSelect,
+  onToggle,
 }: {
-  scope: ConfigScopeNodeDto;
-  expanded: boolean;
+  row: TreeRow;
   selectedId: string | null;
-  onToggle: () => void;
   onSelect: (id: string | null) => void;
+  onToggle: (scopeId: string) => void;
+}) {
+  if (row.kind === "virtual-scope") {
+    return (
+      <ScopeHeaderButton
+        expanded={row.expanded}
+        label={row.label}
+        count={2}
+        onToggle={() => onToggle("virtual")}
+      />
+    );
+  }
+  if (row.kind === "virtual-row") {
+    const selected = selectedId === row.id;
+    return (
+      <FileRowButton
+        selected={selected}
+        label={row.label}
+        onSelect={() => onSelect(row.id)}
+      />
+    );
+  }
+  if (row.kind === "scope") {
+    return (
+      <ScopeHeaderButton
+        expanded={row.expanded}
+        label={row.scope.label}
+        count={row.scope.recursive_count}
+        onToggle={() => onToggle(row.scope.id)}
+      />
+    );
+  }
+  const selected = selectedId === row.file.id;
+  const label = row.file.summary_title ?? fileName(row.file.display_path);
+  return (
+    <FileRowButton
+      selected={selected}
+      label={label}
+      onSelect={() => onSelect(row.file.id)}
+      title={row.file.abs_path}
+      issuesCount={row.file.issues.length}
+      issuesTitle={row.file.issues.join("; ")}
+    />
+  );
+}
+
+function ScopeHeaderButton({
+  expanded,
+  label,
+  count,
+  onToggle,
+}: {
+  expanded: boolean;
+  label: string;
+  count: number;
+  onToggle: () => void;
 }) {
   return (
-    <div role="treeitem" aria-expanded={expanded}>
-      <button
-        type="button"
-        onClick={onToggle}
-        className="pm-focus"
+    <button
+      type="button"
+      role="treeitem"
+      aria-expanded={expanded}
+      onClick={onToggle}
+      className="pm-focus"
+      style={{
+        display: "flex",
+        alignItems: "center",
+        width: "100%",
+        height: "100%",
+        gap: "var(--sp-6)",
+        padding: "0 var(--sp-12)",
+        background: "transparent",
+        border: "none",
+        cursor: "pointer",
+        color: "var(--fg)",
+        fontSize: "var(--fs-xs)",
+        fontWeight: 600,
+        textAlign: "left",
+      }}
+    >
+      <Glyph g={expanded ? NF.chevronD : NF.chevronR} color="var(--fg-muted)" />
+      <span
         style={{
-          display: "flex",
-          alignItems: "center",
-          width: "100%",
-          gap: "var(--sp-6)",
-          padding: "var(--sp-4) var(--sp-12)",
-          background: "transparent",
-          border: "none",
-          cursor: "pointer",
-          color: "var(--fg)",
-          fontSize: "var(--fs-xs)",
-          fontWeight: 600,
-          textAlign: "left",
+          flex: 1,
+          overflow: "hidden",
+          textOverflow: "ellipsis",
+          whiteSpace: "nowrap",
         }}
       >
-        <span style={{ width: 12, display: "inline-block", textAlign: "center" }}>
-          {expanded ? "▾" : "▸"}
+        {label}
+      </span>
+      <span
+        style={{
+          fontSize: "var(--fs-2xs)",
+          color: "var(--fg-faint)",
+          fontWeight: 400,
+        }}
+      >
+        {count}
+      </span>
+    </button>
+  );
+}
+
+function FileRowButton({
+  selected,
+  label,
+  onSelect,
+  title,
+  issuesCount,
+  issuesTitle,
+}: {
+  selected: boolean;
+  label: string;
+  onSelect: () => void;
+  title?: string;
+  issuesCount?: number;
+  issuesTitle?: string;
+}) {
+  return (
+    <button
+      type="button"
+      role="treeitem"
+      aria-selected={selected}
+      onClick={onSelect}
+      className="pm-focus"
+      title={title}
+      style={{
+        display: "flex",
+        alignItems: "center",
+        width: "100%",
+        height: "100%",
+        gap: "var(--sp-6)",
+        padding: "0 var(--sp-12) 0 var(--sp-28)",
+        background: selected ? "var(--bg-active)" : "transparent",
+        color: selected ? "var(--accent-ink)" : "var(--fg)",
+        border: "none",
+        cursor: "pointer",
+        fontSize: "var(--fs-xs)",
+        textAlign: "left",
+      }}
+    >
+      <span
+        style={{
+          flex: 1,
+          overflow: "hidden",
+          textOverflow: "ellipsis",
+          whiteSpace: "nowrap",
+        }}
+      >
+        {label}
+      </span>
+      {issuesCount != null && issuesCount > 0 && (
+        <span title={issuesTitle} aria-label={`${issuesCount} issue${issuesCount === 1 ? "" : "s"}`}>
+          <Glyph g={NF.warn} color="var(--danger)" />
         </span>
-        <span style={{ flex: 1, overflow: "hidden", textOverflow: "ellipsis" }}>
-          {scope.label}
-        </span>
-        <span
-          style={{
-            fontSize: "var(--fs-2xs)",
-            color: "var(--fg-faint)",
-            fontWeight: 400,
-          }}
-        >
-          {scope.recursive_count}
-        </span>
-      </button>
-      {expanded && (
-        <ul role="group" style={{ listStyle: "none", padding: 0, margin: 0 }}>
-          {scope.files.map((f) => (
-            <li key={f.id}>
-              <button
-                type="button"
-                role="treeitem"
-                aria-selected={selectedId === f.id}
-                onClick={() => onSelect(f.id)}
-                className="pm-focus"
-                style={{
-                  display: "flex",
-                  alignItems: "center",
-                  width: "100%",
-                  gap: "var(--sp-6)",
-                  padding: "var(--sp-3) var(--sp-12) var(--sp-3) var(--sp-28)",
-                  background:
-                    selectedId === f.id ? "var(--bg-active)" : "transparent",
-                  color:
-                    selectedId === f.id ? "var(--accent-ink)" : "var(--fg)",
-                  border: "none",
-                  cursor: "pointer",
-                  fontSize: "var(--fs-xs)",
-                  textAlign: "left",
-                }}
-                title={f.abs_path}
-              >
-                <span
-                  style={{
-                    flex: 1,
-                    overflow: "hidden",
-                    textOverflow: "ellipsis",
-                    whiteSpace: "nowrap",
-                  }}
-                >
-                  {f.summary_title ?? fileName(f.display_path)}
-                </span>
-                {f.issues.length > 0 && (
-                  <span
-                    title={f.issues.join("; ")}
-                    style={{
-                      color: "var(--danger)",
-                      fontSize: "var(--fs-2xs)",
-                    }}
-                  >
-                    ⚠
-                  </span>
-                )}
-              </button>
-            </li>
-          ))}
-        </ul>
       )}
-    </div>
+    </button>
   );
 }
 
@@ -879,6 +885,8 @@ function fileName(path: string): string {
   const m = path.match(/([^/\\]+)$/);
   return m ? m[1] : path;
 }
+
+// ---------- File preview ---------------------------------------------
 
 function FilePreview({
   file,
@@ -901,6 +909,10 @@ function FilePreview({
   onSetDefault: (kind: ConfigKind | null, editorId: string) => void;
   onRefreshEditors: () => void;
 }) {
+  const kind = file.kind as ConfigKind;
+  const isMarkdown = MARKDOWN_KINDS.includes(kind);
+  const isJson = JSON_KINDS.includes(kind);
+
   return (
     <div
       style={{
@@ -914,7 +926,7 @@ function FilePreview({
         title={file.summary_title ?? fileName(file.display_path)}
         subtitle={file.summary_description ?? kindLabel(file.kind)}
         path={file.abs_path}
-        kind={file.kind as ConfigKind}
+        kind={kind}
         editors={editors}
         defaults={defaults}
         onOpen={onOpen}
@@ -926,38 +938,93 @@ function FilePreview({
         style={{
           flex: 1,
           overflow: "auto",
-          padding: "var(--sp-16) var(--sp-20)",
-          fontFamily: "var(--mono)",
-          fontSize: "var(--fs-xs)",
-          whiteSpace: "pre-wrap",
+          minHeight: 0,
           color: "var(--fg)",
           background: "var(--bg)",
         }}
       >
         {previewError ? (
-          <div style={{ color: "var(--danger)" }}>Preview failed: {previewError}</div>
-        ) : preview ? (
+          <div
+            style={{
+              padding: "var(--sp-16) var(--sp-20)",
+              color: "var(--danger)",
+              fontSize: "var(--fs-sm)",
+            }}
+          >
+            Preview failed: {previewError}
+          </div>
+        ) : !preview ? (
+          <div
+            style={{
+              padding: "var(--sp-16) var(--sp-20)",
+              color: "var(--fg-faint)",
+              fontSize: "var(--fs-sm)",
+            }}
+          >
+            Loading…
+          </div>
+        ) : isMarkdown ? (
           <>
-            {preview.body_utf8}
-            {preview.truncated && (
-              <div
-                style={{
-                  marginTop: "var(--sp-12)",
-                  color: "var(--fg-faint)",
-                  fontStyle: "italic",
-                }}
-              >
-                … preview truncated at 256 KB. Open in editor to see full file.
-              </div>
-            )}
+            <MarkdownRenderer body={preview.body_utf8} />
+            {preview.truncated && <TruncationFooter onOpen={onOpen} />}
+          </>
+        ) : isJson ? (
+          <>
+            <JsonTreeRenderer body={preview.body_utf8} />
+            {preview.truncated && <TruncationFooter onOpen={onOpen} />}
           </>
         ) : (
-          <div style={{ color: "var(--fg-faint)" }}>Loading…</div>
+          <>
+            <pre
+              style={{
+                margin: 0,
+                padding: "var(--sp-16) var(--sp-20)",
+                fontFamily: "var(--mono)",
+                fontSize: "var(--fs-xs)",
+                whiteSpace: "pre-wrap",
+                overflowWrap: "anywhere",
+                color: "var(--fg)",
+              }}
+            >
+              {preview.body_utf8}
+            </pre>
+            {preview.truncated && <TruncationFooter onOpen={onOpen} />}
+          </>
         )}
       </div>
     </div>
   );
 }
+
+function TruncationFooter({
+  onOpen,
+}: {
+  onOpen: (editorId: string | null) => void;
+}) {
+  return (
+    <div
+      style={{
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "space-between",
+        gap: "var(--sp-12)",
+        padding: "var(--sp-10) var(--sp-20)",
+        borderTop: "var(--bw-hair) solid var(--line)",
+        background: "var(--bg-sunken)",
+        color: "var(--fg-faint)",
+        fontSize: "var(--fs-xs)",
+        fontStyle: "italic",
+      }}
+    >
+      <span>Preview truncated at 256 KB.</span>
+      <Button variant="subtle" size="sm" onClick={() => onOpen(null)}>
+        Open full file
+      </Button>
+    </div>
+  );
+}
+
+// ---------- Home pane (no file selected) ------------------------------
 
 function ConfigHomePane({
   configHomeDir,
@@ -976,7 +1043,6 @@ function ConfigHomePane({
   onSetDefault: (kind: ConfigKind | null, editorId: string) => void;
   onRefreshEditors: () => void;
 }) {
-  const claudeDir = configHomeDir;
   return (
     <div
       style={{
@@ -988,8 +1054,8 @@ function ConfigHomePane({
     >
       <PreviewHeader
         title="Config home"
-        subtitle="Pick a file on the left to preview it."
-        path={claudeDir}
+        subtitle="Pick a file on the left to preview it, or open the whole .claude/ folder."
+        path={configHomeDir}
         kind={null}
         editors={editors}
         defaults={defaults}
@@ -1010,39 +1076,13 @@ function ConfigHomePane({
           textAlign: "center",
         }}
       >
-        Select an artifact from the tree to see its contents, or open the
-        whole <code>.claude/</code> folder in your editor.
+        Select an artifact from the tree on the left to preview it.
       </div>
     </div>
   );
 }
 
-const KIND_LABELS: Record<string, string> = {
-  claude_md: "CLAUDE.md",
-  settings: "settings.json",
-  settings_local: "settings.local.json",
-  managed_settings: "managed-settings.json",
-  redacted_user_config: "Global config (redacted)",
-  mcp_json: ".mcp.json",
-  managed_mcp_json: "managed-mcp.json",
-  agent: "Agent",
-  skill: "Skill",
-  command: "Command",
-  rule: "Rule",
-  hook: "Hook",
-  memory: "Memory",
-  memory_index: "MEMORY.md",
-  plugin: "Plugin",
-  keybindings: "Keybindings",
-  statusline: "Status line",
-  effective_settings: "Effective settings",
-  effective_mcp: "Effective MCP",
-  other: "Other",
-};
-
-function kindLabel(kind: string): string {
-  return KIND_LABELS[kind] ?? kind;
-}
+// ---------- Effective shell (wraps renderers) -------------------------
 
 function EffectiveShell({
   title,
@@ -1051,7 +1091,7 @@ function EffectiveShell({
 }: {
   title: string;
   subtitle: string;
-  children: ReactNode;
+  children: React.ReactNode;
 }) {
   return (
     <div
@@ -1092,6 +1132,37 @@ function EffectiveShell({
     </div>
   );
 }
+
+// ---------- Kind labels ----------------------------------------------
+
+const KIND_LABELS: Record<string, string> = {
+  claude_md: "CLAUDE.md",
+  settings: "settings.json",
+  settings_local: "settings.local.json",
+  managed_settings: "managed-settings.json",
+  redacted_user_config: "Global config (redacted)",
+  mcp_json: ".mcp.json",
+  managed_mcp_json: "managed-mcp.json",
+  agent: "Agent",
+  skill: "Skill",
+  command: "Command",
+  rule: "Rule",
+  hook: "Hook",
+  memory: "Memory",
+  memory_index: "MEMORY.md",
+  plugin: "Plugin",
+  keybindings: "Keybindings",
+  statusline: "Status line",
+  effective_settings: "Effective settings",
+  effective_mcp: "Effective MCP",
+  other: "Other",
+};
+
+function kindLabel(kind: string): string {
+  return KIND_LABELS[kind] ?? kind;
+}
+
+// ---------- Search results pane --------------------------------------
 
 function SearchResultsPane({
   hits,
@@ -1136,7 +1207,7 @@ function SearchResultsPane({
         }}
       >
         {summary
-          ? `${summary.total_hits} ${summary.capped ? "(capped) " : ""}hit${summary.total_hits === 1 ? "" : "s"}${summary.skipped_large > 0 ? ` · ${summary.skipped_large} file${summary.skipped_large === 1 ? "" : "s"} skipped (>2MB)` : ""}${summary.cancelled ? " · cancelled" : ""}`
+          ? `${summary.total_hits}${summary.capped ? " (capped)" : ""} hit${summary.total_hits === 1 ? "" : "s"}${summary.skipped_large > 0 ? ` · ${summary.skipped_large} file${summary.skipped_large === 1 ? "" : "s"} skipped (>2MB)` : ""}${summary.cancelled ? " · cancelled" : ""}`
           : `${hits.length} hit${hits.length === 1 ? "" : "s"} so far…`}
       </div>
       {hits.length === 0 && summary && summary.total_hits === 0 && (
@@ -1207,7 +1278,8 @@ function SearchResultsPane({
               color: "var(--fg-muted)",
               whiteSpace: "pre-wrap",
               overflow: "hidden",
-              maxHeight: "3.6em",
+              overflowWrap: "anywhere",
+              maxHeight: "var(--config-snippet-max-h)",
             }}
           >
             {hit.snippet}

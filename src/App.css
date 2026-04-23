@@ -964,6 +964,17 @@ body {
   box-shadow: var(--focus-ring);
 }
 
+/* Menu / listbox row hover. Stateless — replaces per-row useState
+ * hooks in dropdown menus (PreviewHeader's editor picker, etc.).
+ * Disabled rows keep their default background; callers add
+ * `[aria-disabled="true"]` if needed. */
+.pm-menu-item {
+  transition: background var(--dur-fast) var(--ease-linear);
+}
+.pm-menu-item:hover {
+  background: var(--bg-hover);
+}
+
 /* Primary push button — AppKit NSButton "BezelStyleRounded" feel.
    Solid accent fill at default saturation; on hover the whole
    button dims slightly, not a separate hover color. The subtle
