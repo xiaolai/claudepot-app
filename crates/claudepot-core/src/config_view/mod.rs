@@ -5,11 +5,14 @@
 //! `dev-docs/config-section-plan.md` §15).
 
 pub mod discover;
+pub mod effective_settings;
 pub mod launcher;
 pub mod mask;
+pub mod merge;
 pub mod model;
 pub mod parse;
 pub mod policy;
+pub mod provenance;
 pub mod redacted_claude_json;
 pub mod search;
 
