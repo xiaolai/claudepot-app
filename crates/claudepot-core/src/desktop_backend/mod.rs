@@ -16,6 +16,21 @@ pub trait DesktopPlatform: Send + Sync {
     async fn is_running(&self) -> bool;
     async fn quit(&self) -> Result<(), DesktopSwapError>;
     async fn launch(&self) -> Result<(), DesktopSwapError>;
+
+    /// Whether the Claude Desktop app is installed on this machine.
+    ///
+    /// Distinct from "has a data_dir" — a fresh install has no data_dir
+    /// until first launch, and a user who manually cleared
+    /// `~/Library/Application Support/Claude/` still has the app
+    /// installed. `app_status.desktop_installed` currently collapses
+    /// both questions into one disk check; this accessor lets callers
+    /// disambiguate.
+    ///
+    /// macOS: `/Applications/Claude.app` bundle exists.
+    /// Windows: the MSIX package is registered (best-effort probe;
+    /// falls back to data-dir existence when AppX APIs aren't
+    /// reachable from the current process).
+    fn is_installed(&self) -> bool;
 }
 
 pub fn create_platform() -> Option<Box<dyn DesktopPlatform>> {
