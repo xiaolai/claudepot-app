@@ -6,6 +6,7 @@ pub mod account_verification;
 pub mod blob;
 pub mod cli_backend;
 pub mod desktop_backend;
+pub mod desktop_identity;
 pub mod error;
 pub mod fs_utils;
 pub mod keys;

@@ -4,6 +4,7 @@
 //! command opens the store, calls a core function, and serializes the result.
 //! Errors become user-facing strings at this boundary.
 
+use crate::dto;
 use crate::dto::{
     AccountSummary, AppStatus, CcIdentity, CleanPreviewDto, DryRunPlanDto,
     JournalEntryDto, MoveArgsDto, ProjectDetailDto, ProjectInfoDto, ProtectedPathDto,
@@ -52,14 +53,22 @@ pub fn account_list() -> Result<Vec<AccountSummary>, String> {
     let accounts = store.list().map_err(|e| format!("list failed: {e}"))?;
     let summaries: Vec<AccountSummary> = accounts.iter().map(AccountSummary::from).collect();
 
-    // Opportunistically sync DB flags with reality: if an account's flag
-    // claims credentials exist but the stored blob is missing/corrupt,
-    // flip the flag false. Best-effort — ignore DB errors.
+    // Opportunistically sync DB flags with reality. Best-effort — we
+    // never surface DB write failures here; the flag is re-reconciled
+    // on the next list.
     for (acct, sum) in accounts.iter().zip(summaries.iter()) {
+        // CLI: flag claims credentials exist but the stored blob is
+        // missing/corrupt → flip false.
         if acct.has_cli_credentials && !sum.credentials_healthy {
             let _ = store.update_credentials_flag(acct.uuid, false);
         }
     }
+
+    // Desktop: delegate to the shared reconcile_flags service so the
+    // hot path in account_list and the explicit `desktop_reconcile`
+    // command run identical logic. Best-effort — any failure leaves
+    // the flags as-is for the next list.
+    let _ = services::desktop_service::reconcile_flags(&store);
 
     Ok(summaries)
 }
@@ -163,6 +172,89 @@ pub async fn desktop_use(email: String, no_launch: bool) -> Result<(), String> {
     desktop_backend::swap::switch(&*platform, &store, outgoing_id, target.uuid, no_launch)
         .await
         .map_err(|e| format!("desktop switch failed: {e}"))
+}
+
+/// Ground-truth "who is Claude Desktop signed in as right now".
+///
+/// Mirrors [`current_cc_identity`]: reads the live data dir, probes
+/// the signed-in identity, returns a DTO that never fails at the
+/// Tauri boundary — failures ride in `error` so the UI can render
+/// visible banners.
+///
+/// Phase 1: returns only the fast-path ("OrgUuidCandidate") result or
+/// `None`. The `probe_method` field is the UI's trust gate — only
+/// `Decrypted` (Phase 2+) is authoritative for mutation. See
+/// `desktop_identity` module docs for the rationale.
+#[tauri::command]
+pub async fn current_desktop_identity() -> Result<dto::DesktopIdentity, String> {
+    let now = chrono::Utc::now();
+    let Some(platform) = desktop_backend::create_platform() else {
+        return Ok(dto::DesktopIdentity {
+            email: None,
+            org_uuid: None,
+            probe_method: dto::DesktopProbeMethod::None,
+            verified_at: now,
+            error: Some("Desktop not supported on this platform".to_string()),
+        });
+    };
+    let store = open_store()?;
+
+    match claudepot_core::desktop_identity::probe_live_identity(
+        &*platform,
+        &store,
+        claudepot_core::desktop_identity::ProbeOptions::default(),
+    ) {
+        Ok(None) => Ok(dto::DesktopIdentity {
+            email: None,
+            org_uuid: None,
+            probe_method: dto::DesktopProbeMethod::None,
+            verified_at: now,
+            error: None,
+        }),
+        Ok(Some(live)) => Ok(dto::DesktopIdentity {
+            email: Some(live.email),
+            org_uuid: Some(live.org_uuid),
+            probe_method: match live.probe_method {
+                claudepot_core::desktop_identity::ProbeMethod::OrgUuidCandidate => {
+                    dto::DesktopProbeMethod::OrgUuidCandidate
+                }
+                claudepot_core::desktop_identity::ProbeMethod::Decrypted => {
+                    dto::DesktopProbeMethod::Decrypted
+                }
+            },
+            verified_at: now,
+            error: None,
+        }),
+        Err(e) => Ok(dto::DesktopIdentity {
+            email: None,
+            org_uuid: None,
+            probe_method: dto::DesktopProbeMethod::None,
+            verified_at: now,
+            error: Some(e.to_string()),
+        }),
+    }
+}
+
+/// Explicit flag-vs-disk reconcile. The same logic runs
+/// opportunistically inside `account_list`; this command surfaces
+/// the outcome so the GUI or CLI can show "N flags were reconciled."
+#[tauri::command]
+pub async fn desktop_reconcile() -> Result<dto::DesktopReconcileOutcome, String> {
+    let store = open_store()?;
+    let outcome = services::desktop_service::reconcile_flags(&store)
+        .map_err(|e| format!("reconcile failed: {e}"))?;
+    Ok(dto::DesktopReconcileOutcome {
+        flag_flips: outcome
+            .flag_flips
+            .into_iter()
+            .map(|f| dto::DesktopFlagFlip {
+                email: f.email,
+                uuid: f.uuid.to_string(),
+                new_value: f.new_value,
+            })
+            .collect(),
+        orphan_pointer_cleared: outcome.orphan_pointer_cleared,
+    })
 }
 
 /// macOS-only: request a keychain unlock via the system's native dialog.

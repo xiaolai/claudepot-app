@@ -36,6 +36,7 @@ export const sampleAccount = (
   verified_email: "alice@example.com",
   verified_at: null,
   drift: false,
+  desktop_profile_on_disk: false,
   ...overrides,
 });
 
