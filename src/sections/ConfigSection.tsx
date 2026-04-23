@@ -1,4 +1,11 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import {
+  type ReactNode,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import { open as openDialog } from "@tauri-apps/plugin-dialog";
 import { listen } from "@tauri-apps/api/event";
 import { api } from "../api";
@@ -17,6 +24,11 @@ import { ScreenHeader } from "../shell/ScreenHeader";
 import { PreviewHeader } from "../components/primitives/PreviewHeader";
 import { Button } from "../components/primitives/Button";
 import { NF } from "../icons";
+import { EffectiveRenderer } from "./config/EffectiveRenderer";
+import { EffectiveMcpRenderer } from "./config/EffectiveMcpRenderer";
+
+const EFFECTIVE_SETTINGS_ROUTE = "virtual:effective-settings";
+const EFFECTIVE_MCP_ROUTE = "virtual:effective-mcp";
 
 interface ConfigSectionProps {
   subRoute: string | null;
@@ -48,6 +60,14 @@ export function ConfigSection({ subRoute, onSubRouteChange }: ConfigSectionProps
     if (!subRoute?.startsWith("node:")) return null;
     return subRoute.slice("node:".length);
   }, [subRoute]);
+
+  const virtualRoute = useMemo<
+    null | "effective-settings" | "effective-mcp"
+  >(() => {
+    if (selectedId === EFFECTIVE_SETTINGS_ROUTE) return "effective-settings";
+    if (selectedId === EFFECTIVE_MCP_ROUTE) return "effective-mcp";
+    return null;
+  }, [selectedId]);
 
   const [searchQuery, setSearchQuery] = useState<string>("");
   const [searchRegex, setSearchRegex] = useState<boolean>(false);
@@ -104,18 +124,21 @@ export function ConfigSection({ subRoute, onSubRouteChange }: ConfigSectionProps
   }, [toast]);
 
   // Repair stale subRoute: if the selected id is gone after a rescan,
-  // clear it so the preview doesn't hang on a dead target.
+  // clear it so the preview doesn't hang on a dead target. Virtual
+  // routes (effective views) bypass this check — they're always live.
   useEffect(() => {
     if (!tree || !selectedId) return;
+    if (selectedId.startsWith("virtual:")) return;
     const found = tree.scopes.some((s) =>
       s.files.some((f) => f.id === selectedId),
     );
     if (!found) onSubRouteChange(null);
   }, [tree, selectedId, onSubRouteChange]);
 
-  // Pull preview on selection change.
+  // Pull preview on selection change. Virtual routes skip — their
+  // renderers fetch their own data.
   useEffect(() => {
-    if (!selectedId) {
+    if (!selectedId || selectedId.startsWith("virtual:")) {
       setPreview(null);
       setPreviewError(null);
       return;
@@ -450,7 +473,21 @@ export function ConfigSection({ subRoute, onSubRouteChange }: ConfigSectionProps
             borderLeft: "var(--bw-hair) solid var(--line)",
           }}
         >
-          {selectedFile ? (
+          {virtualRoute === "effective-settings" ? (
+            <EffectiveShell
+              title="Effective settings"
+              subtitle="Merged view of every enabled source. Hover a value to see contributors."
+            >
+              <EffectiveRenderer cwd={tree?.cwd ?? null} />
+            </EffectiveShell>
+          ) : virtualRoute === "effective-mcp" ? (
+            <EffectiveShell
+              title="Effective MCP"
+              subtitle="MCP servers CC would see, per simulation mode."
+            >
+              <EffectiveMcpRenderer cwd={tree?.cwd ?? null} />
+            </EffectiveShell>
+          ) : selectedFile ? (
             <FilePreview
               file={selectedFile}
               preview={preview}
@@ -569,6 +606,19 @@ function ConfigTreePane({
         padding: "var(--sp-8) 0",
       }}
     >
+      <VirtualScope
+        id="scope:virtual:effective"
+        label="Effective"
+        rows={[
+          {
+            id: EFFECTIVE_SETTINGS_ROUTE,
+            label: "Effective settings",
+          },
+          { id: EFFECTIVE_MCP_ROUTE, label: "Effective MCP" },
+        ]}
+        selectedId={selectedId}
+        onSelect={onSelect}
+      />
       {tree.scopes.map((s) => (
         <ScopeRow
           key={s.id}
@@ -582,6 +632,111 @@ function ConfigTreePane({
         />
       ))}
     </nav>
+  );
+}
+
+function VirtualScope({
+  id,
+  label,
+  rows,
+  selectedId,
+  onSelect,
+}: {
+  id: string;
+  label: string;
+  rows: { id: string; label: string }[];
+  selectedId: string | null;
+  onSelect: (id: string | null) => void;
+}) {
+  const [expanded, setExpanded] = useState(true);
+  return (
+    <div role="treeitem" aria-expanded={expanded}>
+      <button
+        type="button"
+        onClick={() => setExpanded((v) => !v)}
+        className="pm-focus"
+        style={{
+          display: "flex",
+          alignItems: "center",
+          width: "100%",
+          gap: "var(--sp-6)",
+          padding: "var(--sp-4) var(--sp-12)",
+          background: "transparent",
+          border: "none",
+          cursor: "pointer",
+          color: "var(--fg)",
+          fontSize: "var(--fs-xs)",
+          fontWeight: 600,
+          textAlign: "left",
+        }}
+      >
+        <span style={{ width: 12, display: "inline-block", textAlign: "center" }}>
+          {expanded ? "▾" : "▸"}
+        </span>
+        <span style={{ flex: 1 }}>{label}</span>
+        <span
+          style={{
+            fontSize: "var(--fs-2xs)",
+            color: "var(--fg-faint)",
+            fontWeight: 400,
+          }}
+        >
+          {rows.length}
+        </span>
+      </button>
+      {expanded && (
+        <ul role="group" style={{ listStyle: "none", padding: 0, margin: 0 }}>
+          {rows.map((r) => (
+            <li key={r.id}>
+              <button
+                type="button"
+                role="treeitem"
+                aria-selected={selectedId === r.id}
+                onClick={() => onSelect(r.id)}
+                className="pm-focus"
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  width: "100%",
+                  gap: "var(--sp-6)",
+                  padding: "var(--sp-3) var(--sp-12) var(--sp-3) var(--sp-28)",
+                  background:
+                    selectedId === r.id ? "var(--bg-active)" : "transparent",
+                  color:
+                    selectedId === r.id ? "var(--accent-ink)" : "var(--fg)",
+                  border: "none",
+                  cursor: "pointer",
+                  fontSize: "var(--fs-xs)",
+                  textAlign: "left",
+                }}
+              >
+                <span
+                  style={{
+                    flex: 1,
+                    overflow: "hidden",
+                    textOverflow: "ellipsis",
+                    whiteSpace: "nowrap",
+                  }}
+                >
+                  {r.label}
+                </span>
+              </button>
+            </li>
+          ))}
+        </ul>
+      )}
+      <div aria-hidden style={{ padding: "var(--sp-2) 0" }} />
+      <div aria-hidden style={{ paddingBottom: "var(--sp-4)" }}>
+        <div
+          style={{
+            height: 0,
+            borderTop: "var(--bw-hair) solid var(--line)",
+            margin: "0 var(--sp-12)",
+          }}
+        />
+      </div>
+      <div style={{ display: "none" }}>{id}</div>
+    </div>
   );
 }
 
@@ -859,6 +1014,55 @@ const KIND_LABELS: Record<string, string> = {
 
 function kindLabel(kind: string): string {
   return KIND_LABELS[kind] ?? kind;
+}
+
+function EffectiveShell({
+  title,
+  subtitle,
+  children,
+}: {
+  title: string;
+  subtitle: string;
+  children: ReactNode;
+}) {
+  return (
+    <div
+      style={{
+        flex: 1,
+        display: "flex",
+        flexDirection: "column",
+        minHeight: 0,
+      }}
+    >
+      <header
+        style={{
+          padding: "var(--sp-16) var(--sp-20) var(--sp-12)",
+          borderBottom: "var(--bw-hair) solid var(--line)",
+        }}
+      >
+        <h2
+          style={{
+            margin: 0,
+            fontSize: "var(--fs-lg)",
+            fontWeight: 600,
+            color: "var(--fg)",
+          }}
+        >
+          {title}
+        </h2>
+        <div
+          style={{
+            marginTop: "var(--sp-4)",
+            fontSize: "var(--fs-xs)",
+            color: "var(--fg-faint)",
+          }}
+        >
+          {subtitle}
+        </div>
+      </header>
+      {children}
+    </div>
+  );
 }
 
 function SearchResultsPane({

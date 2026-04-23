@@ -6,6 +6,7 @@
 
 pub mod diff;
 pub mod discover;
+pub mod effective_io;
 pub mod effective_mcp;
 pub mod effective_settings;
 pub mod launcher;

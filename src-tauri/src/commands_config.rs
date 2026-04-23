@@ -16,10 +16,15 @@
 use crate::preferences::PreferencesState;
 use claudepot_core::config_view::{
     discover,
+    effective_io,
+    effective_mcp::{
+        self, ApprovalState, AutoApprovalReason, BlockReason, McpSimulationMode,
+    },
+    effective_settings,
     launcher::{self, LaunchError},
     model::{
         ConfigTree, DetectSource, EditorCandidate, EditorDefaults, FileNode,
-        Kind, LaunchKind, Node, ParseIssue, Scope, ScopeNode,
+        Kind, LaunchKind, Node, ParseIssue, PolicyOrigin, Scope, ScopeNode,
     },
     scan,
     search::{self, CancelToken},
@@ -554,4 +559,227 @@ pub fn config_search_cancel(
         tok.cancel();
     }
     Ok(())
+}
+
+// ---------- Effective Settings (P4 UI) --------------------------------
+
+#[derive(Serialize, Clone, Debug)]
+pub struct ProvenanceLeafDto {
+    /// Dotted JSON path — `"a.b[2].c"`.
+    pub path: String,
+    pub winner: String,
+    pub contributors: Vec<String>,
+    pub suppressed: bool,
+}
+
+#[derive(Serialize, Clone, Debug)]
+pub struct EffectiveSettingsDto {
+    /// Fully merged JSON, with secrets masked.
+    pub merged: serde_json::Value,
+    /// One entry per primitive leaf.
+    pub provenance: Vec<ProvenanceLeafDto>,
+    /// Winning policy origin ("remote" | "mdm_admin" | …) or None.
+    pub policy_winner: Option<String>,
+    pub policy_errors: Vec<PolicyErrorDto>,
+}
+
+#[derive(Serialize, Clone, Debug)]
+pub struct PolicyErrorDto {
+    pub origin: String,
+    pub message: String,
+}
+
+#[tauri::command]
+pub async fn config_effective_settings(
+    cwd: Option<String>,
+) -> Result<EffectiveSettingsDto, String> {
+    let cwd_path = cwd
+        .map(PathBuf::from)
+        .or_else(|| std::env::current_dir().ok())
+        .unwrap_or_else(|| PathBuf::from("."));
+
+    let dto = tauri::async_runtime::spawn_blocking(move || {
+        let input = effective_io::load_effective_settings_input(&cwd_path);
+        let r = effective_settings::compute(&input);
+        EffectiveSettingsDto {
+            merged: r.merged,
+            provenance: r
+                .provenance
+                .into_iter()
+                .map(|p| ProvenanceLeafDto {
+                    path: render_path(&p.key_path),
+                    winner: scope_label(&p.winner),
+                    contributors: p.contributors.iter().map(scope_label).collect(),
+                    suppressed: p.suppressed,
+                })
+                .collect(),
+            policy_winner: r.policy.winner.map(|o| policy_origin_label(&o)),
+            policy_errors: r
+                .policy
+                .errors
+                .into_iter()
+                .map(|e| PolicyErrorDto {
+                    origin: policy_origin_label(&e.origin),
+                    message: e.message,
+                })
+                .collect(),
+        }
+    })
+    .await
+    .map_err(|e| format!("effective-settings join: {e}"))?;
+
+    Ok(dto)
+}
+
+fn render_path(segs: &[claudepot_core::config_view::model::JsonPathSeg]) -> String {
+    use claudepot_core::config_view::model::JsonPathSeg;
+    let mut out = String::new();
+    for (i, seg) in segs.iter().enumerate() {
+        match seg {
+            JsonPathSeg::Key(k) => {
+                if i > 0 {
+                    out.push('.');
+                }
+                out.push_str(k);
+            }
+            JsonPathSeg::Index(idx) => {
+                out.push_str(&format!("[{idx}]"));
+            }
+        }
+    }
+    out
+}
+
+fn scope_label(s: &Scope) -> String {
+    match s {
+        Scope::PluginBase => "plugin_base".into(),
+        Scope::User => "user".into(),
+        Scope::Project => "project".into(),
+        Scope::Local => "local".into(),
+        Scope::Flag => "flag".into(),
+        Scope::Policy { origin } => format!("policy:{}", policy_origin_label(origin)),
+        Scope::ClaudeMdDir { .. } => "claude_md_dir".into(),
+        Scope::Plugin { id, .. } => format!("plugin:{id}"),
+        Scope::MemoryCurrent => "memory_current".into(),
+        Scope::MemoryOther { .. } => "memory_other".into(),
+        Scope::Effective => "effective".into(),
+        Scope::RedactedUserConfig => "redacted_user_config".into(),
+        Scope::Other => "other".into(),
+    }
+}
+
+fn policy_origin_label(o: &PolicyOrigin) -> String {
+    match o {
+        PolicyOrigin::Remote => "remote".into(),
+        PolicyOrigin::MdmAdmin => "mdm_admin".into(),
+        PolicyOrigin::ManagedFileComposite => "managed_file_composite".into(),
+        PolicyOrigin::HkcuUser => "hkcu_user".into(),
+    }
+}
+
+// ---------- Effective MCP (P5 UI) ------------------------------------
+
+#[derive(Deserialize, Clone, Copy, Debug)]
+#[serde(rename_all = "snake_case")]
+pub enum McpSimulationModeDto {
+    Interactive,
+    NonInteractive,
+    SkipPermissions,
+}
+
+impl From<McpSimulationModeDto> for McpSimulationMode {
+    fn from(d: McpSimulationModeDto) -> Self {
+        match d {
+            McpSimulationModeDto::Interactive => McpSimulationMode::Interactive,
+            McpSimulationModeDto::NonInteractive => McpSimulationMode::NonInteractive,
+            McpSimulationModeDto::SkipPermissions => McpSimulationMode::SkipPermissions,
+        }
+    }
+}
+
+#[derive(Serialize, Clone, Debug)]
+pub struct EffectiveMcpDto {
+    pub enterprise_lockout: bool,
+    pub servers: Vec<EffectiveMcpServerDto>,
+}
+
+#[derive(Serialize, Clone, Debug)]
+pub struct EffectiveMcpServerDto {
+    pub name: String,
+    pub source_scope: String,
+    pub contributors: Vec<String>,
+    pub approval: String,
+    /// E.g. "enable_all_project_mcp", "non_interactive_with_project_source_enabled"
+    pub approval_reason: Option<String>,
+    pub blocked_by: Option<String>,
+    /// Server config JSON with secrets masked.
+    pub masked: serde_json::Value,
+}
+
+#[tauri::command]
+pub async fn config_effective_mcp(
+    cwd: Option<String>,
+    mode: Option<McpSimulationModeDto>,
+) -> Result<EffectiveMcpDto, String> {
+    let cwd_path = cwd
+        .map(PathBuf::from)
+        .or_else(|| std::env::current_dir().ok())
+        .unwrap_or_else(|| PathBuf::from("."));
+    let mode: McpSimulationMode = mode.unwrap_or(McpSimulationModeDto::Interactive).into();
+
+    let dto = tauri::async_runtime::spawn_blocking(move || {
+        let input = effective_io::load_effective_settings_input(&cwd_path);
+        let merged_settings = effective_settings::compute(&input).merged;
+        let bundle = effective_io::load_mcp_bundle(&cwd_path, merged_settings);
+        let lockout = !bundle.enterprise.is_empty();
+        let servers = effective_mcp::compute(&bundle, mode);
+
+        let servers_dto = servers
+            .into_iter()
+            .map(|s| {
+                let (approval, reason) = match s.approval {
+                    ApprovalState::Approved => ("approved".to_string(), None),
+                    ApprovalState::Rejected => ("rejected".to_string(), None),
+                    ApprovalState::Pending => ("pending".to_string(), None),
+                    ApprovalState::AutoApproved(r) => {
+                        ("auto_approved".to_string(), Some(auto_reason_label(&r)))
+                    }
+                };
+                let blocked = s.blocked_by.map(|b| match b {
+                    BlockReason::EnterpriseLockout => "enterprise_lockout".to_string(),
+                    BlockReason::DisabledByUser => "disabled_by_user".to_string(),
+                });
+                EffectiveMcpServerDto {
+                    name: s.name,
+                    source_scope: scope_label(&s.source_scope),
+                    contributors: s.contributors.iter().map(scope_label).collect(),
+                    approval,
+                    approval_reason: reason,
+                    blocked_by: blocked,
+                    masked: s.masked,
+                }
+            })
+            .collect();
+
+        EffectiveMcpDto {
+            enterprise_lockout: lockout,
+            servers: servers_dto,
+        }
+    })
+    .await
+    .map_err(|e| format!("effective-mcp join: {e}"))?;
+
+    Ok(dto)
+}
+
+fn auto_reason_label(r: &AutoApprovalReason) -> String {
+    match r {
+        AutoApprovalReason::EnableAllProjectMcp => "enable_all_project_mcp".into(),
+        AutoApprovalReason::NonInteractiveWithProjectSourceEnabled => {
+            "non_interactive_with_project_source_enabled".into()
+        }
+        AutoApprovalReason::SkipPermissionsWithProjectSourceEnabled => {
+            "skip_permissions_with_project_source_enabled".into()
+        }
+    }
 }
