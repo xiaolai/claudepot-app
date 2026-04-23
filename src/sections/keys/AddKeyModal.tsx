@@ -125,12 +125,6 @@ export function AddKeyModal({
               <strong>API key</strong> detected.
             </Hint>
           )}
-          {kind === "oauth" && (
-            <Hint tone="accent">
-              <strong>OAuth token</strong> detected. It's billed against the
-              account you ran <code>claude setup-token</code> under.
-            </Hint>
-          )}
           {kind === "invalid" && (
             <Hint tone="danger">
               Unknown prefix. Expected <code>sk-ant-api03-</code> (API key) or{" "}
@@ -191,12 +185,17 @@ export function AddKeyModal({
   );
 }
 
-function accountHint(kind: DetectedKind, total: number): string {
+function accountHint(kind: DetectedKind, total: number): React.ReactNode {
   if (total === 0) {
     return "No registered accounts yet — add one from the Accounts section first.";
   }
   if (kind === "oauth") {
-    return "The account you were signed in as when you ran `claude setup-token`.";
+    return (
+      <>
+        The account you were signed in as when you ran{" "}
+        <code>claude setup-token</code>.
+      </>
+    );
   }
   if (kind === "api") {
     return "The Anthropic account that owns this API key in the console.";
@@ -210,7 +209,7 @@ function Field({
   children,
 }: {
   label: string;
-  hint?: string;
+  hint?: React.ReactNode;
   children: React.ReactNode;
 }) {
   return (

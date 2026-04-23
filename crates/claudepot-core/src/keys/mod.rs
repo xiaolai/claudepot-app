@@ -8,24 +8,21 @@
 //! relationship is informational — no enforcement.
 //!
 //! Storage:
-//! * Metadata lives in `keys.db` (SQLite) under the Claudepot data dir.
-//! * Secrets live in the OS keychain via the `keyring` crate. This is
-//!   Claudepot's OWN secret namespace — NEVER use `/usr/bin/security`
-//!   here; that is reserved for CC's shared `Claude Code-credentials`
-//!   slot (see `cli_backend::keychain`).
+//! * Both metadata and secrets live in `keys.db` (SQLite) under the
+//!   Claudepot data dir, file-permission-protected (`0o600` on Unix).
+//!   The OS Keychain is NOT used here — CC's `Claude Code-credentials`
+//!   slot is the only Keychain surface Claudepot touches (via
+//!   `cli_backend::keychain` with `/usr/bin/security`).
 
 mod error;
 mod format;
-mod keychain;
+mod probe;
 mod store;
 mod types;
 
 pub use error::KeyError;
 pub use format::{classify_token, token_preview, KeyPrefix};
-pub use keychain::{
-    delete_api_secret, delete_oauth_secret, read_api_secret, read_oauth_secret,
-    write_api_secret, write_oauth_secret,
-};
+pub use probe::probe_api_key;
 pub use store::KeyStore;
 pub use types::{ApiKey, OauthToken};
 

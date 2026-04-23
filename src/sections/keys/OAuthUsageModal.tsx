@@ -13,14 +13,15 @@ import type { AccountUsage, OauthTokenSummary, UsageWindow } from "../../types";
 
 type State =
   | { status: "loading" }
-  | { status: "ok"; usage: AccountUsage }
+  | { status: "ok"; usage: AccountUsage | null }
   | { status: "error"; detail: string };
 
 /**
  * Mini usage modal that opens when the user clicks the account tag on
- * an OAuth token row. Reuses `/api/oauth/usage` — same endpoint the
- * Accounts section uses — with the row's stored token instead of the
- * account's cached access token.
+ * an OAuth token row. Reads from the in-memory usage cache populated
+ * by the Accounts section — no live Anthropic call is made here.
+ * When the cache has no entry for the account, we show an empty hint
+ * pointing the user at Accounts to refresh.
  */
 export function OAuthUsageModal({
   token,
@@ -35,7 +36,7 @@ export function OAuthUsageModal({
   useEffect(() => {
     let cancelled = false;
     api
-      .keyOauthUsage(token.uuid)
+      .keyOauthUsageCached(token.uuid)
       .then((usage) => {
         if (!cancelled) setState({ status: "ok", usage });
       })
@@ -92,7 +93,16 @@ export function OAuthUsageModal({
             <p style={{ margin: 0, color: "var(--danger)" }}>{state.detail}</p>
           )}
 
-          {state.status === "ok" && <UsageBody usage={state.usage} />}
+          {state.status === "ok" && state.usage === null && (
+            <p style={{ margin: 0, color: "var(--fg-muted)" }}>
+              No cached usage for this account yet. Open the Accounts
+              section to refresh.
+            </p>
+          )}
+
+          {state.status === "ok" && state.usage !== null && (
+            <UsageBody usage={state.usage} />
+          )}
         </div>
       </ModalBody>
       <ModalFooter>
