@@ -13,7 +13,7 @@
 
 use crate::config_view::model::{
     ClaudeMdRole, ConfigTree, FileNode, FileSummary, Kind, Node,
-    ParseIssue, Scope, ScopeNode,
+    ParseIssue, PolicyOrigin, Scope, ScopeNode,
 };
 use crate::config_view::parse;
 use crate::path_utils::simplify_windows_path;
@@ -335,6 +335,50 @@ fn walk_memory_dir(dir: &Path, out: &mut Vec<FileNode>) {
     }
 }
 
+/// Managed settings composite — `managed-settings.json` + any drop-ins
+/// under `managed-settings.d/`. Surfaces one `FileNode` per file so the
+/// user can inspect each contributor; the effective composite is resolved
+/// by `policy::policy_resolve`.
+pub fn collect_policy_managed_files() -> Vec<FileNode> {
+    let home = claude_config_dir();
+    let mut out = Vec::new();
+    if let Some(f) = maybe_file(
+        home.join("managed-settings.json"),
+        Kind::ManagedSettings,
+        Scope::Policy {
+            origin: PolicyOrigin::ManagedFileComposite,
+        },
+    ) {
+        out.push(f);
+    }
+    if let Ok(rd) = std::fs::read_dir(home.join("managed-settings.d")) {
+        let mut entries: Vec<PathBuf> = rd
+            .flatten()
+            .filter_map(|e| {
+                let p = e.path();
+                if p.is_file() && p.extension().is_some_and(|ext| ext == "json") {
+                    Some(p)
+                } else {
+                    None
+                }
+            })
+            .collect();
+        entries.sort();
+        for p in entries {
+            if let Some(f) = maybe_file(
+                p,
+                Kind::ManagedSettings,
+                Scope::Policy {
+                    origin: PolicyOrigin::ManagedFileComposite,
+                },
+            ) {
+                out.push(f);
+            }
+        }
+    }
+    out
+}
+
 /// RedactedUserConfig — `~/.claude.json` IF present. Parser is a no-op
 /// at the file level; actual redaction lives in P2's
 /// `redacted_claude_json.rs`. For P1 we just surface the file node.
@@ -507,6 +551,18 @@ pub fn assemble_tree(cwd: &Path) -> ConfigTree {
             Scope::ClaudeMdDir { dir: dir.clone(), role: role.clone() },
             &label,
             vec![Node::File(f)],
+        ));
+    }
+
+    let policy_files = collect_policy_managed_files();
+    if !policy_files.is_empty() {
+        scopes.push(scope_node(
+            "scope:policy:managed",
+            Scope::Policy {
+                origin: PolicyOrigin::ManagedFileComposite,
+            },
+            "Policy (managed-settings)",
+            policy_files.into_iter().map(Node::File).collect(),
         ));
     }
 
