@@ -106,7 +106,15 @@ export function useActions({ pushToast, refresh, withBusy, addBusy, removeBusy }
   /// verification backend-side — fast-path candidates fail here with
   /// an explicit "live Desktop identity is <other>, not <email>"
   /// error, which is the correct behavior (Codex D5-1).
-  const adoptDesktop = (a: AccountSummary, overwrite = false) =>
+  ///
+  /// Callers that want overwrite=true MUST gate the call behind a
+  /// user-visible confirmation modal — `adoptDesktopForce` is the
+  /// post-confirmation entry point; the bare `adoptDesktop` refuses
+  /// to overwrite and lets the caller render the
+  /// `DesktopConfirmContext::ReplaceProfile` dialog instead.
+  const adoptDesktop = (a: AccountSummary) => adoptDesktopForce(a, false);
+
+  const adoptDesktopForce = (a: AccountSummary, overwrite: boolean) =>
     withBusy(`adopt-${a.uuid}`, async () => {
       try {
         const r = await api.desktopAdopt(a.uuid, overwrite);
@@ -121,7 +129,10 @@ export function useActions({ pushToast, refresh, withBusy, addBusy, removeBusy }
       }
     });
 
-  const clearDesktop = (keepSnapshot = true) =>
+  /// Perform the actual sign-out. Destructive — the caller is
+  /// responsible for having already shown the confirm dialog; this
+  /// entry point assumes consent.
+  const clearDesktopConfirmed = (keepSnapshot = true) =>
     withBusy("desktop-clear", async () => {
       try {
         const r = await api.desktopClear(keepSnapshot);
@@ -138,6 +149,10 @@ export function useActions({ pushToast, refresh, withBusy, addBusy, removeBusy }
         pushToast("error", `Desktop clear failed: ${e}`);
       }
     });
+
+  /// Stub kept for backward compatibility; callers are being migrated
+  /// off this and onto the confirm-then-clearDesktopConfirmed flow.
+  const clearDesktop = clearDesktopConfirmed;
 
   const performRemoveImmediate = (a: AccountSummary) =>
     withBusy(`rm-${a.uuid}`, async () => {
@@ -204,7 +219,9 @@ export function useActions({ pushToast, refresh, withBusy, addBusy, removeBusy }
     cancelLogin,
     useDesktop,
     adoptDesktop,
+    adoptDesktopForce,
     clearDesktop,
+    clearDesktopConfirmed,
     performRemove,
     performClearCli,
   };
