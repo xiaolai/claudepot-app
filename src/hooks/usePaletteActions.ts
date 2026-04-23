@@ -38,6 +38,12 @@ export function usePaletteActions(opts: {
   onAdd: () => void;
   onRefresh: () => void;
   onRemove: (a: AccountSummary) => void;
+  /** Bind current Desktop session to this account. Phase 3+. */
+  onAdoptDesktop?: (a: AccountSummary) => void;
+  /** Sign Desktop out. */
+  onClearDesktop?: () => void;
+  /** Launch Claude Desktop. */
+  onLaunchDesktop?: () => void;
   /** Jump to a top-level section — "accounts", "projects", "settings". */
   onNavigate?: (section: string, subRoute?: string | null) => void;
 }) {
@@ -49,6 +55,9 @@ export function usePaletteActions(opts: {
     onAdd,
     onRefresh,
     onRemove,
+    onAdoptDesktop,
+    onClearDesktop,
+    onLaunchDesktop,
     onNavigate,
   } = opts;
 
@@ -67,7 +76,10 @@ export function usePaletteActions(opts: {
       }
     }
     for (const a of accounts) {
-      if (!a.is_desktop_active && a.has_desktop_profile && status.desktop_installed) {
+      // desktop_profile_on_disk is the disk-truth field; gates on
+      // the actual snapshot existing so the switch won't error at
+      // restore. See plan v2 D18.
+      if (!a.is_desktop_active && a.desktop_profile_on_disk && status.desktop_installed) {
         items.push({
           id: `desk-${a.uuid}`,
           label: `Switch Desktop to ${a.email}`,
@@ -77,6 +89,38 @@ export function usePaletteActions(opts: {
           onSelect: () => onSwitchDesktop(a),
         });
       }
+      // Bind live Desktop into this account — the "no profile yet"
+      // remedy. Shows whenever Desktop is installed and this account
+      // doesn't already have a snapshot; the backend verifies the
+      // live /profile email matches and errors cleanly otherwise.
+      if (onAdoptDesktop && !a.desktop_profile_on_disk && status.desktop_installed) {
+        items.push({
+          id: `adopt-${a.uuid}`,
+          label: `Bind current Desktop session to ${a.email}`,
+          detail: a.org_name ?? "personal",
+          iconName: "monitor",
+          category: "action",
+          onSelect: () => onAdoptDesktop(a),
+        });
+      }
+    }
+    if (status.desktop_installed && onClearDesktop) {
+      items.push({
+        id: "desktop-clear",
+        label: "Sign Desktop out",
+        iconName: "trash",
+        category: "action",
+        onSelect: onClearDesktop,
+      });
+    }
+    if (status.desktop_installed && onLaunchDesktop) {
+      items.push({
+        id: "desktop-launch",
+        label: "Launch Claude Desktop",
+        iconName: "monitor",
+        category: "action",
+        onSelect: onLaunchDesktop,
+      });
     }
     if (onNavigate) {
       items.push({
@@ -123,6 +167,9 @@ export function usePaletteActions(opts: {
     onAdd,
     onRefresh,
     onRemove,
+    onAdoptDesktop,
+    onClearDesktop,
+    onLaunchDesktop,
     onNavigate,
   ]);
 

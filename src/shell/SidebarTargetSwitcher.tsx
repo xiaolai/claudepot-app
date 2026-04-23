@@ -187,17 +187,30 @@ export function SidebarTargetSwitcher({
                 No accounts registered yet.
               </div>
             ) : (
-              accounts.map((a) => (
-                <TargetSwitchOption
-                  key={a.uuid}
-                  account={a}
-                  current={a.uuid === boundUuid}
-                  onClick={() => {
-                    onBind(target.id, a.uuid);
-                    setOpen(false);
-                  }}
-                />
-              ))
+              accounts.map((a) => {
+                // For Desktop targets, only accounts with an on-disk
+                // snapshot can be swapped to. Surface ineligibility
+                // inline rather than letting the click fail at the
+                // backend — matches the tray's labeling.
+                const disabled =
+                  target.id === "desktop" && !a.desktop_profile_on_disk;
+                return (
+                  <TargetSwitchOption
+                    key={a.uuid}
+                    account={a}
+                    current={a.uuid === boundUuid}
+                    disabled={disabled}
+                    disabledReason={
+                      disabled ? "no profile — bind first" : undefined
+                    }
+                    onClick={() => {
+                      if (disabled) return;
+                      onBind(target.id, a.uuid);
+                      setOpen(false);
+                    }}
+                  />
+                );
+              })
             )}
           </div>
           <div
@@ -239,22 +252,28 @@ export function SidebarTargetSwitcher({
 interface TargetSwitchOptionProps {
   account: AccountSummary;
   current: boolean;
+  disabled?: boolean;
+  disabledReason?: string;
   onClick: () => void;
 }
 
 function TargetSwitchOption({
   account,
   current,
+  disabled,
+  disabledReason,
   onClick,
 }: TargetSwitchOptionProps) {
   const [hover, setHover] = useState(false);
   return (
     <button
       type="button"
-      onClick={current ? undefined : onClick}
+      onClick={current || disabled ? undefined : onClick}
       onMouseEnter={() => setHover(true)}
       onMouseLeave={() => setHover(false)}
       aria-current={current || undefined}
+      aria-disabled={disabled || undefined}
+      title={disabled ? disabledReason : undefined}
       style={{
         width: "100%",
         display: "flex",
@@ -262,16 +281,17 @@ function TargetSwitchOption({
         gap: "var(--sp-10)",
         padding: "var(--sp-7) var(--sp-8)",
         fontSize: "var(--fs-sm)",
-        color: "var(--fg)",
+        color: disabled ? "var(--fg-faint)" : "var(--fg)",
         background: current
           ? "var(--accent-soft)"
-          : hover
+          : hover && !disabled
             ? "var(--bg-hover)"
             : "transparent",
         border: `var(--bw-hair) solid ${current ? "var(--accent-border)" : "transparent"}`,
         borderRadius: "var(--r-1)",
         textAlign: "left",
-        cursor: current ? "default" : "pointer",
+        cursor: current || disabled ? "default" : "pointer",
+        opacity: disabled ? 0.5 : 1,
       }}
     >
       <Avatar
