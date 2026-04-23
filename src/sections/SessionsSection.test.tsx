@@ -43,6 +43,7 @@ vi.mock("./sessions/SessionDetail", () => ({
 }));
 
 import { SessionsSection } from "./SessionsSection";
+import { resetSessionsFilterForTest } from "./sessions/sessionsFilterStore";
 
 function mk(id: string, mods: Partial<SessionRow> = {}): SessionRow {
   return {
@@ -95,6 +96,9 @@ beforeEach(() => {
   projectListSpy.mockResolvedValue([] as ProjectInfo[]);
   sessionWorktreeGroupsSpy.mockResolvedValue([] as RepositoryGroup[]);
   sessionSearchSpy.mockResolvedValue([] as SearchHit[]);
+  // Reset the module-scope filter store so one test's filter doesn't
+  // leak into the next (stale `tab = "cleanup"` would hide the list).
+  resetSessionsFilterForTest();
 });
 
 async function mountWithRows(rows: SessionRow[]) {

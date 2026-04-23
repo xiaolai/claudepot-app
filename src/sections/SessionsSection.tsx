@@ -8,6 +8,11 @@ import {
 } from "react";
 import { copyToClipboard } from "../lib/copyToClipboard";
 import { useSessionsData } from "../hooks/useSessionsData";
+import { useTrashCount } from "../hooks/useTrashCount";
+import {
+  readSessionsFilter,
+  writeSessionsFilter,
+} from "./sessions/sessionsFilterStore";
 import { ContextMenu } from "../components/ContextMenu";
 import { Button } from "../components/primitives/Button";
 import { IconButton } from "../components/primitives/IconButton";
@@ -62,15 +67,67 @@ export interface SessionsSectionProps {
 
 export function SessionsSection(props: SessionsSectionProps = {}) {
   const { initialSelectedPath = null, onInitialSelectedPathConsumed } = props;
-  const [activeRepo, setActiveRepo] = useState<string | null>(null);
+  // Seed local state from the module-scope filter store so a user
+  // who typed a query, picked a repo, or drilled into a transcript
+  // returns to the same view after a cross-section hop. On mount the
+  // snapshot is copied in; on change we write back. The store never
+  // pushes updates — consumers read once and own their copy after.
+  const initialFilters = useRef(readSessionsFilter());
+  const [activeRepo, setActiveRepoRaw] = useState<string | null>(
+    initialFilters.current.activeRepo,
+  );
   /** The file_path of the selected row — globally unique on disk.
    * We key selection by path (not session_id) because CC can end up
    * with two .jsonl files that share a session_id (e.g. an interrupted
    * adopt_orphan left the source file behind). */
-  const [selectedPath, setSelectedPath] = useState<string | null>(null);
-  const [filter, setFilter] = useState<SessionFilter>("all");
-  const [query, setQuery] = useState("");
-  const [tab, setTab] = useState<"sessions" | "cleanup">("sessions");
+  const [selectedPath, setSelectedPathRaw] = useState<string | null>(
+    initialFilters.current.selectedPath,
+  );
+  const [filter, setFilterRaw] = useState<SessionFilter>(
+    initialFilters.current.filter,
+  );
+  const [query, setQueryRaw] = useState(initialFilters.current.query);
+  const [tab, setTabRaw] = useState<"sessions" | "cleanup">(
+    initialFilters.current.tab,
+  );
+  // Wrap each setter so every mutation funnels through the module
+  // store. Using a typed helper keeps the call sites unchanged at
+  // the hook-consumption level.
+  const setActiveRepo = useCallback<typeof setActiveRepoRaw>((next) => {
+    setActiveRepoRaw((prev) => {
+      const resolved = typeof next === "function" ? next(prev) : next;
+      writeSessionsFilter({ activeRepo: resolved });
+      return resolved;
+    });
+  }, []);
+  const setSelectedPath = useCallback<typeof setSelectedPathRaw>((next) => {
+    setSelectedPathRaw((prev) => {
+      const resolved = typeof next === "function" ? next(prev) : next;
+      writeSessionsFilter({ selectedPath: resolved });
+      return resolved;
+    });
+  }, []);
+  const setFilter = useCallback<typeof setFilterRaw>((next) => {
+    setFilterRaw((prev) => {
+      const resolved = typeof next === "function" ? next(prev) : next;
+      writeSessionsFilter({ filter: resolved });
+      return resolved;
+    });
+  }, []);
+  const setQuery = useCallback<typeof setQueryRaw>((next) => {
+    setQueryRaw((prev) => {
+      const resolved = typeof next === "function" ? next(prev) : next;
+      writeSessionsFilter({ query: resolved });
+      return resolved;
+    });
+  }, []);
+  const setTab = useCallback<typeof setTabRaw>((next) => {
+    setTabRaw((prev) => {
+      const resolved = typeof next === "function" ? next(prev) : next;
+      writeSessionsFilter({ tab: resolved });
+      return resolved;
+    });
+  }, []);
   const [detailRefreshSignal, setDetailRefreshSignal] = useState(0);
   const [toast, setToast] = useState<string | null>(null);
   const [ctxMenu, setCtxMenu] = useState<{
@@ -93,6 +150,9 @@ export function SessionsSection(props: SessionsSectionProps = {}) {
     fetchStartedAt,
     refresh,
   } = useSessionsData({ onSecondaryError: setToast });
+
+  // Dot on the Cleanup tab when trash is non-empty. Render-if-nonzero.
+  const { count: trashCount, refresh: refreshTrash } = useTrashCount();
 
   // Tick once a second while a fetch is in flight so the "Updating…
   // Ns" elapsed-time label ages without re-rendering the whole table
@@ -344,6 +404,7 @@ export function SessionsSection(props: SessionsSectionProps = {}) {
           label="Cleanup"
           active={tab === "cleanup"}
           onSelect={() => setTab("cleanup")}
+          indicator={trashCount > 0 ? true : undefined}
         />
       </div>
 
@@ -360,7 +421,12 @@ export function SessionsSection(props: SessionsSectionProps = {}) {
           }}
         >
           <div style={{ flex: 2, minWidth: 0, borderRight: "var(--bw-hair) solid var(--line)" }}>
-            <CleanupPane onTrashChanged={refresh} />
+            <CleanupPane
+              onTrashChanged={() => {
+                refresh();
+                refreshTrash();
+              }}
+            />
           </div>
           <div style={{ flex: 1, minWidth: 0 }}>
             <TrashDrawer onChange={refresh} />
