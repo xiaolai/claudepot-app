@@ -36,9 +36,11 @@ use std::sync::Mutex;
 use tauri::{Emitter, State};
 
 /// Cached last-scanned tree, used by `config_preview` to resolve node IDs
-/// back to file paths. Rebuilt on every `config_scan`.
-#[derive(Default)]
-pub struct ConfigTreeState(pub Mutex<Option<ConfigTree>>);
+/// back to file paths. Rebuilt on every `config_scan`. Wrapped in an
+/// `Arc` so the FS watcher can hold its own handle and mirror snapshots
+/// back into the same slot — callers `.lock()` through the Mutex as usual.
+#[derive(Default, Clone)]
+pub struct ConfigTreeState(pub std::sync::Arc<Mutex<Option<ConfigTree>>>);
 
 /// Active search cancel tokens, keyed by client-supplied search_id.
 #[derive(Default)]
