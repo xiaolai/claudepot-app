@@ -14,6 +14,7 @@ import { useFocusTrap } from "../../hooks/useFocusTrap";
 import { NF } from "../../icons";
 import type { AccountSummary } from "../../types";
 import { ActionCard } from "./ActionCard";
+import { DesktopImportCard } from "./DesktopImportCard";
 import { IdentityPreview } from "./IdentityPreview";
 
 interface AddAccountModalProps {
@@ -325,6 +326,21 @@ export function AddAccountModal({
               </div>
             )}
           </ActionCard>
+
+          {/* Tier 3-A — Desktop session import. Decrypts live
+              oauth:tokenCache via the authoritative /profile path
+              (strict probe) and offers a one-click Bind when it
+              matches a registered account. Hidden behind the
+              divider so the default focus stays on the CC flow. */}
+          <DesktopImportCard
+            accounts={accounts}
+            externallyDisabled={importing || browserLoggingIn}
+            onAdopted={(email) => {
+              onAdded(email);
+              onClose();
+            }}
+            onError={onError}
+          />
         </ModalBody>
 
         <ModalFooter>
