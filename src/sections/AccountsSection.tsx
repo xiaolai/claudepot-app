@@ -28,7 +28,7 @@ import type {
  * state (usage cache, busy keys, modals, palette) stays local.
  */
 export function AccountsSection({
-  onNavigate: _onNavigate,
+  onNavigate,
 }: {
   onNavigate?: (section: string, subRoute?: string | null) => void;
 }) {
@@ -58,6 +58,50 @@ export function AccountsSection({
   const usageAgeLabel = useMemo(
     () => formatUsageAge(lastFetchedAt),
     [lastFetchedAt],
+  );
+
+  // Token counts per account — one fetch on mount. Keys section owns
+  // the full lifecycle; this is a read-only decoration on the
+  // Accounts cards. Quiet failure: if the backend doesn't answer
+  // (e.g. first-run, no keychain), the chip just doesn't render.
+  const [tokenCounts, setTokenCounts] = useState<Record<string, number>>({});
+  useEffect(() => {
+    let cancelled = false;
+    Promise.all([
+      api.keyApiList().catch(() => []),
+      api.keyOauthList().catch(() => []),
+    ]).then(([apiKeys, oauthTokens]) => {
+      if (cancelled) return;
+      const counts: Record<string, number> = {};
+      for (const k of apiKeys) {
+        if (k.account_uuid) {
+          counts[k.account_uuid] = (counts[k.account_uuid] ?? 0) + 1;
+        }
+      }
+      for (const t of oauthTokens) {
+        if (t.account_uuid) {
+          counts[t.account_uuid] = (counts[t.account_uuid] ?? 0) + 1;
+        }
+      }
+      setTokenCounts(counts);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [accounts]);
+
+  const handleOpenTokensFor = useCallback(
+    (email: string) => {
+      onNavigate?.("keys");
+      // Dispatch on the next tick so KeysSection has mounted and its
+      // cp-keys-filter listener is wired up before we fire.
+      window.setTimeout(() => {
+        window.dispatchEvent(
+          new CustomEvent("cp-keys-filter", { detail: { query: email } }),
+        );
+      }, 0);
+    },
+    [onNavigate],
   );
 
   const [showAdd, setShowAdd] = useState(false);
@@ -335,6 +379,8 @@ export function AccountsSection({
         cliHandlers={cliHandlers}
         desktopHandlers={desktopHandlers}
         ccIdentity={ccIdentity}
+        tokenCounts={tokenCounts}
+        onOpenTokens={handleOpenTokensFor}
         onAdd={() => setShowAdd(true)}
         onAdoptCurrent={async () => {
           try {
