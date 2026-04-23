@@ -56,6 +56,21 @@ pub enum DesktopSwapError {
     #[error("desktop not installed on this platform")]
     NotInstalled,
 
+    /// Windows-only. Detected at pre-restore by
+    /// `desktop_service::check_profile_dpapi_valid`. Means the
+    /// stored profile's ciphertext was encrypted under a different
+    /// DPAPI master key than the one this Windows session currently
+    /// holds, so Chromium on next launch would reject the cookies /
+    /// tokens as corrupt. Surfaced to the user as "re-sign in to
+    /// Claude Desktop on this machine; Claudepot will re-bind the
+    /// fresh session." Never fires on macOS.
+    #[error(
+        "Desktop profile encrypted under different Windows credentials \
+         (different machine, different user, or password reset) — \
+         sign in to Claude Desktop fresh, then re-bind."
+    )]
+    DpapiInvalidated,
+
     #[error("{0}")]
     Io(#[from] std::io::Error),
 }

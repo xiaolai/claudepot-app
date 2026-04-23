@@ -11,6 +11,7 @@ import { RunningOpStrip } from "./components/RunningOpStrip";
 import { StatusIssuesBanner } from "./components/StatusIssuesBanner";
 import { ToastContainer } from "./components/ToastContainer";
 import { SplitBrainConfirm } from "./sections/accounts/SplitBrainConfirm";
+import { DesktopConfirmDialog } from "./sections/accounts/DesktopConfirmDialog";
 import { sections, sectionIds } from "./sections/registry";
 // Sections are code-split. The initial paint ships just the shell +
 // AccountsSection (the default landing tab); Projects / Sessions /
@@ -147,6 +148,11 @@ function AppShell() {
     splitBrainPending,
     dismissSplitBrain,
     confirmSplitBrain,
+    desktopConfirmPending,
+    requestDesktopSignOut,
+    requestDesktopOverwrite,
+    dismissDesktopConfirm,
+    confirmDesktopPending,
   } = useAppState();
   const { resolved: themeResolved, toggle: toggleTheme } = useTheme();
 
@@ -305,6 +311,33 @@ function AppShell() {
     };
   }, [setSection]);
 
+  // Tray Desktop actions route through the shell's confirmation
+  // modal: the tray itself can't render a modal, so it emits events
+  // the main window converts into the same DesktopConfirmDialog
+  // flow as the in-window context menu + palette.
+  useEffect(() => {
+    let unlistenClear: (() => void) | null = null;
+    let unlistenBind: (() => void) | null = null;
+    listen("cp-tray-desktop-clear", () => requestDesktopSignOut())
+      .then((fn) => {
+        unlistenClear = fn;
+      })
+      .catch(() => {});
+    listen("cp-tray-desktop-bind", () => {
+      // Route to Accounts so the adoption banner / context menu is
+      // visible — the user picks a target account there.
+      setSection("accounts");
+    })
+      .then((fn) => {
+        unlistenBind = fn;
+      })
+      .catch(() => {});
+    return () => {
+      unlistenClear?.();
+      unlistenBind?.();
+    };
+  }, [requestDesktopSignOut, setSection]);
+
   // ⌘⇧L — focus the first SidebarLiveStrip row. Light-weight
   // fallback until the Activity section lands (M4) and claims this
   // shortcut. Ignores editable focus so typing "L" in the command
@@ -441,10 +474,17 @@ function AppShell() {
       const match = accounts.find(
         (a) => a.email.toLowerCase() === email.toLowerCase(),
       );
-      if (match) void actions.adoptDesktop(match);
-      else pushToast("error", `No registered account matches ${email}.`);
+      if (!match) {
+        pushToast("error", `No registered account matches ${email}.`);
+        return;
+      }
+      // Banner action never implicitly overwrites — if the match
+      // already has a snapshot, route through the shell-level
+      // confirm modal so the user opts in to replacing it.
+      if (match.desktop_profile_on_disk) requestDesktopOverwrite(match);
+      else void actions.adoptDesktop(match);
     },
-    [accounts, actions, pushToast],
+    [accounts, actions, pushToast, requestDesktopOverwrite],
   );
 
   const onImportDesktop = useCallback(
@@ -655,6 +695,14 @@ function AppShell() {
           account={splitBrainPending}
           onCancel={dismissSplitBrain}
           onConfirm={confirmSplitBrain}
+        />
+      )}
+
+      {desktopConfirmPending && (
+        <DesktopConfirmDialog
+          request={desktopConfirmPending}
+          onCancel={dismissDesktopConfirm}
+          onConfirm={confirmDesktopPending}
         />
       )}
 

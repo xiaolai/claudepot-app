@@ -40,13 +40,22 @@ function PaletteItem({
 
 export function CommandPalette({
   accounts, status, onClose,
-  onSwitchCli, onSwitchDesktop, onAdd, onRefresh, onRemove, onNavigate,
+  onSwitchCli, onSwitchDesktop, onAdd, onRefresh, onRemove,
+  onAdoptDesktop, onClearDesktop, onLaunchDesktop,
+  onNavigate,
 }: {
   accounts: AccountSummary[]; status: AppStatus; onClose: () => void;
   onSwitchCli: (a: AccountSummary) => void;
   onSwitchDesktop: (a: AccountSummary) => void;
   onAdd: () => void; onRefresh: () => void;
   onRemove: (a: AccountSummary) => void;
+  /** Desktop adopt from palette — Tier 1: shell-level confirm modal
+   * fires when overwrite is needed. */
+  onAdoptDesktop?: (a: AccountSummary) => void;
+  /** Sign Desktop out — Tier 1 confirm-dialog-gated destructive action. */
+  onClearDesktop?: () => void;
+  /** Launch Claude Desktop. */
+  onLaunchDesktop?: () => void;
   onNavigate?: (section: string, subRoute?: string | null) => void;
 }) {
   const [query, setQuery] = useState("");
@@ -55,7 +64,9 @@ export function CommandPalette({
   const listRef = useRef<HTMLDivElement>(null);
   const trapRef = useFocusTrap<HTMLDivElement>();
   const { filter } = usePaletteActions({
-    accounts, status, onSwitchCli, onSwitchDesktop, onAdd, onRefresh, onRemove, onNavigate,
+    accounts, status, onSwitchCli, onSwitchDesktop, onAdd, onRefresh, onRemove,
+    onAdoptDesktop, onClearDesktop, onLaunchDesktop,
+    onNavigate,
   });
 
   const filtered = filter(query);
