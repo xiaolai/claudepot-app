@@ -105,10 +105,10 @@ export function SessionDetailHeader({
         </div>
       </div>
 
-      <h2
+      <h3
         style={{
           margin: 0,
-          fontSize: "var(--fs-lg)",
+          fontSize: "var(--fs-md-lg)",
           fontWeight: 600,
           color: "var(--fg)",
           letterSpacing: "var(--ls-normal)",
@@ -123,7 +123,7 @@ export function SessionDetailHeader({
       >
         {row.first_user_prompt?.trim() ||
           (row.is_sidechain ? "Agent subsession" : "(untitled session)")}
-      </h2>
+      </h3>
 
       <div
         style={{
