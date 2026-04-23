@@ -6,6 +6,90 @@ Versioning scheme:
 - `0.1.x` — beta
 - `1.0.0+` — stable
 
+## 0.0.4 — alpha (unreleased)
+
+### Added
+
+- **Claude Desktop feature overhaul — end-to-end parity with CLI.**
+  Landed in seven phases across macOS + Windows, reviewed by Codex
+  MCP twice (plan review → implementation review → follow-up). See
+  `dev-docs/desktop-feature-overhaul-plan.md` for the full spec.
+  - **Live-identity probing**: org-UUID fast path (candidate,
+    unverified) + decrypted `oauth:tokenCache` + `/profile` slow
+    path (authoritative). `ProbeMethod` tags every result so
+    mutating callers can enforce the Decrypted-only gate at
+    compile time via the private `VerifiedIdentity` constructor.
+  - **Mutators**: `desktop adopt`, `desktop clear`, `desktop
+    reconcile`, plus Tauri commands for each. All gated on a
+    cross-process advisory flock (`~/.claudepot/desktop.lock`)
+    AND a process-wide async Mutex (`DesktopOpState`) so CLI +
+    GUI + tray can't race.
+  - **macOS crypto**: `security find-generic-password -s "Claude
+    Safe Storage" -a "Claude Key" -w` keychain subprocess →
+    PBKDF2-HMAC-SHA1 (1003 iters, "saltysalt") → AES-128-CBC
+    with fixed `b' ' * 16` IV.
+  - **Windows crypto**: `Local State → os_crypt.encrypted_key` →
+    DPAPI `CryptUnprotectData` → 32-byte AES-256-GCM key →
+    decrypt the `v10`-prefixed ciphertext.
+  - **Windows DPAPI invalidation detection**: pre-restore probe
+    attempts real ciphertext decryption of the stored snapshot's
+    `oauth:tokenCache`. Catches the post-machine-migration case
+    where Local State unwraps cleanly but stored blobs are bound
+    to the old DPAPI master key. Surfaces as `DpapiInvalidated`
+    with a "re-sign in, then re-bind" message.
+  - **Windows package discovery**: runtime `Get-AppxPackage
+    Claude_*` probe with `once_cell` cache. Drops the hard-coded
+    `Claude_pzs8sxrjxfjjc` from four production sites.
+  - **UI**: `DesktopConfirmDialog` for destructive actions (sign
+    out, overwrite-profile); `DesktopImportCard` in the
+    Add-account modal; sync-driven Desktop banners
+    (adoption-available, stranger, candidate-only) in the shell's
+    status-issues strip; Bind/Sign-out items across context menu
+    + command palette + tray.
+  - **Sidecar metadata**: `claudepot.profile.json` written inside
+    every snapshot dir with `captured_at`, `captured_from_email`,
+    `captured_verified`, version, platform, session-items list.
+    Survives dir `mtime` drift.
+  - **Tray parity**: active-display row falls back to Desktop
+    when CLI is unbound; Set-Desktop submenu gains Bind / Sign
+    out / Launch / Reconcile header items; per-account rows gate
+    on disk truth (`desktop_profile_on_disk`).
+  - **Window-focus sync**: startup probe runs unthrottled,
+    subsequent window-focus probes respect a 5-minute cooldown.
+
+### Changed
+
+- `AccountSummary` gains `desktop_profile_on_disk` (disk truth)
+  alongside `has_desktop_profile` (DB cache). UI must prefer the
+  disk-truth field when gating Desktop affordances. `account_list`
+  opportunistically reconciles the DB flag against disk on every
+  call; `desktop reconcile` surfaces the outcome explicitly.
+- `app_status.desktop_installed` now uses the authoritative
+  `is_installed()` (macOS: `/Applications/Claude.app`; Windows:
+  MSIX package dir) instead of collapsing "installed" and "has
+  a data_dir" into one disk check.
+- Context-menu "sign in via Desktop app first" disabled reason
+  (misleading — signing in via Desktop didn't help Claudepot)
+  replaced with "bind current Desktop session first".
+- Desktop switch (`desktop_use` + CLI + tray) now acquires the
+  operation lock. Previously bypassed it, letting adopt/clear/
+  switch race across surfaces.
+
+### Fixed
+
+- `trash.rs::inode_of` on Windows used `MetadataExt::file_index`
+  (nightly-only, rust-lang/rust#63010). Broke every Windows build.
+  Now returns 0 (graceful degradation: no hardlink dedupe on
+  Windows until the stable API lands).
+- `account_list` pre-PR only reconciled `has_cli_credentials`,
+  leaving `has_desktop_profile` to drift indefinitely once a
+  snapshot went missing out-of-band. Now also flips the Desktop
+  flag to match disk.
+- Adopt with `overwrite=true` previously deleted the old profile
+  BEFORE attempting the new snapshot; a snapshot failure left the
+  user with NO profile. Now stages the old profile to a tempdir
+  and rolls back on snapshot failure.
+
 ## 0.0.3 — alpha (unreleased)
 
 ### Added
