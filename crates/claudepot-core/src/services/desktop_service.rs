@@ -501,17 +501,31 @@ fn prune_empty_parents(data_dir: &std::path::Path, items: &[&str]) {
 
 /// Windows DPAPI invalidation pre-check.
 ///
-/// Called before `switch` (or any other operation that restores a
-/// stored Desktop profile into the live data dir). Attempts to
-/// decrypt `profile_dir/Cookies` using the CURRENT live
-/// `safe_storage_secret`. If decryption fails, the profile's
-/// ciphertext was encrypted under a different DPAPI master key
-/// (different machine, different Windows user, or post-password-reset)
-/// and restoring it would leave Desktop silently broken.
+/// Tier 2-B (2026-04-23) — upgraded from the Phase 6 keyring-only
+/// probe to a ciphertext-level probe. Codex follow-up review flagged
+/// the keyring-only version: it missed the subtler case where the
+/// CURRENT `Local State` is freshly re-encrypted (machine migration,
+/// Windows password reset that regenerated the DPAPI master key)
+/// but the STORED SNAPSHOT's ciphertext is still bound to the OLD
+/// key. The keyring unwraps fine — it's the stored blobs that are
+/// dead.
 ///
-/// macOS is a no-op — macOS safeStorage keys are stable across
-/// machine reboots and user sessions, so the invalidation failure
-/// mode doesn't exist.
+/// Algorithm (Windows only):
+///
+/// 1. If no `profile_dir/config.json` exists → Ok(true). Nothing to
+///    validate; the snapshot is empty or signed-out.
+/// 2. Read `oauth:tokenCache` from that file. Missing → Ok(true)
+///    (the snapshot was captured from a signed-out Desktop).
+/// 3. Fetch the live `safe_storage_secret` (current DPAPI master key).
+/// 4. Attempt AES-GCM decrypt of the stored ciphertext with the
+///    current key. Success → Ok(true). AES failure → Ok(false): the
+///    ciphertext is dead, profile is invalidated.
+/// 5. If `safe_storage_secret` itself errors with a DPAPI-shaped
+///    failure → Ok(false) (any stored ciphertext is un-decryptable
+///    by definition — the previous keyring-level probe).
+///
+/// macOS: no-op — safeStorage keys are stable across reboots and
+/// sessions, so the invalidation mode doesn't exist.
 pub async fn check_profile_dpapi_valid(
     platform: &dyn DesktopPlatform,
     account_uuid: Uuid,
@@ -519,38 +533,46 @@ pub async fn check_profile_dpapi_valid(
     #[cfg(not(target_os = "windows"))]
     {
         let _ = (platform, account_uuid);
-        return Ok(true);
+        Ok(true)
     }
     #[cfg(target_os = "windows")]
     {
         let profile_dir = paths::desktop_profile_dir(account_uuid);
-        // Cookies is the most broadly present ciphertext — it exists
-        // on any profile with a live web session and is the exact
-        // ciphertext Chromium will try to decrypt on Desktop launch.
-        let cookies = profile_dir.join("Network").join("Cookies");
-        if !cookies.exists() {
-            // Nothing to validate — a fresh profile with no cookies
-            // yet is fine. Snapshot adopt-path from Phase 3 always
-            // writes the full item set, so in practice this branch
-            // only fires on partially-written snapshots.
+        let cfg_path = profile_dir.join("config.json");
+        if !cfg_path.exists() {
             return Ok(true);
         }
-        // If Cookies is a SQLite DB (which it is on modern Chromium),
-        // reading the raw bytes is enough — we just need to try
-        // AES-GCM decryption of one `v10...`-prefixed blob. However
-        // on Windows the Cookies file is a SQLite DB with encrypted
-        // blobs in a column, not a top-level ciphertext blob.
-        // Reproducing Chromium's full Cookies-read path here is out
-        // of scope. Instead we validate that the current
-        // safe_storage_secret is recoverable at all — if DPAPI
-        // rejects Local State, any stored ciphertext is
-        // un-decryptable by definition, so the profile is
-        // invalidated.
-        match platform.safe_storage_secret().await {
+        let raw = match std::fs::read_to_string(&cfg_path) {
+            Ok(s) => s,
+            Err(_) => return Ok(true), // unreadable — don't block
+        };
+        let Ok(cfg) = serde_json::from_str::<serde_json::Value>(&raw) else {
+            return Ok(true); // malformed stored snapshot — not a DPAPI issue
+        };
+        let Some(token_b64) = cfg
+            .get("oauth:tokenCache")
+            .and_then(|v| v.as_str())
+        else {
+            return Ok(true); // snapshot of a signed-out Desktop
+        };
+
+        // Live key — any DPAPI-shape error here means the snapshot
+        // can't possibly be decrypted under this Windows session.
+        let secret = match platform.safe_storage_secret().await {
+            Ok(k) => k,
+            Err(crate::desktop_backend::DesktopKeyError::DpapiFailed(_))
+            | Err(crate::desktop_backend::DesktopKeyError::LocalState(_)) => {
+                return Ok(false);
+            }
+            Err(e) => return Err(e),
+        };
+
+        // Ciphertext-level check: try the real decrypt path. This
+        // catches the subtle "new keyring but old snapshot" case
+        // that the keyring-only probe missed.
+        match crate::desktop_backend::crypto::windows::decrypt(token_b64, &secret) {
             Ok(_) => Ok(true),
-            Err(crate::desktop_backend::DesktopKeyError::DpapiFailed(_)) => Ok(false),
-            Err(crate::desktop_backend::DesktopKeyError::LocalState(_)) => Ok(false),
-            Err(e) => Err(e),
+            Err(_) => Ok(false),
         }
     }
 }
