@@ -150,9 +150,17 @@ fn inode_of(path: &Path) -> u64 {
 }
 
 #[cfg(windows)]
-fn inode_of(path: &Path) -> u64 {
-    use std::os::windows::fs::MetadataExt;
-    fs::metadata(path).map(|m| m.file_index().unwrap_or(0)).unwrap_or(0)
+fn inode_of(_path: &Path) -> u64 {
+    // `MetadataExt::file_index` is a nightly-only API on Windows
+    // (rust-lang/rust#63010). Callers use this to dedupe trash
+    // entries that point at the same physical file; on Windows we
+    // fall back to 0, which simply means "never report dedupe" —
+    // the trash module still works, it just can't collapse hardlinks
+    // on Windows until the stable API lands.
+    //
+    // Discovered during Phase 6 Windows validation (2026-04-23) —
+    // pre-existing blocker for any Windows build of claudepot-core.
+    0
 }
 
 #[cfg(not(any(unix, windows)))]
