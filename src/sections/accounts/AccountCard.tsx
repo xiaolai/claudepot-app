@@ -189,6 +189,16 @@ export function AccountCard({
               Desktop
             </Tag>
           )}
+          {/* Profile-available state (not active). Uses the disk-truth
+              field per plan v2 D18 — so a stale DB flag cannot flip
+              the tag on for an account whose snapshot was deleted
+              out-of-band. Ghost tone keeps it distinct from the
+              active-Desktop accent. */}
+          {!a.is_desktop_active && a.desktop_profile_on_disk && (
+            <Tag tone="ghost" glyph={NF.users}>
+              profile
+            </Tag>
+          )}
         </div>
       </div>
 

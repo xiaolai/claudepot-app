@@ -412,6 +412,52 @@ function AppShell() {
     [pushToast, refreshAccounts],
   );
 
+  // Run the live Desktop identity sync once per shell mount. The
+  // outcome feeds the Desktop-side banners in `useStatusIssues`
+  // (adoption available, stranger, unverified candidate). Never
+  // blocks render — best-effort, fails silently.
+  const [desktopSync, setDesktopSync] = useState<
+    import("./types").DesktopSyncOutcome | null
+  >(null);
+  useEffect(() => {
+    let cancelled = false;
+    void (async () => {
+      try {
+        const outcome = await api.syncFromCurrentDesktop();
+        if (!cancelled) setDesktopSync(outcome);
+      } catch {
+        // Slow-path failure (keychain locked, /profile down) is not a
+        // user-surfaceable error here — the banner layer already shows
+        // CandidateOnly when it can. Swallow.
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  const onAdoptLiveDesktop = useCallback(
+    (email: string) => {
+      const match = accounts.find(
+        (a) => a.email.toLowerCase() === email.toLowerCase(),
+      );
+      if (match) void actions.adoptDesktop(match);
+      else pushToast("error", `No registered account matches ${email}.`);
+    },
+    [accounts, actions, pushToast],
+  );
+
+  const onImportDesktop = useCallback(
+    (email: string) => {
+      // Same as CC-side Import: jump to Accounts + open Add modal.
+      // The user completes browser login there, then triggers adopt.
+      setSection("accounts");
+      window.dispatchEvent(new CustomEvent("cp-open-add"));
+      void email; // label-only; the modal reads live state itself.
+    },
+    [setSection],
+  );
+
   const rawIssues = useStatusIssues({
     ccIdentity,
     status: appStatus,
@@ -422,6 +468,9 @@ function AppShell() {
     onSelectAccount,
     onReloginActive,
     onImportCurrent,
+    desktopSync,
+    onAdoptLiveDesktop,
+    onImportDesktop,
   });
   const visibleIssues = useMemo(
     () => rawIssues.filter((i) => !(i.dismissable && isDismissed(i.id))),
