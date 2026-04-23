@@ -643,6 +643,9 @@ function ActivityPane({
         await api.preferencesSetActivity({ enabled: next });
         if (next) await api.sessionLiveStart();
         else await api.sessionLiveStop();
+        // Sessions section's transcript viewer + any other consumer
+        // of `useActivityPrefs` picks up the change without polling.
+        window.dispatchEvent(new CustomEvent("cp-activity-prefs-changed"));
         pushToast(
           "info",
           next ? "Activity feature enabled." : "Activity feature disabled.",
@@ -661,6 +664,7 @@ function ActivityPane({
       setHideThinking(next);
       try {
         await api.preferencesSetActivity({ hideThinking: next });
+        window.dispatchEvent(new CustomEvent("cp-activity-prefs-changed"));
       } catch (e) {
         setHideThinking(prev);
         pushToast("error", `Toggle failed: ${e}`);
