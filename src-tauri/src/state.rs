@@ -7,7 +7,18 @@
 
 use std::sync::atomic::AtomicU64;
 use std::sync::{Arc, Mutex};
-use tokio::sync::Notify;
+use tokio::sync::{Mutex as AsyncMutex, Notify};
+
+/// Process-wide async mutex that serializes every Desktop-mutating
+/// Tauri command (adopt, clear, use, launch, quit, sync).
+/// Layered on top of the core `desktop_lock` flock so in-process
+/// concurrency doesn't repeatedly hit the filesystem.
+///
+/// See plan v2 §Operation locking + Codex D2-1: the GUI can fire
+/// multiple Tauri commands concurrently (tray + main window), and the
+/// SQLite mutex alone does not guard disk mutations.
+#[derive(Default)]
+pub struct DesktopOpState(pub AsyncMutex<()>);
 
 /// Tracks the currently running `claude auth login` flow, if any.
 /// `None` when idle; `Some(notify)` when a login is in progress and
