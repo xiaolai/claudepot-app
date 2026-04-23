@@ -149,6 +149,25 @@ pub enum ParseIssue {
     Other { message: String },
 }
 
+// ---------- Provenance ------------------------------------------------
+
+#[derive(Serialize, Deserialize, Clone, Debug)]
+#[serde(rename_all = "snake_case", tag = "kind", content = "value")]
+pub enum JsonPathSeg {
+    Key(String),
+    Index(usize),
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug)]
+pub struct ProvenanceEntry {
+    pub key_path: Vec<JsonPathSeg>,
+    pub winner: Scope,
+    pub contributors: Vec<Scope>,
+    /// True when a higher-precedence null/scalar clobbered a lower
+    /// container — the leaf value "won" but there's hidden data below.
+    pub suppressed: bool,
+}
+
 // ---------- Editor detection ------------------------------------------
 
 #[derive(Serialize, Deserialize, Clone, Debug, Eq, PartialEq)]
