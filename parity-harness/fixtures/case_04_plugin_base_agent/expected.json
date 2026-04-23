@@ -1,0 +1,4 @@
+{
+  "agent": {"model": "sonnet", "tools": ["Bash"]},
+  "theme": "dark"
+}

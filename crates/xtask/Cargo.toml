@@ -1,0 +1,17 @@
+[package]
+name = "xtask"
+description = "Workspace automation — CC-parity verifier and other one-shot tasks"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+publish = false
+
+[[bin]]
+name = "xtask"
+path = "src/main.rs"
+
+[dependencies]
+claudepot-core = { path = "../claudepot-core" }
+serde.workspace = true
+serde_json.workspace = true
+anyhow.workspace = true

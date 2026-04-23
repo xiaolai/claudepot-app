@@ -10,7 +10,7 @@
 //! - `added`, `updated`, `removed` operate on `FileNode.id`.
 
 use crate::config_view::model::{ConfigTree, FileNode, Node, ScopeNode};
-use std::collections::{BTreeMap, HashMap};
+use std::collections::HashMap;
 
 #[derive(Clone, Debug, Default)]
 pub struct ConfigTreePatch {
