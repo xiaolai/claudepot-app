@@ -1,20 +1,110 @@
 use crate::error::DesktopSwapError;
+use once_cell::sync::Lazy;
 use std::path::PathBuf;
+use std::sync::RwLock;
 
 pub struct WindowsDesktop;
+
+/// Known-good MSIX package family fallback. Anthropic's current
+/// shipped Desktop uses this exact name; we fall back to it when
+/// runtime AppX discovery fails (no PowerShell, non-elevated,
+/// foreign shell). Treat it as a compile-time constant that can be
+/// overridden at runtime by `discover_package_family_cached`.
+const KNOWN_PACKAGE_FAMILY: &str = "Claude_pzs8sxrjxfjjc";
+
+/// Cached result of the MSIX package-family discovery. Populated on
+/// first call to [`package_family`] per process. RwLock over Option
+/// so the fast path is a read-only lookup after the first probe.
+static DISCOVERED_FAMILY: Lazy<RwLock<Option<String>>> =
+    Lazy::new(|| RwLock::new(None));
+
+/// Return the MSIX package family name for Claude Desktop. Discovery
+/// algorithm (runs at most once per process):
+///
+/// 1. Query `Get-AppxPackage -Name "Claude*"` via PowerShell and
+///    parse the `PackageFamilyName` — the authoritative answer.
+/// 2. If PowerShell fails, fall back to scanning
+///    `%LocalAppData%\Packages\Claude_*` for any matching directory.
+/// 3. If that also fails, return the compile-time
+///    [`KNOWN_PACKAGE_FAMILY`] constant — preserves today's hard-coded
+///    behavior on systems where both probes fail (guest users,
+///    locked-down SKUs without PowerShell).
+///
+/// Cached in `DISCOVERED_FAMILY` after the first successful call.
+/// Subsequent calls are a RwLock read — sub-microsecond.
+pub fn package_family() -> String {
+    if let Some(cached) = DISCOVERED_FAMILY.read().ok().and_then(|g| g.clone()) {
+        return cached;
+    }
+    let discovered = discover_package_family().unwrap_or_else(|| {
+        tracing::warn!(
+            "AppX discovery failed — falling back to known package family `{KNOWN_PACKAGE_FAMILY}`"
+        );
+        KNOWN_PACKAGE_FAMILY.to_string()
+    });
+    if let Ok(mut guard) = DISCOVERED_FAMILY.write() {
+        *guard = Some(discovered.clone());
+    }
+    discovered
+}
+
+#[cfg(target_os = "windows")]
+fn discover_package_family() -> Option<String> {
+    // 1. PowerShell probe — authoritative.
+    let ps = std::process::Command::new("powershell")
+        .args([
+            "-NoProfile",
+            "-NonInteractive",
+            "-Command",
+            "(Get-AppxPackage -Name 'Claude*' | Select -First 1).PackageFamilyName",
+        ])
+        .output();
+    if let Ok(out) = ps {
+        if out.status.success() {
+            let stdout = String::from_utf8_lossy(&out.stdout);
+            let trimmed = stdout.trim();
+            if !trimmed.is_empty() && trimmed.starts_with("Claude") {
+                return Some(trimmed.to_string());
+            }
+        }
+    }
+    // 2. Filesystem fallback — scan the Packages dir.
+    let packages = dirs::data_local_dir()?.join("Packages");
+    let entries = std::fs::read_dir(&packages).ok()?;
+    for entry in entries.flatten() {
+        if let Some(name) = entry.file_name().to_str() {
+            if name.starts_with("Claude_") && entry.path().is_dir() {
+                return Some(name.to_string());
+            }
+        }
+    }
+    None
+}
+
+#[cfg(not(target_os = "windows"))]
+fn discover_package_family() -> Option<String> {
+    Some(KNOWN_PACKAGE_FAMILY.to_string())
+}
+
+/// Claude Desktop's MSIX-virtualized data dir, derived from the
+/// discovered package family so cross-machine / cross-version
+/// installs don't break on rename.
+fn package_data_dir() -> Option<PathBuf> {
+    let family = package_family();
+    dirs::data_local_dir().map(|d| {
+        d.join("Packages")
+            .join(&family)
+            .join("LocalCache")
+            .join("Roaming")
+            .join("Claude")
+    })
+}
 
 /// Path to Electron's `Local State` file — Chromium OSCrypt's keyring
 /// when DPAPI is the scheme. Phase 6 reads `os_crypt.encrypted_key`
 /// from here.
 fn local_state_path() -> Option<PathBuf> {
-    dirs::data_local_dir().map(|d| {
-        d.join("Packages")
-            .join("Claude_pzs8sxrjxfjjc")
-            .join("LocalCache")
-            .join("Roaming")
-            .join("Claude")
-            .join("Local State")
-    })
+    package_data_dir().map(|d| d.join("Local State"))
 }
 
 /// DPAPI `CryptUnprotectData` wrapper (Windows only). Returns the
@@ -105,14 +195,11 @@ fn read_os_crypt_key() -> Result<Vec<u8>, super::DesktopKeyError> {
 #[async_trait::async_trait]
 impl super::DesktopPlatform for WindowsDesktop {
     fn data_dir(&self) -> Option<PathBuf> {
-        // MSIX-virtualized path
-        dirs::data_local_dir().map(|d| {
-            d.join("Packages")
-                .join("Claude_pzs8sxrjxfjjc")
-                .join("LocalCache")
-                .join("Roaming")
-                .join("Claude")
-        })
+        // MSIX-virtualized path. Package family is discovered at
+        // runtime via `Get-AppxPackage Claude_*` and cached; the
+        // compile-time `Claude_pzs8sxrjxfjjc` is only used as a
+        // fallback. Codex follow-up D3-5 "Windows AUMID discovery".
+        package_data_dir()
     }
 
     fn session_items(&self) -> &[&str] {
@@ -142,12 +229,9 @@ impl super::DesktopPlatform for WindowsDesktop {
         // first install — that directory exists even before first
         // launch populates `data_dir`, so it distinguishes
         // installed-but-never-launched from not-installed.
+        let family = package_family();
         dirs::data_local_dir()
-            .map(|d| {
-                d.join("Packages")
-                    .join("Claude_pzs8sxrjxfjjc")
-                    .is_dir()
-            })
+            .map(|d| d.join("Packages").join(&family).is_dir())
             .unwrap_or(false)
     }
 
@@ -226,14 +310,17 @@ impl super::DesktopPlatform for WindowsDesktop {
     }
 
     async fn launch(&self) -> Result<(), DesktopSwapError> {
-        const AUMID: &str = "Claude_pzs8sxrjxfjjc!Claude";
+        // AUMID shape: `<PackageFamily>!<AppId>`. Claude's AppId is
+        // the stable string `Claude`; the family is discovered at
+        // runtime (Codex D3-5).
+        let aumid = format!("{}!Claude", package_family());
         // Audit M8: check exit status. explorer.exe shell:AppsFolder\...
         // returns non-zero if the AUMID doesn't resolve (Claude not
         // installed, MSIX package name changed, permission issue) —
         // silently dropping that made launch() return Ok even when
         // nothing was launched, and the switch reported success.
         let out = tokio::process::Command::new("explorer.exe")
-            .arg(format!("shell:AppsFolder\\{AUMID}"))
+            .arg(format!("shell:AppsFolder\\{aumid}"))
             .output()
             .await
             .map_err(DesktopSwapError::Io)?;
@@ -258,11 +345,25 @@ mod tests {
     use crate::desktop_backend::DesktopPlatform;
 
     #[test]
-    fn test_is_installed_matches_package_dir() {
+    fn test_is_installed_matches_discovered_package_dir() {
         let p = WindowsDesktop;
+        let family = super::package_family();
         let expected = dirs::data_local_dir()
-            .map(|d| d.join("Packages").join("Claude_pzs8sxrjxfjjc").is_dir())
+            .map(|d| d.join("Packages").join(&family).is_dir())
             .unwrap_or(false);
         assert_eq!(p.is_installed(), expected);
+    }
+
+    #[test]
+    fn test_package_family_fallback_is_stable() {
+        // Even when discovery fails (CI sandboxes, non-Windows cargo
+        // test runs), `package_family()` must return a non-empty
+        // string starting with "Claude_". The compile-time constant
+        // is the floor.
+        let family = super::package_family();
+        assert!(
+            family.starts_with("Claude_"),
+            "package_family() returned unexpected value: {family}"
+        );
     }
 }
