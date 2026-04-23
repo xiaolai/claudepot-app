@@ -115,12 +115,19 @@ impl VerifiedIdentity {
         self.0
     }
 
-    /// Test-only constructor. Cargo-gated on `cfg(test)` OR callers
-    /// inside the crate that already hold an identity proven
-    /// Decrypted by other means (e.g., `verify_live_identity`).
-    /// Production code outside this crate cannot bypass the proof.
+    /// In-crate-only constructor used by `desktop_service` tests to
+    /// exercise mutators without running the full decrypt + /profile
+    /// flow. Scoped `pub(crate)` so no downstream crate (Tauri, CLI)
+    /// can bypass the Decrypted-only mutation guarantee — external
+    /// callers must go through [`verify_live_identity`], which is
+    /// the ONLY path that fetches an authoritative identity.
+    ///
+    /// Codex 2026-04-23 follow-up review (thread
+    /// `019db814-a45b-7fa3-a280-80b1f20e1149`) flagged this as HIGH
+    /// when it was `pub`.
     #[doc(hidden)]
-    pub fn from_live_for_testing(id: LiveDesktopIdentity) -> Self {
+    #[cfg(test)]
+    pub(crate) fn from_live_for_testing(id: LiveDesktopIdentity) -> Self {
         Self(id)
     }
 }

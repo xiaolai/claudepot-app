@@ -781,7 +781,18 @@ fn handle_desktop_switch(app: &AppHandle, uuid_str: &str) {
     tauri::async_runtime::spawn(async move {
         // no_launch=true mirrors the app's typical UX — swap without
         // forcing Claude Desktop to relaunch from the tray.
-        match crate::commands::desktop_use(email, true).await {
+        //
+        // desktop_use now takes a DesktopOpState reference; pull it
+        // from the app's managed state so the operation-lock wraps
+        // the switch (Codex follow-up review D1).
+        let lock = match app.try_state::<crate::state::DesktopOpState>() {
+            Some(l) => l,
+            None => {
+                tracing::warn!("tray: DesktopOpState not managed");
+                return;
+            }
+        };
+        match crate::commands::desktop_use(email, true, lock).await {
             Ok(()) => {
                 if let Err(e) = rebuild(&app).await {
                     tracing::warn!("tray rebuild after desktop switch failed: {e}");
