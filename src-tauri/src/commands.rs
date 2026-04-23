@@ -89,9 +89,13 @@ pub fn app_status() -> Result<AppStatus, String> {
     let cli_active_email = email_for(active_id(&store, AccountStore::active_cli_uuid));
     let desktop_active_email = email_for(active_id(&store, AccountStore::active_desktop_uuid));
 
+    // Authoritative: app bundle / MSIX package present. Previously
+    // we checked `data_dir().exists()` which false-negatived on
+    // installed-but-never-launched AND false-negatived when the user
+    // manually cleared the data dir. `is_installed()` is the correct
+    // "is Claude Desktop on this machine" signal.
     let desktop_installed = desktop_backend::create_platform()
-        .and_then(|p| p.data_dir())
-        .map(|d| d.exists())
+        .map(|p| p.is_installed())
         .unwrap_or(false);
 
     Ok(AppStatus {
@@ -255,6 +259,161 @@ pub async fn desktop_reconcile() -> Result<dto::DesktopReconcileOutcome, String>
             .collect(),
         orphan_pointer_cleared: outcome.orphan_pointer_cleared,
     })
+}
+
+/// Adopt the live Desktop session into `uuid`'s snapshot directory.
+/// Verifies the live identity via the slow-path probe before mutating
+/// anything — per plan v2 §D6+§VerifiedIdentity, fast-path candidate
+/// identities cannot drive adoption.
+#[tauri::command]
+pub async fn desktop_adopt(
+    uuid: String,
+    overwrite: bool,
+    lock: tauri::State<'_, crate::state::DesktopOpState>,
+    app: tauri::AppHandle,
+) -> Result<dto::DesktopAdoptOutcome, String> {
+    use tauri::Emitter;
+
+    let _guard = lock.0.lock().await;
+
+    let target_uuid = Uuid::parse_str(&uuid).map_err(|e| format!("bad uuid: {e}"))?;
+    let store = open_store()?;
+    let platform = claudepot_core::desktop_backend::create_platform()
+        .ok_or_else(|| "Desktop not supported on this platform".to_string())?;
+
+    // Verify identity: the authoritative Decrypted path. Fails here
+    // if the live session isn't signed in, if the keychain secret
+    // can't be read, or if /profile rejects the token.
+    let verified = claudepot_core::desktop_identity::verify_live_identity(&*platform, &store)
+        .await
+        .map_err(|e| format!("identity probe failed: {e}"))?
+        .ok_or_else(|| "no live Desktop identity — sign in via Desktop first".to_string())?;
+
+    let outcome = services::desktop_service::adopt_current(
+        &*platform,
+        &store,
+        target_uuid,
+        &verified,
+        overwrite,
+    )
+    .await
+    .map_err(|e| format!("desktop adopt failed: {e}"))?;
+
+    let _ = app.emit("desktop-adopted", &outcome.account_email);
+    Ok(dto::DesktopAdoptOutcome {
+        account_email: outcome.account_email,
+        captured_items: outcome.captured_items,
+        size_bytes: outcome.size_bytes,
+    })
+}
+
+/// Sign Desktop out. Stashes the live session into the active
+/// account's snapshot dir by default (`keep_snapshot=true`) so the
+/// user can swap back in later.
+#[tauri::command]
+pub async fn desktop_clear(
+    keep_snapshot: bool,
+    lock: tauri::State<'_, crate::state::DesktopOpState>,
+    app: tauri::AppHandle,
+) -> Result<dto::DesktopClearOutcome, String> {
+    use tauri::Emitter;
+
+    let _guard = lock.0.lock().await;
+
+    let store = open_store()?;
+    let platform = claudepot_core::desktop_backend::create_platform()
+        .ok_or_else(|| "Desktop not supported on this platform".to_string())?;
+
+    let outcome = services::desktop_service::clear_session(&*platform, &store, keep_snapshot)
+        .await
+        .map_err(|e| format!("desktop clear failed: {e}"))?;
+
+    let _ = app.emit("desktop-cleared", &outcome.email);
+    Ok(dto::DesktopClearOutcome {
+        email: outcome.email,
+        snapshot_kept: outcome.snapshot_kept,
+        items_deleted: outcome.items_deleted,
+    })
+}
+
+/// Startup/window-focus sync. Never mutates the filesystem — at most
+/// caches the `active_desktop` pointer when the live identity maps to
+/// a registered account that already has a snapshot. UI subscribes
+/// to the returned `DesktopSyncOutcome` variants (AdoptionAvailable,
+/// Stranger, CandidateOnly) to surface banners.
+#[tauri::command]
+pub async fn sync_from_current_desktop(
+    lock: tauri::State<'_, crate::state::DesktopOpState>,
+) -> Result<dto::DesktopSyncOutcome, String> {
+    let _guard = lock.0.lock().await;
+
+    let store = open_store()?;
+    let platform = match claudepot_core::desktop_backend::create_platform() {
+        Some(p) => p,
+        None => return Ok(dto::DesktopSyncOutcome::NoLive),
+    };
+    let outcome = services::desktop_service::sync_from_current(&*platform, &store)
+        .await
+        .map_err(|e| format!("sync failed: {e}"))?;
+    Ok(match outcome {
+        services::desktop_service::SyncOutcome::NoLive => dto::DesktopSyncOutcome::NoLive,
+        services::desktop_service::SyncOutcome::Verified { email } => {
+            dto::DesktopSyncOutcome::Verified { email }
+        }
+        services::desktop_service::SyncOutcome::AdoptionAvailable { email } => {
+            dto::DesktopSyncOutcome::AdoptionAvailable { email }
+        }
+        services::desktop_service::SyncOutcome::Stranger { email } => {
+            dto::DesktopSyncOutcome::Stranger { email }
+        }
+        services::desktop_service::SyncOutcome::CandidateOnly { email } => {
+            dto::DesktopSyncOutcome::CandidateOnly { email }
+        }
+    })
+}
+
+#[tauri::command]
+pub async fn desktop_is_running() -> Result<bool, String> {
+    match claudepot_core::desktop_backend::create_platform() {
+        Some(p) => Ok(p.is_running().await),
+        None => Ok(false),
+    }
+}
+
+#[tauri::command]
+pub async fn desktop_launch(
+    lock: tauri::State<'_, crate::state::DesktopOpState>,
+    app: tauri::AppHandle,
+) -> Result<(), String> {
+    use tauri::Emitter;
+    let _guard = lock.0.lock().await;
+    let platform = claudepot_core::desktop_backend::create_platform()
+        .ok_or_else(|| "Desktop not supported on this platform".to_string())?;
+    platform
+        .launch()
+        .await
+        .map_err(|e| format!("launch failed: {e}"))?;
+    let _ = app.emit("desktop-running-changed", true);
+    Ok(())
+}
+
+#[tauri::command]
+pub async fn desktop_quit(
+    lock: tauri::State<'_, crate::state::DesktopOpState>,
+    app: tauri::AppHandle,
+) -> Result<(), String> {
+    use tauri::Emitter;
+    let _guard = lock.0.lock().await;
+    let platform = claudepot_core::desktop_backend::create_platform()
+        .ok_or_else(|| "Desktop not supported on this platform".to_string())?;
+    if platform.is_running().await {
+        platform
+            .quit()
+            .await
+            .map_err(|e| format!("quit failed: {e}"))?;
+    }
+    let _ = app.emit("desktop-running-changed", false);
+    Ok(())
 }
 
 /// macOS-only: request a keychain unlock via the system's native dialog.

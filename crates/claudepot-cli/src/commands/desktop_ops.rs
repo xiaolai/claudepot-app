@@ -295,3 +295,121 @@ pub async fn reconcile(ctx: &AppContext) -> Result<()> {
 
     Ok(())
 }
+
+pub async fn adopt(ctx: &AppContext, email_input: Option<&str>, overwrite: bool) -> Result<()> {
+    use claudepot_core::desktop_backend;
+    use claudepot_core::desktop_identity::verify_live_identity;
+    use claudepot_core::resolve::resolve_email;
+    use claudepot_core::services::desktop_service;
+
+    let platform = desktop_backend::create_platform()
+        .ok_or_else(|| anyhow::anyhow!("Desktop not supported on this platform"))?;
+
+    // Resolve the target account. If --email wasn't given, use the
+    // live /profile email as the target — the common case is "adopt
+    // whoever Desktop is signed in as into the matching Claudepot
+    // account."
+    let verified = verify_live_identity(&*platform, &ctx.store)
+        .await
+        .map_err(|e| anyhow::anyhow!("identity probe failed: {e}"))?
+        .ok_or_else(|| anyhow::anyhow!("no live Desktop identity — sign in first"))?;
+
+    let target_email = match email_input {
+        Some(e) => resolve_email(&ctx.store, e).map_err(|e| anyhow::anyhow!("{e}"))?,
+        None => verified.email().to_string(),
+    };
+    let target = ctx
+        .store
+        .find_by_email(&target_email)?
+        .ok_or_else(|| anyhow::anyhow!("account not found: {target_email}"))?;
+
+    let outcome = desktop_service::adopt_current(
+        &*platform,
+        &ctx.store,
+        target.uuid,
+        &verified,
+        overwrite,
+    )
+    .await
+    .map_err(|e| anyhow::anyhow!("adopt failed: {e}"))?;
+
+    if ctx.json {
+        println!(
+            "{}",
+            serde_json::json!({
+                "email": outcome.account_email,
+                "captured_items": outcome.captured_items,
+                "size_bytes": outcome.size_bytes,
+            })
+        );
+    } else {
+        println!(
+            "Adopted live Desktop session for {}: {} item(s), {} bytes.",
+            outcome.account_email, outcome.captured_items, outcome.size_bytes
+        );
+    }
+    Ok(())
+}
+
+pub async fn clear(ctx: &AppContext, keep_snapshot: bool) -> Result<()> {
+    use claudepot_core::desktop_backend;
+    use claudepot_core::services::desktop_service;
+
+    let platform = desktop_backend::create_platform()
+        .ok_or_else(|| anyhow::anyhow!("Desktop not supported on this platform"))?;
+
+    let outcome = desktop_service::clear_session(&*platform, &ctx.store, keep_snapshot)
+        .await
+        .map_err(|e| anyhow::anyhow!("clear failed: {e}"))?;
+
+    if ctx.json {
+        println!(
+            "{}",
+            serde_json::json!({
+                "email": outcome.email,
+                "snapshot_kept": outcome.snapshot_kept,
+                "items_deleted": outcome.items_deleted,
+            })
+        );
+    } else {
+        match outcome.email {
+            Some(e) => println!("Signed Desktop out ({e}). Deleted {} item(s).", outcome.items_deleted),
+            None => println!(
+                "Signed Desktop out. Deleted {} item(s). No active account was recorded.",
+                outcome.items_deleted
+            ),
+        }
+        if outcome.snapshot_kept {
+            println!("Snapshot preserved.");
+        }
+    }
+    Ok(())
+}
+
+pub async fn launch(_ctx: &AppContext) -> Result<()> {
+    use claudepot_core::desktop_backend;
+    let platform = desktop_backend::create_platform()
+        .ok_or_else(|| anyhow::anyhow!("Desktop not supported on this platform"))?;
+    platform
+        .launch()
+        .await
+        .map_err(|e| anyhow::anyhow!("launch failed: {e}"))?;
+    println!("Launch requested.");
+    Ok(())
+}
+
+pub async fn quit(_ctx: &AppContext) -> Result<()> {
+    use claudepot_core::desktop_backend;
+    let platform = desktop_backend::create_platform()
+        .ok_or_else(|| anyhow::anyhow!("Desktop not supported on this platform"))?;
+    if platform.is_running().await {
+        platform
+            .quit()
+            .await
+            .map_err(|e| anyhow::anyhow!("quit failed: {e}"))?;
+        println!("Desktop quit.");
+    } else {
+        println!("Desktop was not running.");
+    }
+    Ok(())
+}
