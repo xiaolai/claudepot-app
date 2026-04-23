@@ -620,7 +620,14 @@ pub fn handle_menu_event(app: &AppHandle, id: &str) {
             tracing::warn!("emit desktop-bind failed: {e}");
         }
     } else if id == ID_DESKTOP_CLEAR {
-        handle_desktop_clear(app);
+        // Tier 1 (Codex follow-up MEDIUM): route through the webview
+        // so the shell's DesktopConfirmDialog shows before the
+        // destructive clear runs. Never fire clear_session without
+        // an explicit user confirmation.
+        show_window(app);
+        if let Err(e) = app.emit("cp-tray-desktop-clear", ()) {
+            tracing::warn!("emit desktop-clear failed: {e}");
+        }
     } else if id == ID_DESKTOP_LAUNCH {
         handle_desktop_launch(app);
     } else if id == ID_DESKTOP_RECONCILE {
@@ -628,39 +635,6 @@ pub fn handle_menu_event(app: &AppHandle, id: &str) {
     } else if id == ID_QUIT {
         app.exit(0);
     }
-}
-
-fn handle_desktop_clear(app: &AppHandle) {
-    let app = app.clone();
-    tauri::async_runtime::spawn(async move {
-        let lock = match app.try_state::<crate::state::DesktopOpState>() {
-            Some(l) => l,
-            None => return,
-        };
-        let _guard = lock.0.lock().await;
-        let store = match crate::commands::open_store() {
-            Ok(s) => s,
-            Err(e) => {
-                tracing::warn!("tray desktop-clear: open_store: {e}");
-                return;
-            }
-        };
-        let Some(platform) = claudepot_core::desktop_backend::create_platform() else {
-            return;
-        };
-        // keep_snapshot=true so a tray-driven clear is always
-        // recoverable via a subsequent switch.
-        match claudepot_core::services::desktop_service::clear_session(&*platform, &store, true).await {
-            Ok(_) => {
-                let _ = rebuild(&app).await;
-                let _ = app.emit("desktop-cleared", ());
-            }
-            Err(e) => {
-                tracing::warn!("tray desktop-clear failed: {e}");
-                let _ = app.emit("tray-desktop-clear-failed", e.to_string());
-            }
-        }
-    });
 }
 
 fn handle_desktop_launch(app: &AppHandle) {

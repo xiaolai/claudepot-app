@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import type { AccountSummary } from "../types";
+import { api } from "../api";
 import { useUsage } from "../hooks/useUsage";
 import { useTauriEvent } from "../hooks/useTauriEvent";
 import { useGlobalShortcuts } from "../hooks/useGlobalShortcuts";
@@ -45,6 +46,8 @@ export function AccountsSection({
     actions,
     busyKeys,
     requestCliSwap,
+    requestDesktopSignOut,
+    requestDesktopOverwrite,
   } = useAppState();
   const { usage, refreshUsage, refreshUsageFor } = useUsage();
   const compact = useCompactHeader();
@@ -378,6 +381,12 @@ export function AccountsSection({
             refreshUsage();
           }}
           onRemove={(a) => setConfirmRemove(a)}
+          onAdoptDesktop={(a) => {
+            if (a.desktop_profile_on_disk) requestDesktopOverwrite(a);
+            else void actions.adoptDesktop(a);
+          }}
+          onClearDesktop={requestDesktopSignOut}
+          onLaunchDesktop={() => void api.desktopLaunch()}
           onNavigate={onNavigate}
         />
       )}
@@ -395,8 +404,15 @@ export function AccountsSection({
           onRefreshUsageAll={refreshUsage}
           onLogin={actions.login}
           onRemove={setConfirmRemove}
-          onAdoptDesktop={(a) => actions.adoptDesktop(a)}
-          onClearDesktop={() => actions.clearDesktop(true)}
+          onAdoptDesktop={(a) => {
+            // Adopt with no overwrite by default. If a snapshot
+            // already exists for this account, go through the
+            // shell-level confirm — the user must opt into
+            // replacing the existing profile.
+            if (a.desktop_profile_on_disk) requestDesktopOverwrite(a);
+            else void actions.adoptDesktop(a);
+          }}
+          onClearDesktop={requestDesktopSignOut}
           onClose={closeCtxMenu}
         />
       )}
