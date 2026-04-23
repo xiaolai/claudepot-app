@@ -1,8 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
-  STRIP_IDLE_VISIBLE_MS,
   formatElapsed,
-  isStripActive,
   projectLabel,
   shortenModel,
   sortForStrip,
@@ -85,58 +83,6 @@ describe("SidebarLiveStrip helpers", () => {
 
     it("returns empty for null", () => {
       expect(shortenModel(null)).toBe("");
-    });
-  });
-
-  describe("isStripActive", () => {
-    it("keeps busy sessions regardless of idle_ms", () => {
-      expect(isStripActive(session({ status: "busy", idle_ms: 0 }))).toBe(true);
-    });
-
-    it("keeps waiting sessions regardless of idle_ms", () => {
-      expect(isStripActive(session({ status: "waiting", idle_ms: 0 }))).toBe(
-        true,
-      );
-    });
-
-    it("keeps recent-idle sessions below the threshold", () => {
-      expect(
-        isStripActive(
-          session({ status: "idle", idle_ms: STRIP_IDLE_VISIBLE_MS - 1 }),
-        ),
-      ).toBe(true);
-    });
-
-    it("drops idle sessions at or past the threshold", () => {
-      expect(
-        isStripActive(
-          session({ status: "idle", idle_ms: STRIP_IDLE_VISIBLE_MS }),
-        ),
-      ).toBe(false);
-      expect(
-        isStripActive(session({ status: "idle", idle_ms: 82 * 60 * 60_000 })),
-      ).toBe(false);
-    });
-
-    it("keeps alerting (errored/stuck) sessions past the threshold", () => {
-      expect(
-        isStripActive(
-          session({
-            status: "idle",
-            idle_ms: 10 * 60 * 60_000,
-            errored: true,
-          }),
-        ),
-      ).toBe(true);
-      expect(
-        isStripActive(
-          session({
-            status: "idle",
-            idle_ms: 10 * 60 * 60_000,
-            stuck: true,
-          }),
-        ),
-      ).toBe(true);
     });
   });
 

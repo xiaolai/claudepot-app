@@ -6,14 +6,14 @@ import type { LiveSessionSummary, LiveStatus } from "../types";
 /**
  * Live Activity strip — inserted between the primary nav and the
  * `~/.claude` tree. Render-if-nonzero: the entire strip
- * (heading + rows) is suppressed when no sessions are active,
+ * (heading + rows) is suppressed when no sessions are live,
  * honoring the paper-mono rule that zero-value surfaces don't ship.
  *
- * "Active" here means the session is doing something worth the
- * sidebar's attention: alerting (errored/stuck), busy, waiting, or
- * idle within the last 30 minutes. Longer-idle sessions are parked
- * windows, not live work — they stay discoverable via the full
- * Sessions/Activity surfaces.
+ * Every live CC process appears here, including idle-but-alive
+ * sessions (a prompt waiting while the user is away). Rows are
+ * ordered by attention priority (alerting → busy → waiting → idle)
+ * so the most demanding work floats to the top and parked-but-live
+ * contexts sit at the bottom.
  *
  * Each row shows: status dot · project basename · model. The row is
  * a presence indicator, not a dashboard — ticking fields (elapsed,
@@ -36,7 +36,7 @@ interface Props {
 
 export function SidebarLiveStrip({ onOpenSession }: Props) {
   const all = useSessionLive();
-  const sessions = useMemo(() => sortForStrip(all.filter(isStripActive)), [all]);
+  const sessions = useMemo(() => sortForStrip(all), [all]);
   // `focusedIdx` drives the j/k navigation state; the value itself
   // is consumed inside the keydown handler via the functional
   // setter. useRef instead of useState would avoid a re-render per
@@ -217,22 +217,6 @@ const STATUS_DOT: Record<
 };
 
 // ── Pure helpers (unit-testable via export) ────────────────────────
-
-/** Idle sessions older than this vanish from the sidebar strip.
- *  The strip is a "what needs attention now" surface; a 3-day-idle
- *  window is a parked context, not live work. */
-export const STRIP_IDLE_VISIBLE_MS = 30 * 60 * 1000;
-
-/** Predicate: does this session belong in the sidebar LIVE strip?
- *  Alerting sessions (errored/stuck) always qualify — they need
- *  attention regardless of idle time. Busy and waiting always
- *  qualify. Plain idle sessions qualify only within the recency
- *  window. */
-export function isStripActive(s: LiveSessionSummary): boolean {
-  if (s.errored || s.stuck) return true;
-  if (s.status !== "idle") return true;
-  return s.idle_ms < STRIP_IDLE_VISIBLE_MS;
-}
 
 /** Priority tier for strip ordering. Matches ActivitySection's
  *  `sessionTier` so both surfaces tell the same story.
