@@ -27,7 +27,7 @@ use claudepot_core::paths::claude_config_dir;
 use notify::{EventKind, RecursiveMode};
 use notify_debouncer_mini::new_debouncer;
 use serde::Serialize;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 use tauri::{AppHandle, Emitter};
@@ -105,6 +105,7 @@ pub struct ConfigTreeSnapshotDto {
     pub scopes: Vec<ScopeSnapshotDto>,
     pub cwd: String,
     pub project_root: String,
+    pub config_home_dir: String,
     pub memory_slug: String,
     pub memory_slug_lossy: bool,
 }
@@ -174,16 +175,23 @@ fn run_loop(
     })
     .map_err(|e| format!("debouncer init: {e}"))?;
 
-    // Watch ~/.claude and <cwd>. Recursive — we rely on the core
-    // deny-list (`is_in_scope`) to filter noise.
+    // Watch ~/.claude, the cwd subtree, AND every ancestor directory
+    // up to git-root/home — discovery walks CLAUDE.md + .claude/rules
+    // at each ancestor (plan §6.4), so the watcher has to see edits
+    // at those paths too. Recursive watches on ancestors are fine:
+    // core's `is_in_scope` deny-list filters the noise.
     let home = claude_config_dir();
-    for root in [home.clone(), cwd.clone()] {
+    let mut roots: Vec<PathBuf> = vec![home.clone(), cwd.clone()];
+    roots.extend(watch_ancestor_dirs(&cwd, &home));
+    roots.sort();
+    roots.dedup();
+    for root in &roots {
         if !root.exists() {
             continue;
         }
         debouncer
             .watcher()
-            .watch(&root, RecursiveMode::Recursive)
+            .watch(root, RecursiveMode::Recursive)
             .map_err(|e| format!("watch {}: {}", root.display(), e))?;
     }
 
@@ -239,6 +247,27 @@ fn run_loop(
             }
         }
     }
+}
+
+/// Collect ancestor directories of `cwd` up to the same boundary that
+/// discovery uses (first `.git` directory, or the user's home). Callers
+/// then `watch(root, Recursive)` on each — CLAUDE.md and .claude/rules
+/// live at ancestor levels (plan §6.4), so ignoring them here means
+/// edits would require a manual refresh.
+fn watch_ancestor_dirs(cwd: &Path, home: &Path) -> Vec<PathBuf> {
+    let mut out = Vec::new();
+    let mut cur: Option<PathBuf> = cwd.parent().map(|p| p.to_path_buf());
+    while let Some(dir) = cur {
+        out.push(dir.clone());
+        if dir.join(".git").exists() {
+            break;
+        }
+        if &dir == home {
+            break;
+        }
+        cur = dir.parent().map(|p| p.to_path_buf());
+    }
+    out
 }
 
 fn notify_to_fs_event(ev: &notify_debouncer_mini::DebouncedEvent) -> FsEvent {
@@ -334,6 +363,7 @@ fn snapshot_to_dto(t: ConfigTree) -> ConfigTreeSnapshotDto {
             .collect(),
         cwd: t.cwd.display().to_string(),
         project_root: t.project_root.display().to_string(),
+        config_home_dir: t.cwd.join(".claude").display().to_string(),
         memory_slug: t.memory_slug,
         memory_slug_lossy: t.memory_slug_lossy,
     }

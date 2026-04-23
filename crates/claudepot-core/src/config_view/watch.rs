@@ -88,36 +88,15 @@ pub struct FsEvent {
     pub rename_to: Option<std::path::PathBuf>,
 }
 
-/// Deny-list check — shared with discover.rs.
+/// Deny-list check — delegates to `discover::is_denied` so watcher
+/// and discovery share ONE deny-list (plan §6.3). Divergence here
+/// would mean the watcher wakes up for files discovery would ignore,
+/// causing unnecessary rescans.
 pub fn is_in_scope(path: &std::path::Path) -> bool {
     let Some(name) = path.file_name().and_then(|n| n.to_str()) else {
         return false;
     };
-    const DENY: &[&str] = &[
-        "paste-cache",
-        "image-cache",
-        "cache",
-        "downloads",
-        "file-history",
-        ".DS_Store",
-        "projects",
-        "todos",
-        "statsig",
-        "shell-snapshots",
-        "ide",
-        "chrome",
-    ];
-    if DENY.iter().any(|d| *d == name) {
-        return false;
-    }
-    if name.starts_with("history.jsonl")
-        || name.starts_with("security_warnings_state_")
-        || name.ends_with(".bak")
-        || name.contains(".sync-conflict-")
-    {
-        return false;
-    }
-    true
+    !crate::config_view::discover::is_denied(name)
 }
 
 /// Apply an event to the dirty-gen via the in-scope filter. Renames

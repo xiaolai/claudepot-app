@@ -1064,6 +1064,13 @@ export interface ConfigTreeDto {
   scopes: ConfigScopeNodeDto[];
   cwd: string;
   project_root: string;
+  /**
+   * Platform-correct path to `<cwd>/.claude`, joined on the backend via
+   * `Path::join` so Windows tree rows render `C:\...\.claude` instead
+   * of the mixed-separator result of a JS template string. Display-
+   * only — never fed back to the backend for path lookups.
+   */
+  config_home_dir: string;
   memory_slug: string;
   memory_slug_lossy: boolean;
 }

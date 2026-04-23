@@ -41,6 +41,18 @@ pub struct EffectiveSettings {
 }
 
 pub fn compute(input: &EffectiveSettingsInput) -> EffectiveSettings {
+    let mut r = compute_raw(input);
+    mask_json(&mut r.merged);
+    r
+}
+
+/// Same as [`compute`] but skips the secret-mask pipeline. Used by the
+/// parity harness (`cargo xtask verify-cc-parity`) so goldens reflect
+/// CC's upstream merge output rather than a Claudepot-masked view —
+/// mask and merge are tested independently, and comparing CC's own
+/// pre-serialization JSON is the correct apples-to-apples check. Do
+/// NOT expose this output across the IPC boundary.
+pub fn compute_raw(input: &EffectiveSettingsInput) -> EffectiveSettings {
     let policy = policy_resolve(&input.policy_sources, None);
 
     let layers: Vec<(Scope, Value)> = vec![
@@ -94,7 +106,6 @@ pub fn compute(input: &EffectiveSettingsInput) -> EffectiveSettings {
         merged = plain;
     }
 
-    mask_json(&mut merged);
     let provenance = provenance::flatten_provenance(&merged_annot);
 
     EffectiveSettings {
