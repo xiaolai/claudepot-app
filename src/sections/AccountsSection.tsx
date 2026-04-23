@@ -395,6 +395,8 @@ export function AccountsSection({
           onRefreshUsageAll={refreshUsage}
           onLogin={actions.login}
           onRemove={setConfirmRemove}
+          onAdoptDesktop={(a) => actions.adoptDesktop(a)}
+          onClearDesktop={() => actions.clearDesktop(true)}
           onClose={closeCtxMenu}
         />
       )}

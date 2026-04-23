@@ -1,5 +1,10 @@
 import { useMemo } from "react";
-import type { AccountSummary, AppStatus, CcIdentity } from "../types";
+import type {
+  AccountSummary,
+  AppStatus,
+  CcIdentity,
+  DesktopSyncOutcome,
+} from "../types";
 
 export interface StatusAction {
   label: string;
@@ -57,6 +62,24 @@ export function useStatusIssues(opts: {
    * purely for the button label; the backend reads whatever CC has.
    */
   onImportCurrent?: (email: string) => void;
+
+  /**
+   * Latest outcome of `sync_from_current_desktop`. Null when sync
+   * hasn't run yet. UI surfaces adoption / stranger / candidate
+   * banners based on the discriminated variant.
+   */
+  desktopSync?: DesktopSyncOutcome | null;
+  /**
+   * Trigger adopt-live-session for the matched Claudepot account.
+   * Wired so the "adoption available" banner can run end-to-end.
+   */
+  onAdoptLiveDesktop?: (email: string) => void;
+  /**
+   * Open the Add-account modal pre-filled with the live Desktop
+   * identity. Wired so the "stranger" banner can offer one-click
+   * onboarding of an account Desktop is already signed into.
+   */
+  onImportDesktop?: (email: string) => void;
 }): StatusIssue[] {
   const {
     ccIdentity,
@@ -68,6 +91,9 @@ export function useStatusIssues(opts: {
     onSelectAccount,
     onReloginActive,
     onImportCurrent,
+    desktopSync,
+    onAdoptLiveDesktop,
+    onImportDesktop,
   } = opts;
 
   return useMemo(() => {
@@ -202,6 +228,67 @@ export function useStatusIssues(opts: {
       });
     }
 
+    // --- Desktop-side banners (Phase 4) ---------------------------
+    //
+    // Driven by `sync_from_current_desktop` outcomes. Only mutating
+    // affordances run on "adoption_available" (Decrypted tier); the
+    // "candidate_only" variant renders an advisory banner only.
+    if (desktopSync) {
+      switch (desktopSync.kind) {
+        case "adoption_available": {
+          const email = desktopSync.email;
+          issues.push({
+            id: `desktop-adopt:${email.toLowerCase()}`,
+            severity: "info",
+            label: `Claude Desktop is signed in as ${email}`,
+            detail:
+              "Bind this session to the matching registered account so Claudepot can swap in later.",
+            action: onAdoptLiveDesktop
+              ? { label: "Bind", onClick: () => onAdoptLiveDesktop(email) }
+              : undefined,
+            dismissable: true,
+          });
+          break;
+        }
+        case "stranger": {
+          const email = desktopSync.email;
+          issues.push({
+            id: `desktop-stranger:${email.toLowerCase()}`,
+            severity: "info",
+            label: `Claude Desktop is signed in as ${email}`,
+            detail:
+              "This email isn't registered with Claudepot yet. Import it to start managing this session.",
+            action: onImportDesktop
+              ? {
+                  label: `Import ${email}`,
+                  onClick: () => onImportDesktop(email),
+                }
+              : undefined,
+            dismissable: true,
+          });
+          break;
+        }
+        case "candidate_only": {
+          // Unverified match (fast path only). Surface as a mild
+          // warning — never offer mutation here because the email
+          // may be wrong when multiple accounts share an org.
+          const email = desktopSync.email;
+          issues.push({
+            id: `desktop-candidate:${email.toLowerCase()}`,
+            severity: "warning",
+            label: `Claude Desktop identity not verified`,
+            detail: `Possible match: ${email}. Open Claude Desktop once to refresh the verified identity.`,
+            dismissable: true,
+          });
+          break;
+        }
+        case "verified":
+        case "no_live":
+          // No banner — sync is in the steady state.
+          break;
+      }
+    }
+
     return issues;
   }, [
     ccIdentity,
@@ -213,5 +300,8 @@ export function useStatusIssues(opts: {
     onSelectAccount,
     onReloginActive,
     onImportCurrent,
+    desktopSync,
+    onAdoptLiveDesktop,
+    onImportDesktop,
   ]);
 }

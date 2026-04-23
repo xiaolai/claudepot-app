@@ -14,6 +14,10 @@ interface Args {
   onRefreshUsageAll: () => void;
   onLogin: (a: AccountSummary) => void;
   onRemove: (a: AccountSummary) => void;
+  /** "Bind current Desktop session to this account" — Phase 3+. */
+  onAdoptDesktop?: (a: AccountSummary) => void;
+  /** "Sign Desktop out" — works regardless of row (single action). */
+  onClearDesktop?: () => void;
 }
 
 /**
@@ -34,15 +38,27 @@ export function useAccountContextMenu({
   onRefreshUsageAll,
   onLogin,
   onRemove,
+  onAdoptDesktop,
+  onClearDesktop,
 }: Args): ContextMenuItem[] {
   return useMemo(() => {
+    // `desktop_profile_on_disk` is the disk truth; we prefer it over
+    // `has_desktop_profile` (the DB cache) per plan v2 D18. The
+    // context menu gates on disk truth so a stale flag can't enable
+    // a swap that would immediately fail at `restore()`.
+    const hasProfile = a.desktop_profile_on_disk;
     const desktopReason = !status.desktop_installed
       ? "Claude Desktop not installed"
-      : !a.has_desktop_profile
-        ? "sign in via Desktop app first"
+      : !hasProfile
+        ? "bind current Desktop session first"
         : a.is_desktop_active
           ? "already active"
           : undefined;
+    const adoptDesktopDisabled =
+      !status.desktop_installed || !onAdoptDesktop;
+    const adoptDesktopReason = !status.desktop_installed
+      ? "Claude Desktop not installed"
+      : undefined;
     const cliReason = a.is_cli_active
       ? "already active"
       : !a.credentials_healthy
@@ -71,21 +87,35 @@ export function useAccountContextMenu({
       {
         label: a.is_desktop_active ? "Active Desktop" : "Set as Desktop",
         disabled:
-          a.is_desktop_active ||
-          !a.has_desktop_profile ||
-          !status.desktop_installed,
+          a.is_desktop_active || !hasProfile || !status.desktop_installed,
         disabledReason: desktopReason,
         onClick: () => onSwitchDesktop(a),
       },
       {
         label: "Set as Desktop (don't relaunch)",
         disabled:
-          a.is_desktop_active ||
-          !a.has_desktop_profile ||
-          !status.desktop_installed,
+          a.is_desktop_active || !hasProfile || !status.desktop_installed,
         disabledReason: desktopReason,
         onClick: () => onSwitchDesktopNoLaunch(a),
       },
+      {
+        label: "Bind current Desktop session",
+        disabled: adoptDesktopDisabled,
+        disabledReason: adoptDesktopReason,
+        onClick: () => onAdoptDesktop?.(a),
+      },
+      ...(onClearDesktop
+        ? [
+            {
+              label: "Sign Desktop out",
+              disabled: !status.desktop_installed,
+              disabledReason: !status.desktop_installed
+                ? "Claude Desktop not installed"
+                : undefined,
+              onClick: onClearDesktop,
+            } as ContextMenuItem,
+          ]
+        : []),
       { label: "", separator: true, onClick: () => {} },
       {
         label: "Verify now",
@@ -137,6 +167,8 @@ export function useAccountContextMenu({
     onRefreshUsageAll,
     onLogin,
     onRemove,
+    onAdoptDesktop,
+    onClearDesktop,
   ]);
 }
 
@@ -158,6 +190,8 @@ export function CtxMenuForAccount({
   onRefreshUsageAll,
   onLogin,
   onRemove,
+  onAdoptDesktop,
+  onClearDesktop,
   onClose,
 }: {
   menu: { x: number; y: number; account: AccountSummary };
@@ -171,6 +205,8 @@ export function CtxMenuForAccount({
   onRefreshUsageAll: () => void;
   onLogin: (a: AccountSummary) => void;
   onRemove: (a: AccountSummary) => void;
+  onAdoptDesktop?: (a: AccountSummary) => void;
+  onClearDesktop?: () => void;
   onClose: () => void;
 }) {
   const items = useAccountContextMenu({
@@ -185,6 +221,8 @@ export function CtxMenuForAccount({
     onRefreshUsageAll,
     onLogin,
     onRemove,
+    onAdoptDesktop,
+    onClearDesktop,
   });
   return (
     <ContextMenu x={menu.x} y={menu.y} items={items} onClose={onClose} />

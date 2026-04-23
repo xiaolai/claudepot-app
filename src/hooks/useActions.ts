@@ -102,6 +102,43 @@ export function useActions({ pushToast, refresh, withBusy, addBusy, removeBusy }
       }
     });
 
+  /// Bind the live Desktop session to `a`'s snapshot. Runs identity
+  /// verification backend-side — fast-path candidates fail here with
+  /// an explicit "live Desktop identity is <other>, not <email>"
+  /// error, which is the correct behavior (Codex D5-1).
+  const adoptDesktop = (a: AccountSummary, overwrite = false) =>
+    withBusy(`adopt-${a.uuid}`, async () => {
+      try {
+        const r = await api.desktopAdopt(a.uuid, overwrite);
+        pushToast(
+          "info",
+          `Bound Desktop session to ${r.account_email} (${r.captured_items} item(s)).`,
+        );
+        await refresh();
+        rebuildTray();
+      } catch (e) {
+        pushToast("error", `Desktop bind failed: ${e}`);
+      }
+    });
+
+  const clearDesktop = (keepSnapshot = true) =>
+    withBusy("desktop-clear", async () => {
+      try {
+        const r = await api.desktopClear(keepSnapshot);
+        const who = r.email ?? "the active session";
+        pushToast(
+          "info",
+          r.snapshot_kept
+            ? `Signed Desktop out (${who}); snapshot preserved.`
+            : `Signed Desktop out (${who}); snapshot discarded.`,
+        );
+        await refresh();
+        rebuildTray();
+      } catch (e) {
+        pushToast("error", `Desktop clear failed: ${e}`);
+      }
+    });
+
   const performRemoveImmediate = (a: AccountSummary) =>
     withBusy(`rm-${a.uuid}`, async () => {
       try {
@@ -161,5 +198,14 @@ export function useActions({ pushToast, refresh, withBusy, addBusy, removeBusy }
     }
   };
 
-  return { useCli, login, cancelLogin, useDesktop, performRemove, performClearCli };
+  return {
+    useCli,
+    login,
+    cancelLogin,
+    useDesktop,
+    adoptDesktop,
+    clearDesktop,
+    performRemove,
+    performClearCli,
+  };
 }
