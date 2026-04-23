@@ -427,6 +427,29 @@ enum DesktopAction {
     /// Reconcile `has_desktop_profile` flags with on-disk truth and
     /// clear orphan `state.active_desktop` pointers. Idempotent.
     Reconcile,
+    /// Adopt the live Desktop session into an account's snapshot dir.
+    /// Refuses unless the live identity (verified via /profile) matches
+    /// the target account's stored email.
+    Adopt {
+        /// Account email (prefix match). Omit to adopt into whichever
+        /// registered account's email the live /profile returns.
+        email: Option<String>,
+        /// Replace an existing snapshot for this account.
+        #[arg(long)]
+        overwrite: bool,
+    },
+    /// Sign Desktop out. Stashes the live session as a snapshot by
+    /// default so the user can swap back in later.
+    Clear {
+        /// Delete the session items AND the snapshot — full wipe.
+        /// Default behavior preserves the snapshot.
+        #[arg(long)]
+        no_keep_snapshot: bool,
+    },
+    /// Launch Claude Desktop.
+    Launch,
+    /// Gracefully quit Claude Desktop if it's running.
+    Quit,
 }
 
 /// Shared context for all command handlers.
@@ -518,6 +541,14 @@ async fn main() -> Result<()> {
                 commands::desktop_ops::identity(&ctx, strict).await?
             }
             DesktopAction::Reconcile => commands::desktop_ops::reconcile(&ctx).await?,
+            DesktopAction::Adopt { email, overwrite } => {
+                commands::desktop_ops::adopt(&ctx, email.as_deref(), overwrite).await?
+            }
+            DesktopAction::Clear { no_keep_snapshot } => {
+                commands::desktop_ops::clear(&ctx, !no_keep_snapshot).await?
+            }
+            DesktopAction::Launch => commands::desktop_ops::launch(&ctx).await?,
+            DesktopAction::Quit => commands::desktop_ops::quit(&ctx).await?,
         },
         Commands::Project { action } => match action {
             ProjectAction::List => commands::project::list(&ctx)?,

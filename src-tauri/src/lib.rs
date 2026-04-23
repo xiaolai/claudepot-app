@@ -129,6 +129,7 @@ pub fn run() {
             Ok(())
         })
         .manage(state::LoginState::default())
+        .manage(state::DesktopOpState::default())
         .manage(state::DryRunRegistry::default())
         .manage(state::LiveSessionState::default())
         .manage(ops::RunningOps::new())
@@ -152,6 +153,12 @@ pub fn run() {
             commands::desktop_use,
             commands::current_desktop_identity,
             commands::desktop_reconcile,
+            commands::desktop_adopt,
+            commands::desktop_clear,
+            commands::sync_from_current_desktop,
+            commands::desktop_is_running,
+            commands::desktop_launch,
+            commands::desktop_quit,
             commands::account_add_from_current,
             commands::account_register_from_browser,
             commands::account_login,
