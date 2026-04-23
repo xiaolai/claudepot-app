@@ -10,6 +10,7 @@ pub mod effective_mcp;
 pub mod effective_settings;
 pub mod launcher;
 pub mod mask;
+pub mod memory_other;
 pub mod merge;
 pub mod model;
 pub mod parse;
