@@ -59,6 +59,13 @@ export function useToasts() {
    * Push a toast. Options:
    *   - `onUndo` — renders an Undo button. The toast sticks around for
    *     the `undoMs` window (default 3000 ms) before auto-dismissing.
+   *     Undo windows are intentionally short: they are action-commit
+   *     timers, not notifications.
+   *   - `durationMs` — override the auto-dismiss timer for
+   *     notifications (no `onUndo`). Default 10 000 ms for both info
+   *     and error kinds — long enough to read without locking the UI
+   *     under a persistent banner. Pass `Infinity` for sticky
+   *     notifications that the user must close manually.
    *   - `onCommit` — a callback fired iff the toast auto-dismisses
    *     WITHOUT the user clicking Undo. This is the idiomatic way to
    *     schedule a deferred action: the commit and the dismissal are
@@ -72,6 +79,7 @@ export function useToasts() {
       onUndo?: () => void,
       opts?: {
         undoMs?: number;
+        durationMs?: number;
         undoLabel?: string;
         onCommit?: () => void;
         dedupeKey?: string;
@@ -114,8 +122,16 @@ export function useToasts() {
           dedupeKey: opts?.dedupeKey,
         },
       ]);
-      if (kind === "info") {
-        const delay = onUndo ? opts?.undoMs ?? 3000 : 4000;
+      // Auto-dismiss policy:
+      //   onUndo → short (undoMs, default 3 s) — undo is an action
+      //     commit timer, not a notification.
+      //   otherwise → durationMs (default 10 s) for BOTH info and
+      //     error. Errors used to stick forever, which hid real state
+      //     behind a banner the user forgot about; 10 s is long enough
+      //     to read and still auto-heals if the user steps away.
+      //     Callers needing persistence can pass `Infinity`.
+      const delay = onUndo ? opts?.undoMs ?? 3000 : opts?.durationMs ?? 10_000;
+      if (Number.isFinite(delay)) {
         const timer = setTimeout(() => {
           // If the user never clicked Undo, run the commit callback
           // just before dismissing. This makes "toast visible ⇔ Undo
