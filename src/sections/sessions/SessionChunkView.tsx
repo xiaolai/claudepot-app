@@ -1,11 +1,12 @@
+import { useState } from "react";
 import type {
   LinkedTool,
   SessionChunk,
   SessionEvent,
 } from "../../types";
-import { Glyph } from "../../components/primitives/Glyph";
 import { Tag } from "../../components/primitives/Tag";
 import { NF } from "../../icons";
+import { useActivityPrefs } from "../../hooks/useActivityPrefs";
 import { Body, Bubble, Divider } from "./components/transcriptAtoms";
 import { ToolExecutionView } from "./viewers";
 import { redactSecrets } from "./viewers/redact";
@@ -186,35 +187,7 @@ function EventInlineView({
       );
     }
     case "assistantThinking":
-      return (
-        <details
-          style={{
-            border: "var(--bw-hair) solid var(--line)",
-            borderRadius: "var(--r-2)",
-            padding: "var(--sp-4) var(--sp-8)",
-          }}
-        >
-          <summary
-            style={{
-              cursor: "pointer",
-              fontSize: "var(--fs-xs)",
-              color: "var(--fg-muted)",
-              textTransform: "uppercase",
-              letterSpacing: "var(--ls-wide)",
-            }}
-          >
-            <Glyph g={NF.bolt} style={{ fontSize: "var(--fs-2xs)" }} /> Thinking
-          </summary>
-          <div style={{ marginTop: "var(--sp-4)" }}>
-            <Body
-              text={redactSecrets(event.text)}
-              searchTerm={searchTerm}
-              clamp={TEXT_CLAMP}
-              tone="ghost"
-            />
-          </div>
-        </details>
-      );
+      return <ThinkingDetails text={event.text} searchTerm={searchTerm} />;
     case "assistantToolUse":
       // Orphaned tool call — the linker didn't find a matching result.
       return (
@@ -312,6 +285,84 @@ function renderHeader(
       {ts && <span title={ts}>{new Date(ts).toLocaleString()}</span>}
       {extra && <span style={{ marginLeft: "auto" }}>{extra}</span>}
     </div>
+  );
+}
+
+/**
+ * Chunks-mode renderer for an assistantThinking event. Mirrors
+ * ThinkingBody in SessionEventView — honors the activity_hide_thinking
+ * preference and latches a user reveal. Chunks mode is the default
+ * view, so wiring this here is what makes the pref feel real.
+ *
+ * Exported for unit tests; the chunk dispatcher above is the only
+ * production consumer.
+ */
+export function ThinkingDetails({
+  text,
+  searchTerm,
+}: {
+  text: string;
+  searchTerm: string;
+}) {
+  const { hideThinking } = useActivityPrefs();
+  const [revealedByUser, setRevealedByUser] = useState(false);
+  const shown = revealedByUser || !hideThinking;
+  if (!shown) {
+    return (
+      <button
+        type="button"
+        onClick={() => setRevealedByUser(true)}
+        className="pm-focus"
+        style={{
+          alignSelf: "flex-start",
+          display: "inline-flex",
+          alignItems: "center",
+          gap: "var(--sp-6)",
+          padding: "var(--sp-4) var(--sp-10)",
+          fontSize: "var(--fs-xs)",
+          fontStyle: "italic",
+          color: "var(--fg-faint)",
+          background: "var(--bg-sunken)",
+          border: "var(--bw-hair) dashed var(--line)",
+          borderRadius: "var(--r-2)",
+          cursor: "pointer",
+          fontFamily: "var(--font)",
+        }}
+        aria-label={`Reveal thinking block (${text.length} characters)`}
+      >
+        Thinking · {text.length.toLocaleString()} chars — click to reveal
+      </button>
+    );
+  }
+  return (
+    <details
+      open
+      style={{
+        border: "var(--bw-hair) solid var(--line)",
+        borderRadius: "var(--r-2)",
+        padding: "var(--sp-4) var(--sp-8)",
+      }}
+    >
+      <summary
+        style={{
+          cursor: "pointer",
+          fontSize: "var(--fs-xs)",
+          color: "var(--fg-muted)",
+          textTransform: "uppercase",
+          letterSpacing: "var(--ls-wide)",
+        }}
+      >
+        Thinking
+      </summary>
+      <div style={{ marginTop: "var(--sp-4)" }}>
+        <Body
+          text={redactSecrets(text)}
+          searchTerm={searchTerm}
+          clamp={TEXT_CLAMP}
+          tone="ghost"
+        />
+      </div>
+    </details>
   );
 }
 

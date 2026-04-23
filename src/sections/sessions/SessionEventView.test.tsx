@@ -53,4 +53,24 @@ describe("SessionEventView — thinking redaction (M-11)", () => {
     ).toBeNull();
     expect(screen.getByText(text)).toBeInTheDocument();
   });
+
+  it("collapses previously-open blocks when the pref flips back on (unless the user latched them)", () => {
+    // Manual re-render cycle to simulate the pref flipping while the
+    // component stays mounted. The first render honors hideThinking=false
+    // (body shown, no reveal button). The second render honors
+    // hideThinking=true (reveal button reappears) — proving that state
+    // doesn't stick on its first-mount value.
+    prefsSpy.mockReturnValue({ enabled: true, hideThinking: false });
+    const text = "Mid-render pref flip";
+    const { rerender } = renderView(
+      <SessionEventView event={thinkingEvent(text)} searchTerm="" />,
+    );
+    expect(screen.getByText(text)).toBeInTheDocument();
+    prefsSpy.mockReturnValue({ enabled: true, hideThinking: true });
+    rerender(<SessionEventView event={thinkingEvent(text)} searchTerm="" />);
+    expect(screen.queryByText(text)).toBeNull();
+    expect(
+      screen.getByRole("button", { name: /reveal thinking block/i }),
+    ).toBeInTheDocument();
+  });
 });
