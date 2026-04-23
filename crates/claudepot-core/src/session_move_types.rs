@@ -96,6 +96,9 @@ pub enum MoveSessionError {
     #[error("config_dir does not exist or is unreadable: {0:?}")]
     InvalidConfigDir(PathBuf),
 
+    #[error("failed to move to Trash: {0}")]
+    TrashFailed(String),
+
     #[error(transparent)]
     Io(#[from] std::io::Error),
 }
@@ -125,4 +128,21 @@ pub struct AdoptReport {
     pub sessions_failed: Vec<(Uuid, String)>,
     pub source_dir_removed: bool,
     pub per_session: Vec<MoveSessionReport>,
+}
+
+/// Summary of an orphan-project discard. The slug dir is moved to the
+/// OS Trash as a whole (macOS ~/.Trash, Windows Recycle Bin, XDG trash).
+/// `sessions_discarded` and `total_size_bytes` are snapshotted *before*
+/// the trash call so the UI can echo the cost even if the underlying
+/// dir no longer exists by the time the report is rendered.
+#[derive(Debug, Default, Clone)]
+pub struct DiscardReport {
+    pub sessions_discarded: usize,
+    pub total_size_bytes: u64,
+    /// True iff the slug dir is no longer present on disk after the
+    /// trash call. On all supported platforms the `trash` crate moves
+    /// the directory, so this is normally true; it is `false` only
+    /// when the trash operation reports success but leaves a remnant
+    /// (shouldn't happen in practice — kept for observability).
+    pub dir_removed: bool,
 }

@@ -44,8 +44,11 @@ Versioning scheme:
     out, overwrite-profile); `DesktopImportCard` in the
     Add-account modal; sync-driven Desktop banners
     (adoption-available, stranger, candidate-only) in the shell's
-    status-issues strip; Bind/Sign-out items across context menu
-    + command palette + tray.
+    status-issues strip; Bind items in the account context menu
+    and command palette; Bind / Sign out / Launch / Reconcile in
+    the tray. (Per-account Desktop sign-out is no longer in the
+    context menu — use the tray's shared Sign out action
+    instead.)
   - **Sidecar metadata**: `claudepot.profile.json` written inside
     every snapshot dir with `captured_at`, `captured_from_email`,
     `captured_verified`, version, platform, session-items list.

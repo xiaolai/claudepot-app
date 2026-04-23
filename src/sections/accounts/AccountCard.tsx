@@ -62,10 +62,40 @@ export function AccountCard({
   const cliProps = cliTargetProps(a, cliHandlers);
   const desktopProps = desktopTargetProps(a, status, desktopHandlers);
 
+  // Keyboard-focusable context-menu affordance. The inline Remove
+  // button went away with Tier 3-D, and the in-card CLI/Desktop
+  // TargetButtons cover the common verbs. Destructive actions
+  // (remove account, forget desktop snapshot) live only in the
+  // context menu now, so the card itself must be reachable by
+  // keyboard and open that menu from Shift+F10 / the Menu key /
+  // Enter. `article` with `tabIndex=0` makes it focusable; the
+  // key handler synthesises a context-menu event anchored on the
+  // card's own top-left so the popover still appears in a sane
+  // place when triggered without a mouse.
+  const handleKeyboardMenu = (e: React.KeyboardEvent<HTMLElement>) => {
+    if (!onContextMenu) return;
+    const isMenuKey = e.key === "ContextMenu";
+    const isShiftF10 = e.key === "F10" && e.shiftKey;
+    if (!isMenuKey && !isShiftF10) return;
+    e.preventDefault();
+    const rect = e.currentTarget.getBoundingClientRect();
+    onContextMenu(
+      {
+        preventDefault: () => {},
+        clientX: rect.left + 12,
+        clientY: rect.top + 12,
+      } as unknown as React.MouseEvent,
+      a,
+    );
+  };
+
   return (
     <article
       data-account-uuid={a.uuid}
+      tabIndex={0}
+      aria-label={`Account ${a.email}`}
       onContextMenu={onContextMenu ? (e) => onContextMenu(e, a) : undefined}
+      onKeyDown={handleKeyboardMenu}
       style={{
         position: "relative",
         background: "var(--bg-raised)",

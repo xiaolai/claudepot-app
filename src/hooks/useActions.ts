@@ -112,7 +112,13 @@ export function useActions({ pushToast, refresh, withBusy }: Deps) {
   /// `DesktopConfirmContext::ReplaceProfile` dialog instead.
   const adoptDesktop = (a: AccountSummary) => adoptDesktopForce(a, false);
 
-  const adoptDesktopForce = (a: AccountSummary, overwrite: boolean) =>
+  /// Returns `true` iff the bind committed. Callers that only fire
+  /// and forget can ignore the result (the toast and refresh are
+  /// owned here); callers that need to sequence post-success UI
+  /// (e.g. closing the Add-account modal) MUST branch on it — the
+  /// action swallows errors to toast them here, so from the
+  /// awaiter's perspective a rejected promise never appears.
+  const adoptDesktopForce = (a: AccountSummary, overwrite: boolean): Promise<boolean> =>
     withBusy(`adopt-${a.uuid}`, async () => {
       try {
         const r = await api.desktopAdopt(a.uuid, overwrite);
@@ -122,8 +128,10 @@ export function useActions({ pushToast, refresh, withBusy }: Deps) {
         );
         await refresh();
         rebuildTray();
+        return true;
       } catch (e) {
         pushToast("error", `Desktop bind failed: ${e}`);
+        return false;
       }
     });
 

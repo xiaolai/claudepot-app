@@ -33,8 +33,12 @@ interface TargetButtonProps {
  *              secondary verbs.
  *   adopt      dashed outline. Body fires onPrimary (typically "bind
  *              current Desktop session"). No chevron.
- *   disabled   muted fill. Both halves inert; reason lives in the
- *              adjacent AnomalyBanner rather than next to the button.
+ *   disabled   muted fill. Body inert; chevron is still live if the
+ *              caller supplied a `menu` (e.g. CLI "Re-login…" when
+ *              the token expired). To make the chevron inert too,
+ *              pass an empty or missing `menu`. The reason for the
+ *              disabled primary lives in the adjacent AnomalyBanner
+ *              rather than next to the button.
  *
  * The menu reuses `ContextMenu` for keyboard nav and outside-click
  * dismissal. Anchored below the chevron's right edge.
@@ -63,11 +67,15 @@ export function TargetButton({
     const el = chevronRef.current;
     if (!el) return;
     const rect = el.getBoundingClientRect();
-    // ContextMenu clamps itself into the viewport. Anchor under the
-    // chevron, right-aligned so the menu doesn't stick out past the
-    // button's right edge on narrow cards.
+    // ContextMenu clamps itself against the right/bottom viewport
+    // edges, but not the left — anchor at `rect.right - MENU_W` so
+    // the menu aligns to the chevron's right side, then clamp x to
+    // a viewport-padding floor so a card near the window's left
+    // edge doesn't kick the menu offscreen.
     const MENU_W = 200;
-    setMenuPos({ x: rect.right - MENU_W, y: rect.bottom + 4 });
+    const PADDING = 8;
+    const x = Math.max(PADDING, rect.right - MENU_W);
+    setMenuPos({ x, y: rect.bottom + 4 });
   };
 
   return (

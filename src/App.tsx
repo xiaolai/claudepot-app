@@ -468,13 +468,21 @@ function AppShell() {
       try {
         const outcome = await api.syncFromCurrentDesktop();
         setDesktopSync(outcome);
+        // Verified means the backend may have pointed `active_desktop`
+        // at a different account (see sync_from_current). The
+        // `is_desktop_active` flags in our accounts list are now stale
+        // — refresh so badges match truth without waiting for the next
+        // unrelated refresh to happen to win the race.
+        if (outcome.kind === "verified") {
+          await refreshAccounts();
+        }
       } catch {
         // Slow-path failure (keychain locked, /profile down) is not a
         // user-surfaceable error here — the banner layer already shows
         // CandidateOnly when it can. Swallow.
       }
     },
-    [DESKTOP_SYNC_TTL_MS],
+    [DESKTOP_SYNC_TTL_MS, refreshAccounts],
   );
 
   useEffect(() => {

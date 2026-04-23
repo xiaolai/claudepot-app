@@ -445,6 +445,21 @@ export interface GcOutcome {
   would_remove: string[];
 }
 
+export interface AbandonedCleanupEntry {
+  id: string;
+  journalPath: string;
+  sidecarPath: string;
+  referencedSnapshots: string[];
+  bytes: number;
+}
+
+export interface AbandonedCleanupReport {
+  entries: AbandonedCleanupEntry[];
+  removedJournals: number;
+  removedSnapshots: number;
+  bytesFreed: number;
+}
+
 export interface JournalEntry {
   id: string;
   path: string;
@@ -493,6 +508,12 @@ export interface AdoptReport {
   sessionsFailed: AdoptFailure[];
   sourceDirRemoved: boolean;
   perSession: MoveSessionReport[];
+}
+
+export interface DiscardReport {
+  sessionsDiscarded: number;
+  totalSizeBytes: number;
+  dirRemoved: boolean;
 }
 
 // ---------- Session index (Sessions tab) ----------

@@ -705,6 +705,24 @@ pub struct AdoptFailureDto {
     pub error: String,
 }
 
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DiscardReportDto {
+    pub sessions_discarded: usize,
+    pub total_size_bytes: u64,
+    pub dir_removed: bool,
+}
+
+impl From<&claudepot_core::session_move::DiscardReport> for DiscardReportDto {
+    fn from(r: &claudepot_core::session_move::DiscardReport) -> Self {
+        Self {
+            sessions_discarded: r.sessions_discarded,
+            total_size_bytes: r.total_size_bytes,
+            dir_removed: r.dir_removed,
+        }
+    }
+}
+
 impl From<&claudepot_core::session_move::AdoptReport> for AdoptReportDto {
     fn from(r: &claudepot_core::session_move::AdoptReport) -> Self {
         Self {

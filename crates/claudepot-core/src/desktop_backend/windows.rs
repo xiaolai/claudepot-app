@@ -50,21 +50,36 @@ pub fn package_family() -> String {
 
 #[cfg(target_os = "windows")]
 fn discover_package_family() -> Option<String> {
-    // 1. PowerShell probe — authoritative.
-    let ps = std::process::Command::new("powershell")
+    // 1. PowerShell probe — authoritative. Use the fully qualified
+    // System32 path (derived from %SystemRoot%) rather than the
+    // unqualified `powershell` so a hijacked PATH or a dropped
+    // `powershell.exe` in CWD can't run here. Falls back to the
+    // filesystem scan if PowerShell is unavailable.
+    let system_root = std::env::var_os("SystemRoot")
+        .map(std::path::PathBuf::from)
+        .unwrap_or_else(|| std::path::PathBuf::from("C:\\Windows"));
+    let ps_path = system_root
+        .join("System32")
+        .join("WindowsPowerShell")
+        .join("v1.0")
+        .join("powershell.exe");
+    let ps = std::process::Command::new(&ps_path)
         .args([
             "-NoProfile",
             "-NonInteractive",
             "-Command",
-            "(Get-AppxPackage -Name 'Claude*' | Select -First 1).PackageFamilyName",
+            // Filter on PackageFamilyName (Claude_*) rather than
+            // a permissive Name='Claude*' wildcard, so ambient
+            // installs like "ClaudeCompanion" or "ClaudeSync" can't
+            // be selected instead of Claude Desktop itself.
+            "(Get-AppxPackage | Where-Object { $_.PackageFamilyName -like 'Claude_*' } | Select-Object -First 1).PackageFamilyName",
         ])
         .output();
     if let Ok(out) = ps {
         if out.status.success() {
             let stdout = String::from_utf8_lossy(&out.stdout);
-            let trimmed = stdout.trim();
-            if !trimmed.is_empty() && trimmed.starts_with("Claude") {
-                return Some(trimmed.to_string());
+            if let Some(name) = parse_package_family_output(&stdout) {
+                return Some(name);
             }
         }
     }
@@ -84,6 +99,32 @@ fn discover_package_family() -> Option<String> {
 #[cfg(not(target_os = "windows"))]
 fn discover_package_family() -> Option<String> {
     Some(KNOWN_PACKAGE_FAMILY.to_string())
+}
+
+/// Parse a `Get-AppxPackage | Select PackageFamilyName` stdout into
+/// a validated family name. Returns the first non-empty line that
+/// starts with `Claude_` and contains no whitespace (a family name
+/// is a single token). Everything else → `None`.
+///
+/// Extracted for testability — the PowerShell pipeline itself is
+/// mocked in unit tests by passing its captured stdout.
+fn parse_package_family_output(raw: &str) -> Option<String> {
+    for line in raw.lines() {
+        let trimmed = line.trim();
+        if trimmed.is_empty() {
+            continue;
+        }
+        // Reject multi-token lines (e.g. PowerShell's `Name :
+        // ...` tabular format leaking through) — a family name
+        // never contains whitespace.
+        if trimmed.split_whitespace().count() != 1 {
+            continue;
+        }
+        if trimmed.starts_with("Claude_") {
+            return Some(trimmed.to_string());
+        }
+    }
+    None
 }
 
 /// Claude Desktop's MSIX-virtualized data dir, derived from the
@@ -364,6 +405,74 @@ mod tests {
         assert!(
             family.starts_with("Claude_"),
             "package_family() returned unexpected value: {family}"
+        );
+    }
+
+    #[test]
+    fn parse_package_family_output_accepts_single_valid_line() {
+        // The happy path: one line, trimmed, correct prefix.
+        let out = "Claude_pzs8sxrjxfjjc\n";
+        assert_eq!(
+            super::parse_package_family_output(out),
+            Some("Claude_pzs8sxrjxfjjc".to_string())
+        );
+    }
+
+    #[test]
+    fn parse_package_family_output_trims_crlf_and_whitespace() {
+        // PowerShell on Windows emits CRLF; the parser must not leak
+        // the trailing \r into the returned family name.
+        assert_eq!(
+            super::parse_package_family_output("Claude_xyz123\r\n"),
+            Some("Claude_xyz123".to_string())
+        );
+        assert_eq!(
+            super::parse_package_family_output("  Claude_xyz123  \n"),
+            Some("Claude_xyz123".to_string())
+        );
+    }
+
+    #[test]
+    fn parse_package_family_output_rejects_empty_and_missing_prefix() {
+        // An empty probe, a blank line, or a probe that selected a
+        // package that isn't actually Claude must all be rejected so
+        // the filesystem fallback has a chance to run.
+        assert_eq!(super::parse_package_family_output(""), None);
+        assert_eq!(super::parse_package_family_output("\n\n"), None);
+        assert_eq!(
+            super::parse_package_family_output("Microsoft.Edge_8wekyb3d8bbwe"),
+            None,
+        );
+    }
+
+    #[test]
+    fn parse_package_family_output_rejects_tabular_leakage() {
+        // Even with `-NoProfile -NonInteractive`, some CI PowerShell
+        // configurations wrap output in a formatted table. A
+        // multi-token line must be skipped rather than coerced.
+        let tabular = "\nPackageFamilyName\n-----------------\nClaude_pzs8sxrjxfjjc\n";
+        assert_eq!(
+            super::parse_package_family_output(tabular),
+            Some("Claude_pzs8sxrjxfjjc".to_string())
+        );
+        assert_eq!(
+            super::parse_package_family_output("Name : Claude_abc"),
+            None
+        );
+    }
+
+    #[test]
+    fn parse_package_family_output_picks_first_matching_line() {
+        // If multiple Claude_* packages are installed, the caller has
+        // already filtered with `Select-Object -First 1`. The parser
+        // must still honour the first Claude_ line even if leading
+        // lines are blank or unrelated.
+        let out = "\nClaudeCompanion_aaa\nClaude_primary\nClaude_secondary\n";
+        // ClaudeCompanion_ doesn't match the `Claude_` underscore
+        // boundary, so the parser skips it and takes the real one.
+        assert_eq!(
+            super::parse_package_family_output(out),
+            Some("Claude_primary".to_string())
         );
     }
 }

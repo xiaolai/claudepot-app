@@ -3,19 +3,26 @@ import { open as openDialog } from "@tauri-apps/plugin-dialog";
 import { Icon } from "../../components/Icon";
 import { api } from "../../api";
 import { Button } from "../../components/primitives/Button";
+import { ConfirmDialog } from "../../components/ConfirmDialog";
 import {
   Modal,
   ModalHeader,
   ModalBody,
   ModalFooter,
 } from "../../components/primitives/Modal";
-import type { AdoptReport, OrphanedProject } from "../../types";
+import type {
+  AdoptReport,
+  DiscardReport,
+  OrphanedProject,
+} from "../../types";
 import { formatSize } from "./format";
 
 type RowState =
   | { kind: "idle" }
   | { kind: "adopting" }
+  | { kind: "removing" }
   | { kind: "done"; report: AdoptReport }
+  | { kind: "removed"; report: DiscardReport }
   | { kind: "error"; message: string };
 
 /**
@@ -48,6 +55,12 @@ export function AdoptOrphansModal({
   });
   const [targets, setTargets] = useState<Record<string, string>>(initialTargets);
   const [states, setStates] = useState<Record<string, RowState>>({});
+  // Which orphan is pending a Remove confirmation, if any. Per-row state
+  // would work too but a single-modal-at-a-time flow is the simpler UX
+  // and matches how the rest of the app gates destructive actions.
+  const [confirmRemove, setConfirmRemove] = useState<OrphanedProject | null>(
+    null,
+  );
 
   const browse = useCallback(async (slug: string) => {
     const picked = await openDialog({
@@ -79,6 +92,21 @@ export function AdoptOrphansModal({
     [targets, onCompleted],
   );
 
+  const remove = useCallback(
+    async (slug: string) => {
+      setConfirmRemove(null);
+      setStates((s) => ({ ...s, [slug]: { kind: "removing" } }));
+      try {
+        const report = await api.sessionDiscardOrphan(slug);
+        setStates((s) => ({ ...s, [slug]: { kind: "removed", report } }));
+        onCompleted();
+      } catch (e) {
+        setStates((s) => ({ ...s, [slug]: { kind: "error", message: String(e) } }));
+      }
+    },
+    [onCompleted],
+  );
+
   return (
     <Modal open onClose={onClose} width="lg" aria-labelledby={headingId}>
       <ModalHeader
@@ -88,17 +116,26 @@ export function AdoptOrphansModal({
       />
       <ModalBody>
         <p className="muted" style={{ marginTop: 0 }}>
-          Each orphan's original cwd no longer exists. Choose a live
-          target cwd to adopt sessions into. Every session transcript
-          is rewritten so <code>--resume</code> will cd into the new
-          target.
+          Each orphan's original cwd no longer exists. <strong>Adopt</strong>{" "}
+          to keep the history — choose a live target cwd and every
+          session transcript is rewritten so <code>--resume</code> will
+          cd into the new target. <strong>Remove</strong> to forget the
+          orphan entirely — the slug dir is moved to the Trash and can
+          be restored from there if you change your mind.
         </p>
 
         <ul className="adopt-orphans-list" role="list">
           {orphans.map((o) => {
             const state = states[o.slug] ?? { kind: "idle" };
             const target = targets[o.slug] ?? "";
-            const disabled = state.kind === "adopting" || state.kind === "done";
+            // Lock the row once any terminal-or-in-flight action is
+            // underway; the only exit after "removed" is closing the
+            // modal and re-opening with the refreshed orphan list.
+            const disabled =
+              state.kind === "adopting" ||
+              state.kind === "removing" ||
+              state.kind === "done" ||
+              state.kind === "removed";
             return (
               <li key={o.slug} className="adopt-orphans-row">
                 <div className="adopt-orphans-row-head">
@@ -137,6 +174,15 @@ export function AdoptOrphansModal({
                   >
                     {state.kind === "adopting" ? "Adopting…" : "Adopt"}
                   </Button>
+                  <Button
+                    variant="ghost"
+                    danger
+                    onClick={() => setConfirmRemove(o)}
+                    disabled={disabled}
+                    title="Move this orphan's slug dir to the Trash"
+                  >
+                    {state.kind === "removing" ? "Removing…" : "Remove"}
+                  </Button>
                 </div>
 
                 {state.kind === "done" && (
@@ -151,6 +197,14 @@ export function AdoptOrphansModal({
                       </>
                     )}
                     .
+                  </p>
+                )}
+                {state.kind === "removed" && (
+                  <p className="adopt-orphans-row-status ok">
+                    <Icon name="check" size={12} /> Moved{" "}
+                    {state.report.sessionsDiscarded} session
+                    {state.report.sessionsDiscarded === 1 ? "" : "s"} ·{" "}
+                    {formatSize(state.report.totalSizeBytes)} to Trash.
                   </p>
                 )}
                 {state.kind === "error" && (
@@ -168,6 +222,31 @@ export function AdoptOrphansModal({
           Close
         </Button>
       </ModalFooter>
+      {confirmRemove && (
+        <ConfirmDialog
+          title="Move orphan to Trash?"
+          body={
+            <>
+              <p style={{ marginTop: 0 }}>
+                <code className="mono">
+                  {confirmRemove.cwdFromTranscript ?? confirmRemove.slug}
+                </code>
+              </p>
+              <p className="muted" style={{ marginBottom: 0 }}>
+                {confirmRemove.sessionCount} session
+                {confirmRemove.sessionCount === 1 ? "" : "s"} ·{" "}
+                {formatSize(confirmRemove.totalSizeBytes)} will be moved
+                to the Trash. You can restore from Trash if you change
+                your mind.
+              </p>
+            </>
+          }
+          confirmLabel="Move to Trash"
+          confirmDanger
+          onCancel={() => setConfirmRemove(null)}
+          onConfirm={() => remove(confirmRemove.slug)}
+        />
+      )}
     </Modal>
   );
 }

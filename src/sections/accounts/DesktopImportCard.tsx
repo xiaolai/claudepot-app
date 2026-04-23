@@ -1,4 +1,4 @@
-import { type ReactNode, useEffect, useState } from "react";
+import { type ReactNode, useEffect, useMemo, useRef, useState } from "react";
 import { api } from "../../api";
 import { Glyph } from "../../components/primitives/Glyph";
 import { Tag } from "../../components/primitives/Tag";
@@ -12,10 +12,14 @@ interface Props {
   accounts: AccountSummary[];
   /** Disabled while CC-side flows are mid-flight. */
   externallyDisabled: boolean;
+  /** Shared adopt action (toasts, refresh, tray rebuild all owned by
+   *  the caller). The card only awaits it; any errors surface via the
+   *  shared action's own toast, not a duplicate here. Resolves to
+   *  `true` iff the bind committed — the card uses this to decide
+   *  whether to call `onAdopted` (and close the modal). */
+  onAdoptDesktop: (account: AccountSummary) => Promise<boolean>;
   /** Fires after a successful adopt. Parent closes the modal + refreshes. */
   onAdopted: (email: string) => void;
-  /** Surface adopt failures as shell-level toasts. */
-  onError: (message: string) => void;
 }
 
 /**
@@ -49,54 +53,43 @@ type Preflight =
 export function DesktopImportCard({
   accounts,
   externallyDisabled,
+  onAdoptDesktop,
   onAdopted,
-  onError,
 }: Props) {
-  const [preflight, setPreflight] = useState<Preflight>({ kind: "checking" });
   const [adopting, setAdopting] = useState(false);
+  // Probe result is cached for the lifetime of the card. The live
+  // probe runs `/profile` + DPAPI unwrap which is ~1s — rerunning it
+  // every time the `accounts` array identity changes (e.g. parent
+  // refresh) used to thrash; now it runs once on mount and account-
+  // list changes only affect local classification below.
+  const [probe, setProbe] = useState<
+    | { kind: "loading" }
+    | { kind: "ok"; identity: DesktopIdentity }
+    | { kind: "failed"; message: string }
+  >({ kind: "loading" });
+
+  // The parent closes the modal inside `onAdopted`, which unmounts us.
+  // Track mount so the `finally` cleanup doesn't setState on a dead
+  // component (React strict-mode warning + leaked closure).
+  const mountedRef = useRef(true);
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+    };
+  }, []);
 
   useEffect(() => {
     let cancelled = false;
-
-    const matchedAccount = (email: string) =>
-      accounts.find((a) => a.email.toLowerCase() === email.toLowerCase());
-
     (async () => {
       try {
-        const id: DesktopIdentity = await api.currentDesktopIdentity();
+        const id: DesktopIdentity = await api.verifiedDesktopIdentity();
         if (cancelled) return;
-
-        if (id.error) {
-          setPreflight({ kind: "error", message: id.error });
-          return;
-        }
-        if (!id.email) {
-          setPreflight({ kind: "empty", reason: "Claude Desktop is not signed in." });
-          return;
-        }
-        // Only Decrypted results are trusted. A fast-path candidate
-        // is intentionally NOT offered here (Codex D5-1).
-        if (id.probe_method !== "decrypted") {
-          setPreflight({
-            kind: "error",
-            message:
-              "Live Desktop identity could not be verified (candidate-only). Open Claude Desktop once so Claudepot can decrypt the live token.",
-          });
-          return;
-        }
-
-        const match = matchedAccount(id.email);
-        if (!match) {
-          setPreflight({ kind: "new", email: id.email });
-        } else if (match.desktop_profile_on_disk) {
-          setPreflight({ kind: "adopted", email: id.email, account: match });
-        } else {
-          setPreflight({ kind: "known", email: id.email, account: match });
-        }
+        setProbe({ kind: "ok", identity: id });
       } catch (e) {
         if (cancelled) return;
-        setPreflight({
-          kind: "error",
+        setProbe({
+          kind: "failed",
           message: e instanceof Error ? e.message : String(e),
         });
       }
@@ -104,18 +97,55 @@ export function DesktopImportCard({
     return () => {
       cancelled = true;
     };
-  }, [accounts]);
+  }, []);
+
+  // Pure derivation from the cached probe + current accounts list.
+  // Matches the original state machine variant-for-variant — the
+  // only change is that re-classifying on account refresh is now a
+  // zero-network local computation.
+  const preflight: Preflight = useMemo(() => {
+    if (probe.kind === "loading") return { kind: "checking" };
+    if (probe.kind === "failed") {
+      return { kind: "error", message: probe.message };
+    }
+    const id = probe.identity;
+    if (id.error) return { kind: "error", message: id.error };
+    if (!id.email) {
+      return { kind: "empty", reason: "Claude Desktop is not signed in." };
+    }
+    // Only Decrypted results are trusted. A fast-path candidate is
+    // intentionally NOT offered here (Codex D5-1).
+    if (id.probe_method !== "decrypted") {
+      return {
+        kind: "error",
+        message:
+          "Live Desktop identity could not be verified (candidate-only). Open Claude Desktop once so Claudepot can decrypt the live token.",
+      };
+    }
+    const match = accounts.find(
+      (a) => a.email.toLowerCase() === id.email!.toLowerCase(),
+    );
+    if (!match) return { kind: "new", email: id.email };
+    if (match.desktop_profile_on_disk) {
+      return { kind: "adopted", email: id.email, account: match };
+    }
+    return { kind: "known", email: id.email, account: match };
+  }, [probe, accounts]);
 
   const handleAdopt = async () => {
     if (preflight.kind !== "known") return;
     setAdopting(true);
     try {
-      const r = await api.desktopAdopt(preflight.account.uuid, false);
-      onAdopted(r.account_email);
-    } catch (e) {
-      onError(e instanceof Error ? e.message : String(e));
+      // Route through the shared adopt action — it owns busy keys,
+      // toast wording, the post-adopt refresh, and tray rebuild.
+      // The action toasts its own errors and resolves with a bool,
+      // so we ONLY advance past the modal when the bind actually
+      // committed. Otherwise the modal stays open on failure and
+      // the user can retry or close manually.
+      const ok = await onAdoptDesktop(preflight.account);
+      if (ok) onAdopted(preflight.account.email);
     } finally {
-      setAdopting(false);
+      if (mountedRef.current) setAdopting(false);
     }
   };
 
