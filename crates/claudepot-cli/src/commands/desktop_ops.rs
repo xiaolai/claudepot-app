@@ -59,7 +59,14 @@ pub async fn status(ctx: &AppContext) -> Result<()> {
 
 pub async fn use_account(ctx: &AppContext, email_input: &str, no_launch: bool) -> Result<()> {
     use claudepot_core::desktop_backend;
+    use claudepot_core::desktop_lock;
     use claudepot_core::resolve::resolve_email;
+
+    // Acquire the cross-process operation lock so CLI use_account
+    // can't race with a GUI-initiated adopt/clear/switch. Codex
+    // follow-up review D1: CLI switch was bypassing the flock.
+    let _lock = desktop_lock::try_acquire()
+        .map_err(|e| anyhow::anyhow!("{e}"))?;
 
     let platform = desktop_backend::create_platform()
         .ok_or_else(|| anyhow::anyhow!("Claude Desktop is not supported on this platform"))?;

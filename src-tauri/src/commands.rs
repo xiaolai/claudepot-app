@@ -156,7 +156,17 @@ pub async fn cli_clear() -> Result<(), String> {
 }
 
 #[tauri::command]
-pub async fn desktop_use(email: String, no_launch: bool) -> Result<(), String> {
+pub async fn desktop_use(
+    email: String,
+    no_launch: bool,
+    lock: tauri::State<'_, crate::state::DesktopOpState>,
+) -> Result<(), String> {
+    // Codex follow-up review: desktop_use was bypassing the operation
+    // lock, letting switch race with adopt/clear across GUI + tray +
+    // CLI. The async mutex guards in-process; the core flock guards
+    // cross-process (CLI vs GUI running simultaneously).
+    let _guard = lock.0.lock().await;
+
     let store = open_store()?;
     let target = resolve_target(&store, &email)?;
 
