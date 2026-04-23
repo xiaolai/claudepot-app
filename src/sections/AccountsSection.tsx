@@ -192,13 +192,18 @@ export function AccountsSection({
     () => ({
       switchDesktop: (a) => handleDesktopSwitch(a),
       switchDesktopNoLaunch: (a) => void actions.useDesktop(a, true),
-      launchDesktop: () => void api.desktopLaunch(),
+      launchDesktop: () => {
+        api.desktopLaunch().catch((e) => {
+          const msg = e instanceof Error ? e.message : String(e);
+          pushToast("error", `Desktop launch failed: ${msg}`);
+        });
+      },
       adoptDesktop: (a) => {
         if (a.desktop_profile_on_disk) requestDesktopOverwrite(a);
         else void actions.adoptDesktop(a);
       },
     }),
-    [handleDesktopSwitch, actions, requestDesktopOverwrite],
+    [handleDesktopSwitch, actions, requestDesktopOverwrite, pushToast],
   );
 
   if (!status) {
@@ -337,6 +342,7 @@ export function AccountsSection({
           pushToast("info", "Account added.");
         }}
         onError={(msg) => pushToast("error", msg)}
+        onAdoptDesktop={(a) => actions.adoptDesktop(a)}
       />
 
       {confirmRemove && (
@@ -382,7 +388,12 @@ export function AccountsSection({
             else void actions.adoptDesktop(a);
           }}
           onClearDesktop={requestDesktopSignOut}
-          onLaunchDesktop={() => void api.desktopLaunch()}
+          onLaunchDesktop={() => {
+            api.desktopLaunch().catch((e) => {
+              const msg = e instanceof Error ? e.message : String(e);
+              pushToast("error", `Desktop launch failed: ${msg}`);
+            });
+          }}
           onNavigate={onNavigate}
         />
       )}

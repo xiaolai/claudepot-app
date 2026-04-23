@@ -204,6 +204,169 @@ pub fn break_lock_with_audit(
     Ok(BrokenLock { prior, audit_path })
 }
 
+/// Per-entry detail in an [`AbandonedCleanupReport`]. One row per
+/// `.abandoned.json` sidecar encountered — lets the UI show the
+/// user exactly which artifacts will go / went away.
+#[derive(Debug, Clone)]
+pub struct AbandonedCleanupEntry {
+    /// Journal stem (e.g. `move-1744800000-12345`).
+    pub id: String,
+    /// Absolute path of the `.json` journal file.
+    pub journal_path: PathBuf,
+    /// Absolute path of the `.abandoned.json` sidecar.
+    pub sidecar_path: PathBuf,
+    /// Every snapshot file referenced by the journal's
+    /// `snapshot_paths` that currently exists on disk.
+    pub referenced_snapshots: Vec<PathBuf>,
+    /// Aggregate size of journal + sidecar + referenced snapshots,
+    /// in bytes. Measured even in dry-run mode so the UI can preview
+    /// the cost.
+    pub bytes: u64,
+}
+
+/// Returned by [`preview_abandoned`] / [`cleanup_abandoned`].
+///
+/// In preview mode, `entries` lists every artifact that *would* be
+/// removed and `removed_*` are zero. In cleanup mode, `entries` is
+/// the set of artifacts that were actually removed and the counters
+/// reflect true deletions (M12 honesty rule).
+#[derive(Debug, Clone, Default)]
+pub struct AbandonedCleanupReport {
+    pub entries: Vec<AbandonedCleanupEntry>,
+    pub removed_journals: usize,
+    pub removed_snapshots: usize,
+    pub bytes_freed: u64,
+}
+
+/// List every abandoned journal on disk with its referenced snapshot
+/// paths. Does not modify anything. Used to populate the
+/// "Clean recovery artifacts" preview.
+pub fn preview_abandoned(
+    journals_dir: &Path,
+) -> Result<AbandonedCleanupReport, ProjectError> {
+    let mut out = AbandonedCleanupReport::default();
+    for entry in scan_abandoned_entries(journals_dir)? {
+        out.bytes_freed += entry.bytes;
+        out.entries.push(entry);
+    }
+    Ok(out)
+}
+
+/// Remove every abandoned journal + its sidecar + the snapshots it
+/// references. Unlike [`gc`], this function does NOT sweep
+/// unreferenced or age-old snapshots — they may belong to running
+/// ops or to successful ops whose operator still wants the audit
+/// artifact. The cascade is strictly journal → its own
+/// `snapshot_paths`.
+///
+/// M12: counters increment only for files actually removed. A
+/// filesystem race or permission denied leaves the counter at its
+/// prior value and the paths stay out of the report.
+pub fn cleanup_abandoned(
+    journals_dir: &Path,
+) -> Result<AbandonedCleanupReport, ProjectError> {
+    let mut out = AbandonedCleanupReport::default();
+    for entry in scan_abandoned_entries(journals_dir)? {
+        // Remove referenced snapshots first so an orphaned snapshot
+        // never outlives its journal. Non-existent paths are a no-op.
+        let mut actually_removed_snaps = Vec::with_capacity(entry.referenced_snapshots.len());
+        for snap in &entry.referenced_snapshots {
+            let size = fs::metadata(snap).map(|m| m.len()).unwrap_or(0);
+            match fs::remove_file(snap) {
+                Ok(_) => {
+                    out.bytes_freed += size;
+                    out.removed_snapshots += 1;
+                    actually_removed_snaps.push(snap.clone());
+                }
+                Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+                    // Already gone — record nothing.
+                }
+                Err(e) => {
+                    tracing::warn!(
+                        snap = ?snap,
+                        error = %e,
+                        "cleanup_abandoned: snapshot removal failed"
+                    );
+                }
+            }
+        }
+
+        // Then the sidecar, then the journal. If sidecar removal
+        // fails we don't remove the journal — leaving the sidecar in
+        // place keeps list_actionable excluding the entry, so the
+        // invariant "no sidecar → must be actionable" holds.
+        let sidecar_size = fs::metadata(&entry.sidecar_path)
+            .map(|m| m.len())
+            .unwrap_or(0);
+        if fs::remove_file(&entry.sidecar_path).is_ok() {
+            out.bytes_freed += sidecar_size;
+            let journal_size = fs::metadata(&entry.journal_path)
+                .map(|m| m.len())
+                .unwrap_or(0);
+            if fs::remove_file(&entry.journal_path).is_ok() {
+                out.bytes_freed += journal_size;
+                out.removed_journals += 1;
+                out.entries.push(AbandonedCleanupEntry {
+                    referenced_snapshots: actually_removed_snaps,
+                    ..entry
+                });
+            }
+        }
+    }
+    Ok(out)
+}
+
+/// Internal: enumerate every `.abandoned.json` sidecar + its twin
+/// journal + the snapshot paths the journal references. Shared by
+/// [`preview_abandoned`] and [`cleanup_abandoned`] so the two stay
+/// byte-for-byte consistent — preview says exactly what cleanup
+/// would do.
+fn scan_abandoned_entries(
+    journals_dir: &Path,
+) -> Result<Vec<AbandonedCleanupEntry>, ProjectError> {
+    if !journals_dir.exists() {
+        return Ok(Vec::new());
+    }
+    let mut out = Vec::new();
+    for entry in fs::read_dir(journals_dir).map_err(ProjectError::Io)? {
+        let entry = entry.map_err(ProjectError::Io)?;
+        let name = entry.file_name().to_string_lossy().to_string();
+        if !name.ends_with(".abandoned.json") {
+            continue;
+        }
+        let base = name.trim_end_matches(".abandoned.json");
+        let sidecar_path = entry.path();
+        let journal_path = journals_dir.join(format!("{base}.json"));
+
+        let mut bytes: u64 = 0;
+        bytes += fs::metadata(&sidecar_path).map(|m| m.len()).unwrap_or(0);
+        bytes += fs::metadata(&journal_path).map(|m| m.len()).unwrap_or(0);
+
+        // The sidecar file stores an abandonment marker; the
+        // snapshot_paths live in the original journal JSON.
+        let mut referenced_snapshots: Vec<PathBuf> = Vec::new();
+        if let Ok(body) = fs::read_to_string(&journal_path) {
+            if let Ok(j) = serde_json::from_str::<Journal>(&body) {
+                for snap in &j.snapshot_paths {
+                    if snap.exists() {
+                        bytes += fs::metadata(snap).map(|m| m.len()).unwrap_or(0);
+                        referenced_snapshots.push(snap.clone());
+                    }
+                }
+            }
+        }
+
+        out.push(AbandonedCleanupEntry {
+            id: base.to_string(),
+            journal_path,
+            sidecar_path,
+            referenced_snapshots,
+            bytes,
+        });
+    }
+    Ok(out)
+}
+
 /// Garbage-collect abandoned journals and snapshots older than
 /// `older_than_days`. With `dry_run=true` nothing is deleted and
 /// `would_remove` is populated with the candidate paths.
@@ -554,5 +717,175 @@ mod tests {
         let locks = tmp.path().join("locks");
         fs::create_dir_all(&locks).unwrap();
         assert!(resolve_lock_file(&locks, "/nowhere").is_none());
+    }
+
+    // -----------------------------------------------------------------
+    // cleanup_abandoned / preview_abandoned
+    // -----------------------------------------------------------------
+
+    fn write_journal_with_snapshots(
+        journals_dir: &Path,
+        id: &str,
+        snapshots: &[PathBuf],
+    ) -> PathBuf {
+        let j = Journal {
+            version: 1,
+            started_at: "2026-04-15T00:00:00Z".to_string(),
+            started_unix_secs: 1_700_000_000,
+            pid: 12345,
+            hostname: "test-host".to_string(),
+            claudepot_version: "0.1.0".to_string(),
+            old_path: "/tmp/old".to_string(),
+            new_path: "/tmp/new".to_string(),
+            old_san: "-tmp-old".to_string(),
+            new_san: "-tmp-new".to_string(),
+            old_git_root: None,
+            new_git_root: None,
+            flags: JournalFlags::default(),
+            phases_completed: vec!["P3".to_string()],
+            snapshot_paths: snapshots.to_vec(),
+            last_error: None,
+        };
+        let path = journals_dir.join(format!("{id}.json"));
+        fs::write(&path, serde_json::to_string_pretty(&j).unwrap()).unwrap();
+        path
+    }
+
+    fn write_sidecar(journals_dir: &Path, id: &str) {
+        fs::write(journals_dir.join(format!("{id}.abandoned.json")), "{}").unwrap();
+    }
+
+    #[test]
+    fn preview_abandoned_reports_journal_sidecar_and_referenced_snapshots() {
+        let tmp = TempDir::new().unwrap();
+        let journals = tmp.path().join("journals");
+        let snapshots = tmp.path().join("snapshots");
+        fs::create_dir_all(&journals).unwrap();
+        fs::create_dir_all(&snapshots).unwrap();
+
+        let snap_a = snapshots.join("ts-1-P7.json");
+        let snap_b = snapshots.join("ts-1-P8.json");
+        fs::write(&snap_a, "a").unwrap(); // 1 byte
+        fs::write(&snap_b, "bb").unwrap(); // 2 bytes
+
+        let journal_path = write_journal_with_snapshots(
+            &journals,
+            "move-abandoned",
+            &[snap_a.clone(), snap_b.clone()],
+        );
+        write_sidecar(&journals, "move-abandoned");
+
+        let report = preview_abandoned(&journals).expect("preview");
+        assert_eq!(report.entries.len(), 1);
+        let entry = &report.entries[0];
+        assert_eq!(entry.id, "move-abandoned");
+        assert_eq!(entry.journal_path, journal_path);
+        assert_eq!(entry.referenced_snapshots, vec![snap_a.clone(), snap_b.clone()]);
+        assert!(entry.bytes >= 3, "bytes must account for snapshots at minimum");
+        // Preview must NOT delete anything.
+        assert!(snap_a.exists());
+        assert!(snap_b.exists());
+        assert!(journal_path.exists());
+    }
+
+    #[test]
+    fn cleanup_abandoned_removes_journal_sidecar_and_referenced_snapshots() {
+        let tmp = TempDir::new().unwrap();
+        let journals = tmp.path().join("journals");
+        let snapshots = tmp.path().join("snapshots");
+        fs::create_dir_all(&journals).unwrap();
+        fs::create_dir_all(&snapshots).unwrap();
+
+        let snap = snapshots.join("ts-1-P7.json");
+        fs::write(&snap, "bytes").unwrap();
+        let journal_path =
+            write_journal_with_snapshots(&journals, "move-abandoned", &[snap.clone()]);
+        let sidecar_path = journals.join("move-abandoned.abandoned.json");
+        write_sidecar(&journals, "move-abandoned");
+
+        let report = cleanup_abandoned(&journals).expect("cleanup");
+        assert_eq!(report.removed_journals, 1);
+        assert_eq!(report.removed_snapshots, 1);
+        assert_eq!(report.entries.len(), 1);
+        assert!(report.bytes_freed >= 5);
+        assert!(!journal_path.exists(), "journal must be removed");
+        assert!(!sidecar_path.exists(), "sidecar must be removed");
+        assert!(!snap.exists(), "referenced snapshot must be removed");
+    }
+
+    #[test]
+    fn cleanup_abandoned_leaves_unreferenced_and_non_abandoned_artifacts_alone() {
+        // This is the load-bearing safety test: gc(0, ...) would sweep
+        // these too. cleanup_abandoned MUST NOT.
+        let tmp = TempDir::new().unwrap();
+        let journals = tmp.path().join("journals");
+        let snapshots = tmp.path().join("snapshots");
+        fs::create_dir_all(&journals).unwrap();
+        fs::create_dir_all(&snapshots).unwrap();
+
+        // A live journal (no sidecar).
+        let live_journal = write_journal_with_snapshots(&journals, "move-live", &[]);
+        // A snapshot that isn't referenced by any journal — e.g. from
+        // a successful rename. Must survive cleanup.
+        let orphan_snap = snapshots.join("ts-99-P7.json");
+        fs::write(&orphan_snap, "orphan").unwrap();
+        // An abandoned journal with its own referenced snapshot.
+        let referenced = snapshots.join("ts-1-P7.json");
+        fs::write(&referenced, "x").unwrap();
+        let abandoned_journal = write_journal_with_snapshots(
+            &journals,
+            "move-abandoned",
+            &[referenced.clone()],
+        );
+        write_sidecar(&journals, "move-abandoned");
+
+        let report = cleanup_abandoned(&journals).expect("cleanup");
+        assert_eq!(report.removed_journals, 1);
+        assert_eq!(report.removed_snapshots, 1);
+
+        // Live journal untouched.
+        assert!(live_journal.exists(), "live journal must survive");
+        // Orphan snapshot untouched — this is the difference from gc.
+        assert!(
+            orphan_snap.exists(),
+            "unreferenced snapshot must survive cleanup_abandoned"
+        );
+        // Abandoned artifacts gone.
+        assert!(!abandoned_journal.exists());
+        assert!(!referenced.exists());
+    }
+
+    #[test]
+    fn cleanup_abandoned_returns_empty_when_no_sidecars_exist() {
+        let tmp = TempDir::new().unwrap();
+        let journals = tmp.path().join("journals");
+        fs::create_dir_all(&journals).unwrap();
+        let _ = write_journal_with_snapshots(&journals, "move-live", &[]);
+
+        let report = cleanup_abandoned(&journals).expect("cleanup");
+        assert!(report.entries.is_empty());
+        assert_eq!(report.removed_journals, 0);
+        assert_eq!(report.removed_snapshots, 0);
+    }
+
+    #[test]
+    fn cleanup_abandoned_tolerates_missing_snapshot_paths() {
+        // If a snapshot listed in snapshot_paths was already removed
+        // manually (user ran `rm`), cleanup_abandoned should still
+        // succeed and remove the journal + sidecar without counting
+        // the missing snapshot.
+        let tmp = TempDir::new().unwrap();
+        let journals = tmp.path().join("journals");
+        fs::create_dir_all(&journals).unwrap();
+
+        let phantom = tmp.path().join("this-was-deleted-out-of-band.json");
+        let journal_path =
+            write_journal_with_snapshots(&journals, "move-abandoned", &[phantom]);
+        write_sidecar(&journals, "move-abandoned");
+
+        let report = cleanup_abandoned(&journals).expect("cleanup");
+        assert_eq!(report.removed_journals, 1);
+        assert_eq!(report.removed_snapshots, 0);
+        assert!(!journal_path.exists());
     }
 }

@@ -249,6 +249,67 @@ pub async fn current_desktop_identity() -> Result<dto::DesktopIdentity, String> 
     }
 }
 
+/// Strict Desktop identity probe — runs the async Decrypted path
+/// (`probe_live_identity_async` with `strict=true`) so callers that
+/// mutate disk or DB (Bind, switch) can trust the returned email.
+/// Fast-path [`current_desktop_identity`] is intentionally NOT a
+/// valid source for those actions because it returns
+/// `OrgUuidCandidate` only and the UI must not light up
+/// mutation affordances from candidates.
+#[tauri::command]
+pub async fn verified_desktop_identity() -> Result<dto::DesktopIdentity, String> {
+    let now = chrono::Utc::now();
+    let Some(platform) = desktop_backend::create_platform() else {
+        return Ok(dto::DesktopIdentity {
+            email: None,
+            org_uuid: None,
+            probe_method: dto::DesktopProbeMethod::None,
+            verified_at: now,
+            error: Some("Desktop not supported on this platform".to_string()),
+        });
+    };
+    let store = open_store()?;
+    let fetcher = claudepot_core::desktop_identity::DefaultProfileFetcher;
+
+    match claudepot_core::desktop_identity::probe_live_identity_async(
+        &*platform,
+        &store,
+        claudepot_core::desktop_identity::ProbeOptions { strict: true },
+        &fetcher,
+    )
+    .await
+    {
+        Ok(None) => Ok(dto::DesktopIdentity {
+            email: None,
+            org_uuid: None,
+            probe_method: dto::DesktopProbeMethod::None,
+            verified_at: now,
+            error: None,
+        }),
+        Ok(Some(live)) => Ok(dto::DesktopIdentity {
+            email: Some(live.email),
+            org_uuid: Some(live.org_uuid),
+            probe_method: match live.probe_method {
+                claudepot_core::desktop_identity::ProbeMethod::OrgUuidCandidate => {
+                    dto::DesktopProbeMethod::OrgUuidCandidate
+                }
+                claudepot_core::desktop_identity::ProbeMethod::Decrypted => {
+                    dto::DesktopProbeMethod::Decrypted
+                }
+            },
+            verified_at: now,
+            error: None,
+        }),
+        Err(e) => Ok(dto::DesktopIdentity {
+            email: None,
+            org_uuid: None,
+            probe_method: dto::DesktopProbeMethod::None,
+            verified_at: now,
+            error: Some(e.to_string()),
+        }),
+    }
+}
+
 /// Explicit flag-vs-disk reconcile. The same logic runs
 /// opportunistically inside `account_list`; this command surfaces
 /// the outcome so the GUI or CLI can show "N flags were reconciled."
@@ -1252,6 +1313,52 @@ pub struct GcOutcomeDto {
     pub would_remove: Vec<String>,
 }
 
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AbandonedCleanupEntryDto {
+    pub id: String,
+    pub journal_path: String,
+    pub sidecar_path: String,
+    pub referenced_snapshots: Vec<String>,
+    pub bytes: u64,
+}
+
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AbandonedCleanupReportDto {
+    pub entries: Vec<AbandonedCleanupEntryDto>,
+    pub removed_journals: usize,
+    pub removed_snapshots: usize,
+    pub bytes_freed: u64,
+}
+
+impl From<claudepot_core::project_repair::AbandonedCleanupReport>
+    for AbandonedCleanupReportDto
+{
+    fn from(r: claudepot_core::project_repair::AbandonedCleanupReport) -> Self {
+        Self {
+            entries: r
+                .entries
+                .into_iter()
+                .map(|e| AbandonedCleanupEntryDto {
+                    id: e.id,
+                    journal_path: e.journal_path.to_string_lossy().to_string(),
+                    sidecar_path: e.sidecar_path.to_string_lossy().to_string(),
+                    referenced_snapshots: e
+                        .referenced_snapshots
+                        .into_iter()
+                        .map(|p| p.to_string_lossy().to_string())
+                        .collect(),
+                    bytes: e.bytes,
+                })
+                .collect(),
+            removed_journals: r.removed_journals,
+            removed_snapshots: r.removed_snapshots,
+            bytes_freed: r.bytes_freed,
+        }
+    }
+}
+
 fn find_journal(id: &str) -> Result<claudepot_core::project_repair::JournalEntry, String> {
     let (journals, locks, _snaps) = claudepot_home_dirs();
     let entries = project_repair::list_pending_with_status(
@@ -1505,6 +1612,29 @@ pub fn repair_break_lock(path: String) -> Result<BreakLockOutcomeDto, String> {
     })
 }
 
+/// Preview every abandoned journal's artifacts (journal + sidecar +
+/// referenced snapshots) without deleting anything. Used to populate
+/// the "Clean recovery artifacts" card in Maintenance.
+#[tauri::command]
+pub fn repair_preview_abandoned() -> Result<AbandonedCleanupReportDto, String> {
+    let (journals, _locks, _snaps) = claudepot_home_dirs();
+    let result = project_repair::preview_abandoned(&journals)
+        .map_err(|e| format!("preview_abandoned failed: {e}"))?;
+    Ok(result.into())
+}
+
+/// Remove every abandoned journal + sidecar + its referenced
+/// snapshots. Safer than `repair_gc(0, false)`: only touches files
+/// linked to an abandoned entry; unreferenced or recent snapshots
+/// from successful ops are left alone.
+#[tauri::command]
+pub fn repair_cleanup_abandoned() -> Result<AbandonedCleanupReportDto, String> {
+    let (journals, _locks, _snaps) = claudepot_home_dirs();
+    let result = project_repair::cleanup_abandoned(&journals)
+        .map_err(|e| format!("cleanup_abandoned failed: {e}"))?;
+    Ok(result.into())
+}
+
 #[tauri::command]
 pub fn repair_gc(older_than_days: u64, dry_run: bool) -> Result<GcOutcomeDto, String> {
     let (journals, _locks, snapshots) = claudepot_home_dirs();
@@ -1593,6 +1723,19 @@ pub fn session_adopt_orphan(
         claudepot_core::session_move::adopt_orphan_project(&cfg, &slug, target, claude_json_path())
             .map_err(|e| format!("adopt failed: {e}"))?;
     Ok(crate::dto::AdoptReportDto::from(&report))
+}
+
+/// Move an orphan project slug dir to the OS Trash. The user can restore
+/// it from Trash if they change their mind; the guard that the slug is
+/// valid + resolves to a real dir happens in core.
+#[tauri::command]
+pub fn session_discard_orphan(
+    slug: String,
+) -> Result<crate::dto::DiscardReportDto, String> {
+    let cfg = paths::claude_config_dir();
+    let report = claudepot_core::session_move::discard_orphan_project(&cfg, &slug)
+        .map_err(|e| format!("discard failed: {e}"))?;
+    Ok(crate::dto::DiscardReportDto::from(&report))
 }
 
 // ---------------------------------------------------------------------------

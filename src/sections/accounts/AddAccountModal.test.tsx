@@ -57,6 +57,7 @@ describe("AddAccountModal — browser login cancel", () => {
         onAdded={() => {}}
         onError={() => {}}
         accounts={[]}
+        onAdoptDesktop={() => Promise.resolve(true)}
       />,
     );
 
@@ -97,6 +98,7 @@ describe("AddAccountModal — browser login cancel", () => {
         onAdded={() => {}}
         onError={onError}
         accounts={[]}
+        onAdoptDesktop={() => Promise.resolve(true)}
       />,
     );
 
@@ -134,6 +136,7 @@ describe("AddAccountModal — browser login cancel", () => {
         onAdded={() => {}}
         onError={() => {}}
         accounts={[]}
+        onAdoptDesktop={() => Promise.resolve(true)}
       />,
     );
 
@@ -166,6 +169,7 @@ describe("AddAccountModal — browser login cancel", () => {
         onAdded={() => {}}
         onError={onError}
         accounts={[]}
+        onAdoptDesktop={() => Promise.resolve(true)}
       />,
     );
 

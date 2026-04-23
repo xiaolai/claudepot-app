@@ -71,6 +71,13 @@ pub enum DesktopSwapError {
     )]
     DpapiInvalidated,
 
+    /// Failure to acquire or open the Desktop operation lock. Carries
+    /// the underlying [`crate::desktop_lock::DesktopLockError`] so
+    /// callers can distinguish "already held" (retry) from
+    /// "open failed" (I/O) without string-matching on the message.
+    #[error("desktop lock: {0}")]
+    Lock(#[from] crate::desktop_lock::DesktopLockError),
+
     #[error("{0}")]
     Io(#[from] std::io::Error),
 }

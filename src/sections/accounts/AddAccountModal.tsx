@@ -24,6 +24,9 @@ interface AddAccountModalProps {
   onError: (message: string) => void;
   /** Registered accounts — used to flag the "known" state. */
   accounts: AccountSummary[];
+  /** Shared Desktop adopt action — the shell owns toasts/refresh/tray.
+   *  Resolves to `true` iff the bind committed. */
+  onAdoptDesktop: (account: AccountSummary) => Promise<boolean>;
 }
 
 /**
@@ -54,6 +57,7 @@ export function AddAccountModal({
   onAdded,
   onError,
   accounts,
+  onAdoptDesktop,
 }: AddAccountModalProps) {
   const [importing, setImporting] = useState(false);
   const [browserLoggingIn, setBrowserLoggingIn] = useState(false);
@@ -335,11 +339,11 @@ export function AddAccountModal({
           <DesktopImportCard
             accounts={accounts}
             externallyDisabled={importing || browserLoggingIn}
+            onAdoptDesktop={onAdoptDesktop}
             onAdopted={(email) => {
               onAdded(email);
               onClose();
             }}
-            onError={onError}
           />
         </ModalBody>
 

@@ -43,8 +43,8 @@ use crate::session_move_helpers::{
 };
 use crate::session_move_jsonl::{rewrite_history_jsonl, stream_rewrite_jsonl};
 pub use crate::session_move_types::{
-    AdoptReport, MoveSessionError, MoveSessionOpts, MoveSessionReport, OrphanedProject,
-    INVALID_SLUG_MSG,
+    AdoptReport, DiscardReport, MoveSessionError, MoveSessionOpts, MoveSessionReport,
+    OrphanedProject, INVALID_SLUG_MSG,
 };
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -323,6 +323,70 @@ pub fn adopt_orphan_project(
     }
 
     Ok(report)
+}
+
+/// Move an orphan project slug dir (with all its session transcripts and
+/// sidecars) to the OS Trash. Reversible by design — the user can restore
+/// from Trash if they change their mind.
+///
+/// Use this when the user wants to forget an orphan whose sessions are
+/// no longer valuable. For orphans whose history must be preserved, use
+/// [`adopt_orphan_project`] instead.
+///
+/// Guards:
+/// * `orphan_slug` must pass [`validate_slug`] — rejects traversal attempts.
+/// * `<config_dir>/projects/<orphan_slug>` must be an actual directory.
+///
+/// This function does **not** check whether the slug is "really" an orphan.
+/// Policy gating belongs in the UI; the backend is mechanism-only so a
+/// future power-user CLI path can discard any slug the user owns.
+pub fn discard_orphan_project(
+    config_dir: &Path,
+    orphan_slug: &str,
+) -> Result<DiscardReport, MoveSessionError> {
+    discard_orphan_project_with(config_dir, orphan_slug, trash_dir)
+}
+
+/// OS-Trash remover used by [`discard_orphan_project`] in production.
+fn trash_dir(p: &Path) -> Result<(), MoveSessionError> {
+    trash::delete(p).map_err(|e| MoveSessionError::TrashFailed(e.to_string()))
+}
+
+/// Core discard implementation parameterised on the remover so tests
+/// can exercise the slug-validation + counting logic without polluting
+/// the host's real Trash. The `remove` closure is called exactly once,
+/// after validation and size computation, with the resolved slug dir.
+pub(crate) fn discard_orphan_project_with<F>(
+    config_dir: &Path,
+    orphan_slug: &str,
+    remove: F,
+) -> Result<DiscardReport, MoveSessionError>
+where
+    F: FnOnce(&Path) -> Result<(), MoveSessionError>,
+{
+    validate_slug(orphan_slug)?;
+    let projects_dir = config_dir.join("projects");
+    let orphan_dir = projects_dir.join(orphan_slug);
+    if !orphan_dir.is_dir() {
+        return Err(MoveSessionError::InvalidConfigDir(orphan_dir));
+    }
+
+    // Snapshot counts BEFORE the trash call so the report remains
+    // meaningful even if the dir is gone by the time the caller reads it.
+    let sessions = list_sessions_in_slug(&orphan_dir)?;
+    let total_size_bytes: u64 = sessions
+        .iter()
+        .map(|p| fs::metadata(p).map(|m| m.len()).unwrap_or(0))
+        .sum();
+    let sessions_discarded = sessions.len();
+
+    remove(&orphan_dir)?;
+
+    Ok(DiscardReport {
+        sessions_discarded,
+        total_size_bytes,
+        dir_removed: !orphan_dir.exists(),
+    })
 }
 
 // ---------------------------------------------------------------------------
@@ -1050,5 +1114,80 @@ mod tests {
             !f.projects_dir().join(&from_slug).exists(),
             "orphan slug dir must be removed after adopt"
         );
+    }
+
+    #[test]
+    fn discard_orphan_project_rejects_traversal_slug() {
+        // Same guard as adopt — the slug is untrusted input from the UI
+        // and must never be allowed to escape <config_dir>/projects/.
+        let f = Fixture::new();
+        let bad_slugs = [
+            "..",
+            "../outside",
+            "/etc",
+            "a/b",
+            "a\\b",
+            "",
+            ".",
+            "foo\0bar",
+            "has space",
+            "has:colon",
+        ];
+        for slug in bad_slugs {
+            let err = discard_orphan_project_with(f.config_dir(), slug, |_| {
+                panic!("remove must not be called for invalid slug {slug:?}")
+            })
+            .expect_err(&format!("must reject slug {slug:?}"));
+            let matched = matches!(&err, MoveSessionError::InvalidSlug(got, _) if got == slug);
+            assert!(matched, "expected InvalidSlug for {slug:?}, got {err:?}");
+        }
+    }
+
+    #[test]
+    fn discard_orphan_project_reports_counts_and_removes_dir() {
+        let f = Fixture::new();
+        let dead_cwd = PathBuf::from("/was/a/worktree/but/is/gone");
+        let sid_a = Uuid::new_v4();
+        let sid_b = Uuid::new_v4();
+        f.write_session(&dead_cwd, sid_a, 3);
+        f.write_session(&dead_cwd, sid_b, 5);
+        f.write_session_sidecars(&dead_cwd, sid_a);
+
+        let slug = crate::project_sanitize::sanitize_path(&dead_cwd.to_string_lossy());
+        let slug_dir = f.projects_dir().join(&slug);
+        assert!(slug_dir.is_dir(), "sanity: slug dir must exist");
+        let expected_size: u64 = fs::read_dir(&slug_dir)
+            .unwrap()
+            .filter_map(|e| e.ok())
+            .filter_map(|e| {
+                let p = e.path();
+                (p.extension().and_then(|s| s.to_str()) == Some("jsonl"))
+                    .then(|| fs::metadata(&p).map(|m| m.len()).unwrap_or(0))
+            })
+            .sum();
+
+        // Inject a plain remove_dir_all so we don't pollute the real OS
+        // Trash during tests. The trashing path itself is covered by the
+        // `trash` crate's own integration tests + a single run-on-macOS
+        // smoke test we do manually.
+        let report = discard_orphan_project_with(f.config_dir(), &slug, |p| {
+            fs::remove_dir_all(p).map_err(Into::into)
+        })
+        .expect("discard should succeed");
+
+        assert_eq!(report.sessions_discarded, 2);
+        assert_eq!(report.total_size_bytes, expected_size);
+        assert!(report.dir_removed, "slug dir must be gone post-discard");
+        assert!(!slug_dir.exists(), "slug dir must not exist on disk");
+    }
+
+    #[test]
+    fn discard_orphan_project_errors_when_slug_dir_missing() {
+        // A well-formed slug whose directory doesn't exist returns
+        // InvalidConfigDir — the UI can surface this as "already gone".
+        let f = Fixture::new();
+        let err = discard_orphan_project(f.config_dir(), "never-existed")
+            .expect_err("missing slug dir must error");
+        matches!(err, MoveSessionError::InvalidConfigDir(_));
     }
 }

@@ -1,8 +1,9 @@
-import { useCallback, useState } from "react";
+import { useCallback, useRef, useState } from "react";
 import { Icon } from "../../components/Icon";
 import type { CleanResult } from "../../types";
 import { useToasts } from "../../hooks/useToasts";
 import { ToastContainer } from "../../components/ToastContainer";
+import { AbandonedCleanupCard } from "./AbandonedCleanupCard";
 import { RepairView } from "./RepairView";
 import { CleanOrphansModal } from "./CleanOrphansModal";
 
@@ -16,7 +17,13 @@ export function MaintenanceView({
   onOpTerminated?: () => void;
 }) {
   const [cleanOpen, setCleanOpen] = useState(false);
+  // Bump on successful abandoned-cleanup to force the embedded
+  // RepairView to re-fetch (its `entries` list shares state with
+  // the journals dir that just shrank).
+  const [repairRefreshKey, setRepairRefreshKey] = useState(0);
   const { toasts, pushToast, dismissToast } = useToasts();
+  const latestPushToast = useRef(pushToast);
+  latestPushToast.current = pushToast;
 
   const handleCleanDone = useCallback(
     (result: CleanResult) => {
@@ -56,13 +63,33 @@ export function MaintenanceView({
         </button>
       </section>
 
+      {/* Recovery-artifact cleanup — hidden when there's nothing
+          abandoned. Sits between Clean and Repair because its
+          artifacts are products of the Repair flow (Abandon writes
+          the sidecar; this card sweeps it up). */}
+      <AbandonedCleanupCard
+        onCleaned={() => {
+          latestPushToast.current("info", "Abandoned recovery files removed.");
+          // Refresh the Repair list too — list_actionable excludes
+          // abandoned entries, but a stale cached view could still
+          // reference the journal paths we just deleted.
+          setRepairRefreshKey((n) => n + 1);
+          onOpTerminated?.();
+        }}
+      />
+
       {/* Repair section — reuse existing RepairView without the back button */}
       <section className="maintenance-section">
         <div className="maintenance-section-header">
           <Icon name="wrench" size={14} />
           <h2>Repair Queue</h2>
         </div>
-        <RepairView onBack={() => {}} embedded onOpTerminated={onOpTerminated} />
+        <RepairView
+          key={repairRefreshKey}
+          onBack={() => {}}
+          embedded
+          onOpTerminated={onOpTerminated}
+        />
       </section>
 
       {cleanOpen && (

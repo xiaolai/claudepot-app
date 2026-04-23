@@ -2,13 +2,15 @@ import { describe, expect, it, vi, beforeEach } from "vitest";
 import { render, screen, waitFor, fireEvent } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 
-import type { AdoptReport, OrphanedProject } from "../../types";
+import type { AdoptReport, DiscardReport, OrphanedProject } from "../../types";
 
-// API spy — the modal's only external surface.
+// API spies — the modal's only external surface.
 const adoptSpy = vi.fn();
+const discardSpy = vi.fn();
 vi.mock("../../api", () => ({
   api: {
     sessionAdoptOrphan: (...args: unknown[]) => adoptSpy(...args),
+    sessionDiscardOrphan: (...args: unknown[]) => discardSpy(...args),
   },
 }));
 // Tauri dialog plugin — returns a canned path when the user clicks Browse.
@@ -41,9 +43,21 @@ function mkReport(overrides: Partial<AdoptReport> = {}): AdoptReport {
   };
 }
 
+function mkDiscardReport(
+  overrides: Partial<DiscardReport> = {},
+): DiscardReport {
+  return {
+    sessionsDiscarded: 2,
+    totalSizeBytes: 1_500_000,
+    dirRemoved: true,
+    ...overrides,
+  };
+}
+
 describe("AdoptOrphansModal", () => {
   beforeEach(() => {
     adoptSpy.mockReset();
+    discardSpy.mockReset();
     openDialogSpy.mockReset();
   });
 
@@ -130,6 +144,55 @@ describe("AdoptOrphansModal", () => {
     );
     fireEvent.keyDown(window, { key: "Escape" });
     expect(onClose).toHaveBeenCalled();
+  });
+
+  it("Remove opens a confirm dialog — no API call until the user confirms", async () => {
+    const user = userEvent.setup();
+    render(
+      <AdoptOrphansModal
+        orphans={[mkOrphan({ slug: "-dead", cwdFromTranscript: "/gone" })]}
+        onClose={() => {}}
+        onCompleted={() => {}}
+      />,
+    );
+    await user.click(screen.getByRole("button", { name: /^Remove$/ }));
+    // Confirm dialog heading is present.
+    expect(
+      screen.getByRole("heading", { name: /Move orphan to Trash\?/i }),
+    ).toBeInTheDocument();
+    // API NOT called yet.
+    expect(discardSpy).not.toHaveBeenCalled();
+
+    // Cancel closes the confirm without firing the API.
+    await user.click(screen.getByRole("button", { name: /^Cancel$/ }));
+    expect(discardSpy).not.toHaveBeenCalled();
+  });
+
+  it("confirming Remove calls sessionDiscardOrphan and shows a Trash status", async () => {
+    discardSpy.mockResolvedValue(
+      mkDiscardReport({ sessionsDiscarded: 2, totalSizeBytes: 1_500_000 }),
+    );
+    const onCompleted = vi.fn();
+    const user = userEvent.setup();
+    render(
+      <AdoptOrphansModal
+        orphans={[mkOrphan({ slug: "-dead" })]}
+        onClose={() => {}}
+        onCompleted={onCompleted}
+      />,
+    );
+    await user.click(screen.getByRole("button", { name: /^Remove$/ }));
+    await user.click(
+      screen.getByRole("button", { name: /^Move to Trash$/ }),
+    );
+
+    await waitFor(() =>
+      expect(discardSpy).toHaveBeenCalledWith("-dead"),
+    );
+    await waitFor(() =>
+      expect(screen.getByText(/Moved 2 sessions.*Trash\./)).toBeInTheDocument(),
+    );
+    expect(onCompleted).toHaveBeenCalledTimes(1);
   });
 
   it("pre-fills target when Browse returns a picked path", async () => {

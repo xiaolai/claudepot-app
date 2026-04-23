@@ -4,7 +4,9 @@ import type {
   AccountSummary,
   AccountUsage,
   ActivityTrends,
+  AbandonedCleanupReport,
   AdoptReport,
+  DiscardReport,
   ApiKeySummary,
   AppStatus,
   BreakLockOutcome,
@@ -79,6 +81,14 @@ export const api = {
   /// affordances on `probe_method === "decrypted"`.
   currentDesktopIdentity: () =>
     invoke<DesktopIdentity>("current_desktop_identity"),
+  /// Strict Desktop identity probe — runs the async Decrypted path so
+  /// callers that mutate disk or DB (Bind, switch) get a verified
+  /// email. Returns `probe_method === "decrypted"` on success, or
+  /// `"none"` with an `error` message on probe failure. Prefer this
+  /// over `currentDesktopIdentity` anywhere you gate mutation on
+  /// identity — the fast path returns `org_uuid_candidate` only.
+  verifiedDesktopIdentity: () =>
+    invoke<DesktopIdentity>("verified_desktop_identity"),
   /// Explicit reconcile: flip `has_desktop_profile` to match on-disk
   /// truth + clear orphan `state.active_desktop` pointer. The same
   /// logic runs opportunistically inside `accountList` — this
@@ -212,6 +222,16 @@ export const api = {
   /** GC abandoned journals + old snapshots. dryRun=true reports only. */
   repairGc: (olderThanDays: number, dryRun: boolean) =>
     invoke<GcOutcome>("repair_gc", { olderThanDays, dryRun }),
+  /** Preview the list of abandoned journals and their referenced
+   *  snapshots — non-destructive. Use this before offering Clean. */
+  repairPreviewAbandoned: () =>
+    invoke<AbandonedCleanupReport>("repair_preview_abandoned"),
+  /** Remove every abandoned journal + sidecar + its referenced
+   *  snapshots. Safer than `repairGc(0, ...)`: only touches files
+   *  linked to an abandoned entry — unreferenced or recent
+   *  snapshots from successful ops are left alone. */
+  repairCleanupAbandoned: () =>
+    invoke<AbandonedCleanupReport>("repair_cleanup_abandoned"),
 
   // ---------- Op tracking ----------
   /** Snapshot of currently-tracked ops. Backstop for event drops. */
@@ -254,6 +274,14 @@ export const api = {
    */
   sessionAdoptOrphan: (slug: string, targetCwd: string) =>
     invoke<AdoptReport>("session_adopt_orphan", { slug, targetCwd }),
+
+  /**
+   * Move an orphan project slug dir to the OS Trash (reversible).
+   * Pair with ConfirmDialog on the caller side — this is destructive
+   * from the user's perspective even though Trash makes it recoverable.
+   */
+  sessionDiscardOrphan: (slug: string) =>
+    invoke<DiscardReport>("session_discard_orphan", { slug }),
 
   // ---------- Session index (Sessions tab) ----------
   /**

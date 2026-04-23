@@ -116,6 +116,11 @@ windows-sys = { version = "0.59", features = [
 # separate processes; the Tauri-side async Mutex is insufficient alone).
 fs2 = "0.4"
 
+# OS-native Trash so orphan discard is reversible (NSFileManager on macOS,
+# IFileOperation on Windows, XDG trash on Linux). Chosen over manual
+# platform branches so we stay out of undelete semantics ourselves.
+trash = "5"
+
 # ─── Build profiles ──────────────────────────────────────────────────────
 # Release: thin-LTO + single codegen unit. Cuts binary size and — more
 # importantly for startup — lets rustc inline across crates, which the

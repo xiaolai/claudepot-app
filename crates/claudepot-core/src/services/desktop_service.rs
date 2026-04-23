@@ -162,9 +162,7 @@ pub async fn adopt_current(
     let prelude = desktop_prelude(platform)
         .await
         .map_err(|e| match e {
-            crate::error::DesktopSwapError::Io(io) if io.to_string().contains("in progress") => {
-                AdoptError::Lock(crate::desktop_lock::DesktopLockError::Held)
-            }
+            crate::error::DesktopSwapError::Lock(lock_err) => AdoptError::Lock(lock_err),
             crate::error::DesktopSwapError::NotInstalled => AdoptError::DataDirUnreadable,
             other => AdoptError::Swap(other),
         })?;
@@ -172,10 +170,10 @@ pub async fn adopt_current(
     let items = prelude.items;
 
     // Overwrite-safe: stage the old profile into a temp dir first so
-    // we can roll back if snapshot() fails. Codex follow-up review:
-    // previous code unconditionally purged the old profile before
-    // writing the new one, so a snapshot failure left the user with
-    // NO profile at all.
+    // we can roll back if any subsequent step fails. Kept alive for
+    // the whole commit sequence (snapshot + sidecar + DB flags) so
+    // no intermediate failure can leave the user with a partial
+    // profile and no recovery artifact.
     let stash = if profile_dir.exists() {
         let staging = tempfile::Builder::new()
             .prefix("claudepot-adopt-prev-")
@@ -191,12 +189,19 @@ pub async fn adopt_current(
         None
     };
 
-    if let Err(e) = swap::snapshot(&data_dir, target_uuid, items) {
-        // Roll the staged old profile back into place so the user
-        // isn't left with a deleted profile after a failed adopt.
-        if let Some((_holder, staged)) = stash {
-            let _ = crate::fs_utils::copy_dir_recursive(&staged, &profile_dir);
+    // Restore helper — every failure path between here and the final
+    // store write funnels through this so a partial profile_dir never
+    // coexists with the stash contents. Always clears profile_dir
+    // first so copying back starts from a clean state.
+    let restore_stash = |stash: &Option<(tempfile::TempDir, std::path::PathBuf)>| {
+        let _ = std::fs::remove_dir_all(&profile_dir);
+        if let Some((_, staged)) = stash.as_ref() {
+            let _ = crate::fs_utils::copy_dir_recursive(staged, &profile_dir);
         }
+    };
+
+    if let Err(e) = swap::snapshot(&data_dir, target_uuid, items) {
+        restore_stash(&stash);
         return Err(e.into());
     }
 
@@ -205,7 +210,7 @@ pub async fn adopt_current(
     let (captured_items, size_bytes) = measure_profile(&profile_dir);
 
     // Sidecar (D17) — captured metadata that survives dir mtime churn.
-    write_sidecar(
+    if let Err(e) = write_sidecar(
         &profile_dir,
         SidecarMeta {
             captured_at: Utc::now(),
@@ -215,15 +220,35 @@ pub async fn adopt_current(
             platform: std::env::consts::OS.to_string(),
             session_items: items.iter().map(|s| s.to_string()).collect(),
         },
-    )
-    .map_err(|e| AdoptError::Sidecar(e.to_string()))?;
+    ) {
+        restore_stash(&stash);
+        return Err(AdoptError::Sidecar(e.to_string()));
+    }
 
-    store
-        .update_desktop_profile_flag(target_uuid, true)
-        .map_err(|e| AdoptError::Store(e.to_string()))?;
-    store
-        .set_active_desktop(target_uuid)
-        .map_err(|e| AdoptError::Store(e.to_string()))?;
+    if let Err(e) = store.update_desktop_profile_flag(target_uuid, true) {
+        restore_stash(&stash);
+        return Err(AdoptError::Store(e.to_string()));
+    }
+    if let Err(e) = store.set_active_desktop(target_uuid) {
+        // Disk revert matters for DB consistency:
+        //   - No stash (first-time adopt): we just flipped the flag
+        //     from false→true for this uuid; `profile_dir` will be
+        //     empty after `restore_stash`, so the flag must go back
+        //     to false to match disk.
+        //   - Had stash (overwrite adopt): the flag was already true
+        //     *for a valid old profile* before this call; after
+        //     restore_stash the old profile is back on disk, so the
+        //     true flag is still correct. Leaving it alone avoids
+        //     creating DB-vs-disk drift in the opposite direction.
+        if stash.is_none() {
+            let _ = store.update_desktop_profile_flag(target_uuid, false);
+        }
+        restore_stash(&stash);
+        return Err(AdoptError::Store(e.to_string()));
+    }
+
+    // Commit successful — drop the stash (TempDir auto-cleans).
+    drop(stash);
 
     // Relaunch Desktop so the user's workflow is uninterrupted. Best-
     // effort — a launch failure doesn't invalidate the snapshot,
@@ -276,9 +301,7 @@ pub async fn clear_session(
 ) -> Result<ClearOutcome, ClearError> {
     // Shared prelude: acquires lock, resolves data_dir, quits Desktop.
     let prelude = desktop_prelude(platform).await.map_err(|e| match e {
-        crate::error::DesktopSwapError::Io(io) if io.to_string().contains("in progress") => {
-            ClearError::Lock(crate::desktop_lock::DesktopLockError::Held)
-        }
+        crate::error::DesktopSwapError::Lock(lock_err) => ClearError::Lock(lock_err),
         crate::error::DesktopSwapError::NotInstalled => ClearError::DataDirMissing,
         other => ClearError::Swap(other),
     })?;
@@ -533,11 +556,7 @@ pub(crate) async fn desktop_prelude<'a>(
 ) -> Result<DesktopPrelude<'a>, crate::error::DesktopSwapError> {
     use crate::error::DesktopSwapError;
 
-    let _lock = crate::desktop_lock::try_acquire().map_err(|_| {
-        DesktopSwapError::Io(std::io::Error::other(
-            "another Desktop operation is in progress",
-        ))
-    })?;
+    let _lock = crate::desktop_lock::try_acquire()?;
 
     let data_dir = platform.data_dir().ok_or(DesktopSwapError::NotInstalled)?;
     if !data_dir.exists() {
@@ -628,9 +647,29 @@ pub async fn check_profile_dpapi_valid(
         // Ciphertext-level check: try the real decrypt path. This
         // catches the subtle "new keyring but old snapshot" case
         // that the keyring-only probe missed.
+        //
+        // Discriminate by error kind — only AES failure implies the
+        // live DPAPI key can't decrypt the stored ciphertext (the
+        // actual invalidation signal). Base64 / version / format
+        // errors mean the stored snapshot itself is corrupt; that's
+        // a different failure mode. Surface it as an error to the
+        // caller so the UI can report "snapshot corrupt — re-bind"
+        // instead of silently returning true and letting a bad
+        // snapshot proceed.
+        use crate::desktop_backend::crypto::DecryptError;
+        use crate::desktop_backend::DesktopKeyError;
         match crate::desktop_backend::crypto::windows::decrypt(token_b64, &secret) {
             Ok(_) => Ok(true),
-            Err(_) => Ok(false),
+            Err(DecryptError::Aes) => Ok(false),
+            Err(DecryptError::Base64(msg)) => Err(DesktopKeyError::LocalState(
+                format!("snapshot token base64 malformed: {msg}"),
+            )),
+            Err(DecryptError::BadFormat(msg)) => Err(DesktopKeyError::LocalState(
+                format!("snapshot token format invalid: {msg}"),
+            )),
+            Err(DecryptError::UnknownVersion(tag)) => Err(DesktopKeyError::LocalState(
+                format!("snapshot token uses unsupported envelope tag: {tag:?}"),
+            )),
         }
     }
 }
