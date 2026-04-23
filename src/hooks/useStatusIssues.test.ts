@@ -193,3 +193,111 @@ describe("useStatusIssues — cc-slot drift", () => {
     expect(onReloginActive).not.toHaveBeenCalled();
   });
 });
+
+// ---------------------------------------------------------------------------
+// Tier 2-C: Desktop-side banner smoke tests.
+// Exercises the `desktopSync` code path added in Phase 4. Covers all
+// five DesktopSyncOutcome variants so a regression in the banner
+// wiring is caught mechanically.
+// ---------------------------------------------------------------------------
+
+describe("useStatusIssues — desktop sync banners", () => {
+  const baseOpts = {
+    ccIdentity: null,
+    status: sampleStatus(),
+    syncError: null,
+    keychainIssue: null,
+    accounts: [] as ReturnType<typeof sampleAccount>[],
+    onUnlock: () => {},
+  };
+
+  it("adoption_available → info banner with Bind action", () => {
+    const onAdoptLiveDesktop = vi.fn();
+    const { result } = renderHook(() =>
+      useStatusIssues({
+        ...baseOpts,
+        desktopSync: { kind: "adoption_available", email: "alice@example.com" },
+        onAdoptLiveDesktop,
+      }),
+    );
+    const banner = result.current.find((i) => i.id.startsWith("desktop-adopt:"));
+    expect(banner).toBeDefined();
+    expect(banner!.severity).toBe("info");
+    expect(banner!.label).toContain("alice@example.com");
+    expect(banner!.action?.label).toBe("Bind");
+    banner!.action!.onClick();
+    expect(onAdoptLiveDesktop).toHaveBeenCalledWith("alice@example.com");
+  });
+
+  it("stranger → info banner with Import action", () => {
+    const onImportDesktop = vi.fn();
+    const { result } = renderHook(() =>
+      useStatusIssues({
+        ...baseOpts,
+        desktopSync: { kind: "stranger", email: "new@example.com" },
+        onImportDesktop,
+      }),
+    );
+    const banner = result.current.find((i) => i.id.startsWith("desktop-stranger:"));
+    expect(banner).toBeDefined();
+    expect(banner!.severity).toBe("info");
+    expect(banner!.action?.label).toBe("Import new@example.com");
+    banner!.action!.onClick();
+    expect(onImportDesktop).toHaveBeenCalledWith("new@example.com");
+  });
+
+  it("candidate_only → warning banner with NO mutating action", () => {
+    // Critical property — Codex D5-1 / D5-2: fast-path candidate must
+    // never drive mutation. The banner is advisory only.
+    const onAdoptLiveDesktop = vi.fn();
+    const onImportDesktop = vi.fn();
+    const { result } = renderHook(() =>
+      useStatusIssues({
+        ...baseOpts,
+        desktopSync: { kind: "candidate_only", email: "maybe@example.com" },
+        onAdoptLiveDesktop,
+        onImportDesktop,
+      }),
+    );
+    const banner = result.current.find((i) => i.id.startsWith("desktop-candidate:"));
+    expect(banner).toBeDefined();
+    expect(banner!.severity).toBe("warning");
+    expect(banner!.action).toBeUndefined();
+    expect(banner!.action2).toBeUndefined();
+    expect(onAdoptLiveDesktop).not.toHaveBeenCalled();
+    expect(onImportDesktop).not.toHaveBeenCalled();
+  });
+
+  it("verified → no Desktop banner", () => {
+    const { result } = renderHook(() =>
+      useStatusIssues({
+        ...baseOpts,
+        desktopSync: { kind: "verified", email: "active@example.com" },
+      }),
+    );
+    const desktop = result.current.filter((i) => i.id.startsWith("desktop-"));
+    expect(desktop).toEqual([]);
+  });
+
+  it("no_live → no Desktop banner", () => {
+    const { result } = renderHook(() =>
+      useStatusIssues({
+        ...baseOpts,
+        desktopSync: { kind: "no_live" },
+      }),
+    );
+    const desktop = result.current.filter((i) => i.id.startsWith("desktop-"));
+    expect(desktop).toEqual([]);
+  });
+
+  it("banner is dismissable so the 24h snooze store can suppress it", () => {
+    const { result } = renderHook(() =>
+      useStatusIssues({
+        ...baseOpts,
+        desktopSync: { kind: "adoption_available", email: "x@example.com" },
+      }),
+    );
+    const banner = result.current.find((i) => i.id.startsWith("desktop-adopt:"));
+    expect(banner?.dismissable).toBe(true);
+  });
+});
