@@ -243,19 +243,24 @@ mod tests {
 
     fn write_cfg(data_dir: &std::path::Path, body: serde_json::Value) {
         std::fs::create_dir_all(data_dir).unwrap();
-        std::fs::write(
-            data_dir.join("config.json"),
-            serde_json::to_string(&body).unwrap(),
-        )
-        .unwrap();
+        std::fs::write(data_dir.join("config.json"), body.to_string()).unwrap();
     }
 
-    // --- extract_org_uuids unit tests (U1-U3) ---
+    fn fake(data_dir: Option<std::path::PathBuf>) -> FakePlatform {
+        FakePlatform { data_dir }
+    }
+
+    fn probe(p: &FakePlatform, s: &AccountStore, strict: bool)
+        -> Result<Option<LiveDesktopIdentity>, DesktopIdentityError>
+    {
+        probe_live_identity(p, s, ProbeOptions { strict })
+    }
+
+    // --- extract_org_uuids (U1-U3) ---
 
     #[test]
     fn test_extract_org_uuids_finds_all_allowlist_keys() {
-        let u1 = Uuid::new_v4();
-        let u2 = Uuid::new_v4();
+        let (u1, u2) = (Uuid::new_v4(), Uuid::new_v4());
         let cfg = serde_json::json!({
             "locale": "en-US",
             format!("dxt:allowlistEnabled:{}", u1): false,
@@ -265,16 +270,12 @@ mod tests {
         });
         let out = extract_org_uuids(&cfg);
         assert_eq!(out.len(), 2);
-        assert!(out.contains(&u1));
-        assert!(out.contains(&u2));
+        assert!(out.contains(&u1) && out.contains(&u2));
     }
 
     #[test]
     fn test_extract_org_uuids_empty_when_no_keys() {
-        let cfg = serde_json::json!({
-            "locale": "en-US",
-            "oauth:tokenCache": "djEw...",
-        });
+        let cfg = serde_json::json!({ "locale": "en-US", "oauth:tokenCache": "djEw" });
         assert!(extract_org_uuids(&cfg).is_empty());
     }
 
@@ -293,22 +294,15 @@ mod tests {
     fn test_probe_fast_path_unique_match_returns_candidate() {
         let (store, _s) = store();
         let org = Uuid::new_v4();
-        let acct = make_account("alice@example.com", Some(&org.to_string()));
-        store.insert(&acct).unwrap();
+        store.insert(&make_account("alice@example.com", Some(&org.to_string()))).unwrap();
 
         let tmp = tempfile::tempdir().unwrap();
-        write_cfg(
-            tmp.path(),
-            serde_json::json!({
-                format!("dxt:allowlistEnabled:{}", org): false,
-                "oauth:tokenCache": "djEw..."
-            }),
-        );
-        let platform = FakePlatform {
-            data_dir: Some(tmp.path().to_path_buf()),
-        };
+        write_cfg(tmp.path(), serde_json::json!({
+            format!("dxt:allowlistEnabled:{}", org): false,
+            "oauth:tokenCache": "djEw...",
+        }));
 
-        let id = probe_live_identity(&platform, &store, ProbeOptions::default())
+        let id = probe(&fake(Some(tmp.path().to_path_buf())), &store, false)
             .unwrap()
             .expect("unique match");
         assert_eq!(id.email, "alice@example.com");
@@ -322,28 +316,15 @@ mod tests {
         // None → probe also returns None (forces slow path).
         let (store, _s) = store();
         let org = Uuid::new_v4();
-        store
-            .insert(&make_account("a@example.com", Some(&org.to_string())))
-            .unwrap();
-        store
-            .insert(&make_account("b@example.com", Some(&org.to_string())))
-            .unwrap();
+        store.insert(&make_account("a@example.com", Some(&org.to_string()))).unwrap();
+        store.insert(&make_account("b@example.com", Some(&org.to_string()))).unwrap();
 
         let tmp = tempfile::tempdir().unwrap();
-        write_cfg(
-            tmp.path(),
-            serde_json::json!({
-                format!("dxt:allowlistEnabled:{}", org): false,
-                "oauth:tokenCache": "djEw..."
-            }),
-        );
-        let platform = FakePlatform {
-            data_dir: Some(tmp.path().to_path_buf()),
-        };
-
-        assert!(probe_live_identity(&platform, &store, ProbeOptions::default())
-            .unwrap()
-            .is_none());
+        write_cfg(tmp.path(), serde_json::json!({
+            format!("dxt:allowlistEnabled:{}", org): false,
+            "oauth:tokenCache": "djEw...",
+        }));
+        assert!(probe(&fake(Some(tmp.path().to_path_buf())), &store, false).unwrap().is_none());
     }
 
     #[test]
@@ -351,31 +332,17 @@ mod tests {
         // Two DIFFERENT orgs in config, each uniquely matching one
         // account. Fast path still returns None — we can't pick one.
         let (store, _s) = store();
-        let org_a = Uuid::new_v4();
-        let org_b = Uuid::new_v4();
-        store
-            .insert(&make_account("a@example.com", Some(&org_a.to_string())))
-            .unwrap();
-        store
-            .insert(&make_account("b@example.com", Some(&org_b.to_string())))
-            .unwrap();
+        let (a, b) = (Uuid::new_v4(), Uuid::new_v4());
+        store.insert(&make_account("a@example.com", Some(&a.to_string()))).unwrap();
+        store.insert(&make_account("b@example.com", Some(&b.to_string()))).unwrap();
 
         let tmp = tempfile::tempdir().unwrap();
-        write_cfg(
-            tmp.path(),
-            serde_json::json!({
-                format!("dxt:allowlistEnabled:{}", org_a): false,
-                format!("dxt:allowlistEnabled:{}", org_b): false,
-                "oauth:tokenCache": "djEw..."
-            }),
-        );
-        let platform = FakePlatform {
-            data_dir: Some(tmp.path().to_path_buf()),
-        };
-
-        assert!(probe_live_identity(&platform, &store, ProbeOptions::default())
-            .unwrap()
-            .is_none());
+        write_cfg(tmp.path(), serde_json::json!({
+            format!("dxt:allowlistEnabled:{}", a): false,
+            format!("dxt:allowlistEnabled:{}", b): false,
+            "oauth:tokenCache": "djEw...",
+        }));
+        assert!(probe(&fake(Some(tmp.path().to_path_buf())), &store, false).unwrap().is_none());
     }
 
     #[test]
@@ -383,12 +350,8 @@ mod tests {
         let (store, _s) = store();
         let tmp = tempfile::tempdir().unwrap();
         write_cfg(tmp.path(), serde_json::json!({ "locale": "en-US" }));
-        let platform = FakePlatform {
-            data_dir: Some(tmp.path().to_path_buf()),
-        };
-
-        let err = probe_live_identity(&platform, &store, ProbeOptions::default())
-            .expect_err("should error on signed-out");
+        let err = probe(&fake(Some(tmp.path().to_path_buf())), &store, false)
+            .expect_err("signed-out must error");
         assert!(matches!(err, DesktopIdentityError::NotSignedIn));
     }
 
@@ -396,50 +359,32 @@ mod tests {
     fn test_probe_strict_mode_returns_unimplemented_in_phase_1() {
         let (store, _s) = store();
         let org = Uuid::new_v4();
-        store
-            .insert(&make_account("a@example.com", Some(&org.to_string())))
-            .unwrap();
+        store.insert(&make_account("a@example.com", Some(&org.to_string()))).unwrap();
 
         let tmp = tempfile::tempdir().unwrap();
-        write_cfg(
-            tmp.path(),
-            serde_json::json!({
-                format!("dxt:allowlistEnabled:{}", org): false,
-                "oauth:tokenCache": "djEw..."
-            }),
-        );
-        let platform = FakePlatform {
-            data_dir: Some(tmp.path().to_path_buf()),
-        };
-
-        let err = probe_live_identity(
-            &platform,
-            &store,
-            ProbeOptions { strict: true },
-        )
-        .expect_err("strict must fail until Phase 2 crypto lands");
+        write_cfg(tmp.path(), serde_json::json!({
+            format!("dxt:allowlistEnabled:{}", org): false,
+            "oauth:tokenCache": "djEw...",
+        }));
+        let err = probe(&fake(Some(tmp.path().to_path_buf())), &store, true)
+            .expect_err("strict must fail until Phase 2 crypto lands");
         assert!(matches!(err, DesktopIdentityError::Unimplemented));
     }
 
     #[test]
     fn test_probe_no_config_json_returns_no_config() {
         let (store, _s) = store();
-        let tmp = tempfile::tempdir().unwrap();
-        // deliberately DON'T write config.json
-        let platform = FakePlatform {
-            data_dir: Some(tmp.path().to_path_buf()),
-        };
-        let err = probe_live_identity(&platform, &store, ProbeOptions::default())
-            .expect_err("should error when config.json missing");
+        let tmp = tempfile::tempdir().unwrap(); // no config.json
+        let err = probe(&fake(Some(tmp.path().to_path_buf())), &store, false)
+            .expect_err("missing config.json must error");
         assert!(matches!(err, DesktopIdentityError::NoConfig));
     }
 
     #[test]
     fn test_probe_no_data_dir_returns_no_data_dir() {
         let (store, _s) = store();
-        let platform = FakePlatform { data_dir: None };
-        let err = probe_live_identity(&platform, &store, ProbeOptions::default())
-            .expect_err("platform without data_dir should error");
+        let err = probe(&fake(None), &store, false)
+            .expect_err("platform without data_dir must error");
         assert!(matches!(err, DesktopIdentityError::NoDataDir));
     }
 
@@ -451,27 +396,13 @@ mod tests {
         // not Err — the call was well-formed, we just don't know who.
         let (store, _s) = store();
         let org = Uuid::new_v4();
-        store
-            .insert(&make_account(
-                "unrelated@example.com",
-                Some(&Uuid::new_v4().to_string()),
-            ))
-            .unwrap();
+        store.insert(&make_account("x@example.com", Some(&Uuid::new_v4().to_string()))).unwrap();
 
         let tmp = tempfile::tempdir().unwrap();
-        write_cfg(
-            tmp.path(),
-            serde_json::json!({
-                format!("dxt:allowlistEnabled:{}", org): false,
-                "oauth:tokenCache": "djEw..."
-            }),
-        );
-        let platform = FakePlatform {
-            data_dir: Some(tmp.path().to_path_buf()),
-        };
-
-        assert!(probe_live_identity(&platform, &store, ProbeOptions::default())
-            .unwrap()
-            .is_none());
+        write_cfg(tmp.path(), serde_json::json!({
+            format!("dxt:allowlistEnabled:{}", org): false,
+            "oauth:tokenCache": "djEw...",
+        }));
+        assert!(probe(&fake(Some(tmp.path().to_path_buf())), &store, false).unwrap().is_none());
     }
 }
