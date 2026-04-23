@@ -456,6 +456,13 @@ export const api = {
   keyApiRemove: (uuid: string) => invoke<void>("key_api_remove", { uuid }),
   /** Pull the full plaintext secret out for clipboard. Sparingly. */
   keyApiCopy: (uuid: string) => invoke<string>("key_api_copy", { uuid }),
+  /**
+   * Validity ping against `GET /v1/models`. Resolves on a valid key;
+   * rejects with a reason string ("rejected (invalid key)",
+   * "rate-limited (retry in Ns)", …) that's safe to toast verbatim.
+   * No DB write — result is transient.
+   */
+  keyApiProbe: (uuid: string) => invoke<void>("key_api_probe", { uuid }),
 
   /** List every stored CLAUDE_CODE_OAUTH_TOKEN — previews only. */
   keyOauthList: () => invoke<OauthTokenSummary[]>("key_oauth_list"),
@@ -472,18 +479,13 @@ export const api = {
   keyOauthRemove: (uuid: string) => invoke<void>("key_oauth_remove", { uuid }),
   keyOauthCopy: (uuid: string) => invoke<string>("key_oauth_copy", { uuid }),
   /**
-   * Hit `/api/oauth/usage` with the stored token to verify and update
-   * the probe fields. Returns the refreshed summary (so the days-left
-   * chip can flip on a 401 without a second round-trip).
+   * Cached usage snapshot for the account the OAuth token belongs to.
+   * Never hits Anthropic — peeks the in-memory cache populated by
+   * `fetchAllUsage` / `refreshUsageFor` on the Accounts side. Returns
+   * `null` if no cached snapshot exists yet for that account.
    */
-  keyOauthProbe: (uuid: string) =>
-    invoke<OauthTokenSummary>("key_oauth_probe", { uuid }),
-  /**
-   * Full usage breakdown for the mini-usage modal that opens when the
-   * user clicks an OAuth token's account tag.
-   */
-  keyOauthUsage: (uuid: string) =>
-    invoke<AccountUsage>("key_oauth_usage", { uuid }),
+  keyOauthUsageCached: (uuid: string) =>
+    invoke<AccountUsage | null>("key_oauth_usage_cached", { uuid }),
 
   // ─── session_live (Activity feature) ─────────────────────────────
 

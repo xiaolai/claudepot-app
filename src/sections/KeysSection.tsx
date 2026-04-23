@@ -84,6 +84,29 @@ export function KeysSection() {
     [pushToast],
   );
 
+  // Copy a paste-ready POSIX shell invocation:
+  //   CLAUDE_CODE_OAUTH_TOKEN='<token>' claude
+  // CC reads the env var first (auth.ts:168, 1260) and never touches
+  // the keychain, so the user can open a new terminal, paste, and run
+  // as a different identity without disturbing the current login.
+  const onCopyShell = useCallback(
+    async (row: OauthTokenSummary) => {
+      try {
+        const token = await api.keyOauthCopy(row.uuid);
+        const cmd = `CLAUDE_CODE_OAUTH_TOKEN='${token}' claude`;
+        await navigator.clipboard.writeText(cmd);
+        pushToast(
+          "info",
+          `Copied shell command for ${row.label} (${row.token_preview}) — clipboard clears in 30s.`,
+        );
+        scheduleClipboardClear(cmd);
+      } catch (e) {
+        pushToast("error", `Copy failed: ${e}`);
+      }
+    },
+    [pushToast],
+  );
+
   const confirmRemoval = useCallback(async () => {
     if (!pendingRemoval) return;
     const { kind, row } = pendingRemoval;
@@ -99,23 +122,6 @@ export function KeysSection() {
     }
   }, [pendingRemoval, pushToast, refresh]);
 
-  const onProbe = useCallback(
-    async (row: OauthTokenSummary) => {
-      try {
-        const fresh = await api.keyOauthProbe(row.uuid);
-        setOauthTokens((prev) =>
-          prev.map((r) => (r.uuid === fresh.uuid ? fresh : r)),
-        );
-        pushToast(
-          fresh.last_probe_status === "ok" ? "info" : "error",
-          `${row.label}: ${describeProbe(fresh.last_probe_status)}`,
-        );
-      } catch (e) {
-        pushToast("error", `Probe failed: ${e}`);
-      }
-    },
-    [pushToast],
-  );
 
   const added = useCallback(
     (kind: "api" | "oauth") => {
@@ -162,6 +168,12 @@ export function KeysSection() {
           onCopy={(row) =>
             void onCopy("api", row.uuid, row.label, row.token_preview)
           }
+          onProbe={(row) =>
+            void api
+              .keyApiProbe(row.uuid)
+              .then(() => pushToast("info", `${row.label}: valid`))
+              .catch((e) => pushToast("error", `${row.label}: ${e}`))
+          }
           onRemove={(row) => setPendingRemoval({ kind: "api", row })}
         />
 
@@ -171,8 +183,8 @@ export function KeysSection() {
           onCopy={(row) =>
             void onCopy("oauth", row.uuid, row.label, row.token_preview)
           }
+          onCopyShell={(row) => void onCopyShell(row)}
           onRemove={(row) => setPendingRemoval({ kind: "oauth", row })}
-          onProbe={onProbe}
           onOpenUsage={setUsageModalFor}
         />
       </main>
@@ -207,9 +219,6 @@ export function KeysSection() {
           token={usageModalFor}
           onClose={() => {
             setUsageModalFor(null);
-            // `key_oauth_usage` updates the probe status server-side
-            // (last_probed_at, last_probe_status). Re-fetch so the
-            // row's days-left chip + "Revoked" state reflect reality.
             void refresh();
           }}
         />
@@ -244,18 +253,6 @@ export function scheduleClipboardClear(token: string): void {
   }, CLIPBOARD_CLEAR_MS);
 }
 
-function describeProbe(status: string | null): string {
-  if (!status) return "no probe yet";
-  if (status === "ok") return "token is valid";
-  if (status === "unauthorized") return "token rejected (expired or revoked)";
-  if (status.startsWith("rate_limited:")) {
-    const secs = status.split(":")[1];
-    return `rate-limited (retry in ${secs}s)`;
-  }
-  if (status.startsWith("error:")) return status.slice("error:".length);
-  return status;
-}
-
 /* ──────────────────────────────────────────────────────────── */
 /*                         Tables                              */
 /* ──────────────────────────────────────────────────────────── */
@@ -264,16 +261,18 @@ function ApiKeysTable({
   rows,
   loading,
   onCopy,
+  onProbe,
   onRemove,
 }: {
   rows: ApiKeySummary[];
   loading: boolean;
   onCopy: (row: ApiKeySummary) => void;
+  onProbe: (row: ApiKeySummary) => void;
   onRemove: (row: ApiKeySummary) => void;
 }) {
   return (
     <section>
-      <SectionLabel>
+      <SectionLabel style={{ paddingLeft: 0, paddingRight: 0 }}>
         API keys {rows.length > 0 ? `· ${rows.length}` : ""}
       </SectionLabel>
       <p
@@ -300,7 +299,7 @@ function ApiKeysTable({
       ) : (
         <Table>
           <Thead
-            cols={["Label", "Preview", "Created by", "Created", ""]}
+            cols={["Label", "Created by", "Created", ""]}
           />
           <tbody>
             {rows.map((row) => (
@@ -309,13 +308,13 @@ function ApiKeysTable({
                   <strong style={{ fontWeight: 600 }}>{row.label}</strong>
                 </Td>
                 <Td>
-                  <code style={{ fontSize: "var(--fs-xs)" }}>
-                    {row.token_preview}
-                  </code>
-                </Td>
-                <Td>
                   {row.account_email ? (
-                    <Tag tone="neutral">{row.account_email}</Tag>
+                    <Tag
+                      tone="neutral"
+                      style={{ textTransform: "none", letterSpacing: "normal" }}
+                    >
+                      {row.account_email}
+                    </Tag>
                   ) : (
                     <Tag
                       tone="warn"
@@ -334,125 +333,6 @@ function ApiKeysTable({
                   >
                     {fmtDate(row.created_at)}
                   </span>
-                </Td>
-                <Td align="right">
-                  <RowActions>
-                    <IconButton
-                      glyph={NF.copy}
-                      title="Copy full value to clipboard"
-                      aria-label={`Copy ${row.label}`}
-                      onClick={() => onCopy(row)}
-                    />
-                    <IconButton
-                      glyph={NF.trash}
-                      title="Remove"
-                      aria-label={`Remove ${row.label}`}
-                      onClick={() => onRemove(row)}
-                    />
-                  </RowActions>
-                </Td>
-              </Tr>
-            ))}
-          </tbody>
-        </Table>
-      )}
-    </section>
-  );
-}
-
-function OauthTokensTable({
-  rows,
-  loading,
-  onCopy,
-  onRemove,
-  onProbe,
-  onOpenUsage,
-}: {
-  rows: OauthTokenSummary[];
-  loading: boolean;
-  onCopy: (row: OauthTokenSummary) => void;
-  onRemove: (row: OauthTokenSummary) => void;
-  onProbe: (row: OauthTokenSummary) => void;
-  onOpenUsage: (row: OauthTokenSummary) => void;
-}) {
-  return (
-    <section>
-      <SectionLabel>
-        OAuth tokens {rows.length > 0 ? `· ${rows.length}` : ""}
-      </SectionLabel>
-      <p
-        style={{
-          fontSize: "var(--fs-sm)",
-          color: "var(--fg-muted)",
-          margin: "var(--sp-4) 0 var(--sp-14)",
-        }}
-      >
-        Long-lived <code>sk-ant-oat01-…</code> tokens generated by{" "}
-        <code>claude setup-token</code>. Click the tag to view usage.
-      </p>
-
-      {loading && rows.length === 0 ? (
-        <EmptyHint>Loading…</EmptyHint>
-      ) : rows.length === 0 ? (
-        <EmptyHint>
-          No OAuth tokens yet. Run <code>claude setup-token</code> and paste
-          the value into “Add key”.
-        </EmptyHint>
-      ) : (
-        <Table>
-          <Thead
-            cols={[
-              "Label",
-              "Preview",
-              "Created by",
-              "Created",
-              "Expires",
-              "",
-            ]}
-          />
-          <tbody>
-            {rows.map((row) => (
-              <Tr key={row.uuid}>
-                <Td>
-                  <strong style={{ fontWeight: 600 }}>{row.label}</strong>
-                </Td>
-                <Td>
-                  <code style={{ fontSize: "var(--fs-xs)" }}>
-                    {row.token_preview}
-                  </code>
-                </Td>
-                <Td>
-                  <button
-                    type="button"
-                    onClick={() => onOpenUsage(row)}
-                    title="View usage"
-                    style={{
-                      background: "transparent",
-                      border: "none",
-                      padding: 0,
-                      cursor: "pointer",
-                    }}
-                  >
-                    <Tag tone="accent">
-                      {row.account_email ?? row.account_uuid.slice(0, 8)}
-                    </Tag>
-                  </button>
-                </Td>
-                <Td>
-                  <span
-                    style={{
-                      fontSize: "var(--fs-xs)",
-                      color: "var(--fg-muted)",
-                    }}
-                  >
-                    {fmtDate(row.created_at)}
-                  </span>
-                </Td>
-                <Td>
-                  <DaysLeftChip
-                    daysRemaining={row.days_remaining}
-                    probeStatus={row.last_probe_status}
-                  />
                 </Td>
                 <Td align="right">
                   <RowActions>
@@ -485,20 +365,136 @@ function OauthTokensTable({
   );
 }
 
-function DaysLeftChip({
-  daysRemaining,
-  probeStatus,
+function OauthTokensTable({
+  rows,
+  loading,
+  onCopy,
+  onCopyShell,
+  onRemove,
+  onOpenUsage,
 }: {
-  daysRemaining: number;
-  probeStatus: string | null;
+  rows: OauthTokenSummary[];
+  loading: boolean;
+  onCopy: (row: OauthTokenSummary) => void;
+  onCopyShell: (row: OauthTokenSummary) => void;
+  onRemove: (row: OauthTokenSummary) => void;
+  onOpenUsage: (row: OauthTokenSummary) => void;
 }) {
-  if (probeStatus === "unauthorized") {
-    return (
-      <Tag tone="danger" glyph={NF.xCircle}>
-        Revoked
-      </Tag>
-    );
-  }
+  return (
+    <section>
+      <SectionLabel style={{ paddingLeft: 0, paddingRight: 0 }}>
+        OAuth tokens {rows.length > 0 ? `· ${rows.length}` : ""}
+      </SectionLabel>
+      <p
+        style={{
+          fontSize: "var(--fs-sm)",
+          color: "var(--fg-muted)",
+          margin: "var(--sp-4) 0 var(--sp-14)",
+        }}
+      >
+        Long-lived <code>sk-ant-oat01-…</code> tokens generated by{" "}
+        <code>claude setup-token</code>.
+      </p>
+
+      {loading && rows.length === 0 ? (
+        <EmptyHint>Loading…</EmptyHint>
+      ) : rows.length === 0 ? (
+        <EmptyHint>
+          No OAuth tokens yet. Run <code>claude setup-token</code> and paste
+          the value into “Add key”.
+        </EmptyHint>
+      ) : (
+        <Table>
+          <Thead
+            cols={[
+              "Label",
+              "Created by",
+              "Created",
+              "Expires",
+              {
+                label: "Shell",
+                hint:
+                  "Copy a paste-ready terminal command " +
+                  "(CLAUDE_CODE_OAUTH_TOKEN='…' claude). " +
+                  "Launches Claude Code with this token in a new " +
+                  "terminal without disturbing your current login.",
+              },
+              "",
+            ]}
+          />
+          <tbody>
+            {rows.map((row) => (
+              <Tr key={row.uuid}>
+                <Td>
+                  <strong style={{ fontWeight: 600 }}>{row.label}</strong>
+                </Td>
+                <Td>
+                  <button
+                    type="button"
+                    onClick={() => onOpenUsage(row)}
+                    title="View usage"
+                    style={{
+                      background: "transparent",
+                      border: "none",
+                      padding: 0,
+                      cursor: "pointer",
+                    }}
+                  >
+                    <Tag
+                      tone="accent"
+                      style={{ textTransform: "none", letterSpacing: "normal" }}
+                    >
+                      {row.account_email ?? row.account_uuid.slice(0, 8)}
+                    </Tag>
+                  </button>
+                </Td>
+                <Td>
+                  <span
+                    style={{
+                      fontSize: "var(--fs-xs)",
+                      color: "var(--fg-muted)",
+                    }}
+                  >
+                    {fmtDate(row.created_at)}
+                  </span>
+                </Td>
+                <Td>
+                  <DaysLeftChip daysRemaining={row.days_remaining} />
+                </Td>
+                <Td>
+                  <IconButton
+                    glyph={NF.terminal}
+                    onClick={() => onCopyShell(row)}
+                    title="Copy: CLAUDE_CODE_OAUTH_TOKEN='…' claude"
+                    aria-label={`Copy shell command for ${row.label}`}
+                  />
+                </Td>
+                <Td align="right">
+                  <RowActions>
+                    <IconButton
+                      glyph={NF.copy}
+                      title="Copy full value to clipboard"
+                      aria-label={`Copy ${row.label}`}
+                      onClick={() => onCopy(row)}
+                    />
+                    <IconButton
+                      glyph={NF.trash}
+                      title="Remove"
+                      aria-label={`Remove ${row.label}`}
+                      onClick={() => onRemove(row)}
+                    />
+                  </RowActions>
+                </Td>
+              </Tr>
+            ))}
+          </tbody>
+        </Table>
+      )}
+    </section>
+  );
+}
+
+function DaysLeftChip({ daysRemaining }: { daysRemaining: number }) {
   if (daysRemaining <= 0) {
     return (
       <Tag tone="danger" glyph={NF.xCircle}>
@@ -509,13 +505,13 @@ function DaysLeftChip({
   if (daysRemaining < 30) {
     return (
       <Tag tone="warn" glyph={NF.warn}>
-        {daysRemaining}d left
+        {daysRemaining}d
       </Tag>
     );
   }
   return (
     <Tag tone="neutral" glyph={NF.clock}>
-      {daysRemaining}d left
+      {daysRemaining}d
     </Tag>
   );
 }
@@ -538,26 +534,44 @@ function Table({ children }: { children: React.ReactNode }) {
   );
 }
 
-function Thead({ cols }: { cols: string[] }) {
+type ColSpec = string | { label: string; hint: string };
+
+function Thead({ cols }: { cols: ColSpec[] }) {
   return (
     <thead>
       <tr>
-        {cols.map((c, i) => (
-          <th
-            key={i}
-            className="mono-cap"
-            style={{
-              padding: "var(--sp-8) var(--sp-10)",
-              textAlign: i === cols.length - 1 ? "right" : "left",
-              fontSize: "var(--fs-xs)",
-              fontWeight: 500,
-              color: "var(--fg-faint)",
-              borderBottom: "var(--bw-hair) solid var(--line)",
-            }}
-          >
-            {c}
-          </th>
-        ))}
+        {cols.map((c, i) => {
+          const label = typeof c === "string" ? c : c.label;
+          const hint = typeof c === "string" ? undefined : c.hint;
+          return (
+            <th
+              key={i}
+              className="mono-cap"
+              title={hint}
+              style={{
+                padding: "var(--sp-8) var(--sp-10)",
+                textAlign: i === cols.length - 1 ? "right" : "left",
+                fontSize: "var(--fs-xs)",
+                fontWeight: 500,
+                color: "var(--fg-faint)",
+                borderBottom: "var(--bw-hair) solid var(--line)",
+                cursor: hint ? "help" : undefined,
+              }}
+            >
+              {label}
+              {hint && (
+                <>
+                  {" "}
+                  <Glyph
+                    g={NF.info}
+                    color="var(--fg-faint)"
+                    size="var(--fs-xs)"
+                  />
+                </>
+              )}
+            </th>
+          );
+        })}
       </tr>
     </thead>
   );

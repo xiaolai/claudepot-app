@@ -62,6 +62,36 @@ pub fn install<R: Runtime>(app: &AppHandle<R>) -> Result<(), String> {
         .build()
         .map_err(|e| format!("claudepot submenu: {e}"))?;
 
+    // ---- Edit submenu ------------------------------------------------------
+    // Required on macOS: without the predefined copy/cut/paste/select_all
+    // items in an Edit menu, WebKit `<input>` fields don't receive ⌘C/⌘V/
+    // ⌘X/⌘A keyboard shortcuts. `app.set_menu()` replaces the default menu
+    // entirely, so we have to put these back by hand.
+    let undo = PredefinedMenuItem::undo(app, Some("Undo"))
+        .map_err(|e| format!("undo: {e}"))?;
+    let redo = PredefinedMenuItem::redo(app, Some("Redo"))
+        .map_err(|e| format!("redo: {e}"))?;
+    let cut = PredefinedMenuItem::cut(app, Some("Cut"))
+        .map_err(|e| format!("cut: {e}"))?;
+    let copy = PredefinedMenuItem::copy(app, Some("Copy"))
+        .map_err(|e| format!("copy: {e}"))?;
+    let paste = PredefinedMenuItem::paste(app, Some("Paste"))
+        .map_err(|e| format!("paste: {e}"))?;
+    let select_all = PredefinedMenuItem::select_all(app, Some("Select All"))
+        .map_err(|e| format!("select_all: {e}"))?;
+
+    let edit = SubmenuBuilder::new(app, "Edit")
+        .item(&undo)
+        .item(&redo)
+        .separator()
+        .item(&cut)
+        .item(&copy)
+        .item(&paste)
+        .separator()
+        .item(&select_all)
+        .build()
+        .map_err(|e| format!("edit submenu: {e}"))?;
+
     // ---- Account submenu (static; no dynamic rebuild needed) ---------------
     let login_browser = MenuItemBuilder::with_id(
         "app-menu:account:login-browser",
@@ -145,7 +175,7 @@ pub fn install<R: Runtime>(app: &AppHandle<R>) -> Result<(), String> {
         .map_err(|e| format!("help submenu: {e}"))?;
 
     let menu = MenuBuilder::new(app)
-        .items(&[&claudepot, &account, &view, &window, &help])
+        .items(&[&claudepot, &edit, &account, &view, &window, &help])
         .build()
         .map_err(|e| format!("root menu: {e}"))?;
 
