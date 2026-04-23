@@ -5,7 +5,8 @@ use crate::account::{Account, AccountStore};
 use crate::blob::CredentialBlob;
 use crate::cli_backend;
 use crate::cli_backend::swap;
-use crate::oauth::{profile, usage};
+use crate::error::OAuthError;
+use crate::oauth::{profile, refresh, usage};
 use crate::paths;
 use chrono::Utc;
 use uuid::Uuid;
@@ -273,16 +274,25 @@ pub async fn register_from_browser_cancellable(
 ///
 /// Returns `Ok(Some(uuid))` if a sync happened, `Ok(None)` if there was
 /// nothing to adopt (CC empty, or its blob matches no registered email).
-/// Errors bubble up, but callers typically log-and-continue.
+/// Errors bubble up, but callers typically log-and-continue — except
+/// [`RegisterError::AuthRejected`], which the UI surfaces as an
+/// actionable "sign in again" banner.
 pub async fn sync_from_current_cc(store: &AccountStore) -> Result<Option<Uuid>, RegisterError> {
     let platform = cli_backend::create_platform();
-    sync_from_current_cc_with(store, platform.as_ref(), &DefaultProfileFetcher).await
+    sync_from_current_cc_with(
+        store,
+        platform.as_ref(),
+        &DefaultProfileFetcher,
+        &crate::cli_backend::swap::DefaultRefresher,
+    )
+    .await
 }
 
 pub(crate) async fn sync_from_current_cc_with(
     store: &AccountStore,
     platform: &dyn cli_backend::CliPlatform,
     fetch_profile: &dyn ProfileFetcher,
+    refresher: &dyn crate::cli_backend::swap::TokenRefresher,
 ) -> Result<Option<Uuid>, RegisterError> {
     let blob_str = match platform
         .read_default()
@@ -298,11 +308,60 @@ pub(crate) async fn sync_from_current_cc_with(
         Err(_) => return Ok(None), // Unparseable — leave it alone.
     };
 
-    let email = fetch_profile
+    // Resolve CC's current identity, self-healing a stale access_token
+    // via the paired refresh_token. When the profile endpoint returns
+    // 401 we don't know whether the token simply expired (normal, every
+    // few hours) or was revoked; the canonical discriminator is
+    // whether the refresh_token still works. A successful refresh
+    // writes the rotated blob back to CC's keychain so the next CC
+    // invocation doesn't re-refresh redundantly.
+    let (effective_blob_str, email) = match fetch_profile
         .fetch(&blob.claude_ai_oauth.access_token)
         .await
-        .map_err(|e| RegisterError::ProfileFetch(e.to_string()))?
-        .email;
+    {
+        Ok(prof) => (blob_str.clone(), prof.email),
+        Err(OAuthError::AuthFailed(_)) => {
+            let token_resp = match refresher
+                .refresh(&blob.claude_ai_oauth.refresh_token)
+                .await
+            {
+                Ok(tr) => tr,
+                // Refresh endpoint definitively rejected the
+                // refresh_token → terminal. The user has to sign in
+                // again; no amount of retrying will help.
+                Err(OAuthError::RefreshFailed(_)) => {
+                    return Err(RegisterError::AuthRejected);
+                }
+                // Rate-limiting, 5xx, transport — transient. Preserve
+                // the old sync behavior (caller logs + moves on)
+                // rather than locking the user out of the UI.
+                Err(e) => {
+                    return Err(RegisterError::ProfileFetch(format!(
+                        "token refresh: {e}"
+                    )));
+                }
+            };
+            let new_blob_str = refresh::build_blob(&token_resp, Some(&blob));
+            // Write the rotated blob back to CC's keychain so CC itself
+            // sees the fresh token on its next run. Failing here would
+            // leave CC's keychain stale; bubble up as CredentialWrite.
+            platform
+                .write_default(&new_blob_str)
+                .await
+                .map_err(|e| RegisterError::CredentialWrite(e.to_string()))?;
+            // Retry `/profile` with the new access token. A failure
+            // here is transient (we just proved refresh works, so this
+            // isn't an auth issue) — map to ProfileFetch for the
+            // best-effort log-and-continue path.
+            let new_email = fetch_profile
+                .fetch(&token_resp.access_token)
+                .await
+                .map_err(|e| RegisterError::ProfileFetch(e.to_string()))?
+                .email;
+            (new_blob_str, new_email)
+        }
+        Err(e) => return Err(RegisterError::ProfileFetch(e.to_string())),
+    };
 
     let account = match store
         .find_by_email(&email)
@@ -323,11 +382,11 @@ pub(crate) async fn sync_from_current_cc_with(
 
     // Write if the stored blob differs from or is missing vs. CC's current.
     let needs_write = match swap::load_private(account.uuid) {
-        Ok(stored) => stored != blob_str,
+        Ok(stored) => stored != effective_blob_str,
         Err(_) => true,
     };
     if needs_write {
-        swap::save_private(account.uuid, &blob_str)
+        swap::save_private(account.uuid, &effective_blob_str)
             .map_err(|e| RegisterError::CredentialWrite(e.to_string()))?;
         let _ = store.update_credentials_flag(account.uuid, true);
     }
@@ -632,6 +691,14 @@ pub enum RegisterError {
     Store(String),
     #[error("account not found")]
     NotFound,
+    /// CC's stored access token was rejected AND the paired refresh token
+    /// failed to mint a new one — the user must re-login to recover.
+    /// Distinct from `ProfileFetch` so callers (UI banner, CLI exit code)
+    /// can surface an actionable "sign in again" state instead of a vague
+    /// transient warning. Triggered by `sync_from_current_cc` when both
+    /// `/profile` returns 401 and `/v1/oauth/token` refuses the refresh.
+    #[error("CC's stored login is no longer valid — sign in again to Claude Code")]
+    AuthRejected,
 }
 
 #[cfg(test)]
@@ -653,6 +720,25 @@ mod tests {
 
     struct MockPlatform {
         blob: Option<String>,
+        /// Records the most recent `write_default` payload so tests can
+        /// assert that the rotated blob was pushed back into CC's keychain
+        /// after a successful refresh. Wrapped in `std::sync::Mutex`
+        /// rather than `tokio::sync::Mutex` so the setter stays sync
+        /// inside the `CliPlatform` impl — the trait method itself is
+        /// async but the mutation is trivially short.
+        written: std::sync::Mutex<Option<String>>,
+    }
+
+    impl MockPlatform {
+        fn new(blob: Option<String>) -> Self {
+            Self {
+                blob,
+                written: std::sync::Mutex::new(None),
+            }
+        }
+        fn last_written(&self) -> Option<String> {
+            self.written.lock().unwrap().clone()
+        }
     }
 
     #[async_trait::async_trait]
@@ -660,7 +746,8 @@ mod tests {
         async fn read_default(&self) -> Result<Option<String>, SwapError> {
             Ok(self.blob.clone())
         }
-        async fn write_default(&self, _blob: &str) -> Result<(), SwapError> {
+        async fn write_default(&self, blob: &str) -> Result<(), SwapError> {
+            *self.written.lock().unwrap() = Some(blob.to_string());
             Ok(())
         }
         async fn touch_credfile(&self) -> Result<(), SwapError> {
@@ -668,39 +755,103 @@ mod tests {
         }
     }
 
+    /// Profile fetcher with an optional response queue. `ok`/`failing`
+    /// preserve the original single-response behaviour (every `fetch`
+    /// returns the same result). `sequence` pops one result per call —
+    /// used by auto-refresh tests where the first `/profile` call 401s
+    /// on a stale access_token and the second call succeeds with the
+    /// fresh one.
     struct MockProfileFetcher {
         profile: Result<profile::Profile, OAuthError>,
+        queue: std::sync::Mutex<std::collections::VecDeque<Result<profile::Profile, OAuthError>>>,
+        /// Records every access_token passed to `fetch` so tests can
+        /// assert the retry used the new token (not the stale one).
+        seen_tokens: std::sync::Mutex<Vec<String>>,
+    }
+
+    fn sample_profile(email: &str) -> profile::Profile {
+        profile::Profile {
+            email: email.to_string(),
+            org_uuid: "org-uuid-1".to_string(),
+            org_name: "Test Org".to_string(),
+            subscription_type: "pro".to_string(),
+            rate_limit_tier: Some("default_claude_pro".to_string()),
+            account_uuid: "acc-uuid-1".to_string(),
+            display_name: Some("Test User".to_string()),
+        }
+    }
+
+    fn clone_oauth_error(e: &OAuthError) -> OAuthError {
+        match e {
+            OAuthError::AuthFailed(m) => OAuthError::AuthFailed(m.clone()),
+            OAuthError::RefreshFailed(m) => OAuthError::RefreshFailed(m.clone()),
+            OAuthError::ServerError(m) => OAuthError::ServerError(m.clone()),
+            OAuthError::RateLimited { retry_after_secs } => OAuthError::RateLimited {
+                retry_after_secs: *retry_after_secs,
+            },
+            // HttpError isn't constructible in tests; any remaining
+            // variant collapses to AuthFailed so the fall-through
+            // behaves like the original mock.
+            _ => OAuthError::AuthFailed("mock error".into()),
+        }
     }
 
     impl MockProfileFetcher {
         fn ok(email: &str) -> Self {
             Self {
-                profile: Ok(profile::Profile {
-                    email: email.to_string(),
-                    org_uuid: "org-uuid-1".to_string(),
-                    org_name: "Test Org".to_string(),
-                    subscription_type: "pro".to_string(),
-                    rate_limit_tier: Some("default_claude_pro".to_string()),
-                    account_uuid: "acc-uuid-1".to_string(),
-                    display_name: Some("Test User".to_string()),
-                }),
+                profile: Ok(sample_profile(email)),
+                queue: std::sync::Mutex::new(std::collections::VecDeque::new()),
+                seen_tokens: std::sync::Mutex::new(Vec::new()),
             }
         }
         fn failing(msg: &str) -> Self {
             Self {
                 profile: Err(OAuthError::AuthFailed(msg.to_string())),
+                queue: std::sync::Mutex::new(std::collections::VecDeque::new()),
+                seen_tokens: std::sync::Mutex::new(Vec::new()),
             }
+        }
+        fn failing_with(err: OAuthError) -> Self {
+            Self {
+                profile: Err(err),
+                queue: std::sync::Mutex::new(std::collections::VecDeque::new()),
+                seen_tokens: std::sync::Mutex::new(Vec::new()),
+            }
+        }
+        fn sequence(responses: Vec<Result<profile::Profile, OAuthError>>) -> Self {
+            Self {
+                // `profile` is used as the fall-through once the queue
+                // drains — set to a hard AuthFailed so an unexpected
+                // extra call during tests fails loudly instead of
+                // silently succeeding.
+                profile: Err(OAuthError::AuthFailed(
+                    "MockProfileFetcher sequence exhausted".into(),
+                )),
+                queue: std::sync::Mutex::new(responses.into_iter().collect()),
+                seen_tokens: std::sync::Mutex::new(Vec::new()),
+            }
+        }
+        fn tokens_seen(&self) -> Vec<String> {
+            self.seen_tokens.lock().unwrap().clone()
         }
     }
 
     #[async_trait::async_trait]
     impl ProfileFetcher for MockProfileFetcher {
-        async fn fetch(&self, _access_token: &str) -> Result<profile::Profile, OAuthError> {
+        async fn fetch(&self, access_token: &str) -> Result<profile::Profile, OAuthError> {
+            self.seen_tokens
+                .lock()
+                .unwrap()
+                .push(access_token.to_string());
+            if let Some(next) = self.queue.lock().unwrap().pop_front() {
+                return match next {
+                    Ok(p) => Ok(p),
+                    Err(e) => Err(clone_oauth_error(&e)),
+                };
+            }
             match &self.profile {
                 Ok(p) => Ok(p.clone()),
-                Err(OAuthError::AuthFailed(msg)) => Err(OAuthError::AuthFailed(msg.clone())),
-                Err(OAuthError::RefreshFailed(msg)) => Err(OAuthError::RefreshFailed(msg.clone())),
-                _ => Err(OAuthError::AuthFailed("mock error".into())),
+                Err(e) => Err(clone_oauth_error(e)),
             }
         }
     }
@@ -753,9 +904,7 @@ mod tests {
         let _env = setup_test_data_dir();
         let (store, _db) = test_store();
 
-        let platform = MockPlatform {
-            blob: Some(fresh_blob_json()),
-        };
+        let platform = MockPlatform::new(Some(fresh_blob_json()));
         let fetcher = MockProfileFetcher::ok("alice@example.com");
 
         let result = register_from_current_with(&store, &platform, &fetcher)
@@ -779,7 +928,7 @@ mod tests {
         let _env = setup_test_data_dir();
         let (store, _db) = test_store();
 
-        let platform = MockPlatform { blob: None };
+        let platform = MockPlatform::new(None);
         let fetcher = MockProfileFetcher::ok("alice@example.com");
 
         let result = register_from_current_with(&store, &platform, &fetcher).await;
@@ -792,9 +941,7 @@ mod tests {
         let _env = setup_test_data_dir();
         let (store, _db) = test_store();
 
-        let platform = MockPlatform {
-            blob: Some(fresh_blob_json()),
-        };
+        let platform = MockPlatform::new(Some(fresh_blob_json()));
         let fetcher = MockProfileFetcher::failing("401 Unauthorized");
 
         let result = register_from_current_with(&store, &platform, &fetcher).await;
@@ -810,9 +957,7 @@ mod tests {
         // Pre-register
         insert_account(&store, "dup@example.com");
 
-        let platform = MockPlatform {
-            blob: Some(fresh_blob_json()),
-        };
+        let platform = MockPlatform::new(Some(fresh_blob_json()));
         let fetcher = MockProfileFetcher::ok("dup@example.com");
 
         let result = register_from_current_with(&store, &platform, &fetcher).await;
@@ -828,9 +973,7 @@ mod tests {
         let _env = setup_test_data_dir();
         let (store, _db) = test_store();
 
-        let platform = MockPlatform {
-            blob: Some("not json".to_string()),
-        };
+        let platform = MockPlatform::new(Some("not json".to_string()));
         let fetcher = MockProfileFetcher::ok("alice@example.com");
 
         let result = register_from_current_with(&store, &platform, &fetcher).await;
@@ -1099,12 +1242,11 @@ mod tests {
         // calling it twice returns JSON strings whose expiresAt differs
         // by ~1ms, which makes the post-sync comparison flaky.
         let cc_blob = fresh_blob_json();
-        let platform = MockPlatform {
-            blob: Some(cc_blob.clone()),
-        };
+        let platform = MockPlatform::new(Some(cc_blob.clone()));
         let fetcher = MockProfileFetcher::ok("alice@example.com");
+        let refresher = MockRefresher::success();
 
-        let synced = sync_from_current_cc_with(&store, &platform, &fetcher)
+        let synced = sync_from_current_cc_with(&store, &platform, &fetcher, &refresher)
             .await
             .unwrap();
 
@@ -1115,6 +1257,12 @@ mod tests {
         assert_eq!(
             store.active_cli_uuid().unwrap(),
             Some(account.uuid.to_string())
+        );
+        // Happy path never touched the refresher — no blob rotation
+        // should land in CC's keychain.
+        assert!(
+            platform.last_written().is_none(),
+            "platform.write_default must not fire when /profile succeeds"
         );
 
         swap::delete_private(account.uuid).unwrap();
@@ -1128,12 +1276,11 @@ mod tests {
         let _env = setup_test_data_dir();
         let (store, _db) = test_store();
 
-        let platform = MockPlatform {
-            blob: Some(fresh_blob_json()),
-        };
+        let platform = MockPlatform::new(Some(fresh_blob_json()));
         let fetcher = MockProfileFetcher::ok("stranger@example.com");
+        let refresher = MockRefresher::success();
 
-        let result = sync_from_current_cc_with(&store, &platform, &fetcher)
+        let result = sync_from_current_cc_with(&store, &platform, &fetcher, &refresher)
             .await
             .unwrap();
 
@@ -1150,13 +1297,143 @@ mod tests {
         let (store, _db) = test_store();
 
         insert_account(&store, "alice@example.com");
-        let platform = MockPlatform { blob: None };
+        let platform = MockPlatform::new(None);
         let fetcher = MockProfileFetcher::ok("alice@example.com");
+        let refresher = MockRefresher::success();
 
-        let result = sync_from_current_cc_with(&store, &platform, &fetcher)
+        let result = sync_from_current_cc_with(&store, &platform, &fetcher, &refresher)
             .await
             .unwrap();
         assert_eq!(result, None);
+    }
+
+    #[tokio::test]
+    async fn test_sync_refreshes_stale_access_token_and_retries_profile() {
+        // The xaiolai scenario: CC's access_token expired in the
+        // background. /profile returns 401, but the paired
+        // refresh_token is still valid. Expected behavior: sync
+        // silently rotates the tokens, writes the fresh blob back to
+        // CC's keychain, then retries /profile and completes the
+        // adopt flow. No user-facing error.
+        let _lock = crate::testing::lock_data_dir();
+        let _env = setup_test_data_dir();
+        let (store, _db) = test_store();
+
+        let account = insert_account(&store, "alice@example.com");
+        let _ = store.update_credentials_flag(account.uuid, false);
+        let cc_blob = fresh_blob_json();
+        let platform = MockPlatform::new(Some(cc_blob.clone()));
+        // First call: 401. Second call (after refresh): success.
+        let fetcher = MockProfileFetcher::sequence(vec![
+            Err(OAuthError::AuthFailed("401 Unauthorized".into())),
+            Ok(sample_profile("alice@example.com")),
+        ]);
+        let refresher = MockRefresher::success();
+
+        let synced = sync_from_current_cc_with(&store, &platform, &fetcher, &refresher)
+            .await
+            .unwrap();
+
+        assert_eq!(synced, Some(account.uuid));
+
+        // CC's keychain got the rotated blob. The new blob must carry
+        // the fresh access_token ("sk-ant-oat01-new" from
+        // MockRefresher::success) — confirming we wrote the rotated
+        // tokens back to CC and not the stale ones.
+        let written = platform
+            .last_written()
+            .expect("write_default must fire after successful refresh");
+        let written_blob = crate::blob::CredentialBlob::from_json(&written).unwrap();
+        assert_eq!(
+            written_blob.claude_ai_oauth.access_token, "sk-ant-oat01-new",
+            "CC keychain must hold the freshly-rotated access token"
+        );
+
+        // The retry used the NEW access token, not the stale one.
+        let tokens_seen = fetcher.tokens_seen();
+        assert_eq!(tokens_seen.len(), 2, "profile fetch should run twice");
+        assert_eq!(
+            tokens_seen[0], "sk-ant-oat01-test",
+            "first call must use the stale token from CC's blob"
+        );
+        assert_eq!(
+            tokens_seen[1], "sk-ant-oat01-new",
+            "retry must use the freshly-rotated access token"
+        );
+
+        // Claudepot's private slot also gets the fresh blob, and the
+        // account's active_cli pointer is set.
+        let stored = swap::load_private(account.uuid).unwrap();
+        assert_eq!(
+            stored, written,
+            "private slot must match what we wrote to CC's keychain"
+        );
+        assert_eq!(
+            store.active_cli_uuid().unwrap(),
+            Some(account.uuid.to_string())
+        );
+
+        swap::delete_private(account.uuid).unwrap();
+    }
+
+    #[tokio::test]
+    async fn test_sync_returns_auth_rejected_when_refresh_token_is_dead() {
+        // Terminal case: access_token rejected AND refresh_token
+        // refused. The user revoked access elsewhere, or the grant
+        // aged out. Expected: AuthRejected — a first-class error the
+        // UI can surface as "Sign in again" instead of the generic
+        // ProfileFetch warning that's currently dropped on the floor.
+        let _lock = crate::testing::lock_data_dir();
+        let _env = setup_test_data_dir();
+        let (store, _db) = test_store();
+
+        insert_account(&store, "alice@example.com");
+        let platform = MockPlatform::new(Some(fresh_blob_json()));
+        let fetcher = MockProfileFetcher::failing("401 Unauthorized");
+        let refresher = MockRefresher::failing("refresh_token revoked");
+
+        let result = sync_from_current_cc_with(&store, &platform, &fetcher, &refresher).await;
+
+        assert!(
+            matches!(result, Err(RegisterError::AuthRejected)),
+            "expected AuthRejected, got {:?}",
+            result
+        );
+        // We never wrote anything to CC's keychain — refresh failed
+        // before we had a fresh blob to write.
+        assert!(platform.last_written().is_none());
+    }
+
+    #[tokio::test]
+    async fn test_sync_treats_non_auth_profile_errors_as_transient() {
+        // Guardrail: refresh should only kick in for 401 (AuthFailed).
+        // Server-side errors, rate limits, and transport failures must
+        // fall through to ProfileFetch so verified_email history
+        // survives transient outages. Refresher must NOT be called.
+        let _lock = crate::testing::lock_data_dir();
+        let _env = setup_test_data_dir();
+        let (store, _db) = test_store();
+
+        insert_account(&store, "alice@example.com");
+        let platform = MockPlatform::new(Some(fresh_blob_json()));
+        let fetcher = MockProfileFetcher::failing_with(OAuthError::ServerError(
+            "502 Bad Gateway".into(),
+        ));
+        // Configure refresher to fail loudly — if sync ever dispatches
+        // it for a non-auth error, this test will catch the regression.
+        let refresher = MockRefresher::failing("refresher must not be called");
+
+        let result = sync_from_current_cc_with(&store, &platform, &fetcher, &refresher).await;
+
+        assert!(
+            matches!(result, Err(RegisterError::ProfileFetch(_))),
+            "expected ProfileFetch (transient), got {:?}",
+            result
+        );
+        assert!(
+            platform.last_written().is_none(),
+            "server errors must not trigger a keychain write"
+        );
     }
 
     // -- Group 5: account service rollbacks --
@@ -1173,9 +1450,7 @@ mod tests {
         insert_account(&store, "dup@example.com");
         let before_privates = count_private_files();
 
-        let platform = MockPlatform {
-            blob: Some(fresh_blob_json()),
-        };
+        let platform = MockPlatform::new(Some(fresh_blob_json()));
         let fetcher = MockProfileFetcher::ok("dup@example.com");
         let result = register_from_current_with(&store, &platform, &fetcher).await;
         assert!(matches!(

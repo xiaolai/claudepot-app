@@ -609,10 +609,14 @@ async fn spawn_reveal(p: &std::path::Path) -> Result<(), String> {
 /// without clicking anything.
 ///
 /// Returns the email that was synced, empty string if nothing matched,
-/// or a clearly-prefixed error message for user-facing conditions (like
-/// a locked keychain) that the UI should surface prominently.
+/// or a prefixed error message for user-facing conditions the UI should
+/// surface prominently:
+///   * `keychain is locked` — macOS login keychain needs unlocking.
+///   * `auth rejected: …` — CC's stored token is terminally dead
+///     (refresh failed). UI routes to a "Sign in again" banner.
 #[tauri::command]
 pub async fn sync_from_current_cc() -> Result<String, String> {
+    use claudepot_core::services::account_service::RegisterError;
     let store = open_store()?;
     match services::account_service::sync_from_current_cc(&store).await {
         Ok(Some(uuid)) => Ok(store
@@ -622,6 +626,12 @@ pub async fn sync_from_current_cc() -> Result<String, String> {
             .map(|a| a.email)
             .unwrap_or_default()),
         Ok(None) => Ok(String::new()),
+        Err(RegisterError::AuthRejected) => {
+            // Keep the `auth rejected:` prefix stable — the frontend
+            // pattern-matches on it to distinguish "log in again" from
+            // the generic sync-warning banner.
+            Err(format!("auth rejected: {}", RegisterError::AuthRejected))
+        }
         Err(e) => {
             let msg = e.to_string();
             if msg.contains("keychain is locked") {
