@@ -15,24 +15,122 @@
 
 use crate::preferences::PreferencesState;
 use claudepot_core::config_view::{
+    discover,
     launcher::{self, LaunchError},
     model::{
-        DetectSource, EditorCandidate, EditorDefaults, Kind, LaunchKind,
+        ConfigTree, DetectSource, EditorCandidate, EditorDefaults, FileNode,
+        Kind, LaunchKind, Node, ParseIssue, Scope, ScopeNode,
     },
+    scan,
 };
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
+use std::sync::Mutex;
 use tauri::State;
+
+/// Cached last-scanned tree, used by `config_preview` to resolve node IDs
+/// back to file paths. Rebuilt on every `config_scan`.
+#[derive(Default)]
+pub struct ConfigTreeState(pub Mutex<Option<ConfigTree>>);
 
 // ---------- DTOs ------------------------------------------------------
 
 #[derive(Serialize, Clone, Debug)]
 pub struct ConfigTreeDto {
-    pub scopes: Vec<serde_json::Value>,
+    pub scopes: Vec<ScopeNodeDto>,
     pub cwd: String,
     pub project_root: String,
     pub memory_slug: String,
     pub memory_slug_lossy: bool,
+}
+
+#[derive(Serialize, Clone, Debug)]
+pub struct ScopeNodeDto {
+    pub id: String,
+    pub label: String,
+    pub scope_type: String,
+    pub recursive_count: usize,
+    pub files: Vec<FileNodeDto>,
+}
+
+#[derive(Serialize, Clone, Debug)]
+pub struct FileNodeDto {
+    pub id: String,
+    pub kind: String,
+    pub abs_path: String,
+    pub display_path: String,
+    pub size_bytes: u64,
+    pub mtime_unix_ns: i64,
+    pub summary_title: Option<String>,
+    pub summary_description: Option<String>,
+    pub issues: Vec<String>,
+}
+
+impl From<&FileNode> for FileNodeDto {
+    fn from(f: &FileNode) -> Self {
+        Self {
+            id: f.id.clone(),
+            kind: kind_to_str(&f.kind).to_string(),
+            abs_path: f.abs_path.display().to_string(),
+            display_path: f.display_path.clone(),
+            size_bytes: f.size_bytes,
+            mtime_unix_ns: f.mtime_unix_ns,
+            summary_title: f.summary.as_ref().and_then(|s| s.title.clone()),
+            summary_description: f.summary.as_ref().and_then(|s| s.description.clone()),
+            issues: f.issues.iter().map(issue_to_str).collect(),
+        }
+    }
+}
+
+fn issue_to_str(i: &ParseIssue) -> String {
+    match i {
+        ParseIssue::MalformedJson { message } => format!("malformed_json: {message}"),
+        ParseIssue::NotASkill => "not_a_skill".to_string(),
+        ParseIssue::SymlinkLoop => "symlink_loop".to_string(),
+        ParseIssue::PermissionDenied => "permission_denied".to_string(),
+        ParseIssue::Other { message } => format!("other: {message}"),
+    }
+}
+
+fn scope_to_str(s: &Scope) -> String {
+    match s {
+        Scope::PluginBase => "plugin_base".to_string(),
+        Scope::User => "user".to_string(),
+        Scope::Project => "project".to_string(),
+        Scope::Local => "local".to_string(),
+        Scope::Flag => "flag".to_string(),
+        Scope::Policy { .. } => "policy".to_string(),
+        Scope::ClaudeMdDir { .. } => "claude_md_dir".to_string(),
+        Scope::Plugin { .. } => "plugin".to_string(),
+        Scope::MemoryCurrent => "memory_current".to_string(),
+        Scope::MemoryOther { .. } => "memory_other".to_string(),
+        Scope::Effective => "effective".to_string(),
+        Scope::RedactedUserConfig => "redacted_user_config".to_string(),
+        Scope::Other => "other".to_string(),
+    }
+}
+
+fn flatten_files(nodes: &[Node]) -> Vec<FileNodeDto> {
+    let mut out = Vec::new();
+    for n in nodes {
+        match n {
+            Node::File(f) => out.push(FileNodeDto::from(f)),
+            Node::Dir(d) => out.extend(flatten_files(&d.children)),
+        }
+    }
+    out
+}
+
+impl From<&ScopeNode> for ScopeNodeDto {
+    fn from(s: &ScopeNode) -> Self {
+        Self {
+            id: s.id.clone(),
+            label: s.label.clone(),
+            scope_type: scope_to_str(&s.scope),
+            recursive_count: s.recursive_count,
+            files: flatten_files(&s.children),
+        }
+    }
 }
 
 #[derive(Serialize, Clone, Debug)]
@@ -152,20 +250,82 @@ fn kind_from_str(s: &str) -> Option<Kind> {
 
 // ---------- Commands --------------------------------------------------
 
-/// P0 stub: return an empty tree anchored at `cwd`. Real discovery in P1.
+/// Walk the CC-mandated roots anchored at `cwd` and return the tree.
+/// Caches the full tree in `ConfigTreeState` so `config_preview` can
+/// resolve node ids without rescanning.
 #[tauri::command]
-pub async fn config_scan(cwd: Option<String>) -> Result<ConfigTreeDto, String> {
+pub async fn config_scan(
+    cwd: Option<String>,
+    tree_state: State<'_, ConfigTreeState>,
+) -> Result<ConfigTreeDto, String> {
     let cwd_path = cwd
         .map(PathBuf::from)
         .or_else(|| std::env::current_dir().ok())
         .unwrap_or_else(|| PathBuf::from("."));
-    let tree = claudepot_core::config_view::empty_tree(&cwd_path);
-    Ok(ConfigTreeDto {
-        scopes: Vec::new(),
+
+    let tree = tauri::async_runtime::spawn_blocking(move || scan(&cwd_path))
+        .await
+        .map_err(|e| format!("scan join: {e}"))?;
+
+    let dto = ConfigTreeDto {
+        scopes: tree.scopes.iter().map(ScopeNodeDto::from).collect(),
         cwd: tree.cwd.display().to_string(),
         project_root: tree.project_root.display().to_string(),
-        memory_slug: tree.memory_slug,
+        memory_slug: tree.memory_slug.clone(),
         memory_slug_lossy: tree.memory_slug_lossy,
+    };
+
+    {
+        let mut g = tree_state
+            .0
+            .lock()
+            .map_err(|e| format!("tree state lock: {e}"))?;
+        *g = Some(tree);
+    }
+    Ok(dto)
+}
+
+/// Return raw file bytes (head-only) + metadata for a node id.
+/// P2 layers secret masking on top of this — for now it reads the file
+/// head straight from disk.
+#[derive(Serialize, Clone, Debug)]
+pub struct PreviewDto {
+    pub file: FileNodeDto,
+    pub body_utf8: String,
+    pub truncated: bool,
+}
+
+#[tauri::command]
+pub fn config_preview(
+    node_id: String,
+    tree_state: State<'_, ConfigTreeState>,
+) -> Result<PreviewDto, String> {
+    const HEAD_LIMIT: u64 = 256 * 1024;
+    let guard = tree_state
+        .0
+        .lock()
+        .map_err(|e| format!("tree state lock: {e}"))?;
+    let tree = guard.as_ref().ok_or_else(|| "tree not scanned yet".to_string())?;
+    let file = discover::find_file(tree, &node_id)
+        .ok_or_else(|| format!("node not found: {node_id}"))?;
+
+    use std::io::Read;
+    let f = std::fs::File::open(&file.abs_path)
+        .map_err(|e| format!("open {}: {}", file.abs_path.display(), e))?;
+    let meta = f.metadata().map_err(|e| format!("stat: {e}"))?;
+    let truncated = meta.len() > HEAD_LIMIT;
+    let mut buf = Vec::with_capacity(std::cmp::min(HEAD_LIMIT, meta.len()) as usize);
+    let _ = f.take(HEAD_LIMIT).read_to_end(&mut buf);
+    // P2 wraps this in `mask::mask_text(...)` before it crosses the
+    // IPC boundary. Until then the UI relies on the file not holding
+    // secrets — covered by the P0 scope (only the stub config dir
+    // preview is wired in the UI).
+    let body = String::from_utf8_lossy(&buf).into_owned();
+
+    Ok(PreviewDto {
+        file: FileNodeDto::from(file),
+        body_utf8: body,
+        truncated,
     })
 }
 

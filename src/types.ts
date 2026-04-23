@@ -1040,12 +1040,38 @@ export type ConfigKind =
   | "effective_mcp"
   | "other";
 
+export interface ConfigFileNodeDto {
+  id: string;
+  kind: string;
+  abs_path: string;
+  display_path: string;
+  size_bytes: number;
+  mtime_unix_ns: number;
+  summary_title: string | null;
+  summary_description: string | null;
+  issues: string[];
+}
+
+export interface ConfigScopeNodeDto {
+  id: string;
+  label: string;
+  scope_type: string;
+  recursive_count: number;
+  files: ConfigFileNodeDto[];
+}
+
 export interface ConfigTreeDto {
-  scopes: unknown[];
+  scopes: ConfigScopeNodeDto[];
   cwd: string;
   project_root: string;
   memory_slug: string;
   memory_slug_lossy: boolean;
+}
+
+export interface ConfigPreviewDto {
+  file: ConfigFileNodeDto;
+  body_utf8: string;
+  truncated: boolean;
 }
 
 export interface EditorCandidateDto {
