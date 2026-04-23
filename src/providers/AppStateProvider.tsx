@@ -99,8 +99,6 @@ export function AppStateProvider({ children }: { children: ReactNode }) {
     pushToast,
     refresh,
     withBusy: busy.withBusy,
-    addBusy: busy.addBusy,
-    removeBusy: busy.removeBusy,
   });
 
   const [splitBrainPending, setSplitBrainPending] =

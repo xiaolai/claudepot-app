@@ -19,11 +19,9 @@ interface Deps {
   ) => void;
   refresh: () => Promise<void>;
   withBusy: <T>(key: string, fn: () => Promise<T>) => Promise<T>;
-  addBusy: (key: string) => void;
-  removeBusy: (key: string) => void;
 }
 
-export function useActions({ pushToast, refresh, withBusy, addBusy, removeBusy }: Deps) {
+export function useActions({ pushToast, refresh, withBusy }: Deps) {
   const useCli = (a: AccountSummary, force = false) =>
     withBusy(`cli-${a.uuid}`, async () => {
       try {
@@ -199,20 +197,6 @@ export function useActions({ pushToast, refresh, withBusy, addBusy, removeBusy }
     );
   };
 
-  const performClearCli = async () => {
-    addBusy("cli-clear");
-    try {
-      await api.cliClear();
-      pushToast("info", "CLI signed out.");
-      await refresh();
-      rebuildTray();
-    } catch (e) {
-      pushToast("error", `Clear CLI failed: ${e}`);
-    } finally {
-      removeBusy("cli-clear");
-    }
-  };
-
   return {
     useCli,
     login,
@@ -223,6 +207,5 @@ export function useActions({ pushToast, refresh, withBusy, addBusy, removeBusy }
     clearDesktop,
     clearDesktopConfirmed,
     performRemove,
-    performClearCli,
   };
 }

@@ -16,3 +16,5 @@ export { Toast } from "./Toast";
 export type { ToastProps } from "./Toast";
 export { ExternalLink } from "./ExternalLink";
 export { FilterChip } from "./FilterChip";
+export { TargetButton } from "./TargetButton";
+export type { TargetButtonState } from "./TargetButton";
