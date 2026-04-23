@@ -25,6 +25,8 @@ import { ScreenHeader } from "../shell/ScreenHeader";
 import type { SessionRow } from "../types";
 import { MoveSessionModal } from "./projects/MoveSessionModal";
 import { CleanupPane } from "./sessions/CleanupPane";
+import { SessionsTrendsPane } from "./sessions/components/SessionsTrendsPane";
+import { useSessionLive } from "../hooks/useSessionLive";
 import { SectionTab } from "./sessions/components/SectionTab";
 import { SessionsTabPanel } from "./sessions/components/SessionsTabPanel";
 import { buildSessionContextMenuItems } from "./sessions/sessionsContextMenu";
@@ -87,8 +89,11 @@ export function SessionsSection(props: SessionsSectionProps = {}) {
     initialFilters.current.filter,
   );
   const [query, setQueryRaw] = useState(initialFilters.current.query);
-  const [tab, setTabRaw] = useState<"sessions" | "cleanup">(
+  const [tab, setTabRaw] = useState<"sessions" | "trends" | "cleanup">(
     initialFilters.current.tab,
+  );
+  const [liveFilter, setLiveFilterRaw] = useState<boolean>(
+    initialFilters.current.liveFilter,
   );
   // Wrap each setter so every mutation funnels through the module
   // store. Using a typed helper keeps the call sites unchanged at
@@ -128,6 +133,13 @@ export function SessionsSection(props: SessionsSectionProps = {}) {
       return resolved;
     });
   }, []);
+  const setLiveFilter = useCallback<typeof setLiveFilterRaw>((next) => {
+    setLiveFilterRaw((prev) => {
+      const resolved = typeof next === "function" ? next(prev) : next;
+      writeSessionsFilter({ liveFilter: resolved });
+      return resolved;
+    });
+  }, []);
   const [detailRefreshSignal, setDetailRefreshSignal] = useState(0);
   const [toast, setToast] = useState<string | null>(null);
   const [ctxMenu, setCtxMenu] = useState<{
@@ -153,6 +165,15 @@ export function SessionsSection(props: SessionsSectionProps = {}) {
 
   // Dot on the Cleanup tab when trash is non-empty. Render-if-nonzero.
   const { count: trashCount, refresh: refreshTrash } = useTrashCount();
+
+  // Live-runtime snapshot used by the Live filter chip. `useSessionLive`
+  // is a module-scope store so this is cheap even though the Sessions
+  // section is lazy.
+  const liveSummaries = useSessionLive();
+  const liveSessionIds = useMemo(
+    () => new Set(liveSummaries.map((s) => s.session_id)),
+    [liveSummaries],
+  );
 
   // Tick once a second while a fetch is in flight so the "Updating…
   // Ns" elapsed-time label ages without re-rendering the whole table
@@ -271,14 +292,20 @@ export function SessionsSection(props: SessionsSectionProps = {}) {
   }, [deepHits]);
   const filteredByQuery = useMemo(() => {
     const q = deferredQuery.trim().toLowerCase();
-    if (!q) return scoped;
-    return scoped.filter(
-      (s) =>
-        matchesQuery(s, haystack, q) ||
-        // Deep content hit from the backend search.
-        deepHitPaths.has(s.file_path),
-    );
-  }, [scoped, deferredQuery, deepHitPaths, haystack]);
+    let rows = scoped;
+    if (q) {
+      rows = rows.filter(
+        (s) =>
+          matchesQuery(s, haystack, q) ||
+          // Deep content hit from the backend search.
+          deepHitPaths.has(s.file_path),
+      );
+    }
+    if (liveFilter) {
+      rows = rows.filter((s) => liveSessionIds.has(s.session_id));
+    }
+    return rows;
+  }, [scoped, deferredQuery, deepHitPaths, haystack, liveFilter, liveSessionIds]);
 
   const handleContextMenu = useCallback(
     (e: React.MouseEvent, s: SessionRow) => {
@@ -399,6 +426,13 @@ export function SessionsSection(props: SessionsSectionProps = {}) {
           onSelect={() => setTab("sessions")}
         />
         <SectionTab
+          id="sessions-tab-trends"
+          panelId="sessions-tab-panel-trends"
+          label="Trends"
+          active={tab === "trends"}
+          onSelect={() => setTab("trends")}
+        />
+        <SectionTab
           id="sessions-tab-cleanup"
           panelId="sessions-tab-panel-cleanup"
           label="Cleanup"
@@ -461,7 +495,24 @@ export function SessionsSection(props: SessionsSectionProps = {}) {
           onContextMenu={handleContextMenu}
           onRefresh={refresh}
           setToast={setToast}
+          liveFilter={liveFilter}
+          setLiveFilter={setLiveFilter}
+          liveCount={liveSummaries.length}
         />
+      )}
+      {tab === "trends" && (
+        <div
+          id="sessions-tab-panel-trends"
+          role="tabpanel"
+          aria-labelledby="sessions-tab-trends"
+          style={{
+            flex: 1,
+            minHeight: 0,
+            overflow: "auto",
+          }}
+        >
+          <SessionsTrendsPane />
+        </div>
       )}
 
       {moveSession && (

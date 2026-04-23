@@ -32,6 +32,11 @@ vi.mock("../api", () => ({
     // module shape must satisfy imports.
     revealInFinder: vi.fn(),
     sessionRead: vi.fn(),
+    // The Live filter chip subscribes via useSessionLive, which
+    // hydrates through sessionLiveSnapshot on first subscribe.
+    // Return an empty array so the hook resolves cleanly.
+    sessionLiveSnapshot: () => Promise.resolve([]),
+    sessionTrashList: () => Promise.resolve({ entries: [] }),
   },
 }));
 

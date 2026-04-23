@@ -203,7 +203,7 @@ describe("App shell — paper-mono", () => {
     expect(toggle).toBeInTheDocument();
   });
 
-  it("shows the activity badge when a session is errored", async () => {
+  it("shows the sessions nav badge when a live session is errored", async () => {
     await renderApp({
       app_status: () => sampleStatus({ account_count: 0 }),
       account_list: () => [],
@@ -231,11 +231,13 @@ describe("App shell — paper-mono", () => {
       }),
     });
 
-    // Wait for the Activity nav item to render; the badge should show "1"
-    // inside the same button because one session is errored.
-    const activityBtn = await screen.findByRole("button", { name: "Activity" });
+    // After the C-1 A consolidation the Activity section is gone —
+    // alerting sessions surface on the Sessions nav row badge.
+    const sessionsBtn = await screen.findByRole("button", {
+      name: "Sessions",
+    });
     await waitFor(() => {
-      expect(within(activityBtn).getByText("1")).toBeInTheDocument();
+      expect(within(sessionsBtn).getByText("1")).toBeInTheDocument();
     });
   });
 });

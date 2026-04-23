@@ -29,7 +29,11 @@ export interface SessionsFilterSnapshot {
   filter: SessionFilter;
   activeRepo: string | null;
   selectedPath: string | null;
-  tab: "sessions" | "cleanup";
+  tab: "sessions" | "trends" | "cleanup";
+  /** `true` narrows the table to sessions currently alive in the
+   *  live runtime. Stored here so a user who toggled Live on and
+   *  hopped to Accounts returns to the same filtered view. */
+  liveFilter: boolean;
 }
 
 const store: SessionsFilterSnapshot = {
@@ -38,6 +42,7 @@ const store: SessionsFilterSnapshot = {
   activeRepo: null,
   selectedPath: null,
   tab: "sessions",
+  liveFilter: false,
 };
 
 export function readSessionsFilter(): SessionsFilterSnapshot {
@@ -55,4 +60,5 @@ export function resetSessionsFilterForTest(): void {
   store.activeRepo = null;
   store.selectedPath = null;
   store.tab = "sessions";
+  store.liveFilter = false;
 }

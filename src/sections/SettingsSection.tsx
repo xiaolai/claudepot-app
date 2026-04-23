@@ -55,7 +55,6 @@ const SECTION_OPTIONS = [
   { value: "accounts", label: "Accounts" },
   { value: "projects", label: "Projects" },
   { value: "sessions", label: "Sessions" },
-  { value: "activity", label: "Activity" },
   { value: "keys",     label: "Keys"     },
   { value: "settings", label: "Settings" },
 ] as const;
