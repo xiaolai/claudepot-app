@@ -359,6 +359,30 @@ pub struct DesktopReconcileOutcome {
     pub orphan_pointer_cleared: bool,
 }
 
+#[derive(Serialize, Clone, Debug)]
+pub struct DesktopAdoptOutcome {
+    pub account_email: String,
+    pub captured_items: usize,
+    pub size_bytes: u64,
+}
+
+#[derive(Serialize, Clone, Debug)]
+pub struct DesktopClearOutcome {
+    pub email: Option<String>,
+    pub snapshot_kept: bool,
+    pub items_deleted: usize,
+}
+
+#[derive(Serialize, Clone, Debug)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum DesktopSyncOutcome {
+    NoLive,
+    Verified { email: String },
+    AdoptionAvailable { email: String },
+    Stranger { email: String },
+    CandidateOnly { email: String },
+}
+
 // ---------------------------------------------------------------------------
 // Project DTOs — read-only surface (Step 2 of gui-rename plan)
 // ---------------------------------------------------------------------------

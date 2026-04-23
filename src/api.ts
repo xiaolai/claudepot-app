@@ -10,8 +10,11 @@ import type {
   BreakLockOutcome,
   CcIdentity,
   CleanPreview,
+  DesktopAdoptOutcome,
+  DesktopClearOutcome,
   DesktopIdentity,
   DesktopReconcileOutcome,
+  DesktopSyncOutcome,
   DryRunPlan,
   GcOutcome,
   JournalEntry,
@@ -82,6 +85,22 @@ export const api = {
   /// command surfaces the outcome for "Reconcile now" affordances.
   desktopReconcile: () =>
     invoke<DesktopReconcileOutcome>("desktop_reconcile"),
+  /// Adopt the live Desktop session into `uuid`'s snapshot directory.
+  /// Always verifies identity via the authoritative Decrypted path
+  /// before mutating — fast-path candidates cannot drive adoption.
+  desktopAdopt: (uuid: string, overwrite: boolean) =>
+    invoke<DesktopAdoptOutcome>("desktop_adopt", { uuid, overwrite }),
+  /// Sign Desktop out. `keepSnapshot=true` (default) preserves the
+  /// current session as a snapshot under the active account.
+  desktopClear: (keepSnapshot: boolean) =>
+    invoke<DesktopClearOutcome>("desktop_clear", { keepSnapshot }),
+  /// Startup / window-focus sync. Read-only (no disk mutation); at
+  /// most refreshes the active_desktop pointer cache.
+  syncFromCurrentDesktop: () =>
+    invoke<DesktopSyncOutcome>("sync_from_current_desktop"),
+  desktopIsRunning: () => invoke<boolean>("desktop_is_running"),
+  desktopLaunch: () => invoke<void>("desktop_launch"),
+  desktopQuit: () => invoke<void>("desktop_quit"),
   accountAddFromCurrent: () =>
     invoke<RegisterOutcome>("account_add_from_current"),
   /// Browser OAuth onboarding — spawns `claude auth login` in a temp

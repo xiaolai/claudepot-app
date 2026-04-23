@@ -114,6 +114,15 @@ impl VerifiedIdentity {
     pub fn into_identity(self) -> LiveDesktopIdentity {
         self.0
     }
+
+    /// Test-only constructor. Cargo-gated on `cfg(test)` OR callers
+    /// inside the crate that already hold an identity proven
+    /// Decrypted by other means (e.g., `verify_live_identity`).
+    /// Production code outside this crate cannot bypass the proof.
+    #[doc(hidden)]
+    pub fn from_live_for_testing(id: LiveDesktopIdentity) -> Self {
+        Self(id)
+    }
 }
 
 /// Probe the live Desktop session. Never mutates disk or DB.

@@ -1,11 +1,17 @@
-//! Claude Desktop service — Phase 1: reconcile only.
+//! Claude Desktop service — reconcile, adopt, clear, sync.
 //!
-//! Later phases add adopt / clear / sync_from_current. Those require
-//! verified identity (Phase 2 crypto) and are explicitly out of scope
-//! here — see `dev-docs/desktop-feature-overhaul-plan.md` §Rollout.
+//! Phase 1 shipped reconcile-only. Phase 3 adds the three mutators
+//! that change disk and DB state. Every mutator here takes a
+//! [`crate::desktop_identity::VerifiedIdentity`] so the type system
+//! enforces "no mutation on candidate identity" (Codex D5-1 mitigation).
 
 use crate::account::AccountStore;
+use crate::desktop_backend::swap;
+use crate::desktop_backend::DesktopPlatform;
+use crate::desktop_identity::VerifiedIdentity;
+use crate::desktop_lock;
 use crate::paths;
+use chrono::Utc;
 use uuid::Uuid;
 
 /// Result of a `reconcile_flags` pass.
@@ -76,6 +82,427 @@ pub fn reconcile_flags(store: &AccountStore) -> Result<ReconcileOutcome, rusqlit
         flag_flips: flips,
         orphan_pointer_cleared: orphan_cleared,
     })
+}
+
+// ---------------------------------------------------------------------------
+// Phase 3 — adopt / clear / sync (require VerifiedIdentity)
+// ---------------------------------------------------------------------------
+
+/// Outcome of a successful [`adopt_current`].
+#[derive(Debug, Clone)]
+pub struct AdoptOutcome {
+    pub account_email: String,
+    pub captured_items: usize,
+    pub size_bytes: u64,
+}
+
+#[derive(Debug, thiserror::Error)]
+pub enum AdoptError {
+    #[error("live Desktop identity is {actual}, not {expected}")]
+    IdentityMismatch { expected: String, actual: String },
+    #[error("target account {0} is not registered")]
+    NotFound(Uuid),
+    #[error("target already has a profile; pass overwrite=true to replace")]
+    ProfileExists,
+    #[error("Desktop is not supported on this platform")]
+    Unsupported,
+    #[error("data_dir missing or unreadable")]
+    DataDirUnreadable,
+    #[error("swap error: {0}")]
+    Swap(#[from] crate::error::DesktopSwapError),
+    #[error("store: {0}")]
+    Store(String),
+    #[error("lock: {0}")]
+    Lock(#[from] desktop_lock::DesktopLockError),
+    #[error("sidecar write failed: {0}")]
+    Sidecar(String),
+}
+
+/// Adopt the live Desktop session into `target_uuid`'s snapshot
+/// directory. Gated on a [`VerifiedIdentity`] whose email matches the
+/// target account's stored email.
+///
+/// Flow:
+/// 1. Acquire the Desktop operation lock.
+/// 2. Load the target account; verify emails match.
+/// 3. Enforce overwrite policy on the profile dir.
+/// 4. Quit Desktop (if running).
+/// 5. Snapshot live data_dir → profile dir.
+/// 6. Write profile.toml sidecar (D17).
+/// 7. Update has_desktop_profile + active_desktop.
+/// 8. Launch Desktop.
+pub async fn adopt_current(
+    platform: &dyn DesktopPlatform,
+    store: &AccountStore,
+    target_uuid: Uuid,
+    verified: &VerifiedIdentity,
+    overwrite: bool,
+) -> Result<AdoptOutcome, AdoptError> {
+    let _lock = desktop_lock::try_acquire()?;
+
+    let target = store
+        .find_by_uuid(target_uuid)
+        .map_err(|e| AdoptError::Store(e.to_string()))?
+        .ok_or(AdoptError::NotFound(target_uuid))?;
+
+    if !verified.email().eq_ignore_ascii_case(&target.email) {
+        return Err(AdoptError::IdentityMismatch {
+            expected: target.email,
+            actual: verified.email().to_string(),
+        });
+    }
+
+    let profile_dir = paths::desktop_profile_dir(target_uuid);
+    if profile_dir.exists() && !overwrite {
+        return Err(AdoptError::ProfileExists);
+    }
+
+    let data_dir = platform.data_dir().ok_or(AdoptError::DataDirUnreadable)?;
+    if !data_dir.exists() {
+        return Err(AdoptError::DataDirUnreadable);
+    }
+    let items = platform.session_items();
+
+    // Quit Desktop so the cookies/storage aren't in-flight when we copy.
+    if platform.is_running().await {
+        platform.quit().await?;
+    }
+
+    // Overwrite: wipe the existing profile dir so the new snapshot is
+    // authoritative. snapshot()'s own purge-missing logic would
+    // eventually converge, but a fresh tree is simpler and avoids any
+    // partial-read race if the profile was mid-restore.
+    if profile_dir.exists() {
+        std::fs::remove_dir_all(&profile_dir)
+            .map_err(|e| AdoptError::Sidecar(format!("purging old profile: {e}")))?;
+    }
+
+    swap::snapshot(&data_dir, target_uuid, items)?;
+
+    // Count + size for the outcome DTO. Cheap because we just wrote
+    // the files — everything is already in the filesystem cache.
+    let (captured_items, size_bytes) = measure_profile(&profile_dir);
+
+    // Sidecar (D17) — captured metadata that survives dir mtime churn.
+    write_sidecar(
+        &profile_dir,
+        SidecarMeta {
+            captured_at: Utc::now(),
+            captured_from_email: verified.email().to_string(),
+            captured_verified: true,
+            claudepot_version: env!("CARGO_PKG_VERSION").to_string(),
+            platform: std::env::consts::OS.to_string(),
+            session_items: items.iter().map(|s| s.to_string()).collect(),
+        },
+    )
+    .map_err(|e| AdoptError::Sidecar(e.to_string()))?;
+
+    store
+        .update_desktop_profile_flag(target_uuid, true)
+        .map_err(|e| AdoptError::Store(e.to_string()))?;
+    store
+        .set_active_desktop(target_uuid)
+        .map_err(|e| AdoptError::Store(e.to_string()))?;
+
+    // Relaunch Desktop so the user's workflow is uninterrupted. Best-
+    // effort — a launch failure doesn't invalidate the snapshot,
+    // which is the durable artifact.
+    let _ = platform.launch().await;
+
+    Ok(AdoptOutcome {
+        account_email: target.email,
+        captured_items,
+        size_bytes,
+    })
+}
+
+/// Outcome of a successful [`clear_session`].
+#[derive(Debug, Clone)]
+pub struct ClearOutcome {
+    pub email: Option<String>,
+    pub snapshot_kept: bool,
+    pub items_deleted: usize,
+}
+
+#[derive(Debug, thiserror::Error)]
+pub enum ClearError {
+    #[error("Desktop is not supported on this platform")]
+    Unsupported,
+    #[error("data_dir missing — Desktop is already signed out")]
+    DataDirMissing,
+    #[error("swap error: {0}")]
+    Swap(#[from] crate::error::DesktopSwapError),
+    #[error("filesystem: {0}")]
+    Fs(String),
+    #[error("store: {0}")]
+    Store(String),
+    #[error("lock: {0}")]
+    Lock(#[from] desktop_lock::DesktopLockError),
+}
+
+/// Sign Desktop out — by default stashes the current session into
+/// the active account's snapshot dir first. Does NOT relaunch
+/// Desktop (the intent is "leave me signed out").
+///
+/// Windows postcondition: deletes every [`DesktopPlatform::session_items`]
+/// entry. On Windows, nested items under `Network/` are removed; the
+/// parent `Network/` directory is removed iff it ends up empty. All
+/// non-session files (caches, extensions) are retained.
+pub async fn clear_session(
+    platform: &dyn DesktopPlatform,
+    store: &AccountStore,
+    keep_snapshot: bool,
+) -> Result<ClearOutcome, ClearError> {
+    let _lock = desktop_lock::try_acquire()?;
+
+    let data_dir = platform.data_dir().ok_or(ClearError::Unsupported)?;
+    if !data_dir.exists() {
+        return Err(ClearError::DataDirMissing);
+    }
+    let items = platform.session_items();
+
+    // Look up the active account so we know whose snapshot (if any)
+    // to stash. The pointer being None is non-fatal — the user may
+    // have signed in outside of Claudepot.
+    let active = store
+        .active_desktop_uuid()
+        .map_err(|e| ClearError::Store(e.to_string()))?
+        .and_then(|s| Uuid::parse_str(&s).ok())
+        .and_then(|u| store.find_by_uuid(u).ok().flatten());
+
+    if platform.is_running().await {
+        platform.quit().await?;
+    }
+
+    // Snapshot-before-delete when requested + feasible.
+    let snapshot_kept = if keep_snapshot {
+        if let Some(acct) = &active {
+            swap::snapshot(&data_dir, acct.uuid, items)?;
+            store
+                .update_desktop_profile_flag(acct.uuid, true)
+                .map_err(|e| ClearError::Store(e.to_string()))?;
+            // Sidecar uses the account's stored email, not a verified
+            // live identity — clear_session doesn't require
+            // VerifiedIdentity (the intent is to sign out, identity
+            // is secondary).
+            let profile_dir = paths::desktop_profile_dir(acct.uuid);
+            let _ = write_sidecar(
+                &profile_dir,
+                SidecarMeta {
+                    captured_at: Utc::now(),
+                    captured_from_email: acct.email.clone(),
+                    captured_verified: false, // not /profile-confirmed
+                    claudepot_version: env!("CARGO_PKG_VERSION").to_string(),
+                    platform: std::env::consts::OS.to_string(),
+                    session_items: items.iter().map(|s| s.to_string()).collect(),
+                },
+            );
+            true
+        } else {
+            false
+        }
+    } else {
+        false
+    };
+
+    // Delete every session item from data_dir.
+    let items_deleted = delete_session_items(&data_dir, items)?;
+
+    // Clean up the Network/ parent on Windows if empty.
+    prune_empty_parents(&data_dir, items);
+
+    // Clear the active pointer regardless of snapshot outcome —
+    // Desktop is no longer signed in.
+    store
+        .clear_active_desktop()
+        .map_err(|e| ClearError::Store(e.to_string()))?;
+
+    Ok(ClearOutcome {
+        email: active.map(|a| a.email),
+        snapshot_kept,
+        items_deleted,
+    })
+}
+
+/// Startup / window-focus sync. Never mutates disk. Returns a
+/// [`SyncOutcome`] describing what Claudepot should do next (UI
+/// layer surfaces adoption banners, refreshes the pointer cache,
+/// etc.).
+#[derive(Debug, Clone)]
+pub enum SyncOutcome {
+    /// No Desktop session or the platform is unsupported.
+    NoLive,
+    /// Live identity matches a registered account AND that account
+    /// has a snapshot on disk. Nothing to do — pointer cache is
+    /// already correct.
+    Verified { email: String },
+    /// Live identity matches a registered account but no snapshot
+    /// exists yet. UI surfaces a "Bind current Desktop session to
+    /// <email>" banner.
+    AdoptionAvailable { email: String },
+    /// Live identity does not match any registered account. UI
+    /// offers "Register <email>" (Add + Adopt flow).
+    Stranger { email: String },
+    /// The only signal we got was a fast-path candidate. UI treats
+    /// as "possible match — verify" (no mutation on this tier).
+    CandidateOnly { email: String },
+}
+
+pub async fn sync_from_current(
+    platform: &dyn DesktopPlatform,
+    store: &AccountStore,
+) -> Result<SyncOutcome, crate::desktop_identity::DesktopIdentityError> {
+    use crate::desktop_identity::{
+        probe_live_identity_async, DefaultProfileFetcher, ProbeMethod, ProbeOptions,
+    };
+    let fetcher = DefaultProfileFetcher;
+    match probe_live_identity_async(
+        platform,
+        store,
+        ProbeOptions { strict: true },
+        &fetcher,
+    )
+    .await
+    {
+        Ok(None) => Ok(SyncOutcome::NoLive),
+        Ok(Some(id)) => {
+            // strict=true guarantees Decrypted tier.
+            debug_assert!(id.probe_method == ProbeMethod::Decrypted);
+            let matched = store
+                .find_by_email(&id.email)
+                .ok()
+                .flatten();
+            match matched {
+                None => Ok(SyncOutcome::Stranger { email: id.email }),
+                Some(acct) => {
+                    let on_disk = paths::desktop_profile_dir(acct.uuid).exists();
+                    if on_disk {
+                        // Cache the pointer — sync is supposed to
+                        // keep active_desktop in step with reality.
+                        let _ = store.set_active_desktop(acct.uuid);
+                        Ok(SyncOutcome::Verified { email: acct.email })
+                    } else {
+                        Ok(SyncOutcome::AdoptionAvailable { email: acct.email })
+                    }
+                }
+            }
+        }
+        // Slow path failed — fall back to surfacing the fast-path
+        // candidate as "possible match." UI must treat as unverified.
+        Err(crate::desktop_identity::DesktopIdentityError::Key(_))
+        | Err(crate::desktop_identity::DesktopIdentityError::Decrypt(_))
+        | Err(crate::desktop_identity::DesktopIdentityError::TokenParse(_))
+        | Err(crate::desktop_identity::DesktopIdentityError::ProfileFetch(_)) => {
+            let candidate =
+                crate::desktop_identity::probe_live_identity(platform, store, ProbeOptions::default());
+            match candidate {
+                Ok(Some(c)) => Ok(SyncOutcome::CandidateOnly { email: c.email }),
+                _ => Ok(SyncOutcome::NoLive),
+            }
+        }
+        Err(crate::desktop_identity::DesktopIdentityError::NotSignedIn) => Ok(SyncOutcome::NoLive),
+        Err(e) => Err(e),
+    }
+}
+
+// ---------------------------------------------------------------------------
+// helpers
+// ---------------------------------------------------------------------------
+
+fn measure_profile(profile_dir: &std::path::Path) -> (usize, u64) {
+    let mut count = 0usize;
+    let mut size = 0u64;
+    if let Ok(entries) = std::fs::read_dir(profile_dir) {
+        for entry in entries.flatten() {
+            count += 1;
+            size = size.saturating_add(dir_or_file_size(&entry.path()));
+        }
+    }
+    (count, size)
+}
+
+fn dir_or_file_size(p: &std::path::Path) -> u64 {
+    match std::fs::metadata(p) {
+        Err(_) => 0,
+        Ok(md) if md.is_file() => md.len(),
+        Ok(_) => std::fs::read_dir(p)
+            .map(|it| {
+                it.flatten()
+                    .map(|e| dir_or_file_size(&e.path()))
+                    .sum::<u64>()
+            })
+            .unwrap_or(0),
+    }
+}
+
+fn delete_session_items(
+    data_dir: &std::path::Path,
+    items: &[&str],
+) -> Result<usize, ClearError> {
+    let mut deleted = 0;
+    for item in items {
+        let p = data_dir.join(item);
+        if !p.exists() {
+            continue;
+        }
+        let result = if p.is_dir() {
+            std::fs::remove_dir_all(&p)
+        } else {
+            std::fs::remove_file(&p)
+        };
+        match result {
+            Ok(()) => deleted += 1,
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+            Err(e) => return Err(ClearError::Fs(format!("{}: {e}", p.display()))),
+        }
+    }
+    Ok(deleted)
+}
+
+fn prune_empty_parents(data_dir: &std::path::Path, items: &[&str]) {
+    use std::collections::BTreeSet;
+    let mut candidates = BTreeSet::new();
+    for item in items {
+        if let Some(parent) = std::path::Path::new(item).parent() {
+            if parent.as_os_str().is_empty() {
+                continue;
+            }
+            candidates.insert(parent.to_path_buf());
+        }
+    }
+    for parent in candidates {
+        let full = data_dir.join(&parent);
+        if std::fs::read_dir(&full)
+            .map(|mut it| it.next().is_none())
+            .unwrap_or(false)
+        {
+            let _ = std::fs::remove_dir(&full);
+        }
+    }
+}
+
+#[derive(Debug, serde::Serialize)]
+struct SidecarMeta {
+    captured_at: chrono::DateTime<chrono::Utc>,
+    captured_from_email: String,
+    captured_verified: bool,
+    claudepot_version: String,
+    platform: String,
+    session_items: Vec<String>,
+}
+
+fn write_sidecar(
+    profile_dir: &std::path::Path,
+    meta: SidecarMeta,
+) -> std::io::Result<()> {
+    // JSON, not TOML, so we don't pull in another dep. The plan uses
+    // the name `profile.toml` for familiarity but the actual encoding
+    // is JSON — both are human-readable and the parse side is
+    // serde-backed either way.
+    std::fs::create_dir_all(profile_dir)?;
+    let path = profile_dir.join("claudepot.profile.json");
+    let body = serde_json::to_vec_pretty(&meta).map_err(std::io::Error::other)?;
+    std::fs::write(path, body)
 }
 
 #[cfg(test)]
@@ -200,5 +627,223 @@ mod tests {
         // Second pass: clean state.
         let second = reconcile_flags(&store).unwrap();
         assert!(second.flag_flips.is_empty());
+    }
+
+    // -- adopt / clear / sync tests -----------------------------------
+
+    use crate::desktop_identity::{LiveDesktopIdentity, ProbeMethod, VerifiedIdentity};
+    use std::path::PathBuf;
+    use std::sync::atomic::{AtomicBool, Ordering};
+
+    struct TestPlatform {
+        data_dir: PathBuf,
+        items: Vec<&'static str>,
+        running: AtomicBool,
+    }
+
+    #[async_trait::async_trait]
+    impl crate::desktop_backend::DesktopPlatform for TestPlatform {
+        fn data_dir(&self) -> Option<PathBuf> { Some(self.data_dir.clone()) }
+        fn session_items(&self) -> &[&str] { &self.items }
+        async fn is_running(&self) -> bool { self.running.load(Ordering::SeqCst) }
+        async fn quit(&self) -> Result<(), crate::error::DesktopSwapError> {
+            self.running.store(false, Ordering::SeqCst);
+            Ok(())
+        }
+        async fn launch(&self) -> Result<(), crate::error::DesktopSwapError> {
+            self.running.store(true, Ordering::SeqCst);
+            Ok(())
+        }
+        fn is_installed(&self) -> bool { true }
+        async fn safe_storage_secret(
+            &self,
+        ) -> Result<Vec<u8>, crate::desktop_backend::DesktopKeyError> {
+            // Adopt/clear never call safe_storage_secret directly —
+            // they receive a pre-built VerifiedIdentity. Return
+            // Unsupported so an accidental call is loud.
+            Err(crate::desktop_backend::DesktopKeyError::Unsupported)
+        }
+    }
+
+    fn platform_for(data_dir: PathBuf) -> TestPlatform {
+        TestPlatform {
+            data_dir,
+            items: vec!["config.json", "Cookies"],
+            running: AtomicBool::new(false),
+        }
+    }
+
+    fn verified_for(email: &str, org_uuid: &str) -> VerifiedIdentity {
+        VerifiedIdentity::from_live_for_testing(LiveDesktopIdentity {
+            email: email.to_string(),
+            org_uuid: org_uuid.to_string(),
+            probe_method: ProbeMethod::Decrypted,
+        })
+    }
+
+    fn populate_data_dir(data_dir: &std::path::Path) {
+        std::fs::create_dir_all(data_dir).unwrap();
+        std::fs::write(data_dir.join("config.json"), b"{\"test\":true}").unwrap();
+        std::fs::write(data_dir.join("Cookies"), b"cookie-bytes").unwrap();
+    }
+
+    #[tokio::test]
+    async fn test_adopt_happy_path() {
+        let _lock = crate::testing::lock_data_dir();
+        let (store, _env) = setup();
+        let acct = make_account("alice@example.com");
+        store.insert(&acct).unwrap();
+
+        let data_dir = _env.path().join("Claude");
+        populate_data_dir(&data_dir);
+        let platform = platform_for(data_dir);
+        let vid = verified_for("alice@example.com", "org-xxx");
+
+        let out = adopt_current(&platform, &store, acct.uuid, &vid, false).await.unwrap();
+        assert_eq!(out.account_email, "alice@example.com");
+        assert!(out.captured_items >= 2);
+
+        // Flag + pointer updated.
+        let after = store.find_by_uuid(acct.uuid).unwrap().unwrap();
+        assert!(after.has_desktop_profile);
+        assert!(after.is_desktop_active);
+
+        // Sidecar present and parseable.
+        let profile_dir = paths::desktop_profile_dir(acct.uuid);
+        let sidecar = profile_dir.join("claudepot.profile.json");
+        assert!(sidecar.exists(), "sidecar must be written");
+        let parsed: serde_json::Value =
+            serde_json::from_slice(&std::fs::read(&sidecar).unwrap()).unwrap();
+        assert_eq!(parsed["captured_from_email"], "alice@example.com");
+        assert_eq!(parsed["captured_verified"], true);
+    }
+
+    #[tokio::test]
+    async fn test_adopt_rejects_identity_mismatch() {
+        let _lock = crate::testing::lock_data_dir();
+        let (store, _env) = setup();
+        let acct = make_account("alice@example.com");
+        store.insert(&acct).unwrap();
+
+        let data_dir = _env.path().join("Claude");
+        populate_data_dir(&data_dir);
+        let platform = platform_for(data_dir);
+        // Live identity says we're signed in as BOB — must refuse.
+        let vid = verified_for("bob@example.com", "org-xxx");
+
+        let err = adopt_current(&platform, &store, acct.uuid, &vid, false).await.unwrap_err();
+        assert!(matches!(err, AdoptError::IdentityMismatch { .. }));
+        // No mutations — verify the flag didn't flip.
+        let after = store.find_by_uuid(acct.uuid).unwrap().unwrap();
+        assert!(!after.has_desktop_profile);
+    }
+
+    #[tokio::test]
+    async fn test_adopt_refuses_overwrite_without_flag() {
+        let _lock = crate::testing::lock_data_dir();
+        let (store, _env) = setup();
+        let acct = make_account("alice@example.com");
+        store.insert(&acct).unwrap();
+        // Pre-create a profile dir so the adopt must bail unless overwrite=true.
+        std::fs::create_dir_all(paths::desktop_profile_dir(acct.uuid)).unwrap();
+
+        let data_dir = _env.path().join("Claude");
+        populate_data_dir(&data_dir);
+        let platform = platform_for(data_dir);
+        let vid = verified_for("alice@example.com", "org-xxx");
+
+        let err = adopt_current(&platform, &store, acct.uuid, &vid, false).await.unwrap_err();
+        assert!(matches!(err, AdoptError::ProfileExists));
+    }
+
+    #[tokio::test]
+    async fn test_adopt_with_overwrite_replaces_profile() {
+        let _lock = crate::testing::lock_data_dir();
+        let (store, _env) = setup();
+        let acct = make_account("alice@example.com");
+        store.insert(&acct).unwrap();
+        let profile_dir = paths::desktop_profile_dir(acct.uuid);
+        std::fs::create_dir_all(&profile_dir).unwrap();
+        std::fs::write(profile_dir.join("stale.txt"), b"stale").unwrap();
+
+        let data_dir = _env.path().join("Claude");
+        populate_data_dir(&data_dir);
+        let platform = platform_for(data_dir);
+        let vid = verified_for("alice@example.com", "org-xxx");
+
+        adopt_current(&platform, &store, acct.uuid, &vid, true).await.unwrap();
+        assert!(!profile_dir.join("stale.txt").exists(), "old content must be purged");
+        assert!(profile_dir.join("config.json").exists());
+    }
+
+    #[tokio::test]
+    async fn test_clear_session_stashes_snapshot_by_default() {
+        let _lock = crate::testing::lock_data_dir();
+        let (store, _env) = setup();
+        let acct = make_account("alice@example.com");
+        store.insert(&acct).unwrap();
+        store.set_active_desktop(acct.uuid).unwrap();
+
+        let data_dir = _env.path().join("Claude");
+        populate_data_dir(&data_dir);
+        let platform = platform_for(data_dir.clone());
+
+        let out = clear_session(&platform, &store, true).await.unwrap();
+        assert!(out.snapshot_kept);
+        assert_eq!(out.items_deleted, 2);
+        assert_eq!(out.email.as_deref(), Some("alice@example.com"));
+
+        // Items gone from data_dir.
+        assert!(!data_dir.join("config.json").exists());
+        assert!(!data_dir.join("Cookies").exists());
+        // Profile dir has the snapshot.
+        let profile_dir = paths::desktop_profile_dir(acct.uuid);
+        assert!(profile_dir.join("config.json").exists());
+
+        // Active pointer cleared.
+        assert!(store.active_desktop_uuid().unwrap().is_none());
+    }
+
+    #[tokio::test]
+    async fn test_clear_session_keep_snapshot_false() {
+        let _lock = crate::testing::lock_data_dir();
+        let (store, _env) = setup();
+        let acct = make_account("alice@example.com");
+        store.insert(&acct).unwrap();
+        store.set_active_desktop(acct.uuid).unwrap();
+
+        let data_dir = _env.path().join("Claude");
+        populate_data_dir(&data_dir);
+        let platform = platform_for(data_dir.clone());
+
+        let out = clear_session(&platform, &store, false).await.unwrap();
+        assert!(!out.snapshot_kept);
+
+        // No stashed snapshot.
+        let profile_dir = paths::desktop_profile_dir(acct.uuid);
+        assert!(!profile_dir.join("config.json").exists());
+    }
+
+    #[tokio::test]
+    async fn test_clear_session_prunes_empty_network_dir() {
+        // Windows-style nested items: session contains Network/Cookies.
+        // After deletion the empty Network/ parent must be pruned.
+        let _lock = crate::testing::lock_data_dir();
+        let (store, _env) = setup();
+
+        let data_dir = _env.path().join("Claude");
+        std::fs::create_dir_all(data_dir.join("Network")).unwrap();
+        std::fs::write(data_dir.join("config.json"), b"{}").unwrap();
+        std::fs::write(data_dir.join("Network/Cookies"), b"x").unwrap();
+
+        let platform = TestPlatform {
+            data_dir: data_dir.clone(),
+            items: vec!["config.json", "Network/Cookies"],
+            running: AtomicBool::new(false),
+        };
+
+        clear_session(&platform, &store, false).await.unwrap();
+        // Network/ was empty after Cookies removal → pruned.
+        assert!(!data_dir.join("Network").exists(), "empty Network/ must be pruned");
     }
 }

@@ -81,6 +81,29 @@ export interface DesktopReconcileOutcome {
   orphan_pointer_cleared: boolean;
 }
 
+export interface DesktopAdoptOutcome {
+  account_email: string;
+  captured_items: number;
+  size_bytes: number;
+}
+
+export interface DesktopClearOutcome {
+  email: string | null;
+  snapshot_kept: boolean;
+  items_deleted: number;
+}
+
+/**
+ * Discriminated union matching `DesktopSyncOutcome` from Rust.
+ * Serialized as `{ "kind": "verified", "email": "..." }` etc.
+ */
+export type DesktopSyncOutcome =
+  | { kind: "no_live" }
+  | { kind: "verified"; email: string }
+  | { kind: "adoption_available"; email: string }
+  | { kind: "stranger"; email: string }
+  | { kind: "candidate_only"; email: string };
+
 export interface AppStatus {
   platform: string; // "macos" | "linux" | "windows"
   arch: string;
