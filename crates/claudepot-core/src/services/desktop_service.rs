@@ -138,8 +138,9 @@ pub async fn adopt_current(
     verified: &VerifiedIdentity,
     overwrite: bool,
 ) -> Result<AdoptOutcome, AdoptError> {
-    let _lock = desktop_lock::try_acquire()?;
-
+    // Target + identity checks run BEFORE prelude — they're cheap,
+    // don't need the lock, and failing fast keeps us from quitting
+    // Desktop for an op that can't succeed.
     let target = store
         .find_by_uuid(target_uuid)
         .map_err(|e| AdoptError::Store(e.to_string()))?
@@ -157,16 +158,18 @@ pub async fn adopt_current(
         return Err(AdoptError::ProfileExists);
     }
 
-    let data_dir = platform.data_dir().ok_or(AdoptError::DataDirUnreadable)?;
-    if !data_dir.exists() {
-        return Err(AdoptError::DataDirUnreadable);
-    }
-    let items = platform.session_items();
-
-    // Quit Desktop so the cookies/storage aren't in-flight when we copy.
-    if platform.is_running().await {
-        platform.quit().await?;
-    }
+    // Shared prelude: acquires lock, resolves data_dir, quits Desktop.
+    let prelude = desktop_prelude(platform)
+        .await
+        .map_err(|e| match e {
+            crate::error::DesktopSwapError::Io(io) if io.to_string().contains("in progress") => {
+                AdoptError::Lock(crate::desktop_lock::DesktopLockError::Held)
+            }
+            crate::error::DesktopSwapError::NotInstalled => AdoptError::DataDirUnreadable,
+            other => AdoptError::Swap(other),
+        })?;
+    let data_dir = &prelude.data_dir;
+    let items = prelude.items;
 
     // Overwrite-safe: stage the old profile into a temp dir first so
     // we can roll back if snapshot() fails. Codex follow-up review:
@@ -271,13 +274,16 @@ pub async fn clear_session(
     store: &AccountStore,
     keep_snapshot: bool,
 ) -> Result<ClearOutcome, ClearError> {
-    let _lock = desktop_lock::try_acquire()?;
-
-    let data_dir = platform.data_dir().ok_or(ClearError::Unsupported)?;
-    if !data_dir.exists() {
-        return Err(ClearError::DataDirMissing);
-    }
-    let items = platform.session_items();
+    // Shared prelude: acquires lock, resolves data_dir, quits Desktop.
+    let prelude = desktop_prelude(platform).await.map_err(|e| match e {
+        crate::error::DesktopSwapError::Io(io) if io.to_string().contains("in progress") => {
+            ClearError::Lock(crate::desktop_lock::DesktopLockError::Held)
+        }
+        crate::error::DesktopSwapError::NotInstalled => ClearError::DataDirMissing,
+        other => ClearError::Swap(other),
+    })?;
+    let data_dir = &prelude.data_dir;
+    let items = prelude.items;
 
     // Look up the active account so we know whose snapshot (if any)
     // to stash. The pointer being None is non-fatal — the user may
@@ -287,10 +293,6 @@ pub async fn clear_session(
         .map_err(|e| ClearError::Store(e.to_string()))?
         .and_then(|s| Uuid::parse_str(&s).ok())
         .and_then(|u| store.find_by_uuid(u).ok().flatten());
-
-    if platform.is_running().await {
-        platform.quit().await?;
-    }
 
     // Snapshot-before-delete when requested + feasible.
     let snapshot_kept = if keep_snapshot {
@@ -497,6 +499,62 @@ fn prune_empty_parents(data_dir: &std::path::Path, items: &[&str]) {
             let _ = std::fs::remove_dir(&full);
         }
     }
+}
+
+/// Shared preamble for Desktop mutators — acquires the operation
+/// lock, resolves `data_dir`, and quits Desktop if running. Each
+/// mutator previously inlined this shape; centralising it makes
+/// the precondition contract explicit and avoids drift.
+///
+/// Consciously NOT the full `execute_plan` collapse plan-v2 §Phase 7
+/// proposed: Codex D5-4 flagged that as HIGH blast-radius because
+/// `switch` / `adopt_current` / `clear_session` have distinct
+/// rollback semantics. Each mutator keeps its own body + rollback —
+/// only the ~15 lines of shared setup live here.
+#[doc(hidden)]
+pub(crate) struct DesktopPrelude<'a> {
+    pub data_dir: std::path::PathBuf,
+    pub items: &'a [&'a str],
+    // Holds the flock for the full lifetime of the mutator. Dropped
+    // when the mutator returns, releasing the lock.
+    _lock: crate::desktop_lock::DesktopLockGuard,
+}
+
+/// Acquire the Desktop operation lock, resolve data_dir, quit
+/// Desktop if running. Returns the prelude on success.
+///
+/// Error discrimination:
+///   - [`crate::desktop_lock::DesktopLockError::Held`] → another
+///     Claudepot op is already in progress.
+///   - [`crate::error::DesktopSwapError::NotInstalled`] → platform
+///     has no data_dir OR data_dir doesn't exist on disk.
+pub(crate) async fn desktop_prelude<'a>(
+    platform: &'a dyn DesktopPlatform,
+) -> Result<DesktopPrelude<'a>, crate::error::DesktopSwapError> {
+    use crate::error::DesktopSwapError;
+
+    let _lock = crate::desktop_lock::try_acquire().map_err(|_| {
+        DesktopSwapError::Io(std::io::Error::other(
+            "another Desktop operation is in progress",
+        ))
+    })?;
+
+    let data_dir = platform.data_dir().ok_or(DesktopSwapError::NotInstalled)?;
+    if !data_dir.exists() {
+        return Err(DesktopSwapError::NotInstalled);
+    }
+    let items = platform.session_items();
+
+    if platform.is_running().await {
+        tracing::info!("Desktop op prelude — quitting Claude Desktop");
+        platform.quit().await?;
+    }
+
+    Ok(DesktopPrelude {
+        data_dir,
+        items,
+        _lock,
+    })
 }
 
 /// Windows DPAPI invalidation pre-check.
