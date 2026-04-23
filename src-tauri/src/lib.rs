@@ -1,5 +1,7 @@
 mod app_menu;
 mod commands;
+mod commands_config;
+mod config_watch;
 mod dto;
 mod ops;
 mod preferences;
@@ -134,6 +136,9 @@ pub fn run() {
         .manage(state::LiveSessionState::default())
         .manage(ops::RunningOps::new())
         .manage(preferences::PreferencesState::new(prefs))
+        .manage(commands_config::ConfigTreeState::default())
+        .manage(commands_config::SearchRegistry::default())
+        .manage(config_watch::ConfigWatchState::default())
         .manage(claudepot_core::services::usage_cache::UsageCache::new());
 
     #[cfg(debug_assertions)]
@@ -241,6 +246,18 @@ pub fn run() {
             commands::settings_github_token_get,
             commands::settings_github_token_set,
             commands::settings_github_token_clear,
+            commands_config::config_scan,
+            commands_config::config_preview,
+            commands_config::config_list_editors,
+            commands_config::config_get_editor_defaults,
+            commands_config::config_set_editor_default,
+            commands_config::config_open_in_editor_path,
+            commands_config::config_search_start,
+            commands_config::config_search_cancel,
+            commands_config::config_effective_settings,
+            commands_config::config_effective_mcp,
+            config_watch::config_watch_start,
+            config_watch::config_watch_stop,
         ])
         .run(tauri::generate_context!())
         .unwrap_or_else(|e| {
