@@ -6,8 +6,6 @@ import { useTauriEvent } from "../hooks/useTauriEvent";
 import { useGlobalShortcuts } from "../hooks/useGlobalShortcuts";
 import { useCompactHeader } from "../hooks/useWindowWidth";
 import { useAppState } from "../providers/AppStateProvider";
-import { CommandPalette } from "../components/CommandPalette";
-import { ConfirmDialog } from "../components/ConfirmDialog";
 import { Button } from "../components/primitives/Button";
 import { IconButton } from "../components/primitives/IconButton";
 import { NF } from "../icons";
@@ -30,16 +28,9 @@ import type {
  * state (usage cache, busy keys, modals, palette) stays local.
  */
 export function AccountsSection({
-  onNavigate,
-  pendingOpenPalette = false,
-  onPaletteOpened,
+  onNavigate: _onNavigate,
 }: {
   onNavigate?: (section: string, subRoute?: string | null) => void;
-  /** Shell-raised flag — when true, open the palette on next render
-   *  and call `onPaletteOpened` to clear it. Lets ⌘K fire from any
-   *  section, not just Accounts. */
-  pendingOpenPalette?: boolean;
-  onPaletteOpened?: () => void;
 }) {
   const {
     pushToast,
@@ -50,17 +41,13 @@ export function AccountsSection({
     actions,
     busyKeys,
     requestCliSwap,
-    requestDesktopSignOut,
+    requestRemoveAccount,
     requestDesktopOverwrite,
   } = useAppState();
   const { usage, refreshUsage, refreshUsageFor } = useUsage();
   const compact = useCompactHeader();
 
   const [showAdd, setShowAdd] = useState(false);
-  const [confirmRemove, setConfirmRemove] = useState<AccountSummary | null>(
-    null,
-  );
-  const [showPalette, setShowPalette] = useState(false);
   const [filter, setFilter] = useState("");
   const [ctxMenu, setCtxMenu] = useState<
     | { kind: "row"; x: number; y: number; account: AccountSummary }
@@ -111,20 +98,7 @@ export function AccountsSection({
       refreshUsage();
     },
     onAdd: () => setShowAdd(true),
-    onPalette: () => setShowPalette(true),
   });
-
-  // Command palette bridge — AppShell raises `pendingOpenPalette`
-  // when ⌘K fires from any section. We open the palette on the next
-  // render and drain the flag. The palette component lives here
-  // because it owns the account-level actions; keeping it section-
-  // local avoids lifting all the swap/add/remove plumbing to App.
-  useEffect(() => {
-    if (pendingOpenPalette) {
-      setShowPalette(true);
-      onPaletteOpened?.();
-    }
-  }, [pendingOpenPalette, onPaletteOpened]);
 
   // Add-account bridge — the macOS app menu and the tray menu both
   // dispatch this to open the AddAccountModal from outside the section.
@@ -345,59 +319,6 @@ export function AccountsSection({
         onAdoptDesktop={(a) => actions.adoptDesktop(a)}
       />
 
-      {confirmRemove && (
-        <ConfirmDialog
-          title="Remove account?"
-          confirmLabel="Remove"
-          confirmDanger
-          body={
-            <>
-              <p>
-                Remove <strong>{confirmRemove.email}</strong>?
-              </p>
-              <p className="muted small">
-                Deletes credentials and Desktop profile. Active
-                CLI/Desktop pointers will be cleared.
-              </p>
-            </>
-          }
-          onCancel={() => setConfirmRemove(null)}
-          onConfirm={() => {
-            const t = confirmRemove;
-            setConfirmRemove(null);
-            actions.performRemove(t);
-          }}
-        />
-      )}
-
-      {showPalette && status && (
-        <CommandPalette
-          accounts={accounts}
-          status={status}
-          onClose={() => setShowPalette(false)}
-          onSwitchCli={(a) => requestCliSwap(a)}
-          onSwitchDesktop={(a) => handleDesktopSwitch(a)}
-          onAdd={() => setShowAdd(true)}
-          onRefresh={() => {
-            refresh();
-            refreshUsage();
-          }}
-          onRemove={(a) => setConfirmRemove(a)}
-          onAdoptDesktop={(a) => {
-            if (a.desktop_profile_on_disk) requestDesktopOverwrite(a);
-            else void actions.adoptDesktop(a);
-          }}
-          onClearDesktop={requestDesktopSignOut}
-          onLaunchDesktop={() => {
-            api.desktopLaunch().catch((e) => {
-              const msg = e instanceof Error ? e.message : String(e);
-              pushToast("error", `Desktop launch failed: ${msg}`);
-            });
-          }}
-          onNavigate={onNavigate}
-        />
-      )}
-
       {ctxMenu && (
         <CtxMenuForAccount
           menu={ctxMenu}
@@ -410,7 +331,7 @@ export function AccountsSection({
           onRefreshUsageFor={(a) => refreshUsageFor(a.uuid)}
           onRefreshUsageAll={refreshUsage}
           onLogin={actions.login}
-          onRemove={setConfirmRemove}
+          onRemove={requestRemoveAccount}
           onAdoptDesktop={(a) => {
             // Adopt with no overwrite by default. If a snapshot
             // already exists for this account, go through the

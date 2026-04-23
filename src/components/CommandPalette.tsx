@@ -14,6 +14,7 @@ const iconMap = {
   folder: <Icon name="folder" size={14} />,
   wrench: <Icon name="wrench" size={14} />,
   settings: <Icon name="settings" size={14} />,
+  help: <Icon name="help" size={14} />,
 };
 
 function PaletteItem({
@@ -42,7 +43,7 @@ export function CommandPalette({
   accounts, status, onClose,
   onSwitchCli, onSwitchDesktop, onAdd, onRefresh, onRemove,
   onAdoptDesktop, onClearDesktop, onLaunchDesktop,
-  onNavigate,
+  onNavigate, onShowShortcuts,
 }: {
   accounts: AccountSummary[]; status: AppStatus; onClose: () => void;
   onSwitchCli: (a: AccountSummary) => void;
@@ -57,6 +58,8 @@ export function CommandPalette({
   /** Launch Claude Desktop. */
   onLaunchDesktop?: () => void;
   onNavigate?: (section: string, subRoute?: string | null) => void;
+  /** Open the global shortcuts reference modal. */
+  onShowShortcuts?: () => void;
 }) {
   const [query, setQuery] = useState("");
   const [selectedIndex, setSelectedIndex] = useState(0);
@@ -66,7 +69,7 @@ export function CommandPalette({
   const { filter } = usePaletteActions({
     accounts, status, onSwitchCli, onSwitchDesktop, onAdd, onRefresh, onRemove,
     onAdoptDesktop, onClearDesktop, onLaunchDesktop,
-    onNavigate,
+    onNavigate, onShowShortcuts,
   });
 
   const filtered = filter(query);
