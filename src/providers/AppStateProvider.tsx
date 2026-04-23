@@ -28,6 +28,14 @@ interface AppStateValue {
   loadError: string | null;
   keychainIssue: string | null;
   syncError: string | null;
+  /**
+   * Epoch-ms timestamp of the last `sync_from_current_cc` result that
+   * came back with `auth rejected:` — CC's refresh_token is dead, the
+   * user must sign in again. Drives the "Sign in again" banner and a
+   * 60 s cooldown in `useRefresh` to stop focus-thrashing the endpoint.
+   * Null when the latest sync either succeeded or failed transiently.
+   */
+  authRejectedAt: number | null;
   ccIdentity: CcIdentity | null;
   verifying: boolean;
   refresh: () => Promise<void>;
@@ -100,6 +108,7 @@ export function AppStateProvider({ children }: { children: ReactNode }) {
     loadError,
     keychainIssue,
     syncError,
+    authRejectedAt,
     ccIdentity,
     verifying,
     refresh,
@@ -193,6 +202,7 @@ export function AppStateProvider({ children }: { children: ReactNode }) {
       loadError,
       keychainIssue,
       syncError,
+      authRejectedAt,
       ccIdentity,
       verifying,
       refresh,
@@ -224,6 +234,7 @@ export function AppStateProvider({ children }: { children: ReactNode }) {
       loadError,
       keychainIssue,
       syncError,
+      authRejectedAt,
       ccIdentity,
       verifying,
       refresh,
