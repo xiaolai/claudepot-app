@@ -39,6 +39,16 @@ export function useStatusIssues(opts: {
   ccIdentity: CcIdentity | null;
   status: AppStatus | null;
   syncError: string | null;
+  /**
+   * Non-null when the last `sync_from_current_cc` returned
+   * `auth rejected:` — CC's stored refresh_token is terminally dead
+   * and only a browser re-login recovers. Renders an error-severity
+   * banner with a "Sign in again" primary action wired to
+   * `onReloginActive`, distinct from the dismissable `syncError`
+   * warning used for transient failures. Optional so existing tests
+   * (which predate auto-refresh) keep working without a fixture churn.
+   */
+  authRejectedAt?: number | null;
   keychainIssue: string | null;
   accounts: AccountSummary[];
   onUnlock: () => void;
@@ -85,6 +95,7 @@ export function useStatusIssues(opts: {
     ccIdentity,
     status,
     syncError,
+    authRejectedAt,
     keychainIssue,
     accounts,
     onUnlock,
@@ -135,7 +146,22 @@ export function useStatusIssues(opts: {
       });
     }
 
-    if (syncError) {
+    if (authRejectedAt != null) {
+      // CC's stored refresh_token was refused — the user MUST re-login.
+      // Error-severity (not dismissable) because the stale token won't
+      // self-heal and other UI surfaces (verify_all_accounts, swap)
+      // will keep noisily failing until it's resolved.
+      issues.push({
+        id: "auth-rejected",
+        severity: "error",
+        label: "Claude Code needs to sign in again",
+        detail:
+          "The stored login is no longer valid. Open the matching account and click Log in.",
+        action: onReloginActive
+          ? { label: "Sign in", onClick: onReloginActive }
+          : undefined,
+      });
+    } else if (syncError) {
       // Key by the specific error payload so snoozing one sync failure
       // doesn't suppress a later, genuinely different failure. The
       // dismissedIssues store's 24 h expiry still applies per key.
@@ -294,6 +320,7 @@ export function useStatusIssues(opts: {
     ccIdentity,
     status,
     syncError,
+    authRejectedAt,
     keychainIssue,
     accounts,
     onUnlock,

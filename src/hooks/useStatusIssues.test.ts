@@ -301,3 +301,72 @@ describe("useStatusIssues — desktop sync banners", () => {
     expect(banner?.dismissable).toBe(true);
   });
 });
+
+// ---------------------------------------------------------------------------
+// auth-rejected: terminal refresh-token failure from sync_from_current_cc.
+// Distinct from the dismissable `syncError` warning — this banner is
+// error-severity with an actionable "Sign in again" CTA that routes
+// through `onReloginActive`.
+// ---------------------------------------------------------------------------
+
+describe("useStatusIssues — auth rejected", () => {
+  it("renders an error banner with a Sign-in action when authRejectedAt is set", () => {
+    const onReloginActive = vi.fn();
+    const { result } = renderHook(() =>
+      useStatusIssues({
+        ccIdentity: null,
+        status: sampleStatus(),
+        syncError: null,
+        authRejectedAt: 1_700_000_000_000,
+        keychainIssue: null,
+        accounts: [sampleAccount({ email: "alice@example.com" })],
+        onUnlock: () => {},
+        onReloginActive,
+      }),
+    );
+    const banner = result.current.find((i) => i.id === "auth-rejected");
+    expect(banner).toBeDefined();
+    expect(banner!.severity).toBe("error");
+    expect(banner!.action?.label).toBe("Sign in");
+    expect(banner!.dismissable).toBeFalsy();
+    banner!.action!.onClick();
+    expect(onReloginActive).toHaveBeenCalled();
+  });
+
+  it("suppresses the generic sync-warning banner when auth is rejected", () => {
+    // Same event triggers both syncError (from the thrown promise) and
+    // authRejectedAt (from the prefix match). Rendering both would be
+    // redundant noise — the actionable banner wins.
+    const { result } = renderHook(() =>
+      useStatusIssues({
+        ccIdentity: null,
+        status: sampleStatus(),
+        syncError: "auth rejected: CC's stored login is no longer valid",
+        authRejectedAt: Date.now(),
+        keychainIssue: null,
+        accounts: [],
+        onUnlock: () => {},
+      }),
+    );
+    const sync = result.current.find((i) => i.id.startsWith("sync:"));
+    const auth = result.current.find((i) => i.id === "auth-rejected");
+    expect(sync).toBeUndefined();
+    expect(auth).toBeDefined();
+  });
+
+  it("no banner when authRejectedAt is null and syncError is clear", () => {
+    const { result } = renderHook(() =>
+      useStatusIssues({
+        ccIdentity: null,
+        status: sampleStatus(),
+        syncError: null,
+        authRejectedAt: null,
+        keychainIssue: null,
+        accounts: [],
+        onUnlock: () => {},
+      }),
+    );
+    expect(result.current.find((i) => i.id === "auth-rejected")).toBeUndefined();
+    expect(result.current.find((i) => i.id.startsWith("sync:"))).toBeUndefined();
+  });
+});

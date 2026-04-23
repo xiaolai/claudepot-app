@@ -1,5 +1,15 @@
 use crate::error::OAuthError;
 use crate::oauth::http_client;
+use std::time::Duration;
+
+/// Per-request timeout for `/api/oauth/profile`. The shared
+/// `http_client` sets a 15 s ceiling, which is appropriate for token
+/// refresh (network-heavy, user-waiting). Profile is a best-effort
+/// health probe fired on every window focus — 5 s is the latency floor
+/// at which the UI starts to feel stuck. If Anthropic is slower than
+/// that, the caller (sync_from_current_cc) swallows the error and the
+/// UI keeps rendering stored state.
+const PROFILE_TIMEOUT: Duration = Duration::from_secs(5);
 
 #[derive(Debug, Clone)]
 pub struct Profile {
@@ -22,6 +32,7 @@ pub async fn fetch(access_token: &str) -> Result<Profile, OAuthError> {
             crate::oauth::beta_header::get_or_default(),
         )
         .header("Content-Type", "application/json")
+        .timeout(PROFILE_TIMEOUT)
         .send()
         .await?;
 
