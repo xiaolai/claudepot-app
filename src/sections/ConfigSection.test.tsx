@@ -25,7 +25,15 @@ vi.mock("../api", () => ({
       configSetEditorDefaultSpy(...a),
     configOpenInEditorPath: (...a: unknown[]) =>
       configOpenInEditorPathSpy(...a),
+    configWatchStart: vi.fn().mockResolvedValue(undefined),
+    configWatchStop: vi.fn().mockResolvedValue(undefined),
   },
+}));
+
+// ConfigSection uses @tauri-apps/api/event through useConfigTree; mock
+// the listener so tests don't hit Tauri's uninitialized IPC layer.
+vi.mock("@tauri-apps/api/event", () => ({
+  listen: vi.fn().mockResolvedValue(() => {}),
 }));
 
 vi.mock("@tauri-apps/plugin-dialog", () => ({

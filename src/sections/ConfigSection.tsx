@@ -26,6 +26,7 @@ import { Button } from "../components/primitives/Button";
 import { NF } from "../icons";
 import { EffectiveRenderer } from "./config/EffectiveRenderer";
 import { EffectiveMcpRenderer } from "./config/EffectiveMcpRenderer";
+import { useConfigTree } from "../hooks/useConfigTree";
 
 const EFFECTIVE_SETTINGS_ROUTE = "virtual:effective-settings";
 const EFFECTIVE_MCP_ROUTE = "virtual:effective-mcp";
@@ -48,7 +49,7 @@ interface ConfigSectionProps {
  * the selection so a return to the section lands on the same row.
  */
 export function ConfigSection({ subRoute, onSubRouteChange }: ConfigSectionProps) {
-  const [tree, setTree] = useState<ConfigTreeDto | null>(null);
+  const { tree, dirty: watcherDirty, setTree } = useConfigTree(null);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [editors, setEditors] = useState<EditorCandidateDto[] | null>(null);
   const [defaults, setDefaults] = useState<EditorDefaultsDto | null>(null);
@@ -115,6 +116,14 @@ export function ConfigSection({ subRoute, onSubRouteChange }: ConfigSectionProps
       .catch(() =>
         setDefaults({ by_kind: {}, fallback: "system" }),
       );
+    // Kick off the real-FS watcher; incremental patches arrive via
+    // `config-tree-patch` and are applied by useConfigTree.
+    void api.configWatchStart(null).catch(() => {
+      // Non-fatal — the tree still works via explicit Refresh.
+    });
+    return () => {
+      void api.configWatchStop().catch(() => {});
+    };
   }, [refreshTree]);
 
   useEffect(() => {
@@ -338,7 +347,7 @@ export function ConfigSection({ subRoute, onSubRouteChange }: ConfigSectionProps
         title="Config"
         subtitle={
           tree
-            ? `${tree.scopes.length} scope${tree.scopes.length === 1 ? "" : "s"} · ${tree.cwd}`
+            ? `${tree.scopes.length} scope${tree.scopes.length === 1 ? "" : "s"} · ${tree.cwd}${watcherDirty ? " · updating…" : ""}`
             : "Read-only browser over Claude Code's filesystem artifacts."
         }
         actions={

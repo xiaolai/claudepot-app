@@ -634,4 +634,7 @@ export const api = {
       editorId,
       kindHint,
     }),
+  configWatchStart: (cwd?: string | null) =>
+    invoke<void>("config_watch_start", { cwd: cwd ?? null }),
+  configWatchStop: () => invoke<void>("config_watch_stop"),
 };

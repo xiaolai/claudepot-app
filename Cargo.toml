@@ -83,11 +83,13 @@ num_cpus = "1.16"
 regex = "1"
 once_cell = "1"
 
-# The `notify` filesystem-watcher crate was reserved for an event-driven
-# tail path, but the shipped runtime is pure 500ms polling (sub-second
-# latency already meets the plan's M1 target). Dependency removed on
-# audit to avoid carrying an unused workspace dep — re-add when the
-# watcher-backed path actually lands.
+# Filesystem watcher — used by the Config section's real-FS watcher
+# (src-tauri/src/config_watch.rs) to deliver incremental tree patches
+# without polling. `notify-debouncer-mini` gives us coalesced events
+# out of the box, which the core watch state machine still re-checks
+# via scan_until_stable for correctness.
+notify = "6"
+notify-debouncer-mini = "0.4"
 
 # ─── Desktop-identity crypto (Phase 2) ──────────────────────────────────
 # Chromium OSCrypt / Electron safeStorage envelope:
