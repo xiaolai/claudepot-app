@@ -135,6 +135,7 @@ pub fn run() {
         .manage(state::LiveSessionState::default())
         .manage(ops::RunningOps::new())
         .manage(preferences::PreferencesState::new(prefs))
+        .manage(commands_config::ConfigTreeState::default())
         .manage(claudepot_core::services::usage_cache::UsageCache::new());
 
     #[cfg(debug_assertions)]
@@ -243,6 +244,7 @@ pub fn run() {
             commands::settings_github_token_set,
             commands::settings_github_token_clear,
             commands_config::config_scan,
+            commands_config::config_preview,
             commands_config::config_list_editors,
             commands_config::config_get_editor_defaults,
             commands_config::config_set_editor_default,

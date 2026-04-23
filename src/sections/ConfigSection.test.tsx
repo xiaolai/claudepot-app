@@ -12,9 +12,12 @@ const configGetEditorDefaultsSpy = vi.fn();
 const configOpenInEditorPathSpy = vi.fn();
 const configSetEditorDefaultSpy = vi.fn();
 
+const configPreviewSpy = vi.fn();
+
 vi.mock("../api", () => ({
   api: {
     configScan: (...a: unknown[]) => configScanSpy(...a),
+    configPreview: (...a: unknown[]) => configPreviewSpy(...a),
     configListEditors: (...a: unknown[]) => configListEditorsSpy(...a),
     configGetEditorDefaults: (...a: unknown[]) =>
       configGetEditorDefaultsSpy(...a),

@@ -51,6 +51,7 @@ import type {
   RedactionPolicyInput,
   GithubTokenStatus,
   ConfigTreeDto,
+  ConfigPreviewDto,
   ConfigKind,
   EditorCandidateDto,
   EditorDefaultsDto,
@@ -592,6 +593,8 @@ export const api = {
   // Config section — P0 surface.
   configScan: (cwd?: string | null) =>
     invoke<ConfigTreeDto>("config_scan", { cwd: cwd ?? null }),
+  configPreview: (nodeId: string) =>
+    invoke<ConfigPreviewDto>("config_preview", { nodeId }),
   configListEditors: (force?: boolean) =>
     invoke<EditorCandidateDto[]>("config_list_editors", { force: !!force }),
   configGetEditorDefaults: () =>

@@ -4,13 +4,20 @@
 //! submodule. Parse/merge/watch land in later phases (see
 //! `dev-docs/config-section-plan.md` §15).
 
+pub mod discover;
 pub mod launcher;
 pub mod model;
+pub mod parse;
 
 use std::path::Path;
 
-/// P0 stub: return an empty tree anchored at `cwd`. Full discovery lands
-/// in P1 (see plan §6).
+/// Walk the CC-mandated roots at `cwd` and return a populated tree.
+pub fn scan(cwd: &Path) -> model::ConfigTree {
+    discover::assemble_tree(cwd)
+}
+
+/// Empty-tree builder — kept for callers that want an anchored skeleton
+/// without scanning. Useful in early UI states and tests.
 pub fn empty_tree(cwd: &Path) -> model::ConfigTree {
     let cwd = cwd.to_path_buf();
     model::ConfigTree {
