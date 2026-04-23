@@ -136,6 +136,13 @@ export function ProjectsSection({
     );
   }, [projects, nameFilter]);
 
+  const compact = useCompactHeader();
+  // When the window is too narrow to give both the table and the 420px
+  // detail aside enough room, collapse to a single-pane master/detail
+  // flow. Selecting a project replaces the table with the detail view;
+  // the detail's Back button restores the table.
+  const splitView = useSplitView();
+
   const activeTab: "list" | "maintenance" =
     subRoute === "repair" || subRoute === "maintenance"
       ? "maintenance"
@@ -163,13 +170,6 @@ export function ProjectsSection({
       </>
     );
   }
-
-  const compact = useCompactHeader();
-  // When the window is too narrow to give both the table and the 420px
-  // detail aside enough room, collapse to a single-pane master/detail
-  // flow. Selecting a project replaces the table with the detail view;
-  // the detail's Back button restores the table.
-  const splitView = useSplitView();
   const showDetail = selectedPath !== null;
   const showTable = splitView || selectedPath === null;
 
