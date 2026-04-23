@@ -246,6 +246,43 @@ impl AccountStore {
             .optional()
     }
 
+    /// Fetch the single account whose `org_uuid` matches `org_uuid`.
+    ///
+    /// Semantics — important: this is the **unique-match** primitive the
+    /// Desktop org-UUID fast-path relies on. It returns:
+    /// - `Some(account)` iff **exactly one** row has matching non-null
+    ///   `org_uuid`.
+    /// - `None` on zero matches **or** two-plus matches (ambiguous).
+    ///
+    /// Rows with NULL `org_uuid` never match. Callers that need to
+    /// distinguish "no candidate" from "ambiguous" should list the
+    /// accounts separately — by design we collapse both into None so
+    /// the caller can't accidentally act on an ambiguous result.
+    pub fn find_by_org_uuid(&self, org_uuid: Uuid) -> SqlResult<Option<Account>> {
+        let active_cli = self.active_cli_uuid()?;
+        let active_desktop = self.active_desktop_uuid()?;
+        let db = self.db();
+
+        let mut stmt = db.prepare(
+            "SELECT uuid, email, org_uuid, org_name, \
+             subscription_type, rate_limit_tier, created_at, \
+             last_cli_switch, last_desktop_switch, \
+             has_cli_credentials, has_desktop_profile, \
+             verified_email, verified_at, verify_status \
+             FROM accounts WHERE org_uuid = ?1 LIMIT 2",
+        )?;
+        let rows: Vec<Account> = stmt
+            .query_map(params![org_uuid.to_string()], |row| {
+                Self::row_to_account(row, &active_cli, &active_desktop)
+            })?
+            .collect::<SqlResult<_>>()?;
+
+        match rows.len() {
+            1 => Ok(rows.into_iter().next()),
+            _ => Ok(None), // 0 (no match) or 2+ (ambiguous)
+        }
+    }
+
     pub fn insert(&self, account: &Account) -> SqlResult<()> {
         self.db().execute(
             "INSERT INTO accounts (uuid, email, org_uuid, org_name, \
@@ -690,6 +727,100 @@ mod tests {
             t_b > t_a,
             "set_active_cli(new_uuid) must bump last_cli_switch for the new target"
         );
+    }
+
+    // --- find_by_org_uuid (Desktop org-UUID fast-path primitive) ---
+
+    fn make_account_with_org(email: &str, org: Option<&str>) -> Account {
+        let mut a = make_account(email);
+        a.org_uuid = org.map(String::from);
+        a
+    }
+
+    #[test]
+    fn test_find_by_org_uuid_no_match_returns_none() {
+        let (store, _dir) = test_store();
+        let wanted = Uuid::new_v4();
+        store
+            .insert(&make_account_with_org(
+                "a@example.com",
+                Some(&Uuid::new_v4().to_string()),
+            ))
+            .unwrap();
+        assert!(store.find_by_org_uuid(wanted).unwrap().is_none());
+    }
+
+    #[test]
+    fn test_find_by_org_uuid_unique_match_returns_account() {
+        let (store, _dir) = test_store();
+        let org = Uuid::new_v4();
+        let a = make_account_with_org("a@example.com", Some(&org.to_string()));
+        store.insert(&a).unwrap();
+        store
+            .insert(&make_account_with_org(
+                "b@example.com",
+                Some(&Uuid::new_v4().to_string()),
+            ))
+            .unwrap();
+
+        let found = store.find_by_org_uuid(org).unwrap().expect("unique match");
+        assert_eq!(found.email, "a@example.com");
+    }
+
+    #[test]
+    fn test_find_by_org_uuid_ambiguous_returns_none() {
+        // Two accounts in the same org → ambiguous. We must not
+        // pick one arbitrarily — callers rely on None to force the
+        // slow-path identity probe.
+        let (store, _dir) = test_store();
+        let org = Uuid::new_v4();
+        store
+            .insert(&make_account_with_org(
+                "a@example.com",
+                Some(&org.to_string()),
+            ))
+            .unwrap();
+        store
+            .insert(&make_account_with_org(
+                "b@example.com",
+                Some(&org.to_string()),
+            ))
+            .unwrap();
+
+        assert!(store.find_by_org_uuid(org).unwrap().is_none());
+    }
+
+    #[test]
+    fn test_find_by_org_uuid_null_org_uuid_is_skipped() {
+        // A row with NULL org_uuid must never collide with a lookup —
+        // the SQL equality is already NULL-safe (NULL = X is NULL, not
+        // true), but we lock it down explicitly so a future rewrite
+        // using IS NOT DISTINCT FROM doesn't regress.
+        let (store, _dir) = test_store();
+        let org = Uuid::new_v4();
+        store
+            .insert(&make_account_with_org("null@example.com", None))
+            .unwrap();
+        let a = make_account_with_org("a@example.com", Some(&org.to_string()));
+        store.insert(&a).unwrap();
+
+        let found = store.find_by_org_uuid(org).unwrap().expect("unique");
+        assert_eq!(found.email, "a@example.com");
+    }
+
+    #[test]
+    fn test_find_by_org_uuid_surfaces_active_pointer() {
+        // Returned Account must reflect active_cli / active_desktop
+        // (consistent with find_by_uuid + find_by_email).
+        let (store, _dir) = test_store();
+        let org = Uuid::new_v4();
+        let a = make_account_with_org("a@example.com", Some(&org.to_string()));
+        store.insert(&a).unwrap();
+        store.set_active_cli(a.uuid).unwrap();
+
+        let found = store.find_by_org_uuid(org).unwrap().unwrap();
+        assert!(found.is_cli_active);
+        assert!(!found.is_desktop_active);
     }
 }
 

@@ -411,6 +411,22 @@ enum DesktopAction {
         #[arg(long)]
         no_launch: bool,
     },
+    /// Probe the live Desktop session identity.
+    ///
+    /// Phase 1 uses a fast, non-verifying org-UUID match against
+    /// `~/Library/Application Support/Claude/config.json`. The result
+    /// is labeled "org_uuid_candidate" so callers know not to trust it
+    /// for mutation. Phase 2 will add a `--strict` path that decrypts
+    /// `oauth:tokenCache` and verifies via `/profile`.
+    Identity {
+        /// Force the authoritative slow path (decrypt + /profile).
+        /// Phase 1: returns an error since crypto isn't wired yet.
+        #[arg(long)]
+        strict: bool,
+    },
+    /// Reconcile `has_desktop_profile` flags with on-disk truth and
+    /// clear orphan `state.active_desktop` pointers. Idempotent.
+    Reconcile,
 }
 
 /// Shared context for all command handlers.
@@ -498,6 +514,10 @@ async fn main() -> Result<()> {
             DesktopAction::Use { email, no_launch } => {
                 commands::desktop_ops::use_account(&ctx, &email, no_launch).await?
             }
+            DesktopAction::Identity { strict } => {
+                commands::desktop_ops::identity(&ctx, strict).await?
+            }
+            DesktopAction::Reconcile => commands::desktop_ops::reconcile(&ctx).await?,
         },
         Commands::Project { action } => match action {
             ProjectAction::List => commands::project::list(&ctx)?,

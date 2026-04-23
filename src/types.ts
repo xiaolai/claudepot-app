@@ -21,6 +21,13 @@ export interface AccountSummary {
   verified_at: string | null; // RFC3339
   /** True iff verified_email differs from email — misfiled slot. */
   drift: boolean;
+  /**
+   * Per-file-on-disk truth for the Desktop profile snapshot directory.
+   * Differs from `has_desktop_profile` only when the DB flag has
+   * drifted from disk. UI must prefer THIS field over `has_desktop_profile`
+   * when gating Desktop affordances — the DB flag is a cached view.
+   */
+  desktop_profile_on_disk: boolean;
 }
 
 /**
@@ -35,6 +42,43 @@ export interface CcIdentity {
   verified_at: string;
   /** Populated when CC has a blob but /profile failed. */
   error: string | null;
+}
+
+/**
+ * How the Desktop identity was probed. Only `decrypted` is authoritative.
+ * Callers that trigger mutation (Bind, switch, sign out) MUST require
+ * `decrypted` — `org_uuid_candidate` is NOT verified.
+ */
+export type DesktopProbeMethod =
+  | "org_uuid_candidate"
+  | "decrypted"
+  | "none";
+
+/**
+ * Ground-truth "who is Claude Desktop signed in as right now".
+ * Mirrors `CcIdentity`: never throws at the Tauri boundary; all
+ * failures ride `error` so banners can render them.
+ *
+ * Phase 1 only returns `org_uuid_candidate` or `none`; decrypted
+ * path lands with Phase 2 crypto.
+ */
+export interface DesktopIdentity {
+  email: string | null;
+  org_uuid: string | null;
+  probe_method: DesktopProbeMethod;
+  verified_at: string; // RFC3339
+  error: string | null;
+}
+
+export interface DesktopFlagFlip {
+  email: string;
+  uuid: string;
+  new_value: boolean;
+}
+
+export interface DesktopReconcileOutcome {
+  flag_flips: DesktopFlagFlip[];
+  orphan_pointer_cleared: boolean;
 }
 
 export interface AppStatus {

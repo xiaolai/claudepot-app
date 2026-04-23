@@ -35,6 +35,23 @@ impl super::DesktopPlatform for WindowsDesktop {
         ]
     }
 
+    fn is_installed(&self) -> bool {
+        // Best-effort probe: on Windows the authoritative answer is
+        // `Get-AppxPackage Claude_*`, but spawning PowerShell on every
+        // invocation is expensive (~200-400 ms cold). We approximate
+        // by checking for the LocalCache path that MSIX creates on
+        // first install — that directory exists even before first
+        // launch populates `data_dir`, so it distinguishes
+        // installed-but-never-launched from not-installed.
+        dirs::data_local_dir()
+            .map(|d| {
+                d.join("Packages")
+                    .join("Claude_pzs8sxrjxfjjc")
+                    .is_dir()
+            })
+            .unwrap_or(false)
+    }
+
     async fn is_running(&self) -> bool {
         let mut sys = sysinfo::System::new();
         sys.refresh_processes(sysinfo::ProcessesToUpdate::All, true);
@@ -114,5 +131,20 @@ impl super::DesktopPlatform for WindowsDesktop {
             ))));
         }
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::desktop_backend::DesktopPlatform;
+
+    #[test]
+    fn test_is_installed_matches_package_dir() {
+        let p = WindowsDesktop;
+        let expected = dirs::data_local_dir()
+            .map(|d| d.join("Packages").join("Claude_pzs8sxrjxfjjc").is_dir())
+            .unwrap_or(false);
+        assert_eq!(p.is_installed(), expected);
     }
 }

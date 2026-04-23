@@ -544,6 +544,10 @@ mod tests {
             self.running.store(true, Ordering::SeqCst);
             Ok(())
         }
+        fn is_installed(&self) -> bool {
+            // Mock: "installed" iff we were given a data_dir path.
+            self.data_dir_path.is_some()
+        }
     }
 
     #[tokio::test]
