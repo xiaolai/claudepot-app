@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 import { listen } from "@tauri-apps/api/event";
 import type {
   ConfigFileNodeDto,
@@ -20,6 +20,7 @@ export interface ConfigTreePatchEvent {
     scopes: ConfigScopeNodeDto[];
     cwd: string;
     project_root: string;
+    config_home_dir: string;
     memory_slug: string;
     memory_slug_lossy: boolean;
   } | null;
@@ -32,6 +33,13 @@ interface UseConfigTreeResult {
   dirty: boolean;
   /** Increment this to inject an out-of-band snapshot (e.g. after config_scan). */
   setTree: (tree: ConfigTreeDto | null) => void;
+  /**
+   * Increments every time a non-snapshot patch arrives without a baseline
+   * tree present. Consumers watch this with a useEffect and trigger a
+   * fresh configScan to recover — otherwise an early scan failure would
+   * leave every subsequent watcher patch silently dropped.
+   */
+  orphanPatchSignal: number;
 }
 
 /**
@@ -49,11 +57,12 @@ interface UseConfigTreeResult {
 export function useConfigTree(initial: ConfigTreeDto | null): UseConfigTreeResult {
   const [tree, setTree] = useState<ConfigTreeDto | null>(initial);
   const [dirty, setDirty] = useState(false);
-  const treeRef = useRef<ConfigTreeDto | null>(initial);
-
-  useEffect(() => {
-    treeRef.current = tree;
-  }, [tree]);
+  // True if we received a non-snapshot patch before the tree was
+  // seeded. The consumer watches this signal and kicks off a recovery
+  // scan — see ConfigSection.tsx. Stored as a counter so repeated
+  // orphan patches don't retrigger a second recovery before the first
+  // scan's setTree lands.
+  const [orphanPatchSignal, setOrphanPatchSignal] = useState(0);
 
   useEffect(() => {
     let unlisten: (() => void) | null = null;
@@ -67,14 +76,23 @@ export function useConfigTree(initial: ConfigTreeDto | null): UseConfigTreeResul
           scopes: payload.full_snapshot.scopes,
           cwd: payload.full_snapshot.cwd,
           project_root: payload.full_snapshot.project_root,
+          config_home_dir: payload.full_snapshot.config_home_dir,
           memory_slug: payload.full_snapshot.memory_slug,
           memory_slug_lossy: payload.full_snapshot.memory_slug_lossy,
         });
         return;
       }
-      const prev = treeRef.current;
-      if (!prev) return; // No baseline — wait for full_snapshot.
-      setTree(applyPatch(prev, payload));
+      // Functional setState: each patch sees the latest tree even when
+      // multiple patches arrive before a render lands. Orphan patches
+      // (no baseline yet) bump `orphanPatchSignal` so the consumer can
+      // trigger a recovery scan.
+      setTree((prev) => {
+        if (!prev) {
+          setOrphanPatchSignal((n) => n + 1);
+          return prev;
+        }
+        return applyPatch(prev, payload);
+      });
     }).then((u) => {
       if (cancelled) {
         u();
@@ -88,7 +106,7 @@ export function useConfigTree(initial: ConfigTreeDto | null): UseConfigTreeResul
     };
   }, []);
 
-  return { tree, dirty, setTree };
+  return { tree, dirty, setTree, orphanPatchSignal };
 }
 
 export function applyPatch(

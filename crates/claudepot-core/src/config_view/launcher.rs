@@ -340,11 +340,12 @@ static CACHE: Lazy<Mutex<Option<CacheEntry>>> = Lazy::new(|| Mutex::new(None));
 const CACHE_TTL: Duration = Duration::from_secs(300);
 
 /// Detect-with-cache. Re-runs detection after `CACHE_TTL` or when
-/// `force` is true.
+/// `force` is true. On lock poisoning (a prior panic left the guard
+/// in a bad state) the cache is bypassed and we fall back to a fresh
+/// probe — detection is cheap and has no side effects.
 pub fn detect_cached(force: bool) -> Vec<EditorCandidate> {
-    {
-        let guard = CACHE.lock().unwrap();
-        if !force {
+    if !force {
+        if let Ok(guard) = CACHE.lock() {
             if let Some(ref e) = *guard {
                 if e.at.elapsed() < CACHE_TTL {
                     return e.candidates.clone();
@@ -353,14 +354,19 @@ pub fn detect_cached(force: bool) -> Vec<EditorCandidate> {
         }
     }
     let fresh = detect(&RealProbe);
-    let mut guard = CACHE.lock().unwrap();
-    *guard = Some(CacheEntry { at: Instant::now(), candidates: fresh.clone() });
+    if let Ok(mut guard) = CACHE.lock() {
+        *guard = Some(CacheEntry { at: Instant::now(), candidates: fresh.clone() });
+    }
+    // On poisoned lock we skip the cache write — next call re-probes,
+    // which is correct (stale cache never returns).
     fresh
 }
 
 #[cfg(test)]
 pub fn clear_cache_for_test() {
-    *CACHE.lock().unwrap() = None;
+    if let Ok(mut g) = CACHE.lock() {
+        *g = None;
+    }
 }
 
 // ---------- Launch ----------------------------------------------------

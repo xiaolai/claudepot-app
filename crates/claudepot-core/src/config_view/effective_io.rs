@@ -121,6 +121,18 @@ pub fn load_mcp_bundle(cwd: &Path, effective_settings: Value) -> McpSourceBundle
     // Plugin MCP: each enabled plugin's `manifest.mcp_servers`.
     let plugin = collect_plugin_mcp_servers();
 
+    // Approximation for CC's `isSettingSourceEnabled('projectSettings')`:
+    // the source is enabled when the project settings file exists and
+    // parses to a non-empty object. CC also disables it via
+    // `enabledSettingSources` in the cascade, which we can't read
+    // without bootstrap runtime state — the file-presence check is the
+    // conservative approximation and matches the observable effect
+    // for every Claudepot user today (no SDK embedding).
+    let project_settings_path = cwd.join(".claude").join("settings.json");
+    let project_settings_enabled = read_settings_file(&project_settings_path)
+        .and_then(|v| v.as_object().map(|m| !m.is_empty()))
+        .unwrap_or(false);
+
     McpSourceBundle {
         project_chain,
         user,
@@ -128,7 +140,7 @@ pub fn load_mcp_bundle(cwd: &Path, effective_settings: Value) -> McpSourceBundle
         plugin,
         enterprise,
         effective_settings,
-        project_settings_enabled: true,
+        project_settings_enabled,
     }
 }
 
@@ -178,6 +190,11 @@ fn read_claude_json_local_mcp(claude_json: &Path, project_key: &Path) -> BTreeMa
 }
 
 fn walk_project_mcp(cwd: &Path) -> Vec<McpLayer> {
+    // Walk cwd → root (depth-first from cwd). Push order is cwd first,
+    // then parent, ..., so `chain[0]` is the deepest dir. The ingest
+    // loop in `effective_mcp::compute` applies layers in order and
+    // overwrites per-name, so we must hand it the list **shallowest
+    // first** — reverse before returning.
     let mut chain = Vec::new();
     let mut cur: Option<PathBuf> = Some(cwd.to_path_buf());
     while let Some(dir) = cur {
@@ -196,8 +213,8 @@ fn walk_project_mcp(cwd: &Path) -> Vec<McpLayer> {
         }
         cur = dir.parent().map(|p| p.to_path_buf());
     }
-    // CC walks cwd→root and later overrides earlier, so deeper dirs win.
-    // Our push order is cwd→root, matching that semantics.
+    // Reverse → shallowest first, deepest last (deepest wins).
+    chain.reverse();
     chain
 }
 
@@ -277,10 +294,11 @@ mod tests {
         )
         .unwrap();
         let chain = walk_project_mcp(&sub);
-        // Picks up both layers; stops at the git root (so no `td`-level
-        // entries — even if none exist).
+        // Picks up both layers; stops at the git root. Ordering is
+        // shallowest first so the last-wins ingest in effective_mcp
+        // lets deeper dirs (the cwd) override shallower ones.
         assert_eq!(chain.len(), 2);
-        assert!(chain[0].servers.contains_key("foo")); // cwd first
-        assert!(chain[1].servers.contains_key("bar")); // git root
+        assert!(chain[0].servers.contains_key("bar")); // git root first (shallow)
+        assert!(chain[1].servers.contains_key("foo")); // cwd last (deepest, wins)
     }
 }

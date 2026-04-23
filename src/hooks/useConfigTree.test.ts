@@ -30,6 +30,7 @@ const tree = (scopes: ConfigScopeNodeDto[]): ConfigTreeDto => ({
   scopes,
   cwd: "/",
   project_root: "/",
+  config_home_dir: "/.claude",
   memory_slug: "",
   memory_slug_lossy: false,
 });

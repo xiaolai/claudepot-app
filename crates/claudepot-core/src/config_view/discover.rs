@@ -50,7 +50,12 @@ const DENY_PREFIXES: &[&str] = &[
     "security_warnings_state_",
 ];
 
-fn is_denied(name: &str) -> bool {
+/// True when `name` matches the shared Config-section deny-list
+/// (`dev-docs/config-section-plan.md` §6.3). This function is the
+/// single source of truth — `config_view::watch::is_in_scope` and the
+/// Tauri-side watcher BOTH call it so the watcher never wakes up for
+/// files discovery would ignore.
+pub fn is_denied(name: &str) -> bool {
     if DENY_NAMES.contains(&name) {
         return true;
     }
@@ -210,13 +215,26 @@ pub fn collect_project(cwd: &Path) -> Vec<FileNode> {
         Scope::Project,
         true,
     ));
-    out.extend(collect_dir_of_kind(
-        &dotclaude.join("rules"),
-        Kind::Rule,
-        Scope::Project,
-        true,
-    ));
-    // CLAUDE.md here is handled by claudemd_walk.
+    // Rules walk cwd-upward — see `collect_rules_walk`. CLAUDE.md walks
+    // via `collect_claudemd_walk`.
+    out
+}
+
+/// Walk cwd upward (bounded by git-root OR home) collecting every
+/// `.claude/rules/**/*.md` at each level. Mirrors CC's
+/// `getProjectDirsUpToHome` rule-loader (plan §6.4).
+pub fn collect_rules_walk(cwd: &Path) -> Vec<FileNode> {
+    let mut out = Vec::new();
+    let stop = find_stop_boundary(cwd);
+    for dir in ancestors_up_to(cwd, stop.as_deref()) {
+        let rules_dir = dir.join(".claude").join("rules");
+        out.extend(collect_dir_of_kind(
+            &rules_dir,
+            Kind::Rule,
+            Scope::Project,
+            true,
+        ));
+    }
     out
 }
 
@@ -342,6 +360,7 @@ pub fn collect_plugins() -> (Vec<FileNode>, Vec<crate::config_view::plugin_base:
     use crate::config_view::plugin_base::{load_plugin_manifest, load_plugin_settings, Plugin, PluginSourceDisplay};
 
     let home = claude_config_dir();
+    let enabled_specs = load_enabled_plugin_specs(&home);
     let root = home.join("plugins").join("repos");
     let mut files = Vec::new();
     let mut plugins = Vec::new();
@@ -393,19 +412,52 @@ pub fn collect_plugins() -> (Vec<FileNode>, Vec<crate::config_view::plugin_base:
                 files.push(f);
             }
 
+            let spec = format!("{id}@{marketplace_name}");
+            let enabled = enabled_specs.contains(&spec) || enabled_specs.contains(&id);
             plugins.push(Plugin {
                 id: id.clone(),
                 root: plug_root,
                 manifest,
-                enabled: true,
+                enabled,
                 settings,
-                source: PluginSourceDisplay::Marketplace {
-                    spec: format!("{id}@{marketplace_name}"),
-                },
+                source: PluginSourceDisplay::Marketplace { spec },
             });
         }
     }
     (files, plugins)
+}
+
+/// Read enabled plugin specs from user settings. CC's discovery enables
+/// plugins only when the user's `settings.json` has a truthy entry
+/// under `plugins.<spec>`; entries absent from the map are disabled.
+/// Returns the set of truthy specs; absent / missing files yield an
+/// empty set, which correctly disables every discovered marketplace
+/// plugin.
+fn load_enabled_plugin_specs(home: &Path) -> std::collections::HashSet<String> {
+    use std::collections::HashSet;
+    let mut out = HashSet::new();
+    let p = home.join("settings.json");
+    let Some(bytes) = std::fs::read(p).ok() else { return out };
+    let Ok(v): Result<serde_json::Value, _> = serde_json::from_slice(&bytes) else {
+        return out;
+    };
+    let Some(plugins) = v.get("plugins").and_then(|x| x.as_object()) else {
+        return out;
+    };
+    for (spec, val) in plugins {
+        let enabled = match val {
+            serde_json::Value::Bool(b) => *b,
+            serde_json::Value::Object(o) => o
+                .get("enabled")
+                .and_then(|x| x.as_bool())
+                .unwrap_or(true),
+            _ => true,
+        };
+        if enabled {
+            out.insert(spec.clone());
+        }
+    }
+    out
 }
 
 /// Managed settings composite — `managed-settings.json` + any drop-ins
@@ -592,7 +644,8 @@ pub fn assemble_tree(cwd: &Path) -> ConfigTree {
         ));
     }
 
-    let project_files = collect_project(cwd);
+    let mut project_files = collect_project(cwd);
+    project_files.extend(collect_rules_walk(cwd));
     if !project_files.is_empty() {
         scopes.push(scope_node(
             "scope:project",

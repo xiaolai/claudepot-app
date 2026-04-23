@@ -119,7 +119,6 @@ fn verify_cc_parity(args: &[String]) -> Result<()> {
 /// 4. Return Ok if they match; detailed error otherwise.
 fn run_fixture(fixture: &Path) -> Result<()> {
     use claudepot_core::config_view::effective_settings;
-    use claudepot_core::config_view::model::PolicyOrigin;
     use claudepot_core::config_view::policy::PolicySource;
 
     let input_path = fixture.join("input.json");
@@ -137,13 +136,23 @@ fn run_fixture(fixture: &Path) -> Result<()> {
         policy_sources: bundle
             .policy
             .into_iter()
-            .map(|(origin, value)| PolicySource {
-                origin: policy_origin_from_str(&origin).unwrap_or(PolicyOrigin::Remote),
-                value,
+            .map(|(origin, value)| {
+                let parsed = policy_origin_from_str(&origin).ok_or_else(|| {
+                    anyhow!(
+                        "unknown policy origin {origin:?} — expected one of \
+                         remote / mdm_admin / managed_file_composite / hkcu_user"
+                    )
+                })?;
+                Ok::<_, anyhow::Error>(PolicySource {
+                    origin: parsed,
+                    value,
+                })
             })
-            .collect(),
+            .collect::<Result<Vec<_>>>()?,
     };
-    let actual = effective_settings::compute(&input_struct).merged;
+    // Use compute_raw so parity goldens compare unmasked merge output —
+    // CC's loader is upstream of any serialization-time redaction.
+    let actual = effective_settings::compute_raw(&input_struct).merged;
 
     if !json_equal_order_insensitive(&actual, &expected) {
         let diff = simple_diff(&actual, &expected);

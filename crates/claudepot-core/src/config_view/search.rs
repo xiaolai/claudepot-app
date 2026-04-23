@@ -66,7 +66,7 @@ impl CancelToken {
 
 /// Input for one round of matching — either a regex or a plain substring.
 enum Matcher {
-    Plain { needle: String, case_sensitive: bool },
+    Plain { needle: String },
     Regex(Regex),
 }
 
@@ -78,24 +78,27 @@ impl Matcher {
             } else {
                 format!("(?i){}", query.text)
             };
-            Regex::new(&pat).map(Matcher::Regex).map_err(|e| e.to_string())
+            return Regex::new(&pat).map(Matcher::Regex).map_err(|e| e.to_string());
+        }
+        // Case-sensitive plain uses a cheap byte-level scanner. The
+        // case-insensitive variant goes through the regex crate with an
+        // escaped needle + `(?i)` flag — that path is Unicode-aware AND
+        // preserves original byte offsets (lowercasing the haystack via
+        // `String::to_lowercase` can change byte lengths and desync
+        // line-number calculations, e.g. German ß → ss, Turkish İ → i̇).
+        if query.case_sensitive {
+            Ok(Matcher::Plain { needle: query.text.clone() })
         } else {
-            Ok(Matcher::Plain {
-                needle: query.text.clone(),
-                case_sensitive: query.case_sensitive,
-            })
+            let pat = format!("(?i){}", regex::escape(&query.text));
+            Regex::new(&pat).map(Matcher::Regex).map_err(|e| e.to_string())
         }
     }
 
     fn find_iter<'a>(&'a self, hay: &'a str) -> Box<dyn Iterator<Item = (usize, usize)> + 'a> {
         match self {
-            Matcher::Plain { needle, case_sensitive } => {
-                if *case_sensitive {
-                    let n = needle.clone();
-                    Box::new(plain_iter(hay, n))
-                } else {
-                    Box::new(icase_plain_iter(hay, needle.to_lowercase()))
-                }
+            Matcher::Plain { needle } => {
+                let n = needle.clone();
+                Box::new(plain_iter(hay, n))
             }
             Matcher::Regex(re) => Box::new(re.find_iter(hay).map(|m| (m.start(), m.end()))),
         }
@@ -123,30 +126,9 @@ fn plain_iter(hay: &str, needle: String) -> impl Iterator<Item = (usize, usize)>
     })
 }
 
-fn icase_plain_iter(hay: &str, needle_lc: String) -> impl Iterator<Item = (usize, usize)> + '_ {
-    let lc = hay.to_lowercase();
-    let mut i = 0usize;
-    std::iter::from_fn(move || {
-        if needle_lc.is_empty() || i >= lc.len() {
-            return None;
-        }
-        match lc[i..].find(&needle_lc) {
-            Some(off) => {
-                let start = i + off;
-                let end = start + needle_lc.len();
-                i = end;
-                // Map back to original string byte offsets — works because
-                // ASCII-case folding preserves byte offsets, and non-ASCII
-                // preserved codepoint boundaries.
-                Some((start, end))
-            }
-            None => {
-                i = lc.len();
-                None
-            }
-        }
-    })
-}
+// icase_plain_iter was removed — case-insensitive plain search now
+// routes through the regex crate with `(?i)` + `regex::escape`, which
+// is Unicode-aware and preserves original byte offsets.
 
 /// Walk the tree, scan each matching file, emit hits via `on_hit` as
 /// they're discovered. Returns the summary once finished or cancelled.

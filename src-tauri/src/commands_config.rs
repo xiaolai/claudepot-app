@@ -53,6 +53,11 @@ pub struct ConfigTreeDto {
     pub scopes: Vec<ScopeNodeDto>,
     pub cwd: String,
     pub project_root: String,
+    /// Platform-correct path to `<cwd>/.claude`, built via `Path::join`
+    /// so Windows callers receive `C:\…\.claude` (not a mixed-separator
+    /// `C:\…/.claude`). Rendered in the UI as a display-only string;
+    /// the backend consumes the `abs_path` of each FileNode directly.
+    pub config_home_dir: String,
     pub memory_slug: String,
     pub memory_slug_lossy: bool,
 }
@@ -284,6 +289,7 @@ pub async fn config_scan(
         scopes: tree.scopes.iter().map(ScopeNodeDto::from).collect(),
         cwd: tree.cwd.display().to_string(),
         project_root: tree.project_root.display().to_string(),
+        config_home_dir: tree.cwd.join(".claude").display().to_string(),
         memory_slug: tree.memory_slug.clone(),
         memory_slug_lossy: tree.memory_slug_lossy,
     };

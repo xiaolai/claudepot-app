@@ -49,7 +49,12 @@ interface ConfigSectionProps {
  * the selection so a return to the section lands on the same row.
  */
 export function ConfigSection({ subRoute, onSubRouteChange }: ConfigSectionProps) {
-  const { tree, dirty: watcherDirty, setTree } = useConfigTree(null);
+  const {
+    tree,
+    dirty: watcherDirty,
+    setTree,
+    orphanPatchSignal,
+  } = useConfigTree(null);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [editors, setEditors] = useState<EditorCandidateDto[] | null>(null);
   const [defaults, setDefaults] = useState<EditorDefaultsDto | null>(null);
@@ -73,10 +78,10 @@ export function ConfigSection({ subRoute, onSubRouteChange }: ConfigSectionProps
   const [searchQuery, setSearchQuery] = useState<string>("");
   const [searchRegex, setSearchRegex] = useState<boolean>(false);
   const [searchActive, setSearchActive] = useState<boolean>(false);
+  const [activeSearchId, setActiveSearchId] = useState<string | null>(null);
   const [searchHits, setSearchHits] = useState<ConfigSearchHitDto[]>([]);
   const [searchSummary, setSearchSummary] =
     useState<ConfigSearchSummaryDto | null>(null);
-  const searchIdRef = useRef<string | null>(null);
   const searchInputRef = useRef<HTMLInputElement | null>(null);
 
   // ⌘F focuses the content-search input. Esc clears it.
@@ -125,6 +130,17 @@ export function ConfigSection({ subRoute, onSubRouteChange }: ConfigSectionProps
       void api.configWatchStop().catch(() => {});
     };
   }, [refreshTree]);
+
+  // Recovery: if the watcher emits a patch before a baseline snapshot
+  // is in hand (initial configScan failed, or raced ahead of the
+  // watcher's first full_snapshot), re-run the scan so subsequent
+  // patches have something to apply to. Gate on orphanPatchSignal
+  // changing so a steady stream of orphans only triggers one recovery
+  // per signal bump.
+  useEffect(() => {
+    if (orphanPatchSignal === 0) return;
+    void refreshTree();
+  }, [orphanPatchSignal, refreshTree]);
 
   useEffect(() => {
     if (!toast) return;
@@ -184,20 +200,21 @@ export function ConfigSection({ subRoute, onSubRouteChange }: ConfigSectionProps
     const trimmed = searchQuery.trim();
     if (!trimmed) {
       setSearchActive(false);
+      setActiveSearchId(null);
       setSearchHits([]);
       setSearchSummary(null);
       return;
     }
     // Cancel any in-flight search.
-    if (searchIdRef.current) {
+    if (activeSearchId) {
       try {
-        await api.configSearchCancel(searchIdRef.current);
+        await api.configSearchCancel(activeSearchId);
       } catch {
         // ignore
       }
     }
     const id = `search-${Date.now()}`;
-    searchIdRef.current = id;
+    setActiveSearchId(id);
     setSearchActive(true);
     setSearchHits([]);
     setSearchSummary(null);
@@ -210,30 +227,33 @@ export function ConfigSection({ subRoute, onSubRouteChange }: ConfigSectionProps
     } catch (e) {
       setToast(`Search failed: ${e}`);
       setSearchActive(false);
+      setActiveSearchId(null);
     }
-  }, [searchQuery, searchRegex]);
+  }, [searchQuery, searchRegex, activeSearchId]);
 
   const cancelSearch = useCallback(async () => {
-    if (searchIdRef.current) {
+    if (activeSearchId) {
       try {
-        await api.configSearchCancel(searchIdRef.current);
+        await api.configSearchCancel(activeSearchId);
       } catch {
         // ignore
       }
     }
-    searchIdRef.current = null;
+    setActiveSearchId(null);
     setSearchActive(false);
-  }, []);
+  }, [activeSearchId]);
 
-  // Subscribe to streaming events for the active search.
+  // Subscribe to streaming events for the active search. Keying on
+  // `activeSearchId` ensures a new search tears down listeners for
+  // the previous one (which would otherwise keep firing until the
+  // Tauri channel closes).
   useEffect(() => {
-    const id = searchIdRef.current;
-    if (!searchActive || !id) return;
+    if (!activeSearchId) return;
     let unlisten1: (() => void) | null = null;
     let unlisten2: (() => void) | null = null;
     let cancelled = false;
     void listen<ConfigSearchHitDto>(
-      `config-search-hit::${id}`,
+      `config-search-hit::${activeSearchId}`,
       (ev) => {
         if (cancelled) return;
         setSearchHits((prev) => [...prev, ev.payload]);
@@ -246,7 +266,7 @@ export function ConfigSection({ subRoute, onSubRouteChange }: ConfigSectionProps
       }
     });
     void listen<ConfigSearchSummaryDto>(
-      `config-search-done::${id}`,
+      `config-search-done::${activeSearchId}`,
       (ev) => {
         if (cancelled) return;
         setSearchSummary(ev.payload);
@@ -263,7 +283,7 @@ export function ConfigSection({ subRoute, onSubRouteChange }: ConfigSectionProps
       unlisten1?.();
       unlisten2?.();
     };
-  }, [searchActive]);
+  }, [activeSearchId]);
 
   const selectedFile = useMemo<ConfigFileNodeDto | null>(() => {
     if (!tree || !selectedId) return null;
@@ -292,10 +312,9 @@ export function ConfigSection({ subRoute, onSubRouteChange }: ConfigSectionProps
 
   const openConfigHome = useCallback(
     async (editorId: string | null) => {
-      if (!tree?.cwd) return;
-      const target = `${tree.cwd}/.claude`;
+      if (!tree?.config_home_dir) return;
       try {
-        await api.configOpenInEditorPath(target, editorId, null);
+        await api.configOpenInEditorPath(tree.config_home_dir, editorId, null);
       } catch (err) {
         setToast(String(err));
       }
@@ -510,7 +529,7 @@ export function ConfigSection({ subRoute, onSubRouteChange }: ConfigSectionProps
             />
           ) : (
             <ConfigHomePane
-              cwd={tree?.cwd ?? null}
+              configHomeDir={tree?.config_home_dir ?? null}
               editors={editors}
               defaults={defaults}
               onOpen={openConfigHome}
@@ -941,7 +960,7 @@ function FilePreview({
 }
 
 function ConfigHomePane({
-  cwd,
+  configHomeDir,
   editors,
   defaults,
   onOpen,
@@ -949,7 +968,7 @@ function ConfigHomePane({
   onSetDefault,
   onRefreshEditors,
 }: {
-  cwd: string | null;
+  configHomeDir: string | null;
   editors: EditorCandidateDto[] | null;
   defaults: EditorDefaultsDto | null;
   onOpen: (editorId: string | null) => void;
@@ -957,7 +976,7 @@ function ConfigHomePane({
   onSetDefault: (kind: ConfigKind | null, editorId: string) => void;
   onRefreshEditors: () => void;
 }) {
-  const claudeDir = cwd ? `${cwd}/.claude` : null;
+  const claudeDir = configHomeDir;
   return (
     <div
       style={{

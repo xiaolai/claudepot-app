@@ -58,6 +58,7 @@ describe("ConfigSection — P0 smoke", () => {
       scopes: [],
       cwd: "/repo",
       project_root: "/repo",
+      config_home_dir: "/repo/.claude",
       memory_slug: "",
       memory_slug_lossy: false,
     });

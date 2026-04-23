@@ -182,8 +182,20 @@ pub fn compute(bundle: &McpSourceBundle, mode: McpSimulationMode) -> Vec<Effecti
             Scope::ClaudeMdDir { .. } | Scope::Project
         ) || matches!(src, Scope::Other) && contributors.iter().any(|c| matches!(c, Scope::ClaudeMdDir { .. } | Scope::Project));
 
+        // Under enterprise lockout the enterprise servers themselves are
+        // the ONLY active ones — they stay approved. Suppression applies
+        // to the user/project/local/plugin sources, but those never
+        // reach this loop because we didn't ingest them above. We use
+        // the source scope to decide: a Policy-origin entry under
+        // lockout is the enterprise entry; anything else should not be
+        // here at all, but gets conservatively rejected if it is.
+        let is_enterprise_entry = matches!(src, Scope::Policy { .. });
         let approval = if lockout {
-            ApprovalState::Rejected
+            if is_enterprise_entry {
+                ApprovalState::Approved
+            } else {
+                ApprovalState::Rejected
+            }
         } else {
             gate(
                 &name,
@@ -196,7 +208,7 @@ pub fn compute(bundle: &McpSourceBundle, mode: McpSimulationMode) -> Vec<Effecti
             )
         };
 
-        let blocked_by = if lockout {
+        let blocked_by = if lockout && !is_enterprise_entry {
             Some(BlockReason::EnterpriseLockout)
         } else if matches!(approval, ApprovalState::Rejected) {
             Some(BlockReason::DisabledByUser)
@@ -390,7 +402,7 @@ mod tests {
     }
 
     #[test]
-    fn enterprise_lockout_rejects_all() {
+    fn enterprise_lockout_suppresses_non_enterprise_sources() {
         let mut user = BTreeMap::new();
         user.insert("u".to_string(), srv("u"));
         let mut project = BTreeMap::new();
@@ -407,16 +419,15 @@ mod tests {
             ..Default::default()
         };
         let r = compute(&bundle, McpSimulationMode::Interactive);
-        // User and project entries suppressed; only enterprise survives.
-        assert!(r.iter().all(|s| matches!(
-            s.approval,
-            ApprovalState::Rejected | ApprovalState::AutoApproved(_)
-        ) || s.name == "e"));
-        // Verify the enterprise server is actually present.
-        assert!(r.iter().any(|s| s.name == "e"));
-        // None of the suppressed sources appear.
+        // User and project entries don't appear — enterprise is the
+        // only surviving source.
         assert!(!r.iter().any(|s| s.name == "u"));
         assert!(!r.iter().any(|s| s.name == "p"));
+        // Enterprise server is present AND Approved — it's the active
+        // server list, not a blocked one.
+        let ent = r.iter().find(|s| s.name == "e").unwrap();
+        assert_eq!(ent.approval, ApprovalState::Approved);
+        assert!(ent.blocked_by.is_none());
     }
 
     #[test]
