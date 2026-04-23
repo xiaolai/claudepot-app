@@ -6,8 +6,6 @@ import { useTauriEvent } from "../hooks/useTauriEvent";
 import { useGlobalShortcuts } from "../hooks/useGlobalShortcuts";
 import { useCompactHeader } from "../hooks/useWindowWidth";
 import { useAppState } from "../providers/AppStateProvider";
-import { CommandPalette } from "../components/CommandPalette";
-import { ConfirmDialog } from "../components/ConfirmDialog";
 import { Button } from "../components/primitives/Button";
 import { IconButton } from "../components/primitives/IconButton";
 import { NF } from "../icons";
@@ -31,36 +29,82 @@ import type {
  */
 export function AccountsSection({
   onNavigate,
-  pendingOpenPalette = false,
-  onPaletteOpened,
 }: {
   onNavigate?: (section: string, subRoute?: string | null) => void;
-  /** Shell-raised flag — when true, open the palette on next render
-   *  and call `onPaletteOpened` to clear it. Lets ⌘K fire from any
-   *  section, not just Accounts. */
-  pendingOpenPalette?: boolean;
-  onPaletteOpened?: () => void;
 }) {
   const {
     pushToast,
     status,
     accounts,
+    ccIdentity,
     loadError,
     refresh,
     actions,
     busyKeys,
     requestCliSwap,
-    requestDesktopSignOut,
+    requestRemoveAccount,
     requestDesktopOverwrite,
   } = useAppState();
-  const { usage, refreshUsage, refreshUsageFor } = useUsage();
+  const { usage, refreshUsage, refreshUsageFor, lastFetchedAt } = useUsage();
   const compact = useCompactHeader();
 
-  const [showAdd, setShowAdd] = useState(false);
-  const [confirmRemove, setConfirmRemove] = useState<AccountSummary | null>(
-    null,
+  // Tick once a minute so the "updated Xm ago" label ages without a
+  // full section re-render. Cheap — a single state bump per tick.
+  const [, setNowTick] = useState(0);
+  useEffect(() => {
+    const id = window.setInterval(() => setNowTick((n) => n + 1), 60_000);
+    return () => window.clearInterval(id);
+  }, []);
+  const usageAgeLabel = useMemo(
+    () => formatUsageAge(lastFetchedAt),
+    [lastFetchedAt],
   );
-  const [showPalette, setShowPalette] = useState(false);
+
+  // Token counts per account — one fetch on mount. Keys section owns
+  // the full lifecycle; this is a read-only decoration on the
+  // Accounts cards. Quiet failure: if the backend doesn't answer
+  // (e.g. first-run, no keychain), the chip just doesn't render.
+  const [tokenCounts, setTokenCounts] = useState<Record<string, number>>({});
+  useEffect(() => {
+    let cancelled = false;
+    Promise.all([
+      api.keyApiList().catch(() => []),
+      api.keyOauthList().catch(() => []),
+    ]).then(([apiKeys, oauthTokens]) => {
+      if (cancelled) return;
+      const counts: Record<string, number> = {};
+      for (const k of apiKeys) {
+        if (k.account_uuid) {
+          counts[k.account_uuid] = (counts[k.account_uuid] ?? 0) + 1;
+        }
+      }
+      for (const t of oauthTokens) {
+        if (t.account_uuid) {
+          counts[t.account_uuid] = (counts[t.account_uuid] ?? 0) + 1;
+        }
+      }
+      setTokenCounts(counts);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [accounts]);
+
+  const handleOpenTokensFor = useCallback(
+    (email: string) => {
+      onNavigate?.("keys");
+      // Dispatch on the next tick so KeysSection has mounted and its
+      // cp-keys-filter listener is wired up before we fire.
+      window.setTimeout(() => {
+        window.dispatchEvent(
+          new CustomEvent("cp-keys-filter", { detail: { query: email } }),
+        );
+      }, 0);
+    },
+    [onNavigate],
+  );
+
+  const [showAdd, setShowAdd] = useState(false);
   const [filter, setFilter] = useState("");
   const [ctxMenu, setCtxMenu] = useState<
     | { kind: "row"; x: number; y: number; account: AccountSummary }
@@ -111,20 +155,7 @@ export function AccountsSection({
       refreshUsage();
     },
     onAdd: () => setShowAdd(true),
-    onPalette: () => setShowPalette(true),
   });
-
-  // Command palette bridge — AppShell raises `pendingOpenPalette`
-  // when ⌘K fires from any section. We open the palette on the next
-  // render and drain the flag. The palette component lives here
-  // because it owns the account-level actions; keeping it section-
-  // local avoids lifting all the swap/add/remove plumbing to App.
-  useEffect(() => {
-    if (pendingOpenPalette) {
-      setShowPalette(true);
-      onPaletteOpened?.();
-    }
-  }, [pendingOpenPalette, onPaletteOpened]);
 
   // Add-account bridge — the macOS app menu and the tray menu both
   // dispatch this to open the AddAccountModal from outside the section.
@@ -292,6 +323,23 @@ export function AccountsSection({
                 >
                   Verify all
                 </Button>
+                {usageAgeLabel && (
+                  <span
+                    className="mono-cap"
+                    style={{
+                      fontSize: "var(--fs-2xs)",
+                      color: "var(--fg-faint)",
+                      letterSpacing: "0.03em",
+                    }}
+                    title={
+                      lastFetchedAt
+                        ? new Date(lastFetchedAt).toLocaleString()
+                        : undefined
+                    }
+                  >
+                    {usageAgeLabel}
+                  </span>
+                )}
                 <Button
                   variant="ghost"
                   glyph={NF.refresh}
@@ -330,6 +378,20 @@ export function AccountsSection({
         onContextMenu={handleContextMenu}
         cliHandlers={cliHandlers}
         desktopHandlers={desktopHandlers}
+        ccIdentity={ccIdentity}
+        tokenCounts={tokenCounts}
+        onOpenTokens={handleOpenTokensFor}
+        onAdd={() => setShowAdd(true)}
+        onAdoptCurrent={async () => {
+          try {
+            const outcome = await api.accountAddFromCurrent();
+            pushToast("info", `Adopted ${outcome.email}.`);
+            await refresh();
+          } catch (e) {
+            const msg = e instanceof Error ? e.message : String(e);
+            pushToast("error", `Couldn't adopt current session: ${msg}`);
+          }
+        }}
       />
 
       <AddAccountModal
@@ -345,59 +407,6 @@ export function AccountsSection({
         onAdoptDesktop={(a) => actions.adoptDesktop(a)}
       />
 
-      {confirmRemove && (
-        <ConfirmDialog
-          title="Remove account?"
-          confirmLabel="Remove"
-          confirmDanger
-          body={
-            <>
-              <p>
-                Remove <strong>{confirmRemove.email}</strong>?
-              </p>
-              <p className="muted small">
-                Deletes credentials and Desktop profile. Active
-                CLI/Desktop pointers will be cleared.
-              </p>
-            </>
-          }
-          onCancel={() => setConfirmRemove(null)}
-          onConfirm={() => {
-            const t = confirmRemove;
-            setConfirmRemove(null);
-            actions.performRemove(t);
-          }}
-        />
-      )}
-
-      {showPalette && status && (
-        <CommandPalette
-          accounts={accounts}
-          status={status}
-          onClose={() => setShowPalette(false)}
-          onSwitchCli={(a) => requestCliSwap(a)}
-          onSwitchDesktop={(a) => handleDesktopSwitch(a)}
-          onAdd={() => setShowAdd(true)}
-          onRefresh={() => {
-            refresh();
-            refreshUsage();
-          }}
-          onRemove={(a) => setConfirmRemove(a)}
-          onAdoptDesktop={(a) => {
-            if (a.desktop_profile_on_disk) requestDesktopOverwrite(a);
-            else void actions.adoptDesktop(a);
-          }}
-          onClearDesktop={requestDesktopSignOut}
-          onLaunchDesktop={() => {
-            api.desktopLaunch().catch((e) => {
-              const msg = e instanceof Error ? e.message : String(e);
-              pushToast("error", `Desktop launch failed: ${msg}`);
-            });
-          }}
-          onNavigate={onNavigate}
-        />
-      )}
-
       {ctxMenu && (
         <CtxMenuForAccount
           menu={ctxMenu}
@@ -410,7 +419,7 @@ export function AccountsSection({
           onRefreshUsageFor={(a) => refreshUsageFor(a.uuid)}
           onRefreshUsageAll={refreshUsage}
           onLogin={actions.login}
-          onRemove={setConfirmRemove}
+          onRemove={requestRemoveAccount}
           onAdoptDesktop={(a) => {
             // Adopt with no overwrite by default. If a snapshot
             // already exists for this account, go through the
@@ -425,4 +434,23 @@ export function AccountsSection({
 
     </>
   );
+}
+
+/**
+ * Compact "updated 12m ago" label for the Accounts header. Returns
+ * null when no fetch has happened yet, "just now" for < 30 s, else
+ * minutes/hours. Seconds are suppressed on purpose — the label is a
+ * freshness cue, not a stopwatch.
+ */
+function formatUsageAge(lastFetchedAt: number | null): string | null {
+  if (!lastFetchedAt) return null;
+  const deltaMs = Date.now() - lastFetchedAt;
+  if (deltaMs < 30_000) return "updated just now";
+  const minutes = Math.floor(deltaMs / 60_000);
+  if (minutes < 1) return "updated just now";
+  if (minutes < 60) return `updated ${minutes}m ago`;
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) return `updated ${hours}h ago`;
+  const days = Math.floor(hours / 24);
+  return `updated ${days}d ago`;
 }

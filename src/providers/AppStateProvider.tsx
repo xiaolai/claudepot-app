@@ -65,6 +65,17 @@ interface AppStateValue {
   requestDesktopOverwrite: (a: AccountSummary) => void;
   dismissDesktopConfirm: () => void;
   confirmDesktopPending: () => void;
+
+  /**
+   * Pending account-removal confirmation. Shell-level so the command
+   * palette (mounted in AppShell) and the Accounts context menu route
+   * through the same ConfirmDialog. Actual removal still flows through
+   * `actions.performRemove`, which carries the undo toast.
+   */
+  removeConfirmPending: AccountSummary | null;
+  requestRemoveAccount: (a: AccountSummary) => void;
+  dismissRemoveConfirm: () => void;
+  confirmRemoveAccount: () => void;
 }
 
 export type DesktopConfirmRequest =
@@ -156,6 +167,22 @@ export function AppStateProvider({ children }: { children: ReactNode }) {
     }
   }, [actions, desktopConfirmPending]);
 
+  const [removeConfirmPending, setRemoveConfirmPending] =
+    useState<AccountSummary | null>(null);
+  const requestRemoveAccount = useCallback(
+    (a: AccountSummary) => setRemoveConfirmPending(a),
+    [],
+  );
+  const dismissRemoveConfirm = useCallback(
+    () => setRemoveConfirmPending(null),
+    [],
+  );
+  const confirmRemoveAccount = useCallback(() => {
+    const target = removeConfirmPending;
+    setRemoveConfirmPending(null);
+    if (target) actions.performRemove(target);
+  }, [actions, removeConfirmPending]);
+
   const value = useMemo<AppStateValue>(
     () => ({
       toasts,
@@ -183,6 +210,10 @@ export function AppStateProvider({ children }: { children: ReactNode }) {
       requestDesktopOverwrite,
       dismissDesktopConfirm,
       confirmDesktopPending,
+      removeConfirmPending,
+      requestRemoveAccount,
+      dismissRemoveConfirm,
+      confirmRemoveAccount,
     }),
     [
       toasts,
@@ -210,6 +241,10 @@ export function AppStateProvider({ children }: { children: ReactNode }) {
       requestDesktopOverwrite,
       dismissDesktopConfirm,
       confirmDesktopPending,
+      removeConfirmPending,
+      requestRemoveAccount,
+      dismissRemoveConfirm,
+      confirmRemoveAccount,
     ],
   );
 

@@ -4,6 +4,7 @@ import type { CleanResult } from "../../types";
 import { useToasts } from "../../hooks/useToasts";
 import { ToastContainer } from "../../components/ToastContainer";
 import { AbandonedCleanupCard } from "./AbandonedCleanupCard";
+import { GcCard } from "./GcCard";
 import { RepairView } from "./RepairView";
 import { CleanOrphansModal } from "./CleanOrphansModal";
 
@@ -77,6 +78,8 @@ export function MaintenanceView({
           onOpTerminated?.();
         }}
       />
+
+      <GcCard pushToast={pushToast} />
 
       {/* Repair section — reuse existing RepairView without the back button */}
       <section className="maintenance-section">

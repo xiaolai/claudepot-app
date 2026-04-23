@@ -1,8 +1,10 @@
+import { useState } from "react";
 import type { NfIcon } from "../../icons";
 import { Glyph } from "../../components/primitives/Glyph";
 import { Tag } from "../../components/primitives/Tag";
 import { NF } from "../../icons";
 import type { SessionEvent } from "../../types";
+import { useActivityPrefs } from "../../hooks/useActivityPrefs";
 import { Body, Bubble, Divider } from "./components/transcriptAtoms";
 import { formatTokens, modelBadge } from "./format";
 
@@ -28,6 +30,7 @@ export function SessionEventView({
   searchTerm: string;
 }) {
   const ts = event.kind === "malformed" ? null : event.ts;
+  const prefs = useActivityPrefs();
 
   const header = (label: string, extra?: React.ReactNode) => (
     <div
@@ -135,11 +138,10 @@ export function SessionEventView({
       return (
         <Bubble side="right" tone="ghost">
           {header("Thinking")}
-          <Body
+          <ThinkingBody
             text={event.text}
             searchTerm={searchTerm}
-            clamp={MESSAGE_CLAMP}
-            tone="ghost"
+            hideByDefault={prefs.hideThinking}
           />
         </Bubble>
       );
@@ -203,6 +205,66 @@ export function SessionEventView({
 // shared transcriptAtoms module — both transcript renderers consume
 // them. MiniLine is local because only this view needs it.)
 // ---------------------------------------------------------------------------
+
+/**
+ * Renders an assistantThinking block. When `hideByDefault` is true
+ * (driven by the `activity_hide_thinking` pref) the body is replaced
+ * with "Thinking · N chars — click to reveal" until the user expands
+ * it. The toggle is local state, so re-collapsing a block is one
+ * click away.
+ */
+function ThinkingBody({
+  text,
+  searchTerm,
+  hideByDefault,
+}: {
+  text: string;
+  searchTerm: string;
+  hideByDefault: boolean;
+}) {
+  const [revealed, setRevealed] = useState(!hideByDefault);
+  // Keep render in sync when the pref flips mid-view. The local
+  // `revealed` state rides over the pref only AFTER the user clicks
+  // — a toggle in Settings re-collapses blocks they hadn't opened
+  // yet, but leaves expanded ones alone.
+  if (!hideByDefault && !revealed) setRevealed(true);
+
+  if (!revealed) {
+    return (
+      <button
+        type="button"
+        onClick={() => setRevealed(true)}
+        className="pm-focus"
+        style={{
+          alignSelf: "flex-start",
+          display: "inline-flex",
+          alignItems: "center",
+          gap: "var(--sp-6)",
+          padding: "var(--sp-4) var(--sp-10)",
+          fontSize: "var(--fs-xs)",
+          fontStyle: "italic",
+          color: "var(--fg-faint)",
+          background: "var(--bg-sunken)",
+          border: "var(--bw-hair) dashed var(--line)",
+          borderRadius: "var(--r-2)",
+          cursor: "pointer",
+          fontFamily: "var(--font)",
+        }}
+        aria-label={`Reveal thinking block (${text.length} characters)`}
+      >
+        Thinking · {text.length.toLocaleString()} chars — click to reveal
+      </button>
+    );
+  }
+  return (
+    <Body
+      text={text}
+      searchTerm={searchTerm}
+      clamp={MESSAGE_CLAMP}
+      tone="ghost"
+    />
+  );
+}
 
 function MiniLine({
   glyph,

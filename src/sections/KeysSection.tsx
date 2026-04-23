@@ -1,10 +1,11 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { api } from "../api";
 import { Button } from "../components/primitives/Button";
 import { ConfirmDialog } from "../components/ConfirmDialog";
 import { ExternalLink } from "../components/primitives/ExternalLink";
 import { Glyph } from "../components/primitives/Glyph";
 import { IconButton } from "../components/primitives/IconButton";
+import { Input } from "../components/primitives/Input";
 import { SectionLabel } from "../components/primitives/SectionLabel";
 import { Tag } from "../components/primitives/Tag";
 import { ToastContainer } from "../components/ToastContainer";
@@ -36,6 +37,38 @@ export function KeysSection() {
   const [pendingRemoval, setPendingRemoval] = useState<PendingRemoval | null>(
     null,
   );
+  const [filter, setFilter] = useState("");
+
+  const accountEmailByUuid = useMemo(() => {
+    const m = new Map<string, string>();
+    for (const a of accounts) m.set(a.uuid, a.email);
+    return m;
+  }, [accounts]);
+
+  const matches = useCallback(
+    (row: { label: string; token_preview: string; account_uuid?: string }) => {
+      const q = filter.trim().toLowerCase();
+      if (!q) return true;
+      if (row.label.toLowerCase().includes(q)) return true;
+      if (row.token_preview.toLowerCase().includes(q)) return true;
+      const email = row.account_uuid
+        ? accountEmailByUuid.get(row.account_uuid)
+        : undefined;
+      return !!email && email.toLowerCase().includes(q);
+    },
+    [filter, accountEmailByUuid],
+  );
+
+  const shownApi = useMemo(
+    () => apiKeys.filter(matches),
+    [apiKeys, matches],
+  );
+  const shownOauth = useMemo(
+    () => oauthTokens.filter(matches),
+    [oauthTokens, matches],
+  );
+  const totalRows = apiKeys.length + oauthTokens.length;
+  const shownRows = shownApi.length + shownOauth.length;
 
   const refresh = useCallback(async () => {
     setLoading(true);
@@ -58,6 +91,18 @@ export function KeysSection() {
   useEffect(() => {
     void refresh();
   }, [refresh]);
+
+  // Cross-section deep-link: AccountCard's "N tokens" chip dispatches
+  // `cp-keys-filter` so this section can land pre-filtered to an
+  // account. Payload is the literal filter query (typically an email).
+  useEffect(() => {
+    const onFilter = (e: Event) => {
+      const detail = (e as CustomEvent<{ query: string }>).detail;
+      if (typeof detail?.query === "string") setFilter(detail.query);
+    };
+    window.addEventListener("cp-keys-filter", onFilter);
+    return () => window.removeEventListener("cp-keys-filter", onFilter);
+  }, []);
 
   const onCopy = useCallback(
     async (
@@ -151,6 +196,36 @@ export function KeysSection() {
         }
       />
 
+      {totalRows > 4 && (
+        <div
+          style={{
+            padding: "var(--sp-14) var(--sp-32)",
+            borderBottom: "var(--bw-hair) solid var(--line)",
+            display: "flex",
+            gap: "var(--sp-12)",
+            alignItems: "center",
+            background: "var(--bg)",
+          }}
+        >
+          <Input
+            glyph={NF.search}
+            placeholder="Filter keys and tokens"
+            value={filter}
+            onChange={(e) => setFilter(e.target.value)}
+            style={{ width: "var(--filter-input-width)" }}
+            aria-label="Filter keys and tokens"
+          />
+          {filter.trim() !== "" && (
+            <span
+              className="mono-cap"
+              style={{ color: "var(--fg-faint)", marginLeft: "var(--sp-4)" }}
+            >
+              {`${shownRows} / ${totalRows}`}
+            </span>
+          )}
+        </div>
+      )}
+
       <main
         style={{
           flex: 1,
@@ -163,7 +238,7 @@ export function KeysSection() {
         }}
       >
         <ApiKeysTable
-          rows={apiKeys}
+          rows={shownApi}
           loading={loading}
           onCopy={(row) =>
             void onCopy("api", row.uuid, row.label, row.token_preview)
@@ -178,7 +253,7 @@ export function KeysSection() {
         />
 
         <OauthTokensTable
-          rows={oauthTokens}
+          rows={shownOauth}
           loading={loading}
           onCopy={(row) =>
             void onCopy("oauth", row.uuid, row.label, row.token_preview)

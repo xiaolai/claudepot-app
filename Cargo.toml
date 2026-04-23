@@ -7,10 +7,10 @@ members = [
 ]
 
 [workspace.package]
-version = "0.0.4"
+version = "0.0.5"
 edition = "2021"
 authors = ["xiaolai"]
-license = "MIT"
+license = "ISC"
 
 [workspace.dependencies]
 # Async

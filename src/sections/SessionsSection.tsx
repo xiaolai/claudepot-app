@@ -8,6 +8,11 @@ import {
 } from "react";
 import { copyToClipboard } from "../lib/copyToClipboard";
 import { useSessionsData } from "../hooks/useSessionsData";
+import { useTrashCount } from "../hooks/useTrashCount";
+import {
+  readSessionsFilter,
+  writeSessionsFilter,
+} from "./sessions/sessionsFilterStore";
 import { ContextMenu } from "../components/ContextMenu";
 import { Button } from "../components/primitives/Button";
 import { IconButton } from "../components/primitives/IconButton";
@@ -20,6 +25,8 @@ import { ScreenHeader } from "../shell/ScreenHeader";
 import type { SessionRow } from "../types";
 import { MoveSessionModal } from "./projects/MoveSessionModal";
 import { CleanupPane } from "./sessions/CleanupPane";
+import { SessionsTrendsPane } from "./sessions/components/SessionsTrendsPane";
+import { useSessionLive } from "../hooks/useSessionLive";
 import { SectionTab } from "./sessions/components/SectionTab";
 import { SessionsTabPanel } from "./sessions/components/SessionsTabPanel";
 import { buildSessionContextMenuItems } from "./sessions/sessionsContextMenu";
@@ -62,15 +69,77 @@ export interface SessionsSectionProps {
 
 export function SessionsSection(props: SessionsSectionProps = {}) {
   const { initialSelectedPath = null, onInitialSelectedPathConsumed } = props;
-  const [activeRepo, setActiveRepo] = useState<string | null>(null);
+  // Seed local state from the module-scope filter store so a user
+  // who typed a query, picked a repo, or drilled into a transcript
+  // returns to the same view after a cross-section hop. On mount the
+  // snapshot is copied in; on change we write back. The store never
+  // pushes updates — consumers read once and own their copy after.
+  const initialFilters = useRef(readSessionsFilter());
+  const [activeRepo, setActiveRepoRaw] = useState<string | null>(
+    initialFilters.current.activeRepo,
+  );
   /** The file_path of the selected row — globally unique on disk.
    * We key selection by path (not session_id) because CC can end up
    * with two .jsonl files that share a session_id (e.g. an interrupted
    * adopt_orphan left the source file behind). */
-  const [selectedPath, setSelectedPath] = useState<string | null>(null);
-  const [filter, setFilter] = useState<SessionFilter>("all");
-  const [query, setQuery] = useState("");
-  const [tab, setTab] = useState<"sessions" | "cleanup">("sessions");
+  const [selectedPath, setSelectedPathRaw] = useState<string | null>(
+    initialFilters.current.selectedPath,
+  );
+  const [filter, setFilterRaw] = useState<SessionFilter>(
+    initialFilters.current.filter,
+  );
+  const [query, setQueryRaw] = useState(initialFilters.current.query);
+  const [tab, setTabRaw] = useState<"sessions" | "trends" | "cleanup">(
+    initialFilters.current.tab,
+  );
+  const [liveFilter, setLiveFilterRaw] = useState<boolean>(
+    initialFilters.current.liveFilter,
+  );
+  // Wrap each setter so every mutation funnels through the module
+  // store. Using a typed helper keeps the call sites unchanged at
+  // the hook-consumption level.
+  const setActiveRepo = useCallback<typeof setActiveRepoRaw>((next) => {
+    setActiveRepoRaw((prev) => {
+      const resolved = typeof next === "function" ? next(prev) : next;
+      writeSessionsFilter({ activeRepo: resolved });
+      return resolved;
+    });
+  }, []);
+  const setSelectedPath = useCallback<typeof setSelectedPathRaw>((next) => {
+    setSelectedPathRaw((prev) => {
+      const resolved = typeof next === "function" ? next(prev) : next;
+      writeSessionsFilter({ selectedPath: resolved });
+      return resolved;
+    });
+  }, []);
+  const setFilter = useCallback<typeof setFilterRaw>((next) => {
+    setFilterRaw((prev) => {
+      const resolved = typeof next === "function" ? next(prev) : next;
+      writeSessionsFilter({ filter: resolved });
+      return resolved;
+    });
+  }, []);
+  const setQuery = useCallback<typeof setQueryRaw>((next) => {
+    setQueryRaw((prev) => {
+      const resolved = typeof next === "function" ? next(prev) : next;
+      writeSessionsFilter({ query: resolved });
+      return resolved;
+    });
+  }, []);
+  const setTab = useCallback<typeof setTabRaw>((next) => {
+    setTabRaw((prev) => {
+      const resolved = typeof next === "function" ? next(prev) : next;
+      writeSessionsFilter({ tab: resolved });
+      return resolved;
+    });
+  }, []);
+  const setLiveFilter = useCallback<typeof setLiveFilterRaw>((next) => {
+    setLiveFilterRaw((prev) => {
+      const resolved = typeof next === "function" ? next(prev) : next;
+      writeSessionsFilter({ liveFilter: resolved });
+      return resolved;
+    });
+  }, []);
   const [detailRefreshSignal, setDetailRefreshSignal] = useState(0);
   const [toast, setToast] = useState<string | null>(null);
   const [ctxMenu, setCtxMenu] = useState<{
@@ -89,8 +158,39 @@ export function SessionsSection(props: SessionsSectionProps = {}) {
     repoGroups,
     loading,
     error,
+    servedFromCache,
+    fetchStartedAt,
     refresh,
   } = useSessionsData({ onSecondaryError: setToast });
+
+  // Dot on the Cleanup tab when trash is non-empty. Render-if-nonzero.
+  const { count: trashCount, refresh: refreshTrash } = useTrashCount();
+
+  // Live-runtime snapshot used by the Live filter chip. `useSessionLive`
+  // is a module-scope store so this is cheap even though the Sessions
+  // section is lazy.
+  const liveSummaries = useSessionLive();
+  const liveSessionIds = useMemo(
+    () => new Set(liveSummaries.map((s) => s.session_id)),
+    [liveSummaries],
+  );
+
+  // Tick once a second while a fetch is in flight so the "Updating…
+  // Ns" elapsed-time label ages without re-rendering the whole table
+  // between ticks. Only runs while `fetchStartedAt` is non-null — no
+  // idle polling cost.
+  const [, setElapsedTick] = useState(0);
+  useEffect(() => {
+    if (fetchStartedAt === null) return;
+    const id = window.setInterval(() => setElapsedTick((n) => n + 1), 1000);
+    return () => window.clearInterval(id);
+  }, [fetchStartedAt]);
+  const elapsedLabel = useMemo(() => {
+    if (fetchStartedAt === null) return null;
+    const secs = Math.max(0, Math.floor((Date.now() - fetchStartedAt) / 1000));
+    if (secs < 1) return "Updating…";
+    return `Updating… ${secs}s`;
+  }, [fetchStartedAt]);
 
   // Selection / repo-filter pruning lives here (not in the hook)
   // because both are owned by this component. Run as effects on the
@@ -192,14 +292,20 @@ export function SessionsSection(props: SessionsSectionProps = {}) {
   }, [deepHits]);
   const filteredByQuery = useMemo(() => {
     const q = deferredQuery.trim().toLowerCase();
-    if (!q) return scoped;
-    return scoped.filter(
-      (s) =>
-        matchesQuery(s, haystack, q) ||
-        // Deep content hit from the backend search.
-        deepHitPaths.has(s.file_path),
-    );
-  }, [scoped, deferredQuery, deepHitPaths, haystack]);
+    let rows = scoped;
+    if (q) {
+      rows = rows.filter(
+        (s) =>
+          matchesQuery(s, haystack, q) ||
+          // Deep content hit from the backend search.
+          deepHitPaths.has(s.file_path),
+      );
+    }
+    if (liveFilter) {
+      rows = rows.filter((s) => liveSessionIds.has(s.session_id));
+    }
+    return rows;
+  }, [scoped, deferredQuery, deepHitPaths, haystack, liveFilter, liveSessionIds]);
 
   const handleContextMenu = useCallback(
     (e: React.MouseEvent, s: SessionRow) => {
@@ -258,24 +364,65 @@ export function SessionsSection(props: SessionsSectionProps = {}) {
         title="Sessions"
         subtitle={subtitle}
         actions={
-          compact ? (
-            <IconButton
-              glyph={NF.refresh}
-              onClick={refresh}
-              title="Refresh (⌘R)"
-              aria-label="Refresh sessions"
-            />
-          ) : (
-            <Button
-              variant="ghost"
-              glyph={NF.refresh}
-              glyphColor="var(--fg-muted)"
-              onClick={refresh}
-              title="Refresh (⌘R)"
-            >
-              Refresh
-            </Button>
-          )
+          <>
+            {elapsedLabel && (
+              <span
+                className="mono-cap"
+                aria-live="polite"
+                style={{
+                  fontSize: "var(--fs-2xs)",
+                  color: servedFromCache
+                    ? "var(--fg-faint)"
+                    : "var(--fg-ghost)",
+                  letterSpacing: "0.03em",
+                }}
+                title={
+                  servedFromCache
+                    ? "Showing cached rows while we re-scan transcripts"
+                    : undefined
+                }
+              >
+                {elapsedLabel}
+              </span>
+            )}
+            {trashCount > 0 &&
+              (compact ? (
+                <IconButton
+                  glyph={NF.trash}
+                  onClick={() => setTab("cleanup")}
+                  title={`Trash · ${trashCount} item${trashCount === 1 ? "" : "s"}`}
+                  aria-label={`Open trash (${trashCount} item${trashCount === 1 ? "" : "s"})`}
+                />
+              ) : (
+                <Button
+                  variant="ghost"
+                  glyph={NF.trash}
+                  glyphColor="var(--fg-muted)"
+                  onClick={() => setTab("cleanup")}
+                  title="Open the Cleanup tab"
+                >
+                  Trash · {trashCount}
+                </Button>
+              ))}
+            {compact ? (
+              <IconButton
+                glyph={NF.refresh}
+                onClick={refresh}
+                title="Refresh (⌘R)"
+                aria-label="Refresh sessions"
+              />
+            ) : (
+              <Button
+                variant="ghost"
+                glyph={NF.refresh}
+                glyphColor="var(--fg-muted)"
+                onClick={refresh}
+                title="Refresh session list (⌘R)"
+              >
+                Refresh sessions
+              </Button>
+            )}
+          </>
         }
       />
 
@@ -298,11 +445,19 @@ export function SessionsSection(props: SessionsSectionProps = {}) {
           onSelect={() => setTab("sessions")}
         />
         <SectionTab
+          id="sessions-tab-trends"
+          panelId="sessions-tab-panel-trends"
+          label="Trends"
+          active={tab === "trends"}
+          onSelect={() => setTab("trends")}
+        />
+        <SectionTab
           id="sessions-tab-cleanup"
           panelId="sessions-tab-panel-cleanup"
           label="Cleanup"
           active={tab === "cleanup"}
           onSelect={() => setTab("cleanup")}
+          indicator={trashCount > 0 ? true : undefined}
         />
       </div>
 
@@ -319,7 +474,13 @@ export function SessionsSection(props: SessionsSectionProps = {}) {
           }}
         >
           <div style={{ flex: 2, minWidth: 0, borderRight: "var(--bw-hair) solid var(--line)" }}>
-            <CleanupPane onTrashChanged={refresh} />
+            <CleanupPane
+              onTrashChanged={() => {
+                refresh();
+                refreshTrash();
+              }}
+              setToast={setToast}
+            />
           </div>
           <div style={{ flex: 1, minWidth: 0 }}>
             <TrashDrawer onChange={refresh} />
@@ -353,7 +514,24 @@ export function SessionsSection(props: SessionsSectionProps = {}) {
           onContextMenu={handleContextMenu}
           onRefresh={refresh}
           setToast={setToast}
+          liveFilter={liveFilter}
+          setLiveFilter={setLiveFilter}
+          liveCount={liveSummaries.length}
         />
+      )}
+      {tab === "trends" && (
+        <div
+          id="sessions-tab-panel-trends"
+          role="tabpanel"
+          aria-labelledby="sessions-tab-trends"
+          style={{
+            flex: 1,
+            minHeight: 0,
+            overflow: "auto",
+          }}
+        >
+          <SessionsTrendsPane />
+        </div>
       )}
 
       {moveSession && (

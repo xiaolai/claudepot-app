@@ -1,5 +1,6 @@
 import { type MouseEvent, useMemo, useState } from "react";
 import { Glyph } from "../../components/primitives/Glyph";
+import { IconButton } from "../../components/primitives/IconButton";
 import { Tag } from "../../components/primitives/Tag";
 import { NF } from "../../icons";
 import type { ProjectInfo } from "../../types";
@@ -314,7 +315,43 @@ function ProjectRow({
         {p.last_modified_ms != null ? formatRelativeTime(p.last_modified_ms) : "—"}
       </span>
 
-      <span>
+      <span
+        style={{
+          display: "inline-flex",
+          alignItems: "center",
+          gap: "var(--sp-2)",
+          justifyContent: "flex-end",
+        }}
+      >
+        {(hover || active) && onContextMenu && (
+          <span
+            // Stop row-select click from firing when the kebab is used.
+            onClick={(e) => e.stopPropagation()}
+            onMouseDown={(e) => e.stopPropagation()}
+            style={{ display: "inline-flex" }}
+          >
+            <IconButton
+              glyph={NF.ellipsis}
+              size="sm"
+              onClick={() => {
+                const el = document.activeElement as HTMLElement | null;
+                const rect = el?.getBoundingClientRect();
+                onContextMenu(
+                  {
+                    preventDefault: () => {},
+                    stopPropagation: () => {},
+                    clientX: rect ? rect.right : 0,
+                    clientY: rect ? rect.bottom : 0,
+                  } as unknown as MouseEvent,
+                  p,
+                );
+              }}
+              title="More actions"
+              aria-label={`More actions for ${name}`}
+              aria-haspopup="menu"
+            />
+          </span>
+        )}
         {(hover || active) && (
           <Glyph
             g={NF.chevronR}
