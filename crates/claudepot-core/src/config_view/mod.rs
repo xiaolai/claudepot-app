@@ -4,6 +4,7 @@
 //! submodule. Parse/merge/watch land in later phases (see
 //! `dev-docs/config-section-plan.md` §15).
 
+pub mod diff;
 pub mod discover;
 pub mod effective_mcp;
 pub mod effective_settings;
@@ -17,6 +18,7 @@ pub mod policy;
 pub mod provenance;
 pub mod redacted_claude_json;
 pub mod search;
+pub mod watch;
 
 use std::path::Path;
 
