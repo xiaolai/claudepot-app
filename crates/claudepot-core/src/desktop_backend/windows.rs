@@ -3,6 +3,105 @@ use std::path::PathBuf;
 
 pub struct WindowsDesktop;
 
+/// Path to Electron's `Local State` file — Chromium OSCrypt's keyring
+/// when DPAPI is the scheme. Phase 6 reads `os_crypt.encrypted_key`
+/// from here.
+fn local_state_path() -> Option<PathBuf> {
+    dirs::data_local_dir().map(|d| {
+        d.join("Packages")
+            .join("Claude_pzs8sxrjxfjjc")
+            .join("LocalCache")
+            .join("Roaming")
+            .join("Claude")
+            .join("Local State")
+    })
+}
+
+/// DPAPI `CryptUnprotectData` wrapper (Windows only). Returns the
+/// unprotected bytes. Fails with a human-readable error on any of
+/// the three invalidation modes called out in reference.md:
+///   1. Local State encrypted under a different machine.
+///   2. Local State encrypted under a different Windows user.
+///   3. Windows user's password was reset out-of-band (DPAPI master
+///      key irrecoverable).
+#[cfg(target_os = "windows")]
+fn dpapi_unprotect(data: &[u8]) -> Result<Vec<u8>, super::DesktopKeyError> {
+    use windows_sys::Win32::Foundation::LocalFree;
+    use windows_sys::Win32::Security::Cryptography::{
+        CryptUnprotectData, CRYPT_INTEGER_BLOB,
+    };
+
+    let mut input = CRYPT_INTEGER_BLOB {
+        cbData: data.len() as u32,
+        pbData: data.as_ptr() as *mut _,
+    };
+    let mut output = CRYPT_INTEGER_BLOB {
+        cbData: 0,
+        pbData: std::ptr::null_mut(),
+    };
+    let ok = unsafe {
+        CryptUnprotectData(
+            &mut input,
+            std::ptr::null_mut(),
+            std::ptr::null_mut(),
+            std::ptr::null_mut(),
+            std::ptr::null_mut(),
+            0,
+            &mut output,
+        )
+    };
+    if ok == 0 {
+        return Err(super::DesktopKeyError::DpapiFailed(
+            "CryptUnprotectData returned FALSE — Local State is \
+             bound to a different machine or user, or the Windows \
+             user's password was reset out-of-band"
+                .into(),
+        ));
+    }
+    let slice = unsafe {
+        std::slice::from_raw_parts(output.pbData as *const u8, output.cbData as usize)
+    };
+    let result = slice.to_vec();
+    unsafe {
+        LocalFree(output.pbData as _);
+    }
+    Ok(result)
+}
+
+/// Parse `Local State` JSON, extract and DPAPI-unprotect the
+/// `os_crypt.encrypted_key` field. Common entry point shared by the
+/// live-identity probe and the DPAPI-invalidation detector.
+#[cfg(target_os = "windows")]
+fn read_os_crypt_key() -> Result<Vec<u8>, super::DesktopKeyError> {
+    use base64::Engine as _;
+    let path = local_state_path().ok_or_else(|| {
+        super::DesktopKeyError::LocalState("could not resolve Local State path".into())
+    })?;
+    let raw = std::fs::read_to_string(&path)
+        .map_err(|e| super::DesktopKeyError::LocalState(e.to_string()))?;
+    let v: serde_json::Value = serde_json::from_str(&raw)
+        .map_err(|e| super::DesktopKeyError::LocalState(format!("JSON parse: {e}")))?;
+    let b64 = v
+        .pointer("/os_crypt/encrypted_key")
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| {
+            super::DesktopKeyError::LocalState(
+                "os_crypt.encrypted_key missing — Desktop has no keyring yet".into(),
+            )
+        })?;
+    let bytes = base64::engine::general_purpose::STANDARD
+        .decode(b64.as_bytes())
+        .map_err(|e| super::DesktopKeyError::LocalState(format!("base64 decode: {e}")))?;
+    // Chromium writes the literal ASCII prefix "DPAPI" (5 bytes)
+    // before the DPAPI ciphertext. Strip it before unprotecting.
+    if bytes.len() < 5 || &bytes[..5] != b"DPAPI" {
+        return Err(super::DesktopKeyError::LocalState(
+            "encrypted_key missing DPAPI prefix".into(),
+        ));
+    }
+    dpapi_unprotect(&bytes[5..])
+}
+
 #[async_trait::async_trait]
 impl super::DesktopPlatform for WindowsDesktop {
     fn data_dir(&self) -> Option<PathBuf> {
@@ -58,16 +157,17 @@ impl super::DesktopPlatform for WindowsDesktop {
         //   2. base64-decode; strip the leading 5-byte "DPAPI" tag.
         //   3. CryptUnprotectData → 32-byte AES key.
         //
-        // Running a helper subprocess is NOT an option — DPAPI is
-        // user-scoped and a spawned process inherits the same scope
-        // anyway. Call the API directly via `windows-sys` bindings.
+        // DPAPI is user-scoped; a subprocess inherits the same scope
+        // so there's no benefit to spawning. We use `windows-sys`
+        // for the direct API call.
         //
-        // Implementation lands in Phase 6 when Windows build+test
-        // coverage is wired. For now return Unsupported so the
-        // cross-platform wiring compiles; on a Windows build it
-        // surfaces as "Windows Desktop adoption coming in a future
-        // release."
-        Err(super::DesktopKeyError::Unsupported)
+        // Failure here is the load-bearing signal for Codex D3-5:
+        // if the Local State was encrypted under a different
+        // machine/user, or if the Windows password was reset
+        // out-of-band, CryptUnprotectData returns FALSE. The error
+        // propagates to the caller which surfaces a "re-sign in to
+        // Claude Desktop" modal (Phase 6 UX).
+        read_os_crypt_key()
     }
 
     async fn is_running(&self) -> bool {
