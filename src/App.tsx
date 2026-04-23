@@ -35,10 +35,13 @@ const importSessions = () =>
   import("./sections/SessionsSection").then((m) => ({ default: m.SessionsSection }));
 const importKeys = () =>
   import("./sections/KeysSection").then((m) => ({ default: m.KeysSection }));
+const importConfig = () =>
+  import("./sections/ConfigSection").then((m) => ({ default: m.ConfigSection }));
 const ProjectsSection = lazy(importProjects);
 const SettingsSection = lazy(importSettings);
 const SessionsSection = lazy(importSessions);
 const KeysSection = lazy(importKeys);
+const ConfigSection = lazy(importConfig);
 const OperationProgressModal = lazy(() =>
   import("./sections/projects/OperationProgressModal").then((m) => ({
     default: m.OperationProgressModal,
@@ -53,6 +56,7 @@ function preloadSavedSection(): void {
       localStorage.getItem("claudepot.activeSection");
     if (id === "projects") void importProjects();
     else if (id === "sessions") void importSessions();
+    else if (id === "config") void importConfig();
     else if (id === "keys") void importKeys();
     else if (id === "settings") void importSettings();
   } catch {
@@ -668,6 +672,12 @@ function AppShell() {
                   onInitialSelectedPathConsumed={() =>
                     setPendingSessionPath(null)
                   }
+                />
+              )}
+              {section === "config" && (
+                <ConfigSection
+                  subRoute={subRoute}
+                  onSubRouteChange={setSubRoute}
                 />
               )}
               {section === "keys" && <KeysSection />}

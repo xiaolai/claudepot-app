@@ -1,0 +1,6 @@
+{
+  "theme": "light",
+  "verbose": true,
+  "cleanupPeriodDays": 7,
+  "diffTool": "delta"
+}
