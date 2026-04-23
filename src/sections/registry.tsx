@@ -21,7 +21,6 @@ export const sections: readonly SectionDef[] = [
   { id: "accounts", label: "Accounts", glyph: NF.users },
   { id: "projects", label: "Projects", glyph: NF.folder },
   { id: "sessions", label: "Sessions", glyph: NF.chatAlt },
-  { id: "activity", label: "Activity", glyph: NF.bolt },
   { id: "keys",     label: "Keys",     glyph: NF.key     },
   { id: "settings", label: "Settings", glyph: NF.sliders },
 ];

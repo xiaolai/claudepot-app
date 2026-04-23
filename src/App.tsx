@@ -35,15 +35,10 @@ const importSessions = () =>
   import("./sections/SessionsSection").then((m) => ({ default: m.SessionsSection }));
 const importKeys = () =>
   import("./sections/KeysSection").then((m) => ({ default: m.KeysSection }));
-const importActivity = () =>
-  import("./sections/ActivitySection").then((m) => ({
-    default: m.ActivitySection,
-  }));
 const ProjectsSection = lazy(importProjects);
 const SettingsSection = lazy(importSettings);
 const SessionsSection = lazy(importSessions);
 const KeysSection = lazy(importKeys);
-const ActivitySection = lazy(importActivity);
 const OperationProgressModal = lazy(() =>
   import("./sections/projects/OperationProgressModal").then((m) => ({
     default: m.OperationProgressModal,
@@ -60,7 +55,6 @@ function preloadSavedSection(): void {
     else if (id === "sessions") void importSessions();
     else if (id === "keys") void importKeys();
     else if (id === "settings") void importSettings();
-    else if (id === "activity") void importActivity();
   } catch {
     // localStorage unavailable — nothing to preload.
   }
@@ -106,20 +100,19 @@ function AppShell() {
   // open; `false` = either already accepted/declined, or the prefs
   // fetch failed (fail-closed: no modal means no surprise reads).
   const [showConsentModal, setShowConsentModal] = useState(false);
-  // Activity runtime state — drives the sidebar "Off" chip and the
-  // ActivitySection's disabled empty-state. null = unknown (prefs not
-  // fetched yet), true/false = last-known pref value.
-  const [activityEnabled, setActivityEnabled] = useState<boolean | null>(null);
+  // On cold launch: fire the consent modal if the user has never been
+  // asked, otherwise start the live runtime when activity is enabled.
+  // The former sidebar "Off" chip (for the dedicated Activity row)
+  // went away with the C-1 A consolidation — Sessions' Live filter
+  // covers the same "is the runtime on" signal indirectly.
   useEffect(() => {
     let cancelled = false;
     api
       .preferencesGet()
       .then((p) => {
         if (cancelled) return;
-        setActivityEnabled(p.activity_enabled);
         if (!p.activity_consent_seen) setShowConsentModal(true);
         else if (p.activity_enabled) {
-          // Already opted-in on a prior run — start the runtime.
           api.sessionLiveStart().catch(() => {});
         }
       })
@@ -129,19 +122,6 @@ function AppShell() {
     return () => {
       cancelled = true;
     };
-  }, []);
-  // Sections dispatch this after flipping activity_enabled so the
-  // shell's sidebar indicator refreshes without a polling round-trip.
-  useEffect(() => {
-    const onChange = (e: Event) => {
-      const detail = (e as CustomEvent<{ enabled: boolean }>).detail;
-      if (typeof detail?.enabled === "boolean") {
-        setActivityEnabled(detail.enabled);
-      }
-    };
-    window.addEventListener("cp-activity-enabled-changed", onChange);
-    return () =>
-      window.removeEventListener("cp-activity-enabled-changed", onChange);
   }, []);
   const { summary: pendingSummary, refresh: refreshPendingBanner } =
     usePendingJournals();
@@ -632,21 +612,9 @@ function AppShell() {
           onBind={handleBind}
           badges={{
             accounts: accounts.length || undefined,
-            activity:
-              activityEnabled === false ? (
-                <span
-                  style={{
-                    fontSize: "var(--fs-2xs)",
-                    color: "var(--fg-faint)",
-                    letterSpacing: "0.04em",
-                    textTransform: "uppercase",
-                  }}
-                >
-                  Off
-                </span>
-              ) : (
-                activityAlerts || undefined
-              ),
+            // Activity alerts propagate to the Sessions nav row now
+            // that Activity is folded into Sessions' "Live" filter.
+            sessions: activityAlerts || undefined,
           }}
           version={APP_VERSION}
           synced
@@ -701,9 +669,6 @@ function AppShell() {
                     setPendingSessionPath(null)
                   }
                 />
-              )}
-              {section === "activity" && (
-                <ActivitySection onOpenSession={openLiveSession} />
               )}
               {section === "keys" && <KeysSection />}
               {section === "settings" && <SettingsSection />}

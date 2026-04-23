@@ -62,6 +62,9 @@ export function SessionsTabPanel({
   onContextMenu,
   onRefresh,
   setToast,
+  liveFilter,
+  setLiveFilter,
+  liveCount,
 }: {
   showTable: boolean;
   showDetail: boolean;
@@ -87,6 +90,13 @@ export function SessionsTabPanel({
   onContextMenu: (e: MouseEvent, s: SessionRow) => void;
   onRefresh: () => void;
   setToast: (msg: string) => void;
+  /** When on, narrows the table to session rows whose session_id
+   *  matches a currently-live session. Replaces the former standalone
+   *  Activity section's Now view. */
+  liveFilter: boolean;
+  setLiveFilter: (next: boolean) => void;
+  /** Count of currently-live sessions, surfaced on the Live chip. */
+  liveCount: number;
 }) {
   return (
     <div
@@ -141,6 +151,13 @@ export function SessionsTabPanel({
             aria-label="Session filters"
             style={{ display: "flex", gap: "var(--sp-6)" }}
           >
+            <FilterChip
+              active={liveFilter}
+              count={liveCount > 0 ? liveCount : undefined}
+              onToggle={() => setLiveFilter(!liveFilter)}
+            >
+              Live
+            </FilterChip>
             {FILTER_CHIPS.map((opt) => {
               const active = filter === opt.id;
               const count = counts[opt.id];
