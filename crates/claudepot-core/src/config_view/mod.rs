@@ -5,6 +5,7 @@
 //! `dev-docs/config-section-plan.md` §15).
 
 pub mod discover;
+pub mod effective_mcp;
 pub mod effective_settings;
 pub mod launcher;
 pub mod mask;
