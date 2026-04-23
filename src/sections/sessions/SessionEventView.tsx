@@ -209,9 +209,19 @@ export function SessionEventView({
 /**
  * Renders an assistantThinking block. When `hideByDefault` is true
  * (driven by the `activity_hide_thinking` pref) the body is replaced
- * with "Thinking · N chars — click to reveal" until the user expands
- * it. The toggle is local state, so re-collapsing a block is one
- * click away.
+ * with "Thinking · N chars — click to reveal" until the user clicks.
+ *
+ * State semantics:
+ *   - `revealedByUser` latches once the user explicitly clicks to
+ *     reveal. A subsequent pref flip back to hide leaves their
+ *     expanded view alone.
+ *   - While `revealedByUser` is still false, the rendered state
+ *     follows the pref directly — so flipping Hide Thinking on in
+ *     Settings immediately collapses previously-open blocks.
+ *
+ * This is cleaner than the earlier revealed-state-copy-of-pref
+ * approach, which stuck on whichever value the pref held at first
+ * mount.
  */
 function ThinkingBody({
   text,
@@ -222,18 +232,14 @@ function ThinkingBody({
   searchTerm: string;
   hideByDefault: boolean;
 }) {
-  const [revealed, setRevealed] = useState(!hideByDefault);
-  // Keep render in sync when the pref flips mid-view. The local
-  // `revealed` state rides over the pref only AFTER the user clicks
-  // — a toggle in Settings re-collapses blocks they hadn't opened
-  // yet, but leaves expanded ones alone.
-  if (!hideByDefault && !revealed) setRevealed(true);
+  const [revealedByUser, setRevealedByUser] = useState(false);
+  const shown = revealedByUser || !hideByDefault;
 
-  if (!revealed) {
+  if (!shown) {
     return (
       <button
         type="button"
-        onClick={() => setRevealed(true)}
+        onClick={() => setRevealedByUser(true)}
         className="pm-focus"
         style={{
           alignSelf: "flex-start",
