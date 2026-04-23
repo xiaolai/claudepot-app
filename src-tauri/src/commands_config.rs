@@ -22,16 +22,22 @@ use claudepot_core::config_view::{
         Kind, LaunchKind, Node, ParseIssue, Scope, ScopeNode,
     },
     scan,
+    search::{self, CancelToken},
 };
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
-use tauri::State;
+use tauri::{Emitter, State};
 
 /// Cached last-scanned tree, used by `config_preview` to resolve node IDs
 /// back to file paths. Rebuilt on every `config_scan`.
 #[derive(Default)]
 pub struct ConfigTreeState(pub Mutex<Option<ConfigTree>>);
+
+/// Active search cancel tokens, keyed by client-supplied search_id.
+#[derive(Default)]
+pub struct SearchRegistry(pub Mutex<HashMap<String, CancelToken>>);
 
 // ---------- DTOs ------------------------------------------------------
 
@@ -316,11 +322,9 @@ pub fn config_preview(
     let truncated = meta.len() > HEAD_LIMIT;
     let mut buf = Vec::with_capacity(std::cmp::min(HEAD_LIMIT, meta.len()) as usize);
     let _ = f.take(HEAD_LIMIT).read_to_end(&mut buf);
-    // P2 wraps this in `mask::mask_text(...)` before it crosses the
-    // IPC boundary. Until then the UI relies on the file not holding
-    // secrets — covered by the P0 scope (only the stub config dir
-    // preview is wired in the UI).
-    let body = String::from_utf8_lossy(&buf).into_owned();
+    // Mask before the bytes leave the core boundary — no raw secret can
+    // reach the IPC frame (plan §7.3).
+    let body = claudepot_core::config_view::mask::mask_bytes(&buf);
 
     Ok(PreviewDto {
         file: FileNodeDto::from(file),
@@ -423,4 +427,131 @@ fn launch_into(chosen: &EditorCandidate, target: &Path) -> Result<(), String> {
         LaunchError::EmptyPath => "path is empty".to_string(),
         LaunchError::UnknownEditor(id) => format!("unknown editor: {id}"),
     })
+}
+
+// ---------- Content search (P2) --------------------------------------
+
+#[derive(Deserialize, Clone, Debug)]
+pub struct SearchQueryDto {
+    pub text: String,
+    #[serde(default)]
+    pub regex: bool,
+    #[serde(default)]
+    pub case_sensitive: bool,
+    #[serde(default)]
+    pub scope_filter: Option<Vec<String>>,
+}
+
+#[derive(Serialize, Clone, Debug)]
+pub struct SearchHitDto {
+    pub search_id: String,
+    pub node_id: String,
+    pub line_number: u32,
+    pub snippet: String,
+    pub match_count_in_file: u32,
+}
+
+#[derive(Serialize, Clone, Debug)]
+pub struct SearchSummaryDto {
+    pub search_id: String,
+    pub total_hits: u32,
+    pub capped: bool,
+    pub skipped_large: u32,
+    pub cancelled: bool,
+}
+
+/// Start a streaming content search. Hits fire via
+/// `config-search-hit::{search_id}`; summary via
+/// `config-search-done::{search_id}`.
+#[tauri::command]
+pub fn config_search_start(
+    search_id: String,
+    query: SearchQueryDto,
+    app: tauri::AppHandle,
+    tree_state: State<'_, ConfigTreeState>,
+    registry: State<'_, SearchRegistry>,
+) -> Result<(), String> {
+    if search_id.trim().is_empty() {
+        return Err("search_id is empty".to_string());
+    }
+    let tree = {
+        let g = tree_state.0.lock().map_err(|e| format!("tree lock: {e}"))?;
+        g.clone().ok_or_else(|| "tree not scanned yet".to_string())?
+    };
+
+    let cancel = CancelToken::new();
+    {
+        let mut g = registry.0.lock().map_err(|e| format!("reg lock: {e}"))?;
+        g.insert(search_id.clone(), cancel.clone());
+    }
+
+    let query_core = search::SearchQuery {
+        text: query.text,
+        regex: query.regex,
+        case_sensitive: query.case_sensitive,
+        scope_filter: query.scope_filter,
+        kind_filter: None,
+    };
+
+    let search_id_for_task = search_id.clone();
+    let app_for_task = app.clone();
+
+    tauri::async_runtime::spawn_blocking(move || {
+        let sid_hit = search_id_for_task.clone();
+        let app_hit = app_for_task.clone();
+        let summary = search::search(&tree, query_core, &cancel, |hit| {
+            let _ = app_hit.emit(
+                &format!("config-search-hit::{sid_hit}"),
+                SearchHitDto {
+                    search_id: sid_hit.clone(),
+                    node_id: hit.node_id,
+                    line_number: hit.line_number,
+                    snippet: hit.snippet,
+                    match_count_in_file: hit.match_count_in_file,
+                },
+            );
+        });
+        let dto = match summary {
+            Ok(s) => SearchSummaryDto {
+                search_id: search_id_for_task.clone(),
+                total_hits: s.total_hits,
+                capped: s.capped,
+                skipped_large: s.skipped_large,
+                cancelled: s.cancelled,
+            },
+            Err(msg) => SearchSummaryDto {
+                search_id: search_id_for_task.clone(),
+                total_hits: 0,
+                capped: false,
+                skipped_large: 0,
+                cancelled: true,
+            }
+            .with_error(&msg),
+        };
+        let _ = app_for_task.emit(
+            &format!("config-search-done::{search_id_for_task}"),
+            &dto,
+        );
+    });
+
+    Ok(())
+}
+
+impl SearchSummaryDto {
+    fn with_error(self, _msg: &str) -> Self {
+        // Error details land in a trace log; the client sees `cancelled`.
+        self
+    }
+}
+
+#[tauri::command]
+pub fn config_search_cancel(
+    search_id: String,
+    registry: State<'_, SearchRegistry>,
+) -> Result<(), String> {
+    let mut g = registry.0.lock().map_err(|e| format!("reg lock: {e}"))?;
+    if let Some(tok) = g.remove(&search_id) {
+        tok.cancel();
+    }
+    Ok(())
 }

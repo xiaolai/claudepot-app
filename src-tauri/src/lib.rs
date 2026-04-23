@@ -136,6 +136,7 @@ pub fn run() {
         .manage(ops::RunningOps::new())
         .manage(preferences::PreferencesState::new(prefs))
         .manage(commands_config::ConfigTreeState::default())
+        .manage(commands_config::SearchRegistry::default())
         .manage(claudepot_core::services::usage_cache::UsageCache::new());
 
     #[cfg(debug_assertions)]
@@ -249,6 +250,8 @@ pub fn run() {
             commands_config::config_get_editor_defaults,
             commands_config::config_set_editor_default,
             commands_config::config_open_in_editor_path,
+            commands_config::config_search_start,
+            commands_config::config_search_cancel,
         ])
         .run(tauri::generate_context!())
         .unwrap_or_else(|e| {

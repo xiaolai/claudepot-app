@@ -595,6 +595,17 @@ export const api = {
     invoke<ConfigTreeDto>("config_scan", { cwd: cwd ?? null }),
   configPreview: (nodeId: string) =>
     invoke<ConfigPreviewDto>("config_preview", { nodeId }),
+  configSearchStart: (
+    searchId: string,
+    query: {
+      text: string;
+      regex?: boolean;
+      case_sensitive?: boolean;
+      scope_filter?: string[] | null;
+    },
+  ) => invoke<void>("config_search_start", { searchId, query }),
+  configSearchCancel: (searchId: string) =>
+    invoke<void>("config_search_cancel", { searchId }),
   configListEditors: (force?: boolean) =>
     invoke<EditorCandidateDto[]>("config_list_editors", { force: !!force }),
   configGetEditorDefaults: () =>
