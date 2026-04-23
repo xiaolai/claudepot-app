@@ -3,8 +3,7 @@
 //! The DB's `state.active_desktop` pointer is a cache of the last
 //! switch Claudepot itself performed. It goes stale whenever the user
 //! signs in or out of Claude Desktop directly. This module probes the
-//! *live* Desktop session by reading `data_dir/config.json` and
-//! (optionally, Phase 2+) decrypting `oauth:tokenCache`.
+//! *live* Desktop session.
 //!
 //! # Probe methods
 //!
@@ -15,18 +14,21 @@
 //! match is returned as a *candidate* — [`ProbeMethod::OrgUuidCandidate`].
 //!
 //! **Important**: a candidate identity is NOT verified. Users with
-//! multiple accounts in the same org (personal + team Max is common
-//! in practice) can produce the wrong email from the fast path alone.
-//! UI surfaces that mutate disk or DB on the identity's behalf MUST
-//! require a [`ProbeMethod::Decrypted`] result or explicitly label
-//! the affordance as "possible match — verify." See Codex review
-//! 2026-04-23 D5-1 / D5-2.
+//! multiple accounts in the same org can produce the wrong email from
+//! the fast path alone. UI surfaces that mutate disk or DB on the
+//! identity's behalf MUST require a [`ProbeMethod::Decrypted`]
+//! result — see [`VerifiedIdentity`].
 //!
-//! ## Slow path — decrypted + `/profile` (Phase 2+)
-//! Stub in Phase 1 — returns `DesktopIdentityError::Unimplemented`.
-//! Phase 2 wires the real decryption + profile round-trip.
+//! ## Slow path — decrypted + `/profile`
+//! Reads the `oauth:tokenCache` ciphertext from `config.json`, pulls
+//! the OS-specific key via `DesktopPlatform::safe_storage_secret`,
+//! decrypts with [`crate::desktop_backend::crypto`], parses the
+//! plaintext as [`DecryptedTokenCache`], and calls `/api/oauth/profile`
+//! to confirm the identity. Returns [`ProbeMethod::Decrypted`] — the
+//! only trust tier that constructs a [`VerifiedIdentity`].
 
 use crate::account::AccountStore;
+use crate::desktop_backend::token_cache::DecryptedTokenCache;
 use crate::desktop_backend::DesktopPlatform;
 use std::path::Path;
 use uuid::Uuid;
@@ -73,70 +75,236 @@ pub enum DesktopIdentityError {
     ConfigParse(String),
     #[error("no oauth:tokenCache present — Desktop is signed out")]
     NotSignedIn,
-    #[error("slow-path identity probe not yet implemented (Phase 2)")]
-    Unimplemented,
+    #[error("key retrieval failed: {0}")]
+    Key(#[from] crate::desktop_backend::DesktopKeyError),
+    #[error("decryption failed: {0}")]
+    Decrypt(#[from] crate::desktop_backend::crypto::DecryptError),
+    #[error("decrypted token cache is malformed: {0}")]
+    TokenParse(String),
+    #[error("/profile returned error: {0}")]
+    ProfileFetch(String),
+    #[error("slow-path identity probe unsupported on this platform")]
+    Unsupported,
+}
+
+/// Type-level proof that a Desktop identity was obtained via the
+/// authoritative decrypted+`/profile` path. Construction is private
+/// to this module (via [`probe_live_identity`] on the slow path), so
+/// any function taking `&VerifiedIdentity` is guaranteed its email
+/// was server-confirmed.
+///
+/// Used by Phase 3 mutators (adopt, clear) so the type system
+/// enforces the "no mutation on candidate identity" rule Codex D5-1
+/// flagged as critical.
+#[derive(Debug, Clone)]
+pub struct VerifiedIdentity(LiveDesktopIdentity);
+
+impl VerifiedIdentity {
+    /// Public accessor — email is safe to forward; it came from the
+    /// server's `/profile` response, not from anything the local
+    /// config could forge.
+    pub fn email(&self) -> &str {
+        &self.0.email
+    }
+    pub fn org_uuid(&self) -> &str {
+        &self.0.org_uuid
+    }
+    /// Unwrap — intentionally consumes. Rarely needed; most callers
+    /// should use the accessors above.
+    pub fn into_identity(self) -> LiveDesktopIdentity {
+        self.0
+    }
 }
 
 /// Probe the live Desktop session. Never mutates disk or DB.
 ///
 /// See module docs for algorithm. Returns `Ok(None)` when the fast
-/// path produced no candidate and the slow path is disabled (Phase 1)
-/// or unable to resolve.
+/// path produced no candidate and the slow path either wasn't
+/// requested (default) or couldn't resolve (signed out + strict).
+///
+/// Sync version — does not touch the network. Fast path only. Use
+/// [`probe_live_identity_async`] when `strict=true` or when a
+/// verified identity is needed.
 pub fn probe_live_identity(
     platform: &dyn DesktopPlatform,
     store: &AccountStore,
     opts: ProbeOptions,
 ) -> Result<Option<LiveDesktopIdentity>, DesktopIdentityError> {
+    if opts.strict {
+        // Slow path requires async (keychain + HTTP). Surface a
+        // helpful error so callers know to switch entry points.
+        return Err(DesktopIdentityError::Unsupported);
+    }
+    let pieces = load_config(platform)?;
+    fast_path_match(&pieces, store)
+}
+
+/// Async probe. On `strict=true` OR when the fast path can't resolve
+/// (ambiguous / no registered match) AND `oauth:tokenCache` is
+/// present, runs the authoritative slow path.
+pub async fn probe_live_identity_async<F>(
+    platform: &dyn DesktopPlatform,
+    store: &AccountStore,
+    opts: ProbeOptions,
+    fetch_profile: &F,
+) -> Result<Option<LiveDesktopIdentity>, DesktopIdentityError>
+where
+    F: ProfileFetcher + ?Sized,
+{
+    let pieces = load_config(platform)?;
+
+    // Fast path first (unless strict).
+    if !opts.strict {
+        match fast_path_match(&pieces, store)? {
+            Some(id) => return Ok(Some(id)),
+            None => {
+                // Fall through to slow path only if Desktop is
+                // actually signed in.
+                if pieces.token_cache_b64.is_none() {
+                    return Ok(None);
+                }
+            }
+        }
+    }
+
+    let Some(token_b64) = &pieces.token_cache_b64 else {
+        return Err(DesktopIdentityError::NotSignedIn);
+    };
+
+    // Slow path: decrypt + /profile.
+    let secret = platform.safe_storage_secret().await?;
+
+    #[cfg(target_os = "macos")]
+    let plaintext = crate::desktop_backend::crypto::macos::decrypt(token_b64, &secret)?;
+    #[cfg(target_os = "windows")]
+    let plaintext = crate::desktop_backend::crypto::windows::decrypt(token_b64, &secret)?;
+    #[cfg(not(any(target_os = "macos", target_os = "windows")))]
+    {
+        let _ = (token_b64, secret);
+        return Err(DesktopIdentityError::Unsupported);
+    }
+
+    #[cfg(any(target_os = "macos", target_os = "windows"))]
+    {
+        let tc = DecryptedTokenCache::from_json(&plaintext)
+            .map_err(|e| DesktopIdentityError::TokenParse(e.to_string()))?;
+        let access = tc
+            .pick_access_token()
+            .ok_or_else(|| DesktopIdentityError::TokenParse(
+                "no access token found in decrypted bundles".into(),
+            ))?;
+        let prof = fetch_profile
+            .fetch(access)
+            .await
+            .map_err(|e| DesktopIdentityError::ProfileFetch(e.to_string()))?;
+        Ok(Some(LiveDesktopIdentity {
+            email: prof.email,
+            org_uuid: prof.org_uuid,
+            probe_method: ProbeMethod::Decrypted,
+        }))
+    }
+}
+
+/// Convenience: full slow-path probe with the default Anthropic
+/// profile endpoint. Returns a [`VerifiedIdentity`] on success so
+/// mutators can use the type-level proof.
+pub async fn verify_live_identity(
+    platform: &dyn DesktopPlatform,
+    store: &AccountStore,
+) -> Result<Option<VerifiedIdentity>, DesktopIdentityError> {
+    let fetcher = DefaultProfileFetcher;
+    match probe_live_identity_async(
+        platform,
+        store,
+        ProbeOptions { strict: true },
+        &fetcher,
+    )
+    .await?
+    {
+        Some(id) if id.probe_method == ProbeMethod::Decrypted => {
+            Ok(Some(VerifiedIdentity(id)))
+        }
+        Some(_) | None => Ok(None),
+    }
+}
+
+/// Trait for fetching an OAuth profile — enables testing without
+/// network. Mirrors the CLI-side `ProfileFetcher` pattern.
+#[async_trait::async_trait]
+pub trait ProfileFetcher: Send + Sync {
+    async fn fetch(&self, access_token: &str) -> Result<ProfileResponse, String>;
+}
+
+pub struct ProfileResponse {
+    pub email: String,
+    pub org_uuid: String,
+}
+
+/// Production impl: hits the real `/api/oauth/profile` endpoint.
+pub struct DefaultProfileFetcher;
+
+#[async_trait::async_trait]
+impl ProfileFetcher for DefaultProfileFetcher {
+    async fn fetch(&self, access_token: &str) -> Result<ProfileResponse, String> {
+        let p = crate::oauth::profile::fetch(access_token)
+            .await
+            .map_err(|e| e.to_string())?;
+        Ok(ProfileResponse {
+            email: p.email,
+            org_uuid: p.org_uuid,
+        })
+    }
+}
+
+// Helpers split out so sync + async entry points share the same
+// config-loading path.
+
+struct ConfigPieces {
+    cfg: serde_json::Value,
+    org_uuids: Vec<Uuid>,
+    token_cache_b64: Option<String>,
+}
+
+fn load_config(platform: &dyn DesktopPlatform) -> Result<ConfigPieces, DesktopIdentityError> {
     let data_dir = platform.data_dir().ok_or(DesktopIdentityError::NoDataDir)?;
     let cfg_path = data_dir.join("config.json");
     if !cfg_path.exists() {
         return Err(DesktopIdentityError::NoConfig);
     }
-
     let cfg = parse_config_json(&cfg_path)?;
     let org_uuids = extract_org_uuids(&cfg);
-
-    // Empty list → either signed out, or this Desktop build uses a
-    // layout that doesn't carry dxt:allowlist keys yet. Surface the
-    // clearer of the two errors.
-    if org_uuids.is_empty() {
-        // Presence of oauth:tokenCache is a stronger signal of
-        // "signed in, but we can't match via fast path."
-        if cfg.get("oauth:tokenCache").is_some() {
-            if opts.strict {
-                return Err(DesktopIdentityError::Unimplemented);
-            }
-            // Can't verify without the slow path. Report None so
-            // callers can treat this as "unknown identity."
-            return Ok(None);
-        }
+    let token_cache_b64 = cfg
+        .get("oauth:tokenCache")
+        .and_then(|v| v.as_str())
+        .map(String::from);
+    // Neither signal means Desktop is signed out.
+    if org_uuids.is_empty() && token_cache_b64.is_none() {
         return Err(DesktopIdentityError::NotSignedIn);
     }
+    Ok(ConfigPieces {
+        cfg,
+        org_uuids,
+        token_cache_b64,
+    })
+}
 
-    // strict=true: skip the fast path entirely. Phase 2 wires the
-    // slow path here; Phase 1 surfaces Unimplemented so callers know
-    // not to promise verified identity.
-    if opts.strict {
-        return Err(DesktopIdentityError::Unimplemented);
-    }
-
+fn fast_path_match(
+    pieces: &ConfigPieces,
+    store: &AccountStore,
+) -> Result<Option<LiveDesktopIdentity>, DesktopIdentityError> {
+    let _ = &pieces.cfg; // kept for future heuristics
     // Collect candidates that are ALSO registered in the store.
     // Ambiguous fast-path (≥2 accounts share the org) collapses via
     // `find_by_org_uuid`'s unique-match contract.
     let mut matches: Vec<(Uuid, crate::account::Account)> = Vec::new();
-    for org_uuid in &org_uuids {
+    for org_uuid in &pieces.org_uuids {
         if let Ok(Some(acct)) = store.find_by_org_uuid(*org_uuid) {
             matches.push((*org_uuid, acct));
         }
     }
-
-    // Two different orgs, each with one unique account → ambiguous
-    // at the key-set level, even though each call was unique.
-    // Refuse the candidate — force slow path.
     if matches.len() != 1 {
         return Ok(None);
     }
-
     let (org_uuid, account) = matches.into_iter().next().unwrap();
     Ok(Some(LiveDesktopIdentity {
         email: account.email,
@@ -238,6 +406,11 @@ mod tests {
         }
         fn is_installed(&self) -> bool {
             self.data_dir.is_some()
+        }
+        async fn safe_storage_secret(
+            &self,
+        ) -> Result<Vec<u8>, crate::desktop_backend::DesktopKeyError> {
+            Err(crate::desktop_backend::DesktopKeyError::Unsupported)
         }
     }
 
@@ -346,7 +519,9 @@ mod tests {
     }
 
     #[test]
-    fn test_probe_no_oauth_token_returns_not_signed_in() {
+    fn test_probe_empty_config_returns_not_signed_in() {
+        // No allowlist UUIDs AND no oauth:tokenCache → Desktop is
+        // signed out. Surface as NotSignedIn (load_config's guard).
         let (store, _s) = store();
         let tmp = tempfile::tempdir().unwrap();
         write_cfg(tmp.path(), serde_json::json!({ "locale": "en-US" }));
@@ -356,7 +531,10 @@ mod tests {
     }
 
     #[test]
-    fn test_probe_strict_mode_returns_unimplemented_in_phase_1() {
+    fn test_probe_sync_rejects_strict() {
+        // Sync probe cannot run the slow path (needs keychain +
+        // HTTP). Callers must use probe_live_identity_async for
+        // strict=true.
         let (store, _s) = store();
         let org = Uuid::new_v4();
         store.insert(&make_account("a@example.com", Some(&org.to_string()))).unwrap();
@@ -367,8 +545,8 @@ mod tests {
             "oauth:tokenCache": "djEw...",
         }));
         let err = probe(&fake(Some(tmp.path().to_path_buf())), &store, true)
-            .expect_err("strict must fail until Phase 2 crypto lands");
-        assert!(matches!(err, DesktopIdentityError::Unimplemented));
+            .expect_err("sync probe cannot handle strict");
+        assert!(matches!(err, DesktopIdentityError::Unsupported));
     }
 
     #[test]
@@ -386,6 +564,101 @@ mod tests {
         let err = probe(&fake(None), &store, false)
             .expect_err("platform without data_dir must error");
         assert!(matches!(err, DesktopIdentityError::NoDataDir));
+    }
+
+    // --- async slow-path tests (fake fetcher, no network) ---
+
+    struct FixedFetcher {
+        email: String,
+        org_uuid: String,
+    }
+
+    #[async_trait::async_trait]
+    impl super::ProfileFetcher for FixedFetcher {
+        async fn fetch(&self, _: &str) -> Result<super::ProfileResponse, String> {
+            Ok(super::ProfileResponse {
+                email: self.email.clone(),
+                org_uuid: self.org_uuid.clone(),
+            })
+        }
+    }
+
+    struct SlowPathFake {
+        data_dir: std::path::PathBuf,
+        secret: Vec<u8>,
+    }
+
+    #[async_trait::async_trait]
+    impl DesktopPlatform for SlowPathFake {
+        fn data_dir(&self) -> Option<std::path::PathBuf> {
+            Some(self.data_dir.clone())
+        }
+        fn session_items(&self) -> &[&str] { &[] }
+        async fn is_running(&self) -> bool { false }
+        async fn quit(&self) -> Result<(), crate::error::DesktopSwapError> { Ok(()) }
+        async fn launch(&self) -> Result<(), crate::error::DesktopSwapError> { Ok(()) }
+        fn is_installed(&self) -> bool { true }
+        async fn safe_storage_secret(
+            &self,
+        ) -> Result<Vec<u8>, crate::desktop_backend::DesktopKeyError> {
+            Ok(self.secret.clone())
+        }
+    }
+
+    #[cfg(target_os = "macos")]
+    #[tokio::test]
+    async fn test_slow_path_returns_decrypted_identity() {
+        // Encrypt a synthetic tokenCache with a known secret, drop
+        // it in a fake config.json, verify the async probe decrypts
+        // + fetches profile + returns ProbeMethod::Decrypted.
+        use aes::cipher::{block_padding::Pkcs7, BlockEncryptMut, KeyIvInit};
+        type Enc = cbc::Encryptor<aes::Aes128>;
+
+        let secret = b"test-keychain-secret".to_vec();
+        // Shape must match DecryptedTokenCache's real layout: a
+        // keyed map of bundle-keys → token envelopes.
+        let tc_json = br#"{
+            "uid-abc:org-def:https://api.anthropic.com:user:profile": {
+                "token": "sk-ant-oat01-TESTTESTTEST",
+                "refreshToken": "sk-ant-ort01-REFRESHREFRESH",
+                "expiresAt": 1735689600000
+            }
+        }"#;
+        let key = crate::desktop_backend::crypto::macos::derive_key(&secret);
+        let iv = [b' '; 16];
+        let ct = Enc::new_from_slices(&key, &iv).unwrap()
+            .encrypt_padded_vec_mut::<Pkcs7>(tc_json);
+        let mut envelope = b"v10".to_vec();
+        envelope.extend_from_slice(&ct);
+        use base64::Engine as _;
+        let token_b64 = base64::engine::general_purpose::STANDARD.encode(envelope);
+
+        let tmp = tempfile::tempdir().unwrap();
+        write_cfg(tmp.path(), serde_json::json!({
+            "oauth:tokenCache": token_b64,
+        }));
+
+        let (store, _s) = store();
+        let platform = SlowPathFake {
+            data_dir: tmp.path().to_path_buf(),
+            secret,
+        };
+        let fetcher = FixedFetcher {
+            email: "verified@example.com".into(),
+            org_uuid: Uuid::new_v4().to_string(),
+        };
+
+        let id = probe_live_identity_async(
+            &platform,
+            &store,
+            ProbeOptions { strict: true },
+            &fetcher,
+        )
+        .await
+        .unwrap()
+        .expect("slow path returns verified identity");
+        assert_eq!(id.email, "verified@example.com");
+        assert_eq!(id.probe_method, ProbeMethod::Decrypted);
     }
 
     #[test]

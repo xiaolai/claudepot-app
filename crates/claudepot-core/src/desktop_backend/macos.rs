@@ -104,6 +104,50 @@ impl super::DesktopPlatform for MacosDesktop {
         }
         Ok(())
     }
+
+    async fn safe_storage_secret(&self) -> Result<Vec<u8>, super::DesktopKeyError> {
+        // Subprocess-only per .claude/rules/architecture.md — the
+        // `keyring` crate is reserved for Claudepot's own secrets.
+        // `-s` names the service, `-a` the account, `-w` prints the
+        // password to stdout. The trailing newline must be stripped
+        // before PBKDF2 so derive_key sees the exact byte string
+        // Chromium used.
+        let out = tokio::process::Command::new("/usr/bin/security")
+            .args([
+                "find-generic-password",
+                "-s",
+                "Claude Safe Storage",
+                "-a",
+                "Claude Key",
+                "-w",
+            ])
+            .output()
+            .await
+            .map_err(|e| super::DesktopKeyError::KeychainRead(e.to_string()))?;
+
+        if !out.status.success() {
+            let code = out.status.code().unwrap_or(-1);
+            let stderr = String::from_utf8_lossy(&out.stderr);
+            return Err(super::DesktopKeyError::KeychainRead(format!(
+                "security exited {code}: {}",
+                stderr.trim()
+            )));
+        }
+
+        let mut pw = out.stdout;
+        // `security -w` appends exactly one trailing newline on
+        // success. Trim only the trailing newline — the password
+        // itself could contain whitespace.
+        if pw.last() == Some(&b'\n') {
+            pw.pop();
+        }
+        if pw.is_empty() {
+            return Err(super::DesktopKeyError::KeychainRead(
+                "keychain returned empty password".into(),
+            ));
+        }
+        Ok(pw)
+    }
 }
 
 #[cfg(test)]
