@@ -52,6 +52,24 @@ impl super::DesktopPlatform for WindowsDesktop {
             .unwrap_or(false)
     }
 
+    async fn safe_storage_secret(&self) -> Result<Vec<u8>, super::DesktopKeyError> {
+        // Windows algorithm (per reference.md §II.3):
+        //   1. Parse `Local State` JSON → `os_crypt.encrypted_key`.
+        //   2. base64-decode; strip the leading 5-byte "DPAPI" tag.
+        //   3. CryptUnprotectData → 32-byte AES key.
+        //
+        // Running a helper subprocess is NOT an option — DPAPI is
+        // user-scoped and a spawned process inherits the same scope
+        // anyway. Call the API directly via `windows-sys` bindings.
+        //
+        // Implementation lands in Phase 6 when Windows build+test
+        // coverage is wired. For now return Unsupported so the
+        // cross-platform wiring compiles; on a Windows build it
+        // surfaces as "Windows Desktop adoption coming in a future
+        // release."
+        Err(super::DesktopKeyError::Unsupported)
+    }
+
     async fn is_running(&self) -> bool {
         let mut sys = sysinfo::System::new();
         sys.refresh_processes(sysinfo::ProcessesToUpdate::All, true);

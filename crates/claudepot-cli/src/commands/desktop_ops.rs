@@ -143,10 +143,18 @@ pub async fn use_account(ctx: &AppContext, email_input: &str, no_launch: bool) -
     Ok(())
 }
 
-/// Probe the live Desktop session identity. Phase 1: fast-path only.
+/// Probe the live Desktop session identity.
+///
+/// Fast path (default): org-UUID candidate match against the live
+/// `config.json`. Slow path (`--strict`): decrypts `oauth:tokenCache`
+/// via the OS keychain + calls `/api/oauth/profile` for an
+/// authoritative identity.
 pub async fn identity(ctx: &AppContext, strict: bool) -> Result<()> {
     use claudepot_core::desktop_backend;
-    use claudepot_core::desktop_identity::{probe_live_identity, ProbeMethod, ProbeOptions};
+    use claudepot_core::desktop_identity::{
+        probe_live_identity, probe_live_identity_async, DefaultProfileFetcher, ProbeMethod,
+        ProbeOptions,
+    };
 
     let Some(platform) = desktop_backend::create_platform() else {
         if ctx.json {
@@ -166,7 +174,13 @@ pub async fn identity(ctx: &AppContext, strict: bool) -> Result<()> {
     };
 
     let opts = ProbeOptions { strict };
-    match probe_live_identity(&*platform, &ctx.store, opts) {
+    let result = if strict {
+        let fetcher = DefaultProfileFetcher;
+        probe_live_identity_async(&*platform, &ctx.store, opts, &fetcher).await
+    } else {
+        probe_live_identity(&*platform, &ctx.store, opts)
+    };
+    match result {
         Ok(None) => {
             if ctx.json {
                 println!(
