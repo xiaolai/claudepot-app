@@ -37,6 +37,12 @@ pub struct AccountSummary {
     /// Computed: verified_email is set AND differs from `email`. Handy
     /// for the GUI to avoid comparing strings itself.
     pub drift: bool,
+    /// Per-file-on-disk truth for the Desktop profile snapshot dir.
+    /// Computed at list time via `paths::desktop_profile_dir(uuid).exists()`.
+    /// Differs from `has_desktop_profile` only when the DB flag has
+    /// drifted from disk (e.g., the user manually deleted the snapshot).
+    /// UI should prefer this field when gating Desktop affordances.
+    pub desktop_profile_on_disk: bool,
 }
 
 impl From<&claudepot_core::account::Account> for AccountSummary {
@@ -47,6 +53,11 @@ impl From<&claudepot_core::account::Account> for AccountSummary {
         // status ("missing", "corrupt blob", "no credentials") means the
         // swap can't succeed — the UI should gate on this, not the DB flag.
         let credentials_healthy = health.status.starts_with("valid") || health.status == "expired";
+        // Cheap on-disk check per plan v2 §D18: just exists(), no
+        // recursive walk. Size + enumeration moves to
+        // desktop_profile_info(uuid) in a later phase.
+        let desktop_profile_on_disk =
+            claudepot_core::paths::desktop_profile_dir(a.uuid).exists();
         Self {
             uuid: a.uuid.to_string(),
             email: a.email.clone(),
@@ -72,6 +83,7 @@ impl From<&claudepot_core::account::Account> for AccountSummary {
             // verify_status has since moved to "network_error" would
             // spuriously paint as drift if we compared emails.
             drift: a.verify_status == "drift",
+            desktop_profile_on_disk,
         }
     }
 }
@@ -285,6 +297,66 @@ pub struct CcIdentity {
     /// from `email=None` so the UI can distinguish "no CC credentials"
     /// from "couldn't reach the server" from "token revoked".
     pub error: Option<String>,
+}
+
+// ---------------------------------------------------------------------------
+// Desktop-side identity DTOs
+// ---------------------------------------------------------------------------
+
+/// How a Desktop identity was probed. Consumers that mutate disk or DB
+/// on the identity's behalf MUST check this before acting — only
+/// `Decrypted` is verified ground truth.
+#[derive(Serialize, Clone, Debug)]
+#[serde(rename_all = "snake_case")]
+pub enum DesktopProbeMethod {
+    /// Fast path: the live `config.json`'s org UUID uniquely matched
+    /// one registered account. Cheap, but NOT verified — users with
+    /// multiple accounts in the same org produce wrong matches.
+    OrgUuidCandidate,
+    /// Slow path: decrypted `oauth:tokenCache` + successful `/profile`
+    /// round-trip. Trusted. (Phase 2+ — returns `None` with an
+    /// `Unimplemented` error in Phase 1.)
+    Decrypted,
+    /// Probe ran successfully but produced no identity (signed out,
+    /// ambiguous org, or no registered account matches).
+    None,
+}
+
+/// Result of `current_desktop_identity`. Mirrors `CcIdentity`'s
+/// never-throw contract — all failure modes ride the `error` field so
+/// the UI can render them as visible banners instead of dropped
+/// toasts.
+#[derive(Serialize, Clone, Debug)]
+pub struct DesktopIdentity {
+    /// Email of the signed-in Desktop account, when resolvable.
+    pub email: Option<String>,
+    /// Org UUID Desktop is signed in under, when resolvable.
+    pub org_uuid: Option<String>,
+    /// How the identity was obtained. UI trust level keys off this.
+    pub probe_method: DesktopProbeMethod,
+    /// RFC3339 of when the probe ran.
+    pub verified_at: chrono::DateTime<chrono::Utc>,
+    /// Populated on probe failure (data_dir missing, config malformed,
+    /// slow-path not yet implemented, etc.).
+    pub error: Option<String>,
+}
+
+/// Per-account flag flip reported by `desktop_reconcile`.
+#[derive(Serialize, Clone, Debug)]
+pub struct DesktopFlagFlip {
+    pub email: String,
+    pub uuid: String,
+    /// The new value of `has_desktop_profile` after reconcile.
+    pub new_value: bool,
+}
+
+/// Outcome of an explicit `desktop_reconcile` call. `account_list`'s
+/// opportunistic reconcile runs the same logic but drops the outcome
+/// silently (best-effort).
+#[derive(Serialize, Clone, Debug, Default)]
+pub struct DesktopReconcileOutcome {
+    pub flag_flips: Vec<DesktopFlagFlip>,
+    pub orphan_pointer_cleared: bool,
 }
 
 // ---------------------------------------------------------------------------

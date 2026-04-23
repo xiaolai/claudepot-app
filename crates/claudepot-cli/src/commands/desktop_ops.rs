@@ -142,3 +142,142 @@ pub async fn use_account(ctx: &AppContext, email_input: &str, no_launch: bool) -
 
     Ok(())
 }
+
+/// Probe the live Desktop session identity. Phase 1: fast-path only.
+pub async fn identity(ctx: &AppContext, strict: bool) -> Result<()> {
+    use claudepot_core::desktop_backend;
+    use claudepot_core::desktop_identity::{probe_live_identity, ProbeMethod, ProbeOptions};
+
+    let Some(platform) = desktop_backend::create_platform() else {
+        if ctx.json {
+            println!(
+                "{}",
+                serde_json::json!({
+                    "email": null,
+                    "org_uuid": null,
+                    "probe_method": "none",
+                    "error": "Desktop not supported on this platform",
+                })
+            );
+        } else {
+            println!("Claude Desktop is not supported on this platform.");
+        }
+        return Ok(());
+    };
+
+    let opts = ProbeOptions { strict };
+    match probe_live_identity(&*platform, &ctx.store, opts) {
+        Ok(None) => {
+            if ctx.json {
+                println!(
+                    "{}",
+                    serde_json::json!({
+                        "email": null,
+                        "org_uuid": null,
+                        "probe_method": "none",
+                        "error": null,
+                    })
+                );
+            } else {
+                println!("No identifiable Desktop identity.");
+                println!("  Desktop appears signed in, but no registered account matches the live org UUID (or matching is ambiguous). Sign in as a registered account, or add the current account via `claudepot account add`.");
+            }
+        }
+        Ok(Some(id)) => {
+            let method = match id.probe_method {
+                ProbeMethod::OrgUuidCandidate => "org_uuid_candidate",
+                ProbeMethod::Decrypted => "decrypted",
+            };
+            if ctx.json {
+                println!(
+                    "{}",
+                    serde_json::json!({
+                        "email": id.email,
+                        "org_uuid": id.org_uuid,
+                        "probe_method": method,
+                        "error": null,
+                    })
+                );
+            } else {
+                println!("Desktop identity: {}", id.email);
+                println!("  org_uuid:     {}", id.org_uuid);
+                println!("  probe_method: {method}");
+                if matches!(id.probe_method, ProbeMethod::OrgUuidCandidate) {
+                    println!(
+                        "  note:         candidate match (org UUID only) — NOT verified. \
+                         Phase 2 will add a `--strict` decrypted probe."
+                    );
+                }
+            }
+        }
+        Err(e) => {
+            if ctx.json {
+                println!(
+                    "{}",
+                    serde_json::json!({
+                        "email": null,
+                        "org_uuid": null,
+                        "probe_method": "none",
+                        "error": e.to_string(),
+                    })
+                );
+            } else {
+                println!("Desktop identity probe: {e}");
+            }
+        }
+    }
+
+    Ok(())
+}
+
+/// Reconcile `has_desktop_profile` flags with on-disk truth and
+/// clear orphan `state.active_desktop` pointers.
+pub async fn reconcile(ctx: &AppContext) -> Result<()> {
+    use claudepot_core::services::desktop_service;
+
+    let outcome = desktop_service::reconcile_flags(&ctx.store)
+        .map_err(|e| anyhow::anyhow!("reconcile failed: {e}"))?;
+
+    if ctx.json {
+        let flips: Vec<_> = outcome
+            .flag_flips
+            .iter()
+            .map(|f| {
+                serde_json::json!({
+                    "email": f.email,
+                    "uuid": f.uuid.to_string(),
+                    "new_value": f.new_value,
+                })
+            })
+            .collect();
+        println!(
+            "{}",
+            serde_json::json!({
+                "flag_flips": flips,
+                "orphan_pointer_cleared": outcome.orphan_pointer_cleared,
+            })
+        );
+    } else if outcome.flag_flips.is_empty() && !outcome.orphan_pointer_cleared {
+        println!("Desktop reconcile: nothing to do.");
+    } else {
+        if !outcome.flag_flips.is_empty() {
+            println!(
+                "Reconciled {} Desktop profile flag(s):",
+                outcome.flag_flips.len()
+            );
+            for f in &outcome.flag_flips {
+                let arrow = if f.new_value {
+                    "set to true (profile dir found)"
+                } else {
+                    "set to false (profile dir missing)"
+                };
+                println!("  {} — {arrow}", f.email);
+            }
+        }
+        if outcome.orphan_pointer_cleared {
+            println!("Cleared orphan `active_desktop` pointer.");
+        }
+    }
+
+    Ok(())
+}
