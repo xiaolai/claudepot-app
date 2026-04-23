@@ -23,15 +23,56 @@ interface ActivitySectionProps {
 export function ActivitySection({ onOpenSession }: ActivitySectionProps) {
   const live = useSessionLive();
   const [mode, setMode] = useState<Mode>("now");
+  // Local mirror of the activity_enabled preference. `null` while
+  // the initial fetch is in flight so we don't flash "disabled" at
+  // users who already opted in.
+  const [enabled, setEnabled] = useState<boolean | null>(null);
+  const [enabling, setEnabling] = useState(false);
+  useEffect(() => {
+    let cancelled = false;
+    api
+      .preferencesGet()
+      .then((p) => {
+        if (!cancelled) setEnabled(p.activity_enabled);
+      })
+      .catch(() => {
+        // Non-Tauri env — treat as enabled so local dev doesn't dead-end.
+        if (!cancelled) setEnabled(true);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  const enableActivity = async () => {
+    setEnabling(true);
+    try {
+      await api.preferencesSetActivity({ enabled: true, consentSeen: true });
+      await api.sessionLiveStart();
+      setEnabled(true);
+      // Let the shell's sidebar drop the "Off" chip without polling.
+      window.dispatchEvent(
+        new CustomEvent("cp-activity-enabled-changed", {
+          detail: { enabled: true },
+        }),
+      );
+    } catch {
+      // Swallow — the settings pane surfaces the underlying error.
+    } finally {
+      setEnabling(false);
+    }
+  };
 
   return (
     <>
       <ScreenHeader
         title="Activity"
         subtitle={
-          live.length === 0
-            ? "No live sessions."
-            : `${live.length} live session${live.length === 1 ? "" : "s"}`
+          enabled === false
+            ? "Activity is off."
+            : live.length === 0
+              ? "No live sessions."
+              : `${live.length} live session${live.length === 1 ? "" : "s"}`
         }
       />
 
@@ -57,7 +98,9 @@ export function ActivitySection({ onOpenSession }: ActivitySectionProps) {
           gap: "var(--sp-20)",
         }}
       >
-        {mode === "now" ? (
+        {enabled === false ? (
+          <DisabledState busy={enabling} onEnable={enableActivity} />
+        ) : mode === "now" ? (
           live.length === 0 ? (
             <EmptyState />
           ) : (
@@ -74,6 +117,73 @@ export function ActivitySection({ onOpenSession }: ActivitySectionProps) {
         )}
       </div>
     </>
+  );
+}
+
+function DisabledState({
+  busy,
+  onEnable,
+}: {
+  busy: boolean;
+  onEnable: () => void;
+}) {
+  return (
+    <div
+      style={{
+        padding: "var(--sp-32)",
+        border: "var(--bw-hair) dashed var(--line)",
+        borderRadius: "var(--r-2)",
+        textAlign: "center",
+        color: "var(--fg-muted)",
+        fontSize: "var(--fs-sm)",
+        display: "flex",
+        flexDirection: "column",
+        alignItems: "center",
+        gap: "var(--sp-10)",
+      }}
+    >
+      <p
+        style={{
+          margin: 0,
+          fontSize: "var(--fs-md)",
+          fontWeight: 500,
+          color: "var(--fg)",
+        }}
+      >
+        Activity is off.
+      </p>
+      <p
+        style={{
+          margin: 0,
+          fontSize: "var(--fs-xs)",
+          color: "var(--fg-faint)",
+          maxWidth: "var(--content-cap-sm)",
+        }}
+      >
+        When on, Claudepot polls your live Claude Code sessions and
+        streams per-session deltas. Nothing leaves your machine.
+      </p>
+      <button
+        type="button"
+        onClick={onEnable}
+        disabled={busy}
+        className="pm-focus"
+        style={{
+          marginTop: "var(--sp-4)",
+          padding: "var(--sp-6) var(--sp-14)",
+          fontSize: "var(--fs-sm)",
+          fontWeight: 500,
+          color: "var(--on-color)",
+          background: "var(--accent)",
+          border: "var(--bw-hair) solid var(--accent)",
+          borderRadius: "var(--r-2)",
+          cursor: busy ? "default" : "pointer",
+          opacity: busy ? "var(--opacity-dimmed)" : 1,
+        }}
+      >
+        {busy ? "Enabling…" : "Enable Activity"}
+      </button>
+    </div>
   );
 }
 
