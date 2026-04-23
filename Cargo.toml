@@ -104,6 +104,13 @@ sha1 = "0.10"
 cbc = { version = "0.1", features = ["alloc"] }
 # Windows-only
 aes-gcm = "0.10"
+# Direct DPAPI (CryptUnprotectData) bindings for Phase 6. Only the
+# two feature groups we actually use — keeping the compile surface
+# small so non-DPAPI Windows builds don't pay for unused bindings.
+windows-sys = { version = "0.59", features = [
+    "Win32_Foundation",
+    "Win32_Security_Cryptography",
+] }
 
 # Cross-process advisory locking for Desktop mutators (CLI + GUI run as
 # separate processes; the Tauri-side async Mutex is insufficient alone).

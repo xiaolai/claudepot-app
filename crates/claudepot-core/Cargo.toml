@@ -45,3 +45,4 @@ cbc.workspace = true
 
 [target.'cfg(target_os = "windows")'.dependencies]
 aes-gcm.workspace = true
+windows-sys.workspace = true
