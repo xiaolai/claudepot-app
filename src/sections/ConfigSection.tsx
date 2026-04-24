@@ -4,15 +4,16 @@ import { listen } from "@tauri-apps/api/event";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import { api } from "../api";
 import type {
+  ConfigAnchor,
   ConfigFileNodeDto,
   ConfigKind,
   ConfigPreviewDto,
-  ConfigScopeNodeDto,
   ConfigSearchHitDto,
   ConfigSearchSummaryDto,
   ConfigTreeDto,
   EditorCandidateDto,
   EditorDefaultsDto,
+  ProjectInfo,
 } from "../types";
 import { ScreenHeader } from "../shell/ScreenHeader";
 import { PreviewHeader } from "../components/primitives/PreviewHeader";
@@ -21,16 +22,20 @@ import { IconButton } from "../components/primitives/IconButton";
 import { FilterChip } from "../components/primitives/FilterChip";
 import { Input } from "../components/primitives/Input";
 import { Glyph } from "../components/primitives/Glyph";
-import { NF } from "../icons";
+import { NF, type NfIcon } from "../icons";
 import { EffectiveRenderer } from "./config/EffectiveRenderer";
 import { EffectiveMcpRenderer } from "./config/EffectiveMcpRenderer";
 import { MarkdownRenderer } from "./config/MarkdownRenderer";
 import { JsonTreeRenderer } from "./config/JsonTreeRenderer";
+import { HooksRenderer, countHooksInMergedSettings } from "./config/HooksRenderer";
 import { useConfigTree } from "../hooks/useConfigTree";
 import { useAppState } from "../providers/AppStateProvider";
 
-const EFFECTIVE_SETTINGS_ROUTE = "virtual:effective-settings";
-const EFFECTIVE_MCP_ROUTE = "virtual:effective-mcp";
+import {
+  CONFIG_ANCHOR_STORAGE_KEY,
+  EFFECTIVE_MCP_ROUTE,
+  EFFECTIVE_SETTINGS_ROUTE,
+} from "./config/constants";
 
 const MARKDOWN_KINDS: readonly ConfigKind[] = [
   "claude_md",
@@ -55,9 +60,53 @@ const JSON_KINDS: readonly ConfigKind[] = [
   "redacted_user_config",
 ] as const;
 
+// Kinds the user authors. Bucketed under their own kind-group at the
+// top of the tree. Order mirrors how often CC users reach for each.
+// `hook` is NOT here — hooks aren't stand-alone files, they live
+// inside settings.json and surface via the dedicated Hooks entry.
+const DEFINITION_KINDS: readonly ConfigKind[] = [
+  "agent",
+  "skill",
+  "command",
+  "output_style",
+  "workflow",
+  "rule",
+  "keybindings",
+  "statusline",
+] as const;
+
+const DEFINITION_KIND_LABEL: Record<string, string> = {
+  agent: "Agents",
+  skill: "Skills",
+  command: "Commands",
+  output_style: "Output styles",
+  workflow: "Workflows",
+  rule: "Rules",
+  keybindings: "Keybindings",
+  statusline: "Statusline",
+};
+
+const PLUGINS_GROUP_ID = "grp:plugins";
+const FILES_GROUP_ID = "grp:files";
+const HOOKS_ROUTE = "virtual:hooks";
+
 interface ConfigSectionProps {
   subRoute: string | null;
   onSubRouteChange: (subRoute: string | null) => void;
+  /**
+   * When provided, the section is pinned to this anchor: the picker
+   * is hidden, localStorage is not consulted for the initial value,
+   * and the header subtitle hides the anchor label (the surrounding
+   * shell already shows which project you're in).
+   *
+   * Embedders:
+   *   - Project shell passes `{ kind: "folder", path: <project cwd> }`
+   *   - Global section passes `{ kind: "global" }`
+   *
+   * Standalone use (legacy top-level Config tab, if re-enabled) omits
+   * this prop → picker + localStorage behavior as before.
+   */
+  forcedAnchor?: ConfigAnchor;
 }
 
 /**
@@ -74,7 +123,103 @@ interface ConfigSectionProps {
  * concrete ids are cleared after rescans; virtual ids always remain
  * valid.
  */
-export function ConfigSection({ subRoute, onSubRouteChange }: ConfigSectionProps) {
+function loadAnchor(): ConfigAnchor {
+  try {
+    const raw = localStorage.getItem(CONFIG_ANCHOR_STORAGE_KEY);
+    if (!raw) return { kind: "global" };
+    const parsed = JSON.parse(raw);
+    if (parsed?.kind === "folder" && typeof parsed.path === "string") {
+      return { kind: "folder", path: parsed.path };
+    }
+    if (parsed?.kind === "global") return { kind: "global" };
+  } catch {
+    // fall through
+  }
+  return { kind: "global" };
+}
+
+function persistAnchor(anchor: ConfigAnchor): void {
+  try {
+    localStorage.setItem(CONFIG_ANCHOR_STORAGE_KEY, JSON.stringify(anchor));
+  } catch {
+    // localStorage may be disabled — the anchor just won't persist.
+  }
+}
+
+function anchorCwd(anchor: ConfigAnchor): string | null {
+  return anchor.kind === "folder" ? anchor.path : null;
+}
+
+function anchorLabel(anchor: ConfigAnchor): string {
+  if (anchor.kind === "global") return "Global only";
+  const p = anchor.path;
+  const m = p.match(/([^/\\]+)[/\\]?$/);
+  return m ? m[1] : p;
+}
+
+/**
+ * Compact status strip for embedded ConfigSection — a slim row with
+ * artifact count + dirty indicator on the left, Refresh on the right.
+ * Replaces the full ScreenHeader when the surrounding shell already
+ * titles the page (project tabs / Global section).
+ */
+function EmbeddedStatusStrip({
+  artifactCount,
+  updating,
+  onRefresh,
+}: {
+  artifactCount: number | null;
+  updating: boolean;
+  onRefresh: () => void;
+}) {
+  return (
+    <div
+      style={{
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "space-between",
+        padding: "var(--sp-8) var(--sp-16)",
+        borderBottom: "var(--bw-hair) solid var(--line)",
+        fontSize: "var(--fs-xs)",
+        color: "var(--fg-muted)",
+        flexShrink: 0,
+      }}
+    >
+      <span>
+        {artifactCount == null
+          ? "Scanning…"
+          : `${artifactCount} artifact${artifactCount === 1 ? "" : "s"}`}
+        {updating ? " · updating…" : ""}
+      </span>
+      <button
+        type="button"
+        className="pm-focus"
+        onClick={onRefresh}
+        title="Re-scan on-disk artifacts"
+        style={{
+          display: "flex",
+          alignItems: "center",
+          gap: "var(--sp-4)",
+          padding: "var(--sp-2) var(--sp-8)",
+          background: "transparent",
+          border: "none",
+          color: "var(--fg-muted)",
+          fontSize: "var(--fs-xs)",
+          cursor: "pointer",
+          borderRadius: "var(--r-sm)",
+        }}
+      >
+        <span>Refresh</span>
+      </button>
+    </div>
+  );
+}
+
+export function ConfigSection({
+  subRoute,
+  onSubRouteChange,
+  forcedAnchor,
+}: ConfigSectionProps) {
   const {
     tree,
     dirty: watcherDirty,
@@ -87,6 +232,27 @@ export function ConfigSection({ subRoute, onSubRouteChange }: ConfigSectionProps
   const [defaults, setDefaults] = useState<EditorDefaultsDto | null>(null);
   const [preview, setPreview] = useState<ConfigPreviewDto | null>(null);
   const [previewError, setPreviewError] = useState<string | null>(null);
+  // Embedders win: if `forcedAnchor` is set, ignore localStorage and
+  // lock the anchor. Picker, persistence, and chooseAnchor are no-ops
+  // in that mode.
+  const [anchor, setAnchor] = useState<ConfigAnchor>(
+    () => forcedAnchor ?? loadAnchor(),
+  );
+  // Track identity changes of `forcedAnchor` so embedders can switch
+  // between projects without unmounting the section. The JSON-stable
+  // key avoids re-firing for referentially-new but value-equal props.
+  const forcedAnchorKey = forcedAnchor ? JSON.stringify(forcedAnchor) : null;
+  useEffect(() => {
+    if (!forcedAnchor) return;
+    setAnchor(forcedAnchor);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [forcedAnchorKey]);
+  const [recentProjects, setRecentProjects] = useState<ProjectInfo[] | null>(null);
+  // Count of hooks registered in the merged effective settings. `null`
+  // while the effective-settings call is in flight or in global-only
+  // mode (where it's never requested). Drives whether the Hooks row
+  // is rendered in the tree — we don't show an empty placeholder.
+  const [hooksCount, setHooksCount] = useState<number | null>(null);
 
   const selectedId = useMemo(() => {
     if (!subRoute?.startsWith("node:")) return null;
@@ -94,10 +260,11 @@ export function ConfigSection({ subRoute, onSubRouteChange }: ConfigSectionProps
   }, [subRoute]);
 
   const virtualRoute = useMemo<
-    null | "effective-settings" | "effective-mcp"
+    null | "effective-settings" | "effective-mcp" | "hooks"
   >(() => {
     if (selectedId === EFFECTIVE_SETTINGS_ROUTE) return "effective-settings";
     if (selectedId === EFFECTIVE_MCP_ROUTE) return "effective-mcp";
+    if (selectedId === HOOKS_ROUTE) return "hooks";
     return null;
   }, [selectedId]);
 
@@ -130,13 +297,13 @@ export function ConfigSection({ subRoute, onSubRouteChange }: ConfigSectionProps
 
   const refreshTree = useCallback(async () => {
     try {
-      const t = await api.configScan(null);
+      const t = await api.configScan(anchorCwd(anchor));
       setTree(t);
       setLoadError(null);
     } catch (e) {
       setLoadError(String(e));
     }
-  }, [setTree]);
+  }, [setTree, anchor]);
 
   const refreshEditors = useCallback(() => {
     setEditors(null);
@@ -146,8 +313,10 @@ export function ConfigSection({ subRoute, onSubRouteChange }: ConfigSectionProps
       .catch(() => setEditors([]));
   }, []);
 
+  // One-shot mount effect — editor list + defaults only. Scan + watcher
+  // live in the anchor-scoped effect below, so swapping anchors
+  // reliably restarts both.
   useEffect(() => {
-    void refreshTree();
     void api
       .configListEditors(false)
       .then(setEditors)
@@ -158,15 +327,52 @@ export function ConfigSection({ subRoute, onSubRouteChange }: ConfigSectionProps
       .catch(() =>
         setDefaults({ by_kind: {}, fallback: "system" }),
       );
-    // Kick off the real-FS watcher; incremental patches arrive via
-    // `config-tree-patch` and are applied by useConfigTree.
-    void api.configWatchStart(null).catch(() => {
+  }, []);
+
+  // Scan + watcher are rebound whenever the anchor changes. Stopping
+  // first avoids two watchers racing on the same `config-tree-patch`
+  // channel.
+  useEffect(() => {
+    void refreshTree();
+    void api.configWatchStart(anchorCwd(anchor)).catch(() => {
       // Non-fatal — the tree still works via explicit Refresh.
     });
     return () => {
       void api.configWatchStop().catch(() => {});
     };
-  }, [refreshTree]);
+  }, [anchor, refreshTree]);
+
+  // Hook count lives downstream of effective settings. It's anchored
+  // to the same cwd as the tree, so rebind whenever anchor changes.
+  // Global-only mode short-circuits to 0 — no project, no merged hooks.
+  useEffect(() => {
+    if (anchor.kind === "global") {
+      setHooksCount(0);
+      return;
+    }
+    let cancelled = false;
+    void api
+      .configEffectiveSettings(anchor.path)
+      .then((r) => {
+        if (cancelled) return;
+        setHooksCount(countHooksInMergedSettings(r.merged));
+      })
+      .catch(() => {
+        if (!cancelled) setHooksCount(null);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [anchor]);
+
+  // Load the recent-projects list used by the anchor picker dropdown.
+  // Cheap call — just a directory scan of `~/.claudepot/projects/`.
+  useEffect(() => {
+    void api
+      .projectList()
+      .then(setRecentProjects)
+      .catch(() => setRecentProjects([]));
+  }, []);
 
   // Recovery: orphan watcher patches without a baseline trigger a
   // fresh scan so subsequent patches have a tree to apply to.
@@ -174,6 +380,35 @@ export function ConfigSection({ subRoute, onSubRouteChange }: ConfigSectionProps
     if (orphanPatchSignal === 0) return;
     void refreshTree();
   }, [orphanPatchSignal, refreshTree]);
+
+  const chooseAnchor = useCallback(
+    (next: ConfigAnchor) => {
+      // Clear any virtual route selection — Effective panes are hidden
+      // in global mode, so leaving the route pinned would render a
+      // dead pane after the swap. Concrete node ids are checked by
+      // the stale-subroute effect once the next tree arrives.
+      if (next.kind === "global" && subRoute?.startsWith("node:virtual:")) {
+        onSubRouteChange(null);
+      }
+      persistAnchor(next);
+      setAnchor(next);
+    },
+    [subRoute, onSubRouteChange],
+  );
+
+  const pickFolderAnchor = useCallback(async () => {
+    try {
+      const picked = await openDialog({
+        multiple: false,
+        directory: true,
+        title: "Choose project folder",
+      });
+      if (typeof picked !== "string" || picked.length === 0) return;
+      chooseAnchor({ kind: "folder", path: picked });
+    } catch {
+      pushToast("error", "Could not open folder picker");
+    }
+  }, [chooseAnchor, pushToast]);
 
   // Repair stale subRoute. Virtual routes are always valid.
   useEffect(() => {
@@ -379,24 +614,57 @@ export function ConfigSection({ subRoute, onSubRouteChange }: ConfigSectionProps
         minHeight: 0,
       }}
     >
+      {forcedAnchor ? (
+        // Embedded mode: the outer shell (project tabs or Global
+        // section) already owns the title. Render a slim status strip
+        // instead of a full ScreenHeader so the tree/preview grid
+        // dominates the vertical space.
+        <EmbeddedStatusStrip
+          artifactCount={
+            tree
+              ? tree.scopes.reduce((n, s) => n + s.recursive_count, 0)
+              : null
+          }
+          updating={watcherDirty}
+          onRefresh={() => void refreshTree()}
+        />
+      ) : (
       <ScreenHeader
         title="Config"
         subtitle={
           tree
-            ? `${tree.scopes.length} scope${tree.scopes.length === 1 ? "" : "s"} · ${tree.cwd}${watcherDirty ? " · updating…" : ""}`
+            ? (() => {
+                const total = tree.scopes.reduce(
+                  (n, s) => n + s.recursive_count,
+                  0,
+                );
+                const locus =
+                  anchor.kind === "folder" ? anchor.path : "Global only";
+                return `${total} artifact${total === 1 ? "" : "s"} · ${locus}${watcherDirty ? " · updating…" : ""}`;
+              })()
             : "Read-only browser over Claude Code's filesystem artifacts."
         }
         actions={
-          <Button
-            variant="ghost"
-            glyph={NF.refresh}
-            onClick={() => void refreshTree()}
-            title="Re-scan on-disk artifacts"
-          >
-            Refresh
-          </Button>
+          <div style={{ display: "flex", gap: "var(--sp-6)", alignItems: "center" }}>
+            <AnchorPicker
+              anchor={anchor}
+              recent={recentProjects}
+              onGlobal={() => chooseAnchor({ kind: "global" })}
+              onFolder={(path) => chooseAnchor({ kind: "folder", path })}
+              onPickFolder={() => void pickFolderAnchor()}
+            />
+            <Button
+              variant="ghost"
+              glyph={NF.refresh}
+              onClick={() => void refreshTree()}
+              title="Re-scan on-disk artifacts"
+            >
+              Refresh
+            </Button>
+          </div>
         }
       />
+      )}
 
       <div
         style={{
@@ -440,6 +708,8 @@ export function ConfigSection({ subRoute, onSubRouteChange }: ConfigSectionProps
               loadError={loadError}
               selectedId={selectedId}
               onSelect={(id) => onSubRouteChange(id ? `node:${id}` : null)}
+              globalOnly={anchor.kind === "global"}
+              hooksCount={hooksCount}
             />
           )}
         </div>
@@ -466,6 +736,13 @@ export function ConfigSection({ subRoute, onSubRouteChange }: ConfigSectionProps
               subtitle="MCP servers CC would see, per simulation mode."
             >
               <EffectiveMcpRenderer cwd={tree?.cwd ?? null} />
+            </EffectiveShell>
+          ) : virtualRoute === "hooks" ? (
+            <EffectiveShell
+              title="Hooks"
+              subtitle="Registered hooks across every enabled settings layer. One row per matcher → command."
+            >
+              <HooksRenderer cwd={tree?.cwd ?? null} />
             </EffectiveShell>
           ) : selectedFile ? (
             <FilePreview
@@ -566,12 +843,48 @@ function SearchBar({
 }
 
 // ---------- Tree pane (virtualized) ----------------------------------
+//
+// Flat CC-native layout. No meta-section headers ("Effective" /
+// "Definitions" / "Sources") — those were engineering vocabulary.
+// Groups are separated by thin dividers; each row is a first-class
+// Claude Code concept.
+//
+// Top block — project-scoped merged views (hidden in global-only):
+//   Settings · MCP servers · Hooks · Memory
+//
+// Middle block — kind-bucketed authored artifacts (cross-scope),
+// badged with origin (U / P / L / Pl …):
+//   Agents · Skills · Commands · Output styles · Workflows · Rules
+//   · Keybindings · Statusline
+//
+// Plugins — promoted out of the raw-files bucket. Each plugin is a
+// parent bundle; expanding one shows its contributed files (agents,
+// skills, commands, hooks, manifest) flattened by kind.
+//
+// Files — the old "Sources" scope-by-scope tree, kept as a
+// debugging escape hatch. Collapsed by default.
+//
+// Hooks count comes from parsing effective settings' `hooks` field.
+// Plugin bundle grouping uses each file's abs_path prefix against
+// the plugin root (computed client-side from existing scope data).
 
 type TreeRow =
-  | { kind: "scope"; scope: ConfigScopeNodeDto; expanded: boolean }
-  | { kind: "virtual-scope"; label: string; expanded: boolean }
-  | { kind: "virtual-row"; id: string; label: string }
-  | { kind: "file"; file: ConfigFileNodeDto };
+  | {
+      kind: "group";
+      id: string;
+      label: string;
+      count?: number;
+      expanded: boolean;
+      depth: 0 | 1;
+    }
+  | { kind: "virtual-row"; id: string; label: string; count?: number; depth: 0 | 1 | 2 }
+  | {
+      kind: "file";
+      file: ConfigFileNodeDto;
+      scopeBadge: ScopeBadge | null;
+      depth: 1 | 2;
+    }
+  | { kind: "divider"; id: string };
 
 const ROW_HEIGHT = 26;
 
@@ -580,22 +893,44 @@ function ConfigTreePane({
   loadError,
   selectedId,
   onSelect,
+  globalOnly,
+  hooksCount,
 }: {
   tree: ConfigTreeDto | null;
   loadError: string | null;
   selectedId: string | null;
   onSelect: (id: string | null) => void;
+  globalOnly: boolean;
+  /**
+   * Number of hooks found in merged effective settings, or `null` if
+   * the Effective settings haven't resolved yet / are unavailable
+   * (global-only mode). Controls whether the Hooks row is rendered.
+   */
+  hooksCount: number | null;
 }) {
-  const [expanded, setExpanded] = useState<Record<string, boolean>>({});
-  const [effectiveExpanded, setEffectiveExpanded] = useState(true);
+  const [expanded, setExpanded] = useState<Record<string, boolean>>({
+    [FILES_GROUP_ID]: false,
+    [PLUGINS_GROUP_ID]: false,
+  });
   const parentRef = useRef<HTMLDivElement | null>(null);
 
+  // Default expansion rules:
+  //  - Every definition kind-group is closed so the initial tree is
+  //    a dense summary view, not a wall of leaf rows.
+  //  - Every scope under Files is closed — the whole Files block is
+  //    collapsed by default anyway, but if the user opens it they'd
+  //    rather see scope labels than instantly re-explode into files.
+  //  - Each plugin's sub-group is closed.
   useEffect(() => {
     if (!tree) return;
     setExpanded((prev) => {
       const next = { ...prev };
-      for (const s of tree.scopes) {
-        if (!(s.id in next)) next[s.id] = true;
+      tree.scopes.forEach((s) => {
+        if (!(s.id in next)) next[s.id] = false;
+      });
+      for (const k of DEFINITION_KINDS) {
+        const gid = `def:${k}`;
+        if (!(gid in next)) next[gid] = false;
       }
       return next;
     });
@@ -603,21 +938,162 @@ function ConfigTreePane({
 
   const rows: TreeRow[] = useMemo(() => {
     const out: TreeRow[] = [];
-    out.push({ kind: "virtual-scope", label: "Effective", expanded: effectiveExpanded });
-    if (effectiveExpanded) {
-      out.push({ kind: "virtual-row", id: EFFECTIVE_SETTINGS_ROUTE, label: "Effective settings" });
-      out.push({ kind: "virtual-row", id: EFFECTIVE_MCP_ROUTE, label: "Effective MCP" });
-    }
-    if (!tree) return out;
-    for (const scope of tree.scopes) {
-      const open = !!expanded[scope.id];
-      out.push({ kind: "scope", scope, expanded: open });
-      if (open) {
-        for (const f of scope.files) out.push({ kind: "file", file: f });
+
+    // --- Merged views (project-scoped) --------------------------------
+    // Hidden in global-only mode — the backend refuses effective_*
+    // without a cwd and there's no project to walk CLAUDE.md from.
+    if (!globalOnly) {
+      out.push({
+        kind: "virtual-row",
+        id: EFFECTIVE_SETTINGS_ROUTE,
+        label: "Settings",
+        depth: 0,
+      });
+      out.push({
+        kind: "virtual-row",
+        id: EFFECTIVE_MCP_ROUTE,
+        label: "MCP servers",
+        depth: 0,
+      });
+      if (hooksCount != null && hooksCount > 0) {
+        out.push({
+          kind: "virtual-row",
+          id: HOOKS_ROUTE,
+          label: "Hooks",
+          count: hooksCount,
+          depth: 0,
+        });
       }
     }
+
+    if (!tree) return out;
+
+    // --- Definitions (cross-scope, by kind) ---------------------------
+    // Plugin-contributed files are EXCLUDED here — they surface under
+    // the dedicated Plugins block below so the top-level counts mean
+    // "things you authored" rather than "everything loaded."
+    const byKind = new Map<string, { file: ConfigFileNodeDto; badge: ScopeBadge }[]>();
+    for (const scope of tree.scopes) {
+      if (scope.scope_type === "plugin" || scope.scope_type === "plugin_base") {
+        continue;
+      }
+      const badge = scopeBadgeFor(scope.scope_type);
+      for (const f of scope.files) {
+        if ((DEFINITION_KINDS as readonly string[]).includes(f.kind)) {
+          const bucket = byKind.get(f.kind) ?? [];
+          bucket.push({ file: f, badge });
+          byKind.set(f.kind, bucket);
+        }
+      }
+    }
+    for (const bucket of byKind.values()) {
+      bucket.sort((a, b) => {
+        const la = (a.file.summary_title ?? fileName(a.file.display_path)).toLowerCase();
+        const lb = (b.file.summary_title ?? fileName(b.file.display_path)).toLowerCase();
+        return la < lb ? -1 : la > lb ? 1 : 0;
+      });
+    }
+
+    const hadMergedBlock = out.length > 0;
+    const hasDefs = Array.from(byKind.values()).some((b) => b.length > 0);
+    if (hasDefs) {
+      if (hadMergedBlock) {
+        out.push({ kind: "divider", id: "div:defs" });
+      }
+      for (const k of DEFINITION_KINDS) {
+        const bucket = byKind.get(k);
+        if (!bucket || bucket.length === 0) continue;
+        const gid = `def:${k}`;
+        const gOpen = expanded[gid] ?? false;
+        out.push({
+          kind: "group",
+          id: gid,
+          label: DEFINITION_KIND_LABEL[k] ?? kindLabel(k),
+          count: bucket.length,
+          expanded: gOpen,
+          depth: 0,
+        });
+        if (gOpen) {
+          for (const { file, badge } of bucket) {
+            out.push({ kind: "file", file, scopeBadge: badge, depth: 1 });
+          }
+        }
+      }
+    }
+
+    // --- Plugins (first-class bundle) ---------------------------------
+    const pluginFiles = tree.scopes
+      .filter((s) => s.scope_type === "plugin" || s.scope_type === "plugin_base")
+      .flatMap((s) => s.files);
+    if (pluginFiles.length > 0) {
+      const plugins = groupFilesByPlugin(pluginFiles);
+      const plugOpen = expanded[PLUGINS_GROUP_ID] ?? false;
+      out.push({ kind: "divider", id: "div:plugins" });
+      out.push({
+        kind: "group",
+        id: PLUGINS_GROUP_ID,
+        label: "Plugins",
+        count: plugins.length,
+        expanded: plugOpen,
+        depth: 0,
+      });
+      if (plugOpen) {
+        for (const p of plugins) {
+          const pid = `plug:${p.id}`;
+          const pOpen = expanded[pid] ?? false;
+          out.push({
+            kind: "group",
+            id: pid,
+            label: p.label,
+            count: p.files.length,
+            expanded: pOpen,
+            depth: 1,
+          });
+          if (pOpen) {
+            for (const f of p.files) {
+              out.push({ kind: "file", file: f, scopeBadge: null, depth: 2 });
+            }
+          }
+        }
+      }
+    }
+
+    // --- Files (scope-by-scope debug view) ----------------------------
+    // Everything user-visible above is derived from these same scopes;
+    // Files is the escape hatch for "show me the raw file layout."
+    if (tree.scopes.length > 0) {
+      out.push({ kind: "divider", id: "div:files" });
+      const filesOpen = expanded[FILES_GROUP_ID] ?? false;
+      out.push({
+        kind: "group",
+        id: FILES_GROUP_ID,
+        label: "Files",
+        count: tree.scopes.length,
+        expanded: filesOpen,
+        depth: 0,
+      });
+      if (filesOpen) {
+        for (const scope of tree.scopes) {
+          const sOpen = expanded[scope.id] ?? false;
+          out.push({
+            kind: "group",
+            id: scope.id,
+            label: cleanScopeLabel(scope.label),
+            count: scope.recursive_count,
+            expanded: sOpen,
+            depth: 1,
+          });
+          if (sOpen) {
+            for (const f of scope.files) {
+              out.push({ kind: "file", file: f, scopeBadge: null, depth: 2 });
+            }
+          }
+        }
+      }
+    }
+
     return out;
-  }, [tree, expanded, effectiveExpanded]);
+  }, [tree, expanded, globalOnly, hooksCount]);
 
   const virt = useVirtualizer({
     count: rows.length,
@@ -660,11 +1136,14 @@ function ConfigTreePane({
     );
   }
 
+  const toggle = (id: string) =>
+    setExpanded((p) => ({ ...p, [id]: !(p[id] ?? false) }));
+
   return (
     <div
       ref={parentRef}
       role="tree"
-      aria-label="Config scopes"
+      aria-label="Config artifacts"
       style={{
         flex: 1,
         minHeight: 0,
@@ -697,13 +1176,7 @@ function ConfigTreePane({
                 row={row}
                 selectedId={selectedId}
                 onSelect={onSelect}
-                onToggle={(id) => {
-                  if (id === "virtual") {
-                    setEffectiveExpanded((v) => !v);
-                  } else {
-                    setExpanded((p) => ({ ...p, [id]: !p[id] }));
-                  }
-                }}
+                onToggle={toggle}
               />
             </div>
           );
@@ -722,64 +1195,91 @@ function TreeRowView({
   row: TreeRow;
   selectedId: string | null;
   onSelect: (id: string | null) => void;
-  onToggle: (scopeId: string) => void;
+  onToggle: (id: string) => void;
 }) {
-  if (row.kind === "virtual-scope") {
+  if (row.kind === "divider") {
+    return <TreeDivider />;
+  }
+  if (row.kind === "group") {
     return (
-      <ScopeHeaderButton
+      <GroupHeaderButton
         expanded={row.expanded}
         label={row.label}
-        count={2}
-        onToggle={() => onToggle("virtual")}
+        count={row.count}
+        onToggle={() => onToggle(row.id)}
+        depth={row.depth}
       />
     );
   }
   if (row.kind === "virtual-row") {
-    const selected = selectedId === row.id;
     return (
-      <FileRowButton
-        selected={selected}
+      <VirtualRowButton
+        selected={selectedId === row.id}
         label={row.label}
+        count={row.count}
         onSelect={() => onSelect(row.id)}
+        depth={row.depth}
       />
     );
   }
-  if (row.kind === "scope") {
-    return (
-      <ScopeHeaderButton
-        expanded={row.expanded}
-        label={row.scope.label}
-        count={row.scope.recursive_count}
-        onToggle={() => onToggle(row.scope.id)}
-      />
-    );
-  }
-  const selected = selectedId === row.file.id;
   const label = row.file.summary_title ?? fileName(row.file.display_path);
   return (
     <FileRowButton
-      selected={selected}
+      selected={selectedId === row.file.id}
       label={label}
       onSelect={() => onSelect(row.file.id)}
       title={row.file.abs_path}
       issuesCount={row.file.issues.length}
       issuesTitle={row.file.issues.join("; ")}
       includeDepth={row.file.include_depth}
+      scopeBadge={row.scopeBadge ?? undefined}
+      depth={row.depth}
     />
   );
 }
 
-function ScopeHeaderButton({
+function TreeDivider() {
+  return (
+    <div
+      role="separator"
+      aria-orientation="horizontal"
+      style={{
+        display: "flex",
+        alignItems: "center",
+        height: "100%",
+        padding: "0 var(--sp-12)",
+      }}
+    >
+      <div
+        style={{
+          flex: 1,
+          height: "var(--bw-hair)",
+          background: "var(--line)",
+        }}
+      />
+    </div>
+  );
+}
+
+// ---------- Group / virtual / file rows -------------------------------
+
+function GroupHeaderButton({
   expanded,
   label,
   count,
   onToggle,
+  depth,
 }: {
   expanded: boolean;
   label: string;
-  count: number;
+  count?: number;
   onToggle: () => void;
+  depth: 0 | 1;
 }) {
+  // Depth 0 = top-level group (Agents / Skills / Plugins / Files).
+  // Depth 1 = nested group inside Plugins or Files (per-plugin bundle
+  // or per-scope file list).
+  const leftPad = depth === 0 ? "var(--sp-12)" : "var(--sp-24)";
   return (
     <button
       type="button"
@@ -793,13 +1293,13 @@ function ScopeHeaderButton({
         width: "100%",
         height: "100%",
         gap: "var(--sp-6)",
-        padding: "0 var(--sp-12)",
+        padding: `0 var(--sp-12) 0 ${leftPad}`,
         background: "transparent",
         border: "none",
         cursor: "pointer",
         color: "var(--fg)",
         fontSize: "var(--fs-xs)",
-        fontWeight: 600,
+        fontWeight: depth === 0 ? 500 : 400,
         textAlign: "left",
       }}
     >
@@ -814,15 +1314,84 @@ function ScopeHeaderButton({
       >
         {label}
       </span>
+      {count != null && (
+        <span
+          style={{
+            fontSize: "var(--fs-2xs)",
+            color: "var(--fg-faint)",
+            fontWeight: 400,
+          }}
+        >
+          {count}
+        </span>
+      )}
+    </button>
+  );
+}
+
+function VirtualRowButton({
+  selected,
+  label,
+  count,
+  onSelect,
+  depth,
+}: {
+  selected: boolean;
+  label: string;
+  count?: number;
+  onSelect: () => void;
+  depth: 0 | 1 | 2;
+}) {
+  // depth 0 — top-level merged views (Settings, MCP, Hooks, Memory).
+  // Given no chevron, pad the left edge to the same spot label would
+  // start under an expanded group chevron, keeping vertical alignment
+  // with the group rows below.
+  const leftPad =
+    depth === 0 ? "var(--sp-24)" : depth === 1 ? "var(--sp-32)" : "var(--sp-40)";
+  return (
+    <button
+      type="button"
+      role="treeitem"
+      aria-selected={selected}
+      onClick={onSelect}
+      className="pm-focus"
+      style={{
+        display: "flex",
+        alignItems: "center",
+        width: "100%",
+        height: "100%",
+        gap: "var(--sp-6)",
+        padding: `0 var(--sp-12) 0 ${leftPad}`,
+        background: selected ? "var(--bg-active)" : "transparent",
+        color: selected ? "var(--accent-ink)" : "var(--fg)",
+        border: "none",
+        cursor: "pointer",
+        fontSize: "var(--fs-xs)",
+        fontWeight: depth === 0 ? 500 : 400,
+        textAlign: "left",
+      }}
+    >
       <span
         style={{
-          fontSize: "var(--fs-2xs)",
-          color: "var(--fg-faint)",
-          fontWeight: 400,
+          flex: 1,
+          overflow: "hidden",
+          textOverflow: "ellipsis",
+          whiteSpace: "nowrap",
         }}
       >
-        {count}
+        {label}
       </span>
+      {count != null && (
+        <span
+          style={{
+            fontSize: "var(--fs-2xs)",
+            color: "var(--fg-faint)",
+            fontWeight: 400,
+          }}
+        >
+          {count}
+        </span>
+      )}
     </button>
   );
 }
@@ -835,6 +1404,8 @@ function FileRowButton({
   issuesCount,
   issuesTitle,
   includeDepth,
+  scopeBadge,
+  depth,
 }: {
   selected: boolean;
   label: string;
@@ -843,11 +1414,15 @@ function FileRowButton({
   issuesCount?: number;
   issuesTitle?: string;
   includeDepth?: number;
+  scopeBadge?: ScopeBadge;
+  depth: number;
 }) {
-  // Nest `@include`-pulled rows by indenting proportionally to chain
-  // depth. Depth 0 (root files) uses the standard 28px indent.
-  const depth = includeDepth ?? 0;
-  const leftPad = depth === 0 ? "var(--sp-28)" : `calc(var(--sp-28) + ${depth * 12}px)`;
+  // Base indent derives from tree depth (section/group/file). `@include`
+  // chains nest further under their parent file.
+  const basePad =
+    depth >= 2 ? "var(--sp-32)" : depth === 1 ? "var(--sp-20)" : "var(--sp-12)";
+  const inc = includeDepth ?? 0;
+  const leftPad = inc === 0 ? basePad : `calc(${basePad} + ${inc * 12}px)`;
   return (
     <button
       type="button"
@@ -871,7 +1446,7 @@ function FileRowButton({
         textAlign: "left",
       }}
     >
-      {depth > 0 && (
+      {inc > 0 && (
         <span
           aria-hidden
           style={{
@@ -893,6 +1468,7 @@ function FileRowButton({
       >
         {label}
       </span>
+      {scopeBadge && <ScopeBadgeChip badge={scopeBadge} />}
       {issuesCount != null && issuesCount > 0 && (
         <span title={issuesTitle} aria-label={`${issuesCount} issue${issuesCount === 1 ? "" : "s"}`}>
           <Glyph g={NF.warn} color="var(--danger)" />
@@ -900,6 +1476,165 @@ function FileRowButton({
       )}
     </button>
   );
+}
+
+// ---------- Scope badges ----------------------------------------------
+//
+// One-char chips tell Definition rows which scope they came from,
+// without forcing the user to swap to the Sources tree. `scope_type`
+// is the serde-tagged discriminator on the Rust enum (snake_case).
+
+interface ScopeBadge {
+  short: string;
+  full: string;
+}
+
+function scopeBadgeFor(scopeType: string): ScopeBadge {
+  switch (scopeType) {
+    case "user":
+      return { short: "U", full: "User (~/.claude)" };
+    case "project":
+      return { short: "P", full: "Project (cwd/.claude)" };
+    case "local":
+      return { short: "L", full: "Local overrides" };
+    case "flag":
+      return { short: "F", full: "CLI flag override" };
+    case "plugin":
+      return { short: "Pl", full: "Plugin" };
+    case "plugin_base":
+      return { short: "Pb", full: "Plugin base" };
+    case "policy":
+      return { short: "Po", full: "Managed policy" };
+    case "claude_md_dir":
+      return { short: "C", full: "CLAUDE.md walk" };
+    case "memory_current":
+      return { short: "M", full: "Memory (this project)" };
+    case "memory_other":
+      return { short: "m", full: "Memory (other project)" };
+    case "redacted_user_config":
+      return { short: "G", full: "Global config" };
+    case "effective":
+      return { short: "E", full: "Effective" };
+    default:
+      return { short: "·", full: scopeType };
+  }
+}
+
+function ScopeBadgeChip({ badge }: { badge: ScopeBadge }) {
+  return (
+    <span
+      title={badge.full}
+      aria-label={badge.full}
+      style={{
+        fontFamily: "var(--mono)",
+        fontSize: "var(--fs-2xs)",
+        fontWeight: 600,
+        lineHeight: 1,
+        padding: "2px 5px",
+        borderRadius: "var(--r-sm)",
+        border: "var(--bw-hair) solid var(--line)",
+        color: "var(--fg-muted)",
+        background: "var(--bg-sunken)",
+        minWidth: "1.4em",
+        textAlign: "center",
+      }}
+    >
+      {badge.short}
+    </span>
+  );
+}
+
+// ---------- Plugin bundle grouping ------------------------------------
+//
+// Plugin files come from the backend in a single flat scope. To render
+// them as first-class bundles we have to partition by plugin root —
+// every plugin under `~/.claude/plugins/<id>/…` or
+// `<any-scope>/plugins/<id>/…` groups its agents/skills/commands
+// together. We use the longest matching root prefix among the files
+// themselves: the deepest ancestor directory whose basename is the
+// plugin id. This is heuristic but stable for how CC ships plugins
+// today. If the backend ever exposes a `plugin_id` field on FileNode
+// this can be replaced with a direct bucketing.
+interface PluginBundle {
+  id: string;
+  label: string;
+  files: ConfigFileNodeDto[];
+}
+
+function groupFilesByPlugin(files: ConfigFileNodeDto[]): PluginBundle[] {
+  const byId = new Map<string, PluginBundle>();
+  for (const f of files) {
+    const id = pluginIdFromPath(f.abs_path);
+    const bucket = byId.get(id) ?? { id, label: id, files: [] };
+    bucket.files.push(f);
+    byId.set(id, bucket);
+  }
+  const out = Array.from(byId.values());
+  // Sort within each plugin: manifest-like files first, then the rest
+  // alphabetically. Manifests are the user's first landmark per plugin.
+  for (const b of out) {
+    b.files.sort((a, b2) => {
+      const ma = isManifestLike(a) ? 0 : 1;
+      const mb = isManifestLike(b2) ? 0 : 1;
+      if (ma !== mb) return ma - mb;
+      const la = (a.summary_title ?? fileName(a.display_path)).toLowerCase();
+      const lb = (b2.summary_title ?? fileName(b2.display_path)).toLowerCase();
+      return la < lb ? -1 : la > lb ? 1 : 0;
+    });
+  }
+  out.sort((a, b) => a.label.localeCompare(b.label));
+  return out;
+}
+
+// CC stores plugins at:
+//   ~/.claude/plugins/cache/<marketplace>/<plugin>/<version>/…
+// The user-meaningful id is `<plugin>` (3 segments after `plugins`).
+// Fall back to `<marketplace>/<plugin>` shapes for older layouts that
+// omit the cache or version level, then to a stable sentinel.
+function pluginIdFromPath(absPath: string): string {
+  const segs = absPath.split(/[/\\]/).filter(Boolean);
+  const idx = segs.lastIndexOf("plugins");
+  if (idx === -1) return "(unknown plugin)";
+  // cache/<marketplace>/<plugin>/<version>/…  → segs[idx + 3]
+  if (segs[idx + 1] === "cache" && segs.length > idx + 3) {
+    return segs[idx + 3];
+  }
+  // Older: plugins/<marketplace>/<plugin>/…
+  if (segs.length > idx + 2) return segs[idx + 2];
+  // Even older: plugins/<plugin>/…
+  if (segs.length > idx + 1) return segs[idx + 1];
+  return "(unknown plugin)";
+}
+
+function isManifestLike(f: ConfigFileNodeDto): boolean {
+  const base = fileName(f.display_path).toLowerCase();
+  return base === "plugin.json" || base === "manifest.json";
+}
+
+// ---------- Scope label cleanup ---------------------------------------
+//
+// Backend labels carry their provenance ("User (~/.claude)"). In the
+// redesigned tree the section structure already conveys that, so the
+// scope row should read as a short name; the full path moves into the
+// row's `title` tooltip (set by the backend-provided `abs_path` at the
+// file-row level). This purely cosmetic map keeps labels consistent.
+function cleanScopeLabel(label: string): string {
+  // Exact rewrites first — cheaper and more predictable than regexes.
+  const exact: Record<string, string> = {
+    "User (~/.claude)": "User",
+    "Project (cwd/.claude)": "Project",
+    "Local (settings.local.json + CLAUDE.local.md)": "Local",
+    "MCP (.mcp.json walk)": "MCP walk",
+    "Policy (managed-settings)": "Managed policy",
+    "Memory (this project)": "Memory",
+    "Memory (other projects)": "Other projects memory",
+    "Global config (redacted)": "Global config",
+    Plugins: "Plugins",
+  };
+  if (label in exact) return exact[label];
+  // `CLAUDE.md — /some/dir` and `CLAUDE.md — /some/dir (cwd)` stay as-is:
+  // the per-directory path is the only way to tell duplicates apart.
+  return label;
 }
 
 function fileName(path: string): string {
@@ -1354,4 +2089,274 @@ function SearchResultsPane({
       ))}
     </div>
   );
+}
+
+// ---------- Anchor picker --------------------------------------------
+//
+// The anchor determines which project (or none) the Config page walks.
+// It's the semantic pivot of the whole view — when the anchor changes,
+// Project / Local / MCP-walk / CLAUDE.md-walk / Effective scopes all
+// rebuild. Rendered as a dropdown next to Refresh in the header.
+//
+// Menu contents:
+//   Recent (from `api.projectList()`, reachable only, most-recent first)
+//   Pick folder…   — native directory picker
+//   Global only    — explicitly drop every project scope
+
+function AnchorPicker({
+  anchor,
+  recent,
+  onGlobal,
+  onFolder,
+  onPickFolder,
+}: {
+  anchor: ConfigAnchor;
+  recent: ProjectInfo[] | null;
+  onGlobal: () => void;
+  onFolder: (path: string) => void;
+  onPickFolder: () => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const rootRef = useRef<HTMLDivElement | null>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    const onDocClick = (e: MouseEvent) => {
+      if (!rootRef.current) return;
+      if (!rootRef.current.contains(e.target as Node)) setOpen(false);
+    };
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setOpen(false);
+    };
+    document.addEventListener("mousedown", onDocClick);
+    document.addEventListener("keydown", onKey);
+    return () => {
+      document.removeEventListener("mousedown", onDocClick);
+      document.removeEventListener("keydown", onKey);
+    };
+  }, [open]);
+
+  // Reachable, unique-by-path, most-recent first. Cap to keep the menu
+  // a single scroll.
+  const reachable = useMemo<ProjectInfo[]>(() => {
+    if (!recent) return [];
+    const seen = new Set<string>();
+    const out: ProjectInfo[] = [];
+    for (const p of recent) {
+      if (!p.is_reachable) continue;
+      if (seen.has(p.original_path)) continue;
+      seen.add(p.original_path);
+      out.push(p);
+      if (out.length >= 12) break;
+    }
+    return out;
+  }, [recent]);
+
+  const isGlobal = anchor.kind === "global";
+
+  return (
+    <div ref={rootRef} style={{ position: "relative" }}>
+      <button
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        className="pm-focus"
+        aria-haspopup="menu"
+        aria-expanded={open}
+        title={isGlobal ? "No project anchored" : anchor.path}
+        style={{
+          display: "flex",
+          alignItems: "center",
+          gap: "var(--sp-6)",
+          padding: "var(--sp-4) var(--sp-10)",
+          borderRadius: "var(--r-2)",
+          border: "var(--bw-hair) solid var(--line)",
+          background: "var(--bg)",
+          color: "var(--fg)",
+          fontSize: "var(--fs-xs)",
+          cursor: "pointer",
+          maxWidth: "240px",
+        }}
+      >
+        <Glyph g={isGlobal ? NF.globe : NF.folder} color="var(--fg-muted)" />
+        <span
+          style={{
+            overflow: "hidden",
+            textOverflow: "ellipsis",
+            whiteSpace: "nowrap",
+          }}
+        >
+          {anchorLabel(anchor)}
+        </span>
+        <Glyph g={NF.chevronD} color="var(--fg-faint)" />
+      </button>
+      {open && (
+        <div
+          role="menu"
+          aria-label="Project anchor"
+          style={{
+            position: "absolute",
+            top: "calc(100% + var(--sp-4))",
+            right: 0,
+            zIndex: 10,
+            minWidth: "280px",
+            maxHeight: "60vh",
+            overflowY: "auto",
+            background: "var(--bg-raised)",
+            border: "var(--bw-hair) solid var(--line-strong)",
+            borderRadius: "var(--r-2)",
+            boxShadow: "var(--shadow-popover)",
+            padding: "var(--sp-4) 0",
+          }}
+        >
+          {reachable.length > 0 && (
+            <AnchorMenuGroup label="Recent projects">
+              {reachable.map((p) => (
+                <AnchorMenuItem
+                  key={p.original_path}
+                  selected={
+                    anchor.kind === "folder" && anchor.path === p.original_path
+                  }
+                  glyph={NF.folder}
+                  title={p.original_path}
+                  subtitle={p.original_path}
+                  onClick={() => {
+                    onFolder(p.original_path);
+                    setOpen(false);
+                  }}
+                >
+                  {baseName(p.original_path)}
+                </AnchorMenuItem>
+              ))}
+            </AnchorMenuGroup>
+          )}
+          <div
+            role="separator"
+            aria-orientation="horizontal"
+            style={{
+              height: "var(--bw-hair)",
+              background: "var(--line)",
+              margin: "var(--sp-4) 0",
+            }}
+          />
+          <AnchorMenuItem
+            glyph={NF.folderOpen}
+            onClick={() => {
+              setOpen(false);
+              onPickFolder();
+            }}
+          >
+            Pick folder…
+          </AnchorMenuItem>
+          <AnchorMenuItem
+            selected={isGlobal}
+            glyph={NF.globe}
+            subtitle="Hide project / local / CLAUDE.md-walk scopes"
+            onClick={() => {
+              onGlobal();
+              setOpen(false);
+            }}
+          >
+            Global only
+          </AnchorMenuItem>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function AnchorMenuGroup({
+  label,
+  children,
+}: {
+  label: string;
+  children: React.ReactNode;
+}) {
+  return (
+    <div>
+      <div
+        className="mono-cap"
+        style={{
+          padding: "var(--sp-6) var(--sp-12) var(--sp-4)",
+          fontSize: "var(--fs-2xs)",
+          color: "var(--fg-faint)",
+          letterSpacing: "0.08em",
+          textTransform: "uppercase",
+        }}
+      >
+        {label}
+      </div>
+      {children}
+    </div>
+  );
+}
+
+function AnchorMenuItem({
+  selected,
+  glyph,
+  subtitle,
+  title,
+  onClick,
+  children,
+}: {
+  selected?: boolean;
+  glyph: NfIcon;
+  subtitle?: string;
+  title?: string;
+  onClick: () => void;
+  children: React.ReactNode;
+}) {
+  return (
+    <button
+      type="button"
+      role="menuitem"
+      onClick={onClick}
+      className="pm-focus"
+      title={title}
+      style={{
+        display: "flex",
+        alignItems: "center",
+        gap: "var(--sp-8)",
+        width: "100%",
+        padding: "var(--sp-6) var(--sp-12)",
+        background: selected ? "var(--bg-active)" : "transparent",
+        color: selected ? "var(--accent-ink)" : "var(--fg)",
+        border: "none",
+        cursor: "pointer",
+        fontSize: "var(--fs-xs)",
+        textAlign: "left",
+      }}
+    >
+      <Glyph g={glyph} color="var(--fg-muted)" />
+      <div style={{ display: "flex", flexDirection: "column", minWidth: 0, flex: 1 }}>
+        <span
+          style={{
+            overflow: "hidden",
+            textOverflow: "ellipsis",
+            whiteSpace: "nowrap",
+          }}
+        >
+          {children}
+        </span>
+        {subtitle && (
+          <span
+            style={{
+              fontSize: "var(--fs-2xs)",
+              color: "var(--fg-faint)",
+              overflow: "hidden",
+              textOverflow: "ellipsis",
+              whiteSpace: "nowrap",
+            }}
+          >
+            {subtitle}
+          </span>
+        )}
+      </div>
+      {selected && <Glyph g={NF.check} color="var(--accent-ink)" />}
+    </button>
+  );
+}
+
+function baseName(path: string): string {
+  const m = path.match(/([^/\\]+)[/\\]?$/);
+  return m ? m[1] : path;
 }

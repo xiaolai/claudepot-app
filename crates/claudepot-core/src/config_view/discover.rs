@@ -483,7 +483,15 @@ pub fn collect_plugins() -> (Vec<FileNode>, Vec<crate::config_view::plugin_base:
 
     let home = claude_config_dir();
     let enabled_specs = load_enabled_plugin_specs(&home);
-    let root = home.join("plugins").join("repos");
+    // On-disk layout:
+    //   ~/.claude/plugins/cache/<marketplace>/<plugin>/<version>/
+    //       ├── .claude-plugin/plugin.json  (or plugin.json)
+    //       ├── agents/  skills/  commands/  …
+    // Older docs referenced a `repos` directory — CC switched to
+    // `cache` with per-version subdirs. We iterate three levels
+    // and treat each version dir as an independent plugin root so
+    // side-by-side version installs stay distinct in the UI.
+    let root = home.join("plugins").join("cache");
     let mut files = Vec::new();
     let mut plugins = Vec::new();
     let Ok(rd) = std::fs::read_dir(&root) else {
@@ -497,53 +505,132 @@ pub fn collect_plugins() -> (Vec<FileNode>, Vec<crate::config_view::plugin_base:
             continue;
         };
         for plug in plug_rd.flatten() {
-            let plug_root = plug.path();
-            if !plug_root.is_dir() {
+            if !plug.path().is_dir() {
                 continue;
             }
-            let manifest = match load_plugin_manifest(&plug_root) {
-                Ok(m) => m,
-                Err(_) => continue,
+            let Ok(version_rd) = std::fs::read_dir(plug.path()) else {
+                continue;
             };
-            let settings = load_plugin_settings(&plug_root);
-            let id = plug
-                .file_name()
-                .to_string_lossy()
-                .into_owned();
-            let marketplace_name = marketplace
-                .file_name()
-                .to_string_lossy()
-                .into_owned();
+            for version in version_rd.flatten() {
+                let plug_root = version.path();
+                if !plug_root.is_dir() {
+                    continue;
+                }
+                let manifest = match load_plugin_manifest(&plug_root) {
+                    Ok(m) => m,
+                    Err(_) => continue,
+                };
+                let settings = load_plugin_settings(&plug_root);
+                let plug_name = plug.file_name().to_string_lossy().into_owned();
+                let version_name = version.file_name().to_string_lossy().into_owned();
+                let marketplace_name =
+                    marketplace.file_name().to_string_lossy().into_owned();
+                // Plugin id includes the version so two installs of
+                // the same plugin (e.g. upgrade path) don't collide
+                // in the id space. Friendly display stays
+                // `<plugin>@<marketplace>` — version shows on hover
+                // or in details.
+                let id = if version_name == "unknown" {
+                    plug_name.clone()
+                } else {
+                    format!("{plug_name}-{version_name}")
+                };
 
-            // Emit the manifest node for UI.
-            let manifest_path = if plug_root.join("plugin.json").is_file() {
-                plug_root.join("plugin.json")
-            } else {
-                plug_root.join(".claude-plugin").join("plugin.json")
-            };
-            if let Some(f) = maybe_file(
-                manifest_path,
-                Kind::Plugin,
-                Scope::Plugin {
+                let plugin_scope = Scope::Plugin {
                     id: id.clone(),
                     source: crate::config_view::model::PluginSource::Marketplace {
-                        spec: format!("{id}@{marketplace_name}"),
+                        spec: format!("{plug_name}@{marketplace_name}"),
                     },
-                },
-            ) {
-                files.push(f);
-            }
+                };
 
-            let spec = format!("{id}@{marketplace_name}");
-            let enabled = enabled_specs.contains(&spec) || enabled_specs.contains(&id);
-            plugins.push(Plugin {
-                id: id.clone(),
-                root: plug_root,
-                manifest,
-                enabled,
-                settings,
-                source: PluginSourceDisplay::Marketplace { spec },
-            });
+                // Emit the manifest node for UI.
+                let manifest_path = if plug_root.join("plugin.json").is_file() {
+                    plug_root.join("plugin.json")
+                } else {
+                    plug_root.join(".claude-plugin").join("plugin.json")
+                };
+                if let Some(f) = maybe_file(
+                    manifest_path,
+                    Kind::Plugin,
+                    plugin_scope.clone(),
+                ) {
+                    files.push(f);
+                }
+
+                // Walk the plugin's content directories with the same
+                // rules CC uses for user / project scopes — agents,
+                // skills, commands, output-styles, workflows, rules.
+                // Each produces FileNodes tagged with this plugin's
+                // scope so the UI can bucket them under the correct
+                // bundle, and so the cross-scope Definitions view
+                // (which filters plugins out) stays accurate.
+                files.extend(collect_dir_of_kind(
+                    &plug_root.join("agents"),
+                    Kind::Agent,
+                    plugin_scope.clone(),
+                    true,
+                ));
+                files.extend(collect_skills_dir(
+                    &plug_root.join("skills"),
+                    plugin_scope.clone(),
+                ));
+                files.extend(collect_dir_of_kind(
+                    &plug_root.join("commands"),
+                    Kind::Command,
+                    plugin_scope.clone(),
+                    true,
+                ));
+                files.extend(collect_dir_of_kind(
+                    &plug_root.join("output-styles"),
+                    Kind::OutputStyle,
+                    plugin_scope.clone(),
+                    true,
+                ));
+                files.extend(collect_dir_of_kind(
+                    &plug_root.join("workflows"),
+                    Kind::Workflow,
+                    plugin_scope.clone(),
+                    true,
+                ));
+                files.extend(collect_dir_of_kind(
+                    &plug_root.join("rules"),
+                    Kind::Rule,
+                    plugin_scope.clone(),
+                    true,
+                ));
+
+                // Plugin-shipped `settings.json` is real and mergeable
+                // (see plugin_base.rs); surface it so users can inspect.
+                if let Some(f) = maybe_file(
+                    plug_root.join("settings.json"),
+                    Kind::Settings,
+                    plugin_scope.clone(),
+                ) {
+                    files.push(f);
+                }
+                // `hooks.json` / `hooks/<name>.json` aren't standard
+                // across every plugin yet — honor them when present
+                // so packagers using them surface correctly.
+                if let Some(f) = maybe_file(
+                    plug_root.join("hooks.json"),
+                    Kind::Hook,
+                    plugin_scope.clone(),
+                ) {
+                    files.push(f);
+                }
+
+                let spec = format!("{plug_name}@{marketplace_name}");
+                let enabled =
+                    enabled_specs.contains(&spec) || enabled_specs.contains(&plug_name);
+                plugins.push(Plugin {
+                    id,
+                    root: plug_root,
+                    manifest,
+                    enabled,
+                    settings,
+                    source: PluginSourceDisplay::Marketplace { spec },
+                });
+            }
         }
     }
     (files, plugins)
@@ -875,12 +962,25 @@ fn expand_includes(
 
 /// Build the full read-only `ConfigTree` anchored at `cwd`. Produces
 /// scope roots in the fixed rank defined by plan §11.5.
-pub fn assemble_tree(cwd: &Path) -> ConfigTree {
-    let project_root =
-        crate::project_memory::find_canonical_git_root(cwd).unwrap_or_else(|| cwd.to_path_buf());
+///
+/// When `global_only` is true, every cwd-dependent scope is skipped —
+/// Project, Local, `.mcp.json` walk, `CLAUDE.md` walk, and
+/// Memory-current are omitted. `cwd` is still used for the returned
+/// tree's display path (callers typically pass `$HOME`) but nothing
+/// is read from it. This is the mode used when the Config page has
+/// no project anchor selected.
+pub fn assemble_tree(cwd: &Path, global_only: bool) -> ConfigTree {
+    let project_root = if global_only {
+        cwd.to_path_buf()
+    } else {
+        crate::project_memory::find_canonical_git_root(cwd).unwrap_or_else(|| cwd.to_path_buf())
+    };
 
-    let (memory_files, memory_slug, memory_slug_lossy) =
-        collect_memory_current(&project_root);
+    let (memory_files, memory_slug, memory_slug_lossy) = if global_only {
+        (Vec::new(), String::new(), false)
+    } else {
+        collect_memory_current(&project_root)
+    };
 
     let mut scopes: Vec<ScopeNode> = Vec::new();
 
@@ -896,6 +996,9 @@ pub fn assemble_tree(cwd: &Path) -> ConfigTree {
     let mut user_files = collect_user();
     // User memory can always @include external files
     // (`claudemd.ts:833` — `includeExternal: true` regardless of flag).
+    // Includes may reference absolute paths; resolve against `cwd` even
+    // in global mode (no effect when nothing references cwd-relative
+    // paths).
     expand_includes(&mut user_files, cwd, /* is_user_memory */ true);
     if !user_files.is_empty() {
         scopes.push(scope_node(
@@ -906,68 +1009,71 @@ pub fn assemble_tree(cwd: &Path) -> ConfigTree {
         ));
     }
 
-    let mut project_files = collect_project(cwd);
-    project_files.extend(collect_rules_walk(cwd));
-    expand_includes(&mut project_files, cwd, /* is_user_memory */ false);
-    if !project_files.is_empty() {
-        scopes.push(scope_node(
-            "scope:project",
-            Scope::Project,
-            "Project (cwd/.claude)",
-            project_files.into_iter().map(Node::File).collect(),
-        ));
-    }
+    if !global_only {
+        let mut project_files = collect_project(cwd);
+        project_files.extend(collect_rules_walk(cwd));
+        expand_includes(&mut project_files, cwd, /* is_user_memory */ false);
+        if !project_files.is_empty() {
+            scopes.push(scope_node(
+                "scope:project",
+                Scope::Project,
+                "Project (cwd/.claude)",
+                project_files.into_iter().map(Node::File).collect(),
+            ));
+        }
 
-    let mut local_files = collect_local(cwd);
-    // CLAUDE.local.md at every ancestor to FS root, collapsed into the
-    // single Local scope (`claudemd.ts:922-933`). One entry per file.
-    let local_md = collect_claudemd_local_walk(cwd);
-    for (_dir, _role, f) in local_md {
-        local_files.push(f);
-    }
-    expand_includes(&mut local_files, cwd, /* is_user_memory */ false);
-    if !local_files.is_empty() {
-        scopes.push(scope_node(
-            "scope:local",
-            Scope::Local,
-            "Local (settings.local.json + CLAUDE.local.md)",
-            local_files.into_iter().map(Node::File).collect(),
-        ));
-    }
+        let mut local_files = collect_local(cwd);
+        // CLAUDE.local.md at every ancestor to FS root, collapsed into
+        // the single Local scope (`claudemd.ts:922-933`). One entry per
+        // file.
+        let local_md = collect_claudemd_local_walk(cwd);
+        for (_dir, _role, f) in local_md {
+            local_files.push(f);
+        }
+        expand_includes(&mut local_files, cwd, /* is_user_memory */ false);
+        if !local_files.is_empty() {
+            scopes.push(scope_node(
+                "scope:local",
+                Scope::Local,
+                "Local (settings.local.json + CLAUDE.local.md)",
+                local_files.into_iter().map(Node::File).collect(),
+            ));
+        }
 
-    // `.mcp.json` at every ancestor to FS root
-    // (`services/mcp/config.ts:914-920`). One scope for all of them —
-    // dedicated label so users can tell it apart from other Project
-    // settings sources.
-    let mcp_files = collect_mcp_json_walk(cwd);
-    if !mcp_files.is_empty() {
-        scopes.push(scope_node(
-            "scope:mcp-project",
-            Scope::Project,
-            "MCP (.mcp.json walk)",
-            mcp_files.into_iter().map(Node::File).collect(),
-        ));
-    }
+        // `.mcp.json` at every ancestor to FS root
+        // (`services/mcp/config.ts:914-920`). One scope for all of them
+        // — dedicated label so users can tell it apart from other
+        // Project settings sources.
+        let mcp_files = collect_mcp_json_walk(cwd);
+        if !mcp_files.is_empty() {
+            scopes.push(scope_node(
+                "scope:mcp-project",
+                Scope::Project,
+                "MCP (.mcp.json walk)",
+                mcp_files.into_iter().map(Node::File).collect(),
+            ));
+        }
 
-    let claudemd = collect_claudemd_walk(cwd);
-    for (dir, role, f) in claudemd {
-        let label = format!(
-            "CLAUDE.md — {}{}",
-            dir.display(),
-            if matches!(role, ClaudeMdRole::Cwd) { " (cwd)" } else { "" },
-        );
-        // Root file plus its @include chain. CC processes this file as
-        // `Project` memory type (`claudemd.ts:887-895`) — use the
-        // non-user external-gate.
-        let root_id = f.id.clone();
-        let mut bucket = vec![f];
-        expand_includes(&mut bucket, cwd, /* is_user_memory */ false);
-        scopes.push(scope_node(
-            &format!("scope:claudemd:{}", root_id),
-            Scope::ClaudeMdDir { dir: dir.clone(), role: role.clone() },
-            &label,
-            bucket.into_iter().map(Node::File).collect::<Vec<_>>(),
-        ));
+        let claudemd = collect_claudemd_walk(cwd);
+        for (dir, role, f) in claudemd {
+            let label = format!(
+                "CLAUDE.md — {}{}",
+                dir.display(),
+                if matches!(role, ClaudeMdRole::Cwd) { " (cwd)" } else { "" },
+            );
+            // Root file plus its @include chain. CC processes this file
+            // as `Project` memory type (`claudemd.ts:887-895`) — use
+            // the non-user external-gate.
+            let root_id = f.id.clone();
+            let mut bucket = vec![f];
+            expand_includes(&mut bucket, cwd, /* is_user_memory */ false);
+            scopes.push(scope_node(
+                &format!("scope:claudemd:{}", root_id),
+                Scope::ClaudeMdDir { dir: dir.clone(), role: role.clone() },
+                &label,
+                bucket.into_iter().map(Node::File).collect::<Vec<_>>(),
+            ));
+        }
     }
 
     let policy_files = collect_policy_managed_files();
@@ -1008,6 +1114,9 @@ pub fn assemble_tree(cwd: &Path) -> ConfigTree {
         ));
     }
 
+    // Memory-other walks every *sibling* project under the auto-memory
+    // base dir — not cwd-dependent beyond excluding the current slug,
+    // so it stays visible in global mode.
     let other_slugs = crate::config_view::memory_other::scan_other_memory_dirs(&memory_slug);
     if !other_slugs.is_empty() {
         let files: Vec<FileNode> = other_slugs
@@ -1030,6 +1139,9 @@ pub fn assemble_tree(cwd: &Path) -> ConfigTree {
         memory_slug,
         memory_slug_lossy,
         cc_version_hint: None,
+        // Enterprise managed-mcp lockout is a user-wide condition (same
+        // `managed-mcp.json` applies to every project), so compute it
+        // in both modes.
         enterprise_mcp_lockout: managed_mcp_is_nonempty(),
     }
 }
@@ -1158,7 +1270,7 @@ mod tests {
     #[test]
     fn assemble_tree_over_empty_dir_is_fine() {
         let td = TempDir::new().unwrap();
-        let tree = assemble_tree(td.path());
+        let tree = assemble_tree(td.path(), false);
         // No panics; ConfigTree built.
         assert_eq!(tree.cwd, td.path());
     }

@@ -1,4 +1,10 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import {
+  type KeyboardEvent,
+  useCallback,
+  useEffect,
+  useMemo,
+  useState,
+} from "react";
 import { api } from "../api";
 import { Button } from "../components/primitives/Button";
 import { ConfirmDialog } from "../components/ConfirmDialog";
@@ -13,7 +19,7 @@ import { useToasts } from "../hooks/useToasts";
 import { NF } from "../icons";
 import { ScreenHeader } from "../shell/ScreenHeader";
 import type {
-  AccountSummary,
+  AccountSummaryBasic,
   ApiKeySummary,
   OauthTokenSummary,
 } from "../types";
@@ -28,7 +34,7 @@ export function KeysSection() {
   const { toasts, pushToast, dismissToast } = useToasts();
   const [apiKeys, setApiKeys] = useState<ApiKeySummary[]>([]);
   const [oauthTokens, setOauthTokens] = useState<OauthTokenSummary[]>([]);
-  const [accounts, setAccounts] = useState<AccountSummary[]>([]);
+  const [accounts, setAccounts] = useState<AccountSummaryBasic[]>([]);
   const [loading, setLoading] = useState(true);
   const [adding, setAdding] = useState(false);
   const [usageModalFor, setUsageModalFor] = useState<OauthTokenSummary | null>(
@@ -73,10 +79,15 @@ export function KeysSection() {
   const refresh = useCallback(async () => {
     setLoading(true);
     try {
+      // Keys only needs identity fields (uuid → email) to label each
+      // row's owner. The full `accountList` issues one macOS Keychain
+      // syscall per account for token-health computation and runs a
+      // reconcile pass on top — that stall was what made this tab
+      // feel semi-frozen on mount. Basic variant is pure sqlite.
       const [api_, oauth, accts] = await Promise.all([
         api.keyApiList(),
         api.keyOauthList(),
-        api.accountList(),
+        api.accountListBasic(),
       ]);
       setApiKeys(api_);
       setOauthTokens(oauth);
@@ -168,6 +179,28 @@ export function KeysSection() {
   }, [pendingRemoval, pushToast, refresh]);
 
 
+  const onRename = useCallback(
+    async (kind: "api" | "oauth", uuid: string, label: string) => {
+      try {
+        if (kind === "api") await api.keyApiRename(uuid, label);
+        else await api.keyOauthRename(uuid, label);
+        if (kind === "api") {
+          setApiKeys((rows) =>
+            rows.map((r) => (r.uuid === uuid ? { ...r, label } : r)),
+          );
+        } else {
+          setOauthTokens((rows) =>
+            rows.map((r) => (r.uuid === uuid ? { ...r, label } : r)),
+          );
+        }
+      } catch (e) {
+        pushToast("error", `Rename failed: ${e}`);
+        throw e;
+      }
+    },
+    [pushToast],
+  );
+
   const added = useCallback(
     (kind: "api" | "oauth") => {
       pushToast(
@@ -250,6 +283,7 @@ export function KeysSection() {
               .catch((e) => pushToast("error", `${row.label}: ${e}`))
           }
           onRemove={(row) => setPendingRemoval({ kind: "api", row })}
+          onRename={(row, label) => onRename("api", row.uuid, label)}
         />
 
         <OauthTokensTable
@@ -261,6 +295,7 @@ export function KeysSection() {
           onCopyShell={(row) => void onCopyShell(row)}
           onRemove={(row) => setPendingRemoval({ kind: "oauth", row })}
           onOpenUsage={setUsageModalFor}
+          onRename={(row, label) => onRename("oauth", row.uuid, label)}
         />
       </main>
 
@@ -338,12 +373,14 @@ function ApiKeysTable({
   onCopy,
   onProbe,
   onRemove,
+  onRename,
 }: {
   rows: ApiKeySummary[];
   loading: boolean;
   onCopy: (row: ApiKeySummary) => void;
   onProbe: (row: ApiKeySummary) => void;
   onRemove: (row: ApiKeySummary) => void;
+  onRename: (row: ApiKeySummary, label: string) => Promise<void>;
 }) {
   return (
     <section>
@@ -380,7 +417,10 @@ function ApiKeysTable({
             {rows.map((row) => (
               <Tr key={row.uuid}>
                 <Td>
-                  <strong style={{ fontWeight: 600 }}>{row.label}</strong>
+                  <EditableLabel
+                    value={row.label}
+                    onSubmit={(label) => onRename(row, label)}
+                  />
                 </Td>
                 <Td>
                   {row.account_email ? (
@@ -447,6 +487,7 @@ function OauthTokensTable({
   onCopyShell,
   onRemove,
   onOpenUsage,
+  onRename,
 }: {
   rows: OauthTokenSummary[];
   loading: boolean;
@@ -454,6 +495,7 @@ function OauthTokensTable({
   onCopyShell: (row: OauthTokenSummary) => void;
   onRemove: (row: OauthTokenSummary) => void;
   onOpenUsage: (row: OauthTokenSummary) => void;
+  onRename: (row: OauthTokenSummary, label: string) => Promise<void>;
 }) {
   return (
     <section>
@@ -501,7 +543,10 @@ function OauthTokensTable({
             {rows.map((row) => (
               <Tr key={row.uuid}>
                 <Td>
-                  <strong style={{ fontWeight: 600 }}>{row.label}</strong>
+                  <EditableLabel
+                    value={row.label}
+                    onSubmit={(label) => onRename(row, label)}
+                  />
                 </Td>
                 <Td>
                   <button
@@ -588,6 +633,98 @@ function DaysLeftChip({ daysRemaining }: { daysRemaining: number }) {
     <Tag tone="neutral" glyph={NF.clock}>
       {daysRemaining}d
     </Tag>
+  );
+}
+
+/* ──────────────────────────────────────────────────────────── */
+/*                         EditableLabel                        */
+/* ──────────────────────────────────────────────────────────── */
+
+/** Always-present `<input>` that masquerades as text until focused.
+ *  Font, color, padding, and border-bottom are reserved identically
+ *  in both idle and edit states — focus only swaps the border-bottom
+ *  color from transparent to accent, so the row does not shift by a
+ *  single pixel. Blur commits; Enter blurs; Esc reverts then blurs.
+ *  Empty/whitespace is treated as a no-op (backend rejects it and
+ *  a blank label is never useful). */
+function EditableLabel({
+  value,
+  onSubmit,
+}: {
+  value: string;
+  onSubmit: (label: string) => Promise<void>;
+}) {
+  const [draft, setDraft] = useState(value);
+  const [focused, setFocused] = useState(false);
+  const [busy, setBusy] = useState(false);
+
+  // Prop changes (parent-driven rename, refresh) win over local draft
+  // whenever the field is not being actively edited.
+  useEffect(() => {
+    if (!focused) setDraft(value);
+  }, [value, focused]);
+
+  const commit = async () => {
+    const next = draft.trim();
+    if (!next || next === value) {
+      setDraft(value);
+      return;
+    }
+    setBusy(true);
+    try {
+      await onSubmit(next);
+    } catch {
+      setDraft(value);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const onKeyDown = (e: KeyboardEvent<HTMLInputElement>) => {
+    if (e.key === "Enter") {
+      e.preventDefault();
+      e.currentTarget.blur();
+    } else if (e.key === "Escape") {
+      e.preventDefault();
+      setDraft(value);
+      // blur on next frame so the reverted draft is what `commit`
+      // sees (and therefore early-returns).
+      const el = e.currentTarget;
+      requestAnimationFrame(() => el.blur());
+    }
+  };
+
+  return (
+    <input
+      value={draft}
+      disabled={busy}
+      onChange={(e) => setDraft(e.target.value)}
+      onFocus={(e) => {
+        setFocused(true);
+        e.currentTarget.select();
+      }}
+      onBlur={() => {
+        setFocused(false);
+        void commit();
+      }}
+      onKeyDown={onKeyDown}
+      aria-label="Key label"
+      style={{
+        width: "100%",
+        font: "inherit",
+        fontWeight: 600,
+        color: "inherit",
+        background: "transparent",
+        border: 0,
+        borderBottom: `var(--bw-hair) solid ${
+          focused ? "var(--accent-border)" : "transparent"
+        }`,
+        padding: 0,
+        margin: 0,
+        outline: "none",
+        cursor: "text",
+      }}
+    />
   );
 }
 

@@ -3,10 +3,28 @@
 //! Per `.claude/rules/architecture.md`, NO business logic lives here. Each
 //! command opens the store, calls a core function, and serializes the result.
 //! Errors become user-facing strings at this boundary.
+//!
+//! # Threading policy
+//!
+//! **Every `#[tauri::command]` handler in this file is declared `async fn`.**
+//! Tauri 2 dispatches sync (`pub fn`) handlers on the main thread — the same
+//! thread that drives the OS event loop and serves the webview. Any blocking
+//! I/O in a sync handler (SQLite open/read/write, macOS Keychain lookup,
+//! filesystem stat, JSONL scan, HTTP call) therefore freezes the entire
+//! window for the duration of the call.
+//!
+//! Declaring the handler `async fn` tells Tauri to dispatch it on a Tokio
+//! worker. The body's sync I/O then blocks that worker, not the UI thread,
+//! and the webview keeps painting. Bodies stay otherwise unchanged — no
+//! `.await` is required just to reap the threading benefit.
+//!
+//! Precedents / history: commit `4ad707e` (sessions async fix), followed by
+//! the Keys + `account_list` conversion (commit after Keys freeze report).
+//! Apply the same discipline to every new handler added here.
 
 use crate::dto;
 use crate::dto::{
-    AccountSummary, AppStatus, CcIdentity, CleanPreviewDto, DryRunPlanDto,
+    AccountSummary, AccountSummaryBasic, AppStatus, CcIdentity, CleanPreviewDto, DryRunPlanDto,
     JournalEntryDto, MoveArgsDto, ProjectDetailDto, ProjectInfoDto, ProtectedPathDto,
     RegisterOutcome, RemoveOutcome, UsageEntryDto,
 };
@@ -47,8 +65,17 @@ pub(crate) fn open_store() -> Result<AccountStore, String> {
     AccountStore::open(&db).map_err(|e| format!("store open failed: {e}"))
 }
 
+/// `async fn` is load-bearing: Tauri 2 dispatches sync `#[command] fn`
+/// handlers on the main thread (the same thread that serves the
+/// webview and runs the OS event loop). This handler does N
+/// synchronous Keychain lookups per account via `token_health` →
+/// `swap::load_private`, so a sync dispatch would freeze the window
+/// for the sum of those round-trips. `async fn` moves the body to a
+/// Tokio worker; the sync I/O blocks that worker instead of the UI
+/// thread. Same rationale / pattern as the `session_*` commands
+/// (commit 4ad707e).
 #[tauri::command]
-pub fn account_list() -> Result<Vec<AccountSummary>, String> {
+pub async fn account_list() -> Result<Vec<AccountSummary>, String> {
     let store = open_store()?;
     let accounts = store.list().map_err(|e| format!("list failed: {e}"))?;
     let summaries: Vec<AccountSummary> = accounts.iter().map(AccountSummary::from).collect();
@@ -73,8 +100,25 @@ pub fn account_list() -> Result<Vec<AccountSummary>, String> {
     Ok(summaries)
 }
 
+/// Lean sibling of [`account_list`] — returns just the sqlite-backed
+/// fields. Does NOT touch the macOS Keychain (no `token_health`
+/// calls) and does NOT run `reconcile_flags`, so it resolves in
+/// single-digit milliseconds regardless of account count.
+///
+/// Callers that only need identity resolution (uuid ↔ email) should
+/// use this. KeysSection — which labels each API key / OAuth token
+/// with its owner account — is the primary consumer; the Accounts
+/// tab / status bar / tray continue to use the full `account_list`
+/// since they actually render token health.
 #[tauri::command]
-pub fn app_status() -> Result<AppStatus, String> {
+pub async fn account_list_basic() -> Result<Vec<AccountSummaryBasic>, String> {
+    let store = open_store()?;
+    let accounts = store.list().map_err(|e| format!("list failed: {e}"))?;
+    Ok(accounts.iter().map(AccountSummaryBasic::from).collect())
+}
+
+#[tauri::command]
+pub async fn app_status() -> Result<AppStatus, String> {
     let store = open_store()?;
     let accounts = store.list().map_err(|e| format!("list failed: {e}"))?;
 
@@ -685,7 +729,7 @@ pub async fn account_login(
 /// Abort the in-flight `account_login` subprocess, if any. Safe to call
 /// when nothing is running — returns Ok either way.
 #[tauri::command]
-pub fn account_login_cancel(
+pub async fn account_login_cancel(
     state: tauri::State<'_, crate::state::LoginState>,
 ) -> Result<(), String> {
     if let Ok(guard) = state.active.lock() {
@@ -1003,14 +1047,14 @@ fn claudepot_home_dirs() -> (std::path::PathBuf, std::path::PathBuf, std::path::
 }
 
 #[tauri::command]
-pub fn project_list() -> Result<Vec<ProjectInfoDto>, String> {
+pub async fn project_list() -> Result<Vec<ProjectInfoDto>, String> {
     let cfg = paths::claude_config_dir();
     let projects = project::list_projects(&cfg).map_err(|e| format!("list failed: {e}"))?;
     Ok(projects.iter().map(ProjectInfoDto::from).collect())
 }
 
 #[tauri::command]
-pub fn project_show(path: String) -> Result<ProjectDetailDto, String> {
+pub async fn project_show(path: String) -> Result<ProjectDetailDto, String> {
     let cfg = paths::claude_config_dir();
     let detail =
         project::show_project(&cfg, &path).map_err(|e| format!("show failed: {e}"))?;
@@ -1023,9 +1067,9 @@ pub fn project_show(path: String) -> Result<ProjectDetailDto, String> {
 const DRY_RUN_SUPERSEDED: &str = "__claudepot_dry_run_superseded__";
 
 #[tauri::command]
-pub fn project_move_dry_run(
+pub async fn project_move_dry_run(
     args: MoveArgsDto,
-    registry: State<crate::state::DryRunRegistry>,
+    registry: State<'_, crate::state::DryRunRegistry>,
 ) -> Result<DryRunPlanDto, String> {
     use std::sync::atomic::Ordering;
 
@@ -1087,7 +1131,7 @@ pub fn project_move_dry_run(
 /// The pending-journals gate is NOT applied here because this is just
 /// a preview — the gate fires on `project_clean_execute`.
 #[tauri::command]
-pub fn project_clean_preview() -> Result<CleanPreviewDto, String> {
+pub async fn project_clean_preview() -> Result<CleanPreviewDto, String> {
     let cfg = paths::claude_config_dir();
     let (_journals, locks, snaps) = claudepot_home_dirs();
     let (result, orphans) = project::clean_orphans(
@@ -1130,9 +1174,9 @@ pub fn project_clean_preview() -> Result<CleanPreviewDto, String> {
 /// blocked the Tauri worker and left the UI stuck without progress
 /// for multi-GB cleans.
 #[tauri::command]
-pub fn project_clean_start(
+pub async fn project_clean_start(
     app: AppHandle,
-    ops: State<RunningOps>,
+    ops: State<'_, RunningOps>,
 ) -> Result<String, String> {
     let (journals, locks, snaps) = claudepot_home_dirs();
 
@@ -1233,15 +1277,15 @@ pub fn project_clean_start(
 /// `project_move_status`. Returns `None` after the post-terminal
 /// grace window expires.
 #[tauri::command]
-pub fn project_clean_status(
+pub async fn project_clean_status(
     op_id: String,
-    ops: State<RunningOps>,
+    ops: State<'_, RunningOps>,
 ) -> Result<Option<RunningOpInfo>, String> {
     Ok(ops.get(&op_id))
 }
 
 #[tauri::command]
-pub fn repair_list() -> Result<Vec<JournalEntryDto>, String> {
+pub async fn repair_list() -> Result<Vec<JournalEntryDto>, String> {
     let (journals, locks, _snaps) = claudepot_home_dirs();
     let entries = project_repair::list_pending_with_status(
         &journals,
@@ -1256,7 +1300,7 @@ pub fn repair_list() -> Result<Vec<JournalEntryDto>, String> {
 /// entries — excludes the `abandoned` class so the banner doesn't
 /// perpetually nag about a user-dismissed entry.
 #[tauri::command]
-pub fn repair_pending_count() -> Result<usize, String> {
+pub async fn repair_pending_count() -> Result<usize, String> {
     let (journals, locks, _snaps) = claudepot_home_dirs();
     let entries = project_repair::list_actionable(&journals, &locks, JOURNAL_NAG_THRESHOLD_SECS)
         .map_err(|e| format!("repair count failed: {e}"))?;
@@ -1269,7 +1313,7 @@ pub fn repair_pending_count() -> Result<usize, String> {
 /// banner can suppress itself for them (RunningOpStrip already shows
 /// the op live).
 #[tauri::command]
-pub fn repair_status_summary() -> Result<crate::dto::PendingJournalsSummaryDto, String> {
+pub async fn repair_status_summary() -> Result<crate::dto::PendingJournalsSummaryDto, String> {
     use claudepot_core::project_journal::JournalStatus;
     let (journals, locks, _snaps) = claudepot_home_dirs();
     let entries = project_repair::list_pending_with_status(
@@ -1493,10 +1537,10 @@ fn newest_journal_id_for(old_path: &str) -> Option<String> {
 }
 
 #[tauri::command]
-pub fn project_move_start(
+pub async fn project_move_start(
     args: MoveArgsDto,
     app: AppHandle,
-    ops: State<RunningOps>,
+    ops: State<'_, RunningOps>,
 ) -> Result<String, String> {
     let cfg = paths::claude_config_dir();
     let claude_json = dirs::home_dir().map(|h| h.join(".claude.json"));
@@ -1563,18 +1607,18 @@ pub fn project_move_start(
 }
 
 #[tauri::command]
-pub fn project_move_status(
+pub async fn project_move_status(
     op_id: String,
-    ops: State<RunningOps>,
+    ops: State<'_, RunningOps>,
 ) -> Result<Option<RunningOpInfo>, String> {
     Ok(ops.get(&op_id))
 }
 
 #[tauri::command]
-pub fn repair_resume_start(
+pub async fn repair_resume_start(
     id: String,
     app: AppHandle,
-    ops: State<RunningOps>,
+    ops: State<'_, RunningOps>,
 ) -> Result<String, String> {
     let entry = find_journal(&id)?;
     Ok(spawn_repair_op(
@@ -1586,10 +1630,10 @@ pub fn repair_resume_start(
 }
 
 #[tauri::command]
-pub fn repair_rollback_start(
+pub async fn repair_rollback_start(
     id: String,
     app: AppHandle,
-    ops: State<RunningOps>,
+    ops: State<'_, RunningOps>,
 ) -> Result<String, String> {
     let entry = find_journal(&id)?;
     Ok(spawn_repair_op(
@@ -1601,14 +1645,14 @@ pub fn repair_rollback_start(
 }
 
 #[tauri::command]
-pub fn repair_abandon(id: String) -> Result<(), String> {
+pub async fn repair_abandon(id: String) -> Result<(), String> {
     let entry = find_journal(&id)?;
     project_repair::abandon(&entry).map_err(|e| format!("abandon failed: {e}"))?;
     Ok(())
 }
 
 #[tauri::command]
-pub fn repair_break_lock(path: String) -> Result<BreakLockOutcomeDto, String> {
+pub async fn repair_break_lock(path: String) -> Result<BreakLockOutcomeDto, String> {
     let (journals, locks, _snaps) = claudepot_home_dirs();
     let lock_path = project_repair::resolve_lock_file(&locks, &path)
         .ok_or_else(|| format!("no lock file found for '{path}'"))?;
@@ -1626,7 +1670,7 @@ pub fn repair_break_lock(path: String) -> Result<BreakLockOutcomeDto, String> {
 /// referenced snapshots) without deleting anything. Used to populate
 /// the "Clean recovery artifacts" card in Maintenance.
 #[tauri::command]
-pub fn repair_preview_abandoned() -> Result<AbandonedCleanupReportDto, String> {
+pub async fn repair_preview_abandoned() -> Result<AbandonedCleanupReportDto, String> {
     let (journals, _locks, _snaps) = claudepot_home_dirs();
     let result = project_repair::preview_abandoned(&journals)
         .map_err(|e| format!("preview_abandoned failed: {e}"))?;
@@ -1638,7 +1682,7 @@ pub fn repair_preview_abandoned() -> Result<AbandonedCleanupReportDto, String> {
 /// linked to an abandoned entry; unreferenced or recent snapshots
 /// from successful ops are left alone.
 #[tauri::command]
-pub fn repair_cleanup_abandoned() -> Result<AbandonedCleanupReportDto, String> {
+pub async fn repair_cleanup_abandoned() -> Result<AbandonedCleanupReportDto, String> {
     let (journals, _locks, _snaps) = claudepot_home_dirs();
     let result = project_repair::cleanup_abandoned(&journals)
         .map_err(|e| format!("cleanup_abandoned failed: {e}"))?;
@@ -1646,7 +1690,7 @@ pub fn repair_cleanup_abandoned() -> Result<AbandonedCleanupReportDto, String> {
 }
 
 #[tauri::command]
-pub fn repair_gc(older_than_days: u64, dry_run: bool) -> Result<GcOutcomeDto, String> {
+pub async fn repair_gc(older_than_days: u64, dry_run: bool) -> Result<GcOutcomeDto, String> {
     let (journals, _locks, snapshots) = claudepot_home_dirs();
     let result = project_repair::gc(&journals, &snapshots, older_than_days, dry_run)
         .map_err(|e| format!("gc failed: {e}"))?;
@@ -1665,7 +1709,7 @@ pub fn repair_gc(older_than_days: u64, dry_run: bool) -> Result<GcOutcomeDto, St
 /// Snapshot of currently-tracked ops. UI's RunningOpStrip polls this
 /// as a backstop if events drop.
 #[tauri::command]
-pub fn running_ops_list(ops: State<RunningOps>) -> Result<Vec<RunningOpInfo>, String> {
+pub async fn running_ops_list(ops: State<'_, RunningOps>) -> Result<Vec<RunningOpInfo>, String> {
     Ok(ops.list())
 }
 
@@ -1674,7 +1718,7 @@ pub fn running_ops_list(ops: State<RunningOps>) -> Result<Vec<RunningOpInfo>, St
 // ---------------------------------------------------------------------------
 
 #[tauri::command]
-pub fn session_list_orphans() -> Result<Vec<crate::dto::OrphanedProjectDto>, String> {
+pub async fn session_list_orphans() -> Result<Vec<crate::dto::OrphanedProjectDto>, String> {
     let cfg = paths::claude_config_dir();
     let orphans = claudepot_core::session_move::detect_orphaned_projects(&cfg)
         .map_err(|e| format!("orphan scan failed: {e}"))?;
@@ -1691,7 +1735,7 @@ fn claude_json_path() -> Option<std::path::PathBuf> {
 }
 
 #[tauri::command]
-pub fn session_move(
+pub async fn session_move(
     session_id: String,
     from_cwd: String,
     to_cwd: String,
@@ -1720,7 +1764,7 @@ pub fn session_move(
 }
 
 #[tauri::command]
-pub fn session_adopt_orphan(
+pub async fn session_adopt_orphan(
     slug: String,
     target_cwd: String,
 ) -> Result<crate::dto::AdoptReportDto, String> {
@@ -1739,7 +1783,7 @@ pub fn session_adopt_orphan(
 /// it from Trash if they change their mind; the guard that the slug is
 /// valid + resolves to a real dir happens in core.
 #[tauri::command]
-pub fn session_discard_orphan(
+pub async fn session_discard_orphan(
     slug: String,
 ) -> Result<crate::dto::DiscardReportDto, String> {
     let cfg = paths::claude_config_dir();
@@ -1812,7 +1856,7 @@ pub async fn session_read_path(
 /// resolution, clock skew, or anything that defeats the guard. The
 /// next `session_list_all` call re-scans everything from cold.
 #[tauri::command]
-pub fn session_index_rebuild() -> Result<(), String> {
+pub async fn session_index_rebuild() -> Result<(), String> {
     let data_dir = paths::claudepot_data_dir();
     let db_path = data_dir.join("sessions.db");
     let idx = claudepot_core::session_index::SessionIndex::open(&db_path)
@@ -1883,7 +1927,7 @@ fn session_export_text(file_path: String, format: String) -> Result<String, Stri
 /// * Chmod failure after the fact is treated as fatal (we'd otherwise
 ///   fail open on a filesystem that silently ignored the mode bits).
 #[tauri::command]
-pub fn session_export_to_file(
+pub async fn session_export_to_file(
     file_path: String,
     format: String,
     output_path: String,
@@ -2061,7 +2105,7 @@ fn load_detail_by_path(
 /// Materialized list (defaults minus removed_defaults, plus user
 /// entries). UI renders this directly.
 #[tauri::command]
-pub fn protected_paths_list() -> Result<Vec<ProtectedPathDto>, String> {
+pub async fn protected_paths_list() -> Result<Vec<ProtectedPathDto>, String> {
     let dir = paths::claudepot_data_dir();
     let list = claudepot_core::protected_paths::list(&dir)
         .map_err(|e| format!("protected paths list failed: {e}"))?;
@@ -2072,7 +2116,7 @@ pub fn protected_paths_list() -> Result<Vec<ProtectedPathDto>, String> {
 /// badge — default-revived vs new user — to render). Validation is in
 /// core; map errors to user-facing strings here.
 #[tauri::command]
-pub fn protected_paths_add(path: String) -> Result<ProtectedPathDto, String> {
+pub async fn protected_paths_add(path: String) -> Result<ProtectedPathDto, String> {
     let dir = paths::claudepot_data_dir();
     let added = claudepot_core::protected_paths::add(&dir, &path)
         .map_err(|e| format!("{e}"))?;
@@ -2081,7 +2125,7 @@ pub fn protected_paths_add(path: String) -> Result<ProtectedPathDto, String> {
 
 /// Remove a path. Defaults are tombstoned; user entries are dropped.
 #[tauri::command]
-pub fn protected_paths_remove(path: String) -> Result<(), String> {
+pub async fn protected_paths_remove(path: String) -> Result<(), String> {
     let dir = paths::claudepot_data_dir();
     claudepot_core::protected_paths::remove(&dir, &path)
         .map_err(|e| format!("{e}"))
@@ -2091,7 +2135,7 @@ pub fn protected_paths_remove(path: String) -> Result<(), String> {
 /// `user`. Returns the resulting materialized list so the UI can
 /// refresh in one round-trip.
 #[tauri::command]
-pub fn protected_paths_reset() -> Result<Vec<ProtectedPathDto>, String> {
+pub async fn protected_paths_reset() -> Result<Vec<ProtectedPathDto>, String> {
     let dir = paths::claudepot_data_dir();
     claudepot_core::protected_paths::reset(&dir)
         .map_err(|e| format!("protected paths reset failed: {e}"))?;
@@ -2107,7 +2151,7 @@ pub fn protected_paths_reset() -> Result<Vec<ProtectedPathDto>, String> {
 /// Read the current preferences snapshot. Cheap — a clone of the
 /// mutex-guarded record.
 #[tauri::command]
-pub fn preferences_get(
+pub async fn preferences_get(
     state: tauri::State<'_, crate::preferences::PreferencesState>,
 ) -> Result<crate::preferences::Preferences, String> {
     Ok(state
@@ -2123,7 +2167,7 @@ pub fn preferences_get(
 /// `activity_enabled` from the consent modal). Returns the
 /// refreshed snapshot so the UI stays in sync.
 #[tauri::command]
-pub fn preferences_set_activity(
+pub async fn preferences_set_activity(
     state: tauri::State<'_, crate::preferences::PreferencesState>,
     live: tauri::State<'_, crate::state::LiveSessionState>,
     enabled: Option<bool>,
@@ -2164,7 +2208,7 @@ pub fn preferences_set_activity(
 /// per field" shape as `preferences_set_activity` — callers send
 /// only the fields they changed.
 #[tauri::command]
-pub fn preferences_set_notifications(
+pub async fn preferences_set_notifications(
     state: tauri::State<'_, crate::preferences::PreferencesState>,
     on_error: Option<bool>,
     on_idle_done: Option<bool>,
@@ -2195,7 +2239,7 @@ pub fn preferences_set_notifications(
 /// the call still persists the boolean so the UI round-trips cleanly,
 /// but the activation policy is a no-op.
 #[tauri::command]
-pub fn preferences_set_hide_dock_icon(
+pub async fn preferences_set_hide_dock_icon(
     #[allow(unused_variables)] app: tauri::AppHandle,
     state: tauri::State<'_, crate::preferences::PreferencesState>,
     hide: bool,
@@ -2300,8 +2344,14 @@ fn api_summary(
     }
 }
 
+/// `async fn` keeps the two SQLite opens + the email-map list off
+/// Tauri's main thread. Called alongside `key_oauth_list` and
+/// `account_list` in the KeysSection mount Promise.all — sync
+/// handlers there would serialise on the UI thread and freeze the
+/// window. See `session_list_all` / commit 4ad707e for the full
+/// rationale.
 #[tauri::command]
-pub fn key_api_list() -> Result<Vec<ApiKeySummaryDto>, String> {
+pub async fn key_api_list() -> Result<Vec<ApiKeySummaryDto>, String> {
     let keys = open_keys_store()?;
     let accounts = open_store()?;
     let email_map = account_email_map(&accounts)?;
@@ -2311,8 +2361,9 @@ pub fn key_api_list() -> Result<Vec<ApiKeySummaryDto>, String> {
     Ok(rows.into_iter().map(|k| api_summary(k, &email_map)).collect())
 }
 
+/// Sibling to `key_api_list` — same `async fn` rationale applies.
 #[tauri::command]
-pub fn key_oauth_list() -> Result<Vec<OauthTokenSummaryDto>, String> {
+pub async fn key_oauth_list() -> Result<Vec<OauthTokenSummaryDto>, String> {
     let keys = open_keys_store()?;
     let accounts = open_store()?;
     let email_map = account_email_map(&accounts)?;
@@ -2329,8 +2380,12 @@ pub fn key_oauth_list() -> Result<Vec<OauthTokenSummaryDto>, String> {
 /// was created under some account, and recording that makes the row
 /// findable by account later. The "no account" case isn't a real state
 /// we need to model.
+///
+/// `async fn` — the body opens two SQLite stores and writes the
+/// encrypted secret into `keys.db`. Keeping it off the main thread is
+/// consistent with the rest of the `key_*` family; see `key_api_list`.
 #[tauri::command]
-pub fn key_api_add(
+pub async fn key_api_add(
     label: String,
     token: String,
     account_uuid: String,
@@ -2360,8 +2415,11 @@ pub fn key_api_add(
 
 /// Add a `CLAUDE_CODE_OAUTH_TOKEN`. Account tag is required — the user
 /// picks the account they ran `claude setup-token` against.
+///
+/// `async fn` for the same reason as `key_api_add` / the rest of the
+/// `key_*` family.
 #[tauri::command]
-pub fn key_oauth_add(
+pub async fn key_oauth_add(
     label: String,
     token: String,
     account_uuid: String,
@@ -2389,31 +2447,63 @@ pub fn key_oauth_add(
     Ok(oauth_summary(row, &email_map))
 }
 
+/// `async fn` — SQLite delete + encrypted-blob wipe. See `key_api_list`.
 #[tauri::command]
-pub fn key_api_remove(uuid: String) -> Result<(), String> {
+pub async fn key_api_remove(uuid: String) -> Result<(), String> {
     let id = Uuid::parse_str(&uuid).map_err(|e| format!("bad uuid: {e}"))?;
     let keys = open_keys_store()?;
     keys.remove_api_key(id).map_err(|e| format!("{e}"))
 }
 
+/// `async fn` — sibling to `key_api_remove`.
 #[tauri::command]
-pub fn key_oauth_remove(uuid: String) -> Result<(), String> {
+pub async fn key_oauth_remove(uuid: String) -> Result<(), String> {
     let id = Uuid::parse_str(&uuid).map_err(|e| format!("bad uuid: {e}"))?;
     let keys = open_keys_store()?;
     keys.remove_oauth_token(id).map_err(|e| format!("{e}"))
 }
 
+/// Rename an API key. Label is user-owned metadata — resolution and
+/// lookup key off `uuid`, never the label, so renames are a pure
+/// display-layer change.
+#[tauri::command]
+pub async fn key_api_rename(uuid: String, label: String) -> Result<(), String> {
+    let id = Uuid::parse_str(&uuid).map_err(|e| format!("bad uuid: {e}"))?;
+    let label = label.trim();
+    if label.is_empty() {
+        return Err("label is required".to_string());
+    }
+    let keys = open_keys_store()?;
+    keys.rename_api_key(id, label).map_err(|e| format!("{e}"))
+}
+
+/// Rename an OAuth token. See `key_api_rename`.
+#[tauri::command]
+pub async fn key_oauth_rename(uuid: String, label: String) -> Result<(), String> {
+    let id = Uuid::parse_str(&uuid).map_err(|e| format!("bad uuid: {e}"))?;
+    let label = label.trim();
+    if label.is_empty() {
+        return Err("label is required".to_string());
+    }
+    let keys = open_keys_store()?;
+    keys.rename_oauth_token(id, label)
+        .map_err(|e| format!("{e}"))
+}
+
 /// Return the full API-key secret for clipboard copy. Deliberately
 /// distinct from `key_api_list` which only returns the preview.
+///
+/// `async fn` — SQLite read + decrypt. See `key_api_list`.
 #[tauri::command]
-pub fn key_api_copy(uuid: String) -> Result<String, String> {
+pub async fn key_api_copy(uuid: String) -> Result<String, String> {
     let id = Uuid::parse_str(&uuid).map_err(|e| format!("bad uuid: {e}"))?;
     let keys = open_keys_store()?;
     keys.find_api_secret(id).map_err(|e| format!("{e}"))
 }
 
+/// `async fn` — sibling to `key_api_copy`.
 #[tauri::command]
-pub fn key_oauth_copy(uuid: String) -> Result<String, String> {
+pub async fn key_oauth_copy(uuid: String) -> Result<String, String> {
     let id = Uuid::parse_str(&uuid).map_err(|e| format!("bad uuid: {e}"))?;
     let keys = open_keys_store()?;
     keys.find_oauth_secret(id).map_err(|e| format!("{e}"))
@@ -2655,20 +2745,22 @@ pub async fn session_live_unsubscribe(
     Ok(())
 }
 
-/// Synchronous snapshot of currently-live sessions. Used by the
-/// webview on first mount before the first `live-all` event arrives,
-/// and as the resync answer after a gap.
+/// One-shot snapshot of currently-live sessions. Used by the webview
+/// on first mount before the first `live-all` event arrives, and as
+/// the resync answer after a gap. Returns `Result<_, String>` because
+/// async Tauri commands that take reference inputs must return
+/// `Result` (Tauri's codegen requirement).
 #[tauri::command]
-pub fn session_live_snapshot(
+pub async fn session_live_snapshot(
     state: tauri::State<'_, crate::state::LiveSessionState>,
-) -> Vec<crate::dto::LiveSessionSummaryDto> {
-    state
+) -> Result<Vec<crate::dto::LiveSessionSummaryDto>, String> {
+    Ok(state
         .runtime
         .snapshot()
         .iter()
         .cloned()
         .map(crate::dto::LiveSessionSummaryDto::from)
-        .collect()
+        .collect())
 }
 
 /// One-session snapshot for resync after `resync_required`. Returns
@@ -2692,7 +2784,7 @@ pub async fn session_live_session_snapshot(
 /// all-zero series rather than an error — the Trends view is
 /// non-critical.
 #[tauri::command]
-pub fn activity_trends(
+pub async fn activity_trends(
     state: tauri::State<'_, crate::state::LiveSessionState>,
     from_ms: i64,
     to_ms: i64,
@@ -2787,7 +2879,7 @@ fn filter_from_dto(
 }
 
 #[tauri::command]
-pub fn session_prune_plan(
+pub async fn session_prune_plan(
     filter: crate::dto::PruneFilterDto,
 ) -> Result<crate::dto::PrunePlanDto, String> {
     let f = filter_from_dto(filter);
@@ -2797,10 +2889,10 @@ pub fn session_prune_plan(
 }
 
 #[tauri::command]
-pub fn session_prune_start(
+pub async fn session_prune_start(
     filter: crate::dto::PruneFilterDto,
     app: AppHandle,
-    ops: State<RunningOps>,
+    ops: State<'_, RunningOps>,
 ) -> Result<String, String> {
     let f = filter_from_dto(filter);
     let plan = claudepot_core::session_prune::plan_prune(&paths::claude_config_dir(), &f)
@@ -2840,7 +2932,7 @@ pub fn session_prune_start(
 }
 
 #[tauri::command]
-pub fn session_slim_plan(
+pub async fn session_slim_plan(
     path: String,
     opts: crate::dto::SlimOptsDto,
 ) -> Result<crate::dto::SlimPlanDto, String> {
@@ -2856,11 +2948,11 @@ pub fn session_slim_plan(
 }
 
 #[tauri::command]
-pub fn session_slim_start(
+pub async fn session_slim_start(
     path: String,
     opts: crate::dto::SlimOptsDto,
     app: AppHandle,
-    ops: State<RunningOps>,
+    ops: State<'_, RunningOps>,
 ) -> Result<String, String> {
     let opts = claudepot_core::session_slim::SlimOpts {
         drop_tool_results_over_bytes: opts.drop_tool_results_over_bytes,
@@ -2909,7 +3001,7 @@ pub fn session_slim_start(
 }
 
 #[tauri::command]
-pub fn session_slim_plan_all(
+pub async fn session_slim_plan_all(
     filter: crate::dto::PruneFilterDto,
     opts: crate::dto::SlimOptsDto,
 ) -> Result<crate::dto::BulkSlimPlanDto, String> {
@@ -2933,11 +3025,11 @@ pub fn session_slim_plan_all(
 }
 
 #[tauri::command]
-pub fn session_slim_start_all(
+pub async fn session_slim_start_all(
     filter: crate::dto::PruneFilterDto,
     opts: crate::dto::SlimOptsDto,
     app: AppHandle,
-    ops: State<RunningOps>,
+    ops: State<'_, RunningOps>,
 ) -> Result<String, String> {
     let filter = claudepot_core::session_prune::PruneFilter {
         older_than: filter.older_than_secs.map(std::time::Duration::from_secs),
@@ -3015,7 +3107,7 @@ pub fn session_slim_start_all(
 }
 
 #[tauri::command]
-pub fn session_trash_list(
+pub async fn session_trash_list(
     older_than_secs: Option<u64>,
 ) -> Result<crate::dto::TrashListingDto, String> {
     let filter = claudepot_core::trash::TrashFilter {
@@ -3028,7 +3120,7 @@ pub fn session_trash_list(
 }
 
 #[tauri::command]
-pub fn session_trash_restore(
+pub async fn session_trash_restore(
     entry_id: String,
     override_cwd: Option<String>,
 ) -> Result<String, String> {
@@ -3040,7 +3132,7 @@ pub fn session_trash_restore(
 }
 
 #[tauri::command]
-pub fn session_trash_empty(older_than_secs: Option<u64>) -> Result<u64, String> {
+pub async fn session_trash_empty(older_than_secs: Option<u64>) -> Result<u64, String> {
     let filter = claudepot_core::trash::TrashFilter {
         older_than: older_than_secs.map(std::time::Duration::from_secs),
         kind: None,
@@ -3145,7 +3237,7 @@ fn resolve_session_detail(
 }
 
 #[tauri::command]
-pub fn session_export_preview(
+pub async fn session_export_preview(
     target: String,
     format: ExportFormatDto,
     policy: Option<RedactionPolicyDto>,
@@ -3157,13 +3249,13 @@ pub fn session_export_preview(
 }
 
 #[tauri::command]
-pub fn session_share_gist_start(
+pub async fn session_share_gist_start(
     target: String,
     format: ExportFormatDto,
     policy: Option<RedactionPolicyDto>,
     public: bool,
     app: AppHandle,
-    ops: State<RunningOps>,
+    ops: State<'_, RunningOps>,
 ) -> Result<String, String> {
     let detail = resolve_session_detail(&target)?;
     let ext = export_extension(&format);
@@ -3278,7 +3370,7 @@ fn last4_of(s: &str) -> Option<String> {
 }
 
 #[tauri::command]
-pub fn settings_github_token_get() -> Result<GithubTokenStatus, String> {
+pub async fn settings_github_token_get() -> Result<GithubTokenStatus, String> {
     let env_override = std::env::var("GITHUB_TOKEN")
         .map(|v| !v.trim().is_empty())
         .unwrap_or(false);
@@ -3297,7 +3389,7 @@ pub fn settings_github_token_get() -> Result<GithubTokenStatus, String> {
 }
 
 #[tauri::command]
-pub fn settings_github_token_set(value: String) -> Result<GithubTokenStatus, String> {
+pub async fn settings_github_token_set(value: String) -> Result<GithubTokenStatus, String> {
     let entry = keyring::Entry::new(GH_TOKEN_SERVICE, GH_TOKEN_ENTRY)
         .map_err(|e| format!("keychain init: {e}"))?;
     entry
@@ -3314,7 +3406,7 @@ pub fn settings_github_token_set(value: String) -> Result<GithubTokenStatus, Str
 }
 
 #[tauri::command]
-pub fn settings_github_token_clear() -> Result<(), String> {
+pub async fn settings_github_token_clear() -> Result<(), String> {
     let entry = keyring::Entry::new(GH_TOKEN_SERVICE, GH_TOKEN_ENTRY)
         .map_err(|e| format!("keychain init: {e}"))?;
     // Delete is a best-effort; not-found is fine.

@@ -5,9 +5,15 @@ import { IconButton } from "../../../components/primitives/IconButton";
 import { Tag } from "../../../components/primitives/Tag";
 import { NF } from "../../../icons";
 import type { SessionChunk, SessionRow } from "../../../types";
+import {
+  formatUsd,
+  sessionCostEstimate,
+  usePriceTable,
+} from "../../../costs";
 import { formatRelativeTime, formatSize } from "../../projects/format";
 import {
   bestTimestampMs,
+  deriveSessionTitle,
   formatTokens,
   modelBadge,
   projectBasename,
@@ -59,6 +65,17 @@ export function SessionDetailHeader({
   const lastTs = bestTimestampMs(row.last_ts, row.last_modified_ms);
   const firstTs = row.first_ts ? Date.parse(row.first_ts) : null;
   const project = projectBasename(row.project_path) || row.slug;
+  const cleanTitle = deriveSessionTitle(row.first_user_prompt);
+  // API-equivalent cost for this session. The subscription user's
+  // "I'm saving $X" payoff — framed as a neutral hypothetical so we
+  // don't claim savings without knowing the user's plan.
+  const { table: priceTable } = usePriceTable();
+  const costUsd = sessionCostEstimate(priceTable, row.models, {
+    input: row.tokens.input,
+    output: row.tokens.output,
+    cache_read: row.tokens.cache_read,
+    cache_creation: row.tokens.cache_creation,
+  });
 
   return (
     <div
@@ -121,7 +138,7 @@ export function SessionDetailHeader({
         }}
         title={row.first_user_prompt ?? undefined}
       >
-        {row.first_user_prompt?.trim() ||
+        {cleanTitle ??
           (row.is_sidechain ? "Agent subsession" : "(untitled session)")}
       </h3>
 
@@ -156,6 +173,14 @@ export function SessionDetailHeader({
             title={`input ${row.tokens.input} · output ${row.tokens.output} · cache r/w ${row.tokens.cache_read}/${row.tokens.cache_creation}`}
           >
             {formatTokens(row.tokens.total)} tok
+          </Tag>
+        )}
+        {costUsd !== null && costUsd > 0 && (
+          <Tag
+            tone="neutral"
+            title={`On pay-per-call API: ${formatUsd(costUsd)}. Subscription users don't pay this — it's what the same tokens would have cost at Anthropic's standard API rates.`}
+          >
+            {formatUsd(costUsd)} on API
           </Tag>
         )}
         {row.message_count > 0 && (

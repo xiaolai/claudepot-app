@@ -1,6 +1,7 @@
 mod app_menu;
 mod commands;
 mod commands_config;
+mod commands_pricing;
 mod config_watch;
 mod dto;
 mod ops;
@@ -152,6 +153,7 @@ pub fn run() {
             commands::unlock_keychain,
             commands::reveal_in_finder,
             commands::account_list,
+            commands::account_list_basic,
             commands::cli_use,
             commands::cli_is_cc_running,
             commands::cli_clear,
@@ -216,11 +218,13 @@ pub fn run() {
             commands::key_api_list,
             commands::key_api_add,
             commands::key_api_remove,
+            commands::key_api_rename,
             commands::key_api_copy,
             commands::key_api_probe,
             commands::key_oauth_list,
             commands::key_oauth_add,
             commands::key_oauth_remove,
+            commands::key_oauth_rename,
             commands::key_oauth_copy,
             commands::key_oauth_usage_cached,
             commands::preferences_set_activity,
@@ -256,6 +260,8 @@ pub fn run() {
             commands_config::config_search_cancel,
             commands_config::config_effective_settings,
             commands_config::config_effective_mcp,
+            commands_pricing::pricing_get,
+            commands_pricing::pricing_refresh,
             config_watch::config_watch_start,
             config_watch::config_watch_stop,
         ])

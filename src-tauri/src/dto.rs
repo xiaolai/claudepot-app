@@ -45,6 +45,46 @@ pub struct AccountSummary {
     pub desktop_profile_on_disk: bool,
 }
 
+/// Keychain-free subset of [`AccountSummary`]. Returned by
+/// `account_list_basic` for callers that only need to resolve an
+/// account's identity (uuid → email/org/subscription) and don't
+/// render token health.
+///
+/// Every field here comes straight from `AccountStore` (sqlite), so
+/// the whole list resolves in a single-digit millisecond window even
+/// with dozens of accounts. The full [`AccountSummary`], by contrast,
+/// issues one macOS Keychain syscall per account (via
+/// `token_health` → `swap::load_private`) plus a `reconcile_flags`
+/// pass, which can stall the UI for hundreds of milliseconds when
+/// the Keychain is cold. Use the basic variant unless the surface
+/// actually displays token state.
+#[derive(Serialize, Clone)]
+pub struct AccountSummaryBasic {
+    pub uuid: String,
+    pub email: String,
+    pub org_name: Option<String>,
+    pub subscription_type: Option<String>,
+    pub is_cli_active: bool,
+    pub is_desktop_active: bool,
+    pub has_cli_credentials: bool,
+    pub has_desktop_profile: bool,
+}
+
+impl From<&claudepot_core::account::Account> for AccountSummaryBasic {
+    fn from(a: &claudepot_core::account::Account) -> Self {
+        Self {
+            uuid: a.uuid.to_string(),
+            email: a.email.clone(),
+            org_name: a.org_name.clone(),
+            subscription_type: a.subscription_type.clone(),
+            is_cli_active: a.is_cli_active,
+            is_desktop_active: a.is_desktop_active,
+            has_cli_credentials: a.has_cli_credentials,
+            has_desktop_profile: a.has_desktop_profile,
+        }
+    }
+}
+
 impl From<&claudepot_core::account::Account> for AccountSummary {
     fn from(a: &claudepot_core::account::Account) -> Self {
         let health =
