@@ -266,24 +266,32 @@ pub async fn repair_rollback_start(
 
 #[tauri::command]
 pub async fn repair_abandon(id: String) -> Result<(), String> {
-    let entry = find_journal(&id)?;
-    project_repair::abandon(&entry).map_err(|e| format!("abandon failed: {e}"))?;
-    Ok(())
+    tauri::async_runtime::spawn_blocking(move || {
+        let entry = find_journal(&id)?;
+        project_repair::abandon(&entry).map_err(|e| format!("abandon failed: {e}"))?;
+        Ok(())
+    })
+    .await
+    .map_err(|e| format!("abandon join: {e}"))?
 }
 
 #[tauri::command]
 pub async fn repair_break_lock(path: String) -> Result<BreakLockOutcomeDto, String> {
-    let (journals, locks, _snaps) = claudepot_home_dirs();
-    let lock_path = project_repair::resolve_lock_file(&locks, &path)
-        .ok_or_else(|| format!("no lock file found for '{path}'"))?;
-    let broken = project_repair::break_lock_with_audit(&lock_path, &journals)
-        .map_err(|e| format!("break-lock failed: {e}"))?;
-    Ok(BreakLockOutcomeDto {
-        prior_pid: broken.prior.pid,
-        prior_hostname: broken.prior.hostname,
-        prior_started: broken.prior.start_iso8601,
-        audit_path: broken.audit_path.to_string_lossy().to_string(),
+    tauri::async_runtime::spawn_blocking(move || {
+        let (journals, locks, _snaps) = claudepot_home_dirs();
+        let lock_path = project_repair::resolve_lock_file(&locks, &path)
+            .ok_or_else(|| format!("no lock file found for '{path}'"))?;
+        let broken = project_repair::break_lock_with_audit(&lock_path, &journals)
+            .map_err(|e| format!("break-lock failed: {e}"))?;
+        Ok(BreakLockOutcomeDto {
+            prior_pid: broken.prior.pid,
+            prior_hostname: broken.prior.hostname,
+            prior_started: broken.prior.start_iso8601,
+            audit_path: broken.audit_path.to_string_lossy().to_string(),
+        })
     })
+    .await
+    .map_err(|e| format!("break-lock join: {e}"))?
 }
 
 /// Preview every abandoned journal's artifacts (journal + sidecar +
@@ -291,10 +299,14 @@ pub async fn repair_break_lock(path: String) -> Result<BreakLockOutcomeDto, Stri
 /// the "Clean recovery artifacts" card in Maintenance.
 #[tauri::command]
 pub async fn repair_preview_abandoned() -> Result<AbandonedCleanupReportDto, String> {
-    let (journals, _locks, _snaps) = claudepot_home_dirs();
-    let result = project_repair::preview_abandoned(&journals)
-        .map_err(|e| format!("preview_abandoned failed: {e}"))?;
-    Ok(result.into())
+    tauri::async_runtime::spawn_blocking(|| {
+        let (journals, _locks, _snaps) = claudepot_home_dirs();
+        let result = project_repair::preview_abandoned(&journals)
+            .map_err(|e| format!("preview_abandoned failed: {e}"))?;
+        Ok(result.into())
+    })
+    .await
+    .map_err(|e| format!("preview_abandoned join: {e}"))?
 }
 
 /// Remove every abandoned journal + sidecar + its referenced
@@ -303,27 +315,35 @@ pub async fn repair_preview_abandoned() -> Result<AbandonedCleanupReportDto, Str
 /// from successful ops are left alone.
 #[tauri::command]
 pub async fn repair_cleanup_abandoned() -> Result<AbandonedCleanupReportDto, String> {
-    let (journals, _locks, _snaps) = claudepot_home_dirs();
-    let result = project_repair::cleanup_abandoned(&journals)
-        .map_err(|e| format!("cleanup_abandoned failed: {e}"))?;
-    Ok(result.into())
+    tauri::async_runtime::spawn_blocking(|| {
+        let (journals, _locks, _snaps) = claudepot_home_dirs();
+        let result = project_repair::cleanup_abandoned(&journals)
+            .map_err(|e| format!("cleanup_abandoned failed: {e}"))?;
+        Ok(result.into())
+    })
+    .await
+    .map_err(|e| format!("cleanup_abandoned join: {e}"))?
 }
 
 #[tauri::command]
 pub async fn repair_gc(older_than_days: u64, dry_run: bool) -> Result<GcOutcomeDto, String> {
-    let (journals, _locks, snapshots) = claudepot_home_dirs();
-    let result = project_repair::gc(&journals, &snapshots, older_than_days, dry_run)
-        .map_err(|e| format!("gc failed: {e}"))?;
-    Ok(GcOutcomeDto {
-        removed_journals: result.removed_journals,
-        removed_snapshots: result.removed_snapshots,
-        bytes_freed: result.bytes_freed,
-        would_remove: result
-            .would_remove
-            .into_iter()
-            .map(|p| p.to_string_lossy().to_string())
-            .collect(),
+    tauri::async_runtime::spawn_blocking(move || {
+        let (journals, _locks, snapshots) = claudepot_home_dirs();
+        let result = project_repair::gc(&journals, &snapshots, older_than_days, dry_run)
+            .map_err(|e| format!("gc failed: {e}"))?;
+        Ok(GcOutcomeDto {
+            removed_journals: result.removed_journals,
+            removed_snapshots: result.removed_snapshots,
+            bytes_freed: result.bytes_freed,
+            would_remove: result
+                .would_remove
+                .into_iter()
+                .map(|p| p.to_string_lossy().to_string())
+                .collect(),
+        })
     })
+    .await
+    .map_err(|e| format!("gc join: {e}"))?
 }
 
 /// Snapshot of currently-tracked ops. UI's RunningOpStrip polls this
