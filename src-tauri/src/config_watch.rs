@@ -96,6 +96,8 @@ pub struct FileNodeDto {
     pub summary_title: Option<String>,
     pub summary_description: Option<String>,
     pub issues: Vec<String>,
+    pub included_by: Option<String>,
+    pub include_depth: usize,
 }
 
 #[derive(Serialize, Clone, Debug)]
@@ -398,6 +400,8 @@ fn file_to_dto(f: &FileNode) -> FileNodeDto {
             .as_ref()
             .and_then(|s: &FileSummary| s.description.clone()),
         issues: f.issues.iter().map(issue_label).collect(),
+        included_by: f.included_by.as_ref().map(|p| p.display().to_string()),
+        include_depth: f.include_depth,
     }
 }
 
@@ -413,6 +417,8 @@ fn kind_label(k: &Kind) -> String {
         Kind::Agent => "agent",
         Kind::Skill => "skill",
         Kind::Command => "command",
+        Kind::OutputStyle => "output_style",
+        Kind::Workflow => "workflow",
         Kind::Rule => "rule",
         Kind::Hook => "hook",
         Kind::Memory => "memory",

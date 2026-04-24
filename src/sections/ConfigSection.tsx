@@ -37,6 +37,8 @@ const MARKDOWN_KINDS: readonly ConfigKind[] = [
   "agent",
   "skill",
   "command",
+  "output_style",
+  "workflow",
   "rule",
   "memory",
   "memory_index",
@@ -762,6 +764,7 @@ function TreeRowView({
       title={row.file.abs_path}
       issuesCount={row.file.issues.length}
       issuesTitle={row.file.issues.join("; ")}
+      includeDepth={row.file.include_depth}
     />
   );
 }
@@ -831,6 +834,7 @@ function FileRowButton({
   title,
   issuesCount,
   issuesTitle,
+  includeDepth,
 }: {
   selected: boolean;
   label: string;
@@ -838,7 +842,12 @@ function FileRowButton({
   title?: string;
   issuesCount?: number;
   issuesTitle?: string;
+  includeDepth?: number;
 }) {
+  // Nest `@include`-pulled rows by indenting proportionally to chain
+  // depth. Depth 0 (root files) uses the standard 28px indent.
+  const depth = includeDepth ?? 0;
+  const leftPad = depth === 0 ? "var(--sp-28)" : `calc(var(--sp-28) + ${depth * 12}px)`;
   return (
     <button
       type="button"
@@ -853,7 +862,7 @@ function FileRowButton({
         width: "100%",
         height: "100%",
         gap: "var(--sp-6)",
-        padding: "0 var(--sp-12) 0 var(--sp-28)",
+        padding: `0 var(--sp-12) 0 ${leftPad}`,
         background: selected ? "var(--bg-active)" : "transparent",
         color: selected ? "var(--accent-ink)" : "var(--fg)",
         border: "none",
@@ -862,6 +871,18 @@ function FileRowButton({
         textAlign: "left",
       }}
     >
+      {depth > 0 && (
+        <span
+          aria-hidden
+          style={{
+            fontFamily: "var(--mono)",
+            fontSize: "var(--fs-2xs)",
+            color: "var(--fg-faint)",
+          }}
+        >
+          @
+        </span>
+      )}
       <span
         style={{
           flex: 1,
@@ -934,6 +955,12 @@ function FilePreview({
         onSetDefault={onSetDefault}
         onRefreshEditors={onRefreshEditors}
       />
+      {file.include_depth > 0 && file.included_by && (
+        <IncludedByBanner
+          includedBy={file.included_by}
+          depth={file.include_depth}
+        />
+      )}
       <div
         style={{
           flex: 1,
@@ -992,6 +1019,43 @@ function FilePreview({
           </>
         )}
       </div>
+    </div>
+  );
+}
+
+function IncludedByBanner({
+  includedBy,
+  depth,
+}: {
+  includedBy: string;
+  depth: number;
+}) {
+  const parentName = fileName(includedBy);
+  return (
+    <div
+      role="note"
+      style={{
+        display: "flex",
+        alignItems: "center",
+        gap: "var(--sp-8)",
+        padding: "var(--sp-8) var(--sp-20)",
+        borderBottom: "var(--bw-hair) solid var(--line)",
+        background: "var(--bg-sunken)",
+        color: "var(--fg-muted)",
+        fontSize: "var(--fs-xs)",
+      }}
+    >
+      <Glyph g={NF.link} color="var(--fg-muted)" />
+      <span>
+        Loaded via <code style={{ fontFamily: "var(--mono)" }}>@include</code>{" "}
+        (depth {depth}) from{" "}
+        <code
+          style={{ fontFamily: "var(--mono)" }}
+          title={includedBy}
+        >
+          {parentName}
+        </code>
+      </span>
     </div>
   );
 }
@@ -1146,6 +1210,8 @@ const KIND_LABELS: Record<string, string> = {
   agent: "Agent",
   skill: "Skill",
   command: "Command",
+  output_style: "Output style",
+  workflow: "Workflow",
   rule: "Rule",
   hook: "Hook",
   memory: "Memory",
