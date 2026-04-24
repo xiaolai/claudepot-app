@@ -206,11 +206,11 @@ export function ProjectDetail({
               });
             }}
           >
-            <Icon name="folder-open" size={14} /> Open in Finder
+            <Icon name="folder-open" />Open in Finder
           </button>
           <button type="button" className="btn" title="Rename this project"
             onClick={() => onRename(info.original_path)}>
-            <Icon name="pencil" size={14} /> Rename…
+            <Icon name="pencil" />Rename…
           </button>
           {onOpenInConfig && status !== "unreachable" && status !== "orphan" && (
             <button
@@ -219,7 +219,7 @@ export function ProjectDetail({
               title="View this project's Claude Code config — merged settings, MCP, agents, memory"
               onClick={() => onOpenInConfig(info.original_path)}
             >
-              <Icon name="file-code" size={14} /> Open in Config
+              <Icon name="file-code" />Open in Config
             </button>
           )}
         </div>
