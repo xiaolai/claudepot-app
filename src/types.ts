@@ -1029,6 +1029,8 @@ export type ConfigKind =
   | "agent"
   | "skill"
   | "command"
+  | "output_style"
+  | "workflow"
   | "rule"
   | "hook"
   | "memory"
