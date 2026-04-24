@@ -220,9 +220,24 @@ fn is_under_absent_mount(path: &str) -> bool {
 }
 
 /// Recover the project's original cwd from any session.jsonl's `cwd` field.
-/// CC writes `cwd` into every session entry, so this is authoritative and
-/// survives lossy sanitization (hyphens, long paths, unicode).
+/// CC writes `cwd` into every *message* entry, but the first line of a
+/// transcript is often a non-message record (`custom-title`, `summary`)
+/// that carries no `cwd`. Scan forward within each file until we find
+/// one, then bail out. Bounded to keep cost O(1) per project.
+///
+/// The recovered cwd is passed through `simplify_windows_path` so a
+/// verbatim prefix (`\\?\C:\...` or `\\?\UNC\...`) that leaked in from
+/// a non-CC writer is normalized to CC's native form. CC itself never
+/// writes the verbatim form — this is defense-in-depth. On non-Windows
+/// hosts `simplify_windows_path` is a no-op.
 pub(crate) fn recover_cwd_from_sessions(dir: &Path) -> Option<String> {
+    // Practical upper bound: `cwd` lands on the first real user/assistant
+    // entry, which in the wild is within the first handful of lines even
+    // allowing for stacked `custom-title` / `summary` / `task-summary`
+    // preambles. 64 is generous without risking a runaway scan on a
+    // pathological transcript.
+    const MAX_LINES_PER_FILE: usize = 64;
+
     let entries = fs::read_dir(dir).ok()?;
     for entry in entries.flatten() {
         let name = entry.file_name().to_string_lossy().to_string();
@@ -232,15 +247,14 @@ pub(crate) fn recover_cwd_from_sessions(dir: &Path) -> Option<String> {
         let Ok(file) = fs::File::open(entry.path()) else {
             continue;
         };
-        let mut reader = BufReader::new(file);
-        let mut line = String::new();
-        if reader.read_line(&mut line).ok()? == 0 {
-            continue;
-        }
-        if let Ok(val) = serde_json::from_str::<serde_json::Value>(&line) {
+        for line in BufReader::new(file).lines().take(MAX_LINES_PER_FILE) {
+            let Ok(line) = line else { break };
+            let Ok(val) = serde_json::from_str::<serde_json::Value>(&line) else {
+                continue;
+            };
             if let Some(cwd) = val.get("cwd").and_then(|v| v.as_str()) {
                 if !cwd.is_empty() {
-                    return Some(cwd.to_string());
+                    return Some(simplify_windows_path(cwd));
                 }
             }
         }

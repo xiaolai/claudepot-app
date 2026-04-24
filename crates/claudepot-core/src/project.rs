@@ -1611,6 +1611,281 @@ mod tests {
     }
 
     #[test]
+    fn test_recover_cwd_skips_custom_title_first_line() {
+        // CC sometimes writes a `custom-title` entry (no `cwd` field) as
+        // the first line of a session, then writes normal entries with
+        // `cwd` on subsequent lines. The recovery must keep reading
+        // until it finds `cwd`, otherwise paths with `.` collapse
+        // (e.g. `-xiaolai-lixiaolai-com` → `/xiaolai/lixiaolai/com`
+        // instead of the real `/xiaolai/lixiaolai.com`).
+        let tmp = tempfile::tempdir().unwrap();
+        let session_file = tmp.path().join("abc.jsonl");
+        fs::write(
+            &session_file,
+            concat!(
+                r#"{"type":"custom-title","title":"session","timestamp":"2026-04-20T00:00:00Z","uuid":"u1"}"#,
+                "\n",
+                r#"{"type":"user","cwd":"/Users/joker/github/xiaolai/lixiaolai.com","timestamp":"2026-04-20T00:00:01Z","uuid":"u2"}"#,
+                "\n",
+            ),
+        )
+        .unwrap();
+
+        let recovered = recover_cwd_from_sessions(tmp.path());
+        assert_eq!(
+            recovered.as_deref(),
+            Some("/Users/joker/github/xiaolai/lixiaolai.com")
+        );
+    }
+
+    #[test]
+    fn test_recover_cwd_skips_summary_entries() {
+        // Same pattern with a `summary` entry instead of `custom-title`.
+        let tmp = tempfile::tempdir().unwrap();
+        let session_file = tmp.path().join("abc.jsonl");
+        fs::write(
+            &session_file,
+            concat!(
+                r#"{"type":"summary","summary":"...","timestamp":"2026-04-20T00:00:00Z","uuid":"u1"}"#,
+                "\n",
+                r#"{"type":"assistant","cwd":"/home/user/some.dir.with.dots","timestamp":"2026-04-20T00:00:01Z","uuid":"u2"}"#,
+                "\n",
+            ),
+        )
+        .unwrap();
+
+        let recovered = recover_cwd_from_sessions(tmp.path());
+        assert_eq!(recovered.as_deref(), Some("/home/user/some.dir.with.dots"));
+    }
+
+    #[test]
+    fn test_recover_cwd_none_when_no_session_has_cwd() {
+        let tmp = tempfile::tempdir().unwrap();
+        fs::write(
+            tmp.path().join("a.jsonl"),
+            r#"{"type":"custom-title","title":"x","uuid":"u1"}"#,
+        )
+        .unwrap();
+        assert_eq!(recover_cwd_from_sessions(tmp.path()), None);
+    }
+
+    #[test]
+    fn test_recover_cwd_empty_cwd_is_ignored() {
+        // `"cwd": ""` must not be accepted — fall through to the next line.
+        let tmp = tempfile::tempdir().unwrap();
+        fs::write(
+            tmp.path().join("a.jsonl"),
+            concat!(
+                r#"{"type":"user","cwd":"","uuid":"u1"}"#,
+                "\n",
+                r#"{"type":"user","cwd":"/Users/joker/project","uuid":"u2"}"#,
+                "\n",
+            ),
+        )
+        .unwrap();
+        assert_eq!(
+            recover_cwd_from_sessions(tmp.path()).as_deref(),
+            Some("/Users/joker/project")
+        );
+    }
+
+    #[test]
+    fn test_recover_cwd_skips_unparseable_lines() {
+        // Malformed JSON (BOM, truncated line, partial write) must not
+        // abort the whole scan — keep reading.
+        let tmp = tempfile::tempdir().unwrap();
+        fs::write(
+            tmp.path().join("a.jsonl"),
+            concat!(
+                "\u{feff}not-json\n",
+                "{incomplete\n",
+                r#"{"type":"user","cwd":"/real/path","uuid":"u1"}"#,
+                "\n",
+            ),
+        )
+        .unwrap();
+        assert_eq!(
+            recover_cwd_from_sessions(tmp.path()).as_deref(),
+            Some("/real/path")
+        );
+    }
+
+    #[test]
+    fn test_recover_cwd_windows_drive_letter() {
+        let tmp = tempfile::tempdir().unwrap();
+        fs::write(
+            tmp.path().join("a.jsonl"),
+            concat!(
+                r#"{"type":"custom-title","title":"x","uuid":"u1"}"#,
+                "\n",
+                // JSON-escaped backslashes: `C:\Users\joker\project`.
+                r#"{"type":"user","cwd":"C:\\Users\\joker\\project","uuid":"u2"}"#,
+                "\n",
+            ),
+        )
+        .unwrap();
+        assert_eq!(
+            recover_cwd_from_sessions(tmp.path()).as_deref(),
+            Some(r"C:\Users\joker\project")
+        );
+    }
+
+    #[test]
+    fn test_recover_cwd_windows_unc_path() {
+        let tmp = tempfile::tempdir().unwrap();
+        fs::write(
+            tmp.path().join("a.jsonl"),
+            concat!(
+                r#"{"type":"user","cwd":"\\\\server\\share\\project","uuid":"u1"}"#,
+                "\n",
+            ),
+        )
+        .unwrap();
+        assert_eq!(
+            recover_cwd_from_sessions(tmp.path()).as_deref(),
+            Some(r"\\server\share\project")
+        );
+    }
+
+    #[test]
+    fn test_recover_cwd_strips_windows_verbatim_prefix() {
+        // Defense-in-depth: CC never writes `\\?\` in cwd, but a
+        // third-party writer might. The recovered path must be the
+        // non-verbatim form so downstream sanitize/roundtrip checks
+        // don't drift.
+        let tmp = tempfile::tempdir().unwrap();
+        fs::write(
+            tmp.path().join("a.jsonl"),
+            concat!(
+                r#"{"type":"user","cwd":"\\\\?\\C:\\Users\\joker","uuid":"u1"}"#,
+                "\n",
+            ),
+        )
+        .unwrap();
+        assert_eq!(
+            recover_cwd_from_sessions(tmp.path()).as_deref(),
+            Some(r"C:\Users\joker")
+        );
+    }
+
+    #[test]
+    fn test_recover_cwd_strips_windows_verbatim_unc_prefix() {
+        let tmp = tempfile::tempdir().unwrap();
+        fs::write(
+            tmp.path().join("a.jsonl"),
+            concat!(
+                r#"{"type":"user","cwd":"\\\\?\\UNC\\server\\share\\p","uuid":"u1"}"#,
+                "\n",
+            ),
+        )
+        .unwrap();
+        assert_eq!(
+            recover_cwd_from_sessions(tmp.path()).as_deref(),
+            Some(r"\\server\share\p")
+        );
+    }
+
+    #[test]
+    fn test_list_projects_windows_path_with_dot_in_name() {
+        // End-to-end: a Windows-style project whose name contains a
+        // literal `.` should survive the sanitize/unsanitize roundtrip
+        // via the recovered cwd, not collapse to backslashes.
+        let tmp = tempfile::tempdir().unwrap();
+        let projects_dir = tmp.path().join("projects");
+        fs::create_dir(&projects_dir).unwrap();
+        // sanitize(`C:\Users\joker\lixiaolai.com`) = `C--Users-joker-lixiaolai-com`.
+        let slug = "C--Users-joker-lixiaolai-com";
+        let proj = projects_dir.join(slug);
+        fs::create_dir(&proj).unwrap();
+        fs::write(
+            proj.join("s1.jsonl"),
+            concat!(
+                r#"{"type":"custom-title","title":"x","uuid":"u1"}"#,
+                "\n",
+                r#"{"type":"user","cwd":"C:\\Users\\joker\\lixiaolai.com","uuid":"u2"}"#,
+                "\n",
+            ),
+        )
+        .unwrap();
+
+        let result = list_projects(tmp.path()).unwrap();
+        assert_eq!(result.len(), 1);
+        assert_eq!(result[0].original_path, r"C:\Users\joker\lixiaolai.com");
+    }
+
+    #[test]
+    fn test_list_projects_preserves_special_chars_via_cwd() {
+        // Exercises the full edge-case catalog found in real CC project
+        // dirs: spaces, apostrophes, tildes, and dots. All would be lost
+        // by `unsanitize_path` alone, but the authoritative `cwd` keeps
+        // them intact.
+        let cases = [
+            (
+                "-Users-joker-Desktop-reading-room",
+                "/Users/joker/Desktop/reading-room",
+            ),
+            ("-Users-joker-Writer-s-Office", "/Users/joker/Writer's Office"),
+            (
+                "-Users-joker-Library-Mobile-Documents-iCloud-com-nssurge-inc-Documents",
+                "/Users/joker/Library/Mobile Documents/iCloud~com~nssurge~inc/Documents",
+            ),
+            (
+                "-Users-joker-github-xiaolai-myprojects-com-claudepot-app",
+                "/Users/joker/github/xiaolai/myprojects/com.claudepot.app",
+            ),
+        ];
+
+        for (slug, cwd) in cases {
+            let tmp = tempfile::tempdir().unwrap();
+            let projects_dir = tmp.path().join("projects");
+            fs::create_dir(&projects_dir).unwrap();
+            let proj = projects_dir.join(slug);
+            fs::create_dir(&proj).unwrap();
+            let line = format!(
+                r#"{{"type":"custom-title","title":"x","uuid":"u1"}}
+{{"type":"user","cwd":{:?},"uuid":"u2"}}
+"#,
+                cwd
+            );
+            fs::write(proj.join("s1.jsonl"), line).unwrap();
+
+            let result = list_projects(tmp.path()).unwrap();
+            assert_eq!(result.len(), 1, "slug={slug}");
+            assert_eq!(result[0].original_path, cwd, "slug={slug}");
+        }
+    }
+
+    #[test]
+    fn test_list_projects_recovers_cwd_with_dot_in_name() {
+        // End-to-end: a project whose real path contains `.` should be
+        // reported with the dot intact, recovered from session.jsonl
+        // even when the first transcript line is a `custom-title`.
+        let tmp = tempfile::tempdir().unwrap();
+        let projects_dir = tmp.path().join("projects");
+        fs::create_dir(&projects_dir).unwrap();
+        let slug = "-Users-joker-github-xiaolai-lixiaolai-com";
+        let proj = projects_dir.join(slug);
+        fs::create_dir(&proj).unwrap();
+        fs::write(
+            proj.join("s1.jsonl"),
+            concat!(
+                r#"{"type":"custom-title","title":"x","uuid":"u1"}"#,
+                "\n",
+                r#"{"type":"user","cwd":"/Users/joker/github/xiaolai/lixiaolai.com","uuid":"u2"}"#,
+                "\n",
+            ),
+        )
+        .unwrap();
+
+        let result = list_projects(tmp.path()).unwrap();
+        assert_eq!(result.len(), 1);
+        assert_eq!(
+            result[0].original_path,
+            "/Users/joker/github/xiaolai/lixiaolai.com"
+        );
+    }
+
+    #[test]
     fn test_list_projects_with_entries() {
         let tmp = tempfile::tempdir().unwrap();
         let projects_dir = tmp.path().join("projects");
