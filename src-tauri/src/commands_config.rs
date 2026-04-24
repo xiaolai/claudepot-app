@@ -89,6 +89,11 @@ pub struct FileNodeDto {
     pub summary_title: Option<String>,
     pub summary_description: Option<String>,
     pub issues: Vec<String>,
+    /// Absolute path of the memory file that `@include`-pulled this
+    /// one. `None` for root files.
+    pub included_by: Option<String>,
+    /// Depth in the `@include` chain (0 = root, 1 = direct include).
+    pub include_depth: usize,
 }
 
 impl From<&FileNode> for FileNodeDto {
@@ -103,6 +108,8 @@ impl From<&FileNode> for FileNodeDto {
             summary_title: f.summary.as_ref().and_then(|s| s.title.clone()),
             summary_description: f.summary.as_ref().and_then(|s| s.description.clone()),
             issues: f.issues.iter().map(issue_to_str).collect(),
+            included_by: f.included_by.as_ref().map(|p| p.display().to_string()),
+            include_depth: f.include_depth,
         }
     }
 }

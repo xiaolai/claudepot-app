@@ -11,6 +11,7 @@
 //! - Parse results from `parse::*` are attached per file.
 //! - **No** I/O beyond filesystem reads — no subprocesses, no network.
 
+use crate::config_view::memory_include;
 use crate::config_view::model::{
     ClaudeMdRole, ConfigTree, FileNode, FileSummary, Kind, Node,
     ParseIssue, PolicyOrigin, Scope, ScopeNode,
@@ -116,6 +117,8 @@ fn make_file_node(path: &Path, kind: Kind, scope: Scope, parsed: parse::Parsed) 
         summary: parsed.summary,
         issues: parsed.issues,
         symlink_origin: None,
+        included_by: None,
+        include_depth: 0,
     }
 }
 
@@ -660,6 +663,8 @@ pub fn collect_redacted_user_config() -> Option<FileNode> {
         }),
         issues: Vec::new(),
         symlink_origin: None,
+        included_by: None,
+        include_depth: 0,
     })
 }
 
@@ -735,10 +740,96 @@ fn collect_skills_dir(dir: &Path, scope: Scope) -> Vec<FileNode> {
                 summary: None,
                 issues: vec![ParseIssue::NotASkill],
                 symlink_origin: None,
+                included_by: None,
+                include_depth: 0,
             });
         }
     }
     out
+}
+
+// ---------- @include expansion ---------------------------------------
+
+/// Read the `hasClaudeMdExternalIncludesApproved` flag from the global
+/// user config (`~/.claude.json` or the legacy `.config.json`). A
+/// missing file, parse error, or absent key means the flag is off —
+/// Project/Local/Managed includes outside cwd are then skipped, matching
+/// CC's default-deny behavior (`claudemd.ts:798-802`).
+fn external_includes_approved() -> bool {
+    let Some(node) = collect_redacted_user_config() else { return false };
+    let Ok(bytes) = std::fs::read(&node.abs_path) else { return false };
+    let Ok(v): Result<serde_json::Value, _> = serde_json::from_slice(&bytes) else {
+        return false;
+    };
+    v.get("hasClaudeMdExternalIncludesApproved")
+        .and_then(|x| x.as_bool())
+        .unwrap_or(false)
+}
+
+/// For every memory-kind `FileNode` in `files`, resolve its `@include`
+/// chain and append synthetic nodes describing each reachable target.
+/// Cycles and missing files are silently dropped inside the resolver.
+///
+/// `is_user_memory` → always include external targets
+/// (`claudemd.ts:833`). Project/Local/Managed → gate on
+/// `hasClaudeMdExternalIncludesApproved`.
+fn expand_includes(
+    files: &mut Vec<FileNode>,
+    original_cwd: &Path,
+    is_user_memory: bool,
+) {
+    let allow_external = is_user_memory || external_includes_approved();
+    let memory_kinds: &[Kind] = &[
+        Kind::ClaudeMd,
+        Kind::Memory,
+        Kind::MemoryIndex,
+        Kind::Rule,
+    ];
+    let roots: Vec<(PathBuf, Scope)> = files
+        .iter()
+        .filter(|f| memory_kinds.contains(&f.kind))
+        .map(|f| (f.abs_path.clone(), f.scope_badges.first().cloned().unwrap_or(Scope::Other)))
+        .collect();
+    let mut seen: std::collections::HashSet<PathBuf> = files
+        .iter()
+        .map(|f| f.abs_path.clone())
+        .collect();
+    for (root, scope) in roots {
+        for inc in memory_include::resolve_all(&root, original_cwd, allow_external) {
+            if !seen.insert(inc.abs_path.clone()) {
+                continue;
+            }
+            let kind = if memory_include::is_text_extension(&inc.abs_path)
+                && inc.abs_path
+                    .extension()
+                    .map(|e| e.eq_ignore_ascii_case("md"))
+                    .unwrap_or(false)
+            {
+                Kind::Memory
+            } else {
+                Kind::Other
+            };
+            let parsed = parse_file(&inc.abs_path, &kind);
+            let mut node = make_file_node(&inc.abs_path, kind, scope.clone(), parsed);
+            node.included_by = Some(inc.included_by.clone());
+            node.include_depth = inc.depth;
+            // Title hint so the UI can show "included from …".
+            let name = inc.abs_path.file_name()
+                .map(|n| n.to_string_lossy().into_owned())
+                .unwrap_or_default();
+            node.summary = Some(FileSummary {
+                title: Some(name),
+                description: Some(format!(
+                    "@include depth {} (from {})",
+                    inc.depth,
+                    inc.included_by.file_name()
+                        .map(|n| n.to_string_lossy().into_owned())
+                        .unwrap_or_default(),
+                )),
+            });
+            files.push(node);
+        }
+    }
 }
 
 // ---------- Tree assembly --------------------------------------------
@@ -763,7 +854,10 @@ pub fn assemble_tree(cwd: &Path) -> ConfigTree {
         ));
     }
 
-    let user_files = collect_user();
+    let mut user_files = collect_user();
+    // User memory can always @include external files
+    // (`claudemd.ts:833` — `includeExternal: true` regardless of flag).
+    expand_includes(&mut user_files, cwd, /* is_user_memory */ true);
     if !user_files.is_empty() {
         scopes.push(scope_node(
             "scope:user",
@@ -775,6 +869,7 @@ pub fn assemble_tree(cwd: &Path) -> ConfigTree {
 
     let mut project_files = collect_project(cwd);
     project_files.extend(collect_rules_walk(cwd));
+    expand_includes(&mut project_files, cwd, /* is_user_memory */ false);
     if !project_files.is_empty() {
         scopes.push(scope_node(
             "scope:project",
@@ -791,6 +886,7 @@ pub fn assemble_tree(cwd: &Path) -> ConfigTree {
     for (_dir, _role, f) in local_md {
         local_files.push(f);
     }
+    expand_includes(&mut local_files, cwd, /* is_user_memory */ false);
     if !local_files.is_empty() {
         scopes.push(scope_node(
             "scope:local",
@@ -821,11 +917,17 @@ pub fn assemble_tree(cwd: &Path) -> ConfigTree {
             dir.display(),
             if matches!(role, ClaudeMdRole::Cwd) { " (cwd)" } else { "" },
         );
+        // Root file plus its @include chain. CC processes this file as
+        // `Project` memory type (`claudemd.ts:887-895`) — use the
+        // non-user external-gate.
+        let root_id = f.id.clone();
+        let mut bucket = vec![f];
+        expand_includes(&mut bucket, cwd, /* is_user_memory */ false);
         scopes.push(scope_node(
-            &format!("scope:claudemd:{}", f.id),
+            &format!("scope:claudemd:{}", root_id),
             Scope::ClaudeMdDir { dir: dir.clone(), role: role.clone() },
             &label,
-            vec![Node::File(f)],
+            bucket.into_iter().map(Node::File).collect::<Vec<_>>(),
         ));
     }
 
