@@ -102,3 +102,164 @@ pub(crate) fn format_radix(mut x: u32, radix: u32) -> String {
     result.reverse();
     String::from_utf8(result).unwrap_or_default()
 }
+
+#[cfg(test)]
+mod tests {
+    //! Co-located golden tests for the four path shapes defined in
+    //! `.claude/rules/paths.md`. Integration-style tests (sanitize used
+    //! in context) live in `project::tests`; these lock down the pure
+    //! string behavior of `sanitize_path` / `unsanitize_path` / `djb2_hash`
+    //! against CC's on-disk slugger so any regression is caught here
+    //! before touching the rest of the codebase.
+
+    use super::*;
+
+    // --- Group: all four path shapes (sanitize) ----------------------------
+
+    #[test]
+    fn sanitize_unix_absolute() {
+        assert_eq!(
+            sanitize_path("/Users/joker/project"),
+            "-Users-joker-project"
+        );
+    }
+
+    #[test]
+    fn sanitize_windows_drive_letter() {
+        assert_eq!(
+            sanitize_path("C:\\Users\\joker\\project"),
+            "C--Users-joker-project"
+        );
+    }
+
+    #[test]
+    fn sanitize_windows_unc() {
+        assert_eq!(
+            sanitize_path("\\\\server\\share\\project"),
+            "--server-share-project"
+        );
+    }
+
+    #[test]
+    fn sanitize_windows_verbatim_not_accepted() {
+        // The verbatim `\\?\C:\…` form must be stripped by
+        // `path_utils::simplify_windows_path` BEFORE reaching
+        // `sanitize_path` — feeding it verbatim here produces a slug
+        // that won't match CC's on-disk directory. This test locks
+        // that contract: callers must normalize first.
+        let raw = sanitize_path("\\\\?\\C:\\Users\\joker");
+        let simplified =
+            sanitize_path(&crate::path_utils::simplify_windows_path("\\\\?\\C:\\Users\\joker"));
+        assert_ne!(raw, simplified, "verbatim input must be rejected upstream");
+        assert_eq!(simplified, "C--Users-joker");
+    }
+
+    // --- Group: edge cases -------------------------------------------------
+
+    #[test]
+    fn sanitize_empty_input() {
+        assert_eq!(sanitize_path(""), "");
+    }
+
+    #[test]
+    fn sanitize_all_alphanumeric_passthrough() {
+        assert_eq!(sanitize_path("abc123XYZ"), "abc123XYZ");
+    }
+
+    #[test]
+    fn sanitize_all_special_chars_become_hyphens() {
+        assert_eq!(sanitize_path("!@#$%^&*()"), "----------");
+    }
+
+    #[test]
+    fn sanitize_long_path_gets_djb2_suffix() {
+        let input = "/Users/joker/".to_string() + &"a".repeat(250);
+        let out = sanitize_path(&input);
+        // Prefix: MAX_SANITIZED_LENGTH, separator '-', then djb2 hash.
+        assert!(out.len() > MAX_SANITIZED_LENGTH);
+        assert_eq!(out.len(), MAX_SANITIZED_LENGTH + 1 + djb2_hash(&input).len());
+    }
+
+    #[test]
+    fn sanitize_emoji_uses_utf16_code_units() {
+        // 🎉 (U+1F389) is a surrogate pair in UTF-16, so it consumes
+        // TWO hyphens — matching JS's `.charCodeAt()` iteration in CC.
+        assert_eq!(sanitize_path("/tmp/🎉emoji"), "-tmp---emoji");
+    }
+
+    // --- Group: unsanitize roundtrip / lossy ------------------------------
+
+    #[test]
+    fn unsanitize_unix_absolute() {
+        let original = "/Users/joker/project";
+        let slug = sanitize_path(original);
+        let back = unsanitize_path(&slug);
+        // On non-Windows hosts we should get the original back exactly.
+        #[cfg(not(target_os = "windows"))]
+        assert_eq!(back, original);
+        // On Windows, unsanitize reads slugs through the host lens, so
+        // a Unix-shaped slug gets rendered with backslashes. The
+        // authoritative cwd from session.jsonl is preferred anyway —
+        // see recover_cwd_from_sessions.
+        #[cfg(target_os = "windows")]
+        assert_eq!(back, "\\Users\\joker\\project");
+    }
+
+    #[test]
+    fn unsanitize_windows_drive_letter_signature() {
+        // `<alpha>--...` is unambiguous — always rendered as `X:\...`
+        // regardless of host OS.
+        assert_eq!(
+            unsanitize_path("C--Users-joker-project"),
+            "C:\\Users\\joker\\project"
+        );
+    }
+
+    #[test]
+    fn unsanitize_is_lossy() {
+        // `my-project` and `my_project` both sanitize to `my-project`,
+        // so `unsanitize` can't recover the original punctuation.
+        let dashed = sanitize_path("/tmp/my-project");
+        let underscored = sanitize_path("/tmp/my_project");
+        assert_eq!(dashed, underscored);
+    }
+
+    // --- Group: djb2 hash parity with CC ----------------------------------
+
+    #[test]
+    fn djb2_deterministic() {
+        assert_eq!(djb2_hash("hello"), djb2_hash("hello"));
+    }
+
+    #[test]
+    fn djb2_zero_seed() {
+        assert_eq!(djb2_hash(""), "0");
+    }
+
+    #[test]
+    fn djb2_cc_parity_long_input() {
+        // Locked against CC's reference implementation — if this
+        // drifts, slugs for long paths will not match on-disk dirs.
+        let input = "/Users/joker/".to_string() + &"a".repeat(250);
+        assert_eq!(djb2_hash(&input), "lwkvhu");
+    }
+
+    #[test]
+    fn djb2_uses_utf16_code_units_not_utf8_bytes() {
+        // "/tmp/café" — 'é' is one UTF-16 code unit (U+00E9). If we
+        // accidentally iterated UTF-8 bytes we'd hash differently.
+        assert_eq!(djb2_hash("/tmp/café"), "udmm60");
+    }
+
+    #[test]
+    fn format_radix_zero() {
+        assert_eq!(format_radix(0, 36), "0");
+    }
+
+    #[test]
+    fn format_radix_base36_roundtrip_like_js() {
+        // JS `(35).toString(36)` == "z"; `(36).toString(36)` == "10".
+        assert_eq!(format_radix(35, 36), "z");
+        assert_eq!(format_radix(36, 36), "10");
+    }
+}

@@ -51,6 +51,15 @@ export function useRefresh(pushToast: (kind: "info" | "error", text: string) => 
   // refresh that kicked off newer work will have incremented the gen,
   // so the older promise's late resolution is silently ignored.
   const refreshGenRef = useRef(0);
+  // Mirror authRejectedAt into a ref so the refresh callback can
+  // observe the latest value without re-memoizing on every change.
+  // Without this, focus-driven refresh calls captured a stale value
+  // and could re-enter the cooldown window after another caller had
+  // cleared it (or vice versa).
+  const authRejectedAtRef = useRef<number | null>(null);
+  useEffect(() => {
+    authRejectedAtRef.current = authRejectedAt;
+  }, [authRejectedAt]);
 
   const refresh = useCallback(async () => {
     if (refreshingRef.current) return;
@@ -73,9 +82,10 @@ export function useRefresh(pushToast: (kind: "info" | "error", text: string) => 
       // the user what to do.
       const AUTH_REJECTED_COOLDOWN_MS = 60_000;
       const nowMs = Date.now();
+      const cooldownStart = authRejectedAtRef.current;
       const shouldSkipSync =
-        authRejectedAt !== null &&
-        nowMs - authRejectedAt < AUTH_REJECTED_COOLDOWN_MS;
+        cooldownStart !== null &&
+        nowMs - cooldownStart < AUTH_REJECTED_COOLDOWN_MS;
       const syncPromise = shouldSkipSync
         ? Promise.resolve()
         : api
@@ -190,7 +200,7 @@ export function useRefresh(pushToast: (kind: "info" | "error", text: string) => 
     } finally {
       refreshingRef.current = false;
     }
-  }, [pushToast, authRejectedAt]);
+  }, [pushToast]);
 
   useEffect(() => {
     refresh();

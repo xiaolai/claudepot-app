@@ -129,15 +129,14 @@ pub fn rebuild_index_cmd(ctx: &AppContext) -> Result<()> {
 
 fn print_orphans_human(orphans: &[OrphanedProject]) {
     println!(
-        "{:<48}  {:>8}  {:>12}  {}",
-        "Original cwd (from transcript)", "Sessions", "Size", "Slug"
+        "{:<48}  {:>8}  {:>12}  Slug",
+        "Original cwd (from transcript)", "Sessions", "Size"
     );
     println!(
-        "{:<48}  {:>8}  {:>12}  {}",
+        "{:<48}  {:>8}  {:>12}  ────",
         "─".repeat(48),
         "────────",
-        "────────────",
-        "────"
+        "────────────"
     );
     for o in orphans {
         let cwd = o
@@ -357,7 +356,7 @@ pub fn view_cmd(ctx: &AppContext, target: &str, show: &str) -> Result<()> {
                     .collect();
                 print_json(&payload);
             } else {
-                println!("{:>5}  {}", "IDX", "CATEGORY");
+                println!("{:>5}  CATEGORY", "IDX");
                 for (cat, idx) in &cats {
                     println!("{idx:>5}  {cat:?}");
                 }
@@ -377,8 +376,8 @@ pub fn view_cmd(ctx: &AppContext, target: &str, show: &str) -> Result<()> {
                 print_json(&linked);
             } else {
                 println!(
-                    "{:<12}  {:<40}  {:>9}  {}",
-                    "TOOL", "ID", "DUR(ms)", "STATUS"
+                    "{:<12}  {:<40}  {:>9}  STATUS",
+                    "TOOL", "ID", "DUR(ms)"
                 );
                 for t in &linked {
                     let id = truncate_start(&t.tool_use_id, 40);
@@ -411,8 +410,8 @@ pub fn view_cmd(ctx: &AppContext, target: &str, show: &str) -> Result<()> {
                 println!("(no subagents)");
             } else {
                 println!(
-                    "{:<18}  {:<12}  {:>6}  {:>9}  {}",
-                    "ID", "TYPE", "MSGS", "DUR(ms)", "DESCRIPTION"
+                    "{:<18}  {:<12}  {:>6}  {:>9}  DESCRIPTION",
+                    "ID", "TYPE", "MSGS", "DUR(ms)"
                 );
                 for a in &agents {
                     println!(
@@ -432,8 +431,8 @@ pub fn view_cmd(ctx: &AppContext, target: &str, show: &str) -> Result<()> {
                 print_json(&info);
             } else {
                 println!(
-                    "{:>5}  {:>8}  {:>8}  {}",
-                    "PHASE", "START", "END", "SUMMARY"
+                    "{:>5}  {:>8}  {:>8}  SUMMARY",
+                    "PHASE", "START", "END"
                 );
                 for p in &info.phases {
                     println!(
@@ -835,7 +834,7 @@ pub fn worktrees_cmd(ctx: &AppContext) -> Result<()> {
 
 fn print_chunks_human(chunks: &[claudepot_core::session_chunks::SessionChunk]) {
     use claudepot_core::session_chunks::SessionChunk;
-    println!("{:>4}  {:<8}  {:>6}  {:>9}  {}", "ID", "TYPE", "MSGS", "DUR(ms)", "DETAIL");
+    println!("{:>4}  {:<8}  {:>6}  {:>9}  DETAIL", "ID", "TYPE", "MSGS", "DUR(ms)");
     for c in chunks {
         let h = c.header();
         let (kind, detail) = match c {

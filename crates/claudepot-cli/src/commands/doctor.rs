@@ -43,7 +43,7 @@ pub async fn run(ctx: &AppContext) -> Result<()> {
         let expired = report
             .account_health
             .iter()
-            .filter(|a| !a.remaining_mins.is_some_and(|m| m > 0))
+            .filter(|a| a.remaining_mins.is_none_or(|m| m <= 0))
             .count();
         // Keep JSON-mode exit code in sync with text mode: drift → 2,
         // any other error (DB, API unreachable, geo-blocked, expired

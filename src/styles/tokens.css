@@ -420,6 +420,11 @@
   --selection:           var(--accent-soft);
   --selection-inactive:  var(--bg-hover);
   --grouped-bg:          var(--bg-sunken);
+
+  /* Mask opacity anchors — used in mask-image gradients where the
+     value is mask alpha, not a visible color. `#000` means "fully
+     shown"; `transparent` (no token needed) means "fully clipped". */
+  --mask-opaque:         #000;
 }
 
 /* ─── Base reset ──────────────────────────────────────────── */

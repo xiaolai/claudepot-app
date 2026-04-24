@@ -343,8 +343,8 @@ impl AccountStore {
     fn active_uuid(&self, key: &str) -> SqlResult<Option<String>> {
         self.db()
             .query_row(
-                &format!("SELECT value FROM state WHERE key = '{key}'"),
-                [],
+                "SELECT value FROM state WHERE key = ?1",
+                params![key],
                 |r| r.get(0),
             )
             .optional()
@@ -374,21 +374,34 @@ impl AccountStore {
             return Ok(());
         }
 
+        // `ts_column` is an IDENTIFIER, not a value — SQL parameters can't
+        // substitute identifiers. The only callers pass two hardcoded
+        // literals (`"last_cli_switch"` / `"last_desktop_switch"`); we
+        // gate against anything else defensively so this never becomes
+        // an injection vector if the caller set grows.
+        let ts_column = match ts_column {
+            "last_cli_switch" | "last_desktop_switch" => ts_column,
+            other => {
+                return Err(rusqlite::Error::ToSqlConversionFailure(
+                    format!("disallowed ts_column: {other}").into(),
+                ))
+            }
+        };
         let sql = format!("UPDATE accounts SET {ts_column} = ?1 WHERE uuid = ?2");
         let updated = tx.execute(&sql, params![Utc::now().to_rfc3339(), uuid.to_string()])?;
         if updated == 0 {
             return Err(rusqlite::Error::QueryReturnedNoRows);
         }
         tx.execute(
-            &format!("INSERT OR REPLACE INTO state (key, value) VALUES ('{key}', ?1)"),
-            params![uuid.to_string()],
+            "INSERT OR REPLACE INTO state (key, value) VALUES (?1, ?2)",
+            params![key, uuid.to_string()],
         )?;
         tx.commit()
     }
 
     fn clear_active(&self, key: &str) -> SqlResult<()> {
         self.db()
-            .execute(&format!("DELETE FROM state WHERE key = '{key}'"), [])?;
+            .execute("DELETE FROM state WHERE key = ?1", params![key])?;
         Ok(())
     }
 

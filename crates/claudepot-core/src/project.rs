@@ -343,14 +343,13 @@ pub fn move_project(
     // Live-session check for ALL scenarios, not just MoveAndUpdate.
     // --force overrides; applies to old and new paths (spec §5, §7.5
     // E32-E34).
-    if !args.force {
-        if live_session_present(&args.config_dir, &old_san, &old_norm)
-            || live_session_present(&args.config_dir, &new_san, &new_norm)
+    if !args.force
+        && (live_session_present(&args.config_dir, &old_san, &old_norm)
+            || live_session_present(&args.config_dir, &new_san, &new_norm))
         {
             let _ = journal.mark_error("live CC session detected");
             return Err(ProjectError::ClaudeRunning(old_norm.clone()));
         }
-    }
 
     // Phase 3: Move actual directory
     if scenario == MoveScenario::MoveAndUpdate {

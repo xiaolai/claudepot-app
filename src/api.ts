@@ -16,7 +16,6 @@ import type {
   DesktopAdoptOutcome,
   DesktopClearOutcome,
   DesktopIdentity,
-  DesktopReconcileOutcome,
   DesktopSyncOutcome,
   DryRunPlan,
   GcOutcome,
@@ -88,7 +87,6 @@ export const api = {
   /// Cheap preflight used before cli_use to decide whether to raise
   /// the split-brain confirmation dialog.
   cliIsCcRunning: () => invoke<boolean>("cli_is_cc_running"),
-  cliClear: () => invoke<void>("cli_clear"),
   desktopUse: (email: string, noLaunch: boolean) =>
     invoke<void>("desktop_use", { email, noLaunch }),
   /// Ground-truth "who is Claude Desktop signed in as". Phase 1
@@ -105,12 +103,6 @@ export const api = {
   /// identity — the fast path returns `org_uuid_candidate` only.
   verifiedDesktopIdentity: () =>
     invoke<DesktopIdentity>("verified_desktop_identity"),
-  /// Explicit reconcile: flip `has_desktop_profile` to match on-disk
-  /// truth + clear orphan `state.active_desktop` pointer. The same
-  /// logic runs opportunistically inside `accountList` — this
-  /// command surfaces the outcome for "Reconcile now" affordances.
-  desktopReconcile: () =>
-    invoke<DesktopReconcileOutcome>("desktop_reconcile"),
   /// Adopt the live Desktop session into `uuid`'s snapshot directory.
   /// Always verifies identity via the authoritative Decrypted path
   /// before mutating — fast-path candidates cannot drive adoption.
@@ -124,9 +116,7 @@ export const api = {
   /// most refreshes the active_desktop pointer cache.
   syncFromCurrentDesktop: () =>
     invoke<DesktopSyncOutcome>("sync_from_current_desktop"),
-  desktopIsRunning: () => invoke<boolean>("desktop_is_running"),
   desktopLaunch: () => invoke<void>("desktop_launch"),
-  desktopQuit: () => invoke<void>("desktop_quit"),
   accountAddFromCurrent: () =>
     invoke<RegisterOutcome>("account_add_from_current"),
   /// Browser OAuth onboarding — spawns `claude auth login` in a temp

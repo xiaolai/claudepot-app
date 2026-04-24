@@ -123,8 +123,261 @@ fn rewrite_cwd_in_line(
 
 /// Parse a `"key":"<escaped>"` fragment and return the raw string value.
 fn compact_kv_value(compact_kv: &str) -> Option<String> {
-    let after_colon = compact_kv.splitn(2, ':').nth(1)?;
+    let after_colon = compact_kv.split_once(':')?.1;
     serde_json::from_str::<String>(after_colon).ok()
+}
+
+#[cfg(test)]
+mod jsonl_tests {
+    //! Behavior contract for `stream_rewrite_jsonl` + `rewrite_history_jsonl`:
+    //!   - `cwd` / `project` field values are rewritten in place
+    //!   - Non-target fields pass through byte-exact (no key reordering)
+    //!   - Malformed lines are preserved unchanged
+    //!   - Matching needles inside quoted user content are NOT touched
+    //!     (the parse-first guard makes this safe)
+    //!   - Spaced JSON (`"cwd": "…"`) is handled as well as compact
+    //!   - Idempotent under a second call with the same args (no-op)
+
+    use super::*;
+    use std::io::Write as _;
+    use tempfile::tempdir;
+
+    const FROM_CWD: &str = "/tmp/old";
+    const TO_CWD: &str = "/tmp/new";
+
+    fn write(path: &Path, body: &str) {
+        let mut f = fs::File::create(path).unwrap();
+        f.write_all(body.as_bytes()).unwrap();
+    }
+
+    // --- stream_rewrite_jsonl ---------------------------------------------
+
+    #[test]
+    fn stream_rewrite_single_matching_line() {
+        let dir = tempdir().unwrap();
+        let src = dir.path().join("src.jsonl");
+        let dst = dir.path().join("dst.jsonl");
+        write(
+            &src,
+            "{\"type\":\"user\",\"cwd\":\"/tmp/old\",\"message\":\"hi\"}\n",
+        );
+
+        let n = stream_rewrite_jsonl(&src, &dst, FROM_CWD, TO_CWD).unwrap();
+        assert_eq!(n, 1);
+
+        let out = fs::read_to_string(&dst).unwrap();
+        assert!(out.contains(r#""cwd":"/tmp/new""#));
+        assert!(!out.contains(r#""cwd":"/tmp/old""#));
+        // Byte-exact preservation of surrounding fields.
+        assert!(out.contains(r#""type":"user""#));
+        assert!(out.contains(r#""message":"hi""#));
+    }
+
+    #[test]
+    fn stream_rewrite_preserves_non_matching_cwd() {
+        let dir = tempdir().unwrap();
+        let src = dir.path().join("src.jsonl");
+        let dst = dir.path().join("dst.jsonl");
+        // Mid-session cd — cwd doesn't match FROM_CWD, must pass through.
+        write(
+            &src,
+            "{\"cwd\":\"/other\",\"message\":\"x\"}\n{\"cwd\":\"/tmp/old\",\"m\":\"y\"}\n",
+        );
+
+        let n = stream_rewrite_jsonl(&src, &dst, FROM_CWD, TO_CWD).unwrap();
+        assert_eq!(n, 1);
+
+        let out = fs::read_to_string(&dst).unwrap();
+        assert!(out.contains(r#""cwd":"/other""#));
+        assert!(out.contains(r#""cwd":"/tmp/new""#));
+    }
+
+    #[test]
+    fn stream_rewrite_malformed_line_passes_through() {
+        let dir = tempdir().unwrap();
+        let src = dir.path().join("src.jsonl");
+        let dst = dir.path().join("dst.jsonl");
+        write(
+            &src,
+            "not json at all\n{\"cwd\":\"/tmp/old\",\"m\":\"y\"}\n",
+        );
+
+        let n = stream_rewrite_jsonl(&src, &dst, FROM_CWD, TO_CWD).unwrap();
+        assert_eq!(n, 1);
+
+        let out = fs::read_to_string(&dst).unwrap();
+        assert!(out.starts_with("not json at all\n"));
+        assert!(out.contains(r#""cwd":"/tmp/new""#));
+    }
+
+    #[test]
+    fn stream_rewrite_does_not_touch_needle_in_message_body() {
+        // A session whose content happens to contain the string
+        // `"cwd":"/tmp/old"` inside a user message must NOT be rewritten
+        // because the parse-first guard finds cwd only in the top-level
+        // object. Here the top-level cwd differs.
+        let dir = tempdir().unwrap();
+        let src = dir.path().join("src.jsonl");
+        let dst = dir.path().join("dst.jsonl");
+        let line = r#"{"cwd":"/elsewhere","message":"pasted: \"cwd\":\"/tmp/old\""}"#;
+        write(&src, &format!("{line}\n"));
+
+        let n = stream_rewrite_jsonl(&src, &dst, FROM_CWD, TO_CWD).unwrap();
+        assert_eq!(n, 0);
+
+        let out = fs::read_to_string(&dst).unwrap();
+        assert!(out.contains("/elsewhere"));
+        // The literal string inside message body stays.
+        assert!(out.contains(r#"\"cwd\":\"/tmp/old\""#));
+    }
+
+    #[test]
+    fn stream_rewrite_spaced_form_fallback() {
+        let dir = tempdir().unwrap();
+        let src = dir.path().join("src.jsonl");
+        let dst = dir.path().join("dst.jsonl");
+        // Simulated writer with pretty spacing (uncommon but valid).
+        write(&src, "{\"cwd\": \"/tmp/old\", \"m\": \"y\"}\n");
+
+        let n = stream_rewrite_jsonl(&src, &dst, FROM_CWD, TO_CWD).unwrap();
+        assert_eq!(n, 1);
+
+        let out = fs::read_to_string(&dst).unwrap();
+        assert!(out.contains(r#""cwd": "/tmp/new""#));
+    }
+
+    #[test]
+    fn stream_rewrite_idempotent_on_second_pass() {
+        // Running the same rewrite twice must produce 0 changes the
+        // second time — nothing matches FROM_CWD any more.
+        let dir = tempdir().unwrap();
+        let src = dir.path().join("src.jsonl");
+        let dst = dir.path().join("dst.jsonl");
+        write(&src, "{\"cwd\":\"/tmp/old\",\"m\":\"y\"}\n");
+
+        assert_eq!(stream_rewrite_jsonl(&src, &dst, FROM_CWD, TO_CWD).unwrap(), 1);
+        // Second pass reads dst (already rewritten) — must be a no-op.
+        let dst2 = dir.path().join("dst2.jsonl");
+        assert_eq!(stream_rewrite_jsonl(&dst, &dst2, FROM_CWD, TO_CWD).unwrap(), 0);
+    }
+
+    #[test]
+    fn stream_rewrite_handles_paths_with_special_chars() {
+        // Backslashes and quotes in cwd — JSON escaping must match on both
+        // sides of the splice. Without encode_json_string this would miss.
+        let dir = tempdir().unwrap();
+        let src = dir.path().join("src.jsonl");
+        let dst = dir.path().join("dst.jsonl");
+        let from = r"C:\Users\joker\with quote\" ;
+        let to = r"C:\Users\joker\clean";
+        // JSON-escape the original for the on-disk fixture.
+        let encoded_from = serde_json::to_string(from).unwrap();
+        write(&src, &format!("{{\"cwd\":{encoded_from},\"m\":\"x\"}}\n"));
+
+        let n = stream_rewrite_jsonl(&src, &dst, from, to).unwrap();
+        assert_eq!(n, 1);
+        let out = fs::read_to_string(&dst).unwrap();
+        let encoded_to = serde_json::to_string(to).unwrap();
+        assert!(out.contains(&format!(r#""cwd":{encoded_to}"#)));
+    }
+
+    // --- rewrite_history_jsonl --------------------------------------------
+
+    #[test]
+    fn history_rewrites_on_sid_and_project_match() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("history.jsonl");
+        let sid = Uuid::new_v4();
+        write(
+            &path,
+            &format!(
+                "{{\"sessionId\":\"{sid}\",\"project\":\"/tmp/old\",\"m\":\"x\"}}\n\
+                 {{\"sessionId\":\"{sid}\",\"project\":\"/other\",\"m\":\"y\"}}\n"
+            ),
+        );
+
+        let (rewritten, unmapped) =
+            rewrite_history_jsonl(&path, sid, FROM_CWD, TO_CWD).unwrap();
+        assert_eq!(rewritten, 1);
+        assert_eq!(unmapped, 0);
+
+        let out = fs::read_to_string(&path).unwrap();
+        assert!(out.contains(r#""project":"/tmp/new""#));
+        assert!(out.contains(r#""project":"/other""#));
+    }
+
+    #[test]
+    fn history_unmapped_for_project_match_without_sessionid() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("history.jsonl");
+        let sid = Uuid::new_v4();
+        write(
+            &path,
+            "{\"project\":\"/tmp/old\",\"legacy\":true}\n",
+        );
+
+        let (rewritten, unmapped) =
+            rewrite_history_jsonl(&path, sid, FROM_CWD, TO_CWD).unwrap();
+        assert_eq!(rewritten, 0);
+        assert_eq!(unmapped, 1);
+
+        // Line is preserved byte-exact when unmappable.
+        let out = fs::read_to_string(&path).unwrap();
+        assert!(out.contains(r#""project":"/tmp/old""#));
+    }
+
+    #[test]
+    fn history_leaves_other_sessions_alone() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("history.jsonl");
+        let target = Uuid::new_v4();
+        let other = Uuid::new_v4();
+        write(
+            &path,
+            &format!(
+                "{{\"sessionId\":\"{other}\",\"project\":\"/tmp/old\",\"m\":\"x\"}}\n\
+                 {{\"sessionId\":\"{target}\",\"project\":\"/tmp/old\",\"m\":\"y\"}}\n"
+            ),
+        );
+
+        let (rewritten, unmapped) =
+            rewrite_history_jsonl(&path, target, FROM_CWD, TO_CWD).unwrap();
+        assert_eq!(rewritten, 1);
+        assert_eq!(unmapped, 0);
+
+        let out = fs::read_to_string(&path).unwrap();
+        // The other session's project stays pointing at /tmp/old.
+        let other_line = out
+            .lines()
+            .find(|l| l.contains(&other.to_string()))
+            .unwrap();
+        assert!(other_line.contains(r#""project":"/tmp/old""#));
+        let target_line = out
+            .lines()
+            .find(|l| l.contains(&target.to_string()))
+            .unwrap();
+        assert!(target_line.contains(r#""project":"/tmp/new""#));
+    }
+
+    #[test]
+    fn history_preserves_malformed_lines() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("history.jsonl");
+        let sid = Uuid::new_v4();
+        write(
+            &path,
+            &format!(
+                "{{not valid json\n{{\"sessionId\":\"{sid}\",\"project\":\"/tmp/old\"}}\n"
+            ),
+        );
+
+        let (rewritten, _unmapped) =
+            rewrite_history_jsonl(&path, sid, FROM_CWD, TO_CWD).unwrap();
+        assert_eq!(rewritten, 1);
+
+        let out = fs::read_to_string(&path).unwrap();
+        assert!(out.starts_with("{not valid json\n"));
+    }
 }
 
 /// Rewrite `project` fields in `history.jsonl` for lines whose

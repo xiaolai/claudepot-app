@@ -200,7 +200,7 @@ pub async fn adopt_current(
         }
     };
 
-    if let Err(e) = swap::snapshot(&data_dir, target_uuid, items) {
+    if let Err(e) = swap::snapshot(data_dir, target_uuid, items) {
         restore_stash(&stash);
         return Err(e.into());
     }
@@ -320,7 +320,7 @@ pub async fn clear_session(
     // Snapshot-before-delete when requested + feasible.
     let snapshot_kept = if keep_snapshot {
         if let Some(acct) = &active {
-            swap::snapshot(&data_dir, acct.uuid, items)?;
+            swap::snapshot(data_dir, acct.uuid, items)?;
             store
                 .update_desktop_profile_flag(acct.uuid, true)
                 .map_err(|e| ClearError::Store(e.to_string()))?;
@@ -349,10 +349,10 @@ pub async fn clear_session(
     };
 
     // Delete every session item from data_dir.
-    let items_deleted = delete_session_items(&data_dir, items)?;
+    let items_deleted = delete_session_items(data_dir, items)?;
 
     // Clean up the Network/ parent on Windows if empty.
-    prune_empty_parents(&data_dir, items);
+    prune_empty_parents(data_dir, items);
 
     // Clear the active pointer regardless of snapshot outcome —
     // Desktop is no longer signed in.
