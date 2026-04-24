@@ -29,17 +29,34 @@ pub(crate) fn claudepot_home_dirs()
 
 #[tauri::command]
 pub async fn project_list() -> Result<Vec<ProjectInfoDto>, String> {
-    let cfg = paths::claude_config_dir();
-    let projects = project::list_projects(&cfg).map_err(|e| format!("list failed: {e}"))?;
-    Ok(projects.iter().map(ProjectInfoDto::from).collect())
+    // `list_projects` fans out over every project slug, running
+    // `dir_size` (recursive), `recover_cwd_from_sessions` (JSONL I/O),
+    // `classify_reachability` (stat + optional slow-mount checks), and
+    // `canonicalize` on each. Multi-hundred-ms in the tail; keep it
+    // off the Tokio IPC worker so other commands don't queue behind it.
+    tauri::async_runtime::spawn_blocking(|| {
+        let cfg = paths::claude_config_dir();
+        let projects = project::list_projects(&cfg).map_err(|e| format!("list failed: {e}"))?;
+        Ok(projects.iter().map(ProjectInfoDto::from).collect())
+    })
+    .await
+    .map_err(|e| format!("list join: {e}"))?
 }
 
 #[tauri::command]
 pub async fn project_show(path: String) -> Result<ProjectDetailDto, String> {
-    let cfg = paths::claude_config_dir();
-    let detail =
-        project::show_project(&cfg, &path).map_err(|e| format!("show failed: {e}"))?;
-    Ok(ProjectDetailDto::from(&detail))
+    // Same heavy I/O shape as `project_list`, focused on a single slug.
+    // Fires on every row click — the freeze the user feels is this
+    // command holding a worker for seconds on large projects or
+    // stat-slow source paths.
+    tauri::async_runtime::spawn_blocking(move || {
+        let cfg = paths::claude_config_dir();
+        let detail =
+            project::show_project(&cfg, &path).map_err(|e| format!("show failed: {e}"))?;
+        Ok(ProjectDetailDto::from(&detail))
+    })
+    .await
+    .map_err(|e| format!("show join: {e}"))?
 }
 
 /// Sentinel the client checks for and silently discards. Distinguished
@@ -91,7 +108,14 @@ pub async fn project_move_dry_run(
         ignore_pending_journals: args.ignore_pending_journals,
         claudepot_state_dir: Some(repair_root),
     };
-    let plan = project::plan_move(&core_args).map_err(|e| format!("dry-run failed: {e}"))?;
+    // `plan_move` walks the source + target trees, reads snapshots,
+    // and consults `.claude.json`. Keep it off the Tokio IPC worker
+    // so rapid-typing token races don't starve other commands.
+    let plan = tauri::async_runtime::spawn_blocking(move || {
+        project::plan_move(&core_args).map_err(|e| format!("dry-run failed: {e}"))
+    })
+    .await
+    .map_err(|e| format!("dry-run join: {e}"))??;
 
     // Final check: a newer token arrived while we were computing. The
     // plan is stale by definition — return the sentinel instead of
@@ -113,36 +137,43 @@ pub async fn project_move_dry_run(
 /// a preview — the gate fires on `project_clean_execute`.
 #[tauri::command]
 pub async fn project_clean_preview() -> Result<CleanPreviewDto, String> {
-    let cfg = paths::claude_config_dir();
-    let (_journals, locks, snaps) = claudepot_home_dirs();
-    let (result, orphans) = project::clean_orphans(
-        &cfg,
-        None, // claude.json inspection during preview would be a read; skip for now — the execute path handles that and the preview just shows what will be removed.
-        Some(snaps.as_path()),
-        Some(locks.as_path()),
-        true, // dry run
-    )
-    .map_err(|e| format!("clean preview failed: {e}"))?;
+    // `clean_orphans(dry_run=true)` scans every project slug — same
+    // heavy path as `project_list`. Runs on the blocking pool.
+    tauri::async_runtime::spawn_blocking(|| {
+        let cfg = paths::claude_config_dir();
+        let (_journals, locks, snaps) = claudepot_home_dirs();
+        let (result, orphans) = project::clean_orphans(
+            &cfg,
+            None, // claude.json inspection during preview would be a read; skip for now — the execute path handles that and the preview just shows what will be removed.
+            Some(snaps.as_path()),
+            Some(locks.as_path()),
+            true, // dry run
+        )
+        .map_err(|e| format!("clean preview failed: {e}"))?;
 
-    let total_bytes = orphans.iter().map(|p| p.total_size_bytes).sum();
-    // Disclose how many candidates fall under protection so the
-    // confirmation modal can hint that sibling state will be preserved
-    // for those (audit fix). Resolution uses the same fail-safe
-    // fallback as the execute path so preview and execute agree.
-    let protected = claudepot_core::protected_paths::resolved_set_or_defaults(
-        &paths::claudepot_data_dir(),
-    );
-    let protected_count = orphans
-        .iter()
-        .filter(|p| !p.is_empty && protected.contains(&p.original_path))
-        .count();
-    Ok(CleanPreviewDto {
-        orphans: orphans.iter().map(ProjectInfoDto::from).collect(),
-        orphans_found: result.orphans_found,
-        unreachable_skipped: result.unreachable_skipped,
-        total_bytes,
-        protected_count,
+        let total_bytes = orphans.iter().map(|p| p.total_size_bytes).sum();
+        // Disclose how many candidates fall under protection so the
+        // confirmation modal can hint that sibling state will be
+        // preserved for those (audit fix). Resolution uses the same
+        // fail-safe fallback as the execute path so preview and execute
+        // agree.
+        let protected = claudepot_core::protected_paths::resolved_set_or_defaults(
+            &paths::claudepot_data_dir(),
+        );
+        let protected_count = orphans
+            .iter()
+            .filter(|p| !p.is_empty && protected.contains(&p.original_path))
+            .count();
+        Ok(CleanPreviewDto {
+            orphans: orphans.iter().map(ProjectInfoDto::from).collect(),
+            orphans_found: result.orphans_found,
+            unreachable_skipped: result.unreachable_skipped,
+            total_bytes,
+            protected_count,
+        })
     })
+    .await
+    .map_err(|e| format!("clean preview join: {e}"))?
 }
 
 /// Kick off a clean in the background, returning the op_id the UI
@@ -229,14 +260,21 @@ pub async fn project_clean_status(
 
 #[tauri::command]
 pub async fn repair_list() -> Result<Vec<JournalEntryDto>, String> {
-    let (journals, locks, _snaps) = claudepot_home_dirs();
-    let entries = project_repair::list_pending_with_status(
-        &journals,
-        &locks,
-        JOURNAL_NAG_THRESHOLD_SECS,
-    )
-    .map_err(|e| format!("repair list failed: {e}"))?;
-    Ok(entries.iter().map(JournalEntryDto::from).collect())
+    // Walks the journal dir + reads each journal header. Typical N is
+    // tiny, but the PendingJournalsBanner polls on refresh and the
+    // Maintenance view fans it out with other ops.
+    tauri::async_runtime::spawn_blocking(|| {
+        let (journals, locks, _snaps) = claudepot_home_dirs();
+        let entries = project_repair::list_pending_with_status(
+            &journals,
+            &locks,
+            JOURNAL_NAG_THRESHOLD_SECS,
+        )
+        .map_err(|e| format!("repair list failed: {e}"))?;
+        Ok(entries.iter().map(JournalEntryDto::from).collect())
+    })
+    .await
+    .map_err(|e| format!("repair list join: {e}"))?
 }
 
 /// Cheap count for the PendingJournalsBanner. Only counts *actionable*
@@ -244,10 +282,15 @@ pub async fn repair_list() -> Result<Vec<JournalEntryDto>, String> {
 /// perpetually nag about a user-dismissed entry.
 #[tauri::command]
 pub async fn repair_pending_count() -> Result<usize, String> {
-    let (journals, locks, _snaps) = claudepot_home_dirs();
-    let entries = project_repair::list_actionable(&journals, &locks, JOURNAL_NAG_THRESHOLD_SECS)
-        .map_err(|e| format!("repair count failed: {e}"))?;
-    Ok(entries.len())
+    tauri::async_runtime::spawn_blocking(|| {
+        let (journals, locks, _snaps) = claudepot_home_dirs();
+        let entries =
+            project_repair::list_actionable(&journals, &locks, JOURNAL_NAG_THRESHOLD_SECS)
+                .map_err(|e| format!("repair count failed: {e}"))?;
+        Ok(entries.len())
+    })
+    .await
+    .map_err(|e| format!("repair count join: {e}"))?
 }
 
 /// Status-aware banner input: counts per journal class so the UI can
@@ -257,29 +300,33 @@ pub async fn repair_pending_count() -> Result<usize, String> {
 /// the op live).
 #[tauri::command]
 pub async fn repair_status_summary() -> Result<crate::dto::PendingJournalsSummaryDto, String> {
-    use claudepot_core::project_journal::JournalStatus;
-    let (journals, locks, _snaps) = claudepot_home_dirs();
-    let entries = project_repair::list_pending_with_status(
-        &journals,
-        &locks,
-        JOURNAL_NAG_THRESHOLD_SECS,
-    )
-    .map_err(|e| format!("repair summary failed: {e}"))?;
+    tauri::async_runtime::spawn_blocking(|| {
+        use claudepot_core::project_journal::JournalStatus;
+        let (journals, locks, _snaps) = claudepot_home_dirs();
+        let entries = project_repair::list_pending_with_status(
+            &journals,
+            &locks,
+            JOURNAL_NAG_THRESHOLD_SECS,
+        )
+        .map_err(|e| format!("repair summary failed: {e}"))?;
 
-    let mut pending = 0usize;
-    let mut stale = 0usize;
-    let mut running = 0usize;
-    for e in &entries {
-        match e.status {
-            JournalStatus::Pending => pending += 1,
-            JournalStatus::Stale => stale += 1,
-            JournalStatus::Running => running += 1,
-            JournalStatus::Abandoned => {} // filtered
+        let mut pending = 0usize;
+        let mut stale = 0usize;
+        let mut running = 0usize;
+        for e in &entries {
+            match e.status {
+                JournalStatus::Pending => pending += 1,
+                JournalStatus::Stale => stale += 1,
+                JournalStatus::Running => running += 1,
+                JournalStatus::Abandoned => {} // filtered
+            }
         }
-    }
-    Ok(crate::dto::PendingJournalsSummaryDto {
-        pending,
-        stale,
-        running,
+        Ok(crate::dto::PendingJournalsSummaryDto {
+            pending,
+            stale,
+            running,
+        })
     })
+    .await
+    .map_err(|e| format!("repair summary join: {e}"))?
 }

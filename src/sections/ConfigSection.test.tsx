@@ -13,6 +13,8 @@ const configOpenInEditorPathSpy = vi.fn();
 const configSetEditorDefaultSpy = vi.fn();
 
 const configPreviewSpy = vi.fn();
+const configWatchStartSpy = vi.fn().mockResolvedValue(undefined);
+const configWatchStopSpy = vi.fn().mockResolvedValue(undefined);
 
 vi.mock("../api", () => ({
   api: {
@@ -25,8 +27,13 @@ vi.mock("../api", () => ({
       configSetEditorDefaultSpy(...a),
     configOpenInEditorPath: (...a: unknown[]) =>
       configOpenInEditorPathSpy(...a),
-    configWatchStart: vi.fn().mockResolvedValue(undefined),
-    configWatchStop: vi.fn().mockResolvedValue(undefined),
+    configWatchStart: (...a: unknown[]) => configWatchStartSpy(...a),
+    configWatchStop: (...a: unknown[]) => configWatchStopSpy(...a),
+    // Folder-anchored mode triggers effective-settings + hook count;
+    // return a neutral merged shape so the effect doesn't throw.
+    configEffectiveSettings: vi
+      .fn()
+      .mockResolvedValue({ merged: {}, provenance: [], policy_winner: null, policy_errors: [] }),
     // Anchor picker pulls the recent-projects list on mount.
     projectList: vi.fn().mockResolvedValue([]),
   },
@@ -58,6 +65,10 @@ function resetSpies() {
   configGetEditorDefaultsSpy.mockReset();
   configOpenInEditorPathSpy.mockReset();
   configSetEditorDefaultSpy.mockReset();
+  configWatchStartSpy.mockReset();
+  configWatchStartSpy.mockResolvedValue(undefined);
+  configWatchStopSpy.mockReset();
+  configWatchStopSpy.mockResolvedValue(undefined);
 }
 
 describe("ConfigSection — P0 smoke", () => {
@@ -118,5 +129,176 @@ describe("ConfigSection — P0 smoke", () => {
     );
     // Still renders the header — failure is non-fatal in P0.
     expect(screen.getByText("Config")).toBeInTheDocument();
+  });
+
+  // Regression: audit 2026-04-24 H1 — anchor-change cleanup used to
+  // fire `configWatchStop` which could arrive after the new
+  // `configWatchStart` and kill the fresh watcher. Contract now:
+  // anchor change → start only; stop fires only on section unmount.
+  it("does not fire configWatchStop on anchor change, only on unmount", async () => {
+    resetSpies();
+    configScanSpy.mockResolvedValue({
+      scopes: [],
+      cwd: "/repo",
+      project_root: "/repo",
+      config_home_dir: "/repo/.claude",
+      memory_slug: "",
+      memory_slug_lossy: false,
+    });
+    configListEditorsSpy.mockResolvedValue([]);
+    configGetEditorDefaultsSpy.mockResolvedValue({
+      by_kind: {},
+      fallback: "system",
+    });
+
+    const { rerender, unmount } = render(
+      <ConfigSection
+        subRoute={null}
+        onSubRouteChange={() => {}}
+        forcedAnchor={{ kind: "folder", path: "/repoA" }}
+      />,
+    );
+
+    // Initial mount: start fires, stop does not.
+    await waitFor(() => {
+      expect(configWatchStartSpy).toHaveBeenCalledTimes(1);
+    });
+    expect(configWatchStopSpy).not.toHaveBeenCalled();
+
+    // Anchor change: start fires again for the new anchor; stop MUST
+    // still not fire (the race fix relies on the backend's internal
+    // restart inside `configWatchStart`).
+    rerender(
+      <ConfigSection
+        subRoute={null}
+        onSubRouteChange={() => {}}
+        forcedAnchor={{ kind: "folder", path: "/repoB" }}
+      />,
+    );
+    await waitFor(() => {
+      expect(configWatchStartSpy).toHaveBeenCalledTimes(2);
+    });
+    expect(configWatchStopSpy).not.toHaveBeenCalled();
+
+    // Section unmount: THIS is where stop fires.
+    unmount();
+    await waitFor(() => {
+      expect(configWatchStopSpy).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  // Regression: audit 2026-04-24 H2 — overlapping `configScan` calls
+  // resolved out of order used to leave the tree showing the older
+  // anchor because the stale resolve ran `setTree` after the fresh
+  // one. The `scanGenRef` guard should drop stale resolves.
+  it("drops stale configScan resolves when a newer anchor is in flight", async () => {
+    resetSpies();
+    configListEditorsSpy.mockResolvedValue([]);
+    configGetEditorDefaultsSpy.mockResolvedValue({
+      by_kind: {},
+      fallback: "system",
+    });
+
+    type Defer = {
+      promise: Promise<unknown>;
+      resolve: (v: unknown) => void;
+    };
+    const makeDefer = (): Defer => {
+      let r: (v: unknown) => void = () => {};
+      const promise = new Promise((res) => {
+        r = res;
+      });
+      return { promise, resolve: r };
+    };
+
+    const scanA = makeDefer();
+    const scanB = makeDefer();
+    configScanSpy
+      .mockImplementationOnce(() => scanA.promise)
+      .mockImplementationOnce(() => scanB.promise);
+
+    const treeA = {
+      scopes: [
+        {
+          id: "scope:project:A",
+          scope_type: "Project",
+          label: "Project (cwd/.claude)",
+          recursive_count: 1,
+          files: [
+            {
+              id: "f:A",
+              rel_path: ".claude/settings.json",
+              abs_path: "/repoA/.claude/settings.json",
+              display_path: ".claude/settings.json",
+              kind: "Settings",
+              scope_badges: [],
+              size_bytes: 1,
+              mtime_unix_ns: 0,
+              issues: [],
+              symlink_origin: null,
+              included_by: null,
+              include_depth: 0,
+            },
+          ],
+        },
+      ],
+      cwd: "/repoA",
+      project_root: "/repoA",
+      config_home_dir: "/repoA/.claude",
+      memory_slug: "a",
+      memory_slug_lossy: false,
+    };
+    const treeB = {
+      ...treeA,
+      scopes: [
+        {
+          ...treeA.scopes[0],
+          id: "scope:project:B",
+          files: [
+            { ...treeA.scopes[0].files[0], id: "f:B", abs_path: "/repoB/.claude/settings.json" },
+          ],
+        },
+      ],
+      cwd: "/repoB",
+      project_root: "/repoB",
+      config_home_dir: "/repoB/.claude",
+      memory_slug: "b",
+    };
+
+    const { rerender } = render(
+      <ConfigSection
+        subRoute={null}
+        onSubRouteChange={() => {}}
+        forcedAnchor={{ kind: "folder", path: "/repoA" }}
+      />,
+    );
+
+    // Wait for scanA to be in flight.
+    await waitFor(() => expect(configScanSpy).toHaveBeenCalledTimes(1));
+
+    // Flip anchor to B — triggers scanB.
+    rerender(
+      <ConfigSection
+        subRoute={null}
+        onSubRouteChange={() => {}}
+        forcedAnchor={{ kind: "folder", path: "/repoB" }}
+      />,
+    );
+    await waitFor(() => expect(configScanSpy).toHaveBeenCalledTimes(2));
+
+    // Resolve B first (the fresh anchor); its scope id should render.
+    scanB.resolve(treeB);
+    await waitFor(() => {
+      expect(screen.queryByText(/repoB/i)).toBeTruthy();
+    });
+
+    // Now resolve A (the stale anchor). Its setTree must be dropped by
+    // the generation guard — the rendered tree must NOT flip back to
+    // A.
+    scanA.resolve(treeA);
+    // Give React a tick to (not) process the stale resolve.
+    await new Promise((r) => setTimeout(r, 20));
+    expect(screen.queryByText(/repoA/i)).toBeFalsy();
+    expect(screen.queryByText(/repoB/i)).toBeTruthy();
   });
 });

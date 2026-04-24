@@ -307,12 +307,22 @@ export function ConfigSection({
     return () => window.removeEventListener("keydown", onKey);
   }, []);
 
+  // Generation token for `configScan` requests. Each call captures the
+  // current gen; on return we only commit if it's still the latest.
+  // Fixes the stale-write race where two anchor changes in flight could
+  // land in reverse order and leave the tree showing the older anchor
+  // (audit 2026-04-24, H2).
+  const scanGenRef = useRef(0);
+
   const refreshTree = useCallback(async () => {
+    const myGen = ++scanGenRef.current;
     try {
       const t = await api.configScan(anchorCwd(anchor));
+      if (myGen !== scanGenRef.current) return; // superseded
       setTree(t);
       setLoadError(null);
     } catch (e) {
+      if (myGen !== scanGenRef.current) return; // superseded
       setLoadError(String(e));
     }
   }, [setTree, anchor]);
@@ -341,18 +351,28 @@ export function ConfigSection({
       );
   }, []);
 
-  // Scan + watcher are rebound whenever the anchor changes. Stopping
-  // first avoids two watchers racing on the same `config-tree-patch`
-  // channel.
+  // Scan + watcher are rebound whenever the anchor changes. We do NOT
+  // issue a `configWatchStop` from this effect's cleanup: `configWatchStart`
+  // already stops the previous watcher inside a state mutex, so firing
+  // an extra `stop` on cleanup can race and kill the freshly-started
+  // watcher when it arrives late (audit 2026-04-24, H1). The terminal
+  // `configWatchStop` for section unmount lives in its own effect below.
   useEffect(() => {
     void refreshTree();
     void api.configWatchStart(anchorCwd(anchor)).catch(() => {
       // Non-fatal — the tree still works via explicit Refresh.
     });
+  }, [anchor, refreshTree]);
+
+  // Section-unmount only: stop the watcher so it doesn't keep emitting
+  // to a webview that no longer listens. Deliberately empty deps —
+  // anchor changes are handled by the effect above via the backend's
+  // internal restart.
+  useEffect(() => {
     return () => {
       void api.configWatchStop().catch(() => {});
     };
-  }, [anchor, refreshTree]);
+  }, []);
 
   // Hook count lives downstream of effective settings. It's anchored
   // to the same cwd as the tree, so rebind whenever anchor changes.

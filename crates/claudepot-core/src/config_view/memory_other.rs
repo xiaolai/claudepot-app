@@ -37,8 +37,13 @@ pub fn scan_other_memory_dirs(current_project_slug: &str) -> Vec<MemorySlug> {
         if !mem.is_dir() {
             continue;
         }
-        let file_count = count_md_files(&mem);
-        if file_count == 0 {
+        let (file_count, truncated) = count_md_files(&mem);
+        // Suppress only when we proved the dir is empty of .md files.
+        // If the walker truncated (cap hit), we don't have that proof,
+        // so keep the slug visible — hiding a real memory source just
+        // because the walk was deep would be worse than rendering a
+        // possibly-undercounted row (audit 2026-04-24, M4).
+        if file_count == 0 && !truncated {
             continue;
         }
         let lossy = looks_lossy(&name);
@@ -66,25 +71,56 @@ fn looks_lossy(slug: &str) -> bool {
     slug.len() >= 200
 }
 
-fn count_md_files(dir: &Path) -> usize {
+/// Iterative bounded walk. The caller only needs "any .md files?" plus
+/// a rough count for display, so we cap both total entries visited and
+/// descent depth to stop a pathological tree (symlink loop, huge
+/// sibling repo scanned by accident) from dominating the scan — this
+/// function runs once per non-current project slug on every global
+/// config refresh.
+///
+/// Returns `(count, truncated)`. `truncated = true` means the walk hit
+/// a cap (entries or depth) before finishing — callers must NOT
+/// interpret `count == 0` as "no memory here" in that case, since the
+/// first `.md` file may have been beyond the cap (audit 2026-04-24, M4).
+fn count_md_files(root: &Path) -> (usize, bool) {
+    const MAX_ENTRIES: usize = 2048;
+    const MAX_DEPTH: usize = 6;
+
     let mut n = 0usize;
-    let Ok(rd) = std::fs::read_dir(dir) else { return 0 };
-    for entry in rd.flatten() {
-        let Ok(ft) = entry.file_type() else { continue };
-        if ft.is_dir() {
-            n += count_md_files(&entry.path());
-        } else if ft.is_file()
-            && entry
-                .path()
-                .extension()
-                .and_then(|e| e.to_str())
-                .map(|e| e.eq_ignore_ascii_case("md"))
-                .unwrap_or(false)
-        {
-            n += 1;
+    let mut visited = 0usize;
+    let mut truncated = false;
+    let mut stack: Vec<(PathBuf, usize)> = vec![(root.to_path_buf(), 0)];
+    while let Some((dir, depth)) = stack.pop() {
+        let Ok(rd) = std::fs::read_dir(&dir) else { continue };
+        for entry in rd.flatten() {
+            visited += 1;
+            if visited >= MAX_ENTRIES {
+                return (n, true);
+            }
+            let Ok(ft) = entry.file_type() else { continue };
+            if ft.is_dir() {
+                if depth + 1 < MAX_DEPTH {
+                    stack.push((entry.path(), depth + 1));
+                } else {
+                    // We have a subdir but can't descend into it. If
+                    // we never found a `.md` file here, a deeper one
+                    // may exist — flag as truncated so the caller
+                    // doesn't treat the dir as definitely empty.
+                    truncated = true;
+                }
+            } else if ft.is_file()
+                && entry
+                    .path()
+                    .extension()
+                    .and_then(|e| e.to_str())
+                    .map(|e| e.eq_ignore_ascii_case("md"))
+                    .unwrap_or(false)
+            {
+                n += 1;
+            }
         }
     }
-    n
+    (n, truncated)
 }
 
 /// Build a summary FileNode for a MemoryOther slug. The UI renders
@@ -196,6 +232,75 @@ mod tests {
             .title
             .unwrap()
             .starts_with("(lossy)"));
+    }
+
+    #[test]
+    fn count_md_files_respects_entry_cap() {
+        let td = tempfile::tempdir().unwrap();
+        // 3000 .md files at depth 1; cap is 2048 entries visited.
+        for i in 0..3000 {
+            std::fs::write(td.path().join(format!("n{i}.md")), "x").unwrap();
+        }
+        let (n, truncated) = count_md_files(td.path());
+        // Early-exit caps the count; exact value depends on readdir
+        // order, but it must be (a) at most the cap and (b) well
+        // above zero so callers still get "has memory" truthiness.
+        assert!(n > 0, "expected positive count, got {n}");
+        assert!(n <= 2048, "count should be capped, got {n}");
+        assert!(truncated, "cap should flag truncation");
+    }
+
+    #[test]
+    fn count_md_files_respects_depth_cap() {
+        let td = tempfile::tempdir().unwrap();
+        // 10-level deep chain with a .md file at each level. Depth cap
+        // is 6, so anything strictly deeper is invisible.
+        let mut p = td.path().to_path_buf();
+        for i in 0..10 {
+            p = p.join(format!("d{i}"));
+            std::fs::create_dir(&p).unwrap();
+            std::fs::write(p.join("note.md"), "x").unwrap();
+        }
+        let (n, truncated) = count_md_files(td.path());
+        assert!(n >= 1, "expected to find at least one file");
+        assert!(n <= 6, "depth cap should limit to ~6 files, got {n}");
+        assert!(truncated, "depth cap should flag truncation");
+    }
+
+    #[test]
+    fn count_md_files_reports_not_truncated_when_walk_completes() {
+        // No cap hit: 5 .md files at depth 1, no subdirs.
+        let td = tempfile::tempdir().unwrap();
+        for i in 0..5 {
+            std::fs::write(td.path().join(format!("n{i}.md")), "x").unwrap();
+        }
+        let (n, truncated) = count_md_files(td.path());
+        assert_eq!(n, 5);
+        assert!(!truncated, "complete walk should not flag truncation");
+    }
+
+    #[test]
+    fn scan_keeps_slug_when_cap_hits_before_first_md() {
+        // Fixture: a "memory" dir full of non-.md noise that exceeds
+        // the entry cap. `count_md_files` returns (0, true); the slug
+        // must still be included so the UI surfaces the directory
+        // instead of silently hiding it.
+        //
+        // We can't override CLAUDE_HOME inside `scan_other_memory_dirs`
+        // without wider plumbing, so this test exercises the same
+        // logic path via the reported pair directly: a zero-count +
+        // truncated outcome must be treated as "keep the slug."
+        let td = tempfile::tempdir().unwrap();
+        let memory = td.path().join("memory");
+        std::fs::create_dir(&memory).unwrap();
+        for i in 0..3000 {
+            std::fs::write(memory.join(format!("note{i}.txt")), "x").unwrap();
+        }
+        let (n, truncated) = count_md_files(&memory);
+        assert_eq!(n, 0, "no .md files exist");
+        assert!(truncated, "cap must trigger");
+        // Contract: the caller must KEEP this dir (`!(n == 0 && !truncated)`).
+        assert!(!(n == 0 && !truncated));
     }
 
     #[test]

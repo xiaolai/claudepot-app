@@ -78,31 +78,41 @@ const KEEPALIVE: Duration = Duration::from_secs(300);
 pub fn start(
     app: AppHandle,
     anchor: Option<PathBuf>,
-    tree_state: Arc<Mutex<Option<ConfigTree>>>,
+    tree_state: crate::commands_config::ConfigTreeState,
 ) -> Result<WatcherHandle, String> {
-    // Initial snapshot so subsequent diffs have something to compare
-    // against.
-    let seed = match &anchor {
-        Some(cwd) => discover::assemble_tree(cwd, false),
-        None => {
-            let home = dirs::home_dir().unwrap_or_else(|| PathBuf::from("/"));
-            discover::assemble_tree(&home, true)
-        }
-    };
-    {
-        let mut g = tree_state.lock().map_err(|e| format!("tree lock: {e}"))?;
-        *g = Some(seed);
-    }
-
     let stop = Arc::new(std::sync::atomic::AtomicBool::new(false));
     let stop_inner = stop.clone();
     let app_inner = app.clone();
     let tree_state_inner = tree_state.clone();
     let anchor_inner = anchor.clone();
 
+    // Seed runs inside the worker — the caller (the Tauri IPC worker)
+    // returns immediately instead of sitting on a full-tree scan.
+    //
+    // We seed unconditionally. A previous version tried to skip the
+    // seed when `tree_state` was already populated (reusing what
+    // `config_scan` left behind), but that let a new watcher for
+    // anchor B diff against anchor A's cached tree — `diff()` doesn't
+    // always emit `full_snapshot` on similar-shaped trees, so bogus
+    // incremental patches could slip through (audit 2026-04-24, H3).
+    // Overwriting with a fresh seed is cheap on a background thread
+    // and is always correct.
+    //
+    // The seed write uses the same generation counter as `config_scan`
+    // so a slow watcher seed can't clobber a newer `config_scan` result
+    // (audit 2026-04-24, H2).
     let worker = std::thread::Builder::new()
         .name("config-watch".to_string())
         .spawn(move || {
+            let my_gen = tree_state_inner.next_gen();
+            let seed = match &anchor_inner {
+                Some(cwd) => discover::assemble_tree(cwd, false),
+                None => {
+                    let home = dirs::home_dir().unwrap_or_else(|| PathBuf::from("/"));
+                    discover::assemble_tree(&home, true)
+                }
+            };
+            let _ = tree_state_inner.commit(my_gen, seed);
             if let Err(e) = run_loop(app_inner, anchor_inner, tree_state_inner, stop_inner) {
                 tracing::error!("config-watch loop exited: {e}");
             }
@@ -118,7 +128,7 @@ pub fn start(
 fn run_loop(
     app: AppHandle,
     anchor: Option<PathBuf>,
-    tree_state: Arc<Mutex<Option<ConfigTree>>>,
+    tree_state: crate::commands_config::ConfigTreeState,
     stop: Arc<std::sync::atomic::AtomicBool>,
 ) -> Result<(), String> {
     use std::sync::mpsc::channel;
@@ -249,10 +259,11 @@ fn notify_to_fs_event(ev: &notify_debouncer_mini::DebouncedEvent) -> FsEvent {
 fn emit_patch(
     app: &AppHandle,
     anchor: Option<&std::path::Path>,
-    tree_state: &Arc<Mutex<Option<ConfigTree>>>,
+    tree_state: &crate::commands_config::ConfigTreeState,
     gen: &DirtyGen,
     generation: u64,
 ) {
+    let my_gen = tree_state.next_gen();
     let (next, dirty) = scan_until_stable(gen, || match anchor {
         Some(cwd) => discover::assemble_tree(cwd, false),
         None => {
@@ -261,12 +272,12 @@ fn emit_patch(
         }
     });
 
-    let prev_opt = {
-        let g = match tree_state.lock() {
-            Ok(g) => g,
-            Err(_) => return,
-        };
-        g.clone()
+    // Snapshot the previous committed tree before building the diff.
+    // Cloning leaves us holding a detached value so the mutex is free
+    // during the diff + commit that follow.
+    let prev_opt = match tree_state.snapshot() {
+        Ok(o) => o,
+        Err(_) => return,
     };
 
     let core_patch: CorePatch = match &prev_opt {
@@ -282,8 +293,14 @@ fn emit_patch(
         },
     };
 
-    if let Ok(mut g) = tree_state.lock() {
-        *g = Some(next);
+    // Attempt to commit. If we lose the race (a newer generation —
+    // typically a concurrent `config_scan` — already committed), DROP
+    // the emit too: the client's tree is already at least as fresh as
+    // this patch's baseline, and applying our stale diff would roll it
+    // back (audit 2026-04-24 round 3).
+    let won = tree_state.commit(my_gen, next).unwrap_or(false);
+    if !won {
+        return;
     }
 
     let payload = encode_patch(core_patch, generation);
@@ -349,8 +366,14 @@ fn _type_guard(_: EventKind) {}
 /// Turn on the real-FS watcher. Idempotent — calling this while a
 /// watcher is already running stops the old one and starts a new one
 /// rooted at `cwd`.
+///
+/// The caller-facing work is cheap: stop the old watcher, clone the
+/// shared tree cache, spawn the worker. The worker thread owns the
+/// initial `assemble_tree` seed so the IPC worker that dispatched this
+/// command doesn't sit holding the full-tree scan (which overlapped
+/// with `config_scan`'s own scan on every anchor change).
 #[tauri::command]
-pub fn config_watch_start(
+pub async fn config_watch_start(
     cwd: Option<String>,
     app: AppHandle,
     state: tauri::State<'_, ConfigWatchState>,
@@ -364,17 +387,18 @@ pub fn config_watch_start(
         h.stop();
     }
 
-    // Hand the watcher the SAME Arc<Mutex<_>> that config_scan /
-    // config_preview use — snapshots land in a single cache, so the
-    // preview command resolves newly-added file ids without a rescan.
-    let shared: Arc<Mutex<Option<ConfigTree>>> = tree_state.0.clone();
+    // Hand the watcher a clone of the full `ConfigTreeState` (tree +
+    // generation counter) — snapshots land in the same cache that
+    // `config_scan` writes through, and both use the generation to
+    // avoid clobbering each other's results.
+    let shared = tree_state.inner().clone();
     let handle = start(app.clone(), cwd.map(PathBuf::from), shared)?;
     *guard = Some(handle);
     Ok(())
 }
 
 #[tauri::command]
-pub fn config_watch_stop(
+pub async fn config_watch_stop(
     state: tauri::State<'_, ConfigWatchState>,
 ) -> Result<(), String> {
     let mut guard = state

@@ -8,13 +8,21 @@ use uuid::Uuid;
 
 #[tauri::command]
 pub async fn session_list_orphans() -> Result<Vec<crate::dto::OrphanedProjectDto>, String> {
-    let cfg = paths::claude_config_dir();
-    let orphans = claudepot_core::session_move::detect_orphaned_projects(&cfg)
-        .map_err(|e| format!("orphan scan failed: {e}"))?;
-    Ok(orphans
-        .iter()
-        .map(crate::dto::OrphanedProjectDto::from)
-        .collect())
+    // Iterates every project slug, reads each slug's first session
+    // JSONL header to recover `cwd`, then stats that cwd. O(N projects)
+    // syscalls; runs in parallel with `project_list` on every Projects
+    // refresh. Off the Tokio worker.
+    tauri::async_runtime::spawn_blocking(|| {
+        let cfg = paths::claude_config_dir();
+        let orphans = claudepot_core::session_move::detect_orphaned_projects(&cfg)
+            .map_err(|e| format!("orphan scan failed: {e}"))?;
+        Ok(orphans
+            .iter()
+            .map(crate::dto::OrphanedProjectDto::from)
+            .collect())
+    })
+    .await
+    .map_err(|e| format!("orphan join: {e}"))?
 }
 
 /// CC stores `.claude.json` at `$HOME/.claude.json` — a sibling of
@@ -34,22 +42,29 @@ pub async fn session_move(
 ) -> Result<crate::dto::MoveSessionReportDto, String> {
     let sid = Uuid::parse_str(&session_id)
         .map_err(|e| format!("invalid session id: {e}"))?;
-    let cfg = paths::claude_config_dir();
-    let opts = claudepot_core::session_move::MoveSessionOpts {
-        force_live_session: force_live,
-        force_sync_conflict: force_conflict,
-        cleanup_source_if_empty: cleanup_source,
-        claude_json_path: claude_json_path(),
-    };
-    let report = claudepot_core::session_move::move_session(
-        &cfg,
-        sid,
-        std::path::Path::new(&from_cwd),
-        std::path::Path::new(&to_cwd),
-        opts,
-    )
-    .map_err(|e| format!("move failed: {e}"))?;
-    Ok(crate::dto::MoveSessionReportDto::from(&report))
+    // `move_session` rewrites transcript files, mutates `.claude.json`,
+    // and can touch the live-runtime lockfile. Blocking I/O with no
+    // await points — push it off the Tokio worker.
+    tauri::async_runtime::spawn_blocking(move || {
+        let cfg = paths::claude_config_dir();
+        let opts = claudepot_core::session_move::MoveSessionOpts {
+            force_live_session: force_live,
+            force_sync_conflict: force_conflict,
+            cleanup_source_if_empty: cleanup_source,
+            claude_json_path: claude_json_path(),
+        };
+        let report = claudepot_core::session_move::move_session(
+            &cfg,
+            sid,
+            std::path::Path::new(&from_cwd),
+            std::path::Path::new(&to_cwd),
+            opts,
+        )
+        .map_err(|e| format!("move failed: {e}"))?;
+        Ok(crate::dto::MoveSessionReportDto::from(&report))
+    })
+    .await
+    .map_err(|e| format!("move join: {e}"))?
 }
 
 #[tauri::command]
@@ -57,15 +72,23 @@ pub async fn session_adopt_orphan(
     slug: String,
     target_cwd: String,
 ) -> Result<crate::dto::AdoptReportDto, String> {
-    let cfg = paths::claude_config_dir();
-    let target = std::path::Path::new(&target_cwd);
-    if !target.is_dir() {
-        return Err(format!("target cwd does not exist: {target_cwd}"));
-    }
-    let report =
-        claudepot_core::session_move::adopt_orphan_project(&cfg, &slug, target, claude_json_path())
-            .map_err(|e| format!("adopt failed: {e}"))?;
-    Ok(crate::dto::AdoptReportDto::from(&report))
+    tauri::async_runtime::spawn_blocking(move || {
+        let cfg = paths::claude_config_dir();
+        let target = std::path::Path::new(&target_cwd);
+        if !target.is_dir() {
+            return Err(format!("target cwd does not exist: {target_cwd}"));
+        }
+        let report = claudepot_core::session_move::adopt_orphan_project(
+            &cfg,
+            &slug,
+            target,
+            claude_json_path(),
+        )
+        .map_err(|e| format!("adopt failed: {e}"))?;
+        Ok(crate::dto::AdoptReportDto::from(&report))
+    })
+    .await
+    .map_err(|e| format!("adopt join: {e}"))?
 }
 
 /// Move an orphan project slug dir to the OS Trash. The user can restore
@@ -75,8 +98,12 @@ pub async fn session_adopt_orphan(
 pub async fn session_discard_orphan(
     slug: String,
 ) -> Result<crate::dto::DiscardReportDto, String> {
-    let cfg = paths::claude_config_dir();
-    let report = claudepot_core::session_move::discard_orphan_project(&cfg, &slug)
-        .map_err(|e| format!("discard failed: {e}"))?;
-    Ok(crate::dto::DiscardReportDto::from(&report))
+    tauri::async_runtime::spawn_blocking(move || {
+        let cfg = paths::claude_config_dir();
+        let report = claudepot_core::session_move::discard_orphan_project(&cfg, &slug)
+            .map_err(|e| format!("discard failed: {e}"))?;
+        Ok(crate::dto::DiscardReportDto::from(&report))
+    })
+    .await
+    .map_err(|e| format!("discard join: {e}"))?
 }
