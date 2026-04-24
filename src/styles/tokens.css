@@ -175,8 +175,13 @@
 
   /* Config section — scope-first tree + editor-picker menu + preview.
      Width is responsive: floor 240px (readable) / ideal 30% of pane
-     / ceiling 360px (caps before crowding the preview). */
-  --config-tree-width:     clamp(240px, 30%, 360px);
+     / ceiling 360px (caps before crowding the preview). The
+     `-nested` variant is used when ConfigSection is rendered inside
+     ProjectsSection's CONFIG tab — there's already a project-filter
+     rail to the left, so the artifact tree can pull in tighter to
+     leave room for the detail pane. */
+  --config-tree-width:        clamp(240px, 30%, 360px);
+  --config-tree-width-nested: clamp(180px, 22%, 260px);
   --config-menu-min-width: 280px;
   --config-menu-max-height: min(60vh, 420px);
   --config-cmd-col-max:    240px;

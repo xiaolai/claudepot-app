@@ -158,6 +158,18 @@ function anchorLabel(anchor: ConfigAnchor): string {
 }
 
 /**
+ * Project / scope label rendered next to "Effective MCP" / "Effective
+ * settings" / "Hooks" titles. Lets the user see *which* scope the
+ * computed view applies to without scanning the surrounding chrome —
+ * useful when ConfigSection is nested inside a project tab and the
+ * outer breadcrumb is far away.
+ */
+function effectiveScopeLabel(anchor: ConfigAnchor): string | null {
+  if (anchor.kind === "global") return "Global";
+  return anchorLabel(anchor);
+}
+
+/**
  * Compact status strip for embedded ConfigSection — a slim row with
  * artifact count + dirty indicator on the left, Refresh on the right.
  * Replaces the full ScreenHeader when the surrounding shell already
@@ -670,7 +682,13 @@ export function ConfigSection({
         style={{
           flex: 1,
           display: "grid",
-          gridTemplateColumns: "var(--config-tree-width) minmax(0, 1fr)",
+          // When ConfigSection is nested inside ProjectsSection's
+          // CONFIG tab there's already a project-filter rail to the
+          // left; pull the artifact tree in tighter so the detail
+          // pane has room for tables (Effective MCP, Hooks).
+          gridTemplateColumns: forcedAnchor
+            ? "var(--config-tree-width-nested) minmax(0, 1fr)"
+            : "var(--config-tree-width) minmax(0, 1fr)",
           minHeight: 0,
         }}
       >
@@ -727,6 +745,7 @@ export function ConfigSection({
             <EffectiveShell
               title="Effective settings"
               subtitle="Merged view of every enabled source. Hover a value to see contributors."
+              scopeLabel={effectiveScopeLabel(anchor)}
             >
               <EffectiveRenderer cwd={tree?.cwd ?? null} />
             </EffectiveShell>
@@ -734,6 +753,7 @@ export function ConfigSection({
             <EffectiveShell
               title="Effective MCP"
               subtitle="MCP servers CC would see, per simulation mode."
+              scopeLabel={effectiveScopeLabel(anchor)}
             >
               <EffectiveMcpRenderer cwd={tree?.cwd ?? null} />
             </EffectiveShell>
@@ -741,6 +761,7 @@ export function ConfigSection({
             <EffectiveShell
               title="Hooks"
               subtitle="Registered hooks across every enabled settings layer. One row per matcher → command."
+              scopeLabel={effectiveScopeLabel(anchor)}
             >
               <HooksRenderer cwd={tree?.cwd ?? null} />
             </EffectiveShell>
@@ -1886,10 +1907,15 @@ function ConfigHomePane({
 function EffectiveShell({
   title,
   subtitle,
+  scopeLabel,
   children,
 }: {
   title: string;
   subtitle: string;
+  /** Project / "Global" context shown next to the title so the user can
+   *  read what scope this view applies to without scanning the
+   *  surrounding chrome. `null` hides the chip. */
+  scopeLabel?: string | null;
   children: React.ReactNode;
 }) {
   return (
@@ -1907,16 +1933,43 @@ function EffectiveShell({
           borderBottom: "var(--bw-hair) solid var(--line)",
         }}
       >
-        <h2
+        <div
           style={{
-            margin: 0,
-            fontSize: "var(--fs-lg)",
-            fontWeight: 600,
-            color: "var(--fg)",
+            display: "flex",
+            alignItems: "baseline",
+            gap: "var(--sp-10)",
+            flexWrap: "wrap",
           }}
         >
-          {title}
-        </h2>
+          <h2
+            style={{
+              margin: 0,
+              fontSize: "var(--fs-lg)",
+              fontWeight: 600,
+              color: "var(--fg)",
+            }}
+          >
+            {title}
+          </h2>
+          {scopeLabel && (
+            <span
+              className="mono-cap"
+              title={scopeLabel}
+              style={{
+                fontSize: "var(--fs-2xs)",
+                color: "var(--fg-faint)",
+                letterSpacing: "var(--ls-wide)",
+                textTransform: "uppercase",
+                overflow: "hidden",
+                textOverflow: "ellipsis",
+                whiteSpace: "nowrap",
+                maxWidth: "60%",
+              }}
+            >
+              {scopeLabel}
+            </span>
+          )}
+        </div>
         <div
           style={{
             marginTop: "var(--sp-4)",

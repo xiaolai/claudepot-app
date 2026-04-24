@@ -8,10 +8,14 @@ import type {
 import { Tag, type TagTone } from "../../components/primitives/Tag";
 import { SegmentedControl } from "../../components/SegmentedControl";
 
+// Display labels for the simulation segmented control. Kept short so
+// all three fit at any reasonable pane width (the longest, `non-int`,
+// matches `skip-perm` for visual balance). Hover surfaces the full
+// command-line equivalent via `MODE_TITLES`.
 const MODES: readonly { id: McpSimulationMode; label: string }[] = [
   { id: "interactive", label: "interactive" },
   { id: "non_interactive", label: "non-interactive" },
-  { id: "skip_permissions", label: "skip-permissions" },
+  { id: "skip_permissions", label: "skip-perms" },
 ] as const;
 
 const MODE_TITLES: Record<McpSimulationMode, string> = {
@@ -163,10 +167,16 @@ function ServerTable({
         tableLayout: "fixed",
       }}
     >
+      {/* Percentages only — mixing a fixed px (`--config-cmd-col-max`)
+          with percentages under `table-layout: fixed` squeezed the
+          Server column to a negative width in narrow panes (e.g.
+          nested inside Projects where the detail area is ~470px).
+          Proportional sizing keeps every column addressable at any
+          container size; the cells already `text-overflow: ellipsis`. */}
       <colgroup>
-        <col />
-        <col style={{ width: "30%" }} />
-        <col style={{ width: "var(--config-cmd-col-max)" }} />
+        <col style={{ width: "25%" }} />
+        <col style={{ width: "15%" }} />
+        <col style={{ width: "40%" }} />
         <col style={{ width: "20%" }} />
       </colgroup>
       <thead>
