@@ -69,6 +69,8 @@ pub enum Kind {
     Agent,
     Skill,
     Command,
+    OutputStyle,
+    Workflow,
     Rule,
     Hook,
     Memory,

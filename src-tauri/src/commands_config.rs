@@ -12,6 +12,13 @@
 //!
 //! Per `.claude/rules/architecture.md`: all logic lives in
 //! `claudepot_core::config_view`; these commands are DTO adapters only.
+//!
+//! # Threading policy
+//!
+//! All handlers in this file are `async fn` so Tauri dispatches them on a
+//! Tokio worker instead of the main thread. See the threading-policy
+//! comment in `commands.rs` for the full rationale — any blocking I/O on
+//! the main thread freezes the webview.
 
 use crate::preferences::PreferencesState;
 use claudepot_core::config_view::{
@@ -227,6 +234,8 @@ fn kind_to_str(k: &Kind) -> &'static str {
         Kind::Agent => "agent",
         Kind::Skill => "skill",
         Kind::Command => "command",
+        Kind::OutputStyle => "output_style",
+        Kind::Workflow => "workflow",
         Kind::Rule => "rule",
         Kind::Hook => "hook",
         Kind::Memory => "memory",
@@ -252,6 +261,8 @@ fn kind_from_str(s: &str) -> Option<Kind> {
         "agent" => Kind::Agent,
         "skill" => Kind::Skill,
         "command" => Kind::Command,
+        "output_style" => Kind::OutputStyle,
+        "workflow" => Kind::Workflow,
         "rule" => Kind::Rule,
         "hook" => Kind::Hook,
         "memory" => Kind::Memory,
@@ -315,7 +326,7 @@ pub struct PreviewDto {
 }
 
 #[tauri::command]
-pub fn config_preview(
+pub async fn config_preview(
     node_id: String,
     tree_state: State<'_, ConfigTreeState>,
 ) -> Result<PreviewDto, String> {
@@ -359,7 +370,7 @@ pub async fn config_list_editors(
 
 /// Read persisted editor defaults.
 #[tauri::command]
-pub fn config_get_editor_defaults(
+pub async fn config_get_editor_defaults(
     prefs: State<'_, PreferencesState>,
 ) -> Result<EditorDefaultsDto, String> {
     let g = prefs.0.lock().map_err(|e| format!("prefs lock: {e}"))?;
@@ -369,7 +380,7 @@ pub fn config_get_editor_defaults(
 /// Set the default editor for a given `kind`. When `kind` is `None`,
 /// update the global `fallback` instead.
 #[tauri::command]
-pub fn config_set_editor_default(
+pub async fn config_set_editor_default(
     kind: Option<String>,
     editor_id: String,
     prefs: State<'_, PreferencesState>,
@@ -398,7 +409,7 @@ pub fn config_set_editor_default(
 /// `kind_hint` steers per-kind default resolution — callers that
 /// don't know the kind pass `None` and we use the global fallback.
 #[tauri::command]
-pub fn config_open_in_editor_path(
+pub async fn config_open_in_editor_path(
     path: String,
     editor_id: Option<String>,
     kind_hint: Option<String>,
@@ -477,7 +488,7 @@ pub struct SearchSummaryDto {
 /// `config-search-hit::{search_id}`; summary via
 /// `config-search-done::{search_id}`.
 #[tauri::command]
-pub fn config_search_start(
+pub async fn config_search_start(
     search_id: String,
     query: SearchQueryDto,
     app: tauri::AppHandle,
@@ -558,7 +569,7 @@ impl SearchSummaryDto {
 }
 
 #[tauri::command]
-pub fn config_search_cancel(
+pub async fn config_search_cancel(
     search_id: String,
     registry: State<'_, SearchRegistry>,
 ) -> Result<(), String> {

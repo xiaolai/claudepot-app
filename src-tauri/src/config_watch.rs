@@ -413,6 +413,8 @@ fn kind_label(k: &Kind) -> String {
         Kind::Agent => "agent",
         Kind::Skill => "skill",
         Kind::Command => "command",
+        Kind::OutputStyle => "output_style",
+        Kind::Workflow => "workflow",
         Kind::Rule => "rule",
         Kind::Hook => "hook",
         Kind::Memory => "memory",
