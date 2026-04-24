@@ -1,14 +1,20 @@
 import { useId, useMemo, useState } from "react";
 import { open as openDialog } from "@tauri-apps/plugin-dialog";
-import { Icon } from "../../components/Icon";
 import { api } from "../../api";
 import { Button } from "../../components/primitives/Button";
+import { Glyph } from "../../components/primitives/Glyph";
 import {
   Modal,
   ModalHeader,
   ModalBody,
   ModalFooter,
 } from "../../components/primitives/Modal";
+import {
+  Disclosure,
+  FieldBlock,
+  OptionRow,
+} from "../../components/primitives/modalParts";
+import { NF } from "../../icons";
 import type { MoveSessionReport, ProjectInfo } from "../../types";
 import { classifyProject } from "./projectStatus";
 
@@ -51,6 +57,8 @@ export function MoveSessionModal({
   onCompleted: (report: MoveSessionReport) => void;
 }) {
   const headingId = useId();
+  const selectId = useId();
+  const customCwdId = useId();
 
   // Dropdown options: only "alive" projects — picking an orphan /
   // unreachable / empty target would either fail the backend or
@@ -83,11 +91,12 @@ export function MoveSessionModal({
   const target = selection === "__other__" ? customCwd.trim() : selection;
   const canSubmit =
     phase.kind === "idle" && target !== "" && target !== fromCwd;
+  const moving = phase.kind === "moving";
 
   // Escape is suppressed while a move is in flight — Modal wires
   // its own Escape handler, so we gate the onClose callback.
   const handleClose = () => {
-    if (phase.kind !== "moving") onClose();
+    if (!moving) onClose();
   };
 
   async function browse() {
@@ -126,119 +135,218 @@ export function MoveSessionModal({
   const shortTo = target ? (basename(target) ?? target) : "";
 
   return (
-    <Modal open onClose={handleClose} aria-labelledby={headingId}>
+    <Modal open onClose={handleClose} width="lg" aria-labelledby={headingId}>
       <ModalHeader
-        title={`Move session ${shortSid}`}
+        glyph={NF.arrowR}
+        title="Move session"
         id={headingId}
         onClose={handleClose}
       />
-      <ModalBody>
-        <p className="muted" style={{ marginTop: 0 }}>
-          From <strong className="mono">{shortFrom}</strong> to the target
-          you pick. Every transcript line's <code>cwd</code> is rewritten
-          so <code>--resume</code> will cd into the new project.
-          History entries keyed by this sessionId follow; pre-sessionId
-          entries stay behind.
+      <ModalBody
+        style={{
+          display: "flex",
+          flexDirection: "column",
+          gap: "var(--sp-14)",
+        }}
+      >
+        {/* Session identity strip — demoted below the title so the
+            8-char prefix isn't the loudest text on the screen. */}
+        <div
+          style={{
+            display: "flex",
+            alignItems: "baseline",
+            gap: "var(--sp-8)",
+            color: "var(--fg-faint)",
+            fontSize: "var(--fs-2xs)",
+          }}
+        >
+          <span className="mono-cap">session</span>
+          <span className="mono" title={sessionId}>
+            {shortSid}
+          </span>
+        </div>
+
+        <p
+          style={{
+            margin: 0,
+            fontSize: "var(--fs-sm)",
+            lineHeight: 1.5,
+            color: "var(--fg-muted)",
+          }}
+        >
+          From <strong className="mono" style={{ color: "var(--fg)" }}>{shortFrom}</strong>{" "}
+          to the target you pick. Every transcript line's{" "}
+          <code className="mono" style={{ fontSize: "var(--fs-xs)" }}>cwd</code>{" "}
+          is rewritten so{" "}
+          <code className="mono" style={{ fontSize: "var(--fs-xs)" }}>--resume</code>{" "}
+          opens the new project. History entries keyed by this sessionId
+          follow; pre-sessionId entries stay behind.
         </p>
 
         {phase.kind !== "done" ? (
           <>
-            <div className="move-session-form">
-              <label className="move-session-label">
-                Target project
-                <select
-                  value={selection}
-                  onChange={(e) => setSelection(e.target.value)}
-                  disabled={phase.kind === "moving"}
-                >
-                  {options.length === 0 && (
-                    <option value="__other__" disabled>
-                      No live project targets — pick Other…
+            <FieldBlock label="Target project" htmlFor={selectId}>
+              <select
+                id={selectId}
+                value={selection}
+                onChange={(e) => setSelection(e.target.value)}
+                disabled={moving}
+                className="mono pm-focus"
+                style={{
+                  width: "100%",
+                  height: "var(--sp-28)",
+                  padding: "0 var(--sp-8)",
+                  border: "var(--bw-hair) solid var(--line)",
+                  borderRadius: "var(--r-2)",
+                  background: "var(--bg)",
+                  color: "var(--fg)",
+                  fontSize: "var(--fs-sm)",
+                  cursor: moving ? "not-allowed" : "pointer",
+                }}
+              >
+                {options.length === 0 && (
+                  <option value="__other__" disabled>
+                    No live project targets — pick Other…
+                  </option>
+                )}
+                {options.map((p) => {
+                  const base = basename(p.original_path) ?? p.original_path;
+                  return (
+                    <option key={p.original_path} value={p.original_path}>
+                      {base} — {p.original_path}
                     </option>
-                  )}
-                  {options.map((p) => {
-                    const base = basename(p.original_path) ?? p.original_path;
-                    return (
-                      <option key={p.original_path} value={p.original_path}>
-                        {base} — {p.original_path}
-                      </option>
-                    );
-                  })}
-                  <option value="__other__">Other…</option>
-                </select>
-              </label>
+                  );
+                })}
+                <option value="__other__">Other…</option>
+              </select>
+            </FieldBlock>
 
-              {selection === "__other__" && (
-                <div className="adopt-orphans-row-input">
+            {selection === "__other__" && (
+              <FieldBlock label="Custom path" htmlFor={customCwdId}>
+                <div
+                  style={{
+                    display: "flex",
+                    gap: "var(--sp-6)",
+                    alignItems: "stretch",
+                  }}
+                >
                   <input
+                    id={customCwdId}
                     type="text"
-                    className="path-input pm-focus"
+                    className="mono pm-focus"
                     placeholder="Target cwd (absolute path)"
                     value={customCwd}
                     onChange={(e) => setCustomCwd(e.target.value)}
-                    disabled={phase.kind === "moving"}
+                    disabled={moving}
+                    style={{
+                      flex: 1,
+                      padding: "var(--sp-6) var(--sp-10)",
+                      fontSize: "var(--fs-sm)",
+                      color: "var(--fg)",
+                      background: "var(--bg)",
+                      border: "var(--bw-hair) solid var(--line)",
+                      borderRadius: "var(--r-2)",
+                      outline: "none",
+                    }}
                   />
-                  <Button
-                    variant="ghost"
-                    onClick={browse}
-                    disabled={phase.kind === "moving"}
-                  >
+                  <Button variant="ghost" onClick={browse} disabled={moving}>
                     Browse…
                   </Button>
                 </div>
-              )}
+              </FieldBlock>
+            )}
 
-              <details className="move-session-advanced">
-                <summary>Advanced</summary>
-                <label className="move-session-check">
-                  <input
-                    type="checkbox"
-                    checked={forceLive}
-                    onChange={(e) => setForceLive(e.target.checked)}
-                    disabled={phase.kind === "moving"}
-                  />
+            <Disclosure label="Advanced">
+              <OptionRow
+                type="checkbox"
+                checked={forceLive}
+                onChange={(e) => setForceLive(e.target.checked)}
+                disabled={moving}
+              >
+                <strong style={{ fontWeight: 600 }}>
                   Force past the live-session mtime guard
-                  <span className="muted">
-                    (use only if CC isn't writing to this session)
-                  </span>
-                </label>
-                <label className="move-session-check">
-                  <input
-                    type="checkbox"
-                    checked={forceConflict}
-                    onChange={(e) => setForceConflict(e.target.checked)}
-                    disabled={phase.kind === "moving"}
-                  />
-                  Force past Syncthing <code>.sync-conflict-*</code>
-                  <span className="muted">
-                    (will silently orphan the conflict copy)
-                  </span>
-                </label>
-                <label className="move-session-check">
-                  <input
-                    type="checkbox"
-                    checked={cleanupSource}
-                    onChange={(e) => setCleanupSource(e.target.checked)}
-                    disabled={phase.kind === "moving"}
-                  />
+                </strong>
+                <span style={{ color: "var(--fg-faint)" }}>
+                  {" "}
+                  — use only if CC isn't writing to this session.
+                </span>
+              </OptionRow>
+              <OptionRow
+                type="checkbox"
+                checked={forceConflict}
+                onChange={(e) => setForceConflict(e.target.checked)}
+                disabled={moving}
+              >
+                <strong style={{ fontWeight: 600 }}>
+                  Force past Syncthing{" "}
+                  <code className="mono" style={{ fontSize: "var(--fs-xs)" }}>
+                    .sync-conflict-*
+                  </code>
+                </strong>
+                <span style={{ color: "var(--fg-faint)" }}>
+                  {" "}
+                  — will silently orphan the conflict copy.
+                </span>
+              </OptionRow>
+              <OptionRow
+                type="checkbox"
+                checked={cleanupSource}
+                onChange={(e) => setCleanupSource(e.target.checked)}
+                disabled={moving}
+              >
+                <strong style={{ fontWeight: 600 }}>
                   Remove source project dir if it's empty after the move
-                  <span className="muted">
-                    (was the last session here? tidy up the husk)
-                  </span>
-                </label>
-              </details>
-            </div>
+                </strong>
+                <span style={{ color: "var(--fg-faint)" }}>
+                  {" "}
+                  — tidy up the husk when this was the last session here.
+                </span>
+              </OptionRow>
+            </Disclosure>
 
             {phase.kind === "error" && (
-              <p className="move-session-error" role="alert">
-                <Icon name="alert-circle" size={12} /> {phase.message}
-              </p>
+              <div
+                role="alert"
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  gap: "var(--sp-6)",
+                  margin: 0,
+                  padding: "var(--sp-8) var(--sp-10)",
+                  border: "var(--bw-hair) solid var(--bad)",
+                  background: "var(--bad-weak)",
+                  color: "var(--bad)",
+                  borderRadius: "var(--r-2)",
+                  fontSize: "var(--fs-xs)",
+                }}
+              >
+                <Glyph g={NF.warn} style={{ fontSize: "var(--fs-xs)" }} />
+                <span style={{ minWidth: 0, flex: 1, wordBreak: "break-word" }}>
+                  {phase.message}
+                </span>
+              </div>
             )}
           </>
         ) : (
-          <div className="move-session-done">
-            <p className="move-session-done-line">
-              <Icon name="check" size={14} /> Moved.
+          <div
+            style={{
+              display: "flex",
+              flexDirection: "column",
+              gap: "var(--sp-12)",
+            }}
+          >
+            <p
+              style={{
+                display: "flex",
+                alignItems: "center",
+                gap: "var(--sp-6)",
+                margin: 0,
+                fontSize: "var(--fs-sm)",
+                color: "var(--ok)",
+              }}
+            >
+              <Glyph g={NF.check} style={{ fontSize: "var(--fs-sm)" }} />
+              Moved.
             </p>
             <dl className="detail-grid">
               <dt>Transcript lines rewritten</dt>
@@ -259,7 +367,7 @@ export function MoveSessionModal({
               <dd>
                 {phase.report.historyEntriesMoved}
                 {phase.report.historyEntriesUnmapped > 0 && (
-                  <span className="muted">
+                  <span style={{ color: "var(--fg-faint)" }}>
                     {" · "}
                     {phase.report.historyEntriesUnmapped} stayed (pre-sessionId)
                   </span>
@@ -286,11 +394,7 @@ export function MoveSessionModal({
       <ModalFooter>
         {phase.kind !== "done" ? (
           <>
-            <Button
-              variant="ghost"
-              onClick={handleClose}
-              disabled={phase.kind === "moving"}
-            >
+            <Button variant="ghost" onClick={handleClose} disabled={moving}>
               Cancel
             </Button>
             <Button
@@ -299,9 +403,7 @@ export function MoveSessionModal({
               disabled={!canSubmit}
               autoFocus
             >
-              {phase.kind === "moving"
-                ? "Moving…"
-                : `Move to ${shortTo || "…"}`}
+              {moving ? "Moving…" : `Move to ${shortTo || "…"}`}
             </Button>
           </>
         ) : (

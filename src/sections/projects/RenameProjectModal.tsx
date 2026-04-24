@@ -1,8 +1,8 @@
 import { useCallback, useEffect, useId, useMemo, useRef, useState } from "react";
-import { Icon } from "../../components/Icon";
 import { open as openDialog } from "@tauri-apps/plugin-dialog";
 import { api } from "../../api";
 import { Button } from "../../components/primitives/Button";
+import { Glyph } from "../../components/primitives/Glyph";
 import { IconButton } from "../../components/primitives/IconButton";
 import {
   Modal,
@@ -10,6 +10,12 @@ import {
   ModalBody,
   ModalFooter,
 } from "../../components/primitives/Modal";
+import {
+  FieldBlock,
+  GroupCard,
+  Hint,
+  OptionRow,
+} from "../../components/primitives/modalParts";
 import { NF } from "../../icons";
 import { DRY_RUN_SUPERSEDED, type DryRunPlan, type MoveArgs } from "../../types";
 
@@ -36,9 +42,6 @@ type CollisionPolicy = "none" | "merge" | "overwrite";
  *   explicit consequence copy.
  * - Submit is explicitly not a safety claim — copy below the button
  *   says so verbatim.
- *
- * Submit itself is stubbed in this step; Step 6 wires it to
- * `project_move_start`.
  */
 export function RenameProjectModal({
   oldPath,
@@ -144,28 +147,47 @@ export function RenameProjectModal({
 
   const conflict = preview.kind === "ok" ? preview.plan.conflict : null;
   const conflictNeedsPolicy = Boolean(conflict) && collision === "none";
-  const submitDisabled =
-    !newPath.trim() ||
-    newPath === oldPath ||
-    preview.kind !== "ok" ||
-    conflictNeedsPolicy;
+  const disabledReason: string | null = (() => {
+    if (!newPath.trim()) return "Enter a new path";
+    if (newPath === oldPath) return "New path is unchanged";
+    if (preview.kind === "loading") return "Computing preview…";
+    if (preview.kind === "error") return "Preview failed";
+    if (preview.kind === "idle") return "Preview pending";
+    if (conflictNeedsPolicy) return "Resolve the conflict above";
+    return null;
+  })();
+  const submitDisabled = disabledReason !== null;
 
   return (
     <Modal open onClose={onClose} width="lg" aria-labelledby={headingId}>
       <ModalHeader
+        glyph={NF.edit}
         title="Rename project"
         id={headingId}
         onClose={onClose}
       />
-      <ModalBody>
-        <div className="rename-modal-inner">
-          <label className="field-label">Current path</label>
-          <div className="mono small selectable muted">{oldPath}</div>
+      <ModalBody style={{ display: "flex", flexDirection: "column", gap: "var(--sp-16)" }}>
+        <FieldBlock label="Current path">
+          <div
+            className="mono selectable"
+            style={{
+              fontSize: "var(--fs-sm)",
+              color: "var(--fg-muted)",
+              padding: "var(--sp-6) var(--sp-10)",
+              background: "var(--bg-sunken)",
+              border: "var(--bw-hair) solid var(--line)",
+              borderRadius: "var(--r-2)",
+              overflow: "hidden",
+              textOverflow: "ellipsis",
+              whiteSpace: "nowrap",
+            }}
+          >
+            {oldPath}
+          </div>
+        </FieldBlock>
 
-          <label className="field-label" htmlFor="rename-new-path">
-            New path
-          </label>
-          <div className="field-row">
+        <FieldBlock label="New path" htmlFor="rename-new-path">
+          <div style={{ display: "flex", gap: "var(--sp-6)", alignItems: "stretch" }}>
             <input
               id="rename-new-path"
               type="text"
@@ -176,6 +198,16 @@ export function RenameProjectModal({
               autoComplete="off"
               autoFocus
               onChange={(e) => setNewPath(e.target.value)}
+              style={{
+                flex: 1,
+                padding: "var(--sp-6) var(--sp-10)",
+                fontSize: "var(--fs-sm)",
+                color: "var(--fg)",
+                background: "var(--bg)",
+                border: "var(--bw-hair) solid var(--line)",
+                borderRadius: "var(--r-2)",
+                outline: "none",
+              }}
             />
             <IconButton
               glyph={NF.folder}
@@ -184,139 +216,135 @@ export function RenameProjectModal({
               onClick={browseParent}
             />
           </div>
-          <p className="muted small">
+          <Hint>
             Different case = case-only rename (handled via two-step on
             case-insensitive disks).
-          </p>
+          </Hint>
+        </FieldBlock>
 
-          <fieldset className="field-group">
-            <legend className="field-label">Collision policy</legend>
-            <label className="radio-row">
-              <input
-                type="radio"
-                name="collision"
-                checked={collision === "none"}
-                onChange={() => setCollision("none")}
-              />
-              <span>None — abort if target exists</span>
-            </label>
-            <label className="radio-row">
-              <input
-                type="radio"
-                name="collision"
-                checked={collision === "merge"}
-                onChange={() => setCollision("merge")}
-              />
-              <span>Merge (old wins)</span>
-            </label>
-            <label className="radio-row">
-              <input
-                type="radio"
-                name="collision"
-                checked={collision === "overwrite"}
-                onChange={() => setCollision("overwrite")}
-              />
-              <span>Overwrite</span>
-            </label>
-          </fieldset>
+        <GroupCard label="Collision policy">
+          <OptionRow
+            type="radio"
+            name="collision"
+            checked={collision === "none"}
+            onChange={() => setCollision("none")}
+          >
+            <strong style={{ fontWeight: 600 }}>None</strong> — abort if target exists
+          </OptionRow>
+          <OptionRow
+            type="radio"
+            name="collision"
+            checked={collision === "merge"}
+            onChange={() => setCollision("merge")}
+          >
+            <strong style={{ fontWeight: 600 }}>Merge (old wins)</strong> — keep existing files at target
+          </OptionRow>
+          <OptionRow
+            type="radio"
+            name="collision"
+            checked={collision === "overwrite"}
+            onChange={() => setCollision("overwrite")}
+          >
+            <strong style={{ fontWeight: 600 }}>Overwrite</strong> — replace files at target with source
+          </OptionRow>
+        </GroupCard>
 
-          <label className="check-row">
-            <input
-              type="checkbox"
-              checked={noMove}
-              onChange={(e) => setNoMove(e.target.checked)}
-            />
-            <span>
-              <strong>State-only</strong> — update CC state, don't move the
-              source directory
+        <OptionRow
+          type="checkbox"
+          checked={noMove}
+          onChange={(e) => setNoMove(e.target.checked)}
+        >
+          <strong style={{ fontWeight: 600 }}>State-only</strong> — update CC state, don't move the source directory
+        </OptionRow>
+
+        <GroupCard
+          label={
+            <span style={{ display: "inline-flex", alignItems: "center", gap: "var(--sp-5)", color: "var(--bad)" }}>
+              <Glyph g={NF.warn} size="var(--fs-xs)" /> Danger zone
             </span>
-          </label>
+          }
+          tone="danger"
+        >
+          <OptionRow
+            type="checkbox"
+            checked={force}
+            onChange={(e) => setForce(e.target.checked)}
+          >
+            <strong style={{ fontWeight: 600 }}>--force</strong> — skip live-session detection. If CC is running
+            against this project, its session files can be corrupted.
+          </OptionRow>
+          <OptionRow
+            type="checkbox"
+            checked={ignorePending}
+            onChange={(e) => setIgnorePending(e.target.checked)}
+          >
+            <strong style={{ fontWeight: 600 }}>--ignore-pending-journals</strong> — run even if a prior rename
+            left a journal behind. Resolve pending journals first via Repair
+            unless you know why this one is safe.
+          </OptionRow>
+        </GroupCard>
 
-          <fieldset className="danger-zone">
-            <legend>
-              <Icon name="alert-triangle" size={14} /> Danger zone
-            </legend>
-            <label className="check-row">
-              <input
-                type="checkbox"
-                checked={force}
-                onChange={(e) => setForce(e.target.checked)}
-              />
-              <span>
-                <strong>--force</strong> — skip live-session detection. If CC
-                is running against this project, its session files can be
-                corrupted.
-              </span>
-            </label>
-            <label className="check-row">
-              <input
-                type="checkbox"
-                checked={ignorePending}
-                onChange={(e) => setIgnorePending(e.target.checked)}
-              />
-              <span>
-                <strong>--ignore-pending-journals</strong> — run even if a
-                prior rename left a journal behind. Resolve pending journals
-                first via Repair unless you know why this one is safe.
-              </span>
-            </label>
-          </fieldset>
-
-          <div className="preview-pane" aria-live="polite">
-            <div className="field-label">Preview</div>
-            {preview.kind === "idle" && (
-              <p className="muted small">Enter a new path to preview.</p>
-            )}
-            {preview.kind === "loading" && (
-              <p className="muted small">Computing preview…</p>
-            )}
+        <FieldBlock label="Preview">
+          <div
+            aria-live="polite"
+            style={{
+              padding: "var(--sp-8) var(--sp-12)",
+              background: "var(--bg-sunken)",
+              border: "var(--bw-hair) solid var(--line)",
+              borderRadius: "var(--r-2)",
+              fontSize: "var(--fs-sm)",
+              color: "var(--fg-muted)",
+            }}
+          >
+            {preview.kind === "idle" && <span>Enter a new path to preview.</span>}
+            {preview.kind === "loading" && <span>Computing preview…</span>}
             {preview.kind === "error" && (
-              <div className="banner warn">
-                <strong>Invalid:</strong>{" "}
-                <span className="mono small">{preview.message}</span>
+              <div>
+                <strong style={{ color: "var(--fg)", fontWeight: 600 }}>Invalid:</strong>{" "}
+                <span className="mono" style={{ fontSize: "var(--fs-xs)" }}>{preview.message}</span>
               </div>
             )}
             {preview.kind === "ok" && (
-              <ul className="preview-list">
+              <ul
+                style={{
+                  listStyle: "none",
+                  margin: 0,
+                  padding: 0,
+                  display: "grid",
+                  gap: "var(--sp-4)",
+                }}
+              >
                 <li>
-                  {preview.plan.would_move_dir ? "Will" : "Won't"} move source
-                  directory
+                  {preview.plan.would_move_dir ? "Will" : "Won't"} move source directory
                 </li>
                 <li>
-                  CC dir:{" "}
-                  <code className="mono">{preview.plan.old_cc_dir}</code> →{" "}
-                  <code className="mono">{preview.plan.new_cc_dir}</code>
+                  CC dir: <code className="mono" style={{ fontSize: "var(--fs-xs)" }}>{preview.plan.old_cc_dir}</code>{" "}
+                  → <code className="mono" style={{ fontSize: "var(--fs-xs)" }}>{preview.plan.new_cc_dir}</code>
                 </li>
                 <li>
                   {preview.plan.session_count} session
                   {preview.plan.session_count === 1 ? "" : "s"},{" "}
                   {preview.plan.estimated_jsonl_files} jsonl file
-                  {preview.plan.estimated_jsonl_files === 1 ? "" : "s"} to
-                  rewrite
+                  {preview.plan.estimated_jsonl_files === 1 ? "" : "s"} to rewrite
                 </li>
                 <li>
-                  ~/.claude.json:{" "}
-                  {preview.plan.would_rewrite_claude_json ? "rewrite" : "skip"}
+                  ~/.claude.json: {preview.plan.would_rewrite_claude_json ? "rewrite" : "skip"}
                 </li>
                 <li>
-                  Auto-memory dir:{" "}
-                  {preview.plan.would_move_memory_dir ? "move" : "skip"}
+                  Auto-memory dir: {preview.plan.would_move_memory_dir ? "move" : "skip"}
                 </li>
                 <li>
                   Project-local settings:{" "}
-                  {preview.plan.would_rewrite_project_settings
-                    ? "rewrite"
-                    : "skip"}
+                  {preview.plan.would_rewrite_project_settings ? "rewrite" : "skip"}
                 </li>
                 {preview.plan.estimated_history_lines > 0 && (
                   <li>
-                    History lines potentially updated: ~
-                    {preview.plan.estimated_history_lines}
+                    History lines potentially updated: ~{preview.plan.estimated_history_lines}
                   </li>
                 )}
                 {conflict && (
-                  <li className="bad">
-                    <strong>Conflict:</strong> {conflict}
+                  <li style={{ color: "var(--bad)" }}>
+                    <strong style={{ fontWeight: 600 }}>Conflict:</strong> {conflict}
                     {collision === "none" && (
                       <>
                         {" "}
@@ -328,22 +356,32 @@ export function RenameProjectModal({
               </ul>
             )}
           </div>
-        </div>
+        </FieldBlock>
       </ModalBody>
       <ModalFooter>
         <p
-          className="muted small"
           style={{
             flex: 1,
+            margin: 0,
             textAlign: "left",
             fontSize: "var(--fs-xs)",
             color: "var(--fg-faint)",
-            margin: 0,
           }}
         >
           Preview is approximate. Live-session and pending-journal checks
           happen at apply time.
         </p>
+        {submitDisabled && disabledReason && (
+          <span
+            style={{
+              fontSize: "var(--fs-xs)",
+              color: "var(--fg-faint)",
+              fontStyle: "italic",
+            }}
+          >
+            {disabledReason}
+          </span>
+        )}
         <Button variant="ghost" onClick={onClose}>
           Cancel
         </Button>
