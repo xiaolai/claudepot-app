@@ -16,6 +16,8 @@ const file = (id: string, title: string): ConfigFileNodeDto => ({
   summary_title: title,
   summary_description: null,
   issues: [],
+  included_by: null,
+  include_depth: 0,
 });
 
 const scope = (id: string, files: ConfigFileNodeDto[]): ConfigScopeNodeDto => ({
