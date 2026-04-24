@@ -377,44 +377,59 @@ pub enum WalkBoundary {
     FsRoot,
 }
 
-/// Locate the stop boundary under `GitRootOrHome`. Returns `None` if
-/// neither `.git` nor home is found — caller walks to FS root.
-fn stop_boundary_git_root_or_home(cwd: &Path) -> Option<PathBuf> {
-    let home = dirs::home_dir();
-    let mut cur = Some(cwd.to_path_buf());
-    while let Some(d) = cur {
-        if d.join(".git").exists() {
-            return Some(d);
-        }
-        if Some(&d) == home.as_ref() {
-            return Some(d);
-        }
-        cur = d.parent().map(|p| p.to_path_buf());
-    }
-    None
-}
-
 /// Compute the list of ancestor dirs under the chosen `WalkBoundary`.
 /// Output is shallow → deep (root first, cwd last), matching how CC
 /// processes memory files so deeper overrides shallower.
+///
+/// `GitRootOrHome`: includes the nearest `.git` dir (if found) and
+/// stops there. If no `.git` is found, stops at — and **excludes** —
+/// `$HOME`. CC's `getProjectDirsUpToHome` (`markdownConfigLoader.ts:244-
+/// 251`) breaks the loop *before* processing the home directory so
+/// `~/.claude/{agents,…}` never leaks into Project scope.
+///
+/// `FsRoot`: walks cwd up to (but **not including**) the filesystem
+/// root. CC's memory loader uses `while (currentDir !==
+/// parse(currentDir).root)` at `claudemd.ts:854`, so `/CLAUDE.md` and
+/// `/.mcp.json` are never loaded.
 fn ancestors_for(cwd: &Path, boundary: WalkBoundary) -> Vec<PathBuf> {
-    let stop = match boundary {
-        WalkBoundary::GitRootOrHome => stop_boundary_git_root_or_home(cwd),
-        WalkBoundary::FsRoot => None,
-    };
+    let home = dirs::home_dir();
+    let fs_root = filesystem_root_of(cwd);
     let mut out = Vec::new();
     let mut cur = Some(cwd.to_path_buf());
     while let Some(d) = cur {
-        out.push(d.clone());
-        if let Some(s) = &stop {
-            if s == &d {
-                break;
+        match boundary {
+            WalkBoundary::GitRootOrHome => {
+                if home.as_ref() == Some(&d) {
+                    // Exclude `$HOME` itself — CC stops BEFORE adding it.
+                    break;
+                }
+                out.push(d.clone());
+                if d.join(".git").exists() {
+                    break;
+                }
+            }
+            WalkBoundary::FsRoot => {
+                if Some(&d) == fs_root.as_ref() {
+                    // Exclude the filesystem root.
+                    break;
+                }
+                out.push(d.clone());
             }
         }
         cur = d.parent().map(|p| p.to_path_buf());
     }
     out.reverse();
     out
+}
+
+/// Return the filesystem root for an arbitrary path (e.g. `/` on Unix,
+/// `C:\` on Windows). Matches JS `path.parse(dir).root`.
+fn filesystem_root_of(p: &Path) -> Option<PathBuf> {
+    let mut cur = p.to_path_buf();
+    while let Some(parent) = cur.parent() {
+        cur = parent.to_path_buf();
+    }
+    Some(cur)
 }
 
 /// Memory dir for current project (per `getAutoMemPath`, simplified).
@@ -766,6 +781,30 @@ fn external_includes_approved() -> bool {
         .unwrap_or(false)
 }
 
+/// True when `~/.claude/managed-mcp.json` exists AND declares at least
+/// one MCP server. CC uses this as an enterprise lockout switch — when
+/// set, project/user/local MCP sources are ignored entirely
+/// (`services/mcp/config.ts` + plan §9.4). A malformed file or an
+/// empty `{}` is treated as "not locked" so the flag only ever fires
+/// when the admin actually provisioned servers.
+fn managed_mcp_is_nonempty() -> bool {
+    let p = claude_config_dir().join("managed-mcp.json");
+    let Ok(bytes) = std::fs::read(&p) else { return false };
+    let Ok(v): Result<serde_json::Value, _> = serde_json::from_slice(&bytes) else {
+        return false;
+    };
+    // CC checks both the top-level `mcpServers` key and the shorthand
+    // `{ <name>: {…} }` shape used by `.mcp.json` — treat any non-empty
+    // object field as "provisioned".
+    if let Some(m) = v.get("mcpServers").and_then(|x| x.as_object()) {
+        return !m.is_empty();
+    }
+    if let Some(o) = v.as_object() {
+        return !o.is_empty();
+    }
+    false
+}
+
 /// For every memory-kind `FileNode` in `files`, resolve its `@include`
 /// chain and append synthetic nodes describing each reachable target.
 /// Cycles and missing files are silently dropped inside the resolver.
@@ -991,7 +1030,7 @@ pub fn assemble_tree(cwd: &Path) -> ConfigTree {
         memory_slug,
         memory_slug_lossy,
         cc_version_hint: None,
-        enterprise_mcp_lockout: false,
+        enterprise_mcp_lockout: managed_mcp_is_nonempty(),
     }
 }
 
@@ -1125,23 +1164,27 @@ mod tests {
     }
 
     #[test]
-    fn ancestors_fs_root_goes_to_filesystem_root() {
+    fn ancestors_fs_root_excludes_filesystem_root() {
         let root = PathBuf::from("/a/b/c/d");
         let a = ancestors_for(&root, WalkBoundary::FsRoot);
-        // Shallow → deep, stops only at filesystem root.
+        // CC: `while (currentDir !== parse(currentDir).root)` — root
+        // itself is NOT in the list.
         assert_eq!(a.last().unwrap(), &PathBuf::from("/a/b/c/d"));
-        assert_eq!(a.first().unwrap(), &PathBuf::from("/"));
+        assert!(!a.contains(&PathBuf::from("/")));
+        assert_eq!(a.first().unwrap(), &PathBuf::from("/a"));
     }
 
     #[test]
     fn ancestors_git_root_or_home_stops_at_git() {
-        // Simulate a .git at /a/b by using a temp dir.
         let td = TempDir::new().unwrap();
         let mid = td.path().join("mid");
         let leaf = mid.join("leaf");
         std::fs::create_dir_all(&leaf).unwrap();
         std::fs::create_dir_all(mid.join(".git")).unwrap();
         let a = ancestors_for(&leaf, WalkBoundary::GitRootOrHome);
+        // `.git` parent is INCLUDED (matches CC — see
+        // `markdownConfigLoader.ts:261-275` — git-root dir is processed,
+        // then the loop breaks).
         assert_eq!(a.first().unwrap(), &mid);
         assert_eq!(a.last().unwrap(), &leaf);
     }

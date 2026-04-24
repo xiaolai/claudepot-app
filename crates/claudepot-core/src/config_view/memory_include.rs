@@ -21,9 +21,42 @@
 //!   `hasClaudeMdExternalIncludesApproved` flag from the global
 //!   config. The gate is applied by the caller, not this module.
 
+use once_cell::sync::Lazy;
 use regex::Regex;
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
+
+/// CC's extraction regex, compiled once at first use.
+/// Pattern: `/(?:^|\s)@((?:[^\s\\]|\\ )+)/g` (`claudemd.ts:459`).
+static INCLUDE_RE: Lazy<Regex> =
+    Lazy::new(|| Regex::new(r"(?:^|\s)@((?:[^\s\\]|\\ )+)").expect("include regex is constant"));
+
+/// Strip a leading YAML frontmatter block (`---\n...\n---`) before
+/// scanning for `@` paths. CC runs `parseFrontmatterPaths` before
+/// `extractIncludePathsFromTokens` (`claudemd.ts:356-378`), so `@`
+/// tokens inside frontmatter are never extracted.
+fn strip_frontmatter(body: &str) -> &str {
+    let Some(rest) = body.strip_prefix("---\n").or_else(|| body.strip_prefix("---\r\n")) else {
+        return body;
+    };
+    // Find the closing `---` line. It must be on its own line.
+    let mut cur = 0usize;
+    while let Some(idx) = rest[cur..].find("\n---") {
+        let marker_start = cur + idx + 1; // position of `-` after `\n`
+        let after = &rest[marker_start + 3..];
+        if after.starts_with('\n') {
+            return &after[1..];
+        }
+        if after.starts_with("\r\n") {
+            return &after[2..];
+        }
+        if after.is_empty() {
+            return "";
+        }
+        cur = marker_start + 3;
+    }
+    body
+}
 
 /// CC's `MAX_INCLUDE_DEPTH` — `claudemd.ts:537`. Include chains deeper
 /// than this are truncated.
@@ -83,12 +116,14 @@ pub const TEXT_FILE_EXTENSIONS: &[&str] = &[
     ".log", ".diff", ".patch",
 ];
 
-/// Returns true when `path`'s extension is in the CC text-file
-/// allowlist. No extension → false (CC's `if (ext && …)` at
-/// `claudemd.ts:350-354`). Comparison is ASCII-lowercase to match
-/// `toLowerCase()` in CC.
+/// Returns true when `path` either lacks an extension or whose
+/// extension is in the CC text-file allowlist. CC only rejects
+/// **non-empty** non-allowed extensions (`if (ext && !…)` at
+/// `claudemd.ts:350-354`), so `@Makefile`, `@LICENSE`, and other
+/// extensionless text files still load. Comparison is ASCII-lowercase
+/// to match `toLowerCase()` in CC.
 pub fn is_text_extension(path: &Path) -> bool {
-    let Some(ext) = path.extension() else { return false };
+    let Some(ext) = path.extension() else { return true };
     let ext_lc = ext.to_string_lossy().to_ascii_lowercase();
     let full = format!(".{ext_lc}");
     TEXT_FILE_EXTENSIONS.contains(&full.as_str())
@@ -110,11 +145,11 @@ pub struct ResolvedInclude {
 /// path shapes and unsupported extensions are dropped here so the
 /// caller's recursion budget doesn't spend on dead ends.
 pub fn extract_includes(body: &str, base_dir: &Path) -> Vec<PathBuf> {
+    let body = strip_frontmatter(body);
     let scannable = mask_non_scannable(body);
-    let re = include_regex();
     let mut out: Vec<PathBuf> = Vec::new();
     let mut seen: HashSet<PathBuf> = HashSet::new();
-    for cap in re.captures_iter(&scannable) {
+    for cap in INCLUDE_RE.captures_iter(&scannable) {
         let Some(raw) = cap.get(1) else { continue };
         let stripped = strip_fragment(raw.as_str());
         let Some(unescaped) = unescape_spaces(stripped) else {
@@ -134,39 +169,32 @@ pub fn extract_includes(body: &str, base_dir: &Path) -> Vec<PathBuf> {
     out
 }
 
-/// CC's regex `/(?:^|\s)@((?:[^\s\\]|\\ )+)/g`. The leading alternation
-/// ensures the `@` isn't inside another word. Compiled once.
-fn include_regex() -> Regex {
-    // Rust's `regex` crate supports `(?:…)` but not lookbehind; the
-    // leading `(?:^|\s)` is zero-width in the match length sense but
-    // consumes one char (the space). That's fine because we only care
-    // about the captured group 1.
-    Regex::new(r"(?:^|\s)@((?:[^\s\\]|\\ )+)").unwrap()
-}
-
-/// Replace fenced-code / inline-code / non-comment HTML spans with
-/// equal-length whitespace so offset-sensitive consumers still work.
-/// HTML comment residue is preserved in-line; the `<!-- -->` wrapper
-/// itself is blanked.
+/// Replace fenced-code / inline-code / HTML spans with equal-length
+/// whitespace so offset-sensitive consumers still work. HTML comment
+/// spans (`<!-- ... -->`) are blanked in their entirety — matches CC's
+/// comment handling at `claudemd.ts:506-511`, which strips the whole
+/// span via `/<!--[\s\S]*?-->/g` and re-scans only the non-comment
+/// residue of the html token. Other HTML tags are also blanked so
+/// text between block-level tags is skipped the way CC skips non-text
+/// tokens.
 fn mask_non_scannable(body: &str) -> String {
-    let bytes = body.as_bytes();
-    let mut out = body.to_string();
-    // Pass 1: fenced blocks. Look line-by-line for a line whose first
-    // non-whitespace run is ``` or ~~~ (3+). Close on the matching
-    // marker.
-    mask_fenced_blocks(&mut out);
-    // Pass 2: inline backticks. Match shortest `…` span.
-    mask_inline_code(&mut out);
-    // Pass 3: HTML blocks. Comments keep their residue (outside the
-    // <!-- --> wrapper); other tags blanked.
-    mask_html(&mut out);
-    // Sanity: length preserved.
-    debug_assert_eq!(out.len(), bytes.len());
-    out
+    let len = body.len();
+    // Work on a mutable byte buffer that we later re-promote to
+    // UTF-8. We only ever write ASCII space (0x20) and keep newlines
+    // intact, so every write lands inside the first byte of a valid
+    // code point and the result remains valid UTF-8 without touching
+    // `String`'s unsafe surface.
+    let mut buf = body.as_bytes().to_vec();
+    mask_fenced_blocks(&mut buf);
+    mask_inline_code(&mut buf);
+    mask_html(&mut buf);
+    debug_assert_eq!(buf.len(), len);
+    // Safe: every byte we blanked was overwritten with a space; all
+    // other bytes are unchanged from the original `&str`.
+    String::from_utf8(buf).expect("masker preserves UTF-8")
 }
 
-fn mask_fenced_blocks(text: &mut String) {
-    let bytes = unsafe { text.as_bytes_mut() };
+fn mask_fenced_blocks(bytes: &mut [u8]) {
     let mut in_fence: Option<(u8, usize)> = None; // (marker, run_len)
     let mut i = 0usize;
     let mut line_start = 0usize;
@@ -209,8 +237,7 @@ fn mask_fenced_blocks(text: &mut String) {
     }
 }
 
-fn mask_inline_code(text: &mut String) {
-    let bytes = unsafe { text.as_bytes_mut() };
+fn mask_inline_code(bytes: &mut [u8]) {
     let mut i = 0usize;
     while i < bytes.len() {
         if bytes[i] == b'`' {
@@ -241,30 +268,32 @@ fn mask_inline_code(text: &mut String) {
     }
 }
 
-fn mask_html(text: &mut String) {
-    let bytes = unsafe { text.as_bytes_mut() };
+fn mask_html(bytes: &mut [u8]) {
     let mut i = 0usize;
     while i < bytes.len() {
         if bytes[i] == b'<' {
-            // Comment?
+            // HTML comment — blank the **entire** span including
+            // interior text. CC strips `<!-- ... -->` via
+            // `/<!--[\s\S]*?-->/g` at `claudemd.ts:507-508`, so `@path`
+            // references inside comments are never extracted.
             if bytes[i..].starts_with(b"<!--") {
-                // Blank `<!--` and the matching `-->`, keep interior bytes.
                 let start = i;
                 let open_end = i + 4;
                 if let Some(close_rel) = find_subslice(&bytes[open_end..], b"-->") {
-                    let close_start = open_end + close_rel;
-                    let close_end = close_start + 3;
-                    blank_range(bytes, start, open_end);
-                    blank_range(bytes, close_start, close_end);
+                    let close_end = open_end + close_rel + 3;
+                    blank_range(bytes, start, close_end);
                     i = close_end;
                     continue;
                 } else {
-                    // Unterminated comment — blank the rest.
                     blank_range(bytes, start, bytes.len());
                     break;
                 }
             }
-            // Tag? Find matching `>`; blank the whole tag.
+            // Plain HTML tag — blank the tag itself so `@` in attr
+            // values doesn't match. Interior text between tags is still
+            // scanned, which is a documented limitation vs. CC's full
+            // tokenizer; adding a dependency-free markdown lexer would
+            // be the next step if this proves insufficient.
             if i + 1 < bytes.len() && (bytes[i + 1].is_ascii_alphabetic() || bytes[i + 1] == b'/' || bytes[i + 1] == b'!') {
                 if let Some(close_rel) = find_subslice(&bytes[i..], b">") {
                     let close_end = i + close_rel + 1;
@@ -314,24 +343,9 @@ fn unescape_spaces(s: &str) -> Option<String> {
     if s.is_empty() {
         return None;
     }
-    let mut out = String::with_capacity(s.len());
-    let mut bytes = s.bytes();
-    while let Some(b) = bytes.next() {
-        if b == b'\\' {
-            if let Some(next) = bytes.next() {
-                if next == b' ' {
-                    out.push(' ');
-                } else {
-                    out.push('\\');
-                    out.push(next as char);
-                }
-            } else {
-                out.push('\\');
-            }
-        } else {
-            out.push(b as char);
-        }
-    }
+    // CC's `path.replace(/\\ /g, ' ')` at `claudemd.ts:473`. Chars-safe
+    // so non-ASCII filenames (e.g. `café.md`) are preserved verbatim.
+    let out = s.replace("\\ ", " ");
     if out.is_empty() { None } else { Some(out) }
 }
 
@@ -368,7 +382,12 @@ fn is_valid_path_shape(path: &str) -> bool {
 
 /// Mirror of CC's `utils/path.ts:expandPath`. `~` and `~/…` expand to
 /// the user's home dir; `.` / bare paths resolve against `base_dir`;
-/// `/…` is absolute.
+/// absolute paths pass through.
+///
+/// Absoluteness is tested with `Path::is_absolute` rather than a
+/// `starts_with('/')` check so Windows drive-letter paths (`C:\…`) and
+/// UNC paths (`\\server\share\…`) are classified correctly per
+/// `rules/paths.md`.
 pub fn expand_path(path: &str, base_dir: &Path) -> PathBuf {
     if path == "~" {
         return dirs::home_dir().unwrap_or_else(|| PathBuf::from("/"));
@@ -378,8 +397,9 @@ pub fn expand_path(path: &str, base_dir: &Path) -> PathBuf {
             return home.join(rest);
         }
     }
-    if path.starts_with('/') {
-        return PathBuf::from(path);
+    let p = Path::new(path);
+    if p.is_absolute() {
+        return p.to_path_buf();
     }
     if let Some(rest) = path.strip_prefix("./") {
         return base_dir.join(rest);
@@ -416,6 +436,10 @@ fn walk(
     processed: &mut HashSet<PathBuf>,
     out: &mut Vec<ResolvedInclude>,
 ) {
+    // CC's `processMemoryFile` returns `[]` when `depth >= MAX_DEPTH`
+    // (`claudemd.ts:630`), so no file at depth == MAX_DEPTH is ever
+    // emitted. Mirror that here — children whose depth would reach the
+    // cap are simply not enqueued.
     if depth >= MAX_DEPTH {
         return;
     }
@@ -428,9 +452,16 @@ fn walk(
     // file don't both recurse (`claudemd.ts:629-648`).
     processed.insert(file.to_path_buf());
 
-    let Ok(bytes) = std::fs::read(file) else { return };
+    let Ok(bytes) = std::fs::read(&canon_original) else { return };
     let Ok(body) = std::str::from_utf8(&bytes) else { return };
-    let base_dir = file.parent().unwrap_or(Path::new("."));
+    // CC resolves symlinks **before** resolving `@include` paths so the
+    // include base matches the real on-disk location of the containing
+    // file (`claudemd.ts:639-648`). Use the canonicalized parent so
+    // `@./foo.md` next to a symlinked root still lands on the physical
+    // neighbour.
+    let base_dir = canon_original
+        .parent()
+        .unwrap_or_else(|| Path::new("."));
     for target in extract_includes(body, base_dir) {
         let canon = std::fs::canonicalize(&target)
             .unwrap_or_else(|_| target.clone());
@@ -440,26 +471,20 @@ fn walk(
         if !allow_external && !is_inside(&canon, original_cwd) {
             continue;
         }
-        if depth + 1 == MAX_DEPTH {
-            // Emit leaf without recursing further.
-            if processed.insert(canon.clone()) {
-                out.push(ResolvedInclude {
-                    abs_path: canon.clone(),
-                    included_by: parent.to_path_buf(),
-                    depth: depth + 1,
-                });
-            }
+        if processed.contains(&canon) {
             continue;
         }
-        if processed.contains(&canon) {
+        let child_depth = depth + 1;
+        if child_depth >= MAX_DEPTH {
+            // CC wouldn't emit this file (depth >= MAX) — skip.
             continue;
         }
         out.push(ResolvedInclude {
             abs_path: canon.clone(),
             included_by: parent.to_path_buf(),
-            depth: depth + 1,
+            depth: child_depth,
         });
-        walk(&canon, original_cwd, allow_external, depth + 1, &canon, processed, out);
+        walk(&canon, original_cwd, allow_external, child_depth, &canon, processed, out);
     }
 }
 
@@ -569,9 +594,11 @@ mod tests {
     }
 
     #[test]
-    fn recursive_depth_cap() {
+    fn recursive_depth_cap_matches_cc() {
         let td = TempDir::new().unwrap();
-        // Chain 10 files deep; MAX_DEPTH=5 should cap.
+        // Chain 10 files deep. CC's `processMemoryFile` returns [] at
+        // depth >= MAX_DEPTH (=5), so the deepest emitted file sits at
+        // depth MAX_DEPTH - 1 (=4). Root (depth 0) isn't in `out`.
         for i in 0..10 {
             let p = td.path().join(format!("{i}.md"));
             let body = if i < 9 {
@@ -583,12 +610,60 @@ mod tests {
         }
         let root = td.path().join("0.md");
         let out = resolve_all(&root, td.path(), true);
-        assert!(out.len() <= MAX_DEPTH);
+        assert_eq!(out.len(), MAX_DEPTH - 1);
         assert_eq!(out.first().unwrap().depth, 1);
-        // Depth strictly increases along the chain.
-        for w in out.windows(2) {
-            assert_eq!(w[1].depth, w[0].depth + 1);
-        }
+        assert_eq!(out.last().unwrap().depth, MAX_DEPTH - 1);
+    }
+
+    #[test]
+    fn extensionless_includes_allowed() {
+        let td = TempDir::new().unwrap();
+        // CC only rejects explicit non-text extensions (`.exe`, `.png`,
+        // …). Extensionless filenames like `Makefile` or `LICENSE` MUST
+        // pass through.
+        let paths = extract_includes("@./Makefile here @./LICENSE end", td.path());
+        assert_eq!(paths.len(), 2);
+        assert_eq!(paths[0], td.path().join("Makefile"));
+        assert_eq!(paths[1], td.path().join("LICENSE"));
+    }
+
+    #[test]
+    fn strips_frontmatter_before_scan() {
+        let td = TempDir::new().unwrap();
+        // CC extracts includes from the content *after* frontmatter is
+        // removed. `@bad.md` inside the YAML front matter must not leak.
+        let body = "---\npaths: '@bad.md'\n---\n@./real.md here";
+        let paths = extract_includes(body, td.path());
+        assert_eq!(paths, vec![td.path().join("real.md")]);
+    }
+
+    #[test]
+    fn html_comment_interior_is_blanked() {
+        let td = TempDir::new().unwrap();
+        // CC strips the entire `<!-- ... -->` span. `@` references
+        // that live inside a comment must NOT be extracted.
+        let body = "<!-- @./hidden.md --> @./visible.md";
+        let paths = extract_includes(body, td.path());
+        assert_eq!(paths, vec![td.path().join("visible.md")]);
+    }
+
+    #[test]
+    fn unescape_spaces_preserves_non_ascii() {
+        let td = TempDir::new().unwrap();
+        // Non-ASCII filenames must round-trip through the unescape
+        // pass — regressions here corrupt UTF-8 silently.
+        let paths = extract_includes(r"@./café\ notes.md here", td.path());
+        assert_eq!(paths, vec![td.path().join("café notes.md")]);
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn windows_drive_letter_is_absolute() {
+        use std::path::Path;
+        assert_eq!(
+            expand_path("C:\\users\\x.md", Path::new("X:\\bogus")),
+            PathBuf::from("C:\\users\\x.md"),
+        );
     }
 
     #[test]
@@ -626,11 +701,16 @@ mod tests {
     }
 
     #[test]
-    fn is_text_extension_matches_common() {
+    fn is_text_extension_matches_cc_contract() {
+        // Per claudemd.ts:350-354, CC only rejects non-empty extensions
+        // that aren't in the allowlist. Extensionless files (Makefile,
+        // LICENSE, …) are treated as text.
         assert!(is_text_extension(Path::new("/x/a.md")));
         assert!(is_text_extension(Path::new("/x/a.JSON")));
         assert!(is_text_extension(Path::new("/x/a.ts")));
+        assert!(is_text_extension(Path::new("/x/Makefile")));
+        assert!(is_text_extension(Path::new("/x/LICENSE")));
         assert!(!is_text_extension(Path::new("/x/a.png")));
-        assert!(!is_text_extension(Path::new("/x/noext")));
+        assert!(!is_text_extension(Path::new("/x/a.exe")));
     }
 }
