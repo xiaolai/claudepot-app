@@ -288,13 +288,43 @@ pub async fn sync_from_current_cc(store: &AccountStore) -> Result<Option<Uuid>, 
     .await
 }
 
-pub(crate) async fn sync_from_current_cc_with(
-    store: &AccountStore,
+/// Resolve CC's current identity from its keychain, healing stale
+/// access tokens when a paired refresh_token still works. Returns
+/// `Ok(None)` if CC has no credentials or the stored blob is
+/// unparseable — both are benign "nothing to sync" outcomes.
+///
+/// ## Race handling
+///
+/// A naive implementation (snapshot blob once, 401 → refresh with that
+/// snapshot's refresh_token) races against CC's own refresh loop.
+/// Token refresh is single-use: whichever party calls `/token` second
+/// with the same refresh_token is rejected. The loser sees the
+/// rejection as `AuthRejected` and asks the user to re-login even
+/// though CC itself is perfectly healthy.
+///
+/// To close that window:
+///
+/// 1. `/profile` with the access_token from the initial snapshot.
+/// 2. On 401, re-read the keychain. If the blob changed, retry
+///    `/profile` with the fresh access_token first — the common case
+///    is CC having rotated between our read and our call. Don't
+///    consume a refresh_token for this.
+/// 3. If the retry also 401s (or the blob hasn't changed), refresh
+///    using the LATEST refresh_token we have evidence of. Only a
+///    definitive `RefreshFailed` from the token endpoint is terminal
+///    (`AuthRejected`); everything else is transient (`ProfileFetch`).
+///
+/// The rotated blob is written back to CC's keychain so CC's next
+/// keychain read sees the fresh token. The write is guarded by a
+/// best-effort CAS against the keychain: if another writer landed
+/// something newer between our refresh and our write, we yield
+/// rather than clobber.
+async fn resolve_cc_identity(
     platform: &dyn cli_backend::CliPlatform,
     fetch_profile: &dyn ProfileFetcher,
     refresher: &dyn crate::cli_backend::swap::TokenRefresher,
-) -> Result<Option<Uuid>, RegisterError> {
-    let blob_str = match platform
+) -> Result<Option<(String, String)>, RegisterError> {
+    let blob_str_t0 = match platform
         .read_default()
         .await
         .map_err(|e| RegisterError::CredentialRead(e.to_string()))?
@@ -303,65 +333,114 @@ pub(crate) async fn sync_from_current_cc_with(
         None => return Ok(None), // CC has no credentials — nothing to sync.
     };
 
-    let blob = match CredentialBlob::from_json(&blob_str) {
+    let blob_t0 = match CredentialBlob::from_json(&blob_str_t0) {
         Ok(b) => b,
         Err(_) => return Ok(None), // Unparseable — leave it alone.
     };
 
-    // Resolve CC's current identity, self-healing a stale access_token
-    // via the paired refresh_token. When the profile endpoint returns
-    // 401 we don't know whether the token simply expired (normal, every
-    // few hours) or was revoked; the canonical discriminator is
-    // whether the refresh_token still works. A successful refresh
-    // writes the rotated blob back to CC's keychain so the next CC
-    // invocation doesn't re-refresh redundantly.
-    let (effective_blob_str, email) = match fetch_profile
-        .fetch(&blob.claude_ai_oauth.access_token)
+    // Step 1 — happy path. Most calls end here.
+    match fetch_profile
+        .fetch(&blob_t0.claude_ai_oauth.access_token)
         .await
     {
-        Ok(prof) => (blob_str.clone(), prof.email),
-        Err(OAuthError::AuthFailed(_)) => {
-            let token_resp = match refresher
-                .refresh(&blob.claude_ai_oauth.refresh_token)
-                .await
-            {
-                Ok(tr) => tr,
-                // Refresh endpoint definitively rejected the
-                // refresh_token → terminal. The user has to sign in
-                // again; no amount of retrying will help.
-                Err(OAuthError::RefreshFailed(_)) => {
-                    return Err(RegisterError::AuthRejected);
-                }
-                // Rate-limiting, 5xx, transport — transient. Preserve
-                // the old sync behavior (caller logs + moves on)
-                // rather than locking the user out of the UI.
-                Err(e) => {
-                    return Err(RegisterError::ProfileFetch(format!(
-                        "token refresh: {e}"
-                    )));
-                }
-            };
-            let new_blob_str = refresh::build_blob(&token_resp, Some(&blob));
-            // Write the rotated blob back to CC's keychain so CC itself
-            // sees the fresh token on its next run. Failing here would
-            // leave CC's keychain stale; bubble up as CredentialWrite.
-            platform
-                .write_default(&new_blob_str)
-                .await
-                .map_err(|e| RegisterError::CredentialWrite(e.to_string()))?;
-            // Retry `/profile` with the new access token. A failure
-            // here is transient (we just proved refresh works, so this
-            // isn't an auth issue) — map to ProfileFetch for the
-            // best-effort log-and-continue path.
-            let new_email = fetch_profile
-                .fetch(&token_resp.access_token)
-                .await
-                .map_err(|e| RegisterError::ProfileFetch(e.to_string()))?
-                .email;
-            (new_blob_str, new_email)
-        }
+        Ok(prof) => return Ok(Some((blob_str_t0, prof.email))),
+        Err(OAuthError::AuthFailed(_)) => {}
         Err(e) => return Err(RegisterError::ProfileFetch(e.to_string())),
+    }
+
+    // Step 2 — race check. The blob we snapshot at the start may have
+    // been superseded by a concurrent writer (CC's own refresh loop,
+    // or another Claudepot instance) by the time our /profile call
+    // returned 401. Re-read and, if it changed, retry with the fresh
+    // access_token before spending a refresh_token.
+    let latest_blob_str = match platform
+        .read_default()
+        .await
+        .map_err(|e| RegisterError::CredentialRead(e.to_string()))?
+    {
+        Some(b) => b,
+        None => return Ok(None),
     };
+    let latest_blob = match CredentialBlob::from_json(&latest_blob_str) {
+        Ok(b) => b,
+        Err(_) => return Ok(None),
+    };
+
+    if latest_blob_str != blob_str_t0 {
+        match fetch_profile
+            .fetch(&latest_blob.claude_ai_oauth.access_token)
+            .await
+        {
+            Ok(prof) => return Ok(Some((latest_blob_str, prof.email))),
+            Err(OAuthError::AuthFailed(_)) => {}
+            Err(e) => return Err(RegisterError::ProfileFetch(e.to_string())),
+        }
+    }
+
+    // Step 3 — refresh. Use the LATEST refresh_token, not the one we
+    // originally snapshot. If a concurrent writer already rotated, our
+    // original refresh_token is dead server-side and calling refresh
+    // with it would produce a false AuthRejected.
+    let token_resp = match refresher
+        .refresh(&latest_blob.claude_ai_oauth.refresh_token)
+        .await
+    {
+        Ok(tr) => tr,
+        // Refresh endpoint definitively rejected the refresh_token →
+        // terminal. The user has to sign in again; no amount of
+        // retrying will help.
+        Err(OAuthError::RefreshFailed(_)) => {
+            return Err(RegisterError::AuthRejected);
+        }
+        // Rate-limiting, 5xx, transport — transient. Preserve the old
+        // sync behavior (caller logs + moves on) rather than locking
+        // the user out of the UI.
+        Err(e) => {
+            return Err(RegisterError::ProfileFetch(format!(
+                "token refresh: {e}"
+            )));
+        }
+    };
+    let new_blob_str = refresh::build_blob(&token_resp, Some(&latest_blob));
+
+    // Write the rotated blob back to CC's keychain so CC itself sees
+    // the fresh token on its next run. Guarded by a best-effort CAS:
+    // if another writer landed a different blob while we were
+    // refreshing, skip the write so we don't regress their state.
+    let pre_write = platform
+        .read_default()
+        .await
+        .map_err(|e| RegisterError::CredentialWrite(e.to_string()))?;
+    if pre_write.as_deref() == Some(latest_blob_str.as_str()) {
+        platform
+            .write_default(&new_blob_str)
+            .await
+            .map_err(|e| RegisterError::CredentialWrite(e.to_string()))?;
+    }
+
+    // Retry `/profile` with the new access token. A failure here is
+    // transient (we just proved refresh works, so this isn't an auth
+    // issue) — map to ProfileFetch for the best-effort log-and-
+    // continue path.
+    let new_email = fetch_profile
+        .fetch(&token_resp.access_token)
+        .await
+        .map_err(|e| RegisterError::ProfileFetch(e.to_string()))?
+        .email;
+    Ok(Some((new_blob_str, new_email)))
+}
+
+pub(crate) async fn sync_from_current_cc_with(
+    store: &AccountStore,
+    platform: &dyn cli_backend::CliPlatform,
+    fetch_profile: &dyn ProfileFetcher,
+    refresher: &dyn crate::cli_backend::swap::TokenRefresher,
+) -> Result<Option<Uuid>, RegisterError> {
+    let (effective_blob_str, email) =
+        match resolve_cc_identity(platform, fetch_profile, refresher).await? {
+            Some(pair) => pair,
+            None => return Ok(None),
+        };
 
     let account = match store
         .find_by_email(&email)
@@ -719,35 +798,63 @@ mod tests {
     // -- Mock infrastructure --
 
     struct MockPlatform {
-        blob: Option<String>,
-        /// Records the most recent `write_default` payload so tests can
-        /// assert that the rotated blob was pushed back into CC's keychain
-        /// after a successful refresh. Wrapped in `std::sync::Mutex`
-        /// rather than `tokio::sync::Mutex` so the setter stays sync
-        /// inside the `CliPlatform` impl — the trait method itself is
-        /// async but the mutation is trivially short.
-        written: std::sync::Mutex<Option<String>>,
+        /// Scripted queue of `read_default` responses. Calls pop from
+        /// the front while more than one response remains; once the
+        /// queue holds its last entry, further calls clone it
+        /// indefinitely. This preserves the original single-blob
+        /// behaviour (`MockPlatform::new`) while letting race-sensitive
+        /// tests (`MockPlatform::with_read_sequence`) script a keychain
+        /// that appears to change between reads — modelling a
+        /// concurrent writer.
+        reads: std::sync::Mutex<std::collections::VecDeque<Option<String>>>,
+        /// Full history of `write_default` payloads so tests can assert
+        /// both whether a write happened and in what order.
+        writes: std::sync::Mutex<Vec<String>>,
     }
 
     impl MockPlatform {
         fn new(blob: Option<String>) -> Self {
+            let mut q = std::collections::VecDeque::new();
+            q.push_back(blob);
             Self {
-                blob,
-                written: std::sync::Mutex::new(None),
+                reads: std::sync::Mutex::new(q),
+                writes: std::sync::Mutex::new(Vec::new()),
+            }
+        }
+        /// Build a platform whose `read_default` returns each scripted
+        /// value in order, then repeats the last one. Used by the
+        /// race regression tests to inject a "CC rotated the blob
+        /// while we were mid-flight" transition.
+        fn with_read_sequence(reads: Vec<Option<String>>) -> Self {
+            assert!(
+                !reads.is_empty(),
+                "with_read_sequence needs at least one scripted response"
+            );
+            Self {
+                reads: std::sync::Mutex::new(reads.into_iter().collect()),
+                writes: std::sync::Mutex::new(Vec::new()),
             }
         }
         fn last_written(&self) -> Option<String> {
-            self.written.lock().unwrap().clone()
+            self.writes.lock().unwrap().last().cloned()
+        }
+        fn write_count(&self) -> usize {
+            self.writes.lock().unwrap().len()
         }
     }
 
     #[async_trait::async_trait]
     impl cli_backend::CliPlatform for MockPlatform {
         async fn read_default(&self) -> Result<Option<String>, SwapError> {
-            Ok(self.blob.clone())
+            let mut q = self.reads.lock().unwrap();
+            if q.len() > 1 {
+                Ok(q.pop_front().unwrap())
+            } else {
+                Ok(q.front().cloned().unwrap_or(None))
+            }
         }
         async fn write_default(&self, blob: &str) -> Result<(), SwapError> {
-            *self.written.lock().unwrap() = Some(blob.to_string());
+            self.writes.lock().unwrap().push(blob.to_string());
             Ok(())
         }
         async fn touch_credfile(&self) -> Result<(), SwapError> {
@@ -858,6 +965,10 @@ mod tests {
 
     struct MockRefresher {
         response: Result<TokenResponse, OAuthError>,
+        /// Records every refresh_token passed to `refresh` so tests can
+        /// assert the race-aware path used the LATEST refresh_token,
+        /// not the stale snapshot captured at the top of sync.
+        seen_tokens: std::sync::Mutex<Vec<String>>,
     }
 
     impl MockRefresher {
@@ -870,18 +981,24 @@ mod tests {
                     scope: Some("user:inference".into()),
                     token_type: Some("Bearer".into()),
                 }),
+                seen_tokens: std::sync::Mutex::new(Vec::new()),
             }
         }
         fn failing(msg: &str) -> Self {
             Self {
                 response: Err(OAuthError::RefreshFailed(msg.to_string())),
+                seen_tokens: std::sync::Mutex::new(Vec::new()),
             }
+        }
+        fn tokens_seen(&self) -> Vec<String> {
+            self.seen_tokens.lock().unwrap().clone()
         }
     }
 
     #[async_trait::async_trait]
     impl crate::cli_backend::swap::TokenRefresher for MockRefresher {
-        async fn refresh(&self, _rt: &str) -> Result<TokenResponse, OAuthError> {
+        async fn refresh(&self, rt: &str) -> Result<TokenResponse, OAuthError> {
+            self.seen_tokens.lock().unwrap().push(rt.to_string());
             match &self.response {
                 Ok(r) => Ok(TokenResponse {
                     access_token: r.access_token.clone(),
@@ -1402,6 +1519,196 @@ mod tests {
         // We never wrote anything to CC's keychain — refresh failed
         // before we had a fresh blob to write.
         assert!(platform.last_written().is_none());
+    }
+
+    /// Build a credential blob with caller-specified access_token /
+    /// refresh_token values. Used by the race regression tests to
+    /// stand up distinguishable "before" and "after" snapshots so
+    /// assertions can prove WHICH blob the sync path acted on.
+    fn blob_json_with(access: &str, refresh: &str) -> String {
+        let expires = chrono::Utc::now().timestamp_millis() + 3_600_000;
+        format!(
+            r#"{{"claudeAiOauth":{{"accessToken":"{access}","refreshToken":"{refresh}","expiresAt":{expires},"scopes":["user:inference","user:profile"],"subscriptionType":"pro","rateLimitTier":"default_claude_pro"}}}}"#
+        )
+    }
+
+    #[tokio::test]
+    async fn test_sync_race_adopts_fresh_keychain_blob_without_burning_refresh_token() {
+        // The user-reported scenario: CC auto-refreshed between our
+        // initial keychain read and our /profile call. Our snapshot's
+        // access_token is now stale, but CC wrote a fresh blob whose
+        // access_token works. Before this fix, sync would refresh
+        // using the stale refresh_token — which CC just consumed —
+        // and report AuthRejected. After the fix, the re-read picks
+        // up CC's fresh blob and /profile succeeds without touching
+        // the refresh endpoint.
+        let _lock = crate::testing::lock_data_dir();
+        let _env = setup_test_data_dir();
+        let (store, _db) = test_store();
+        let account = insert_account(&store, "alice@example.com");
+        let _ = store.update_credentials_flag(account.uuid, false);
+
+        let old_blob = blob_json_with("sk-ant-oat01-stale", "sk-ant-ort01-stale");
+        let fresh_blob = blob_json_with("sk-ant-oat01-fresh", "sk-ant-ort01-fresh");
+        let platform = MockPlatform::with_read_sequence(vec![
+            Some(old_blob.clone()),
+            Some(fresh_blob.clone()),
+        ]);
+        // First /profile (stale access) → 401, second (fresh access) → Ok.
+        let fetcher = MockProfileFetcher::sequence(vec![
+            Err(OAuthError::AuthFailed("401 Unauthorized".into())),
+            Ok(sample_profile("alice@example.com")),
+        ]);
+        // Refresher configured to fail loudly — if the race-aware path
+        // ever dispatches it when the fresh access_token already works,
+        // this test catches the regression.
+        let refresher = MockRefresher::failing("refresher must not be called");
+
+        let synced = sync_from_current_cc_with(&store, &platform, &fetcher, &refresher)
+            .await
+            .unwrap();
+
+        assert_eq!(synced, Some(account.uuid));
+
+        // /profile was called twice: once with the stale access_token,
+        // then with the fresh one from CC's rotated blob.
+        let tokens = fetcher.tokens_seen();
+        assert_eq!(tokens.len(), 2, "expected exactly two /profile calls");
+        assert_eq!(tokens[0], "sk-ant-oat01-stale");
+        assert_eq!(tokens[1], "sk-ant-oat01-fresh");
+
+        // Refresh endpoint must NOT have been hit — the race was
+        // resolved by reading the fresh blob, not by burning a
+        // refresh_token that CC had already consumed.
+        assert!(
+            refresher.tokens_seen().is_empty(),
+            "refresh must not run when a fresh keychain read resolves /profile"
+        );
+
+        // CC's keychain wasn't overwritten — we didn't produce a new
+        // blob to write.
+        assert_eq!(platform.write_count(), 0);
+
+        // Claudepot's private slot mirrors the FRESH blob, not the
+        // stale snapshot. If we stored the stale one, the next swap
+        // would feed CC dead tokens.
+        let stored = swap::load_private(account.uuid).unwrap();
+        assert_eq!(stored, fresh_blob);
+
+        swap::delete_private(account.uuid).unwrap();
+    }
+
+    #[tokio::test]
+    async fn test_sync_race_refresh_uses_latest_refresh_token_not_stale_snapshot() {
+        // Defence in depth: even when the fresh access_token from a
+        // re-read also 401s (e.g. clock skew, server-side lag on
+        // newly-rotated tokens), the refresh MUST be attempted with
+        // the LATEST refresh_token from the keychain — not the stale
+        // one captured at the top of sync. Calling /token with a
+        // refresh_token that's already been consumed is what produced
+        // the false AuthRejected in the first place.
+        let _lock = crate::testing::lock_data_dir();
+        let _env = setup_test_data_dir();
+        let (store, _db) = test_store();
+        let account = insert_account(&store, "alice@example.com");
+        let _ = store.update_credentials_flag(account.uuid, false);
+
+        let stale_blob = blob_json_with("sk-ant-oat01-stale", "sk-ant-ort01-stale");
+        let fresh_blob = blob_json_with("sk-ant-oat01-fresh", "sk-ant-ort01-fresh");
+        let platform = MockPlatform::with_read_sequence(vec![
+            Some(stale_blob.clone()),
+            Some(fresh_blob.clone()),
+            // Pre-write CAS read sees the same fresh blob — no further
+            // race after refresh, so the CAS write proceeds.
+            Some(fresh_blob.clone()),
+        ]);
+        // 1st /profile (stale access) → 401
+        // 2nd /profile (fresh access) → 401 too (still in limbo)
+        // 3rd /profile (post-refresh access) → Ok
+        let fetcher = MockProfileFetcher::sequence(vec![
+            Err(OAuthError::AuthFailed("401 stale".into())),
+            Err(OAuthError::AuthFailed("401 fresh".into())),
+            Ok(sample_profile("alice@example.com")),
+        ]);
+        let refresher = MockRefresher::success();
+
+        let synced = sync_from_current_cc_with(&store, &platform, &fetcher, &refresher)
+            .await
+            .unwrap();
+
+        assert_eq!(synced, Some(account.uuid));
+
+        // Critical assertion: refresh used the FRESH refresh_token
+        // (from the re-read), not the stale one from our initial
+        // snapshot. Reversing this is exactly what produces the false
+        // AuthRejected banner.
+        let rt_seen = refresher.tokens_seen();
+        assert_eq!(rt_seen.len(), 1, "refresh must run exactly once");
+        assert_eq!(
+            rt_seen[0], "sk-ant-ort01-fresh",
+            "refresh must use the LATEST refresh_token, not the stale snapshot"
+        );
+
+        // CAS allowed the write because the keychain still matched
+        // `fresh_blob` when we checked pre-write. The written blob
+        // carries the post-refresh access_token.
+        assert_eq!(platform.write_count(), 1);
+        let written = platform.last_written().unwrap();
+        let written_blob = CredentialBlob::from_json(&written).unwrap();
+        assert_eq!(written_blob.claude_ai_oauth.access_token, "sk-ant-oat01-new");
+
+        swap::delete_private(account.uuid).unwrap();
+    }
+
+    #[tokio::test]
+    async fn test_sync_race_cas_skips_keychain_writeback_when_concurrent_writer_landed() {
+        // Belt-and-braces: after our refresh succeeds, another writer
+        // (another Claudepot instance, or CC racing the same window)
+        // may have landed a different blob in the keychain. Writing
+        // our rotated blob would clobber theirs. The CAS guard reads
+        // the keychain right before the write and skips if it no
+        // longer matches what we refreshed from.
+        let _lock = crate::testing::lock_data_dir();
+        let _env = setup_test_data_dir();
+        let (store, _db) = test_store();
+        let account = insert_account(&store, "alice@example.com");
+        let _ = store.update_credentials_flag(account.uuid, false);
+
+        let our_blob = blob_json_with("sk-ant-oat01-stale", "sk-ant-ort01-stale");
+        let intruder_blob =
+            blob_json_with("sk-ant-oat01-intruder", "sk-ant-ort01-intruder");
+        let platform = MockPlatform::with_read_sequence(vec![
+            // #1 initial snapshot.
+            Some(our_blob.clone()),
+            // #2 race-check re-read — still our blob, no race yet.
+            Some(our_blob.clone()),
+            // #3 pre-write CAS — surprise: someone wrote between
+            // refresh and write-back.
+            Some(intruder_blob.clone()),
+        ]);
+        let fetcher = MockProfileFetcher::sequence(vec![
+            Err(OAuthError::AuthFailed("401 Unauthorized".into())),
+            Ok(sample_profile("alice@example.com")),
+        ]);
+        let refresher = MockRefresher::success();
+
+        let synced = sync_from_current_cc_with(&store, &platform, &fetcher, &refresher)
+            .await
+            .unwrap();
+
+        assert_eq!(synced, Some(account.uuid));
+
+        // CAS must have suppressed the write. Leaving the intruder's
+        // newer blob in place is the correct trade-off: we don't know
+        // what state they're in, but we know our rotated blob is no
+        // fresher than theirs.
+        assert_eq!(
+            platform.write_count(),
+            0,
+            "CAS must skip write-back when the keychain changed during refresh"
+        );
+
+        swap::delete_private(account.uuid).unwrap();
     }
 
     #[tokio::test]
