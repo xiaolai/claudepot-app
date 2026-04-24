@@ -13,8 +13,10 @@ use std::path::PathBuf;
 
 /// How to handle absolute filesystem paths in the text.
 #[derive(Debug, Clone)]
+#[derive(Default)]
 pub enum PathStrategy {
     /// Leave paths untouched.
+    #[default]
     Off,
     /// Rewrite any path under `root` to its relative form.
     Relative { root: PathBuf },
@@ -22,11 +24,6 @@ pub enum PathStrategy {
     Hash,
 }
 
-impl Default for PathStrategy {
-    fn default() -> Self {
-        PathStrategy::Off
-    }
-}
 
 #[derive(Debug, Clone)]
 pub struct RedactionPolicy {

@@ -530,7 +530,7 @@ pub async fn verify(ctx: &AppContext, email_input: Option<&str>) -> Result<()> {
             .collect();
         println!("{}", serde_json::to_string_pretty(&json)?);
     } else {
-        println!("{:<32} {:<8} {}", "ACCOUNT", "STATUS", "DETAIL");
+        println!("{:<32} {:<8} DETAIL", "ACCOUNT", "STATUS");
         for (email, _uuid, status, actual) in &rows {
             let detail = match (status.as_str(), actual) {
                 ("drift", Some(a)) => format!("authenticates as {a}"),

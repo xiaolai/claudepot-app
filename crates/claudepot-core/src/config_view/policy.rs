@@ -96,8 +96,7 @@ pub fn build_managed_composite(
             out.insert(k.clone(), v.clone());
         }
     }
-    let mut sorted: Vec<(String, Value)> =
-        drop_in_dir_entries.iter().cloned().collect();
+    let mut sorted: Vec<(String, Value)> = drop_in_dir_entries.to_vec();
     sorted.sort_by(|a, b| a.0.cmp(&b.0));
     for (_name, v) in sorted {
         if let Value::Object(m) = v {

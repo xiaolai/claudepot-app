@@ -200,7 +200,7 @@ fn write_cache(table: &PriceTable) -> std::io::Result<()> {
     std::fs::create_dir_all(&dir)?;
     let path = dir.join(CACHE_FILENAME);
     let bytes = serde_json::to_vec_pretty(table)
-        .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))?;
+        .map_err(|e| std::io::Error::other(e))?;
     std::fs::write(path, bytes)
 }
 

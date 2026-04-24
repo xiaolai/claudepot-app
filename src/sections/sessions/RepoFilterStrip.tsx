@@ -107,12 +107,16 @@ function RepoFilterStripInner({
 
   // Mask: each edge shows a 16px fade only when content extends past
   // that edge. Building the gradient inline lets us drop either stop
-  // cleanly — a dead `transparent 0, #000 0` stop would still render
-  // a hairline in some engines.
-  const maskLeft = edges.left ? "transparent 0, #000 var(--sp-16)" : "#000 0";
+  // cleanly — a dead `transparent 0, <opaque> 0` stop would still
+  // render a hairline in some engines. The mask uses `--mask-opaque`
+  // (semantic token for "fully shown"), not a visual color.
+  const opaque = "var(--mask-opaque)";
+  const maskLeft = edges.left
+    ? `transparent 0, ${opaque} var(--sp-16)`
+    : `${opaque} 0`;
   const maskRight = edges.right
-    ? "#000 calc(100% - var(--sp-16)), transparent 100%"
-    : "#000 100%";
+    ? `${opaque} calc(100% - var(--sp-16)), transparent 100%`
+    : `${opaque} 100%`;
   const maskImage = `linear-gradient(to right, ${maskLeft}, ${maskRight})`;
 
   return (

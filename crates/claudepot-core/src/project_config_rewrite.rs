@@ -132,12 +132,12 @@ pub fn rewrite_claude_json(
             ConfigCollisionPolicy::Merge => {
                 // Shallow merge: old wins on top-level collision, new
                 // contributes any keys old doesn't have.
-                let merged = shallow_merge_old_wins(
+                
+                shallow_merge_old_wins(
                     moved_value,
                     existing,
                     &mut result.merged_keys,
-                );
-                merged
+                )
             }
             ConfigCollisionPolicy::Overwrite => moved_value,
         }

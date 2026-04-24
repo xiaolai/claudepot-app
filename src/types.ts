@@ -89,17 +89,6 @@ export interface DesktopIdentity {
   error: string | null;
 }
 
-export interface DesktopFlagFlip {
-  email: string;
-  uuid: string;
-  new_value: boolean;
-}
-
-export interface DesktopReconcileOutcome {
-  flag_flips: DesktopFlagFlip[];
-  orphan_pointer_cleared: boolean;
-}
-
 export interface DesktopAdoptOutcome {
   account_email: string;
   captured_items: number;

@@ -35,7 +35,10 @@ export function useTauriEvent<T>(
         // Real Tauri subscription failures are rare and will surface
         // elsewhere (event never fires → op never completes → user
         // sees the RunningOpStrip stall).
-        console.warn(`useTauriEvent: listen(${channel}) failed`, err);
+        if (import.meta.env.DEV) {
+          // eslint-disable-next-line no-console
+          console.warn(`useTauriEvent: listen(${channel}) failed`, err);
+        }
       });
 
     return () => {

@@ -282,7 +282,7 @@ pub fn add(data_dir: &Path, path: &str) -> Result<ProtectedPath, ProtectedPathsE
     let normalized = validate(path)?;
     let mut store = load_store(data_dir)?;
 
-    let is_default = DEFAULT_PATHS.iter().any(|d| *d == normalized.as_str());
+    let is_default = DEFAULT_PATHS.contains(&normalized.as_str());
     let in_user = store.user.iter().any(|u| u == &normalized);
     let was_removed_default =
         is_default && store.removed_defaults.iter().any(|r| r == &normalized);
@@ -315,7 +315,7 @@ pub fn remove(data_dir: &Path, path: &str) -> Result<(), ProtectedPathsError> {
     let normalized = validate(path)?;
     let mut store = load_store(data_dir)?;
 
-    let is_default = DEFAULT_PATHS.iter().any(|d| *d == normalized.as_str());
+    let is_default = DEFAULT_PATHS.contains(&normalized.as_str());
     let in_user = store.user.iter().any(|u| u == &normalized);
     let already_removed = store.removed_defaults.iter().any(|r| r == &normalized);
     let active_default = is_default && !already_removed;

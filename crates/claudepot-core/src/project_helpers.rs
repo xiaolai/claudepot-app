@@ -427,7 +427,7 @@ fn lsof_available() -> bool {
     std::process::Command::new("lsof")
         .arg("-v")
         .output()
-        .map(|o| o.status.success() || o.stderr.is_empty() == false)
+        .map(|o| o.status.success() || !o.stderr.is_empty())
         .unwrap_or(false)
 }
 

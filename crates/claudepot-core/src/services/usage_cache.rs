@@ -126,6 +126,12 @@ pub struct UsageCache {
     fetcher: Box<dyn UsageFetcher>,
 }
 
+impl Default for UsageCache {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl UsageCache {
     pub fn new() -> Self {
         Self {

@@ -15,6 +15,7 @@
 //! `dev-docs/kannon/reference.md §V.2 (Source 2)`. CC tolerates
 //! malformed lines — so do we.
 
+use crate::path_utils::simplify_windows_path;
 use chrono::{DateTime, Utc};
 #[cfg(test)]
 use rayon::prelude::*;
@@ -340,8 +341,13 @@ pub fn read_session_detail_at_path(
     file_path: &Path,
 ) -> Result<SessionDetail, SessionError> {
     let projects_dir = config_dir.join("projects");
-    let canonical_projects = fs::canonicalize(&projects_dir).unwrap_or(projects_dir);
-    let canonical_file = fs::canonicalize(file_path)
+    // Both sides of the containment check must be canonicalized —
+    // silently falling back on failure turns this security gate off.
+    // On Windows we also strip the `\\?\` verbatim prefix so string-
+    // based `starts_with` comparisons line up on both paths.
+    let canonical_projects = canonicalize_simplified(&projects_dir)
+        .map_err(|_| SessionError::InvalidPath(projects_dir.display().to_string()))?;
+    let canonical_file = canonicalize_simplified(file_path)
         .map_err(|_| SessionError::NotFound(file_path.display().to_string()))?;
     if !canonical_file.starts_with(&canonical_projects) {
         return Err(SessionError::InvalidPath(file_path.display().to_string()));
@@ -366,6 +372,19 @@ pub fn read_session_detail_at_path(
 // ---------------------------------------------------------------------------
 // Internals
 // ---------------------------------------------------------------------------
+
+/// Canonicalize a path and strip the Windows `\\?\` verbatim prefix.
+///
+/// `fs::canonicalize` on Windows returns `\\?\C:\...`; comparing such a
+/// path against a non-verbatim path with `Path::starts_with` fails even
+/// when they point at the same location. On Unix this is just a
+/// canonicalize — `simplify_windows_path` is a no-op.
+fn canonicalize_simplified(path: &Path) -> std::io::Result<PathBuf> {
+    let canonical = fs::canonicalize(path)?;
+    Ok(PathBuf::from(simplify_windows_path(
+        &canonical.to_string_lossy(),
+    )))
+}
 
 fn locate_session(config_dir: &Path, session_id: &str) -> Result<(String, PathBuf), SessionError> {
     if session_id.contains('/')
@@ -445,10 +464,10 @@ pub(crate) fn scan_session(slug: &str, path: &Path) -> Result<SessionRow, Sessio
             .map(|d| d.with_timezone(&Utc));
 
         if let Some(t) = ts {
-            if first_ts.map_or(true, |cur| t < cur) {
+            if first_ts.is_none_or(|cur| t < cur) {
                 first_ts = Some(t);
             }
-            if last_ts.map_or(true, |cur| t > cur) {
+            if last_ts.is_none_or(|cur| t > cur) {
                 last_ts = Some(t);
             }
         }
