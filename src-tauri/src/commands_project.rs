@@ -1,0 +1,285 @@
+//! Tauri commands for the Projects section and its clean / repair
+//! preview surfaces.
+//!
+//! Read-only (list, show), plan-only (dry-run move), and the clean
+//! launcher / status commands. Repair journal editing / op-start lives
+//! in `commands_repair.rs`.
+
+use crate::dto::{
+    CleanPreviewDto, DryRunPlanDto, JournalEntryDto, MoveArgsDto, ProjectDetailDto,
+    ProjectInfoDto,
+};
+use crate::ops::{
+    emit_terminal, new_op_id, new_running_op, spawn_op_thread, CleanResultSummary, OpKind,
+    RunningOpInfo, RunningOps,
+};
+use claudepot_core::paths;
+use claudepot_core::project;
+use claudepot_core::project_repair;
+use tauri::{AppHandle, State};
+
+/// Default journal nag threshold per spec §8 Q7 — mirrors the CLI.
+pub(crate) const JOURNAL_NAG_THRESHOLD_SECS: u64 = 86_400;
+
+pub(crate) fn claudepot_home_dirs()
+    -> (std::path::PathBuf, std::path::PathBuf, std::path::PathBuf)
+{
+    paths::claudepot_repair_dirs()
+}
+
+#[tauri::command]
+pub async fn project_list() -> Result<Vec<ProjectInfoDto>, String> {
+    let cfg = paths::claude_config_dir();
+    let projects = project::list_projects(&cfg).map_err(|e| format!("list failed: {e}"))?;
+    Ok(projects.iter().map(ProjectInfoDto::from).collect())
+}
+
+#[tauri::command]
+pub async fn project_show(path: String) -> Result<ProjectDetailDto, String> {
+    let cfg = paths::claude_config_dir();
+    let detail =
+        project::show_project(&cfg, &path).map_err(|e| format!("show failed: {e}"))?;
+    Ok(ProjectDetailDto::from(&detail))
+}
+
+/// Sentinel the client checks for and silently discards. Distinguished
+/// from real failures so the preview pane doesn't flash an error
+/// state just because the user kept typing.
+const DRY_RUN_SUPERSEDED: &str = "__claudepot_dry_run_superseded__";
+
+#[tauri::command]
+pub async fn project_move_dry_run(
+    args: MoveArgsDto,
+    registry: State<'_, crate::state::DryRunRegistry>,
+) -> Result<DryRunPlanDto, String> {
+    use std::sync::atomic::Ordering;
+
+    // Record this call's token as the latest. A later call with a
+    // greater token will overwrite it; we compare again at exit so
+    // we can bail on stale work without returning a misleading plan.
+    //
+    // `fetch_max` instead of `store`: if the client sends tokens out
+    // of order (rare but possible with async dispatch), we want to
+    // preserve the highest seen value so a "genuinely latest" call
+    // wins regardless of arrival order.
+    let my_token = args.cancel_token.unwrap_or(0);
+    if my_token > 0 {
+        registry.latest.fetch_max(my_token, Ordering::SeqCst);
+    }
+
+    // Short-circuit: if a newer token has already been seen before we
+    // even start, bail immediately. Saves work on rapid typing.
+    if my_token > 0 && registry.latest.load(Ordering::SeqCst) > my_token {
+        return Err(DRY_RUN_SUPERSEDED.to_string());
+    }
+
+    let cfg = paths::claude_config_dir();
+    let claude_json_path = dirs::home_dir().map(|h| h.join(".claude.json"));
+    let repair_root = paths::claudepot_repair_dir();
+    let snapshots_dir = Some(repair_root.join("snapshots"));
+    let core_args = project::MoveArgs {
+        old_path: args.old_path.into(),
+        new_path: args.new_path.into(),
+        config_dir: cfg,
+        claude_json_path,
+        snapshots_dir,
+        no_move: args.no_move,
+        merge: args.merge,
+        overwrite: args.overwrite,
+        force: args.force,
+        dry_run: true, // enforced; caller cannot turn this off
+        ignore_pending_journals: args.ignore_pending_journals,
+        claudepot_state_dir: Some(repair_root),
+    };
+    let plan = project::plan_move(&core_args).map_err(|e| format!("dry-run failed: {e}"))?;
+
+    // Final check: a newer token arrived while we were computing. The
+    // plan is stale by definition — return the sentinel instead of
+    // the old plan so the UI doesn't render a mismatched preview.
+    if my_token > 0 && registry.latest.load(Ordering::SeqCst) > my_token {
+        return Err(DRY_RUN_SUPERSEDED.to_string());
+    }
+
+    Ok(DryRunPlanDto::from(&plan))
+}
+
+// ---------------------------------------------------------------------------
+// Project clean (orphan reclaim) surface
+// ---------------------------------------------------------------------------
+
+/// Return the set of projects that would be cleaned and the count of
+/// unreachable candidates skipped. Read-only: no lock, no deletion.
+/// The pending-journals gate is NOT applied here because this is just
+/// a preview — the gate fires on `project_clean_execute`.
+#[tauri::command]
+pub async fn project_clean_preview() -> Result<CleanPreviewDto, String> {
+    let cfg = paths::claude_config_dir();
+    let (_journals, locks, snaps) = claudepot_home_dirs();
+    let (result, orphans) = project::clean_orphans(
+        &cfg,
+        None, // claude.json inspection during preview would be a read; skip for now — the execute path handles that and the preview just shows what will be removed.
+        Some(snaps.as_path()),
+        Some(locks.as_path()),
+        true, // dry run
+    )
+    .map_err(|e| format!("clean preview failed: {e}"))?;
+
+    let total_bytes = orphans.iter().map(|p| p.total_size_bytes).sum();
+    // Disclose how many candidates fall under protection so the
+    // confirmation modal can hint that sibling state will be preserved
+    // for those (audit fix). Resolution uses the same fail-safe
+    // fallback as the execute path so preview and execute agree.
+    let protected = claudepot_core::protected_paths::resolved_set_or_defaults(
+        &paths::claudepot_data_dir(),
+    );
+    let protected_count = orphans
+        .iter()
+        .filter(|p| !p.is_empty && protected.contains(&p.original_path))
+        .count();
+    Ok(CleanPreviewDto {
+        orphans: orphans.iter().map(ProjectInfoDto::from).collect(),
+        orphans_found: result.orphans_found,
+        unreachable_skipped: result.unreachable_skipped,
+        total_bytes,
+        protected_count,
+    })
+}
+
+/// Kick off a clean in the background, returning the op_id the UI
+/// subscribes to on `op-progress::<op_id>`. Gated on no pending rename
+/// journals; the `__clean__` lock is acquired inside `clean_orphans`
+/// so two concurrent starts can't race (the loser errors out via the
+/// terminal op event).
+#[tauri::command]
+pub async fn project_clean_start(
+    app: AppHandle,
+    ops: State<'_, RunningOps>,
+) -> Result<String, String> {
+    let (journals, locks, snaps) = claudepot_home_dirs();
+
+    let actionable =
+        project_repair::list_actionable(&journals, &locks, JOURNAL_NAG_THRESHOLD_SECS)
+            .map_err(|e| format!("journal check failed: {e}"))?;
+    if !actionable.is_empty() {
+        return Err(format!(
+            "refusing to clean while {} rename journal(s) are pending. Resolve them in the Repair view first.",
+            actionable.len()
+        ));
+    }
+
+    let op_id = new_op_id();
+    ops.insert(new_running_op(&op_id, OpKind::CleanProjects, "", ""));
+
+    let cfg = paths::claude_config_dir();
+    let claude_json = dirs::home_dir().map(|h| h.join(".claude.json"));
+    // Resolve protected paths once on the spawning thread so the
+    // background task gets a snapshot — list mutations during a
+    // multi-second clean must not change the rules mid-flight. On
+    // read failure, fall back to built-in defaults (audit fix: an
+    // empty set would silently disable protection for `/`, `~`,
+    // `/Users`, etc.).
+    let protected = claudepot_core::protected_paths::resolved_set_or_defaults(
+        &paths::claudepot_data_dir(),
+    );
+
+    // `spawn_op_thread` uses a plain OS thread, not `spawn_blocking`
+    // — Tauri's sync #[command] runs outside a tokio runtime context
+    // on at least some dispatch paths, and `spawn_blocking` panics
+    // with "no reactor running" there. Our work is blocking I/O (fs
+    // scans, remove_dir_all) with no await points anyway.
+    let ops_for_task = ops.inner().clone();
+    spawn_op_thread(app, ops_for_task, op_id.clone(), move |sink, app, ops, op_id| {
+        let repair_root = paths::claudepot_repair_dir();
+        let result = project::clean_orphans_with_progress(
+            &cfg,
+            claude_json.as_deref(),
+            Some(snaps.as_path()),
+            Some(locks.as_path()),
+            Some(repair_root.as_path()),
+            &protected,
+            false,
+            &sink,
+        );
+        match result {
+            Ok((clean, _orphans)) => {
+                ops.update(&op_id, |op| {
+                    op.clean_result = Some(CleanResultSummary::from_core(&clean));
+                });
+                emit_terminal(&app, &ops, &op_id, None);
+            }
+            Err(e) => {
+                emit_terminal(&app, &ops, &op_id, Some(format!("clean failed: {e}")));
+            }
+        }
+    });
+
+    Ok(op_id)
+}
+
+/// Fetch the current state of an in-flight clean. Mirrors
+/// `project_move_status`. Returns `None` after the post-terminal
+/// grace window expires.
+#[tauri::command]
+pub async fn project_clean_status(
+    op_id: String,
+    ops: State<'_, RunningOps>,
+) -> Result<Option<RunningOpInfo>, String> {
+    Ok(ops.get(&op_id))
+}
+
+#[tauri::command]
+pub async fn repair_list() -> Result<Vec<JournalEntryDto>, String> {
+    let (journals, locks, _snaps) = claudepot_home_dirs();
+    let entries = project_repair::list_pending_with_status(
+        &journals,
+        &locks,
+        JOURNAL_NAG_THRESHOLD_SECS,
+    )
+    .map_err(|e| format!("repair list failed: {e}"))?;
+    Ok(entries.iter().map(JournalEntryDto::from).collect())
+}
+
+/// Cheap count for the PendingJournalsBanner. Only counts *actionable*
+/// entries — excludes the `abandoned` class so the banner doesn't
+/// perpetually nag about a user-dismissed entry.
+#[tauri::command]
+pub async fn repair_pending_count() -> Result<usize, String> {
+    let (journals, locks, _snaps) = claudepot_home_dirs();
+    let entries = project_repair::list_actionable(&journals, &locks, JOURNAL_NAG_THRESHOLD_SECS)
+        .map_err(|e| format!("repair count failed: {e}"))?;
+    Ok(entries.len())
+}
+
+/// Status-aware banner input: counts per journal class so the UI can
+/// pick a neutral / warning tone based on staleness. Abandoned entries
+/// are filtered out; running entries are surfaced separately so the
+/// banner can suppress itself for them (RunningOpStrip already shows
+/// the op live).
+#[tauri::command]
+pub async fn repair_status_summary() -> Result<crate::dto::PendingJournalsSummaryDto, String> {
+    use claudepot_core::project_journal::JournalStatus;
+    let (journals, locks, _snaps) = claudepot_home_dirs();
+    let entries = project_repair::list_pending_with_status(
+        &journals,
+        &locks,
+        JOURNAL_NAG_THRESHOLD_SECS,
+    )
+    .map_err(|e| format!("repair summary failed: {e}"))?;
+
+    let mut pending = 0usize;
+    let mut stale = 0usize;
+    let mut running = 0usize;
+    for e in &entries {
+        match e.status {
+            JournalStatus::Pending => pending += 1,
+            JournalStatus::Stale => stale += 1,
+            JournalStatus::Running => running += 1,
+            JournalStatus::Abandoned => {} // filtered
+        }
+    }
+    Ok(crate::dto::PendingJournalsSummaryDto {
+        pending,
+        stale,
+        running,
+    })
+}
