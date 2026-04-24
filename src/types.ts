@@ -1,5 +1,24 @@
 // Shape of DTOs returned by the Rust side. Keep in sync with src-tauri/src/dto.rs.
 
+/**
+ * Keychain-free subset of `AccountSummary`, returned by
+ * `api.accountListBasic()`. Use when a caller needs just the
+ * sqlite-backed identity fields (uuid, email, org, subscription,
+ * active flags) — it avoids the per-account Keychain reads the
+ * full `AccountSummary` requires for `token_status` / `token_
+ * remaining_mins` / `credentials_healthy`.
+ */
+export interface AccountSummaryBasic {
+  uuid: string;
+  email: string;
+  org_name: string | null;
+  subscription_type: string | null;
+  is_cli_active: boolean;
+  is_desktop_active: boolean;
+  has_cli_credentials: boolean;
+  has_desktop_profile: boolean;
+}
+
 export interface AccountSummary {
   uuid: string;
   email: string;
@@ -1070,6 +1089,20 @@ export interface ConfigScopeNodeDto {
   files: ConfigFileNodeDto[];
 }
 
+/**
+ * User-selected anchor for the Config page.
+ *
+ * `global` — no project selected. Backend runs in global-only mode:
+ *   skips Project / Local / MCP-walk / CLAUDE.md-walk / Memory-current
+ *   scopes. Effective Settings / MCP are not available.
+ * `folder` — specific cwd; the backend walks that project normally.
+ *
+ * Persisted in localStorage under `claudepot.config.anchor`.
+ */
+export type ConfigAnchor =
+  | { kind: "global" }
+  | { kind: "folder"; path: string };
+
 export interface ConfigTreeDto {
   scopes: ConfigScopeNodeDto[];
   cwd: string;
@@ -1166,4 +1199,32 @@ export interface EditorCandidateDto {
 export interface EditorDefaultsDto {
   by_kind: Record<string, string>;
   fallback: string;
+}
+
+// ---------- Pricing ---------------------------------------------------
+
+/** Per-million-token US-dollar rates for one Claude model. */
+export interface ModelRatesDto {
+  input_per_mtok: number;
+  output_per_mtok: number;
+  cache_write_per_mtok: number;
+  cache_read_per_mtok: number;
+}
+
+/** Where the current price table came from. */
+export interface PriceSourceDto {
+  /** "bundled" | "live" | "cached" */
+  kind: "bundled" | "live" | "cached";
+  /** ISO-ish timestamp for live / cached; verification date for bundled. */
+  timestamp: string;
+  /** Source URL (empty for bundled). */
+  url: string;
+}
+
+export interface PriceTableDto {
+  /** Keyed by canonical model id (e.g. `claude-opus-4-7`). */
+  models: Record<string, ModelRatesDto>;
+  source: PriceSourceDto;
+  /** Short user-safe message when the last refresh attempt failed. */
+  last_fetch_error: string | null;
 }

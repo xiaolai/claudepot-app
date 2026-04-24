@@ -27,7 +27,16 @@ use std::path::Path;
 
 /// Walk the CC-mandated roots at `cwd` and return a populated tree.
 pub fn scan(cwd: &Path) -> model::ConfigTree {
-    discover::assemble_tree(cwd)
+    discover::assemble_tree(cwd, false)
+}
+
+/// Scan only the global (user/policy/plugins/memory-other) scopes —
+/// skips every cwd-dependent source. Used when the Config page has no
+/// project anchor. Display cwd in the returned tree is set to `$HOME`
+/// (or `/` if the home dir cannot be resolved) for downstream DTO use.
+pub fn scan_global() -> model::ConfigTree {
+    let home = dirs::home_dir().unwrap_or_else(|| std::path::PathBuf::from("/"));
+    discover::assemble_tree(&home, true)
 }
 
 /// Empty-tree builder — kept for callers that want an anchored skeleton

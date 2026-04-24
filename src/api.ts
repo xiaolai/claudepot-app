@@ -2,6 +2,7 @@
 import { invoke } from "@tauri-apps/api/core";
 import type {
   AccountSummary,
+  AccountSummaryBasic,
   AccountUsage,
   ActivityTrends,
   AbandonedCleanupReport,
@@ -58,6 +59,7 @@ import type {
   EditorCandidateDto,
   EditorDefaultsDto,
   McpSimulationMode,
+  PriceTableDto,
 } from "./types";
 
 export const api = {
@@ -75,6 +77,12 @@ export const api = {
   /// exact path is gone (orphan projects still "open parent").
   revealInFinder: (path: string) => invoke<void>("reveal_in_finder", { path }),
   accountList: () => invoke<AccountSummary[]>("account_list"),
+  /** Keychain-free lean list — use when you only need identity
+   *  fields (uuid / email / org / subscription / active flags).
+   *  Much faster than `accountList` because it skips the per-account
+   *  `token_health` call that hits macOS Keychain. */
+  accountListBasic: () =>
+    invoke<AccountSummaryBasic[]>("account_list_basic"),
   cliUse: (email: string, force = false) =>
     invoke<void>("cli_use", { email, force }),
   /// Cheap preflight used before cli_use to decide whether to raise
@@ -462,6 +470,10 @@ export const api = {
   keyApiAdd: (label: string, token: string, accountUuid: string) =>
     invoke<ApiKeySummary>("key_api_add", { label, token, accountUuid }),
   keyApiRemove: (uuid: string) => invoke<void>("key_api_remove", { uuid }),
+  /** Rename an API key. Label is user-owned metadata — no lookups
+   *  key off it, so renames are display-only. */
+  keyApiRename: (uuid: string, label: string) =>
+    invoke<void>("key_api_rename", { uuid, label }),
   /** Pull the full plaintext secret out for clipboard. Sparingly. */
   keyApiCopy: (uuid: string) => invoke<string>("key_api_copy", { uuid }),
   /**
@@ -485,6 +497,9 @@ export const api = {
       accountUuid,
     }),
   keyOauthRemove: (uuid: string) => invoke<void>("key_oauth_remove", { uuid }),
+  /** Rename an OAuth token. See `keyApiRename`. */
+  keyOauthRename: (uuid: string, label: string) =>
+    invoke<void>("key_oauth_rename", { uuid, label }),
   keyOauthCopy: (uuid: string) => invoke<string>("key_oauth_copy", { uuid }),
   /**
    * Cached usage snapshot for the account the OAuth token belongs to.
@@ -637,4 +652,8 @@ export const api = {
   configWatchStart: (cwd?: string | null) =>
     invoke<void>("config_watch_start", { cwd: cwd ?? null }),
   configWatchStop: () => invoke<void>("config_watch_stop"),
+
+  // Pricing — API-equivalent cost display for subscription users.
+  pricingGet: () => invoke<PriceTableDto>("pricing_get"),
+  pricingRefresh: () => invoke<PriceTableDto>("pricing_refresh"),
 };

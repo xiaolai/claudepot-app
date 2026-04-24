@@ -33,15 +33,32 @@ const importSettings = () =>
   import("./sections/SettingsSection").then((m) => ({ default: m.SettingsSection }));
 const importSessions = () =>
   import("./sections/SessionsSection").then((m) => ({ default: m.SessionsSection }));
+const importActivities = () =>
+  import("./sections/ActivitiesSection").then((m) => ({
+    default: m.ActivitiesSection,
+  }));
 const importKeys = () =>
   import("./sections/KeysSection").then((m) => ({ default: m.KeysSection }));
 const importConfig = () =>
   import("./sections/ConfigSection").then((m) => ({ default: m.ConfigSection }));
+const importGlobal = () =>
+  import("./sections/GlobalSection").then((m) => ({ default: m.GlobalSection }));
 const ProjectsSection = lazy(importProjects);
 const SettingsSection = lazy(importSettings);
-const SessionsSection = lazy(importSessions);
+const ActivitiesSection = lazy(importActivities);
+// SessionsSection is mounted transitively through ActivitiesSection
+// now; keep the lazy factory around so its chunk is cached by the
+// prefetcher without us needing a second export here.
+void importSessions;
 const KeysSection = lazy(importKeys);
-const ConfigSection = lazy(importConfig);
+const GlobalSection = lazy(importGlobal);
+// ConfigSection isn't rendered at the top level anymore — it lives
+// inside GlobalSection and the Projects shell's Config tab. The
+// import* chunk keys off GlobalSection's own import, and
+// ProjectsSection statically imports ConfigSection, so we don't need
+// to warm it separately. Keep the factory reference so tree-shaking
+// can't drop the export accidentally.
+void importConfig;
 const OperationProgressModal = lazy(() =>
   import("./sections/projects/OperationProgressModal").then((m) => ({
     default: m.OperationProgressModal,
@@ -55,8 +72,8 @@ function preloadSavedSection(): void {
       localStorage.getItem("claudepot.startSection") ||
       localStorage.getItem("claudepot.activeSection");
     if (id === "projects") void importProjects();
-    else if (id === "sessions") void importSessions();
-    else if (id === "config") void importConfig();
+    else if (id === "activities") void importActivities();
+    else if (id === "global") void importGlobal();
     else if (id === "keys") void importKeys();
     else if (id === "settings") void importSettings();
   } catch {
@@ -287,7 +304,7 @@ function AppShell() {
       const detail = (ev as CustomEvent<{ filePath: string }>).detail;
       if (!detail?.filePath) return;
       setPendingSessionPath(detail.filePath);
-      setSection("sessions");
+      setSection("activities");
     }
     window.addEventListener("cp-goto-session", onGoto);
     return () => window.removeEventListener("cp-goto-session", onGoto);
@@ -319,7 +336,7 @@ function AppShell() {
       } catch {
         /* fallback to just switching */
       }
-      setSection("sessions");
+      setSection("activities");
     })
       .then((fn) => {
         unlisten = fn;
@@ -576,11 +593,16 @@ function AppShell() {
     (s: LiveSessionSummary) => {
       if (s.transcript_path) {
         setPendingSessionPath(s.transcript_path);
-        setSection("sessions");
+        setSection("activities");
       }
     },
     [setSection],
   );
+
+  // "Open in Config" used to cross-section hop to the standalone
+  // Config tab. With the restructure, Config is a tab inside the
+  // Projects shell, so the button simply selects the project + flips
+  // the tab locally (handled inside ProjectsSection).
 
   return (
     <div
@@ -618,9 +640,9 @@ function AppShell() {
           onBind={handleBind}
           badges={{
             accounts: accounts.length || undefined,
-            // Activity alerts propagate to the Sessions nav row now
-            // that Activity is folded into Sessions' "Live" filter.
-            sessions: activityAlerts || undefined,
+            // Alerting sessions (errored / stuck) surface as the
+            // badge count on the Activities nav row.
+            activities: activityAlerts || undefined,
           }}
           version={APP_VERSION}
           synced
@@ -668,16 +690,16 @@ function AppShell() {
                   onSubRouteChange={setSubRoute}
                 />
               )}
-              {section === "sessions" && (
-                <SessionsSection
+              {section === "activities" && (
+                <ActivitiesSection
                   initialSelectedPath={pendingSessionPath}
                   onInitialSelectedPathConsumed={() =>
                     setPendingSessionPath(null)
                   }
                 />
               )}
-              {section === "config" && (
-                <ConfigSection
+              {section === "global" && (
+                <GlobalSection
                   subRoute={subRoute}
                   onSubRouteChange={setSubRoute}
                 />

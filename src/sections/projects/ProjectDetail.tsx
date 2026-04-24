@@ -38,6 +38,8 @@ export function ProjectDetail({
   onMoved,
   onError,
   onOpenMaintenance,
+  onOpenInConfig,
+  onOpenSession,
   onBack,
 }: {
   path: string;
@@ -58,6 +60,22 @@ export function ProjectDetail({
   /** When set, empty-project hints get a clickable "Go to Maintenance"
    * nudge so the user doesn't have to navigate manually (G8). */
   onOpenMaintenance?: () => void;
+  /**
+   * Jump to the Config section anchored on this project. Wired by the
+   * shell. Button is only rendered when this prop is present AND the
+   * project is reachable — an unreachable source path can't be walked
+   * by Config's scanner.
+   */
+  onOpenInConfig?: (path: string) => void;
+  /**
+   * Open a session's transcript inline. The shell owns the master-
+   * detail toggle inside the Projects section's Sessions tab — when
+   * this callback fires with a resolved transcript path, the shell
+   * swaps this ProjectDetail for the SessionDetail viewer. Omitted
+   * in embedded contexts (e.g. tests) where the master-detail swap
+   * isn't wired.
+   */
+  onOpenSession?: (transcriptPath: string) => void;
   /** Single-pane mode: render a Back button so the user can return to
    * the project list on narrow windows. When omitted the header reads
    * as detail-first (the surrounding layout is already a split). */
@@ -194,6 +212,16 @@ export function ProjectDetail({
             onClick={() => onRename(info.original_path)}>
             <Icon name="pencil" size={14} /> Rename…
           </button>
+          {onOpenInConfig && status !== "unreachable" && status !== "orphan" && (
+            <button
+              type="button"
+              className="btn"
+              title="View this project's Claude Code config — merged settings, MCP, agents, memory"
+              onClick={() => onOpenInConfig(info.original_path)}
+            >
+              <Icon name="file-code" size={14} /> Open in Config
+            </button>
+          )}
         </div>
       </header>
 
@@ -292,6 +320,18 @@ export function ProjectDetail({
       {sessions.length > 0 && (
         <SessionListPane
           sessions={sessions}
+          onOpen={
+            onOpenSession
+              ? (sid) => {
+                  const p = sessionFilePath(
+                    appStatus?.cc_config_dir,
+                    info.sanitized_name,
+                    sid,
+                  );
+                  if (p) onOpenSession(p);
+                }
+              : undefined
+          }
           onContextMenu={onSessionContextMenu}
           onMenuButton={onSessionMenuButton}
         />
@@ -304,11 +344,24 @@ export function ProjectDetail({
             info.sanitized_name,
             ctxMenu.sessionId,
           );
+          const canOpenInConfig =
+            !!onOpenInConfig &&
+            classifyProject(info) !== "orphan" &&
+            classifyProject(info) !== "unreachable";
           const items: ContextMenuItem[] = [
             {
               label: "Move to another project…",
               onClick: () => setMoveTarget(ctxMenu.sessionId),
             },
+            ...(canOpenInConfig
+              ? [
+                  { label: "", separator: true, onClick: () => {} },
+                  {
+                    label: "Open project in Config",
+                    onClick: () => onOpenInConfig!(info.original_path),
+                  },
+                ] as ContextMenuItem[]
+              : []),
             ...(transcriptPath
               ? ([
                   { label: "", separator: true, onClick: () => {} },
@@ -381,10 +434,17 @@ const PAGE_SIZE = 20;
  */
 function SessionListPane({
   sessions,
+  onOpen,
   onContextMenu,
   onMenuButton,
 }: {
   sessions: ProjectDetailData["sessions"];
+  /**
+   * Click-to-open: fires when the user picks a session row to view
+   * its transcript inline. `null` disables the primary click (row
+   * keeps working as a target for right-click / kebab only).
+   */
+  onOpen?: (sid: string) => void;
   onContextMenu: (e: React.MouseEvent, sid: string) => void;
   onMenuButton: (e: React.MouseEvent, sid: string) => void;
 }) {
@@ -401,7 +461,12 @@ function SessionListPane({
   const handleKeyDown = (e: React.KeyboardEvent, sid: string) => {
     if (e.key === "Enter" || e.key === " ") {
       e.preventDefault();
-      onMenuButton(e as unknown as React.MouseEvent, sid);
+      // Primary key action opens the transcript when a handler is
+      // available; falls back to the actions menu (legacy behavior)
+      // so the old keyboard flow still works in contexts that don't
+      // wire opening (tests, Storybook).
+      if (onOpen) onOpen(sid);
+      else onMenuButton(e as unknown as React.MouseEvent, sid);
     }
   };
 
@@ -432,8 +497,10 @@ function SessionListPane({
               role="option"
               aria-selected={false}
               tabIndex={0}
+              onClick={() => onOpen?.(s.session_id)}
               onContextMenu={(e) => onContextMenu(e, s.session_id)}
               onKeyDown={(e) => handleKeyDown(e, s.session_id)}
+              style={onOpen ? { cursor: "pointer" } : undefined}
             >
               <div className="session-row-text">
                 <span className="session-row-name mono">
@@ -451,7 +518,10 @@ function SessionListPane({
                 className="session-row-menu-btn"
                 aria-label="Session actions"
                 title="Actions"
-                onClick={(e) => onMenuButton(e, s.session_id)}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onMenuButton(e, s.session_id);
+                }}
               >
                 <Icon name="more-vertical" size={12} />
               </button>

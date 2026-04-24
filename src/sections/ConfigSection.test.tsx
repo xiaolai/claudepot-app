@@ -27,6 +27,8 @@ vi.mock("../api", () => ({
       configOpenInEditorPathSpy(...a),
     configWatchStart: vi.fn().mockResolvedValue(undefined),
     configWatchStop: vi.fn().mockResolvedValue(undefined),
+    // Anchor picker pulls the recent-projects list on mount.
+    projectList: vi.fn().mockResolvedValue([]),
   },
 }));
 

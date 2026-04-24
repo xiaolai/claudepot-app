@@ -121,19 +121,27 @@ pub struct ScopeSnapshotDto {
     pub files: Vec<FileNodeDto>,
 }
 
-/// Kick off a watcher rooted at `cwd` (or current dir when None).
+/// Kick off a watcher.
+///
+/// `anchor = Some(cwd)` watches the anchored project: cwd subtree,
+/// every ancestor up to git-root/home, and `~/.claude`.
+/// `anchor = None` is the global-only mode used when the Config page
+/// has no project selected — only `~/.claude` is watched and rescans
+/// use `assemble_tree(_, global_only=true)`.
 pub fn start(
     app: AppHandle,
-    cwd: Option<PathBuf>,
+    anchor: Option<PathBuf>,
     tree_state: Arc<Mutex<Option<ConfigTree>>>,
 ) -> Result<WatcherHandle, String> {
-    let cwd = cwd
-        .or_else(|| std::env::current_dir().ok())
-        .unwrap_or_else(|| PathBuf::from("."));
-
     // Initial snapshot so subsequent diffs have something to compare
     // against.
-    let seed = discover::assemble_tree(&cwd);
+    let seed = match &anchor {
+        Some(cwd) => discover::assemble_tree(cwd, false),
+        None => {
+            let home = dirs::home_dir().unwrap_or_else(|| PathBuf::from("/"));
+            discover::assemble_tree(&home, true)
+        }
+    };
     {
         let mut g = tree_state.lock().map_err(|e| format!("tree lock: {e}"))?;
         *g = Some(seed);
@@ -143,12 +151,12 @@ pub fn start(
     let stop_inner = stop.clone();
     let app_inner = app.clone();
     let tree_state_inner = tree_state.clone();
-    let cwd_inner = cwd.clone();
+    let anchor_inner = anchor.clone();
 
     let worker = std::thread::Builder::new()
         .name("config-watch".to_string())
         .spawn(move || {
-            if let Err(e) = run_loop(app_inner, cwd_inner, tree_state_inner, stop_inner) {
+            if let Err(e) = run_loop(app_inner, anchor_inner, tree_state_inner, stop_inner) {
                 tracing::error!("config-watch loop exited: {e}");
             }
         })
@@ -162,7 +170,7 @@ pub fn start(
 
 fn run_loop(
     app: AppHandle,
-    cwd: PathBuf,
+    anchor: Option<PathBuf>,
     tree_state: Arc<Mutex<Option<ConfigTree>>>,
     stop: Arc<std::sync::atomic::AtomicBool>,
 ) -> Result<(), String> {
@@ -177,14 +185,19 @@ fn run_loop(
     })
     .map_err(|e| format!("debouncer init: {e}"))?;
 
-    // Watch ~/.claude, the cwd subtree, AND every ancestor directory
-    // up to git-root/home — discovery walks CLAUDE.md + .claude/rules
-    // at each ancestor (plan §6.4), so the watcher has to see edits
-    // at those paths too. Recursive watches on ancestors are fine:
-    // core's `is_in_scope` deny-list filters the noise.
+    // Roots depend on anchor mode.
+    // Anchored: watch ~/.claude, the cwd subtree, AND every ancestor
+    // directory up to git-root/home — discovery walks CLAUDE.md +
+    // .claude/rules at each ancestor (plan §6.4).
+    // Global: only ~/.claude — there's no project subtree to watch.
+    // Recursive watches on ancestors are fine: core's `is_in_scope`
+    // deny-list filters the noise.
     let home = claude_config_dir();
-    let mut roots: Vec<PathBuf> = vec![home.clone(), cwd.clone()];
-    roots.extend(watch_ancestor_dirs(&cwd, &home));
+    let mut roots: Vec<PathBuf> = vec![home.clone()];
+    if let Some(cwd) = anchor.as_ref() {
+        roots.push(cwd.clone());
+        roots.extend(watch_ancestor_dirs(cwd, &home));
+    }
     roots.sort();
     roots.dedup();
     for root in &roots {
@@ -218,7 +231,7 @@ fn run_loop(
                 generation_counter = generation_counter.wrapping_add(1);
                 emit_patch(
                     &app,
-                    &cwd,
+                    anchor.as_deref(),
                     &tree_state,
                     &gen,
                     generation_counter,
@@ -236,7 +249,7 @@ fn run_loop(
                     generation_counter = generation_counter.wrapping_add(1);
                     emit_patch(
                         &app,
-                        &cwd,
+                        anchor.as_deref(),
                         &tree_state,
                         &gen,
                         generation_counter,
@@ -288,12 +301,18 @@ fn notify_to_fs_event(ev: &notify_debouncer_mini::DebouncedEvent) -> FsEvent {
 
 fn emit_patch(
     app: &AppHandle,
-    cwd: &std::path::Path,
+    anchor: Option<&std::path::Path>,
     tree_state: &Arc<Mutex<Option<ConfigTree>>>,
     gen: &DirtyGen,
     generation: u64,
 ) {
-    let (next, dirty) = scan_until_stable(gen, || discover::assemble_tree(cwd));
+    let (next, dirty) = scan_until_stable(gen, || match anchor {
+        Some(cwd) => discover::assemble_tree(cwd, false),
+        None => {
+            let home = dirs::home_dir().unwrap_or_else(|| PathBuf::from("/"));
+            discover::assemble_tree(&home, true)
+        }
+    });
 
     let prev_opt = {
         let g = match tree_state.lock() {

@@ -294,14 +294,18 @@ pub async fn config_scan(
     cwd: Option<String>,
     tree_state: State<'_, ConfigTreeState>,
 ) -> Result<ConfigTreeDto, String> {
-    let cwd_path = cwd
-        .map(PathBuf::from)
-        .or_else(|| std::env::current_dir().ok())
-        .unwrap_or_else(|| PathBuf::from("."));
+    // `cwd = None` means "no project anchor selected" — scan global
+    // scopes only. We deliberately do NOT fall back to
+    // `std::env::current_dir()`, which was non-deterministic between
+    // dev and packaged builds.
+    let anchor: Option<PathBuf> = cwd.map(PathBuf::from);
 
-    let tree = tauri::async_runtime::spawn_blocking(move || scan(&cwd_path))
-        .await
-        .map_err(|e| format!("scan join: {e}"))?;
+    let tree = tauri::async_runtime::spawn_blocking(move || match anchor {
+        Some(p) => scan(&p),
+        None => claudepot_core::config_view::scan_global(),
+    })
+    .await
+    .map_err(|e| format!("scan join: {e}"))?;
 
     let dto = ConfigTreeDto {
         scopes: tree.scopes.iter().map(ScopeNodeDto::from).collect(),
@@ -619,10 +623,13 @@ pub struct PolicyErrorDto {
 pub async fn config_effective_settings(
     cwd: Option<String>,
 ) -> Result<EffectiveSettingsDto, String> {
+    // Effective settings merges Project + Local + User + Policy — the
+    // result is only meaningful with a project anchor. Callers that
+    // reach this command in global-only mode have skipped the UI
+    // gating; fail loudly rather than fabricate a result.
     let cwd_path = cwd
         .map(PathBuf::from)
-        .or_else(|| std::env::current_dir().ok())
-        .unwrap_or_else(|| PathBuf::from("."));
+        .ok_or_else(|| "no project anchored — effective settings needs a cwd".to_string())?;
 
     let dto = tauri::async_runtime::spawn_blocking(move || {
         let input = effective_io::load_effective_settings_input(&cwd_path);
@@ -747,10 +754,11 @@ pub async fn config_effective_mcp(
     cwd: Option<String>,
     mode: Option<McpSimulationModeDto>,
 ) -> Result<EffectiveMcpDto, String> {
+    // Same rationale as `config_effective_settings`: MCP merge requires
+    // a project anchor.
     let cwd_path = cwd
         .map(PathBuf::from)
-        .or_else(|| std::env::current_dir().ok())
-        .unwrap_or_else(|| PathBuf::from("."));
+        .ok_or_else(|| "no project anchored — effective MCP needs a cwd".to_string())?;
     let mode: McpSimulationMode = mode.unwrap_or(McpSimulationModeDto::Interactive).into();
 
     let dto = tauri::async_runtime::spawn_blocking(move || {

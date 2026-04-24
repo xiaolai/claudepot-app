@@ -9,7 +9,7 @@ import {
   ModalHeader,
 } from "../../components/primitives/Modal";
 import { NF } from "../../icons";
-import type { AccountSummary } from "../../types";
+import type { AccountSummaryBasic } from "../../types";
 
 type DetectedKind = "api" | "oauth" | "invalid" | "empty";
 
@@ -32,7 +32,7 @@ export function AddKeyModal({
   onClose,
   onAdded,
 }: {
-  accounts: AccountSummary[];
+  accounts: AccountSummaryBasic[];
   onClose: () => void;
   onAdded: (kind: "api" | "oauth") => void;
 }) {
@@ -279,7 +279,7 @@ function AccountSelect({
   onChange,
   disabled,
 }: {
-  accounts: AccountSummary[];
+  accounts: AccountSummaryBasic[];
   value: string;
   onChange: (v: string) => void;
   disabled?: boolean;

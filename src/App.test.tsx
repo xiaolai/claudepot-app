@@ -81,7 +81,8 @@ describe("App shell — paper-mono", () => {
     // presence of each label somewhere in the sidebar region.
     expect(await screen.findByText("Accounts")).toBeInTheDocument();
     expect(screen.getByText("Projects")).toBeInTheDocument();
-    expect(screen.getByText("Sessions")).toBeInTheDocument();
+    expect(screen.getByText("Activities")).toBeInTheDocument();
+    expect(screen.getByText("Global")).toBeInTheDocument();
     expect(screen.getByText("Settings")).toBeInTheDocument();
   });
 
@@ -231,13 +232,14 @@ describe("App shell — paper-mono", () => {
       }),
     });
 
-    // After the C-1 A consolidation the Activity section is gone —
-    // alerting sessions surface on the Sessions nav row badge.
-    const sessionsBtn = await screen.findByRole("button", {
-      name: "Sessions",
+    // After the project-shell restructure, the cross-project
+    // firehose nav row was renamed "Sessions" → "Activities". The
+    // badge still surfaces alerting sessions there.
+    const activitiesBtn = await screen.findByRole("button", {
+      name: "Activities",
     });
     await waitFor(() => {
-      expect(within(sessionsBtn).getByText("1")).toBeInTheDocument();
+      expect(within(activitiesBtn).getByText("1")).toBeInTheDocument();
     });
   });
 });
