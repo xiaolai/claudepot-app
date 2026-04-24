@@ -1,3 +1,4 @@
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Glyph } from "../../components/primitives/Glyph";
 import { NF } from "../../icons";
 import type { RepositoryGroup, SessionRow } from "../../types";
@@ -26,18 +27,130 @@ export function RepoFilterStrip({
 }) {
   if (!groups || groups.length < 2) return null;
 
+  return <RepoFilterStripInner {...{ groups, activeRepo, onChange }} />;
+}
+
+/**
+ * Inner component that owns the scroll-strip refs + effects. Split
+ * out of the public `RepoFilterStrip` so the `if (groups.length < 2)`
+ * guard above keeps the hooks from mounting (and immediately
+ * unmounting) when only one repo exists — a full-tree re-render after
+ * the filter guard tripped would otherwise violate hook order.
+ */
+function RepoFilterStripInner({
+  groups,
+  activeRepo,
+  onChange,
+}: {
+  groups: RepositoryGroup[];
+  activeRepo: string | null;
+  onChange: (repoId: string | null) => void;
+}) {
+  // Sort busy repos first so the most-used projects sit near the
+  // scroll origin. The "All repos" pill is always rendered first and
+  // doesn't participate in the sort. Caller's array is not mutated —
+  // sort on a shallow copy so React dev-mode's strict frozen props
+  // don't trip over us.
+  const sortedGroups = useMemo(
+    () => [...groups].sort((a, b) => b.sessions.length - a.sessions.length),
+    [groups],
+  );
+
+  const scrollerRef = useRef<HTMLDivElement | null>(null);
+  // Scroll-position edges drive the fade on each side so the mask
+  // only appears when there is actually content past that edge.
+  // Drawing a fade against a solid, unscrolled edge would visually
+  // imply "there's more here" when there isn't.
+  const [edges, setEdges] = useState<{ left: boolean; right: boolean }>({
+    left: false,
+    right: false,
+  });
+  useEffect(() => {
+    const root = scrollerRef.current;
+    if (!root) return;
+    const update = () => {
+      const canLeft = root.scrollLeft > 1;
+      const canRight =
+        root.scrollLeft + root.clientWidth < root.scrollWidth - 1;
+      setEdges((prev) =>
+        prev.left === canLeft && prev.right === canRight
+          ? prev
+          : { left: canLeft, right: canRight },
+      );
+    };
+    update();
+    root.addEventListener("scroll", update, { passive: true });
+    const ro = new ResizeObserver(update);
+    ro.observe(root);
+    return () => {
+      root.removeEventListener("scroll", update);
+      ro.disconnect();
+    };
+  }, [sortedGroups.length]);
+
+  // Keep the active pill in view after an external selection change
+  // (e.g. cross-section deep-link). `scrollIntoView` on a pill that
+  // is already visible is a no-op, so this is safe to run every time
+  // `activeRepo` changes.
+  useEffect(() => {
+    const root = scrollerRef.current;
+    if (!root) return;
+    const activeEl = root.querySelector<HTMLElement>(
+      '[role="tab"][aria-selected="true"]',
+    );
+    activeEl?.scrollIntoView({
+      behavior: "smooth",
+      inline: "nearest",
+      block: "nearest",
+    });
+  }, [activeRepo]);
+
+  // Mask: each edge shows a 16px fade only when content extends past
+  // that edge. Building the gradient inline lets us drop either stop
+  // cleanly — a dead `transparent 0, #000 0` stop would still render
+  // a hairline in some engines.
+  const maskLeft = edges.left ? "transparent 0, #000 var(--sp-16)" : "#000 0";
+  const maskRight = edges.right
+    ? "#000 calc(100% - var(--sp-16)), transparent 100%"
+    : "#000 100%";
+  const maskImage = `linear-gradient(to right, ${maskLeft}, ${maskRight})`;
+
   return (
     <div
       role="tablist"
       aria-label="Repository filter"
       data-testid="repo-filter-strip"
+      className="scrollbar-none"
+      ref={scrollerRef}
+      onWheel={(e) => {
+        // On macOS trackpads, horizontal intent still arrives on
+        // deltaX; on regular wheels, the user scrolls deltaY and
+        // expects the horizontal strip to move. Translate vertical
+        // wheel intent into horizontal scroll when there's no
+        // intentional horizontal component.
+        if (Math.abs(e.deltaY) > Math.abs(e.deltaX)) {
+          const el = e.currentTarget;
+          el.scrollLeft += e.deltaY;
+        }
+      }}
       style={{
         display: "flex",
-        flexWrap: "wrap",
+        flexWrap: "nowrap",
+        alignItems: "center",
         gap: "var(--sp-4)",
         padding: "var(--sp-6) var(--sp-32) var(--sp-10)",
         borderBottom: "var(--bw-hair) solid var(--line)",
         background: "var(--bg)",
+        overflowX: "auto",
+        overflowY: "hidden",
+        scrollBehavior: "smooth",
+        scrollbarWidth: "none",
+        msOverflowStyle: "none",
+        // Dynamic edge fade — only apply the fade on sides that have
+        // more content past the viewport. See the `edges` state
+        // above.
+        maskImage,
+        WebkitMaskImage: maskImage,
       }}
     >
       <RepoPill
@@ -46,7 +159,7 @@ export function RepoFilterStrip({
         count={groups.reduce((n, g) => n + g.sessions.length, 0)}
         onClick={() => onChange(null)}
       />
-      {groups.map((g) => {
+      {sortedGroups.map((g) => {
         const id = groupId(g);
         return (
           <RepoPill
@@ -112,6 +225,8 @@ function RepoPill({
         color: active ? "var(--accent-ink)" : "var(--fg-muted)",
         cursor: "pointer",
         fontFamily: "inherit",
+        flexShrink: 0,
+        whiteSpace: "nowrap",
       }}
     >
       <Glyph g={NF.git} style={{ fontSize: "var(--fs-2xs)" }} />
