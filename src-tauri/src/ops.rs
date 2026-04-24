@@ -334,3 +334,60 @@ pub fn now_unix_secs() -> u64 {
 pub fn new_op_id() -> String {
     format!("op-{}", uuid::Uuid::new_v4())
 }
+
+/// Build a fresh `RunningOpInfo` for an op that has just been created
+/// and not yet started any phase. Populates the identity fields
+/// (`op_id`, `kind`, `old_path`, `new_path`) and seeds every progress /
+/// result field with its "nothing happened yet" default.
+///
+/// Every start-style command used to construct this by hand with 11
+/// fields, 8 of which were identical — this helper is the point of
+/// gravity so adding a new field doesn't drift across call sites.
+pub fn new_running_op(
+    op_id: impl Into<String>,
+    kind: OpKind,
+    old_path: impl Into<String>,
+    new_path: impl Into<String>,
+) -> RunningOpInfo {
+    RunningOpInfo {
+        op_id: op_id.into(),
+        kind,
+        old_path: old_path.into(),
+        new_path: new_path.into(),
+        current_phase: None,
+        sub_progress: None,
+        status: OpStatus::Running,
+        started_unix_secs: now_unix_secs(),
+        last_error: None,
+        move_result: None,
+        clean_result: None,
+        failed_journal_id: None,
+    }
+}
+
+/// Spawn an OS thread bound to a fresh `TauriProgressSink`. The work
+/// closure receives the sink plus cloned `app` / `ops` / `op_id`
+/// handles so it can call `emit_terminal` / `ops.update` directly
+/// — preserving the escape hatch for ops that need bespoke
+/// post-processing on success (e.g. storing a structured summary).
+///
+/// `std::thread::spawn` rather than `tokio::spawn`: Tauri's sync
+/// command path doesn't always have a reactor running, and the work
+/// is blocking I/O anyway.
+pub fn spawn_op_thread<F>(
+    app: AppHandle,
+    ops: RunningOps,
+    op_id: String,
+    work: F,
+) where
+    F: FnOnce(TauriProgressSink, AppHandle, RunningOps, String) + Send + 'static,
+{
+    std::thread::spawn(move || {
+        let sink = TauriProgressSink {
+            app: app.clone(),
+            op_id: op_id.clone(),
+            ops: ops.clone(),
+        };
+        work(sink, app, ops, op_id);
+    });
+}

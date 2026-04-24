@@ -12,71 +12,21 @@
 //! in-app refresh.
 
 use crate::dto::AccountSummary;
+use crate::tray_icons::{
+    icon_item, ICON_CHECK, ICON_HOME, ICON_POWER, ICON_REFRESH, ICON_SLIDERS, ICON_USER_PLUS,
+    ID_ACTIVE_DISPLAY, ID_ADD, ID_DESKTOP_BIND, ID_DESKTOP_CLEAR, ID_DESKTOP_LAUNCH,
+    ID_DESKTOP_RECONCILE, ID_QUIT, ID_SETTINGS, ID_SHOW, ID_SYNC, ID_USAGE_REFRESH, PREFIX_CLI,
+    PREFIX_DESKTOP, PREFIX_LIVE,
+};
+use crate::tray_menu::{
+    build_cli_submenu, build_desktop_submenu, build_live_submenu, build_tooltip,
+    build_usage_submenu,
+};
 use claudepot_core::oauth::usage::UsageResponse;
 use claudepot_core::services::usage_cache::UsageCache;
 use tauri::image::Image;
-use tauri::menu::{
-    IconMenuItemBuilder, MenuBuilder, MenuItemBuilder, PredefinedMenuItem, SubmenuBuilder,
-};
+use tauri::menu::{IconMenuItemBuilder, MenuBuilder, PredefinedMenuItem};
 use tauri::{AppHandle, Emitter, Manager};
-
-// Mono glyph icons rendered from JetBrains Mono Nerd Font — matches the
-// webview's paper-mono register. Source PNGs live at
-// `src-tauri/icons/menu/*.png` at 36x36 @2x (muda scales every
-// menu-item icon to 18pt anyway), fill `#888` so the glyph reads on
-// both Light and Dark menu backgrounds. Muda never calls
-// `setTemplate:YES` on custom bitmaps, so pure-black or pure-white
-// would disappear in one mode — mid-gray is the pragmatic compromise.
-const ICON_TERMINAL: &[u8] = include_bytes!("../icons/menu/terminal.png");
-const ICON_DESKTOP: &[u8] = include_bytes!("../icons/menu/desktop.png");
-const ICON_USER_PLUS: &[u8] = include_bytes!("../icons/menu/user-plus.png");
-const ICON_REFRESH: &[u8] = include_bytes!("../icons/menu/refresh.png");
-const ICON_HOME: &[u8] = include_bytes!("../icons/menu/home.png");
-const ICON_SLIDERS: &[u8] = include_bytes!("../icons/menu/sliders.png");
-const ICON_CHECK: &[u8] = include_bytes!("../icons/menu/check.png");
-const ICON_POWER: &[u8] = include_bytes!("../icons/menu/power.png");
-const ICON_BAR_CHART: &[u8] = include_bytes!("../icons/menu/bar-chart.png");
-const ICON_BOLT: &[u8] = include_bytes!("../icons/menu/bolt.png");
-// Per-row glyphs. Usage rows carry a single account-identity anchor
-// (circle-user); Live/Activity rows vary by status so the user can
-// scan "what's actually happening" from the tray without opening
-// the window — play = busy, pause = waiting, dot = idle.
-const ICON_CIRCLE_USER: &[u8] = include_bytes!("../icons/menu/circle-user.png");
-const ICON_CIRCLE_PLAY: &[u8] = include_bytes!("../icons/menu/circle-play.png");
-const ICON_CIRCLE_PAUSE: &[u8] = include_bytes!("../icons/menu/circle-pause.png");
-const ICON_CIRCLE_DOT: &[u8] = include_bytes!("../icons/menu/circle-dot.png");
-
-/// Build an icon menu item from pre-rendered PNG bytes.
-fn icon_item(
-    app: &AppHandle,
-    id: &str,
-    label: &str,
-    bytes: &'static [u8],
-) -> Result<tauri::menu::IconMenuItem<tauri::Wry>, String> {
-    let img = Image::from_bytes(bytes).map_err(|e| format!("icon {id}: {e}"))?;
-    IconMenuItemBuilder::with_id(id, label)
-        .icon(img)
-        .build(app)
-        .map_err(|e| format!("icon item {id}: {e}"))
-}
-
-const ID_SHOW: &str = "tray:show";
-const ID_SETTINGS: &str = "tray:settings";
-const ID_QUIT: &str = "tray:quit";
-const ID_ADD: &str = "tray:add-account";
-const ID_SYNC: &str = "tray:sync-cc";
-const ID_DESKTOP_BIND: &str = "tray:desktop-bind";
-const ID_DESKTOP_CLEAR: &str = "tray:desktop-clear";
-const ID_DESKTOP_RECONCILE: &str = "tray:desktop-reconcile";
-const ID_DESKTOP_LAUNCH: &str = "tray:desktop-launch";
-const ID_ACTIVE_DISPLAY: &str = "tray:active-display";
-const ID_USAGE_REFRESH: &str = "tray:usage:refresh";
-pub const PREFIX_CLI: &str = "tray:cli-switch:";
-pub const PREFIX_DESKTOP: &str = "tray:desktop-switch:";
-/// Prefix for per-session rows in the Live submenu. Suffix is the
-/// sessionId — the menu-event handler routes by this prefix and
-/// opens the window with that session selected.
-pub const PREFIX_LIVE: &str = "tray:live:";
 
 /// Build and set the tray menu from the current account state.
 ///
@@ -237,344 +187,6 @@ pub async fn rebuild(app: &AppHandle) -> Result<(), String> {
     Ok(())
 }
 
-fn build_cli_submenu(
-    app: &AppHandle,
-    summaries: &[AccountSummary],
-) -> Result<tauri::menu::Submenu<tauri::Wry>, String> {
-    let mut builder = SubmenuBuilder::new(app, "Switch CLI");
-    if let Ok(img) = Image::from_bytes(ICON_TERMINAL) {
-        builder = builder.submenu_icon(img);
-    }
-    let mut any = false;
-    for s in summaries {
-        if s.is_cli_active {
-            continue;
-        }
-        any = true;
-        let label = if s.credentials_healthy {
-            s.email.clone()
-        } else {
-            format!("{} (re-auth needed)", s.email)
-        };
-        let item = MenuItemBuilder::with_id(format!("{PREFIX_CLI}{}", s.uuid), label)
-            .enabled(s.credentials_healthy)
-            .build(app)
-            .map_err(|e| format!("cli item: {e}"))?;
-        builder = builder.item(&item);
-    }
-    if !any {
-        let empty = MenuItemBuilder::with_id("tray:cli-switch:empty", "No other accounts")
-            .enabled(false)
-            .build(app)
-            .map_err(|e| format!("cli empty: {e}"))?;
-        builder = builder.item(&empty);
-    }
-    builder.build().map_err(|e| format!("cli submenu: {e}"))
-}
-
-fn build_desktop_submenu(
-    app: &AppHandle,
-    summaries: &[AccountSummary],
-) -> Result<tauri::menu::Submenu<tauri::Wry>, String> {
-    let mut builder = SubmenuBuilder::new(app, "Set Desktop");
-    if let Ok(img) = Image::from_bytes(ICON_DESKTOP) {
-        builder = builder.submenu_icon(img);
-    }
-
-    // Phase 5 header items — unconditional utilities that apply to
-    // the live Desktop session regardless of which account is
-    // targeted. Placing them above the per-account switch list keeps
-    // the account rows as the "pick one" block.
-    let bind_item = MenuItemBuilder::with_id(ID_DESKTOP_BIND, "Bind current Desktop session")
-        .enabled(true)
-        .build(app)
-        .map_err(|e| format!("desktop bind: {e}"))?;
-    let clear_item = MenuItemBuilder::with_id(ID_DESKTOP_CLEAR, "Sign Desktop out")
-        .enabled(true)
-        .build(app)
-        .map_err(|e| format!("desktop clear: {e}"))?;
-    let launch_item = MenuItemBuilder::with_id(ID_DESKTOP_LAUNCH, "Launch Claude Desktop")
-        .enabled(true)
-        .build(app)
-        .map_err(|e| format!("desktop launch: {e}"))?;
-    let reconcile_item = MenuItemBuilder::with_id(ID_DESKTOP_RECONCILE, "Reconcile profile flags")
-        .enabled(true)
-        .build(app)
-        .map_err(|e| format!("desktop reconcile: {e}"))?;
-    let header_sep = tauri::menu::PredefinedMenuItem::separator(app)
-        .map_err(|e| format!("desktop header sep: {e}"))?;
-    builder = builder.item(&bind_item).item(&clear_item).item(&launch_item).item(&reconcile_item).item(&header_sep);
-
-    let mut any = false;
-    for s in summaries {
-        if s.is_desktop_active {
-            continue;
-        }
-        any = true;
-        // Gate on disk truth (plan v2 D18). The DB flag can be
-        // stale; desktop_profile_on_disk tracks reality.
-        let label = if s.desktop_profile_on_disk {
-            s.email.clone()
-        } else {
-            format!("{} (no profile)", s.email)
-        };
-        let item =
-            MenuItemBuilder::with_id(format!("{PREFIX_DESKTOP}{}", s.uuid), label)
-                .enabled(s.desktop_profile_on_disk)
-                .build(app)
-                .map_err(|e| format!("desktop item: {e}"))?;
-        builder = builder.item(&item);
-    }
-    if !any {
-        let empty =
-            MenuItemBuilder::with_id("tray:desktop-switch:empty", "No eligible accounts")
-                .enabled(false)
-                .build(app)
-                .map_err(|e| format!("desktop empty: {e}"))?;
-        builder = builder.item(&empty);
-    }
-    builder
-        .build()
-        .map_err(|e| format!("desktop submenu: {e}"))
-}
-
-/// One submenu row per account with credentials:
-///   - Label: `email — 5h N% · 7d N% · Extra NN%/off`
-///   - Disabled (display-only): clicking opens nothing, the value IS
-///     the content. Entries without a cached snapshot render with a
-///     "no data yet" suffix so the row doesn't lie.
-///
-/// Footer: a single "Refresh" item that triggers a fresh batch fetch
-/// and rebuild, so users can top up the numbers without opening the
-/// main window.
-fn build_usage_submenu(
-    app: &AppHandle,
-    snapshots: &[(AccountSummary, Option<UsageResponse>)],
-) -> Result<tauri::menu::Submenu<tauri::Wry>, String> {
-    let mut builder = SubmenuBuilder::new(app, "Usage");
-    if let Ok(img) = Image::from_bytes(ICON_BAR_CHART) {
-        builder = builder.submenu_icon(img);
-    }
-
-    let mut any = false;
-    for (s, snap) in snapshots {
-        if !s.credentials_healthy {
-            // Accounts without creds can't have usage; skip rather
-            // than render a dead row. The active-account line above
-            // already surfaces the "re-auth needed" signal.
-            continue;
-        }
-        any = true;
-        let label = format_usage_line(&s.email, snap.as_ref());
-        let id = format!("tray:usage:row:{}", s.uuid);
-        // Icon is best-effort — a broken asset must not take down
-        // the whole submenu. Fall back to a plain text row. Each
-        // branch is self-contained because IconMenuItem and
-        // MenuItem are distinct concrete types — the builder's
-        // `item(&dyn IsMenuItem<_>)` signature is polymorphic.
-        match Image::from_bytes(ICON_CIRCLE_USER) {
-            Ok(img) => {
-                let item = IconMenuItemBuilder::with_id(&id, label)
-                    .icon(img)
-                    .enabled(false)
-                    .build(app)
-                    .map_err(|e| format!("usage item: {e}"))?;
-                builder = builder.item(&item);
-            }
-            Err(_) => {
-                let item = MenuItemBuilder::with_id(&id, label)
-                    .enabled(false)
-                    .build(app)
-                    .map_err(|e| format!("usage item: {e}"))?;
-                builder = builder.item(&item);
-            }
-        }
-    }
-
-    if !any {
-        let empty = MenuItemBuilder::with_id("tray:usage:empty", "No accounts with credentials")
-            .enabled(false)
-            .build(app)
-            .map_err(|e| format!("usage empty: {e}"))?;
-        builder = builder.item(&empty);
-    } else {
-        let sep =
-            PredefinedMenuItem::separator(app).map_err(|e| format!("usage sep: {e}"))?;
-        builder = builder.item(&sep);
-        let refresh_img =
-            Image::from_bytes(ICON_REFRESH).map_err(|e| format!("usage refresh icon: {e}"))?;
-        let refresh_item = IconMenuItemBuilder::with_id(ID_USAGE_REFRESH, "Refresh")
-            .icon(refresh_img)
-            .build(app)
-            .map_err(|e| format!("usage refresh: {e}"))?;
-        builder = builder.item(&refresh_item);
-    }
-
-    builder.build().map_err(|e| format!("usage submenu: {e}"))
-}
-
-/// Build the Live sessions submenu from the current aggregate
-/// snapshot exposed by `LiveSessionState`. Returns `Ok(None)` when
-/// no sessions are live — the caller omits the menu item entirely,
-/// preserving the "render-if-nonzero" rule. Each row is disabled
-/// (display-only) EXCEPT for the per-session opener, which routes
-/// via `PREFIX_LIVE<sessionId>` in the menu-event handler.
-fn build_live_submenu(
-    app: &AppHandle,
-) -> Result<Option<tauri::menu::Submenu<tauri::Wry>>, String> {
-    let Some(state) = app.try_state::<crate::state::LiveSessionState>() else {
-        return Ok(None);
-    };
-    let list = state.runtime.snapshot();
-    if list.is_empty() {
-        return Ok(None);
-    }
-    let label = format!("Active: {}", list.len());
-    let mut builder = SubmenuBuilder::new(app, &label);
-    if let Ok(img) = Image::from_bytes(ICON_BOLT) {
-        builder = builder.submenu_icon(img);
-    }
-    for s in list.iter() {
-        use claudepot_core::session_live::types::Status;
-        let action = s
-            .current_action
-            .clone()
-            .unwrap_or_else(|| match s.status {
-                Status::Waiting => {
-                    if let Some(w) = &s.waiting_for {
-                        format!("waiting — {w}")
-                    } else {
-                        "waiting".to_string()
-                    }
-                }
-                Status::Idle => "idle".to_string(),
-                Status::Busy => "working".to_string(),
-            });
-        let line = format_live_row(&s.cwd, s.model.as_deref(), &action, s.idle_ms);
-        let id = format!("{}{}", PREFIX_LIVE, s.session_id);
-        // Status-varied per-row glyph so the tray conveys
-        // "what's happening" without requiring the user to parse
-        // the text after each label.
-        let icon_bytes: &[u8] = match s.status {
-            Status::Busy => ICON_CIRCLE_PLAY,
-            Status::Waiting => ICON_CIRCLE_PAUSE,
-            Status::Idle => ICON_CIRCLE_DOT,
-        };
-        match Image::from_bytes(icon_bytes) {
-            Ok(img) => {
-                let item = IconMenuItemBuilder::with_id(&id, line)
-                    .icon(img)
-                    .build(app)
-                    .map_err(|e| format!("live item: {e}"))?;
-                builder = builder.item(&item);
-            }
-            Err(_) => {
-                let item = MenuItemBuilder::with_id(&id, line)
-                    .build(app)
-                    .map_err(|e| format!("live item: {e}"))?;
-                builder = builder.item(&item);
-            }
-        }
-    }
-    Ok(Some(
-        builder.build().map_err(|e| format!("live submenu: {e}"))?,
-    ))
-}
-
-/// Format a single live-session row for the tray. Tray rows are
-/// plain `&str` — no rich formatting available — so we pack
-/// `project · model · action · elapsed` into a compact one-liner.
-fn format_live_row(cwd: &str, model: Option<&str>, action: &str, idle_ms: i64) -> String {
-    let project = cwd.rsplit('/').find(|s| !s.is_empty()).unwrap_or(cwd);
-    let family = match model {
-        Some(m) if m.contains("opus") => "OPUS",
-        Some(m) if m.contains("sonnet") => "SON",
-        Some(m) if m.contains("haiku") => "HAI",
-        Some(_) => "?",
-        None => "?",
-    };
-    let elapsed = format_elapsed_short(idle_ms);
-    // Clip action to 32 chars so the tray row doesn't wrap.
-    let clipped: String = if action.chars().count() > 32 {
-        let mut s: String = action.chars().take(31).collect();
-        s.push('…');
-        s
-    } else {
-        action.to_string()
-    };
-    format!("{project} · {family} · {clipped} · {elapsed}")
-}
-
-fn format_elapsed_short(ms: i64) -> String {
-    if ms < 1_000 {
-        return "—".to_string();
-    }
-    let secs = ms / 1_000;
-    if secs < 60 {
-        return format!("{secs}s");
-    }
-    let m = secs / 60;
-    let s = secs % 60;
-    if m < 60 {
-        return format!("{m}:{s:02}");
-    }
-    let h = m / 60;
-    format!("{h}h{}m", m % 60)
-}
-
-/// Compact one-liner for a tray row. `5h 77% · 7d 33% · Extra 100%`.
-/// Only non-null windows contribute; extras appears only when enabled.
-/// Returns a "(no data)" sentinel when the snapshot is None so the row
-/// doesn't pretend to have information.
-fn format_usage_line(email: &str, snap: Option<&UsageResponse>) -> String {
-    let Some(u) = snap else {
-        return format!("{email} — (no data — click Refresh)");
-    };
-    let mut parts: Vec<String> = Vec::new();
-    if let Some(w) = u.five_hour.as_ref() {
-        parts.push(format!("5h {}%", w.utilization.round() as i64));
-    }
-    if let Some(w) = u.seven_day.as_ref() {
-        parts.push(format!("7d {}%", w.utilization.round() as i64));
-    }
-    if let Some(extra) = u.extra_usage.as_ref() {
-        if extra.is_enabled {
-            let pct = extra
-                .utilization
-                .or_else(|| match (extra.used_credits, extra.monthly_limit) {
-                    (Some(used), Some(limit)) if limit > 0.0 => Some((used / limit) * 100.0),
-                    _ => None,
-                })
-                .map(|p| p.round() as i64);
-            match pct {
-                Some(p) => parts.push(format!("Extra {p}%")),
-                None => parts.push("Extra on".to_string()),
-            }
-        } else {
-            parts.push("Extra off".to_string());
-        }
-    }
-    if parts.is_empty() {
-        format!("{email} — (no windows reported)")
-    } else {
-        format!("{email} — {}", parts.join(" · "))
-    }
-}
-
-fn build_tooltip(
-    cli_active: Option<&AccountSummary>,
-    desktop_active: Option<&AccountSummary>,
-) -> String {
-    match (cli_active, desktop_active) {
-        (Some(c), Some(d)) if c.uuid == d.uuid => format!("Claudepot — {}", c.email),
-        (Some(c), Some(d)) => {
-            format!("Claudepot\nCLI: {}\nDesktop: {}", c.email, d.email)
-        }
-        (Some(c), None) => format!("Claudepot — {}", c.email),
-        (None, Some(d)) => format!("Claudepot — Desktop: {}", d.email),
-        (None, None) => "Claudepot".to_string(),
-    }
-}
 
 /// Handle a tray menu item click. The app_menu module handles any id
 /// starting with `app-menu:`; the rest live here.
@@ -728,7 +340,7 @@ fn handle_cli_switch(app: &AppHandle, uuid_str: &str) {
     };
     let app = app.clone();
     tauri::async_runtime::spawn(async move {
-        match crate::commands::cli_use(email, None).await {
+        match crate::commands_cli::cli_use(email, None).await {
             Ok(()) => {
                 if let Err(e) = rebuild(&app).await {
                     tracing::warn!("tray rebuild after cli switch failed: {e}");
@@ -766,7 +378,7 @@ fn handle_desktop_switch(app: &AppHandle, uuid_str: &str) {
                 return;
             }
         };
-        match crate::commands::desktop_use(email, true, lock).await {
+        match crate::commands_desktop::desktop_use(email, true, lock).await {
             Ok(()) => {
                 if let Err(e) = rebuild(&app).await {
                     tracing::warn!("tray rebuild after desktop switch failed: {e}");

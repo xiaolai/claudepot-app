@@ -17,16 +17,19 @@
 //! - A 5-minute keepalive forces a fresh scan even if no events
 //!   arrived (plan §11.4) to cover FS event drops.
 
+use crate::config_dto::{file_to_dto, flatten_file_refs, scope_kind_label};
+use crate::config_watch_types::{
+    AddedFileDto, ConfigTreePatchEvent, ConfigTreeSnapshotDto, ReorderedDto, ScopeSnapshotDto,
+};
 use claudepot_core::config_view::{
     diff::ConfigTreePatch as CorePatch,
     discover,
-    model::{ConfigTree, FileNode, FileSummary, Kind, ParseIssue, Scope},
+    model::ConfigTree,
     watch::{ingest_event, scan_until_stable, DirtyGen, FsEvent, FsEventKind},
 };
 use claudepot_core::paths::claude_config_dir;
 use notify::{EventKind, RecursiveMode};
 use notify_debouncer_mini::new_debouncer;
-use serde::Serialize;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
@@ -61,65 +64,9 @@ pub struct ConfigWatchState(pub Mutex<Option<WatcherHandle>>);
 const DEBOUNCE: Duration = Duration::from_millis(250);
 const KEEPALIVE: Duration = Duration::from_secs(300);
 
-/// DTO payload for the `config-tree-patch` event.
-#[derive(Serialize, Clone, Debug)]
-pub struct ConfigTreePatchEvent {
-    pub generation: u64,
-    pub added: Vec<AddedFileDto>,
-    pub updated: Vec<FileNodeDto>,
-    pub removed: Vec<String>,
-    pub reordered: Vec<ReorderedDto>,
-    pub full_snapshot: Option<ConfigTreeSnapshotDto>,
-    pub dirty_during_emit: bool,
-}
-
-#[derive(Serialize, Clone, Debug)]
-pub struct AddedFileDto {
-    pub parent_scope_id: String,
-    pub file: FileNodeDto,
-}
-
-#[derive(Serialize, Clone, Debug)]
-pub struct ReorderedDto {
-    pub parent_scope_id: String,
-    pub child_ids: Vec<String>,
-}
-
-#[derive(Serialize, Clone, Debug)]
-pub struct FileNodeDto {
-    pub id: String,
-    pub kind: String,
-    pub abs_path: String,
-    pub display_path: String,
-    pub size_bytes: u64,
-    pub mtime_unix_ns: i64,
-    pub summary_title: Option<String>,
-    pub summary_description: Option<String>,
-    pub issues: Vec<String>,
-    pub included_by: Option<String>,
-    pub include_depth: usize,
-}
-
-#[derive(Serialize, Clone, Debug)]
-pub struct ConfigTreeSnapshotDto {
-    // Reuse the same shape the top-level config_scan returns so the
-    // React reducer can handle both with the same code path.
-    pub scopes: Vec<ScopeSnapshotDto>,
-    pub cwd: String,
-    pub project_root: String,
-    pub config_home_dir: String,
-    pub memory_slug: String,
-    pub memory_slug_lossy: bool,
-}
-
-#[derive(Serialize, Clone, Debug)]
-pub struct ScopeSnapshotDto {
-    pub id: String,
-    pub label: String,
-    pub scope_type: String,
-    pub recursive_count: usize,
-    pub files: Vec<FileNodeDto>,
-}
+// DTOs for the `config-tree-patch` event live in
+// `config_watch_types.rs` so this file can focus on the watcher state
+// machine.
 
 /// Kick off a watcher.
 ///
@@ -223,7 +170,7 @@ fn run_loop(
             Ok(Ok(batch)) => {
                 let any_relevant = batch
                     .iter()
-                    .map(|ev| notify_to_fs_event(ev))
+                    .map(notify_to_fs_event)
                     .any(|e| ingest_event(&gen, &e));
                 if !any_relevant {
                     continue;
@@ -277,7 +224,7 @@ fn watch_ancestor_dirs(cwd: &Path, home: &Path) -> Vec<PathBuf> {
         if dir.join(".git").exists() {
             break;
         }
-        if &dir == home {
+        if dir == home {
             break;
         }
         cur = dir.parent().map(|p| p.to_path_buf());
@@ -377,9 +324,12 @@ fn snapshot_to_dto(t: ConfigTree) -> ConfigTreeSnapshotDto {
             .map(|s| ScopeSnapshotDto {
                 id: s.id.clone(),
                 label: s.label.clone(),
-                scope_type: scope_label(&s.scope),
+                scope_type: scope_kind_label(&s.scope),
                 recursive_count: s.recursive_count,
-                files: flatten(&s.children).iter().map(|f| file_to_dto(f)).collect(),
+                files: flatten_file_refs(&s.children)
+                    .into_iter()
+                    .map(file_to_dto)
+                    .collect(),
             })
             .collect(),
         cwd: t.cwd.display().to_string(),
@@ -388,98 +338,6 @@ fn snapshot_to_dto(t: ConfigTree) -> ConfigTreeSnapshotDto {
         memory_slug: t.memory_slug,
         memory_slug_lossy: t.memory_slug_lossy,
     }
-}
-
-fn flatten(nodes: &[claudepot_core::config_view::model::Node]) -> Vec<&FileNode> {
-    use claudepot_core::config_view::model::Node;
-    let mut out = Vec::new();
-    for n in nodes {
-        match n {
-            Node::File(f) => out.push(f),
-            Node::Dir(d) => out.extend(flatten(&d.children)),
-        }
-    }
-    out
-}
-
-fn file_to_dto(f: &FileNode) -> FileNodeDto {
-    FileNodeDto {
-        id: f.id.clone(),
-        kind: kind_label(&f.kind),
-        abs_path: f.abs_path.display().to_string(),
-        display_path: f.display_path.clone(),
-        size_bytes: f.size_bytes,
-        mtime_unix_ns: f.mtime_unix_ns,
-        summary_title: f
-            .summary
-            .as_ref()
-            .and_then(|s: &FileSummary| s.title.clone()),
-        summary_description: f
-            .summary
-            .as_ref()
-            .and_then(|s: &FileSummary| s.description.clone()),
-        issues: f.issues.iter().map(issue_label).collect(),
-        included_by: f.included_by.as_ref().map(|p| p.display().to_string()),
-        include_depth: f.include_depth,
-    }
-}
-
-fn kind_label(k: &Kind) -> String {
-    match k {
-        Kind::ClaudeMd => "claude_md",
-        Kind::Settings => "settings",
-        Kind::SettingsLocal => "settings_local",
-        Kind::ManagedSettings => "managed_settings",
-        Kind::RedactedUserConfig => "redacted_user_config",
-        Kind::McpJson => "mcp_json",
-        Kind::ManagedMcpJson => "managed_mcp_json",
-        Kind::Agent => "agent",
-        Kind::Skill => "skill",
-        Kind::Command => "command",
-        Kind::OutputStyle => "output_style",
-        Kind::Workflow => "workflow",
-        Kind::Rule => "rule",
-        Kind::Hook => "hook",
-        Kind::Memory => "memory",
-        Kind::MemoryIndex => "memory_index",
-        Kind::Plugin => "plugin",
-        Kind::Keybindings => "keybindings",
-        Kind::Statusline => "statusline",
-        Kind::EffectiveSettings => "effective_settings",
-        Kind::EffectiveMcp => "effective_mcp",
-        Kind::Other => "other",
-    }
-    .to_string()
-}
-
-fn issue_label(i: &ParseIssue) -> String {
-    match i {
-        ParseIssue::MalformedJson { message } => format!("malformed_json: {message}"),
-        ParseIssue::NotASkill => "not_a_skill".to_string(),
-        ParseIssue::SymlinkLoop => "symlink_loop".to_string(),
-        ParseIssue::PermissionDenied => "permission_denied".to_string(),
-        ParseIssue::Other { message } => format!("other: {message}"),
-    }
-}
-
-fn scope_label(s: &Scope) -> String {
-    use Scope::*;
-    match s {
-        PluginBase => "plugin_base",
-        User => "user",
-        Project => "project",
-        Local => "local",
-        Flag => "flag",
-        Policy { .. } => "policy",
-        ClaudeMdDir { .. } => "claude_md_dir",
-        Plugin { .. } => "plugin",
-        MemoryCurrent => "memory_current",
-        MemoryOther { .. } => "memory_other",
-        Effective => "effective",
-        RedactedUserConfig => "redacted_user_config",
-        Other => "other",
-    }
-    .to_string()
 }
 
 // Silence unused warnings — `EventKind` is referenced through the

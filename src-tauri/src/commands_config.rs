@@ -20,23 +20,25 @@
 //! comment in `commands.rs` for the full rationale — any blocking I/O on
 //! the main thread freezes the webview.
 
+use crate::commands_config_types::{
+    auto_reason_label, render_path, ConfigTreeDto, EditorCandidateDto, EditorDefaultsDto,
+    EffectiveMcpDto, EffectiveMcpServerDto, EffectiveSettingsDto, McpSimulationModeDto,
+    PolicyErrorDto, ProvenanceLeafDto, ScopeNodeDto, SearchHitDto, SearchQueryDto,
+    SearchSummaryDto,
+};
+use crate::config_dto::{kind_from_str, policy_origin_label, scope_label_with_origin, FileNodeDto};
+use serde::Serialize;
 use crate::preferences::PreferencesState;
 use claudepot_core::config_view::{
     discover,
     effective_io,
-    effective_mcp::{
-        self, ApprovalState, AutoApprovalReason, BlockReason, McpSimulationMode,
-    },
+    effective_mcp::{self, ApprovalState, BlockReason, McpSimulationMode},
     effective_settings,
     launcher::{self, LaunchError},
-    model::{
-        ConfigTree, DetectSource, EditorCandidate, EditorDefaults, FileNode,
-        Kind, LaunchKind, Node, ParseIssue, PolicyOrigin, Scope, ScopeNode,
-    },
+    model::{ConfigTree, EditorCandidate},
     scan,
     search::{self, CancelToken},
 };
-use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
@@ -53,236 +55,7 @@ pub struct ConfigTreeState(pub std::sync::Arc<Mutex<Option<ConfigTree>>>);
 #[derive(Default)]
 pub struct SearchRegistry(pub Mutex<HashMap<String, CancelToken>>);
 
-// ---------- DTOs ------------------------------------------------------
-
-#[derive(Serialize, Clone, Debug)]
-pub struct ConfigTreeDto {
-    pub scopes: Vec<ScopeNodeDto>,
-    pub cwd: String,
-    pub project_root: String,
-    /// Platform-correct path to `<cwd>/.claude`, built via `Path::join`
-    /// so Windows callers receive `C:\…\.claude` (not a mixed-separator
-    /// `C:\…/.claude`). Rendered in the UI as a display-only string;
-    /// the backend consumes the `abs_path` of each FileNode directly.
-    pub config_home_dir: String,
-    pub memory_slug: String,
-    pub memory_slug_lossy: bool,
-}
-
-#[derive(Serialize, Clone, Debug)]
-pub struct ScopeNodeDto {
-    pub id: String,
-    pub label: String,
-    pub scope_type: String,
-    pub recursive_count: usize,
-    pub files: Vec<FileNodeDto>,
-}
-
-#[derive(Serialize, Clone, Debug)]
-pub struct FileNodeDto {
-    pub id: String,
-    pub kind: String,
-    pub abs_path: String,
-    pub display_path: String,
-    pub size_bytes: u64,
-    pub mtime_unix_ns: i64,
-    pub summary_title: Option<String>,
-    pub summary_description: Option<String>,
-    pub issues: Vec<String>,
-    /// Absolute path of the memory file that `@include`-pulled this
-    /// one. `None` for root files.
-    pub included_by: Option<String>,
-    /// Depth in the `@include` chain (0 = root, 1 = direct include).
-    pub include_depth: usize,
-}
-
-impl From<&FileNode> for FileNodeDto {
-    fn from(f: &FileNode) -> Self {
-        Self {
-            id: f.id.clone(),
-            kind: kind_to_str(&f.kind).to_string(),
-            abs_path: f.abs_path.display().to_string(),
-            display_path: f.display_path.clone(),
-            size_bytes: f.size_bytes,
-            mtime_unix_ns: f.mtime_unix_ns,
-            summary_title: f.summary.as_ref().and_then(|s| s.title.clone()),
-            summary_description: f.summary.as_ref().and_then(|s| s.description.clone()),
-            issues: f.issues.iter().map(issue_to_str).collect(),
-            included_by: f.included_by.as_ref().map(|p| p.display().to_string()),
-            include_depth: f.include_depth,
-        }
-    }
-}
-
-fn issue_to_str(i: &ParseIssue) -> String {
-    match i {
-        ParseIssue::MalformedJson { message } => format!("malformed_json: {message}"),
-        ParseIssue::NotASkill => "not_a_skill".to_string(),
-        ParseIssue::SymlinkLoop => "symlink_loop".to_string(),
-        ParseIssue::PermissionDenied => "permission_denied".to_string(),
-        ParseIssue::Other { message } => format!("other: {message}"),
-    }
-}
-
-fn scope_to_str(s: &Scope) -> String {
-    match s {
-        Scope::PluginBase => "plugin_base".to_string(),
-        Scope::User => "user".to_string(),
-        Scope::Project => "project".to_string(),
-        Scope::Local => "local".to_string(),
-        Scope::Flag => "flag".to_string(),
-        Scope::Policy { .. } => "policy".to_string(),
-        Scope::ClaudeMdDir { .. } => "claude_md_dir".to_string(),
-        Scope::Plugin { .. } => "plugin".to_string(),
-        Scope::MemoryCurrent => "memory_current".to_string(),
-        Scope::MemoryOther { .. } => "memory_other".to_string(),
-        Scope::Effective => "effective".to_string(),
-        Scope::RedactedUserConfig => "redacted_user_config".to_string(),
-        Scope::Other => "other".to_string(),
-    }
-}
-
-fn flatten_files(nodes: &[Node]) -> Vec<FileNodeDto> {
-    let mut out = Vec::new();
-    for n in nodes {
-        match n {
-            Node::File(f) => out.push(FileNodeDto::from(f)),
-            Node::Dir(d) => out.extend(flatten_files(&d.children)),
-        }
-    }
-    out
-}
-
-impl From<&ScopeNode> for ScopeNodeDto {
-    fn from(s: &ScopeNode) -> Self {
-        Self {
-            id: s.id.clone(),
-            label: s.label.clone(),
-            scope_type: scope_to_str(&s.scope),
-            recursive_count: s.recursive_count,
-            files: flatten_files(&s.children),
-        }
-    }
-}
-
-#[derive(Serialize, Clone, Debug)]
-pub struct EditorCandidateDto {
-    pub id: String,
-    pub label: String,
-    pub binary_path: Option<String>,
-    pub bundle_id: Option<String>,
-    pub launch_kind: String,
-    pub detected_via: String,
-    pub supports_kinds: Option<Vec<Kind>>,
-}
-
-impl From<&EditorCandidate> for EditorCandidateDto {
-    fn from(c: &EditorCandidate) -> Self {
-        let launch_kind = match &c.launch {
-            LaunchKind::Direct { .. } => "direct",
-            LaunchKind::MacosOpenA { .. } => "macos-open-a",
-            LaunchKind::EnvEditor => "env-editor",
-            LaunchKind::SystemHandler => "system-handler",
-        }
-        .to_string();
-        let detected_via = match &c.detected_via {
-            DetectSource::PathBinary { .. } => "path-binary",
-            DetectSource::MacosAppBundle { .. } => "macos-app",
-            DetectSource::WindowsRegistry { .. } => "windows-registry",
-            DetectSource::LinuxDesktopFile { .. } => "linux-desktop-file",
-            DetectSource::EnvVar { .. } => "env-var",
-            DetectSource::SystemDefault => "system-default",
-            DetectSource::UserPicked { .. } => "user-picked",
-        }
-        .to_string();
-        Self {
-            id: c.id.clone(),
-            label: c.label.clone(),
-            binary_path: c
-                .binary_path
-                .as_ref()
-                .map(|p| p.display().to_string()),
-            bundle_id: c.bundle_id.clone(),
-            launch_kind,
-            detected_via,
-            supports_kinds: c.supports_kinds.clone(),
-        }
-    }
-}
-
-#[derive(Serialize, Deserialize, Clone, Debug)]
-pub struct EditorDefaultsDto {
-    pub by_kind: std::collections::BTreeMap<String, String>,
-    pub fallback: String,
-}
-
-impl From<&EditorDefaults> for EditorDefaultsDto {
-    fn from(d: &EditorDefaults) -> Self {
-        Self {
-            by_kind: d
-                .by_kind
-                .iter()
-                .map(|(k, v)| (kind_to_str(k).to_string(), v.clone()))
-                .collect(),
-            fallback: d.fallback.clone(),
-        }
-    }
-}
-
-fn kind_to_str(k: &Kind) -> &'static str {
-    match k {
-        Kind::ClaudeMd => "claude_md",
-        Kind::Settings => "settings",
-        Kind::SettingsLocal => "settings_local",
-        Kind::ManagedSettings => "managed_settings",
-        Kind::RedactedUserConfig => "redacted_user_config",
-        Kind::McpJson => "mcp_json",
-        Kind::ManagedMcpJson => "managed_mcp_json",
-        Kind::Agent => "agent",
-        Kind::Skill => "skill",
-        Kind::Command => "command",
-        Kind::OutputStyle => "output_style",
-        Kind::Workflow => "workflow",
-        Kind::Rule => "rule",
-        Kind::Hook => "hook",
-        Kind::Memory => "memory",
-        Kind::MemoryIndex => "memory_index",
-        Kind::Plugin => "plugin",
-        Kind::Keybindings => "keybindings",
-        Kind::Statusline => "statusline",
-        Kind::EffectiveSettings => "effective_settings",
-        Kind::EffectiveMcp => "effective_mcp",
-        Kind::Other => "other",
-    }
-}
-
-fn kind_from_str(s: &str) -> Option<Kind> {
-    Some(match s {
-        "claude_md" => Kind::ClaudeMd,
-        "settings" => Kind::Settings,
-        "settings_local" => Kind::SettingsLocal,
-        "managed_settings" => Kind::ManagedSettings,
-        "redacted_user_config" => Kind::RedactedUserConfig,
-        "mcp_json" => Kind::McpJson,
-        "managed_mcp_json" => Kind::ManagedMcpJson,
-        "agent" => Kind::Agent,
-        "skill" => Kind::Skill,
-        "command" => Kind::Command,
-        "output_style" => Kind::OutputStyle,
-        "workflow" => Kind::Workflow,
-        "rule" => Kind::Rule,
-        "hook" => Kind::Hook,
-        "memory" => Kind::Memory,
-        "memory_index" => Kind::MemoryIndex,
-        "plugin" => Kind::Plugin,
-        "keybindings" => Kind::Keybindings,
-        "statusline" => Kind::Statusline,
-        "effective_settings" => Kind::EffectiveSettings,
-        "effective_mcp" => Kind::EffectiveMcp,
-        "other" => Kind::Other,
-        _ => return None,
-    })
-}
+// DTOs + enum converters live in `commands_config_types.rs`.
 
 // ---------- Commands --------------------------------------------------
 
@@ -466,35 +239,6 @@ fn launch_into(chosen: &EditorCandidate, target: &Path) -> Result<(), String> {
 
 // ---------- Content search (P2) --------------------------------------
 
-#[derive(Deserialize, Clone, Debug)]
-pub struct SearchQueryDto {
-    pub text: String,
-    #[serde(default)]
-    pub regex: bool,
-    #[serde(default)]
-    pub case_sensitive: bool,
-    #[serde(default)]
-    pub scope_filter: Option<Vec<String>>,
-}
-
-#[derive(Serialize, Clone, Debug)]
-pub struct SearchHitDto {
-    pub search_id: String,
-    pub node_id: String,
-    pub line_number: u32,
-    pub snippet: String,
-    pub match_count_in_file: u32,
-}
-
-#[derive(Serialize, Clone, Debug)]
-pub struct SearchSummaryDto {
-    pub search_id: String,
-    pub total_hits: u32,
-    pub capped: bool,
-    pub skipped_large: u32,
-    pub cancelled: bool,
-}
-
 /// Start a streaming content search. Hits fire via
 /// `config-search-hit::{search_id}`; summary via
 /// `config-search-done::{search_id}`.
@@ -572,13 +316,6 @@ pub async fn config_search_start(
     Ok(())
 }
 
-impl SearchSummaryDto {
-    fn with_error(self, _msg: &str) -> Self {
-        // Error details land in a trace log; the client sees `cancelled`.
-        self
-    }
-}
-
 #[tauri::command]
 pub async fn config_search_cancel(
     search_id: String,
@@ -592,32 +329,6 @@ pub async fn config_search_cancel(
 }
 
 // ---------- Effective Settings (P4 UI) --------------------------------
-
-#[derive(Serialize, Clone, Debug)]
-pub struct ProvenanceLeafDto {
-    /// Dotted JSON path — `"a.b[2].c"`.
-    pub path: String,
-    pub winner: String,
-    pub contributors: Vec<String>,
-    pub suppressed: bool,
-}
-
-#[derive(Serialize, Clone, Debug)]
-pub struct EffectiveSettingsDto {
-    /// Fully merged JSON, with secrets masked.
-    pub merged: serde_json::Value,
-    /// One entry per primitive leaf.
-    pub provenance: Vec<ProvenanceLeafDto>,
-    /// Winning policy origin ("remote" | "mdm_admin" | …) or None.
-    pub policy_winner: Option<String>,
-    pub policy_errors: Vec<PolicyErrorDto>,
-}
-
-#[derive(Serialize, Clone, Debug)]
-pub struct PolicyErrorDto {
-    pub origin: String,
-    pub message: String,
-}
 
 #[tauri::command]
 pub async fn config_effective_settings(
@@ -641,8 +352,12 @@ pub async fn config_effective_settings(
                 .into_iter()
                 .map(|p| ProvenanceLeafDto {
                     path: render_path(&p.key_path),
-                    winner: scope_label(&p.winner),
-                    contributors: p.contributors.iter().map(scope_label).collect(),
+                    winner: scope_label_with_origin(&p.winner),
+                    contributors: p
+                        .contributors
+                        .iter()
+                        .map(scope_label_with_origin)
+                        .collect(),
                     suppressed: p.suppressed,
                 })
                 .collect(),
@@ -664,90 +379,7 @@ pub async fn config_effective_settings(
     Ok(dto)
 }
 
-fn render_path(segs: &[claudepot_core::config_view::model::JsonPathSeg]) -> String {
-    use claudepot_core::config_view::model::JsonPathSeg;
-    let mut out = String::new();
-    for (i, seg) in segs.iter().enumerate() {
-        match seg {
-            JsonPathSeg::Key(k) => {
-                if i > 0 {
-                    out.push('.');
-                }
-                out.push_str(k);
-            }
-            JsonPathSeg::Index(idx) => {
-                out.push_str(&format!("[{idx}]"));
-            }
-        }
-    }
-    out
-}
-
-fn scope_label(s: &Scope) -> String {
-    match s {
-        Scope::PluginBase => "plugin_base".into(),
-        Scope::User => "user".into(),
-        Scope::Project => "project".into(),
-        Scope::Local => "local".into(),
-        Scope::Flag => "flag".into(),
-        Scope::Policy { origin } => format!("policy:{}", policy_origin_label(origin)),
-        Scope::ClaudeMdDir { .. } => "claude_md_dir".into(),
-        Scope::Plugin { id, .. } => format!("plugin:{id}"),
-        Scope::MemoryCurrent => "memory_current".into(),
-        Scope::MemoryOther { .. } => "memory_other".into(),
-        Scope::Effective => "effective".into(),
-        Scope::RedactedUserConfig => "redacted_user_config".into(),
-        Scope::Other => "other".into(),
-    }
-}
-
-fn policy_origin_label(o: &PolicyOrigin) -> String {
-    match o {
-        PolicyOrigin::Remote => "remote".into(),
-        PolicyOrigin::MdmAdmin => "mdm_admin".into(),
-        PolicyOrigin::ManagedFileComposite => "managed_file_composite".into(),
-        PolicyOrigin::HkcuUser => "hkcu_user".into(),
-    }
-}
-
 // ---------- Effective MCP (P5 UI) ------------------------------------
-
-#[derive(Deserialize, Clone, Copy, Debug)]
-#[serde(rename_all = "snake_case")]
-pub enum McpSimulationModeDto {
-    Interactive,
-    NonInteractive,
-    SkipPermissions,
-}
-
-impl From<McpSimulationModeDto> for McpSimulationMode {
-    fn from(d: McpSimulationModeDto) -> Self {
-        match d {
-            McpSimulationModeDto::Interactive => McpSimulationMode::Interactive,
-            McpSimulationModeDto::NonInteractive => McpSimulationMode::NonInteractive,
-            McpSimulationModeDto::SkipPermissions => McpSimulationMode::SkipPermissions,
-        }
-    }
-}
-
-#[derive(Serialize, Clone, Debug)]
-pub struct EffectiveMcpDto {
-    pub enterprise_lockout: bool,
-    pub servers: Vec<EffectiveMcpServerDto>,
-}
-
-#[derive(Serialize, Clone, Debug)]
-pub struct EffectiveMcpServerDto {
-    pub name: String,
-    pub source_scope: String,
-    pub contributors: Vec<String>,
-    pub approval: String,
-    /// E.g. "enable_all_project_mcp", "non_interactive_with_project_source_enabled"
-    pub approval_reason: Option<String>,
-    pub blocked_by: Option<String>,
-    /// Server config JSON with secrets masked.
-    pub masked: serde_json::Value,
-}
 
 #[tauri::command]
 pub async fn config_effective_mcp(
@@ -785,8 +417,12 @@ pub async fn config_effective_mcp(
                 });
                 EffectiveMcpServerDto {
                     name: s.name,
-                    source_scope: scope_label(&s.source_scope),
-                    contributors: s.contributors.iter().map(scope_label).collect(),
+                    source_scope: scope_label_with_origin(&s.source_scope),
+                    contributors: s
+                        .contributors
+                        .iter()
+                        .map(scope_label_with_origin)
+                        .collect(),
                     approval,
                     approval_reason: reason,
                     blocked_by: blocked,
@@ -806,14 +442,4 @@ pub async fn config_effective_mcp(
     Ok(dto)
 }
 
-fn auto_reason_label(r: &AutoApprovalReason) -> String {
-    match r {
-        AutoApprovalReason::EnableAllProjectMcp => "enable_all_project_mcp".into(),
-        AutoApprovalReason::NonInteractiveWithProjectSourceEnabled => {
-            "non_interactive_with_project_source_enabled".into()
-        }
-        AutoApprovalReason::SkipPermissionsWithProjectSourceEnabled => {
-            "skip_permissions_with_project_source_enabled".into()
-        }
-    }
-}
+// `render_path` + `auto_reason_label` live in `commands_config_types`.

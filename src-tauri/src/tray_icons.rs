@@ -1,0 +1,72 @@
+//! Tray icon constants, menu-item IDs, and the `icon_item` builder.
+//!
+//! Kept separate from `tray.rs` so the builder logic there can focus on
+//! menu composition rather than asset wiring. The PNG bytes are baked in
+//! at compile time from `src-tauri/icons/menu/` — changes to the source
+//! assets require a rebuild.
+
+use tauri::image::Image;
+use tauri::menu::{IconMenuItem, IconMenuItemBuilder};
+use tauri::{AppHandle, Wry};
+
+// Mono glyph icons rendered from JetBrains Mono Nerd Font — matches the
+// webview's paper-mono register. Source PNGs live at
+// `src-tauri/icons/menu/*.png` at 36x36 @2x (muda scales every
+// menu-item icon to 18pt anyway), fill `#888` so the glyph reads on
+// both Light and Dark menu backgrounds. Muda never calls
+// `setTemplate:YES` on custom bitmaps, so pure-black or pure-white
+// would disappear in one mode — mid-gray is the pragmatic compromise.
+pub const ICON_TERMINAL: &[u8] = include_bytes!("../icons/menu/terminal.png");
+pub const ICON_DESKTOP: &[u8] = include_bytes!("../icons/menu/desktop.png");
+pub const ICON_USER_PLUS: &[u8] = include_bytes!("../icons/menu/user-plus.png");
+pub const ICON_REFRESH: &[u8] = include_bytes!("../icons/menu/refresh.png");
+pub const ICON_HOME: &[u8] = include_bytes!("../icons/menu/home.png");
+pub const ICON_SLIDERS: &[u8] = include_bytes!("../icons/menu/sliders.png");
+pub const ICON_CHECK: &[u8] = include_bytes!("../icons/menu/check.png");
+pub const ICON_POWER: &[u8] = include_bytes!("../icons/menu/power.png");
+pub const ICON_BAR_CHART: &[u8] = include_bytes!("../icons/menu/bar-chart.png");
+pub const ICON_BOLT: &[u8] = include_bytes!("../icons/menu/bolt.png");
+// Per-row glyphs. Usage rows carry a single account-identity anchor
+// (circle-user); Live/Activity rows vary by status so the user can
+// scan "what's actually happening" from the tray without opening
+// the window — play = busy, pause = waiting, dot = idle.
+pub const ICON_CIRCLE_USER: &[u8] = include_bytes!("../icons/menu/circle-user.png");
+pub const ICON_CIRCLE_PLAY: &[u8] = include_bytes!("../icons/menu/circle-play.png");
+pub const ICON_CIRCLE_PAUSE: &[u8] = include_bytes!("../icons/menu/circle-pause.png");
+pub const ICON_CIRCLE_DOT: &[u8] = include_bytes!("../icons/menu/circle-dot.png");
+
+// Menu-item IDs. Anything prefixed `tray:` is routed by
+// `handle_menu_event` in `tray.rs`.
+pub const ID_SHOW: &str = "tray:show";
+pub const ID_SETTINGS: &str = "tray:settings";
+pub const ID_QUIT: &str = "tray:quit";
+pub const ID_ADD: &str = "tray:add-account";
+pub const ID_SYNC: &str = "tray:sync-cc";
+pub const ID_DESKTOP_BIND: &str = "tray:desktop-bind";
+pub const ID_DESKTOP_CLEAR: &str = "tray:desktop-clear";
+pub const ID_DESKTOP_RECONCILE: &str = "tray:desktop-reconcile";
+pub const ID_DESKTOP_LAUNCH: &str = "tray:desktop-launch";
+pub const ID_ACTIVE_DISPLAY: &str = "tray:active-display";
+pub const ID_USAGE_REFRESH: &str = "tray:usage:refresh";
+
+// Prefixes for dynamic per-account / per-session menu items.
+pub const PREFIX_CLI: &str = "tray:cli-switch:";
+pub const PREFIX_DESKTOP: &str = "tray:desktop-switch:";
+/// Prefix for per-session rows in the Live submenu. Suffix is the
+/// sessionId — the menu-event handler routes by this prefix and
+/// opens the window with that session selected.
+pub const PREFIX_LIVE: &str = "tray:live:";
+
+/// Build an icon menu item from pre-rendered PNG bytes.
+pub fn icon_item(
+    app: &AppHandle,
+    id: &str,
+    label: &str,
+    bytes: &'static [u8],
+) -> Result<IconMenuItem<Wry>, String> {
+    let img = Image::from_bytes(bytes).map_err(|e| format!("icon {id}: {e}"))?;
+    IconMenuItemBuilder::with_id(id, label)
+        .icon(img)
+        .build(app)
+        .map_err(|e| format!("icon item {id}: {e}"))
+}
