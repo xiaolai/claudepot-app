@@ -173,6 +173,17 @@ impl KeyStore {
         Ok(())
     }
 
+    pub fn rename_api_key(&self, uuid: Uuid, label: &str) -> Result<(), KeyError> {
+        let updated = self.db().execute(
+            "UPDATE api_keys SET label = ?1 WHERE uuid = ?2",
+            params![label, uuid.to_string()],
+        )?;
+        if updated == 0 {
+            return Err(KeyError::NotFound(uuid.to_string()));
+        }
+        Ok(())
+    }
+
     // API keys have no probe command today — per-key usage isn't
     // available through the public API. The `last_probed_at` /
     // `last_probe_status` columns on the row remain reserved so a
@@ -260,6 +271,17 @@ impl KeyStore {
             params![uuid.to_string()],
         )?;
         if deleted == 0 {
+            return Err(KeyError::NotFound(uuid.to_string()));
+        }
+        Ok(())
+    }
+
+    pub fn rename_oauth_token(&self, uuid: Uuid, label: &str) -> Result<(), KeyError> {
+        let updated = self.db().execute(
+            "UPDATE oauth_tokens SET label = ?1 WHERE uuid = ?2",
+            params![label, uuid.to_string()],
+        )?;
+        if updated == 0 {
             return Err(KeyError::NotFound(uuid.to_string()));
         }
         Ok(())
@@ -408,6 +430,43 @@ mod tests {
         let (store, _dir) = tmp_store();
         let result = store.remove_api_key(Uuid::new_v4());
         assert!(matches!(result, Err(KeyError::NotFound(_))));
+    }
+
+    #[test]
+    fn rename_api_key_persists_new_label() {
+        let (store, _dir) = tmp_store();
+        let account = Uuid::new_v4();
+        let key = store
+            .insert_api_key("old", "sk-ant-api03-a…z", account, "sk-ant-api03-a")
+            .unwrap();
+        store.rename_api_key(key.uuid, "new").unwrap();
+        let list = store.list_api_keys().unwrap();
+        assert_eq!(list[0].label, "new");
+    }
+
+    #[test]
+    fn rename_oauth_token_persists_new_label() {
+        let (store, _dir) = tmp_store();
+        let account = Uuid::new_v4();
+        let tok = store
+            .insert_oauth_token("old", "sk-ant-oat01-a…z", account, "sk-ant-oat01-a")
+            .unwrap();
+        store.rename_oauth_token(tok.uuid, "new").unwrap();
+        let list = store.list_oauth_tokens().unwrap();
+        assert_eq!(list[0].label, "new");
+    }
+
+    #[test]
+    fn rename_returns_not_found_for_unknown_uuid() {
+        let (store, _dir) = tmp_store();
+        assert!(matches!(
+            store.rename_api_key(Uuid::new_v4(), "x"),
+            Err(KeyError::NotFound(_))
+        ));
+        assert!(matches!(
+            store.rename_oauth_token(Uuid::new_v4(), "x"),
+            Err(KeyError::NotFound(_))
+        ));
     }
 
     #[test]
