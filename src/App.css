@@ -83,9 +83,9 @@ body {
   vertical-align: -0.125em;
   flex-shrink: 0;
 }
-.btn .icon {
-  margin-right: 4px;
-}
+/* `.btn .icon` used to set margin-right in the nerd-font era; Lucide
+   SVGs don't carry the `.icon` class, so the new `gap: 6px` on `.btn`
+   (see above) is what actually puts air between icon and label. */
 .icon-btn .icon,
 .copy-btn .icon,
 .toast-close .icon,
@@ -937,13 +937,26 @@ body {
      `.project-detail-actions` three buttons ("Open in Finder",
      "Rename…", "Open in Config") were wrapping to two lines when
      the actions flex block shrank under pressure from the title
-     block — the result was the icon + "Open in" on row one and the
-     editor name alone on row two. Buttons size to their intrinsic
-     content now; if the whole row overflows, `flex-wrap` on the
-     parent is the right knob. */
+     block. Buttons size to their intrinsic content now; if the whole
+     row overflows, `flex-wrap` on the parent is the right knob. */
   white-space: nowrap;
   display: inline-flex;
   align-items: center;
+  /* 6px between an inline icon and its label. Paired with the
+     `.btn > svg { width: 1em }` rule below so the icon reads as a
+     peer of the 12px body text rather than a badge. */
+  gap: 6px;
+  flex-shrink: 0;
+}
+
+/* Lucide icons render as bare <svg> (no `.icon` class), so we target
+   them directly. `1em` locks the icon's box to the button's own
+   font-size — at `.btn`'s 12px that yields a 12px square, matching
+   the label's cap height instead of the 14px default the <Icon>
+   component ships with. */
+.btn > svg {
+  width: 1em;
+  height: 1em;
   flex-shrink: 0;
 }
 
