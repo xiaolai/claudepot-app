@@ -62,13 +62,25 @@ export function Chip({
 }
 
 /**
- * Auto-advancing elapsed-time counter for the "idle for N seconds"
- * pill. Bases on the timestamp the backend published, then runs a
- * local rAF tick so the display updates every frame without
- * requiring a backend ping. When `idleMs` changes (a new backend
- * publish), the counter rebases against `performance.now()`.
+ * Auto-advancing elapsed-time counter for the "idle / busy / waiting
+ * for N seconds" pill. Bases on the timestamp the backend published,
+ * then runs a local rAF tick so the display updates every frame
+ * without requiring a backend ping. When `idleMs` changes (a new
+ * backend publish), the counter rebases against `performance.now()`.
+ *
+ * `label` is prepended to the time so a bare number never appears in
+ * the header — design.md forbids unlabeled signals in primary UI.
+ * Falls back to "elapsed" when the caller can't disambiguate the
+ * status semantics. The label is also mirrored into `aria-label` so
+ * assistive tech reads "busy 17 seconds" instead of a lone "17s".
  */
-export function ElapsedCounter({ idleMs }: { idleMs: number }) {
+export function ElapsedCounter({
+  idleMs,
+  label = "elapsed",
+}: {
+  idleMs: number;
+  label?: string;
+}) {
   const [tickMs, setTickMs] = useState(0);
   useEffect(() => {
     setTickMs(0);
@@ -89,12 +101,22 @@ export function ElapsedCounter({ idleMs }: { idleMs: number }) {
   const text = m > 0 ? `${m}:${String(s).padStart(2, "0")}` : `${s}s`;
   return (
     <span
+      aria-label={`${label} ${m > 0 ? `${m}m ${s}s` : `${s} seconds`}`}
       style={{
+        display: "inline-flex",
+        alignItems: "baseline",
+        gap: "var(--sp-4)",
         fontVariantNumeric: "tabular-nums",
         color: "var(--fg-muted)",
       }}
     >
-      {text}
+      <span
+        className="mono-cap"
+        style={{ color: "var(--fg-faint)", fontSize: "var(--fs-3xs)" }}
+      >
+        {label}
+      </span>
+      <span>{text}</span>
     </span>
   );
 }

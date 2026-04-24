@@ -224,6 +224,15 @@ function StatusChipRow({
   idleMs,
 }: StatusChipRowProps) {
   const statusTone: ChipTone = errored ? "warn" : STATUS_TONE[status];
+  // The elapsed counter reuses `idle_ms` across every status. Name it
+  // by the current status so users don't have to decode whether "17s"
+  // means "idle for 17s" or "this turn has been running 17s".
+  const elapsedLabel =
+    status === "busy"
+      ? "working"
+      : status === "waiting"
+        ? "waiting"
+        : "idle";
   return (
     <div
       style={{
@@ -241,7 +250,7 @@ function StatusChipRow({
       {model ? <Chip tone="neutral">{model}</Chip> : null}
       {waitingFor ? <Chip tone="neutral">{waitingFor}</Chip> : null}
       <div style={{ flex: 1 }} />
-      <ElapsedCounter idleMs={idleMs} />
+      <ElapsedCounter idleMs={idleMs} label={elapsedLabel} />
     </div>
   );
 }
