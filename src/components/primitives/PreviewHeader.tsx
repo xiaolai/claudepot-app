@@ -101,19 +101,41 @@ export function PreviewHeader({
     setMenuMaxHeight(`min(var(--config-menu-max-height), ${available}px)`);
   }, [menuOpen]);
 
-  const resolvedLabel = useMemo(() => {
-    if (!editors || !defaults) return "Open in…";
+  // Resolve the editor the primary click would launch. Returns the
+  // editor name only — the "Open in …" verb is carried by the glyph
+  // (NF.openExternal) so the button can render as `↗ VS Code` instead
+  // of `Open in VS Code`, saving ~7 chars of horizontal space without
+  // losing the "which editor" signal.
+  const resolvedEditor = useMemo(() => {
+    if (!editors || !defaults) return null;
     const byKindId = kind ? defaults.by_kind[kind] : undefined;
     const pickId = byKindId ?? defaults.fallback ?? "system";
-    const picked = editors.find((e) => e.id === pickId);
-    if (picked) return `Open in ${picked.label}`;
-    const system = editors.find((e) => e.id === "system");
-    return system ? `Open in ${system.label}` : "Open in…";
+    return (
+      editors.find((e) => e.id === pickId) ??
+      editors.find((e) => e.id === "system") ??
+      null
+    );
   }, [editors, defaults, kind]);
 
   const disabled = !path;
   const loading = !editors || !defaults;
-  const buttonLabel = loading ? "Detecting editors…" : resolvedLabel;
+  // Glyph only shows next to an actual editor name — the
+  // loading / no-editor placeholders carry the meaning in words
+  // alone, so a bare arrow would leave the user guessing.
+  const showGlyph = !loading && resolvedEditor != null;
+  const buttonLabel = loading
+    ? "Detecting editors…"
+    : resolvedEditor
+      ? resolvedEditor.label
+      : "Open in…";
+  // `aria-label` and hover title keep the full "Open in <Editor>" for
+  // screen readers and tooltip users — the visible text is just the
+  // editor name.
+  const buttonAccessibleLabel = loading
+    ? "Detecting editors…"
+    : resolvedEditor
+      ? `Open in ${resolvedEditor.label}`
+      : "Open in…";
 
   return (
     <header
@@ -209,17 +231,20 @@ export function PreviewHeader({
               size="md"
               disabled={disabled || loading}
               onClick={() => onOpen(null)}
-              aria-label={buttonLabel}
+              aria-label={buttonAccessibleLabel}
+              glyph={showGlyph ? NF.openExternal : undefined}
               style={{
                 borderRadius: 0,
                 border: "none",
                 minWidth: 0,
                 overflow: "hidden",
-                display: "block",
+                // `flex` (not `block`) so the glyph sits next to the
+                // label instead of pushing it below.
+                display: "flex",
                 textOverflow: "ellipsis",
                 whiteSpace: "nowrap",
               }}
-              title={buttonLabel}
+              title={buttonAccessibleLabel}
             >
               {buttonLabel}
             </Button>

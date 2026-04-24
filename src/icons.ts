@@ -66,6 +66,7 @@ import {
   Shield,
   SlidersHorizontal,
   SortAsc,
+  SquareArrowOutUpRight,
   Star,
   Sun,
   Tag,
@@ -132,6 +133,11 @@ export const NF = {
   download:   Download,
   upload:     Upload,
   play:       Play,
+  /** "Opens in another app" — used for the PreviewHeader's
+   *  Open-in-editor button. SquareArrowOut* is the Lucide convention
+   *  for "leaves this surface / launches externally", distinct from
+   *  a plain `arrowUpR` which reads as generic navigation. */
+  openExternal: SquareArrowOutUpRight,
 
   // --- status
   dot:        Dot,
