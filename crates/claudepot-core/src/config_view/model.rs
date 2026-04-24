@@ -1,10 +1,15 @@
 //! Config section data model.
 //!
-//! P0 ships the **stable subset** needed to wire the section in: `Scope`,
-//! `Kind`, `ConfigTree`, `EditorCandidate`, `EditorDefaults`, plus a few
-//! support enums. The richer `Annotated` / `ProvenanceEntry` /
-//! `ConfigTreePatch` types land alongside the scanners that populate
-//! them in later phases (see `dev-docs/config-section-plan.md` §5).
+//! Types surfaced through the Config section: `Scope`, `Kind`,
+//! `ConfigTree`, editor-detection helpers, and the `@include`
+//! breadcrumb fields on `FileNode` (`included_by`, `include_depth`).
+//! `Kind` tracks every artifact CC loads: memory files, the six
+//! `CLAUDE_CONFIG_DIRECTORIES` (commands, agents, output-styles,
+//! skills, workflows, rules), MCP sources (regular + managed), policy
+//! settings, keybindings, and the redacted global config.
+//!
+//! All names mirror `dev-docs/config-section-plan.md`. Divergences
+//! from CC's own types are called out at the field level.
 
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
