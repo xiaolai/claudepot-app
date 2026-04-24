@@ -485,6 +485,25 @@ textarea {
   background: var(--fg-ghost);
 }
 
+/* Hide scrollbars for strips that should feel like chip rails, not
+ * scrollable lists. Use on elements that set their own
+ * `scrollbar-width: none` inline — the pair keeps Firefox and
+ * WebKit in lock-step. */
+.scrollbar-none::-webkit-scrollbar {
+  display: none;
+}
+
+/* Suppress the native disclosure triangle on `<summary>` so paper-
+ * mono modals can swap in a Lucide chevron. Changing `display` away
+ * from `list-item` already does this in every current engine, but
+ * keeping the explicit marker rule makes future UA resets a no-op. */
+summary {
+  list-style: none;
+}
+summary::-webkit-details-marker {
+  display: none;
+}
+
 /* ─── Utility classes ─────────────────────────────────────── */
 .mono-cap {
   text-transform: uppercase;
