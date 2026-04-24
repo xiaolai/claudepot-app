@@ -351,7 +351,7 @@ function EditorMenu({
         position: "absolute",
         top: "calc(100% + var(--sp-4))",
         right: 0,
-        zIndex: 10,
+        zIndex: "var(--z-popover)" as unknown as number,
         minWidth: "var(--config-menu-min-width)",
         maxHeight,
         overflowY: "auto",

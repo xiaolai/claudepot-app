@@ -25,7 +25,9 @@ export function MarkdownRenderer({ body }: { body: string }) {
         gap: "var(--sp-12)",
         padding: "var(--sp-16) var(--sp-20)",
         fontSize: "var(--fs-sm)",
-        lineHeight: 1.55,
+        // Markdown body sits at `--lh-body` (1.5); headings + code
+        // blocks inside pick their own line-height as needed.
+        lineHeight: "var(--lh-body)",
         color: "var(--fg)",
       }}
     >

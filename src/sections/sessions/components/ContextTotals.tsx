@@ -79,7 +79,7 @@ export function ContextTotals({
             </div>
             <div
               style={{
-                height: 4,
+                height: "var(--sp-4)",
                 background: "var(--bg-sunken)",
                 borderRadius: "var(--r-1)",
                 overflow: "hidden",

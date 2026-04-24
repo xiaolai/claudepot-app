@@ -190,7 +190,7 @@ export function TargetButton({
             color: "var(--fg-faint)",
             textAlign: "center",
             letterSpacing: "0.02em",
-            lineHeight: 1.2,
+            lineHeight: "var(--lh-tight)",
           }}
         >
           {disabledReason}

@@ -125,7 +125,7 @@ export function CleanupPane({
           value={olderThanDays}
           onChange={(e) => setOlderThanDays(e.target.value)}
           aria-label="Older than days"
-          style={{ width: 210 }}
+          style={{ width: "var(--input-width-md)" }}
         />
         <Input
           glyph={NF.archive}
@@ -134,7 +134,7 @@ export function CleanupPane({
           value={largerThanMb}
           onChange={(e) => setLargerThanMb(e.target.value)}
           aria-label="Larger than MB"
-          style={{ width: 210 }}
+          style={{ width: "var(--input-width-md)" }}
         />
         <FilterChip active={hasError} onToggle={() => setHasError((v) => !v)}>
           Errors

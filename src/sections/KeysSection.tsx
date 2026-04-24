@@ -303,7 +303,7 @@ export function KeysSection() {
         <ConfirmDialog
           title="Remove key?"
           body={
-            <p style={{ margin: 0, lineHeight: 1.5 }}>
+            <p style={{ margin: 0, lineHeight: "var(--lh-body)" }}>
               Remove <strong>{pendingRemoval.row.label}</strong>? The stored
               secret will be deleted from the system Keychain. This can’t be
               undone.

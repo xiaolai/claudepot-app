@@ -68,8 +68,8 @@ export function SectionTab({
               ? {
                   // Render-if-nonzero dot — 6px, filled accent when
                   // inactive (to draw the eye) and muted when active.
-                  width: 6,
-                  height: 6,
+                  width: "var(--sp-6)",
+                  height: "var(--sp-6)",
                   borderRadius: "50%",
                   background: active ? "var(--on-color)" : "var(--accent)",
                   flexShrink: 0,
