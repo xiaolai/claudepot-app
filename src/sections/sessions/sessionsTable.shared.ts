@@ -18,8 +18,14 @@ export type SortDir = "asc" | "desc";
  *
  * Shared between the table header and every row so the columns line
  * up. Changing this template is the single point of edit.
+ *
+ * Weighting: the session-preview column does the heaviest lifting —
+ * it carries the derived prompt title and a second meta line — so it
+ * takes the widest fraction. Project names are usually a single
+ * basename, and the numeric columns hold at most 4-character strings
+ * (`999k`, `113`, `8m ago`), so they stay narrow.
  */
-export const COLS = "var(--sp-20) 2fr 1.1fr 0.6fr 0.7fr 0.9fr var(--sp-24)";
+export const COLS = "var(--sp-20) 3fr 1fr 0.5fr 0.6fr 0.8fr var(--sp-24)";
 
 /**
  * Above this count, switch to row-level virtualization.

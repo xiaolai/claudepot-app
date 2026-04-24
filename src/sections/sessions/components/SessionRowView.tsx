@@ -14,6 +14,7 @@ import type { SessionRow } from "../../../types";
 import { formatRelativeTime, formatSize } from "../../projects/format";
 import {
   bestTimestampMs,
+  deriveSessionTitle,
   formatTokens,
   modelBadge,
   projectBasename,
@@ -79,6 +80,10 @@ export const SessionRowView = memo(function SessionRowView({
     () => maybeRedact(s.first_user_prompt),
     [s.first_user_prompt],
   );
+  const cleanTitle = useMemo(
+    () => deriveSessionTitle(safePrompt),
+    [safePrompt],
+  );
   const project = redactSecrets(projectBasename(s.project_path) || s.slug);
   const projectTitle = useMemo(
     () => redactSecrets(s.project_path),
@@ -86,8 +91,7 @@ export const SessionRowView = memo(function SessionRowView({
   );
   const safeBranch = useMemo(() => maybeRedact(s.git_branch), [s.git_branch]);
   const headline =
-    safePrompt?.trim() ||
-    (s.is_sidechain ? "Agent subsession" : shortSessionId(s.session_id));
+    cleanTitle ?? (s.is_sidechain ? "Agent subsession" : shortSessionId(s.session_id));
   const model = modelBadge(s.models);
   const tokens = formatTokens(s.tokens.total);
 
@@ -194,38 +198,61 @@ export const SessionRowView = memo(function SessionRowView({
             marginTop: "var(--sp-2)",
             color: "var(--fg-faint)",
             fontSize: "var(--fs-xs)",
-            display: "flex",
-            gap: "var(--sp-8)",
+            display: "block",
             whiteSpace: "nowrap",
             overflow: "hidden",
             textOverflow: "ellipsis",
           }}
         >
-          <span className="mono">{shortSessionId(s.session_id)}</span>
-          {model && (
-            <>
-              <span>·</span>
-              <span>{model}</span>
-            </>
-          )}
-          {safeBranch && (
-            <>
-              <span>·</span>
-              <span style={{ display: "inline-flex", gap: "var(--sp-4)" }}>
-                <Glyph
-                  g={NF.branch}
-                  style={{ fontSize: "var(--fs-2xs)" }}
-                />
-                {safeBranch}
+          {(() => {
+            // Build the meta line as one inline text run so that when
+            // overflow truncates the right edge, the separator that
+            // would otherwise precede a clipped value never stays
+            // orphaned on screen. Each segment carries its own leading
+            // separator; ellipsis then cuts cleanly through the value
+            // it belongs to.
+            const parts: Array<{ key: string; node: React.ReactNode }> = [];
+            parts.push({
+              key: "id",
+              node: (
+                <span className="mono">{shortSessionId(s.session_id)}</span>
+              ),
+            });
+            if (model) parts.push({ key: "model", node: <span>{model}</span> });
+            if (safeBranch) {
+              parts.push({
+                key: "branch",
+                node: (
+                  <span
+                    style={{
+                      display: "inline-flex",
+                      alignItems: "baseline",
+                      gap: "var(--sp-4)",
+                    }}
+                  >
+                    <Glyph g={NF.branch} style={{ fontSize: "var(--fs-2xs)" }} />
+                    {safeBranch}
+                  </span>
+                ),
+              });
+            }
+            if (s.file_size_bytes > 0) {
+              parts.push({
+                key: "size",
+                node: <span>{formatSize(s.file_size_bytes)}</span>,
+              });
+            }
+            return parts.map((p, i) => (
+              <span key={p.key}>
+                {i > 0 && (
+                  <span style={{ margin: "0 var(--sp-8)" }} aria-hidden>
+                    ·
+                  </span>
+                )}
+                {p.node}
               </span>
-            </>
-          )}
-          {s.file_size_bytes > 0 && (
-            <>
-              <span>·</span>
-              <span>{formatSize(s.file_size_bytes)}</span>
-            </>
-          )}
+            ));
+          })()}
         </div>
         {snippet && (() => {
           // Defense in depth: backend already redacts via
