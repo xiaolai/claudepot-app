@@ -75,7 +75,7 @@ export function EditToolViewer({ tool }: { tool: LinkedTool }) {
         style={{
           padding: "var(--sp-6) var(--sp-10)",
           fontSize: "var(--fs-xs)",
-          lineHeight: 1.5,
+          lineHeight: "var(--lh-body)",
         }}
       >
         {diff.map((line, i) => (

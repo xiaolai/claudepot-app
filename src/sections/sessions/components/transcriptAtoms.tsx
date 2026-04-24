@@ -78,7 +78,7 @@ export function Divider({ children }: { children: React.ReactNode }) {
         margin: "var(--sp-14) 0",
       }}
     >
-      <div style={{ flex: 1, height: 1, background: "var(--line)" }} />
+      <div style={{ flex: 1, height: "var(--sp-1)", background: "var(--line)" }} />
       <div
         style={{
           display: "flex",
@@ -90,7 +90,7 @@ export function Divider({ children }: { children: React.ReactNode }) {
       >
         {children}
       </div>
-      <div style={{ flex: 1, height: 1, background: "var(--line)" }} />
+      <div style={{ flex: 1, height: "var(--sp-1)", background: "var(--line)" }} />
     </div>
   );
 }

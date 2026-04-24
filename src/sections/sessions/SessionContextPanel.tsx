@@ -109,7 +109,7 @@ export function SessionContextPanel({
       data-testid="session-context-panel"
       aria-label="Visible context"
       style={{
-        width: 360,
+        width: "var(--context-panel-width)",
         borderLeft: "var(--bw-hair) solid var(--line)",
         background: "var(--bg-raised)",
         display: "flex",
@@ -227,8 +227,8 @@ function InjectionList({ injections }: { injections: ContextInjection[] }) {
             <span
               aria-hidden
               style={{
-                width: 6,
-                height: 6,
+                width: "var(--sp-6)",
+                height: "var(--sp-6)",
                 borderRadius: "50%",
                 background: colorFor(i.category),
                 flexShrink: 0,

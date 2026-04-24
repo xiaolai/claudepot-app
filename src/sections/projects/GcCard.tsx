@@ -77,7 +77,7 @@ export function GcCard({
           value={days}
           onChange={(e) => setDays(Number(e.target.value))}
           style={{
-            width: 72,
+            width: "var(--sp-72)",
             padding: "var(--sp-4) var(--sp-6)",
             fontSize: "var(--fs-sm)",
             fontFamily: "var(--font)",

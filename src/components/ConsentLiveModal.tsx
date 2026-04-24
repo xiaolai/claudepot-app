@@ -79,7 +79,7 @@ export function ConsentLiveModal({ open, onDismiss }: Props) {
             color: "var(--fg-muted)",
             margin: 0,
             marginBottom: "var(--sp-12)",
-            lineHeight: 1.5,
+            lineHeight: "var(--lh-body)",
           }}
         >
           Claudepot can watch the transcript files Claude Code already
@@ -93,7 +93,7 @@ export function ConsentLiveModal({ open, onDismiss }: Props) {
             margin: 0,
             marginBottom: "var(--sp-20)",
             paddingLeft: "var(--sp-20)",
-            lineHeight: 1.6,
+            lineHeight: "var(--lh-loose)",
           }}
         >
           <li>Reads files Claude Code already writes to this Mac.</li>

@@ -134,7 +134,7 @@ export function OptionRow({
         fontSize: "var(--fs-sm)",
         color: disabled ? "var(--fg-faint)" : "var(--fg)",
         cursor: disabled ? "not-allowed" : "pointer",
-        lineHeight: 1.4,
+        lineHeight: "var(--lh-body)",
       }}
     >
       <input

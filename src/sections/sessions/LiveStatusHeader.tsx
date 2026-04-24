@@ -297,7 +297,7 @@ function CurrentActionCard({
         style={{
           flex: 1,
           fontSize: "var(--fs-sm)",
-          lineHeight: 1.4,
+          lineHeight: "var(--lh-body)",
           color: "var(--fg)",
         }}
       >

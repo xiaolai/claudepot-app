@@ -170,7 +170,7 @@ export function MoveSessionModal({
           style={{
             margin: 0,
             fontSize: "var(--fs-sm)",
-            lineHeight: 1.5,
+            lineHeight: "var(--lh-body)",
             color: "var(--fg-muted)",
           }}
         >
