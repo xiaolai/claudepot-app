@@ -69,6 +69,8 @@ pub enum Kind {
     Agent,
     Skill,
     Command,
+    OutputStyle,
+    Workflow,
     Rule,
     Hook,
     Memory,
@@ -123,6 +125,17 @@ pub struct FileNode {
     pub summary: Option<FileSummary>,
     pub issues: Vec<ParseIssue>,
     pub symlink_origin: Option<PathBuf>,
+    /// When this file was reached via a `@include` chain, the absolute
+    /// path of the memory file that pulled it in. `None` for the root
+    /// memory file or any file not surfaced through the include
+    /// resolver. See `memory_include::resolve_all`.
+    #[serde(default)]
+    pub included_by: Option<PathBuf>,
+    /// Depth of this node in the `@include` chain (0 = root file).
+    /// Lets the UI render a "depth: 2 ↑" breadcrumb without walking
+    /// the parent chain.
+    #[serde(default)]
+    pub include_depth: usize,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug)]

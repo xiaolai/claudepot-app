@@ -11,6 +11,7 @@
 //! - Parse results from `parse::*` are attached per file.
 //! - **No** I/O beyond filesystem reads — no subprocesses, no network.
 
+use crate::config_view::memory_include;
 use crate::config_view::model::{
     ClaudeMdRole, ConfigTree, FileNode, FileSummary, Kind, Node,
     ParseIssue, PolicyOrigin, Scope, ScopeNode,
@@ -116,6 +117,8 @@ fn make_file_node(path: &Path, kind: Kind, scope: Scope, parsed: parse::Parsed) 
         summary: parsed.summary,
         issues: parsed.issues,
         symlink_origin: None,
+        included_by: None,
+        include_depth: 0,
     }
 }
 
@@ -140,7 +143,11 @@ fn parse_file(path: &Path, kind: &Kind) -> parse::Parsed {
         }
         Kind::McpJson | Kind::ManagedMcpJson => parse::parse_settings_json(&bytes),
         Kind::ClaudeMd => parse::parse_claude_md(&bytes),
-        Kind::Agent | Kind::Rule | Kind::Command => parse::parse_frontmatter_markdown(&bytes),
+        Kind::Agent
+        | Kind::Rule
+        | Kind::Command
+        | Kind::OutputStyle
+        | Kind::Workflow => parse::parse_frontmatter_markdown(&bytes),
         Kind::Skill => parse::parse_frontmatter_markdown(&bytes),
         Kind::Memory => parse::parse_memory_head(&bytes),
         Kind::MemoryIndex => parse::parse_memory_index(&bytes).1,
@@ -189,6 +196,20 @@ pub fn collect_user() -> Vec<FileNode> {
         Scope::User,
         true,
     ));
+    // `output-styles` and `workflows` are two more
+    // `CLAUDE_CONFIG_DIRECTORIES` per `markdownConfigLoader.ts:29-36`.
+    out.extend(collect_dir_of_kind(
+        &home.join("output-styles"),
+        Kind::OutputStyle,
+        Scope::User,
+        true,
+    ));
+    out.extend(collect_dir_of_kind(
+        &home.join("workflows"),
+        Kind::Workflow,
+        Scope::User,
+        true,
+    ));
 
     out
 }
@@ -197,36 +218,61 @@ pub fn collect_project(cwd: &Path) -> Vec<FileNode> {
     let dotclaude = cwd.join(".claude");
     let mut out = Vec::new();
 
+    // Single `settings.json` at cwd — CC does not walk for settings.
     out.extend(maybe_file(
         dotclaude.join("settings.json"),
         Kind::Settings,
         Scope::Project,
     ));
-    out.extend(collect_dir_of_kind(
-        &dotclaude.join("agents"),
-        Kind::Agent,
-        Scope::Project,
-        true,
-    ));
-    out.extend(collect_skills_dir(&dotclaude.join("skills"), Scope::Project));
-    out.extend(collect_dir_of_kind(
-        &dotclaude.join("commands"),
-        Kind::Command,
-        Scope::Project,
-        true,
-    ));
+
+    // Agents / skills / commands / output-styles / workflows: CC walks
+    // cwd → git-root OR home via `getProjectDirsUpToHome`
+    // (`markdownConfigLoader.ts:234`). Dedup by abs_path so symlinked
+    // repos don't produce duplicate entries — stricter dedup by inode
+    // lands later with E1.
+    let mut seen: std::collections::HashSet<PathBuf> = std::collections::HashSet::new();
+    for dir in ancestors_for(cwd, WalkBoundary::GitRootOrHome) {
+        let dc = dir.join(".claude");
+        for f in collect_dir_of_kind(&dc.join("agents"), Kind::Agent, Scope::Project, true)
+            .into_iter()
+            .chain(collect_skills_dir(&dc.join("skills"), Scope::Project))
+            .chain(collect_dir_of_kind(
+                &dc.join("commands"),
+                Kind::Command,
+                Scope::Project,
+                true,
+            ))
+            .chain(collect_dir_of_kind(
+                &dc.join("output-styles"),
+                Kind::OutputStyle,
+                Scope::Project,
+                true,
+            ))
+            .chain(collect_dir_of_kind(
+                &dc.join("workflows"),
+                Kind::Workflow,
+                Scope::Project,
+                true,
+            ))
+        {
+            if seen.insert(f.abs_path.clone()) {
+                out.push(f);
+            }
+        }
+    }
     // Rules walk cwd-upward — see `collect_rules_walk`. CLAUDE.md walks
     // via `collect_claudemd_walk`.
     out
 }
 
-/// Walk cwd upward (bounded by git-root OR home) collecting every
-/// `.claude/rules/**/*.md` at each level. Mirrors CC's
-/// `getProjectDirsUpToHome` rule-loader (plan §6.4).
+/// Walk cwd upward collecting every `.claude/rules/**/*.md` at each
+/// level. Memory-file walk — bounded by FS root per
+/// `claudemd.ts:909-919` (rules are loaded as Project memory by
+/// `processMdRules`, which runs inside the `while (currentDir !==
+/// parse(currentDir).root)` loop at `claudemd.ts:854`).
 pub fn collect_rules_walk(cwd: &Path) -> Vec<FileNode> {
     let mut out = Vec::new();
-    let stop = find_stop_boundary(cwd);
-    for dir in ancestors_up_to(cwd, stop.as_deref()) {
+    for dir in ancestors_for(cwd, WalkBoundary::FsRoot) {
         let rules_dir = dir.join(".claude").join("rules");
         out.extend(collect_dir_of_kind(
             &rules_dir,
@@ -248,13 +294,13 @@ pub fn collect_local(cwd: &Path) -> Vec<FileNode> {
     out
 }
 
-/// Walk from cwd up to canonical git-root (or filesystem root as fallback)
-/// collecting `CLAUDE.md` + `.claude/CLAUDE.md` at each level. Per
-/// `dev-docs/config-section-plan.md` §6.4.
+/// Walk from cwd to filesystem root collecting `CLAUDE.md` +
+/// `.claude/CLAUDE.md` at each ancestor. Matches CC's memory walk at
+/// `claudemd.ts:854` — goes to `parse(currentDir).root`, NOT bounded
+/// by git-root.
 pub fn collect_claudemd_walk(cwd: &Path) -> Vec<(PathBuf, ClaudeMdRole, FileNode)> {
     let mut out = Vec::new();
-    let stop = find_stop_boundary(cwd);
-    let dirs = ancestors_up_to(cwd, stop.as_deref());
+    let dirs = ancestors_for(cwd, WalkBoundary::FsRoot);
 
     for (i, dir) in dirs.iter().enumerate() {
         let role = if i + 1 == dirs.len() {
@@ -278,8 +324,62 @@ pub fn collect_claudemd_walk(cwd: &Path) -> Vec<(PathBuf, ClaudeMdRole, FileNode
     out
 }
 
-fn find_stop_boundary(cwd: &Path) -> Option<PathBuf> {
-    // Stop at `.git` dir or home — whichever is nearer.
+/// Walk cwd → FS root collecting `CLAUDE.local.md` at each ancestor.
+/// CC loads these as Local memory (`claudemd.ts:922-933`). Each file
+/// gets its own scope so contributors stay distinct in the tree.
+pub fn collect_claudemd_local_walk(cwd: &Path) -> Vec<(PathBuf, ClaudeMdRole, FileNode)> {
+    let mut out = Vec::new();
+    let dirs = ancestors_for(cwd, WalkBoundary::FsRoot);
+
+    for (i, dir) in dirs.iter().enumerate() {
+        let role = if i + 1 == dirs.len() {
+            ClaudeMdRole::Cwd
+        } else {
+            ClaudeMdRole::Ancestor
+        };
+        if let Some(f) = maybe_file(
+            dir.join("CLAUDE.local.md"),
+            Kind::ClaudeMd,
+            Scope::Local,
+        ) {
+            out.push((dir.clone(), role.clone(), f));
+        }
+    }
+    out
+}
+
+/// Walk cwd → FS root collecting `.mcp.json` at each ancestor. CC's
+/// MCP project-scope loader walks all the way to
+/// `parse(currentDir).root` (`services/mcp/config.ts:914-920`).
+pub fn collect_mcp_json_walk(cwd: &Path) -> Vec<FileNode> {
+    let mut out = Vec::new();
+    for dir in ancestors_for(cwd, WalkBoundary::FsRoot) {
+        if let Some(f) = maybe_file(
+            dir.join(".mcp.json"),
+            Kind::McpJson,
+            Scope::Project,
+        ) {
+            out.push(f);
+        }
+    }
+    out
+}
+
+/// Boundary strategy used by each walk. CC distinguishes two:
+/// - `GitRootOrHome` — agents/skills/commands via `getProjectDirsUpToHome`
+///   (`markdownConfigLoader.ts:234-289`). Stops at first `.git` OR home.
+/// - `FsRoot` — memory walk (CLAUDE.md, CLAUDE.local.md, .claude/CLAUDE.md,
+///   .claude/rules, .mcp.json) via `claudemd.ts:854` and
+///   `services/mcp/config.ts:914-920`. Walks all the way to the filesystem
+///   root; does NOT stop at .git.
+pub enum WalkBoundary {
+    GitRootOrHome,
+    FsRoot,
+}
+
+/// Locate the stop boundary under `GitRootOrHome`. Returns `None` if
+/// neither `.git` nor home is found — caller walks to FS root.
+fn stop_boundary_git_root_or_home(cwd: &Path) -> Option<PathBuf> {
     let home = dirs::home_dir();
     let mut cur = Some(cwd.to_path_buf());
     while let Some(d) = cur {
@@ -294,19 +394,26 @@ fn find_stop_boundary(cwd: &Path) -> Option<PathBuf> {
     None
 }
 
-fn ancestors_up_to(cwd: &Path, stop: Option<&Path>) -> Vec<PathBuf> {
+/// Compute the list of ancestor dirs under the chosen `WalkBoundary`.
+/// Output is shallow → deep (root first, cwd last), matching how CC
+/// processes memory files so deeper overrides shallower.
+fn ancestors_for(cwd: &Path, boundary: WalkBoundary) -> Vec<PathBuf> {
+    let stop = match boundary {
+        WalkBoundary::GitRootOrHome => stop_boundary_git_root_or_home(cwd),
+        WalkBoundary::FsRoot => None,
+    };
     let mut out = Vec::new();
     let mut cur = Some(cwd.to_path_buf());
     while let Some(d) = cur {
         out.push(d.clone());
-        if let Some(s) = stop {
-            if s == d {
+        if let Some(s) = &stop {
+            if s == &d {
                 break;
             }
         }
         cur = d.parent().map(|p| p.to_path_buf());
     }
-    out.reverse(); // shallow → deep
+    out.reverse();
     out
 }
 
@@ -476,6 +583,19 @@ pub fn collect_policy_managed_files() -> Vec<FileNode> {
     ) {
         out.push(f);
     }
+    // `managed-mcp.json` — when present and non-empty, CC locks out
+    // project + user + local MCP sources
+    // (`services/mcp/config.ts`, plan §9.4). Surface as a Policy entry
+    // so the user can see the lockout source.
+    if let Some(f) = maybe_file(
+        home.join("managed-mcp.json"),
+        Kind::ManagedMcpJson,
+        Scope::Policy {
+            origin: PolicyOrigin::ManagedFileComposite,
+        },
+    ) {
+        out.push(f);
+    }
     if let Ok(rd) = std::fs::read_dir(home.join("managed-settings.d")) {
         let mut entries: Vec<PathBuf> = rd
             .flatten()
@@ -504,14 +624,26 @@ pub fn collect_policy_managed_files() -> Vec<FileNode> {
     out
 }
 
-/// RedactedUserConfig — `~/.claude.json` IF present. Parser is a no-op
-/// at the file level; actual redaction lives in P2's
-/// `redacted_claude_json.rs`. For P1 we just surface the file node.
+/// RedactedUserConfig — global user config. Mirrors CC's
+/// `getGlobalClaudeFile` (`env.ts:14-26`): legacy
+/// `<claude_config_dir>/.config.json` wins when present; otherwise
+/// `$CLAUDE_CONFIG_DIR/.claude.json` (or `~/.claude.json` when the env
+/// var is unset). Surface the actual file so the preview points to the
+/// authoritative location.
 pub fn collect_redacted_user_config() -> Option<FileNode> {
-    let p = claude_config_dir().join(".claude.json");
-    if !p.is_file() {
+    let legacy = claude_config_dir().join(".config.json");
+    let primary_base = std::env::var_os("CLAUDE_CONFIG_DIR")
+        .map(PathBuf::from)
+        .or_else(dirs::home_dir)
+        .unwrap_or_else(|| PathBuf::from("/tmp"));
+    let primary = primary_base.join(".claude.json");
+    let p = if legacy.is_file() {
+        legacy
+    } else if primary.is_file() {
+        primary
+    } else {
         return None;
-    }
+    };
     let meta = std::fs::metadata(&p).ok()?;
     let size = meta.len();
     let mtime = mtime_ns(&meta);
@@ -531,6 +663,8 @@ pub fn collect_redacted_user_config() -> Option<FileNode> {
         }),
         issues: Vec::new(),
         symlink_origin: None,
+        included_by: None,
+        include_depth: 0,
     })
 }
 
@@ -606,10 +740,96 @@ fn collect_skills_dir(dir: &Path, scope: Scope) -> Vec<FileNode> {
                 summary: None,
                 issues: vec![ParseIssue::NotASkill],
                 symlink_origin: None,
+                included_by: None,
+                include_depth: 0,
             });
         }
     }
     out
+}
+
+// ---------- @include expansion ---------------------------------------
+
+/// Read the `hasClaudeMdExternalIncludesApproved` flag from the global
+/// user config (`~/.claude.json` or the legacy `.config.json`). A
+/// missing file, parse error, or absent key means the flag is off —
+/// Project/Local/Managed includes outside cwd are then skipped, matching
+/// CC's default-deny behavior (`claudemd.ts:798-802`).
+fn external_includes_approved() -> bool {
+    let Some(node) = collect_redacted_user_config() else { return false };
+    let Ok(bytes) = std::fs::read(&node.abs_path) else { return false };
+    let Ok(v): Result<serde_json::Value, _> = serde_json::from_slice(&bytes) else {
+        return false;
+    };
+    v.get("hasClaudeMdExternalIncludesApproved")
+        .and_then(|x| x.as_bool())
+        .unwrap_or(false)
+}
+
+/// For every memory-kind `FileNode` in `files`, resolve its `@include`
+/// chain and append synthetic nodes describing each reachable target.
+/// Cycles and missing files are silently dropped inside the resolver.
+///
+/// `is_user_memory` → always include external targets
+/// (`claudemd.ts:833`). Project/Local/Managed → gate on
+/// `hasClaudeMdExternalIncludesApproved`.
+fn expand_includes(
+    files: &mut Vec<FileNode>,
+    original_cwd: &Path,
+    is_user_memory: bool,
+) {
+    let allow_external = is_user_memory || external_includes_approved();
+    let memory_kinds: &[Kind] = &[
+        Kind::ClaudeMd,
+        Kind::Memory,
+        Kind::MemoryIndex,
+        Kind::Rule,
+    ];
+    let roots: Vec<(PathBuf, Scope)> = files
+        .iter()
+        .filter(|f| memory_kinds.contains(&f.kind))
+        .map(|f| (f.abs_path.clone(), f.scope_badges.first().cloned().unwrap_or(Scope::Other)))
+        .collect();
+    let mut seen: std::collections::HashSet<PathBuf> = files
+        .iter()
+        .map(|f| f.abs_path.clone())
+        .collect();
+    for (root, scope) in roots {
+        for inc in memory_include::resolve_all(&root, original_cwd, allow_external) {
+            if !seen.insert(inc.abs_path.clone()) {
+                continue;
+            }
+            let kind = if memory_include::is_text_extension(&inc.abs_path)
+                && inc.abs_path
+                    .extension()
+                    .map(|e| e.eq_ignore_ascii_case("md"))
+                    .unwrap_or(false)
+            {
+                Kind::Memory
+            } else {
+                Kind::Other
+            };
+            let parsed = parse_file(&inc.abs_path, &kind);
+            let mut node = make_file_node(&inc.abs_path, kind, scope.clone(), parsed);
+            node.included_by = Some(inc.included_by.clone());
+            node.include_depth = inc.depth;
+            // Title hint so the UI can show "included from …".
+            let name = inc.abs_path.file_name()
+                .map(|n| n.to_string_lossy().into_owned())
+                .unwrap_or_default();
+            node.summary = Some(FileSummary {
+                title: Some(name),
+                description: Some(format!(
+                    "@include depth {} (from {})",
+                    inc.depth,
+                    inc.included_by.file_name()
+                        .map(|n| n.to_string_lossy().into_owned())
+                        .unwrap_or_default(),
+                )),
+            });
+            files.push(node);
+        }
+    }
 }
 
 // ---------- Tree assembly --------------------------------------------
@@ -634,7 +854,10 @@ pub fn assemble_tree(cwd: &Path) -> ConfigTree {
         ));
     }
 
-    let user_files = collect_user();
+    let mut user_files = collect_user();
+    // User memory can always @include external files
+    // (`claudemd.ts:833` — `includeExternal: true` regardless of flag).
+    expand_includes(&mut user_files, cwd, /* is_user_memory */ true);
     if !user_files.is_empty() {
         scopes.push(scope_node(
             "scope:user",
@@ -646,6 +869,7 @@ pub fn assemble_tree(cwd: &Path) -> ConfigTree {
 
     let mut project_files = collect_project(cwd);
     project_files.extend(collect_rules_walk(cwd));
+    expand_includes(&mut project_files, cwd, /* is_user_memory */ false);
     if !project_files.is_empty() {
         scopes.push(scope_node(
             "scope:project",
@@ -655,13 +879,34 @@ pub fn assemble_tree(cwd: &Path) -> ConfigTree {
         ));
     }
 
-    let local_files = collect_local(cwd);
+    let mut local_files = collect_local(cwd);
+    // CLAUDE.local.md at every ancestor to FS root, collapsed into the
+    // single Local scope (`claudemd.ts:922-933`). One entry per file.
+    let local_md = collect_claudemd_local_walk(cwd);
+    for (_dir, _role, f) in local_md {
+        local_files.push(f);
+    }
+    expand_includes(&mut local_files, cwd, /* is_user_memory */ false);
     if !local_files.is_empty() {
         scopes.push(scope_node(
             "scope:local",
             Scope::Local,
-            "Local (settings.local.json)",
+            "Local (settings.local.json + CLAUDE.local.md)",
             local_files.into_iter().map(Node::File).collect(),
+        ));
+    }
+
+    // `.mcp.json` at every ancestor to FS root
+    // (`services/mcp/config.ts:914-920`). One scope for all of them —
+    // dedicated label so users can tell it apart from other Project
+    // settings sources.
+    let mcp_files = collect_mcp_json_walk(cwd);
+    if !mcp_files.is_empty() {
+        scopes.push(scope_node(
+            "scope:mcp-project",
+            Scope::Project,
+            "MCP (.mcp.json walk)",
+            mcp_files.into_iter().map(Node::File).collect(),
         ));
     }
 
@@ -672,11 +917,17 @@ pub fn assemble_tree(cwd: &Path) -> ConfigTree {
             dir.display(),
             if matches!(role, ClaudeMdRole::Cwd) { " (cwd)" } else { "" },
         );
+        // Root file plus its @include chain. CC processes this file as
+        // `Project` memory type (`claudemd.ts:887-895`) — use the
+        // non-user external-gate.
+        let root_id = f.id.clone();
+        let mut bucket = vec![f];
+        expand_includes(&mut bucket, cwd, /* is_user_memory */ false);
         scopes.push(scope_node(
-            &format!("scope:claudemd:{}", f.id),
+            &format!("scope:claudemd:{}", root_id),
             Scope::ClaudeMdDir { dir: dir.clone(), role: role.clone() },
             &label,
-            vec![Node::File(f)],
+            bucket.into_iter().map(Node::File).collect::<Vec<_>>(),
         ));
     }
 
@@ -874,14 +1125,24 @@ mod tests {
     }
 
     #[test]
-    fn ancestors_shallow_to_deep() {
+    fn ancestors_fs_root_goes_to_filesystem_root() {
         let root = PathBuf::from("/a/b/c/d");
-        let stop = PathBuf::from("/a/b");
-        let a = ancestors_up_to(&root, Some(&stop));
-        assert_eq!(a, vec![
-            PathBuf::from("/a/b"),
-            PathBuf::from("/a/b/c"),
-            PathBuf::from("/a/b/c/d"),
-        ]);
+        let a = ancestors_for(&root, WalkBoundary::FsRoot);
+        // Shallow → deep, stops only at filesystem root.
+        assert_eq!(a.last().unwrap(), &PathBuf::from("/a/b/c/d"));
+        assert_eq!(a.first().unwrap(), &PathBuf::from("/"));
+    }
+
+    #[test]
+    fn ancestors_git_root_or_home_stops_at_git() {
+        // Simulate a .git at /a/b by using a temp dir.
+        let td = TempDir::new().unwrap();
+        let mid = td.path().join("mid");
+        let leaf = mid.join("leaf");
+        std::fs::create_dir_all(&leaf).unwrap();
+        std::fs::create_dir_all(mid.join(".git")).unwrap();
+        let a = ancestors_for(&leaf, WalkBoundary::GitRootOrHome);
+        assert_eq!(a.first().unwrap(), &mid);
+        assert_eq!(a.last().unwrap(), &leaf);
     }
 }

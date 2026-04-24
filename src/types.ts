@@ -1029,6 +1029,8 @@ export type ConfigKind =
   | "agent"
   | "skill"
   | "command"
+  | "output_style"
+  | "workflow"
   | "rule"
   | "hook"
   | "memory"
@@ -1050,6 +1052,14 @@ export interface ConfigFileNodeDto {
   summary_title: string | null;
   summary_description: string | null;
   issues: string[];
+  /**
+   * Absolute path of the memory file that `@include`-pulled this one.
+   * `null` for root files. Present only on memory-kind nodes reached
+   * through the include resolver.
+   */
+  included_by: string | null;
+  /** Depth in the `@include` chain (0 = root, 1 = direct include). */
+  include_depth: number;
 }
 
 export interface ConfigScopeNodeDto {

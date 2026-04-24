@@ -133,6 +133,8 @@ mod tests {
             }),
             issues: vec![],
             symlink_origin: None,
+            included_by: None,
+            include_depth: 0,
         }
     }
 

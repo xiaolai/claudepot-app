@@ -113,6 +113,8 @@ pub fn make_slug_file_node(s: &MemorySlug) -> FileNode {
         }),
         issues: vec![],
         symlink_origin: None,
+        included_by: None,
+        include_depth: 0,
     }
 }
 
