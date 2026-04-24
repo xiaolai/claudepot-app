@@ -933,6 +933,18 @@ body {
   user-select: none;
   transition: background 0.1s ease;
   box-shadow: var(--shadow-subtle);
+  /* Button labels should never break mid-word. In
+     `.project-detail-actions` three buttons ("Open in Finder",
+     "Rename…", "Open in Config") were wrapping to two lines when
+     the actions flex block shrank under pressure from the title
+     block — the result was the icon + "Open in" on row one and the
+     editor name alone on row two. Buttons size to their intrinsic
+     content now; if the whole row overflows, `flex-wrap` on the
+     parent is the right knob. */
+  white-space: nowrap;
+  display: inline-flex;
+  align-items: center;
+  flex-shrink: 0;
 }
 
 .btn:hover:not(:disabled) {
