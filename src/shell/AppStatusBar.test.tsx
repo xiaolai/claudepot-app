@@ -26,8 +26,21 @@ describe("AppStatusBar helpers", () => {
     });
 
     it("drops the model-mix tail when every session has unknown model", () => {
+      // Unknown-model sessions are counted in the live segment but are
+      // not surfaced in the mix — a lone "?" letterform reads as an
+      // error indicator at a glance.
       const segment = formatLiveSegment([mkSession({ model: null })]);
-      expect(segment).toBe("● 1 live · ? 1");
+      expect(segment).toBe("● 1 live");
+    });
+
+    it("renders the mix even when some sessions are still unknown", () => {
+      const segment = formatLiveSegment([
+        mkSession({ model: null }),
+        mkSession({ model: null }),
+        mkSession({ model: "claude-opus-4-7" }),
+      ]);
+      // Three live total, only one known family → no "? 2" tail.
+      expect(segment).toBe("● 3 live · OPUS 1");
     });
 
     it("renders counts with family markers", () => {

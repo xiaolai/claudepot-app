@@ -2091,6 +2091,10 @@ body {
 
 .segmented-control-item {
   flex: 1;
+  /* `min-width: 0` lets flex items shrink below their intrinsic
+     content width so `text-overflow: ellipsis` actually triggers
+     instead of forcing the whole bar to overflow. */
+  min-width: 0;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -2105,6 +2109,8 @@ body {
   color: var(--muted);
   box-shadow: none;
   white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .segmented-control-item:first-child {

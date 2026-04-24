@@ -106,8 +106,11 @@ export function AppStatusBar({ stats }: { stats: AppStatusBarStats }) {
   );
 }
 
-/** Build the "● N live · Opus 2, Sonnet 1" segment. Returns null
- *  when no sessions are live so the segment is render-if-nonzero. */
+/** Build the "● N live · OPUS 2, SON 1" segment. Returns null when
+ *  no sessions are live so the segment is render-if-nonzero. When
+ *  every session has an unknown model, renders just "● N live" — the
+ *  "?" family rendered as a letterform read as an error indicator.
+ *  The live count already captures the total; the mix is supplemental. */
 export function formatLiveSegment(
   sessions: LiveSessionSummary[],
 ): string | null {
@@ -120,12 +123,16 @@ export function formatLiveSegment(
 }
 
 /** Group live sessions by 3-letter model family and format as
- *  "OPUS 2, SON 1" in descending count order. Unknown models
- *  cluster under their raw id trimmed to 8 chars. */
+ *  "OPUS 2, SON 1" in descending count order. Sessions whose model is
+ *  `null` (no assistant turn yet) are omitted — the status bar doesn't
+ *  label them as "? N" because a solitary question mark reads as an
+ *  error; the live-count segment still counts them. Unrecognised
+ *  non-null models cluster under their raw id trimmed to 8 chars. */
 export function modelMix(sessions: LiveSessionSummary[]): string[] {
   const counts = new Map<string, number>();
   for (const s of sessions) {
     const key = familyKey(s.model);
+    if (key == null) continue;
     counts.set(key, (counts.get(key) ?? 0) + 1);
   }
   return [...counts.entries()]
@@ -133,8 +140,8 @@ export function modelMix(sessions: LiveSessionSummary[]): string[] {
     .map(([k, n]) => `${k} ${n}`);
 }
 
-function familyKey(model: string | null): string {
-  if (!model) return "?";
+function familyKey(model: string | null): string | null {
+  if (!model) return null;
   if (model.includes("opus")) return "OPUS";
   if (model.includes("sonnet")) return "SON";
   if (model.includes("haiku")) return "HAI";
