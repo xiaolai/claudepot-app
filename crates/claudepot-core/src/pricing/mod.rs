@@ -40,6 +40,9 @@ use std::collections::BTreeMap;
 use std::path::PathBuf;
 use std::time::{SystemTime, UNIX_EPOCH};
 
+pub mod service;
+pub use service::{Fetcher, LiveFetcher, PricingCacheService};
+
 /// USD per *million tokens*. Kept in an "easy to eyeball" unit so
 /// table edits don't drown in trailing zeros. Multiplication by
 /// actual token counts happens one layer up.
