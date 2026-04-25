@@ -18,6 +18,8 @@ import { NF } from "../icons";
 import { ToastContainer } from "../components/ToastContainer";
 import { ScreenHeader } from "../shell/ScreenHeader";
 import { ProtectedPathsPane } from "./settings/ProtectedPathsPane";
+import { CleanupPane } from "./sessions/CleanupPane";
+import { TrashDrawer } from "./sessions/TrashDrawer";
 import type { AppStatus, CcIdentity } from "../types";
 import { APP_VERSION } from "../version";
 
@@ -25,16 +27,19 @@ type Tab =
   | "general"
   | "appearance"
   | "activity"
+  | "cleanup"
   | "protected"
   | "github"
   | "locks"
   | "diagnostics"
   | "about";
 
-// Cleanup was removed in the C-1 E consolidation: GC moved to
-// Projects → Maintenance (GcCard), Rebuild session index moved to
-// Sessions → Cleanup (SessionIndexRebuild). Settings no longer owns
-// any repair/cleanup surfaces.
+// Cleanup re-landed here from the (now-removed) Sessions section's
+// Cleanup sub-tab when the cross-project Sessions firehose was
+// folded back into per-project browsing under `Projects`. Hosts the
+// session prune flow + the trash drawer + the session-index rebuild
+// utility — global maintenance operations on the on-disk transcript
+// store. GC of stale projects still lives in Projects → Maintenance.
 const TAB_DEFS: ReadonlyArray<{
   id: Tab;
   label: string;
@@ -44,6 +49,7 @@ const TAB_DEFS: ReadonlyArray<{
   { id: "general",     label: "General",        glyph: NF.sliders,  group: "core" },
   { id: "appearance",  label: "Appearance",     glyph: NF.sun,      group: "core" },
   { id: "activity",    label: "Activity",       glyph: NF.bolt,     group: "core" },
+  { id: "cleanup",     label: "Cleanup",        glyph: NF.trash,    group: "advanced" },
   { id: "protected",   label: "Protected paths", glyph: NF.shield,  group: "advanced" },
   { id: "github",      label: "GitHub",         glyph: NF.key,      group: "advanced" },
   { id: "locks",       label: "Locks",          glyph: NF.lock,     group: "advanced" },
@@ -97,6 +103,7 @@ export function SettingsSection() {
           {tab === "general" && <GeneralPane pushToast={pushToast} />}
           {tab === "appearance" && <AppearancePane />}
           {tab === "activity" && <ActivityPane pushToast={pushToast} />}
+          {tab === "cleanup" && <CleanupTabPane pushToast={pushToast} />}
           {tab === "protected" && <ProtectedPathsPane pushToast={pushToast} />}
           {tab === "github" && <GithubPane pushToast={pushToast} />}
           {tab === "locks" && <LocksPane pushToast={pushToast} />}
@@ -588,6 +595,58 @@ function AboutPane() {
         />
       </dl>
     </SettingsGroup>
+  );
+}
+
+/* ──────────────────────────────────────────────────────────── */
+/*                         Cleanup pane                         */
+/* ──────────────────────────────────────────────────────────── */
+
+function CleanupTabPane({
+  pushToast,
+}: {
+  pushToast: (kind: "info" | "error", text: string) => void;
+}) {
+  // Reuse the existing CleanupPane + TrashDrawer that previously
+  // lived under Sessions → Cleanup. The two-pane layout (filter +
+  // plan on the left, trash on the right) carries over verbatim;
+  // the sub-tab outer chrome is gone since this is just a Settings
+  // sub-tab now. `setToast` adapts SettingsSection's toast API
+  // (kind + text) to CleanupPane's single-string signature by
+  // routing all pane toasts through the info channel.
+  const setToast = useCallback(
+    (msg: string) => pushToast("info", msg),
+    [pushToast],
+  );
+  // The pane uses an internal refresh signal to coordinate the
+  // prune flow with the trash drawer — when a prune dispatches,
+  // the drawer re-fetches so newly-trashed entries appear.
+  const [trashTick, setTrashTick] = useState(0);
+  return (
+    <div
+      style={{
+        display: "flex",
+        gap: "var(--sp-24)",
+        alignItems: "flex-start",
+      }}
+    >
+      <div style={{ flex: 2, minWidth: 0 }}>
+        <CleanupPane
+          onTrashChanged={() => setTrashTick((n) => n + 1)}
+          setToast={setToast}
+        />
+      </div>
+      <div
+        style={{
+          flex: 1,
+          minWidth: 0,
+          borderLeft: "var(--bw-hair) solid var(--line)",
+          paddingLeft: "var(--sp-16)",
+        }}
+      >
+        <TrashDrawer key={trashTick} onChange={() => setTrashTick((n) => n + 1)} />
+      </div>
+    </div>
   );
 }
 

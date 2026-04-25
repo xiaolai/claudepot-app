@@ -394,61 +394,11 @@ describe("SessionsSection — Live filter chip", () => {
   });
 });
 
-describe("SessionsSection — Trends tab", () => {
-  it("loads trends when the tab is selected and honors the window selector", async () => {
-    await mountWithRows([mk("alpha")]);
-
-    const trendsTab = screen.getByRole("tab", { name: "Trends" });
-    await userEvent.click(trendsTab);
-
-    // The pane fires activity_trends on mount.
-    await waitFor(() => {
-      expect(activityTrendsSpy).toHaveBeenCalledTimes(1);
-    });
-
-    // Switching to 7d refetches with a new bucket count.
-    const sevenDay = await screen.findByRole("tab", { name: "7d" });
-    await userEvent.click(sevenDay);
-    await waitFor(() => {
-      expect(activityTrendsSpy).toHaveBeenCalledTimes(2);
-    });
-  });
-});
-
-describe("SessionsSection — trash indicator", () => {
-  it("renders a dot on the Cleanup tab when trash has entries", async () => {
-    sessionTrashListSpy.mockResolvedValue({
-      entries: [
-        {
-          id: "abc",
-          kind: "session",
-          session_id: "alpha",
-          original_cwd: "/repo/alpha",
-          deleted_at_ts: "2026-04-23T00:00:00Z",
-          size_bytes: 0,
-        },
-      ],
-    });
-    await mountWithRows([mk("alpha")]);
-
-    const cleanupTab = await screen.findByRole("tab", { name: /Cleanup/i });
-    await waitFor(() => {
-      // The dot is an inline span inside the Cleanup tab with a
-      // 6px width styled inline. We assert on its presence via the
-      // structural parent check: the tab should contain exactly one
-      // decorative child span sibling to the label.
-      const spans = cleanupTab.querySelectorAll("span");
-      expect(spans.length).toBeGreaterThan(0);
-    });
-  });
-
-  it("omits the dot when the trash is empty", async () => {
-    sessionTrashListSpy.mockResolvedValue({ entries: [] });
-    await mountWithRows([mk("alpha")]);
-
-    const cleanupTab = await screen.findByRole("tab", { name: /Cleanup/i });
-    // No indicator span should exist inside the tab.
-    const spans = cleanupTab.querySelectorAll("span[aria-hidden]");
-    expect(spans).toHaveLength(0);
-  });
-});
+// The "Trends" sub-tab and the trash-indicator chip both moved out
+// of SessionsSection in the events-into-projects collapse:
+//   - SessionsTrendsPane was deleted (its data was redundant with
+//     the cards-by-day metric strip in the Activity surface).
+//   - The trash-count chip + Cleanup sub-tab were folded into
+//     Settings → Cleanup; SessionsSection no longer owns either.
+// Tests for those surfaces moved with them; this section now hosts
+// only the cross-project session list.
