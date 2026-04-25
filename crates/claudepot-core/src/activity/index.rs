@@ -169,6 +169,75 @@ impl ActivityIndex {
         Ok(Some(db.last_insert_rowid()))
     }
 
+    /// Bulk insert + return per-card outcomes. `Some(rowid)` means
+    /// inserted, `None` means deduped against an existing row. Vec
+    /// is aligned with the input slice so callers can correlate
+    /// classifier-emitted cards with their assigned ids — needed by
+    /// the LiveRuntime bus emission path that wants to publish
+    /// `CardEmitted { id, ... }` deltas with the canonical id.
+    ///
+    /// Slightly more expensive than `insert_many` because each row
+    /// needs `last_insert_rowid()` lookup. Use `insert_many` when
+    /// you only need counts (the backfill path).
+    pub fn insert_many_returning_ids(
+        &self,
+        cards: &[Card],
+    ) -> Result<Vec<Option<i64>>, ActivityIndexError> {
+        if cards.is_empty() {
+            return Ok(Vec::new());
+        }
+        let mut db = self.db();
+        let tx = db.transaction()?;
+        let mut out = Vec::with_capacity(cards.len());
+        {
+            let mut stmt = tx.prepare(
+                "INSERT OR IGNORE INTO activity_cards
+                    (session_path, event_uuid, byte_offset, kind, severity,
+                     ts_ms, title, subtitle, help_id, help_args_json,
+                     source_ref_json, cwd, git_branch, plugin)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14)",
+            )?;
+            for card in cards {
+                let help_id = card.help.as_ref().map(|h| h.template_id.as_str());
+                let help_args = card
+                    .help
+                    .as_ref()
+                    .map(|h| serde_json::to_string(&h.args))
+                    .transpose()?;
+                let source_ref_json = card
+                    .source_ref
+                    .as_ref()
+                    .map(serde_json::to_string)
+                    .transpose()?;
+                let session_path = card.session_path.to_string_lossy();
+                let cwd = card.cwd.to_string_lossy();
+                let n = stmt.execute(params![
+                    session_path.as_ref(),
+                    card.event_uuid,
+                    card.byte_offset as i64,
+                    card.kind.label(),
+                    card.severity.label(),
+                    card.ts.timestamp_millis(),
+                    card.title,
+                    card.subtitle,
+                    help_id,
+                    help_args,
+                    source_ref_json,
+                    cwd.as_ref(),
+                    card.git_branch,
+                    card.plugin,
+                ])?;
+                if n == 0 {
+                    out.push(None);
+                } else {
+                    out.push(Some(tx.last_insert_rowid()));
+                }
+            }
+        }
+        tx.commit()?;
+        Ok(out)
+    }
+
     /// Bulk insert in a single transaction. Returns `(inserted,
     /// skipped_duplicates)`. The transaction wrapper is a 100×
     /// speedup over per-row autocommit when backfilling thousands

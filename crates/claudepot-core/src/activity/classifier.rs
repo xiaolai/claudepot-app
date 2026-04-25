@@ -22,7 +22,7 @@ use serde_json::Value;
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 
-use super::card::{Card, CardKind, HelpRef, Severity};
+use super::card::{Card, CardKind, ConfigScope, HelpRef, Severity, SourceRef};
 use crate::session_live::redact::redact_secrets;
 
 /// Per-session in/out state for the classifier. Phase 1 uses only
@@ -1001,11 +1001,54 @@ fn classify_hook_failure(
         title,
         subtitle,
         help,
-        source_ref: None, // Phase 4 adds settings-layer resolution
+        source_ref: derive_hook_source_ref(&cwd),
         cwd,
         git_branch,
         plugin,
     })
+}
+
+/// Best-effort `SourceRef` for a hook failure. Walks CC's known
+/// settings cascade for the project cwd and returns the first file
+/// that exists, ranked by match probability:
+///
+///   1. `<cwd>/.claude/settings.local.json` (Local scope)
+///   2. `<cwd>/.claude/settings.json` (Project scope)
+///   3. `~/.claude/settings.json` (User scope) — most common
+///
+/// Line number is unset — JSON byte-offset tracking lives behind
+/// a parser refactor (Phase 6 in the design doc). The GUI's
+/// click-through opens the file at line 1; users see the file and
+/// can search for the offending hook by name.
+///
+/// Returns `None` only when no settings file at any layer exists,
+/// which is genuinely the case (hook came from a since-removed
+/// settings file) — never fabricates a path.
+fn derive_hook_source_ref(cwd: &Path) -> Option<SourceRef> {
+    let candidates: [(PathBuf, ConfigScope); 3] = [
+        (
+            cwd.join(".claude").join("settings.local.json"),
+            ConfigScope::Local,
+        ),
+        (
+            cwd.join(".claude").join("settings.json"),
+            ConfigScope::Project,
+        ),
+        (
+            crate::paths::claude_config_dir().join("settings.json"),
+            ConfigScope::User,
+        ),
+    ];
+    for (path, scope) in candidates {
+        if path.exists() {
+            return Some(SourceRef {
+                path,
+                line: None,
+                scope,
+            });
+        }
+    }
+    None
 }
 
 /// Map a hook failure's stderr/exit-code to a help template.
