@@ -246,9 +246,12 @@ describe("useStatusIssues — desktop sync banners", () => {
     expect(onImportDesktop).toHaveBeenCalledWith("new@example.com");
   });
 
-  it("candidate_only → warning banner with NO mutating action", () => {
+  it("candidate_only → info banner with NO mutating action", () => {
     // Critical property — Codex D5-1 / D5-2: fast-path candidate must
-    // never drive mutation. The banner is advisory only.
+    // never drive mutation. The banner is advisory only. Severity is
+    // info (not warning): the slow-path failure is almost always
+    // transient (keychain cold cache, /profile blip), and the next
+    // sync cycle heals it without user action.
     const onAdoptLiveDesktop = vi.fn();
     const onImportDesktop = vi.fn();
     const { result } = renderHook(() =>
@@ -261,7 +264,7 @@ describe("useStatusIssues — desktop sync banners", () => {
     );
     const banner = result.current.find((i) => i.id.startsWith("desktop-candidate:"));
     expect(banner).toBeDefined();
-    expect(banner!.severity).toBe("warning");
+    expect(banner!.severity).toBe("info");
     expect(banner!.action).toBeUndefined();
     expect(banner!.action2).toBeUndefined();
     expect(onAdoptLiveDesktop).not.toHaveBeenCalled();
