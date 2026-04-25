@@ -81,7 +81,8 @@ describe("App shell — paper-mono", () => {
     // presence of each label somewhere in the sidebar region.
     expect(await screen.findByText("Accounts")).toBeInTheDocument();
     expect(screen.getByText("Projects")).toBeInTheDocument();
-    expect(screen.getByText("Activities")).toBeInTheDocument();
+    expect(screen.getByText("Sessions")).toBeInTheDocument();
+    expect(screen.getByText("Activity")).toBeInTheDocument();
     expect(screen.getByText("Global")).toBeInTheDocument();
     expect(screen.getByText("Settings")).toBeInTheDocument();
   });
@@ -232,11 +233,12 @@ describe("App shell — paper-mono", () => {
       }),
     });
 
-    // After the project-shell restructure, the cross-project
-    // firehose nav row was renamed "Sessions" → "Activities". The
+    // After the registry rename in the events/activity collapse,
+    // the cross-project firehose nav row is now labeled "Sessions"
+    // (id stays `activities` for localStorage compatibility). The
     // badge still surfaces alerting sessions there.
     const activitiesBtn = await screen.findByRole("button", {
-      name: "Activities",
+      name: "Sessions",
     });
     await waitFor(() => {
       expect(within(activitiesBtn).getByText("1")).toBeInTheDocument();

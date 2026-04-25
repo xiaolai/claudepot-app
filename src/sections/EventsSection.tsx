@@ -8,6 +8,7 @@ import type {
   CardsRecentQuery,
   SeverityLabel,
 } from "../types";
+import { DashboardStrip } from "./activities/DashboardStrip";
 import {
   aggregate,
   daySeries,
@@ -17,21 +18,27 @@ import {
 } from "./events/charts";
 
 /**
- * Events section — per-event forensic surface plus an at-a-glance
- * aggregate strip across the top.
+ * Activity section (rendered under the `events` route id for
+ * localStorage-state compatibility) — three time scales of
+ * "what's happening" stacked into a single surface.
  *
  * Layout (top → bottom, then left → right):
  *   row 1 — header (title, total/new counts, reindex/refresh/mark-seen)
- *   row 2 — metrics strip (cards-by-day · severity mix · top kinds)
- *           derived from a *filter-independent* fetch so the strip
+ *   row 2 — NOW: live running sessions + today/month dashboard strip,
+ *           the live signal that previously lived in ActivitiesSection
+ *   row 3 — RECENT: metrics strip (cards-by-day · severity mix · top
+ *           kinds) derived from a *filter-independent* fetch so it
  *           always reflects "what's happening overall" while the
  *           list below shows the user's drill-down
- *   row 3 — two-pane: filter rail (left) · card stream (right)
+ *   row 4 — STREAM: two-pane filter rail (left) · card stream (right)
  *
- * Pre-merge there were two tabs (`Events` and `Trends`) showing the
- * same dataset at two zoom levels. Standard log-viewer pattern is
- * one surface with a chart-on-top — see `dev-docs/activity-cards-
- * design.md` §9.
+ * Each row answers a distinct question at a distinct time scale —
+ * NOW (sub-second), RECENT (last 30d aggregates), STREAM (every
+ * event). Standard observability layout (Sentry, Datadog do exactly
+ * this). Pre-merge there were three tabs — `Activities`, `Events`,
+ * `Trends` — showing facets of the same reality. Collapsing them
+ * removes a navigation choice users had to learn without losing
+ * any signal.
  *
  * Live updates: the classifier persists cards into
  * `~/.claudepot/sessions.db`; live tail emits `CardEmitted` deltas.
@@ -196,6 +203,7 @@ export function EventsSection() {
           onMarkAllSeen={markAllSeen}
           onRefresh={() => void refresh()}
         />
+        <DashboardStrip />
         <MetricsStrip cards={aggCards} loading={loading} />
         <CardStream
           cards={cards}

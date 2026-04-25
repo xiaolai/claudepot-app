@@ -1,34 +1,22 @@
-import { DashboardStrip } from "./activities/DashboardStrip";
 import { SessionsSection, type SessionsSectionProps } from "./SessionsSection";
 
 /**
- * Activities section — dashboard + cross-project session feed.
+ * Activities section — cross-project session firehose.
  *
- * The dashboard strip at the top answers "what's happening right now,
- * today, this month" at a glance; the session feed below (the old
- * SessionsSection) keeps the firehose + Trends / Cleanup tabs for
- * drill-down and maintenance.
+ * The dashboard strip that previously sat above the session list has
+ * moved to the (renamed) Activity surface (`Events` tab → relabeled
+ * "Activity"), where it pairs with the activity-cards stream as a
+ * unified "what's happening / has happened" view. This section now
+ * exists only to host SessionsSection until per-project session
+ * browsing inside `Projects → ProjectDetail` is verified competent
+ * for power-user flows (cross-project search, repo grouping, the
+ * Cleanup sub-tab); at that point the section can be removed and
+ * its sub-tabs relocated.
  *
- * We wrap rather than absorb — SessionsSection has substantial
- * internal state (filter store, live strip, selection) that two call
- * sites sharing would entangle. The dashboard derives its own
- * aggregates from `sessionListAll` + `useSessionLive`, so the two
- * components live in parallel without coupling.
+ * Kept as a thin wrapper — SessionsSection has substantial internal
+ * state (filter store, live strip, selection) that we don't want to
+ * mount at multiple call sites concurrently.
  */
 export function ActivitiesSection(props: SessionsSectionProps = {}) {
-  return (
-    <div
-      style={{
-        display: "flex",
-        flexDirection: "column",
-        height: "100%",
-        minHeight: 0,
-      }}
-    >
-      <DashboardStrip />
-      <div style={{ flex: 1, minHeight: 0, display: "flex", flexDirection: "column" }}>
-        <SessionsSection {...props} />
-      </div>
-    </div>
-  );
+  return <SessionsSection {...props} />;
 }
