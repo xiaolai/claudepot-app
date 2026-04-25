@@ -51,3 +51,46 @@ Email prefix matching. One rule: find all registered emails where
 input is a prefix. Exactly one match → use it. Zero or multiple → error.
 
 No fuzzy matching, no edit distance, no aliases, no labels.
+
+## IPC trust + secret direction
+
+Tauri 2 IPC is in-process — JS bridge is **not** a cross-trust
+boundary. Real exposure surfaces are DevTools, JS exception
+serialization, Rust-side logging, and toast paths that interpolate
+errors. The renderer is our own code; CSP keeps third-party JS out.
+
+Direction matters. Secrets entering Rust via paste (e.g. `key_*_add`,
+`settings_github_token_set`) are acceptable — the user typed them.
+Secrets *returning* over IPC (the old `key_*_copy → string` shape)
+are not — they sit in the JS heap waiting for a DevTools snapshot.
+
+Rules:
+
+- `key_*_copy` / `key_oauth_copy_shell` write the OS clipboard
+  Rust-side via `tauri-plugin-clipboard-manager` and return only a
+  `KeyCopyReceiptDto` (label + preview + clear deadline).
+- `key_*_add` / `settings_github_token_set` accept the secret as
+  an IPC arg and **zeroize** the local `String` (and any owned
+  copies) on every exit path — success and error alike. Use the
+  `zeroize` crate; `Drop` alone does not scrub.
+- Errors must not interpolate the secret. `KeyError` Display impl
+  is audited for this; new error types touching secrets must follow.
+- Renderer-side `setToken("")` runs in a `finally` block on the
+  Add modals so React state doesn't outlive the single bridge call.
+
+## Clipboard plugin scope
+
+`tauri-plugin-clipboard-manager` is enabled with three permissions in
+`capabilities/default.json`:
+
+- `clipboard-manager:allow-write-text` — writes from `key_*_copy*`.
+- `clipboard-manager:allow-read-text` — readback for the 30s
+  self-clear gate (only clear if the clipboard still holds our
+  payload).
+- `clipboard-manager:allow-clear` — the actual self-clear.
+
+These permissions are renderer-callable in principle, but the
+renderer is our own code — no third-party JS reaches them under our
+CSP. New surfaces that touch the clipboard must go through Rust;
+adding a `__TAURI_INVOKE__('plugin:clipboard-manager|…')` call from
+JS is a review finding.
