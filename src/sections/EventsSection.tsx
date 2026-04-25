@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { listen } from "@tauri-apps/api/event";
 import { api } from "../api";
 import type {
@@ -95,17 +95,33 @@ export function EventsSection() {
     limit: DEFAULT_LIMIT,
   });
 
+  // Monotonic request counters guard against out-of-order fetch
+  // resolution. Filter edits, the 5s poll, and the `live-all` tick
+  // can stack two `refresh()` calls in flight simultaneously; if the
+  // older one resolves second it would repaint cards/counts that
+  // don't match the *current* filter. Each fetch captures the seq
+  // it was started under and bails before setState if a newer fetch
+  // has since started. Same pattern for the aggregate path.
+  const refreshSeqRef = useRef(0);
+  const refreshAggSeqRef = useRef(0);
+
   // Filtered list refresh. Uses Promise.allSettled so a transient
   // failure on one fetch (e.g. cards_count_new_since timing out)
   // doesn't blank the whole surface — the parts that did succeed
   // still render. Errors are kept inline only when both list and
   // counts fail; partial failures degrade to a stale-but-usable view.
   const refresh = useCallback(async () => {
+    const seq = ++refreshSeqRef.current;
     setError(null);
     const [listR, countsR] = await Promise.allSettled([
       api.cardsRecent(filters),
       api.cardsCountNewSince(filters),
     ]);
+    // A newer refresh has started since this one was dispatched —
+    // drop the result rather than overwrite fresher state. Loading
+    // also stays "true" only when the latest dispatcher decides to
+    // clear it; older completions don't get a vote.
+    if (seq !== refreshSeqRef.current) return;
     if (listR.status === "fulfilled") setCards(listR.value);
     if (countsR.status === "fulfilled") setCounts(countsR.value);
     if (listR.status === "rejected" && countsR.status === "rejected") {
@@ -119,8 +135,11 @@ export function EventsSection() {
   // be wasted work (the metrics strip is intentionally global). It
   // refreshes on mount, on the `live-all` tick (cards landed
   // anywhere), and on Reindex completion (handled by handleReindex
-  // which calls refreshAgg explicitly).
+  // which calls refreshAgg explicitly). Same monotonic-seq guard
+  // as `refresh` so a slow aggregate fetch can't clobber a fresher
+  // one.
   const refreshAgg = useCallback(async () => {
+    const seq = ++refreshAggSeqRef.current;
     try {
       const sinceMs = Date.now() - AGG_WINDOW_MS;
       const agg = await api.cardsRecent({
@@ -128,6 +147,7 @@ export function EventsSection() {
         limit: AGG_LIMIT,
         sinceMs,
       });
+      if (seq !== refreshAggSeqRef.current) return;
       setAggCards(agg);
     } catch {
       // Strip stays on its last-known dataset — failing here
