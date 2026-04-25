@@ -1,0 +1,262 @@
+/* Settings section + protected paths pane + segmented control.
+   Sharded out of src/App.css to keep each file under the 350-LOC
+   loc-guardian limit. Tokens still live in src/styles/tokens.css —
+   nothing in this file may declare global custom properties.        */
+
+/* ---------- settings section (P3.1) ---------- */
+
+.settings-view {
+  /* No max-width on the flex child itself, otherwise the content pane
+     can't fill the window and the transparent body reveals the OS
+     chrome on wide displays. Reading width is capped on each inner
+     element instead — the pane's --bg reaches the window edge. */
+  padding: 16px 24px 24px;
+}
+
+.settings-view > * {
+  max-width: 520px;
+}
+
+.settings-heading {
+  font-size: 13px;
+  font-weight: 600;
+  margin: 0 0 16px;
+}
+
+.settings-group {
+  padding: 12px 0;
+  border-top: 0.5px solid var(--border);
+}
+
+.settings-group:first-of-type {
+  border-top: none;
+  padding-top: 0;
+}
+
+.settings-group-title {
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: var(--muted);
+  margin: 0 0 8px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.settings-group-title .icon {
+  margin-right: 0;
+}
+
+.settings-desc {
+  font-size: 12px;
+  margin: 0 0 10px;
+}
+
+.settings-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  font-size: 12px;
+  padding: 4px 0;
+}
+
+.settings-select {
+  font: inherit;
+  font-size: 12px;
+  padding: 4px 8px;
+  border: 0.5px solid var(--border);
+  border-radius: 6px;
+  background: var(--surface);
+  color: var(--text);
+}
+
+.settings-input-group {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.settings-input {
+  font: inherit;
+  font-size: 12px;
+  padding: 4px 8px;
+  border: 0.5px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg);
+  color: var(--text);
+  width: 60px;
+}
+
+.settings-input.wide {
+  flex: 1;
+  width: auto;
+}
+
+.settings-input:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 0;
+}
+
+.settings-actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 8px;
+}
+
+.settings-result {
+  margin-top: 8px;
+  padding: 6px 10px;
+  border-radius: 6px;
+  background: var(--surface);
+  border: 0.5px solid var(--border);
+  font-size: 12px;
+}
+
+.settings-about-grid {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 4px 16px;
+  font-size: 12px;
+  margin: 0;
+}
+
+.settings-about-grid dt {
+  color: var(--muted);
+  text-align: right;
+}
+
+.settings-about-grid dd {
+  margin: 0;
+}
+
+/* ---------- protected paths pane ---------- */
+
+.protected-list {
+  list-style: none;
+  margin: 8px 0 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  border: 0.5px solid var(--border);
+  border-radius: 6px;
+  max-height: 320px;
+  overflow-y: auto;
+}
+
+.protected-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 10px;
+  border-bottom: 0.5px solid var(--border);
+}
+
+.protected-row:last-child {
+  border-bottom: none;
+}
+
+.protected-row:hover {
+  background: var(--hover-bg);
+}
+
+.protected-empty {
+  justify-content: center;
+  padding: 16px;
+}
+
+.protected-path {
+  flex: 1;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--text);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  background: transparent;
+  padding: 0;
+}
+
+.protected-add-form {
+  display: flex;
+  gap: 8px;
+  margin-top: 12px;
+  align-items: center;
+}
+
+.protected-add-form .settings-input.wide {
+  flex: 1;
+}
+
+.settings-inline-error {
+  margin: 6px 0 0;
+  font-size: 11px;
+  color: var(--bad);
+}
+
+.settings-inline-hint {
+  margin: 6px 0 0;
+  font-size: 11px;
+}
+
+.sidebar-segmented-slot {
+  padding: 0 8px 8px;
+}
+
+/* ---------- segmented control (P2.2) ---------- */
+
+.segmented-control {
+  display: flex;
+  border: 0.5px solid var(--border);
+  border-radius: 6px;
+  overflow: hidden;
+  background: color-mix(in srgb, var(--bg) 60%, transparent);
+}
+
+.segmented-control-item {
+  flex: 1;
+  /* `min-width: 0` lets flex items shrink below their intrinsic
+     content width so `text-overflow: ellipsis` actually triggers
+     instead of forcing the whole bar to overflow. */
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 24px;
+  padding: 0 12px;
+  border: none;
+  border-left: 0.5px solid var(--border);
+  border-radius: 0;
+  background: transparent;
+  font-size: 11px;
+  font-weight: 400;
+  color: var(--muted);
+  box-shadow: none;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.segmented-control-item:first-child {
+  border-left: none;
+}
+
+.segmented-control-item:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--muted) 8%, transparent);
+  color: var(--text);
+}
+
+.segmented-control-item.selected {
+  background: color-mix(in srgb, var(--accent) 14%, transparent);
+  color: var(--text);
+  font-weight: 500;
+}
+
+.segmented-control-item:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+}
+

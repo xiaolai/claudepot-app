@@ -1,0 +1,143 @@
+/* Global resets, icons, utilities, app layout, footer, motion + responsive.
+   Sharded out of src/App.css to keep each file under the 350-LOC
+   loc-guardian limit. Tokens still live in src/styles/tokens.css —
+   nothing in this file may declare global custom properties.        */
+
+/* System Settings ▸ Accessibility ▸ Display ▸ Reduce transparency.
+   The chrome (nav rail + sidebar) now uses a solid --chrome color so
+   it needs no override. Translucent overlays (palette/toast/modal) do. */
+@media (prefers-reduced-transparency) {
+  .palette,
+  .toast,
+  .modal {
+    backdrop-filter: none;
+    -webkit-backdrop-filter: none;
+    background: var(--surface);
+  }
+}
+
+/* ---------- global resets ---------- */
+
+* {
+  box-sizing: border-box;
+}
+
+html, body, #root {
+  margin: 0;
+  padding: 0;
+  height: 100%;
+  background: transparent;
+  color: var(--text);
+}
+
+body {
+  font-family: var(--font);
+  font-size: 11px;
+  line-height: 1.4;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  text-rendering: optimizeLegibility;
+  font-feature-settings: "kern", "liga", "calt";
+  font-variant-numeric: tabular-nums;
+  cursor: default;
+  -webkit-user-select: none;
+  user-select: none;
+}
+
+.selectable {
+  -webkit-user-select: text;
+  user-select: text;
+}
+
+/* ---------- nerd-font icons ---------- */
+/* Icons are glyphs in the body mono font (JetBrainsMono NF Mono). Size
+   set via font-size inline from the <Icon size={n}> component; color
+   inherits from the parent so one `color: var(--accent)` recolors
+   every icon beneath it. */
+.icon {
+  display: inline-block;
+  font-family: var(--font-mono);
+  font-feature-settings: normal;
+  font-variant: normal;
+  text-rendering: auto;
+  -webkit-font-smoothing: antialiased;
+  line-height: 1;
+  vertical-align: -0.125em;
+  flex-shrink: 0;
+}
+/* `.btn .icon` used to set margin-right in the nerd-font era; Lucide
+   SVGs don't carry the `.icon` class, so the new `gap: 6px` on `.btn`
+   (see above) is what actually puts air between icon and label. */
+.icon-btn .icon,
+.copy-btn .icon,
+.toast-close .icon,
+.project-filter-chip .icon {
+  margin-right: 0;
+}
+
+/* ---------- utilities ---------- */
+
+.muted  { color: var(--muted); }
+.mono   {
+  font-family: var(--font-mono);
+  font-size: 11px;
+}
+
+/* ---------- app layout: sidebar + content ---------- */
+
+.app-layout {
+  display: flex;
+  height: 100vh;
+  overflow: hidden;
+  position: relative;
+  /* Hairline along the top of the webview — reads as the native title
+     bar's bottom border, anchoring the chrome visually below it. */
+  border-top: 0.5px solid var(--border);
+}
+
+/* ---------- footer (content pane bottom) ---------- */
+
+.content-footer {
+  margin-top: auto;
+  padding-top: 12px;
+  border-top: 0.5px solid var(--border);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 11px;
+}
+
+/* ---------- reduced motion ---------- */
+
+@media (prefers-reduced-motion: reduce) {
+  .toast, .toast.exiting {
+    animation: none;
+  }
+  .skeleton {
+    animation: none;
+    opacity: 0.4;
+  }
+}
+
+/* ---------- responsive ---------- */
+
+@media (max-width: 600px) {
+  .app-layout {
+    flex-direction: column;
+  }
+  .sidebar {
+    width: 100%;
+    min-width: unset;
+    max-height: 200px;
+    border-right: none;
+    border-bottom: 0.5px solid var(--border);
+    padding-top: 16px;
+  }
+  .content {
+    padding-top: 16px;
+  }
+  .detail-actions {
+    flex-wrap: wrap;
+  }
+}
+

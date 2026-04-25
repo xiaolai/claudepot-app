@@ -25,6 +25,21 @@ z-indexes come from that file. Literals are a review finding.
 If a value you need doesn't exist, add a semantic token to
 `tokens.css` first (light + dark), then reference it.
 
+## Stylesheet layout
+
+- `src/styles/tokens.css` — every global custom property; the only
+  file allowed to open `:root { }`.
+- `src/styles/components/*.css` — sharded component styles
+  (`base`, `rail`, `sidebar`, `accounts`, `palette`, `modals`,
+  `banners`, `settings`, `projects`, …). Each shard stays under the
+  350-LOC loc-guardian limit and groups by surface, not by feature
+  flag or PR.
+- `src/App.css` — import index only. It carries the file-level
+  documentation (the "do not declare tokens" rule, the lint
+  invariants) and `@import`s every shard in cascade order.
+  **Never add a rule directly to App.css.** Pick the matching shard
+  (or add a new shard) and let the index pull it in.
+
 ## Icons
 
 Lucide SVG icons only, via `<Glyph g={NF.x} />` from

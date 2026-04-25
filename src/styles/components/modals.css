@@ -1,0 +1,231 @@
+/* Modal, toasts, copy button, hint, loading skeleton.
+   Sharded out of src/App.css to keep each file under the 350-LOC
+   loc-guardian limit. Tokens still live in src/styles/tokens.css —
+   nothing in this file may declare global custom properties.        */
+
+/* ---------- modal ---------- */
+
+.modal-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.30);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 50;
+}
+
+.modal {
+  width: 440px;
+  max-width: calc(100vw - 48px);
+  background: var(--surface);
+  border: 0.5px solid var(--border);
+  border-radius: 12px;
+  padding: 20px;
+  box-shadow: var(--shadow-modal);
+}
+
+.modal h2 {
+  margin: 0 0 8px;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.modal-body {
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.modal-body code {
+  font-family: var(--font-mono);
+  background: var(--bg);
+  padding: 1px 5px;
+  border-radius: 4px;
+  font-size: 11px;
+}
+
+.modal-body p {
+  margin: 0 0 6px;
+}
+
+.modal-body p:last-child {
+  margin-bottom: 0;
+}
+
+.modal-body p.small {
+  font-size: 11px;
+  margin-top: 6px;
+}
+
+.modal-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 20px;
+}
+
+/* ---------- toasts (macOS HUD style, top-center) ---------- */
+
+.toasts {
+  position: fixed;
+  top: 64px;
+  left: 50%;
+  transform: translateX(-50%);
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  z-index: 100;
+  pointer-events: none;
+}
+
+.toast {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 14px;
+  border-radius: 10px;
+  background: rgba(40, 40, 40, 0.85);
+  -webkit-backdrop-filter: blur(20px);
+  backdrop-filter: blur(20px);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+  font-size: 12px;
+  color: #fff;
+  max-width: 320px;
+  pointer-events: auto;
+  animation: toast-in 0.15s ease;
+}
+
+.toast-text {
+  flex: 1;
+}
+
+.toast-undo {
+  font-size: 12px;
+  font-weight: 600;
+  padding: 2px 8px;
+  border: 0.5px solid rgba(255, 255, 255, 0.3);
+  border-radius: 4px;
+  background: rgba(255, 255, 255, 0.15);
+  color: #fff;
+  height: auto;
+  box-shadow: none;
+  flex-shrink: 0;
+}
+
+.toast-undo:hover {
+  background: rgba(255, 255, 255, 0.25);
+}
+
+.toast-close {
+  font-size: 12px;
+  line-height: 1;
+  padding: 0;
+  border: none;
+  border-radius: 0;
+  background: none;
+  color: rgba(255, 255, 255, 0.6);
+  height: auto;
+  box-shadow: none;
+  width: auto;
+  min-width: 0;
+}
+
+.toast-close:hover {
+  color: #fff;
+  background: none;
+}
+
+.toast.error {
+  background: rgba(255, 59, 48, 0.90);
+}
+
+.toast.info {
+  /* default dark HUD */
+}
+
+@keyframes toast-in {
+  from {
+    opacity: 0;
+    transform: translateY(-8px);
+  }
+}
+
+.toast.exiting {
+  animation: toast-out 0.15s ease forwards;
+}
+
+@keyframes toast-out {
+  to {
+    opacity: 0;
+    transform: translateY(-8px);
+  }
+}
+
+/* ---------- copy button ---------- */
+
+.copy-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 12px;
+  padding: 2px;
+  border: none;
+  background: none;
+  color: var(--muted);
+  opacity: 0.6;
+  vertical-align: middle;
+  width: auto;
+  height: auto;
+  min-width: 0;
+  box-shadow: none;
+  margin-left: 4px;
+}
+
+.copy-btn:hover {
+  opacity: 1;
+  color: var(--accent);
+  background: none;
+}
+
+/* ---------- hint ---------- */
+
+.account-hint {
+  font-size: 11px;
+  margin-top: 4px;
+  padding-left: 0;
+  color: var(--muted);
+}
+
+/* ---------- loading skeleton ---------- */
+
+.skeleton-container {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  width: 100%;
+  max-width: 300px;
+}
+
+.skeleton {
+  background: var(--border);
+  border-radius: 6px;
+  animation: skeleton-pulse 1.2s ease-in-out infinite;
+}
+
+.skeleton-header {
+  height: 32px;
+}
+
+.skeleton-card {
+  height: 28px;
+}
+
+.skeleton-card.short {
+  width: 60%;
+}
+
+@keyframes skeleton-pulse {
+  0%, 100% { opacity: 0.3; }
+  50% { opacity: 0.6; }
+}
+
