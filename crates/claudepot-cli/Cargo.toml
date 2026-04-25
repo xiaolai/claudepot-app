@@ -17,6 +17,7 @@ claudepot-core = { path = "../claudepot-core" }
 tokio.workspace = true
 clap.workspace = true
 anyhow.workspace = true
+async-trait.workspace = true
 tracing.workspace = true
 tracing-subscriber.workspace = true
 uuid.workspace = true
