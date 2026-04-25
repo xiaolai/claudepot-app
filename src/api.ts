@@ -4,8 +4,13 @@ import type {
   AccountSummary,
   AccountSummaryBasic,
   AccountUsage,
+  ActivityCard,
   ActivityTrends,
   AbandonedCleanupReport,
+  CardNavigate,
+  CardsCount,
+  CardsRecentQuery,
+  CardsReindexResult,
   AdoptReport,
   DiscardReport,
   ApiKeySummary,
@@ -597,6 +602,21 @@ export const api = {
       toMs,
       bucketCount,
     }),
+
+  // Activity cards — per-event forensic surface (separate from the
+  // live-strip activityTrends above; cards diagnose anomalies +
+  // milestones from session JSONLs). See dev-docs/activity-cards-design.md.
+  cardsRecent: (query: CardsRecentQuery) =>
+    invoke<ActivityCard[]>("cards_recent", { query }),
+  cardsCountNewSince: (query: CardsRecentQuery) =>
+    invoke<CardsCount>("cards_count_new_since", { query }),
+  cardsSetLastSeen: (cardId: number) =>
+    invoke<void>("cards_set_last_seen", { cardId }),
+  cardsNavigate: (cardId: number) =>
+    invoke<CardNavigate | null>("cards_navigate", { cardId }),
+  cardsBody: (cardId: number) =>
+    invoke<string | null>("cards_body", { cardId }),
+  cardsReindex: () => invoke<CardsReindexResult>("cards_reindex"),
 
   // Config section — P0 surface.
   configScan: (cwd?: string | null) =>

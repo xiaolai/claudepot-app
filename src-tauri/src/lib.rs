@@ -6,6 +6,7 @@ mod commands_preferences;
 mod commands_pricing;
 mod commands_account;
 mod commands_activity;
+mod commands_activity_cards;
 mod commands_cli;
 mod commands_desktop;
 mod commands_keys;
@@ -21,6 +22,7 @@ mod config_watch;
 mod config_watch_types;
 mod dto;
 mod dto_activity;
+mod dto_activity_cards;
 mod dto_desktop;
 mod dto_keys;
 mod dto_project;
@@ -63,6 +65,38 @@ pub fn run() {
     // avoid a visible dock-icon flash on cold launch.
     let prefs = preferences::Preferences::load();
     let hide_dock = prefs.hide_dock_icon;
+
+    // Open the activity-cards index before the builder chain so we can
+    // wire it into the live runtime AND publish it as IPC state in the
+    // same `.manage()` series. Lives in the same `sessions.db` file as
+    // SessionIndex (SQLite WAL lets the two handles coexist). Open
+    // failure (disk full, perms, corrupt) degrades gracefully — the
+    // cards surface goes dark; the live-strip and everything else
+    // continues to work.
+    let cards_db_path = claudepot_core::paths::claudepot_data_dir().join("sessions.db");
+    let cards_index: Option<std::sync::Arc<claudepot_core::activity::ActivityIndex>> =
+        match claudepot_core::activity::ActivityIndex::open(&cards_db_path) {
+            Ok(idx) => Some(std::sync::Arc::new(idx)),
+            Err(e) => {
+                tracing::warn!(
+                    target = "claudepot_tauri",
+                    error = %e,
+                    path = %cards_db_path.display(),
+                    "activity-cards index open failed — cards surface degraded"
+                );
+                None
+            }
+        };
+
+    // Build LiveSessionState here so we can hand the cards index into
+    // its runtime BEFORE the first tick fires. `state.runtime` is
+    // already an Arc, so this is cheap.
+    let live_session_state = state::LiveSessionState::default();
+    if let Some(idx) = cards_index.as_ref() {
+        live_session_state
+            .runtime
+            .enable_activity(std::sync::Arc::clone(idx));
+    }
 
     // `mut` is only consumed by the debug-only plugin block below;
     // release builds don't touch it. Silence the release warning here.
@@ -161,13 +195,22 @@ pub fn run() {
         .manage(state::LoginState::default())
         .manage(state::DesktopOpState::default())
         .manage(state::DryRunRegistry::default())
-        .manage(state::LiveSessionState::default())
+        .manage(live_session_state)
         .manage(ops::RunningOps::new())
         .manage(preferences::PreferencesState::new(prefs))
         .manage(commands_config::ConfigTreeState::default())
         .manage(commands_config::SearchRegistry::default())
         .manage(config_watch::ConfigWatchState::default())
         .manage(claudepot_core::services::usage_cache::UsageCache::new());
+
+    // Conditionally publish the cards index — `None` means open
+    // failed at startup, in which case the cards-* commands return
+    // `Tauri State unavailable` errors that the JS side surfaces as
+    // a "cards index not ready" toast. The live-strip surface and
+    // every other command keeps working.
+    if let Some(idx) = cards_index {
+        builder = builder.manage(commands_activity_cards::ActivityCardsState { index: idx });
+    }
 
     #[cfg(debug_assertions)]
     {
@@ -259,6 +302,12 @@ pub fn run() {
             commands_activity::session_live_subscribe,
             commands_activity::session_live_unsubscribe,
             commands_activity::activity_trends,
+            commands_activity_cards::cards_recent,
+            commands_activity_cards::cards_count_new_since,
+            commands_activity_cards::cards_set_last_seen,
+            commands_activity_cards::cards_navigate,
+            commands_activity_cards::cards_body,
+            commands_activity_cards::cards_reindex,
             commands_session_prune::session_prune_plan,
             commands_session_prune::session_prune_start,
             commands_session_prune::session_slim_plan,

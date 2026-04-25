@@ -549,12 +549,47 @@ impl LiveRuntime {
                     running_offset += line.len() as u64 + 1;
                 }
                 if !new_cards.is_empty() {
-                    if let Err(err) = idx.insert_many(&new_cards) {
-                        tracing::warn!(
-                            target = "session_live::runtime",
-                            error = %err,
-                            "activity insert_many failed (continuing)"
-                        );
+                    match idx.insert_many_returning_ids(&new_cards) {
+                        Ok(rowids) => {
+                            // Pair each freshly-assigned rowid with
+                            // its source card and publish a
+                            // CardEmitted delta. Skipped (None)
+                            // entries fire nothing — those are
+                            // duplicate inserts, not new events.
+                            for (card, rowid) in new_cards.iter().zip(rowids.iter()) {
+                                let Some(id) = rowid else {
+                                    continue;
+                                };
+                                s.seq += 1;
+                                let plugin = card.plugin.clone();
+                                let cwd = card.cwd.to_string_lossy().into_owned();
+                                let _ = self
+                                    .detail
+                                    .publish_delta(LiveDelta {
+                                        session_id: s.session_id.clone(),
+                                        seq: s.seq,
+                                        produced_at_ms: now_ms,
+                                        kind: LiveDeltaKind::CardEmitted {
+                                            id: *id,
+                                            card_kind: card.kind.label().to_string(),
+                                            severity: card.severity.label().to_string(),
+                                            title: card.title.clone(),
+                                            ts_ms: card.ts.timestamp_millis(),
+                                            plugin,
+                                            cwd,
+                                        },
+                                        resync_required: false,
+                                    })
+                                    .await;
+                            }
+                        }
+                        Err(err) => {
+                            tracing::warn!(
+                                target = "session_live::runtime",
+                                error = %err,
+                                "activity insert_many failed (continuing)"
+                            );
+                        }
                     }
                 }
             }
