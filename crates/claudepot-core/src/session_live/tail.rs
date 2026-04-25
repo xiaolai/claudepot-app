@@ -99,6 +99,29 @@ impl FileTail {
         })
     }
 
+    /// Create a tail positioned at a specific byte offset. Used by
+    /// the runtime's attach path, where the seed step has already
+    /// consumed the trailing window of the file: the tail picks up
+    /// from exactly the byte the seed read ended at, so any lines
+    /// appended between the seed read and the tail open are still
+    /// surfaced (no gap), and lines already seeded are not replayed
+    /// (no double-ingest). Capping `offset` to current `len()`
+    /// keeps us correct if the file has somehow shrunk in between.
+    pub fn at_offset(path: impl Into<PathBuf>, offset: u64) -> io::Result<Self> {
+        let path = path.into();
+        let file = File::open(&path)?;
+        let md = file.metadata()?;
+        let cur_len = md.len();
+        let off = offset.min(cur_len);
+        Ok(Self {
+            path,
+            offset: off,
+            rotation_token: rotation_token(&md),
+            last_size: Some(cur_len),
+            was_present: true,
+        })
+    }
+
     /// Create a tail positioned at byte 0 — will replay the full
     /// current contents on the first poll. Useful for tests and for
     /// sessions that appeared *after* the runtime started.
@@ -124,6 +147,16 @@ impl FileTail {
             last_size: None,
             was_present: false,
         }
+    }
+
+    /// Byte offset we've consumed up to (exclusive). Used by callers
+    /// that want to compute per-line offsets — e.g., the activity
+    /// classifier's `byte_offset` anchor for `Card::byte_offset`.
+    /// Read the offset BEFORE calling `poll()`; combined with the
+    /// length of each returned line + its trailing newline, that
+    /// yields the offset of each new line.
+    pub fn offset(&self) -> u64 {
+        self.offset
     }
 
     pub fn path(&self) -> &Path {

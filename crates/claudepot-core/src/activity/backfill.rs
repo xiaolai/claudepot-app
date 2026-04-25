@@ -378,6 +378,44 @@ mod tests {
         assert!(stats.failed.is_empty());
     }
 
+    /// Phase 4 plugin attribution survives the round-trip from
+    /// classifier → bulk insert → recent() → row_to_card.
+    /// Regression for the smoke-test bug where every queried card
+    /// had plugin=None despite the classifier extracting it.
+    #[test]
+    fn plugin_attribution_round_trips_through_index() {
+        let dir = tempdir().unwrap();
+        let config = dir.path().join("claude");
+        let jsonl = config.join("projects").join("-Users-x-proj").join("s.jsonl");
+        let fixture = include_str!("testdata/hook_plugin_missing.jsonl").trim();
+        write_jsonl(&jsonl, &[fixture]);
+
+        let db = ActivityIndex::open(&dir.path().join("a.db")).unwrap();
+        let stats = run(&config, &db).unwrap();
+        assert_eq!(stats.cards_inserted, 1);
+
+        let cards = db.recent(&Default::default()).unwrap();
+        assert_eq!(cards.len(), 1);
+        assert_eq!(
+            cards[0].plugin.as_deref(),
+            Some("mermaid-preview@xiaolai"),
+            "plugin attribution must round-trip end-to-end"
+        );
+
+        // Filtering by plugin should also find it.
+        let by_plugin = db
+            .recent(&crate::activity::index::RecentQuery {
+                plugin: Some("mermaid-preview".to_string()),
+                ..Default::default()
+            })
+            .unwrap();
+        assert_eq!(
+            by_plugin.len(),
+            1,
+            "plugin filter must match by bare name"
+        );
+    }
+
     /// Regression for Codex audit verification PARTIAL: if the user
     /// deletes the whole `~/.claude/projects/` tree and reruns
     /// reindex, every existing index row is stale. The early-return
