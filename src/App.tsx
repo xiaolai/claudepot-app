@@ -31,8 +31,6 @@ const importProjects = () =>
   import("./sections/ProjectsSection").then((m) => ({ default: m.ProjectsSection }));
 const importSettings = () =>
   import("./sections/SettingsSection").then((m) => ({ default: m.SettingsSection }));
-const importSessions = () =>
-  import("./sections/SessionsSection").then((m) => ({ default: m.SessionsSection }));
 const importEvents = () =>
   import("./sections/EventsSection").then((m) => ({ default: m.EventsSection }));
 const importKeys = () =>
@@ -44,12 +42,6 @@ const importGlobal = () =>
 const ProjectsSection = lazy(importProjects);
 const SettingsSection = lazy(importSettings);
 const EventsSection = lazy(importEvents);
-// SessionsSection is no longer rendered as a top-level surface —
-// sessions live inside Projects → ProjectDetail's master-detail
-// pane after the events-into-projects collapse. The factory stays
-// around for the prefetcher chunk-cache without us needing a
-// second top-level export.
-void importSessions;
 const KeysSection = lazy(importKeys);
 const GlobalSection = lazy(importGlobal);
 // ConfigSection isn't rendered at the top level anymore — it lives
@@ -112,11 +104,13 @@ function AppShell() {
     sectionIds,
   );
   /**
-   * Path to select when the Sessions tab next mounts. Written by the
-   * cross-session command-palette bridge; cleared by SessionsSection
-   * the first time it mounts with a pending value. This replaces an
-   * earlier setTimeout(0) dispatch that could drop the selection if
-   * the lazy section hadn't finished mounting.
+   * Transcript file to open when ProjectsSection next mounts. Written
+   * by the cross-section command-palette bridge, the Activity-surface
+   * card click, and the live-session jump from the dashboard strip;
+   * cleared by ProjectsSection's pending-consumer effect after it
+   * resolves the matching project and seeds `openedSessionPath`.
+   * This replaces an earlier setTimeout(0) dispatch that could drop
+   * the selection if the lazy section hadn't finished mounting.
    */
   const [pendingSessionPath, setPendingSessionPath] = useState<string | null>(
     null,
@@ -350,11 +344,12 @@ function AppShell() {
   }, [setSection, toggleTheme, refreshAccounts, pushToast]);
 
   // Bridge from the command palette's cross-session search: when the
-  // user selects a session hit, stash the target path and jump to the
-  // Sessions tab. `SessionsSection` reads the pending path on mount —
-  // so the selection is guaranteed to be consumed even if the section
-  // wasn't already rendered. Previous implementation raced via
-  // `setTimeout(0)` and could drop the selection on slow mounts.
+  // user selects a session hit, stash the target path and jump to
+  // Projects. `ProjectsSection` consumes the pending path on mount,
+  // resolves the owning project from the file's slug, and opens the
+  // transcript in its master-detail pane. Previous implementation
+  // raced via `setTimeout(0)` and could drop the selection on slow
+  // mounts.
   useEffect(() => {
     function onGoto(ev: Event) {
       const detail = (ev as CustomEvent<{ filePath: string }>).detail;
