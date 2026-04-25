@@ -61,6 +61,11 @@ enum Commands {
         #[command(subcommand)]
         action: SessionAction,
     },
+    /// Inspect "what just happened" across CC sessions — anomaly + milestone cards
+    Activity {
+        #[command(subcommand)]
+        action: ActivityAction,
+    },
     /// Health check and diagnostics
     Doctor,
     /// Ground-truth authentication status.
@@ -236,6 +241,34 @@ enum SessionAction {
         #[arg(long)]
         execute: bool,
     },
+}
+
+#[derive(Subcommand)]
+enum ActivityAction {
+    /// Show recent activity cards (anomalies + milestones), newest first.
+    Recent {
+        /// Window: `30m`, `2h`, `7d`. Omit for all-time.
+        #[arg(long)]
+        since: Option<String>,
+        /// Filter by kind. Repeat for multiple kinds. Values:
+        /// hook, hook-slow, hook-info, agent, agent-stranded,
+        /// tool-error, command, milestone.
+        #[arg(long, value_name = "KIND")]
+        kind: Vec<String>,
+        /// Minimum severity: info, notice, warn, error.
+        #[arg(long)]
+        severity: Option<String>,
+        /// Filter to cards from this project (matches by cwd prefix).
+        #[arg(long)]
+        project: Option<String>,
+        /// Maximum rows to print. Defaults to 200, capped at 10000.
+        #[arg(long)]
+        limit: Option<usize>,
+    },
+    /// Walk every JSONL under `~/.claude/projects/` and rebuild the
+    /// activity index. Idempotent — re-running adds zero rows when
+    /// the source hasn't changed.
+    Reindex,
 }
 
 #[derive(Subcommand)]
@@ -600,6 +633,23 @@ async fn main() -> Result<()> {
         },
         Commands::Doctor => commands::doctor::run(&ctx).await?,
         Commands::Status => commands::status::run(&ctx).await?,
+        Commands::Activity { action } => match action {
+            ActivityAction::Recent {
+                since,
+                kind,
+                severity,
+                project,
+                limit,
+            } => commands::activity::recent(
+                &ctx,
+                since.as_deref(),
+                &kind,
+                severity.as_deref(),
+                project.as_deref(),
+                limit,
+            )?,
+            ActivityAction::Reindex => commands::activity::reindex(&ctx)?,
+        },
         Commands::Session { action } => match action {
             SessionAction::ListOrphans => commands::session::list_orphans(&ctx)?,
             SessionAction::Move {
