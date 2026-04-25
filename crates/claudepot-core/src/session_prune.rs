@@ -66,7 +66,24 @@ impl PruneFilter {
     pub fn matches(&self, row: &SessionRow, now_ms: i64) -> bool {
         if let Some(max_age) = self.older_than {
             let cut = now_ms.saturating_sub(max_age.as_millis() as i64);
-            let last = row.last_ts.map(|t| t.timestamp_millis()).unwrap_or(0);
+            // Prefer the in-transcript `last_ts` (event timestamp),
+            // but fall back to the file's mtime when no parseable
+            // timestamp survived. Without the fallback, `last_ts: None`
+            // collapses to `0` (the Unix epoch) and any "older than X"
+            // filter sweeps the row up — even when the file was
+            // written seconds ago. If neither timestamp is available,
+            // refuse to classify as old (skip the row).
+            let last = match row
+                .last_ts
+                .map(|t| t.timestamp_millis())
+                .or_else(|| {
+                    row.last_modified
+                        .and_then(|st| st.duration_since(std::time::UNIX_EPOCH).ok())
+                        .and_then(|d| i64::try_from(d.as_millis()).ok())
+                }) {
+                Some(ms) => ms,
+                None => return false,
+            };
             if last >= cut {
                 return false;
             }
@@ -345,6 +362,65 @@ mod tests {
         };
         assert!(!side_only.matches(&clean_main, now_ms()));
         assert!(side_only.matches(&err_side, now_ms()));
+    }
+
+    #[test]
+    fn older_than_falls_back_to_file_mtime_when_last_ts_missing() {
+        // Regression: a row with no parseable `last_ts` must NOT be
+        // treated as ancient. When the file mtime is recent, the
+        // older-than filter should leave it alone.
+        let tmp = TempDir::new().unwrap();
+        let mut row = mk_row_on_disk(tmp.path(), "fresh", 10, 60, false, false);
+        row.last_ts = None;
+        // mtime is "just now" via mk_row_on_disk's default. A 1-hour
+        // older-than filter must miss this row.
+        let f = PruneFilter {
+            older_than: Some(Duration::from_secs(3600)),
+            ..PruneFilter::default()
+        };
+        assert!(
+            !f.matches(&row, now_ms()),
+            "untimestamped session with recent mtime must not be pruned"
+        );
+    }
+
+    #[test]
+    fn older_than_uses_mtime_for_old_untimestamped_rows() {
+        // Counterpart to the regression test: a row with no `last_ts`
+        // but an old mtime should still be reachable by older-than.
+        let tmp = TempDir::new().unwrap();
+        let mut row = mk_row_on_disk(tmp.path(), "stale", 10, 60, false, false);
+        row.last_ts = None;
+        row.last_modified = Some(
+            std::time::SystemTime::now() - std::time::Duration::from_secs(7200),
+        );
+        let f = PruneFilter {
+            older_than: Some(Duration::from_secs(3600)),
+            ..PruneFilter::default()
+        };
+        assert!(
+            f.matches(&row, now_ms()),
+            "untimestamped session with old mtime should be eligible"
+        );
+    }
+
+    #[test]
+    fn older_than_skips_rows_with_no_timestamps_at_all() {
+        // Belt-and-suspenders: when neither `last_ts` nor
+        // `last_modified` is available, refuse to classify the row
+        // as old. Anything else risks deleting live data.
+        let tmp = TempDir::new().unwrap();
+        let mut row = mk_row_on_disk(tmp.path(), "blind", 10, 60, false, false);
+        row.last_ts = None;
+        row.last_modified = None;
+        let f = PruneFilter {
+            older_than: Some(Duration::from_secs(3600)),
+            ..PruneFilter::default()
+        };
+        assert!(
+            !f.matches(&row, now_ms()),
+            "row with no timestamps must not be eligible for older-than prune"
+        );
     }
 
     #[test]

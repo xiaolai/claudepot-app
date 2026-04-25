@@ -106,17 +106,57 @@ pub fn list_actionable(
         .collect())
 }
 
+/// Look up a single pending journal by its stable id (the file stem,
+/// e.g. `move-1744800000-12345`). Returns `Ok(None)` if no journal in
+/// `journals_dir` carries that id. Same I/O as
+/// [`list_pending_with_status`] — narrower contract.
+pub fn find_pending_by_id(
+    journals_dir: &Path,
+    locks_dir: &Path,
+    nag_threshold_secs: u64,
+    id: &str,
+) -> Result<Option<JournalEntry>, ProjectError> {
+    Ok(list_pending_with_status(journals_dir, locks_dir, nag_threshold_secs)?
+        .into_iter()
+        .find(|e| e.id == id))
+}
+
+/// Find the most recent pending journal whose `old_path` matches the
+/// given value, picked by `started_unix_secs` (max wins). Used by the
+/// IPC layer's failure-finalizer to deep-link the user back to the
+/// exact journal that just failed. Returns `Ok(None)` when no journal
+/// matches. Same I/O as [`list_pending_with_status`].
+pub fn newest_pending_for_old_path(
+    journals_dir: &Path,
+    locks_dir: &Path,
+    nag_threshold_secs: u64,
+    old_path: &str,
+) -> Result<Option<JournalEntry>, ProjectError> {
+    Ok(list_pending_with_status(journals_dir, locks_dir, nag_threshold_secs)?
+        .into_iter()
+        .filter(|e| e.journal.old_path == old_path)
+        .max_by_key(|e| e.journal.started_unix_secs))
+}
+
 /// Re-run the original move. The original journal is marked abandoned
 /// first so the pending-journal gate doesn't block the re-run. Phases
 /// are idempotent (spec §6).
 ///
 /// The returned `MoveResult` carries a fresh journal path (the
 /// successor), not the old one.
+///
+/// `claudepot_state_dir` MUST be the same repair-tree root that owns
+/// `entry.path` — otherwise the new journal/lock/snapshot tree splits
+/// from the original and the post-failure audit trail goes stale.
+/// Production callers pass `Some(paths::claudepot_repair_dir())`; the
+/// resolver below derives the root from the journal's location as a
+/// safety net for tests that pass `None`.
 pub fn resume(
     entry: &JournalEntry,
     config_dir: PathBuf,
     claude_json_path: Option<PathBuf>,
     snapshots_dir: Option<PathBuf>,
+    claudepot_state_dir: Option<PathBuf>,
     sink: &dyn ProgressSink,
 ) -> Result<MoveResult, ProjectError> {
     // Supersede the prior journal (audit trail preserved; gate ignores it).
@@ -134,7 +174,14 @@ pub fn resume(
         force: entry.journal.flags.force,
         dry_run: false,
         ignore_pending_journals: true,
-        claudepot_state_dir: None,
+        // Audit B3 fix: thread the explicit override OR fall back to
+        // the journal's own repair tree (parent of `journals/`). The
+        // legacy code hard-coded `None`, which forced new
+        // locks/journals/snapshots into `<config_dir>/claudepot/`
+        // instead of the real `~/.claudepot/repair/` tree, splitting
+        // the audit trail.
+        claudepot_state_dir: claudepot_state_dir
+            .or_else(|| state_root_from_entry(entry)),
     };
     project::move_project(&args, sink)
 }
@@ -147,6 +194,7 @@ pub fn rollback(
     config_dir: PathBuf,
     claude_json_path: Option<PathBuf>,
     snapshots_dir: Option<PathBuf>,
+    claudepot_state_dir: Option<PathBuf>,
     sink: &dyn ProgressSink,
 ) -> Result<MoveResult, ProjectError> {
     let _ = project_journal::mark_abandoned(&entry.path);
@@ -163,9 +211,25 @@ pub fn rollback(
         force: entry.journal.flags.force,
         dry_run: false,
         ignore_pending_journals: true,
-        claudepot_state_dir: None,
+        // Audit B3 fix: see `resume` above — preserve the original
+        // repair-tree root so the rollback's audit artifacts stay
+        // alongside the failed forward move's.
+        claudepot_state_dir: claudepot_state_dir
+            .or_else(|| state_root_from_entry(entry)),
     };
     project::move_project(&args, sink)
+}
+
+/// Derive the repair-tree root from a journal entry's path. The journal
+/// lives at `<state_root>/journals/<id>.json`, so the root is two
+/// `parent()`s up. Returns `None` if the path is unexpected (e.g. a
+/// shallow tmp path in a test); callers fall back to the legacy default.
+fn state_root_from_entry(entry: &JournalEntry) -> Option<PathBuf> {
+    entry
+        .path
+        .parent() // <state_root>/journals
+        .and_then(|p| p.parent()) // <state_root>
+        .map(|p| p.to_path_buf())
 }
 
 /// Write the `.abandoned.json` sidecar. The journal itself is kept
@@ -554,6 +618,129 @@ mod tests {
         let actionable = list_actionable(&journals, &locks, 86_400).unwrap();
         assert_eq!(actionable.len(), 1);
         assert_eq!(actionable[0].id, "move-b");
+    }
+
+    /// Variant of `write_journal` that lets the caller set `old_path`.
+    /// The fixed-`old_path` helper above is enough for status tests
+    /// but not for `newest_pending_for_old_path`, which keys off the
+    /// journal's `old_path` field.
+    fn write_journal_with_old_path(
+        dir: &Path,
+        id: &str,
+        started_unix: u64,
+        old_path: &str,
+    ) -> PathBuf {
+        let j = Journal {
+            version: 1,
+            started_at: "2026-04-15T00:00:00Z".to_string(),
+            started_unix_secs: started_unix,
+            pid: 12345,
+            hostname: "test-host".to_string(),
+            claudepot_version: "0.1.0".to_string(),
+            old_path: old_path.to_string(),
+            new_path: "/tmp/new".to_string(),
+            old_san: project::sanitize_path(old_path),
+            new_san: "-tmp-new".to_string(),
+            old_git_root: None,
+            new_git_root: None,
+            flags: JournalFlags::default(),
+            phases_completed: vec!["P3".to_string()],
+            snapshot_paths: vec![],
+            last_error: None,
+        };
+        let path = dir.join(format!("{id}.json"));
+        fs::write(&path, serde_json::to_string_pretty(&j).unwrap()).unwrap();
+        path
+    }
+
+    #[test]
+    fn test_find_pending_by_id_returns_none_when_missing() {
+        let tmp = TempDir::new().unwrap();
+        let journals = tmp.path().join("journals");
+        let locks = tmp.path().join("locks");
+        fs::create_dir_all(&journals).unwrap();
+        fs::create_dir_all(&locks).unwrap();
+
+        let now = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_secs();
+        write_journal(&journals, "move-a", now - 60);
+
+        let got =
+            find_pending_by_id(&journals, &locks, 86_400, "move-does-not-exist").unwrap();
+        assert!(got.is_none());
+    }
+
+    #[test]
+    fn test_find_pending_by_id_returns_entry_when_present() {
+        let tmp = TempDir::new().unwrap();
+        let journals = tmp.path().join("journals");
+        let locks = tmp.path().join("locks");
+        fs::create_dir_all(&journals).unwrap();
+        fs::create_dir_all(&locks).unwrap();
+
+        let now = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_secs();
+        write_journal(&journals, "move-a", now - 60);
+        write_journal(&journals, "move-b", now - 120);
+
+        let got = find_pending_by_id(&journals, &locks, 86_400, "move-b")
+            .unwrap()
+            .expect("move-b should resolve");
+        assert_eq!(got.id, "move-b");
+        assert_eq!(got.journal.started_unix_secs, now - 120);
+    }
+
+    #[test]
+    fn test_newest_pending_for_old_path_picks_max_started_unix_secs() {
+        let tmp = TempDir::new().unwrap();
+        let journals = tmp.path().join("journals");
+        let locks = tmp.path().join("locks");
+        fs::create_dir_all(&journals).unwrap();
+        fs::create_dir_all(&locks).unwrap();
+
+        let now = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_secs();
+        // Three journals share /tmp/old; one points at a different path.
+        write_journal_with_old_path(&journals, "move-old-1", now - 300, "/tmp/old");
+        write_journal_with_old_path(&journals, "move-old-2", now - 100, "/tmp/old");
+        write_journal_with_old_path(&journals, "move-old-3", now - 200, "/tmp/old");
+        write_journal_with_old_path(&journals, "move-other", now - 50, "/tmp/other");
+
+        let got = newest_pending_for_old_path(&journals, &locks, 86_400, "/tmp/old")
+            .unwrap()
+            .expect("a /tmp/old journal should win");
+        assert_eq!(got.id, "move-old-2");
+        assert_eq!(got.journal.started_unix_secs, now - 100);
+    }
+
+    #[test]
+    fn test_newest_pending_for_old_path_returns_none_when_no_match() {
+        let tmp = TempDir::new().unwrap();
+        let journals = tmp.path().join("journals");
+        let locks = tmp.path().join("locks");
+        fs::create_dir_all(&journals).unwrap();
+        fs::create_dir_all(&locks).unwrap();
+
+        let now = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_secs();
+        write_journal_with_old_path(&journals, "move-a", now - 60, "/tmp/somewhere");
+
+        let got = newest_pending_for_old_path(
+            &journals,
+            &locks,
+            86_400,
+            "/tmp/nothing-here",
+        )
+        .unwrap();
+        assert!(got.is_none());
     }
 
     #[test]

@@ -609,10 +609,17 @@ fn redact_in_place(detail: &mut SessionDetail) {
             }
             SessionEvent::AssistantToolUse {
                 input_preview,
+                input_full,
                 tool_name,
                 ..
             } => {
                 *input_preview = redact_secrets(input_preview);
+                // `input_full` is the untruncated tool-call JSON.
+                // `export_json` serializes it verbatim, so any secret
+                // that happens to live deeper than the 240-char preview
+                // cap (e.g. inside a long Bash command or Edit body)
+                // would leak unless we scrub it here too.
+                *input_full = redact_secrets(input_full);
                 // Tool names are tokens from CC (Read/Bash/…), not
                 // user-controlled, but run them through the helper
                 // anyway — costs nothing and closes the door on
@@ -828,6 +835,43 @@ mod tests {
         assert!(!out.contains("sk-ant-oat01-AbcdAAAA"));
         assert!(!out.contains("sk-ant-oat01-AbcdBBBB"));
         assert!(out.contains("sk-ant-***9999"));
+    }
+
+    #[test]
+    fn json_export_redacts_secret_in_tool_use_input_full() {
+        // Regression: `redact_in_place` must scrub `input_full` (not
+        // just `input_preview`). A long Bash/Edit/Write payload can
+        // hide a secret well past the 240-char preview cap; the JSON
+        // export serializes `input_full` verbatim and would leak it.
+        let mut d = sample_detail();
+        // Build a payload long enough that the secret sits beyond what
+        // any preview-only redaction would reach.
+        let padding = "x".repeat(400);
+        let secret_payload = format!(
+            r#"{{"command":"echo {padding} sk-ant-oat01-FullCDEF1234"}}"#
+        );
+        // Mutate the AssistantToolUse fixture so input_preview is
+        // safe-looking but input_full carries the secret.
+        if let SessionEvent::AssistantToolUse {
+            input_preview,
+            input_full,
+            ..
+        } = &mut d.events[1]
+        {
+            *input_preview = r#"{"command":"echo …"}"#.into();
+            *input_full = secret_payload.clone();
+        } else {
+            panic!("fixture event #1 must be AssistantToolUse");
+        }
+        let out = export_json(&d);
+        assert!(
+            !out.contains("sk-ant-oat01-FullCDEF1234"),
+            "input_full secret leaked into JSON export"
+        );
+        assert!(
+            out.contains("sk-ant-***1234"),
+            "expected redacted suffix in JSON output"
+        );
     }
 
     #[test]

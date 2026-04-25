@@ -295,6 +295,24 @@ pub fn list_pending(journals_dir: &Path) -> Result<Vec<(PathBuf, Journal)>, Proj
     Ok(out)
 }
 
+/// List pending journals with explicitly-abandoned ones filtered out.
+///
+/// `list_pending` returns every parseable `move-*.json` it finds, even
+/// ones the user marked `.abandoned.json`. Callers that gate mutating
+/// commands or print user-facing pending banners want the
+/// "actionable" subset — pending journals the user has not yet
+/// dismissed. This helper packages that filter so it can't drift
+/// across CLI / Tauri call sites.
+pub fn list_active_pending(
+    journals_dir: &Path,
+) -> Result<Vec<(PathBuf, Journal)>, ProjectError> {
+    let all = list_pending(journals_dir)?;
+    Ok(all
+        .into_iter()
+        .filter(|(path, _)| !abandoned_path(path).exists())
+        .collect())
+}
+
 /// Status classification per spec §6 (informed by Q6 lockfile and Q7
 /// nag thresholds).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -492,6 +510,31 @@ mod tests {
         let tmp = tempfile::tempdir().unwrap();
         let dir = tmp.path().join("journals");
         assert!(list_pending(&dir).unwrap().is_empty());
+    }
+
+    #[test]
+    fn test_list_active_pending_excludes_abandoned() {
+        let tmp = tempfile::tempdir().unwrap();
+        let dir = tmp.path().join("journals");
+        let active = open_journal(&dir, mkjournal("/a", "/b", 1000)).unwrap();
+        let dropped = open_journal(&dir, mkjournal("/c", "/d", 1500)).unwrap();
+        // Mark the second journal abandoned. `list_pending` still
+        // returns it (it's the parent journal, not the sidecar);
+        // `list_active_pending` must filter it out.
+        mark_abandoned(&dropped.path).unwrap();
+
+        let raw_paths: Vec<PathBuf> =
+            list_pending(&dir).unwrap().into_iter().map(|(p, _)| p).collect();
+        assert!(raw_paths.contains(&active.path));
+        assert!(raw_paths.contains(&dropped.path));
+
+        let active_paths: Vec<PathBuf> = list_active_pending(&dir)
+            .unwrap()
+            .into_iter()
+            .map(|(p, _)| p)
+            .collect();
+        assert!(active_paths.contains(&active.path));
+        assert!(!active_paths.contains(&dropped.path));
     }
 
     #[test]

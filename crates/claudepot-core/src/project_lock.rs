@@ -99,6 +99,15 @@ pub fn acquire(
 
     let mut broken: Option<BrokenLockRecord> = None;
 
+    // Audit B3 fix: cap the number of times we'll classify a corrupt /
+    // unreadable lock and break it. Without a cap, repeated read
+    // failures (permission denied, EIO, racing writers) loop forever
+    // burning CPU. Eight passes is enough to absorb a single torn
+    // write + re-classification, but small enough to surface a real
+    // I/O fault as a hard error instead of a hang.
+    const MAX_CORRUPT_LOCK_RETRIES: usize = 8;
+    let mut corrupt_retries: usize = 0;
+
     loop {
         let now = SystemTime::now();
         let candidate = Lock {
@@ -175,6 +184,23 @@ pub fn acquire(
                         // avoid clobbering a fresh lock that may have
                         // replaced the corrupt one between our read
                         // and our remove.
+                        //
+                        // Bound the loop: if we keep failing to
+                        // reclassify or remove, surface a hard error
+                        // instead of spinning forever (audit B3).
+                        corrupt_retries += 1;
+                        if corrupt_retries > MAX_CORRUPT_LOCK_RETRIES {
+                            return Err(ProjectError::Io(std::io::Error::new(
+                                std::io::ErrorKind::PermissionDenied,
+                                format!(
+                                    "claudepot lock at {} is unreadable after {} \
+                                     attempts; resolve with `claudepot project \
+                                     repair --break-lock <path>`",
+                                    path.display(),
+                                    MAX_CORRUPT_LOCK_RETRIES
+                                ),
+                            )));
+                        }
                         let original_bytes = fs::read(&path).unwrap_or_default();
                         broken = Some(BrokenLockRecord {
                             prior: Lock {
@@ -429,6 +455,40 @@ mod tests {
             claudepot_version: "x".to_string(),
         };
         assert!(is_live(&lock));
+    }
+
+    #[test]
+    fn test_acquire_bounds_retries_on_unreadable_lock() {
+        // Audit B3 fix: simulate a lock path that is permanently
+        // unreadable AND undeletable as a regular file (a directory in
+        // place). Without the bounded-retry cap, `acquire` would spin
+        // forever. With the cap it must surface a PermissionDenied IO
+        // error.
+        let tmp = tempfile::tempdir().unwrap();
+        let dir = tmp.path().join("locks");
+        fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("-stuck.lock");
+        // A directory at the lock path: try_create_exclusive() fails
+        // with AlreadyExists, read_lock() fails to parse, and
+        // remove_file() fails because the path is a directory. The
+        // loop must terminate on its own.
+        fs::create_dir_all(&path).unwrap();
+
+        let result = acquire(&dir, "-stuck");
+        match result {
+            Err(ProjectError::Io(e)) => {
+                assert_eq!(
+                    e.kind(),
+                    std::io::ErrorKind::PermissionDenied,
+                    "expected PermissionDenied, got {:?}",
+                    e.kind()
+                );
+            }
+            other => panic!(
+                "expected bounded-retry hard error, got {:?}",
+                other
+            ),
+        }
     }
 
     #[test]

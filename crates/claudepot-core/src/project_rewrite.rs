@@ -245,9 +245,20 @@ fn rewrite_cwd_in_value(v: &mut Value, old_path: &str, new_path: &str) -> bool {
 ///
 /// Rules:
 ///   - Exact match: `s == old_path` → `new_path`.
-///   - Boundary prefix: `s == old_path + MAIN_SEPARATOR + suffix` →
-///     `new_path + MAIN_SEPARATOR + suffix`.
+///   - Boundary prefix: `s == old_path + SEP + suffix` →
+///     `new_path + NEW_SEP + suffix`. Both `\` and `/` are accepted as
+///     boundary separators because session JSONL `cwd` values may carry
+///     a Windows path on a Unix host (and vice versa) and the host's
+///     `MAIN_SEPARATOR` would miss the foreign form. Audit B3:
+///     `project_rewrite.rs:251` was Unix-only on Linux/macOS.
 ///   - Else: no rewrite.
+///
+/// Separator preservation: the boundary separator from the source
+/// (after `old_path`) is reused when constructing the rewritten suffix,
+/// so a `C:\foo\bar` cwd stored in a JSONL on macOS keeps its
+/// backslashes. The host `MAIN_SEPARATOR` is only used as a tie-breaker
+/// when neither `old_path` nor `s` carries a separator after `old_path`
+/// (exact-match path).
 pub(crate) fn rewrite_path_string(
     s: &str,
     old_path: &str,
@@ -256,10 +267,20 @@ pub(crate) fn rewrite_path_string(
     if s == old_path {
         return Some(new_path.to_string());
     }
-    let sep = std::path::MAIN_SEPARATOR;
-    let boundary = format!("{old_path}{sep}");
-    if let Some(rest) = s.strip_prefix(&boundary) {
-        return Some(format!("{new_path}{sep}{rest}"));
+    // Try both separators. Order matters only when `old_path` happens
+    // to have a trailing single-char that combines with `\` and `/`
+    // ambiguously — in practice, a cwd string never ends in a separator
+    // so the first match wins cleanly.
+    for sep in ['\\', '/'] {
+        let boundary = format!("{old_path}{sep}");
+        if let Some(rest) = s.strip_prefix(&boundary) {
+            // Preserve the SOURCE separator inside the suffix as-is
+            // (`rest` is already separator-correct for its origin
+            // file). The boundary separator we splice between
+            // `new_path` and `rest` is the one we just matched, which
+            // matches the document's native shape.
+            return Some(format!("{new_path}{sep}{rest}"));
+        }
     }
     None
 }
@@ -384,6 +405,78 @@ mod tests {
     #[test]
     fn test_rewrite_path_string_unrelated_path() {
         let r = rewrite_path_string("/elsewhere", "/a/b", "/c/d");
+        assert_eq!(r, None);
+    }
+
+    // -------------------------------------------------------------------
+    // Cross-OS path-shape coverage. The four canonical shapes per
+    // .claude/rules/paths.md must rewrite on any host because session
+    // JSONL `cwd` strings cross OS boundaries (sync, restore, etc.).
+    // -------------------------------------------------------------------
+
+    #[test]
+    fn test_rewrite_path_string_windows_drive_boundary_on_any_host() {
+        // The audit case: `C:\foo\bar` stored in a JSONL on macOS.
+        // MAIN_SEPARATOR on Linux/macOS is `/`, so the legacy code
+        // would never match the `\` boundary. Both separators must
+        // work.
+        let r = rewrite_path_string(
+            r"C:\Users\joker\proj\src\main.rs",
+            r"C:\Users\joker\proj",
+            r"D:\code\proj",
+        );
+        assert_eq!(r, Some(r"D:\code\proj\src\main.rs".to_string()));
+    }
+
+    #[test]
+    fn test_rewrite_path_string_unc_boundary_on_any_host() {
+        let r = rewrite_path_string(
+            r"\\server\share\proj\src\lib.rs",
+            r"\\server\share\proj",
+            r"\\backup\share\proj",
+        );
+        assert_eq!(
+            r,
+            Some(r"\\backup\share\proj\src\lib.rs".to_string())
+        );
+    }
+
+    #[test]
+    fn test_rewrite_path_string_unix_boundary_on_any_host() {
+        let r = rewrite_path_string(
+            "/Users/joker/proj/src/main.rs",
+            "/Users/joker/proj",
+            "/Users/joker/code",
+        );
+        assert_eq!(
+            r,
+            Some("/Users/joker/code/src/main.rs".to_string())
+        );
+    }
+
+    #[test]
+    fn test_rewrite_path_string_verbatim_drive_boundary() {
+        // Verbatim-prefixed paths are rare in CC's writers but defense
+        // in depth: if one leaks in, the boundary must still match.
+        let r = rewrite_path_string(
+            r"\\?\C:\Users\joker\proj\src\main.rs",
+            r"\\?\C:\Users\joker\proj",
+            r"\\?\D:\code\proj",
+        );
+        assert_eq!(
+            r,
+            Some(r"\\?\D:\code\proj\src\main.rs".to_string())
+        );
+    }
+
+    #[test]
+    fn test_rewrite_path_string_windows_false_positive_prefix_rejected() {
+        // `C:\Users\joker\proj-backup` must NOT match `C:\Users\joker\proj`.
+        let r = rewrite_path_string(
+            r"C:\Users\joker\proj-backup",
+            r"C:\Users\joker\proj",
+            r"D:\code\proj",
+        );
         assert_eq!(r, None);
     }
 

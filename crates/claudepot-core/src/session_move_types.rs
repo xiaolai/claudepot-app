@@ -87,6 +87,9 @@ pub enum MoveSessionError {
     #[error("target slug already contains a file for session {0}")]
     TargetCollision(Uuid),
 
+    #[error("target sidecar path already exists: {0:?} — refusing to overwrite an existing per-session file")]
+    SidecarCollision(PathBuf),
+
     #[error("from_cwd and to_cwd canonicalize to the same path")]
     SameCwd,
 
