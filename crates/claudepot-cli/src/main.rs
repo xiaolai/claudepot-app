@@ -261,6 +261,10 @@ enum ActivityAction {
         /// Filter to cards from this project (matches by cwd prefix).
         #[arg(long)]
         project: Option<String>,
+        /// Filter to cards attributed to this plugin (`<name>` or
+        /// `<name>@<owner>`).
+        #[arg(long)]
+        plugin: Option<String>,
         /// Maximum rows to print. Defaults to 200, capped at 10000.
         #[arg(long)]
         limit: Option<usize>,
@@ -639,6 +643,7 @@ async fn main() -> Result<()> {
                 kind,
                 severity,
                 project,
+                plugin,
                 limit,
             } => commands::activity::recent(
                 &ctx,
@@ -646,6 +651,7 @@ async fn main() -> Result<()> {
                 &kind,
                 severity.as_deref(),
                 project.as_deref(),
+                plugin.as_deref(),
                 limit,
             )?,
             ActivityAction::Reindex => commands::activity::reindex(&ctx)?,

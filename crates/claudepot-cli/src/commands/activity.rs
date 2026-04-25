@@ -37,6 +37,7 @@ pub fn recent(
     kinds: &[String],
     severity: Option<&str>,
     project: Option<&str>,
+    plugin: Option<&str>,
     limit: Option<usize>,
 ) -> Result<()> {
     let idx = open_index()?;
@@ -58,6 +59,9 @@ pub fn recent(
     }
     if let Some(p) = project {
         q.project_path_prefix = Some(PathBuf::from(p));
+    }
+    if let Some(p) = plugin {
+        q.plugin = Some(p.to_string());
     }
     let cards = idx.recent(&q).context("query recent activity cards")?;
 
@@ -209,7 +213,12 @@ fn print_human(cards: &[Card]) {
                 println!("              ↳ {rendered}");
             }
         }
-        println!("              ({project}{branch})");
+        let plugin = c
+            .plugin
+            .as_deref()
+            .map(|p| format!(" · plugin:{p}"))
+            .unwrap_or_default();
+        println!("              ({project}{branch}{plugin})");
         println!();
     }
 }

@@ -59,6 +59,16 @@ pub struct Card {
     pub cwd: PathBuf,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub git_branch: Option<String>,
+    /// Best-effort plugin attribution. Derived from either the
+    /// `plugin:` namespace prefix on commands/skills/agents OR the
+    /// `${CLAUDE_PLUGIN_ROOT}` substring in a hook's `command`. The
+    /// inverse lookup (plugin → its installed name) lives in the
+    /// `extract_plugin` helper in `classifier.rs`. `None` means
+    /// either: no plugin signal in the source line, or the signal
+    /// was ambiguous. Indexed for filtering — the GUI's "show me
+    /// this plugin's events" filter chains off this column.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub plugin: Option<String>,
 }
 
 /// What kind of activity this card represents. Marked
@@ -219,6 +229,7 @@ mod tests {
             source_ref: None,
             cwd: PathBuf::from("/Users/x/proj"),
             git_branch: None,
+            plugin: None,
         };
         let s = serde_json::to_string(&c).unwrap();
         let back: Card = serde_json::from_str(&s).unwrap();
@@ -241,6 +252,7 @@ mod tests {
             source_ref: None,
             cwd: PathBuf::from("/x"),
             git_branch: None,
+            plugin: None,
         };
         let s = serde_json::to_string(&c).unwrap();
         // Cleanliness check: no nullable noise crosses the boundary.
@@ -250,5 +262,6 @@ mod tests {
         assert!(!s.contains("\"help\""));
         assert!(!s.contains("\"source_ref\""));
         assert!(!s.contains("\"git_branch\""));
+        assert!(!s.contains("\"plugin\""));
     }
 }

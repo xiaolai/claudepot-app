@@ -144,8 +144,8 @@ impl ActivityIndex {
             "INSERT OR IGNORE INTO activity_cards
                 (session_path, event_uuid, byte_offset, kind, severity,
                  ts_ms, title, subtitle, help_id, help_args_json,
-                 source_ref_json, cwd, git_branch)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13)",
+                 source_ref_json, cwd, git_branch, plugin)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14)",
             params![
                 session_path.as_ref(),
                 card.event_uuid,
@@ -160,6 +160,7 @@ impl ActivityIndex {
                 source_ref_json,
                 cwd.as_ref(),
                 card.git_branch,
+                card.plugin,
             ],
         )?;
         if rows == 0 {
@@ -187,8 +188,8 @@ impl ActivityIndex {
                 "INSERT OR IGNORE INTO activity_cards
                     (session_path, event_uuid, byte_offset, kind, severity,
                      ts_ms, title, subtitle, help_id, help_args_json,
-                     source_ref_json, cwd, git_branch)
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13)",
+                     source_ref_json, cwd, git_branch, plugin)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14)",
             )?;
             for card in cards {
                 let help_id = card.help.as_ref().map(|h| h.template_id.as_str());
@@ -218,6 +219,7 @@ impl ActivityIndex {
                     source_ref_json,
                     cwd.as_ref(),
                     card.git_branch,
+                    card.plugin,
                 ])?;
                 if n == 0 {
                     skipped += 1;
@@ -247,6 +249,108 @@ impl ActivityIndex {
     pub fn row_count(&self) -> Result<i64, ActivityIndexError> {
         let db = self.db();
         let n: i64 = db.query_row("SELECT COUNT(*) FROM activity_cards", [], |r| r.get(0))?;
+        Ok(n)
+    }
+
+    /// Read the `last_seen_card_id` cursor — the highest `id` the
+    /// user has acknowledged. Anything above this is "new since you
+    /// were away."  Returns `None` when the cursor has never been
+    /// set (a fresh install or a freshly cleared index).
+    ///
+    /// The cursor lives in the `activity_meta` table, alongside any
+    /// future per-user index settings. Cheap key/value rows; no
+    /// migration cost.
+    pub fn last_seen(&self) -> Result<Option<i64>, ActivityIndexError> {
+        let db = self.db();
+        let v: Option<String> = db
+            .query_row(
+                "SELECT v FROM activity_meta WHERE k = 'last_seen_card_id'",
+                [],
+                |r| r.get(0),
+            )
+            .ok();
+        Ok(v.and_then(|s| s.parse::<i64>().ok()))
+    }
+
+    /// Set the cursor. Idempotent UPSERT — re-setting to the same
+    /// value is a no-op.
+    pub fn set_last_seen(&self, id: i64) -> Result<(), ActivityIndexError> {
+        let db = self.db();
+        db.execute(
+            "INSERT INTO activity_meta (k, v) VALUES ('last_seen_card_id', ?1) \
+             ON CONFLICT (k) DO UPDATE SET v = excluded.v",
+            params![id.to_string()],
+        )?;
+        Ok(())
+    }
+
+    /// Count rows with `id > cursor` matching the given query
+    /// filters. Cheap aggregate query — uses the existing indexes,
+    /// no row read. Returns `i64` because SQLite's COUNT is `i64`
+    /// natively; values realistically stay well below `i32::MAX` for
+    /// any human's history.
+    pub fn count_new_since(
+        &self,
+        cursor: Option<i64>,
+        q: &RecentQuery,
+    ) -> Result<i64, ActivityIndexError> {
+        let mut where_parts: Vec<String> = Vec::new();
+        let mut binds: Vec<Box<dyn rusqlite::ToSql>> = Vec::new();
+        if let Some(cursor) = cursor {
+            where_parts.push(format!("id > ?{}", binds.len() + 1));
+            binds.push(Box::new(cursor));
+        }
+        if let Some(since_ms) = q.since_ms {
+            where_parts.push(format!("ts_ms >= ?{}", binds.len() + 1));
+            binds.push(Box::new(since_ms));
+        }
+        if !q.kinds.is_empty() {
+            let placeholders = q
+                .kinds
+                .iter()
+                .enumerate()
+                .map(|(i, _)| format!("?{}", binds.len() + 1 + i))
+                .collect::<Vec<_>>()
+                .join(",");
+            where_parts.push(format!("kind IN ({placeholders})"));
+            for k in &q.kinds {
+                binds.push(Box::new(k.label().to_string()));
+            }
+        }
+        if let Some(min_sev) = q.min_severity {
+            where_parts.push(format!(
+                "(CASE severity WHEN 'INFO' THEN 0 WHEN 'NOTICE' THEN 1 WHEN 'WARN' THEN 2 WHEN 'ERROR' THEN 3 ELSE -1 END) >= ?{}",
+                binds.len() + 1
+            ));
+            binds.push(Box::new(severity_rank(min_sev)));
+        }
+        if let Some(project) = &q.project_path_prefix {
+            let n = binds.len() + 1;
+            where_parts.push(format!("substr(cwd, 1, length(?{n})) = ?{n}"));
+            binds.push(Box::new(project.to_string_lossy().into_owned()));
+        }
+        if let Some(plugin) = &q.plugin {
+            // Same predicate as recent() — keep the two paths in
+            // lockstep so the "N new" badge agrees with the list.
+            let n = binds.len() + 1;
+            let m = binds.len() + 2;
+            where_parts.push(format!("(plugin = ?{n} OR substr(plugin, 1, length(?{m})) = ?{m})"));
+            binds.push(Box::new(plugin.clone()));
+            binds.push(Box::new(format!("{plugin}@")));
+        }
+
+        let where_clause = if where_parts.is_empty() {
+            String::new()
+        } else {
+            format!(" WHERE {}", where_parts.join(" AND "))
+        };
+        let sql = format!("SELECT COUNT(*) FROM activity_cards{where_clause}");
+
+        let db = self.db();
+        let mut stmt = db.prepare(&sql)?;
+        let bind_refs: Vec<&dyn rusqlite::ToSql> =
+            binds.iter().map(|b| b.as_ref()).collect();
+        let n: i64 = stmt.query_row(rusqlite::params_from_iter(bind_refs), |r| r.get(0))?;
         Ok(n)
     }
 
@@ -317,6 +421,17 @@ impl ActivityIndex {
             where_parts.push(format!("substr(cwd, 1, length(?{n})) = ?{n}"));
             binds.push(Box::new(project.to_string_lossy().into_owned()));
         }
+        if let Some(plugin) = &q.plugin {
+            // Match either bare plugin name or `<name>@<owner>` form
+            // — many cards have a name without owner attribution.
+            let n = binds.len() + 1;
+            let m = binds.len() + 2;
+            where_parts.push(format!("(plugin = ?{n} OR substr(plugin, 1, length(?{m})) = ?{m})"));
+            binds.push(Box::new(plugin.clone()));
+            // Match `<name>@` so `name@anyowner` also matches when
+            // the user filters by `name`.
+            binds.push(Box::new(format!("{plugin}@")));
+        }
 
         let where_clause = if where_parts.is_empty() {
             String::new()
@@ -327,7 +442,7 @@ impl ActivityIndex {
         let sql = format!(
             "SELECT id, session_path, event_uuid, byte_offset, kind, severity,
                     ts_ms, title, subtitle, help_id, help_args_json,
-                    source_ref_json, cwd, git_branch
+                    source_ref_json, cwd, git_branch, plugin
                FROM activity_cards
                {where_clause}
                ORDER BY ts_ms DESC
@@ -380,6 +495,10 @@ pub struct RecentQuery {
     /// Show only cards whose `cwd` starts with this path. Useful for
     /// per-project filtering. `None` = all projects.
     pub project_path_prefix: Option<PathBuf>,
+    /// Show only cards attributed to this plugin (`<name>` or
+    /// `<name>@<owner>`). `None` = all plugins, including unattributed
+    /// (`plugin IS NULL`) cards.
+    pub plugin: Option<String>,
     /// Default 200, max 10_000.
     pub limit: Option<usize>,
 }
@@ -442,6 +561,7 @@ fn row_to_card(r: &rusqlite::Row) -> rusqlite::Result<Card> {
     let source_ref_json: Option<String> = r.get(11)?;
     let cwd: String = r.get(12)?;
     let git_branch: Option<String> = r.get(13)?;
+    let plugin: Option<String> = r.get(14)?;
 
     let kind = parse_kind_label(&kind_label).ok_or_else(|| {
         rusqlite::Error::FromSqlConversionFailure(
@@ -512,6 +632,7 @@ fn row_to_card(r: &rusqlite::Row) -> rusqlite::Result<Card> {
         source_ref,
         cwd: PathBuf::from(cwd),
         git_branch,
+        plugin,
     })
 }
 
@@ -570,9 +691,34 @@ fn quarantine_corrupt_db(path: &Path) -> Result<(), ActivityIndexError> {
     Ok(())
 }
 
+/// Add `plugin` column to `activity_cards` on DBs that pre-date its
+/// introduction. Idempotent: checks `PRAGMA table_info` first, only
+/// runs `ALTER TABLE` when missing. Same shape as `account.rs`'s
+/// additive-ALTER pattern.
+fn ensure_plugin_column(db: &Connection) -> Result<(), ActivityIndexError> {
+    let mut stmt = db.prepare("PRAGMA table_info(activity_cards)")?;
+    let cols: Vec<String> = stmt
+        .query_map([], |r| r.get::<_, String>(1))?
+        .collect::<Result<Vec<_>, _>>()?;
+    if !cols.iter().any(|c| c == "plugin") {
+        db.execute("ALTER TABLE activity_cards ADD COLUMN plugin TEXT", [])?;
+    }
+    Ok(())
+}
+
 fn apply_schema(db: &Connection) -> Result<(), ActivityIndexError> {
     db.execute_batch(
         r#"
+        -- Per-DB key/value scratch space for the activity index.
+        -- Currently holds `last_seen_card_id` (the cursor for the
+        -- "N new since you were away" badge); future additions
+        -- (per-template mute, per-project last-acknowledged) live
+        -- here too.
+        CREATE TABLE IF NOT EXISTS activity_meta (
+            k TEXT PRIMARY KEY,
+            v TEXT NOT NULL
+        );
+
         CREATE TABLE IF NOT EXISTS activity_cards (
             id              INTEGER PRIMARY KEY,
             session_path    TEXT NOT NULL,
@@ -587,7 +733,8 @@ fn apply_schema(db: &Connection) -> Result<(), ActivityIndexError> {
             help_args_json  TEXT,
             source_ref_json TEXT,
             cwd             TEXT NOT NULL,
-            git_branch      TEXT
+            git_branch      TEXT,
+            plugin          TEXT
         );
 
         -- Idempotency: a re-fed JSONL line with the same uuid is a
@@ -608,6 +755,11 @@ fn apply_schema(db: &Connection) -> Result<(), ActivityIndexError> {
         CREATE INDEX IF NOT EXISTS idx_activity_cards_cwd_ts
             ON activity_cards(cwd, ts_ms DESC);
         "#,
+    )?;
+    ensure_plugin_column(db)?;
+    db.execute_batch(
+        "CREATE INDEX IF NOT EXISTS idx_activity_cards_plugin_ts \
+         ON activity_cards(plugin, ts_ms DESC) WHERE plugin IS NOT NULL;",
     )?;
     Ok(())
 }
@@ -640,6 +792,7 @@ mod tests {
             source_ref: None,
             cwd: PathBuf::from("/Users/x/proj"),
             git_branch: Some("main".into()),
+            plugin: None,
         }
     }
 
@@ -722,6 +875,82 @@ mod tests {
         let cards = idx.recent(&RecentQuery::default()).unwrap();
         assert_eq!(cards.len(), 1, "bad row skipped, good row returned");
         assert_eq!(cards[0].title, "good");
+    }
+
+    /// Phase 2: `last_seen_card_id` cursor round-trips. Fresh DB →
+    /// `None`. After `set_last_seen(N)` → `Some(N)`. Re-setting is
+    /// an UPSERT, not an error.
+    #[test]
+    fn last_seen_cursor_round_trips() {
+        let dir = tempdir().unwrap();
+        let idx = ActivityIndex::open(&dir.path().join("a.db")).unwrap();
+        assert_eq!(idx.last_seen().unwrap(), None);
+
+        idx.set_last_seen(42).unwrap();
+        assert_eq!(idx.last_seen().unwrap(), Some(42));
+
+        // UPSERT — re-setting overwrites without error.
+        idx.set_last_seen(43).unwrap();
+        assert_eq!(idx.last_seen().unwrap(), Some(43));
+    }
+
+    /// Phase 2: `count_new_since` returns rows above the cursor that
+    /// also match the filter set. Drives the "N new since you were
+    /// away" badge.
+    #[test]
+    fn count_new_since_respects_cursor_and_filters() {
+        let dir = tempdir().unwrap();
+        let idx = ActivityIndex::open(&dir.path().join("a.db")).unwrap();
+        let mut warn = sample_card("u1", 0, "warn-card");
+        warn.severity = Severity::Warn;
+        let mut info = sample_card("u2", 1, "info-card");
+        info.kind = CardKind::ToolError;
+        info.severity = Severity::Info;
+        let id_warn = idx.insert(&warn).unwrap().unwrap();
+        let id_info = idx.insert(&info).unwrap().unwrap();
+        assert!(id_warn < id_info, "rowid is monotonic");
+
+        // No cursor: every row counts.
+        let total = idx
+            .count_new_since(None, &RecentQuery::default())
+            .unwrap();
+        assert_eq!(total, 2);
+
+        // Cursor at id_warn: only the info row is "new."
+        let after_warn = idx
+            .count_new_since(Some(id_warn), &RecentQuery::default())
+            .unwrap();
+        assert_eq!(after_warn, 1);
+
+        // Cursor + severity filter: cursor excludes warn, filter
+        // would exclude info, so net zero.
+        let new_warns_after = idx
+            .count_new_since(
+                Some(id_warn),
+                &RecentQuery {
+                    min_severity: Some(Severity::Warn),
+                    ..Default::default()
+                },
+            )
+            .unwrap();
+        assert_eq!(new_warns_after, 0);
+
+        // Plugin filter parity with recent(): inserting a card with
+        // a plugin attribution and counting "new since 0" with that
+        // filter must agree with recent() (1, not 0).
+        let mut tagged = sample_card("u3", 2, "tagged");
+        tagged.plugin = Some("mermaid-preview@xiaolai".to_string());
+        let id_tagged = idx.insert(&tagged).unwrap().unwrap();
+        let only_plugin = RecentQuery {
+            plugin: Some("mermaid-preview".to_string()),
+            ..Default::default()
+        };
+        assert_eq!(idx.recent(&only_plugin).unwrap().len(), 1);
+        assert_eq!(
+            idx.count_new_since(Some(id_tagged - 1), &only_plugin).unwrap(),
+            1,
+            "count_new_since must honor plugin filter — parity with recent()"
+        );
     }
 
     /// Regression for Codex audit LOW #3: project-prefix filtering
