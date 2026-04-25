@@ -37,6 +37,10 @@ const importActivities = () =>
   import("./sections/ActivitiesSection").then((m) => ({
     default: m.ActivitiesSection,
   }));
+const importEvents = () =>
+  import("./sections/EventsSection").then((m) => ({ default: m.EventsSection }));
+const importTrends = () =>
+  import("./sections/TrendsSection").then((m) => ({ default: m.TrendsSection }));
 const importKeys = () =>
   import("./sections/KeysSection").then((m) => ({ default: m.KeysSection }));
 const importConfig = () =>
@@ -46,6 +50,8 @@ const importGlobal = () =>
 const ProjectsSection = lazy(importProjects);
 const SettingsSection = lazy(importSettings);
 const ActivitiesSection = lazy(importActivities);
+const EventsSection = lazy(importEvents);
+const TrendsSection = lazy(importTrends);
 // SessionsSection is mounted transitively through ActivitiesSection
 // now; keep the lazy factory around so its chunk is cached by the
 // prefetcher without us needing a second export here.
@@ -73,6 +79,8 @@ function preloadSavedSection(): void {
       localStorage.getItem("claudepot.activeSection");
     if (id === "projects") void importProjects();
     else if (id === "activities") void importActivities();
+    else if (id === "events") void importEvents();
+    else if (id === "trends") void importTrends();
     else if (id === "global") void importGlobal();
     else if (id === "keys") void importKeys();
     else if (id === "settings") void importSettings();
@@ -91,6 +99,7 @@ import { AppStateProvider, useAppState } from "./providers/AppStateProvider";
 import { api } from "./api";
 import { ConsentLiveModal } from "./components/ConsentLiveModal";
 import { useActivityNotifications } from "./hooks/useActivityNotifications";
+import { useCardNotifications } from "./sections/events/useCardNotifications";
 import { listen } from "@tauri-apps/api/event";
 import type { LiveSessionSummary, RunningOpInfo } from "./types";
 import { WindowChrome, AppSidebar, AppStatusBar } from "./shell";
@@ -235,6 +244,33 @@ function AppShell() {
     return () => window.removeEventListener("keydown", onKey);
   }, [setSection]);
 
+  // Cross-section navigation requests via DOM CustomEvent. Lets a
+  // child section (e.g. EventsSection card click) switch to another
+  // section AND seed the target session without prop-drilling
+  // `setSection` or coupling component trees. Payload shape:
+  // `{ id: string, sessionPath?: string }`.
+  //
+  // When `sessionPath` is set, also seeds `pendingSessionPath` so
+  // the destination Sessions section opens the right transcript on
+  // mount. Per-line scroll-to-byte-offset is Phase 6 — landing on
+  // the right session is the MVP.
+  useEffect(() => {
+    const handler = (e: Event) => {
+      const detail = (e as CustomEvent<{ id?: string; sessionPath?: string }>)
+        .detail;
+      const id = detail?.id;
+      if (id && sectionIds.includes(id)) {
+        if (detail.sessionPath) {
+          setPendingSessionPath(detail.sessionPath);
+        }
+        setSection(id);
+      }
+    };
+    window.addEventListener("claudepot:navigate-section", handler);
+    return () =>
+      window.removeEventListener("claudepot:navigate-section", handler);
+  }, [setSection]);
+
   // App menu bar + tray menu both emit `app-menu` with a string id as
   // payload. Routing lives here (not in the section) because nav items
   // need the shell-level setSection. Action items delegate to the
@@ -315,6 +351,11 @@ function AppShell() {
   // count of alerting sessions (errored/stuck) for the nav badge,
   // reusing the hook's internal useSessionLive subscription.
   const activityAlerts = useActivityNotifications();
+  // Card-level OS notifications. Fires on Warn+ CardEmitted deltas
+  // gated by `notify_on_error`. Coalesces same-title bursts (≥3 in
+  // 60 s → one summary notification). See
+  // src/sections/events/useCardNotifications.ts for the rules.
+  useCardNotifications();
 
   // Tray → Activity row click lands on the Tauri event
   // `cp-activity-open-session` with the session id as payload.
@@ -698,6 +739,8 @@ function AppShell() {
                   }
                 />
               )}
+              {section === "events" && <EventsSection />}
+              {section === "trends" && <TrendsSection />}
               {section === "global" && (
                 <GlobalSection
                   subRoute={subRoute}

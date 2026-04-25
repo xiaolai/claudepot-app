@@ -72,6 +72,18 @@ pub enum LiveDeltaKindDto {
         errored: bool,
         stuck: bool,
     },
+    /// Activity card emitted by the live classifier. Subscribers
+    /// (the GUI events strip + notifier) consume this to update
+    /// without a follow-up `cards_recent` query.
+    CardEmitted {
+        id: i64,
+        card_kind: String,
+        severity: String,
+        title: String,
+        ts_ms: i64,
+        plugin: Option<String>,
+        cwd: String,
+    },
     Ended,
 }
 
@@ -126,6 +138,23 @@ impl From<claudepot_core::session_live::types::LiveDelta> for LiveDeltaDto {
             LiveDeltaKind::OverlayChanged { errored, stuck } => {
                 LiveDeltaKindDto::OverlayChanged { errored, stuck }
             }
+            LiveDeltaKind::CardEmitted {
+                id,
+                card_kind,
+                severity,
+                title,
+                ts_ms,
+                plugin,
+                cwd,
+            } => LiveDeltaKindDto::CardEmitted {
+                id,
+                card_kind,
+                severity,
+                title,
+                ts_ms,
+                plugin,
+                cwd,
+            },
             LiveDeltaKind::Ended => LiveDeltaKindDto::Ended,
         };
         Self {
