@@ -1,5 +1,6 @@
 pub mod claude_json;
 pub mod credfile;
+pub mod secret_file;
 pub mod storage;
 pub mod swap;
 

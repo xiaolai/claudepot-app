@@ -869,27 +869,50 @@ fn external_includes_approved() -> bool {
 }
 
 /// True when `~/.claude/managed-mcp.json` exists AND declares at least
-/// one MCP server. CC uses this as an enterprise lockout switch — when
-/// set, project/user/local MCP sources are ignored entirely
-/// (`services/mcp/config.ts` + plan §9.4). A malformed file or an
-/// empty `{}` is treated as "not locked" so the flag only ever fires
-/// when the admin actually provisioned servers.
+/// one MCP server in a valid server-map shape. CC uses this as an
+/// enterprise lockout switch — when set, project/user/local MCP sources
+/// are ignored entirely (`services/mcp/config.ts` + plan §9.4).
+///
+/// Validation rules (so a stray top-level field doesn't toggle lockout):
+/// * The file must parse as a top-level JSON object.
+/// * It must expose a server map either at `mcpServers` or as the bare
+///   top-level object (the same shorthand `.mcp.json` accepts).
+/// * Every value in the chosen map must itself be a JSON object —
+///   stray scalars / arrays mean the file is malformed and lockout
+///   stays off.
+/// * The map must be non-empty.
+///
+/// Anything else — empty `{}`, malformed JSON, the wrong shape — is
+/// treated as "not provisioned" so admins can drop a placeholder
+/// without flipping the lockout.
 fn managed_mcp_is_nonempty() -> bool {
     let p = claude_config_dir().join("managed-mcp.json");
     let Ok(bytes) = std::fs::read(&p) else { return false };
     let Ok(v): Result<serde_json::Value, _> = serde_json::from_slice(&bytes) else {
         return false;
     };
-    // CC checks both the top-level `mcpServers` key and the shorthand
-    // `{ <name>: {…} }` shape used by `.mcp.json` — treat any non-empty
-    // object field as "provisioned".
-    if let Some(m) = v.get("mcpServers").and_then(|x| x.as_object()) {
-        return !m.is_empty();
+    managed_mcp_value_is_provisioned(&v)
+}
+
+/// Pure decision function — split out from `managed_mcp_is_nonempty` so
+/// it can be unit-tested without driving `CLAUDE_CONFIG_DIR` and the
+/// real filesystem. Encodes the validation rules documented above.
+fn managed_mcp_value_is_provisioned(v: &serde_json::Value) -> bool {
+    let Some(top) = v.as_object() else { return false };
+
+    // Prefer the explicit `mcpServers` key when present; otherwise
+    // accept the bare `{ <name>: {…} }` shorthand. Either way the map
+    // body must look like a server registry — every value an object.
+    let map = match top.get("mcpServers") {
+        Some(serde_json::Value::Object(m)) => m,
+        Some(_) => return false, // wrong shape under the canonical key
+        None => top,
+    };
+
+    if map.is_empty() {
+        return false;
     }
-    if let Some(o) = v.as_object() {
-        return !o.is_empty();
-    }
-    false
+    map.values().all(|v| v.is_object())
 }
 
 /// For every memory-kind `FileNode` in `files`, resolve its `@include`
@@ -1284,6 +1307,85 @@ mod tests {
         assert_eq!(a.last().unwrap(), &PathBuf::from("/a/b/c/d"));
         assert!(!a.contains(&PathBuf::from("/")));
         assert_eq!(a.first().unwrap(), &PathBuf::from("/a"));
+    }
+
+    // ----- managed-mcp.json lockout shape validation --------------
+
+    #[test]
+    fn managed_mcp_empty_object_is_not_provisioned() {
+        // Pre-fix bug: any non-empty object enabled lockout. Empty
+        // object must stay unprovisioned.
+        let v = serde_json::json!({});
+        assert!(!managed_mcp_value_is_provisioned(&v));
+    }
+
+    #[test]
+    fn managed_mcp_top_level_array_is_not_provisioned() {
+        let v = serde_json::json!([{"command": "x"}]);
+        assert!(!managed_mcp_value_is_provisioned(&v));
+    }
+
+    #[test]
+    fn managed_mcp_top_level_scalar_is_not_provisioned() {
+        let v = serde_json::json!("hi");
+        assert!(!managed_mcp_value_is_provisioned(&v));
+        let v = serde_json::json!(42);
+        assert!(!managed_mcp_value_is_provisioned(&v));
+        let v = serde_json::json!(null);
+        assert!(!managed_mcp_value_is_provisioned(&v));
+    }
+
+    #[test]
+    fn managed_mcp_unrelated_object_is_not_provisioned() {
+        // A dict of strings (not server objects) must NOT trigger
+        // lockout — this is the regression class the audit flagged.
+        let v = serde_json::json!({"note": "placeholder", "schema": "v1"});
+        assert!(!managed_mcp_value_is_provisioned(&v));
+    }
+
+    #[test]
+    fn managed_mcp_servers_key_with_objects_is_provisioned() {
+        let v = serde_json::json!({
+            "mcpServers": {
+                "tools": {"command": "x", "args": []}
+            }
+        });
+        assert!(managed_mcp_value_is_provisioned(&v));
+    }
+
+    #[test]
+    fn managed_mcp_servers_key_empty_is_not_provisioned() {
+        let v = serde_json::json!({"mcpServers": {}});
+        assert!(!managed_mcp_value_is_provisioned(&v));
+    }
+
+    #[test]
+    fn managed_mcp_servers_key_wrong_shape_is_not_provisioned() {
+        // `mcpServers` present but not an object → reject without
+        // falling back to the bare-shorthand branch.
+        let v = serde_json::json!({"mcpServers": []});
+        assert!(!managed_mcp_value_is_provisioned(&v));
+        let v = serde_json::json!({"mcpServers": "x"});
+        assert!(!managed_mcp_value_is_provisioned(&v));
+    }
+
+    #[test]
+    fn managed_mcp_shorthand_with_objects_is_provisioned() {
+        // `.mcp.json`-style shorthand: top-level keys ARE the servers.
+        let v = serde_json::json!({
+            "tools": {"command": "x"}
+        });
+        assert!(managed_mcp_value_is_provisioned(&v));
+    }
+
+    #[test]
+    fn managed_mcp_shorthand_with_non_object_values_is_not_provisioned() {
+        // A single bad entry disqualifies — shape must be a server map.
+        let v = serde_json::json!({
+            "tools": {"command": "x"},
+            "broken": "string-not-server"
+        });
+        assert!(!managed_mcp_value_is_provisioned(&v));
     }
 
     #[test]

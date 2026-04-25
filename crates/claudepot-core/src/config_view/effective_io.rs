@@ -69,7 +69,50 @@ fn read_settings_file(path: &Path) -> Option<Value> {
         return None;
     }
     let bytes = std::fs::read(path).ok()?;
-    serde_json::from_slice(&bytes).ok()
+    let parsed: Value = serde_json::from_slice(&bytes).ok()?;
+    // Settings files MUST be a top-level JSON object. CC's merge
+    // customizer (see `merge::merge_settings`) clones the higher-
+    // precedence side wholesale when shapes don't match — so a
+    // top-level array, scalar, or `null` would clobber every previously
+    // merged scope. That is never a legitimate user intent and would
+    // silently destroy effective settings; surface a tracing warning
+    // and skip the layer instead.
+    if !parsed.is_object() {
+        tracing::warn!(
+            path = %path.display(),
+            kind = json_kind(&parsed),
+            "settings file is not a top-level JSON object — skipping merge"
+        );
+        return None;
+    }
+    Some(parsed)
+}
+
+/// Tag for the warning emitted when a settings file is the wrong shape.
+fn json_kind(v: &Value) -> &'static str {
+    match v {
+        Value::Null => "null",
+        Value::Bool(_) => "bool",
+        Value::Number(_) => "number",
+        Value::String(_) => "string",
+        Value::Array(_) => "array",
+        Value::Object(_) => "object",
+    }
+}
+
+/// Resolve CC's `.claude.json` location identically to
+/// `discover::collect_redacted_user_config`. CC stores this file at
+/// `$CLAUDE_CONFIG_DIR/.claude.json` when the env var is set, otherwise
+/// `$HOME/.claude.json` — note this is a SIBLING of `$HOME/.claude/`,
+/// NOT a child of it. Resolving via `claude_config_dir().join(...)`
+/// would land at `~/.claude/.claude.json`, which CC never writes, so
+/// every MCP read would see an empty map.
+fn resolve_claude_json_path() -> PathBuf {
+    let base = std::env::var_os("CLAUDE_CONFIG_DIR")
+        .map(PathBuf::from)
+        .or_else(dirs::home_dir)
+        .unwrap_or_else(|| PathBuf::from("/tmp"));
+    base.join(".claude.json")
 }
 
 fn non_empty_or_none(v: Value) -> Option<Value> {
@@ -104,8 +147,12 @@ pub fn load_mcp_bundle(cwd: &Path, effective_settings: Value) -> McpSourceBundle
     let home = claude_config_dir();
     let enterprise = read_mcp_servers_obj(&home.join("managed-mcp.json"));
 
-    // User: `mcpServers` from ~/.claude.json.
-    let user = read_claude_json_mcp_servers(&home.join(".claude.json"));
+    // User: `mcpServers` from ~/.claude.json. The file lives as a
+    // sibling of `~/.claude/`, NOT inside it — see
+    // `resolve_claude_json_path` for the same logic CC's
+    // `getGlobalClaudeFile` (env.ts:14-26) implements.
+    let claude_json = resolve_claude_json_path();
+    let user = read_claude_json_mcp_servers(&claude_json);
 
     // Local (per-project): ~/.claude.json's
     // `projects[<project-path>].mcpServers`. We use the literal `cwd`
@@ -113,7 +160,7 @@ pub fn load_mcp_bundle(cwd: &Path, effective_settings: Value) -> McpSourceBundle
     // which we approximate via `find_canonical_git_root`.
     let project_key = crate::project_memory::find_canonical_git_root(cwd)
         .unwrap_or_else(|| cwd.to_path_buf());
-    let local = read_claude_json_local_mcp(&home.join(".claude.json"), &project_key);
+    let local = read_claude_json_local_mcp(&claude_json, &project_key);
 
     // Project chain: every `.mcp.json` from cwd up to fs root (or git).
     let project_chain = walk_project_mcp(cwd);
@@ -272,6 +319,65 @@ mod tests {
         drop(f);
         let m = read_mcp_servers_obj(&p);
         assert!(m.contains_key("foo"));
+    }
+
+    #[test]
+    fn read_settings_file_skips_top_level_array() {
+        // A settings file that is a top-level JSON array would clobber
+        // the merged object via `merge_settings`'s scalar-vs-object
+        // branch. The reader must reject it before merge.
+        use std::io::Write;
+        let td = tempfile::TempDir::new().unwrap();
+        let p = td.path().join("settings.json");
+        let mut f = std::fs::File::create(&p).unwrap();
+        write!(f, r#"[1, 2, 3]"#).unwrap();
+        drop(f);
+        assert!(read_settings_file(&p).is_none());
+    }
+
+    #[test]
+    fn read_settings_file_skips_top_level_scalar() {
+        use std::io::Write;
+        let td = tempfile::TempDir::new().unwrap();
+        let p = td.path().join("settings.json");
+        let mut f = std::fs::File::create(&p).unwrap();
+        write!(f, r#""just a string""#).unwrap();
+        drop(f);
+        assert!(read_settings_file(&p).is_none());
+    }
+
+    #[test]
+    fn read_settings_file_skips_top_level_null() {
+        use std::io::Write;
+        let td = tempfile::TempDir::new().unwrap();
+        let p = td.path().join("settings.json");
+        let mut f = std::fs::File::create(&p).unwrap();
+        write!(f, "null").unwrap();
+        drop(f);
+        assert!(read_settings_file(&p).is_none());
+    }
+
+    #[test]
+    fn read_settings_file_accepts_top_level_object() {
+        use std::io::Write;
+        let td = tempfile::TempDir::new().unwrap();
+        let p = td.path().join("settings.json");
+        let mut f = std::fs::File::create(&p).unwrap();
+        write!(f, r#"{{"theme":"dark"}}"#).unwrap();
+        drop(f);
+        let v = read_settings_file(&p).expect("object should pass");
+        assert_eq!(v["theme"], serde_json::json!("dark"));
+    }
+
+    #[test]
+    fn read_settings_file_skips_invalid_json() {
+        use std::io::Write;
+        let td = tempfile::TempDir::new().unwrap();
+        let p = td.path().join("settings.json");
+        let mut f = std::fs::File::create(&p).unwrap();
+        write!(f, "not json").unwrap();
+        drop(f);
+        assert!(read_settings_file(&p).is_none());
     }
 
     #[test]

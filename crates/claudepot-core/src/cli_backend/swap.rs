@@ -192,8 +192,14 @@ fn acquire_swap_lock() -> Result<fs::File, SwapError> {
     }
     #[cfg(windows)]
     {
-        // On Windows, opening with write + no sharing provides exclusion.
-        // The OpenOptions above already provide this behavior.
+        // Use a real cross-process exclusive lock. Plain
+        // `OpenOptions::write` does NOT exclude other processes — a
+        // concurrent process can still open + write the file. Use
+        // LockFileEx via the `fs2` shim, which is already used for the
+        // Desktop swap lock in `desktop_lock.rs`.
+        use fs2::FileExt;
+        file.lock_exclusive()
+            .map_err(SwapError::FileError)?;
     }
 
     Ok(file)

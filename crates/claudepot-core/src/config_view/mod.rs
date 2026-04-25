@@ -21,7 +21,10 @@ pub mod policy;
 pub mod provenance;
 pub mod redacted_claude_json;
 pub mod search;
+pub mod service;
 pub mod watch;
+
+pub use service::ConfigScanService;
 
 use std::path::Path;
 
