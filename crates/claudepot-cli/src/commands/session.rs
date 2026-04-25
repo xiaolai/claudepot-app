@@ -512,8 +512,12 @@ pub fn view_cmd(ctx: &AppContext, target: &str, show: &str) -> Result<()> {
 }
 
 /// `claudepot session export <target> --format fmt --to dest [flags]`
+///
+/// Pure dispatcher: format → policy → body → `core::session_export_delivery::deliver`.
+/// All file/clipboard/gist mechanics live in `claudepot-core`; the CLI
+/// only supplies a [`SubprocessClipboard`] for the `clipboard` arm.
 #[allow(clippy::too_many_arguments)]
-pub fn export_cmd(
+pub async fn export_cmd(
     ctx: &AppContext,
     target: &str,
     format: &str,
@@ -526,6 +530,9 @@ pub fn export_cmd(
     redact_regex: Vec<String>,
     html_no_js: bool,
 ) -> Result<()> {
+    use claudepot_core::session_export_delivery::{
+        deliver, default_export_filename, extension_for, DeliveryReceipt, ExportDestination,
+    };
     let _ = ctx;
     let detail = resolve_detail(target)?;
     let fmt = match format {
@@ -538,46 +545,41 @@ pub fn export_cmd(
         other => bail!("unknown format: {other}"),
     };
     let policy = build_policy(redact_paths, redact_emails, redact_env, redact_regex)?;
-    let body =
-        claudepot_core::session_export::export_with(&detail, fmt.clone(), &policy);
-    match to {
+    let body = claudepot_core::session_export::export_with(&detail, fmt.clone(), &policy);
+    let dest = match to {
         "file" => {
             let path = output.ok_or_else(|| anyhow::anyhow!("--output required for --to file"))?;
-            write_export_file(path, body.as_bytes())
-                .with_context(|| format!("write {path}"))?;
-            eprintln!("Wrote {} bytes to {path}", body.len());
+            ExportDestination::File {
+                path: PathBuf::from(path),
+            }
         }
-        "clipboard" => {
-            write_to_clipboard(&body)
-                .with_context(|| "copy to clipboard")?;
-            eprintln!("Copied {} bytes to clipboard", body.len());
+        "clipboard" => ExportDestination::Clipboard,
+        "gist" => ExportDestination::Gist {
+            filename: default_export_filename(&detail.row.session_id, extension_for(&fmt)),
+            description: format!("Claudepot session export: {}", detail.row.session_id),
+            public,
+        },
+        other => bail!("unknown destination: {other}"),
+    };
+    let clipboard = crate::clipboard::SubprocessClipboard;
+    let receipt = deliver(
+        &body,
+        dest,
+        Some(&clipboard),
+        &claudepot_core::project_progress::NoopSink,
+    )
+    .await?;
+    match receipt {
+        DeliveryReceipt::File { path, bytes } => {
+            eprintln!("Wrote {bytes} bytes to {}", path.display());
         }
-        "gist" => {
-            let token = resolve_github_token()?;
-            let filename = default_gist_filename(&detail, format);
-            let description = format!(
-                "Claudepot session export: {}",
-                detail.row.session_id
-            );
-            let result = tokio::runtime::Builder::new_current_thread()
-                .enable_all()
-                .build()
-                .context("build tokio runtime")?
-                .block_on(async {
-                    claudepot_core::session_share::share_gist(
-                        &body,
-                        &filename,
-                        &description,
-                        public,
-                        &token,
-                        &claudepot_core::project_progress::NoopSink,
-                    )
-                    .await
-                })?;
+        DeliveryReceipt::Clipboard { bytes } => {
+            eprintln!("Copied {bytes} bytes to clipboard");
+        }
+        DeliveryReceipt::Gist { result, .. } => {
             eprintln!("Uploaded to {}", result.url);
             println!("{}", result.url);
         }
-        other => bail!("unknown destination: {other}"),
     }
     Ok(())
 }
@@ -604,171 +606,6 @@ fn build_policy(
         env_assignments: redact_env,
         custom_regex: redact_regex,
     })
-}
-
-fn default_gist_filename(
-    detail: &claudepot_core::session::SessionDetail,
-    format: &str,
-) -> String {
-    let ext = match format {
-        "html" => "html",
-        "json" => "json",
-        _ => "md",
-    };
-    format!("session-{}.{ext}", short_hash_id(&detail.row.session_id))
-}
-
-fn short_hash_id(s: &str) -> String {
-    let mut h: u64 = 0xcbf29ce484222325;
-    for b in s.bytes() {
-        h ^= b as u64;
-        h = h.wrapping_mul(0x100000001b3);
-    }
-    format!("{:08x}", (h & 0xffff_ffff) as u32)
-}
-
-fn resolve_github_token() -> Result<String> {
-    if let Ok(t) = std::env::var("GITHUB_TOKEN") {
-        if !t.trim().is_empty() {
-            return Ok(t);
-        }
-    }
-    // Keychain fallback (the GUI may have stored a PAT under
-    // `claudepot.github-token`). CLI-only for now — never prints the
-    // value back to the user.
-    if let Ok(kr) = keyring::Entry::new("claudepot", "github-token") {
-        if let Ok(val) = kr.get_password() {
-            return Ok(val);
-        }
-    }
-    bail!(
-        "no GitHub token. Set GITHUB_TOKEN or run Claudepot → Settings → GitHub."
-    )
-}
-
-fn write_to_clipboard(body: &str) -> Result<()> {
-    use std::process::{Command, Stdio};
-    // macOS, Linux (wl-copy / xclip), Windows (clip.exe). Try each in
-    // order; return the first one that accepts stdin.
-    let candidates: &[(&str, &[&str])] = &[
-        ("pbcopy", &[][..]),
-        ("wl-copy", &[][..]),
-        ("xclip", &["-selection", "clipboard"][..]),
-        ("clip.exe", &[][..]),
-    ];
-    for (cmd, args) in candidates {
-        let mut child = match Command::new(cmd)
-            .args(args.iter().copied())
-            .stdin(Stdio::piped())
-            .stdout(Stdio::null())
-            .stderr(Stdio::null())
-            .spawn()
-        {
-            Ok(c) => c,
-            Err(_) => continue,
-        };
-        if let Some(mut stdin) = child.stdin.take() {
-            use std::io::Write;
-            stdin.write_all(body.as_bytes())?;
-            drop(stdin);
-        }
-        let status = child.wait()?;
-        if status.success() {
-            return Ok(());
-        }
-    }
-    bail!("no clipboard command available (tried pbcopy, wl-copy, xclip, clip.exe)")
-}
-
-/// Create the export file with 0600 mode on Unix — the file may carry
-/// secrets from the transcript even after redaction (user-supplied
-/// content that never passes through the redactor), and the rule is
-/// "minimum permissions on credential-adjacent data".
-///
-/// `OpenOptions::mode(0o600)` only applies on file creation, so an
-/// existing file with relaxed perms would keep them on overwrite.
-/// We explicitly `set_permissions(0o600)` after opening so the
-/// invariant holds whether the file is new or being replaced. On
-/// Windows we tighten the DACL so only the current user can read.
-fn write_export_file(path: &str, bytes: &[u8]) -> std::io::Result<()> {
-    let mut opts = std::fs::OpenOptions::new();
-    opts.write(true).create(true).truncate(true);
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::OpenOptionsExt;
-        opts.mode(0o600);
-    }
-    let mut file = opts.open(path)?;
-
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt;
-        let perms = std::fs::Permissions::from_mode(0o600);
-        // Apply unconditionally — `opts.mode` above only covers the
-        // create path; existing files must be narrowed here.
-        std::fs::set_permissions(path, perms)?;
-    }
-    use std::io::Write as _;
-    file.write_all(bytes)?;
-    file.sync_all()?;
-
-    #[cfg(windows)]
-    {
-        // Apply a strict DACL via `icacls`: disable inheritance and
-        // grant only the current user full control. `icacls` is a
-        // Windows system binary always present since XP; shelling
-        // out avoids pulling a Rust ACL crate into the dep graph.
-        harden_windows_acl(path)?;
-    }
-
-    Ok(())
-}
-
-/// Tighten the DACL on `path` to the Windows equivalent of `0600`.
-///
-/// The goal is the POSIX semantic "not world-readable" — which on
-/// Windows means no Everyone / Users / Authenticated Users ACE. We
-/// deliberately do **not** remove grants for `BUILTIN\Administrators`
-/// or `NT AUTHORITY\SYSTEM`: those principals can read any file on the
-/// machine anyway, so removing them is security theater for this
-/// threat model. The user's goal is protection from peer user accounts
-/// on a shared machine, not from the OS administrator.
-#[cfg(windows)]
-fn harden_windows_acl(path: &str) -> std::io::Result<()> {
-    use std::process::Command;
-    let user = std::env::var("USERNAME").unwrap_or_default();
-    if user.is_empty() {
-        return Err(std::io::Error::new(
-            std::io::ErrorKind::Other,
-            "could not resolve %USERNAME% for ACL hardening",
-        ));
-    }
-    // Sequence:
-    //  1. /inheritance:r  — strip inherited ACEs entirely
-    //  2. /remove:g <peer-groups> — drop any surviving explicit grants
-    //     for Everyone / Users / Authenticated Users
-    //  3. /grant:r USER:F — replace the user ACE with exactly full control
-    // `/remove:g <name>` is a no-op when the ACE isn't present.
-    let run = |args: &[&str]| -> std::io::Result<()> {
-        let out = Command::new("icacls").args(args).output()?;
-        if !out.status.success() {
-            return Err(std::io::Error::new(
-                std::io::ErrorKind::Other,
-                format!(
-                    "icacls {args:?} failed for {path}: status={:?} stderr={}",
-                    out.status.code(),
-                    String::from_utf8_lossy(&out.stderr).trim()
-                ),
-            ));
-        }
-        Ok(())
-    };
-    run(&[path, "/inheritance:r"])?;
-    run(&[path, "/remove:g", "Everyone"])?;
-    run(&[path, "/remove:g", "Users"])?;
-    run(&[path, "/remove:g", "Authenticated Users"])?;
-    run(&[path, "/grant:r", &format!("{user}:F")])?;
-    Ok(())
 }
 
 /// `claudepot session search <query> [--limit N]`
@@ -1382,6 +1219,11 @@ fn slim_all_cmd(
 
 /// Accept either a bare UUID (looked up against the index) or an
 /// absolute `.jsonl` path.
+///
+/// Prefix matching mirrors the email-prefix-matching contract in
+/// `.claude/rules/architecture.md`: zero matches → error, exactly one
+/// match → use it, more than one → error and list the ambiguous
+/// candidates so the user can disambiguate.
 fn resolve_session_path(target: &str) -> Result<PathBuf> {
     if target.ends_with(".jsonl") {
         let p = PathBuf::from(target);
@@ -1393,12 +1235,41 @@ fn resolve_session_path(target: &str) -> Result<PathBuf> {
     // Treat as UUID — search the index.
     let cfg = paths::claude_config_dir();
     let rows = claudepot_core::session::list_all_sessions(&cfg)?;
-    let row = rows
+    resolve_session_path_from_rows(target, &rows)
+}
+
+/// Pure helper for prefix resolution. Split out so it can be unit-tested
+/// without touching the on-disk session index.
+fn resolve_session_path_from_rows(
+    target: &str,
+    rows: &[claudepot_core::session::SessionRow],
+) -> Result<PathBuf> {
+    // Exact match short-circuits ambiguity: a full UUID is always
+    // unambiguous.
+    if let Some(exact) = rows.iter().find(|r| r.session_id == target) {
+        return Ok(exact.file_path.clone());
+    }
+    let matches: Vec<&claudepot_core::session::SessionRow> = rows
         .iter()
-        .find(|r| r.session_id == target || r.session_id.starts_with(target));
-    match row {
-        Some(r) => Ok(r.file_path.clone()),
-        None => bail!("no session found for {target}"),
+        .filter(|r| r.session_id.starts_with(target))
+        .collect();
+    match matches.len() {
+        0 => bail!("no session found for {target}"),
+        1 => Ok(matches[0].file_path.clone()),
+        n => {
+            // Surface up to a handful of candidates so the user can
+            // disambiguate. Avoid spamming for huge prefix matches.
+            const PREVIEW: usize = 8;
+            let mut msg = format!("ambiguous session id `{target}` — {n} matches:\n");
+            for r in matches.iter().take(PREVIEW) {
+                msg.push_str(&format!("  {}\n", r.session_id));
+            }
+            if n > PREVIEW {
+                msg.push_str(&format!("  … and {} more\n", n - PREVIEW));
+            }
+            msg.push_str("Use a longer prefix or the full UUID.");
+            bail!("{msg}")
+        }
     }
 }
 
@@ -1406,5 +1277,86 @@ fn atty_like() -> bool {
     // Used by `trash empty` to refuse without `--yes`. On a non-TTY
     // (pipe, CI, test harness) we don't demand the confirmation.
     std::io::IsTerminal::is_terminal(&std::io::stdin())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::resolve_session_path_from_rows;
+    use claudepot_core::session::{SessionRow, TokenUsage};
+    use std::path::PathBuf;
+
+    fn row(id: &str) -> SessionRow {
+        SessionRow {
+            session_id: id.to_string(),
+            slug: "-test".to_string(),
+            file_path: PathBuf::from(format!("/tmp/{id}.jsonl")),
+            file_size_bytes: 0,
+            last_modified: None,
+            project_path: "/test".to_string(),
+            project_from_transcript: false,
+            first_ts: None,
+            last_ts: None,
+            event_count: 0,
+            message_count: 0,
+            user_message_count: 0,
+            assistant_message_count: 0,
+            first_user_prompt: None,
+            models: vec![],
+            tokens: TokenUsage::default(),
+            git_branch: None,
+            cc_version: None,
+            display_slug: None,
+            has_error: false,
+            is_sidechain: false,
+        }
+    }
+
+    #[test]
+    fn test_resolve_session_path_unique_prefix_resolves() {
+        let rows = vec![
+            row("aaaaaaaa-1111-2222-3333-444444444444"),
+            row("bbbbbbbb-1111-2222-3333-444444444444"),
+        ];
+        let got = resolve_session_path_from_rows("aaa", &rows).unwrap();
+        assert_eq!(got, PathBuf::from("/tmp/aaaaaaaa-1111-2222-3333-444444444444.jsonl"));
+    }
+
+    #[test]
+    fn test_resolve_session_path_no_match_errors() {
+        let rows = vec![row("aaaaaaaa-1111-2222-3333-444444444444")];
+        let err = resolve_session_path_from_rows("zzz", &rows).unwrap_err();
+        assert!(err.to_string().contains("no session found"));
+    }
+
+    #[test]
+    fn test_resolve_session_path_ambiguous_prefix_errors_and_lists() {
+        // Two ids share the prefix "abc". Old code returned the first
+        // match (and silently slimmed the wrong transcript). New code
+        // must reject the ambiguous prefix and list the candidates.
+        let rows = vec![
+            row("abc11111-aaaa-aaaa-aaaa-aaaaaaaaaaaa"),
+            row("abc22222-bbbb-bbbb-bbbb-bbbbbbbbbbbb"),
+            row("dead0000-cccc-cccc-cccc-cccccccccccc"),
+        ];
+        let err = resolve_session_path_from_rows("abc", &rows).unwrap_err();
+        let msg = err.to_string();
+        assert!(msg.contains("ambiguous"), "msg: {msg}");
+        assert!(msg.contains("abc11111"), "msg: {msg}");
+        assert!(msg.contains("abc22222"), "msg: {msg}");
+        // Non-matching id must NOT appear in the candidate list.
+        assert!(!msg.contains("dead0000"), "msg: {msg}");
+    }
+
+    #[test]
+    fn test_resolve_session_path_exact_match_wins_over_prefix() {
+        // If the target is exactly equal to one id but is also a prefix
+        // of another, the exact match should win unambiguously.
+        let rows = vec![
+            row("abc"),
+            row("abcdef-something"),
+        ];
+        let got = resolve_session_path_from_rows("abc", &rows).unwrap();
+        assert_eq!(got, PathBuf::from("/tmp/abc.jsonl"));
+    }
 }
 

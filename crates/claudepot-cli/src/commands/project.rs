@@ -20,32 +20,16 @@ fn snapshots_dir() -> std::path::PathBuf {
     paths::claudepot_repair_dir().join("snapshots")
 }
 
-/// Check whether a journal has been explicitly abandoned via a
-/// sidecar `.abandoned.json` file.
-fn abandoned_sidecar_exists(journal_path: &std::path::Path) -> bool {
-    let Some((parent, stem)) = journal_path
-        .parent()
-        .zip(journal_path.file_stem().map(|s| s.to_string_lossy().to_string()))
-    else {
-        return false;
-    };
-    parent.join(format!("{stem}.abandoned.json")).exists()
-}
-
 /// Print a one-line banner if any pending journals exist. Used by
 /// read-only subcommands (list, show) per spec §6 (gate rules).
 fn warn_pending_journals_banner() {
-    let Ok(pending) = project_journal::list_pending(&journals_dir()) else {
+    let Ok(active) = project_journal::list_active_pending(&journals_dir()) else {
         return;
     };
-    let non_abandoned: Vec<_> = pending
-        .into_iter()
-        .filter(|(path, _)| !abandoned_sidecar_exists(path))
-        .collect();
-    if !non_abandoned.is_empty() {
+    if !active.is_empty() {
         eprintln!(
             "\u{26a0}  {} pending rename journal(s). Run `claudepot project repair` to resolve.",
-            non_abandoned.len()
+            active.len()
         );
     }
 }
@@ -54,10 +38,7 @@ fn warn_pending_journals_banner() {
 /// is pending (and not abandoned) unless the caller explicitly opts
 /// out via `ignore_pending_journals`.
 fn gate_on_pending_journals(ignore: bool) -> Result<()> {
-    let pending: Vec<_> = project_journal::list_pending(&journals_dir())?
-        .into_iter()
-        .filter(|(path, _)| !abandoned_sidecar_exists(path))
-        .collect();
+    let pending = project_journal::list_active_pending(&journals_dir())?;
     if pending.is_empty() || ignore {
         if ignore && !pending.is_empty() {
             eprintln!(
@@ -710,12 +691,22 @@ fn list_journals(ctx: &AppContext, entries: &[project_repair::JournalEntry]) -> 
     Ok(())
 }
 
-/// Core-facing helper: build the three path args needed by resume/rollback.
-fn repair_paths() -> (std::path::PathBuf, Option<std::path::PathBuf>, Option<std::path::PathBuf>) {
+/// Core-facing helper: build the path args needed by resume/rollback.
+/// Returns (config_dir, claude_json, snapshots_dir, claudepot_state_dir).
+/// `claudepot_state_dir` MUST flow through so the resumed/rolled-back
+/// move's lock + journal + snapshot tree stays attached to the
+/// original repair tree (audit B3 fix).
+fn repair_paths() -> (
+    std::path::PathBuf,
+    Option<std::path::PathBuf>,
+    Option<std::path::PathBuf>,
+    Option<std::path::PathBuf>,
+) {
     let config_dir = paths::claude_config_dir();
     let claude_json_path = dirs::home_dir().map(|h| h.join(".claude.json"));
-    let snapshots = Some(paths::claudepot_repair_dir().join("snapshots"));
-    (config_dir, claude_json_path, snapshots)
+    let state_root = paths::claudepot_repair_dir();
+    let snapshots = Some(state_root.join("snapshots"));
+    (config_dir, claude_json_path, snapshots, Some(state_root))
 }
 
 fn handle_resume(ctx: &AppContext, entry: &project_repair::JournalEntry) -> Result<()> {
@@ -733,8 +724,15 @@ fn handle_resume(ctx: &AppContext, entry: &project_repair::JournalEntry) -> Resu
         eprintln!("Re-run with -y to confirm.");
         anyhow::bail!("aborted (run with -y to confirm)");
     }
-    let (config_dir, claude_json, snapshots) = repair_paths();
-    let result = project_repair::resume(entry, config_dir, claude_json, snapshots, &claudepot_core::project_progress::NoopSink)?;
+    let (config_dir, claude_json, snapshots, state_root) = repair_paths();
+    let result = project_repair::resume(
+        entry,
+        config_dir,
+        claude_json,
+        snapshots,
+        state_root,
+        &claudepot_core::project_progress::NoopSink,
+    )?;
     if ctx.json {
         println!("{}", serde_json::to_string_pretty(&result)?);
     } else {
@@ -767,8 +765,15 @@ fn handle_rollback(ctx: &AppContext, entry: &project_repair::JournalEntry) -> Re
         eprintln!("Re-run with -y to confirm.");
         anyhow::bail!("aborted (run with -y to confirm)");
     }
-    let (config_dir, claude_json, snapshots) = repair_paths();
-    let result = project_repair::rollback(entry, config_dir, claude_json, snapshots, &claudepot_core::project_progress::NoopSink)?;
+    let (config_dir, claude_json, snapshots, state_root) = repair_paths();
+    let result = project_repair::rollback(
+        entry,
+        config_dir,
+        claude_json,
+        snapshots,
+        state_root,
+        &claudepot_core::project_progress::NoopSink,
+    )?;
     if ctx.json {
         println!("{}", serde_json::to_string_pretty(&result)?);
     } else {

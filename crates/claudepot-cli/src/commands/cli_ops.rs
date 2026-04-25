@@ -1,5 +1,6 @@
 use crate::AppContext;
 use anyhow::Result;
+use claudepot_core::error::SwapError;
 
 pub async fn status(ctx: &AppContext) -> Result<()> {
     // Audit M1: reconcile DB pointer with CC's shared slot before
@@ -120,13 +121,15 @@ pub async fn use_account(ctx: &AppContext, email_input: &str, no_refresh: bool, 
             &ctx.store, current_uuid, target.uuid,
             platform.as_ref(), !no_refresh, &refresher, &fetcher,
         )
-        .await?;
+        .await
+        .map_err(annotate_swap_err)?;
     } else {
         cli_backend::swap::switch(
             &ctx.store, current_uuid, target.uuid,
             platform.as_ref(), !no_refresh, &refresher, &fetcher,
         )
-        .await?;
+        .await
+        .map_err(annotate_swap_err)?;
     }
 
     let from = current_uuid
@@ -179,6 +182,19 @@ pub async fn use_account(ctx: &AppContext, email_input: &str, no_refresh: bool, 
     }
 
     Ok(())
+}
+
+/// Re-attach CLI-specific remediation copy to surface-agnostic
+/// `SwapError` variants. The core error message is intentionally
+/// neutral so the same variant can fan out to the CLI (which gets
+/// `--force`) and the GUI/tray (which gets an Override button).
+fn annotate_swap_err(e: SwapError) -> anyhow::Error {
+    match e {
+        SwapError::LiveSessionConflict => anyhow::anyhow!(
+            "{e}\n\nQuit Claude Code first, or pass --force to proceed anyway."
+        ),
+        other => other.into(),
+    }
 }
 
 /// Post-swap advisory classification. Pure function so the decision
