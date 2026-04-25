@@ -39,8 +39,6 @@ const importActivities = () =>
   }));
 const importEvents = () =>
   import("./sections/EventsSection").then((m) => ({ default: m.EventsSection }));
-const importTrends = () =>
-  import("./sections/TrendsSection").then((m) => ({ default: m.TrendsSection }));
 const importKeys = () =>
   import("./sections/KeysSection").then((m) => ({ default: m.KeysSection }));
 const importConfig = () =>
@@ -51,7 +49,6 @@ const ProjectsSection = lazy(importProjects);
 const SettingsSection = lazy(importSettings);
 const ActivitiesSection = lazy(importActivities);
 const EventsSection = lazy(importEvents);
-const TrendsSection = lazy(importTrends);
 // SessionsSection is mounted transitively through ActivitiesSection
 // now; keep the lazy factory around so its chunk is cached by the
 // prefetcher without us needing a second export here.
@@ -88,7 +85,6 @@ function preloadSavedSection(): void {
     if (id === "projects") void importProjects();
     else if (id === "activities") void importActivities();
     else if (id === "events") void importEvents();
-    else if (id === "trends") void importTrends();
     else if (id === "global") void importGlobal();
     else if (id === "keys") void importKeys();
     else if (id === "settings") void importSettings();
@@ -750,7 +746,6 @@ function AppShell() {
                 />
               )}
               {section === "events" && <EventsSection />}
-              {section === "trends" && <TrendsSection />}
               {section === "global" && (
                 <GlobalSection
                   subRoute={subRoute}
