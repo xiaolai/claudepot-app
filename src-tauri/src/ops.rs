@@ -30,6 +30,19 @@ pub enum OpKind {
     /// Gist upload — tracked separately from SessionSlim so the UI
     /// label reads "Sharing" rather than "Slimming".
     SessionShare,
+    /// Single-session move: rewrites primary JSONL `cwd`, sidecar dirs,
+    /// history.jsonl, .claude.json pointers, source dir.
+    SessionMove,
+    /// Existing-account re-login: spawns `claude auth login` and re-imports
+    /// the resulting blob into the slot. Long-running because OAuth blocks
+    /// on the browser.
+    AccountLogin,
+    /// Browser-OAuth onboarding for a fresh account. Same shape as
+    /// AccountLogin but the terminal payload carries a new account uuid.
+    AccountRegister,
+    /// Per-account `/profile` reconcile loop. Carries per-account events
+    /// alongside the standard phase channel.
+    VerifyAll,
 }
 
 /// Post-op summary surfaced to the UI on success, so we can render
@@ -121,6 +134,134 @@ pub struct RunningOpInfo {
     /// — matches the newest journal whose `old_path == old_path` (the
     /// journal is created during the move, so it will exist when we look).
     pub failed_journal_id: Option<String>,
+    /// Populated on successful SessionMove. None while running or on
+    /// error. Mirrors the shape of `MoveSessionReportDto` so the
+    /// Sessions modal can render the same summary as the legacy
+    /// `session_move` IPC.
+    pub session_move_result: Option<MoveSessionReportSummary>,
+    /// Populated by login ops as they progress through `LoginPhase`s.
+    /// Mirrors `current_phase` (string) as a typed field — useful when
+    /// the polling backstop kicks in and the UI wants to render a
+    /// phase glyph without re-deriving from the channel name.
+    pub login_phase: Option<LoginPhaseKind>,
+    /// Populated on terminal events for VerifyAll ops. Counts only —
+    /// per-account detail comes through `op-progress::<op_id>` events.
+    pub verify_results: Option<VerifyResultSummary>,
+}
+
+/// Mirror of [`claudepot_core::services::account_service::LoginPhase`] for
+/// JSON emission. Same six variants; carried on `RunningOpInfo` so the
+/// UI can render a typed phase glyph without parsing strings.
+#[derive(Debug, Clone, Copy, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum LoginPhaseKind {
+    Spawning,
+    WaitingForBrowser,
+    ReadingBlob,
+    FetchingProfile,
+    VerifyingIdentity,
+    Persisting,
+}
+
+impl From<claudepot_core::services::account_service::LoginPhase> for LoginPhaseKind {
+    fn from(p: claudepot_core::services::account_service::LoginPhase) -> Self {
+        use claudepot_core::services::account_service::LoginPhase as LP;
+        match p {
+            LP::Spawning => Self::Spawning,
+            LP::WaitingForBrowser => Self::WaitingForBrowser,
+            LP::ReadingBlob => Self::ReadingBlob,
+            LP::FetchingProfile => Self::FetchingProfile,
+            LP::VerifyingIdentity => Self::VerifyingIdentity,
+            LP::Persisting => Self::Persisting,
+        }
+    }
+}
+
+impl LoginPhaseKind {
+    /// Phase id stable contract: matches the strings the Tauri sink
+    /// emits on `op-progress::<op_id>`. Frontend reads by these ids
+    /// to flip phase rows in the modal.
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::Spawning => "spawning",
+            Self::WaitingForBrowser => "waiting_for_browser",
+            Self::ReadingBlob => "reading_blob",
+            Self::FetchingProfile => "fetching_profile",
+            Self::VerifyingIdentity => "verifying_identity",
+            Self::Persisting => "persisting",
+        }
+    }
+}
+
+/// Counters bundled at the end of a `verify_all` op so the UI can render
+/// a one-line summary in the running-op strip without re-aggregating
+/// per-account events.
+#[derive(Debug, Clone, Serialize, Default)]
+pub struct VerifyResultSummary {
+    pub total: usize,
+    pub ok: usize,
+    pub drift: usize,
+    pub rejected: usize,
+    pub network_error: usize,
+}
+
+/// Per-account event emitted on `op-progress::<op_id>` for VerifyAll ops.
+/// Carries the typed payload that the original `VerifyEvent::Account`
+/// produced — sibling to `ProgressEvent`, NOT pipe-delimited into
+/// `ProgressEvent.detail`.
+///
+/// The frontend listens for both `ProgressEvent` (overall phase advance,
+/// terminal events) and `VerifyAccountEvent` (per-account row updates).
+#[derive(Debug, Clone, Serialize)]
+pub struct VerifyAccountEvent {
+    pub op_id: String,
+    /// Always `"verify_account"` — distinguishes this payload from
+    /// `ProgressEvent` on the shared channel.
+    pub kind: &'static str,
+    pub uuid: String,
+    pub email: String,
+    pub idx: usize,
+    pub total: usize,
+    /// "ok" | "drift" | "rejected" | "network_error"
+    pub outcome: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub detail: Option<String>,
+}
+
+/// Mirror of `claudepot_core::session_move::MoveSessionReport` for
+/// JSON emission. Same shape (camelCase) as
+/// [`crate::dto_session_move::MoveSessionReportDto`] so the frontend
+/// can reuse `MoveSessionReport` regardless of which surface fed it.
+#[derive(Debug, Clone, Serialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct MoveSessionReportSummary {
+    pub session_id: Option<String>,
+    pub from_slug: String,
+    pub to_slug: String,
+    pub jsonl_lines_rewritten: usize,
+    pub subagent_files_moved: usize,
+    pub remote_agent_files_moved: usize,
+    pub history_entries_moved: usize,
+    pub history_entries_unmapped: usize,
+    pub claude_json_pointers_cleared: u8,
+    pub source_dir_removed: bool,
+}
+
+impl MoveSessionReportSummary {
+    pub fn from_core(r: &claudepot_core::session_move::MoveSessionReport) -> Self {
+        Self {
+            session_id: r.session_id.map(|s| s.to_string()),
+            from_slug: r.from_slug.clone(),
+            to_slug: r.to_slug.clone(),
+            jsonl_lines_rewritten: r.jsonl_lines_rewritten,
+            subagent_files_moved: r.subagent_files_moved,
+            remote_agent_files_moved: r.remote_agent_files_moved,
+            history_entries_moved: r.history_entries_moved,
+            history_entries_unmapped: r.history_entries_unmapped,
+            claude_json_pointers_cleared: r.claude_json_pointers_cleared,
+            source_dir_removed: r.source_dir_removed,
+        }
+    }
 }
 
 /// Mirror of `claudepot_core::project_types::CleanResult` for JSON
@@ -362,6 +503,179 @@ pub fn new_running_op(
         move_result: None,
         clean_result: None,
         failed_journal_id: None,
+        session_move_result: None,
+        login_phase: None,
+        verify_results: None,
+    }
+}
+
+/// `LoginProgressSink` adapter — emits each `LoginPhase` transition as
+/// a `ProgressEvent` on `op-progress::<op_id>` and mirrors the latest
+/// phase into the shared [`RunningOps`] map. Drop-in for the core
+/// `register_from_browser_with_progress` / `login_and_reimport_with_progress`
+/// surfaces.
+pub struct TauriLoginProgressSink {
+    pub app: AppHandle,
+    pub op_id: String,
+    pub ops: RunningOps,
+}
+
+impl TauriLoginProgressSink {
+    fn channel(&self) -> String {
+        format!("op-progress::{}", self.op_id)
+    }
+}
+
+impl claudepot_core::services::account_service::LoginProgressSink for TauriLoginProgressSink {
+    fn phase(&self, phase: claudepot_core::services::account_service::LoginPhase) {
+        let kind = LoginPhaseKind::from(phase);
+        let phase_str = kind.as_str().to_string();
+        let payload = ProgressEvent {
+            op_id: self.op_id.clone(),
+            phase: phase_str.clone(),
+            status: "running".to_string(),
+            done: None,
+            total: None,
+            detail: None,
+        };
+        let _ = self.app.emit(&self.channel(), payload);
+        self.ops.update(&self.op_id, |op| {
+            op.current_phase = Some(phase_str);
+            op.login_phase = Some(kind);
+        });
+    }
+
+    fn error(&self, phase: claudepot_core::services::account_service::LoginPhase, msg: &str) {
+        let kind = LoginPhaseKind::from(phase);
+        let phase_str = kind.as_str().to_string();
+        let payload = ProgressEvent {
+            op_id: self.op_id.clone(),
+            phase: phase_str.clone(),
+            status: "error".to_string(),
+            done: None,
+            total: None,
+            detail: Some(msg.to_string()),
+        };
+        let _ = self.app.emit(&self.channel(), payload);
+        // Don't flip the overall op status here — `emit_terminal` is the
+        // authoritative terminal hook. The phase-level error is informative
+        // only; the op's terminal event stays the single source of truth.
+        self.ops.update(&self.op_id, |op| {
+            op.current_phase = Some(phase_str);
+            op.login_phase = Some(kind);
+        });
+    }
+}
+
+/// `VerifyProgressSink` adapter — emits both `ProgressEvent` (for phase
+/// advance + terminal) and the typed `VerifyAccountEvent` (for per-row
+/// badge flips) on the same `op-progress::<op_id>` channel. Maintains
+/// running counts on `RunningOps::verify_results` so the polling backstop
+/// returns the right summary even if the channel listener missed events.
+pub struct TauriVerifyProgressSink {
+    pub app: AppHandle,
+    pub op_id: String,
+    pub ops: RunningOps,
+}
+
+impl TauriVerifyProgressSink {
+    fn channel(&self) -> String {
+        format!("op-progress::{}", self.op_id)
+    }
+}
+
+impl claudepot_core::services::account_service::VerifyProgressSink for TauriVerifyProgressSink {
+    fn event(&self, ev: claudepot_core::services::account_service::VerifyEvent) {
+        use claudepot_core::services::account_service::{VerifyEvent, VerifyOutcomeKind};
+        match ev {
+            VerifyEvent::Started { total } => {
+                let payload = ProgressEvent {
+                    op_id: self.op_id.clone(),
+                    phase: "verify".to_string(),
+                    status: "running".to_string(),
+                    done: Some(0),
+                    total: Some(total),
+                    detail: None,
+                };
+                let _ = self.app.emit(&self.channel(), payload);
+                self.ops.update(&self.op_id, |op| {
+                    op.current_phase = Some("verify".to_string());
+                    op.sub_progress = Some((0, total));
+                    op.verify_results = Some(VerifyResultSummary {
+                        total,
+                        ..Default::default()
+                    });
+                });
+            }
+            VerifyEvent::Account {
+                uuid,
+                email,
+                idx,
+                total,
+                outcome,
+                detail,
+            } => {
+                let outcome_str = match outcome {
+                    VerifyOutcomeKind::Ok => "ok",
+                    VerifyOutcomeKind::Drift => "drift",
+                    VerifyOutcomeKind::Rejected => "rejected",
+                    VerifyOutcomeKind::NetworkError => "network_error",
+                };
+                // 1) Per-row typed event — sibling payload, NOT pipe-delimited
+                //    into `ProgressEvent.detail`.
+                let row_payload = VerifyAccountEvent {
+                    op_id: self.op_id.clone(),
+                    kind: "verify_account",
+                    uuid: uuid.to_string(),
+                    email: email.clone(),
+                    idx,
+                    total,
+                    outcome: outcome_str.to_string(),
+                    detail: detail.clone(),
+                };
+                let _ = self.app.emit(&self.channel(), row_payload);
+
+                // 2) Standard sub-progress on the same channel so the
+                //    running-ops strip can render `idx/total` without
+                //    knowing about the typed row event.
+                let progress_payload = ProgressEvent {
+                    op_id: self.op_id.clone(),
+                    phase: "verify".to_string(),
+                    status: "running".to_string(),
+                    done: Some(idx),
+                    total: Some(total),
+                    detail: None,
+                };
+                let _ = self.app.emit(&self.channel(), progress_payload);
+
+                self.ops.update(&self.op_id, |op| {
+                    op.sub_progress = Some((idx, total));
+                    if let Some(r) = op.verify_results.as_mut() {
+                        match outcome {
+                            VerifyOutcomeKind::Ok => r.ok += 1,
+                            VerifyOutcomeKind::Drift => r.drift += 1,
+                            VerifyOutcomeKind::Rejected => r.rejected += 1,
+                            VerifyOutcomeKind::NetworkError => r.network_error += 1,
+                        }
+                    }
+                });
+            }
+            VerifyEvent::Done => {
+                // The terminal `op` event is emitted by `emit_terminal`
+                // in the work closure, after the function returns; here
+                // we just emit the per-phase `complete` so the modal can
+                // flip the final phase row.
+                let payload = ProgressEvent {
+                    op_id: self.op_id.clone(),
+                    phase: "verify".to_string(),
+                    status: "complete".to_string(),
+                    done: None,
+                    total: None,
+                    detail: None,
+                };
+                let _ = self.app.emit(&self.channel(), payload);
+            }
+        }
     }
 }
 

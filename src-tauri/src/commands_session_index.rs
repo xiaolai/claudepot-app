@@ -8,6 +8,10 @@
 
 use claudepot_core::paths;
 
+fn join_blocking_err(e: tokio::task::JoinError) -> String {
+    format!("blocking task failed: {e}")
+}
+
 // ---------------------------------------------------------------------------
 // Session index — Sessions tab list + per-session detail (transcript).
 // ---------------------------------------------------------------------------
@@ -16,34 +20,39 @@ use claudepot_core::paths;
 /// token totals, first-prompt previews, and model sets. Returned
 /// newest-first.
 ///
-/// `async fn` is load-bearing: Tauri 2 dispatches sync `#[command] fn`
-/// handlers on the main thread (the same thread that runs the OS
-/// event loop and serves the webview). A sync handler that does
-/// blocking I/O — and `list_all_sessions` reads from sessions.db and
-/// can fall back to a full JSONL scan — would freeze the entire
-/// window for the duration of the call. With `async fn`, Tauri runs
-/// the body on a Tokio worker; the sync I/O blocks that worker but
-/// the main thread stays free for the webview to keep painting.
+/// The body runs in `tokio::task::spawn_blocking` so the SQLite read
+/// (and full JSONL fallback when the cache is cold) can't starve the
+/// Tauri IPC worker pool. Async-fn alone keeps the call off Tauri's
+/// main thread, but the worker pool itself is shared across every
+/// async command — letting a multi-second scan park there serializes
+/// everything else (audit B8 commands_session_index.rs:28).
 #[tauri::command]
 pub async fn session_list_all() -> Result<Vec<crate::dto::SessionRowDto>, String> {
-    let cfg = paths::claude_config_dir();
-    let rows = claudepot_core::session::list_all_sessions(&cfg)
-        .map_err(|e| format!("session list failed: {e}"))?;
-    Ok(rows.iter().map(crate::dto::SessionRowDto::from).collect())
+    tokio::task::spawn_blocking(|| {
+        let cfg = paths::claude_config_dir();
+        let rows = claudepot_core::session::list_all_sessions(&cfg)
+            .map_err(|e| format!("session list failed: {e}"))?;
+        Ok::<_, String>(rows.iter().map(crate::dto::SessionRowDto::from).collect())
+    })
+    .await
+    .map_err(join_blocking_err)?
 }
 
 /// Full JSONL parse for a single session, keyed by its UUID. Returns
 /// the same row metadata as `session_list_all` plus the normalized
 /// event stream for transcript rendering.
 ///
-/// `async fn` to keep the JSONL parse off Tauri's main thread — see
-/// `session_list_all` for the full rationale.
+/// Wrapped in `spawn_blocking` for the same reason as `session_list_all`.
 #[tauri::command]
 pub async fn session_read(session_id: String) -> Result<crate::dto::SessionDetailDto, String> {
-    let cfg = paths::claude_config_dir();
-    let detail = claudepot_core::session::read_session_detail(&cfg, &session_id)
-        .map_err(|e| format!("session read failed: {e}"))?;
-    Ok(crate::dto::SessionDetailDto::from(&detail))
+    tokio::task::spawn_blocking(move || {
+        let cfg = paths::claude_config_dir();
+        let detail = claudepot_core::session::read_session_detail(&cfg, &session_id)
+            .map_err(|e| format!("session read failed: {e}"))?;
+        Ok::<_, String>(crate::dto::SessionDetailDto::from(&detail))
+    })
+    .await
+    .map_err(join_blocking_err)?
 }
 
 /// Full JSONL parse keyed by the transcript's on-disk path. Preferred
@@ -52,18 +61,22 @@ pub async fn session_read(session_id: String) -> Result<crate::dto::SessionDetai
 /// (interrupted rescue or adopt). Path must live under
 /// `<config>/projects/` and must end in `.jsonl`.
 ///
-/// `async fn` for the same off-main-thread reason as `session_read`.
+/// Wrapped in `spawn_blocking` for the same reason as `session_list_all`.
 #[tauri::command]
 pub async fn session_read_path(
     file_path: String,
 ) -> Result<crate::dto::SessionDetailDto, String> {
-    let cfg = paths::claude_config_dir();
-    let detail = claudepot_core::session::read_session_detail_at_path(
-        &cfg,
-        std::path::Path::new(&file_path),
-    )
-    .map_err(|e| format!("session read failed: {e}"))?;
-    Ok(crate::dto::SessionDetailDto::from(&detail))
+    tokio::task::spawn_blocking(move || {
+        let cfg = paths::claude_config_dir();
+        let detail = claudepot_core::session::read_session_detail_at_path(
+            &cfg,
+            std::path::Path::new(&file_path),
+        )
+        .map_err(|e| format!("session read failed: {e}"))?;
+        Ok::<_, String>(crate::dto::SessionDetailDto::from(&detail))
+    })
+    .await
+    .map_err(join_blocking_err)?
 }
 
 /// Drop every cached row in `sessions.db` and repopulate from disk.
@@ -71,14 +84,20 @@ pub async fn session_read_path(
 /// edit; this is the escape hatch for filesystems with coarse mtime
 /// resolution, clock skew, or anything that defeats the guard. The
 /// next `session_list_all` call re-scans everything from cold.
+///
+/// Wrapped in `spawn_blocking` — full rebuild scans every JSONL.
 #[tauri::command]
 pub async fn session_index_rebuild() -> Result<(), String> {
-    let data_dir = paths::claudepot_data_dir();
-    let db_path = data_dir.join("sessions.db");
-    let idx = claudepot_core::session_index::SessionIndex::open(&db_path)
-        .map_err(|e| format!("open session index: {e}"))?;
-    idx.rebuild()
-        .map_err(|e| format!("rebuild session index: {e}"))
+    tokio::task::spawn_blocking(|| {
+        let data_dir = paths::claudepot_data_dir();
+        let db_path = data_dir.join("sessions.db");
+        let idx = claudepot_core::session_index::SessionIndex::open(&db_path)
+            .map_err(|e| format!("open session index: {e}"))?;
+        idx.rebuild()
+            .map_err(|e| format!("rebuild session index: {e}"))
+    })
+    .await
+    .map_err(join_blocking_err)?
 }
 
 // ---------------------------------------------------------------------------
@@ -89,26 +108,35 @@ pub async fn session_index_rebuild() -> Result<(), String> {
 /// Chunked event stream plus per-chunk linked tools — the shape the
 /// Sessions transcript renders from.
 ///
-/// `async fn` because it parses the full JSONL via `load_detail_by_path`.
+/// Wrapped in `spawn_blocking` — `load_detail_by_path` parses the full
+/// JSONL synchronously.
 #[tauri::command]
 pub async fn session_chunks(
     file_path: String,
 ) -> Result<Vec<crate::dto::SessionChunkDto>, String> {
-    let detail = load_detail_by_path(&file_path)?;
-    let chunks = claudepot_core::session_chunks::build_chunks(&detail.events);
-    Ok(chunks.iter().map(crate::dto::SessionChunkDto::from).collect())
+    tokio::task::spawn_blocking(move || {
+        let detail = load_detail_by_path(&file_path)?;
+        let chunks = claudepot_core::session_chunks::build_chunks(&detail.events);
+        Ok::<_, String>(chunks.iter().map(crate::dto::SessionChunkDto::from).collect())
+    })
+    .await
+    .map_err(join_blocking_err)?
 }
 
 /// Visible-context token attribution across six categories.
 ///
-/// `async fn` because it parses the full JSONL via `load_detail_by_path`.
+/// Wrapped in `spawn_blocking` — same reason as `session_chunks`.
 #[tauri::command]
 pub async fn session_context_attribution(
     file_path: String,
 ) -> Result<crate::dto::ContextStatsDto, String> {
-    let detail = load_detail_by_path(&file_path)?;
-    let stats = claudepot_core::session_context::attribute_context(&detail.events);
-    Ok((&stats).into())
+    tokio::task::spawn_blocking(move || {
+        let detail = load_detail_by_path(&file_path)?;
+        let stats = claudepot_core::session_context::attribute_context(&detail.events);
+        Ok::<_, String>((&stats).into())
+    })
+    .await
+    .map_err(join_blocking_err)?
 }
 
 /// Export transcript to Markdown or JSON (sk-ant-* redacted). Kept as
@@ -144,6 +172,21 @@ fn session_export_text(file_path: String, format: String) -> Result<String, Stri
 ///   fail open on a filesystem that silently ignored the mode bits).
 #[tauri::command]
 pub async fn session_export_to_file(
+    file_path: String,
+    format: String,
+    output_path: String,
+) -> Result<usize, String> {
+    // Wrapped in `spawn_blocking` — JSONL parse, redaction, atomic
+    // write, and chmod are all sync and would otherwise hold the IPC
+    // worker for the whole export (audit B8 commands_session_index.rs:146).
+    tokio::task::spawn_blocking(move || -> Result<usize, String> {
+        session_export_to_file_sync(file_path, format, output_path)
+    })
+    .await
+    .map_err(join_blocking_err)?
+}
+
+fn session_export_to_file_sync(
     file_path: String,
     format: String,
     output_path: String,
@@ -262,45 +305,48 @@ pub async fn session_export_to_file(
 
 /// Cross-session text search. Returns up to `limit` hits.
 ///
-/// `async fn` is mandatory here. The body opens every `.jsonl` that
-/// doesn't match via the row-level fast path and scans line by line —
-/// for a multi-thousand-session corpus this is many seconds of pure
-/// blocking I/O. Run on Tauri's main thread (the default for sync
-/// commands) it would freeze the OS event loop and the webview for
-/// the duration; under `async fn` Tauri dispatches to a Tokio worker
-/// and the webview keeps repainting. See `session_list_all` for the
-/// same rationale.
+/// Wrapped in `spawn_blocking` — the body opens every `.jsonl` that
+/// doesn't match via the row-level fast path and scans line by line.
+/// For a multi-thousand-session corpus this is many seconds of pure
+/// blocking I/O, which would otherwise pin a Tauri IPC worker.
 #[tauri::command]
 pub async fn session_search(
     query: String,
     limit: Option<usize>,
 ) -> Result<Vec<crate::dto::SearchHitDto>, String> {
-    let cfg = paths::claude_config_dir();
-    let rows = claudepot_core::session::list_all_sessions(&cfg)
-        .map_err(|e| format!("list sessions: {e}"))?;
-    let hits =
-        claudepot_core::session_search::search_rows(&rows, &query, limit.unwrap_or(25))
-            .map_err(|e| format!("search sessions: {e}"))?;
-    Ok(hits.iter().map(crate::dto::SearchHitDto::from).collect())
+    tokio::task::spawn_blocking(move || {
+        let cfg = paths::claude_config_dir();
+        let rows = claudepot_core::session::list_all_sessions(&cfg)
+            .map_err(|e| format!("list sessions: {e}"))?;
+        let hits =
+            claudepot_core::session_search::search_rows(&rows, &query, limit.unwrap_or(25))
+                .map_err(|e| format!("search sessions: {e}"))?;
+        Ok::<_, String>(hits.iter().map(crate::dto::SearchHitDto::from).collect())
+    })
+    .await
+    .map_err(join_blocking_err)?
 }
 
 /// Group all sessions by git repository (collapses worktrees into a
 /// single repository row).
 ///
-/// `async fn` for the same reason as `session_list_all` — this calls
-/// `list_all_sessions` itself, then runs a pure-Rust grouping pass.
-/// Sync dispatch would block the main thread for the SQLite read /
-/// JSONL fallback.
+/// Wrapped in `spawn_blocking` for the same reason as `session_list_all`.
 #[tauri::command]
 pub async fn session_worktree_groups() -> Result<Vec<crate::dto::RepositoryGroupDto>, String> {
-    let cfg = paths::claude_config_dir();
-    let rows = claudepot_core::session::list_all_sessions(&cfg)
-        .map_err(|e| format!("list sessions: {e}"))?;
-    let groups = claudepot_core::session_worktree::group_by_repo(rows);
-    Ok(groups
-        .iter()
-        .map(crate::dto::RepositoryGroupDto::from)
-        .collect())
+    tokio::task::spawn_blocking(|| {
+        let cfg = paths::claude_config_dir();
+        let rows = claudepot_core::session::list_all_sessions(&cfg)
+            .map_err(|e| format!("list sessions: {e}"))?;
+        let groups = claudepot_core::session_worktree::group_by_repo(rows);
+        Ok::<_, String>(
+            groups
+                .iter()
+                .map(crate::dto::RepositoryGroupDto::from)
+                .collect(),
+        )
+    })
+    .await
+    .map_err(join_blocking_err)?
 }
 
 pub(crate) fn load_detail_by_path(

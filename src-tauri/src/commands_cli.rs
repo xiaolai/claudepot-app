@@ -28,6 +28,11 @@ pub async fn cli_use(email: String, force: Option<bool>) -> Result<(), String> {
     let platform = cli_backend::create_platform();
     let refresher = cli_backend::swap::DefaultRefresher;
     let fetcher = cli_backend::swap::DefaultProfileFetcher;
+    // Return the bare SwapError Display — the frontend (toast or
+    // tray-switch handler) is responsible for the surface-appropriate
+    // prefix. The previous `"cli switch failed: {e}"` wrapper produced
+    // a doubly-prefixed toast ("Tray switch failed: cli switch failed:
+    // …") and leaked CLI-binary phrasing into a GUI surface.
     if force.unwrap_or(false) {
         cli_backend::swap::switch_force(
             &store, current_id, target.uuid,
@@ -41,7 +46,7 @@ pub async fn cli_use(email: String, force: Option<bool>) -> Result<(), String> {
         )
         .await
     }
-    .map_err(|e| format!("cli switch failed: {e}"))
+    .map_err(|e| e.to_string())
 }
 
 /// Idempotent startup sync: if CC is currently signed in as one of the

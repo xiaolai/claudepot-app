@@ -209,7 +209,7 @@ pub fn build_live_submenu(app: &AppHandle) -> Result<Option<Submenu<Wry>>, Strin
     let Some(state) = app.try_state::<crate::state::LiveSessionState>() else {
         return Ok(None);
     };
-    let list = state.runtime.snapshot();
+    let list = state.service.snapshot();
     if list.is_empty() {
         return Ok(None);
     }

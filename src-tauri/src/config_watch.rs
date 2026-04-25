@@ -25,20 +25,37 @@ use claudepot_core::config_view::{
     diff::ConfigTreePatch as CorePatch,
     discover,
     model::ConfigTree,
-    watch::{ingest_event, scan_until_stable, DirtyGen, FsEvent, FsEventKind},
+    watch::{ingest_event, scan_until_stable, FsEvent, FsEventKind},
+    ConfigScanService,
 };
 use claudepot_core::paths::claude_config_dir;
 use notify::{EventKind, RecursiveMode};
 use notify_debouncer_mini::new_debouncer;
 use std::path::{Path, PathBuf};
+use std::sync::mpsc::Sender;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 use tauri::{AppHandle, Emitter};
 
+/// Messages the worker thread receives. Carries either a debounced
+/// filesystem batch or a clean-shutdown signal. Wrapping both in one
+/// channel lets `recv_timeout(KEEPALIVE)` wake up immediately on stop
+/// instead of waiting for the keepalive timer (audit 2026-04-24, B9).
+enum WorkerMsg {
+    Event(Result<Vec<notify_debouncer_mini::DebouncedEvent>, notify::Error>),
+    Shutdown,
+}
+
 /// Handle for a running watcher. Dropping it stops the task.
 pub struct WatcherHandle {
-    /// Set to true to request a clean shutdown on the next tick.
+    /// Set to true to request a clean shutdown on the next tick. Kept
+    /// in addition to the shutdown channel so a missed/closed send
+    /// doesn't strand the worker.
     stop: Arc<std::sync::atomic::AtomicBool>,
+    /// Wakeable shutdown channel. Sending interrupts `recv_timeout`
+    /// instantly, so `stop()` returns within the join time of the
+    /// worker thread instead of waiting up to `KEEPALIVE`.
+    shutdown_tx: Sender<WorkerMsg>,
     /// Joinable worker thread. `None` after `stop()`.
     worker: Option<std::thread::JoinHandle<()>>,
 }
@@ -46,6 +63,10 @@ pub struct WatcherHandle {
 impl WatcherHandle {
     pub fn stop(&mut self) {
         self.stop.store(true, std::sync::atomic::Ordering::Release);
+        // Best-effort wake. If the channel is already closed (worker
+        // exited), the AtomicBool + closed-debouncer-tx combination
+        // still guarantees we don't loop forever.
+        let _ = self.shutdown_tx.send(WorkerMsg::Shutdown);
         if let Some(h) = self.worker.take() {
             let _ = h.join();
         }
@@ -78,19 +99,26 @@ const KEEPALIVE: Duration = Duration::from_secs(300);
 pub fn start(
     app: AppHandle,
     anchor: Option<PathBuf>,
-    tree_state: crate::commands_config::ConfigTreeState,
+    svc: Arc<ConfigScanService>,
 ) -> Result<WatcherHandle, String> {
     let stop = Arc::new(std::sync::atomic::AtomicBool::new(false));
     let stop_inner = stop.clone();
     let app_inner = app.clone();
-    let tree_state_inner = tree_state.clone();
+    let svc_inner = Arc::clone(&svc);
     let anchor_inner = anchor.clone();
+
+    // Single channel for both debounced FS batches and the shutdown
+    // poison pill. Created here so the `WatcherHandle` returned to the
+    // caller carries a `Sender` clone that wakes the worker mid-`recv`.
+    let (msg_tx, msg_rx) = std::sync::mpsc::channel::<WorkerMsg>();
+    let shutdown_tx = msg_tx.clone();
+    let event_tx = msg_tx;
 
     // Seed runs inside the worker — the caller (the Tauri IPC worker)
     // returns immediately instead of sitting on a full-tree scan.
     //
     // We seed unconditionally. A previous version tried to skip the
-    // seed when `tree_state` was already populated (reusing what
+    // seed when the service was already populated (reusing what
     // `config_scan` left behind), but that let a new watcher for
     // anchor B diff against anchor A's cached tree — `diff()` doesn't
     // always emit `full_snapshot` on similar-shaped trees, so bogus
@@ -104,7 +132,7 @@ pub fn start(
     let worker = std::thread::Builder::new()
         .name("config-watch".to_string())
         .spawn(move || {
-            let my_gen = tree_state_inner.next_gen();
+            let handle = svc_inner.start_scan();
             let seed = match &anchor_inner {
                 Some(cwd) => discover::assemble_tree(cwd, false),
                 None => {
@@ -112,8 +140,15 @@ pub fn start(
                     discover::assemble_tree(&home, true)
                 }
             };
-            let _ = tree_state_inner.commit(my_gen, seed);
-            if let Err(e) = run_loop(app_inner, anchor_inner, tree_state_inner, stop_inner) {
+            let _ = svc_inner.commit(handle, seed);
+            if let Err(e) = run_loop(
+                app_inner,
+                anchor_inner,
+                svc_inner,
+                stop_inner,
+                event_tx,
+                msg_rx,
+            ) {
                 tracing::error!("config-watch loop exited: {e}");
             }
         })
@@ -121,6 +156,7 @@ pub fn start(
 
     Ok(WatcherHandle {
         stop,
+        shutdown_tx,
         worker: Some(worker),
     })
 }
@@ -128,17 +164,15 @@ pub fn start(
 fn run_loop(
     app: AppHandle,
     anchor: Option<PathBuf>,
-    tree_state: crate::commands_config::ConfigTreeState,
+    svc: Arc<ConfigScanService>,
     stop: Arc<std::sync::atomic::AtomicBool>,
+    event_tx: std::sync::mpsc::Sender<WorkerMsg>,
+    rx: std::sync::mpsc::Receiver<WorkerMsg>,
 ) -> Result<(), String> {
-    use std::sync::mpsc::channel;
-
-    let (tx, rx) = channel::<Result<Vec<notify_debouncer_mini::DebouncedEvent>, notify::Error>>();
-
     let mut debouncer = new_debouncer(DEBOUNCE, move |res| {
         // Forward to the run loop. Ignore channel-closed errors — the
         // worker is shutting down.
-        let _ = tx.send(res);
+        let _ = event_tx.send(WorkerMsg::Event(res));
     })
     .map_err(|e| format!("debouncer init: {e}"))?;
 
@@ -167,7 +201,12 @@ fn run_loop(
             .map_err(|e| format!("watch {}: {}", root.display(), e))?;
     }
 
-    let gen = DirtyGen::new();
+    // The dirty-gen counter belongs to the service so the same
+    // counter is observed by every consumer (watcher, future
+    // scan_until_stable callers in core). Bumps happen here on
+    // in-scope filesystem events; the keepalive path also bumps it
+    // so `scan_until_stable` reliably sees a change.
+    let gen = svc.dirty_gen();
     let mut generation_counter: u64 = 0;
     let mut last_keepalive = std::time::Instant::now();
 
@@ -177,11 +216,14 @@ fn run_loop(
         }
 
         match rx.recv_timeout(KEEPALIVE) {
-            Ok(Ok(batch)) => {
+            Ok(WorkerMsg::Shutdown) => {
+                return Ok(());
+            }
+            Ok(WorkerMsg::Event(Ok(batch))) => {
                 let any_relevant = batch
                     .iter()
                     .map(notify_to_fs_event)
-                    .any(|e| ingest_event(&gen, &e));
+                    .any(|e| ingest_event(gen, &e));
                 if !any_relevant {
                     continue;
                 }
@@ -189,13 +231,12 @@ fn run_loop(
                 emit_patch(
                     &app,
                     anchor.as_deref(),
-                    &tree_state,
-                    &gen,
+                    &svc,
                     generation_counter,
                 );
                 last_keepalive = std::time::Instant::now();
             }
-            Ok(Err(e)) => {
+            Ok(WorkerMsg::Event(Err(e))) => {
                 tracing::warn!("watcher event error: {e}");
                 // Keep looping — one bad event doesn't kill the watcher.
             }
@@ -207,8 +248,7 @@ fn run_loop(
                     emit_patch(
                         &app,
                         anchor.as_deref(),
-                        &tree_state,
-                        &gen,
+                        &svc,
                         generation_counter,
                     );
                     last_keepalive = std::time::Instant::now();
@@ -259,12 +299,11 @@ fn notify_to_fs_event(ev: &notify_debouncer_mini::DebouncedEvent) -> FsEvent {
 fn emit_patch(
     app: &AppHandle,
     anchor: Option<&std::path::Path>,
-    tree_state: &crate::commands_config::ConfigTreeState,
-    gen: &DirtyGen,
+    svc: &Arc<ConfigScanService>,
     generation: u64,
 ) {
-    let my_gen = tree_state.next_gen();
-    let (next, dirty) = scan_until_stable(gen, || match anchor {
+    let handle = svc.start_scan();
+    let (next, dirty) = scan_until_stable(svc.dirty_gen(), || match anchor {
         Some(cwd) => discover::assemble_tree(cwd, false),
         None => {
             let home = dirs::home_dir().unwrap_or_else(|| PathBuf::from("/"));
@@ -272,17 +311,15 @@ fn emit_patch(
         }
     });
 
-    // Snapshot the previous committed tree before building the diff.
-    // Cloning leaves us holding a detached value so the mutex is free
-    // during the diff + commit that follow.
-    let prev_opt = match tree_state.snapshot() {
-        Ok(o) => o,
-        Err(_) => return,
-    };
+    // Snapshot the previous committed tree (Arc-cloned, no copy of
+    // the underlying tree) before building the diff. Holding only an
+    // Arc means the read-side lock is released before the diff + commit
+    // that follow.
+    let prev_opt = svc.current_tree();
 
     let core_patch: CorePatch = match &prev_opt {
         Some(prev) => {
-            let mut p = claudepot_core::config_view::diff::diff(prev, &next);
+            let mut p = claudepot_core::config_view::diff::diff(prev.as_ref(), &next);
             p.dirty_during_emit = dirty;
             p
         }
@@ -298,7 +335,7 @@ fn emit_patch(
     // the emit too: the client's tree is already at least as fresh as
     // this patch's baseline, and applying our stale diff would roll it
     // back (audit 2026-04-24 round 3).
-    let won = tree_state.commit(my_gen, next).unwrap_or(false);
+    let won = svc.commit(handle, next);
     if !won {
         return;
     }
@@ -377,22 +414,33 @@ pub async fn config_watch_start(
     cwd: Option<String>,
     app: AppHandle,
     state: tauri::State<'_, ConfigWatchState>,
-    tree_state: tauri::State<'_, crate::commands_config::ConfigTreeState>,
+    svc: tauri::State<'_, Arc<ConfigScanService>>,
 ) -> Result<(), String> {
+    // Take the previous handle out under the lock, then drop the lock
+    // before joining its worker thread. Holding the mutex during
+    // `stop()` would block any concurrent `config_watch_*` command
+    // until the worker exits (audit 2026-04-24, B9).
+    let prev = {
+        let mut guard = state
+            .0
+            .lock()
+            .map_err(|e| format!("watch state lock: {e}"))?;
+        guard.take()
+    };
+    if let Some(mut h) = prev {
+        h.stop();
+    }
+
+    // Hand the watcher an Arc clone of the shared `ConfigScanService`
+    // — snapshots land in the same cache that `config_scan` writes
+    // through, and both use the service's generation counter to
+    // avoid clobbering each other's results.
+    let shared = Arc::clone(svc.inner());
+    let handle = start(app.clone(), cwd.map(PathBuf::from), shared)?;
     let mut guard = state
         .0
         .lock()
         .map_err(|e| format!("watch state lock: {e}"))?;
-    if let Some(mut h) = guard.take() {
-        h.stop();
-    }
-
-    // Hand the watcher a clone of the full `ConfigTreeState` (tree +
-    // generation counter) — snapshots land in the same cache that
-    // `config_scan` writes through, and both use the generation to
-    // avoid clobbering each other's results.
-    let shared = tree_state.inner().clone();
-    let handle = start(app.clone(), cwd.map(PathBuf::from), shared)?;
     *guard = Some(handle);
     Ok(())
 }
@@ -401,12 +449,100 @@ pub async fn config_watch_start(
 pub async fn config_watch_stop(
     state: tauri::State<'_, ConfigWatchState>,
 ) -> Result<(), String> {
-    let mut guard = state
-        .0
-        .lock()
-        .map_err(|e| format!("watch state lock: {e}"))?;
-    if let Some(mut h) = guard.take() {
+    // Same pattern as `config_watch_start`: release the mutex before
+    // joining the worker so other commands can make progress while
+    // shutdown is in flight (audit 2026-04-24, B9).
+    let prev = {
+        let mut guard = state
+            .0
+            .lock()
+            .map_err(|e| format!("watch state lock: {e}"))?;
+        guard.take()
+    };
+    if let Some(mut h) = prev {
         h.stop();
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    //! Timing tests for `WatcherHandle::stop()`.
+    //!
+    //! These tests build a `WatcherHandle` *without* going through
+    //! `start()` — `start()` needs a `tauri::AppHandle` plus a real
+    //! filesystem watcher, neither of which is appropriate for a unit
+    //! test. Instead the test fabricates a worker thread that mirrors
+    //! the production wait pattern: `rx.recv_timeout(KEEPALIVE)` over
+    //! the same `WorkerMsg` channel, with the same `AtomicBool` stop
+    //! check at the top of the loop.
+    //!
+    //! The contract under test: after `stop()` returns, the worker
+    //! thread has joined, and the join completed in well under
+    //! `KEEPALIVE` (5 minutes). Pre-fix, the worker would sit in
+    //! `recv_timeout` until the keepalive fired; this asserts the
+    //! shutdown channel actually wakes it up.
+    use super::*;
+    use std::time::Instant;
+
+    /// Build a `WatcherHandle` whose worker only waits for shutdown.
+    /// No tauri, no notify-debouncer, no filesystem.
+    fn fake_handle() -> WatcherHandle {
+        let stop = Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let stop_inner = stop.clone();
+        let (msg_tx, msg_rx) = std::sync::mpsc::channel::<WorkerMsg>();
+        let shutdown_tx = msg_tx.clone();
+        let worker = std::thread::Builder::new()
+            .name("config-watch-test".to_string())
+            .spawn(move || loop {
+                if stop_inner.load(std::sync::atomic::Ordering::Acquire) {
+                    return;
+                }
+                match msg_rx.recv_timeout(KEEPALIVE) {
+                    Ok(WorkerMsg::Shutdown) => return,
+                    Ok(WorkerMsg::Event(_)) => {
+                        // Drain and re-check stop on next iter.
+                    }
+                    Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {
+                        // Keepalive — re-check stop on next iter.
+                    }
+                    Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => return,
+                }
+            })
+            .expect("spawn test worker");
+        WatcherHandle {
+            stop,
+            shutdown_tx,
+            worker: Some(worker),
+        }
+    }
+
+    #[test]
+    fn test_watcher_stop_wakes_worker_promptly() {
+        let mut h = fake_handle();
+        // Give the worker a moment to enter `recv_timeout`. Without
+        // this the channel send could race with `worker.spawn` and
+        // "succeed" before the receiver is parked, which would mask
+        // a regression where the wakeup-via-channel path was lost.
+        std::thread::sleep(Duration::from_millis(50));
+        let start = Instant::now();
+        h.stop();
+        let elapsed = start.elapsed();
+        assert!(
+            elapsed < Duration::from_secs(1),
+            "stop() took {:?}; expected <1s — shutdown channel did not wake the worker",
+            elapsed
+        );
+    }
+
+    #[test]
+    fn test_watcher_stop_is_idempotent() {
+        // Calling stop() twice must not panic and must remain fast.
+        let mut h = fake_handle();
+        std::thread::sleep(Duration::from_millis(50));
+        h.stop();
+        let start = Instant::now();
+        h.stop();
+        assert!(start.elapsed() < Duration::from_millis(100));
+    }
 }

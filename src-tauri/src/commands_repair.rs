@@ -81,15 +81,8 @@ impl From<claudepot_core::project_repair::AbandonedCleanupReport>
 
 fn find_journal(id: &str) -> Result<claudepot_core::project_repair::JournalEntry, String> {
     let (journals, locks, _snaps) = claudepot_home_dirs();
-    let entries = project_repair::list_pending_with_status(
-        &journals,
-        &locks,
-        JOURNAL_NAG_THRESHOLD_SECS,
-    )
-    .map_err(|e| format!("repair list failed: {e}"))?;
-    entries
-        .into_iter()
-        .find(|e| e.id == id)
+    project_repair::find_pending_by_id(&journals, &locks, JOURNAL_NAG_THRESHOLD_SECS, id)
+        .map_err(|e| format!("repair list failed: {e}"))?
         .ok_or_else(|| format!("no journal with id '{id}'"))
 }
 
@@ -112,19 +105,38 @@ fn spawn_repair_op(
     spawn_op_thread(app, ops, op_id.clone(), move |sink, app, ops, op_id| {
         let cfg = paths::claude_config_dir();
         let claude_json = dirs::home_dir().map(|h| h.join(".claude.json"));
-        let snaps = Some(paths::claudepot_repair_dir().join("snapshots"));
+        let state_root = paths::claudepot_repair_dir();
+        let snaps = Some(state_root.join("snapshots"));
+        // Audit B3 fix: thread the repair-tree root through so the
+        // resumed/rolled-back move's lock + journal + snapshots stay
+        // in the same `~/.claudepot/repair/` tree as the original.
+        let state_root_arg = Some(state_root);
         let result = match kind {
-            OpKind::RepairResume => {
-                project_repair::resume(&entry, cfg, claude_json, snaps, &sink)
-            }
-            OpKind::RepairRollback => {
-                project_repair::rollback(&entry, cfg, claude_json, snaps, &sink)
-            }
+            OpKind::RepairResume => project_repair::resume(
+                &entry,
+                cfg,
+                claude_json,
+                snaps,
+                state_root_arg,
+                &sink,
+            ),
+            OpKind::RepairRollback => project_repair::rollback(
+                &entry,
+                cfg,
+                claude_json,
+                snaps,
+                state_root_arg,
+                &sink,
+            ),
             OpKind::MoveProject
             | OpKind::CleanProjects
             | OpKind::SessionPrune
             | OpKind::SessionSlim
-            | OpKind::SessionShare => {
+            | OpKind::SessionShare
+            | OpKind::SessionMove
+            | OpKind::AccountLogin
+            | OpKind::AccountRegister
+            | OpKind::VerifyAll => {
                 unreachable!("wrong spawn path")
             }
         };
@@ -166,17 +178,15 @@ fn finalize_op(
 /// the UI falls back to "Open Repair" without a specific target.
 fn newest_journal_id_for(old_path: &str) -> Option<String> {
     let (journals, locks, _snaps) = claudepot_home_dirs();
-    let entries = project_repair::list_pending_with_status(
+    project_repair::newest_pending_for_old_path(
         &journals,
         &locks,
         JOURNAL_NAG_THRESHOLD_SECS,
+        old_path,
     )
-    .ok()?;
-    entries
-        .into_iter()
-        .filter(|e| e.journal.old_path == old_path)
-        .max_by_key(|e| e.journal.started_unix_secs)
-        .map(|e| e.id)
+    .ok()
+    .flatten()
+    .map(|e| e.id)
 }
 
 #[tauri::command]

@@ -96,6 +96,18 @@ pub struct CleanPreviewDto {
     pub protected_count: usize,
 }
 
+impl From<&claudepot_core::project::CleanPreview> for CleanPreviewDto {
+    fn from(p: &claudepot_core::project::CleanPreview) -> Self {
+        Self {
+            orphans: p.orphans.iter().map(ProjectInfoDto::from).collect(),
+            orphans_found: p.orphans_found,
+            unreachable_skipped: p.unreachable_skipped,
+            total_bytes: p.total_bytes,
+            protected_count: p.protected_count,
+        }
+    }
+}
+
 // Note: the post-clean result DTO lives in `ops::CleanResultSummary`
 // because the clean op is event-driven (tokio task + op-progress
 // events), so its result must attach to a `RunningOpInfo` rather than
@@ -170,4 +182,32 @@ pub struct MoveArgsDto {
     /// on `project_move_dry_run`; other callers leave it None.
     #[serde(default)]
     pub cancel_token: Option<u64>,
+}
+
+#[cfg(test)]
+mod clean_preview_dto_tests {
+    use super::*;
+    use claudepot_core::project::CleanPreview;
+
+    /// `CleanPreviewDto::from(&CleanPreview)` must be a pure field copy.
+    /// If a future field is added to `CleanPreview` and this conversion
+    /// silently drops it, the JSON the GUI sees will lose data without
+    /// any compile-time signal. Locking the field-by-field copy down
+    /// here makes that drift load-bearing for tests.
+    #[test]
+    fn test_clean_preview_dto_is_pure_field_copy() {
+        let preview = CleanPreview {
+            orphans: Vec::new(),
+            orphans_found: 7,
+            unreachable_skipped: 3,
+            total_bytes: 1234,
+            protected_count: 2,
+        };
+        let dto = CleanPreviewDto::from(&preview);
+        assert_eq!(dto.orphans_found, preview.orphans_found);
+        assert_eq!(dto.unreachable_skipped, preview.unreachable_skipped);
+        assert_eq!(dto.total_bytes, preview.total_bytes);
+        assert_eq!(dto.protected_count, preview.protected_count);
+        assert_eq!(dto.orphans.len(), preview.orphans.len());
+    }
 }

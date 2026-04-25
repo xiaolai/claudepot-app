@@ -7,9 +7,16 @@
 
 use crate::commands::open_store;
 use crate::dto::{AccountSummary, RegisterOutcome, RemoveOutcome, UsageEntryDto};
+use crate::ops::{
+    emit_terminal, new_op_id, new_running_op, spawn_op_thread, OpKind, RunningOpInfo, RunningOps,
+    TauriLoginProgressSink, TauriVerifyProgressSink, VerifyResultSummary,
+};
 use claudepot_core::services;
 use claudepot_core::services::usage_cache::UsageCache;
 use std::collections::HashMap;
+use std::sync::Arc;
+use tauri::{AppHandle, State};
+use tokio::sync::Notify;
 use uuid::Uuid;
 
 /// Spawn `claude auth login` (browser opens), wait for the user to
@@ -286,4 +293,289 @@ pub async fn verify_all_accounts() -> Result<Vec<AccountSummary>, String> {
     // refresh rotated the access_token in between.
     let refreshed = store.list().map_err(|e| format!("list failed: {e}"))?;
     Ok(refreshed.iter().map(AccountSummary::from).collect())
+}
+
+// ---------------------------------------------------------------------------
+// Long-running `*_start` variants — emit `op-progress::<op_id>` events
+// instead of holding the IPC worker for the full subprocess + post-flow.
+// See `dev-docs/reports/codex-mini-audit-fix-deferred-design-2026-04-25.md`
+// (clusters C-1 + C-2).
+// ---------------------------------------------------------------------------
+
+/// Browser re-login for an existing account. Returns the op_id immediately
+/// so the GUI can subscribe to `op-progress::<op_id>` for `LoginPhase`
+/// events. The legacy synchronous [`account_login`] above stays registered
+/// for one release.
+///
+/// Critical guard ordering (see C-1 design doc):
+/// 1. Two-at-once login guard fires BEFORE `new_op_id()` — otherwise a
+///    rejected second start would still leave a stuck op in `RunningOps`.
+/// 2. `LoginState`'s cancel `Notify` is registered BEFORE spawning the
+///    worker thread — otherwise a fast cancel races against spawn.
+#[tauri::command]
+pub async fn account_login_start(
+    uuid: String,
+    state: State<'_, crate::state::LoginState>,
+    ops: State<'_, RunningOps>,
+    app: AppHandle,
+) -> Result<String, String> {
+    let id = Uuid::parse_str(&uuid).map_err(|e| format!("bad uuid: {e}"))?;
+
+    // Guard 1: reject second-start BEFORE allocating op_id, so a rejection
+    // doesn't leak a stuck op into `RunningOps`.
+    let notify = Arc::new(Notify::new());
+    {
+        let mut slot = state
+            .active
+            .lock()
+            .map_err(|e| format!("login state lock poisoned: {e}"))?;
+        if slot.is_some() {
+            return Err("a login is already in progress".to_string());
+        }
+        // Guard 2: register cancel Notify BEFORE spawning the worker.
+        // A fast cancel arriving between spawn and notify-install would
+        // see no notify and the subprocess would leak.
+        *slot = Some(notify.clone());
+    }
+
+    let op_id = new_op_id();
+    ops.insert(new_running_op(
+        &op_id,
+        OpKind::AccountLogin,
+        uuid.clone(),
+        String::new(),
+    ));
+
+    let ops_for_task = ops.inner().clone();
+    let login_state_clone = (*state.inner()).clone_handle();
+    spawn_op_thread(
+        app,
+        ops_for_task,
+        op_id.clone(),
+        move |_sink, app, ops, op_id| {
+            // Build a dedicated Tokio runtime for the worker thread —
+            // `spawn_op_thread` runs an OS thread, not a Tokio task, but
+            // `login_and_reimport_with_progress` is async and needs to
+            // drive `tokio::process::Command` / `tokio::sync::Notify`.
+            let rt = match tokio::runtime::Builder::new_current_thread()
+                .enable_all()
+                .build()
+            {
+                Ok(rt) => rt,
+                Err(e) => {
+                    emit_terminal(&app, &ops, &op_id, Some(format!("runtime: {e}")));
+                    login_state_clone.clear();
+                    return;
+                }
+            };
+            let store = match open_store() {
+                Ok(s) => s,
+                Err(e) => {
+                    emit_terminal(&app, &ops, &op_id, Some(e));
+                    login_state_clone.clear();
+                    return;
+                }
+            };
+            let login_sink = TauriLoginProgressSink {
+                app: app.clone(),
+                op_id: op_id.clone(),
+                ops: ops.clone(),
+            };
+            let result = rt.block_on(
+                services::account_service::login_and_reimport_with_progress(
+                    &store,
+                    id,
+                    Some(notify),
+                    &login_sink,
+                ),
+            );
+            // Always release the LoginState slot on terminal — same
+            // invariant as the legacy `account_login`.
+            login_state_clone.clear();
+            match result {
+                Ok(()) => emit_terminal(&app, &ops, &op_id, None),
+                Err(e) => emit_terminal(&app, &ops, &op_id, Some(format!("login failed: {e}"))),
+            }
+        },
+    );
+
+    Ok(op_id)
+}
+
+/// Snapshot of an in-flight or just-finished login op. Returns `None`
+/// after the standard 5s grace window.
+#[tauri::command]
+pub async fn account_login_status(
+    op_id: String,
+    ops: State<'_, RunningOps>,
+) -> Result<Option<RunningOpInfo>, String> {
+    Ok(ops.get(&op_id))
+}
+
+/// Browser-OAuth onboarding for a brand-new account. Same shape as
+/// [`account_login_start`] but the terminal payload represents a fresh
+/// account-creation success.
+#[tauri::command]
+pub async fn account_register_from_browser_start(
+    state: State<'_, crate::state::LoginState>,
+    ops: State<'_, RunningOps>,
+    app: AppHandle,
+) -> Result<String, String> {
+    let notify = Arc::new(Notify::new());
+    {
+        let mut slot = state
+            .active
+            .lock()
+            .map_err(|e| format!("login state lock poisoned: {e}"))?;
+        if slot.is_some() {
+            return Err("a login is already in progress".to_string());
+        }
+        *slot = Some(notify.clone());
+    }
+
+    let op_id = new_op_id();
+    ops.insert(new_running_op(
+        &op_id,
+        OpKind::AccountRegister,
+        String::new(),
+        String::new(),
+    ));
+
+    let ops_for_task = ops.inner().clone();
+    let login_state_clone = (*state.inner()).clone_handle();
+    spawn_op_thread(
+        app,
+        ops_for_task,
+        op_id.clone(),
+        move |_sink, app, ops, op_id| {
+            let rt = match tokio::runtime::Builder::new_current_thread()
+                .enable_all()
+                .build()
+            {
+                Ok(rt) => rt,
+                Err(e) => {
+                    emit_terminal(&app, &ops, &op_id, Some(format!("runtime: {e}")));
+                    login_state_clone.clear();
+                    return;
+                }
+            };
+            let store = match open_store() {
+                Ok(s) => s,
+                Err(e) => {
+                    emit_terminal(&app, &ops, &op_id, Some(e));
+                    login_state_clone.clear();
+                    return;
+                }
+            };
+            let login_sink = TauriLoginProgressSink {
+                app: app.clone(),
+                op_id: op_id.clone(),
+                ops: ops.clone(),
+            };
+            let result = rt.block_on(
+                services::account_service::register_from_browser_with_progress(
+                    &store,
+                    Some(notify),
+                    &login_sink,
+                ),
+            );
+            login_state_clone.clear();
+            match result {
+                Ok(_r) => emit_terminal(&app, &ops, &op_id, None),
+                Err(e) => emit_terminal(&app, &ops, &op_id, Some(format!("register failed: {e}"))),
+            }
+        },
+    );
+
+    Ok(op_id)
+}
+
+/// Start a `verify_all` op. Returns the op_id immediately; per-account
+/// progress events fire on `op-progress::<op_id>` (typed
+/// `VerifyAccountEvent` payloads alongside generic `ProgressEvent`s).
+///
+/// Concurrency guard: rejects a second start while one is `Running`.
+/// `useRefresh.ts` already debounces, but be defensive — the legacy
+/// `verify_all_accounts` IPC could land mid-op too.
+#[tauri::command]
+pub async fn verify_all_accounts_start(
+    ops: State<'_, RunningOps>,
+    app: AppHandle,
+) -> Result<String, String> {
+    // Defensive concurrency guard: bail out if any VerifyAll op is still
+    // running. Polling backstop guarantees the prior op_id is reachable
+    // until the 5s grace window expires.
+    if ops
+        .list()
+        .iter()
+        .any(|op| matches!(op.kind, OpKind::VerifyAll) && op.status == crate::ops::OpStatus::Running)
+    {
+        return Err("verify_all is already in progress".to_string());
+    }
+
+    let op_id = new_op_id();
+    ops.insert(new_running_op(
+        &op_id,
+        OpKind::VerifyAll,
+        String::new(),
+        String::new(),
+    ));
+
+    let ops_for_task = ops.inner().clone();
+    spawn_op_thread(
+        app,
+        ops_for_task,
+        op_id.clone(),
+        move |_sink, app, ops, op_id| {
+            let rt = match tokio::runtime::Builder::new_current_thread()
+                .enable_all()
+                .build()
+            {
+                Ok(rt) => rt,
+                Err(e) => {
+                    emit_terminal(&app, &ops, &op_id, Some(format!("runtime: {e}")));
+                    return;
+                }
+            };
+            let store = match open_store() {
+                Ok(s) => s,
+                Err(e) => {
+                    emit_terminal(&app, &ops, &op_id, Some(e));
+                    return;
+                }
+            };
+            let verify_sink = TauriVerifyProgressSink {
+                app: app.clone(),
+                op_id: op_id.clone(),
+                ops: ops.clone(),
+            };
+            let fetcher = claudepot_core::cli_backend::swap::DefaultProfileFetcher;
+            rt.block_on(services::account_service::verify_all_with_progress(
+                &store,
+                &fetcher,
+                &verify_sink,
+            ));
+            // verify_all_with_progress is infallible — the only failures
+            // are per-account, surfaced through the sink. The op's
+            // terminal event is always Complete.
+            emit_terminal(&app, &ops, &op_id, None);
+        },
+    );
+
+    Ok(op_id)
+}
+
+#[tauri::command]
+pub async fn verify_all_accounts_status(
+    op_id: String,
+    ops: State<'_, RunningOps>,
+) -> Result<Option<RunningOpInfo>, String> {
+    Ok(ops.get(&op_id))
+}
+
+// Suppress `unused`: the `*_start` paths build a default summary at
+// `Started`; downstream consumers read it via the polling backstop.
+#[allow(dead_code)]
+fn _ensure_summary_type_is_used() {
+    let _: VerifyResultSummary = VerifyResultSummary::default();
 }

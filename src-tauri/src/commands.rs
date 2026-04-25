@@ -22,7 +22,7 @@
 //! the Keys + `account_list` conversion (commit after Keys freeze report).
 //! Apply the same discipline to every new handler added here.
 
-use crate::dto::{AccountSummary, AccountSummaryBasic, AppStatus};
+use crate::dto::{AccountSummary, AccountSummaryBasic, AppStatus, ReconcileReportDto};
 use claudepot_core::account::{Account, AccountStore};
 use claudepot_core::desktop_backend;
 use claudepot_core::paths;
@@ -64,30 +64,52 @@ pub(crate) fn open_store() -> Result<AccountStore, String> {
 /// Tokio worker; the sync I/O blocks that worker instead of the UI
 /// thread. Same rationale / pattern as the `session_*` commands
 /// (commit 4ad707e).
+///
+/// The Keychain reads themselves are routed through
+/// `tauri::async_runtime::spawn_blocking` so they run on Tokio's
+/// blocking pool instead of an async worker — same threading guard
+/// as the `commands_config` / `commands_keys` handlers. Sequential
+/// order is preserved inside `list_summaries` so macOS unlock
+/// dialogs don't stack.
+///
+/// **Pure read.** Any DB ↔ truth-on-disk drift is reconciled by
+/// [`accounts_reconcile`] (called once at startup in `lib.rs::run`
+/// and on user request). `account_list` never writes to the store.
 #[tauri::command]
 pub async fn account_list() -> Result<Vec<AccountSummary>, String> {
-    let store = open_store()?;
-    let accounts = store.list().map_err(|e| format!("list failed: {e}"))?;
-    let summaries: Vec<AccountSummary> = accounts.iter().map(AccountSummary::from).collect();
+    let views = tauri::async_runtime::spawn_blocking(move || {
+        let store = open_store()?;
+        let views = services::account_summary::list_summaries(&store)
+            .map_err(|e| format!("list failed: {e}"))?;
+        Ok::<_, String>(views)
+    })
+    .await
+    .map_err(|e| format!("account_list join: {e}"))??;
 
-    // Opportunistically sync DB flags with reality. Best-effort — we
-    // never surface DB write failures here; the flag is re-reconciled
-    // on the next list.
-    for (acct, sum) in accounts.iter().zip(summaries.iter()) {
-        // CLI: flag claims credentials exist but the stored blob is
-        // missing/corrupt → flip false.
-        if acct.has_cli_credentials && !sum.credentials_healthy {
-            let _ = store.update_credentials_flag(acct.uuid, false);
-        }
-    }
+    Ok(views.iter().map(AccountSummary::from).collect())
+}
 
-    // Desktop: delegate to the shared reconcile_flags service so the
-    // hot path in account_list and the explicit `desktop_reconcile`
-    // command run identical logic. Best-effort — any failure leaves
-    // the flags as-is for the next list.
-    let _ = services::desktop_service::reconcile_flags(&store);
+/// Run both reconcile passes (CLI flag drift + Desktop flag drift +
+/// orphan `state.active_desktop` clear) and return counts to the
+/// webview. The full per-row detail stays in the Rust
+/// [`claudepot_core::services::account_service::ReconcileReport`];
+/// the JS side renders a one-line summary and refetches
+/// `account_list` to pick up the post-reconcile DB state.
+///
+/// Routed through `spawn_blocking` for the same reason as
+/// [`account_list`] — the inner `token_health` calls do macOS
+/// Keychain syscalls and must stay off async workers.
+#[tauri::command]
+pub async fn accounts_reconcile() -> Result<ReconcileReportDto, String> {
+    let report = tauri::async_runtime::spawn_blocking(move || {
+        let store = open_store()?;
+        services::account_service::reconcile_all(&store)
+            .map_err(|e| format!("reconcile failed: {e}"))
+    })
+    .await
+    .map_err(|e| format!("accounts_reconcile join: {e}"))??;
 
-    Ok(summaries)
+    Ok(ReconcileReportDto::from(&report))
 }
 
 /// Lean sibling of [`account_list`] — returns just the sqlite-backed
@@ -279,3 +301,99 @@ async fn spawn_reveal(p: &std::path::Path) -> Result<(), String> {
 //   - Preferences:                                `commands_preferences.rs`
 //   - Config tree / watcher:                      `commands_config.rs`
 //   - Pricing:                                    `commands_pricing.rs`
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use claudepot_core::cli_backend::swap;
+    use std::sync::Mutex;
+
+    /// Tests in this module mutate process-global env vars
+    /// (`CLAUDEPOT_DATA_DIR`, `CLAUDEPOT_CREDENTIAL_BACKEND`). Cargo
+    /// runs unit tests within a single binary in parallel by default,
+    /// so we serialize through this lock to keep the env from racing.
+    static ENV_LOCK: Mutex<()> = Mutex::new(());
+
+    fn lock() -> std::sync::MutexGuard<'static, ()> {
+        ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner())
+    }
+
+    fn setup_data_dir() -> tempfile::TempDir {
+        let dir = tempfile::tempdir().unwrap();
+        std::env::set_var("CLAUDEPOT_DATA_DIR", dir.path());
+        std::env::set_var("CLAUDEPOT_CREDENTIAL_BACKEND", "file");
+        dir
+    }
+
+    fn make_account(email: &str) -> claudepot_core::account::Account {
+        claudepot_core::account::Account {
+            uuid: uuid::Uuid::new_v4(),
+            email: email.to_string(),
+            org_uuid: Some("org-test".to_string()),
+            org_name: Some("Test Org".to_string()),
+            subscription_type: Some("pro".to_string()),
+            rate_limit_tier: None,
+            created_at: chrono::Utc::now(),
+            last_cli_switch: None,
+            last_desktop_switch: None,
+            has_cli_credentials: true,
+            has_desktop_profile: false,
+            is_cli_active: false,
+            is_desktop_active: false,
+            verified_email: None,
+            verified_at: None,
+            verify_status: "never".to_string(),
+        }
+    }
+
+    /// `account_list` must be a pure read after B-2: even when the DB
+    /// flag for `has_cli_credentials` disagrees with keychain truth,
+    /// the list call leaves the row untouched. Reconciliation is the
+    /// dedicated `accounts_reconcile` command's job.
+    #[tokio::test]
+    async fn test_account_list_is_pure_read() {
+        let _g = lock();
+        let _env = setup_data_dir();
+
+        // Open the production-style store at `<data_dir>/accounts.db`,
+        // then close it before invoking `account_list` — the command
+        // re-opens its own connection.
+        let db_path = paths::claudepot_data_dir().join("accounts.db");
+        std::fs::create_dir_all(db_path.parent().unwrap()).unwrap();
+        let store = AccountStore::open(&db_path).unwrap();
+
+        // Drift case 1: DB says has_cli_credentials=true, keychain empty.
+        let mut a = make_account("drift@example.com");
+        a.has_cli_credentials = true;
+        store.insert(&a).unwrap();
+        let before = store.find_by_uuid(a.uuid).unwrap().unwrap();
+        assert!(before.has_cli_credentials, "precondition: flag was true");
+        // Drop the store handle so the command's open succeeds.
+        drop(store);
+
+        // The list call. Resolve the inner future via the macro shim:
+        // `#[tauri::command]` keeps the function callable as a normal
+        // async fn from Rust.
+        let _ = account_list().await.unwrap();
+
+        // Re-open and verify the flag is *unchanged*. (The pre-B-2
+        // implementation would have flipped this to false.)
+        let after_store = AccountStore::open(&db_path).unwrap();
+        let after = after_store.find_by_uuid(a.uuid).unwrap().unwrap();
+        assert!(
+            after.has_cli_credentials,
+            "account_list must not write to the store; flag flipped from {} to {}",
+            before.has_cli_credentials, after.has_cli_credentials
+        );
+
+        // Sanity: `accounts_reconcile` *does* flip the same drift.
+        let report = accounts_reconcile().await.unwrap();
+        assert_eq!(report.cli_flipped, 1);
+        let after_reconcile = after_store.find_by_uuid(a.uuid).unwrap().unwrap();
+        assert!(!after_reconcile.has_cli_credentials);
+
+        // Cleanup keychain side: nothing was saved here, but if a
+        // previous run left a blob on this uuid, drop it.
+        let _ = swap::delete_private(a.uuid);
+    }
+}
