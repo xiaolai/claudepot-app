@@ -1,4 +1,5 @@
 pub mod account;
+pub mod activity;
 pub mod cli_ops;
 pub mod desktop_ops;
 pub mod doctor;
