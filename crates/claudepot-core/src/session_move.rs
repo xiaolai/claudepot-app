@@ -36,13 +36,16 @@
 //!   `~/.claude/todos/` (dead in current CC).
 
 use crate::path_utils::simplify_windows_path;
+use crate::project_progress::{NoopSink, PhaseStatus, ProgressSink};
 use crate::project_sanitize::sanitize_path;
 use crate::session_move_helpers::{
     clear_claude_json_session_pointers, extract_session_id_from_path, has_sync_conflict,
-    is_recently_modified, list_sessions_in_slug, move_session_subdir, read_first_cwd,
-    remove_empty_subdirs, remove_if_empty, validate_slug,
+    is_recently_modified, list_sessions_in_slug, move_session_subdir_with_progress,
+    read_first_cwd, remove_empty_subdirs, remove_if_empty, validate_slug,
 };
-use crate::session_move_jsonl::{rewrite_history_jsonl, stream_rewrite_jsonl};
+use crate::session_move_jsonl::{
+    rewrite_history_jsonl_with_progress, stream_rewrite_jsonl_with_progress,
+};
 pub use crate::session_move_types::{
     AdoptReport, DiscardReport, MoveSessionError, MoveSessionOpts, MoveSessionReport,
     OrphanedProject, INVALID_SLUG_MSG,
@@ -84,6 +87,32 @@ pub fn move_session(
     from_cwd: &Path,
     to_cwd: &Path,
     opts: MoveSessionOpts,
+) -> Result<MoveSessionReport, MoveSessionError> {
+    move_session_with_progress(config_dir, session_id, from_cwd, to_cwd, opts, &NoopSink)
+}
+
+/// Progress-aware variant of [`move_session`]. Emits structured
+/// [`PhaseStatus`] events on `sink` keyed by these stable phase ids
+/// — the frontend reads these by name and renders matching labels:
+///
+/// | id | label                              |
+/// |----|------------------------------------|
+/// | S1 | Rewriting primary transcript       |
+/// | S2 | Moving sidecar dirs                |
+/// | S3 | Updating history.jsonl             |
+/// | S4 | Clearing .claude.json pointers     |
+/// | S5 | Cleaning up source dir             |
+///
+/// `sub_progress` fires per JSONL line in S1, per sidecar file in S2,
+/// per history line scanned in S3. S4 and S5 each fire a single
+/// `Complete` event (atomic / single-step phases).
+pub fn move_session_with_progress(
+    config_dir: &Path,
+    session_id: Uuid,
+    from_cwd: &Path,
+    to_cwd: &Path,
+    opts: MoveSessionOpts,
+    sink: &dyn ProgressSink,
 ) -> Result<MoveSessionReport, MoveSessionError> {
     if !config_dir.is_dir() {
         return Err(MoveSessionError::InvalidConfigDir(config_dir.to_path_buf()));
@@ -134,51 +163,130 @@ pub fn move_session(
 
     fs::create_dir_all(&to_proj)?;
 
-    // Phase 1: rewrite + place the primary JSONL atomically in the target.
-    // We stream from source → target tempfile, then rename into place,
-    // then unlink the source. That ordering means a crash mid-way leaves
-    // the source intact (worst case: an orphaned tempfile in the target).
+    // Phase S1: rewrite + place the primary JSONL atomically in the
+    // target. We stream from source → target tempfile, then rename into
+    // place, then unlink the source. That ordering means a crash mid-way
+    // leaves the source intact (worst case: an orphaned tempfile in the
+    // target).
     let from_str = from_canonical.to_string_lossy();
     let to_str = to_canonical.to_string_lossy();
-    let lines_rewritten =
-        stream_rewrite_jsonl(&from_session, &to_session, &from_str, &to_str)?;
-
-    // Phase 2: sibling per-session dir (subagents/, remote-agents/).
-    let from_sub = from_proj.join(session_id.to_string());
-    let (subagent_files_moved, remote_agent_files_moved) = if from_sub.is_dir() {
-        let to_sub = to_proj.join(session_id.to_string());
-        move_session_subdir(&from_sub, &to_sub)?
-    } else {
-        (0, 0)
+    let lines_rewritten = match stream_rewrite_jsonl_with_progress(
+        &from_session,
+        &to_session,
+        &from_str,
+        &to_str,
+        &mut |done, total| sink.sub_progress("S1", done, total),
+    ) {
+        Ok(n) => {
+            sink.phase("S1", PhaseStatus::Complete);
+            n
+        }
+        Err(e) => {
+            sink.phase("S1", PhaseStatus::Error(e.to_string()));
+            return Err(e);
+        }
     };
 
-    // Phase 3: history.jsonl — rewrite lines keyed by sessionId. Also
-    // counts lines that look like ours (project matches source_cwd) but
-    // lack sessionId so we can surface "some history couldn't be
-    // attributed" to the caller.
+    // From here on, any phase failure must roll the target JSONL back
+    // out — otherwise both source and target carry the transcript and
+    // a retry trips `TargetCollision`. We can't fully undo every side
+    // effect (history.jsonl rewrites, .claude.json pointer clears
+    // already happened in-place), but unwinding the target file
+    // restores the precondition the next attempt needs.
     let history_path = config_dir.join("history.jsonl");
-    let (history_entries_moved, history_entries_unmapped) = if history_path.is_file() {
-        rewrite_history_jsonl(&history_path, session_id, &from_str, &to_str)?
-    } else {
-        (0, 0)
-    };
+    let from_sub = from_proj.join(session_id.to_string());
+    let to_sub = to_proj.join(session_id.to_string());
+    // Snapshot whether the target sidecar dir pre-existed. Without this,
+    // a rollback that wipes `to_sub` could destroy unrelated user data
+    // that lived there before we ever started.
+    let to_sub_preexisted = to_sub.exists();
+    let result: Result<(usize, usize, usize, usize, u8), (MoveSessionError, &'static str)> = (|| {
+        // Phase S2: sibling per-session dir (subagents/, remote-agents/).
+        let (subagent_files_moved, remote_agent_files_moved) = if from_sub.is_dir() {
+            move_session_subdir_with_progress(&from_sub, &to_sub, &mut |done, total| {
+                sink.sub_progress("S2", done, total)
+            })
+            .map_err(|e| (e, "S2"))?
+        } else {
+            (0, 0)
+        };
+        sink.phase("S2", PhaseStatus::Complete);
 
-    // Phase 4: .claude.json session pointers. CC stores this file at
-    // `$HOME/.claude.json` — a sibling of `$HOME/.claude/`, NOT inside
-    // config_dir. The caller is responsible for passing the correct
-    // path; if they don't (`None`), Phase 4 is skipped.
-    let claude_json_pointers_cleared = match opts.claude_json_path.as_deref() {
-        Some(path) => clear_claude_json_session_pointers(path, &from_canonical, session_id)?,
-        None => 0,
+        // Phase S3: history.jsonl — rewrite lines keyed by sessionId.
+        // Also counts lines that look like ours (project matches
+        // source_cwd) but lack sessionId so we can surface "some history
+        // couldn't be attributed" to the caller.
+        let (history_entries_moved, history_entries_unmapped) = if history_path.is_file() {
+            rewrite_history_jsonl_with_progress(
+                &history_path,
+                session_id,
+                &from_str,
+                &to_str,
+                &mut |done, total| sink.sub_progress("S3", done, total),
+            )
+            .map_err(|e| (e, "S3"))?
+        } else {
+            (0, 0)
+        };
+        sink.phase("S3", PhaseStatus::Complete);
+
+        // Phase S4: .claude.json session pointers. CC stores this file at
+        // `$HOME/.claude.json` — a sibling of `$HOME/.claude/`, NOT
+        // inside config_dir. The caller is responsible for passing the
+        // correct path; if they don't (`None`), S4 is skipped.
+        let claude_json_pointers_cleared = match opts.claude_json_path.as_deref() {
+            Some(path) => clear_claude_json_session_pointers(path, &from_canonical, session_id)
+                .map_err(|e| (e, "S4"))?,
+            None => 0,
+        };
+        sink.phase("S4", PhaseStatus::Complete);
+
+        Ok((
+            subagent_files_moved,
+            remote_agent_files_moved,
+            history_entries_moved,
+            history_entries_unmapped,
+            claude_json_pointers_cleared,
+        ))
+    })();
+
+    let (
+        subagent_files_moved,
+        remote_agent_files_moved,
+        history_entries_moved,
+        history_entries_unmapped,
+        claude_json_pointers_cleared,
+    ) = match result {
+        Ok(v) => v,
+        Err((e, phase)) => {
+            sink.phase(phase, PhaseStatus::Error(e.to_string()));
+            // Roll the target JSONL back so a retry doesn't hit
+            // TargetCollision on the same session that previously failed
+            // mid-flight. Best-effort — if the unlink itself fails (rare;
+            // the file we just renamed in is owned by us), the original
+            // error wins because that's what the caller asked about.
+            let _ = fs::remove_file(&to_session);
+            // Best-effort sidecar rollback. Only wipe `to_sub` if we
+            // *created* it during this attempt — otherwise we'd
+            // destroy whatever pre-existing sidecars the user already
+            // had under that session id. If sidecars were partially
+            // copied into a freshly-created `to_sub`, this sweep keeps
+            // a retry from tripping the `SidecarCollision` guard.
+            if !to_sub_preexisted {
+                let _ = fs::remove_dir_all(&to_sub);
+            }
+            return Err(e);
+        }
     };
 
     // Now it's safe to unlink the source JSONL. If anything above failed
     // we returned early and the source is preserved.
     fs::remove_file(&from_session)?;
 
-    // Phase 5: optional cleanup of an empty source project dir.
+    // Phase S5: optional cleanup of an empty source project dir.
     let source_dir_removed =
         opts.cleanup_source_if_empty && remove_if_empty(&from_proj)?;
+    sink.phase("S5", PhaseStatus::Complete);
 
     Ok(MoveSessionReport {
         session_id: Some(session_id),
@@ -806,6 +914,85 @@ mod tests {
     }
 
     #[test]
+    fn move_session_rolls_back_target_on_phase_failure() {
+        // Regression: when a post-Phase-1 step fails, we must unwind
+        // the target JSONL — otherwise both source and target carry
+        // the transcript and a retry trips `TargetCollision` on the
+        // same uuid that previously failed mid-flight.
+        //
+        // We trigger a sidecar collision: a per-session file already
+        // exists under the target's per-session subdir, which makes
+        // Phase 2's `copy_tree_then_remove` refuse the merge.
+        let f = Fixture::new();
+        let from = f.make_live_cwd("feat-x");
+        let to = f.make_live_cwd("main");
+        let sid = Uuid::new_v4();
+        f.write_session(&from, sid, 2);
+        f.write_session_sidecars(&from, sid);
+
+        // Pre-place a colliding sidecar in the target's session subdir.
+        // The target dir lives on a different filesystem in principle,
+        // but in tests we stay on tmpfs — so `move_session_subdir`
+        // takes the rename branch when `to_sub` does NOT exist, and
+        // the copy-then-merge branch when it does. Forcing the merge
+        // path with a name collision exercises the failure leg.
+        let to_slug = f.ensure_slug(&to);
+        let to_sub_subagents = to_slug.join(sid.to_string()).join("subagents");
+        fs::create_dir_all(&to_sub_subagents).unwrap();
+        fs::write(
+            to_sub_subagents.join("agent-foo.jsonl"),
+            r#"{"agentId":"foo"}"#,
+        )
+        .unwrap();
+
+        let err = move_session(
+            f.config_dir(),
+            sid,
+            &from,
+            &to,
+            MoveSessionOpts::default(),
+        )
+        .expect_err("phase-2 sidecar collision must surface as an error");
+        assert!(
+            matches!(err, MoveSessionError::SidecarCollision(_)),
+            "got: {err}"
+        );
+
+        // Source must still hold the primary JSONL — Phase 5 must NOT
+        // have run. Target's primary JSONL must NOT exist (rolled back).
+        let from_session = f.slug_dir(&from).join(format!("{sid}.jsonl"));
+        let to_session = f.slug_dir(&to).join(format!("{sid}.jsonl"));
+        assert!(
+            from_session.exists(),
+            "source JSONL must be preserved on phase failure"
+        );
+        assert!(
+            !to_session.exists(),
+            "target JSONL must be rolled back on phase failure"
+        );
+        // The pre-existing target sidecar that triggered the failure
+        // must NOT have been wiped by rollback — only this attempt's
+        // newly-placed residue should be cleaned up.
+        assert!(
+            to_sub_subagents.join("agent-foo.jsonl").exists(),
+            "rollback must not wipe pre-existing target sidecars"
+        );
+
+        // Retry must NOT trip TargetCollision (the rollback removed
+        // the placeholder). Clear the colliding sidecar first so Phase
+        // 2 can succeed on the second attempt.
+        fs::remove_dir_all(to_slug.join(sid.to_string())).unwrap();
+        move_session(
+            f.config_dir(),
+            sid,
+            &from,
+            &to,
+            MoveSessionOpts::default(),
+        )
+        .expect("retry after rollback must succeed");
+    }
+
+    #[test]
     fn move_session_rejects_same_canonical_cwd() {
         let f = Fixture::new();
         let from = f.make_live_cwd("only-one");
@@ -1021,6 +1208,157 @@ mod tests {
             active.is_null() || active["sessionId"].is_null(),
             "activeWorktreeSession.sessionId must be cleared (or the whole block nulled): {active}"
         );
+    }
+
+    // -----------------------------------------------------------------------
+    // Section C2 — progress sink contract
+    // -----------------------------------------------------------------------
+
+    /// Capture every phase + sub_progress event so tests can assert
+    /// the public phase contract (S1..S5) without binding to internal
+    /// timings.
+    #[derive(Default)]
+    struct RecordingSink {
+        phases: std::sync::Mutex<Vec<(String, PhaseStatus)>>,
+        subs: std::sync::Mutex<Vec<(String, usize, usize)>>,
+    }
+
+    impl ProgressSink for RecordingSink {
+        fn phase(&self, phase: &str, status: PhaseStatus) {
+            self.phases
+                .lock()
+                .unwrap()
+                .push((phase.to_string(), status));
+        }
+        fn sub_progress(&self, phase: &str, done: usize, total: usize) {
+            self.subs
+                .lock()
+                .unwrap()
+                .push((phase.to_string(), done, total));
+        }
+    }
+
+    #[test]
+    fn move_session_emits_expected_phases() {
+        let f = Fixture::new();
+        let from = f.make_live_cwd("feat-x");
+        let to = f.make_live_cwd("main");
+        let sid = Uuid::new_v4();
+        f.write_session(&from, sid, 4);
+        f.write_session_sidecars(&from, sid);
+        // Seed history.jsonl so S3 isn't a no-op.
+        let from_s = from.to_string_lossy();
+        f.write_history(&[&format!(
+            r#"{{"display":"p1","timestamp":1,"project":"{from_s}","sessionId":"{sid}"}}"#
+        )]);
+        // Provide claude.json so S4 actually runs.
+        let from_key = from.to_string_lossy().to_string();
+        f.write_claude_json(serde_json::json!({
+            "projects": { &from_key: { "lastSessionId": sid.to_string(), "projectOnboardingSeenCount": 0 } }
+        }));
+
+        let sink = RecordingSink::default();
+        move_session_with_progress(
+            f.config_dir(),
+            sid,
+            &from,
+            &to,
+            MoveSessionOpts {
+                cleanup_source_if_empty: true,
+                claude_json_path: Some(f.claude_json_path()),
+                ..Default::default()
+            },
+            &sink,
+        )
+        .expect("happy path with sink");
+
+        let phases = sink.phases.lock().unwrap();
+        let ids: Vec<&str> = phases.iter().map(|(p, _)| p.as_str()).collect();
+        assert_eq!(
+            ids,
+            vec!["S1", "S2", "S3", "S4", "S5"],
+            "phase order must be S1→S2→S3→S4→S5"
+        );
+        for (id, status) in phases.iter() {
+            assert!(
+                matches!(status, PhaseStatus::Complete),
+                "phase {id} should be Complete on happy path; got {status:?}"
+            );
+        }
+
+        // S1 should have fired sub_progress at least once with the
+        // line count as total.
+        let subs = sink.subs.lock().unwrap();
+        let s1_subs: Vec<_> = subs.iter().filter(|(p, _, _)| p == "S1").collect();
+        assert!(!s1_subs.is_empty(), "S1 must emit at least one sub_progress");
+        let (_, _, total) = s1_subs.last().unwrap();
+        assert_eq!(*total, 4, "S1 total should equal source line count");
+    }
+
+    #[test]
+    fn move_session_phase_error_propagates() {
+        // Force a phase-2 (S2) error via a sidecar collision and
+        // assert: (a) sink saw S2 error, (b) primary JSONL was rolled
+        // back. Production parity with `move_session_rolls_back_target_on_phase_failure`,
+        // but exercises the progress-sink contract.
+        let f = Fixture::new();
+        let from = f.make_live_cwd("feat-x");
+        let to = f.make_live_cwd("main");
+        let sid = Uuid::new_v4();
+        f.write_session(&from, sid, 2);
+        f.write_session_sidecars(&from, sid);
+
+        // Pre-place a colliding sidecar so S2's copy-merge branch
+        // refuses.
+        let to_slug = f.ensure_slug(&to);
+        let to_sub_subagents = to_slug.join(sid.to_string()).join("subagents");
+        fs::create_dir_all(&to_sub_subagents).unwrap();
+        fs::write(
+            to_sub_subagents.join("agent-foo.jsonl"),
+            r#"{"agentId":"foo"}"#,
+        )
+        .unwrap();
+
+        let sink = RecordingSink::default();
+        let err = move_session_with_progress(
+            f.config_dir(),
+            sid,
+            &from,
+            &to,
+            MoveSessionOpts::default(),
+            &sink,
+        )
+        .expect_err("S2 collision must surface as error");
+        assert!(matches!(err, MoveSessionError::SidecarCollision(_)), "got: {err}");
+
+        // S1 should have completed; S2 should have errored.
+        let phases = sink.phases.lock().unwrap();
+        let s1 = phases.iter().find(|(p, _)| p == "S1").expect("S1 emitted");
+        assert!(
+            matches!(s1.1, PhaseStatus::Complete),
+            "S1 should still be Complete: {:?}",
+            s1.1
+        );
+        let s2 = phases.iter().find(|(p, _)| p == "S2").expect("S2 emitted");
+        assert!(
+            matches!(s2.1, PhaseStatus::Error(_)),
+            "S2 should be Error: {:?}",
+            s2.1
+        );
+        // S3..S5 must NOT have fired — once a phase errors the rest
+        // are skipped.
+        for skipped in ["S3", "S4", "S5"] {
+            assert!(
+                !phases.iter().any(|(p, _)| p == skipped),
+                "{skipped} must not fire after S2 error"
+            );
+        }
+
+        // Source primary JSONL preserved; target JSONL rolled back.
+        let from_session = f.slug_dir(&from).join(format!("{sid}.jsonl"));
+        let to_session = f.slug_dir(&to).join(format!("{sid}.jsonl"));
+        assert!(from_session.exists(), "source must be preserved on error");
+        assert!(!to_session.exists(), "target must be rolled back on error");
     }
 
     // -----------------------------------------------------------------------

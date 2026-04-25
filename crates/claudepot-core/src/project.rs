@@ -358,7 +358,10 @@ pub fn move_project(
         }
         // E3: Case-only rename on case-insensitive FS needs a two-step
         // via an intermediate name, else `fs::rename` is a no-op on
-        // APFS/NTFS.
+        // APFS/NTFS. The intermediate name is recorded in the journal
+        // (audit B3 fix) so a crash between the two renames leaves a
+        // recoverable trail instead of a stranded `*.claudepot-caserename-*`
+        // directory.
         let case_only = is_case_only_rename(&old_norm, &new_norm);
         if case_only {
             let tmp_name = format!(
@@ -366,6 +369,12 @@ pub fn move_project(
                 new_norm,
                 std::process::id()
             );
+            // Record before mutating disk so a crash mid-rename has the
+            // breadcrumb. snapshot_paths is repurposed here: the path
+            // is the in-flight temp dir, not a copy of pre-state, so
+            // repair / cleanup tooling can finish or roll back the
+            // half-renamed move.
+            let _ = journal.record_snapshot(std::path::PathBuf::from(&tmp_name));
             fs::rename(&old_norm, &tmp_name).map_err(|e| {
                 let _ = journal.mark_error(&format!("P3 case-rename step 1 failed: {e}"));
                 ProjectError::Io(e)
@@ -527,6 +536,9 @@ pub fn move_project(
                         new_san,
                         std::process::id()
                     ));
+                    // Audit B3 fix: record the temp dir so repair can
+                    // finish or roll back if we crash between renames.
+                    let _ = journal.record_snapshot(tmp.clone());
                     fs::rename(&cc_old, &tmp).map_err(ProjectError::Io)?;
                     fs::rename(&tmp, &cc_new).map_err(ProjectError::Io)?;
                 } else {
@@ -758,10 +770,75 @@ fn path_is_inside(inner: &str, outer: &str) -> bool {
     inner.starts_with(&boundary) && inner != outer
 }
 
-/// True iff `old` and `new` differ only in ASCII letter case. Used to
-/// trigger the E3 two-step case-only rename on case-insensitive FS.
+/// True iff `old` and `new` differ only in ASCII letter case AND both
+/// resolve to the same on-disk entry (i.e. the FS is case-insensitive
+/// for these inputs). Used to trigger the E3 two-step case-only rename.
+///
+/// Audit B3 fix: the legacy implementation was string-only
+/// (`old.eq_ignore_ascii_case(new)`), which on a case-sensitive FS
+/// where `foo/` and `Foo/` are distinct directories would mis-classify
+/// a real `foo → Foo` rename (target exists, source exists, different
+/// inodes) as case-only. The two-step rename would then move `foo`
+/// through a temporary name and overwrite `Foo` — data loss.
+///
+/// Same-file identity is the authoritative signal: if both paths exist
+/// AND `metadata.dev/ino` agree (Unix) or `metadata.file_index/volume`
+/// agree (Windows), the FS is case-insensitive for this case rename.
+/// If either path is missing we fall back to the string check — there's
+/// no inode to compare and the rename is mechanically a normal move.
 fn is_case_only_rename(old: &str, new: &str) -> bool {
-    old != new && old.eq_ignore_ascii_case(new)
+    if old == new || !old.eq_ignore_ascii_case(new) {
+        return false;
+    }
+    // Both string-equal-modulo-case. Probe the FS for same-file
+    // identity. If the FS reports two distinct entries, this is NOT a
+    // case-only rename — it's a real move with a target collision.
+    match same_file_identity(old, new) {
+        Some(true) => true,
+        // Definitively distinct entries on a case-sensitive FS.
+        Some(false) => false,
+        // Couldn't probe (one side missing, stat error). Fall back to
+        // the string check so the legacy "either-side-only-exists"
+        // case rename keeps working.
+        None => true,
+    }
+}
+
+/// Probe whether two paths point at the same FS entry. Returns
+/// `Some(true)` on confirmed same-inode (case-insensitive FS), `Some(false)`
+/// on confirmed distinct entries (case-sensitive FS), and `None` when we
+/// can't tell — typically because one side doesn't exist or stat failed.
+fn same_file_identity(a: &str, b: &str) -> Option<bool> {
+    let ma = fs::metadata(a).ok()?;
+    let mb = fs::metadata(b).ok()?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::MetadataExt;
+        Some(ma.dev() == mb.dev() && ma.ino() == mb.ino())
+    }
+    #[cfg(windows)]
+    {
+        // On Windows, same-file identity requires opening both handles
+        // and comparing FILE_ID_INFO. `std::os::windows::fs::MetadataExt`
+        // exposes `volume_serial_number()` and `file_index()` (added in
+        // 1.75); use those when available. If we can't get a clean
+        // pair, return None so the caller falls back to string parity.
+        use std::os::windows::fs::MetadataExt;
+        match (
+            ma.volume_serial_number(),
+            mb.volume_serial_number(),
+            ma.file_index(),
+            mb.file_index(),
+        ) {
+            (Some(va), Some(vb), Some(ia), Some(ib)) => Some(va == vb && ia == ib),
+            _ => None,
+        }
+    }
+    #[cfg(not(any(unix, windows)))]
+    {
+        let _ = (ma, mb);
+        None
+    }
 }
 
 /// Live-session detection at a specific (config_dir, san, project_cwd)
@@ -869,6 +946,69 @@ pub fn clean_orphans(
         dry_run,
         &crate::project_progress::NoopSink,
     )
+}
+
+/// Read-only preview of what `clean_orphans` would do — the list of
+/// candidate orphans plus the aggregate counts the GUI's confirmation
+/// modal needs to render an honest disclosure (total bytes reclaimed,
+/// how many candidates fall under the user's protected-paths set).
+///
+/// This is the business policy that used to live inline in the
+/// `project_clean_preview` Tauri command. Computing it here keeps the
+/// preview policy in lock-step with the execute path: the candidate
+/// list comes from `clean_orphans(.., dry_run=true)` rather than a
+/// re-scan, so no list can ever drift between preview and execute.
+///
+/// The protected-set resolution uses
+/// `protected_paths::resolved_set_or_defaults`, which falls back to
+/// the built-in defaults if the user's `protected_paths.json` is
+/// unreadable. The audit-flagged failure mode — empty set silently
+/// disabling protection — cannot happen here.
+#[derive(Debug, Clone)]
+pub struct CleanPreview {
+    pub orphans: Vec<ProjectInfo>,
+    pub orphans_found: usize,
+    pub unreachable_skipped: usize,
+    pub total_bytes: u64,
+    pub protected_count: usize,
+}
+
+pub fn clean_preview(
+    config_dir: &Path,
+    claude_json_path: Option<&Path>,
+    snapshots_dir: Option<&Path>,
+    locks_dir: Option<&Path>,
+    claudepot_data_dir: &Path,
+) -> Result<CleanPreview, ProjectError> {
+    let (result, orphans) = clean_orphans(
+        config_dir,
+        claude_json_path,
+        snapshots_dir,
+        locks_dir,
+        true, // dry-run: lock-step with execute path's candidate list
+    )?;
+
+    let total_bytes: u64 = orphans.iter().map(|p| p.total_size_bytes).sum();
+    // Empty-dir orphans are excluded from the protected count for the
+    // same reason `clean_orphans_with_progress` excludes them from
+    // `protected_paths_skipped`: their `original_path` came from the
+    // lossy `unsanitize_path` fallback, so a protected-set match would
+    // be coincidental, not authoritative. Mirror that predicate
+    // exactly so preview and execute report the same number.
+    let protected =
+        crate::protected_paths::resolved_set_or_defaults(claudepot_data_dir);
+    let protected_count = orphans
+        .iter()
+        .filter(|p| !p.is_empty && protected.contains(&p.original_path))
+        .count();
+
+    Ok(CleanPreview {
+        orphans,
+        orphans_found: result.orphans_found,
+        unreachable_skipped: result.unreachable_skipped,
+        total_bytes,
+        protected_count,
+    })
 }
 
 /// Progress-emitting variant of `clean_orphans`. Phases:
@@ -2928,6 +3068,186 @@ mod tests {
 
         assert_eq!(result.orphans_removed, 1);
         assert_eq!(result.protected_paths_skipped, 0);
+    }
+
+    // ----- clean_preview (B-4) -----
+
+    /// Empty `projects/` dir → zero candidates and zero counts. The
+    /// preview must be safe to call before the user has any project
+    /// state at all (first-launch path).
+    #[test]
+    fn test_clean_preview_empty_config_returns_zero_counts() {
+        let tmp = tempfile::tempdir().unwrap();
+        fs::create_dir(tmp.path().join("projects")).unwrap();
+        let data = tempfile::tempdir().unwrap();
+
+        let preview = clean_preview(tmp.path(), None, None, None, data.path()).unwrap();
+
+        assert_eq!(preview.orphans_found, 0);
+        assert_eq!(preview.unreachable_skipped, 0);
+        assert_eq!(preview.total_bytes, 0);
+        assert_eq!(preview.protected_count, 0);
+        assert!(preview.orphans.is_empty());
+    }
+
+    /// `total_bytes` must be the sum of `total_size_bytes` over the
+    /// candidate orphans — and exactly that, no double-counting and
+    /// no inclusion of unreachable-skipped projects.
+    #[test]
+    fn test_clean_preview_total_bytes_sums_orphans() {
+        use crate::project_sanitize::sanitize_path;
+        let tmp = tempfile::tempdir().unwrap();
+        let projects_dir = tmp.path().join("projects");
+        fs::create_dir(&projects_dir).unwrap();
+
+        // Two orphans with non-trivial body so each registers a
+        // recoverable cwd through session.jsonl. Pad each session
+        // with kilobytes of payload so the sizes are clearly distinct.
+        let src_a = tmp.path().join("orphan-a");
+        let src_b = tmp.path().join("orphan-b");
+        let san_a = sanitize_path(&src_a.to_string_lossy());
+        let san_b = sanitize_path(&src_b.to_string_lossy());
+        let dir_a = projects_dir.join(&san_a);
+        let dir_b = projects_dir.join(&san_b);
+        fs::create_dir(&dir_a).unwrap();
+        fs::create_dir(&dir_b).unwrap();
+        fs::write(
+            dir_a.join("session.jsonl"),
+            format!(
+                "{{\"cwd\":\"{src}\",\"type\":\"user\",\"pad\":\"{pad}\"}}\n",
+                src = src_a.to_string_lossy(),
+                pad = "x".repeat(2048)
+            ),
+        )
+        .unwrap();
+        fs::write(
+            dir_b.join("session.jsonl"),
+            format!(
+                "{{\"cwd\":\"{src}\",\"type\":\"user\",\"pad\":\"{pad}\"}}\n",
+                src = src_b.to_string_lossy(),
+                pad = "y".repeat(4096)
+            ),
+        )
+        .unwrap();
+
+        let data = tempfile::tempdir().unwrap();
+        let preview = clean_preview(tmp.path(), None, None, None, data.path()).unwrap();
+
+        assert_eq!(preview.orphans_found, 2);
+        assert_eq!(preview.orphans.len(), 2);
+        let expected: u64 = preview.orphans.iter().map(|p| p.total_size_bytes).sum();
+        assert_eq!(preview.total_bytes, expected);
+        // Sanity: the payloads we wrote are at least 2 KiB + 4 KiB,
+        // so a positive total proves we did not silently zero things out.
+        assert!(preview.total_bytes >= 6 * 1024);
+    }
+
+    /// `protected_count` must mirror `clean_orphans_with_progress`'s
+    /// `protected_paths_skipped` predicate exactly: an empty-dir orphan
+    /// (whose `original_path` is from the lossy fallback) is excluded,
+    /// even when the protected set happens to contain the unsanitized
+    /// guess.
+    #[test]
+    fn test_clean_preview_protected_count_excludes_empty_orphans() {
+        use crate::project_sanitize::sanitize_path;
+
+        let tmp = tempfile::tempdir().unwrap();
+        let projects_dir = tmp.path().join("projects");
+        fs::create_dir(&projects_dir).unwrap();
+
+        // (1) Authoritative orphan whose source is in the protected set.
+        let guarded = tmp.path().join("guarded-ws");
+        let guarded_str = guarded.to_string_lossy().to_string();
+        let san_guarded = sanitize_path(&guarded_str);
+        let dir_g = projects_dir.join(&san_guarded);
+        fs::create_dir(&dir_g).unwrap();
+        fs::write(
+            dir_g.join("session.jsonl"),
+            format!("{{\"cwd\":\"{guarded_str}\",\"type\":\"user\"}}\n"),
+        )
+        .unwrap();
+
+        // (2) Empty-dir orphan whose unsanitized guess is also in the
+        //     protected set — it must NOT be counted.
+        let empty = projects_dir.join("-some-ambiguous-path");
+        fs::create_dir(&empty).unwrap();
+
+        // Stand up a custom data_dir whose protected_paths.json contains
+        // both candidates. We seed the store directly (bypassing `add()`)
+        // so the test stays focused on the predicate, not the editor API.
+        // Schema mirrors `Store` in `protected_paths.rs` — `user` is a
+        // flat array of path strings, not objects.
+        let data = tempfile::tempdir().unwrap();
+        fs::write(
+            crate::protected_paths::store_path(data.path()),
+            serde_json::json!({
+                "version": 1,
+                "user": [guarded_str.clone(), "/some/ambiguous/path"],
+                "removed_defaults": []
+            })
+            .to_string(),
+        )
+        .unwrap();
+
+        let preview =
+            clean_preview(tmp.path(), None, None, None, data.path()).unwrap();
+
+        assert_eq!(preview.orphans_found, 2);
+        // Only the authoritative-path orphan counts as protected.
+        assert_eq!(preview.protected_count, 1);
+    }
+
+    /// When `protected_paths.json` is missing, the resolution must fall
+    /// back to `DEFAULT_PATHS` — never to an empty set. The audit-flagged
+    /// failure mode (an empty set silently disabling protection for `/`,
+    /// `~`, `/Users`, etc.) cannot reach `clean_preview` if this test
+    /// passes.
+    #[test]
+    fn test_clean_preview_protected_count_uses_fail_safe_defaults() {
+        let tmp = tempfile::tempdir().unwrap();
+        fs::create_dir(tmp.path().join("projects")).unwrap();
+
+        // (1) Empty data_dir → no `protected_paths.json` at all.
+        let data = tempfile::tempdir().unwrap();
+        assert!(!crate::protected_paths::store_path(data.path()).exists());
+
+        // The preview must not panic, and the protected set used inside
+        // it must be the fail-safe defaults (which include "/" and "~"
+        // on every host). Cross-check the exposed resolution against the
+        // preview path's own consumer: if `resolved_set_or_defaults`
+        // gave us an empty set here, the audit bug would be live.
+        let resolved =
+            crate::protected_paths::resolved_set_or_defaults(data.path());
+        assert!(
+            resolved.contains("/"),
+            "fail-safe defaults must include '/'"
+        );
+        assert!(
+            resolved.contains("~"),
+            "fail-safe defaults must include '~'"
+        );
+
+        let preview =
+            clean_preview(tmp.path(), None, None, None, data.path()).unwrap();
+        assert_eq!(preview.orphans_found, 0);
+        assert_eq!(preview.protected_count, 0);
+
+        // (2) Corrupt store → still falls back to defaults rather than
+        //     producing an empty set or erroring out.
+        fs::write(
+            crate::protected_paths::store_path(data.path()),
+            "{ this is not valid json",
+        )
+        .unwrap();
+        let resolved_corrupt =
+            crate::protected_paths::resolved_set_or_defaults(data.path());
+        assert!(
+            resolved_corrupt.contains("/") && resolved_corrupt.contains("~"),
+            "corrupt store must still expose defaults"
+        );
+        let preview2 =
+            clean_preview(tmp.path(), None, None, None, data.path()).unwrap();
+        assert_eq!(preview2.orphans_found, 0);
     }
 
     #[test]

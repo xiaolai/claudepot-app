@@ -80,12 +80,17 @@ pub(crate) fn is_recently_modified(path: &Path) -> Result<bool, MoveSessionError
 /// Uses rename when the src and dst share a filesystem (the common case
 /// — both under ~/.claude); falls back to copy-then-remove if rename
 /// fails with EXDEV.
-pub(crate) fn move_session_subdir(
+/// Fires `on_progress(done, total)` after each file is moved or
+/// copied. `total` is the precounted file count across `subagents/`
+/// + `remote-agents/`. Pass `&mut |_, _| {}` to suppress.
+pub(crate) fn move_session_subdir_with_progress(
     from_sub: &Path,
     to_sub: &Path,
+    on_progress: &mut dyn FnMut(usize, usize),
 ) -> Result<(usize, usize), MoveSessionError> {
     let subagent_count = count_files(&from_sub.join("subagents"))?;
     let remote_agent_count = count_files(&from_sub.join("remote-agents"))?;
+    let total = subagent_count + remote_agent_count;
 
     if let Some(parent) = to_sub.parent() {
         fs::create_dir_all(parent)?;
@@ -95,14 +100,28 @@ pub(crate) fn move_session_subdir(
         // prior partial move. Merge by moving files individually rather
         // than refusing — the session-file collision check upstream is
         // the real gate.
-        copy_tree_then_remove(from_sub, to_sub)?;
+        let mut done = 0usize;
+        copy_tree_then_remove_with_progress(from_sub, to_sub, &mut done, total, on_progress)?;
     } else if let Err(err) = fs::rename(from_sub, to_sub) {
         // Cross-device rename is the only expected failure mode.
         // Fall through to copy+delete.
         if err.raw_os_error() == Some(libc::EXDEV) {
-            copy_tree_then_remove(from_sub, to_sub)?;
+            let mut done = 0usize;
+            copy_tree_then_remove_with_progress(
+                from_sub,
+                to_sub,
+                &mut done,
+                total,
+                on_progress,
+            )?;
         } else {
             return Err(err.into());
+        }
+    } else {
+        // Atomic rename moved everything in one syscall — emit a single
+        // `total/total` tick so the sink sees S2 finish.
+        if total > 0 {
+            on_progress(total, total);
         }
     }
 
@@ -126,7 +145,17 @@ fn count_files(dir: &Path) -> Result<usize, MoveSessionError> {
     Ok(n)
 }
 
-fn copy_tree_then_remove(from: &Path, to: &Path) -> Result<(), MoveSessionError> {
+/// Ticks `on_progress(done, total)` after each file is copied. `done`
+/// is shared across recursive calls so the count keeps increasing even
+/// as the walker descends. Pass `total = 0` + a no-op callback to
+/// disable progress.
+fn copy_tree_then_remove_with_progress(
+    from: &Path,
+    to: &Path,
+    done: &mut usize,
+    total: usize,
+    on_progress: &mut dyn FnMut(usize, usize),
+) -> Result<(), MoveSessionError> {
     fs::create_dir_all(to)?;
     for entry in fs::read_dir(from)? {
         let entry = entry?;
@@ -134,9 +163,25 @@ fn copy_tree_then_remove(from: &Path, to: &Path) -> Result<(), MoveSessionError>
         let dst = to.join(entry.file_name());
         let ft = entry.file_type()?;
         if ft.is_dir() {
-            copy_tree_then_remove(&src, &dst)?;
+            copy_tree_then_remove_with_progress(&src, &dst, done, total, on_progress)?;
         } else {
+            // File-level collision check. Without it, a partial prior
+            // move (e.g. a previous run that crashed mid-copy) silently
+            // clobbers the target's transcript with the source's. The
+            // primary `<sid>.jsonl` is gated upstream by
+            // `MoveSessionError::TargetCollision`, but per-session
+            // sidecar files (subagents/<x>.jsonl,
+            // remote-agents/<x>.jsonl) live under a session-scoped
+            // subdir and bypass that gate. Refuse the merge so the
+            // caller can resolve the conflict explicitly.
+            if dst.exists() {
+                return Err(MoveSessionError::SidecarCollision(dst));
+            }
             fs::copy(&src, &dst)?;
+            *done += 1;
+            if total > 0 {
+                on_progress(*done, total);
+            }
         }
     }
     fs::remove_dir_all(from)?;

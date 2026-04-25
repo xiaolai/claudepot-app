@@ -152,6 +152,7 @@ pub fn link_parent_tasks(
         if let SessionEvent::AssistantToolUse {
             tool_name,
             tool_use_id,
+            input_full,
             input_preview,
             ..
         } = ev
@@ -159,7 +160,19 @@ pub fn link_parent_tasks(
             if tool_name != "Task" {
                 continue;
             }
-            let Some(input) = serde_json::from_str::<Value>(input_preview).ok() else {
+            // Prefer `input_full` (untruncated). The 240-char preview
+            // can chop the tail of a long Task call, so a real
+            // `agent_id`/`agentId` field hidden after a long
+            // `description` would never parse — and the linker would
+            // silently fall back to positional guessing. Fall back to
+            // `input_preview` only when `input_full` is empty (older
+            // index rows without the full payload).
+            let raw = if input_full.is_empty() {
+                input_preview.as_str()
+            } else {
+                input_full.as_str()
+            };
+            let Some(input) = serde_json::from_str::<Value>(raw).ok() else {
                 continue;
             };
             let agent_type = input
@@ -174,8 +187,15 @@ pub fn link_parent_tasks(
             // Matching strategy: the Task call input doesn't always
             // carry the agent_id. Fall back to positional pairing —
             // apply the `tool_use_id` to the first un-linked subagent.
+            // Accept both `agentId` (camelCase, current CC) and
+            // `agent_id` (snake_case, legacy) — the wire format has
+            // drifted across versions.
             let mut attached = false;
-            if let Some(a_id) = input.get("agent_id").and_then(Value::as_str) {
+            let agent_id_field = input
+                .get("agentId")
+                .and_then(Value::as_str)
+                .or_else(|| input.get("agent_id").and_then(Value::as_str));
+            if let Some(a_id) = agent_id_field {
                 if let Some(&idx) = by_id.get(a_id) {
                     let a = &mut subagents[idx];
                     a.parent_task_id.get_or_insert_with(|| tool_use_id.clone());
@@ -620,6 +640,101 @@ mod tests {
         assert_eq!(agents[0].parent_task_id.as_deref(), Some("toolu_parent"));
         assert_eq!(agents[0].agent_type.as_deref(), Some("Explore"));
         assert_eq!(agents[0].description.as_deref(), Some("Find thing"));
+    }
+
+    #[test]
+    fn link_parent_tasks_uses_input_full_when_preview_truncates_agent_id() {
+        // Regression: the parent-task linker must read `input_full`,
+        // not the 240-char `input_preview`. A real Task call carrying
+        // a long `description` followed by `agent_id` gets its tail
+        // chopped in the preview — losing the explicit link and
+        // forcing a positional guess.
+        use serde_json::json;
+        let tmp = TempDir::new().unwrap();
+        let sub_dir = tmp.path().join("projects").join("-r").join("S1").join("subagents");
+        mkdir(&sub_dir);
+        write_file(
+            &sub_dir.join("agent-bbb.jsonl"),
+            &[&user_line("2026-04-10T10:00:00Z", "go", "S1")],
+        );
+        let mut agents = resolve_subagents(tmp.path(), "-r", "S1").unwrap();
+        let long_desc = "x".repeat(400);
+        let parent_input = json!({
+            "subagent_type": "Explore",
+            "description": long_desc,
+            "agent_id": "bbb",
+        })
+        .to_string();
+        // Simulate the indexer: input_preview is the 240-char trimmed
+        // form, input_full carries the whole payload.
+        let preview: String = parent_input.chars().take(240).collect();
+        let parent_events = vec![SessionEvent::AssistantToolUse {
+            ts: None,
+            uuid: None,
+            model: None,
+            tool_name: "Task".into(),
+            tool_use_id: "toolu_full".into(),
+            input_preview: preview,
+            input_full: parent_input,
+        }];
+        link_parent_tasks(&parent_events, &mut agents);
+        assert_eq!(
+            agents[0].parent_task_id.as_deref(),
+            Some("toolu_full"),
+            "explicit agent_id link must hold even when preview truncates"
+        );
+        assert_eq!(agents[0].agent_type.as_deref(), Some("Explore"));
+    }
+
+    #[test]
+    fn link_parent_tasks_accepts_camelcase_agent_id() {
+        // Regression: CC's wire format uses camelCase `agentId`. The
+        // linker previously only checked `agent_id`, so a real explicit
+        // link silently fell through to positional guessing.
+        use serde_json::json;
+        let tmp = TempDir::new().unwrap();
+        let sub_dir = tmp.path().join("projects").join("-r").join("S1").join("subagents");
+        mkdir(&sub_dir);
+        // Two subagents — only the explicit camelCase agentId match
+        // should attach to the Task call.
+        write_file(
+            &sub_dir.join("agent-aa.jsonl"),
+            &[&user_line("2026-04-10T10:00:00Z", "first", "S1")],
+        );
+        write_file(
+            &sub_dir.join("agent-target.jsonl"),
+            &[&user_line("2026-04-10T10:00:01Z", "target", "S1")],
+        );
+        let mut agents = resolve_subagents(tmp.path(), "-r", "S1").unwrap();
+        let parent_input = json!({
+            "subagent_type": "Explore",
+            "description": "do work",
+            "agentId": "target",
+        })
+        .to_string();
+        let parent_events = vec![SessionEvent::AssistantToolUse {
+            ts: None,
+            uuid: None,
+            model: None,
+            tool_name: "Task".into(),
+            tool_use_id: "toolu_camel".into(),
+            input_preview: parent_input.clone(),
+            input_full: parent_input,
+        }];
+        link_parent_tasks(&parent_events, &mut agents);
+        let target = agents.iter().find(|a| a.id == "target").unwrap();
+        assert_eq!(
+            target.parent_task_id.as_deref(),
+            Some("toolu_camel"),
+            "camelCase agentId must attach to the matching subagent"
+        );
+        // The other subagent must not have stolen the link by positional
+        // fallback.
+        let other = agents.iter().find(|a| a.id == "aa").unwrap();
+        assert!(
+            other.parent_task_id.is_none(),
+            "explicit camelCase match must beat positional fallback"
+        );
     }
 
     #[test]

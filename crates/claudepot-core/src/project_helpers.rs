@@ -1,7 +1,7 @@
 //! Private helper functions for the project module.
 
 use crate::error::ProjectError;
-use crate::path_utils::simplify_windows_path;
+use crate::path_utils::{is_windows_absolute, simplify_windows_path};
 use crate::project_sanitize::{sanitize_path, unsanitize_path, MAX_SANITIZED_LENGTH};
 use crate::project_types::*;
 use std::fs;
@@ -11,6 +11,22 @@ use std::time::SystemTime;
 use unicode_normalization::UnicodeNormalization;
 
 pub(crate) fn resolve_path(path: &str) -> Result<String, ProjectError> {
+    // Windows-shaped input on a non-Windows host: `Path::is_absolute()`
+    // returns false for `C:\...`, `\\server\share\...`, and `\\?\C:\...`,
+    // so the legacy `if p.is_absolute()` branch would prepend the host's
+    // cwd and corrupt the path. CC's session JSONLs and `.claude.json`
+    // both store the OS-native form verbatim, so a foreign Windows path
+    // can absolutely reach this function on macOS/Linux.
+    //
+    // Treat any Windows-shape input as absolute and skip canonicalize
+    // (the host cannot stat a foreign path). Unix-shape inputs keep the
+    // original behavior: prepend cwd if relative, then canonicalize if
+    // the path exists.
+    if is_windows_absolute(path) {
+        let simplified = simplify_windows_path(path);
+        return Ok(simplified.nfc().collect::<String>());
+    }
+
     let p = PathBuf::from(path);
     let abs = if p.is_absolute() {
         p
@@ -151,6 +167,32 @@ pub(crate) enum PathReachability {
 pub(crate) fn classify_reachability(original_path: &str) -> PathReachability {
     if original_path.is_empty() {
         return PathReachability::Unreachable;
+    }
+
+    // Foreign-shaped paths (Windows shapes on non-Windows hosts and
+    // vice versa) cannot be definitively stat'd by the current OS:
+    // `Path::new("C:\\...").try_exists()` on Linux always returns
+    // `Ok(false)` because the host treats the string as a relative
+    // path under cwd. Treating that as `Absent` would mark live
+    // foreign-host data as orphaned and queue it for deletion. The
+    // safe answer is `Unreachable` — we genuinely don't know.
+    #[cfg(not(windows))]
+    {
+        if is_windows_absolute(original_path) {
+            return PathReachability::Unreachable;
+        }
+    }
+    #[cfg(windows)]
+    {
+        // Inverse case: Unix-shape (`/Users/...`) on Windows. The host
+        // would join it with the current drive and stat the result —
+        // also nonsense. Detect by leading `/` AND no drive-letter +
+        // no UNC prefix.
+        if original_path.starts_with('/')
+            && !is_windows_absolute(original_path)
+        {
+            return PathReachability::Unreachable;
+        }
     }
 
     if is_under_absent_mount(original_path) {
