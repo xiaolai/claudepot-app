@@ -7,11 +7,27 @@ globs: "crates/claudepot-cli/**/*.rs"
 
 ## Every command handler:
 
-1. Lives in `cli/commands/<noun>.rs` for nouns with ≤2 verbs.
-   Nouns with ≥3 verbs use `cli/commands/<noun>/<verb>.rs` and a
-   thin `cli/commands/<noun>/mod.rs` that re-exports each verb. The
-   noun module's mod.rs holds shared formatters, types, and the
-   gate helpers used by multiple verbs in the group.
+1. Lives under `cli/commands/<noun>.rs` for nouns with ≤2 verbs.
+   Nouns with ≥3 verbs use a `cli/commands/<noun>/` directory plus a
+   `cli/commands/<noun>.rs` entry file that holds shared formatters,
+   types, gate helpers, the submodule declarations, and the
+   `pub use` re-exports `main.rs`'s match block depends on. Inside
+   the directory, organize verbs whichever way reads cleanest:
+
+   - **One verb per file** — preferred when verbs are independent
+     (`commands/account/{add,list,remove,verify,login}.rs`).
+   - **Verb-group per file** — preferred when several verbs share
+     state, helpers, or a sub-domain inside the noun. The session
+     module is the canonical example: `orphan.rs` (list-orphans /
+     move / adopt-orphan / rebuild-index — all about transcripts'
+     project-association lifecycle), `inspect.rs` (view + chunk /
+     summary printers), `search.rs` (search + worktrees), `prune.rs`,
+     `trash.rs`, `slim.rs`. Splitting these into one-per-file would
+     fragment closely-related code without buying clarity.
+
+   Submodules access the entry file's private helpers via
+   `use super::*;` — Rust's privacy is outward-not-upward, so
+   children reach the parent's private items without `pub(super)`.
 2. Takes parsed clap args + shared `AppContext` (store, http client, platform)
 3. Returns `anyhow::Result<()>`
 4. Calls ONLY `claudepot-core` functions — no direct I/O

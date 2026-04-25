@@ -4,6 +4,7 @@
 
 export * from "./account";
 export * from "./project";
+export * from "./settings";
 export * from "./ops";
 export * from "./session";
 export * from "./key";
