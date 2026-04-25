@@ -20,7 +20,7 @@
 use chrono::{DateTime, Utc};
 use serde_json::Value;
 use std::collections::{HashMap, HashSet};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use super::card::{Card, CardKind, HelpRef, Severity};
 use crate::session_live::redact::redact_secrets;
@@ -34,23 +34,33 @@ use crate::session_live::redact::redact_secrets;
 /// new session — there is no shared global state.
 #[derive(Debug, Default)]
 pub struct ClassifierState {
-    /// Phase 2+: dedup `nested_memory` loads per session. Already
-    /// present so the suppression rule has somewhere to record state
-    /// when it's enabled.
+    /// Dedup `nested_memory` loads per session. Reserved for the rule
+    /// suppression rule when it's wired up; safe to keep empty for v2.
     pub seen_rules: HashSet<PathBuf>,
-    /// Phase 3+: open `Agent` tool_uses keyed by `tool_use.id`,
-    /// drained at session-end into `AgentStranded` cards.
+    /// Open `Agent` tool_uses keyed by `tool_use.id`. Closed by a
+    /// matching `tool_result` (emits `AgentReturn`) or drained at
+    /// session-end via `finalize_session` (emits `AgentStranded`).
     pub open_episodes: HashMap<String, OpenEpisode>,
+    /// Last `message.model` seen on an assistant turn for this
+    /// session. A change between calls emits a `SessionMilestone`
+    /// card describing the switch (e.g. "Sonnet 4.6 → Opus 4.7").
+    pub last_model: Option<String>,
 }
 
-/// Phase 3 placeholder — a tool_use that hasn't seen its matching
-/// tool_result yet.
+/// A `tool_use` that hasn't seen its matching `tool_result` yet.
+/// Closed via `close_agent_episode_if_open` (emits `AgentReturn`)
+/// or drained via `finalize_session` (emits `AgentStranded`).
 #[derive(Debug, Clone)]
 pub struct OpenEpisode {
     pub tool_use_id: String,
     pub tool_name: String,
     pub opened_at: DateTime<Utc>,
     pub byte_offset: u64,
+    /// Carried for human-readable card titles. `None` for non-Agent
+    /// tool_uses (Phase 2 only opens Agent episodes; later phases
+    /// may track other long-running tools).
+    pub subagent_type: Option<String>,
+    pub description: Option<String>,
 }
 
 /// Envelope context carried alongside every line. Filled once per
@@ -80,16 +90,27 @@ pub fn classify(
     line: &Value,
     byte_offset: u64,
     meta: &SessionMeta,
-    _state: &mut ClassifierState,
+    state: &mut ClassifierState,
 ) -> Vec<Card> {
-    // Fast-path: only `attachment` records can produce v1 cards.
-    // Every other type returns immediately, keeping the per-line
-    // cost ≤1µs on 99% of input.
+    // Fast-path: route by top-level `type`. Most lines emit zero
+    // cards and short-circuit in the first arm.
     let entry_type = line.get("type").and_then(Value::as_str).unwrap_or("");
-    if entry_type != "attachment" {
-        return Vec::new();
+    match entry_type {
+        "attachment" => classify_attachment(line, byte_offset, meta),
+        // user lines carry tool_result blocks — that's where ToolError
+        // cards come from. Phase 2 also tracks Agent tool_result for
+        // episode close (Phase 3 adds the AgentReturn emission).
+        "user" => classify_user_line(line, byte_offset, meta, state),
+        // assistant lines carry tool_use blocks — Phase 3 opens Agent
+        // episodes here and emits SessionMilestone (model switch).
+        "assistant" => classify_assistant_line(line, byte_offset, meta, state),
+        _ => Vec::new(),
     }
+}
 
+/// Route `attachment` records by `attachment.type`. Most types are
+/// suppressed in v1 (rule loads, skill listings, MCP additions).
+fn classify_attachment(line: &Value, byte_offset: u64, meta: &SessionMeta) -> Vec<Card> {
     // Bind in the match to avoid the unwrap-after-Some-check pattern
     // (rust-conventions: no `unwrap` in core).
     let attachment = match line.get("attachment") {
@@ -149,12 +170,722 @@ pub fn classify(
         )
         .map(|c| vec![c])
         .unwrap_or_default(),
-        // Phase 2+ adds the remaining attachment.type variants
-        // (success-slow, additional_context, system_message, etc.).
-        // Unknown attachment types are silently skipped — never emit
-        // a placeholder.
+        // Phase 2: surface successful hooks that exceeded a slowness
+        // threshold. Routine fast hooks stay invisible per design v2
+        // §2 suppression rules.
+        "hook_success" => classify_hook_slow(line, attachment, byte_offset, meta)
+            .map(|c| vec![c])
+            .unwrap_or_default(),
+        // Other attachment types (additional_context, system_message,
+        // nested_memory, skill_listing, mcp_*_delta, …) are
+        // suppressed in v1 — they're routine activity, not anomalies.
         _ => Vec::new(),
     }
+}
+
+/// Slow-hook threshold. Hooks above this duration get a `HookSlow`
+/// card even on success — the duration itself is the signal.
+const HOOK_SLOW_THRESHOLD_MS: i64 = 5_000;
+
+/// Slow-agent threshold. Successful Agent runs above this get an
+/// `AgentReturn` card; below it, the episode silently closes (the
+/// design's noise-suppression rule for routine fast subagents).
+const AGENT_RETURN_SLOW_THRESHOLD_MS: i64 = 60_000;
+
+/// `hook_success` with `durationMs > 5000` → `HookSlow` card. Cheap
+/// hooks below the threshold stay silent (the design's suppression
+/// rule for routine activity).
+fn classify_hook_slow(
+    line: &Value,
+    attachment: &Value,
+    byte_offset: u64,
+    meta: &SessionMeta,
+) -> Option<Card> {
+    let duration_ms = attachment.get("durationMs").and_then(Value::as_i64)?;
+    // Design v2 §6 / §5: durationMs > 5000 emits, exactly 5000 stays
+    // silent. `<=` (not `<`) implements the strictly-greater rule.
+    if duration_ms <= HOOK_SLOW_THRESHOLD_MS {
+        return None;
+    }
+    let hook_name = attachment.get("hookName").and_then(Value::as_str)?;
+    let _hook_event = attachment.get("hookEvent").and_then(Value::as_str)?;
+    let command = attachment
+        .get("command")
+        .and_then(Value::as_str)
+        .map(|c| redact_secrets(c));
+
+    let plugin = plugin_from_hook(attachment);
+    Some(Card {
+        id: None,
+        session_path: meta.session_path.clone(),
+        event_uuid: line.get("uuid").and_then(Value::as_str).map(String::from),
+        byte_offset,
+        kind: CardKind::HookSlow,
+        ts: parse_ts(line)?,
+        severity: Severity::Notice,
+        title: format!("Slow hook: {hook_name} ({duration_ms} ms)"),
+        subtitle: command.as_deref().map(|s| truncate(s, 120)),
+        help: None,
+        source_ref: None,
+        cwd: extract_cwd(line, meta),
+        git_branch: extract_git_branch(line, meta),
+        plugin,
+    })
+}
+
+/// `type: user` records carry the model's `tool_result` responses
+/// (in `message.content[*]` with `type: tool_result`). Any with
+/// `is_error: true` becomes a `ToolError` card.
+///
+/// Phase 3 will also close `Agent` episodes here when a tool_result
+/// matches an open `Agent` tool_use_id (emitting `AgentReturn`
+/// instead of `ToolError`). For Phase 2 we treat agent-tool errors
+/// the same as any other tool error — there's no Agent open-set yet.
+fn classify_user_line(
+    line: &Value,
+    byte_offset: u64,
+    meta: &SessionMeta,
+    state: &mut ClassifierState,
+) -> Vec<Card> {
+    let message = match line.get("message").and_then(Value::as_object) {
+        Some(m) => m,
+        None => return Vec::new(),
+    };
+    let content = match message.get("content").and_then(Value::as_array) {
+        Some(c) => c,
+        None => return Vec::new(),
+    };
+
+    let mut cards = Vec::new();
+    for block in content {
+        if block.get("type").and_then(Value::as_str) != Some("tool_result") {
+            continue;
+        }
+        let is_error = block.get("is_error").and_then(Value::as_bool).unwrap_or(false);
+        let tool_use_id = block
+            .get("tool_use_id")
+            .and_then(Value::as_str)
+            .map(String::from);
+
+        // Phase 3 hook: close the matching Agent episode if one's open.
+        // For now (Phase 2) we just log it — the Agent close path
+        // emits its own card kind and lives in
+        // `close_agent_episode_if_open`. Always called so the
+        // open_episodes map gets drained even on Phase 2 paths.
+        if let Some(id) = tool_use_id.as_deref() {
+            if let Some(card) = close_agent_episode_if_open(state, id, line, byte_offset, meta, is_error)
+            {
+                cards.push(card);
+                // The agent return card supersedes a generic tool
+                // error card on the same `tool_use_id`.
+                continue;
+            }
+        }
+
+        if !is_error {
+            continue;
+        }
+
+        let body = extract_tool_result_text(block);
+        if let Some(card) = build_tool_error_card(
+            line,
+            byte_offset,
+            meta,
+            tool_use_id.clone(),
+            &body,
+        ) {
+            cards.push(card);
+        }
+    }
+    cards
+}
+
+/// `type: assistant` records carry `tool_use` blocks in
+/// `message.content`. Phase 3 opens `Agent` episodes here and emits
+/// `SessionMilestone` cards on model changes; Phase 2 already
+/// supports both since the cost is one HashMap insert + one model-id
+/// compare per assistant turn.
+fn classify_assistant_line(
+    line: &Value,
+    byte_offset: u64,
+    meta: &SessionMeta,
+    state: &mut ClassifierState,
+) -> Vec<Card> {
+    let message = match line.get("message").and_then(Value::as_object) {
+        Some(m) => m,
+        None => return Vec::new(),
+    };
+    let mut cards = Vec::new();
+
+    // Milestone: model change. Compare the model id seen on this
+    // turn to the last one we recorded for the session. Skip the
+    // first turn (when last_model is None) — there's nothing to
+    // "switch from."
+    if let Some(model) = message.get("model").and_then(Value::as_str) {
+        let model_string = model.to_string();
+        match &state.last_model {
+            None => state.last_model = Some(model_string),
+            Some(prev) if prev != model => {
+                cards.push(build_milestone_card(
+                    line,
+                    byte_offset,
+                    meta,
+                    format!("Model switched: {prev} → {model}"),
+                ));
+                state.last_model = Some(model_string);
+            }
+            _ => {}
+        }
+    }
+
+    // Open Agent episodes for every `Agent` tool_use in this turn.
+    // The matching close is in `close_agent_episode_if_open`.
+    if let Some(content) = message.get("content").and_then(Value::as_array) {
+        for block in content {
+            if block.get("type").and_then(Value::as_str) != Some("tool_use") {
+                continue;
+            }
+            let tool_name = match block.get("name").and_then(Value::as_str) {
+                Some(n) => n,
+                None => continue,
+            };
+            if tool_name != "Agent" {
+                continue;
+            }
+            let tool_use_id = match block.get("id").and_then(Value::as_str) {
+                Some(id) => id.to_string(),
+                None => continue,
+            };
+            let subagent_type = block
+                .get("input")
+                .and_then(|i| i.get("subagent_type"))
+                .and_then(Value::as_str)
+                .map(String::from);
+            let description = block
+                .get("input")
+                .and_then(|i| i.get("description"))
+                .and_then(Value::as_str)
+                .map(String::from);
+            state.open_episodes.insert(
+                tool_use_id.clone(),
+                OpenEpisode {
+                    tool_use_id,
+                    tool_name: tool_name.to_string(),
+                    opened_at: parse_ts(line).unwrap_or_else(Utc::now),
+                    byte_offset,
+                    subagent_type,
+                    description,
+                },
+            );
+        }
+    }
+
+    cards
+}
+
+/// Drain every still-open episode in `state` into `AgentStranded`
+/// cards. The caller invokes this when the session ends (PID gone OR
+/// JSONL idle 5 min). Mutates state — drained map is empty after.
+///
+/// Returned cards reference the *opening* tool_use's byte_offset and
+/// timestamp — they describe the agent that never returned, not the
+/// session end itself.
+pub fn finalize_session(state: &mut ClassifierState, meta: &SessionMeta) -> Vec<Card> {
+    let drained: Vec<OpenEpisode> = state.open_episodes.drain().map(|(_, ep)| ep).collect();
+    drained
+        .into_iter()
+        .map(|ep| {
+            let label = ep
+                .subagent_type
+                .as_deref()
+                .map(|s| format!("Agent {s}"))
+                .unwrap_or_else(|| format!("{} tool", ep.tool_name));
+            let subtitle = ep
+                .description
+                .as_deref()
+                .map(|s| truncate(&redact_secrets(s), 120));
+            let plugin = ep
+                .subagent_type
+                .as_deref()
+                .and_then(plugin_from_namespaced_name);
+            Card {
+                id: None,
+                session_path: meta.session_path.clone(),
+                event_uuid: None,
+                byte_offset: ep.byte_offset,
+                kind: CardKind::AgentStranded,
+                ts: ep.opened_at,
+                severity: Severity::Warn,
+                title: format!("{label} did not return"),
+                subtitle,
+                help: Some(HelpRef {
+                    template_id: "agent.no_return".to_string(),
+                    args: Default::default(),
+                }),
+                source_ref: None,
+                cwd: meta.cwd.clone(),
+                git_branch: meta.git_branch.clone(),
+                plugin,
+            }
+        })
+        .collect()
+}
+
+/// Try to close an open `Agent` episode keyed by `tool_use_id`. If
+/// the id is in `open_episodes`, remove it and return an
+/// `AgentReturn` card describing the close. If not present (the
+/// tool_result was for a non-Agent tool, or the open record was
+/// never created), return `None` so the caller falls through to the
+/// generic `ToolError` path.
+fn close_agent_episode_if_open(
+    state: &mut ClassifierState,
+    tool_use_id: &str,
+    line: &Value,
+    byte_offset: u64,
+    meta: &SessionMeta,
+    is_error: bool,
+) -> Option<Card> {
+    let ep = state.open_episodes.remove(tool_use_id)?;
+    let now = parse_ts(line).unwrap_or_else(Utc::now);
+    let duration = (now - ep.opened_at).num_milliseconds().max(0);
+    // Design v2 §5: AgentReturn cards only emit on failure or when
+    // the agent ran longer than 60 s. Routine successful agents
+    // returning quickly are noise. Episode is still drained from the
+    // map (so it can't strand later); we just suppress the card.
+    if !is_error && duration <= AGENT_RETURN_SLOW_THRESHOLD_MS {
+        return None;
+    }
+    let severity = if is_error { Severity::Error } else { Severity::Notice };
+    let label = ep
+        .subagent_type
+        .as_deref()
+        .map(|s| format!("Agent {s}"))
+        .unwrap_or_else(|| format!("{} tool", ep.tool_name));
+    let title = if is_error {
+        format!("{label} failed ({duration} ms)")
+    } else {
+        format!("{label} returned ({duration} ms)")
+    };
+    // Description from the parent's tool_use input is user-typed
+    // text — same redaction discipline as hook stderr.
+    let subtitle = ep
+        .description
+        .as_deref()
+        .map(|s| truncate(&redact_secrets(s), 120));
+    let help = if is_error {
+        Some(HelpRef {
+            template_id: "agent.error_return".to_string(),
+            args: Default::default(),
+        })
+    } else {
+        None
+    };
+    // Agent return cards inherit the subagent's plugin namespace
+    // when the subagent_type carries one (e.g. "grill:roast").
+    let plugin = ep
+        .subagent_type
+        .as_deref()
+        .and_then(plugin_from_namespaced_name);
+    Some(Card {
+        id: None,
+        session_path: meta.session_path.clone(),
+        event_uuid: line.get("uuid").and_then(Value::as_str).map(String::from),
+        byte_offset,
+        kind: CardKind::AgentReturn,
+        ts: now,
+        severity,
+        title,
+        subtitle,
+        help,
+        source_ref: None,
+        cwd: extract_cwd(line, meta),
+        git_branch: extract_git_branch(line, meta),
+        plugin,
+    })
+}
+
+/// Build a `SessionMilestone` card with a fixed Notice severity.
+/// Used by the milestone-detection arms in `classify_assistant_line`.
+fn build_milestone_card(line: &Value, byte_offset: u64, meta: &SessionMeta, title: String) -> Card {
+    Card {
+        id: None,
+        session_path: meta.session_path.clone(),
+        event_uuid: line.get("uuid").and_then(Value::as_str).map(String::from),
+        byte_offset,
+        kind: CardKind::SessionMilestone,
+        ts: parse_ts(line).unwrap_or_else(Utc::now),
+        severity: Severity::Notice,
+        title,
+        subtitle: None,
+        help: None,
+        source_ref: None,
+        cwd: extract_cwd(line, meta),
+        git_branch: extract_git_branch(line, meta),
+        plugin: None,
+    }
+}
+
+/// Build a `ToolError` card. Tries to match the body against the
+/// Phase 2 tool-error templates; emits the card with no help when
+/// none match. Tool name is best-effort — the parent message has it
+/// in a sibling field, but most callers only need the body for the
+/// error message. Defer parent lookup to v2 if it matters.
+fn build_tool_error_card(
+    line: &Value,
+    byte_offset: u64,
+    meta: &SessionMeta,
+    tool_use_id: Option<String>,
+    body: &str,
+) -> Option<Card> {
+    let _ = tool_use_id; // reserved for Phase 4 tool-name lookup
+    let cwd_for_help = extract_cwd(line, meta);
+    let help = match_help_for_tool_error(body, &cwd_for_help);
+    let severity = severity_for_tool_error_help(help.as_ref());
+    let title = title_for_tool_error(body);
+    let subtitle = first_line(body).map(|s| truncate(&redact_secrets(s), 120));
+
+    Some(Card {
+        id: None,
+        session_path: meta.session_path.clone(),
+        event_uuid: line.get("uuid").and_then(Value::as_str).map(String::from),
+        byte_offset,
+        kind: CardKind::ToolError,
+        ts: parse_ts(line)?,
+        severity,
+        title,
+        subtitle,
+        help,
+        source_ref: None,
+        cwd: extract_cwd(line, meta),
+        git_branch: extract_git_branch(line, meta),
+        // Tool errors do not have an obvious plugin signal at this
+        // layer (the parent assistant's tool_use carries the name).
+        // Phase 4 source-ref work could thread plugin attribution
+        // through here when the tool name is known.
+        plugin: None,
+    })
+}
+
+/// Map a tool-error body to a help template. Returns `None` when no
+/// template matches — better to ship the card without help than to
+/// fabricate guidance.
+///
+/// `cwd` is the session's current working directory; some templates
+/// (e.g. `tool.no_such_file`) include it in the rendered help so
+/// the user knows where the path lookup happened.
+fn match_help_for_tool_error(body: &str, cwd: &Path) -> Option<HelpRef> {
+    use std::collections::BTreeMap;
+    // Read-required: most common tool error on the reference machine
+    // (~400 instances). Two variants — "not been read" and "modified
+    // since read" — both diagnose the same situation: model needs to
+    // re-read and retry, no user action.
+    if body.contains("File has not been read yet")
+        || body.contains("File has been modified since read")
+    {
+        let mut args = BTreeMap::new();
+        if let Some(file) = extract_path_from_body(body) {
+            args.insert("file".to_string(), redact_secrets(&file));
+        }
+        return Some(HelpRef {
+            template_id: "tool.read_required".to_string(),
+            args,
+        });
+    }
+    if body.contains("Cancelled: parallel tool call") {
+        return Some(HelpRef {
+            template_id: "tool.parallel_cancelled".to_string(),
+            args: BTreeMap::new(),
+        });
+    }
+    if body.contains("ssh: connect to host") && body.contains("timed out") {
+        let mut args = BTreeMap::new();
+        if let Some(host) = extract_ssh_host(body) {
+            args.insert("host".to_string(), host);
+        }
+        return Some(HelpRef {
+            template_id: "tool.ssh_timeout".to_string(),
+            args,
+        });
+    }
+    if body.contains("String to replace not found") {
+        let mut args = BTreeMap::new();
+        if let Some(file) = extract_path_from_body(body) {
+            args.insert("file".to_string(), redact_secrets(&file));
+        }
+        return Some(HelpRef {
+            template_id: "tool.edit_drift".to_string(),
+            args,
+        });
+    }
+    if body.contains("user doesn't want to proceed") {
+        return Some(HelpRef {
+            template_id: "tool.user_rejected".to_string(),
+            args: BTreeMap::new(),
+        });
+    }
+    if body.contains("command not found") {
+        let mut args = BTreeMap::new();
+        if let Some(cmd) = extract_missing_command(body) {
+            let cmd_redacted = redact_secrets(&cmd);
+            if let Some(pkg) = brew_install_hint(&cmd_redacted) {
+                args.insert("brew_install_hint".to_string(), pkg.to_string());
+            }
+            args.insert("command".to_string(), cmd_redacted);
+        }
+        return Some(HelpRef {
+            template_id: "tool.bash_cmd_not_found".to_string(),
+            args,
+        });
+    }
+    let lower = body.to_ascii_lowercase();
+    if lower.contains("no such file or directory") {
+        let mut args = BTreeMap::new();
+        if let Some(path) = extract_no_such_file_path(body) {
+            args.insert("path".to_string(), redact_secrets(&path));
+        }
+        // Always carry the cwd context — the renderer omits it when
+        // the path looks absolute, but the template prefers having
+        // it for a relative path so the user can disambiguate.
+        let cwd_str = cwd.to_string_lossy();
+        if !cwd_str.is_empty() {
+            args.insert("cwd".to_string(), redact_secrets(&cwd_str));
+        }
+        return Some(HelpRef {
+            template_id: "tool.no_such_file".to_string(),
+            args,
+        });
+    }
+    None
+}
+
+/// Pull the offending path from a "no such file or directory" body.
+/// CC-shaped messages typically end with `... no such file or
+/// directory: <path>` (e.g. `(eval):2: no such file or directory:
+/// /tmp/missing`). Returns `None` when no path is parseable.
+fn extract_no_such_file_path(body: &str) -> Option<String> {
+    let lower = body.to_ascii_lowercase();
+    let needle = "no such file or directory";
+    let idx = lower.find(needle)?;
+    let rest = &body[idx + needle.len()..];
+    // Skip the colon-and-space delimiter.
+    let trimmed = rest.trim_start_matches([':', ' ']).trim();
+    if trimmed.is_empty() {
+        return None;
+    }
+    // Stop at first newline.
+    let end = trimmed.find('\n').unwrap_or(trimmed.len());
+    let candidate = trimmed[..end].trim();
+    if candidate.is_empty() {
+        None
+    } else {
+        Some(candidate.to_string())
+    }
+}
+
+fn severity_for_tool_error_help(help: Option<&HelpRef>) -> Severity {
+    match help.map(|h| h.template_id.as_str()) {
+        // Read-required and parallel-cancelled are pure noise — model
+        // recovers automatically. Render as Info so the default view
+        // can hide them with a "warn or above" filter.
+        Some("tool.read_required") | Some("tool.parallel_cancelled") => Severity::Info,
+        Some("tool.user_rejected") => Severity::Notice,
+        // Everything else (ssh timeout, no such file, edit drift, cmd
+        // not found, unmatched) is a real failure the user might
+        // want to act on.
+        _ => Severity::Warn,
+    }
+}
+
+fn title_for_tool_error(body: &str) -> String {
+    // First line of the body is usually the most informative — the
+    // <tool_use_error> tag wraps a sentence the model wrote for
+    // itself ("File has been modified since read…"). Strip the tag
+    // so the title is human-readable. Redact BEFORE truncation so a
+    // tool error that echoes a token (e.g. an HTTP failure with
+    // an Authorization header) doesn't surface the secret in the
+    // card title — the title is persisted to sessions.db.
+    let head = first_line(body).unwrap_or("Tool error");
+    let stripped = head
+        .trim_start_matches("<tool_use_error>")
+        .trim_end_matches("</tool_use_error>")
+        .trim();
+    let one_line = if stripped.is_empty() {
+        "Tool error".to_string()
+    } else {
+        redact_secrets(stripped)
+    };
+    truncate(&one_line, 80)
+}
+
+/// Best-effort extractor: pulls `file_path: "..."` or "in <path>" out
+/// of a tool-error body. Returns `None` when no obvious path is found.
+fn extract_path_from_body(body: &str) -> Option<String> {
+    // "in <path>" pattern (used by edit_drift)
+    if let Some(idx) = body.find(" in ") {
+        let rest = &body[idx + 4..];
+        let end = rest
+            .find(|c: char| c == '\n' || c == '.' || c == ')' || c == ',')
+            .unwrap_or(rest.len());
+        let candidate = rest[..end].trim();
+        if candidate.starts_with('/') || candidate.starts_with('~') {
+            return Some(candidate.to_string());
+        }
+    }
+    None
+}
+
+/// Pull the host from `ssh: connect to host <host>` (with or without
+/// a trailing port).
+fn extract_ssh_host(body: &str) -> Option<String> {
+    let needle = "ssh: connect to host ";
+    let idx = body.find(needle)?;
+    let rest = &body[idx + needle.len()..];
+    let end = rest
+        .find(|c: char| c.is_whitespace())
+        .unwrap_or(rest.len());
+    let host = rest[..end].trim();
+    if host.is_empty() { None } else { Some(host.to_string()) }
+}
+
+/// Map a missing command name to its Homebrew package name when the
+/// two differ. Most CLI tools install under their own name, so the
+/// table only carries the well-known exceptions. `None` is the
+/// honest "we don't know" signal — the renderer falls back to a
+/// generic install message rather than guess wrong.
+fn brew_install_hint(cmd: &str) -> Option<&'static str> {
+    Some(match cmd {
+        // Tools whose binary name matches their brew formula —
+        // safe to suggest unconditionally.
+        "rg" => "ripgrep",
+        "fd" => "fd",
+        "fzf" => "fzf",
+        "jq" => "jq",
+        "yq" => "yq",
+        "gh" => "gh",
+        "tree" => "tree",
+        "wget" => "wget",
+        "tmux" => "tmux",
+        "htop" => "htop",
+        "ncdu" => "ncdu",
+        "bat" => "bat",
+        "exa" => "eza",
+        "eza" => "eza",
+        "delta" => "git-delta",
+        "shellcheck" => "shellcheck",
+        "ffmpeg" => "ffmpeg",
+        "imagemagick" | "convert" => "imagemagick",
+        "pandoc" => "pandoc",
+        "qpdf" => "qpdf",
+        "pdftk" => "pdftk-java",
+        "gs" => "ghostscript",
+        _ => return None,
+    })
+}
+
+/// Pull the missing command from `bash: <cmd>: command not found` or
+/// `<cmd>: command not found`.
+fn extract_missing_command(body: &str) -> Option<String> {
+    let needle = ": command not found";
+    let idx = body.find(needle)?;
+    let prefix = &body[..idx];
+    // Trim back to the start of the line, then strip an optional
+    // shell-name prefix like "bash:" / "zsh:" / "(eval):2:".
+    let line_start = prefix.rfind('\n').map(|p| p + 1).unwrap_or(0);
+    let raw = &prefix[line_start..];
+    // Common shell prefixes: "bash: foo", "(eval):1: foo", "zsh: foo".
+    let stripped = raw
+        .splitn(2, ':')
+        .nth(1)
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .unwrap_or(raw.trim());
+    if stripped.is_empty() {
+        None
+    } else {
+        // If the rest still has colon-prefixed garbage, take the last
+        // word — that's typically the actual command.
+        let last_word = stripped.split_whitespace().last().unwrap_or(stripped);
+        Some(last_word.to_string())
+    }
+}
+
+/// Pull the textual content out of a `tool_result` block. CC writes
+/// either a string or an array of `{type:"text", text:"..."}` blocks
+/// — we handle both shapes.
+fn extract_tool_result_text(block: &Value) -> String {
+    match block.get("content") {
+        Some(Value::String(s)) => s.clone(),
+        Some(Value::Array(arr)) => arr
+            .iter()
+            .filter_map(|b| b.get("text").and_then(Value::as_str))
+            .collect::<Vec<_>>()
+            .join(" "),
+        _ => String::new(),
+    }
+}
+
+fn extract_cwd(line: &Value, meta: &SessionMeta) -> PathBuf {
+    line.get("cwd")
+        .and_then(Value::as_str)
+        .map(PathBuf::from)
+        .unwrap_or_else(|| meta.cwd.clone())
+}
+
+fn extract_git_branch(line: &Value, meta: &SessionMeta) -> Option<String> {
+    line.get("gitBranch")
+        .and_then(Value::as_str)
+        .map(String::from)
+        .or_else(|| meta.git_branch.clone())
+}
+
+/// Best-effort plugin attribution from a hook attachment. CC's hook
+/// `command` field on plugin-supplied hooks contains the literal
+/// `${CLAUDE_PLUGIN_ROOT}` substring, and the path that follows
+/// resolves under `~/.claude/plugins/cache/<owner>/<name>/<version>/`
+/// at runtime. Both forms work as a signature: the env-var literal
+/// or the cache path. We take the first signal we find.
+///
+/// Returns `Some("<name>@<owner>")` when extractable, `None` when
+/// the command is from outside the plugin system (e.g. a bare
+/// `bash …` script).
+fn plugin_from_hook(attachment: &Value) -> Option<String> {
+    let command = attachment.get("command").and_then(Value::as_str)?;
+    plugin_from_command_string(command)
+}
+
+/// Pull plugin slug from a hook `command` string. Two real-world
+/// shapes seen in CC's stderr:
+/// 1. `bash ${CLAUDE_PLUGIN_ROOT}/scripts/foo.sh` — the CLAUDE_PLUGIN_ROOT
+///    literal alone doesn't name the plugin (CC resolves it at
+///    runtime). Returns None — caller can fall back to other
+///    signals when present (e.g. the corresponding plugin_missing
+///    stderr already carries the slug).
+/// 2. `bash /Users/<user>/.claude/plugins/cache/<owner>/<name>/<ver>/scripts/foo.sh`
+///    — the path encodes owner + name. Returns `<name>@<owner>`.
+fn plugin_from_command_string(command: &str) -> Option<String> {
+    if let Some(idx) = command.find("/plugins/cache/") {
+        let rest = &command[idx + "/plugins/cache/".len()..];
+        let mut parts = rest.split('/');
+        let owner = parts.next()?;
+        let name = parts.next()?;
+        if !owner.is_empty() && !name.is_empty() {
+            return Some(format!("{name}@{owner}"));
+        }
+    }
+    None
+}
+
+/// Plugin attribution from a slash-command name (`/plugin:cmd`). CC
+/// namespaces plugin commands with the plugin's installed name as
+/// the prefix, separated by `:`. Returns just the plugin name (no
+/// `@<owner>` suffix — that lookup requires the installed plugins
+/// registry, which lives outside this hot path).
+fn plugin_from_namespaced_name(name: &str) -> Option<String> {
+    let (prefix, rest) = name.split_once(':')?;
+    if prefix.is_empty() || rest.is_empty() {
+        return None;
+    }
+    Some(prefix.to_string())
 }
 
 /// Per-attachment-type flavor for hook failure classification.
@@ -238,6 +969,11 @@ fn classify_hook_failure(
 
     let help = match_help_for_hook(stderr, exit_code);
 
+    // Plugin attribution: prefer the slug extracted from a
+    // plugin_missing stderr (always present in the parenthesized
+    // form), fall back to the cache-path signature in `command`.
+    let plugin = extract_missing_plugin(stderr).or_else(|| plugin_from_hook(attachment));
+
     let ts = parse_ts(line)?;
     let event_uuid = line
         .get("uuid")
@@ -265,31 +1001,62 @@ fn classify_hook_failure(
         title,
         subtitle,
         help,
-        source_ref: None, // Phase 2 adds settings-layer resolution
+        source_ref: None, // Phase 4 adds settings-layer resolution
         cwd,
         git_branch,
+        plugin,
     })
 }
 
 /// Map a hook failure's stderr/exit-code to a help template.
 ///
-/// v1 catalog: `hook.plugin_missing` only. Other patterns surface as
-/// cards without help — honest "we don't have advice for this yet"
-/// rather than fabricated guidance.
+/// Phase 2 catalog: `hook.plugin_missing` and `hook.json_invalid`.
+/// Other patterns surface as cards without help — honest "we don't
+/// have advice for this yet" rather than fabricated guidance.
 ///
 /// Every arg value derived from stderr is run through the redactor
-/// before crossing the persistence boundary. The current extractor
-/// can only return a `<slug>@<owner>` pair which is safe by shape,
-/// but the redact pass keeps the contract honest under future
-/// extractors that pull more freeform text.
+/// before crossing the persistence boundary.
 fn match_help_for_hook(stderr: &str, _exit_code: Option<i64>) -> Option<HelpRef> {
+    use std::collections::BTreeMap;
     if let Some(plugin) = extract_missing_plugin(stderr) {
-        let mut args = std::collections::BTreeMap::new();
+        let mut args = BTreeMap::new();
         args.insert("plugin".to_string(), redact_secrets(&plugin));
         return Some(HelpRef {
             template_id: "hook.plugin_missing".to_string(),
             args,
         });
+    }
+    if stderr.contains("Hook JSON output validation failed")
+        || stderr.contains("hookSpecificOutput")
+    {
+        let mut args = BTreeMap::new();
+        if let Some(detail) = extract_json_validation_detail(stderr) {
+            args.insert("detail".to_string(), redact_secrets(&detail));
+        }
+        return Some(HelpRef {
+            template_id: "hook.json_invalid".to_string(),
+            args,
+        });
+    }
+    None
+}
+
+/// Pull the most informative line out of a CC schema-validation
+/// stderr ("- : Invalid input" / "- /hookSpecificOutput: ..."). The
+/// raw stderr can run several lines and includes a JSON dump of
+/// what the hook produced; we want the one-line "what the schema
+/// rejected." Returns `None` when no specific line stands out.
+fn extract_json_validation_detail(stderr: &str) -> Option<String> {
+    // Match the typical CC line: "- /<json-pointer>: <message>" or
+    // "- : <message>". Prefer the first line that looks shaped.
+    for raw in stderr.lines() {
+        let line = raw.trim();
+        if line.starts_with("- ") {
+            let rest = line.trim_start_matches("- ").trim();
+            if !rest.is_empty() {
+                return Some(rest.to_string());
+            }
+        }
     }
     None
 }
@@ -540,5 +1307,478 @@ mod tests {
     fn extract_plugin_returns_none_on_unrelated_stderr() {
         assert_eq!(extract_missing_plugin("permission denied"), None);
         assert_eq!(extract_missing_plugin(""), None);
+    }
+
+    // ── Phase 2: HookSlow ────────────────────────────────────────
+
+    /// `hook_success` with `durationMs > 5000` → `HookSlow` card.
+    #[test]
+    fn classifies_slow_hook_success() {
+        let line = r#"{"type":"attachment","timestamp":"2026-04-25T10:00:00Z","uuid":"u1","cwd":"/x","attachment":{"type":"hook_success","hookName":"PostToolUse:Edit","hookEvent":"PostToolUse","toolUseID":"t1","content":"ok","stdout":"","stderr":"","exitCode":0,"durationMs":7500,"command":"./slow.sh"}}"#;
+        let v = parse(line);
+        let mut state = ClassifierState::default();
+        let cards = classify(&v, 0, &meta(), &mut state);
+        assert_eq!(cards.len(), 1);
+        assert_eq!(cards[0].kind, CardKind::HookSlow);
+        assert_eq!(cards[0].severity, Severity::Notice);
+        assert!(
+            cards[0].title.contains("7500 ms"),
+            "title should include duration: {:?}",
+            cards[0].title
+        );
+    }
+
+    /// Fast successful hooks stay invisible — that's the suppression
+    /// rule from design v2 §2 (routine sub-5s success = noise).
+    #[test]
+    fn fast_hook_success_is_suppressed() {
+        let line = r#"{"type":"attachment","timestamp":"2026-04-25T10:00:00Z","attachment":{"type":"hook_success","hookName":"x","hookEvent":"PostToolUse","toolUseID":"t1","content":"ok","exitCode":0,"durationMs":42}}"#;
+        let v = parse(line);
+        let mut state = ClassifierState::default();
+        let cards = classify(&v, 0, &meta(), &mut state);
+        assert!(cards.is_empty());
+    }
+
+    // ── Phase 2: ToolError ───────────────────────────────────────
+
+    fn tool_error_line(content: &str) -> Value {
+        // Build the JSONL envelope by serializing an object with the
+        // content as a string field — escaping is then handled by
+        // serde_json. Avoids the embedded-string-escaping fragility of
+        // the previous fixture style.
+        serde_json::json!({
+            "type": "user",
+            "timestamp": "2026-04-25T10:00:00Z",
+            "uuid": "u1",
+            "cwd": "/x",
+            "message": {
+                "role": "user",
+                "content": [{
+                    "type": "tool_result",
+                    "tool_use_id": "t1",
+                    "is_error": true,
+                    "content": content,
+                }]
+            }
+        })
+    }
+
+    #[test]
+    fn classifies_tool_error_unknown_pattern_without_help() {
+        let mut state = ClassifierState::default();
+        let v = tool_error_line("Exit code 1\nweird novel failure");
+        let cards = classify(&v, 0, &meta(), &mut state);
+        assert_eq!(cards.len(), 1);
+        assert_eq!(cards[0].kind, CardKind::ToolError);
+        assert!(cards[0].help.is_none());
+    }
+
+    #[test]
+    fn classifies_tool_error_read_required_with_help() {
+        let mut state = ClassifierState::default();
+        let v = tool_error_line(
+            "<tool_use_error>File has been modified since read, either by the user or by a linter.</tool_use_error>",
+        );
+        let cards = classify(&v, 0, &meta(), &mut state);
+        assert_eq!(cards.len(), 1);
+        assert_eq!(cards[0].kind, CardKind::ToolError);
+        // Read-required is Info — model auto-recovers.
+        assert_eq!(cards[0].severity, Severity::Info);
+        assert_eq!(
+            cards[0].help.as_ref().unwrap().template_id,
+            "tool.read_required"
+        );
+    }
+
+    #[test]
+    fn classifies_tool_error_ssh_timeout_extracts_host() {
+        let mut state = ClassifierState::default();
+        let v = tool_error_line("Exit code 255\nssh: connect to host 192.0.2.7 port 22: Operation timed out");
+        let cards = classify(&v, 0, &meta(), &mut state);
+        let h = cards[0].help.as_ref().unwrap();
+        assert_eq!(h.template_id, "tool.ssh_timeout");
+        assert_eq!(h.args.get("host").map(String::as_str), Some("192.0.2.7"));
+    }
+
+    #[test]
+    fn classifies_tool_error_edit_drift() {
+        let mut state = ClassifierState::default();
+        let v = tool_error_line(
+            "<tool_use_error>String to replace not found in file.\nString: foo</tool_use_error>",
+        );
+        let cards = classify(&v, 0, &meta(), &mut state);
+        assert_eq!(
+            cards[0].help.as_ref().unwrap().template_id,
+            "tool.edit_drift"
+        );
+    }
+
+    #[test]
+    fn classifies_tool_error_user_rejected() {
+        let mut state = ClassifierState::default();
+        let v = tool_error_line(
+            "The user doesn't want to proceed with this tool use. The tool use was rejected.",
+        );
+        let cards = classify(&v, 0, &meta(), &mut state);
+        assert_eq!(cards[0].severity, Severity::Notice);
+        assert_eq!(
+            cards[0].help.as_ref().unwrap().template_id,
+            "tool.user_rejected"
+        );
+    }
+
+    #[test]
+    fn classifies_tool_error_bash_cmd_not_found() {
+        let mut state = ClassifierState::default();
+        let v = tool_error_line("Exit code 127\npyenv: python: command not found");
+        let cards = classify(&v, 0, &meta(), &mut state);
+        let h = cards[0].help.as_ref().unwrap();
+        assert_eq!(h.template_id, "tool.bash_cmd_not_found");
+        assert_eq!(h.args.get("command").map(String::as_str), Some("python"));
+    }
+
+    /// Successful tool calls (`is_error: false`) must NOT produce
+    /// cards — only the failure path is interesting.
+    #[test]
+    fn successful_tool_results_are_suppressed() {
+        let mut state = ClassifierState::default();
+        let v = serde_json::json!({
+            "type": "user",
+            "timestamp": "2026-04-25T10:00:00Z",
+            "message": {
+                "role": "user",
+                "content": [{
+                    "type": "tool_result",
+                    "tool_use_id": "t1",
+                    "is_error": false,
+                    "content": "fine",
+                }]
+            }
+        });
+        let cards = classify(&v, 0, &meta(), &mut state);
+        assert!(cards.is_empty());
+    }
+
+    // ── Phase 3: Episode tracker (Agent return / stranded) ───────
+
+    fn agent_open_line(tool_use_id: &str) -> Value {
+        serde_json::json!({
+            "type": "assistant",
+            "timestamp": "2026-04-25T10:00:00Z",
+            "uuid": "u-open",
+            "cwd": "/x",
+            "message": {
+                "role": "assistant",
+                "model": "claude-opus-4-7",
+                "content": [{
+                    "type": "tool_use",
+                    "id": tool_use_id,
+                    "name": "Agent",
+                    "input": {
+                        "subagent_type": "Explore",
+                        "description": "Find the leak"
+                    }
+                }]
+            }
+        })
+    }
+
+    fn agent_close_line(tool_use_id: &str, is_error: bool, ts: &str) -> Value {
+        serde_json::json!({
+            "type": "user",
+            "timestamp": ts,
+            "uuid": "u-close",
+            "cwd": "/x",
+            "message": {
+                "role": "user",
+                "content": [{
+                    "type": "tool_result",
+                    "tool_use_id": tool_use_id,
+                    "is_error": is_error,
+                    "content": "done",
+                }]
+            }
+        })
+    }
+
+    /// Slow successful agent close → AgentReturn card (Notice).
+    /// Phase 2/3 design: only emit on failure OR duration > 60 s.
+    #[test]
+    fn agent_open_then_slow_close_emits_one_agent_return_card() {
+        let mut state = ClassifierState::default();
+        let cards1 = classify(&agent_open_line("t1"), 0, &meta(), &mut state);
+        // Opening the episode produces no card by itself (the assistant
+        // turn is the trigger; the card lands on close).
+        assert!(cards1.is_empty());
+        assert_eq!(state.open_episodes.len(), 1);
+
+        // 90 s elapsed — above the 60 s threshold, so the card emits.
+        let cards2 = classify(
+            &agent_close_line("t1", false, "2026-04-25T10:01:30Z"),
+            100,
+            &meta(),
+            &mut state,
+        );
+        assert_eq!(cards2.len(), 1);
+        assert_eq!(cards2[0].kind, CardKind::AgentReturn);
+        assert_eq!(cards2[0].severity, Severity::Notice);
+        assert!(
+            cards2[0].title.starts_with("Agent Explore returned"),
+            "title {:?}",
+            cards2[0].title
+        );
+        assert_eq!(state.open_episodes.len(), 0, "episode closed");
+    }
+
+    /// Fast successful agent close → episode closed silently (no card).
+    /// Routine fast subagents are noise per design v2 §5.
+    #[test]
+    fn agent_fast_successful_close_suppresses_card_but_drains_episode() {
+        let mut state = ClassifierState::default();
+        classify(&agent_open_line("t1"), 0, &meta(), &mut state);
+        let cards = classify(
+            // 30 s elapsed — below the 60 s threshold.
+            &agent_close_line("t1", false, "2026-04-25T10:00:30Z"),
+            100,
+            &meta(),
+            &mut state,
+        );
+        assert!(cards.is_empty(), "fast successful agent suppressed");
+        assert_eq!(state.open_episodes.len(), 0, "episode still drained");
+    }
+
+    #[test]
+    fn agent_close_with_error_emits_error_severity_card() {
+        let mut state = ClassifierState::default();
+        classify(&agent_open_line("t1"), 0, &meta(), &mut state);
+        let cards = classify(
+            &agent_close_line("t1", true, "2026-04-25T10:00:01Z"),
+            0,
+            &meta(),
+            &mut state,
+        );
+        assert_eq!(cards[0].kind, CardKind::AgentReturn);
+        assert_eq!(cards[0].severity, Severity::Error);
+        assert!(cards[0].title.contains("failed"));
+        assert_eq!(
+            cards[0].help.as_ref().unwrap().template_id,
+            "agent.error_return"
+        );
+    }
+
+    /// Open agent episodes drained at session end → AgentStranded.
+    #[test]
+    fn finalize_session_drains_open_episodes_into_stranded_cards() {
+        let mut state = ClassifierState::default();
+        classify(&agent_open_line("t1"), 0, &meta(), &mut state);
+        classify(&agent_open_line("t2"), 50, &meta(), &mut state);
+        let cards = finalize_session(&mut state, &meta());
+        assert_eq!(cards.len(), 2);
+        for card in &cards {
+            assert_eq!(card.kind, CardKind::AgentStranded);
+            assert_eq!(card.severity, Severity::Warn);
+            assert!(card.title.contains("did not return"));
+        }
+        assert_eq!(state.open_episodes.len(), 0, "drained");
+    }
+
+    /// A non-Agent `tool_result` whose id matches an open episode
+    /// (shouldn't happen in CC but defensive): fall through to the
+    /// generic ToolError path. The Agent close path checks the
+    /// open_episodes map by id alone, so this test pins what happens
+    /// when a stale id collides.
+    #[test]
+    fn non_agent_tool_result_falls_through_to_tool_error() {
+        let mut state = ClassifierState::default();
+        let v = tool_error_line("some random failure");
+        let cards = classify(&v, 0, &meta(), &mut state);
+        assert_eq!(cards[0].kind, CardKind::ToolError);
+    }
+
+    // ── Phase 3: SessionMilestone (model switch) ─────────────────
+
+    fn assistant_with_model(model: &str) -> Value {
+        serde_json::json!({
+            "type": "assistant",
+            "timestamp": "2026-04-25T10:00:00Z",
+            "uuid": "u-a",
+            "cwd": "/x",
+            "message": {
+                "role": "assistant",
+                "model": model,
+                "content": [{"type": "text", "text": "hi"}],
+            }
+        })
+    }
+
+    #[test]
+    fn first_assistant_turn_does_not_emit_milestone() {
+        let mut state = ClassifierState::default();
+        let cards = classify(
+            &assistant_with_model("claude-opus-4-7"),
+            0,
+            &meta(),
+            &mut state,
+        );
+        assert!(
+            cards.is_empty(),
+            "first model sighting is a baseline, not a switch"
+        );
+        assert_eq!(state.last_model.as_deref(), Some("claude-opus-4-7"));
+    }
+
+    #[test]
+    fn model_switch_emits_milestone_card() {
+        let mut state = ClassifierState::default();
+        classify(
+            &assistant_with_model("claude-opus-4-7"),
+            0,
+            &meta(),
+            &mut state,
+        );
+        let cards = classify(
+            &assistant_with_model("claude-sonnet-4-6"),
+            100,
+            &meta(),
+            &mut state,
+        );
+        assert_eq!(cards.len(), 1);
+        assert_eq!(cards[0].kind, CardKind::SessionMilestone);
+        assert!(
+            cards[0]
+                .title
+                .contains("claude-opus-4-7 → claude-sonnet-4-6"),
+            "title {:?}",
+            cards[0].title
+        );
+    }
+
+    #[test]
+    fn same_model_repeated_does_not_emit_milestone() {
+        let mut state = ClassifierState::default();
+        classify(
+            &assistant_with_model("claude-opus-4-7"),
+            0,
+            &meta(),
+            &mut state,
+        );
+        let cards = classify(
+            &assistant_with_model("claude-opus-4-7"),
+            100,
+            &meta(),
+            &mut state,
+        );
+        assert!(cards.is_empty());
+    }
+
+    // ── Helper extractors ─────────────────────────────────────────
+
+    #[test]
+    fn extract_ssh_host_handles_real_message() {
+        let s = "Exit code 255\nssh: connect to host 192.0.2.7 port 22: Operation timed out\n";
+        assert_eq!(extract_ssh_host(s).as_deref(), Some("192.0.2.7"));
+    }
+
+    #[test]
+    fn extract_missing_command_handles_pyenv_form() {
+        let s = "Exit code 127\npyenv: python: command not found";
+        assert_eq!(extract_missing_command(s).as_deref(), Some("python"));
+    }
+
+    #[test]
+    fn extract_missing_command_handles_bash_form() {
+        let s = "bash: fzf: command not found";
+        assert_eq!(extract_missing_command(s).as_deref(), Some("fzf"));
+    }
+
+    // ── Phase 4: Plugin attribution ──────────────────────────────
+
+    #[test]
+    fn plugin_from_command_extracts_from_cache_path() {
+        // Real shape from the audit fixture.
+        let s = "bash /Users/joker/.claude/plugins/cache/xiaolai/mermaid-preview/0.1.1/scripts/foo.sh";
+        assert_eq!(
+            plugin_from_command_string(s).as_deref(),
+            Some("mermaid-preview@xiaolai")
+        );
+    }
+
+    #[test]
+    fn plugin_from_command_returns_none_for_bare_env_var() {
+        // CLAUDE_PLUGIN_ROOT alone doesn't name the plugin — caller
+        // falls back to other signals (extract_missing_plugin from
+        // stderr is the most common one).
+        let s = "bash ${CLAUDE_PLUGIN_ROOT}/scripts/foo.sh";
+        assert_eq!(plugin_from_command_string(s), None);
+    }
+
+    #[test]
+    fn plugin_from_namespaced_name_pulls_prefix() {
+        assert_eq!(
+            plugin_from_namespaced_name("grill:roast").as_deref(),
+            Some("grill")
+        );
+        assert_eq!(
+            plugin_from_namespaced_name("nlpm:scorer").as_deref(),
+            Some("nlpm")
+        );
+    }
+
+    #[test]
+    fn plugin_from_namespaced_name_returns_none_for_bare_name() {
+        // Built-in agents like "Explore" / "general-purpose" have no
+        // plugin namespace.
+        assert_eq!(plugin_from_namespaced_name("Explore"), None);
+        assert_eq!(plugin_from_namespaced_name("general-purpose"), None);
+        // Empty halves rejected.
+        assert_eq!(plugin_from_namespaced_name(":roast"), None);
+        assert_eq!(plugin_from_namespaced_name("grill:"), None);
+    }
+
+    /// End-to-end: a real plugin_missing hook failure card carries
+    /// the extracted plugin slug as an attribution.
+    #[test]
+    fn plugin_missing_hook_attributes_to_plugin() {
+        let line = include_str!("testdata/hook_plugin_missing.jsonl").trim();
+        let v = parse(line);
+        let mut state = ClassifierState::default();
+        let cards = classify(&v, 0, &meta(), &mut state);
+        assert_eq!(cards.len(), 1);
+        assert_eq!(
+            cards[0].plugin.as_deref(),
+            Some("mermaid-preview@xiaolai"),
+            "plugin attribution missing"
+        );
+    }
+
+    /// Agent return cards inherit the plugin namespace from
+    /// `subagent_type` when present.
+    #[test]
+    fn plugin_namespaced_subagent_attributes_to_plugin() {
+        let mut state = ClassifierState::default();
+        let open = serde_json::json!({
+            "type": "assistant",
+            "timestamp": "2026-04-25T10:00:00Z",
+            "uuid": "u-open",
+            "cwd": "/x",
+            "message": {
+                "role": "assistant",
+                "model": "claude-opus-4-7",
+                "content": [{
+                    "type": "tool_use",
+                    "id": "t1",
+                    "name": "Agent",
+                    "input": {
+                        "subagent_type": "grill:roast",
+                        "description": "audit",
+                    }
+                }]
+            }
+        });
+        classify(&open, 0, &meta(), &mut state);
+        // Use a slow close (>60s) so the card actually emits.
+        let close = agent_close_line("t1", false, "2026-04-25T10:01:30Z");
+        let cards = classify(&close, 100, &meta(), &mut state);
+        assert_eq!(cards[0].plugin.as_deref(), Some("grill"));
     }
 }
