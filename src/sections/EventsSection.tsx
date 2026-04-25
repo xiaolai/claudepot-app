@@ -162,14 +162,22 @@ export function EventsSection() {
       const nav = await api.cardsNavigate(card.id);
       if (!nav) return;
       // Hand off target session via a window CustomEvent — the App
-      // shell switches to the Activities section and seeds the
-      // Sessions detail with this path. Per-line scroll-to-offset
-      // is deferred (the shell doesn't yet thread byteOffset down
+      // shell switches to Projects, resolves the matching project
+      // by cwd, and opens the transcript inside ProjectDetail's
+      // master-detail pane. Per-line scroll-to-byte-offset is
+      // deferred (the shell doesn't yet thread byteOffset down
       // through SessionDetail); landing on the right transcript is
-      // the MVP.
+      // the MVP. If no registered project matches the cwd (orphan),
+      // ProjectsSection still seeds openedSessionPath so the
+      // transcript opens in the detail pane without a project row
+      // to anchor it.
       window.dispatchEvent(
         new CustomEvent("claudepot:navigate-section", {
-          detail: { id: "activities", sessionPath: nav.sessionPath },
+          detail: {
+            id: "projects",
+            projectPath: card.cwd,
+            sessionPath: nav.sessionPath,
+          },
         }),
       );
     } catch (e) {

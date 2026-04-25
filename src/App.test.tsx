@@ -81,7 +81,6 @@ describe("App shell — paper-mono", () => {
     // presence of each label somewhere in the sidebar region.
     expect(await screen.findByText("Accounts")).toBeInTheDocument();
     expect(screen.getByText("Projects")).toBeInTheDocument();
-    expect(screen.getByText("Sessions")).toBeInTheDocument();
     expect(screen.getByText("Activity")).toBeInTheDocument();
     expect(screen.getByText("Global")).toBeInTheDocument();
     expect(screen.getByText("Settings")).toBeInTheDocument();
@@ -205,7 +204,7 @@ describe("App shell — paper-mono", () => {
     expect(toggle).toBeInTheDocument();
   });
 
-  it("shows the sessions nav badge when a live session is errored", async () => {
+  it("shows the activity nav badge when a live session is errored", async () => {
     await renderApp({
       app_status: () => sampleStatus({ account_count: 0 }),
       account_list: () => [],
@@ -233,15 +232,17 @@ describe("App shell — paper-mono", () => {
       }),
     });
 
-    // After the registry rename in the events/activity collapse,
-    // the cross-project firehose nav row is now labeled "Sessions"
-    // (id stays `activities` for localStorage compatibility). The
-    // badge still surfaces alerting sessions there.
-    const activitiesBtn = await screen.findByRole("button", {
-      name: "Sessions",
+    // After the events-into-projects collapse, the cross-project
+    // firehose nav row is gone from the sidebar; alerting sessions
+    // now surface on the merged "Activity" surface (id `events`,
+    // label "Activity"). That tab owns "what's happening right now"
+    // — the live strip + dashboard + events stream — so the badge
+    // moved with the live signal.
+    const activityBtn = await screen.findByRole("button", {
+      name: "Activity",
     });
     await waitFor(() => {
-      expect(within(activitiesBtn).getByText("1")).toBeInTheDocument();
+      expect(within(activityBtn).getByText("1")).toBeInTheDocument();
     });
   });
 });
