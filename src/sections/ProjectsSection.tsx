@@ -40,9 +40,22 @@ import { AdoptOrphansModal } from "./projects/AdoptOrphansModal";
 export function ProjectsSection({
   subRoute,
   onSubRouteChange,
+  pendingProjectPath,
+  pendingSessionPath,
+  onPendingConsumed,
 }: {
   subRoute: string | null;
   onSubRouteChange: (next: string | null) => void;
+  /** Project cwd to open on next mount/refresh, e.g. from a card
+   *  click in the Activity surface. Cleared via `onPendingConsumed`
+   *  the first paint that successfully selects the project. */
+  pendingProjectPath?: string | null;
+  /** Session jsonl path to open inside ProjectDetail once the
+   *  project resolves. Consumed alongside `pendingProjectPath`. */
+  pendingSessionPath?: string | null;
+  /** Fired when the pending pair has been consumed so the parent
+   *  can clear state and avoid re-applying on every prop change. */
+  onPendingConsumed?: () => void;
 }) {
   const [projects, setProjects] = useState<ProjectInfo[]>([]);
   const [orphans, setOrphans] = useState<OrphanedProject[]>([]);
@@ -71,6 +84,56 @@ export function ProjectsSection({
   useEffect(() => {
     if (projectTab !== "sessions") setOpenedSessionPath(null);
   }, [projectTab]);
+
+  // Cross-section navigation hand-off. Two callers feed in here:
+  //   1. Activity surface card click — supplies `{projectPath, sessionPath}`
+  //      (cwd carried on the card itself; clean lookup).
+  //   2. cp-goto-session, openLiveSession, palette goto — supply
+  //      only `sessionPath`. We derive the project by extracting the
+  //      slug (the second-to-last path segment of the .jsonl) and
+  //      matching it against `project.sanitized_name`. The slug
+  //      encodes the cwd via `sanitize_path`; matching by that name
+  //      is what the GUI uses everywhere else.
+  // If no project matches (orphan, project deleted), we still seed
+  // openedSessionPath so the transcript opens via the master-detail
+  // pane — but only when a project IS selected, since the right pane
+  // hides when selectedPath is null. The onPendingConsumed callback
+  // fires once after the projects list arrives so the parent clears
+  // state without trapping us in a setState loop.
+  const consumedPendingRef = useRef(false);
+  useEffect(() => {
+    if (consumedPendingRef.current) return;
+    if (!pendingProjectPath && !pendingSessionPath) return;
+    if (loading) return;
+    let resolvedProject: ProjectInfo | null = null;
+    if (pendingProjectPath) {
+      const wanted = pendingProjectPath.toLowerCase();
+      resolvedProject =
+        projects.find((p) => p.original_path.toLowerCase() === wanted) ?? null;
+    }
+    if (!resolvedProject && pendingSessionPath) {
+      // Derive slug: the parent directory of the .jsonl file under
+      // `<cc_config_dir>/projects/<slug>/<sid>.jsonl`.
+      const parts = pendingSessionPath.split(/[\\/]/);
+      const slug = parts[parts.length - 2] ?? null;
+      if (slug) {
+        resolvedProject =
+          projects.find((p) => p.sanitized_name === slug) ?? null;
+      }
+    }
+    if (resolvedProject) setSelectedPath(resolvedProject.original_path);
+    if (pendingSessionPath && resolvedProject) {
+      setOpenedSessionPath(pendingSessionPath);
+    }
+    consumedPendingRef.current = true;
+    onPendingConsumed?.();
+  }, [
+    loading,
+    pendingProjectPath,
+    pendingSessionPath,
+    projects,
+    onPendingConsumed,
+  ]);
   const [renameTarget, setRenameTarget] = useState<string | null>(null);
   const [filter, setFilter] = useState<ProjectFilter>("all");
   const [nameFilter, setNameFilter] = useState("");
