@@ -151,6 +151,24 @@ pub enum LiveDeltaKind {
     ModelChanged { model: String },
     /// Overlay transition — errored or stuck state flipped.
     OverlayChanged { errored: bool, stuck: bool },
+    /// An activity card was extracted from this session's tail.
+    /// Carries the assigned `id` from the index plus the payload
+    /// fields the GUI needs to render an inline strip without a
+    /// follow-up query. Subscribers should debounce by `id` —
+    /// rare double-emit (rotation race) is the only case where
+    /// the same id might appear twice.
+    ///
+    /// `card_kind` (not `kind`) avoids colliding with the serde
+    /// discriminator tag on this enum.
+    CardEmitted {
+        id: i64,
+        card_kind: String,
+        severity: String,
+        title: String,
+        ts_ms: i64,
+        plugin: Option<String>,
+        cwd: String,
+    },
     /// Session has ended (process died or PID file removed). The
     /// subscriber should discard state and unsubscribe.
     Ended,

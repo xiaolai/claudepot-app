@@ -899,6 +899,97 @@ export interface ActivityTrends {
 }
 
 // ---------------------------------------------------------------------------
+// Activity cards — per-event forensic surface
+// (separate from ActivityTrends's live-strip aggregation; see design v2)
+// ---------------------------------------------------------------------------
+
+export type CardKindLabel =
+  | "hook"
+  | "hook-slow"
+  | "hook-info"
+  | "agent"
+  | "agent-stranded"
+  | "tool-error"
+  | "command"
+  | "milestone";
+
+export type SeverityLabel = "INFO" | "NOTICE" | "WARN" | "ERROR";
+
+export interface HelpRef {
+  template_id: string;
+  args: Record<string, string>;
+  /** Pre-rendered English text from the template catalog. `undefined`
+   *  means the template id was unknown to the binary that wrote it —
+   *  the renderer should hide the help line rather than guess. */
+  rendered?: string;
+}
+
+export interface SourceRef {
+  path: string;
+  line?: number;
+  scope: "project" | "local" | "user" | "managed" | "unknown";
+}
+
+/** One activity card. Matches `ActivityCardDto` on the Rust side. */
+export interface ActivityCard {
+  id: number;
+  session_path: string;
+  event_uuid?: string;
+  byte_offset: number;
+  kind: CardKindLabel;
+  ts_ms: number;
+  severity: SeverityLabel;
+  title: string;
+  subtitle?: string;
+  help?: HelpRef;
+  source_ref?: SourceRef;
+  cwd: string;
+  git_branch?: string;
+  plugin?: string;
+}
+
+/** Filter set for `cardsRecent` / `cardsCountNewSince`. Every field
+ *  optional; absent = no constraint on that dimension. */
+export interface CardsRecentQuery {
+  sinceMs?: number;
+  kinds?: CardKindLabel[];
+  minSeverity?: "info" | "notice" | "warn" | "error";
+  projectPathPrefix?: string;
+  plugin?: string;
+  limit?: number;
+}
+
+export interface CardsCount {
+  total: number;
+  /** Cards with id strictly above `lastSeenId`. The "N new since you
+   *  were away" badge value. */
+  new: number;
+  lastSeenId?: number | null;
+}
+
+/** Click-through navigation payload. The renderer uses this to
+ *  switch to the Sessions section and seek to the right line. */
+export interface CardNavigate {
+  sessionPath: string;
+  byteOffset: number;
+  eventUuid?: string;
+}
+
+export interface CardsReindexFailure {
+  path: string;
+  error: string;
+}
+
+export interface CardsReindexResult {
+  filesScanned: number;
+  cardsInserted: number;
+  cardsSkippedDuplicates: number;
+  cardsPruned: number;
+  failed: CardsReindexFailure[];
+  elapsedMs: number;
+}
+
+// ---------------------------------------------------------------------------
 // Session prune / slim / trash
 // ---------------------------------------------------------------------------
 
