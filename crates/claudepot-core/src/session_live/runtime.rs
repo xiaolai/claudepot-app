@@ -20,13 +20,16 @@
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::Arc;
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::{Arc, Mutex as StdMutex};
 use std::time::Duration;
 
 use chrono::Utc;
 use tokio::sync::{mpsc, watch, Mutex};
 
+use crate::activity::{
+    classify, finalize_session as activity_finalize, ActivityIndex, ClassifierState, SessionMeta,
+};
 use crate::paths;
 use crate::project_sanitize::sanitize_path;
 use crate::session::{parse_line_into, SessionEvent};
@@ -73,8 +76,24 @@ pub struct LiveRuntime {
     /// writing to on each tick. See `transcript_resolver` for the
     /// ownership rules and CC source references.
     resolver: Arc<Mutex<TranscriptResolver>>,
-    /// Cancellation flag set by `stop`; the poll loop checks it.
-    running: Arc<AtomicBool>,
+    /// Generation counter that drives task lifecycle. Each `start`
+    /// bumps it; the spawned poll task captures its generation and
+    /// exits as soon as `current_generation` differs. `stop` simply
+    /// bumps the counter — no shared `running` flag, so two pollers
+    /// can never overlap regardless of how rapidly start/stop fires.
+    current_generation: Arc<AtomicU64>,
+    /// Notify fired by the most recently spawned poll task right
+    /// before it exits. `start` clones the prior `Notify` (if any)
+    /// after bumping the generation, then awaits it before
+    /// entering its own poll loop. This is what makes rapid
+    /// stop→start race-safe: two pollers can never overlap.
+    exit_notify: Arc<StdMutex<Option<Arc<tokio::sync::Notify>>>>,
+    /// Optional activity index. When set, the per-tick tail loop
+    /// also runs each new line through the classifier and persists
+    /// any emitted cards. `None` keeps the runtime backwards-
+    /// compatible — existing test harnesses and Tauri commands that
+    /// don't care about activity see no behavior change.
+    activity: Arc<StdMutex<Option<Arc<ActivityIndex>>>>,
 }
 
 /// Per-session mutable state the runtime carries between ticks.
@@ -107,6 +126,21 @@ struct SessionState {
     /// Resets to 0 on every write; forces a heartbeat write when it
     /// crosses HEARTBEAT_TICKS (defined in `tick`).
     ticks_since_metrics: u64,
+    /// Per-session classifier state (open Agent episodes, last
+    /// model, …). Lives next to the tail since classifier and tail
+    /// are both per-session and share the same byte-offset cursor.
+    /// Default-constructed for new sessions; mutated in place by
+    /// `classify` on every line.
+    activity_state: ClassifierState,
+    /// Cwd captured at session attach time, threaded into
+    /// `SessionMeta` so the classifier can populate cards even when
+    /// individual JSONL lines omit a `cwd` field. CC writes `cwd`
+    /// on every line in current versions, but the fallback keeps
+    /// us robust against historical or partial records.
+    cwd_path: PathBuf,
+    /// Most recent `gitBranch` value seen on a line in this session
+    /// — same role as `cwd_path` for the SessionMeta fallback.
+    last_git_branch: Option<String>,
 }
 
 impl LiveRuntime {
@@ -134,7 +168,9 @@ impl LiveRuntime {
             metrics,
             excluded_paths: Arc::new(Mutex::new(Vec::new())),
             resolver: Arc::new(Mutex::new(TranscriptResolver::new())),
-            running: Arc::new(AtomicBool::new(false)),
+            current_generation: Arc::new(AtomicU64::new(0)),
+            exit_notify: Arc::new(StdMutex::new(None)),
+            activity: Arc::new(StdMutex::new(None)),
         })
     }
 
@@ -157,8 +193,27 @@ impl LiveRuntime {
             metrics: None,
             excluded_paths: Arc::new(Mutex::new(Vec::new())),
             resolver: Arc::new(Mutex::new(TranscriptResolver::new())),
-            running: Arc::new(AtomicBool::new(false)),
+            current_generation: Arc::new(AtomicU64::new(0)),
+            exit_notify: Arc::new(StdMutex::new(None)),
+            activity: Arc::new(StdMutex::new(None)),
         })
+    }
+
+    /// Inject an `ActivityIndex` so the per-tick tail loop also runs
+    /// each new line through the activity classifier. Optional —
+    /// without it, the runtime keeps its prior behavior (status only).
+    /// Called once at startup by the production entrypoint; tests
+    /// inject a tempdir-backed index when they want classification
+    /// coverage.
+    pub fn enable_activity(&self, idx: Arc<ActivityIndex>) {
+        if let Ok(mut slot) = self.activity.lock() {
+            *slot = Some(idx);
+        }
+    }
+
+    /// Return a clone of the injected activity index, if any.
+    pub fn activity(&self) -> Option<Arc<ActivityIndex>> {
+        self.activity.lock().ok().and_then(|g| g.clone())
     }
 
     /// Replace the excluded-paths list. Called by the Tauri command
@@ -178,19 +233,41 @@ impl LiveRuntime {
         self.metrics.clone()
     }
 
-    /// Spawn the poll loop. Idempotent: calling start twice when
-    /// already running is a no-op. Handle is returned for tests
-    /// that want to await completion after `stop`; production
+    /// Spawn the poll loop. Race-safe across rapid stop→start cycles:
+    /// the new task awaits termination of any prior task before
+    /// entering its own poll loop, so two pollers never run
+    /// concurrently. Returns the handle for tests; production
     /// callers can discard it.
     pub fn start(self: Arc<Self>) -> tokio::task::JoinHandle<()> {
-        if self.running.swap(true, Ordering::SeqCst) {
-            // Already running. Spawn a trivially-complete task for
-            // caller API symmetry.
-            return tokio::spawn(async {});
-        }
+        // Bump the generation. Any prior poll task observes the new
+        // value and exits at its next loop check. The new task
+        // captures `my_gen` and runs until the generation moves past
+        // it again (next start or stop).
+        let my_gen = self.current_generation.fetch_add(1, Ordering::SeqCst) + 1;
+
+        // Swap in our exit-notify and capture the prior one so we
+        // can await it before entering the loop. Holding the lock
+        // for both operations keeps swap atomic relative to a
+        // concurrent `start`.
+        let my_notify = Arc::new(tokio::sync::Notify::new());
+        let prior_notify = {
+            let mut slot = self
+                .exit_notify
+                .lock()
+                .expect("exit_notify mutex poisoned");
+            slot.replace(Arc::clone(&my_notify))
+        };
+
         let this = Arc::clone(&self);
         tokio::spawn(async move {
-            while this.running.load(Ordering::SeqCst) {
+            // Drain any prior poll task first. This is the load-bearing
+            // line: without it, a rapid stop→start could leave the old
+            // task mid-tick (holding `state` lock or in flight) while
+            // the new one starts ticking — producing two pollers.
+            if let Some(prior) = prior_notify {
+                prior.notified().await;
+            }
+            while this.current_generation.load(Ordering::SeqCst) == my_gen {
                 if let Err(e) = this.tick().await {
                     tracing::warn!(
                         target = "session_live::runtime",
@@ -200,13 +277,19 @@ impl LiveRuntime {
                 }
                 tokio::time::sleep(TICK_INTERVAL).await;
             }
+            // Tell any future `start` (and the surrounding `stop`-
+            // awaiter, if any) that this task has fully exited.
+            // `notify_waiters` wakes everyone currently parked plus
+            // future `notified()` calls, since we use the
+            // permit-style `notify_one`.
+            my_notify.notify_one();
         })
     }
 
-    /// Stop the poll loop. Sets the cancellation flag; the running
-    /// task will exit on its next sleep wakeup (≤ 500 ms).
+    /// Stop the poll loop. Bumps the generation; the running task
+    /// will exit on its next loop-condition check (≤ 500 ms).
     pub fn stop(&self) {
-        self.running.store(false, Ordering::SeqCst);
+        self.current_generation.fetch_add(1, Ordering::SeqCst);
     }
 
     /// Aggregate subscription for surfaces that want the full list
@@ -313,6 +396,27 @@ impl LiveRuntime {
             .cloned()
             .collect();
         for sid in &gone {
+            // Drain any open Agent episodes into AgentStranded
+            // cards before removing the session — the session
+            // ended, so anything still open will never close
+            // naturally. Idempotent; classifier state is consumed.
+            if let (Some(idx), Some(s)) = (self.activity(), state.get_mut(sid)) {
+                let meta = SessionMeta {
+                    session_path: s.transcript_path.clone(),
+                    cwd: s.cwd_path.clone(),
+                    git_branch: s.last_git_branch.clone(),
+                };
+                let stranded = activity_finalize(&mut s.activity_state, &meta);
+                if !stranded.is_empty() {
+                    if let Err(err) = idx.insert_many(&stranded) {
+                        tracing::warn!(
+                            target = "session_live::runtime",
+                            error = %err,
+                            "activity finalize insert failed (continuing)"
+                        );
+                    }
+                }
+            }
             // Emit an Ended delta if anyone was listening.
             let seq = state.get(sid).map(|s| s.seq).unwrap_or(0) + 1;
             let _ = self
@@ -364,6 +468,12 @@ impl LiveRuntime {
                 .set_pid_status(pid_status, rec.waiting_for.clone());
             let pid_waiting_for_snap = rec.waiting_for.clone();
 
+            // Capture pre-poll byte offset BEFORE `tail.poll()`
+            // mutates it. Used to compute per-line offsets for the
+            // activity classifier — design v2's `Card.byte_offset`
+            // is the line's first-byte position in the JSONL.
+            let pre_poll_offset = s.tail.offset();
+
             let progress = match s.tail.poll() {
                 Ok(p) => p,
                 Err(e) => {
@@ -378,6 +488,12 @@ impl LiveRuntime {
             };
             if progress.rotated {
                 s.machine = StatusMachine::new();
+                // Classifier state is per-session — a transcript
+                // rotation is effectively a new session and the
+                // open-episode set must reset. Otherwise an Agent
+                // tool_use opened in the pre-rotation transcript
+                // would falsely linger and emit a stranded card.
+                s.activity_state = ClassifierState::default();
             }
             let mut events: Vec<SessionEvent> = Vec::new();
             for (i, line) in progress.new_lines.iter().enumerate() {
@@ -385,6 +501,62 @@ impl LiveRuntime {
             }
             for e in &events {
                 s.machine.ingest(e);
+            }
+
+            // Activity classifier pass — runs alongside the
+            // transcript parser, sharing the same byte stream but
+            // not the same parsed model. See dev-docs/activity-cards-
+            // design.md §1 call #2 for the design rationale (cards
+            // and the transcript view have different needs).
+            if let Some(idx) = self.activity() {
+                let meta = SessionMeta {
+                    session_path: s.transcript_path.clone(),
+                    cwd: s.cwd_path.clone(),
+                    git_branch: s.last_git_branch.clone(),
+                };
+                let mut new_cards = Vec::new();
+                let mut running_offset = pre_poll_offset;
+                for line in progress.new_lines.iter() {
+                    // Best-effort parse — malformed lines simply
+                    // don't produce cards. The classifier is
+                    // defensive against schema drift.
+                    if let Ok(v) = serde_json::from_str::<serde_json::Value>(line) {
+                        // Refresh meta from any cwd/gitBranch on the
+                        // line — CC writes them on every record in
+                        // current versions, so this keeps cards
+                        // accurate even after `cd` mid-session.
+                        if let Some(c) = v.get("cwd").and_then(|v| v.as_str()) {
+                            s.cwd_path = PathBuf::from(c);
+                        }
+                        if let Some(b) = v.get("gitBranch").and_then(|v| v.as_str()) {
+                            s.last_git_branch = Some(b.to_string());
+                        }
+                        let scoped_meta = SessionMeta {
+                            session_path: meta.session_path.clone(),
+                            cwd: s.cwd_path.clone(),
+                            git_branch: s.last_git_branch.clone(),
+                        };
+                        new_cards.extend(classify(
+                            &v,
+                            running_offset,
+                            &scoped_meta,
+                            &mut s.activity_state,
+                        ));
+                    }
+                    // +1 for the trailing newline that was stripped
+                    // by `read_line` before the line landed in
+                    // `progress.new_lines`.
+                    running_offset += line.len() as u64 + 1;
+                }
+                if !new_cards.is_empty() {
+                    if let Err(err) = idx.insert_many(&new_cards) {
+                        tracing::warn!(
+                            target = "session_live::runtime",
+                            error = %err,
+                            "activity insert_many failed (continuing)"
+                        );
+                    }
+                }
             }
 
             // Compute the new snapshot and emit deltas for any
@@ -562,6 +734,72 @@ fn transcript_path(projects_dir: &Path, cwd: &str, session_id: &str) -> PathBuf 
     projects_dir.join(slug).join(format!("{session_id}.jsonl"))
 }
 
+/// Bytes of trailing transcript content read on attach to seed the
+/// status machine. Sized to comfortably hold tens of recent JSONL
+/// lines without being an attack surface for huge files. CC events
+/// are typically a few hundred bytes; 64 KiB gives us ~150-300
+/// recent events which is more than enough to recover the latest
+/// status (busy / waiting / idle / errored).
+const ATTACH_BACKFILL_BYTES: u64 = 64 * 1024;
+
+/// Read up to `max_bytes` from the END of `path` (aligned to a line
+/// boundary), parse complete JSONL lines, and feed each event into
+/// `machine` so the status snapshot reflects actual recent activity.
+/// Returns the file size at read time — the caller passes this to
+/// `FileTail::at_offset` so the tail picks up exactly where the
+/// seed left off (no gap, no double-ingest). Best-effort: any I/O
+/// or parse failure leaves `machine` untouched and returns `None`,
+/// in which case the caller falls back to a plain `at_eof` tail.
+fn seed_status_from_recent_lines(
+    path: &Path,
+    machine: &mut StatusMachine,
+    max_bytes: u64,
+) -> Option<u64> {
+    use std::io::{Read, Seek, SeekFrom};
+    let mut file = std::fs::File::open(path).ok()?;
+    let size = file.metadata().ok()?.len();
+    if size == 0 {
+        return Some(0);
+    }
+    let take = size.min(max_bytes);
+    let start = size - take;
+    file.seek(SeekFrom::Start(start)).ok()?;
+    let mut buf = Vec::with_capacity(take as usize);
+    file.take(take).read_to_end(&mut buf).ok()?;
+    // If we sliced into the middle of a line (happens whenever
+    // `start > 0`), drop the partial-leading-line so we never feed
+    // a malformed JSON fragment to the parser.
+    let parse_from = if start == 0 {
+        0
+    } else {
+        match buf.iter().position(|&b| b == b'\n') {
+            Some(pos) => pos + 1,
+            // No newline anywhere in the trailing window — entire
+            // tail is one in-flight line. Skip parsing but still
+            // report the size so the tail starts from EOF.
+            None => return Some(size),
+        }
+    };
+    let slice = &buf[parse_from..];
+    let mut events: Vec<SessionEvent> = Vec::new();
+    let mut line_no = 0usize;
+    for raw in slice.split(|&b| b == b'\n') {
+        if raw.is_empty() {
+            continue;
+        }
+        line_no += 1;
+        let line = match std::str::from_utf8(raw) {
+            Ok(s) => s,
+            Err(_) => continue,
+        };
+        parse_line_into(&mut events, line, line_no);
+    }
+    for e in &events {
+        machine.ingest(e);
+    }
+    Some(size)
+}
+
 fn snapshot_waiting_for(s: &SessionState) -> Option<String> {
     s.machine.snapshot().waiting_for
 }
@@ -569,12 +807,30 @@ fn snapshot_waiting_for(s: &SessionState) -> Option<String> {
 impl SessionState {
     fn try_attach(rec: &PidRecord, projects_dir: &Path) -> std::io::Result<Self> {
         let path = transcript_path(projects_dir, &rec.cwd, &rec.session_id);
-        // at_eof: don't replay historical content on attach. The live
-        // view is forward-only; history lives in the static Sessions
-        // browser.
-        let tail = FileTail::at_eof(&path)?;
         let mut machine = StatusMachine::new();
+        // Seed the status machine from a bounded trailing window of
+        // the existing transcript BEFORE opening the tail. Without
+        // this, busy/waiting sessions (e.g. ones in flight when the
+        // runtime starts, or freshly attached after `/clear`
+        // rebinding) would appear Idle until the next line lands.
+        // The window is small enough (64 KiB) that even very chatty
+        // transcripts only cost a few JSONL parses on attach.
+        let seed_size = seed_status_from_recent_lines(
+            &path,
+            &mut machine,
+            ATTACH_BACKFILL_BYTES,
+        );
+        // Open the tail at the byte offset the seed left off at.
+        // Using `at_offset` (rather than re-statting via `at_eof`)
+        // closes the race where lines appended between the seed
+        // read and the tail open would be lost.
+        let tail = match seed_size {
+            Some(off) => FileTail::at_offset(&path, off)?,
+            None => FileTail::at_eof(&path)?,
+        };
         // Prime with the PID-file status if present (BG_SESSIONS on).
+        // This is applied AFTER backfill so an authoritative PID
+        // status wins over any stale seeded transition.
         if let Some(raw) = rec.status.as_deref() {
             machine.set_pid_status(
                 Some(Status::from_pid_field(raw)),
@@ -605,6 +861,9 @@ impl SessionState {
             last_metrics_stuck: false,
             last_metrics_model: None,
             ticks_since_metrics: 0,
+            activity_state: ClassifierState::default(),
+            cwd_path: PathBuf::from(&rec.cwd),
+            last_git_branch: None,
         })
     }
 }

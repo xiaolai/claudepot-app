@@ -302,6 +302,86 @@ async fn start_stop_lifecycle_is_clean() {
         .unwrap();
 }
 
+/// Rapid stop→start must NOT spawn a second poller while the prior
+/// one is still alive. The new task must wait for the prior one to
+/// terminate before entering its own loop. We verify this by
+/// observing that at most ONE poll task is active at a time:
+/// successive `start`+`stop` cycles converge to all handles
+/// completing within the bounded test window.
+#[tokio::test]
+async fn rapid_stop_start_does_not_double_spawn() {
+    let f = fixture();
+
+    // First cycle: start, then stop without giving the loop a chance
+    // to fully exit between the next start.
+    let h1 = f.runtime.clone().start();
+    // Stop immediately (no sleep): the loop is still in its first
+    // sleep wakeup window.
+    f.runtime.stop();
+    // Re-start before h1 has had the chance to exit. Without the
+    // generation+notify fix, this used to leave two pollers running
+    // (h1 still alive while h2 begins ticking).
+    let h2 = f.runtime.clone().start();
+    // Now stop the second one too.
+    f.runtime.stop();
+
+    // Both handles must complete within the bounded window. If they
+    // don't, the fix isn't working: a hung handle means a poll task
+    // never noticed its generation was bumped (or the new task
+    // never awaited the old).
+    tokio::time::timeout(std::time::Duration::from_secs(2), h1)
+        .await
+        .expect("h1 must complete after stop")
+        .unwrap();
+    tokio::time::timeout(std::time::Duration::from_secs(2), h2)
+        .await
+        .expect("h2 must complete after stop")
+        .unwrap();
+}
+
+/// Seed-on-attach: a transcript that was busy mid-turn before the
+/// runtime started must surface as Busy on the very first tick —
+/// not Idle. Without the seed step, `try_attach` opens the tail at
+/// EOF with a fresh `StatusMachine`, so the snapshot reports Idle
+/// until CC writes another line (which can take seconds or never).
+#[tokio::test]
+async fn try_attach_seeds_status_from_recent_transcript() {
+    let f = fixture();
+    write_pid_file(
+        &f.sessions_dir,
+        12345,
+        r#"{"pid":12345,"sessionId":"sess-seed","cwd":"/tmp/seed-proj","startedAt":1000}"#,
+    );
+    // Pre-existing transcript: a user turn followed by an unmatched
+    // tool_use — the canonical "Busy" shape per the status-machine
+    // tests. The runtime hasn't seen any of this yet.
+    write_transcript(
+        &f.projects_dir,
+        "/tmp/seed-proj",
+        "sess-seed",
+        concat!(
+            r#"{"parentUuid":null,"isSidechain":false,"userType":"external","cwd":"/tmp/seed-proj","sessionId":"sess-seed","version":"2.1","timestamp":"2026-04-21T10:00:00.000Z","uuid":"u1","type":"user","message":{"role":"user","content":"go"}}"#,
+            "\n",
+            r#"{"parentUuid":"u1","isSidechain":false,"userType":"external","cwd":"/tmp/seed-proj","sessionId":"sess-seed","version":"2.1","timestamp":"2026-04-21T10:00:05.000Z","uuid":"u2","type":"assistant","message":{"id":"m1","role":"assistant","model":"claude-opus-4-7","content":[{"type":"tool_use","id":"tu1","name":"Bash","input":{"command":"pnpm test"}}]}}"#,
+            "\n",
+        ),
+    );
+    f.check.set_alive(&[12345]);
+
+    // First tick attaches and ALSO seeds status. The aggregate must
+    // already report Busy + the recent action — no second tick
+    // required.
+    f.runtime.tick().await.unwrap();
+    let snap = f.runtime.snapshot();
+    assert_eq!(snap.len(), 1);
+    assert_eq!(
+        snap[0].status,
+        Status::Busy,
+        "seeded transcript must surface as Busy on first tick"
+    );
+    assert_eq!(snap[0].current_action.as_deref(), Some("Bash: pnpm test"));
+}
+
 #[tokio::test]
 async fn session_snapshot_returns_live_record_only() {
     let f = fixture();
@@ -687,4 +767,135 @@ async fn redaction_applied_to_current_action() {
         ca.contains("Authorization: Bearer ***") || ca.contains("sk-ant-***"),
         "expected redaction marker, got: {ca}"
     );
+}
+
+/// Phase 3 LiveRuntime integration: when an `ActivityIndex` is
+/// enabled, the per-tick tail loop classifies new lines and persists
+/// any emitted cards. The classifier runs alongside the transcript
+/// parser, sharing the byte stream but not the parsed model.
+#[tokio::test]
+async fn activity_classifier_runs_on_live_tail() {
+    let f = fixture();
+    let activity_dir = f._td.path().join("activity.db");
+    let idx = std::sync::Arc::new(crate::activity::ActivityIndex::open(&activity_dir).unwrap());
+    f.runtime.enable_activity(std::sync::Arc::clone(&idx));
+
+    // Pre-create a transcript with an existing failure that would
+    // produce a card. Using the real plugin_missing fixture so the
+    // help template path lights up too.
+    let body = include_str!("../activity/testdata/hook_plugin_missing.jsonl").trim();
+    let body = format!("{body}\n");
+    write_transcript(&f.projects_dir, "/Users/x/proj", "sess1", &body);
+    // Register the live session AFTER writing the transcript so the
+    // attach path sees it.
+    write_pid_file(
+        &f.sessions_dir,
+        9001,
+        r#"{"pid":9001,"sessionId":"sess1","cwd":"/Users/x/proj","startedAt":1700000000000}"#,
+    );
+    f.check.set_alive(&[9001]);
+    f.runtime.tick().await.unwrap();
+
+    // Append a fresh `hook_non_blocking_error` and tick again so the
+    // tail-derived path (not just the attach seed) gets exercised.
+    let appended = format!("{body}");
+    append_transcript(&f.projects_dir, "/Users/x/proj", "sess1", &appended);
+    f.runtime.tick().await.unwrap();
+
+    let cards = idx
+        .recent(&crate::activity::RecentQuery {
+            limit: Some(50),
+            ..Default::default()
+        })
+        .unwrap();
+    assert!(
+        cards.iter().any(|c| c.title.contains("PostToolUse:Write")),
+        "expected at least one PostToolUse:Write card, got titles: {:?}",
+        cards.iter().map(|c| c.title.clone()).collect::<Vec<_>>()
+    );
+    assert!(
+        cards.iter().any(|c| c.plugin.as_deref() == Some("mermaid-preview@xiaolai")),
+        "expected plugin attribution to appear, got plugins: {:?}",
+        cards
+            .iter()
+            .map(|c| c.plugin.clone())
+            .collect::<Vec<_>>()
+    );
+}
+
+/// Phase 3 finalize hook: when a session disappears from the PID
+/// registry, any open Agent episodes drain into AgentStranded
+/// cards before the session is removed from the runtime's state map.
+#[tokio::test]
+async fn ended_session_drains_open_agent_episodes_to_stranded_cards() {
+    let f = fixture();
+    let activity_dir = f._td.path().join("activity.db");
+    let idx = std::sync::Arc::new(crate::activity::ActivityIndex::open(&activity_dir).unwrap());
+    f.runtime.enable_activity(std::sync::Arc::clone(&idx));
+
+    // Empty transcript at attach time so the tail-EOF positioning
+    // doesn't skip our test line. Seeded status is irrelevant for
+    // this test — we only care about the classifier path.
+    write_transcript(&f.projects_dir, "/Users/x/proj", "sess2", "");
+    write_pid_file(
+        &f.sessions_dir,
+        9002,
+        r#"{"pid":9002,"sessionId":"sess2","cwd":"/Users/x/proj","startedAt":1700000000000}"#,
+    );
+    f.check.set_alive(&[9002]);
+    // First tick: attach.
+    f.runtime.tick().await.unwrap();
+
+    // Append an Agent tool_use AFTER attach — the tail now picks it
+    // up on the next tick and the classifier records the open
+    // episode. This is the steady-state path (production sessions
+    // append while the runtime watches).
+    let line = serde_json::json!({
+        "type": "assistant",
+        "timestamp": "2026-04-25T10:00:00Z",
+        "uuid": "u-open",
+        "cwd": "/Users/x/proj",
+        "message": {
+            "role": "assistant",
+            "model": "claude-opus-4-7",
+            "content": [{
+                "type": "tool_use",
+                "id": "t-stranded",
+                "name": "Agent",
+                "input": {
+                    "subagent_type": "Explore",
+                    "description": "find the leak",
+                }
+            }]
+        }
+    });
+    let body = format!("{line}\n");
+    append_transcript(&f.projects_dir, "/Users/x/proj", "sess2", &body);
+    f.runtime.tick().await.unwrap();
+
+    // Pre-finalize: episode is open, no stranded card yet.
+    let pre = idx.recent(&Default::default()).unwrap();
+    assert!(
+        pre.iter().all(|c| c.kind != crate::activity::CardKind::AgentStranded),
+        "no AgentStranded card while session is live"
+    );
+
+    // Session disappears (PID file removed) — runtime drains the
+    // open episode on the next tick.
+    std::fs::remove_file(f.sessions_dir.join("9002.json")).unwrap();
+    f.check.set_alive(&[]);
+    f.runtime.tick().await.unwrap();
+
+    let stranded: Vec<_> = idx
+        .recent(&crate::activity::RecentQuery {
+            kinds: vec![crate::activity::CardKind::AgentStranded],
+            ..Default::default()
+        })
+        .unwrap();
+    assert_eq!(
+        stranded.len(),
+        1,
+        "expected exactly one stranded card, got {stranded:?}"
+    );
+    assert!(stranded[0].title.contains("did not return"));
 }
