@@ -11,15 +11,20 @@ type Bucket = "ok" | "unverified" | "drift" | "broken";
  *   ok         verify_status === "ok"          (green check)
  *   unverified "never" or "network_error"      (grey circle — we just don't know)
  *   drift      "drift"                         (warn — slot misfiled, worth attention)
- *   broken     rejected | expired | bad blob   (danger — creds are dead, re-login required)
+ *   broken     rejected | bad blob             (danger — creds are dead, re-login required)
  *
  * Order matters: broken wins over drift wins over unverified wins over ok,
  * so a single anomalous account lands in its most severe bucket.
+ *
+ * `token_status === "expired"` is intentionally NOT a "broken" signal:
+ * the verify pass auto-refreshes via the OAuth refresh_token within a
+ * second of the next focus/refresh tick, and a stuck refresh flips the
+ * row to "rejected" — which IS broken. Counting locally-expired tokens
+ * here false-alarms during the cold-paint window before verify runs.
  */
 function categorize(a: AccountSummary): Bucket {
   if (!a.credentials_healthy) return "broken";
   if (a.verify_status === "rejected") return "broken";
-  if (a.token_status === "expired") return "broken";
   if (a.verify_status === "drift") return "drift";
   if (a.verify_status === "ok") return "ok";
   // Covers "never" and "network_error".
@@ -113,7 +118,7 @@ export function HealthChips({ accounts }: Props) {
       glyph: NF.ban,
       tone: "var(--warn)",
       count: buckets.broken,
-      title: `${buckets.broken} broken — credentials rejected, expired, or unreadable`,
+      title: `${buckets.broken} broken — credentials rejected or unreadable`,
       aria: "broken",
     });
   }

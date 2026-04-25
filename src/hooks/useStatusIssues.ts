@@ -295,13 +295,16 @@ export function useStatusIssues(opts: {
           break;
         }
         case "candidate_only": {
-          // Unverified match (fast path only). Surface as a mild
-          // warning — never offer mutation here because the email
-          // may be wrong when multiple accounts share an org.
+          // Unverified match (fast path only). Surface as info — the
+          // slow path failed transiently (keychain not yet unlocked,
+          // /profile blip, decrypt race) and the next sync cycle
+          // almost always heals it. A "warning" here false-alarms on
+          // every cold start. Never offer mutation: the email may be
+          // wrong when multiple accounts share an org (Codex D5-1/D5-2).
           const email = desktopSync.email;
           issues.push({
             id: `desktop-candidate:${email.toLowerCase()}`,
-            severity: "warning",
+            severity: "info",
             label: "Couldn't confirm Claude Desktop's current account",
             detail: `The most likely match is ${email}. Open Claude Desktop once to refresh this.`,
             dismissable: true,

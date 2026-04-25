@@ -9,9 +9,15 @@ interface AnomalyBannerProps {
 }
 
 /**
- * In-card warning strip. Triggers on drift / rejected / expired /
- * unhealthy — see `isAnomaly(a)`. Always exposes a "Re-login" button
- * that fires `onRelogin` (wired to `api.accountLogin`).
+ * In-card warning strip. Triggers on drift / rejected / unhealthy —
+ * see `isAnomaly(a)`. Always exposes a "Re-login" button that fires
+ * `onRelogin` (wired to `api.accountLogin`).
+ *
+ * `token_status === "expired"` is intentionally NOT an anomaly: the
+ * verify pass auto-refreshes via the OAuth refresh_token within a
+ * second of the next focus/refresh tick, so a banner would just
+ * flash and disappear. If the refresh itself fails, verify_status
+ * flips to "rejected" and that branch carries the actionable signal.
  */
 export function AnomalyBanner({
   account,
@@ -82,13 +88,14 @@ export function AnomalyBanner({
 
 /**
  * True when the account is in a state that needs human attention.
- * The four cases match `anomalyCopy` below one-to-one.
+ * The three cases match `anomalyCopy` below one-to-one. Locally
+ * `expired` tokens are excluded — the verify pass refreshes them
+ * automatically; if the refresh fails the row flips to `rejected`.
  */
 export function isAnomaly(a: AccountSummary): boolean {
   return (
     a.drift ||
     a.verify_status === "rejected" ||
-    a.token_status === "expired" ||
     !a.credentials_healthy
   );
 }
@@ -114,12 +121,6 @@ function anomalyCopy(
     return {
       title: "Server rejected the saved login",
       detail: "The stored login is no longer valid — log in again to fix.",
-    };
-  }
-  if (a.token_status === "expired") {
-    return {
-      title: "Session expired",
-      detail: "Log in again to refresh usage for this account.",
     };
   }
   if (!a.credentials_healthy) {
