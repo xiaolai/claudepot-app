@@ -1,25 +1,24 @@
 //! Pricing commands — expose `claudepot_core::pricing` to the
-//! frontend and kick a background refresh when the cache is stale.
+//! frontend.
 //!
 //! The frontend calls `pricing_get` on mount and whenever it wants a
-//! fresh snapshot for display. The command is cheap: it reads the
-//! file cache, or returns bundled defaults, in a few ms. If the
-//! cache is stale, it also spawns a non-blocking `pricing_refresh`
-//! task so the next read returns fresh numbers without the caller
-//! waiting on the network.
+//! fresh snapshot for display. `pricing_get` is cheap: it returns the
+//! current best in-memory snapshot via the
+//! [`PricingCacheService`] and never blocks on the network. If the
+//! current source is `Bundled`, the service kicks a background
+//! refresh so the next call returns fresh numbers — singleflighted
+//! across all callers (D-3).
+//!
+//! `pricing_refresh` forces a refresh and joins the in-flight task if
+//! one exists, so a button-mash on "Refresh rates" can no longer
+//! spawn N concurrent scrapes.
 
-use claudepot_core::pricing::{self, ModelRates, PriceSource, PriceTable};
+use claudepot_core::pricing::{ModelRates, PriceSource, PriceTable, PricingCacheService};
 use serde::Serialize;
 use std::collections::BTreeMap;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Arc;
 use std::time::UNIX_EPOCH;
-
-/// Singleflight guard: when `pricing_get` is called rapidly from
-/// several surfaces (dashboard mount + transcript header + sidebar
-/// badge all at once) and the table is bundled, we'd otherwise spawn
-/// N concurrent scrapes of the same URL. This flag ensures only one
-/// refresh task is in flight across the whole process.
-static REFRESH_IN_FLIGHT: AtomicBool = AtomicBool::new(false);
+use tauri::State;
 
 #[derive(Serialize, Clone, Debug)]
 pub struct PriceSourceDto {
@@ -120,66 +119,45 @@ fn to_source_dto(src: PriceSource) -> PriceSourceDto {
     }
 }
 
-fn to_table_dto(table: PriceTable) -> PriceTableDto {
+fn to_table_dto(table: &PriceTable) -> PriceTableDto {
+    // Clone into the DTO. Reading from an `Arc<PriceTable>` snapshot
+    // means the source data is immutable; we only need the clone so
+    // the returned DTO can own its own `String`s and rate copies for
+    // serde-serialization across the IPC bridge.
     let models = table
         .models
-        .into_iter()
-        .map(|(k, v)| (k, v.into()))
+        .iter()
+        .map(|(k, v)| (k.clone(), v.clone().into()))
         .collect();
     PriceTableDto {
         models,
-        source: to_source_dto(table.source),
-        last_fetch_error: table.last_fetch_error,
+        source: to_source_dto(table.source.clone()),
+        last_fetch_error: table.last_fetch_error.clone(),
     }
 }
 
 /// Return the best currently-available price table. Never blocks on
-/// the network: if the cache is stale, a background refresh is
-/// spawned so the *next* call returns fresh numbers without making
-/// this one wait.
+/// the network: when the in-memory snapshot is `Bundled`, the
+/// underlying service spawns a background refresh (singleflighted
+/// across all callers) so the *next* call returns fresh numbers
+/// without making this one wait.
 #[tauri::command]
-pub async fn pricing_get() -> Result<PriceTableDto, String> {
-    let table = pricing::load();
-    // If we fell back to bundled (or the cache is about to expire),
-    // fire a fresh fetch in the background. The task doesn't own the
-    // UI — its result goes to the file cache and is picked up by the
-    // next `pricing_get` call.
-    let needs_refresh = matches!(table.source, PriceSource::Bundled { .. });
-    if needs_refresh {
-        // Singleflight: only spawn when no other refresh is running.
-        // `compare_exchange` returns Ok iff we were the one that
-        // flipped the flag from false → true, which is the only
-        // caller that should drive the spawn.
-        if REFRESH_IN_FLIGHT
-            .compare_exchange(false, true, Ordering::AcqRel, Ordering::Acquire)
-            .is_ok()
-        {
-            tauri::async_runtime::spawn(async {
-                // Ignore errors — bundled defaults are already serving
-                // the UI. `pricing::refresh_now` persists to cache on
-                // success and logs its own warnings on failure.
-                let _ = pricing::refresh_now().await;
-                REFRESH_IN_FLIGHT.store(false, Ordering::Release);
-            });
-        }
-    }
-    Ok(to_table_dto(table))
+pub async fn pricing_get(
+    svc: State<'_, Arc<PricingCacheService>>,
+) -> Result<PriceTableDto, String> {
+    let table = svc.get_or_refresh_async();
+    Ok(to_table_dto(table.as_ref()))
 }
 
-/// Force a refresh right now and return the fresh table (or the
-/// previous-best if the fetch fails). Useful for a "Refresh rates"
-/// button; the frontend dashboard doesn't need it for the automatic
-/// daily cadence — that happens transparently via `pricing_get`.
+/// Force a refresh right now and return the fresh table. If a refresh
+/// is already in flight (kicked by `pricing_get` or a previous button
+/// press), joins it instead of spawning a duplicate. On fetch failure
+/// the service returns a bundled fallback tagged with
+/// `last_fetch_error` — never panics, never poisons the singleflight.
 #[tauri::command]
-pub async fn pricing_refresh() -> Result<PriceTableDto, String> {
-    match pricing::refresh_now().await {
-        Ok(fresh) => Ok(to_table_dto(fresh)),
-        Err(e) => {
-            // Keep serving the previous-best table, but annotate the
-            // error so the UI can show "couldn't refresh: <reason>".
-            let mut fallback = pricing::load();
-            fallback.last_fetch_error = Some(e);
-            Ok(to_table_dto(fallback))
-        }
-    }
+pub async fn pricing_refresh(
+    svc: State<'_, Arc<PricingCacheService>>,
+) -> Result<PriceTableDto, String> {
+    let table = svc.refresh_now().await;
+    Ok(to_table_dto(table.as_ref()))
 }
