@@ -1,0 +1,161 @@
+/* Unified status bar at the bottom of the content pane.
+   Sharded out of src/App.css to keep each file under the 350-LOC
+   loc-guardian limit. Tokens still live in src/styles/tokens.css —
+   nothing in this file may declare global custom properties.        */
+
+/* ---------- unified status bar (P1.2) ----------
+   Replaces the old cc-truth-strip + sync-error + drift + keychain
+   banners with a single bar. 0 issues = invisible. 1 issue = single
+   line. Multiple = expandable.
+*/
+
+.status-bar {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding: 6px 12px;
+  margin-bottom: 12px;
+  border-radius: 6px;
+  font-size: 12px;
+  color: var(--text);
+}
+
+.status-bar.info {
+  background: var(--surface);
+  border: 0.5px solid var(--border);
+}
+
+.status-bar.warning {
+  background: var(--warn-weak);
+  border: 0.5px solid color-mix(in srgb, var(--warn) 30%, transparent);
+}
+
+.status-bar.error {
+  background: var(--bad-weak);
+  border: 0.5px solid color-mix(in srgb, var(--bad) 30%, transparent);
+}
+
+.status-bar-text {
+  flex: 1;
+  min-width: 0;
+}
+
+.status-bar-action {
+  height: 22px;
+  padding: 0 10px;
+  font-size: 11px;
+  font-weight: 500;
+  border-radius: 4px;
+  flex-shrink: 0;
+}
+
+.status-bar.error .status-bar-action {
+  background: var(--bad);
+  color: #fff;
+  border-color: transparent;
+}
+
+/* 24 h snooze button on dismissable status issues. Kept compact so
+   it doesn't compete with the action button for attention. */
+.status-bar-dismiss {
+  width: 18px;
+  height: 18px;
+  padding: 0;
+  flex-shrink: 0;
+  opacity: 0.6;
+}
+.status-bar-dismiss:hover {
+  opacity: 1;
+}
+
+.status-bar-toggle {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  background: transparent;
+  border: none;
+  padding: 0;
+  color: inherit;
+  font: inherit;
+  font-size: 12px;
+  height: auto;
+  box-shadow: none;
+  flex: 1;
+}
+
+.status-bar-toggle:hover {
+  background: transparent;
+}
+
+.status-bar-toggle .icon {
+  margin-right: 0;
+  flex-shrink: 0;
+}
+
+.status-bar-verifying {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 11px;
+  color: var(--muted);
+  font-style: italic;
+  margin-left: auto;
+  flex-shrink: 0;
+}
+
+.status-bar-verifying .icon {
+  margin-right: 0;
+}
+
+.status-bar-spin {
+  animation: status-bar-spin 1.2s linear infinite;
+}
+
+@keyframes status-bar-spin {
+  to { transform: rotate(360deg); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .status-bar-spin { animation: none; }
+}
+
+.status-bar-list {
+  list-style: none;
+  padding: 4px 0 0;
+  margin: 0;
+  width: 100%;
+  display: grid;
+  gap: 4px;
+}
+
+.status-bar-item {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 4px 0;
+  font-size: 12px;
+}
+
+.status-bar-item .icon {
+  margin-right: 0;
+  flex-shrink: 0;
+  margin-top: 1px;
+}
+
+.status-bar-item.error svg { color: var(--bad); }
+.status-bar-item.warning svg { color: var(--warn); }
+
+.status-bar-item-content {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.status-bar-detail {
+  font-size: 11px;
+  color: var(--muted);
+}
+

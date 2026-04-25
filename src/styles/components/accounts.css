@@ -1,0 +1,241 @@
+/* Account detail pane + slot/token badges + status dot + verified row.
+   Sharded out of src/App.css to keep each file under the 350-LOC
+   loc-guardian limit. Tokens still live in src/styles/tokens.css —
+   nothing in this file may declare global custom properties.        */
+
+/* ---------- account detail (content pane) ---------- */
+
+.account-detail-pane {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  flex: 1;
+}
+
+.detail-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.detail-email {
+  font-size: 14px;
+  font-weight: 600;
+  margin: 0;
+}
+
+.detail-meta {
+  font-size: 11px;
+  color: var(--muted);
+  margin-top: 2px;
+}
+
+.detail-badges {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+}
+
+.detail-actions {
+  display: flex;
+  gap: 8px;
+}
+/* Inline button icons: 14px per design system */
+.detail-actions .icon,
+.project-detail-actions .icon {
+  font-size: 14px;
+}
+
+.detail-section {
+  padding: 12px 0;
+  border-top: 0.5px solid var(--border);
+}
+
+.detail-section-title {
+  font-size: 11px;
+  font-weight: 500;
+  text-transform: none;
+  letter-spacing: 0;
+  color: var(--muted);
+  margin: 0 0 8px;
+}
+
+/* ---------- collapsible section (P1.3) ---------- */
+
+.collapsible-section {
+  padding: 0;
+  border-top: 0.5px solid var(--border);
+}
+
+.collapsible-section-toggle {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  padding: 8px 0;
+  background: transparent;
+  border: none;
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 500;
+  text-transform: none;
+  letter-spacing: 0;
+  height: auto;
+  box-shadow: none;
+  text-align: left;
+}
+
+.collapsible-section-toggle:hover {
+  color: var(--text);
+  background: transparent;
+}
+
+.collapsible-section-toggle .icon {
+  margin-right: 0;
+  flex-shrink: 0;
+}
+
+.collapsible-chevron {
+  transition: transform 0.15s ease;
+}
+
+.collapsible-chevron.open {
+  transform: rotate(90deg);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .collapsible-chevron { transition: none; }
+}
+
+.collapsible-section-title {
+  flex: 1;
+}
+
+.collapsible-section-body {
+  padding: 0 0 8px;
+}
+
+/* ---------- detail grid ---------- */
+
+.detail-grid {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 4px 16px;
+  font-size: 12px;
+  margin: 0;
+}
+
+.detail-grid dt {
+  color: var(--muted);
+  font-weight: 400;
+  text-transform: none;
+  font-size: 12px;
+  letter-spacing: 0;
+  text-align: right;
+  padding-top: 1px;
+}
+
+.detail-grid dd {
+  margin: 0;
+}
+
+/* ---------- slot badges ---------- */
+
+.slot-badge {
+  font-size: 10px;
+  padding: 1px 6px;
+  border-radius: 999px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.slot-badge.cli {
+  background: var(--accent-weak);
+  color: var(--accent);
+}
+
+.slot-badge.desktop {
+  background: var(--ok-weak);
+  color: var(--ok);
+}
+
+/* Sidebar slot icons — three-state matrix per slot.
+   .active   = filled, full-color (account currently fills this slot)
+   .available = light, muted (account COULD fill this slot)
+   (no icon) = the slot can't be filled — no credentials/profile */
+.slot-icon {
+  flex-shrink: 0;
+}
+
+.slot-icon.cli.active {
+  color: var(--accent);
+}
+
+.slot-icon.desktop.active {
+  color: var(--ok);
+}
+
+.slot-icon.available {
+  color: var(--muted);
+  opacity: 0.6;
+}
+
+/* ---------- token badge ---------- */
+
+.token-badge {
+  font-size: 10px;
+  padding: 1px 6px;
+  border-radius: 999px;
+  font-weight: 600;
+}
+
+.token-badge.ok {
+  background: var(--ok-weak);
+  color: var(--ok);
+}
+
+.token-badge.bad {
+  background: var(--bad-weak);
+  color: var(--bad);
+}
+
+.token-badge.warn {
+  background: var(--warn-weak);
+  color: var(--warn);
+}
+
+/* ---------- status dot (sidebar) ---------- */
+
+.status-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.status-dot.ok   { background: var(--ok); }
+.status-dot.bad  { background: var(--bad); }
+.status-dot.warn { background: var(--warn); }
+
+/* ---------- verified identity row in AccountDetail ---------- */
+
+.verify-line {
+  display: inline;
+}
+.verify-line.ok {
+  color: var(--ok);
+}
+.verify-line.bad {
+  color: var(--bad);
+  font-weight: 500;
+}
+.verify-line.muted {
+  color: var(--muted);
+}
+.verify-note {
+  font-size: 10px;
+  font-style: italic;
+}
+

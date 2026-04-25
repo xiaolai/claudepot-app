@@ -1,0 +1,19 @@
+# loc-guardian: exclude generated/handoff artifacts and test files
+# whose paths the skill's hard-coded patterns miss.
+
+# Design-handoff artifacts (Figma export, never edited by hand).
+design_handoff_claudepot/
+
+# Lock file (defense in depth — already in tokei defaults).
+pnpm-lock.yaml
+
+# Integration test crates — the skill excludes a top-level `tests/`
+# directory but tokei's `--exclude tests` does not consistently match
+# `crates/*/tests/` paths.
+crates/*/tests/
+
+# Inline-included test modules. Loaded via `#[cfg(test)] #[path]` from
+# a production sibling so they retain `super::*` access to private
+# items. The skill's exclude glob is `*_test.*` (singular); we use the
+# `_tests.rs` plural to mirror the inline `mod tests` convention.
+**/*_tests.rs

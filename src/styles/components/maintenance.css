@@ -1,0 +1,241 @@
+/* Maintenance + repair view + repair action buttons + type-to-confirm + op progress modal + running-op strip.
+   Sharded out of src/App.css to keep each file under the 350-LOC
+   loc-guardian limit. Tokens still live in src/styles/tokens.css —
+   nothing in this file may declare global custom properties.        */
+
+/* ---------- maintenance view (P2.2) ---------- */
+
+.maintenance-view {
+  padding-top: 16px;
+}
+
+.maintenance-section {
+  padding: 16px 24px;
+  border-bottom: 0.5px solid var(--border);
+}
+
+.maintenance-section:last-child {
+  border-bottom: none;
+}
+
+.maintenance-section-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.maintenance-section-header h2 {
+  font-size: 13px;
+  font-weight: 500;
+  margin: 0;
+}
+
+.maintenance-section-header .icon {
+  color: var(--muted);
+}
+
+.maintenance-desc {
+  font-size: 12px;
+  margin: 0 0 12px;
+}
+
+.maintenance-toast {
+  margin-top: 8px;
+  padding: 6px 10px;
+  border-radius: 6px;
+  background: var(--ok-weak);
+  color: var(--ok);
+  font-size: 12px;
+}
+
+.repair-view-embedded {
+  padding: 0;
+}
+
+.repair-view-embedded .repair-list {
+  padding: 0;
+}
+
+/* ---------- repair view ---------- */
+
+.repair-view { padding-top: 16px; }
+
+.repair-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0 20px 12px;
+  border-bottom: 0.5px solid var(--border);
+}
+
+.repair-header h2 {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 14px;
+  font-weight: 600;
+  margin: 0;
+}
+
+.repair-list { list-style: none; padding: 12px 20px; margin: 0; display: grid; gap: 10px; }
+
+.repair-entry {
+  padding: 10px 12px;
+  border: 0.5px solid var(--border);
+  border-radius: 6px;
+  display: grid;
+  gap: 4px;
+}
+
+.repair-entry-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.repair-entry-paths { line-height: 1.4; }
+.repair-entry-error { padding-top: 2px; }
+
+.repair-entry-actions {
+  padding-top: 6px;
+  border-top: 0.5px dashed var(--border);
+  font-style: italic;
+}
+
+/* ---------- repair action buttons ---------- */
+
+.repair-entry-actions {
+  display: flex;
+  gap: 6px;
+  padding-top: 8px;
+  border-top: 0.5px solid var(--border);
+  font-style: normal;
+}
+
+.repair-entry-actions button {
+  font-size: 12px;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+/* ---------- type-to-confirm block ---------- */
+
+.type-to-confirm {
+  padding: 8px 0;
+  display: grid;
+  gap: 4px;
+}
+
+.type-to-confirm input {
+  width: 100%;
+  padding: 6px 8px;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  border: 0.5px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg);
+  color: var(--text);
+}
+
+.type-to-confirm input:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 0;
+}
+
+/* ---------- op progress modal ---------- */
+
+.op-progress-modal { width: 480px; }
+
+.phase-list {
+  list-style: none;
+  padding: 8px 0;
+  margin: 0;
+  display: grid;
+  gap: 4px;
+}
+
+.phase {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  padding: 4px 8px;
+  border-radius: 4px;
+}
+
+.phase-tag {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 600;
+  width: 24px;
+  color: var(--muted);
+}
+
+.phase-label {
+  font-size: 12px;
+  color: var(--muted);
+  text-transform: capitalize;
+}
+
+.phase-pending { opacity: 0.5; }
+.phase-running { background: var(--accent-weak); }
+.phase-running .phase-label { color: var(--accent); font-weight: 500; }
+.phase-complete .phase-label { color: var(--ok, var(--muted)); }
+.phase-error { background: var(--bad-weak, transparent); }
+.phase-error .phase-label { color: var(--bad); font-weight: 600; }
+
+.op-terminal {
+  padding: 10px 12px;
+  border-radius: 6px;
+  margin: 8px 0;
+}
+.op-terminal.ok { background: var(--ok-weak, transparent); color: var(--ok); }
+.op-terminal.bad { background: var(--bad-weak, transparent); color: var(--bad); }
+
+/* ---------- running-op strip ---------- */
+
+.running-op-strip {
+  position: fixed;
+  bottom: 8px;
+  left: 56px;  /* 48 rail + 8 gap */
+  right: 8px;
+  z-index: 9;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  pointer-events: none;
+}
+
+.running-op-strip-item {
+  pointer-events: auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 12px;
+  background: rgba(0, 0, 0, 0.8);
+  color: white;
+  border: 0;
+  border-radius: 999px;
+  font-size: 12px;
+  cursor: default;
+  backdrop-filter: blur(10px);
+}
+
+.running-op-spinner {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--accent);
+  animation: running-op-pulse 1.2s ease-in-out infinite;
+}
+
+@keyframes running-op-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.3; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .running-op-spinner { animation: none; }
+}
+

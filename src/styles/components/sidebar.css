@@ -1,0 +1,236 @@
+/* Sidebar shell + header + search + inline switch button.
+   Sharded out of src/App.css to keep each file under the 350-LOC
+   loc-guardian limit. Tokens still live in src/styles/tokens.css —
+   nothing in this file may declare global custom properties.        */
+
+/* ---------- sidebar ---------- */
+
+/* List pane — shares the rail's chrome color so they read as a single
+   navigation surface on the left edge; the content pane to the right is
+   the document surface with its own brighter --bg. */
+.sidebar {
+  flex: 0 0 20%;
+  min-width: 200px;
+  max-width: 280px;
+  display: flex;
+  flex-direction: column;
+  background: var(--chrome);
+  border-right: 0.5px solid var(--border);
+  overflow-y: auto;
+  padding: 12px 8px 8px;
+  /* Firefox */
+  scrollbar-width: thin;
+  scrollbar-color: color-mix(in srgb, var(--muted) 30%, transparent) transparent;
+}
+/* WebKit — thin, translucent, chrome-colored. Narrowly scoped to the
+   sidebar; global scrollbar overrides are still an anti-pattern. */
+.sidebar::-webkit-scrollbar {
+  width: 6px;
+}
+.sidebar::-webkit-scrollbar-track {
+  background: transparent;
+}
+.sidebar::-webkit-scrollbar-thumb {
+  background: color-mix(in srgb, var(--muted) 25%, transparent);
+  border-radius: 999px;
+}
+.sidebar::-webkit-scrollbar-thumb:hover {
+  background: color-mix(in srgb, var(--muted) 45%, transparent);
+}
+
+.sidebar-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 4px 8px 12px;
+}
+
+.sidebar-title {
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: var(--muted);
+}
+
+.sidebar-actions {
+  display: flex;
+  gap: 2px;
+}
+
+/* ---------- sidebar search (P3.3) ---------- */
+
+.sidebar-search {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 0 8px 8px;
+  padding: 4px 8px;
+  border: 0.5px solid var(--border);
+  border-radius: 6px;
+  background: color-mix(in srgb, var(--bg) 60%, transparent);
+}
+
+.sidebar-search-icon {
+  color: var(--muted);
+  flex-shrink: 0;
+}
+
+.sidebar-search-icon.icon {
+  margin-right: 0;
+}
+
+.sidebar-search-input {
+  flex: 1;
+  border: none;
+  background: transparent;
+  font-size: 11px;
+  color: var(--text);
+  outline: none;
+  min-width: 0;
+  padding: 0;
+}
+
+.sidebar-search-input::placeholder {
+  color: var(--muted);
+}
+
+.sidebar-search-clear {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  padding: 0;
+  border: none;
+  border-radius: 50%;
+  background: var(--border);
+  color: var(--muted);
+  box-shadow: none;
+  flex-shrink: 0;
+}
+
+.sidebar-search-clear .icon {
+  margin-right: 0;
+}
+
+.sidebar-search-clear:hover {
+  background: var(--muted);
+  color: var(--bg);
+}
+
+.sidebar-list {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  flex: 1;
+  /* Align item outer bounds with the tab / filter / search containers
+     above the list (all inset 16px from sidebar edges). */
+  padding: 0 8px;
+}
+
+.sidebar-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 8px;
+  border-radius: 6px;
+  cursor: default;
+  transition: background 0.1s ease;
+  min-height: 32px;
+}
+
+.sidebar-item:hover {
+  background: rgba(0, 0, 0, 0.04);
+}
+
+/* Selected state: same neutral-gray rhythm as the context menu.
+ * Unmistakability still survives prefers-contrast: more because the
+ * name weight jumps to 600 below — selection is fill + weight, not
+ * fill alone. No accent tint; the entire row hierarchy now reads as
+ * calm monochrome with a weight bump on the selected row. */
+.sidebar-item.active {
+  background: color-mix(in srgb, var(--text) 14%, transparent);
+}
+
+.sidebar-item-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+.sidebar-item-text {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 12px;
+}
+
+/* Row name — medium weight by default, semibold only on the selected
+   row. Keeps the unselected list quiet so the selected item is the
+   one unmistakable focal point (design-principles.md §2). */
+.sidebar-item-name {
+  font-weight: 500;
+  color: var(--text);
+}
+.sidebar-item.active .sidebar-item-name {
+  font-weight: 600;
+}
+
+.sidebar-item-meta {
+  font-size: 11px;
+  color: var(--muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* ---------- sidebar inline switch button (P0.1) ---------- */
+
+.sidebar-switch-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  padding: 0;
+  border: none;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--muted);
+  box-shadow: none;
+  opacity: 0;
+  transition: opacity 0.1s ease;
+  flex-shrink: 0;
+}
+
+.sidebar-switch-btn .icon {
+  margin-right: 0;
+}
+
+.sidebar-item:hover .sidebar-switch-btn,
+.sidebar-item:focus-within .sidebar-switch-btn {
+  opacity: 1;
+}
+
+.sidebar-switch-btn:hover:not(:disabled) {
+  background: var(--accent-weak);
+  color: var(--accent);
+}
+
+.sidebar-switch-btn.login {
+  color: var(--warn);
+}
+
+.sidebar-switch-btn.login:hover:not(:disabled) {
+  background: var(--warn-weak);
+  color: var(--warn);
+}
+
+.sidebar-switch-btn:disabled {
+  opacity: 0.3;
+}
+

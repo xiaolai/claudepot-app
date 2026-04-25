@@ -1,0 +1,85 @@
+/* Content pane shell + toolbar + status pills.
+   Sharded out of src/App.css to keep each file under the 350-LOC
+   loc-guardian limit. Tokens still live in src/styles/tokens.css —
+   nothing in this file may declare global custom properties.        */
+
+/* ---------- content pane ---------- */
+
+.content {
+  flex: 1 1 76%;
+  min-width: 400px;      /* content floor */
+  display: flex;
+  flex-direction: column;
+  background: var(--bg);
+  overflow-y: auto;
+  
+  padding: 16px 24px 20px;
+}
+
+.content.loading {
+  justify-content: center;
+  align-items: center;
+}
+
+/* ---------- toolbar (inside content, top area) ---------- */
+
+.toolbar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding-bottom: 16px;
+  margin-bottom: 16px;
+  border-bottom: 0.5px solid var(--border);
+}
+
+.toolbar-title {
+  font-size: 12px;
+  font-weight: 600;
+  flex: 1;
+}
+
+.toolbar-status {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+/* ---------- status pills (CLI / Desktop active indicators) ---------- */
+
+.pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 10px;
+  border: 0.5px solid var(--border);
+  border-radius: 6px;
+  background: transparent;
+  font-size: 11px;
+}
+
+.pill.active {
+  border-color: var(--accent);
+  background: var(--accent-weak);
+}
+
+.pill.disabled {
+  opacity: 0.5;
+}
+
+.pill-label {
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--muted);
+  font-size: 10px;
+}
+
+.pill-value {
+  font-weight: 500;
+  font-size: 11px;
+  max-width: 160px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
