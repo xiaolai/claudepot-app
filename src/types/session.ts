@@ -163,6 +163,15 @@ export type SessionEvent =
       raw_type: string;
     }
   | {
+      // Task-summary marker emitted by Claude after a /compact or
+      // when an agent finalizes its run. Serialized by Rust via
+      // `#[serde(rename = "taskSummary")]` on `SessionEventDto`.
+      kind: "taskSummary";
+      ts: string | null;
+      uuid: string | null;
+      summary: string;
+    }
+  | {
       kind: "malformed";
       line_number: number;
       error: string;

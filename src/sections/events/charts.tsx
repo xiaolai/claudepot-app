@@ -58,12 +58,21 @@ export function daySeries(byDay: Map<string, number>, days: number): number[] {
   return out;
 }
 
+// Day-bucket keys are in **local** time: the user reads the sparkbar
+// at-a-glance against their wall clock, so a card landed at 11:30 PM
+// on Tuesday should fall under Tuesday's bar even if UTC says it's
+// already Wednesday. `toISOString().slice(0,10)` would silently
+// off-by-one near local midnight; we build the key from local
+// calendar fields instead.
 function isoDay(ms: number): string {
   return isoDayFromDate(new Date(ms));
 }
 
 function isoDayFromDate(d: Date): string {
-  return d.toISOString().slice(0, 10);
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, "0");
+  const day = String(d.getDate()).padStart(2, "0");
+  return `${y}-${m}-${day}`;
 }
 
 // ── Components ──────────────────────────────────────────────────

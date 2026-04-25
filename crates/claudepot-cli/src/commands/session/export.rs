@@ -6,6 +6,12 @@
 use super::*;
 use super::inspect::resolve_detail;
 
+/// `claudepot session export <target> --format fmt --to dest [flags]`
+///
+/// Pure dispatcher: format → policy → body → `core::session_export_delivery::deliver`.
+/// All file/clipboard/gist mechanics live in `claudepot-core`; the CLI
+/// only supplies a [`SubprocessClipboard`] for the `clipboard` arm.
+#[allow(clippy::too_many_arguments)]
 pub async fn export_cmd(
     ctx: &AppContext,
     target: &str,

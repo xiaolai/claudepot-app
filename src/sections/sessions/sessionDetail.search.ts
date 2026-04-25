@@ -176,6 +176,10 @@ export function eventMatchesSearch(e: SessionEvent, q: string): boolean {
       return safeLower(e.name).includes(q);
     case "fileSnapshot":
       return false;
+    case "taskSummary":
+      // Task-summary markers carry a single user-readable string;
+      // searching it lets users find /compact boundaries quickly.
+      return safeLower(e.summary).includes(q);
     case "other":
       return safeLower(e.raw_type).includes(q);
     case "malformed":

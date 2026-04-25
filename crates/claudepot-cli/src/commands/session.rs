@@ -1,17 +1,22 @@
 //! `claudepot session …` verb-group module.
 //!
-//! Per the commands.md rule for nouns with ≥3 verbs, the session
-//! handlers live in submodules under `commands/session/<verb>.rs`.
-//! This entry point holds the imports, the shared formatting helpers
-//! consumed by multiple verbs, the submodule declarations, and the
-//! `pub use` re-exports `main.rs`'s match block depends on.
-
-//! CC session transcript management — move, list-orphans, adopt-orphan,
-//! inspect (view/chunks/tools/classify/subagents/phases/context),
-//! export, search, worktree grouping.
+//! Public verbs (re-exported below for `main.rs`'s match block):
+//! - **orphan** — list-orphans, move, adopt-orphan, rebuild-index
+//! - **inspect** — view (chunks / tools / classify / subagents /
+//!   phases / context)
+//! - **search** — search, worktrees
+//! - **export** — write a transcript to file (markdown / html / json)
+//! - **prune** — wholesale-delete sessions matching a filter
+//! - **trash** — list / restore / empty the prune trash
+//! - **slim** — strip noisy events from a session in place
 //!
-//! All handlers are thin wrappers around `claudepot_core`. No business
-//! logic lives here (per `.claude/rules/architecture.md`).
+//! Per the commands.md rule for nouns with ≥3 verbs, related verbs
+//! live in submodules under `commands/session/<group>.rs`. This entry
+//! point holds the imports, the shared formatting helpers consumed
+//! by multiple verbs, the submodule declarations, and the `pub use`
+//! re-exports `main.rs` depends on. All handlers are thin wrappers
+//! around `claudepot_core` — no business logic here, per
+//! `.claude/rules/architecture.md`.
 
 use crate::AppContext;
 use anyhow::{bail, Context, Result};
@@ -26,15 +31,14 @@ use uuid::Uuid;
 
 /// CC stores `.claude.json` at `$HOME/.claude.json` — a sibling of
 /// `~/.claude/`, not inside. Central accessor so CLI and Tauri agree.
-
 fn claude_json_path() -> Option<PathBuf> {
     dirs::home_dir().map(|h| h.join(".claude.json"))
 }
 
-/// List projects whose internal `cwd` no longer exists on disk. These
-/// are the adoption candidates — typically sessions orphaned by
-/// `git worktree remove`.
-
+/// Truncate a string to `max` chars by keeping the tail (path-friendly,
+/// since the basename usually carries the load-bearing token) and
+/// prefixing the elision with `…`. Returns the input untouched when
+/// it's already short enough.
 fn truncate_start(s: &str, max: usize) -> String {
     if s.chars().count() <= max {
         return s.to_string();

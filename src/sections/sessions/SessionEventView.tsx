@@ -184,6 +184,18 @@ export function SessionEventView({
         </MiniLine>
       );
 
+    case "taskSummary":
+      // Boundary marker emitted after /compact or when an agent
+      // finalizes a run. Render the summary inline so users can
+      // see the compaction reason without expanding the event.
+      // Re-uses the same `summary` glyph as the existing `summary`
+      // kind above — both are end-of-arc markers visually.
+      return (
+        <MiniLine glyph={NF.book} tone="ghost">
+          Task summary · {event.summary}
+        </MiniLine>
+      );
+
     case "other":
       return (
         <MiniLine glyph={NF.circle} tone="ghost">
