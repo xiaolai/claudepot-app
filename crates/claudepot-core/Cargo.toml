@@ -30,6 +30,8 @@ rayon.workspace = true
 num_cpus.workspace = true
 regex.workspace = true
 once_cell.workspace = true
+parking_lot.workspace = true
+arc-swap.workspace = true
 
 # Desktop-identity crypto (Phase 2 of desktop overhaul).
 # See Cargo.toml workspace comment for the full algorithm rationale.

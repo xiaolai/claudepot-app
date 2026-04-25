@@ -28,6 +28,15 @@ tauri-plugin-dialog = "2"
 tauri-plugin-autostart = "2"
 tauri-plugin-notification = "2"
 tauri-plugin-opener = "2"
+# D-5/6/7: Rust-side clipboard write for `key_*_copy`. The raw secret
+# never returns to JS — the renderer only sees a `KeyCopyReceiptDto`
+# (label + preview + clear-deadline). Self-clear after 30s is also
+# scheduled in Rust so the policy lives next to the write.
+tauri-plugin-clipboard-manager = "2.3"
+zeroize.workspace = true
 dirs = { workspace = true }
 notify.workspace = true
 notify-debouncer-mini.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true
