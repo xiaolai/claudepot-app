@@ -62,8 +62,11 @@ See `dev-docs/implementation-plan.md` for the full plan.
   + synced strip), content column, 24px `StatusBar` at bottom.
   Primitives live in `src/components/primitives/`. Sections live
   under `src/sections/`; the registry (`src/sections/registry.tsx`)
-  is the single source of truth for primary nav. Accounts, Projects,
-  Sessions (stub), and Settings are the current sections.
+  is the single source of truth for primary nav. Sections in order:
+  Accounts, Projects, Sessions (cross-project firehose, id is
+  `activities` for localStorage compatibility), Activity (live +
+  dashboard + cards stream, id is `events` for the same reason),
+  Global, Keys, Settings.
 - Long-running ops (project rename, repair resume/rollback) flow
   through a single op-progress pipeline:
   `Tauri *_start` cmd → spawns task → emits events on
