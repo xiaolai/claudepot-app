@@ -85,17 +85,19 @@ impl From<&claudepot_core::account::Account> for AccountSummaryBasic {
     }
 }
 
+/// Inline-I/O fallback used by the verify commands in
+/// `commands_account.rs` (`verify_account`, `verify_all_accounts`).
+/// Those handlers hand back a fresh `AccountSummary` after a single
+/// row mutation and don't have an `AccountSummaryView` in hand —
+/// recomputing per-row token health here is the cheapest path. New
+/// callers should prefer the `From<&AccountSummaryView>` impl, which
+/// keeps Keychain I/O upstream in `list_summaries` where it can be
+/// sequenced.
 impl From<&claudepot_core::account::Account> for AccountSummary {
     fn from(a: &claudepot_core::account::Account) -> Self {
         let health =
             claudepot_core::services::account_service::token_health(a.uuid, a.has_cli_credentials);
-        // A stored blob is "healthy" if it exists and parses. Any other
-        // status ("missing", "corrupt blob", "no credentials") means the
-        // swap can't succeed — the UI should gate on this, not the DB flag.
         let credentials_healthy = health.status.starts_with("valid") || health.status == "expired";
-        // Cheap on-disk check per plan v2 §D18: just exists(), no
-        // recursive walk. Size + enumeration moves to
-        // desktop_profile_info(uuid) in a later phase.
         let desktop_profile_on_disk =
             claudepot_core::paths::desktop_profile_dir(a.uuid).exists();
         Self {
@@ -115,15 +117,140 @@ impl From<&claudepot_core::account::Account> for AccountSummary {
             verify_status: a.verify_status.clone(),
             verified_email: a.verified_email.clone(),
             verified_at: a.verified_at,
-            // Derive from verify_status, not `verified_email != email`.
-            // update_verification() intentionally preserves
-            // verified_email across rejected/network_error so history
-            // isn't wiped by a blip — meaning a stored row where
-            // verified_email still points at the old drift target but
-            // verify_status has since moved to "network_error" would
-            // spuriously paint as drift if we compared emails.
+            // Derive from verify_status, not `verified_email != email`:
+            // update_verification() preserves verified_email across
+            // rejected/network_error so a transient blip doesn't wipe
+            // history; comparing emails would spuriously paint stale
+            // history as drift.
             drift: a.verify_status == "drift",
             desktop_profile_on_disk,
+        }
+    }
+}
+
+/// Pure field copy from the listing-time aggregate. The Keychain
+/// read + filesystem stat happened upstream in
+/// `services::account_summary::list_summaries`; this impl is the
+/// thin DTO boundary the webview wants.
+impl From<&claudepot_core::services::account_summary::AccountSummaryView> for AccountSummary {
+    fn from(v: &claudepot_core::services::account_summary::AccountSummaryView) -> Self {
+        let a = &v.account;
+        Self {
+            uuid: a.uuid.to_string(),
+            email: a.email.clone(),
+            org_name: a.org_name.clone(),
+            subscription_type: a.subscription_type.clone(),
+            is_cli_active: a.is_cli_active,
+            is_desktop_active: a.is_desktop_active,
+            has_cli_credentials: a.has_cli_credentials,
+            has_desktop_profile: a.has_desktop_profile,
+            last_cli_switch: a.last_cli_switch,
+            last_desktop_switch: a.last_desktop_switch,
+            token_status: v.token_health.status.clone(),
+            token_remaining_mins: v.token_health.remaining_mins,
+            credentials_healthy: v.credentials_healthy,
+            verify_status: a.verify_status.clone(),
+            verified_email: a.verified_email.clone(),
+            verified_at: a.verified_at,
+            drift: v.drift,
+            desktop_profile_on_disk: v.desktop_profile_on_disk,
+        }
+    }
+}
+
+#[cfg(test)]
+mod account_summary_dto_tests {
+    use super::*;
+    use claudepot_core::account::Account;
+    use claudepot_core::services::account_service::TokenHealth;
+    use claudepot_core::services::account_summary::AccountSummaryView;
+
+    fn sample_account(email: &str) -> Account {
+        Account {
+            uuid: uuid::Uuid::new_v4(),
+            email: email.to_string(),
+            org_uuid: Some("org-test".to_string()),
+            org_name: Some("Test Org".to_string()),
+            subscription_type: Some("pro".to_string()),
+            rate_limit_tier: None,
+            created_at: chrono::Utc::now(),
+            last_cli_switch: None,
+            last_desktop_switch: None,
+            has_cli_credentials: true,
+            has_desktop_profile: false,
+            is_cli_active: false,
+            is_desktop_active: false,
+            verified_email: None,
+            verified_at: None,
+            verify_status: "never".to_string(),
+        }
+    }
+
+    /// The new `From<&AccountSummaryView>` impl must be a pure field
+    /// copy — no Keychain reads, no filesystem stats. This test
+    /// confirms every field on `AccountSummary` traces back to a
+    /// plain field on either `view.account` or `view` itself.
+    #[test]
+    fn test_account_summary_dto_is_pure_field_copy() {
+        let mut account = sample_account("copy@example.com");
+        account.is_cli_active = true;
+        account.has_desktop_profile = true;
+        account.verify_status = "drift".to_string();
+        account.verified_email = Some("other@example.com".to_string());
+
+        let view = AccountSummaryView {
+            account: account.clone(),
+            token_health: TokenHealth {
+                status: "valid (1h)".to_string(),
+                remaining_mins: Some(60),
+            },
+            credentials_healthy: true,
+            desktop_profile_on_disk: true,
+            drift: true,
+        };
+
+        let dto = AccountSummary::from(&view);
+
+        assert_eq!(dto.uuid, account.uuid.to_string());
+        assert_eq!(dto.email, account.email);
+        assert_eq!(dto.org_name, account.org_name);
+        assert_eq!(dto.subscription_type, account.subscription_type);
+        assert_eq!(dto.is_cli_active, account.is_cli_active);
+        assert_eq!(dto.is_desktop_active, account.is_desktop_active);
+        assert_eq!(dto.has_cli_credentials, account.has_cli_credentials);
+        assert_eq!(dto.has_desktop_profile, account.has_desktop_profile);
+        assert_eq!(dto.last_cli_switch, account.last_cli_switch);
+        assert_eq!(dto.last_desktop_switch, account.last_desktop_switch);
+        assert_eq!(dto.token_status, "valid (1h)");
+        assert_eq!(dto.token_remaining_mins, Some(60));
+        assert!(dto.credentials_healthy);
+        assert_eq!(dto.verify_status, account.verify_status);
+        assert_eq!(dto.verified_email, account.verified_email);
+        assert_eq!(dto.verified_at, account.verified_at);
+        assert!(dto.drift);
+        assert!(dto.desktop_profile_on_disk);
+    }
+}
+
+/// Counts-only summary of the reconcile pass crossed back to the
+/// webview. Per-row detail (which uuid flipped, which email)
+/// intentionally stays in the Rust [`ReconcileReport`]; the JS side
+/// renders a one-line "synced N flags" toast and refetches
+/// `account_list`, so the bytes-on-the-wire payload is just three
+/// counters.
+#[derive(Serialize, Clone)]
+pub struct ReconcileReportDto {
+    pub cli_flipped: usize,
+    pub desktop_flipped: usize,
+    pub orphan_pointer_cleared: bool,
+}
+
+impl From<&claudepot_core::services::account_service::ReconcileReport> for ReconcileReportDto {
+    fn from(r: &claudepot_core::services::account_service::ReconcileReport) -> Self {
+        Self {
+            cli_flipped: r.cli_flips.len(),
+            desktop_flipped: r.desktop.flag_flips.len(),
+            orphan_pointer_cleared: r.desktop.orphan_pointer_cleared,
         }
     }
 }

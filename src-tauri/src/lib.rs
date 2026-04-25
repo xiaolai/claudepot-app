@@ -31,6 +31,7 @@ mod dto_session;
 mod dto_session_debug;
 mod dto_session_move;
 mod dto_session_prune;
+mod live_activity_bridge;
 mod ops;
 mod preferences;
 mod state;
@@ -88,15 +89,10 @@ pub fn run() {
             }
         };
 
-    // Build LiveSessionState here so we can hand the cards index into
-    // its runtime BEFORE the first tick fires. `state.runtime` is
-    // already an Arc, so this is cheap.
-    let live_session_state = state::LiveSessionState::default();
-    if let Some(idx) = cards_index.as_ref() {
-        live_session_state
-            .runtime
-            .enable_activity(std::sync::Arc::clone(idx));
-    }
+    // (Live state is built inside the `.manage` chain below — the
+    // service-refactor pattern owns the runtime, so we hand the
+    // cards index into the service's `enable_activity` accessor at
+    // construction time.)
 
     // `mut` is only consumed by the debug-only plugin block below;
     // release builds don't touch it. Silence the release warning here.
@@ -105,6 +101,13 @@ pub fn run() {
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_notification::init())
         .plugin(tauri_plugin_opener::init())
+        // D-5/6/7: Rust-side clipboard write for `key_*_copy`. Permissions
+        // restricted in `capabilities/default.json` to write/read/clear —
+        // the renderer never invokes the plugin directly (its only
+        // consumer is our own `commands_keys.rs`), but the read-text
+        // permission is required so the 30s self-clear can verify the
+        // clipboard still holds our payload before clobbering it.
+        .plugin(tauri_plugin_clipboard_manager::init())
         .plugin(tauri_plugin_autostart::init(
             tauri_plugin_autostart::MacosLauncher::LaunchAgent,
             None,
@@ -179,6 +182,40 @@ pub fn run() {
                 }
             });
 
+            // One-shot startup reconcile (B-2). Pre-B-2 the Tauri
+            // `account_list` command opportunistically rewrote
+            // `has_cli_credentials` and `has_desktop_profile` on every
+            // poll, which raced two GUI sections that both polled.
+            // Now: a single best-effort pass at startup catches the
+            // common "user mutated state out-of-band" case, and the
+            // explicit `accounts_reconcile` Tauri command covers the
+            // user-driven path. Failure here never blocks startup.
+            tauri::async_runtime::spawn_blocking(|| {
+                let store = match crate::commands::open_store() {
+                    Ok(s) => s,
+                    Err(e) => {
+                        tracing::warn!("startup reconcile: open_store failed: {e}");
+                        return;
+                    }
+                };
+                match claudepot_core::services::account_service::reconcile_all(&store) {
+                    Ok(report) => {
+                        if !report.cli_flips.is_empty()
+                            || !report.desktop.flag_flips.is_empty()
+                            || report.desktop.orphan_pointer_cleared
+                        {
+                            tracing::info!(
+                                cli_flipped = report.cli_flips.len(),
+                                desktop_flipped = report.desktop.flag_flips.len(),
+                                orphan_pointer_cleared = report.desktop.orphan_pointer_cleared,
+                                "startup reconcile applied"
+                            );
+                        }
+                    }
+                    Err(e) => tracing::warn!("startup reconcile failed: {e}"),
+                }
+            });
+
             // Listen for frontend requests to rebuild the tray menu
             let handle2 = app.handle().clone();
             app.listen("rebuild-tray-menu", move |_| {
@@ -190,18 +227,58 @@ pub fn run() {
                 });
             });
 
+            // Register the Tauri-side listener with the
+            // `LiveActivityService`. This is the only place that
+            // knows how to translate service events
+            // (`on_aggregate`, `on_membership_changed`, `on_detail`)
+            // into webview emits + tray rebuilds. The service
+            // itself is framework-free.
+            let live_state = app.state::<state::LiveSessionState>();
+            let service = std::sync::Arc::clone(&live_state.service);
+            let listener = live_activity_bridge::TauriSessionEventListener::new(
+                app.handle().clone(),
+            );
+            tauri::async_runtime::spawn(async move {
+                service.subscribe(listener).await;
+            });
+
             Ok(())
         })
         .manage(state::LoginState::default())
         .manage(state::DesktopOpState::default())
-        .manage(state::DryRunRegistry::default())
-        .manage(live_session_state)
+        .manage(state::DryRunState::new())
+        .manage({
+            // Build the live state with the service refactor's
+            // pattern, then enable activity-cards classification on
+            // the inner runtime when the cards index opened
+            // successfully. The setup hook (which subscribes the
+            // bridge listener) reads the same `LiveSessionState`
+            // afterwards and sees both the service AND the wired
+            // activity index.
+            let svc =
+                claudepot_core::services::live_activity_service::LiveActivityService::new();
+            if let Some(idx) = cards_index.as_ref() {
+                svc.enable_activity(std::sync::Arc::clone(idx));
+            }
+            state::LiveSessionState::new(svc)
+        })
         .manage(ops::RunningOps::new())
         .manage(preferences::PreferencesState::new(prefs))
-        .manage(commands_config::ConfigTreeState::default())
+        // D-1: shared config-scan cache + commit race arbiter. Owns
+        // the latest scanned `ConfigTree`, hands out generation tokens,
+        // and arbitrates between concurrent writers (`config_scan`
+        // command + watcher seed/keepalive). Was `ConfigTreeState` in
+        // the IPC layer — service moved to `claudepot-core` so the
+        // commit policy is testable without Tauri.
+        .manage(claudepot_core::config_view::ConfigScanService::new())
         .manage(commands_config::SearchRegistry::default())
         .manage(config_watch::ConfigWatchState::default())
-        .manage(claudepot_core::services::usage_cache::UsageCache::new());
+        .manage(claudepot_core::services::usage_cache::UsageCache::new())
+        // D-3: process-wide pricing cache + singleflight refresh.
+        // Replaces the old `static REFRESH_IN_FLIGHT: AtomicBool` in
+        // `commands_pricing.rs`, and now correctly singleflights the
+        // `pricing_refresh` button-mash path too.
+        .manage(claudepot_core::pricing::PricingCacheService::new());
 
     // Conditionally publish the cards index — `None` means open
     // failed at startup, in which case the cards-* commands return
@@ -224,6 +301,7 @@ pub fn run() {
             commands::reveal_in_finder,
             commands::account_list,
             commands::account_list_basic,
+            commands::accounts_reconcile,
             commands_cli::cli_use,
             commands_cli::cli_is_cc_running,
             commands_desktop::desktop_use,
@@ -235,12 +313,17 @@ pub fn run() {
             commands_desktop::desktop_launch,
             commands_account::account_add_from_current,
             commands_account::account_register_from_browser,
+            commands_account::account_register_from_browser_start,
             commands_account::account_login,
+            commands_account::account_login_start,
+            commands_account::account_login_status,
             commands_account::account_login_cancel,
             commands_account::account_remove,
             commands_account::fetch_all_usage,
             commands_account::refresh_usage_for,
             commands_account::verify_all_accounts,
+            commands_account::verify_all_accounts_start,
+            commands_account::verify_all_accounts_status,
             commands_account::verify_account,
             commands_cli::current_cc_identity,
             commands_project::project_list,
@@ -264,6 +347,8 @@ pub fn run() {
             commands_project::repair_status_summary,
             commands_session_move::session_list_orphans,
             commands_session_move::session_move,
+            commands_session_move::session_move_start,
+            commands_session_move::session_move_status,
             commands_session_move::session_adopt_orphan,
             commands_session_move::session_discard_orphan,
             commands_session_index::session_list_all,
@@ -292,6 +377,7 @@ pub fn run() {
             commands_keys::key_oauth_remove,
             commands_keys::key_oauth_rename,
             commands_keys::key_oauth_copy,
+            commands_keys::key_oauth_copy_shell,
             commands_keys::key_oauth_usage_cached,
             commands_preferences::preferences_set_activity,
             commands_preferences::preferences_set_notifications,
