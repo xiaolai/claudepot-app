@@ -8,7 +8,6 @@ import {
 } from "react";
 import { copyToClipboard } from "../lib/copyToClipboard";
 import { useSessionsData } from "../hooks/useSessionsData";
-import { useTrashCount } from "../hooks/useTrashCount";
 import {
   readSessionsFilter,
   writeSessionsFilter,
@@ -24,10 +23,7 @@ import { NF } from "../icons";
 import { ScreenHeader } from "../shell/ScreenHeader";
 import type { SessionRow } from "../types";
 import { MoveSessionModal } from "./projects/MoveSessionModal";
-import { CleanupPane } from "./sessions/CleanupPane";
-import { SessionsTrendsPane } from "./sessions/components/SessionsTrendsPane";
 import { useSessionLive } from "../hooks/useSessionLive";
-import { SectionTab } from "./sessions/components/SectionTab";
 import { SessionsTabPanel } from "./sessions/components/SessionsTabPanel";
 import { buildSessionContextMenuItems } from "./sessions/sessionsContextMenu";
 import { filterSessionsByRepo } from "./sessions/RepoFilterStrip";
@@ -39,7 +35,6 @@ import {
   countSessionStatus,
   type SessionFilter,
 } from "./sessions/SessionsTable";
-import { TrashDrawer } from "./sessions/TrashDrawer";
 
 /**
  * Sessions tab — a flat, cross-project index of every CC session on
@@ -89,9 +84,6 @@ export function SessionsSection(props: SessionsSectionProps = {}) {
     initialFilters.current.filter,
   );
   const [query, setQueryRaw] = useState(initialFilters.current.query);
-  const [tab, setTabRaw] = useState<"sessions" | "trends" | "cleanup">(
-    initialFilters.current.tab,
-  );
   const [liveFilter, setLiveFilterRaw] = useState<boolean>(
     initialFilters.current.liveFilter,
   );
@@ -126,13 +118,6 @@ export function SessionsSection(props: SessionsSectionProps = {}) {
       return resolved;
     });
   }, []);
-  const setTab = useCallback<typeof setTabRaw>((next) => {
-    setTabRaw((prev) => {
-      const resolved = typeof next === "function" ? next(prev) : next;
-      writeSessionsFilter({ tab: resolved });
-      return resolved;
-    });
-  }, []);
   const setLiveFilter = useCallback<typeof setLiveFilterRaw>((next) => {
     setLiveFilterRaw((prev) => {
       const resolved = typeof next === "function" ? next(prev) : next;
@@ -163,8 +148,8 @@ export function SessionsSection(props: SessionsSectionProps = {}) {
     refresh,
   } = useSessionsData({ onSecondaryError: setToast });
 
-  // Dot on the Cleanup tab when trash is non-empty. Render-if-nonzero.
-  const { count: trashCount, refresh: refreshTrash } = useTrashCount();
+  // Cleanup moved to Settings → Cleanup; the trash-count chip in
+  // this header has gone with it.
 
   // Live-runtime snapshot used by the Live filter chip. `useSessionLive`
   // is a module-scope store so this is cheap even though the Sessions
@@ -387,25 +372,6 @@ export function SessionsSection(props: SessionsSectionProps = {}) {
                 {elapsedLabel}
               </span>
             )}
-            {trashCount > 0 &&
-              (compact ? (
-                <IconButton
-                  glyph={NF.trash}
-                  onClick={() => setTab("cleanup")}
-                  title={`Trash · ${trashCount} item${trashCount === 1 ? "" : "s"}`}
-                  aria-label={`Open trash (${trashCount} item${trashCount === 1 ? "" : "s"})`}
-                />
-              ) : (
-                <Button
-                  variant="ghost"
-                  glyph={NF.trash}
-                  glyphColor="var(--fg-muted)"
-                  onClick={() => setTab("cleanup")}
-                  title="Open the Cleanup tab"
-                >
-                  Trash · {trashCount}
-                </Button>
-              ))}
             {compact ? (
               <IconButton
                 glyph={NF.refresh}
@@ -428,113 +394,39 @@ export function SessionsSection(props: SessionsSectionProps = {}) {
         }
       />
 
-      <div
-        role="tablist"
-        aria-label="Sessions view"
-        style={{
-          display: "flex",
-          gap: "var(--sp-6)",
-          padding: "var(--sp-8) var(--sp-32)",
-          borderBottom: "var(--bw-hair) solid var(--line)",
-          background: "var(--bg)",
-        }}
-      >
-        <SectionTab
-          id="sessions-tab-sessions"
-          panelId="sessions-tab-panel-sessions"
-          label="Sessions"
-          active={tab === "sessions"}
-          onSelect={() => setTab("sessions")}
-        />
-        <SectionTab
-          id="sessions-tab-trends"
-          panelId="sessions-tab-panel-trends"
-          label="Trends"
-          active={tab === "trends"}
-          onSelect={() => setTab("trends")}
-        />
-        <SectionTab
-          id="sessions-tab-cleanup"
-          panelId="sessions-tab-panel-cleanup"
-          label="Cleanup"
-          active={tab === "cleanup"}
-          onSelect={() => setTab("cleanup")}
-          indicator={trashCount > 0 ? true : undefined}
-        />
-      </div>
-
-      {tab === "cleanup" && (
-        <div
-          id="sessions-tab-panel-cleanup"
-          role="tabpanel"
-          aria-labelledby="sessions-tab-cleanup"
-          style={{
-            display: "flex",
-            flex: 1,
-            minHeight: 0,
-            overflow: "auto",
-          }}
-        >
-          <div style={{ flex: 2, minWidth: 0, borderRight: "var(--bw-hair) solid var(--line)" }}>
-            <CleanupPane
-              onTrashChanged={() => {
-                refresh();
-                refreshTrash();
-              }}
-              setToast={setToast}
-            />
-          </div>
-          <div style={{ flex: 1, minWidth: 0 }}>
-            <TrashDrawer onChange={refresh} />
-          </div>
-        </div>
-      )}
-
-      {tab === "sessions" && (
-        <SessionsTabPanel
-          showTable={showTable}
-          showDetail={showDetail}
-          splitView={splitView}
-          repoGroups={repoGroups}
-          activeRepo={activeRepo}
-          setActiveRepo={setActiveRepo}
-          query={query}
-          setQuery={setQuery}
-          filter={filter}
-          setFilter={setFilter}
-          counts={counts}
-          loading={loading}
-          error={error}
-          sessions={sessions}
-          filteredByQuery={filteredByQuery}
-          searchSnippets={searchSnippets}
-          selectedPath={selectedPath}
-          setSelectedPath={setSelectedPath}
-          projects={projects}
-          detailRefreshSignal={detailRefreshSignal}
-          setDetailRefreshSignal={setDetailRefreshSignal}
-          onContextMenu={handleContextMenu}
-          onRefresh={refresh}
-          setToast={setToast}
-          liveFilter={liveFilter}
-          setLiveFilter={setLiveFilter}
-          liveCount={liveSummaries.length}
-        />
-      )}
-      {tab === "trends" && (
-        <div
-          id="sessions-tab-panel-trends"
-          role="tabpanel"
-          aria-labelledby="sessions-tab-trends"
-          style={{
-            flex: 1,
-            minHeight: 0,
-            overflow: "auto",
-          }}
-        >
-          <SessionsTrendsPane />
-        </div>
-      )}
+      <SessionsTabPanel
+        showTable={showTable}
+        showDetail={showDetail}
+        splitView={splitView}
+        repoGroups={repoGroups}
+        activeRepo={activeRepo}
+        setActiveRepo={setActiveRepo}
+        query={query}
+        setQuery={setQuery}
+        filter={filter}
+        setFilter={setFilter}
+        counts={counts}
+        loading={loading}
+        error={error}
+        sessions={sessions}
+        filteredByQuery={filteredByQuery}
+        searchSnippets={searchSnippets}
+        selectedPath={selectedPath}
+        setSelectedPath={setSelectedPath}
+        projects={projects}
+        detailRefreshSignal={detailRefreshSignal}
+        setDetailRefreshSignal={setDetailRefreshSignal}
+        onContextMenu={handleContextMenu}
+        onRefresh={refresh}
+        setToast={setToast}
+        liveFilter={liveFilter}
+        setLiveFilter={setLiveFilter}
+        liveCount={liveSummaries.length}
+      />
+      {/* The "Cleanup" sub-tab moved to Settings → Cleanup; the
+          "Trends" sub-tab was deleted (its data is redundant with
+          the cards-by-day metric in Activity). The single remaining
+          Sessions surface no longer needs a tab bar. */}
 
       {moveSession && (
         <MoveSessionModal

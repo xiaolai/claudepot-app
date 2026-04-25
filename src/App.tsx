@@ -33,10 +33,6 @@ const importSettings = () =>
   import("./sections/SettingsSection").then((m) => ({ default: m.SettingsSection }));
 const importSessions = () =>
   import("./sections/SessionsSection").then((m) => ({ default: m.SessionsSection }));
-const importActivities = () =>
-  import("./sections/ActivitiesSection").then((m) => ({
-    default: m.ActivitiesSection,
-  }));
 const importEvents = () =>
   import("./sections/EventsSection").then((m) => ({ default: m.EventsSection }));
 const importKeys = () =>
@@ -47,11 +43,12 @@ const importGlobal = () =>
   import("./sections/GlobalSection").then((m) => ({ default: m.GlobalSection }));
 const ProjectsSection = lazy(importProjects);
 const SettingsSection = lazy(importSettings);
-const ActivitiesSection = lazy(importActivities);
 const EventsSection = lazy(importEvents);
-// SessionsSection is mounted transitively through ActivitiesSection
-// now; keep the lazy factory around so its chunk is cached by the
-// prefetcher without us needing a second export here.
+// SessionsSection is no longer rendered as a top-level surface —
+// sessions live inside Projects → ProjectDetail's master-detail
+// pane after the events-into-projects collapse. The factory stays
+// around for the prefetcher chunk-cache without us needing a
+// second top-level export.
 void importSessions;
 const KeysSection = lazy(importKeys);
 const GlobalSection = lazy(importGlobal);
@@ -83,7 +80,6 @@ function preloadSavedSection(): void {
       localStorage.getItem("claudepot.startSection") ||
       localStorage.getItem("claudepot.activeSection");
     if (id === "projects") void importProjects();
-    else if (id === "activities") void importActivities();
     else if (id === "events") void importEvents();
     else if (id === "global") void importGlobal();
     else if (id === "keys") void importKeys();
@@ -123,6 +119,15 @@ function AppShell() {
    * the lazy section hadn't finished mounting.
    */
   const [pendingSessionPath, setPendingSessionPath] = useState<string | null>(
+    null,
+  );
+  /**
+   * Project cwd to pre-select when the Projects section next mounts.
+   * Set when a card in the Activity surface fires
+   * `claudepot:navigate-section` with `projectPath`. Consumed by
+   * ProjectsSection alongside `pendingSessionPath`.
+   */
+  const [pendingProjectPath, setPendingProjectPath] = useState<string | null>(
     null,
   );
   // Palette + shortcuts modal live at shell level so ⌘K / ⌘/ open
@@ -263,12 +268,20 @@ function AppShell() {
   // the right session is the MVP.
   useEffect(() => {
     const handler = (e: Event) => {
-      const detail = (e as CustomEvent<{ id?: string; sessionPath?: string }>)
-        .detail;
+      const detail = (
+        e as CustomEvent<{
+          id?: string;
+          sessionPath?: string;
+          projectPath?: string;
+        }>
+      ).detail;
       const id = detail?.id;
       if (id && sectionIds.includes(id)) {
         if (detail.sessionPath) {
           setPendingSessionPath(detail.sessionPath);
+        }
+        if (detail.projectPath) {
+          setPendingProjectPath(detail.projectPath);
         }
         setSection(id);
       }
@@ -346,8 +359,13 @@ function AppShell() {
     function onGoto(ev: Event) {
       const detail = (ev as CustomEvent<{ filePath: string }>).detail;
       if (!detail?.filePath) return;
+      // After the events-into-projects collapse, transcripts open
+      // inside ProjectsSection's master-detail pane. ProjectsSection
+      // derives the matching project from the file's slug when no
+      // explicit projectPath is supplied — see its pending-consumer
+      // effect.
       setPendingSessionPath(detail.filePath);
-      setSection("activities");
+      setSection("projects");
     }
     window.addEventListener("cp-goto-session", onGoto);
     return () => window.removeEventListener("cp-goto-session", onGoto);
@@ -381,10 +399,16 @@ function AppShell() {
         if (row?.transcript_path) {
           setPendingSessionPath(row.transcript_path);
         }
+        if (row?.cwd) {
+          setPendingProjectPath(row.cwd);
+        }
       } catch {
         /* fallback to just switching */
       }
-      setSection("activities");
+      // Sessions live inside Projects after the events-into-projects
+      // collapse; the live snapshot already carries `cwd` so the
+      // pending-consumer can pick the right project on first paint.
+      setSection("projects");
     })
       .then((fn) => {
         unlisten = fn;
@@ -640,7 +664,11 @@ function AppShell() {
     (s: LiveSessionSummary) => {
       if (s.transcript_path) {
         setPendingSessionPath(s.transcript_path);
-        setSection("activities");
+        if (s.cwd) setPendingProjectPath(s.cwd);
+        // Sessions land inside Projects after the events-into-
+        // projects collapse; ProjectsSection's pending consumer
+        // selects the matching project and opens the transcript.
+        setSection("projects");
       }
     },
     [setSection],
@@ -688,8 +716,10 @@ function AppShell() {
           badges={{
             accounts: accounts.length || undefined,
             // Alerting sessions (errored / stuck) surface as the
-            // badge count on the Activities nav row.
-            activities: activityAlerts || undefined,
+            // badge count on the Activity nav row — the merged
+            // dashboard + events surface that now owns "what's
+            // happening right now."
+            events: activityAlerts || undefined,
           }}
           version={APP_VERSION}
           synced
@@ -735,14 +765,12 @@ function AppShell() {
                 <ProjectsSection
                   subRoute={subRoute}
                   onSubRouteChange={setSubRoute}
-                />
-              )}
-              {section === "activities" && (
-                <ActivitiesSection
-                  initialSelectedPath={pendingSessionPath}
-                  onInitialSelectedPathConsumed={() =>
-                    setPendingSessionPath(null)
-                  }
+                  pendingProjectPath={pendingProjectPath}
+                  pendingSessionPath={pendingSessionPath}
+                  onPendingConsumed={() => {
+                    setPendingProjectPath(null);
+                    setPendingSessionPath(null);
+                  }}
                 />
               )}
               {section === "events" && <EventsSection />}
