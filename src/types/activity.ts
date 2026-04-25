@@ -35,6 +35,22 @@ export type LiveDeltaKind =
   | { kind: "task_summary_changed"; summary: string }
   | { kind: "model_changed"; model: string }
   | { kind: "overlay_changed"; errored: boolean; stuck: boolean }
+  | {
+      // Activity card emitted by the live classifier. Subscribers
+      // (Activity surface card stream + notifier) consume this to
+      // update without a follow-up `cards_recent` query. Mirrors
+      // `LiveDeltaKindDto::CardEmitted` in dto_activity.rs;
+      // serialized as `card_emitted` via the enum's
+      // `#[serde(rename_all = "snake_case")]`.
+      kind: "card_emitted";
+      id: number;
+      card_kind: string;
+      severity: string;
+      title: string;
+      ts_ms: number;
+      plugin: string | null;
+      cwd: string;
+    }
   | { kind: "ended" };
 
 export type LiveDelta = LiveDeltaKind & {

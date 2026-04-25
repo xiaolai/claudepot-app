@@ -611,16 +611,34 @@ function CleanupTabPane({
   // lived under Sessions → Cleanup. The two-pane layout (filter +
   // plan on the left, trash on the right) carries over verbatim;
   // the sub-tab outer chrome is gone since this is just a Settings
-  // sub-tab now. `setToast` adapts SettingsSection's toast API
-  // (kind + text) to CleanupPane's single-string signature by
-  // routing all pane toasts through the info channel.
+  // sub-tab now.
+  //
+  // `setToast` adapts CleanupPane's single-string signature (used
+  // primarily by the SessionIndexRebuild subsection for failure
+  // reporting) to SettingsSection's (kind, text) API. We classify
+  // by message prefix — the rebuild surface emits "rebuild failed:"
+  // / "couldn't …" on errors, plain status messages otherwise — so
+  // failures route to the error channel rather than getting lost
+  // in the info stream.
   const setToast = useCallback(
-    (msg: string) => pushToast("info", msg),
+    (msg: string) => {
+      const lower = msg.toLowerCase();
+      const looksLikeError =
+        lower.startsWith("error") ||
+        lower.startsWith("rebuild failed") ||
+        lower.includes("failed:") ||
+        lower.startsWith("couldn't") ||
+        lower.startsWith("could not");
+      pushToast(looksLikeError ? "error" : "info", msg);
+    },
     [pushToast],
   );
-  // The pane uses an internal refresh signal to coordinate the
-  // prune flow with the trash drawer — when a prune dispatches,
-  // the drawer re-fetches so newly-trashed entries appear.
+  // Bumped when CleanupPane dispatches a prune so the TrashDrawer
+  // re-fetches and shows the newly-trashed entries. We deliberately
+  // do NOT pass this tick as the drawer's `key` — that would force
+  // a remount + drop the drawer's local state on every action — and
+  // we don't bump on the drawer's own onChange (the drawer already
+  // refreshes itself after restore/empty).
   const [trashTick, setTrashTick] = useState(0);
   return (
     <div
@@ -644,7 +662,13 @@ function CleanupTabPane({
           paddingLeft: "var(--sp-16)",
         }}
       >
-        <TrashDrawer key={trashTick} onChange={() => setTrashTick((n) => n + 1)} />
+        {/* `key={trashTick}` forces a remount whenever CleanupPane
+            dispatches a prune so the drawer picks up the newly-
+            trashed entries. We deliberately do NOT pass `onChange`
+            here — the drawer already calls its own refresh() after
+            restore / empty actions, so wiring it back to setTrashTick
+            would double-bump and remount the drawer mid-action. */}
+        <TrashDrawer key={trashTick} />
       </div>
     </div>
   );

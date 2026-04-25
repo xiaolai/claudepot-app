@@ -45,6 +45,10 @@ pub use crate::{
     dto_activity::{
         ActivityTrendsDto, LiveDeltaDto, LiveDeltaKindDto, LiveSessionSummaryDto,
     },
+    dto_activity_cards::{
+        ActivityCardDto, CardNavigateDto, CardsCountDto, CardsRecentQueryDto,
+        CardsReindexFailureDto, CardsReindexResultDto, HelpRefDto, SourceRefDto,
+    },
     dto_desktop::{
         DesktopAdoptOutcome, DesktopClearOutcome, DesktopIdentity, DesktopProbeMethod,
         DesktopSyncOutcome,

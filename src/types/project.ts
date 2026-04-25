@@ -38,11 +38,11 @@ export interface ProjectDetail {
 }
 
 /**
- * Preview of what `project_clean_execute` would delete. The UI
- * renders this in the confirm modal before the user approves the
- * actual run. `unreachable_skipped` surfaces projects whose source
- * lives on an unmounted volume — they are NOT candidates for cleanup
- * and shouldn't be in the list.
+ * Preview of what `projectCleanStart` would delete. Returned by
+ * `projectCleanPreview`; the UI renders this in the confirm modal
+ * before the user approves the actual run. `unreachable_skipped`
+ * surfaces projects whose source lives on an unmounted volume —
+ * they are NOT candidates for cleanup and shouldn't be in the list.
  */
 export interface CleanPreview {
   orphans: ProjectInfo[];
@@ -59,11 +59,13 @@ export interface CleanPreview {
 }
 
 /**
- * Outcome of a completed `project_clean_execute`. The modal renders
- * every non-zero counter as a line item. `snapshot_paths` points at
- * the recovery snapshots (~/.claude.json entry value, dropped
- * history.jsonl lines) so the user can restore if the clean turned
- * out to be wrong.
+ * Outcome of a completed `projectCleanStart` op (delivered via the
+ * `op-progress::<op_id>` terminal event and surfaced through
+ * `RunningOpInfo.clean_result`). The modal renders every non-zero
+ * counter as a line item. `snapshot_paths` points at the recovery
+ * snapshots (~/.claude.json entry value, dropped history.jsonl
+ * lines) so the user can restore if the clean turned out to be
+ * wrong.
  */
 export interface CleanResult {
   orphans_found: number;

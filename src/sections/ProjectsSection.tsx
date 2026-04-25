@@ -94,17 +94,20 @@ export function ProjectsSection({
   //      matching it against `project.sanitized_name`. The slug
   //      encodes the cwd via `sanitize_path`; matching by that name
   //      is what the GUI uses everywhere else.
-  // If no project matches (orphan, project deleted), we still seed
-  // openedSessionPath so the transcript opens via the master-detail
-  // pane — but only when a project IS selected, since the right pane
-  // hides when selectedPath is null. The onPendingConsumed callback
-  // fires once after the projects list arrives so the parent clears
-  // state without trapping us in a setState loop.
-  const consumedPendingRef = useRef(false);
+  // We key the "did I already consume this?" gate by the pending
+  // payload itself (project + session) so a SECOND deep-link while
+  // ProjectsSection stays mounted re-fires the resolver — earlier
+  // versions used a once-per-mount boolean and silently dropped
+  // every navigation after the first. The gate is also released
+  // once the consumer would resolve to nothing (e.g. project list
+  // hasn't arrived yet, or the project doesn't exist anymore) so
+  // the parent doesn't have to clear-and-reset state on a no-op.
+  const lastConsumedRef = useRef<string | null>(null);
   useEffect(() => {
-    if (consumedPendingRef.current) return;
     if (!pendingProjectPath && !pendingSessionPath) return;
     if (loading) return;
+    const payloadKey = `${pendingProjectPath ?? ""}::${pendingSessionPath ?? ""}`;
+    if (lastConsumedRef.current === payloadKey) return;
     let resolvedProject: ProjectInfo | null = null;
     if (pendingProjectPath) {
       const wanted = pendingProjectPath.toLowerCase();
@@ -121,11 +124,17 @@ export function ProjectsSection({
           projects.find((p) => p.sanitized_name === slug) ?? null;
       }
     }
-    if (resolvedProject) setSelectedPath(resolvedProject.original_path);
-    if (pendingSessionPath && resolvedProject) {
-      setOpenedSessionPath(pendingSessionPath);
-    }
-    consumedPendingRef.current = true;
+    // No matching project (orphan, deleted, or project list still
+    // syncing): do NOT mark consumed yet. The parent keeps the
+    // pending state and we retry once `projects` updates. If the
+    // project genuinely no longer exists the user lands on the
+    // empty-pane state on next render — which is the correct
+    // "graceful degradation" outcome rather than silently dropping
+    // the request.
+    if (!resolvedProject) return;
+    setSelectedPath(resolvedProject.original_path);
+    if (pendingSessionPath) setOpenedSessionPath(pendingSessionPath);
+    lastConsumedRef.current = payloadKey;
     onPendingConsumed?.();
   }, [
     loading,

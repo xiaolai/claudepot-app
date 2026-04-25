@@ -74,14 +74,14 @@ const SEVERITY_OPTIONS: {
 ];
 
 const DEFAULT_LIMIT = 200;
-// Aggregate fetch is filter-independent — the metrics strip should
-// always show the same overview regardless of the user's drill-down.
-// 10k matches the limit the previous standalone `Trends` tab used and
-// is comfortably above current scale (~4k cards on the reference
-// machine). Bump this if the index grows past 50k and the
-// client-side aggregation becomes noticeable.
+// Aggregate fetch is filter-independent and time-windowed to match
+// the metrics strip's "last 30 days" framing — without `sinceMs` the
+// strip would silently aggregate the newest 10k cards across all
+// time, mismatching its own subtitle. 10k caps the client-side
+// aggregation cost at the current ~4k-card scale; bump if the index
+// grows past 50k and aggregation becomes noticeable.
 const AGG_LIMIT = 10_000;
-const AGG_QUERY: CardsRecentQuery = { minSeverity: "info", limit: AGG_LIMIT };
+const AGG_WINDOW_MS = 30 * 24 * 60 * 60 * 1000;
 
 export function EventsSection() {
   const [cards, setCards] = useState<ActivityCard[]>([]);
@@ -95,60 +95,89 @@ export function EventsSection() {
     limit: DEFAULT_LIMIT,
   });
 
+  // Filtered list refresh. Uses Promise.allSettled so a transient
+  // failure on one fetch (e.g. cards_count_new_since timing out)
+  // doesn't blank the whole surface — the parts that did succeed
+  // still render. Errors are kept inline only when both list and
+  // counts fail; partial failures degrade to a stale-but-usable view.
   const refresh = useCallback(async () => {
-    try {
-      setError(null);
-      // Three parallel fetches: filtered list, new-since counter, and
-      // the unfiltered aggregate set that backs the metrics strip.
-      const [list, c, agg] = await Promise.all([
-        api.cardsRecent(filters),
-        api.cardsCountNewSince(filters),
-        api.cardsRecent(AGG_QUERY),
-      ]);
-      setCards(list);
-      setCounts(c);
-      setAggCards(agg);
-      setLoading(false);
-    } catch (e) {
-      setError(String(e));
-      setLoading(false);
+    setError(null);
+    const [listR, countsR] = await Promise.allSettled([
+      api.cardsRecent(filters),
+      api.cardsCountNewSince(filters),
+    ]);
+    if (listR.status === "fulfilled") setCards(listR.value);
+    if (countsR.status === "fulfilled") setCounts(countsR.value);
+    if (listR.status === "rejected" && countsR.status === "rejected") {
+      setError(String(listR.reason));
     }
+    setLoading(false);
   }, [filters]);
+
+  // Aggregate fetch — separate from `refresh` because it doesn't
+  // depend on `filters`, and re-running on every filter change would
+  // be wasted work (the metrics strip is intentionally global). It
+  // refreshes on mount, on the `live-all` tick (cards landed
+  // anywhere), and on Reindex completion (handled by handleReindex
+  // which calls refreshAgg explicitly).
+  const refreshAgg = useCallback(async () => {
+    try {
+      const sinceMs = Date.now() - AGG_WINDOW_MS;
+      const agg = await api.cardsRecent({
+        minSeverity: "info",
+        limit: AGG_LIMIT,
+        sinceMs,
+      });
+      setAggCards(agg);
+    } catch {
+      // Strip stays on its last-known dataset — failing here
+      // shouldn't blank the metrics row when the underlying list
+      // below might still be fine.
+    }
+  }, []);
 
   useEffect(() => {
     void refresh();
   }, [refresh]);
 
+  useEffect(() => {
+    void refreshAgg();
+  }, [refreshAgg]);
+
   // Live updates — subscribe to the `live::*` channel pattern. Tauri
   // doesn't support channel wildcards, so we listen on the public
   // `live-all` channel for session lifecycle and refresh on tick;
   // per-session CardEmitted deltas land on `live::<sid>` channels
-  // which the user's existing Sessions section already subscribes to.
+  // which the per-session detail viewer subscribes to directly.
   // For cross-session card visibility, a 5-second poll is the
-  // simplest correct approach; live deltas for the *selected* session
-  // arrive via the subscriber inside the session detail viewer.
+  // simplest correct approach; live deltas for the *selected*
+  // session arrive via the subscriber inside SessionDetail.
   useEffect(() => {
     const unsubP = listen("live-all", () => {
       void refresh();
+      void refreshAgg();
     });
-    const t = setInterval(() => void refresh(), 5_000);
+    const t = setInterval(() => {
+      void refresh();
+      void refreshAgg();
+    }, 5_000);
     return () => {
       void unsubP.then((u) => u());
       clearInterval(t);
     };
-  }, [refresh]);
+  }, [refresh, refreshAgg]);
 
   const handleReindex = useCallback(async () => {
     setReindexing(true);
     try {
       await api.cardsReindex();
-      await refresh();
+      await Promise.all([refresh(), refreshAgg()]);
     } catch (e) {
       setError(String(e));
     } finally {
       setReindexing(false);
     }
-  }, [refresh]);
+  }, [refresh, refreshAgg]);
 
   const markAllSeen = useCallback(async () => {
     if (!cards.length) return;
