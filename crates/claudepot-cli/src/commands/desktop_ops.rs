@@ -61,6 +61,7 @@ pub async fn use_account(ctx: &AppContext, email_input: &str, no_launch: bool) -
     use claudepot_core::desktop_backend;
     use claudepot_core::desktop_lock;
     use claudepot_core::resolve::resolve_email;
+    use claudepot_core::services::desktop_service;
 
     // Acquire the cross-process operation lock so CLI use_account
     // can't race with a GUI-initiated adopt/clear/switch. Codex
@@ -77,16 +78,6 @@ pub async fn use_account(ctx: &AppContext, email_input: &str, no_launch: bool) -
         .store
         .find_by_email(&email)?
         .ok_or_else(|| anyhow::anyhow!("account not found: {email}"))?;
-
-    // Check if target has a Desktop profile
-    let profile_dir = claudepot_core::paths::desktop_profile_dir(target.uuid);
-    if !profile_dir.exists() {
-        anyhow::bail!(
-            "no Desktop profile stored for {email}. \
-             Sign in to Claude Desktop as this account first, then use \
-             `claudepot desktop use` to switch."
-        );
-    }
 
     let current_uuid = ctx
         .store
@@ -121,27 +112,27 @@ pub async fn use_account(ctx: &AppContext, email_input: &str, no_launch: bool) -
 
     ctx.info(&format!("Switching Desktop: {from_email} → {email}"));
 
-    desktop_backend::swap::switch(
-        platform.as_ref(),
-        &ctx.store,
-        current_uuid,
-        target.uuid,
-        no_launch,
-    )
-    .await
-    .map_err(|e| anyhow::anyhow!("{e}"))?;
+    // Route through desktop_service::switch so CLI gets the same
+    // snapshot preflight + verbatim error message as the GUI command.
+    let outcome = desktop_service::switch(platform.as_ref(), &ctx.store, target.uuid, no_launch)
+        .await
+        .map_err(|e| anyhow::anyhow!("{e}"))?;
 
     if ctx.json {
         println!(
             "{}",
             serde_json::json!({
-                "from": from_email,
-                "to": email,
+                "from": outcome.outgoing_email.clone().unwrap_or_else(|| "(none)".to_string()),
+                "to": outcome.email,
                 "launched": !no_launch,
             })
         );
     } else {
-        println!("Desktop: {from_email} → {email}");
+        let from_display = outcome
+            .outgoing_email
+            .clone()
+            .unwrap_or_else(|| "(none)".to_string());
+        println!("Desktop: {from_display} → {}", outcome.email);
         if no_launch {
             println!("Desktop was not relaunched (--no-launch).");
         }

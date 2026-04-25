@@ -4,6 +4,7 @@ use claudepot_core::account::AccountStore;
 use claudepot_core::paths;
 use claudepot_core::services::usage_cache::UsageCache;
 
+mod clipboard;
 mod commands;
 mod output;
 mod time_fmt;
@@ -704,7 +705,8 @@ async fn main() -> Result<()> {
                 redact_env,
                 redact_regex,
                 html_no_js,
-            )?,
+            )
+            .await?,
             SessionAction::Search { query, limit } => {
                 commands::session::search_cmd(&ctx, &query, limit)?
             }
