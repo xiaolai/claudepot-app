@@ -1,14 +1,28 @@
 use serde::{Deserialize, Serialize};
+use std::fmt;
 
 /// The on-disk OAuth credential blob written by Claude Code CLI.
 /// See reference.md Appendix A for the verified shape.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+///
+/// `Debug` is implemented manually so token bodies never appear in
+/// `tracing::*`, panic messages, or `dbg!` output — the only thing
+/// printed for token fields is the redacted length sentinel from
+/// `OAuthCredentials::fmt`.
+#[derive(Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct CredentialBlob {
     pub claude_ai_oauth: OAuthCredentials,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+impl fmt::Debug for CredentialBlob {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("CredentialBlob")
+            .field("claude_ai_oauth", &self.claude_ai_oauth)
+            .finish()
+    }
+}
+
+#[derive(Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct OAuthCredentials {
     /// Opaque 108-char token, prefix `sk-ant-oat01-`.
@@ -31,6 +45,33 @@ pub struct OAuthCredentials {
     /// e.g. "default_claude_max_20x". May be empty string on older blobs.
     #[serde(default)]
     pub rate_limit_tier: Option<String>,
+}
+
+impl fmt::Debug for OAuthCredentials {
+    /// Manual impl: `access_token` and `refresh_token` are redacted to
+    /// `<redacted len=N>`. Per `.claude/rules/rust-conventions.md`, raw
+    /// token bodies must never appear in any debug or log output.
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("OAuthCredentials")
+            .field("access_token", &Redacted(self.access_token.len()))
+            .field("refresh_token", &Redacted(self.refresh_token.len()))
+            .field("expires_at", &self.expires_at)
+            .field("scopes", &self.scopes)
+            .field("subscription_type", &self.subscription_type)
+            .field("rate_limit_tier", &self.rate_limit_tier)
+            .finish()
+    }
+}
+
+/// Tiny helper rendered as `<redacted len=N>` so debug output preserves
+/// the token's length (useful for diagnosing truncated writes) without
+/// ever exposing the body.
+struct Redacted(usize);
+
+impl fmt::Debug for Redacted {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "<redacted len={}>", self.0)
+    }
 }
 
 impl CredentialBlob {
@@ -135,5 +176,53 @@ mod tests {
         let blob = CredentialBlob::from_json(&json).unwrap();
         assert!(!blob.is_expired(0)); // not expired without margin
         assert!(blob.is_expired(60)); // expired with 60s margin
+    }
+
+    /// Debug output must never reveal the access or refresh token body.
+    /// `.claude/rules/rust-conventions.md` requires this — derived
+    /// `Debug` would dump the raw `sk-ant-*` strings into any log line
+    /// or panic that touches a CredentialBlob.
+    #[test]
+    fn test_blob_debug_redacts_tokens() {
+        let json = r#"{"claudeAiOauth":{"accessToken":"sk-ant-oat01-SECRETLEAKVALUE","refreshToken":"sk-ant-ort01-OTHERLEAK","expiresAt":1,"scopes":["a"]}}"#;
+        let blob = CredentialBlob::from_json(json).unwrap();
+        let dbg = format!("{:?}", blob);
+        assert!(
+            !dbg.contains("sk-ant-oat01-SECRETLEAKVALUE"),
+            "Debug must not include raw access token; got: {dbg}"
+        );
+        assert!(
+            !dbg.contains("sk-ant-ort01-OTHERLEAK"),
+            "Debug must not include raw refresh token; got: {dbg}"
+        );
+        assert!(
+            !dbg.contains("SECRETLEAK"),
+            "Debug must not include any partial token body; got: {dbg}"
+        );
+        // Length is preserved so operators can still tell something is
+        // there (and how long).
+        assert!(
+            dbg.contains("len=28"),
+            "Debug should record access-token length; got: {dbg}"
+        );
+        assert!(
+            dbg.contains("len=22"),
+            "Debug should record refresh-token length; got: {dbg}"
+        );
+        // Non-secret fields stay visible.
+        assert!(dbg.contains("expires_at"));
+        assert!(dbg.contains("scopes"));
+    }
+
+    #[test]
+    fn test_blob_debug_with_alternate_formatter_also_redacts() {
+        // `{:#?}` (pretty) and any other formatter route through the
+        // same Debug impl — guard against a future regression that
+        // reintroduces a bypass.
+        let json = r#"{"claudeAiOauth":{"accessToken":"sk-ant-oat01-XYZ","refreshToken":"sk-ant-ort01-ABC","expiresAt":0,"scopes":[]}}"#;
+        let blob = CredentialBlob::from_json(json).unwrap();
+        let pretty = format!("{:#?}", blob);
+        assert!(!pretty.contains("sk-ant-oat01-XYZ"));
+        assert!(!pretty.contains("sk-ant-ort01-ABC"));
     }
 }

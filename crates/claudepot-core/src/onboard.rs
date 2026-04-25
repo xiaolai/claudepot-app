@@ -24,14 +24,25 @@ pub async fn run_auth_login_in_place_cancellable(
     cancel: Option<std::sync::Arc<tokio::sync::Notify>>,
 ) -> Result<(), OnboardError> {
     let claude_path = which_claude()?;
+    run_auth_login_in_place_cancellable_with_binary(&claude_path, cancel).await
+}
 
+/// Internal seam: accepts an explicit binary path so tests can point
+/// the loop at a controllable stub process. Mirrors
+/// [`run_auth_login_cancellable_with_binary`] — kept private to the
+/// crate so the public surface stays tied to the auto-discovered
+/// `claude` binary.
+pub(crate) async fn run_auth_login_in_place_cancellable_with_binary(
+    claude_path: &std::path::Path,
+    cancel: Option<std::sync::Arc<tokio::sync::Notify>>,
+) -> Result<(), OnboardError> {
     tracing::info!(
         binary = %claude_path.display(),
         timeout_secs = LOGIN_TIMEOUT.as_secs(),
         "spawning `claude auth login` in place"
     );
 
-    let mut child = tokio::process::Command::new(&claude_path)
+    let mut child = tokio::process::Command::new(claude_path)
         .arg("auth")
         .arg("login")
         .stdin(std::process::Stdio::null())
@@ -89,7 +100,14 @@ async fn pipe_to_tracing<R: tokio::io::AsyncRead + Unpin + Send + 'static>(
     use tokio::io::{AsyncBufReadExt, BufReader};
     let mut lines = BufReader::new(reader).lines();
     while let Ok(Some(line)) = lines.next_line().await {
-        tracing::info!(target: "claudepot::onboard", stream = stream_name, "{}", line);
+        // `claude auth login` can occasionally echo OAuth artifacts into
+        // its diagnostic output. Run every line through the same
+        // `sk-ant-*` masker the rest of the codebase uses before it
+        // reaches `tracing` — otherwise any sink (file, syslog, console)
+        // becomes a credential disclosure surface.
+        // See `.claude/rules/rust-conventions.md` §Security.
+        let safe = crate::session_export::redact_secrets(&line);
+        tracing::info!(target: "claudepot::onboard", stream = stream_name, "{}", safe);
     }
 }
 
