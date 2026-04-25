@@ -11,11 +11,13 @@ import {
 } from "../../components/primitives/Modal";
 import { Tag } from "../../components/primitives/Tag";
 import { useFocusTrap } from "../../hooks/useFocusTrap";
+import { useOperations } from "../../hooks/useOperations";
 import { NF } from "../../icons";
 import type { AccountSummary } from "../../types";
 import { ActionCard } from "./ActionCard";
 import { DesktopImportCard } from "./DesktopImportCard";
 import { IdentityPreview } from "./IdentityPreview";
+import { LOGIN_PHASES, renderLoginResult } from "./loginProgress";
 
 interface AddAccountModalProps {
   open: boolean;
@@ -64,6 +66,7 @@ export function AddAccountModal({
   const [preflight, setPreflight] = useState<Preflight>({ kind: "checking" });
   const trapRef = useFocusTrap<HTMLDivElement>();
   const titleId = useId();
+  const { open: openOpModal } = useOperations();
 
   useEffect(() => {
     if (!open) return;
@@ -130,8 +133,32 @@ export function AddAccountModal({
   const handleBrowserLogin = async () => {
     setBrowserLoggingIn(true);
     try {
-      const outcome = await api.accountRegisterFromBrowser();
-      onAdded(outcome.email);
+      // Async start: returns op_id immediately; phase events flow on
+      // `op-progress::<op_id>`. The shell `OperationProgressModal`
+      // takes over the user-visible surface.
+      const opId = await api.accountRegisterFromBrowserStart();
+      // Hand off the AddAccountModal — the OperationProgressModal owns
+      // the in-flight surface from here. The parent shell will pick up
+      // the new account on the next refresh once `onComplete` fires.
+      openOpModal({
+        opId,
+        title: "Add account: browser login",
+        phases: LOGIN_PHASES,
+        fetchStatus: api.accountLoginStatus,
+        renderResult: renderLoginResult,
+        onComplete: () => {
+          // We don't know the new email yet (the synchronous return
+          // value is gone); the parent's refresh will pick it up. Pass
+          // an empty string so the parent's contract holds.
+          onAdded("");
+        },
+        onError: (detail) => {
+          const msg = detail ?? "";
+          if (!/cancel/i.test(msg)) {
+            onError(msg || "register failed");
+          }
+        },
+      });
       onClose();
     } catch (e) {
       // Cancelled flows produce `register failed: claude auth login was

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { api } from "../../api";
 import { Button } from "../../components/primitives/Button";
 import { FilterChip } from "../../components/primitives/FilterChip";
@@ -41,6 +41,10 @@ export function CleanupPane({
   const [loading, setLoading] = useState(false);
   const [err, setErr] = useState<string | null>(null);
   const [running, setRunning] = useState(false);
+  // Monotonic counter so a late preview response from a superseded
+  // filter can't repopulate the plan with stale entries the user is
+  // about to act on. Mirrors `useSessionSearch`'s requestSeqRef pattern.
+  const previewSeqRef = useRef(0);
 
   const buildFilter = useCallback((): PruneFilterInput => {
     return {
@@ -59,16 +63,22 @@ export function CleanupPane({
   }, [olderThanDays, largerThanMb, hasError, sidechain]);
 
   const preview = useCallback(async () => {
+    const mySeq = ++previewSeqRef.current;
     setErr(null);
     setLoading(true);
     try {
       const p = await api.sessionPrunePlan(buildFilter());
+      // Discard the response if the user changed filters (or
+      // re-clicked Preview) while we were waiting — the plan we'd
+      // commit would not match the current filter row.
+      if (mySeq !== previewSeqRef.current) return;
       setPlan(p);
     } catch (e) {
+      if (mySeq !== previewSeqRef.current) return;
       setErr(String(e));
       setPlan(null);
     } finally {
-      setLoading(false);
+      if (mySeq === previewSeqRef.current) setLoading(false);
     }
   }, [buildFilter]);
 
@@ -89,8 +99,11 @@ export function CleanupPane({
 
   // Filter changes invalidate the prune preview. The slim
   // subsection owns its own plan and invalidates it on the same
-  // signal via the `buildFilter` reference identity.
+  // signal via the `buildFilter` reference identity. Bumping
+  // `previewSeqRef` here ensures any in-flight preview from the
+  // prior filter is discarded on arrival.
   useEffect(() => {
+    previewSeqRef.current++;
     setPlan(null);
   }, [olderThanDays, largerThanMb, hasError, sidechain]);
 

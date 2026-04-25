@@ -78,6 +78,12 @@ export function AddKeyModal({
     } catch (e) {
       setError(`${e}`);
     } finally {
+      // D-5/6/7: scrub the token from React state regardless of
+      // success or error. The plaintext was only ever needed for the
+      // single `key_*_add` call above; keeping it around in component
+      // state would leave it observable in DevTools React inspector
+      // (and any subsequent re-render). Cheap belt-and-suspenders.
+      setToken("");
       setBusy(false);
     }
   };

@@ -62,7 +62,24 @@ describe("ProtectedPathsPane", () => {
 
   it("surfaces an inline error from the api when add fails", async () => {
     listSpy.mockResolvedValue([]);
-    addSpy.mockRejectedValue("path is already protected: '/'");
+    addSpy.mockRejectedValue("path is already protected: '/tmp'");
+    const user = userEvent.setup();
+    render(<ProtectedPathsPane pushToast={pushToast} />);
+    await waitFor(() => expect(listSpy).toHaveBeenCalled());
+
+    const input = screen.getByPlaceholderText(/path\/to\/protect/i);
+    await user.type(input, "/tmp");
+    await user.click(screen.getByRole("button", { name: /^Add$/i }));
+
+    await waitFor(() =>
+      expect(screen.getByRole("alert")).toHaveTextContent(/already protected/i),
+    );
+    // Inline error, not a toast.
+    expect(pushToast).not.toHaveBeenCalled();
+  });
+
+  it("rejects filesystem-root inputs client-side without calling the api", async () => {
+    listSpy.mockResolvedValue([]);
     const user = userEvent.setup();
     render(<ProtectedPathsPane pushToast={pushToast} />);
     await waitFor(() => expect(listSpy).toHaveBeenCalled());
@@ -72,10 +89,63 @@ describe("ProtectedPathsPane", () => {
     await user.click(screen.getByRole("button", { name: /^Add$/i }));
 
     await waitFor(() =>
-      expect(screen.getByRole("alert")).toHaveTextContent(/already protected/i),
+      expect(screen.getByRole("alert")).toHaveTextContent(
+        /filesystem root/i,
+      ),
     );
-    // Inline error, not a toast.
+    expect(addSpy).not.toHaveBeenCalled();
     expect(pushToast).not.toHaveBeenCalled();
+  });
+
+  it("rejects relative paths client-side without calling the api", async () => {
+    listSpy.mockResolvedValue([]);
+    const user = userEvent.setup();
+    render(<ProtectedPathsPane pushToast={pushToast} />);
+    await waitFor(() => expect(listSpy).toHaveBeenCalled());
+
+    const input = screen.getByPlaceholderText(/path\/to\/protect/i);
+    await user.type(input, "relative/dir");
+    await user.click(screen.getByRole("button", { name: /^Add$/i }));
+
+    await waitFor(() =>
+      expect(screen.getByRole("alert")).toHaveTextContent(
+        /must be absolute/i,
+      ),
+    );
+    expect(addSpy).not.toHaveBeenCalled();
+  });
+
+  it("rejects paths containing '..' segments client-side", async () => {
+    listSpy.mockResolvedValue([]);
+    const user = userEvent.setup();
+    render(<ProtectedPathsPane pushToast={pushToast} />);
+    await waitFor(() => expect(listSpy).toHaveBeenCalled());
+
+    const input = screen.getByPlaceholderText(/path\/to\/protect/i);
+    await user.type(input, "/etc/../passwd");
+    await user.click(screen.getByRole("button", { name: /^Add$/i }));
+
+    await waitFor(() =>
+      expect(screen.getByRole("alert")).toHaveTextContent(/'\.\.'/),
+    );
+    expect(addSpy).not.toHaveBeenCalled();
+  });
+
+  it("rejects Windows drive root client-side", async () => {
+    listSpy.mockResolvedValue([]);
+    const user = userEvent.setup();
+    render(<ProtectedPathsPane pushToast={pushToast} />);
+    await waitFor(() => expect(listSpy).toHaveBeenCalled());
+
+    const input = screen.getByPlaceholderText(/path\/to\/protect/i);
+    // userEvent treats `\` as a special char; type via fireEvent path.
+    await user.type(input, "C:\\");
+    await user.click(screen.getByRole("button", { name: /^Add$/i }));
+
+    await waitFor(() =>
+      expect(screen.getByRole("alert")).toHaveTextContent(/drive root/i),
+    );
+    expect(addSpy).not.toHaveBeenCalled();
   });
 
   it("removes a row when the trailing button is clicked", async () => {

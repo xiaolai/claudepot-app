@@ -392,7 +392,52 @@ export type OpKind =
   | "clean_projects"
   | "session_prune"
   | "session_slim"
-  | "session_share";
+  | "session_share"
+  | "session_move"
+  | "account_login"
+  | "account_register"
+  | "verify_all";
+
+/** Phase ids emitted by `session_move_with_progress`. Stable contract
+ *  with `crates/claudepot-core/src/session_move.rs`. */
+export type SessionMovePhase = "S1" | "S2" | "S3" | "S4" | "S5";
+
+/** Discrete steps of the browser-OAuth login pipeline. Stable contract
+ *  with `claudepot_core::services::account_service::LoginPhase`. */
+export type LoginPhase =
+  | "spawning"
+  | "waiting_for_browser"
+  | "reading_blob"
+  | "fetching_profile"
+  | "verifying_identity"
+  | "persisting";
+
+/** Per-account verify outcome — flat enum mirroring
+ *  `claudepot_core::services::account_service::VerifyOutcomeKind`. */
+export type VerifyOutcomeKind = "ok" | "drift" | "rejected" | "network_error";
+
+/** Per-account event emitted on `op-progress::<op_id>` for VerifyAll
+ *  ops. Sibling payload to `OperationProgressEvent` — distinguished by
+ *  its `kind: "verify_account"` discriminator. */
+export interface VerifyAccountEvent {
+  op_id: string;
+  kind: "verify_account";
+  uuid: string;
+  email: string;
+  idx: number;
+  total: number;
+  outcome: VerifyOutcomeKind;
+  detail?: string;
+}
+
+/** Counters bundled at the end of a `verify_all` op. */
+export interface VerifyResultSummary {
+  total: number;
+  ok: number;
+  drift: number;
+  rejected: number;
+  network_error: number;
+}
 
 export type OpStatus = "running" | "complete" | "error";
 
@@ -425,6 +470,14 @@ export interface RunningOpInfo {
   clean_result: CleanResult | null;
   /** Journal id of a failed move so the UI can deep-link to Repair. */
   failed_journal_id: string | null;
+  /** Populated on successful SessionMove. Same shape as the legacy
+   *  `sessionMove` IPC's return value. */
+  session_move_result?: MoveSessionReport | null;
+  /** Latest login phase observed by the polling backstop. Mirrors
+   *  `current_phase` (string) but typed for the GUI. */
+  login_phase?: LoginPhase | null;
+  /** Aggregate counters for a `verify_all` op. */
+  verify_results?: VerifyResultSummary | null;
 }
 
 /** Event payload on `op-progress::<op_id>` channels. */
@@ -823,6 +876,20 @@ export interface ApiKeySummary {
   created_at: string; // RFC3339
   last_probed_at: string | null;
   last_probe_status: string | null;
+}
+
+/**
+ * Receipt returned by `keyApiCopy` / `keyOauthCopy` /
+ * `keyOauthCopyShell`. The raw secret is written to the OS clipboard
+ * by Rust and never crosses the IPC bridge; the renderer only sees
+ * fields it already had on hand (label + preview) plus the unix-ms
+ * timestamp at which Rust will self-clear the clipboard. Designed
+ * to be safe to log + toast verbatim.
+ */
+export interface KeyCopyReceiptDto {
+  label: string;
+  preview: string;
+  clipboard_clears_at_unix_ms: number;
 }
 
 /**

@@ -6,6 +6,7 @@ import { useCompactHeader } from "../hooks/useWindowWidth";
 import type { MoveArgs, OrphanedProject, ProjectInfo } from "../types";
 import { ContextMenu, type ContextMenuItem } from "../components/ContextMenu";
 import { classifyProject } from "./projects/projectStatus";
+import type { ProjectStatus } from "./projects/projectStatus";
 import { Button } from "../components/primitives/Button";
 import { IconButton } from "../components/primitives/IconButton";
 import { Input } from "../components/primitives/Input";
@@ -148,6 +149,16 @@ export function ProjectsSection({
         p.sanitized_name.toLowerCase().includes(q),
     );
   }, [projects, nameFilter]);
+  // Audit T2 H#1: chip-state `filter` was set but never consumed before
+  // rendering `ProjectsList`. Apply status filter on top of the
+  // name-filtered set so orphan/offline/empty chips actually narrow
+  // the rail.
+  const shownProjects = useMemo(() => {
+    if (filter === "all") return filteredByName;
+    return filteredByName.filter(
+      (p) => classifyProject(p) === (filter as ProjectStatus),
+    );
+  }, [filteredByName, filter]);
 
   const compact = useCompactHeader();
 
@@ -183,9 +194,11 @@ export function ProjectsSection({
     if (total === 0) {
       return "No CC projects yet — run `claude` in any directory to create one.";
     }
-    const narrowed = nameFilter.trim() && filteredByName.length !== total;
+    const narrowed =
+      (nameFilter.trim() !== "" || filter !== "all") &&
+      shownProjects.length !== total;
     if (narrowed) {
-      return `${filteredByName.length} of ${total} project${total === 1 ? "" : "s"} shown`;
+      return `${shownProjects.length} of ${total} project${total === 1 ? "" : "s"} shown`;
     }
     const actionable = counts.orphan + counts.unreachable + counts.empty;
     if (actionable === 0) {
@@ -313,7 +326,7 @@ export function ProjectsSection({
               loading={loading && projects.length > 0}
             />
             <ProjectsList
-              projects={filteredByName}
+              projects={shownProjects}
               selectedPath={selectedPath}
               onSelect={setSelectedPath}
               onContextMenu={handleContextMenu}

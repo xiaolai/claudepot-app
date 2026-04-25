@@ -139,7 +139,16 @@ export function LiveStatusHeader({ sessionId }: Props) {
       }))
       .then((fn) => {
         if (cancelled) {
+          // Unmount happened before subscribe resolved. The cleanup
+          // already fired `sessionLiveUnsubscribe`, but at that
+          // point the backend hadn't registered our forwarder yet —
+          // so it was a no-op. Now that the forwarder is live, drop
+          // the listen handler AND tell the backend again so the
+          // forwarder task is actually cancelled.
           fn?.();
+          api.sessionLiveUnsubscribe(sessionId).catch(() => {
+            /* best-effort */
+          });
         } else {
           unlisten = fn ?? null;
         }

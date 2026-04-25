@@ -55,6 +55,7 @@ import type {
   ExportFormatInput,
   RedactionPolicyInput,
   GithubTokenStatus,
+  KeyCopyReceiptDto,
   ConfigTreeDto,
   ConfigPreviewDto,
   ConfigKind,
@@ -130,12 +131,28 @@ export const api = {
   /// by claudepot-core on the Rust side.
   accountRegisterFromBrowser: () =>
     invoke<RegisterOutcome>("account_register_from_browser"),
+  /// Async variant of `accountRegisterFromBrowser`: returns the op_id
+  /// immediately. Subscribe to `op-progress::<op_id>` for `LoginPhase`
+  /// events and call `accountLoginStatus` once the terminal event lands
+  /// (the same status endpoint serves both register + login flows since
+  /// they share the `RunningOpInfo` shape).
+  accountRegisterFromBrowserStart: () =>
+    invoke<string>("account_register_from_browser_start"),
   // Token-based onboarding is CLI-only — the refresh token must never enter
   // the webview JS heap. Browser onboarding above is the GUI equivalent.
   /// Re-log in via browser (opens Claude's OAuth flow) and imports the
   /// resulting blob into the given account's slot. Can take several
   /// minutes while the user completes auth in the browser.
   accountLogin: (uuid: string) => invoke<void>("account_login", { uuid }),
+  /// Async variant of `accountLogin`: returns the op_id immediately so
+  /// the IPC worker isn't held for the full subprocess + OAuth wait.
+  accountLoginStart: (uuid: string) =>
+    invoke<string>("account_login_start", { uuid }),
+  /// Poll the current state of an in-flight login op. Used as a backstop
+  /// in case an `op-progress` event drops; the modal reads the final
+  /// `RunningOpInfo` here once the terminal event fires.
+  accountLoginStatus: (opId: string) =>
+    invoke<RunningOpInfo | null>("account_login_status", { opId }),
   accountLoginCancel: () => invoke<void>("account_login_cancel"),
   accountRemove: (uuid: string) =>
     invoke<RemoveOutcome>("account_remove", { uuid }),
@@ -149,6 +166,15 @@ export const api = {
   /// separate `accountList` round-trip. Slow — one HTTP call per account
   /// with credentials.
   verifyAllAccounts: () => invoke<AccountSummary[]>("verify_all_accounts"),
+  /// Async variant of `verifyAllAccounts`: returns the op_id immediately
+  /// so per-account events can drive inline row badge updates instead of
+  /// blocking the IPC worker on N round-trips. Subscribe to
+  /// `op-progress::<op_id>` for both `OperationProgressEvent` (phase
+  /// advance + terminal) and `VerifyAccountEvent` (per-row payloads).
+  verifyAllAccountsStart: () => invoke<string>("verify_all_accounts_start"),
+  /// Poll the current state of an in-flight verify_all op.
+  verifyAllAccountsStatus: (opId: string) =>
+    invoke<RunningOpInfo | null>("verify_all_accounts_status", { opId }),
   /// Verify a single account — fast, single /profile round-trip. Used
   /// by the per-row context menu and command palette.
   verifyAccount: (uuid: string) =>
@@ -278,6 +304,31 @@ export const api = {
       forceConflict: args.forceConflict ?? false,
       cleanupSource: args.cleanupSource ?? false,
     }),
+  /**
+   * Start an async session move and return the op_id immediately.
+   * Subscribe to `op-progress::<op_id>` for S1..S5 phase events;
+   * call `sessionMoveStatus(opId)` once the terminal event lands to
+   * read the structured `MoveSessionReport`.
+   */
+  sessionMoveStart: (args: {
+    sessionId: string;
+    fromCwd: string;
+    toCwd: string;
+    forceLive?: boolean;
+    forceConflict?: boolean;
+    cleanupSource?: boolean;
+  }) =>
+    invoke<string>("session_move_start", {
+      sessionId: args.sessionId,
+      fromCwd: args.fromCwd,
+      toCwd: args.toCwd,
+      forceLive: args.forceLive ?? false,
+      forceConflict: args.forceConflict ?? false,
+      cleanupSource: args.cleanupSource ?? false,
+    }),
+  /** Poll current state of an in-flight session move. null if op_id unknown. */
+  sessionMoveStatus: (opId: string) =>
+    invoke<RunningOpInfo | null>("session_move_status", { opId }),
   /**
    * Move every session under an orphaned slug into a live target cwd.
    * Force-bypasses the live-mtime guard since an orphan's cwd is gone
@@ -469,8 +520,14 @@ export const api = {
    *  key off it, so renames are display-only. */
   keyApiRename: (uuid: string, label: string) =>
     invoke<void>("key_api_rename", { uuid, label }),
-  /** Pull the full plaintext secret out for clipboard. Sparingly. */
-  keyApiCopy: (uuid: string) => invoke<string>("key_api_copy", { uuid }),
+  /**
+   * Copy the full API key value to the OS clipboard. The raw secret
+   * never returns to JS — Rust writes the clipboard directly and
+   * schedules a 30-second self-clear. Returns a receipt the UI can
+   * toast verbatim (label + preview + clear deadline).
+   */
+  keyApiCopy: (uuid: string) =>
+    invoke<KeyCopyReceiptDto>("key_api_copy", { uuid }),
   /**
    * Validity ping against `GET /v1/models`. Resolves on a valid key;
    * rejects with a reason string ("rejected (invalid key)",
@@ -495,7 +552,20 @@ export const api = {
   /** Rename an OAuth token. See `keyApiRename`. */
   keyOauthRename: (uuid: string, label: string) =>
     invoke<void>("key_oauth_rename", { uuid, label }),
-  keyOauthCopy: (uuid: string) => invoke<string>("key_oauth_copy", { uuid }),
+  /**
+   * Sibling of `keyApiCopy` — same Rust-side clipboard write, same
+   * receipt shape, same 30-second self-clear contract.
+   */
+  keyOauthCopy: (uuid: string) =>
+    invoke<KeyCopyReceiptDto>("key_oauth_copy", { uuid }),
+  /**
+   * Copy a paste-ready POSIX shell invocation
+   * (`CLAUDE_CODE_OAUTH_TOKEN='…' claude`) for this OAuth token. Same
+   * receipt + clipboard contract as `keyOauthCopy` — the format string
+   * is built on the Rust side so the secret never crosses the bridge.
+   */
+  keyOauthCopyShell: (uuid: string) =>
+    invoke<KeyCopyReceiptDto>("key_oauth_copy_shell", { uuid }),
   /**
    * Cached usage snapshot for the account the OAuth token belongs to.
    * Never hits Anthropic — peeks the in-memory cache populated by

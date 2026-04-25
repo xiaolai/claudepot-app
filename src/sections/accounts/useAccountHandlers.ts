@@ -1,5 +1,6 @@
 import { useCallback } from "react";
 import { api } from "../../api";
+import { runVerifyAll } from "./runVerifyAll";
 import type { AccountSummary } from "../../types";
 
 type Push = (
@@ -64,19 +65,24 @@ export function useAccountHandlers({
     [pushToast, refresh],
   );
 
-  const runVerifyAll = useCallback(async () => {
+  const runVerifyAllHandler = useCallback(async () => {
     try {
-      const verified = await api.verifyAllAccounts();
-      const drift = verified.filter((a) => a.verify_status === "drift").length;
-      const rejected = verified.filter(
-        (a) => a.verify_status === "rejected",
-      ).length;
-      if (drift + rejected === 0) {
-        pushToast("info", `All ${verified.length} accounts verified.`);
+      // The streaming start API returns when the terminal `op` event
+      // lands. `runVerifyAll` patches rows in place via `patchAccount`,
+      // but at this entry point we only need the aggregate summary —
+      // useRefresh's parallel verify pass owns the row-level surface.
+      // Pass no-op patchers here; the caller's `refresh()` below picks
+      // up the persisted state.
+      const summary = await runVerifyAll({
+        patchAccount: () => {},
+        setAccounts: () => {},
+      });
+      if (summary.drift + summary.rejected === 0) {
+        pushToast("info", `All ${summary.total} accounts verified.`);
       } else {
         pushToast(
           "error",
-          `Verify: ${drift} drift, ${rejected} rejected — see card banners.`,
+          `Verify: ${summary.drift} drift, ${summary.rejected} rejected — see card banners.`,
         );
       }
       await refresh();
@@ -96,5 +102,5 @@ export function useAccountHandlers({
     [pushToast, useDesktop],
   );
 
-  return { runVerifyAccount, runVerifyAll, handleDesktopSwitch };
+  return { runVerifyAccount, runVerifyAll: runVerifyAllHandler, handleDesktopSwitch };
 }

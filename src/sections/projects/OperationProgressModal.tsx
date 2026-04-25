@@ -1,6 +1,5 @@
-import { useCallback, useId, useRef, useState } from "react";
+import { useCallback, useId, useMemo, useRef, useState, type ReactNode } from "react";
 import { useTauriEvent } from "../../hooks/useTauriEvent";
-import { api } from "../../api";
 import { Button } from "../../components/primitives/Button";
 import {
   Modal,
@@ -9,40 +8,35 @@ import {
   ModalFooter,
 } from "../../components/primitives/Modal";
 import type {
-  MoveResultSummary,
   OperationProgressEvent,
+  RunningOpInfo,
 } from "../../types";
 
-const PHASES = ["P3", "P4", "P5", "P6", "P7", "P8", "P9"] as const;
-type Phase = (typeof PHASES)[number];
+/**
+ * One row in the modal's phase list. `id` is the stable phase id the
+ * backend emits (e.g. `"P3"` for project-move, `"S1"` for session-move);
+ * `label` is the user-facing string.
+ */
+export type PhaseSpec = { id: string; label: string };
 
 type PhaseState = "pending" | "running" | "complete" | "error";
 
 /**
- * User-facing label for each phase identifier. Source: the phase
- * emitter in `crates/claudepot-core/src/project.rs` — one entry per
- * `sink.phase("Pn", …)` call site. Keep the labels short so the row
- * reads well at the modal's default width.
- */
-const PHASE_LABEL: Record<Phase, string> = {
-  P3: "Moving source directory",
-  P4: "Renaming Claude Code project",
-  P5: "Updating history.jsonl",
-  P6: "Rewriting session transcripts",
-  P7: "Updating Claude Code config",
-  P8: "Moving auto-memory directory",
-  P9: "Updating project settings",
-};
-
-/**
  * Subscribes to `op-progress::<opId>` and renders a phase-by-phase
- * progress view. Serves resume, rollback, and (in Step 6) fresh
- * rename. Closing mid-op only hides the modal — the op keeps running
- * and shows up in the RunningOpStrip.
+ * progress view. The phase list and the result-rendering policy are
+ * passed in by the caller, so the modal is reusable across project
+ * move, repair resume/rollback, session move, and any future op that
+ * fits the pipe.
+ *
+ * Closing mid-op only hides the modal — the op keeps running and
+ * shows up in the RunningOpStrip.
  */
 export function OperationProgressModal({
   opId,
   title,
+  phases,
+  fetchStatus,
+  renderResult,
   onClose,
   onComplete,
   onError,
@@ -50,6 +44,16 @@ export function OperationProgressModal({
 }: {
   opId: string;
   title: string;
+  /** Stable list of phase ids + labels expected on this op. */
+  phases: PhaseSpec[];
+  /** Polled once per terminal event to fetch the structured result.
+   *  Project-move passes `api.projectMoveStatus`; session-move passes
+   *  `api.sessionMoveStatus`. */
+  fetchStatus: (opId: string) => Promise<RunningOpInfo | null>;
+  /** Renders the success-state body. Receives the `RunningOpInfo`
+   *  returned by `fetchStatus`. Optional — when omitted, only the
+   *  "✓ Complete." line shows. */
+  renderResult?: (info: RunningOpInfo | null) => ReactNode;
   onClose: () => void;
   /** Fires once when the terminal `op / complete` event lands. */
   onComplete?: () => void;
@@ -60,44 +64,43 @@ export function OperationProgressModal({
   onOpenRepair?: (failedJournalId: string | null) => void;
 }) {
   const channel = `op-progress::${opId}`;
-  const [phases, setPhases] = useState<Record<Phase, PhaseState>>(
+  const phaseIds = useMemo(() => phases.map((p) => p.id), [phases]);
+  const [phaseStates, setPhaseStates] = useState<Record<string, PhaseState>>(
     () =>
-      Object.fromEntries(PHASES.map((p) => [p, "pending"])) as Record<
-        Phase,
+      Object.fromEntries(phaseIds.map((p) => [p, "pending"])) as Record<
+        string,
         PhaseState
       >,
   );
   const [sub, setSub] = useState<{
-    phase: Phase;
+    phase: string;
     done: number;
     total: number;
   } | null>(null);
   const [terminal, setTerminal] = useState<
-    | { kind: "complete"; result: MoveResultSummary | null }
+    | { kind: "complete"; info: RunningOpInfo | null }
     | { kind: "error"; detail: string | null; failedJournalId: string | null }
     | null
   >(null);
   const firedTerminal = useRef(false);
   const headingId = useId();
 
-  // Audit H9: the handler used to close over `sub?.phase`, making its
-  // identity change every time a sub-progress update arrived. The
-  // inner `useTauriEvent(channel, handler)` subscribed by
-  // [channel, handler], so the subscription torn down and re-attached
-  // on every phase transition. Because `listen()` is async, that
-  // created a gap in which a terminal `op` event could land and be
-  // missed, leaving the modal stuck in a non-terminal state.
-  //
-  // Fix: stabilize handler identity. All mutable state accessed by
-  // the handler goes through refs, so the deps array shrinks to [].
-  // Callback identity is constant for the modal's lifetime; the
-  // subscription attaches once on mount and detaches once on unmount.
-  const subRef = useRef<{ phase: Phase; done: number; total: number } | null>(null);
+  // Audit H9: stabilize handler identity so the underlying `listen`
+  // subscription attaches once per modal lifetime — preventing the
+  // gap-window where a terminal event could be dropped during a
+  // resubscribe. All mutable state read in the handler goes through
+  // refs.
+  const subRef = useRef<{ phase: string; done: number; total: number } | null>(
+    null,
+  );
   subRef.current = sub;
   const onCompleteRef = useRef(onComplete);
   onCompleteRef.current = onComplete;
   const onErrorRef = useRef(onError);
   onErrorRef.current = onError;
+  const fetchStatusRef = useRef(fetchStatus);
+  fetchStatusRef.current = fetchStatus;
+  const phaseIdSet = useMemo(() => new Set(phaseIds), [phaseIds]);
 
   const handler = useCallback(
     (event: { payload: OperationProgressEvent }) => {
@@ -107,14 +110,11 @@ export function OperationProgressModal({
         if (firedTerminal.current) return;
         firedTerminal.current = true;
         const isComplete = ev.status === "complete";
-        api
-          .projectMoveStatus(opId)
+        fetchStatusRef
+          .current(opId)
           .then((info) => {
             if (isComplete) {
-              setTerminal({
-                kind: "complete",
-                result: info?.move_result ?? null,
-              });
+              setTerminal({ kind: "complete", info: info ?? null });
               onCompleteRef.current?.();
             } else {
               setTerminal({
@@ -127,7 +127,7 @@ export function OperationProgressModal({
           })
           .catch(() => {
             if (isComplete) {
-              setTerminal({ kind: "complete", result: null });
+              setTerminal({ kind: "complete", info: null });
               onCompleteRef.current?.();
             } else {
               setTerminal({
@@ -140,22 +140,22 @@ export function OperationProgressModal({
           });
         return;
       }
-      const phase = ev.phase as Phase;
-      if (!PHASES.includes(phase)) return;
+      const phase = ev.phase;
+      if (!phaseIdSet.has(phase)) return;
       if (typeof ev.done === "number" && typeof ev.total === "number") {
         setSub({ phase, done: ev.done, total: ev.total });
-        setPhases((prev) =>
+        setPhaseStates((prev) =>
           prev[phase] === "pending" ? { ...prev, [phase]: "running" } : prev,
         );
         return;
       }
       if (ev.status === "complete") {
-        setPhases((prev) => ({ ...prev, [phase]: "complete" }));
+        setPhaseStates((prev) => ({ ...prev, [phase]: "complete" }));
         if (subRef.current?.phase === phase) setSub(null);
       } else if (ev.status === "error") {
-        setPhases((prev) => ({ ...prev, [phase]: "error" }));
+        setPhaseStates((prev) => ({ ...prev, [phase]: "error" }));
       } else {
-        setPhases((prev) => ({ ...prev, [phase]: "running" }));
+        setPhaseStates((prev) => ({ ...prev, [phase]: "running" }));
       }
     },
     // Intentionally empty — handler reads mutable state via refs so
@@ -171,15 +171,15 @@ export function OperationProgressModal({
       <ModalHeader title={title} id={headingId} onClose={onClose} />
       <ModalBody>
         <ul className="phase-list">
-          {PHASES.map((p) => {
-            const state = phases[p];
+          {phases.map((p) => {
+            const state = phaseStates[p.id] ?? "pending";
             return (
-              <li key={p} className={`phase phase-${state}`}>
-                <span className="phase-tag" title={`Internal id: ${p}`}>
-                  {PHASE_LABEL[p]}
+              <li key={p.id} className={`phase phase-${state}`}>
+                <span className="phase-tag" title={`Internal id: ${p.id}`}>
+                  {p.label}
                 </span>
                 <span className="phase-label">{state}</span>
-                {sub && sub.phase === p && (
+                {sub && sub.phase === p.id && (
                   <span className="phase-progress mono small muted">
                     {" "}({sub.done}/{sub.total})
                   </span>
@@ -192,45 +192,7 @@ export function OperationProgressModal({
         {terminal?.kind === "complete" && (
           <div className="op-terminal ok">
             <strong>✓ Complete.</strong>
-            {terminal.result && (
-              <ul className="op-terminal-detail">
-                {terminal.result.actual_dir_moved && (
-                  <li>Source directory moved.</li>
-                )}
-                {terminal.result.cc_dir_renamed && (
-                  <li>
-                    CC project dir renamed;{" "}
-                    {terminal.result.jsonl_files_modified} of{" "}
-                    {terminal.result.jsonl_files_scanned} jsonl file
-                    {terminal.result.jsonl_files_scanned === 1 ? "" : "s"}{" "}
-                    rewritten.
-                  </li>
-                )}
-                {terminal.result.memory_dir_moved && (
-                  <li>Auto-memory directory moved.</li>
-                )}
-                {terminal.result.config_had_collision &&
-                  terminal.result.config_snapshot_path && (
-                    <li>
-                      Pre-existing data preserved at{" "}
-                      <code className="mono small">
-                        {terminal.result.config_snapshot_path}
-                      </code>
-                      . Retained 30 days.
-                    </li>
-                  )}
-                {terminal.result.warnings.length > 0 && (
-                  <li className="muted small">
-                    Warnings:
-                    <ul>
-                      {terminal.result.warnings.map((w, i) => (
-                        <li key={i}>{w}</li>
-                      ))}
-                    </ul>
-                  </li>
-                )}
-              </ul>
-            )}
+            {renderResult ? renderResult(terminal.info) : null}
           </div>
         )}
         {terminal?.kind === "error" && (

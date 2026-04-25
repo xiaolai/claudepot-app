@@ -9,6 +9,13 @@ export function useFocusTrap<T extends HTMLElement>() {
     const el = ref.current;
     if (!el) return;
 
+    // Audit T4-7: capture the previously-focused element BEFORE we
+    // move focus into the trap. On cleanup (modal/palette closes),
+    // restore focus there so keyboard users land back on the trigger
+    // element they activated, not at the document root. Mirrors the
+    // behaviour of `Modal.tsx`'s prevFocusRef.
+    const previouslyFocused = document.activeElement as HTMLElement | null;
+
     // Focus the autofocus element or the first focusable on mount
     const initialNodes = Array.from(el.querySelectorAll<HTMLElement>(FOCUSABLE));
     const auto = el.querySelector<HTMLElement>("[autofocus]");
@@ -32,7 +39,14 @@ export function useFocusTrap<T extends HTMLElement>() {
     };
 
     el.addEventListener("keydown", onKey);
-    return () => el.removeEventListener("keydown", onKey);
+    return () => {
+      el.removeEventListener("keydown", onKey);
+      // Best-effort restore: skip if the previous element is gone
+      // from the DOM (e.g. component unmounted) or never existed.
+      if (previouslyFocused && document.contains(previouslyFocused)) {
+        previouslyFocused.focus?.();
+      }
+    };
   }, []);
 
   return ref;

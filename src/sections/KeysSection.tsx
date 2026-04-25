@@ -115,24 +115,20 @@ export function KeysSection() {
     return () => window.removeEventListener("cp-keys-filter", onFilter);
   }, []);
 
+  // D-5/6/7: secret never enters JS. Rust writes the clipboard
+  // directly and schedules its own 30s self-clear; we just toast the
+  // receipt the bridge hands back (label + preview).
   const onCopy = useCallback(
-    async (
-      kind: "api" | "oauth",
-      uuid: string,
-      label: string,
-      preview: string,
-    ) => {
+    async (kind: "api" | "oauth", uuid: string) => {
       try {
-        const token =
+        const r =
           kind === "api"
             ? await api.keyApiCopy(uuid)
             : await api.keyOauthCopy(uuid);
-        await navigator.clipboard.writeText(token);
         pushToast(
           "info",
-          `Copied ${label} (${preview}) — clipboard clears in 30s.`,
+          `Copied ${r.label} (${r.preview}) — clipboard clears in 30s.`,
         );
-        scheduleClipboardClear(token);
       } catch (e) {
         pushToast("error", `Copy failed: ${e}`);
       }
@@ -140,22 +136,20 @@ export function KeysSection() {
     [pushToast],
   );
 
-  // Copy a paste-ready POSIX shell invocation:
-  //   CLAUDE_CODE_OAUTH_TOKEN='<token>' claude
-  // CC reads the env var first (auth.ts:168, 1260) and never touches
-  // the keychain, so the user can open a new terminal, paste, and run
-  // as a different identity without disturbing the current login.
+  // Paste-ready POSIX shell invocation. The format string is built
+  // server-side (`key_oauth_copy_shell`) so the raw token never
+  // crosses the IPC bridge. CC reads `CLAUDE_CODE_OAUTH_TOKEN` first
+  // (auth.ts:168, 1260) and never touches the keychain — letting the
+  // user open a new terminal, paste, and switch identities without
+  // disturbing the current login.
   const onCopyShell = useCallback(
     async (row: OauthTokenSummary) => {
       try {
-        const token = await api.keyOauthCopy(row.uuid);
-        const cmd = `CLAUDE_CODE_OAUTH_TOKEN='${token}' claude`;
-        await navigator.clipboard.writeText(cmd);
+        const r = await api.keyOauthCopyShell(row.uuid);
         pushToast(
           "info",
-          `Copied shell command for ${row.label} (${row.token_preview}) — clipboard clears in 30s.`,
+          `Copied shell command for ${r.label} (${r.preview}) — clipboard clears in 30s.`,
         );
-        scheduleClipboardClear(cmd);
       } catch (e) {
         pushToast("error", `Copy failed: ${e}`);
       }
@@ -273,9 +267,7 @@ export function KeysSection() {
         <ApiKeysTable
           rows={shownApi}
           loading={loading}
-          onCopy={(row) =>
-            void onCopy("api", row.uuid, row.label, row.token_preview)
-          }
+          onCopy={(row) => void onCopy("api", row.uuid)}
           onProbe={(row) =>
             void api
               .keyApiProbe(row.uuid)
@@ -289,9 +281,7 @@ export function KeysSection() {
         <OauthTokensTable
           rows={shownOauth}
           loading={loading}
-          onCopy={(row) =>
-            void onCopy("oauth", row.uuid, row.label, row.token_preview)
-          }
+          onCopy={(row) => void onCopy("oauth", row.uuid)}
           onCopyShell={(row) => void onCopyShell(row)}
           onRemove={(row) => setPendingRemoval({ kind: "oauth", row })}
           onOpenUsage={setUsageModalFor}
@@ -337,30 +327,6 @@ export function KeysSection() {
       <ToastContainer toasts={toasts} onDismiss={dismissToast} />
     </>
   );
-}
-
-export const CLIPBOARD_CLEAR_MS = 30_000;
-
-/** Overwrite the clipboard with an empty string 30s after a secret
- *  was copied, but only if the clipboard still holds that exact
- *  token — avoids stomping on whatever the user copied next. If
- *  `readText` is denied we can't verify the clipboard still holds
- *  our token, so we abort rather than blind-clear whatever replaced
- *  it. The toast already told the user to expect a 30s clear; a
- *  no-op beats clobbering their next copy.
- *
- *  Exported so the behavior is unit-testable with fake timers. */
-export function scheduleClipboardClear(token: string): void {
-  window.setTimeout(async () => {
-    try {
-      const current = await navigator.clipboard.readText();
-      if (current !== token) return;
-      await navigator.clipboard.writeText("");
-    } catch {
-      // readback denied — can't prove the clipboard still holds the
-      // token, so don't risk clobbering whatever's there now.
-    }
-  }, CLIPBOARD_CLEAR_MS);
 }
 
 /* ──────────────────────────────────────────────────────────── */

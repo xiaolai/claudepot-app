@@ -10,16 +10,28 @@ import type { GcOutcome } from "../../types";
  * project-domain maintenance view. Preview is idempotent and
  * mandatory before Execute. Execute is irreversible.
  */
+const GC_DAYS_MIN = 1;
+const GC_DAYS_MAX = 365;
+
 export function GcCard({
   pushToast,
 }: {
   pushToast: (kind: "info" | "error", text: string) => void;
 }) {
-  const [days, setDays] = useState(30);
+  // Audit T2 H#3: `days` is forwarded to an irreversible GC. Track the
+  // raw input as the source of truth so empty / NaN / out-of-range
+  // values disable the actions instead of silently coercing to 0 (or
+  // any other unsafe value) and running outside the advertised
+  // 1–365 window.
+  const [days, setDays] = useState<number>(30);
   const [busy, setBusy] = useState(false);
   const [result, setResult] = useState<GcOutcome | null>(null);
 
+  const daysValid =
+    Number.isFinite(days) && days >= GC_DAYS_MIN && days <= GC_DAYS_MAX;
+
   const dryRun = useCallback(async () => {
+    if (!daysValid) return;
     setBusy(true);
     try {
       setResult(await api.repairGc(days, true));
@@ -28,9 +40,10 @@ export function GcCard({
     } finally {
       setBusy(false);
     }
-  }, [days, pushToast]);
+  }, [days, daysValid, pushToast]);
 
   const execute = useCallback(async () => {
+    if (!daysValid) return;
     setBusy(true);
     try {
       const r = await api.repairGc(days, false);
@@ -46,7 +59,7 @@ export function GcCard({
     } finally {
       setBusy(false);
     }
-  }, [days, pushToast]);
+  }, [days, daysValid, pushToast]);
 
   return (
     <section className="maintenance-section">
@@ -72,10 +85,11 @@ export function GcCard({
         <input
           id="gc-days"
           type="number"
-          min={1}
-          max={365}
-          value={days}
-          onChange={(e) => setDays(Number(e.target.value))}
+          min={GC_DAYS_MIN}
+          max={GC_DAYS_MAX}
+          value={Number.isFinite(days) ? days : ""}
+          onChange={(e) => setDays(e.target.valueAsNumber)}
+          aria-invalid={!daysValid}
           style={{
             width: "var(--sp-72)",
             padding: "var(--sp-4) var(--sp-6)",
@@ -90,12 +104,22 @@ export function GcCard({
         />
         <span className="muted small">days</span>
       </div>
-      <div style={{ display: "flex", gap: "var(--sp-8)" }}>
+      <div
+        style={{
+          display: "flex",
+          alignItems: "center",
+          gap: "var(--sp-8)",
+        }}
+      >
         <Button
           variant="ghost"
           onClick={dryRun}
-          disabled={busy}
-          title="Preview what GC would remove"
+          disabled={busy || !daysValid}
+          title={
+            daysValid
+              ? "Preview what GC would remove"
+              : `Enter a value between ${GC_DAYS_MIN} and ${GC_DAYS_MAX}`
+          }
         >
           Preview
         </Button>
@@ -103,11 +127,26 @@ export function GcCard({
           variant="solid"
           danger
           onClick={execute}
-          disabled={busy || !result}
-          title={result ? undefined : "Run Preview first"}
+          disabled={busy || !result || !daysValid}
+          title={
+            !daysValid
+              ? `Enter a value between ${GC_DAYS_MIN} and ${GC_DAYS_MAX}`
+              : result
+                ? undefined
+                : "Run Preview first"
+          }
         >
           Execute GC
         </Button>
+        {!daysValid && (
+          <span
+            className="muted small"
+            style={{ color: "var(--bad)" }}
+            role="status"
+          >
+            Days must be {GC_DAYS_MIN}–{GC_DAYS_MAX}.
+          </span>
+        )}
       </div>
       {result && (
         <div

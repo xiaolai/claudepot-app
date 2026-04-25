@@ -8,6 +8,67 @@ interface Props {
 }
 
 /**
+ * Client-side validation for a "protected path" draft. The UI advertises
+ * only absolute paths and `~`-prefixed paths as valid — without this
+ * guard, anything non-empty would fall through to `protectedPathsAdd`
+ * (audit 2026-04-24, T3 H3).
+ *
+ * Returns `null` when the draft is acceptable, or a human-readable
+ * error message otherwise. Rejects:
+ *   - empty / whitespace-only strings
+ *   - paths containing `..` segments (traversal)
+ *   - relative paths (no leading `/`, `~`, drive letter, or `\\`)
+ *   - root-only paths: `/`, `~`, `~/`, drive root (`C:\`, `C:/`, or
+ *     bare `C:`), UNC root (`\\`)
+ *
+ * Path-shape checks here mirror the `simplify_windows_path` /
+ * `is_absolute` discipline in `.claude/rules/paths.md`: anything that
+ * might be a Windows path must be handled explicitly. The host backend
+ * still gets the final say on canonical form and conflicts.
+ */
+export function validateProtectedPath(raw: string): string | null {
+  const trimmed = raw.trim();
+  if (trimmed.length === 0) {
+    return "Path cannot be empty.";
+  }
+  // Reject anything containing a `..` segment — easy footgun for the
+  // protected-paths feature where the goal is to nail down a stable
+  // location.
+  const hasParentSegment = trimmed
+    .split(/[/\\]/)
+    .some((seg) => seg === "..");
+  if (hasParentSegment) {
+    return "Path cannot contain '..' segments.";
+  }
+  // UNC root only: just leading backslashes with no host/share.
+  if (/^\\\\+$/.test(trimmed)) {
+    return "Path cannot be a UNC root.";
+  }
+  // Absolute path shapes — any one of these is sufficient.
+  const isUnixAbsolute = trimmed.startsWith("/");
+  const isHomeRelative = trimmed === "~" || trimmed.startsWith("~/") || trimmed.startsWith("~\\");
+  const isWindowsDrive = /^[A-Za-z]:[\\/]/.test(trimmed);
+  // Drive letter without a separator (e.g. `C:`) is not a usable path.
+  const isDriveBare = /^[A-Za-z]:$/.test(trimmed);
+  const isUncPath = /^\\\\[^\\]+\\[^\\]+/.test(trimmed);
+  if (isDriveBare) {
+    return "Path cannot be a bare drive letter; specify a directory under the drive.";
+  }
+  if (!isUnixAbsolute && !isHomeRelative && !isWindowsDrive && !isUncPath) {
+    return "Path must be absolute (start with '/', '~', a drive letter, or '\\\\').";
+  }
+  // Reject filesystem roots: `/`, `~`, `~/`, drive roots like `C:\` /
+  // `C:/`. Protecting "everything" is never the user's intent.
+  if (trimmed === "/" || trimmed === "~" || trimmed === "~/" || trimmed === "~\\") {
+    return "Path cannot be a filesystem root.";
+  }
+  if (/^[A-Za-z]:[\\/]?$/.test(trimmed)) {
+    return "Path cannot be a drive root; specify a directory under the drive.";
+  }
+  return null;
+}
+
+/**
  * Settings → Protected pane.
  *
  * Renders the materialized list (defaults minus tombstones, then user
@@ -40,8 +101,13 @@ export function ProtectedPathsPane({ pushToast }: Props) {
   }, [reload]);
 
   const handleAdd = useCallback(async () => {
+    if (busy) return;
     const path = draft.trim();
-    if (!path || busy) return;
+    const validationError = validateProtectedPath(path);
+    if (validationError) {
+      setAddError(validationError);
+      return;
+    }
     setAddError(null);
     setBusy(true);
     try {

@@ -12,6 +12,7 @@ import { useRefresh } from "../hooks/useRefresh";
 import { useDismissedIssues } from "../hooks/useDismissedIssues";
 import { useBusy } from "../hooks/useBusy";
 import { useActions } from "../hooks/useActions";
+import { useOperations } from "../hooks/useOperations";
 import type { AccountSummary, AppStatus, CcIdentity } from "../types";
 
 interface AppStateValue {
@@ -115,10 +116,12 @@ export function AppStateProvider({ children }: { children: ReactNode }) {
   } = useRefresh(pushToast);
   const { isDismissed, dismiss, clear } = useDismissedIssues();
   const busy = useBusy();
+  const { open: openOpModal } = useOperations();
   const actions = useActions({
     pushToast,
     refresh,
     withBusy: busy.withBusy,
+    openOpModal,
   });
 
   const [splitBrainPending, setSplitBrainPending] =

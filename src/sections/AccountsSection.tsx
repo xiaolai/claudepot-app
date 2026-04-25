@@ -194,7 +194,20 @@ export function AccountsSection({
   useTauriEvent("tray-refresh-requested", trayRefresh);
   useTauriEvent<string>("tray-cli-switch-failed", (e) => {
     const detail = typeof e?.payload === "string" ? e.payload : "unknown";
-    pushToast("error", `Tray switch failed: ${detail}`);
+    pushToast("error", `Switch failed: ${detail}`);
+  });
+  // The tray click had no Override affordance of its own — re-enter
+  // the standard request flow so the shell-level SplitBrainDialog
+  // (or, if the preflight probe fails, the Override toast in
+  // `useActions.useCli`) becomes the single UX for "CC is live".
+  useTauriEvent<string>("tray-cli-switch-needs-override", (e) => {
+    const email = typeof e?.payload === "string" ? e.payload : "";
+    const account = accounts.find((a) => a.email === email);
+    if (!account) {
+      pushToast("error", `Switch failed: account ${email || "unknown"} not found`);
+      return;
+    }
+    void requestCliSwap(account);
   });
 
   const shown = useMemo(() => {
