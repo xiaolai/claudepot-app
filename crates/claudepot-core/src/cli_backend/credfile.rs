@@ -9,23 +9,9 @@ use std::io::Write;
 pub fn read_default() -> Result<Option<String>, SwapError> {
     let path = paths::claude_credentials_file();
 
-    // Verify file permissions before reading credentials
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt;
-        if let Ok(meta) = std::fs::metadata(&path) {
-            let mode = meta.permissions().mode() & 0o777;
-            if mode != 0o600 {
-                tracing::warn!(
-                    "credential file {} has permissions {:o} (expected 600), fixing",
-                    path.display(),
-                    mode
-                );
-                std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600))
-                    .map_err(SwapError::FileError)?;
-            }
-        }
-    }
+    // Verify file permissions / ACL before reading credentials.
+    // Cross-platform: 0600 on Unix, user-only DACL on Windows.
+    super::secret_file::verify_path(&path)?;
 
     match std::fs::read_to_string(&path) {
         Ok(s) if s.trim().is_empty() => Ok(None),
@@ -54,6 +40,9 @@ pub fn write_default(blob: &str) -> Result<(), SwapError> {
 
     tmp.persist(&path)
         .map_err(|e| SwapError::WriteFailed(format!("persist failed: {e}")))?;
+    // Apply user-only access on the persisted target. Unix already
+    // has 0600 from the tempfile; Windows requires an explicit DACL.
+    super::secret_file::harden_path(&path)?;
     Ok(())
 }
 

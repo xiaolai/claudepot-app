@@ -49,8 +49,18 @@ impl super::DesktopPlatform for MacosDesktop {
     async fn is_running(&self) -> bool {
         // Use pgrep instead of sysinfo — sysinfo's exe() returns None
         // for some processes on macOS when running over SSH.
+        //
+        // The match pattern must accept BOTH install locations:
+        //   * /Applications/Claude.app  — system install
+        //   * ~/Applications/Claude.app — per-user install
+        // The previous implementation only matched the system path,
+        // which left a per-user install reported as "not running"
+        // during a swap. Match on the trailing `.app/` segment plus
+        // the executable name `Claude` so any install location is
+        // covered. The `\b` is BSD pgrep BRE — matches a literal
+        // boundary in the regex it invokes via -f.
         tokio::process::Command::new("pgrep")
-            .args(["-f", "/Applications/Claude.app/"])
+            .args(["-f", "Claude.app/Contents/MacOS/Claude"])
             .stdout(std::process::Stdio::null())
             .stderr(std::process::Stdio::null())
             .status()

@@ -98,18 +98,47 @@ fn copy_dir_all(src: &Path, dst: &Path) -> io::Result<()> {
     Ok(())
 }
 
-/// Move every child of `src` into `dst` via `rename`. Children already
-/// present in `dst` are skipped — target's existing copy wins, the
-/// legacy copy is left behind for manual inspection.
+/// Move every child of `src` into `dst`.
+///
+/// Three cases per child:
+///
+/// * **Only in legacy** → rename across, with cross-filesystem copy +
+///   remove fallback on EXDEV.
+/// * **In both, both sides directories** → recurse into the pair so
+///   only-in-legacy grandchildren still migrate. Without this branch a
+///   single same-named directory (e.g. `journals/`) blocked every
+///   legacy file under it from ever moving over, even ones the target
+///   had no copy of.
+/// * **In both, conflicting file or shape mismatch** → keep target's
+///   copy; legacy is left behind for manual inspection.
 fn merge_dir_into(src: &Path, dst: &Path) -> io::Result<()> {
     fs::create_dir_all(dst)?;
     for entry in fs::read_dir(src)? {
         let entry = entry?;
         let from = entry.path();
         let to = dst.join(entry.file_name());
+
         if to.exists() {
+            // Directory-on-directory → recurse so unique grandchildren
+            // still migrate. Anything else (file vs file, file vs dir,
+            // dir vs file) is treated as a conflict and the target
+            // wins, mirroring the documented top-level behavior.
+            let from_meta = fs::symlink_metadata(&from)?;
+            let to_meta = fs::symlink_metadata(&to)?;
+            if from_meta.is_dir() && to_meta.is_dir() {
+                merge_dir_into(&from, &to)?;
+                // After the recursive merge, drop the legacy dir if it
+                // emptied out. Anything left is a real conflict; keep
+                // it for inspection.
+                if let Ok(mut it) = fs::read_dir(&from) {
+                    if it.next().is_none() {
+                        let _ = fs::remove_dir(&from);
+                    }
+                }
+            }
             continue;
         }
+
         if let Err(e) = fs::rename(&from, &to) {
             if e.raw_os_error() == Some(18) {
                 // Cross-filesystem again — copy this child and remove
@@ -225,6 +254,65 @@ mod tests {
         // Legacy root kept because "journals" subdir still holds the
         // unmerged conflict.
         assert!(legacy.exists());
+
+        std::env::remove_var("CLAUDE_CONFIG_DIR");
+    }
+
+    /// Regression: when both sides have a same-named directory but the
+    /// children differ, only-in-legacy grandchildren must still
+    /// migrate. The pre-fix code stopped at the directory itself and
+    /// silently dropped every unique legacy file beneath it.
+    #[test]
+    fn merges_recurses_into_same_named_directories() {
+        let _lock = lock_data_dir();
+        let (claude, claudepot) = isolated_roots();
+
+        let legacy = claude.path().join("claudepot");
+        let target = claudepot.path().join("repair");
+
+        // Both have `journals/` and a same-named entry inside; legacy
+        // also has a unique entry that must move over.
+        fs::create_dir_all(legacy.join("journals")).unwrap();
+        fs::create_dir_all(target.join("journals")).unwrap();
+        fs::write(legacy.join("journals").join("conflict.json"), "legacy").unwrap();
+        fs::write(target.join("journals").join("conflict.json"), "target").unwrap();
+        fs::write(legacy.join("journals").join("uniq.json"), "uniq").unwrap();
+
+        // Two-level deep: both sides have `snapshots/2024/`; only legacy
+        // has `2024/old.json`. Without recursion this never migrates.
+        fs::create_dir_all(legacy.join("snapshots").join("2024")).unwrap();
+        fs::create_dir_all(target.join("snapshots").join("2024")).unwrap();
+        fs::write(
+            legacy.join("snapshots").join("2024").join("old.json"),
+            "old",
+        )
+        .unwrap();
+
+        migrate_repair_tree().unwrap();
+
+        // Conflict preserved on target side.
+        assert_eq!(
+            fs::read_to_string(target.join("journals").join("conflict.json")).unwrap(),
+            "target"
+        );
+        // Unique grandchildren migrated.
+        assert_eq!(
+            fs::read_to_string(target.join("journals").join("uniq.json")).unwrap(),
+            "uniq"
+        );
+        assert_eq!(
+            fs::read_to_string(
+                target.join("snapshots").join("2024").join("old.json")
+            )
+            .unwrap(),
+            "old"
+        );
+
+        // The conflicting file is still on the legacy side; the rest
+        // (the unique migrated children) is gone.
+        assert!(legacy.join("journals").join("conflict.json").exists());
+        assert!(!legacy.join("journals").join("uniq.json").exists());
+        assert!(!legacy.join("snapshots").join("2024").join("old.json").exists());
 
         std::env::remove_var("CLAUDE_CONFIG_DIR");
     }

@@ -66,6 +66,20 @@ pub async fn read(service: &str) -> Result<Option<String>, SwapError> {
     Ok(Some(blob))
 }
 
+/// Short, non-reversible fingerprint of a credential blob, suitable for
+/// log correlation. SHA-256, truncated to 8 hex chars (32 bits). NEVER
+/// returns blob content — pre-images cannot be recovered from this value.
+/// 32 bits is small enough that it cannot meaningfully identify the blob
+/// to an attacker reading logs but distinct enough to tell two blobs apart
+/// in the same trace.
+fn blob_digest(blob: &str) -> String {
+    use sha2::{Digest, Sha256};
+    let mut h = Sha256::new();
+    h.update(blob.as_bytes());
+    let digest = h.finalize();
+    hex::encode(&digest[..4])
+}
+
 /// Validate that a string is safe to interpolate in a `security -i` command.
 /// Rejects values containing quotes, newlines, or backslashes that could
 /// alter the parsed command semantics.
@@ -90,8 +104,8 @@ pub async fn write(service: &str, blob: &str) -> Result<(), SwapError> {
         target: "claudepot::keychain_write",
         service = %service,
         user = %user,
-        blob_prefix = %&blob.chars().take(50).collect::<String>(),
         blob_len = blob.len(),
+        blob_digest = %blob_digest(blob),
         "writing to CC keychain via `security -i add-generic-password -U`"
     );
     let command_line =
@@ -149,8 +163,10 @@ pub async fn write(service: &str, blob: &str) -> Result<(), SwapError> {
         Ok(Some(stored)) => {
             tracing::error!(
                 target: "claudepot::keychain_write",
-                expected_prefix = %&blob.chars().take(50).collect::<String>(),
-                actual_prefix = %&stored.chars().take(50).collect::<String>(),
+                expected_len = blob.len(),
+                actual_len = stored.len(),
+                expected_digest = %blob_digest(blob),
+                actual_digest = %blob_digest(&stored),
                 "readback MISMATCH — the write silently didn't stick"
             );
             return Err(SwapError::KeychainError(

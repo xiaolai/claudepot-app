@@ -54,6 +54,18 @@ pub fn snapshot(
 }
 
 /// Restore a profile into the Desktop data dir with staging + rollback.
+///
+/// Strategy:
+///   * Phase 1 — copy the profile into a stage dir adjacent to
+///     `data_dir`. Co-locating the stage on the same filesystem lets
+///     Phase 3 use `rename` (atomic) instead of `copy` (non-atomic).
+///   * Phase 2 — move current `data_dir` contents to a holding dir,
+///     also adjacent. On any failure the partial moves are rolled back
+///     from holding → data_dir.
+///   * Phase 3 — `rename` items from stage → data_dir. If the target
+///     and stage live on the same filesystem this is atomic. On
+///     failure we clean up partially-restored items and roll back
+///     from holding.
 pub fn restore(
     data_dir: &Path,
     account_id: Uuid,
@@ -64,10 +76,19 @@ pub fn restore(
         return Err(DesktopSwapError::NoStoredProfile(account_id));
     }
 
-    // Phase 1: stage items to a temp dir
+    // Stage and holding dirs go in `data_dir`'s parent (or in
+    // `data_dir` itself if no parent is available) so they end up on
+    // the same filesystem as the live data — required for `rename` to
+    // be atomic in Phase 3. `tempfile` ignores the prefix path and
+    // appends a random suffix, so the dirs remain unique under
+    // concurrent restores.
+    let adjacent_root = data_dir.parent().unwrap_or(data_dir);
+    std::fs::create_dir_all(adjacent_root)?;
+
+    // Phase 1: stage items to a temp dir adjacent to data_dir.
     let stage_dir = tempfile::Builder::new()
         .prefix("claudepot-desktop-stage-")
-        .tempdir()?;
+        .tempdir_in(adjacent_root)?;
 
     for item in session_items {
         let src = profile_dir.join(item);
@@ -83,10 +104,10 @@ pub fn restore(
         }
     }
 
-    // Phase 2: move current items to a holding dir
+    // Phase 2: move current items to a holding dir adjacent to data_dir.
     let holding_dir = tempfile::Builder::new()
         .prefix("claudepot-desktop-old-")
-        .tempdir()?;
+        .tempdir_in(adjacent_root)?;
 
     let mut moved: Vec<String> = Vec::new();
     for item in session_items {
@@ -114,7 +135,15 @@ pub fn restore(
         }
     }
 
-    // Phase 3: move staged items into data dir
+    // Phase 3: move staged items into data dir.
+    //
+    // Prefer `rename` for atomicity. Stage and data_dir share a parent
+    // (Phase 1 set this up), so on a sane filesystem `rename` is a
+    // single inode-table update — either the new item is fully visible
+    // or it isn't. Fall back to copy (non-atomic) only if rename
+    // fails, which on Unix is typically `EXDEV` (cross-device link),
+    // and on Windows can be `ERROR_NOT_SAME_DEVICE` or
+    // `ERROR_ACCESS_DENIED` if the destination already exists.
     let mut restored: Vec<String> = Vec::new();
     for item in session_items {
         let src = stage_dir.path().join(item);
@@ -123,10 +152,31 @@ pub fn restore(
             if let Some(parent) = dst.parent() {
                 let _ = std::fs::create_dir_all(parent);
             }
-            let result = if src.is_dir() {
-                copy_dir_recursive(&src, &dst)
-            } else {
-                std::fs::copy(&src, &dst).map(|_| ())
+            // `rename` cannot replace an existing dir on Unix and may
+            // refuse on Windows. After Phase 2 the live items have
+            // been moved to holding, so `dst` should be absent — but
+            // be defensive in case a sibling item created the parent
+            // unexpectedly.
+            if dst.exists() {
+                if dst.is_dir() {
+                    let _ = std::fs::remove_dir_all(&dst);
+                } else {
+                    let _ = std::fs::remove_file(&dst);
+                }
+            }
+            let result = match std::fs::rename(&src, &dst) {
+                Ok(()) => Ok(()),
+                Err(_) => {
+                    // Cross-filesystem fallback: copy then remove src.
+                    if src.is_dir() {
+                        copy_dir_recursive(&src, &dst)
+                            .and_then(|_| std::fs::remove_dir_all(&src))
+                    } else {
+                        std::fs::copy(&src, &dst)
+                            .map(|_| ())
+                            .and_then(|_| std::fs::remove_file(&src))
+                    }
+                }
             };
             if let Err(e) = result {
                 // Phase-3 failure: clean up partially-restored targets, then rollback

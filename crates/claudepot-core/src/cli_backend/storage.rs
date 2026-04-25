@@ -60,29 +60,18 @@ fn save_to_file(account_id: Uuid, blob: &str) -> Result<(), SwapError> {
     }
     tmp.persist(&path)
         .map_err(|e| SwapError::WriteFailed(format!("persist failed: {e}")))?;
+    // Apply user-only access on the persisted target. Unix already
+    // has 0600 from the tempfile; Windows requires an explicit DACL.
+    super::secret_file::harden_path(&path)?;
     Ok(())
 }
 
 fn load_from_file(account_id: Uuid) -> Result<String, SwapError> {
     let path = private_path(account_id);
 
-    // Verify file permissions before reading credentials — auto-repair 0600.
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt;
-        if let Ok(meta) = std::fs::metadata(&path) {
-            let mode = meta.permissions().mode() & 0o777;
-            if mode != 0o600 {
-                tracing::warn!(
-                    "credential file {} has permissions {:o} (expected 600), fixing",
-                    path.display(),
-                    mode
-                );
-                std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600))
-                    .map_err(SwapError::FileError)?;
-            }
-        }
-    }
+    // Verify file permissions / ACL before reading credentials.
+    // Cross-platform: 0600 on Unix, user-only DACL on Windows.
+    super::secret_file::verify_path(&path)?;
 
     std::fs::read_to_string(&path).map_err(|_| SwapError::NoStoredCredentials(account_id))
 }
@@ -99,38 +88,85 @@ fn delete_file(account_id: Uuid) -> Result<(), SwapError> {
 // approach silently succeeds but writes to an ephemeral per-app keychain
 // on Developer ID-signed binaries without a provisioning profile.
 
+/// Reject characters that would let a caller break out of the
+/// `security -i` quoted command line. Same allowlist as the CC keychain
+/// helper in `keychain.rs::validate_security_input`.
+#[cfg(target_os = "macos")]
+fn validate_keychain_attr(value: &str) -> std::io::Result<()> {
+    if value.contains('"') || value.contains('\n') || value.contains('\r') || value.contains('\\') {
+        return Err(std::io::Error::other(
+            "keychain attribute contains unsafe characters",
+        ));
+    }
+    Ok(())
+}
+
 #[cfg(target_os = "macos")]
 fn save_to_keyring(account_id: Uuid, blob: &str) -> std::io::Result<()> {
-    use std::process::Command;
+    use std::io::Write as _;
+    use std::process::{Command, Stdio};
+
+    let account = account_id.to_string();
+    validate_keychain_attr(&account)?;
+    validate_keychain_attr(KEYCHAIN_SERVICE)?;
+
+    // Idempotent delete; ignore failure (the item may not exist).
     let _ = Command::new("/usr/bin/security")
         .args([
             "delete-generic-password",
             "-a",
-            &account_id.to_string(),
+            &account,
             "-s",
             KEYCHAIN_SERVICE,
         ])
         .output();
 
-    let out = Command::new("/usr/bin/security")
-        .args([
-            "add-generic-password",
-            "-A",
-            "-a",
-            &account_id.to_string(),
-            "-s",
-            KEYCHAIN_SERVICE,
-            "-w",
-            blob,
-        ])
-        .output()?;
+    // Hardened write path:
+    //   1. Drop `-A` — never grant blanket access. The keychain item
+    //      defaults to the calling executable having access via the
+    //      partition list; that is what we want.
+    //   2. Pass blob via `-X <hex>` over stdin to `security -i` so the
+    //      blob never appears in argv (argv is world-readable on macOS
+    //      via `ps`/`lsof`).
+    let hex_value = hex::encode(blob.as_bytes());
+    let command_line = format!(
+        "add-generic-password -U -a \"{account}\" -s \"{KEYCHAIN_SERVICE}\" -X \"{hex_value}\"\n"
+    );
+
+    let mut child = Command::new("/usr/bin/security")
+        .args(["-i"])
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()?;
+
+    if let Some(mut stdin) = child.stdin.take() {
+        stdin.write_all(command_line.as_bytes())?;
+        // Closing stdin signals end-of-input to `security -i`.
+        drop(stdin);
+    }
+
+    let out = child.wait_with_output()?;
     if !out.status.success() {
         return Err(std::io::Error::other(format!(
-            "security add-generic-password failed: {}",
+            "security add-generic-password failed (exit {}): {}",
+            out.status.code().unwrap_or(-1),
             String::from_utf8_lossy(&out.stderr).trim()
         )));
     }
-    Ok(())
+
+    // Read-back verification — `security -i` returns 0 even when the
+    // inner command silently fails (TCC denial, ACL gate). Only confirm
+    // success once we observe the blob actually landed.
+    match load_from_keyring(account_id)? {
+        Some(stored) if stored == blob => Ok(()),
+        Some(_) => Err(std::io::Error::other(
+            "keyring write did not take effect (read-back mismatch)",
+        )),
+        None => Err(std::io::Error::other(
+            "keyring write returned success but item is absent on read-back",
+        )),
+    }
 }
 
 #[cfg(target_os = "macos")]
