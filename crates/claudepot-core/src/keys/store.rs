@@ -148,6 +148,24 @@ impl KeyStore {
         Ok(key)
     }
 
+    /// Look up a single API key by uuid. Mirrors `find_oauth_token` —
+    /// the IPC `key_api_copy` path needs both the row metadata
+    /// (label / preview, for the receipt) and the secret in one
+    /// pass. `Ok(None)` means no row; not found is not an error
+    /// here so callers can decide whether to treat it as one.
+    pub fn find_api_key(&self, uuid: Uuid) -> Result<Option<ApiKey>, KeyError> {
+        let db = self.db();
+        let mut stmt = db.prepare(
+            "SELECT uuid, label, token_preview, account_uuid, \
+                    created_at, last_probed_at, last_probe_status \
+             FROM api_keys WHERE uuid = ?1",
+        )?;
+        let row = stmt
+            .query_row(params![uuid.to_string()], row_to_api_key)
+            .optional()?;
+        Ok(row)
+    }
+
     pub fn find_api_secret(&self, uuid: Uuid) -> Result<String, KeyError> {
         let db = self.db();
         let secret: Option<String> = db

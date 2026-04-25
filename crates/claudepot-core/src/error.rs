@@ -32,10 +32,12 @@ pub enum SwapError {
         actual_email: String,
     },
 
-    #[error(
-        "a Claude Code process is running — its token refresh will overwrite this swap. \
-         Quit Claude Code first, or pass --force to proceed anyway."
-    )]
+    /// Surface-agnostic message: callers append their own remediation
+    /// copy (CLI says "pass --force"; the GUI/tray surfaces an Override
+    /// affordance). Keep "Claude Code process is running" verbatim —
+    /// `useActions.useCli` substring-matches on it to route the in-app
+    /// switch path into the Override toast.
+    #[error("a Claude Code process is running — its next token refresh will overwrite this swap")]
     LiveSessionConflict,
 
     #[error("identity verification failed: {0}")]

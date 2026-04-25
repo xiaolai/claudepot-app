@@ -88,6 +88,89 @@ pub fn reconcile_flags(store: &AccountStore) -> Result<ReconcileOutcome, rusqlit
 // Phase 3 — adopt / clear / sync (require VerifiedIdentity)
 // ---------------------------------------------------------------------------
 
+/// Outcome of a successful [`switch`].
+#[derive(Debug, Clone)]
+pub struct SwitchOutcome {
+    /// Email of the target account that Desktop is now bound to.
+    pub email: String,
+    /// Email of the previously-active account, if any. `None` when
+    /// no `active_desktop` pointer was set going in.
+    pub outgoing_email: Option<String>,
+}
+
+#[derive(Debug, thiserror::Error)]
+pub enum SwitchError {
+    #[error("{email} has no Desktop profile yet \u{2014} sign in via the Desktop app first")]
+    NoSnapshot { email: String },
+    #[error("target account {0} is not registered")]
+    NotFound(Uuid),
+    #[error("Desktop is not supported on this platform")]
+    Unsupported,
+    #[error(transparent)]
+    Swap(#[from] crate::error::DesktopSwapError),
+    #[error("store: {0}")]
+    Store(String),
+}
+
+/// Switch the active Desktop profile to `target_uuid`.
+///
+/// Wraps [`crate::desktop_backend::swap::switch`] with the snapshot
+/// preflight + outgoing-id lookup that callers (Tauri command, CLI)
+/// previously inlined. Snapshot existence is checked BEFORE quitting
+/// Desktop — a missing snapshot must not leave the user staring at a
+/// quit Desktop with no recovery path.
+///
+/// Errors:
+///   - [`SwitchError::NotFound`] — `target_uuid` is not in the store.
+///   - [`SwitchError::NoSnapshot`] — target exists but has never been
+///     adopted; user must sign into Desktop and adopt first.
+///   - [`SwitchError::Swap`] — anything from the underlying swap
+///     pipeline (DPAPI mismatch, quit timeout, file copy I/O, etc.).
+///   - [`SwitchError::Store`] — DB read failed during target lookup.
+pub async fn switch(
+    platform: &dyn DesktopPlatform,
+    store: &AccountStore,
+    target_uuid: Uuid,
+    no_launch: bool,
+) -> Result<SwitchOutcome, SwitchError> {
+    // Target lookup.
+    let target = store
+        .find_by_uuid(target_uuid)
+        .map_err(|e| SwitchError::Store(e.to_string()))?
+        .ok_or(SwitchError::NotFound(target_uuid))?;
+
+    // Snapshot preflight — runs BEFORE swap::switch so a missing
+    // snapshot can't quit Desktop. Error message must match the
+    // user-visible string the Tauri command used to print verbatim.
+    if !paths::desktop_profile_dir(target_uuid).exists() {
+        return Err(SwitchError::NoSnapshot {
+            email: target.email.clone(),
+        });
+    }
+
+    // Outgoing pointer — best-effort. A malformed value behaves like
+    // no pointer (the swap layer treats `None` as "first switch").
+    let outgoing_id = store
+        .active_desktop_uuid()
+        .map_err(|e| SwitchError::Store(e.to_string()))?
+        .and_then(|s| Uuid::parse_str(&s).ok());
+
+    let outgoing_email = match outgoing_id {
+        Some(u) => store
+            .find_by_uuid(u)
+            .map_err(|e| SwitchError::Store(e.to_string()))?
+            .map(|a| a.email),
+        None => None,
+    };
+
+    swap::switch(platform, store, outgoing_id, target_uuid, no_launch).await?;
+
+    Ok(SwitchOutcome {
+        email: target.email,
+        outgoing_email,
+    })
+}
+
 /// Outcome of a successful [`adopt_current`].
 #[derive(Debug, Clone)]
 pub struct AdoptOutcome {
@@ -310,12 +393,20 @@ pub async fn clear_session(
 
     // Look up the active account so we know whose snapshot (if any)
     // to stash. The pointer being None is non-fatal — the user may
-    // have signed in outside of Claudepot.
-    let active = store
+    // have signed in outside of Claudepot. But a store *error* (DB
+    // unreadable, lock poisoned, schema mismatch) must propagate:
+    // silently treating it as "no active account" would skip the
+    // snapshot AND still proceed with the destructive delete.
+    let active = match store
         .active_desktop_uuid()
         .map_err(|e| ClearError::Store(e.to_string()))?
         .and_then(|s| Uuid::parse_str(&s).ok())
-        .and_then(|u| store.find_by_uuid(u).ok().flatten());
+    {
+        Some(u) => store
+            .find_by_uuid(u)
+            .map_err(|e| ClearError::Store(e.to_string()))?,
+        None => None,
+    };
 
     // Snapshot-before-delete when requested + feasible.
     let snapshot_kept = if keep_snapshot {
@@ -1054,5 +1145,113 @@ mod tests {
         clear_session(&platform, &store, false).await.unwrap();
         // Network/ was empty after Cookies removal → pruned.
         assert!(!data_dir.join("Network").exists(), "empty Network/ must be pruned");
+    }
+
+    // -- switch (B-3 desktop_use preflight) tests ---------------------
+
+    #[tokio::test]
+    async fn test_switch_rejects_target_without_snapshot() {
+        let _lock = crate::testing::lock_data_dir();
+        let (store, _env) = setup();
+        let acct = make_account("alice@example.com");
+        store.insert(&acct).unwrap();
+        // Deliberately do NOT create paths::desktop_profile_dir(acct.uuid).
+
+        let data_dir = _env.path().join("Claude");
+        populate_data_dir(&data_dir);
+        let platform = platform_for(data_dir);
+
+        let err = switch(&platform, &store, acct.uuid, true).await.unwrap_err();
+        // Verbatim error wording — UI copy is exact.
+        let msg = err.to_string();
+        assert_eq!(
+            msg,
+            "alice@example.com has no Desktop profile yet \u{2014} sign in via the Desktop app first",
+        );
+        assert!(matches!(err, SwitchError::NoSnapshot { .. }));
+    }
+
+    #[tokio::test]
+    async fn test_switch_rejects_unregistered_target() {
+        let _lock = crate::testing::lock_data_dir();
+        let (store, _env) = setup();
+
+        let data_dir = _env.path().join("Claude");
+        populate_data_dir(&data_dir);
+        let platform = platform_for(data_dir);
+
+        let bogus = Uuid::new_v4();
+        let err = switch(&platform, &store, bogus, true).await.unwrap_err();
+        match err {
+            SwitchError::NotFound(u) => assert_eq!(u, bogus),
+            other => panic!("expected NotFound, got {other:?}"),
+        }
+    }
+
+    #[tokio::test]
+    async fn test_switch_happy_path_calls_swap_and_returns_outcome() {
+        let _lock = crate::testing::lock_data_dir();
+        let (store, _env) = setup();
+
+        // Outgoing account: has a snapshot on disk so swap can stash
+        // the live data_dir into it without complaint.
+        let outgoing = make_account("alice@example.com");
+        store.insert(&outgoing).unwrap();
+        std::fs::create_dir_all(paths::desktop_profile_dir(outgoing.uuid)).unwrap();
+        store.set_active_desktop(outgoing.uuid).unwrap();
+
+        // Target account: pre-populated profile dir so swap::switch
+        // finds something to restore.
+        let target = make_account("bob@example.com");
+        store.insert(&target).unwrap();
+        let target_profile_dir = paths::desktop_profile_dir(target.uuid);
+        std::fs::create_dir_all(&target_profile_dir).unwrap();
+        std::fs::write(target_profile_dir.join("config.json"), b"{\"target\":true}").unwrap();
+        std::fs::write(target_profile_dir.join("Cookies"), b"target-cookies").unwrap();
+
+        let data_dir = _env.path().join("Claude");
+        populate_data_dir(&data_dir);
+        let platform = platform_for(data_dir.clone());
+
+        let out = switch(&platform, &store, target.uuid, true).await.unwrap();
+        assert_eq!(out.email, "bob@example.com");
+        assert_eq!(out.outgoing_email.as_deref(), Some("alice@example.com"));
+
+        // active_desktop pointer now references target (swap::switch's
+        // postcondition — proves we actually delegated).
+        let active = store.active_desktop_uuid().unwrap().unwrap();
+        assert_eq!(active.parse::<Uuid>().unwrap(), target.uuid);
+
+        // Disk-side proof: data_dir holds the target's contents.
+        assert_eq!(
+            std::fs::read(data_dir.join("config.json")).unwrap(),
+            b"{\"target\":true}",
+        );
+    }
+
+    #[tokio::test]
+    async fn test_switch_does_not_quit_desktop_on_preflight_failure() {
+        let _lock = crate::testing::lock_data_dir();
+        let (store, _env) = setup();
+        let acct = make_account("alice@example.com");
+        store.insert(&acct).unwrap();
+        // No snapshot on disk → preflight will reject.
+
+        let data_dir = _env.path().join("Claude");
+        populate_data_dir(&data_dir);
+        let platform = TestPlatform {
+            data_dir,
+            items: vec!["config.json", "Cookies"],
+            running: AtomicBool::new(true),
+        };
+
+        let err = switch(&platform, &store, acct.uuid, true).await.unwrap_err();
+        assert!(matches!(err, SwitchError::NoSnapshot { .. }));
+        // The whole point of running the preflight FIRST: Desktop must
+        // still be running.
+        assert!(
+            platform.running.load(Ordering::SeqCst),
+            "preflight failure must not quit Desktop",
+        );
     }
 }
