@@ -1,13 +1,17 @@
 import { describe, expect, it, vi, beforeEach } from "vitest";
 import { render, screen, waitFor, fireEvent } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import type { ReactNode } from "react";
 
-import type { MoveSessionReport, ProjectInfo } from "../../types";
+import type { ProjectInfo } from "../../types";
+import { OperationsProvider } from "../../hooks/useOperations";
 
-const moveSpy = vi.fn();
+const moveStartSpy = vi.fn();
+const moveStatusSpy = vi.fn();
 vi.mock("../../api", () => ({
   api: {
-    sessionMove: (...args: unknown[]) => moveSpy(...args),
+    sessionMoveStart: (...args: unknown[]) => moveStartSpy(...args),
+    sessionMoveStatus: (...args: unknown[]) => moveStatusSpy(...args),
   },
 }));
 const openDialogSpy = vi.fn();
@@ -32,22 +36,6 @@ function mkProject(overrides: Partial<ProjectInfo> = {}): ProjectInfo {
   };
 }
 
-function mkReport(overrides: Partial<MoveSessionReport> = {}): MoveSessionReport {
-  return {
-    sessionId: "abcd0000-0000-0000-0000-000000000000",
-    fromSlug: "-from",
-    toSlug: "-to",
-    jsonlLinesRewritten: 12,
-    subagentFilesMoved: 0,
-    remoteAgentFilesMoved: 0,
-    historyEntriesMoved: 3,
-    historyEntriesUnmapped: 1,
-    claudeJsonPointersCleared: 1,
-    sourceDirRemoved: false,
-    ...overrides,
-  };
-}
-
 const baseProps = {
   sessionId: "abcd0000-0000-0000-0000-000000000000",
   fromCwd: "/from",
@@ -58,19 +46,26 @@ const baseProps = {
   ],
 };
 
+function withProvider(ui: ReactNode) {
+  return <OperationsProvider>{ui}</OperationsProvider>;
+}
+
 describe("MoveSessionModal", () => {
   beforeEach(() => {
-    moveSpy.mockReset();
+    moveStartSpy.mockReset();
+    moveStatusSpy.mockReset();
     openDialogSpy.mockReset();
   });
 
   it("excludes the source cwd from the target picker", () => {
     render(
-      <MoveSessionModal
-        {...baseProps}
-        onClose={() => {}}
-        onCompleted={() => {}}
-      />,
+      withProvider(
+        <MoveSessionModal
+          {...baseProps}
+          onClose={() => {}}
+          onCompleted={() => {}}
+        />,
+      ),
     );
     const select = screen.getByRole("combobox") as HTMLSelectElement;
     const values = Array.from(select.options).map((o) => o.value);
@@ -81,31 +76,33 @@ describe("MoveSessionModal", () => {
 
   it("excludes orphan / unreachable / empty projects from targets (B1)", () => {
     render(
-      <MoveSessionModal
-        sessionId={baseProps.sessionId}
-        fromCwd={baseProps.fromCwd}
-        projects={[
-          mkProject({ original_path: "/from", sanitized_name: "-from" }),
-          mkProject({ original_path: "/live/ok", sanitized_name: "-live-ok" }),
-          mkProject({
-            original_path: "/live/dead",
-            sanitized_name: "-live-dead",
-            is_orphan: true,
-          }),
-          mkProject({
-            original_path: "/live/offline",
-            sanitized_name: "-live-offline",
-            is_reachable: false,
-          }),
-          mkProject({
-            original_path: "/live/empty",
-            sanitized_name: "-live-empty",
-            is_empty: true,
-          }),
-        ]}
-        onClose={() => {}}
-        onCompleted={() => {}}
-      />,
+      withProvider(
+        <MoveSessionModal
+          sessionId={baseProps.sessionId}
+          fromCwd={baseProps.fromCwd}
+          projects={[
+            mkProject({ original_path: "/from", sanitized_name: "-from" }),
+            mkProject({ original_path: "/live/ok", sanitized_name: "-live-ok" }),
+            mkProject({
+              original_path: "/live/dead",
+              sanitized_name: "-live-dead",
+              is_orphan: true,
+            }),
+            mkProject({
+              original_path: "/live/offline",
+              sanitized_name: "-live-offline",
+              is_reachable: false,
+            }),
+            mkProject({
+              original_path: "/live/empty",
+              sanitized_name: "-live-empty",
+              is_empty: true,
+            }),
+          ]}
+          onClose={() => {}}
+          onCompleted={() => {}}
+        />,
+      ),
     );
     const select = screen.getByRole("combobox") as HTMLSelectElement;
     const values = Array.from(select.options).map((o) => o.value);
@@ -117,44 +114,48 @@ describe("MoveSessionModal", () => {
 
   it("defaults to the most-recently-touched alive project (B11)", () => {
     render(
-      <MoveSessionModal
-        sessionId={baseProps.sessionId}
-        fromCwd={baseProps.fromCwd}
-        projects={[
-          mkProject({ original_path: "/from", sanitized_name: "-from" }),
-          mkProject({
-            original_path: "/old",
-            sanitized_name: "-old",
-            last_modified_ms: 1_000,
-          }),
-          mkProject({
-            original_path: "/fresh",
-            sanitized_name: "-fresh",
-            last_modified_ms: 9_999_999_999,
-          }),
-          mkProject({
-            original_path: "/mid",
-            sanitized_name: "-mid",
-            last_modified_ms: 5_000,
-          }),
-        ]}
-        onClose={() => {}}
-        onCompleted={() => {}}
-      />,
+      withProvider(
+        <MoveSessionModal
+          sessionId={baseProps.sessionId}
+          fromCwd={baseProps.fromCwd}
+          projects={[
+            mkProject({ original_path: "/from", sanitized_name: "-from" }),
+            mkProject({
+              original_path: "/old",
+              sanitized_name: "-old",
+              last_modified_ms: 1_000,
+            }),
+            mkProject({
+              original_path: "/fresh",
+              sanitized_name: "-fresh",
+              last_modified_ms: 9_999_999_999,
+            }),
+            mkProject({
+              original_path: "/mid",
+              sanitized_name: "-mid",
+              last_modified_ms: 5_000,
+            }),
+          ]}
+          onClose={() => {}}
+          onCompleted={() => {}}
+        />,
+      ),
     );
     const select = screen.getByRole("combobox") as HTMLSelectElement;
     expect(select.value).toBe("/fresh");
   });
 
   it("threads cleanupSource from the Advanced toggle (B6)", async () => {
-    moveSpy.mockResolvedValue(mkReport());
+    moveStartSpy.mockResolvedValue("op-test-1");
     const user = userEvent.setup();
     render(
-      <MoveSessionModal
-        {...baseProps}
-        onClose={() => {}}
-        onCompleted={() => {}}
-      />,
+      withProvider(
+        <MoveSessionModal
+          {...baseProps}
+          onClose={() => {}}
+          onCompleted={() => {}}
+        />,
+      ),
     );
     await user.click(screen.getByText("Advanced"));
     await user.click(
@@ -163,29 +164,31 @@ describe("MoveSessionModal", () => {
     await user.click(screen.getByRole("button", { name: /Move to/i }));
 
     await waitFor(() =>
-      expect(moveSpy).toHaveBeenCalledWith(
+      expect(moveStartSpy).toHaveBeenCalledWith(
         expect.objectContaining({ cleanupSource: true }),
       ),
     );
   });
 
-  it("calls the api with the selected target and reports success inline", async () => {
-    moveSpy.mockResolvedValue(mkReport());
-    const onCompleted = vi.fn();
+  it("calls sessionMoveStart with the selected target and hands off to the shell modal", async () => {
+    moveStartSpy.mockResolvedValue("op-handoff");
+    const onClose = vi.fn();
     const user = userEvent.setup();
 
     render(
-      <MoveSessionModal
-        {...baseProps}
-        onClose={() => {}}
-        onCompleted={onCompleted}
-      />,
+      withProvider(
+        <MoveSessionModal
+          {...baseProps}
+          onClose={onClose}
+          onCompleted={() => {}}
+        />,
+      ),
     );
     await user.selectOptions(screen.getByRole("combobox"), "/live/other");
     await user.click(screen.getByRole("button", { name: /Move to/i }));
 
     await waitFor(() =>
-      expect(moveSpy).toHaveBeenCalledWith({
+      expect(moveStartSpy).toHaveBeenCalledWith({
         sessionId: baseProps.sessionId,
         fromCwd: "/from",
         toCwd: "/live/other",
@@ -194,40 +197,43 @@ describe("MoveSessionModal", () => {
         cleanupSource: false,
       }),
     );
-    await waitFor(() => expect(screen.getByText(/^Moved\.$/)).toBeInTheDocument());
-    expect(screen.getByText(/12/)).toBeInTheDocument(); // lines rewritten
-    // The "1 stayed (pre-sessionId)" inline meta appears after success;
-    // it's distinct from the same phrase in the preamble.
-    expect(screen.getByText(/stayed \(pre-sessionId\)/i)).toBeInTheDocument();
-    expect(onCompleted).toHaveBeenCalledTimes(1);
+    // The local modal closes once the shell takes over.
+    await waitFor(() => expect(onClose).toHaveBeenCalled());
   });
 
-  it("shows inline error on failure, no double-signal", async () => {
-    moveSpy.mockRejectedValue("session appears live (mtime < threshold)");
+  it("shows inline error when the start call rejects, without closing", async () => {
+    moveStartSpy.mockRejectedValue("session appears live (mtime < threshold)");
+    const onClose = vi.fn();
     const user = userEvent.setup();
     render(
-      <MoveSessionModal
-        {...baseProps}
-        onClose={() => {}}
-        onCompleted={() => {}}
-      />,
+      withProvider(
+        <MoveSessionModal
+          {...baseProps}
+          onClose={onClose}
+          onCompleted={() => {}}
+        />,
+      ),
     );
     await user.click(screen.getByRole("button", { name: /Move to/i }));
 
     await waitFor(() =>
       expect(screen.getByText(/appears live/)).toBeInTheDocument(),
     );
+    // The local modal stays open so the user can fix the inputs.
+    expect(onClose).not.toHaveBeenCalled();
   });
 
   it('Other… reveals an input and "Browse" picks a path', async () => {
     openDialogSpy.mockResolvedValue("/picked");
     const user = userEvent.setup();
     render(
-      <MoveSessionModal
-        {...baseProps}
-        onClose={() => {}}
-        onCompleted={() => {}}
-      />,
+      withProvider(
+        <MoveSessionModal
+          {...baseProps}
+          onClose={() => {}}
+          onCompleted={() => {}}
+        />,
+      ),
     );
     await user.selectOptions(screen.getByRole("combobox"), "__other__");
     expect(screen.getByPlaceholderText(/target cwd/i)).toBeInTheDocument();
@@ -238,16 +244,17 @@ describe("MoveSessionModal", () => {
   });
 
   it("threads forceLive / forceConflict into the api call", async () => {
-    moveSpy.mockResolvedValue(mkReport());
+    moveStartSpy.mockResolvedValue("op-flags");
     const user = userEvent.setup();
     render(
-      <MoveSessionModal
-        {...baseProps}
-        onClose={() => {}}
-        onCompleted={() => {}}
-      />,
+      withProvider(
+        <MoveSessionModal
+          {...baseProps}
+          onClose={() => {}}
+          onCompleted={() => {}}
+        />,
+      ),
     );
-    // Open the Advanced disclosure
     const summary = screen.getByText("Advanced");
     await user.click(summary);
     await user.click(
@@ -256,7 +263,7 @@ describe("MoveSessionModal", () => {
     await user.click(screen.getByRole("button", { name: /Move to/i }));
 
     await waitFor(() =>
-      expect(moveSpy).toHaveBeenCalledWith(
+      expect(moveStartSpy).toHaveBeenCalledWith(
         expect.objectContaining({ forceLive: true, forceConflict: false }),
       ),
     );
@@ -265,11 +272,13 @@ describe("MoveSessionModal", () => {
   it("closes on Escape", () => {
     const onClose = vi.fn();
     render(
-      <MoveSessionModal
-        {...baseProps}
-        onClose={onClose}
-        onCompleted={() => {}}
-      />,
+      withProvider(
+        <MoveSessionModal
+          {...baseProps}
+          onClose={onClose}
+          onCompleted={() => {}}
+        />,
+      ),
     );
     fireEvent.keyDown(window, { key: "Escape" });
     expect(onClose).toHaveBeenCalled();
@@ -278,11 +287,13 @@ describe("MoveSessionModal", () => {
   it("disables Move when the target equals the source (Other + matching input)", async () => {
     const user = userEvent.setup();
     render(
-      <MoveSessionModal
-        {...baseProps}
-        onClose={() => {}}
-        onCompleted={() => {}}
-      />,
+      withProvider(
+        <MoveSessionModal
+          {...baseProps}
+          onClose={() => {}}
+          onCompleted={() => {}}
+        />,
+      ),
     );
     await user.selectOptions(screen.getByRole("combobox"), "__other__");
     await user.type(screen.getByPlaceholderText(/target cwd/i), "/from");

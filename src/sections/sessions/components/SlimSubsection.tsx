@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { api } from "../../../api";
 import { Button } from "../../../components/primitives/Button";
 import { FilterChip } from "../../../components/primitives/FilterChip";
@@ -47,10 +47,15 @@ export function SlimSubsection({
   const [stripImages, setStripImages] = useState(false);
   const [stripDocuments, setStripDocuments] = useState(false);
   const [slimPlan, setSlimPlan] = useState<BulkSlimPlan | null>(null);
+  // Monotonic counter so a late slim-preview response from a
+  // superseded filter or flag change can't repopulate `slimPlan`
+  // with stale entries the user is about to act on.
+  const previewSeqRef = useRef(0);
 
   // Toggling a slim flag must invalidate a stale slim plan, but
   // leave any prune preview the host might be showing untouched.
   useEffect(() => {
+    previewSeqRef.current++;
     setSlimPlan(null);
   }, [stripImages, stripDocuments]);
 
@@ -60,12 +65,14 @@ export function SlimSubsection({
   // `buildFilter`'s reference changes (it's a useCallback over the
   // filter inputs).
   useEffect(() => {
+    previewSeqRef.current++;
     setSlimPlan(null);
   }, [buildFilter]);
 
   const anySlimFlag = stripImages || stripDocuments;
 
   const previewSlim = useCallback(async () => {
+    const mySeq = ++previewSeqRef.current;
     setErr(null);
     setLoading(true);
     try {
@@ -75,12 +82,17 @@ export function SlimSubsection({
         strip_images: stripImages,
         strip_documents: stripDocuments,
       });
+      // Discard the response if the user changed filters/flags
+      // (or re-clicked Preview) while we were waiting — the plan
+      // we'd commit would not match the current inputs.
+      if (mySeq !== previewSeqRef.current) return;
       setSlimPlan(p);
     } catch (e) {
+      if (mySeq !== previewSeqRef.current) return;
       setErr(String(e));
       setSlimPlan(null);
     } finally {
-      setLoading(false);
+      if (mySeq === previewSeqRef.current) setLoading(false);
     }
   }, [buildFilter, stripImages, stripDocuments, setErr, setLoading]);
 

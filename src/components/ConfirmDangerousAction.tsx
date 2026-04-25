@@ -13,10 +13,11 @@ import { Modal, ModalHeader, ModalBody, ModalFooter } from "./primitives/Modal";
  *   enables. Used for Abandon, which destroys the audit trail.
  *
  * Built on the paper-mono `<Modal>` primitive. Destructive actions
- * intentionally keep backdrop-click disabled here — Modal's default
- * `onClose` fires on scrim click AND Escape; we only wire Escape by
- * passing `onClose={onCancel}` and let the user's explicit Cancel
- * button be the mouse path.
+ * intentionally suppress backdrop-click dismissal — Modal's default
+ * scrim click would fire `onClose`, but for a destructive prompt that
+ * means a stray click silently abandons the user's intent. Esc still
+ * cancels via `onClose`, and the explicit Cancel button is the mouse
+ * path. See `closeOnBackdrop={false}` below.
  */
 export function ConfirmDangerousAction({
   title,
@@ -44,7 +45,12 @@ export function ConfirmDangerousAction({
     typeToConfirm !== undefined && typed !== typeToConfirm;
 
   return (
-    <Modal open onClose={onCancel} aria-labelledby={headingId}>
+    <Modal
+      open
+      onClose={onCancel}
+      closeOnBackdrop={false}
+      aria-labelledby={headingId}
+    >
       <ModalHeader title={title} id={headingId} onClose={onCancel} />
       <ModalBody>
         {consequences}

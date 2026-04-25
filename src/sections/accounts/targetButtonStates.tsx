@@ -127,9 +127,12 @@ export function desktopTargetProps(
 
   // No stored snapshot — the only verb is "adopt the currently-live
   // Desktop session into this account's slot". No menu; one click.
+  // The label stays "Desktop" so the column reads as a single target
+  // noun across rows; the dashed border (`state: "adopt"`) and the
+  // tooltip carry the "this will bind" signal.
   return {
     icon: NF.desktop,
-    label: "Adopt",
+    label: "Desktop",
     state: "adopt",
     onPrimary: () => h.adoptDesktop(a),
     primaryTitle: "Bind the currently-running Desktop session to this account",

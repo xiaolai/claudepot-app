@@ -16,6 +16,14 @@ function verb(kind: RunningOpInfo["kind"]): string {
       return "Slimming";
     case "session_share":
       return "Sharing";
+    case "session_move":
+      return "Moving session";
+    case "account_login":
+      return "Logging in";
+    case "account_register":
+      return "Adding account";
+    case "verify_all":
+      return "Verifying";
   }
 }
 

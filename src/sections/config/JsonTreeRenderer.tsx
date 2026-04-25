@@ -86,6 +86,12 @@ function tryParse(body: string): ParseResult {
   }
 }
 
+// Hard cap on tree depth. Adversarial JSON (e.g. a million-deep array
+// chain) would otherwise blow the React render stack and freeze the
+// pane. 64 is well past anything CC writes in practice (audit
+// 2026-04-24, T3 H2).
+const MAX_DEPTH = 64;
+
 function Node({
   value,
   depth,
@@ -110,6 +116,20 @@ function Node({
     );
   }
 
+  // Depth cap — past the limit, render the container as a sealed
+  // marker rather than recursing further. Keeps the tree useful for
+  // the prefix the user can actually navigate to.
+  if (depth >= MAX_DEPTH) {
+    return (
+      <Line depth={depth}>
+        {label && <Key k={label} />}
+        <span style={{ color: "var(--fg-faint)" }}>
+          {Array.isArray(value) ? "[…]" : "{…}"} (max depth)
+        </span>
+      </Line>
+    );
+  }
+
   if (Array.isArray(value)) {
     return (
       <Collapsible
@@ -119,11 +139,12 @@ function Node({
         closeBracket="]"
         count={value.length}
         initiallyOpen={initiallyOpen || depth < 1}
-      >
-        {value.map((item, i) => (
-          <Node key={i} value={item} depth={depth + 1} label={undefined} />
-        ))}
-      </Collapsible>
+        renderChildren={() =>
+          value.map((item, i) => (
+            <Node key={i} value={item} depth={depth + 1} label={undefined} />
+          ))
+        }
+      />
     );
   }
 
@@ -137,11 +158,12 @@ function Node({
       closeBracket="}"
       count={keys.length}
       initiallyOpen={initiallyOpen || depth < 1}
-    >
-      {keys.map((k) => (
-        <Node key={k} value={obj[k]} depth={depth + 1} label={k} />
-      ))}
-    </Collapsible>
+      renderChildren={() =>
+        keys.map((k) => (
+          <Node key={k} value={obj[k]} depth={depth + 1} label={k} />
+        ))
+      }
+    />
   );
 }
 
@@ -152,7 +174,7 @@ function Collapsible({
   closeBracket,
   count,
   initiallyOpen,
-  children,
+  renderChildren,
 }: {
   depth: number;
   label: string | undefined;
@@ -160,7 +182,11 @@ function Collapsible({
   closeBracket: "}" | "]";
   count: number;
   initiallyOpen: boolean;
-  children: ReactNode;
+  // Lazily produces children only when the node is open. Collapsed
+  // arrays/objects must NOT recurse into their contents — large JSON
+  // bodies would otherwise build every descendant `Node` upfront and
+  // freeze the pane (audit 2026-04-24, T3 H2).
+  renderChildren: () => ReactNode;
 }) {
   const [open, setOpen] = useState(initiallyOpen);
   return (
@@ -201,7 +227,7 @@ function Collapsible({
       </Line>
       {open && (
         <>
-          {children}
+          {renderChildren()}
           <Line depth={depth}>
             <span style={{ color: "var(--fg-muted)" }}>{closeBracket}</span>
           </Line>

@@ -16,6 +16,14 @@ interface ModalProps {
   children: ReactNode;
   /** Optional aria-labelledby target for the header element id. */
   "aria-labelledby"?: string;
+  /**
+   * If false, scrim clicks no longer call `onClose`. Esc still
+   * fires `onClose`. Defaults to true. Used by destructive
+   * confirmations (`ConfirmDangerousAction`) so a slipped click on
+   * the backdrop can't dismiss the dialog and let the user lose the
+   * pending action without realising it.
+   */
+  closeOnBackdrop?: boolean;
 }
 
 const WIDTH_TOKEN: Record<"sm" | "md" | "lg", string> = {
@@ -40,6 +48,7 @@ export function Modal({
   onClose,
   width,
   children,
+  closeOnBackdrop = true,
   ...aria
 }: ModalProps) {
   const dialogRef = useRef<HTMLDivElement | null>(null);
@@ -114,7 +123,7 @@ export function Modal({
 
   return (
     <div
-      onClick={onClose}
+      onClick={closeOnBackdrop ? onClose : undefined}
       style={{
         position: "fixed",
         inset: 0,

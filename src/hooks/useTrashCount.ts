@@ -32,14 +32,28 @@ export function useTrashCount(): { count: number; refresh: () => void } {
     // existing tray-usage-refreshed as a best-effort nudge, and the
     // section's own onChange hooks call refresh() directly. If we
     // grow a bespoke event we'll add it here.
+    //
+    // Audit T4-5: `listen(...).then(fn => unlisten = fn)` raced
+    // unmount — if the component tore down before listen() resolved,
+    // `fn` was assigned to a captured local that nothing else
+    // referenced and the subscription leaked for the lifetime of
+    // the webview. Mirror useTauriEvent's cancelled-flag pattern:
+    // on resolve, if we're already cancelled, fire the unlisten
+    // immediately.
     let unlisten: UnlistenFn | undefined;
+    let cancelled = false;
     listen("tray-usage-refreshed", () => void refresh())
       .then((fn) => {
-        unlisten = fn;
+        if (cancelled) {
+          fn();
+        } else {
+          unlisten = fn;
+        }
       })
       .catch(() => {});
 
     return () => {
+      cancelled = true;
       window.removeEventListener("focus", onFocus);
       unlisten?.();
     };

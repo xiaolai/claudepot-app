@@ -60,16 +60,27 @@ export function useUsage() {
     // When the user clicks "Refresh" in the tray's Usage submenu,
     // the backend re-fetches and emits tray-usage-refreshed. Pull the
     // fresh cache into the webview so the card values match the tray.
+    //
+    // Audit T4-6: see useTrashCount for the matching late-resolve
+    // race. If `listen()` resolves after unmount, fire the returned
+    // unlisten immediately so the subscription doesn't outlive the
+    // hook.
     let unlisten: UnlistenFn | undefined;
+    let cancelled = false;
     listen("tray-usage-refreshed", () => {
       refreshUsage();
     })
       .then((fn) => {
-        unlisten = fn;
+        if (cancelled) {
+          fn();
+        } else {
+          unlisten = fn;
+        }
       })
       .catch(() => {});
 
     return () => {
+      cancelled = true;
       window.removeEventListener("focus", onFocus);
       unlisten?.();
     };

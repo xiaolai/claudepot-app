@@ -70,6 +70,14 @@ const OperationProgressModal = lazy(() =>
     default: m.OperationProgressModal,
   })),
 );
+import {
+  PROJECT_MOVE_PHASES,
+  renderProjectMoveResult,
+} from "./sections/projects/projectMoveProgress";
+import {
+  SESSION_MOVE_PHASES,
+  renderSessionMoveResult,
+} from "./sections/projects/sessionMoveProgress";
 
 /** Kick off the saved section's chunk in parallel with first paint. */
 function preloadSavedSection(): void {
@@ -97,6 +105,7 @@ import { useTheme } from "./hooks/useTheme";
 import { OperationsProvider, useOperations } from "./hooks/useOperations";
 import { AppStateProvider, useAppState } from "./providers/AppStateProvider";
 import { api } from "./api";
+import { toastError } from "./lib/toastError";
 import { ConsentLiveModal } from "./components/ConsentLiveModal";
 import { useActivityNotifications } from "./hooks/useActivityNotifications";
 import { useCardNotifications } from "./sections/events/useCardNotifications";
@@ -199,7 +208,9 @@ function AppShell() {
         ? "Resuming"
         : op.kind === "repair_rollback"
           ? "Rolling back"
-          : "Renaming";
+          : op.kind === "session_move"
+            ? "Moving session"
+            : "Renaming";
     const base = (p: string) => p.split("/").filter(Boolean).pop() ?? p;
     return `${verb} ${base(op.old_path)} → ${base(op.new_path)}`;
   };
@@ -305,7 +316,7 @@ function AppShell() {
               email ? `Synced ${email} from CC.` : "Nothing to sync.",
             ),
           )
-          .catch((e) => pushToast("error", `Sync failed: ${e}`));
+          .catch((e) => toastError(pushToast, "Sync failed", e));
         return;
       }
       if (cmd === "app-menu:account:verify-all") {
@@ -315,7 +326,7 @@ function AppShell() {
             pushToast("info", "Verify all complete.");
             void refreshAccounts();
           })
-          .catch((e) => pushToast("error", `Verify failed: ${e}`));
+          .catch((e) => toastError(pushToast, "Verify failed", e));
         return;
       }
       if (cmd === "app-menu:help:copy-diag") {
@@ -487,7 +498,7 @@ function AppShell() {
       await api.unlockKeychain();
       await refreshAccounts();
     } catch (e) {
-      pushToast("error", `Unlock failed: ${e}`);
+      toastError(pushToast, "Unlock failed", e);
     }
   }, [pushToast, refreshAccounts]);
 
@@ -513,8 +524,7 @@ function AppShell() {
         pushToast("info", `Imported ${outcome.email}`);
         await refreshAccounts();
       } catch (e) {
-        const msg = e instanceof Error ? e.message : String(e);
-        pushToast("error", `Import failed: ${msg}`);
+        toastError(pushToast, "Import failed", e);
       }
       // `email` is intentionally unused — supplied by the hook so the
       // button label can show the address, but the backend reads CC's
@@ -757,6 +767,16 @@ function AppShell() {
             onReopen={(opId) => {
               const op = runningOps.find((o) => o.op_id === opId);
               if (!op) return;
+              if (op.kind === "session_move") {
+                openOp({
+                  opId,
+                  title: labelFor(op),
+                  phases: SESSION_MOVE_PHASES,
+                  fetchStatus: api.sessionMoveStatus,
+                  renderResult: renderSessionMoveResult,
+                });
+                return;
+              }
               openOp({
                 opId,
                 title: labelFor(op),
@@ -779,6 +799,9 @@ function AppShell() {
             key={activeOp.opId}
             opId={activeOp.opId}
             title={activeOp.title}
+            phases={activeOp.phases ?? PROJECT_MOVE_PHASES}
+            fetchStatus={activeOp.fetchStatus ?? api.projectMoveStatus}
+            renderResult={activeOp.renderResult ?? renderProjectMoveResult}
             onClose={closeOp}
             onComplete={() => {
               activeOp.onComplete?.();
@@ -854,8 +877,7 @@ function AppShell() {
           onClearDesktop={requestDesktopSignOut}
           onLaunchDesktop={() => {
             api.desktopLaunch().catch((e) => {
-              const msg = e instanceof Error ? e.message : String(e);
-              pushToast("error", `Desktop launch failed: ${msg}`);
+              toastError(pushToast, "Desktop launch failed", e);
             });
           }}
           onNavigate={setSection}

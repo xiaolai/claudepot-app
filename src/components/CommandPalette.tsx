@@ -75,7 +75,12 @@ export function CommandPalette({
   const filtered = filter(query);
   const sessionSearch = useSessionSearch(query);
   const sessionHits: SearchHit[] = sessionSearch.hits;
-  useEffect(() => { setSelectedIndex(0); }, [query]);
+  useEffect(() => {
+    // After a query change, snap to the first enabled item so a
+    // disabled head-of-list (e.g. "Sign Desktop out" while no
+    // active Desktop binding exists) doesn't strand the cursor.
+    setSelectedIndex(0);
+  }, [query]);
   useEffect(() => {
     // Query `.palette-item` specifically — `children` also contains
     // `.palette-group-label` dividers (Quick Switch / Navigate /
@@ -88,19 +93,55 @@ export function CommandPalette({
   useEffect(() => { inputRef.current?.focus(); }, []);
 
   const totalItems = filtered.length + sessionHits.length;
+  // True iff the item at `i` is disabled. Session hits never carry a
+  // disabled flag, so they always read as enabled. Used by both arrow
+  // navigation (skip past) and Enter (no-op on a disabled cursor).
+  const isDisabledAt = useCallback(
+    (i: number): boolean => {
+      if (i < 0 || i >= totalItems) return true;
+      if (i < filtered.length) return Boolean(filtered[i]?.disabled);
+      return false;
+    },
+    [filtered, totalItems],
+  );
+  const nextEnabledFrom = useCallback(
+    (start: number, dir: 1 | -1): number => {
+      let i = start;
+      while (i >= 0 && i < totalItems) {
+        if (!isDisabledAt(i)) return i;
+        i += dir;
+      }
+      return -1;
+    },
+    [isDisabledAt, totalItems],
+  );
   const handleKeyDown = useCallback((e: React.KeyboardEvent) => {
     if (e.key === "ArrowDown") {
       e.preventDefault();
       if (totalItems === 0) return;
-      setSelectedIndex((i) => Math.min(i + 1, totalItems - 1));
+      setSelectedIndex((i) => {
+        const next = nextEnabledFrom(Math.min(i + 1, totalItems - 1), 1);
+        return next === -1 ? i : next;
+      });
     }
-    else if (e.key === "ArrowUp") { e.preventDefault(); setSelectedIndex((i) => Math.max(i - 1, 0)); }
+    else if (e.key === "ArrowUp") {
+      e.preventDefault();
+      setSelectedIndex((i) => {
+        const prev = nextEnabledFrom(Math.max(i - 1, 0), -1);
+        return prev === -1 ? i : prev;
+      });
+    }
     else if (e.key === "Enter") {
       e.preventDefault();
       if (totalItems === 0) return;
       if (selectedIndex < filtered.length) {
         const item = filtered[selectedIndex];
-        if (item) { item.onSelect(); onClose(); }
+        // Disabled palette items must not fire on Enter — the
+        // visual `disabled` on the <button> only blocks click, not
+        // keyboard activation routed through the parent listbox.
+        if (!item || item.disabled) return;
+        item.onSelect();
+        onClose();
       } else {
         const hit = sessionHits[selectedIndex - filtered.length];
         if (hit) {
@@ -114,7 +155,7 @@ export function CommandPalette({
       }
     }
     else if (e.key === "Escape") { e.preventDefault(); onClose(); }
-  }, [filtered, sessionHits, selectedIndex, totalItems, onClose]);
+  }, [filtered, sessionHits, selectedIndex, totalItems, onClose, nextEnabledFrom]);
 
   const switchItems = filtered.filter((a) => a.category === "switch");
   const navigateItems = filtered.filter((a) => a.category === "navigate");

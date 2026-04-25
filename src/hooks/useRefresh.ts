@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { api } from "../api";
+import { runVerifyAll } from "../sections/accounts/runVerifyAll";
 import type { AccountSummary, AppStatus, CcIdentity } from "../types";
 
 /**
@@ -45,6 +46,15 @@ export function useRefresh(pushToast: (kind: "info" | "error", text: string) => 
   const verifying = verifyingCount > 0;
   const lastRefreshRef = useRef(0);
   const refreshingRef = useRef(false);
+  // Audit T4-3: a refresh kicked off while another is in flight used
+  // to be silently dropped by `if (refreshingRef.current) return`.
+  // Mutation-triggered refreshes (e.g. after `account_use_cli`) that
+  // landed during the cold-start refresh would never run, leaving
+  // the UI staring at stale flags. Track a `pending` bit instead:
+  // late callers set it, the active refresh notices in its finally
+  // and fires exactly one follow-up. Coalesces a burst of N calls
+  // into 2 actual refreshes, never zero.
+  const pendingRefreshRef = useRef(false);
   // Generation token — every call to refresh() bumps this. Background
   // callbacks (currentCcIdentity, verifyAllAccounts) capture the gen
   // that started them and check before calling setState; a later
@@ -62,7 +72,12 @@ export function useRefresh(pushToast: (kind: "info" | "error", text: string) => 
   }, [authRejectedAt]);
 
   const refresh = useCallback(async () => {
-    if (refreshingRef.current) return;
+    if (refreshingRef.current) {
+      // A refresh is already underway — flag the request so the
+      // currently-running pass triggers a follow-up in its finally.
+      pendingRefreshRef.current = true;
+      return;
+    }
     refreshingRef.current = true;
     lastRefreshRef.current = Date.now();
     refreshGenRef.current += 1;
@@ -180,11 +195,17 @@ export function useRefresh(pushToast: (kind: "info" | "error", text: string) => 
         // but the flag itself is now a simple ref-count — can't get
         // stuck on an orphaned set.
         setVerifyingCount((n) => n + 1);
-        api
-          .verifyAllAccounts()
-          .then((verified) => {
-            if (gen === refreshGenRef.current) setAccounts(verified);
-          })
+        runVerifyAll({
+          patchAccount: (uuid, patch) => {
+            if (gen !== refreshGenRef.current) return;
+            setAccounts((prev) =>
+              prev.map((a) => (a.uuid === uuid ? { ...a, ...patch } : a)),
+            );
+          },
+          setAccounts: (rows) => {
+            if (gen === refreshGenRef.current) setAccounts(rows);
+          },
+        })
           .catch((e) => {
             // eslint-disable-next-line no-console
             console.warn("verify_all_accounts failed:", e);
@@ -199,6 +220,22 @@ export function useRefresh(pushToast: (kind: "info" | "error", text: string) => 
       pushToast("error", `refresh failed: ${msg}`);
     } finally {
       refreshingRef.current = false;
+      // Drain the pending bit. If anyone called `refresh()` while
+      // we were running, kick a single follow-up. Doing it here —
+      // not in a `while` loop — keeps the function bounded: more
+      // requests landing during the follow-up coalesce into one
+      // more pass, and the chain ends naturally when no caller
+      // arrives during the active run.
+      if (pendingRefreshRef.current) {
+        pendingRefreshRef.current = false;
+        // Schedule on a microtask so the current promise's `.then`
+        // chain unwinds before the next refresh starts; otherwise
+        // React state updates from this pass would batch with the
+        // next pass's setState calls in unpredictable ways.
+        queueMicrotask(() => {
+          void refresh();
+        });
+      }
     }
   }, [pushToast]);
 

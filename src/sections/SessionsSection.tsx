@@ -179,7 +179,7 @@ export function SessionsSection(props: SessionsSectionProps = {}) {
   // Ns" elapsed-time label ages without re-rendering the whole table
   // between ticks. Only runs while `fetchStartedAt` is non-null — no
   // idle polling cost.
-  const [, setElapsedTick] = useState(0);
+  const [elapsedTick, setElapsedTick] = useState(0);
   useEffect(() => {
     if (fetchStartedAt === null) return;
     const id = window.setInterval(() => setElapsedTick((n) => n + 1), 1000);
@@ -190,7 +190,9 @@ export function SessionsSection(props: SessionsSectionProps = {}) {
     const secs = Math.max(0, Math.floor((Date.now() - fetchStartedAt) / 1000));
     if (secs < 1) return "Updating…";
     return `Updating… ${secs}s`;
-  }, [fetchStartedAt]);
+    // `elapsedTick` is intentionally in deps so the memo recomputes on
+    // each interval tick — the value isn't read directly inside.
+  }, [fetchStartedAt, elapsedTick]);
 
   // Selection / repo-filter pruning lives here (not in the hook)
   // because both are owned by this component. Run as effects on the

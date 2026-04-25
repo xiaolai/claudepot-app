@@ -52,7 +52,17 @@ export function useToasts() {
       timersRef.current.delete(id);
     }
     setToasts((t) => t.map((x) => (x.id === id ? { ...x, exiting: true } : x)));
-    setTimeout(() => removeToast(id), 150);
+    // Audit T4-4: the 150 ms exit-animation timer used to be a bare
+    // setTimeout outside `timersRef`. If the component unmounted during
+    // the exit window the timer would still fire `removeToast`,
+    // calling `setState` on a dead component (React 18: warning;
+    // future strict modes: error). Stash the exit timer in the same
+    // map so the unmount cleanup clears it like any other.
+    const exitTimer = setTimeout(() => {
+      timersRef.current.delete(id);
+      removeToast(id);
+    }, 150);
+    timersRef.current.set(id, exitTimer);
   }, [removeToast]);
 
   /**

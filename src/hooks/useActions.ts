@@ -1,6 +1,11 @@
 import { emit } from "@tauri-apps/api/event";
 import { api } from "../api";
 import type { AccountSummary } from "../types";
+import type { OpHandle } from "./useOperations";
+import {
+  LOGIN_PHASES,
+  renderLoginResult,
+} from "../sections/accounts/loginProgress";
 
 /** Tell the Rust tray module to rebuild the account menu. */
 const rebuildTray = () => emit("rebuild-tray-menu").catch(() => {});
@@ -19,9 +24,13 @@ interface Deps {
   ) => void;
   refresh: () => Promise<void>;
   withBusy: <T>(key: string, fn: () => Promise<T>) => Promise<T>;
+  /** Mount the shared op-progress modal. Wired through `useOperations`
+   *  at the AppStateProvider level so callers don't need to know about
+   *  React context details. */
+  openOpModal: (handle: OpHandle) => void;
 }
 
-export function useActions({ pushToast, refresh, withBusy }: Deps) {
+export function useActions({ pushToast, refresh, withBusy, openOpModal }: Deps) {
   const useCli = (a: AccountSummary, force = false) =>
     withBusy(`cli-${a.uuid}`, async () => {
       try {
@@ -59,23 +68,45 @@ export function useActions({ pushToast, refresh, withBusy }: Deps) {
   const login = (a: AccountSummary) =>
     withBusy(`re-${a.uuid}`, async () => {
       try {
-        // The "Opening browser…" toast is error-tone because the login
-        // subprocess is long-running and we want the Cancel affordance
-        // (Undo button) to stay visible until the user clicks it OR
-        // the subprocess terminates. Error toasts don't auto-dismiss.
+        // Kick off the async start. The IPC worker returns immediately
+        // with an op_id; phase events flow on `op-progress::<op_id>`.
+        const opId = await api.accountLoginStart(a.uuid);
+        // The OperationProgressModal owns the user-visible surface.
+        // We still drop a discoverable "opening browser" toast so users
+        // glancing at the toast region see what's happening; the toast
+        // carries the Cancel undo affordance for parity with the
+        // legacy synchronous flow.
         pushToast(
           "error",
           `Opening browser — sign in as ${a.email}…`,
           cancelLogin,
           { undoLabel: "Cancel" },
         );
-        await api.accountLogin(a.uuid);
-        pushToast("info", `Signed in as ${a.email}`);
-        await refresh();
-        rebuildTray();
+        openOpModal({
+          opId,
+          title: `Re-login: ${a.email}`,
+          phases: LOGIN_PHASES,
+          fetchStatus: api.accountLoginStatus,
+          renderResult: renderLoginResult,
+          onComplete: () => {
+            pushToast("info", `Signed in as ${a.email}`);
+            void refresh();
+            rebuildTray();
+          },
+          onError: (detail) => {
+            const msg = detail ?? "";
+            if (msg.toLowerCase().includes("cancel")) {
+              pushToast("info", "Login cancelled.");
+            } else {
+              pushToast("error", `Login failed: ${msg || "unknown"}`);
+            }
+          },
+        });
       } catch (e) {
         const msg = `${e}`;
-        if (msg.toLowerCase().includes("cancelled")) {
+        if (msg.toLowerCase().includes("already in progress")) {
+          pushToast("error", "A login is already in progress.");
+        } else if (msg.toLowerCase().includes("cancelled")) {
           pushToast("info", "Login cancelled.");
         } else {
           pushToast("error", `Login failed: ${msg}`);

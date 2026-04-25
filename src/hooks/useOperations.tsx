@@ -6,6 +6,8 @@ import {
   useState,
   type ReactNode,
 } from "react";
+import type { PhaseSpec } from "../sections/projects/OperationProgressModal";
+import type { RunningOpInfo } from "../types";
 
 /**
  * Handle to a currently-visible operation-progress modal. The shell
@@ -16,6 +18,16 @@ import {
 export interface OpHandle {
   opId: string;
   title: string;
+  /** Phase ids + labels expected for this op. Defaults to the
+   *  project-move phase set when omitted, for backward compat with
+   *  call sites that haven't migrated yet. */
+  phases?: PhaseSpec[];
+  /** How to fetch the current `RunningOpInfo` snapshot when the
+   *  terminal event lands. Defaults to `api.projectMoveStatus`. */
+  fetchStatus?: (opId: string) => Promise<RunningOpInfo | null>;
+  /** Renders the success-state body. Defaults to
+   *  `renderProjectMoveResult`. */
+  renderResult?: (info: RunningOpInfo | null) => ReactNode;
   /** Fired on terminal complete event. */
   onComplete?: () => void;
   /** Fired on terminal error event, with detail. */

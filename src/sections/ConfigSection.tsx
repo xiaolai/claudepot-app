@@ -288,6 +288,12 @@ export function ConfigSection({
   const [searchSummary, setSearchSummary] =
     useState<ConfigSearchSummaryDto | null>(null);
   const searchInputRef = useRef<HTMLInputElement | null>(null);
+  // Holds the unlisten callbacks for the currently active search.
+  // Listeners are attached BEFORE `configSearchStart()` is invoked so
+  // fast searches can't drop early `hit`/`done` events that would
+  // otherwise fire before a listener-effect could subscribe (audit
+  // 2026-04-24, T3 H1).
+  const searchUnlistenersRef = useRef<Array<() => void>>([]);
 
   // ⌘F focuses the content-search input. Esc clears it. Respects the
   // same modal / input gate as useSection so shortcuts never fire
@@ -480,9 +486,24 @@ export function ConfigSection({
     };
   }, [selectedId]);
 
+  // Tear down listeners registered for a previous search. Safe to call
+  // when the ref is empty.
+  const detachSearchListeners = useCallback(() => {
+    const fns = searchUnlistenersRef.current;
+    searchUnlistenersRef.current = [];
+    for (const fn of fns) {
+      try {
+        fn();
+      } catch {
+        // ignore — best-effort teardown
+      }
+    }
+  }, []);
+
   const startSearch = useCallback(async () => {
     const trimmed = searchQuery.trim();
     if (!trimmed) {
+      detachSearchListeners();
       setSearchActive(false);
       setActiveSearchId(null);
       setSearchHits([]);
@@ -499,11 +520,38 @@ export function ConfigSection({
         // ignore
       }
     }
+    // Drop listeners from the previous search before we mint a new id.
+    detachSearchListeners();
     const id = `search-${Date.now()}`;
-    setActiveSearchId(id);
-    setSearchActive(true);
     setSearchHits([]);
     setSearchSummary(null);
+    // Attach listeners BEFORE invoking `configSearchStart`. The backend
+    // begins emitting `hit`/`done` events as soon as the start command
+    // returns, and fast searches (e.g. "no matches" on a tiny tree)
+    // can fire `done` before a useEffect-driven subscription would
+    // ever attach. Awaiting the `listen()` promises here makes the
+    // ordering explicit (audit 2026-04-24, T3 H1).
+    try {
+      const u1 = await listen<ConfigSearchHitDto>(
+        `config-search-hit::${id}`,
+        (ev) => {
+          setSearchHits((prev) => [...prev, ev.payload]);
+        },
+      );
+      const u2 = await listen<ConfigSearchSummaryDto>(
+        `config-search-done::${id}`,
+        (ev) => {
+          setSearchSummary(ev.payload);
+        },
+      );
+      searchUnlistenersRef.current = [u1, u2];
+    } catch (e) {
+      pushToast("error", `Search failed: ${e}`);
+      detachSearchListeners();
+      return;
+    }
+    setActiveSearchId(id);
+    setSearchActive(true);
     try {
       await api.configSearchStart(id, {
         text: trimmed,
@@ -512,10 +560,11 @@ export function ConfigSection({
       });
     } catch (e) {
       pushToast("error", `Search failed: ${e}`);
+      detachSearchListeners();
       setSearchActive(false);
       setActiveSearchId(null);
     }
-  }, [searchQuery, searchRegex, activeSearchId, pushToast]);
+  }, [searchQuery, searchRegex, activeSearchId, pushToast, detachSearchListeners]);
 
   const cancelSearch = useCallback(async () => {
     if (activeSearchId) {
@@ -525,9 +574,10 @@ export function ConfigSection({
         // ignore
       }
     }
+    detachSearchListeners();
     setActiveSearchId(null);
     setSearchActive(false);
-  }, [activeSearchId]);
+  }, [activeSearchId, detachSearchListeners]);
 
   const clearSearch = useCallback(async () => {
     await cancelSearch();
@@ -536,37 +586,13 @@ export function ConfigSection({
     setSearchSummary(null);
   }, [cancelSearch]);
 
+  // Section-unmount cleanup: drop any still-attached search listeners
+  // so they can't fire on a dead component.
   useEffect(() => {
-    if (!activeSearchId) return;
-    let unlisten1: (() => void) | null = null;
-    let unlisten2: (() => void) | null = null;
-    let cancelled = false;
-    void listen<ConfigSearchHitDto>(
-      `config-search-hit::${activeSearchId}`,
-      (ev) => {
-        if (cancelled) return;
-        setSearchHits((prev) => [...prev, ev.payload]);
-      },
-    ).then((u) => {
-      if (cancelled) u();
-      else unlisten1 = u;
-    });
-    void listen<ConfigSearchSummaryDto>(
-      `config-search-done::${activeSearchId}`,
-      (ev) => {
-        if (cancelled) return;
-        setSearchSummary(ev.payload);
-      },
-    ).then((u) => {
-      if (cancelled) u();
-      else unlisten2 = u;
-    });
     return () => {
-      cancelled = true;
-      unlisten1?.();
-      unlisten2?.();
+      detachSearchListeners();
     };
-  }, [activeSearchId]);
+  }, [detachSearchListeners]);
 
   const selectedFile = useMemo<ConfigFileNodeDto | null>(() => {
     if (!tree || !selectedId) return null;
