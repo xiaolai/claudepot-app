@@ -340,7 +340,7 @@ fn handle_cli_switch(app: &AppHandle, uuid_str: &str) {
     };
     let app = app.clone();
     tauri::async_runtime::spawn(async move {
-        match crate::commands_cli::cli_use(email, None).await {
+        match crate::commands_cli::cli_use(email.clone(), None).await {
             Ok(()) => {
                 if let Err(e) = rebuild(&app).await {
                     tracing::warn!("tray rebuild after cli switch failed: {e}");
@@ -349,7 +349,17 @@ fn handle_cli_switch(app: &AppHandle, uuid_str: &str) {
             }
             Err(e) => {
                 tracing::warn!("tray cli_use failed: {e}");
-                let _ = app.emit("tray-cli-switch-failed", e.to_string());
+                // Route the live-session conflict to a typed event so
+                // the React layer can surface the same Override
+                // affordance the in-app card path already has via
+                // `useActions.useCli`. The tray's own click handler
+                // has no `--force` channel, so a generic error toast
+                // here would leave the user with no way to proceed.
+                if e.to_lowercase().contains("claude code process is running") {
+                    let _ = app.emit("tray-cli-switch-needs-override", email);
+                } else {
+                    let _ = app.emit("tray-cli-switch-failed", e);
+                }
             }
         }
     });

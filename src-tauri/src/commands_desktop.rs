@@ -8,9 +8,7 @@
 
 use crate::commands::open_store;
 use crate::dto;
-use claudepot_core::account::AccountStore;
 use claudepot_core::desktop_backend;
-use claudepot_core::paths;
 use claudepot_core::services;
 use uuid::Uuid;
 
@@ -29,23 +27,13 @@ pub async fn desktop_use(
     let store = open_store()?;
     let target = crate::commands::resolve_target(&store, &email)?;
 
-    // Preflight: refuse to quit Desktop if the target has no stored profile.
-    let target_profile_dir = paths::desktop_profile_dir(target.uuid);
-    if !target_profile_dir.exists() {
-        return Err(format!(
-            "{} has no Desktop profile yet \u{2014} sign in via the Desktop app first",
-            target.email
-        ));
-    }
-
-    let outgoing_id =
-        crate::commands::active_id(&store, AccountStore::active_desktop_uuid);
-
     let platform = desktop_backend::create_platform()
         .ok_or_else(|| "Desktop not supported on this platform".to_string())?;
-    desktop_backend::swap::switch(&*platform, &store, outgoing_id, target.uuid, no_launch)
+
+    services::desktop_service::switch(&*platform, &store, target.uuid, no_launch)
         .await
-        .map_err(|e| format!("desktop switch failed: {e}"))
+        .map(|_| ())
+        .map_err(|e| e.to_string())
 }
 
 /// Ground-truth "who is Claude Desktop signed in as right now".

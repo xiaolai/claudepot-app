@@ -15,6 +15,7 @@ use crate::ops::{
 };
 use claudepot_core::paths;
 use claudepot_core::project;
+use claudepot_core::project_dry_run_service::DryRunOutcome;
 use claudepot_core::project_repair;
 use tauri::{AppHandle, State};
 
@@ -62,34 +63,17 @@ pub async fn project_show(path: String) -> Result<ProjectDetailDto, String> {
 /// Sentinel the client checks for and silently discards. Distinguished
 /// from real failures so the preview pane doesn't flash an error
 /// state just because the user kept typing.
+///
+/// Lives in the IPC layer on purpose — it's a Tauri-bridge protocol
+/// artifact, not a domain concept. The core service surfaces a typed
+/// `DryRunOutcome::Superseded`; we map it to this string here.
 const DRY_RUN_SUPERSEDED: &str = "__claudepot_dry_run_superseded__";
 
 #[tauri::command]
 pub async fn project_move_dry_run(
     args: MoveArgsDto,
-    registry: State<'_, crate::state::DryRunRegistry>,
+    svc: State<'_, crate::state::DryRunState>,
 ) -> Result<DryRunPlanDto, String> {
-    use std::sync::atomic::Ordering;
-
-    // Record this call's token as the latest. A later call with a
-    // greater token will overwrite it; we compare again at exit so
-    // we can bail on stale work without returning a misleading plan.
-    //
-    // `fetch_max` instead of `store`: if the client sends tokens out
-    // of order (rare but possible with async dispatch), we want to
-    // preserve the highest seen value so a "genuinely latest" call
-    // wins regardless of arrival order.
-    let my_token = args.cancel_token.unwrap_or(0);
-    if my_token > 0 {
-        registry.latest.fetch_max(my_token, Ordering::SeqCst);
-    }
-
-    // Short-circuit: if a newer token has already been seen before we
-    // even start, bail immediately. Saves work on rapid typing.
-    if my_token > 0 && registry.latest.load(Ordering::SeqCst) > my_token {
-        return Err(DRY_RUN_SUPERSEDED.to_string());
-    }
-
     let cfg = paths::claude_config_dir();
     let claude_json_path = dirs::home_dir().map(|h| h.join(".claude.json"));
     let repair_root = paths::claudepot_repair_dir();
@@ -108,23 +92,24 @@ pub async fn project_move_dry_run(
         ignore_pending_journals: args.ignore_pending_journals,
         claudepot_state_dir: Some(repair_root),
     };
-    // `plan_move` walks the source + target trees, reads snapshots,
-    // and consults `.claude.json`. Keep it off the Tokio IPC worker
-    // so rapid-typing token races don't starve other commands.
-    let plan = tauri::async_runtime::spawn_blocking(move || {
-        project::plan_move(&core_args).map_err(|e| format!("dry-run failed: {e}"))
+
+    let token = args.cancel_token.unwrap_or(0);
+    // `dry_run` walks the source + target trees, reads snapshots, and
+    // consults `.claude.json`. Keep it off the Tokio IPC worker so
+    // rapid-typing token races don't starve other commands.
+    let svc_arc = std::sync::Arc::clone(&svc.0);
+    let outcome = tauri::async_runtime::spawn_blocking(move || {
+        svc_arc
+            .dry_run(core_args, token)
+            .map_err(|e| format!("dry-run failed: {e}"))
     })
     .await
     .map_err(|e| format!("dry-run join: {e}"))??;
 
-    // Final check: a newer token arrived while we were computing. The
-    // plan is stale by definition — return the sentinel instead of
-    // the old plan so the UI doesn't render a mismatched preview.
-    if my_token > 0 && registry.latest.load(Ordering::SeqCst) > my_token {
-        return Err(DRY_RUN_SUPERSEDED.to_string());
+    match outcome {
+        DryRunOutcome::Plan(p) => Ok(DryRunPlanDto::from(&p)),
+        DryRunOutcome::Superseded => Err(DRY_RUN_SUPERSEDED.to_string()),
     }
-
-    Ok(DryRunPlanDto::from(&plan))
 }
 
 // ---------------------------------------------------------------------------
@@ -137,40 +122,24 @@ pub async fn project_move_dry_run(
 /// a preview — the gate fires on `project_clean_execute`.
 #[tauri::command]
 pub async fn project_clean_preview() -> Result<CleanPreviewDto, String> {
-    // `clean_orphans(dry_run=true)` scans every project slug — same
-    // heavy path as `project_list`. Runs on the blocking pool.
+    // `clean_preview` calls `clean_orphans(dry_run=true)` internally,
+    // which scans every project slug — same heavy path as
+    // `project_list`. Runs on the blocking pool.
     tauri::async_runtime::spawn_blocking(|| {
         let cfg = paths::claude_config_dir();
         let (_journals, locks, snaps) = claudepot_home_dirs();
-        let (result, orphans) = project::clean_orphans(
+        // `claude.json` inspection during preview would be a read;
+        // skip for now — the execute path handles that, and the
+        // preview just shows what will be removed.
+        let preview = project::clean_preview(
             &cfg,
-            None, // claude.json inspection during preview would be a read; skip for now — the execute path handles that and the preview just shows what will be removed.
+            None,
             Some(snaps.as_path()),
             Some(locks.as_path()),
-            true, // dry run
+            &paths::claudepot_data_dir(),
         )
         .map_err(|e| format!("clean preview failed: {e}"))?;
-
-        let total_bytes = orphans.iter().map(|p| p.total_size_bytes).sum();
-        // Disclose how many candidates fall under protection so the
-        // confirmation modal can hint that sibling state will be
-        // preserved for those (audit fix). Resolution uses the same
-        // fail-safe fallback as the execute path so preview and execute
-        // agree.
-        let protected = claudepot_core::protected_paths::resolved_set_or_defaults(
-            &paths::claudepot_data_dir(),
-        );
-        let protected_count = orphans
-            .iter()
-            .filter(|p| !p.is_empty && protected.contains(&p.original_path))
-            .count();
-        Ok(CleanPreviewDto {
-            orphans: orphans.iter().map(ProjectInfoDto::from).collect(),
-            orphans_found: result.orphans_found,
-            unreachable_skipped: result.unreachable_skipped,
-            total_bytes,
-            protected_count,
-        })
+        Ok(CleanPreviewDto::from(&preview))
     })
     .await
     .map_err(|e| format!("clean preview join: {e}"))?

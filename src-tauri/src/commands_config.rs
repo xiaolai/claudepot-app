@@ -35,90 +35,14 @@ use claudepot_core::config_view::{
     effective_mcp::{self, ApprovalState, BlockReason, McpSimulationMode},
     effective_settings,
     launcher::{self, LaunchError},
-    model::{ConfigTree, EditorCandidate},
-    scan,
+    model::EditorCandidate,
     search::{self, CancelToken},
+    ConfigScanService,
 };
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 use tauri::{Emitter, State};
-
-/// Cached last-scanned tree, used by `config_preview` to resolve node IDs
-/// back to file paths. Rebuilt on every `config_scan`. Shared between the
-/// command and the filesystem watcher so snapshots land in one cache.
-///
-/// `commit` is last-writer-wins by generation, and the generation check
-/// lives INSIDE the mutex — the previous "load → lock → write" shape
-/// was a non-atomic compare-and-write that let an older writer race
-/// past a newer one (audit 2026-04-24 round 2).
-#[derive(Default)]
-pub(crate) struct ConfigTreeCell {
-    pub(crate) tree: Option<ConfigTree>,
-    /// Generation of the committed tree; 0 before anything is written.
-    pub(crate) last_committed_gen: u64,
-}
-
-#[derive(Default, Clone)]
-pub struct ConfigTreeState {
-    cell: std::sync::Arc<Mutex<ConfigTreeCell>>,
-    /// Monotonic counter used to hand out generations to writers. Bumped
-    /// via `next_gen()` before a writer starts its scan.
-    gen_counter: std::sync::Arc<std::sync::atomic::AtomicU64>,
-}
-
-impl ConfigTreeState {
-    /// Claim the next generation for a writer. The writer calls
-    /// `commit` with this token on success.
-    pub fn next_gen(&self) -> u64 {
-        self.gen_counter
-            .fetch_add(1, std::sync::atomic::Ordering::SeqCst)
-            + 1
-    }
-
-    /// Atomically commit the tree iff `my_gen` beats the last committed
-    /// generation. The comparison and the write happen under the same
-    /// mutex so no older writer can slip past a newer one. Returns
-    /// `true` when the commit took effect.
-    pub fn commit(&self, my_gen: u64, tree: ConfigTree) -> Result<bool, String> {
-        let mut g = self
-            .cell
-            .lock()
-            .map_err(|e| format!("tree state lock: {e}"))?;
-        if my_gen <= g.last_committed_gen {
-            return Ok(false);
-        }
-        g.tree = Some(tree);
-        g.last_committed_gen = my_gen;
-        Ok(true)
-    }
-
-    /// Read-only accessor — lets `config_preview` / `config_search_start`
-    /// grab a snapshot of the cached tree. Clones under the lock so the
-    /// reader leaves with a detached value and never holds the mutex
-    /// across I/O.
-    pub fn snapshot(&self) -> Result<Option<ConfigTree>, String> {
-        let g = self
-            .cell
-            .lock()
-            .map_err(|e| format!("tree state lock: {e}"))?;
-        Ok(g.tree.clone())
-    }
-
-    /// Run `f` with a reference to the cached tree while holding the
-    /// mutex. Used by `config_preview` to locate a `FileNode` and clone
-    /// only that node out, without cloning the whole tree.
-    pub fn with_tree<T>(
-        &self,
-        f: impl FnOnce(&ConfigTree) -> T,
-    ) -> Result<Option<T>, String> {
-        let g = self
-            .cell
-            .lock()
-            .map_err(|e| format!("tree state lock: {e}"))?;
-        Ok(g.tree.as_ref().map(f))
-    }
-}
 
 /// Active search cancel tokens, keyed by client-supplied search_id.
 #[derive(Default)]
@@ -129,12 +53,12 @@ pub struct SearchRegistry(pub Mutex<HashMap<String, CancelToken>>);
 // ---------- Commands --------------------------------------------------
 
 /// Walk the CC-mandated roots anchored at `cwd` and return the tree.
-/// Caches the full tree in `ConfigTreeState` so `config_preview` can
+/// Caches the full tree in `ConfigScanService` so `config_preview` can
 /// resolve node ids without rescanning.
 #[tauri::command]
 pub async fn config_scan(
     cwd: Option<String>,
-    tree_state: State<'_, ConfigTreeState>,
+    svc: State<'_, Arc<ConfigScanService>>,
 ) -> Result<ConfigTreeDto, String> {
     // `cwd = None` means "no project anchor selected" — scan global
     // scopes only. We deliberately do NOT fall back to
@@ -142,15 +66,12 @@ pub async fn config_scan(
     // dev and packaged builds.
     let anchor: Option<PathBuf> = cwd.map(PathBuf::from);
 
-    // Claim a generation BEFORE starting work so the commit check at
-    // the end can drop a stale result (two scans for different anchors
-    // in flight concurrently — the later-generation wins, the earlier
-    // is silently discarded).
-    let my_gen = tree_state.next_gen();
-
-    let tree = tauri::async_runtime::spawn_blocking(move || match anchor {
-        Some(p) => scan(&p),
-        None => claudepot_core::config_view::scan_global(),
+    // Service owns the generation handle + the commit race. Run the
+    // full scan on the blocking pool so the IPC worker isn't pinned
+    // by filesystem stalls.
+    let svc = Arc::clone(svc.inner());
+    let tree = tauri::async_runtime::spawn_blocking(move || {
+        svc.scan_and_commit(anchor.as_deref())
     })
     .await
     .map_err(|e| format!("scan join: {e}"))?;
@@ -163,9 +84,6 @@ pub async fn config_scan(
         memory_slug: tree.memory_slug.clone(),
         memory_slug_lossy: tree.memory_slug_lossy,
     };
-
-    // Commit iff no newer generation landed while we were scanning.
-    let _ = tree_state.commit(my_gen, tree)?;
     Ok(dto)
 }
 
@@ -182,19 +100,19 @@ pub struct PreviewDto {
 #[tauri::command]
 pub async fn config_preview(
     node_id: String,
-    tree_state: State<'_, ConfigTreeState>,
+    svc: State<'_, Arc<ConfigScanService>>,
 ) -> Result<PreviewDto, String> {
     const HEAD_LIMIT: u64 = 256 * 1024;
     // Clone the FileNode out of the locked tree so we can drop the
     // guard before any I/O. `FileNode` is small (paths + a handful of
     // metadata fields); the clone is cheap relative to the 256 KiB
     // read that follows.
-    let file = tree_state
+    let file = svc
         .with_tree(|tree| {
             discover::find_file(tree, &node_id)
                 .ok_or_else(|| format!("node not found: {node_id}"))
                 .map(Clone::clone)
-        })?
+        })
         .ok_or_else(|| "tree not scanned yet".to_string())??;
 
     // File open + read up to 256 KiB. Fast on a local SSD but can stall
@@ -327,14 +245,17 @@ pub async fn config_search_start(
     search_id: String,
     query: SearchQueryDto,
     app: tauri::AppHandle,
-    tree_state: State<'_, ConfigTreeState>,
+    svc: State<'_, Arc<ConfigScanService>>,
     registry: State<'_, SearchRegistry>,
 ) -> Result<(), String> {
     if search_id.trim().is_empty() {
         return Err("search_id is empty".to_string());
     }
-    let tree = tree_state
-        .snapshot()?
+    // `current_tree` returns an `Arc<ConfigTree>`; cheap refcount bump
+    // and the search runs against an immutable snapshot, so concurrent
+    // commits don't disturb in-flight searches.
+    let tree = svc
+        .current_tree()
         .ok_or_else(|| "tree not scanned yet".to_string())?;
 
     let cancel = CancelToken::new();
@@ -357,7 +278,7 @@ pub async fn config_search_start(
     tauri::async_runtime::spawn_blocking(move || {
         let sid_hit = search_id_for_task.clone();
         let app_hit = app_for_task.clone();
-        let summary = search::search(&tree, query_core, &cancel, |hit| {
+        let summary = search::search(&*tree, query_core, &cancel, |hit| {
             let _ = app_hit.emit(
                 &format!("config-search-hit::{sid_hit}"),
                 SearchHitDto {
@@ -522,102 +443,7 @@ pub async fn config_effective_mcp(
 }
 
 // `render_path` + `auto_reason_label` live in `commands_config_types`.
-
-#[cfg(test)]
-mod tree_state_tests {
-    use super::ConfigTreeState;
-    use claudepot_core::config_view::model::ConfigTree;
-    use std::path::PathBuf;
-
-    fn fixture_tree(tag: &str) -> ConfigTree {
-        // Minimal synthetic tree keyed by `cwd` so assertions can tell
-        // one writer's tree from another's.
-        ConfigTree {
-            scopes: Vec::new(),
-            scanned_at_unix_ns: 0,
-            cwd: PathBuf::from(tag),
-            project_root: PathBuf::from(tag),
-            memory_slug: String::new(),
-            memory_slug_lossy: false,
-            cc_version_hint: None,
-            enterprise_mcp_lockout: false,
-        }
-    }
-
-    #[test]
-    fn commit_accepts_writes_in_generation_order() {
-        let state = ConfigTreeState::default();
-        let g1 = state.next_gen();
-        let g2 = state.next_gen();
-        assert!(state.commit(g1, fixture_tree("a")).unwrap());
-        assert!(state.commit(g2, fixture_tree("b")).unwrap());
-        assert_eq!(
-            state.snapshot().unwrap().unwrap().cwd,
-            PathBuf::from("b")
-        );
-    }
-
-    #[test]
-    fn commit_drops_older_writer_when_newer_already_committed() {
-        // Classic stale-write race: claim g1, claim g2, commit g2,
-        // commit g1. The g1 write MUST be dropped — the atomic
-        // check-and-write inside `commit` guarantees this (audit
-        // 2026-04-24 round 3, the original check-then-lock shape let
-        // g1 slip past).
-        let state = ConfigTreeState::default();
-        let g1 = state.next_gen();
-        let g2 = state.next_gen();
-        assert!(state.commit(g2, fixture_tree("new")).unwrap());
-        assert!(!state.commit(g1, fixture_tree("stale")).unwrap());
-        assert_eq!(
-            state.snapshot().unwrap().unwrap().cwd,
-            PathBuf::from("new")
-        );
-    }
-
-    #[test]
-    fn concurrent_writers_always_leave_the_newest_tree_committed() {
-        use std::sync::Arc;
-        use std::thread;
-        // Spawn 32 writers; each claims a generation, spins for a
-        // variable interval, then commits a tree tagged with its
-        // generation. Repeat to hammer the compare-and-write path.
-        //
-        // Strong assertion (round-3 follow-up audit, L-fix): after
-        // every writer finishes, `last_committed_gen` MUST equal the
-        // highest claimed generation AND the committed tree's tag
-        // must match — the winner is the writer who claimed the
-        // highest generation, not merely "some writer with a
-        // generation <= max." The round-2 non-atomic commit would
-        // frequently leave `last_committed_gen < max_gen` here and
-        // fail this assertion.
-        for _trial in 0..50 {
-            let state = Arc::new(ConfigTreeState::default());
-            let mut handles = Vec::new();
-            for i in 0..32 {
-                let s = state.clone();
-                handles.push(thread::spawn(move || {
-                    let g = s.next_gen();
-                    for _ in 0..(i * 7 % 13) {
-                        std::hint::spin_loop();
-                    }
-                    let _ = s.commit(g, fixture_tree(&format!("w{g}")));
-                    g
-                }));
-            }
-            let gens: Vec<u64> = handles.into_iter().map(|h| h.join().unwrap()).collect();
-            let max_gen = *gens.iter().max().unwrap();
-            let cell = state.cell.lock().unwrap();
-            assert_eq!(
-                cell.last_committed_gen, max_gen,
-                "the writer with the highest claimed generation must win"
-            );
-            let tree = cell.tree.as_ref().expect("at least one writer committed");
-            assert_eq!(
-                tree.cwd,
-                PathBuf::from(format!("w{max_gen}")),
-                "committed tree must come from the winning writer"
-            );
-        }
-    }
-}
+//
+// The tree-state race tests that used to live here moved to
+// `claudepot_core::config_view::service::tests` when the cell
+// migrated out of the IPC layer (D-1, audit-fix wave 3).
