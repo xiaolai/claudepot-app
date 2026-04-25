@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { listen } from "@tauri-apps/api/event";
 import { api } from "../api";
 import type {
@@ -8,22 +8,37 @@ import type {
   CardsRecentQuery,
   SeverityLabel,
 } from "../types";
+import {
+  aggregate,
+  daySeries,
+  SeverityMix,
+  Sparkbars,
+  TopKinds,
+} from "./events/charts";
 
 /**
- * Events section — per-event forensic surface.
+ * Events section — per-event forensic surface plus an at-a-glance
+ * aggregate strip across the top.
  *
- * Two-pane layout:
- *   left  — filter rail (kind, severity, plugin, project)
- *   right — card stream, newest first; card click navigates to the
- *           Sessions section with the right line scrolled into view.
+ * Layout (top → bottom, then left → right):
+ *   row 1 — header (title, total/new counts, reindex/refresh/mark-seen)
+ *   row 2 — metrics strip (cards-by-day · severity mix · top kinds)
+ *           derived from a *filter-independent* fetch so the strip
+ *           always reflects "what's happening overall" while the
+ *           list below shows the user's drill-down
+ *   row 3 — two-pane: filter rail (left) · card stream (right)
  *
- * The classifier persists cards into `~/.claudepot/sessions.db`
- * (same file SessionIndex uses, separate table). Live tail emits
- * `LiveDeltaKind::CardEmitted` deltas onto the per-session detail
- * bus when an `ActivityIndex` is wired into the runtime — that
- * happens at app startup in `lib.rs::run`. This component reloads
- * the list on each delta seen for any subscribed session, plus an
- * occasional polling fallback for global cards (cross-session).
+ * Pre-merge there were two tabs (`Events` and `Trends`) showing the
+ * same dataset at two zoom levels. Standard log-viewer pattern is
+ * one surface with a chart-on-top — see `dev-docs/activity-cards-
+ * design.md` §9.
+ *
+ * Live updates: the classifier persists cards into
+ * `~/.claudepot/sessions.db`; live tail emits `CardEmitted` deltas.
+ * This component refetches on every delta from `live-all` plus a
+ * 5-second polling fallback for cross-session visibility. The
+ * aggregate strip refetches on the same cadence (cheap — same
+ * `cards_recent` command, just with a higher limit and no filters).
  *
  * Suppression rules and severity meanings live in
  * `dev-docs/activity-cards-design.md` §2 / §6 — when in doubt,
@@ -52,10 +67,19 @@ const SEVERITY_OPTIONS: {
 ];
 
 const DEFAULT_LIMIT = 200;
+// Aggregate fetch is filter-independent — the metrics strip should
+// always show the same overview regardless of the user's drill-down.
+// 10k matches the limit the previous standalone `Trends` tab used and
+// is comfortably above current scale (~4k cards on the reference
+// machine). Bump this if the index grows past 50k and the
+// client-side aggregation becomes noticeable.
+const AGG_LIMIT = 10_000;
+const AGG_QUERY: CardsRecentQuery = { minSeverity: "info", limit: AGG_LIMIT };
 
 export function EventsSection() {
   const [cards, setCards] = useState<ActivityCard[]>([]);
   const [counts, setCounts] = useState<CardsCount | null>(null);
+  const [aggCards, setAggCards] = useState<ActivityCard[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [reindexing, setReindexing] = useState(false);
@@ -67,12 +91,16 @@ export function EventsSection() {
   const refresh = useCallback(async () => {
     try {
       setError(null);
-      const [list, c] = await Promise.all([
+      // Three parallel fetches: filtered list, new-since counter, and
+      // the unfiltered aggregate set that backs the metrics strip.
+      const [list, c, agg] = await Promise.all([
         api.cardsRecent(filters),
         api.cardsCountNewSince(filters),
+        api.cardsRecent(AGG_QUERY),
       ]);
       setCards(list);
       setCounts(c);
+      setAggCards(agg);
       setLoading(false);
     } catch (e) {
       setError(String(e));
@@ -168,6 +196,7 @@ export function EventsSection() {
           onMarkAllSeen={markAllSeen}
           onRefresh={() => void refresh()}
         />
+        <MetricsStrip cards={aggCards} loading={loading} />
         <CardStream
           cards={cards}
           loading={loading}
@@ -177,6 +206,98 @@ export function EventsSection() {
         />
       </div>
     </div>
+  );
+}
+
+// ── Metrics strip ────────────────────────────────────────────────
+
+/**
+ * Three-cell aggregate summary that sits above the card stream.
+ *   cell 1 — total + cards-by-day sparkbar (last 30d)
+ *   cell 2 — severity mix bar + counts
+ *   cell 3 — top 5 kinds with proportional bars
+ *
+ * Filter-independent: derives from a separate unfiltered fetch
+ * (AGG_QUERY) so the user always sees the global picture while
+ * filtering the list below. Hidden when the aggregate set is empty
+ * — first paint, after a reindex, or no cards at all.
+ */
+function MetricsStrip({ cards, loading }: { cards: ActivityCard[]; loading: boolean }) {
+  const agg = useMemo(() => aggregate(cards), [cards]);
+  const series = useMemo(() => daySeries(agg.byDay, 30), [agg.byDay]);
+
+  // Hide cleanly when there's nothing to show — the empty state on
+  // the card list below carries the "no cards yet" message; we don't
+  // need a parallel empty banner here.
+  if (loading || agg.total === 0) return null;
+
+  return (
+    <div
+      style={{
+        display: "grid",
+        gridTemplateColumns: "1fr 1fr 1fr",
+        gap: "var(--sp-12)",
+        padding: "var(--sp-10) var(--sp-16)",
+        borderBottom: "var(--bw-hair) solid var(--line)",
+        background: "var(--bg-sunken)",
+      }}
+    >
+      <MetricCell title={`${agg.total.toLocaleString()} cards`} subtitle="last 30 days">
+        <Sparkbars data={series} />
+      </MetricCell>
+      <MetricCell title="Severity mix">
+        <SeverityMix agg={agg} />
+      </MetricCell>
+      <MetricCell title="Top kinds">
+        <TopKinds agg={agg} limit={5} labelFor={kindLabel} />
+      </MetricCell>
+    </div>
+  );
+}
+
+function MetricCell({
+  title,
+  subtitle,
+  children,
+}: {
+  title: string;
+  subtitle?: string;
+  children: React.ReactNode;
+}) {
+  return (
+    <section
+      style={{
+        display: "flex",
+        flexDirection: "column",
+        gap: "var(--sp-6)",
+        minWidth: 0,
+        color: "var(--fg)",
+      }}
+    >
+      <div>
+        <span
+          className="mono-cap"
+          style={{
+            fontSize: "var(--fs-2xs)",
+            color: "var(--fg-muted)",
+          }}
+        >
+          {title}
+        </span>
+        {subtitle && (
+          <span
+            style={{
+              fontSize: "var(--fs-2xs)",
+              color: "var(--fg-faint)",
+              marginLeft: "var(--sp-6)",
+            }}
+          >
+            {subtitle}
+          </span>
+        )}
+      </div>
+      {children}
+    </section>
   );
 }
 
