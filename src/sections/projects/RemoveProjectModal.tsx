@@ -214,7 +214,22 @@ export function RemoveProjectModal({
                 }}
               >
                 Type{" "}
-                <code style={{ color: "var(--fg-base)" }}>{basic.slug}</code>{" "}
+                <code
+                  style={{
+                    color: "var(--fg-base)",
+                    // Slugs are case-sensitive on disk. The
+                    // surrounding label is `text-transform:
+                    // uppercase` for visual consistency with the
+                    // REMOVING/NOT TOUCHING/RECOVERABLE block
+                    // headers, but the slug itself must render in
+                    // its original casing — otherwise users type
+                    // what they see (uppercase) and the match fails
+                    // forever.
+                    textTransform: "none",
+                  }}
+                >
+                  {basic.slug}
+                </code>{" "}
                 to confirm
               </label>
               <Input
