@@ -183,6 +183,32 @@ describe("RemoveProjectModal", () => {
     await waitFor(() => expect(onError).toHaveBeenCalledWith("live session"));
   });
 
+  it("renders the slug confirm hint with original casing (not uppercased by CSS)", async () => {
+    // Regression: the label was styled `text-transform: uppercase`,
+    // which made a mixed-case slug render in all-caps. Users typed
+    // what they saw and the case-sensitive match failed forever.
+    // The fix overrides text-transform: none on just the slug
+    // <code>; the surrounding label stays uppercased.
+    basicSpy.mockResolvedValue(okBasic({ slug: "-Users-joker" }));
+    extrasSpy.mockResolvedValue(okExtras());
+    render(
+      <RemoveProjectModal
+        target="/Users/joker"
+        onClose={() => {}}
+        onCompleted={() => {}}
+        onError={() => {}}
+      />,
+    );
+    // The slug appears multiple times in the modal — find any element
+    // that's a direct match to its original casing (i.e. not uppercased).
+    const slugNodes = await screen.findAllByText("-Users-joker");
+    expect(slugNodes.length).toBeGreaterThan(0);
+    // The disabled-reason hint also carries the slug in mixed case.
+    expect(
+      screen.getByText(/Type -Users-joker to confirm\./),
+    ).toBeInTheDocument();
+  });
+
   it("Cancel is the primary affordance", async () => {
     basicSpy.mockResolvedValue(okBasic());
     extrasSpy.mockResolvedValue(okExtras());
