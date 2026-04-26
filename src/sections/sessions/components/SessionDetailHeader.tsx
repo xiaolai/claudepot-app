@@ -1,7 +1,7 @@
+import { BackAffordance } from "../../../components/primitives/BackAffordance";
 import { Button } from "../../../components/primitives/Button";
 import { CopyButton } from "../../../components/CopyButton";
 import { Glyph } from "../../../components/primitives/Glyph";
-import { IconButton } from "../../../components/primitives/IconButton";
 import { Tag } from "../../../components/primitives/Tag";
 import { NF } from "../../../icons";
 import type { SessionChunk, SessionRow } from "../../../types";
@@ -94,14 +94,6 @@ export function SessionDetailHeader({
           marginBottom: "var(--sp-6)",
         }}
       >
-        {onBack && (
-          <IconButton
-            glyph={NF.chevronL}
-            onClick={onBack}
-            title="Back to session list"
-            aria-label="Back to session list"
-          />
-        )}
         <div
           style={{
             fontSize: "var(--fs-2xs)",
@@ -113,7 +105,15 @@ export function SessionDetailHeader({
             gap: "var(--sp-6)",
           }}
         >
-          <span>{project}</span>
+          {onBack ? (
+            <BackAffordance
+              label={project}
+              onClick={onBack}
+              title={`Back to session list for ${project}`}
+            />
+          ) : (
+            <span>{project}</span>
+          )}
           <Glyph g={NF.chevronR} style={{ fontSize: "var(--fs-3xs)" }} />
           <span className="mono" title={row.session_id}>
             {shortSessionId(row.session_id)}

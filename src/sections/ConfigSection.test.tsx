@@ -4,7 +4,7 @@
  * and exposes the split-button "Open in…" primary action.
  */
 import { describe, expect, it, vi } from "vitest";
-import { render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 
 const configScanSpy = vi.fn();
 const configListEditorsSpy = vi.fn();
@@ -300,5 +300,112 @@ describe("ConfigSection — P0 smoke", () => {
     await new Promise((r) => setTimeout(r, 20));
     expect(screen.queryByText(/repoA/i)).toBeFalsy();
     expect(screen.queryByText(/repoB/i)).toBeTruthy();
+  });
+
+  // Audit 2026-04-26 finding — the FilePreview / EffectiveShell back
+  // affordance ("Artifacts" link above the title) must clear the
+  // current sub-route so the right pane returns to ConfigHomePane.
+  // Regression guard: a stale or no-op handler would leave the user
+  // dead-ended on a selected node with no way back.
+  it("clears the sub-route when the FilePreview back link is clicked", async () => {
+    resetSpies();
+    configScanSpy.mockResolvedValue({
+      scopes: [
+        {
+          id: "scope:project:repo",
+          scope_type: "Project",
+          label: "Project (cwd/.claude)",
+          recursive_count: 1,
+          files: [
+            {
+              id: "f:settings",
+              rel_path: ".claude/settings.json",
+              abs_path: "/repo/.claude/settings.json",
+              display_path: ".claude/settings.json",
+              kind: "settings",
+              scope_badges: [],
+              size_bytes: 1,
+              mtime_unix_ns: 0,
+              issues: [],
+              symlink_origin: null,
+              included_by: null,
+              include_depth: 0,
+              summary_title: "settings.json",
+              summary_description: null,
+            },
+          ],
+        },
+      ],
+      cwd: "/repo",
+      project_root: "/repo",
+      config_home_dir: "/repo/.claude",
+      memory_slug: "",
+      memory_slug_lossy: false,
+    });
+    configListEditorsSpy.mockResolvedValue([]);
+    configGetEditorDefaultsSpy.mockResolvedValue({
+      by_kind: {},
+      fallback: "system",
+    });
+    configPreviewSpy.mockResolvedValue({
+      body_utf8: "{}",
+      truncated: false,
+    });
+
+    const onSubRouteChange = vi.fn();
+
+    render(
+      <ConfigSection
+        subRoute="node:f:settings"
+        onSubRouteChange={onSubRouteChange}
+      />,
+    );
+
+    // Wait for the back affordance to render — only present when a
+    // node is selected (subRoute → selectedFile path).
+    const backBtn = await screen.findByRole("button", {
+      name: /back to artifact list/i,
+    });
+    fireEvent.click(backBtn);
+    expect(onSubRouteChange).toHaveBeenCalledWith(null);
+  });
+
+  // Companion to the FilePreview test above — the virtual-route
+  // EffectiveShell wrappers (effective-settings / effective-mcp /
+  // hooks) share the same `onClose={() => onSubRouteChange(null)}`
+  // contract. One representative case (effective-settings) is enough;
+  // all three pass `onClose` through the same EffectiveShell component
+  // so coverage of one validates the wiring.
+  it("clears the sub-route when the EffectiveShell back link is clicked", async () => {
+    resetSpies();
+    configScanSpy.mockResolvedValue({
+      scopes: [],
+      cwd: "/repo",
+      project_root: "/repo",
+      config_home_dir: "/repo/.claude",
+      memory_slug: "",
+      memory_slug_lossy: false,
+    });
+    configListEditorsSpy.mockResolvedValue([]);
+    configGetEditorDefaultsSpy.mockResolvedValue({
+      by_kind: {},
+      fallback: "system",
+    });
+
+    const onSubRouteChange = vi.fn();
+
+    render(
+      <ConfigSection
+        subRoute="node:virtual:effective-settings"
+        onSubRouteChange={onSubRouteChange}
+        forcedAnchor={{ kind: "folder", path: "/repo" }}
+      />,
+    );
+
+    const backBtn = await screen.findByRole("button", {
+      name: /back to artifact list/i,
+    });
+    fireEvent.click(backBtn);
+    expect(onSubRouteChange).toHaveBeenCalledWith(null);
   });
 });
