@@ -152,6 +152,7 @@ export function RemoveProjectModal({
           <>
             <Block label="Removing">
               <code
+                className="selectable"
                 style={{
                   fontSize: "var(--fs-sm)",
                   color: "var(--fg-base)",
@@ -165,6 +166,7 @@ export function RemoveProjectModal({
 
             <Block label="Not touching">
               <code
+                className="selectable"
                 style={{
                   fontSize: "var(--fs-sm)",
                   color: "var(--fg-base)",
@@ -215,6 +217,7 @@ export function RemoveProjectModal({
               >
                 Type{" "}
                 <code
+                  className="selectable"
                   style={{
                     color: "var(--fg-base)",
                     // Slugs are case-sensitive on disk. The
