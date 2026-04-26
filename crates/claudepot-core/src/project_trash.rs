@@ -758,7 +758,7 @@ mod tests {
     fn list_missing_root_returns_empty() {
         let tmp = TempDir::new().unwrap();
         let listing =
-            list(&tmp.path().to_path_buf(), ProjectTrashFilter::default()).unwrap();
+            list(tmp.path(), ProjectTrashFilter::default()).unwrap();
         assert!(listing.entries.is_empty());
         assert_eq!(listing.total_bytes, 0);
     }
