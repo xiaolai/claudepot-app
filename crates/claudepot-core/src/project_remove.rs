@@ -85,6 +85,31 @@ pub struct RemovePreview {
     pub history_lines_count: usize,
 }
 
+/// Cheap subset of `RemovePreview` — fields the GUI's modal needs to
+/// render the disclosure on first paint. Excludes the slow probes
+/// (`detect_live_session`, full `~/.claude.json` parse, full
+/// `history.jsonl` scan) so the modal opens instantly even when
+/// `history.jsonl` is multi-MB. The slow fields come from
+/// `RemovePreviewExtras` via a follow-up call.
+#[derive(Debug, Clone, Serialize)]
+pub struct RemovePreviewBasic {
+    pub slug: String,
+    pub original_path: Option<String>,
+    pub bytes: u64,
+    pub session_count: usize,
+    pub last_modified: Option<SystemTime>,
+}
+
+/// Slow subset of `RemovePreview` — the probes that read large files
+/// or call out to system tools. Computed in a separate call so the
+/// confirm modal isn't blocked on first paint.
+#[derive(Debug, Clone, Serialize)]
+pub struct RemovePreviewExtras {
+    pub has_live_session: bool,
+    pub claude_json_entry_present: bool,
+    pub history_lines_count: usize,
+}
+
 /// Outcome of a successful `remove_project`.
 #[derive(Debug, Clone, Serialize)]
 pub struct RemoveResult {
@@ -195,12 +220,34 @@ fn snapshot_history_lines(history_path: &Path, target: &str) -> Vec<String> {
     out
 }
 
-/// Read-only path. Computes the same data `remove_project` would act
-/// on, without touching the filesystem. Callers use this to render a
-/// confirmation modal honestly.
-pub fn remove_project_preview(
+/// Cheap preview — slug + paths + sessions + size + last_modified.
+/// Skips the live-session probe (lsof + process scan) and the full
+/// `~/.claude.json` / `history.jsonl` reads. The GUI calls this for
+/// the modal's first paint so the disclosure shows up instantly even
+/// when sibling state files are large.
+pub fn remove_project_preview_basic(
     args: &RemoveArgs<'_>,
-) -> Result<RemovePreview, ProjectError> {
+) -> Result<RemovePreviewBasic, ProjectError> {
+    let (slug, project_dir) = resolve_target(args)?;
+    let info: ProjectInfo = compute_project_info(&project_dir, &slug)?;
+    let original_path =
+        resolve_original_path(&project_dir, &slug, args.claude_json_path);
+    Ok(RemovePreviewBasic {
+        slug,
+        original_path,
+        bytes: info.total_size_bytes,
+        session_count: info.session_count,
+        last_modified: info.last_modified,
+    })
+}
+
+/// Slow preview — runs the live-session probe and parses
+/// `~/.claude.json` + `history.jsonl` end-to-end. Returns the
+/// disabled-state metadata the modal uses to gate the Remove button
+/// and to annotate the disclosure.
+pub fn remove_project_preview_extras(
+    args: &RemoveArgs<'_>,
+) -> Result<RemovePreviewExtras, ProjectError> {
     let (slug, project_dir) = resolve_target(args)?;
     let info: ProjectInfo = compute_project_info(&project_dir, &slug)?;
     let original_path =
@@ -225,15 +272,33 @@ pub fn remove_project_preview(
         _ => 0,
     };
 
-    Ok(RemovePreview {
-        slug,
-        original_path,
-        bytes: info.total_size_bytes,
-        session_count: info.session_count,
-        last_modified: info.last_modified,
+    let _ = slug; // keep slug computation for symmetry with basic
+    Ok(RemovePreviewExtras {
         has_live_session,
         claude_json_entry_present,
         history_lines_count,
+    })
+}
+
+/// Read-only path. Computes the same data `remove_project` would act
+/// on, without touching the filesystem. Callers use this to render a
+/// confirmation modal honestly. CLI uses this for the synchronous
+/// disclosure print; GUI prefers the basic+extras split for snappy
+/// first paint.
+pub fn remove_project_preview(
+    args: &RemoveArgs<'_>,
+) -> Result<RemovePreview, ProjectError> {
+    let basic = remove_project_preview_basic(args)?;
+    let extras = remove_project_preview_extras(args)?;
+    Ok(RemovePreview {
+        slug: basic.slug,
+        original_path: basic.original_path,
+        bytes: basic.bytes,
+        session_count: basic.session_count,
+        last_modified: basic.last_modified,
+        has_live_session: extras.has_live_session,
+        claude_json_entry_present: extras.claude_json_entry_present,
+        history_lines_count: extras.history_lines_count,
     })
 }
 

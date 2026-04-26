@@ -218,6 +218,54 @@ impl From<&claudepot_core::project_remove::RemovePreview> for RemoveProjectPrevi
     }
 }
 
+/// Cheap subset — what the GUI modal renders on first paint. No live-
+/// session probe, no large-file reads. Returns in <50 ms even when
+/// sibling state is multi-MB.
+#[derive(Serialize)]
+pub struct RemoveProjectPreviewBasicDto {
+    pub slug: String,
+    pub original_path: Option<String>,
+    pub bytes: u64,
+    pub session_count: usize,
+    pub last_modified_ms: Option<i64>,
+}
+
+impl From<&claudepot_core::project_remove::RemovePreviewBasic>
+    for RemoveProjectPreviewBasicDto
+{
+    fn from(p: &claudepot_core::project_remove::RemovePreviewBasic) -> Self {
+        Self {
+            slug: p.slug.clone(),
+            original_path: p.original_path.clone(),
+            bytes: p.bytes,
+            session_count: p.session_count,
+            last_modified_ms: system_time_to_ms(p.last_modified),
+        }
+    }
+}
+
+/// Slow subset — fields that gate the Remove button (`has_live_session`)
+/// and annotate the disclosure (sibling-state counts). Comes in via a
+/// follow-up call so the modal can render without waiting on it.
+#[derive(Serialize)]
+pub struct RemoveProjectPreviewExtrasDto {
+    pub has_live_session: bool,
+    pub claude_json_entry_present: bool,
+    pub history_lines_count: usize,
+}
+
+impl From<&claudepot_core::project_remove::RemovePreviewExtras>
+    for RemoveProjectPreviewExtrasDto
+{
+    fn from(p: &claudepot_core::project_remove::RemovePreviewExtras) -> Self {
+        Self {
+            has_live_session: p.has_live_session,
+            claude_json_entry_present: p.claude_json_entry_present,
+            history_lines_count: p.history_lines_count,
+        }
+    }
+}
+
 /// Outcome of a successful `project_remove_execute`. Carries the trash
 /// id so the GUI can offer a one-click Undo right after the operation
 /// (in addition to the persistent Trash drawer).

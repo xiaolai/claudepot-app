@@ -17,6 +17,8 @@ import type {
   ProjectRestoreReport,
   ProjectTrashListing,
   RemoveProjectPreview,
+  RemoveProjectPreviewBasic,
+  RemoveProjectPreviewExtras,
   RemoveProjectResult,
   RunningOpInfo,
 } from "../types";
@@ -70,10 +72,25 @@ export const projectApi = {
 
   // ---------- Project remove + trash ----------
   /**
-   * Read-only preview the RemoveProjectModal renders. `has_live_session`
-   * is informational — the modal disables the confirm path with an
-   * inline reason rather than failing the call. The execute path
-   * surfaces a hard error if a live session is detected.
+   * Cheap preview — fields the modal needs to render the disclosure on
+   * first paint. Returns in <50 ms even when sibling state is multi-MB.
+   * Pair with `projectRemovePreviewExtras` for the slow-probe data.
+   */
+  projectRemovePreviewBasic: (target: string) =>
+    invoke<RemoveProjectPreviewBasic>("project_remove_preview_basic", { target }),
+  /**
+   * Slow preview — live-session probe + sibling-state counts. Issued
+   * in parallel with the basic call so the modal renders without
+   * waiting on it.
+   */
+  projectRemovePreviewExtras: (target: string) =>
+    invoke<RemoveProjectPreviewExtras>("project_remove_preview_extras", {
+      target,
+    }),
+  /**
+   * Combined preview — used by the CLI / non-interactive callers that
+   * want every field in one round trip. The GUI prefers the
+   * basic+extras split for responsiveness.
    */
   projectRemovePreview: (target: string) =>
     invoke<RemoveProjectPreview>("project_remove_preview", { target }),

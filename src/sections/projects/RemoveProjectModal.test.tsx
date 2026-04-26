@@ -2,28 +2,41 @@ import { describe, expect, it, vi, beforeEach } from "vitest";
 import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 
-const previewSpy = vi.fn();
+const basicSpy = vi.fn();
+const extrasSpy = vi.fn();
 const executeSpy = vi.fn();
 
 vi.mock("../../api", () => ({
   api: {
-    projectRemovePreview: (...args: unknown[]) => previewSpy(...args),
+    projectRemovePreviewBasic: (...args: unknown[]) => basicSpy(...args),
+    projectRemovePreviewExtras: (...args: unknown[]) => extrasSpy(...args),
     projectRemoveExecute: (...args: unknown[]) => executeSpy(...args),
   },
 }));
 
 import { RemoveProjectModal } from "./RemoveProjectModal";
-import type { RemoveProjectPreview } from "../../types";
+import type {
+  RemoveProjectPreviewBasic,
+  RemoveProjectPreviewExtras,
+} from "../../types";
 
-function okPreview(
-  overrides: Partial<RemoveProjectPreview> = {},
-): RemoveProjectPreview {
+function okBasic(
+  overrides: Partial<RemoveProjectPreviewBasic> = {},
+): RemoveProjectPreviewBasic {
   return {
     slug: "-Users-joker-myproject",
     original_path: "/Users/joker/myproject",
     bytes: 4_200_000,
     session_count: 12,
     last_modified_ms: Date.now() - 3 * 24 * 3600 * 1000,
+    ...overrides,
+  };
+}
+
+function okExtras(
+  overrides: Partial<RemoveProjectPreviewExtras> = {},
+): RemoveProjectPreviewExtras {
+  return {
     has_live_session: false,
     claude_json_entry_present: true,
     history_lines_count: 7,
@@ -32,13 +45,15 @@ function okPreview(
 }
 
 beforeEach(() => {
-  previewSpy.mockReset();
+  basicSpy.mockReset();
+  extrasSpy.mockReset();
   executeSpy.mockReset();
 });
 
 describe("RemoveProjectModal", () => {
   it("renders the three blocks with cwd verbatim and slug", async () => {
-    previewSpy.mockResolvedValue(okPreview());
+    basicSpy.mockResolvedValue(okBasic());
+    extrasSpy.mockResolvedValue(okExtras());
     render(
       <RemoveProjectModal
         target="/Users/joker/myproject"
@@ -62,7 +77,8 @@ describe("RemoveProjectModal", () => {
   });
 
   it("disables Remove until the slug is typed exactly", async () => {
-    previewSpy.mockResolvedValue(okPreview());
+    basicSpy.mockResolvedValue(okBasic());
+    extrasSpy.mockResolvedValue(okExtras());
     const user = userEvent.setup();
     render(
       <RemoveProjectModal
@@ -89,7 +105,8 @@ describe("RemoveProjectModal", () => {
   });
 
   it("blocks confirm with inline reason when a live session is detected", async () => {
-    previewSpy.mockResolvedValue(okPreview({ has_live_session: true }));
+    basicSpy.mockResolvedValue(okBasic());
+    extrasSpy.mockResolvedValue(okExtras({ has_live_session: true }));
     const user = userEvent.setup();
     render(
       <RemoveProjectModal
@@ -112,7 +129,8 @@ describe("RemoveProjectModal", () => {
   });
 
   it("calls executeSpy on confirmed Remove and bubbles the result", async () => {
-    previewSpy.mockResolvedValue(okPreview());
+    basicSpy.mockResolvedValue(okBasic());
+    extrasSpy.mockResolvedValue(okExtras());
     executeSpy.mockResolvedValue({
       slug: "-Users-joker-myproject",
       original_path: "/Users/joker/myproject",
@@ -144,7 +162,8 @@ describe("RemoveProjectModal", () => {
   });
 
   it("calls onError when execute rejects", async () => {
-    previewSpy.mockResolvedValue(okPreview());
+    basicSpy.mockResolvedValue(okBasic());
+    extrasSpy.mockResolvedValue(okExtras());
     executeSpy.mockRejectedValue("live session");
     const onError = vi.fn();
     const user = userEvent.setup();
@@ -165,7 +184,8 @@ describe("RemoveProjectModal", () => {
   });
 
   it("Cancel is the primary affordance", async () => {
-    previewSpy.mockResolvedValue(okPreview());
+    basicSpy.mockResolvedValue(okBasic());
+    extrasSpy.mockResolvedValue(okExtras());
     render(
       <RemoveProjectModal
         target="/Users/joker/myproject"
