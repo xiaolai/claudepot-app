@@ -155,7 +155,7 @@ describe("ProjectDetail", () => {
     ).toBeInTheDocument();
   });
 
-  it("Open in Finder button calls revealInFinder with the fetched project's path", async () => {
+  it("Finder button calls revealInFinder with the fetched project's path", async () => {
     // The button uses info.original_path from the fetched ProjectDetail
     // (which may differ from the `path` prop under rename-in-flight).
     // mkDetail's fixture has original_path="/p".
@@ -171,7 +171,7 @@ describe("ProjectDetail", () => {
         onMoved={() => {}}
       />,
     );
-    const btn = await screen.findByRole("button", { name: /open in finder/i });
+    const btn = await screen.findByRole("button", { name: /^finder$/i });
     await user.click(btn);
     expect(revealSpy).toHaveBeenCalledWith("/p");
   });
@@ -293,7 +293,7 @@ describe("ProjectDetail", () => {
         onMoved={() => {}}
       />,
     );
-    await screen.findByRole("button", { name: /open in finder/i });
+    await screen.findByRole("button", { name: /^finder$/i });
     expect(
       screen.queryByRole("button", { name: /back to project list/i }),
     ).toBeNull();
@@ -335,7 +335,7 @@ describe("ProjectDetail", () => {
         onError={onError}
       />,
     );
-    await user.click(await screen.findByRole("button", { name: /open in finder/i }));
+    await user.click(await screen.findByRole("button", { name: /^finder$/i }));
     await waitFor(() => expect(onError).toHaveBeenCalled());
     expect(onError.mock.calls[0][0]).toMatch(/permission denied/);
   });

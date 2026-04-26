@@ -3,6 +3,7 @@ import { Icon } from "../../components/Icon";
 import { api } from "../../api";
 import { CopyButton } from "../../components/CopyButton";
 import { ContextMenu, type ContextMenuItem } from "../../components/ContextMenu";
+import { fileManagerName } from "../../lib/platformLabels";
 import { useAppState } from "../../providers/AppStateProvider";
 import type { ProjectDetail as ProjectDetailData, ProjectInfo } from "../../types";
 import { classifyProject } from "./projectStatus";
@@ -154,7 +155,7 @@ export function ProjectDetail({
   }
   if (!detail) return <main className="content" />;
 
-  const { info, sessions, memory_files } = detail;
+  const { info, sessions } = detail;
   const status = classifyProject(info);
   const noContent = info.session_count === 0 && info.memory_file_count === 0;
 
@@ -197,7 +198,7 @@ export function ProjectDetail({
           <button
             type="button"
             className="btn"
-            title="Reveal this project's directory in the native file manager"
+            title={`Reveal this project's directory in ${fileManagerName(appStatus?.platform)}`}
             onClick={() => {
               api.revealInFinder(info.original_path).catch((e) => {
                 const msg = `Couldn't reveal: ${e}`;
@@ -206,7 +207,7 @@ export function ProjectDetail({
               });
             }}
           >
-            <Icon name="folder-open" />Open in Finder
+            <Icon name="folder-open" />{fileManagerName(appStatus?.platform)}
           </button>
           <button type="button" className="btn" title="Rename this project"
             onClick={() => onRename(info.original_path)}>
@@ -219,7 +220,7 @@ export function ProjectDetail({
               title="View this project's Claude Code config — merged settings, MCP, agents, memory"
               onClick={() => onOpenInConfig(info.original_path)}
             >
-              <Icon name="file-code" />Open in Config
+              <Icon name="file-code" />Config
             </button>
           )}
         </div>
@@ -304,17 +305,6 @@ export function ProjectDetail({
             </button>
           )}
         </div>
-      )}
-
-      {memory_files.length > 0 && (
-        <section className="detail-section">
-          <h3>Memory</h3>
-          <ul className="detail-list mono small">
-            {memory_files.map((m) => (
-              <li key={m}>{m}</li>
-            ))}
-          </ul>
-        </section>
       )}
 
       {sessions.length > 0 && (
