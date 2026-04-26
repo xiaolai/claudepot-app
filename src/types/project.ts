@@ -85,6 +85,64 @@ export interface CleanResult {
   protected_paths_skipped: number;
 }
 
+// ---------------------------------------------------------------------------
+// Project remove + project trash — single-target reversible delete
+// ---------------------------------------------------------------------------
+
+/**
+ * Read-only preview the RemoveProjectModal renders. Mirrors
+ * `RemoveProjectPreviewDto` in src-tauri. `has_live_session` is
+ * informational — the modal disables the confirm path with an inline
+ * reason when true, per the design rule on disabled buttons stating
+ * a reason inline.
+ */
+export interface RemoveProjectPreview {
+  slug: string;
+  /** Best-effort recovered cwd. Null when the dir is empty AND no
+   *  `.claude.json` key matches the unsanitized slug. */
+  original_path: string | null;
+  bytes: number;
+  session_count: number;
+  last_modified_ms: number | null;
+  has_live_session: boolean;
+  claude_json_entry_present: boolean;
+  history_lines_count: number;
+}
+
+/** Outcome of a successful `projectRemoveExecute`. */
+export interface RemoveProjectResult {
+  slug: string;
+  original_path: string | null;
+  bytes: number;
+  session_count: number;
+  trash_id: string;
+  claude_json_entry_removed: boolean;
+  history_lines_removed: number;
+}
+
+/** One row in the project Trash drawer. */
+export interface ProjectTrashEntry {
+  id: string;
+  slug: string;
+  original_path: string | null;
+  bytes: number;
+  session_count: number;
+  ts_ms: number;
+  has_claude_json_entry: boolean;
+  history_lines_count: number;
+}
+
+export interface ProjectTrashListing {
+  entries: ProjectTrashEntry[];
+  total_bytes: number;
+}
+
+export interface ProjectRestoreReport {
+  restored_dir: string;
+  claude_json_restored: boolean;
+  history_lines_restored: number;
+}
+
 // ProtectedPath + Preferences moved to src/types/settings.ts so the
 // project shard stays domain-coherent. The index.ts re-export keeps
 // `from "../types"` import sites unchanged.
