@@ -1238,7 +1238,7 @@ pub fn clean_orphans_with_progress(
 ///
 /// Preferred over calling `remove_claude_json_entry` in a loop — for
 /// N orphans we'd otherwise read+rewrite the whole config N times.
-fn remove_claude_json_entries_batch(
+pub(crate) fn remove_claude_json_entries_batch(
     config_path: &Path,
     snapshots_dir: &Path,
     paths: &[String],
@@ -1290,7 +1290,7 @@ fn remove_claude_json_entries_batch(
 ///
 /// Uses a `HashSet` lookup per line so per-line work stays O(1) in the
 /// number of target paths.
-fn remove_history_lines_batch(
+pub(crate) fn remove_history_lines_batch(
     history_path: &Path,
     snapshots_dir: &Path,
     paths: &[String],

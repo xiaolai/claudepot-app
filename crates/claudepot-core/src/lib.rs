@@ -29,6 +29,7 @@ pub mod project_journal;
 pub mod project_lock;
 pub mod project_memory;
 pub mod project_progress;
+pub mod project_remove;
 pub mod project_repair;
 pub mod project_rewrite;
 pub mod project_sanitize;
