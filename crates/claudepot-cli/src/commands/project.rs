@@ -1,8 +1,12 @@
 use crate::AppContext;
-use anyhow::Result;
+use anyhow::{Context as _, Result};
 use claudepot_core::paths;
 use claudepot_core::project::{self, format_size};
 use claudepot_core::project_journal;
+use claudepot_core::project_remove::{
+    remove_project as core_remove_project, remove_project_preview, RemoveArgs,
+};
+use claudepot_core::project_trash::{self, ProjectTrashFilter};
 use std::time::SystemTime;
 
 /// Default journal nag threshold per spec §8 Q7.
@@ -905,5 +909,282 @@ fn handle_gc(
         );
     }
 
+    Ok(())
+}
+
+// ---------------------------------------------------------------------------
+// project remove — single-target trash with manifest snapshot
+// ---------------------------------------------------------------------------
+
+/// Build the args bundle from the user's input plus the standard
+/// claudepot path layout. Pulled out so dry-run and execute share
+/// exactly the same resolution path.
+fn build_remove_args<'a>(
+    target: &'a str,
+    config_dir: &'a std::path::Path,
+    claude_json: &'a std::path::Path,
+    history: &'a std::path::Path,
+    snapshots: &'a std::path::Path,
+    locks: &'a std::path::Path,
+    data_dir: &'a std::path::Path,
+) -> RemoveArgs<'a> {
+    RemoveArgs {
+        config_dir,
+        claude_json_path: Some(claude_json),
+        history_path: Some(history),
+        snapshots_dir: snapshots,
+        locks_dir: locks,
+        data_dir,
+        target,
+    }
+}
+
+/// Print the three-block disclosure (Removing / Not touching /
+/// Recoverable until). Same shape the GUI modal renders, so the CLI
+/// and GUI agree on what the user is being asked to confirm.
+fn print_remove_disclosure(
+    preview: &claudepot_core::project_remove::RemovePreview,
+    config_dir: &std::path::Path,
+) {
+    println!();
+    println!("Removing:");
+    let cc_dir = config_dir.join("projects").join(&preview.slug);
+    println!("  {}", cc_dir.display());
+    let last = preview
+        .last_modified
+        .map(format_relative_time)
+        .unwrap_or_else(|| "unknown".to_string());
+    let mut details = Vec::new();
+    if preview.session_count > 0 {
+        details.push(format!(
+            "{} session{}",
+            preview.session_count,
+            if preview.session_count == 1 { "" } else { "s" }
+        ));
+    }
+    if preview.bytes > 0 {
+        details.push(format_size(preview.bytes));
+    }
+    details.push(format!("last touched {}", last));
+    if preview.claude_json_entry_present {
+        details.push("with .claude.json entry".to_string());
+    }
+    if preview.history_lines_count > 0 {
+        details.push(format!(
+            "{} history line{}",
+            preview.history_lines_count,
+            if preview.history_lines_count == 1 { "" } else { "s" }
+        ));
+    }
+    println!("  {}", details.join(" \u{00b7} "));
+
+    println!();
+    println!("Not touching:");
+    if let Some(orig) = preview.original_path.as_deref() {
+        println!("  {}  (your actual project files)", orig);
+    } else {
+        println!("  (the underlying cwd, whichever it was)");
+    }
+
+    println!();
+    let cutoff = chrono::Utc::now() + chrono::Duration::days(30);
+    println!(
+        "Recoverable until: {} (30 days), via `claudepot project trash restore <id>`",
+        cutoff.format("%Y-%m-%d")
+    );
+}
+
+pub fn remove(ctx: &AppContext, target: &str, dry_run: bool) -> Result<()> {
+    if !dry_run {
+        gate_on_pending_journals(false)?;
+    }
+    let config_dir = paths::claude_config_dir();
+    let claude_json = dirs::home_dir()
+        .map(|h| h.join(".claude.json"))
+        .ok_or_else(|| anyhow::anyhow!("no home directory"))?;
+    let history = config_dir.join("history.jsonl");
+    let snapshots = snapshots_dir();
+    let locks = locks_dir();
+    let data_dir = paths::claudepot_data_dir();
+
+    let args = build_remove_args(
+        target,
+        &config_dir,
+        &claude_json,
+        &history,
+        &snapshots,
+        &locks,
+        &data_dir,
+    );
+    let preview = remove_project_preview(&args)?;
+
+    if preview.has_live_session {
+        eprintln!(
+            "\u{26a0}  Live CC session detected for {}. Close it before removing.",
+            preview.original_path.as_deref().unwrap_or(&preview.slug)
+        );
+        if ctx.json {
+            println!(
+                "{}",
+                serde_json::json!({
+                    "error": "live_session",
+                    "slug": preview.slug,
+                    "original_path": preview.original_path
+                })
+            );
+        }
+        anyhow::bail!("refusing to remove project with a live session");
+    }
+
+    if ctx.json && (dry_run || !ctx.yes) {
+        println!("{}", serde_json::to_string_pretty(&preview)?);
+        return Ok(());
+    }
+
+    if !ctx.yes || dry_run {
+        print_remove_disclosure(&preview, &config_dir);
+        if !dry_run {
+            println!();
+            println!(
+                "Re-run with -y to confirm. (The project moves to recoverable trash.)"
+            );
+        }
+        return Ok(());
+    }
+
+    let result = core_remove_project(&args)?;
+
+    if ctx.json {
+        println!("{}", serde_json::to_string_pretty(&result)?);
+        return Ok(());
+    }
+
+    println!(
+        "\u{2713} Trashed {} ({}). Restore with `claudepot project trash restore {}`.",
+        result.slug,
+        format_size(result.bytes),
+        result.trash_id
+    );
+    if result.claude_json_entry_removed {
+        println!("  · pruned ~/.claude.json entry");
+    }
+    if result.history_lines_removed > 0 {
+        println!(
+            "  · pruned {} history line{}",
+            result.history_lines_removed,
+            if result.history_lines_removed == 1 { "" } else { "s" }
+        );
+    }
+    Ok(())
+}
+
+// ---------------------------------------------------------------------------
+// project trash — list / restore / empty
+// ---------------------------------------------------------------------------
+
+pub fn trash_list(ctx: &AppContext) -> Result<()> {
+    let data_dir = paths::claudepot_data_dir();
+    let listing = project_trash::list(&data_dir, ProjectTrashFilter::default())
+        .context("read project trash")?;
+
+    if ctx.json {
+        println!("{}", serde_json::to_string_pretty(&listing)?);
+        return Ok(());
+    }
+
+    if listing.entries.is_empty() {
+        println!("No trashed projects.");
+        return Ok(());
+    }
+
+    println!(
+        "{} trashed project{} ({}):",
+        listing.entries.len(),
+        if listing.entries.len() == 1 { "" } else { "s" },
+        format_size(listing.total_bytes)
+    );
+    println!();
+    for e in &listing.entries {
+        let when = chrono::DateTime::<chrono::Utc>::from_timestamp_millis(e.ts_ms)
+            .map(|dt| dt.format("%Y-%m-%d %H:%M").to_string())
+            .unwrap_or_else(|| "unknown".to_string());
+        let path_label = e.original_path.as_deref().unwrap_or("(unknown cwd)");
+        println!(
+            "  {}  {}  {}  {} session{}  {}",
+            e.id,
+            when,
+            format_size(e.bytes),
+            e.session_count,
+            if e.session_count == 1 { "" } else { "s" },
+            path_label
+        );
+    }
+    Ok(())
+}
+
+pub fn trash_restore(ctx: &AppContext, entry_id: &str) -> Result<()> {
+    let data_dir = paths::claudepot_data_dir();
+    let config_dir = paths::claude_config_dir();
+    let claude_json = dirs::home_dir().map(|h| h.join(".claude.json"));
+    let history = config_dir.join("history.jsonl");
+
+    let report = project_trash::restore(
+        &data_dir,
+        entry_id,
+        &config_dir,
+        claude_json.as_deref(),
+        Some(&history),
+    )
+    .context("restore project from trash")?;
+
+    if ctx.json {
+        println!("{}", serde_json::to_string_pretty(&report)?);
+        return Ok(());
+    }
+
+    println!("\u{2713} Restored {}", report.restored_dir.display());
+    if report.claude_json_restored {
+        println!("  · re-inserted ~/.claude.json entry");
+    }
+    if report.history_lines_restored > 0 {
+        println!(
+            "  · restored {} history line{}",
+            report.history_lines_restored,
+            if report.history_lines_restored == 1 { "" } else { "s" }
+        );
+    }
+    Ok(())
+}
+
+pub fn trash_empty(ctx: &AppContext, older_than_days: Option<u64>) -> Result<()> {
+    let data_dir = paths::claudepot_data_dir();
+    let filter = ProjectTrashFilter {
+        older_than: older_than_days
+            .map(|d| std::time::Duration::from_secs(d.saturating_mul(86_400))),
+    };
+    // Preview first so the user knows what they're about to lose.
+    let listing = project_trash::list(&data_dir, filter.clone())?;
+    if listing.entries.is_empty() {
+        println!("No trash to empty.");
+        return Ok(());
+    }
+
+    if !ctx.yes {
+        println!(
+            "{} trashed project{} ({}) match the filter.",
+            listing.entries.len(),
+            if listing.entries.len() == 1 { "" } else { "s" },
+            format_size(listing.total_bytes)
+        );
+        println!("Re-run with -y to permanently delete.");
+        return Ok(());
+    }
+
+    let freed = project_trash::empty(&data_dir, filter)?;
+    if ctx.json {
+        println!("{}", serde_json::json!({"bytes_freed": freed}));
+    } else {
+        println!("\u{2713} Emptied trash, freed {}.", format_size(freed));
+    }
     Ok(())
 }

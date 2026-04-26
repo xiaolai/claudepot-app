@@ -184,6 +184,128 @@ pub struct MoveArgsDto {
     pub cancel_token: Option<u64>,
 }
 
+// ---------------------------------------------------------------------------
+// project remove — preview + result DTOs
+// ---------------------------------------------------------------------------
+
+/// Read-only preview the GUI's RemoveProjectModal renders honestly.
+/// Field-for-field copy of `claudepot_core::project_remove::RemovePreview`
+/// with `last_modified_ms` instead of `SystemTime` for serde.
+#[derive(Serialize)]
+pub struct RemoveProjectPreviewDto {
+    pub slug: String,
+    pub original_path: Option<String>,
+    pub bytes: u64,
+    pub session_count: usize,
+    pub last_modified_ms: Option<i64>,
+    pub has_live_session: bool,
+    pub claude_json_entry_present: bool,
+    pub history_lines_count: usize,
+}
+
+impl From<&claudepot_core::project_remove::RemovePreview> for RemoveProjectPreviewDto {
+    fn from(p: &claudepot_core::project_remove::RemovePreview) -> Self {
+        Self {
+            slug: p.slug.clone(),
+            original_path: p.original_path.clone(),
+            bytes: p.bytes,
+            session_count: p.session_count,
+            last_modified_ms: system_time_to_ms(p.last_modified),
+            has_live_session: p.has_live_session,
+            claude_json_entry_present: p.claude_json_entry_present,
+            history_lines_count: p.history_lines_count,
+        }
+    }
+}
+
+/// Outcome of a successful `project_remove_execute`. Carries the trash
+/// id so the GUI can offer a one-click Undo right after the operation
+/// (in addition to the persistent Trash drawer).
+#[derive(Serialize)]
+pub struct RemoveProjectResultDto {
+    pub slug: String,
+    pub original_path: Option<String>,
+    pub bytes: u64,
+    pub session_count: usize,
+    pub trash_id: String,
+    pub claude_json_entry_removed: bool,
+    pub history_lines_removed: usize,
+}
+
+impl From<&claudepot_core::project_remove::RemoveResult> for RemoveProjectResultDto {
+    fn from(r: &claudepot_core::project_remove::RemoveResult) -> Self {
+        Self {
+            slug: r.slug.clone(),
+            original_path: r.original_path.clone(),
+            bytes: r.bytes,
+            session_count: r.session_count,
+            trash_id: r.trash_id.clone(),
+            claude_json_entry_removed: r.claude_json_entry_removed,
+            history_lines_removed: r.history_lines_removed,
+        }
+    }
+}
+
+/// One row in the project Trash drawer / `project trash list` output.
+#[derive(Serialize)]
+pub struct ProjectTrashEntryDto {
+    pub id: String,
+    pub slug: String,
+    pub original_path: Option<String>,
+    pub bytes: u64,
+    pub session_count: usize,
+    pub ts_ms: i64,
+    pub has_claude_json_entry: bool,
+    pub history_lines_count: usize,
+}
+
+impl From<&claudepot_core::project_trash::ProjectTrashEntry> for ProjectTrashEntryDto {
+    fn from(e: &claudepot_core::project_trash::ProjectTrashEntry) -> Self {
+        Self {
+            id: e.id.clone(),
+            slug: e.slug.clone(),
+            original_path: e.original_path.clone(),
+            bytes: e.bytes,
+            session_count: e.session_count,
+            ts_ms: e.ts_ms,
+            has_claude_json_entry: e.claude_json_entry.is_some(),
+            history_lines_count: e.history_lines.len(),
+        }
+    }
+}
+
+#[derive(Serialize)]
+pub struct ProjectTrashListingDto {
+    pub entries: Vec<ProjectTrashEntryDto>,
+    pub total_bytes: u64,
+}
+
+impl From<&claudepot_core::project_trash::ProjectTrashListing> for ProjectTrashListingDto {
+    fn from(l: &claudepot_core::project_trash::ProjectTrashListing) -> Self {
+        Self {
+            entries: l.entries.iter().map(ProjectTrashEntryDto::from).collect(),
+            total_bytes: l.total_bytes,
+        }
+    }
+}
+
+#[derive(Serialize)]
+pub struct ProjectRestoreReportDto {
+    pub restored_dir: String,
+    pub claude_json_restored: bool,
+    pub history_lines_restored: usize,
+}
+
+impl From<&claudepot_core::project_trash::ProjectRestoreReport> for ProjectRestoreReportDto {
+    fn from(r: &claudepot_core::project_trash::ProjectRestoreReport) -> Self {
+        Self {
+            restored_dir: r.restored_dir.to_string_lossy().to_string(),
+            claude_json_restored: r.claude_json_restored,
+            history_lines_restored: r.history_lines_restored,
+        }
+    }
+}
+
 #[cfg(test)]
 mod clean_preview_dto_tests {
     use super::*;

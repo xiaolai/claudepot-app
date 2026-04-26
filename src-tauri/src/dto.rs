@@ -56,7 +56,9 @@ pub use crate::{
     dto_keys::{ApiKeySummaryDto, OauthTokenSummaryDto},
     dto_project::{
         CleanPreviewDto, DryRunPlanDto, MoveArgsDto, PendingJournalsSummaryDto,
-        ProjectDetailDto, ProjectInfoDto, SessionInfoDto,
+        ProjectDetailDto, ProjectInfoDto, ProjectRestoreReportDto,
+        ProjectTrashEntryDto, ProjectTrashListingDto, RemoveProjectPreviewDto,
+        RemoveProjectResultDto, SessionInfoDto,
     },
     dto_project_repair::{JournalEntryDto, JournalFlagsDto},
     dto_session::{
