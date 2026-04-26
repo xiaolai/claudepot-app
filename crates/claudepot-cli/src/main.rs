@@ -343,6 +343,24 @@ enum ProjectAction {
         #[arg(long)]
         ignore_pending_journals: bool,
     },
+    /// Move a single project to recoverable trash and strip its
+    /// `~/.claude.json` + `history.jsonl` entries. Manual counterpart
+    /// to `clean` for the "I accidentally ran `claude` here" case
+    /// where the source cwd still exists. Restore via
+    /// `claudepot project trash restore <id>`.
+    Remove {
+        /// Project path or sanitized slug (e.g. `/Users/joker` or
+        /// `-Users-joker`).
+        target: String,
+        /// Show the disclosure without trashing anything
+        #[arg(long)]
+        dry_run: bool,
+    },
+    /// Inspect, restore, or permanently delete trashed projects
+    Trash {
+        #[command(subcommand)]
+        action: ProjectTrashAction,
+    },
     /// Repair or resolve pending / failed rename journals
     Repair {
         /// Finish remaining phases for a journal (id optional, use --all to target every one)
@@ -370,6 +388,24 @@ enum ProjectAction {
         /// Apply to all matching journals
         #[arg(long)]
         all: bool,
+    },
+}
+
+#[derive(Subcommand)]
+enum ProjectTrashAction {
+    /// List trashed projects (newest first)
+    List,
+    /// Restore a trashed project by its trash id
+    Restore {
+        /// Trash entry id (from `project trash list`)
+        id: String,
+    },
+    /// Permanently delete trashed projects (irreversible)
+    Empty {
+        /// Only delete entries older than this many days (omit to
+        /// empty everything that matches)
+        #[arg(long)]
+        older_than: Option<u64>,
     },
 }
 
@@ -615,6 +651,18 @@ async fn main() -> Result<()> {
                 dry_run,
                 ignore_pending_journals,
             } => commands::project::clean(&ctx, dry_run, ignore_pending_journals)?,
+            ProjectAction::Remove { target, dry_run } => {
+                commands::project::remove(&ctx, &target, dry_run)?
+            }
+            ProjectAction::Trash { action } => match action {
+                ProjectTrashAction::List => commands::project::trash_list(&ctx)?,
+                ProjectTrashAction::Restore { id } => {
+                    commands::project::trash_restore(&ctx, &id)?
+                }
+                ProjectTrashAction::Empty { older_than } => {
+                    commands::project::trash_empty(&ctx, older_than)?
+                }
+            },
             ProjectAction::Repair {
                 resume,
                 rollback,
