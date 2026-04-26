@@ -25,10 +25,27 @@ export type Toast = {
   dedupeKey?: string;
 };
 
+/**
+ * Last toast that fully dismissed (post-exit-animation removal). Used
+ * by the status bar's echo segment so the user can re-read what just
+ * scrolled by without the message blocking the UI. The status bar
+ * gates display on `at` — recent dismissals show, older ones fade out
+ * naturally. `null` means no echo (either none has happened yet, or
+ * the consumer chose to clear it).
+ */
+export type DismissedToast = {
+  text: string;
+  kind: "info" | "error";
+  /** epoch-ms when the toast finished its exit animation. */
+  at: number;
+};
+
 let toastCounter = 0;
 
 export function useToasts() {
   const [toasts, setToasts] = useState<Toast[]>([]);
+  const [lastDismissed, setLastDismissed] =
+    useState<DismissedToast | null>(null);
   const timersRef = useRef<Map<number, ReturnType<typeof setTimeout>>>(new Map());
 
   // Clear all pending timers on unmount
@@ -41,7 +58,21 @@ export function useToasts() {
   }, []);
 
   const removeToast = useCallback((id: number) => {
-    setToasts((t) => t.filter((x) => x.id !== id));
+    // Capture the toast's text + kind before it leaves so the status
+    // bar can echo it. We snapshot from the array INSIDE the setter so
+    // we read the live value without taking a stale closure on
+    // `toasts`.
+    setToasts((t) => {
+      const leaving = t.find((x) => x.id === id);
+      if (leaving) {
+        setLastDismissed({
+          text: leaving.text,
+          kind: leaving.kind,
+          at: Date.now(),
+        });
+      }
+      return t.filter((x) => x.id !== id);
+    });
     timersRef.current.delete(id);
   }, []);
 
@@ -156,5 +187,15 @@ export function useToasts() {
     [dismissToast],
   );
 
-  return { toasts, pushToast, dismissToast };
+  /** Clear the echo. Used when the status bar's fade window elapses
+   *  so the segment unmounts cleanly rather than re-rendering empty. */
+  const clearLastDismissed = useCallback(() => setLastDismissed(null), []);
+
+  return {
+    toasts,
+    pushToast,
+    dismissToast,
+    lastDismissed,
+    clearLastDismissed,
+  };
 }

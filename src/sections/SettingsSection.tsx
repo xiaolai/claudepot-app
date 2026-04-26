@@ -13,9 +13,9 @@ import { Tag } from "../components/primitives/Tag";
 import { useDevMode } from "../hooks/useDevMode";
 import { useSettingsActions } from "../hooks/useSettingsActions";
 import { useTheme, type ThemeMode } from "../hooks/useTheme";
-import { useToasts } from "../hooks/useToasts";
+import { useAppState } from "../providers/AppStateProvider";
+import { toastError } from "../lib/toastError";
 import { NF } from "../icons";
-import { ToastContainer } from "../components/ToastContainer";
 import { ScreenHeader } from "../shell/ScreenHeader";
 import { ProtectedPathsPane } from "./settings/ProtectedPathsPane";
 import { CleanupPane } from "./sessions/CleanupPane";
@@ -66,7 +66,7 @@ const SECTION_OPTIONS = [
 ] as const;
 
 export function SettingsSection() {
-  const { toasts, pushToast, dismissToast } = useToasts();
+  const { pushToast } = useAppState();
   const [tab, setTab] = useState<Tab>("general");
   const active = TAB_DEFS.find((t) => t.id === tab) ?? TAB_DEFS[0];
 
@@ -111,8 +111,6 @@ export function SettingsSection() {
           {tab === "about" && <AboutPane />}
         </main>
       </div>
-
-      <ToastContainer toasts={toasts} onDismiss={dismissToast} />
     </>
   );
 }
@@ -971,7 +969,11 @@ function GithubPane({
     try {
       setStatus(await api.settingsGithubTokenGet());
     } catch (e) {
-      pushToast("error", String(e));
+      // Route through toastError so the redactSecrets pipeline scrubs
+      // any `sk-ant-*` / `ghp_*` blob the backend might echo back. The
+      // toast lingers in the DOM (and now in the status-bar echo) so
+      // raw stringification is a leak surface.
+      toastError(pushToast, "GitHub token load failed", e);
     }
   }, [pushToast]);
 
@@ -990,7 +992,7 @@ function GithubPane({
       await refresh();
       pushToast("info", "GitHub token saved.");
     } catch (e) {
-      pushToast("error", String(e));
+      toastError(pushToast, "GitHub token save failed", e);
     } finally {
       setBusy(false);
     }
@@ -1004,7 +1006,7 @@ function GithubPane({
       await refresh();
       pushToast("info", "GitHub token cleared.");
     } catch (e) {
-      pushToast("error", String(e));
+      toastError(pushToast, "GitHub token clear failed", e);
     } finally {
       setBusy(false);
     }

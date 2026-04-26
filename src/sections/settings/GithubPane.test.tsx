@@ -35,10 +35,20 @@ vi.mock("../../api", () => ({
   },
 }));
 
+// SettingsSection now reads pushToast from AppStateProvider; mock the
+// provider so the test can mount the section without booting the
+// whole app shell. The spy is hoisted so individual tests can assert
+// success / error labels and confirm secret redaction wording.
+const pushToastSpy = vi.fn();
+vi.mock("../../providers/AppStateProvider", () => ({
+  useAppState: () => ({ pushToast: pushToastSpy }),
+}));
+
 beforeEach(() => {
   getSpy.mockReset();
   setSpy.mockReset();
   clearSpy.mockReset();
+  pushToastSpy.mockReset();
 });
 
 /**
@@ -88,6 +98,51 @@ describe("Settings → GitHub", () => {
     expect((input as HTMLInputElement).value).toBe("");
     // Raw token is not present anywhere in the rendered DOM.
     expect(document.body.textContent ?? "").not.toContain("ghp_abcdefghij1234");
+    // Success toast fires with the saved-not-stringified message —
+    // and the raw token never reaches pushToast under any path.
+    await waitFor(() =>
+      expect(pushToastSpy).toHaveBeenCalledWith("info", "GitHub token saved."),
+    );
+    for (const call of pushToastSpy.mock.calls) {
+      expect(call.join(" ")).not.toContain("ghp_abcdefghij1234");
+    }
+  });
+
+  it("redacts sk-ant-* tokens that leak into the save-error toast", async () => {
+    // Regression guard for the audit-fix follow-up: the catch path now
+    // routes through `toastError` so `redactSecrets` scrubs any
+    // `sk-ant-*` blob the backend might echo back. We assert two
+    // things at once — the scoped label (so the user knows which
+    // action failed) and the actual redaction of the token shape the
+    // architecture rule names. (GitHub PAT redaction is out of scope
+    // for the redactor as currently shipped — see redactSecrets.ts.)
+    getSpy.mockResolvedValueOnce({
+      present: false,
+      last4: null,
+      env_override: false,
+    });
+    const leakedAnthropicToken =
+      "sk-ant-oat01-ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789xyz";
+    setSpy.mockRejectedValueOnce(
+      new Error(`backend rejected ${leakedAnthropicToken}`),
+    );
+    await mountAndOpenGithubTab();
+    const input = await screen.findByLabelText("GitHub token");
+    await userEvent.type(input, "ghp_abcdefghij1234");
+    await userEvent.click(screen.getByRole("button", { name: /Save/ }));
+
+    await waitFor(() => {
+      const errorCall = pushToastSpy.mock.calls.find(
+        ([kind]) => kind === "error",
+      );
+      expect(errorCall).toBeDefined();
+      const [, message] = errorCall!;
+      expect(message).toMatch(/^GitHub token save failed:/);
+      // The raw `sk-ant-*` token must not appear in the toast text;
+      // the redactor leaves the prefix + masked suffix only.
+      expect(message).not.toContain(leakedAnthropicToken);
+      expect(message).toMatch(/sk-ant-\*\*\*/);
+    });
   });
 
   it("surfaces a warning when GITHUB_TOKEN env var is set", async () => {
@@ -120,6 +175,12 @@ describe("Settings → GitHub", () => {
     await screen.findByTestId("github-token-last4");
     await userEvent.click(screen.getByRole("button", { name: /Clear/ }));
     await waitFor(() => expect(clearSpy).toHaveBeenCalled());
+    await waitFor(() =>
+      expect(pushToastSpy).toHaveBeenCalledWith(
+        "info",
+        "GitHub token cleared.",
+      ),
+    );
     await waitFor(() =>
       expect(screen.getByText(/No token stored/)).toBeInTheDocument(),
     );

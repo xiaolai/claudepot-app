@@ -64,33 +64,41 @@
   margin-top: 20px;
 }
 
-/* ---------- toasts (macOS HUD style, top-center) ---------- */
+/* ---------- toasts (paper-mono, bottom-center, above status bar) ----------
+   Single transient-notification surface across the app, anchored to
+   `--toast-bottom` so it pairs with the status-bar echo strip
+   (AppStatusBar.tsx) instead of competing with it. Stack flows
+   downward so the newest toast sits closest to the status bar — the
+   user's eye-line for "what just happened" — and older toasts get
+   pushed up. Matches the paper-mono register the rest of the chrome
+   uses: raised surface, hairline border, soft shadow, mono body. */
 
 .toasts {
   position: fixed;
-  top: 64px;
+  bottom: var(--toast-bottom);
   left: 50%;
   transform: translateX(-50%);
   display: flex;
   flex-direction: column;
-  gap: 8px;
-  z-index: 100;
+  align-items: center;
+  gap: var(--sp-6);
+  z-index: var(--z-toast);
   pointer-events: none;
+  max-width: var(--toast-max-width);
 }
 
 .toast {
   display: flex;
   align-items: center;
-  gap: 8px;
-  padding: 8px 14px;
-  border-radius: 10px;
-  background: rgba(40, 40, 40, 0.85);
-  -webkit-backdrop-filter: blur(20px);
-  backdrop-filter: blur(20px);
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
-  font-size: 12px;
-  color: #fff;
-  max-width: 320px;
+  gap: var(--sp-10);
+  padding: var(--sp-10) var(--sp-16);
+  border: var(--bw-hair) solid var(--line-strong);
+  border-radius: var(--r-2);
+  background: var(--bg-raised);
+  box-shadow: var(--shadow-md);
+  font-size: var(--fs-sm);
+  color: var(--fg);
+  max-width: 100%;
   pointer-events: auto;
   animation: toast-in 0.15s ease;
 }
@@ -100,30 +108,36 @@
 }
 
 .toast-undo {
-  font-size: 12px;
+  font-size: var(--fs-sm);
   font-weight: 600;
-  padding: 2px 8px;
-  border: 0.5px solid rgba(255, 255, 255, 0.3);
-  border-radius: 4px;
-  background: rgba(255, 255, 255, 0.15);
-  color: #fff;
+  padding: var(--sp-2) var(--sp-8);
+  border: var(--bw-hair) solid var(--line-strong);
+  border-radius: var(--r-1);
+  background: var(--bg-sunken);
+  color: var(--fg);
   height: auto;
   box-shadow: none;
   flex-shrink: 0;
 }
 
 .toast-undo:hover {
-  background: rgba(255, 255, 255, 0.25);
+  background: var(--accent-soft);
+  border-color: var(--accent-border);
+}
+
+.toast-undo:focus-visible {
+  outline: none;
+  box-shadow: var(--focus-ring);
 }
 
 .toast-close {
-  font-size: 12px;
+  font-size: var(--fs-sm);
   line-height: 1;
   padding: 0;
   border: none;
   border-radius: 0;
   background: none;
-  color: rgba(255, 255, 255, 0.6);
+  color: var(--fg-faint);
   height: auto;
   box-shadow: none;
   width: auto;
@@ -131,22 +145,32 @@
 }
 
 .toast-close:hover {
-  color: #fff;
+  color: var(--fg);
   background: none;
 }
 
+.toast-close:focus-visible {
+  outline: none;
+  color: var(--fg);
+  box-shadow: var(--focus-ring);
+}
+
+/* Error tone — paper-mono uses the danger token for the left rule, not
+   a saturated background fill. Keeps the readable raised surface and
+   borrows the same rhythm banners use. */
 .toast.error {
-  background: rgba(255, 59, 48, 0.90);
+  border-left: var(--bw-strong) solid var(--danger);
+  padding-left: calc(var(--sp-16) - var(--bw-hair));
 }
 
 .toast.info {
-  /* default dark HUD */
+  /* default raised surface */
 }
 
 @keyframes toast-in {
   from {
     opacity: 0;
-    transform: translateY(-8px);
+    transform: translateY(8px);
   }
 }
 
@@ -157,7 +181,7 @@
 @keyframes toast-out {
   to {
     opacity: 0;
-    transform: translateY(-8px);
+    transform: translateY(8px);
   }
 }
 

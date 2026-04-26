@@ -12,8 +12,6 @@ export { Avatar, avatarColorFor } from "./Avatar";
 export { SidebarItem } from "./SidebarItem";
 export { Modal, ModalHeader, ModalBody, ModalFooter } from "./Modal";
 export { DevBadge } from "./DevBadge";
-export { Toast } from "./Toast";
-export type { ToastProps } from "./Toast";
 export { ExternalLink } from "./ExternalLink";
 export { FilterChip } from "./FilterChip";
 export { TargetButton } from "./TargetButton";

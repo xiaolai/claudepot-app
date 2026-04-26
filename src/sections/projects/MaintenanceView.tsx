@@ -1,8 +1,7 @@
 import { useCallback, useRef, useState } from "react";
 import { Icon } from "../../components/Icon";
 import type { CleanResult } from "../../types";
-import { useToasts } from "../../hooks/useToasts";
-import { ToastContainer } from "../../components/ToastContainer";
+import { useAppState } from "../../providers/AppStateProvider";
 import { AbandonedCleanupCard } from "./AbandonedCleanupCard";
 import { GcCard } from "./GcCard";
 import { RepairView } from "./RepairView";
@@ -22,7 +21,7 @@ export function MaintenanceView({
   // RepairView to re-fetch (its `entries` list shares state with
   // the journals dir that just shrank).
   const [repairRefreshKey, setRepairRefreshKey] = useState(0);
-  const { toasts, pushToast, dismissToast } = useToasts();
+  const { pushToast } = useAppState();
   const latestPushToast = useRef(pushToast);
   latestPushToast.current = pushToast;
 
@@ -101,8 +100,6 @@ export function MaintenanceView({
           onDone={(result) => { handleCleanDone(result); }}
         />
       )}
-
-      <ToastContainer toasts={toasts} onDismiss={dismissToast} />
     </main>
   );
 }
