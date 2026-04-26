@@ -341,6 +341,8 @@ pub fn run() {
             commands_project::project_clean_start,
             commands_project::project_clean_status,
             commands_project::project_remove_preview,
+            commands_project::project_remove_preview_basic,
+            commands_project::project_remove_preview_extras,
             commands_project::project_remove_execute,
             commands_project::project_trash_list,
             commands_project::project_trash_restore,

@@ -8,7 +8,8 @@
 use crate::dto::{
     CleanPreviewDto, DryRunPlanDto, JournalEntryDto, MoveArgsDto, ProjectDetailDto,
     ProjectInfoDto, ProjectRestoreReportDto, ProjectTrashListingDto,
-    RemoveProjectPreviewDto, RemoveProjectResultDto,
+    RemoveProjectPreviewBasicDto, RemoveProjectPreviewDto,
+    RemoveProjectPreviewExtrasDto, RemoveProjectResultDto,
 };
 use crate::ops::{
     emit_terminal, new_op_id, new_running_op, spawn_op_thread, CleanResultSummary, OpKind,
@@ -18,7 +19,8 @@ use claudepot_core::paths;
 use claudepot_core::project;
 use claudepot_core::project_dry_run_service::DryRunOutcome;
 use claudepot_core::project_remove::{
-    remove_project as core_remove_project, remove_project_preview, RemoveArgs,
+    remove_project as core_remove_project, remove_project_preview,
+    remove_project_preview_basic, remove_project_preview_extras, RemoveArgs,
 };
 use claudepot_core::project_repair;
 use claudepot_core::project_trash;
@@ -329,6 +331,61 @@ fn remove_paths() -> (
     let (_journals, locks, snaps) = claudepot_home_dirs();
     let data_dir = paths::claudepot_data_dir();
     (config_dir, claude_json, history, snaps, locks, data_dir)
+}
+
+/// Cheap preview — slug, paths, sessions, size, last_modified. No
+/// live-session probe, no large-file reads. The GUI calls this for
+/// the modal's first paint so the disclosure shows up instantly even
+/// when `~/.claude.json` or `history.jsonl` are multi-MB.
+#[tauri::command]
+pub async fn project_remove_preview_basic(
+    target: String,
+) -> Result<RemoveProjectPreviewBasicDto, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let (config_dir, claude_json, history, snaps, locks, data_dir) = remove_paths();
+        let args = RemoveArgs {
+            config_dir: &config_dir,
+            claude_json_path: Some(&claude_json),
+            history_path: Some(&history),
+            snapshots_dir: &snaps,
+            locks_dir: &locks,
+            data_dir: &data_dir,
+            target: &target,
+        };
+        let basic = remove_project_preview_basic(&args)
+            .map_err(|e| format!("preview basic failed: {e}"))?;
+        Ok(RemoveProjectPreviewBasicDto::from(&basic))
+    })
+    .await
+    .map_err(|e| format!("preview basic join: {e}"))?
+}
+
+/// Slow preview — runs the lsof-backed live-session probe and parses
+/// `~/.claude.json` + `history.jsonl` end-to-end. Returns the
+/// disabled-state metadata the modal uses to gate the Remove button
+/// and annotate the disclosure ("with .claude.json entry · N history
+/// lines"). Issued in parallel with `project_remove_preview_basic`.
+#[tauri::command]
+pub async fn project_remove_preview_extras(
+    target: String,
+) -> Result<RemoveProjectPreviewExtrasDto, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let (config_dir, claude_json, history, snaps, locks, data_dir) = remove_paths();
+        let args = RemoveArgs {
+            config_dir: &config_dir,
+            claude_json_path: Some(&claude_json),
+            history_path: Some(&history),
+            snapshots_dir: &snaps,
+            locks_dir: &locks,
+            data_dir: &data_dir,
+            target: &target,
+        };
+        let extras = remove_project_preview_extras(&args)
+            .map_err(|e| format!("preview extras failed: {e}"))?;
+        Ok(RemoveProjectPreviewExtrasDto::from(&extras))
+    })
+    .await
+    .map_err(|e| format!("preview extras join: {e}"))?
 }
 
 /// Read-only preview the GUI's RemoveProjectModal renders. Live-session

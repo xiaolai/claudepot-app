@@ -90,6 +90,30 @@ export interface CleanResult {
 // ---------------------------------------------------------------------------
 
 /**
+ * Cheap subset of `RemoveProjectPreview` — what the modal renders on
+ * first paint. Skips the live-session probe and the multi-MB sibling-
+ * state reads, so it lands in <50 ms even on prolific users.
+ */
+export interface RemoveProjectPreviewBasic {
+  slug: string;
+  original_path: string | null;
+  bytes: number;
+  session_count: number;
+  last_modified_ms: number | null;
+}
+
+/**
+ * Slow subset — live-session probe + sibling-state counts. Comes in
+ * via a follow-up call so the modal stays responsive while these
+ * resolve.
+ */
+export interface RemoveProjectPreviewExtras {
+  has_live_session: boolean;
+  claude_json_entry_present: boolean;
+  history_lines_count: number;
+}
+
+/**
  * Read-only preview the RemoveProjectModal renders. Mirrors
  * `RemoveProjectPreviewDto` in src-tauri. `has_live_session` is
  * informational — the modal disables the confirm path with an inline
