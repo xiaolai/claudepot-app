@@ -14,6 +14,10 @@ import type {
   PendingJournalsSummary,
   ProjectDetail,
   ProjectInfo,
+  ProjectRestoreReport,
+  ProjectTrashListing,
+  RemoveProjectPreview,
+  RemoveProjectResult,
   RunningOpInfo,
 } from "../types";
 
@@ -63,6 +67,39 @@ export const projectApi = {
    */
   projectCleanStatus: (opId: string) =>
     invoke<RunningOpInfo | null>("project_clean_status", { opId }),
+
+  // ---------- Project remove + trash ----------
+  /**
+   * Read-only preview the RemoveProjectModal renders. `has_live_session`
+   * is informational — the modal disables the confirm path with an
+   * inline reason rather than failing the call. The execute path
+   * surfaces a hard error if a live session is detected.
+   */
+  projectRemovePreview: (target: string) =>
+    invoke<RemoveProjectPreview>("project_remove_preview", { target }),
+  /**
+   * Trashes the project's CC artifact dir, snapshots and prunes its
+   * `.claude.json` entry + matching history.jsonl lines. Reversible
+   * via `projectTrashRestore` until the trash GC sweeps it (default
+   * 30 days). Synchronous from the frontend's perspective — typical
+   * removes complete in <1 s.
+   */
+  projectRemoveExecute: (target: string) =>
+    invoke<RemoveProjectResult>("project_remove_execute", { target }),
+  /** Newest-first list of trashed projects with sibling-state hints. */
+  projectTrashList: () => invoke<ProjectTrashListing>("project_trash_list"),
+  /**
+   * Restore a trashed project. Refuses to clobber if the user has
+   * since recreated a project at the same slug.
+   */
+  projectTrashRestore: (entryId: string) =>
+    invoke<ProjectRestoreReport>("project_trash_restore", { entryId }),
+  /**
+   * Permanently delete trashed projects. Irreversible. `olderThanDays`
+   * filters; null means everything matches.
+   */
+  projectTrashEmpty: (olderThanDays: number | null) =>
+    invoke<number>("project_trash_empty", { olderThanDays }),
 
   // ---------- Repair (read-only) ----------
   /** Every journal on disk with its classified status. Includes abandoned. */

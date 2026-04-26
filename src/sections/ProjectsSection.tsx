@@ -23,6 +23,7 @@ import { SessionDetail } from "./sessions/SessionDetail";
 import { ConfigSection } from "./ConfigSection";
 import { SectionTab } from "./sessions/components/SectionTab";
 import { RenameProjectModal } from "./projects/RenameProjectModal";
+import { RemoveProjectModal } from "./projects/RemoveProjectModal";
 import { MaintenanceView } from "./projects/MaintenanceView";
 import { OrphanBanner } from "./projects/OrphanBanner";
 import { AdoptOrphansModal } from "./projects/AdoptOrphansModal";
@@ -144,6 +145,7 @@ export function ProjectsSection({
     onPendingConsumed,
   ]);
   const [renameTarget, setRenameTarget] = useState<string | null>(null);
+  const [removeTarget, setRemoveTarget] = useState<string | null>(null);
   const [filter, setFilter] = useState<ProjectFilter>("all");
   const [nameFilter, setNameFilter] = useState("");
   const [toast, setToast] = useState<string | null>(null);
@@ -536,6 +538,29 @@ export function ProjectsSection({
         />
       )}
 
+      {removeTarget && (
+        <RemoveProjectModal
+          target={removeTarget}
+          onClose={() => setRemoveTarget(null)}
+          onCompleted={(result) => {
+            setRemoveTarget(null);
+            // Drop the selection if we just trashed the open project,
+            // so the detail pane doesn't render a stale ghost.
+            setSelectedPath((prev) =>
+              prev && result.original_path === prev ? null : prev,
+            );
+            setToast(
+              `Removed ${result.slug}. Restore via project trash if needed.`,
+            );
+            refresh();
+          }}
+          onError={(msg) => {
+            setRemoveTarget(null);
+            setToast(`Couldn't remove: ${msg}`);
+          }}
+        />
+      )}
+
       <Toast message={toast} onDismiss={() => setToast(null)} />
 
       {ctxMenu &&
@@ -571,6 +596,11 @@ export function ProjectsSection({
             {
               label: "Rename…",
               onClick: () => setRenameTarget(p.original_path),
+            },
+            {
+              label: "Remove project…",
+              onClick: () =>
+                setRemoveTarget(p.original_path || p.sanitized_name),
             },
             {
               label: "Clean orphans…",
