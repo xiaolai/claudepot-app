@@ -19,6 +19,7 @@ import { ScreenHeader } from "../shell/ScreenHeader";
 import { PreviewHeader } from "../components/primitives/PreviewHeader";
 import { Button } from "../components/primitives/Button";
 import { IconButton } from "../components/primitives/IconButton";
+import { BackAffordance } from "../components/primitives/BackAffordance";
 import { FilterChip } from "../components/primitives/FilterChip";
 import { Input } from "../components/primitives/Input";
 import { Glyph } from "../components/primitives/Glyph";
@@ -792,6 +793,7 @@ export function ConfigSection({
               title="Effective settings"
               subtitle="Merged view of every enabled source. Hover a value to see contributors."
               scopeLabel={effectiveScopeLabel(anchor)}
+              onClose={() => onSubRouteChange(null)}
             >
               <EffectiveRenderer cwd={tree?.cwd ?? null} />
             </EffectiveShell>
@@ -800,6 +802,7 @@ export function ConfigSection({
               title="Effective MCP"
               subtitle="MCP servers CC would see, per simulation mode."
               scopeLabel={effectiveScopeLabel(anchor)}
+              onClose={() => onSubRouteChange(null)}
             >
               <EffectiveMcpRenderer cwd={tree?.cwd ?? null} />
             </EffectiveShell>
@@ -808,6 +811,7 @@ export function ConfigSection({
               title="Hooks"
               subtitle="Registered hooks across every enabled settings layer. One row per matcher → command."
               scopeLabel={effectiveScopeLabel(anchor)}
+              onClose={() => onSubRouteChange(null)}
             >
               <HooksRenderer cwd={tree?.cwd ?? null} />
             </EffectiveShell>
@@ -822,6 +826,7 @@ export function ConfigSection({
               onPickOther={pickOther}
               onSetDefault={setDefault}
               onRefreshEditors={refreshEditors}
+              onClose={() => onSubRouteChange(null)}
             />
           ) : (
             <ConfigHomePane
@@ -1721,6 +1726,7 @@ function FilePreview({
   onPickOther,
   onSetDefault,
   onRefreshEditors,
+  onClose,
 }: {
   file: ConfigFileNodeDto;
   preview: ConfigPreviewDto | null;
@@ -1731,6 +1737,7 @@ function FilePreview({
   onPickOther: () => void;
   onSetDefault: (kind: ConfigKind | null, editorId: string) => void;
   onRefreshEditors: () => void;
+  onClose?: () => void;
 }) {
   const kind = file.kind as ConfigKind;
   const isMarkdown = MARKDOWN_KINDS.includes(kind);
@@ -1756,6 +1763,7 @@ function FilePreview({
         onPickOther={onPickOther}
         onSetDefault={onSetDefault}
         onRefreshEditors={onRefreshEditors}
+        onClose={onClose}
       />
       {file.include_depth > 0 && file.included_by && (
         <IncludedByBanner
@@ -1954,6 +1962,7 @@ function EffectiveShell({
   title,
   subtitle,
   scopeLabel,
+  onClose,
   children,
 }: {
   title: string;
@@ -1962,6 +1971,11 @@ function EffectiveShell({
    *  read what scope this view applies to without scanning the
    *  surrounding chrome. `null` hides the chip. */
   scopeLabel?: string | null;
+  /** Closes this view and returns the right pane to `ConfigHomePane`.
+   *  Renders a small chevron-left affordance above the title. Mirrors
+   *  `PreviewHeader.onClose` so the master/detail pane has a uniform
+   *  back signal whether the user opened a file or a virtual route. */
+  onClose?: () => void;
   children: React.ReactNode;
 }) {
   return (
@@ -1979,6 +1993,14 @@ function EffectiveShell({
           borderBottom: "var(--bw-hair) solid var(--line)",
         }}
       >
+        {onClose && (
+          <BackAffordance
+            label="Artifacts"
+            onClick={onClose}
+            title="Back to artifact list"
+            style={{ marginBottom: "var(--sp-6)" }}
+          />
+        )}
         <div
           style={{
             display: "flex",

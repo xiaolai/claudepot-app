@@ -9,6 +9,7 @@ import {
 import { Glyph } from "./Glyph";
 import { NF } from "../../icons";
 import { Button } from "./Button";
+import { BackAffordance } from "./BackAffordance";
 import type {
   ConfigKind,
   EditorCandidateDto,
@@ -29,6 +30,13 @@ interface PreviewHeaderProps {
   onPickOther: () => void;
   onSetDefault: (kind: ConfigKind | null, editorId: string) => void;
   onRefreshEditors: () => void;
+  /**
+   * Closes this preview and returns the right pane to its empty/home
+   * state. Renders a small chevron-left button above the title when
+   * set. Omit to suppress the affordance — used by `ConfigHomePane`,
+   * which IS the home view and has nowhere to go back to.
+   */
+  onClose?: () => void;
   /** Secondary (kebab) actions. */
   secondaryActions?: ReactNode;
   style?: CSSProperties;
@@ -58,6 +66,7 @@ export function PreviewHeader({
   onPickOther,
   onSetDefault,
   onRefreshEditors,
+  onClose,
   secondaryActions,
   style,
 }: PreviewHeaderProps) {
@@ -148,6 +157,14 @@ export function PreviewHeader({
         ...style,
       }}
     >
+      {onClose && (
+        <BackAffordance
+          label="Artifacts"
+          onClick={onClose}
+          title="Back to artifact list"
+          style={{ marginBottom: "var(--sp-2)" }}
+        />
+      )}
       <div
         style={{
           display: "flex",
