@@ -144,6 +144,12 @@ pub fn run() {
                 .icon(icon)
                 .icon_as_template(true)
                 .tooltip("Claudepot")
+                // Left-click toggles the window directly; the menu is
+                // right-click only. Standard pattern for productivity
+                // menubar apps (Slack, Tailscale admin) — the menu's
+                // job is quick switching, the icon's job is "open".
+                // Linux: unsupported by Tauri, falls through as no-op.
+                .show_menu_on_left_click(false)
                 .on_tray_icon_event(|tray, event| {
                     if let TrayIconEvent::Click {
                         button: MouseButton::Left,
