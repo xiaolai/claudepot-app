@@ -129,24 +129,48 @@ pub struct RemoveResult {
 /// Resolve `args.target` (path or slug) to the on-disk `<slug>` plus
 /// its `<config_dir>/projects/<slug>` directory. Errors if the dir
 /// doesn't exist.
+///
+/// Implementation note: paths and slugs need disjoint dispatch,
+/// because `Path::join` REPLACES the base when handed an absolute
+/// path — `<projects_root>.join("/Users/joker")` returns
+/// `/Users/joker` (the user's $HOME), not a subpath of `projects_root`.
+/// If the resulting directory existed, we'd then walk and stat the
+/// user's entire home tree (200+ seconds) before failing the slug
+/// validator at the trash boundary. Catastrophic latency, even if
+/// not unsafe.
+///
+/// Disambiguation: anything containing `/`, `\`, or starting with a
+/// drive-letter is treated as a path → sanitize first. Otherwise
+/// it's a slug → look up directly.
 fn resolve_target(args: &RemoveArgs<'_>) -> Result<(String, PathBuf), ProjectError> {
-    // First treat as a slug — fast path for GUI callers.
     let projects_root = args.config_dir.join("projects");
-    let candidate = projects_root.join(args.target);
-    if candidate.is_dir() {
-        return Ok((args.target.to_string(), candidate));
-    }
-    // Otherwise treat as a path. We don't go through `resolve_path`'s
-    // canonicalize step here because the user may be asking us to
-    // remove the artifact dir for a path whose source no longer
-    // exists. Sanitize the input as-given.
-    let slug = sanitize_path(args.target);
-    let dir = projects_root.join(&slug);
-    if dir.is_dir() {
-        Ok((slug, dir))
+    let looks_like_path = args.target.contains('/')
+        || args.target.contains('\\')
+        || is_windows_drive_letter(args.target);
+
+    if looks_like_path {
+        let slug = sanitize_path(args.target);
+        let dir = projects_root.join(&slug);
+        if dir.is_dir() {
+            return Ok((slug, dir));
+        }
     } else {
-        Err(ProjectError::NotFound(args.target.to_string()))
+        // Pure-slug fast path for GUI callers (no separators in the
+        // sanitized name by construction).
+        let candidate = projects_root.join(args.target);
+        if candidate.is_dir() {
+            return Ok((args.target.to_string(), candidate));
+        }
     }
+    Err(ProjectError::NotFound(args.target.to_string()))
+}
+
+/// `C:` / `D:` / etc. — Windows-shaped absolute path that wouldn't
+/// otherwise be flagged by the `/` or `\` check (e.g. `C:foo` —
+/// drive-relative, ambiguous, but still not a CC slug).
+fn is_windows_drive_letter(s: &str) -> bool {
+    let bytes = s.as_bytes();
+    bytes.len() >= 2 && bytes[0].is_ascii_alphabetic() && bytes[1] == b':'
 }
 
 /// Compute the displayed `original_path` for a removal preview. The
@@ -582,6 +606,29 @@ mod tests {
         // history.jsonl has the line back.
         let h = fs::read_to_string(&f.history).unwrap();
         assert!(h.contains(&f.original_path));
+    }
+
+    #[test]
+    fn absolute_path_input_does_not_walk_outside_projects_root() {
+        // Regression: `Path::join` replaces the base when handed an
+        // absolute path, so `projects_root.join("/Users/joker")`
+        // returned the user's $HOME — and `compute_project_info`
+        // happily stat-walked the entire tree (200+ s in the field
+        // before this fix). The slug-path disjoint dispatch in
+        // `resolve_target` keeps the absolute-path branch from ever
+        // hitting the slug fast-path.
+        let f = setup("-Users-joker-myproject", "/Users/joker/myproject", true);
+        // The target is a path (contains `/`) that is NOT a CC slug.
+        // Even though `/Users/joker/myproject` happens to exist as a
+        // real directory on the test host (it doesn't here, but in
+        // production it would), we should resolve via sanitize, NOT
+        // by joining it onto projects_root.
+        let preview = remove_project_preview(&args(&f, "/Users/joker/myproject")).unwrap();
+        assert_eq!(preview.slug, "-Users-joker-myproject");
+        // Slug never contains separators — the trash-side validator
+        // would catch it later, but the preview path catches it now.
+        assert!(!preview.slug.contains('/'));
+        assert!(!preview.slug.contains('\\'));
     }
 
     #[test]
