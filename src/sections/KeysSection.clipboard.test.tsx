@@ -41,6 +41,14 @@ vi.mock("../api", () => ({
   },
 }));
 
+// KeysSection now reads pushToast from AppStateProvider; mock the
+// hook so the test can render the section in isolation and still
+// assert toast messages by inspecting the spy.
+const pushToastSpy = vi.fn();
+vi.mock("../providers/AppStateProvider", () => ({
+  useAppState: () => ({ pushToast: pushToastSpy }),
+}));
+
 import { KeysSection } from "./KeysSection";
 
 const ACCOUNT_UUID = "11111111-1111-1111-1111-111111111111";
@@ -61,6 +69,7 @@ beforeEach(() => {
   keyOauthRemove.mockReset();
   keyApiRename.mockReset();
   keyOauthRename.mockReset();
+  pushToastSpy.mockReset();
 
   keyApiList.mockResolvedValue([
     {
@@ -120,14 +129,16 @@ describe("KeysSection — D-5/6/7 copy flow", () => {
     // Critical: only the row uuid crosses the bridge. No plaintext.
     expect(keyApiCopy).toHaveBeenCalledWith(API_UUID);
 
-    // Toast renders label + preview verbatim. Plaintext must not
-    // appear anywhere in the DOM.
+    // Toast carries label + preview verbatim — assert the receipt
+    // hand-off without depending on where the toast is rendered. The
+    // global ToastContainer lives outside this section now (mounted by
+    // AppShell), so the section under test does not render the toast
+    // DOM itself.
     await waitFor(() =>
-      expect(
-        screen.getByText(
-          /Copied ci-api-key \(sk-ant-api03-Abc…xyz\)/,
-        ),
-      ).toBeInTheDocument(),
+      expect(pushToastSpy).toHaveBeenCalledWith(
+        "info",
+        expect.stringMatching(/Copied ci-api-key \(sk-ant-api03-Abc…xyz\)/),
+      ),
     );
     expect(document.body.textContent ?? "").not.toContain(RAW_API_SECRET);
   });
@@ -168,9 +179,10 @@ describe("KeysSection — D-5/6/7 copy flow", () => {
     expect(keyOauthCopy).not.toHaveBeenCalled();
     // The shell-format toast hint identifies the right path.
     await waitFor(() =>
-      expect(
-        screen.getByText(/Copied shell command for ci-oauth-token/),
-      ).toBeInTheDocument(),
+      expect(pushToastSpy).toHaveBeenCalledWith(
+        "info",
+        expect.stringMatching(/Copied shell command for ci-oauth-token/),
+      ),
     );
   });
 
@@ -182,7 +194,10 @@ describe("KeysSection — D-5/6/7 copy flow", () => {
     await userEvent.click(btn);
 
     await waitFor(() =>
-      expect(screen.getByText(/Copy failed/)).toBeInTheDocument(),
+      expect(pushToastSpy).toHaveBeenCalledWith(
+        "error",
+        expect.stringMatching(/Copy failed/),
+      ),
     );
     expect(document.body.textContent ?? "").not.toContain(RAW_API_SECRET);
   });

@@ -14,8 +14,7 @@ import { IconButton } from "../components/primitives/IconButton";
 import { Input } from "../components/primitives/Input";
 import { SectionLabel } from "../components/primitives/SectionLabel";
 import { Tag } from "../components/primitives/Tag";
-import { ToastContainer } from "../components/ToastContainer";
-import { useToasts } from "../hooks/useToasts";
+import { useAppState } from "../providers/AppStateProvider";
 import { NF } from "../icons";
 import { ScreenHeader } from "../shell/ScreenHeader";
 import type {
@@ -31,7 +30,7 @@ type PendingRemoval =
   | { kind: "oauth"; row: OauthTokenSummary };
 
 export function KeysSection() {
-  const { toasts, pushToast, dismissToast } = useToasts();
+  const { pushToast } = useAppState();
   const [apiKeys, setApiKeys] = useState<ApiKeySummary[]>([]);
   const [oauthTokens, setOauthTokens] = useState<OauthTokenSummary[]>([]);
   const [accounts, setAccounts] = useState<AccountSummaryBasic[]>([]);
@@ -323,8 +322,6 @@ export function KeysSection() {
           }}
         />
       )}
-
-      <ToastContainer toasts={toasts} onDismiss={dismissToast} />
     </>
   );
 }

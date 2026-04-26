@@ -10,7 +10,7 @@ import type { ProjectStatus } from "./projects/projectStatus";
 import { Button } from "../components/primitives/Button";
 import { IconButton } from "../components/primitives/IconButton";
 import { Input } from "../components/primitives/Input";
-import { Toast } from "../components/primitives/Toast";
+import { useAppState } from "../providers/AppStateProvider";
 import { NF } from "../icons";
 import { ScreenHeader } from "../shell/ScreenHeader";
 import {
@@ -148,7 +148,7 @@ export function ProjectsSection({
   const [removeTarget, setRemoveTarget] = useState<string | null>(null);
   const [filter, setFilter] = useState<ProjectFilter>("all");
   const [nameFilter, setNameFilter] = useState("");
-  const [toast, setToast] = useState<string | null>(null);
+  const { pushToast } = useAppState();
   const [detailRefreshSignal, setDetailRefreshSignal] = useState(0);
   const [ctxMenu, setCtxMenu] = useState<{
     x: number;
@@ -443,7 +443,7 @@ export function ProjectsSection({
                           setDetailRefreshSignal((n) => n + 1);
                           refresh();
                         }}
-                        onError={(msg) => setToast(msg)}
+                        onError={(msg) => pushToast("error", msg)}
                         onBack={() => setOpenedSessionPath(null)}
                       />
                     ) : (
@@ -461,7 +461,7 @@ export function ProjectsSection({
                           setDetailRefreshSignal((n) => n + 1);
                           refresh();
                         }}
-                        onError={(msg) => setToast(msg)}
+                        onError={(msg) => pushToast("error", msg)}
                         onOpenMaintenance={() => onSubRouteChange("maintenance")}
                         onOpenInConfig={() => setProjectTab("config")}
                         onOpenSession={(p) => setOpenedSessionPath(p)}
@@ -523,16 +523,16 @@ export function ProjectsSection({
                 opId,
                 title: `Renaming ${base(args.oldPath)} → ${base(args.newPath)}`,
                 onComplete: () => {
-                  setToast("Rename complete.");
+                  pushToast("info", "Rename complete.");
                   refresh();
                 },
                 onError: (detail) => {
-                  setToast(`Rename failed: ${detail ?? "unknown"}`);
+                  pushToast("error", `Rename failed: ${detail ?? "unknown"}`);
                   refresh();
                 },
               });
             } catch (e) {
-              setToast(`Couldn't start rename: ${e}`);
+              pushToast("error", `Couldn't start rename: ${e}`);
             }
           }}
         />
@@ -549,19 +549,18 @@ export function ProjectsSection({
             setSelectedPath((prev) =>
               prev && result.original_path === prev ? null : prev,
             );
-            setToast(
+            pushToast(
+              "info",
               `Removed ${result.slug}. Restore via project trash if needed.`,
             );
             refresh();
           }}
           onError={(msg) => {
             setRemoveTarget(null);
-            setToast(`Couldn't remove: ${msg}`);
+            pushToast("error", `Couldn't remove: ${msg}`);
           }}
         />
       )}
-
-      <Toast message={toast} onDismiss={() => setToast(null)} />
 
       {ctxMenu &&
         (() => {
@@ -574,7 +573,7 @@ export function ProjectsSection({
               label: "Open in Finder",
               onClick: () => {
                 api.revealInFinder(p.original_path).catch((e) => {
-                  setToast(`Couldn't reveal: ${e}`);
+                  pushToast("error", `Couldn't reveal: ${e}`);
                 });
               },
             },
@@ -610,15 +609,23 @@ export function ProjectsSection({
             {
               label: "Copy path",
               onClick: () => {
-                navigator.clipboard.writeText(p.original_path);
-                setToast("Copied path.");
+                navigator.clipboard
+                  .writeText(p.original_path)
+                  .then(() => pushToast("info", "Copied path."))
+                  .catch((e) =>
+                    pushToast("error", `Couldn't copy path: ${e}`),
+                  );
               },
             },
             {
               label: "Copy key",
               onClick: () => {
-                navigator.clipboard.writeText(p.sanitized_name);
-                setToast("Copied key.");
+                navigator.clipboard
+                  .writeText(p.sanitized_name)
+                  .then(() => pushToast("info", "Copied key."))
+                  .catch((e) =>
+                    pushToast("error", `Couldn't copy key: ${e}`),
+                  );
               },
             },
           ];

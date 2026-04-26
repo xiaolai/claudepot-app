@@ -1,5 +1,13 @@
-import { describe, expect, it } from "vitest";
-import { formatLiveSegment, modelMix } from "./AppStatusBar";
+import {
+  afterEach,
+  beforeEach,
+  describe,
+  expect,
+  it,
+  vi,
+} from "vitest";
+import { act, cleanup, render, screen } from "@testing-library/react";
+import { AppStatusBar, formatLiveSegment, modelMix } from "./AppStatusBar";
 import type { LiveSessionSummary } from "../types";
 
 function mkSession(overrides: Partial<LiveSessionSummary> = {}): LiveSessionSummary {
@@ -77,5 +85,112 @@ describe("AppStatusBar helpers", () => {
       const sessions = [mkSession({ model: "some-very-long-id" })];
       expect(modelMix(sessions)[0]).toBe("some-ve… 1");
     });
+  });
+});
+
+/**
+ * Component-level coverage for the dismissed-toast echo segment. The
+ * unit tests in `useToasts.test.ts` lock down the hook contract; this
+ * suite locks down what the bar actually renders given that contract:
+ * suppression while a live toast is on screen, render-after-dismiss,
+ * and auto-clear after the fade window.
+ *
+ * `vi.mock` is hoisted by vitest to before the imports, so its
+ * factory cannot close over a locally-declared `state` variable. We
+ * route the per-test state through `vi.hoisted` so both the mock
+ * factory and the test bodies share the same object.
+ */
+const echoMocks = vi.hoisted(() => {
+  type ToastShape = { id: number; kind: "info" | "error"; text: string };
+  type Dismissed =
+    | { text: string; kind: "info" | "error"; at: number }
+    | null;
+  const state: {
+    toasts: ToastShape[];
+    lastDismissed: Dismissed;
+    clearLastDismissedSpy: ReturnType<typeof vi.fn> | null;
+  } = { toasts: [], lastDismissed: null, clearLastDismissedSpy: null };
+  return { state };
+});
+
+vi.mock("../hooks/useSessionLive", () => ({
+  useSessionLive: () => [],
+}));
+vi.mock("../providers/AppStateProvider", () => ({
+  useAppState: () => ({
+    toasts: echoMocks.state.toasts,
+    lastDismissed: echoMocks.state.lastDismissed,
+    clearLastDismissed:
+      echoMocks.state.clearLastDismissedSpy ?? (() => undefined),
+  }),
+}));
+
+describe("AppStatusBar — toast echo", () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+    echoMocks.state.toasts = [];
+    echoMocks.state.lastDismissed = null;
+    echoMocks.state.clearLastDismissedSpy = vi.fn();
+  });
+  afterEach(() => {
+    vi.useRealTimers();
+    cleanup();
+  });
+
+  const stats = { projects: null, sessions: null };
+
+  it("does not render the echo when nothing has been dismissed yet", () => {
+    render(<AppStatusBar stats={stats} />);
+    // The echo is the only descendant tagged aria-hidden + ellipsised.
+    expect(document.querySelector('[aria-hidden="true"]')).toBeNull();
+  });
+
+  it("suppresses the echo while a live toast is on screen", () => {
+    echoMocks.state.lastDismissed = {
+      text: "Copied path.",
+      kind: "info",
+      at: Date.now(),
+    };
+    echoMocks.state.toasts = [{ id: 1, kind: "info", text: "live" }];
+    render(<AppStatusBar stats={stats} />);
+    // Echo would otherwise read "Copied path." — suppression means
+    // the text never reaches the DOM at all.
+    expect(screen.queryByText("Copied path.")).toBeNull();
+  });
+
+  it("renders the echo text after a dismissal with no live toast", () => {
+    echoMocks.state.lastDismissed = {
+      text: "Rename complete.",
+      kind: "info",
+      at: Date.now(),
+    };
+    render(<AppStatusBar stats={stats} />);
+    expect(screen.getByText("Rename complete.")).toBeInTheDocument();
+  });
+
+  it("calls clearLastDismissed once the 6 s window elapses", () => {
+    echoMocks.state.lastDismissed = {
+      text: "Saved.",
+      kind: "info",
+      at: Date.now(),
+    };
+    render(<AppStatusBar stats={stats} />);
+    expect(echoMocks.state.clearLastDismissedSpy).not.toHaveBeenCalled();
+    act(() => vi.advanceTimersByTime(6_000));
+    expect(echoMocks.state.clearLastDismissedSpy).toHaveBeenCalledTimes(1);
+  });
+
+  it("clears immediately if the dismissal was already older than the window", () => {
+    // Edge case: dismissal happened, then the user navigated away from
+    // the section. When the bar mounts, the echo is already past its
+    // sell-by date — clear synchronously rather than schedule a timer
+    // that would fire instantly.
+    echoMocks.state.lastDismissed = {
+      text: "stale",
+      kind: "info",
+      at: Date.now() - 10_000,
+    };
+    render(<AppStatusBar stats={stats} />);
+    expect(echoMocks.state.clearLastDismissedSpy).toHaveBeenCalledTimes(1);
   });
 });

@@ -7,7 +7,11 @@ import {
   type ReactNode,
 } from "react";
 import { api } from "../api";
-import { useToasts, type Toast } from "../hooks/useToasts";
+import {
+  useToasts,
+  type DismissedToast,
+  type Toast,
+} from "../hooks/useToasts";
 import { useRefresh } from "../hooks/useRefresh";
 import { useDismissedIssues } from "../hooks/useDismissedIssues";
 import { useBusy } from "../hooks/useBusy";
@@ -20,6 +24,14 @@ interface AppStateValue {
   toasts: Toast[];
   pushToast: ReturnType<typeof useToasts>["pushToast"];
   dismissToast: (id: number) => void;
+  /**
+   * Last toast that fully dismissed. The status bar reads this and
+   * echoes the message for a few seconds so the user can re-read what
+   * just scrolled by — `null` once the echo has been cleared.
+   */
+  lastDismissed: DismissedToast | null;
+  /** Clear the echo segment when its fade window elapses. */
+  clearLastDismissed: () => void;
 
   // Refresh state — single source shared between AppShell banner and
   // AccountsSection so there's only one `/profile` + `/verify_all`
@@ -102,7 +114,13 @@ const AppStateContext = createContext<AppStateValue | null>(null);
  * `useStatusIssues` fire once at shell level off the same state.
  */
 export function AppStateProvider({ children }: { children: ReactNode }) {
-  const { toasts, pushToast, dismissToast } = useToasts();
+  const {
+    toasts,
+    pushToast,
+    dismissToast,
+    lastDismissed,
+    clearLastDismissed,
+  } = useToasts();
   const {
     status,
     accounts,
@@ -200,6 +218,8 @@ export function AppStateProvider({ children }: { children: ReactNode }) {
       toasts,
       pushToast,
       dismissToast,
+      lastDismissed,
+      clearLastDismissed,
       status,
       accounts,
       loadError,
@@ -232,6 +252,8 @@ export function AppStateProvider({ children }: { children: ReactNode }) {
       toasts,
       pushToast,
       dismissToast,
+      lastDismissed,
+      clearLastDismissed,
       status,
       accounts,
       loadError,

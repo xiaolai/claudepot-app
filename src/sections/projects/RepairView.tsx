@@ -2,11 +2,11 @@ import { useCallback, useEffect, useState } from "react";
 import { Icon } from "../../components/Icon";
 import { api } from "../../api";
 import { useOperations } from "../../hooks/useOperations";
+import { useAppState } from "../../providers/AppStateProvider";
 import type { JournalEntry } from "../../types";
 import { RepairEntry } from "./RepairEntry";
 import { RepairConfirmDialogs, type PendingAction } from "./RepairConfirmDialogs";
 import { ConfirmDangerousAction } from "../../components/ConfirmDangerousAction";
-import { Toast } from "../../components/primitives/Toast";
 
 export function RepairView({
   onBack,
@@ -24,7 +24,7 @@ export function RepairView({
   const [breakLockTarget, setBreakLockTarget] = useState<JournalEntry | null>(
     null,
   );
-  const [toast, setToast] = useState<string | null>(null);
+  const { pushToast } = useAppState();
   const { open: openOpModal } = useOperations();
 
   const refresh = useCallback(() => {
@@ -45,12 +45,12 @@ export function RepairView({
   // pointed at the same afterTerminal which always set "Done." —
   // indistinguishable from success at the page level.
   const afterComplete = (kind: "Resume" | "Rollback", id: string) => {
-    setToast(`${kind} complete: ${id}`);
+    pushToast("info", `${kind} complete: ${id}`);
     refresh();
     onOpTerminated?.();
   };
   const afterError = (kind: "Resume" | "Rollback", id: string, detail: string | null) => {
-    setToast(`${kind} failed: ${detail ?? id}`);
+    pushToast("error", `${kind} failed: ${detail ?? id}`);
     refresh();
     onOpTerminated?.();
   };
@@ -65,7 +65,7 @@ export function RepairView({
         onComplete: () => afterComplete("Resume", entry.id),
         onError: (detail) => afterError("Resume", entry.id, detail),
       });
-    } catch (e) { setToast(`Resume failed: ${e}`); }
+    } catch (e) { pushToast("error", `Resume failed: ${e}`); }
   };
 
   const runRollback = async (entry: JournalEntry) => {
@@ -78,30 +78,31 @@ export function RepairView({
         onComplete: () => afterComplete("Rollback", entry.id),
         onError: (detail) => afterError("Rollback", entry.id, detail),
       });
-    } catch (e) { setToast(`Rollback failed: ${e}`); }
+    } catch (e) { pushToast("error", `Rollback failed: ${e}`); }
   };
 
   const runAbandon = async (entry: JournalEntry) => {
     setPending(null);
     try {
       await api.repairAbandon(entry.id);
-      setToast(`Abandoned ${entry.id}.`);
+      pushToast("info", `Abandoned ${entry.id}.`);
       refresh();
       onOpTerminated?.();
-    } catch (e) { setToast(`Abandon failed: ${e}`); }
+    } catch (e) { pushToast("error", `Abandon failed: ${e}`); }
   };
 
   const runBreakLock = async (entry: JournalEntry) => {
     setBreakLockTarget(null);
     try {
       const outcome = await api.repairBreakLock(entry.old_path);
-      setToast(
+      pushToast(
+        "info",
         `Lock broken — prior owner PID ${outcome.prior_pid} on ${outcome.prior_hostname}. Audit saved.`,
       );
       refresh();
       onOpTerminated?.();
     } catch (e) {
-      setToast(`Break lock failed: ${e}`);
+      pushToast("error", `Break lock failed: ${e}`);
     }
   };
 
@@ -174,8 +175,6 @@ export function RepairView({
           onConfirm={() => runBreakLock(breakLockTarget)}
         />
       )}
-
-      <Toast message={toast} onDismiss={() => setToast(null)} />
     </Wrapper>
   );
 }

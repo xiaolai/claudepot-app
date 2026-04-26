@@ -173,6 +173,17 @@
   --input-width-md:        210px;   /* medium form inputs (CleanupPane "older than"/"larger than" rows) */
   --banner-min-width:      180px;
   --toast-max-width:       min(560px, calc(100vw - var(--sp-48)));
+  /* Vertical anchor for the toast queue. Sits one comfortable em
+     above the status bar so toasts read as bottom chrome rather than
+     overlay clutter. Single source for `.toasts` (CSS) and the echo
+     segment that lives in the status bar — anything that wants the
+     same anchor reads from here. */
+  --toast-bottom:          calc(var(--statusbar-height) + var(--sp-16));
+  /* Status-bar echo — the dismissed-toast text the bar replays for a
+     few seconds. Capped narrower than `--toast-max-width` because the
+     bar is only 24 px tall and a wider strip would steam-roll the
+     surrounding segments. */
+  --toast-echo-max-width:  min(60%, 480px);
 
   /* Side/context panels — the visible-context aside in the Sessions
      section sits at this fixed width so the transcript column has a

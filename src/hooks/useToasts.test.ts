@@ -111,3 +111,90 @@ describe("useToasts — auto-dismiss policy", () => {
     expect(commitB).toHaveBeenCalledTimes(1);
   });
 });
+
+/**
+ * Echo / `lastDismissed` contract — the slice the status bar reads
+ * to replay the most recent toast text. Captured *after* the exit
+ * animation completes so the live toast and its echo never coexist
+ * (one signal per surface).
+ */
+describe("useToasts — lastDismissed echo", () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+  });
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it("starts as null and only populates after a toast fully removes", () => {
+    const { result } = renderHook(() => useToasts());
+    expect(result.current.lastDismissed).toBeNull();
+
+    act(() => result.current.pushToast("info", "saved"));
+    // While the toast is on screen, the echo slot stays empty —
+    // otherwise the status bar would render the same message twice.
+    expect(result.current.lastDismissed).toBeNull();
+
+    // 10 s auto-dismiss → 150 ms exit animation → final remove.
+    act(() => vi.advanceTimersByTime(10_000));
+    act(() => vi.advanceTimersByTime(200));
+    expect(result.current.lastDismissed).toMatchObject({
+      text: "saved",
+      kind: "info",
+    });
+    expect(result.current.lastDismissed?.at).toBeTypeOf("number");
+  });
+
+  it("preserves the kind so the status bar can pick a tone", () => {
+    const { result } = renderHook(() => useToasts());
+    act(() => result.current.pushToast("error", "oops"));
+    act(() => vi.advanceTimersByTime(10_200));
+    expect(result.current.lastDismissed?.kind).toBe("error");
+  });
+
+  it("overwrites with the most recent dismissal", () => {
+    const { result } = renderHook(() => useToasts());
+    act(() => result.current.pushToast("info", "first", undefined, { durationMs: 500 }));
+    act(() => vi.advanceTimersByTime(700));
+    expect(result.current.lastDismissed?.text).toBe("first");
+
+    act(() => result.current.pushToast("error", "second", undefined, { durationMs: 500 }));
+    act(() => vi.advanceTimersByTime(700));
+    expect(result.current.lastDismissed?.text).toBe("second");
+    expect(result.current.lastDismissed?.kind).toBe("error");
+  });
+
+  it("clearLastDismissed empties the slot", () => {
+    const { result } = renderHook(() => useToasts());
+    act(() => result.current.pushToast("info", "saved", undefined, { durationMs: 100 }));
+    act(() => vi.advanceTimersByTime(300));
+    expect(result.current.lastDismissed).not.toBeNull();
+
+    act(() => result.current.clearLastDismissed());
+    expect(result.current.lastDismissed).toBeNull();
+  });
+
+  it("dedupe-cancellation does NOT echo the dropped toast (intentional)", () => {
+    // Dedupe is the "user spammed an action" path — we cancel the
+    // prior toast WITHOUT echoing it because the user almost certainly
+    // didn't read the dropped message. Echoing every dedupe-stale
+    // toast in the status bar would feel like ghosts of un-clicked
+    // intent. The new toast still echoes normally when IT dismisses.
+    const { result } = renderHook(() => useToasts());
+    act(() =>
+      result.current.pushToast("info", "first", undefined, {
+        durationMs: 5000,
+        dedupeKey: "k",
+      }),
+    );
+    act(() =>
+      result.current.pushToast("info", "second", undefined, {
+        durationMs: 5000,
+        dedupeKey: "k",
+      }),
+    );
+    expect(result.current.lastDismissed).toBeNull();
+    expect(result.current.toasts).toHaveLength(1);
+    expect(result.current.toasts[0].text).toBe("second");
+  });
+});
