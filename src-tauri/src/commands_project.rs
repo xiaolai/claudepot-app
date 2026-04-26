@@ -7,7 +7,8 @@
 
 use crate::dto::{
     CleanPreviewDto, DryRunPlanDto, JournalEntryDto, MoveArgsDto, ProjectDetailDto,
-    ProjectInfoDto,
+    ProjectInfoDto, ProjectRestoreReportDto, ProjectTrashListingDto,
+    RemoveProjectPreviewDto, RemoveProjectResultDto,
 };
 use crate::ops::{
     emit_terminal, new_op_id, new_running_op, spawn_op_thread, CleanResultSummary, OpKind,
@@ -16,7 +17,11 @@ use crate::ops::{
 use claudepot_core::paths;
 use claudepot_core::project;
 use claudepot_core::project_dry_run_service::DryRunOutcome;
+use claudepot_core::project_remove::{
+    remove_project as core_remove_project, remove_project_preview, RemoveArgs,
+};
 use claudepot_core::project_repair;
+use claudepot_core::project_trash;
 use tauri::{AppHandle, State};
 
 /// Default journal nag threshold per spec §8 Q7 — mirrors the CLI.
@@ -298,4 +303,146 @@ pub async fn repair_status_summary() -> Result<crate::dto::PendingJournalsSummar
     })
     .await
     .map_err(|e| format!("repair summary join: {e}"))?
+}
+
+// ---------------------------------------------------------------------------
+// project remove — single-target trash
+// ---------------------------------------------------------------------------
+
+/// Build the standard claudepot path layout into a RemoveArgs bundle.
+/// Pulled out so preview and execute share exactly the same resolution
+/// path — the GUI's confirmation modal renders against the preview,
+/// then the execute hits the same target.
+fn remove_paths() -> (
+    std::path::PathBuf, // config_dir
+    std::path::PathBuf, // claude_json
+    std::path::PathBuf, // history
+    std::path::PathBuf, // snapshots
+    std::path::PathBuf, // locks
+    std::path::PathBuf, // data_dir
+) {
+    let config_dir = paths::claude_config_dir();
+    let claude_json = dirs::home_dir()
+        .map(|h| h.join(".claude.json"))
+        .unwrap_or_else(|| std::path::PathBuf::from(".claude.json"));
+    let history = config_dir.join("history.jsonl");
+    let (_journals, locks, snaps) = claudepot_home_dirs();
+    let data_dir = paths::claudepot_data_dir();
+    (config_dir, claude_json, history, snaps, locks, data_dir)
+}
+
+/// Read-only preview the GUI's RemoveProjectModal renders. Live-session
+/// presence is reported but not blocking — the modal needs to surface
+/// the reason and disable the confirm path itself, per the design rule
+/// ("disabled buttons state a reason inline").
+#[tauri::command]
+pub async fn project_remove_preview(
+    target: String,
+) -> Result<RemoveProjectPreviewDto, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let (config_dir, claude_json, history, snaps, locks, data_dir) = remove_paths();
+        let args = RemoveArgs {
+            config_dir: &config_dir,
+            claude_json_path: Some(&claude_json),
+            history_path: Some(&history),
+            snapshots_dir: &snaps,
+            locks_dir: &locks,
+            data_dir: &data_dir,
+            target: &target,
+        };
+        let preview = remove_project_preview(&args)
+            .map_err(|e| format!("preview failed: {e}"))?;
+        Ok(RemoveProjectPreviewDto::from(&preview))
+    })
+    .await
+    .map_err(|e| format!("preview join: {e}"))?
+}
+
+/// Execute the trash. Synchronous-from-the-frontend's-perspective —
+/// removes are O(seconds) for typical projects and don't need the
+/// op-progress channel. The pending-journals gate fires here, mirroring
+/// the CLI gate.
+#[tauri::command]
+pub async fn project_remove_execute(
+    target: String,
+) -> Result<RemoveProjectResultDto, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let (journals, locks_dir, _snaps) = claudepot_home_dirs();
+        let actionable =
+            project_repair::list_actionable(&journals, &locks_dir, JOURNAL_NAG_THRESHOLD_SECS)
+                .map_err(|e| format!("journal check failed: {e}"))?;
+        if !actionable.is_empty() {
+            return Err(format!(
+                "refusing to remove while {} rename journal(s) are pending. Resolve them in the Repair view first.",
+                actionable.len()
+            ));
+        }
+
+        let (config_dir, claude_json, history, snaps, locks, data_dir) = remove_paths();
+        let args = RemoveArgs {
+            config_dir: &config_dir,
+            claude_json_path: Some(&claude_json),
+            history_path: Some(&history),
+            snapshots_dir: &snaps,
+            locks_dir: &locks,
+            data_dir: &data_dir,
+            target: &target,
+        };
+        let result = core_remove_project(&args)
+            .map_err(|e| format!("remove failed: {e}"))?;
+        Ok(RemoveProjectResultDto::from(&result))
+    })
+    .await
+    .map_err(|e| format!("remove join: {e}"))?
+}
+
+#[tauri::command]
+pub async fn project_trash_list() -> Result<ProjectTrashListingDto, String> {
+    tauri::async_runtime::spawn_blocking(|| {
+        let data_dir = paths::claudepot_data_dir();
+        let listing = project_trash::list(
+            &data_dir,
+            project_trash::ProjectTrashFilter::default(),
+        )
+        .map_err(|e| format!("trash list failed: {e}"))?;
+        Ok(ProjectTrashListingDto::from(&listing))
+    })
+    .await
+    .map_err(|e| format!("trash list join: {e}"))?
+}
+
+#[tauri::command]
+pub async fn project_trash_restore(
+    entry_id: String,
+) -> Result<ProjectRestoreReportDto, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let (config_dir, claude_json, history, _snaps, _locks, data_dir) = remove_paths();
+        let report = project_trash::restore(
+            &data_dir,
+            &entry_id,
+            &config_dir,
+            Some(&claude_json),
+            Some(&history),
+        )
+        .map_err(|e| format!("restore failed: {e}"))?;
+        Ok(ProjectRestoreReportDto::from(&report))
+    })
+    .await
+    .map_err(|e| format!("restore join: {e}"))?
+}
+
+#[tauri::command]
+pub async fn project_trash_empty(
+    older_than_days: Option<u64>,
+) -> Result<u64, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let data_dir = paths::claudepot_data_dir();
+        let filter = project_trash::ProjectTrashFilter {
+            older_than: older_than_days
+                .map(|d| std::time::Duration::from_secs(d.saturating_mul(86_400))),
+        };
+        project_trash::empty(&data_dir, filter).map_err(|e| format!("empty failed: {e}"))
+    })
+    .await
+    .map_err(|e| format!("empty join: {e}"))?
 }
