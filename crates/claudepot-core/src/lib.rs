@@ -32,6 +32,7 @@ pub mod project_progress;
 pub mod project_repair;
 pub mod project_rewrite;
 pub mod project_sanitize;
+pub mod project_trash;
 pub mod project_types;
 pub mod protected_paths;
 pub mod resolve;
