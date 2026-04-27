@@ -37,14 +37,66 @@ fn parse_on_conflict(s: &str) -> Result<OnConflict, String> {
 
 /// Build the active-roots snapshot used by every command. The
 /// project root is optional — global-only callers omit it.
+///
+/// Renderer-supplied `project_root` is **shape-validated** before
+/// being accepted. Without this check, `validate_scope_root` becomes
+/// circular: a malicious caller could pass any directory as
+/// `project_root`, and the backend would happily accept the same
+/// path back as `scope_root`. The shape rules:
+///   - must be absolute
+///   - must end with the `.claude` segment
+///   - must NOT be under `plugins/cache/` (those are plugin-owned)
+///   - must NOT be the user-scope claude dir (it'd shadow `User`)
+///   - must NOT contain `..` segments
 fn build_roots(project_root: Option<String>) -> ActiveRoots {
     let mut roots = ActiveRoots::user(paths::claude_config_dir());
     if let Some(p) = project_root.filter(|s| !s.is_empty()) {
-        roots = roots.with_project(PathBuf::from(p));
+        let candidate = PathBuf::from(p);
+        if is_valid_project_root(&candidate, &paths::claude_config_dir()) {
+            roots = roots.with_project(candidate);
+        }
+        // Silently drop malformed candidates — the affected commands
+        // will simply not find the file and surface OutOfScope.
     }
     // Managed-policy roots are added per-platform; left empty for
     // now since none of our shipped flows currently set them.
     roots
+}
+
+fn is_valid_project_root(candidate: &std::path::Path, user_root: &std::path::Path) -> bool {
+    if !candidate.is_absolute() {
+        return false;
+    }
+    // Reject any traversal segments.
+    if candidate
+        .components()
+        .any(|c| matches!(c, Component::ParentDir))
+    {
+        return false;
+    }
+    // Must end with `.claude`.
+    if candidate.file_name().and_then(|s| s.to_str()) != Some(".claude") {
+        return false;
+    }
+    // Must not be the user-scope root (already covered by ActiveRoots::user).
+    if candidate == user_root {
+        return false;
+    }
+    // Must not be under plugins/cache/.
+    let plugin_cache_segment = ["plugins", "cache"];
+    let parts: Vec<&str> = candidate
+        .components()
+        .filter_map(|c| match c {
+            Component::Normal(s) => s.to_str(),
+            _ => None,
+        })
+        .collect();
+    for win in parts.windows(2) {
+        if win == plugin_cache_segment {
+            return false;
+        }
+    }
+    true
 }
 
 /// Validate that `relative_path` is a clean rel-path with no
