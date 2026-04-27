@@ -54,7 +54,17 @@ export function BashToolViewer({ tool }: { tool: LinkedTool }) {
         }}
       >
         <Glyph g={NF.terminal} style={{ fontSize: "var(--fs-sm)" }} />
-        <span className="mono" style={{ flex: 1 }} title={cmd}>
+        <span
+          className="mono"
+          style={{
+            flex: 1,
+            minWidth: 0,
+            overflow: "hidden",
+            textOverflow: "ellipsis",
+            whiteSpace: "nowrap",
+          }}
+          title={cmd}
+        >
           $ {cmd || "(no command)"}
         </span>
         {typeof exit === "number" && (

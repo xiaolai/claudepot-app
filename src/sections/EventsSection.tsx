@@ -300,7 +300,10 @@ function MetricsStrip({ cards, loading }: { cards: ActivityCard[]; loading: bool
     <div
       style={{
         display: "grid",
-        gridTemplateColumns: "1fr 1fr 1fr",
+        // `minmax(0, 1fr)` rather than bare `1fr` so each cell can
+        // shrink below its content's min-content width — bare `1fr`
+        // tracks pin to intrinsic min-content and overflow the row.
+        gridTemplateColumns: "repeat(3, minmax(0, 1fr))",
         gap: "var(--sp-12)",
         padding: "var(--sp-10) var(--sp-16)",
         borderBottom: "var(--bw-hair) solid var(--line)",

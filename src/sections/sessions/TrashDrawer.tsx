@@ -152,7 +152,12 @@ export function TrashDrawer({ onChange }: { onChange?: () => void }) {
                 borderRadius: "var(--r-2)",
                 marginBottom: "var(--sp-8)",
                 display: "grid",
-                gridTemplateColumns: "auto 1fr auto",
+                // `minmax(0, 1fr)` so the path column can shrink
+                // below its content's intrinsic min-content width;
+                // a bare `1fr` track would otherwise overflow the
+                // row whenever a trash entry's path is longer than
+                // the drawer is wide.
+                gridTemplateColumns: "auto minmax(0, 1fr) auto",
                 gap: "var(--sp-12)",
                 alignItems: "center",
                 fontSize: "var(--fs-sm)",

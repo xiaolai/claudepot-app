@@ -164,21 +164,18 @@ function ServerTable({
         width: "100%",
         borderCollapse: "collapse",
         fontSize: "var(--fs-xs)",
-        tableLayout: "fixed",
+        // Auto layout — atomic columns (Source: "user"/"project"/…,
+        // Approval: a tag) hug their content; the variable-length
+        // columns (Server, Command) split the remainder. Cells in the
+        // variable columns set `max-width: 0` + `text-overflow:
+        // ellipsis` so they truncate instead of forcing the table
+        // wider than its container. Earlier attempts at proportional
+        // `tableLayout: fixed` either truncated atomic columns to
+        // useless widths ("proje…") or, when mixed with px values,
+        // computed a negative width for Server in narrow panes.
+        tableLayout: "auto",
       }}
     >
-      {/* Percentages only — mixing a fixed px (`--config-cmd-col-max`)
-          with percentages under `table-layout: fixed` squeezed the
-          Server column to a negative width in narrow panes (e.g.
-          nested inside Projects where the detail area is ~470px).
-          Proportional sizing keeps every column addressable at any
-          container size; the cells already `text-overflow: ellipsis`. */}
-      <colgroup>
-        <col style={{ width: "25%" }} />
-        <col style={{ width: "15%" }} />
-        <col style={{ width: "40%" }} />
-        <col style={{ width: "20%" }} />
-      </colgroup>
       <thead>
         <tr
           style={{
@@ -225,11 +222,20 @@ function ServerRow({ server }: { server: ConfigEffectiveMcpServerDto }) {
       >
         <td
           style={{
+            // `max-width: 0` + `width: 100%` is the table-cell trick
+            // that lets `text-overflow: ellipsis` actually fire under
+            // `table-layout: auto` — without it, the cell expands to
+            // its content's intrinsic width and pushes the table past
+            // its container. The auto layout then redistributes the
+            // remainder between this column and Command.
+            maxWidth: 0,
+            width: "100%",
             padding: "var(--sp-6) var(--sp-12)",
             overflow: "hidden",
             textOverflow: "ellipsis",
             whiteSpace: "nowrap",
           }}
+          title={server.name}
         >
           <span style={{ fontWeight: 500 }}>{server.name}</span>
           {server.contributors.length > 1 && (
@@ -261,6 +267,11 @@ function ServerRow({ server }: { server: ConfigEffectiveMcpServerDto }) {
         </td>
         <td
           style={{
+            // Same `max-width: 0` + `width: 100%` ellipsis trick as
+            // the Server cell — the two variable-length columns share
+            // whatever the atomic Source/Approval cells leave behind.
+            maxWidth: 0,
+            width: "100%",
             padding: "var(--sp-6) var(--sp-12)",
             fontFamily: "var(--font-mono)",
             fontSize: "var(--fs-2xs)",

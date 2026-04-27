@@ -222,6 +222,7 @@ function InjectionList({ injections }: { injections: ContextInjection[] }) {
               padding: "var(--sp-4) 0",
               borderBottom: "var(--bw-hair) solid var(--line)",
               fontSize: "var(--fs-xs)",
+              minWidth: 0,
             }}
           >
             <span
