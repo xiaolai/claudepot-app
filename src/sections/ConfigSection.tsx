@@ -28,6 +28,7 @@ import { EffectiveRenderer } from "./config/EffectiveRenderer";
 import { EffectiveMcpRenderer } from "./config/EffectiveMcpRenderer";
 import { MarkdownRenderer } from "./config/MarkdownRenderer";
 import { JsonTreeRenderer } from "./config/JsonTreeRenderer";
+import { CodeRenderer } from "./config/CodeRenderer";
 import { HooksRenderer, countHooksInMergedSettings } from "./config/HooksRenderer";
 import { useConfigTree } from "../hooks/useConfigTree";
 import { useAppState } from "../providers/AppStateProvider";
@@ -1730,6 +1731,24 @@ function fileName(path: string): string {
   return m ? m[1] : path;
 }
 
+/**
+ * Best-guess language hint for kinds that fall to the CodeRenderer.
+ * The renderer also runs extension and shebang detection — this just
+ * gives a sane default for kinds whose path doesn't carry a useful
+ * extension (e.g., a `statusline` named `statusline` with no suffix).
+ * Returning null lets the renderer's auto-detection take over.
+ */
+function codeHintForKind(kind: ConfigKind): string | null {
+  switch (kind) {
+    case "statusline":
+      return "bash";
+    case "hook":
+      return null; // hook entries are JSON snippets in settings; let auto-detect run
+    default:
+      return null;
+  }
+}
+
 // ---------- File preview ---------------------------------------------
 
 function FilePreview({
@@ -1828,19 +1847,11 @@ function FilePreview({
           </>
         ) : (
           <>
-            <pre
-              style={{
-                margin: 0,
-                padding: "var(--sp-16) var(--sp-20)",
-                fontFamily: "var(--mono)",
-                fontSize: "var(--fs-xs)",
-                whiteSpace: "pre-wrap",
-                overflowWrap: "anywhere",
-                color: "var(--fg)",
-              }}
-            >
-              {preview.body_utf8}
-            </pre>
+            <CodeRenderer
+              body={preview.body_utf8}
+              path={file.abs_path}
+              defaultLang={codeHintForKind(kind)}
+            />
             {preview.truncated && <TruncationFooter onOpen={onOpen} />}
           </>
         )}
