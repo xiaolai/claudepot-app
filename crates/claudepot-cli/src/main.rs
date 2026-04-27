@@ -413,6 +413,12 @@ enum AutomationAction {
         end: String,
         #[arg(long, default_value = "scheduled")]
         trigger: String,
+        /// Absolute path to the run directory. Authoritative; the
+        /// shim always passes this. When omitted (manual debug
+        /// invocation), the default `~/.claudepot/automations/<id>/runs/<run-id>`
+        /// path is used.
+        #[arg(long)]
+        run_dir: Option<String>,
     },
 }
 
@@ -823,6 +829,7 @@ async fn main() -> Result<()> {
                 start,
                 end,
                 trigger,
+                run_dir,
             } => commands::automation::record_run_cmd(
                 &automation_id,
                 &run_id,
@@ -830,6 +837,7 @@ async fn main() -> Result<()> {
                 &start,
                 &end,
                 &trigger,
+                run_dir.as_deref(),
             )?,
         },
         Commands::Export {
