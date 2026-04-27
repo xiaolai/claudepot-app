@@ -35,6 +35,7 @@
 pub mod cron;
 pub mod env;
 pub mod error;
+pub mod install;
 pub mod run;
 pub mod scheduler;
 pub mod shim;
@@ -43,7 +44,8 @@ pub mod store;
 pub mod types;
 
 pub use error::AutomationError;
-pub use run::{list_run_ids, parse_result_event, read_run, record_run, RecordInputs};
+pub use install::{current_claudepot_cli, install_shim, resolve_binary};
+pub use run::{list_run_ids, parse_result_event, read_run, record_run, run_now, RecordInputs};
 pub use scheduler::{
     active_scheduler, cron_next_runs, noop::NoopScheduler, RegisteredEntry, Scheduler,
     SchedulerCapabilities,

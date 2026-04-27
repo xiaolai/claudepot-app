@@ -23,10 +23,12 @@ use chrono::{DateTime, Utc};
 use serde::Deserialize;
 
 use crate::fs_utils;
+use crate::project_progress::{PhaseStatus, ProgressSink};
 
 use super::error::AutomationError;
+use super::install::install_shim;
 use super::store::automation_runs_dir;
-use super::types::{AutomationId, AutomationRun, HostPlatform, RunResult, TriggerKind};
+use super::types::{Automation, AutomationId, AutomationRun, HostPlatform, RunResult, TriggerKind};
 
 /// Inputs to [`record_run`]. All values are knowable by the helper
 /// shim at exit time.
@@ -192,6 +194,129 @@ fn walk_for_filename(dir: &Path, target: &str, depth_remaining: u32) -> Option<P
         }
     }
     None
+}
+
+/// Spawn the automation's helper shim once and return the
+/// resulting [`AutomationRun`]. Used by the "Run Now" button —
+/// distinct from scheduled runs which the OS scheduler invokes
+/// directly. Phase events are emitted on `sink`.
+pub async fn run_now(
+    automation: &Automation,
+    binary_abs_path: &str,
+    claudepot_cli_abs_path: &str,
+    sink: &dyn ProgressSink,
+) -> Result<AutomationRun, AutomationError> {
+    sink.phase("prepare", PhaseStatus::Running);
+    let shim_path = install_shim(automation, binary_abs_path, claudepot_cli_abs_path)?;
+    sink.phase("prepare", PhaseStatus::Complete);
+
+    sink.phase("spawn", PhaseStatus::Running);
+    let started_at = Utc::now();
+    // The shim is responsible for everything inside (per-run dir,
+    // logs, calling _record-run). We just await its exit.
+    let mut cmd = if cfg!(target_os = "windows") {
+        let mut c = tokio::process::Command::new("cmd");
+        c.arg("/C").arg(&shim_path);
+        c
+    } else {
+        let mut c = tokio::process::Command::new("/bin/sh");
+        c.arg(&shim_path);
+        c
+    };
+    let status = cmd
+        .status()
+        .await
+        .map_err(|e| AutomationError::Io(std::io::Error::other(format!(
+            "failed to spawn shim: {e}"
+        ))))?;
+    let ended_at = Utc::now();
+    let exit_code = status.code().unwrap_or(-1);
+    sink.phase("spawn", PhaseStatus::Complete);
+
+    // The shim already wrote result.json via _record-run. Find it
+    // by scanning runs/ for the most recent dir. Tolerate the
+    // record-run subcommand failing — fall back to building the
+    // record from exit code alone.
+    sink.phase("record", PhaseStatus::Running);
+    let runs_dir = automation_runs_dir(&automation.id);
+    let latest = find_latest_run_dir(&runs_dir);
+    let run = if let Some(run_dir) = latest {
+        let result_path = run_dir.join("result.json");
+        if result_path.exists() {
+            let raw = std::fs::read(&result_path)?;
+            serde_json::from_slice(&raw)?
+        } else {
+            synthesize_run(automation, started_at, ended_at, exit_code, &run_dir)
+        }
+    } else {
+        // No run dir means the shim never started or failed
+        // before mkdir. Use a stub so the caller still gets a
+        // record back.
+        synthesize_run(
+            automation,
+            started_at,
+            ended_at,
+            exit_code,
+            &runs_dir.join("unknown"),
+        )
+    };
+    sink.phase("record", PhaseStatus::Complete);
+
+    sink.phase("done", PhaseStatus::Complete);
+    Ok(run)
+}
+
+fn synthesize_run(
+    automation: &Automation,
+    started_at: DateTime<Utc>,
+    ended_at: DateTime<Utc>,
+    exit_code: i32,
+    run_dir: &Path,
+) -> AutomationRun {
+    AutomationRun {
+        id: run_dir
+            .file_name()
+            .and_then(|s| s.to_str())
+            .unwrap_or("synthetic")
+            .to_string(),
+        automation_id: automation.id,
+        started_at,
+        ended_at,
+        duration_ms: (ended_at - started_at).num_milliseconds(),
+        exit_code,
+        result: None,
+        session_jsonl_path: None,
+        stdout_log: "stdout.log".to_string(),
+        stderr_log: "stderr.log".to_string(),
+        trigger_kind: TriggerKind::Manual,
+        host_platform: HostPlatform::current(),
+        claudepot_version: env!("CARGO_PKG_VERSION").to_string(),
+    }
+}
+
+/// Find the most recent `runs/<run-id>/` directory by name.
+/// Skips dotfiles (`.latest` symlink and pointer files).
+fn find_latest_run_dir(runs_dir: &Path) -> Option<PathBuf> {
+    if !runs_dir.exists() {
+        return None;
+    }
+    let mut best: Option<PathBuf> = None;
+    let mut best_name = String::new();
+    for entry in std::fs::read_dir(runs_dir).ok()?.flatten() {
+        let path = entry.path();
+        if !entry.file_type().map(|t| t.is_dir()).unwrap_or(false) {
+            continue;
+        }
+        let name = match entry.file_name().to_str() {
+            Some(n) if !n.starts_with('.') => n.to_string(),
+            _ => continue,
+        };
+        if name > best_name {
+            best_name = name;
+            best = Some(path);
+        }
+    }
+    best
 }
 
 /// Convenience: list all run-id directory names for an automation,
