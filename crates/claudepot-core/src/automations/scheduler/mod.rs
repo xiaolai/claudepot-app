@@ -21,6 +21,16 @@ use super::error::AutomationError;
 use super::types::{Automation, AutomationId, Trigger};
 
 pub mod noop;
+pub mod xml;
+
+#[cfg(target_os = "macos")]
+pub mod launchd;
+
+#[cfg(target_os = "linux")]
+pub mod systemd;
+
+#[cfg(target_os = "windows")]
+pub mod schtasks;
 
 /// Capabilities the active platform supports. Drives UI greying
 /// in the Add/Edit modal.
@@ -86,14 +96,26 @@ pub trait Scheduler {
     fn capabilities(&self) -> SchedulerCapabilities;
 }
 
-/// Construct the active scheduler for the current host. Returns
-/// the `Noop` adapter on unsupported platforms (caller can detect
-/// this via `capabilities().native_label`).
-///
-/// In v1 every OS returns `Noop` until each adapter ships. This
-/// keeps the rest of the wiring safe to land first.
+/// Construct the active scheduler for the current host.
+/// Returns the `Noop` adapter on unsupported platforms (caller
+/// can detect via `capabilities().native_label == "none"`).
 pub fn active_scheduler() -> Box<dyn Scheduler> {
-    Box::new(noop::NoopScheduler)
+    #[cfg(target_os = "macos")]
+    {
+        return Box::new(launchd::LaunchdScheduler);
+    }
+    #[cfg(target_os = "linux")]
+    {
+        return Box::new(systemd::SystemdScheduler);
+    }
+    #[cfg(target_os = "windows")]
+    {
+        return Box::new(schtasks::SchtasksScheduler);
+    }
+    #[cfg(not(any(target_os = "macos", target_os = "linux", target_os = "windows")))]
+    {
+        Box::new(noop::NoopScheduler)
+    }
 }
 
 /// Compute the next `n` fire times of a [`Trigger`] starting at
