@@ -153,6 +153,17 @@ trash = "5"
 tar = "0.4"
 zstd = "0.13"
 
+# Bundle encryption + signing — see `migrate::crypto`.
+# - `age` for passphrase-based symmetric encryption (default-on).
+#   Pure-Rust, audited X25519/scrypt/ChaCha20-Poly1305.
+# - `minisign-verify` for signature verification only on the import
+#   path. Bundle signing (the export-side write) uses the `minisign`
+#   crate; verification is split out so importers don't need the keygen
+#   surface.
+age = "0.10"
+minisign = "0.7"
+minisign-verify = "0.2"
+
 # Secret zeroization — used by the Keys + Settings IPC commands
 # (D-5/6/7) to overwrite token bytes after persistence/copy. Drop alone
 # is not enough: Rust's `String` deallocator does not scrub. `zeroize`

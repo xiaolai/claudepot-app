@@ -12,6 +12,7 @@ mod commands_artifact_usage;
 mod commands_cli;
 mod commands_desktop;
 mod commands_keys;
+mod commands_migrate;
 mod commands_project;
 mod commands_protected;
 mod commands_repair;
@@ -30,6 +31,7 @@ mod dto_artifact_lifecycle;
 mod dto_artifact_usage;
 mod dto_desktop;
 mod dto_keys;
+mod dto_migrate;
 mod dto_project;
 mod dto_project_repair;
 mod dto_session;
@@ -455,6 +457,10 @@ pub fn run() {
             commands_pricing::pricing_refresh,
             config_watch::config_watch_start,
             config_watch::config_watch_stop,
+            commands_migrate::migrate_inspect,
+            commands_migrate::migrate_export,
+            commands_migrate::migrate_import,
+            commands_migrate::migrate_undo,
         ])
         .run(tauri::generate_context!())
         .unwrap_or_else(|e| {

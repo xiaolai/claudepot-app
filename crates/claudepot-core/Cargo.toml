@@ -41,6 +41,9 @@ fs2.workspace = true
 trash.workspace = true
 tar.workspace = true
 zstd.workspace = true
+age.workspace = true
+minisign.workspace = true
+minisign-verify.workspace = true
 
 [target.'cfg(target_os = "macos")'.dependencies]
 pbkdf2.workspace = true
