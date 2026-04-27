@@ -18,10 +18,16 @@ pub enum MigrateError {
     Serialize(String),
 
     #[error(
-        "unsupported bundle schema_version {found} (expected {expected}); \
-         run `project migrate inspect --upgrade-schema` first"
+        "unsupported bundle schema_version {found} (expected {expected})"
     )]
     UnsupportedSchemaVersion { found: u32, expected: u32 },
+
+    /// Configuration error — user / adapter supplied a missing or
+    /// inconsistent flag. Distinguished from `NotImplemented` so the
+    /// CLI can format the message as a user-facing usage error rather
+    /// than a feature-gap message.
+    #[error("configuration error: {0}")]
+    Configuration(String),
 
     #[error("project not found in bundle: {0}")]
     ProjectNotInBundle(String),

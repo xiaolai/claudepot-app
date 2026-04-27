@@ -75,13 +75,26 @@ pub fn rewrite_jsonl_multi(
 /// Rewrite a single JSONL line. Cheap fast path: if no rule's `from`
 /// occurs anywhere in the line, return as-is. Slow path: parse JSON,
 /// walk, serialize.
+///
+/// Parse failures are logged at `warn` and the line is passed through
+/// untouched. Silent skipping was the prior behavior; the audit
+/// flagged it as opaque on corrupted JSONL — surfacing through tracing
+/// makes the gap visible without aborting the whole rewrite (a single
+/// torn line shouldn't sink an otherwise-clean migration).
 pub fn rewrite_jsonl_line_multi(line: &str, table: &SubstitutionTable) -> (String, usize) {
     if !line_contains_any(line, table) {
         return (line.to_string(), 0);
     }
     let mut value: Value = match serde_json::from_str(line) {
         Ok(v) => v,
-        Err(_) => return (line.to_string(), 0),
+        Err(e) => {
+            tracing::warn!(
+                error = %e,
+                len = line.len(),
+                "migrate::rewrite: passing through unparseable JSONL line",
+            );
+            return (line.to_string(), 0);
+        }
     };
     let count = rewrite_value(&mut value, table);
     if count == 0 {
@@ -89,7 +102,10 @@ pub fn rewrite_jsonl_line_multi(line: &str, table: &SubstitutionTable) -> (Strin
     }
     match serde_json::to_string(&value) {
         Ok(s) => (s, count),
-        Err(_) => (line.to_string(), 0),
+        Err(e) => {
+            tracing::warn!(error = %e, "migrate::rewrite: serialize after rewrite failed");
+            (line.to_string(), 0)
+        }
     }
 }
 
@@ -343,9 +359,14 @@ mod tests {
         let line = r#"{"cwd":"/Users/joker/x/src/main.rs"}"#;
         let (out, n) = rewrite_jsonl_line_multi(line, &t);
         assert!(n >= 1);
-        // Original `/` boundary is preserved — the source file's shape
-        // is intentionally kept; CC's resume reader handles either.
-        assert!(out.contains(r#""cwd":"C:\\Users\\alice\\x/src/main.rs""#));
+        // Cross-OS rewrite: the suffix separator is coerced to the
+        // target's native form. Mixed separators (`C:\x/y`) are wrong
+        // because CC writers don't produce them and downstream
+        // sanitize/canonicalize would reject the path.
+        assert!(
+            out.contains(r#""cwd":"C:\\Users\\alice\\x\\src\\main.rs""#),
+            "expected backslash-separated suffix; got: {out}"
+        );
     }
 
     #[test]

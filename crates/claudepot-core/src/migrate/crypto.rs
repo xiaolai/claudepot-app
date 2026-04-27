@@ -18,14 +18,20 @@
 //!
 //! ## Signing (`minisign`)
 //!
-//! Optional. When `--sign KEYFILE` is set, the manifest sha256 trailer
-//! is signed with the supplied minisign secret key, and the signature
-//! is written next to the bundle as `<bundle>.minisig`. Required for
-//! `--unattended-import`.
+//! Optional. When `--sign KEYFILE` is set, the **entire bundle file
+//! bytes** are signed with the supplied minisign secret key, and the
+//! signature is written next to the bundle as `<bundle>.minisig`.
+//!
+//! This is a deliberate deviation from `dev-docs/project-migrate-spec.md`
+//! §3.3, which proposes signing only the manifest sha256. Signing the
+//! bundle bytes is strictly stronger (covers payload tampering as well
+//! as manifest tampering), at the cost of forcing the verifier to
+//! read the whole file. The deviation is documented in `bundle.rs`
+//! and is the contract this module implements; a future PR can either
+//! align both sides if the spec wants the lighter form.
 //!
 //! Verification on the import side reads the sidecar `<bundle>.minisig`
-//! and a public key (provided via `--verify-key PUBFILE` or by trust
-//! lookup against `~/.claudepot/trust/`).
+//! and a public key (provided via `--verify-key PUBFILE`).
 
 use crate::migrate::error::MigrateError;
 use age::secrecy::SecretString;
@@ -42,41 +48,65 @@ pub const SIGNATURE_SUFFIX: &str = ".minisig";
 /// passphrase. Returns the path to the encrypted output. The plaintext
 /// is **not** removed by this function — the caller chooses whether
 /// to retain it (debug mode) or delete it (default).
+///
+/// Streams plaintext → age encryptor → output file via buffered I/O
+/// so we don't buffer the entire bundle in memory (audit Performance
+/// finding). The intermediate buffer is bounded by `BufWriter`'s
+/// default capacity (8KB).
 pub fn encrypt_bundle_with_passphrase(
     plaintext_bundle: &Path,
     passphrase: &SecretString,
 ) -> Result<PathBuf, MigrateError> {
-    let plaintext = fs::read(plaintext_bundle).map_err(MigrateError::from)?;
-    let encryptor = age::Encryptor::with_user_passphrase(passphrase.clone());
-
-    let mut out = Vec::new();
-    let mut writer = encryptor
-        .wrap_output(&mut out)
-        .map_err(|e| MigrateError::Serialize(format!("age encrypt: {e}")))?;
-    use std::io::Write;
-    writer
-        .write_all(&plaintext)
-        .map_err(MigrateError::from)?;
-    writer
-        .finish()
-        .map_err(|e| MigrateError::Serialize(format!("age finish: {e}")))?;
-
     let mut out_path_os = plaintext_bundle.as_os_str().to_os_string();
     out_path_os.push(ENCRYPTED_SUFFIX);
     let out_path = PathBuf::from(out_path_os);
-    fs::write(&out_path, out).map_err(MigrateError::from)?;
+
+    let plaintext_file = fs::File::open(plaintext_bundle).map_err(MigrateError::from)?;
+    let mut reader = std::io::BufReader::new(plaintext_file);
+    let out_file = fs::File::create(&out_path).map_err(MigrateError::from)?;
+    let writer_buf = std::io::BufWriter::new(out_file);
+
+    let encryptor = age::Encryptor::with_user_passphrase(passphrase.clone());
+    let mut age_writer = encryptor
+        .wrap_output(writer_buf)
+        .map_err(|e| MigrateError::Serialize(format!("age encrypt: {e}")))?;
+    std::io::copy(&mut reader, &mut age_writer).map_err(MigrateError::from)?;
+    let buf_writer = age_writer
+        .finish()
+        .map_err(|e| MigrateError::Serialize(format!("age finish: {e}")))?;
+    let mut out_file = buf_writer
+        .into_inner()
+        .map_err(|e| MigrateError::from(e.into_error()))?;
+    use std::io::Write;
+    out_file.flush().map_err(MigrateError::from)?;
+    out_file.sync_all().map_err(MigrateError::from)?;
     Ok(out_path)
 }
 
-/// Decrypt a `.age` bundle to a sibling plaintext file (the same path
-/// minus the `.age` suffix). Returns the plaintext path. Wrong
-/// passphrase produces `IntegrityViolation` (no partial extraction).
+/// Decrypt a `.age` bundle into a unique tempfile under the
+/// caller-supplied directory. Returns the plaintext path AND a
+/// matching sidecar path (since downstream `BundleReader::open` no
+/// longer requires the original sidecar — we hand it the plaintext
+/// directly via the unverified path).
+///
+/// Why a tempfile, not a deterministic sibling: a sibling at
+/// `<encrypted>` minus `.age` could collide with an existing plaintext
+/// bundle, and the cleanup guard would then delete the user's
+/// pre-existing file on import success. Using `NamedTempFile` keeps
+/// the path unpredictable and outside the user's working tree.
 pub fn decrypt_bundle_with_passphrase(
     encrypted_bundle: &Path,
     passphrase: &SecretString,
+    tmpdir: &Path,
 ) -> Result<PathBuf, MigrateError> {
-    let encrypted = fs::read(encrypted_bundle).map_err(MigrateError::from)?;
-    let decryptor = age::Decryptor::new(&encrypted[..])
+    // Stream the encrypted bytes through age's decryptor into the
+    // tempfile via std::io::copy. The earlier shape buffered the
+    // whole encrypted payload AND the whole plaintext in memory
+    // (audit Performance finding); now both stages are bounded by
+    // the BufReader/BufWriter defaults.
+    let enc_file = fs::File::open(encrypted_bundle).map_err(MigrateError::from)?;
+    let enc_reader = std::io::BufReader::new(enc_file);
+    let decryptor = age::Decryptor::new(enc_reader)
         .map_err(|e| MigrateError::IntegrityViolation(format!("age open: {e}")))?;
 
     // age 0.10's Decryptor is an enum; passphrase mode lives on the
@@ -93,29 +123,29 @@ pub fn decrypt_bundle_with_passphrase(
         }
     };
 
-    let mut plaintext = Vec::new();
-    use std::io::Read;
-    reader
-        .read_to_end(&mut plaintext)
+    fs::create_dir_all(tmpdir).map_err(MigrateError::from)?;
+    // Tempfile inside the caller's staging area. We keep the path
+    // inside our tempdir so the cleanup guard can remove it without
+    // touching the user's tree.
+    let tmp = tempfile::Builder::new()
+        .prefix("decrypted-")
+        .suffix(".tar.zst")
+        .tempfile_in(tmpdir)
         .map_err(MigrateError::from)?;
-
-    let stem = encrypted_bundle
-        .file_name()
-        .and_then(|s| s.to_str())
-        .ok_or_else(|| {
-            MigrateError::IntegrityViolation(
-                "encrypted bundle has no filename".to_string(),
-            )
-        })?;
-    let plaintext_name = stem.strip_suffix(ENCRYPTED_SUFFIX).ok_or_else(|| {
-        MigrateError::IntegrityViolation(format!(
-            "encrypted bundle filename does not end with {ENCRYPTED_SUFFIX}"
-        ))
+    let tmp_path = tmp.path().to_path_buf();
+    {
+        let out_file = tmp.as_file();
+        let mut buf_writer = std::io::BufWriter::new(out_file);
+        std::io::copy(&mut reader, &mut buf_writer).map_err(MigrateError::from)?;
+        use std::io::Write;
+        buf_writer.flush().map_err(MigrateError::from)?;
+    }
+    // Detach so the file outlives this function; cleanup is the
+    // caller's responsibility (PlaintextCleanupGuard).
+    let _ = tmp.into_temp_path().keep().map_err(|e| {
+        MigrateError::Io(std::io::Error::other(format!("keep tempfile: {e}")))
     })?;
-    let parent = encrypted_bundle.parent().unwrap_or_else(|| Path::new("."));
-    let out = parent.join(plaintext_name);
-    fs::write(&out, plaintext).map_err(MigrateError::from)?;
-    Ok(out)
+    Ok(tmp_path)
 }
 
 /// Sign the bundle (entire file bytes) using a minisign secret key.
@@ -227,11 +257,46 @@ mod tests {
         // Original plaintext is left in place.
         assert_eq!(fs::read(&plaintext_path).unwrap(), plaintext);
 
-        // Remove plaintext and decrypt to a fresh location.
+        // Remove plaintext and decrypt to a fresh location. The
+        // decrypt landing tempdir is a separate path we control —
+        // keeping the decrypted plaintext outside the user's
+        // working tree.
         fs::remove_file(&plaintext_path).unwrap();
-        let decrypted = decrypt_bundle_with_passphrase(&enc, &pwd).unwrap();
-        assert_eq!(decrypted, plaintext_path);
+        let decrypt_tmpdir = tmp.path().join("staging");
+        let decrypted =
+            decrypt_bundle_with_passphrase(&enc, &pwd, &decrypt_tmpdir).unwrap();
+        assert!(decrypted.starts_with(&decrypt_tmpdir));
         assert_eq!(fs::read(&decrypted).unwrap(), plaintext);
+        // The original plaintext sibling path was NOT touched.
+        assert!(!plaintext_path.exists());
+    }
+
+    #[test]
+    fn decrypt_does_not_clobber_existing_plaintext_sibling() {
+        // Regression for the audit Sec finding: prior version wrote to
+        // a deterministic sibling, which would overwrite (and the
+        // cleanup guard would then delete) any pre-existing plaintext.
+        let tmp = tempfile::tempdir().unwrap();
+        let plaintext_path = tmp.path().join("p.tar.zst");
+        fs::write(&plaintext_path, b"original-content").unwrap();
+        let enc = encrypt_bundle_with_passphrase(&plaintext_path, &passphrase("pw"))
+            .unwrap();
+        // Now we simulate a SECOND, unrelated plaintext at the same
+        // sibling path that should NOT be overwritten by a decrypt
+        // pass.
+        fs::write(&plaintext_path, b"unrelated-pre-existing").unwrap();
+        let stage = tmp.path().join("stage");
+        let _decrypted = decrypt_bundle_with_passphrase(
+            &enc,
+            &passphrase("pw"),
+            &stage,
+        )
+        .unwrap();
+        // The pre-existing sibling is intact.
+        assert_eq!(
+            fs::read(&plaintext_path).unwrap(),
+            b"unrelated-pre-existing"
+        );
     }
 
     #[test]
@@ -241,8 +306,12 @@ mod tests {
         fs::write(&plaintext_path, b"x").unwrap();
         let enc = encrypt_bundle_with_passphrase(&plaintext_path, &passphrase("right"))
             .unwrap();
-        let err = decrypt_bundle_with_passphrase(&enc, &passphrase("wrong"))
-            .unwrap_err();
+        let err = decrypt_bundle_with_passphrase(
+            &enc,
+            &passphrase("wrong"),
+            &tmp.path().join("stage"),
+        )
+        .unwrap_err();
         match err {
             MigrateError::IntegrityViolation(_) => {}
             other => panic!("expected IntegrityViolation, got {other:?}"),
@@ -254,8 +323,12 @@ mod tests {
         let tmp = tempfile::tempdir().unwrap();
         let p = tmp.path().join("not-encrypted.tar.zst.age");
         fs::write(&p, b"this is not an age file").unwrap();
-        let err =
-            decrypt_bundle_with_passphrase(&p, &passphrase("anything")).unwrap_err();
+        let err = decrypt_bundle_with_passphrase(
+            &p,
+            &passphrase("anything"),
+            &tmp.path().join("stage"),
+        )
+        .unwrap_err();
         assert!(matches!(err, MigrateError::IntegrityViolation(_)));
     }
 

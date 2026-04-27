@@ -225,7 +225,24 @@ pub fn inspect(ctx: &AppContext, bundle: PathBuf, upgrade_schema: bool) -> Resul
             "--upgrade-schema not yet implemented (no older schema versions exist)"
         ));
     }
-    let manifest = migrate::inspect(&bundle).map_err(map_migrate_err)?;
+    // Encrypted bundles route through the inspect_encrypted helper.
+    // Passphrase resolution mirrors `import` — env first, no
+    // interactive prompt (the CLI hasn't pulled in `rpassword` yet).
+    let is_encrypted = bundle.extension().is_some_and(|e| e == "age");
+    let manifest = if is_encrypted {
+        let pwd = std::env::var("CLAUDEPOT_PASSPHRASE")
+            .ok()
+            .filter(|s| !s.is_empty())
+            .map(migrate::SecretString::from)
+            .ok_or_else(|| {
+                anyhow!(
+                    "encrypted bundle: set CLAUDEPOT_PASSPHRASE to inspect"
+                )
+            })?;
+        migrate::inspect_encrypted(&bundle, &pwd).map_err(map_migrate_err)?
+    } else {
+        migrate::inspect(&bundle).map_err(map_migrate_err)?
+    };
     if ctx.json {
         println!("{}", serde_json::to_string_pretty(&manifest)?);
     } else {

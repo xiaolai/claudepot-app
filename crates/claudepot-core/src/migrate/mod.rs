@@ -4,48 +4,91 @@
 //! `dev-docs/project-migrate-cc-research.md` for verified CC source
 //! citations.
 //!
-//! # v0 scope
+//! # Capability matrix
 //!
-//! What ships in this revision:
-//!   - Bundle format (`*.claudepot.tar.zst`) — write/read, integrity
-//!     sha256 sidecar, manifest with self-trailer.
-//!   - Path-rewrite engine — NFC normalization, multi-rule
-//!     substitution table, slug recompute, file-history dual rewrite.
-//!   - Conflict-resolution policy (skip / merge / replace).
-//!   - Trust gates (hooks split, MCP scrubbing).
-//!   - Journal + staging + undo-window primitives.
-//!   - Export + import orchestrators for the simple-project cases
-//!     (one project, no `--include-global`, no `--include-worktree`).
+//! What ships:
+//!   - Bundle format (`*.claudepot.tar.zst`): writer + reader, outer
+//!     sidecar sha256 (REQUIRED at open), inner `integrity.sha256`
+//!     (cross-checked against on-disk after extract), manifest with
+//!     self-trailer (REQUIRED).
+//!   - Path-rewrite engine: NFC normalization on both sides of every
+//!     substitution rule AND on lookups, multi-rule table with
+//!     longest-prefix-wins, slug recompute, target-native separator
+//!     coercion on cross-OS rewrites, file-history dual rewrite
+//!     (rename on disk + JSONL `Record` key rewrite).
+//!   - Conflict-resolution policy (skip / merge / replace + prefer-
+//!     imported|target).
+//!   - Trust gates: hooks split out into `proposed-hooks.json`,
+//!     MCP absolute-path commands flagged `needs_resolution`.
+//!   - Apply pipeline P0-P5 + P8: integrity verify, stage, plan,
+//!     rewrite, lock (global import lock via `project_lock`), apply,
+//!     release. Per-step `after_sha256` populated for tamper
+//!     detection on undo.
+//!   - Surgical CreateDir rollback: removes only journaled files,
+//!     surfaces user-added survivors as `skipped_tampered`.
+//!   - Counter-journal on undo (replays the inverse so undo-of-undo
+//!     is well-defined within the 24h window).
+//!   - `age` passphrase encryption + `minisign` signing/verification.
+//!   - `--include-global` (Bucket C: CLAUDE.md, agents/, skills/,
+//!     commands/, plugins registry, scrubbed settings/mcp).
+//!   - `--include-worktree` (project-scoped settings + CLAUDE.md;
+//!     `settings.local.json` and `managed-settings.*` always
+//!     excluded).
+//!   - `--include-claudepot-state` (account stubs without secrets,
+//!     prefs, lifecycle; account stubs are LOG-ONLY per §16 Q2).
 //!
-//! What is deliberately deferred (with explicit `NotImplemented` errors):
-//!   - Bundle encryption (`age`) — `crypto::require_plaintext_only`.
-//!   - Bundle signing (`minisign`) — `crypto::require_unsigned`.
-//!   - `--include-worktree` worktree.tar bundling.
-//!   - Plugin re-installation on import.
-//!   - macOS `com.apple.quarantine` xattr stripping.
-//!   - GUI / Tauri integration.
-//!   - WyHash long-path slug parity (still uses djb2 via
-//!     `project_sanitize`; CC's `findProjectDir` prefix-scan handles it,
-//!     see spec §5.3).
+//! What returns `NotImplemented` or `Configuration` (loud refusal,
+//! not silent degradation):
+//!   - `--include-live` — spec §9.1 retry semantics.
+//!   - `--upgrade-schema` — no older schema versions exist yet.
+//!   - Encrypted export without a passphrase — `Configuration` (the
+//!     feature ships; the user must supply the passphrase).
 //!
-//! Each deferred surface has a stub or `NotImplemented` return so
-//! callers see a deliberate refusal rather than silent degradation.
+//! Known partial coverage / spec gaps (documented here so the
+//! mismatch is visible — these are tracked in the audit follow-up):
+//!   - Slug derivation uses cwd, not the canonical git root. Worktrees
+//!     of one repo end up under separate slugs instead of sharing one.
+//!     Spec §5.3 calls for `findCanonicalGitRoot`; we still do
+//!     `sanitize_path(cwd)`. Auto-memory paths drift accordingly.
+//!   - Session enumeration walks one slug, not the worktree set.
+//!     Sibling-worktree sessions can fall outside the export.
+//!   - Conflict resolution lands `Apply`. `Merge` and `ArchiveThenApply`
+//!     are dispatched to the loud refusal path inside `import_bundle`.
+//!   - Bucket B (file-history dirs, todos/tasks/plans/session-env,
+//!     security_warnings_state) is partially implemented (file-history
+//!     repath only).
+//!   - `~/.claude.json` projects-map fragment merge (§5.6) and
+//!     `history.jsonl` fragment dedupe (§5.7) are not yet wired.
+//!   - Plugin re-install on import, `--accept-mcp` write-side, and
+//!     statusline-script trust gating live in `global` as TODO.
+//!   - Tauri commands return synchronously; the spec §12.3 op-id
+//!     progress channel is not wired.
+//!   - WyHash long-path slug parity — still djb2 (CC's
+//!     `findProjectDir` prefix-scan tolerates it, spec §5.3).
+//!   - macOS `com.apple.quarantine` xattr stripping is a no-op stub.
 
+// Public surface exposed across crate boundaries (CLI / Tauri use
+// these). The other modules are internal implementation detail.
 pub mod apply;
-pub mod bundle;
 pub mod conflicts;
-pub mod crypto;
-pub mod error;
-pub mod file_history;
-pub mod global;
-pub mod state;
-pub mod worktree;
 pub mod manifest;
-pub mod nfc;
-pub mod plan;
-pub mod quarantine;
-pub mod rewrite;
-pub mod trust;
+pub mod state;
+
+// Internal-only — the orchestrator wires these together. External
+// callers should use the public surface re-exported below
+// (`MigrateError`, `SecretString`, `export_projects`, `import_bundle`,
+// `inspect`, `inspect_encrypted`, `import_undo`).
+pub(crate) mod bundle;
+pub(crate) mod crypto;
+pub(crate) mod error;
+pub(crate) mod file_history;
+pub(crate) mod global;
+pub(crate) mod nfc;
+pub(crate) mod plan;
+pub(crate) mod quarantine;
+pub(crate) mod rewrite;
+pub(crate) mod trust;
+pub(crate) mod worktree;
 
 #[cfg(test)]
 mod golden_tests;
@@ -114,10 +157,21 @@ pub fn export_projects(
 ) -> Result<ExportReceipt, MigrateError> {
     if opts.encrypt && opts.encrypt_passphrase.is_none() {
         // Adapter must prompt and pass the SecretString in. Refusing
-        // here is loud rather than silent (matches the rest of the
-        // crypto-failure surface).
-        return Err(MigrateError::NotImplemented(
+        // here is loud rather than silent. Configuration (not
+        // NotImplemented) — encryption is supported; the user just
+        // didn't wire the passphrase.
+        return Err(MigrateError::Configuration(
             "encryption requested but no passphrase supplied — adapter must prompt".to_string(),
+        ));
+    }
+    if opts.include_live {
+        // Spec §9.1: --include-live requires fstat-based live-session
+        // detection plus a 3-retry copy + `live_at_export: true` flag.
+        // Neither path is built yet; refuse loudly so the user sees
+        // the gap rather than getting a silent normal export.
+        return Err(MigrateError::NotImplemented(
+            "--include-live (live-session export with retry semantics, spec §9.1)"
+                .to_string(),
         ));
     }
 
@@ -339,15 +393,24 @@ pub fn inspect(bundle_path: &Path) -> Result<manifest::BundleManifest, MigrateEr
     r.read_manifest()
 }
 
-/// Inspect an encrypted bundle by decrypting to a tempfile and
-/// reading the manifest.
+/// Inspect an encrypted bundle by decrypting to a tempfile under our
+/// own staging tree and reading the manifest. Never writes plaintext
+/// next to the encrypted bundle (see `crypto::decrypt_bundle_with_passphrase`
+/// for the rationale).
 pub fn inspect_encrypted(
     bundle_path: &Path,
     passphrase: &age::secrecy::SecretString,
 ) -> Result<manifest::BundleManifest, MigrateError> {
-    let plaintext = crypto::decrypt_bundle_with_passphrase(bundle_path, passphrase)?;
+    let stage = apply::imports_root().join(format!("inspect-{}", uuid::Uuid::new_v4()));
+    let plaintext =
+        crypto::decrypt_bundle_with_passphrase(bundle_path, passphrase, &stage)?;
     let _cleanup = PlaintextCleanupGuard::new(Some(plaintext.clone()));
-    let r = bundle::BundleReader::open(&plaintext)?;
+    // The decrypted plaintext lives under our staging tree and was
+    // never written next to the user's encrypted bundle, so the outer
+    // sidecar is by-design absent. Use `open_unverified` — verification
+    // is structurally equivalent because age's Poly1305 already
+    // authenticated the plaintext.
+    let r = bundle::BundleReader::open_unverified(&plaintext)?;
     r.read_manifest()
 }
 
@@ -391,7 +454,16 @@ pub struct UndoReceipt {
 /// repair tree, verifies it's within window, runs the LIFO replay,
 /// and writes a counter-journal alongside.
 pub fn import_undo() -> Result<UndoReceipt, MigrateError> {
-    let (journals_dir, _, _) = crate::paths::claudepot_repair_dirs();
+    // Take the same lock as import — mutually exclusive with any
+    // other in-flight migrate / rename / repair op (spec §8.3).
+    let (journals_dir, locks_dir, _) = crate::paths::claudepot_repair_dirs();
+    let (_lock_guard, _broken) =
+        crate::project_lock::acquire(&locks_dir, "import").map_err(|e| {
+            MigrateError::Configuration(format!(
+                "could not acquire import lock for undo — another claudepot \
+                 operation may be running: {e}"
+            ))
+        })?;
     if !journals_dir.exists() {
         return Err(MigrateError::Io(std::io::Error::new(
             std::io::ErrorKind::NotFound,
@@ -436,13 +508,17 @@ pub fn import_undo() -> Result<UndoReceipt, MigrateError> {
 
     let report = apply::rollback(&journal)?;
 
-    // Write counter-journal.
+    // Write counter-journal so undo-of-undo is well-defined (§8.3).
+    // Record the original journal steps (in apply order) — replaying
+    // them is the inverse of an undo. Crucially we keep the original
+    // `dir_inventory` and `snapshot_path` references so a redo would
+    // restore exactly what the undo removed.
     let counter = apply::ImportJournal {
         bundle_id: format!("undo-{}", journal.bundle_id),
         started_unix_secs: now_secs(),
         finished_unix_secs: Some(now_secs()),
         claudepot_version: env!("CARGO_PKG_VERSION").to_string(),
-        steps: Vec::new(),
+        steps: journal.steps.clone(),
         committed: true,
     };
     let counter_path = journals_dir.join(format!("undo-{}.json", journal.bundle_id));
@@ -537,25 +613,35 @@ pub fn import_bundle(
         crypto::verify_bundle_signature(bundle_path, verify_key)?;
     }
 
-    // If the path ends in `.age`, decrypt to a sibling plaintext file
-    // first. The plaintext file lives alongside the `.age` for the
-    // duration of the import; we delete it after success.
-    let (bundle_path_resolved, plaintext_to_cleanup) =
+    // If the path ends in `.age`, decrypt into a tempfile under our
+    // staging tree (NOT next to the user's encrypted bundle — that
+    // could clobber an unrelated plaintext sibling). We delete the
+    // tempfile after success or failure via `PlaintextCleanupGuard`.
+    let bundle_id = uuid::Uuid::new_v4().to_string();
+    let (bundle_path_resolved, plaintext_to_cleanup, encrypted) =
         if bundle_path.extension().is_some_and(|e| e == "age") {
             let pwd = opts.decrypt_passphrase.clone().ok_or_else(|| {
-                MigrateError::NotImplemented(
+                MigrateError::Configuration(
                     "encrypted bundle but no passphrase supplied — adapter must prompt"
                         .to_string(),
                 )
             })?;
-            let plaintext = crypto::decrypt_bundle_with_passphrase(bundle_path, &pwd)?;
-            (plaintext.clone(), Some(plaintext))
+            let stage = apply::imports_root().join(format!("decrypt-{bundle_id}"));
+            let plaintext =
+                crypto::decrypt_bundle_with_passphrase(bundle_path, &pwd, &stage)?;
+            (plaintext.clone(), Some(plaintext), true)
         } else {
-            (bundle_path.to_path_buf(), None)
+            (bundle_path.to_path_buf(), None, false)
         };
     let bundle_path = &bundle_path_resolved;
 
-    let reader = bundle::BundleReader::open(bundle_path)?;
+    let reader = if encrypted {
+        // age's Poly1305 already authenticated the plaintext bytes, so
+        // the outer sidecar is unnecessary on this temp file. Skip it.
+        bundle::BundleReader::open_unverified(bundle_path)?
+    } else {
+        bundle::BundleReader::open(bundle_path)?
+    };
     let manifest = reader.read_manifest()?;
     let _cleanup_guard = PlaintextCleanupGuard::new(plaintext_to_cleanup);
     if manifest.schema_version != manifest::SCHEMA_VERSION {
@@ -565,10 +651,22 @@ pub fn import_bundle(
         });
     }
 
-    let bundle_id = uuid::Uuid::new_v4().to_string();
     let staging = apply::staging_dir(&bundle_id);
     let journal_path = apply::journal_path(&bundle_id);
     let mut journal = apply::ImportJournal::new(bundle_id.clone());
+
+    // Acquire the global import lock per spec §8 P4 — mutually
+    // exclusive with rename / repair / clean_orphans / move so a
+    // concurrent claudepot run can't trample our staging or journal.
+    // Lifetime: held for P1..P8 via the RAII `LockGuard`.
+    let (_, locks_dir, _) = crate::paths::claudepot_repair_dirs();
+    let (_lock_guard, _broken) =
+        crate::project_lock::acquire(&locks_dir, "import").map_err(|e| {
+            MigrateError::Configuration(format!(
+                "could not acquire import lock — another claudepot operation \
+                 may be running: {e}"
+            ))
+        })?;
 
     let mut projects_imported = Vec::new();
     let mut projects_refused = Vec::new();
@@ -617,6 +715,15 @@ pub fn import_bundle(
     fs::create_dir_all(&staging).map_err(MigrateError::from)?;
     if let Err(e) = reader.extract_all(&staging) {
         // Stage failure: nothing landed yet. Just clean staging.
+        let _ = apply::discard_staging(&bundle_id);
+        return Err(e);
+    }
+    // §3.3 inner integrity gate: the outer sidecar covers the
+    // compressed bytes; this gate covers each unpacked file. Without
+    // it, a bundle whose tar contents were swapped after a re-pack
+    // (with a fresh outer sidecar) would still pass open(). With it,
+    // every payload digest must match `integrity.sha256` or we abort.
+    if let Err(e) = bundle::verify_extracted_dir(&staging) {
         let _ = apply::discard_staging(&bundle_id);
         return Err(e);
     }
@@ -711,6 +818,10 @@ pub fn import_bundle(
             Err(e) => return Err(MigrateError::from(e)),
         }
 
+        // Populate dir_inventory so surgical rollback knows exactly
+        // which files we wrote — preserves user work added post-
+        // import (audit Robustness finding).
+        let dir_inventory = apply::collect_dir_inventory(&target_slug_dir);
         journal.record(apply::JournalStep {
             kind: apply::JournalStepKind::CreateDir,
             before: None,
@@ -718,6 +829,7 @@ pub fn import_bundle(
             snapshot_path: None,
             after_sha256: None,
             fragment_key: None,
+            dir_inventory,
             timestamp_unix_secs: now_secs(),
         });
 
@@ -727,7 +839,11 @@ pub fn import_bundle(
             if staged_project_root.join("project-scoped").exists() {
                 let target_cwd = std::path::PathBuf::from(&target_cwd);
                 if target_cwd.exists() {
-                    let steps = worktree::apply_worktree(&staged_project_root, &target_cwd)?;
+                    let steps = worktree::apply_worktree(
+                        &staged_project_root,
+                        &target_cwd,
+                        &bundle_id,
+                    )?;
                     for s in steps {
                         let kind = match s.kind {
                             worktree::WorktreeApplyKind::Created => {
@@ -738,13 +854,16 @@ pub fn import_bundle(
                             }
                             worktree::WorktreeApplyKind::SkippedIdentical => continue,
                         };
+                        let after_path = std::path::Path::new(&s.after);
+                        let after_sha256 = apply::sha256_of_file_optional(after_path);
                         journal.record(apply::JournalStep {
                             kind,
                             before: None,
                             after: Some(s.after),
                             snapshot_path: None,
-                            after_sha256: None,
+                            after_sha256,
                             fragment_key: None,
+            dir_inventory: Vec::new(),
                             timestamp_unix_secs: now_secs(),
                         });
                     }
@@ -764,6 +883,7 @@ pub fn import_bundle(
         let outcome = state::apply_claudepot_state(
             &staging,
             &crate::paths::claudepot_data_dir(),
+            &bundle_id,
         )?;
         for created in outcome.created {
             journal.record(apply::JournalStep {
@@ -773,6 +893,7 @@ pub fn import_bundle(
                 snapshot_path: None,
                 after_sha256: None,
                 fragment_key: None,
+            dir_inventory: Vec::new(),
                 timestamp_unix_secs: now_secs(),
             });
         }
@@ -784,6 +905,7 @@ pub fn import_bundle(
                 snapshot_path: None,
                 after_sha256: None,
                 fragment_key: None,
+            dir_inventory: Vec::new(),
                 timestamp_unix_secs: now_secs(),
             });
         }
@@ -816,13 +938,20 @@ pub fn import_bundle(
                 | global::GlobalApplyKind::McpProposed => apply::JournalStepKind::CreateFile,
                 global::GlobalApplyKind::SkippedIdentical => continue,
             };
+            // Compute sha256 of the post-apply file so rollback's
+            // tamper detection has a real baseline. Without this the
+            // after_sha256 field stays None and post-import edits go
+            // undetected during undo.
+            let after_path = std::path::Path::new(&step.after);
+            let after_sha256 = apply::sha256_of_file_optional(after_path);
             journal.record(apply::JournalStep {
                 kind,
                 before: None,
                 after: Some(step.after),
                 snapshot_path: step.snapshot,
-                after_sha256: None,
+                after_sha256,
                 fragment_key: None,
+            dir_inventory: Vec::new(),
                 timestamp_unix_secs: now_secs(),
             });
         }
@@ -920,17 +1049,20 @@ fn walk_and_append(
         let entry = entry.map_err(MigrateError::from)?;
         let ft = entry.file_type().map_err(MigrateError::from)?;
         let path = entry.path();
+        // Symlink check FIRST. The legacy version put this inside the
+        // `is_file` branch, where it was unreachable because a symlink
+        // satisfies neither `is_file` nor `is_dir` — `FileType` reports
+        // them as their own variant. Result: symlinks were silently
+        // skipped, contradicting the §3.1 zero-symlink policy.
+        if ft.is_symlink() {
+            return Err(MigrateError::IntegrityViolation(format!(
+                "source contains symlink: {}",
+                path.display()
+            )));
+        }
         if ft.is_dir() {
             walk_and_append(&path, base, bundle_prefix, writer, inventory)?;
         } else if ft.is_file() {
-            // Refuse symlinks at the source side too — match the
-            // bundle-side §3.1 rule.
-            if ft.is_symlink() {
-                return Err(MigrateError::IntegrityViolation(format!(
-                    "source contains symlink: {}",
-                    path.display()
-                )));
-            }
             let rel = path
                 .strip_prefix(base)
                 .map_err(|e| {
@@ -1068,7 +1200,9 @@ mod tests {
             sign_password: None,
         };
         let err = export_projects(&cfg, opts).unwrap_err();
-        assert!(matches!(err, MigrateError::NotImplemented(_)));
+        // Configuration (not NotImplemented) — encryption ships;
+        // missing passphrase is a usage error.
+        assert!(matches!(err, MigrateError::Configuration(_)));
     }
 
     #[test]
@@ -1376,6 +1510,57 @@ mod tests {
         imp.decrypt_passphrase = Some(pwd.clone());
         let r = import_bundle(&cfg_target, &receipt.bundle_path, imp).unwrap();
         assert_eq!(r.projects_imported.len(), 1);
+
+        std::env::remove_var("CLAUDEPOT_DATA_DIR");
+    }
+
+    #[test]
+    fn undo_writes_counter_journal_replayable_for_redo() {
+        // Audit Robustness fix: counter-journal must record the
+        // inverse steps so undo-of-undo (redo) is well-defined within
+        // the 24h window. The earlier shape persisted an EMPTY
+        // counter, making redo impossible.
+        let _lock = lock_data_dir();
+        let tmp = tempfile::tempdir().unwrap();
+        std::env::set_var("CLAUDEPOT_DATA_DIR", tmp.path().join("claudepot"));
+        let cfg_src = tmp.path().join("src/.claude");
+        fs::create_dir_all(cfg_src.join("projects")).unwrap();
+        let cwd = "/tmp/test-undo-redo".to_string();
+        seed_project(&cfg_src, &cwd);
+        let bundle = tmp.path().join("ur.tar.zst");
+        export_projects(
+            &cfg_src,
+            ExportOptions {
+                output: bundle.clone(),
+                project_cwds: vec![cwd.clone()],
+                include_global: false,
+                include_worktree: false,
+                include_live: false,
+                include_claudepot_state: false,
+                include_file_history: true,
+                encrypt: false,
+                sign_keyfile: None,
+                account_stubs: None,
+                encrypt_passphrase: None,
+                sign_password: None,
+            },
+        )
+        .unwrap();
+
+        let cfg_target = tmp.path().join("dst/.claude");
+        fs::create_dir_all(cfg_target.join("projects")).unwrap();
+        let receipt =
+            import_bundle(&cfg_target, &bundle, ImportOptions::default()).unwrap();
+        let undo = import_undo().unwrap();
+        // Counter-journal must exist AND be non-empty so a future
+        // redo can replay it.
+        assert!(undo.counter_journal_path.exists());
+        let counter = apply::ImportJournal::load(&undo.counter_journal_path).unwrap();
+        assert!(
+            !counter.steps.is_empty(),
+            "counter-journal must record the inverse steps"
+        );
+        assert_eq!(counter.bundle_id, format!("undo-{}", receipt.bundle_id));
 
         std::env::remove_var("CLAUDEPOT_DATA_DIR");
     }
