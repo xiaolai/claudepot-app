@@ -2012,6 +2012,7 @@ function EffectiveShell({
         display: "flex",
         flexDirection: "column",
         minHeight: 0,
+        minWidth: 0,
       }}
     >
       <header

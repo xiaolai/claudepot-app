@@ -40,7 +40,17 @@ export function WriteToolViewer({ tool }: { tool: LinkedTool }) {
         }}
       >
         <Glyph g={NF.fileCode} style={{ fontSize: "var(--fs-sm)" }} />
-        <span className="mono" style={{ flex: 1 }} title={path}>
+        <span
+          className="mono"
+          style={{
+            flex: 1,
+            minWidth: 0,
+            overflow: "hidden",
+            textOverflow: "ellipsis",
+            whiteSpace: "nowrap",
+          }}
+          title={path}
+        >
           {path}
         </span>
         <span style={{ color: "var(--fg-ghost)" }}>

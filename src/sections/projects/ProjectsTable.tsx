@@ -17,7 +17,13 @@ export type ProjectFilter = "all" | "orphan" | "unreachable" | "empty";
 export type SortKey = "path" | "session_count" | "size" | "last_touched";
 export type SortDir = "asc" | "desc";
 
-const COLS = "var(--sp-20) 1.6fr 0.9fr 0.9fr 0.8fr 1fr var(--sp-24)";
+// `minmax(0, *fr)` rather than bare `*fr` tracks so each column can
+// shrink below intrinsic min-content. The Project name span already
+// has `overflow: hidden`, but the bare tracks would otherwise let the
+// row overflow when a project carries a single very long unbreakable
+// path segment.
+const COLS =
+  "var(--sp-20) minmax(0,1.6fr) minmax(0,0.9fr) minmax(0,0.9fr) minmax(0,0.8fr) minmax(0,1fr) var(--sp-24)";
 
 function projectBasename(p: ProjectInfo): string {
   return (

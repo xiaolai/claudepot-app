@@ -425,6 +425,7 @@ export function ProjectsSection({
                   style={{
                     flex: 1,
                     minHeight: 0,
+                    minWidth: 0,
                     display: "flex",
                     flexDirection: "column",
                   }}

@@ -87,7 +87,17 @@ export function ReadToolViewer({ tool }: { tool: LinkedTool }) {
         }}
       >
         <Glyph g={NF.fileText} style={{ fontSize: "var(--fs-sm)" }} />
-        <span className="mono" style={{ flex: 1 }} title={path}>
+        <span
+          className="mono"
+          style={{
+            flex: 1,
+            minWidth: 0,
+            overflow: "hidden",
+            textOverflow: "ellipsis",
+            whiteSpace: "nowrap",
+          }}
+          title={path}
+        >
           {path}
         </span>
         {typeof input.offset === "number" && (

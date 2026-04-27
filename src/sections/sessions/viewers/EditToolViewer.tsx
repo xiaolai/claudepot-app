@@ -42,7 +42,17 @@ export function EditToolViewer({ tool }: { tool: LinkedTool }) {
         }}
       >
         <Glyph g={NF.edit} style={{ fontSize: "var(--fs-sm)" }} />
-        <span className="mono" title={file_path} style={{ flex: 1 }}>
+        <span
+          className="mono"
+          title={file_path}
+          style={{
+            flex: 1,
+            minWidth: 0,
+            overflow: "hidden",
+            textOverflow: "ellipsis",
+            whiteSpace: "nowrap",
+          }}
+        >
           {file_path}
         </span>
         {replace_all && (
