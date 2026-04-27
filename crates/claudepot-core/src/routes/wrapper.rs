@@ -113,7 +113,7 @@ fn render_header(route: &Route) -> String {
     out.push_str("#\n");
     out.push_str("# Edit via Claudepot's Third-party section, not by hand —\n");
     out.push_str("# subsequent route updates will overwrite this file.\n");
-    out.push_str("\n");
+    out.push('\n');
     out
 }
 

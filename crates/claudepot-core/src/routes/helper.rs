@@ -92,7 +92,7 @@ fn render_helper(route_id: RouteId, field: SecretField) -> String {
     s.push_str(
         "# Used by the wrapper script (\\$()) and by Cowork on 3P's inferenceCredentialHelper.\n",
     );
-    s.push_str("\n");
+    s.push('\n');
     s.push_str(&format!(
         "exec /usr/bin/security find-generic-password -s claudepot-routes -a {} -w\n",
         shell_quote(&acct)
