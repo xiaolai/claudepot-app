@@ -24,6 +24,8 @@ import { ConfigSection } from "./ConfigSection";
 import { SectionTab } from "./sessions/components/SectionTab";
 import { RenameProjectModal } from "./projects/RenameProjectModal";
 import { RemoveProjectModal } from "./projects/RemoveProjectModal";
+import { ExportProjectModal } from "./projects/ExportProjectModal";
+import { ImportBundleModal } from "./projects/ImportBundleModal";
 import { MaintenanceView } from "./projects/MaintenanceView";
 import { OrphanBanner } from "./projects/OrphanBanner";
 import { AdoptOrphansModal } from "./projects/AdoptOrphansModal";
@@ -146,6 +148,11 @@ export function ProjectsSection({
   ]);
   const [renameTarget, setRenameTarget] = useState<string | null>(null);
   const [removeTarget, setRemoveTarget] = useState<string | null>(null);
+  // Project migrate UI state (spec §12.2). Export is row-keyed (we
+  // know which project to bundle); import is global (the user picks
+  // a bundle file from anywhere on disk).
+  const [exportTarget, setExportTarget] = useState<string | null>(null);
+  const [importOpen, setImportOpen] = useState(false);
   const [filter, setFilter] = useState<ProjectFilter>("all");
   const [nameFilter, setNameFilter] = useState("");
   const { pushToast } = useAppState();
@@ -294,6 +301,12 @@ export function ProjectsSection({
           compact ? (
             <>
               <IconButton
+                glyph={NF.download}
+                onClick={() => setImportOpen(true)}
+                title="Import bundle"
+                aria-label="Import bundle"
+              />
+              <IconButton
                 glyph={NF.wrench}
                 onClick={() => onSubRouteChange("maintenance")}
                 title="Maintenance — clean + repair"
@@ -308,6 +321,15 @@ export function ProjectsSection({
             </>
           ) : (
             <>
+              <Button
+                variant="ghost"
+                glyph={NF.download}
+                glyphColor="var(--fg-muted)"
+                onClick={() => setImportOpen(true)}
+                title="Import a *.claudepot.tar.zst bundle"
+              >
+                Import bundle
+              </Button>
               <Button
                 variant="ghost"
                 glyph={NF.wrench}
@@ -563,6 +585,48 @@ export function ProjectsSection({
         />
       )}
 
+      {exportTarget && (
+        <ExportProjectModal
+          cwd={exportTarget}
+          onClose={() => setExportTarget(null)}
+          onCompleted={(receipt) => {
+            setExportTarget(null);
+            pushToast(
+              "info",
+              `Exported ${receipt.projectCount} project(s) to ${receipt.bundlePath}`,
+            );
+          }}
+          onError={(msg) => {
+            setExportTarget(null);
+            pushToast("error", `Export failed: ${msg}`);
+          }}
+        />
+      )}
+
+      {importOpen && (
+        <ImportBundleModal
+          onClose={() => setImportOpen(false)}
+          onCompleted={(receipt) => {
+            setImportOpen(false);
+            const verb = receipt.dryRun ? "Plan" : "Imported";
+            pushToast(
+              "info",
+              `${verb}: ${receipt.projectsImported.length} project(s)${
+                receipt.projectsRefused.length
+                  ? ` (${receipt.projectsRefused.length} refused)`
+                  : ""
+              }`,
+            );
+            // Re-fetch the list so newly-imported slugs show up.
+            if (!receipt.dryRun) refresh();
+          }}
+          onError={(msg) => {
+            setImportOpen(false);
+            pushToast("error", `Import failed: ${msg}`);
+          }}
+        />
+      )}
+
       {ctxMenu &&
         (() => {
           const p = ctxMenu.project;
@@ -596,6 +660,10 @@ export function ProjectsSection({
             {
               label: "Rename…",
               onClick: () => setRenameTarget(p.original_path),
+            },
+            {
+              label: "Export bundle…",
+              onClick: () => setExportTarget(p.original_path),
             },
             {
               label: "Remove project…",
