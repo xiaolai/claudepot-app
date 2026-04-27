@@ -392,6 +392,7 @@ pub fn run() {
             commands_artifact_lifecycle::artifact_recover_trash,
             commands_artifact_lifecycle::artifact_forget_trash,
             commands_artifact_lifecycle::artifact_purge_trash,
+            commands_artifact_lifecycle::artifact_disabled_preview,
             commands_protected::protected_paths_list,
             commands_protected::protected_paths_add,
             commands_protected::protected_paths_remove,

@@ -318,7 +318,8 @@ function StateBadge({ state }: { state: TrashEntryDto["state"] }) {
       ? "var(--fg-faint)"
       : state === "abandoned_staging"
         ? "var(--warn)"
-        : "var(--danger)";
+        : // missing_*, orphan_payload, tampered — all destructive states
+          "var(--danger)";
   return (
     <span
       style={{
@@ -327,6 +328,11 @@ function StateBadge({ state }: { state: TrashEntryDto["state"] }) {
         textTransform: "uppercase",
         color: tone,
       }}
+      title={
+        state === "tampered"
+          ? "Payload differs from the byte count / sha256 the manifest recorded — restore refused; investigate or forget."
+          : undefined
+      }
     >
       {state.replace(/_/g, " ")}
     </span>

@@ -168,33 +168,82 @@ pub(crate) fn resolve_collision_pub(
 /// If `target` exists, either fail (`Refuse`) or compute a unique
 /// suffixed sibling (`Suffix`). Suffix iterates `-2`, `-3`, … up to
 /// 999 to avoid pathological loops.
+///
+/// Existence check is case-aware on case-insensitive filesystems
+/// (default APFS on macOS, NTFS on Windows). On those platforms a
+/// suffixed candidate that case-folds to an existing sibling is
+/// also rejected — otherwise `myskill-2` could shadow `MySkill-2`
+/// from a tooling perspective even though the filesystem treats
+/// them as the same name.
 fn resolve_collision(target: &Path, on_conflict: OnConflict) -> Result<PathBuf> {
-    if !target.exists() {
-        return Ok(target.to_path_buf());
+    if exists_case_aware(target) {
+        return match on_conflict {
+            OnConflict::Refuse => Err(LifecycleError::Conflict(target.to_path_buf())),
+            OnConflict::Suffix => suffix_until_free(target),
+        };
     }
-    match on_conflict {
-        OnConflict::Refuse => Err(LifecycleError::Conflict(target.to_path_buf())),
-        OnConflict::Suffix => {
-            let parent = target.parent().unwrap_or_else(|| Path::new("."));
-            let stem = target
-                .file_stem()
-                .map(|s| s.to_string_lossy().into_owned())
-                .unwrap_or_else(|| "x".into());
-            let ext = target
-                .extension()
-                .map(|s| s.to_string_lossy().into_owned());
-            for n in 2..=999 {
-                let candidate = if let Some(e) = &ext {
-                    parent.join(format!("{stem}-{n}.{e}"))
-                } else {
-                    parent.join(format!("{stem}-{n}"))
-                };
-                if !candidate.exists() {
-                    return Ok(candidate);
-                }
-            }
-            Err(LifecycleError::Conflict(target.to_path_buf()))
+    Ok(target.to_path_buf())
+}
+
+fn suffix_until_free(target: &Path) -> Result<PathBuf> {
+    let parent = target.parent().unwrap_or_else(|| Path::new("."));
+    let stem = target
+        .file_stem()
+        .map(|s| s.to_string_lossy().into_owned())
+        .unwrap_or_else(|| "x".into());
+    let ext = target
+        .extension()
+        .map(|s| s.to_string_lossy().into_owned());
+    for n in 2..=999 {
+        let candidate = if let Some(e) = &ext {
+            parent.join(format!("{stem}-{n}.{e}"))
+        } else {
+            parent.join(format!("{stem}-{n}"))
+        };
+        if !exists_case_aware(&candidate) {
+            return Ok(candidate);
         }
+    }
+    Err(LifecycleError::Conflict(target.to_path_buf()))
+}
+
+/// Existence check that's correct on both case-sensitive (Linux,
+/// case-sensitive APFS volumes) and case-insensitive filesystems
+/// (macOS default APFS, Windows NTFS).
+///
+/// `Path::exists` already returns true for case-folded matches on
+/// case-insensitive filesystems, so for the same-case target the
+/// answer is correct. The extra dirent scan catches the case where
+/// our generated suffix differs only in case from a real sibling
+/// (`Foo-2.md` exists, we ask about `foo-2.md` on macOS) — the
+/// filesystem says "exists" so the bare check is right; we still
+/// run the scan to also reject `Foo-2.md` vs `foo-2.md` on the
+/// case-sensitive Linux path where `exists()` would say "no".
+fn exists_case_aware(target: &Path) -> bool {
+    if target.exists() {
+        return true;
+    }
+    // On case-sensitive filesystems we still want to refuse a target
+    // whose case-folded name matches an existing sibling — keeps the
+    // disabled tree's UX consistent across platforms (a user who
+    // disables `Foo.md` on macOS shouldn't be able to disable
+    // `foo.md` on Linux without an explicit rename first).
+    let parent = match target.parent() {
+        Some(p) => p,
+        None => return false,
+    };
+    let want = target
+        .file_name()
+        .map(|n| n.to_string_lossy().to_lowercase());
+    let want = match want {
+        Some(s) => s,
+        None => return false,
+    };
+    match std::fs::read_dir(parent) {
+        Ok(iter) => iter
+            .flatten()
+            .any(|e| e.file_name().to_string_lossy().to_lowercase() == want),
+        Err(_) => false,
     }
 }
 
@@ -460,6 +509,26 @@ mod tests {
         };
         let err = enable_at(&t, OnConflict::Refuse, &user_roots(&claude)).unwrap_err();
         assert!(matches!(err, LifecycleError::SourceMissing(_)));
+    }
+
+    #[test]
+    fn collision_is_case_aware_on_all_platforms() {
+        // The disabled tree treats Foo.md and foo.md as the same
+        // artifact, even on case-sensitive filesystems. Without
+        // case-fold detection a Linux user could disable Foo.md and
+        // then disable foo.md too, producing two disabled entries
+        // that look like one to a macOS user pulling the same
+        // .claude tree across platforms.
+        let tmp = tempfile::tempdir().unwrap();
+        let claude = tmp.path().join(".claude");
+        let agent_lower = claude.join("agents/foo.md");
+        write_file(&agent_lower, b"lower");
+        // Pre-existing disabled entry with mixed case.
+        write_file(&claude.join(".disabled/agents/Foo.md"), b"upper");
+        let t = classify_path(&agent_lower, &user_roots(&claude)).unwrap();
+        let err = disable_at(&t, OnConflict::Refuse, &user_roots(&claude)).unwrap_err();
+        assert!(matches!(err, LifecycleError::Conflict(_)));
+        assert!(agent_lower.exists(), "source preserved on conflict");
     }
 
     #[test]

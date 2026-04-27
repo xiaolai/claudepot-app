@@ -36,6 +36,7 @@ import { useArtifactUsage } from "../hooks/useArtifactUsage";
 import { UsageMicroBadge, UsageStrip } from "./config/UsageBadge";
 import { LifecycleActions } from "./config/LifecycleActions";
 import { useLifecycleClassification } from "../hooks/useLifecycleClassification";
+import { DisabledScopeView } from "./config/DisabledScopeView";
 import { useAppState } from "../providers/AppStateProvider";
 
 import {
@@ -96,6 +97,7 @@ const DEFINITION_KIND_LABEL: Record<string, string> = {
 const PLUGINS_GROUP_ID = "grp:plugins";
 const FILES_GROUP_ID = "grp:files";
 const HOOKS_ROUTE = "virtual:hooks";
+const DISABLED_ROUTE = "virtual:disabled";
 
 interface ConfigSectionProps {
   subRoute: string | null;
@@ -283,6 +285,11 @@ export function ConfigSection({
   // mode (where it's never requested). Drives whether the Hooks row
   // is rendered in the tree — we don't show an empty placeholder.
   const [hooksCount, setHooksCount] = useState<number | null>(null);
+  // Disabled-artifact count drives the optional "Disabled" row in the
+  // tree. Re-fetched on every tree identity change so the row count
+  // stays accurate after disable/enable/trash actions (each of those
+  // refreshes the tree, which bumps this fetch).
+  const [disabledCount, setDisabledCount] = useState<number>(0);
 
   const selectedId = useMemo(() => {
     if (!subRoute?.startsWith("node:")) return null;
@@ -290,11 +297,12 @@ export function ConfigSection({
   }, [subRoute]);
 
   const virtualRoute = useMemo<
-    null | "effective-settings" | "effective-mcp" | "hooks"
+    null | "effective-settings" | "effective-mcp" | "hooks" | "disabled"
   >(() => {
     if (selectedId === EFFECTIVE_SETTINGS_ROUTE) return "effective-settings";
     if (selectedId === EFFECTIVE_MCP_ROUTE) return "effective-mcp";
     if (selectedId === HOOKS_ROUTE) return "hooks";
+    if (selectedId === DISABLED_ROUTE) return "disabled";
     return null;
   }, [selectedId]);
 
@@ -420,6 +428,28 @@ export function ConfigSection({
       cancelled = true;
     };
   }, [anchor]);
+
+  // Disabled-artifact count drives the optional "Disabled" tree row.
+  // Refetches whenever the active tree identity changes — every
+  // disable/enable/trash action in the FilePreview path triggers a
+  // configScan + setTree, which bumps this dep.
+  useEffect(() => {
+    let cancelled = false;
+    const projectClaude =
+      anchor.kind === "global" ? null : tree?.config_home_dir ?? null;
+    void api
+      .artifactListDisabled(projectClaude)
+      .then((rows) => {
+        if (cancelled) return;
+        setDisabledCount(rows.length);
+      })
+      .catch(() => {
+        if (!cancelled) setDisabledCount(0);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [tree, anchor]);
 
   // Load the recent-projects list used by the anchor picker dropdown.
   // Cheap call — just a directory scan of `~/.claudepot/projects/`.
@@ -808,6 +838,7 @@ export function ConfigSection({
               onSelect={(id) => onSubRouteChange(id ? `node:${id}` : null)}
               globalOnly={anchor.kind === "global"}
               hooksCount={hooksCount}
+              disabledCount={disabledCount}
               usageByFileId={usageByFileId}
             />
           )}
@@ -849,6 +880,21 @@ export function ConfigSection({
             >
               <HooksRenderer cwd={tree?.cwd ?? null} />
             </EffectiveShell>
+          ) : virtualRoute === "disabled" ? (
+            <DisabledScopeView
+              projectRoot={
+                anchor.kind === "global" ? null : tree?.config_home_dir ?? null
+              }
+              pushToast={pushToast}
+              onChanged={() => {
+                void api
+                  .configScan(anchor.kind === "folder" ? anchor.path : null)
+                  .then(setTree)
+                  .catch(() => {
+                    /* tree errors already surfaced via loadError elsewhere */
+                  });
+              }}
+            />
           ) : selectedFile ? (
             <SelectedFilePreview
               file={selectedFile}
@@ -1020,6 +1066,7 @@ function ConfigTreePane({
   onSelect,
   globalOnly,
   hooksCount,
+  disabledCount,
   usageByFileId,
 }: {
   tree: ConfigTreeDto | null;
@@ -1033,6 +1080,13 @@ function ConfigTreePane({
    * (global-only mode). Controls whether the Hooks row is rendered.
    */
   hooksCount: number | null;
+  /**
+   * Number of disabled artifacts (skills + agents + commands)
+   * across all active scope_roots. Drives the optional "Disabled"
+   * row in the tree — hidden when zero so the empty state doesn't
+   * take a slot.
+   */
+  disabledCount: number;
   /**
    * Per-file usage stats keyed by FileNode.id. `null` while the
    * first batch fetch is in flight; entries missing for files whose
@@ -1097,6 +1151,19 @@ function ConfigTreePane({
           depth: 0,
         });
       }
+    }
+    // Disabled scope — visible at the top regardless of global vs
+    // project mode (user-scope disabled artifacts surface in both).
+    // Hidden when the count is zero so the empty state doesn't take
+    // up a row in the tree.
+    if (disabledCount > 0) {
+      out.push({
+        kind: "virtual-row",
+        id: DISABLED_ROUTE,
+        label: "Disabled",
+        count: disabledCount,
+        depth: 0,
+      });
     }
 
     if (!tree) return out;
@@ -1226,7 +1293,7 @@ function ConfigTreePane({
     }
 
     return out;
-  }, [tree, expanded, globalOnly, hooksCount]);
+  }, [tree, expanded, globalOnly, hooksCount, disabledCount]);
 
   const virt = useVirtualizer({
     count: rows.length,

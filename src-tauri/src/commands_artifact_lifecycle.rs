@@ -38,25 +38,40 @@ fn parse_on_conflict(s: &str) -> Result<OnConflict, String> {
 /// Build the active-roots snapshot used by every command. The
 /// project root is optional — global-only callers omit it.
 ///
-/// Renderer-supplied `project_root` is **shape-validated** before
-/// being accepted. Without this check, `validate_scope_root` becomes
-/// circular: a malicious caller could pass any directory as
-/// `project_root`, and the backend would happily accept the same
-/// path back as `scope_root`. The shape rules:
-///   - must be absolute
-///   - must end with the `.claude` segment
-///   - must NOT be under `plugins/cache/` (those are plugin-owned)
-///   - must NOT be the user-scope claude dir (it'd shadow `User`)
-///   - must NOT contain `..` segments
+/// Renderer-supplied `project_root` is accepted only when it BOTH
+///   1. passes shape validation (absolute, ends with `.claude`, no
+///      `..`, not under `plugins/cache/`, not the user root), AND
+///   2. is in the backend-discovered set of known project anchors
+///      (`paths::discover_known_project_roots`, derived from the
+///      session-index sweep).
+///
+/// Without the second check the validation would be circular: any
+/// `.claude`-shaped directory the renderer named would get accepted
+/// back as a writable scope. With it, the renderer's freedom is
+/// reduced to *selecting* among roots the user has actually opened
+/// — never inventing new ones.
+///
+/// Invalid candidates are silently dropped; the affected command
+/// falls through to user-only scope and surfaces OutOfScope.
 fn build_roots(project_root: Option<String>) -> ActiveRoots {
-    let mut roots = ActiveRoots::user(paths::claude_config_dir());
+    let user_root = paths::claude_config_dir();
+    let mut roots = ActiveRoots::user(user_root.clone());
     if let Some(p) = project_root.filter(|s| !s.is_empty()) {
         let candidate = PathBuf::from(p);
-        if is_valid_project_root(&candidate, &paths::claude_config_dir()) {
-            roots = roots.with_project(candidate);
+        if is_valid_project_root(&candidate, &user_root) {
+            let known =
+                claudepot_core::artifact_lifecycle::paths::discover_known_project_roots(
+                    &user_root,
+                );
+            if known.iter().any(|k| k == &candidate) {
+                roots = roots.with_project(candidate);
+            }
+            // Else: shape-valid but not in the known-set — drop
+            // silently. The user can disable/trash by selecting a
+            // file in the Config tree (which the backend already
+            // knows about because the session index recorded the
+            // project).
         }
-        // Silently drop malformed candidates — the affected commands
-        // will simply not find the file and surface OutOfScope.
     }
     // Managed-policy roots are added per-platform; left empty for
     // now since none of our shipped flows currently set them.
@@ -342,6 +357,72 @@ pub async fn artifact_forget_trash(trash_id: String) -> Result<(), String> {
     tokio::task::spawn_blocking(move || {
         let trash_root = artifact_lifecycle::default_trash_root();
         artifact_lifecycle::forget_at(&trash_root, &trash_id).map_err(err_to_string)
+    })
+    .await
+    .map_err(join_blocking_err)?
+}
+
+/// Read the contents of a disabled artifact. The Config tree's
+/// existing preview path can't reach `.disabled/` entries (they're
+/// excluded from active discovery by design); this command is the
+/// targeted read surface that drives the Disabled-scope preview pane.
+///
+/// Validates via the same classify_path gate used by mutating
+/// commands, then returns the body as UTF-8 (with a small head
+/// truncation guard).
+#[tauri::command]
+pub async fn artifact_disabled_preview(
+    scope_root: String,
+    kind: String,
+    relative_path: String,
+    project_root: Option<String>,
+) -> Result<String, String> {
+    tokio::task::spawn_blocking(move || {
+        let kind = parse_kind(&kind)?;
+        validate_relative_path(&relative_path)?;
+        let roots = build_roots(project_root);
+        let scope_root_path = validate_scope_root(&scope_root, &roots)?;
+        // The disabled location is what we read.
+        let abs = scope_root_path
+            .join(claudepot_core::artifact_lifecycle::DISABLED_DIR)
+            .join(kind.subdir())
+            .join(&relative_path);
+        let trackable = claudepot_core::artifact_lifecycle::paths::classify_path(&abs, &roots)
+            .map_err(|reason| reason.to_string())?;
+        if !trackable.already_disabled {
+            return Err(format!("not a disabled artifact: {}", abs.display()));
+        }
+        // For File payloads read the file itself; for Directory
+        // payloads (Skill dir) read the SKILL.md inside.
+        let read_path = match trackable.payload_kind {
+            claudepot_core::artifact_lifecycle::paths::PayloadKind::File => abs,
+            claudepot_core::artifact_lifecycle::paths::PayloadKind::Directory => {
+                abs.join("SKILL.md")
+            }
+        };
+        // 256 KiB head cap — same order of magnitude as the existing
+        // ConfigPreview body cap; large markdowns get truncated.
+        // Stream the read with `take(N + 1)` so a multi-GB
+        // accidentally-trashed file doesn't spike memory or block
+        // the spawn_blocking worker pool.
+        const PREVIEW_HEAD_BYTES: usize = 256 * 1024;
+        use std::io::Read;
+        let file = std::fs::File::open(&read_path)
+            .map_err(|e| format!("read open failed: {e}"))?;
+        let mut bytes = Vec::with_capacity(PREVIEW_HEAD_BYTES.min(64 * 1024));
+        file.take(PREVIEW_HEAD_BYTES as u64 + 1)
+            .read_to_end(&mut bytes)
+            .map_err(|e| format!("read failed: {e}"))?;
+        let truncated = bytes.len() > PREVIEW_HEAD_BYTES;
+        if truncated {
+            bytes.truncate(PREVIEW_HEAD_BYTES);
+        }
+        let body = String::from_utf8_lossy(&bytes).into_owned();
+        Ok::<_, String>(if truncated {
+            format!("{body}\n\n…(truncated)")
+        } else {
+            body
+        })
     })
     .await
     .map_err(join_blocking_err)?
