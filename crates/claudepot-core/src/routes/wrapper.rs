@@ -12,7 +12,9 @@ use crate::paths::claudepot_data_dir;
 
 use super::error::RouteError;
 use super::slug::sanitize_wrapper_name;
-use super::types::{AuthScheme, Route, RouteProvider};
+use super::types::{
+    AuthScheme, BedrockConfig, FoundryConfig, Route, RouteProvider, VertexConfig,
+};
 use super::CLAUDEPOT_MANAGED_MARKER;
 
 /// `~/.claudepot/bin/`.
@@ -62,6 +64,9 @@ pub fn delete_wrapper(name: &str) -> Result<(), RouteError> {
 fn render_script(route: &Route) -> String {
     match &route.provider {
         RouteProvider::Gateway(cfg) => render_gateway(route, cfg),
+        RouteProvider::Bedrock(cfg) => render_bedrock(route, cfg),
+        RouteProvider::Vertex(cfg) => render_vertex(route, cfg),
+        RouteProvider::Foundry(cfg) => render_foundry(route, cfg),
     }
 }
 
@@ -93,6 +98,91 @@ fn render_gateway(route: &Route, cfg: &super::types::GatewayConfig) -> String {
     if cfg.enable_tool_search {
         out.push_str(&kv_line("ENABLE_TOOL_SEARCH", "true"));
     }
+    out.push_str("  claude \"$@\"\n");
+    out
+}
+
+fn render_header(route: &Route) -> String {
+    let mut out = String::with_capacity(256);
+    out.push_str("#!/bin/sh\n");
+    out.push_str("# claudepot-managed wrapper — third-party LLM route\n");
+    out.push_str(&format!("# {}: true\n", CLAUDEPOT_MANAGED_MARKER));
+    out.push_str(&format!("# route: {}\n", shell_comment_safe(&route.name)));
+    out.push_str(&format!(
+        "# provider: {}\n",
+        route.provider.kind().as_str()
+    ));
+    out.push_str("#\n");
+    out.push_str("# Edit via Claudepot's Third-party section, not by hand —\n");
+    out.push_str("# subsequent route updates will overwrite this file.\n");
+    out.push_str("\n");
+    out
+}
+
+fn render_bedrock(route: &Route, cfg: &BedrockConfig) -> String {
+    let mut out = render_header(route);
+    out.push_str("exec env \\\n");
+    out.push_str(&kv_line("CLAUDE_CODE_USE_BEDROCK", "1"));
+    out.push_str(&kv_line("AWS_REGION", &cfg.region));
+    out.push_str(&kv_line("ANTHROPIC_SMALL_FAST_MODEL_AWS_REGION", &cfg.region));
+    if let Some(token) = &cfg.bearer_token {
+        out.push_str(&kv_line("AWS_BEARER_TOKEN_BEDROCK", token));
+    }
+    if let Some(profile) = &cfg.aws_profile {
+        out.push_str(&kv_line("AWS_PROFILE", profile));
+    }
+    if let Some(url) = &cfg.base_url {
+        out.push_str(&kv_line("ANTHROPIC_BEDROCK_BASE_URL", url));
+    }
+    if cfg.skip_aws_auth {
+        out.push_str(&kv_line("CLAUDE_CODE_SKIP_BEDROCK_AUTH", "1"));
+    }
+    out.push_str(&kv_line("ANTHROPIC_MODEL", &route.model));
+    let small = route.small_fast_model.as_deref().unwrap_or(&route.model);
+    out.push_str(&kv_line("ANTHROPIC_SMALL_FAST_MODEL", small));
+    out.push_str("  claude \"$@\"\n");
+    out
+}
+
+fn render_vertex(route: &Route, cfg: &VertexConfig) -> String {
+    let mut out = render_header(route);
+    out.push_str("exec env \\\n");
+    out.push_str(&kv_line("CLAUDE_CODE_USE_VERTEX", "1"));
+    out.push_str(&kv_line("ANTHROPIC_VERTEX_PROJECT_ID", &cfg.project_id));
+    if let Some(region) = &cfg.region {
+        out.push_str(&kv_line("CLOUD_ML_REGION", region));
+    }
+    if let Some(url) = &cfg.base_url {
+        out.push_str(&kv_line("ANTHROPIC_VERTEX_BASE_URL", url));
+    }
+    if cfg.skip_gcp_auth {
+        out.push_str(&kv_line("CLAUDE_CODE_SKIP_VERTEX_AUTH", "1"));
+    }
+    out.push_str(&kv_line("ANTHROPIC_MODEL", &route.model));
+    let small = route.small_fast_model.as_deref().unwrap_or(&route.model);
+    out.push_str(&kv_line("ANTHROPIC_SMALL_FAST_MODEL", small));
+    out.push_str("  claude \"$@\"\n");
+    out
+}
+
+fn render_foundry(route: &Route, cfg: &FoundryConfig) -> String {
+    let mut out = render_header(route);
+    out.push_str("exec env \\\n");
+    out.push_str(&kv_line("CLAUDE_CODE_USE_FOUNDRY", "1"));
+    if let Some(url) = &cfg.base_url {
+        out.push_str(&kv_line("ANTHROPIC_FOUNDRY_BASE_URL", url));
+    } else if let Some(resource) = &cfg.resource {
+        out.push_str(&kv_line("ANTHROPIC_FOUNDRY_RESOURCE", resource));
+    }
+    if let Some(key) = &cfg.api_key {
+        out.push_str(&kv_line("ANTHROPIC_FOUNDRY_API_KEY", key));
+    }
+    if cfg.skip_azure_auth {
+        out.push_str(&kv_line("CLAUDE_CODE_SKIP_FOUNDRY_AUTH", "1"));
+    }
+    out.push_str(&kv_line("ANTHROPIC_MODEL", &route.model));
+    let small = route.small_fast_model.as_deref().unwrap_or(&route.model);
+    out.push_str(&kv_line("ANTHROPIC_SMALL_FAST_MODEL", small));
     out.push_str("  claude \"$@\"\n");
     out
 }
@@ -143,7 +233,10 @@ fn set_executable(_path: &Path) -> Result<(), RouteError> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::routes::types::{AuthScheme, GatewayConfig, Route, RouteProvider};
+    use crate::routes::types::{
+        AuthScheme, BedrockConfig, FoundryConfig, GatewayConfig, Route, RouteProvider,
+        VertexConfig,
+    };
     use uuid::Uuid;
 
     fn sample(model: &str, key: &str, name: &str) -> Route {
@@ -226,6 +319,142 @@ mod tests {
         let s = render_script(&r);
         // Must round-trip safely through sh -n.
         assert!(s.contains("'weird'\\''key'"));
+    }
+
+    fn bedrock_sample(model: &str, region: &str) -> Route {
+        Route {
+            id: Uuid::new_v4(),
+            name: "Bedrock prod".into(),
+            provider: RouteProvider::Bedrock(BedrockConfig {
+                region: region.into(),
+                bearer_token: Some("aws-bearer-token".into()),
+                base_url: None,
+                aws_profile: Some("claudepot-prod".into()),
+                skip_aws_auth: false,
+            }),
+            model: model.into(),
+            small_fast_model: None,
+            additional_models: vec![],
+            wrapper_name: "claude-bedrock".into(),
+            deployment_organization_uuid: Uuid::new_v4(),
+            active_on_desktop: false,
+            installed_on_cli: false,
+        }
+    }
+
+    fn vertex_sample(model: &str, project: &str) -> Route {
+        Route {
+            id: Uuid::new_v4(),
+            name: "Vertex eu".into(),
+            provider: RouteProvider::Vertex(VertexConfig {
+                project_id: project.into(),
+                region: Some("us-east5".into()),
+                base_url: None,
+                skip_gcp_auth: false,
+            }),
+            model: model.into(),
+            small_fast_model: None,
+            additional_models: vec![],
+            wrapper_name: "claude-vertex".into(),
+            deployment_organization_uuid: Uuid::new_v4(),
+            active_on_desktop: false,
+            installed_on_cli: false,
+        }
+    }
+
+    fn foundry_sample(model: &str, resource_or_url: Result<&str, &str>) -> Route {
+        let (base_url, resource) = match resource_or_url {
+            Ok(res) => (None, Some(res.to_string())),
+            Err(url) => (Some(url.to_string()), None),
+        };
+        Route {
+            id: Uuid::new_v4(),
+            name: "Foundry".into(),
+            provider: RouteProvider::Foundry(FoundryConfig {
+                api_key: Some("foundry-key-123".into()),
+                base_url,
+                resource,
+                skip_azure_auth: false,
+            }),
+            model: model.into(),
+            small_fast_model: None,
+            additional_models: vec![],
+            wrapper_name: "claude-foundry".into(),
+            deployment_organization_uuid: Uuid::new_v4(),
+            active_on_desktop: false,
+            installed_on_cli: false,
+        }
+    }
+
+    #[test]
+    fn render_bedrock_emits_use_flag_and_region() {
+        let r = bedrock_sample(
+            "us.anthropic.claude-sonnet-4-20250514-v1:0",
+            "us-west-2",
+        );
+        let s = render_script(&r);
+        assert!(s.contains("CLAUDE_CODE_USE_BEDROCK='1'"));
+        assert!(s.contains("AWS_REGION='us-west-2'"));
+        assert!(s.contains("AWS_BEARER_TOKEN_BEDROCK='aws-bearer-token'"));
+        assert!(s.contains("AWS_PROFILE='claudepot-prod'"));
+        assert!(s.contains("ANTHROPIC_SMALL_FAST_MODEL_AWS_REGION='us-west-2'"));
+        assert!(s
+            .contains("ANTHROPIC_MODEL='us.anthropic.claude-sonnet-4-20250514-v1:0'"));
+        assert!(s.contains("# provider: bedrock"));
+    }
+
+    #[test]
+    fn render_bedrock_skip_auth_flag() {
+        let mut r = bedrock_sample("anthropic.claude-haiku-4-5", "us-east-1");
+        if let RouteProvider::Bedrock(ref mut cfg) = r.provider {
+            cfg.skip_aws_auth = true;
+        }
+        let s = render_script(&r);
+        assert!(s.contains("CLAUDE_CODE_SKIP_BEDROCK_AUTH='1'"));
+    }
+
+    #[test]
+    fn render_vertex_emits_required_keys() {
+        let r = vertex_sample("claude-sonnet-4-5@20250929", "my-gcp-proj");
+        let s = render_script(&r);
+        assert!(s.contains("CLAUDE_CODE_USE_VERTEX='1'"));
+        assert!(s.contains("ANTHROPIC_VERTEX_PROJECT_ID='my-gcp-proj'"));
+        assert!(s.contains("CLOUD_ML_REGION='us-east5'"));
+        assert!(s.contains("ANTHROPIC_MODEL='claude-sonnet-4-5@20250929'"));
+        assert!(s.contains("# provider: vertex"));
+    }
+
+    #[test]
+    fn render_vertex_skip_auth_flag() {
+        let mut r = vertex_sample("claude-sonnet-4-5", "p");
+        if let RouteProvider::Vertex(ref mut cfg) = r.provider {
+            cfg.skip_gcp_auth = true;
+        }
+        let s = render_script(&r);
+        assert!(s.contains("CLAUDE_CODE_SKIP_VERTEX_AUTH='1'"));
+    }
+
+    #[test]
+    fn render_foundry_resource_form() {
+        let r = foundry_sample("claude-sonnet-4-5", Ok("my-resource"));
+        let s = render_script(&r);
+        assert!(s.contains("CLAUDE_CODE_USE_FOUNDRY='1'"));
+        assert!(s.contains("ANTHROPIC_FOUNDRY_RESOURCE='my-resource'"));
+        assert!(s.contains("ANTHROPIC_FOUNDRY_API_KEY='foundry-key-123'"));
+        assert!(!s.contains("ANTHROPIC_FOUNDRY_BASE_URL"));
+    }
+
+    #[test]
+    fn render_foundry_base_url_form() {
+        let r = foundry_sample(
+            "claude-sonnet-4-5",
+            Err("https://my-resource.openai.azure.com"),
+        );
+        let s = render_script(&r);
+        assert!(s.contains(
+            "ANTHROPIC_FOUNDRY_BASE_URL='https://my-resource.openai.azure.com'"
+        ));
+        assert!(!s.contains("ANTHROPIC_FOUNDRY_RESOURCE"));
     }
 
     #[test]

@@ -37,10 +37,49 @@ pub struct GatewayInputDto {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct BedrockInputDto {
+    pub region: String,
+    #[serde(default)]
+    pub bearer_token: String,
+    #[serde(default)]
+    pub base_url: String,
+    #[serde(default)]
+    pub aws_profile: String,
+    #[serde(default)]
+    pub skip_aws_auth: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct VertexInputDto {
+    pub project_id: String,
+    #[serde(default)]
+    pub region: String,
+    #[serde(default)]
+    pub base_url: String,
+    #[serde(default)]
+    pub skip_gcp_auth: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct FoundryInputDto {
+    #[serde(default)]
+    pub api_key: String,
+    #[serde(default)]
+    pub base_url: String,
+    #[serde(default)]
+    pub resource: String,
+    #[serde(default)]
+    pub skip_azure_auth: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RouteCreateDto {
     pub name: String,
     pub provider_kind: String,
     pub gateway: Option<GatewayInputDto>,
+    pub bedrock: Option<BedrockInputDto>,
+    pub vertex: Option<VertexInputDto>,
+    pub foundry: Option<FoundryInputDto>,
     pub model: String,
     pub small_fast_model: Option<String>,
     #[serde(default)]
@@ -56,6 +95,9 @@ pub struct RouteUpdateDto {
     pub name: String,
     pub provider_kind: String,
     pub gateway: Option<GatewayInputDto>,
+    pub bedrock: Option<BedrockInputDto>,
+    pub vertex: Option<VertexInputDto>,
+    pub foundry: Option<FoundryInputDto>,
     pub model: String,
     pub small_fast_model: Option<String>,
     #[serde(default)]

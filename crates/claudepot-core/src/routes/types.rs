@@ -72,22 +72,86 @@ fn default_auth_scheme() -> AuthScheme {
     AuthScheme::Bearer
 }
 
-/// Per-provider configuration. Phase-1 ships the gateway variant
-/// fully; Bedrock/Vertex/Foundry land in Phase 4.
+/// Bedrock-provider configuration. Mirrors `inferenceBedrock*` keys.
+/// One of `bearer_token`, `aws_profile`, or `inferenceCredentialHelper`
+/// must provide credentials at runtime.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct BedrockConfig {
+    /// `inferenceBedrockRegion`. Required.
+    pub region: String,
+    /// `inferenceBedrockBearerToken`. Stored plaintext when present.
+    /// `None` falls back to `aws_profile` or external helper.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub bearer_token: Option<String>,
+    /// `inferenceBedrockBaseUrl`. Optional override (LiteLLM, custom
+    /// endpoint).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub base_url: Option<String>,
+    /// `inferenceBedrockProfile`. Named AWS profile (e.g. resolved by
+    /// `~/.aws/credentials`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub aws_profile: Option<String>,
+    /// When true, set `CLAUDE_CODE_SKIP_BEDROCK_AUTH=1` in the
+    /// wrapper — for gateways that handle AWS auth on the proxy side.
+    #[serde(default)]
+    pub skip_aws_auth: bool,
+}
+
+/// Vertex-provider configuration. `project_id` is required; other
+/// fields override CC defaults.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct VertexConfig {
+    /// `inferenceVertexProjectId` (mirrored as
+    /// `ANTHROPIC_VERTEX_PROJECT_ID` in the wrapper). Required.
+    pub project_id: String,
+    /// `inferenceVertexRegion` / `CLOUD_ML_REGION`. Falls back to
+    /// CC's `us-east5` default when `None`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub region: Option<String>,
+    /// `inferenceVertexBaseUrl`. Optional override for LiteLLM-fronted
+    /// Vertex routes.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub base_url: Option<String>,
+    /// When true, set `CLAUDE_CODE_SKIP_VERTEX_AUTH=1` in the wrapper.
+    #[serde(default)]
+    pub skip_gcp_auth: bool,
+}
+
+/// Foundry-provider configuration. Set EITHER `base_url` (full URL)
+/// OR `resource` (Azure resource name; SDK constructs the URL).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct FoundryConfig {
+    /// `inferenceFoundryApiKey`. Stored plaintext when present.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub api_key: Option<String>,
+    /// `inferenceFoundryBaseUrl`. Mutually exclusive with `resource`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub base_url: Option<String>,
+    /// `inferenceFoundryResource`. Mutually exclusive with `base_url`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub resource: Option<String>,
+    /// When true, set `CLAUDE_CODE_SKIP_FOUNDRY_AUTH=1` in the wrapper.
+    #[serde(default)]
+    pub skip_azure_auth: bool,
+}
+
+/// Per-provider configuration.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "lowercase")]
 pub enum RouteProvider {
     Gateway(GatewayConfig),
-    // Bedrock/Vertex/Foundry: phase-4 placeholder kept narrow on
-    // purpose. Adding fields below is non-breaking; the JSON store
-    // round-trips unknown variants only through serde, so the doc
-    // is the contract until phase 4.
+    Bedrock(BedrockConfig),
+    Vertex(VertexConfig),
+    Foundry(FoundryConfig),
 }
 
 impl RouteProvider {
     pub fn kind(&self) -> ProviderKind {
         match self {
             RouteProvider::Gateway(_) => ProviderKind::Gateway,
+            RouteProvider::Bedrock(_) => ProviderKind::Bedrock,
+            RouteProvider::Vertex(_) => ProviderKind::Vertex,
+            RouteProvider::Foundry(_) => ProviderKind::Foundry,
         }
     }
 }
@@ -149,6 +213,37 @@ impl Route {
         let (base_url, api_key_preview) = match &self.provider {
             RouteProvider::Gateway(cfg) => {
                 (cfg.base_url.clone(), preview_secret(&cfg.api_key))
+            }
+            RouteProvider::Bedrock(cfg) => {
+                let url = cfg.base_url.clone().unwrap_or_else(|| {
+                    format!("bedrock://{}", cfg.region)
+                });
+                let preview = match (cfg.bearer_token.as_ref(), cfg.aws_profile.as_ref()) {
+                    (Some(t), _) => preview_secret(t),
+                    (None, Some(p)) => format!("aws-profile:{p}"),
+                    (None, None) => String::from("(iam-default)"),
+                };
+                (url, preview)
+            }
+            RouteProvider::Vertex(cfg) => {
+                let url = cfg
+                    .base_url
+                    .clone()
+                    .unwrap_or_else(|| format!("vertex://{}", cfg.project_id));
+                (url, format!("project:{}", cfg.project_id))
+            }
+            RouteProvider::Foundry(cfg) => {
+                let url = match (cfg.base_url.as_ref(), cfg.resource.as_ref()) {
+                    (Some(u), _) => u.clone(),
+                    (None, Some(r)) => format!("foundry://{r}"),
+                    (None, None) => String::from("(unconfigured)"),
+                };
+                let preview = cfg
+                    .api_key
+                    .as_deref()
+                    .map(preview_secret)
+                    .unwrap_or_else(|| String::from("(none)"));
+                (url, preview)
             }
         };
         RouteSummary {

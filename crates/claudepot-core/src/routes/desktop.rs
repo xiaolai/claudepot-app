@@ -202,6 +202,68 @@ fn build_inference_keys(route: &Route) -> Map<String, Value> {
                 Value::String(cfg.auth_scheme.as_str().to_string()),
             );
         }
+        RouteProvider::Bedrock(cfg) => {
+            m.insert(
+                "inferenceBedrockRegion".to_string(),
+                Value::String(cfg.region.clone()),
+            );
+            if let Some(t) = &cfg.bearer_token {
+                m.insert(
+                    "inferenceBedrockBearerToken".to_string(),
+                    Value::String(t.clone()),
+                );
+            }
+            if let Some(u) = &cfg.base_url {
+                m.insert(
+                    "inferenceBedrockBaseUrl".to_string(),
+                    Value::String(u.clone()),
+                );
+            }
+            if let Some(p) = &cfg.aws_profile {
+                m.insert(
+                    "inferenceBedrockProfile".to_string(),
+                    Value::String(p.clone()),
+                );
+            }
+        }
+        RouteProvider::Vertex(cfg) => {
+            m.insert(
+                "inferenceVertexProjectId".to_string(),
+                Value::String(cfg.project_id.clone()),
+            );
+            if let Some(r) = &cfg.region {
+                m.insert(
+                    "inferenceVertexRegion".to_string(),
+                    Value::String(r.clone()),
+                );
+            }
+            if let Some(u) = &cfg.base_url {
+                m.insert(
+                    "inferenceVertexBaseUrl".to_string(),
+                    Value::String(u.clone()),
+                );
+            }
+        }
+        RouteProvider::Foundry(cfg) => {
+            if let Some(k) = &cfg.api_key {
+                m.insert(
+                    "inferenceFoundryApiKey".to_string(),
+                    Value::String(k.clone()),
+                );
+            }
+            if let Some(u) = &cfg.base_url {
+                m.insert(
+                    "inferenceFoundryBaseUrl".to_string(),
+                    Value::String(u.clone()),
+                );
+            }
+            if let Some(r) = &cfg.resource {
+                m.insert(
+                    "inferenceFoundryResource".to_string(),
+                    Value::String(r.clone()),
+                );
+            }
+        }
     }
     m
 }
@@ -209,7 +271,10 @@ fn build_inference_keys(route: &Route) -> Map<String, Value> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::routes::types::{AuthScheme, GatewayConfig, RouteProvider};
+    use crate::routes::types::{
+        AuthScheme, BedrockConfig, FoundryConfig, GatewayConfig, RouteProvider,
+        VertexConfig,
+    };
     use uuid::Uuid;
 
     fn sample() -> Route {
@@ -307,6 +372,120 @@ mod tests {
         let p = dir.path().join("missing.json");
         let m = read_top_level(&p).unwrap();
         assert_eq!(m.get("_cfprefsMigrated"), Some(&Value::Bool(true)));
+    }
+
+    #[test]
+    fn enterprise_config_bedrock_keys() {
+        let r = Route {
+            id: Uuid::new_v4(),
+            name: "Bedrock prod".into(),
+            provider: RouteProvider::Bedrock(BedrockConfig {
+                region: "us-west-2".into(),
+                bearer_token: Some("token".into()),
+                base_url: None,
+                aws_profile: Some("claudepot".into()),
+                skip_aws_auth: false,
+            }),
+            model: "anthropic.claude-sonnet-4".into(),
+            small_fast_model: None,
+            additional_models: vec![],
+            wrapper_name: "claude-bedrock".into(),
+            deployment_organization_uuid: Uuid::new_v4(),
+            active_on_desktop: false,
+            installed_on_cli: false,
+        };
+        let m = build_enterprise_config(&r, false);
+        assert_eq!(
+            m.get("inferenceProvider"),
+            Some(&Value::String("bedrock".into()))
+        );
+        assert_eq!(
+            m.get("inferenceBedrockRegion"),
+            Some(&Value::String("us-west-2".into()))
+        );
+        assert_eq!(
+            m.get("inferenceBedrockProfile"),
+            Some(&Value::String("claudepot".into()))
+        );
+        // Optional field absent when not set:
+        assert!(m.get("inferenceBedrockBaseUrl").is_none());
+    }
+
+    #[test]
+    fn enterprise_config_vertex_keys() {
+        let r = Route {
+            id: Uuid::new_v4(),
+            name: "Vertex".into(),
+            provider: RouteProvider::Vertex(VertexConfig {
+                project_id: "my-proj".into(),
+                region: Some("us-east5".into()),
+                base_url: None,
+                skip_gcp_auth: false,
+            }),
+            model: "claude-sonnet-4-5".into(),
+            small_fast_model: None,
+            additional_models: vec![],
+            wrapper_name: "claude-vertex".into(),
+            deployment_organization_uuid: Uuid::new_v4(),
+            active_on_desktop: false,
+            installed_on_cli: false,
+        };
+        let m = build_enterprise_config(&r, true);
+        assert_eq!(
+            m.get("inferenceProvider"),
+            Some(&Value::String("vertex".into()))
+        );
+        assert_eq!(
+            m.get("inferenceVertexProjectId"),
+            Some(&Value::String("my-proj".into()))
+        );
+        assert_eq!(
+            m.get("inferenceVertexRegion"),
+            Some(&Value::String("us-east5".into()))
+        );
+        assert_eq!(
+            m.get("disableDeploymentModeChooser"),
+            Some(&Value::Bool(true))
+        );
+    }
+
+    #[test]
+    fn enterprise_config_foundry_resource_xor_url() {
+        let r_resource = Route {
+            id: Uuid::new_v4(),
+            name: "Foundry res".into(),
+            provider: RouteProvider::Foundry(FoundryConfig {
+                api_key: Some("k".into()),
+                base_url: None,
+                resource: Some("my-resource".into()),
+                skip_azure_auth: false,
+            }),
+            model: "claude-sonnet-4-5".into(),
+            small_fast_model: None,
+            additional_models: vec![],
+            wrapper_name: "claude-foundry".into(),
+            deployment_organization_uuid: Uuid::new_v4(),
+            active_on_desktop: false,
+            installed_on_cli: false,
+        };
+        let m = build_enterprise_config(&r_resource, false);
+        assert_eq!(
+            m.get("inferenceFoundryResource"),
+            Some(&Value::String("my-resource".into()))
+        );
+        assert!(m.get("inferenceFoundryBaseUrl").is_none());
+
+        let mut r_url = r_resource.clone();
+        if let RouteProvider::Foundry(ref mut cfg) = r_url.provider {
+            cfg.resource = None;
+            cfg.base_url = Some("https://x.openai.azure.com".into());
+        }
+        let m2 = build_enterprise_config(&r_url, false);
+        assert_eq!(
+            m2.get("inferenceFoundryBaseUrl"),
+            Some(&Value::String("https://x.openai.azure.com".into()))
+        );
+        assert!(m2.get("inferenceFoundryResource").is_none());
     }
 
     #[test]
