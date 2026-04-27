@@ -7,6 +7,7 @@ mod commands_pricing;
 mod commands_account;
 mod commands_activity;
 mod commands_activity_cards;
+mod commands_artifact_lifecycle;
 mod commands_artifact_usage;
 mod commands_cli;
 mod commands_desktop;
@@ -25,6 +26,7 @@ mod dto;
 mod dto_account;
 mod dto_activity;
 mod dto_activity_cards;
+mod dto_artifact_lifecycle;
 mod dto_artifact_usage;
 mod dto_desktop;
 mod dto_keys;
@@ -380,6 +382,16 @@ pub fn run() {
             commands_artifact_usage::artifact_usage_for,
             commands_artifact_usage::artifact_usage_batch,
             commands_artifact_usage::artifact_usage_top,
+            commands_artifact_lifecycle::artifact_classify_path,
+            commands_artifact_lifecycle::artifact_disable,
+            commands_artifact_lifecycle::artifact_enable,
+            commands_artifact_lifecycle::artifact_list_disabled,
+            commands_artifact_lifecycle::artifact_trash,
+            commands_artifact_lifecycle::artifact_list_trash,
+            commands_artifact_lifecycle::artifact_restore_from_trash,
+            commands_artifact_lifecycle::artifact_recover_trash,
+            commands_artifact_lifecycle::artifact_forget_trash,
+            commands_artifact_lifecycle::artifact_purge_trash,
             commands_protected::protected_paths_list,
             commands_protected::protected_paths_add,
             commands_protected::protected_paths_remove,

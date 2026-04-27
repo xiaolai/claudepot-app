@@ -13,6 +13,7 @@ import { activityApi } from "./activity";
 import { configApi } from "./config";
 import { pricingApi } from "./pricing";
 import { artifactUsageApi } from "./artifact-usage";
+import { artifactLifecycleApi } from "./artifact-lifecycle";
 
 export const api = {
   ...accountApi,
@@ -25,4 +26,5 @@ export const api = {
   ...configApi,
   ...pricingApi,
   ...artifactUsageApi,
+  ...artifactLifecycleApi,
 };
