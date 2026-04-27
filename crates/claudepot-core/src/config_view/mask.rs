@@ -165,6 +165,27 @@ pub fn mask_bytes(bytes: &[u8]) -> String {
     mask_text(&text)
 }
 
+/// Mask a preview body, preferring JSON-aware masking when the content
+/// parses cleanly. The byte-level regex path is unsafe on JSON: a rule
+/// whose character class includes JSON delimiters (e.g.
+/// `aws_secret_key`'s `[A-Za-z0-9/+=]{40}` matching a long path string)
+/// can rewrite bytes across a closing `"`, producing an "Unterminated
+/// string" parse error in the renderer on a healthy file. JSON-aware
+/// masking only rewrites string *values*, never delimiters, and is
+/// structurally incapable of breaking the document.
+///
+/// Falls back to `mask_bytes` for non-JSON bodies (markdown, plugin
+/// READMEs, hook scripts) and for malformed/truncated JSON.
+pub fn mask_preview_body(bytes: &[u8]) -> String {
+    if let Ok(mut v) = serde_json::from_slice::<Value>(bytes) {
+        mask_json(&mut v);
+        if let Ok(s) = serde_json::to_string_pretty(&v) {
+            return s;
+        }
+    }
+    mask_bytes(bytes)
+}
+
 /// Recursively walk every string leaf and map value in a JSON tree.
 /// Applies `mask_text` to each string. Returns a new tree — callers
 /// must not keep the original after calling.
@@ -276,6 +297,53 @@ mod tests {
     fn plain_text_untouched() {
         let s = "this is just a note about settings.json";
         assert_eq!(mask_text(s), s);
+    }
+
+    #[test]
+    fn mask_preview_body_does_not_corrupt_long_paths_in_json() {
+        // Regression: byte-level `mask_bytes` would match the
+        // `aws_secret_key` rule (`\b[A-Za-z0-9/+=]{40}\b…`) inside a
+        // long path string and consume the closing `"`, producing an
+        // "Unterminated string" parse error in the renderer on a
+        // healthy file. `mask_preview_body` must round-trip such
+        // values without corrupting JSON syntax.
+        let original = serde_json::json!({
+            "projects": {
+                "claudepot-app": [
+                    "/Users/joker/github/xiaolai/myprojects/booklib/src-tauri",
+                    "/Users/joker/github/xiaolai/myprojects/claudepot-app/src",
+                ]
+            }
+        });
+        let bytes = serde_json::to_vec(&original).unwrap();
+        let masked = mask_preview_body(&bytes);
+        let reparsed: Value = serde_json::from_str(&masked)
+            .expect("masked JSON must remain parseable");
+        assert_eq!(reparsed, original);
+    }
+
+    #[test]
+    fn mask_preview_body_still_redacts_secrets_in_json_values() {
+        // JSON-aware path must mask string leaves the same way the
+        // byte path does — only the delimiter handling changes.
+        let tok = format!("ghp_{}", "A".repeat(40));
+        let v = serde_json::json!({
+            "tokens": { "github": tok.clone() },
+            "notes": ["secret is", tok.clone()],
+        });
+        let bytes = serde_json::to_vec(&v).unwrap();
+        let masked = mask_preview_body(&bytes);
+        assert!(masked.contains("<redacted:github_pat_classic>"));
+        assert!(!masked.contains(&tok));
+    }
+
+    #[test]
+    fn mask_preview_body_falls_back_to_bytes_for_non_json() {
+        // Markdown bodies don't parse as JSON — must fall through to
+        // byte-level masking and still redact known patterns.
+        let md = "Here is a key: AKIAIOSFODNN7EXAMPLE plus padding.";
+        let masked = mask_preview_body(md.as_bytes());
+        assert!(masked.contains("<redacted:aws_access_key>"));
     }
 
     #[test]
