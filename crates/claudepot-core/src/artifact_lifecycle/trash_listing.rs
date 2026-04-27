@@ -128,14 +128,16 @@ pub(super) fn classify_entry(path: PathBuf, name: &str) -> TrashEntry {
     }
 }
 
-/// Cross-check a payload entry against the recorded manifest.
-/// Returns true when sizes (and, for files with a recorded digest,
-/// hashes) match. Stat / hash failures are treated as mismatches —
-/// safer to surface "looks tampered" than to claim Healthy on a
-/// probe error.
+/// Cheap manifest cross-check — basename + byte_count only. The full
+/// sha256 verification is deferred to `verify_against_manifest_full`,
+/// called by `restore_at` before it touches the filesystem so we
+/// pay the digest cost once per restore instead of once per listing.
+///
+/// `list_at` runs this on every Healthy candidate; a mismatch
+/// downgrades to `Tampered`. The user sees the same UX as before —
+/// Tampered entries refuse restore — but the listing scales with
+/// the number of trash entries, not their byte sizes.
 fn verify_against_manifest(payload_path: &Path, manifest: &TrashManifest) -> bool {
-    // Basename must match too — single-child OrphanPayload check
-    // already guards count, this confirms identity.
     if payload_path
         .file_name()
         .and_then(|n| n.to_str())
@@ -147,10 +149,20 @@ fn verify_against_manifest(payload_path: &Path, manifest: &TrashManifest) -> boo
         Some(n) => n,
         None => return false,
     };
-    if observed_size != manifest.byte_count {
+    observed_size == manifest.byte_count
+}
+
+/// Full verification including sha256 (for File payloads with a
+/// recorded digest). Called by `restore_at` immediately before the
+/// rename so a Tampered entry that snuck past the cheap list check
+/// still gets caught at the moment that matters most.
+pub(super) fn verify_against_manifest_full(
+    payload_path: &Path,
+    manifest: &TrashManifest,
+) -> bool {
+    if !verify_against_manifest(payload_path, manifest) {
         return false;
     }
-    // For files with a recorded digest, confirm content matches.
     if manifest.payload_kind == PayloadKind::File {
         if let Some(expected) = manifest.sha256.as_deref() {
             match trash_io::stream_hash_file(payload_path) {
@@ -164,7 +176,15 @@ fn verify_against_manifest(payload_path: &Path, manifest: &TrashManifest) -> boo
 
 fn observed_size(payload_path: &Path, kind: PayloadKind) -> Option<u64> {
     match kind {
-        PayloadKind::File => std::fs::symlink_metadata(payload_path).ok().map(|m| m.len()),
+        PayloadKind::File => {
+            // Use `metadata` (follows symlinks) — matches the
+            // producer side, where `stream_hash_file` opens the file
+            // through `File::open` (also follows symlinks). If the
+            // two used different policies a File payload that's a
+            // symlink would always be Tampered: producer hashes the
+            // target, verifier sizes the link.
+            std::fs::metadata(payload_path).ok().map(|m| m.len())
+        }
         PayloadKind::Directory => {
             let mut total = 0u64;
             // Use the same lstat-based walker the producer used so

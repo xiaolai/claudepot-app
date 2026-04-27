@@ -400,18 +400,24 @@ pub async fn artifact_disabled_preview(
                 abs.join("SKILL.md")
             }
         };
-        let bytes = std::fs::read(&read_path)
-            .map_err(|e| format!("read failed: {e}"))?;
         // 256 KiB head cap — same order of magnitude as the existing
         // ConfigPreview body cap; large markdowns get truncated.
+        // Stream the read with `take(N + 1)` so a multi-GB
+        // accidentally-trashed file doesn't spike memory or block
+        // the spawn_blocking worker pool.
         const PREVIEW_HEAD_BYTES: usize = 256 * 1024;
+        use std::io::Read;
+        let file = std::fs::File::open(&read_path)
+            .map_err(|e| format!("read open failed: {e}"))?;
+        let mut bytes = Vec::with_capacity(PREVIEW_HEAD_BYTES.min(64 * 1024));
+        file.take(PREVIEW_HEAD_BYTES as u64 + 1)
+            .read_to_end(&mut bytes)
+            .map_err(|e| format!("read failed: {e}"))?;
         let truncated = bytes.len() > PREVIEW_HEAD_BYTES;
-        let head = if truncated {
-            &bytes[..PREVIEW_HEAD_BYTES]
-        } else {
-            &bytes[..]
-        };
-        let body = String::from_utf8_lossy(head).into_owned();
+        if truncated {
+            bytes.truncate(PREVIEW_HEAD_BYTES);
+        }
+        let body = String::from_utf8_lossy(&bytes).into_owned();
         Ok::<_, String>(if truncated {
             format!("{body}\n\n…(truncated)")
         } else {
