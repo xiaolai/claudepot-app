@@ -11,6 +11,8 @@ use crate::fs_utils;
 use crate::paths::claudepot_data_dir;
 
 use super::error::RouteError;
+use super::helper::helper_path;
+use super::keychain::SecretField;
 use super::slug::sanitize_wrapper_name;
 use super::types::{
     AuthScheme, BedrockConfig, FoundryConfig, Route, RouteProvider, VertexConfig,
@@ -71,22 +73,18 @@ fn render_script(route: &Route) -> String {
 }
 
 fn render_gateway(route: &Route, cfg: &super::types::GatewayConfig) -> String {
-    let mut out = String::with_capacity(512);
-    out.push_str("#!/bin/sh\n");
-    out.push_str("# claudepot-managed wrapper — third-party LLM route\n");
-    out.push_str(&format!("# {}: true\n", CLAUDEPOT_MANAGED_MARKER));
-    out.push_str(&format!("# route: {}\n", shell_comment_safe(&route.name)));
-    out.push_str(&format!(
-        "# provider: {}\n",
-        route.provider.kind().as_str()
-    ));
-    out.push_str("#\n");
-    out.push_str("# Edit via Claudepot's Third-party section, not by hand —\n");
-    out.push_str("# subsequent route updates will overwrite this file.\n");
-    out.push_str("\n");
+    let mut out = render_header(route);
     out.push_str("exec env \\\n");
     out.push_str(&kv_line("ANTHROPIC_BASE_URL", &cfg.base_url));
-    out.push_str(&kv_line("ANTHROPIC_AUTH_TOKEN", &cfg.api_key));
+    if cfg.use_keychain {
+        let helper = helper_path(route.id, SecretField::GatewayApiKey);
+        out.push_str(&format!(
+            "  ANTHROPIC_AUTH_TOKEN=\"$({})\" \\\n",
+            shell_quote(&helper.to_string_lossy())
+        ));
+    } else {
+        out.push_str(&kv_line("ANTHROPIC_AUTH_TOKEN", &cfg.api_key));
+    }
     if cfg.auth_scheme == AuthScheme::Bearer {
         // CC's default is bearer; only emit a hint if the user picks
         // a non-default scheme. For now we pass the key as-is and let
@@ -125,7 +123,13 @@ fn render_bedrock(route: &Route, cfg: &BedrockConfig) -> String {
     out.push_str(&kv_line("CLAUDE_CODE_USE_BEDROCK", "1"));
     out.push_str(&kv_line("AWS_REGION", &cfg.region));
     out.push_str(&kv_line("ANTHROPIC_SMALL_FAST_MODEL_AWS_REGION", &cfg.region));
-    if let Some(token) = &cfg.bearer_token {
+    if cfg.use_keychain {
+        let helper = helper_path(route.id, SecretField::BedrockBearerToken);
+        out.push_str(&format!(
+            "  AWS_BEARER_TOKEN_BEDROCK=\"$({})\" \\\n",
+            shell_quote(&helper.to_string_lossy())
+        ));
+    } else if let Some(token) = &cfg.bearer_token {
         out.push_str(&kv_line("AWS_BEARER_TOKEN_BEDROCK", token));
     }
     if let Some(profile) = &cfg.aws_profile {
@@ -174,7 +178,13 @@ fn render_foundry(route: &Route, cfg: &FoundryConfig) -> String {
     } else if let Some(resource) = &cfg.resource {
         out.push_str(&kv_line("ANTHROPIC_FOUNDRY_RESOURCE", resource));
     }
-    if let Some(key) = &cfg.api_key {
+    if cfg.use_keychain {
+        let helper = helper_path(route.id, SecretField::FoundryApiKey);
+        out.push_str(&format!(
+            "  ANTHROPIC_FOUNDRY_API_KEY=\"$({})\" \\\n",
+            shell_quote(&helper.to_string_lossy())
+        ));
+    } else if let Some(key) = &cfg.api_key {
         out.push_str(&kv_line("ANTHROPIC_FOUNDRY_API_KEY", key));
     }
     if cfg.skip_azure_auth {
@@ -248,6 +258,7 @@ mod tests {
                 api_key: key.into(),
                 auth_scheme: AuthScheme::Bearer,
                 enable_tool_search: false,
+                use_keychain: false,
             }),
             model: model.into(),
             small_fast_model: None,
@@ -331,6 +342,7 @@ mod tests {
                 base_url: None,
                 aws_profile: Some("claudepot-prod".into()),
                 skip_aws_auth: false,
+                use_keychain: false,
             }),
             model: model.into(),
             small_fast_model: None,
@@ -375,6 +387,7 @@ mod tests {
                 base_url,
                 resource,
                 skip_azure_auth: false,
+                use_keychain: false,
             }),
             model: model.into(),
             small_fast_model: None,

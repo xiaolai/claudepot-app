@@ -57,6 +57,15 @@ export function RouteCard({
           {route.name}
         </h3>
         <Tag tone="neutral">{route.provider_kind}</Tag>
+        {route.use_keychain && (
+          <Tag
+            tone="ok"
+            glyph={NF.lock}
+            title="Secret is held in the OS keychain; the wrapper + Cowork helper read it on demand."
+          >
+            Keychain
+          </Tag>
+        )}
         {route.active_on_desktop && (
           <Tag tone="accent" title="Mirrored into Claude Desktop's enterpriseConfig">
             Active on Desktop

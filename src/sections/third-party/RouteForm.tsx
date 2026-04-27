@@ -90,6 +90,11 @@ export function RouteForm({
   );
   const [autoSlug, setAutoSlug] = useState("claude-route");
 
+  // `use_keychain` is shared across provider variants — a route is
+  // either keychain-backed or plaintext-backed, regardless of which
+  // provider it talks to. Read from the summary in edit mode.
+  const initialUseKeychain = initial?.use_keychain ?? false;
+
   // Gateway state
   const [gwBase, setGwBase] = useState(
     initial?.provider_kind === "gateway" ? initial.base_url : "",
@@ -101,6 +106,7 @@ export function RouteForm({
   const [gwToolSearch, setGwToolSearch] = useState(
     initial?.enable_tool_search ?? false,
   );
+  const [gwUseKeychain, setGwUseKeychain] = useState(initialUseKeychain);
 
   // Bedrock state
   const [bedRegion, setBedRegion] = useState("");
@@ -108,8 +114,9 @@ export function RouteForm({
   const [bedBaseUrl, setBedBaseUrl] = useState("");
   const [bedProfile, setBedProfile] = useState("");
   const [bedSkipAuth, setBedSkipAuth] = useState(false);
+  const [bedUseKeychain, setBedUseKeychain] = useState(initialUseKeychain);
 
-  // Vertex state
+  // Vertex state (no inline secret — no keychain option)
   const [vxProjectId, setVxProjectId] = useState("");
   const [vxRegion, setVxRegion] = useState("");
   const [vxBaseUrl, setVxBaseUrl] = useState("");
@@ -120,6 +127,7 @@ export function RouteForm({
   const [fdBase, setFdBase] = useState("");
   const [fdResource, setFdResource] = useState("");
   const [fdSkipAuth, setFdSkipAuth] = useState(false);
+  const [fdUseKeychain, setFdUseKeychain] = useState(initialUseKeychain);
 
   const [submitting, setSubmitting] = useState(false);
 
@@ -179,6 +187,7 @@ export function RouteForm({
             api_key: gwKey,
             auth_scheme: gwAuth,
             enable_tool_search: gwToolSearch,
+            use_keychain: gwUseKeychain,
           }
         : null;
     const bedrock: BedrockInputDto | null =
@@ -189,6 +198,7 @@ export function RouteForm({
             base_url: bedBaseUrl.trim(),
             aws_profile: bedProfile.trim(),
             skip_aws_auth: bedSkipAuth,
+            use_keychain: bedUseKeychain,
           }
         : null;
     const vertex: VertexInputDto | null =
@@ -207,6 +217,7 @@ export function RouteForm({
             base_url: fdBase.trim(),
             resource: fdResource.trim(),
             skip_azure_auth: fdSkipAuth,
+            use_keychain: fdUseKeychain,
           }
         : null;
 
@@ -271,7 +282,10 @@ export function RouteForm({
           setAuthScheme={setGwAuth}
           enableToolSearch={gwToolSearch}
           setEnableToolSearch={setGwToolSearch}
+          useKeychain={gwUseKeychain}
+          setUseKeychain={setGwUseKeychain}
           editKeyHint={mode === "edit"}
+          mode={mode}
         />
       )}
       {providerKind === "bedrock" && (
@@ -286,7 +300,10 @@ export function RouteForm({
           setAwsProfile={setBedProfile}
           skipAuth={bedSkipAuth}
           setSkipAuth={setBedSkipAuth}
+          useKeychain={bedUseKeychain}
+          setUseKeychain={setBedUseKeychain}
           editKeyHint={mode === "edit"}
+          mode={mode}
         />
       )}
       {providerKind === "vertex" && (
@@ -311,7 +328,10 @@ export function RouteForm({
           setResource={setFdResource}
           skipAuth={fdSkipAuth}
           setSkipAuth={setFdSkipAuth}
+          useKeychain={fdUseKeychain}
+          setUseKeychain={setFdUseKeychain}
           editKeyHint={mode === "edit"}
+          mode={mode}
         />
       )}
 
@@ -486,6 +506,39 @@ function SecretFieldHint({ editing }: { editing: boolean }) {
   );
 }
 
+function KeychainOption(props: {
+  checked: boolean;
+  onChange: (b: boolean) => void;
+  disabled: boolean;
+  field: string;
+}) {
+  return (
+    <label
+      style={{
+        display: "flex",
+        alignItems: "center",
+        gap: "var(--sp-8)",
+        fontSize: "var(--fs-sm)",
+        color: "var(--fg)",
+        opacity: props.disabled ? 0.6 : 1,
+      }}
+      title="When checked, the secret is held in the OS keychain (macOS Keychain on this platform) and a small helper script feeds it to Claude Code / Cowork on demand. Recommended for long-lived API keys."
+    >
+      <input
+        type="checkbox"
+        checked={props.checked}
+        disabled={props.disabled}
+        onChange={(e) => props.onChange(e.target.checked)}
+      />
+      Store {props.field} in OS keychain
+      <span style={{ color: "var(--fg-faint)" }}>
+        — Cowork on 3P picks up via{" "}
+        <code>inferenceCredentialHelper</code>
+      </span>
+    </label>
+  );
+}
+
 function GatewayFields(props: {
   baseUrl: string;
   setBaseUrl: (s: string) => void;
@@ -495,7 +548,10 @@ function GatewayFields(props: {
   setAuthScheme: (s: "bearer" | "basic") => void;
   enableToolSearch: boolean;
   setEnableToolSearch: (b: boolean) => void;
+  useKeychain: boolean;
+  setUseKeychain: (b: boolean) => void;
   editKeyHint: boolean;
+  mode: "add" | "edit";
 }) {
   return (
     <>
@@ -563,6 +619,12 @@ function GatewayFields(props: {
           — only if your gateway forwards Anthropic beta headers
         </span>
       </label>
+      <KeychainOption
+        checked={props.useKeychain}
+        onChange={props.setUseKeychain}
+        disabled={props.mode === "edit"}
+        field="API key"
+      />
     </>
   );
 }
@@ -578,7 +640,10 @@ function BedrockFields(props: {
   setAwsProfile: (s: string) => void;
   skipAuth: boolean;
   setSkipAuth: (b: boolean) => void;
+  useKeychain: boolean;
+  setUseKeychain: (b: boolean) => void;
   editKeyHint: boolean;
+  mode: "add" | "edit";
 }) {
   return (
     <>
@@ -644,6 +709,12 @@ function BedrockFields(props: {
           — gateway handles AWS auth on the proxy side
         </span>
       </label>
+      <KeychainOption
+        checked={props.useKeychain}
+        onChange={props.setUseKeychain}
+        disabled={props.mode === "edit"}
+        field="bearer token"
+      />
     </>
   );
 }
@@ -714,7 +785,10 @@ function FoundryFields(props: {
   setResource: (s: string) => void;
   skipAuth: boolean;
   setSkipAuth: (b: boolean) => void;
+  useKeychain: boolean;
+  setUseKeychain: (b: boolean) => void;
   editKeyHint: boolean;
+  mode: "add" | "edit";
 }) {
   return (
     <>
@@ -774,6 +848,12 @@ function FoundryFields(props: {
         />
         Skip Foundry auth
       </label>
+      <KeychainOption
+        checked={props.useKeychain}
+        onChange={props.setUseKeychain}
+        disabled={props.mode === "edit"}
+        field="API key"
+      />
     </>
   );
 }
