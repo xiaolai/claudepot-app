@@ -468,3 +468,31 @@ pub async fn routes_zero_secret(mut secret: String) -> Result<(), String> {
     secret.zeroize();
     Ok(())
 }
+
+/// Whether Claude Desktop is currently running. Mirrors the existing
+/// `desktop_backend` probe — used by the Third-party section to
+/// surface a "restart required" affordance after activate/deactivate.
+#[tauri::command]
+pub async fn routes_desktop_running() -> Result<bool, String> {
+    let Some(platform) = claudepot_core::desktop_backend::create_platform() else {
+        return Ok(false);
+    };
+    Ok(platform.is_running().await)
+}
+
+/// Quit + relaunch Claude Desktop so the new `enterpriseConfig` is
+/// picked up. Idempotent on cold-start machines (skips quit when the
+/// app isn't running, then launches).
+#[tauri::command]
+pub async fn routes_desktop_restart() -> Result<(), String> {
+    let Some(platform) = claudepot_core::desktop_backend::create_platform() else {
+        return Err(String::from(
+            "Claude Desktop is not supported on this platform",
+        ));
+    };
+    if platform.is_running().await {
+        platform.quit().await.map_err(map_err)?;
+    }
+    platform.launch().await.map_err(map_err)?;
+    Ok(())
+}

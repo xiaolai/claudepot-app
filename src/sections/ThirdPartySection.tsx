@@ -33,6 +33,10 @@ export function ThirdPartySection() {
   const [busyIds, setBusyIds] = useState<Set<string>>(new Set());
   const [showAdd, setShowAdd] = useState(false);
   const [editTarget, setEditTarget] = useState<RouteSummaryDto | null>(null);
+  const [restartHint, setRestartHint] = useState<
+    "needed" | "applied" | "none"
+  >("none");
+  const [restartingDesktop, setRestartingDesktop] = useState(false);
 
   const refresh = useCallback(async () => {
     try {
@@ -98,15 +102,27 @@ export function ThirdPartySection() {
     }
   };
 
+  const flagRestartIfRunning = async () => {
+    try {
+      if (await api.routesDesktopRunning()) {
+        setRestartHint("needed");
+      } else {
+        setRestartHint("none");
+      }
+    } catch {
+      // Probe failure is non-fatal; default to showing the banner so
+      // the user is reminded to restart if Desktop is in fact open.
+      setRestartHint("needed");
+    }
+  };
+
   const handleUseDesktop = async (id: string) => {
     setBusy(id, true);
     try {
       await api.routesUseDesktop(id);
       await refresh();
-      showToast(
-        "info",
-        "Active on Desktop. Restart Claude Desktop for changes to take effect.",
-      );
+      await flagRestartIfRunning();
+      showToast("info", "Active on Desktop.");
     } catch (e) {
       showToast("error", `Use in Desktop failed: ${e instanceof Error ? e.message : e}`);
     } finally {
@@ -119,11 +135,28 @@ export function ThirdPartySection() {
     try {
       await api.routesUnuseDesktop();
       await refresh();
-      showToast("info", "Desktop activation cleared. Restart Claude Desktop.");
+      await flagRestartIfRunning();
+      showToast("info", "Desktop activation cleared.");
     } catch (e) {
       showToast("error", `Deactivate Desktop failed: ${e instanceof Error ? e.message : e}`);
     } finally {
       setBusy(id, false);
+    }
+  };
+
+  const handleRestartDesktop = async () => {
+    setRestartingDesktop(true);
+    try {
+      await api.routesDesktopRestart();
+      setRestartHint("applied");
+      showToast("info", "Claude Desktop restarted.");
+    } catch (e) {
+      showToast(
+        "error",
+        `Restart failed: ${e instanceof Error ? e.message : e}`,
+      );
+    } finally {
+      setRestartingDesktop(false);
     }
   };
 
@@ -135,10 +168,15 @@ export function ThirdPartySection() {
     ) {
       return;
     }
+    const wasActive =
+      routes?.find((r) => r.id === id)?.active_on_desktop ?? false;
     setBusy(id, true);
     try {
       await api.routesRemove(id);
       await refresh();
+      if (wasActive) {
+        await flagRestartIfRunning();
+      }
       showToast("info", "Route deleted.");
     } catch (e) {
       showToast("error", `Delete failed: ${e instanceof Error ? e.message : e}`);
@@ -221,6 +259,40 @@ export function ThirdPartySection() {
             }}
           >
             {toast.msg}
+          </div>
+        )}
+
+        {restartHint === "needed" && (
+          <div
+            role="status"
+            style={{
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "space-between",
+              gap: "var(--sp-12)",
+              padding: "var(--sp-10) var(--sp-14)",
+              border: "var(--bw-hair) solid var(--accent-border)",
+              background: "var(--accent-soft)",
+              color: "var(--accent-ink)",
+              borderRadius: "var(--r-2)",
+              fontSize: "var(--fs-sm)",
+            }}
+          >
+            <span>
+              Claude Desktop is running. Restart it to apply the new
+              configuration.
+            </span>
+            <Button
+              variant="solid"
+              size="sm"
+              onClick={handleRestartDesktop}
+              disabled={restartingDesktop}
+              glyph={NF.refresh}
+            >
+              {restartingDesktop
+                ? "Restarting…"
+                : "Quit & relaunch Claude Desktop"}
+            </Button>
           </div>
         )}
 

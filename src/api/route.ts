@@ -59,4 +59,9 @@ export const routeApi = {
   /** Best-effort renderer-side cleanup of a previously-sent secret. */
   routesZeroSecret: (secret: string) =>
     invoke<void>("routes_zero_secret", { secret }),
+
+  /** Is Claude Desktop currently running? */
+  routesDesktopRunning: () => invoke<boolean>("routes_desktop_running"),
+  /** Quit and relaunch Claude Desktop to apply enterpriseConfig changes. */
+  routesDesktopRestart: () => invoke<void>("routes_desktop_restart"),
 };
