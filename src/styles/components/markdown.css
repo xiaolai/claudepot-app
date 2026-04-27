@@ -1,0 +1,280 @@
+/* ==========================================================================
+   markdown.css — paper-mono rendering for Config previews
+
+   Two surfaces share this stylesheet:
+     1. `.md-body`     — the article wrapper that <MarkdownRenderer> drops
+                          around react-markdown output.
+     2. `.code-block`  — the standalone <CodeRenderer> for non-markdown
+                          code files (statusline, hooks, "other"). It
+                          renders a <pre><code class="hljs language-..."> tree
+                          so the same .hljs-* rules below apply.
+
+   Tokens come from tokens.css. No raw colors here.
+   ========================================================================== */
+
+/* ── Markdown body block layout ────────────────────────────── */
+.md-body {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-12);
+  padding: var(--sp-16) var(--sp-20);
+  font-size: var(--fs-sm);
+  line-height: var(--lh-body);
+  color: var(--fg);
+  /* react-markdown emits raw text nodes alongside elements; keep them
+     readable but never let them break the layout. */
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+
+.md-body > * { margin: 0; }
+.md-body > * + * { margin-top: var(--sp-8); }
+
+.md-body h1,
+.md-body h2,
+.md-body h3,
+.md-body h4,
+.md-body h5,
+.md-body h6 {
+  margin: var(--sp-12) 0 0;
+  font-weight: 600;
+  color: var(--fg);
+  line-height: var(--lh-tight, 1.25);
+}
+.md-body h1 { font-size: var(--fs-md-lg); }
+.md-body h2 { font-size: var(--fs-md); }
+.md-body h3 { font-size: var(--fs-sm); }
+.md-body h4,
+.md-body h5,
+.md-body h6 { font-size: var(--fs-sm); color: var(--fg-muted); }
+
+.md-body p { margin: 0; }
+
+.md-body ul,
+.md-body ol {
+  margin: 0;
+  padding-left: var(--sp-20);
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-3);
+}
+.md-body li > ul,
+.md-body li > ol {
+  margin-top: var(--sp-3);
+}
+
+/* GFM task lists */
+.md-body input[type="checkbox"] {
+  margin-right: var(--sp-6);
+  accent-color: var(--accent);
+}
+
+.md-body blockquote {
+  margin: 0;
+  padding: var(--sp-4) var(--sp-12);
+  border-left: var(--bw-strong) solid var(--accent-border);
+  color: var(--fg-muted);
+  font-style: italic;
+}
+
+.md-body hr {
+  border: none;
+  border-top: var(--bw-hair) solid var(--line);
+  margin: var(--sp-6) 0;
+}
+
+.md-body a {
+  color: var(--accent-ink);
+  text-decoration: underline;
+  text-underline-offset: 0.18em;
+}
+.md-body a:hover { color: var(--accent); }
+
+.md-body strong { font-weight: 600; }
+.md-body em { font-style: italic; }
+.md-body del { text-decoration: line-through; color: var(--fg-muted); }
+
+/* Inline code (NOT inside a fenced block) */
+.md-body :not(pre) > code {
+  font-family: var(--font-mono);
+  font-size: 0.92em;
+  padding: 0 var(--sp-3);
+  background: var(--bg-sunken);
+  border: var(--bw-hair) solid var(--line);
+  border-radius: var(--r-1);
+  color: var(--fg);
+}
+
+/* GFM tables */
+.md-body table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: var(--fs-xs);
+  border: var(--bw-hair) solid var(--line);
+  border-radius: var(--r-2);
+  overflow: hidden;
+}
+.md-body thead th {
+  background: var(--bg-sunken);
+  font-weight: 600;
+  text-align: left;
+}
+.md-body th,
+.md-body td {
+  padding: var(--sp-6) var(--sp-10);
+  border-bottom: var(--bw-hair) solid var(--line);
+  vertical-align: top;
+}
+.md-body tbody tr:last-child td { border-bottom: none; }
+
+/* Images — never load over the network from Tauri webview; this just
+   prevents oversize blowouts if someone references a local file URL. */
+.md-body img {
+  max-width: 100%;
+  height: auto;
+  border-radius: var(--r-2);
+  border: var(--bw-hair) solid var(--line);
+}
+
+/* ── Fenced code block (markdown) and stand-alone code preview ─ */
+.md-body pre,
+.code-block pre {
+  margin: 0;
+  padding: var(--sp-10) var(--sp-12);
+  background: var(--bg-sunken);
+  border: var(--bw-hair) solid var(--line);
+  border-radius: var(--r-2);
+  font-family: var(--font-mono);
+  font-size: var(--fs-xs);
+  line-height: var(--lh-code, 1.5);
+  color: var(--fg);
+  overflow: auto;
+  white-space: pre;
+  tab-size: 4;
+}
+
+.md-body pre code,
+.code-block pre code {
+  background: transparent;
+  border: 0;
+  padding: 0;
+  font-size: inherit;
+  color: inherit;
+  display: block;
+}
+
+/* The stand-alone code-file preview lives in a flex column so the
+   <pre> can grow to fill the preview pane without an extra padding
+   ring. The container handles spacing. */
+.code-block {
+  display: flex;
+  flex-direction: column;
+  padding: var(--sp-16) var(--sp-20);
+}
+.code-block pre {
+  white-space: pre;
+}
+
+/* ── highlight.js token coloring (paper-mono mapping) ──────── */
+.hljs { color: var(--fg); background: transparent; }
+
+.hljs-comment,
+.hljs-quote { color: var(--syn-comment); font-style: italic; }
+
+.hljs-keyword,
+.hljs-selector-tag,
+.hljs-section,
+.hljs-doctag,
+.hljs-name,
+.hljs-strong { color: var(--syn-keyword); }
+
+.hljs-string,
+.hljs-regexp,
+.hljs-template-variable,
+.hljs-template-tag,
+.hljs-symbol,
+.hljs-bullet { color: var(--syn-string); }
+
+.hljs-number,
+.hljs-literal,
+.hljs-link { color: var(--syn-number); }
+
+.hljs-title,
+.hljs-title.function_,
+.hljs-title.class_,
+.hljs-title.class_.inherited__ { color: var(--syn-function); }
+
+.hljs-type,
+.hljs-built_in,
+.hljs-class .hljs-title,
+.hljs-params { color: var(--syn-type); }
+
+.hljs-attr,
+.hljs-attribute,
+.hljs-property,
+.hljs-variable,
+.hljs-selector-id,
+.hljs-selector-class,
+.hljs-selector-attr,
+.hljs-selector-pseudo { color: var(--syn-attr); }
+
+.hljs-meta,
+.hljs-meta .hljs-string,
+.hljs-meta-keyword,
+.hljs-meta-string,
+.hljs-tag,
+.hljs-formula { color: var(--syn-meta); }
+
+.hljs-emphasis { font-style: italic; }
+.hljs-strong   { font-weight: 600; }
+
+.hljs-deletion { background: var(--syn-deleted); }
+.hljs-addition { background: var(--syn-inserted); }
+
+/* ── Mermaid ──────────────────────────────────────────────── */
+.mermaid-block {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  padding: var(--sp-12) var(--sp-16);
+  background: var(--bg);
+  border: var(--bw-hair) solid var(--line);
+  border-radius: var(--r-2);
+  overflow: auto;
+}
+
+.mermaid-block svg {
+  max-width: 100%;
+  height: auto;
+}
+
+.mermaid-error {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-6);
+  padding: var(--sp-10) var(--sp-12);
+  background: var(--bg-sunken);
+  border: var(--bw-hair) solid var(--danger);
+  border-radius: var(--r-2);
+  font-size: var(--fs-xs);
+}
+
+.mermaid-error-title {
+  color: var(--danger);
+  font-weight: 600;
+}
+
+.mermaid-error-msg,
+.mermaid-error-source {
+  margin: 0;
+  padding: var(--sp-6) var(--sp-8);
+  background: var(--bg);
+  border: var(--bw-hair) solid var(--line);
+  border-radius: var(--r-1);
+  font-family: var(--font-mono);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  color: var(--fg-muted);
+}
+
+.mermaid-error-msg { color: var(--danger); }

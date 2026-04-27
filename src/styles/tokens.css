@@ -326,6 +326,21 @@
                      0 2px 8px   oklch(0% 0 0 / 0.08);
   --shadow-thumb:    0 1px 2px   oklch(0% 0 0 / 0.20);
   --shadow-overlay:  0 20px 60px oklch(0% 0 0 / 0.20);
+
+  /* ── Syntax (paper-mono restraint: low chroma, hue-only
+        differentiation, --fg/--fg-muted/--fg-faint do most of
+        the work). Used by markdown fenced code blocks and the
+        Config code-file preview via highlight.js classes. */
+  --syn-keyword:  oklch(48% 0.11 25);   /* warm red — keywords, control-flow */
+  --syn-string:   oklch(45% 0.08 145);  /* muted green — strings */
+  --syn-number:   oklch(45% 0.10 280);  /* purple — numbers, literals */
+  --syn-function: oklch(45% 0.10 220);  /* blue — function/method names */
+  --syn-type:     oklch(48% 0.09 80);   /* amber — types, built-ins */
+  --syn-attr:     oklch(45% 0.08 160);  /* teal — attributes, JSON keys */
+  --syn-meta:     var(--fg-muted);      /* meta, preprocessor, frontmatter */
+  --syn-comment:  var(--fg-faint);      /* comments — italic */
+  --syn-deleted:  oklch(60% 0.10 25 / 0.18);
+  --syn-inserted: oklch(60% 0.10 145 / 0.18);
 }
 
 /* ── DARK (ink paper) ─────────────────────────────────────── */
@@ -364,6 +379,20 @@
                      0 2px 8px   oklch(0% 0 0 / 0.30);
   --shadow-thumb:    0 1px 2px   oklch(0% 0 0 / 0.45);
   --shadow-overlay:  0 20px 60px oklch(0% 0 0 / 0.45);
+
+  /* ── Syntax (dark): bump L for legibility on ink paper.
+        Same hue family as light so syntax reads identically
+        across themes for muscle-memory. */
+  --syn-keyword:  oklch(76% 0.13 25);
+  --syn-string:   oklch(74% 0.10 145);
+  --syn-number:   oklch(74% 0.12 280);
+  --syn-function: oklch(74% 0.12 220);
+  --syn-type:     oklch(78% 0.10 80);
+  --syn-attr:     oklch(74% 0.09 160);
+  --syn-meta:     var(--fg-muted);
+  --syn-comment:  var(--fg-faint);
+  --syn-deleted:  oklch(40% 0.12 25 / 0.30);
+  --syn-inserted: oklch(40% 0.10 145 / 0.30);
 }
 
 /* ── Follow OS when no explicit theme is set ──────────────── */
@@ -399,6 +428,17 @@
                        0 2px 8px   oklch(0% 0 0 / 0.30);
     --shadow-thumb:    0 1px 2px   oklch(0% 0 0 / 0.45);
     --shadow-overlay:  0 20px 60px oklch(0% 0 0 / 0.45);
+
+    --syn-keyword:  oklch(76% 0.13 25);
+    --syn-string:   oklch(74% 0.10 145);
+    --syn-number:   oklch(74% 0.12 280);
+    --syn-function: oklch(74% 0.12 220);
+    --syn-type:     oklch(78% 0.10 80);
+    --syn-attr:     oklch(74% 0.09 160);
+    --syn-meta:     var(--fg-muted);
+    --syn-comment:  var(--fg-faint);
+    --syn-deleted:  oklch(40% 0.12 25 / 0.30);
+    --syn-inserted: oklch(40% 0.10 145 / 0.30);
   }
 }
 
