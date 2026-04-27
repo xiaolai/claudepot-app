@@ -142,7 +142,7 @@ pub struct FileInventoryEntry {
 
 /// Export-time feature flags. Travel inside `manifest.json` so the
 /// importer can surface them in the inspect view.
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ExportFlags {
     #[serde(default)]
     pub include_global: bool,
@@ -160,6 +160,22 @@ pub struct ExportFlags {
     pub encrypted: bool,
     #[serde(default)]
     pub signed: bool,
+}
+
+impl Default for ExportFlags {
+    fn default() -> Self {
+        Self {
+            include_global: false,
+            include_worktree: false,
+            include_live: false,
+            include_claudepot_state: false,
+            // Match the serde default so `default()` and round-tripped
+            // older bundles agree on the fallback.
+            include_file_history: true,
+            encrypted: false,
+            signed: false,
+        }
+    }
 }
 
 fn default_true() -> bool {

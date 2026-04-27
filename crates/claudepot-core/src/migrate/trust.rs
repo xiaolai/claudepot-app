@@ -148,6 +148,26 @@ pub enum TrustGateKind {
     GlobalContent,
 }
 
+/// Apply Bucket-C scrubbing to a parsed `~/.claude/settings.json` and
+/// produce both the scrubbed body and the proposed-hooks block. The
+/// returned `proposed_hooks` is `Some` only when the source had any
+/// hooks defined (otherwise the importer skips the trust panel).
+pub fn scrub_user_settings(parsed: serde_json::Value) -> SettingsSplit {
+    split_settings(parsed)
+}
+
+/// Apply Bucket-C scrubbing to a parsed `~/.claude/mcpServers.json` (or
+/// the `mcpServers` block of `~/.claude.json`). Returns the count of
+/// entries marked `needs_resolution`. The input map is mutated in
+/// place.
+pub fn scrub_mcp_block(value: &mut serde_json::Value) -> usize {
+    if let serde_json::Value::Object(map) = value {
+        scrub_mcp_servers(map)
+    } else {
+        0
+    }
+}
+
 /// Quarantine xattr stripping (macOS only). Stub for non-mac targets.
 /// See spec §7.6 — we only strip from JSONL/config files Claudepot
 /// owns; user-installable surfaces (statusline, plugins, hooks) keep

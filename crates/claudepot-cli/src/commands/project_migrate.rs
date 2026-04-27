@@ -11,8 +11,9 @@
 
 use crate::AppContext;
 use anyhow::{anyhow, Result};
+use claudepot_core::account::AccountStore;
 use claudepot_core::migrate::{
-    self, conflicts, ExportOptions, ImportOptions, MigrateError,
+    self, conflicts, state as migrate_state, ExportOptions, ImportOptions, MigrateError,
 };
 use claudepot_core::paths;
 use claudepot_core::project_helpers::resolve_path;
@@ -69,6 +70,35 @@ pub fn export(
             .join(format!("{host}-{date}.claudepot.tar.zst"))
     });
 
+    // When --include-claudepot-state is set, pull account stubs from
+    // the local store. Per spec §16 Q2 we only carry the
+    // (uuid, email, org, verification shape); never tokens.
+    let account_stubs = if include_claudepot_state {
+        let data_dir = paths::claudepot_data_dir();
+        let store = AccountStore::open(&data_dir.join("accounts.db"))?;
+        Some(migrate_state::account_stubs_from_store(&store).map_err(map_migrate_err)?)
+    } else {
+        None
+    };
+
+    // Passphrase resolution. The CLI honors `CLAUDEPOT_PASSPHRASE`
+    // (env var) for non-interactive flows; otherwise tty prompt would
+    // be ideal but we don't ship `rpassword` in this slice — the CLI
+    // refuses cleanly so the user can `--no-encrypt` or set the env.
+    let encrypt_passphrase = if encrypt {
+        match std::env::var("CLAUDEPOT_PASSPHRASE") {
+            Ok(s) if !s.is_empty() => Some(migrate::SecretString::from(s)),
+            _ => {
+                return Err(anyhow!(
+                    "encryption requested; set CLAUDEPOT_PASSPHRASE or pass --no-encrypt"
+                ));
+            }
+        }
+    } else {
+        None
+    };
+    let sign_password = std::env::var("CLAUDEPOT_SIGN_PASSWORD").ok();
+
     let opts = ExportOptions {
         output,
         project_cwds: project_cwds.clone(),
@@ -78,7 +108,10 @@ pub fn export(
         include_claudepot_state,
         include_file_history: !no_file_history,
         encrypt,
+        encrypt_passphrase,
         sign_keyfile,
+        sign_password,
+        account_stubs,
     };
 
     let receipt = migrate::export_projects(&config_dir, opts).map_err(map_migrate_err)?;
@@ -120,6 +153,10 @@ pub fn import(
     }
 
     let config_dir = paths::claude_config_dir();
+    let decrypt_passphrase = std::env::var("CLAUDEPOT_PASSPHRASE")
+        .ok()
+        .filter(|s| !s.is_empty())
+        .map(migrate::SecretString::from);
     let opts = ImportOptions {
         mode: mode.into(),
         prefer: prefer.map(Into::into),
@@ -128,6 +165,8 @@ pub fn import(
         remap_rules: parse_remap(&remap)?,
         include_file_history: !no_file_history,
         dry_run,
+        decrypt_passphrase,
+        verify_key: None,
     };
 
     let receipt = migrate::import_bundle(&config_dir, &bundle, opts).map_err(map_migrate_err)?;
@@ -164,7 +203,17 @@ pub fn import(
                 println!("  ✗ {cwd}: {reason}");
             }
         }
-        println!("Undo within 24h: claudepot project migrate undo");
+        if !receipt.accounts_listed.is_empty() {
+            println!(
+                "Source machine had {} account(s) — re-login here to use them \
+                 (no credentials traveled):",
+                receipt.accounts_listed.len()
+            );
+            for stub in &receipt.accounts_listed {
+                println!("  - {} (verify: {})", stub.email, stub.verify_status);
+            }
+        }
+        println!("Undo within 24h: claudepot migrate undo");
     }
     Ok(())
 }
@@ -203,74 +252,36 @@ pub fn inspect(ctx: &AppContext, bundle: PathBuf, upgrade_schema: bool) -> Resul
     Ok(())
 }
 
-/// `project migrate undo` — v0 stub. Reads the most recent journal
-/// inside the 24h undo window and reports it; the actual reverse-
-/// LIFO replay lands with the rollback layer.
+/// `project migrate undo` — reverse the most recent import within
+/// the 24h undo window. LIFO journal replay; per-step tamper detection.
 pub fn undo(ctx: &AppContext) -> Result<()> {
-    let (journals_dir, _, _) = paths::claudepot_repair_dirs();
-    if !journals_dir.exists() {
-        if ctx.json {
-            println!("{}", serde_json::json!({"undone": false, "reason": "no journals"}));
-        } else {
-            println!("No import journals to undo.");
-        }
-        return Ok(());
-    }
-    let mut newest: Option<(PathBuf, u64)> = None;
-    for entry in std::fs::read_dir(&journals_dir)? {
-        let entry = entry?;
-        let p = entry.path();
-        let name = p.file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_default();
-        if !name.starts_with("import-") {
-            continue;
-        }
-        let m = entry.metadata()?;
-        let mtime = m.modified()
-            .ok()
-            .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
-            .map(|d| d.as_secs())
-            .unwrap_or(0);
-        if newest.as_ref().is_none_or(|(_, t)| mtime > *t) {
-            newest = Some((p, mtime));
-        }
-    }
-    let Some((path, _)) = newest else {
-        if ctx.json {
-            println!("{}", serde_json::json!({"undone": false, "reason": "no recent imports"}));
-        } else {
-            println!("No recent import journals.");
-        }
-        return Ok(());
-    };
-    let journal = migrate::apply::ImportJournal::load(&path).map_err(map_migrate_err)?;
-    if !migrate::apply::within_undo_window(&journal) {
-        return Err(anyhow!(
-            "most recent import journal is older than 24h — outside undo window: {}",
-            path.display()
-        ));
-    }
-    // v0: the rollback machinery is the next layer. Surface the
-    // journal so the user can see what would have been reversed.
+    let receipt = migrate::import_undo().map_err(map_migrate_err)?;
     if ctx.json {
-        println!(
-            "{}",
-            serde_json::json!({
-                "undone": false,
-                "reason": "rollback engine deferred to next slice",
-                "journal": &journal,
-            })
-        );
+        let v = serde_json::json!({
+            "bundle_id": receipt.bundle_id,
+            "journal_path": receipt.journal_path.to_string_lossy(),
+            "counter_journal_path": receipt.counter_journal_path.to_string_lossy(),
+            "steps_reversed": receipt.steps_reversed,
+            "steps_tampered": receipt.steps_tampered,
+            "steps_errored": receipt.steps_errored,
+        });
+        println!("{}", serde_json::to_string_pretty(&v)?);
     } else {
-        println!("Most recent import journal: {}", path.display());
-        println!("  bundle_id:  {}", journal.bundle_id);
-        println!("  steps:      {}", journal.steps.len());
-        println!("  committed:  {}", journal.committed);
-        println!();
-        println!(
-            "Note: the rollback engine is deferred — this command currently \
-             reports the journal so the user can audit it. Reverse-LIFO \
-             replay lands with apply v1."
-        );
+        println!("Undo of import {}:", receipt.bundle_id);
+        println!("  steps reversed:  {}", receipt.steps_reversed);
+        if !receipt.steps_tampered.is_empty() {
+            println!("  skipped (post-apply tamper):");
+            for s in &receipt.steps_tampered {
+                println!("    - {s}");
+            }
+        }
+        if !receipt.steps_errored.is_empty() {
+            println!("  errors:");
+            for s in &receipt.steps_errored {
+                println!("    - {s}");
+            }
+        }
+        println!("  counter-journal: {}", receipt.counter_journal_path.display());
     }
     Ok(())
 }
