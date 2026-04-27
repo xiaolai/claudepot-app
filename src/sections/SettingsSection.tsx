@@ -19,6 +19,7 @@ import { NF } from "../icons";
 import { ScreenHeader } from "../shell/ScreenHeader";
 import { ProtectedPathsPane } from "./settings/ProtectedPathsPane";
 import { CleanupPane } from "./sessions/CleanupPane";
+import { ArtifactLifecyclePane } from "./settings/ArtifactLifecyclePane";
 import { TrashDrawer } from "./sessions/TrashDrawer";
 import type { AppStatus, CcIdentity } from "../types";
 import { APP_VERSION } from "../version";
@@ -642,31 +643,59 @@ function CleanupTabPane({
     <div
       style={{
         display: "flex",
-        gap: "var(--sp-24)",
-        alignItems: "flex-start",
+        flexDirection: "column",
+        gap: "var(--sp-32)",
       }}
     >
-      <div style={{ flex: 2, minWidth: 0 }}>
-        <CleanupPane
-          onTrashChanged={() => setTrashTick((n) => n + 1)}
-          setToast={setToast}
-        />
-      </div>
       <div
         style={{
-          flex: 1,
-          minWidth: 0,
-          borderLeft: "var(--bw-hair) solid var(--line)",
-          paddingLeft: "var(--sp-16)",
+          display: "flex",
+          gap: "var(--sp-24)",
+          alignItems: "flex-start",
         }}
       >
-        {/* `key={trashTick}` forces a remount whenever CleanupPane
-            dispatches a prune so the drawer picks up the newly-
-            trashed entries. We deliberately do NOT pass `onChange`
-            here — the drawer already calls its own refresh() after
-            restore / empty actions, so wiring it back to setTrashTick
-            would double-bump and remount the drawer mid-action. */}
-        <TrashDrawer key={trashTick} />
+        <div style={{ flex: 2, minWidth: 0 }}>
+          <CleanupPane
+            onTrashChanged={() => setTrashTick((n) => n + 1)}
+            setToast={setToast}
+          />
+        </div>
+        <div
+          style={{
+            flex: 1,
+            minWidth: 0,
+            borderLeft: "var(--bw-hair) solid var(--line)",
+            paddingLeft: "var(--sp-16)",
+          }}
+        >
+          {/* `key={trashTick}` forces a remount whenever CleanupPane
+              dispatches a prune so the drawer picks up the newly-
+              trashed entries. We deliberately do NOT pass `onChange`
+              here — the drawer already calls its own refresh() after
+              restore / empty actions, so wiring it back to setTrashTick
+              would double-bump and remount the drawer mid-action. */}
+          <TrashDrawer key={trashTick} />
+        </div>
+      </div>
+
+      {/* Artifact lifecycle (Disable + Trash for skills/agents/
+          commands). Lives below the session cleanup row so it shares
+          the same nav slot but doesn't crowd the existing layout. */}
+      <div
+        style={{
+          borderTop: "var(--bw-hair) solid var(--line)",
+          paddingTop: "var(--sp-16)",
+        }}
+      >
+        <ArtifactLifecyclePane
+          pushToast={pushToast}
+          // CleanupTabPane doesn't know about the active project
+          // anchor — Settings is global. Project-scoped disabled
+          // artifacts still surface when the user opened the same
+          // project in Config; for the global Settings view we pass
+          // null so only user-scope entries appear.
+          projectRoot={null}
+        />
       </div>
     </div>
   );
