@@ -6,12 +6,12 @@
 /* ---------- maintenance view (P2.2) ---------- */
 
 .maintenance-view {
-  padding-top: 16px;
+  padding-top: var(--sp-16);
 }
 
 .maintenance-section {
-  padding: 16px 24px;
-  border-bottom: 0.5px solid var(--border);
+  padding: var(--sp-16) var(--sp-24);
+  border-bottom: var(--bw-subhair) solid var(--border);
 }
 
 .maintenance-section:last-child {
@@ -21,12 +21,12 @@
 .maintenance-section-header {
   display: flex;
   align-items: center;
-  gap: 8px;
-  margin-bottom: 8px;
+  gap: var(--sp-8);
+  margin-bottom: var(--sp-8);
 }
 
 .maintenance-section-header h2 {
-  font-size: 13px;
+  font-size: var(--fs-base);
   font-weight: 500;
   margin: 0;
 }
@@ -36,17 +36,17 @@
 }
 
 .maintenance-desc {
-  font-size: 12px;
-  margin: 0 0 12px;
+  font-size: var(--fs-sm);
+  margin: 0 0 var(--sp-12);
 }
 
 .maintenance-toast {
-  margin-top: 8px;
-  padding: 6px 10px;
-  border-radius: 6px;
+  margin-top: var(--sp-8);
+  padding: var(--sp-6) var(--sp-10);
+  border-radius: var(--r-2);
   background: var(--ok-weak);
   color: var(--ok);
-  font-size: 12px;
+  font-size: var(--fs-sm);
 }
 
 .repair-view-embedded {
@@ -59,47 +59,53 @@
 
 /* ---------- repair view ---------- */
 
-.repair-view { padding-top: 16px; }
+.repair-view { padding-top: var(--sp-16); }
 
 .repair-header {
   display: flex;
   align-items: center;
-  gap: 8px;
-  padding: 0 20px 12px;
-  border-bottom: 0.5px solid var(--border);
+  gap: var(--sp-8);
+  padding: 0 var(--sp-20) var(--sp-12);
+  border-bottom: var(--bw-subhair) solid var(--border);
 }
 
 .repair-header h2 {
   display: flex;
   align-items: center;
-  gap: 6px;
-  font-size: 14px;
+  gap: var(--sp-6);
+  font-size: var(--fs-md);
   font-weight: 600;
   margin: 0;
 }
 
-.repair-list { list-style: none; padding: 12px 20px; margin: 0; display: grid; gap: 10px; }
+.repair-list {
+  list-style: none;
+  padding: var(--sp-12) var(--sp-20);
+  margin: 0;
+  display: grid;
+  gap: var(--sp-10);
+}
 
 .repair-entry {
-  padding: 10px 12px;
-  border: 0.5px solid var(--border);
-  border-radius: 6px;
+  padding: var(--sp-10) var(--sp-12);
+  border: var(--bw-subhair) solid var(--border);
+  border-radius: var(--r-2);
   display: grid;
-  gap: 4px;
+  gap: var(--sp-4);
 }
 
 .repair-entry-head {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: var(--sp-8);
 }
 
-.repair-entry-paths { line-height: 1.4; }
-.repair-entry-error { padding-top: 2px; }
+.repair-entry-paths { line-height: var(--lh-base); }
+.repair-entry-error { padding-top: var(--sp-2); }
 
 .repair-entry-actions {
-  padding-top: 6px;
-  border-top: 0.5px dashed var(--border);
+  padding-top: var(--sp-6);
+  border-top: var(--bw-subhair) dashed var(--border);
   font-style: italic;
 }
 
@@ -107,73 +113,73 @@
 
 .repair-entry-actions {
   display: flex;
-  gap: 6px;
-  padding-top: 8px;
-  border-top: 0.5px solid var(--border);
+  gap: var(--sp-6);
+  padding-top: var(--sp-8);
+  border-top: var(--bw-subhair) solid var(--border);
   font-style: normal;
 }
 
 .repair-entry-actions button {
-  font-size: 12px;
+  font-size: var(--fs-sm);
   display: inline-flex;
   align-items: center;
-  gap: 4px;
+  gap: var(--sp-4);
 }
 
 /* ---------- type-to-confirm block ---------- */
 
 .type-to-confirm {
-  padding: 8px 0;
+  padding: var(--sp-8) 0;
   display: grid;
-  gap: 4px;
+  gap: var(--sp-4);
 }
 
 .type-to-confirm input {
   width: 100%;
-  padding: 6px 8px;
+  padding: var(--sp-6) var(--sp-8);
   font-family: var(--font-mono);
-  font-size: 12px;
-  border: 0.5px solid var(--border);
-  border-radius: 6px;
+  font-size: var(--fs-sm);
+  border: var(--bw-subhair) solid var(--border);
+  border-radius: var(--r-2);
   background: var(--bg);
   color: var(--text);
 }
 
 .type-to-confirm input:focus-visible {
-  outline: 2px solid var(--accent);
-  outline-offset: 0;
+  outline: var(--bw-focus) solid var(--accent);
+  outline-offset: var(--focus-outline-offset-flat);
 }
 
 /* ---------- op progress modal ---------- */
 
-.op-progress-modal { width: 480px; }
+.op-progress-modal { width: var(--modal-width-md); }
 
 .phase-list {
   list-style: none;
-  padding: 8px 0;
+  padding: var(--sp-8) 0;
   margin: 0;
   display: grid;
-  gap: 4px;
+  gap: var(--sp-4);
 }
 
 .phase {
   display: flex;
   align-items: baseline;
-  gap: 8px;
-  padding: 4px 8px;
-  border-radius: 4px;
+  gap: var(--sp-8);
+  padding: var(--sp-4) var(--sp-8);
+  border-radius: var(--r-1);
 }
 
 .phase-tag {
   font-family: var(--font-mono);
-  font-size: 11px;
+  font-size: var(--fs-xs);
   font-weight: 600;
-  width: 24px;
+  width: var(--sp-24);
   color: var(--muted);
 }
 
 .phase-label {
-  font-size: 12px;
+  font-size: var(--fs-sm);
   color: var(--muted);
   text-transform: capitalize;
 }
@@ -181,29 +187,33 @@
 .phase-pending { opacity: 0.5; }
 .phase-running { background: var(--accent-weak); }
 .phase-running .phase-label { color: var(--accent); font-weight: 500; }
-.phase-complete .phase-label { color: var(--ok, var(--muted)); }
-.phase-error { background: var(--bad-weak, transparent); }
+.phase-complete .phase-label { color: var(--ok); }
+.phase-error { background: var(--bad-weak); }
 .phase-error .phase-label { color: var(--bad); font-weight: 600; }
 
 .op-terminal {
-  padding: 10px 12px;
-  border-radius: 6px;
-  margin: 8px 0;
+  padding: var(--sp-10) var(--sp-12);
+  border-radius: var(--r-2);
+  margin: var(--sp-8) 0;
 }
-.op-terminal.ok { background: var(--ok-weak, transparent); color: var(--ok); }
-.op-terminal.bad { background: var(--bad-weak, transparent); color: var(--bad); }
+.op-terminal.ok { background: var(--ok-weak); color: var(--ok); }
+.op-terminal.bad { background: var(--bad-weak); color: var(--bad); }
 
-/* ---------- running-op strip ---------- */
+/* ---------- running-op strip ----------
+   Floats above the content pane while a long-running op is in flight.
+   The strip needs absolute, not theme-tinted, contrast — it has to read
+   as a "system overlay" against arbitrary content underneath, so the
+   fill is the always-dark `--scrim-strong` regardless of theme. */
 
 .running-op-strip {
   position: fixed;
-  bottom: 8px;
-  left: 56px;  /* 48 rail + 8 gap */
-  right: 8px;
-  z-index: 9;
+  bottom: var(--sp-8);
+  left: var(--sp-56);  /* 48 rail + 8 gap */
+  right: var(--sp-8);
+  z-index: var(--z-strip);
   display: flex;
   flex-wrap: wrap;
-  gap: 6px;
+  gap: var(--sp-6);
   pointer-events: none;
 }
 
@@ -211,20 +221,21 @@
   pointer-events: auto;
   display: inline-flex;
   align-items: center;
-  gap: 8px;
-  padding: 6px 12px;
-  background: rgba(0, 0, 0, 0.8);
-  color: white;
+  gap: var(--sp-8);
+  padding: var(--sp-6) var(--sp-12);
+  background: var(--scrim-strong);
+  color: var(--on-color);
   border: 0;
-  border-radius: 999px;
-  font-size: 12px;
+  border-radius: var(--r-pill);
+  font-size: var(--fs-sm);
   cursor: default;
   backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
 }
 
 .running-op-spinner {
-  width: 8px;
-  height: 8px;
+  width: var(--sp-8);
+  height: var(--sp-8);
   border-radius: 50%;
   background: var(--accent);
   animation: running-op-pulse 1.2s ease-in-out infinite;

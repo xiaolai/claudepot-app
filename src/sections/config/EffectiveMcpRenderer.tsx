@@ -248,7 +248,7 @@ function ServerRow({ server }: { server: ConfigEffectiveMcpServerDto }) {
         <td
           style={{
             padding: "var(--sp-6) var(--sp-12)",
-            fontFamily: "var(--mono)",
+            fontFamily: "var(--font-mono)",
             fontSize: "var(--fs-2xs)",
             color: "var(--fg-muted)",
             overflow: "hidden",
@@ -262,7 +262,7 @@ function ServerRow({ server }: { server: ConfigEffectiveMcpServerDto }) {
         <td
           style={{
             padding: "var(--sp-6) var(--sp-12)",
-            fontFamily: "var(--mono)",
+            fontFamily: "var(--font-mono)",
             fontSize: "var(--fs-2xs)",
             color: "var(--fg-muted)",
             overflow: "hidden",
@@ -288,7 +288,7 @@ function ServerRow({ server }: { server: ConfigEffectiveMcpServerDto }) {
               style={{
                 margin: 0,
                 padding: "var(--sp-10) var(--sp-16)",
-                fontFamily: "var(--mono)",
+                fontFamily: "var(--font-mono)",
                 fontSize: "var(--fs-2xs)",
                 color: "var(--fg-muted)",
                 whiteSpace: "pre-wrap",

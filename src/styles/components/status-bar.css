@@ -13,27 +13,27 @@
   display: flex;
   align-items: center;
   flex-wrap: wrap;
-  gap: 8px;
-  padding: 6px 12px;
-  margin-bottom: 12px;
-  border-radius: 6px;
-  font-size: 12px;
+  gap: var(--sp-8);
+  padding: var(--sp-6) var(--sp-12);
+  margin-bottom: var(--sp-12);
+  border-radius: var(--r-2);
+  font-size: var(--fs-sm);
   color: var(--text);
 }
 
 .status-bar.info {
   background: var(--surface);
-  border: 0.5px solid var(--border);
+  border: var(--bw-subhair) solid var(--border);
 }
 
 .status-bar.warning {
   background: var(--warn-weak);
-  border: 0.5px solid color-mix(in srgb, var(--warn) 30%, transparent);
+  border: var(--bw-subhair) solid color-mix(in srgb, var(--warn) 30%, transparent);
 }
 
 .status-bar.error {
   background: var(--bad-weak);
-  border: 0.5px solid color-mix(in srgb, var(--bad) 30%, transparent);
+  border: var(--bw-subhair) solid color-mix(in srgb, var(--bad) 30%, transparent);
 }
 
 .status-bar-text {
@@ -42,25 +42,25 @@
 }
 
 .status-bar-action {
-  height: 22px;
-  padding: 0 10px;
-  font-size: 11px;
+  height: var(--sp-22);
+  padding: 0 var(--sp-10);
+  font-size: var(--fs-xs);
   font-weight: 500;
-  border-radius: 4px;
+  border-radius: var(--r-1);
   flex-shrink: 0;
 }
 
 .status-bar.error .status-bar-action {
   background: var(--bad);
-  color: #fff;
+  color: var(--on-color);
   border-color: transparent;
 }
 
 /* 24 h snooze button on dismissable status issues. Kept compact so
    it doesn't compete with the action button for attention. */
 .status-bar-dismiss {
-  width: 18px;
-  height: 18px;
+  width: var(--sp-18);
+  height: var(--sp-18);
   padding: 0;
   flex-shrink: 0;
   opacity: 0.6;
@@ -72,13 +72,13 @@
 .status-bar-toggle {
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: var(--sp-6);
   background: transparent;
   border: none;
   padding: 0;
   color: inherit;
   font: inherit;
-  font-size: 12px;
+  font-size: var(--fs-sm);
   height: auto;
   box-shadow: none;
   flex: 1;
@@ -96,8 +96,8 @@
 .status-bar-verifying {
   display: inline-flex;
   align-items: center;
-  gap: 4px;
-  font-size: 11px;
+  gap: var(--sp-4);
+  font-size: var(--fs-xs);
   color: var(--muted);
   font-style: italic;
   margin-left: auto;
@@ -122,25 +122,25 @@
 
 .status-bar-list {
   list-style: none;
-  padding: 4px 0 0;
+  padding: var(--sp-4) 0 0;
   margin: 0;
   width: 100%;
   display: grid;
-  gap: 4px;
+  gap: var(--sp-4);
 }
 
 .status-bar-item {
   display: flex;
   align-items: flex-start;
-  gap: 8px;
-  padding: 4px 0;
-  font-size: 12px;
+  gap: var(--sp-8);
+  padding: var(--sp-4) 0;
+  font-size: var(--fs-sm);
 }
 
 .status-bar-item .icon {
   margin-right: 0;
   flex-shrink: 0;
-  margin-top: 1px;
+  margin-top: var(--sp-px);
 }
 
 .status-bar-item.error svg { color: var(--bad); }
@@ -151,11 +151,11 @@
   min-width: 0;
   display: flex;
   flex-direction: column;
-  gap: 2px;
+  gap: var(--sp-2);
 }
 
 .status-bar-detail {
-  font-size: 11px;
+  font-size: var(--fs-xs);
   color: var(--muted);
 }
 

@@ -13,18 +13,18 @@
 
 .btn {
   font: inherit;
-  font-size: 12px;
+  font-size: var(--fs-sm);
   font-weight: 400;
-  height: 28px;
-  padding: 1px 12px;
-  border: 0.5px solid var(--border);
-  border-radius: 6px;
+  height: var(--btn-h-legacy);
+  padding: var(--sp-1) var(--sp-12);
+  border: var(--bw-subhair) solid var(--border);
+  border-radius: var(--r-2);
   background: var(--surface);
   color: var(--text);
   cursor: default;
   -webkit-user-select: none;
   user-select: none;
-  transition: background 0.1s ease;
+  transition: background var(--dur-hover) var(--ease-out);
   box-shadow: var(--shadow-subtle);
   /* Button labels should never break mid-word. In
      `.project-detail-actions` three buttons ("Open in Finder",
@@ -35,10 +35,10 @@
   white-space: nowrap;
   display: inline-flex;
   align-items: center;
-  /* 6px between an inline icon and its label. Paired with the
+  /* `--sp-6` between an inline icon and its label. Paired with the
      `.btn > svg { width: 1em }` rule below so the icon reads as a
-     peer of the 12px body text rather than a badge. */
-  gap: 6px;
+     peer of the body text rather than a badge. */
+  gap: var(--sp-6);
   flex-shrink: 0;
 }
 
@@ -54,15 +54,15 @@
 }
 
 .btn:hover:not(:disabled) {
-  background: rgba(0, 0, 0, 0.04);
+  background: var(--bg-hover-soft);
 }
 
 .btn:active:not(:disabled) {
-  background: rgba(0, 0, 0, 0.07);
+  background: var(--bg-hover-firm);
 }
 
 .btn:disabled {
-  opacity: 0.45;
+  opacity: var(--opacity-disabled);
 }
 
 .btn:focus-visible {
@@ -100,10 +100,10 @@
    focused push buttons. */
 .btn.primary {
   background: var(--accent);
-  color: var(--accent-text);
+  color: var(--on-color);
   font-weight: 500;
   border-color: transparent;
-  box-shadow: inset 0 0.5px 0 rgba(255, 255, 255, 0.18);
+  box-shadow: inset 0 var(--bw-subhair) 0 oklch(100% 0 0 / 0.18);
 }
 
 .btn.primary:hover:not(:disabled) {
@@ -134,64 +134,40 @@
 
 .btn.danger.primary {
   background: var(--bad);
-  color: #fff;
+  color: var(--on-color);
   border-color: transparent;
 }
 
 .btn.danger.primary:hover:not(:disabled) {
   filter: brightness(0.92);
   background: var(--bad);
-  color: #fff;
+  color: var(--on-color);
 }
 
-/* Icon-only toolbar button */
+/* Icon-only toolbar button. Hover and active fills come from the
+   theme-aware `--bg-hover-*` tokens, which derive from `--fg`; this
+   replaces the older prefers-color-scheme overrides that bypassed
+   the explicit `[data-theme]` toggle. */
 .icon-btn {
   display: flex;
   align-items: center;
   justify-content: center;
-  width: 28px;
-  height: 28px;
+  width: var(--icon-btn-md);
+  height: var(--icon-btn-md);
   padding: 0;
   border: none;
-  border-radius: 6px;
+  border-radius: var(--r-2);
   background: transparent;
   color: var(--muted);
   box-shadow: none;
 }
 
 .icon-btn:hover:not(:disabled) {
-  background: rgba(0, 0, 0, 0.05);
+  background: var(--bg-hover-soft);
   color: var(--text);
 }
 
 .icon-btn:active:not(:disabled) {
-  background: rgba(0, 0, 0, 0.10);
-}
-
-@media (prefers-color-scheme: dark) {
-  .btn:hover:not(:disabled) {
-    background: rgba(255, 255, 255, 0.06);
-  }
-  .btn:active:not(:disabled) {
-    background: rgba(255, 255, 255, 0.10);
-  }
-  .btn.primary:hover:not(:disabled) {
-    background: var(--accent);
-  }
-  .btn.warn:hover:not(:disabled) {
-    background: var(--warn-weak);
-  }
-  .btn.danger:hover:not(:disabled) {
-    background: var(--bad-weak);
-  }
-  .btn.danger.primary:hover:not(:disabled) {
-    background: var(--bad);
-  }
-  .icon-btn:hover:not(:disabled) {
-    background: rgba(255, 255, 255, 0.08);
-  }
-  .icon-btn:active:not(:disabled) {
-    background: rgba(255, 255, 255, 0.15);
-  }
+  background: var(--bg-hover-firm);
 }
 

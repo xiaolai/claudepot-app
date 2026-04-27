@@ -203,7 +203,7 @@ export function PreviewHeader({
             <div
               style={{
                 marginTop: "var(--sp-6)",
-                fontFamily: "var(--mono)",
+                fontFamily: "var(--font-mono)",
                 fontSize: "var(--fs-2xs)",
                 color: "var(--fg-faint)",
                 overflow: "hidden",

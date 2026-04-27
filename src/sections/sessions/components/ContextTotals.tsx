@@ -126,7 +126,7 @@ export function colorFor(cat: ContextCategory): string {
     case "mentioned-file":
       return "var(--ok)";
     case "tool-output":
-      return "var(--info, var(--fg-muted))";
+      return "var(--info)";
     case "thinking-text":
       return "var(--fg-muted)";
     case "team-coordination":

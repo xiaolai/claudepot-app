@@ -88,7 +88,7 @@ export function EffectiveRenderer({ cwd }: { cwd: string | null }) {
           minHeight: 0,
           overflow: "auto",
           padding: "var(--sp-12) var(--sp-16)",
-          fontFamily: "var(--mono)",
+          fontFamily: "var(--font-mono)",
           fontSize: "var(--fs-xs)",
         }}
       >
@@ -278,7 +278,7 @@ function ScopeBadge({ label }: { label: string }) {
         color: "var(--fg-muted)",
         border: "var(--bw-hair) solid var(--line)",
         borderRadius: "var(--r-1)",
-        fontFamily: "var(--mono)",
+        fontFamily: "var(--font-mono)",
         whiteSpace: "nowrap",
       }}
     >
