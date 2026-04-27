@@ -48,6 +48,9 @@ vi.mock("../api", () => ({
       }),
     // Usage badge fetcher runs once per tree identity.
     artifactUsageBatch: vi.fn().mockResolvedValue([]),
+    // Disabled-list fetcher runs once per tree identity to size the
+    // optional "Disabled" tree row.
+    artifactListDisabled: vi.fn().mockResolvedValue([]),
   },
 }));
 
