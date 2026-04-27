@@ -9,6 +9,8 @@
 //! user-facing surface. The Automations GUI section is the
 //! sanctioned way to manage automations.
 
+use std::path::PathBuf;
+
 use anyhow::{anyhow, Context, Result};
 use chrono::{DateTime, TimeZone, Utc};
 use claudepot_core::automations::{
@@ -46,6 +48,7 @@ pub fn record_run_cmd(
     start: &str,
     end: &str,
     trigger: &str,
+    run_dir: Option<&str>,
 ) -> Result<()> {
     let id: AutomationId = Uuid::parse_str(automation_id.trim())
         .with_context(|| format!("invalid automation id: {automation_id:?}"))?;
@@ -58,8 +61,13 @@ pub fn record_run_cmd(
         ));
     }
 
-    // Locate the run directory the shim already created.
-    let run_dir = automation_runs_dir(&id).join(run_id);
+    // Locate the run directory. The shim passes --run-dir explicitly
+    // (the authoritative source); fall back to the default layout for
+    // backward compat / manual invocation.
+    let run_dir: PathBuf = match run_dir {
+        Some(p) => PathBuf::from(p),
+        None => automation_runs_dir(&id).join(run_id),
+    };
     if !run_dir.exists() {
         return Err(anyhow!(
             "run directory does not exist: {} — did the shim run?",

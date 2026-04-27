@@ -100,7 +100,8 @@ END_TS=$(date -u +%s)
   --exit "$EXIT" \
   --start "$START_TS" \
   --end "$END_TS" \
-  --trigger scheduled || true
+  --trigger scheduled \
+  --run-dir "$RUN_DIR" || true
 
 exit $EXIT
 "#,
@@ -184,7 +185,8 @@ pub fn render_windows(automation: &Automation, inputs: &ShimInputs<'_>) -> Strin
     );
     s.push_str(&format!(
         "\"{cli}\" automation _record-run --automation-id \"%AUTO_ID%\" --run-id \"%RUN_ID%\" \
---exit \"%EXIT%\" --start \"%START_TS%\" --end \"%END_TS%\" --trigger scheduled\r\n",
+--exit \"%EXIT%\" --start \"%START_TS%\" --end \"%END_TS%\" --trigger scheduled \
+--run-dir \"%RUN_DIR%\"\r\n",
         cli = cmd_escape_value(inputs.claudepot_cli_abs_path),
     ));
     s.push_str("exit /b %EXIT%\r\n");
