@@ -461,8 +461,24 @@ export function ConfigSection({
 
   // Pull preview on selection change. Virtual routes skip — their
   // renderers fetch their own data.
+  //
+  // Gated on `treeReady` because the backend's preview command rejects
+  // with "tree not scanned yet" when `ConfigScanService` hasn't
+  // committed its first tree. That happens whenever a persisted
+  // `subRoute` deserializes into a `selectedId` at mount, racing the
+  // initial `refreshTree()` call. Once the scan commits, the effect
+  // re-fires and the preview goes through. Capturing only the
+  // truthiness (not the tree reference) avoids re-fetching on every
+  // watcher-driven re-scan — those don't change which file is loaded.
+  const treeReady = tree !== null;
   useEffect(() => {
     if (!selectedId || selectedId.startsWith("virtual:")) {
+      setPreview(null);
+      setPreviewError(null);
+      return;
+    }
+    if (!treeReady) {
+      // Don't render a stale preview from a prior tree while we wait.
       setPreview(null);
       setPreviewError(null);
       return;
@@ -485,7 +501,7 @@ export function ConfigSection({
     return () => {
       cancelled = true;
     };
-  }, [selectedId]);
+  }, [selectedId, treeReady]);
 
   // Tear down listeners registered for a previous search. Safe to call
   // when the ref is empty.
