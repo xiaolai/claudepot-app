@@ -213,27 +213,6 @@ pub fn verify_bundle_signature(
     Ok(())
 }
 
-// ---------------------------------------------------------------------
-// Backwards-compat helpers — used by the orchestrator's pre-flight
-// before the encrypt path landed. The previous "always refuse" stubs
-// are retained for callers that want to opt out explicitly without
-// supplying a passphrase.
-// ---------------------------------------------------------------------
-
-/// No-op pass-through retained for callers that want explicit
-/// "I want plaintext" branching. When `encrypt` is true and no
-/// passphrase pipeline exists yet, the orchestrator should call
-/// `encrypt_bundle_with_passphrase` directly instead of this.
-pub fn require_plaintext_only(_encrypt: bool) -> Result<(), MigrateError> {
-    Ok(())
-}
-
-/// Same shape: optional pre-flight hook. Real signing goes through
-/// `sign_bundle`.
-pub fn require_unsigned(_keyfile: Option<&str>) -> Result<(), MigrateError> {
-    Ok(())
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -330,13 +309,6 @@ mod tests {
         )
         .unwrap_err();
         assert!(matches!(err, MigrateError::IntegrityViolation(_)));
-    }
-
-    #[test]
-    fn require_plaintext_only_is_pass_through() {
-        // Backwards compat for callers that still gate on the boolean.
-        assert!(require_plaintext_only(true).is_ok());
-        assert!(require_plaintext_only(false).is_ok());
     }
 
     #[test]

@@ -9,6 +9,8 @@
 use std::path::Path;
 
 /// Strip `com.apple.quarantine` from a single file. No-op on non-mac.
+/// Not yet wired into the apply pipeline — see module docstring.
+#[allow(dead_code)]
 pub fn strip(_path: &Path) -> std::io::Result<()> {
     #[cfg(target_os = "macos")]
     {

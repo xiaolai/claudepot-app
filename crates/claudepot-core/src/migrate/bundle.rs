@@ -38,7 +38,12 @@ use std::io::{BufReader, BufWriter, Read, Seek, SeekFrom, Write};
 use std::path::{Component, Path, PathBuf};
 
 /// File extension for plaintext bundles. Encrypted bundles append
-/// `.age` after this extension.
+/// `.age` after this extension. Held as a public constant so external
+/// docs / tests / future GUI surfaces have a single source of truth;
+/// not yet referenced from inside the crate (pending a
+/// `default_bundle_name` helper that the CLI's default-name builder
+/// would consume).
+#[allow(dead_code)]
 pub const BUNDLE_EXT: &str = "claudepot.tar.zst";
 
 /// File mode buckets allowed in the bundle. Anything else normalizes
