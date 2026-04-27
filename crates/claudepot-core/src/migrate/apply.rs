@@ -66,6 +66,11 @@ pub struct JournalStep {
     /// removes that key.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub fragment_key: Option<String>,
+    /// For CreateDir steps: per-file inventory (relative-to-`after`)
+    /// of every file the import wrote into the directory. Rollback
+    /// removes only these paths so post-import user work survives.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub dir_inventory: Vec<String>,
     pub timestamp_unix_secs: u64,
 }
 
@@ -76,7 +81,11 @@ pub enum JournalStepKind {
     /// `after`.
     CreateFile,
     /// Created a new directory tree at `after` from the bundle.
-    /// Rollback: recursively remove `after`.
+    /// Rollback: surgical removal — read the journal's
+    /// `dir_inventory` (a list of bundle-relative file paths) and
+    /// remove only those files; user-added files post-import survive
+    /// rollback and are flagged as tampered. The dir itself is
+    /// removed only when it's empty after surgical removal.
     CreateDir,
     /// Renamed `before` → `after` (e.g. file-history repath). Rollback:
     /// rename `after` back to `before`.
@@ -299,20 +308,50 @@ fn rollback_one(step: &JournalStep) -> Result<StepRollback, MigrateError> {
             if !path.exists() {
                 return Ok(StepRollback::SkippedNoOp);
             }
-            // For directories we trust the journal — recorded
-            // before_sha256 doesn't apply to a tree. Best-effort
-            // remove; if the user has added new files under the
-            // imported dir, they survive (recursive remove would
-            // delete their work).
+            // Surgical removal: walk the recorded inventory and remove
+            // only those exact files. Anything else under the dir is
+            // user work added after the import; we leave it and flag
+            // it as tampered so the user knows.
             //
-            // Strategy: only remove files that match the import's
-            // file inventory; surface the rest as
-            // `skipped_tampered`. For v0 we take the simple branch
-            // — recursive remove — and accept that user-added files
-            // post-import are lost on undo. The 24h window makes
-            // this acceptable; a future revision should walk the
-            // bundle inventory for surgical removal.
-            fs::remove_dir_all(path).map_err(MigrateError::from)?;
+            // If the journal predates the dir_inventory field (legacy
+            // entries written by an earlier claudepot), fall back to
+            // the conservative recursive-remove behavior — but flag a
+            // tamper notice so it's visible in the receipt.
+            if step.dir_inventory.is_empty() {
+                // Legacy journal — preserve old behavior but warn.
+                fs::remove_dir_all(path).map_err(MigrateError::from)?;
+                return Ok(StepRollback::SkippedTampered(format!(
+                    "{after}: legacy journal had no dir_inventory; \
+                     removed entire tree (post-import edits, if any, lost)"
+                )));
+            }
+            let mut tampered: Vec<String> = Vec::new();
+            for rel in &step.dir_inventory {
+                let p = path.join(rel);
+                match fs::remove_file(&p) {
+                    Ok(()) => {}
+                    Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+                        tampered.push(format!("{rel}: file disappeared (already removed)"));
+                    }
+                    Err(e) => return Err(MigrateError::from(e)),
+                }
+            }
+            // Best-effort empty-dir cleanup. Walk in reverse depth
+            // order so leaves go first; remove_dir is no-op on
+            // non-empty so user-added files prevent removal.
+            try_remove_empty_dirs(path);
+            // Detect any survivors — files the user added that we
+            // didn't journal. They stay on disk; we report them.
+            let survivors = collect_survivors(path);
+            for s in survivors {
+                tampered.push(format!(
+                    "{}: user-added file survived undo",
+                    s.to_string_lossy()
+                ));
+            }
+            if !tampered.is_empty() {
+                return Ok(StepRollback::SkippedTampered(tampered.join("; ")));
+            }
             Ok(StepRollback::Reversed)
         }
         JournalStepKind::RenameFile => {
@@ -379,6 +418,75 @@ fn rollback_one(step: &JournalStep) -> Result<StepRollback, MigrateError> {
     }
 }
 
+/// Walk a directory and try to remove every empty leaf. Used by
+/// surgical CreateDir rollback after the journaled file removals so
+/// the leftover empty subtree doesn't linger.
+fn try_remove_empty_dirs(root: &Path) {
+    fn recurse(p: &Path) {
+        if let Ok(rd) = fs::read_dir(p) {
+            for entry in rd.flatten() {
+                if entry.file_type().map(|t| t.is_dir()).unwrap_or(false) {
+                    recurse(&entry.path());
+                }
+            }
+        }
+        let _ = fs::remove_dir(p);
+    }
+    recurse(root);
+}
+
+/// Walk a directory and collect every file that survived a surgical
+/// removal pass. Used to populate the `skipped_tampered` list so the
+/// user sees the post-import work the undo couldn't reverse.
+fn collect_survivors(root: &Path) -> Vec<PathBuf> {
+    let mut out = Vec::new();
+    fn recurse(p: &Path, out: &mut Vec<PathBuf>) {
+        if let Ok(rd) = fs::read_dir(p) {
+            for entry in rd.flatten() {
+                let ft = match entry.file_type() {
+                    Ok(t) => t,
+                    Err(_) => continue,
+                };
+                let path = entry.path();
+                if ft.is_dir() {
+                    recurse(&path, out);
+                } else if ft.is_file() {
+                    out.push(path);
+                }
+            }
+        }
+    }
+    recurse(root, &mut out);
+    out
+}
+
+/// Walk a target directory tree and produce relative paths for every
+/// file inside. Used at apply time to seed `JournalStep::dir_inventory`
+/// so surgical rollback knows what the import wrote.
+pub fn collect_dir_inventory(root: &Path) -> Vec<String> {
+    let mut out = Vec::new();
+    fn recurse(p: &Path, base: &Path, out: &mut Vec<String>) {
+        if let Ok(rd) = fs::read_dir(p) {
+            for entry in rd.flatten() {
+                let ft = match entry.file_type() {
+                    Ok(t) => t,
+                    Err(_) => continue,
+                };
+                let path = entry.path();
+                if ft.is_dir() {
+                    recurse(&path, base, out);
+                } else if ft.is_file() {
+                    if let Ok(rel) = path.strip_prefix(base) {
+                        out.push(rel.to_string_lossy().replace('\\', "/"));
+                    }
+                }
+            }
+        }
+    }
+    recurse(root, root, &mut out);
+    out
+}
+
 /// Discard a journal's snapshot dir. Called after a successful import
 /// is committed AND past the 24h undo window, or on `--gc`.
 pub fn discard_snapshots(bundle_id: &str) -> Result<(), MigrateError> {
@@ -423,6 +531,7 @@ mod tests {
             snapshot_path: None,
             after_sha256: None,
             fragment_key: None,
+            dir_inventory: Vec::new(),
             timestamp_unix_secs: 1,
         });
         j.persist(&p).unwrap();
@@ -470,6 +579,7 @@ mod tests {
             snapshot_path: None,
             after_sha256: None,
             fragment_key: None,
+            dir_inventory: Vec::new(),
             timestamp_unix_secs: now_secs(),
         }
     }
@@ -521,14 +631,73 @@ mod tests {
         fs::write(d.join("nested/x"), b"x").unwrap();
 
         let mut j = ImportJournal::new("rb3".to_string());
+        let mut s = step(
+            JournalStepKind::CreateDir,
+            None,
+            Some(d.to_str().unwrap()),
+        );
+        // New contract: dir_inventory must list every file the
+        // import wrote so surgical rollback can target them.
+        s.dir_inventory = vec!["nested/x".to_string()];
+        j.record(s);
+        let report = rollback(&j).unwrap();
+        assert_eq!(report.reversed, 1);
+        assert!(!d.exists());
+    }
+
+    #[test]
+    fn rollback_create_dir_preserves_user_added_files() {
+        // Audit Robustness fix: when the user adds files into the
+        // imported tree post-import, rollback must NOT delete them.
+        // It walks `dir_inventory`, removes only those, and surfaces
+        // the survivors as `skipped_tampered`.
+        let _lock = lock_data_dir();
+        let tmp = tempfile::tempdir().unwrap();
+        let d = tmp.path().join("p");
+        fs::create_dir_all(d.join("nested")).unwrap();
+        // Imported file (in inventory).
+        fs::write(d.join("nested/imported.jsonl"), b"x").unwrap();
+        // User-added file (NOT in inventory) — must survive.
+        fs::write(d.join("user-added.txt"), b"hello").unwrap();
+
+        let mut j = ImportJournal::new("rb-survives".to_string());
+        let mut s = step(
+            JournalStepKind::CreateDir,
+            None,
+            Some(d.to_str().unwrap()),
+        );
+        s.dir_inventory = vec!["nested/imported.jsonl".to_string()];
+        j.record(s);
+
+        let report = rollback(&j).unwrap();
+        // 0 reversed (we skipped this step due to tamper); 1 tampered.
+        assert_eq!(report.reversed, 0);
+        assert_eq!(report.skipped_tampered.len(), 1);
+        assert!(d.exists(), "dir must survive when user-added files are present");
+        assert!(d.join("user-added.txt").exists());
+        assert!(!d.join("nested/imported.jsonl").exists(), "imported file removed");
+    }
+
+    #[test]
+    fn rollback_create_dir_with_empty_inventory_is_legacy_path() {
+        // Backward compat: a journal written before dir_inventory
+        // existed has an empty inventory. We fall back to the
+        // recursive-remove behavior but mark the step as tampered so
+        // the user knows post-import edits (if any) were lost.
+        let _lock = lock_data_dir();
+        let tmp = tempfile::tempdir().unwrap();
+        let d = tmp.path().join("legacy");
+        fs::create_dir_all(d.join("a")).unwrap();
+        fs::write(d.join("a/b"), b"x").unwrap();
+        let mut j = ImportJournal::new("rb-legacy".to_string());
         j.record(step(
             JournalStepKind::CreateDir,
             None,
             Some(d.to_str().unwrap()),
         ));
         let report = rollback(&j).unwrap();
-        assert_eq!(report.reversed, 1);
-        assert!(!d.exists());
+        assert_eq!(report.skipped_tampered.len(), 1);
+        assert!(!d.exists(), "legacy path still removes the tree");
     }
 
     #[test]

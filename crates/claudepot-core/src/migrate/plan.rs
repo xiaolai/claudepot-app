@@ -76,15 +76,30 @@ impl SubstitutionTable {
     /// Match semantics mirror `project_rewrite::rewrite_path_string`:
     /// exact match OR prefix-match with a `\` or `/` boundary. Both
     /// separators are accepted because cwd strings cross OS boundaries.
+    ///
+    /// Lookup-side normalization: rules are NFC-normalized at insert
+    /// time, so the lookup string must also be NFC-normalized before
+    /// matching, otherwise an HFS+/APFS path that round-tripped as NFD
+    /// would silently miss (audit Correctness finding). We also run
+    /// `simplify_windows_path` so a verbatim `\\?\C:\…` lookup matches
+    /// a non-verbatim rule.
     pub fn apply_path(&self, s: &str) -> Option<String> {
+        let lookup = nfc(&simplify_windows_path(s));
+        let lookup = lookup.as_str();
         for rule in &self.rules {
-            if s == rule.from {
-                return Some(rule.to.clone());
+            if lookup == rule.from {
+                return Some(target_with_native_sep(&rule.to, ""));
             }
             for sep in ['\\', '/'] {
                 let boundary = format!("{}{sep}", rule.from);
-                if let Some(rest) = s.strip_prefix(&boundary) {
-                    return Some(format!("{}{sep}{rest}", rule.to));
+                if let Some(rest) = lookup.strip_prefix(&boundary) {
+                    // Cross-OS rewrite: when the target side is
+                    // Windows-shape but the source separator was `/`,
+                    // the legacy code emitted mixed paths like
+                    // `C:\x/y`. Coerce the boundary + suffix into the
+                    // target's native separator so the result stays
+                    // consistent (audit Correctness finding row 2).
+                    return Some(target_with_native_sep(&rule.to, rest));
                 }
             }
         }
@@ -106,6 +121,41 @@ impl SubstitutionTable {
 ///   `target_slug = sanitize_path(NFC(simplify_windows_path(target_canonical_git_root)))`
 pub fn target_slug(target_canonical_git_root: &str) -> String {
     sanitize_path(&nfc(&simplify_windows_path(target_canonical_git_root)))
+}
+
+/// Construct `<to><sep><suffix>`, picking the native separator for the
+/// `to` side. If `to` is Windows-shape (drive letter or UNC), the
+/// suffix's `/` separators are flipped to `\` and the boundary is
+/// `\`. If `to` is Unix-shape, suffix `\` separators are flipped to
+/// `/`. If suffix is empty, only `to` is returned.
+fn target_with_native_sep(to: &str, suffix: &str) -> String {
+    let to_is_windows = is_windows_shape(to);
+    if suffix.is_empty() {
+        return to.to_string();
+    }
+    let sep = if to_is_windows { '\\' } else { '/' };
+    let canonical_suffix: String = if to_is_windows {
+        suffix.replace('/', "\\")
+    } else {
+        suffix.replace('\\', "/")
+    };
+    format!("{to}{sep}{canonical_suffix}")
+}
+
+fn is_windows_shape(p: &str) -> bool {
+    if p.starts_with(r"\\") || p.starts_with("//") {
+        // UNC.
+        return true;
+    }
+    let bytes = p.as_bytes();
+    if bytes.len() >= 3
+        && bytes[0].is_ascii_alphabetic()
+        && bytes[1] == b':'
+        && (bytes[2] == b'\\' || bytes[2] == b'/')
+    {
+        return true;
+    }
+    false
 }
 
 #[cfg(test)]
@@ -151,6 +201,39 @@ mod tests {
         t.push("/a", "/b", RuleOrigin::Home);
         t.finalize();
         assert_eq!(t.apply_path("/c/d"), None);
+    }
+
+    #[test]
+    fn apply_path_normalizes_raw_nfd_lookup() {
+        // Audit Correctness fix: rules are NFC-normalized at insert,
+        // but the lookup string also needs normalization. A path
+        // round-tripped through HFS+ may come back as NFD; without
+        // lookup-side NFC the rule would silently miss. Pass raw NFD
+        // explicitly here — no caller-side NFC — to exercise the gate.
+        let mut t = SubstitutionTable::new();
+        // Insert rule in NFC form (precomposed `é`).
+        t.push("/Users/caf\u{00E9}/x", "/home/cafe/x", RuleOrigin::ProjectCwd);
+        t.finalize();
+        // Lookup with raw NFD form (`e` + combining acute).
+        let raw_nfd = "/Users/caf\u{0065}\u{0301}/x/sub.rs";
+        let result = t.apply_path(raw_nfd);
+        assert_eq!(result, Some("/home/cafe/x/sub.rs".to_string()));
+    }
+
+    #[test]
+    fn apply_path_normalizes_verbatim_windows_lookup() {
+        // Same shape but for verbatim `\\?\C:\…` lookups: rules use
+        // the simplified form, lookup must too.
+        let mut t = SubstitutionTable::new();
+        t.push(
+            r"C:\Users\joker\x",
+            r"D:\code\x",
+            RuleOrigin::ProjectCwd,
+        );
+        t.finalize();
+        let verbatim_lookup = r"\\?\C:\Users\joker\x\foo.rs";
+        let result = t.apply_path(verbatim_lookup);
+        assert_eq!(result, Some(r"D:\code\x\foo.rs".to_string()));
     }
 
     #[test]

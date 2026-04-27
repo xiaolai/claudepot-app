@@ -136,10 +136,12 @@ pub fn read_artifact_lifecycle_bytes(
 ///     account store. Returns the list so the caller can print it.
 ///   - Protected paths, preferences, artifact-lifecycle: written
 ///     to the target data dir, side-by-side if a file already
-///     exists (`<name>.imported.json`).
+///     exists (`<name>.imported.<bundle_id_short>.json` so repeat
+///     imports don't clobber prior review artifacts).
 pub fn apply_claudepot_state(
     staging: &Path,
     data_dir: &Path,
+    bundle_id: &str,
 ) -> Result<ClaudepotStateApplyOutcome, MigrateError> {
     let mut outcome = ClaudepotStateApplyOutcome::default();
 
@@ -182,7 +184,9 @@ pub fn apply_claudepot_state(
                     .push(target.to_string_lossy().to_string());
                 continue;
             }
-            let imported_name = target_name.replace(".json", ".imported.json");
+            let suffix = bundle_id.split('-').next().unwrap_or(bundle_id);
+            let imported_name =
+                target_name.replace(".json", &format!(".imported.{suffix}.json"));
             let imported = data_dir.join(imported_name);
             fs::copy(&src, &imported).map_err(MigrateError::from)?;
             outcome
@@ -298,7 +302,7 @@ mod tests {
         .unwrap();
 
         let data_dir = tmp.path().join("data");
-        let outcome = apply_claudepot_state(&staging, &data_dir).unwrap();
+        let outcome = apply_claudepot_state(&staging, &data_dir, "test").unwrap();
         assert_eq!(outcome.accounts_listed.len(), 1);
         assert_eq!(outcome.accounts_listed[0].email, "x@y");
         assert!(data_dir.join("preferences.json").exists());
@@ -328,9 +332,10 @@ mod tests {
         )
         .unwrap();
 
-        let outcome = apply_claudepot_state(&staging, &data_dir).unwrap();
+        let outcome = apply_claudepot_state(&staging, &data_dir, "test").unwrap();
         assert_eq!(outcome.side_by_side.len(), 1);
-        assert!(data_dir.join("protected-paths.imported.json").exists());
+        // Suffix uses the test bundle id's first hyphen-segment.
+        assert!(data_dir.join("protected-paths.imported.test.json").exists());
         // Original target untouched.
         assert_eq!(
             fs::read_to_string(data_dir.join("protected-paths.json")).unwrap(),
@@ -352,7 +357,7 @@ mod tests {
         )
         .unwrap();
         let data_dir = tmp.path().join("data");
-        let outcome = apply_claudepot_state(&staging, &data_dir).unwrap();
+        let outcome = apply_claudepot_state(&staging, &data_dir, "test").unwrap();
         assert_eq!(outcome.accounts_listed.len(), 1);
         // The function signature itself is the contract — there is no
         // way to inadvertently call AccountStore::insert from this

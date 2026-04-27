@@ -21,6 +21,28 @@ use claudepot_core::migrate::{
 use claudepot_core::paths;
 use claudepot_core::project_helpers::resolve_path;
 use std::path::PathBuf;
+use zeroize::Zeroize;
+
+/// RAII helper: takes ownership of a plain `String` carrying a secret
+/// (passphrase) that arrived over IPC, hands the `SecretString` (which
+/// itself zeroes on drop) to the caller, and zeroes any remaining
+/// owned copies on every exit path.
+///
+/// We can't change the wire shape — Tauri serde-deserializes JSON
+/// `string` values into plain `String` heap allocations before the
+/// command body runs. The earliest we can act is here, where we
+/// immediately convert the bytes into a zeroize-on-drop wrapper and
+/// scrub the original.
+fn promote_secret(mut raw: Option<String>) -> Option<SecretString> {
+    let s = raw.take()?;
+    let secret = SecretString::from(s.clone());
+    // Zeroize the leftover plain String before returning. `s.clone()`
+    // forced a fresh allocation that SecretString now owns; the
+    // original raw allocation goes away here.
+    let mut to_clear = s;
+    to_clear.zeroize();
+    Some(secret)
+}
 
 /// Inspect a bundle's manifest. Encrypted bundles need a passphrase.
 #[tauri::command]
@@ -31,10 +53,8 @@ pub async fn migrate_inspect(args: InspectArgsDto) -> Result<ImportPlanDto, Stri
         .map(|e| e == "age")
         .unwrap_or(false)
     {
-        let pwd = args
-            .passphrase
-            .ok_or_else(|| "encrypted bundle requires passphrase".to_string())
-            .map(SecretString::from)?;
+        let pwd = promote_secret(args.passphrase)
+            .ok_or_else(|| "encrypted bundle requires passphrase".to_string())?;
         let m = migrate::inspect_encrypted(&bundle, &pwd)
             .map_err(|e| e.to_string())?;
         return Ok(m.into());
@@ -67,6 +87,16 @@ pub async fn migrate_export(args: ExportArgsDto) -> Result<ExportReceiptDto, Str
         None
     };
 
+    // Move plain-String secrets through `promote_secret` so the JSON-
+    // deserialized String allocations are zeroed as soon as we have a
+    // SecretString copy. `sign_password` lives as a plain String per
+    // the minisign API; we still zeroize the local after passing.
+    let encrypt_passphrase = promote_secret(args.encrypt_passphrase);
+    let mut sign_password_raw = args.sign_password;
+    let sign_password = sign_password_raw.clone();
+    if let Some(s) = sign_password_raw.as_mut() {
+        s.zeroize();
+    }
     let opts = ExportOptions {
         output: PathBuf::from(args.output_path),
         project_cwds,
@@ -76,9 +106,9 @@ pub async fn migrate_export(args: ExportArgsDto) -> Result<ExportReceiptDto, Str
         include_claudepot_state: args.include_claudepot_state,
         include_file_history: !args.no_file_history,
         encrypt: args.encrypt,
-        encrypt_passphrase: args.encrypt_passphrase.map(SecretString::from),
+        encrypt_passphrase,
         sign_keyfile: args.sign_keyfile,
-        sign_password: args.sign_password,
+        sign_password,
         account_stubs,
     };
     let receipt = migrate::export_projects(&config_dir, opts).map_err(|e| e.to_string())?;
@@ -113,7 +143,7 @@ pub async fn migrate_import(args: ImportArgsDto) -> Result<ImportReceiptDto, Str
             .collect(),
         include_file_history: !args.no_file_history,
         dry_run: args.dry_run,
-        decrypt_passphrase: args.passphrase.map(SecretString::from),
+        decrypt_passphrase: promote_secret(args.passphrase),
         verify_key: args.verify_key_path.map(PathBuf::from),
     };
     let receipt = migrate::import_bundle(

@@ -153,7 +153,10 @@ fn row32_encrypt_returns_not_implemented_no_partial_state() {
         sign_password: None,
     };
     let err = crate::migrate::export_projects(&cfg, opts).unwrap_err();
-    assert!(matches!(err, MigrateError::NotImplemented(_)));
+    // After v1 encryption support landed, missing passphrase became a
+    // Configuration error rather than NotImplemented (the feature
+    // ships; the user just didn't supply it).
+    assert!(matches!(err, MigrateError::Configuration(_)));
     // No bundle file was written.
     assert!(!tmp.path().join("e.tar.zst").exists());
 }

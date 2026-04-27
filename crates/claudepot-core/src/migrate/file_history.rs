@@ -136,15 +136,44 @@ pub fn build_path_index_from_jsonls(
     jsonl_paths: &[PathBuf],
 ) -> Result<HashMap<String, String>, MigrateError> {
     let mut index = HashMap::new();
+    use std::io::{BufRead, BufReader};
     for path in jsonl_paths {
-        let contents = match fs::read_to_string(path) {
-            Ok(s) => s,
-            Err(_) => continue,
+        let file = match fs::File::open(path) {
+            Ok(f) => f,
+            Err(e) => {
+                tracing::warn!(
+                    path = %path.display(),
+                    error = %e,
+                    "migrate::file_history: skipping unreadable JSONL"
+                );
+                continue;
+            }
         };
-        for line in contents.lines() {
-            let v: Value = match serde_json::from_str(line) {
+        let reader = BufReader::new(file);
+        for (lineno, line) in reader.lines().enumerate() {
+            let line = match line {
+                Ok(l) => l,
+                Err(e) => {
+                    tracing::warn!(
+                        path = %path.display(),
+                        line = lineno + 1,
+                        error = %e,
+                        "migrate::file_history: I/O error reading line"
+                    );
+                    break;
+                }
+            };
+            let v: Value = match serde_json::from_str(&line) {
                 Ok(v) => v,
-                Err(_) => continue,
+                Err(e) => {
+                    tracing::warn!(
+                        path = %path.display(),
+                        line = lineno + 1,
+                        error = %e,
+                        "migrate::file_history: skipping unparseable JSONL line",
+                    );
+                    continue;
+                }
             };
             collect_paths(&v, &mut index);
         }

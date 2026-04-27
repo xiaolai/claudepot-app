@@ -1,14 +1,15 @@
 //! Bundle manifest schema and version negotiation.
 //!
 //! See `dev-docs/project-migrate-spec.md` §3.4 for the schema-version
-//! contract: the importer refuses unknown versions and older bundles
-//! must go through an explicit `project migrate inspect --upgrade-schema`
-//! pass before import.
+//! contract: the importer refuses unknown versions. The
+//! `--upgrade-schema` flow (§3.4 in-place upgrade) is not implemented
+//! yet — there are no older schemas to upgrade from.
 //!
-//! Source identity is hashed (sha256) so a bundle can be inspected
-//! later without leaking the original hostname. The pre-hash material
-//! (HOME, hostname, user) is recorded in the bundle's `host_identity`
-//! debug field, which is an opaque hex digest in production.
+//! Source identity is recorded as a hashed digest only. We sha256
+//! `(hostname || user || HOME)` and store the hex result in
+//! `host_identity`. The pre-hash material is **not** kept anywhere
+//! in the bundle — opaque off-machine, stable across exports from
+//! the same machine.
 
 use serde::{Deserialize, Serialize};
 

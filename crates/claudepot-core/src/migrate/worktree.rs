@@ -121,6 +121,7 @@ fn is_excluded(rel: &str) -> bool {
 pub fn apply_worktree(
     staging_project_root: &Path,
     target_cwd: &Path,
+    bundle_id: &str,
 ) -> Result<Vec<WorktreeApplyStep>, MigrateError> {
     let bundle_root = staging_project_root.join("project-scoped");
     if !bundle_root.exists() {
@@ -172,7 +173,7 @@ pub fn apply_worktree(
                 if cur == new {
                     WorktreeApplyKind::SkippedIdentical
                 } else {
-                    let imported = imported_sibling(&target);
+                    let imported = imported_sibling(&target, bundle_id);
                     fs::copy(&p, &imported).map_err(MigrateError::from)?;
                     steps.push(WorktreeApplyStep {
                         after: imported.to_string_lossy().to_string(),
@@ -209,7 +210,7 @@ pub enum WorktreeApplyKind {
     SkippedIdentical,
 }
 
-fn imported_sibling(target: &Path) -> PathBuf {
+fn imported_sibling(target: &Path, bundle_id: &str) -> PathBuf {
     let parent = target.parent().unwrap_or_else(|| Path::new("."));
     let stem = target
         .file_stem()
@@ -219,7 +220,8 @@ fn imported_sibling(target: &Path) -> PathBuf {
         .extension()
         .map(|s| format!(".{}", s.to_string_lossy()))
         .unwrap_or_default();
-    parent.join(format!("{stem}.imported{ext}"))
+    let suffix = bundle_id.split('-').next().unwrap_or(bundle_id);
+    parent.join(format!("{stem}.imported.{suffix}{ext}"))
 }
 
 #[cfg(test)]
@@ -300,7 +302,7 @@ mod tests {
         .unwrap();
         let target = tmp.path().join("target");
         fs::create_dir_all(&target).unwrap();
-        let steps = apply_worktree(&staged_root, &target).unwrap();
+        let steps = apply_worktree(&staged_root, &target, "test").unwrap();
         assert_eq!(steps.len(), 2);
         assert!(target.join("CLAUDE.md").exists());
         assert!(target.join(".claude/settings.json").exists());
@@ -315,12 +317,12 @@ mod tests {
         let target = tmp.path().join("target");
         fs::create_dir_all(&target).unwrap();
         fs::write(target.join("CLAUDE.md"), "from target").unwrap();
-        let steps = apply_worktree(&staged_root, &target).unwrap();
+        let steps = apply_worktree(&staged_root, &target, "test").unwrap();
         let side = steps
             .iter()
             .find(|s| s.kind == WorktreeApplyKind::SideBySide)
             .unwrap();
-        assert!(side.after.ends_with("CLAUDE.imported.md"));
+        assert!(side.after.ends_with("CLAUDE.imported.test.md"));
         // Original target untouched.
         assert_eq!(
             fs::read_to_string(target.join("CLAUDE.md")).unwrap(),
@@ -335,7 +337,7 @@ mod tests {
         fs::create_dir_all(staged_root.join("project-scoped")).unwrap();
         fs::write(staged_root.join("project-scoped/CLAUDE.md"), "x").unwrap();
         let target = tmp.path().join("never-existed");
-        let err = apply_worktree(&staged_root, &target).unwrap_err();
+        let err = apply_worktree(&staged_root, &target, "test").unwrap_err();
         match err {
             MigrateError::Io(e) => assert_eq!(e.kind(), std::io::ErrorKind::NotFound),
             other => panic!("expected NotFound, got {other:?}"),

@@ -323,10 +323,13 @@ fn apply_plain_or_settings(
         }));
     }
     // Differing — write side-by-side. Settings and CLAUDE.md must
-    // never be silently overwritten.
+    // never be silently overwritten. Append a unique suffix
+    // (`<bundle_id_short>`) so repeated imports don't clobber prior
+    // review artifacts (audit Robustness finding).
+    let suffix = bundle_id.split('-').next().unwrap_or(bundle_id);
     let imported_name = match hint {
-        Hint::SettingsScrubbed => "settings.imported.json".to_string(),
-        _ => format!("{target_rel}.imported"),
+        Hint::SettingsScrubbed => format!("settings.imported.{suffix}.json"),
+        _ => format!("{target_rel}.imported.{suffix}"),
     };
     let imported_path = target
         .parent()
@@ -335,7 +338,6 @@ fn apply_plain_or_settings(
             MigrateError::Io(std::io::Error::other("target has no parent"))
         })?;
     fs::copy(src, &imported_path).map_err(MigrateError::from)?;
-    let _ = bundle_id; // snapshot deferred for side-by-side
     Ok(Some(GlobalApplyStep {
         after: imported_path.to_string_lossy().to_string(),
         snapshot: None,
@@ -515,7 +517,13 @@ mod tests {
             .iter()
             .find(|s| s.kind == GlobalApplyKind::SideBySide)
             .unwrap();
-        assert!(side.after.ends_with("settings.imported.json"));
+        // Bundle id is `bid` per the test fixture; suffix uses the
+        // first hyphen-segment, so `settings.imported.bid.json`.
+        assert!(
+            side.after.ends_with("settings.imported.bid.json"),
+            "expected per-bundle suffix; got: {}",
+            side.after
+        );
         // Original target untouched.
         assert_eq!(
             fs::read_to_string(target_cfg.join("settings.json")).unwrap(),

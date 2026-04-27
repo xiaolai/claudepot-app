@@ -5,12 +5,25 @@
 //! Wire format:
 //!   - `tar` outer container — preserves Unix mode + symlink shape.
 //!   - `zstd` inner stream — JSONL compresses 6–10×.
-//!   - Sidecar `<file>.sha256` written at export, verified at import.
-//!   - `integrity.sha256` inside the bundle holds per-file digests.
-//!   - `manifest.json` is self-verifying via a trailer line.
-//!   - `.minisign` signature optional, written when `--sign KEYFILE`
-//!     is used. **Not yet implemented** — `crypto.rs` carries the
-//!     deferred-stub for it.
+//!   - Sidecar `<file>.sha256` written at export, REQUIRED at import.
+//!     Missing sidecar → `IntegrityViolation`; making it optional
+//!     would let an attacker bypass the outer integrity gate by
+//!     dropping the sidecar.
+//!   - `integrity.sha256` inside the bundle holds per-file digests
+//!     (every payload file plus `manifest.json`). The orchestrator
+//!     calls `verify_extracted_dir(&staging)` after `extract_all` to
+//!     re-hash every on-disk file against this list — a repacked
+//!     bundle that swapped contents but kept the outer sidecar would
+//!     fail this gate.
+//!   - `manifest.json` is self-verifying via a REQUIRED trailer line
+//!     (`# manifest-sha256: <hex>`). Missing trailer → IntegrityViolation.
+//!   - `.minisig` signature sidecar — optional, written when
+//!     `--sign KEYFILE` is used. Real implementation in `crypto.rs`
+//!     (sign_bundle / verify_bundle_signature). The current shape
+//!     signs the bundle bytes directly (bundle-bytes signature, not
+//!     manifest-sha256-only as suggested by §3.3). Documented as a
+//!     known deviation from the spec; either align via a follow-up
+//!     PR or update the spec to match the implementation.
 //!
 //! Symlinks inside the bundle are forbidden — the reader rejects any
 //! entry whose typeflag is symlink, and any entry whose path contains
@@ -146,8 +159,29 @@ impl BundleWriter {
     /// to the bundle and finalize. The bundle is then atomically
     /// renamed to its final path; a sidecar `<file>.sha256` is written
     /// next to it.
+    ///
+    /// Order matters per §3.3: we build the manifest first (so its
+    /// sha256 can land in the trailer), then `integrity.sha256` includes
+    /// the manifest digest, then both are written into the tar.
+    /// `integrity.sha256` itself is not self-listed (it would need
+    /// post-hoc self-reference); the manifest's self-trailer covers
+    /// the manifest, and the outer sidecar `<bundle>.sha256` covers
+    /// the entire compressed file.
     pub fn finalize(mut self, manifest: &BundleManifest) -> Result<PathBuf, MigrateError> {
-        // 1. integrity.sha256 — line per file: `<sha> <path>`.
+        // 1. Build manifest with self-trailer (sha256 of body).
+        let manifest_json = serde_json::to_vec_pretty(manifest)
+            .map_err(|e| MigrateError::Serialize(e.to_string()))?;
+        let manifest_sha = sha256_hex(&manifest_json);
+        let mut manifest_with_trailer = manifest_json;
+        manifest_with_trailer.push(b'\n');
+        manifest_with_trailer.extend_from_slice(b"# manifest-sha256: ");
+        manifest_with_trailer.extend_from_slice(manifest_sha.as_bytes());
+        manifest_with_trailer.push(b'\n');
+
+        // 2. integrity.sha256 — line per payload file (existing
+        // inventory) PLUS the manifest. Sha256 of the manifest covers
+        // the trailer too because the trailer was appended above.
+        let manifest_full_sha = sha256_hex(&manifest_with_trailer);
         let mut integrity_lines = String::new();
         for entry in &self.inventory {
             integrity_lines.push_str(&entry.sha256);
@@ -155,8 +189,13 @@ impl BundleWriter {
             integrity_lines.push_str(&entry.path);
             integrity_lines.push('\n');
         }
-        // Append unconditionally — even an empty bundle gets the file.
+        integrity_lines.push_str(&manifest_full_sha);
+        integrity_lines.push(' ');
+        integrity_lines.push_str("manifest.json");
+        integrity_lines.push('\n');
         let integrity_bytes = integrity_lines.into_bytes();
+
+        // 3. Write integrity.sha256 then manifest.json into the tar.
         let mut header = tar::Header::new_gnu();
         header.set_size(integrity_bytes.len() as u64);
         header.set_mode(0o644);
@@ -166,16 +205,6 @@ impl BundleWriter {
         self.builder
             .append_data(&mut header, "integrity.sha256", integrity_bytes.as_slice())
             .map_err(MigrateError::from)?;
-
-        // 2. manifest.json with self-trailer.
-        let manifest_json = serde_json::to_vec_pretty(manifest)
-            .map_err(|e| MigrateError::Serialize(e.to_string()))?;
-        let manifest_sha = sha256_hex(&manifest_json);
-        let mut manifest_with_trailer = manifest_json;
-        manifest_with_trailer.push(b'\n');
-        manifest_with_trailer.extend_from_slice(b"# manifest-sha256: ");
-        manifest_with_trailer.extend_from_slice(manifest_sha.as_bytes());
-        manifest_with_trailer.push(b'\n');
 
         let mut header = tar::Header::new_gnu();
         header.set_size(manifest_with_trailer.len() as u64);
@@ -233,7 +262,9 @@ pub struct BundleReader {
 
 impl BundleReader {
     /// Open the bundle and verify the sidecar `<file>.sha256` matches.
-    /// Mismatch → `IntegrityViolation` with the file name (§14 verify).
+    /// Mismatch or missing sidecar → `IntegrityViolation`. The sidecar
+    /// is required by §3.3; making it optional would let an attacker
+    /// drop the sidecar to bypass the outer integrity check.
     pub fn open(bundle: impl AsRef<Path>) -> Result<Self, MigrateError> {
         let path = bundle.as_ref().to_path_buf();
         if !path.exists() {
@@ -243,34 +274,64 @@ impl BundleReader {
             )));
         }
         let sidecar = sidecar_path_for(&path);
-        if sidecar.exists() {
-            let expected = read_sidecar_digest(&sidecar)?;
-            let actual = sha256_of_file(&path)?;
-            if expected != actual {
-                return Err(MigrateError::IntegrityViolation(format!(
-                    "bundle sha256 mismatch: expected {expected}, got {actual}"
-                )));
-            }
+        if !sidecar.exists() {
+            return Err(MigrateError::IntegrityViolation(format!(
+                "bundle sha256 sidecar missing at {} — refusing to open \
+                 (per spec §3.3 the sidecar is required for integrity)",
+                sidecar.display()
+            )));
+        }
+        let expected = read_sidecar_digest(&sidecar)?;
+        let actual = sha256_of_file(&path)?;
+        if expected != actual {
+            return Err(MigrateError::IntegrityViolation(format!(
+                "bundle sha256 mismatch: expected {expected}, got {actual}"
+            )));
         }
         Ok(Self { path })
     }
 
-    /// Read the `manifest.json` entry. Verifies the trailing
-    /// `# manifest-sha256: <hex>` line matches the manifest body's own
-    /// digest (§3.3 self-verify).
+    /// Construct without sidecar verification. Used by callers that
+    /// have already validated the bundle bytes through another channel
+    /// (e.g. just decrypted from age into a tempfile). Internal-only;
+    /// surfaces of `BundleReader::open` outside the crate stay strict.
+    pub(crate) fn open_unverified(bundle: impl AsRef<Path>) -> Result<Self, MigrateError> {
+        let path = bundle.as_ref().to_path_buf();
+        if !path.exists() {
+            return Err(MigrateError::Io(std::io::Error::new(
+                std::io::ErrorKind::NotFound,
+                format!("bundle not found: {}", path.display()),
+            )));
+        }
+        Ok(Self { path })
+    }
+
+    /// Read the `manifest.json` entry. Requires the trailing
+    /// `# manifest-sha256: <hex>` line and verifies it matches the
+    /// manifest body's own digest (§3.3 self-verify). A missing
+    /// trailer is `IntegrityViolation` — older bundles never shipped
+    /// without one.
     pub fn read_manifest(&self) -> Result<BundleManifest, MigrateError> {
         let entry = self.read_entry("manifest.json")?;
         let (body, trailer_sha) = split_manifest_trailer(&entry)?;
+        let expected = trailer_sha.ok_or_else(|| {
+            MigrateError::IntegrityViolation(
+                "manifest.json missing self-sha trailer (§3.3)".to_string(),
+            )
+        })?;
         let recomputed = sha256_hex(body);
-        if let Some(expected) = trailer_sha {
-            if expected != recomputed {
-                return Err(MigrateError::IntegrityViolation(format!(
-                    "manifest.json self-sha mismatch: expected {expected}, got {recomputed}"
-                )));
-            }
+        if expected != recomputed {
+            return Err(MigrateError::IntegrityViolation(format!(
+                "manifest.json self-sha mismatch: expected {expected}, got {recomputed}"
+            )));
         }
-        let manifest: BundleManifest = serde_json::from_slice(body)
-            .map_err(|e| MigrateError::Serialize(e.to_string()))?;
+        // Bundle parse failures map to IntegrityViolation, not
+        // Serialize: a non-parseable manifest at this layer means the
+        // bundle is corrupt or schema-mismatched, never a transient
+        // serialization error.
+        let manifest: BundleManifest = serde_json::from_slice(body).map_err(|e| {
+            MigrateError::IntegrityViolation(format!("manifest.json parse: {e}"))
+        })?;
         Ok(manifest)
     }
 
@@ -301,8 +362,12 @@ impl BundleReader {
     /// returns `IntegrityViolation` and stops extraction. Caller is
     /// responsible for removing `dest` before extraction if it exists.
     ///
-    /// Returns the per-file digests collected during extraction so
-    /// callers can verify against `integrity.sha256`.
+    /// After extraction, parses `integrity.sha256` and verifies every
+    /// listed digest matches what landed on disk. A mismatch on any
+    /// entry → `IntegrityViolation` with the file name, leaving the
+    /// (now untrusted) staging tree for the caller to remove.
+    ///
+    /// Returns the per-file digests collected during extraction.
     pub fn extract_all(
         &self,
         dest: &Path,
@@ -356,6 +421,17 @@ impl BundleReader {
                 sha256: sha256_hex(&buf),
             });
         }
+
+        // The orchestrator (`migrate::import_bundle`) calls
+        // `verify_extracted_dir(dest)` immediately after this returns,
+        // which re-hashes every on-disk file and matches each line of
+        // `integrity.sha256` against it. Inline structural sanity here:
+        // the extraction pass must have produced a manifest entry.
+        if !digests.iter().any(|e| e.path == "manifest.json") {
+            return Err(MigrateError::IntegrityViolation(
+                "bundle missing manifest.json after extraction".to_string(),
+            ));
+        }
         Ok(digests)
     }
 
@@ -367,6 +443,61 @@ impl BundleReader {
         let decoder = zstd::Decoder::new(file).map_err(MigrateError::from)?;
         Ok(tar::Archive::new(decoder))
     }
+}
+
+/// Cross-check the contents of an extracted bundle directory against
+/// the `integrity.sha256` file inside it. Called by the orchestrator
+/// after `extract_all` returns successfully (which already validates
+/// the in-memory inventory has the structural files); this second
+/// pass closes the loop by re-hashing the on-disk files and matching
+/// each line of `integrity.sha256` against them.
+pub fn verify_extracted_dir(dest: &Path) -> Result<(), MigrateError> {
+    let integrity_path = dest.join("integrity.sha256");
+    if !integrity_path.exists() {
+        return Err(MigrateError::IntegrityViolation(
+            "bundle missing integrity.sha256 in staging".to_string(),
+        ));
+    }
+    let body = fs::read_to_string(&integrity_path).map_err(MigrateError::from)?;
+    for (lineno, line) in body.lines().enumerate() {
+        if line.trim().is_empty() {
+            continue;
+        }
+        // `<sha> <path>` per line.
+        let mut parts = line.splitn(2, ' ');
+        let expected = parts.next().unwrap_or("");
+        let rel = parts.next().unwrap_or("").trim_start();
+        if expected.len() != 64 || !expected.chars().all(|c| c.is_ascii_hexdigit()) {
+            return Err(MigrateError::IntegrityViolation(format!(
+                "integrity.sha256 line {}: malformed digest",
+                lineno + 1
+            )));
+        }
+        if rel.is_empty() {
+            return Err(MigrateError::IntegrityViolation(format!(
+                "integrity.sha256 line {}: missing path",
+                lineno + 1
+            )));
+        }
+        // integrity.sha256 entries don't reference itself; any other
+        // listed path must be present and match.
+        if rel == "integrity.sha256" {
+            continue;
+        }
+        let on_disk = dest.join(rel);
+        if !on_disk.exists() {
+            return Err(MigrateError::IntegrityViolation(format!(
+                "integrity.sha256 references missing file: {rel}"
+            )));
+        }
+        let actual = sha256_of_file(&on_disk)?;
+        if actual != expected {
+            return Err(MigrateError::IntegrityViolation(format!(
+                "integrity.sha256 mismatch for {rel}: expected {expected}, got {actual}"
+            )));
+        }
+    }
+    Ok(())
 }
 
 /// Compute the sidecar path: `<bundle>.sha256`.
