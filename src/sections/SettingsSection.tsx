@@ -400,7 +400,7 @@ function AppearancePane() {
           })}
         </div>
       </Row>
-      <Row label="Effective" hint="Which palette the app is rendering right now.">
+      <Row label="Active" hint="Which palette the app is rendering right now.">
         <Tag tone="accent" glyph={resolved === "dark" ? NF.moon : NF.sun}>
           {resolved}
         </Tag>
