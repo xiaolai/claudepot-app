@@ -57,6 +57,15 @@ enum Commands {
         #[command(subcommand)]
         action: ProjectAction,
     },
+    /// Hidden plumbing for the Automations feature. Not a
+    /// user-facing surface — invoked by the per-automation helper
+    /// shim. The Automations GUI section is the sanctioned way
+    /// to define and manage automations.
+    #[command(name = "automation", hide = true)]
+    Automation {
+        #[command(subcommand)]
+        action: AutomationAction,
+    },
     /// Export the current project's CC state to a portable bundle
     /// (`*.claudepot.tar.zst`).
     ///
@@ -381,6 +390,29 @@ enum TrashAction {
         /// Only empty entries older than the given duration.
         #[arg(long)]
         older_than: Option<String>,
+    },
+}
+
+#[derive(Subcommand)]
+enum AutomationAction {
+    /// Plumbing: invoked by an automation's helper shim after
+    /// `claude -p` exits. Reads the redirected `stdout.log` from
+    /// the per-run directory, parses the terminal `result` event,
+    /// and writes `result.json` next to the logs.
+    #[command(name = "_record-run")]
+    RecordRun {
+        #[arg(long)]
+        automation_id: String,
+        #[arg(long)]
+        run_id: String,
+        #[arg(long)]
+        exit: i32,
+        #[arg(long)]
+        start: String,
+        #[arg(long)]
+        end: String,
+        #[arg(long, default_value = "scheduled")]
+        trigger: String,
     },
 }
 
@@ -781,6 +813,23 @@ async fn main() -> Result<()> {
                 older_than,
                 id.as_deref(),
                 all,
+            )?,
+        },
+        Commands::Automation { action } => match action {
+            AutomationAction::RecordRun {
+                automation_id,
+                run_id,
+                exit,
+                start,
+                end,
+                trigger,
+            } => commands::automation::record_run_cmd(
+                &automation_id,
+                &run_id,
+                exit,
+                &start,
+                &end,
+                &trigger,
             )?,
         },
         Commands::Export {

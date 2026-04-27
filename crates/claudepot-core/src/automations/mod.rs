@@ -35,12 +35,19 @@
 pub mod cron;
 pub mod env;
 pub mod error;
+pub mod run;
+pub mod scheduler;
 pub mod shim;
 pub mod slug;
 pub mod store;
 pub mod types;
 
 pub use error::AutomationError;
+pub use run::{list_run_ids, parse_result_event, read_run, record_run, RecordInputs};
+pub use scheduler::{
+    active_scheduler, cron_next_runs, noop::NoopScheduler, RegisteredEntry, Scheduler,
+    SchedulerCapabilities,
+};
 pub use shim::{render_unix, render_windows, ShimInputs};
 pub use slug::validate_name;
 pub use store::{
