@@ -112,7 +112,7 @@ export function SessionDetailHeader({
         const rect = el?.getBoundingClientRect();
         setMenu({
           x: rect ? rect.right : 0,
-          y: rect ? rect.bottom + 4 : 0,
+          y: rect ? rect.bottom : 0,
         });
       }}
       title="More actions"
