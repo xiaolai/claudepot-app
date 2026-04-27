@@ -57,7 +57,7 @@ export function ProjectsList({
     >
       {projects.map((p) => (
         <ProjectRow
-          key={p.original_path}
+          key={p.sanitized_name}
           project={p}
           selected={p.original_path === selectedPath}
           onSelect={onSelect}
