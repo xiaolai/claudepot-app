@@ -259,6 +259,16 @@
   --session-filter-min-width: 140px;
   --responsive-breakpoint-sm: 600px;  /* mobile flip-to-column */
   --sidebar-collapsed-max-h:  200px;  /* sidebar height in column mode */
+
+  /* Scroll-driven compact-header thresholds. Read in JS via
+     `getComputedStyle` so the SessionDetail's auto-compact toggle
+     stays in step with the rest of the design scale. Two values
+     give a small hysteresis: engage when scrolling down past the
+     larger threshold, release when scrolling back above the
+     smaller one — prevents flicker at the boundary on momentum
+     scroll. */
+  --scroll-compact-engage:    16px;
+  --scroll-compact-release:    4px;
   --icon-btn-sm:           22px;
   --icon-btn-md:           28px;
   --icon-btn-lg:           32px;

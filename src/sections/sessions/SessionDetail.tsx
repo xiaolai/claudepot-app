@@ -84,20 +84,29 @@ export function SessionDetail({
   const topSentinelRef = useRef<HTMLDivElement | null>(null);
 
   // Auto-compact the header once the user has scrolled into the
-  // transcript. A small hysteresis (engage at 16px, release at 4px)
-  // keeps the boundary from flickering when the user lands on a
-  // mid-position with momentum scroll. Cleared/re-attached when the
-  // scroll container changes — currently SessionDetail is keyed on
-  // `filePath` upstream, so the element identity tracks selection.
+  // transcript. The two thresholds give a small hysteresis (engage
+  // when scrolling down past the larger one, release when scrolling
+  // back above the smaller one) so the boundary doesn't flicker on
+  // momentum scroll. Both values come from `tokens.css` —
+  // `--scroll-compact-engage` / `--scroll-compact-release` — so the
+  // numbers stay aligned with the rest of the design scale and there
+  // is one place to tune them.
+  //
+  // Cleared/re-attached when the scroll container changes — currently
+  // SessionDetail is keyed on `filePath` upstream, so the element
+  // identity tracks selection.
   useEffect(() => {
     if (!scrollEl) return;
-    const ENGAGE = 16;
-    const RELEASE = 4;
+    const cs = getComputedStyle(scrollEl);
+    const engage =
+      Number.parseFloat(cs.getPropertyValue("--scroll-compact-engage")) || 16;
+    const release =
+      Number.parseFloat(cs.getPropertyValue("--scroll-compact-release")) || 4;
     const onScroll = () => {
       const top = scrollEl.scrollTop;
       setCompact((c) => {
-        if (c && top < RELEASE) return false;
-        if (!c && top > ENGAGE) return true;
+        if (c && top < release) return false;
+        if (!c && top > engage) return true;
         return c;
       });
     };
