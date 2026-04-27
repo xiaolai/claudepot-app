@@ -202,14 +202,27 @@ pub fn restore_at(
     // disable_at uses; restore must respect it.
     let _lock = super::scope_lock::acquire(&manifest.scope_root)?;
 
-    let target = super::disable::resolve_collision_pub(&manifest.original_path, on_conflict)?;
-    if let Some(parent) = target.parent() {
-        std::fs::create_dir_all(parent).map_err(LifecycleError::io("create restore parent"))?;
-    }
     let payload_src = entry
         .entry_dir
         .join("payload")
         .join(&manifest.source_basename);
+
+    // Full sha256 + byte_count + basename verification at the moment
+    // it matters most — right before we write to the active scope.
+    // The list_at fast-path only checked size; this catches a payload
+    // whose bytes were modified in-place after trashing without
+    // changing the file size.
+    if !super::trash_listing::verify_against_manifest_full(&payload_src, manifest) {
+        return Err(LifecycleError::WrongTrashState {
+            state: "tampered",
+            action: "restore",
+        });
+    }
+
+    let target = super::disable::resolve_collision_pub(&manifest.original_path, on_conflict)?;
+    if let Some(parent) = target.parent() {
+        std::fs::create_dir_all(parent).map_err(LifecycleError::io("create restore parent"))?;
+    }
     // No-replace rename first; on EXDEV (cross-volume) fall back to
     // copy with a final existence check inside the lock so the
     // copy can't silently overwrite a racing disable's destination.

@@ -334,7 +334,9 @@ function Row({
 function scopeShort(scope: string | undefined, root: string): string {
   if (scope === "user") return "User";
   if (scope === "project") {
-    const trimmed = root.replace(/\/\.claude\/?$/, "");
+    // Strip trailing `/.claude` (Unix) or `\.claude` (Windows) so the
+    // row shows the repo path, not the trailing config subdir.
+    const trimmed = root.replace(/[/\\]\.claude[/\\]?$/, "");
     return `Project: ${trimmed}`;
   }
   return root;

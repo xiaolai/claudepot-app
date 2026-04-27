@@ -272,6 +272,14 @@ fn is_under_absent_mount(path: &str) -> bool {
 /// a non-CC writer is normalized to CC's native form. CC itself never
 /// writes the verbatim form — this is defense-in-depth. On non-Windows
 /// hosts `simplify_windows_path` is a no-op.
+/// Public re-export of `recover_cwd_from_sessions` so the
+/// artifact_lifecycle layer can do a lightweight project-root
+/// discovery without paying for full `compute_project_info` (which
+/// also walks the entire project transcript dir for size + mtime).
+pub fn recover_cwd_from_sessions_pub(dir: &Path) -> Option<String> {
+    recover_cwd_from_sessions(dir)
+}
+
 pub(crate) fn recover_cwd_from_sessions(dir: &Path) -> Option<String> {
     // Practical upper bound: `cwd` lands on the first real user/assistant
     // entry, which in the wild is within the first handful of lines even

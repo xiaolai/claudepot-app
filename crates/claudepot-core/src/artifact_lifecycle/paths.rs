@@ -145,25 +145,37 @@ pub const DISABLED_DIR: &str = ".disabled";
 /// Renderer-supplied roots that aren't in the returned list are
 /// silently dropped — the operation falls through to user-only scope.
 pub fn discover_known_project_roots(config_dir: &std::path::Path) -> Vec<PathBuf> {
-    let projects = match crate::project::list_projects(config_dir) {
-        Ok(p) => p,
+    // Lightweight scan: iterate `<config>/projects/<slug>/` directly
+    // and recover each project's cwd via the cheap one-line transcript
+    // peek used by `recover_cwd_from_sessions`. Skips the recursive
+    // dir_size / mtime walks that `project::list_projects` performs
+    // (those would scale lifecycle commands with the entire transcript
+    // index — significant for power users with hundreds of projects).
+    let projects_dir = config_dir.join("projects");
+    let entries = match std::fs::read_dir(&projects_dir) {
+        Ok(it) => it,
         Err(_) => return Vec::new(),
     };
-    projects
-        .into_iter()
-        .filter_map(|p| {
-            // <original_path>/.claude/ is the lifecycle scope_root.
-            // Only surface dirs that actually exist on disk — a
-            // stale session record for a deleted project shouldn't
-            // expand the writable surface.
-            let claude_dir = PathBuf::from(&p.original_path).join(".claude");
-            if claude_dir.is_dir() {
-                Some(claude_dir)
-            } else {
-                None
-            }
-        })
-        .collect()
+    let mut out = Vec::new();
+    for entry in entries.flatten() {
+        let path = entry.path();
+        let ft = match entry.file_type() {
+            Ok(t) => t,
+            Err(_) => continue,
+        };
+        if !ft.is_dir() {
+            continue;
+        }
+        let cwd = match crate::project_helpers::recover_cwd_from_sessions_pub(&path) {
+            Some(c) => c,
+            None => continue,
+        };
+        let claude_dir = PathBuf::from(cwd).join(".claude");
+        if claude_dir.is_dir() {
+            out.push(claude_dir);
+        }
+    }
+    out
 }
 
 /// Take a (Windows-aware) absolute path and decide what lifecycle
