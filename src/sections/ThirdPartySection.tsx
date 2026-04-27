@@ -1,20 +1,163 @@
+import { useCallback, useEffect, useState } from "react";
 import { ScreenHeader } from "../shell/ScreenHeader";
+import { Button } from "../components/primitives/Button";
+import { NF } from "../icons";
+import { api } from "../api";
+import type { RouteSettingsDto, RouteSummaryDto } from "../types";
+import { AddRouteModal } from "./third-party/AddRouteModal";
+import { RouteCard } from "./third-party/RouteCard";
 
 /**
  * Third-party section — entry point for non-Anthropic LLM routes.
  *
- * Phase 0 stub. Full design in `dev-docs/third-party-llm-design.md`.
+ * Phase 2. Full design in `dev-docs/third-party-llm-design.md`.
  *
- * Forthcoming:
- *  - CLI wrappers under `~/.claudepot/bin/<name>` that set
- *    `ANTHROPIC_BASE_URL` / `ANTHROPIC_AUTH_TOKEN` and exec `claude`.
- *  - Desktop profiles under
- *    `~/Library/Application Support/Claude-3p/configLibrary/<uuid>.json`,
- *    coexisting with the first-party Anthropic identity.
- *  - Provider support: gateway (Ollama / OpenRouter / Kimi / DeepSeek
- *    / GLM / LiteLLM), Bedrock, Vertex, Foundry.
+ * Mental model:
+ *   - First-party `claude` CLI keeps reading from the
+ *     `Claude Code-credentials` keychain entry — never touched.
+ *   - First-party Claude Desktop keeps reading from
+ *     `~/Library/Application Support/Claude/` — never touched.
+ *   - Third-party routes live in their own dimension: each one
+ *     installs as a separate wrapper binary on PATH
+ *     (`~/.claudepot/bin/<name>`) and as a Desktop profile in
+ *     `~/Library/Application Support/Claude-3p/`.
  */
 export function ThirdPartySection() {
+  const [routes, setRoutes] = useState<RouteSummaryDto[] | null>(null);
+  const [settings, setSettings] = useState<RouteSettingsDto | null>(null);
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const [toast, setToast] = useState<{
+    kind: "info" | "error";
+    msg: string;
+  } | null>(null);
+  const [busyIds, setBusyIds] = useState<Set<string>>(new Set());
+  const [showAdd, setShowAdd] = useState(false);
+
+  const refresh = useCallback(async () => {
+    try {
+      const [list, s] = await Promise.all([
+        api.routesList(),
+        api.routesSettingsGet(),
+      ]);
+      setRoutes(list);
+      setSettings(s);
+      setLoadError(null);
+    } catch (e) {
+      setLoadError(`Load failed: ${e instanceof Error ? e.message : e}`);
+    }
+  }, []);
+
+  useEffect(() => {
+    void refresh();
+  }, [refresh]);
+
+  const setBusy = (id: string, busy: boolean) => {
+    setBusyIds((prev) => {
+      const next = new Set(prev);
+      if (busy) next.add(id);
+      else next.delete(id);
+      return next;
+    });
+  };
+
+  const showToast = (kind: "info" | "error", msg: string) => {
+    setToast({ kind, msg });
+    window.setTimeout(() => setToast(null), 4500);
+  };
+
+  const handleUseCli = async (id: string) => {
+    setBusy(id, true);
+    try {
+      await api.routesUseCli(id);
+      await refresh();
+      const r = (await api.routesList()).find((x) => x.id === id);
+      showToast(
+        "info",
+        r
+          ? `Wrapper installed: \`${r.wrapper_name}\`. Add ~/.claudepot/bin to PATH if you haven't already.`
+          : "Wrapper installed.",
+      );
+    } catch (e) {
+      showToast("error", `Use in CLI failed: ${e instanceof Error ? e.message : e}`);
+    } finally {
+      setBusy(id, false);
+    }
+  };
+
+  const handleUnuseCli = async (id: string) => {
+    setBusy(id, true);
+    try {
+      await api.routesUnuseCli(id);
+      await refresh();
+      showToast("info", "Wrapper removed.");
+    } catch (e) {
+      showToast("error", `Uninstall CLI failed: ${e instanceof Error ? e.message : e}`);
+    } finally {
+      setBusy(id, false);
+    }
+  };
+
+  const handleUseDesktop = async (id: string) => {
+    setBusy(id, true);
+    try {
+      await api.routesUseDesktop(id);
+      await refresh();
+      showToast(
+        "info",
+        "Active on Desktop. Restart Claude Desktop for changes to take effect.",
+      );
+    } catch (e) {
+      showToast("error", `Use in Desktop failed: ${e instanceof Error ? e.message : e}`);
+    } finally {
+      setBusy(id, false);
+    }
+  };
+
+  const handleUnuseDesktop = async (id: string) => {
+    setBusy(id, true);
+    try {
+      await api.routesUnuseDesktop();
+      await refresh();
+      showToast("info", "Desktop activation cleared. Restart Claude Desktop.");
+    } catch (e) {
+      showToast("error", `Deactivate Desktop failed: ${e instanceof Error ? e.message : e}`);
+    } finally {
+      setBusy(id, false);
+    }
+  };
+
+  const handleRemove = async (id: string) => {
+    if (
+      !window.confirm(
+        "Delete this route? Its CLI wrapper will be removed and any active Desktop activation cleared. The route definition itself cannot be recovered without recreating it.",
+      )
+    ) {
+      return;
+    }
+    setBusy(id, true);
+    try {
+      await api.routesRemove(id);
+      await refresh();
+      showToast("info", "Route deleted.");
+    } catch (e) {
+      showToast("error", `Delete failed: ${e instanceof Error ? e.message : e}`);
+    } finally {
+      setBusy(id, false);
+    }
+  };
+
+  const toggleChooser = async () => {
+    if (!settings) return;
+    try {
+      const next = await api.routesSettingsSet({
+        disable_deployment_mode_chooser: !settings.disable_deployment_mode_chooser,
+      });
+      setSettings(next);
+    } catch (e) {
+      showToast("error", `Settings update failed: ${e instanceof Error ? e.message : e}`);
+    }
+  };
+
   return (
     <div
       style={{
@@ -27,42 +170,156 @@ export function ThirdPartySection() {
       <ScreenHeader
         title="Third-party"
         subtitle="Run Claude Code and Claude Desktop with non-Anthropic LLMs"
+        actions={
+          <Button
+            variant="solid"
+            glyph={NF.plus}
+            onClick={() => setShowAdd(true)}
+            title="Configure a new third-party route"
+          >
+            Add route
+          </Button>
+        }
       />
+
       <div
         style={{
           flex: 1,
           overflow: "auto",
-          padding: "var(--sp-32)",
-          maxWidth: 720,
-          color: "var(--fg)",
-          fontSize: "var(--fs-sm)",
-          lineHeight: 1.6,
+          padding: "var(--sp-24) var(--sp-32)",
+          display: "flex",
+          flexDirection: "column",
+          gap: "var(--sp-20)",
         }}
       >
-        <p style={{ marginTop: 0 }}>
-          Manage routes to non-Anthropic backends — Bedrock, Vertex,
-          Foundry, or any Anthropic-Messages-compatible gateway
-          (Ollama, vLLM, OpenRouter, Kimi, DeepSeek, GLM, LiteLLM,
-          and more).
-        </p>
-        <p>
-          Each route materializes as a wrapper command on PATH —{" "}
-          <code style={{ color: "var(--fg-strong)" }}>claude-llama3</code>
-          ,{" "}
-          <code style={{ color: "var(--fg-strong)" }}>claude-kimi</code>
-          ,{" "}
-          <code style={{ color: "var(--fg-strong)" }}>
-            claude-bedrock-prod
-          </code>{" "}
-          — and as an entry in Claude Desktop&rsquo;s native
-          configuration registry. The first-party{" "}
-          <code style={{ color: "var(--fg-strong)" }}>claude</code>{" "}
-          binary and your Anthropic account are never touched.
-        </p>
-        <p style={{ color: "var(--fg-faint)", fontStyle: "italic" }}>
-          Profile management UI is in progress.
-        </p>
+        {loadError && (
+          <div
+            role="alert"
+            style={{
+              padding: "var(--sp-12) var(--sp-16)",
+              border: "var(--bw-hair) solid var(--danger-border, var(--line))",
+              borderRadius: "var(--r-2)",
+              color: "var(--fg)",
+              fontSize: "var(--fs-sm)",
+            }}
+          >
+            {loadError}
+          </div>
+        )}
+
+        {toast && (
+          <div
+            role={toast.kind === "error" ? "alert" : "status"}
+            style={{
+              padding: "var(--sp-10) var(--sp-14)",
+              borderRadius: "var(--r-2)",
+              border: "var(--bw-hair) solid var(--line)",
+              background: "var(--bg-raised)",
+              color: toast.kind === "error" ? "var(--danger-fg, var(--fg))" : "var(--fg)",
+              fontSize: "var(--fs-sm)",
+            }}
+          >
+            {toast.msg}
+          </div>
+        )}
+
+        {settings && (
+          <label
+            style={{
+              display: "flex",
+              alignItems: "center",
+              gap: "var(--sp-8)",
+              fontSize: "var(--fs-sm)",
+              color: "var(--fg-faint)",
+            }}
+            title="When enabled, Claude Desktop skips the launch-time chooser and commits to the active mode."
+          >
+            <input
+              type="checkbox"
+              checked={settings.disable_deployment_mode_chooser}
+              onChange={toggleChooser}
+            />
+            Hide the deployment-mode chooser at Claude Desktop launch
+          </label>
+        )}
+
+        {routes === null ? (
+          <p style={{ color: "var(--fg-faint)" }}>Loading…</p>
+        ) : routes.length === 0 ? (
+          <EmptyState onAdd={() => setShowAdd(true)} />
+        ) : (
+          <div
+            style={{
+              display: "grid",
+              gridTemplateColumns: "repeat(auto-fill, minmax(360px, 1fr))",
+              gap: "var(--sp-16)",
+            }}
+          >
+            {routes.map((r) => (
+              <RouteCard
+                key={r.id}
+                route={r}
+                busy={busyIds.has(r.id)}
+                onUseCli={handleUseCli}
+                onUnuseCli={handleUnuseCli}
+                onUseDesktop={handleUseDesktop}
+                onUnuseDesktop={handleUnuseDesktop}
+                onRemove={handleRemove}
+              />
+            ))}
+          </div>
+        )}
       </div>
+
+      <AddRouteModal
+        open={showAdd}
+        onClose={() => setShowAdd(false)}
+        onCreated={() => {
+          void refresh();
+          showToast("info", "Route added.");
+        }}
+        onError={(msg) => showToast("error", msg)}
+      />
+    </div>
+  );
+}
+
+function EmptyState({ onAdd }: { onAdd: () => void }) {
+  return (
+    <div
+      style={{
+        display: "flex",
+        flexDirection: "column",
+        alignItems: "flex-start",
+        gap: "var(--sp-16)",
+        padding: "var(--sp-32)",
+        maxWidth: 720,
+        color: "var(--fg)",
+        fontSize: "var(--fs-sm)",
+        lineHeight: 1.6,
+      }}
+    >
+      <p style={{ margin: 0 }}>
+        No routes yet. Add a route to run Claude Code or Claude Desktop
+        against a non-Anthropic backend — Bedrock, Vertex, Foundry, or
+        any Anthropic-Messages-compatible gateway (Ollama, vLLM,
+        OpenRouter, Kimi, DeepSeek, GLM, LiteLLM, …).
+      </p>
+      <p style={{ margin: 0 }}>
+        Each route installs a wrapper command on PATH —{" "}
+        <code style={{ color: "var(--fg-strong)" }}>claude-llama3</code>,{" "}
+        <code style={{ color: "var(--fg-strong)" }}>claude-kimi</code>,{" "}
+        <code style={{ color: "var(--fg-strong)" }}>
+          claude-bedrock-prod
+        </code>{" "}
+        — and (optionally) a profile in Claude Desktop&rsquo;s native
+        configuration registry. The first-party{" "}
+        <code style={{ color: "var(--fg-strong)" }}>claude</code> binary
+        and your Anthropic account are never touched.
+      </p>
+      <Button variant="solid" glyph={NF.plus} onClick={onAdd}>
+        Add your first route
+      </Button>
     </div>
   );
 }
