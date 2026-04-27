@@ -78,8 +78,33 @@ export function SessionDetail({
   const [viewMode, setViewMode] = useState<ViewMode>("chunks");
   const [contextOpen, setContextOpen] = useState(false);
   const [moveOpen, setMoveOpen] = useState(false);
+  const [scrollEl, setScrollEl] = useState<HTMLDivElement | null>(null);
+  const [compact, setCompact] = useState(false);
   const tokenRef = useRef(0);
   const topSentinelRef = useRef<HTMLDivElement | null>(null);
+
+  // Auto-compact the header once the user has scrolled into the
+  // transcript. A small hysteresis (engage at 16px, release at 4px)
+  // keeps the boundary from flickering when the user lands on a
+  // mid-position with momentum scroll. Cleared/re-attached when the
+  // scroll container changes — currently SessionDetail is keyed on
+  // `filePath` upstream, so the element identity tracks selection.
+  useEffect(() => {
+    if (!scrollEl) return;
+    const ENGAGE = 16;
+    const RELEASE = 4;
+    const onScroll = () => {
+      const top = scrollEl.scrollTop;
+      setCompact((c) => {
+        if (c && top < RELEASE) return false;
+        if (!c && top > ENGAGE) return true;
+        return c;
+      });
+    };
+    scrollEl.addEventListener("scroll", onScroll, { passive: true });
+    onScroll();
+    return () => scrollEl.removeEventListener("scroll", onScroll);
+  }, [scrollEl]);
 
   useEffect(() => {
     const myToken = ++tokenRef.current;
@@ -253,6 +278,7 @@ export function SessionDetail({
         chunks={chunks}
         viewMode={viewMode}
         contextOpen={contextOpen}
+        compact={compact}
         onBack={onBack}
         onReveal={handleReveal}
         onCopyFirstPrompt={handleCopyFirstPrompt}
@@ -276,6 +302,7 @@ export function SessionDetail({
         search={search}
         setSearch={setSearch}
         topSentinelRef={topSentinelRef}
+        scrollRef={setScrollEl}
         onLoadMoreEvents={() => setVisibleCount((n) => n + EVENT_PAGE)}
         onLoadMoreChunks={() => setVisibleChunks((n) => n + CHUNK_PAGE)}
         eventPage={EVENT_PAGE}
