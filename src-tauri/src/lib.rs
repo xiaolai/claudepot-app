@@ -7,6 +7,7 @@ mod commands_pricing;
 mod commands_account;
 mod commands_activity;
 mod commands_activity_cards;
+mod commands_artifact_usage;
 mod commands_cli;
 mod commands_desktop;
 mod commands_keys;
@@ -24,6 +25,7 @@ mod dto;
 mod dto_account;
 mod dto_activity;
 mod dto_activity_cards;
+mod dto_artifact_usage;
 mod dto_desktop;
 mod dto_keys;
 mod dto_project;
@@ -375,6 +377,9 @@ pub fn run() {
             commands_session_index::session_export_to_file,
             commands_session_index::session_search,
             commands_session_index::session_worktree_groups,
+            commands_artifact_usage::artifact_usage_for,
+            commands_artifact_usage::artifact_usage_batch,
+            commands_artifact_usage::artifact_usage_top,
             commands_protected::protected_paths_list,
             commands_protected::protected_paths_add,
             commands_protected::protected_paths_remove,
