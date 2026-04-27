@@ -94,4 +94,23 @@ export const artifactLifecycleApi = {
 
   artifactPurgeTrash: (olderThanDays: number) =>
     invoke<number>("artifact_purge_trash", { olderThanDays }),
+
+  /**
+   * Read the contents of a disabled artifact for preview. The
+   * Config tree's normal preview path can't reach `.disabled/`
+   * entries (excluded from active discovery by design), so the
+   * Disabled scope uses this dedicated read surface.
+   */
+  artifactDisabledPreview: (
+    scopeRoot: string,
+    kind: LifecycleKind,
+    relativePath: string,
+    projectRoot: string | null,
+  ) =>
+    invoke<string>("artifact_disabled_preview", {
+      scopeRoot,
+      kind,
+      relativePath,
+      projectRoot,
+    }),
 };

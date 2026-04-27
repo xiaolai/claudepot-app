@@ -12,14 +12,17 @@ export type OnConflict = "refuse" | "suffix";
  * Trash-entry health state. `Healthy` is the only state that
  * supports one-click `restore`. `MissingManifest` and
  * `AbandonedStaging` go through `recover` (with a confirmed target).
- * `MissingPayload` and `OrphanPayload` only support `forget`.
+ * `MissingPayload`, `OrphanPayload`, and `Tampered` only support
+ * `forget` — Tampered means the on-disk payload no longer matches
+ * the byte_count / sha256 the manifest recorded at trash time.
  */
 export type TrashState =
   | "healthy"
   | "missing_manifest"
   | "missing_payload"
   | "orphan_payload"
-  | "abandoned_staging";
+  | "abandoned_staging"
+  | "tampered";
 
 export interface DisabledRecordDto {
   scope: LifecycleScope;

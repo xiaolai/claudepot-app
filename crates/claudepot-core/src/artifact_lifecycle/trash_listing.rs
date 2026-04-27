@@ -7,7 +7,9 @@
 //! row and decide what to do (recover / forget).
 
 use crate::artifact_lifecycle::error::{LifecycleError, Result};
+use crate::artifact_lifecycle::paths::PayloadKind;
 use crate::artifact_lifecycle::trash::{TrashEntry, TrashManifest, TrashState};
+use crate::artifact_lifecycle::trash_io;
 use std::path::{Path, PathBuf};
 
 /// Walk `trash_root`, return one row per entry with its state.
@@ -94,7 +96,7 @@ pub(super) fn classify_entry(path: PathBuf, name: &str) -> TrashEntry {
         None
     };
 
-    let state = if !payload_exists {
+    let mut state = if !payload_exists {
         TrashState::MissingPayload
     } else if !manifest_exists || manifest.is_none() {
         TrashState::MissingManifest
@@ -104,11 +106,79 @@ pub(super) fn classify_entry(path: PathBuf, name: &str) -> TrashEntry {
         TrashState::Healthy
     };
 
+    // For Healthy candidates, also verify the payload size matches
+    // the manifest (cheap stat) and — for File payloads with a
+    // recorded sha256 — recompute the digest (one streaming pass).
+    // Mismatch downgrades to Tampered so restore is refused and the
+    // user is forced to investigate.
+    if state == TrashState::Healthy {
+        if let Some(m) = manifest.as_ref() {
+            if !verify_against_manifest(&payload_children[0], m) {
+                state = TrashState::Tampered;
+            }
+        }
+    }
+
     TrashEntry {
         id,
         entry_dir: path,
         state,
         manifest,
         directory_mtime_ms,
+    }
+}
+
+/// Cross-check a payload entry against the recorded manifest.
+/// Returns true when sizes (and, for files with a recorded digest,
+/// hashes) match. Stat / hash failures are treated as mismatches —
+/// safer to surface "looks tampered" than to claim Healthy on a
+/// probe error.
+fn verify_against_manifest(payload_path: &Path, manifest: &TrashManifest) -> bool {
+    // Basename must match too — single-child OrphanPayload check
+    // already guards count, this confirms identity.
+    if payload_path
+        .file_name()
+        .and_then(|n| n.to_str())
+        != Some(manifest.source_basename.as_str())
+    {
+        return false;
+    }
+    let observed_size = match observed_size(payload_path, manifest.payload_kind) {
+        Some(n) => n,
+        None => return false,
+    };
+    if observed_size != manifest.byte_count {
+        return false;
+    }
+    // For files with a recorded digest, confirm content matches.
+    if manifest.payload_kind == PayloadKind::File {
+        if let Some(expected) = manifest.sha256.as_deref() {
+            match trash_io::stream_hash_file(payload_path) {
+                Ok((_, hex)) => return hex == expected,
+                Err(_) => return false,
+            }
+        }
+    }
+    true
+}
+
+fn observed_size(payload_path: &Path, kind: PayloadKind) -> Option<u64> {
+    match kind {
+        PayloadKind::File => std::fs::symlink_metadata(payload_path).ok().map(|m| m.len()),
+        PayloadKind::Directory => {
+            let mut total = 0u64;
+            // Use the same lstat-based walker the producer used so
+            // the count is comparable byte-for-byte.
+            trash_io::walk_dir(payload_path, &mut |k, p| match k {
+                trash_io::WalkEntryKind::File | trash_io::WalkEntryKind::Symlink => {
+                    if let Ok(meta) = std::fs::symlink_metadata(p) {
+                        total += meta.len();
+                    }
+                }
+                trash_io::WalkEntryKind::Directory => {}
+            })
+            .ok()?;
+            Some(total)
+        }
     }
 }

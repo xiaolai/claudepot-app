@@ -101,9 +101,6 @@ pub enum RefuseReason {
 
     #[error("not a Skill, Agent, or Slash command ({path})")]
     WrongKind { path: PathBuf },
-
-    #[error("path is already disabled ({path}) — use enable instead")]
-    AlreadyDisabled { path: PathBuf },
 }
 
 pub type Result<T, E = LifecycleError> = std::result::Result<T, E>;
