@@ -14,6 +14,7 @@ import { configApi } from "./config";
 import { pricingApi } from "./pricing";
 import { artifactUsageApi } from "./artifact-usage";
 import { artifactLifecycleApi } from "./artifact-lifecycle";
+import { migrateApi } from "./migrate";
 
 export const api = {
   ...accountApi,
@@ -27,4 +28,8 @@ export const api = {
   ...pricingApi,
   ...artifactUsageApi,
   ...artifactLifecycleApi,
+  migrate: migrateApi,
 };
+
+export { migrateApi };
+export type * from "./migrate";

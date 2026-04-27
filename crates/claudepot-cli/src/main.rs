@@ -57,6 +57,90 @@ enum Commands {
         #[command(subcommand)]
         action: ProjectAction,
     },
+    /// Export the current project's CC state to a portable bundle
+    /// (`*.claudepot.tar.zst`).
+    ///
+    /// Lives at the top level (not under `project`) so the call sites
+    /// in scripting / SSH paths stay short. Internally a thin wrapper
+    /// over `claudepot-core::migrate::export_projects`.
+    #[command(name = "export")]
+    Export {
+        /// One or more project prefixes (resolved against the user's
+        /// CC project tree via the same exactly-one-prefix-match rule
+        /// as `account` resolution).
+        project_prefixes: Vec<String>,
+        /// Output path. Defaults to `<host>-<YYYYMMDD>.claudepot.tar.zst`
+        /// in the current working directory.
+        #[arg(long, short)]
+        out: Option<std::path::PathBuf>,
+        /// Include `~/.claude/CLAUDE.md`, `agents/`, `skills/`,
+        /// `commands/`, scrubbed `settings.json`, plugin registry.
+        /// Carries trust-gate items the importer must accept.
+        #[arg(long)]
+        include_global: bool,
+        /// Tarball the project's `<cwd>/.claude/**` and `<cwd>/CLAUDE.md`
+        /// alongside the session state. Use only when the project is
+        /// not in git (escape hatch — git is the right transport for
+        /// source).
+        #[arg(long)]
+        include_worktree: bool,
+        /// Best-effort snapshot of in-flight sessions. Marks them
+        /// `live_at_export: true` in the per-project manifest; the
+        /// importer surfaces a banner before applying.
+        #[arg(long)]
+        include_live: bool,
+        /// Include claudepot's own state (protected paths,
+        /// preferences, artifact-lifecycle). NOT credentials.
+        #[arg(long)]
+        include_claudepot_state: bool,
+        /// Skip the `file-history/<sid>/` dirs entirely. JSONL records
+        /// still ride along; only the on-disk backups are dropped.
+        #[arg(long)]
+        no_file_history: bool,
+        /// Encrypt the bundle with `age` (passphrase prompt). Default
+        /// for v1; v0 ships plaintext only.
+        #[arg(long)]
+        encrypt: bool,
+        /// Optional minisign signature over the manifest sha256.
+        #[arg(long, value_name = "KEYFILE")]
+        sign: Option<String>,
+    },
+    /// Import a `*.claudepot.tar.zst` bundle into this machine.
+    #[command(name = "import")]
+    Import {
+        /// Path to the bundle file.
+        bundle: std::path::PathBuf,
+        /// Conflict-resolution mode. Default is `skip` (refuse on any
+        /// pre-existing slug); `merge` unions sessions; `replace`
+        /// archives the target slug to claudepot trash first
+        /// (requires `--yes`).
+        #[arg(long, value_enum, default_value_t = commands::project_migrate::ConflictModeArg::Skip)]
+        mode: commands::project_migrate::ConflictModeArg,
+        /// In `--mode=merge`, pick a side for any session-id collision.
+        #[arg(long, value_enum)]
+        prefer: Option<commands::project_migrate::MergePreferenceArg>,
+        /// Opt in to all bundled hooks (still printed to stderr).
+        #[arg(long)]
+        accept_hooks: bool,
+        /// Opt in to all needs-resolution MCP entries.
+        #[arg(long)]
+        accept_mcp: bool,
+        /// Override path substitution rule. Repeatable.
+        #[arg(long, value_name = "SOURCE=TARGET")]
+        remap: Vec<String>,
+        /// Import without repathing file-history (records ride along
+        /// but visual diffs for old turns are degraded).
+        #[arg(long)]
+        no_file_history: bool,
+        /// Plan only — don't apply.
+        #[arg(long)]
+        dry_run: bool,
+    },
+    /// Inspect or manage migration bundles.
+    Migrate {
+        #[command(subcommand)]
+        action: MigrateAction,
+    },
     /// Manage CC session transcripts (move between projects, rescue orphans)
     Session {
         #[command(subcommand)]
@@ -392,6 +476,21 @@ enum ProjectAction {
 }
 
 #[derive(Subcommand)]
+enum MigrateAction {
+    /// Read a bundle's manifest and print a summary without
+    /// extracting.
+    Inspect {
+        /// Path to the bundle file.
+        bundle: std::path::PathBuf,
+        /// In-place upgrade older bundles to the current schema.
+        #[arg(long)]
+        upgrade_schema: bool,
+    },
+    /// Reverse the most recent import within the 24h undo window.
+    Undo,
+}
+
+#[derive(Subcommand)]
 enum ProjectTrashAction {
     /// List trashed projects (newest first)
     List,
@@ -683,6 +782,55 @@ async fn main() -> Result<()> {
                 id.as_deref(),
                 all,
             )?,
+        },
+        Commands::Export {
+            project_prefixes,
+            out,
+            include_global,
+            include_worktree,
+            include_live,
+            include_claudepot_state,
+            no_file_history,
+            encrypt,
+            sign,
+        } => commands::project_migrate::export(
+            &ctx,
+            project_prefixes,
+            out,
+            include_global,
+            include_worktree,
+            include_live,
+            include_claudepot_state,
+            no_file_history,
+            encrypt,
+            sign,
+        )?,
+        Commands::Import {
+            bundle,
+            mode,
+            prefer,
+            accept_hooks,
+            accept_mcp,
+            remap,
+            no_file_history,
+            dry_run,
+        } => commands::project_migrate::import(
+            &ctx,
+            bundle,
+            mode,
+            prefer,
+            accept_hooks,
+            accept_mcp,
+            remap,
+            no_file_history,
+            dry_run,
+            cli.yes,
+        )?,
+        Commands::Migrate { action } => match action {
+            MigrateAction::Inspect { bundle, upgrade_schema } => {
+                commands::project_migrate::inspect(&ctx, bundle, upgrade_schema)?
+            }
+            MigrateAction::Undo => commands::project_migrate::undo(&ctx)?,
         },
         Commands::Doctor => commands::doctor::run(&ctx).await?,
         Commands::Status => commands::status::run(&ctx).await?,
