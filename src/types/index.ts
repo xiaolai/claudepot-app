@@ -14,3 +14,4 @@ export * from "./config";
 export * from "./pricing";
 export * from "./artifact-usage";
 export * from "./artifact-lifecycle";
+export * from "./route";
