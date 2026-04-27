@@ -212,7 +212,7 @@ fn commit_secrets(
                 let need_inherit = cfg
                     .bearer_token
                     .as_ref()
-                    .map_or(false, |t| t.is_empty());
+                    .is_some_and(|t| t.is_empty());
                 if need_inherit {
                     if let Some(RouteProvider::Bedrock(p)) = prev {
                         cfg.bearer_token = p.bearer_token.clone();
@@ -241,7 +241,7 @@ fn commit_secrets(
                 let need_inherit = cfg
                     .api_key
                     .as_ref()
-                    .map_or(false, |k| k.is_empty());
+                    .is_some_and(|k| k.is_empty());
                 if need_inherit {
                     if let Some(RouteProvider::Foundry(p)) = prev {
                         cfg.api_key = p.api_key.clone();
@@ -373,17 +373,11 @@ pub async fn routes_add(
 
     let mut store = open_store()?;
     let saved = store.add(new_route).map_err(map_err)?;
-    let dto = project_summary(&saved);
-    // Best-effort zero of the api_key string the renderer sent.
-    if let Some(_) = std::any::TypeId::of::<RouteCreateDto>().to_owned().into() {
-        // RouteCreateDto.gateway moved out via `take()` above; the original
-        // api_key string was consumed by `build_provider`. No additional
-        // zeroing needed here — once `build_provider` placed the key into
-        // the GatewayConfig and that into the store, the renderer-side
-        // string is the only other live copy and is the renderer's job
-        // to clear.
-    }
-    Ok(dto)
+    // RouteCreateDto.gateway moved out via `take()` above; the
+    // original api_key string was consumed by `build_provider`. The
+    // renderer-side string is the only remaining live copy — it's
+    // the renderer's job to clear (via routes_zero_secret).
+    Ok(project_summary(&saved))
 }
 
 #[tauri::command]
