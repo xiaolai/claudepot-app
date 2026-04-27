@@ -1,4 +1,4 @@
-import { type CSSProperties, type MouseEvent, useState } from "react";
+import { type CSSProperties, type MouseEvent, type Ref, useState } from "react";
 import type { NfIcon } from "../../icons";
 import { Glyph } from "./Glyph";
 
@@ -25,6 +25,14 @@ interface IconButtonProps {
   "aria-haspopup"?: boolean | "menu" | "listbox" | "dialog";
   "aria-expanded"?: boolean;
   style?: CSSProperties;
+  /**
+   * Forwarded ref to the underlying `<button>`. Callers that need
+   * to anchor a popover to the button (e.g. the session-header
+   * kebab) read the ref's `getBoundingClientRect()` at click time
+   * — that's more reliable than `document.activeElement`, which
+   * can go stale when focus is elsewhere.
+   */
+  ref?: Ref<HTMLButtonElement>;
 }
 
 const SIZE_TOKEN: Record<"sm" | "md" | "lg", string> = {
@@ -56,12 +64,14 @@ export function IconButton({
   size = "md",
   title,
   style,
+  ref,
   ...aria
 }: IconButtonProps) {
   const [hover, setHover] = useState(false);
   const dim = resolveSize(size);
   return (
     <button
+      ref={ref}
       type="button"
       title={title}
       disabled={disabled}

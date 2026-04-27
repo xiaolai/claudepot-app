@@ -1,5 +1,6 @@
 import { save } from "@tauri-apps/plugin-dialog";
 import { api } from "../../api";
+import { formatErrorMessage } from "../../lib/toastError";
 
 export type SessionExportFormat = "md" | "json";
 
@@ -12,6 +13,14 @@ export type SessionExportFormat = "md" | "json";
  * Cancel is silent (no error). Dialog/permission failures and write
  * failures both flow through `onError` with a clean human line — the
  * raw plugin string is logged to the console instead of toasted.
+ *
+ * Error strings handed to `onError` are routed through
+ * `formatErrorMessage`, which redacts `sk-ant-*` substrings and
+ * caps the toast at 240 chars. The Rust side already strips secrets
+ * from transcripts before writing, but a user-supplied path or file
+ * permission message could in principle echo a secret-shaped
+ * substring back through the dialog plugin's error blob — so we
+ * defend in depth at the UI seam.
  */
 export async function exportSession(
   filePath: string,
@@ -40,7 +49,7 @@ export async function exportSession(
   try {
     await api.sessionExportToFile(filePath, format, target);
   } catch (e) {
-    onError?.(`Export failed: ${String(e)}`);
+    onError?.(formatErrorMessage("Export failed", e));
   }
 }
 

@@ -1,12 +1,13 @@
-import { describe, expect, it, vi } from "vitest";
-import { render, screen, within } from "@testing-library/react";
+import { beforeEach, describe, expect, it, vi } from "vitest";
+import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 
 import type { SessionRow } from "../../../types";
 
+const sessionExportToFile = vi.fn();
 vi.mock("../../../api", () => ({
   api: {
-    sessionExportToFile: vi.fn(),
+    sessionExportToFile: (...args: unknown[]) => sessionExportToFile(...args),
     revealInFinder: vi.fn(),
   },
 }));
@@ -17,8 +18,9 @@ vi.mock("../../../costs", () => ({
   formatUsd: (n: number) => `$${n.toFixed(2)}`,
 }));
 
+const saveDialog = vi.fn();
 vi.mock("@tauri-apps/plugin-dialog", () => ({
-  save: vi.fn().mockResolvedValue(null),
+  save: (...args: unknown[]) => saveDialog(...args),
 }));
 
 import { SessionDetailHeader } from "./SessionDetailHeader";
@@ -64,6 +66,11 @@ const callbacks = {
   onToggleViewMode: vi.fn(),
   onToggleContext: vi.fn(),
 };
+
+beforeEach(() => {
+  saveDialog.mockReset();
+  sessionExportToFile.mockReset();
+});
 
 describe("SessionDetailHeader — full mode", () => {
   it("renders breadcrumb, title, tags, and inline Reveal + kebab", () => {
@@ -241,5 +248,125 @@ describe("SessionDetailHeader — compact mode", () => {
     expect(
       within(screen.getByRole("menu")).getByText(/move to project/i),
     ).toBeInTheDocument();
+  });
+});
+
+describe("SessionDetailHeader — kebab export", () => {
+  async function openKebab(user: ReturnType<typeof userEvent.setup>) {
+    await user.click(
+      screen.getByRole("button", { name: /more session actions/i }),
+    );
+  }
+
+  it("invokes the export pipeline with the chosen target path (markdown)", async () => {
+    const user = userEvent.setup();
+    saveDialog.mockResolvedValue("/tmp/sess.md");
+    sessionExportToFile.mockResolvedValue(undefined);
+    render(
+      <SessionDetailHeader
+        row={makeRow()}
+        chunks={[]}
+        viewMode="chunks"
+        contextOpen={false}
+        compact={false}
+        {...callbacks}
+      />,
+    );
+    await openKebab(user);
+    await user.click(screen.getByRole("menuitem", { name: /export as markdown/i }));
+
+    await waitFor(() => {
+      expect(saveDialog).toHaveBeenCalledTimes(1);
+      expect(sessionExportToFile).toHaveBeenCalledWith(
+        "/tmp/sess.jsonl",
+        "md",
+        "/tmp/sess.md",
+      );
+    });
+  });
+
+  it("invokes the export pipeline with format=json for the JSON menu item", async () => {
+    const user = userEvent.setup();
+    saveDialog.mockResolvedValue("/tmp/sess.json");
+    sessionExportToFile.mockResolvedValue(undefined);
+    const onError = vi.fn();
+    render(
+      <SessionDetailHeader
+        row={makeRow()}
+        chunks={[]}
+        viewMode="chunks"
+        contextOpen={false}
+        compact={false}
+        onError={onError}
+        {...callbacks}
+      />,
+    );
+    await openKebab(user);
+    await user.click(screen.getByRole("menuitem", { name: /export as json/i }));
+
+    await waitFor(() => {
+      expect(sessionExportToFile).toHaveBeenCalledWith(
+        "/tmp/sess.jsonl",
+        "json",
+        "/tmp/sess.json",
+      );
+    });
+    // No error pushed on the happy path.
+    expect(onError).not.toHaveBeenCalled();
+  });
+
+  it("silently bails when the user cancels the save dialog", async () => {
+    const user = userEvent.setup();
+    saveDialog.mockResolvedValue(null);
+    const onError = vi.fn();
+    render(
+      <SessionDetailHeader
+        row={makeRow()}
+        chunks={[]}
+        viewMode="chunks"
+        contextOpen={false}
+        compact={false}
+        onError={onError}
+        {...callbacks}
+      />,
+    );
+    await openKebab(user);
+    await user.click(screen.getByRole("menuitem", { name: /export as markdown/i }));
+
+    await waitFor(() => {
+      expect(saveDialog).toHaveBeenCalledTimes(1);
+    });
+    expect(sessionExportToFile).not.toHaveBeenCalled();
+    expect(onError).not.toHaveBeenCalled();
+  });
+
+  it("redacts sk-ant-* tokens that surface in export errors", async () => {
+    const user = userEvent.setup();
+    saveDialog.mockResolvedValue("/tmp/sess.md");
+    sessionExportToFile.mockRejectedValue(
+      new Error("write failed at /tmp/sk-ant-oat01-AbcdEf12345/sess.md"),
+    );
+    const onError = vi.fn();
+    render(
+      <SessionDetailHeader
+        row={makeRow()}
+        chunks={[]}
+        viewMode="chunks"
+        contextOpen={false}
+        compact={false}
+        onError={onError}
+        {...callbacks}
+      />,
+    );
+    await openKebab(user);
+    await user.click(screen.getByRole("menuitem", { name: /export as markdown/i }));
+
+    await waitFor(() => {
+      expect(onError).toHaveBeenCalledTimes(1);
+    });
+    const msg = onError.mock.calls[0][0] as string;
+    expect(msg).not.toContain("AbcdEf12345");
+    expect(msg).toMatch(/sk-ant-\*+/);
+    expect(msg.startsWith("Export failed:")).toBe(true);
   });
 });

@@ -52,7 +52,14 @@ export function SessionDetailHeaderCompact({
           color: "var(--fg-faint)",
           letterSpacing: "var(--ls-wide)",
           textTransform: "uppercase",
-          flexShrink: 0,
+          minWidth: 0,
+          // Cap the breadcrumb so a very long project basename
+          // doesn't widen the row beyond the title's flex-basis and
+          // push the right-side actions off-screen. The `< project >`
+          // segment is still readable up to ~22 characters; longer
+          // names ellipsize with the full label preserved in the
+          // hover title on the BackAffordance.
+          maxWidth: "var(--breadcrumb-max-width)",
         }}
       >
         {onBack ? (
@@ -60,12 +67,35 @@ export function SessionDetailHeaderCompact({
             label={project}
             onClick={onBack}
             title={`Back to session list for ${project}`}
+            style={{
+              overflow: "hidden",
+              textOverflow: "ellipsis",
+              whiteSpace: "nowrap",
+              minWidth: 0,
+            }}
           />
         ) : (
-          <span>{project}</span>
+          <span
+            style={{
+              overflow: "hidden",
+              textOverflow: "ellipsis",
+              whiteSpace: "nowrap",
+              minWidth: 0,
+            }}
+            title={project}
+          >
+            {project}
+          </span>
         )}
-        <Glyph g={NF.chevronR} style={{ fontSize: "var(--fs-3xs)" }} />
-        <span className="mono" title={row.session_id}>
+        <Glyph
+          g={NF.chevronR}
+          style={{ fontSize: "var(--fs-3xs)", flexShrink: 0 }}
+        />
+        <span
+          className="mono"
+          title={row.session_id}
+          style={{ flexShrink: 0 }}
+        >
           {shortSessionId(row.session_id)}
         </span>
       </div>

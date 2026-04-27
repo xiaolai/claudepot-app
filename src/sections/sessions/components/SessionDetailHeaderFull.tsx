@@ -5,11 +5,7 @@ import { Glyph } from "../../../components/primitives/Glyph";
 import { Tag } from "../../../components/primitives/Tag";
 import { NF } from "../../../icons";
 import type { SessionRow } from "../../../types";
-import {
-  formatUsd,
-  sessionCostEstimate,
-  usePriceTable,
-} from "../../../costs";
+import { formatUsd } from "../../../costs";
 import { formatRelativeTime, formatSize } from "../../projects/format";
 import {
   bestTimestampMs,
@@ -25,19 +21,26 @@ import {
  * `SessionDetailHeader` when the user is at the top of the
  * transcript; the compact sibling takes over once they scroll.
  *
- * Pure presentation. The orchestrator owns the kebab popover state
- * and supplies the right-aligned action buttons via `revealNode` /
- * `kebabNode`, so this file never imports `ContextMenu`.
+ * Pure presentation. The orchestrator owns the kebab popover state,
+ * the price-table fetch, and supplies the right-aligned action
+ * buttons via `revealNode` / `kebabNode`, so this file never imports
+ * `ContextMenu` and never touches the `pricingGet` API surface.
  */
 export function SessionDetailHeaderFull({
   row,
   title,
+  costUsd,
   onBack,
   revealNode,
   kebabNode,
 }: {
   row: SessionRow;
   title: string;
+  /** API-equivalent cost for the session, or `null` when the price
+   * table is still loading or has no entries for the row's models.
+   * Computed once in the orchestrator so it survives the compact↔
+   * full layout transitions without re-fetching pricing. */
+  costUsd: number | null;
   onBack?: () => void;
   revealNode: ReactNode;
   kebabNode: ReactNode;
@@ -45,13 +48,6 @@ export function SessionDetailHeaderFull({
   const lastTs = bestTimestampMs(row.last_ts, row.last_modified_ms);
   const firstTs = row.first_ts ? Date.parse(row.first_ts) : null;
   const project = projectBasename(row.project_path) || row.slug;
-  const { table: priceTable } = usePriceTable();
-  const costUsd = sessionCostEstimate(priceTable, row.models, {
-    input: row.tokens.input,
-    output: row.tokens.output,
-    cache_read: row.tokens.cache_read,
-    cache_creation: row.tokens.cache_creation,
-  });
 
   return (
     <div

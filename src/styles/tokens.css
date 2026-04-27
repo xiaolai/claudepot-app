@@ -269,6 +269,11 @@
      scroll. */
   --scroll-compact-engage:    16px;
   --scroll-compact-release:    4px;
+
+  /* Cap the compact session-header breadcrumb so a very long
+     project basename doesn't widen the row beyond the title's
+     flex-basis and push the right-side Reveal/kebab off-screen. */
+  --breadcrumb-max-width:     280px;
   --icon-btn-sm:           22px;
   --icon-btn-md:           28px;
   --icon-btn-lg:           32px;
