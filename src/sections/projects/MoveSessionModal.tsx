@@ -68,15 +68,27 @@ export function MoveSessionModal({
   // Sort: most-recently-touched first so the default selection is
   // the one the user almost certainly wants (B1, B11).
   const options = useMemo(
-    () =>
-      projects
+    () => {
+      // Two distinct slugs can unsanitize to the same `original_path`
+      // (the round-trip is lossy — see .claude/rules/paths.md). The
+      // target of a move is the cwd path itself, so duplicate paths
+      // collapse to one option; pick the most-recently-touched slug as
+      // the representative so sort below stays stable.
+      const alive = projects
         .filter(
           (p) =>
             p.original_path !== fromCwd && classifyProject(p) === "alive",
         )
         .sort(
           (a, b) => (b.last_modified_ms ?? 0) - (a.last_modified_ms ?? 0),
-        ),
+        );
+      const seen = new Set<string>();
+      return alive.filter((p) => {
+        if (seen.has(p.original_path)) return false;
+        seen.add(p.original_path);
+        return true;
+      });
+    },
     [projects, fromCwd],
   );
   const [selection, setSelection] = useState<string>(
@@ -232,7 +244,7 @@ export function MoveSessionModal({
             {options.map((p) => {
               const base = basename(p.original_path) ?? p.original_path;
               return (
-                <option key={p.original_path} value={p.original_path}>
+                <option key={p.sanitized_name} value={p.original_path}>
                   {base} — {p.original_path}
                 </option>
               );
