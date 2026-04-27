@@ -35,7 +35,7 @@ use claudepot_core::config_view::{
     effective_mcp::{self, ApprovalState, BlockReason, McpSimulationMode},
     effective_settings,
     launcher::{self, LaunchError},
-    model::EditorCandidate,
+    model::{EditorCandidate, Kind},
     search::{self, CancelToken},
     ConfigScanService,
 };
@@ -102,11 +102,18 @@ pub async fn config_preview(
     node_id: String,
     svc: State<'_, Arc<ConfigScanService>>,
 ) -> Result<PreviewDto, String> {
+    // Markdown / hook scripts: 256 KiB head is plenty.
     const HEAD_LIMIT: u64 = 256 * 1024;
+    // JSON files: must read the whole document for the JSON-aware mask
+    // path to produce a parseable result. 8 MiB is well above any
+    // legitimate ~/.claude.json or settings.json — past that we accept
+    // truncation + byte-level masking and the renderer's tree view
+    // gracefully degrades to its <pre> fallback.
+    const JSON_LIMIT: u64 = 8 * 1024 * 1024;
     // Clone the FileNode out of the locked tree so we can drop the
     // guard before any I/O. `FileNode` is small (paths + a handful of
-    // metadata fields); the clone is cheap relative to the 256 KiB
-    // read that follows.
+    // metadata fields); the clone is cheap relative to the read that
+    // follows.
     let file = svc
         .with_tree(|tree| {
             discover::find_file(tree, &node_id)
@@ -115,20 +122,30 @@ pub async fn config_preview(
         })
         .ok_or_else(|| "tree not scanned yet".to_string())??;
 
-    // File open + read up to 256 KiB. Fast on a local SSD but can stall
-    // on a slow mount or a huge file we're about to truncate — push it
-    // onto the blocking pool rather than the Tokio IPC worker.
+    // File open + read. Fast on a local SSD but can stall on a slow
+    // mount or a huge file — push onto the blocking pool rather than
+    // the Tokio IPC worker.
     tauri::async_runtime::spawn_blocking(move || {
         use std::io::Read;
+        let is_json = is_json_kind(&file.kind);
+        let limit: u64 = if is_json { JSON_LIMIT } else { HEAD_LIMIT };
         let f = std::fs::File::open(&file.abs_path)
             .map_err(|e| format!("open {}: {}", file.abs_path.display(), e))?;
         let meta = f.metadata().map_err(|e| format!("stat: {e}"))?;
-        let truncated = meta.len() > HEAD_LIMIT;
-        let mut buf = Vec::with_capacity(std::cmp::min(HEAD_LIMIT, meta.len()) as usize);
-        let _ = f.take(HEAD_LIMIT).read_to_end(&mut buf);
+        let truncated = meta.len() > limit;
+        let mut buf = Vec::with_capacity(std::cmp::min(limit, meta.len()) as usize);
+        let _ = f.take(limit).read_to_end(&mut buf);
         // Mask before the bytes leave the core boundary — no raw secret
-        // can reach the IPC frame (plan §7.3).
-        let body = claudepot_core::config_view::mask::mask_bytes(&buf);
+        // can reach the IPC frame (plan §7.3). For JSON kinds, prefer
+        // the structure-aware masker so a regex rule with `/`+`=` in
+        // its character class can't eat a JSON string delimiter on long
+        // path values (regression test:
+        // `mask_preview_body_does_not_corrupt_paths` in mask.rs).
+        let body = if is_json {
+            claudepot_core::config_view::mask::mask_preview_body(&buf)
+        } else {
+            claudepot_core::config_view::mask::mask_bytes(&buf)
+        };
         Ok(PreviewDto {
             file: FileNodeDto::from(&file),
             body_utf8: body,
@@ -137,6 +154,28 @@ pub async fn config_preview(
     })
     .await
     .map_err(|e| format!("preview join: {e}"))?
+}
+
+/// File kinds whose on-disk representation is a single JSON document.
+/// Used by `config_preview` to switch from byte-level regex masking
+/// (unsafe on JSON, see `mask_preview_body`) to structure-aware
+/// masking. Markdown-shaped kinds (ClaudeMd, Agent, Skill, Command,
+/// OutputStyle, Workflow, Rule, Memory, MemoryIndex, Statusline) and
+/// freeform kinds (Hook, Other) keep the byte-level path.
+fn is_json_kind(kind: &Kind) -> bool {
+    matches!(
+        kind,
+        Kind::Settings
+            | Kind::SettingsLocal
+            | Kind::ManagedSettings
+            | Kind::RedactedUserConfig
+            | Kind::McpJson
+            | Kind::ManagedMcpJson
+            | Kind::Plugin
+            | Kind::Keybindings
+            | Kind::EffectiveSettings
+            | Kind::EffectiveMcp
+    )
 }
 
 /// Detected editors, cached for 5 minutes. Pass `force = true` to
