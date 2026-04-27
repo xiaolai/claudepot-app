@@ -1,9 +1,13 @@
 import { useEffect } from "react";
-import { Glyph } from "../components/primitives/Glyph";
 import { useSessionLive } from "../hooks/useSessionLive";
 import { useAppState } from "../providers/AppStateProvider";
-import { NF } from "../icons";
-import type { LiveSessionSummary } from "../types";
+import { RunningOpsChip } from "../components/RunningOpsChip";
+import { PendingJournalsChip } from "../components/PendingJournalsChip";
+import type {
+  LiveSessionSummary,
+  PendingJournalsSummary,
+  RunningOpInfo,
+} from "../types";
 
 /** How long the dismissed-toast echo lives in the status bar before
  *  fading out. Long enough for the user to re-read what just scrolled
@@ -17,30 +21,53 @@ import type { LiveSessionSummary } from "../types";
 const TOAST_ECHO_MS = 6000;
 
 export interface AppStatusBarStats {
-  /** Git branch name or similar. Undefined hides the branch segment. */
-  branch?: string;
   /** Total projects. `null` hides the segment. */
   projects: number | null;
   /** Total sessions. `null` hides the segment. */
   sessions: number | null;
-  /** Formatted monthly token count (already grouped). `null` hides. */
-  tokens?: string | null;
-  /** Active model label. */
-  model?: string;
+}
+
+export interface AppStatusBarProps {
+  stats: AppStatusBarStats;
+  /** In-flight long-running ops; renders the running-ops chip when nonzero. */
+  runningOps?: RunningOpInfo[];
+  /** Re-open progress modal for an op clicked in the chip popover. */
+  onReopenOp?: (opId: string) => void;
+  /** Pending rename-journal counts; renders the pending chip when actionable. */
+  pendingSummary?: PendingJournalsSummary | null;
+  /** Click target for the pending chip — typically jumps to Projects → Repair. */
+  onOpenRepair?: () => void;
+  /** Click target for the live-sessions segment — typically jumps to Activity. */
+  onOpenLive?: () => void;
 }
 
 /**
- * Bottom 24px chrome — status dots and counts. All stats are
- * optional; if you pass `null` the segment is dropped so we never
- * render "0 projects · 0 sessions".
+ * Bottom tokens.s[6] chrome — the single ambient-state surface for the app.
  *
- * Also hosts the dismissed-toast echo: when a transient notification
- * finishes, its text lingers here for `TOAST_ECHO_MS` so the user can
- * re-read what scrolled by. The echo is suppressed while a toast is
- * still on screen (one signal per surface — the live toast IS the
- * signal) and clears itself when the window elapses.
+ * Layout, left → right:
+ *   1. Live sessions segment (`● 3 live · OPUS 2, SON 1`) — text/link
+ *      when `onOpenLive` is wired, plain text otherwise.
+ *   2. Aggregate counts — `N projects · N sessions` — passed in via `stats`.
+ *      Each segment is `null`-elidable so we never render `0 projects`.
+ *   3. Right cluster of action chips: `[● N op]` running-ops chip +
+ *      `[⚠ N pending]` pending-journals chip. Each chip resolves to
+ *      a real UI destination per design.md "render-if-nonzero" rule.
+ *
+ * Center floats the dismissed-toast echo over the existing flex
+ * layout so it doesn't jostle the segment positions.
+ *
+ * Why no `branch` or `model` fields: Claudepot has no app-wide
+ * concept of a "current project" (it's a switcher, not an editor),
+ * and CC selects model per-session — both would be misleading.
  */
-export function AppStatusBar({ stats }: { stats: AppStatusBarStats }) {
+export function AppStatusBar({
+  stats,
+  runningOps,
+  onReopenOp,
+  pendingSummary,
+  onOpenRepair,
+  onOpenLive,
+}: AppStatusBarProps) {
   const live = useSessionLive();
   const liveSegment = formatLiveSegment(live);
   const { lastDismissed, clearLastDismissed, toasts } = useAppState();
@@ -67,17 +94,23 @@ export function AppStatusBar({ stats }: { stats: AppStatusBarStats }) {
     return () => clearTimeout(t);
   }, [lastDismissed, clearLastDismissed]);
 
-  const segments: (string | null)[] = [
-    liveSegment,
-    stats.projects != null && stats.projects > 0
-      ? `${stats.projects} project${stats.projects === 1 ? "" : "s"}`
-      : null,
-    stats.sessions != null && stats.sessions > 0
-      ? `${stats.sessions} session${stats.sessions === 1 ? "" : "s"}`
-      : null,
-    stats.tokens ? `${stats.tokens} tokens this month` : null,
-  ];
-  const visible = segments.filter(Boolean) as string[];
+  const countSegments: string[] = [];
+  if (stats.projects != null && stats.projects > 0) {
+    countSegments.push(
+      `${stats.projects} project${stats.projects === 1 ? "" : "s"}`,
+    );
+  }
+  if (stats.sessions != null && stats.sessions > 0) {
+    countSegments.push(
+      `${stats.sessions} session${stats.sessions === 1 ? "" : "s"}`,
+    );
+  }
+
+  const hasRunningOps =
+    !!runningOps && runningOps.some((o) => o.status === "running");
+  const hasPending =
+    !!pendingSummary && pendingSummary.pending + pendingSummary.stale > 0;
+  const hasRightCluster = hasRunningOps || hasPending;
 
   return (
     <div
@@ -97,23 +130,11 @@ export function AppStatusBar({ stats }: { stats: AppStatusBarStats }) {
         textTransform: "uppercase",
       }}
     >
-      {stats.branch && (
-        <>
-          <span
-            style={{
-              display: "flex",
-              alignItems: "center",
-              gap: "var(--sp-6)",
-            }}
-          >
-            <Glyph g={NF.branch} style={{ fontSize: "var(--fs-2xs)" }} />
-            {stats.branch}
-          </span>
-          {visible.length > 0 && <span>·</span>}
-        </>
+      {liveSegment && (
+        <LiveSegment text={liveSegment} onClick={onOpenLive} />
       )}
 
-      {visible.map((seg, i) => (
+      {countSegments.map((seg, i) => (
         <span
           key={seg}
           style={{
@@ -122,34 +143,48 @@ export function AppStatusBar({ stats }: { stats: AppStatusBarStats }) {
             gap: "var(--sp-6)",
           }}
         >
-          {i > 0 && <span style={{ marginRight: "var(--sp-10)" }}>·</span>}
+          {(liveSegment || i > 0) && (
+            <span style={{ marginRight: "var(--sp-10)" }}>·</span>
+          )}
           {seg}
         </span>
       ))}
 
       <span style={{ flex: 1 }} />
 
-      {/* Model name is reference info, not a notification — subtle
-          text, no accent color, no glyph. Uppercase + letter-spacing
-          from the parent makes the string feel louder than its tone,
-          so we drop those for the model segment and render it in
-          --fg-ghost to sit quietly. */}
-      {stats.model && (
+      {hasRightCluster && (
         <span
           style={{
-            color: "var(--fg-ghost)",
+            display: "inline-flex",
+            alignItems: "center",
+            gap: "var(--sp-6)",
+            // Cancel the parent's wide letter-spacing + uppercase for
+            // the chip cluster — chips own their own typography (see
+            // statusbar-chips.css). The bar's wide-tracking is for
+            // text segments only.
             textTransform: "none",
             letterSpacing: "var(--ls-normal)",
           }}
         >
-          {stats.model}
+          {hasRunningOps && onReopenOp && (
+            <RunningOpsChip
+              ops={runningOps ?? []}
+              onReopen={onReopenOp}
+            />
+          )}
+          {hasPending && onOpenRepair && (
+            <PendingJournalsChip
+              summary={pendingSummary ?? null}
+              onOpen={onOpenRepair}
+            />
+          )}
         </span>
       )}
 
       {/* Toast echo — absolutely centered over the bar so it doesn't
           jostle the existing flex layout. Re-keyed on `at` so each new
           dismissal restarts the fade animation cleanly. The error tone
-          carries a 2px left rule like the live toast does, which keeps
+          carries a tokens.sp[2] left rule like the live toast does, which keeps
           the visual link without saturating the bar. */}
       {echoVisible && lastDismissed && (
         <div
@@ -203,6 +238,58 @@ export function AppStatusBar({ stats }: { stats: AppStatusBarStats }) {
         }
       `}</style>
     </div>
+  );
+}
+
+/** Live-sessions segment. Renders as a button-shaped link when a
+ *  click handler is wired (jumps to the Activity section's live
+ *  filter); otherwise stays as plain text. Either way the bar's
+ *  uppercase + wide-tracking is preserved so it reads as one of the
+ *  ambient segments rather than a chip. */
+function LiveSegment({
+  text,
+  onClick,
+}: {
+  text: string;
+  onClick?: () => void;
+}) {
+  if (!onClick) {
+    return (
+      <span
+        style={{
+          display: "flex",
+          alignItems: "center",
+          gap: "var(--sp-6)",
+        }}
+      >
+        {text}
+      </span>
+    );
+  }
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      title="Open live activity"
+      style={{
+        display: "inline-flex",
+        alignItems: "center",
+        gap: "var(--sp-6)",
+        background: "transparent",
+        border: 0,
+        padding: 0,
+        margin: 0,
+        height: "auto",
+        font: "inherit",
+        fontSize: "inherit",
+        color: "inherit",
+        letterSpacing: "inherit",
+        textTransform: "inherit",
+        cursor: "pointer",
+      }}
+    >
+      {text}
+    </button>
   );
 }
 

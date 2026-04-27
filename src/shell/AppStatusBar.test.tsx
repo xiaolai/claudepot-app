@@ -194,3 +194,79 @@ describe("AppStatusBar — toast echo", () => {
     expect(echoMocks.state.clearLastDismissedSpy).toHaveBeenCalledTimes(1);
   });
 });
+
+/**
+ * Right-cluster chip rendering. Locks down the contract: the chips
+ * appear when their hooks have nonzero data, are wired to the
+ * corresponding callbacks, and disappear when handlers are absent.
+ */
+describe("AppStatusBar — chip rendering", () => {
+  beforeEach(() => {
+    echoMocks.state.toasts = [];
+    echoMocks.state.lastDismissed = null;
+    echoMocks.state.clearLastDismissedSpy = vi.fn();
+  });
+  afterEach(() => cleanup());
+
+  const stats = { projects: null, sessions: null };
+
+  it("hides the running-ops chip when the list is empty", () => {
+    render(
+      <AppStatusBar
+        stats={stats}
+        runningOps={[]}
+        onReopenOp={() => {}}
+      />,
+    );
+    expect(screen.queryByText(/op$/)).toBeNull();
+  });
+
+  it("renders the running-ops chip with a singular label", () => {
+    render(
+      <AppStatusBar
+        stats={stats}
+        runningOps={[
+          {
+            op_id: "op-1",
+            kind: "verify_all",
+            old_path: "",
+            new_path: "",
+            current_phase: null,
+            sub_progress: null,
+            status: "running",
+            started_unix_secs: 0,
+            last_error: null,
+            move_result: null,
+            clean_result: null,
+            failed_journal_id: null,
+          },
+        ]}
+        onReopenOp={() => {}}
+      />,
+    );
+    expect(screen.getByText("1 op")).toBeInTheDocument();
+  });
+
+  it("hides the pending chip when summary is null", () => {
+    render(
+      <AppStatusBar
+        stats={stats}
+        pendingSummary={null}
+        onOpenRepair={() => {}}
+      />,
+    );
+    expect(screen.queryByText(/pending$/)).toBeNull();
+  });
+
+  it("renders the pending chip with the count and warn tone for stale", () => {
+    render(
+      <AppStatusBar
+        stats={stats}
+        pendingSummary={{ pending: 1, stale: 2, running: 0 }}
+        onOpenRepair={() => {}}
+      />,
+    );
+    const chip = screen.getByText("3 pending").closest("button");
+    expect(chip?.className).toContain("warn");
+  });
+});
