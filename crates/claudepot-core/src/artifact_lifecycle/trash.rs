@@ -189,6 +189,12 @@ pub fn restore_at(
     if !manifest.scope_root.exists() {
         return Err(LifecycleError::ScopeRootMissing(manifest.scope_root.clone()));
     }
+    // Hold the scope lock for the manifest's destination scope_root
+    // so collision check + rename + a racing disable/enable on the
+    // same scope don't interleave. This is the same primitive
+    // disable_at uses; restore must respect it.
+    let _lock = super::scope_lock::acquire(&manifest.scope_root)?;
+
     let target = super::disable::resolve_collision_pub(&manifest.original_path, on_conflict)?;
     if let Some(parent) = target.parent() {
         std::fs::create_dir_all(parent).map_err(LifecycleError::io("create restore parent"))?;
@@ -197,18 +203,18 @@ pub fn restore_at(
         .entry_dir
         .join("payload")
         .join(&manifest.source_basename);
-    // Try atomic no-replace rename first to close the TOCTOU window
-    // between collision check and rename. If the rename fails for
-    // any reason (cross-volume, conflict from a racing process,
-    // etc.) fall back to the move_or_copy path which does
-    // copy-on-EXDEV but otherwise propagates errors.
+    // No-replace rename first; on EXDEV (cross-volume) fall back to
+    // copy with a final existence check inside the lock so the
+    // copy can't silently overwrite a racing disable's destination.
     match super::disable::rename_no_replace_pub(&payload_src, &target) {
         Ok(()) => {}
         Err(LifecycleError::Conflict(_)) => {
-            // Lost the race — surface the conflict cleanly.
             return Err(LifecycleError::Conflict(target));
         }
         Err(_) => {
+            if target.exists() {
+                return Err(LifecycleError::Conflict(target));
+            }
             move_or_copy(&payload_src, &target, manifest.payload_kind)?;
         }
     }
@@ -276,17 +282,33 @@ pub fn recover_at(
     };
     let (byte_count, sha) = hash_payload(&payload_src, payload_kind)?;
 
+    // Derive scope_root + relative_path by walking up from the
+    // confirmed target through the kind subdir. For
+    // `/repo/.claude/agents/team/foo.md` with kind=agent the
+    // expected scope_root is `/repo/.claude` and rel-path is
+    // `team/foo.md`. Falls back to the parent dir when the
+    // expected layout doesn't match — recover is a manual flow,
+    // the user can correct via re-recover.
+    let kind_subdir = confirmed_kind.subdir();
+    let (scope_root, relative_path) = derive_scope_and_rel(confirmed_target, kind_subdir)
+        .unwrap_or_else(|| {
+            (
+                confirmed_target
+                    .parent()
+                    .map(Path::to_path_buf)
+                    .unwrap_or_else(|| confirmed_target.to_path_buf()),
+                basename.clone(),
+            )
+        });
+
     let manifest = TrashManifest {
         version: MANIFEST_VERSION,
         id: trash_id.to_string(),
         trashed_at_ms: entry.directory_mtime_ms.unwrap_or_else(|| Utc::now().timestamp_millis()),
-        scope: Scope::User, // unknown — UI ownership; the confirmed_target gives us truth
-        scope_root: confirmed_target
-            .parent()
-            .map(Path::to_path_buf)
-            .unwrap_or_else(|| confirmed_target.to_path_buf()),
+        scope: Scope::User, // unknown — best-effort. The (scope_root, kind, rel) triple is what restore actually uses.
+        scope_root,
         kind: confirmed_kind,
-        relative_path: basename.clone(),
+        relative_path,
         original_path: confirmed_target.to_path_buf(),
         source_basename: basename,
         payload_kind,
@@ -349,6 +371,64 @@ pub fn purge_older_than(trash_root: &Path, older_than_days: u32) -> Result<u32> 
 /// directly — the public surface stays at `artifact_lifecycle::list_trash_at`.
 pub fn list_at(trash_root: &Path) -> Result<Vec<TrashEntry>> {
     listing_list_at(trash_root)
+}
+
+/// Walk up from `confirmed_target` to find the `<kind_subdir>/` ancestor
+/// and split into (scope_root, relative_path-under-kind). Used by
+/// `recover_at` to synthesize a correct manifest from the user's
+/// confirmed target instead of mis-attributing scope_root to the
+/// file's parent directory.
+fn derive_scope_and_rel(
+    confirmed_target: &Path,
+    kind_subdir: &str,
+) -> Option<(PathBuf, String)> {
+    let mut comps: Vec<&std::ffi::OsStr> = confirmed_target
+        .components()
+        .filter_map(|c| match c {
+            std::path::Component::Normal(s) => Some(s),
+            _ => None,
+        })
+        .collect();
+    let kind_idx = comps.iter().rposition(|s| {
+        s.to_str().map(|x| x == kind_subdir).unwrap_or(false)
+    })?;
+    if kind_idx == 0 {
+        return None;
+    }
+    // scope_root = path up to (but not including) the kind subdir.
+    let mut scope_root = PathBuf::new();
+    for c in confirmed_target.components() {
+        match c {
+            std::path::Component::Prefix(_) | std::path::Component::RootDir => {
+                scope_root.push(c.as_os_str());
+            }
+            std::path::Component::Normal(s) => {
+                if s == comps[kind_idx] {
+                    break;
+                }
+                scope_root.push(s);
+            }
+            _ => {}
+        }
+        // Stop when we've added the segment immediately before kind_subdir.
+        let depth = scope_root
+            .components()
+            .filter(|c| matches!(c, std::path::Component::Normal(_)))
+            .count();
+        if depth == kind_idx {
+            break;
+        }
+    }
+    let rel: String = comps
+        .split_off(kind_idx + 1)
+        .into_iter()
+        .filter_map(|s| s.to_str().map(str::to_string))
+        .collect::<Vec<_>>()
+        .join("/");
+    if rel.is_empty() {
+        return None;
+    }
+    Some((scope_root, rel))
 }
 
 /// Validate `trash_id` strictly as a UUID before any path join.

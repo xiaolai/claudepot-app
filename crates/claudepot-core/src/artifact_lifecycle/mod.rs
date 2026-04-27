@@ -455,6 +455,35 @@ mod tests {
     }
 
     #[test]
+    fn recover_synthesizes_correct_scope_root_for_nested_target() {
+        // /repo/.claude/agents/team/foo.md should derive
+        // scope_root=/repo/.claude and relative_path=team/foo.md,
+        // NOT the parent dir (/repo/.claude/agents/team).
+        let tmp = tempfile::tempdir().unwrap();
+        let trash = tmp.path().join("trash");
+        let claude = tmp.path().join("repo/.claude");
+        std::fs::create_dir_all(claude.join("agents/team")).unwrap();
+
+        let mm_dir = trash.join("00000000-0000-0000-0000-000000000099");
+        std::fs::create_dir_all(mm_dir.join("payload")).unwrap();
+        std::fs::write(mm_dir.join("payload/foo.md"), b"recovered").unwrap();
+
+        let target = claude.join("agents/team/foo.md");
+        recover_at(
+            &trash,
+            "00000000-0000-0000-0000-000000000099",
+            &target,
+            ArtifactKind::Agent,
+            OnConflict::Refuse,
+        )
+        .unwrap();
+        // After successful recover the file should land at the
+        // confirmed target, proving the derived scope+rel was right.
+        assert!(target.exists(), "recovered file present at confirmed target");
+        assert_eq!(std::fs::read(&target).unwrap(), b"recovered");
+    }
+
+    #[test]
     fn skill_md_path_classifies_as_directory_payload() {
         // A SKILL.md file inside `<root>/skills/<name>/` must
         // classify as the SKILL DIRECTORY (so disable moves the
