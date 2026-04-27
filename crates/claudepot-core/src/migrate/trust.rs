@@ -15,10 +15,8 @@
 //!   - **CLAUDE.md / agents / skills / commands** — content only;
 //!     content-hash summary, user can untick.
 
-use crate::migrate::error::MigrateError;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
-use std::path::Path;
 
 /// Output of `split_settings`. The two pieces travel separately in the
 /// bundle so the importer's trust panel can show hooks distinct from
@@ -52,6 +50,13 @@ pub fn split_settings(parsed: Value) -> SettingsSplit {
 /// trust gate cares about; unknown fields round-trip via
 /// `serde_json::Value` so the importer can re-emit the original
 /// shape.
+// `McpServerEntry` and `ClaudepotMcpMeta` are forward-looking
+// scaffolding for the import-side `--accept-mcp` write path (re-
+// enables flagged entries on the target). The export-side
+// `scrub_mcp_servers` operates on a `serde_json::Map` directly, so
+// these typed structs are not yet referenced. Tracked in mod.rs
+// "known partial coverage" → MCP `accept_mcp` write-side.
+#[allow(dead_code)]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct McpServerEntry {
     /// The configured command. May be a bare program name (`bun`,
@@ -70,6 +75,7 @@ pub struct McpServerEntry {
     pub rest: serde_json::Map<String, Value>,
 }
 
+#[allow(dead_code)]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ClaudepotMcpMeta {
     #[serde(default)]
@@ -125,6 +131,12 @@ fn is_absolute_path_command(cmd: &str) -> bool {
 /// One trust-gate item surfaced to the user at import time. The
 /// adapter (CLI / GUI) decides how to present them; this struct is
 /// the wire shape.
+///
+/// Not yet emitted by the apply pipeline — the spec §12.3
+/// `ImportPlanDto` should carry a `Vec<TrustGateItem>` once the
+/// trust-gate review UX lands. Tracked in mod.rs "known partial
+/// coverage" → Tauri op-id / inspect-plan DTO.
+#[allow(dead_code)]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TrustGateItem {
     pub kind: TrustGateKind,
@@ -138,6 +150,7 @@ pub struct TrustGateItem {
     pub default_reject: bool,
 }
 
+#[allow(dead_code)]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum TrustGateKind {
@@ -168,27 +181,10 @@ pub fn scrub_mcp_block(value: &mut serde_json::Value) -> usize {
     }
 }
 
-/// Quarantine xattr stripping (macOS only). Stub for non-mac targets.
-/// See spec §7.6 — we only strip from JSONL/config files Claudepot
-/// owns; user-installable surfaces (statusline, plugins, hooks) keep
-/// quarantine.
-pub fn strip_quarantine_xattr(_path: &Path) -> Result<(), MigrateError> {
-    #[cfg(target_os = "macos")]
-    {
-        // The real implementation will shell out to
-        //   /usr/bin/xattr -d com.apple.quarantine <path>
-        // OR call the libc `removexattr` directly. Deferred to v0.1
-        // — bundles produced today don't carry quarantine xattr yet
-        // (they're written by claudepot, not downloaded), so
-        // post-import nag risk is low. Track in spec §7.6.
-        let _ = _path;
-        return Ok(());
-    }
-    #[cfg(not(target_os = "macos"))]
-    {
-        Ok(())
-    }
-}
+// (`strip_quarantine_xattr` removed — duplicate of
+//  `migrate::quarantine::strip`. Trust gates only need the
+//  scrub helpers; the xattr stripper lives next to the bundle
+//  apply path.)
 
 #[cfg(test)]
 mod tests {

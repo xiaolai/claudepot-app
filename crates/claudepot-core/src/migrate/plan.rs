@@ -106,11 +106,15 @@ impl SubstitutionTable {
         None
     }
 
-    /// Total rule count (for reporting).
+    /// Total rule count. Used by tests and by adapters that surface
+    /// a "N substitution rules" line in the import-plan UI; not
+    /// referenced from the orchestrator yet.
+    #[allow(dead_code)]
     pub fn len(&self) -> usize {
         self.rules.len()
     }
 
+    #[allow(dead_code)]
     pub fn is_empty(&self) -> bool {
         self.rules.is_empty()
     }

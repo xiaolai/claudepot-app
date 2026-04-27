@@ -221,8 +221,9 @@ pub struct GlobalApplyStep {
 pub enum GlobalApplyKind {
     /// Wrote a fresh file to the target tree.
     Created,
-    /// Replaced an existing file; prior content is at `snapshot`.
-    Replaced,
+    // (`Replaced` removed — the apply path always writes
+    //  side-by-side instead of overwriting silently. Settings hooks
+    //  are the one exception, and they go through `HooksAccepted`.)
     /// Wrote `<name>.imported` next to a differing target file.
     SideBySide,
     /// Skipped because the target file matches byte-for-byte.

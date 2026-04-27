@@ -929,10 +929,7 @@ pub fn import_bundle(
         for step in global_steps {
             let kind = match step.kind {
                 global::GlobalApplyKind::Created => apply::JournalStepKind::CreateFile,
-                global::GlobalApplyKind::Replaced
-                | global::GlobalApplyKind::HooksAccepted => {
-                    apply::JournalStepKind::ReplaceFile
-                }
+                global::GlobalApplyKind::HooksAccepted => apply::JournalStepKind::ReplaceFile,
                 global::GlobalApplyKind::SideBySide
                 | global::GlobalApplyKind::HooksProposed
                 | global::GlobalApplyKind::McpProposed => apply::JournalStepKind::CreateFile,

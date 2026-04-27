@@ -17,6 +17,19 @@
 //! This module owns step 1: scanning a `file-history/<sid>/` directory
 //! for `<hex>@v<n>` files, recovering the original path → new path
 //! mapping from the JSONL records, and renaming the files in place.
+//!
+//! ## Wiring status
+//!
+//! Step 1 is implemented and exercised by the file's own tests, but
+//! the `import_bundle` orchestrator does not yet call `repath_dir`.
+//! The reason: the export side does not yet bundle the
+//! `~/.claude/file-history/<sid>/` trees (Bucket B siblings, see
+//! `mod.rs` "known partial coverage"). Wiring the import-side rename
+//! before the export-side bundling lands would be a no-op. The
+//! `#[allow(dead_code)]` annotations below acknowledge this gap so the
+//! compiler does not falsely flag the infrastructure as unreachable.
+
+#![allow(dead_code)]
 
 use crate::migrate::error::MigrateError;
 use crate::migrate::plan::SubstitutionTable;
