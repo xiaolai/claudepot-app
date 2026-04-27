@@ -10,7 +10,14 @@ use crate::artifact_lifecycle::error::{LifecycleError, Result};
 use crate::artifact_lifecycle::paths::PayloadKind;
 use crate::artifact_lifecycle::trash::TrashManifest;
 use sha2::{Digest, Sha256};
+use std::io::{BufReader, Read};
 use std::path::Path;
+
+/// Buffer size for streaming hash. 64 KiB strikes the usual balance:
+/// bigger than the typical small-file payload (so two reads do most
+/// files) but small enough to keep the resident set quiet on
+/// pathological inputs (someone trashes a 2 GiB markdown by accident).
+const HASH_BUF_BYTES: usize = 64 * 1024;
 
 /// Atomic manifest write — tempfile + rename so a crash mid-write
 /// either leaves the previous manifest (if any) or no manifest at all.
@@ -130,40 +137,147 @@ pub(super) fn remove_source(source: &Path, kind: PayloadKind) -> Result<()> {
 }
 
 /// Compute (byte_count, sha256?) for the trashed payload. Files
-/// hash; directories report total size only (computing a tree-hash
-/// is expensive and rarely useful in practice).
+/// hash via a streaming reader so a multi-GB payload doesn't spike
+/// the resident set. Directories report total size only (computing a
+/// tree-hash is expensive and rarely useful in practice).
 pub(super) fn hash_payload(path: &Path, kind: PayloadKind) -> Result<(u64, Option<String>)> {
     match kind {
         PayloadKind::File => {
-            let bytes = std::fs::read(path).map_err(LifecycleError::io("hash file"))?;
-            let mut hasher = Sha256::new();
-            hasher.update(&bytes);
-            Ok((bytes.len() as u64, Some(hex::encode(hasher.finalize()))))
+            let (bytes, hex) = stream_hash_file(path)?;
+            Ok((bytes, Some(hex)))
         }
         PayloadKind::Directory => {
             let mut total = 0u64;
-            walk_dir(path, &mut |p| {
-                if let Ok(meta) = std::fs::metadata(p) {
-                    total += meta.len();
+            walk_dir(path, &mut |entry_kind, p| match entry_kind {
+                WalkEntryKind::File | WalkEntryKind::Symlink => {
+                    if let Ok(meta) = std::fs::symlink_metadata(p) {
+                        total += meta.len();
+                    }
                 }
+                WalkEntryKind::Directory => {}
             })?;
             Ok((total, None))
         }
     }
 }
 
-fn walk_dir(root: &Path, f: &mut dyn FnMut(&Path)) -> Result<()> {
-    if root.is_file() {
-        f(root);
+/// Streaming SHA-256 over a file. Returns (byte_count, hex digest).
+/// Reads in `HASH_BUF_BYTES` chunks via `BufReader::read` so memory
+/// stays bounded regardless of file size.
+pub(crate) fn stream_hash_file(path: &Path) -> Result<(u64, String)> {
+    let file = std::fs::File::open(path).map_err(LifecycleError::io("hash file open"))?;
+    let mut reader = BufReader::with_capacity(HASH_BUF_BYTES, file);
+    let mut hasher = Sha256::new();
+    let mut buf = vec![0u8; HASH_BUF_BYTES];
+    let mut total: u64 = 0;
+    loop {
+        let n = reader
+            .read(&mut buf)
+            .map_err(LifecycleError::io("hash file read"))?;
+        if n == 0 {
+            break;
+        }
+        hasher.update(&buf[..n]);
+        total += n as u64;
+    }
+    Ok((total, hex::encode(hasher.finalize())))
+}
+
+#[cfg(test)]
+#[cfg(unix)]
+mod tests {
+    use super::*;
+    use tempfile::tempdir;
+
+    #[test]
+    fn walk_dir_does_not_recurse_into_symlinks() {
+        // A symlink loop (link → root) would recurse forever if the
+        // walker followed it. The lstat-based walker reports the link
+        // as Symlink and stops.
+        let tmp = tempdir().unwrap();
+        let root = tmp.path().join("root");
+        std::fs::create_dir_all(&root).unwrap();
+        std::fs::write(root.join("a.md"), b"x").unwrap();
+        // Create root/loop → root.
+        std::os::unix::fs::symlink(&root, root.join("loop")).unwrap();
+
+        let mut entries: Vec<(WalkEntryKind, std::path::PathBuf)> = Vec::new();
+        walk_dir(&root, &mut |k, p| entries.push((k, p.to_path_buf()))).unwrap();
+        assert!(
+            entries
+                .iter()
+                .any(|(k, p)| *k == WalkEntryKind::Symlink && p.ends_with("loop")),
+            "loop must surface as a Symlink entry"
+        );
+        // No nested traversal — only one level of File entries (a.md).
+        let file_count = entries
+            .iter()
+            .filter(|(k, _)| *k == WalkEntryKind::File)
+            .count();
+        assert_eq!(file_count, 1, "must not recurse into the symlink loop");
+    }
+
+    #[test]
+    fn stream_hash_file_matches_in_memory_hash() {
+        // Sanity: streaming hash agrees with hashing all bytes at once
+        // for a moderately-sized file (larger than HASH_BUF_BYTES).
+        let tmp = tempdir().unwrap();
+        let f = tmp.path().join("big.bin");
+        let bytes: Vec<u8> = (0..200_000u32).map(|i| (i & 0xff) as u8).collect();
+        std::fs::write(&f, &bytes).unwrap();
+
+        let (n, hex) = stream_hash_file(&f).unwrap();
+        assert_eq!(n, bytes.len() as u64);
+
+        let mut hasher = Sha256::new();
+        hasher.update(&bytes);
+        let expected = hex::encode(hasher.finalize());
+        assert_eq!(hex, expected);
+    }
+}
+
+/// Tag passed to the `walk_dir` callback so the caller can decide
+/// what to do with each entry without re-stat'ing.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum WalkEntryKind {
+    File,
+    Directory,
+    Symlink,
+}
+
+/// Recursive walker that uses `symlink_metadata` (lstat) so symlink
+/// entries are reported AS symlinks and never traversed. Without
+/// this guard a symlink-to-`/` (or a self-referential dir symlink)
+/// would loop until stack overflow.
+///
+/// Callers that want symlink contents traversed must follow the
+/// link explicitly — the walker won't do it for them.
+pub(crate) fn walk_dir(root: &Path, f: &mut dyn FnMut(WalkEntryKind, &Path)) -> Result<()> {
+    let meta = std::fs::symlink_metadata(root)
+        .map_err(LifecycleError::io("walk dir root stat"))?;
+    let ft = meta.file_type();
+    if ft.is_symlink() {
+        f(WalkEntryKind::Symlink, root);
         return Ok(());
     }
+    if ft.is_file() {
+        f(WalkEntryKind::File, root);
+        return Ok(());
+    }
+    // Directory.
+    f(WalkEntryKind::Directory, root);
     for entry in std::fs::read_dir(root).map_err(LifecycleError::io("walk dir"))? {
         let entry = entry.map_err(LifecycleError::io("walk dir entry"))?;
         let path = entry.path();
-        if path.is_dir() {
+        let ft = entry
+            .file_type()
+            .map_err(LifecycleError::io("walk dir file_type"))?;
+        if ft.is_symlink() {
+            f(WalkEntryKind::Symlink, &path);
+        } else if ft.is_dir() {
             walk_dir(&path, f)?;
         } else {
-            f(&path);
+            f(WalkEntryKind::File, &path);
         }
     }
     Ok(())

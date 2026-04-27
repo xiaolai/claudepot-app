@@ -45,6 +45,12 @@ pub enum TrashState {
     MissingPayload,
     OrphanPayload,
     AbandonedStaging,
+    /// Manifest parses and the payload exists, but the byte count
+    /// (and sha256 when recorded) doesn't match what the manifest
+    /// claims. Surfaced as a distinct state so the user knows the
+    /// stored content was modified after trashing — restore is
+    /// refused (manual recover or forget required).
+    Tampered,
 }
 
 impl TrashState {
@@ -55,6 +61,7 @@ impl TrashState {
             Self::MissingPayload => "missing_payload",
             Self::OrphanPayload => "orphan_payload",
             Self::AbandonedStaging => "abandoned_staging",
+            Self::Tampered => "tampered",
         }
     }
 }

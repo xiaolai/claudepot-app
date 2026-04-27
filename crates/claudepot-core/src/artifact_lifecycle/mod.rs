@@ -58,17 +58,17 @@ pub fn list_disabled_for(
 }
 
 /// Convenience for tests + Tauri: classify, then disable.
+///
+/// Idempotent: a path that's already under `<root>/.disabled/` is
+/// surfaced through `disable_at`, which short-circuits with the
+/// existing record. Calling `disable_path` on the same path twice in
+/// a row succeeds both times — the second call is a no-op.
 pub fn disable_path(
     abs_path: &Path,
     roots: &ActiveRoots,
     on_conflict: OnConflict,
 ) -> Result<DisabledRecord> {
     let trackable = classify_path(abs_path, roots)?;
-    if trackable.already_disabled {
-        return Err(LifecycleError::Refused(RefuseReason::AlreadyDisabled {
-            path: abs_path.to_path_buf(),
-        }));
-    }
     disable_at(&trackable, on_conflict, roots)
 }
 
@@ -116,6 +116,29 @@ mod tests {
             std::fs::create_dir_all(parent).unwrap();
         }
         std::fs::write(p, body).unwrap();
+    }
+
+    #[test]
+    fn disable_path_is_idempotent_for_already_disabled() {
+        // Calling disable_path twice in a row on the same artifact
+        // succeeds both times. The second call is a no-op that
+        // returns the same record (delegated through disable_at,
+        // which short-circuits when the trackable is already
+        // disabled). Important so a flaky double-click in the UI
+        // doesn't surface a confusing error.
+        let tmp = tempfile::tempdir().unwrap();
+        let claude = tmp.path().join(".claude");
+        let agent = claude.join("agents/foo.md");
+        std::fs::create_dir_all(agent.parent().unwrap()).unwrap();
+        std::fs::write(&agent, b"x").unwrap();
+        let roots = ActiveRoots::user(claude.clone());
+
+        let first = disable_path(&agent, &roots, OnConflict::Refuse).unwrap();
+        // Second call on the now-disabled path — the disabled location.
+        let second =
+            disable_path(&first.current_path, &roots, OnConflict::Refuse).unwrap();
+        assert_eq!(first.current_path, second.current_path);
+        assert!(first.current_path.exists());
     }
 
     #[test]
@@ -368,6 +391,37 @@ mod tests {
             OnConflict::Refuse,
         )
         .unwrap_err();
+        assert!(matches!(err, LifecycleError::WrongTrashState { .. }));
+    }
+
+    #[test]
+    fn list_trash_marks_post_trash_modification_as_tampered() {
+        // Trash a real file, then poke at its bytes inside the trash
+        // dir. The next listing should classify it as Tampered, not
+        // Healthy — restore is then refused.
+        let tmp = tempfile::tempdir().unwrap();
+        let claude = tmp.path().join(".claude");
+        let trash = tmp.path().join("trash");
+        let agent = claude.join("agents/foo.md");
+        write_file(&agent, b"original");
+        let roots = ActiveRoots::user(claude.clone());
+        let entry = trash_path(&agent, &roots, &trash).unwrap();
+        let payload = entry.entry_dir.join("payload/foo.md");
+        // Tamper: rewrite the payload to a different size+content.
+        std::fs::write(&payload, b"tampered_with_more_bytes").unwrap();
+
+        let listed = list_trash_at(&trash).unwrap();
+        let row = listed
+            .iter()
+            .find(|e| e.id == entry.id)
+            .expect("entry present");
+        assert_eq!(
+            row.state,
+            TrashState::Tampered,
+            "post-trash modification must surface as Tampered"
+        );
+        // Restore now refuses because state isn't Healthy.
+        let err = restore_at(&trash, &entry.id, OnConflict::Refuse).unwrap_err();
         assert!(matches!(err, LifecycleError::WrongTrashState { .. }));
     }
 

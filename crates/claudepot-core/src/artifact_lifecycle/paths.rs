@@ -129,6 +129,43 @@ impl ActiveRoots {
 /// Sentinel directory name used for in-place disable.
 pub const DISABLED_DIR: &str = ".disabled";
 
+/// Discover every project `<repo>/.claude/` directory the backend
+/// already knows about — derived from the session-index sweep
+/// (`project::list_projects`), which records every project that has
+/// ever produced a session transcript.
+///
+/// Lifecycle commands consult this list before accepting a renderer-
+/// supplied `project_root`. Without it, validation is circular: the
+/// renderer claims a root, the backend checks the same renderer-
+/// influenced list, and arbitrary `.claude`-shaped directories
+/// elsewhere on disk get accepted as writable scope roots.
+///
+/// Result is best-effort: discovery failures (read errors, etc.)
+/// produce an empty Vec rather than poison the lifecycle surface.
+/// Renderer-supplied roots that aren't in the returned list are
+/// silently dropped — the operation falls through to user-only scope.
+pub fn discover_known_project_roots(config_dir: &std::path::Path) -> Vec<PathBuf> {
+    let projects = match crate::project::list_projects(config_dir) {
+        Ok(p) => p,
+        Err(_) => return Vec::new(),
+    };
+    projects
+        .into_iter()
+        .filter_map(|p| {
+            // <original_path>/.claude/ is the lifecycle scope_root.
+            // Only surface dirs that actually exist on disk — a
+            // stale session record for a deleted project shouldn't
+            // expand the writable surface.
+            let claude_dir = PathBuf::from(&p.original_path).join(".claude");
+            if claude_dir.is_dir() {
+                Some(claude_dir)
+            } else {
+                None
+            }
+        })
+        .collect()
+}
+
 /// Take a (Windows-aware) absolute path and decide what lifecycle
 /// action it's eligible for. All mutating ops call this first.
 ///
@@ -528,6 +565,51 @@ mod tests {
         let en = enabled_target_for(&t);
         assert_eq!(dis, user_root.join(".disabled/agents/team/foo.md"));
         assert_eq!(en, user_root.join("agents/team/foo.md"));
+    }
+
+    #[test]
+    fn discover_known_project_roots_returns_only_existing_dot_claude_dirs() {
+        // Seed a fake config dir with two project sanitized slugs.
+        // One project's `.claude/` exists on disk, the other doesn't.
+        // Discovery must surface only the existing one.
+        let tmp = tempfile::tempdir().unwrap();
+        let config = tmp.path().join("claude_home");
+        std::fs::create_dir_all(config.join("projects")).unwrap();
+
+        let alive_repo = tmp.path().join("repo-alive");
+        let alive_claude = alive_repo.join(".claude");
+        std::fs::create_dir_all(&alive_claude).unwrap();
+        let dead_repo = tmp.path().join("repo-dead");
+        // Note: dead_repo does NOT have a `.claude/` directory.
+        std::fs::create_dir_all(&dead_repo).unwrap();
+
+        // Plant transcripts that record each project's cwd.
+        let alive_slug = crate::project_sanitize::sanitize_path(&alive_repo.to_string_lossy());
+        let dead_slug = crate::project_sanitize::sanitize_path(&dead_repo.to_string_lossy());
+        for (slug, cwd) in [
+            (&alive_slug, &alive_repo),
+            (&dead_slug, &dead_repo),
+        ] {
+            let dir = config.join("projects").join(slug);
+            std::fs::create_dir_all(&dir).unwrap();
+            let session = dir.join("S.jsonl");
+            std::fs::write(
+                &session,
+                format!(
+                    r#"{{"type":"user","timestamp":"2026-04-10T10:00:00Z","cwd":"{}","sessionId":"S","message":{{"role":"user","content":"hi"}}}}
+"#,
+                    cwd.to_string_lossy()
+                ),
+            )
+            .unwrap();
+        }
+
+        let discovered = discover_known_project_roots(&config);
+        assert!(discovered.contains(&alive_claude), "alive project surfaces");
+        assert!(
+            !discovered.iter().any(|p| p.starts_with(&dead_repo)),
+            "dead project (no .claude) must NOT surface"
+        );
     }
 
     #[test]
