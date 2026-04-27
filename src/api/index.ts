@@ -12,6 +12,7 @@ import { keyApi } from "./key";
 import { activityApi } from "./activity";
 import { configApi } from "./config";
 import { pricingApi } from "./pricing";
+import { artifactUsageApi } from "./artifact-usage";
 
 export const api = {
   ...accountApi,
@@ -23,4 +24,5 @@ export const api = {
   ...activityApi,
   ...configApi,
   ...pricingApi,
+  ...artifactUsageApi,
 };
