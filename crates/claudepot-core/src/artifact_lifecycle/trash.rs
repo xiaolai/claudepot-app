@@ -1,0 +1,554 @@
+//! Trash + restore + recover + forget + purge.
+//!
+//! Two-phase staging guards against torn writes:
+//!
+//!   1. Stage: create `<trash_root>/<uuid>.staging/payload/<basename>`
+//!   2. Manifest: write `<trash_root>/<uuid>.staging/manifest.json`
+//!   3. Source: remove the original artifact
+//!   4. Commit:  rename `<uuid>.staging/` → `<uuid>/` (atomic)
+//!
+//! A crash anywhere up to step 4 leaves the staging dir behind; the
+//! next listing classifies it as `AbandonedStaging` and the user can
+//! Recover or Forget it.
+//!
+//! Cross-volume sources (source on a different filesystem from
+//! `~/.claudepot/trash/`) substitute copy-and-verify for the
+//! payload step. The protocol is identical otherwise.
+
+use crate::artifact_lifecycle::error::{LifecycleError, RefuseReason, Result};
+use crate::artifact_lifecycle::paths::{
+    enabled_target_for, ActiveRoots, ArtifactKind, PayloadKind, Scope, Trackable,
+};
+use chrono::Utc;
+use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
+use std::path::{Path, PathBuf};
+use uuid::Uuid;
+
+/// JSON-stable manifest written into every trash entry.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TrashManifest {
+    pub version: u32,
+    pub id: String,
+    pub trashed_at_ms: i64,
+    pub scope: Scope,
+    pub scope_root: PathBuf,
+    pub kind: ArtifactKind,
+    pub relative_path: String,
+    pub original_path: PathBuf,
+    pub source_basename: String,
+    pub payload_kind: PayloadKind,
+    pub byte_count: u64,
+    pub sha256: Option<String>,
+}
+
+const MANIFEST_VERSION: u32 = 1;
+
+/// Health status surfaced for each trash entry by `list_trash`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+#[non_exhaustive]
+pub enum TrashState {
+    Healthy,
+    MissingManifest,
+    MissingPayload,
+    OrphanPayload,
+    AbandonedStaging,
+}
+
+impl TrashState {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Healthy => "healthy",
+            Self::MissingManifest => "missing_manifest",
+            Self::MissingPayload => "missing_payload",
+            Self::OrphanPayload => "orphan_payload",
+            Self::AbandonedStaging => "abandoned_staging",
+        }
+    }
+}
+
+/// One row returned by `list_trash`. `manifest` is `None` for
+/// entries whose state precludes parsing (MissingManifest /
+/// AbandonedStaging without a written manifest).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TrashEntry {
+    pub id: String,
+    pub entry_dir: PathBuf,
+    pub state: TrashState,
+    pub manifest: Option<TrashManifest>,
+    /// Wall-clock ms of the directory's mtime — used as a fallback
+    /// "when was this trashed" when the manifest is missing/corrupt.
+    pub directory_mtime_ms: Option<i64>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RestoredArtifact {
+    pub id: String,
+    pub final_path: PathBuf,
+}
+
+/// Trash an artifact: source must be the active path (not a
+/// `.disabled/` entry). The Trackable already names the canonical
+/// triple; we read it back from there.
+pub fn trash_at(
+    trackable: &Trackable,
+    trash_root: &Path,
+    _roots: &ActiveRoots,
+) -> Result<TrashEntry> {
+    if trackable.already_disabled {
+        // Trashing a disabled artifact is allowed — we still trash
+        // the disabled-on-disk path. Use the disabled location as
+        // the source.
+        return trash_from_path(
+            trackable,
+            &crate::artifact_lifecycle::paths::disabled_target_for(trackable),
+            trash_root,
+        );
+    }
+    let source = enabled_target_for(trackable);
+    trash_from_path(trackable, &source, trash_root)
+}
+
+fn trash_from_path(
+    trackable: &Trackable,
+    source: &Path,
+    trash_root: &Path,
+) -> Result<TrashEntry> {
+    if !source.exists() {
+        return Err(LifecycleError::SourceMissing(source.to_path_buf()));
+    }
+    let id = Uuid::new_v4().to_string();
+    std::fs::create_dir_all(trash_root).map_err(LifecycleError::io("create trash root"))?;
+
+    let staging = trash_root.join(format!("{id}.staging"));
+    let committed = trash_root.join(&id);
+    std::fs::create_dir_all(&staging).map_err(LifecycleError::io("create staging dir"))?;
+
+    let basename = source
+        .file_name()
+        .map(|s| s.to_string_lossy().into_owned())
+        .ok_or_else(|| LifecycleError::Refused(RefuseReason::WrongKind {
+            path: source.to_path_buf(),
+        }))?;
+
+    let payload_dir = staging.join("payload");
+    std::fs::create_dir_all(&payload_dir).map_err(LifecycleError::io("create payload dir"))?;
+    let payload_target = payload_dir.join(&basename);
+
+    // Step 2: move (or copy) the artifact into staging payload.
+    move_or_copy(source, &payload_target, trackable.payload_kind)?;
+
+    // Compute byte_count + sha256 from the staged payload (so the
+    // manifest reflects what we actually wrote).
+    let (byte_count, sha) = hash_payload(&payload_target, trackable.payload_kind)?;
+
+    let manifest = TrashManifest {
+        version: MANIFEST_VERSION,
+        id: id.clone(),
+        trashed_at_ms: Utc::now().timestamp_millis(),
+        scope: trackable.scope,
+        scope_root: trackable.scope_root.clone(),
+        kind: trackable.kind,
+        relative_path: trackable.relative_path.clone(),
+        original_path: source.to_path_buf(),
+        source_basename: basename,
+        payload_kind: trackable.payload_kind,
+        byte_count,
+        sha256: sha,
+    };
+
+    // Step 3: write manifest atomically (tempfile + rename).
+    write_manifest_atomic(&staging, &manifest)?;
+
+    // Step 4: remove source if we copied (move_or_copy already
+    // removed for a same-volume rename). For copy paths, the source
+    // still exists.
+    if source.exists() {
+        remove_source(source, trackable.payload_kind)?;
+    }
+
+    // Step 5: commit-rename staging → committed.
+    std::fs::rename(&staging, &committed).map_err(LifecycleError::io("commit trash entry"))?;
+
+    Ok(TrashEntry {
+        id,
+        entry_dir: committed,
+        state: TrashState::Healthy,
+        manifest: Some(manifest),
+        directory_mtime_ms: None,
+    })
+}
+
+/// Restore a `Healthy` trash entry to its original location.
+pub fn restore_at(
+    trash_root: &Path,
+    trash_id: &str,
+    on_conflict: super::disable::OnConflict,
+) -> Result<RestoredArtifact> {
+    let entry = read_one(trash_root, trash_id)?;
+    if entry.state != TrashState::Healthy {
+        return Err(LifecycleError::WrongTrashState {
+            state: entry.state.as_str(),
+            action: "restore",
+        });
+    }
+    let manifest = entry.manifest.as_ref().expect("Healthy implies manifest");
+    if !manifest.scope_root.exists() {
+        return Err(LifecycleError::ScopeRootMissing(manifest.scope_root.clone()));
+    }
+    let target = super::disable::resolve_collision_pub(&manifest.original_path, on_conflict)?;
+    if let Some(parent) = target.parent() {
+        std::fs::create_dir_all(parent).map_err(LifecycleError::io("create restore parent"))?;
+    }
+    let payload_src = entry
+        .entry_dir
+        .join("payload")
+        .join(&manifest.source_basename);
+    move_or_copy(&payload_src, &target, manifest.payload_kind)?;
+    // After restore we drop the trash entry.
+    std::fs::remove_dir_all(&entry.entry_dir)
+        .map_err(LifecycleError::io("drop restored trash entry"))?;
+    Ok(RestoredArtifact {
+        id: trash_id.to_string(),
+        final_path: target,
+    })
+}
+
+/// Recover a `MissingManifest` or `AbandonedStaging` entry by
+/// promoting it to a synthetic manifest then performing the restore.
+/// The user has confirmed the target path and kind via UI dialog.
+pub fn recover_at(
+    trash_root: &Path,
+    trash_id: &str,
+    confirmed_target: &Path,
+    confirmed_kind: ArtifactKind,
+    on_conflict: super::disable::OnConflict,
+) -> Result<RestoredArtifact> {
+    let entry = read_one(trash_root, trash_id)?;
+    match entry.state {
+        TrashState::MissingManifest | TrashState::AbandonedStaging => {}
+        other => {
+            return Err(LifecycleError::WrongTrashState {
+                state: other.as_str(),
+                action: "recover",
+            })
+        }
+    }
+
+    // Promote AbandonedStaging to a "regular" entry by renaming.
+    let entry_dir = if entry.entry_dir.extension().and_then(|s| s.to_str()) == Some("staging") {
+        let promoted = trash_root.join(trash_id);
+        std::fs::rename(&entry.entry_dir, &promoted)
+            .map_err(LifecycleError::io("promote staging"))?;
+        promoted
+    } else {
+        entry.entry_dir.clone()
+    };
+
+    let payload_dir = entry_dir.join("payload");
+    let mut children: Vec<PathBuf> = std::fs::read_dir(&payload_dir)
+        .map_err(LifecycleError::io("read payload"))?
+        .filter_map(|e| e.ok().map(|d| d.path()))
+        .collect();
+    if children.len() != 1 {
+        return Err(LifecycleError::RecoveryAmbiguous(format!(
+            "payload contains {} entries",
+            children.len()
+        )));
+    }
+    let payload_src = children.remove(0);
+    let basename = payload_src
+        .file_name()
+        .map(|s| s.to_string_lossy().into_owned())
+        .ok_or_else(|| LifecycleError::RecoveryAmbiguous("no basename".into()))?;
+    let payload_kind = if payload_src.is_dir() {
+        PayloadKind::Directory
+    } else {
+        PayloadKind::File
+    };
+    let (byte_count, sha) = hash_payload(&payload_src, payload_kind)?;
+
+    let manifest = TrashManifest {
+        version: MANIFEST_VERSION,
+        id: trash_id.to_string(),
+        trashed_at_ms: entry.directory_mtime_ms.unwrap_or_else(|| Utc::now().timestamp_millis()),
+        scope: Scope::User, // unknown — UI ownership; the confirmed_target gives us truth
+        scope_root: confirmed_target
+            .parent()
+            .map(Path::to_path_buf)
+            .unwrap_or_else(|| confirmed_target.to_path_buf()),
+        kind: confirmed_kind,
+        relative_path: basename.clone(),
+        original_path: confirmed_target.to_path_buf(),
+        source_basename: basename,
+        payload_kind,
+        byte_count,
+        sha256: sha,
+    };
+    write_manifest_atomic(&entry_dir, &manifest)?;
+
+    // Now restore from the synthesized manifest.
+    restore_at(trash_root, trash_id, on_conflict)
+}
+
+/// Forget a trash entry (used for MissingPayload, OrphanPayload, or
+/// last-resort cleanup of any entry).
+pub fn forget_at(trash_root: &Path, trash_id: &str) -> Result<()> {
+    let dir_normal = trash_root.join(trash_id);
+    let dir_staging = trash_root.join(format!("{trash_id}.staging"));
+    let dir = if dir_normal.exists() {
+        dir_normal
+    } else if dir_staging.exists() {
+        dir_staging
+    } else {
+        return Err(LifecycleError::TrashEntryNotFound(trash_id.to_string()));
+    };
+    std::fs::remove_dir_all(&dir).map_err(LifecycleError::io("forget trash entry"))?;
+    Ok(())
+}
+
+/// Purge entries older than `older_than_days`. Only `Healthy` entries
+/// participate — corrupt entries stay until manually forgotten so the
+/// user can investigate.
+pub fn purge_older_than(trash_root: &Path, older_than_days: u32) -> Result<u32> {
+    if !trash_root.exists() {
+        return Ok(0);
+    }
+    let cutoff = Utc::now().timestamp_millis() - (older_than_days as i64) * 86_400_000;
+    let mut purged = 0u32;
+    let entries = list_at(trash_root)?;
+    for entry in entries {
+        if entry.state != TrashState::Healthy {
+            continue;
+        }
+        let ts = entry
+            .manifest
+            .as_ref()
+            .map(|m| m.trashed_at_ms)
+            .unwrap_or(0);
+        if ts < cutoff {
+            std::fs::remove_dir_all(&entry.entry_dir)
+                .map_err(LifecycleError::io("purge trash entry"))?;
+            purged += 1;
+        }
+    }
+    Ok(purged)
+}
+
+/// Walk `trash_root`, return one row per entry with its state.
+pub fn list_at(trash_root: &Path) -> Result<Vec<TrashEntry>> {
+    if !trash_root.exists() {
+        return Ok(Vec::new());
+    }
+    let mut out = Vec::new();
+    for entry in std::fs::read_dir(trash_root).map_err(LifecycleError::io("read trash root"))? {
+        let entry = entry.map_err(LifecycleError::io("read trash entry"))?;
+        let path = entry.path();
+        if !path.is_dir() {
+            continue;
+        }
+        let name = entry.file_name().to_string_lossy().into_owned();
+        if name.starts_with('.') {
+            // Skip hidden files (e.g., .DS_Store, future locks).
+            continue;
+        }
+        out.push(classify_entry(path, &name));
+    }
+    Ok(out)
+}
+
+fn read_one(trash_root: &Path, trash_id: &str) -> Result<TrashEntry> {
+    let normal = trash_root.join(trash_id);
+    let staging = trash_root.join(format!("{trash_id}.staging"));
+    let (path, name) = if normal.is_dir() {
+        (normal, trash_id.to_string())
+    } else if staging.is_dir() {
+        (staging, format!("{trash_id}.staging"))
+    } else {
+        return Err(LifecycleError::TrashEntryNotFound(trash_id.to_string()));
+    };
+    Ok(classify_entry(path, &name))
+}
+
+fn classify_entry(path: PathBuf, name: &str) -> TrashEntry {
+    let directory_mtime_ms = path
+        .metadata()
+        .ok()
+        .and_then(|m| m.modified().ok())
+        .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+        .map(|d| d.as_millis() as i64);
+
+    if name.ends_with(".staging") {
+        let id = name.strip_suffix(".staging").unwrap_or(name).to_string();
+        return TrashEntry {
+            id,
+            entry_dir: path,
+            state: TrashState::AbandonedStaging,
+            manifest: None,
+            directory_mtime_ms,
+        };
+    }
+
+    let id = name.to_string();
+    let manifest_path = path.join("manifest.json");
+    let payload_dir = path.join("payload");
+
+    let manifest_exists = manifest_path.exists();
+    let payload_exists = payload_dir.exists();
+    let payload_children: Vec<PathBuf> = std::fs::read_dir(&payload_dir)
+        .ok()
+        .map(|it| it.filter_map(|e| e.ok().map(|d| d.path())).collect())
+        .unwrap_or_default();
+
+    let manifest = if manifest_exists {
+        std::fs::read_to_string(&manifest_path)
+            .ok()
+            .and_then(|s| serde_json::from_str::<TrashManifest>(&s).ok())
+    } else {
+        None
+    };
+
+    let state = if !payload_exists {
+        TrashState::MissingPayload
+    } else if !manifest_exists || manifest.is_none() {
+        TrashState::MissingManifest
+    } else if payload_children.len() != 1 {
+        TrashState::OrphanPayload
+    } else {
+        TrashState::Healthy
+    };
+
+    TrashEntry {
+        id,
+        entry_dir: path,
+        state,
+        manifest,
+        directory_mtime_ms,
+    }
+}
+
+fn write_manifest_atomic(staging: &Path, manifest: &TrashManifest) -> Result<()> {
+    let body = serde_json::to_vec_pretty(manifest)
+        .map_err(|e| LifecycleError::io("serialize manifest")(std::io::Error::other(e)))?;
+    let target = staging.join("manifest.json");
+    let tmp = staging.join(".manifest.tmp");
+    std::fs::write(&tmp, &body).map_err(LifecycleError::io("write manifest tmp"))?;
+    std::fs::rename(&tmp, &target).map_err(LifecycleError::io("commit manifest"))?;
+    Ok(())
+}
+
+fn move_or_copy(source: &Path, target: &Path, kind: PayloadKind) -> Result<()> {
+    // Try atomic rename first (same volume).
+    match std::fs::rename(source, target) {
+        Ok(()) => return Ok(()),
+        Err(err) => {
+            // ErrorKind::CrossesDevices is rust 1.85+; older Rusts
+            // surface raw errno 18 / 17 (EXDEV / EXDEV alias).
+            let exdev = err
+                .raw_os_error()
+                .map(|c| c == 18)
+                .unwrap_or(false)
+                || err.kind() == std::io::ErrorKind::Other;
+            if !exdev {
+                return Err(LifecycleError::io("rename to trash")(err));
+            }
+        }
+    }
+    // Fall back to copy.
+    match kind {
+        PayloadKind::File => {
+            std::fs::copy(source, target).map_err(LifecycleError::io("copy file to trash"))?;
+        }
+        PayloadKind::Directory => {
+            copy_dir_recursive(source, target)?;
+        }
+    }
+    Ok(())
+}
+
+fn copy_dir_recursive(source: &Path, target: &Path) -> Result<()> {
+    std::fs::create_dir_all(target).map_err(LifecycleError::io("create copy target"))?;
+    for entry in std::fs::read_dir(source).map_err(LifecycleError::io("read copy source"))? {
+        let entry = entry.map_err(LifecycleError::io("read copy entry"))?;
+        let src = entry.path();
+        let dst = target.join(entry.file_name());
+        let ft = entry
+            .file_type()
+            .map_err(LifecycleError::io("file type during copy"))?;
+        if ft.is_dir() {
+            copy_dir_recursive(&src, &dst)?;
+        } else if ft.is_symlink() {
+            #[cfg(unix)]
+            {
+                let link = std::fs::read_link(&src).map_err(LifecycleError::io("read symlink"))?;
+                std::os::unix::fs::symlink(link, &dst)
+                    .map_err(LifecycleError::io("write symlink"))?;
+            }
+            #[cfg(windows)]
+            {
+                // Windows symlinks need elevation; copy the resolved
+                // file as a fallback. Lossy but trash is recoverable.
+                let resolved =
+                    std::fs::canonicalize(&src).map_err(LifecycleError::io("resolve symlink"))?;
+                if resolved.is_dir() {
+                    copy_dir_recursive(&resolved, &dst)?;
+                } else {
+                    std::fs::copy(&resolved, &dst)
+                        .map_err(LifecycleError::io("copy symlink target"))?;
+                }
+            }
+        } else {
+            std::fs::copy(&src, &dst).map_err(LifecycleError::io("copy file"))?;
+        }
+    }
+    Ok(())
+}
+
+fn remove_source(source: &Path, kind: PayloadKind) -> Result<()> {
+    match kind {
+        PayloadKind::File => std::fs::remove_file(source).map_err(LifecycleError::io("remove source file")),
+        PayloadKind::Directory => {
+            std::fs::remove_dir_all(source).map_err(LifecycleError::io("remove source dir"))
+        }
+    }
+}
+
+fn hash_payload(path: &Path, kind: PayloadKind) -> Result<(u64, Option<String>)> {
+    match kind {
+        PayloadKind::File => {
+            let bytes = std::fs::read(path).map_err(LifecycleError::io("hash file"))?;
+            let mut hasher = Sha256::new();
+            hasher.update(&bytes);
+            Ok((bytes.len() as u64, Some(hex::encode(hasher.finalize()))))
+        }
+        PayloadKind::Directory => {
+            // Directory hashing is expensive and rarely useful; we
+            // record the byte count by walking and skip the digest.
+            let mut total = 0u64;
+            walk_dir(path, &mut |p| {
+                if let Ok(meta) = std::fs::metadata(p) {
+                    total += meta.len();
+                }
+            })?;
+            Ok((total, None))
+        }
+    }
+}
+
+fn walk_dir(root: &Path, f: &mut dyn FnMut(&Path)) -> Result<()> {
+    if root.is_file() {
+        f(root);
+        return Ok(());
+    }
+    for entry in std::fs::read_dir(root).map_err(LifecycleError::io("walk dir"))? {
+        let entry = entry.map_err(LifecycleError::io("walk dir entry"))?;
+        let path = entry.path();
+        if path.is_dir() {
+            walk_dir(&path, f)?;
+        } else {
+            f(&path);
+        }
+    }
+    Ok(())
+}

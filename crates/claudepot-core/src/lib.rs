@@ -4,6 +4,7 @@ pub mod testing;
 pub mod account;
 pub mod account_verification;
 pub mod activity;
+pub mod artifact_lifecycle;
 pub mod artifact_usage;
 pub mod blob;
 pub mod cli_backend;
