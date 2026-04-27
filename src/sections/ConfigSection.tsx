@@ -220,7 +220,7 @@ function EmbeddedStatusStrip({
           color: "var(--fg-muted)",
           fontSize: "var(--fs-xs)",
           cursor: "pointer",
-          borderRadius: "var(--r-sm)",
+          borderRadius: "var(--r-1)",
         }}
       >
         <span>Refresh</span>
@@ -1539,7 +1539,7 @@ function FileRowButton({
         <span
           aria-hidden
           style={{
-            fontFamily: "var(--mono)",
+            fontFamily: "var(--font-mono)",
             fontSize: "var(--fs-2xs)",
             color: "var(--fg-faint)",
           }}
@@ -1615,12 +1615,12 @@ function ScopeBadgeChip({ badge }: { badge: ScopeBadge }) {
       title={badge.full}
       aria-label={badge.full}
       style={{
-        fontFamily: "var(--mono)",
+        fontFamily: "var(--font-mono)",
         fontSize: "var(--fs-2xs)",
         fontWeight: 600,
         lineHeight: "var(--lh-flat)",
         padding: "var(--sp-2) var(--sp-5)",
-        borderRadius: "var(--r-sm)",
+        borderRadius: "var(--r-1)",
         border: "var(--bw-hair) solid var(--line)",
         color: "var(--fg-muted)",
         background: "var(--bg-sunken)",
@@ -1884,10 +1884,10 @@ function IncludedByBanner({
     >
       <Glyph g={NF.link} color="var(--fg-muted)" />
       <span>
-        Loaded via <code style={{ fontFamily: "var(--mono)" }}>@include</code>{" "}
+        Loaded via <code style={{ fontFamily: "var(--font-mono)" }}>@include</code>{" "}
         (depth {depth}) from{" "}
         <code
-          style={{ fontFamily: "var(--mono)" }}
+          style={{ fontFamily: "var(--font-mono)" }}
           title={includedBy}
         >
           {parentName}
@@ -2213,7 +2213,7 @@ function SearchResultsPane({
               style={{
                 fontSize: "var(--fs-2xs)",
                 color: "var(--fg-faint)",
-                fontFamily: "var(--mono)",
+                fontFamily: "var(--font-mono)",
               }}
             >
               :{hit.line_number}
@@ -2222,7 +2222,7 @@ function SearchResultsPane({
           <pre
             style={{
               margin: "var(--sp-3) 0 0 0",
-              fontFamily: "var(--mono)",
+              fontFamily: "var(--font-mono)",
               fontSize: "var(--fs-2xs)",
               color: "var(--fg-muted)",
               whiteSpace: "pre-wrap",

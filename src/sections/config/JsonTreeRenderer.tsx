@@ -46,7 +46,7 @@ export function JsonTreeRenderer({ body }: { body: string }) {
         <pre
           style={{
             margin: 0,
-            fontFamily: "var(--mono)",
+            fontFamily: "var(--font-mono)",
             fontSize: "var(--fs-xs)",
             color: "var(--fg)",
             whiteSpace: "pre-wrap",
@@ -63,7 +63,7 @@ export function JsonTreeRenderer({ body }: { body: string }) {
     <div
       style={{
         padding: "var(--sp-12) var(--sp-16)",
-        fontFamily: "var(--mono)",
+        fontFamily: "var(--font-mono)",
         fontSize: "var(--fs-xs)",
         color: "var(--fg)",
         overflowWrap: "anywhere",

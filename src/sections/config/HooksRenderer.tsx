@@ -135,7 +135,7 @@ export function HooksRenderer({ cwd }: { cwd: string | null }) {
                 margin: 0,
                 fontSize: "var(--fs-sm)",
                 fontWeight: 600,
-                fontFamily: "var(--mono)",
+                fontFamily: "var(--font-mono)",
               }}
             >
               {event}
@@ -177,10 +177,10 @@ export function HooksRenderer({ cwd }: { cwd: string | null }) {
                     color: "var(--fg-muted)",
                   }}
                 >
-                  <span style={{ fontFamily: "var(--mono)" }}>matcher</span>
+                  <span style={{ fontFamily: "var(--font-mono)" }}>matcher</span>
                   <code
                     style={{
-                      fontFamily: "var(--mono)",
+                      fontFamily: "var(--font-mono)",
                       color: "var(--fg)",
                     }}
                   >
@@ -202,7 +202,7 @@ export function HooksRenderer({ cwd }: { cwd: string | null }) {
                 <pre
                   style={{
                     margin: 0,
-                    fontFamily: "var(--mono)",
+                    fontFamily: "var(--font-mono)",
                     fontSize: "var(--fs-xs)",
                     color: "var(--fg)",
                     whiteSpace: "pre-wrap",

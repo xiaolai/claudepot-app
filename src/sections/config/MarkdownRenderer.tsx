@@ -205,7 +205,7 @@ function FrontmatterCard({ entries }: { entries: FrontmatterEntry[] }) {
         background: "var(--bg-sunken)",
         border: "var(--bw-hair) solid var(--line)",
         borderRadius: "var(--r-2)",
-        fontFamily: "var(--mono)",
+        fontFamily: "var(--font-mono)",
         fontSize: "var(--fs-xs)",
       }}
     >

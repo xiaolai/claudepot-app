@@ -5,57 +5,57 @@
 
 /* ---------- clean-orphans modal ---------- */
 
-.clean-modal { width: 560px; max-height: 85vh; overflow-y: auto; }
+.clean-modal { width: var(--modal-width-xl); max-height: 85vh; overflow-y: auto; }
 
 .clean-modal .clean-summary {
-  font-size: 12px;
-  margin: 4px 0 8px;
+  font-size: var(--fs-sm);
+  margin: var(--sp-4) 0 var(--sp-8);
 }
 
 .clean-modal .clean-empty {
-  padding: 16px 0;
+  padding: var(--sp-16) 0;
   text-align: center;
 }
 
 .clean-modal .clean-unreachable {
   display: flex;
   align-items: flex-start;
-  gap: 8px;
-  padding: 8px 12px;
-  margin-bottom: 12px;
-  border-radius: 8px;
+  gap: var(--sp-8);
+  padding: var(--sp-8) var(--sp-12);
+  margin-bottom: var(--sp-12);
+  border-radius: var(--r-3);
   background: color-mix(in srgb, var(--muted) 8%, transparent);
-  border: 0.5px solid var(--border);
+  border: var(--bw-subhair) solid var(--border);
   color: var(--muted);
-  font-size: 12px;
-  line-height: 1.5;
+  font-size: var(--fs-sm);
+  line-height: var(--lh-body);
 }
 .clean-modal .clean-unreachable strong { color: var(--text); }
 
 .clean-orphan-list {
   list-style: none;
   padding: 0;
-  margin: 0 0 10px 0;
-  max-height: 280px;
+  margin: 0 0 var(--sp-10) 0;
+  max-height: var(--list-max-height-sm);
   overflow-y: auto;
-  border: 0.5px solid var(--border);
-  border-radius: 6px;
+  border: var(--bw-subhair) solid var(--border);
+  border-radius: var(--r-2);
 }
 
 .clean-orphan-row {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 8px;
-  padding: 5px 10px;
-  border-bottom: 0.5px solid var(--border);
+  gap: var(--sp-8);
+  padding: var(--sp-5) var(--sp-10);
+  border-bottom: var(--bw-subhair) solid var(--border);
 }
 .clean-orphan-row:last-child { border-bottom: none; }
 
 .clean-orphan-main {
   display: flex;
   align-items: baseline;
-  gap: 10px;
+  gap: var(--sp-10);
   min-width: 0;
   flex: 1;
 }
@@ -63,7 +63,7 @@
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  font-size: 12px;
+  font-size: var(--fs-sm);
   flex: 1;
   min-width: 0;
 }
@@ -73,35 +73,35 @@
 }
 
 .clean-modal .clean-disclaimer {
-  margin-top: 8px;
+  margin-top: var(--sp-8);
 }
 
 .clean-modal .clean-running {
-  padding: 16px 0 8px;
+  padding: var(--sp-16) 0 var(--sp-8);
   text-align: center;
 }
-.clean-modal .clean-running p { margin: 4px 0; }
+.clean-modal .clean-running p { margin: var(--sp-4) 0; }
 .clean-progress-track {
-  height: 6px;
-  margin: 12px auto;
-  max-width: 320px;
+  height: var(--sp-6);
+  margin: var(--sp-12) auto;
+  max-width: var(--progress-track-max);
   background: color-mix(in srgb, var(--muted) 15%, transparent);
-  border-radius: 999px;
+  border-radius: var(--r-pill);
   overflow: hidden;
 }
 .clean-progress-fill {
   height: 100%;
   background: var(--accent);
-  border-radius: 999px;
-  transition: width 180ms ease;
+  border-radius: var(--r-pill);
+  transition: width var(--dur-slow) var(--ease-out);
 }
 .clean-spinner {
-  width: 18px;
-  height: 18px;
-  margin: 12px auto;
-  border: 2px solid color-mix(in srgb, var(--muted) 25%, transparent);
+  width: var(--sp-18);
+  height: var(--sp-18);
+  margin: var(--sp-12) auto;
+  border: var(--bw-focus) solid color-mix(in srgb, var(--muted) 25%, transparent);
   border-top-color: var(--accent);
-  border-radius: 999px;
+  border-radius: var(--r-pill);
   animation: clean-spin 0.8s linear infinite;
 }
 @keyframes clean-spin {
@@ -115,41 +115,41 @@
 .clean-modal .clean-error {
   display: flex;
   align-items: flex-start;
-  gap: 8px;
-  padding: 10px 12px;
-  border-radius: 8px;
+  gap: var(--sp-8);
+  padding: var(--sp-10) var(--sp-12);
+  border-radius: var(--r-3);
   background: var(--bad-weak);
   color: var(--bad);
 }
-.clean-modal .clean-error strong { display: block; margin-bottom: 4px; }
-.clean-modal .clean-error p { margin: 2px 0; }
+.clean-modal .clean-error strong { display: block; margin-bottom: var(--sp-4); }
+.clean-modal .clean-error p { margin: var(--sp-2) 0; }
 
 .clean-modal .clean-result-list {
-  margin: 8px 0;
-  padding-left: 18px;
-  font-size: 12px;
+  margin: var(--sp-8) 0;
+  padding-left: var(--sp-18);
+  font-size: var(--fs-sm);
 }
-.clean-modal .clean-result-list li { margin: 2px 0; }
+.clean-modal .clean-result-list li { margin: var(--sp-2) 0; }
 
 .clean-modal .clean-snapshots {
-  margin-top: 12px;
-  padding-top: 12px;
-  border-top: 0.5px solid var(--border);
+  margin-top: var(--sp-12);
+  padding-top: var(--sp-12);
+  border-top: var(--bw-subhair) solid var(--border);
 }
 .clean-modal .clean-snapshots .field-label {
-  margin-bottom: 2px;
+  margin-bottom: var(--sp-2);
 }
 .clean-snapshot-list {
   list-style: none;
   padding: 0;
-  margin: 4px 0 0 0;
+  margin: var(--sp-4) 0 0 0;
 }
 .clean-snapshot-list li {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 8px;
-  padding: 4px 0;
+  gap: var(--sp-8);
+  padding: var(--sp-4) 0;
 }
 .clean-snapshot-list .mono {
   overflow: hidden;
@@ -168,29 +168,31 @@
   font: inherit;
   cursor: default;
   text-decoration: underline;
-  text-underline-offset: 2px;
+  text-underline-offset: var(--sp-2);
 }
 .link-btn:focus-visible {
-  outline: 2px solid var(--accent);
-  outline-offset: 2px;
-  border-radius: 2px;
+  outline: var(--bw-focus) solid var(--accent);
+  outline-offset: var(--focus-outline-offset);
+  border-radius: var(--sp-2);
 }
 
 .op-terminal-detail {
   list-style: none;
-  margin: 6px 0 0;
+  margin: var(--sp-6) 0 0;
   padding: 0;
   display: grid;
-  gap: 3px;
-  font-size: 12px;
+  gap: var(--sp-3);
+  font-size: var(--fs-sm);
   color: var(--text);
 }
 
-.op-terminal-detail code.mono { font-size: 11px; }
+.op-terminal-detail code.mono { font-size: var(--fs-xs); }
 
+/* `--warn` and `--warn-weak` are always defined per theme; the earlier
+ * fallback chain (rgba/hex literals) was dead code. */
 .pending-journals-banner.stale {
-  background: var(--warn-weak, rgba(230, 160, 30, 0.15));
-  border-color: var(--warn, #e6a01e);
-  color: var(--warn, inherit);
+  background: var(--warn-weak);
+  border-color: var(--warn);
+  color: var(--warn);
 }
 

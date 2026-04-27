@@ -385,7 +385,7 @@ function FilterRail({ filters, onChange }: FilterRailProps) {
       style={{
         width: 240,
         flexShrink: 0,
-        borderRight: "1px solid var(--border)",
+        borderRight: "var(--bw-subhair) solid var(--border)",
         padding: "var(--sp-16)",
         display: "flex",
         flexDirection: "column",
@@ -532,7 +532,7 @@ function Header({
         alignItems: "center",
         justifyContent: "space-between",
         padding: "var(--sp-12) var(--sp-16)",
-        borderBottom: "1px solid var(--border)",
+        borderBottom: "var(--bw-subhair) solid var(--border)",
         gap: "var(--sp-12)",
       }}
     >
@@ -660,7 +660,7 @@ function CardRow({ card, isNew, onClick }: CardRowProps) {
       onClick={onClick}
       style={{
         padding: "var(--sp-12) var(--sp-16)",
-        borderBottom: "1px solid var(--border)",
+        borderBottom: "var(--bw-subhair) solid var(--border)",
         cursor: "pointer",
         display: "flex",
         gap: "var(--sp-12)",
@@ -731,7 +731,7 @@ function CardRow({ card, isNew, onClick }: CardRowProps) {
               padding: "var(--sp-4) var(--sp-8)",
               background: "var(--bg-elev)",
               borderLeft: "2px solid var(--accent)",
-              borderRadius: "var(--radius-sm)",
+              borderRadius: "var(--r-1)",
             }}
           >
             ↳ {card.help.rendered}
@@ -785,7 +785,7 @@ function SeverityChip({ severity }: { severity: SeverityLabel }) {
         width: 60,
         flexShrink: 0,
         padding: "var(--sp-2) var(--sp-6)",
-        borderRadius: "var(--radius-sm)",
+        borderRadius: "var(--r-1)",
         background: bg,
         color: fg,
         fontSize: 10,
@@ -806,9 +806,9 @@ function SeverityChip({ severity }: { severity: SeverityLabel }) {
 function severityColors(s: SeverityLabel): { bg: string; fg: string } {
   switch (s) {
     case "ERROR":
-      return { bg: "var(--danger-bg, rgba(220, 38, 38, 0.15))", fg: "var(--danger, #dc2626)" };
+      return { bg: "var(--bad-weak)", fg: "var(--danger)" };
     case "WARN":
-      return { bg: "var(--warn-bg, rgba(217, 119, 6, 0.15))", fg: "var(--warn, #d97706)" };
+      return { bg: "var(--warn-weak)", fg: "var(--warn)" };
     case "NOTICE":
       return { bg: "var(--bg-elev)", fg: "var(--fg)" };
     case "INFO":
@@ -866,8 +866,8 @@ function rangeBucket(sinceMs: number): number {
 const inputStyle: React.CSSProperties = {
   fontSize: "var(--fs-sm)",
   padding: "var(--sp-4) var(--sp-8)",
-  border: "1px solid var(--border)",
-  borderRadius: "var(--radius-sm)",
+  border: "var(--bw-subhair) solid var(--border)",
+  borderRadius: "var(--r-1)",
   background: "var(--bg)",
   color: "var(--fg)",
   fontFamily: "inherit",
@@ -881,8 +881,8 @@ const selectStyle: React.CSSProperties = {
 const btnStyle: React.CSSProperties = {
   fontSize: "var(--fs-sm)",
   padding: "var(--sp-4) var(--sp-12)",
-  border: "1px solid var(--border)",
-  borderRadius: "var(--radius-sm)",
+  border: "var(--bw-subhair) solid var(--border)",
+  borderRadius: "var(--r-1)",
   background: "var(--bg)",
   color: "var(--fg)",
   cursor: "pointer",

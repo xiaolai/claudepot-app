@@ -155,7 +155,7 @@ export function RemoveProjectModal({
                 className="selectable"
                 style={{
                   fontSize: "var(--fs-sm)",
-                  color: "var(--fg-base)",
+                  color: "var(--fg)",
                   wordBreak: "break-all",
                 }}
               >
@@ -169,7 +169,7 @@ export function RemoveProjectModal({
                 className="selectable"
                 style={{
                   fontSize: "var(--fs-sm)",
-                  color: "var(--fg-base)",
+                  color: "var(--fg)",
                   wordBreak: "break-all",
                 }}
               >
@@ -212,14 +212,14 @@ export function RemoveProjectModal({
                   fontSize: "var(--fs-xs)",
                   color: "var(--fg-muted)",
                   textTransform: "uppercase",
-                  letterSpacing: "var(--tracking-wide)",
+                  letterSpacing: "var(--ls-wide)",
                 }}
               >
                 Type{" "}
                 <code
                   className="selectable"
                   style={{
-                    color: "var(--fg-base)",
+                    color: "var(--fg)",
                     // Slugs are case-sensitive on disk. The
                     // surrounding label is `text-transform:
                     // uppercase` for visual consistency with the
@@ -240,7 +240,7 @@ export function RemoveProjectModal({
                 onChange={(e) => setConfirmInput(e.target.value)}
                 aria-label="Type project slug to confirm removal"
                 autoFocus
-                style={{ fontFamily: "var(--ff-mono)" }}
+                style={{ fontFamily: "var(--font-mono)" }}
               />
             </div>
           </>
@@ -298,7 +298,7 @@ function Block({
           fontSize: "var(--fs-xs)",
           color: "var(--fg-muted)",
           textTransform: "uppercase",
-          letterSpacing: "var(--tracking-wide)",
+          letterSpacing: "var(--ls-wide)",
         }}
       >
         {label}

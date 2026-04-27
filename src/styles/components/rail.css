@@ -7,13 +7,13 @@
 
 .section-rail {
   flex: 0 0 4%;
-  min-width: 44px;
-  max-width: 52px;
+  min-width: var(--rail-min-width);
+  max-width: var(--rail-max-width);
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 4px;
-  padding: 12px 0 8px;
+  gap: var(--sp-4);
+  padding: var(--sp-12) 0 var(--sp-8);
   background: var(--chrome);
   /* No right border — rail and sidebar share --chrome and should read
      as one continuous surface. The only visible vertical separator in
@@ -26,8 +26,8 @@
    box around it. Font-baseline offset then becomes invisible because
    there's no "dead space" in the indicator to reveal it. */
 .section-rail-item {
-  width: 32px;
-  height: 32px;
+  width: var(--sp-32);
+  height: var(--sp-32);
   display: grid;
   place-items: center;
   padding: 0;
@@ -50,15 +50,16 @@
    from <Icon size={18}> override font-size — we don't care, our grid
    sizing wins. */
 .section-rail-item .icon {
-  font-size: 18px !important;
-  line-height: 1 !important;
-  width: 24px !important;
-  height: 24px !important;
+  font-size: var(--fs-lg) !important;
+  line-height: var(--lh-flat) !important;
+  width: var(--sp-24) !important;
+  height: var(--sp-24) !important;
   display: grid !important;
   place-items: center !important;
-  border-radius: 6px;
+  border-radius: var(--r-2);
   vertical-align: 0;
-  transition: background 0.1s ease, color 0.1s ease;
+  transition: background var(--dur-hover) var(--ease-out),
+              color var(--dur-hover) var(--ease-out);
 }
 
 .section-rail-item:hover .icon {
@@ -72,33 +73,33 @@
 }
 
 .section-rail-item:focus-visible .icon {
-  outline: 1px solid color-mix(in srgb, var(--accent) 55%, transparent);
-  outline-offset: 1px;
+  outline: var(--bw-hair) solid color-mix(in srgb, var(--accent) 55%, transparent);
+  outline-offset: var(--focus-outline-offset-flush);
 }
 
 /* ---------- section submenu (popover) ---------- */
 
 .section-submenu {
   position: fixed;
-  min-width: 180px;
-  padding: 4px;
+  min-width: var(--menu-min-width);
+  padding: var(--sp-4);
   background: var(--surface);
-  border: 0.5px solid var(--border);
-  border-radius: 8px;
-  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.15);
-  z-index: 100;
+  border: var(--bw-subhair) solid var(--border);
+  border-radius: var(--r-3);
+  box-shadow: var(--shadow-popover);
+  z-index: var(--z-popover);
 }
 
 .section-submenu-item {
   display: block;
   width: 100%;
-  padding: 6px 10px;
+  padding: var(--sp-6) var(--sp-10);
   text-align: left;
   background: transparent;
   border: 0;
-  border-radius: 4px;
+  border-radius: var(--r-1);
   color: var(--text);
-  font-size: 12px;
+  font-size: var(--fs-sm);
   cursor: default;
 }
 

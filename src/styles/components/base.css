@@ -16,13 +16,19 @@
   }
 }
 
-/* ---------- global resets ---------- */
+/* ---------- global resets ----------
+   The body's font, color, background, and rendering hints live in
+   tokens.css alongside the rest of the design surface. This shard
+   only adds the app-shell behaviors layered on top: a default cursor
+   (Tauri webview drives a desktop UI, so no text-cursor by default)
+   and user-select disabled globally. `.selectable` opts a node back
+   into text selection. */
 
 * {
   box-sizing: border-box;
 }
 
-html, body, #root {
+html, #root {
   margin: 0;
   padding: 0;
   height: 100%;
@@ -31,14 +37,6 @@ html, body, #root {
 }
 
 body {
-  font-family: var(--font);
-  font-size: 11px;
-  line-height: 1.4;
-  -webkit-font-smoothing: antialiased;
-  -moz-osx-font-smoothing: grayscale;
-  text-rendering: optimizeLegibility;
-  font-feature-settings: "kern", "liga", "calt";
-  font-variant-numeric: tabular-nums;
   cursor: default;
   -webkit-user-select: none;
   user-select: none;
@@ -80,7 +78,7 @@ body {
 .muted  { color: var(--muted); }
 .mono   {
   font-family: var(--font-mono);
-  font-size: 11px;
+  font-size: var(--fs-xs);
 }
 
 /* ---------- app layout: sidebar + content ---------- */
@@ -92,19 +90,19 @@ body {
   position: relative;
   /* Hairline along the top of the webview — reads as the native title
      bar's bottom border, anchoring the chrome visually below it. */
-  border-top: 0.5px solid var(--border);
+  border-top: var(--bw-subhair) solid var(--border);
 }
 
 /* ---------- footer (content pane bottom) ---------- */
 
 .content-footer {
   margin-top: auto;
-  padding-top: 12px;
-  border-top: 0.5px solid var(--border);
+  padding-top: var(--sp-12);
+  border-top: var(--bw-subhair) solid var(--border);
   display: flex;
   align-items: center;
-  gap: 8px;
-  font-size: 11px;
+  gap: var(--sp-8);
+  font-size: var(--fs-xs);
 }
 
 /* ---------- reduced motion ---------- */
@@ -128,13 +126,13 @@ body {
   .sidebar {
     width: 100%;
     min-width: unset;
-    max-height: 200px;
+    max-height: var(--sidebar-collapsed-max-h);
     border-right: none;
-    border-bottom: 0.5px solid var(--border);
-    padding-top: 16px;
+    border-bottom: var(--bw-subhair) solid var(--border);
+    padding-top: var(--sp-16);
   }
   .content {
-    padding-top: 16px;
+    padding-top: var(--sp-16);
   }
   .detail-actions {
     flex-wrap: wrap;

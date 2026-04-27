@@ -8,7 +8,7 @@
 .account-detail-pane {
   display: flex;
   flex-direction: column;
-  gap: 16px;
+  gap: var(--sp-16);
   flex: 1;
 }
 
@@ -16,68 +16,68 @@
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 12px;
+  gap: var(--sp-12);
 }
 
 .detail-email {
-  font-size: 14px;
+  font-size: var(--fs-md);
   font-weight: 600;
   margin: 0;
 }
 
 .detail-meta {
-  font-size: 11px;
+  font-size: var(--fs-xs);
   color: var(--muted);
-  margin-top: 2px;
+  margin-top: var(--sp-2);
 }
 
 .detail-badges {
   display: flex;
-  gap: 6px;
+  gap: var(--sp-6);
   align-items: center;
 }
 
 .detail-actions {
   display: flex;
-  gap: 8px;
+  gap: var(--sp-8);
 }
-/* Inline button icons: 14px per design system */
+/* Inline button icons: --fs-md per design system */
 .detail-actions .icon,
 .project-detail-actions .icon {
-  font-size: 14px;
+  font-size: var(--fs-md);
 }
 
 .detail-section {
-  padding: 12px 0;
-  border-top: 0.5px solid var(--border);
+  padding: var(--sp-12) 0;
+  border-top: var(--bw-subhair) solid var(--border);
 }
 
 .detail-section-title {
-  font-size: 11px;
+  font-size: var(--fs-xs);
   font-weight: 500;
   text-transform: none;
   letter-spacing: 0;
   color: var(--muted);
-  margin: 0 0 8px;
+  margin: 0 0 var(--sp-8);
 }
 
 /* ---------- collapsible section (P1.3) ---------- */
 
 .collapsible-section {
   padding: 0;
-  border-top: 0.5px solid var(--border);
+  border-top: var(--bw-subhair) solid var(--border);
 }
 
 .collapsible-section-toggle {
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: var(--sp-6);
   width: 100%;
-  padding: 8px 0;
+  padding: var(--sp-8) 0;
   background: transparent;
   border: none;
   color: var(--muted);
-  font-size: 11px;
+  font-size: var(--fs-xs);
   font-weight: 500;
   text-transform: none;
   letter-spacing: 0;
@@ -97,7 +97,7 @@
 }
 
 .collapsible-chevron {
-  transition: transform 0.15s ease;
+  transition: transform var(--dur-base) var(--ease-out);
 }
 
 .collapsible-chevron.open {
@@ -113,7 +113,7 @@
 }
 
 .collapsible-section-body {
-  padding: 0 0 8px;
+  padding: 0 0 var(--sp-8);
 }
 
 /* ---------- detail grid ---------- */
@@ -121,8 +121,8 @@
 .detail-grid {
   display: grid;
   grid-template-columns: auto 1fr;
-  gap: 4px 16px;
-  font-size: 12px;
+  gap: var(--sp-4) var(--sp-16);
+  font-size: var(--fs-sm);
   margin: 0;
 }
 
@@ -130,10 +130,10 @@
   color: var(--muted);
   font-weight: 400;
   text-transform: none;
-  font-size: 12px;
+  font-size: var(--fs-sm);
   letter-spacing: 0;
   text-align: right;
-  padding-top: 1px;
+  padding-top: var(--sp-px);
 }
 
 .detail-grid dd {
@@ -143,9 +143,9 @@
 /* ---------- slot badges ---------- */
 
 .slot-badge {
-  font-size: 10px;
-  padding: 1px 6px;
-  border-radius: 999px;
+  font-size: var(--fs-2xs);
+  padding: var(--sp-1) var(--sp-6);
+  border-radius: var(--r-pill);
   font-weight: 600;
   text-transform: uppercase;
   letter-spacing: 0.04em;
@@ -185,9 +185,9 @@
 /* ---------- token badge ---------- */
 
 .token-badge {
-  font-size: 10px;
-  padding: 1px 6px;
-  border-radius: 999px;
+  font-size: var(--fs-2xs);
+  padding: var(--sp-1) var(--sp-6);
+  border-radius: var(--r-pill);
   font-weight: 600;
 }
 
@@ -209,8 +209,8 @@
 /* ---------- status dot (sidebar) ---------- */
 
 .status-dot {
-  width: 7px;
-  height: 7px;
+  width: var(--sp-7);
+  height: var(--sp-7);
   border-radius: 50%;
   flex-shrink: 0;
 }
@@ -235,7 +235,7 @@
   color: var(--muted);
 }
 .verify-note {
-  font-size: 10px;
+  font-size: var(--fs-2xs);
   font-style: italic;
 }
 

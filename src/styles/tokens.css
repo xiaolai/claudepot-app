@@ -30,6 +30,7 @@
   --ok:     oklch(62% 0.10 150);
   --warn:   oklch(72% 0.12 80);
   --danger: oklch(60% 0.14 25);
+  --info:   oklch(60% 0.10 220);  /* informational chips, dashboard meta */
 
   /* ── "On color" text — white in both themes, for use as the
         foreground on filled accent / danger surfaces where the
@@ -45,10 +46,13 @@
 
   /* ── Pixel scale (every raw px value the UI uses) ─────────
         Naming: `--sp-N` where N is the px value. Components
-        reference these instead of inline numeric literals. */
+        reference these instead of inline numeric literals.
+        `--sp-px` is the canonical 1px (kept for the times the
+        intent is "one device pixel"); `--sp-1` is the same value
+        on the numeric grid for callers that want positional
+        consistency with `--sp-2`/`--sp-3`/etc. */
   --sp-0:    0;
   --sp-px:   1px;
-  --sp-half: 2px;
   --sp-1:    1px;
   --sp-2:    2px;
   --sp-3:    3px;
@@ -79,6 +83,7 @@
   --sp-44:   44px;
   --sp-48:   48px;
   --sp-50:   50px;
+  --sp-56:   56px;
   --sp-60:   60px;
   --sp-64:   64px;
   --sp-72:   72px;
@@ -115,7 +120,9 @@
   /* ── Line heights ───────────────────────────────────────── */
   --lh-flat:  1;      /* icons, badges, glyph cells */
   --lh-tight: 1.25;
-  --lh-body:  1.5;
+  --lh-base:  1.4;    /* shipping body line-height */
+  --lh-body:  1.5;    /* paragraph reading (markdown body, etc.) */
+  --lh-code:  1.5;    /* fenced code + standalone code preview */
   --lh-loose: 1.7;
 
   /* ── Letter spacing ─────────────────────────────────────── */
@@ -126,16 +133,20 @@
 
   /* ── Radii (small — mono reads flatter) ─────────────────── */
   --r-0:    0;
-  --r-1:    3px;
-  --r-2:    6px;
-  --r-3:    10px;
+  --r-1:    4px;     /* badges, tags, code chips, kbd */
+  --r-2:    6px;     /* rows, inputs, default surface corner */
+  --r-3:    8px;     /* cards, banners, popover items */
+  --r-4:    10px;    /* palette / large overlays */
+  --r-5:    12px;    /* modal corner */
   --r-pill: 999px;
 
   /* ── Border widths ──────────────────────────────────────── */
-  --bw-hair:   1px;    /* every hairline border / divider */
-  --bw-kbd:    1.5px;  /* Kbd "pressed-key" bottom border */
-  --bw-strong: 2px;    /* active-state left border on rows/nav */
-  --bw-accent: 3px;    /* accent bar on selected cards */
+  --bw-subhair: 0.5px; /* shipping hairline (sub-pixel on @2x screens) */
+  --bw-hair:    1px;   /* solid hairline (used inline + on @1x) */
+  --bw-kbd:     1.5px; /* Kbd "pressed-key" bottom border */
+  --bw-strong:  2px;   /* active-state left border on rows/nav */
+  --bw-accent:  3px;   /* accent bar on selected cards */
+  --bw-focus:   2px;   /* focus-visible outline width */
 
   /* ── Opacity steps ──────────────────────────────────────── */
   --opacity-disabled: 0.45;
@@ -165,8 +176,10 @@
   --modal-width-sm:        440px;
   --modal-width-md:        480px;
   --modal-width-lg:        520px;
+  --modal-width-xl:        560px;
   --content-cap-sm:        400px;
   --content-cap-md:        640px;
+  --content-cap-lg:        820px;   /* wide reading column for transcripts */
   --filter-input-width:    300px;
   --filter-input-min:      160px;   /* shrink floor for the Sessions/Projects name-filter input */
   --input-width-compact:    80px;   /* short number inputs (Activity stuck-minutes, spend-$) */
@@ -202,6 +215,10 @@
   --config-tree-width-nested: clamp(180px, 22%, 260px);
   --config-menu-min-width: 280px;
   --config-menu-max-height: min(60vh, 420px);
+  /* Standard popover/context-menu min-width — the section submenu in
+     the rail and the right-click context menu both anchor at this
+     width so menu items in different surfaces read at the same scale. */
+  --menu-min-width:         180px;
   /* Compact popover menus (session export format picker, etc.) —
      narrower than the editor picker because the labels are short
      ("Markdown", "JSON", "HTML"). */
@@ -222,6 +239,26 @@
   --btn-h-sm:              24px;
   --btn-h-md:              30px;
   --btn-h-lg:              36px;
+  --btn-h-legacy:          28px;  /* legacy `.btn` opt-in chrome only */
+
+  /* Container constraints — semantic limits that components apply
+     to constrain content shape. Each is named for the surface
+     responsibility, not the px value. */
+  --content-min-width:        400px;  /* content/banner-wrapped floor */
+  --sidebar-min-width:        200px;
+  --sidebar-max-width:        280px;
+  --rail-min-width:            44px;
+  --rail-max-width:            52px;
+  --list-max-height-sm:       280px;  /* clean-orphan modal list */
+  --list-max-height-md:       320px;  /* settings protected-paths list */
+  --popover-max-height:       400px;  /* palette body */
+  --progress-track-max:       320px;  /* clean progress / spinner */
+  --text-max-width:           280px;  /* onboarding-step copy */
+  --skeleton-max-width:       300px;
+  --pill-value-max-width:     160px;
+  --session-filter-min-width: 140px;
+  --responsive-breakpoint-sm: 600px;  /* mobile flip-to-column */
+  --sidebar-collapsed-max-h:  200px;  /* sidebar height in column mode */
   --icon-btn-sm:           22px;
   --icon-btn-md:           28px;
   --icon-btn-lg:           32px;
@@ -316,6 +353,10 @@
   --line-strong: oklch(85% 0.006 60);
 
   --scrim:       oklch(30% 0.01 60 / 0.28);
+  /* Always-dark overlay for system-style HUD strips (running-op
+     strip, etc.) that must stay legible against arbitrary content
+     and stay tonally consistent across both themes. */
+  --scrim-strong: oklch(0% 0 0 / 0.8);
 
   --shadow-sm: 0 1px 0 oklch(0% 0 0 / 0.02);
   --shadow-md: 0 2px 8px oklch(0% 0 0 / 0.04);
@@ -361,6 +402,7 @@
   --line-strong: oklch(34% 0.010 60);
 
   --scrim:       oklch(0% 0 0 / 0.55);
+  --scrim-strong: oklch(0% 0 0 / 0.8);
 
   /* Dark accent: chroma bumped 0.13 → 0.17 and L tuned to 72% so
      the solid fill reads at the same visual saturation weight as
@@ -370,6 +412,8 @@
   --accent-soft:   oklch(72% 0.17 45 / 0.18);
   --accent-border: oklch(72% 0.17 45 / 0.38);
   --accent-ink:    oklch(82% 0.14 45);
+
+  --info:        oklch(72% 0.10 220);
 
   --shadow-sm: 0 1px 0 oklch(0% 0 0 / 0.2);
   --shadow-md: 0 2px 8px oklch(0% 0 0 / 0.3);
@@ -414,11 +458,20 @@
     --line-strong: oklch(34% 0.010 60);
 
     --scrim:       oklch(0% 0 0 / 0.55);
+    --scrim-strong: oklch(0% 0 0 / 0.8);
 
-    --accent:        oklch(74% 0.13 45);
-    --accent-soft:   oklch(74% 0.13 45 / 0.16);
-    --accent-border: oklch(74% 0.13 45 / 0.35);
-    --accent-ink:    oklch(80% 0.12 45);
+    /* Dark accent: chroma bumped 0.13 → 0.17 and L tuned to 72% so
+       the solid fill reads at the same visual saturation weight as
+       the light-mode accent against an ink-paper background. Mirrors
+       the explicit `[data-theme="dark"]` block — the two paths must
+       stay in lockstep so a user with no theme preference set sees
+       the same accent as one who picked dark explicitly. */
+    --accent:        oklch(72% 0.17 45);
+    --accent-soft:   oklch(72% 0.17 45 / 0.18);
+    --accent-border: oklch(72% 0.17 45 / 0.38);
+    --accent-ink:    oklch(82% 0.14 45);
+
+    --info:        oklch(72% 0.10 220);
 
     --shadow-sm: 0 1px 0 oklch(0% 0 0 / 0.2);
     --shadow-md: 0 2px 8px oklch(0% 0 0 / 0.3);
@@ -472,6 +525,22 @@
   --bad-weak:    color-mix(in oklch, var(--danger) 12%, transparent);
   --ok-weak:     color-mix(in oklch, var(--ok) 12%, transparent);
   --warn-weak:   color-mix(in oklch, var(--warn) 12%, transparent);
+  --info-weak:   color-mix(in oklch, var(--info) 12%, transparent);
+
+  /* Hover/selected fills — derived from --fg so they invert correctly
+     with the theme. Replaces the earlier scattered rgba(0,0,0,0.04) /
+     rgba(255,255,255,0.05) literals that bypassed [data-theme]. */
+  --bg-hover-soft:     color-mix(in oklch, var(--fg) 6%,  transparent);
+  --bg-hover-firm:     color-mix(in oklch, var(--fg) 10%, transparent);
+  --bg-selected-firm:  color-mix(in oklch, var(--fg) 14%, transparent);
+
+  /* Focus-ring offsets — outline pattern (input/list/row controls).
+     The box-shadow ring (filled chrome controls) keeps using
+     --focus-ring above. */
+  --focus-outline-offset:        2px;
+  --focus-outline-offset-tight: -2px;
+  --focus-outline-offset-flush:  1px;
+  --focus-outline-offset-flat:   0;
 
   /* Focus ring — previous system shipped a single combined variable */
   --focus-ring: 0 0 0 3px var(--accent-border);
@@ -508,12 +577,17 @@ body {
   height: 100%;
 }
 
+/* Body chrome, font, and rendering hints. The `font-size` / `line-height`
+   sit on the shipping body scale (`--fs-xs` / `--lh-base`); section-level
+   text picks larger sizes explicitly. base.css adds the global cursor +
+   user-select rules on top of this declaration; nothing else may
+   redeclare the body block. */
 body {
   background: var(--bg);
   color: var(--fg);
   font-family: var(--font);
-  font-size: var(--fs-base);
-  line-height: var(--lh-body);
+  font-size: var(--fs-xs);
+  line-height: var(--lh-base);
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
   text-rendering: optimizeLegibility;

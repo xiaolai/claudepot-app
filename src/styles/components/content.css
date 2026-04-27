@@ -7,13 +7,13 @@
 
 .content {
   flex: 1 1 76%;
-  min-width: 400px;      /* content floor */
+  min-width: var(--content-min-width);
   display: flex;
   flex-direction: column;
   background: var(--bg);
   overflow-y: auto;
-  
-  padding: 16px 24px 20px;
+
+  padding: var(--sp-16) var(--sp-24) var(--sp-20);
 }
 
 .content.loading {
@@ -26,21 +26,21 @@
 .toolbar {
   display: flex;
   align-items: center;
-  gap: 8px;
-  padding-bottom: 16px;
-  margin-bottom: 16px;
-  border-bottom: 0.5px solid var(--border);
+  gap: var(--sp-8);
+  padding-bottom: var(--sp-16);
+  margin-bottom: var(--sp-16);
+  border-bottom: var(--bw-subhair) solid var(--border);
 }
 
 .toolbar-title {
-  font-size: 12px;
+  font-size: var(--fs-sm);
   font-weight: 600;
   flex: 1;
 }
 
 .toolbar-status {
   display: flex;
-  gap: 8px;
+  gap: var(--sp-8);
   align-items: center;
 }
 
@@ -49,12 +49,12 @@
 .pill {
   display: inline-flex;
   align-items: center;
-  gap: 6px;
-  padding: 3px 10px;
-  border: 0.5px solid var(--border);
-  border-radius: 6px;
+  gap: var(--sp-6);
+  padding: var(--sp-3) var(--sp-10);
+  border: var(--bw-subhair) solid var(--border);
+  border-radius: var(--r-2);
   background: transparent;
-  font-size: 11px;
+  font-size: var(--fs-xs);
 }
 
 .pill.active {
@@ -71,13 +71,13 @@
   text-transform: uppercase;
   letter-spacing: 0.04em;
   color: var(--muted);
-  font-size: 10px;
+  font-size: var(--fs-2xs);
 }
 
 .pill-value {
   font-weight: 500;
-  font-size: 11px;
-  max-width: 160px;
+  font-size: var(--fs-xs);
+  max-width: var(--pill-value-max-width);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
