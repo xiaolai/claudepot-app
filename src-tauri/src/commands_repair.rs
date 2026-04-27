@@ -136,7 +136,8 @@ fn spawn_repair_op(
             | OpKind::SessionMove
             | OpKind::AccountLogin
             | OpKind::AccountRegister
-            | OpKind::VerifyAll => {
+            | OpKind::VerifyAll
+            | OpKind::AutomationRun => {
                 unreachable!("wrong spawn path")
             }
         };

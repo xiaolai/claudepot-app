@@ -1,5 +1,6 @@
 mod app_menu;
 mod commands;
+mod commands_automations;
 mod commands_config;
 mod commands_config_types;
 mod commands_preferences;
@@ -26,6 +27,7 @@ mod config_watch;
 mod config_watch_types;
 mod dto;
 mod dto_account;
+mod dto_automations;
 mod dto_activity;
 mod dto_activity_cards;
 mod dto_artifact_lifecycle;
@@ -479,6 +481,22 @@ pub fn run() {
             commands_routes::routes_zero_secret,
             commands_routes::routes_desktop_running,
             commands_routes::routes_desktop_restart,
+            commands_automations::automations_list,
+            commands_automations::automations_get,
+            commands_automations::automations_add,
+            commands_automations::automations_update,
+            commands_automations::automations_remove,
+            commands_automations::automations_set_enabled,
+            commands_automations::automations_run_now_start,
+            commands_automations::automations_runs_list,
+            commands_automations::automations_run_get,
+            commands_automations::automations_validate_name,
+            commands_automations::automations_validate_cron,
+            commands_automations::automations_scheduler_capabilities,
+            commands_automations::automations_dry_run_artifact,
+            commands_automations::automations_open_artifact_dir,
+            commands_automations::automations_linger_status,
+            commands_automations::automations_linger_enable,
         ])
         .run(tauri::generate_context!())
         .unwrap_or_else(|e| {
