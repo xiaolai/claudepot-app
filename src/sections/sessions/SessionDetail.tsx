@@ -258,6 +258,7 @@ export function SessionDetail({
         display: "flex",
         flex: 1,
         minHeight: 0,
+        minWidth: 0,
       }}
     >
       <div
@@ -266,6 +267,13 @@ export function SessionDetail({
           flexDirection: "column",
           flex: 1,
           minHeight: 0,
+          // Without minWidth:0 the column inherits flex's `minWidth:
+          // auto` default, which pins it to its intrinsic content
+          // width. The compact header's single nowrap title row then
+          // pushes Reveal + kebab off-screen instead of letting the
+          // h3 ellipsize. Same fix as minHeight:0 — but for the
+          // horizontal axis.
+          minWidth: 0,
         }}
       >
       {/* Live status header — renders only when the selected session
