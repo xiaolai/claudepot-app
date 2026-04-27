@@ -7,8 +7,6 @@ import {
   useRef,
   useState,
 } from "react";
-import { PendingJournalsBanner } from "./components/PendingJournalsBanner";
-import { RunningOpStrip } from "./components/RunningOpStrip";
 import { StatusIssuesBanner } from "./components/StatusIssuesBanner";
 import { ToastContainer } from "./components/ToastContainer";
 import { CommandPalette } from "./components/CommandPalette";
@@ -468,15 +466,12 @@ function AppShell() {
     return () => window.removeEventListener("keydown", onKey);
   }, []);
 
+  // Suppress the pending-journals chip while the user is already on
+  // the surface that resolves it — duplicating the call-to-action a
+  // foot below the Repair view itself reads as nagging.
   const onRepairSubview =
     section === "projects" &&
     (subRoute === "repair" || subRoute === "maintenance");
-  const actionableTotal =
-    pendingSummary === null
-      ? 0
-      : pendingSummary.pending + pendingSummary.stale;
-  const showBanner =
-    pendingSummary !== null && actionableTotal > 0 && !onRepairSubview;
 
   const handleBind = useCallback(
     async (target: "cli" | "desktop", uuid: string) => {
@@ -734,15 +729,6 @@ function AppShell() {
         >
           <StatusIssuesBanner issues={visibleIssues} onDismiss={dismiss} />
 
-          {showBanner && pendingSummary && (
-            <div style={{ padding: "var(--sp-12) var(--sp-16) 0" }}>
-              <PendingJournalsBanner
-                summary={pendingSummary}
-                onOpen={() => setSection("projects", "repair")}
-              />
-            </div>
-          )}
-
           <div
             style={{
               flex: 1,
@@ -779,28 +765,6 @@ function AppShell() {
               {section === "settings" && <SettingsSection />}
             </Suspense>
           </div>
-
-          <RunningOpStrip
-            ops={runningOps}
-            onReopen={(opId) => {
-              const op = runningOps.find((o) => o.op_id === opId);
-              if (!op) return;
-              if (op.kind === "session_move") {
-                openOp({
-                  opId,
-                  title: labelFor(op),
-                  phases: SESSION_MOVE_PHASES,
-                  fetchStatus: api.sessionMoveStatus,
-                  renderResult: renderSessionMoveResult,
-                });
-                return;
-              }
-              openOp({
-                opId,
-                title: labelFor(op),
-              });
-            }}
-          />
         </main>
       </div>
 
@@ -809,6 +773,28 @@ function AppShell() {
           projects: null,
           sessions: null,
         }}
+        runningOps={runningOps}
+        onReopenOp={(opId: string) => {
+          const op = runningOps.find((o) => o.op_id === opId);
+          if (!op) return;
+          if (op.kind === "session_move") {
+            openOp({
+              opId,
+              title: labelFor(op),
+              phases: SESSION_MOVE_PHASES,
+              fetchStatus: api.sessionMoveStatus,
+              renderResult: renderSessionMoveResult,
+            });
+            return;
+          }
+          openOp({
+            opId,
+            title: labelFor(op),
+          });
+        }}
+        pendingSummary={onRepairSubview ? null : pendingSummary}
+        onOpenRepair={() => setSection("projects", "repair")}
+        onOpenLive={() => setSection("events")}
       />
 
       {activeOp && (

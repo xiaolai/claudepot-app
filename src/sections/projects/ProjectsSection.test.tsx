@@ -1,7 +1,7 @@
 import { describe, expect, it, beforeEach } from "vitest";
 import { render, screen, act } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { PendingJournalsBanner } from "../../components/PendingJournalsBanner";
+import { PendingJournalsChip } from "../../components/PendingJournalsChip";
 
 beforeEach(() => {
   localStorage.clear();
@@ -13,49 +13,56 @@ const summary = (p: number, s: number, r = 0) => ({
   running: r,
 });
 
-describe("PendingJournalsBanner", () => {
+describe("PendingJournalsChip", () => {
   it("renders nothing when total is zero", () => {
     const { container } = render(
-      <PendingJournalsBanner summary={summary(0, 0)} onOpen={() => {}} />,
+      <PendingJournalsChip summary={summary(0, 0)} onOpen={() => {}} />,
+    );
+    expect(container.firstChild).toBeNull();
+  });
+
+  it("renders nothing when summary is null", () => {
+    const { container } = render(
+      <PendingJournalsChip summary={null} onOpen={() => {}} />,
     );
     expect(container.firstChild).toBeNull();
   });
 
   it("renders singular label for total=1", () => {
     render(
-      <PendingJournalsBanner summary={summary(1, 0)} onOpen={() => {}} />,
+      <PendingJournalsChip summary={summary(1, 0)} onOpen={() => {}} />,
     );
-    expect(screen.getByText(/1 pending rename journal/)).toBeInTheDocument();
+    expect(screen.getByText("1 pending")).toBeInTheDocument();
   });
 
   it("renders plural label for total>1", () => {
     render(
-      <PendingJournalsBanner summary={summary(1, 2)} onOpen={() => {}} />,
+      <PendingJournalsChip summary={summary(1, 2)} onOpen={() => {}} />,
     );
-    expect(screen.getByText(/3 pending rename journals/)).toBeInTheDocument();
+    expect(screen.getByText("3 pending")).toBeInTheDocument();
   });
 
-  it("adds .stale modifier when any stale entry exists", () => {
+  it("adds .warn modifier when any stale entry exists", () => {
     render(
-      <PendingJournalsBanner summary={summary(0, 1)} onOpen={() => {}} />,
+      <PendingJournalsChip summary={summary(0, 1)} onOpen={() => {}} />,
     );
     const btn = screen.getByRole("button");
-    expect(btn.className).toContain("stale");
+    expect(btn.className).toContain("warn");
   });
 
   it("uses neutral tone when only pending entries exist", () => {
     render(
-      <PendingJournalsBanner summary={summary(3, 0)} onOpen={() => {}} />,
+      <PendingJournalsChip summary={summary(3, 0)} onOpen={() => {}} />,
     );
     const btn = screen.getByRole("button");
-    expect(btn.className).not.toContain("stale");
+    expect(btn.className).not.toContain("warn");
   });
 
   it("calls onOpen when clicked", async () => {
     const user = userEvent.setup();
     let opened = false;
     render(
-      <PendingJournalsBanner
+      <PendingJournalsChip
         summary={summary(2, 0)}
         onOpen={() => { opened = true; }}
       />,

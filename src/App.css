@@ -31,6 +31,7 @@ focus-ring|shadow|font|dur-|ease-)[A-Za-z0-9_-]*\s*:" src/styles/components/  # 
 @import "./styles/components/accounts.css";
 @import "./styles/components/buttons.css";
 @import "./styles/components/status-bar.css";
+@import "./styles/components/statusbar-chips.css";
 @import "./styles/components/banners.css";
 @import "./styles/components/palette.css";
 @import "./styles/components/modals.css";

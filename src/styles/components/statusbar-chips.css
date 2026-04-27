@@ -1,0 +1,148 @@
+/* Status-bar chips — small, button-shaped ambient-state indicators
+   at the right end of the var(--s-6) status bar. Each chip is one click
+   away from the UI that resolves it (running ops → progress modal,
+   pending journals → Repair view). Plain text segments live next
+   to chips but never wear chip styling — see AppStatusBar.tsx for
+   the spec. Tokens live in src/styles/tokens.css; nothing here
+   may declare global custom properties.                            */
+
+.statusbar-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-6);
+  height: calc(var(--statusbar-height) - var(--sp-8));
+  padding: 0 var(--sp-8);
+  background: var(--bg-raised);
+  border: var(--bw-hair) solid var(--line);
+  border-radius: var(--r-1);
+  color: var(--fg-muted);
+  font-family: inherit;
+  font-size: var(--fs-2xs);
+  letter-spacing: var(--ls-wide);
+  text-transform: uppercase;
+  cursor: pointer;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+.statusbar-chip:hover {
+  background: var(--bg-active);
+  border-color: var(--line-strong);
+  color: var(--fg);
+}
+
+.statusbar-chip:focus-visible {
+  outline: none;
+  box-shadow: var(--focus-ring);
+  border-color: var(--accent-border);
+}
+
+.statusbar-chip[aria-expanded="true"] {
+  background: var(--bg-active);
+  border-color: var(--accent-border);
+  color: var(--fg);
+}
+
+/* Tone variant — nudges the user toward a chip that's flagging an
+   issue (stale pending journals). Kept subtle: a faint warn tint on
+   the border and ink, never a saturated fill. The bar is too small
+   for full color blocks. */
+.statusbar-chip.warn {
+  border-color: color-mix(in oklch, var(--warn) 40%, var(--line));
+  color: var(--warn);
+}
+
+.statusbar-chip.warn:hover {
+  background: var(--warn-weak);
+  border-color: var(--warn);
+}
+
+/* Pulsing dot for the running-ops chip. Reuses the shape that lived
+   on .running-op-spinner in maintenance.css (now retired) — same
+   accent fill, same 1.2s ease pulse. */
+.statusbar-chip-pulse {
+  width: var(--sp-6);
+  height: var(--sp-6);
+  border-radius: 50%;
+  background: var(--accent);
+  animation: statusbar-chip-pulse 1.2s ease-in-out infinite;
+  flex-shrink: 0;
+}
+
+@keyframes statusbar-chip-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.3; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .statusbar-chip-pulse { animation: none; }
+}
+
+/* Popover anchored above the chip (status bar sits at the window
+   bottom, so the popover MUST open upward). Mirrors the paper-mono
+   surface used by the sidebar swap-target dropdown. */
+.statusbar-chip-popover {
+  position: absolute;
+  bottom: calc(100% + var(--sp-4));
+  right: 0;
+  min-width: var(--config-menu-min-width);
+  max-width: var(--project-detail-width);
+  background: var(--bg-raised);
+  border: var(--bw-hair) solid var(--line-strong);
+  border-radius: var(--r-2);
+  box-shadow: var(--shadow-popover);
+  z-index: var(--z-popover);
+  overflow: hidden;
+}
+
+.statusbar-chip-popover-header {
+  padding: var(--sp-8) var(--sp-12) var(--sp-4);
+  font-size: var(--fs-2xs);
+  letter-spacing: var(--ls-wide);
+  text-transform: uppercase;
+  color: var(--fg-faint);
+  border-bottom: var(--bw-hair) solid var(--line);
+}
+
+.statusbar-chip-popover-list {
+  display: flex;
+  flex-direction: column;
+}
+
+.statusbar-chip-popover-item {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-8);
+  padding: var(--sp-8) var(--sp-12);
+  background: transparent;
+  border: 0;
+  border-radius: 0;
+  font: inherit;
+  font-size: var(--fs-xs);
+  color: var(--fg);
+  text-align: left;
+  cursor: pointer;
+  white-space: normal;
+}
+
+.statusbar-chip-popover-item:hover {
+  background: var(--bg-active);
+}
+
+.statusbar-chip-popover-item:focus-visible {
+  outline: none;
+  background: var(--bg-active);
+  box-shadow: inset 0 0 0 var(--bw-accent) var(--accent);
+}
+
+.statusbar-chip-popover-item + .statusbar-chip-popover-item {
+  border-top: var(--bw-hair) solid var(--line);
+}
+
+.statusbar-chip-popover-label {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
