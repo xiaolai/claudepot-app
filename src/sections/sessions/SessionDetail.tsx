@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { api } from "../../api";
 import { Glyph } from "../../components/primitives/Glyph";
 import { useReachTop } from "../../hooks/useReachTop";
+import { useScrollCompact } from "../../hooks/useScrollCompact";
 import { NF } from "../../icons";
 import type {
   ProjectInfo,
@@ -79,41 +80,12 @@ export function SessionDetail({
   const [contextOpen, setContextOpen] = useState(false);
   const [moveOpen, setMoveOpen] = useState(false);
   const [scrollEl, setScrollEl] = useState<HTMLDivElement | null>(null);
-  const [compact, setCompact] = useState(false);
+  // Threshold parsing, hysteresis, and listener cleanup live in
+  // `useScrollCompact` — see its tests for the engage/release
+  // boundary contract.
+  const compact = useScrollCompact(scrollEl);
   const tokenRef = useRef(0);
   const topSentinelRef = useRef<HTMLDivElement | null>(null);
-
-  // Auto-compact the header once the user has scrolled into the
-  // transcript. The two thresholds give a small hysteresis (engage
-  // when scrolling down past the larger one, release when scrolling
-  // back above the smaller one) so the boundary doesn't flicker on
-  // momentum scroll. Both values come from `tokens.css` —
-  // `--scroll-compact-engage` / `--scroll-compact-release` — so the
-  // numbers stay aligned with the rest of the design scale and there
-  // is one place to tune them.
-  //
-  // Cleared/re-attached when the scroll container changes — currently
-  // SessionDetail is keyed on `filePath` upstream, so the element
-  // identity tracks selection.
-  useEffect(() => {
-    if (!scrollEl) return;
-    const cs = getComputedStyle(scrollEl);
-    const engage =
-      Number.parseFloat(cs.getPropertyValue("--scroll-compact-engage")) || 16;
-    const release =
-      Number.parseFloat(cs.getPropertyValue("--scroll-compact-release")) || 4;
-    const onScroll = () => {
-      const top = scrollEl.scrollTop;
-      setCompact((c) => {
-        if (c && top < release) return false;
-        if (!c && top > engage) return true;
-        return c;
-      });
-    };
-    scrollEl.addEventListener("scroll", onScroll, { passive: true });
-    onScroll();
-    return () => scrollEl.removeEventListener("scroll", onScroll);
-  }, [scrollEl]);
 
   useEffect(() => {
     const myToken = ++tokenRef.current;

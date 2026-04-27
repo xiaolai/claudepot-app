@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { Button } from "../../../components/primitives/Button";
 import { IconButton } from "../../../components/primitives/IconButton";
 import {
@@ -7,6 +7,7 @@ import {
 } from "../../../components/ContextMenu";
 import { NF } from "../../../icons";
 import type { SessionChunk, SessionRow } from "../../../types";
+import { sessionCostEstimate, usePriceTable } from "../../../costs";
 import { deriveSessionTitle } from "../format";
 import { exportSession } from "../sessionExport";
 import { SessionDetailHeaderFull } from "./SessionDetailHeaderFull";
@@ -61,6 +62,18 @@ export function SessionDetailHeader({
     cleanTitle ??
     (row.is_sidechain ? "Agent subsession" : "(untitled session)");
 
+  // Price table is fetched once at this orchestrator level and
+  // shared with the full layout via prop. Rendering it inside the
+  // full layout would re-issue `pricingGet` every time the user
+  // scrolls back to the top and re-mounts the full view.
+  const { table: priceTable } = usePriceTable();
+  const costUsd = sessionCostEstimate(priceTable, row.models, {
+    input: row.tokens.input,
+    output: row.tokens.output,
+    cache_read: row.tokens.cache_read,
+    cache_creation: row.tokens.cache_creation,
+  });
+
   const [menu, setMenu] = useState<{ x: number; y: number } | null>(null);
 
   const menuItems: ContextMenuItem[] = [
@@ -103,18 +116,26 @@ export function SessionDetailHeader({
     },
   ];
 
+  // Anchor against the kebab itself rather than `document.activeElement`.
+  // `activeElement` is correct when the user clicked the kebab, but
+  // it goes stale if focus is somewhere else (e.g. the search input
+  // when the menu opens via a future shortcut). A direct ref reads the
+  // intended button regardless of focus state.
+  const kebabRef = useRef<HTMLButtonElement | null>(null);
+  const openMenu = () => {
+    const rect = kebabRef.current?.getBoundingClientRect();
+    setMenu({
+      x: rect ? rect.right : 0,
+      y: rect ? rect.bottom : 0,
+    });
+  };
+
   const kebabNode = (
     <IconButton
+      ref={kebabRef}
       glyph={NF.ellipsis}
       size="sm"
-      onClick={() => {
-        const el = document.activeElement as HTMLElement | null;
-        const rect = el?.getBoundingClientRect();
-        setMenu({
-          x: rect ? rect.right : 0,
-          y: rect ? rect.bottom : 0,
-        });
-      }}
+      onClick={openMenu}
       title="More actions"
       aria-label="More session actions"
       aria-haspopup="menu"
@@ -145,6 +166,7 @@ export function SessionDetailHeader({
     <SessionDetailHeaderFull
       row={row}
       title={title}
+      costUsd={costUsd}
       onBack={onBack}
       revealNode={revealNode}
       kebabNode={kebabNode}

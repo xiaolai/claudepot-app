@@ -59,8 +59,28 @@ export function BackAffordance({
         ...style,
       }}
     >
-      <Glyph g={NF.chevronL} style={{ fontSize: "var(--fs-xs)" }} />
-      <span>{label}</span>
+      <Glyph
+        g={NF.chevronL}
+        style={{ fontSize: "var(--fs-xs)", flexShrink: 0 }}
+      />
+      <span
+        style={{
+          // Ellipsize the label rather than overflowing the button's
+          // bounding box. The outer button is `display: inline-flex`,
+          // so `text-overflow: ellipsis` on the button itself doesn't
+          // apply between flex children — the ellipsis has to live on
+          // the text node's own container. With `min-width: 0`, the
+          // span can shrink below its content's min-content width
+          // when a parent caps the breadcrumb (see compact session
+          // header's `--breadcrumb-max-width`).
+          minWidth: 0,
+          overflow: "hidden",
+          textOverflow: "ellipsis",
+          whiteSpace: "nowrap",
+        }}
+      >
+        {label}
+      </span>
     </button>
   );
 }
