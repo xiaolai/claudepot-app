@@ -37,6 +37,7 @@ pub mod project_trash;
 pub mod project_types;
 pub mod protected_paths;
 pub mod resolve;
+pub mod routes;
 pub mod services;
 pub mod session;
 pub mod session_chunks;
