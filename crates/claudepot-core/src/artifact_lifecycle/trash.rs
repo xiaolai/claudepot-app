@@ -177,6 +177,7 @@ pub fn restore_at(
     trash_id: &str,
     on_conflict: super::disable::OnConflict,
 ) -> Result<RestoredArtifact> {
+    validate_trash_id(trash_id)?;
     let entry = read_one(trash_root, trash_id)?;
     if entry.state != TrashState::Healthy {
         return Err(LifecycleError::WrongTrashState {
@@ -196,7 +197,21 @@ pub fn restore_at(
         .entry_dir
         .join("payload")
         .join(&manifest.source_basename);
-    move_or_copy(&payload_src, &target, manifest.payload_kind)?;
+    // Try atomic no-replace rename first to close the TOCTOU window
+    // between collision check and rename. If the rename fails for
+    // any reason (cross-volume, conflict from a racing process,
+    // etc.) fall back to the move_or_copy path which does
+    // copy-on-EXDEV but otherwise propagates errors.
+    match super::disable::rename_no_replace_pub(&payload_src, &target) {
+        Ok(()) => {}
+        Err(LifecycleError::Conflict(_)) => {
+            // Lost the race — surface the conflict cleanly.
+            return Err(LifecycleError::Conflict(target));
+        }
+        Err(_) => {
+            move_or_copy(&payload_src, &target, manifest.payload_kind)?;
+        }
+    }
     // After restore we drop the trash entry.
     std::fs::remove_dir_all(&entry.entry_dir)
         .map_err(LifecycleError::io("drop restored trash entry"))?;
@@ -216,6 +231,7 @@ pub fn recover_at(
     confirmed_kind: ArtifactKind,
     on_conflict: super::disable::OnConflict,
 ) -> Result<RestoredArtifact> {
+    validate_trash_id(trash_id)?;
     let entry = read_one(trash_root, trash_id)?;
     match entry.state {
         TrashState::MissingManifest | TrashState::AbandonedStaging => {}
@@ -286,6 +302,7 @@ pub fn recover_at(
 /// Forget a trash entry (used for MissingPayload, OrphanPayload, or
 /// last-resort cleanup of any entry).
 pub fn forget_at(trash_root: &Path, trash_id: &str) -> Result<()> {
+    validate_trash_id(trash_id)?;
     let dir_normal = trash_root.join(trash_id);
     let dir_staging = trash_root.join(format!("{trash_id}.staging"));
     let dir = if dir_normal.exists() {
@@ -332,6 +349,22 @@ pub fn purge_older_than(trash_root: &Path, older_than_days: u32) -> Result<u32> 
 /// directly — the public surface stays at `artifact_lifecycle::list_trash_at`.
 pub fn list_at(trash_root: &Path) -> Result<Vec<TrashEntry>> {
     listing_list_at(trash_root)
+}
+
+/// Validate `trash_id` strictly as a UUID before any path join.
+/// All trash mutators MUST call this first — the trash_id flows
+/// from the renderer (untrusted layer per the IPC trust model) and
+/// is path-joined inside core; without validation it's a path-
+/// traversal vector.
+///
+/// Accepts the canonical 36-char UUID hex form (8-4-4-4-12). Anything
+/// containing `/`, `\`, `..`, or other non-hex / non-hyphen chars is
+/// rejected.
+pub(super) fn validate_trash_id(trash_id: &str) -> Result<()> {
+    if uuid::Uuid::parse_str(trash_id).is_err() {
+        return Err(LifecycleError::InvalidTrashId(trash_id.to_string()));
+    }
+    Ok(())
 }
 
 // Listing (`list_at`, `read_one`, `classify_entry`), IO helpers

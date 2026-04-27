@@ -63,6 +63,12 @@ pub enum LifecycleError {
     /// e.g., orphan-payload entries with multiple children.
     #[error("recovery ambiguous: {0}")]
     RecoveryAmbiguous(String),
+
+    /// Trash ID didn't pass UUID validation. Rejects path-traversal
+    /// attempts (`../../etc`) and any string containing separators
+    /// or other non-UUID characters at the API boundary.
+    #[error("invalid trash id: {0}")]
+    InvalidTrashId(String),
 }
 
 impl LifecycleError {

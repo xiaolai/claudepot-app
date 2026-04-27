@@ -13,7 +13,7 @@
 use crate::artifact_lifecycle::error::RefuseReason;
 use crate::path_utils::simplify_windows_path;
 use serde::{Deserialize, Serialize};
-use std::path::{Path, PathBuf};
+use std::path::{Component, Path, PathBuf};
 
 /// Three trackable artifact kinds. Hooks/rules/plugins are not
 /// lifecycle-managed (see the design doc for why).
@@ -201,9 +201,40 @@ pub fn classify_path(path: &Path, roots: &ActiveRoots) -> Result<Trackable, Refu
     if rel_under_kind.as_os_str().is_empty() {
         return Err(RefuseReason::WrongKind { path: path.clone() });
     }
-    let relative_path = path_to_forward_slash(&rel_under_kind);
+    // Reject any traversal / absolute / prefix components in the
+    // path-under-kind. Without this, `<root>/agents/../../etc/passwd`
+    // would classify as a trackable agent and let the caller mutate
+    // arbitrary filesystem locations under the rename's resolution.
+    for component in rel_under_kind.components() {
+        match component {
+            Component::Normal(_) => {}
+            _ => return Err(RefuseReason::WrongKind { path: path.clone() }),
+        }
+    }
 
-    let payload_kind = detect_payload_kind(&path)?;
+    // Skill files live at `<root>/skills/<name>/SKILL.md`. CC's
+    // Skill discovery treats the parent directory `<name>/` as the
+    // skill — moving just SKILL.md would leave behind an empty
+    // skill dir that CC then sees as broken. So when the caller
+    // hands us a SKILL.md path, classify the SKILL DIRECTORY.
+    let is_skill_md_inside_dir = kind == ArtifactKind::Skill
+        && path.file_name().map(|n| n == "SKILL.md").unwrap_or(false)
+        && rel_under_kind
+            .parent()
+            .map(|p| !p.as_os_str().is_empty())
+            .unwrap_or(false);
+    let (relative_path_pb, payload_kind) = if is_skill_md_inside_dir {
+        // rel_under_kind = "<name>/SKILL.md" → take just "<name>".
+        let name_only = rel_under_kind
+            .parent()
+            .map(Path::to_path_buf)
+            .unwrap_or_else(|| rel_under_kind.clone());
+        (name_only, PayloadKind::Directory)
+    } else {
+        let payload = detect_payload_kind(&path)?;
+        (rel_under_kind, payload)
+    };
+    let relative_path = path_to_forward_slash(&relative_path_pb);
 
     Ok(Trackable {
         scope,
@@ -269,18 +300,29 @@ fn detect_payload_kind(path: &Path) -> Result<PayloadKind, RefuseReason> {
 
 /// Detect plugin cache paths. CC stores plugins at
 /// `<some_root>/plugins/cache/<owner>/<plugin>/<version>/...`.
+///
+/// Component-based: walks the path's components instead of doing a
+/// substring match so Windows paths (with backslash separators) are
+/// handled correctly. Returns `Some(<plugin>)` when the
+/// `plugins/cache/<owner>/<plugin>/...` shape appears anywhere in
+/// the path.
 fn plugin_id_from_path(path: &Path) -> Option<String> {
-    let s = path.to_string_lossy();
-    let i = s.find("plugins/cache/")?;
-    let after = &s[i + "plugins/cache/".len()..];
-    let mut parts = after.split('/');
-    let _owner = parts.next()?;
-    let plugin = parts.next()?;
-    if plugin.is_empty() {
-        None
-    } else {
-        Some(plugin.to_string())
+    let parts: Vec<&str> = path
+        .components()
+        .filter_map(|c| match c {
+            Component::Normal(s) => s.to_str(),
+            _ => None,
+        })
+        .collect();
+    for window in parts.windows(4) {
+        if window[0] == "plugins" && window[1] == "cache" {
+            let plugin = window[3];
+            if !plugin.is_empty() {
+                return Some(plugin.to_string());
+            }
+        }
     }
+    None
 }
 
 fn canonicalize_for_classify(path: &Path) -> PathBuf {

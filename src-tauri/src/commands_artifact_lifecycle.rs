@@ -17,7 +17,7 @@ use claudepot_core::artifact_lifecycle::{
     LifecycleError,
 };
 use claudepot_core::paths;
-use std::path::PathBuf;
+use std::path::{Component, PathBuf};
 
 fn join_blocking_err(e: tokio::task::JoinError) -> String {
     format!("blocking task failed: {e}")
@@ -47,6 +47,67 @@ fn build_roots(project_root: Option<String>) -> ActiveRoots {
     roots
 }
 
+/// Validate that `relative_path` is a clean rel-path with no
+/// traversal segments, no absolute roots, no Windows prefixes, and
+/// no empty components. Rejects:
+///   - absolute paths (`/foo`, `C:\foo`)
+///   - parent dir refs (`..`)
+///   - root dir refs (this implies an absolute path was passed)
+///   - Windows prefixes (drive letters / UNC)
+///   - empty components (consecutive separators)
+///   - backslashes (the wire contract is forward-slash only)
+///
+/// The renderer is our own code, but the IPC trust model puts the
+/// validation here so a future caller (a CLI, a third-party plugin
+/// that issues invokes) can't smuggle traversal segments through.
+fn validate_relative_path(relative_path: &str) -> Result<(), String> {
+    if relative_path.is_empty() {
+        return Err("relative_path is empty".into());
+    }
+    if relative_path.contains('\\') {
+        return Err("relative_path must use forward slashes only".into());
+    }
+    let p = std::path::Path::new(relative_path);
+    for c in p.components() {
+        match c {
+            Component::Normal(_) => {}
+            Component::ParentDir => {
+                return Err(format!(
+                    "relative_path must not contain `..`: {relative_path}"
+                ));
+            }
+            Component::CurDir => {
+                return Err(format!(
+                    "relative_path must not contain `.`: {relative_path}"
+                ));
+            }
+            Component::RootDir | Component::Prefix(_) => {
+                return Err(format!(
+                    "relative_path must be relative (no root): {relative_path}"
+                ));
+            }
+        }
+    }
+    Ok(())
+}
+
+/// Validate that the `scope_root` the renderer claims is one of the
+/// roots the backend knows about. Without this check, the renderer
+/// could ask the backend to operate on an arbitrary directory shaped
+/// like `<scope_root>/agents/...`. Plugin / managed-policy paths
+/// stay refused at `classify_path` regardless.
+fn validate_scope_root(scope_root: &str, roots: &ActiveRoots) -> Result<PathBuf, String> {
+    let p = PathBuf::from(scope_root);
+    let ok = roots.iter_scoped().any(|(_, root)| root == p.as_path());
+    if !ok {
+        return Err(format!(
+            "scope_root not in active roots: {}",
+            p.display()
+        ));
+    }
+    Ok(p)
+}
+
 /// Reconstruct an absolute path from the canonical triple, then
 /// classify it. Used internally by mutating commands so the core
 /// always re-derives the Trackable from the triple (defense
@@ -58,7 +119,8 @@ fn rebuild_trackable(
     roots: &ActiveRoots,
 ) -> Result<Trackable, String> {
     let kind = parse_kind(kind)?;
-    let scope_root_path = PathBuf::from(scope_root);
+    validate_relative_path(relative_path)?;
+    let scope_root_path = validate_scope_root(scope_root, roots)?;
     let abs = scope_root_path
         .join(kind.subdir())
         .join(relative_path);

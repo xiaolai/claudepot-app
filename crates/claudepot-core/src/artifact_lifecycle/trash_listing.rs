@@ -36,7 +36,12 @@ pub fn list_at(trash_root: &Path) -> Result<Vec<TrashEntry>> {
 /// Read a single entry by id (with or without the `.staging`
 /// suffix). Returns `Err(TrashEntryNotFound)` when neither form
 /// exists on disk.
+///
+/// Defense-in-depth: also runs `validate_trash_id` here so any
+/// path that bypasses the public API (e.g., a future internal
+/// caller) still can't smuggle traversal segments through.
 pub(super) fn read_one(trash_root: &Path, trash_id: &str) -> Result<TrashEntry> {
+    crate::artifact_lifecycle::trash::validate_trash_id(trash_id)?;
     let normal = trash_root.join(trash_id);
     let staging = trash_root.join(format!("{trash_id}.staging"));
     let (path, name) = if normal.is_dir() {

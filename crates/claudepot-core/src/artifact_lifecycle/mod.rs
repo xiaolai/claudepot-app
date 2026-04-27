@@ -380,4 +380,100 @@ mod tests {
         forget_at(&trash, "00000000-0000-0000-0000-000000000009").unwrap();
         assert!(!mp_dir.exists());
     }
+
+    // ---------- security regressions --------------------------------
+
+    #[test]
+    fn forget_rejects_path_traversal_in_trash_id() {
+        // Without UUID validation `forget_at("../whatever")` would
+        // resolve to trash_root/../whatever and rm-rf an arbitrary
+        // sibling directory.
+        let tmp = tempfile::tempdir().unwrap();
+        let trash = tmp.path().join("trash");
+        std::fs::create_dir_all(&trash).unwrap();
+        let outside = tmp.path().join("outside");
+        std::fs::create_dir_all(&outside).unwrap();
+        let attack = "../outside";
+        let err = forget_at(&trash, attack).unwrap_err();
+        assert!(matches!(err, LifecycleError::InvalidTrashId(_)));
+        assert!(outside.exists(), "outside dir must NOT be removed");
+    }
+
+    #[test]
+    fn restore_rejects_path_traversal_in_trash_id() {
+        let tmp = tempfile::tempdir().unwrap();
+        let trash = tmp.path().join("trash");
+        std::fs::create_dir_all(&trash).unwrap();
+        let err =
+            restore_at(&trash, "../whatever", OnConflict::Refuse).unwrap_err();
+        assert!(matches!(err, LifecycleError::InvalidTrashId(_)));
+    }
+
+    #[test]
+    fn recover_rejects_path_traversal_in_trash_id() {
+        let tmp = tempfile::tempdir().unwrap();
+        let trash = tmp.path().join("trash");
+        std::fs::create_dir_all(&trash).unwrap();
+        let err = recover_at(
+            &trash,
+            "../whatever",
+            std::path::Path::new("/x"),
+            ArtifactKind::Agent,
+            OnConflict::Refuse,
+        )
+        .unwrap_err();
+        assert!(matches!(err, LifecycleError::InvalidTrashId(_)));
+    }
+
+    #[test]
+    fn classify_rejects_parent_dir_traversal_in_relative_path() {
+        // <root>/agents/../../etc/passwd would otherwise classify as
+        // a trackable agent and let the caller mutate /etc/passwd.
+        use crate::artifact_lifecycle::error::RefuseReason;
+        let tmp = tempfile::tempdir().unwrap();
+        let claude = tmp.path().join(".claude");
+        let escape_target = tmp.path().join("etc/passwd");
+        std::fs::create_dir_all(claude.join("agents")).unwrap();
+        std::fs::create_dir_all(escape_target.parent().unwrap()).unwrap();
+        std::fs::write(&escape_target, b"sensitive").unwrap();
+        let attack_path = claude.join("agents").join("../../etc/passwd");
+        let roots = ActiveRoots::user(claude.clone());
+        let err =
+            crate::artifact_lifecycle::paths::classify_path(&attack_path, &roots)
+                .unwrap_err();
+        // The traversal path either refuses (WrongKind / OutOfScope)
+        // — never classifies as an active trackable agent.
+        match err {
+            RefuseReason::WrongKind { .. } | RefuseReason::OutOfScope { .. } => {}
+            other => panic!("expected WrongKind/OutOfScope, got {:?}", other),
+        }
+        assert_eq!(
+            std::fs::read(&escape_target).unwrap(),
+            b"sensitive",
+            "escape target must remain untouched"
+        );
+    }
+
+    #[test]
+    fn skill_md_path_classifies_as_directory_payload() {
+        // A SKILL.md file inside `<root>/skills/<name>/` must
+        // classify as the SKILL DIRECTORY (so disable moves the
+        // whole skill, not just SKILL.md leaving an empty dir
+        // behind that CC sees as a broken skill).
+        let tmp = tempfile::tempdir().unwrap();
+        let claude = tmp.path().join(".claude");
+        let skill_dir = claude.join("skills/myskill");
+        std::fs::create_dir_all(&skill_dir).unwrap();
+        let skill_md = skill_dir.join("SKILL.md");
+        std::fs::write(&skill_md, b"---\nname: x\n---\n").unwrap();
+        let roots = ActiveRoots::user(claude.clone());
+        let t = crate::artifact_lifecycle::paths::classify_path(&skill_md, &roots).unwrap();
+        assert_eq!(t.kind, ArtifactKind::Skill);
+        assert_eq!(
+            t.payload_kind,
+            crate::artifact_lifecycle::paths::PayloadKind::Directory,
+            "SKILL.md must classify as a directory payload (the skill dir)"
+        );
+        assert_eq!(t.relative_path, "myskill", "rel-path is the skill dir name");
+    }
 }
