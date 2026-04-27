@@ -14,8 +14,14 @@ pub enum RouteError {
     #[error("route name already taken: {0}")]
     DuplicateName(String),
 
+    #[error("wrapper name already in use by another route: {0}")]
+    DuplicateWrapperName(String),
+
     #[error("wrapper name '{0}' would collide with the first-party `claude` binary")]
     WrapperShadowsClaude(String),
+
+    #[error("wrapper '{0}' already exists on disk and was not written by Claudepot — refusing to overwrite")]
+    WrapperFileNotManaged(String),
 
     #[error("invalid wrapper name '{0}': {1}")]
     InvalidWrapperName(String, String),
@@ -28,4 +34,7 @@ pub enum RouteError {
 
     #[error("home directory unavailable")]
     NoHomeDir,
+
+    #[error("operation not supported on this platform: {0}")]
+    UnsupportedPlatform(&'static str),
 }

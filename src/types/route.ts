@@ -93,3 +93,58 @@ export interface RouteUpdateDto {
 export interface RouteSettingsDto {
   disable_deployment_mode_chooser: boolean;
 }
+
+// ── Outbound DETAILS DTOs ────────────────────────────────────────
+//
+// Returned by `routes_get` so the Edit modal can hydrate every
+// provider-specific field. Secrets stay opaque — callers see
+// `*_preview` and `has_*` booleans but never the actual value.
+
+export interface GatewayDetailsDto {
+  base_url: string;
+  api_key_preview: string;
+  has_api_key: boolean;
+  auth_scheme: RouteAuthScheme;
+  enable_tool_search: boolean;
+}
+
+export interface BedrockDetailsDto {
+  region: string;
+  bearer_token_preview: string;
+  has_bearer_token: boolean;
+  base_url: string | null;
+  aws_profile: string | null;
+  skip_aws_auth: boolean;
+}
+
+export interface VertexDetailsDto {
+  project_id: string;
+  region: string | null;
+  base_url: string | null;
+  skip_gcp_auth: boolean;
+}
+
+export interface FoundryDetailsDto {
+  api_key_preview: string;
+  has_api_key: boolean;
+  base_url: string | null;
+  resource: string | null;
+  skip_azure_auth: boolean;
+}
+
+export interface RouteDetailsDto {
+  id: string;
+  name: string;
+  provider_kind: RouteProviderKind;
+  gateway: GatewayDetailsDto | null;
+  bedrock: BedrockDetailsDto | null;
+  vertex: VertexDetailsDto | null;
+  foundry: FoundryDetailsDto | null;
+  model: string;
+  small_fast_model: string | null;
+  additional_models: string[];
+  wrapper_name: string;
+  active_on_desktop: boolean;
+  installed_on_cli: boolean;
+  use_keychain: boolean;
+}

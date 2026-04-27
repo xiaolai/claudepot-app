@@ -23,11 +23,12 @@ mod keychain;
 mod slug;
 mod store;
 mod types;
+mod url;
 mod wrapper;
 
 pub use desktop::{
-    activate_desktop, clear_desktop_active, enterprise_config_path, library_dir,
-    write_library_profile,
+    activate_desktop, clear_desktop_active, delete_library_profile, enterprise_config_path,
+    library_dir, write_library_profile,
 };
 pub use error::RouteError;
 pub use helper::{delete_helpers, helper_path, helpers_dir, write_helper};
@@ -37,6 +38,7 @@ pub use keychain::{
     SecretField,
 };
 pub use slug::{derive_wrapper_slug, sanitize_wrapper_name, WrapperNameError};
+pub use url::{validate_base_url, BaseUrlError};
 pub use store::RouteStore;
 pub use types::{
     AuthScheme, BedrockConfig, FoundryConfig, GatewayConfig, ProviderKind, Route,

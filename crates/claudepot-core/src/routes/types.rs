@@ -274,19 +274,26 @@ impl Route {
     }
 }
 
-/// Truncated key preview that fits the `sk-ant-oat01-Abc…xyz` shape
-/// used elsewhere in Claudepot. Fewer than 8 chars → return placeholder.
+/// Bounded-leakage key preview. Unlike Claudepot's first-party
+/// `sk-ant-oat01-Abc…xyz` style — which depends on a known prefix
+/// taxonomy — third-party routes carry arbitrary key formats
+/// (vendor-specific, free-form, even single-word placeholders), so
+/// we never expose the leading characters: a short leading slice
+/// of an opaque secret is meaningfully more leakage than of a
+/// well-prefixed one.
+///
+/// Rule: keys ≥16 chars show only the last 4 (`…WxYz`); shorter
+/// keys collapse to a length-bucket placeholder; empty stays empty.
 fn preview_secret(key: &str) -> String {
     if key.is_empty() {
         return String::from("(none)");
     }
     let len = key.chars().count();
-    if len <= 8 {
-        return format!("{}…", "*".repeat(len.min(4)));
+    if len < 16 {
+        return format!("(set, {len} chars)");
     }
-    let head: String = key.chars().take(6).collect();
-    let tail: String = key.chars().skip(len.saturating_sub(3)).collect();
-    format!("{head}…{tail}")
+    let tail: String = key.chars().skip(len.saturating_sub(4)).collect();
+    format!("…{tail}")
 }
 
 #[cfg(test)]
@@ -316,18 +323,32 @@ mod tests {
     }
 
     #[test]
-    fn preview_secret_short() {
+    fn preview_secret_empty() {
         assert_eq!(preview_secret(""), "(none)");
-        assert_eq!(preview_secret("ab"), "**…");
-        assert_eq!(preview_secret("eight888"), "****…");
     }
 
     #[test]
-    fn preview_secret_long() {
+    fn preview_secret_short_buckets_to_length() {
+        // Anything under 16 chars must NOT reveal the value.
+        assert_eq!(preview_secret("ab"), "(set, 2 chars)");
+        assert_eq!(preview_secret("ollama"), "(set, 6 chars)");
+        assert_eq!(preview_secret("eight888"), "(set, 8 chars)");
+        assert_eq!(
+            preview_secret("nine99999"),
+            "(set, 9 chars)",
+            "9-char secret must not be reconstructable from its preview",
+        );
+        assert_eq!(preview_secret("fifteen-chars__"), "(set, 15 chars)");
+    }
+
+    #[test]
+    fn preview_secret_long_shows_only_last_four() {
         assert_eq!(
             preview_secret("sk-or-v1-abcdef1234567890xyz"),
-            "sk-or-…xyz"
+            "…0xyz",
         );
+        // 16-char boundary case
+        assert_eq!(preview_secret("0123456789abcdef"), "…cdef");
     }
 
     #[test]
@@ -337,7 +358,7 @@ mod tests {
             name: "Test".into(),
             provider: RouteProvider::Gateway(GatewayConfig {
                 base_url: "http://127.0.0.1:11434".into(),
-                api_key: "secret-12345-xyz".into(),
+                api_key: "secret-12345678-xyz".into(),
                 auth_scheme: AuthScheme::Bearer,
                 enable_tool_search: false,
                 use_keychain: false,
@@ -351,7 +372,10 @@ mod tests {
             installed_on_cli: false,
         };
         let s = r.summary();
-        assert_eq!(s.api_key_preview, "secret…xyz");
+        // Preview must not leak any leading characters and must
+        // reveal only the last four.
+        assert_eq!(s.api_key_preview, "…-xyz");
+        assert!(!s.api_key_preview.contains("secret"));
         assert!(!s.api_key_preview.contains("12345"));
     }
 }

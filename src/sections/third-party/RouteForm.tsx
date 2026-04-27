@@ -9,8 +9,8 @@ import type {
   FoundryInputDto,
   GatewayInputDto,
   RouteCreateDto,
+  RouteDetailsDto,
   RouteProviderKind,
-  RouteSummaryDto,
   RouteUpdateDto,
   VertexInputDto,
 } from "../../types";
@@ -18,12 +18,12 @@ import type {
 export interface RouteFormProps {
   mode: "add" | "edit";
   /**
-   * Pre-population for edit mode. For security the api_key /
-   * bearer_token / foundry_api_key are NOT returned from the
-   * backend — those fields stay empty in the form and the
-   * commit policy is "blank = keep existing on the Rust side."
+   * Pre-population for edit mode. Carries every provider-specific
+   * non-secret field. Secrets stay opaque (`*_preview`,
+   * `has_*`) — the form leaves the secret input blank and the
+   * Rust-side policy is "blank = keep existing".
    */
-  initial?: RouteSummaryDto | null;
+  initial?: RouteDetailsDto | null;
   onSubmit: (
     payload: RouteCreateDto | RouteUpdateDto,
   ) => Promise<void>;
@@ -92,41 +92,53 @@ export function RouteForm({
 
   // `use_keychain` is shared across provider variants — a route is
   // either keychain-backed or plaintext-backed, regardless of which
-  // provider it talks to. Read from the summary in edit mode.
+  // provider it talks to. Read from the details in edit mode.
   const initialUseKeychain = initial?.use_keychain ?? false;
 
-  // Gateway state
-  const [gwBase, setGwBase] = useState(
-    initial?.provider_kind === "gateway" ? initial.base_url : "",
-  );
+  // Gateway state — hydrated from initial.gateway in edit mode.
+  const [gwBase, setGwBase] = useState(initial?.gateway?.base_url ?? "");
   const [gwKey, setGwKey] = useState("");
   const [gwAuth, setGwAuth] = useState<"bearer" | "basic">(
-    initial?.auth_scheme === "basic" ? "basic" : "bearer",
+    initial?.gateway?.auth_scheme === "basic" ? "basic" : "bearer",
   );
   const [gwToolSearch, setGwToolSearch] = useState(
-    initial?.enable_tool_search ?? false,
+    initial?.gateway?.enable_tool_search ?? false,
   );
   const [gwUseKeychain, setGwUseKeychain] = useState(initialUseKeychain);
 
-  // Bedrock state
-  const [bedRegion, setBedRegion] = useState("");
+  // Bedrock state — hydrated from initial.bedrock.
+  const [bedRegion, setBedRegion] = useState(initial?.bedrock?.region ?? "");
   const [bedToken, setBedToken] = useState("");
-  const [bedBaseUrl, setBedBaseUrl] = useState("");
-  const [bedProfile, setBedProfile] = useState("");
-  const [bedSkipAuth, setBedSkipAuth] = useState(false);
+  const [bedBaseUrl, setBedBaseUrl] = useState(
+    initial?.bedrock?.base_url ?? "",
+  );
+  const [bedProfile, setBedProfile] = useState(
+    initial?.bedrock?.aws_profile ?? "",
+  );
+  const [bedSkipAuth, setBedSkipAuth] = useState(
+    initial?.bedrock?.skip_aws_auth ?? false,
+  );
   const [bedUseKeychain, setBedUseKeychain] = useState(initialUseKeychain);
 
-  // Vertex state (no inline secret — no keychain option)
-  const [vxProjectId, setVxProjectId] = useState("");
-  const [vxRegion, setVxRegion] = useState("");
-  const [vxBaseUrl, setVxBaseUrl] = useState("");
-  const [vxSkipAuth, setVxSkipAuth] = useState(false);
+  // Vertex state (no inline secret — no keychain option).
+  const [vxProjectId, setVxProjectId] = useState(
+    initial?.vertex?.project_id ?? "",
+  );
+  const [vxRegion, setVxRegion] = useState(initial?.vertex?.region ?? "");
+  const [vxBaseUrl, setVxBaseUrl] = useState(initial?.vertex?.base_url ?? "");
+  const [vxSkipAuth, setVxSkipAuth] = useState(
+    initial?.vertex?.skip_gcp_auth ?? false,
+  );
 
-  // Foundry state
+  // Foundry state — hydrated from initial.foundry.
   const [fdKey, setFdKey] = useState("");
-  const [fdBase, setFdBase] = useState("");
-  const [fdResource, setFdResource] = useState("");
-  const [fdSkipAuth, setFdSkipAuth] = useState(false);
+  const [fdBase, setFdBase] = useState(initial?.foundry?.base_url ?? "");
+  const [fdResource, setFdResource] = useState(
+    initial?.foundry?.resource ?? "",
+  );
+  const [fdSkipAuth, setFdSkipAuth] = useState(
+    initial?.foundry?.skip_azure_auth ?? false,
+  );
   const [fdUseKeychain, setFdUseKeychain] = useState(initialUseKeychain);
 
   const [submitting, setSubmitting] = useState(false);
@@ -241,11 +253,14 @@ export function RouteForm({
 
     try {
       await onSubmit(payload);
-      // Clear local secret state best-effort.
+    } finally {
+      // Clear local secret state on every code path (success, error,
+      // user cancellation mid-submit). The earlier impl only cleared
+      // on success, leaving the secret resident in React state until
+      // the modal closed when a submit failed.
       setGwKey("");
       setBedToken("");
       setFdKey("");
-    } finally {
       setSubmitting(false);
     }
   };

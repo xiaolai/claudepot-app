@@ -5,6 +5,7 @@
 import { invoke } from "@tauri-apps/api/core";
 import type {
   RouteCreateDto,
+  RouteDetailsDto,
   RouteSettingsDto,
   RouteSummaryDto,
   RouteUpdateDto,
@@ -15,6 +16,13 @@ export const routeApi = {
 
   /** Enumerate every defined route. Previews only — no api_key. */
   routesList: () => invoke<RouteSummaryDto[]>("routes_list"),
+
+  /**
+   * Fetch full details for one route — non-secret fields populated
+   * for every provider variant, secret fields returned as
+   * `*_preview` + `has_*` booleans only. Used by the Edit modal.
+   */
+  routesGet: (id: string) => invoke<RouteDetailsDto>("routes_get", { id }),
 
   routesSettingsGet: () => invoke<RouteSettingsDto>("routes_settings_get"),
   routesSettingsSet: (settings: RouteSettingsDto) =>

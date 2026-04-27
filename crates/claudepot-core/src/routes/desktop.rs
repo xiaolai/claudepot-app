@@ -24,13 +24,28 @@ use super::keychain::SecretField;
 use super::types::{Route, RouteProvider};
 use super::CLAUDEPOT_MANAGED_MARKER;
 
-/// `~/Library/Application Support/Claude-3p/`.
+/// `~/Library/Application Support/Claude-3p/` (macOS only).
+///
+/// Phase-1 MVP is macOS-first; Linux Cowork on 3P uses
+/// `~/.config/Claude-3p/`-style paths and Windows uses
+/// `%APPDATA%\Claude-3p\`, but those land in a follow-up. Here we
+/// fail fast on non-macOS so a route's `active_on_desktop` flag
+/// can never disagree with the actual filesystem state.
 pub fn data_dir() -> Result<PathBuf, RouteError> {
-    let home = dirs::home_dir().ok_or(RouteError::NoHomeDir)?;
-    Ok(home
-        .join("Library")
-        .join("Application Support")
-        .join("Claude-3p"))
+    #[cfg(not(target_os = "macos"))]
+    {
+        return Err(RouteError::UnsupportedPlatform(
+            "Cowork-on-3P Desktop activation is currently macOS-only",
+        ));
+    }
+    #[cfg(target_os = "macos")]
+    {
+        let home = dirs::home_dir().ok_or(RouteError::NoHomeDir)?;
+        Ok(home
+            .join("Library")
+            .join("Application Support")
+            .join("Claude-3p"))
+    }
 }
 
 /// `~/Library/Application Support/Claude-3p/configLibrary/`.
@@ -41,6 +56,38 @@ pub fn library_dir() -> Result<PathBuf, RouteError> {
 /// `~/Library/Application Support/Claude-3p/claude_desktop_config.json`.
 pub fn enterprise_config_path() -> Result<PathBuf, RouteError> {
     Ok(data_dir()?.join("claude_desktop_config.json"))
+}
+
+/// Set of `enterpriseConfig` keys this module owns. activate/clear
+/// only mutate these — anything else (operational hardening keys,
+/// OTLP config, future Anthropic additions, hand-edited values) is
+/// preserved verbatim.
+const MANAGED_ENTERPRISE_KEYS: &[&str] = &[
+    "inferenceProvider",
+    "inferenceModels",
+    "deploymentOrganizationUuid",
+    "disableDeploymentModeChooser",
+    "inferenceCredentialHelper",
+    "inferenceGatewayBaseUrl",
+    "inferenceGatewayApiKey",
+    "inferenceGatewayAuthScheme",
+    "inferenceBedrockRegion",
+    "inferenceBedrockBearerToken",
+    "inferenceBedrockBaseUrl",
+    "inferenceBedrockProfile",
+    "inferenceVertexProjectId",
+    "inferenceVertexRegion",
+    "inferenceVertexBaseUrl",
+    "inferenceFoundryApiKey",
+    "inferenceFoundryBaseUrl",
+    "inferenceFoundryResource",
+    CLAUDEPOT_MANAGED_MARKER,
+];
+
+fn strip_managed_keys(target: &mut Map<String, Value>) {
+    for k in MANAGED_ENTERPRISE_KEYS {
+        target.remove(*k);
+    }
 }
 
 /// One profile entry under `configLibrary/`. Field names match the
@@ -77,9 +124,9 @@ pub fn write_library_profile(route: &Route) -> Result<PathBuf, RouteError> {
 }
 
 /// Activate a route on Desktop: write the library profile and
-/// mirror the same keys into `enterpriseConfig` of the top-level
-/// `claude_desktop_config.json`. Other fields (e.g.
-/// `_cfprefsMigrated`, future Anthropic additions) are preserved.
+/// mirror its managed keys into `enterpriseConfig`. Unmanaged keys
+/// in the existing `enterpriseConfig` (operational hardening, OTLP,
+/// future Anthropic additions, user-applied tweaks) are preserved.
 pub fn activate_desktop(
     route: &Route,
     disable_chooser: bool,
@@ -88,7 +135,20 @@ pub fn activate_desktop(
     let path = enterprise_config_path()?;
     let mut top = read_top_level(&path)?;
 
-    let enterprise = build_enterprise_config(route, disable_chooser);
+    let mut enterprise = top
+        .remove("enterpriseConfig")
+        .and_then(|v| match v {
+            Value::Object(m) => Some(m),
+            _ => None,
+        })
+        .unwrap_or_default();
+    // Drop only what we own, then re-insert the new managed values
+    // on top of whatever else is there.
+    strip_managed_keys(&mut enterprise);
+    let new_keys = build_enterprise_config(route, disable_chooser);
+    for (k, v) in new_keys {
+        enterprise.insert(k, v);
+    }
     top.insert(
         "enterpriseConfig".to_string(),
         Value::Object(enterprise),
@@ -99,19 +159,52 @@ pub fn activate_desktop(
     Ok(path)
 }
 
-/// Reset the top-level `enterpriseConfig` to `{}`. Library entries
-/// are kept intact — `clear` is "no route is active right now," not
-/// "delete everything."
+/// Remove the managed-route keys from `enterpriseConfig`, leaving
+/// any unmanaged keys intact. Library entries are not touched —
+/// `clear` is "no route is active right now," not "wipe state."
 pub fn clear_desktop_active() -> Result<PathBuf, RouteError> {
     let path = enterprise_config_path()?;
     let mut top = read_top_level(&path)?;
+    let mut enterprise = top
+        .remove("enterpriseConfig")
+        .and_then(|v| match v {
+            Value::Object(m) => Some(m),
+            _ => None,
+        })
+        .unwrap_or_default();
+    strip_managed_keys(&mut enterprise);
     top.insert(
         "enterpriseConfig".to_string(),
-        Value::Object(Map::new()),
+        Value::Object(enterprise),
     );
     let bytes = serde_json::to_vec_pretty(&Value::Object(top))?;
     fs_utils::atomic_write(&path, &bytes)?;
     Ok(path)
+}
+
+/// Remove a route's `configLibrary/<uuid>.json` profile if it
+/// exists and we own it (managed marker present). Idempotent on a
+/// missing file. Leaves unmanaged or hand-edited profiles alone.
+pub fn delete_library_profile(
+    route_id: super::types::RouteId,
+) -> Result<(), RouteError> {
+    let path = library_dir()?.join(format!("{}.json", route_id));
+    match std::fs::read(&path) {
+        Ok(bytes) => {
+            // Treat unparseable JSON as unmanaged — caller's `Use in
+            // Desktop` regenerates it from scratch on next activation.
+            let owned_by_us = serde_json::from_slice::<Value>(&bytes)
+                .ok()
+                .and_then(|v| v.get("claudepot_managed").cloned())
+                == Some(Value::Bool(true));
+            if !owned_by_us {
+                return Ok(());
+            }
+            std::fs::remove_file(&path).map_err(RouteError::Io)
+        }
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(()),
+        Err(e) => Err(RouteError::Io(e)),
+    }
 }
 
 fn read_top_level(path: &Path) -> Result<Map<String, Value>, RouteError> {

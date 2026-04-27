@@ -116,3 +116,64 @@ pub struct RouteUpdateDto {
 pub struct RouteSettingsDto {
     pub disable_deployment_mode_chooser: bool,
 }
+
+// ── Outbound DETAILS DTOs ────────────────────────────────────────
+//
+// `RouteSummaryDto` is the list-view projection. `RouteDetailsDto`
+// adds provider-specific non-secret fields so the Edit modal can
+// hydrate every form control. Secrets never round-trip — they show
+// up only as `*_preview` and `has_*` booleans.
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct GatewayDetailsDto {
+    pub base_url: String,
+    pub api_key_preview: String,
+    pub has_api_key: bool,
+    pub auth_scheme: String,
+    pub enable_tool_search: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct BedrockDetailsDto {
+    pub region: String,
+    pub bearer_token_preview: String,
+    pub has_bearer_token: bool,
+    pub base_url: Option<String>,
+    pub aws_profile: Option<String>,
+    pub skip_aws_auth: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct VertexDetailsDto {
+    pub project_id: String,
+    pub region: Option<String>,
+    pub base_url: Option<String>,
+    pub skip_gcp_auth: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct FoundryDetailsDto {
+    pub api_key_preview: String,
+    pub has_api_key: bool,
+    pub base_url: Option<String>,
+    pub resource: Option<String>,
+    pub skip_azure_auth: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RouteDetailsDto {
+    pub id: String,
+    pub name: String,
+    pub provider_kind: String,
+    pub gateway: Option<GatewayDetailsDto>,
+    pub bedrock: Option<BedrockDetailsDto>,
+    pub vertex: Option<VertexDetailsDto>,
+    pub foundry: Option<FoundryDetailsDto>,
+    pub model: String,
+    pub small_fast_model: Option<String>,
+    pub additional_models: Vec<String>,
+    pub wrapper_name: String,
+    pub active_on_desktop: bool,
+    pub installed_on_cli: bool,
+    pub use_keychain: bool,
+}
