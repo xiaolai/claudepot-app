@@ -452,6 +452,8 @@ pub fn run() {
             commands_routes::routes_derive_slug,
             commands_routes::routes_validate_wrapper_name,
             commands_routes::routes_zero_secret,
+            commands_routes::routes_desktop_running,
+            commands_routes::routes_desktop_restart,
         ])
         .run(tauri::generate_context!())
         .unwrap_or_else(|e| {
