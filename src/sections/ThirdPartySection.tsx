@@ -4,7 +4,7 @@ import { Button } from "../components/primitives/Button";
 import { NF } from "../icons";
 import { api } from "../api";
 import type { RouteSettingsDto, RouteSummaryDto } from "../types";
-import { AddRouteModal } from "./third-party/AddRouteModal";
+import { AddRouteModal, EditRouteModal } from "./third-party/AddRouteModal";
 import { RouteCard } from "./third-party/RouteCard";
 
 /**
@@ -32,6 +32,7 @@ export function ThirdPartySection() {
   } | null>(null);
   const [busyIds, setBusyIds] = useState<Set<string>>(new Set());
   const [showAdd, setShowAdd] = useState(false);
+  const [editTarget, setEditTarget] = useState<RouteSummaryDto | null>(null);
 
   const refresh = useCallback(async () => {
     try {
@@ -265,6 +266,7 @@ export function ThirdPartySection() {
                 onUseDesktop={handleUseDesktop}
                 onUnuseDesktop={handleUnuseDesktop}
                 onRemove={handleRemove}
+                onEdit={(route) => setEditTarget(route)}
               />
             ))}
           </div>
@@ -277,6 +279,16 @@ export function ThirdPartySection() {
         onCreated={() => {
           void refresh();
           showToast("info", "Route added.");
+        }}
+        onError={(msg) => showToast("error", msg)}
+      />
+      <EditRouteModal
+        open={editTarget !== null}
+        initial={editTarget}
+        onClose={() => setEditTarget(null)}
+        onSaved={() => {
+          void refresh();
+          showToast("info", "Route updated.");
         }}
         onError={(msg) => showToast("error", msg)}
       />

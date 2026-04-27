@@ -10,14 +10,16 @@
 
 use claudepot_core::routes::{
     activate_desktop, clear_desktop_active, delete_wrapper, derive_wrapper_slug,
-    sanitize_wrapper_name, write_wrapper, AuthScheme, GatewayConfig, ProviderKind,
-    Route, RouteError, RouteProvider, RouteStore,
+    sanitize_wrapper_name, write_wrapper, AuthScheme, BedrockConfig, FoundryConfig,
+    GatewayConfig, ProviderKind, Route, RouteError, RouteProvider, RouteStore,
+    VertexConfig,
 };
 use uuid::Uuid;
 use zeroize::Zeroize;
 
 use crate::dto_routes::{
-    GatewayInputDto, RouteCreateDto, RouteSettingsDto, RouteSummaryDto, RouteUpdateDto,
+    BedrockInputDto, FoundryInputDto, GatewayInputDto, RouteCreateDto, RouteSettingsDto,
+    RouteSummaryDto, RouteUpdateDto, VertexInputDto,
 };
 
 fn map_err<E: std::fmt::Display>(e: E) -> String {
@@ -48,6 +50,9 @@ fn parse_auth_scheme(s: &str) -> AuthScheme {
 fn build_provider(
     kind: ProviderKind,
     gateway: Option<GatewayInputDto>,
+    bedrock: Option<BedrockInputDto>,
+    vertex: Option<VertexInputDto>,
+    foundry: Option<FoundryInputDto>,
 ) -> Result<RouteProvider, String> {
     match kind {
         ProviderKind::Gateway => {
@@ -69,13 +74,80 @@ fn build_provider(
                 enable_tool_search: g.enable_tool_search,
             }))
         }
-        ProviderKind::Bedrock | ProviderKind::Vertex | ProviderKind::Foundry => {
-            // Phase-4 work — currently rejected at the handler edge.
-            Err(format!(
-                "provider '{}' not yet supported (gateway only in MVP)",
-                kind.as_str()
-            ))
+        ProviderKind::Bedrock => {
+            let b =
+                bedrock.ok_or_else(|| String::from("bedrock config missing"))?;
+            let region = b.region.trim();
+            if region.is_empty() {
+                return Err(String::from("AWS region is required"));
+            }
+            let bearer = empty_to_none(b.bearer_token);
+            let profile = empty_to_none(b.aws_profile);
+            if !b.skip_aws_auth && bearer.is_none() && profile.is_none() {
+                return Err(String::from(
+                    "Bedrock needs a bearer token, AWS profile, or skip_aws_auth set",
+                ));
+            }
+            Ok(RouteProvider::Bedrock(BedrockConfig {
+                region: region.to_string(),
+                bearer_token: bearer,
+                base_url: empty_to_none(b.base_url),
+                aws_profile: profile,
+                skip_aws_auth: b.skip_aws_auth,
+            }))
         }
+        ProviderKind::Vertex => {
+            let v =
+                vertex.ok_or_else(|| String::from("vertex config missing"))?;
+            let project_id = v.project_id.trim();
+            if project_id.is_empty() {
+                return Err(String::from("GCP project ID is required"));
+            }
+            Ok(RouteProvider::Vertex(VertexConfig {
+                project_id: project_id.to_string(),
+                region: empty_to_none(v.region),
+                base_url: empty_to_none(v.base_url),
+                skip_gcp_auth: v.skip_gcp_auth,
+            }))
+        }
+        ProviderKind::Foundry => {
+            let f =
+                foundry.ok_or_else(|| String::from("foundry config missing"))?;
+            let base = empty_to_none(f.base_url);
+            let resource = empty_to_none(f.resource);
+            if base.is_none() && resource.is_none() {
+                return Err(String::from(
+                    "Foundry needs either a base URL or a resource name",
+                ));
+            }
+            if base.is_some() && resource.is_some() {
+                return Err(String::from(
+                    "Foundry: choose base URL OR resource name, not both",
+                ));
+            }
+            if let Some(b) = &base {
+                if !(b.starts_with("http://") || b.starts_with("https://")) {
+                    return Err(format!(
+                        "Foundry base URL must start with http:// or https:// (got: {b})"
+                    ));
+                }
+            }
+            Ok(RouteProvider::Foundry(FoundryConfig {
+                api_key: empty_to_none(f.api_key),
+                base_url: base,
+                resource,
+                skip_azure_auth: f.skip_azure_auth,
+            }))
+        }
+    }
+}
+
+fn empty_to_none(s: String) -> Option<String> {
+    let t = s.trim();
+    if t.is_empty() {
+        None
+    } else {
+        Some(t.to_string())
     }
 }
 
@@ -85,6 +157,11 @@ fn project_summary(r: &Route) -> RouteSummaryDto {
         RouteProvider::Gateway(cfg) => {
             (cfg.auth_scheme.as_str().to_string(), cfg.enable_tool_search)
         }
+        // Auth scheme / tool-search aren't meaningful for these providers;
+        // the GUI shows neutral defaults so the field is well-defined.
+        RouteProvider::Bedrock(_) => (String::from("bearer"), false),
+        RouteProvider::Vertex(_) => (String::from("bearer"), false),
+        RouteProvider::Foundry(_) => (String::from("bearer"), false),
     };
     RouteSummaryDto {
         id: s.id.to_string(),
@@ -149,7 +226,13 @@ pub async fn routes_add(
     mut route: RouteCreateDto,
 ) -> Result<RouteSummaryDto, String> {
     let provider_kind = parse_provider(&route.provider_kind)?;
-    let provider = build_provider(provider_kind, route.gateway.take())?;
+    let provider = build_provider(
+        provider_kind,
+        route.gateway.take(),
+        route.bedrock.take(),
+        route.vertex.take(),
+        route.foundry.take(),
+    )?;
     let wrapper = pick_wrapper_name(&route.wrapper_name, &route.model)?;
 
     let new_route = Route {
@@ -194,7 +277,61 @@ pub async fn routes_edit(
 ) -> Result<RouteSummaryDto, String> {
     let id = parse_route_id(&route.id)?;
     let provider_kind = parse_provider(&route.provider_kind)?;
-    let provider = build_provider(provider_kind, route.gateway.take())?;
+
+    // "Blank secret = keep existing" — the form intentionally
+    // doesn't pre-fill secrets. Patch any blank secret with the
+    // pre-existing value before parsing the provider config.
+    // Also captures the prior wrapper name to detect renames so
+    // we can clean up the stale wrapper file post-edit.
+    let prev_wrapper_name: Option<String>;
+    {
+        let store = open_store()?;
+        let prev = store
+            .get(id)
+            .ok_or_else(|| RouteError::NotFound(id.to_string()).to_string())?;
+        prev_wrapper_name = if prev.installed_on_cli {
+            Some(prev.wrapper_name.clone())
+        } else {
+            None
+        };
+        match (provider_kind, &prev.provider) {
+            (ProviderKind::Gateway, RouteProvider::Gateway(prev_cfg)) => {
+                if let Some(g) = route.gateway.as_mut() {
+                    if g.api_key.is_empty() {
+                        g.api_key = prev_cfg.api_key.clone();
+                    }
+                }
+            }
+            (ProviderKind::Bedrock, RouteProvider::Bedrock(prev_cfg)) => {
+                if let Some(b) = route.bedrock.as_mut() {
+                    if b.bearer_token.is_empty() {
+                        if let Some(prev_token) = &prev_cfg.bearer_token {
+                            b.bearer_token = prev_token.clone();
+                        }
+                    }
+                }
+            }
+            (ProviderKind::Foundry, RouteProvider::Foundry(prev_cfg)) => {
+                if let Some(f) = route.foundry.as_mut() {
+                    if f.api_key.is_empty() {
+                        if let Some(prev_key) = &prev_cfg.api_key {
+                            f.api_key = prev_key.clone();
+                        }
+                    }
+                }
+            }
+            // Provider-kind change OR Vertex (no inline secret) — nothing to inherit.
+            _ => {}
+        }
+    }
+
+    let provider = build_provider(
+        provider_kind,
+        route.gateway.take(),
+        route.bedrock.take(),
+        route.vertex.take(),
+        route.foundry.take(),
+    )?;
     let wrapper = pick_wrapper_name(&route.wrapper_name, &route.model)?;
 
     let candidate = Route {
@@ -222,13 +359,14 @@ pub async fn routes_edit(
     let mut store = open_store()?;
     let updated = store.update(candidate).map_err(map_err)?;
 
-    // If the wrapper was previously installed and the user changed
-    // the wrapper name, the OLD wrapper is now stale. Best-effort
-    // delete the old name; the wrapper rewriter doesn't know what
-    // the previous name was — we'd need to fetch pre-update state
-    // for that. For phase-1 MVP we accept the leak and handle it
-    // in a follow-up by making `update` return the prior route too.
+    // Rewrite the wrapper if it was installed; if the wrapper name
+    // changed, also delete the old one so the rename is clean.
     if updated.installed_on_cli {
+        if let Some(prev_name) = &prev_wrapper_name {
+            if prev_name != &updated.wrapper_name {
+                let _ = delete_wrapper(prev_name);
+            }
+        }
         let _ = write_wrapper(&updated);
     }
     if updated.active_on_desktop {

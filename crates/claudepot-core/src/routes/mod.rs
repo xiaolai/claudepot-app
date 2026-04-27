@@ -31,7 +31,8 @@ pub use error::RouteError;
 pub use slug::{derive_wrapper_slug, sanitize_wrapper_name, WrapperNameError};
 pub use store::RouteStore;
 pub use types::{
-    AuthScheme, GatewayConfig, ProviderKind, Route, RouteId, RouteProvider, RouteSummary,
+    AuthScheme, BedrockConfig, FoundryConfig, GatewayConfig, ProviderKind, Route,
+    RouteId, RouteProvider, RouteSummary, VertexConfig,
 };
 pub use wrapper::{wrapper_dir, wrapper_path, write_wrapper, delete_wrapper};
 

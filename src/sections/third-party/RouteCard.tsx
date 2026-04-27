@@ -13,6 +13,7 @@ interface RouteCardProps {
   onUseDesktop: (id: string) => void;
   onUnuseDesktop: (id: string) => void;
   onRemove: (id: string) => void;
+  onEdit: (route: RouteSummaryDto) => void;
 }
 
 export function RouteCard({
@@ -23,6 +24,7 @@ export function RouteCard({
   onUseDesktop,
   onUnuseDesktop,
   onRemove,
+  onEdit,
 }: RouteCardProps) {
   return (
     <article
@@ -182,13 +184,22 @@ export function RouteCard({
             </Button>
           )}
         </div>
-        <IconButton
-          glyph={NF.trash}
-          onClick={() => onRemove(route.id)}
-          disabled={busy}
-          title="Delete this route — also tears down its CLI wrapper and Desktop activation"
-          aria-label="Delete route"
-        />
+        <div style={{ display: "flex", gap: "var(--sp-4)" }}>
+          <IconButton
+            glyph={NF.edit}
+            onClick={() => onEdit(route)}
+            disabled={busy}
+            title="Edit this route"
+            aria-label="Edit route"
+          />
+          <IconButton
+            glyph={NF.trash}
+            onClick={() => onRemove(route.id)}
+            disabled={busy}
+            title="Delete this route — also tears down its CLI wrapper and Desktop activation"
+            aria-label="Delete route"
+          />
+        </div>
       </footer>
     </article>
   );

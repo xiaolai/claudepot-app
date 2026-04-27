@@ -36,10 +36,35 @@ export interface GatewayInputDto {
   enable_tool_search: boolean;
 }
 
+export interface BedrockInputDto {
+  region: string;
+  bearer_token: string;
+  base_url: string;
+  aws_profile: string;
+  skip_aws_auth: boolean;
+}
+
+export interface VertexInputDto {
+  project_id: string;
+  region: string;
+  base_url: string;
+  skip_gcp_auth: boolean;
+}
+
+export interface FoundryInputDto {
+  api_key: string;
+  base_url: string;
+  resource: string;
+  skip_azure_auth: boolean;
+}
+
 export interface RouteCreateDto {
   name: string;
   provider_kind: RouteProviderKind;
   gateway: GatewayInputDto | null;
+  bedrock: BedrockInputDto | null;
+  vertex: VertexInputDto | null;
+  foundry: FoundryInputDto | null;
   model: string;
   small_fast_model: string | null;
   additional_models: string[];
@@ -52,6 +77,9 @@ export interface RouteUpdateDto {
   name: string;
   provider_kind: RouteProviderKind;
   gateway: GatewayInputDto | null;
+  bedrock: BedrockInputDto | null;
+  vertex: VertexInputDto | null;
+  foundry: FoundryInputDto | null;
   model: string;
   small_fast_model: string | null;
   additional_models: string[];
