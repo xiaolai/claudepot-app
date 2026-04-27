@@ -20,6 +20,7 @@ export interface SectionDef {
 export const sections: readonly SectionDef[] = [
   { id: "accounts",    label: "Accounts",    glyph: NF.users     },
   { id: "projects",    label: "Projects",    glyph: NF.folder    },
+  { id: "automations", label: "Automations", glyph: NF.clock     },
   { id: "events",      label: "Activity",    glyph: NF.dashboard },
   { id: "global",      label: "Global",      glyph: NF.globe     },
   { id: "keys",        label: "Keys",        glyph: NF.key       },
