@@ -16,6 +16,7 @@ mod commands_migrate;
 mod commands_project;
 mod commands_protected;
 mod commands_repair;
+mod commands_routes;
 mod commands_session_index;
 mod commands_session_move;
 mod commands_session_prune;
@@ -34,6 +35,7 @@ mod dto_keys;
 mod dto_migrate;
 mod dto_project;
 mod dto_project_repair;
+mod dto_routes;
 mod dto_session;
 mod dto_session_debug;
 mod dto_session_move;
@@ -461,6 +463,22 @@ pub fn run() {
             commands_migrate::migrate_export,
             commands_migrate::migrate_import,
             commands_migrate::migrate_undo,
+            commands_routes::routes_list,
+            commands_routes::routes_get,
+            commands_routes::routes_settings_get,
+            commands_routes::routes_settings_set,
+            commands_routes::routes_add,
+            commands_routes::routes_edit,
+            commands_routes::routes_remove,
+            commands_routes::routes_use_cli,
+            commands_routes::routes_unuse_cli,
+            commands_routes::routes_use_desktop,
+            commands_routes::routes_unuse_desktop,
+            commands_routes::routes_derive_slug,
+            commands_routes::routes_validate_wrapper_name,
+            commands_routes::routes_zero_secret,
+            commands_routes::routes_desktop_running,
+            commands_routes::routes_desktop_restart,
         ])
         .run(tauri::generate_context!())
         .unwrap_or_else(|e| {

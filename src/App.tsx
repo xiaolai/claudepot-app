@@ -37,11 +37,14 @@ const importConfig = () =>
   import("./sections/ConfigSection").then((m) => ({ default: m.ConfigSection }));
 const importGlobal = () =>
   import("./sections/GlobalSection").then((m) => ({ default: m.GlobalSection }));
+const importThirdParty = () =>
+  import("./sections/ThirdPartySection").then((m) => ({ default: m.ThirdPartySection }));
 const ProjectsSection = lazy(importProjects);
 const SettingsSection = lazy(importSettings);
 const EventsSection = lazy(importEvents);
 const KeysSection = lazy(importKeys);
 const GlobalSection = lazy(importGlobal);
+const ThirdPartySection = lazy(importThirdParty);
 // ConfigSection isn't rendered at the top level anymore — it lives
 // inside GlobalSection and the Projects shell's Config tab. The
 // import* chunk keys off GlobalSection's own import, and
@@ -73,6 +76,7 @@ function preloadSavedSection(): void {
     else if (id === "events") void importEvents();
     else if (id === "global") void importGlobal();
     else if (id === "keys") void importKeys();
+    else if (id === "third-party") void importThirdParty();
     else if (id === "settings") void importSettings();
   } catch {
     // localStorage unavailable — nothing to preload.
@@ -762,6 +766,7 @@ function AppShell() {
                 />
               )}
               {section === "keys" && <KeysSection />}
+              {section === "third-party" && <ThirdPartySection />}
               {section === "settings" && <SettingsSection />}
             </Suspense>
           </div>
