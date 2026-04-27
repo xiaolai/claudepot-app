@@ -206,6 +206,13 @@ fn resolve_collision(target: &Path, on_conflict: OnConflict) -> Result<PathBuf> 
 /// For non-Linux platforms the lock is the only guard, so this layer
 /// is a no-op wrapper. The lock is held by the caller for the duration
 /// of validate + rename, so this is acceptable.
+///
+/// Crate-visible alias used by `trash::restore_at` so the same
+/// no-replace semantics apply to restore destinations.
+pub(crate) fn rename_no_replace_pub(source: &Path, target: &Path) -> Result<()> {
+    rename_no_replace(source, target)
+}
+
 fn rename_no_replace(source: &Path, target: &Path) -> Result<()> {
     #[cfg(all(target_os = "linux", not(target_env = "musl")))]
     {

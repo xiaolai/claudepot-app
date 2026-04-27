@@ -10,10 +10,12 @@
 import { useCallback, useState } from "react";
 import { api } from "../../api";
 import { Button } from "../../components/primitives/Button";
+import { ConfirmDialog } from "../../components/ConfirmDialog";
 import { NF } from "../../icons";
 import { formatRelative } from "../../lib/formatRelative";
 import type { LifecycleKind, TrashEntryDto } from "../../types";
 import { Section, Empty, Table, Th, Td, rowStyle } from "./LifecyclePresentational";
+import { RecoverDialog } from "./RecoverDialog";
 
 export const PURGE_AFTER_DAYS = 30;
 
@@ -92,6 +94,9 @@ function TrashRow({
   onChanged: () => void;
 }) {
   const [busy, setBusy] = useState(false);
+  const [confirmForget, setConfirmForget] = useState(false);
+  const [confirmSuffix, setConfirmSuffix] = useState(false);
+  const [recoverOpen, setRecoverOpen] = useState(false);
   const m = row.manifest;
   const kind = m?.kind ?? "—";
   const name = m?.relative_path ?? `(unrecoverable: ${row.state})`;
@@ -105,22 +110,7 @@ function TrashRow({
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
       if (/already exists/i.test(msg)) {
-        if (
-          window.confirm(
-            `Original location is occupied. Restore with "-N" suffix?`,
-          )
-        ) {
-          try {
-            const r = await api.artifactRestoreFromTrash(row.id, "suffix");
-            pushToast("info", `Restored to ${r.final_path}`);
-            onChanged();
-          } catch (err2) {
-            pushToast(
-              "error",
-              `Restore failed: ${err2 instanceof Error ? err2.message : String(err2)}`,
-            );
-          }
-        }
+        setConfirmSuffix(true);
       } else {
         pushToast("error", `Restore failed: ${msg}`);
       }
@@ -129,10 +119,25 @@ function TrashRow({
     }
   }, [row, pushToast, onChanged]);
 
-  const onForget = useCallback(async () => {
-    if (!window.confirm(`Forget this trash entry? It will be gone for good.`)) {
-      return;
+  const restoreWithSuffix = useCallback(async () => {
+    setConfirmSuffix(false);
+    setBusy(true);
+    try {
+      const r = await api.artifactRestoreFromTrash(row.id, "suffix");
+      pushToast("info", `Restored to ${r.final_path}`);
+      onChanged();
+    } catch (err) {
+      pushToast(
+        "error",
+        `Restore failed: ${err instanceof Error ? err.message : String(err)}`,
+      );
+    } finally {
+      setBusy(false);
     }
+  }, [row, pushToast, onChanged]);
+
+  const doForget = useCallback(async () => {
+    setConfirmForget(false);
     setBusy(true);
     try {
       await api.artifactForgetTrash(row.id);
@@ -146,96 +151,111 @@ function TrashRow({
     }
   }, [row, pushToast, onChanged]);
 
-  const onRecover = useCallback(async () => {
-    // Prompts are good enough for the rare-corruption flow.
-    const guessedKind = m?.kind ?? "agent";
-    const guessedTarget = m?.original_path ?? "";
-    const target = window.prompt(
-      `Recover this entry. Confirm the absolute target path:`,
-      guessedTarget,
-    );
-    if (!target) return;
-    const inputKind = window.prompt(
-      `Confirm artifact kind (skill / agent / command):`,
-      guessedKind,
-    );
-    if (!inputKind) return;
-    if (!["skill", "agent", "command"].includes(inputKind)) {
-      pushToast("error", `Unknown kind: ${inputKind}`);
-      return;
-    }
-    setBusy(true);
-    try {
-      const r = await api.artifactRecoverTrash(
-        row.id,
-        target,
-        inputKind as LifecycleKind,
-        "refuse",
-      );
-      pushToast("info", `Recovered to ${r.final_path}`);
-      onChanged();
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err);
-      pushToast("error", `Recover failed: ${msg}`);
-    } finally {
-      setBusy(false);
-    }
-  }, [row, m, pushToast, onChanged]);
+  const doRecover = useCallback(
+    async (target: string, recoveryKind: LifecycleKind) => {
+      setRecoverOpen(false);
+      setBusy(true);
+      try {
+        const r = await api.artifactRecoverTrash(
+          row.id,
+          target,
+          recoveryKind,
+          "refuse",
+        );
+        pushToast("info", `Recovered to ${r.final_path}`);
+        onChanged();
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        pushToast("error", `Recover failed: ${msg}`);
+      } finally {
+        setBusy(false);
+      }
+    },
+    [row, pushToast, onChanged],
+  );
 
   const trashedAt = row.trashed_at_ms
     ? formatRelative(row.trashed_at_ms, { ago: true })
     : "unknown";
 
   return (
-    <tr style={rowStyle()}>
-      <Td muted>{kind}</Td>
-      <Td>
-        <span style={{ fontWeight: 500 }} title={m?.original_path ?? row.entry_dir}>
-          {name}
-        </span>
-      </Td>
-      <Td muted>{trashedAt}</Td>
-      <Td muted>
-        <StateBadge state={row.state} />
-      </Td>
-      <Td align="right">
-        <span style={{ display: "inline-flex", gap: "var(--sp-6)" }}>
-          {row.state === "healthy" && (
+    <>
+      <tr style={rowStyle()}>
+        <Td muted>{kind}</Td>
+        <Td>
+          <span style={{ fontWeight: 500 }} title={m?.original_path ?? row.entry_dir}>
+            {name}
+          </span>
+        </Td>
+        <Td muted>{trashedAt}</Td>
+        <Td muted>
+          <StateBadge state={row.state} />
+        </Td>
+        <Td align="right">
+          <span style={{ display: "inline-flex", gap: "var(--sp-6)" }}>
+            {row.state === "healthy" && (
+              <Button
+                variant="ghost"
+                glyph={NF.refresh}
+                onClick={onRestore}
+                disabled={busy}
+                size="sm"
+              >
+                Restore
+              </Button>
+            )}
+            {(row.state === "missing_manifest" ||
+              row.state === "abandoned_staging") && (
+              <Button
+                variant="ghost"
+                glyph={NF.refresh}
+                onClick={() => setRecoverOpen(true)}
+                disabled={busy}
+                size="sm"
+              >
+                Recover…
+              </Button>
+            )}
             <Button
               variant="ghost"
-              glyph={NF.refresh}
-              onClick={onRestore}
+              danger
+              glyph={NF.trash}
+              onClick={() => setConfirmForget(true)}
               disabled={busy}
               size="sm"
             >
-              Restore
+              Forget
             </Button>
-          )}
-          {(row.state === "missing_manifest" ||
-            row.state === "abandoned_staging") && (
-            <Button
-              variant="ghost"
-              glyph={NF.refresh}
-              onClick={onRecover}
-              disabled={busy}
-              size="sm"
-            >
-              Recover…
-            </Button>
-          )}
-          <Button
-            variant="ghost"
-            danger
-            glyph={NF.trash}
-            onClick={onForget}
-            disabled={busy}
-            size="sm"
-          >
-            Forget
-          </Button>
-        </span>
-      </Td>
-    </tr>
+          </span>
+        </Td>
+      </tr>
+      {confirmForget && (
+        <ConfirmDialog
+          title="Forget this trash entry?"
+          body="This entry will be removed from disk. There's no further undo."
+          confirmLabel="Forget"
+          confirmDanger
+          onConfirm={doForget}
+          onCancel={() => setConfirmForget(false)}
+        />
+      )}
+      {confirmSuffix && (
+        <ConfirmDialog
+          title="Original location is occupied"
+          body={`Restore "${name}" with a "-N" suffix instead?`}
+          confirmLabel="Restore with suffix"
+          onConfirm={restoreWithSuffix}
+          onCancel={() => setConfirmSuffix(false)}
+        />
+      )}
+      {recoverOpen && (
+        <RecoverDialog
+          entry={row}
+          onCancel={() => setRecoverOpen(false)}
+          onSubmit={doRecover}
+        />
+      )}
+    </>
   );
 }
 
@@ -249,14 +269,10 @@ function PurgeButton({
   rowCount: number;
 }) {
   const [busy, setBusy] = useState(false);
-  const onClick = useCallback(async () => {
-    if (
-      !window.confirm(
-        `Purge Healthy trash entries older than ${PURGE_AFTER_DAYS} days? Corrupt entries are kept until manually forgotten.`,
-      )
-    ) {
-      return;
-    }
+  const [confirm, setConfirm] = useState(false);
+
+  const doPurge = useCallback(async () => {
+    setConfirm(false);
     setBusy(true);
     try {
       const n = await api.artifactPurgeTrash(PURGE_AFTER_DAYS);
@@ -269,17 +285,30 @@ function PurgeButton({
       setBusy(false);
     }
   }, [pushToast, onChanged]);
+
   return (
-    <Button
-      variant="ghost"
-      glyph={NF.trash}
-      onClick={onClick}
-      disabled={busy}
-      size="sm"
-      title={`Purge Healthy entries older than ${PURGE_AFTER_DAYS} days`}
-    >
-      Empty old
-    </Button>
+    <>
+      <Button
+        variant="ghost"
+        glyph={NF.trash}
+        onClick={() => setConfirm(true)}
+        disabled={busy}
+        size="sm"
+        title={`Purge Healthy entries older than ${PURGE_AFTER_DAYS} days`}
+      >
+        Empty old
+      </Button>
+      {confirm && (
+        <ConfirmDialog
+          title={`Purge old trash entries?`}
+          body={`Healthy entries older than ${PURGE_AFTER_DAYS} days will be removed. Corrupt entries are kept until manually forgotten.`}
+          confirmLabel="Purge"
+          confirmDanger
+          onConfirm={doPurge}
+          onCancel={() => setConfirm(false)}
+        />
+      )}
+    </>
   );
 }
 

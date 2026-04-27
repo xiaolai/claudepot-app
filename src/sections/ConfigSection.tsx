@@ -863,7 +863,12 @@ export function ConfigSection({
               onClose={() => onSubRouteChange(null)}
               usage={usageByFileId?.get(selectedFile.id) ?? null}
               projectRoot={
-                anchor.kind === "global" ? null : tree?.project_root ?? null
+                anchor.kind === "global"
+                  ? null
+                  : // Lifecycle's scope_root is the project's `.claude/`
+                    // directory, NOT the repo root. The Config tree
+                    // already exposes that as `config_home_dir`.
+                    tree?.config_home_dir ?? null
               }
               pushToast={pushToast}
               onLifecycleAction={() => {

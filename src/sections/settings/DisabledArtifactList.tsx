@@ -6,6 +6,7 @@
 import { useCallback, useState } from "react";
 import { api } from "../../api";
 import { Button } from "../../components/primitives/Button";
+import { ConfirmDialog } from "../../components/ConfirmDialog";
 import { NF } from "../../icons";
 import type { DisabledRecordDto, LifecycleKind } from "../../types";
 import { Section, Empty, Table, Th, Td, rowStyle } from "./LifecyclePresentational";
@@ -77,6 +78,7 @@ function DisabledRow({
   onChanged: () => void;
 }) {
   const [busy, setBusy] = useState(false);
+  const [confirmTrash, setConfirmTrash] = useState(false);
 
   const onEnable = useCallback(async () => {
     setBusy(true);
@@ -98,14 +100,8 @@ function DisabledRow({
     }
   }, [record, projectRoot, pushToast, onChanged]);
 
-  const onTrash = useCallback(async () => {
-    if (
-      !window.confirm(
-        `Move ${record.kind} "${record.name}" to trash? You can restore it within ~30 days.`,
-      )
-    ) {
-      return;
-    }
+  const doTrash = useCallback(async () => {
+    setConfirmTrash(false);
     setBusy(true);
     try {
       await api.artifactTrash(
@@ -125,41 +121,53 @@ function DisabledRow({
   }, [record, projectRoot, pushToast, onChanged]);
 
   return (
-    <tr style={rowStyle()}>
-      <Td muted>{record.kind}</Td>
-      <Td>
-        <span style={{ fontWeight: 500 }} title={record.current_path}>
-          {record.name}
-        </span>
-      </Td>
-      <Td muted>
-        <span title={record.scope_root}>
-          {record.scope === "user" ? "User" : "Project"}
-        </span>
-      </Td>
-      <Td align="right">
-        <span style={{ display: "inline-flex", gap: "var(--sp-6)" }}>
-          <Button
-            variant="ghost"
-            glyph={NF.refresh}
-            onClick={onEnable}
-            disabled={busy}
-            size="sm"
-          >
-            Re-enable
-          </Button>
-          <Button
-            variant="ghost"
-            danger
-            glyph={NF.trash}
-            onClick={onTrash}
-            disabled={busy}
-            size="sm"
-          >
-            Trash
-          </Button>
-        </span>
-      </Td>
-    </tr>
+    <>
+      <tr style={rowStyle()}>
+        <Td muted>{record.kind}</Td>
+        <Td>
+          <span style={{ fontWeight: 500 }} title={record.current_path}>
+            {record.name}
+          </span>
+        </Td>
+        <Td muted>
+          <span title={record.scope_root}>
+            {record.scope === "user" ? "User" : "Project"}
+          </span>
+        </Td>
+        <Td align="right">
+          <span style={{ display: "inline-flex", gap: "var(--sp-6)" }}>
+            <Button
+              variant="ghost"
+              glyph={NF.refresh}
+              onClick={onEnable}
+              disabled={busy}
+              size="sm"
+            >
+              Re-enable
+            </Button>
+            <Button
+              variant="ghost"
+              danger
+              glyph={NF.trash}
+              onClick={() => setConfirmTrash(true)}
+              disabled={busy}
+              size="sm"
+            >
+              Trash
+            </Button>
+          </span>
+        </Td>
+      </tr>
+      {confirmTrash && (
+        <ConfirmDialog
+          title={`Move ${record.kind} to trash?`}
+          body={`"${record.name}" will move to trash. You can restore it within ~30 days.`}
+          confirmLabel="Move to trash"
+          confirmDanger
+          onConfirm={doTrash}
+          onCancel={() => setConfirmTrash(false)}
+        />
+      )}
+    </>
   );
 }
