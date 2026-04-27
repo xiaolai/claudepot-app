@@ -143,6 +143,16 @@ fs2 = "0.4"
 # platform branches so we stay out of undelete semantics ourselves.
 trash = "5"
 
+# Project-migrate bundle format (`*.claudepot.tar.zst`) — see
+# `dev-docs/project-migrate-spec.md` §3.
+# - `tar` carries Unix mode + symlink shape verbatim and round-trips
+#   on Windows via the `tar` crate's path normalization.
+# - `zstd` because session JSONL compresses 6–10×.
+# Both are pure-Rust at the API surface; `zstd` ships its own zstd-sys C
+# library bundled, so no system zstd dependency.
+tar = "0.4"
+zstd = "0.13"
+
 # Secret zeroization — used by the Keys + Settings IPC commands
 # (D-5/6/7) to overwrite token bytes after persistence/copy. Drop alone
 # is not enough: Rust's `String` deallocator does not scrub. `zeroize`

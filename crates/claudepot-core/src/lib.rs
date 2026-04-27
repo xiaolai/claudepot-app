@@ -16,6 +16,7 @@ pub mod error;
 pub mod fs_utils;
 pub mod keys;
 pub mod launcher;
+pub mod migrate;
 pub mod migrations;
 pub mod oauth;
 pub mod onboard;
