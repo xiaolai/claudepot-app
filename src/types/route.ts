@@ -26,6 +26,7 @@ export interface RouteSummaryDto {
   installed_on_cli: boolean;
   enable_tool_search: boolean;
   auth_scheme: RouteAuthScheme;
+  use_keychain: boolean;
 }
 
 export interface GatewayInputDto {
@@ -34,6 +35,7 @@ export interface GatewayInputDto {
   /** Empty string defaults to `bearer` on the Rust side. */
   auth_scheme: RouteAuthScheme | "";
   enable_tool_search: boolean;
+  use_keychain: boolean;
 }
 
 export interface BedrockInputDto {
@@ -42,6 +44,7 @@ export interface BedrockInputDto {
   base_url: string;
   aws_profile: string;
   skip_aws_auth: boolean;
+  use_keychain: boolean;
 }
 
 export interface VertexInputDto {
@@ -56,6 +59,7 @@ export interface FoundryInputDto {
   base_url: string;
   resource: string;
   skip_azure_auth: boolean;
+  use_keychain: boolean;
 }
 
 export interface RouteCreateDto {

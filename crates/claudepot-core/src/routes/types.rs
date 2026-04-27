@@ -66,6 +66,12 @@ pub struct GatewayConfig {
     /// Gateway). See design doc §15.3.
     #[serde(default)]
     pub enable_tool_search: bool,
+    /// When true, `api_key` is stored in the OS keychain instead of
+    /// in this struct (the field is blanked on persist) and the
+    /// wrapper / Cowork-on-3P pull it via a helper script. See
+    /// `routes::helper` and `routes::keychain`.
+    #[serde(default)]
+    pub use_keychain: bool,
 }
 
 fn default_auth_scheme() -> AuthScheme {
@@ -95,6 +101,9 @@ pub struct BedrockConfig {
     /// wrapper — for gateways that handle AWS auth on the proxy side.
     #[serde(default)]
     pub skip_aws_auth: bool,
+    /// Keychain-backing for `bearer_token`. See [`GatewayConfig`].
+    #[serde(default)]
+    pub use_keychain: bool,
 }
 
 /// Vertex-provider configuration. `project_id` is required; other
@@ -133,6 +142,9 @@ pub struct FoundryConfig {
     /// When true, set `CLAUDE_CODE_SKIP_FOUNDRY_AUTH=1` in the wrapper.
     #[serde(default)]
     pub skip_azure_auth: bool,
+    /// Keychain-backing for `api_key`. See [`GatewayConfig`].
+    #[serde(default)]
+    pub use_keychain: bool,
 }
 
 /// Per-provider configuration.
@@ -328,6 +340,7 @@ mod tests {
                 api_key: "secret-12345-xyz".into(),
                 auth_scheme: AuthScheme::Bearer,
                 enable_tool_search: false,
+                use_keychain: false,
             }),
             model: "llama3.2:3b".into(),
             small_fast_model: None,

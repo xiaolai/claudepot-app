@@ -19,6 +19,8 @@ use serde_json::{Map, Value};
 use crate::fs_utils;
 
 use super::error::RouteError;
+use super::helper::helper_path;
+use super::keychain::SecretField;
 use super::types::{Route, RouteProvider};
 use super::CLAUDEPOT_MANAGED_MARKER;
 
@@ -194,20 +196,40 @@ fn build_inference_keys(route: &Route) -> Map<String, Value> {
                 Value::String(cfg.base_url.clone()),
             );
             m.insert(
-                "inferenceGatewayApiKey".to_string(),
-                Value::String(cfg.api_key.clone()),
-            );
-            m.insert(
                 "inferenceGatewayAuthScheme".to_string(),
                 Value::String(cfg.auth_scheme.as_str().to_string()),
             );
+            if cfg.use_keychain {
+                m.insert(
+                    "inferenceCredentialHelper".to_string(),
+                    Value::String(
+                        helper_path(route.id, SecretField::GatewayApiKey)
+                            .to_string_lossy()
+                            .into_owned(),
+                    ),
+                );
+            } else {
+                m.insert(
+                    "inferenceGatewayApiKey".to_string(),
+                    Value::String(cfg.api_key.clone()),
+                );
+            }
         }
         RouteProvider::Bedrock(cfg) => {
             m.insert(
                 "inferenceBedrockRegion".to_string(),
                 Value::String(cfg.region.clone()),
             );
-            if let Some(t) = &cfg.bearer_token {
+            if cfg.use_keychain {
+                m.insert(
+                    "inferenceCredentialHelper".to_string(),
+                    Value::String(
+                        helper_path(route.id, SecretField::BedrockBearerToken)
+                            .to_string_lossy()
+                            .into_owned(),
+                    ),
+                );
+            } else if let Some(t) = &cfg.bearer_token {
                 m.insert(
                     "inferenceBedrockBearerToken".to_string(),
                     Value::String(t.clone()),
@@ -245,7 +267,16 @@ fn build_inference_keys(route: &Route) -> Map<String, Value> {
             }
         }
         RouteProvider::Foundry(cfg) => {
-            if let Some(k) = &cfg.api_key {
+            if cfg.use_keychain {
+                m.insert(
+                    "inferenceCredentialHelper".to_string(),
+                    Value::String(
+                        helper_path(route.id, SecretField::FoundryApiKey)
+                            .to_string_lossy()
+                            .into_owned(),
+                    ),
+                );
+            } else if let Some(k) = &cfg.api_key {
                 m.insert(
                     "inferenceFoundryApiKey".to_string(),
                     Value::String(k.clone()),
@@ -286,6 +317,7 @@ mod tests {
                 api_key: "ollama".into(),
                 auth_scheme: AuthScheme::Bearer,
                 enable_tool_search: false,
+                use_keychain: false,
             }),
             model: "llama3.2:3b".into(),
             small_fast_model: None,
@@ -385,6 +417,7 @@ mod tests {
                 base_url: None,
                 aws_profile: Some("claudepot".into()),
                 skip_aws_auth: false,
+                use_keychain: false,
             }),
             model: "anthropic.claude-sonnet-4".into(),
             small_fast_model: None,
@@ -459,6 +492,7 @@ mod tests {
                 base_url: None,
                 resource: Some("my-resource".into()),
                 skip_azure_auth: false,
+                use_keychain: false,
             }),
             model: "claude-sonnet-4-5".into(),
             small_fast_model: None,

@@ -9,9 +9,10 @@
 //! `api_key_preview` is sent back.
 
 use claudepot_core::routes::{
-    activate_desktop, clear_desktop_active, delete_wrapper, derive_wrapper_slug,
-    sanitize_wrapper_name, write_wrapper, AuthScheme, BedrockConfig, FoundryConfig,
-    GatewayConfig, ProviderKind, Route, RouteError, RouteProvider, RouteStore,
+    activate_desktop, clear_desktop_active, delete_helpers, delete_keychain_for_route,
+    delete_wrapper, derive_wrapper_slug, sanitize_wrapper_name, store_keychain_secret,
+    write_helper, write_wrapper, AuthScheme, BedrockConfig, FoundryConfig, GatewayConfig,
+    ProviderKind, Route, RouteError, RouteId, RouteProvider, RouteStore, SecretField,
     VertexConfig,
 };
 use uuid::Uuid;
@@ -72,6 +73,7 @@ fn build_provider(
                 api_key: g.api_key,
                 auth_scheme: parse_auth_scheme(&g.auth_scheme),
                 enable_tool_search: g.enable_tool_search,
+                use_keychain: g.use_keychain,
             }))
         }
         ProviderKind::Bedrock => {
@@ -94,6 +96,7 @@ fn build_provider(
                 base_url: empty_to_none(b.base_url),
                 aws_profile: profile,
                 skip_aws_auth: b.skip_aws_auth,
+                use_keychain: b.use_keychain,
             }))
         }
         ProviderKind::Vertex => {
@@ -137,6 +140,7 @@ fn build_provider(
                 base_url: base,
                 resource,
                 skip_azure_auth: f.skip_azure_auth,
+                use_keychain: f.use_keychain,
             }))
         }
     }
@@ -151,17 +155,122 @@ fn empty_to_none(s: String) -> Option<String> {
     }
 }
 
+/// Side-effect function that resolves how each provider's secret
+/// should be stored, given the new (post-form) and the previous
+/// (already-on-disk) provider configs:
+///
+///   - **Plaintext mode (`use_keychain == false`)**: blank secret on
+///     edit means "keep prev value"; non-empty replaces.
+///   - **Keychain mode (`use_keychain == true`)**: any non-empty
+///     incoming secret is written to the OS keychain and the helper
+///     script is (re)materialized; the inline field is then blanked
+///     so it never reaches the routes.json on disk.
+///
+/// Run before `RouteStore::add` / `update` so the persisted route
+/// reflects the post-effect state.
+fn commit_secrets(
+    new_provider: &mut RouteProvider,
+    route_id: RouteId,
+    prev: Option<&RouteProvider>,
+) -> Result<(), String> {
+    match new_provider {
+        RouteProvider::Gateway(cfg) => {
+            if cfg.use_keychain {
+                if !cfg.api_key.is_empty() {
+                    store_keychain_secret(
+                        route_id,
+                        SecretField::GatewayApiKey,
+                        &cfg.api_key,
+                    )
+                    .map_err(map_err)?;
+                    write_helper(route_id, SecretField::GatewayApiKey)
+                        .map_err(map_err)?;
+                }
+                cfg.api_key.clear();
+            } else if cfg.api_key.is_empty() {
+                if let Some(RouteProvider::Gateway(p)) = prev {
+                    cfg.api_key = p.api_key.clone();
+                }
+            }
+        }
+        RouteProvider::Bedrock(cfg) => {
+            if cfg.use_keychain {
+                if let Some(t) = cfg.bearer_token.take() {
+                    if !t.is_empty() {
+                        store_keychain_secret(
+                            route_id,
+                            SecretField::BedrockBearerToken,
+                            &t,
+                        )
+                        .map_err(map_err)?;
+                        write_helper(route_id, SecretField::BedrockBearerToken)
+                            .map_err(map_err)?;
+                    }
+                }
+                cfg.bearer_token = None;
+            } else {
+                let need_inherit = cfg
+                    .bearer_token
+                    .as_ref()
+                    .map_or(false, |t| t.is_empty());
+                if need_inherit {
+                    if let Some(RouteProvider::Bedrock(p)) = prev {
+                        cfg.bearer_token = p.bearer_token.clone();
+                    } else {
+                        cfg.bearer_token = None;
+                    }
+                }
+            }
+        }
+        RouteProvider::Foundry(cfg) => {
+            if cfg.use_keychain {
+                if let Some(k) = cfg.api_key.take() {
+                    if !k.is_empty() {
+                        store_keychain_secret(
+                            route_id,
+                            SecretField::FoundryApiKey,
+                            &k,
+                        )
+                        .map_err(map_err)?;
+                        write_helper(route_id, SecretField::FoundryApiKey)
+                            .map_err(map_err)?;
+                    }
+                }
+                cfg.api_key = None;
+            } else {
+                let need_inherit = cfg
+                    .api_key
+                    .as_ref()
+                    .map_or(false, |k| k.is_empty());
+                if need_inherit {
+                    if let Some(RouteProvider::Foundry(p)) = prev {
+                        cfg.api_key = p.api_key.clone();
+                    } else {
+                        cfg.api_key = None;
+                    }
+                }
+            }
+        }
+        RouteProvider::Vertex(_) => {}
+    }
+    Ok(())
+}
+
 fn project_summary(r: &Route) -> RouteSummaryDto {
     let s = r.summary();
-    let (auth_scheme, enable_tool_search) = match &r.provider {
-        RouteProvider::Gateway(cfg) => {
-            (cfg.auth_scheme.as_str().to_string(), cfg.enable_tool_search)
+    let (auth_scheme, enable_tool_search, use_keychain) = match &r.provider {
+        RouteProvider::Gateway(cfg) => (
+            cfg.auth_scheme.as_str().to_string(),
+            cfg.enable_tool_search,
+            cfg.use_keychain,
+        ),
+        RouteProvider::Bedrock(cfg) => {
+            (String::from("bearer"), false, cfg.use_keychain)
         }
-        // Auth scheme / tool-search aren't meaningful for these providers;
-        // the GUI shows neutral defaults so the field is well-defined.
-        RouteProvider::Bedrock(_) => (String::from("bearer"), false),
-        RouteProvider::Vertex(_) => (String::from("bearer"), false),
-        RouteProvider::Foundry(_) => (String::from("bearer"), false),
+        RouteProvider::Vertex(_) => (String::from("bearer"), false, false),
+        RouteProvider::Foundry(cfg) => {
+            (String::from("bearer"), false, cfg.use_keychain)
+        }
     };
     RouteSummaryDto {
         id: s.id.to_string(),
@@ -177,6 +286,7 @@ fn project_summary(r: &Route) -> RouteSummaryDto {
         installed_on_cli: s.installed_on_cli,
         enable_tool_search,
         auth_scheme,
+        use_keychain,
     }
 }
 
@@ -226,7 +336,7 @@ pub async fn routes_add(
     mut route: RouteCreateDto,
 ) -> Result<RouteSummaryDto, String> {
     let provider_kind = parse_provider(&route.provider_kind)?;
-    let provider = build_provider(
+    let mut provider = build_provider(
         provider_kind,
         route.gateway.take(),
         route.bedrock.take(),
@@ -235,8 +345,13 @@ pub async fn routes_add(
     )?;
     let wrapper = pick_wrapper_name(&route.wrapper_name, &route.model)?;
 
+    // Allocate the route id up-front so commit_secrets can address
+    // the keychain entries by it.
+    let route_id = Uuid::new_v4();
+    commit_secrets(&mut provider, route_id, None)?;
+
     let new_route = Route {
-        id: Uuid::nil(),
+        id: route_id,
         name: route.name.trim().to_string(),
         provider,
         model: route.model.trim().to_string(),
@@ -278,60 +393,32 @@ pub async fn routes_edit(
     let id = parse_route_id(&route.id)?;
     let provider_kind = parse_provider(&route.provider_kind)?;
 
-    // "Blank secret = keep existing" — the form intentionally
-    // doesn't pre-fill secrets. Patch any blank secret with the
-    // pre-existing value before parsing the provider config.
-    // Also captures the prior wrapper name to detect renames so
-    // we can clean up the stale wrapper file post-edit.
-    let prev_wrapper_name: Option<String>;
-    {
+    // Capture the prior provider so commit_secrets can decide
+    // "blank = keep existing" for plaintext mode, and capture the
+    // prior wrapper name to detect renames for stale-file cleanup.
+    let (prev_provider, prev_wrapper_name) = {
         let store = open_store()?;
         let prev = store
             .get(id)
             .ok_or_else(|| RouteError::NotFound(id.to_string()).to_string())?;
-        prev_wrapper_name = if prev.installed_on_cli {
-            Some(prev.wrapper_name.clone())
-        } else {
-            None
-        };
-        match (provider_kind, &prev.provider) {
-            (ProviderKind::Gateway, RouteProvider::Gateway(prev_cfg)) => {
-                if let Some(g) = route.gateway.as_mut() {
-                    if g.api_key.is_empty() {
-                        g.api_key = prev_cfg.api_key.clone();
-                    }
-                }
-            }
-            (ProviderKind::Bedrock, RouteProvider::Bedrock(prev_cfg)) => {
-                if let Some(b) = route.bedrock.as_mut() {
-                    if b.bearer_token.is_empty() {
-                        if let Some(prev_token) = &prev_cfg.bearer_token {
-                            b.bearer_token = prev_token.clone();
-                        }
-                    }
-                }
-            }
-            (ProviderKind::Foundry, RouteProvider::Foundry(prev_cfg)) => {
-                if let Some(f) = route.foundry.as_mut() {
-                    if f.api_key.is_empty() {
-                        if let Some(prev_key) = &prev_cfg.api_key {
-                            f.api_key = prev_key.clone();
-                        }
-                    }
-                }
-            }
-            // Provider-kind change OR Vertex (no inline secret) — nothing to inherit.
-            _ => {}
-        }
-    }
+        (
+            prev.provider.clone(),
+            if prev.installed_on_cli {
+                Some(prev.wrapper_name.clone())
+            } else {
+                None
+            },
+        )
+    };
 
-    let provider = build_provider(
+    let mut provider = build_provider(
         provider_kind,
         route.gateway.take(),
         route.bedrock.take(),
         route.vertex.take(),
         route.foundry.take(),
     )?;
+    commit_secrets(&mut provider, id, Some(&prev_provider))?;
     let wrapper = pick_wrapper_name(&route.wrapper_name, &route.model)?;
 
     let candidate = Route {
@@ -382,13 +469,16 @@ pub async fn routes_remove(id: String) -> Result<(), String> {
     let id = parse_route_id(&id)?;
     let mut store = open_store()?;
     let removed = store.remove(id).map_err(map_err)?;
-    // Side effects: tear down wrapper + clear desktop activation.
+    // Side effects: tear down wrapper + clear desktop activation +
+    // forget any keychain entries / helper scripts the route owned.
     if removed.installed_on_cli {
         let _ = delete_wrapper(&removed.wrapper_name);
     }
     if removed.active_on_desktop {
         let _ = clear_desktop_active();
     }
+    let _ = delete_keychain_for_route(id);
+    let _ = delete_helpers(id, None);
     Ok(())
 }
 

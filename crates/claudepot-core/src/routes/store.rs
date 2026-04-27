@@ -218,6 +218,7 @@ mod tests {
                 api_key: "ollama".into(),
                 auth_scheme: AuthScheme::Bearer,
                 enable_tool_search: false,
+                use_keychain: false,
             }),
             model: "llama3.2:3b".into(),
             small_fast_model: None,

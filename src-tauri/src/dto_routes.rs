@@ -23,6 +23,7 @@ pub struct RouteSummaryDto {
     pub installed_on_cli: bool,
     pub enable_tool_search: bool,
     pub auth_scheme: String,
+    pub use_keychain: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -34,6 +35,8 @@ pub struct GatewayInputDto {
     pub auth_scheme: String,
     #[serde(default)]
     pub enable_tool_search: bool,
+    #[serde(default)]
+    pub use_keychain: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -47,6 +50,8 @@ pub struct BedrockInputDto {
     pub aws_profile: String,
     #[serde(default)]
     pub skip_aws_auth: bool,
+    #[serde(default)]
+    pub use_keychain: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -70,6 +75,8 @@ pub struct FoundryInputDto {
     pub resource: String,
     #[serde(default)]
     pub skip_azure_auth: bool,
+    #[serde(default)]
+    pub use_keychain: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

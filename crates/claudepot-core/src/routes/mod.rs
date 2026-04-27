@@ -18,6 +18,8 @@
 
 mod desktop;
 mod error;
+mod helper;
+mod keychain;
 mod slug;
 mod store;
 mod types;
@@ -28,6 +30,12 @@ pub use desktop::{
     write_library_profile,
 };
 pub use error::RouteError;
+pub use helper::{delete_helpers, helper_path, helpers_dir, write_helper};
+pub use keychain::{
+    delete_all_for_route as delete_keychain_for_route, delete_secret as delete_keychain_secret,
+    read_secret as read_keychain_secret, store_secret as store_keychain_secret,
+    SecretField,
+};
 pub use slug::{derive_wrapper_slug, sanitize_wrapper_name, WrapperNameError};
 pub use store::RouteStore;
 pub use types::{
