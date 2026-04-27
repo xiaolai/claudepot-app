@@ -10,7 +10,17 @@ use std::path::{Path, PathBuf};
 use std::time::SystemTime;
 use unicode_normalization::UnicodeNormalization;
 
-pub(crate) fn resolve_path(path: &str) -> Result<String, ProjectError> {
+/// Resolve a user-supplied path string to an absolute, NFC-normalized
+/// form. Windows-shaped input (drive letter, UNC, verbatim) is handled
+/// without touching the host filesystem; Unix-shaped input is
+/// canonicalized when it exists on disk.
+///
+/// Promoted from `pub(crate)` so the migrate CLI surface
+/// (`project export <prefix>`) can reuse the same resolution semantics
+/// as `project move`. The function is the same one CC's
+/// `canonicalizePath` mirrors at write time, so callers that go
+/// through this stay byte-identical to CC's slug input.
+pub fn resolve_path(path: &str) -> Result<String, ProjectError> {
     // Windows-shaped input on a non-Windows host: `Path::is_absolute()`
     // returns false for `C:\...`, `\\server\share\...`, and `\\?\C:\...`,
     // so the legacy `if p.is_absolute()` branch would prepend the host's
