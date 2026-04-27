@@ -36,6 +36,18 @@ vi.mock("../api", () => ({
       .mockResolvedValue({ merged: {}, provenance: [], policy_winner: null, policy_errors: [] }),
     // Anchor picker pulls the recent-projects list on mount.
     projectList: vi.fn().mockResolvedValue([]),
+    // Lifecycle classification runs whenever a file is selected.
+    // Default to "out of scope" so no Disable/Trash buttons render —
+    // the existing tests don't care about those affordances.
+    artifactClassifyPath: vi
+      .fn()
+      .mockResolvedValue({
+        trackable: null,
+        refused: "outside test scope",
+        already_disabled: false,
+      }),
+    // Usage badge fetcher runs once per tree identity.
+    artifactUsageBatch: vi.fn().mockResolvedValue([]),
   },
 }));
 
