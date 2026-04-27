@@ -167,7 +167,7 @@ function anchorLabel(anchor: ConfigAnchor): string {
 }
 
 /**
- * Project / scope label rendered next to "Effective MCP" / "Effective
+ * Project / scope label rendered next to "Active MCP" / "Active
  * settings" / "Hooks" titles. Lets the user see *which* scope the
  * computed view applies to without scanning the surrounding chrome —
  * useful when ConfigSection is nested inside a project tab and the
@@ -855,7 +855,7 @@ export function ConfigSection({
         >
           {virtualRoute === "effective-settings" ? (
             <EffectiveShell
-              title="Effective settings"
+              title="Active settings"
               subtitle="Merged view of every enabled source. Hover a value to see contributors."
               scopeLabel={effectiveScopeLabel(anchor)}
               onClose={() => onSubRouteChange(null)}
@@ -864,7 +864,7 @@ export function ConfigSection({
             </EffectiveShell>
           ) : virtualRoute === "effective-mcp" ? (
             <EffectiveShell
-              title="Effective MCP"
+              title="Active MCP"
               subtitle="MCP servers CC would see, per simulation mode."
               scopeLabel={effectiveScopeLabel(anchor)}
               onClose={() => onSubRouteChange(null)}
@@ -1736,7 +1736,7 @@ function scopeBadgeFor(scopeType: string): ScopeBadge {
     case "redacted_user_config":
       return { short: "G", full: "Global config" };
     case "effective":
-      return { short: "E", full: "Effective" };
+      return { short: "A", full: "Active" };
     default:
       return { short: "·", full: scopeType };
   }
@@ -2314,8 +2314,8 @@ const KIND_LABELS: Record<string, string> = {
   plugin: "Plugin",
   keybindings: "Keybindings",
   statusline: "Status line",
-  effective_settings: "Effective settings",
-  effective_mcp: "Effective MCP",
+  effective_settings: "Active settings",
+  effective_mcp: "Active MCP",
   other: "Other",
 };
 
