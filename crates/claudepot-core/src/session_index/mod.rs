@@ -37,6 +37,7 @@ use rusqlite::{params, Connection};
 use std::path::Path;
 use std::sync::{Mutex, MutexGuard};
 
+use crate::artifact_usage::{model::UsageEvent, store as usage_store};
 use crate::session::{scan_session, SessionRow};
 
 /// Handle to the persistent session index.
@@ -187,22 +188,24 @@ impl SessionIndex {
         // captured with their path + message so the caller can log /
         // surface them; the file will also be retried on the next
         // refresh because its tuple stays absent or different.
-        let scan_results: Vec<Result<SessionRow, (std::path::PathBuf, String)>> = plan
+        type ScanOk = (SessionRow, Vec<UsageEvent>);
+        let scan_results: Vec<Result<ScanOk, (std::path::PathBuf, String)>> = plan
             .to_upsert
             .par_iter()
             .filter_map(|path_key| {
                 by_path.get(path_key.as_str()).map(|entry| {
                     scan_session(&entry.slug, &entry.path)
+                        .map(|s| (s.row, s.usage))
                         .map_err(|e| (entry.path.clone(), e.to_string()))
                 })
             })
             .collect();
 
-        let mut scanned: Vec<SessionRow> = Vec::with_capacity(scan_results.len());
+        let mut scanned: Vec<(SessionRow, Vec<UsageEvent>)> = Vec::with_capacity(scan_results.len());
         let mut failed: Vec<(std::path::PathBuf, String)> = walk.stat_failed;
         for r in scan_results {
             match r {
-                Ok(row) => scanned.push(row),
+                Ok(pair) => scanned.push(pair),
                 Err((path, msg)) => {
                     tracing::warn!(path = %path.display(), error = %msg, "session_index: scan failed");
                     failed.push((path, msg));
@@ -210,20 +213,40 @@ impl SessionIndex {
             }
         }
 
-        // Single write transaction: upserts + deletes. If anything
-        // fails, nothing is committed and the cache stays consistent.
+        // Single write transaction: upserts + deletes (sessions table)
+        // plus usage_event delete-and-reinsert (per re-scanned file).
+        // GC of stale raw events runs in the same transaction so a
+        // single refresh leaves the cache fully consistent.
         let indexed_at_ms = Utc::now().timestamp_millis();
+        let usage_cutoff_ms = indexed_at_ms - 30 * 86_400_000;
         let scanned_count = scanned.len();
         let deleted_count = plan.to_delete.len();
+        let mut usage_events_written = 0usize;
         {
             let mut db = self.db();
             let tx = db.transaction()?;
-            for row in &scanned {
+            for (row, events) in &scanned {
                 codec::upsert_row(&tx, row, indexed_at_ms)?;
+                let file_path = row.file_path.to_string_lossy();
+                // Order matters: subtract the existing per-day counts
+                // BEFORE deleting the raw events that produced them,
+                // otherwise the ensuing inserts double-bump the daily
+                // rollup on every re-scan.
+                usage_store::subtract_daily_for_file(&tx, &file_path)?;
+                usage_store::delete_events_for_file(&tx, &file_path)?;
+                for ev in events {
+                    usage_store::insert_event(&tx, ev, &file_path, &row.project_path)?;
+                    usage_events_written += 1;
+                }
             }
             for gone in &plan.to_delete {
                 codec::delete_row(&tx, gone)?;
+                usage_store::subtract_daily_for_file(&tx, gone)?;
+                usage_store::delete_events_for_file(&tx, gone)?;
             }
+            // GC raw events older than 30 days. The daily rollup is
+            // unaffected; counters survive eviction.
+            usage_store::gc_events_older_than(&tx, usage_cutoff_ms)?;
             tx.commit()?;
         }
 
@@ -233,6 +256,7 @@ impl SessionIndex {
             deleted = deleted_count,
             failed = failed.len(),
             total_on_disk = walk.entries.len(),
+            usage_events = usage_events_written,
             elapsed_ms = elapsed.as_millis() as u64,
             "session_index: refresh complete"
         );
@@ -256,6 +280,61 @@ impl SessionIndex {
         codec::load_all_rows(&db)
     }
 
+    // -----------------------------------------------------------------
+    // artifact_usage public API — wraps the queries in
+    // `claudepot_core::artifact_usage` so callers don't need raw access
+    // to the underlying connection. Locking matches the rest of the
+    // index: short-lived guard, no I/O held across await.
+    // -----------------------------------------------------------------
+
+    pub fn usage_for_artifact(
+        &self,
+        kind: crate::artifact_usage::ArtifactKind,
+        artifact_key: &str,
+        now_ms: i64,
+    ) -> Result<crate::artifact_usage::UsageStats, SessionIndexError> {
+        let db = self.db();
+        crate::artifact_usage::usage_for_artifact(&db, kind, artifact_key, now_ms)
+            .map_err(SessionIndexError::Sql)
+    }
+
+    /// Batch fetch — single mutex acquisition for all keys, used by
+    /// the Config-tree renderer to populate every visible artifact's
+    /// badge in one round-trip without N independent IPC calls.
+    pub fn usage_batch(
+        &self,
+        keys: &[(crate::artifact_usage::ArtifactKind, String)],
+        now_ms: i64,
+    ) -> Result<
+        Vec<(
+            (crate::artifact_usage::ArtifactKind, String),
+            crate::artifact_usage::UsageStats,
+        )>,
+        SessionIndexError,
+    > {
+        let db = self.db();
+        crate::artifact_usage::batch_usage(&db, keys, now_ms)
+            .map_err(SessionIndexError::Sql)
+    }
+
+    pub fn usage_top(
+        &self,
+        kind: Option<crate::artifact_usage::ArtifactKind>,
+        limit: usize,
+        now_ms: i64,
+    ) -> Result<Vec<crate::artifact_usage::UsageListRow>, SessionIndexError> {
+        let db = self.db();
+        crate::artifact_usage::list_top_used(&db, kind, limit, now_ms)
+            .map_err(SessionIndexError::Sql)
+    }
+
+    pub fn usage_known_keys(
+        &self,
+    ) -> Result<Vec<(crate::artifact_usage::ArtifactKind, String)>, SessionIndexError> {
+        let db = self.db();
+        crate::artifact_usage::list_all_known(&db).map_err(SessionIndexError::Sql)
+    }
+
     /// Truncate the cache. Intended as the escape hatch for cases the
     /// `(size, mtime)` guard can't see — filesystems with coarse
     /// mtime resolution, clock skew, a JSONL edited in-place with
@@ -263,9 +342,12 @@ impl SessionIndex {
     /// `list_all` / `refresh` to repopulate.
     ///
     /// Does not drop the DB file or touch the schema — just the rows.
+    /// Also truncates `usage_event` and `usage_daily` so the next
+    /// `refresh()` rebuilds the rollups from disk truth.
     pub fn rebuild(&self) -> Result<(), SessionIndexError> {
         let db = self.db();
         db.execute("DELETE FROM sessions", [])?;
+        usage_store::truncate_all(&db)?;
         Ok(())
     }
 }
@@ -290,10 +372,43 @@ pub struct RefreshStats {
 
 fn apply_schema(db: &Connection) -> Result<(), SessionIndexError> {
     db.execute_batch(schema::SCHEMA)?;
+    // v2 (additive): artifact usage tables share `sessions.db` because
+    // the source data — JSONL transcripts — is the same. Refresh writes
+    // both in one transaction.
+    //
+    // Read the prior version BEFORE the bump so we can tell a fresh DB
+    // from a v1→v2 upgrade. On upgrade we invalidate the sessions
+    // cache so the next `refresh()` re-scans every transcript and
+    // populates usage tables — without this, existing users keep their
+    // stale `(size, mtime_ns)` rows and never produce usage events
+    // until each JSONL changes naturally.
+    let prior_version: Option<String> = db
+        .query_row(
+            "SELECT v FROM meta WHERE k = 'schema_version'",
+            [],
+            |r| r.get::<_, String>(0),
+        )
+        .ok();
+
+    db.execute_batch(crate::artifact_usage::schema::SCHEMA)?;
     db.execute(
         "INSERT OR IGNORE INTO meta (k, v) VALUES ('schema_version', ?1)",
-        params![schema::SCHEMA_VERSION],
+        params![crate::artifact_usage::schema::SCHEMA_VERSION],
     )?;
+    // Forward migrate any v1 row to v2 (the meta key is INSERT OR
+    // IGNORE so existing rows aren't bumped automatically).
+    db.execute(
+        "UPDATE meta SET v = ?1 WHERE k = 'schema_version' AND v < ?1",
+        params![crate::artifact_usage::schema::SCHEMA_VERSION],
+    )?;
+
+    if matches!(prior_version.as_deref(), Some("1")) {
+        // Drop cached session rows so the next refresh re-scans every
+        // transcript. Cheaper than walking every existing row to extract
+        // events — a cold scan of ~6 k JSONL files takes ~10 s, well
+        // under any user-perceptible threshold for an upgrade event.
+        db.execute("DELETE FROM sessions", [])?;
+    }
     Ok(())
 }
 
@@ -382,7 +497,7 @@ mod tests {
         assert_eq!(idx.row_count().unwrap(), 0);
         assert_eq!(
             idx.schema_version().unwrap().as_deref(),
-            Some(schema::SCHEMA_VERSION)
+            Some(crate::artifact_usage::schema::SCHEMA_VERSION)
         );
     }
 
@@ -395,7 +510,7 @@ mod tests {
         let second = SessionIndex::open(&path).unwrap();
         assert_eq!(
             second.schema_version().unwrap().as_deref(),
-            Some(schema::SCHEMA_VERSION)
+            Some(crate::artifact_usage::schema::SCHEMA_VERSION)
         );
     }
 
@@ -743,7 +858,7 @@ mod tests {
         assert_eq!(idx.row_count().unwrap(), 0);
         assert_eq!(
             idx.schema_version().unwrap().as_deref(),
-            Some(schema::SCHEMA_VERSION)
+            Some(crate::artifact_usage::schema::SCHEMA_VERSION)
         );
 
         // A quarantined file must exist alongside for manual forensics.
@@ -794,5 +909,242 @@ mod tests {
         assert_eq!(stats.scanned, 1, "only the new file re-scans");
         assert_eq!(stats.deleted, 0);
         assert_eq!(idx.row_count().unwrap(), 2);
+    }
+
+    // -----------------------------------------------------------------
+    // artifact_usage integration: a JSONL with one of each event family
+    // refreshes into the right counters.
+    // -----------------------------------------------------------------
+
+    fn artifact_session_lines(cwd: &str, sid: &str) -> Vec<String> {
+        // Five lines: hello user, slash command, invoked_skills attachment,
+        // hook_success attachment, an Agent tool_use.
+        vec![
+            format!(
+                r#"{{"type":"user","message":{{"role":"user","content":"hi"}},"timestamp":"2026-04-10T10:00:00Z","cwd":"{cwd}","sessionId":"{sid}"}}"#
+            ),
+            format!(
+                r#"{{"type":"user","message":{{"role":"user","content":"<command-name>/foo:bar</command-name>"}},"timestamp":"2026-04-10T10:00:01Z","cwd":"{cwd}","sessionId":"{sid}"}}"#
+            ),
+            format!(
+                r#"{{"type":"attachment","timestamp":"2026-04-10T10:00:02Z","sessionId":"{sid}","attachment":{{"type":"invoked_skills","skills":[{{"name":"x","path":"plugin:foo:x"}}]}}}}"#
+            ),
+            format!(
+                r#"{{"type":"attachment","timestamp":"2026-04-10T10:00:03Z","sessionId":"{sid}","attachment":{{"type":"hook_success","hookName":"PreToolUse:Bash","command":"node /h.js","durationMs":42,"exitCode":0}}}}"#
+            ),
+            format!(
+                r#"{{"type":"assistant","timestamp":"2026-04-10T10:00:04Z","sessionId":"{sid}","message":{{"content":[{{"type":"tool_use","id":"toolu_X","name":"Agent","input":{{"subagent_type":"Explore"}}}}]}}}}"#
+            ),
+        ]
+    }
+
+    fn count_usage_rows(idx: &SessionIndex) -> i64 {
+        let db = idx.db();
+        db.query_row("SELECT COUNT(*) FROM usage_event", [], |r| r.get::<_, i64>(0))
+            .unwrap()
+    }
+
+    #[test]
+    fn refresh_writes_one_usage_event_per_extracted_kind() {
+        let (idx, _tmp) = open_index();
+        let cfg = TempDir::new().unwrap();
+        write_session(cfg.path(), "-a", "S1", &artifact_session_lines("/a", "S1"));
+        idx.refresh(cfg.path()).unwrap();
+        // One slash command + one skill + one hook + one agent = 4 rows.
+        assert_eq!(count_usage_rows(&idx), 4);
+    }
+
+    #[test]
+    fn rebuild_truncates_usage_tables() {
+        let (idx, _tmp) = open_index();
+        let cfg = TempDir::new().unwrap();
+        write_session(cfg.path(), "-a", "S1", &artifact_session_lines("/a", "S1"));
+        idx.refresh(cfg.path()).unwrap();
+        assert!(count_usage_rows(&idx) > 0);
+        idx.rebuild().unwrap();
+        assert_eq!(count_usage_rows(&idx), 0);
+        let db = idx.db();
+        let daily: i64 = db
+            .query_row("SELECT COUNT(*) FROM usage_daily", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(daily, 0, "rebuild must clear daily rollup too");
+    }
+
+    #[test]
+    fn refresh_re_scan_replaces_usage_for_same_file() {
+        // A second refresh after a file change must not duplicate rows
+        // for that file. The subtract→delete→insert sequence in
+        // refresh is what guarantees this.
+        let (idx, _tmp) = open_index();
+        let cfg = TempDir::new().unwrap();
+        let path = write_session(cfg.path(), "-a", "S1", &artifact_session_lines("/a", "S1"));
+        idx.refresh(cfg.path()).unwrap();
+        let first = count_usage_rows(&idx);
+
+        // Append one more event line to trigger re-scan.
+        let extra = format!(
+            r#"{{"type":"attachment","timestamp":"2026-04-10T10:00:05Z","sessionId":"S1","attachment":{{"type":"hook_success","hookName":"PreToolUse:Bash","command":"node /h.js","durationMs":51,"exitCode":0}}}}"#
+        );
+        let mut f = std::fs::OpenOptions::new()
+            .append(true)
+            .open(&path)
+            .unwrap();
+        writeln!(f, "{extra}").unwrap();
+        drop(f);
+
+        idx.refresh(cfg.path()).unwrap();
+        let second = count_usage_rows(&idx);
+        assert_eq!(
+            second,
+            first + 1,
+            "re-scan must replace the file's events, not duplicate them"
+        );
+    }
+
+    #[test]
+    fn refresh_re_scan_does_not_inflate_daily_counts() {
+        // Stronger regression than the row-count test: walks the full
+        // index API to confirm `usage_for_artifact` returns the same
+        // 30d count after re-scanning a file with no event changes.
+        // A bug in subtract_daily_for_file would surface as 2× counts
+        // here while leaving the raw row count unchanged.
+        use crate::artifact_usage::ArtifactKind;
+        let (idx, _tmp) = open_index();
+        let cfg = TempDir::new().unwrap();
+        let path = write_session(cfg.path(), "-a", "S1", &artifact_session_lines("/a", "S1"));
+        idx.refresh(cfg.path()).unwrap();
+        let now_ms = chrono::Utc::now().timestamp_millis();
+        let first = idx
+            .usage_for_artifact(ArtifactKind::Hook, "node /h.js", now_ms)
+            .unwrap()
+            .count_30d;
+
+        // Force a re-scan by bumping mtime — same content, no new events.
+        let later = std::time::SystemTime::now() + std::time::Duration::from_secs(2);
+        filetime::set_file_mtime(&path, filetime::FileTime::from_system_time(later)).unwrap();
+
+        idx.refresh(cfg.path()).unwrap();
+        let second = idx
+            .usage_for_artifact(ArtifactKind::Hook, "node /h.js", now_ms)
+            .unwrap()
+            .count_30d;
+        assert_eq!(
+            second, first,
+            "re-scan with unchanged content must leave the 30d count unchanged"
+        );
+    }
+
+    #[test]
+    fn schema_v1_to_v2_upgrade_invalidates_sessions_so_usage_can_repopulate() {
+        // Simulate the field condition: a sessions.db that pre-dates the
+        // artifact_usage tables — i.e. v1 schema with rows in `sessions`
+        // and no `usage_event` / `usage_daily` tables. After re-opening
+        // (which runs apply_schema and detects the v1→v2 upgrade), the
+        // sessions table should be empty so the next refresh re-scans
+        // every file from cold and produces usage events.
+        let tmp = TempDir::new().unwrap();
+        let path = tmp.path().join("sessions.db");
+
+        // Hand-craft a v1-shaped DB: just the v1 sessions table + a
+        // schema_version=1 meta row. Skip the usage tables on purpose.
+        {
+            let db = Connection::open(&path).unwrap();
+            db.execute_batch(schema::SCHEMA).unwrap();
+            db.execute(
+                "INSERT OR REPLACE INTO meta (k, v) VALUES ('schema_version', '1')",
+                [],
+            )
+            .unwrap();
+            // Plant one row so we can prove the upgrade clears it.
+            db.execute(
+                "INSERT INTO sessions (
+                    file_path, slug, session_id, file_size_bytes,
+                    file_mtime_ns, file_inode, project_path,
+                    project_from_transcript, event_count, message_count,
+                    user_message_count, assistant_message_count,
+                    models_json, tokens_input, tokens_output,
+                    tokens_cache_creation, tokens_cache_read, has_error,
+                    is_sidechain, indexed_at_ms
+                 ) VALUES (
+                    '/legacy.jsonl', '-legacy', 'OLD', 1, 1, 1, '/x',
+                    0, 0, 0, 0, 0, '[]', 0, 0, 0, 0, 0, 0, 0
+                 )",
+                [],
+            )
+            .unwrap();
+        }
+
+        // Open via SessionIndex — apply_schema runs, sees v1, invalidates.
+        let idx = SessionIndex::open(&path).unwrap();
+        assert_eq!(
+            idx.row_count().unwrap(),
+            0,
+            "v1→v2 upgrade must clear sessions so refresh re-populates usage"
+        );
+        assert_eq!(
+            idx.schema_version().unwrap().as_deref(),
+            Some(crate::artifact_usage::schema::SCHEMA_VERSION),
+            "schema_version must advance to v2 after upgrade"
+        );
+    }
+
+    #[test]
+    fn fresh_db_open_does_not_clear_anything() {
+        // Regression guard for the v1→v2 logic: a brand-new DB has no
+        // prior schema_version row, so the upgrade branch must NOT fire.
+        let tmp = TempDir::new().unwrap();
+        let path = tmp.path().join("sessions.db");
+        let idx = SessionIndex::open(&path).unwrap();
+        assert_eq!(idx.row_count().unwrap(), 0);
+        // Re-open: still no spurious cleanup.
+        drop(idx);
+        let idx2 = SessionIndex::open(&path).unwrap();
+        assert_eq!(idx2.row_count().unwrap(), 0);
+    }
+
+    #[test]
+    fn refresh_flips_agent_outcome_to_error_on_failed_tool_result() {
+        // End-to-end coverage for the streaming outcome flip the
+        // session scanner does (replacing the removed
+        // `link_agent_outcomes` two-pass linker). We write one
+        // assistant turn that dispatches two Agent calls, then a
+        // user line whose tool_result for the second one is_error,
+        // and verify that exactly one of the two recorded usage
+        // events ends up with outcome=error.
+        use crate::artifact_usage::ArtifactKind;
+        let (idx, _tmp) = open_index();
+        let cfg = TempDir::new().unwrap();
+        // JSONL is strictly one event per line — keep these as
+        // single physical lines so the streaming parser sees them.
+        let lines = vec![
+            r#"{"type":"assistant","timestamp":"2026-04-10T10:00:00Z","sessionId":"S1","message":{"content":[{"type":"tool_use","id":"toolu_OK","name":"Agent","input":{"subagent_type":"Explore"}},{"type":"tool_use","id":"toolu_BAD","name":"Agent","input":{"subagent_type":"Explore"}}]}}"#.to_string(),
+            r#"{"type":"user","timestamp":"2026-04-10T10:00:01Z","sessionId":"S1","message":{"content":[{"type":"tool_result","tool_use_id":"toolu_BAD","is_error":true,"content":"boom"}]}}"#.to_string(),
+            r#"{"type":"user","timestamp":"2026-04-10T10:00:02Z","sessionId":"S1","message":{"content":[{"type":"tool_result","tool_use_id":"toolu_OK","is_error":false,"content":"ok"}]}}"#.to_string(),
+        ];
+        write_session(cfg.path(), "-a", "S1", &lines);
+        idx.refresh(cfg.path()).unwrap();
+
+        let now_ms = chrono::Utc::now().timestamp_millis();
+        let stats = idx
+            .usage_for_artifact(ArtifactKind::Agent, "Explore", now_ms)
+            .unwrap();
+        assert_eq!(stats.count_30d, 2, "two Agent dispatches should be recorded");
+        assert_eq!(
+            stats.error_count_30d, 1,
+            "exactly one event should be flipped to error by the failed tool_result"
+        );
+    }
+
+    #[test]
+    fn refresh_drops_usage_for_deleted_session_file() {
+        let (idx, _tmp) = open_index();
+        let cfg = TempDir::new().unwrap();
+        let path = write_session(cfg.path(), "-a", "S1", &artifact_session_lines("/a", "S1"));
+        idx.refresh(cfg.path()).unwrap();
+        assert!(count_usage_rows(&idx) > 0);
+
+        std::fs::remove_file(&path).unwrap();
+        idx.refresh(cfg.path()).unwrap();
+        assert_eq!(count_usage_rows(&idx), 0, "usage rows follow session deletion");
     }
 }

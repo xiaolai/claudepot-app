@@ -21,6 +21,10 @@
 //! write in `mod.rs::apply_schema`; see `account.rs` for the
 //! additive-ALTER pattern.
 
+/// Sessions-table schema version. The `meta.schema_version` row stores
+/// the *highest* version the index file has ever seen (currently the
+/// `artifact_usage` schema version "2"). This constant only ratchets
+/// when the `sessions` table itself changes.
 pub const SCHEMA_VERSION: &str = "1";
 
 pub const SCHEMA: &str = r#"
