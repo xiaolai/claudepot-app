@@ -44,6 +44,13 @@ const DENY_NAMES: &[&str] = &[
     "projects",
     "todos",
     "shell-snapshots",
+    // Lifecycle stash — `artifact_lifecycle` moves disabled skills/
+    // agents/commands into `<scope_root>/.disabled/`. The active
+    // Config tree must NOT walk into it (otherwise disabled
+    // artifacts would re-appear under their kind groups). The
+    // lifecycle module's own discover walks `.disabled/` directly
+    // and bypasses this list intentionally.
+    crate::artifact_lifecycle::DISABLED_DIR,
 ];
 
 const DENY_PREFIXES: &[&str] = &[
@@ -1268,9 +1275,25 @@ mod tests {
         assert!(is_denied("cache"));
         assert!(is_denied(".DS_Store"));
         assert!(is_denied("history.jsonl"));
-        assert!(is_denied("foo.sync-conflict-x.txt"));
         assert!(is_denied(".claude.json"));
         assert!(!is_denied("settings.json"));
+    }
+
+    #[test]
+    fn deny_names_excludes_lifecycle_disabled_dir() {
+        // The lifecycle module stashes disabled artifacts under
+        // <root>/.disabled/. Active Config discovery must skip it,
+        // otherwise disabled skills/agents would re-appear under
+        // their kind groups in the tree.
+        assert!(is_denied(".disabled"));
+        assert_eq!(crate::artifact_lifecycle::DISABLED_DIR, ".disabled");
+    }
+
+    #[test]
+    fn deny_names_for_sync_conflict_and_bak() {
+        assert!(is_denied("foo.sync-conflict-x.txt"));
+        assert!(is_denied("foo.bak"));
+        assert!(is_denied("foo.bak.20240101"));
     }
 
     #[test]
