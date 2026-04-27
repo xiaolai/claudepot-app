@@ -15,13 +15,15 @@
 //! `dev-docs/kannon/reference.md §V.2 (Source 2)`. CC tolerates
 //! malformed lines — so do we.
 
+use crate::artifact_usage::extract as usage_extract;
+use crate::artifact_usage::model::{Outcome, UsageEvent};
 use crate::path_utils::simplify_windows_path;
 use chrono::{DateTime, Utc};
 #[cfg(test)]
 use rayon::prelude::*;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
-use std::collections::BTreeSet;
+use std::collections::{BTreeSet, HashMap};
 use std::fs;
 use std::io::{BufRead, BufReader};
 use std::path::{Path, PathBuf};
@@ -285,7 +287,7 @@ pub(crate) fn scan_all_sessions_uncached(
 
     let mut rows: Vec<SessionRow> = work
         .par_iter()
-        .filter_map(|(slug, path)| scan_session(slug, path).ok())
+        .filter_map(|(slug, path)| scan_session(slug, path).ok().map(|s| s.row))
         .collect();
 
     rows.sort_by(|a, b| {
@@ -323,7 +325,7 @@ pub fn read_session_detail(
     session_id: &str,
 ) -> Result<SessionDetail, SessionError> {
     let (slug, path) = locate_session(config_dir, session_id)?;
-    let row = scan_session(&slug, &path)?;
+    let row = scan_session(&slug, &path)?.row;
     let events = parse_events(&path)?;
     Ok(SessionDetail { row, events })
 }
@@ -364,7 +366,7 @@ pub fn read_session_detail_at_path(
         .and_then(|p| p.file_name())
         .map(|n| n.to_string_lossy().to_string())
         .unwrap_or_default();
-    let row = scan_session(&slug, &canonical_file)?;
+    let row = scan_session(&slug, &canonical_file)?.row;
     let events = parse_events(&canonical_file)?;
     Ok(SessionDetail { row, events })
 }
@@ -410,13 +412,23 @@ fn locate_session(config_dir: &Path, session_id: &str) -> Result<(String, PathBu
     Err(SessionError::NotFound(session_id.to_string()))
 }
 
+/// Combined output of a session scan — the indexed metadata row plus
+/// the usage events extracted from the same pass. Returned by
+/// `scan_session` so callers that only want metadata can drop the
+/// `usage` field, while `session_index` consumes both in one transaction.
+pub struct SessionScan {
+    pub row: SessionRow,
+    pub usage: Vec<UsageEvent>,
+}
+
 /// Single streaming scan that folds every field we care about into a
-/// `SessionRow`. Malformed lines are counted toward `event_count` but
-/// contribute nothing else — matching CC's own tolerance.
+/// `SessionRow`, and at the same time extracts artifact usage events.
+/// Malformed lines are counted toward `event_count` but contribute
+/// nothing else — matching CC's own tolerance.
 ///
 /// Exposed to `session_index` so the persistent cache can reuse the
 /// same JSONL-folding logic without copy-pasting the match tree.
-pub(crate) fn scan_session(slug: &str, path: &Path) -> Result<SessionRow, SessionError> {
+pub(crate) fn scan_session(slug: &str, path: &Path) -> Result<SessionScan, SessionError> {
     let meta = fs::metadata(path)?;
     let file = fs::File::open(path)?;
     let reader = BufReader::new(file);
@@ -442,6 +454,13 @@ pub(crate) fn scan_session(slug: &str, path: &Path) -> Result<SessionRow, Sessio
     let mut has_error = false;
     let mut any_sidechain = false;
 
+    // Usage extraction state — one Vec accumulates all events from
+    // this transcript; `agent_use_index` lets us flip an Agent event's
+    // outcome to Error when its matching tool_result lands later in
+    // the stream.
+    let mut usage_events: Vec<UsageEvent> = Vec::new();
+    let mut agent_use_index: HashMap<String, usize> = HashMap::new();
+
     for line in reader.lines() {
         let line = match line {
             Ok(l) => l,
@@ -455,6 +474,20 @@ pub(crate) fn scan_session(slug: &str, path: &Path) -> Result<SessionRow, Sessio
         let Ok(v) = serde_json::from_str::<Value>(&line) else {
             continue;
         };
+
+        // Extract usage events from this line. Agent events come
+        // through a paired API so we capture each tool_use.id at
+        // construction — no positional re-match needed (the previous
+        // index-based pairing skipped malformed Agent blocks
+        // inconsistently between the two passes).
+        collect_usage_events(
+            &v,
+            ts_for_usage(&v),
+            &session_id,
+            &mut usage_events,
+            &mut agent_use_index,
+        );
+        flip_agent_outcomes_from_user_line(&v, &agent_use_index, &mut usage_events);
 
         // --- ambient fields (most lines carry these) -------------------
         let ts = v
@@ -559,7 +592,7 @@ pub(crate) fn scan_session(slug: &str, path: &Path) -> Result<SessionRow, Sessio
     let project_path = cwd_from_transcript
         .unwrap_or_else(|| crate::project_sanitize::unsanitize_path(slug));
 
-    Ok(SessionRow {
+    let row = SessionRow {
         session_id,
         slug: slug.to_string(),
         file_path: path.to_path_buf(),
@@ -581,7 +614,97 @@ pub(crate) fn scan_session(slug: &str, path: &Path) -> Result<SessionRow, Sessio
         display_slug,
         has_error,
         is_sidechain: any_sidechain,
+    };
+    Ok(SessionScan {
+        row,
+        usage: usage_events,
     })
+}
+
+/// Parse a line's timestamp into ms-since-epoch for the usage
+/// extractor, mirroring `extract::parse_ts_ms`. Returns `None` for
+/// lines without a usable timestamp; the caller treats that as
+/// "skip usage extraction for this line."
+fn ts_for_usage(v: &Value) -> Option<i64> {
+    usage_extract::parse_ts_ms(v)
+}
+
+/// Collect usage events from one JSONL line, registering any Agent
+/// tool_use_id encountered for later outcome-flip pairing.
+///
+/// Agent events come from `extract_assistant_with_ids` so the id is
+/// captured at construction — no positional re-match between two
+/// passes (which previously diverged when malformed Agent blocks
+/// appeared before valid ones).
+///
+/// Non-Agent events go straight to `usage_events` via
+/// `extract_from_line`'s normal route.
+fn collect_usage_events(
+    v: &Value,
+    ts_ms: Option<i64>,
+    session_id: &str,
+    usage_events: &mut Vec<UsageEvent>,
+    agent_use_index: &mut HashMap<String, usize>,
+) {
+    let Some(ts_ms) = ts_ms else {
+        return;
+    };
+    let event_type = v.get("type").and_then(Value::as_str).unwrap_or("");
+    if event_type == "assistant" {
+        for (ev, id) in usage_extract::extract_assistant_with_ids(v, ts_ms, session_id) {
+            let idx = usage_events.len();
+            usage_events.push(ev);
+            if let Some(id) = id {
+                agent_use_index.insert(id, idx);
+            }
+        }
+        return;
+    }
+    // user / attachment lines and anything else — no Agent ids to
+    // pair, so the simple extractor path is fine.
+    let new_events = usage_extract::extract_from_line(v, session_id);
+    usage_events.extend(new_events);
+}
+
+/// Walk a `user` line's `tool_result` blocks; for each one with
+/// `is_error: true` whose `tool_use_id` we've recorded, flip the
+/// matching Agent event's outcome to `Outcome::Error` and forget the
+/// id (so a subsequent re-issue can't double-flip).
+fn flip_agent_outcomes_from_user_line(
+    v: &Value,
+    agent_use_index: &HashMap<String, usize>,
+    usage_events: &mut [UsageEvent],
+) {
+    if v.get("type").and_then(Value::as_str) != Some("user") {
+        return;
+    }
+    let Some(content) = v
+        .get("message")
+        .and_then(|m| m.get("content"))
+        .and_then(Value::as_array)
+    else {
+        return;
+    };
+    for block in content {
+        if block.get("type").and_then(Value::as_str) != Some("tool_result") {
+            continue;
+        }
+        let is_error = block
+            .get("is_error")
+            .and_then(Value::as_bool)
+            .unwrap_or(false);
+        if !is_error {
+            continue;
+        }
+        let Some(use_id) = block.get("tool_use_id").and_then(Value::as_str) else {
+            continue;
+        };
+        if let Some(&idx) = agent_use_index.get(use_id) {
+            if let Some(ev) = usage_events.get_mut(idx) {
+                ev.outcome = Outcome::Error;
+            }
+        }
+    }
 }
 
 /// Crate-visible wrapper so `session_subagents` can parse an
