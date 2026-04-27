@@ -32,16 +32,30 @@ pub fn helper_path(route_id: RouteId, field: SecretField) -> PathBuf {
     helpers_dir().join(format!("{}-{}.sh", route_id, field_suffix(field)))
 }
 
-/// Materialize the helper script. Returns the absolute path written.
+/// Materialize the helper script. Returns the absolute path
+/// written. Phase-1 keychain-mode is macOS-only; non-macOS hosts
+/// are rejected so a route can't persist `use_keychain: true` while
+/// no working helper actually exists.
 pub fn write_helper(
     route_id: RouteId,
     field: SecretField,
 ) -> Result<PathBuf, RouteError> {
-    let path = helper_path(route_id, field);
-    let body = render_helper(route_id, field);
-    fs_utils::atomic_write(&path, body.as_bytes())?;
-    set_executable(&path)?;
-    Ok(path)
+    #[cfg(not(target_os = "macos"))]
+    {
+        let _ = route_id;
+        let _ = field;
+        return Err(RouteError::UnsupportedPlatform(
+            "OS-keychain-backed routes are currently macOS-only",
+        ));
+    }
+    #[cfg(target_os = "macos")]
+    {
+        let path = helper_path(route_id, field);
+        let body = render_helper(route_id, field);
+        fs_utils::atomic_write(&path, body.as_bytes())?;
+        set_executable(&path)?;
+        Ok(path)
+    }
 }
 
 /// Best-effort cleanup of helpers for a given route. `None` field

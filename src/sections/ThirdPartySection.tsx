@@ -4,6 +4,7 @@ import { Button } from "../components/primitives/Button";
 import { NF } from "../icons";
 import { api } from "../api";
 import type { RouteSettingsDto, RouteSummaryDto } from "../types";
+import { ConfirmDialog } from "../components/ConfirmDialog";
 import { AddRouteModal, EditRouteModal } from "./third-party/AddRouteModal";
 import { RouteCard } from "./third-party/RouteCard";
 
@@ -33,6 +34,9 @@ export function ThirdPartySection() {
   const [busyIds, setBusyIds] = useState<Set<string>>(new Set());
   const [showAdd, setShowAdd] = useState(false);
   const [editTarget, setEditTarget] = useState<RouteSummaryDto | null>(null);
+  const [removeTarget, setRemoveTarget] = useState<RouteSummaryDto | null>(
+    null,
+  );
   const [restartHint, setRestartHint] = useState<
     "needed" | "applied" | "none"
   >("none");
@@ -160,28 +164,24 @@ export function ThirdPartySection() {
     }
   };
 
-  const handleRemove = async (id: string) => {
-    if (
-      !window.confirm(
-        "Delete this route? Its CLI wrapper will be removed and any active Desktop activation cleared. The route definition itself cannot be recovered without recreating it.",
-      )
-    ) {
-      return;
-    }
-    const wasActive =
-      routes?.find((r) => r.id === id)?.active_on_desktop ?? false;
-    setBusy(id, true);
+  const handleRemove = (id: string) => {
+    const target = routes?.find((r) => r.id === id) ?? null;
+    if (target) setRemoveTarget(target);
+  };
+
+  const executeRemove = async (route: RouteSummaryDto) => {
+    setBusy(route.id, true);
     try {
-      await api.routesRemove(id);
+      await api.routesRemove(route.id);
       await refresh();
-      if (wasActive) {
+      if (route.active_on_desktop) {
         await flagRestartIfRunning();
       }
       showToast("info", "Route deleted.");
     } catch (e) {
       showToast("error", `Delete failed: ${e instanceof Error ? e.message : e}`);
     } finally {
-      setBusy(id, false);
+      setBusy(route.id, false);
     }
   };
 
@@ -356,7 +356,7 @@ export function ThirdPartySection() {
       />
       <EditRouteModal
         open={editTarget !== null}
-        initial={editTarget}
+        initialSummary={editTarget}
         onClose={() => setEditTarget(null)}
         onSaved={() => {
           void refresh();
@@ -364,6 +364,26 @@ export function ThirdPartySection() {
         }}
         onError={(msg) => showToast("error", msg)}
       />
+      {removeTarget && (
+        <ConfirmDialog
+          title="Delete route?"
+          confirmLabel="Delete route"
+          confirmDanger
+          body={
+            <p style={{ margin: 0, lineHeight: 1.5 }}>
+              <code>{removeTarget.name}</code>'s CLI wrapper will be
+              removed and its Desktop activation cleared. The route
+              definition cannot be recovered without recreating it.
+            </p>
+          }
+          onCancel={() => setRemoveTarget(null)}
+          onConfirm={() => {
+            const target = removeTarget;
+            setRemoveTarget(null);
+            void executeRemove(target);
+          }}
+        />
+      )}
     </div>
   );
 }

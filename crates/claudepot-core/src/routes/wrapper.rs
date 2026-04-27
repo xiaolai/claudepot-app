@@ -29,22 +29,63 @@ pub fn wrapper_path(name: &str) -> PathBuf {
     wrapper_dir().join(name)
 }
 
-/// Materialize a route as a wrapper script. Returns the absolute
-/// path that was written.
-pub fn write_wrapper(route: &Route) -> Result<PathBuf, RouteError> {
-    let name = sanitize_wrapper_name(&route.wrapper_name)
-        .map_err(|e| RouteError::InvalidWrapperName(route.wrapper_name.clone(), e.to_string()))?;
-    if name == "claude" {
-        return Err(RouteError::WrapperShadowsClaude(name));
+/// Refuse to operate on this script unless it carries the
+/// claudepot-managed marker the writer plants in the header. That
+/// way a route deletion never wipes a user's own `~/.claudepot/bin/x`
+/// (and an `add` can't silently overwrite either).
+fn assert_managed(path: &Path) -> Result<(), RouteError> {
+    match std::fs::read_to_string(path) {
+        Ok(body) => {
+            if body.contains(&format!("# {}: true", CLAUDEPOT_MANAGED_MARKER)) {
+                Ok(())
+            } else {
+                Err(RouteError::WrapperFileNotManaged(
+                    path.display().to_string(),
+                ))
+            }
+        }
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(()),
+        Err(e) => Err(RouteError::Io(e)),
     }
-    let path = wrapper_path(&name);
-    let script = render_script(route);
-    fs_utils::atomic_write(&path, script.as_bytes())?;
-    set_executable(&path)?;
-    Ok(path)
 }
 
-/// Remove a wrapper script. Idempotent — missing file is not an error.
+/// Materialize a route as a wrapper script. Returns the absolute
+/// path that was written. Phase-1 MVP is Unix-only; non-Unix hosts
+/// get an unsupported-platform error so a route can't be persisted
+/// in `installed_on_cli=true` while no wrapper actually exists.
+pub fn write_wrapper(route: &Route) -> Result<PathBuf, RouteError> {
+    #[cfg(not(unix))]
+    {
+        let _ = route; // suppress unused warning on Windows
+        return Err(RouteError::Io(std::io::Error::other(
+            "CLI wrappers require a POSIX shell — Windows .cmd wrappers are a follow-up",
+        )));
+    }
+    #[cfg(unix)]
+    {
+        let name = sanitize_wrapper_name(&route.wrapper_name).map_err(|e| {
+            RouteError::InvalidWrapperName(route.wrapper_name.clone(), e.to_string())
+        })?;
+        if name == "claude" {
+            return Err(RouteError::WrapperShadowsClaude(name));
+        }
+        let path = wrapper_path(&name);
+        // Refuse to overwrite a non-managed file. Users can hand-edit
+        // their own `~/.claudepot/bin/foo` for whatever reason; we
+        // shouldn't clobber it even if they happen to pick the same
+        // name as a route's wrapper.
+        assert_managed(&path)?;
+        let script = render_script(route);
+        fs_utils::atomic_write(&path, script.as_bytes())?;
+        set_executable(&path)?;
+        Ok(path)
+    }
+}
+
+/// Remove a wrapper script. Idempotent — missing file is not an
+/// error. Refuses to remove files Claudepot didn't write (no
+/// managed marker present), so a stray hand-edited file under
+/// `~/.claudepot/bin/` survives a route deletion.
 pub fn delete_wrapper(name: &str) -> Result<(), RouteError> {
     // Skip sanitization here (we delete by stored name verbatim) but
     // refuse to follow `..` or absolute paths that would escape
@@ -56,6 +97,7 @@ pub fn delete_wrapper(name: &str) -> Result<(), RouteError> {
         ));
     }
     let path = wrapper_path(name);
+    assert_managed(&path)?;
     match std::fs::remove_file(&path) {
         Ok(()) => Ok(()),
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(()),
@@ -74,7 +116,27 @@ fn render_script(route: &Route) -> String {
 
 fn render_gateway(route: &Route, cfg: &super::types::GatewayConfig) -> String {
     let mut out = render_header(route);
+    if cfg.auth_scheme == AuthScheme::Basic {
+        // CC's CLI passes ANTHROPIC_AUTH_TOKEN through as
+        // `Authorization: Bearer …`; there's no env-only knob for
+        // HTTP Basic. The Basic scheme is therefore a Desktop-only
+        // setting (`inferenceGatewayAuthScheme`). Surface this in
+        // the script header — keeping the comment outside the
+        // continued `exec env \` block so the line-continuation
+        // backslashes aren't broken by an embedded `#`.
+        out.push_str(
+            "# NOTE: Desktop is configured for Basic auth on this gateway,\n",
+        );
+        out.push_str(
+            "#       but CC CLI sends ANTHROPIC_AUTH_TOKEN as Bearer regardless.\n",
+        );
+        out.push('\n');
+    }
     out.push_str("exec env \\\n");
+    // Mark the wrapper's routing env as host-managed so CC won't
+    // let `~/.claude/settings.json` env override our base URL / model
+    // pick. See routes module docs.
+    out.push_str(&kv_line("CLAUDE_CODE_PROVIDER_MANAGED_BY_HOST", "1"));
     out.push_str(&kv_line("ANTHROPIC_BASE_URL", &cfg.base_url));
     if cfg.use_keychain {
         let helper = helper_path(route.id, SecretField::GatewayApiKey);
@@ -84,11 +146,6 @@ fn render_gateway(route: &Route, cfg: &super::types::GatewayConfig) -> String {
         ));
     } else {
         out.push_str(&kv_line("ANTHROPIC_AUTH_TOKEN", &cfg.api_key));
-    }
-    if cfg.auth_scheme == AuthScheme::Bearer {
-        // CC's default is bearer; only emit a hint if the user picks
-        // a non-default scheme. For now we pass the key as-is and let
-        // CC's standard `Authorization: Bearer …` header carry it.
     }
     out.push_str(&kv_line("ANTHROPIC_MODEL", &route.model));
     let small = route.small_fast_model.as_deref().unwrap_or(&route.model);
@@ -120,6 +177,7 @@ fn render_header(route: &Route) -> String {
 fn render_bedrock(route: &Route, cfg: &BedrockConfig) -> String {
     let mut out = render_header(route);
     out.push_str("exec env \\\n");
+    out.push_str(&kv_line("CLAUDE_CODE_PROVIDER_MANAGED_BY_HOST", "1"));
     out.push_str(&kv_line("CLAUDE_CODE_USE_BEDROCK", "1"));
     out.push_str(&kv_line("AWS_REGION", &cfg.region));
     out.push_str(&kv_line("ANTHROPIC_SMALL_FAST_MODEL_AWS_REGION", &cfg.region));
@@ -151,6 +209,7 @@ fn render_bedrock(route: &Route, cfg: &BedrockConfig) -> String {
 fn render_vertex(route: &Route, cfg: &VertexConfig) -> String {
     let mut out = render_header(route);
     out.push_str("exec env \\\n");
+    out.push_str(&kv_line("CLAUDE_CODE_PROVIDER_MANAGED_BY_HOST", "1"));
     out.push_str(&kv_line("CLAUDE_CODE_USE_VERTEX", "1"));
     out.push_str(&kv_line("ANTHROPIC_VERTEX_PROJECT_ID", &cfg.project_id));
     if let Some(region) = &cfg.region {
@@ -172,6 +231,7 @@ fn render_vertex(route: &Route, cfg: &VertexConfig) -> String {
 fn render_foundry(route: &Route, cfg: &FoundryConfig) -> String {
     let mut out = render_header(route);
     out.push_str("exec env \\\n");
+    out.push_str(&kv_line("CLAUDE_CODE_PROVIDER_MANAGED_BY_HOST", "1"));
     out.push_str(&kv_line("CLAUDE_CODE_USE_FOUNDRY", "1"));
     if let Some(url) = &cfg.base_url {
         out.push_str(&kv_line("ANTHROPIC_FOUNDRY_BASE_URL", url));
@@ -291,6 +351,7 @@ mod tests {
         let s = render_script(&r);
         assert!(s.starts_with("#!/bin/sh"));
         assert!(s.contains("claudepot_managed: true"));
+        assert!(s.contains("CLAUDE_CODE_PROVIDER_MANAGED_BY_HOST='1'"));
         assert!(s.contains("ANTHROPIC_BASE_URL='http://127.0.0.1:11434'"));
         assert!(s.contains("ANTHROPIC_AUTH_TOKEN='ollama'"));
         assert!(s.contains("ANTHROPIC_MODEL='llama3.2:3b'"));
@@ -305,6 +366,85 @@ mod tests {
         let s = render_script(&r);
         assert!(s.contains("ANTHROPIC_MODEL='llama3.2:8b'"));
         assert!(s.contains("ANTHROPIC_SMALL_FAST_MODEL='llama3.2:3b'"));
+    }
+
+    #[test]
+    fn render_gateway_basic_auth_keeps_exec_env_continuation_intact() {
+        let mut r = sample("llama3.2:3b", "ollama", "claude-llama3");
+        if let RouteProvider::Gateway(ref mut cfg) = r.provider {
+            cfg.auth_scheme = AuthScheme::Basic;
+        }
+        let s = render_script(&r);
+        // Critical: no `#` comment may sit inside the `exec env \`
+        // continuation block — embedded comments break the
+        // line-joining and silently drop later vars.
+        let exec_at = s.find("exec env \\\n").expect("exec env present");
+        let exec_to_claude = &s[exec_at..];
+        let claude_at = exec_to_claude
+            .find("  claude \"$@\"")
+            .expect("exec block ends with claude invocation");
+        let exec_block = &exec_to_claude[..claude_at];
+        for line in exec_block.lines() {
+            assert!(
+                !line.trim_start().starts_with('#'),
+                "exec block must not contain comments: {line:?}",
+            );
+        }
+        // The Basic-auth note must still be present, before exec env.
+        let pre = &s[..exec_at];
+        assert!(
+            pre.contains("Basic auth on this gateway"),
+            "Basic-auth note should be in the header, got: {pre}",
+        );
+        // ANTHROPIC_MODEL must still be in the exec block.
+        assert!(exec_block.contains("ANTHROPIC_MODEL='llama3.2:3b'"));
+    }
+
+    /// Run `sh -n` on every rendered script so a future refactor
+    /// can't reintroduce a stray `#` mid-`exec env` (or any other
+    /// shell-syntax bug). Skips on hosts without `/bin/sh` (none in
+    /// our CI matrix today).
+    #[test]
+    fn rendered_scripts_pass_sh_syntax_check() {
+        use std::io::Write;
+        let cases: Vec<Route> = vec![
+            sample("llama3.2:3b", "ollama", "claude-llama3"),
+            {
+                let mut r = sample("llama3.2:3b", "ollama", "claude-basic");
+                if let RouteProvider::Gateway(ref mut cfg) = r.provider {
+                    cfg.auth_scheme = AuthScheme::Basic;
+                    cfg.enable_tool_search = true;
+                }
+                r
+            },
+            bedrock_sample("anthropic.claude-haiku-4-5", "us-east-1"),
+            vertex_sample("claude-sonnet-4-5", "p"),
+            foundry_sample("claude-sonnet-4-5", Ok("my-resource")),
+            foundry_sample(
+                "claude-sonnet-4-5",
+                Err("https://my.openai.azure.com"),
+            ),
+        ];
+        for r in cases {
+            let body = render_script(&r);
+            let mut tmp =
+                tempfile::NamedTempFile::new().expect("tempfile create");
+            tmp.write_all(body.as_bytes()).expect("write");
+            let path = tmp.path().to_path_buf();
+            let out = std::process::Command::new("/bin/sh")
+                .arg("-n")
+                .arg(&path)
+                .output()
+                .expect("invoke /bin/sh -n");
+            assert!(
+                out.status.success(),
+                "sh -n rejected wrapper for {} ({}):\n--- script ---\n{}\n--- stderr ---\n{}",
+                r.name,
+                r.provider.kind().as_str(),
+                body,
+                String::from_utf8_lossy(&out.stderr),
+            );
+        }
     }
 
     #[test]

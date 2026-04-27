@@ -440,6 +440,7 @@ pub fn run() {
             config_watch::config_watch_start,
             config_watch::config_watch_stop,
             commands_routes::routes_list,
+            commands_routes::routes_get,
             commands_routes::routes_settings_get,
             commands_routes::routes_settings_set,
             commands_routes::routes_add,

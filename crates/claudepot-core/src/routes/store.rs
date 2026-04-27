@@ -107,6 +107,14 @@ impl RouteStore {
         if self.file.routes.iter().any(|r| r.name == route.name) {
             return Err(RouteError::DuplicateName(route.name));
         }
+        if self
+            .file
+            .routes
+            .iter()
+            .any(|r| r.wrapper_name == route.wrapper_name)
+        {
+            return Err(RouteError::DuplicateWrapperName(route.wrapper_name));
+        }
         if route.id.is_nil() {
             route.id = Uuid::new_v4();
         }
@@ -137,6 +145,16 @@ impl RouteStore {
             .any(|(i, r)| i != idx && r.name == route.name)
         {
             return Err(RouteError::DuplicateName(route.name));
+        }
+        // Reject wrapper-name collisions with another route.
+        if self
+            .file
+            .routes
+            .iter()
+            .enumerate()
+            .any(|(i, r)| i != idx && r.wrapper_name == route.wrapper_name)
+        {
+            return Err(RouteError::DuplicateWrapperName(route.wrapper_name));
         }
         let prev = &self.file.routes[idx];
         let merged = Route {
@@ -257,6 +275,38 @@ mod tests {
         s.add(sample_route("Local")).unwrap();
         let err = s.add(sample_route("Local")).unwrap_err();
         assert!(matches!(err, RouteError::DuplicateName(_)));
+    }
+
+    #[test]
+    fn add_rejects_duplicate_wrapper_name() {
+        let dir = tempdir().unwrap();
+        let p = dir.path().join("routes.json");
+        let mut s = RouteStore::open_at(p).unwrap();
+        let mut a = sample_route("Alpha");
+        a.wrapper_name = "claude-shared".into();
+        s.add(a).unwrap();
+        let mut b = sample_route("Beta");
+        b.wrapper_name = "claude-shared".into();
+        let err = s.add(b).unwrap_err();
+        assert!(matches!(err, RouteError::DuplicateWrapperName(_)));
+    }
+
+    #[test]
+    fn update_rejects_duplicate_wrapper_name() {
+        let dir = tempdir().unwrap();
+        let p = dir.path().join("routes.json");
+        let mut s = RouteStore::open_at(p).unwrap();
+        let mut a = sample_route("Alpha");
+        a.wrapper_name = "claude-alpha".into();
+        let a_saved = s.add(a).unwrap();
+        let mut b = sample_route("Beta");
+        b.wrapper_name = "claude-beta".into();
+        s.add(b).unwrap();
+
+        let mut renamed = a_saved.clone();
+        renamed.wrapper_name = "claude-beta".into();
+        let err = s.update(renamed).unwrap_err();
+        assert!(matches!(err, RouteError::DuplicateWrapperName(_)));
     }
 
     #[test]
