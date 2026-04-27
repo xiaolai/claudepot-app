@@ -37,44 +37,6 @@
   flex-shrink: 0;
 }
 
-/* ---------- pending journals banner ---------- */
-
-.global-banner-slot {
-  position: fixed;
-  bottom: 0;
-  left: var(--sp-48);  /* clears section rail */
-  right: 0;
-  z-index: var(--z-popover);
-  display: flex;
-  justify-content: center;
-  padding: var(--sp-8) var(--sp-12);
-  pointer-events: none;
-}
-
-.pending-journals-banner {
-  pointer-events: auto;
-  display: inline-flex;
-  align-items: center;
-  gap: var(--sp-8);
-  padding: var(--sp-6) var(--sp-12);
-  background: var(--warn-weak);
-  color: var(--text);
-  border: var(--bw-subhair) solid var(--border);
-  border-radius: var(--r-pill);
-  font-size: var(--fs-sm);
-  cursor: default;
-  box-shadow: var(--shadow-md);
-}
-
-.pending-journals-banner:hover {
-  background: var(--accent-weak);
-}
-
-.pending-journals-banner:focus-visible {
-  outline: var(--bw-focus) solid var(--accent);
-  outline-offset: var(--focus-outline-offset);
-}
-
 /* ---------- orphan banner + adoption modal ---------- */
 
 /* Content wrapper that stacks the banner above the detail pane so the
