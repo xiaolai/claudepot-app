@@ -137,6 +137,7 @@ export function SessionDetailBody({
   search,
   setSearch,
   topSentinelRef,
+  scrollRef,
   onLoadMoreEvents,
   onLoadMoreChunks,
   eventPage,
@@ -168,6 +169,10 @@ export function SessionDetailBody({
   /** Sentinel that the parent's `useReachTop` observes to auto-page
    * older chunks. */
   topSentinelRef: RefObject<HTMLDivElement | null>;
+  /** Callback ref the parent attaches to observe transcript scroll —
+   * powers the auto-compact session header. Optional so older callers
+   * don't have to wire it. */
+  scrollRef?: (el: HTMLDivElement | null) => void;
   onLoadMoreEvents: () => void;
   onLoadMoreChunks: () => void;
   /** How many entries the "Show older …" buttons reveal at a time.
@@ -213,6 +218,7 @@ export function SessionDetailBody({
 
       {/* Transcript -------------------------------------------------- */}
       <div
+        ref={scrollRef}
         style={{
           flex: 1,
           minHeight: 0,

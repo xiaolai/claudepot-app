@@ -1,8 +1,11 @@
+import { useState } from "react";
 import { BackAffordance } from "../../../components/primitives/BackAffordance";
 import { Button } from "../../../components/primitives/Button";
 import { CopyButton } from "../../../components/CopyButton";
 import { Glyph } from "../../../components/primitives/Glyph";
+import { IconButton } from "../../../components/primitives/IconButton";
 import { Tag } from "../../../components/primitives/Tag";
+import { ContextMenu, type ContextMenuItem } from "../../../components/ContextMenu";
 import { NF } from "../../../icons";
 import type { SessionChunk, SessionRow } from "../../../types";
 import {
@@ -19,15 +22,21 @@ import {
   projectBasename,
   shortSessionId,
 } from "../format";
-import { SessionExportMenu } from "../SessionExportMenu";
+import { exportSession } from "../sessionExport";
 
 /**
- * Top header strip of the session detail viewer. Renders, top to
- * bottom: breadcrumb (project / session id with copy), title (first
- * prompt, two-line clamp), tag row (status / model / branch / cc /
- * tokens / turns / size), metadata row (project path / started /
- * last event), and action button row (Reveal / Move / Copy first
- * prompt / Export menu / Raw↔Chunked / Context toggle).
+ * Top header strip of the session detail viewer. Two layouts:
+ *
+ *   - **Full** (transcript at the top): breadcrumb / two-line title /
+ *     tag row / metadata row / Reveal + kebab.
+ *   - **Compact** (user has scrolled down): single ~40px row with
+ *     breadcrumb · title (1 line) · model · Reveal + kebab.
+ *
+ * The compact form is the load-bearing one for users on short
+ * windows — once the reader is reading, the header gives back its
+ * vertical real estate. Snap rather than animate, with a small
+ * hysteresis (managed in the parent) so the boundary doesn't
+ * flicker.
  *
  * Lifted out of `SessionDetail.tsx` per the project's one-component-
  * per-file rule. Pure presentational — every dependency comes in
@@ -39,6 +48,7 @@ export function SessionDetailHeader({
   chunks,
   viewMode,
   contextOpen,
+  compact,
   onBack,
   onReveal,
   onCopyFirstPrompt,
@@ -53,19 +63,24 @@ export function SessionDetailHeader({
   chunks: SessionChunk[] | null;
   viewMode: "chunks" | "raw";
   contextOpen: boolean;
+  /** Parent toggles this when the transcript scrolls past a small
+   * threshold. Switches us into the single-row layout. */
+  compact: boolean;
   onBack?: () => void;
   onReveal: () => void;
   onCopyFirstPrompt: () => void;
   onMoveClick: () => void;
   onToggleViewMode: () => void;
   onToggleContext: () => void;
-  /** Optional error sink for the export menu's surface errors. */
+  /** Optional error sink for the export pipeline. */
   onError?: (message: string) => void;
 }) {
   const lastTs = bestTimestampMs(row.last_ts, row.last_modified_ms);
   const firstTs = row.first_ts ? Date.parse(row.first_ts) : null;
   const project = projectBasename(row.project_path) || row.slug;
   const cleanTitle = deriveSessionTitle(row.first_user_prompt);
+  const titleText =
+    cleanTitle ?? (row.is_sidechain ? "Agent subsession" : "(untitled session)");
   // API-equivalent cost for this session. The subscription user's
   // "I'm saving $X" payoff — framed as a neutral hypothetical so we
   // don't claim savings without knowing the user's plan.
@@ -76,6 +91,173 @@ export function SessionDetailHeader({
     cache_read: row.tokens.cache_read,
     cache_creation: row.tokens.cache_creation,
   });
+
+  const [menu, setMenu] = useState<{ x: number; y: number } | null>(null);
+  const openMenuFromTarget = (target: HTMLElement | null) => {
+    const rect = target?.getBoundingClientRect();
+    setMenu({
+      x: rect ? rect.right - 0 : 0,
+      y: rect ? rect.bottom + 4 : 0,
+    });
+  };
+
+  const menuItems: ContextMenuItem[] = [
+    {
+      label: "Move to project…",
+      disabled: !row.project_from_transcript,
+      disabledReason: row.project_from_transcript
+        ? undefined
+        : "no cwd recorded",
+      onClick: onMoveClick,
+    },
+    ...(row.first_user_prompt
+      ? [
+          {
+            label: "Copy first prompt",
+            onClick: onCopyFirstPrompt,
+          },
+        ]
+      : []),
+    { separator: true, label: "", onClick: () => {} },
+    {
+      label: "Export as Markdown",
+      onClick: () => {
+        void exportSession(row.file_path, "md", onError);
+      },
+    },
+    {
+      label: "Export as JSON",
+      onClick: () => {
+        void exportSession(row.file_path, "json", onError);
+      },
+    },
+    { separator: true, label: "", onClick: () => {} },
+    ...(chunks !== null
+      ? [
+          {
+            label: viewMode === "chunks" ? "Raw events" : "Chunked view",
+            onClick: onToggleViewMode,
+          },
+        ]
+      : []),
+    {
+      label: contextOpen ? "Hide context" : "Show context",
+      onClick: onToggleContext,
+    },
+  ];
+
+  const kebabButton = (
+    <IconButton
+      glyph={NF.ellipsis}
+      size="sm"
+      onClick={() => {
+        const el = document.activeElement as HTMLElement | null;
+        openMenuFromTarget(el);
+      }}
+      title="More actions"
+      aria-label="More session actions"
+      aria-haspopup="menu"
+      aria-expanded={menu !== null}
+    />
+  );
+
+  const revealButton = (
+    <Button
+      variant="ghost"
+      glyph={NF.folderOpen}
+      glyphColor="var(--fg-muted)"
+      onClick={onReveal}
+    >
+      Reveal
+    </Button>
+  );
+
+  if (compact) {
+    return (
+      <div
+        style={{
+          padding: "var(--sp-8) var(--sp-28)",
+          borderBottom: "var(--bw-hair) solid var(--line)",
+          flexShrink: 0,
+          background: "var(--bg)",
+          display: "flex",
+          alignItems: "center",
+          gap: "var(--sp-12)",
+          minHeight: "var(--sp-40)",
+        }}
+      >
+        <div
+          style={{
+            display: "flex",
+            alignItems: "center",
+            gap: "var(--sp-6)",
+            fontSize: "var(--fs-2xs)",
+            color: "var(--fg-faint)",
+            letterSpacing: "var(--ls-wide)",
+            textTransform: "uppercase",
+            flexShrink: 0,
+          }}
+        >
+          {onBack ? (
+            <BackAffordance
+              label={project}
+              onClick={onBack}
+              title={`Back to session list for ${project}`}
+            />
+          ) : (
+            <span>{project}</span>
+          )}
+          <Glyph g={NF.chevronR} style={{ fontSize: "var(--fs-3xs)" }} />
+          <span className="mono" title={row.session_id}>
+            {shortSessionId(row.session_id)}
+          </span>
+        </div>
+
+        <h3
+          style={{
+            flex: 1,
+            margin: 0,
+            fontSize: "var(--fs-sm)",
+            fontWeight: 500,
+            color: "var(--fg)",
+            letterSpacing: "var(--ls-normal)",
+            textTransform: "none",
+            whiteSpace: "nowrap",
+            overflow: "hidden",
+            textOverflow: "ellipsis",
+            minWidth: 0,
+          }}
+          title={row.first_user_prompt ?? titleText}
+        >
+          {titleText}
+        </h3>
+
+        <div style={{ display: "flex", alignItems: "center", gap: "var(--sp-6)" }}>
+          {row.has_error && (
+            <Tag tone="warn" glyph={NF.warn}>
+              error
+            </Tag>
+          )}
+          {row.models.length > 0 && (
+            <Tag tone="accent" title={row.models.join(", ")}>
+              {modelBadge(row.models)}
+            </Tag>
+          )}
+          {revealButton}
+          {kebabButton}
+        </div>
+
+        {menu && (
+          <ContextMenu
+            x={menu.x}
+            y={menu.y}
+            items={menuItems}
+            onClose={() => setMenu(null)}
+          />
+        )}
+      </div>
+    );
+  }
 
   return (
     <div
@@ -138,8 +320,7 @@ export function SessionDetailHeader({
         }}
         title={row.first_user_prompt ?? undefined}
       >
-        {cleanTitle ??
-          (row.is_sidechain ? "Agent subsession" : "(untitled session)")}
+        {titleText}
       </h3>
 
       <div
@@ -243,69 +424,22 @@ export function SessionDetailHeader({
         style={{
           marginTop: "var(--sp-14)",
           display: "flex",
-          flexWrap: "wrap",
+          alignItems: "center",
           gap: "var(--sp-8)",
         }}
       >
-        <Button
-          variant="ghost"
-          glyph={NF.folderOpen}
-          glyphColor="var(--fg-muted)"
-          onClick={onReveal}
-        >
-          Reveal
-        </Button>
-        <Button
-          variant="ghost"
-          glyph={NF.arrowR}
-          glyphColor="var(--fg-muted)"
-          onClick={onMoveClick}
-          disabled={!row.project_from_transcript}
-          title={
-            row.project_from_transcript
-              ? "Move this session's transcript to another project"
-              : "Can't move: no cwd recorded in the transcript"
-          }
-        >
-          Move to project…
-        </Button>
-        {row.first_user_prompt && (
-          <Button
-            variant="ghost"
-            glyph={NF.copy}
-            glyphColor="var(--fg-muted)"
-            onClick={onCopyFirstPrompt}
-          >
-            Copy first prompt
-          </Button>
-        )}
-        <SessionExportMenu filePath={row.file_path} onError={onError} />
-        {chunks !== null && (
-          <Button
-            variant="ghost"
-            glyph={viewMode === "chunks" ? NF.layers : NF.fileText}
-            glyphColor="var(--fg-muted)"
-            onClick={onToggleViewMode}
-            title={
-              viewMode === "chunks"
-                ? "Switch to raw event stream"
-                : "Switch to chunked view"
-            }
-          >
-            {viewMode === "chunks" ? "Raw events" : "Chunked"}
-          </Button>
-        )}
-        <Button
-          variant="ghost"
-          glyph={NF.sliders}
-          glyphColor="var(--fg-muted)"
-          onClick={onToggleContext}
-          aria-pressed={contextOpen}
-          title="Toggle visible-context panel"
-        >
-          {contextOpen ? "Hide context" : "Context"}
-        </Button>
+        {revealButton}
+        {kebabButton}
       </div>
+
+      {menu && (
+        <ContextMenu
+          x={menu.x}
+          y={menu.y}
+          items={menuItems}
+          onClose={() => setMenu(null)}
+        />
+      )}
     </div>
   );
 }
