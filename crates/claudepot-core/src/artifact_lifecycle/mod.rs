@@ -22,6 +22,8 @@ pub mod error;
 pub mod paths;
 pub mod scope_lock;
 pub mod trash;
+mod trash_io;
+mod trash_listing;
 
 pub use disable::{disable_at, enable_at, DisabledRecord, OnConflict};
 pub use discover::list_disabled;
