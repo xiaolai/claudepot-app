@@ -13,3 +13,4 @@ export * from "./session-ops";
 export * from "./config";
 export * from "./pricing";
 export * from "./artifact-usage";
+export * from "./artifact-lifecycle";

@@ -34,6 +34,8 @@ import { HooksRenderer, countHooksInMergedSettings } from "./config/HooksRendere
 import { useConfigTree } from "../hooks/useConfigTree";
 import { useArtifactUsage } from "../hooks/useArtifactUsage";
 import { UsageMicroBadge, UsageStrip } from "./config/UsageBadge";
+import { LifecycleActions } from "./config/LifecycleActions";
+import { useLifecycleClassification } from "../hooks/useLifecycleClassification";
 import { useAppState } from "../providers/AppStateProvider";
 
 import {
@@ -848,7 +850,7 @@ export function ConfigSection({
               <HooksRenderer cwd={tree?.cwd ?? null} />
             </EffectiveShell>
           ) : selectedFile ? (
-            <FilePreview
+            <SelectedFilePreview
               file={selectedFile}
               preview={preview}
               previewError={previewError}
@@ -860,6 +862,24 @@ export function ConfigSection({
               onRefreshEditors={refreshEditors}
               onClose={() => onSubRouteChange(null)}
               usage={usageByFileId?.get(selectedFile.id) ?? null}
+              projectRoot={
+                anchor.kind === "global"
+                  ? null
+                  : // Lifecycle's scope_root is the project's `.claude/`
+                    // directory, NOT the repo root. The Config tree
+                    // already exposes that as `config_home_dir`.
+                    tree?.config_home_dir ?? null
+              }
+              pushToast={pushToast}
+              onLifecycleAction={() => {
+                // Refresh the tree so the artifact disappears from /
+                // reappears in the active scopes.
+                void api.configScan(anchor.kind === "folder" ? anchor.path : null)
+                  .then(setTree)
+                  .catch(() => {
+                    /* tree errors already surfaced via loadError elsewhere */
+                  });
+              }}
             />
           ) : (
             <ConfigHomePane
@@ -1797,6 +1817,74 @@ function codeHintForKind(kind: ConfigKind): string | null {
 
 // ---------- File preview ---------------------------------------------
 
+/**
+ * Wraps FilePreview with the lifecycle classifier + Disable/Trash
+ * action buttons in the header. Kept as a separate composition so
+ * FilePreview itself stays focused on the editor / preview chrome
+ * and doesn't grow another concern.
+ *
+ * The lifecycle-action click flow lives entirely here: classify →
+ * render the right action set → on success, call `onLifecycleAction`
+ * which the parent uses to refresh the active tree.
+ */
+function SelectedFilePreview({
+  file,
+  preview,
+  previewError,
+  editors,
+  defaults,
+  onOpen,
+  onPickOther,
+  onSetDefault,
+  onRefreshEditors,
+  onClose,
+  usage,
+  projectRoot,
+  pushToast,
+  onLifecycleAction,
+}: {
+  file: ConfigFileNodeDto;
+  preview: ConfigPreviewDto | null;
+  previewError: string | null;
+  editors: EditorCandidateDto[] | null;
+  defaults: EditorDefaultsDto | null;
+  onOpen: (editorId: string | null) => void;
+  onPickOther: () => void;
+  onSetDefault: (kind: ConfigKind | null, editorId: string) => void;
+  onRefreshEditors: () => void;
+  onClose?: () => void;
+  usage?: ArtifactUsageStatsDto | null;
+  projectRoot: string | null;
+  pushToast: (kind: "info" | "error", text: string) => void;
+  onLifecycleAction: () => void;
+}) {
+  const classification = useLifecycleClassification(file.abs_path, projectRoot);
+  return (
+    <FilePreview
+      file={file}
+      preview={preview}
+      previewError={previewError}
+      editors={editors}
+      defaults={defaults}
+      onOpen={onOpen}
+      onPickOther={onPickOther}
+      onSetDefault={onSetDefault}
+      onRefreshEditors={onRefreshEditors}
+      onClose={onClose}
+      usage={usage}
+      headerSecondaryActions={
+        <LifecycleActions
+          file={file}
+          classification={classification}
+          projectRoot={projectRoot}
+          onActed={onLifecycleAction}
+          pushToast={pushToast}
+        />
+      }
+    />
+  );
+}
+
 function FilePreview({
   file,
   preview,
@@ -1809,6 +1897,7 @@ function FilePreview({
   onRefreshEditors,
   onClose,
   usage,
+  headerSecondaryActions,
 }: {
   file: ConfigFileNodeDto;
   preview: ConfigPreviewDto | null;
@@ -1823,6 +1912,9 @@ function FilePreview({
   /** Usage stats for the selected file. `null` when the file isn't
    * trackable or the fetch hasn't returned. */
   usage?: ArtifactUsageStatsDto | null;
+  /** Optional secondary actions (Disable / Trash) — already gated by
+   * the lifecycle classifier. Forwarded to PreviewHeader. */
+  headerSecondaryActions?: React.ReactNode;
 }) {
   const kind = file.kind as ConfigKind;
   const isMarkdown = MARKDOWN_KINDS.includes(kind);
@@ -1849,6 +1941,7 @@ function FilePreview({
         onSetDefault={onSetDefault}
         onRefreshEditors={onRefreshEditors}
         onClose={onClose}
+        secondaryActions={headerSecondaryActions}
       />
       {file.include_depth > 0 && file.included_by && (
         <IncludedByBanner
