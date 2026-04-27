@@ -50,6 +50,12 @@ pub const BUNDLE_EXT: &str = "claudepot.tar.zst";
 /// to `0o644` for files / `0o755` for dirs at extract time (§3.1).
 const ALLOWED_FILE_MODES: &[u32] = &[0o600, 0o644, 0o755];
 
+/// Files smaller than this take the legacy in-memory append path
+/// (read once, hash, append). Above the threshold we switch to
+/// streaming because the JSONL transcripts the migrator handles can
+/// run to tens of MB each.
+const SMALL_FILE_THRESHOLD: usize = 256 * 1024;
+
 /// zstd compression level. Level 6 is the documented sweet spot for
 /// JSONL (5–8 ratio improvement vs level 3 at ~2× CPU; level 12+ is
 /// diminishing returns for ~10× CPU).
@@ -140,18 +146,66 @@ impl BundleWriter {
         Ok(())
     }
 
-    /// Append a regular file from disk. Convenience wrapper that reads
-    /// the file into memory once. For large files (>50 MB) callers
-    /// should switch to a streaming append; not yet implemented.
+    /// Append a regular file from disk. Streams the source file
+    /// through both `Sha256` and `tar::Builder::append_data` via a
+    /// fan-out reader so sha256 is computed in the same pass as the
+    /// tar write — no separate buffering of the file contents.
+    ///
+    /// Files smaller than the buffer cap (`SMALL_FILE_THRESHOLD`,
+    /// 256 KB) take the legacy in-memory path because `append_data`
+    /// needs the size up front and the bookkeeping cost dominates
+    /// for small files. The migrate workload is dominated by JSONL
+    /// transcripts up to a few MB each, well above the threshold,
+    /// so the streaming path is the hot one.
     pub fn append_file(
         &mut self,
         bundle_relative: &str,
         on_disk: &Path,
         mode_override: Option<u32>,
     ) -> Result<(), MigrateError> {
-        let contents = fs::read(on_disk).map_err(MigrateError::from)?;
+        validate_bundle_path(bundle_relative)?;
         let mode = mode_override.unwrap_or_else(|| pick_mode_from_metadata(on_disk));
-        self.append_bytes(bundle_relative, &contents, mode)
+        let normalized_mode = if ALLOWED_FILE_MODES.contains(&mode) {
+            mode
+        } else {
+            0o644
+        };
+        let metadata = fs::metadata(on_disk).map_err(MigrateError::from)?;
+        let size = metadata.len();
+
+        if size as usize <= SMALL_FILE_THRESHOLD {
+            // Small file: read once, sha256 once, append once. The
+            // double-pass through the file contents is acceptable
+            // because the file is bounded.
+            let contents = fs::read(on_disk).map_err(MigrateError::from)?;
+            return self.append_bytes(bundle_relative, &contents, normalized_mode);
+        }
+
+        // Large file: stream through a fan-out reader that hashes
+        // every byte while the tar builder consumes them.
+        let file = fs::File::open(on_disk).map_err(MigrateError::from)?;
+        let buf_reader = std::io::BufReader::new(file);
+        let mut hashing_reader = HashingReader::new(buf_reader);
+
+        let mut header = tar::Header::new_gnu();
+        header.set_size(size);
+        header.set_mode(normalized_mode);
+        header.set_mtime(0);
+        header.set_uid(0);
+        header.set_gid(0);
+        header.set_entry_type(tar::EntryType::Regular);
+        header.set_cksum();
+        self.builder
+            .append_data(&mut header, bundle_relative, &mut hashing_reader)
+            .map_err(MigrateError::from)?;
+
+        let digest = hex::encode(hashing_reader.finalize());
+        self.inventory.push(FileInventoryEntry {
+            path: bundle_relative.to_string(),
+            size,
+            sha256: digest,
+        });
+        Ok(())
     }
 
     /// Yield the inventory built so far. Callers fold this into
@@ -447,6 +501,39 @@ impl BundleReader {
         let file = File::open(&self.path).map_err(MigrateError::from)?;
         let decoder = zstd::Decoder::new(file).map_err(MigrateError::from)?;
         Ok(tar::Archive::new(decoder))
+    }
+}
+
+/// Reader adapter that streams bytes through a `Sha256` hasher
+/// while the wrapped reader is consumed. Used by the streaming
+/// `append_file` path so sha256 is computed in the same pass that
+/// feeds tar — avoiding a second full read of large transcript
+/// files.
+struct HashingReader<R: std::io::Read> {
+    inner: R,
+    hasher: Sha256,
+}
+
+impl<R: std::io::Read> HashingReader<R> {
+    fn new(inner: R) -> Self {
+        Self {
+            inner,
+            hasher: Sha256::new(),
+        }
+    }
+
+    fn finalize(self) -> Vec<u8> {
+        self.hasher.finalize().to_vec()
+    }
+}
+
+impl<R: std::io::Read> std::io::Read for HashingReader<R> {
+    fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
+        let n = self.inner.read(buf)?;
+        if n > 0 {
+            self.hasher.update(&buf[..n]);
+        }
+        Ok(n)
     }
 }
 
@@ -751,5 +838,43 @@ mod tests {
         assert!(names.contains(&"c.txt"));
         assert!(names.contains(&"manifest.json"));
         assert!(names.contains(&"integrity.sha256"));
+    }
+
+    #[test]
+    fn append_file_streams_large_files_with_correct_sha256() {
+        // Audit Performance fix: large files take a streaming path
+        // that hashes via fan-out instead of buffering the whole
+        // file. The streaming sha256 must match a fresh full-read
+        // hash; if it diverges, integrity.sha256 verification at
+        // import would falsely flag the bundle as corrupt.
+        use sha2::{Digest, Sha256};
+
+        let tmp = tempfile::tempdir().unwrap();
+        let big = tmp.path().join("big.bin");
+        // ~600 KB — above SMALL_FILE_THRESHOLD (256 KB).
+        let payload: Vec<u8> = (0..600 * 1024).map(|i| (i % 251) as u8).collect();
+        fs::write(&big, &payload).unwrap();
+
+        let bundle_path = tmp.path().join("big.claudepot.tar.zst");
+        let mut w = BundleWriter::create(&bundle_path).unwrap();
+        w.append_file("big.bin", &big, None).unwrap();
+
+        // Inventory's recorded sha256 must match a fresh full hash
+        // of the source file (the streaming path can't drop bytes
+        // without diverging from this).
+        let inv = w.inventory().last().unwrap().clone();
+        assert_eq!(inv.path, "big.bin");
+        assert_eq!(inv.size, payload.len() as u64);
+        let mut h = Sha256::new();
+        h.update(&payload);
+        let expected = hex::encode(h.finalize());
+        assert_eq!(inv.sha256, expected);
+        w.finalize(&fixture_manifest()).unwrap();
+
+        // Round-trip extraction round-trips the bytes.
+        let r = BundleReader::open(&bundle_path).unwrap();
+        let dest = tmp.path().join("out");
+        r.extract_all(&dest).unwrap();
+        assert_eq!(fs::read(dest.join("big.bin")).unwrap(), payload);
     }
 }

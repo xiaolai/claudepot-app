@@ -863,7 +863,7 @@ pub fn import_bundle(
                             snapshot_path: None,
                             after_sha256,
                             fragment_key: None,
-            dir_inventory: Vec::new(),
+                            dir_inventory: Vec::new(),
                             timestamp_unix_secs: now_secs(),
                         });
                     }
@@ -886,26 +886,33 @@ pub fn import_bundle(
             &bundle_id,
         )?;
         for created in outcome.created {
+            // Tamper baseline so undo can detect post-apply edits to
+            // protected-paths.json / preferences.json / artifact-
+            // lifecycle.json (audit Robustness #12 follow-up).
+            let after_sha256 =
+                apply::sha256_of_file_optional(std::path::Path::new(&created));
             journal.record(apply::JournalStep {
                 kind: apply::JournalStepKind::CreateFile,
                 before: None,
                 after: Some(created),
                 snapshot_path: None,
-                after_sha256: None,
+                after_sha256,
                 fragment_key: None,
-            dir_inventory: Vec::new(),
+                dir_inventory: Vec::new(),
                 timestamp_unix_secs: now_secs(),
             });
         }
         for sbs in outcome.side_by_side {
+            let after_sha256 =
+                apply::sha256_of_file_optional(std::path::Path::new(&sbs));
             journal.record(apply::JournalStep {
                 kind: apply::JournalStepKind::CreateFile,
                 before: None,
                 after: Some(sbs),
                 snapshot_path: None,
-                after_sha256: None,
+                after_sha256,
                 fragment_key: None,
-            dir_inventory: Vec::new(),
+                dir_inventory: Vec::new(),
                 timestamp_unix_secs: now_secs(),
             });
         }
@@ -948,7 +955,7 @@ pub fn import_bundle(
                 snapshot_path: step.snapshot,
                 after_sha256,
                 fragment_key: None,
-            dir_inventory: Vec::new(),
+                dir_inventory: Vec::new(),
                 timestamp_unix_secs: now_secs(),
             });
         }
