@@ -4,6 +4,7 @@ import { listen } from "@tauri-apps/api/event";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import { api } from "../api";
 import type {
+  ArtifactUsageStatsDto,
   ConfigAnchor,
   ConfigFileNodeDto,
   ConfigKind,
@@ -31,6 +32,8 @@ import { JsonTreeRenderer } from "./config/JsonTreeRenderer";
 import { CodeRenderer } from "./config/CodeRenderer";
 import { HooksRenderer, countHooksInMergedSettings } from "./config/HooksRenderer";
 import { useConfigTree } from "../hooks/useConfigTree";
+import { useArtifactUsage } from "../hooks/useArtifactUsage";
+import { UsageMicroBadge, UsageStrip } from "./config/UsageBadge";
 import { useAppState } from "../providers/AppStateProvider";
 
 import {
@@ -251,6 +254,17 @@ export function ConfigSection({
   // in that mode.
   const [anchor, setAnchor] = useState<ConfigAnchor>(
     () => forcedAnchor ?? loadAnchor(),
+  );
+  // Usage telemetry fetched once per tree identity. The renderer reads
+  // `usageByFileId.get(file.id)?` to decorate trackable rows and the
+  // preview pane. In global-only mode we pass `null` for the project
+  // root: the backend reports `tree.project_root` as the user home in
+  // that mode, which would mis-classify every `~/.claude/skills/*` as
+  // a project skill. Without a real project, only `userSettings:*`
+  // (and `plugin:*`) are valid scopes.
+  const { usageByFileId } = useArtifactUsage(
+    tree,
+    anchor.kind === "global",
   );
   // Track identity changes of `forcedAnchor` so embedders can switch
   // between projects without unmounting the section. The JSON-stable
@@ -792,6 +806,7 @@ export function ConfigSection({
               onSelect={(id) => onSubRouteChange(id ? `node:${id}` : null)}
               globalOnly={anchor.kind === "global"}
               hooksCount={hooksCount}
+              usageByFileId={usageByFileId}
             />
           )}
         </div>
@@ -844,6 +859,7 @@ export function ConfigSection({
               onSetDefault={setDefault}
               onRefreshEditors={refreshEditors}
               onClose={() => onSubRouteChange(null)}
+              usage={usageByFileId?.get(selectedFile.id) ?? null}
             />
           ) : (
             <ConfigHomePane
@@ -984,6 +1000,7 @@ function ConfigTreePane({
   onSelect,
   globalOnly,
   hooksCount,
+  usageByFileId,
 }: {
   tree: ConfigTreeDto | null;
   loadError: string | null;
@@ -996,6 +1013,13 @@ function ConfigTreePane({
    * (global-only mode). Controls whether the Hooks row is rendered.
    */
   hooksCount: number | null;
+  /**
+   * Per-file usage stats keyed by FileNode.id. `null` while the
+   * first batch fetch is in flight; entries missing for files whose
+   * artifact_key didn't resolve to a known kind. Renderer treats
+   * "missing" as "no telemetry yet" — never displays a 0 placeholder.
+   */
+  usageByFileId: Map<string, ArtifactUsageStatsDto> | null;
 }) {
   const [expanded, setExpanded] = useState<Record<string, boolean>>({
     [FILES_GROUP_ID]: false,
@@ -1266,6 +1290,7 @@ function ConfigTreePane({
                 selectedId={selectedId}
                 onSelect={onSelect}
                 onToggle={toggle}
+                usageByFileId={usageByFileId}
               />
             </div>
           );
@@ -1280,11 +1305,13 @@ function TreeRowView({
   selectedId,
   onSelect,
   onToggle,
+  usageByFileId,
 }: {
   row: TreeRow;
   selectedId: string | null;
   onSelect: (id: string | null) => void;
   onToggle: (id: string) => void;
+  usageByFileId: Map<string, ArtifactUsageStatsDto> | null;
 }) {
   if (row.kind === "divider") {
     return <TreeDivider />;
@@ -1323,6 +1350,7 @@ function TreeRowView({
       includeDepth={row.file.include_depth}
       scopeBadge={row.scopeBadge ?? undefined}
       depth={row.depth}
+      usage={usageByFileId?.get(row.file.id) ?? null}
     />
   );
 }
@@ -1495,6 +1523,7 @@ function FileRowButton({
   includeDepth,
   scopeBadge,
   depth,
+  usage,
 }: {
   selected: boolean;
   label: string;
@@ -1505,6 +1534,13 @@ function FileRowButton({
   includeDepth?: number;
   scopeBadge?: ScopeBadge;
   depth: number;
+  /**
+   * Usage telemetry for this file. `null` = either not a trackable
+   * artifact, or the batch fetch hasn't completed yet — both cases
+   * render the row at full opacity (we don't dim until we've
+   * confirmed "trackable AND zero invocations in 30 days").
+   */
+  usage?: ArtifactUsageStatsDto | null;
 }) {
   // Base indent derives from tree depth (section/group/file). `@include`
   // chains nest further under their parent file.
@@ -1512,6 +1548,7 @@ function FileRowButton({
     depth >= 2 ? "var(--sp-32)" : depth === 1 ? "var(--sp-20)" : "var(--sp-12)";
   const inc = includeDepth ?? 0;
   const leftPad = inc === 0 ? basePad : `calc(${basePad} + ${inc * 12}px)`;
+  const isUnused = usage != null && usage.count_30d === 0;
   return (
     <button
       type="button"
@@ -1519,7 +1556,11 @@ function FileRowButton({
       aria-selected={selected}
       onClick={onSelect}
       className="pm-focus"
-      title={title}
+      title={
+        isUnused
+          ? `${title ?? ""}${title ? " — " : ""}Never invoked in last 30 days`
+          : title
+      }
       style={{
         display: "flex",
         alignItems: "center",
@@ -1528,7 +1569,11 @@ function FileRowButton({
         gap: "var(--sp-6)",
         padding: `0 var(--sp-12) 0 ${leftPad}`,
         background: selected ? "var(--bg-active)" : "transparent",
-        color: selected ? "var(--accent-ink)" : "var(--fg)",
+        color: selected
+          ? "var(--accent-ink)"
+          : isUnused
+            ? "var(--fg-faint)"
+            : "var(--fg)",
         border: "none",
         cursor: "pointer",
         fontSize: "var(--fs-xs)",
@@ -1556,6 +1601,7 @@ function FileRowButton({
         }}
       >
         {label}
+        <UsageMicroBadge stats={usage} />
       </span>
       {scopeBadge && <ScopeBadgeChip badge={scopeBadge} />}
       {issuesCount != null && issuesCount > 0 && (
@@ -1762,6 +1808,7 @@ function FilePreview({
   onSetDefault,
   onRefreshEditors,
   onClose,
+  usage,
 }: {
   file: ConfigFileNodeDto;
   preview: ConfigPreviewDto | null;
@@ -1773,6 +1820,9 @@ function FilePreview({
   onSetDefault: (kind: ConfigKind | null, editorId: string) => void;
   onRefreshEditors: () => void;
   onClose?: () => void;
+  /** Usage stats for the selected file. `null` when the file isn't
+   * trackable or the fetch hasn't returned. */
+  usage?: ArtifactUsageStatsDto | null;
 }) {
   const kind = file.kind as ConfigKind;
   const isMarkdown = MARKDOWN_KINDS.includes(kind);
@@ -1806,6 +1856,7 @@ function FilePreview({
           depth={file.include_depth}
         />
       )}
+      {usage !== undefined && <UsageStrip stats={usage} />}
       <div
         style={{
           flex: 1,

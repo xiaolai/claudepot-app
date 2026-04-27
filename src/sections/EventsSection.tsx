@@ -16,6 +16,28 @@ import {
   Sparkbars,
   TopKinds,
 } from "./events/charts";
+import { UsageView } from "./events/UsageView";
+
+type EventsTab = "stream" | "usage";
+
+const TAB_STORAGE_KEY = "claudepot.events.tab";
+
+function loadTab(): EventsTab {
+  try {
+    const v = localStorage.getItem(TAB_STORAGE_KEY);
+    return v === "usage" ? "usage" : "stream";
+  } catch {
+    return "stream";
+  }
+}
+
+function saveTab(t: EventsTab) {
+  try {
+    localStorage.setItem(TAB_STORAGE_KEY, t);
+  } catch {
+    /* ignore quota / private mode */
+  }
+}
 
 /**
  * Activity section (rendered under the `events` route id for
@@ -94,6 +116,20 @@ export function EventsSection() {
     minSeverity: "warn",
     limit: DEFAULT_LIMIT,
   });
+  // Tab state. `stream` is the historical view (failure cards); `usage`
+  // is the new what-fired-and-how-often surface. Persisted so a user
+  // who lives in Usage doesn't get bumped back to Stream on every
+  // app restart.
+  const [tab, setTabState] = useState<EventsTab>(loadTab);
+  const setTab = useCallback((next: EventsTab) => {
+    setTabState(next);
+    saveTab(next);
+  }, []);
+  // UsageView registers its refresh fn here on mount so the header
+  // button can trigger it when tab === "usage". Plain ref — no setter
+  // needed, the registration is identity-stable for the whole life
+  // of the mounted UsageView.
+  const usageRefreshRef = useRef<(() => void) | null>(null);
 
   // Monotonic request counters guard against out-of-order fetch
   // resolution. Filter edits, the 5s poll, and the `live-all` tick
@@ -243,7 +279,7 @@ export function EventsSection() {
         background: "var(--bg)",
       }}
     >
-      <FilterRail filters={filters} onChange={setFilters} />
+      {tab === "stream" && <FilterRail filters={filters} onChange={setFilters} />}
       <div
         style={{
           flex: 1,
@@ -258,19 +294,113 @@ export function EventsSection() {
           reindexing={reindexing}
           onReindex={handleReindex}
           onMarkAllSeen={markAllSeen}
-          onRefresh={() => void refresh()}
+          onRefresh={() => {
+            if (tab === "usage") {
+              usageRefreshRef.current?.();
+            } else {
+              void refresh();
+            }
+          }}
         />
-        <DashboardStrip />
-        <MetricsStrip cards={aggCards} loading={loading} />
-        <CardStream
-          cards={cards}
-          loading={loading}
-          error={error}
-          lastSeenId={counts?.lastSeenId ?? null}
-          onCardClick={handleCardClick}
-        />
+        <TabStrip current={tab} onPick={setTab} />
+        {tab === "stream" ? (
+          <>
+            <DashboardStrip />
+            <MetricsStrip cards={aggCards} loading={loading} />
+            <CardStream
+              cards={cards}
+              loading={loading}
+              error={error}
+              lastSeenId={counts?.lastSeenId ?? null}
+              onCardClick={handleCardClick}
+            />
+          </>
+        ) : (
+          <UsageView
+            registerRefresh={(fn) => {
+              usageRefreshRef.current = fn;
+            }}
+          />
+        )}
       </div>
     </div>
+  );
+}
+
+// ── Tab strip ────────────────────────────────────────────────────
+//
+// Two-tab toggle splitting Activity into "Stream" (failure cards,
+// the diagnostic surface) and "Usage" (per-artifact fire counts,
+// the stewardship surface). Both views read from the same
+// `sessions.db` — different facets of the same JSONL stream.
+
+function TabStrip({
+  current,
+  onPick,
+}: {
+  current: EventsTab;
+  onPick: (t: EventsTab) => void;
+}) {
+  return (
+    <div
+      role="tablist"
+      aria-label="Activity view"
+      style={{
+        display: "flex",
+        gap: "var(--sp-2)",
+        padding: "var(--sp-6) var(--sp-16) 0",
+        borderBottom: "var(--bw-hair) solid var(--line)",
+      }}
+    >
+      <TabButton
+        active={current === "stream"}
+        label="Stream"
+        sub="Failures + slow events"
+        onClick={() => onPick("stream")}
+      />
+      <TabButton
+        active={current === "usage"}
+        label="Usage"
+        sub="Per-artifact invocation counts"
+        onClick={() => onPick("usage")}
+      />
+    </div>
+  );
+}
+
+function TabButton({
+  active,
+  label,
+  sub,
+  onClick,
+}: {
+  active: boolean;
+  label: string;
+  sub: string;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      role="tab"
+      aria-selected={active}
+      onClick={onClick}
+      className="pm-focus"
+      title={sub}
+      style={{
+        padding: "var(--sp-6) var(--sp-12) var(--sp-8)",
+        background: "transparent",
+        color: active ? "var(--accent-ink)" : "var(--fg-muted)",
+        border: "none",
+        borderBottom: `2px solid ${active ? "var(--accent)" : "transparent"}`,
+        fontSize: "var(--fs-sm)",
+        fontWeight: active ? 600 : 400,
+        cursor: "pointer",
+        marginBottom: "-1px",
+      }}
+    >
+      {label}
+    </button>
   );
 }
 
