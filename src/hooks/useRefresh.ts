@@ -194,25 +194,38 @@ export function useRefresh(pushToast: (kind: "info" | "error", text: string) => 
         // gates on gen to avoid stale data overwriting fresher data,
         // but the flag itself is now a simple ref-count — can't get
         // stuck on an orphaned set.
-        setVerifyingCount((n) => n + 1);
-        runVerifyAll({
-          patchAccount: (uuid, patch) => {
-            if (gen !== refreshGenRef.current) return;
-            setAccounts((prev) =>
-              prev.map((a) => (a.uuid === uuid ? { ...a, ...patch } : a)),
-            );
-          },
-          setAccounts: (rows) => {
-            if (gen === refreshGenRef.current) setAccounts(rows);
-          },
-        })
-          .catch((e) => {
-            // eslint-disable-next-line no-console
-            console.warn("verify_all_accounts failed:", e);
+        //
+        // Defer the verify burst past first paint. `verify_all_accounts`
+        // fans out one HTTPS `/profile` round-trip per account in
+        // parallel; nothing the user sees on cold start depends on the
+        // result, so paying for it on the boot critical path just
+        // delays ambient network for the same staleness gate that fires
+        // on the next focus event.
+        const rIC: (cb: () => void) => number =
+          (window as typeof window & {
+            requestIdleCallback?: (cb: () => void) => number;
+          }).requestIdleCallback ?? ((cb) => window.setTimeout(cb, 0));
+        rIC(() => {
+          setVerifyingCount((n) => n + 1);
+          runVerifyAll({
+            patchAccount: (uuid, patch) => {
+              if (gen !== refreshGenRef.current) return;
+              setAccounts((prev) =>
+                prev.map((a) => (a.uuid === uuid ? { ...a, ...patch } : a)),
+              );
+            },
+            setAccounts: (rows) => {
+              if (gen === refreshGenRef.current) setAccounts(rows);
+            },
           })
-          .finally(() => {
-            setVerifyingCount((n) => Math.max(0, n - 1));
-          });
+            .catch((e) => {
+              // eslint-disable-next-line no-console
+              console.warn("verify_all_accounts failed:", e);
+            })
+            .finally(() => {
+              setVerifyingCount((n) => Math.max(0, n - 1));
+            });
+        });
       }
     } catch (e) {
       const msg = `${e}`;
