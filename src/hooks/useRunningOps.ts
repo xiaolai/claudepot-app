@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { api } from "../api";
 import type { RunningOpInfo } from "../types";
 
@@ -8,7 +8,10 @@ const POLL_INTERVAL_MS = 3_000;
  * Polls the backend for currently-tracked ops so the RunningOpStrip
  * stays in sync even if a Tauri event is lost. Polling is cheap —
  * pure HashMap lookup behind the Tauri command. Stops when the list
- * is empty to avoid a useless tick loop.
+ * is empty to avoid a useless tick loop, and auto-rearms whenever
+ * the next refresh sees ops appear (e.g. one was started from the
+ * CLI, another window, or a `_start` Tauri command in this window
+ * that already calls refresh() to pick the op up).
  *
  * Callers can force an immediate refresh after firing a `_start`
  * command; the poll-based fallback exists for event drops, not as
@@ -19,11 +22,26 @@ export function useRunningOps(): {
   refresh: () => void;
 } {
   const [ops, setOps] = useState<RunningOpInfo[]>([]);
+  const intervalRef = useRef<number | null>(null);
 
   const refresh = useCallback(() => {
     api
       .runningOpsList()
-      .then(setOps)
+      .then((list) => {
+        setOps(list);
+        // Idle-aware polling: stop the interval when nothing is in
+        // flight, restart it the moment something appears. The
+        // self-reference is safe — useCallback with [] gives `refresh`
+        // a stable identity, and JS resolves the name at call time.
+        if (list.length === 0) {
+          if (intervalRef.current !== null) {
+            window.clearInterval(intervalRef.current);
+            intervalRef.current = null;
+          }
+        } else if (intervalRef.current === null) {
+          intervalRef.current = window.setInterval(refresh, POLL_INTERVAL_MS);
+        }
+      })
       .catch((err) => {
         console.warn("useRunningOps refresh failed", err);
       });
@@ -44,11 +62,12 @@ export function useRunningOps(): {
       }).cancelIdleCallback ?? window.clearTimeout;
 
     const idleHandle = rIC(() => refresh());
-    // Always poll — ops may be started from elsewhere (CLI, another window).
-    const id = window.setInterval(refresh, POLL_INTERVAL_MS);
     return () => {
       cIC(idleHandle);
-      window.clearInterval(id);
+      if (intervalRef.current !== null) {
+        window.clearInterval(intervalRef.current);
+        intervalRef.current = null;
+      }
     };
   }, [refresh]);
 
