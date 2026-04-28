@@ -440,7 +440,14 @@ jobs:
       - build-windows
     runs-on: ubuntu-latest
     permissions:
+      # `contents: write` for `softprops/action-gh-release` and `gh release upload`.
+      # `actions: write` for the `gh workflow run update-homebrew.yml` dispatch
+      # at the end of the job — without it, that call hits HTTP 403
+      # "Resource not accessible by integration" and the Homebrew tap
+      # silently never updates (the step has continue-on-error so the
+      # release ships green either way).
       contents: write
+      actions: write
     steps:
       - uses: actions/download-artifact@v7
         with:
