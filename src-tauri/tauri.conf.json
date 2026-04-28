@@ -34,6 +34,7 @@
     "active": true,
     "targets": "all",
     "createUpdaterArtifacts": true,
+    "externalBin": ["binaries/claudepot-cli"],
     "category": "DeveloperTool",
     "shortDescription": "Multi-account Claude Code / Desktop switcher",
     "longDescription": "Manage multiple Anthropic Claude Code and Claude Desktop accounts. Switch the active account in seconds without re-authenticating.",
