@@ -28,8 +28,12 @@ struct AutomationsFile {
     automations: Vec<Automation>,
 }
 
+/// The schema version this build understands. Bump when the shape
+/// changes in a way old binaries cannot read forward.
+const CURRENT_VERSION: u32 = 1;
+
 fn default_version() -> u32 {
-    1
+    CURRENT_VERSION
 }
 
 impl Default for AutomationsFile {
@@ -100,7 +104,17 @@ impl AutomationStore {
             if raw.is_empty() {
                 AutomationsFile::default()
             } else {
-                serde_json::from_slice::<AutomationsFile>(&raw)?
+                let parsed: AutomationsFile = serde_json::from_slice(&raw)?;
+                // Refuse to load files newer than this binary
+                // understands — saving them back could downgrade
+                // their schema and lose data the future format adds.
+                if parsed.version > CURRENT_VERSION {
+                    return Err(AutomationError::InvalidEnv(format!(
+                        "automations.json schema version {} is newer than this build (supports up to {}); upgrade Claudepot",
+                        parsed.version, CURRENT_VERSION
+                    )));
+                }
+                parsed
             }
         } else {
             AutomationsFile::default()

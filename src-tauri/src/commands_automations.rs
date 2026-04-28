@@ -347,6 +347,11 @@ pub async fn automations_set_enabled(
     let mut patch = AutomationPatch::default();
     patch.enabled = Some(enabled);
     store.update(&aid, patch).map_err(err)?;
+    // Persist BEFORE touching the OS scheduler — same rationale as
+    // automations_add/update/remove: a failed register/unregister
+    // can't leave the JSON store and the OS scheduler in
+    // disagreement.
+    store.save().map_err(err)?;
 
     let scheduler = active_scheduler();
     if enabled {
@@ -361,8 +366,6 @@ pub async fn automations_set_enabled(
     } else {
         let _ = scheduler.unregister(&aid);
     }
-
-    store.save().map_err(err)?;
     Ok(())
 }
 
