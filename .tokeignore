@@ -1,8 +1,5 @@
-# loc-guardian: exclude generated/handoff artifacts and test files
-# whose paths the skill's hard-coded patterns miss.
-
-# Design-handoff artifacts (Figma export, never edited by hand).
-design_handoff_claudepot/
+# loc-guardian: exclude generated artifacts and test files whose
+# paths the skill's hard-coded patterns miss.
 
 # Lock file (defense in depth — already in tokei defaults).
 pnpm-lock.yaml
