@@ -26,6 +26,9 @@
     clippy::manual_map,
     clippy::single_match,
     clippy::assertions_on_constants,
+    // CI uses clippy 1.95 (vs local 1.92); 1.95 added the
+    // `collapsible_match` lint family.
+    clippy::collapsible_match,
 )]
 
 #[cfg(test)]
