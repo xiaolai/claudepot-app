@@ -28,6 +28,10 @@ struct ProbeEntry {
     id: &'static str,
     label: &'static str,
     bundle_id: Option<&'static str>,
+    /// Used only by the macOS launch path. Linux/Windows builds
+    /// don't read it, but the field stays in the table so the static
+    /// initializer is one shape for every target.
+    #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
     macos_app: Option<&'static str>,
     cli_names: &'static [&'static str],
     args_template: &'static [&'static str],

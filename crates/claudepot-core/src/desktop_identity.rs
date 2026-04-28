@@ -27,6 +27,12 @@
 //! to confirm the identity. Returns [`ProbeMethod::Decrypted`] — the
 //! only trust tier that constructs a [`VerifiedIdentity`].
 
+// On non-macOS targets the slow-path token-cache decrypt machinery
+// is gated out, so the import + the `fetch_profile` parameter that
+// only feeds it land as warnings under `-D warnings`. Suppress just
+// for those targets — macOS still enforces the lints.
+#![cfg_attr(not(target_os = "macos"), allow(unused_imports, unused_variables))]
+
 use crate::account::AccountStore;
 use crate::desktop_backend::token_cache::DecryptedTokenCache;
 use crate::desktop_backend::DesktopPlatform;

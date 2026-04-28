@@ -12,6 +12,11 @@
 //! itself, but it does describe how to retrieve it, and any leak
 //! gives an attacker on the same box one less unknown.
 
+// Linux/Windows builds gate the keychain helper out (currently
+// macOS-only), so the helper functions and `fs_utils` import compile
+// in but are unused on those targets. Suppress only there.
+#![cfg_attr(not(target_os = "macos"), allow(unused_imports, dead_code))]
+
 use std::path::{Path, PathBuf};
 
 use crate::fs_utils;
