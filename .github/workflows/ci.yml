@@ -7,7 +7,7 @@ on:
 
 env:
   CARGO_TERM_COLOR: always
-  # Opt every JavaScript-based action (`actions/checkout@v4`,
+  # Opt every JavaScript-based action (`actions/checkout@v6`,
   # `actions/cache@v4`, `actions/setup-node@v4`, `pnpm/action-setup@v4`)
   # into the Node 24 runtime ahead of GitHub's June 2026 forced switch.
   # Skips the deprecation warning on every job; also surfaces any
@@ -20,7 +20,7 @@ jobs:
     name: Format / Clippy (Linux)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - name: Install Rust stable
         uses: dtolnay/rust-toolchain@stable
@@ -52,7 +52,7 @@ jobs:
         os: [ubuntu-latest, macos-latest, windows-latest]
     runs-on: ${{ matrix.os }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - name: Install Rust stable
         uses: dtolnay/rust-toolchain@stable
@@ -75,7 +75,7 @@ jobs:
     name: Frontend tests (Vitest)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - name: Setup pnpm
         uses: pnpm/action-setup@v4
