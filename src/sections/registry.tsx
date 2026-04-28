@@ -18,14 +18,14 @@ export interface SectionDef {
 }
 
 export const sections: readonly SectionDef[] = [
-  { id: "accounts",    label: "Accounts",    glyph: NF.users     },
-  { id: "projects",    label: "Projects",    glyph: NF.folder    },
-  { id: "automations", label: "Automations", glyph: NF.clock     },
-  { id: "events",      label: "Activities",  glyph: NF.dashboard },
-  { id: "global",      label: "Global",      glyph: NF.globe     },
-  { id: "keys",        label: "Keys",        glyph: NF.key       },
-  { id: "third-party", label: "Third-party", glyph: NF.cpu       },
-  { id: "settings",    label: "Settings",    glyph: NF.sliders   },
+  { id: "accounts",    label: "Accounts",      glyph: NF.users     },
+  { id: "events",      label: "Activities",    glyph: NF.dashboard },
+  { id: "projects",    label: "Projects",      glyph: NF.folder    },
+  { id: "keys",        label: "Keys",          glyph: NF.key       },
+  { id: "third-party", label: "Third-parties", glyph: NF.cpu       },
+  { id: "automations", label: "Automations",   glyph: NF.clock     },
+  { id: "global",      label: "Global",        glyph: NF.globe     },
+  { id: "settings",    label: "Settings",      glyph: NF.sliders   },
 ];
 
 export const sectionIds = sections.map((s) => s.id);

@@ -207,7 +207,7 @@ export function ThirdPartySection() {
       }}
     >
       <ScreenHeader
-        title="Third-party"
+        title="Third-parties"
         subtitle="Run Claude Code and Claude Desktop with non-Anthropic LLMs"
         actions={
           <Button
@@ -324,7 +324,8 @@ export function ThirdPartySection() {
           <div
             style={{
               display: "grid",
-              gridTemplateColumns: "repeat(auto-fill, minmax(360px, 1fr))",
+              gridTemplateColumns:
+                "repeat(auto-fill, minmax(var(--content-cap-sm), 1fr))",
               gap: "var(--sp-16)",
             }}
           >
