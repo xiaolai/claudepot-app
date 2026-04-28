@@ -68,53 +68,52 @@ export function useActivityNotifications(): number {
     "unknown" | "not-requested" | "granted" | "denied"
   >("unknown");
 
-  // Load prefs once on mount + refresh whenever the api setters
-  // broadcast `cp-prefs-changed`. Previously this polled every 10 s,
-  // which was waste — preferences only mutate via Settings /
-  // ConsentLiveModal, and those call sites already round-trip through
-  // the api/activity wrappers that emit the event.
+  // Load prefs once on mount; subsequent updates ride on the
+  // `cp-prefs-changed` event whose payload IS the new Preferences
+  // snapshot — no second preferencesGet() and no ordering race
+  // between back-to-back setters.
   useEffect(() => {
     let cancelled = false;
     let unlisten: UnlistenFn | null = null;
-    const load = () => {
-      api
-        .preferencesGet()
-        .then(async (p) => {
-          if (cancelled) return;
-          prefsRef.current = p;
-          setPrefsVersion((v) => v + 1);
-          // Probe OS-notification permission the first time any
-          // notification pref is flipped on. No request until a
-          // trigger actually fires, so a cautious user who never
-          // enables alerts never sees the OS prompt.
-          const wantsOs =
-            p.notify_on_error ||
-            p.notify_on_idle_done ||
-            p.notify_on_stuck_minutes != null ||
-            p.notify_on_spend_usd != null;
-          if (wantsOs && osPermissionRef.current === "unknown") {
-            try {
-              const granted = await isPermissionGranted();
-              // If not yet granted, leave as "not-requested" so the
-              // next trigger does a user-facing requestPermission.
-              // isPermissionGranted returns false BEFORE any prompt
-              // has been shown, so treating that as terminal
-              // "denied" would silently suppress all future OS
-              // notifications on a fresh install.
-              osPermissionRef.current = granted
-                ? "granted"
-                : "not-requested";
-            } catch {
-              osPermissionRef.current = "denied";
-            }
-          }
-        })
-        .catch(() => {
-          /* no-tauri env */
-        });
+
+    const applyPrefs = async (p: Preferences) => {
+      if (cancelled) return;
+      prefsRef.current = p;
+      setPrefsVersion((v) => v + 1);
+      // Probe OS-notification permission the first time any
+      // notification pref is flipped on. No request until a
+      // trigger actually fires, so a cautious user who never
+      // enables alerts never sees the OS prompt.
+      const wantsOs =
+        p.notify_on_error ||
+        p.notify_on_idle_done ||
+        p.notify_on_stuck_minutes != null ||
+        p.notify_on_spend_usd != null;
+      if (wantsOs && osPermissionRef.current === "unknown") {
+        try {
+          const granted = await isPermissionGranted();
+          // If not yet granted, leave as "not-requested" so the
+          // next trigger does a user-facing requestPermission.
+          // isPermissionGranted returns false BEFORE any prompt
+          // has been shown, so treating that as terminal
+          // "denied" would silently suppress all future OS
+          // notifications on a fresh install.
+          osPermissionRef.current = granted ? "granted" : "not-requested";
+        } catch {
+          osPermissionRef.current = "denied";
+        }
+      }
     };
-    load();
-    listen("cp-prefs-changed", load)
+
+    api
+      .preferencesGet()
+      .then((p) => applyPrefs(p))
+      .catch(() => {
+        /* no-tauri env */
+      });
+    listen<Preferences>("cp-prefs-changed", (ev) => {
+      if (ev.payload) void applyPrefs(ev.payload);
+    })
       .then((fn) => {
         if (cancelled) fn();
         else unlisten = fn;

@@ -6,7 +6,7 @@ import {
   sendNotification,
 } from "@tauri-apps/plugin-notification";
 import { api } from "../../api";
-import type { LiveSessionSummary } from "../../types";
+import type { LiveSessionSummary, Preferences } from "../../types";
 
 /**
  * `useCardNotifications` — fires native OS notifications when the
@@ -40,30 +40,40 @@ export function useCardNotifications() {
   const COALESCE_WINDOW_MS = 60_000;
   const COALESCE_THRESHOLD = 3;
 
-  // Fetch preference + listen for changes via the cp-prefs event
-  // pattern other surfaces use. Default-off until we hear from the
-  // backend (fail-closed: no notifications without consent).
+  // Fetch preference once on mount + listen for changes via the
+  // cp-prefs-changed event whose payload IS the new Preferences. No
+  // second preferencesGet() round-trip on each event, no ordering
+  // race between back-to-back setters. Default-off until we hear
+  // from the backend (fail-closed: no notifications without consent).
   useEffect(() => {
+    // active-flag pattern: cleanup may run before listen() resolves
+    // (StrictMode double-mount, fast unmount). Without the flag the
+    // returned unlisten gets stashed into a stale closure and the
+    // listener leaks for the page lifetime.
+    let active = true;
     let aliveU: UnlistenFn | null = null;
     void api
       .preferencesGet()
       .then((p) => {
-        enabledRef.current = !!p.notify_on_error;
+        if (active) enabledRef.current = !!p.notify_on_error;
       })
       .catch(() => {
         /* non-tauri env */
       });
-    void listen("cp-prefs-changed", () => {
-      void api
-        .preferencesGet()
-        .then((p) => {
-          enabledRef.current = !!p.notify_on_error;
-        })
-        .catch(() => {});
-    }).then((u) => {
-      aliveU = u;
-    });
+    void listen<Preferences>("cp-prefs-changed", (ev) => {
+      if (active && ev.payload) {
+        enabledRef.current = !!ev.payload.notify_on_error;
+      }
+    })
+      .then((u) => {
+        if (!active) u();
+        else aliveU = u;
+      })
+      .catch(() => {
+        /* non-tauri env */
+      });
     return () => {
+      active = false;
       if (aliveU) aliveU();
     };
   }, []);
