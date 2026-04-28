@@ -84,7 +84,7 @@ jobs:
           compute "Claudepot-x86_64.dmg"           dmg_intel
 
       - name: Checkout homebrew-tap
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           repository: xiaolai/homebrew-tap
           token: ${{ secrets.HOMEBREW_TAP_TOKEN }}
