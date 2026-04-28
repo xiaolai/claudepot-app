@@ -6,6 +6,42 @@ Versioning scheme:
 - `0.1.x` — beta
 - `1.0.0+` — stable
 
+## 0.0.6 — alpha
+
+### Changed
+
+- **Frontend perf overhaul.** Stabilized `useActions` /
+  `useBusy` callback identities so AppStateProvider's context
+  value stops churning on every render. Deferred cold-start
+  `verify_all_accounts` past first paint. Replaced the 10 s
+  preferences poll with an event-driven listener. Single-pass
+  account match in `useStatusIssues`. Pinned the `useSection`
+  ⌘1..⌘9 keydown listener via a section ref so it wires once
+  for the lifetime of the hook.
+
+### Fixed
+
+- **Stale notification prefs after toggle.** `cp-prefs-changed`
+  now carries the freshly-saved `Preferences` snapshot as its
+  payload, eliminating the second-`preferencesGet()` ordering
+  race that could let an older read overwrite a newer state.
+- **Cross-process op discovery.** The running-ops poller no
+  longer pauses when the local list goes empty — CLI-started
+  ops surface in the GUI within one 3 s tick again.
+- **Listener leaks under StrictMode double-mount.**
+  `cp-activity-open-session`, `cp-tray-desktop-{clear,bind}`,
+  the `useCardNotifications` bootstrap chain, and the
+  `cp-prefs-changed` listener all use the active-flag
+  late-resolve guard now.
+- **Backend forwarder leak in card-notification cleanup.** Each
+  frontend `unlisten` is now paired with
+  `api.sessionLiveUnsubscribe(sid)` so the rust singleton
+  releases its slot and remounts can re-subscribe without
+  `AlreadySubscribed`.
+- **Dead-state writes after fast unmount.** The deferred
+  verify-all `requestIdleCallback` handle is stored on a ref
+  and cancelled both on supersede and on hook teardown.
+
 ## 0.0.5 — alpha (unreleased)
 
 ### Added
