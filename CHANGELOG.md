@@ -6,6 +6,19 @@ Versioning scheme:
 - `0.1.x` — beta
 - `1.0.0+` — stable
 
+## 0.0.8 — alpha (unreleased)
+
+### Fixed
+
+- **CI release pipeline.** v0.0.7's release run failed because the
+  Linux/Windows GUI jobs looked for legacy Tauri 1 artifact names
+  (`*.AppImage.tar.gz`, `*.nsis.zip`, `*.msi.zip`) when staging
+  signatures. Tauri 2 signs each bundle file directly, so the actual
+  outputs are `*.AppImage.sig`, `*-setup.exe.sig`, `*.msi.sig`. The
+  staging steps and the `latest.json` generator now read those names,
+  and the in-app updater for Linux/Windows points at the real
+  installer URLs (`.AppImage`, `-setup.exe`).
+
 ## 0.0.7 — alpha (unreleased)
 
 ### Added
