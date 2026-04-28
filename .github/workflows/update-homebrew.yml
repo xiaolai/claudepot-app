@@ -12,6 +12,11 @@ on:
         description: 'Version to publish (e.g. 0.0.2 — no leading v)'
         required: true
 
+env:
+  # Opt every JavaScript-based action into Node 24 ahead of GitHub's
+  # June 2026 forced switch. See ci.yml for the full rationale.
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
+
 permissions:
   contents: read
 

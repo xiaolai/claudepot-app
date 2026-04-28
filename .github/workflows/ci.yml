@@ -7,6 +7,13 @@ on:
 
 env:
   CARGO_TERM_COLOR: always
+  # Opt every JavaScript-based action (`actions/checkout@v4`,
+  # `actions/cache@v4`, `actions/setup-node@v4`, `pnpm/action-setup@v4`)
+  # into the Node 24 runtime ahead of GitHub's June 2026 forced switch.
+  # Skips the deprecation warning on every job; also surfaces any
+  # Node-24 incompatibility well before the September 2026 hard
+  # removal of Node 20 from runners.
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
 
 jobs:
   lint:
