@@ -96,9 +96,9 @@ pub fn expand(expr: &str) -> Result<Vec<LaunchSlot>, AutomationError> {
                     // dom + dow both unrestricted. If `mon` is also
                     // unrestricted, emit a single any-day slot. If
                     // `mon` is restricted, we MUST iterate every
-                    // selected month — `pick_month` returned only the
-                    // first one, so `0 9 * jan,feb *` was silently
-                    // collapsing to January only.
+                    // selected month — picking only the first one
+                    // would silently collapse `0 9 * jan,feb *` to
+                    // January only.
                     for mo in iter_months(&mon) {
                         slots.push(LaunchSlot {
                             minute: m,
@@ -193,15 +193,6 @@ fn check_cap(slots: &[LaunchSlot], expr: &str) -> Result<(), AutomationError> {
         ));
     }
     Ok(())
-}
-
-fn pick_month(mon: &Field) -> Option<u8> {
-    if mon.is_full {
-        None
-    } else {
-        // Should not happen — if mon is restricted we use iter_months.
-        Some(mon.values[0])
-    }
 }
 
 fn iter_months(mon: &Field) -> Box<dyn Iterator<Item = Option<u8>> + '_> {
@@ -460,7 +451,8 @@ mod tests {
     #[test]
     fn restricted_months_with_star_dom_and_dow_keeps_all_months() {
         // Regression: previously collapsed to the first month only
-        // because `pick_month` discarded the rest.
+        // because the (now-removed) single-month picker discarded
+        // the rest. `iter_months` is the fix.
         let s = ok("0 9 * jan,feb *");
         assert_eq!(s.len(), 2);
         let months: Vec<Option<u8>> = s.iter().map(|x| x.month).collect();
