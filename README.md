@@ -16,6 +16,10 @@
   <a href="#for-developers">For developers</a>
 </p>
 
+<p align="center">
+  <img src="assets/screenshots/activities.png" alt="Claudepot — Activities tab showing live sessions, today/month dashboard, and recent events" width="900">
+</p>
+
 ---
 
 ## What
@@ -88,19 +92,35 @@ After that, switch with one click from the sidebar, the ⌘K command palette, or
 
 **Accounts** — Manage every Claude account you have. Add, remove, verify, and switch between them. Two slots — one for the CLI, one for the Desktop app — switched independently. Per-account secrets live in the OS keychain.
 
+![Accounts tab](assets/screenshots/accounts.png)
+
 **Activities** — Three time-scales of "what's happening with Claude right now": a live strip (running sessions, sorted by who needs attention first), a today/month dashboard, and a stream of recent events. macOS notifications when a session goes from `busy` to `waiting`.
+
+![Activities tab](assets/screenshots/activities.png)
 
 **Projects** — Every project Claude has ever touched, with all its sessions. Cross-project text search, filters by date / error / size / token count. **Rename a project here** instead of `mv`-ing it — Claudepot rewrites every reference Claude has (session transcripts, project map, history file, memory, settings) in nine journaled phases. Resumable on crash, fully reversible.
 
+![Projects tab](assets/screenshots/projects.png)
+
 **Keys** — All your API keys and OAuth tokens, in one inventory. Stored in the OS keychain (macOS Keychain / Windows Credential Manager / Linux Secret Service). Copy with self-clearing clipboard — the value wipes itself after 30 seconds.
+
+![Keys tab](assets/screenshots/keys.png)
 
 **Third-parties** — Run non-Anthropic models through the same `claude` interface. Each route installs as a wrapper binary on `PATH` and a separate Desktop profile, so first-party Claude is never touched.
 
+![Third-parties tab](assets/screenshots/third-parties.png)
+
 **Automations** — Schedule a `claude -p` prompt to run on a cron expression (every weekday at 8am, every Monday morning, anything cron can express) or on demand. Each run lands in a history pane with stdout, stderr, and exit code. macOS uses launchd, Windows uses Task Scheduler, Linux uses systemd-user timers — set up for you, not by hand.
+
+![Automations tab](assets/screenshots/automations.png)
 
 **Global** — Browse your user-wide Claude Code configuration in one place: user prefs, global config, plugins, memory across projects, managed policy. Read-only inspection — handy when something behaves oddly and you need to know which config layer is responsible.
 
+![Global tab](assets/screenshots/global.png)
+
 **Settings** — Theme and density (paper-mono light / dark), Activity preferences, Diagnostics (`doctor`), Cleanup (**Prune** old/large sessions · **Slim** drops bulky tool-output payloads while keeping prompts and replies · **Trash** 7-day undo for anything deleted), Protected paths, GitHub PAT, Locks, About.
+
+![Settings tab](assets/screenshots/settings.png)
 
 ## For developers
 
