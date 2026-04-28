@@ -13,8 +13,8 @@
 
 use crate::config_view::memory_include;
 use crate::config_view::model::{
-    ClaudeMdRole, ConfigTree, FileNode, FileSummary, Kind, Node,
-    ParseIssue, PolicyOrigin, Scope, ScopeNode,
+    ClaudeMdRole, ConfigTree, FileNode, FileSummary, Kind, Node, ParseIssue, PolicyOrigin, Scope,
+    ScopeNode,
 };
 use crate::config_view::parse;
 use crate::path_utils::simplify_windows_path;
@@ -53,10 +53,7 @@ const DENY_NAMES: &[&str] = &[
     crate::artifact_lifecycle::DISABLED_DIR,
 ];
 
-const DENY_PREFIXES: &[&str] = &[
-    "history.jsonl",
-    "security_warnings_state_",
-];
+const DENY_PREFIXES: &[&str] = &["history.jsonl", "security_warnings_state_"];
 
 /// True when `name` matches the shared Config-section deny-list
 /// (`dev-docs/config-section-plan.md` §6.3). This function is the
@@ -150,11 +147,9 @@ fn parse_file(path: &Path, kind: &Kind) -> parse::Parsed {
         }
         Kind::McpJson | Kind::ManagedMcpJson => parse::parse_settings_json(&bytes),
         Kind::ClaudeMd => parse::parse_claude_md(&bytes),
-        Kind::Agent
-        | Kind::Rule
-        | Kind::Command
-        | Kind::OutputStyle
-        | Kind::Workflow => parse::parse_frontmatter_markdown(&bytes),
+        Kind::Agent | Kind::Rule | Kind::Command | Kind::OutputStyle | Kind::Workflow => {
+            parse::parse_frontmatter_markdown(&bytes)
+        }
         Kind::Skill => parse::parse_frontmatter_markdown(&bytes),
         Kind::Memory => parse::parse_memory_head(&bytes),
         Kind::MemoryIndex => parse::parse_memory_index(&bytes).1,
@@ -176,13 +171,21 @@ pub fn collect_user() -> Vec<FileNode> {
     let home = claude_config_dir();
     let mut out = Vec::new();
 
-    out.extend(maybe_file(home.join("settings.json"), Kind::Settings, Scope::User));
+    out.extend(maybe_file(
+        home.join("settings.json"),
+        Kind::Settings,
+        Scope::User,
+    ));
     out.extend(maybe_file(
         home.join("keybindings.json"),
         Kind::Keybindings,
         Scope::User,
     ));
-    out.extend(maybe_file(home.join("CLAUDE.md"), Kind::ClaudeMd, Scope::User));
+    out.extend(maybe_file(
+        home.join("CLAUDE.md"),
+        Kind::ClaudeMd,
+        Scope::User,
+    ));
 
     out.extend(collect_dir_of_kind(
         &home.join("agents"),
@@ -344,11 +347,7 @@ pub fn collect_claudemd_local_walk(cwd: &Path) -> Vec<(PathBuf, ClaudeMdRole, Fi
         } else {
             ClaudeMdRole::Ancestor
         };
-        if let Some(f) = maybe_file(
-            dir.join("CLAUDE.local.md"),
-            Kind::ClaudeMd,
-            Scope::Local,
-        ) {
+        if let Some(f) = maybe_file(dir.join("CLAUDE.local.md"), Kind::ClaudeMd, Scope::Local) {
             out.push((dir.clone(), role.clone(), f));
         }
     }
@@ -361,11 +360,7 @@ pub fn collect_claudemd_local_walk(cwd: &Path) -> Vec<(PathBuf, ClaudeMdRole, Fi
 pub fn collect_mcp_json_walk(cwd: &Path) -> Vec<FileNode> {
     let mut out = Vec::new();
     for dir in ancestors_for(cwd, WalkBoundary::FsRoot) {
-        if let Some(f) = maybe_file(
-            dir.join(".mcp.json"),
-            Kind::McpJson,
-            Scope::Project,
-        ) {
+        if let Some(f) = maybe_file(dir.join(".mcp.json"), Kind::McpJson, Scope::Project) {
             out.push(f);
         }
     }
@@ -454,7 +449,9 @@ pub fn collect_memory_current(project_root: &Path) -> (Vec<FileNode>, String, bo
 }
 
 fn walk_memory_dir(dir: &Path, out: &mut Vec<FileNode>) {
-    let Ok(rd) = std::fs::read_dir(dir) else { return };
+    let Ok(rd) = std::fs::read_dir(dir) else {
+        return;
+    };
     for entry in rd.flatten() {
         let path = entry.path();
         let name = entry.file_name().to_string_lossy().into_owned();
@@ -486,7 +483,9 @@ fn walk_memory_dir(dir: &Path, out: &mut Vec<FileNode>) {
 /// per-plugin file nodes (manifest + settings) for display, plus a
 /// `Vec<plugin_base::Plugin>` the merge cascade will consume.
 pub fn collect_plugins() -> (Vec<FileNode>, Vec<crate::config_view::plugin_base::Plugin>) {
-    use crate::config_view::plugin_base::{load_plugin_manifest, load_plugin_settings, Plugin, PluginSourceDisplay};
+    use crate::config_view::plugin_base::{
+        load_plugin_manifest, load_plugin_settings, Plugin, PluginSourceDisplay,
+    };
 
     let home = claude_config_dir();
     let enabled_specs = load_enabled_plugin_specs(&home);
@@ -530,8 +529,7 @@ pub fn collect_plugins() -> (Vec<FileNode>, Vec<crate::config_view::plugin_base:
                 let settings = load_plugin_settings(&plug_root);
                 let plug_name = plug.file_name().to_string_lossy().into_owned();
                 let version_name = version.file_name().to_string_lossy().into_owned();
-                let marketplace_name =
-                    marketplace.file_name().to_string_lossy().into_owned();
+                let marketplace_name = marketplace.file_name().to_string_lossy().into_owned();
                 // Plugin id includes the version so two installs of
                 // the same plugin (e.g. upgrade path) don't collide
                 // in the id space. Friendly display stays
@@ -556,11 +554,7 @@ pub fn collect_plugins() -> (Vec<FileNode>, Vec<crate::config_view::plugin_base:
                 } else {
                     plug_root.join(".claude-plugin").join("plugin.json")
                 };
-                if let Some(f) = maybe_file(
-                    manifest_path,
-                    Kind::Plugin,
-                    plugin_scope.clone(),
-                ) {
+                if let Some(f) = maybe_file(manifest_path, Kind::Plugin, plugin_scope.clone()) {
                     files.push(f);
                 }
 
@@ -627,8 +621,7 @@ pub fn collect_plugins() -> (Vec<FileNode>, Vec<crate::config_view::plugin_base:
                 }
 
                 let spec = format!("{plug_name}@{marketplace_name}");
-                let enabled =
-                    enabled_specs.contains(&spec) || enabled_specs.contains(&plug_name);
+                let enabled = enabled_specs.contains(&spec) || enabled_specs.contains(&plug_name);
                 plugins.push(Plugin {
                     id,
                     root: plug_root,
@@ -653,7 +646,9 @@ fn load_enabled_plugin_specs(home: &Path) -> std::collections::HashSet<String> {
     use std::collections::HashSet;
     let mut out = HashSet::new();
     let p = home.join("settings.json");
-    let Some(bytes) = std::fs::read(p).ok() else { return out };
+    let Some(bytes) = std::fs::read(p).ok() else {
+        return out;
+    };
     let Ok(v): Result<serde_json::Value, _> = serde_json::from_slice(&bytes) else {
         return out;
     };
@@ -663,10 +658,9 @@ fn load_enabled_plugin_specs(home: &Path) -> std::collections::HashSet<String> {
     for (spec, val) in plugins {
         let enabled = match val {
             serde_json::Value::Bool(b) => *b,
-            serde_json::Value::Object(o) => o
-                .get("enabled")
-                .and_then(|x| x.as_bool())
-                .unwrap_or(true),
+            serde_json::Value::Object(o) => {
+                o.get("enabled").and_then(|x| x.as_bool()).unwrap_or(true)
+            }
             _ => true,
         };
         if enabled {
@@ -779,14 +773,11 @@ pub fn collect_redacted_user_config() -> Option<FileNode> {
 
 // ---------- Internals -------------------------------------------------
 
-fn collect_dir_of_kind(
-    dir: &Path,
-    kind: Kind,
-    scope: Scope,
-    recurse: bool,
-) -> Vec<FileNode> {
+fn collect_dir_of_kind(dir: &Path, kind: Kind, scope: Scope, recurse: bool) -> Vec<FileNode> {
     let mut out = Vec::new();
-    let Ok(rd) = std::fs::read_dir(dir) else { return out };
+    let Ok(rd) = std::fs::read_dir(dir) else {
+        return out;
+    };
     for entry in rd.flatten() {
         let name = entry.file_name().to_string_lossy().into_owned();
         if is_denied(&name) {
@@ -799,7 +790,12 @@ fn collect_dir_of_kind(
         };
         if ft.is_dir() {
             if recurse {
-                out.extend(collect_dir_of_kind(&path, kind.clone(), scope.clone(), true));
+                out.extend(collect_dir_of_kind(
+                    &path,
+                    kind.clone(),
+                    scope.clone(),
+                    true,
+                ));
             }
         } else if ft.is_file() && name.ends_with(".md") {
             if let Some(f) = maybe_file(path, kind.clone(), scope.clone()) {
@@ -814,7 +810,9 @@ fn collect_dir_of_kind(
 /// under `skills/` is flagged `NotASkill` (plan §6.5).
 fn collect_skills_dir(dir: &Path, scope: Scope) -> Vec<FileNode> {
     let mut out = Vec::new();
-    let Ok(rd) = std::fs::read_dir(dir) else { return out };
+    let Ok(rd) = std::fs::read_dir(dir) else {
+        return out;
+    };
     for entry in rd.flatten() {
         let name = entry.file_name().to_string_lossy().into_owned();
         if is_denied(&name) {
@@ -865,8 +863,12 @@ fn collect_skills_dir(dir: &Path, scope: Scope) -> Vec<FileNode> {
 /// Project/Local/Managed includes outside cwd are then skipped, matching
 /// CC's default-deny behavior (`claudemd.ts:798-802`).
 fn external_includes_approved() -> bool {
-    let Some(node) = collect_redacted_user_config() else { return false };
-    let Ok(bytes) = std::fs::read(&node.abs_path) else { return false };
+    let Some(node) = collect_redacted_user_config() else {
+        return false;
+    };
+    let Ok(bytes) = std::fs::read(&node.abs_path) else {
+        return false;
+    };
     let Ok(v): Result<serde_json::Value, _> = serde_json::from_slice(&bytes) else {
         return false;
     };
@@ -894,7 +896,9 @@ fn external_includes_approved() -> bool {
 /// without flipping the lockout.
 fn managed_mcp_is_nonempty() -> bool {
     let p = claude_config_dir().join("managed-mcp.json");
-    let Ok(bytes) = std::fs::read(&p) else { return false };
+    let Ok(bytes) = std::fs::read(&p) else {
+        return false;
+    };
     let Ok(v): Result<serde_json::Value, _> = serde_json::from_slice(&bytes) else {
         return false;
     };
@@ -905,7 +909,9 @@ fn managed_mcp_is_nonempty() -> bool {
 /// it can be unit-tested without driving `CLAUDE_CONFIG_DIR` and the
 /// real filesystem. Encodes the validation rules documented above.
 fn managed_mcp_value_is_provisioned(v: &serde_json::Value) -> bool {
-    let Some(top) = v.as_object() else { return false };
+    let Some(top) = v.as_object() else {
+        return false;
+    };
 
     // Prefer the explicit `mcpServers` key when present; otherwise
     // accept the bare `{ <name>: {…} }` shorthand. Either way the map
@@ -929,34 +935,29 @@ fn managed_mcp_value_is_provisioned(v: &serde_json::Value) -> bool {
 /// `is_user_memory` → always include external targets
 /// (`claudemd.ts:833`). Project/Local/Managed → gate on
 /// `hasClaudeMdExternalIncludesApproved`.
-fn expand_includes(
-    files: &mut Vec<FileNode>,
-    original_cwd: &Path,
-    is_user_memory: bool,
-) {
+fn expand_includes(files: &mut Vec<FileNode>, original_cwd: &Path, is_user_memory: bool) {
     let allow_external = is_user_memory || external_includes_approved();
-    let memory_kinds: &[Kind] = &[
-        Kind::ClaudeMd,
-        Kind::Memory,
-        Kind::MemoryIndex,
-        Kind::Rule,
-    ];
+    let memory_kinds: &[Kind] = &[Kind::ClaudeMd, Kind::Memory, Kind::MemoryIndex, Kind::Rule];
     let roots: Vec<(PathBuf, Scope)> = files
         .iter()
         .filter(|f| memory_kinds.contains(&f.kind))
-        .map(|f| (f.abs_path.clone(), f.scope_badges.first().cloned().unwrap_or(Scope::Other)))
+        .map(|f| {
+            (
+                f.abs_path.clone(),
+                f.scope_badges.first().cloned().unwrap_or(Scope::Other),
+            )
+        })
         .collect();
-    let mut seen: std::collections::HashSet<PathBuf> = files
-        .iter()
-        .map(|f| f.abs_path.clone())
-        .collect();
+    let mut seen: std::collections::HashSet<PathBuf> =
+        files.iter().map(|f| f.abs_path.clone()).collect();
     for (root, scope) in roots {
         for inc in memory_include::resolve_all(&root, original_cwd, allow_external) {
             if !seen.insert(inc.abs_path.clone()) {
                 continue;
             }
             let kind = if memory_include::is_text_extension(&inc.abs_path)
-                && inc.abs_path
+                && inc
+                    .abs_path
                     .extension()
                     .map(|e| e.eq_ignore_ascii_case("md"))
                     .unwrap_or(false)
@@ -970,7 +971,9 @@ fn expand_includes(
             node.included_by = Some(inc.included_by.clone());
             node.include_depth = inc.depth;
             // Title hint so the UI can show "included from …".
-            let name = inc.abs_path.file_name()
+            let name = inc
+                .abs_path
+                .file_name()
                 .map(|n| n.to_string_lossy().into_owned())
                 .unwrap_or_default();
             node.summary = Some(FileSummary {
@@ -978,7 +981,8 @@ fn expand_includes(
                 description: Some(format!(
                     "@include depth {} (from {})",
                     inc.depth,
-                    inc.included_by.file_name()
+                    inc.included_by
+                        .file_name()
                         .map(|n| n.to_string_lossy().into_owned())
                         .unwrap_or_default(),
                 )),
@@ -1089,7 +1093,11 @@ pub fn assemble_tree(cwd: &Path, global_only: bool) -> ConfigTree {
             let label = format!(
                 "CLAUDE.md — {}{}",
                 dir.display(),
-                if matches!(role, ClaudeMdRole::Cwd) { " (cwd)" } else { "" },
+                if matches!(role, ClaudeMdRole::Cwd) {
+                    " (cwd)"
+                } else {
+                    ""
+                },
             );
             // Root file plus its @include chain. CC processes this file
             // as `Project` memory type (`claudemd.ts:887-895`) — use
@@ -1099,7 +1107,10 @@ pub fn assemble_tree(cwd: &Path, global_only: bool) -> ConfigTree {
             expand_includes(&mut bucket, cwd, /* is_user_memory */ false);
             scopes.push(scope_node(
                 &format!("scope:claudemd:{}", root_id),
-                Scope::ClaudeMdDir { dir: dir.clone(), role: role.clone() },
+                Scope::ClaudeMdDir {
+                    dir: dir.clone(),
+                    role: role.clone(),
+                },
                 &label,
                 bucket.into_iter().map(Node::File).collect::<Vec<_>>(),
             ));
@@ -1220,12 +1231,11 @@ fn sort_child(a: &Node, b: &Node) -> std::cmp::Ordering {
 
 fn node_label(n: &Node) -> &str {
     match n {
-        Node::File(f) => {
-            f.summary
-                .as_ref()
-                .and_then(|s| s.title.as_deref())
-                .unwrap_or(&f.display_path)
-        }
+        Node::File(f) => f
+            .summary
+            .as_ref()
+            .and_then(|s| s.title.as_deref())
+            .unwrap_or(&f.display_path),
         Node::Dir(d) => &d.display_path,
     }
 }

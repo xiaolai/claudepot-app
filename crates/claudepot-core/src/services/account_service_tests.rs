@@ -771,10 +771,8 @@ async fn test_sync_race_adopts_fresh_keychain_blob_without_burning_refresh_token
 
     let old_blob = blob_json_with("sk-ant-oat01-stale", "sk-ant-ort01-stale");
     let fresh_blob = blob_json_with("sk-ant-oat01-fresh", "sk-ant-ort01-fresh");
-    let platform = MockPlatform::with_read_sequence(vec![
-        Some(old_blob.clone()),
-        Some(fresh_blob.clone()),
-    ]);
+    let platform =
+        MockPlatform::with_read_sequence(vec![Some(old_blob.clone()), Some(fresh_blob.clone())]);
     // First /profile (stale access) → 401, second (fresh access) → Ok.
     let fetcher = MockProfileFetcher::sequence(vec![
         Err(OAuthError::AuthFailed("401 Unauthorized".into())),
@@ -876,7 +874,10 @@ async fn test_sync_race_refresh_uses_latest_refresh_token_not_stale_snapshot() {
     assert_eq!(platform.write_count(), 1);
     let written = platform.last_written().unwrap();
     let written_blob = CredentialBlob::from_json(&written).unwrap();
-    assert_eq!(written_blob.claude_ai_oauth.access_token, "sk-ant-oat01-new");
+    assert_eq!(
+        written_blob.claude_ai_oauth.access_token,
+        "sk-ant-oat01-new"
+    );
 
     swap::delete_private(account.uuid).unwrap();
 }
@@ -900,8 +901,7 @@ async fn test_sync_race_cas_skips_keychain_writeback_when_concurrent_writer_land
     let _ = store.update_credentials_flag(account.uuid, false);
 
     let our_blob = blob_json_with("sk-ant-oat01-stale", "sk-ant-ort01-stale");
-    let intruder_blob =
-        blob_json_with("sk-ant-oat01-intruder", "sk-ant-ort01-intruder");
+    let intruder_blob = blob_json_with("sk-ant-oat01-intruder", "sk-ant-ort01-intruder");
     let platform = MockPlatform::with_read_sequence(vec![
         // #1 initial snapshot.
         Some(our_blob.clone()),
@@ -960,8 +960,7 @@ async fn test_sync_race_cas_miss_aborts_when_live_blob_unverifiable() {
     let _ = store.update_credentials_flag(account.uuid, false);
 
     let our_blob = blob_json_with("sk-ant-oat01-stale", "sk-ant-ort01-stale");
-    let intruder_blob =
-        blob_json_with("sk-ant-oat01-intruder", "sk-ant-ort01-intruder");
+    let intruder_blob = blob_json_with("sk-ant-oat01-intruder", "sk-ant-ort01-intruder");
     let platform = MockPlatform::with_read_sequence(vec![
         Some(our_blob.clone()),
         Some(our_blob.clone()),
@@ -1004,9 +1003,8 @@ async fn test_sync_treats_non_auth_profile_errors_as_transient() {
 
     insert_account(&store, "alice@example.com");
     let platform = MockPlatform::new(Some(fresh_blob_json()));
-    let fetcher = MockProfileFetcher::failing_with(OAuthError::ServerError(
-        "502 Bad Gateway".into(),
-    ));
+    let fetcher =
+        MockProfileFetcher::failing_with(OAuthError::ServerError("502 Bad Gateway".into()));
     // Configure refresher to fail loudly — if sync ever dispatches
     // it for a non-auth error, this test will catch the regression.
     let refresher = MockRefresher::failing("refresher must not be called");
@@ -1355,8 +1353,7 @@ async fn test_login_progress_emits_spawning_then_error_for_unknown_account() {
     let (store, _dir) = test_store();
 
     let sink = RecordingLoginSink::new();
-    let result =
-        login_and_reimport_with_progress(&store, Uuid::new_v4(), None, &sink).await;
+    let result = login_and_reimport_with_progress(&store, Uuid::new_v4(), None, &sink).await;
     assert!(matches!(result, Err(RegisterError::NotFound)));
 
     let events = sink.events();
@@ -1459,7 +1456,12 @@ async fn test_verify_all_with_progress_emits_started_then_per_account_then_done(
     let account_events: Vec<_> = events
         .iter()
         .filter_map(|e| match e {
-            VerifyEvent::Account { idx, total, outcome, .. } => Some((*idx, *total, *outcome)),
+            VerifyEvent::Account {
+                idx,
+                total,
+                outcome,
+                ..
+            } => Some((*idx, *total, *outcome)),
             _ => None,
         })
         .collect();

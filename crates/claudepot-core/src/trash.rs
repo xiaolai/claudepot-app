@@ -175,11 +175,10 @@ fn inode_of(_path: &Path) -> u64 {
 /// copy+fsync+unlink.
 pub fn write(data_dir: &Path, put: TrashPut<'_>) -> Result<TrashEntry, TrashError> {
     let src = put.orig_path;
-    let meta =
-        fs::metadata(src).map_err(|e| match e.kind() {
-            io::ErrorKind::NotFound => TrashError::SourceMissing(src.to_path_buf()),
-            _ => TrashError::io(src, e),
-        })?;
+    let meta = fs::metadata(src).map_err(|e| match e.kind() {
+        io::ErrorKind::NotFound => TrashError::SourceMissing(src.to_path_buf()),
+        _ => TrashError::io(src, e),
+    })?;
     let size = meta.len();
     let inode = inode_of(src);
 
@@ -208,8 +207,7 @@ pub fn write(data_dir: &Path, put: TrashPut<'_>) -> Result<TrashEntry, TrashErro
         reason: put.reason,
     };
     let manifest = batch_dir.join("manifest.json");
-    let json = serde_json::to_vec_pretty(&entry)
-        .expect("TrashEntry serializes");
+    let json = serde_json::to_vec_pretty(&entry).expect("TrashEntry serializes");
     fs::write(&manifest, json).map_err(|e| TrashError::io(&manifest, e))?;
     Ok(entry)
 }
@@ -267,13 +265,10 @@ pub fn list(data_dir: &Path, filter: TrashFilter) -> Result<TrashListing, TrashE
         if !manifest.exists() {
             continue;
         }
-        let raw = fs::read_to_string(&manifest)
-            .map_err(|e| TrashError::io(&manifest, e))?;
-        let te: TrashEntry = serde_json::from_str(&raw).map_err(|e| {
-            TrashError::ManifestParse {
-                path: manifest.clone(),
-                source: e,
-            }
+        let raw = fs::read_to_string(&manifest).map_err(|e| TrashError::io(&manifest, e))?;
+        let te: TrashEntry = serde_json::from_str(&raw).map_err(|e| TrashError::ManifestParse {
+            path: manifest.clone(),
+            source: e,
         })?;
         if let Some(k) = filter.kind {
             if te.kind != k {
@@ -441,7 +436,10 @@ mod tests {
         .unwrap();
         assert_eq!(entry.kind, TrashKind::Prune);
         assert_eq!(entry.size, 5);
-        assert!(!src.exists(), "src should be moved out of its original path");
+        assert!(
+            !src.exists(),
+            "src should be moved out of its original path"
+        );
         let listing = list(&data_dir, TrashFilter::default()).unwrap();
         assert_eq!(listing.entries.len(), 1);
         assert_eq!(listing.entries[0].id, entry.id);
@@ -697,8 +695,8 @@ mod tests {
         assert!(is_valid_batch_id("20260422T153045Z-deadbeef"));
         assert!(is_valid_batch_id("20260422T153045Z-00000000"));
         assert!(!is_valid_batch_id("20260422T153045Z-DEADBEEF")); // uppercase hex rejected
-        assert!(!is_valid_batch_id("20260422T153045Z-dead"));      // too short
-        assert!(!is_valid_batch_id("20260422X153045Z-deadbeef"));  // wrong separator
+        assert!(!is_valid_batch_id("20260422T153045Z-dead")); // too short
+        assert!(!is_valid_batch_id("20260422X153045Z-deadbeef")); // wrong separator
     }
 
     #[test]
@@ -723,9 +721,6 @@ mod tests {
         assert_eq!(listing.entries.len(), 1);
         let cwd = listing.entries[0].cwd.as_deref().unwrap();
         // String comparison to dodge PathBuf platform-specific parsing.
-        assert_eq!(
-            cwd.to_string_lossy(),
-            entry.cwd.unwrap().to_string_lossy()
-        );
+        assert_eq!(cwd.to_string_lossy(), entry.cwd.unwrap().to_string_lossy());
     }
 }

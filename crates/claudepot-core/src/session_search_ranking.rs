@@ -103,7 +103,10 @@ mod tests {
         ];
         let ranked = rank_hits(hits);
         let ids: Vec<_> = ranked.iter().map(|h| h.session_id.as_str()).collect();
-        assert_eq!(ids, vec!["phrase-new", "phrase-old", "prefix-new", "sub-old"]);
+        assert_eq!(
+            ids,
+            vec!["phrase-new", "phrase-old", "prefix-new", "sub-old"]
+        );
     }
 
     #[test]

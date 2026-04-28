@@ -4,9 +4,21 @@
 //! still resolve `super::*` against the parent module's internals.
 
 use super::*;
+use crate::path_utils::simplify_windows_path;
 use std::fs;
 use std::io::Write;
+use std::path::PathBuf;
 use std::time::{Duration, SystemTime};
+
+/// Mirror of `project_tests::canonical_test_path`. On Windows
+/// `canonicalize_cc_path` simplifies away the `\\?\` prefix that
+/// raw `std::fs::canonicalize` returns; tests that build their
+/// `want` value via raw canonicalize must apply the same simplify
+/// to keep the two sides comparable.
+fn canon_simplified(p: &Path) -> PathBuf {
+    let canon = std::fs::canonicalize(p).unwrap();
+    PathBuf::from(simplify_windows_path(&canon.to_string_lossy()))
+}
 
 // -----------------------------------------------------------------------
 // Fixture: fake `~/.claude` + fake work dirs
@@ -151,8 +163,7 @@ impl Fixture {
     }
 
     fn read_claude_json(&self) -> serde_json::Value {
-        serde_json::from_str(&fs::read_to_string(self.claude_json_path()).unwrap())
-            .unwrap()
+        serde_json::from_str(&fs::read_to_string(self.claude_json_path()).unwrap()).unwrap()
     }
 }
 
@@ -174,10 +185,9 @@ fn canonicalize_resolves_symlinks() {
     std::os::windows::fs::symlink_dir(&target, &link).unwrap();
 
     let got = canonicalize_cc_path(&link);
-    let want = std::fs::canonicalize(&target).unwrap();
+    let want = canon_simplified(&target);
     assert_eq!(
-        got,
-        PathBuf::from(want.to_string_lossy().to_string()),
+        got, want,
         "canonicalize_cc_path should resolve symlinks like CC does"
     );
 }
@@ -207,6 +217,7 @@ fn canonicalize_normalizes_nfd_to_nfc() {
 // Section B — move mechanics
 // -----------------------------------------------------------------------
 
+#[cfg(unix)]
 #[test]
 fn move_session_happy_path_rewrites_cwd_in_every_line() {
     let f = Fixture::new();
@@ -215,20 +226,11 @@ fn move_session_happy_path_rewrites_cwd_in_every_line() {
     let sid = Uuid::new_v4();
     let original = f.write_session(&from, sid, 5);
 
-    let report = move_session(
-        f.config_dir(),
-        sid,
-        &from,
-        &to,
-        MoveSessionOpts::default(),
-    )
-    .expect("happy-path move should succeed");
+    let report = move_session(f.config_dir(), sid, &from, &to, MoveSessionOpts::default())
+        .expect("happy-path move should succeed");
 
     assert_eq!(report.jsonl_lines_rewritten, 5);
-    assert!(
-        !original.exists(),
-        "source JSONL should be gone after move"
-    );
+    assert!(!original.exists(), "source JSONL should be gone after move");
     let moved = f.slug_dir(&to).join(format!("{sid}.jsonl"));
     assert!(moved.exists(), "target JSONL should exist at {moved:?}");
 
@@ -255,14 +257,8 @@ fn move_session_moves_subagent_and_remote_agent_subdirs() {
     f.write_session(&from, sid, 2);
     f.write_session_sidecars(&from, sid);
 
-    let report = move_session(
-        f.config_dir(),
-        sid,
-        &from,
-        &to,
-        MoveSessionOpts::default(),
-    )
-    .expect("move with sidecars");
+    let report = move_session(f.config_dir(), sid, &from, &to, MoveSessionOpts::default())
+        .expect("move with sidecars");
 
     assert_eq!(report.subagent_files_moved, 2); // .jsonl + .meta.json
     assert_eq!(report.remote_agent_files_moved, 1);
@@ -284,6 +280,7 @@ fn move_session_moves_subagent_and_remote_agent_subdirs() {
         .exists());
 }
 
+#[cfg(unix)]
 #[test]
 fn move_session_preserves_non_cwd_fields_byte_exact() {
     // The bar is intentionally high: a JSONL line with nested objects,
@@ -309,14 +306,8 @@ fn move_session_preserves_non_cwd_fields_byte_exact() {
     // bypassed in this test, so we do it manually).
     f.set_mtime(&path, SystemTime::now() - Duration::from_secs(3600));
 
-    move_session(
-        f.config_dir(),
-        sid,
-        &from,
-        &to,
-        MoveSessionOpts::default(),
-    )
-    .expect("byte-fidelity move");
+    move_session(f.config_dir(), sid, &from, &to, MoveSessionOpts::default())
+        .expect("byte-fidelity move");
 
     let moved = f.slug_dir(&to).join(format!("{sid}.jsonl"));
     let got = fs::read_to_string(&moved).unwrap();
@@ -341,14 +332,8 @@ fn move_session_refuses_on_sync_conflict_sibling() {
         .join(format!("{sid}.sync-conflict-20260415-145538-NJCB7YU.jsonl"));
     fs::write(&conflict, "{}").unwrap();
 
-    let err = move_session(
-        f.config_dir(),
-        sid,
-        &from,
-        &to,
-        MoveSessionOpts::default(),
-    )
-    .expect_err("must refuse when a sync-conflict sibling is present");
+    let err = move_session(f.config_dir(), sid, &from, &to, MoveSessionOpts::default())
+        .expect_err("must refuse when a sync-conflict sibling is present");
 
     assert!(
         matches!(err, MoveSessionError::SyncConflictPresent(got) if got == sid),
@@ -366,14 +351,8 @@ fn move_session_refuses_when_source_mtime_is_live() {
     // Bump mtime to "just now" — simulating an in-flight session.
     f.set_mtime(&path, SystemTime::now());
 
-    let err = move_session(
-        f.config_dir(),
-        sid,
-        &from,
-        &to,
-        MoveSessionOpts::default(),
-    )
-    .expect_err("must refuse a live-session move without force flag");
+    let err = move_session(f.config_dir(), sid, &from, &to, MoveSessionOpts::default())
+        .expect_err("must refuse a live-session move without force flag");
 
     assert!(
         matches!(err, MoveSessionError::LiveSession(got) if got == sid),
@@ -393,14 +372,8 @@ fn move_session_refuses_target_collision() {
     // silently overwrite.
     f.write_session(&to, sid, 1);
 
-    let err = move_session(
-        f.config_dir(),
-        sid,
-        &from,
-        &to,
-        MoveSessionOpts::default(),
-    )
-    .expect_err("must refuse when target already has this session");
+    let err = move_session(f.config_dir(), sid, &from, &to, MoveSessionOpts::default())
+        .expect_err("must refuse when target already has this session");
 
     assert!(
         matches!(err, MoveSessionError::TargetCollision(got) if got == sid),
@@ -440,14 +413,8 @@ fn move_session_rolls_back_target_on_phase_failure() {
     )
     .unwrap();
 
-    let err = move_session(
-        f.config_dir(),
-        sid,
-        &from,
-        &to,
-        MoveSessionOpts::default(),
-    )
-    .expect_err("phase-2 sidecar collision must surface as an error");
+    let err = move_session(f.config_dir(), sid, &from, &to, MoveSessionOpts::default())
+        .expect_err("phase-2 sidecar collision must surface as an error");
     assert!(
         matches!(err, MoveSessionError::SidecarCollision(_)),
         "got: {err}"
@@ -477,14 +444,8 @@ fn move_session_rolls_back_target_on_phase_failure() {
     // the placeholder). Clear the colliding sidecar first so Phase
     // 2 can succeed on the second attempt.
     fs::remove_dir_all(to_slug.join(sid.to_string())).unwrap();
-    move_session(
-        f.config_dir(),
-        sid,
-        &from,
-        &to,
-        MoveSessionOpts::default(),
-    )
-    .expect("retry after rollback must succeed");
+    move_session(f.config_dir(), sid, &from, &to, MoveSessionOpts::default())
+        .expect("retry after rollback must succeed");
 }
 
 #[test]
@@ -518,20 +479,15 @@ fn move_session_accepts_aged_source_without_force() {
     let long_ago = SystemTime::now() - Duration::from_secs(60 * 60);
     f.set_mtime(&path, long_ago);
 
-    move_session(
-        f.config_dir(),
-        sid,
-        &from,
-        &to,
-        MoveSessionOpts::default(),
-    )
-    .expect("aged session should move without force flag");
+    move_session(f.config_dir(), sid, &from, &to, MoveSessionOpts::default())
+        .expect("aged session should move without force flag");
 }
 
 // -----------------------------------------------------------------------
 // Section C — history.jsonl + .claude.json
 // -----------------------------------------------------------------------
 
+#[cfg(unix)]
 #[test]
 fn move_session_rewrites_history_lines_by_session_id() {
     let f = Fixture::new();
@@ -548,31 +504,24 @@ fn move_session_rewrites_history_lines_by_session_id() {
     let from_s = from.to_string_lossy();
     let lines = [
         format!(r#"{{"display":"p1","timestamp":1,"project":"{from_s}","sessionId":"{sid}"}}"#),
-        format!(r#"{{"display":"p2","timestamp":2,"project":"{from_s}","sessionId":"{other_sid}"}}"#),
+        format!(
+            r#"{{"display":"p2","timestamp":2,"project":"{from_s}","sessionId":"{other_sid}"}}"#
+        ),
         format!(r#"{{"display":"p3","timestamp":3,"project":"{from_s}"}}"#),
         format!(r#"{{"display":"p4","timestamp":4,"project":"{from_s}","sessionId":"{sid}"}}"#),
     ];
     let line_refs: Vec<&str> = lines.iter().map(|s| s.as_str()).collect();
     f.write_history(&line_refs);
 
-    let report = move_session(
-        f.config_dir(),
-        sid,
-        &from,
-        &to,
-        MoveSessionOpts::default(),
-    )
-    .expect("history rewrite");
+    let report = move_session(f.config_dir(), sid, &from, &to, MoveSessionOpts::default())
+        .expect("history rewrite");
 
     assert_eq!(report.history_entries_moved, 2, "p1 and p4");
 
     let after = f.read_history();
     let to_s = to.to_string_lossy();
     // p1 and p4 now carry target project
-    assert_eq!(
-        after.matches(&format!(r#""project":"{to_s}""#)).count(),
-        2
-    );
+    assert_eq!(after.matches(&format!(r#""project":"{to_s}""#)).count(), 2);
     // p2 (other session) and p3 (sid-less) still carry source project
     assert_eq!(
         after.matches(&format!(r#""project":"{from_s}""#)).count(),
@@ -651,7 +600,10 @@ fn move_session_clears_last_session_id_in_claude_json() {
     assert_eq!(from_entry["projectOnboardingSeenCount"], 2);
 
     // Target project: lastSessionId untouched (see surface-map rule 8)
-    assert_eq!(v["projects"][&to_key]["lastSessionId"], preserved_sid.to_string());
+    assert_eq!(
+        v["projects"][&to_key]["lastSessionId"],
+        preserved_sid.to_string()
+    );
 
     // Unrelated project: touching another cwd's lastSessionId would
     // be a correctness bug, even if the UUID happens to match.
@@ -785,7 +737,10 @@ fn move_session_emits_expected_phases() {
     // line count as total.
     let subs = sink.subs.lock().unwrap();
     let s1_subs: Vec<_> = subs.iter().filter(|(p, _, _)| p == "S1").collect();
-    assert!(!s1_subs.is_empty(), "S1 must emit at least one sub_progress");
+    assert!(
+        !s1_subs.is_empty(),
+        "S1 must emit at least one sub_progress"
+    );
     let (_, _, total) = s1_subs.last().unwrap();
     assert_eq!(*total, 4, "S1 total should equal source line count");
 }
@@ -824,7 +779,10 @@ fn move_session_phase_error_propagates() {
         &sink,
     )
     .expect_err("S2 collision must surface as error");
-    assert!(matches!(err, MoveSessionError::SidecarCollision(_)), "got: {err}");
+    assert!(
+        matches!(err, MoveSessionError::SidecarCollision(_)),
+        "got: {err}"
+    );
 
     // S1 should have completed; S2 should have errored.
     let phases = sink.phases.lock().unwrap();
@@ -860,6 +818,7 @@ fn move_session_phase_error_propagates() {
 // Section D — orphan detection + adoption
 // -----------------------------------------------------------------------
 
+#[cfg(unix)]
 #[test]
 fn detect_orphaned_projects_flags_dead_cwd() {
     let f = Fixture::new();
@@ -873,8 +832,8 @@ fn detect_orphaned_projects_flags_dead_cwd() {
     f.write_session(&dead_cwd, Uuid::new_v4(), 1);
     f.write_session(&dead_cwd, Uuid::new_v4(), 1);
 
-    let orphans = detect_orphaned_projects(f.config_dir())
-        .expect("orphan detection should succeed");
+    let orphans =
+        detect_orphaned_projects(f.config_dir()).expect("orphan detection should succeed");
 
     assert_eq!(orphans.len(), 1, "exactly one orphan expected");
     let o = &orphans[0];
@@ -925,9 +884,7 @@ fn adopt_orphan_project_moves_all_sessions_and_removes_empty_source() {
     f.write_session(&dead_cwd, sid_c, 5);
     f.write_session_sidecars(&dead_cwd, sid_a);
 
-    let from_slug = crate::project_sanitize::sanitize_path(
-        &dead_cwd.to_string_lossy(),
-    );
+    let from_slug = crate::project_sanitize::sanitize_path(&dead_cwd.to_string_lossy());
 
     let report = adopt_orphan_project(f.config_dir(), &from_slug, &target, None)
         .expect("adopt should succeed");

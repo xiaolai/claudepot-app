@@ -63,8 +63,8 @@ pub struct DecryptedTokenCache(pub BTreeMap<String, TokenEnvelope>);
 
 impl DecryptedTokenCache {
     pub fn from_json(plaintext: &[u8]) -> Result<Self, TokenParseError> {
-        let cache: DecryptedTokenCache = serde_json::from_slice(plaintext)
-            .map_err(|e| TokenParseError::Json(e.to_string()))?;
+        let cache: DecryptedTokenCache =
+            serde_json::from_slice(plaintext).map_err(|e| TokenParseError::Json(e.to_string()))?;
         if cache.0.is_empty() {
             return Err(TokenParseError::Empty);
         }
@@ -113,7 +113,9 @@ impl DecryptedTokenCache {
     /// identical (userId, orgUuid), so any entry yields the right
     /// answer. Falls back to None when no entry has a valid key.
     pub fn org_uuid(&self) -> Option<&str> {
-        self.0.keys().find_map(|k| Self::parse_bundle_key(k).map(|p| p.org_uuid))
+        self.0
+            .keys()
+            .find_map(|k| Self::parse_bundle_key(k).map(|p| p.org_uuid))
     }
 }
 
@@ -132,7 +134,12 @@ impl std::fmt::Debug for DecryptedTokenCache {
         d.field("bundles", &self.0.len());
         for (key, env) in &self.0 {
             let short_key = match Self::parse_bundle_key(key) {
-                Some(b) => format!("{}…@{} [{}]", &b.user_uuid[..8.min(b.user_uuid.len())], b.org_uuid, b.scopes),
+                Some(b) => format!(
+                    "{}…@{} [{}]",
+                    &b.user_uuid[..8.min(b.user_uuid.len())],
+                    b.org_uuid,
+                    b.scopes
+                ),
                 None => "<unparseable>".to_string(),
             };
             d.field(&short_key, &EnvelopeRedacted(env));
@@ -147,7 +154,10 @@ impl std::fmt::Debug for EnvelopeRedacted<'_> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("TokenEnvelope")
             .field("token", &redact(&self.0.token))
-            .field("refresh_token", &self.0.refresh_token.as_deref().map(redact))
+            .field(
+                "refresh_token",
+                &self.0.refresh_token.as_deref().map(redact),
+            )
             .field("expires_at", &self.0.expires_at)
             .finish()
     }
@@ -224,7 +234,8 @@ mod tests {
 
     #[test]
     fn test_parse_bundle_key_shape() {
-        let k = "uid-1234:org-5678:https://api.anthropic.com:user:inference user:sessions:claude_code";
+        let k =
+            "uid-1234:org-5678:https://api.anthropic.com:user:inference user:sessions:claude_code";
         let b = DecryptedTokenCache::parse_bundle_key(k).unwrap();
         assert_eq!(b.user_uuid, "uid-1234");
         assert_eq!(b.org_uuid, "org-5678");
@@ -232,10 +243,7 @@ mod tests {
         // Scopes retain their internal `:` — critical, because
         // scope identifiers like `user:sessions:claude_code` are
         // NOT key delimiters.
-        assert_eq!(
-            b.scopes,
-            "user:inference user:sessions:claude_code"
-        );
+        assert_eq!(b.scopes, "user:inference user:sessions:claude_code");
     }
 
     #[test]

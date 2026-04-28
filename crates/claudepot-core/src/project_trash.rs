@@ -192,8 +192,7 @@ pub fn write(
     let uuid8 = Uuid::new_v4().simple().to_string()[..8].to_string();
     let batch_id = format!("{}-{}", batch_ts_string(SystemTime::now()), uuid8);
     let batch_dir = trash_root(data_dir).join(&batch_id);
-    fs::create_dir_all(&batch_dir)
-        .map_err(|e| ProjectTrashError::io(&batch_dir, e))?;
+    fs::create_dir_all(&batch_dir).map_err(|e| ProjectTrashError::io(&batch_dir, e))?;
 
     let payload = batch_dir.join("payload");
     move_dir(src, &payload)?;
@@ -303,14 +302,12 @@ pub fn list(
         if !manifest.exists() {
             continue;
         }
-        let raw = fs::read_to_string(&manifest)
-            .map_err(|e| ProjectTrashError::io(&manifest, e))?;
-        let te: ProjectTrashEntry = serde_json::from_str(&raw).map_err(|e| {
-            ProjectTrashError::ManifestParse {
+        let raw = fs::read_to_string(&manifest).map_err(|e| ProjectTrashError::io(&manifest, e))?;
+        let te: ProjectTrashEntry =
+            serde_json::from_str(&raw).map_err(|e| ProjectTrashError::ManifestParse {
                 path: manifest.clone(),
                 source: e,
-            }
-        })?;
+            })?;
         if let Some(cut) = cutoff_ms {
             if te.ts_ms >= cut {
                 continue;
@@ -367,8 +364,7 @@ fn find_batch(
         return Err(ProjectTrashError::EntryNotFound(entry_id.to_string()));
     }
     let manifest = batch_dir.join("manifest.json");
-    let raw =
-        fs::read_to_string(&manifest).map_err(|e| ProjectTrashError::io(&manifest, e))?;
+    let raw = fs::read_to_string(&manifest).map_err(|e| ProjectTrashError::io(&manifest, e))?;
     let te: ProjectTrashEntry =
         serde_json::from_str(&raw).map_err(|e| ProjectTrashError::ManifestParse {
             path: manifest.clone(),
@@ -423,21 +419,20 @@ pub fn restore(
         if path.exists() {
             if let Ok(contents) = fs::read_to_string(path) {
                 if let Ok(mut root) = serde_json::from_str::<serde_json::Value>(&contents) {
-                    let projects = root
-                        .as_object_mut()
-                        .and_then(|m| m.entry("projects").or_insert_with(|| {
-                            serde_json::Value::Object(serde_json::Map::new())
-                        }).as_object_mut());
+                    let projects = root.as_object_mut().and_then(|m| {
+                        m.entry("projects")
+                            .or_insert_with(|| serde_json::Value::Object(serde_json::Map::new()))
+                            .as_object_mut()
+                    });
                     if let Some(map) = projects {
                         if !map.contains_key(orig) {
                             map.insert(orig.to_string(), value.clone());
                             claude_json_restored = true;
-                            let bytes = serde_json::to_vec_pretty(&root)
-                                .expect("re-serialize claude.json");
+                            let bytes =
+                                serde_json::to_vec_pretty(&root).expect("re-serialize claude.json");
                             // Best-effort write: failures here surface
                             // through Io error.
-                            fs::write(path, bytes)
-                                .map_err(|e| ProjectTrashError::io(path, e))?;
+                            fs::write(path, bytes).map_err(|e| ProjectTrashError::io(path, e))?;
                         }
                     }
                 }
@@ -471,10 +466,7 @@ pub fn restore(
 
 /// Delete batches matching the filter. Returns bytes reclaimed (sum of
 /// entry `bytes`). Missing root is a no-op.
-pub fn empty(
-    data_dir: &Path,
-    filter: ProjectTrashFilter,
-) -> Result<u64, ProjectTrashError> {
+pub fn empty(data_dir: &Path, filter: ProjectTrashFilter) -> Result<u64, ProjectTrashError> {
     let listing = list(data_dir, filter)?;
     let mut freed: u64 = 0;
     for te in &listing.entries {
@@ -574,9 +566,7 @@ mod tests {
                 bytes: 5,
                 session_count: 1,
                 claude_json_entry: Some(snap_value.clone()),
-                history_lines: vec![
-                    r#"{"project":"/Users/joker","display":"ls"}"#.to_string(),
-                ],
+                history_lines: vec![r#"{"project":"/Users/joker","display":"ls"}"#.to_string()],
                 reason: None,
             },
         )
@@ -671,8 +661,7 @@ mod tests {
         )
         .unwrap();
 
-        let report =
-            restore(&data_dir, &entry.id, &config_dir, Some(&claude_json), None).unwrap();
+        let report = restore(&data_dir, &entry.id, &config_dir, Some(&claude_json), None).unwrap();
         assert!(!report.claude_json_restored, "live key wins");
         let cj: serde_json::Value =
             serde_json::from_str(&fs::read_to_string(&claude_json).unwrap()).unwrap();
@@ -757,8 +746,7 @@ mod tests {
     #[test]
     fn list_missing_root_returns_empty() {
         let tmp = TempDir::new().unwrap();
-        let listing =
-            list(tmp.path(), ProjectTrashFilter::default()).unwrap();
+        let listing = list(tmp.path(), ProjectTrashFilter::default()).unwrap();
         assert!(listing.entries.is_empty());
         assert_eq!(listing.total_bytes, 0);
     }
@@ -794,14 +782,7 @@ mod tests {
         // Need a real source dir or the missing-source check fires
         // first; `validate_slug` runs before metadata.
         let dir = mk_project_dir(&projects, "x", &[]);
-        for bad in [
-            "..",
-            ".",
-            "",
-            "a/b",
-            "a\\b",
-            ".hidden",
-        ] {
+        for bad in ["..", ".", "", "a/b", "a\\b", ".hidden"] {
             let err = write(
                 &data_dir,
                 ProjectTrashPut {
@@ -856,8 +837,7 @@ mod tests {
             "20260422T120000Z", // truncated
             "malformed",
         ] {
-            let err =
-                restore(&data_dir, bad, &config_dir, None, None).unwrap_err();
+            let err = restore(&data_dir, bad, &config_dir, None, None).unwrap_err();
             assert!(
                 matches!(err, ProjectTrashError::EntryNotFound(_)),
                 "expected EntryNotFound for {bad:?}, got {err:?}"
@@ -886,9 +866,6 @@ mod tests {
         fs::create_dir_all(&nested).unwrap();
         fs::write(nested.join("leaf.jsonl"), b"deep").unwrap();
         copy_dir_recursive(&src, &dest).unwrap();
-        assert_eq!(
-            fs::read(dest.join("a/b/c/leaf.jsonl")).unwrap(),
-            b"deep"
-        );
+        assert_eq!(fs::read(dest.join("a/b/c/leaf.jsonl")).unwrap(), b"deep");
     }
 }

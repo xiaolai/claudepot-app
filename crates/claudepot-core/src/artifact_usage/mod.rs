@@ -120,7 +120,10 @@ pub fn list_all_known(db: &Connection) -> SqlResult<Vec<(ArtifactKind, String)>>
         .query_map([], |r| {
             let kind_s: String = r.get(0)?;
             let key: String = r.get(1)?;
-            Ok((ArtifactKind::parse(&kind_s).unwrap_or(ArtifactKind::Skill), key))
+            Ok((
+                ArtifactKind::parse(&kind_s).unwrap_or(ArtifactKind::Skill),
+                key,
+            ))
         })?
         .collect::<SqlResult<Vec<_>>>()?;
     Ok(rows)
@@ -138,7 +141,13 @@ mod tests {
         db
     }
 
-    fn ev(kind: ArtifactKind, key: &str, ts_ms: i64, outcome: Outcome, dur: Option<u64>) -> UsageEvent {
+    fn ev(
+        kind: ArtifactKind,
+        key: &str,
+        ts_ms: i64,
+        outcome: Outcome,
+        dur: Option<u64>,
+    ) -> UsageEvent {
         UsageEvent {
             ts_ms,
             session_id: "S1".into(),
@@ -197,7 +206,13 @@ mod tests {
         .unwrap();
         store::insert_event(
             &db,
-            &ev(ArtifactKind::Hook, "h", now - 1000, Outcome::Error, Some(20)),
+            &ev(
+                ArtifactKind::Hook,
+                "h",
+                now - 1000,
+                Outcome::Error,
+                Some(20),
+            ),
             "/s",
             "/p",
         )
@@ -213,7 +228,13 @@ mod tests {
         let now = 100 * 86_400_000_i64; // day 100
         store::insert_event(
             &db,
-            &ev(ArtifactKind::Skill, "k", now - 25 * 3600 * 1000, Outcome::Ok, None),
+            &ev(
+                ArtifactKind::Skill,
+                "k",
+                now - 25 * 3600 * 1000,
+                Outcome::Ok,
+                None,
+            ),
             "/s",
             "/p",
         )
@@ -246,7 +267,13 @@ mod tests {
         // it.
         store::insert_event(
             &db,
-            &ev(ArtifactKind::Skill, "k", now - 25 * 3_600_000, Outcome::Ok, None),
+            &ev(
+                ArtifactKind::Skill,
+                "k",
+                now - 25 * 3_600_000,
+                Outcome::Ok,
+                None,
+            ),
             "/s",
             "/p",
         )

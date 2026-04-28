@@ -14,9 +14,7 @@ use super::error::RouteError;
 use super::helper::helper_path;
 use super::keychain::SecretField;
 use super::slug::sanitize_wrapper_name;
-use super::types::{
-    AuthScheme, BedrockConfig, FoundryConfig, Route, RouteProvider, VertexConfig,
-};
+use super::types::{AuthScheme, BedrockConfig, FoundryConfig, Route, RouteProvider, VertexConfig};
 use super::CLAUDEPOT_MANAGED_MARKER;
 
 /// `~/.claudepot/bin/`.
@@ -124,12 +122,8 @@ fn render_gateway(route: &Route, cfg: &super::types::GatewayConfig) -> String {
         // the script header — keeping the comment outside the
         // continued `exec env \` block so the line-continuation
         // backslashes aren't broken by an embedded `#`.
-        out.push_str(
-            "# NOTE: Desktop is configured for Basic auth on this gateway,\n",
-        );
-        out.push_str(
-            "#       but CC CLI sends ANTHROPIC_AUTH_TOKEN as Bearer regardless.\n",
-        );
+        out.push_str("# NOTE: Desktop is configured for Basic auth on this gateway,\n");
+        out.push_str("#       but CC CLI sends ANTHROPIC_AUTH_TOKEN as Bearer regardless.\n");
         out.push('\n');
     }
     out.push_str("exec env \\\n");
@@ -163,10 +157,7 @@ fn render_header(route: &Route) -> String {
     out.push_str("# claudepot-managed wrapper — third-party LLM route\n");
     out.push_str(&format!("# {}: true\n", CLAUDEPOT_MANAGED_MARKER));
     out.push_str(&format!("# route: {}\n", shell_comment_safe(&route.name)));
-    out.push_str(&format!(
-        "# provider: {}\n",
-        route.provider.kind().as_str()
-    ));
+    out.push_str(&format!("# provider: {}\n", route.provider.kind().as_str()));
     out.push_str("#\n");
     out.push_str("# Edit via Claudepot's Third-party section, not by hand —\n");
     out.push_str("# subsequent route updates will overwrite this file.\n");
@@ -180,7 +171,10 @@ fn render_bedrock(route: &Route, cfg: &BedrockConfig) -> String {
     out.push_str(&kv_line("CLAUDE_CODE_PROVIDER_MANAGED_BY_HOST", "1"));
     out.push_str(&kv_line("CLAUDE_CODE_USE_BEDROCK", "1"));
     out.push_str(&kv_line("AWS_REGION", &cfg.region));
-    out.push_str(&kv_line("ANTHROPIC_SMALL_FAST_MODEL_AWS_REGION", &cfg.region));
+    out.push_str(&kv_line(
+        "ANTHROPIC_SMALL_FAST_MODEL_AWS_REGION",
+        &cfg.region,
+    ));
     if cfg.use_keychain {
         let helper = helper_path(route.id, SecretField::BedrockBearerToken);
         out.push_str(&format!(
@@ -304,8 +298,7 @@ fn set_executable(_path: &Path) -> Result<(), RouteError> {
 mod tests {
     use super::*;
     use crate::routes::types::{
-        AuthScheme, BedrockConfig, FoundryConfig, GatewayConfig, Route, RouteProvider,
-        VertexConfig,
+        AuthScheme, BedrockConfig, FoundryConfig, GatewayConfig, Route, RouteProvider, VertexConfig,
     };
     use uuid::Uuid;
 
@@ -402,8 +395,10 @@ mod tests {
 
     /// Run `sh -n` on every rendered script so a future refactor
     /// can't reintroduce a stray `#` mid-`exec env` (or any other
-    /// shell-syntax bug). Skips on hosts without `/bin/sh` (none in
-    /// our CI matrix today).
+    /// shell-syntax bug). Windows runner has no `/bin/sh`, so the
+    /// test is gated to Unix — the rendered scripts are shell-only
+    /// anyway (the macOS keychain helper).
+    #[cfg(unix)]
     #[test]
     fn rendered_scripts_pass_sh_syntax_check() {
         use std::io::Write;
@@ -420,15 +415,11 @@ mod tests {
             bedrock_sample("anthropic.claude-haiku-4-5", "us-east-1"),
             vertex_sample("claude-sonnet-4-5", "p"),
             foundry_sample("claude-sonnet-4-5", Ok("my-resource")),
-            foundry_sample(
-                "claude-sonnet-4-5",
-                Err("https://my.openai.azure.com"),
-            ),
+            foundry_sample("claude-sonnet-4-5", Err("https://my.openai.azure.com")),
         ];
         for r in cases {
             let body = render_script(&r);
-            let mut tmp =
-                tempfile::NamedTempFile::new().expect("tempfile create");
+            let mut tmp = tempfile::NamedTempFile::new().expect("tempfile create");
             tmp.write_all(body.as_bytes()).expect("write");
             let path = tmp.path().to_path_buf();
             let out = std::process::Command::new("/bin/sh")
@@ -541,18 +532,14 @@ mod tests {
 
     #[test]
     fn render_bedrock_emits_use_flag_and_region() {
-        let r = bedrock_sample(
-            "us.anthropic.claude-sonnet-4-20250514-v1:0",
-            "us-west-2",
-        );
+        let r = bedrock_sample("us.anthropic.claude-sonnet-4-20250514-v1:0", "us-west-2");
         let s = render_script(&r);
         assert!(s.contains("CLAUDE_CODE_USE_BEDROCK='1'"));
         assert!(s.contains("AWS_REGION='us-west-2'"));
         assert!(s.contains("AWS_BEARER_TOKEN_BEDROCK='aws-bearer-token'"));
         assert!(s.contains("AWS_PROFILE='claudepot-prod'"));
         assert!(s.contains("ANTHROPIC_SMALL_FAST_MODEL_AWS_REGION='us-west-2'"));
-        assert!(s
-            .contains("ANTHROPIC_MODEL='us.anthropic.claude-sonnet-4-20250514-v1:0'"));
+        assert!(s.contains("ANTHROPIC_MODEL='us.anthropic.claude-sonnet-4-20250514-v1:0'"));
         assert!(s.contains("# provider: bedrock"));
     }
 
@@ -604,9 +591,7 @@ mod tests {
             Err("https://my-resource.openai.azure.com"),
         );
         let s = render_script(&r);
-        assert!(s.contains(
-            "ANTHROPIC_FOUNDRY_BASE_URL='https://my-resource.openai.azure.com'"
-        ));
+        assert!(s.contains("ANTHROPIC_FOUNDRY_BASE_URL='https://my-resource.openai.azure.com'"));
         assert!(!s.contains("ANTHROPIC_FOUNDRY_RESOURCE"));
     }
 

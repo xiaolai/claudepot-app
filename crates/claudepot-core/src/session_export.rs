@@ -38,7 +38,11 @@ pub enum ExportFormat {
 /// Returns the rendered body as a string. Callers decide where to put
 /// it (stdout, file, clipboard).
 pub fn export(detail: &SessionDetail, format: ExportFormat) -> String {
-    export_with(detail, format, &crate::redaction::RedactionPolicy::default())
+    export_with(
+        detail,
+        format,
+        &crate::redaction::RedactionPolicy::default(),
+    )
 }
 
 /// Like `export` but honors a custom `RedactionPolicy`. `export` is
@@ -88,10 +92,7 @@ pub fn export_markdown_slim(detail: &SessionDetail) -> String {
                 ts: *ts,
                 uuid: uuid.clone(),
                 tool_use_id: tool_use_id.clone(),
-                content: format!(
-                    "(tool result redacted — {} bytes)",
-                    content.len()
-                ),
+                content: format!("(tool result redacted — {} bytes)", content.len()),
                 is_error: *is_error,
             },
             other => other.clone(),
@@ -114,12 +115,11 @@ pub fn export_html(detail: &SessionDetail, no_js: bool) -> String {
     let _ = writeln!(s, "<html lang=\"en\">");
     let _ = writeln!(s, "<head>");
     let _ = writeln!(s, "<meta charset=\"utf-8\">");
+    let _ = writeln!(s, "<title>Session {}</title>", html_escape(&row.session_id));
     let _ = writeln!(
         s,
-        "<title>Session {}</title>",
-        html_escape(&row.session_id)
+        "<meta name=\"viewport\" content=\"width=device-width,initial-scale=1\">"
     );
-    let _ = writeln!(s, "<meta name=\"viewport\" content=\"width=device-width,initial-scale=1\">");
     let _ = writeln!(s, "<style>");
     s.push_str(HTML_CSS);
     let _ = writeln!(s, "</style>");
@@ -346,7 +346,8 @@ fn render_chunk(s: &mut String, chunk: &SessionChunk, events: &[SessionEvent]) {
                 let _ = writeln!(
                     s,
                     "### 👤 User{}",
-                    ts.map(|t| format!(" — {}", t.to_rfc3339())).unwrap_or_default()
+                    ts.map(|t| format!(" — {}", t.to_rfc3339()))
+                        .unwrap_or_default()
                 );
                 let _ = writeln!(s);
                 let _ = writeln!(s, "{}", redact_secrets(text.trim()));
@@ -626,7 +627,9 @@ fn redact_in_place(detail: &mut SessionDetail) {
                 // future custom tool names that might echo secrets.
                 *tool_name = redact_secrets(tool_name);
             }
-            SessionEvent::System { detail, subtype, .. } => {
+            SessionEvent::System {
+                detail, subtype, ..
+            } => {
                 *detail = redact_secrets(detail);
                 if let Some(s) = subtype {
                     *s = redact_secrets(s);

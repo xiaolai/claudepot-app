@@ -64,8 +64,7 @@ pub fn rewrite_jsonl_multi(
     }
 
     if any_change {
-        tmp.persist(path)
-            .map_err(|e| MigrateError::from(e.error))?;
+        tmp.persist(path).map_err(|e| MigrateError::from(e.error))?;
     } else {
         drop(tmp);
     }
@@ -196,8 +195,8 @@ fn line_contains_any(line: &str, table: &SubstitutionTable) -> bool {
             return true;
         }
         // JSON-encoded form (handles backslash doubling on Windows).
-        let encoded = serde_json::to_string(&rule.from)
-            .unwrap_or_else(|_| format!("\"{}\"", rule.from));
+        let encoded =
+            serde_json::to_string(&rule.from).unwrap_or_else(|_| format!("\"{}\"", rule.from));
         let encoded_inner = encoded.trim_matches('"');
         if line.contains(encoded_inner) {
             return true;
@@ -209,19 +208,16 @@ fn line_contains_any(line: &str, table: &SubstitutionTable) -> bool {
 /// Rewrite a JSON file (e.g. `claude-json-fragment.json`) in memory
 /// using the substitution table; write back atomically. Returns
 /// number of fields rewritten.
-pub fn rewrite_json_file(
-    path: &Path,
-    table: &SubstitutionTable,
-) -> Result<usize, MigrateError> {
+pub fn rewrite_json_file(path: &Path, table: &SubstitutionTable) -> Result<usize, MigrateError> {
     let bytes = fs::read(path).map_err(MigrateError::from)?;
-    let mut value: Value = serde_json::from_slice(&bytes)
-        .map_err(|e| MigrateError::Serialize(e.to_string()))?;
+    let mut value: Value =
+        serde_json::from_slice(&bytes).map_err(|e| MigrateError::Serialize(e.to_string()))?;
     let count = rewrite_value(&mut value, table);
     if count == 0 {
         return Ok(0);
     }
-    let new_json = serde_json::to_vec_pretty(&value)
-        .map_err(|e| MigrateError::Serialize(e.to_string()))?;
+    let new_json =
+        serde_json::to_vec_pretty(&value).map_err(|e| MigrateError::Serialize(e.to_string()))?;
     let parent = path.parent().unwrap_or_else(|| Path::new("."));
     let mut tmp = tempfile::NamedTempFile::new_in(parent).map_err(MigrateError::from)?;
     tmp.write_all(&new_json).map_err(MigrateError::from)?;
@@ -238,11 +234,7 @@ mod tests {
     fn unix_to_linux_table() -> SubstitutionTable {
         let mut t = SubstitutionTable::new();
         t.push("/Users/joker", "/home/alice", RuleOrigin::Home);
-        t.push(
-            "/Users/joker/x",
-            "/home/alice/x",
-            RuleOrigin::ProjectCwd,
-        );
+        t.push("/Users/joker/x", "/home/alice/x", RuleOrigin::ProjectCwd);
         t.finalize();
         t
     }
@@ -372,11 +364,7 @@ mod tests {
     #[test]
     fn cross_os_windows_to_unix_rewrites_with_forward_slashes() {
         let mut t = SubstitutionTable::new();
-        t.push(
-            r"C:\Users\joker\x",
-            "/home/alice/x",
-            RuleOrigin::ProjectCwd,
-        );
+        t.push(r"C:\Users\joker\x", "/home/alice/x", RuleOrigin::ProjectCwd);
         t.finalize();
         // Source Windows JSONL: backslash-doubled in JSON escaping.
         // The line as it appears in the file:

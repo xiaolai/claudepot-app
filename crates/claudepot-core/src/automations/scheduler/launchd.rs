@@ -80,10 +80,16 @@ impl Scheduler for LaunchdScheduler {
         crate::fs_utils::atomic_write(&plist_path, xml.as_bytes())?;
         // launchctl bootstrap requires the plist file already on disk.
         let bootstrap_target = gui_target_root();
-        run_launchctl(&["bootstrap", &bootstrap_target, plist_path.to_str().unwrap_or("")])
-            .map_err(|e| AutomationError::Io(std::io::Error::other(format!(
+        run_launchctl(&[
+            "bootstrap",
+            &bootstrap_target,
+            plist_path.to_str().unwrap_or(""),
+        ])
+        .map_err(|e| {
+            AutomationError::Io(std::io::Error::other(format!(
                 "launchctl bootstrap failed for {label}: {e}"
-            ))))?;
+            )))
+        })?;
         Ok(())
     }
 
@@ -174,7 +180,10 @@ fn gui_target(label: &str) -> String {
 }
 
 fn run_launchctl(args: &[&str]) -> Result<(), String> {
-    let out = Command::new("/bin/launchctl").args(args).output().map_err(|e| e.to_string())?;
+    let out = Command::new("/bin/launchctl")
+        .args(args)
+        .output()
+        .map_err(|e| e.to_string())?;
     if out.status.success() {
         return Ok(());
     }
@@ -352,7 +361,10 @@ mod tests {
             json_schema: None,
             bare: false,
             extra_env: Default::default(),
-            trigger: Trigger::Cron { cron: cron.into(), timezone: None },
+            trigger: Trigger::Cron {
+                cron: cron.into(),
+                timezone: None,
+            },
             platform_options: PlatformOptions::default(),
             log_retention_runs: 50,
             created_at: now,
@@ -376,7 +388,9 @@ mod tests {
         let xml = render_plist(&a).unwrap();
         assert!(xml.starts_with("<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<!DOCTYPE plist"));
         assert!(xml.contains("<key>Label</key>"));
-        assert!(xml.contains("<string>io.claudepot.automation.00000000-0000-0000-0000-000000000000</string>"));
+        assert!(xml.contains(
+            "<string>io.claudepot.automation.00000000-0000-0000-0000-000000000000</string>"
+        ));
         assert!(xml.contains("<key>ProgramArguments</key>"));
         assert!(xml.contains("<string>/bin/sh</string>"));
         assert!(xml.contains("run.sh"));
@@ -436,7 +450,10 @@ mod tests {
     #[test]
     fn next_runs_works_via_trait() {
         let s = LaunchdScheduler;
-        let trigger = Trigger::Cron { cron: "0 9 * * *".into(), timezone: None };
+        let trigger = Trigger::Cron {
+            cron: "0 9 * * *".into(),
+            timezone: None,
+        };
         let from = chrono::TimeZone::with_ymd_and_hms(&Utc, 2026, 4, 28, 8, 0, 0).unwrap();
         let next = s.next_runs(&trigger, from, 2).unwrap();
         assert_eq!(next.len(), 2);

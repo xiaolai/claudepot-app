@@ -134,10 +134,7 @@ pub fn resolve_subagents(
 ///
 /// We accept both `agentId` (canonical field on result payloads) and
 /// `agent_id` (legacy snake_case) for forward/backward compatibility.
-pub fn link_parent_tasks(
-    parent_events: &[SessionEvent],
-    subagents: &mut [Subagent],
-) {
+pub fn link_parent_tasks(parent_events: &[SessionEvent], subagents: &mut [Subagent]) {
     if subagents.is_empty() {
         return;
     }
@@ -211,10 +208,7 @@ pub fn link_parent_tasks(
                 }
             }
             if !attached {
-                if let Some(a) = subagents
-                    .iter_mut()
-                    .find(|a| a.parent_task_id.is_none())
-                {
+                if let Some(a) = subagents.iter_mut().find(|a| a.parent_task_id.is_none()) {
                     a.parent_task_id.get_or_insert_with(|| tool_use_id.clone());
                     // Positional fallback: don't clobber whatever the
                     // subagent parser already derived from its own
@@ -291,7 +285,9 @@ fn file_belongs_to_session(path: &Path, session_id: &str) -> bool {
 fn extract_agent_id_from_filename(path: &Path) -> Option<String> {
     let stem = path.file_stem()?.to_string_lossy();
     // stem == "agent-<id>" or "agent_<id>"
-    let id = stem.strip_prefix("agent-").or_else(|| stem.strip_prefix("agent_"))?;
+    let id = stem
+        .strip_prefix("agent-")
+        .or_else(|| stem.strip_prefix("agent_"))?;
     Some(id.to_string())
 }
 
@@ -518,10 +514,7 @@ mod tests {
         assert_eq!(agents[0].metrics.tokens.input, 10);
         assert_eq!(agents[0].metrics.tokens.output, 5);
         assert_eq!(agents[0].metrics.duration_ms, 2000);
-        assert_eq!(
-            agents[0].description.as_deref(),
-            Some("explore repo")
-        );
+        assert_eq!(agents[0].description.as_deref(), Some("explore repo"));
     }
 
     #[test]
@@ -566,7 +559,12 @@ mod tests {
     #[test]
     fn parallel_flag_set_when_windows_overlap() {
         let tmp = TempDir::new().unwrap();
-        let sub_dir = tmp.path().join("projects").join("-r").join("S1").join("subagents");
+        let sub_dir = tmp
+            .path()
+            .join("projects")
+            .join("-r")
+            .join("S1")
+            .join("subagents");
         mkdir(&sub_dir);
         write_file(
             &sub_dir.join("agent-a.jsonl"),
@@ -590,7 +588,12 @@ mod tests {
     #[test]
     fn non_overlapping_subagents_are_sequential() {
         let tmp = TempDir::new().unwrap();
-        let sub_dir = tmp.path().join("projects").join("-r").join("S1").join("subagents");
+        let sub_dir = tmp
+            .path()
+            .join("projects")
+            .join("-r")
+            .join("S1")
+            .join("subagents");
         mkdir(&sub_dir);
         write_file(
             &sub_dir.join("agent-a.jsonl"),
@@ -614,7 +617,12 @@ mod tests {
     fn link_parent_tasks_matches_explicit_agent_id() {
         use serde_json::json;
         let tmp = TempDir::new().unwrap();
-        let sub_dir = tmp.path().join("projects").join("-r").join("S1").join("subagents");
+        let sub_dir = tmp
+            .path()
+            .join("projects")
+            .join("-r")
+            .join("S1")
+            .join("subagents");
         mkdir(&sub_dir);
         write_file(
             &sub_dir.join("agent-aaa.jsonl"),
@@ -651,7 +659,12 @@ mod tests {
         // forcing a positional guess.
         use serde_json::json;
         let tmp = TempDir::new().unwrap();
-        let sub_dir = tmp.path().join("projects").join("-r").join("S1").join("subagents");
+        let sub_dir = tmp
+            .path()
+            .join("projects")
+            .join("-r")
+            .join("S1")
+            .join("subagents");
         mkdir(&sub_dir);
         write_file(
             &sub_dir.join("agent-bbb.jsonl"),
@@ -693,7 +706,12 @@ mod tests {
         // link silently fell through to positional guessing.
         use serde_json::json;
         let tmp = TempDir::new().unwrap();
-        let sub_dir = tmp.path().join("projects").join("-r").join("S1").join("subagents");
+        let sub_dir = tmp
+            .path()
+            .join("projects")
+            .join("-r")
+            .join("S1")
+            .join("subagents");
         mkdir(&sub_dir);
         // Two subagents — only the explicit camelCase agentId match
         // should attach to the Task call.
@@ -740,7 +758,12 @@ mod tests {
     #[test]
     fn link_parent_tasks_falls_back_to_positional_match() {
         let tmp = TempDir::new().unwrap();
-        let sub_dir = tmp.path().join("projects").join("-r").join("S1").join("subagents");
+        let sub_dir = tmp
+            .path()
+            .join("projects")
+            .join("-r")
+            .join("S1")
+            .join("subagents");
         mkdir(&sub_dir);
         write_file(
             &sub_dir.join("agent-zz.jsonl"),
@@ -764,7 +787,12 @@ mod tests {
     #[test]
     fn link_parent_tasks_uses_tool_result_agent_id_when_present() {
         let tmp = TempDir::new().unwrap();
-        let sub_dir = tmp.path().join("projects").join("-r").join("S1").join("subagents");
+        let sub_dir = tmp
+            .path()
+            .join("projects")
+            .join("-r")
+            .join("S1")
+            .join("subagents");
         mkdir(&sub_dir);
         write_file(
             &sub_dir.join("agent-xyz.jsonl"),
@@ -817,7 +845,12 @@ mod tests {
     #[test]
     fn agent_underscore_filename_is_also_recognized() {
         let tmp = TempDir::new().unwrap();
-        let sub_dir = tmp.path().join("projects").join("-r").join("S1").join("subagents");
+        let sub_dir = tmp
+            .path()
+            .join("projects")
+            .join("-r")
+            .join("S1")
+            .join("subagents");
         mkdir(&sub_dir);
         write_file(
             &sub_dir.join("agent_legacy.jsonl"),

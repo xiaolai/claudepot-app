@@ -40,9 +40,7 @@ use crate::session_live::registry::{self, ProcessCheck, SysinfoCheck};
 use crate::session_live::status::StatusMachine;
 use crate::session_live::tail::FileTail;
 use crate::session_live::transcript_resolver::TranscriptResolver;
-use crate::session_live::types::{
-    LiveDelta, LiveDeltaKind, LiveSessionSummary, PidRecord, Status,
-};
+use crate::session_live::types::{LiveDelta, LiveDeltaKind, LiveSessionSummary, PidRecord, Status};
 
 /// How often the runtime polls the PID registry and tails each
 /// transcript. 500 ms matches the plan's M1 target of sub-second
@@ -149,9 +147,7 @@ impl LiveRuntime {
     pub fn new() -> Arc<Self> {
         let check: Arc<dyn ProcessCheck> = Arc::new(SysinfoCheck::new());
         let cfg = paths::claude_config_dir();
-        let metrics = MetricsStore::open_default()
-            .ok()
-            .map(Arc::new);
+        let metrics = MetricsStore::open_default().ok().map(Arc::new);
         if metrics.is_none() {
             tracing::warn!(
                 target = "session_live::runtime",
@@ -251,10 +247,7 @@ impl LiveRuntime {
         // concurrent `start`.
         let my_notify = Arc::new(tokio::sync::Notify::new());
         let prior_notify = {
-            let mut slot = self
-                .exit_notify
-                .lock()
-                .expect("exit_notify mutex poisoned");
+            let mut slot = self.exit_notify.lock().expect("exit_notify mutex poisoned");
             slot.replace(Arc::clone(&my_notify))
         };
 
@@ -294,9 +287,7 @@ impl LiveRuntime {
 
     /// Aggregate subscription for surfaces that want the full list
     /// (tray, sidebar strip, status bar).
-    pub fn subscribe_aggregate(
-        &self,
-    ) -> watch::Receiver<Arc<Vec<LiveSessionSummary>>> {
+    pub fn subscribe_aggregate(&self) -> watch::Receiver<Arc<Vec<LiveSessionSummary>>> {
         self.aggregate.subscribe()
     }
 
@@ -345,9 +336,9 @@ impl LiveRuntime {
         let excluded = self.excluded_paths.lock().await.clone();
         let mut filtered = outcome;
         if !excluded.is_empty() {
-            filtered.live.retain(|r| {
-                !excluded.iter().any(|p| r.cwd.starts_with(p))
-            });
+            filtered
+                .live
+                .retain(|r| !excluded.iter().any(|p| r.cwd.starts_with(p)));
         }
         let mut outcome = filtered;
 
@@ -385,11 +376,8 @@ impl LiveRuntime {
         let mut state = self.state.lock().await;
 
         // 1. Drop sessions that disappeared from the registry.
-        let live_ids: std::collections::HashSet<String> = outcome
-            .live
-            .iter()
-            .map(|r| r.session_id.clone())
-            .collect();
+        let live_ids: std::collections::HashSet<String> =
+            outcome.live.iter().map(|r| r.session_id.clone()).collect();
         let gone: Vec<String> = state
             .keys()
             .filter(|k| !live_ids.contains(*k))
@@ -634,8 +622,7 @@ impl LiveRuntime {
             // summary_from_state → current_action.
             if snap.task_summary != s.last_task_summary {
                 if let Some(summary_text) = &snap.task_summary {
-                    let redacted =
-                        crate::session_live::redact::redact_secrets(summary_text);
+                    let redacted = crate::session_live::redact::redact_secrets(summary_text);
                     s.seq += 1;
                     let _ = self
                         .detail
@@ -643,9 +630,7 @@ impl LiveRuntime {
                             session_id: s.session_id.clone(),
                             seq: s.seq,
                             produced_at_ms: now_ms,
-                            kind: LiveDeltaKind::TaskSummaryChanged {
-                                summary: redacted,
-                            },
+                            kind: LiveDeltaKind::TaskSummaryChanged { summary: redacted },
                             resync_required: false,
                         })
                         .await;
@@ -684,9 +669,7 @@ impl LiveRuntime {
                             session_id: s.session_id.clone(),
                             seq: s.seq,
                             produced_at_ms: now_ms,
-                            kind: LiveDeltaKind::ModelChanged {
-                                model: new_model,
-                            },
+                            kind: LiveDeltaKind::ModelChanged { model: new_model },
                             resync_required: false,
                         })
                         .await;
@@ -850,11 +833,7 @@ impl SessionState {
         // rebinding) would appear Idle until the next line lands.
         // The window is small enough (64 KiB) that even very chatty
         // transcripts only cost a few JSONL parses on attach.
-        let seed_size = seed_status_from_recent_lines(
-            &path,
-            &mut machine,
-            ATTACH_BACKFILL_BYTES,
-        );
+        let seed_size = seed_status_from_recent_lines(&path, &mut machine, ATTACH_BACKFILL_BYTES);
         // Open the tail at the byte offset the seed left off at.
         // Using `at_offset` (rather than re-statting via `at_eof`)
         // closes the race where lines appended between the seed
@@ -867,10 +846,7 @@ impl SessionState {
         // This is applied AFTER backfill so an authoritative PID
         // status wins over any stale seeded transition.
         if let Some(raw) = rec.status.as_deref() {
-            machine.set_pid_status(
-                Some(Status::from_pid_field(raw)),
-                rec.waiting_for.clone(),
-            );
+            machine.set_pid_status(Some(Status::from_pid_field(raw)), rec.waiting_for.clone());
         }
         Ok(Self {
             pid: rec.pid,

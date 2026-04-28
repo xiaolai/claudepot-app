@@ -41,11 +41,7 @@ pub fn sanitize_path(name: &str) -> String {
 /// * Otherwise, `-` → host separator (`\` on Windows, `/` on Unix).
 pub fn unsanitize_path(sanitized: &str) -> String {
     let bytes = sanitized.as_bytes();
-    if bytes.len() >= 3
-        && bytes[0].is_ascii_alphabetic()
-        && bytes[1] == b'-'
-        && bytes[2] == b'-'
-    {
+    if bytes.len() >= 3 && bytes[0].is_ascii_alphabetic() && bytes[1] == b'-' && bytes[2] == b'-' {
         let drive = bytes[0] as char;
         let rest = sanitized[3..].replace('-', "\\");
         return format!("{}:\\{}", drive, rest);
@@ -148,8 +144,9 @@ mod tests {
         // that won't match CC's on-disk directory. This test locks
         // that contract: callers must normalize first.
         let raw = sanitize_path("\\\\?\\C:\\Users\\joker");
-        let simplified =
-            sanitize_path(&crate::path_utils::simplify_windows_path("\\\\?\\C:\\Users\\joker"));
+        let simplified = sanitize_path(&crate::path_utils::simplify_windows_path(
+            "\\\\?\\C:\\Users\\joker",
+        ));
         assert_ne!(raw, simplified, "verbatim input must be rejected upstream");
         assert_eq!(simplified, "C--Users-joker");
     }
@@ -177,7 +174,10 @@ mod tests {
         let out = sanitize_path(&input);
         // Prefix: MAX_SANITIZED_LENGTH, separator '-', then djb2 hash.
         assert!(out.len() > MAX_SANITIZED_LENGTH);
-        assert_eq!(out.len(), MAX_SANITIZED_LENGTH + 1 + djb2_hash(&input).len());
+        assert_eq!(
+            out.len(),
+            MAX_SANITIZED_LENGTH + 1 + djb2_hash(&input).len()
+        );
     }
 
     #[test]

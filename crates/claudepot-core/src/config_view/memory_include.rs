@@ -36,7 +36,10 @@ static INCLUDE_RE: Lazy<Regex> =
 /// `extractIncludePathsFromTokens` (`claudemd.ts:356-378`), so `@`
 /// tokens inside frontmatter are never extracted.
 fn strip_frontmatter(body: &str) -> &str {
-    let Some(rest) = body.strip_prefix("---\n").or_else(|| body.strip_prefix("---\r\n")) else {
+    let Some(rest) = body
+        .strip_prefix("---\n")
+        .or_else(|| body.strip_prefix("---\r\n"))
+    else {
         return body;
     };
     // Find the closing `---` line. It must be on its own line.
@@ -67,53 +70,135 @@ pub const MAX_DEPTH: usize = 5;
 /// Order preserved so diff against CC reads cleanly.
 pub const TEXT_FILE_EXTENSIONS: &[&str] = &[
     // Markdown and text
-    ".md", ".txt", ".text",
+    ".md",
+    ".txt",
+    ".text",
     // Data formats
-    ".json", ".yaml", ".yml", ".toml", ".xml", ".csv",
+    ".json",
+    ".yaml",
+    ".yml",
+    ".toml",
+    ".xml",
+    ".csv",
     // Web
-    ".html", ".htm", ".css", ".scss", ".sass", ".less",
+    ".html",
+    ".htm",
+    ".css",
+    ".scss",
+    ".sass",
+    ".less",
     // JavaScript/TypeScript
-    ".js", ".ts", ".tsx", ".jsx", ".mjs", ".cjs", ".mts", ".cts",
+    ".js",
+    ".ts",
+    ".tsx",
+    ".jsx",
+    ".mjs",
+    ".cjs",
+    ".mts",
+    ".cts",
     // Python
-    ".py", ".pyi", ".pyw",
+    ".py",
+    ".pyi",
+    ".pyw",
     // Ruby
-    ".rb", ".erb", ".rake",
+    ".rb",
+    ".erb",
+    ".rake",
     // Go
     ".go",
     // Rust
     ".rs",
     // Java/Kotlin/Scala
-    ".java", ".kt", ".kts", ".scala",
+    ".java",
+    ".kt",
+    ".kts",
+    ".scala",
     // C/C++
-    ".c", ".cpp", ".cc", ".cxx", ".h", ".hpp", ".hxx",
+    ".c",
+    ".cpp",
+    ".cc",
+    ".cxx",
+    ".h",
+    ".hpp",
+    ".hxx",
     // C#
     ".cs",
     // Swift
     ".swift",
     // Shell
-    ".sh", ".bash", ".zsh", ".fish", ".ps1", ".bat", ".cmd",
+    ".sh",
+    ".bash",
+    ".zsh",
+    ".fish",
+    ".ps1",
+    ".bat",
+    ".cmd",
     // Config
-    ".env", ".ini", ".cfg", ".conf", ".config", ".properties",
+    ".env",
+    ".ini",
+    ".cfg",
+    ".conf",
+    ".config",
+    ".properties",
     // Database
-    ".sql", ".graphql", ".gql",
+    ".sql",
+    ".graphql",
+    ".gql",
     // Protocol
     ".proto",
     // Frontend frameworks
-    ".vue", ".svelte", ".astro",
+    ".vue",
+    ".svelte",
+    ".astro",
     // Templating
-    ".ejs", ".hbs", ".pug", ".jade",
+    ".ejs",
+    ".hbs",
+    ".pug",
+    ".jade",
     // Other languages
-    ".php", ".pl", ".pm", ".lua", ".r", ".R", ".dart", ".ex", ".exs",
-    ".erl", ".hrl", ".clj", ".cljs", ".cljc", ".edn", ".hs", ".lhs",
-    ".elm", ".ml", ".mli", ".f", ".f90", ".f95", ".for",
+    ".php",
+    ".pl",
+    ".pm",
+    ".lua",
+    ".r",
+    ".R",
+    ".dart",
+    ".ex",
+    ".exs",
+    ".erl",
+    ".hrl",
+    ".clj",
+    ".cljs",
+    ".cljc",
+    ".edn",
+    ".hs",
+    ".lhs",
+    ".elm",
+    ".ml",
+    ".mli",
+    ".f",
+    ".f90",
+    ".f95",
+    ".for",
     // Build files
-    ".cmake", ".make", ".makefile", ".gradle", ".sbt",
+    ".cmake",
+    ".make",
+    ".makefile",
+    ".gradle",
+    ".sbt",
     // Documentation
-    ".rst", ".adoc", ".asciidoc", ".org", ".tex", ".latex",
+    ".rst",
+    ".adoc",
+    ".asciidoc",
+    ".org",
+    ".tex",
+    ".latex",
     // Lock files
     ".lock",
     // Misc
-    ".log", ".diff", ".patch",
+    ".log",
+    ".diff",
+    ".patch",
 ];
 
 /// Returns true when `path` either lacks an extension or whose
@@ -123,7 +208,9 @@ pub const TEXT_FILE_EXTENSIONS: &[&str] = &[
 /// extensionless text files still load. Comparison is ASCII-lowercase
 /// to match `toLowerCase()` in CC.
 pub fn is_text_extension(path: &Path) -> bool {
-    let Some(ext) = path.extension() else { return true };
+    let Some(ext) = path.extension() else {
+        return true;
+    };
     let ext_lc = ext.to_string_lossy().to_ascii_lowercase();
     let full = format!(".{ext_lc}");
     TEXT_FILE_EXTENSIONS.contains(&full.as_str())
@@ -294,7 +381,11 @@ fn mask_html(bytes: &mut [u8]) {
             // scanned, which is a documented limitation vs. CC's full
             // tokenizer; adding a dependency-free markdown lexer would
             // be the next step if this proves insufficient.
-            if i + 1 < bytes.len() && (bytes[i + 1].is_ascii_alphabetic() || bytes[i + 1] == b'/' || bytes[i + 1] == b'!') {
+            if i + 1 < bytes.len()
+                && (bytes[i + 1].is_ascii_alphabetic()
+                    || bytes[i + 1] == b'/'
+                    || bytes[i + 1] == b'!')
+            {
                 if let Some(close_rel) = find_subslice(&bytes[i..], b">") {
                     let close_end = i + close_rel + 1;
                     blank_range(bytes, i, close_end);
@@ -323,7 +414,10 @@ fn blank_range(bytes: &mut [u8], start: usize, end: usize) {
 }
 
 fn strip_leading_ws(line: &[u8]) -> &[u8] {
-    let n = line.iter().take_while(|&&b| b == b' ' || b == b'\t').count();
+    let n = line
+        .iter()
+        .take_while(|&&b| b == b' ' || b == b'\t')
+        .count();
     &line[n..]
 }
 
@@ -341,7 +435,11 @@ fn unescape_spaces(s: &str) -> Option<String> {
     // CC's `path.replace(/\\ /g, ' ')` at `claudemd.ts:473`. Chars-safe
     // so non-ASCII filenames (e.g. `café.md`) are preserved verbatim.
     let out = s.replace("\\ ", " ");
-    if out.is_empty() { None } else { Some(out) }
+    if out.is_empty() {
+        None
+    } else {
+        Some(out)
+    }
 }
 
 /// Path-shape validation mirrored from `claudemd.ts:476-489`.
@@ -418,7 +516,15 @@ pub fn resolve_all(
 ) -> Vec<ResolvedInclude> {
     let mut out = Vec::new();
     let mut processed: HashSet<PathBuf> = HashSet::new();
-    walk(root_file, original_cwd, allow_external, 0, root_file, &mut processed, &mut out);
+    walk(
+        root_file,
+        original_cwd,
+        allow_external,
+        0,
+        root_file,
+        &mut processed,
+        &mut out,
+    );
     out
 }
 
@@ -438,8 +544,7 @@ fn walk(
     if depth >= MAX_DEPTH {
         return;
     }
-    let canon_original = std::fs::canonicalize(file)
-        .unwrap_or_else(|_| file.to_path_buf());
+    let canon_original = std::fs::canonicalize(file).unwrap_or_else(|_| file.to_path_buf());
     if !processed.insert(canon_original.clone()) {
         return;
     }
@@ -447,19 +552,20 @@ fn walk(
     // file don't both recurse (`claudemd.ts:629-648`).
     processed.insert(file.to_path_buf());
 
-    let Ok(bytes) = std::fs::read(&canon_original) else { return };
-    let Ok(body) = std::str::from_utf8(&bytes) else { return };
+    let Ok(bytes) = std::fs::read(&canon_original) else {
+        return;
+    };
+    let Ok(body) = std::str::from_utf8(&bytes) else {
+        return;
+    };
     // CC resolves symlinks **before** resolving `@include` paths so the
     // include base matches the real on-disk location of the containing
     // file (`claudemd.ts:639-648`). Use the canonicalized parent so
     // `@./foo.md` next to a symlinked root still lands on the physical
     // neighbour.
-    let base_dir = canon_original
-        .parent()
-        .unwrap_or_else(|| Path::new("."));
+    let base_dir = canon_original.parent().unwrap_or_else(|| Path::new("."));
     for target in extract_includes(body, base_dir) {
-        let canon = std::fs::canonicalize(&target)
-            .unwrap_or_else(|_| target.clone());
+        let canon = std::fs::canonicalize(&target).unwrap_or_else(|_| target.clone());
         if !canon.is_file() {
             continue;
         }
@@ -479,7 +585,15 @@ fn walk(
             included_by: parent.to_path_buf(),
             depth: child_depth,
         });
-        walk(&canon, original_cwd, allow_external, child_depth, &canon, processed, out);
+        walk(
+            &canon,
+            original_cwd,
+            allow_external,
+            child_depth,
+            &canon,
+            processed,
+            out,
+        );
     }
 }
 
@@ -671,7 +785,10 @@ mod tests {
         let out = resolve_all(&a, td.path(), true);
         // Only b is emitted (a is the root and already in processed).
         assert_eq!(out.len(), 1);
-        assert_eq!(out[0].abs_path.canonicalize().unwrap(), b.canonicalize().unwrap());
+        assert_eq!(
+            out[0].abs_path.canonicalize().unwrap(),
+            b.canonicalize().unwrap()
+        );
     }
 
     #[test]

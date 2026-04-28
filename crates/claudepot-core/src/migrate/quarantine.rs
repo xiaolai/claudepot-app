@@ -21,7 +21,7 @@ pub fn strip(_path: &Path) -> std::io::Result<()> {
         // and the user drops in a downloaded `.sh`, this is the hook
         // point.
         let _ = _path;
-        return Ok(());
+        Ok(())
     }
     #[cfg(not(target_os = "macos"))]
     Ok(())

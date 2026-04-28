@@ -17,9 +17,7 @@ pub enum MigrateError {
     #[error("serialization: {0}")]
     Serialize(String),
 
-    #[error(
-        "unsupported bundle schema_version {found} (expected {expected})"
-    )]
+    #[error("unsupported bundle schema_version {found} (expected {expected})")]
     UnsupportedSchemaVersion { found: u32, expected: u32 },
 
     /// Configuration error — user / adapter supplied a missing or

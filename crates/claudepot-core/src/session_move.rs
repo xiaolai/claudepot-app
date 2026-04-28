@@ -40,8 +40,8 @@ use crate::project_progress::{NoopSink, PhaseStatus, ProgressSink};
 use crate::project_sanitize::sanitize_path;
 use crate::session_move_helpers::{
     clear_claude_json_session_pointers, extract_session_id_from_path, has_sync_conflict,
-    is_recently_modified, list_sessions_in_slug, move_session_subdir_with_progress,
-    read_first_cwd, remove_empty_subdirs, remove_if_empty, validate_slug,
+    is_recently_modified, list_sessions_in_slug, move_session_subdir_with_progress, read_first_cwd,
+    remove_empty_subdirs, remove_if_empty, validate_slug,
 };
 use crate::session_move_jsonl::{
     rewrite_history_jsonl_with_progress, stream_rewrite_jsonl_with_progress,
@@ -200,55 +200,56 @@ pub fn move_session_with_progress(
     // a rollback that wipes `to_sub` could destroy unrelated user data
     // that lived there before we ever started.
     let to_sub_preexisted = to_sub.exists();
-    let result: Result<(usize, usize, usize, usize, u8), (MoveSessionError, &'static str)> = (|| {
-        // Phase S2: sibling per-session dir (subagents/, remote-agents/).
-        let (subagent_files_moved, remote_agent_files_moved) = if from_sub.is_dir() {
-            move_session_subdir_with_progress(&from_sub, &to_sub, &mut |done, total| {
-                sink.sub_progress("S2", done, total)
-            })
-            .map_err(|e| (e, "S2"))?
-        } else {
-            (0, 0)
-        };
-        sink.phase("S2", PhaseStatus::Complete);
+    let result: Result<(usize, usize, usize, usize, u8), (MoveSessionError, &'static str)> =
+        (|| {
+            // Phase S2: sibling per-session dir (subagents/, remote-agents/).
+            let (subagent_files_moved, remote_agent_files_moved) = if from_sub.is_dir() {
+                move_session_subdir_with_progress(&from_sub, &to_sub, &mut |done, total| {
+                    sink.sub_progress("S2", done, total)
+                })
+                .map_err(|e| (e, "S2"))?
+            } else {
+                (0, 0)
+            };
+            sink.phase("S2", PhaseStatus::Complete);
 
-        // Phase S3: history.jsonl — rewrite lines keyed by sessionId.
-        // Also counts lines that look like ours (project matches
-        // source_cwd) but lack sessionId so we can surface "some history
-        // couldn't be attributed" to the caller.
-        let (history_entries_moved, history_entries_unmapped) = if history_path.is_file() {
-            rewrite_history_jsonl_with_progress(
-                &history_path,
-                session_id,
-                &from_str,
-                &to_str,
-                &mut |done, total| sink.sub_progress("S3", done, total),
-            )
-            .map_err(|e| (e, "S3"))?
-        } else {
-            (0, 0)
-        };
-        sink.phase("S3", PhaseStatus::Complete);
+            // Phase S3: history.jsonl — rewrite lines keyed by sessionId.
+            // Also counts lines that look like ours (project matches
+            // source_cwd) but lack sessionId so we can surface "some history
+            // couldn't be attributed" to the caller.
+            let (history_entries_moved, history_entries_unmapped) = if history_path.is_file() {
+                rewrite_history_jsonl_with_progress(
+                    &history_path,
+                    session_id,
+                    &from_str,
+                    &to_str,
+                    &mut |done, total| sink.sub_progress("S3", done, total),
+                )
+                .map_err(|e| (e, "S3"))?
+            } else {
+                (0, 0)
+            };
+            sink.phase("S3", PhaseStatus::Complete);
 
-        // Phase S4: .claude.json session pointers. CC stores this file at
-        // `$HOME/.claude.json` — a sibling of `$HOME/.claude/`, NOT
-        // inside config_dir. The caller is responsible for passing the
-        // correct path; if they don't (`None`), S4 is skipped.
-        let claude_json_pointers_cleared = match opts.claude_json_path.as_deref() {
-            Some(path) => clear_claude_json_session_pointers(path, &from_canonical, session_id)
-                .map_err(|e| (e, "S4"))?,
-            None => 0,
-        };
-        sink.phase("S4", PhaseStatus::Complete);
+            // Phase S4: .claude.json session pointers. CC stores this file at
+            // `$HOME/.claude.json` — a sibling of `$HOME/.claude/`, NOT
+            // inside config_dir. The caller is responsible for passing the
+            // correct path; if they don't (`None`), S4 is skipped.
+            let claude_json_pointers_cleared = match opts.claude_json_path.as_deref() {
+                Some(path) => clear_claude_json_session_pointers(path, &from_canonical, session_id)
+                    .map_err(|e| (e, "S4"))?,
+                None => 0,
+            };
+            sink.phase("S4", PhaseStatus::Complete);
 
-        Ok((
-            subagent_files_moved,
-            remote_agent_files_moved,
-            history_entries_moved,
-            history_entries_unmapped,
-            claude_json_pointers_cleared,
-        ))
-    })();
+            Ok((
+                subagent_files_moved,
+                remote_agent_files_moved,
+                history_entries_moved,
+                history_entries_unmapped,
+                claude_json_pointers_cleared,
+            ))
+        })();
 
     let (
         subagent_files_moved,
@@ -284,8 +285,7 @@ pub fn move_session_with_progress(
     fs::remove_file(&from_session)?;
 
     // Phase S5: optional cleanup of an empty source project dir.
-    let source_dir_removed =
-        opts.cleanup_source_if_empty && remove_if_empty(&from_proj)?;
+    let source_dir_removed = opts.cleanup_source_if_empty && remove_if_empty(&from_proj)?;
     sink.phase("S5", PhaseStatus::Complete);
 
     Ok(MoveSessionReport {

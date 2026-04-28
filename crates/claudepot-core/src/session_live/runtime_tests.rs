@@ -58,12 +58,10 @@ fn append_transcript(projects_dir: &std::path::Path, cwd: &str, sid: &str, body:
 /// Transcript path for assertions and mtime bumps. Mirrors
 /// `runtime.rs::transcript_path` one for one — kept local so tests
 /// don't depend on a private helper.
-fn transcript_path(
-    projects_dir: &std::path::Path,
-    cwd: &str,
-    sid: &str,
-) -> std::path::PathBuf {
-    projects_dir.join(sanitize_path(cwd)).join(format!("{sid}.jsonl"))
+fn transcript_path(projects_dir: &std::path::Path, cwd: &str, sid: &str) -> std::path::PathBuf {
+    projects_dir
+        .join(sanitize_path(cwd))
+        .join(format!("{sid}.jsonl"))
 }
 
 /// Set the mtime relative to now. `offset_secs` may be negative to
@@ -78,11 +76,7 @@ fn bump_mtime(path: &std::path::Path, offset_secs: i64) {
     } else {
         now - std::time::Duration::from_secs((-offset_secs) as u64)
     };
-    filetime::set_file_mtime(
-        path,
-        filetime::FileTime::from_system_time(target),
-    )
-    .unwrap();
+    filetime::set_file_mtime(path, filetime::FileTime::from_system_time(target)).unwrap();
 }
 
 /// Format an ms-since-epoch timestamp as RFC-3339 for embedding in
@@ -437,12 +431,7 @@ async fn task_summary_drives_current_action_and_emits_delta() {
     // Drain deltas and confirm at least one TaskSummaryChanged
     // arrived with the expected text.
     let mut saw_task_summary = false;
-    while let Ok(d) = tokio::time::timeout(
-        std::time::Duration::from_millis(200),
-        rx.recv(),
-    )
-    .await
-    {
+    while let Ok(d) = tokio::time::timeout(std::time::Duration::from_millis(200), rx.recv()).await {
         let Some(d) = d else { break };
         if let LiveDeltaKind::TaskSummaryChanged { summary } = &d.kind {
             assert!(summary.contains("running the test suite"));
@@ -473,7 +462,9 @@ async fn excluded_paths_are_skipped_by_tick() {
     write_transcript(&f.projects_dir, "/tmp/secret-proj", "sess-excluded", "");
     f.check.set_alive(&[12345, 12346]);
 
-    f.runtime.set_excluded_paths(vec!["/tmp/secret".to_string()]).await;
+    f.runtime
+        .set_excluded_paths(vec!["/tmp/secret".to_string()])
+        .await;
     f.runtime.tick().await.unwrap();
 
     let snap = f.runtime.snapshot();
@@ -569,13 +560,10 @@ async fn clear_rotation_rebinds_to_the_active_transcript() {
 
     // The stale subscriber should have received an `Ended` delta —
     // that's how detail consumers know to unmount.
-    let d = tokio::time::timeout(
-        std::time::Duration::from_millis(200),
-        rx_stale.recv(),
-    )
-    .await
-    .expect("Ended delta should arrive on stale session")
-    .expect("channel open");
+    let d = tokio::time::timeout(std::time::Duration::from_millis(200), rx_stale.recv())
+        .await
+        .expect("Ended delta should arrive on stale session")
+        .expect("channel open");
     assert!(
         matches!(d.kind, LiveDeltaKind::Ended),
         "expected Ended, got {:?}",
@@ -814,12 +802,11 @@ async fn activity_classifier_runs_on_live_tail() {
         cards.iter().map(|c| c.title.clone()).collect::<Vec<_>>()
     );
     assert!(
-        cards.iter().any(|c| c.plugin.as_deref() == Some("mermaid-preview@xiaolai")),
-        "expected plugin attribution to appear, got plugins: {:?}",
         cards
             .iter()
-            .map(|c| c.plugin.clone())
-            .collect::<Vec<_>>()
+            .any(|c| c.plugin.as_deref() == Some("mermaid-preview@xiaolai")),
+        "expected plugin attribution to appear, got plugins: {:?}",
+        cards.iter().map(|c| c.plugin.clone()).collect::<Vec<_>>()
     );
 }
 
@@ -876,7 +863,8 @@ async fn ended_session_drains_open_agent_episodes_to_stranded_cards() {
     // Pre-finalize: episode is open, no stranded card yet.
     let pre = idx.recent(&Default::default()).unwrap();
     assert!(
-        pre.iter().all(|c| c.kind != crate::activity::CardKind::AgentStranded),
+        pre.iter()
+            .all(|c| c.kind != crate::activity::CardKind::AgentStranded),
         "no AgentStranded card while session is live"
     );
 

@@ -134,10 +134,7 @@ impl DetailBus {
     /// dropping it does not remove the slot from the map — the slot
     /// is reaped lazily on the next `publish_delta` that encounters
     /// `TrySendError::Closed`.
-    pub async fn subscribe(
-        &self,
-        session_id: &str,
-    ) -> Result<mpsc::Receiver<LiveDelta>, BusError> {
+    pub async fn subscribe(&self, session_id: &str) -> Result<mpsc::Receiver<LiveDelta>, BusError> {
         let mut map = self.inner.lock().await;
         if let Some(slot) = map.get(session_id) {
             if !slot.tx.is_closed() {
@@ -275,11 +272,10 @@ mod tests {
         let bus = DetailBus::new();
         let mut rx = bus.subscribe("s1").await.unwrap();
         for i in 1..=5 {
-            assert!(
-                bus.publish_delta(status_delta("s1", i, Status::Busy))
-                    .await
-                    .unwrap()
-            );
+            assert!(bus
+                .publish_delta(status_delta("s1", i, Status::Busy))
+                .await
+                .unwrap());
         }
         for i in 1..=5 {
             let d = rx.recv().await.unwrap();
@@ -311,11 +307,10 @@ mod tests {
         }
         assert!(last_seen.is_some());
 
-        assert!(
-            bus.publish_delta(status_delta("s2", 100_000, Status::Idle))
-                .await
-                .unwrap()
-        );
+        assert!(bus
+            .publish_delta(status_delta("s2", 100_000, Status::Idle))
+            .await
+            .unwrap());
         let d = rx.recv().await.unwrap();
         assert_eq!(d.seq, 100_000);
         assert!(
@@ -374,22 +369,17 @@ mod tests {
                 for i in 0..10_000u64 {
                     // Ignore full-channel drops; they're expected if
                     // the consumer is slower.
-                    let _ = bus
-                        .publish_delta(status_delta("s3", i, Status::Busy))
-                        .await;
+                    let _ = bus.publish_delta(status_delta("s3", i, Status::Busy)).await;
                 }
             })
         };
         let mut seen = 0u64;
         let mut last_seq = 0u64;
         while seen < 9_500 {
-            let d = tokio::time::timeout(
-                std::time::Duration::from_secs(5),
-                rx.recv(),
-            )
-            .await
-            .expect("should not stall")
-            .unwrap();
+            let d = tokio::time::timeout(std::time::Duration::from_secs(5), rx.recv())
+                .await
+                .expect("should not stall")
+                .unwrap();
             assert!(d.seq >= last_seq, "seqs must be non-decreasing");
             last_seq = d.seq;
             seen += 1;

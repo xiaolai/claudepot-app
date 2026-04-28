@@ -138,10 +138,7 @@ pub(super) fn classify_entry(path: PathBuf, name: &str) -> TrashEntry {
 /// Tampered entries refuse restore — but the listing scales with
 /// the number of trash entries, not their byte sizes.
 fn verify_against_manifest(payload_path: &Path, manifest: &TrashManifest) -> bool {
-    if payload_path
-        .file_name()
-        .and_then(|n| n.to_str())
-        != Some(manifest.source_basename.as_str())
+    if payload_path.file_name().and_then(|n| n.to_str()) != Some(manifest.source_basename.as_str())
     {
         return false;
     }
@@ -156,10 +153,7 @@ fn verify_against_manifest(payload_path: &Path, manifest: &TrashManifest) -> boo
 /// recorded digest). Called by `restore_at` immediately before the
 /// rename so a Tampered entry that snuck past the cheap list check
 /// still gets caught at the moment that matters most.
-pub(super) fn verify_against_manifest_full(
-    payload_path: &Path,
-    manifest: &TrashManifest,
-) -> bool {
+pub(super) fn verify_against_manifest_full(payload_path: &Path, manifest: &TrashManifest) -> bool {
     if !verify_against_manifest(payload_path, manifest) {
         return false;
     }

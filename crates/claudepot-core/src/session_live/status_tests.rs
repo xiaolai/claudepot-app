@@ -373,10 +373,12 @@ fn current_action_redacts_leaked_keys() {
         model: None,
         tool_name: "Bash".into(),
         tool_use_id: "tu".into(),
-        input_preview: r#"{"command":"curl -H 'Authorization: Bearer sk-ant-Abc123DEF456_xyz' https://api"}"#
-            .into(),
-        input_full: r#"{"command":"curl -H 'Authorization: Bearer sk-ant-Abc123DEF456_xyz' https://api"}"#
-            .into(),
+        input_preview:
+            r#"{"command":"curl -H 'Authorization: Bearer sk-ant-Abc123DEF456_xyz' https://api"}"#
+                .into(),
+        input_full:
+            r#"{"command":"curl -H 'Authorization: Bearer sk-ant-Abc123DEF456_xyz' https://api"}"#
+                .into(),
     });
     let ca = m.snapshot().current_action.unwrap();
     assert!(
@@ -436,8 +438,7 @@ fn recent_errors_window_is_bounded_even_under_burst() {
     // Advance time past the window and ingest one more error —
     // the trimmer must drop everything older than the cutoff.
     let mut later = StatusMachine::with_now(|| {
-        chrono::TimeZone::with_ymd_and_hms(&Utc, 2026, 4, 21, 11, 0, 0)
-            .unwrap()
+        chrono::TimeZone::with_ymd_and_hms(&Utc, 2026, 4, 21, 11, 0, 0).unwrap()
     });
     // Move the vecdeque into the later machine to simulate
     // the sliding window after wall-clock progression.
@@ -606,10 +607,7 @@ fn golden_unmatched_tool_fixture_is_busy_with_action() {
     }
     let snap = m.snapshot();
     assert_eq!(snap.status, Status::Busy);
-    assert_eq!(
-        snap.current_action.as_deref(),
-        Some("Bash: sleep 600")
-    );
+    assert_eq!(snap.current_action.as_deref(), Some("Bash: sleep 600"));
 }
 
 #[test]
@@ -618,9 +616,7 @@ fn golden_errored_fixture_triggers_overlay() {
     let events = parse_for_test(raw);
     // Use a clock close to the fixture events so the errors are
     // inside the 60s window.
-    let mut m = StatusMachine::with_now(|| {
-        Utc.with_ymd_and_hms(2026, 4, 21, 10, 0, 30).unwrap()
-    });
+    let mut m = StatusMachine::with_now(|| Utc.with_ymd_and_hms(2026, 4, 21, 10, 0, 30).unwrap());
     for e in &events {
         m.ingest(e);
     }

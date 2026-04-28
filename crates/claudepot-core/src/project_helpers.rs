@@ -228,9 +228,7 @@ pub(crate) fn classify_reachability(original_path: &str) -> PathReachability {
         // would join it with the current drive and stat the result —
         // also nonsense. Detect by leading `/` AND no drive-letter +
         // no UNC prefix.
-        if original_path.starts_with('/')
-            && !is_windows_absolute(original_path)
-        {
+        if original_path.starts_with('/') && !is_windows_absolute(original_path) {
             return PathReachability::Unreachable;
         }
     }
@@ -538,12 +536,7 @@ fn walk_jsonl_mtime(dir: &Path, newest: &mut Option<SystemTime>) {
         let Ok(ft) = entry.file_type() else { continue };
         if ft.is_dir() {
             walk_jsonl_mtime(&path, newest);
-        } else if ft.is_file()
-            && path
-                .extension()
-                .map(|e| e == "jsonl")
-                .unwrap_or(false)
-        {
+        } else if ft.is_file() && path.extension().map(|e| e == "jsonl").unwrap_or(false) {
             if let Ok(meta) = entry.metadata() {
                 if let Ok(mtime) = meta.modified() {
                     if newest.map(|n| mtime > n).unwrap_or(true) {

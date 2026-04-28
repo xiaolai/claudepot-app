@@ -70,4 +70,3 @@ pub fn trash_empty_cmd(ctx: &AppContext, older_than: Option<&str>) -> Result<()>
     }
     Ok(())
 }
-

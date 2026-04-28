@@ -170,11 +170,9 @@ pub fn export_projects(
         // Neither path is built yet; refuse loudly so the user sees
         // the gap rather than getting a silent normal export.
         return Err(MigrateError::NotImplemented(
-            "--include-live (live-session export with retry semantics, spec §9.1)"
-                .to_string(),
+            "--include-live (live-session export with retry semantics, spec §9.1)".to_string(),
         ));
     }
-
 
     let mut writer = bundle::BundleWriter::create(&opts.output)?;
     let mut projects = Vec::new();
@@ -244,8 +242,8 @@ pub fn export_projects(
             live_at_export: false,
             worktree_set,
         };
-        let pm_bytes = serde_json::to_vec_pretty(&pm)
-            .map_err(|e| MigrateError::Serialize(e.to_string()))?;
+        let pm_bytes =
+            serde_json::to_vec_pretty(&pm).map_err(|e| MigrateError::Serialize(e.to_string()))?;
         writer.append_bytes(
             &format!("projects/{project_id}/manifest.json"),
             &pm_bytes,
@@ -402,8 +400,7 @@ pub fn inspect_encrypted(
     passphrase: &age::secrecy::SecretString,
 ) -> Result<manifest::BundleManifest, MigrateError> {
     let stage = apply::imports_root().join(format!("inspect-{}", uuid::Uuid::new_v4()));
-    let plaintext =
-        crypto::decrypt_bundle_with_passphrase(bundle_path, passphrase, &stage)?;
+    let plaintext = crypto::decrypt_bundle_with_passphrase(bundle_path, passphrase, &stage)?;
     let _cleanup = PlaintextCleanupGuard::new(Some(plaintext.clone()));
     // The decrypted plaintext lives under our staging tree and was
     // never written next to the user's encrypted bundle, so the outer
@@ -622,13 +619,11 @@ pub fn import_bundle(
         if bundle_path.extension().is_some_and(|e| e == "age") {
             let pwd = opts.decrypt_passphrase.clone().ok_or_else(|| {
                 MigrateError::Configuration(
-                    "encrypted bundle but no passphrase supplied — adapter must prompt"
-                        .to_string(),
+                    "encrypted bundle but no passphrase supplied — adapter must prompt".to_string(),
                 )
             })?;
             let stage = apply::imports_root().join(format!("decrypt-{bundle_id}"));
-            let plaintext =
-                crypto::decrypt_bundle_with_passphrase(bundle_path, &pwd, &stage)?;
+            let plaintext = crypto::decrypt_bundle_with_passphrase(bundle_path, &pwd, &stage)?;
             (plaintext.clone(), Some(plaintext), true)
         } else {
             (bundle_path.to_path_buf(), None, false)
@@ -732,236 +727,235 @@ pub fn import_bundle(
     // outer `?` would skip the journal persist. Wrap the loop so we
     // can run rollback against whatever we've already recorded.
     let apply_outcome: Result<(), MigrateError> = (|| {
-    for pref in &manifest.projects {
-        // P2 plan — single-project scope; HOME and config dir rules
-        // come from the manifest. Cwd rules from --remap.
-        let mut table = plan::SubstitutionTable::new();
-        let target_cwd = opts
-            .remap_rules
-            .iter()
-            .find(|(s, _)| s == &pref.source_cwd)
-            .map(|(_, t)| t.clone())
-            .unwrap_or_else(|| pref.source_cwd.clone());
-        table.push(&pref.source_cwd, &target_cwd, plan::RuleOrigin::ProjectCwd);
-        // HOME / config-dir rules for embedded paths.
-        table.push(&manifest.source_home, &home_string(), plan::RuleOrigin::Home);
-        table.push(
-            &manifest.source_claude_config_dir,
-            &config_dir.to_string_lossy(),
-            plan::RuleOrigin::ClaudeConfigDir,
-        );
-        for (s, t) in &opts.remap_rules {
-            if s != &pref.source_cwd {
-                table.push(s, t, plan::RuleOrigin::UserRemap);
+        for pref in &manifest.projects {
+            // P2 plan — single-project scope; HOME and config dir rules
+            // come from the manifest. Cwd rules from --remap.
+            let mut table = plan::SubstitutionTable::new();
+            let target_cwd = opts
+                .remap_rules
+                .iter()
+                .find(|(s, _)| s == &pref.source_cwd)
+                .map(|(_, t)| t.clone())
+                .unwrap_or_else(|| pref.source_cwd.clone());
+            table.push(&pref.source_cwd, &target_cwd, plan::RuleOrigin::ProjectCwd);
+            // HOME / config-dir rules for embedded paths.
+            table.push(
+                &manifest.source_home,
+                &home_string(),
+                plan::RuleOrigin::Home,
+            );
+            table.push(
+                &manifest.source_claude_config_dir,
+                &config_dir.to_string_lossy(),
+                plan::RuleOrigin::ClaudeConfigDir,
+            );
+            for (s, t) in &opts.remap_rules {
+                if s != &pref.source_cwd {
+                    table.push(s, t, plan::RuleOrigin::UserRemap);
+                }
             }
-        }
-        table.finalize();
+            table.finalize();
 
-        // Conflict detection.
-        let target_slug = plan::target_slug(&target_cwd);
-        let target_slug_dir = config_dir.join("projects").join(&target_slug);
-        let conflict = if target_slug_dir.exists() {
-            conflicts::ProjectConflict::PresentNoOverlap {
-                target_slug: target_slug.clone(),
-                target_session_count: 0,
+            // Conflict detection.
+            let target_slug = plan::target_slug(&target_cwd);
+            let target_slug_dir = config_dir.join("projects").join(&target_slug);
+            let conflict = if target_slug_dir.exists() {
+                conflicts::ProjectConflict::PresentNoOverlap {
+                    target_slug: target_slug.clone(),
+                    target_session_count: 0,
+                }
+            } else {
+                conflicts::ProjectConflict::None
+            };
+            match conflicts::resolve(&conflict, opts.mode, opts.prefer) {
+                conflicts::Resolution::Apply => {}
+                conflicts::Resolution::Refuse(reason) => {
+                    projects_refused.push((pref.source_cwd.clone(), reason));
+                    continue;
+                }
+                other => {
+                    // Merge / archive paths land in the next slice; for v0
+                    // we refuse loudly so callers know to wait.
+                    projects_refused.push((
+                        pref.source_cwd.clone(),
+                        format!("v0 only supports apply (no-conflict). got: {other:?}"),
+                    ));
+                    continue;
+                }
             }
-        } else {
-            conflicts::ProjectConflict::None
-        };
-        match conflicts::resolve(&conflict, opts.mode, opts.prefer) {
-            conflicts::Resolution::Apply => {}
-            conflicts::Resolution::Refuse(reason) => {
-                projects_refused.push((pref.source_cwd.clone(), reason));
-                continue;
-            }
-            other => {
-                // Merge / archive paths land in the next slice; for v0
-                // we refuse loudly so callers know to wait.
+
+            // P3 rewrite + P5 apply for the slug tree.
+            let staged_slug_root = staging
+                .join("projects")
+                .join(&pref.id)
+                .join("claude")
+                .join("projects")
+                .join(&pref.source_slug);
+            rewrite_slug_tree(&staged_slug_root, &table)?;
+
+            if !staged_slug_root.exists() {
                 projects_refused.push((
                     pref.source_cwd.clone(),
-                    format!("v0 only supports apply (no-conflict). got: {other:?}"),
+                    "bundle missing expected slug tree".to_string(),
                 ));
                 continue;
             }
-        }
-
-        // P3 rewrite + P5 apply for the slug tree.
-        let staged_slug_root = staging
-            .join("projects")
-            .join(&pref.id)
-            .join("claude")
-            .join("projects")
-            .join(&pref.source_slug);
-        rewrite_slug_tree(&staged_slug_root, &table)?;
-
-        if !staged_slug_root.exists() {
-            projects_refused.push((
-                pref.source_cwd.clone(),
-                "bundle missing expected slug tree".to_string(),
-            ));
-            continue;
-        }
-        // P5: rename staged → final. Both paths are in the same volume
-        // (`~/.claudepot/imports/...` and `~/.claude/projects/...`)
-        // are typically on the same FS; if not, fall back to copy.
-        if let Some(parent) = target_slug_dir.parent() {
-            fs::create_dir_all(parent).map_err(MigrateError::from)?;
-        }
-        match fs::rename(&staged_slug_root, &target_slug_dir) {
-            Ok(()) => {}
-            Err(e) if e.kind() == std::io::ErrorKind::CrossesDevices
-                || e.raw_os_error() == Some(libc::EXDEV) =>
-            {
-                copy_dir_recursive(&staged_slug_root, &target_slug_dir)?;
-                fs::remove_dir_all(&staged_slug_root).map_err(MigrateError::from)?;
+            // P5: rename staged → final. Both paths are in the same volume
+            // (`~/.claudepot/imports/...` and `~/.claude/projects/...`)
+            // are typically on the same FS; if not, fall back to copy.
+            if let Some(parent) = target_slug_dir.parent() {
+                fs::create_dir_all(parent).map_err(MigrateError::from)?;
             }
-            Err(e) => return Err(MigrateError::from(e)),
-        }
-
-        // Populate dir_inventory so surgical rollback knows exactly
-        // which files we wrote — preserves user work added post-
-        // import (audit Robustness finding).
-        let dir_inventory = apply::collect_dir_inventory(&target_slug_dir);
-        journal.record(apply::JournalStep {
-            kind: apply::JournalStepKind::CreateDir,
-            before: None,
-            after: Some(target_slug_dir.to_string_lossy().to_string()),
-            snapshot_path: None,
-            after_sha256: None,
-            fragment_key: None,
-            dir_inventory,
-            timestamp_unix_secs: now_secs(),
-        });
-
-        // Worktree apply (when bundle carries it).
-        if manifest.flags.include_worktree {
-            let staged_project_root = staging.join("projects").join(&pref.id);
-            if staged_project_root.join("project-scoped").exists() {
-                let target_cwd = std::path::PathBuf::from(&target_cwd);
-                if target_cwd.exists() {
-                    let steps = worktree::apply_worktree(
-                        &staged_project_root,
-                        &target_cwd,
-                        &bundle_id,
-                    )?;
-                    for s in steps {
-                        let kind = match s.kind {
-                            worktree::WorktreeApplyKind::Created => {
-                                apply::JournalStepKind::CreateFile
-                            }
-                            worktree::WorktreeApplyKind::SideBySide => {
-                                apply::JournalStepKind::CreateFile
-                            }
-                            worktree::WorktreeApplyKind::SkippedIdentical => continue,
-                        };
-                        let after_path = std::path::Path::new(&s.after);
-                        let after_sha256 = apply::sha256_of_file_optional(after_path);
-                        journal.record(apply::JournalStep {
-                            kind,
-                            before: None,
-                            after: Some(s.after),
-                            snapshot_path: None,
-                            after_sha256,
-                            fragment_key: None,
-                            dir_inventory: Vec::new(),
-                            timestamp_unix_secs: now_secs(),
-                        });
-                    }
+            match fs::rename(&staged_slug_root, &target_slug_dir) {
+                Ok(()) => {}
+                Err(e)
+                    if e.kind() == std::io::ErrorKind::CrossesDevices
+                        || e.raw_os_error() == Some(libc::EXDEV) =>
+                {
+                    copy_dir_recursive(&staged_slug_root, &target_slug_dir)?;
+                    fs::remove_dir_all(&staged_slug_root).map_err(MigrateError::from)?;
                 }
-                // Target cwd missing: skip silently. The slug landed
-                // either way; the user can re-apply worktree later.
+                Err(e) => return Err(MigrateError::from(e)),
+            }
+
+            // Populate dir_inventory so surgical rollback knows exactly
+            // which files we wrote — preserves user work added post-
+            // import (audit Robustness finding).
+            let dir_inventory = apply::collect_dir_inventory(&target_slug_dir);
+            journal.record(apply::JournalStep {
+                kind: apply::JournalStepKind::CreateDir,
+                before: None,
+                after: Some(target_slug_dir.to_string_lossy().to_string()),
+                snapshot_path: None,
+                after_sha256: None,
+                fragment_key: None,
+                dir_inventory,
+                timestamp_unix_secs: now_secs(),
+            });
+
+            // Worktree apply (when bundle carries it).
+            if manifest.flags.include_worktree {
+                let staged_project_root = staging.join("projects").join(&pref.id);
+                if staged_project_root.join("project-scoped").exists() {
+                    let target_cwd = std::path::PathBuf::from(&target_cwd);
+                    if target_cwd.exists() {
+                        let steps = worktree::apply_worktree(
+                            &staged_project_root,
+                            &target_cwd,
+                            &bundle_id,
+                        )?;
+                        for s in steps {
+                            let kind = match s.kind {
+                                worktree::WorktreeApplyKind::Created => {
+                                    apply::JournalStepKind::CreateFile
+                                }
+                                worktree::WorktreeApplyKind::SideBySide => {
+                                    apply::JournalStepKind::CreateFile
+                                }
+                                worktree::WorktreeApplyKind::SkippedIdentical => continue,
+                            };
+                            let after_path = std::path::Path::new(&s.after);
+                            let after_sha256 = apply::sha256_of_file_optional(after_path);
+                            journal.record(apply::JournalStep {
+                                kind,
+                                before: None,
+                                after: Some(s.after),
+                                snapshot_path: None,
+                                after_sha256,
+                                fragment_key: None,
+                                dir_inventory: Vec::new(),
+                                timestamp_unix_secs: now_secs(),
+                            });
+                        }
+                    }
+                    // Target cwd missing: skip silently. The slug landed
+                    // either way; the user can re-apply worktree later.
+                }
+            }
+
+            projects_imported.push(pref.source_cwd.clone());
+        }
+
+        // Claudepot state (Bucket C-adjacent). Surface account stubs to
+        // the receipt; write protected-paths/preferences/artifact-lifecycle
+        // to the target's claudepot data dir.
+        if manifest.flags.include_claudepot_state {
+            let outcome = state::apply_claudepot_state(
+                &staging,
+                &crate::paths::claudepot_data_dir(),
+                &bundle_id,
+            )?;
+            for created in outcome.created {
+                // Tamper baseline so undo can detect post-apply edits to
+                // protected-paths.json / preferences.json / artifact-
+                // lifecycle.json (audit Robustness #12 follow-up).
+                let after_sha256 = apply::sha256_of_file_optional(std::path::Path::new(&created));
+                journal.record(apply::JournalStep {
+                    kind: apply::JournalStepKind::CreateFile,
+                    before: None,
+                    after: Some(created),
+                    snapshot_path: None,
+                    after_sha256,
+                    fragment_key: None,
+                    dir_inventory: Vec::new(),
+                    timestamp_unix_secs: now_secs(),
+                });
+            }
+            for sbs in outcome.side_by_side {
+                let after_sha256 = apply::sha256_of_file_optional(std::path::Path::new(&sbs));
+                journal.record(apply::JournalStep {
+                    kind: apply::JournalStepKind::CreateFile,
+                    before: None,
+                    after: Some(sbs),
+                    snapshot_path: None,
+                    after_sha256,
+                    fragment_key: None,
+                    dir_inventory: Vec::new(),
+                    timestamp_unix_secs: now_secs(),
+                });
+            }
+            // Account stubs are intentionally NOT recorded in the journal
+            // — they don't mutate any target file (log-only per §16 Q2).
+            // The receipt picks them up via `bundle_id` correlation in
+            // `import_undo`, but the orchestrator returns them in
+            // `ImportReceipt::accounts_listed` for the CLI to display.
+            accounts_listed = outcome.accounts_listed;
+        }
+
+        // Bucket C — global content. Only when the bundle's flags say so
+        // AND staging actually carries it.
+        if manifest.flags.include_global {
+            let global_steps =
+                global::apply_global(&staging, config_dir, opts.accept_hooks, &bundle_id)?;
+            for step in global_steps {
+                let kind = match step.kind {
+                    global::GlobalApplyKind::Created => apply::JournalStepKind::CreateFile,
+                    global::GlobalApplyKind::HooksAccepted => apply::JournalStepKind::ReplaceFile,
+                    global::GlobalApplyKind::SideBySide
+                    | global::GlobalApplyKind::HooksProposed
+                    | global::GlobalApplyKind::McpProposed => apply::JournalStepKind::CreateFile,
+                    global::GlobalApplyKind::SkippedIdentical => continue,
+                };
+                // Compute sha256 of the post-apply file so rollback's
+                // tamper detection has a real baseline. Without this the
+                // after_sha256 field stays None and post-import edits go
+                // undetected during undo.
+                let after_path = std::path::Path::new(&step.after);
+                let after_sha256 = apply::sha256_of_file_optional(after_path);
+                journal.record(apply::JournalStep {
+                    kind,
+                    before: None,
+                    after: Some(step.after),
+                    snapshot_path: step.snapshot,
+                    after_sha256,
+                    fragment_key: None,
+                    dir_inventory: Vec::new(),
+                    timestamp_unix_secs: now_secs(),
+                });
             }
         }
 
-        projects_imported.push(pref.source_cwd.clone());
-    }
-
-    // Claudepot state (Bucket C-adjacent). Surface account stubs to
-    // the receipt; write protected-paths/preferences/artifact-lifecycle
-    // to the target's claudepot data dir.
-    if manifest.flags.include_claudepot_state {
-        let outcome = state::apply_claudepot_state(
-            &staging,
-            &crate::paths::claudepot_data_dir(),
-            &bundle_id,
-        )?;
-        for created in outcome.created {
-            // Tamper baseline so undo can detect post-apply edits to
-            // protected-paths.json / preferences.json / artifact-
-            // lifecycle.json (audit Robustness #12 follow-up).
-            let after_sha256 =
-                apply::sha256_of_file_optional(std::path::Path::new(&created));
-            journal.record(apply::JournalStep {
-                kind: apply::JournalStepKind::CreateFile,
-                before: None,
-                after: Some(created),
-                snapshot_path: None,
-                after_sha256,
-                fragment_key: None,
-                dir_inventory: Vec::new(),
-                timestamp_unix_secs: now_secs(),
-            });
-        }
-        for sbs in outcome.side_by_side {
-            let after_sha256 =
-                apply::sha256_of_file_optional(std::path::Path::new(&sbs));
-            journal.record(apply::JournalStep {
-                kind: apply::JournalStepKind::CreateFile,
-                before: None,
-                after: Some(sbs),
-                snapshot_path: None,
-                after_sha256,
-                fragment_key: None,
-                dir_inventory: Vec::new(),
-                timestamp_unix_secs: now_secs(),
-            });
-        }
-        // Account stubs are intentionally NOT recorded in the journal
-        // — they don't mutate any target file (log-only per §16 Q2).
-        // The receipt picks them up via `bundle_id` correlation in
-        // `import_undo`, but the orchestrator returns them in
-        // `ImportReceipt::accounts_listed` for the CLI to display.
-        accounts_listed = outcome.accounts_listed;
-    }
-
-    // Bucket C — global content. Only when the bundle's flags say so
-    // AND staging actually carries it.
-    if manifest.flags.include_global {
-        let global_steps = global::apply_global(
-            &staging,
-            config_dir,
-            opts.accept_hooks,
-            &bundle_id,
-        )?;
-        for step in global_steps {
-            let kind = match step.kind {
-                global::GlobalApplyKind::Created => apply::JournalStepKind::CreateFile,
-                global::GlobalApplyKind::HooksAccepted => apply::JournalStepKind::ReplaceFile,
-                global::GlobalApplyKind::SideBySide
-                | global::GlobalApplyKind::HooksProposed
-                | global::GlobalApplyKind::McpProposed => apply::JournalStepKind::CreateFile,
-                global::GlobalApplyKind::SkippedIdentical => continue,
-            };
-            // Compute sha256 of the post-apply file so rollback's
-            // tamper detection has a real baseline. Without this the
-            // after_sha256 field stays None and post-import edits go
-            // undetected during undo.
-            let after_path = std::path::Path::new(&step.after);
-            let after_sha256 = apply::sha256_of_file_optional(after_path);
-            journal.record(apply::JournalStep {
-                kind,
-                before: None,
-                after: Some(step.after),
-                snapshot_path: step.snapshot,
-                after_sha256,
-                fragment_key: None,
-                dir_inventory: Vec::new(),
-                timestamp_unix_secs: now_secs(),
-            });
-        }
-    }
-
-    Ok(())
+        Ok(())
     })();
 
     if let Err(e) = apply_outcome {
@@ -995,10 +989,7 @@ pub fn import_bundle(
 
 /// Walk a slug tree under `staging` and rewrite every `*.jsonl` and
 /// `*.meta.json` per the substitution table. Quiet on success.
-fn rewrite_slug_tree(
-    slug_dir: &Path,
-    table: &plan::SubstitutionTable,
-) -> Result<(), MigrateError> {
+fn rewrite_slug_tree(slug_dir: &Path, table: &plan::SubstitutionTable) -> Result<(), MigrateError> {
     if !slug_dir.exists() {
         return Ok(());
     }
@@ -1069,9 +1060,7 @@ fn walk_and_append(
         } else if ft.is_file() {
             let rel = path
                 .strip_prefix(base)
-                .map_err(|e| {
-                    MigrateError::Io(std::io::Error::other(format!("strip_prefix: {e}")))
-                })?
+                .map_err(|e| MigrateError::Io(std::io::Error::other(format!("strip_prefix: {e}"))))?
                 .to_string_lossy()
                 .replace('\\', "/");
             let bundle_path = format!("{bundle_prefix}/{rel}");
@@ -1254,9 +1243,9 @@ mod tests {
                 include_file_history: true,
                 encrypt: false,
                 sign_keyfile: None,
-            account_stubs: None,
-            encrypt_passphrase: None,
-            sign_password: None,
+                account_stubs: None,
+                encrypt_passphrase: None,
+                sign_password: None,
             },
         )
         .unwrap();
@@ -1309,21 +1298,16 @@ mod tests {
                 include_file_history: true,
                 encrypt: false,
                 sign_keyfile: None,
-            account_stubs: None,
-            encrypt_passphrase: None,
-            sign_password: None,
+                account_stubs: None,
+                encrypt_passphrase: None,
+                sign_password: None,
             },
         )
         .unwrap();
 
         let cfg_target = tmp.path().join("dst/.claude");
         fs::create_dir_all(cfg_target.join("projects")).unwrap();
-        let receipt = import_bundle(
-            &cfg_target,
-            &bundle,
-            ImportOptions::default(),
-        )
-        .unwrap();
+        let receipt = import_bundle(&cfg_target, &bundle, ImportOptions::default()).unwrap();
         assert_eq!(receipt.projects_imported.len(), 1);
 
         // Bucket C content landed.
@@ -1331,10 +1315,8 @@ mod tests {
         assert!(cfg_target.join("agents/foo.md").exists());
         // Settings present (from scrubbed) without hooks (since we
         // didn't pass --accept-hooks).
-        let settings_v: serde_json::Value = serde_json::from_slice(
-            &fs::read(cfg_target.join("settings.json")).unwrap(),
-        )
-        .unwrap();
+        let settings_v: serde_json::Value =
+            serde_json::from_slice(&fs::read(cfg_target.join("settings.json")).unwrap()).unwrap();
         assert!(settings_v.get("hooks").is_none());
         // proposed-hooks.json placed next to settings for review.
         assert!(cfg_target.join("proposed-hooks.json").exists());
@@ -1380,9 +1362,9 @@ mod tests {
                 include_file_history: true,
                 encrypt: false,
                 sign_keyfile: None,
-            account_stubs: None,
-            encrypt_passphrase: None,
-            sign_password: None,
+                account_stubs: None,
+                encrypt_passphrase: None,
+                sign_password: None,
             },
         )
         .unwrap();
@@ -1394,8 +1376,7 @@ mod tests {
         let cfg_target = tmp.path().join("dst/.claude");
         fs::create_dir_all(cfg_target.join("projects")).unwrap();
 
-        let receipt =
-            import_bundle(&cfg_target, &bundle, ImportOptions::default()).unwrap();
+        let receipt = import_bundle(&cfg_target, &bundle, ImportOptions::default()).unwrap();
         assert_eq!(receipt.projects_imported.len(), 1);
 
         // settings.json from the bundle is identical to what's on disk
@@ -1440,9 +1421,9 @@ mod tests {
                 include_file_history: true,
                 encrypt: false,
                 sign_keyfile: None,
-            account_stubs: None,
-            encrypt_passphrase: None,
-            sign_password: None,
+                account_stubs: None,
+                encrypt_passphrase: None,
+                sign_password: None,
             },
         )
         .unwrap();
@@ -1453,10 +1434,8 @@ mod tests {
         opts.accept_hooks = true;
         import_bundle(&cfg_target, &bundle, opts).unwrap();
 
-        let settings_v: serde_json::Value = serde_json::from_slice(
-            &fs::read(cfg_target.join("settings.json")).unwrap(),
-        )
-        .unwrap();
+        let settings_v: serde_json::Value =
+            serde_json::from_slice(&fs::read(cfg_target.join("settings.json")).unwrap()).unwrap();
         assert!(settings_v.get("hooks").is_some());
         // No side-by-side proposed-hooks.json (it merged into
         // settings).
@@ -1553,8 +1532,7 @@ mod tests {
 
         let cfg_target = tmp.path().join("dst/.claude");
         fs::create_dir_all(cfg_target.join("projects")).unwrap();
-        let receipt =
-            import_bundle(&cfg_target, &bundle, ImportOptions::default()).unwrap();
+        let receipt = import_bundle(&cfg_target, &bundle, ImportOptions::default()).unwrap();
         let undo = import_undo().unwrap();
         // Counter-journal must exist AND be non-empty so a future
         // redo can replay it.
@@ -1591,17 +1569,16 @@ mod tests {
                 include_file_history: true,
                 encrypt: false,
                 sign_keyfile: None,
-            account_stubs: None,
-            encrypt_passphrase: None,
-            sign_password: None,
+                account_stubs: None,
+                encrypt_passphrase: None,
+                sign_password: None,
             },
         )
         .unwrap();
 
         let cfg_target = tmp.path().join("dst/.claude");
         fs::create_dir_all(cfg_target.join("projects")).unwrap();
-        let receipt =
-            import_bundle(&cfg_target, &bundle, ImportOptions::default()).unwrap();
+        let receipt = import_bundle(&cfg_target, &bundle, ImportOptions::default()).unwrap();
         assert!(!receipt.dry_run);
         assert_eq!(receipt.projects_imported.len(), 1);
 
@@ -1642,21 +1619,16 @@ mod tests {
                 include_file_history: true,
                 encrypt: false,
                 sign_keyfile: None,
-            account_stubs: None,
-            encrypt_passphrase: None,
-            sign_password: None,
+                account_stubs: None,
+                encrypt_passphrase: None,
+                sign_password: None,
             },
         )
         .unwrap();
 
         let cfg_target = tmp.path().join("dst/.claude");
         fs::create_dir_all(cfg_target.join("projects")).unwrap();
-        let receipt = import_bundle(
-            &cfg_target,
-            &bundle,
-            ImportOptions::default(),
-        )
-        .unwrap();
+        let receipt = import_bundle(&cfg_target, &bundle, ImportOptions::default()).unwrap();
         assert!(!receipt.dry_run);
         assert_eq!(receipt.projects_imported.len(), 1);
         assert!(receipt.journal_path.exists());
@@ -1669,7 +1641,12 @@ mod tests {
         let mut found_jsonl = false;
         for entry in fs::read_dir(&target_dir).unwrap() {
             let entry = entry.unwrap();
-            if entry.path().extension().map(|e| e == "jsonl").unwrap_or(false) {
+            if entry
+                .path()
+                .extension()
+                .map(|e| e == "jsonl")
+                .unwrap_or(false)
+            {
                 found_jsonl = true;
                 let contents = fs::read_to_string(entry.path()).unwrap();
                 // cwd preserved (no remap, same machine fallback).

@@ -242,16 +242,15 @@ fn try_create_exclusive(path: &Path, lock: &Lock) -> std::io::Result<()> {
         use std::os::unix::fs::PermissionsExt;
         let _ = f.set_permissions(fs::Permissions::from_mode(0o600));
     }
-    let json = serde_json::to_string_pretty(lock)
-        .map_err(|e| std::io::Error::other(e.to_string()))?;
+    let json =
+        serde_json::to_string_pretty(lock).map_err(|e| std::io::Error::other(e.to_string()))?;
     f.write_all(json.as_bytes())?;
     f.sync_all()?;
     Ok(())
 }
 
 fn stale_reason(lock: &Lock) -> String {
-    let current_host =
-        whoami::fallible::hostname().unwrap_or_else(|_| "unknown".to_string());
+    let current_host = whoami::fallible::hostname().unwrap_or_else(|_| "unknown".to_string());
     if lock.hostname == current_host {
         format!("same-host pid {} not alive (ESRCH)", lock.pid)
     } else {
@@ -283,8 +282,7 @@ pub fn break_lock(path: &Path) -> Result<Lock, ProjectError> {
 
 /// Composite staleness rule (spec §5.1).
 pub fn is_stale(lock: &Lock) -> bool {
-    let current_host =
-        whoami::fallible::hostname().unwrap_or_else(|_| "unknown".to_string());
+    let current_host = whoami::fallible::hostname().unwrap_or_else(|_| "unknown".to_string());
     let now_unix = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .map(|d| d.as_secs())
@@ -317,8 +315,7 @@ pub fn is_stale(lock: &Lock) -> bool {
 /// Check whether a lock file's process is still alive (same-host only).
 /// Returns true if the lock is live, false if dead or cross-host.
 pub fn is_live(lock: &Lock) -> bool {
-    let current_host =
-        whoami::fallible::hostname().unwrap_or_else(|_| "unknown".to_string());
+    let current_host = whoami::fallible::hostname().unwrap_or_else(|_| "unknown".to_string());
     if lock.hostname == current_host {
         !pid_is_dead(lock.pid)
     } else {
@@ -341,7 +338,7 @@ fn pid_is_dead(pid: u32) -> bool {
     let e = std::io::Error::last_os_error();
     match e.raw_os_error() {
         Some(err) if err == ESRCH => true, // dead
-        _ => false,                         // EPERM (alive but ours) or other
+        _ => false,                        // EPERM (alive but ours) or other
     }
 }
 
@@ -412,8 +409,7 @@ mod tests {
         let fake = Lock {
             version: 1,
             pid: 99_999_999,
-            hostname: whoami::fallible::hostname()
-                .unwrap_or_else(|_| "unknown".to_string()),
+            hostname: whoami::fallible::hostname().unwrap_or_else(|_| "unknown".to_string()),
             start_iso8601: "2026-01-01T00:00:00Z".to_string(),
             start_unix_secs: 1000,
             claudepot_version: "x".to_string(),
@@ -448,8 +444,7 @@ mod tests {
         let lock = Lock {
             version: 1,
             pid: std::process::id(),
-            hostname: whoami::fallible::hostname()
-                .unwrap_or_else(|_| "unknown".to_string()),
+            hostname: whoami::fallible::hostname().unwrap_or_else(|_| "unknown".to_string()),
             start_iso8601: "2026-01-01T00:00:00Z".to_string(),
             start_unix_secs: 1000,
             claudepot_version: "x".to_string(),
@@ -484,10 +479,7 @@ mod tests {
                     e.kind()
                 );
             }
-            other => panic!(
-                "expected bounded-retry hard error, got {:?}",
-                other
-            ),
+            other => panic!("expected bounded-retry hard error, got {:?}", other),
         }
     }
 

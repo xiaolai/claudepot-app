@@ -49,11 +49,7 @@ fn keyring_to_route_error(e: keyring::Error) -> RouteError {
 }
 
 /// Write or replace the secret for one (route, field) cell.
-pub fn store_secret(
-    route_id: RouteId,
-    field: SecretField,
-    secret: &str,
-) -> Result<(), RouteError> {
+pub fn store_secret(route_id: RouteId, field: SecretField, secret: &str) -> Result<(), RouteError> {
     let e = entry(route_id, field)?;
     e.set_password(secret).map_err(keyring_to_route_error)?;
     Ok(())
@@ -61,10 +57,7 @@ pub fn store_secret(
 
 /// Read the secret. `Ok(None)` when no entry exists; `Err` for I/O
 /// or platform-permission failures.
-pub fn read_secret(
-    route_id: RouteId,
-    field: SecretField,
-) -> Result<Option<String>, RouteError> {
+pub fn read_secret(route_id: RouteId, field: SecretField) -> Result<Option<String>, RouteError> {
     let e = entry(route_id, field)?;
     match e.get_password() {
         Ok(p) => Ok(Some(p)),
@@ -74,10 +67,7 @@ pub fn read_secret(
 }
 
 /// Delete the entry. Idempotent — missing-entry errors are swallowed.
-pub fn delete_secret(
-    route_id: RouteId,
-    field: SecretField,
-) -> Result<(), RouteError> {
+pub fn delete_secret(route_id: RouteId, field: SecretField) -> Result<(), RouteError> {
     let e = entry(route_id, field)?;
     match e.delete_credential() {
         Ok(()) => Ok(()),
@@ -105,8 +95,7 @@ mod tests {
 
     #[test]
     fn account_format() {
-        let id = uuid::Uuid::parse_str("11111111-1111-1111-1111-111111111111")
-            .unwrap();
+        let id = uuid::Uuid::parse_str("11111111-1111-1111-1111-111111111111").unwrap();
         assert_eq!(
             account(id, SecretField::GatewayApiKey),
             "11111111-1111-1111-1111-111111111111-api_key"

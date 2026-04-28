@@ -170,9 +170,7 @@ mod tests {
         // recording a higher latest. This exercises the same
         // post-check branch as the IPC test.
         svc.latest.store(20, Ordering::SeqCst);
-        let outcome = svc
-            .dry_run(args, 10)
-            .expect("dry_run failed");
+        let outcome = svc.dry_run(args, 10).expect("dry_run failed");
         assert!(
             matches!(outcome, DryRunOutcome::Superseded),
             "post-check must fire when latest > token"

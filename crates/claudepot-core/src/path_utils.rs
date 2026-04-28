@@ -270,7 +270,10 @@ mod tests {
     #[test]
     fn expand_tilde_with_subpath() {
         let home = dirs::home_dir().expect("HOME available in tests");
-        let expected = home.join("github/xiaolai/myprojects/foo").to_string_lossy().to_string();
+        let expected = home
+            .join("github/xiaolai/myprojects/foo")
+            .to_string_lossy()
+            .to_string();
         assert_eq!(
             expand_tilde("~/github/xiaolai/myprojects/foo"),
             Some(expected)

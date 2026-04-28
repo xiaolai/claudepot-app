@@ -73,14 +73,11 @@ impl PruneFilter {
             // filter sweeps the row up — even when the file was
             // written seconds ago. If neither timestamp is available,
             // refuse to classify as old (skip the row).
-            let last = match row
-                .last_ts
-                .map(|t| t.timestamp_millis())
-                .or_else(|| {
-                    row.last_modified
-                        .and_then(|st| st.duration_since(std::time::UNIX_EPOCH).ok())
-                        .and_then(|d| i64::try_from(d.as_millis()).ok())
-                }) {
+            let last = match row.last_ts.map(|t| t.timestamp_millis()).or_else(|| {
+                row.last_modified
+                    .and_then(|st| st.duration_since(std::time::UNIX_EPOCH).ok())
+                    .and_then(|d| i64::try_from(d.as_millis()).ok())
+            }) {
                 Some(ms) => ms,
                 None => return false,
             };
@@ -391,9 +388,8 @@ mod tests {
         let tmp = TempDir::new().unwrap();
         let mut row = mk_row_on_disk(tmp.path(), "stale", 10, 60, false, false);
         row.last_ts = None;
-        row.last_modified = Some(
-            std::time::SystemTime::now() - std::time::Duration::from_secs(7200),
-        );
+        row.last_modified =
+            Some(std::time::SystemTime::now() - std::time::Duration::from_secs(7200));
         let f = PruneFilter {
             older_than: Some(Duration::from_secs(3600)),
             ..PruneFilter::default()
@@ -493,8 +489,7 @@ mod tests {
         assert!(report.failed.is_empty());
         assert_eq!(report.freed_bytes, 123);
         assert!(!r.file_path.exists(), "file should be moved out");
-        let listing =
-            trash::list(&data_dir, Default::default()).unwrap();
+        let listing = trash::list(&data_dir, Default::default()).unwrap();
         assert_eq!(listing.entries.len(), 1);
     }
 

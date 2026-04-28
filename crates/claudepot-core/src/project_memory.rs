@@ -136,8 +136,7 @@ pub fn move_memory_dir_if_needed(
                     })
                     .collect();
                 let snap = snaps.join(format!("{ts}-{safe_san}-P8.snap"));
-                crate::fs_utils::copy_dir_recursive(&new_mem, &snap)
-                    .map_err(ProjectError::Io)?;
+                crate::fs_utils::copy_dir_recursive(&new_mem, &snap).map_err(ProjectError::Io)?;
                 result.snapshot_path = Some(snap);
             }
             fs::remove_dir_all(&new_mem).map_err(ProjectError::Io)?;
@@ -176,11 +175,19 @@ pub fn move_memory_dir_if_needed(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::path_utils::simplify_windows_path;
+
+    /// Canonicalize a temp-dir path and strip Windows `\\?\` so test
+    /// fixtures see the same shape `find_canonical_git_root` returns.
+    fn canonical_test_path(p: &Path) -> PathBuf {
+        let canon = p.canonicalize().unwrap();
+        PathBuf::from(simplify_windows_path(&canon.to_string_lossy()))
+    }
 
     #[test]
     fn test_find_canonical_git_root_finds_containing_repo() {
         let tmp = tempfile::tempdir().unwrap();
-        let repo = tmp.path().canonicalize().unwrap();
+        let repo = canonical_test_path(tmp.path());
         fs::create_dir(repo.join(".git")).unwrap();
         let sub = repo.join("src").join("lib");
         fs::create_dir_all(&sub).unwrap();
@@ -192,7 +199,7 @@ mod tests {
     #[test]
     fn test_find_canonical_git_root_no_repo() {
         let tmp = tempfile::tempdir().unwrap();
-        let p = tmp.path().canonicalize().unwrap().join("deep").join("path");
+        let p = canonical_test_path(tmp.path()).join("deep").join("path");
         fs::create_dir_all(&p).unwrap();
         // No .git anywhere above (except possibly our real repo —
         // filter by tempdir prefix).
@@ -209,7 +216,7 @@ mod tests {
     fn test_move_memory_dir_no_git_root_change() {
         // Both paths resolve to same git root → no-op.
         let tmp = tempfile::tempdir().unwrap();
-        let base = tmp.path().canonicalize().unwrap();
+        let base = canonical_test_path(tmp.path());
         let repo = base.join("repo");
         fs::create_dir(&repo).unwrap();
         fs::create_dir(repo.join(".git")).unwrap();
@@ -235,7 +242,7 @@ mod tests {
     #[test]
     fn test_move_memory_dir_project_is_git_root() {
         let tmp = tempfile::tempdir().unwrap();
-        let base = tmp.path().canonicalize().unwrap();
+        let base = canonical_test_path(tmp.path());
         let config = base.join("config");
         fs::create_dir_all(config.join("projects")).unwrap();
 

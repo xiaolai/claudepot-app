@@ -118,13 +118,10 @@ fn write_atomic(path: &Path, root: &Value) -> Result<(), SwapError> {
     // filesystem). Using `.tmp-<pid>` suffix avoids collisions with
     // concurrent writers; if that concurrency actually happens, the
     // outer swap lock serializes us anyway.
-    let parent = path.parent().ok_or_else(|| {
-        SwapError::WriteFailed(".claude.json has no parent directory".into())
-    })?;
-    let tmp = parent.join(format!(
-        ".claude.json.tmp-{}",
-        std::process::id()
-    ));
+    let parent = path
+        .parent()
+        .ok_or_else(|| SwapError::WriteFailed(".claude.json has no parent directory".into()))?;
+    let tmp = parent.join(format!(".claude.json.tmp-{}", std::process::id()));
     fs::write(&tmp, text).map_err(SwapError::FileError)?;
 
     // Preserve original permissions if the file existed.
@@ -249,10 +246,9 @@ mod tests {
         )
         .unwrap();
 
-        let prior: Value = serde_json::from_str(
-            r#"{"emailAddress": "original@x.com", "someField": true}"#,
-        )
-        .unwrap();
+        let prior: Value =
+            serde_json::from_str(r#"{"emailAddress": "original@x.com", "someField": true}"#)
+                .unwrap();
         restore_oauth_account(&path, Some(&prior)).unwrap();
 
         let text = fs::read_to_string(&path).unwrap();

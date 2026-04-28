@@ -26,15 +26,11 @@ use std::path::{Path, PathBuf};
 /// retries with `Suffix` only after explicit user click.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
+#[derive(Default)]
 pub enum OnConflict {
+    #[default]
     Refuse,
     Suffix,
-}
-
-impl Default for OnConflict {
-    fn default() -> Self {
-        Self::Refuse
-    }
 }
 
 /// What the caller gets back after a successful disable/enable.
@@ -158,10 +154,7 @@ fn record_from_active(t: &Trackable) -> DisabledRecord {
 
 /// Crate-visible alias used by the trash module's restore path so
 /// the same collision policy applies everywhere.
-pub(crate) fn resolve_collision_pub(
-    target: &Path,
-    on_conflict: OnConflict,
-) -> Result<PathBuf> {
+pub(crate) fn resolve_collision_pub(target: &Path, on_conflict: OnConflict) -> Result<PathBuf> {
     resolve_collision(target, on_conflict)
 }
 
@@ -191,9 +184,7 @@ fn suffix_until_free(target: &Path) -> Result<PathBuf> {
         .file_stem()
         .map(|s| s.to_string_lossy().into_owned())
         .unwrap_or_else(|| "x".into());
-    let ext = target
-        .extension()
-        .map(|s| s.to_string_lossy().into_owned());
+    let ext = target.extension().map(|s| s.to_string_lossy().into_owned());
     for n in 2..=999 {
         let candidate = if let Some(e) = &ext {
             parent.join(format!("{stem}-{n}.{e}"))
@@ -268,10 +259,12 @@ fn rename_no_replace(source: &Path, target: &Path) -> Result<()> {
         use std::ffi::CString;
         use std::os::unix::ffi::OsStrExt;
         const RENAME_NOREPLACE: libc::c_uint = 1;
-        let src_c = CString::new(source.as_os_str().as_bytes())
-            .map_err(|_| LifecycleError::io("rename: bad src")(std::io::Error::other("nul byte")))?;
-        let dst_c = CString::new(target.as_os_str().as_bytes())
-            .map_err(|_| LifecycleError::io("rename: bad dst")(std::io::Error::other("nul byte")))?;
+        let src_c = CString::new(source.as_os_str().as_bytes()).map_err(|_| {
+            LifecycleError::io("rename: bad src")(std::io::Error::other("nul byte"))
+        })?;
+        let dst_c = CString::new(target.as_os_str().as_bytes()).map_err(|_| {
+            LifecycleError::io("rename: bad dst")(std::io::Error::other("nul byte"))
+        })?;
         // renameat2 is Linux-specific; AT_FDCWD = -100.
         let rc = unsafe {
             libc::syscall(
@@ -360,10 +353,7 @@ mod tests {
         let rec = disable_at(&t, OnConflict::Refuse, &user_roots(&claude)).unwrap();
         assert!(!agent.exists(), "source removed");
         assert!(rec.current_path.exists(), "destination present");
-        assert_eq!(
-            rec.current_path,
-            claude.join(".disabled/agents/foo.md")
-        );
+        assert_eq!(rec.current_path, claude.join(".disabled/agents/foo.md"));
     }
 
     #[test]
@@ -417,7 +407,10 @@ mod tests {
         let err = disable_at(&t, OnConflict::Refuse, &user_roots(&claude)).unwrap_err();
         assert!(matches!(err, LifecycleError::Conflict(_)));
         // The source must remain in place when the disable refuses.
-        assert!(agent.exists(), "source must not be moved on conflict refuse");
+        assert!(
+            agent.exists(),
+            "source must not be moved on conflict refuse"
+        );
     }
 
     #[test]

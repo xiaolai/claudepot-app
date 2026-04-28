@@ -212,7 +212,7 @@ fn classify_hook_slow(
     let command = attachment
         .get("command")
         .and_then(Value::as_str)
-        .map(|c| redact_secrets(c));
+        .map(redact_secrets);
 
     let plugin = plugin_from_hook(attachment);
     Some(Card {
@@ -261,7 +261,10 @@ fn classify_user_line(
         if block.get("type").and_then(Value::as_str) != Some("tool_result") {
             continue;
         }
-        let is_error = block.get("is_error").and_then(Value::as_bool).unwrap_or(false);
+        let is_error = block
+            .get("is_error")
+            .and_then(Value::as_bool)
+            .unwrap_or(false);
         let tool_use_id = block
             .get("tool_use_id")
             .and_then(Value::as_str)
@@ -273,7 +276,8 @@ fn classify_user_line(
         // `close_agent_episode_if_open`. Always called so the
         // open_episodes map gets drained even on Phase 2 paths.
         if let Some(id) = tool_use_id.as_deref() {
-            if let Some(card) = close_agent_episode_if_open(state, id, line, byte_offset, meta, is_error)
+            if let Some(card) =
+                close_agent_episode_if_open(state, id, line, byte_offset, meta, is_error)
             {
                 cards.push(card);
                 // The agent return card supersedes a generic tool
@@ -287,13 +291,9 @@ fn classify_user_line(
         }
 
         let body = extract_tool_result_text(block);
-        if let Some(card) = build_tool_error_card(
-            line,
-            byte_offset,
-            meta,
-            tool_use_id.clone(),
-            &body,
-        ) {
+        if let Some(card) =
+            build_tool_error_card(line, byte_offset, meta, tool_use_id.clone(), &body)
+        {
             cards.push(card);
         }
     }
@@ -455,7 +455,11 @@ fn close_agent_episode_if_open(
     if !is_error && duration <= AGENT_RETURN_SLOW_THRESHOLD_MS {
         return None;
     }
-    let severity = if is_error { Severity::Error } else { Severity::Notice };
+    let severity = if is_error {
+        Severity::Error
+    } else {
+        Severity::Notice
+    };
     let label = ep
         .subagent_type
         .as_deref()
@@ -723,9 +727,7 @@ fn extract_path_from_body(body: &str) -> Option<String> {
     // "in <path>" pattern (used by edit_drift)
     if let Some(idx) = body.find(" in ") {
         let rest = &body[idx + 4..];
-        let end = rest
-            .find(|c: char| c == '\n' || c == '.' || c == ')' || c == ',')
-            .unwrap_or(rest.len());
+        let end = rest.find(['\n', '.', ')', ',']).unwrap_or(rest.len());
         let candidate = rest[..end].trim();
         if candidate.starts_with('/') || candidate.starts_with('~') {
             return Some(candidate.to_string());
@@ -740,11 +742,13 @@ fn extract_ssh_host(body: &str) -> Option<String> {
     let needle = "ssh: connect to host ";
     let idx = body.find(needle)?;
     let rest = &body[idx + needle.len()..];
-    let end = rest
-        .find(|c: char| c.is_whitespace())
-        .unwrap_or(rest.len());
+    let end = rest.find(|c: char| c.is_whitespace()).unwrap_or(rest.len());
     let host = rest[..end].trim();
-    if host.is_empty() { None } else { Some(host.to_string()) }
+    if host.is_empty() {
+        None
+    } else {
+        Some(host.to_string())
+    }
 }
 
 /// Map a missing command name to its Homebrew package name when the
@@ -794,8 +798,8 @@ fn extract_missing_command(body: &str) -> Option<String> {
     let raw = &prefix[line_start..];
     // Common shell prefixes: "bash: foo", "(eval):1: foo", "zsh: foo".
     let stripped = raw
-        .splitn(2, ':')
-        .nth(1)
+        .split_once(':')
+        .map(|x| x.1)
         .map(str::trim)
         .filter(|s| !s.is_empty())
         .unwrap_or(raw.trim());
@@ -975,10 +979,7 @@ fn classify_hook_failure(
     let plugin = extract_missing_plugin(stderr).or_else(|| plugin_from_hook(attachment));
 
     let ts = parse_ts(line)?;
-    let event_uuid = line
-        .get("uuid")
-        .and_then(Value::as_str)
-        .map(str::to_string);
+    let event_uuid = line.get("uuid").and_then(Value::as_str).map(str::to_string);
     let cwd = line
         .get("cwd")
         .and_then(Value::as_str)

@@ -6,8 +6,8 @@
 
 use std::path::PathBuf;
 
-use crate::automations::error::AutomationError;
 use crate::automations::env::default_path_segments;
+use crate::automations::error::AutomationError;
 use crate::automations::shim::{render_unix, render_windows, ShimInputs};
 use crate::automations::store::automation_dir;
 use crate::automations::types::{Automation, AutomationBinary};
@@ -37,7 +37,10 @@ pub fn install_shim(
     };
 
     let (shim_path, contents) = if cfg!(target_os = "windows") {
-        (auto_dir.join("run.cmd"), render_windows(automation, &inputs))
+        (
+            auto_dir.join("run.cmd"),
+            render_windows(automation, &inputs),
+        )
     } else {
         (auto_dir.join("run.sh"), render_unix(automation, &inputs))
     };
@@ -66,18 +69,16 @@ pub fn resolve_binary(
     route_lookup: &dyn Fn(&uuid::Uuid) -> Option<String>,
 ) -> Result<String, AutomationError> {
     match &automation.binary {
-        AutomationBinary::FirstParty => which_claude()
-            .ok_or_else(|| AutomationError::InvalidPath(
+        AutomationBinary::FirstParty => which_claude().ok_or_else(|| {
+            AutomationError::InvalidPath(
                 "claude".into(),
                 "first-party `claude` binary not found on PATH",
-            )),
+            )
+        }),
         AutomationBinary::Route { route_id } => {
-            let wrapper_name = route_lookup(route_id).ok_or_else(|| {
-                AutomationError::NotFound(format!("route {route_id}"))
-            })?;
-            let bin = claudepot_data_dir()
-                .join("bin")
-                .join(&wrapper_name);
+            let wrapper_name = route_lookup(route_id)
+                .ok_or_else(|| AutomationError::NotFound(format!("route {route_id}")))?;
+            let bin = claudepot_data_dir().join("bin").join(&wrapper_name);
             if !bin.exists() {
                 return Err(AutomationError::InvalidPath(
                     bin.display().to_string(),
@@ -160,10 +161,9 @@ pub fn current_claudepot_cli() -> Result<String, AutomationError> {
     //    known-broken state when called from a GUI process — we
     //    return the path so callers can register, but the shim's
     //    record-run callback will fail at runtime in the GUI case.
-    let current = std::env::current_exe()
-        .map_err(|e| AutomationError::Io(std::io::Error::other(format!(
-            "current_exe failed: {e}"
-        ))))?;
+    let current = std::env::current_exe().map_err(|e| {
+        AutomationError::Io(std::io::Error::other(format!("current_exe failed: {e}")))
+    })?;
     Ok(current.display().to_string())
 }
 
@@ -203,7 +203,10 @@ mod tests {
             json_schema: None,
             bare: false,
             extra_env: Default::default(),
-            trigger: Trigger::Cron { cron: "0 9 * * *".into(), timezone: None },
+            trigger: Trigger::Cron {
+                cron: "0 9 * * *".into(),
+                timezone: None,
+            },
             platform_options: PlatformOptions::default(),
             log_retention_runs: 50,
             created_at: now,
@@ -257,7 +260,9 @@ mod tests {
     #[test]
     fn resolve_binary_route_unknown_id_returns_not_found() {
         let mut a = auto();
-        a.binary = AutomationBinary::Route { route_id: Uuid::new_v4() };
+        a.binary = AutomationBinary::Route {
+            route_id: Uuid::new_v4(),
+        };
         let lookup = |_id: &uuid::Uuid| None;
         let res = resolve_binary(&a, &lookup);
         assert!(matches!(res, Err(AutomationError::NotFound(_))));

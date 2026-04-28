@@ -2,11 +2,7 @@ use claudepot_core::account::Account;
 use std::collections::HashMap;
 use uuid::Uuid;
 
-pub fn format_account_list(
-    accounts: &[Account],
-    usage: &HashMap<Uuid, f64>,
-    json: bool,
-) -> String {
+pub fn format_account_list(accounts: &[Account], usage: &HashMap<Uuid, f64>, json: bool) -> String {
     if json {
         return format_account_list_json(accounts, usage);
     }
