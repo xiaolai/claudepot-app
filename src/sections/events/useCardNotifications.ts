@@ -86,20 +86,38 @@ export function useCardNotifications() {
 
     async function subscribeNew(sessions: LiveSessionSummary[]) {
       const live = new Set(sessions.map((s) => s.session_id));
-      // Sub new
-      for (const s of sessions) {
-        if (subscriptions.current.has(s.session_id)) continue;
-        try {
-          await api.sessionLiveSubscribe(s.session_id);
-        } catch {
-          continue;
-        }
-        const unlisten = await listen(
-          `live::${s.session_id}`,
-          (ev) => handleDelta(ev.payload as LiveDeltaWire),
-        );
-        subscriptions.current.set(s.session_id, unlisten);
-      }
+      // Subscribe in parallel — N live sessions used to serialize 2 N
+      // IPC round-trips before the first delta could arrive. The
+      // post-await race-checks guard against a concurrent subscribeNew
+      // (e.g. the bootstrap call + a `live-all` event landing during
+      // it) wiring the same session twice.
+      const fresh = sessions.filter(
+        (s) => !subscriptions.current.has(s.session_id),
+      );
+      await Promise.all(
+        fresh.map(async (s) => {
+          try {
+            await api.sessionLiveSubscribe(s.session_id);
+          } catch {
+            return;
+          }
+          if (subscriptions.current.has(s.session_id)) return;
+          const unlisten = await listen(
+            `live::${s.session_id}`,
+            (ev) => handleDelta(ev.payload as LiveDeltaWire),
+          );
+          if (subscriptions.current.has(s.session_id)) {
+            // Race winner already inserted an unlisten — drop ours.
+            try {
+              unlisten();
+            } catch {
+              /* ignore */
+            }
+            return;
+          }
+          subscriptions.current.set(s.session_id, unlisten);
+        }),
+      );
       // Unsub gone
       for (const [sid, unlisten] of Array.from(subscriptions.current.entries())) {
         if (!live.has(sid)) {
