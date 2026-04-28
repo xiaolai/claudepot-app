@@ -1,7 +1,7 @@
 //! Private helper functions for the project module.
 
 use crate::error::ProjectError;
-use crate::path_utils::{is_windows_absolute, simplify_windows_path};
+use crate::path_utils::{expand_tilde, is_windows_absolute, simplify_windows_path};
 use crate::project_sanitize::{sanitize_path, unsanitize_path, MAX_SANITIZED_LENGTH};
 use crate::project_types::*;
 use std::fs;
@@ -36,6 +36,36 @@ pub fn resolve_path(path: &str) -> Result<String, ProjectError> {
         let simplified = simplify_windows_path(path);
         return Ok(simplified.nfc().collect::<String>());
     }
+
+    // Tilde handling. A user-typed `~/foo` (e.g. pasted into the GUI
+    // rename modal) must be expanded to the absolute home form before
+    // any path math. Without this, the literal `~` segment falls
+    // through to `current_dir().join(...)` and produces a broken path
+    // like `/cwd/~/foo` — exactly the regression that left a stranded
+    // `myprojects/~/github/.../north-star` tree on 2026-04-28.
+    //
+    // Forms we don't expand (`~user`, `~user/foo`) are rejected with
+    // a clear error rather than passed through. POSIX user-home
+    // expansion has no portable Rust stdlib equivalent, and silently
+    // accepting them would re-open the same footgun at a different
+    // entry point.
+    let path_owned: String;
+    let path: &str = if path.starts_with('~') {
+        match expand_tilde(path) {
+            Some(expanded) => {
+                path_owned = expanded;
+                &path_owned
+            }
+            None => {
+                return Err(ProjectError::Ambiguous(format!(
+                    "tilde-shaped path {path:?} is not supported; \
+                     use '~', '~/...', or an absolute path"
+                )));
+            }
+        }
+    } else {
+        path
+    };
 
     let p = PathBuf::from(path);
     let abs = if p.is_absolute() {

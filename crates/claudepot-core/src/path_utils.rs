@@ -89,6 +89,28 @@ pub fn is_absolute_path_str(path: &str) -> bool {
     std::path::Path::new(path).is_absolute()
 }
 
+/// Expand `~` or `~/...` against `$HOME`. Returns `None` if the input
+/// doesn't start with one of those two shapes, or if `$HOME` is
+/// unavailable.
+///
+/// Other tilde forms (`~user`, `~user/x`) are NOT expanded — Rust's
+/// stdlib has no portable user-database lookup, and silently passing
+/// them through would let a literal `~user` segment reach
+/// `current_dir().join(...)` and corrupt downstream paths. Callers
+/// that want strict input validation should test `path.starts_with('~')`
+/// AND a `None` return as a hard error.
+///
+/// Pure string op — no filesystem access beyond `dirs::home_dir()`.
+pub fn expand_tilde(p: &str) -> Option<String> {
+    if p == "~" {
+        return dirs::home_dir().map(|h| h.to_string_lossy().to_string());
+    }
+    if let Some(rest) = p.strip_prefix("~/") {
+        return dirs::home_dir().map(|h| h.join(rest).to_string_lossy().to_string());
+    }
+    None
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -233,5 +255,58 @@ mod tests {
         assert!(is_absolute_path_str(r"C:\Users\joker\project"));
         assert!(is_absolute_path_str(r"\\server\share\path"));
         assert!(is_absolute_path_str(r"\\?\C:\Users\joker"));
+    }
+
+    // -------------------------------------------------------------------
+    // expand_tilde — runs on every host OS
+    // -------------------------------------------------------------------
+
+    #[test]
+    fn expand_tilde_bare() {
+        let home = dirs::home_dir().expect("HOME available in tests");
+        assert_eq!(expand_tilde("~"), Some(home.to_string_lossy().to_string()));
+    }
+
+    #[test]
+    fn expand_tilde_with_subpath() {
+        let home = dirs::home_dir().expect("HOME available in tests");
+        let expected = home.join("github/xiaolai/myprojects/foo").to_string_lossy().to_string();
+        assert_eq!(
+            expand_tilde("~/github/xiaolai/myprojects/foo"),
+            Some(expected)
+        );
+    }
+
+    #[test]
+    fn expand_tilde_rejects_non_tilde() {
+        assert_eq!(expand_tilde("/Users/joker/foo"), None);
+        assert_eq!(expand_tilde("foo"), None);
+        assert_eq!(expand_tilde("./foo"), None);
+        assert_eq!(expand_tilde(""), None);
+    }
+
+    #[test]
+    fn expand_tilde_rejects_user_home() {
+        // `~root`, `~alice/x` — POSIX-shell forms we don't support.
+        // Returning None forces callers to error rather than letting a
+        // literal `~root` segment slip through.
+        assert_eq!(expand_tilde("~root"), None);
+        assert_eq!(expand_tilde("~alice/foo"), None);
+    }
+
+    #[test]
+    fn expand_tilde_rejects_windows_paths() {
+        // Windows-shaped input — `~` is not the first char.
+        assert_eq!(expand_tilde(r"C:\Users\joker"), None);
+        assert_eq!(expand_tilde(r"\\server\share"), None);
+    }
+
+    #[test]
+    fn expand_tilde_subpath_no_extra_separator() {
+        // Ensure no double-slash when joining: dirs::home_dir() never
+        // returns a trailing slash, and Path::join handles the seam.
+        let result = expand_tilde("~/foo").expect("HOME available");
+        assert!(!result.contains("//"));
+        assert!(!result.ends_with('/') || result == "/");
     }
 }

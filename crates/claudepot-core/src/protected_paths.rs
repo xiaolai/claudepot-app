@@ -25,6 +25,7 @@
 //! Claudepot's private root (`paths::claudepot_data_dir()`); these are
 //! user preferences, not operational state like the repair tree.
 
+use crate::path_utils::expand_tilde;
 use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
 use std::fs;
@@ -221,18 +222,6 @@ pub fn resolved_set_or_defaults(data_dir: &Path) -> HashSet<String> {
             default_resolved_set()
         }
     }
-}
-
-/// Expand `~` or `~/x` against the current `$HOME`. Returns `None` if
-/// the input doesn't start with `~` or if `$HOME` is unavailable.
-fn expand_tilde(p: &str) -> Option<String> {
-    if p == "~" {
-        return dirs::home_dir().map(|h| h.to_string_lossy().to_string());
-    }
-    if let Some(rest) = p.strip_prefix("~/") {
-        return dirs::home_dir().map(|h| h.join(rest).to_string_lossy().to_string());
-    }
-    None
 }
 
 fn validate(input: &str) -> Result<String, ProtectedPathsError> {
