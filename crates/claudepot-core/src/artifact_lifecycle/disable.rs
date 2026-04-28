@@ -33,7 +33,6 @@ pub enum OnConflict {
     Suffix,
 }
 
-
 /// What the caller gets back after a successful disable/enable.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DisabledRecord {

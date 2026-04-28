@@ -727,9 +727,7 @@ fn extract_path_from_body(body: &str) -> Option<String> {
     // "in <path>" pattern (used by edit_drift)
     if let Some(idx) = body.find(" in ") {
         let rest = &body[idx + 4..];
-        let end = rest
-            .find(['\n', '.', ')', ','])
-            .unwrap_or(rest.len());
+        let end = rest.find(['\n', '.', ')', ',']).unwrap_or(rest.len());
         let candidate = rest[..end].trim();
         if candidate.starts_with('/') || candidate.starts_with('~') {
             return Some(candidate.to_string());
@@ -799,7 +797,9 @@ fn extract_missing_command(body: &str) -> Option<String> {
     let line_start = prefix.rfind('\n').map(|p| p + 1).unwrap_or(0);
     let raw = &prefix[line_start..];
     // Common shell prefixes: "bash: foo", "(eval):1: foo", "zsh: foo".
-    let stripped = raw.split_once(':').map(|x| x.1)
+    let stripped = raw
+        .split_once(':')
+        .map(|x| x.1)
         .map(str::trim)
         .filter(|s| !s.is_empty())
         .unwrap_or(raw.trim());
