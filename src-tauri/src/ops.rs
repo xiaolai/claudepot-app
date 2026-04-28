@@ -43,6 +43,10 @@ pub enum OpKind {
     /// Per-account `/profile` reconcile loop. Carries per-account events
     /// alongside the standard phase channel.
     VerifyAll,
+    /// Manual "Run Now" of an automation. Spawns the helper shim
+    /// out-of-band of the OS scheduler and emits phase events
+    /// (prepare → spawn → record → done).
+    AutomationRun,
 }
 
 /// Post-op summary surfaced to the UI on success, so we can render

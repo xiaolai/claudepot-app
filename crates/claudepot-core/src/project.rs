@@ -807,38 +807,18 @@ fn is_case_only_rename(old: &str, new: &str) -> bool {
 /// Probe whether two paths point at the same FS entry. Returns
 /// `Some(true)` on confirmed same-inode (case-insensitive FS), `Some(false)`
 /// on confirmed distinct entries (case-sensitive FS), and `None` when we
-/// can't tell — typically because one side doesn't exist or stat failed.
+/// can't tell — typically because one side doesn't exist or open failed.
+///
+/// Uses the `same-file` crate, which opens both paths via the
+/// platform-native handle API (open(2) on unix, CreateFileW on
+/// Windows) and compares device + inode (unix) or volume serial +
+/// file index (Windows). This avoids the still-unstable
+/// `std::os::windows::fs::MetadataExt::{volume_serial_number, file_index}`
+/// methods (`windows_by_handle` feature, tracking issue rust-lang/rust#63010).
 fn same_file_identity(a: &str, b: &str) -> Option<bool> {
-    let ma = fs::metadata(a).ok()?;
-    let mb = fs::metadata(b).ok()?;
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::MetadataExt;
-        Some(ma.dev() == mb.dev() && ma.ino() == mb.ino())
-    }
-    #[cfg(windows)]
-    {
-        // On Windows, same-file identity requires opening both handles
-        // and comparing FILE_ID_INFO. `std::os::windows::fs::MetadataExt`
-        // exposes `volume_serial_number()` and `file_index()` (added in
-        // 1.75); use those when available. If we can't get a clean
-        // pair, return None so the caller falls back to string parity.
-        use std::os::windows::fs::MetadataExt;
-        match (
-            ma.volume_serial_number(),
-            mb.volume_serial_number(),
-            ma.file_index(),
-            mb.file_index(),
-        ) {
-            (Some(va), Some(vb), Some(ia), Some(ib)) => Some(va == vb && ia == ib),
-            _ => None,
-        }
-    }
-    #[cfg(not(any(unix, windows)))]
-    {
-        let _ = (ma, mb);
-        None
-    }
+    let ha = same_file::Handle::from_path(a).ok()?;
+    let hb = same_file::Handle::from_path(b).ok()?;
+    Some(ha == hb)
 }
 
 /// Live-session detection at a specific (config_dir, san, project_cwd)
