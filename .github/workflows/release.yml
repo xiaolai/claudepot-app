@@ -630,3 +630,61 @@ jobs:
             --repo "$GITHUB_REPOSITORY" \
             -f version="$VERSION_NUM"
           echo "Triggered Homebrew tap update for $VERSION_NUM"
+
+      # Prune older releases to keep the Releases page tight. Two reasons:
+      #   1. Each release ships ~150 MB of signed bundles + sigs across
+      #      five platforms; keeping the full back-catalog forever would
+      #      bloat the repo's storage usage indefinitely.
+      #   2. The in-app updater always reads
+      #      `/releases/latest/download/latest.json`, so older releases
+      #      never serve update traffic — they're purely historical.
+      #
+      # Policy: keep the 2 most recent published releases plus their
+      # tags; delete everything older. Drafts left over from failed runs
+      # are also pruned (the workflow always finishes by either
+      # publishing or failing within seconds of creating its own draft,
+      # so any draft that survives a successful run is an orphan).
+      #
+      # `continue-on-error: true` because a transient API hiccup here
+      # shouldn't fail the release after everything else has succeeded.
+      # Worst case: an extra older release lingers until the next
+      # release run trims it.
+      - name: Prune old releases (keep 2 most recent)
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -eu
+          KEEP=2
+
+          # Sort published releases newest-first; keep the head, target
+          # the tail for deletion.
+          PUBLISHED=$(gh release list \
+            --repo "$GITHUB_REPOSITORY" \
+            --limit 100 \
+            --json tagName,isDraft,publishedAt \
+            --jq 'sort_by(.publishedAt) | reverse | .[] | select(.isDraft | not) | .tagName')
+          KEPT=$(echo "$PUBLISHED" | sed -n "1,${KEEP}p")
+          DELETE=$(echo "$PUBLISHED" | sed -n "$((KEEP+1)),\$p")
+
+          DRAFTS=$(gh release list \
+            --repo "$GITHUB_REPOSITORY" \
+            --limit 100 \
+            --json tagName,isDraft \
+            --jq '.[] | select(.isDraft) | .tagName')
+
+          echo "Keeping (most recent $KEEP):"
+          echo "$KEPT" | sed 's/^/  /'
+          echo "Deleting (older published):"
+          echo "$DELETE" | sed 's/^/  /'
+          echo "Deleting (orphan drafts):"
+          echo "$DRAFTS" | sed 's/^/  /'
+
+          for tag in $DELETE $DRAFTS; do
+            [ -z "$tag" ] && continue
+            echo "  rm $tag"
+            gh release delete "$tag" \
+              --cleanup-tag \
+              --yes \
+              --repo "$GITHUB_REPOSITORY" || echo "  (failed; continuing)"
+          done
