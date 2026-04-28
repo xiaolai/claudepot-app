@@ -33,6 +33,7 @@
   "bundle": {
     "active": true,
     "targets": "all",
+    "createUpdaterArtifacts": true,
     "category": "DeveloperTool",
     "shortDescription": "Multi-account Claude Code / Desktop switcher",
     "longDescription": "Manage multiple Anthropic Claude Code and Claude Desktop accounts. Switch the active account in seconds without re-authenticating.",
@@ -54,5 +55,12 @@
       "icons/icon.ico"
     ]
   },
-  "plugins": {}
+  "plugins": {
+    "updater": {
+      "pubkey": "",
+      "endpoints": [
+        "https://github.com/xiaolai/claudepot-app/releases/latest/download/latest.json"
+      ]
+    }
+  }
 }

@@ -94,6 +94,8 @@ import { useStatusIssues } from "./hooks/useStatusIssues";
 import { useTheme } from "./hooks/useTheme";
 import { OperationsProvider, useOperations } from "./hooks/useOperations";
 import { AppStateProvider, useAppState } from "./providers/AppStateProvider";
+import { UpdateProvider } from "./providers/UpdateProvider";
+import { readDevMode, writeDevMode } from "./hooks/useDevMode";
 import { api } from "./api";
 import { toastError } from "./lib/toastError";
 import { ConsentLiveModal } from "./components/ConsentLiveModal";
@@ -255,6 +257,26 @@ function AppShell() {
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, [setSection]);
+
+  // ⌃⌥⌘L — toggle developer mode globally. The combo requires all
+  // four modifiers (Cmd + Alt + Ctrl + L), which is effectively
+  // unreachable by accident; matches macOS's own deep-system-toggle
+  // convention (⌃⌥⌘8 inverts screen colors, etc.). The settings
+  // surface no longer renders a visible toggle, so this is the only
+  // entry point. A toast confirms the new state since the toggle
+  // is otherwise invisible.
+  useEffect(() => {
+    const onDevKey = (e: KeyboardEvent) => {
+      if (!e.metaKey || !e.ctrlKey || !e.altKey) return;
+      if (e.key !== "l" && e.key !== "L") return;
+      e.preventDefault();
+      const next = !readDevMode();
+      writeDevMode(next);
+      pushToast("info", next ? "Developer mode on" : "Developer mode off");
+    };
+    window.addEventListener("keydown", onDevKey);
+    return () => window.removeEventListener("keydown", onDevKey);
+  }, [pushToast]);
 
   // Cross-section navigation requests via DOM CustomEvent. Lets a
   // child section (e.g. EventsSection card click) switch to another
@@ -933,7 +955,9 @@ function App() {
   return (
     <OperationsProvider>
       <AppStateProvider>
-        <AppShell />
+        <UpdateProvider>
+          <AppShell />
+        </UpdateProvider>
       </AppStateProvider>
     </OperationsProvider>
   );

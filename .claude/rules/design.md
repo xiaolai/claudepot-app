@@ -49,6 +49,18 @@ to a `lucide-react` component reference. No Heroicons, Font Awesome,
 emoji, or hand-authored SVGs. New icons are added to the `NF` map
 in `src/icons.ts` by picking a Lucide import.
 
+**Brand-mark exception.** `lucide-react` v1+ removed brand icons
+(GitHub, GitLab, Twitter/X, etc.) for trademark reasons. When a
+trademarked third-party brand mark is required by the design (e.g.
+the GitHub logo next to a `github.com/…` link in About), an inline
+SVG of that mark is allowed *only if* (a) it sits in secondary
+chrome (About, footer, "powered by") — never in primary navigation
+or a primary action; (b) it uses `currentColor` so it inherits the
+theme; (c) it's named like `<BrandnameMark>` and lives next to its
+single call site, with a comment explaining why Lucide can't supply
+it. Adding a custom SVG without verifying that the underlying need
+is actually a trademarked third-party mark is a review finding.
+
 `Glyph` pins `strokeWidth={1.75}` and centers the SVG in a square
 inline-flex box so icons track the surrounding font-size. For the
 tray/menubar (AppKit NSImage, not React), PNGs are pre-rasterized
