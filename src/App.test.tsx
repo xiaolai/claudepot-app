@@ -81,7 +81,7 @@ describe("App shell — paper-mono", () => {
     // presence of each label somewhere in the sidebar region.
     expect(await screen.findByText("Accounts")).toBeInTheDocument();
     expect(screen.getByText("Projects")).toBeInTheDocument();
-    expect(screen.getByText("Activity")).toBeInTheDocument();
+    expect(screen.getByText("Activities")).toBeInTheDocument();
     expect(screen.getByText("Global")).toBeInTheDocument();
     expect(screen.getByText("Settings")).toBeInTheDocument();
   });
@@ -234,12 +234,12 @@ describe("App shell — paper-mono", () => {
 
     // After the events-into-projects collapse, the cross-project
     // firehose nav row is gone from the sidebar; alerting sessions
-    // now surface on the merged "Activity" surface (id `events`,
-    // label "Activity"). That tab owns "what's happening right now"
+    // now surface on the merged "Activities" surface (id `events`,
+    // label "Activities"). That tab owns "what's happening right now"
     // — the live strip + dashboard + events stream — so the badge
     // moved with the live signal.
     const activityBtn = await screen.findByRole("button", {
-      name: "Activity",
+      name: "Activities",
     });
     await waitFor(() => {
       expect(within(activityBtn).getByText("1")).toBeInTheDocument();
