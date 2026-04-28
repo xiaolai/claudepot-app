@@ -864,10 +864,16 @@ fn test_move_project_rewrites_session_jsonl_cwd() {
     let new_san = sanitize_path(&new_str);
     let cc_new = projects_dir.join(&new_san);
     let after_main = fs::read_to_string(cc_new.join("sess.jsonl")).unwrap();
-    assert!(after_main.contains(&format!(r#""cwd":"{}""#, new_str)));
-    assert!(after_main.contains(&format!(r#""cwd":"{}{}src""#, new_str, sep)));
-    assert!(after_main.contains(r#""cwd":"/elsewhere""#)); // untouched
-    assert!(!after_main.contains(&format!(r#""cwd":"{}""#, old_str)));
+    // Build the contains-needles via serde_json so backslashes in
+    // Windows paths are rendered as their JSON-escaped form on disk
+    // (`"cwd":"C:\\Users\\..."` — two backslashes per separator).
+    // Raw `format!(r#""cwd":"{}""#, ...)` produces single-backslash
+    // strings that don't appear anywhere in the actual JSONL.
+    let cwd_needle = |s: &str| format!(r#""cwd":{}"#, serde_json::to_string(s).unwrap());
+    assert!(after_main.contains(&cwd_needle(&new_str)));
+    assert!(after_main.contains(&cwd_needle(&format!("{new_str}{sep}src"))));
+    assert!(after_main.contains(&cwd_needle("/elsewhere"))); // untouched
+    assert!(!after_main.contains(&cwd_needle(&old_str)));
 }
 
 /// End-to-end verification that Phase 7 (~/.claude.json projects map)
@@ -1795,14 +1801,14 @@ fn test_move_project_already_moved() {
     fs::create_dir(&cc_old).unwrap();
     let session_path = cc_old.join("s.jsonl");
     fs::write(&session_path, "{}").unwrap();
-    // Age the session beyond the live-heartbeat window (60 s). On
-    // Windows runners `lsof` is absent, so `detect_live_session`
-    // falls back to heartbeat-only and treats the fresh-fixture
-    // mtime as a live Claude → `force: false` then refuses with
-    // `ClaudeRunning`. Push mtime back so the test exercises the
-    // already-moved path the assertion is actually about.
+    // Age the session beyond the move-side live-heartbeat window
+    // (120 s — see `project.rs:810`). On Windows runners `lsof` is
+    // absent, so `detect_live_session` falls back to heartbeat-only
+    // and treats the fresh-fixture mtime as a live Claude →
+    // `force: false` then refuses with `ClaudeRunning`. Push mtime
+    // back well past the window.
     let stale = filetime::FileTime::from_system_time(
-        std::time::SystemTime::now() - std::time::Duration::from_secs(120),
+        std::time::SystemTime::now() - std::time::Duration::from_secs(300),
     );
     filetime::set_file_mtime(&session_path, stale).unwrap();
 

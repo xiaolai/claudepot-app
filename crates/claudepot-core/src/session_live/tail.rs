@@ -378,6 +378,20 @@ mod tests {
         assert_eq!(p.new_lines, vec!["{\"x\":1}"]);
     }
 
+    // Inode-change detection: covered on Unix by atomic-rename-onto-
+    // target (gives a fresh inode under every Unix filesystem we
+    // ship to). Gated to Unix because:
+    //   * Linux tmpfs reuses the freed inode immediately, so the
+    //     more-natural `remove_file + write_all` form is racy and
+    //     `rename` is the only reliable inode-bumper.
+    //   * Windows has no inode; `rotation_token` falls back to file
+    //     creation time, and NTFS file tunneling preserves the
+    //     destination's creation time across either delete/recreate
+    //     OR rename-onto-target unless the test sleeps past the
+    //     tunneling TTL (~15 s). Truncation-based rotation
+    //     (`truncate_in_place_is_detected_as_rotation` above) covers
+    //     the Windows rotation path without that timing dance.
+    #[cfg(unix)]
     #[test]
     fn inode_change_is_detected_as_rotation() {
         let dir = tmp();
@@ -386,14 +400,9 @@ mod tests {
         let mut t = FileTail::at_start(&path).unwrap();
         let _ = t.poll().unwrap();
 
-        // Replace via atomic rename — guarantees a fresh inode under
-        // every filesystem we ship to. The earlier `remove_file +
-        // write_all(path)` form is racy on Linux tmpfs (the GitHub
-        // Actions runner default), where the inode allocator hands
-        // the just-freed inode back to the next file with the same
-        // name and `detect_rotation` then sees no change. `rename`
-        // moves a separately-created inode onto the target, so
-        // before-and-after inode numbers can never collide.
+        // Replace via atomic rename — moves a separately-created
+        // inode onto the target, so before-and-after inode numbers
+        // can never collide on Linux tmpfs either.
         let sibling = dir.path().join("s.jsonl.new");
         write_all(&sibling, "{\"y\":1}\n");
         std::fs::rename(&sibling, &path).unwrap();
