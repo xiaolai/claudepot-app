@@ -104,11 +104,8 @@ mod tests {
         let local: DateTime<Local> = dt.into();
         // Only assert the UTC marker to avoid depending on the test
         // host's local-zone conversion of 14:59 UTC.
-        assert!(
-            format_local_time_of_day(&local).ends_with(
-                &format_offset(local.offset().local_minus_utc())
-            )
-        );
+        assert!(format_local_time_of_day(&local)
+            .ends_with(&format_offset(local.offset().local_minus_utc())));
     }
 
     #[test]

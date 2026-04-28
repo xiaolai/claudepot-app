@@ -160,8 +160,8 @@ fn read_gitdir_pointer(git_file: &Path) -> Option<PathBuf> {
     let wt = abs.parent()?; // worktrees
     let git_dir = wt.parent()?; // .git
     let main_root = git_dir.parent()?; // /.../repo
-    // Canonicalize so matches stay stable across symlinked tempdirs
-    // (e.g. `/var` vs `/private/var` on macOS).
+                                       // Canonicalize so matches stay stable across symlinked tempdirs
+                                       // (e.g. `/var` vs `/private/var` on macOS).
     Some(fs::canonicalize(main_root).unwrap_or_else(|_| main_root.to_path_buf()))
 }
 
@@ -255,8 +255,16 @@ mod tests {
         fs::create_dir(repo.join(".git")).unwrap();
 
         let rows = vec![
-            row(repo.to_str().unwrap(), Some("main"), ts("2026-04-10T10:00:00Z")),
-            row(nested.to_str().unwrap(), Some("main"), ts("2026-04-10T11:00:00Z")),
+            row(
+                repo.to_str().unwrap(),
+                Some("main"),
+                ts("2026-04-10T10:00:00Z"),
+            ),
+            row(
+                nested.to_str().unwrap(),
+                Some("main"),
+                ts("2026-04-10T11:00:00Z"),
+            ),
         ];
         let groups = group_by_repo(rows);
         assert_eq!(groups.len(), 1);
@@ -274,8 +282,7 @@ mod tests {
         fs::create_dir_all(&wt).unwrap();
         // Main repo has a real .git directory.
         fs::create_dir(main.join(".git")).unwrap();
-        fs::create_dir_all(main.join(".git").join("worktrees").join("feature"))
-            .unwrap();
+        fs::create_dir_all(main.join(".git").join("worktrees").join("feature")).unwrap();
         // Worktree has a `.git` file pointing into the main repo's
         // `.git/worktrees/feature`.
         let pointer_target = main.join(".git").join("worktrees").join("feature");
@@ -286,8 +293,16 @@ mod tests {
         .unwrap();
 
         let rows = vec![
-            row(main.to_str().unwrap(), Some("main"), ts("2026-04-10T10:00:00Z")),
-            row(wt.to_str().unwrap(), Some("feature"), ts("2026-04-10T11:00:00Z")),
+            row(
+                main.to_str().unwrap(),
+                Some("main"),
+                ts("2026-04-10T10:00:00Z"),
+            ),
+            row(
+                wt.to_str().unwrap(),
+                Some("feature"),
+                ts("2026-04-10T11:00:00Z"),
+            ),
         ];
         let groups = group_by_repo(rows);
         assert_eq!(groups.len(), 1, "both worktrees must share the same root");
@@ -343,20 +358,23 @@ mod tests {
         fs::create_dir_all(&main).unwrap();
         fs::create_dir_all(&wt).unwrap();
         fs::create_dir(main.join(".git")).unwrap();
-        fs::create_dir_all(main.join(".git").join("worktrees").join("feature"))
-            .unwrap();
+        fs::create_dir_all(main.join(".git").join("worktrees").join("feature")).unwrap();
         // Relative pointer — git worktree add --relative.
         // git_file is at `<tmp>/repo-wt/.git`, so `../repo/.git/worktrees/feature`
         // resolves back to the main repo.
-        fs::write(
-            wt.join(".git"),
-            "gitdir: ../repo/.git/worktrees/feature\n",
-        )
-        .unwrap();
+        fs::write(wt.join(".git"), "gitdir: ../repo/.git/worktrees/feature\n").unwrap();
 
         let rows = vec![
-            row(main.to_str().unwrap(), Some("main"), ts("2026-04-10T10:00:00Z")),
-            row(wt.to_str().unwrap(), Some("feature"), ts("2026-04-10T11:00:00Z")),
+            row(
+                main.to_str().unwrap(),
+                Some("main"),
+                ts("2026-04-10T10:00:00Z"),
+            ),
+            row(
+                wt.to_str().unwrap(),
+                Some("feature"),
+                ts("2026-04-10T11:00:00Z"),
+            ),
         ];
         let groups = group_by_repo(rows);
         assert_eq!(

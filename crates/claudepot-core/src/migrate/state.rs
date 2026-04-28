@@ -57,8 +57,8 @@ pub fn append_claudepot_state(
     // Account stubs always written, even when empty — the importer
     // checks for the file's presence to decide whether the bundle
     // carries account stubs at all.
-    let bytes = serde_json::to_vec_pretty(accounts)
-        .map_err(|e| MigrateError::Serialize(e.to_string()))?;
+    let bytes =
+        serde_json::to_vec_pretty(accounts).map_err(|e| MigrateError::Serialize(e.to_string()))?;
     writer.append_bytes("claudepot/accounts.export.json", &bytes, 0o644)?;
 
     if let Some(p) = protected_paths_json {
@@ -98,9 +98,7 @@ pub fn account_stubs_from_store(
 
 /// Read protected-paths JSON from the canonical store path. Returns
 /// `Ok(None)` when no file exists yet.
-pub fn read_protected_paths_bytes(
-    data_dir: &Path,
-) -> Result<Option<Vec<u8>>, MigrateError> {
+pub fn read_protected_paths_bytes(data_dir: &Path) -> Result<Option<Vec<u8>>, MigrateError> {
     let p = crate::protected_paths::store_path(data_dir);
     if !p.exists() {
         return Ok(None);
@@ -121,9 +119,7 @@ pub fn read_preferences_bytes(data_dir: &Path) -> Result<Option<Vec<u8>>, Migrat
 /// Read artifact-lifecycle config from
 /// `<data_dir>/artifact-lifecycle.json`. Returns `Ok(None)` when no
 /// file exists.
-pub fn read_artifact_lifecycle_bytes(
-    data_dir: &Path,
-) -> Result<Option<Vec<u8>>, MigrateError> {
+pub fn read_artifact_lifecycle_bytes(data_dir: &Path) -> Result<Option<Vec<u8>>, MigrateError> {
     let p = data_dir.join("artifact-lifecycle.json");
     if !p.exists() {
         return Ok(None);
@@ -185,8 +181,7 @@ pub fn apply_claudepot_state(
                 continue;
             }
             let suffix = bundle_id.split('-').next().unwrap_or(bundle_id);
-            let imported_name =
-                target_name.replace(".json", &format!(".imported.{suffix}.json"));
+            let imported_name = target_name.replace(".json", &format!(".imported.{suffix}.json"));
             let imported = data_dir.join(imported_name);
             fs::copy(&src, &imported).map_err(MigrateError::from)?;
             outcome
@@ -314,23 +309,11 @@ mod tests {
         let tmp = tempfile::tempdir().unwrap();
         let staging = tmp.path().join("staging");
         fs::create_dir_all(staging.join("claudepot")).unwrap();
-        fs::write(
-            staging.join("claudepot/accounts.export.json"),
-            "[]",
-        )
-        .unwrap();
-        fs::write(
-            staging.join("claudepot/protected-paths.json"),
-            r#"["/a"]"#,
-        )
-        .unwrap();
+        fs::write(staging.join("claudepot/accounts.export.json"), "[]").unwrap();
+        fs::write(staging.join("claudepot/protected-paths.json"), r#"["/a"]"#).unwrap();
         let data_dir = tmp.path().join("data");
         fs::create_dir_all(&data_dir).unwrap();
-        fs::write(
-            data_dir.join("protected-paths.json"),
-            r#"["/different"]"#,
-        )
-        .unwrap();
+        fs::write(data_dir.join("protected-paths.json"), r#"["/different"]"#).unwrap();
 
         let outcome = apply_claudepot_state(&staging, &data_dir, "test").unwrap();
         assert_eq!(outcome.side_by_side.len(), 1);

@@ -141,10 +141,7 @@ impl JournalHandle {
 /// the same process within the same wall-clock second would otherwise
 /// collide and the second `write_atomic` would overwrite the first,
 /// erasing its phases / snapshot paths / error state.
-pub fn open_journal(
-    journals_dir: &Path,
-    initial: Journal,
-) -> Result<JournalHandle, ProjectError> {
+pub fn open_journal(journals_dir: &Path, initial: Journal) -> Result<JournalHandle, ProjectError> {
     fs::create_dir_all(journals_dir).map_err(ProjectError::Io)?;
     // Build the uniquified filename. If the caller happens to collide
     // on the first random draw (cosmically unlikely at 6 lowercase+digit
@@ -164,9 +161,7 @@ pub fn open_journal(
         if attempts >= 5 {
             return Err(ProjectError::Io(std::io::Error::new(
                 std::io::ErrorKind::AlreadyExists,
-                format!(
-                    "failed to generate unique journal filename after {attempts} attempts"
-                ),
+                format!("failed to generate unique journal filename after {attempts} attempts"),
             )));
         }
     };
@@ -303,9 +298,7 @@ pub fn list_pending(journals_dir: &Path) -> Result<Vec<(PathBuf, Journal)>, Proj
 /// "actionable" subset — pending journals the user has not yet
 /// dismissed. This helper packages that filter so it can't drift
 /// across CLI / Tauri call sites.
-pub fn list_active_pending(
-    journals_dir: &Path,
-) -> Result<Vec<(PathBuf, Journal)>, ProjectError> {
+pub fn list_active_pending(journals_dir: &Path) -> Result<Vec<(PathBuf, Journal)>, ProjectError> {
     let all = list_pending(journals_dir)?;
     Ok(all
         .into_iter()
@@ -383,8 +376,7 @@ fn abandoned_path(journal_path: &Path) -> PathBuf {
     s.push(".abandoned.json");
     // Replace .json.abandoned.json → .abandoned.json by switching extension.
     // Simpler: build directly on the stem.
-    if let (Some(stem), Some(parent)) = (journal_path.file_stem(), journal_path.parent())
-    {
+    if let (Some(stem), Some(parent)) = (journal_path.file_stem(), journal_path.parent()) {
         return parent.join(format!("{}.abandoned.json", stem.to_string_lossy()));
     }
     PathBuf::from(s)
@@ -466,14 +458,12 @@ mod tests {
         let mut h = open_journal(&dir, mkjournal("/a", "/b", 1000)).unwrap();
         h.mark_phase("P3").unwrap();
         h.mark_phase("P4").unwrap();
-        let read: Journal =
-            serde_json::from_str(&fs::read_to_string(&h.path).unwrap()).unwrap();
+        let read: Journal = serde_json::from_str(&fs::read_to_string(&h.path).unwrap()).unwrap();
         assert_eq!(read.phases_completed, vec!["P3", "P4"]);
 
         // Idempotent.
         h.mark_phase("P3").unwrap();
-        let read2: Journal =
-            serde_json::from_str(&fs::read_to_string(&h.path).unwrap()).unwrap();
+        let read2: Journal = serde_json::from_str(&fs::read_to_string(&h.path).unwrap()).unwrap();
         assert_eq!(read2.phases_completed, vec!["P3", "P4"]);
     }
 
@@ -485,8 +475,7 @@ mod tests {
         let snap = PathBuf::from("/tmp/snap.json");
         h.record_snapshot(snap.clone()).unwrap();
         h.mark_error("uh oh").unwrap();
-        let read: Journal =
-            serde_json::from_str(&fs::read_to_string(&h.path).unwrap()).unwrap();
+        let read: Journal = serde_json::from_str(&fs::read_to_string(&h.path).unwrap()).unwrap();
         assert_eq!(read.snapshot_paths, vec![snap]);
         assert_eq!(read.last_error.as_deref(), Some("uh oh"));
     }
@@ -500,8 +489,7 @@ mod tests {
         let _ = open_journal(&dir, mkjournal("/e", "/f", 1800)).unwrap();
 
         let pending = list_pending(&dir).unwrap();
-        let timestamps: Vec<u64> =
-            pending.iter().map(|(_, j)| j.started_unix_secs).collect();
+        let timestamps: Vec<u64> = pending.iter().map(|(_, j)| j.started_unix_secs).collect();
         assert_eq!(timestamps, vec![1500, 1800, 2000]);
     }
 
@@ -523,8 +511,11 @@ mod tests {
         // `list_active_pending` must filter it out.
         mark_abandoned(&dropped.path).unwrap();
 
-        let raw_paths: Vec<PathBuf> =
-            list_pending(&dir).unwrap().into_iter().map(|(p, _)| p).collect();
+        let raw_paths: Vec<PathBuf> = list_pending(&dir)
+            .unwrap()
+            .into_iter()
+            .map(|(p, _)| p)
+            .collect();
         assert!(raw_paths.contains(&active.path));
         assert!(raw_paths.contains(&dropped.path));
 
@@ -544,7 +535,11 @@ mod tests {
         let h = open_journal(&dir, mkjournal("/a", "/b", 1000)).unwrap();
         let sidecar = mark_abandoned(&h.path).unwrap();
         assert!(sidecar.exists());
-        assert!(sidecar.file_name().unwrap().to_string_lossy().ends_with(".abandoned.json"));
+        assert!(sidecar
+            .file_name()
+            .unwrap()
+            .to_string_lossy()
+            .ends_with(".abandoned.json"));
 
         // List should now skip this journal as abandoned.
         let status = classify(&h.path, h.journal(), false, 1000, 86400);

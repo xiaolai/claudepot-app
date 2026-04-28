@@ -120,12 +120,7 @@ fn extract_invoked_skills(att: &Value, ts_ms: i64, session_id: &str) -> Vec<Usag
         .collect()
 }
 
-fn extract_hook(
-    att: &Value,
-    ts_ms: i64,
-    session_id: &str,
-    outcome: Outcome,
-) -> Vec<UsageEvent> {
+fn extract_hook(att: &Value, ts_ms: i64, session_id: &str, outcome: Outcome) -> Vec<UsageEvent> {
     let command = att
         .get("command")
         .and_then(Value::as_str)
@@ -138,9 +133,7 @@ fn extract_hook(
         Some(k) => k,
         None => return Vec::new(),
     };
-    let duration_ms = att
-        .get("durationMs")
-        .and_then(Value::as_u64);
+    let duration_ms = att.get("durationMs").and_then(Value::as_u64);
     let plugin_id = command.as_deref().and_then(parse_hook_plugin_id);
     let extra_json = build_hook_extra(hook_name.as_deref(), command.as_deref());
     vec![UsageEvent {
@@ -222,10 +215,7 @@ pub fn extract_assistant_with_ids(
                     let obj = serde_json::json!({ "description": d });
                     serde_json::to_string(&obj).ok()
                 });
-            let tool_use_id = block
-                .get("id")
-                .and_then(Value::as_str)
-                .map(str::to_string);
+            let tool_use_id = block.get("id").and_then(Value::as_str).map(str::to_string);
             Some((
                 UsageEvent {
                     ts_ms,

@@ -179,9 +179,9 @@ fn parse_severity(s: &str) -> Result<Severity> {
         "notice" => Severity::Notice,
         "warn" | "warning" => Severity::Warn,
         "error" | "err" => Severity::Error,
-        other => anyhow::bail!(
-            "unknown --severity {other:?}; valid values: info, notice, warn, error"
-        ),
+        other => {
+            anyhow::bail!("unknown --severity {other:?}; valid values: info, notice, warn, error")
+        }
     })
 }
 

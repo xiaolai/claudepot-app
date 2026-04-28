@@ -59,38 +59,40 @@ pub fn rewrite_project_paths(
         .num_threads(num_cpus::get())
         .build()
         .map_err(|e| ProjectError::Io(std::io::Error::other(e.to_string())))?;
-    pool.install(|| files.par_iter().for_each(|path| {
-        let result = if is_jsonl(path) {
-            rewrite_jsonl(path, old_path, new_path)
-        } else {
-            rewrite_meta_json(path, old_path, new_path)
-        };
+    pool.install(|| {
+        files.par_iter().for_each(|path| {
+            let result = if is_jsonl(path) {
+                rewrite_jsonl(path, old_path, new_path)
+            } else {
+                rewrite_meta_json(path, old_path, new_path)
+            };
 
-        // PoisonError recovery: another worker panicking shouldn't
-        // crash the remaining rewrites. Recover the inner guard and
-        // keep going — the panicked worker's file stays unmodified
-        // (atomic-replace ensures no half-write on disk).
-        {
-            let mut s = stats.lock().unwrap_or_else(|e| e.into_inner());
-            s.files_scanned += 1;
-            match &result {
-                Ok(lines) if *lines > 0 => {
-                    s.files_modified += 1;
-                    s.lines_rewritten += lines;
+            // PoisonError recovery: another worker panicking shouldn't
+            // crash the remaining rewrites. Recover the inner guard and
+            // keep going — the panicked worker's file stays unmodified
+            // (atomic-replace ensures no half-write on disk).
+            {
+                let mut s = stats.lock().unwrap_or_else(|e| e.into_inner());
+                s.files_scanned += 1;
+                match &result {
+                    Ok(lines) if *lines > 0 => {
+                        s.files_modified += 1;
+                        s.lines_rewritten += lines;
+                    }
+                    Ok(_) => {}
+                    Err(_) => {}
                 }
-                Ok(_) => {}
-                Err(_) => {}
             }
-        }
-        if let Err(e) = result {
-            errors
-                .lock()
-                .unwrap_or_else(|poison| poison.into_inner())
-                .push((path.clone(), e));
-        }
-        let n = done.fetch_add(1, std::sync::atomic::Ordering::Relaxed) + 1;
-        sink.sub_progress("P6", n, total);
-    }));
+            if let Err(e) = result {
+                errors
+                    .lock()
+                    .unwrap_or_else(|poison| poison.into_inner())
+                    .push((path.clone(), e));
+            }
+            let n = done.fetch_add(1, std::sync::atomic::Ordering::Relaxed) + 1;
+            sink.sub_progress("P6", n, total);
+        })
+    });
 
     let stats = stats.into_inner().unwrap_or_else(|e| e.into_inner());
     let errors = errors.into_inner().unwrap_or_else(|e| e.into_inner());
@@ -147,14 +149,9 @@ fn is_meta_json(p: &Path) -> bool {
 /// decide whether to even open a tempfile; if absent, we still must
 /// scan the remainder, so we start writing and abort (discard tempfile)
 /// if no rewrites happened by EOF.
-fn rewrite_jsonl(
-    path: &Path,
-    old_path: &str,
-    new_path: &str,
-) -> Result<usize, ProjectError> {
+fn rewrite_jsonl(path: &Path, old_path: &str, new_path: &str) -> Result<usize, ProjectError> {
     // JSON-escaped needle (handles Windows backslashes and Unicode).
-    let old_escaped = serde_json::to_string(old_path)
-        .unwrap_or_else(|_| format!("\"{old_path}\""));
+    let old_escaped = serde_json::to_string(old_path).unwrap_or_else(|_| format!("\"{old_path}\""));
     let needle = old_escaped.trim_matches('"');
 
     let src = fs::File::open(path).map_err(ProjectError::Io)?;
@@ -185,12 +182,7 @@ fn rewrite_jsonl(
 /// Rewrite one JSONL line. Cheap fast path: if the line doesn't contain
 /// the needle, return unchanged. Slow path: parse as JSON, mutate `cwd`
 /// with prefix-match-plus-boundary, serialize back.
-fn rewrite_jsonl_line(
-    line: &str,
-    old_path: &str,
-    new_path: &str,
-    needle: &str,
-) -> (String, bool) {
+fn rewrite_jsonl_line(line: &str, old_path: &str, new_path: &str, needle: &str) -> (String, bool) {
     if !line.contains(needle) {
         return (line.to_string(), false);
     }
@@ -259,11 +251,7 @@ fn rewrite_cwd_in_value(v: &mut Value, old_path: &str, new_path: &str) -> bool {
 /// backslashes. The host `MAIN_SEPARATOR` is only used as a tie-breaker
 /// when neither `old_path` nor `s` carries a separator after `old_path`
 /// (exact-match path).
-pub(crate) fn rewrite_path_string(
-    s: &str,
-    old_path: &str,
-    new_path: &str,
-) -> Option<String> {
+pub(crate) fn rewrite_path_string(s: &str, old_path: &str, new_path: &str) -> Option<String> {
     if s == old_path {
         return Some(new_path.to_string());
     }
@@ -288,11 +276,7 @@ pub(crate) fn rewrite_path_string(
 /// Rewrite a `.meta.json` file. Parses the whole file as JSON, walks all
 /// string values, applies the prefix-match rule, and writes back atomically
 /// if any value changed.
-fn rewrite_meta_json(
-    path: &Path,
-    old_path: &str,
-    new_path: &str,
-) -> Result<usize, ProjectError> {
+fn rewrite_meta_json(path: &Path, old_path: &str, new_path: &str) -> Result<usize, ProjectError> {
     let contents = fs::read_to_string(path).map_err(ProjectError::Io)?;
     // Audit M11: use the JSON-escaped needle for the fast path.
     // `contents` is JSON, so Windows paths appear with backslashes
@@ -300,8 +284,7 @@ fn rewrite_meta_json(
     // every Windows path, causing the sidecar to be silently skipped
     // even when P6 reported a clean pass. JSONL uses the same
     // escaped needle; this aligns both file formats.
-    let old_escaped = serde_json::to_string(old_path)
-        .unwrap_or_else(|_| format!("\"{old_path}\""));
+    let old_escaped = serde_json::to_string(old_path).unwrap_or_else(|_| format!("\"{old_path}\""));
     let needle = old_escaped.trim_matches('"');
     if !contents.contains(needle) && !contents.contains(old_path) {
         // Also accept the raw form so non-Windows callers keep working
@@ -323,7 +306,8 @@ fn rewrite_meta_json(
         .map_err(|e| ProjectError::Io(std::io::Error::other(e.to_string())))?;
     let parent = path.parent().unwrap_or_else(|| Path::new("."));
     let mut tmp = tempfile::NamedTempFile::new_in(parent).map_err(ProjectError::Io)?;
-    tmp.write_all(new_json.as_bytes()).map_err(ProjectError::Io)?;
+    tmp.write_all(new_json.as_bytes())
+        .map_err(ProjectError::Io)?;
     tmp.write_all(b"\n").map_err(ProjectError::Io)?;
     tmp.persist(path).map_err(|e| ProjectError::Io(e.error))?;
     Ok(changed)
@@ -332,11 +316,7 @@ fn rewrite_meta_json(
 /// Crate-public wrapper for `rewrite_strings_in_value` so the P7 config
 /// rewriter can reuse the same path-rewrite logic on `~/.claude.json`
 /// values.
-pub(crate) fn rewrite_strings_in_value_pub(
-    v: &mut Value,
-    old_path: &str,
-    new_path: &str,
-) -> usize {
+pub(crate) fn rewrite_strings_in_value_pub(v: &mut Value, old_path: &str, new_path: &str) -> usize {
     rewrite_strings_in_value(v, old_path, new_path)
 }
 
@@ -387,11 +367,7 @@ mod tests {
     #[test]
     fn test_rewrite_path_string_boundary_prefix() {
         let sep = std::path::MAIN_SEPARATOR;
-        let r = rewrite_path_string(
-            &format!("/a/b{sep}src{sep}main.rs"),
-            "/a/b",
-            "/c/d",
-        );
+        let r = rewrite_path_string(&format!("/a/b{sep}src{sep}main.rs"), "/a/b", "/c/d");
         assert_eq!(r, Some(format!("/c/d{sep}src{sep}main.rs")));
     }
 
@@ -435,10 +411,7 @@ mod tests {
             r"\\server\share\proj",
             r"\\backup\share\proj",
         );
-        assert_eq!(
-            r,
-            Some(r"\\backup\share\proj\src\lib.rs".to_string())
-        );
+        assert_eq!(r, Some(r"\\backup\share\proj\src\lib.rs".to_string()));
     }
 
     #[test]
@@ -448,10 +421,7 @@ mod tests {
             "/Users/joker/proj",
             "/Users/joker/code",
         );
-        assert_eq!(
-            r,
-            Some("/Users/joker/code/src/main.rs".to_string())
-        );
+        assert_eq!(r, Some("/Users/joker/code/src/main.rs".to_string()));
     }
 
     #[test]
@@ -463,10 +433,7 @@ mod tests {
             r"\\?\C:\Users\joker\proj",
             r"\\?\D:\code\proj",
         );
-        assert_eq!(
-            r,
-            Some(r"\\?\D:\code\proj\src\main.rs".to_string())
-        );
+        assert_eq!(r, Some(r"\\?\D:\code\proj\src\main.rs".to_string()));
     }
 
     #[test]
@@ -573,7 +540,11 @@ not json /a/b
         .unwrap();
 
         // Subagent jsonl nested
-        let subagent_dir = proj.join("sessionX").join("subagents").join("workflows").join("runY");
+        let subagent_dir = proj
+            .join("sessionX")
+            .join("subagents")
+            .join("workflows")
+            .join("runY");
         fs::create_dir_all(&subagent_dir).unwrap();
         fs::write(
             subagent_dir.join("agent-foo.jsonl"),
@@ -626,7 +597,10 @@ not json /a/b
         impl ProgressSink for CountingSink {
             fn phase(&self, _p: &str, _s: PhaseStatus) {}
             fn sub_progress(&self, phase: &str, done: usize, total: usize) {
-                self.calls.lock().unwrap().push((phase.to_string(), done, total));
+                self.calls
+                    .lock()
+                    .unwrap()
+                    .push((phase.to_string(), done, total));
             }
         }
 

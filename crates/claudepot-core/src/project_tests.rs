@@ -473,7 +473,10 @@ fn test_list_projects_preserves_special_chars_via_cwd() {
             "-Users-joker-Desktop-reading-room",
             "/Users/joker/Desktop/reading-room",
         ),
-        ("-Users-joker-Writer-s-Office", "/Users/joker/Writer's Office"),
+        (
+            "-Users-joker-Writer-s-Office",
+            "/Users/joker/Writer's Office",
+        ),
         (
             "-Users-joker-Library-Mobile-Documents-iCloud-com-nssurge-inc-Documents",
             "/Users/joker/Library/Mobile Documents/iCloud~com~nssurge~inc/Documents",
@@ -709,12 +712,11 @@ fn test_move_project_long_path_prefix_fallback() {
     let found_new = fs::read_dir(&projects_dir)
         .unwrap()
         .filter_map(|e| e.ok())
-        .find(|e| {
-            e.file_name()
-                .to_string_lossy()
-                .starts_with(new_prefix)
-        });
-    assert!(found_new.is_some(), "new CC dir should exist under the new prefix");
+        .find(|e| e.file_name().to_string_lossy().starts_with(new_prefix));
+    assert!(
+        found_new.is_some(),
+        "new CC dir should exist under the new prefix"
+    );
 }
 
 #[test]
@@ -804,8 +806,11 @@ fn test_move_project_rewrites_session_jsonl_cwd() {
     fs::create_dir_all(&subagent_dir).unwrap();
     fs::write(
         subagent_dir.join("agent-x.jsonl"),
-        format!(r#"{{"cwd":"{old}","agent":"x"}}
-"#, old = old_str),
+        format!(
+            r#"{{"cwd":"{old}","agent":"x"}}
+"#,
+            old = old_str
+        ),
     )
     .unwrap();
 
@@ -905,7 +910,10 @@ fn test_move_project_rewrites_claude_json() {
         serde_json::from_str(&fs::read_to_string(&claude_json).unwrap()).unwrap();
     let new_str = dst.to_string_lossy().to_string();
     assert!(cfg_after["projects"].get(&old_str).is_none());
-    assert_eq!(cfg_after["projects"][&new_str]["trust"], serde_json::json!(true));
+    assert_eq!(
+        cfg_after["projects"][&new_str]["trust"],
+        serde_json::json!(true)
+    );
     assert_eq!(
         cfg_after["projects"][&new_str]["allowedTools"],
         serde_json::json!(["X"])
@@ -1214,8 +1222,7 @@ fn test_clean_prunes_claude_json_entry_with_snapshot() {
     // shape is a map `{ <removed_path>: <value>, ... }` so all N
     // dropped entries live in one file.
     let snap: serde_json::Value =
-        serde_json::from_str(&fs::read_to_string(&result.snapshot_paths[0]).unwrap())
-            .unwrap();
+        serde_json::from_str(&fs::read_to_string(&result.snapshot_paths[0]).unwrap()).unwrap();
     assert_eq!(snap[&fake_source_str]["trust"], serde_json::json!(true));
 }
 
@@ -1243,10 +1250,10 @@ fn test_clean_prunes_history_lines_with_snapshot() {
     // Seed history.jsonl with two lines for our orphan and one
     // unrelated line.
     let history = config_dir.join("history.jsonl");
-    let orphan_line_a = serde_json::json!({"display": "hello", "project": fake_source_str})
-        .to_string();
-    let orphan_line_b = serde_json::json!({"display": "again", "project": fake_source_str})
-        .to_string();
+    let orphan_line_a =
+        serde_json::json!({"display": "hello", "project": fake_source_str}).to_string();
+    let orphan_line_b =
+        serde_json::json!({"display": "again", "project": fake_source_str}).to_string();
     let other_line =
         serde_json::json!({"display": "keep me", "project": "/other/project"}).to_string();
     fs::write(
@@ -1298,14 +1305,7 @@ fn test_clean_takes_exclusive_lock() {
     // refuses.
     let (_g, _broken) = crate::project_lock::acquire(&locks, "__clean__").unwrap();
 
-    let err = clean_orphans(
-        tmp.path(),
-        None,
-        None,
-        Some(locks.as_path()),
-        false,
-    )
-    .unwrap_err();
+    let err = clean_orphans(tmp.path(), None, None, Some(locks.as_path()), false).unwrap_err();
     assert!(matches!(err, ProjectError::Ambiguous(_)));
 }
 
@@ -1329,11 +1329,7 @@ fn test_clean_removes_empty_project_dir() {
     // LEFT ALONE for empty-dir cleanup since original_path is
     // not authoritative.
     let claude_json = tmp.path().join("claude.json");
-    fs::write(
-        &claude_json,
-        r#"{"projects":{"/real":{"trust":true}}}"#,
-    )
-    .unwrap();
+    fs::write(&claude_json, r#"{"projects":{"/real":{"trust":true}}}"#).unwrap();
 
     let locks = tmp.path().join("locks");
     let snaps = tmp.path().join("snaps");
@@ -1421,10 +1417,8 @@ fn test_clean_protected_path_skips_sibling_rewrites() {
     .unwrap();
 
     let history = config_dir.join("history.jsonl");
-    let line_p =
-        serde_json::json!({"display": "p", "project": protected_str}).to_string();
-    let line_n =
-        serde_json::json!({"display": "n", "project": normal_str}).to_string();
+    let line_p = serde_json::json!({"display": "p", "project": protected_str}).to_string();
+    let line_n = serde_json::json!({"display": "n", "project": normal_str}).to_string();
     fs::write(&history, format!("{line_p}\n{line_n}\n")).unwrap();
 
     let snapshots = tmp.path().join("snaps");
@@ -1506,15 +1500,16 @@ fn test_clean_skips_sibling_rewrite_when_source_reappeared() {
     )
     .unwrap();
     let history = config_dir.join("history.jsonl");
-    let line =
-        serde_json::json!({"display": "x", "project": reappeared_str}).to_string();
+    let line = serde_json::json!({"display": "x", "project": reappeared_str}).to_string();
     fs::write(&history, format!("{line}\n")).unwrap();
 
     // Capture the listing (orphan), THEN make the source reappear.
     // The clean runs after — preflight should detect this and skip
     // both the artifact dir and the sibling prune.
     let listing = list_projects(config_dir).unwrap();
-    assert!(listing.iter().any(|p| p.is_orphan && p.original_path == reappeared_str));
+    assert!(listing
+        .iter()
+        .any(|p| p.is_orphan && p.original_path == reappeared_str));
     fs::create_dir(&reappeared).unwrap();
 
     let snaps = tmp.path().join("snaps");
@@ -1699,8 +1694,7 @@ fn test_clean_preview_protected_count_excludes_empty_orphans() {
     )
     .unwrap();
 
-    let preview =
-        clean_preview(tmp.path(), None, None, None, data.path()).unwrap();
+    let preview = clean_preview(tmp.path(), None, None, None, data.path()).unwrap();
 
     assert_eq!(preview.orphans_found, 2);
     // Only the authoritative-path orphan counts as protected.
@@ -1726,8 +1720,7 @@ fn test_clean_preview_protected_count_uses_fail_safe_defaults() {
     // on every host). Cross-check the exposed resolution against the
     // preview path's own consumer: if `resolved_set_or_defaults`
     // gave us an empty set here, the audit bug would be live.
-    let resolved =
-        crate::protected_paths::resolved_set_or_defaults(data.path());
+    let resolved = crate::protected_paths::resolved_set_or_defaults(data.path());
     assert!(
         resolved.contains("/"),
         "fail-safe defaults must include '/'"
@@ -1737,8 +1730,7 @@ fn test_clean_preview_protected_count_uses_fail_safe_defaults() {
         "fail-safe defaults must include '~'"
     );
 
-    let preview =
-        clean_preview(tmp.path(), None, None, None, data.path()).unwrap();
+    let preview = clean_preview(tmp.path(), None, None, None, data.path()).unwrap();
     assert_eq!(preview.orphans_found, 0);
     assert_eq!(preview.protected_count, 0);
 
@@ -1749,14 +1741,12 @@ fn test_clean_preview_protected_count_uses_fail_safe_defaults() {
         "{ this is not valid json",
     )
     .unwrap();
-    let resolved_corrupt =
-        crate::protected_paths::resolved_set_or_defaults(data.path());
+    let resolved_corrupt = crate::protected_paths::resolved_set_or_defaults(data.path());
     assert!(
         resolved_corrupt.contains("/") && resolved_corrupt.contains("~"),
         "corrupt store must still expose defaults"
     );
-    let preview2 =
-        clean_preview(tmp.path(), None, None, None, data.path()).unwrap();
+    let preview2 = clean_preview(tmp.path(), None, None, None, data.path()).unwrap();
     assert_eq!(preview2.orphans_found, 0);
 }
 
@@ -1876,7 +1866,11 @@ fn test_resolve_path_expands_bare_tilde() {
     // Compare to canonical home (resolve_path canonicalizes existing
     // paths; macOS may symlink-resolve `/Users/x` and `$HOME` may differ
     // from the canonical form).
-    let canonical_home = home.canonicalize().unwrap_or(home).to_string_lossy().to_string();
+    let canonical_home = home
+        .canonicalize()
+        .unwrap_or(home)
+        .to_string_lossy()
+        .to_string();
     assert_eq!(resolved, canonical_home);
 }
 
@@ -1889,7 +1883,8 @@ fn test_resolve_path_expands_tilde_subpath() {
     let nonexistent = "~/__claudepot_nonexistent_test_dir_4f7e2a__";
     let resolved = resolve_path(nonexistent).expect("~/x should expand");
     let home = dirs::home_dir().expect("HOME available in tests");
-    let expected = home.join("__claudepot_nonexistent_test_dir_4f7e2a__")
+    let expected = home
+        .join("__claudepot_nonexistent_test_dir_4f7e2a__")
         .to_string_lossy()
         .to_string();
     assert_eq!(resolved, expected);
@@ -2822,7 +2817,8 @@ fn test_move_project_post_move_failure_becomes_warning() {
         claudepot_state_dir: None,
     };
 
-    let err = move_project(&args, &crate::project_progress::NoopSink).expect_err("must error on CC dir collision");
+    let err = move_project(&args, &crate::project_progress::NoopSink)
+        .expect_err("must error on CC dir collision");
     assert!(matches!(err, ProjectError::Ambiguous(_)));
     assert!(src.exists(), "disk dir untouched on preflight failure");
     assert!(!dst.exists(), "target not created on preflight failure");

@@ -184,9 +184,7 @@ fn json_export_redacts_secret_in_tool_use_input_full() {
     // Build a payload long enough that the secret sits beyond what
     // any preview-only redaction would reach.
     let padding = "x".repeat(400);
-    let secret_payload = format!(
-        r#"{{"command":"echo {padding} sk-ant-oat01-FullCDEF1234"}}"#
-    );
+    let secret_payload = format!(r#"{{"command":"echo {padding} sk-ant-oat01-FullCDEF1234"}}"#);
     // Mutate the AssistantToolUse fixture so input_preview is
     // safe-looking but input_full carries the secret.
     if let SessionEvent::AssistantToolUse {
@@ -239,9 +237,8 @@ fn extract_local_command_stdout_returns_none_when_no_wrapper() {
 
 #[test]
 fn extract_local_command_stdout_reads_payload() {
-    let got = extract_local_command_stdout(
-        "<local-command-stdout>body\nmore</local-command-stdout>",
-    );
+    let got =
+        extract_local_command_stdout("<local-command-stdout>body\nmore</local-command-stdout>");
     assert_eq!(got, Some("body\nmore"));
 }
 
@@ -346,15 +343,16 @@ fn markdown_slim_redacts_oversized_tool_result_content() {
         .iter()
         .map(|ev| match ev {
             E::UserToolResult {
-                ts, uuid, tool_use_id, content, is_error,
+                ts,
+                uuid,
+                tool_use_id,
+                content,
+                is_error,
             } if content.len() > 1024 => E::UserToolResult {
                 ts: *ts,
                 uuid: uuid.clone(),
                 tool_use_id: tool_use_id.clone(),
-                content: format!(
-                    "(tool result redacted — {} bytes)",
-                    content.len()
-                ),
+                content: format!("(tool result redacted — {} bytes)", content.len()),
                 is_error: *is_error,
             },
             other => other.clone(),

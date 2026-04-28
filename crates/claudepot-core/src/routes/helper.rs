@@ -36,10 +36,7 @@ pub fn helper_path(route_id: RouteId, field: SecretField) -> PathBuf {
 /// written. Phase-1 keychain-mode is macOS-only; non-macOS hosts
 /// are rejected so a route can't persist `use_keychain: true` while
 /// no working helper actually exists.
-pub fn write_helper(
-    route_id: RouteId,
-    field: SecretField,
-) -> Result<PathBuf, RouteError> {
+pub fn write_helper(route_id: RouteId, field: SecretField) -> Result<PathBuf, RouteError> {
     #[cfg(not(target_os = "macos"))]
     {
         let _ = route_id;
@@ -60,10 +57,7 @@ pub fn write_helper(
 
 /// Best-effort cleanup of helpers for a given route. `None` field
 /// means "remove every helper for this route."
-pub fn delete_helpers(
-    route_id: RouteId,
-    field: Option<SecretField>,
-) -> Result<(), RouteError> {
+pub fn delete_helpers(route_id: RouteId, field: Option<SecretField>) -> Result<(), RouteError> {
     let targets: Vec<SecretField> = match field {
         Some(f) => vec![f],
         None => vec![
@@ -100,9 +94,7 @@ fn render_helper(route_id: RouteId, field: SecretField) -> String {
     s.push_str(&format!("# {}: true\n", CLAUDEPOT_MANAGED_MARKER));
     s.push_str(&format!("# route: {}\n", route_id));
     s.push_str(&format!("# field: {}\n", field_suffix(field)));
-    s.push_str(
-        "# Reads from macOS keychain item written by Claudepot — never echoes.\n",
-    );
+    s.push_str("# Reads from macOS keychain item written by Claudepot — never echoes.\n");
     s.push_str(
         "# Used by the wrapper script (\\$()) and by Cowork on 3P's inferenceCredentialHelper.\n",
     );
@@ -122,9 +114,7 @@ fn render_helper(route_id: RouteId, field: SecretField) -> String {
     s.push_str(&format!("# {}: true\n", CLAUDEPOT_MANAGED_MARKER));
     s.push_str(&format!("# route: {}\n", route_id));
     s.push_str(&format!("# field: {}\n", field_suffix(field)));
-    s.push_str(
-        "echo 'claudepot: keychain helper not implemented on this platform' >&2\n",
-    );
+    s.push_str("echo 'claudepot: keychain helper not implemented on this platform' >&2\n");
     s.push_str("exit 1\n");
     s
 }

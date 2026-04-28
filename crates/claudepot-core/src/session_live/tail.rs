@@ -239,7 +239,9 @@ impl FileTail {
         let mut file = file;
         file.seek(SeekFrom::Start(self.offset))?;
         let mut buf = Vec::with_capacity((file_size - self.offset) as usize);
-        file.by_ref().take(file_size - self.offset).read_to_end(&mut buf)?;
+        file.by_ref()
+            .take(file_size - self.offset)
+            .read_to_end(&mut buf)?;
 
         // Only consume up to the LAST '\n'. Anything after is a
         // partial write we must defer to the next poll.
@@ -289,10 +291,7 @@ mod tests {
     }
 
     fn append(path: &Path, text: &str) {
-        let mut f = std::fs::OpenOptions::new()
-            .append(true)
-            .open(path)
-            .unwrap();
+        let mut f = std::fs::OpenOptions::new().append(true).open(path).unwrap();
         f.write_all(text.as_bytes()).unwrap();
     }
 

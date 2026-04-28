@@ -1,10 +1,8 @@
 //! §11.3 CC-state goldens — bundle-vs-target CC-state edge cases.
 
 use crate::migrate::apply::ImportJournal;
-use crate::migrate::bundle::{BundleReader, BundleWriter, sidecar_path_for};
-use crate::migrate::manifest::{
-    BundleManifest, ExportFlags, ProjectManifestRef, SCHEMA_VERSION,
-};
+use crate::migrate::bundle::{sidecar_path_for, BundleReader, BundleWriter};
+use crate::migrate::manifest::{BundleManifest, ExportFlags, ProjectManifestRef, SCHEMA_VERSION};
 use crate::migrate::MigrateError;
 use std::fs;
 
@@ -64,10 +62,7 @@ fn row17_unknown_schema_version_refused() {
         },
     )
     .unwrap_err();
-    assert!(matches!(
-        err,
-        MigrateError::UnsupportedSchemaVersion { .. }
-    ));
+    assert!(matches!(err, MigrateError::UnsupportedSchemaVersion { .. }));
 }
 
 // Row 18 — non-JSONL file inside `<slug>/` (e.g. `*.meta.json`) copies
@@ -162,9 +157,9 @@ fn row21_round_trip_export_inspect_export_diff() {
             include_file_history: true,
             encrypt: false,
             sign_keyfile: None,
-        account_stubs: None,
-        encrypt_passphrase: None,
-        sign_password: None,
+            account_stubs: None,
+            encrypt_passphrase: None,
+            sign_password: None,
         },
     )
     .unwrap();
@@ -172,12 +167,8 @@ fn row21_round_trip_export_inspect_export_diff() {
     // Import to a fresh target.
     let cfg_b = tmp.path().join("b/.claude");
     fs::create_dir_all(cfg_b.join("projects")).unwrap();
-    crate::migrate::import_bundle(
-        &cfg_b,
-        &bundle_a,
-        crate::migrate::ImportOptions::default(),
-    )
-    .unwrap();
+    crate::migrate::import_bundle(&cfg_b, &bundle_a, crate::migrate::ImportOptions::default())
+        .unwrap();
 
     // Re-export from the target.
     let bundle_b = tmp.path().join("b.tar.zst");
@@ -193,19 +184,16 @@ fn row21_round_trip_export_inspect_export_diff() {
             include_file_history: true,
             encrypt: false,
             sign_keyfile: None,
-        account_stubs: None,
-        encrypt_passphrase: None,
-        sign_password: None,
+            account_stubs: None,
+            encrypt_passphrase: None,
+            sign_password: None,
         },
     )
     .unwrap();
 
     // The session payload's slug field — recomputed in both bundles
     // because both sides see the same source/target — must round-trip.
-    let imported_jsonl = cfg_b
-        .join("projects")
-        .join(&slug)
-        .join("aaaa-bbbb.jsonl");
+    let imported_jsonl = cfg_b.join("projects").join(&slug).join("aaaa-bbbb.jsonl");
     assert!(imported_jsonl.exists());
     let after = fs::read_to_string(&imported_jsonl).unwrap();
     assert!(after.contains(&cwd));
@@ -268,8 +256,10 @@ fn row24_live_at_export_flag_round_trips() {
         worktree_set: false,
     };
     let pm_bytes = serde_json::to_vec_pretty(&pm).unwrap();
-    w.append_bytes("projects/abc/manifest.json", &pm_bytes, 0o644).unwrap();
-    w.finalize(&fixture_manifest(SCHEMA_VERSION, vec![])).unwrap();
+    w.append_bytes("projects/abc/manifest.json", &pm_bytes, 0o644)
+        .unwrap();
+    w.finalize(&fixture_manifest(SCHEMA_VERSION, vec![]))
+        .unwrap();
 
     let r = BundleReader::open(&bundle_path).unwrap();
     let pm_back: crate::migrate::manifest::ProjectManifest =

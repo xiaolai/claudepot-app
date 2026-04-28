@@ -164,10 +164,7 @@ pub fn plan_slim(path: &Path, opts: &SlimOpts) -> Result<SlimPlan, SlimError> {
             continue;
         }
         let mut v: serde_json::Value =
-            serde_json::from_str(&line).map_err(|e| SlimError::Json {
-                line: i,
-                source: e,
-            })?;
+            serde_json::from_str(&line).map_err(|e| SlimError::Json { line: i, source: e })?;
         let (new_line, line_stats) = rewrite_line(&mut v, opts);
         redact_count += line_stats.redacted_here;
         image_count += line_stats.images_here;
@@ -197,7 +194,9 @@ struct FileGuard {
 }
 impl FileGuard {
     fn new(p: impl Into<PathBuf>) -> Self {
-        Self { path: Some(p.into()) }
+        Self {
+            path: Some(p.into()),
+        }
     }
     fn disarm(&mut self) {
         self.path = None;
@@ -248,10 +247,7 @@ pub fn execute_slim(
             continue;
         }
         let mut v: serde_json::Value =
-            serde_json::from_str(&line).map_err(|e| SlimError::Json {
-                line: i,
-                source: e,
-            })?;
+            serde_json::from_str(&line).map_err(|e| SlimError::Json { line: i, source: e })?;
         let (new_line, stats) = rewrite_line(&mut v, opts);
         redact_count += stats.redacted_here;
         image_count += stats.images_here;
@@ -263,7 +259,12 @@ pub fn execute_slim(
 
     sink.phase("guarding", PhaseStatus::Running);
     let after = fs::metadata(path).map_err(|e| SlimError::io(path, e))?;
-    if after.len() != before_size || !same_mtime(before_mtime, after.modified().map_err(|e| SlimError::io(path, e))?) {
+    if after.len() != before_size
+        || !same_mtime(
+            before_mtime,
+            after.modified().map_err(|e| SlimError::io(path, e))?,
+        )
+    {
         return Err(SlimError::LiveWriteDetected);
     }
 
@@ -285,7 +286,9 @@ pub fn execute_slim(
             cwd: path.parent(),
             reason: Some(format!(
                 "pre-slim snapshot of {}",
-                path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default()
+                path.file_name()
+                    .map(|n| n.to_string_lossy().into_owned())
+                    .unwrap_or_default()
             )),
         },
     )?;
@@ -300,7 +303,10 @@ pub fn execute_slim(
     // correct pre-slim state and can be restored via `trash restore`.
     let after2 = fs::metadata(path).map_err(|e| SlimError::io(path, e))?;
     if after2.len() != before_size
-        || !same_mtime(before_mtime, after2.modified().map_err(|e| SlimError::io(path, e))?)
+        || !same_mtime(
+            before_mtime,
+            after2.modified().map_err(|e| SlimError::io(path, e))?,
+        )
     {
         return Err(SlimError::LiveWriteDetected);
     }
@@ -439,10 +445,7 @@ fn rewrite_line(v: &mut serde_json::Value, opts: &SlimOpts) -> (String, LineStat
         }
         // Tool result stays, but its nested content may hold images
         // or documents we were asked to strip.
-        if let Some(inner) = part
-            .get_mut("content")
-            .and_then(|c| c.as_array_mut())
-        {
+        if let Some(inner) = part.get_mut("content").and_then(|c| c.as_array_mut()) {
             for item in inner.iter_mut() {
                 if maybe_strip_media_block(item, opts.strip_images, "image", "[image]") {
                     stats.images_here += 1;
@@ -518,9 +521,7 @@ pub fn plan_slim_all_from_rows(
     opts: &SlimOpts,
     now_ms: i64,
 ) -> Result<BulkSlimPlan, SlimError> {
-    filter
-        .validate()
-        .map_err(|_| SlimError::EmptyFilter)?;
+    filter.validate().map_err(|_| SlimError::EmptyFilter)?;
     let mut entries: Vec<BulkSlimEntry> = Vec::new();
     let mut failed_to_plan: Vec<(PathBuf, String)> = Vec::new();
     for row in rows.iter().filter(|r| filter.matches(r, now_ms)) {
@@ -577,12 +578,7 @@ pub fn plan_slim_all(
     opts: &SlimOpts,
 ) -> Result<BulkSlimPlan, SlimError> {
     let rows = crate::session::list_all_sessions(config_dir).map_err(SlimError::Session)?;
-    plan_slim_all_from_rows(
-        &rows,
-        filter,
-        opts,
-        chrono::Utc::now().timestamp_millis(),
-    )
+    plan_slim_all_from_rows(&rows, filter, opts, chrono::Utc::now().timestamp_millis())
 }
 
 /// Execute a bulk plan. One file at a time, failures collected
@@ -605,7 +601,12 @@ pub fn execute_slim_all(
     let mut tool_result_redacts: u32 = 0;
     for (i, e) in plan.entries.iter().enumerate() {
         sink.sub_progress("slimming", i, total);
-        match execute_slim(data_dir, &e.file_path, opts, &crate::project_progress::NoopSink) {
+        match execute_slim(
+            data_dir,
+            &e.file_path,
+            opts,
+            &crate::project_progress::NoopSink,
+        ) {
             Ok(r) => {
                 bytes_saved = bytes_saved.saturating_add(r.bytes_saved());
                 images = images.saturating_add(r.image_redact_count);

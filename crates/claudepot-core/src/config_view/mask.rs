@@ -79,13 +79,19 @@ static RULES: Lazy<Vec<Rule>> = Lazy::new(|| {
     // Slack
     rules.push(r("slack_bot", r"\bxoxb-[0-9A-Za-z\-]{20,}\b"));
     rules.push(r("slack_user", r"\bxoxp-[0-9A-Za-z\-]{20,}\b"));
-    rules.push(r("slack_webhook", r"https://hooks\.slack\.com/services/[A-Za-z0-9/_\-]+"));
+    rules.push(r(
+        "slack_webhook",
+        r"https://hooks\.slack\.com/services/[A-Za-z0-9/_\-]+",
+    ));
 
     // Twilio
     rules.push(r("twilio_account_sid", r"\bAC[0-9a-f]{32}\b"));
 
     // SendGrid
-    rules.push(r("sendgrid", r"\bSG\.[A-Za-z0-9_\-]{22}\.[A-Za-z0-9_\-]{43}\b"));
+    rules.push(r(
+        "sendgrid",
+        r"\bSG\.[A-Za-z0-9_\-]{22}\.[A-Za-z0-9_\-]{43}\b",
+    ));
 
     // npm
     rules.push(r("npm_token", r"\bnpm_[A-Za-z0-9]{36,}\b"));
@@ -97,7 +103,10 @@ static RULES: Lazy<Vec<Rule>> = Lazy::new(|| {
     rules.push(r("databricks", r"\bdapi[a-f0-9]{32}\b"));
 
     // HashiCorp TF
-    rules.push(r("terraform_cloud", r"\b[A-Za-z0-9]{14}\.atlasv1\.[A-Za-z0-9_\-]{60,}\b"));
+    rules.push(r(
+        "terraform_cloud",
+        r"\b[A-Za-z0-9]{14}\.atlasv1\.[A-Za-z0-9_\-]{60,}\b",
+    ));
 
     // Pulumi
     rules.push(r("pulumi", r"\bpul-[A-Fa-f0-9]{40}\b"));
@@ -107,16 +116,25 @@ static RULES: Lazy<Vec<Rule>> = Lazy::new(|| {
 
     // Grafana
     rules.push(r("grafana_api", r"\beyJrIjoi[A-Za-z0-9+/=_\-]{40,}\b"));
-    rules.push(r("grafana_service_account", r"\bglsa_[A-Za-z0-9_]{32}_[A-Fa-f0-9]{8}\b"));
+    rules.push(r(
+        "grafana_service_account",
+        r"\bglsa_[A-Za-z0-9_]{32}_[A-Fa-f0-9]{8}\b",
+    ));
     rules.push(r("grafana_cloud", r"\bglc_[A-Za-z0-9+/=]{64,}\b"));
 
     // Sentry
     rules.push(r("sentry_auth", r"\bsntrys_[A-Za-z0-9+/=_\-]{60,}\b"));
-    rules.push(r("sentry_dsn", r"https://[0-9a-f]{32}@[A-Za-z0-9.\-]+\.ingest\.sentry\.io/[0-9]+"));
+    rules.push(r(
+        "sentry_dsn",
+        r"https://[0-9a-f]{32}@[A-Za-z0-9.\-]+\.ingest\.sentry\.io/[0-9]+",
+    ));
 
     // Stripe
     rules.push(r("stripe_live_secret", r"\bsk_live_[A-Za-z0-9]{20,}\b"));
-    rules.push(r("stripe_live_publishable", r"\bpk_live_[A-Za-z0-9]{20,}\b"));
+    rules.push(r(
+        "stripe_live_publishable",
+        r"\bpk_live_[A-Za-z0-9]{20,}\b",
+    ));
 
     // Shopify
     rules.push(r("shopify_access", r"\bshpat_[A-Fa-f0-9]{32}\b"));
@@ -140,7 +158,10 @@ static RULES: Lazy<Vec<Rule>> = Lazy::new(|| {
 
     // AWS secret-key pattern (unprefixed 40-char) runs LAST so it never
     // swallows a more-specific prefixed token that came before it.
-    rules.push(r("aws_secret_key", r"\b[A-Za-z0-9/+=]{40}\b(?:[^A-Za-z0-9/+=]|$)"));
+    rules.push(r(
+        "aws_secret_key",
+        r"\b[A-Za-z0-9/+=]{40}\b(?:[^A-Za-z0-9/+=]|$)",
+    ));
 
     rules
 });
@@ -232,7 +253,12 @@ mod tests {
 
     #[test]
     fn masks_jwt() {
-        let jwt = format!("eyJ{}.{}.{}", "a".repeat(20), "b".repeat(20), "c".repeat(20));
+        let jwt = format!(
+            "eyJ{}.{}.{}",
+            "a".repeat(20),
+            "b".repeat(20),
+            "c".repeat(20)
+        );
         let out = mask_text(&jwt);
         assert!(out.contains("<redacted:jwt>"));
     }
@@ -317,8 +343,8 @@ mod tests {
         });
         let bytes = serde_json::to_vec(&original).unwrap();
         let masked = mask_preview_body(&bytes);
-        let reparsed: Value = serde_json::from_str(&masked)
-            .expect("masked JSON must remain parseable");
+        let reparsed: Value =
+            serde_json::from_str(&masked).expect("masked JSON must remain parseable");
         assert_eq!(reparsed, original);
     }
 

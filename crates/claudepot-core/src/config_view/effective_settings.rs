@@ -56,17 +56,53 @@ pub fn compute_raw(input: &EffectiveSettingsInput) -> EffectiveSettings {
     let policy = policy_resolve(&input.policy_sources, None);
 
     let layers: Vec<(Scope, Value)> = vec![
-        (Scope::PluginBase, input.plugin_base.clone().unwrap_or_else(|| Value::Object(Map::new()))),
-        (Scope::User, input.user.clone().unwrap_or_else(|| Value::Object(Map::new()))),
-        (Scope::Project, input.project.clone().unwrap_or_else(|| Value::Object(Map::new()))),
-        (Scope::Local, input.local.clone().unwrap_or_else(|| Value::Object(Map::new()))),
-        (Scope::Flag, input.flag.clone().unwrap_or_else(|| Value::Object(Map::new()))),
+        (
+            Scope::PluginBase,
+            input
+                .plugin_base
+                .clone()
+                .unwrap_or_else(|| Value::Object(Map::new())),
+        ),
+        (
+            Scope::User,
+            input
+                .user
+                .clone()
+                .unwrap_or_else(|| Value::Object(Map::new())),
+        ),
+        (
+            Scope::Project,
+            input
+                .project
+                .clone()
+                .unwrap_or_else(|| Value::Object(Map::new())),
+        ),
+        (
+            Scope::Local,
+            input
+                .local
+                .clone()
+                .unwrap_or_else(|| Value::Object(Map::new())),
+        ),
+        (
+            Scope::Flag,
+            input
+                .flag
+                .clone()
+                .unwrap_or_else(|| Value::Object(Map::new())),
+        ),
     ];
 
-    let policy_layer = policy.effective.clone().map(|p| (
-        policy.winner.clone().map(|o| Scope::Policy { origin: o }).unwrap_or(Scope::Other),
-        p,
-    ));
+    let policy_layer = policy.effective.clone().map(|p| {
+        (
+            policy
+                .winner
+                .clone()
+                .map(|o| Scope::Policy { origin: o })
+                .unwrap_or(Scope::Other),
+            p,
+        )
+    });
 
     // Build Annotated tree in precedence order.
     let mut annotated: Option<Annotated> = None;

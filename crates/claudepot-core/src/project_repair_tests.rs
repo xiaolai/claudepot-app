@@ -80,12 +80,7 @@ fn test_list_actionable_excludes_abandoned() {
 /// The fixed-`old_path` helper above is enough for status tests
 /// but not for `newest_pending_for_old_path`, which keys off the
 /// journal's `old_path` field.
-fn write_journal_with_old_path(
-    dir: &Path,
-    id: &str,
-    started_unix: u64,
-    old_path: &str,
-) -> PathBuf {
+fn write_journal_with_old_path(dir: &Path, id: &str, started_unix: u64, old_path: &str) -> PathBuf {
     let j = Journal {
         version: 1,
         started_at: "2026-04-15T00:00:00Z".to_string(),
@@ -123,8 +118,7 @@ fn test_find_pending_by_id_returns_none_when_missing() {
         .as_secs();
     write_journal(&journals, "move-a", now - 60);
 
-    let got =
-        find_pending_by_id(&journals, &locks, 86_400, "move-does-not-exist").unwrap();
+    let got = find_pending_by_id(&journals, &locks, 86_400, "move-does-not-exist").unwrap();
     assert!(got.is_none());
 }
 
@@ -189,13 +183,7 @@ fn test_newest_pending_for_old_path_returns_none_when_no_match() {
         .as_secs();
     write_journal_with_old_path(&journals, "move-a", now - 60, "/tmp/somewhere");
 
-    let got = newest_pending_for_old_path(
-        &journals,
-        &locks,
-        86_400,
-        "/tmp/nothing-here",
-    )
-    .unwrap();
+    let got = newest_pending_for_old_path(&journals, &locks, 86_400, "/tmp/nothing-here").unwrap();
     assert!(got.is_none());
 }
 
@@ -270,8 +258,9 @@ fn test_gc_dry_run_does_not_delete() {
     project_journal::mark_abandoned(&journal_path).unwrap();
     // Backdate sidecar mtime by 100 days.
     let sidecar = journals.join("move-old.abandoned.json");
-    let old_time =
-        SystemTime::now().checked_sub(Duration::from_secs(100 * 86_400)).unwrap();
+    let old_time = SystemTime::now()
+        .checked_sub(Duration::from_secs(100 * 86_400))
+        .unwrap();
     filetime::set_file_mtime(&sidecar, old_time.into()).ok();
     filetime::set_file_mtime(&journal_path, old_time.into()).ok();
 
@@ -297,8 +286,9 @@ fn test_gc_removes_abandoned_journals_older_than_cutoff() {
     let journal_path = write_journal(&journals, "move-old", now - 100 * 86_400);
     project_journal::mark_abandoned(&journal_path).unwrap();
     let sidecar = journals.join("move-old.abandoned.json");
-    let old_time =
-        SystemTime::now().checked_sub(Duration::from_secs(100 * 86_400)).unwrap();
+    let old_time = SystemTime::now()
+        .checked_sub(Duration::from_secs(100 * 86_400))
+        .unwrap();
     filetime::set_file_mtime(&sidecar, old_time.into()).ok();
     filetime::set_file_mtime(&journal_path, old_time.into()).ok();
 
@@ -366,11 +356,7 @@ fn test_resolve_lock_file_missing_returns_none() {
 // cleanup_abandoned / preview_abandoned
 // -----------------------------------------------------------------
 
-fn write_journal_with_snapshots(
-    journals_dir: &Path,
-    id: &str,
-    snapshots: &[PathBuf],
-) -> PathBuf {
+fn write_journal_with_snapshots(journals_dir: &Path, id: &str, snapshots: &[PathBuf]) -> PathBuf {
     let j = Journal {
         version: 1,
         started_at: "2026-04-15T00:00:00Z".to_string(),
@@ -423,8 +409,14 @@ fn preview_abandoned_reports_journal_sidecar_and_referenced_snapshots() {
     let entry = &report.entries[0];
     assert_eq!(entry.id, "move-abandoned");
     assert_eq!(entry.journal_path, journal_path);
-    assert_eq!(entry.referenced_snapshots, vec![snap_a.clone(), snap_b.clone()]);
-    assert!(entry.bytes >= 3, "bytes must account for snapshots at minimum");
+    assert_eq!(
+        entry.referenced_snapshots,
+        vec![snap_a.clone(), snap_b.clone()]
+    );
+    assert!(
+        entry.bytes >= 3,
+        "bytes must account for snapshots at minimum"
+    );
     // Preview must NOT delete anything.
     assert!(snap_a.exists());
     assert!(snap_b.exists());
@@ -441,8 +433,7 @@ fn cleanup_abandoned_removes_journal_sidecar_and_referenced_snapshots() {
 
     let snap = snapshots.join("ts-1-P7.json");
     fs::write(&snap, "bytes").unwrap();
-    let journal_path =
-        write_journal_with_snapshots(&journals, "move-abandoned", &[snap.clone()]);
+    let journal_path = write_journal_with_snapshots(&journals, "move-abandoned", &[snap.clone()]);
     let sidecar_path = journals.join("move-abandoned.abandoned.json");
     write_sidecar(&journals, "move-abandoned");
 
@@ -475,11 +466,8 @@ fn cleanup_abandoned_leaves_unreferenced_and_non_abandoned_artifacts_alone() {
     // An abandoned journal with its own referenced snapshot.
     let referenced = snapshots.join("ts-1-P7.json");
     fs::write(&referenced, "x").unwrap();
-    let abandoned_journal = write_journal_with_snapshots(
-        &journals,
-        "move-abandoned",
-        &[referenced.clone()],
-    );
+    let abandoned_journal =
+        write_journal_with_snapshots(&journals, "move-abandoned", &[referenced.clone()]);
     write_sidecar(&journals, "move-abandoned");
 
     let report = cleanup_abandoned(&journals).expect("cleanup");
@@ -522,8 +510,7 @@ fn cleanup_abandoned_tolerates_missing_snapshot_paths() {
     fs::create_dir_all(&journals).unwrap();
 
     let phantom = tmp.path().join("this-was-deleted-out-of-band.json");
-    let journal_path =
-        write_journal_with_snapshots(&journals, "move-abandoned", &[phantom]);
+    let journal_path = write_journal_with_snapshots(&journals, "move-abandoned", &[phantom]);
     write_sidecar(&journals, "move-abandoned");
 
     let report = cleanup_abandoned(&journals).expect("cleanup");

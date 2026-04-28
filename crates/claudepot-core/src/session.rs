@@ -589,8 +589,8 @@ pub(crate) fn scan_session(slug: &str, path: &Path) -> Result<SessionScan, Sessi
     }
 
     let project_from_transcript = cwd_from_transcript.is_some();
-    let project_path = cwd_from_transcript
-        .unwrap_or_else(|| crate::project_sanitize::unsanitize_path(slug));
+    let project_path =
+        cwd_from_transcript.unwrap_or_else(|| crate::project_sanitize::unsanitize_path(slug));
 
     let row = SessionRow {
         session_id,
@@ -770,10 +770,7 @@ pub(crate) fn parse_line_into(out: &mut Vec<SessionEvent>, line: &str, line_numb
         .and_then(Value::as_str)
         .and_then(|s| DateTime::parse_from_rfc3339(s).ok())
         .map(|d| d.with_timezone(&Utc));
-    let uuid = v
-        .get("uuid")
-        .and_then(Value::as_str)
-        .map(|s| s.to_string());
+    let uuid = v.get("uuid").and_then(Value::as_str).map(|s| s.to_string());
 
     let event_type = v.get("type").and_then(Value::as_str).unwrap_or("");
     match event_type {
@@ -982,10 +979,7 @@ fn emit_assistant_events(
                     .and_then(Value::as_str)
                     .unwrap_or("")
                     .to_string();
-                let input_raw = part
-                    .get("input")
-                    .map(|i| i.to_string())
-                    .unwrap_or_default();
+                let input_raw = part.get("input").map(|i| i.to_string()).unwrap_or_default();
                 let input_preview = truncate_prompt(&input_raw);
                 out.push(SessionEvent::AssistantToolUse {
                     ts,

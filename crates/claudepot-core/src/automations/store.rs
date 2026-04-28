@@ -152,7 +152,12 @@ impl AutomationStore {
                 "bypassPermissions requires a non-empty allowed_tools whitelist".into(),
             ));
         }
-        if self.file.automations.iter().any(|a| a.name == automation.name) {
+        if self
+            .file
+            .automations
+            .iter()
+            .any(|a| a.name == automation.name)
+        {
             return Err(AutomationError::DuplicateName(automation.name));
         }
         if self.file.automations.iter().any(|a| a.id == automation.id) {

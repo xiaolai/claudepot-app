@@ -15,10 +15,16 @@ pub struct Parsed {
 
 impl Parsed {
     pub fn empty() -> Self {
-        Self { summary: None, issues: Vec::new() }
+        Self {
+            summary: None,
+            issues: Vec::new(),
+        }
     }
     pub fn with_summary(s: FileSummary) -> Self {
-        Self { summary: Some(s), issues: Vec::new() }
+        Self {
+            summary: Some(s),
+            issues: Vec::new(),
+        }
     }
 }
 
@@ -50,7 +56,9 @@ pub fn parse_settings_json(bytes: &[u8]) -> Parsed {
 /// Only matches the CC shape: `^---\n…\n---\n`. Everything before the
 /// closing fence is the frontmatter string.
 pub fn split_frontmatter(text: &str) -> (Option<&str>, &str) {
-    let t = text.strip_prefix("---\n").or_else(|| text.strip_prefix("---\r\n"));
+    let t = text
+        .strip_prefix("---\n")
+        .or_else(|| text.strip_prefix("---\r\n"));
     let Some(rest) = t else {
         return (None, text);
     };
@@ -179,8 +187,12 @@ pub fn parse_memory_index(bytes: &[u8]) -> (Vec<MemoryIndexEntry>, Parsed) {
             continue;
         }
         // "- [Title](file.md) — hook"
-        let Some(after_dash) = t.strip_prefix("- [") else { continue };
-        let Some(close) = after_dash.find("](") else { continue };
+        let Some(after_dash) = t.strip_prefix("- [") else {
+            continue;
+        };
+        let Some(close) = after_dash.find("](") else {
+            continue;
+        };
         let title = after_dash[..close].to_string();
         let rest = &after_dash[close + 2..];
         let Some(end) = rest.find(')') else { continue };

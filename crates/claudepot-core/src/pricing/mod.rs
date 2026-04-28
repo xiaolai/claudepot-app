@@ -64,7 +64,10 @@ pub enum PriceSource {
     /// Live scrape of an Anthropic-controlled URL.
     Live { url: String, fetched_at_unix: u64 },
     /// Cache file, older than memory but younger than bundled.
-    Cached { fetched_at_unix: u64, source_url: String },
+    Cached {
+        fetched_at_unix: u64,
+        source_url: String,
+    },
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -134,10 +137,7 @@ pub fn bundled() -> PriceTable {
 /// Returns `None` for unknown ids; the UI should render "rate
 /// unknown" rather than silently substituting a different model's
 /// rate. That way rate drift surfaces instead of lying.
-pub fn resolve_model_rates<'a>(
-    table: &'a PriceTable,
-    model_id: &str,
-) -> Option<&'a ModelRates> {
+pub fn resolve_model_rates<'a>(table: &'a PriceTable, model_id: &str) -> Option<&'a ModelRates> {
     if let Some(r) = table.models.get(model_id) {
         return Some(r);
     }
@@ -171,8 +171,12 @@ pub fn load_cached() -> Option<PriceTable> {
     let bytes = std::fs::read(&path).ok()?;
     let table: PriceTable = serde_json::from_slice(&bytes).ok()?;
     let fetched_at = match &table.source {
-        PriceSource::Cached { fetched_at_unix, .. } => *fetched_at_unix,
-        PriceSource::Live { fetched_at_unix, .. } => *fetched_at_unix,
+        PriceSource::Cached {
+            fetched_at_unix, ..
+        } => *fetched_at_unix,
+        PriceSource::Live {
+            fetched_at_unix, ..
+        } => *fetched_at_unix,
         // Bundled-sourced cache files are meaningless (nothing to
         // restore); treat as miss.
         PriceSource::Bundled { .. } => return None,
@@ -202,8 +206,7 @@ fn write_cache(table: &PriceTable) -> std::io::Result<()> {
     let dir = crate::paths::claudepot_data_dir();
     std::fs::create_dir_all(&dir)?;
     let path = dir.join(CACHE_FILENAME);
-    let bytes = serde_json::to_vec_pretty(table)
-        .map_err(|e| std::io::Error::other(e))?;
+    let bytes = serde_json::to_vec_pretty(table).map_err(|e| std::io::Error::other(e))?;
     std::fs::write(path, bytes)
 }
 
@@ -233,8 +236,7 @@ pub async fn fetch_live() -> Result<PriceTable, String> {
         .await
         .map_err(|e| format!("read body: {e}"))?;
 
-    let models = parse_pricing_html(&body)
-        .map_err(|e| format!("parse: {e}"))?;
+    let models = parse_pricing_html(&body).map_err(|e| format!("parse: {e}"))?;
     // Require at least one model from each frontier family. Previous
     // check hardcoded exact ids (`claude-opus-4-7` etc.) which would
     // fail forever once Anthropic ships the next point release —
@@ -334,9 +336,7 @@ fn extract_two_dollar_rates(s: &str) -> Option<(f64, f64)> {
     while i < bytes.len() {
         if bytes[i] == b'$' {
             let mut j = i + 1;
-            while j < bytes.len()
-                && (bytes[j].is_ascii_digit() || bytes[j] == b'.')
-            {
+            while j < bytes.len() && (bytes[j].is_ascii_digit() || bytes[j] == b'.') {
                 j += 1;
             }
             if j > i + 1 {

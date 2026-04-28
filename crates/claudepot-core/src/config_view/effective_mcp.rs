@@ -114,8 +114,13 @@ pub fn compute(bundle: &McpSourceBundle, mode: McpSimulationMode) -> Vec<Effecti
     // Per-server aggregation. Precedence (low → high): user, project (shallow→deep),
     // local, plugin. Enterprise supersedes everything when active.
     let mut map: BTreeMap<String, (Scope, Value, Vec<Scope>)> = BTreeMap::new();
-    let ingest = |scope: Scope, name: String, value: Value, map: &mut BTreeMap<String, (Scope, Value, Vec<Scope>)>| {
-        let entry = map.entry(name).or_insert_with(|| (scope.clone(), value.clone(), vec![scope.clone()]));
+    let ingest = |scope: Scope,
+                  name: String,
+                  value: Value,
+                  map: &mut BTreeMap<String, (Scope, Value, Vec<Scope>)>| {
+        let entry = map
+            .entry(name)
+            .or_insert_with(|| (scope.clone(), value.clone(), vec![scope.clone()]));
         // Overwrite — later source wins.
         entry.0 = scope.clone();
         entry.1 = value;
@@ -130,7 +135,12 @@ pub fn compute(bundle: &McpSourceBundle, mode: McpSimulationMode) -> Vec<Effecti
         }
         for layer in &bundle.project_chain {
             for (name, v) in &layer.servers {
-                ingest(layer.source_scope.clone(), name.clone(), v.clone(), &mut map);
+                ingest(
+                    layer.source_scope.clone(),
+                    name.clone(),
+                    v.clone(),
+                    &mut map,
+                );
             }
         }
         for (name, v) in &bundle.local {
@@ -177,10 +187,11 @@ pub fn compute(bundle: &McpSourceBundle, mode: McpSimulationMode) -> Vec<Effecti
 
     let mut out = Vec::with_capacity(map.len());
     for (name, (src, raw, contributors)) in map {
-        let project_scoped = matches!(
-            src,
-            Scope::ClaudeMdDir { .. } | Scope::Project
-        ) || matches!(src, Scope::Other) && contributors.iter().any(|c| matches!(c, Scope::ClaudeMdDir { .. } | Scope::Project));
+        let project_scoped = matches!(src, Scope::ClaudeMdDir { .. } | Scope::Project)
+            || matches!(src, Scope::Other)
+                && contributors
+                    .iter()
+                    .any(|c| matches!(c, Scope::ClaudeMdDir { .. } | Scope::Project));
 
         // Under enterprise lockout the enterprise servers themselves are
         // the ONLY active ones — they stay approved. Suppression applies
@@ -257,9 +268,7 @@ fn gate(
             ApprovalState::AutoApproved(AutoApprovalReason::NonInteractiveWithProjectSourceEnabled)
         }
         McpSimulationMode::SkipPermissions if project_settings_enabled => {
-            ApprovalState::AutoApproved(
-                AutoApprovalReason::SkipPermissionsWithProjectSourceEnabled,
-            )
+            ApprovalState::AutoApproved(AutoApprovalReason::SkipPermissionsWithProjectSourceEnabled)
         }
         _ => ApprovalState::Pending,
     }
@@ -327,9 +336,7 @@ mod tests {
         let r = compute(&bundle, McpSimulationMode::NonInteractive);
         assert_eq!(
             r[0].approval,
-            ApprovalState::AutoApproved(
-                AutoApprovalReason::NonInteractiveWithProjectSourceEnabled
-            )
+            ApprovalState::AutoApproved(AutoApprovalReason::NonInteractiveWithProjectSourceEnabled)
         );
     }
 
@@ -472,7 +479,10 @@ mod tests {
             "foo".to_string(),
             json!({"command": "x", "env": {"TOK": tok}}),
         );
-        let bundle = McpSourceBundle { user, ..Default::default() };
+        let bundle = McpSourceBundle {
+            user,
+            ..Default::default()
+        };
         let r = compute(&bundle, McpSimulationMode::Interactive);
         let s = serde_json::to_string(&r[0].masked).unwrap();
         assert!(!s.contains("xoxb-1234-5678"));
@@ -483,7 +493,10 @@ mod tests {
     fn user_scoped_server_ungated() {
         let mut user = BTreeMap::new();
         user.insert("foo".to_string(), srv("x"));
-        let bundle = McpSourceBundle { user, ..Default::default() };
+        let bundle = McpSourceBundle {
+            user,
+            ..Default::default()
+        };
         let r = compute(&bundle, McpSimulationMode::Interactive);
         // User-scoped servers aren't subject to the project-gate.
         assert_eq!(r[0].approval, ApprovalState::Approved);

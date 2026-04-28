@@ -162,8 +162,7 @@ fn find_case_insensitive(haystack: &str, needle_lower: &str) -> Option<(usize, u
     } else {
         let last_contributing_src = src_byte_of_lower_byte[lower_end - 1];
         let mut k = lower_end;
-        while k < src_byte_of_lower_byte.len()
-            && src_byte_of_lower_byte[k] == last_contributing_src
+        while k < src_byte_of_lower_byte.len() && src_byte_of_lower_byte[k] == last_contributing_src
         {
             k += 1;
         }
@@ -223,10 +222,7 @@ fn scan_file(
         let Ok(v) = serde_json::from_str::<serde_json::Value>(&line) else {
             continue;
         };
-        let event_type = v
-            .get("type")
-            .and_then(|x| x.as_str())
-            .unwrap_or("");
+        let event_type = v.get("type").and_then(|x| x.as_str()).unwrap_or("");
         let (role, text) = match event_type {
             "user" => ("user", extract_user_text(&v)),
             "assistant" => ("assistant", extract_assistant_text(&v)),
@@ -390,11 +386,7 @@ pub fn search_events<'a>(
             out.push((
                 i,
                 ev,
-                redact_secrets(&make_snippet_chars(
-                    text,
-                    off,
-                    needle_char_len(&needle),
-                )),
+                redact_secrets(&make_snippet_chars(text, off, needle_char_len(&needle))),
             ));
         }
     }
@@ -549,12 +541,7 @@ mod tests {
                 r#"{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"t1","content":[{"type":"text","text":"nothing to see"},{"type":"text","text":"pnpm tauri dev finished"}],"is_error":false}]},"sessionId":"s"}"#,
             ],
         );
-        let hits = search_rows(
-            &[row("s", "-r", path, None, None)],
-            "tauri",
-            10,
-        )
-        .unwrap();
+        let hits = search_rows(&[row("s", "-r", path, None, None)], "tauri", 10).unwrap();
         assert_eq!(hits.len(), 1);
         assert!(hits[0].snippet.contains("tauri"));
     }
@@ -573,12 +560,7 @@ mod tests {
                 r#"{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"let me check"},{"type":"tool_use","id":"t1","name":"Bash","input":{"command":"pnpm tauri dev","description":"start dev server"}}]},"sessionId":"s"}"#,
             ],
         );
-        let hits = search_rows(
-            &[row("s", "-r", path, None, None)],
-            "tauri",
-            10,
-        )
-        .unwrap();
+        let hits = search_rows(&[row("s", "-r", path, None, None)], "tauri", 10).unwrap();
         assert_eq!(hits.len(), 1);
         assert_eq!(hits[0].role, "assistant");
         assert!(hits[0].snippet.contains("tauri"));
@@ -598,12 +580,7 @@ mod tests {
                 r#"{"type":"assistant","message":{"role":"assistant","content":[{"type":"thinking","thinking":"I should inspect the tauri config next"}]},"sessionId":"s"}"#,
             ],
         );
-        let hits = search_rows(
-            &[row("s", "-r", path, None, None)],
-            "tauri",
-            10,
-        )
-        .unwrap();
+        let hits = search_rows(&[row("s", "-r", path, None, None)], "tauri", 10).unwrap();
         assert_eq!(hits.len(), 1);
         assert_eq!(hits[0].role, "assistant");
         assert!(hits[0].snippet.contains("tauri"));
@@ -638,7 +615,9 @@ mod tests {
             let path = tmp.path().join(format!("s{i}.jsonl"));
             write_jsonl(
                 &path,
-                &[r#"{"type":"user","message":{"role":"user","content":"widget search"},"sessionId":"s"}"#],
+                &[
+                    r#"{"type":"user","message":{"role":"user","content":"widget search"},"sessionId":"s"}"#,
+                ],
             );
             rows.push(row(&format!("s{i}"), "-r", path, None, None));
         }
@@ -680,12 +659,7 @@ mod tests {
             Some("auth here"),
             ts("2020-01-01T00:00:00Z"),
         );
-        let hits = search_rows(
-            &[sub1, sub2, sub3, phrase],
-            "auth",
-            3,
-        )
-        .unwrap();
+        let hits = search_rows(&[sub1, sub2, sub3, phrase], "auth", 3).unwrap();
         assert_eq!(hits.len(), 3);
         // The phrase match must survive the limit — it's the best score.
         assert!(
@@ -822,12 +796,10 @@ mod tests {
         let path = tmp.path().join("fold.jsonl");
         write_jsonl(
             &path,
-            &[
-                &format!(
-                    r#"{{"type":"user","message":{{"role":"user","content":"{}"}},"sessionId":"s"}}"#,
-                    text_only_phrase
-                ),
-            ],
+            &[&format!(
+                r#"{{"type":"user","message":{{"role":"user","content":"{}"}},"sessionId":"s"}}"#,
+                text_only_phrase
+            )],
         );
         let hits = search_rows(
             &[row("s", "-r", path, None, ts("2026-04-10T10:00:00Z"))],
@@ -889,11 +861,15 @@ mod tests {
         // standalone word; `sub.jsonl` has it inside another word.
         write_jsonl(
             &phrase_path,
-            &[r#"{"type":"user","message":{"role":"user","content":"discuss auth today"},"sessionId":"p"}"#],
+            &[
+                r#"{"type":"user","message":{"role":"user","content":"discuss auth today"},"sessionId":"p"}"#,
+            ],
         );
         write_jsonl(
             &sub_path,
-            &[r#"{"type":"user","message":{"role":"user","content":"unauthorized access"},"sessionId":"s"}"#],
+            &[
+                r#"{"type":"user","message":{"role":"user","content":"unauthorized access"},"sessionId":"s"}"#,
+            ],
         );
         // Feed substring-match first so recency/input order alone would
         // rank it first. Ranking should flip the order by score.
@@ -909,8 +885,20 @@ mod tests {
 
     #[test]
     fn search_rows_recency_breaks_ties_among_equal_scores() {
-        let older = row("old", "-r", PathBuf::new(), Some("auth matters"), ts("2020-01-01T00:00:00Z"));
-        let newer = row("new", "-r", PathBuf::new(), Some("auth matters"), ts("2026-04-10T10:00:00Z"));
+        let older = row(
+            "old",
+            "-r",
+            PathBuf::new(),
+            Some("auth matters"),
+            ts("2020-01-01T00:00:00Z"),
+        );
+        let newer = row(
+            "new",
+            "-r",
+            PathBuf::new(),
+            Some("auth matters"),
+            ts("2026-04-10T10:00:00Z"),
+        );
         let hits = search_rows(&[older, newer], "auth", 10).unwrap();
         assert_eq!(hits.len(), 2);
         assert_eq!(hits[0].session_id, "new");

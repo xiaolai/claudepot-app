@@ -316,9 +316,7 @@ async fn resolve_cc_identity(
         // sync behavior (caller logs + moves on) rather than locking
         // the user out of the UI.
         Err(e) => {
-            return Err(RegisterError::ProfileFetch(format!(
-                "token refresh: {e}"
-            )));
+            return Err(RegisterError::ProfileFetch(format!("token refresh: {e}")));
         }
     };
     let new_blob_str = refresh::build_blob(&token_resp, Some(&latest_blob));
@@ -879,7 +877,6 @@ async fn finish_login_after_subprocess(
     expected_email: &str,
     progress: &dyn LoginProgressSink,
 ) -> Result<(), RegisterError> {
-
     // After success, CC holds fresh credentials. Mirror the post-spawn
     // pipeline of `reimport_from_current_with` but emit per-step progress
     // so the GUI can show progress through the (fast) tail.
@@ -911,7 +908,10 @@ async fn finish_login_after_subprocess(
     };
 
     progress.phase(LoginPhase::FetchingProfile);
-    let prof = match fetch_profile.fetch(&blob.claude_ai_oauth.access_token).await {
+    let prof = match fetch_profile
+        .fetch(&blob.claude_ai_oauth.access_token)
+        .await
+    {
         Ok(p) => p,
         Err(e) => {
             let msg = e.to_string();
@@ -1015,9 +1015,15 @@ pub async fn register_from_browser_with_progress(
     match store.find_by_email(&prof.email) {
         Ok(Some(existing)) => {
             onboard::cleanup(&config_dir).await;
-            let msg = format!("already registered: {} (uuid: {})", existing.email, existing.uuid);
+            let msg = format!(
+                "already registered: {} (uuid: {})",
+                existing.email, existing.uuid
+            );
             progress.error(LoginPhase::VerifyingIdentity, &msg);
-            return Err(RegisterError::AlreadyRegistered(existing.email, existing.uuid));
+            return Err(RegisterError::AlreadyRegistered(
+                existing.email,
+                existing.uuid,
+            ));
         }
         Ok(None) => {}
         Err(e) => {
@@ -1195,40 +1201,37 @@ pub async fn verify_all_with_progress(
         }
         first = false;
 
-        let (outcome_kind, detail) = match crate::services::identity::verify_account_identity(
-            store, uuid, fetcher,
-        )
-        .await
-        {
-            Ok(outcome) => {
-                let kind = VerifyOutcomeKind::from(&outcome);
-                let detail = match &outcome {
-                    crate::account::VerifyOutcome::Drift { actual_email, .. } => {
-                        Some(format!("actual: {actual_email}"))
-                    }
-                    crate::account::VerifyOutcome::Rejected => {
-                        Some("re-login required".to_string())
-                    }
-                    crate::account::VerifyOutcome::NetworkError => {
-                        Some("/profile unreachable".to_string())
-                    }
-                    crate::account::VerifyOutcome::Ok { .. } => None,
-                };
-                tracing::info!(
-                    account = %uuid,
-                    status = outcome.as_str(),
-                    "verify_all_with_progress: result"
-                );
-                (kind, detail)
-            }
-            Err(e) => {
-                tracing::warn!(
-                    account = %uuid,
-                    "verify_all_with_progress: error {e}"
-                );
-                (VerifyOutcomeKind::NetworkError, Some(e.to_string()))
-            }
-        };
+        let (outcome_kind, detail) =
+            match crate::services::identity::verify_account_identity(store, uuid, fetcher).await {
+                Ok(outcome) => {
+                    let kind = VerifyOutcomeKind::from(&outcome);
+                    let detail = match &outcome {
+                        crate::account::VerifyOutcome::Drift { actual_email, .. } => {
+                            Some(format!("actual: {actual_email}"))
+                        }
+                        crate::account::VerifyOutcome::Rejected => {
+                            Some("re-login required".to_string())
+                        }
+                        crate::account::VerifyOutcome::NetworkError => {
+                            Some("/profile unreachable".to_string())
+                        }
+                        crate::account::VerifyOutcome::Ok { .. } => None,
+                    };
+                    tracing::info!(
+                        account = %uuid,
+                        status = outcome.as_str(),
+                        "verify_all_with_progress: result"
+                    );
+                    (kind, detail)
+                }
+                Err(e) => {
+                    tracing::warn!(
+                        account = %uuid,
+                        "verify_all_with_progress: error {e}"
+                    );
+                    (VerifyOutcomeKind::NetworkError, Some(e.to_string()))
+                }
+            };
 
         progress.event(VerifyEvent::Account {
             uuid,
@@ -1294,7 +1297,9 @@ pub enum ReconcileError {
 /// Idempotent: a second pass on a converged store returns an empty `Vec`.
 /// Errors short-circuit on the first sqlite failure (read or write).
 pub fn reconcile_cli_flags(store: &AccountStore) -> Result<Vec<CliFlagFlip>, ReconcileError> {
-    let accounts = store.list().map_err(|e| ReconcileError::Store(e.to_string()))?;
+    let accounts = store
+        .list()
+        .map_err(|e| ReconcileError::Store(e.to_string()))?;
     let mut flips = Vec::new();
     for a in &accounts {
         // Probe the keychain directly. A present, parseable blob is the

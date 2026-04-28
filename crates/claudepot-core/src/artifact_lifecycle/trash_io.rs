@@ -253,8 +253,7 @@ pub(crate) enum WalkEntryKind {
 /// Callers that want symlink contents traversed must follow the
 /// link explicitly — the walker won't do it for them.
 pub(crate) fn walk_dir(root: &Path, f: &mut dyn FnMut(WalkEntryKind, &Path)) -> Result<()> {
-    let meta = std::fs::symlink_metadata(root)
-        .map_err(LifecycleError::io("walk dir root stat"))?;
+    let meta = std::fs::symlink_metadata(root).map_err(LifecycleError::io("walk dir root stat"))?;
     let ft = meta.file_type();
     if ft.is_symlink() {
         f(WalkEntryKind::Symlink, root);

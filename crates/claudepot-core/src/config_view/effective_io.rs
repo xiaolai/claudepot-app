@@ -28,8 +28,7 @@ pub fn load_effective_settings_input(cwd: &Path) -> EffectiveSettingsInput {
     let home = claude_config_dir();
 
     // PluginBase is the lowest layer in the cascade.
-    let (_plugin_files, plugins) =
-        crate::config_view::discover::collect_plugins();
+    let (_plugin_files, plugins) = crate::config_view::discover::collect_plugins();
     let plugin_base_raw = plugin_base::build_plugin_base(&plugins);
     let plugin_base = non_empty_or_none(plugin_base_raw);
 
@@ -45,13 +44,22 @@ pub fn load_effective_settings_input(cwd: &Path) -> EffectiveSettingsInput {
     // sources if they've got a cache/registry reader plugged in.
     let composite = load_managed_composite(&home);
     let policy_sources = vec![
-        PolicySource { origin: PolicyOrigin::Remote, value: None },
-        PolicySource { origin: PolicyOrigin::MdmAdmin, value: None },
+        PolicySource {
+            origin: PolicyOrigin::Remote,
+            value: None,
+        },
+        PolicySource {
+            origin: PolicyOrigin::MdmAdmin,
+            value: None,
+        },
         PolicySource {
             origin: PolicyOrigin::ManagedFileComposite,
             value: composite,
         },
-        PolicySource { origin: PolicyOrigin::HkcuUser, value: None },
+        PolicySource {
+            origin: PolicyOrigin::HkcuUser,
+            value: None,
+        },
     ];
 
     EffectiveSettingsInput {
@@ -158,8 +166,8 @@ pub fn load_mcp_bundle(cwd: &Path, effective_settings: Value) -> McpSourceBundle
     // `projects[<project-path>].mcpServers`. We use the literal `cwd`
     // as the key — CC canonicalizes via `getProjectPathForConfig`,
     // which we approximate via `find_canonical_git_root`.
-    let project_key = crate::project_memory::find_canonical_git_root(cwd)
-        .unwrap_or_else(|| cwd.to_path_buf());
+    let project_key =
+        crate::project_memory::find_canonical_git_root(cwd).unwrap_or_else(|| cwd.to_path_buf());
     let local = read_claude_json_local_mcp(&claude_json, &project_key);
 
     // Project chain: every `.mcp.json` from cwd up to fs root (or git).
@@ -192,7 +200,9 @@ pub fn load_mcp_bundle(cwd: &Path, effective_settings: Value) -> McpSourceBundle
 }
 
 fn read_mcp_servers_obj(path: &Path) -> BTreeMap<String, Value> {
-    let Some(bytes) = std::fs::read(path).ok() else { return BTreeMap::new() };
+    let Some(bytes) = std::fs::read(path).ok() else {
+        return BTreeMap::new();
+    };
     let Ok(v): Result<Value, _> = serde_json::from_slice(&bytes) else {
         return BTreeMap::new();
     };
@@ -207,7 +217,9 @@ fn read_mcp_servers_obj(path: &Path) -> BTreeMap<String, Value> {
 }
 
 fn read_claude_json_mcp_servers(path: &Path) -> BTreeMap<String, Value> {
-    let Some(bytes) = std::fs::read(path).ok() else { return BTreeMap::new() };
+    let Some(bytes) = std::fs::read(path).ok() else {
+        return BTreeMap::new();
+    };
     let Ok(v): Result<Value, _> = serde_json::from_slice(&bytes) else {
         return BTreeMap::new();
     };
@@ -218,7 +230,9 @@ fn read_claude_json_mcp_servers(path: &Path) -> BTreeMap<String, Value> {
 }
 
 fn read_claude_json_local_mcp(claude_json: &Path, project_key: &Path) -> BTreeMap<String, Value> {
-    let Some(bytes) = std::fs::read(claude_json).ok() else { return BTreeMap::new() };
+    let Some(bytes) = std::fs::read(claude_json).ok() else {
+        return BTreeMap::new();
+    };
     let Ok(v): Result<Value, _> = serde_json::from_slice(&bytes) else {
         return BTreeMap::new();
     };

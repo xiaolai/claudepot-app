@@ -139,9 +139,15 @@ struct TestPlatform {
 
 #[async_trait::async_trait]
 impl crate::desktop_backend::DesktopPlatform for TestPlatform {
-    fn data_dir(&self) -> Option<PathBuf> { Some(self.data_dir.clone()) }
-    fn session_items(&self) -> &[&str] { &self.items }
-    async fn is_running(&self) -> bool { self.running.load(Ordering::SeqCst) }
+    fn data_dir(&self) -> Option<PathBuf> {
+        Some(self.data_dir.clone())
+    }
+    fn session_items(&self) -> &[&str] {
+        &self.items
+    }
+    async fn is_running(&self) -> bool {
+        self.running.load(Ordering::SeqCst)
+    }
     async fn quit(&self) -> Result<(), crate::error::DesktopSwapError> {
         self.running.store(false, Ordering::SeqCst);
         Ok(())
@@ -150,7 +156,9 @@ impl crate::desktop_backend::DesktopPlatform for TestPlatform {
         self.running.store(true, Ordering::SeqCst);
         Ok(())
     }
-    fn is_installed(&self) -> bool { true }
+    fn is_installed(&self) -> bool {
+        true
+    }
     async fn safe_storage_secret(
         &self,
     ) -> Result<Vec<u8>, crate::desktop_backend::DesktopKeyError> {
@@ -195,7 +203,9 @@ async fn test_adopt_happy_path() {
     let platform = platform_for(data_dir);
     let vid = verified_for("alice@example.com", "org-xxx");
 
-    let out = adopt_current(&platform, &store, acct.uuid, &vid, false).await.unwrap();
+    let out = adopt_current(&platform, &store, acct.uuid, &vid, false)
+        .await
+        .unwrap();
     assert_eq!(out.account_email, "alice@example.com");
     assert!(out.captured_items >= 2);
 
@@ -227,7 +237,9 @@ async fn test_adopt_rejects_identity_mismatch() {
     // Live identity says we're signed in as BOB — must refuse.
     let vid = verified_for("bob@example.com", "org-xxx");
 
-    let err = adopt_current(&platform, &store, acct.uuid, &vid, false).await.unwrap_err();
+    let err = adopt_current(&platform, &store, acct.uuid, &vid, false)
+        .await
+        .unwrap_err();
     assert!(matches!(err, AdoptError::IdentityMismatch { .. }));
     // No mutations — verify the flag didn't flip.
     let after = store.find_by_uuid(acct.uuid).unwrap().unwrap();
@@ -248,7 +260,9 @@ async fn test_adopt_refuses_overwrite_without_flag() {
     let platform = platform_for(data_dir);
     let vid = verified_for("alice@example.com", "org-xxx");
 
-    let err = adopt_current(&platform, &store, acct.uuid, &vid, false).await.unwrap_err();
+    let err = adopt_current(&platform, &store, acct.uuid, &vid, false)
+        .await
+        .unwrap_err();
     assert!(matches!(err, AdoptError::ProfileExists));
 }
 
@@ -267,8 +281,13 @@ async fn test_adopt_with_overwrite_replaces_profile() {
     let platform = platform_for(data_dir);
     let vid = verified_for("alice@example.com", "org-xxx");
 
-    adopt_current(&platform, &store, acct.uuid, &vid, true).await.unwrap();
-    assert!(!profile_dir.join("stale.txt").exists(), "old content must be purged");
+    adopt_current(&platform, &store, acct.uuid, &vid, true)
+        .await
+        .unwrap();
+    assert!(
+        !profile_dir.join("stale.txt").exists(),
+        "old content must be purged"
+    );
     assert!(profile_dir.join("config.json").exists());
 }
 
@@ -356,7 +375,10 @@ async fn test_clear_session_prunes_empty_network_dir() {
 
     clear_session(&platform, &store, false).await.unwrap();
     // Network/ was empty after Cookies removal → pruned.
-    assert!(!data_dir.join("Network").exists(), "empty Network/ must be pruned");
+    assert!(
+        !data_dir.join("Network").exists(),
+        "empty Network/ must be pruned"
+    );
 }
 
 // -- switch (B-3 desktop_use preflight) tests ---------------------
@@ -373,7 +395,9 @@ async fn test_switch_rejects_target_without_snapshot() {
     populate_data_dir(&data_dir);
     let platform = platform_for(data_dir);
 
-    let err = switch(&platform, &store, acct.uuid, true).await.unwrap_err();
+    let err = switch(&platform, &store, acct.uuid, true)
+        .await
+        .unwrap_err();
     // Verbatim error wording — UI copy is exact.
     let msg = err.to_string();
     assert_eq!(
@@ -457,7 +481,9 @@ async fn test_switch_does_not_quit_desktop_on_preflight_failure() {
         running: AtomicBool::new(true),
     };
 
-    let err = switch(&platform, &store, acct.uuid, true).await.unwrap_err();
+    let err = switch(&platform, &store, acct.uuid, true)
+        .await
+        .unwrap_err();
     assert!(matches!(err, SwitchError::NoSnapshot { .. }));
     // The whole point of running the preflight FIRST: Desktop must
     // still be running.

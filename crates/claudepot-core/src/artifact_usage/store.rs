@@ -165,10 +165,10 @@ pub fn count_for_window(
          FROM usage_daily
          WHERE kind = ?1 AND artifact_key = ?2 AND day_unix_s >= ?3",
     )?;
-    let row: (i64, i64) = stmt.query_row(
-        params![kind.as_str(), artifact_key, cutoff_day],
-        |r| Ok((r.get(0)?, r.get(1)?)),
-    )?;
+    let row: (i64, i64) = stmt
+        .query_row(params![kind.as_str(), artifact_key, cutoff_day], |r| {
+            Ok((r.get(0)?, r.get(1)?))
+        })?;
     Ok((row.0.max(0) as u64, row.1.max(0) as u64))
 }
 

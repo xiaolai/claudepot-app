@@ -261,7 +261,10 @@ fn classify_user_line(
         if block.get("type").and_then(Value::as_str) != Some("tool_result") {
             continue;
         }
-        let is_error = block.get("is_error").and_then(Value::as_bool).unwrap_or(false);
+        let is_error = block
+            .get("is_error")
+            .and_then(Value::as_bool)
+            .unwrap_or(false);
         let tool_use_id = block
             .get("tool_use_id")
             .and_then(Value::as_str)
@@ -273,7 +276,8 @@ fn classify_user_line(
         // `close_agent_episode_if_open`. Always called so the
         // open_episodes map gets drained even on Phase 2 paths.
         if let Some(id) = tool_use_id.as_deref() {
-            if let Some(card) = close_agent_episode_if_open(state, id, line, byte_offset, meta, is_error)
+            if let Some(card) =
+                close_agent_episode_if_open(state, id, line, byte_offset, meta, is_error)
             {
                 cards.push(card);
                 // The agent return card supersedes a generic tool
@@ -287,13 +291,9 @@ fn classify_user_line(
         }
 
         let body = extract_tool_result_text(block);
-        if let Some(card) = build_tool_error_card(
-            line,
-            byte_offset,
-            meta,
-            tool_use_id.clone(),
-            &body,
-        ) {
+        if let Some(card) =
+            build_tool_error_card(line, byte_offset, meta, tool_use_id.clone(), &body)
+        {
             cards.push(card);
         }
     }
@@ -455,7 +455,11 @@ fn close_agent_episode_if_open(
     if !is_error && duration <= AGENT_RETURN_SLOW_THRESHOLD_MS {
         return None;
     }
-    let severity = if is_error { Severity::Error } else { Severity::Notice };
+    let severity = if is_error {
+        Severity::Error
+    } else {
+        Severity::Notice
+    };
     let label = ep
         .subagent_type
         .as_deref()
@@ -740,11 +744,13 @@ fn extract_ssh_host(body: &str) -> Option<String> {
     let needle = "ssh: connect to host ";
     let idx = body.find(needle)?;
     let rest = &body[idx + needle.len()..];
-    let end = rest
-        .find(|c: char| c.is_whitespace())
-        .unwrap_or(rest.len());
+    let end = rest.find(|c: char| c.is_whitespace()).unwrap_or(rest.len());
     let host = rest[..end].trim();
-    if host.is_empty() { None } else { Some(host.to_string()) }
+    if host.is_empty() {
+        None
+    } else {
+        Some(host.to_string())
+    }
 }
 
 /// Map a missing command name to its Homebrew package name when the
@@ -975,10 +981,7 @@ fn classify_hook_failure(
     let plugin = extract_missing_plugin(stderr).or_else(|| plugin_from_hook(attachment));
 
     let ts = parse_ts(line)?;
-    let event_uuid = line
-        .get("uuid")
-        .and_then(Value::as_str)
-        .map(str::to_string);
+    let event_uuid = line.get("uuid").and_then(Value::as_str).map(str::to_string);
     let cwd = line
         .get("cwd")
         .and_then(Value::as_str)

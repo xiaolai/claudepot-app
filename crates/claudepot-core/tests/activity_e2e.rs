@@ -57,12 +57,7 @@ fn write_transcript(projects_dir: &std::path::Path, cwd: &str, sid: &str, body: 
     f.write_all(body.as_bytes()).unwrap();
 }
 
-fn append_transcript(
-    projects_dir: &std::path::Path,
-    cwd: &str,
-    sid: &str,
-    body: &str,
-) {
+fn append_transcript(projects_dir: &std::path::Path, cwd: &str, sid: &str, body: &str) {
     let slug = sanitize_path(cwd);
     let path = projects_dir.join(slug).join(format!("{sid}.jsonl"));
     let mut f = std::fs::OpenOptions::new()
@@ -148,10 +143,7 @@ async fn synthetic_session_appears_and_transitions_within_1s() {
     let snap = runtime.snapshot();
     assert_eq!(snap[0].status, Status::Busy);
     assert_eq!(snap[0].model.as_deref(), Some("claude-opus-4-7"));
-    assert_eq!(
-        snap[0].current_action.as_deref(),
-        Some("Bash: pnpm test")
-    );
+    assert_eq!(snap[0].current_action.as_deref(), Some("Bash: pnpm test"));
 
     // A StatusChanged delta must have arrived.
     let d = tokio::time::timeout(Duration::from_millis(500), rx.recv())
@@ -177,12 +169,7 @@ async fn synthetic_session_appears_and_transitions_within_1s() {
     // second tick are fine — they just happen before the end.
     let mut saw_ended = false;
     for _ in 0..8 {
-        match tokio::time::timeout(
-            Duration::from_millis(200),
-            rx.recv(),
-        )
-        .await
-        {
+        match tokio::time::timeout(Duration::from_millis(200), rx.recv()).await {
             Ok(Some(d)) if matches!(d.kind, LiveDeltaKind::Ended) => {
                 saw_ended = true;
                 break;
@@ -243,12 +230,7 @@ async fn task_summary_path_end_to_end() {
     );
 
     let mut saw_task_summary = false;
-    while let Ok(Some(d)) = tokio::time::timeout(
-        Duration::from_millis(200),
-        rx.recv(),
-    )
-    .await
-    {
+    while let Ok(Some(d)) = tokio::time::timeout(Duration::from_millis(200), rx.recv()).await {
         if let LiveDeltaKind::TaskSummaryChanged { summary } = &d.kind {
             assert!(summary.contains("investigating the test flake"));
             saw_task_summary = true;

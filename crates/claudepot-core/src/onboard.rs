@@ -324,8 +324,7 @@ mod tests {
         // Write a stub binary to a tempdir and make it executable.
         let stub_dir = tempfile::tempdir().expect("mk stub tempdir");
         let stub = stub_dir.path().join("claude-stub.sh");
-        std::fs::write(&stub, "#!/bin/sh\nexec sleep 30\n")
-            .expect("write stub");
+        std::fs::write(&stub, "#!/bin/sh\nexec sleep 30\n").expect("write stub");
         let mut perms = std::fs::metadata(&stub).unwrap().permissions();
         perms.set_mode(0o755);
         std::fs::set_permissions(&stub, perms).unwrap();
@@ -334,26 +333,21 @@ mod tests {
         // so stale state (from previous failed runs or parallel tests)
         // doesn't confuse the post-cleanup assertion below.
         let temp_root = std::env::temp_dir();
-        let before: std::collections::HashSet<std::ffi::OsString> =
-            std::fs::read_dir(&temp_root)
-                .map(|it| {
-                    it.filter_map(|e| e.ok())
-                        .map(|e| e.file_name())
-                        .filter(|n| {
-                            n.to_string_lossy()
-                                .starts_with("claudepot-onboard-")
-                        })
-                        .collect()
-                })
-                .unwrap_or_default();
+        let before: std::collections::HashSet<std::ffi::OsString> = std::fs::read_dir(&temp_root)
+            .map(|it| {
+                it.filter_map(|e| e.ok())
+                    .map(|e| e.file_name())
+                    .filter(|n| n.to_string_lossy().starts_with("claudepot-onboard-"))
+                    .collect()
+            })
+            .unwrap_or_default();
 
         let notify = Arc::new(Notify::new());
         let notify_clone = notify.clone();
         let stub_path = stub.clone();
 
         let task = tokio::spawn(async move {
-            run_auth_login_cancellable_with_binary(&stub_path, Some(notify_clone))
-                .await
+            run_auth_login_cancellable_with_binary(&stub_path, Some(notify_clone)).await
         });
 
         // Let the child actually spawn before we fire the Notify so
@@ -374,18 +368,14 @@ mod tests {
         // New tempdirs created by *this* test run must all be gone
         // after the awaited cleanup. Tempdirs from prior runs /
         // parallel tests are filtered out via the `before` snapshot.
-        let after: std::collections::HashSet<std::ffi::OsString> =
-            std::fs::read_dir(&temp_root)
-                .map(|it| {
-                    it.filter_map(|e| e.ok())
-                        .map(|e| e.file_name())
-                        .filter(|n| {
-                            n.to_string_lossy()
-                                .starts_with("claudepot-onboard-")
-                        })
-                        .collect()
-                })
-                .unwrap_or_default();
+        let after: std::collections::HashSet<std::ffi::OsString> = std::fs::read_dir(&temp_root)
+            .map(|it| {
+                it.filter_map(|e| e.ok())
+                    .map(|e| e.file_name())
+                    .filter(|n| n.to_string_lossy().starts_with("claudepot-onboard-"))
+                    .collect()
+            })
+            .unwrap_or_default();
         let new_leftovers: Vec<_> = after.difference(&before).collect();
         assert!(
             new_leftovers.is_empty(),

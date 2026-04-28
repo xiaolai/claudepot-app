@@ -7,8 +7,8 @@ use super::*;
 
 pub fn search_cmd(ctx: &AppContext, query: &str, limit: usize) -> Result<()> {
     let cfg = paths::claude_config_dir();
-    let rows = claudepot_core::session::list_all_sessions(&cfg)
-        .context("list sessions for search")?;
+    let rows =
+        claudepot_core::session::list_all_sessions(&cfg).context("list sessions for search")?;
     let hits = claudepot_core::session_search::search_rows(&rows, query, limit)
         .context("search sessions")?;
     if ctx.json {
@@ -60,4 +60,3 @@ pub fn worktrees_cmd(ctx: &AppContext) -> Result<()> {
     }
     Ok(())
 }
-

@@ -209,10 +209,7 @@ fn resolve_original_path(
 
 /// Read `~/.claude.json` and return the value at `projects.<key>`,
 /// without mutating. None when the file/key is absent.
-fn snapshot_claude_json_entry(
-    claude_json_path: &Path,
-    key: &str,
-) -> Option<serde_json::Value> {
+fn snapshot_claude_json_entry(claude_json_path: &Path, key: &str) -> Option<serde_json::Value> {
     let contents = std::fs::read_to_string(claude_json_path).ok()?;
     let root: serde_json::Value = serde_json::from_str(&contents).ok()?;
     root.get("projects")?.get(key).cloned()
@@ -254,8 +251,7 @@ pub fn remove_project_preview_basic(
 ) -> Result<RemovePreviewBasic, ProjectError> {
     let (slug, project_dir) = resolve_target(args)?;
     let info: ProjectInfo = compute_project_info(&project_dir, &slug)?;
-    let original_path =
-        resolve_original_path(&project_dir, &slug, args.claude_json_path);
+    let original_path = resolve_original_path(&project_dir, &slug, args.claude_json_path);
     Ok(RemovePreviewBasic {
         slug,
         original_path,
@@ -274,22 +270,16 @@ pub fn remove_project_preview_extras(
 ) -> Result<RemovePreviewExtras, ProjectError> {
     let (slug, project_dir) = resolve_target(args)?;
     let info: ProjectInfo = compute_project_info(&project_dir, &slug)?;
-    let original_path =
-        resolve_original_path(&project_dir, &slug, args.claude_json_path);
+    let original_path = resolve_original_path(&project_dir, &slug, args.claude_json_path);
 
-    let live_check_path =
-        original_path.as_deref().unwrap_or(&info.original_path);
-    let has_live_session = detect_live_session(
-        &project_dir,
-        live_check_path,
-        REMOVE_LIVE_HEARTBEAT_SECS,
-    );
+    let live_check_path = original_path.as_deref().unwrap_or(&info.original_path);
+    let has_live_session =
+        detect_live_session(&project_dir, live_check_path, REMOVE_LIVE_HEARTBEAT_SECS);
 
-    let claude_json_entry_present =
-        match (args.claude_json_path, original_path.as_deref()) {
-            (Some(cj), Some(key)) => snapshot_claude_json_entry(cj, key).is_some(),
-            _ => false,
-        };
+    let claude_json_entry_present = match (args.claude_json_path, original_path.as_deref()) {
+        (Some(cj), Some(key)) => snapshot_claude_json_entry(cj, key).is_some(),
+        _ => false,
+    };
 
     let history_lines_count = match (args.history_path, original_path.as_deref()) {
         (Some(h), Some(target)) => snapshot_history_lines(h, target).len(),
@@ -309,9 +299,7 @@ pub fn remove_project_preview_extras(
 /// confirmation modal honestly. CLI uses this for the synchronous
 /// disclosure print; GUI prefers the basic+extras split for snappy
 /// first paint.
-pub fn remove_project_preview(
-    args: &RemoveArgs<'_>,
-) -> Result<RemovePreview, ProjectError> {
+pub fn remove_project_preview(args: &RemoveArgs<'_>) -> Result<RemovePreview, ProjectError> {
     let basic = remove_project_preview_basic(args)?;
     let extras = remove_project_preview_extras(args)?;
     Ok(RemovePreview {
@@ -331,12 +319,10 @@ pub fn remove_project_preview(
 pub fn remove_project(args: &RemoveArgs<'_>) -> Result<RemoveResult, ProjectError> {
     let (slug, project_dir) = resolve_target(args)?;
     let info: ProjectInfo = compute_project_info(&project_dir, &slug)?;
-    let original_path =
-        resolve_original_path(&project_dir, &slug, args.claude_json_path);
+    let original_path = resolve_original_path(&project_dir, &slug, args.claude_json_path);
 
     // Live-session refusal. The same probe `clean_orphans` runs.
-    let live_check_path =
-        original_path.as_deref().unwrap_or(&info.original_path);
+    let live_check_path = original_path.as_deref().unwrap_or(&info.original_path);
     if detect_live_session(&project_dir, live_check_path, REMOVE_LIVE_HEARTBEAT_SECS) {
         return Err(ProjectError::ClaudeRunning(live_check_path.to_string()));
     }
@@ -486,8 +472,7 @@ mod tests {
                 original_path: {"trustDialogAccepted": true}
             }
         });
-        fs::write(&claude_json, serde_json::to_vec(&claude_json_body).unwrap())
-            .unwrap();
+        fs::write(&claude_json, serde_json::to_vec(&claude_json_body).unwrap()).unwrap();
 
         let history = config_dir.join("history.jsonl");
         let history_body = format!(
@@ -527,7 +512,10 @@ mod tests {
         let f = setup("-Users-joker-myproject", "/Users/joker/myproject", true);
         let preview = remove_project_preview(&args(&f, &f.slug)).unwrap();
         assert_eq!(preview.slug, f.slug);
-        assert_eq!(preview.original_path.as_deref(), Some("/Users/joker/myproject"));
+        assert_eq!(
+            preview.original_path.as_deref(),
+            Some("/Users/joker/myproject")
+        );
         assert_eq!(preview.session_count, 1);
         assert!(preview.claude_json_entry_present);
         assert_eq!(preview.history_lines_count, 1);
@@ -538,8 +526,7 @@ mod tests {
     fn preview_resolves_path_input_to_slug() {
         let f = setup("-Users-joker-myproject", "/Users/joker/myproject", true);
         // User passes a path; should resolve to the same slug.
-        let preview =
-            remove_project_preview(&args(&f, "/Users/joker/myproject")).unwrap();
+        let preview = remove_project_preview(&args(&f, "/Users/joker/myproject")).unwrap();
         assert_eq!(preview.slug, f.slug);
     }
 
@@ -558,8 +545,7 @@ mod tests {
 
         // .claude.json key removed.
         let cj: serde_json::Value =
-            serde_json::from_str(&fs::read_to_string(&f.claude_json).unwrap())
-                .unwrap();
+            serde_json::from_str(&fs::read_to_string(&f.claude_json).unwrap()).unwrap();
         assert!(cj["projects"].get(&f.original_path).is_none());
 
         // history.jsonl: target line gone, unrelated line preserved.
@@ -568,8 +554,7 @@ mod tests {
         assert!(h.contains("/Users/other"));
 
         // Trash manifest holds the snapshot.
-        let listing =
-            crate::project_trash::list(&f.data_dir, Default::default()).unwrap();
+        let listing = crate::project_trash::list(&f.data_dir, Default::default()).unwrap();
         assert_eq!(listing.entries.len(), 1);
         let entry = &listing.entries[0];
         assert_eq!(entry.id, result.trash_id);
@@ -599,8 +584,7 @@ mod tests {
 
         // .claude.json has the entry back.
         let cj: serde_json::Value =
-            serde_json::from_str(&fs::read_to_string(&f.claude_json).unwrap())
-                .unwrap();
+            serde_json::from_str(&fs::read_to_string(&f.claude_json).unwrap()).unwrap();
         assert!(cj["projects"].get(&f.original_path).is_some());
 
         // history.jsonl has the line back.

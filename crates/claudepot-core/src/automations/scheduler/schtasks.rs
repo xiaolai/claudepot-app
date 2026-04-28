@@ -330,8 +330,18 @@ fn emit_calendar_trigger(out: &mut String, level: usize, slot: &LaunchSlot) {
     // Everything else is a daily.
     let all_months_array = |out: &mut String, lvl: usize| {
         for m in [
-            "January", "February", "March", "April", "May", "June",
-            "July", "August", "September", "October", "November", "December",
+            "January",
+            "February",
+            "March",
+            "April",
+            "May",
+            "June",
+            "July",
+            "August",
+            "September",
+            "October",
+            "November",
+            "December",
         ] {
             indent(out, lvl);
             out.push_str(&format!("<{m} />\n"));
@@ -364,9 +374,17 @@ fn emit_calendar_trigger(out: &mut String, level: usize, slot: &LaunchSlot) {
         indent(out, level + 2);
         out.push_str("<Months>\n");
         let mtag = match m {
-            1 => "January", 2 => "February", 3 => "March", 4 => "April",
-            5 => "May", 6 => "June", 7 => "July", 8 => "August",
-            9 => "September", 10 => "October", 11 => "November",
+            1 => "January",
+            2 => "February",
+            3 => "March",
+            4 => "April",
+            5 => "May",
+            6 => "June",
+            7 => "July",
+            8 => "August",
+            9 => "September",
+            10 => "October",
+            11 => "November",
             _ => "December",
         };
         indent(out, level + 3);
@@ -414,9 +432,17 @@ fn emit_calendar_trigger(out: &mut String, level: usize, slot: &LaunchSlot) {
         out.push_str("<Months>\n");
         if let Some(m) = slot.month {
             let mtag = match m {
-                1 => "January", 2 => "February", 3 => "March", 4 => "April",
-                5 => "May", 6 => "June", 7 => "July", 8 => "August",
-                9 => "September", 10 => "October", 11 => "November",
+                1 => "January",
+                2 => "February",
+                3 => "March",
+                4 => "April",
+                5 => "May",
+                6 => "June",
+                7 => "July",
+                8 => "August",
+                9 => "September",
+                10 => "October",
+                11 => "November",
                 _ => "December",
             };
             indent(out, level + 3);
@@ -471,7 +497,10 @@ mod tests {
             json_schema: None,
             bare: false,
             extra_env: Default::default(),
-            trigger: Trigger::Cron { cron: cron.into(), timezone: None },
+            trigger: Trigger::Cron {
+                cron: cron.into(),
+                timezone: None,
+            },
             platform_options: PlatformOptions::default(),
             log_retention_runs: 50,
             created_at: now,
@@ -486,7 +515,9 @@ mod tests {
         let xml = render_xml(&a).unwrap();
         assert!(xml.starts_with("<?xml version=\"1.0\" encoding=\"UTF-16\"?>"));
         assert!(xml.contains("<Source>claudepot</Source>"));
-        assert!(xml.contains("<URI>\\Claudepot\\automation_00000000-0000-0000-0000-000000000000</URI>"));
+        assert!(
+            xml.contains("<URI>\\Claudepot\\automation_00000000-0000-0000-0000-000000000000</URI>")
+        );
         assert!(xml.contains("<CalendarTrigger>"));
         assert!(xml.contains("<StartBoundary>2000-01-01T09:00:00</StartBoundary>"));
         assert!(xml.contains("<ScheduleByDay>"));

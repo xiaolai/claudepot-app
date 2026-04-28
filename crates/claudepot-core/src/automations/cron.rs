@@ -249,10 +249,7 @@ fn parse_part(
     let (range_part, step) = match part.split_once('/') {
         Some((r, s)) => {
             let n: u8 = s.parse().map_err(|_| {
-                AutomationError::InvalidCron(
-                    expr.to_string(),
-                    format!("invalid step in '{part}'"),
-                )
+                AutomationError::InvalidCron(expr.to_string(), format!("invalid step in '{part}'"))
             })?;
             if n == 0 {
                 return Err(AutomationError::InvalidCron(
@@ -307,13 +304,27 @@ fn parse_value(raw: &str, kind: FieldKind, expr: &str) -> Result<u8, AutomationE
     let lower = raw.to_ascii_lowercase();
     let table: &[(&str, u8)] = match kind {
         FieldKind::Mon => &[
-            ("jan", 1), ("feb", 2), ("mar", 3), ("apr", 4),
-            ("may", 5), ("jun", 6), ("jul", 7), ("aug", 8),
-            ("sep", 9), ("oct", 10), ("nov", 11), ("dec", 12),
+            ("jan", 1),
+            ("feb", 2),
+            ("mar", 3),
+            ("apr", 4),
+            ("may", 5),
+            ("jun", 6),
+            ("jul", 7),
+            ("aug", 8),
+            ("sep", 9),
+            ("oct", 10),
+            ("nov", 11),
+            ("dec", 12),
         ],
         FieldKind::Dow => &[
-            ("sun", 0), ("mon", 1), ("tue", 2), ("wed", 3),
-            ("thu", 4), ("fri", 5), ("sat", 6),
+            ("sun", 0),
+            ("mon", 1),
+            ("tue", 2),
+            ("wed", 3),
+            ("thu", 4),
+            ("fri", 5),
+            ("sat", 6),
         ],
         _ => &[],
     };
@@ -321,10 +332,7 @@ fn parse_value(raw: &str, kind: FieldKind, expr: &str) -> Result<u8, AutomationE
         .iter()
         .find_map(|(n, v)| (*n == lower).then_some(*v))
         .ok_or_else(|| {
-            AutomationError::InvalidCron(
-                expr.to_string(),
-                format!("unrecognized value '{raw}'"),
-            )
+            AutomationError::InvalidCron(expr.to_string(), format!("unrecognized value '{raw}'"))
         })
 }
 
@@ -425,8 +433,8 @@ mod tests {
 
     #[test]
     fn rejects_unknown_alpha() {
-        assert!(expand("0 9 * sun *").is_err());        // sun in mon column
-        assert!(expand("0 9 * * jan").is_err());        // jan in dow column
+        assert!(expand("0 9 * sun *").is_err()); // sun in mon column
+        assert!(expand("0 9 * * jan").is_err()); // jan in dow column
         assert!(expand("0 9 * xyz *").is_err());
     }
 
@@ -470,7 +478,11 @@ mod tests {
         let s = ok("0 9 1 * 1");
         assert_eq!(s.len(), 2);
         // One slot has dom=Some(1), dow=None; another dom=None, dow=Some(1)
-        assert!(s.iter().any(|x| x.day_of_month == Some(1) && x.day_of_week.is_none()));
-        assert!(s.iter().any(|x| x.day_of_month.is_none() && x.day_of_week == Some(1)));
+        assert!(s
+            .iter()
+            .any(|x| x.day_of_month == Some(1) && x.day_of_week.is_none()));
+        assert!(s
+            .iter()
+            .any(|x| x.day_of_month.is_none() && x.day_of_week == Some(1)));
     }
 }

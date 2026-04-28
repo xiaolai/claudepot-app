@@ -148,9 +148,7 @@ fn count_new_since_respects_cursor_and_filters() {
     assert!(id_warn < id_info, "rowid is monotonic");
 
     // No cursor: every row counts.
-    let total = idx
-        .count_new_since(None, &RecentQuery::default())
-        .unwrap();
+    let total = idx.count_new_since(None, &RecentQuery::default()).unwrap();
     assert_eq!(total, 2);
 
     // Cursor at id_warn: only the info row is "new."
@@ -184,7 +182,8 @@ fn count_new_since_respects_cursor_and_filters() {
     };
     assert_eq!(idx.recent(&only_plugin).unwrap().len(), 1);
     assert_eq!(
-        idx.count_new_since(Some(id_tagged - 1), &only_plugin).unwrap(),
+        idx.count_new_since(Some(id_tagged - 1), &only_plugin)
+            .unwrap(),
         1,
         "count_new_since must honor plugin filter — parity with recent()"
     );
@@ -233,13 +232,18 @@ fn project_filter_does_not_treat_percent_as_wildcard() {
 fn insert_and_recent_round_trip() {
     let dir = tempdir().unwrap();
     let idx = ActivityIndex::open(&dir.path().join("a.db")).unwrap();
-    let id = idx.insert(&sample_card("u1", 0, "Hook failed: PostToolUse:Edit")).unwrap();
+    let id = idx
+        .insert(&sample_card("u1", 0, "Hook failed: PostToolUse:Edit"))
+        .unwrap();
     assert!(id.is_some());
     assert_eq!(idx.row_count().unwrap(), 1);
     let cards = idx.recent(&RecentQuery::default()).unwrap();
     assert_eq!(cards.len(), 1);
     assert_eq!(cards[0].title, "Hook failed: PostToolUse:Edit");
-    assert_eq!(cards[0].help.as_ref().unwrap().template_id, "hook.plugin_missing");
+    assert_eq!(
+        cards[0].help.as_ref().unwrap().template_id,
+        "hook.plugin_missing"
+    );
 }
 
 /// The idempotency invariant — re-inserting a card with the same

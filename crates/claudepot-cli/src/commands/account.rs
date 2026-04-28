@@ -10,7 +10,7 @@ pub async fn list(ctx: &AppContext) -> Result<()> {
     // sync the GUI already performs on startup.
     match claudepot_core::services::account_service::sync_from_current_cc(&ctx.store).await {
         Ok(Some(_)) => {} // synced — pointer may have been corrected
-        Ok(None) => {}     // CC has no blob or no matching account
+        Ok(None) => {}    // CC has no blob or no matching account
         Err(e) => {
             // Best-effort: if /profile fails (network, token revoked),
             // show the DB-sourced list with a warning rather than failing.
@@ -69,8 +69,8 @@ pub async fn add(ctx: &AppContext, from_current: bool, from_token: Option<String
         } else {
             String::new()
         };
-        let token = resolve_refresh_token(&token_arg, &stdin_line)
-            .map_err(|e| anyhow::anyhow!("{e}"))?;
+        let token =
+            resolve_refresh_token(&token_arg, &stdin_line).map_err(|e| anyhow::anyhow!("{e}"))?;
         ctx.info("Exchanging refresh token...");
         ctx.info("Fetching account profile...");
         account_service::register_from_token(&ctx.store, &token).await?
@@ -207,8 +207,7 @@ pub async fn remove(ctx: &AppContext, email_input: &str) -> Result<()> {
     }
 
     let result =
-        account_service::remove_account(&ctx.store, account.uuid, Some(&ctx.usage_cache))
-            .await?;
+        account_service::remove_account(&ctx.store, account.uuid, Some(&ctx.usage_cache)).await?;
 
     if ctx.json {
         println!(
@@ -252,8 +251,7 @@ pub async fn inspect(ctx: &AppContext, email_input: &str) -> Result<()> {
         .ok_or_else(|| anyhow::anyhow!("account not found: {email}"))?;
 
     let health = account_service::token_health(account.uuid, account.has_cli_credentials);
-    let usage_result =
-        account_service::fetch_usage(&ctx.usage_cache, account.uuid, false).await;
+    let usage_result = account_service::fetch_usage(&ctx.usage_cache, account.uuid, false).await;
 
     if ctx.json {
         let mut j = serde_json::json!({
@@ -369,9 +367,7 @@ pub async fn inspect(ctx: &AppContext, email_input: &str) -> Result<()> {
                         let limit = extra.monthly_limit.unwrap_or(0.0) / 100.0;
                         let sym = currency_symbol(extra.currency.as_deref());
                         if limit > 0.0 {
-                            let pct = extra
-                                .utilization
-                                .unwrap_or_else(|| (used / limit) * 100.0);
+                            let pct = extra.utilization.unwrap_or_else(|| (used / limit) * 100.0);
                             let balance = (limit - used).max(0.0);
                             println!(
                                 "  Extra:     {pct:.0}% used · {sym}{used:.2} / {sym}{limit:.2} · {sym}{balance:.2} left"
@@ -402,10 +398,7 @@ pub async fn inspect(ctx: &AppContext, email_input: &str) -> Result<()> {
     Ok(())
 }
 
-fn print_window(
-    label: &str,
-    window: &Option<claudepot_core::oauth::usage::UsageWindow>,
-) {
+fn print_window(label: &str, window: &Option<claudepot_core::oauth::usage::UsageWindow>) {
     if let Some(w) = window {
         match &w.resets_at {
             Some(ts) => {
@@ -464,14 +457,9 @@ pub async fn verify(ctx: &AppContext, email_input: Option<&str>) -> Result<()> {
         // A concurrent `account remove` between resolve and lookup
         // turns a normal user error into a process panic. Convert to
         // a regular error like every other lookup path.
-        let acct = ctx
-            .store
-            .find_by_email(&resolved)?
-            .ok_or_else(|| {
-                anyhow::anyhow!(
-                    "resolved email '{resolved}' not found (removed concurrently?)"
-                )
-            })?;
+        let acct = ctx.store.find_by_email(&resolved)?.ok_or_else(|| {
+            anyhow::anyhow!("resolved email '{resolved}' not found (removed concurrently?)")
+        })?;
         vec![acct]
     } else {
         ctx.store.list()?
@@ -513,7 +501,12 @@ pub async fn verify(ctx: &AppContext, email_input: Option<&str>) -> Result<()> {
                 (format!("error: {e}"), None)
             }
         };
-        rows.push((account.email.clone(), account.uuid.to_string(), status, actual));
+        rows.push((
+            account.email.clone(),
+            account.uuid.to_string(),
+            status,
+            actual,
+        ));
     }
 
     if ctx.json {
@@ -605,10 +598,7 @@ mod tests {
         // token that propagated into `register_from_token` and surfaced
         // as an opaque "token exchange failed" error. We now fail fast
         // with a clear local error.
-        assert_eq!(
-            resolve_refresh_token("-", ""),
-            Err(TokenSourceError::Empty)
-        );
+        assert_eq!(resolve_refresh_token("-", ""), Err(TokenSourceError::Empty));
         assert_eq!(
             resolve_refresh_token("-", "\n"),
             Err(TokenSourceError::Empty)

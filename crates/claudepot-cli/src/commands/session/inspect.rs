@@ -8,15 +8,13 @@ use super::*;
 pub(super) fn resolve_detail(target: &str) -> Result<SessionDetail> {
     let cfg = paths::claude_config_dir();
     // Heuristic: anything containing `/` or ending in `.jsonl` is a path.
-    let looks_like_path = target.contains('/')
-        || target.contains('\\')
-        || target.ends_with(".jsonl");
+    let looks_like_path =
+        target.contains('/') || target.contains('\\') || target.ends_with(".jsonl");
     if looks_like_path {
         read_session_detail_at_path(&cfg, Path::new(target))
             .with_context(|| format!("read transcript at {target}"))
     } else {
-        read_session_detail(&cfg, target)
-            .with_context(|| format!("locate session {target}"))
+        read_session_detail(&cfg, target).with_context(|| format!("locate session {target}"))
     }
 }
 
@@ -196,14 +194,15 @@ pub fn view_cmd(ctx: &AppContext, target: &str, show: &str) -> Result<()> {
 
 fn print_chunks_human(chunks: &[claudepot_core::session_chunks::SessionChunk]) {
     use claudepot_core::session_chunks::SessionChunk;
-    println!("{:>4}  {:<8}  {:>6}  {:>9}  DETAIL", "ID", "TYPE", "MSGS", "DUR(ms)");
+    println!(
+        "{:>4}  {:<8}  {:>6}  {:>9}  DETAIL",
+        "ID", "TYPE", "MSGS", "DUR(ms)"
+    );
     for c in chunks {
         let h = c.header();
         let (kind, detail) = match c {
             SessionChunk::User { event_index, .. } => ("user", format!("event #{event_index}")),
-            SessionChunk::System { event_index, .. } => {
-                ("system", format!("event #{event_index}"))
-            }
+            SessionChunk::System { event_index, .. } => ("system", format!("event #{event_index}")),
             SessionChunk::Compact { event_index, .. } => {
                 ("compact", format!("event #{event_index}"))
             }
@@ -307,4 +306,3 @@ fn count_by_category(
         "hard_noise": hard_noise,
     })
 }
-

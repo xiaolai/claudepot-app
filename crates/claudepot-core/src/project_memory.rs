@@ -136,8 +136,7 @@ pub fn move_memory_dir_if_needed(
                     })
                     .collect();
                 let snap = snaps.join(format!("{ts}-{safe_san}-P8.snap"));
-                crate::fs_utils::copy_dir_recursive(&new_mem, &snap)
-                    .map_err(ProjectError::Io)?;
+                crate::fs_utils::copy_dir_recursive(&new_mem, &snap).map_err(ProjectError::Io)?;
                 result.snapshot_path = Some(snap);
             }
             fs::remove_dir_all(&new_mem).map_err(ProjectError::Io)?;

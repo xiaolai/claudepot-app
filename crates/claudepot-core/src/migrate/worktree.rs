@@ -31,8 +31,7 @@ pub fn project_scoped_prefix(project_id: &str) -> String {
 
 /// Filenames excluded from project-scoped bundling. Spec §4 settings
 /// tier table — these are always local, never travel.
-pub const EXCLUDED_BASENAMES: &[&str] =
-    &["settings.local.json", "managed-settings.json"];
+pub const EXCLUDED_BASENAMES: &[&str] = &["settings.local.json", "managed-settings.json"];
 
 /// Excluded directory prefixes (relative to `<cwd>/.claude/`).
 pub const EXCLUDED_DIRS: &[&str] = &["managed-settings.d"];
@@ -256,11 +255,7 @@ mod tests {
         fs::create_dir_all(cwd.join(".claude")).unwrap();
         fs::write(cwd.join(".claude/settings.json"), "{}").unwrap();
         fs::write(cwd.join(".claude/settings.local.json"), "{\"secret\":1}").unwrap();
-        fs::write(
-            cwd.join(".claude/managed-settings.json"),
-            "{\"policy\":1}",
-        )
-        .unwrap();
+        fs::write(cwd.join(".claude/managed-settings.json"), "{\"policy\":1}").unwrap();
         fs::write(cwd.join("CLAUDE.md"), "# project prefs\n").unwrap();
 
         let bundle_path = tmp.path().join("w.tar.zst");
@@ -274,7 +269,8 @@ mod tests {
 
         let r = BundleReader::open(&bundle_path).unwrap();
         assert_eq!(
-            r.read_entry("projects/abc/project-scoped/CLAUDE.md").unwrap(),
+            r.read_entry("projects/abc/project-scoped/CLAUDE.md")
+                .unwrap(),
             b"# project prefs\n"
         );
         assert!(r

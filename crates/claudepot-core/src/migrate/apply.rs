@@ -139,8 +139,8 @@ impl ImportJournal {
         if let Some(parent) = path.parent() {
             fs::create_dir_all(parent).map_err(MigrateError::from)?;
         }
-        let bytes = serde_json::to_vec_pretty(self)
-            .map_err(|e| MigrateError::Serialize(e.to_string()))?;
+        let bytes =
+            serde_json::to_vec_pretty(self).map_err(|e| MigrateError::Serialize(e.to_string()))?;
         let parent = path.parent().unwrap_or_else(|| Path::new("."));
         let mut tmp = tempfile::NamedTempFile::new_in(parent).map_err(MigrateError::from)?;
         std::io::Write::write_all(&mut tmp, &bytes).map_err(MigrateError::from)?;
@@ -355,8 +355,7 @@ fn rollback_one(step: &JournalStep) -> Result<StepRollback, MigrateError> {
             Ok(StepRollback::Reversed)
         }
         JournalStepKind::RenameFile => {
-            let (Some(before), Some(after)) = (step.before.as_ref(), step.after.as_ref())
-            else {
+            let (Some(before), Some(after)) = (step.before.as_ref(), step.after.as_ref()) else {
                 return Ok(StepRollback::SkippedNoOp);
             };
             let after_p = Path::new(after);
@@ -500,7 +499,9 @@ pub fn discard_snapshots(bundle_id: &str) -> Result<(), MigrateError> {
 /// Check whether a journal is within the 24h undo window.
 pub fn within_undo_window(journal: &ImportJournal) -> bool {
     const UNDO_WINDOW_SECS: u64 = 24 * 60 * 60;
-    let pivot = journal.finished_unix_secs.unwrap_or(journal.started_unix_secs);
+    let pivot = journal
+        .finished_unix_secs
+        .unwrap_or(journal.started_unix_secs);
     let age = now_secs().saturating_sub(pivot);
     age <= UNDO_WINDOW_SECS
 }
@@ -592,7 +593,11 @@ mod tests {
         fs::write(&f, b"x").unwrap();
 
         let mut j = ImportJournal::new("rb1".to_string());
-        j.record(step(JournalStepKind::CreateFile, None, Some(f.to_str().unwrap())));
+        j.record(step(
+            JournalStepKind::CreateFile,
+            None,
+            Some(f.to_str().unwrap()),
+        ));
         j.mark_committed();
 
         let report = rollback(&j).unwrap();
@@ -631,11 +636,7 @@ mod tests {
         fs::write(d.join("nested/x"), b"x").unwrap();
 
         let mut j = ImportJournal::new("rb3".to_string());
-        let mut s = step(
-            JournalStepKind::CreateDir,
-            None,
-            Some(d.to_str().unwrap()),
-        );
+        let mut s = step(JournalStepKind::CreateDir, None, Some(d.to_str().unwrap()));
         // New contract: dir_inventory must list every file the
         // import wrote so surgical rollback can target them.
         s.dir_inventory = vec!["nested/x".to_string()];
@@ -661,11 +662,7 @@ mod tests {
         fs::write(d.join("user-added.txt"), b"hello").unwrap();
 
         let mut j = ImportJournal::new("rb-survives".to_string());
-        let mut s = step(
-            JournalStepKind::CreateDir,
-            None,
-            Some(d.to_str().unwrap()),
-        );
+        let mut s = step(JournalStepKind::CreateDir, None, Some(d.to_str().unwrap()));
         s.dir_inventory = vec!["nested/imported.jsonl".to_string()];
         j.record(s);
 
@@ -673,9 +670,15 @@ mod tests {
         // 0 reversed (we skipped this step due to tamper); 1 tampered.
         assert_eq!(report.reversed, 0);
         assert_eq!(report.skipped_tampered.len(), 1);
-        assert!(d.exists(), "dir must survive when user-added files are present");
+        assert!(
+            d.exists(),
+            "dir must survive when user-added files are present"
+        );
         assert!(d.join("user-added.txt").exists());
-        assert!(!d.join("nested/imported.jsonl").exists(), "imported file removed");
+        assert!(
+            !d.join("nested/imported.jsonl").exists(),
+            "imported file removed"
+        );
     }
 
     #[test]
@@ -754,8 +757,16 @@ mod tests {
 
         // Two CreateFile steps. LIFO rollback removes b before a.
         let mut j = ImportJournal::new("rb-lifo".to_string());
-        j.record(step(JournalStepKind::CreateFile, None, Some(a.to_str().unwrap())));
-        j.record(step(JournalStepKind::CreateFile, None, Some(b.to_str().unwrap())));
+        j.record(step(
+            JournalStepKind::CreateFile,
+            None,
+            Some(a.to_str().unwrap()),
+        ));
+        j.record(step(
+            JournalStepKind::CreateFile,
+            None,
+            Some(b.to_str().unwrap()),
+        ));
         let report = rollback(&j).unwrap();
         assert_eq!(report.reversed, 2);
         assert!(!a.exists());

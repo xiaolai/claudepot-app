@@ -114,8 +114,7 @@ pub fn rewrite_claude_json(
         // Snapshot the existing value before we touch it, so the user can
         // recover. Snapshot written even for Merge (not just Overwrite)
         // because Merge still destroys data where old-wins on collision.
-        result.snapshot_path =
-            Some(write_snapshot(snapshots_dir, new_san, &existing)?);
+        result.snapshot_path = Some(write_snapshot(snapshots_dir, new_san, &existing)?);
 
         match policy {
             ConfigCollisionPolicy::Error => {
@@ -132,12 +131,8 @@ pub fn rewrite_claude_json(
             ConfigCollisionPolicy::Merge => {
                 // Shallow merge: old wins on top-level collision, new
                 // contributes any keys old doesn't have.
-                
-                shallow_merge_old_wins(
-                    moved_value,
-                    existing,
-                    &mut result.merged_keys,
-                )
+
+                shallow_merge_old_wins(moved_value, existing, &mut result.merged_keys)
             }
             ConfigCollisionPolicy::Overwrite => moved_value,
         }
@@ -168,11 +163,7 @@ pub fn rewrite_claude_json(
 /// If either value is not an object, returns `old_val` unchanged (we
 /// don't know how to deep-merge non-object types meaningfully; the
 /// snapshot preserves the dropped data).
-fn shallow_merge_old_wins(
-    old_val: Value,
-    new_val: Value,
-    merged_keys: &mut Vec<String>,
-) -> Value {
+fn shallow_merge_old_wins(old_val: Value, new_val: Value, merged_keys: &mut Vec<String>) -> Value {
     let (mut old_map, new_map) = match (old_val, new_val) {
         (Value::Object(o), Value::Object(n)) => (o, n),
         (old, _) => return old, // non-object: can't merge meaningfully; preserve old
@@ -202,7 +193,13 @@ fn write_snapshot(
     // are already [a-zA-Z0-9-], so this is belt-and-suspenders.
     let safe_san: String = new_san
         .chars()
-        .map(|c| if c.is_ascii_alphanumeric() || c == '-' { c } else { '_' })
+        .map(|c| {
+            if c.is_ascii_alphanumeric() || c == '-' {
+                c
+            } else {
+                '_'
+            }
+        })
         .collect();
 
     let ts = std::time::SystemTime::now()
@@ -267,8 +264,7 @@ pub fn rewrite_project_settings(
     if starts_with_tilde || !is_absolute {
         return Ok(false);
     }
-    let Some(new_value) =
-        crate::project_rewrite::rewrite_path_string(current, old_path, new_path)
+    let Some(new_value) = crate::project_rewrite::rewrite_path_string(current, old_path, new_path)
     else {
         return Ok(false);
     };
@@ -297,10 +293,7 @@ fn write_config_atomic(path: &Path, value: &Value) -> Result<(), ProjectError> {
         use std::os::unix::fs::PermissionsExt;
         if let Ok(meta) = fs::metadata(path) {
             let mode = meta.permissions().mode();
-            let _ = fs::set_permissions(
-                tmp.path(),
-                fs::Permissions::from_mode(mode),
-            );
+            let _ = fs::set_permissions(tmp.path(), fs::Permissions::from_mode(mode));
         }
     }
 
@@ -368,10 +361,7 @@ mod tests {
         let tmp = tempfile::tempdir().unwrap();
         let snap = tmp.path().join("snaps");
         let cfg = tmp.path().join("claude.json");
-        write_json(
-            &cfg,
-            &json!({"projects": {"/elsewhere": {"trust": true}}}),
-        );
+        write_json(&cfg, &json!({"projects": {"/elsewhere": {"trust": true}}}));
 
         let r = rewrite_claude_json(
             &cfg,
@@ -506,8 +496,7 @@ mod tests {
 
         // Snapshot captures pre-existing new_path value.
         let snap_value: Value =
-            serde_json::from_str(&fs::read_to_string(r.snapshot_path.unwrap()).unwrap())
-                .unwrap();
+            serde_json::from_str(&fs::read_to_string(r.snapshot_path.unwrap()).unwrap()).unwrap();
         assert_eq!(snap_value["trust"], json!(false));
         assert_eq!(snap_value["ghostKey"], json!("stay"));
     }
@@ -601,15 +590,10 @@ mod tests {
         )
         .unwrap();
 
-        let rewrote =
-            rewrite_project_settings(&proj, "/old/project", "/new/path").unwrap();
+        let rewrote = rewrite_project_settings(&proj, "/old/project", "/new/path").unwrap();
         assert!(rewrote);
-        let after: Value =
-            serde_json::from_str(&fs::read_to_string(&settings).unwrap()).unwrap();
-        assert_eq!(
-            after["autoMemoryDirectory"],
-            json!("/new/path/memdir")
-        );
+        let after: Value = serde_json::from_str(&fs::read_to_string(&settings).unwrap()).unwrap();
+        assert_eq!(after["autoMemoryDirectory"], json!("/new/path/memdir"));
         assert_eq!(after["other"], json!("keep"));
     }
 
@@ -621,12 +605,10 @@ mod tests {
         let settings = proj.join(".claude").join("settings.json");
         fs::write(&settings, r#"{"autoMemoryDirectory":"~/memdir"}"#).unwrap();
 
-        let rewrote =
-            rewrite_project_settings(&proj, "/old", "/new").unwrap();
+        let rewrote = rewrite_project_settings(&proj, "/old", "/new").unwrap();
         assert!(!rewrote);
         // Unchanged.
-        let after: Value =
-            serde_json::from_str(&fs::read_to_string(&settings).unwrap()).unwrap();
+        let after: Value = serde_json::from_str(&fs::read_to_string(&settings).unwrap()).unwrap();
         assert_eq!(after["autoMemoryDirectory"], json!("~/memdir"));
     }
 
@@ -641,8 +623,7 @@ mod tests {
         )
         .unwrap();
 
-        let rewrote =
-            rewrite_project_settings(&proj, "/old", "/new").unwrap();
+        let rewrote = rewrite_project_settings(&proj, "/old", "/new").unwrap();
         assert!(!rewrote);
     }
 
@@ -652,8 +633,7 @@ mod tests {
         let proj = tmp.path().join("new");
         fs::create_dir(&proj).unwrap();
 
-        let rewrote =
-            rewrite_project_settings(&proj, "/old", "/new").unwrap();
+        let rewrote = rewrite_project_settings(&proj, "/old", "/new").unwrap();
         assert!(!rewrote);
     }
 
@@ -668,8 +648,7 @@ mod tests {
         )
         .unwrap();
 
-        let rewrote =
-            rewrite_project_settings(&proj, "/old", "/new").unwrap();
+        let rewrote = rewrite_project_settings(&proj, "/old", "/new").unwrap();
         assert!(!rewrote);
     }
 

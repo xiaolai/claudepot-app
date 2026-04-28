@@ -216,7 +216,11 @@ mod tests {
         // explicitly here — no caller-side NFC — to exercise the gate.
         let mut t = SubstitutionTable::new();
         // Insert rule in NFC form (precomposed `é`).
-        t.push("/Users/caf\u{00E9}/x", "/home/cafe/x", RuleOrigin::ProjectCwd);
+        t.push(
+            "/Users/caf\u{00E9}/x",
+            "/home/cafe/x",
+            RuleOrigin::ProjectCwd,
+        );
         t.finalize();
         // Lookup with raw NFD form (`e` + combining acute).
         let raw_nfd = "/Users/caf\u{0065}\u{0301}/x/sub.rs";
@@ -229,11 +233,7 @@ mod tests {
         // Same shape but for verbatim `\\?\C:\…` lookups: rules use
         // the simplified form, lookup must too.
         let mut t = SubstitutionTable::new();
-        t.push(
-            r"C:\Users\joker\x",
-            r"D:\code\x",
-            RuleOrigin::ProjectCwd,
-        );
+        t.push(r"C:\Users\joker\x", r"D:\code\x", RuleOrigin::ProjectCwd);
         t.finalize();
         let verbatim_lookup = r"\\?\C:\Users\joker\x\foo.rs";
         let result = t.apply_path(verbatim_lookup);
@@ -276,18 +276,12 @@ mod tests {
 
     #[test]
     fn target_slug_windows_drive() {
-        assert_eq!(
-            target_slug(r"C:\Users\alice\x"),
-            "C--Users-alice-x"
-        );
+        assert_eq!(target_slug(r"C:\Users\alice\x"), "C--Users-alice-x");
     }
 
     #[test]
     fn target_slug_unc() {
-        assert_eq!(
-            target_slug(r"\\nas\share\proj"),
-            "--nas-share-proj"
-        );
+        assert_eq!(target_slug(r"\\nas\share\proj"), "--nas-share-proj");
     }
 
     #[test]
@@ -295,10 +289,7 @@ mod tests {
         // Verbatim `\\?\C:\Users\joker` must be stripped before sanitize,
         // otherwise we'd produce a slug with leading `--` from the
         // verbatim signature.
-        assert_eq!(
-            target_slug(r"\\?\C:\Users\joker"),
-            "C--Users-joker"
-        );
+        assert_eq!(target_slug(r"\\?\C:\Users\joker"), "C--Users-joker");
     }
 
     #[test]

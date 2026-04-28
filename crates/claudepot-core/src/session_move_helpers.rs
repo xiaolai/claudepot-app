@@ -107,13 +107,7 @@ pub(crate) fn move_session_subdir_with_progress(
         // Fall through to copy+delete.
         if err.raw_os_error() == Some(libc::EXDEV) {
             let mut done = 0usize;
-            copy_tree_then_remove_with_progress(
-                from_sub,
-                to_sub,
-                &mut done,
-                total,
-                on_progress,
-            )?;
+            copy_tree_then_remove_with_progress(from_sub, to_sub, &mut done, total, on_progress)?;
         } else {
             return Err(err.into());
         }
@@ -245,8 +239,8 @@ pub(crate) fn clear_claude_json_session_pointers(
     // output; acceptable since CC itself rewrites this file freely).
     let parent = path.parent().unwrap_or_else(|| Path::new("."));
     let mut tmp = tempfile::NamedTempFile::new_in(parent)?;
-    let new_json = serde_json::to_string_pretty(&root)
-        .map_err(|e| std::io::Error::other(e.to_string()))?;
+    let new_json =
+        serde_json::to_string_pretty(&root).map_err(|e| std::io::Error::other(e.to_string()))?;
     tmp.write_all(new_json.as_bytes())?;
     tmp.write_all(b"\n")?;
     tmp.flush()?;

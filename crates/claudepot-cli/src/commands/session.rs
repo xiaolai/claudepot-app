@@ -64,7 +64,6 @@ fn format_bytes(n: u64) -> String {
     }
 }
 
-
 fn print_json<T: serde::Serialize>(value: &T) {
     match serde_json::to_string_pretty(value) {
         Ok(s) => println!("{s}"),
@@ -75,7 +74,6 @@ fn print_json<T: serde::Serialize>(value: &T) {
 // ---------------------------------------------------------------------------
 // Prune + trash
 // ---------------------------------------------------------------------------
-
 
 fn format_size(bytes: u64) -> String {
     const KB: f64 = 1024.0;
@@ -110,9 +108,7 @@ fn parse_duration(s: &str) -> Result<std::time::Duration> {
     if t.is_empty() {
         bail!("empty duration");
     }
-    let (num_part, unit) = t.split_at(
-        t.find(|c: char| c.is_ascii_alphabetic()).unwrap_or(t.len()),
-    );
+    let (num_part, unit) = t.split_at(t.find(|c: char| c.is_ascii_alphabetic()).unwrap_or(t.len()));
     let n: u64 = num_part
         .parse()
         .with_context(|| format!("invalid duration: {s}"))?;
@@ -131,9 +127,7 @@ fn parse_size(s: &str) -> Result<u64> {
     if t.is_empty() {
         bail!("empty size");
     }
-    let (num_part, unit) = t.split_at(
-        t.find(|c: char| c.is_ascii_alphabetic()).unwrap_or(t.len()),
-    );
+    let (num_part, unit) = t.split_at(t.find(|c: char| c.is_ascii_alphabetic()).unwrap_or(t.len()));
     let n: u64 = num_part
         .parse()
         .with_context(|| format!("invalid size: {s}"))?;

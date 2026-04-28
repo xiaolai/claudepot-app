@@ -111,17 +111,15 @@ pub fn build_chunks(events: &[SessionEvent]) -> Vec<SessionChunk> {
         let cat = classify_event(ev);
         match cat {
             MessageCategory::HardNoise => continue,
-            MessageCategory::Ai => {
-                match &mut current_ai {
-                    Some(ai) => ai.push(idx, ev),
-                    None => {
-                        let mut ai = AiInProgress::new(next_id);
-                        ai.push(idx, ev);
-                        current_ai = Some(ai);
-                        next_id += 1;
-                    }
+            MessageCategory::Ai => match &mut current_ai {
+                Some(ai) => ai.push(idx, ev),
+                None => {
+                    let mut ai = AiInProgress::new(next_id);
+                    ai.push(idx, ev);
+                    current_ai = Some(ai);
+                    next_id += 1;
                 }
-            }
+            },
             other => {
                 if let Some(ai) = current_ai.take() {
                     chunks.push(ai.finish(&linked));
@@ -291,10 +289,7 @@ fn add_usage(acc: &mut TokenUsage, u: &TokenUsage) {
 /// it as charged. `None` UUIDs are always charged — they're rare
 /// enough that a single fragment per missing-UUID turn won't matter
 /// in practice, and we'd rather over-count than silently drop data.
-pub(crate) fn should_charge_usage(
-    uuid: &Option<String>,
-    seen: &mut HashSet<String>,
-) -> bool {
+pub(crate) fn should_charge_usage(uuid: &Option<String>, seen: &mut HashSet<String>) -> bool {
     match uuid {
         Some(u) => seen.insert(u.clone()),
         None => true,
@@ -321,7 +316,11 @@ mod tests {
         }
     }
 
-    fn assistant_text(s: &str, t: Option<DateTime<Utc>>, tokens: Option<TokenUsage>) -> SessionEvent {
+    fn assistant_text(
+        s: &str,
+        t: Option<DateTime<Utc>>,
+        tokens: Option<TokenUsage>,
+    ) -> SessionEvent {
         SessionEvent::AssistantText {
             ts: t,
             uuid: None,
@@ -363,14 +362,23 @@ mod tests {
         let chunks = build_chunks(&events);
         assert_eq!(chunks.len(), 2);
         match &chunks[0] {
-            SessionChunk::User { event_index, header, .. } => {
+            SessionChunk::User {
+                event_index,
+                header,
+                ..
+            } => {
                 assert_eq!(*event_index, 0);
                 assert_eq!(header.id, 0);
             }
             other => panic!("wanted User, got {other:?}"),
         }
         match &chunks[1] {
-            SessionChunk::Ai { event_indices, tool_executions, header, .. } => {
+            SessionChunk::Ai {
+                event_indices,
+                tool_executions,
+                header,
+                ..
+            } => {
                 assert_eq!(event_indices, &vec![1]);
                 assert!(tool_executions.is_empty());
                 assert_eq!(header.id, 1);
@@ -408,7 +416,12 @@ mod tests {
         ];
         let chunks = build_chunks(&events);
         assert_eq!(chunks.len(), 2);
-        if let SessionChunk::Ai { event_indices, header, .. } = &chunks[1] {
+        if let SessionChunk::Ai {
+            event_indices,
+            header,
+            ..
+        } = &chunks[1]
+        {
             assert_eq!(event_indices, &vec![1, 2, 3]);
             assert_eq!(header.metrics.message_count, 3);
             assert_eq!(header.metrics.thinking_count, 1);
@@ -445,7 +458,10 @@ mod tests {
     fn system_command_stdout_is_its_own_chunk() {
         let events = vec![
             user("hi", None),
-            user("<local-command-stdout>fork sha</local-command-stdout>", None),
+            user(
+                "<local-command-stdout>fork sha</local-command-stdout>",
+                None,
+            ),
             assistant_text("k", None, None),
         ];
         let chunks = build_chunks(&events);

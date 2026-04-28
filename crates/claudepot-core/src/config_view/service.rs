@@ -175,9 +175,9 @@ impl ConfigScanService {
             // the very first writer (`gen=1 > last_committed_gen=0`).
             // If we ever land here, fall back to an empty tree at the
             // requested anchor so callers don't see a dangling Arc.
-            let cwd = anchor
-                .map(|p| p.to_path_buf())
-                .unwrap_or_else(|| dirs::home_dir().unwrap_or_else(|| std::path::PathBuf::from("/")));
+            let cwd = anchor.map(|p| p.to_path_buf()).unwrap_or_else(|| {
+                dirs::home_dir().unwrap_or_else(|| std::path::PathBuf::from("/"))
+            });
             Arc::new(super::empty_tree(&cwd))
         })
     }
@@ -223,10 +223,7 @@ mod tests {
         let h2 = svc.start_scan();
         assert!(svc.commit(h1, fixture_tree("a")));
         assert!(svc.commit(h2, fixture_tree("b")));
-        assert_eq!(
-            svc.current_tree().unwrap().cwd,
-            PathBuf::from("b")
-        );
+        assert_eq!(svc.current_tree().unwrap().cwd, PathBuf::from("b"));
     }
 
     #[test]
@@ -241,10 +238,7 @@ mod tests {
         let h2 = svc.start_scan();
         assert!(svc.commit(h2, fixture_tree("new")));
         assert!(!svc.commit(h1, fixture_tree("stale")));
-        assert_eq!(
-            svc.current_tree().unwrap().cwd,
-            PathBuf::from("new")
-        );
+        assert_eq!(svc.current_tree().unwrap().cwd, PathBuf::from("new"));
     }
 
     #[test]
@@ -312,10 +306,7 @@ mod tests {
         let h2 = svc.start_scan();
         assert!(svc.commit(h2, fixture_tree("after-drop")));
         assert_eq!(svc.generation(), 2);
-        assert_eq!(
-            svc.current_tree().unwrap().cwd,
-            PathBuf::from("after-drop")
-        );
+        assert_eq!(svc.current_tree().unwrap().cwd, PathBuf::from("after-drop"));
     }
 
     #[test]

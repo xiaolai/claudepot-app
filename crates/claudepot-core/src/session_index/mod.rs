@@ -135,11 +135,9 @@ impl SessionIndex {
     pub fn schema_version(&self) -> Result<Option<String>, SessionIndexError> {
         let db = self.db();
         let v: Option<String> = db
-            .query_row(
-                "SELECT v FROM meta WHERE k = 'schema_version'",
-                [],
-                |r| r.get(0),
-            )
+            .query_row("SELECT v FROM meta WHERE k = 'schema_version'", [], |r| {
+                r.get(0)
+            })
             .ok();
         Ok(v)
     }
@@ -201,7 +199,8 @@ impl SessionIndex {
             })
             .collect();
 
-        let mut scanned: Vec<(SessionRow, Vec<UsageEvent>)> = Vec::with_capacity(scan_results.len());
+        let mut scanned: Vec<(SessionRow, Vec<UsageEvent>)> =
+            Vec::with_capacity(scan_results.len());
         let mut failed: Vec<(std::path::PathBuf, String)> = walk.stat_failed;
         for r in scan_results {
             match r {
@@ -313,8 +312,7 @@ impl SessionIndex {
         SessionIndexError,
     > {
         let db = self.db();
-        crate::artifact_usage::batch_usage(&db, keys, now_ms)
-            .map_err(SessionIndexError::Sql)
+        crate::artifact_usage::batch_usage(&db, keys, now_ms).map_err(SessionIndexError::Sql)
     }
 
     pub fn usage_top(
@@ -383,11 +381,9 @@ fn apply_schema(db: &Connection) -> Result<(), SessionIndexError> {
     // stale `(size, mtime_ns)` rows and never produce usage events
     // until each JSONL changes naturally.
     let prior_version: Option<String> = db
-        .query_row(
-            "SELECT v FROM meta WHERE k = 'schema_version'",
-            [],
-            |r| r.get::<_, String>(0),
-        )
+        .query_row("SELECT v FROM meta WHERE k = 'schema_version'", [], |r| {
+            r.get::<_, String>(0)
+        })
         .ok();
 
     db.execute_batch(crate::artifact_usage::schema::SCHEMA)?;
@@ -868,7 +864,9 @@ mod tests {
             .map(|e| e.file_name().to_string_lossy().into_owned())
             .collect();
         assert!(
-            siblings.iter().any(|n| n.starts_with("sessions.db.corrupt-")),
+            siblings
+                .iter()
+                .any(|n| n.starts_with("sessions.db.corrupt-")),
             "quarantined file must exist; saw {siblings:?}"
         );
     }
@@ -940,8 +938,10 @@ mod tests {
 
     fn count_usage_rows(idx: &SessionIndex) -> i64 {
         let db = idx.db();
-        db.query_row("SELECT COUNT(*) FROM usage_event", [], |r| r.get::<_, i64>(0))
-            .unwrap()
+        db.query_row("SELECT COUNT(*) FROM usage_event", [], |r| {
+            r.get::<_, i64>(0)
+        })
+        .unwrap()
     }
 
     #[test]
@@ -1128,7 +1128,10 @@ mod tests {
         let stats = idx
             .usage_for_artifact(ArtifactKind::Agent, "Explore", now_ms)
             .unwrap();
-        assert_eq!(stats.count_30d, 2, "two Agent dispatches should be recorded");
+        assert_eq!(
+            stats.count_30d, 2,
+            "two Agent dispatches should be recorded"
+        );
         assert_eq!(
             stats.error_count_30d, 1,
             "exactly one event should be flipped to error by the failed tool_result"
@@ -1145,6 +1148,10 @@ mod tests {
 
         std::fs::remove_file(&path).unwrap();
         idx.refresh(cfg.path()).unwrap();
-        assert_eq!(count_usage_rows(&idx), 0, "usage rows follow session deletion");
+        assert_eq!(
+            count_usage_rows(&idx),
+            0,
+            "usage rows follow session deletion"
+        );
     }
 }

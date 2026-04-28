@@ -85,16 +85,14 @@ mod windows_impl {
     use std::os::windows::ffi::OsStrExt;
     use std::path::Path;
     use windows_sys::Win32::Foundation::{LocalFree, ERROR_SUCCESS, HANDLE};
+    use windows_sys::Win32::Security::Authorization::SetEntriesInAclW;
     use windows_sys::Win32::Security::Authorization::{
         SetNamedSecurityInfoW, SE_FILE_OBJECT, TRUSTEE_IS_SID, TRUSTEE_IS_USER,
     };
-    use windows_sys::Win32::Security::Authorization::{
-        EXPLICIT_ACCESS_W, SET_ACCESS, TRUSTEE_W,
-    };
-    use windows_sys::Win32::Security::Authorization::SetEntriesInAclW;
+    use windows_sys::Win32::Security::Authorization::{EXPLICIT_ACCESS_W, SET_ACCESS, TRUSTEE_W};
     use windows_sys::Win32::Security::{
-        GetTokenInformation, TokenUser, ACL, DACL_SECURITY_INFORMATION,
-        NO_INHERITANCE, PROTECTED_DACL_SECURITY_INFORMATION, TOKEN_QUERY, TOKEN_USER,
+        GetTokenInformation, TokenUser, ACL, DACL_SECURITY_INFORMATION, NO_INHERITANCE,
+        PROTECTED_DACL_SECURITY_INFORMATION, TOKEN_QUERY, TOKEN_USER,
     };
     use windows_sys::Win32::System::Threading::{GetCurrentProcess, OpenProcessToken};
 
@@ -129,13 +127,7 @@ mod windows_impl {
 
             // 2. Read TOKEN_USER (variable-length: SID lives past the struct).
             let mut needed: u32 = 0;
-            GetTokenInformation(
-                token,
-                TokenUser,
-                std::ptr::null_mut(),
-                0,
-                &mut needed,
-            );
+            GetTokenInformation(token, TokenUser, std::ptr::null_mut(), 0, &mut needed);
             if needed == 0 {
                 return Err(SwapError::WriteFailed(
                     "GetTokenInformation size probe failed".to_string(),
@@ -182,8 +174,7 @@ mod windows_impl {
             // 4. Apply the protected DACL to the file by name.
             let mut wide: Vec<u16> = path.as_os_str().encode_wide().collect();
             wide.push(0);
-            let info_flags =
-                DACL_SECURITY_INFORMATION | PROTECTED_DACL_SECURITY_INFORMATION;
+            let info_flags = DACL_SECURITY_INFORMATION | PROTECTED_DACL_SECURITY_INFORMATION;
             let rc = SetNamedSecurityInfoW(
                 wide.as_ptr() as *mut _,
                 SE_FILE_OBJECT,
