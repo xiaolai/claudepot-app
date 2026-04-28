@@ -94,16 +94,22 @@ export function AppStatusBar({
     return () => clearTimeout(t);
   }, [lastDismissed, clearLastDismissed]);
 
-  const countSegments: string[] = [];
+  // Each count segment carries a `title` so the bar's terse glyph-y
+  // text reveals plain English on hover, and an `aria-label` so
+  // screen readers announce the same. Native title is fine here:
+  // the bar is for ambient context, not primary action.
+  const countSegments: { text: string; title: string }[] = [];
   if (stats.projects != null && stats.projects > 0) {
-    countSegments.push(
-      `${stats.projects} project${stats.projects === 1 ? "" : "s"}`,
-    );
+    countSegments.push({
+      text: `${stats.projects} project${stats.projects === 1 ? "" : "s"}`,
+      title: `${stats.projects} CC project${stats.projects === 1 ? "" : "s"} indexed in ~/.claude/projects`,
+    });
   }
   if (stats.sessions != null && stats.sessions > 0) {
-    countSegments.push(
-      `${stats.sessions} session${stats.sessions === 1 ? "" : "s"}`,
-    );
+    countSegments.push({
+      text: `${stats.sessions} session${stats.sessions === 1 ? "" : "s"}`,
+      title: `${stats.sessions} session transcript${stats.sessions === 1 ? "" : "s"} on disk`,
+    });
   }
 
   const hasRunningOps =
@@ -136,7 +142,9 @@ export function AppStatusBar({
 
       {countSegments.map((seg, i) => (
         <span
-          key={seg}
+          key={seg.text}
+          title={seg.title}
+          aria-label={seg.title}
           style={{
             display: "flex",
             alignItems: "center",
@@ -144,9 +152,9 @@ export function AppStatusBar({
           }}
         >
           {(liveSegment || i > 0) && (
-            <span style={{ marginRight: "var(--sp-10)" }}>·</span>
+            <span aria-hidden style={{ marginRight: "var(--sp-10)" }}>·</span>
           )}
-          {seg}
+          {seg.text}
         </span>
       ))}
 
@@ -253,9 +261,16 @@ function LiveSegment({
   text: string;
   onClick?: () => void;
 }) {
+  // The live segment text reads as opaque jargon to a new user
+  // ("● 3 live · OPUS 2, SON 1"). Tooltips spell out what the dot
+  // means and that the right-hand cluster groups by model family.
+  const tip =
+    "Sessions Claude Code is currently writing to. Suffix groups by model family.";
   if (!onClick) {
     return (
       <span
+        title={tip}
+        aria-label={tip}
         style={{
           display: "flex",
           alignItems: "center",
@@ -270,7 +285,8 @@ function LiveSegment({
     <button
       type="button"
       onClick={onClick}
-      title="Open live activity"
+      title={`${tip} Click to open Activities → Live.`}
+      aria-label={`${tip} Click to open Activities → Live.`}
       style={{
         display: "inline-flex",
         alignItems: "center",

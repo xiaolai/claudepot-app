@@ -21,6 +21,14 @@ import type {
 
 export const accountApi = {
   appStatus: () => invoke<AppStatus>("app_status"),
+  /**
+   * Whether the in-app updater is supported on this install. False on
+   * Linux when the binary isn't running from an AppImage (e.g. a .deb
+   * install or a system package), where in-place replacement would
+   * race with apt. The frontend hides the auto-update UI when this
+   * returns false.
+   */
+  updaterSupported: () => invoke<boolean>("updater_supported"),
   /// Idempotent startup adoption: if CC holds credentials for one of the
   /// registered accounts, imports them into the matching slot. Returns
   /// the synced email (empty string when nothing matched).

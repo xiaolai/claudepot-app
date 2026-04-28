@@ -10,10 +10,10 @@ import { Button } from "../components/primitives/Button";
 import { ExternalLink } from "../components/primitives/ExternalLink";
 import { Glyph } from "../components/primitives/Glyph";
 import { Tag } from "../components/primitives/Tag";
-import { useDevMode } from "../hooks/useDevMode";
 import { useSettingsActions } from "../hooks/useSettingsActions";
 import { useTheme, type ThemeMode } from "../hooks/useTheme";
 import { useAppState } from "../providers/AppStateProvider";
+import { useUpdater, type CheckFrequency } from "../providers/UpdateProvider";
 import { toastError } from "../lib/toastError";
 import { NF } from "../icons";
 import { ScreenHeader } from "../shell/ScreenHeader";
@@ -219,7 +219,6 @@ function GeneralPane({
       return "accounts";
     }
   });
-  const [devMode, setDevMode] = useDevMode();
   const [hideDock, setHideDock] = useState<boolean | null>(null);
   const [launchAtLogin, setLaunchAtLogin] = useState<boolean | null>(null);
   const [isMac, setIsMac] = useState<boolean>(false);
@@ -331,12 +330,13 @@ function GeneralPane({
           <Toggle on={hideDock === true} onChange={toggleHideDock} />
         </Row>
       )}
-      <Row
-        label="Developer mode"
-        hint="Reveals backend command names, raw paths, and internal identifiers next to their human-facing labels."
-      >
-        <Toggle on={devMode} onChange={setDevMode} />
-      </Row>
+      {/* Developer mode: hidden from the UI on purpose. Toggle is
+          ⌃⌥⌘L (Ctrl+Alt+Cmd+L). The four-modifier combo is
+          unreachable by accident and matches macOS's own
+          deep-system-toggle convention (e.g. ⌃⌥⌘8 inverts colors).
+          Wired in `App.tsx` so it works from any section. A toast
+          confirms the new state since the toggle has no visual
+          surface to mirror it. */}
     </SettingsGroup>
   );
 }
@@ -566,34 +566,466 @@ function DiagnosticsPane({
 /*                        About pane                           */
 /* ──────────────────────────────────────────────────────────── */
 
+/** Hand-coded GitHub mark. lucide-react v1+ removed brand icons, so
+ *  we ship the Octocat path inline. This is the project's brand-mark
+ *  exception — see rules/design.md "Icons → Brand-mark exception".
+ *  Lives next to its only call site (the About pane); uses
+ *  `currentColor` so it tracks theme tokens. */
+function GithubMark({ style }: { style?: React.CSSProperties }) {
+  return (
+    <svg
+      role="img"
+      aria-label="GitHub"
+      viewBox="0 0 24 24"
+      fill="currentColor"
+      style={style}
+    >
+      <path d="M12 .5C5.65.5.5 5.65.5 12c0 5.08 3.29 9.39 7.86 10.91.58.11.79-.25.79-.55 0-.27-.01-1-.02-1.96-3.2.69-3.87-1.54-3.87-1.54-.52-1.32-1.27-1.67-1.27-1.67-1.04-.71.08-.7.08-.7 1.15.08 1.76 1.18 1.76 1.18 1.02 1.75 2.69 1.24 3.34.95.1-.74.4-1.24.72-1.53-2.55-.29-5.24-1.28-5.24-5.7 0-1.26.45-2.29 1.18-3.1-.12-.29-.51-1.46.11-3.05 0 0 .96-.31 3.15 1.18a10.92 10.92 0 0 1 5.74 0c2.19-1.49 3.15-1.18 3.15-1.18.62 1.59.23 2.76.11 3.05.74.81 1.18 1.84 1.18 3.1 0 4.43-2.69 5.41-5.26 5.69.41.36.78 1.06.78 2.13 0 1.54-.01 2.78-.01 3.16 0 .31.21.67.8.55C20.21 21.39 23.5 17.08 23.5 12 23.5 5.65 18.35.5 12 .5z" />
+    </svg>
+  );
+}
+
 function AboutPane() {
   return (
-    <SettingsGroup>
-      <dl style={gridStyle}>
-        <Kv label="App" value="Claudepot" />
-        <Kv label="Version" value={APP_VERSION} mono />
-        <Kv
-          label="Author"
-          value={
-            <ExternalLink href="https://github.com/xiaolai">
-              @xiaolai
-            </ExternalLink>
+    <div style={{ display: "flex", flexDirection: "column", gap: "var(--sp-24)" }}>
+      <SettingsGroup>
+        <dl style={gridStyle}>
+          <Kv
+            label="App"
+            value={
+              <span>
+                clau<span style={{ color: "var(--accent)" }}>depot</span>
+              </span>
+            }
+          />
+          <Kv label="Version" value={APP_VERSION} mono />
+          <Kv
+            label="Author"
+            value={
+              <div
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  gap: "var(--sp-12)",
+                  flexWrap: "wrap",
+                }}
+              >
+                <span
+                  style={{
+                    display: "inline-flex",
+                    alignItems: "center",
+                    gap: "var(--sp-6)",
+                  }}
+                >
+                  <GithubMark
+                    style={{
+                      width: "var(--fs-base)",
+                      height: "var(--fs-base)",
+                      color: "var(--fg-muted)",
+                    }}
+                  />
+                  <ExternalLink href="https://github.com/xiaolai">
+                    github.com/xiaolai
+                  </ExternalLink>
+                </span>
+                <span
+                  style={{
+                    display: "inline-flex",
+                    alignItems: "center",
+                    gap: "var(--sp-6)",
+                  }}
+                >
+                  <Glyph
+                    g={NF.globe}
+                    color="var(--fg-muted)"
+                    style={{ fontSize: "var(--fs-base)" }}
+                  />
+                  <ExternalLink href="https://lixiaolai.com">
+                    lixiaolai.com
+                  </ExternalLink>
+                </span>
+              </div>
+            }
+          />
+          <Kv label="Design" value="paper-mono" />
+        </dl>
+      </SettingsGroup>
+      <UpdatesPane />
+    </div>
+  );
+}
+
+/* ──────────────────────────────────────────────────────────── */
+/*                     Updates sub-pane                        */
+/* ──────────────────────────────────────────────────────────── */
+
+/** Format a number of bytes as MB with one decimal. */
+function formatMB(n: number): string {
+  return (n / 1024 / 1024).toFixed(1);
+}
+
+/** Render the local datetime of a string the updater plugin handed us. */
+function formatLastChecked(at: number | null): string {
+  if (!at) return "Never";
+  const d = new Date(at);
+  return d.toLocaleString();
+}
+
+function UpdatesPane() {
+  const {
+    supported,
+    status,
+    updateInfo,
+    downloadProgress,
+    error,
+    isSkipped,
+    autoCheckEnabled,
+    setAutoCheckEnabled,
+    checkFrequency,
+    setCheckFrequency,
+    lastCheckedAt,
+    checkNow,
+    downloadAndInstall,
+    applyUpdate,
+    skipThisVersion,
+    resetSkip,
+  } = useUpdater();
+
+  // Platform probe in flight — render nothing rather than a flicker
+  // of unavailable controls.
+  if (supported === null) return null;
+
+  // Linux .deb / system install: in-place updates would race apt, so
+  // the in-app updater is gated off. Surface a single-row hint
+  // pointing at the Releases page so the user knows where to go.
+  if (supported === false) {
+    return (
+      <SettingsGroup desc="In-app updates aren't available on this install — your package manager owns this binary. Check the Releases page for new versions.">
+        <Row label="Updates">
+          <ExternalLink href="https://github.com/xiaolai/claudepot-app/releases">
+            github.com/xiaolai/claudepot-app/releases
+          </ExternalLink>
+        </Row>
+      </SettingsGroup>
+    );
+  }
+
+  const checkDisabled =
+    status === "checking" ||
+    status === "downloading" ||
+    status === "ready";
+
+  const showAvailableCard =
+    !!updateInfo &&
+    !isSkipped &&
+    (status === "available" ||
+      status === "downloading" ||
+      status === "ready");
+
+  return (
+    <SettingsGroup desc="Claudepot checks an authenticated, minisign-signed manifest hosted on GitHub Releases. Your install only updates to versions signed by the project's release key.">
+      {/* Status row + manual trigger. */}
+      <Row label="Updates">
+        <div style={{ display: "flex", alignItems: "center", gap: "var(--sp-12)" }}>
+          <UpdateStatusBadge
+            status={status}
+            updateInfo={updateInfo}
+            error={error}
+            isSkipped={isSkipped}
+          />
+          <Button
+            variant="ghost"
+            onClick={() => void checkNow()}
+            disabled={checkDisabled}
+          >
+            {status === "checking" ? "Checking…" : "Check now"}
+          </Button>
+        </div>
+      </Row>
+
+      {/* Available / downloading / ready card. Single card switches
+          its primary action by status; we never stack two cards. */}
+      {showAvailableCard && updateInfo && (
+        <UpdateAvailableCard
+          info={updateInfo}
+          status={status}
+          progress={downloadProgress}
+          onDownload={() => void downloadAndInstall()}
+          onSkip={skipThisVersion}
+          onApply={() => void applyUpdate()}
+        />
+      )}
+
+      {/* When the user has skipped a version, surface a small
+          inline note + an "undo" so they can change their mind. */}
+      {updateInfo && isSkipped && (
+        <Row
+          label="Skipped"
+          hint={`Version ${updateInfo.version} won't prompt again.`}
+        >
+          <Button variant="ghost" onClick={resetSkip}>
+            Show again
+          </Button>
+        </Row>
+      )}
+
+      <Row
+        label="Check automatically"
+        hint="Background checks run after the chosen interval has elapsed since the last successful check."
+      >
+        <Toggle on={autoCheckEnabled} onChange={setAutoCheckEnabled} />
+      </Row>
+
+      <Row label="Frequency">
+        <select
+          value={checkFrequency}
+          onChange={(e) =>
+            setCheckFrequency(e.target.value as CheckFrequency)
           }
-        />
-        <Kv
-          label="Website"
-          value={
-            <ExternalLink href="https://claudepot.com">
-              claudepot.com
-            </ExternalLink>
-          }
-        />
-        <Kv
-          label="Design"
-          value="paper-mono — JetBrains Mono NF, OKLCH palette"
-        />
-      </dl>
+          disabled={!autoCheckEnabled}
+          style={selectStyle}
+        >
+          <option value="startup">On every launch</option>
+          <option value="daily">Daily</option>
+          <option value="weekly">Weekly</option>
+          <option value="manual">Only when I click Check now</option>
+        </select>
+      </Row>
+
+      <Row label="Last checked">
+        <span
+          style={{ fontSize: "var(--fs-sm)", color: "var(--fg-muted)" }}
+        >
+          {formatLastChecked(lastCheckedAt)}
+        </span>
+      </Row>
+
+      <Row label="All releases" hint="Browse the changelog and download installers for any platform.">
+        <ExternalLink href="https://github.com/xiaolai/claudepot-app/releases">
+          github.com/xiaolai/claudepot-app/releases
+        </ExternalLink>
+      </Row>
     </SettingsGroup>
+  );
+}
+
+function UpdateStatusBadge({
+  status,
+  updateInfo,
+  error,
+  isSkipped,
+}: {
+  status: ReturnType<typeof useUpdater>["status"];
+  updateInfo: ReturnType<typeof useUpdater>["updateInfo"];
+  error: string | null;
+  isSkipped: boolean;
+}) {
+  let glyph: NfIcon = NF.info;
+  let color = "var(--fg-muted)";
+  let label = "Idle";
+
+  if (status === "checking") {
+    glyph = NF.refresh;
+    color = "var(--fg-muted)";
+    label = "Checking…";
+  } else if (status === "up-to-date") {
+    glyph = NF.check;
+    color = "var(--ok)";
+    label = "You're on the latest version";
+  } else if (status === "available" && updateInfo) {
+    glyph = NF.download;
+    color = "var(--accent)";
+    label = isSkipped
+      ? `v${updateInfo.version} skipped`
+      : `Update available — v${updateInfo.version}`;
+  } else if (status === "downloading") {
+    glyph = NF.download;
+    color = "var(--fg-muted)";
+    label = "Downloading…";
+  } else if (status === "ready") {
+    glyph = NF.check;
+    color = "var(--ok)";
+    label = "Ready to install — restart Claudepot";
+  } else if (status === "error") {
+    glyph = NF.warn;
+    color = "var(--danger)";
+    label = error ? `Check failed: ${error}` : "Check failed";
+  }
+
+  return (
+    <span
+      style={{
+        display: "inline-flex",
+        alignItems: "center",
+        gap: "var(--sp-6)",
+        fontSize: "var(--fs-sm)",
+        color,
+      }}
+      role="status"
+      aria-live="polite"
+    >
+      <Glyph g={glyph} style={{ fontSize: "var(--fs-base)" }} />
+      <span>{label}</span>
+    </span>
+  );
+}
+
+function UpdateAvailableCard({
+  info,
+  status,
+  progress,
+  onDownload,
+  onSkip,
+  onApply,
+}: {
+  info: NonNullable<ReturnType<typeof useUpdater>["updateInfo"]>;
+  status: ReturnType<typeof useUpdater>["status"];
+  progress: ReturnType<typeof useUpdater>["downloadProgress"];
+  onDownload: () => void;
+  onSkip: () => void;
+  onApply: () => void;
+}) {
+  const total = progress?.total ?? 0;
+  const downloaded = progress?.downloaded ?? 0;
+  const pct = total > 0 ? Math.round((downloaded / total) * 100) : 0;
+
+  return (
+    <div
+      style={{
+        border: "var(--bw-hair) solid var(--line)",
+        borderRadius: "var(--r-2)",
+        padding: "var(--sp-14) var(--sp-16)",
+        background: "var(--bg-raised)",
+      }}
+    >
+      <div
+        style={{
+          display: "flex",
+          justifyContent: "space-between",
+          alignItems: "flex-start",
+          gap: "var(--sp-16)",
+        }}
+      >
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <div
+            style={{
+              display: "flex",
+              alignItems: "baseline",
+              gap: "var(--sp-8)",
+            }}
+          >
+            <span
+              style={{
+                fontSize: "var(--fs-base)",
+                fontWeight: 600,
+                color: "var(--fg)",
+              }}
+            >
+              v{info.version}
+            </span>
+            <span
+              style={{
+                fontSize: "var(--fs-xs)",
+                color: "var(--fg-faint)",
+              }}
+            >
+              current v{info.currentVersion}
+            </span>
+            {info.pubDate && (
+              <span
+                style={{
+                  fontSize: "var(--fs-xs)",
+                  color: "var(--fg-faint)",
+                }}
+              >
+                · {info.pubDate.slice(0, 10)}
+              </span>
+            )}
+          </div>
+          {info.notes && (
+            <div
+              style={{
+                marginTop: "var(--sp-8)",
+                fontSize: "var(--fs-sm)",
+                color: "var(--fg-muted)",
+                whiteSpace: "pre-wrap",
+                maxHeight: "var(--sp-96, tokens.sp[96])",
+                overflow: "auto",
+              }}
+            >
+              {info.notes}
+            </div>
+          )}
+        </div>
+
+        <div
+          style={{
+            display: "flex",
+            flexDirection: "column",
+            gap: "var(--sp-6)",
+            flexShrink: 0,
+          }}
+        >
+          {status === "available" && (
+            <>
+              <Button variant="solid" onClick={onDownload}>
+                Download
+              </Button>
+              <Button variant="ghost" onClick={onSkip}>
+                Skip this version
+              </Button>
+            </>
+          )}
+          {status === "downloading" && (
+            <Button variant="solid" disabled>
+              Downloading…
+            </Button>
+          )}
+          {status === "ready" && (
+            <Button variant="solid" onClick={onApply}>
+              Restart to update
+            </Button>
+          )}
+        </div>
+      </div>
+
+      {status === "downloading" && (
+        <div style={{ marginTop: "var(--sp-10)" }}>
+          <div
+            style={{
+              display: "flex",
+              justifyContent: "space-between",
+              fontSize: "var(--fs-xs)",
+              color: "var(--fg-faint)",
+              marginBottom: "var(--sp-4)",
+            }}
+          >
+            <span>Downloading…</span>
+            <span>
+              {formatMB(downloaded)} / {total > 0 ? formatMB(total) : "?"} MB
+              {total > 0 && ` (${pct}%)`}
+            </span>
+          </div>
+          <div
+            style={{
+              height: "var(--sp-4)",
+              background: "var(--bg-active)",
+              borderRadius: "var(--r-pill)",
+              overflow: "hidden",
+            }}
+          >
+            <div
+              style={{
+                width: total > 0 ? `${pct}%` : "33%",
+                height: "100%",
+                background: "var(--accent)",
+                transition: "width var(--dur-base) var(--ease-out)",
+              }}
+            />
+          </div>
+        </div>
+      )}
+    </div>
   );
 }
 

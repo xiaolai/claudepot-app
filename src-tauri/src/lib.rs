@@ -113,6 +113,17 @@ pub fn run() {
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_notification::init())
         .plugin(tauri_plugin_opener::init())
+        // Auto-update pipeline. The plugin reads endpoints + pubkey from
+        // tauri.conf.json `plugins.updater`; `latest.json` lives as a
+        // release asset on this repo, so the URL self-tracks the newest
+        // published release. Dev builds: the plugin loads but `check()`
+        // fails fast (no signed `latest.json` for unreleased versions),
+        // and the renderer surfaces that as an error toast — no crash.
+        .plugin(tauri_plugin_updater::Builder::new().build())
+        // `process::relaunch` is invoked after the user clicks
+        // "Restart to update" — the renderer runs it once the updater
+        // has staged the new bundle. Capability gates the IPC.
+        .plugin(tauri_plugin_process::init())
         // D-5/6/7: Rust-side clipboard write for `key_*_copy`. Permissions
         // restricted in `capabilities/default.json` to write/read/clear —
         // the renderer never invokes the plugin directly (its only
@@ -314,6 +325,7 @@ pub fn run() {
 
     builder.invoke_handler(tauri::generate_handler![
             commands::app_status,
+            commands::updater_supported,
             commands_cli::sync_from_current_cc,
             commands::unlock_keychain,
             commands::reveal_in_finder,

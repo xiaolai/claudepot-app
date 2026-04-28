@@ -18,9 +18,37 @@ env:
 
 jobs:
   # ------------------------------------------------------------------
+  # Pre-flight: refuse to ship if the updater pubkey is empty. With
+  # an empty pubkey the runtime falls back to the in-Rust gate
+  # (`updater_supported()` returns false), so the build wouldn't be
+  # *unsafe* — but it would ship a production binary whose in-app
+  # updater is silently disabled, which is worse than no release at
+  # all. Failing the workflow at the start surfaces the missing
+  # config before the matrix burns 10+ runner-minutes. Local dev and
+  # feature branches don't run release.yml so this gate doesn't slow
+  # them down.
+  # ------------------------------------------------------------------
+  preflight:
+    name: Pre-flight checks
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Verify updater pubkey is set
+        run: |
+          set -eu
+          PUBKEY=$(jq -r '.plugins.updater.pubkey // ""' src-tauri/tauri.conf.json)
+          if [ -z "$PUBKEY" ]; then
+            echo "::error::src-tauri/tauri.conf.json plugins.updater.pubkey is empty."
+            echo "::error::Generate a keypair with 'pnpm tauri signer generate' and embed the public key before tagging a release. See dev-docs/auto-update.md."
+            exit 1
+          fi
+          echo "OK: updater pubkey present (${#PUBKEY} chars)"
+
+  # ------------------------------------------------------------------
   # macOS — CLI (Developer-ID signed + notarized) + GUI (Tauri-managed signing + notarization)
   # ------------------------------------------------------------------
   build-macos:
+    needs: preflight
     name: macOS ${{ matrix.arch }} (CLI + GUI)
     runs-on: macos-latest
     strategy:
@@ -133,8 +161,15 @@ jobs:
           APPLE_ID: ${{ secrets.APPLE_ID }}
           APPLE_PASSWORD: ${{ secrets.APPLE_APP_PASSWORD }}
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          # Tauri-2 updater minisign signing — the env vars are read by
+          # `tauri build` when `bundle.createUpdaterArtifacts: true` is
+          # set, producing `.app.tar.gz` + `.app.tar.gz.sig` alongside
+          # the .app/.dmg. Empty on PRs (secret missing) → updater
+          # artifacts are skipped, regular bundles still build.
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         run: |
-          pnpm tauri build --target ${{ matrix.target }} --bundles app,dmg
+          pnpm tauri build --target ${{ matrix.target }} --bundles app,dmg,updater
 
       - name: Stage GUI artifacts
         run: |
@@ -147,6 +182,15 @@ jobs:
           APP=$(ls -d target/${{ matrix.target }}/release/bundle/macos/*.app | head -1)
           (cd "$(dirname "$APP")" && zip -ry "$(pwd)/$(basename "$APP" .app)-${{ matrix.arch }}.app.zip" "$(basename "$APP")")
           mv "$(dirname "$APP")"/*-${{ matrix.arch }}.app.zip "release-staging/"
+          # Updater bundle: `.app.tar.gz` + `.sig`. Tauri's macOS bundler
+          # uses the .app's basename, so we rename to a stable filename
+          # (`Claudepot-<arch>.app.tar.gz`) the latest.json job can
+          # reference without scraping per-version paths.
+          UPDATER=$(ls target/${{ matrix.target }}/release/bundle/macos/*.app.tar.gz 2>/dev/null | head -1 || true)
+          if [ -n "$UPDATER" ]; then
+            cp "$UPDATER"      "release-staging/Claudepot-${{ matrix.arch }}.app.tar.gz"
+            cp "$UPDATER.sig"  "release-staging/Claudepot-${{ matrix.arch }}.app.tar.gz.sig"
+          fi
           ls -la release-staging/
 
       - name: Upload artifacts
@@ -169,6 +213,7 @@ jobs:
   # ------------------------------------------------------------------
   build-linux-x86_64:
     name: Linux x86_64 (CLI + GUI)
+    needs: preflight
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -217,7 +262,14 @@ jobs:
           tar czf claudepot-x86_64-linux.tar.gz claudepot
 
       - name: Build GUI bundle (Tauri)
-        run: pnpm tauri build --bundles appimage,deb
+        env:
+          # Updater bundles for Linux: `.AppImage.tar.gz` + `.sig`. `.deb`
+          # users are expected to upgrade via apt, so the in-app updater
+          # only surfaces an "Open Releases" link for them; only the
+          # AppImage is signed here.
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        run: pnpm tauri build --bundles appimage,deb,updater
 
       - name: Stage GUI artifacts
         run: |
@@ -225,6 +277,13 @@ jobs:
           mkdir -p release-staging
           cp target/release/bundle/appimage/*.AppImage "release-staging/Claudepot-x86_64.AppImage" || true
           cp target/release/bundle/deb/*.deb "release-staging/Claudepot-x86_64.deb" || true
+          # Updater bundle for Linux is `.AppImage.tar.gz` (the AppImage
+          # repackaged as a signed tarball).
+          UPDATER=$(ls target/release/bundle/appimage/*.AppImage.tar.gz 2>/dev/null | head -1 || true)
+          if [ -n "$UPDATER" ]; then
+            cp "$UPDATER"      "release-staging/Claudepot-x86_64.AppImage.tar.gz"
+            cp "$UPDATER.sig"  "release-staging/Claudepot-x86_64.AppImage.tar.gz.sig"
+          fi
           ls -la release-staging/
 
       - uses: actions/upload-artifact@v4
@@ -242,6 +301,7 @@ jobs:
   # ------------------------------------------------------------------
   build-linux-aarch64:
     name: Linux aarch64 (CLI only)
+    needs: preflight
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -288,6 +348,7 @@ jobs:
   # ------------------------------------------------------------------
   build-windows:
     name: Windows x86_64 (CLI + GUI)
+    needs: preflight
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
@@ -325,7 +386,14 @@ jobs:
           Compress-Archive -Path claudepot.exe -DestinationPath claudepot-x86_64-windows.zip
 
       - name: Build GUI bundle (Tauri)
-        run: pnpm tauri build --bundles msi,nsis
+        env:
+          # Updater bundles for Windows: `.nsis.zip` + `.sig` (the NSIS
+          # installer repackaged as a signed zip). MSI updater bundles
+          # are also produced (`.msi.zip` + `.sig`) so MSI installs can
+          # update too.
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        run: pnpm tauri build --bundles msi,nsis,updater
 
       - name: Stage GUI artifacts
         shell: pwsh
@@ -336,6 +404,20 @@ jobs:
           }
           Get-ChildItem -Path target/release/bundle/nsis/*.exe | ForEach-Object {
             Copy-Item $_.FullName "release-staging/Claudepot-x86_64-setup.exe"
+          }
+          # Updater bundles + sigs (NSIS preferred; MSI also signed for
+          # users who installed via msiexec).
+          Get-ChildItem -Path target/release/bundle/nsis/*.nsis.zip -ErrorAction SilentlyContinue | ForEach-Object {
+            Copy-Item $_.FullName "release-staging/Claudepot-x86_64-setup.nsis.zip"
+          }
+          Get-ChildItem -Path target/release/bundle/nsis/*.nsis.zip.sig -ErrorAction SilentlyContinue | ForEach-Object {
+            Copy-Item $_.FullName "release-staging/Claudepot-x86_64-setup.nsis.zip.sig"
+          }
+          Get-ChildItem -Path target/release/bundle/msi/*.msi.zip -ErrorAction SilentlyContinue | ForEach-Object {
+            Copy-Item $_.FullName "release-staging/Claudepot-x86_64.msi.zip"
+          }
+          Get-ChildItem -Path target/release/bundle/msi/*.msi.zip.sig -ErrorAction SilentlyContinue | ForEach-Object {
+            Copy-Item $_.FullName "release-staging/Claudepot-x86_64.msi.zip.sig"
           }
           Get-ChildItem release-staging
 
@@ -369,6 +451,10 @@ jobs:
       - name: Flatten artifacts
         run: |
           mkdir -p release
+          # Include updater `.sig` files alongside everything else.
+          # `.AppImage.tar.gz` matches via `.tar.gz`; `.app.tar.gz`
+          # matches via `.tar.gz`; `.nsis.zip` / `.msi.zip` match via
+          # `.zip`; `.sig` is its own pattern.
           find artifacts -type f \( \
             -name '*.zip' -o \
             -name '*.tar.gz' -o \
@@ -376,7 +462,8 @@ jobs:
             -name '*.AppImage' -o \
             -name '*.deb' -o \
             -name '*.msi' -o \
-            -name '*.exe' \
+            -name '*.exe' -o \
+            -name '*.sig' \
           \) -exec cp {} release/ \;
           ls -la release/
 
@@ -400,6 +487,121 @@ jobs:
             ### Windows
             - **GUI** (x86_64): `Claudepot-x86_64.msi` or `Claudepot-x86_64-setup.exe` — unsigned (Windows SmartScreen will warn)
             - **CLI**: `claudepot-x86_64-windows.zip`
+
+            ### In-app auto-update
+            Versions ≥0.0.7 carry a minisign-signed updater bundle.
+            macOS, Linux AppImage, and Windows NSIS / MSI installs check
+            for new versions in Settings → About; `.deb` users update
+            via apt as before.
+
+      # Generate Tauri-2 latest.json from the four signature files so
+      # the in-app updater can verify and install the new bundles.
+      # Tauri's updater plugin parses the `version` field with `semver`
+      # — a leading 'v' breaks parsing silently — so we strip it. Each
+      # platform entry is gated on the existence of its `.sig`, so a
+      # missing signing secret on one platform doesn't break the others
+      # (the latest.json simply omits that platform; the updater
+      # reports "no update available" for users on that OS).
+      - name: Generate latest.json
+        env:
+          TAG: ${{ github.event.inputs.tag || github.ref_name }}
+        run: |
+          set -eu
+          VERSION="${TAG#v}"
+          BASE_URL="https://github.com/$GITHUB_REPOSITORY/releases/download/$TAG"
+          PUB_DATE=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+
+          read_sig() {
+            local f="release/$1"
+            [ -f "$f" ] || return 1
+            cat "$f"
+          }
+
+          {
+            echo "{"
+            echo "  \"version\": \"$VERSION\","
+            echo "  \"notes\": \"See release notes at https://github.com/$GITHUB_REPOSITORY/releases/tag/$TAG\","
+            echo "  \"pub_date\": \"$PUB_DATE\","
+            echo "  \"platforms\": {"
+
+            sep=""
+            if SIG=$(read_sig "Claudepot-aarch64.app.tar.gz.sig"); then
+              echo "$sep    \"darwin-aarch64\": {"
+              echo "      \"signature\": \"$SIG\","
+              echo "      \"url\": \"$BASE_URL/Claudepot-aarch64.app.tar.gz\""
+              echo "    }"
+              sep=","
+            fi
+            if SIG=$(read_sig "Claudepot-x86_64.app.tar.gz.sig"); then
+              echo "$sep    \"darwin-x86_64\": {"
+              echo "      \"signature\": \"$SIG\","
+              echo "      \"url\": \"$BASE_URL/Claudepot-x86_64.app.tar.gz\""
+              echo "    }"
+              sep=","
+            fi
+            if SIG=$(read_sig "Claudepot-x86_64.AppImage.tar.gz.sig"); then
+              echo "$sep    \"linux-x86_64\": {"
+              echo "      \"signature\": \"$SIG\","
+              echo "      \"url\": \"$BASE_URL/Claudepot-x86_64.AppImage.tar.gz\""
+              echo "    }"
+              sep=","
+            fi
+            if SIG=$(read_sig "Claudepot-x86_64-setup.nsis.zip.sig"); then
+              echo "$sep    \"windows-x86_64\": {"
+              echo "      \"signature\": \"$SIG\","
+              echo "      \"url\": \"$BASE_URL/Claudepot-x86_64-setup.nsis.zip\""
+              echo "    }"
+              sep=","
+            fi
+
+            echo "  }"
+            echo "}"
+          } > latest.json
+
+          echo "Generated latest.json:"
+          cat latest.json
+
+          # Validate. Tauri's updater rejects a leading 'v' or non-SemVer
+          # version. An unsubstituted shell variable in a URL means the
+          # heredoc lost a value and would silently fail at runtime.
+          MV=$(jq -er '.version' latest.json)
+          if [[ "$MV" =~ ^v ]] || ! [[ "$MV" =~ ^[0-9]+\.[0-9]+\.[0-9]+([-+].+)?$ ]]; then
+            echo "::error::latest.json version field invalid: '$MV'"
+            exit 1
+          fi
+          if jq -er '.platforms[] | select(.url | test("\\$|\\{|VERSION|GITHUB_"))' latest.json > /dev/null 2>&1; then
+            echo "::error::latest.json contains an unexpanded shell variable in a platform URL"
+            exit 1
+          fi
+          # Every supported platform MUST be present. If the Linux
+          # AppImage signer fails on one release, Linux clients on the
+          # *next* release would otherwise see "no update available"
+          # silently because Tauri's plugin returns "no update" when
+          # the platform key is missing — they'd be stuck on whichever
+          # version they ran when the signer last worked. Failing the
+          # release loudly forces the operator to fix the signing
+          # secret before any client gets stuck.
+          REQUIRED=("darwin-aarch64" "darwin-x86_64" "linux-x86_64" "windows-x86_64")
+          MISSING=()
+          for p in "${REQUIRED[@]}"; do
+            if ! jq -er ".platforms.\"$p\"" latest.json > /dev/null 2>&1; then
+              MISSING+=("$p")
+            fi
+          done
+          if [ ${#MISSING[@]} -gt 0 ]; then
+            echo "::error::latest.json is missing required platforms: ${MISSING[*]}"
+            echo "::error::Cause: a build failed to produce a .sig (likely TAURI_SIGNING_PRIVATE_KEY missing on that runner)."
+            exit 1
+          fi
+          PLATFORMS=$(jq -er '.platforms | length' latest.json)
+          echo "OK: latest.json validates with $PLATFORMS platform(s) — all required targets present"
+
+      - name: Upload latest.json to release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ github.event.inputs.tag || github.ref_name }}
+        run: |
+          gh release upload "$TAG" latest.json --repo "$GITHUB_REPOSITORY" --clobber
 
       # Homebrew can't fetch draft release assets (they require auth),
       # so the tap-update workflow needs a published release. Comment
