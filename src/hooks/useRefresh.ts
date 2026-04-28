@@ -70,6 +70,12 @@ export function useRefresh(pushToast: (kind: "info" | "error", text: string) => 
   useEffect(() => {
     authRejectedAtRef.current = authRejectedAt;
   }, [authRejectedAt]);
+  // Pending requestIdleCallback handle for the deferred runVerifyAll
+  // dispatch. Stored so the surrounding effect's cleanup (and any
+  // refresh that supersedes a still-queued idle callback) can cancel
+  // it cleanly instead of letting the rIC fire after teardown and
+  // hit dead state setters.
+  const verifyIdleRef = useRef<number | null>(null);
 
   const refresh = useCallback(async () => {
     if (refreshingRef.current) {
@@ -205,7 +211,20 @@ export function useRefresh(pushToast: (kind: "info" | "error", text: string) => 
           (window as typeof window & {
             requestIdleCallback?: (cb: () => void) => number;
           }).requestIdleCallback ?? ((cb) => window.setTimeout(cb, 0));
-        rIC(() => {
+        const cIC: (h: number) => void =
+          (window as typeof window & {
+            cancelIdleCallback?: (h: number) => void;
+          }).cancelIdleCallback ?? window.clearTimeout;
+        // Cancel any prior pending verify-rIC: a refresh that fires
+        // while one is still queued would otherwise run two verifies
+        // back-to-back (the queued one against stale data, the new
+        // one against fresh).
+        if (verifyIdleRef.current !== null) {
+          cIC(verifyIdleRef.current);
+          verifyIdleRef.current = null;
+        }
+        verifyIdleRef.current = rIC(() => {
+          verifyIdleRef.current = null;
           setVerifyingCount((n) => n + 1);
           runVerifyAll({
             patchAccount: (uuid, patch) => {
@@ -260,7 +279,19 @@ export function useRefresh(pushToast: (kind: "info" | "error", text: string) => 
       }
     };
     window.addEventListener("focus", onFocus);
-    return () => window.removeEventListener("focus", onFocus);
+    return () => {
+      window.removeEventListener("focus", onFocus);
+      // Drop any still-queued deferred verify so it can't fire after
+      // teardown and call setVerifyingCount on a dead component.
+      if (verifyIdleRef.current !== null) {
+        const cIC: (h: number) => void =
+          (window as typeof window & {
+            cancelIdleCallback?: (h: number) => void;
+          }).cancelIdleCallback ?? window.clearTimeout;
+        cIC(verifyIdleRef.current);
+        verifyIdleRef.current = null;
+      }
+    };
   }, [refresh]);
 
   return {
