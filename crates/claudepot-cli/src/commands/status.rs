@@ -167,7 +167,9 @@ fn emit_text(decision: &StatusDecision) {
         StatusDecision::Untracked { cc_email } => {
             println!("CC:       {cc_email}");
             println!("Active:   (no active_cli set)");
-            println!("Status:   UNTRACKED \u{2014} CC is signed in but Claudepot has no active_cli");
+            println!(
+                "Status:   UNTRACKED \u{2014} CC is signed in but Claudepot has no active_cli"
+            );
         }
         StatusDecision::NoBlob => {
             eprintln!("CC has no stored credentials");
@@ -218,7 +220,12 @@ mod tests {
     #[test]
     fn test_classify_match_returns_exit_0() {
         let d = classify(Some("a@x.com".into()), Ok(Some("a@x.com".into())));
-        assert_eq!(d, StatusDecision::Match { cc_email: "a@x.com".into() });
+        assert_eq!(
+            d,
+            StatusDecision::Match {
+                cc_email: "a@x.com".into()
+            }
+        );
         assert_eq!(d.exit_code(), 0);
     }
 
@@ -227,7 +234,10 @@ mod tests {
         let d = classify(Some("a@x.com".into()), Ok(Some("b@x.com".into())));
         assert_eq!(
             d,
-            StatusDecision::Drift { cc_email: "a@x.com".into(), active: "b@x.com".into() }
+            StatusDecision::Drift {
+                cc_email: "a@x.com".into(),
+                active: "b@x.com".into()
+            }
         );
         assert_eq!(d.exit_code(), 2);
     }
@@ -235,7 +245,12 @@ mod tests {
     #[test]
     fn test_classify_untracked_returns_exit_2() {
         let d = classify(Some("a@x.com".into()), Ok(None));
-        assert_eq!(d, StatusDecision::Untracked { cc_email: "a@x.com".into() });
+        assert_eq!(
+            d,
+            StatusDecision::Untracked {
+                cc_email: "a@x.com".into()
+            }
+        );
         assert_eq!(d.exit_code(), 2);
     }
 
@@ -248,17 +263,17 @@ mod tests {
 
     #[test]
     fn test_classify_could_not_check_returns_exit_3() {
-        let d = classify(
-            Some("a@x.com".into()),
-            Err("db corrupt".into()),
-        );
+        let d = classify(Some("a@x.com".into()), Err("db corrupt".into()));
         assert_eq!(d, StatusDecision::CouldNotCheck("db corrupt".into()));
         assert_eq!(d.exit_code(), 3);
     }
 
     #[test]
     fn test_classify_match_is_case_insensitive() {
-        let d = classify(Some("Alice@Example.COM".into()), Ok(Some("alice@example.com".into())));
+        let d = classify(
+            Some("Alice@Example.COM".into()),
+            Ok(Some("alice@example.com".into())),
+        );
         assert!(matches!(d, StatusDecision::Match { .. }));
         assert_eq!(d.exit_code(), 0);
     }

@@ -200,8 +200,7 @@ async fn deliver_file(body: &str, path: &Path) -> Result<DeliveryReceipt, Delive
         // delete).
         tmp.persist(&path_buf)
             .map_err(|e| DeliverError::File(e.error))?;
-        secret_file::harden_path(&path_buf)
-            .map_err(|e| DeliverError::Harden(e.to_string()))?;
+        secret_file::harden_path(&path_buf).map_err(|e| DeliverError::Harden(e.to_string()))?;
         Ok(DeliveryReceipt::File {
             path: path_buf,
             bytes: bytes_len,
@@ -216,9 +215,8 @@ async fn deliver_clipboard(
     body: &str,
     writer: Option<&dyn ClipboardWriter>,
 ) -> Result<DeliveryReceipt, DeliverError> {
-    let writer = writer.ok_or_else(|| {
-        DeliverError::Clipboard("no clipboard writer supplied".to_string())
-    })?;
+    let writer = writer
+        .ok_or_else(|| DeliverError::Clipboard("no clipboard writer supplied".to_string()))?;
     writer
         .write_text(body)
         .await

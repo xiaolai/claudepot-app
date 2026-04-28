@@ -20,9 +20,8 @@ use std::time::{Duration, Instant};
 
 use chrono::Utc;
 use claudepot_core::automations::{
-    active_scheduler, install_shim, store::automation_runs_dir, Automation,
-    AutomationBinary, AutomationId, OutputFormat, PermissionMode, PlatformOptions,
-    Trigger,
+    active_scheduler, install_shim, store::automation_runs_dir, Automation, AutomationBinary,
+    AutomationId, OutputFormat, PermissionMode, PlatformOptions, Trigger,
 };
 use uuid::Uuid;
 
@@ -47,7 +46,10 @@ fn make_fake_claude(stdout: &str) -> PathBuf {
         "claude"
     });
     let contents = if cfg!(target_os = "windows") {
-        format!("@echo off\r\necho.{}\r\nexit /b 0\r\n", stdout.replace('\n', " "))
+        format!(
+            "@echo off\r\necho.{}\r\nexit /b 0\r\n",
+            stdout.replace('\n', " ")
+        )
     } else {
         format!(
             "#!/bin/sh\ncat > /dev/null\nprintf '%s' '{}'\nexit 0\n",
@@ -130,10 +132,7 @@ fn end_to_end_register_kickstart_unregister() {
     let fake_claude = make_fake_claude(stdout);
     let cli = current_claudepot_cli();
 
-    let automation = make_automation(&format!(
-        "e2e-test-{}",
-        Utc::now().timestamp()
-    ));
+    let automation = make_automation(&format!("e2e-test-{}", Utc::now().timestamp()));
     let _guard = CleanupGuard { id: automation.id };
 
     install_shim(
@@ -166,8 +165,7 @@ fn end_to_end_register_kickstart_unregister() {
                     let result_json = path.join("result.json");
                     if result_json.exists() {
                         let raw = std::fs::read(&result_json).unwrap();
-                        let parsed: serde_json::Value =
-                            serde_json::from_slice(&raw).unwrap();
+                        let parsed: serde_json::Value = serde_json::from_slice(&raw).unwrap();
                         eprintln!("result.json: {parsed:?}");
                         assert_eq!(parsed["exit_code"], 0);
                         found_result = true;

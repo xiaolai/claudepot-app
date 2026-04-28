@@ -108,11 +108,7 @@ pub fn trash_at(
     trash_from_path(trackable, &source, trash_root)
 }
 
-fn trash_from_path(
-    trackable: &Trackable,
-    source: &Path,
-    trash_root: &Path,
-) -> Result<TrashEntry> {
+fn trash_from_path(trackable: &Trackable, source: &Path, trash_root: &Path) -> Result<TrashEntry> {
     if !source.exists() {
         return Err(LifecycleError::SourceMissing(source.to_path_buf()));
     }
@@ -126,9 +122,11 @@ fn trash_from_path(
     let basename = source
         .file_name()
         .map(|s| s.to_string_lossy().into_owned())
-        .ok_or_else(|| LifecycleError::Refused(RefuseReason::WrongKind {
-            path: source.to_path_buf(),
-        }))?;
+        .ok_or_else(|| {
+            LifecycleError::Refused(RefuseReason::WrongKind {
+                path: source.to_path_buf(),
+            })
+        })?;
 
     let payload_dir = staging.join("payload");
     std::fs::create_dir_all(&payload_dir).map_err(LifecycleError::io("create payload dir"))?;
@@ -194,7 +192,9 @@ pub fn restore_at(
     }
     let manifest = entry.manifest.as_ref().expect("Healthy implies manifest");
     if !manifest.scope_root.exists() {
-        return Err(LifecycleError::ScopeRootMissing(manifest.scope_root.clone()));
+        return Err(LifecycleError::ScopeRootMissing(
+            manifest.scope_root.clone(),
+        ));
     }
     // Hold the scope lock for the manifest's destination scope_root
     // so collision check + rename + a racing disable/enable on the
@@ -324,7 +324,9 @@ pub fn recover_at(
     let manifest = TrashManifest {
         version: MANIFEST_VERSION,
         id: trash_id.to_string(),
-        trashed_at_ms: entry.directory_mtime_ms.unwrap_or_else(|| Utc::now().timestamp_millis()),
+        trashed_at_ms: entry
+            .directory_mtime_ms
+            .unwrap_or_else(|| Utc::now().timestamp_millis()),
         scope: Scope::User, // unknown — best-effort. The (scope_root, kind, rel) triple is what restore actually uses.
         scope_root,
         kind: confirmed_kind,
@@ -398,10 +400,7 @@ pub fn list_at(trash_root: &Path) -> Result<Vec<TrashEntry>> {
 /// `recover_at` to synthesize a correct manifest from the user's
 /// confirmed target instead of mis-attributing scope_root to the
 /// file's parent directory.
-fn derive_scope_and_rel(
-    confirmed_target: &Path,
-    kind_subdir: &str,
-) -> Option<(PathBuf, String)> {
+fn derive_scope_and_rel(confirmed_target: &Path, kind_subdir: &str) -> Option<(PathBuf, String)> {
     let mut comps: Vec<&std::ffi::OsStr> = confirmed_target
         .components()
         .filter_map(|c| match c {
@@ -409,9 +408,9 @@ fn derive_scope_and_rel(
             _ => None,
         })
         .collect();
-    let kind_idx = comps.iter().rposition(|s| {
-        s.to_str().map(|x| x == kind_subdir).unwrap_or(false)
-    })?;
+    let kind_idx = comps
+        .iter()
+        .rposition(|s| s.to_str().map(|x| x == kind_subdir).unwrap_or(false))?;
     if kind_idx == 0 {
         return None;
     }

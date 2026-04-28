@@ -79,9 +79,10 @@ fn diff_scope(prev: &ScopeNode, next: &ScopeNode, patch: &mut ConfigTreePatch) {
     let prev_order: Vec<&str> = prev_files.iter().map(|f| f.id.as_str()).collect();
     let next_order: Vec<&str> = next_files.iter().map(|f| f.id.as_str()).collect();
     if prev_order != next_order {
-        patch
-            .reordered
-            .push((next.id.clone(), next_order.into_iter().map(String::from).collect()));
+        patch.reordered.push((
+            next.id.clone(),
+            next_order.into_iter().map(String::from).collect(),
+        ));
     }
 }
 

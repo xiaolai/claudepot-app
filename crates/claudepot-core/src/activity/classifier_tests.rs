@@ -34,7 +34,10 @@ fn classifies_real_plugin_missing_failure() {
     assert_eq!(c.title, "Hook failed: PostToolUse:Write");
     let h = c.help.as_ref().expect("plugin_missing must produce help");
     assert_eq!(h.template_id, "hook.plugin_missing");
-    assert_eq!(h.args.get("plugin").map(String::as_str), Some("mermaid-preview@xiaolai"));
+    assert_eq!(
+        h.args.get("plugin").map(String::as_str),
+        Some("mermaid-preview@xiaolai")
+    );
 }
 
 /// Hook failure that doesn't match any known pattern should still
@@ -49,7 +52,10 @@ fn classifies_unknown_hook_failure_without_help() {
     assert_eq!(cards.len(), 1);
     let c = &cards[0];
     assert_eq!(c.kind, CardKind::HookFailure);
-    assert!(c.help.is_none(), "unknown pattern → no help (not fabricated)");
+    assert!(
+        c.help.is_none(),
+        "unknown pattern → no help (not fabricated)"
+    );
     assert_eq!(c.subtitle.as_deref(), Some("node: bad allocation"));
 }
 
@@ -79,7 +85,10 @@ fn ignores_non_attachment_lines() {
         r#"{"type":"progress","data":{"type":"hook_progress","hookEvent":"SessionStart"}}"#,
     ] {
         let cards = classify(&parse(sample), 0, &meta(), &mut state);
-        assert!(cards.is_empty(), "non-attachment must produce no card: {sample}");
+        assert!(
+            cards.is_empty(),
+            "non-attachment must produce no card: {sample}"
+        );
     }
 }
 
@@ -94,7 +103,10 @@ fn suppresses_hook_success_and_rule_loads_in_v1() {
         r#"{"type":"attachment","timestamp":"2026-04-25T10:00:00Z","attachment":{"type":"nested_memory","path":"/x/.claude/rules/r.md","content":{"type":"Project","content":"..."}}}"#,
     ] {
         let cards = classify(&parse(sample), 0, &meta(), &mut state);
-        assert!(cards.is_empty(), "suppressed attachment produced card: {sample}");
+        assert!(
+            cards.is_empty(),
+            "suppressed attachment produced card: {sample}"
+        );
     }
 }
 
@@ -106,11 +118,7 @@ fn suppresses_hook_success_and_rule_loads_in_v1() {
 #[test]
 fn classifies_every_hook_failure_attachment_family() {
     let cases = [
-        (
-            "hook_cancelled",
-            "Hook cancelled: ",
-            Severity::Notice,
-        ),
+        ("hook_cancelled", "Hook cancelled: ", Severity::Notice),
         (
             "hook_error_during_execution",
             "Hook crashed: ",
@@ -131,10 +139,7 @@ fn classifies_every_hook_failure_attachment_family() {
         let cards = classify(&v, 0, &meta(), &mut state);
         assert_eq!(cards.len(), 1, "{att_type} should produce one card");
         assert_eq!(cards[0].kind, CardKind::HookFailure);
-        assert_eq!(
-            cards[0].severity, expected_severity,
-            "{att_type} severity"
-        );
+        assert_eq!(cards[0].severity, expected_severity, "{att_type} severity");
         assert!(
             cards[0].title.starts_with(prefix),
             "{att_type} title prefix mismatch: {:?}",
@@ -167,7 +172,9 @@ fn redacts_stderr_secrets_from_subtitle() {
 #[test]
 fn defensive_against_missing_required_fields() {
     let mut state = ClassifierState::default();
-    let v = parse(r#"{"type":"attachment","timestamp":"2026-04-25T10:00:00Z","attachment":{"type":"hook_non_blocking_error"}}"#);
+    let v = parse(
+        r#"{"type":"attachment","timestamp":"2026-04-25T10:00:00Z","attachment":{"type":"hook_non_blocking_error"}}"#,
+    );
     let cards = classify(&v, 0, &meta(), &mut state);
     assert!(cards.is_empty(), "missing required fields → no card");
 }
@@ -175,7 +182,10 @@ fn defensive_against_missing_required_fields() {
 #[test]
 fn extract_plugin_handles_paren_form() {
     let s = "Failed to run: Plugin directory does not exist: /Users/joker/.claude/plugins/cache/xiaolai/mermaid-preview/0.1.1 (mermaid-preview@xiaolai — run /plugin to reinstall)";
-    assert_eq!(extract_missing_plugin(s).as_deref(), Some("mermaid-preview@xiaolai"));
+    assert_eq!(
+        extract_missing_plugin(s).as_deref(),
+        Some("mermaid-preview@xiaolai")
+    );
 }
 
 #[test]
@@ -275,7 +285,9 @@ fn classifies_tool_error_read_required_with_help() {
 #[test]
 fn classifies_tool_error_ssh_timeout_extracts_host() {
     let mut state = ClassifierState::default();
-    let v = tool_error_line("Exit code 255\nssh: connect to host 192.0.2.7 port 22: Operation timed out");
+    let v = tool_error_line(
+        "Exit code 255\nssh: connect to host 192.0.2.7 port 22: Operation timed out",
+    );
     let cards = classify(&v, 0, &meta(), &mut state);
     let h = cards[0].help.as_ref().unwrap();
     assert_eq!(h.template_id, "tool.ssh_timeout");

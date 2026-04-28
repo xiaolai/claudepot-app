@@ -98,9 +98,8 @@ pub(super) struct FsEntry {
 /// cache. Ordering is not meaningful here — the diff fn rebuilds
 /// hashmaps.
 pub(super) fn load_db_tuples(db: &Connection) -> Result<Vec<IndexTuple>, SessionIndexError> {
-    let mut stmt = db.prepare(
-        "SELECT file_path, file_size_bytes, file_mtime_ns, file_inode FROM sessions",
-    )?;
+    let mut stmt =
+        db.prepare("SELECT file_path, file_size_bytes, file_mtime_ns, file_inode FROM sessions")?;
     let rows = stmt.query_map([], |r| {
         Ok(IndexTuple {
             file_path: r.get::<_, String>(0)?,
@@ -127,10 +126,7 @@ pub(super) fn upsert_row(
     indexed_at_ms: i64,
 ) -> Result<(), SessionIndexError> {
     let file_path = row.file_path.to_string_lossy().into_owned();
-    let mtime_ns = row
-        .last_modified
-        .map(mtime_ns_of_systemtime)
-        .unwrap_or(0);
+    let mtime_ns = row.last_modified.map(mtime_ns_of_systemtime).unwrap_or(0);
     // Inode is read from the file on disk at UPSERT time (cheap stat)
     // so callers don't need to thread it through SessionRow, which is
     // the public session API type. Missing → 0, which matches the
@@ -256,7 +252,10 @@ mod redact_tests {
 
 /// Remove one row by path. Used for files that vanished from disk.
 pub(super) fn delete_row(db: &Connection, file_path: &str) -> Result<(), SessionIndexError> {
-    db.execute("DELETE FROM sessions WHERE file_path = ?1", params![file_path])?;
+    db.execute(
+        "DELETE FROM sessions WHERE file_path = ?1",
+        params![file_path],
+    )?;
     Ok(())
 }
 
@@ -277,9 +276,7 @@ pub(super) fn get_row_by_path(
     file_path: &str,
 ) -> Result<Option<SessionRow>, SessionIndexError> {
     use rusqlite::OptionalExtension;
-    let mut stmt = db.prepare(&format!(
-        "{SQL_SELECT_ALL} WHERE file_path = ?1 LIMIT 1"
-    ))?;
+    let mut stmt = db.prepare(&format!("{SQL_SELECT_ALL} WHERE file_path = ?1 LIMIT 1"))?;
     let row = stmt
         .query_row(params![file_path], row_from_sql)
         .optional()?;

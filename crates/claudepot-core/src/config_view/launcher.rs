@@ -15,9 +15,7 @@
 //! The launcher never waits for the editor process — spawn is
 //! fire-and-forget. Spawn errors are returned; callers surface as a toast.
 
-use crate::config_view::model::{
-    DetectSource, EditorCandidate, EditorDefaults, Kind, LaunchKind,
-};
+use crate::config_view::model::{DetectSource, EditorCandidate, EditorDefaults, Kind, LaunchKind};
 use once_cell::sync::Lazy;
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
@@ -30,6 +28,10 @@ struct ProbeEntry {
     id: &'static str,
     label: &'static str,
     bundle_id: Option<&'static str>,
+    /// Used only by the macOS launch path. Linux/Windows builds
+    /// don't read it, but the field stays in the table so the static
+    /// initializer is one shape for every target.
+    #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
     macos_app: Option<&'static str>,
     cli_names: &'static [&'static str],
     args_template: &'static [&'static str],
@@ -227,7 +229,11 @@ pub struct RealProbe;
 impl ProbeBackend for RealProbe {
     fn which(&self, name: &str) -> Option<PathBuf> {
         use std::process::Command;
-        let cmd = if cfg!(target_os = "windows") { "where" } else { "which" };
+        let cmd = if cfg!(target_os = "windows") {
+            "where"
+        } else {
+            "which"
+        };
         let out = Command::new(cmd).arg(name).output().ok()?;
         if !out.status.success() {
             return None;
@@ -269,7 +275,9 @@ pub fn detect<B: ProbeBackend>(backend: &B) -> Vec<EditorCandidate> {
             binary_path: None,
             bundle_id: None,
             launch: LaunchKind::EnvEditor,
-            detected_via: DetectSource::EnvVar { name: "EDITOR".to_string() },
+            detected_via: DetectSource::EnvVar {
+                name: "EDITOR".to_string(),
+            },
             supports_kinds: None,
         });
     }
@@ -355,7 +363,10 @@ pub fn detect_cached(force: bool) -> Vec<EditorCandidate> {
     }
     let fresh = detect(&RealProbe);
     if let Ok(mut guard) = CACHE.lock() {
-        *guard = Some(CacheEntry { at: Instant::now(), candidates: fresh.clone() });
+        *guard = Some(CacheEntry {
+            at: Instant::now(),
+            candidates: fresh.clone(),
+        });
     }
     // On poisoned lock we skip the cache write — next call re-probes,
     // which is correct (stale cache never returns).
@@ -442,9 +453,9 @@ pub fn invoke(editor: &EditorCandidate, path: &Path) -> Result<(), LaunchError> 
             }
             #[cfg(target_os = "windows")]
             {
-                let p = path.to_str().ok_or_else(|| {
-                    LaunchError::Spawn("path is not valid UTF-8".to_string())
-                })?;
+                let p = path
+                    .to_str()
+                    .ok_or_else(|| LaunchError::Spawn("path is not valid UTF-8".to_string()))?;
                 std::process::Command::new("cmd")
                     .args(["/C", "start", "", p])
                     .spawn()
@@ -477,7 +488,11 @@ pub fn resolve_editor_for<'a>(
     }
     let matches_kind: Vec<&EditorCandidate> = candidates
         .iter()
-        .filter(|c| c.supports_kinds.as_ref().is_some_and(|ks| ks.contains(kind)))
+        .filter(|c| {
+            c.supports_kinds
+                .as_ref()
+                .is_some_and(|ks| ks.contains(kind))
+        })
         .collect();
     if !matches_kind.is_empty() {
         if let Some(c) = matches_kind.iter().find(|c| c.id == defaults.fallback) {
@@ -510,9 +525,9 @@ mod tests {
             self.bins.get(name).cloned()
         }
         fn dir_exists(&self, path: &Path) -> bool {
-            self.apps.iter().any(|app| {
-                path == Path::new("/Applications").join(app)
-            })
+            self.apps
+                .iter()
+                .any(|app| path == Path::new("/Applications").join(app))
         }
         fn env_editor(&self) -> Option<String> {
             self.env_editor.clone()
@@ -550,7 +565,11 @@ mod tests {
     fn detect_cli_only_on_linux_or_missing_app() {
         let mut bins = HashMap::new();
         bins.insert("code", PathBuf::from("/usr/local/bin/code"));
-        let backend = StubBackend { apps: vec![], bins, env_editor: None };
+        let backend = StubBackend {
+            apps: vec![],
+            bins,
+            env_editor: None,
+        };
         let cands = detect(&backend);
         // On macOS, VS Code app bundle is absent in the stub → falls back
         // to CLI. On Linux/Windows, the CLI is the only path.
@@ -603,7 +622,9 @@ mod tests {
                 label: "VMark".to_string(),
                 binary_path: None,
                 bundle_id: None,
-                launch: LaunchKind::MacosOpenA { app_name: "VMark".to_string() },
+                launch: LaunchKind::MacosOpenA {
+                    app_name: "VMark".to_string(),
+                },
                 detected_via: DetectSource::SystemDefault,
                 supports_kinds: Some(vec![Kind::ClaudeMd]),
             },
@@ -625,7 +646,9 @@ mod tests {
     fn resolve_editor_skips_missing_by_kind_default() {
         let mut defaults = EditorDefaults::new();
         // User's saved default no longer present on this machine.
-        defaults.by_kind.insert(Kind::Settings, "cursor".to_string());
+        defaults
+            .by_kind
+            .insert(Kind::Settings, "cursor".to_string());
         defaults.fallback = "system".to_string();
         let cands = vec![EditorCandidate {
             id: "system".to_string(),
@@ -649,7 +672,9 @@ mod tests {
                 label: "VMark".to_string(),
                 binary_path: None,
                 bundle_id: None,
-                launch: LaunchKind::MacosOpenA { app_name: "VMark".to_string() },
+                launch: LaunchKind::MacosOpenA {
+                    app_name: "VMark".to_string(),
+                },
                 detected_via: DetectSource::SystemDefault,
                 supports_kinds: Some(vec![Kind::ClaudeMd]),
             },
@@ -658,7 +683,9 @@ mod tests {
                 label: "Visual Studio Code".to_string(),
                 binary_path: None,
                 bundle_id: None,
-                launch: LaunchKind::MacosOpenA { app_name: "Visual Studio Code".to_string() },
+                launch: LaunchKind::MacosOpenA {
+                    app_name: "Visual Studio Code".to_string(),
+                },
                 detected_via: DetectSource::SystemDefault,
                 supports_kinds: None,
             },

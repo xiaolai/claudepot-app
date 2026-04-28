@@ -49,9 +49,7 @@ pub fn migrate_repair_tree() -> io::Result<()> {
             // EXDEV (18 on Linux/macOS) → cross-filesystem rename not
             // supported; fall through to copy + delete.
             Err(e) if e.raw_os_error() == Some(18) => {
-                tracing::info!(
-                    "cross-filesystem migration, copying then removing"
-                );
+                tracing::info!("cross-filesystem migration, copying then removing");
                 copy_dir_all(&legacy, &target)?;
                 fs::remove_dir_all(&legacy)?;
                 return Ok(());
@@ -203,8 +201,7 @@ mod tests {
         let target = claudepot.path().join("repair");
         assert!(!legacy.exists(), "legacy root should be gone");
         assert_eq!(
-            fs::read_to_string(target.join("journals").join("move-1.json"))
-                .unwrap(),
+            fs::read_to_string(target.join("journals").join("move-1.json")).unwrap(),
             "j"
         );
         assert_eq!(
@@ -212,8 +209,7 @@ mod tests {
             "l"
         );
         assert_eq!(
-            fs::read_to_string(target.join("snapshots").join("snap.json"))
-                .unwrap(),
+            fs::read_to_string(target.join("snapshots").join("snap.json")).unwrap(),
             "s"
         );
 
@@ -247,8 +243,7 @@ mod tests {
             "target's copy must win on conflict"
         );
         assert_eq!(
-            fs::read_to_string(target.join("locks").join("only.lock"))
-                .unwrap(),
+            fs::read_to_string(target.join("locks").join("only.lock")).unwrap(),
             "only"
         );
         // Legacy root kept because "journals" subdir still holds the
@@ -301,10 +296,7 @@ mod tests {
             "uniq"
         );
         assert_eq!(
-            fs::read_to_string(
-                target.join("snapshots").join("2024").join("old.json")
-            )
-            .unwrap(),
+            fs::read_to_string(target.join("snapshots").join("2024").join("old.json")).unwrap(),
             "old"
         );
 
@@ -312,7 +304,11 @@ mod tests {
         // (the unique migrated children) is gone.
         assert!(legacy.join("journals").join("conflict.json").exists());
         assert!(!legacy.join("journals").join("uniq.json").exists());
-        assert!(!legacy.join("snapshots").join("2024").join("old.json").exists());
+        assert!(!legacy
+            .join("snapshots")
+            .join("2024")
+            .join("old.json")
+            .exists());
 
         std::env::remove_var("CLAUDE_CONFIG_DIR");
     }

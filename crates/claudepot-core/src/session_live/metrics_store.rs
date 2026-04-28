@@ -85,9 +85,10 @@ impl MetricsStore {
         ts_ms: i64,
         sessions: &[LiveSessionSummary],
     ) -> Result<(), MetricsError> {
-        let conn = self.conn.lock().map_err(|_| MetricsError::Sqlite(
-            rusqlite::Error::InvalidQuery,
-        ))?;
+        let conn = self
+            .conn
+            .lock()
+            .map_err(|_| MetricsError::Sqlite(rusqlite::Error::InvalidQuery))?;
         let tx_guard = conn.unchecked_transaction()?;
         for s in sessions {
             let status_s = match s.status {
@@ -116,9 +117,10 @@ impl MetricsStore {
     /// (once a day on startup) — keeps the DB bounded so a month of
     /// constant use doesn't balloon the file.
     pub fn prune_before(&self, cutoff_ms: i64) -> Result<usize, MetricsError> {
-        let conn = self.conn.lock().map_err(|_| MetricsError::Sqlite(
-            rusqlite::Error::InvalidQuery,
-        ))?;
+        let conn = self
+            .conn
+            .lock()
+            .map_err(|_| MetricsError::Sqlite(rusqlite::Error::InvalidQuery))?;
         let n = conn.execute(
             "DELETE FROM metrics_tick WHERE ts_ms < ?1",
             rusqlite::params![cutoff_ms],
@@ -144,9 +146,10 @@ impl MetricsStore {
         }
         let total = (to_ms - from_ms).max(1) as f64;
         let bucket_width = total / bucket_count as f64;
-        let conn = self.conn.lock().map_err(|_| MetricsError::Sqlite(
-            rusqlite::Error::InvalidQuery,
-        ))?;
+        let conn = self
+            .conn
+            .lock()
+            .map_err(|_| MetricsError::Sqlite(rusqlite::Error::InvalidQuery))?;
         let mut stmt = conn.prepare(
             "SELECT ts_ms, session_id FROM metrics_tick \
              WHERE ts_ms >= ?1 AND ts_ms < ?2",
@@ -157,10 +160,9 @@ impl MetricsStore {
         // it. Using Vec<HashSet<String>> is O(N) memory-wise; in
         // practice a bucket has tens of sessions at most, so it
         // holds up fine.
-        let mut buckets: Vec<std::collections::HashSet<String>> =
-            (0..bucket_count)
-                .map(|_| std::collections::HashSet::new())
-                .collect();
+        let mut buckets: Vec<std::collections::HashSet<String>> = (0..bucket_count)
+            .map(|_| std::collections::HashSet::new())
+            .collect();
         while let Some(row) = rows.next()? {
             let ts_ms: i64 = row.get(0)?;
             let sid: String = row.get(1)?;
@@ -174,14 +176,11 @@ impl MetricsStore {
     /// Count the number of ticks in `[from_ms, to_ms)` carrying the
     /// `errored` overlay. Used for the error-burst sparkline and the
     /// headline "errors today" stat.
-    pub fn error_count(
-        &self,
-        from_ms: i64,
-        to_ms: i64,
-    ) -> Result<u64, MetricsError> {
-        let conn = self.conn.lock().map_err(|_| MetricsError::Sqlite(
-            rusqlite::Error::InvalidQuery,
-        ))?;
+    pub fn error_count(&self, from_ms: i64, to_ms: i64) -> Result<u64, MetricsError> {
+        let conn = self
+            .conn
+            .lock()
+            .map_err(|_| MetricsError::Sqlite(rusqlite::Error::InvalidQuery))?;
         let n: i64 = conn.query_row(
             "SELECT COUNT(*) FROM metrics_tick \
              WHERE ts_ms >= ?1 AND ts_ms < ?2 AND errored = 1",

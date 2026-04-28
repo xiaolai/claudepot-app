@@ -65,7 +65,10 @@ fn first_user_prompt_skips_tool_result_and_caveat() {
     let real = r#"{"type":"user","message":{"role":"user","content":[{"type":"text","text":"the real question"}]},"timestamp":"2026-04-10T10:00:02Z","cwd":"/a","sessionId":"S1"}"#;
     write_session(tmp.path(), "-a", "S1", &[caveat, tool, real]);
     let rows = scan_all_sessions_uncached(tmp.path()).unwrap();
-    assert_eq!(rows[0].first_user_prompt.as_deref(), Some("the real question"));
+    assert_eq!(
+        rows[0].first_user_prompt.as_deref(),
+        Some("the real question")
+    );
 }
 
 #[test]

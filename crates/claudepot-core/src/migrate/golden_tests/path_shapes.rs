@@ -61,11 +61,7 @@ fn row2_macos_to_windows_unix_to_drive_letter() {
 #[test]
 fn row3_windows_unc_to_macos_volume() {
     let mut t = SubstitutionTable::new();
-    t.push(
-        r"\\nas\share\proj",
-        "/Volumes/proj",
-        RuleOrigin::ProjectCwd,
-    );
+    t.push(r"\\nas\share\proj", "/Volumes/proj", RuleOrigin::ProjectCwd);
     t.finalize();
     assert_eq!(target_slug("/Volumes/proj"), "-Volumes-proj");
     // Source UNC slug shape is what the SOURCE machine wrote into
@@ -87,7 +83,8 @@ fn row4_home_rule_rewrites_embedded_tool_paths() {
     // Tool-result lines carry path strings inside `tool_use.input`
     // and `tool_result.content`. Multi-rule rewriter walks all string
     // values, not just `cwd`.
-    let line = r#"{"cwd":"/Users/joker/x","tool_use":{"input":{"file_path":"/Users/joker/x/foo.rs"}}}"#;
+    let line =
+        r#"{"cwd":"/Users/joker/x","tool_use":{"input":{"file_path":"/Users/joker/x/foo.rs"}}}"#;
     let (out, _n) = rewrite_jsonl_line_multi(line, &t);
     assert!(out.contains("/Users/alice/x"));
     assert!(out.contains("/Users/alice/x/foo.rs"));
@@ -112,7 +109,9 @@ fn row5_long_path_emits_djb2_with_prefix_scan_shape() {
     let suffix = &after_prefix[1..];
     assert!(suffix.chars().all(|c| c.is_ascii_alphanumeric()));
     // Prefix is the uniformly-sanitized first 200 chars.
-    assert!(prefix.chars().all(|c| c.is_ascii_alphanumeric() || c == '-'));
+    assert!(prefix
+        .chars()
+        .all(|c| c.is_ascii_alphanumeric() || c == '-'));
 }
 
 // Row 6 — path with NFD `é` → NFC target: slug equality post-normalize.
@@ -182,8 +181,8 @@ fn row9_mid_session_cd_lines_rewrite_independently() {
 fn row10_canonical_cwd_drives_target_slug() {
     let canonical = "/Volumes/repo/x";
     let alias = "/Users/joker/x"; // a hypothetical symlink alias
-    // Different inputs produce different slugs (no auto-canonicalize
-    // at sanitize layer); migrator must canonicalize upstream.
+                                  // Different inputs produce different slugs (no auto-canonicalize
+                                  // at sanitize layer); migrator must canonicalize upstream.
     assert_ne!(target_slug(canonical), target_slug(alias));
     // Once canonicalized, the slug is deterministic.
     assert_eq!(target_slug(canonical), "-Volumes-repo-x");

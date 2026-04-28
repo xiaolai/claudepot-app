@@ -295,10 +295,16 @@ mod jsonl_tests {
         let dst = dir.path().join("dst.jsonl");
         write(&src, "{\"cwd\":\"/tmp/old\",\"m\":\"y\"}\n");
 
-        assert_eq!(stream_rewrite_jsonl(&src, &dst, FROM_CWD, TO_CWD).unwrap(), 1);
+        assert_eq!(
+            stream_rewrite_jsonl(&src, &dst, FROM_CWD, TO_CWD).unwrap(),
+            1
+        );
         // Second pass reads dst (already rewritten) — must be a no-op.
         let dst2 = dir.path().join("dst2.jsonl");
-        assert_eq!(stream_rewrite_jsonl(&dst, &dst2, FROM_CWD, TO_CWD).unwrap(), 0);
+        assert_eq!(
+            stream_rewrite_jsonl(&dst, &dst2, FROM_CWD, TO_CWD).unwrap(),
+            0
+        );
     }
 
     #[test]
@@ -308,7 +314,7 @@ mod jsonl_tests {
         let dir = tempdir().unwrap();
         let src = dir.path().join("src.jsonl");
         let dst = dir.path().join("dst.jsonl");
-        let from = r"C:\Users\joker\with quote\" ;
+        let from = r"C:\Users\joker\with quote\";
         let to = r"C:\Users\joker\clean";
         // JSON-escape the original for the on-disk fixture.
         let encoded_from = serde_json::to_string(from).unwrap();
@@ -336,8 +342,7 @@ mod jsonl_tests {
             ),
         );
 
-        let (rewritten, unmapped) =
-            rewrite_history_jsonl(&path, sid, FROM_CWD, TO_CWD).unwrap();
+        let (rewritten, unmapped) = rewrite_history_jsonl(&path, sid, FROM_CWD, TO_CWD).unwrap();
         assert_eq!(rewritten, 1);
         assert_eq!(unmapped, 0);
 
@@ -351,13 +356,9 @@ mod jsonl_tests {
         let dir = tempdir().unwrap();
         let path = dir.path().join("history.jsonl");
         let sid = Uuid::new_v4();
-        write(
-            &path,
-            "{\"project\":\"/tmp/old\",\"legacy\":true}\n",
-        );
+        write(&path, "{\"project\":\"/tmp/old\",\"legacy\":true}\n");
 
-        let (rewritten, unmapped) =
-            rewrite_history_jsonl(&path, sid, FROM_CWD, TO_CWD).unwrap();
+        let (rewritten, unmapped) = rewrite_history_jsonl(&path, sid, FROM_CWD, TO_CWD).unwrap();
         assert_eq!(rewritten, 0);
         assert_eq!(unmapped, 1);
 
@@ -380,8 +381,7 @@ mod jsonl_tests {
             ),
         );
 
-        let (rewritten, unmapped) =
-            rewrite_history_jsonl(&path, target, FROM_CWD, TO_CWD).unwrap();
+        let (rewritten, unmapped) = rewrite_history_jsonl(&path, target, FROM_CWD, TO_CWD).unwrap();
         assert_eq!(rewritten, 1);
         assert_eq!(unmapped, 0);
 
@@ -406,13 +406,10 @@ mod jsonl_tests {
         let sid = Uuid::new_v4();
         write(
             &path,
-            &format!(
-                "{{not valid json\n{{\"sessionId\":\"{sid}\",\"project\":\"/tmp/old\"}}\n"
-            ),
+            &format!("{{not valid json\n{{\"sessionId\":\"{sid}\",\"project\":\"/tmp/old\"}}\n"),
         );
 
-        let (rewritten, _unmapped) =
-            rewrite_history_jsonl(&path, sid, FROM_CWD, TO_CWD).unwrap();
+        let (rewritten, _unmapped) = rewrite_history_jsonl(&path, sid, FROM_CWD, TO_CWD).unwrap();
         assert_eq!(rewritten, 1);
 
         let out = fs::read_to_string(&path).unwrap();

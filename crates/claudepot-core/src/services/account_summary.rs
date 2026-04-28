@@ -54,8 +54,7 @@ pub fn list_summaries(store: &AccountStore) -> Result<Vec<AccountSummaryView>, r
         // A stored blob is "healthy" if it exists and parses. Any other
         // status ("missing", "corrupt blob", "no credentials") means the
         // swap can't succeed — the UI should gate on this, not the DB flag.
-        let credentials_healthy =
-            health.status.starts_with("valid") || health.status == "expired";
+        let credentials_healthy = health.status.starts_with("valid") || health.status == "expired";
         // Cheap on-disk check per plan v2 §D18: just exists(), no
         // recursive walk.
         let desktop_profile_on_disk = paths::desktop_profile_dir(account.uuid).exists();
@@ -81,9 +80,7 @@ mod tests {
     use super::*;
     use crate::account_verification::VerifyOutcome;
     use crate::cli_backend::swap;
-    use crate::testing::{
-        fresh_blob_json, make_account, setup_test_data_dir, test_store,
-    };
+    use crate::testing::{fresh_blob_json, make_account, setup_test_data_dir, test_store};
 
     fn insert(store: &AccountStore, account: &Account) {
         store.insert(account).unwrap();

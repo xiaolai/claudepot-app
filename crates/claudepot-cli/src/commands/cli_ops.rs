@@ -68,7 +68,12 @@ pub async fn status(ctx: &AppContext) -> Result<()> {
     Ok(())
 }
 
-pub async fn use_account(ctx: &AppContext, email_input: &str, no_refresh: bool, force: bool) -> Result<()> {
+pub async fn use_account(
+    ctx: &AppContext,
+    email_input: &str,
+    no_refresh: bool,
+    force: bool,
+) -> Result<()> {
     use claudepot_core::cli_backend;
     use claudepot_core::resolve::resolve_email;
     use claudepot_core::services::account_service;
@@ -88,9 +93,7 @@ pub async fn use_account(ctx: &AppContext, email_input: &str, no_refresh: bool, 
     // keychain. Best-effort; network/profile failures fall through.
     if let Err(e) = account_service::sync_from_current_cc(&ctx.store).await {
         if !ctx.quiet {
-            eprintln!(
-                "\u{26a0}  Couldn't verify CC state ({e}); proceeding with DB view."
-            );
+            eprintln!("\u{26a0}  Couldn't verify CC state ({e}); proceeding with DB view.");
         }
     }
 
@@ -118,15 +121,25 @@ pub async fn use_account(ctx: &AppContext, email_input: &str, no_refresh: bool, 
     let fetcher = cli_backend::swap::DefaultProfileFetcher;
     if force {
         cli_backend::swap::switch_force(
-            &ctx.store, current_uuid, target.uuid,
-            platform.as_ref(), !no_refresh, &refresher, &fetcher,
+            &ctx.store,
+            current_uuid,
+            target.uuid,
+            platform.as_ref(),
+            !no_refresh,
+            &refresher,
+            &fetcher,
         )
         .await
         .map_err(annotate_swap_err)?;
     } else {
         cli_backend::swap::switch(
-            &ctx.store, current_uuid, target.uuid,
-            platform.as_ref(), !no_refresh, &refresher, &fetcher,
+            &ctx.store,
+            current_uuid,
+            target.uuid,
+            platform.as_ref(),
+            !no_refresh,
+            &refresher,
+            &fetcher,
         )
         .await
         .map_err(annotate_swap_err)?;
@@ -152,8 +165,7 @@ pub async fn use_account(ctx: &AppContext, email_input: &str, no_refresh: bool, 
         // paths (the old behaviour) meant we printed the "running
         // claude processes will continue" note even when no CC was
         // running — misleading.
-        let cc_running =
-            claudepot_core::cli_backend::swap::is_cc_process_running_public().await;
+        let cc_running = claudepot_core::cli_backend::swap::is_cc_process_running_public().await;
         match swap_completion_note(force, cc_running) {
             SwapNote::ForceWithRunning => {
                 eprintln!();
@@ -190,9 +202,9 @@ pub async fn use_account(ctx: &AppContext, email_input: &str, no_refresh: bool, 
 /// `--force`) and the GUI/tray (which gets an Override button).
 fn annotate_swap_err(e: SwapError) -> anyhow::Error {
     match e {
-        SwapError::LiveSessionConflict => anyhow::anyhow!(
-            "{e}\n\nQuit Claude Code first, or pass --force to proceed anyway."
-        ),
+        SwapError::LiveSessionConflict => {
+            anyhow::anyhow!("{e}\n\nQuit Claude Code first, or pass --force to proceed anyway.")
+        }
         other => other.into(),
     }
 }
@@ -259,9 +271,7 @@ pub async fn run(
 
     match classify_run_mode(print_token, args).map_err(|e| anyhow::anyhow!("{e}"))? {
         RunMode::PrintToken => {
-            eprintln!(
-                "⚠ WARNING: outputting raw access token. Do not log or share this value."
-            );
+            eprintln!("⚠ WARNING: outputting raw access token. Do not log or share this value.");
             let token = launcher::get_access_token(account.uuid)
                 .await
                 .map_err(|e| anyhow::anyhow!("{e}"))?;
@@ -272,10 +282,7 @@ pub async fn run(
             // Drop the internal "Mode D" jargon — users shouldn't need
             // to know the implementation-plan's mode-letter taxonomy to
             // read a progress line. Show the bin name instead.
-            let bin = args
-                .first()
-                .map(String::as_str)
-                .unwrap_or("<cmd>");
+            let bin = args.first().map(String::as_str).unwrap_or("<cmd>");
             ctx.info(&format!("Running {bin} as {email}..."));
             let exit_code = launcher::run(account.uuid, args)
                 .await
@@ -388,10 +395,7 @@ mod tests {
     fn test_swap_note_force_and_running_shows_split_brain_warning() {
         // Full 13-line warning — the only state worth interrupting the
         // user with, since the swap genuinely may be reverted by CC.
-        assert_eq!(
-            swap_completion_note(true, true),
-            SwapNote::ForceWithRunning
-        );
+        assert_eq!(swap_completion_note(true, true), SwapNote::ForceWithRunning);
     }
 
     #[test]

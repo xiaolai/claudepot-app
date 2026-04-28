@@ -17,16 +17,12 @@ use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
+#[derive(Default)]
 pub enum ConflictMode {
+    #[default]
     Skip,
     Merge,
     Replace,
-}
-
-impl Default for ConflictMode {
-    fn default() -> Self {
-        Self::Skip
-    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -65,7 +61,9 @@ pub enum Resolution {
     ArchiveThenApply,
     /// Apply per merge: union sessions, dedupe, prefer per the
     /// merge-preference flag.
-    Merge { prefer: MergePreference },
+    Merge {
+        prefer: MergePreference,
+    },
     /// Refuse — surface to the user with the carried reason.
     Refuse(String),
 }
@@ -84,11 +82,9 @@ pub fn resolve(
                  use --mode=merge or --mode=replace"
             ))
         }
-        (ProjectConflict::PresentNoOverlap { .. }, ConflictMode::Merge) => {
-            Resolution::Merge {
-                prefer: prefer.unwrap_or(MergePreference::Imported),
-            }
-        }
+        (ProjectConflict::PresentNoOverlap { .. }, ConflictMode::Merge) => Resolution::Merge {
+            prefer: prefer.unwrap_or(MergePreference::Imported),
+        },
         (ProjectConflict::PresentNoOverlap { .. }, ConflictMode::Replace) => {
             Resolution::ArchiveThenApply
         }
@@ -103,16 +99,19 @@ pub fn resolve(
              use --mode=merge --prefer-imported|--prefer-target or --mode=replace",
             overlapping_ids.len()
         )),
-        (ProjectConflict::PresentOverlap { overlapping_ids, .. }, ConflictMode::Merge) => {
-            match prefer {
-                None => Resolution::Refuse(format!(
-                    "{} overlapping sessionId(s); --mode=merge requires \
+        (
+            ProjectConflict::PresentOverlap {
+                overlapping_ids, ..
+            },
+            ConflictMode::Merge,
+        ) => match prefer {
+            None => Resolution::Refuse(format!(
+                "{} overlapping sessionId(s); --mode=merge requires \
                      --prefer-imported or --prefer-target",
-                    overlapping_ids.len()
-                )),
-                Some(p) => Resolution::Merge { prefer: p },
-            }
-        }
+                overlapping_ids.len()
+            )),
+            Some(p) => Resolution::Merge { prefer: p },
+        },
         (ProjectConflict::PresentOverlap { .. }, ConflictMode::Replace) => {
             Resolution::ArchiveThenApply
         }

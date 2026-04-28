@@ -196,8 +196,8 @@ impl UsageCache {
             if let Some(rx) = inflight.get(&uuid) {
                 let mut rx = rx.clone();
                 drop(inflight); // release lock before await
-                // Wait for the initiator to finish. If sender was dropped (panic),
-                // changed() returns Err — we handle that explicitly.
+                                // Wait for the initiator to finish. If sender was dropped (panic),
+                                // changed() returns Err — we handle that explicitly.
                 if rx.changed().await.is_err() {
                     return Err(UsageFetchError::FetchFailed(
                         "inflight fetch was cancelled".into(),
@@ -278,10 +278,7 @@ impl UsageCache {
             Err(OAuthError::RateLimited { retry_after_secs }) => {
                 {
                     let mut cooldowns = self.cooldowns.lock().await;
-                    cooldowns.insert(
-                        uuid,
-                        Instant::now() + Duration::from_secs(retry_after_secs),
-                    );
+                    cooldowns.insert(uuid, Instant::now() + Duration::from_secs(retry_after_secs));
                 }
                 let _ = tx.send(Some(FetchOutcome::RateLimited { retry_after_secs }));
                 guard.disarm_and_cleanup().await;
@@ -439,8 +436,7 @@ impl UsageCache {
                 UsageOutcome::Fresh { response, age_secs }
             }
             Ok(None) => UsageOutcome::NoCredentials,
-            Err(UsageFetchError::Cooldown { .. })
-            | Err(UsageFetchError::RateLimited { .. }) => {
+            Err(UsageFetchError::Cooldown { .. }) | Err(UsageFetchError::RateLimited { .. }) => {
                 // Serve stale cache if we have one; otherwise signal
                 // rate-limited-without-fallback so the UI can render
                 // "retry in Ns".
@@ -466,10 +462,7 @@ impl UsageCache {
     /// Batch variant of `fetch_usage_detailed`. Every input uuid appears
     /// in the output map — status is carried per entry so the UI can
     /// render the exact reason each account is unavailable.
-    pub async fn fetch_batch_detailed(
-        &self,
-        uuids: &[Uuid],
-    ) -> HashMap<Uuid, UsageOutcome> {
+    pub async fn fetch_batch_detailed(&self, uuids: &[Uuid]) -> HashMap<Uuid, UsageOutcome> {
         let mut out = HashMap::new();
         let mut first = true;
         for &uuid in uuids {
@@ -717,7 +710,11 @@ mod tests {
         assert!(result.is_ok());
         let resp = result.unwrap().unwrap();
         assert_eq!(resp.five_hour.unwrap().utilization, 42.0);
-        assert_eq!(count.load(Ordering::SeqCst), 0, "fetcher should not be called");
+        assert_eq!(
+            count.load(Ordering::SeqCst),
+            0,
+            "fetcher should not be called"
+        );
     }
 
     #[tokio::test]
@@ -749,7 +746,10 @@ mod tests {
             "should not error on missing blob, got: {:?}",
             result
         );
-        assert!(result.unwrap().is_none(), "should return None, not stale cache");
+        assert!(
+            result.unwrap().is_none(),
+            "should return None, not stale cache"
+        );
     }
 
     #[tokio::test]
@@ -766,7 +766,11 @@ mod tests {
 
         let result = cache.fetch_usage(uuid, false).await;
         assert!(matches!(result, Err(UsageFetchError::Cooldown { .. })));
-        assert_eq!(count.load(Ordering::SeqCst), 0, "fetcher should not be called during cooldown");
+        assert_eq!(
+            count.load(Ordering::SeqCst),
+            0,
+            "fetcher should not be called during cooldown"
+        );
     }
 
     #[tokio::test]
@@ -868,7 +872,12 @@ mod tests {
         let r = UsageCache::outcome_to_result(Some(FetchOutcome::RateLimited {
             retry_after_secs: 30,
         }));
-        assert!(matches!(r, Err(UsageFetchError::RateLimited { retry_after_secs: 30 })));
+        assert!(matches!(
+            r,
+            Err(UsageFetchError::RateLimited {
+                retry_after_secs: 30
+            })
+        ));
 
         // Failed
         let r = UsageCache::outcome_to_result(Some(FetchOutcome::Failed("boom".into())));

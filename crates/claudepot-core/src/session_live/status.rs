@@ -352,7 +352,6 @@ impl StatusMachine {
     }
 }
 
-
 #[cfg(test)]
 #[path = "status_tests.rs"]
 mod tests;

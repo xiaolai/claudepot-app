@@ -123,7 +123,10 @@ fn test_snapshot_purges_items_absent_from_current_session() {
         "stale Local Storage dir not purged"
     );
     // config.json still present in data_dir → still in profile.
-    assert_eq!(fs::read_to_string(profile.join("config.json")).unwrap(), "v1");
+    assert_eq!(
+        fs::read_to_string(profile.join("config.json")).unwrap(),
+        "v1"
+    );
 }
 
 #[test]

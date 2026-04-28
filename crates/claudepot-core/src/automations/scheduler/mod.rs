@@ -102,7 +102,7 @@ pub trait Scheduler {
 pub fn active_scheduler() -> Box<dyn Scheduler> {
     #[cfg(target_os = "macos")]
     {
-        return Box::new(launchd::LaunchdScheduler);
+        Box::new(launchd::LaunchdScheduler)
     }
     #[cfg(target_os = "linux")]
     {
@@ -144,7 +144,9 @@ pub fn cron_next_runs(
     let mut cursor = from
         .with_timezone(&Utc)
         .checked_add_signed(chrono::Duration::seconds(60))
-        .ok_or_else(|| AutomationError::InvalidCron(cron_expr.into(), "time arithmetic overflow".into()))?;
+        .ok_or_else(|| {
+            AutomationError::InvalidCron(cron_expr.into(), "time arithmetic overflow".into())
+        })?;
     cursor = truncate_to_minute(cursor);
 
     for _ in 0..cap_minutes {
@@ -173,9 +175,9 @@ fn matches_any_slot(dt: DateTime<Utc>, slots: &[super::cron::LaunchSlot]) -> boo
     use chrono::{Datelike, Timelike};
     let m = dt.minute() as u8;
     let h = dt.hour() as u8;
-    let dom = dt.day() as u8;       // 1..=31
-    let mon = dt.month() as u8;     // 1..=12
-    // chrono Weekday: Mon=0..Sun=6. We want cron Sun=0..Sat=6.
+    let dom = dt.day() as u8; // 1..=31
+    let mon = dt.month() as u8; // 1..=12
+                                // chrono Weekday: Mon=0..Sun=6. We want cron Sun=0..Sat=6.
     let dow = match dt.weekday() {
         chrono::Weekday::Sun => 0u8,
         chrono::Weekday::Mon => 1,
@@ -219,7 +221,8 @@ mod tests {
         assert_eq!(next.len(), 3);
         assert_eq!(next[0], Utc.with_ymd_and_hms(2026, 5, 4, 9, 0, 0).unwrap()); // Mon
         assert_eq!(next[1], Utc.with_ymd_and_hms(2026, 5, 5, 9, 0, 0).unwrap()); // Tue
-        assert_eq!(next[2], Utc.with_ymd_and_hms(2026, 5, 6, 9, 0, 0).unwrap()); // Wed
+        assert_eq!(next[2], Utc.with_ymd_and_hms(2026, 5, 6, 9, 0, 0).unwrap());
+        // Wed
     }
 
     #[test]

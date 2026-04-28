@@ -100,10 +100,12 @@ pub fn list_actionable(
     locks_dir: &Path,
     nag_threshold_secs: u64,
 ) -> Result<Vec<JournalEntry>, ProjectError> {
-    Ok(list_pending_with_status(journals_dir, locks_dir, nag_threshold_secs)?
-        .into_iter()
-        .filter(|e| e.status != JournalStatus::Abandoned)
-        .collect())
+    Ok(
+        list_pending_with_status(journals_dir, locks_dir, nag_threshold_secs)?
+            .into_iter()
+            .filter(|e| e.status != JournalStatus::Abandoned)
+            .collect(),
+    )
 }
 
 /// Look up a single pending journal by its stable id (the file stem,
@@ -116,9 +118,11 @@ pub fn find_pending_by_id(
     nag_threshold_secs: u64,
     id: &str,
 ) -> Result<Option<JournalEntry>, ProjectError> {
-    Ok(list_pending_with_status(journals_dir, locks_dir, nag_threshold_secs)?
-        .into_iter()
-        .find(|e| e.id == id))
+    Ok(
+        list_pending_with_status(journals_dir, locks_dir, nag_threshold_secs)?
+            .into_iter()
+            .find(|e| e.id == id),
+    )
 }
 
 /// Find the most recent pending journal whose `old_path` matches the
@@ -132,10 +136,12 @@ pub fn newest_pending_for_old_path(
     nag_threshold_secs: u64,
     old_path: &str,
 ) -> Result<Option<JournalEntry>, ProjectError> {
-    Ok(list_pending_with_status(journals_dir, locks_dir, nag_threshold_secs)?
-        .into_iter()
-        .filter(|e| e.journal.old_path == old_path)
-        .max_by_key(|e| e.journal.started_unix_secs))
+    Ok(
+        list_pending_with_status(journals_dir, locks_dir, nag_threshold_secs)?
+            .into_iter()
+            .filter(|e| e.journal.old_path == old_path)
+            .max_by_key(|e| e.journal.started_unix_secs),
+    )
 }
 
 /// Re-run the original move. The original journal is marked abandoned
@@ -180,8 +186,7 @@ pub fn resume(
         // locks/journals/snapshots into `<config_dir>/claudepot/`
         // instead of the real `~/.claudepot/repair/` tree, splitting
         // the audit trail.
-        claudepot_state_dir: claudepot_state_dir
-            .or_else(|| state_root_from_entry(entry)),
+        claudepot_state_dir: claudepot_state_dir.or_else(|| state_root_from_entry(entry)),
     };
     project::move_project(&args, sink)
 }
@@ -214,8 +219,7 @@ pub fn rollback(
         // Audit B3 fix: see `resume` above — preserve the original
         // repair-tree root so the rollback's audit artifacts stay
         // alongside the failed forward move's.
-        claudepot_state_dir: claudepot_state_dir
-            .or_else(|| state_root_from_entry(entry)),
+        claudepot_state_dir: claudepot_state_dir.or_else(|| state_root_from_entry(entry)),
     };
     project::move_project(&args, sink)
 }
@@ -305,9 +309,7 @@ pub struct AbandonedCleanupReport {
 /// List every abandoned journal on disk with its referenced snapshot
 /// paths. Does not modify anything. Used to populate the
 /// "Clean recovery artifacts" preview.
-pub fn preview_abandoned(
-    journals_dir: &Path,
-) -> Result<AbandonedCleanupReport, ProjectError> {
+pub fn preview_abandoned(journals_dir: &Path) -> Result<AbandonedCleanupReport, ProjectError> {
     let mut out = AbandonedCleanupReport::default();
     for entry in scan_abandoned_entries(journals_dir)? {
         out.bytes_freed += entry.bytes;
@@ -326,9 +328,7 @@ pub fn preview_abandoned(
 /// M12: counters increment only for files actually removed. A
 /// filesystem race or permission denied leaves the counter at its
 /// prior value and the paths stay out of the report.
-pub fn cleanup_abandoned(
-    journals_dir: &Path,
-) -> Result<AbandonedCleanupReport, ProjectError> {
+pub fn cleanup_abandoned(journals_dir: &Path) -> Result<AbandonedCleanupReport, ProjectError> {
     let mut out = AbandonedCleanupReport::default();
     for entry in scan_abandoned_entries(journals_dir)? {
         // Remove referenced snapshots first so an orphaned snapshot
@@ -385,9 +385,7 @@ pub fn cleanup_abandoned(
 /// [`preview_abandoned`] and [`cleanup_abandoned`] so the two stay
 /// byte-for-byte consistent — preview says exactly what cleanup
 /// would do.
-fn scan_abandoned_entries(
-    journals_dir: &Path,
-) -> Result<Vec<AbandonedCleanupEntry>, ProjectError> {
+fn scan_abandoned_entries(journals_dir: &Path) -> Result<Vec<AbandonedCleanupEntry>, ProjectError> {
     if !journals_dir.exists() {
         return Ok(Vec::new());
     }
@@ -483,9 +481,8 @@ pub fn gc(
                 if fs::remove_file(entry.path()).is_ok() {
                     result.bytes_freed += sidecar_size;
                     if journal_path.exists() {
-                        let journal_size = fs::metadata(&journal_path)
-                            .map(|m| m.len())
-                            .unwrap_or(0);
+                        let journal_size =
+                            fs::metadata(&journal_path).map(|m| m.len()).unwrap_or(0);
                         if fs::remove_file(&journal_path).is_ok() {
                             result.bytes_freed += journal_size;
                         }

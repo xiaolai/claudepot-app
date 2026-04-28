@@ -60,7 +60,10 @@ fn validate_key(key: &str) -> Result<(), AutomationError> {
             "key '{key}' must start with a letter or underscore"
         )));
     }
-    if !bytes.iter().all(|&b| b.is_ascii_alphanumeric() || b == b'_') {
+    if !bytes
+        .iter()
+        .all(|&b| b.is_ascii_alphanumeric() || b == b'_')
+    {
         return Err(AutomationError::InvalidEnv(format!(
             "key '{key}' must be ASCII alnum + underscore only"
         )));
@@ -126,10 +129,7 @@ pub fn default_path_segments(claudepot_bin_dir: &str) -> Vec<String> {
             "/usr/bin".to_string(),
             "/bin".to_string(),
             // Common per-user shim locations.
-            format!(
-                "{}/.local/bin",
-                std::env::var("HOME").unwrap_or_default()
-            ),
+            format!("{}/.local/bin", std::env::var("HOME").unwrap_or_default()),
         ]
     };
     if !claudepot_bin_dir.is_empty() {
@@ -143,7 +143,10 @@ mod tests {
     use super::*;
 
     fn map(entries: &[(&str, &str)]) -> BTreeMap<String, String> {
-        entries.iter().map(|(k, v)| (k.to_string(), v.to_string())).collect()
+        entries
+            .iter()
+            .map(|(k, v)| (k.to_string(), v.to_string()))
+            .collect()
     }
 
     #[test]

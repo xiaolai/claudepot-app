@@ -97,7 +97,10 @@ fn slim_preserves_user_prompts_assistant_text_and_tool_calls() {
     let body = fs::read_to_string(&session).unwrap();
     assert!(body.contains("hello there"));
     assert!(body.contains("answer text"));
-    assert!(body.contains("\"tool_use\""), "tool_use (tool call) must survive");
+    assert!(
+        body.contains("\"tool_use\""),
+        "tool_use (tool call) must survive"
+    );
     assert!(body.contains("\"summary\""), "summary must survive");
     assert!(body.contains("tool_result_redacted"));
 }
@@ -205,10 +208,7 @@ fn slim_aborts_if_file_changes_under_us() {
     use std::os::unix::fs::MetadataExt;
     let tmp = TempDir::new().unwrap();
     let huge = "x".repeat(500);
-    let session = write_session(
-        tmp.path(),
-        &[mk_line_tool_result("t1", "bash", &huge)],
-    );
+    let session = write_session(tmp.path(), &[mk_line_tool_result("t1", "bash", &huge)]);
     let data_dir = tmp.path().join("data");
     fs::create_dir_all(&data_dir).unwrap();
 
@@ -293,10 +293,7 @@ fn strip_user_image_top_level() {
     // SI.1: user image at message.content[*].type == "image"
     let tmp = TempDir::new().unwrap();
     let huge = "A".repeat(4096); // plausible base64 payload
-    let session = write_session(
-        tmp.path(),
-        &[mk_line_user_image("u1", "p0", &huge)],
-    );
+    let session = write_session(tmp.path(), &[mk_line_user_image("u1", "p0", &huge)]);
     let data_dir = tmp.path().join("data");
     fs::create_dir_all(&data_dir).unwrap();
     let opts = SlimOpts {
@@ -363,10 +360,7 @@ fn strip_document() {
     // SI.3: document block, guarded by strip_documents only
     let tmp = TempDir::new().unwrap();
     let huge = "D".repeat(4096);
-    let session = write_session(
-        tmp.path(),
-        &[mk_line_user_document("u1", "p0", &huge)],
-    );
+    let session = write_session(tmp.path(), &[mk_line_user_document("u1", "p0", &huge)]);
     let data_dir = tmp.path().join("data");
     fs::create_dir_all(&data_dir).unwrap();
     // strip_images only → document is NOT stripped.
@@ -431,10 +425,7 @@ fn strip_idempotent_second_pass_is_noop() {
     // and a byte-identical file.
     let tmp = TempDir::new().unwrap();
     let img = "I".repeat(1024);
-    let session = write_session(
-        tmp.path(),
-        &[mk_line_user_image("u1", "p0", &img)],
-    );
+    let session = write_session(tmp.path(), &[mk_line_user_image("u1", "p0", &img)]);
     let data_dir = tmp.path().join("data");
     fs::create_dir_all(&data_dir).unwrap();
     let opts = SlimOpts {
@@ -494,10 +485,10 @@ fn cc_parity_strip_images_from_messages() {
     // document, and (c) a tool_result that wraps an image and a
     // document. After running strip with both flags on, the result
     // must be node-for-node equal to the `after` fixture.
-    let before_path =
-        std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/slim-images/before.jsonl");
-    let after_path =
-        std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/slim-images/after.jsonl");
+    let before_path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("tests/fixtures/slim-images/before.jsonl");
+    let after_path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("tests/fixtures/slim-images/after.jsonl");
     let tmp = TempDir::new().unwrap();
     let session = tmp.path().join("s.jsonl");
     fs::copy(&before_path, &session).unwrap();
@@ -547,7 +538,10 @@ fn oversized_tool_result_size_redact_wins_over_image_strip() {
         ..SlimOpts::default()
     };
     let report = execute_slim(&data_dir, &session, &opts, &NoopSink).unwrap();
-    assert_eq!(report.redact_count, 1, "tool_result marker replaces whole part");
+    assert_eq!(
+        report.redact_count, 1,
+        "tool_result marker replaces whole part"
+    );
     assert_eq!(
         report.image_redact_count, 0,
         "marker replaced the part before the image was touched"
@@ -604,10 +598,7 @@ fn strip_images_then_restore_round_trips_original_at_original_path() {
     // temp filename.
     let tmp = TempDir::new().unwrap();
     let img = "Z".repeat(2048);
-    let session = write_session(
-        tmp.path(),
-        &[mk_line_user_image("u1", "p0", &img)],
-    );
+    let session = write_session(tmp.path(), &[mk_line_user_image("u1", "p0", &img)]);
     let before_bytes = fs::read(&session).unwrap();
     let data_dir = tmp.path().join("data");
     fs::create_dir_all(&data_dir).unwrap();
@@ -694,8 +685,8 @@ fn slim_execute_aborts_cleanly_on_live_write_and_leaves_no_orphans() {
         strip_images: true,
         ..SlimOpts::default()
     };
-    let err = execute_slim(&data_dir, &session, &opts, &NoopSink)
-        .expect_err("malformed JSON must fail");
+    let err =
+        execute_slim(&data_dir, &session, &opts, &NoopSink).expect_err("malformed JSON must fail");
     assert!(
         matches!(err, SlimError::Json { .. }),
         "expected Json error, got {err:?}"
@@ -753,10 +744,7 @@ fn strip_images_excluded_tool_preserves_nested_image() {
 fn slim_keeps_pre_slim_snapshot_in_trash() {
     let tmp = TempDir::new().unwrap();
     let huge = "x".repeat(500);
-    let session = write_session(
-        tmp.path(),
-        &[mk_line_tool_result("t1", "bash", &huge)],
-    );
+    let session = write_session(tmp.path(), &[mk_line_tool_result("t1", "bash", &huge)]);
     let data_dir = tmp.path().join("data");
     fs::create_dir_all(&data_dir).unwrap();
     execute_slim(
@@ -881,13 +869,9 @@ fn bulk_execute_slims_every_matched_file_and_sums_totals() {
         ..Default::default()
     };
     let opts = bulk_opts();
-    let plan = plan_slim_all_from_rows(
-        &rows,
-        &filter,
-        &opts,
-        chrono::Utc::now().timestamp_millis(),
-    )
-    .unwrap();
+    let plan =
+        plan_slim_all_from_rows(&rows, &filter, &opts, chrono::Utc::now().timestamp_millis())
+            .unwrap();
     let data_dir = tmp.path().join("data");
     fs::create_dir_all(&data_dir).unwrap();
     let report = execute_slim_all(&data_dir, &plan, &opts, &NoopSink);
@@ -898,7 +882,10 @@ fn bulk_execute_slims_every_matched_file_and_sums_totals() {
     // Each session's file shrank.
     for row in [&a, &b] {
         let body = fs::read_to_string(&row.file_path).unwrap();
-        assert!(!body.contains(&"A".repeat(1024)), "base64 payload must be gone");
+        assert!(
+            !body.contains(&"A".repeat(1024)),
+            "base64 payload must be gone"
+        );
         assert!(body.contains("\"[image]\""));
     }
     // Each has its own trash entry.
@@ -980,7 +967,11 @@ fn bulk_plan_surfaces_unreadable_rows_via_failed_to_plan() {
         chrono::Utc::now().timestamp_millis(),
     )
     .unwrap();
-    assert_eq!(plan.entries.len(), 1, "only the good row plans successfully");
+    assert_eq!(
+        plan.entries.len(),
+        1,
+        "only the good row plans successfully"
+    );
     assert_eq!(plan.failed_to_plan.len(), 1);
     assert!(plan.failed_to_plan[0].0.ends_with("absent.jsonl"));
 }

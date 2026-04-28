@@ -58,7 +58,16 @@ pub async fn share_gist(
     token: &str,
     sink: &dyn ProgressSink,
 ) -> Result<GistResult, ShareError> {
-    share_gist_with_base(content, filename, description, public, token, sink, DEFAULT_BASE).await
+    share_gist_with_base(
+        content,
+        filename,
+        description,
+        public,
+        token,
+        sink,
+        DEFAULT_BASE,
+    )
+    .await
 }
 
 /// Base-URL injection point for tests. Production callers use
@@ -134,10 +143,7 @@ pub async fn share_gist_with_base(
                         body: scrubbed,
                     },
                 };
-                sink.phase(
-                    "uploading",
-                    PhaseStatus::Error(err.to_string()),
-                );
+                sink.phase("uploading", PhaseStatus::Error(err.to_string()));
                 return Err(err);
             }
             Err(e) => {
@@ -251,7 +257,8 @@ mod tests {
             use tokio::io::{AsyncReadExt, AsyncWriteExt};
             let mut buf = vec![0u8; 4096];
             let _ = socket.read(&mut buf).await;
-            let resp = "HTTP/1.1 401 Unauthorized\r\nContent-Length: 0\r\nConnection: close\r\n\r\n";
+            let resp =
+                "HTTP/1.1 401 Unauthorized\r\nContent-Length: 0\r\nConnection: close\r\n\r\n";
             let _ = socket.write_all(resp.as_bytes()).await;
         });
 

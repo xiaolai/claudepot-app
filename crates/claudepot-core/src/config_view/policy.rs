@@ -127,7 +127,9 @@ pub fn load_managed_file(path: &std::path::Path) -> Result<Option<Value>, String
 /// Scan `managed-settings.d/*.json` into `(filename, parsed)` pairs.
 pub fn scan_managed_dir(dir: &std::path::Path) -> Vec<(String, Value)> {
     let mut out = Vec::new();
-    let Ok(rd) = std::fs::read_dir(dir) else { return out };
+    let Ok(rd) = std::fs::read_dir(dir) else {
+        return out;
+    };
     for entry in rd.flatten() {
         let name = entry.file_name().to_string_lossy().into_owned();
         if !name.ends_with(".json") {

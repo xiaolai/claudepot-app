@@ -198,8 +198,7 @@ fn acquire_swap_lock() -> Result<fs::File, SwapError> {
         // LockFileEx via the `fs2` shim, which is already used for the
         // Desktop swap lock in `desktop_lock.rs`.
         use fs2::FileExt;
-        file.lock_exclusive()
-            .map_err(SwapError::FileError)?;
+        file.lock_exclusive().map_err(SwapError::FileError)?;
     }
 
     Ok(file)
@@ -255,9 +254,15 @@ pub async fn switch(
     fetcher: &dyn ProfileFetcher,
 ) -> Result<(), SwapError> {
     switch_inner(
-        store, current_id, target_id, platform, auto_refresh, false,
+        store,
+        current_id,
+        target_id,
+        platform,
+        auto_refresh,
+        false,
         claude_json::default_path().as_deref(),
-        refresher, fetcher,
+        refresher,
+        fetcher,
     )
     .await
 }
@@ -274,9 +279,15 @@ pub async fn switch_force(
     fetcher: &dyn ProfileFetcher,
 ) -> Result<(), SwapError> {
     switch_inner(
-        store, current_id, target_id, platform, auto_refresh, true,
+        store,
+        current_id,
+        target_id,
+        platform,
+        auto_refresh,
+        true,
         claude_json::default_path().as_deref(),
-        refresher, fetcher,
+        refresher,
+        fetcher,
     )
     .await
 }
@@ -517,12 +528,11 @@ async fn switch_inner(
         // access token. We re-read the blob rather than plumb the
         // target_blob through — keeps the post-verify code unchanged.
         let cj_update_result: Result<(), SwapError> = async {
-            let target_after = platform
-                .read_default()
-                .await?
-                .ok_or_else(|| SwapError::IdentityVerificationFailed(
+            let target_after = platform.read_default().await?.ok_or_else(|| {
+                SwapError::IdentityVerificationFailed(
                     "post-write slot empty during oauthAccount rewrite".into(),
-                ))?;
+                )
+            })?;
             let blob = crate::blob::CredentialBlob::from_json(&target_after)
                 .map_err(|e| SwapError::CorruptBlob(e.to_string()))?;
             let profile = fetcher
@@ -559,10 +569,7 @@ async fn switch_inner(
             }
         }
         if let Some(cj_path) = claude_json_path {
-            let _ = claude_json::restore_oauth_account(
-                cj_path,
-                prior_oauth_account.as_ref(),
-            );
+            let _ = claude_json::restore_oauth_account(cj_path, prior_oauth_account.as_ref());
         }
         return Err(SwapError::WriteFailed(format!("db update failed: {e}")));
     }
@@ -587,9 +594,15 @@ pub(crate) async fn switch_force_for_tests(
     fetcher: &dyn ProfileFetcher,
 ) -> Result<(), SwapError> {
     switch_inner(
-        store, current_id, target_id, platform, auto_refresh, true,
+        store,
+        current_id,
+        target_id,
+        platform,
+        auto_refresh,
+        true,
         None, // don't touch ~/.claude.json in tests
-        refresher, fetcher,
+        refresher,
+        fetcher,
     )
     .await
 }

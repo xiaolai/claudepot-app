@@ -95,7 +95,10 @@ pub fn scrub_mcp_servers(map: &mut serde_json::Map<String, Value>) -> usize {
     let mut count = 0;
     for (_name, entry) in map.iter_mut() {
         let Value::Object(obj) = entry else { continue };
-        let Some(command) = obj.get("command").and_then(|v| v.as_str()).map(|s| s.to_string())
+        let Some(command) = obj
+            .get("command")
+            .and_then(|v| v.as_str())
+            .map(|s| s.to_string())
         else {
             continue;
         };
@@ -121,7 +124,10 @@ fn is_absolute_path_command(cmd: &str) -> bool {
     }
     if cmd.len() >= 3 {
         let bytes = cmd.as_bytes();
-        if bytes[0].is_ascii_alphabetic() && bytes[1] == b':' && (bytes[2] == b'/' || bytes[2] == b'\\') {
+        if bytes[0].is_ascii_alphabetic()
+            && bytes[1] == b':'
+            && (bytes[2] == b'/' || bytes[2] == b'\\')
+        {
             return true;
         }
     }

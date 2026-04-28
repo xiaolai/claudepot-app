@@ -170,7 +170,11 @@ mod tests {
 
     #[test]
     fn outputs_are_sorted_for_determinism() {
-        let fs = vec![t("/c.jsonl", 1, 1), t("/a.jsonl", 1, 1), t("/b.jsonl", 1, 1)];
+        let fs = vec![
+            t("/c.jsonl", 1, 1),
+            t("/a.jsonl", 1, 1),
+            t("/b.jsonl", 1, 1),
+        ];
         let plan = diff_fs_vs_db(&fs, &[]);
         assert_eq!(
             plan.to_upsert,

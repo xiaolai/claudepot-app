@@ -125,7 +125,10 @@ pub fn export(
         });
         println!("{}", serde_json::to_string_pretty(&v)?);
     } else {
-        println!("Exported {} project(s), {} file(s)", receipt.project_count, receipt.file_count);
+        println!(
+            "Exported {} project(s), {} file(s)",
+            receipt.project_count, receipt.file_count
+        );
         println!("  Bundle:  {}", receipt.bundle_path.display());
         println!("  Sidecar: {}", receipt.bundle_sha256_sidecar.display());
     }
@@ -181,7 +184,10 @@ pub fn import(
         });
         println!("{}", serde_json::to_string_pretty(&v)?);
     } else if receipt.dry_run {
-        println!("Dry run: {} project(s) would import", receipt.projects_imported.len());
+        println!(
+            "Dry run: {} project(s) would import",
+            receipt.projects_imported.len()
+        );
         for cwd in &receipt.projects_imported {
             println!("  ✓ {cwd}");
         }
@@ -234,11 +240,7 @@ pub fn inspect(ctx: &AppContext, bundle: PathBuf, upgrade_schema: bool) -> Resul
             .ok()
             .filter(|s| !s.is_empty())
             .map(migrate::SecretString::from)
-            .ok_or_else(|| {
-                anyhow!(
-                    "encrypted bundle: set CLAUDEPOT_PASSPHRASE to inspect"
-                )
-            })?;
+            .ok_or_else(|| anyhow!("encrypted bundle: set CLAUDEPOT_PASSPHRASE to inspect"))?;
         migrate::inspect_encrypted(&bundle, &pwd).map_err(map_migrate_err)?
     } else {
         migrate::inspect(&bundle).map_err(map_migrate_err)?
@@ -249,7 +251,10 @@ pub fn inspect(ctx: &AppContext, bundle: PathBuf, upgrade_schema: bool) -> Resul
         println!("Bundle: {}", bundle.display());
         println!("  schema_version:  {}", manifest.schema_version);
         println!("  claudepot:       {}", manifest.claudepot_version);
-        println!("  source_os:       {} / {}", manifest.source_os, manifest.source_arch);
+        println!(
+            "  source_os:       {} / {}",
+            manifest.source_os, manifest.source_arch
+        );
         println!("  created_at:      {}", manifest.created_at);
         println!(
             "  flags:           global={} worktree={} live={} state={} fhist={} enc={} sig={}",
@@ -263,7 +268,10 @@ pub fn inspect(ctx: &AppContext, bundle: PathBuf, upgrade_schema: bool) -> Resul
         );
         println!("  projects ({})", manifest.projects.len());
         for p in &manifest.projects {
-            println!("    - {} ({} sessions) slug={}", p.source_cwd, p.session_count, p.source_slug);
+            println!(
+                "    - {} ({} sessions) slug={}",
+                p.source_cwd, p.session_count, p.source_slug
+            );
         }
     }
     Ok(())
@@ -298,7 +306,10 @@ pub fn undo(ctx: &AppContext) -> Result<()> {
                 println!("    - {s}");
             }
         }
-        println!("  counter-journal: {}", receipt.counter_journal_path.display());
+        println!(
+            "  counter-journal: {}",
+            receipt.counter_journal_path.display()
+        );
     }
     Ok(())
 }

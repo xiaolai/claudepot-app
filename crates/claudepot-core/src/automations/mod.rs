@@ -53,10 +53,9 @@ pub use scheduler::{
 pub use shim::{render_unix, render_windows, ShimInputs};
 pub use slug::validate_name;
 pub use store::{
-    automation_dir, automation_runs_dir, automations_file_path, AutomationPatch,
-    AutomationStore,
+    automation_dir, automation_runs_dir, automations_file_path, AutomationPatch, AutomationStore,
 };
 pub use types::{
-    Automation, AutomationBinary, AutomationId, AutomationRun, HostPlatform,
-    OutputFormat, PermissionMode, PlatformOptions, RunResult, Trigger, TriggerKind,
+    Automation, AutomationBinary, AutomationId, AutomationRun, HostPlatform, OutputFormat,
+    PermissionMode, PlatformOptions, RunResult, Trigger, TriggerKind,
 };

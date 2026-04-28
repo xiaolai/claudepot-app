@@ -34,17 +34,16 @@ pub use error::RouteError;
 pub use helper::{delete_helpers, helper_path, helpers_dir, write_helper};
 pub use keychain::{
     delete_all_for_route as delete_keychain_for_route, delete_secret as delete_keychain_secret,
-    read_secret as read_keychain_secret, store_secret as store_keychain_secret,
-    SecretField,
+    read_secret as read_keychain_secret, store_secret as store_keychain_secret, SecretField,
 };
 pub use slug::{derive_wrapper_slug, sanitize_wrapper_name, WrapperNameError};
-pub use url::{validate_base_url, BaseUrlError};
 pub use store::RouteStore;
 pub use types::{
-    AuthScheme, BedrockConfig, FoundryConfig, GatewayConfig, ProviderKind, Route,
-    RouteId, RouteProvider, RouteSummary, VertexConfig,
+    AuthScheme, BedrockConfig, FoundryConfig, GatewayConfig, ProviderKind, Route, RouteId,
+    RouteProvider, RouteSummary, VertexConfig,
 };
-pub use wrapper::{wrapper_dir, wrapper_path, write_wrapper, delete_wrapper};
+pub use url::{validate_base_url, BaseUrlError};
+pub use wrapper::{delete_wrapper, wrapper_dir, wrapper_path, write_wrapper};
 
 /// Marker stamped on every Claudepot-written wrapper script and
 /// Desktop `configLibrary/<uuid>.json` so future runs can distinguish

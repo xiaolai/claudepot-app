@@ -215,25 +215,21 @@ pub fn classify_path(path: &Path, roots: &ActiveRoots) -> Result<Trackable, Refu
         .ok_or_else(|| RefuseReason::OutOfScope { path: path.clone() })?;
 
     // Now classify the path under <scope_root>/...
-    let rel = path.strip_prefix(scope_root).map_err(|_| {
-        RefuseReason::OutOfScope {
-            path: path.clone(),
-        }
-    })?;
+    let rel = path
+        .strip_prefix(scope_root)
+        .map_err(|_| RefuseReason::OutOfScope { path: path.clone() })?;
     let mut comps = rel.components();
     let first = comps
         .next()
-        .ok_or_else(|| RefuseReason::OutOfScope {
-            path: path.clone(),
-        })?;
+        .ok_or_else(|| RefuseReason::OutOfScope { path: path.clone() })?;
     let first_s = first.as_os_str().to_string_lossy().into_owned();
 
     let (kind_subdir, already_disabled) = if first_s == DISABLED_DIR {
         // Path is inside `.disabled/<kind>/...` — second component is
         // the kind subdir.
-        let second = comps.next().ok_or_else(|| RefuseReason::WrongKind {
-            path: path.clone(),
-        })?;
+        let second = comps
+            .next()
+            .ok_or_else(|| RefuseReason::WrongKind { path: path.clone() })?;
         (second.as_os_str().to_string_lossy().into_owned(), true)
     } else {
         (first_s, false)
@@ -430,11 +426,7 @@ mod tests {
         let tmp = tempfile::tempdir().unwrap();
         let user_root = tmp.path().join(".claude");
         let skill_dir = make_temp_dir(&user_root, "skills/myskill");
-        let r = classify_path(
-            &skill_dir,
-            &root_with(&user_root.to_string_lossy(), None),
-        )
-        .unwrap();
+        let r = classify_path(&skill_dir, &root_with(&user_root.to_string_lossy(), None)).unwrap();
         assert_eq!(r.scope, Scope::User);
         assert_eq!(r.kind, ArtifactKind::Skill);
         assert_eq!(r.relative_path, "myskill");
@@ -447,11 +439,7 @@ mod tests {
         let tmp = tempfile::tempdir().unwrap();
         let user_root = tmp.path().join(".claude");
         let agent = make_temp_file(&user_root, "agents/foo.md");
-        let r = classify_path(
-            &agent,
-            &root_with(&user_root.to_string_lossy(), None),
-        )
-        .unwrap();
+        let r = classify_path(&agent, &root_with(&user_root.to_string_lossy(), None)).unwrap();
         assert_eq!(r.kind, ArtifactKind::Agent);
         assert_eq!(r.relative_path, "foo.md");
         assert_eq!(r.payload_kind, PayloadKind::File);
@@ -462,11 +450,7 @@ mod tests {
         let tmp = tempfile::tempdir().unwrap();
         let user_root = tmp.path().join(".claude");
         let cmd = make_temp_file(&user_root, "commands/team/lint.md");
-        let r = classify_path(
-            &cmd,
-            &root_with(&user_root.to_string_lossy(), None),
-        )
-        .unwrap();
+        let r = classify_path(&cmd, &root_with(&user_root.to_string_lossy(), None)).unwrap();
         assert_eq!(r.kind, ArtifactKind::Command);
         assert_eq!(r.relative_path, "team/lint.md");
     }
@@ -476,11 +460,7 @@ mod tests {
         let tmp = tempfile::tempdir().unwrap();
         let user_root = tmp.path().join(".claude");
         let disabled = make_temp_file(&user_root, ".disabled/agents/foo.md");
-        let r = classify_path(
-            &disabled,
-            &root_with(&user_root.to_string_lossy(), None),
-        )
-        .unwrap();
+        let r = classify_path(&disabled, &root_with(&user_root.to_string_lossy(), None)).unwrap();
         assert_eq!(r.kind, ArtifactKind::Agent);
         assert_eq!(r.relative_path, "foo.md");
         assert!(r.already_disabled);
@@ -495,12 +475,11 @@ mod tests {
             &user_root,
             "plugins/cache/owner/my-plugin/0.1.0/skills/x/SKILL.md",
         );
-        let err = classify_path(
-            &plugin,
-            &root_with(&user_root.to_string_lossy(), None),
-        )
-        .unwrap_err();
-        assert!(matches!(err, RefuseReason::Plugin { ref plugin_id, .. } if plugin_id == "my-plugin"));
+        let err =
+            classify_path(&plugin, &root_with(&user_root.to_string_lossy(), None)).unwrap_err();
+        assert!(
+            matches!(err, RefuseReason::Plugin { ref plugin_id, .. } if plugin_id == "my-plugin")
+        );
     }
 
     #[test]
@@ -508,11 +487,8 @@ mod tests {
         let tmp = tempfile::tempdir().unwrap();
         let user_root = tmp.path().join(".claude");
         let stray = make_temp_file(tmp.path(), "elsewhere/agents/foo.md");
-        let err = classify_path(
-            &stray,
-            &root_with(&user_root.to_string_lossy(), None),
-        )
-        .unwrap_err();
+        let err =
+            classify_path(&stray, &root_with(&user_root.to_string_lossy(), None)).unwrap_err();
         assert!(matches!(err, RefuseReason::OutOfScope { .. }));
     }
 
@@ -543,11 +519,8 @@ mod tests {
         let tmp = tempfile::tempdir().unwrap();
         let user_root = tmp.path().join(".claude");
         let stray = make_temp_file(&user_root, "settings.json");
-        let err = classify_path(
-            &stray,
-            &root_with(&user_root.to_string_lossy(), None),
-        )
-        .unwrap_err();
+        let err =
+            classify_path(&stray, &root_with(&user_root.to_string_lossy(), None)).unwrap_err();
         assert!(matches!(err, RefuseReason::WrongKind { .. }));
     }
 
@@ -595,25 +568,26 @@ mod tests {
         // Note: dead_repo does NOT have a `.claude/` directory.
         std::fs::create_dir_all(&dead_repo).unwrap();
 
-        // Plant transcripts that record each project's cwd.
+        // Plant transcripts that record each project's cwd. Build via
+        // `serde_json::json!` so Windows backslashes are correctly
+        // JSON-escaped — interpolating raw `cwd.to_string_lossy()` into
+        // a `format!` string produces invalid JSON on Windows
+        // (`C:\Users\…` becomes a string with unescaped backslashes
+        // that serde_json then refuses to parse).
         let alive_slug = crate::project_sanitize::sanitize_path(&alive_repo.to_string_lossy());
         let dead_slug = crate::project_sanitize::sanitize_path(&dead_repo.to_string_lossy());
-        for (slug, cwd) in [
-            (&alive_slug, &alive_repo),
-            (&dead_slug, &dead_repo),
-        ] {
+        for (slug, cwd) in [(&alive_slug, &alive_repo), (&dead_slug, &dead_repo)] {
             let dir = config.join("projects").join(slug);
             std::fs::create_dir_all(&dir).unwrap();
             let session = dir.join("S.jsonl");
-            std::fs::write(
-                &session,
-                format!(
-                    r#"{{"type":"user","timestamp":"2026-04-10T10:00:00Z","cwd":"{}","sessionId":"S","message":{{"role":"user","content":"hi"}}}}
-"#,
-                    cwd.to_string_lossy()
-                ),
-            )
-            .unwrap();
+            let line = serde_json::json!({
+                "type": "user",
+                "timestamp": "2026-04-10T10:00:00Z",
+                "cwd": cwd.to_string_lossy().as_ref(),
+                "sessionId": "S",
+                "message": {"role": "user", "content": "hi"},
+            });
+            std::fs::write(&session, format!("{line}\n")).unwrap();
         }
 
         let discovered = discover_known_project_roots(&config);

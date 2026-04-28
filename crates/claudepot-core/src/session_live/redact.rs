@@ -53,8 +53,7 @@ static AUTH_HEADER_RE: Lazy<Regex> = Lazy::new(|| {
 /// Anchoring on `eyJ` keeps false positives away from arbitrary
 /// dotted identifiers.
 static JWT_RE: Lazy<Regex> = Lazy::new(|| {
-    Regex::new(r"eyJ[A-Za-z0-9_\-]+\.[A-Za-z0-9_\-]+\.[A-Za-z0-9_\-]+")
-        .expect("static regex")
+    Regex::new(r"eyJ[A-Za-z0-9_\-]+\.[A-Za-z0-9_\-]+\.[A-Za-z0-9_\-]+").expect("static regex")
 });
 
 /// Key=value pairs with a sensitive-looking key name. The delimiter
@@ -80,14 +79,19 @@ static SENSITIVE_KV_RE: Lazy<Regex> = Lazy::new(|| {
 /// the line so we can mask cookie VALUES while preserving the key=
 /// shape + attribute keywords (Path, HttpOnly, Secure, SameSite …)
 /// which are useful context and never sensitive.
-static COOKIE_HEADER_RE: Lazy<Regex> = Lazy::new(|| {
-    Regex::new(r"(?i)(Cookie|Set-Cookie)\s*:\s*([^\r\n]+)")
-        .expect("static regex")
-});
+static COOKIE_HEADER_RE: Lazy<Regex> =
+    Lazy::new(|| Regex::new(r"(?i)(Cookie|Set-Cookie)\s*:\s*([^\r\n]+)").expect("static regex"));
 
 const COOKIE_ATTR_NAMES: &[&str] = &[
-    "path", "domain", "expires", "max-age", "secure", "httponly",
-    "samesite", "partitioned", "priority",
+    "path",
+    "domain",
+    "expires",
+    "max-age",
+    "secure",
+    "httponly",
+    "samesite",
+    "partitioned",
+    "priority",
 ];
 
 /// Length threshold below which a matched sk-ant token is masked
@@ -134,9 +138,7 @@ pub fn redact_secrets(text: &str) -> String {
             format!("{}: {}", header, mask_cookie_body(body))
         })
         .into_owned();
-    out = JWT_RE
-        .replace_all(&out, "eyJ***.***.***")
-        .into_owned();
+    out = JWT_RE.replace_all(&out, "eyJ***.***.***").into_owned();
     out = SENSITIVE_KV_RE
         .replace_all(&out, |caps: &regex::Captures<'_>| {
             // Preserve the original separator so Bash-style args like
@@ -268,16 +270,13 @@ mod tests {
         // When there's no `token=` / `Authorization:` wrapper, the
         // sk-ant pass is the last-mile fallback and should preserve
         // the last-4 suffix so different leaks stay distinguishable.
-        let out = redact_secrets(
-            "stray sk-ant-Abc123DEF456_ghiJKLxyz trailing",
-        );
+        let out = redact_secrets("stray sk-ant-Abc123DEF456_ghiJKLxyz trailing");
         assert!(out.contains("sk-ant-***Lxyz"));
     }
 
     #[test]
     fn multiple_tokens_all_redacted() {
-        let input =
-            "a sk-ant-shortt b sk-ant-longerThanTwelveChars c sk-ant-x d";
+        let input = "a sk-ant-shortt b sk-ant-longerThanTwelveChars c sk-ant-x d";
         let out = redact_secrets(input);
         assert!(!out.contains("shortt"));
         assert!(!out.contains("longerThanTwelveChars"));
@@ -353,18 +352,14 @@ mod tests {
 
     #[test]
     fn auth_bearer_header_masks_token() {
-        let out = redact_secrets(
-            r#"curl -H "Authorization: Bearer abc123XYZdef456""#,
-        );
+        let out = redact_secrets(r#"curl -H "Authorization: Bearer abc123XYZdef456""#);
         assert!(!out.contains("abc123XYZdef456"));
         assert!(out.contains("Authorization: Bearer ***"));
     }
 
     #[test]
     fn auth_basic_header_masks_blob() {
-        let out = redact_secrets(
-            "Authorization: Basic dXNlcjpwYXNzd29yZA==",
-        );
+        let out = redact_secrets("Authorization: Basic dXNlcjpwYXNzd29yZA==");
         assert!(!out.contains("dXNlcjpwYXNzd29yZA"));
         assert!(out.contains("Authorization: Basic ***"));
     }
@@ -429,10 +424,7 @@ mod tests {
     fn api_key_variants_all_caught() {
         for variant in ["api_key", "api-key", "apikey", "API_KEY"] {
             let out = redact_secrets(&format!("{variant}=XYZ-leakme-123"));
-            assert!(
-                !out.contains("XYZ-leakme-123"),
-                "variant {variant} leaked"
-            );
+            assert!(!out.contains("XYZ-leakme-123"), "variant {variant} leaked");
         }
     }
 
@@ -489,9 +481,7 @@ mod tests {
 
     #[test]
     fn cookie_header_masks_values_preserves_attrs() {
-        let out = redact_secrets(
-            "Cookie: sid=abc123; lang=en-US; Path=/; HttpOnly",
-        );
+        let out = redact_secrets("Cookie: sid=abc123; lang=en-US; Path=/; HttpOnly");
         assert!(!out.contains("abc123"));
         assert!(!out.contains("en-US"));
         assert!(out.contains("sid=***"));
@@ -503,9 +493,7 @@ mod tests {
 
     #[test]
     fn set_cookie_header_also_masked() {
-        let out = redact_secrets(
-            "Set-Cookie: token=eyJabc.def.ghi; Secure; Max-Age=3600",
-        );
+        let out = redact_secrets("Set-Cookie: token=eyJabc.def.ghi; Secure; Max-Age=3600");
         assert!(!out.contains("eyJabc.def.ghi"));
         assert!(out.contains("token=***"));
         assert!(out.contains("Max-Age=***"));

@@ -272,7 +272,11 @@ impl BundleWriter {
         header.set_entry_type(tar::EntryType::Regular);
         header.set_cksum();
         self.builder
-            .append_data(&mut header, "manifest.json", manifest_with_trailer.as_slice())
+            .append_data(
+                &mut header,
+                "manifest.json",
+                manifest_with_trailer.as_slice(),
+            )
             .map_err(MigrateError::from)?;
 
         // 3. Close tar → finish zstd → flush BufWriter → fsync File.
@@ -388,9 +392,8 @@ impl BundleReader {
         // Serialize: a non-parseable manifest at this layer means the
         // bundle is corrupt or schema-mismatched, never a transient
         // serialization error.
-        let manifest: BundleManifest = serde_json::from_slice(body).map_err(|e| {
-            MigrateError::IntegrityViolation(format!("manifest.json parse: {e}"))
-        })?;
+        let manifest: BundleManifest = serde_json::from_slice(body)
+            .map_err(|e| MigrateError::IntegrityViolation(format!("manifest.json parse: {e}")))?;
         Ok(manifest)
     }
 
@@ -427,10 +430,7 @@ impl BundleReader {
     /// (now untrusted) staging tree for the caller to remove.
     ///
     /// Returns the per-file digests collected during extraction.
-    pub fn extract_all(
-        &self,
-        dest: &Path,
-    ) -> Result<Vec<FileInventoryEntry>, MigrateError> {
+    pub fn extract_all(&self, dest: &Path) -> Result<Vec<FileInventoryEntry>, MigrateError> {
         fs::create_dir_all(dest).map_err(MigrateError::from)?;
         let mut archive = self.open_archive()?;
         let mut digests = Vec::new();
@@ -494,7 +494,9 @@ impl BundleReader {
         Ok(digests)
     }
 
-    fn open_archive(&self) -> Result<tar::Archive<zstd::Decoder<'static, BufReader<File>>>, MigrateError> {
+    fn open_archive(
+        &self,
+    ) -> Result<tar::Archive<zstd::Decoder<'static, BufReader<File>>>, MigrateError> {
         // `zstd::Decoder::new` wraps its input in a `BufReader` internally,
         // so we pass the raw `File` and the decoder type carries
         // `BufReader<File>`.
@@ -639,10 +641,7 @@ fn split_manifest_trailer(bytes: &[u8]) -> Result<(&[u8], Option<String>), Migra
     // Trailer line: `# manifest-sha256: <hex>\n`. It's the last line
     // of the file, so we slice from the LAST occurrence of the marker.
     let marker = b"\n# manifest-sha256: ";
-    if let Some(pos) = bytes
-        .windows(marker.len())
-        .rposition(|w| w == marker)
-    {
+    if let Some(pos) = bytes.windows(marker.len()).rposition(|w| w == marker) {
         let body = &bytes[..pos];
         let trailer_text = &bytes[pos + marker.len()..];
         let hex = std::str::from_utf8(trailer_text)
@@ -756,9 +755,7 @@ mod tests {
         let tmp = tempfile::tempdir().unwrap();
         let bundle_path = tmp.path().join("test.claudepot.tar.zst");
         let mut writer = BundleWriter::create(&bundle_path).unwrap();
-        writer
-            .append_bytes("hello.txt", b"world\n", 0o644)
-            .unwrap();
+        writer.append_bytes("hello.txt", b"world\n", 0o644).unwrap();
         let final_path = writer.finalize(&fixture_manifest()).unwrap();
         assert_eq!(final_path, bundle_path);
         assert!(bundle_path.exists());
@@ -800,8 +797,11 @@ mod tests {
         w.finalize(&fixture_manifest()).unwrap();
         // Tamper sidecar.
         let sidecar = sidecar_path_for(&bundle_path);
-        fs::write(&sidecar, format!("{}  {}\n", "0".repeat(64), "y.claudepot.tar.zst"))
-            .unwrap();
+        fs::write(
+            &sidecar,
+            format!("{}  {}\n", "0".repeat(64), "y.claudepot.tar.zst"),
+        )
+        .unwrap();
         let err = BundleReader::open(&bundle_path).unwrap_err();
         assert!(matches!(err, MigrateError::IntegrityViolation(_)));
     }

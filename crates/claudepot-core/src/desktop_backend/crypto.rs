@@ -57,7 +57,9 @@ pub enum DecryptError {
 /// compatibility because the envelope layout is the same on macOS.
 pub fn strip_version_prefix(cipher: &[u8]) -> Result<&[u8], DecryptError> {
     if cipher.len() < 3 {
-        return Err(DecryptError::BadFormat("ciphertext shorter than 3 bytes".into()));
+        return Err(DecryptError::BadFormat(
+            "ciphertext shorter than 3 bytes".into(),
+        ));
     }
     let tag = [cipher[0], cipher[1], cipher[2]];
     if &tag != b"v10" && &tag != b"v11" {
@@ -71,10 +73,7 @@ pub fn strip_version_prefix(cipher: &[u8]) -> Result<&[u8], DecryptError> {
 pub fn b64_decode(s: &str) -> Result<Vec<u8>, DecryptError> {
     base64::engine::general_purpose::STANDARD
         .decode(s.as_bytes())
-        .or_else(|_| {
-            base64::engine::general_purpose::STANDARD_NO_PAD
-                .decode(s.as_bytes())
-        })
+        .or_else(|_| base64::engine::general_purpose::STANDARD_NO_PAD.decode(s.as_bytes()))
         .map_err(|e| DecryptError::Base64(e.to_string()))
 }
 

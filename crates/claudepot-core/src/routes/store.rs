@@ -194,11 +194,7 @@ impl RouteStore {
         self.persist()
     }
 
-    pub fn set_installed_cli(
-        &mut self,
-        id: RouteId,
-        installed: bool,
-    ) -> Result<(), RouteError> {
+    pub fn set_installed_cli(&mut self, id: RouteId, installed: bool) -> Result<(), RouteError> {
         let r = self
             .file
             .routes

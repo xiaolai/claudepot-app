@@ -97,10 +97,7 @@ impl LiveActivityService {
     /// Idempotent: calling repeatedly with the same `idx` is a no-op
     /// because the runtime stores the index in a `Mutex<Option<…>>`
     /// keyed by replacement, not append.
-    pub fn enable_activity(
-        &self,
-        idx: Arc<crate::activity::ActivityIndex>,
-    ) {
+    pub fn enable_activity(&self, idx: Arc<crate::activity::ActivityIndex>) {
         self.runtime.enable_activity(idx);
     }
 
@@ -109,10 +106,7 @@ impl LiveActivityService {
     /// supplies the user's `excluded_paths` preference; the service
     /// pushes it into the runtime before the first tick so an
     /// excluded project never appears in even the first aggregate.
-    pub async fn start(
-        self: &Arc<Self>,
-        excluded: Vec<String>,
-    ) -> Result<(), LiveActivityError> {
+    pub async fn start(self: &Arc<Self>, excluded: Vec<String>) -> Result<(), LiveActivityError> {
         let mut started = self.started.lock().await;
         if *started {
             return Ok(());
@@ -243,9 +237,7 @@ impl LiveActivityService {
         {
             let handles = self.detail_handles.lock().await;
             if handles.contains_key(session_id) {
-                return Err(LiveActivityError::AlreadySubscribed(
-                    session_id.to_string(),
-                ));
+                return Err(LiveActivityError::AlreadySubscribed(session_id.to_string()));
             }
         }
         let mut rx = self
@@ -371,13 +363,9 @@ mod tests {
         fn on_aggregate(&self, _sessions: Arc<Vec<LiveSessionSummary>>) {
             *self.aggregate_calls.lock().unwrap() += 1;
         }
-        fn on_membership_changed(
-            &self,
-            sessions: Arc<Vec<LiveSessionSummary>>,
-        ) {
+        fn on_membership_changed(&self, sessions: Arc<Vec<LiveSessionSummary>>) {
             *self.membership_calls.lock().unwrap() += 1;
-            let ids: Vec<String> =
-                sessions.iter().map(|s| s.session_id.clone()).collect();
+            let ids: Vec<String> = sessions.iter().map(|s| s.session_id.clone()).collect();
             *self.last_membership.lock().unwrap() = ids;
         }
         fn on_detail(&self, session_id: &str, delta: LiveDelta) {
@@ -408,23 +396,17 @@ mod tests {
             sid = sid,
             cwd = cwd
         );
-        let mut f =
-            std::fs::File::create(dir.join(format!("{pid}.json"))).unwrap();
+        let mut f = std::fs::File::create(dir.join(format!("{pid}.json"))).unwrap();
         f.write_all(body.as_bytes()).unwrap();
     }
 
-    fn write_transcript(
-        projects_dir: &std::path::Path,
-        cwd: &str,
-        sid: &str,
-    ) {
+    fn write_transcript(projects_dir: &std::path::Path, cwd: &str, sid: &str) {
         use crate::project_sanitize::sanitize_path;
         use std::io::Write;
         let slug = sanitize_path(cwd);
         let dir = projects_dir.join(slug);
         std::fs::create_dir_all(&dir).unwrap();
-        let mut f =
-            std::fs::File::create(dir.join(format!("{sid}.jsonl"))).unwrap();
+        let mut f = std::fs::File::create(dir.join(format!("{sid}.jsonl"))).unwrap();
         f.write_all(b"").unwrap();
     }
 
@@ -458,8 +440,7 @@ mod tests {
 
         // Wait beyond the debounce window before the next change
         // so it fires immediately rather than coalescing.
-        tokio::time::sleep(MEMBERSHIP_DEBOUNCE + Duration::from_millis(50))
-            .await;
+        tokio::time::sleep(MEMBERSHIP_DEBOUNCE + Duration::from_millis(50)).await;
 
         // Remove A, add B → membership changes.
         std::fs::remove_file(_sessions_td.path().join("1001.json")).unwrap();
@@ -525,8 +506,7 @@ mod tests {
         );
 
         // Wait past the window — the coalesced delivery must fire.
-        tokio::time::sleep(MEMBERSHIP_DEBOUNCE + Duration::from_millis(100))
-            .await;
+        tokio::time::sleep(MEMBERSHIP_DEBOUNCE + Duration::from_millis(100)).await;
         let after_window = *listener.membership_calls.lock().unwrap();
         assert_eq!(
             after_window, 2,
@@ -600,6 +580,5 @@ mod tests {
         assert_eq!(service.detail_handles.lock().await.len(), 0);
         // And `started` flips back so a future start works.
         assert!(!*service.started.lock().await);
-
     }
 }

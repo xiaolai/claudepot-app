@@ -737,9 +737,11 @@ async fn main() -> Result<()> {
         },
         Commands::Cli { action } => match action {
             CliAction::Status => commands::cli_ops::status(&ctx).await?,
-            CliAction::Use { email, no_refresh, force } => {
-                commands::cli_ops::use_account(&ctx, &email, no_refresh, force).await?
-            }
+            CliAction::Use {
+                email,
+                no_refresh,
+                force,
+            } => commands::cli_ops::use_account(&ctx, &email, no_refresh, force).await?,
             CliAction::Clear => commands::cli_ops::clear(&ctx).await?,
             CliAction::Run {
                 email,
@@ -797,9 +799,7 @@ async fn main() -> Result<()> {
             }
             ProjectAction::Trash { action } => match action {
                 ProjectTrashAction::List => commands::project::trash_list(&ctx)?,
-                ProjectTrashAction::Restore { id } => {
-                    commands::project::trash_restore(&ctx, &id)?
-                }
+                ProjectTrashAction::Restore { id } => commands::project::trash_restore(&ctx, &id)?,
                 ProjectTrashAction::Empty { older_than } => {
                     commands::project::trash_empty(&ctx, older_than)?
                 }
@@ -888,9 +888,10 @@ async fn main() -> Result<()> {
             cli.yes,
         )?,
         Commands::Migrate { action } => match action {
-            MigrateAction::Inspect { bundle, upgrade_schema } => {
-                commands::project_migrate::inspect(&ctx, bundle, upgrade_schema)?
-            }
+            MigrateAction::Inspect {
+                bundle,
+                upgrade_schema,
+            } => commands::project_migrate::inspect(&ctx, bundle, upgrade_schema)?,
             MigrateAction::Undo => commands::project_migrate::undo(&ctx)?,
         },
         Commands::Doctor => commands::doctor::run(&ctx).await?,
@@ -950,20 +951,22 @@ async fn main() -> Result<()> {
                 redact_env,
                 redact_regex,
                 html_no_js,
-            } => commands::session::export_cmd(
-                &ctx,
-                &target,
-                &format,
-                &to,
-                output.as_deref(),
-                public,
-                &redact_paths,
-                redact_emails,
-                redact_env,
-                redact_regex,
-                html_no_js,
-            )
-            .await?,
+            } => {
+                commands::session::export_cmd(
+                    &ctx,
+                    &target,
+                    &format,
+                    &to,
+                    output.as_deref(),
+                    public,
+                    &redact_paths,
+                    redact_emails,
+                    redact_env,
+                    redact_regex,
+                    html_no_js,
+                )
+                .await?
+            }
             SessionAction::Search { query, limit } => {
                 commands::session::search_cmd(&ctx, &query, limit)?
             }

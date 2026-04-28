@@ -103,10 +103,7 @@ mod tests {
 
     #[test]
     fn humanize_falls_back_to_first_string_for_unmapped_tool() {
-        let out = humanize_tool_input(
-            "CustomTool",
-            r#"{"arg1":42,"arg2":"meaningful text"}"#,
-        );
+        let out = humanize_tool_input("CustomTool", r#"{"arg1":42,"arg2":"meaningful text"}"#);
         assert_eq!(out, "meaningful text");
     }
 

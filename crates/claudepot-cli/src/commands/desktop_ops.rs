@@ -66,8 +66,7 @@ pub async fn use_account(ctx: &AppContext, email_input: &str, no_launch: bool) -
     // Acquire the cross-process operation lock so CLI use_account
     // can't race with a GUI-initiated adopt/clear/switch. Codex
     // follow-up review D1: CLI switch was bypassing the flock.
-    let _lock = desktop_lock::try_acquire()
-        .map_err(|e| anyhow::anyhow!("{e}"))?;
+    let _lock = desktop_lock::try_acquire().map_err(|e| anyhow::anyhow!("{e}"))?;
 
     let platform = desktop_backend::create_platform()
         .ok_or_else(|| anyhow::anyhow!("Claude Desktop is not supported on this platform"))?;
@@ -321,15 +320,10 @@ pub async fn adopt(ctx: &AppContext, email_input: Option<&str>, overwrite: bool)
         .find_by_email(&target_email)?
         .ok_or_else(|| anyhow::anyhow!("account not found: {target_email}"))?;
 
-    let outcome = desktop_service::adopt_current(
-        &*platform,
-        &ctx.store,
-        target.uuid,
-        &verified,
-        overwrite,
-    )
-    .await
-    .map_err(|e| anyhow::anyhow!("adopt failed: {e}"))?;
+    let outcome =
+        desktop_service::adopt_current(&*platform, &ctx.store, target.uuid, &verified, overwrite)
+            .await
+            .map_err(|e| anyhow::anyhow!("adopt failed: {e}"))?;
 
     if ctx.json {
         println!(
@@ -371,7 +365,10 @@ pub async fn clear(ctx: &AppContext, keep_snapshot: bool) -> Result<()> {
         );
     } else {
         match outcome.email {
-            Some(e) => println!("Signed Desktop out ({e}). Deleted {} item(s).", outcome.items_deleted),
+            Some(e) => println!(
+                "Signed Desktop out ({e}). Deleted {} item(s).",
+                outcome.items_deleted
+            ),
             None => println!(
                 "Signed Desktop out. Deleted {} item(s). No active account was recorded.",
                 outcome.items_deleted

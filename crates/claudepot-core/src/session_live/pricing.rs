@@ -39,9 +39,8 @@ pub struct ModelRates {
 pub fn canonicalize_model_id(raw: &str) -> String {
     static DATE_SUFFIX_RE: Lazy<Regex> =
         Lazy::new(|| Regex::new(r"-\d{8}$").expect("static regex"));
-    static ALIAS_SUFFIX_RE: Lazy<Regex> = Lazy::new(|| {
-        Regex::new(r"-(preview|latest|experimental)$").expect("static regex")
-    });
+    static ALIAS_SUFFIX_RE: Lazy<Regex> =
+        Lazy::new(|| Regex::new(r"-(preview|latest|experimental)$").expect("static regex"));
     let lower = raw.to_ascii_lowercase();
     let no_date = DATE_SUFFIX_RE.replace(&lower, "").into_owned();
     ALIAS_SUFFIX_RE.replace(&no_date, "").into_owned()
@@ -147,10 +146,7 @@ mod tests {
 
     #[test]
     fn canonicalize_is_lowercase() {
-        assert_eq!(
-            canonicalize_model_id("Claude-Opus-4-7"),
-            "claude-opus-4-7"
-        );
+        assert_eq!(canonicalize_model_id("Claude-Opus-4-7"), "claude-opus-4-7");
     }
 
     #[test]
@@ -222,24 +218,15 @@ mod tests {
     #[test]
     fn estimate_opus_million_in_million_out() {
         // 1M in at $15 + 1M out at $75 = $90.
-        let c = estimate_cost_usd(
-            "claude-opus-4-7",
-            1_000_000,
-            1_000_000,
-            0,
-            0,
-        )
-        .unwrap();
+        let c = estimate_cost_usd("claude-opus-4-7", 1_000_000, 1_000_000, 0, 0).unwrap();
         assert!((c - 90.0).abs() < 1e-6);
     }
 
     #[test]
     fn estimate_cache_read_is_dramatically_cheaper() {
         // 1M cache-read at $1.50 vs 1M input at $15 — 10× savings.
-        let read = estimate_cost_usd("claude-opus-4-7", 0, 0, 1_000_000, 0)
-            .unwrap();
-        let raw_in = estimate_cost_usd("claude-opus-4-7", 1_000_000, 0, 0, 0)
-            .unwrap();
+        let read = estimate_cost_usd("claude-opus-4-7", 0, 0, 1_000_000, 0).unwrap();
+        let raw_in = estimate_cost_usd("claude-opus-4-7", 1_000_000, 0, 0, 0).unwrap();
         assert!(read * 10.0 > raw_in * 0.99 && read * 10.0 < raw_in * 1.01);
     }
 
@@ -250,16 +237,9 @@ mod tests {
 
     #[test]
     fn estimate_is_additive_across_token_classes() {
-        let split = estimate_cost_usd(
-            "claude-sonnet-4-6",
-            100_000,
-            50_000,
-            25_000,
-            10_000,
-        )
-        .unwrap();
-        let sum = estimate_cost_usd("claude-sonnet-4-6", 100_000, 0, 0, 0)
-            .unwrap()
+        let split =
+            estimate_cost_usd("claude-sonnet-4-6", 100_000, 50_000, 25_000, 10_000).unwrap();
+        let sum = estimate_cost_usd("claude-sonnet-4-6", 100_000, 0, 0, 0).unwrap()
             + estimate_cost_usd("claude-sonnet-4-6", 0, 50_000, 0, 0).unwrap()
             + estimate_cost_usd("claude-sonnet-4-6", 0, 0, 25_000, 0).unwrap()
             + estimate_cost_usd("claude-sonnet-4-6", 0, 0, 0, 10_000).unwrap();

@@ -64,8 +64,7 @@ impl Scheduler for SystemdScheduler {
         crate::fs_utils::atomic_write(&service_path, service.as_bytes())?;
         crate::fs_utils::atomic_write(&timer_path, timer.as_bytes())?;
         run_systemctl(&["--user", "daemon-reload"]).map_err(io_err)?;
-        run_systemctl(&["--user", "enable", "--now", &format!("{base}.timer")])
-            .map_err(io_err)?;
+        run_systemctl(&["--user", "enable", "--now", &format!("{base}.timer")]).map_err(io_err)?;
         Ok(())
     }
 
@@ -349,7 +348,10 @@ mod tests {
             json_schema: None,
             bare: false,
             extra_env: Default::default(),
-            trigger: Trigger::Cron { cron: cron.into(), timezone: None },
+            trigger: Trigger::Cron {
+                cron: cron.into(),
+                timezone: None,
+            },
             platform_options: PlatformOptions::default(),
             log_retention_runs: 50,
             created_at: now,

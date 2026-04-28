@@ -142,24 +142,17 @@ mod tests {
 
     #[test]
     fn moonshot_prefix_stripped() {
-        assert_eq!(
-            derive_wrapper_slug("moonshotai/kimi-k2"),
-            "claude-kimi-k2"
-        );
+        assert_eq!(derive_wrapper_slug("moonshotai/kimi-k2"), "claude-kimi-k2");
     }
 
     #[test]
     fn deepseek_dot_replaced() {
-        assert_eq!(
-            derive_wrapper_slug("deepseek-v3.2"),
-            "claude-deepseek-v3-2"
-        );
+        assert_eq!(derive_wrapper_slug("deepseek-v3.2"), "claude-deepseek-v3-2");
     }
 
     #[test]
     fn anthropic_bedrock_long_id_truncated() {
-        let slug =
-            derive_wrapper_slug("us.anthropic.claude-sonnet-4-20250514-v1:0");
+        let slug = derive_wrapper_slug("us.anthropic.claude-sonnet-4-20250514-v1:0");
         assert!(slug.starts_with("claude-"));
         assert!(slug.len() - "claude-".len() <= MAX_SLUG_LEN);
         assert!(!slug.ends_with('-'));
@@ -194,10 +187,7 @@ mod tests {
     #[test]
     fn weird_chars_dropped() {
         // `@` and `!` are dropped, not replaced with `-`.
-        assert_eq!(
-            derive_wrapper_slug("foo@bar!baz"),
-            "claude-foobarbaz"
-        );
+        assert_eq!(derive_wrapper_slug("foo@bar!baz"), "claude-foobarbaz");
     }
 
     #[test]
@@ -207,10 +197,7 @@ mod tests {
 
     #[test]
     fn collapses_repeated_dashes() {
-        assert_eq!(
-            derive_wrapper_slug("a--b---c"),
-            "claude-a-b-c"
-        );
+        assert_eq!(derive_wrapper_slug("a--b---c"), "claude-a-b-c");
     }
 
     #[test]

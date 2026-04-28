@@ -247,7 +247,10 @@ mod tests {
 
     #[test]
     fn permission_mode_flags() {
-        assert_eq!(PermissionMode::BypassPermissions.as_cli_flag(), "bypassPermissions");
+        assert_eq!(
+            PermissionMode::BypassPermissions.as_cli_flag(),
+            "bypassPermissions"
+        );
         assert_eq!(PermissionMode::AcceptEdits.as_cli_flag(), "acceptEdits");
         assert_eq!(PermissionMode::Default.as_cli_flag(), "default");
     }

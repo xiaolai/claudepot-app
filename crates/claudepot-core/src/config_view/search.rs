@@ -78,7 +78,9 @@ impl Matcher {
             } else {
                 format!("(?i){}", query.text)
             };
-            return Regex::new(&pat).map(Matcher::Regex).map_err(|e| e.to_string());
+            return Regex::new(&pat)
+                .map(Matcher::Regex)
+                .map_err(|e| e.to_string());
         }
         // Case-sensitive plain uses a cheap byte-level scanner. The
         // case-insensitive variant goes through the regex crate with an
@@ -87,10 +89,14 @@ impl Matcher {
         // `String::to_lowercase` can change byte lengths and desync
         // line-number calculations, e.g. German ß → ss, Turkish İ → i̇).
         if query.case_sensitive {
-            Ok(Matcher::Plain { needle: query.text.clone() })
+            Ok(Matcher::Plain {
+                needle: query.text.clone(),
+            })
         } else {
             let pat = format!("(?i){}", regex::escape(&query.text));
-            Regex::new(&pat).map(Matcher::Regex).map_err(|e| e.to_string())
+            Regex::new(&pat)
+                .map(Matcher::Regex)
+                .map_err(|e| e.to_string())
         }
     }
 
@@ -140,8 +146,10 @@ pub fn search<F: FnMut(SearchHit)>(
 ) -> Result<SearchSummary, String> {
     let matcher = Matcher::build(&query)?;
 
-    let scope_filter: Option<std::collections::HashSet<&str>> =
-        query.scope_filter.as_ref().map(|v| v.iter().map(String::as_str).collect());
+    let scope_filter: Option<std::collections::HashSet<&str>> = query
+        .scope_filter
+        .as_ref()
+        .map(|v| v.iter().map(String::as_str).collect());
     let kind_filter: Option<std::collections::HashSet<&Kind>> =
         query.kind_filter.as_ref().map(|v| v.iter().collect());
 
@@ -294,20 +302,22 @@ mod tests {
     fn make_tree(files: Vec<(PathBuf, String)>) -> ConfigTree {
         let children: Vec<Node> = files
             .iter()
-            .map(|(p, _)| Node::File(FileNode {
-                id: format!("id-{}", p.display()),
-                kind: Kind::ClaudeMd,
-                abs_path: p.clone(),
-                display_path: p.display().to_string(),
-                scope_badges: vec![Scope::User],
-                size_bytes: std::fs::metadata(p).map(|m| m.len()).unwrap_or(0),
-                mtime_unix_ns: 0,
-                summary: None,
-                issues: vec![],
-                symlink_origin: None,
-                included_by: None,
-                include_depth: 0,
-            }))
+            .map(|(p, _)| {
+                Node::File(FileNode {
+                    id: format!("id-{}", p.display()),
+                    kind: Kind::ClaudeMd,
+                    abs_path: p.clone(),
+                    display_path: p.display().to_string(),
+                    scope_badges: vec![Scope::User],
+                    size_bytes: std::fs::metadata(p).map(|m| m.len()).unwrap_or(0),
+                    mtime_unix_ns: 0,
+                    summary: None,
+                    issues: vec![],
+                    symlink_origin: None,
+                    included_by: None,
+                    include_depth: 0,
+                })
+            })
             .collect();
 
         ConfigTree {

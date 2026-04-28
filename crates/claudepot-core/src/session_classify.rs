@@ -237,9 +237,7 @@ mod tests {
 
     #[test]
     fn noise_tags_mixed_with_real_text_is_user() {
-        let e = user_text(
-            "<system-reminder>hi</system-reminder>real follow-up question",
-        );
+        let e = user_text("<system-reminder>hi</system-reminder>real follow-up question");
         assert_eq!(classify_event(&e), MessageCategory::User);
     }
 

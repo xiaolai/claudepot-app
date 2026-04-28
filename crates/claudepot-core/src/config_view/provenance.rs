@@ -215,10 +215,7 @@ fn walk(a: &Annotated, path: &mut Vec<JsonPathSeg>, out: &mut Vec<ProvenanceEntr
         } => {
             out.push(ProvenanceEntry {
                 key_path: path.clone(),
-                winner: contributors
-                    .last()
-                    .cloned()
-                    .unwrap_or(Scope::Other),
+                winner: contributors.last().cloned().unwrap_or(Scope::Other),
                 contributors: contributors.clone(),
                 suppressed: *suppressed,
             });

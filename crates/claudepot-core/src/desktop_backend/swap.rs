@@ -169,8 +169,7 @@ pub fn restore(
                 Err(_) => {
                     // Cross-filesystem fallback: copy then remove src.
                     if src.is_dir() {
-                        copy_dir_recursive(&src, &dst)
-                            .and_then(|_| std::fs::remove_dir_all(&src))
+                        copy_dir_recursive(&src, &dst).and_then(|_| std::fs::remove_dir_all(&src))
                     } else {
                         std::fs::copy(&src, &dst)
                             .map(|_| ())
@@ -244,9 +243,7 @@ pub async fn switch(
         Ok(true) => {}
         Ok(false) => return Err(DesktopSwapError::DpapiInvalidated),
         Err(e) => {
-            tracing::warn!(
-                "DPAPI precheck returned error — proceeding optimistically: {e}"
-            );
+            tracing::warn!("DPAPI precheck returned error — proceeding optimistically: {e}");
         }
     }
 

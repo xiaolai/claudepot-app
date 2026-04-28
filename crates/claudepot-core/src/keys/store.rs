@@ -41,10 +41,7 @@ CREATE TABLE IF NOT EXISTS oauth_tokens (
 /// auto-purge any row whose secret is blank. Older builds stored the
 /// secret in the OS Keychain, so the DB row alone is unrecoverable —
 /// a blank-secret row is a stranded artifact and is dropped on open.
-fn migrate_add_secret_and_purge(
-    db: &Connection,
-    table: &str,
-) -> Result<(), KeyError> {
+fn migrate_add_secret_and_purge(db: &Connection, table: &str) -> Result<(), KeyError> {
     let add_col = format!("ALTER TABLE {table} ADD COLUMN secret TEXT NOT NULL DEFAULT ''");
     match db.execute(&add_col, []) {
         Ok(_) => {}
@@ -64,9 +61,8 @@ pub struct KeyStore {
 impl KeyStore {
     pub fn open(path: &Path) -> Result<Self, KeyError> {
         if let Some(parent) = path.parent() {
-            std::fs::create_dir_all(parent).map_err(|e| {
-                KeyError::Sql(rusqlite::Error::ToSqlConversionFailure(Box::new(e)))
-            })?;
+            std::fs::create_dir_all(parent)
+                .map_err(|e| KeyError::Sql(rusqlite::Error::ToSqlConversionFailure(Box::new(e))))?;
         }
         let db = Connection::open(path)?;
         db.execute_batch("PRAGMA journal_mode=WAL;")?;
@@ -80,10 +76,9 @@ impl KeyStore {
             use std::os::unix::fs::PermissionsExt;
             let secure = |p: &Path| -> Result<(), KeyError> {
                 if p.exists() {
-                    std::fs::set_permissions(p, std::fs::Permissions::from_mode(0o600))
-                        .map_err(|e| {
-                            KeyError::Sql(rusqlite::Error::ToSqlConversionFailure(Box::new(e)))
-                        })?;
+                    std::fs::set_permissions(p, std::fs::Permissions::from_mode(0o600)).map_err(
+                        |e| KeyError::Sql(rusqlite::Error::ToSqlConversionFailure(Box::new(e))),
+                    )?;
                 }
                 Ok(())
             };
@@ -305,11 +300,7 @@ impl KeyStore {
         Ok(())
     }
 
-    pub fn update_oauth_token_probe(
-        &self,
-        uuid: Uuid,
-        status: &str,
-    ) -> Result<(), KeyError> {
+    pub fn update_oauth_token_probe(&self, uuid: Uuid, status: &str) -> Result<(), KeyError> {
         let now = Utc::now().to_rfc3339();
         self.db().execute(
             "UPDATE oauth_tokens SET last_probed_at = ?1, last_probe_status = ?2 WHERE uuid = ?3",
@@ -405,7 +396,10 @@ mod tests {
         assert_eq!(list.len(), 1);
         assert_eq!(list[0].uuid, key.uuid);
         assert_eq!(list[0].account_uuid, account);
-        assert_eq!(store.find_api_secret(key.uuid).unwrap(), "sk-ant-api03-abcdef");
+        assert_eq!(
+            store.find_api_secret(key.uuid).unwrap(),
+            "sk-ant-api03-abcdef"
+        );
     }
 
     #[test]

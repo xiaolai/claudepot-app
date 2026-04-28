@@ -150,10 +150,7 @@ pub fn render_windows(automation: &Automation, inputs: &ShimInputs<'_>) -> Strin
 
     let mut env_block = String::new();
     for (k, v) in inputs.extra_env {
-        env_block.push_str(&format!(
-            "set {}\r\n",
-            cmd_set_assignment(k, v)
-        ));
+        env_block.push_str(&format!("set {}\r\n", cmd_set_assignment(k, v)));
     }
 
     let mut s = String::new();
@@ -190,16 +187,18 @@ pub fn render_windows(automation: &Automation, inputs: &ShimInputs<'_>) -> Strin
     // Fail-fast if the runs dir couldn't be created.
     s.push_str("if not exist \"%RUN_DIR%\" (echo claudepot: failed to create %RUN_DIR%>&2 & exit /b 70)\r\n");
 
-    s.push_str(&format!("set {}\r\n", cmd_set_assignment("PATH", &path_value)));
+    s.push_str(&format!(
+        "set {}\r\n",
+        cmd_set_assignment("PATH", &path_value)
+    ));
     s.push_str("set LANG=en_US.UTF-8\r\n");
     s.push_str("set LC_ALL=en_US.UTF-8\r\n");
     s.push_str("set TERM=dumb\r\n");
     s.push_str(&env_block);
-    s.push_str(&format!(
-        "cd /d {}\r\n",
-        cmd_quote_arg(&automation.cwd)
-    ));
-    s.push_str("if errorlevel 1 (echo claudepot: failed to cd to working directory>&2 & exit /b 71)\r\n");
+    s.push_str(&format!("cd /d {}\r\n", cmd_quote_arg(&automation.cwd)));
+    s.push_str(
+        "if errorlevel 1 (echo claudepot: failed to cd to working directory>&2 & exit /b 71)\r\n",
+    );
 
     s.push_str(
         "for /f \"usebackq delims=\" %%t in (`powershell -NoProfile -Command \
@@ -231,7 +230,10 @@ pub fn render_windows(automation: &Automation, inputs: &ShimInputs<'_>) -> Strin
 
 fn build_cli_flags(a: &Automation) -> Vec<String> {
     let mut v: Vec<String> = Vec::new();
-    v.push(format!("    --output-format {}", a.output_format.as_cli_flag()));
+    v.push(format!(
+        "    --output-format {}",
+        a.output_format.as_cli_flag()
+    ));
     if let Some(model) = &a.model {
         v.push(format!("    --model {}", sh_quote(model)));
     }

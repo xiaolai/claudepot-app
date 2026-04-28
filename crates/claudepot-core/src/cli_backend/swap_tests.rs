@@ -366,9 +366,7 @@ impl RoundRobinFetcher {
 #[async_trait::async_trait]
 impl super::ProfileFetcher for RoundRobinFetcher {
     async fn fetch_email(&self, _access_token: &str) -> Result<String, OAuthError> {
-        let i = self
-            .idx
-            .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        let i = self.idx.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
         Ok(self.emails[i % self.emails.len()].clone())
     }
 }
@@ -1212,13 +1210,7 @@ async fn test_switch_aborts_on_post_switch_read_returns_none() {
     let fetcher = MockProfileFetcher::returning(&format!("seed-{target_id}@example.com"));
 
     let result = switch_force_for_tests(
-        &store,
-        None,
-        target_id,
-        &platform,
-        false,
-        &refresher,
-        &fetcher,
+        &store, None, target_id, &platform, false, &refresher, &fetcher,
     )
     .await;
 
@@ -1245,9 +1237,7 @@ impl MockPlatformReadReplacesBlob {
     fn new(initial: &str, replace_with: &str) -> Self {
         Self {
             storage: std::sync::Mutex::new(Some(initial.to_string())),
-            replace_on_read_after_write: std::sync::Mutex::new(Some(
-                replace_with.to_string(),
-            )),
+            replace_on_read_after_write: std::sync::Mutex::new(Some(replace_with.to_string())),
             wrote: std::sync::Mutex::new(false),
         }
     }
