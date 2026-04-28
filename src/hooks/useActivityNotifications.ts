@@ -4,6 +4,7 @@ import {
   requestPermission,
   sendNotification,
 } from "@tauri-apps/plugin-notification";
+import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { api } from "../api";
 import { useSessionLive } from "./useSessionLive";
 import type { LiveSessionSummary, Preferences } from "../types";
@@ -67,54 +68,62 @@ export function useActivityNotifications(): number {
     "unknown" | "not-requested" | "granted" | "denied"
   >("unknown");
 
-  // Load prefs once + refresh every 10s. The triggers are a user
-  // configuration; getting a fresh read once per 10s is far cheaper
-  // than round-tripping on every tick, and the feature is itself
-  // opt-in so misses during the refresh window are harmless.
+  // Load prefs once on mount; subsequent updates ride on the
+  // `cp-prefs-changed` event whose payload IS the new Preferences
+  // snapshot — no second preferencesGet() and no ordering race
+  // between back-to-back setters.
   useEffect(() => {
     let cancelled = false;
-    const load = () => {
-      api
-        .preferencesGet()
-        .then(async (p) => {
-          if (cancelled) return;
-          prefsRef.current = p;
-          setPrefsVersion((v) => v + 1);
-          // Probe OS-notification permission the first time any
-          // notification pref is flipped on. No request until a
-          // trigger actually fires, so a cautious user who never
-          // enables alerts never sees the OS prompt.
-          const wantsOs =
-            p.notify_on_error ||
-            p.notify_on_idle_done ||
-            p.notify_on_stuck_minutes != null ||
-            p.notify_on_spend_usd != null;
-          if (wantsOs && osPermissionRef.current === "unknown") {
-            try {
-              const granted = await isPermissionGranted();
-              // If not yet granted, leave as "not-requested" so the
-              // next trigger does a user-facing requestPermission.
-              // isPermissionGranted returns false BEFORE any prompt
-              // has been shown, so treating that as terminal
-              // "denied" would silently suppress all future OS
-              // notifications on a fresh install.
-              osPermissionRef.current = granted
-                ? "granted"
-                : "not-requested";
-            } catch {
-              osPermissionRef.current = "denied";
-            }
-          }
-        })
-        .catch(() => {
-          /* no-tauri env */
-        });
+    let unlisten: UnlistenFn | null = null;
+
+    const applyPrefs = async (p: Preferences) => {
+      if (cancelled) return;
+      prefsRef.current = p;
+      setPrefsVersion((v) => v + 1);
+      // Probe OS-notification permission the first time any
+      // notification pref is flipped on. No request until a
+      // trigger actually fires, so a cautious user who never
+      // enables alerts never sees the OS prompt.
+      const wantsOs =
+        p.notify_on_error ||
+        p.notify_on_idle_done ||
+        p.notify_on_stuck_minutes != null ||
+        p.notify_on_spend_usd != null;
+      if (wantsOs && osPermissionRef.current === "unknown") {
+        try {
+          const granted = await isPermissionGranted();
+          // If not yet granted, leave as "not-requested" so the
+          // next trigger does a user-facing requestPermission.
+          // isPermissionGranted returns false BEFORE any prompt
+          // has been shown, so treating that as terminal
+          // "denied" would silently suppress all future OS
+          // notifications on a fresh install.
+          osPermissionRef.current = granted ? "granted" : "not-requested";
+        } catch {
+          osPermissionRef.current = "denied";
+        }
+      }
     };
-    load();
-    const id = setInterval(load, 10_000);
+
+    api
+      .preferencesGet()
+      .then((p) => applyPrefs(p))
+      .catch(() => {
+        /* no-tauri env */
+      });
+    listen<Preferences>("cp-prefs-changed", (ev) => {
+      if (ev.payload) void applyPrefs(ev.payload);
+    })
+      .then((fn) => {
+        if (cancelled) fn();
+        else unlisten = fn;
+      })
+      .catch(() => {
+        /* no-tauri env */
+      });
     return () => {
       cancelled = true;
-      clearInterval(id);
+      unlisten?.();
     };
   }, []);
 

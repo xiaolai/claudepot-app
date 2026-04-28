@@ -1,3 +1,4 @@
+import { useMemo } from "react";
 import { emit } from "@tauri-apps/api/event";
 import { api } from "../api";
 import type { AccountSummary } from "../types";
@@ -31,6 +32,15 @@ interface Deps {
 }
 
 export function useActions({ pushToast, refresh, withBusy, openOpModal }: Deps) {
+  // Memoize the entire returned object so its identity (and the
+  // identity of every inner function) is stable across renders. The
+  // four input deps are themselves stable refs (useToasts.pushToast,
+  // useRefresh.refresh, useBusy.withBusy, useOperations.open), so this
+  // memo only recomputes when one of them legitimately changes.
+  // Without this wrapper, AppStateProvider's context value churned on
+  // every render and forced every `useAppState()` consumer to
+  // re-render — the dominant cold-start CPU cost.
+  return useMemo(() => {
   const useCli = (a: AccountSummary, force = false) =>
     withBusy(`cli-${a.uuid}`, async () => {
       try {
@@ -247,4 +257,5 @@ export function useActions({ pushToast, refresh, withBusy, openOpModal }: Deps) 
     clearDesktopConfirmed,
     performRemove,
   };
+  }, [pushToast, refresh, withBusy, openOpModal]);
 }
