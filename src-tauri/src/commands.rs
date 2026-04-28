@@ -287,6 +287,110 @@ async fn spawn_reveal(p: &std::path::Path) -> Result<(), String> {
     Ok(())
 }
 
+/// Whether the current install can be updated in-place by
+/// `tauri-plugin-updater`.
+///
+/// Returns `false` immediately if the embedded updater public key is
+/// empty (placeholder state — keypair hasn't been generated yet, or
+/// the `tauri.conf.json` was checked in without one). Without a
+/// pubkey, signature verification has no anchor; surfacing the UI
+/// would just produce confusing "verification failed" errors when
+/// the user clicks Download. The release workflow's preflight job
+/// also fails closed on this state, so this is defense in depth.
+///
+/// **macOS** — always supported. Tauri ships `.app.tar.gz` updater
+/// bundles for both architectures.
+///
+/// **Linux** — supported only when the binary is running from an
+/// AppImage. The AppImage runtime sets the `APPIMAGE` env var to the
+/// absolute path of the `.AppImage` file; that's the canonical
+/// detection signal recommended by the AppImageKit project. Without
+/// it (system install, `cargo run`, `.deb`), the in-app updater
+/// would download an `.AppImage.tar.gz` and try to extract it over
+/// files apt manages — which would either fail, race with apt, or
+/// corrupt the package state. We hide the UI instead.
+///
+/// **Windows** — supported only for NSIS installs. Tauri 2's
+/// `latest.json` keys platforms by `{os}-{arch}` only, with no
+/// per-bundle-format distinction; the canonical `windows-x86_64`
+/// entry points at `.nsis.zip`. An MSI install that hits the
+/// updater would download NSIS and replace files under the MSI's
+/// registration, leaving Windows Add/Remove Programs out of sync.
+/// We disambiguate at runtime by checking the binary's install
+/// directory: NSIS defaults to a per-user path under
+/// `%LOCALAPPDATA%\Programs\…`, while MSI installs land under
+/// `Program Files`. Misclassifying a side-loaded build is harmless
+/// (the updater check runs against the manifest and returns "no
+/// update available" for the dev version anyway).
+#[tauri::command]
+pub async fn updater_supported(app: tauri::AppHandle) -> bool {
+    if !updater_pubkey_configured(&app) {
+        return false;
+    }
+    #[cfg(target_os = "macos")]
+    {
+        true
+    }
+    #[cfg(target_os = "linux")]
+    {
+        std::env::var_os("APPIMAGE").is_some()
+    }
+    #[cfg(target_os = "windows")]
+    {
+        windows_is_nsis_install()
+    }
+    #[cfg(not(any(target_os = "macos", target_os = "windows", target_os = "linux")))]
+    {
+        false
+    }
+}
+
+/// Read `plugins.updater.pubkey` from the live Tauri config and
+/// return true iff it's non-empty. The config is parsed once at
+/// app start, so this is just an Arc deref — cheap to call from a
+/// hot command path.
+fn updater_pubkey_configured(app: &tauri::AppHandle) -> bool {
+    let config = app.config();
+    let Some(updater) = config.plugins.0.get("updater") else {
+        return false;
+    };
+    updater
+        .get("pubkey")
+        .and_then(|v| v.as_str())
+        .map(|s| !s.is_empty())
+        .unwrap_or(false)
+}
+
+#[cfg(target_os = "windows")]
+fn windows_is_nsis_install() -> bool {
+    // True when the running binary lives in a directory that looks
+    // like a Tauri NSIS install (per-user). Returns true for any
+    // path containing the `\Programs\` segment under a user profile,
+    // which is where Tauri's NSIS template installs by default.
+    // Returns false for `Program Files` (MSI / system install) and
+    // for `target\debug` / `target\release` (dev runs — keeping the
+    // updater UI out of dev where there's no signed bundle anyway).
+    let Ok(exe) = std::env::current_exe() else {
+        return false;
+    };
+    let path = exe.to_string_lossy().to_lowercase();
+    // Dev-build paths — not an installed location.
+    if path.contains(r"\target\debug\") || path.contains(r"\target\release\") {
+        return false;
+    }
+    // MSI / system install. Tauri's MSI bundler defaults to
+    // `%ProgramFiles%\<publisher>\<product>\…` for per-machine
+    // installs, which is the only path users typically reach via
+    // `msiexec`.
+    if path.contains(r"\program files\") || path.contains(r"\program files (x86)\") {
+        return false;
+    }
+    // NSIS default: `%LOCALAPPDATA%\Programs\<product>\…`. Match the
+    // signature segment rather than the full LOCALAPPDATA prefix so
+    // we tolerate roaming profiles and redirected folders.
+    path.contains(r"\programs\")
+}
+
 // Every topic-specific command surface lives in its own sibling
 // `commands_<topic>.rs`; see:
 //   - Projects read surface + clean preview/start: `commands_project.rs`

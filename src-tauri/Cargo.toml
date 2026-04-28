@@ -33,6 +33,12 @@ tauri-plugin-opener = "2"
 # (label + preview + clear-deadline). Self-clear after 30s is also
 # scheduled in Rust so the policy lives next to the write.
 tauri-plugin-clipboard-manager = "2.3"
+# Auto-update pipeline (Settings → About). Minisign-signed bundles are
+# verified at runtime against the pubkey embedded in tauri.conf.json;
+# the signing key is only available in CI via TAURI_SIGNING_PRIVATE_KEY.
+# `process` ships the `relaunch` IPC the renderer uses after install.
+tauri-plugin-updater = "2"
+tauri-plugin-process = "2"
 zeroize.workspace = true
 dirs = { workspace = true }
 notify.workspace = true
