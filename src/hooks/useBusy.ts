@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useCallback, useMemo, useState } from "react";
 
 /**
  * Per-key busy tracking with concurrent-start safety.
@@ -19,7 +19,12 @@ import { useMemo, useState } from "react";
 export function useBusy() {
   const [counts, setCounts] = useState<Record<string, number>>({});
 
-  const bump = (key: string, delta: number) =>
+  // Identities pinned with useCallback — `withBusy` is read as a dep
+  // by `useActions`, which is in turn read as a dep by AppStateProvider's
+  // context-value memo. A fresh closure per render here propagated all
+  // the way up and forced every `useAppState()` consumer to re-render
+  // on every parent render.
+  const bump = useCallback((key: string, delta: number) => {
     setCounts((prev) => {
       const cur = prev[key] ?? 0;
       const next = cur + delta;
@@ -28,18 +33,22 @@ export function useBusy() {
       else copy[key] = next;
       return copy;
     });
+  }, []);
 
-  const withBusy = async <T,>(key: string, fn: () => Promise<T>) => {
-    bump(key, 1);
-    try {
-      return await fn();
-    } finally {
-      bump(key, -1);
-    }
-  };
+  const withBusy = useCallback(
+    async <T>(key: string, fn: () => Promise<T>): Promise<T> => {
+      bump(key, 1);
+      try {
+        return await fn();
+      } finally {
+        bump(key, -1);
+      }
+    },
+    [bump],
+  );
 
-  const addBusy = (key: string) => bump(key, 1);
-  const removeBusy = (key: string) => bump(key, -1);
+  const addBusy = useCallback((key: string) => bump(key, 1), [bump]);
+  const removeBusy = useCallback((key: string) => bump(key, -1), [bump]);
 
   // Derived Set so existing consumers that call `busyKeys.has(key)`
   // work unchanged. Memoized so identity is stable across renders
