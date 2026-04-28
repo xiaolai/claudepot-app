@@ -143,6 +143,14 @@ fs2 = "0.4"
 # platform branches so we stay out of undelete semantics ourselves.
 trash = "5"
 
+# Cross-platform "is path A the same file as path B?" — used by the
+# project module's same_file_identity helper. Already in our dep tree
+# transitively via walkdir; pulling it in as a direct dep lets us drop
+# the nightly-only std::os::windows::fs::MetadataExt::file_index path
+# (`windows_by_handle` is still unstable as of Rust 1.83) and avoids
+# branching in user code.
+same-file = "1"
+
 # Project-migrate bundle format (`*.claudepot.tar.zst`) — see
 # `dev-docs/project-migrate-spec.md` §3.
 # - `tar` carries Unix mode + symlink shape verbatim and round-trips

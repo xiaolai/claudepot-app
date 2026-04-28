@@ -89,12 +89,12 @@ mod windows_impl {
         SetNamedSecurityInfoW, SE_FILE_OBJECT, TRUSTEE_IS_SID, TRUSTEE_IS_USER,
     };
     use windows_sys::Win32::Security::Authorization::{
-        EXPLICIT_ACCESS_W, SET_ACCESS, NO_INHERITANCE, TRUSTEE_W,
+        EXPLICIT_ACCESS_W, SET_ACCESS, TRUSTEE_W,
     };
     use windows_sys::Win32::Security::Authorization::SetEntriesInAclW;
     use windows_sys::Win32::Security::{
         GetTokenInformation, TokenUser, ACL, DACL_SECURITY_INFORMATION,
-        PROTECTED_DACL_SECURITY_INFORMATION, TOKEN_QUERY, TOKEN_USER,
+        NO_INHERITANCE, PROTECTED_DACL_SECURITY_INFORMATION, TOKEN_QUERY, TOKEN_USER,
     };
     use windows_sys::Win32::System::Threading::{GetCurrentProcess, OpenProcessToken};
 
