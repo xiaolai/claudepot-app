@@ -1885,12 +1885,8 @@ fn test_resolve_path_expands_bare_tilde() {
     // paths; macOS may symlink-resolve `/Users/x` and `$HOME` may differ
     // from the canonical form). Strip `\\?\` on Windows because
     // `resolve_path` simplifies the verbatim form away.
-    let canonical_home = simplify_windows_path(
-        &home
-            .canonicalize()
-            .unwrap_or(home)
-            .to_string_lossy(),
-    );
+    let canonical_home =
+        simplify_windows_path(&home.canonicalize().unwrap_or(home).to_string_lossy());
     assert_eq!(resolved, canonical_home);
 }
 
