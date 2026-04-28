@@ -6,6 +6,38 @@ Versioning scheme:
 - `0.1.x` — beta
 - `1.0.0+` — stable
 
+## 0.0.7 — alpha (unreleased)
+
+### Added
+
+- **In-app auto-update.** Settings → About now checks for new
+  signed releases, surfaces a Download / Skip / Restart card, and
+  persists frequency preferences (every launch / daily / weekly /
+  manual). Uses `tauri-plugin-updater` with a minisign-signed
+  `latest.json` hosted as a GitHub release asset; signature
+  verification is independent of OS code-signing. macOS, Linux
+  AppImage, and Windows NSIS installs auto-update; Linux .deb,
+  Windows MSI, and unconfigured-pubkey builds detect their
+  unsupported state and hide the controls behind a "use the
+  Releases page" hint.
+- **⌃⌥⌘L** toggles developer mode globally. The visible toggle is
+  gone from Settings → General; the four-modifier combo is
+  unreachable by accident and matches macOS's deep-system-toggle
+  convention. A toast confirms the new state.
+- **Status-bar tooltips** on the live, projects, and sessions
+  segments — the terse glyphy text now reveals plain English on
+  hover, and screen readers get the same via `aria-label`.
+
+### Changed
+
+- **Settings → About redesigned.** App row renders the wordmark
+  with `depot` in the accent color; author block carries two
+  iconified links (GitHub mark + globe → homepage); design row
+  trimmed to "paper-mono".
+- **Developer mode** is no longer a Settings toggle — it's
+  keyboard-only via ⌃⌥⌘L. The localStorage key (`cp-dev-mode`)
+  and `<DevBadge>` consumers are unchanged.
+
 ## 0.0.6 — alpha
 
 ### Changed
