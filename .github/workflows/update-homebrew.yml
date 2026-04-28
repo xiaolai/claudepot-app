@@ -130,11 +130,17 @@ jobs:
           echo "Generated Formula/claudepot.rb:"
           cat homebrew-tap/Formula/claudepot.rb
 
-      # The cask ships the GUI **and** the CLI. Tauri's externalBin
-      # packs `claudepot-cli-<triple>` into Contents/MacOS/ and signs
-      # it as part of the bundle; the `binary` stanza symlinks it as
-      # /opt/homebrew/bin/claudepot so a single
-      # `brew install --cask claudepot` gives users both.
+      # The cask ships the GUI **and** the CLI. Tauri 2 takes the
+      # `binaries/claudepot-cli` `externalBin` entry, picks the
+      # matching `claudepot-cli-<triple>` source file from
+      # `src-tauri/binaries/`, signs it as part of the bundle, and
+      # writes it into `Contents/MacOS/` under the BARE basename
+      # (no triple suffix in the bundled name — the suffix is just a
+      # source-side disambiguator). The `binary` stanza symlinks
+      # that bundled file as /opt/homebrew/bin/claudepot so a single
+      # `brew install --cask claudepot` gives users both. The
+      # bundled path is identical on both arches; only the URL +
+      # sha256 differ.
       - name: Generate Casks/claudepot.rb
         env:
           DMG_ARM:   ${{ steps.sha256.outputs.dmg_arm }}
@@ -148,18 +154,15 @@ jobs:
               sha256 "${DMG_ARM}"
 
               url "https://github.com/${REPO}/releases/download/v#{version}/Claudepot-aarch64.dmg"
-
-              binary "#{appdir}/Claudepot.app/Contents/MacOS/claudepot-cli-aarch64-apple-darwin",
-                     target: "claudepot"
             end
             on_intel do
               sha256 "${DMG_INTEL}"
 
               url "https://github.com/${REPO}/releases/download/v#{version}/Claudepot-x86_64.dmg"
-
-              binary "#{appdir}/Claudepot.app/Contents/MacOS/claudepot-cli-x86_64-apple-darwin",
-                     target: "claudepot"
             end
+
+            binary "#{appdir}/Claudepot.app/Contents/MacOS/claudepot-cli",
+                   target: "claudepot"
 
             name "Claudepot"
             desc "Multi-account Claude Code / Claude Desktop switcher"
