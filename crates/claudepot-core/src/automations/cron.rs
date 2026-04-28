@@ -92,13 +92,24 @@ pub fn expand(expr: &str) -> Result<Vec<LaunchSlot>, AutomationError> {
             // we OR them (union of matching days). When both are
             // unrestricted, we emit a single "any-day" slot.
             match (dom.is_full, dow.is_full) {
-                (true, true) => slots.push(LaunchSlot {
-                    minute: m,
-                    hour: h,
-                    day_of_month: None,
-                    month: pick_month(&mon),
-                    day_of_week: None,
-                }),
+                (true, true) => {
+                    // dom + dow both unrestricted. If `mon` is also
+                    // unrestricted, emit a single any-day slot. If
+                    // `mon` is restricted, we MUST iterate every
+                    // selected month — `pick_month` returned only the
+                    // first one, so `0 9 * jan,feb *` was silently
+                    // collapsing to January only.
+                    for mo in iter_months(&mon) {
+                        slots.push(LaunchSlot {
+                            minute: m,
+                            hour: h,
+                            day_of_month: None,
+                            month: mo,
+                            day_of_week: None,
+                        });
+                        check_cap(&slots, expr)?;
+                    }
+                }
                 (false, true) => {
                     for &d in &dom.values {
                         for mo in iter_months(&mon) {
@@ -444,6 +455,21 @@ mod tests {
         let doms: Vec<Option<u8>> = s.iter().map(|x| x.day_of_month).collect();
         assert!(doms.contains(&Some(1)));
         assert!(doms.contains(&Some(15)));
+    }
+
+    #[test]
+    fn restricted_months_with_star_dom_and_dow_keeps_all_months() {
+        // Regression: previously collapsed to the first month only
+        // because `pick_month` discarded the rest.
+        let s = ok("0 9 * jan,feb *");
+        assert_eq!(s.len(), 2);
+        let months: Vec<Option<u8>> = s.iter().map(|x| x.month).collect();
+        assert!(months.contains(&Some(1)));
+        assert!(months.contains(&Some(2)));
+        for slot in &s {
+            assert_eq!(slot.day_of_month, None);
+            assert_eq!(slot.day_of_week, None);
+        }
     }
 
     #[test]

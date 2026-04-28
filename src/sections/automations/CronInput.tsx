@@ -29,14 +29,21 @@ export function CronInput({
     if (debounceRef.current !== undefined) {
       window.clearTimeout(debounceRef.current);
     }
+    // Cancel-token: each effect run owns this flag. When the user
+    // types again we set the previous run's flag to false in the
+    // cleanup, so a slow response from an older request is dropped
+    // rather than overwriting newer state.
+    let cancelled = false;
     debounceRef.current = window.setTimeout(async () => {
       try {
         const result = await api.automationsValidateCron(value);
+        if (cancelled) return;
         setValid(result.valid);
         setError(result.error);
         setNextRuns(result.next_runs);
         onValidityChange?.(result.valid);
       } catch (e) {
+        if (cancelled) return;
         setValid(false);
         setError(String(e));
         setNextRuns([]);
@@ -44,6 +51,7 @@ export function CronInput({
       }
     }, 250);
     return () => {
+      cancelled = true;
       if (debounceRef.current !== undefined) {
         window.clearTimeout(debounceRef.current);
       }

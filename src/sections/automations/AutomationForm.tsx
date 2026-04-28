@@ -124,13 +124,23 @@ export function AutomationForm({
     };
   }, [name, initial]);
 
-  const allowedTools = allowedToolsText
-    .split(/[,\s]+/)
-    .map((s) => s.trim())
-    .filter(Boolean);
+  // Allowed-tools tokenizer: split on commas and whitespace, but
+  // preserve patterns like `Bash(git *)` whose parentheses contain
+  // their own spaces. We walk character by character, tracking
+  // paren depth, and only break on top-level separators.
+  const allowedTools = parseAllowedTools(allowedToolsText);
 
   const bypassWithoutTools =
     permissionMode === "bypassPermissions" && allowedTools.length === 0;
+
+  // Budget: empty string = "no cap" (null), otherwise must be a
+  // finite non-negative number. NaN/negative are rejected before
+  // the DTO crosses IPC.
+  const budgetTrimmed = maxBudget.trim();
+  const budgetParsed: number | null =
+    budgetTrimmed === "" ? null : Number(budgetTrimmed);
+  const budgetInvalid =
+    budgetParsed !== null && (!Number.isFinite(budgetParsed) || budgetParsed < 0);
 
   const canSubmit =
     !!name &&
@@ -140,6 +150,7 @@ export function AutomationForm({
     cronValid &&
     !nameError &&
     !bypassWithoutTools &&
+    !budgetInvalid &&
     !busy &&
     (binaryKind === "first_party" || !!routeId);
 
@@ -148,8 +159,17 @@ export function AutomationForm({
       name: name.trim(),
       display_name: displayName.trim() || null,
       description: description.trim() || null,
-      binary_kind: binaryKind,
-      binary_route_id: binaryKind === "route" ? routeId : null,
+      // In edit mode binary cannot change (the scheduler artifact
+      // and shim are tied to the original binary kind). The form
+      // disables the binary fields visually; here we belt-and-
+      // braces it by preserving `initial.summary.binary_kind` /
+      // `binary_route_id` when present.
+      binary_kind: initial?.summary.binary_kind ?? binaryKind,
+      binary_route_id: initial
+        ? initial.summary.binary_route_id
+        : binaryKind === "route"
+          ? routeId
+          : null,
       model: model.trim() || null,
       cwd: cwd.trim(),
       prompt,
@@ -157,17 +177,19 @@ export function AutomationForm({
       append_system_prompt: appendSystemPrompt.trim() || null,
       permission_mode: permissionMode,
       allowed_tools: allowedTools,
-      add_dir: [],
-      max_budget_usd: maxBudget ? Number(maxBudget) : null,
+      // Preserve initial values for fields the form doesn't yet
+      // expose; otherwise an edit would silently clear them.
+      add_dir: initial?.add_dir ?? [],
+      max_budget_usd: budgetParsed,
       fallback_model: fallbackModel.trim() || null,
       output_format: outputFormat,
-      json_schema: null,
+      json_schema: initial?.json_schema ?? null,
       bare: bareMode,
-      extra_env: {},
+      extra_env: initial?.extra_env ?? {},
       cron: cron.trim(),
-      timezone: null,
+      timezone: initial?.summary.timezone ?? null,
       platform_options: platformOptions,
-      log_retention_runs: 50,
+      log_retention_runs: initial?.log_retention_runs ?? 50,
     };
     onSubmit(dto);
   }
@@ -215,10 +237,10 @@ export function AutomationForm({
 
       {/* What it runs */}
       <Group title="What it runs">
-        <Field label="Binary">
+        <Field label={initial ? "Binary (locked in edit mode)" : "Binary"}>
           <select
             value={binaryKind}
-            disabled={busy}
+            disabled={busy || !!initial}
             onChange={(e) =>
               setBinaryKind(e.target.value as "first_party" | "route")
             }
@@ -230,7 +252,7 @@ export function AutomationForm({
           {binaryKind === "route" && (
             <select
               value={routeId}
-              disabled={busy}
+              disabled={busy || !!initial}
               onChange={(e) => setRouteId(e.target.value)}
               style={{ ...inputStyle(), marginTop: "var(--sp-6)" }}
             >
@@ -241,6 +263,13 @@ export function AutomationForm({
                 </option>
               ))}
             </select>
+          )}
+          {initial && (
+            <Hint>
+              Binary cannot change in edit mode — the scheduler
+              registration and helper shim are tied to the original
+              binary. Delete and re-create to switch.
+            </Hint>
           )}
         </Field>
         <Field label="Working directory (cwd)">
@@ -261,7 +290,7 @@ export function AutomationForm({
             onChange={(e) => setPrompt(e.target.value)}
             rows={4}
             placeholder="summarize today's PRs..."
-            style={{ ...inputStyle(), resize: "vertical", minHeight: "tokens.sp[80]" }}
+            style={{ ...inputStyle(), resize: "vertical", minHeight: "5rem" }}
           />
         </Field>
         <Field label="System prompt (optional, replaces default)">
@@ -270,7 +299,7 @@ export function AutomationForm({
             disabled={busy}
             onChange={(e) => setSystemPrompt(e.target.value)}
             rows={2}
-            style={{ ...inputStyle(), resize: "vertical", minHeight: "tokens.s[12]" }}
+            style={{ ...inputStyle(), resize: "vertical", minHeight: "3rem" }}
           />
         </Field>
         <Field label="Append to system prompt (optional)">
@@ -279,7 +308,7 @@ export function AutomationForm({
             disabled={busy}
             onChange={(e) => setAppendSystemPrompt(e.target.value)}
             rows={2}
-            style={{ ...inputStyle(), resize: "vertical", minHeight: "tokens.s[12]" }}
+            style={{ ...inputStyle(), resize: "vertical", minHeight: "3rem" }}
           />
         </Field>
       </Group>
@@ -343,15 +372,21 @@ export function AutomationForm({
             </Hint>
           )}
         </Field>
-        <Field label="Max budget (USD per run; null = unlimited)">
+        <Field label="Max budget (USD per run; empty = unlimited)">
           <input
             type="number"
             step="0.01"
+            min="0"
             value={maxBudget}
             disabled={busy}
             onChange={(e) => setMaxBudget(e.target.value)}
-            style={inputStyle()}
+            style={inputStyle(budgetInvalid)}
           />
+          {budgetInvalid && (
+            <Hint kind="error">
+              Budget must be a finite non-negative number.
+            </Hint>
+          )}
         </Field>
         <Field label="Output format">
           <select
@@ -562,6 +597,41 @@ function Toggle({
       <span>{label}</span>
     </label>
   );
+}
+
+/**
+ * Tokenize an allowed-tools field. Splits on top-level commas and
+ * whitespace, but keeps parenthesized arg patterns intact:
+ *
+ *   "Read, Grep, Bash(git *), Bash(cat *)" →
+ *     ["Read", "Grep", "Bash(git *)", "Bash(cat *)"]
+ *
+ * Naive `split(/[,\s]+/)` would shred `Bash(git *)` into
+ * `Bash(git`, `*)` — silently dropping the whole permission
+ * pattern from the whitelist.
+ */
+function parseAllowedTools(input: string): string[] {
+  const out: string[] = [];
+  let current = "";
+  let depth = 0;
+  for (const ch of input) {
+    if (ch === "(") {
+      depth += 1;
+      current += ch;
+    } else if (ch === ")") {
+      depth = Math.max(0, depth - 1);
+      current += ch;
+    } else if ((ch === "," || /\s/.test(ch)) && depth === 0) {
+      const trimmed = current.trim();
+      if (trimmed) out.push(trimmed);
+      current = "";
+    } else {
+      current += ch;
+    }
+  }
+  const trimmed = current.trim();
+  if (trimmed) out.push(trimmed);
+  return out;
 }
 
 function inputStyle(invalid: boolean = false): React.CSSProperties {

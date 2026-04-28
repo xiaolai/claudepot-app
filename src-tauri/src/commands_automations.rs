@@ -39,19 +39,14 @@ fn parse_id(s: &str) -> Result<AutomationId, String> {
 fn route_lookup_fn() -> impl Fn(&Uuid) -> Option<String> {
     move |id: &Uuid| -> Option<String> {
         let store = RouteStore::open().ok()?;
+        // The route's `wrapper_name` is the canonical, on-disk
+        // wrapper filename (the user may have supplied a custom
+        // override, which `derive_wrapper_slug` does not capture).
         store
             .list()
             .iter()
             .find(|r| &r.id == id)
-            .map(|r| {
-                // Wrapper name is derived from route name + provider; we
-                // store it explicitly on the route. RouteSummaryDto's
-                // wrapper_name is the cached form.
-                claudepot_core::routes::derive_wrapper_slug(&r.name)
-                    .trim_start_matches("claude-")
-                    .to_string()
-            })
-            .map(|slug| format!("claude-{slug}"))
+            .map(|r| r.wrapper_name.clone())
     }
 }
 
@@ -129,8 +124,13 @@ fn build_automation_from_create(
     })
 }
 
+/// Build a [`AutomationPatch`] from a wire DTO. `existing` lets us
+/// merge `Trigger` correctly when the caller supplies only one of
+/// `cron`/`timezone` (preserving the other), and lets us validate
+/// the post-merge record's cross-field invariants.
 fn build_patch_from_update(
     dto: AutomationUpdateDto,
+    existing: &Automation,
 ) -> Result<AutomationPatch, String> {
     let mut patch = AutomationPatch::default();
     patch.display_name = dto.display_name;
@@ -148,7 +148,14 @@ fn build_patch_from_update(
     }
     patch.allowed_tools = dto.allowed_tools;
     patch.add_dir = dto.add_dir;
-    patch.max_budget_usd = dto.max_budget_usd;
+    if let Some(b) = dto.max_budget_usd {
+        if !b.is_finite() || b < 0.0 {
+            return Err(format!(
+                "max_budget_usd must be a finite non-negative number (got {b})"
+            ));
+        }
+        patch.max_budget_usd = Some(b);
+    }
     patch.fallback_model = dto.fallback_model;
     if let Some(s) = dto.output_format {
         let of = parse_output_format(&s).ok_or_else(|| format!("invalid output_format: {s}"))?;
@@ -160,18 +167,24 @@ fn build_patch_from_update(
         claudepot_core::automations::env::validate_map(&env).map_err(err)?;
         patch.extra_env = Some(env);
     }
+    // Trigger merge: `cron` and `timezone` arrive independently; we
+    // build a Cron trigger only when at least one of them changes,
+    // preserving the un-supplied side from the existing record.
     if dto.cron.is_some() || dto.timezone.is_some() {
-        // Build a fresh cron trigger; we need at least the cron string
-        // to validate.
-        if let Some(c) = &dto.cron {
-            let _ = claudepot_core::automations::cron::expand(c).map_err(err)?;
-        }
-        // Default tz handling: if cron supplied alone, keep null tz.
-        let cron = dto.cron.unwrap_or_default();
-        let timezone = dto.timezone.unwrap_or(None);
-        if !cron.is_empty() {
-            patch.trigger = Some(Trigger::Cron { cron, timezone });
-        }
+        let (existing_cron, existing_tz) = match &existing.trigger {
+            Trigger::Cron { cron, timezone } => (cron.clone(), timezone.clone()),
+        };
+        let cron = dto.cron.unwrap_or(existing_cron);
+        // Validate the cron string before building the trigger.
+        let _ = claudepot_core::automations::cron::expand(&cron).map_err(err)?;
+        // Empty timezone string from the wire == "no timezone";
+        // otherwise treat as a fresh override. Missing field == keep existing.
+        let timezone = match dto.timezone {
+            Some(s) if s.is_empty() => None,
+            Some(s) => Some(s),
+            None => existing_tz,
+        };
+        patch.trigger = Some(Trigger::Cron { cron, timezone });
     }
     if let Some(po) = dto.platform_options {
         patch.platform_options = Some(PlatformOptions {
@@ -181,6 +194,24 @@ fn build_patch_from_update(
         });
     }
     patch.log_retention_runs = dto.log_retention_runs;
+
+    // Cross-field invariant: bypassPermissions + non-empty
+    // allowed_tools. Compute the post-merge state and reject
+    // unsafe combinations early.
+    let post_mode = patch.permission_mode.unwrap_or(existing.permission_mode);
+    let post_tools_empty = match &patch.allowed_tools {
+        Some(v) => v.is_empty(),
+        None => existing.allowed_tools.is_empty(),
+    };
+    if matches!(
+        post_mode,
+        claudepot_core::automations::PermissionMode::BypassPermissions
+    ) && post_tools_empty
+    {
+        return Err(String::from(
+            "bypassPermissions requires a non-empty allowed_tools whitelist",
+        ));
+    }
     Ok(patch)
 }
 
@@ -222,14 +253,32 @@ pub async fn automations_add(
     let cli_path = current_claudepot_cli().map_err(err)?;
     install_shim(&automation, &binary_path, &cli_path).map_err(err)?;
 
-    let scheduler = active_scheduler();
-    if automation.enabled {
-        scheduler.register(&automation).map_err(err)?;
-    }
-
+    // Persist the record FIRST. If we registered with the OS scheduler
+    // first and then the JSON write failed, we'd leak an orphaned
+    // launchd plist / systemd unit / scheduled task with no matching
+    // record. Save first, then register; if registration then fails,
+    // remove from the store and return the error so the on-disk state
+    // stays consistent.
     let summary = AutomationSummaryDto::from(&automation);
+    let id = automation.id;
+    let enabled = automation.enabled;
     store.add(automation).map_err(err)?;
     store.save().map_err(err)?;
+
+    if enabled {
+        let scheduler = active_scheduler();
+        if let Err(e) = scheduler.register(
+            store
+                .get(&id)
+                .ok_or_else(|| String::from("automation vanished after save"))?,
+        ) {
+            // Roll back the store side so we don't leave a phantom
+            // record that the UI thinks is live.
+            let _ = store.remove(&id);
+            let _ = store.save();
+            return Err(err(e));
+        }
+    }
     Ok(summary)
 }
 
@@ -239,10 +288,20 @@ pub async fn automations_update(
 ) -> Result<AutomationSummaryDto, String> {
     let mut store = open_store()?;
     let id = parse_id(&dto.id)?;
-    let patch = build_patch_from_update(dto)?;
+    // Snapshot the existing record so the patch builder can merge
+    // partial trigger fields (cron without timezone, etc.) and so
+    // we can validate cross-field invariants against the post-merge
+    // state.
+    let existing = store
+        .get(&id)
+        .ok_or_else(|| format!("automation {id} not found"))?
+        .clone();
+    let patch = build_patch_from_update(dto, &existing)?;
     store.update(&id, patch).map_err(err)?;
+    // Persist BEFORE touching the OS scheduler — see comment in
+    // automations_add for the leak-prevention rationale.
+    store.save().map_err(err)?;
 
-    // Pull the updated record so we can re-render shim + plist.
     let updated = store
         .get(&id)
         .ok_or_else(|| format!("automation {id} not found after update"))?
@@ -256,8 +315,6 @@ pub async fn automations_update(
     if updated.enabled {
         scheduler.register(&updated).map_err(err)?;
     }
-
-    store.save().map_err(err)?;
     Ok(AutomationSummaryDto::from(&updated))
 }
 
@@ -266,6 +323,10 @@ pub async fn automations_remove(id: String) -> Result<(), String> {
     let mut store = open_store()?;
     let aid = parse_id(&id)?;
     let _ = store.remove(&aid).map_err(err)?;
+    // Persist FIRST so the JSON store and OS scheduler can never
+    // diverge if a later step fails. Even if scheduler unregister
+    // errors, the store no longer points at the dropped record.
+    store.save().map_err(err)?;
     let scheduler = active_scheduler();
     let _ = scheduler.unregister(&aid);
     // Best-effort cleanup of the on-disk per-automation dir.
@@ -273,7 +334,6 @@ pub async fn automations_remove(id: String) -> Result<(), String> {
     if auto_dir.exists() {
         let _ = std::fs::remove_dir_all(&auto_dir);
     }
-    store.save().map_err(err)?;
     Ok(())
 }
 

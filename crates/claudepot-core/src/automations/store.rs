@@ -45,23 +45,30 @@ impl Default for AutomationsFile {
 /// Adding fields to `Automation` requires adding them here too —
 /// kept verbose deliberately so a missing field is a compile error,
 /// not a silent drop.
+///
+/// String/numeric fields whose underlying type is `Option<T>` on
+/// `Automation` collapse here to `Option<T>` (single-level): we
+/// can set or leave alone, but cannot explicitly clear via patch.
+/// Callers that want to clear send the form's empty value (empty
+/// string / NaN / etc.); the patch builder converts that to the
+/// underlying `None` before applying.
 #[derive(Debug, Default, Clone)]
 pub struct AutomationPatch {
-    pub display_name: Option<Option<String>>,
-    pub description: Option<Option<String>>,
+    pub display_name: Option<String>,
+    pub description: Option<String>,
     pub enabled: Option<bool>,
-    pub model: Option<Option<String>>,
+    pub model: Option<String>,
     pub cwd: Option<String>,
     pub prompt: Option<String>,
-    pub system_prompt: Option<Option<String>>,
-    pub append_system_prompt: Option<Option<String>>,
+    pub system_prompt: Option<String>,
+    pub append_system_prompt: Option<String>,
     pub permission_mode: Option<super::types::PermissionMode>,
     pub allowed_tools: Option<Vec<String>>,
     pub add_dir: Option<Vec<String>>,
-    pub max_budget_usd: Option<Option<f64>>,
-    pub fallback_model: Option<Option<String>>,
+    pub max_budget_usd: Option<f64>,
+    pub fallback_model: Option<String>,
     pub output_format: Option<super::types::OutputFormat>,
-    pub json_schema: Option<Option<String>>,
+    pub json_schema: Option<String>,
     pub bare: Option<bool>,
     pub extra_env: Option<std::collections::BTreeMap<String, String>>,
     pub trigger: Option<super::types::Trigger>,
@@ -115,11 +122,22 @@ impl AutomationStore {
 
     /// Insert a new automation. The caller is responsible for
     /// having validated every field on `Automation`; the store
-    /// only enforces uniqueness of `name` and `id`.
+    /// only enforces uniqueness of `name` and `id` plus the
+    /// cross-field invariant that `bypassPermissions` carries a
+    /// non-empty allow-list.
     pub fn add(&mut self, automation: Automation) -> Result<(), AutomationError> {
         // Defensive name re-validation — cheap, prevents malformed
         // names from sneaking in via deserialization.
         validate_name(&automation.name)?;
+        if matches!(
+            automation.permission_mode,
+            super::types::PermissionMode::BypassPermissions
+        ) && automation.allowed_tools.is_empty()
+        {
+            return Err(AutomationError::InvalidEnv(
+                "bypassPermissions requires a non-empty allowed_tools whitelist".into(),
+            ));
+        }
         if self.file.automations.iter().any(|a| a.name == automation.name) {
             return Err(AutomationError::DuplicateName(automation.name));
         }
@@ -146,17 +164,25 @@ impl AutomationStore {
             .position(|a| &a.id == id)
             .ok_or_else(|| AutomationError::NotFound(id.to_string()))?;
         let a = &mut self.file.automations[idx];
+        // Helper: empty string in a single-level patch means "clear to None".
+        fn nz(v: String) -> Option<String> {
+            if v.is_empty() {
+                None
+            } else {
+                Some(v)
+            }
+        }
         if let Some(v) = patch.display_name {
-            a.display_name = v;
+            a.display_name = nz(v);
         }
         if let Some(v) = patch.description {
-            a.description = v;
+            a.description = nz(v);
         }
         if let Some(v) = patch.enabled {
             a.enabled = v;
         }
         if let Some(v) = patch.model {
-            a.model = v;
+            a.model = nz(v);
         }
         if let Some(v) = patch.cwd {
             a.cwd = v;
@@ -165,10 +191,10 @@ impl AutomationStore {
             a.prompt = v;
         }
         if let Some(v) = patch.system_prompt {
-            a.system_prompt = v;
+            a.system_prompt = nz(v);
         }
         if let Some(v) = patch.append_system_prompt {
-            a.append_system_prompt = v;
+            a.append_system_prompt = nz(v);
         }
         if let Some(v) = patch.permission_mode {
             a.permission_mode = v;
@@ -180,16 +206,21 @@ impl AutomationStore {
             a.add_dir = v;
         }
         if let Some(v) = patch.max_budget_usd {
-            a.max_budget_usd = v;
+            // NaN means "clear to None"; finite negative also clears.
+            a.max_budget_usd = if v.is_finite() && v >= 0.0 {
+                Some(v)
+            } else {
+                None
+            };
         }
         if let Some(v) = patch.fallback_model {
-            a.fallback_model = v;
+            a.fallback_model = nz(v);
         }
         if let Some(v) = patch.output_format {
             a.output_format = v;
         }
         if let Some(v) = patch.json_schema {
-            a.json_schema = v;
+            a.json_schema = nz(v);
         }
         if let Some(v) = patch.bare {
             a.bare = v;
@@ -205,6 +236,18 @@ impl AutomationStore {
         }
         if let Some(v) = patch.log_retention_runs {
             a.log_retention_runs = v;
+        }
+        // Cross-field invariant: bypassPermissions requires a non-empty
+        // allow-list. The Tauri layer also enforces this on add/update,
+        // but the store is the last gate before persistence.
+        if matches!(
+            a.permission_mode,
+            super::types::PermissionMode::BypassPermissions
+        ) && a.allowed_tools.is_empty()
+        {
+            return Err(AutomationError::InvalidEnv(
+                "bypassPermissions requires a non-empty allowed_tools whitelist".into(),
+            ));
         }
         a.updated_at = chrono::Utc::now();
         Ok(())

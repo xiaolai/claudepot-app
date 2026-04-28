@@ -81,23 +81,56 @@ export function AutomationsSection() {
 
   async function handleRun(id: string) {
     setBusy(id, true);
+    let unlisten: (() => void) | null = null;
+    let timeoutHandle: number | undefined;
+    const cleanup = () => {
+      if (unlisten) {
+        try {
+          unlisten();
+        } catch {
+          /* listener already torn down */
+        }
+        unlisten = null;
+      }
+      if (timeoutHandle !== undefined) {
+        window.clearTimeout(timeoutHandle);
+        timeoutHandle = undefined;
+      }
+    };
     try {
       const opId = await api.automationsRunNowStart(id);
-      // Listen for the terminal event on this op channel.
-      const unlisten = await listen(`op-progress::${opId}`, (event) => {
-        const payload = event.payload as { phase?: string; terminal?: boolean };
-        if (payload.terminal) {
+      // Listen for the terminal event on this op channel. The
+      // backend (src-tauri/src/ops.rs::ProgressEvent) emits the
+      // terminal event as `{phase: "op", status: "complete" | "error", ...}`.
+      // Per-phase events use other phase names with status="running"
+      // / "complete" — we only fire on the op-level signal.
+      unlisten = await listen<{
+        phase: string;
+        status: string;
+        detail?: string;
+      }>(`op-progress::${opId}`, (event) => {
+        const payload = event.payload;
+        if (payload.phase === "op") {
+          if (payload.status === "error") {
+            setToast({
+              kind: "error",
+              msg: payload.detail ?? "Run failed.",
+            });
+          } else {
+            setRunsRefreshKey((k) => k + 1);
+          }
           setBusy(id, false);
-          setRunsRefreshKey((k) => k + 1);
-          unlisten();
+          cleanup();
         }
       });
       // Safety timeout in case the event channel drops — clear busy
       // after 5 minutes so the UI doesn't get stuck forever.
-      window.setTimeout(() => {
+      timeoutHandle = window.setTimeout(() => {
         setBusy(id, false);
+        cleanup();
       }, 5 * 60 * 1000);
     } catch (e) {
+      cleanup();
       setBusy(id, false);
       setToast({ kind: "error", msg: String(e) });
     }
@@ -290,7 +323,7 @@ function EmptyState({ onAdd }: { onAdd: () => void }) {
       <h3 style={{ margin: 0, fontSize: "var(--fs-md)", color: "var(--fg)" }}>
         Schedule a claude -p run
       </h3>
-      <p style={{ margin: 0, fontSize: "var(--fs-sm)", maxWidth: "tokens.modal.width.md" }}>
+      <p style={{ margin: 0, fontSize: "var(--fs-sm)", maxWidth: "60ch" }}>
         Project commands and agents in the chosen folder are picked up
         automatically. Use a slash-command for the prompt to keep
         complex jobs versioned in your repo.

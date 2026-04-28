@@ -57,6 +57,23 @@ impl Scheduler for LaunchdScheduler {
         // replaced cleanly.
         let _ = run_launchctl(&["bootout", &gui_target(&label)]);
 
+        // Pre-create the stable launchd stdout/stderr log files so
+        // launchd's open(2) for `StandardOutPath` /
+        // `StandardErrorPath` finds existing files at bootstrap time.
+        // The plist points at `<auto_dir>/launchd-{stdout,stderr}.log`;
+        // the helper shim writes its own per-run logs into
+        // `<auto_dir>/runs/<run-id>/`, so these stable files only
+        // capture out-of-band launchd noise (registration errors,
+        // pre-shim failures) — useful for forensics.
+        let auto_dir = automation_dir(&automation.id);
+        std::fs::create_dir_all(&auto_dir)?;
+        for f in ["launchd-stdout.log", "launchd-stderr.log"] {
+            let _ = std::fs::OpenOptions::new()
+                .create(true)
+                .append(true)
+                .open(auto_dir.join(f));
+        }
+
         if let Some(parent) = plist_path.parent() {
             std::fs::create_dir_all(parent)?;
         }
@@ -176,8 +193,18 @@ pub fn render_plist(automation: &Automation) -> Result<String, AutomationError> 
     let label = label_for(&automation.id);
     let auto_dir = automation_dir(&automation.id);
     let shim_path = auto_dir.join("run.sh");
-    let stdout_target = auto_dir.join("runs").join(".latest").join("stdout.log");
-    let stderr_target = auto_dir.join("runs").join(".latest").join("stderr.log");
+    // launchd opens StandardOutPath/StandardErrorPath BEFORE
+    // launching ProgramArguments, so the target path must already
+    // exist as a writeable file (or be in a directory that does).
+    // The previous design pointed at `runs/.latest/stdout.log` but
+    // `.latest` was created by the shim AFTER launchd's open(2),
+    // racing the redirect. We instead point at stable per-automation
+    // log files that the shim appends to from inside its own
+    // per-run dir; launchd captures any out-of-band stderr
+    // (e.g. shim startup errors before mkdir) into these stable
+    // files where they're useful for debugging registration issues.
+    let stdout_target = auto_dir.join("launchd-stdout.log");
+    let stderr_target = auto_dir.join("launchd-stderr.log");
 
     let slots = match &automation.trigger {
         Trigger::Cron { cron: expr, .. } => cron::expand(expr)?,

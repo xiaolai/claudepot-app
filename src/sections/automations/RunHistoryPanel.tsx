@@ -93,7 +93,7 @@ export function RunHistoryPanel({ automationId, refreshKey }: Props) {
               color: ok ? "var(--fg-2)" : "var(--danger)",
             }}
           >
-            <span style={{ width: "tokens.s[8]" }}>{symbol}</span>
+            <span style={{ width: "32px" }}>{symbol}</span>
             <span style={{ color: "var(--fg-2)" }}>
               {fmtIso(run.started_at)}
             </span>
