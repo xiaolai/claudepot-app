@@ -321,7 +321,12 @@ pub fn reset(data_dir: &Path) -> Result<(), ProtectedPathsError> {
     Ok(())
 }
 
-#[cfg(test)]
+// Test fixtures use Unix-style absolute paths (`/`, `/tmp`, `/Volumes/...`).
+// Windows would need separately-shaped fixtures (`C:\`, `D:\Volumes`); those
+// don't exist yet, and the production code is itself path-shape-agnostic
+// at this layer. Gate the suite to Unix so CI on Windows isn't misled by
+// red asserts that aren't testing real Windows behavior.
+#[cfg(all(test, unix))]
 mod tests {
     use super::*;
 

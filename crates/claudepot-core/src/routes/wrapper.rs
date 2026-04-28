@@ -395,8 +395,10 @@ mod tests {
 
     /// Run `sh -n` on every rendered script so a future refactor
     /// can't reintroduce a stray `#` mid-`exec env` (or any other
-    /// shell-syntax bug). Skips on hosts without `/bin/sh` (none in
-    /// our CI matrix today).
+    /// shell-syntax bug). Windows runner has no `/bin/sh`, so the
+    /// test is gated to Unix — the rendered scripts are shell-only
+    /// anyway (the macOS keychain helper).
+    #[cfg(unix)]
     #[test]
     fn rendered_scripts_pass_sh_syntax_check() {
         use std::io::Write;

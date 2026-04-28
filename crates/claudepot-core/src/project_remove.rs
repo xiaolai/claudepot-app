@@ -635,6 +635,7 @@ mod tests {
         assert!(matches!(err, ProjectError::NotFound(_)));
     }
 
+    #[cfg(unix)]
     #[test]
     fn empty_project_uses_unsanitize_fallback_when_key_matches() {
         // Empty dir (no sessions) where `unsanitize(slug)` happens to

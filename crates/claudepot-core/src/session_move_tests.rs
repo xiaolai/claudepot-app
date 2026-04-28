@@ -4,9 +4,21 @@
 //! still resolve `super::*` against the parent module's internals.
 
 use super::*;
+use crate::path_utils::simplify_windows_path;
 use std::fs;
 use std::io::Write;
+use std::path::PathBuf;
 use std::time::{Duration, SystemTime};
+
+/// Mirror of `project_tests::canonical_test_path`. On Windows
+/// `canonicalize_cc_path` simplifies away the `\\?\` prefix that
+/// raw `std::fs::canonicalize` returns; tests that build their
+/// `want` value via raw canonicalize must apply the same simplify
+/// to keep the two sides comparable.
+fn canon_simplified(p: &Path) -> PathBuf {
+    let canon = std::fs::canonicalize(p).unwrap();
+    PathBuf::from(simplify_windows_path(&canon.to_string_lossy()))
+}
 
 // -----------------------------------------------------------------------
 // Fixture: fake `~/.claude` + fake work dirs
@@ -173,10 +185,9 @@ fn canonicalize_resolves_symlinks() {
     std::os::windows::fs::symlink_dir(&target, &link).unwrap();
 
     let got = canonicalize_cc_path(&link);
-    let want = std::fs::canonicalize(&target).unwrap();
+    let want = canon_simplified(&target);
     assert_eq!(
-        got,
-        PathBuf::from(want.to_string_lossy().to_string()),
+        got, want,
         "canonicalize_cc_path should resolve symlinks like CC does"
     );
 }
@@ -206,6 +217,7 @@ fn canonicalize_normalizes_nfd_to_nfc() {
 // Section B — move mechanics
 // -----------------------------------------------------------------------
 
+#[cfg(unix)]
 #[test]
 fn move_session_happy_path_rewrites_cwd_in_every_line() {
     let f = Fixture::new();
@@ -268,6 +280,7 @@ fn move_session_moves_subagent_and_remote_agent_subdirs() {
         .exists());
 }
 
+#[cfg(unix)]
 #[test]
 fn move_session_preserves_non_cwd_fields_byte_exact() {
     // The bar is intentionally high: a JSONL line with nested objects,
@@ -474,6 +487,7 @@ fn move_session_accepts_aged_source_without_force() {
 // Section C — history.jsonl + .claude.json
 // -----------------------------------------------------------------------
 
+#[cfg(unix)]
 #[test]
 fn move_session_rewrites_history_lines_by_session_id() {
     let f = Fixture::new();
@@ -804,6 +818,7 @@ fn move_session_phase_error_propagates() {
 // Section D — orphan detection + adoption
 // -----------------------------------------------------------------------
 
+#[cfg(unix)]
 #[test]
 fn detect_orphaned_projects_flags_dead_cwd() {
     let f = Fixture::new();

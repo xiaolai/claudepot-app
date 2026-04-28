@@ -466,6 +466,7 @@ mod tests {
         assert!(after.contains(r#""cwd":"/other""#));
     }
 
+    #[cfg(unix)]
     #[test]
     fn test_rewrite_jsonl_prefix_cwd() {
         let tmp = tempfile::tempdir().unwrap();

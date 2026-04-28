@@ -808,27 +808,29 @@ fn test_move_project_rewrites_session_jsonl_cwd() {
     let cc_old = projects_dir.join(&old_san);
     fs::create_dir(&cc_old).unwrap();
 
-    // Main session jsonl with exact match and a subdir-cd case
+    // Build the JSONL via `serde_json::json!` so backslashes in Windows
+    // paths get correctly escaped — interpolating `old_str` into a
+    // raw `format!` template produces invalid JSON on Windows and
+    // every line silently fails to parse, so the rewriter never sees
+    // a `cwd` to rewrite.
     let sep = std::path::MAIN_SEPARATOR;
-    let session_content = format!(
-        r#"{{"cwd":"{old}","i":1}}
-{{"cwd":"{old}{sep}src","i":2}}
-{{"cwd":"/elsewhere","i":3}}
-"#,
-        old = old_str
-    );
-    fs::write(cc_old.join("sess.jsonl"), &session_content).unwrap();
+    let line_a = serde_json::json!({"cwd": old_str.as_str(), "i": 1}).to_string();
+    let old_with_src = format!("{old_str}{sep}src");
+    let line_b = serde_json::json!({"cwd": old_with_src.as_str(), "i": 2}).to_string();
+    let line_c = serde_json::json!({"cwd": "/elsewhere", "i": 3}).to_string();
+    fs::write(
+        cc_old.join("sess.jsonl"),
+        format!("{line_a}\n{line_b}\n{line_c}\n"),
+    )
+    .unwrap();
 
     // Subagent jsonl
     let subagent_dir = cc_old.join("sessA").join("subagents");
     fs::create_dir_all(&subagent_dir).unwrap();
+    let agent_line = serde_json::json!({"cwd": old_str.as_str(), "agent": "x"}).to_string();
     fs::write(
         subagent_dir.join("agent-x.jsonl"),
-        format!(
-            r#"{{"cwd":"{old}","agent":"x"}}
-"#,
-            old = old_str
-        ),
+        format!("{agent_line}\n"),
     )
     .unwrap();
 
@@ -1099,6 +1101,7 @@ fn test_clean_orphans_dry_run() {
     assert!(orphan.exists());
 }
 
+#[cfg(unix)]
 #[test]
 fn test_clean_orphans_removes() {
     let tmp = tempfile::tempdir().unwrap();
@@ -1175,6 +1178,7 @@ fn test_clean_skips_unreachable_mount_prefix() {
 /// Fix #4a: when an orphan whose cwd was recovered authoritatively
 /// is cleaned, any matching `~/.claude.json` `projects[<path>]`
 /// entry must be removed with a snapshot written for recovery.
+#[cfg(unix)]
 #[test]
 fn test_clean_prunes_claude_json_entry_with_snapshot() {
     use crate::project_sanitize::sanitize_path;
@@ -1246,6 +1250,7 @@ fn test_clean_prunes_claude_json_entry_with_snapshot() {
 
 /// Fix #4b: matching `history.jsonl` lines are removed and dropped
 /// lines are captured in a snapshot so recovery is possible.
+#[cfg(unix)]
 #[test]
 fn test_clean_prunes_history_lines_with_snapshot() {
     use crate::project_sanitize::sanitize_path;
@@ -1386,6 +1391,7 @@ fn test_reachability_empty_path_is_unreachable() {
 /// removed, but `~/.claude.json` and `history.jsonl` entries for
 /// that path are LEFT INTACT. `protected_paths_skipped` reflects
 /// the count.
+#[cfg(unix)]
 #[test]
 fn test_clean_protected_path_skips_sibling_rewrites() {
     use crate::project_sanitize::sanitize_path;
@@ -1483,6 +1489,7 @@ fn test_clean_protected_path_skips_sibling_rewrites() {
 /// since `list_projects` ran (TOCTOU). Phase 0's preflight catches
 /// the reappearance and excludes the orphan from `authoritative_paths`,
 /// so neither `~/.claude.json` nor `history.jsonl` are touched.
+#[cfg(unix)]
 #[test]
 fn test_clean_skips_sibling_rewrite_when_source_reappeared() {
     use crate::project_sanitize::sanitize_path;
@@ -1670,6 +1677,7 @@ fn test_clean_preview_total_bytes_sums_orphans() {
 /// (whose `original_path` is from the lossy fallback) is excluded,
 /// even when the protected set happens to contain the unsanitized
 /// guess.
+#[cfg(unix)]
 #[test]
 fn test_clean_preview_protected_count_excludes_empty_orphans() {
     use crate::project_sanitize::sanitize_path;
@@ -1724,6 +1732,7 @@ fn test_clean_preview_protected_count_excludes_empty_orphans() {
 /// failure mode (an empty set silently disabling protection for `/`,
 /// `~`, `/Users`, etc.) cannot reach `clean_preview` if this test
 /// passes.
+#[cfg(unix)]
 #[test]
 fn test_clean_preview_protected_count_uses_fail_safe_defaults() {
     let tmp = tempfile::tempdir().unwrap();
@@ -1784,7 +1793,18 @@ fn test_move_project_already_moved() {
     let old_san = sanitize_path(&src.to_string_lossy());
     let cc_old = projects_dir.join(&old_san);
     fs::create_dir(&cc_old).unwrap();
-    fs::write(cc_old.join("s.jsonl"), "{}").unwrap();
+    let session_path = cc_old.join("s.jsonl");
+    fs::write(&session_path, "{}").unwrap();
+    // Age the session beyond the live-heartbeat window (60 s). On
+    // Windows runners `lsof` is absent, so `detect_live_session`
+    // falls back to heartbeat-only and treats the fresh-fixture
+    // mtime as a live Claude → `force: false` then refuses with
+    // `ClaudeRunning`. Push mtime back so the test exercises the
+    // already-moved path the assertion is actually about.
+    let stale = filetime::FileTime::from_system_time(
+        std::time::SystemTime::now() - std::time::Duration::from_secs(120),
+    );
+    filetime::set_file_mtime(&session_path, stale).unwrap();
 
     let args = MoveArgs {
         old_path: src.clone(),
