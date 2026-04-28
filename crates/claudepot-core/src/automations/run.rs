@@ -234,6 +234,20 @@ pub async fn run_now(
 ) -> Result<AutomationRun, AutomationError> {
     sink.phase("prepare", PhaseStatus::Running);
     let shim_path = install_shim(automation, binary_abs_path, claudepot_cli_abs_path)?;
+
+    // Mint a deterministic run id in Rust so we can read back the
+    // exact run dir without scanning for "newest" (which would race
+    // any concurrent scheduled run firing in the same second). The
+    // shim honors `CLAUDEPOT_RUN_ID` from its env when present.
+    // Format: ISO-Z timestamp + UUIDv4 suffix → satisfies
+    // validate_run_id ([A-Za-z0-9._-], ≤128 chars).
+    let run_id = format!(
+        "{}-{}",
+        Utc::now().format("%Y%m%dT%H%M%SZ"),
+        uuid::Uuid::new_v4().simple()
+    );
+    let runs_root = automation_runs_dir(&automation.id);
+    let run_dir = runs_root.join(&run_id);
     sink.phase("prepare", PhaseStatus::Complete);
 
     sink.phase("spawn", PhaseStatus::Running);
@@ -249,6 +263,7 @@ pub async fn run_now(
         c.arg(&shim_path);
         c
     };
+    cmd.env("CLAUDEPOT_RUN_ID", &run_id);
     let status = cmd
         .status()
         .await
@@ -259,32 +274,28 @@ pub async fn run_now(
     let exit_code = status.code().unwrap_or(-1);
     sink.phase("spawn", PhaseStatus::Complete);
 
-    // The shim already wrote result.json via _record-run. Find it
-    // by scanning runs/ for the most recent dir. Tolerate the
-    // record-run subcommand failing — fall back to building the
-    // record from exit code alone.
+    // Read the result.json the shim's `_record-run` callback wrote.
+    // If it's missing (record-run failed, shim crashed before
+    // calling it, etc.), synthesize a record AND persist it so the
+    // run history reflects every attempt.
     sink.phase("record", PhaseStatus::Running);
-    let runs_dir = automation_runs_dir(&automation.id);
-    let latest = find_latest_run_dir(&runs_dir);
-    let run = if let Some(run_dir) = latest {
-        let result_path = run_dir.join("result.json");
-        if result_path.exists() {
-            let raw = std::fs::read(&result_path)?;
-            serde_json::from_slice(&raw)?
-        } else {
-            synthesize_run(automation, started_at, ended_at, exit_code, &run_dir)
-        }
+    let result_path = run_dir.join("result.json");
+    let run = if result_path.exists() {
+        let raw = std::fs::read(&result_path)?;
+        serde_json::from_slice(&raw)?
     } else {
-        // No run dir means the shim never started or failed
-        // before mkdir. Use a stub so the caller still gets a
-        // record back.
-        synthesize_run(
-            automation,
-            started_at,
-            ended_at,
-            exit_code,
-            &runs_dir.join("unknown"),
-        )
+        let synth = synthesize_run(automation, started_at, ended_at, exit_code, &run_dir);
+        // Persist the synthesized record so the run history has a
+        // row for it. Best-effort — don't fail the whole run-now
+        // if the persist itself errors (that would mask the actual
+        // run outcome).
+        if !run_dir.exists() {
+            let _ = std::fs::create_dir_all(&run_dir);
+        }
+        if let Ok(bytes) = serde_json::to_vec_pretty(&synth) {
+            let _ = crate::fs_utils::atomic_write(&result_path, &bytes);
+        }
+        synth
     };
     sink.phase("record", PhaseStatus::Complete);
 
@@ -322,6 +333,7 @@ fn synthesize_run(
 
 /// Find the most recent `runs/<run-id>/` directory by name.
 /// Skips dotfiles (`.latest` symlink and pointer files).
+#[allow(dead_code)]
 fn find_latest_run_dir(runs_dir: &Path) -> Option<PathBuf> {
     if !runs_dir.exists() {
         return None;

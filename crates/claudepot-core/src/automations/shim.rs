@@ -176,11 +176,13 @@ pub fn render_windows(automation: &Automation, inputs: &ShimInputs<'_>) -> Strin
     s.push_str("if defined CLAUDEPOT_RUN_ID (\r\n");
     s.push_str("  set RUN_ID=%CLAUDEPOT_RUN_ID%\r\n");
     s.push_str(") else (\r\n");
+    // Two %RANDOM%s give 30 effective bits of entropy — concurrent
+    // same-second invocations no longer collide in practice.
     s.push_str(
         "  for /f \"usebackq delims=\" %%t in (`powershell -NoProfile -Command \
-\"[DateTime]::UtcNow.ToString('yyyyMMddTHHmmssZ')\"`) do set RUN_ID=%%t-%RANDOM%\r\n",
+\"[DateTime]::UtcNow.ToString('yyyyMMddTHHmmssZ')\"`) do set RUN_ID=%%t-%RANDOM%-%RANDOM%\r\n",
     );
-    s.push_str("  if not defined RUN_ID set RUN_ID=fallback-%RANDOM%-%RANDOM%\r\n");
+    s.push_str("  if not defined RUN_ID set RUN_ID=fallback-%RANDOM%-%RANDOM%-%RANDOM%\r\n");
     s.push_str(")\r\n");
 
     s.push_str("set RUN_DIR=%AUTO_DIR%\\runs\\%RUN_ID%\r\n");
@@ -287,17 +289,31 @@ pub fn sh_quote(s: &str) -> String {
     out
 }
 
-/// Build a `set NAME="VALUE"` form for cmd. Both NAME and VALUE
-/// pass through `cmd_escape_value`. Use this everywhere instead of
-/// hand-stitching `set "K=V"`.
+/// Build the right-hand side of `set <assignment>` for cmd.exe.
+///
+/// Returns `"NAME=ESCAPED_VALUE"` (with the outer quotes), so the
+/// caller writes `set {assignment}` and cmd parses the whole thing
+/// as a quoted assignment — the quotes are NOT stored in the
+/// variable's value (that would be the case if we wrote
+/// `set NAME="VALUE"` instead).
+///
+/// VALUE escape: `%` → `%%` (no expansion of arbitrary names);
+/// `"` and `^` are dropped (the env validator already rejects them
+/// from user-supplied values; defense-in-depth here lets a future
+/// caller bypass the validator without escaping ambiguity);
+/// `\r\n\0` are dropped (the validator rejects these too).
 fn cmd_set_assignment(name: &str, value: &str) -> String {
-    format!(
-        "{}={}",
-        cmd_escape_value(name),
-        // Use the quoted-arg form so embedded spaces and `&|<>^` are
-        // treated as data; `cmd_quote_arg` adds the outer `"`s.
-        cmd_quote_arg(value)
-    )
+    let mut escaped = String::with_capacity(value.len());
+    for ch in value.chars() {
+        match ch {
+            '%' => escaped.push_str("%%"),
+            '"' | '^' | '\r' | '\n' | '\0' => {
+                // drop — env validator should have rejected these
+            }
+            other => escaped.push(other),
+        }
+    }
+    format!("\"{name}={escaped}\"")
 }
 
 /// Quote a single argument for cmd.exe. Wraps in `"…"`, escapes any
