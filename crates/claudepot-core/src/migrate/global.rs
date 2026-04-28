@@ -136,9 +136,7 @@ fn walk_append(
         } else if ft.is_file() {
             let rel = path
                 .strip_prefix(base)
-                .map_err(|e| {
-                    MigrateError::Io(std::io::Error::other(format!("strip_prefix: {e}")))
-                })?
+                .map_err(|e| MigrateError::Io(std::io::Error::other(format!("strip_prefix: {e}"))))?
                 .to_string_lossy()
                 .replace('\\', "/");
             let bp = format!("{bundle_prefix}/{rel}");
@@ -248,9 +246,7 @@ fn apply_one(
     let (target_rel, kind_hint) = match rel {
         "settings.json.scrubbed" => ("settings.json".to_string(), Hint::SettingsScrubbed),
         "proposed-hooks.json" => ("proposed-hooks.json".to_string(), Hint::Hooks),
-        "mcp-servers.scrubbed.json" => {
-            ("mcpServers.imported.json".to_string(), Hint::Mcp)
-        }
+        "mcp-servers.scrubbed.json" => ("mcpServers.imported.json".to_string(), Hint::Mcp),
         other => (other.to_string(), Hint::Plain),
     };
     let target_path = target_config_dir.join(&target_rel);
@@ -335,9 +331,7 @@ fn apply_plain_or_settings(
     let imported_path = target
         .parent()
         .map(|p| p.join(&imported_name))
-        .ok_or_else(|| {
-            MigrateError::Io(std::io::Error::other("target has no parent"))
-        })?;
+        .ok_or_else(|| MigrateError::Io(std::io::Error::other("target has no parent")))?;
     fs::copy(src, &imported_path).map_err(MigrateError::from)?;
     Ok(Some(GlobalApplyStep {
         after: imported_path.to_string_lossy().to_string(),
@@ -358,9 +352,8 @@ fn apply_hooks(
     let settings_path = target_config_dir.join("settings.json");
     let mut settings = if settings_path.exists() {
         let bytes = fs::read(&settings_path).map_err(MigrateError::from)?;
-        serde_json::from_slice::<serde_json::Value>(&bytes).map_err(|e| {
-            MigrateError::Serialize(format!("settings.json parse: {e}"))
-        })?
+        serde_json::from_slice::<serde_json::Value>(&bytes)
+            .map_err(|e| MigrateError::Serialize(format!("settings.json parse: {e}")))?
     } else {
         serde_json::Value::Object(Default::default())
     };
@@ -376,8 +369,8 @@ fn apply_hooks(
         map.insert("hooks".to_string(), hooks);
     }
 
-    let new_bytes = serde_json::to_vec_pretty(&settings)
-        .map_err(|e| MigrateError::Serialize(e.to_string()))?;
+    let new_bytes =
+        serde_json::to_vec_pretty(&settings).map_err(|e| MigrateError::Serialize(e.to_string()))?;
     fs::write(&settings_path, new_bytes).map_err(MigrateError::from)?;
     Ok(Some(GlobalApplyStep {
         after: settings_path.to_string_lossy().to_string(),
@@ -487,7 +480,11 @@ mod tests {
         let global = staging.join("global");
         fs::create_dir_all(&global).unwrap();
         fs::write(global.join("CLAUDE.md"), "from-bundle").unwrap();
-        fs::write(global.join("settings.json.scrubbed"), r#"{"theme":"light"}"#).unwrap();
+        fs::write(
+            global.join("settings.json.scrubbed"),
+            r#"{"theme":"light"}"#,
+        )
+        .unwrap();
 
         let target_cfg = tmp.path().join("target/.claude");
         fs::create_dir_all(&target_cfg).unwrap();
@@ -507,7 +504,11 @@ mod tests {
         let staging = tmp.path().join("staging");
         let global = staging.join("global");
         fs::create_dir_all(&global).unwrap();
-        fs::write(global.join("settings.json.scrubbed"), r#"{"theme":"light"}"#).unwrap();
+        fs::write(
+            global.join("settings.json.scrubbed"),
+            r#"{"theme":"light"}"#,
+        )
+        .unwrap();
 
         let target_cfg = tmp.path().join("target/.claude");
         fs::create_dir_all(&target_cfg).unwrap();
@@ -538,11 +539,7 @@ mod tests {
         let staging = tmp.path().join("staging");
         let global = staging.join("global");
         fs::create_dir_all(&global).unwrap();
-        fs::write(
-            global.join("proposed-hooks.json"),
-            r#"{"PreToolUse":[]}"#,
-        )
-        .unwrap();
+        fs::write(global.join("proposed-hooks.json"), r#"{"PreToolUse":[]}"#).unwrap();
         let target_cfg = tmp.path().join("target/.claude");
         fs::create_dir_all(&target_cfg).unwrap();
         let steps = apply_global(&staging, &target_cfg, false, "bid").unwrap();
@@ -580,8 +577,7 @@ mod tests {
             .unwrap();
         assert!(h.after.ends_with("settings.json"));
         let v: serde_json::Value =
-            serde_json::from_slice(&fs::read(target_cfg.join("settings.json")).unwrap())
-                .unwrap();
+            serde_json::from_slice(&fs::read(target_cfg.join("settings.json")).unwrap()).unwrap();
         assert!(v.get("hooks").is_some());
         std::env::remove_var("CLAUDEPOT_DATA_DIR");
     }

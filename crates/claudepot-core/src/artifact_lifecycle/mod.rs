@@ -29,12 +29,12 @@ pub use disable::{disable_at, enable_at, DisabledRecord, OnConflict};
 pub use discover::list_disabled;
 pub use error::{LifecycleError, RefuseReason, Result};
 pub use paths::{
-    classify_path, disabled_target_for, enabled_target_for, ActiveRoots, ArtifactKind,
-    PayloadKind, Scope, Trackable, DISABLED_DIR,
+    classify_path, disabled_target_for, enabled_target_for, ActiveRoots, ArtifactKind, PayloadKind,
+    Scope, Trackable, DISABLED_DIR,
 };
 pub use trash::{
-    forget_at, list_at as list_trash_at, purge_older_than, recover_at, restore_at,
-    trash_at, RestoredArtifact, TrashEntry, TrashManifest, TrashState,
+    forget_at, list_at as list_trash_at, purge_older_than, recover_at, restore_at, trash_at,
+    RestoredArtifact, TrashEntry, TrashManifest, TrashState,
 };
 
 use std::path::{Path, PathBuf};
@@ -86,11 +86,7 @@ pub fn enable_path(
 }
 
 /// Convenience for tests + Tauri: classify, then trash.
-pub fn trash_path(
-    abs_path: &Path,
-    roots: &ActiveRoots,
-    trash_root: &Path,
-) -> Result<TrashEntry> {
+pub fn trash_path(abs_path: &Path, roots: &ActiveRoots, trash_root: &Path) -> Result<TrashEntry> {
     let trackable = classify_path(abs_path, roots)?;
     trash_at(&trackable, trash_root, roots)
 }
@@ -135,8 +131,7 @@ mod tests {
 
         let first = disable_path(&agent, &roots, OnConflict::Refuse).unwrap();
         // Second call on the now-disabled path — the disabled location.
-        let second =
-            disable_path(&first.current_path, &roots, OnConflict::Refuse).unwrap();
+        let second = disable_path(&first.current_path, &roots, OnConflict::Refuse).unwrap();
         assert_eq!(first.current_path, second.current_path);
         assert!(first.current_path.exists());
     }
@@ -228,7 +223,11 @@ mod tests {
         let mut manifest: TrashManifest =
             serde_json::from_str(&std::fs::read_to_string(&manifest_path).unwrap()).unwrap();
         manifest.trashed_at_ms -= 31 * 86_400_000;
-        std::fs::write(&manifest_path, serde_json::to_vec_pretty(&manifest).unwrap()).unwrap();
+        std::fs::write(
+            &manifest_path,
+            serde_json::to_vec_pretty(&manifest).unwrap(),
+        )
+        .unwrap();
 
         let purged = purge_older_than(&trash, 30).unwrap();
         assert_eq!(purged, 1);
@@ -322,8 +321,12 @@ mod tests {
         let mm_dir = trash.join("00000000-0000-0000-0000-000000000002");
         std::fs::create_dir_all(mm_dir.join("payload")).unwrap();
         std::fs::write(mm_dir.join("payload/foo.md"), b"x").unwrap();
-        let err = restore_at(&trash, "00000000-0000-0000-0000-000000000002", OnConflict::Refuse)
-            .unwrap_err();
+        let err = restore_at(
+            &trash,
+            "00000000-0000-0000-0000-000000000002",
+            OnConflict::Refuse,
+        )
+        .unwrap_err();
         assert!(matches!(err, LifecycleError::WrongTrashState { .. }));
     }
 
@@ -458,8 +461,7 @@ mod tests {
         let tmp = tempfile::tempdir().unwrap();
         let trash = tmp.path().join("trash");
         std::fs::create_dir_all(&trash).unwrap();
-        let err =
-            restore_at(&trash, "../whatever", OnConflict::Refuse).unwrap_err();
+        let err = restore_at(&trash, "../whatever", OnConflict::Refuse).unwrap_err();
         assert!(matches!(err, LifecycleError::InvalidTrashId(_)));
     }
 
@@ -493,8 +495,7 @@ mod tests {
         let attack_path = claude.join("agents").join("../../etc/passwd");
         let roots = ActiveRoots::user(claude.clone());
         let err =
-            crate::artifact_lifecycle::paths::classify_path(&attack_path, &roots)
-                .unwrap_err();
+            crate::artifact_lifecycle::paths::classify_path(&attack_path, &roots).unwrap_err();
         // The traversal path either refuses (WrongKind / OutOfScope)
         // — never classifies as an active trackable agent.
         match err {
@@ -533,7 +534,10 @@ mod tests {
         .unwrap();
         // After successful recover the file should land at the
         // confirmed target, proving the derived scope+rel was right.
-        assert!(target.exists(), "recovered file present at confirmed target");
+        assert!(
+            target.exists(),
+            "recovered file present at confirmed target"
+        );
         assert_eq!(std::fs::read(&target).unwrap(), b"recovered");
     }
 

@@ -111,11 +111,7 @@ impl TranscriptResolver {
     /// the slug dir, so callers can recompute the path by joining
     /// `<projects_dir>/<slug(cwd)>/<session_id>.jsonl` without a
     /// separate lookup.
-    pub fn resolve(
-        &mut self,
-        rec: &PidRecord,
-        projects_dir: &Path,
-    ) -> Option<String> {
+    pub fn resolve(&mut self, rec: &PidRecord, projects_dir: &Path) -> Option<String> {
         let slug = sanitize_path(&rec.cwd);
         let slug_dir = projects_dir.join(&slug);
 
@@ -141,10 +137,7 @@ impl TranscriptResolver {
             if path.extension().and_then(|s| s.to_str()) != Some("jsonl") {
                 continue;
             }
-            let Some(session_id) = path
-                .file_stem()
-                .and_then(|s| s.to_str())
-                .map(str::to_owned)
+            let Some(session_id) = path.file_stem().and_then(|s| s.to_str()).map(str::to_owned)
             else {
                 continue;
             };
@@ -392,22 +385,12 @@ mod tests {
         let started_at = chrono::Utc::now().timestamp_millis() - 10 * 60 * 1000;
 
         // Declared (stale) transcript — first event right after startup.
-        let declared = write_transcript(
-            &projects,
-            cwd,
-            "stale-sid",
-            &iso_from_offset_secs(-590),
-        );
+        let declared = write_transcript(&projects, cwd, "stale-sid", &iso_from_offset_secs(-590));
         touch(&declared, -500); // last written 500s ago
 
         // Fresh transcript from a /clear 2 min ago — still being
         // actively written as of a second ago.
-        let fresh = write_transcript(
-            &projects,
-            cwd,
-            "fresh-sid",
-            &iso_from_offset_secs(-120),
-        );
+        let fresh = write_transcript(&projects, cwd, "fresh-sid", &iso_from_offset_secs(-120));
         touch(&fresh, -1);
 
         let mut r = TranscriptResolver::new();
@@ -423,21 +406,11 @@ mod tests {
         let started_at = chrono::Utc::now().timestamp_millis() - 5 * 60 * 1000;
 
         // Declared transcript is being actively written.
-        let declared = write_transcript(
-            &projects,
-            cwd,
-            "live-sid",
-            &iso_from_offset_secs(-200),
-        );
+        let declared = write_transcript(&projects, cwd, "live-sid", &iso_from_offset_secs(-200));
         touch(&declared, -1);
 
         // An older /clear-ed sibling is stale.
-        let sibling = write_transcript(
-            &projects,
-            cwd,
-            "older-sid",
-            &iso_from_offset_secs(-250),
-        );
+        let sibling = write_transcript(&projects, cwd, "older-sid", &iso_from_offset_secs(-250));
         touch(&sibling, -200);
 
         let mut r = TranscriptResolver::new();
@@ -486,12 +459,7 @@ mod tests {
         touch(&ancient, -365 * 24 * 3600);
 
         // Declared transcript — actively being written.
-        let declared = write_transcript(
-            &projects,
-            cwd,
-            "current-sid",
-            &iso_from_offset_secs(-30),
-        );
+        let declared = write_transcript(&projects, cwd, "current-sid", &iso_from_offset_secs(-30));
         touch(&declared, -1);
 
         let mut r = TranscriptResolver::new();
@@ -567,12 +535,7 @@ mod tests {
             &iso_from_offset_secs(-500),
         );
         touch(&b, -300);
-        let c = write_transcript(
-            &projects,
-            cwd,
-            "style-tweak",
-            &iso_from_offset_secs(-100),
-        );
+        let c = write_transcript(&projects, cwd, "style-tweak", &iso_from_offset_secs(-100));
         touch(&c, -1);
 
         let mut r = TranscriptResolver::new();
@@ -660,12 +623,7 @@ mod tests {
 
         // A stale (declared) sibling — first event right after PID
         // startup, last written 500s ago.
-        let stale = write_transcript(
-            &projects,
-            cwd,
-            "stale-sid",
-            &iso_from_offset_secs(-599),
-        );
+        let stale = write_transcript(&projects, cwd, "stale-sid", &iso_from_offset_secs(-599));
         touch(&stale, -500);
 
         let mut r = TranscriptResolver::new();

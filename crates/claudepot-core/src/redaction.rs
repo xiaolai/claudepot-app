@@ -12,8 +12,7 @@
 use std::path::PathBuf;
 
 /// How to handle absolute filesystem paths in the text.
-#[derive(Debug, Clone)]
-#[derive(Default)]
+#[derive(Debug, Clone, Default)]
 pub enum PathStrategy {
     /// Leave paths untouched.
     #[default]
@@ -23,7 +22,6 @@ pub enum PathStrategy {
     /// Replace every absolute path with a short hash token.
     Hash,
 }
-
 
 #[derive(Debug, Clone)]
 pub struct RedactionPolicy {
@@ -212,8 +210,14 @@ fn looks_like_env_line(line: &str) -> bool {
     }
     let (name, _) = t.split_at(t.find('=').unwrap());
     !name.is_empty()
-        && name.chars().all(|c| c.is_ascii_uppercase() || c == '_' || c.is_ascii_digit())
-        && name.chars().next().map(|c| c.is_ascii_uppercase()).unwrap_or(false)
+        && name
+            .chars()
+            .all(|c| c.is_ascii_uppercase() || c == '_' || c.is_ascii_digit())
+        && name
+            .chars()
+            .next()
+            .map(|c| c.is_ascii_uppercase())
+            .unwrap_or(false)
 }
 
 /// Dumb literal substring replacement as the "custom regex" fallback
@@ -284,7 +288,8 @@ mod tests {
             anthropic_keys: false,
             ..RedactionPolicy::default()
         };
-        let input = "unix /Users/joker/a.jsonl drive C:\\Users\\joker\\a and unc \\\\server\\share\\x";
+        let input =
+            "unix /Users/joker/a.jsonl drive C:\\Users\\joker\\a and unc \\\\server\\share\\x";
         let out = apply(input, &p);
         assert!(out.contains("<path:"));
         assert!(!out.contains("/Users/joker"));

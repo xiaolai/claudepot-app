@@ -96,8 +96,7 @@ pub fn load_plugin_manifest(root: &Path) -> Result<Value, String> {
     ];
     for p in &candidates {
         if p.is_file() {
-            let bytes = std::fs::read(p)
-                .map_err(|e| format!("read {}: {}", p.display(), e))?;
+            let bytes = std::fs::read(p).map_err(|e| format!("read {}: {}", p.display(), e))?;
             return serde_json::from_slice(&bytes)
                 .map_err(|e| format!("parse {}: {}", p.display(), e));
         }

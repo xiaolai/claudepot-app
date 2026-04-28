@@ -81,4 +81,3 @@ pub fn prune_cmd(
     }
     Ok(())
 }
-

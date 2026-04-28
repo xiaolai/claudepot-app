@@ -223,13 +223,12 @@ pub struct RouteSummary {
 impl Route {
     pub fn summary(&self) -> RouteSummary {
         let (base_url, api_key_preview) = match &self.provider {
-            RouteProvider::Gateway(cfg) => {
-                (cfg.base_url.clone(), preview_secret(&cfg.api_key))
-            }
+            RouteProvider::Gateway(cfg) => (cfg.base_url.clone(), preview_secret(&cfg.api_key)),
             RouteProvider::Bedrock(cfg) => {
-                let url = cfg.base_url.clone().unwrap_or_else(|| {
-                    format!("bedrock://{}", cfg.region)
-                });
+                let url = cfg
+                    .base_url
+                    .clone()
+                    .unwrap_or_else(|| format!("bedrock://{}", cfg.region));
                 let preview = match (cfg.bearer_token.as_ref(), cfg.aws_profile.as_ref()) {
                     (Some(t), _) => preview_secret(t),
                     (None, Some(p)) => format!("aws-profile:{p}"),
@@ -343,10 +342,7 @@ mod tests {
 
     #[test]
     fn preview_secret_long_shows_only_last_four() {
-        assert_eq!(
-            preview_secret("sk-or-v1-abcdef1234567890xyz"),
-            "…0xyz",
-        );
+        assert_eq!(preview_secret("sk-or-v1-abcdef1234567890xyz"), "…0xyz",);
         // 16-char boundary case
         assert_eq!(preview_secret("0123456789abcdef"), "…cdef");
     }

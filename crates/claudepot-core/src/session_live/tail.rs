@@ -239,7 +239,9 @@ impl FileTail {
         let mut file = file;
         file.seek(SeekFrom::Start(self.offset))?;
         let mut buf = Vec::with_capacity((file_size - self.offset) as usize);
-        file.by_ref().take(file_size - self.offset).read_to_end(&mut buf)?;
+        file.by_ref()
+            .take(file_size - self.offset)
+            .read_to_end(&mut buf)?;
 
         // Only consume up to the LAST '\n'. Anything after is a
         // partial write we must defer to the next poll.
@@ -289,10 +291,7 @@ mod tests {
     }
 
     fn append(path: &Path, text: &str) {
-        let mut f = std::fs::OpenOptions::new()
-            .append(true)
-            .open(path)
-            .unwrap();
+        let mut f = std::fs::OpenOptions::new().append(true).open(path).unwrap();
         f.write_all(text.as_bytes()).unwrap();
     }
 
@@ -379,6 +378,20 @@ mod tests {
         assert_eq!(p.new_lines, vec!["{\"x\":1}"]);
     }
 
+    // Inode-change detection: covered on Unix by atomic-rename-onto-
+    // target (gives a fresh inode under every Unix filesystem we
+    // ship to). Gated to Unix because:
+    //   * Linux tmpfs reuses the freed inode immediately, so the
+    //     more-natural `remove_file + write_all` form is racy and
+    //     `rename` is the only reliable inode-bumper.
+    //   * Windows has no inode; `rotation_token` falls back to file
+    //     creation time, and NTFS file tunneling preserves the
+    //     destination's creation time across either delete/recreate
+    //     OR rename-onto-target unless the test sleeps past the
+    //     tunneling TTL (~15 s). Truncation-based rotation
+    //     (`truncate_in_place_is_detected_as_rotation` above) covers
+    //     the Windows rotation path without that timing dance.
+    #[cfg(unix)]
     #[test]
     fn inode_change_is_detected_as_rotation() {
         let dir = tmp();
@@ -387,9 +400,12 @@ mod tests {
         let mut t = FileTail::at_start(&path).unwrap();
         let _ = t.poll().unwrap();
 
-        // Remove and recreate — new inode.
-        std::fs::remove_file(&path).unwrap();
-        write_all(&path, "{\"y\":1}\n");
+        // Replace via atomic rename — moves a separately-created
+        // inode onto the target, so before-and-after inode numbers
+        // can never collide on Linux tmpfs either.
+        let sibling = dir.path().join("s.jsonl.new");
+        write_all(&sibling, "{\"y\":1}\n");
+        std::fs::rename(&sibling, &path).unwrap();
         let p = t.poll().unwrap();
         assert!(p.rotated, "inode change must be reported as rotation");
         assert_eq!(p.new_lines, vec!["{\"y\":1}"]);

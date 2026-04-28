@@ -27,6 +27,12 @@
 //! to confirm the identity. Returns [`ProbeMethod::Decrypted`] — the
 //! only trust tier that constructs a [`VerifiedIdentity`].
 
+// On non-macOS targets the slow-path token-cache decrypt machinery
+// is gated out, so the import + the `fetch_profile` parameter that
+// only feeds it land as warnings under `-D warnings`. Suppress just
+// for those targets — macOS still enforces the lints.
+#![cfg_attr(not(target_os = "macos"), allow(unused_imports, unused_variables))]
+
 use crate::account::AccountStore;
 use crate::desktop_backend::token_cache::DecryptedTokenCache;
 use crate::desktop_backend::DesktopPlatform;
@@ -204,11 +210,9 @@ where
     {
         let tc = DecryptedTokenCache::from_json(&plaintext)
             .map_err(|e| DesktopIdentityError::TokenParse(e.to_string()))?;
-        let access = tc
-            .pick_access_token()
-            .ok_or_else(|| DesktopIdentityError::TokenParse(
-                "no access token found in decrypted bundles".into(),
-            ))?;
+        let access = tc.pick_access_token().ok_or_else(|| {
+            DesktopIdentityError::TokenParse("no access token found in decrypted bundles".into())
+        })?;
         let prof = fetch_profile
             .fetch(access)
             .await
@@ -229,17 +233,10 @@ pub async fn verify_live_identity(
     store: &AccountStore,
 ) -> Result<Option<VerifiedIdentity>, DesktopIdentityError> {
     let fetcher = DefaultProfileFetcher;
-    match probe_live_identity_async(
-        platform,
-        store,
-        ProbeOptions { strict: true },
-        &fetcher,
-    )
-    .await?
+    match probe_live_identity_async(platform, store, ProbeOptions { strict: true }, &fetcher)
+        .await?
     {
-        Some(id) if id.probe_method == ProbeMethod::Decrypted => {
-            Ok(Some(VerifiedIdentity(id)))
-        }
+        Some(id) if id.probe_method == ProbeMethod::Decrypted => Ok(Some(VerifiedIdentity(id))),
         Some(_) | None => Ok(None),
     }
 }
@@ -309,9 +306,9 @@ fn fast_path_match(
     store: &AccountStore,
 ) -> Result<Option<LiveDesktopIdentity>, DesktopIdentityError> {
     let _ = &pieces.cfg; // kept for future heuristics
-    // Collect candidates that are ALSO registered in the store.
-    // Ambiguous fast-path (≥2 accounts share the org) collapses via
-    // `find_by_org_uuid`'s unique-match contract.
+                         // Collect candidates that are ALSO registered in the store.
+                         // Ambiguous fast-path (≥2 accounts share the org) collapses via
+                         // `find_by_org_uuid`'s unique-match contract.
     let mut matches: Vec<(Uuid, crate::account::Account)> = Vec::new();
     for org_uuid in &pieces.org_uuids {
         if let Ok(Some(acct)) = store.find_by_org_uuid(*org_uuid) {
@@ -346,7 +343,9 @@ pub fn extract_org_uuids(cfg: &serde_json::Value) -> Vec<Uuid> {
         // The UUID is the substring after the LAST ':'. Using the last
         // `:` handles key variants like `dxt:allowlistEnabled:<uuid>`
         // and `dxt:allowlistLastUpdated:<uuid>` identically.
-        let Some(tail) = k.rsplit(':').next() else { continue };
+        let Some(tail) = k.rsplit(':').next() else {
+            continue;
+        };
         if let Ok(uuid) = Uuid::parse_str(tail) {
             if !out.contains(&uuid) {
                 out.push(uuid);
@@ -439,9 +438,11 @@ mod tests {
         FakePlatform { data_dir }
     }
 
-    fn probe(p: &FakePlatform, s: &AccountStore, strict: bool)
-        -> Result<Option<LiveDesktopIdentity>, DesktopIdentityError>
-    {
+    fn probe(
+        p: &FakePlatform,
+        s: &AccountStore,
+        strict: bool,
+    ) -> Result<Option<LiveDesktopIdentity>, DesktopIdentityError> {
         probe_live_identity(p, s, ProbeOptions { strict })
     }
 
@@ -483,13 +484,18 @@ mod tests {
     fn test_probe_fast_path_unique_match_returns_candidate() {
         let (store, _s) = store();
         let org = Uuid::new_v4();
-        store.insert(&make_account("alice@example.com", Some(&org.to_string()))).unwrap();
+        store
+            .insert(&make_account("alice@example.com", Some(&org.to_string())))
+            .unwrap();
 
         let tmp = tempfile::tempdir().unwrap();
-        write_cfg(tmp.path(), serde_json::json!({
-            format!("dxt:allowlistEnabled:{}", org): false,
-            "oauth:tokenCache": "djEw...",
-        }));
+        write_cfg(
+            tmp.path(),
+            serde_json::json!({
+                format!("dxt:allowlistEnabled:{}", org): false,
+                "oauth:tokenCache": "djEw...",
+            }),
+        );
 
         let id = probe(&fake(Some(tmp.path().to_path_buf())), &store, false)
             .unwrap()
@@ -505,15 +511,24 @@ mod tests {
         // None → probe also returns None (forces slow path).
         let (store, _s) = store();
         let org = Uuid::new_v4();
-        store.insert(&make_account("a@example.com", Some(&org.to_string()))).unwrap();
-        store.insert(&make_account("b@example.com", Some(&org.to_string()))).unwrap();
+        store
+            .insert(&make_account("a@example.com", Some(&org.to_string())))
+            .unwrap();
+        store
+            .insert(&make_account("b@example.com", Some(&org.to_string())))
+            .unwrap();
 
         let tmp = tempfile::tempdir().unwrap();
-        write_cfg(tmp.path(), serde_json::json!({
-            format!("dxt:allowlistEnabled:{}", org): false,
-            "oauth:tokenCache": "djEw...",
-        }));
-        assert!(probe(&fake(Some(tmp.path().to_path_buf())), &store, false).unwrap().is_none());
+        write_cfg(
+            tmp.path(),
+            serde_json::json!({
+                format!("dxt:allowlistEnabled:{}", org): false,
+                "oauth:tokenCache": "djEw...",
+            }),
+        );
+        assert!(probe(&fake(Some(tmp.path().to_path_buf())), &store, false)
+            .unwrap()
+            .is_none());
     }
 
     #[test]
@@ -522,16 +537,25 @@ mod tests {
         // account. Fast path still returns None — we can't pick one.
         let (store, _s) = store();
         let (a, b) = (Uuid::new_v4(), Uuid::new_v4());
-        store.insert(&make_account("a@example.com", Some(&a.to_string()))).unwrap();
-        store.insert(&make_account("b@example.com", Some(&b.to_string()))).unwrap();
+        store
+            .insert(&make_account("a@example.com", Some(&a.to_string())))
+            .unwrap();
+        store
+            .insert(&make_account("b@example.com", Some(&b.to_string())))
+            .unwrap();
 
         let tmp = tempfile::tempdir().unwrap();
-        write_cfg(tmp.path(), serde_json::json!({
-            format!("dxt:allowlistEnabled:{}", a): false,
-            format!("dxt:allowlistEnabled:{}", b): false,
-            "oauth:tokenCache": "djEw...",
-        }));
-        assert!(probe(&fake(Some(tmp.path().to_path_buf())), &store, false).unwrap().is_none());
+        write_cfg(
+            tmp.path(),
+            serde_json::json!({
+                format!("dxt:allowlistEnabled:{}", a): false,
+                format!("dxt:allowlistEnabled:{}", b): false,
+                "oauth:tokenCache": "djEw...",
+            }),
+        );
+        assert!(probe(&fake(Some(tmp.path().to_path_buf())), &store, false)
+            .unwrap()
+            .is_none());
     }
 
     #[test]
@@ -553,13 +577,18 @@ mod tests {
         // strict=true.
         let (store, _s) = store();
         let org = Uuid::new_v4();
-        store.insert(&make_account("a@example.com", Some(&org.to_string()))).unwrap();
+        store
+            .insert(&make_account("a@example.com", Some(&org.to_string())))
+            .unwrap();
 
         let tmp = tempfile::tempdir().unwrap();
-        write_cfg(tmp.path(), serde_json::json!({
-            format!("dxt:allowlistEnabled:{}", org): false,
-            "oauth:tokenCache": "djEw...",
-        }));
+        write_cfg(
+            tmp.path(),
+            serde_json::json!({
+                format!("dxt:allowlistEnabled:{}", org): false,
+                "oauth:tokenCache": "djEw...",
+            }),
+        );
         let err = probe(&fake(Some(tmp.path().to_path_buf())), &store, true)
             .expect_err("sync probe cannot handle strict");
         assert!(matches!(err, DesktopIdentityError::Unsupported));
@@ -577,8 +606,8 @@ mod tests {
     #[test]
     fn test_probe_no_data_dir_returns_no_data_dir() {
         let (store, _s) = store();
-        let err = probe(&fake(None), &store, false)
-            .expect_err("platform without data_dir must error");
+        let err =
+            probe(&fake(None), &store, false).expect_err("platform without data_dir must error");
         assert!(matches!(err, DesktopIdentityError::NoDataDir));
     }
 
@@ -609,11 +638,21 @@ mod tests {
         fn data_dir(&self) -> Option<std::path::PathBuf> {
             Some(self.data_dir.clone())
         }
-        fn session_items(&self) -> &[&str] { &[] }
-        async fn is_running(&self) -> bool { false }
-        async fn quit(&self) -> Result<(), crate::error::DesktopSwapError> { Ok(()) }
-        async fn launch(&self) -> Result<(), crate::error::DesktopSwapError> { Ok(()) }
-        fn is_installed(&self) -> bool { true }
+        fn session_items(&self) -> &[&str] {
+            &[]
+        }
+        async fn is_running(&self) -> bool {
+            false
+        }
+        async fn quit(&self) -> Result<(), crate::error::DesktopSwapError> {
+            Ok(())
+        }
+        async fn launch(&self) -> Result<(), crate::error::DesktopSwapError> {
+            Ok(())
+        }
+        fn is_installed(&self) -> bool {
+            true
+        }
         async fn safe_storage_secret(
             &self,
         ) -> Result<Vec<u8>, crate::desktop_backend::DesktopKeyError> {
@@ -642,7 +681,8 @@ mod tests {
         }"#;
         let key = crate::desktop_backend::crypto::macos::derive_key(&secret);
         let iv = [b' '; 16];
-        let ct = Enc::new_from_slices(&key, &iv).unwrap()
+        let ct = Enc::new_from_slices(&key, &iv)
+            .unwrap()
             .encrypt_padded_vec_mut::<Pkcs7>(tc_json);
         let mut envelope = b"v10".to_vec();
         envelope.extend_from_slice(&ct);
@@ -650,9 +690,12 @@ mod tests {
         let token_b64 = base64::engine::general_purpose::STANDARD.encode(envelope);
 
         let tmp = tempfile::tempdir().unwrap();
-        write_cfg(tmp.path(), serde_json::json!({
-            "oauth:tokenCache": token_b64,
-        }));
+        write_cfg(
+            tmp.path(),
+            serde_json::json!({
+                "oauth:tokenCache": token_b64,
+            }),
+        );
 
         let (store, _s) = store();
         let platform = SlowPathFake {
@@ -664,15 +707,11 @@ mod tests {
             org_uuid: Uuid::new_v4().to_string(),
         };
 
-        let id = probe_live_identity_async(
-            &platform,
-            &store,
-            ProbeOptions { strict: true },
-            &fetcher,
-        )
-        .await
-        .unwrap()
-        .expect("slow path returns verified identity");
+        let id =
+            probe_live_identity_async(&platform, &store, ProbeOptions { strict: true }, &fetcher)
+                .await
+                .unwrap()
+                .expect("slow path returns verified identity");
         assert_eq!(id.email, "verified@example.com");
         assert_eq!(id.probe_method, ProbeMethod::Decrypted);
     }
@@ -685,13 +724,23 @@ mod tests {
         // not Err — the call was well-formed, we just don't know who.
         let (store, _s) = store();
         let org = Uuid::new_v4();
-        store.insert(&make_account("x@example.com", Some(&Uuid::new_v4().to_string()))).unwrap();
+        store
+            .insert(&make_account(
+                "x@example.com",
+                Some(&Uuid::new_v4().to_string()),
+            ))
+            .unwrap();
 
         let tmp = tempfile::tempdir().unwrap();
-        write_cfg(tmp.path(), serde_json::json!({
-            format!("dxt:allowlistEnabled:{}", org): false,
-            "oauth:tokenCache": "djEw...",
-        }));
-        assert!(probe(&fake(Some(tmp.path().to_path_buf())), &store, false).unwrap().is_none());
+        write_cfg(
+            tmp.path(),
+            serde_json::json!({
+                format!("dxt:allowlistEnabled:{}", org): false,
+                "oauth:tokenCache": "djEw...",
+            }),
+        );
+        assert!(probe(&fake(Some(tmp.path().to_path_buf())), &store, false)
+            .unwrap()
+            .is_none());
     }
 }

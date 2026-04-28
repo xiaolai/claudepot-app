@@ -21,7 +21,11 @@ pub fn list_disabled(roots: &ActiveRoots) -> Result<Vec<DisabledRecord>> {
         if !disabled_root.exists() {
             continue;
         }
-        for kind in [ArtifactKind::Skill, ArtifactKind::Agent, ArtifactKind::Command] {
+        for kind in [
+            ArtifactKind::Skill,
+            ArtifactKind::Agent,
+            ArtifactKind::Command,
+        ] {
             let kind_root = disabled_root.join(kind.subdir());
             if !kind_root.exists() {
                 continue;
@@ -67,7 +71,14 @@ fn walk_kind(
                 } else {
                     PayloadKind::File
                 };
-                out.push(record_for(scope, scope_root, kind, name, path, payload_kind));
+                out.push(record_for(
+                    scope,
+                    scope_root,
+                    kind,
+                    name,
+                    path,
+                    payload_kind,
+                ));
             }
         }
         ArtifactKind::Agent | ArtifactKind::Command => {
@@ -103,9 +114,7 @@ fn walk_md_files(root: &Path, f: &mut dyn FnMut(&Path)) -> Result<()> {
         if name_s.starts_with('.') {
             continue;
         }
-        let ft = entry
-            .file_type()
-            .map_err(LifecycleError::io("file type"))?;
+        let ft = entry.file_type().map_err(LifecycleError::io("file type"))?;
         if ft.is_dir() {
             walk_md_files(&path, f)?;
         } else if ft.is_file() && name_s.ends_with(".md") {

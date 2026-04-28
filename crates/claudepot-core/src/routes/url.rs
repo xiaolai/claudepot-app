@@ -44,7 +44,7 @@ pub fn validate_base_url(input: &str) -> Result<String, BaseUrlError> {
 
     // Strip path/query/fragment to get the authority component.
     let authority_end = after_scheme
-        .find(|c: char| c == '/' || c == '?' || c == '#')
+        .find(['/', '?', '#'])
         .unwrap_or(after_scheme.len());
     let authority = &after_scheme[..authority_end];
 
@@ -149,8 +149,7 @@ mod tests {
 
     #[test]
     fn rejects_userinfo() {
-        let err =
-            validate_base_url("https://user:pass@example.com").unwrap_err();
+        let err = validate_base_url("https://user:pass@example.com").unwrap_err();
         assert!(matches!(err, BaseUrlError::Malformed(_)));
     }
 
@@ -168,8 +167,7 @@ mod tests {
     #[test]
     fn rejects_inner_whitespace() {
         // Inner whitespace in URLs is invalid.
-        let err =
-            validate_base_url("https://example.com/with space").unwrap_err();
+        let err = validate_base_url("https://example.com/with space").unwrap_err();
         assert!(matches!(err, BaseUrlError::InvalidChars));
         // Inner control char in middle of host.
         let err = validate_base_url("https://exam\nple.com").unwrap_err();

@@ -7,8 +7,8 @@ use super::*;
 
 pub fn list_orphans(ctx: &AppContext) -> Result<()> {
     let config_dir = paths::claude_config_dir();
-    let orphans = detect_orphaned_projects(&config_dir)
-        .context("failed to scan for orphaned projects")?;
+    let orphans =
+        detect_orphaned_projects(&config_dir).context("failed to scan for orphaned projects")?;
 
     if ctx.json {
         println!("{}", format_orphans_json(&orphans));
@@ -63,11 +63,7 @@ pub fn move_cmd(
 }
 
 /// Adopt every session under an orphan slug into a live target cwd.
-pub fn adopt_orphan_cmd(
-    ctx: &AppContext,
-    orphan_slug: &str,
-    target_cwd: &str,
-) -> Result<()> {
+pub fn adopt_orphan_cmd(ctx: &AppContext, orphan_slug: &str, target_cwd: &str) -> Result<()> {
     let config_dir = paths::claude_config_dir();
     let target = Path::new(target_cwd);
     if !target.is_dir() {
@@ -95,7 +91,10 @@ pub fn rebuild_index_cmd(ctx: &AppContext) -> Result<()> {
         .context("open session index")?;
     idx.rebuild().context("rebuild session index")?;
     if ctx.json {
-        println!(r#"{{"status":"ok","path":{:?}}}"#, db_path.display().to_string());
+        println!(
+            r#"{{"status":"ok","path":{:?}}}"#,
+            db_path.display().to_string()
+        );
     } else {
         eprintln!("Session index cleared at {}", db_path.display());
         eprintln!("Next `session` list will re-parse every transcript.");

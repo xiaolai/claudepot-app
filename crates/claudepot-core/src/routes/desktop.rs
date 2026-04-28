@@ -127,10 +127,7 @@ pub fn write_library_profile(route: &Route) -> Result<PathBuf, RouteError> {
 /// mirror its managed keys into `enterpriseConfig`. Unmanaged keys
 /// in the existing `enterpriseConfig` (operational hardening, OTLP,
 /// future Anthropic additions, user-applied tweaks) are preserved.
-pub fn activate_desktop(
-    route: &Route,
-    disable_chooser: bool,
-) -> Result<PathBuf, RouteError> {
+pub fn activate_desktop(route: &Route, disable_chooser: bool) -> Result<PathBuf, RouteError> {
     write_library_profile(route)?;
     let path = enterprise_config_path()?;
     let mut top = read_top_level(&path)?;
@@ -149,10 +146,7 @@ pub fn activate_desktop(
     for (k, v) in new_keys {
         enterprise.insert(k, v);
     }
-    top.insert(
-        "enterpriseConfig".to_string(),
-        Value::Object(enterprise),
-    );
+    top.insert("enterpriseConfig".to_string(), Value::Object(enterprise));
 
     let bytes = serde_json::to_vec_pretty(&Value::Object(top))?;
     fs_utils::atomic_write(&path, &bytes)?;
@@ -173,10 +167,7 @@ pub fn clear_desktop_active() -> Result<PathBuf, RouteError> {
         })
         .unwrap_or_default();
     strip_managed_keys(&mut enterprise);
-    top.insert(
-        "enterpriseConfig".to_string(),
-        Value::Object(enterprise),
-    );
+    top.insert("enterpriseConfig".to_string(), Value::Object(enterprise));
     let bytes = serde_json::to_vec_pretty(&Value::Object(top))?;
     fs_utils::atomic_write(&path, &bytes)?;
     Ok(path)
@@ -185,9 +176,7 @@ pub fn clear_desktop_active() -> Result<PathBuf, RouteError> {
 /// Remove a route's `configLibrary/<uuid>.json` profile if it
 /// exists and we own it (managed marker present). Idempotent on a
 /// missing file. Leaves unmanaged or hand-edited profiles alone.
-pub fn delete_library_profile(
-    route_id: super::types::RouteId,
-) -> Result<(), RouteError> {
+pub fn delete_library_profile(route_id: super::types::RouteId) -> Result<(), RouteError> {
     let path = library_dir()?.join(format!("{}.json", route_id));
     match std::fs::read(&path) {
         Ok(bytes) => {
@@ -245,10 +234,7 @@ fn build_library_profile(route: &Route) -> LibraryProfile {
     }
 }
 
-fn build_enterprise_config(
-    route: &Route,
-    disable_chooser: bool,
-) -> Map<String, Value> {
+fn build_enterprise_config(route: &Route, disable_chooser: bool) -> Map<String, Value> {
     let mut m = Map::new();
     m.insert(
         "inferenceProvider".to_string(),
@@ -273,10 +259,7 @@ fn build_enterprise_config(
         "disableDeploymentModeChooser".to_string(),
         Value::Bool(disable_chooser),
     );
-    m.insert(
-        CLAUDEPOT_MANAGED_MARKER.to_string(),
-        Value::Bool(true),
-    );
+    m.insert(CLAUDEPOT_MANAGED_MARKER.to_string(), Value::Bool(true));
     m
 }
 
@@ -396,8 +379,7 @@ fn build_inference_keys(route: &Route) -> Map<String, Value> {
 mod tests {
     use super::*;
     use crate::routes::types::{
-        AuthScheme, BedrockConfig, FoundryConfig, GatewayConfig, RouteProvider,
-        VertexConfig,
+        AuthScheme, BedrockConfig, FoundryConfig, GatewayConfig, RouteProvider, VertexConfig,
     };
     use uuid::Uuid;
 
@@ -416,10 +398,8 @@ mod tests {
             small_fast_model: None,
             additional_models: vec!["qwen2.5:7b".into()],
             wrapper_name: "claude-llama3-2-3b".into(),
-            deployment_organization_uuid: Uuid::parse_str(
-                "22222222-2222-2222-2222-222222222222",
-            )
-            .unwrap(),
+            deployment_organization_uuid: Uuid::parse_str("22222222-2222-2222-2222-222222222222")
+                .unwrap(),
             active_on_desktop: false,
             installed_on_cli: false,
         }
@@ -470,10 +450,7 @@ mod tests {
             m.get("disableDeploymentModeChooser"),
             Some(&Value::Bool(false))
         );
-        assert_eq!(
-            m.get("claudepot_managed"),
-            Some(&Value::Bool(true))
-        );
+        assert_eq!(m.get("claudepot_managed"), Some(&Value::Bool(true)));
         assert_eq!(
             m.get("deploymentOrganizationUuid"),
             Some(&Value::String(

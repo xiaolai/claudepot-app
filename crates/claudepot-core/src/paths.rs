@@ -133,11 +133,7 @@ mod tests {
         // Must be exactly $HOME/.claudepot per the repo contract —
         // not dirs::data_dir()/Claudepot, which was the prior default
         // and diverges from every other path reference in the codebase.
-        assert!(
-            result.ends_with(".claudepot"),
-            "got: {}",
-            result.display()
-        );
+        assert!(result.ends_with(".claudepot"), "got: {}", result.display());
         // Verify it's in the home tree, not Library/Application Support
         // or similar platform-specific app-data location.
         if let Some(home) = dirs::home_dir() {

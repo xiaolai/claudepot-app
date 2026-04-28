@@ -257,15 +257,10 @@ mod tests {
         assert_eq!(stats.cards_inserted, 1, "fixture has exactly one failure");
         assert!(stats.failed.is_empty(), "fixture must parse cleanly");
 
-        let cards = db
-            .recent(&Default::default())
-            .unwrap();
+        let cards = db.recent(&Default::default()).unwrap();
         assert_eq!(cards.len(), 1);
         let c = &cards[0];
-        assert_eq!(
-            c.help.as_ref().unwrap().template_id,
-            "hook.plugin_missing"
-        );
+        assert_eq!(c.help.as_ref().unwrap().template_id, "hook.plugin_missing");
     }
 
     /// The convergence invariant: after every full pass, the table
@@ -386,7 +381,10 @@ mod tests {
     fn plugin_attribution_round_trips_through_index() {
         let dir = tempdir().unwrap();
         let config = dir.path().join("claude");
-        let jsonl = config.join("projects").join("-Users-x-proj").join("s.jsonl");
+        let jsonl = config
+            .join("projects")
+            .join("-Users-x-proj")
+            .join("s.jsonl");
         let fixture = include_str!("testdata/hook_plugin_missing.jsonl").trim();
         write_jsonl(&jsonl, &[fixture]);
 
@@ -409,11 +407,7 @@ mod tests {
                 ..Default::default()
             })
             .unwrap();
-        assert_eq!(
-            by_plugin.len(),
-            1,
-            "plugin filter must match by bare name"
-        );
+        assert_eq!(by_plugin.len(), 1, "plugin filter must match by bare name");
     }
 
     /// Regression for Codex audit verification PARTIAL: if the user
@@ -425,7 +419,10 @@ mod tests {
     fn missing_projects_dir_sweeps_all_existing_rows() {
         let dir = tempdir().unwrap();
         let config = dir.path().join("claude");
-        let path_a = config.join("projects").join("-Users-x-proj").join("a.jsonl");
+        let path_a = config
+            .join("projects")
+            .join("-Users-x-proj")
+            .join("a.jsonl");
         let fixture = include_str!("testdata/hook_plugin_missing.jsonl").trim();
         write_jsonl(&path_a, &[fixture]);
 
@@ -457,6 +454,9 @@ mod tests {
         let stats = run(&config, &db).unwrap();
         assert_eq!(stats.files_scanned, 1);
         assert_eq!(stats.cards_inserted, 1, "valid line still classified");
-        assert!(stats.failed.is_empty(), "malformed lines are not file-level failures");
+        assert!(
+            stats.failed.is_empty(),
+            "malformed lines are not file-level failures"
+        );
     }
 }

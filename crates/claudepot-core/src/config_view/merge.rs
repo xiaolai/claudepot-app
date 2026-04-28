@@ -20,12 +20,8 @@ use std::collections::HashSet;
 /// Returns a new Value; inputs are borrowed.
 pub fn merge_settings(lower: &Value, upper: &Value) -> Value {
     match (lower, upper) {
-        (Value::Object(lo), Value::Object(up)) => {
-            Value::Object(merge_objects(lo, up))
-        }
-        (Value::Array(lo), Value::Array(up)) => {
-            Value::Array(merge_arrays(lo, up))
-        }
+        (Value::Object(lo), Value::Object(up)) => Value::Object(merge_objects(lo, up)),
+        (Value::Array(lo), Value::Array(up)) => Value::Array(merge_arrays(lo, up)),
         (_, _) => {
             // Scalar-on-scalar / scalar-on-object / null-clobber:
             // higher wins, including Null.

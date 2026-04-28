@@ -56,7 +56,9 @@ fn gate_on_pending_journals(ignore: bool) -> Result<()> {
     for (path, j) in &pending {
         eprintln!(
             "  {} — {} \u{2192} {} (started {}, phases: [{}])",
-            path.file_stem().map(|s| s.to_string_lossy().to_string()).unwrap_or_default(),
+            path.file_stem()
+                .map(|s| s.to_string_lossy().to_string())
+                .unwrap_or_default(),
             j.old_path,
             j.new_path,
             j.started_at,
@@ -354,9 +356,17 @@ pub fn move_project(
         println!(
             "  \u{2713} Rewrote {} cwd reference{} across {} session/subagent file{} (P6)",
             result.jsonl_lines_rewritten,
-            if result.jsonl_lines_rewritten == 1 { "" } else { "s" },
+            if result.jsonl_lines_rewritten == 1 {
+                ""
+            } else {
+                "s"
+            },
             result.jsonl_files_modified,
-            if result.jsonl_files_modified == 1 { "" } else { "s" },
+            if result.jsonl_files_modified == 1 {
+                ""
+            } else {
+                "s"
+            },
         );
     }
     if !result.jsonl_errors.is_empty() {
@@ -391,7 +401,9 @@ pub fn move_project(
         println!("  \u{2014} P8 skipped: git root changed but no auto-memory dir to move");
     }
     if result.project_settings_rewritten {
-        println!("  \u{2713} Project-local .claude/settings.json autoMemoryDirectory rewritten (P9)");
+        println!(
+            "  \u{2713} Project-local .claude/settings.json autoMemoryDirectory rewritten (P9)"
+        );
     }
 
     for warning in &result.warnings {
@@ -423,9 +435,8 @@ pub fn clean(ctx: &AppContext, dry_run: bool, ignore_pending_journals: bool) -> 
     // an empty set would silently disable even `/`, `~`, `/Users` —
     // worse than blocking the clean. Built-in defaults are always
     // available since they're a compile-time constant).
-    let protected = claudepot_core::protected_paths::resolved_set_or_defaults(
-        &paths::claudepot_data_dir(),
-    );
+    let protected =
+        claudepot_core::protected_paths::resolved_set_or_defaults(&paths::claudepot_data_dir());
 
     let repair_root = paths::claudepot_repair_dir();
     let (result, orphans) = project::clean_orphans_with_progress(
@@ -525,28 +536,44 @@ pub fn clean(ctx: &AppContext, dry_run: bool, ignore_pending_journals: bool) -> 
         println!(
             "\u{26a0}  Skipped {} project{} with a live CC session — quit Claude Code and re-run.",
             result.orphans_skipped_live,
-            if result.orphans_skipped_live == 1 { "" } else { "s" }
+            if result.orphans_skipped_live == 1 {
+                ""
+            } else {
+                "s"
+            }
         );
     }
     if result.claude_json_entries_removed > 0 {
         println!(
             "  \u{2713} Removed {} ~/.claude.json projects-map entr{}",
             result.claude_json_entries_removed,
-            if result.claude_json_entries_removed == 1 { "y" } else { "ies" }
+            if result.claude_json_entries_removed == 1 {
+                "y"
+            } else {
+                "ies"
+            }
         );
     }
     if result.history_lines_removed > 0 {
         println!(
             "  \u{2713} Removed {} history.jsonl line{}",
             result.history_lines_removed,
-            if result.history_lines_removed == 1 { "" } else { "s" }
+            if result.history_lines_removed == 1 {
+                ""
+            } else {
+                "s"
+            }
         );
     }
     if result.claudepot_artifacts_removed > 0 {
         println!(
             "  \u{2713} Removed {} stale claudepot artifact{}",
             result.claudepot_artifacts_removed,
-            if result.claudepot_artifacts_removed == 1 { "" } else { "s" }
+            if result.claudepot_artifacts_removed == 1 {
+                ""
+            } else {
+                "s"
+            }
         );
     }
     if !result.snapshot_paths.is_empty() {
@@ -610,11 +637,8 @@ pub fn repair(
         return handle_gc(ctx, older_than.unwrap_or(90), &journals, &snaps);
     }
 
-    let entries = project_repair::list_pending_with_status(
-        &journals,
-        &locks,
-        JOURNAL_NAG_THRESHOLD_SECS,
-    )?;
+    let entries =
+        project_repair::list_pending_with_status(&journals, &locks, JOURNAL_NAG_THRESHOLD_SECS)?;
     if entries.is_empty() {
         if ctx.json {
             println!("[]");
@@ -678,7 +702,10 @@ fn list_journals(ctx: &AppContext, entries: &[project_repair::JournalEntry]) -> 
     println!();
     for e in entries {
         println!("  [{}] {}", e.status.tag(), e.id);
-        println!("      {} \u{2192} {}", e.journal.old_path, e.journal.new_path);
+        println!(
+            "      {} \u{2192} {}",
+            e.journal.old_path, e.journal.new_path
+        );
         println!(
             "      started {}, phases [{}]",
             e.journal.started_at,
@@ -689,9 +716,7 @@ fn list_journals(ctx: &AppContext, entries: &[project_repair::JournalEntry]) -> 
         }
     }
     println!();
-    println!(
-        "Resolve with: --resume, --rollback, or --abandon (add --id <id> or --all)."
-    );
+    println!("Resolve with: --resume, --rollback, or --abandon (add --id <id> or --all).");
     Ok(())
 }
 
@@ -720,9 +745,21 @@ fn handle_resume(ctx: &AppContext, entry: &project_repair::JournalEntry) -> Resu
             "  claudepot project move '{}' '{}' {}{}{}",
             entry.journal.old_path,
             entry.journal.new_path,
-            if entry.journal.flags.merge { "--merge " } else { "" },
-            if entry.journal.flags.overwrite { "--overwrite " } else { "" },
-            if entry.journal.flags.force { "--force" } else { "" },
+            if entry.journal.flags.merge {
+                "--merge "
+            } else {
+                ""
+            },
+            if entry.journal.flags.overwrite {
+                "--overwrite "
+            } else {
+                ""
+            },
+            if entry.journal.flags.force {
+                "--force"
+            } else {
+                ""
+            },
         );
         eprintln!();
         eprintln!("Re-run with -y to confirm.");
@@ -752,8 +789,16 @@ fn handle_rollback(ctx: &AppContext, entry: &project_repair::JournalEntry) -> Re
             "  claudepot project move '{}' '{}' {}{}",
             entry.journal.new_path,
             entry.journal.old_path,
-            if entry.journal.flags.merge { "--merge " } else { "" },
-            if entry.journal.flags.overwrite { "--overwrite " } else { "" },
+            if entry.journal.flags.merge {
+                "--merge "
+            } else {
+                ""
+            },
+            if entry.journal.flags.overwrite {
+                "--overwrite "
+            } else {
+                ""
+            },
         );
         if !entry.journal.snapshot_paths.is_empty() {
             eprintln!();
@@ -813,7 +858,10 @@ fn handle_abandon(ctx: &AppContext, entry: &project_repair::JournalEntry) -> Res
             })
         );
     } else {
-        println!("\u{2713} Marked abandoned. Audit trail kept at {:?}.", entry.path);
+        println!(
+            "\u{2713} Marked abandoned. Audit trail kept at {:?}.",
+            entry.path
+        );
         println!("   Sidecar: {:?}", sidecar);
     }
     Ok(())
@@ -973,7 +1021,11 @@ fn print_remove_disclosure(
         details.push(format!(
             "{} history line{}",
             preview.history_lines_count,
-            if preview.history_lines_count == 1 { "" } else { "s" }
+            if preview.history_lines_count == 1 {
+                ""
+            } else {
+                "s"
+            }
         ));
     }
     println!("  {}", details.join(" \u{00b7} "));
@@ -1045,9 +1097,7 @@ pub fn remove(ctx: &AppContext, target: &str, dry_run: bool) -> Result<()> {
         print_remove_disclosure(&preview, &config_dir);
         if !dry_run {
             println!();
-            println!(
-                "Re-run with -y to confirm. (The project moves to recoverable trash.)"
-            );
+            println!("Re-run with -y to confirm. (The project moves to recoverable trash.)");
         }
         return Ok(());
     }
@@ -1072,7 +1122,11 @@ pub fn remove(ctx: &AppContext, target: &str, dry_run: bool) -> Result<()> {
         println!(
             "  · pruned {} history line{}",
             result.history_lines_removed,
-            if result.history_lines_removed == 1 { "" } else { "s" }
+            if result.history_lines_removed == 1 {
+                ""
+            } else {
+                "s"
+            }
         );
     }
     Ok(())
@@ -1150,7 +1204,11 @@ pub fn trash_restore(ctx: &AppContext, entry_id: &str) -> Result<()> {
         println!(
             "  · restored {} history line{}",
             report.history_lines_restored,
-            if report.history_lines_restored == 1 { "" } else { "s" }
+            if report.history_lines_restored == 1 {
+                ""
+            } else {
+                "s"
+            }
         );
     }
     Ok(())

@@ -58,7 +58,14 @@ pub fn token_preview(token: &str) -> String {
     // Use char_indices so a multi-byte tail doesn't panic — tokens are
     // ASCII today, but the defensive accounting is cheap.
     let head: String = body.chars().take(3).collect();
-    let tail: String = body.chars().rev().take(3).collect::<String>().chars().rev().collect();
+    let tail: String = body
+        .chars()
+        .rev()
+        .take(3)
+        .collect::<String>()
+        .chars()
+        .rev()
+        .collect();
     format!("{prefix}{head}…{tail}")
 }
 
@@ -67,7 +74,14 @@ fn safe_generic_preview(token: &str) -> String {
         return "…".to_string();
     }
     let head: String = token.chars().take(4).collect();
-    let tail: String = token.chars().rev().take(4).collect::<String>().chars().rev().collect();
+    let tail: String = token
+        .chars()
+        .rev()
+        .take(4)
+        .collect::<String>()
+        .chars()
+        .rev()
+        .collect();
     format!("{head}…{tail}")
 }
 

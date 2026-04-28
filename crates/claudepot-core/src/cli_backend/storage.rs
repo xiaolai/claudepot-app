@@ -351,7 +351,10 @@ pub fn delete(account_id: Uuid) -> Result<(), SwapError> {
                 // consulted, even when the keychain held the real blob.
                 Err(SwapError::WriteFailed(format!(
                     "both storage backends errored: keyring={}, file={}",
-                    keyring_result.err().map(|e| e.to_string()).unwrap_or_default(),
+                    keyring_result
+                        .err()
+                        .map(|e| e.to_string())
+                        .unwrap_or_default(),
                     file_result.err().map(|e| e.to_string()).unwrap_or_default()
                 )))
             }

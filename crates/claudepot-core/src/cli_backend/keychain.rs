@@ -211,8 +211,7 @@ pub async fn delete(service: &str) -> Result<(), SwapError> {
         // Exit 44 = errSecItemNotFound. Also accept the English
         // stderr phrase for backward compat on older macOS without
         // the numeric exit conventions.
-        let not_found = output.status.code() == Some(44)
-            || stderr.contains("could not be found");
+        let not_found = output.status.code() == Some(44) || stderr.contains("could not be found");
         if !not_found {
             return Err(SwapError::KeychainError(format!(
                 "security delete-generic-password failed: {stderr}"

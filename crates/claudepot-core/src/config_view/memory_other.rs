@@ -6,9 +6,7 @@
 //! - Provides disambiguation candidates when `find_project_memory_dir`
 //!   returns `Ambiguous` (plan §10.4) — the UI renders a role="listbox".
 
-use crate::config_view::model::{
-    FileNode, FileSummary, Kind, Scope,
-};
+use crate::config_view::model::{FileNode, FileSummary, Kind, Scope};
 use crate::paths::claude_config_dir;
 use crate::project_sanitize::{sanitize_path, unsanitize_path};
 use std::path::{Path, PathBuf};
@@ -27,9 +25,13 @@ pub struct MemorySlug {
 pub fn scan_other_memory_dirs(current_project_slug: &str) -> Vec<MemorySlug> {
     let base = claude_config_dir().join("projects");
     let mut out = Vec::new();
-    let Ok(rd) = std::fs::read_dir(&base) else { return out };
+    let Ok(rd) = std::fs::read_dir(&base) else {
+        return out;
+    };
     for entry in rd.flatten() {
-        let Some(name) = entry.file_name().to_str().map(str::to_string) else { continue };
+        let Some(name) = entry.file_name().to_str().map(str::to_string) else {
+            continue;
+        };
         if name == current_project_slug {
             continue;
         }
@@ -91,7 +93,9 @@ fn count_md_files(root: &Path) -> (usize, bool) {
     let mut truncated = false;
     let mut stack: Vec<(PathBuf, usize)> = vec![(root.to_path_buf(), 0)];
     while let Some((dir, depth)) = stack.pop() {
-        let Ok(rd) = std::fs::read_dir(&dir) else { continue };
+        let Ok(rd) = std::fs::read_dir(&dir) else {
+            continue;
+        };
         for entry in rd.flatten() {
             visited += 1;
             if visited >= MAX_ENTRIES {
@@ -145,7 +149,11 @@ pub fn make_slug_file_node(s: &MemorySlug) -> FileNode {
                     .clone()
                     .unwrap_or_else(|| format!("(lossy) {}", &s.slug[..s.slug.len().min(40)])),
             ),
-            description: Some(format!("{} memory file{}", s.file_count, if s.file_count == 1 { "" } else { "s" })),
+            description: Some(format!(
+                "{} memory file{}",
+                s.file_count,
+                if s.file_count == 1 { "" } else { "s" }
+            )),
         }),
         issues: vec![],
         symlink_origin: None,
@@ -183,7 +191,11 @@ pub fn find_project_memory_dir(project_root: &Path) -> MemoryLookup {
         return MemoryLookup::Exact(exact);
     }
 
-    let prefix = exact_slug.split('-').next().unwrap_or(&exact_slug).to_string();
+    let prefix = exact_slug
+        .split('-')
+        .next()
+        .unwrap_or(&exact_slug)
+        .to_string();
     if prefix.is_empty() {
         return MemoryLookup::NotFound;
     }
@@ -226,12 +238,7 @@ mod tests {
             file_count: 3,
         };
         let f = make_slug_file_node(&s);
-        assert!(f
-            .summary
-            .unwrap()
-            .title
-            .unwrap()
-            .starts_with("(lossy)"));
+        assert!(f.summary.unwrap().title.unwrap().starts_with("(lossy)"));
     }
 
     #[test]

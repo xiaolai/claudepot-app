@@ -242,13 +242,11 @@ pub async fn adopt_current(
     }
 
     // Shared prelude: acquires lock, resolves data_dir, quits Desktop.
-    let prelude = desktop_prelude(platform)
-        .await
-        .map_err(|e| match e {
-            crate::error::DesktopSwapError::Lock(lock_err) => AdoptError::Lock(lock_err),
-            crate::error::DesktopSwapError::NotInstalled => AdoptError::DataDirUnreadable,
-            other => AdoptError::Swap(other),
-        })?;
+    let prelude = desktop_prelude(platform).await.map_err(|e| match e {
+        crate::error::DesktopSwapError::Lock(lock_err) => AdoptError::Lock(lock_err),
+        crate::error::DesktopSwapError::NotInstalled => AdoptError::DataDirUnreadable,
+        other => AdoptError::Swap(other),
+    })?;
     let data_dir = &prelude.data_dir;
     let items = prelude.items;
 
@@ -490,22 +488,13 @@ pub async fn sync_from_current(
         probe_live_identity_async, DefaultProfileFetcher, ProbeMethod, ProbeOptions,
     };
     let fetcher = DefaultProfileFetcher;
-    match probe_live_identity_async(
-        platform,
-        store,
-        ProbeOptions { strict: true },
-        &fetcher,
-    )
-    .await
+    match probe_live_identity_async(platform, store, ProbeOptions { strict: true }, &fetcher).await
     {
         Ok(None) => Ok(SyncOutcome::NoLive),
         Ok(Some(id)) => {
             // strict=true guarantees Decrypted tier.
             debug_assert!(id.probe_method == ProbeMethod::Decrypted);
-            let matched = store
-                .find_by_email(&id.email)
-                .ok()
-                .flatten();
+            let matched = store.find_by_email(&id.email).ok().flatten();
             match matched {
                 None => Ok(SyncOutcome::Stranger { email: id.email }),
                 Some(acct) => {
@@ -527,8 +516,11 @@ pub async fn sync_from_current(
         | Err(crate::desktop_identity::DesktopIdentityError::Decrypt(_))
         | Err(crate::desktop_identity::DesktopIdentityError::TokenParse(_))
         | Err(crate::desktop_identity::DesktopIdentityError::ProfileFetch(_)) => {
-            let candidate =
-                crate::desktop_identity::probe_live_identity(platform, store, ProbeOptions::default());
+            let candidate = crate::desktop_identity::probe_live_identity(
+                platform,
+                store,
+                ProbeOptions::default(),
+            );
             match candidate {
                 Ok(Some(c)) => Ok(SyncOutcome::CandidateOnly { email: c.email }),
                 _ => Ok(SyncOutcome::NoLive),
@@ -569,10 +561,7 @@ fn dir_or_file_size(p: &std::path::Path) -> u64 {
     }
 }
 
-fn delete_session_items(
-    data_dir: &std::path::Path,
-    items: &[&str],
-) -> Result<usize, ClearError> {
+fn delete_session_items(data_dir: &std::path::Path, items: &[&str]) -> Result<usize, ClearError> {
     let mut deleted = 0;
     for item in items {
         let p = data_dir.join(item);
@@ -717,10 +706,7 @@ pub async fn check_profile_dpapi_valid(
         let Ok(cfg) = serde_json::from_str::<serde_json::Value>(&raw) else {
             return Ok(true); // malformed stored snapshot — not a DPAPI issue
         };
-        let Some(token_b64) = cfg
-            .get("oauth:tokenCache")
-            .and_then(|v| v.as_str())
-        else {
+        let Some(token_b64) = cfg.get("oauth:tokenCache").and_then(|v| v.as_str()) else {
             return Ok(true); // snapshot of a signed-out Desktop
         };
 
@@ -752,15 +738,15 @@ pub async fn check_profile_dpapi_valid(
         match crate::desktop_backend::crypto::windows::decrypt(token_b64, &secret) {
             Ok(_) => Ok(true),
             Err(DecryptError::Aes) => Ok(false),
-            Err(DecryptError::Base64(msg)) => Err(DesktopKeyError::LocalState(
-                format!("snapshot token base64 malformed: {msg}"),
-            )),
-            Err(DecryptError::BadFormat(msg)) => Err(DesktopKeyError::LocalState(
-                format!("snapshot token format invalid: {msg}"),
-            )),
-            Err(DecryptError::UnknownVersion(tag)) => Err(DesktopKeyError::LocalState(
-                format!("snapshot token uses unsupported envelope tag: {tag:?}"),
-            )),
+            Err(DecryptError::Base64(msg)) => Err(DesktopKeyError::LocalState(format!(
+                "snapshot token base64 malformed: {msg}"
+            ))),
+            Err(DecryptError::BadFormat(msg)) => Err(DesktopKeyError::LocalState(format!(
+                "snapshot token format invalid: {msg}"
+            ))),
+            Err(DecryptError::UnknownVersion(tag)) => Err(DesktopKeyError::LocalState(format!(
+                "snapshot token uses unsupported envelope tag: {tag:?}"
+            ))),
         }
     }
 }
@@ -775,10 +761,7 @@ struct SidecarMeta {
     session_items: Vec<String>,
 }
 
-fn write_sidecar(
-    profile_dir: &std::path::Path,
-    meta: SidecarMeta,
-) -> std::io::Result<()> {
+fn write_sidecar(profile_dir: &std::path::Path, meta: SidecarMeta) -> std::io::Result<()> {
     // JSON, not TOML, so we don't pull in another dep. The plan uses
     // the name `profile.toml` for familiarity but the actual encoding
     // is JSON — both are human-readable and the parse side is

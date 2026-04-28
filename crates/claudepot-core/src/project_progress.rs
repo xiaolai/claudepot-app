@@ -52,10 +52,16 @@ mod tests {
 
     impl ProgressSink for RecordingSink {
         fn phase(&self, phase: &str, status: PhaseStatus) {
-            self.phases.lock().unwrap().push((phase.to_string(), status));
+            self.phases
+                .lock()
+                .unwrap()
+                .push((phase.to_string(), status));
         }
         fn sub_progress(&self, phase: &str, done: usize, total: usize) {
-            self.subs.lock().unwrap().push((phase.to_string(), done, total));
+            self.subs
+                .lock()
+                .unwrap()
+                .push((phase.to_string(), done, total));
         }
     }
 

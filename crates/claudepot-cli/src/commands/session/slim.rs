@@ -30,14 +30,7 @@ pub fn slim_cmd(
         opts.drop_tool_results_over_bytes = parse_size(s)?;
     }
     if all {
-        return slim_all_cmd(
-            ctx,
-            older_than,
-            larger_than,
-            project,
-            &opts,
-            execute,
-        );
+        return slim_all_cmd(ctx, older_than, larger_than, project, &opts, execute);
     }
     // Bulk-only filter flags are meaningless without --all. If the
     // user passed one, reject rather than silently ignore it — a
@@ -155,7 +148,10 @@ fn slim_all_cmd(
         if opts.drop_tool_results_over_bytes < u64::MAX {
             println!("  Tool-result redacts:  {}", plan.total_tool_result_redacts);
         }
-        println!("  Bytes saved:          {}", format_size(plan.total_bytes_saved));
+        println!(
+            "  Bytes saved:          {}",
+            format_size(plan.total_bytes_saved)
+        );
         // Show top 10 by bytes saved.
         if !plan.entries.is_empty() {
             println!("\nTop {}:", plan.entries.len().min(10));
@@ -202,7 +198,10 @@ fn slim_all_cmd(
     if opts.strip_documents {
         println!("Documents redacted:  {}", report.total_document_redacts);
     }
-    println!("Bytes saved:         {}", format_size(report.total_bytes_saved));
+    println!(
+        "Bytes saved:         {}",
+        format_size(report.total_bytes_saved)
+    );
     if !report.skipped_live.is_empty() {
         eprintln!("\nSkipped (still being written to):");
         for p in &report.skipped_live {
@@ -274,7 +273,6 @@ fn resolve_session_path_from_rows(
     }
 }
 
-
 #[cfg(test)]
 mod tests {
     use super::resolve_session_path_from_rows;
@@ -314,7 +312,10 @@ mod tests {
             row("bbbbbbbb-1111-2222-3333-444444444444"),
         ];
         let got = resolve_session_path_from_rows("aaa", &rows).unwrap();
-        assert_eq!(got, PathBuf::from("/tmp/aaaaaaaa-1111-2222-3333-444444444444.jsonl"));
+        assert_eq!(
+            got,
+            PathBuf::from("/tmp/aaaaaaaa-1111-2222-3333-444444444444.jsonl")
+        );
     }
 
     #[test]
@@ -347,10 +348,7 @@ mod tests {
     fn test_resolve_session_path_exact_match_wins_over_prefix() {
         // If the target is exactly equal to one id but is also a prefix
         // of another, the exact match should win unambiguously.
-        let rows = vec![
-            row("abc"),
-            row("abcdef-something"),
-        ];
+        let rows = vec![row("abc"), row("abcdef-something")];
         let got = resolve_session_path_from_rows("abc", &rows).unwrap();
         assert_eq!(got, PathBuf::from("/tmp/abc.jsonl"));
     }

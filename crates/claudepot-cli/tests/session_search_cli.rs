@@ -107,10 +107,7 @@ fn search_json_includes_score_field_on_every_hit() {
     let arr = hits.as_array().expect("array");
     assert_eq!(arr.len(), 1);
     let h = &arr[0];
-    assert!(
-        h.get("score").is_some(),
-        "hit missing score field: {h}"
-    );
+    assert!(h.get("score").is_some(), "hit missing score field: {h}");
     let score = h["score"].as_f64().expect("score is number");
     assert!(score > 0.0 && score <= 1.0, "score in bounds: {score}");
 }
@@ -174,8 +171,10 @@ fn search_limit_respected() {
         let uuid = format!("{i:08x}-0000-0000-0000-000000000000");
         write_session(&env, &slug, &uuid, &format!("widget number {i}"));
     }
-    let (stdout, _stderr, code) =
-        run_search(&env, &["--json", "session", "search", "widget", "--limit", "2"]);
+    let (stdout, _stderr, code) = run_search(
+        &env,
+        &["--json", "session", "search", "widget", "--limit", "2"],
+    );
     assert_eq!(code, 0);
     let hits: serde_json::Value = serde_json::from_str(&stdout).unwrap();
     assert_eq!(hits.as_array().unwrap().len(), 2);

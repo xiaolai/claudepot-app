@@ -99,10 +99,7 @@ fn prune_dry_run_default_does_not_move_files() {
             0,
         ),
     );
-    let (stdout, _stderr, code) = run(
-        &env,
-        &["session", "prune", "--older-than", "30d"],
-    );
+    let (stdout, _stderr, code) = run(&env, &["session", "prune", "--older-than", "30d"]);
     assert_eq!(code, 0, "stdout={stdout}");
     assert!(stdout.contains("Plan (dry-run)"));
     assert!(stdout.contains("--execute"));
@@ -151,16 +148,7 @@ fn prune_json_emits_plan_shape() {
             0,
         ),
     );
-    let (stdout, _stderr, code) = run(
-        &env,
-        &[
-            "--json",
-            "session",
-            "prune",
-            "--older-than",
-            "30d",
-        ],
-    );
+    let (stdout, _stderr, code) = run(&env, &["--json", "session", "prune", "--older-than", "30d"]);
     assert_eq!(code, 0);
     let plan: serde_json::Value = serde_json::from_str(&stdout).unwrap();
     assert!(plan.get("entries").is_some());
@@ -209,8 +197,7 @@ fn trash_list_after_prune_shows_the_moved_entry() {
         &env,
         &["session", "prune", "--older-than", "30d", "--execute"],
     );
-    let (stdout, _stderr, code) =
-        run(&env, &["--json", "session", "trash", "list"]);
+    let (stdout, _stderr, code) = run(&env, &["--json", "session", "trash", "list"]);
     assert_eq!(code, 0);
     let listing: serde_json::Value = serde_json::from_str(&stdout).unwrap();
     let entries = listing["entries"].as_array().unwrap();
@@ -238,12 +225,10 @@ fn trash_restore_puts_the_file_back() {
     );
     assert!(!session_path.exists());
     // List to get the batch id.
-    let (stdout, _stderr, _) =
-        run(&env, &["--json", "session", "trash", "list"]);
+    let (stdout, _stderr, _) = run(&env, &["--json", "session", "trash", "list"]);
     let listing: serde_json::Value = serde_json::from_str(&stdout).unwrap();
     let id = listing["entries"][0]["id"].as_str().unwrap().to_string();
-    let (stdout, _stderr, code) =
-        run(&env, &["session", "trash", "restore", &id]);
+    let (stdout, _stderr, code) = run(&env, &["session", "trash", "restore", &id]);
     assert_eq!(code, 0, "stdout={stdout}");
     assert!(session_path.exists());
 }
@@ -268,8 +253,7 @@ fn trash_empty_with_yes_flag_clears_everything() {
     );
     let (stdout, _stderr, code) = run(&env, &["-y", "session", "trash", "empty"]);
     assert_eq!(code, 0, "stdout={stdout}");
-    let (stdout, _stderr, _) =
-        run(&env, &["--json", "session", "trash", "list"]);
+    let (stdout, _stderr, _) = run(&env, &["--json", "session", "trash", "list"]);
     let listing: serde_json::Value = serde_json::from_str(&stdout).unwrap();
     assert!(listing["entries"].as_array().unwrap().is_empty());
 }

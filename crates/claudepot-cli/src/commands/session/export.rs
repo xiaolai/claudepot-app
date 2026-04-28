@@ -3,8 +3,8 @@
 //! Sub-module of `commands/session.rs`; see that file's header for
 //! the verb-group rationale and the shared formatting helpers.
 
-use super::*;
 use super::inspect::resolve_detail;
+use super::*;
 
 /// `claudepot session export <target> --format fmt --to dest [flags]`
 ///
@@ -26,7 +26,7 @@ pub async fn export_cmd(
     html_no_js: bool,
 ) -> Result<()> {
     use claudepot_core::session_export_delivery::{
-        deliver, default_export_filename, extension_for, DeliveryReceipt, ExportDestination,
+        default_export_filename, deliver, extension_for, DeliveryReceipt, ExportDestination,
     };
     let _ = ctx;
     let detail = resolve_detail(target)?;
@@ -34,9 +34,7 @@ pub async fn export_cmd(
         "md" | "markdown" => claudepot_core::session_export::ExportFormat::Markdown,
         "markdown-slim" => claudepot_core::session_export::ExportFormat::MarkdownSlim,
         "json" => claudepot_core::session_export::ExportFormat::Json,
-        "html" => claudepot_core::session_export::ExportFormat::Html {
-            no_js: html_no_js,
-        },
+        "html" => claudepot_core::session_export::ExportFormat::Html { no_js: html_no_js },
         other => bail!("unknown format: {other}"),
     };
     let policy = build_policy(redact_paths, redact_emails, redact_env, redact_regex)?;

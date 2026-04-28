@@ -403,7 +403,9 @@ impl ActivityIndex {
             // lockstep so the "N new" badge agrees with the list.
             let n = binds.len() + 1;
             let m = binds.len() + 2;
-            where_parts.push(format!("(plugin = ?{n} OR substr(plugin, 1, length(?{m})) = ?{m})"));
+            where_parts.push(format!(
+                "(plugin = ?{n} OR substr(plugin, 1, length(?{m})) = ?{m})"
+            ));
             binds.push(Box::new(plugin.clone()));
             binds.push(Box::new(format!("{plugin}@")));
         }
@@ -417,8 +419,7 @@ impl ActivityIndex {
 
         let db = self.db();
         let mut stmt = db.prepare(&sql)?;
-        let bind_refs: Vec<&dyn rusqlite::ToSql> =
-            binds.iter().map(|b| b.as_ref()).collect();
+        let bind_refs: Vec<&dyn rusqlite::ToSql> = binds.iter().map(|b| b.as_ref()).collect();
         let n: i64 = stmt.query_row(rusqlite::params_from_iter(bind_refs), |r| r.get(0))?;
         Ok(n)
     }
@@ -495,7 +496,9 @@ impl ActivityIndex {
             // — many cards have a name without owner attribution.
             let n = binds.len() + 1;
             let m = binds.len() + 2;
-            where_parts.push(format!("(plugin = ?{n} OR substr(plugin, 1, length(?{m})) = ?{m})"));
+            where_parts.push(format!(
+                "(plugin = ?{n} OR substr(plugin, 1, length(?{m})) = ?{m})"
+            ));
             binds.push(Box::new(plugin.clone()));
             // Match `<name>@` so `name@anyowner` also matches when
             // the user filters by `name`.
@@ -522,8 +525,7 @@ impl ActivityIndex {
 
         let db = self.db();
         let mut stmt = db.prepare(&sql)?;
-        let bind_refs: Vec<&dyn rusqlite::ToSql> =
-            binds.iter().map(|b| b.as_ref()).collect();
+        let bind_refs: Vec<&dyn rusqlite::ToSql> = binds.iter().map(|b| b.as_ref()).collect();
         let rows = stmt.query_map(rusqlite::params_from_iter(bind_refs), row_to_card)?;
         let mut out = Vec::new();
         for r in rows {

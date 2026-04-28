@@ -156,14 +156,7 @@ pub fn attribute_context(events: &[SessionEvent]) -> ContextStats {
         let ts = event_ts(ev);
         match ev {
             SessionEvent::UserText { text, .. } => {
-                attribute_user_text(
-                    idx,
-                    text,
-                    ts,
-                    phase,
-                    &mut totals,
-                    &mut injections,
-                );
+                attribute_user_text(idx, text, ts, phase, &mut totals, &mut injections);
             }
             SessionEvent::UserToolResult { content, .. } => {
                 let tokens = estimate_tokens(content);
@@ -245,13 +238,12 @@ pub fn attribute_context(events: &[SessionEvent]) -> ContextStats {
                 };
                 // `Read`/`@` mentions of CLAUDE.md get re-bucketed to
                 // the CLAUDE.md category when we can detect them.
-                let effective_category = if tool_name == "Read"
-                    && input_preview_mentions_claude_md(input_preview)
-                {
-                    ContextCategory::ClaudeMd
-                } else {
-                    category
-                };
+                let effective_category =
+                    if tool_name == "Read" && input_preview_mentions_claude_md(input_preview) {
+                        ContextCategory::ClaudeMd
+                    } else {
+                        category
+                    };
                 totals.add(effective_category, tokens);
                 injections.push(ContextInjection {
                     event_index: idx,
@@ -278,10 +270,7 @@ pub fn attribute_context(events: &[SessionEvent]) -> ContextStats {
 // Helpers
 // ---------------------------------------------------------------------------
 
-fn build_phase_lookup(
-    events: &[SessionEvent],
-    phases: &[ContextPhase],
-) -> HashMap<usize, usize> {
+fn build_phase_lookup(events: &[SessionEvent], phases: &[ContextPhase]) -> HashMap<usize, usize> {
     let mut m = HashMap::with_capacity(events.len());
     for p in phases {
         for i in p.start_index..p.end_index {
@@ -363,7 +352,10 @@ fn extract_at_mentions(text: &str) -> Vec<String> {
 }
 
 fn is_mention_separator(b: u8) -> bool {
-    matches!(b, b' ' | b'\n' | b'\t' | b'(' | b'[' | b'{' | b',' | b';' | b'"' | b'\'')
+    matches!(
+        b,
+        b' ' | b'\n' | b'\t' | b'(' | b'[' | b'{' | b',' | b';' | b'"' | b'\''
+    )
 }
 
 fn is_path_char(b: u8) -> bool {

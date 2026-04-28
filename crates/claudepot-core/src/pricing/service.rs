@@ -155,8 +155,7 @@ impl PricingCacheService {
             if let Some(existing) = guard.as_ref() {
                 (Arc::clone(existing), false)
             } else {
-                let cell: Arc<OnceCell<Arc<PriceTable>>> =
-                    Arc::new(OnceCell::new());
+                let cell: Arc<OnceCell<Arc<PriceTable>>> = Arc::new(OnceCell::new());
                 *guard = Some(Arc::clone(&cell));
                 (cell, true)
             }
@@ -176,9 +175,7 @@ impl PricingCacheService {
                             // Cache-write failure is non-fatal — the
                             // in-memory table is still usable, we
                             // just won't persist until next refresh.
-                            tracing::warn!(
-                                "pricing cache write failed: {e}"
-                            );
+                            tracing::warn!("pricing cache write failed: {e}");
                         }
                         Arc::new(fresh)
                     }

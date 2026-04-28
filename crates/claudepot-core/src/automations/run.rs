@@ -84,12 +84,12 @@ pub fn record_run(inputs: &RecordInputs<'_>) -> Result<AutomationRun, Automation
 /// Find the run directory containing `stdout.log` and write
 /// `result.json` alongside.
 fn write_result_json(run: &AutomationRun, stdout_log: &Path) -> Result<(), AutomationError> {
-    let run_dir = stdout_log
-        .parent()
-        .ok_or_else(|| AutomationError::InvalidPath(
+    let run_dir = stdout_log.parent().ok_or_else(|| {
+        AutomationError::InvalidPath(
             stdout_log.display().to_string(),
             "stdout log has no parent dir",
-        ))?;
+        )
+    })?;
     let result_path = run_dir.join("result.json");
     let bytes = serde_json::to_vec_pretty(run)?;
     fs_utils::atomic_write(&result_path, &bytes)?;
@@ -264,12 +264,9 @@ pub async fn run_now(
         c
     };
     cmd.env("CLAUDEPOT_RUN_ID", &run_id);
-    let status = cmd
-        .status()
-        .await
-        .map_err(|e| AutomationError::Io(std::io::Error::other(format!(
-            "failed to spawn shim: {e}"
-        ))))?;
+    let status = cmd.status().await.map_err(|e| {
+        AutomationError::Io(std::io::Error::other(format!("failed to spawn shim: {e}")))
+    })?;
     let ended_at = Utc::now();
     let exit_code = status.code().unwrap_or(-1);
     sink.phase("spawn", PhaseStatus::Complete);
@@ -380,7 +377,10 @@ pub fn list_run_ids(id: &AutomationId) -> Result<Vec<String>, AutomationError> {
 /// safe filename component and pins the resolved path under the
 /// automation's runs dir so a malicious caller cannot escape with
 /// `..` or absolute paths.
-pub fn read_run(automation_id: &AutomationId, run_id: &str) -> Result<AutomationRun, AutomationError> {
+pub fn read_run(
+    automation_id: &AutomationId,
+    run_id: &str,
+) -> Result<AutomationRun, AutomationError> {
     validate_run_id(run_id)?;
     let runs_root = automation_runs_dir(automation_id);
     let path = runs_root.join(run_id).join("result.json");

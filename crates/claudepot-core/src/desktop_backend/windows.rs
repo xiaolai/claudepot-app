@@ -15,8 +15,7 @@ const KNOWN_PACKAGE_FAMILY: &str = "Claude_pzs8sxrjxfjjc";
 /// Cached result of the MSIX package-family discovery. Populated on
 /// first call to [`package_family`] per process. RwLock over Option
 /// so the fast path is a read-only lookup after the first probe.
-static DISCOVERED_FAMILY: Lazy<RwLock<Option<String>>> =
-    Lazy::new(|| RwLock::new(None));
+static DISCOVERED_FAMILY: Lazy<RwLock<Option<String>>> = Lazy::new(|| RwLock::new(None));
 
 /// Return the MSIX package family name for Claude Desktop. Discovery
 /// algorithm (runs at most once per process):
@@ -158,9 +157,7 @@ fn local_state_path() -> Option<PathBuf> {
 #[cfg(target_os = "windows")]
 fn dpapi_unprotect(data: &[u8]) -> Result<Vec<u8>, super::DesktopKeyError> {
     use windows_sys::Win32::Foundation::LocalFree;
-    use windows_sys::Win32::Security::Cryptography::{
-        CryptUnprotectData, CRYPT_INTEGER_BLOB,
-    };
+    use windows_sys::Win32::Security::Cryptography::{CryptUnprotectData, CRYPT_INTEGER_BLOB};
 
     let mut input = CRYPT_INTEGER_BLOB {
         cbData: data.len() as u32,
@@ -189,9 +186,8 @@ fn dpapi_unprotect(data: &[u8]) -> Result<Vec<u8>, super::DesktopKeyError> {
                 .into(),
         ));
     }
-    let slice = unsafe {
-        std::slice::from_raw_parts(output.pbData as *const u8, output.cbData as usize)
-    };
+    let slice =
+        unsafe { std::slice::from_raw_parts(output.pbData as *const u8, output.cbData as usize) };
     let result = slice.to_vec();
     unsafe {
         LocalFree(output.pbData as _);
@@ -320,8 +316,7 @@ impl super::DesktopPlatform for WindowsDesktop {
             .map_err(DesktopSwapError::Io)?;
 
         // Poll for graceful exit.
-        let graceful_deadline =
-            std::time::Instant::now() + std::time::Duration::from_secs(8);
+        let graceful_deadline = std::time::Instant::now() + std::time::Duration::from_secs(8);
         while std::time::Instant::now() < graceful_deadline {
             if !self.is_running().await {
                 return Ok(());

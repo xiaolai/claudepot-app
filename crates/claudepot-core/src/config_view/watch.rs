@@ -64,7 +64,11 @@ where
 
 /// Compute the patch between `prev` and `next`, tagging it with the
 /// `dirty_during_emit` flag from `scan_until_stable`.
-pub fn make_patch(prev: &ConfigTree, next: &ConfigTree, dirty_during_emit: bool) -> ConfigTreePatch {
+pub fn make_patch(
+    prev: &ConfigTree,
+    next: &ConfigTree,
+    dirty_during_emit: bool,
+) -> ConfigTreePatch {
     let mut p = diff(prev, next);
     p.dirty_during_emit = dirty_during_emit;
     p

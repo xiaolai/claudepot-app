@@ -26,11 +26,11 @@
 //! mid-write. The poller logs via `tracing` and skips the file; on
 //! the next tick (default 2s) it retries.
 
+use once_cell::sync::Lazy;
+use regex::Regex;
 use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
-use once_cell::sync::Lazy;
-use regex::Regex;
 
 use crate::paths;
 use crate::session_live::types::PidRecord;
@@ -109,7 +109,9 @@ impl SysinfoCheck {
 impl ProcessCheck for SysinfoCheck {
     fn is_running(&self, pid: u32) -> bool {
         use sysinfo::Pid;
-        let Ok(sys) = self.sys.lock() else { return false };
+        let Ok(sys) = self.sys.lock() else {
+            return false;
+        };
         sys.process(Pid::from_u32(pid)).is_some()
     }
 
@@ -129,9 +131,7 @@ impl ProcessCheck for SysinfoCheck {
 /// other side of the WSL boundary) cannot exist when we're native.
 #[cfg(target_os = "linux")]
 pub(crate) fn is_wsl() -> bool {
-    if std::env::var_os("WSL_DISTRO_NAME").is_some()
-        || std::env::var_os("WSL_INTEROP").is_some()
-    {
+    if std::env::var_os("WSL_DISTRO_NAME").is_some() || std::env::var_os("WSL_INTEROP").is_some() {
         return true;
     }
     let check = |path: &str| -> bool {
@@ -279,9 +279,8 @@ mod tests {
         let src = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
             .join("src/session_live/testdata/pid")
             .join(fixture);
-        let body = fs::read_to_string(&src).unwrap_or_else(|_| {
-            panic!("fixture missing: {}", src.display())
-        });
+        let body = fs::read_to_string(&src)
+            .unwrap_or_else(|_| panic!("fixture missing: {}", src.display()));
         let dst = dir.join(as_name);
         let mut f = std::fs::File::create(&dst).unwrap();
         f.write_all(body.as_bytes()).unwrap();
@@ -379,12 +378,10 @@ mod tests {
 
     #[test]
     fn sweep_deletes_flagged_paths() {
-        let (td, root) = dir_with(&[
-            (
-                "99009.json",
-                r#"{"pid":99009,"sessionId":"s","cwd":"/tmp/x","startedAt":0}"#,
-            ),
-        ]);
+        let (td, root) = dir_with(&[(
+            "99009.json",
+            r#"{"pid":99009,"sessionId":"s","cwd":"/tmp/x","startedAt":0}"#,
+        )]);
         let _ = &td;
         // Inject PollOutcome manually.
         let out = PollOutcome {
@@ -406,8 +403,7 @@ mod tests {
             r#"{"pid":42,"sessionId":"s","cwd":"/tmp/x","startedAt":0}"#,
         )]);
         let _ = &td;
-        let out =
-            poll_dir(&root, &FakeCheck([99100].into_iter().collect())).unwrap();
+        let out = poll_dir(&root, &FakeCheck([99100].into_iter().collect())).unwrap();
         assert_eq!(out.live.len(), 1);
         assert_eq!(out.live[0].pid, 99100);
     }

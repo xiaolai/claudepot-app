@@ -185,8 +185,7 @@ pub async fn verify_and_get_access_token(
     uuid: Uuid,
     fetcher: &dyn ProfileFetcher,
 ) -> Result<(VerifyOutcome, Option<String>), VerifyError> {
-    let outcome =
-        verify_account_identity_with(store, uuid, fetcher, &DefaultRefresher).await?;
+    let outcome = verify_account_identity_with(store, uuid, fetcher, &DefaultRefresher).await?;
     let token = if matches!(outcome, VerifyOutcome::Ok { .. }) {
         // Re-read the slot — it may have been rotated by a refresh inside
         // `verify_account_identity`.
@@ -383,10 +382,15 @@ mod tests {
         swap::save_private(uuid, &crate::testing::fresh_blob_json()).unwrap();
 
         let fetcher = MockFetcher::ok("alice@example.com");
-        let outcome = verify_account_identity(&store, uuid, &fetcher).await.unwrap();
-        assert_eq!(outcome, VerifyOutcome::Ok {
-            email: "alice@example.com".into()
-        });
+        let outcome = verify_account_identity(&store, uuid, &fetcher)
+            .await
+            .unwrap();
+        assert_eq!(
+            outcome,
+            VerifyOutcome::Ok {
+                email: "alice@example.com".into()
+            }
+        );
 
         let row = store.find_by_uuid(uuid).unwrap().unwrap();
         assert_eq!(row.verify_status, "ok");
@@ -403,7 +407,9 @@ mod tests {
         swap::save_private(uuid, &crate::testing::fresh_blob_json()).unwrap();
 
         let fetcher = MockFetcher::ok("bob@example.com");
-        let outcome = verify_account_identity(&store, uuid, &fetcher).await.unwrap();
+        let outcome = verify_account_identity(&store, uuid, &fetcher)
+            .await
+            .unwrap();
         assert!(matches!(outcome, VerifyOutcome::Drift { .. }));
 
         let row = store.find_by_uuid(uuid).unwrap().unwrap();
@@ -484,7 +490,12 @@ mod tests {
         let outcome = verify_account_identity_with(&store, uuid, &fetcher, &refresher)
             .await
             .unwrap();
-        assert_eq!(outcome, VerifyOutcome::Ok { email: "alice@example.com".into() });
+        assert_eq!(
+            outcome,
+            VerifyOutcome::Ok {
+                email: "alice@example.com".into()
+            }
+        );
 
         // Slot must hold the rotated blob now — NOT the original.
         let stored = swap::load_private(uuid).unwrap();
@@ -519,7 +530,10 @@ mod tests {
 
         // Critical: the rotated blob must NOT have been written.
         let stored = swap::load_private(uuid).unwrap();
-        assert_eq!(stored, original_blob, "drift must not persist the rotated blob");
+        assert_eq!(
+            stored, original_blob,
+            "drift must not persist the rotated blob"
+        );
         swap::delete_private(uuid).unwrap();
     }
 
@@ -541,7 +555,9 @@ mod tests {
             .unwrap();
 
         let fetcher = MockFetcher::network_failing();
-        let outcome = verify_account_identity(&store, uuid, &fetcher).await.unwrap();
+        let outcome = verify_account_identity(&store, uuid, &fetcher)
+            .await
+            .unwrap();
         assert_eq!(outcome, VerifyOutcome::NetworkError);
 
         let row = store.find_by_uuid(uuid).unwrap().unwrap();

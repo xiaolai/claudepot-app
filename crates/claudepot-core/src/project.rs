@@ -113,9 +113,7 @@ pub fn plan_move(args: &MoveArgs) -> Result<DryRunPlan, ProjectError> {
     probe.dry_run = true;
     let result = move_project(&probe, &crate::project_progress::NoopSink)?;
     result.dry_run_plan.ok_or_else(|| {
-        ProjectError::Ambiguous(
-            "internal: move_project(dry_run=true) returned no plan".to_string(),
-        )
+        ProjectError::Ambiguous("internal: move_project(dry_run=true) returned no plan".to_string())
     })
 }
 
@@ -147,8 +145,7 @@ pub fn move_project(
     // in case will canonicalize to the same path, so a naive equality
     // check would reject the rename. Honor the user's raw new_path
     // intent instead.
-    let case_only_rename_requested =
-        old_str != new_str && old_str.eq_ignore_ascii_case(new_str);
+    let case_only_rename_requested = old_str != new_str && old_str.eq_ignore_ascii_case(new_str);
     let new_norm = if case_only_rename_requested {
         // Use the user's explicitly-cased new path as the canonical.
         // Resolve to an absolute form (no canonicalize(); that would
@@ -245,11 +242,8 @@ pub fn move_project(
             // stale, excluding running + abandoned) so a repair
             // currently executing in another thread doesn't block a
             // fresh move against a DIFFERENT project.
-            let actionable = crate::project_repair::list_actionable(
-                &journals_dir,
-                &locks_dir,
-                86_400,
-            )?;
+            let actionable =
+                crate::project_repair::list_actionable(&journals_dir, &locks_dir, 86_400)?;
             if !actionable.is_empty() {
                 return Err(ProjectError::Ambiguous(format!(
                     "refusing to move: {} actionable rename journal(s) on disk. \
@@ -312,8 +306,7 @@ pub fn move_project(
     let claudepot_home = repair_root(args);
     let locks_dir = claudepot_home.join("locks");
     let journals_dir = claudepot_home.join("journals");
-    let (_lock, broken_lock_record) =
-        crate::project_lock::acquire(&locks_dir, &old_san)?;
+    let (_lock, broken_lock_record) = crate::project_lock::acquire(&locks_dir, &old_san)?;
     let mut journal = crate::project_journal::open_journal(
         &journals_dir,
         crate::project_journal::new_initial_journal(
@@ -346,10 +339,10 @@ pub fn move_project(
     if !args.force
         && (live_session_present(&args.config_dir, &old_san, &old_norm)
             || live_session_present(&args.config_dir, &new_san, &new_norm))
-        {
-            let _ = journal.mark_error("live CC session detected");
-            return Err(ProjectError::ClaudeRunning(old_norm.clone()));
-        }
+    {
+        let _ = journal.mark_error("live CC session detected");
+        return Err(ProjectError::ClaudeRunning(old_norm.clone()));
+    }
 
     // Phase 3: Move actual directory
     if scenario == MoveScenario::MoveAndUpdate {
@@ -364,11 +357,7 @@ pub fn move_project(
         // directory.
         let case_only = is_case_only_rename(&old_norm, &new_norm);
         if case_only {
-            let tmp_name = format!(
-                "{}.claudepot-caserename-{}",
-                new_norm,
-                std::process::id()
-            );
+            let tmp_name = format!("{}.claudepot-caserename-{}", new_norm, std::process::id());
             // Record before mutating disk so a crash mid-rename has the
             // breadcrumb. snapshot_paths is repurposed here: the path
             // is the in-flight temp dir, not a copy of pre-state, so
@@ -419,8 +408,7 @@ pub fn move_project(
                             // Target got claimed in the race. Roll back
                             // the staging copy and abort — source is
                             // untouched.
-                            let cleanup_err =
-                                fs::remove_dir_all(&staging).err();
+                            let cleanup_err = fs::remove_dir_all(&staging).err();
                             let _ = journal.mark_error(&format!(
                                 "P3 EXDEV rename-into-place failed: {rename_err} \
                                  (staging cleanup: {:?})",
@@ -500,14 +488,12 @@ pub fn move_project(
                         .snapshots_dir
                         .clone()
                         .unwrap_or_else(|| repair_root(args).join("snapshots"));
-                    let snap = snapshot_cc_dir(&snaps, &new_san, "P4", &cc_new)
-                        .map_err(|e| {
-                            let msg = format!(
-                                "P4 --overwrite refused: snapshot of {cc_new:?} failed: {e}"
-                            );
-                            let _ = journal.mark_error(&msg);
-                            ProjectError::Ambiguous(msg)
-                        })?;
+                    let snap = snapshot_cc_dir(&snaps, &new_san, "P4", &cc_new).map_err(|e| {
+                        let msg =
+                            format!("P4 --overwrite refused: snapshot of {cc_new:?} failed: {e}");
+                        let _ = journal.mark_error(&msg);
+                        ProjectError::Ambiguous(msg)
+                    })?;
                     let _ = journal.record_snapshot(snap);
                     fs::remove_dir_all(&cc_new).map_err(ProjectError::Io)?;
                     fs::rename(&cc_old, &cc_new).map_err(ProjectError::Io)?;
@@ -526,10 +512,8 @@ pub fn move_project(
             } else {
                 // E3: case-only rename on case-insensitive FS needs
                 // two-step here too (same as P3).
-                let cc_case_only = is_case_only_rename(
-                    &cc_old.to_string_lossy(),
-                    &cc_new.to_string_lossy(),
-                );
+                let cc_case_only =
+                    is_case_only_rename(&cc_old.to_string_lossy(), &cc_new.to_string_lossy());
                 if cc_case_only {
                     let tmp = projects_base.join(format!(
                         "{}.claudepot-caserename-{}",
@@ -577,16 +561,14 @@ pub fn move_project(
     // sanitize to `-tmp-a-b`) left stale cwd in session files and
     // session resumption opened the wrong project.
     let p6_needed = !cc_dir_conflict
-        && (result.cc_dir_renamed
-            || (old_norm != new_norm && scenario != MoveScenario::StateOnly));
+        && (result.cc_dir_renamed || (old_norm != new_norm && scenario != MoveScenario::StateOnly));
     if p6_needed {
         let projects_base = args.config_dir.join("projects");
         let cc_new_dir_exact = projects_base.join(&new_san);
         let cc_new_dir = if cc_new_dir_exact.exists() {
             cc_new_dir_exact
         } else if new_san.len() >= MAX_SANITIZED_LENGTH {
-            find_project_dir_by_prefix(&args.config_dir, &new_san)?
-                .unwrap_or(cc_new_dir_exact)
+            find_project_dir_by_prefix(&args.config_dir, &new_san)?.unwrap_or(cc_new_dir_exact)
         } else {
             cc_new_dir_exact
         };
@@ -624,9 +606,7 @@ pub fn move_project(
     // semantics and 30-day snapshots for destructive cases (see spec
     // §4.2 P7 and §8 Q2). Caller must pass `claude_json_path`; we do NOT
     // default to the real home dir here so tests stay hermetic.
-    if let (false, Some(config_path)) =
-        (cc_dir_conflict, args.claude_json_path.clone())
-    {
+    if let (false, Some(config_path)) = (cc_dir_conflict, args.claude_json_path.clone()) {
         let snapshots_dir = args
             .snapshots_dir
             .clone()
@@ -827,9 +807,7 @@ fn same_file_identity(a: &str, b: &str) -> Option<bool> {
 /// counts as live.
 fn live_session_present(config_dir: &Path, san: &str, project_cwd: &str) -> bool {
     let cc_dir = config_dir.join("projects").join(san);
-    if cc_dir.exists()
-        && crate::project_helpers::detect_live_session(&cc_dir, project_cwd, 120)
-    {
+    if cc_dir.exists() && crate::project_helpers::detect_live_session(&cc_dir, project_cwd, 120) {
         return true;
     }
     // Also probe the project cwd directly: if CC is running there but
@@ -860,13 +838,18 @@ fn snapshot_cc_dir(
         .unwrap_or(0);
     let safe_san: String = san
         .chars()
-        .map(|c| if c.is_ascii_alphanumeric() || c == '-' { c } else { '_' })
+        .map(|c| {
+            if c.is_ascii_alphanumeric() || c == '-' {
+                c
+            } else {
+                '_'
+            }
+        })
         .collect();
     let target = snapshots_dir.join(format!("{ts}-{safe_san}-{phase}.snap"));
     copy_dir_recursive(source, &target)?;
     Ok(target)
 }
-
 
 // ---------------------------------------------------------------------------
 // clean_orphans
@@ -975,8 +958,7 @@ pub fn clean_preview(
     // lossy `unsanitize_path` fallback, so a protected-set match would
     // be coincidental, not authoritative. Mirror that predicate
     // exactly so preview and execute report the same number.
-    let protected =
-        crate::protected_paths::resolved_set_or_defaults(claudepot_data_dir);
+    let protected = crate::protected_paths::resolved_set_or_defaults(claudepot_data_dir);
     let protected_count = orphans
         .iter()
         .filter(|p| !p.is_empty && protected.contains(&p.original_path))
@@ -1021,8 +1003,7 @@ pub fn clean_orphans_with_progress(
     let projects = list_projects(config_dir)?;
 
     let unreachable_skipped = projects.iter().filter(|p| !p.is_reachable).count();
-    let orphans: Vec<ProjectInfo> =
-        projects.into_iter().filter(|p| p.is_orphan).collect();
+    let orphans: Vec<ProjectInfo> = projects.into_iter().filter(|p| p.is_orphan).collect();
 
     let mut result = CleanResult {
         orphans_found: orphans.len(),
@@ -1042,8 +1023,7 @@ pub fn clean_orphans_with_progress(
         .map(|p| p.to_path_buf())
         .unwrap_or_else(|| state_root.join("locks"));
 
-    let (lock_guard, _broken) =
-        crate::project_lock::acquire(&locks_dir_owned, CLEAN_LOCK_KEY)?;
+    let (lock_guard, _broken) = crate::project_lock::acquire(&locks_dir_owned, CLEAN_LOCK_KEY)?;
 
     // Phase 0 — preflight. Per-orphan TOCTOU + live-session validation
     // happens BEFORE any sibling-state mutation. Without this, a batch
@@ -1074,13 +1054,11 @@ pub fn clean_orphans_with_progress(
                 return Decision::SkipMissing;
             }
             if !orphan.is_empty
-                && classify_reachability(&orphan.original_path)
-                    != PathReachability::Absent
+                && classify_reachability(&orphan.original_path) != PathReachability::Absent
             {
                 return Decision::SkipReappeared;
             }
-            if detect_live_session(&dir, &orphan.original_path, CLEAN_LIVE_HEARTBEAT_SECS)
-            {
+            if detect_live_session(&dir, &orphan.original_path, CLEAN_LIVE_HEARTBEAT_SECS) {
                 return Decision::SkipLive;
             }
             Decision::Remove
@@ -1320,12 +1298,12 @@ pub(crate) fn remove_history_lines_batch(
         return Ok((0, None));
     }
 
-    tmp.persist(history_path).map_err(|e| ProjectError::Io(e.error))?;
+    tmp.persist(history_path)
+        .map_err(|e| ProjectError::Io(e.error))?;
 
     let count = dropped.len();
-    let payload = serde_json::Value::Array(
-        dropped.into_iter().map(serde_json::Value::String).collect(),
-    );
+    let payload =
+        serde_json::Value::Array(dropped.into_iter().map(serde_json::Value::String).collect());
     let snap = write_clean_snapshot(snapshots_dir, "batch", "history", &payload)?;
     Ok((count, Some(snap)))
 }
@@ -1428,7 +1406,13 @@ fn write_clean_snapshot(
     fs::create_dir_all(snapshots_dir).map_err(ProjectError::Io)?;
     let safe_san: String = sanitized_name
         .chars()
-        .map(|c| if c.is_ascii_alphanumeric() || c == '-' { c } else { '_' })
+        .map(|c| {
+            if c.is_ascii_alphanumeric() || c == '-' {
+                c
+            } else {
+                '_'
+            }
+        })
         .collect();
     let ts = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)

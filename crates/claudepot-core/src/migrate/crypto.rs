@@ -142,9 +142,10 @@ pub fn decrypt_bundle_with_passphrase(
     }
     // Detach so the file outlives this function; cleanup is the
     // caller's responsibility (PlaintextCleanupGuard).
-    let _ = tmp.into_temp_path().keep().map_err(|e| {
-        MigrateError::Io(std::io::Error::other(format!("keep tempfile: {e}")))
-    })?;
+    let _ = tmp
+        .into_temp_path()
+        .keep()
+        .map_err(|e| MigrateError::Io(std::io::Error::other(format!("keep tempfile: {e}"))))?;
     Ok(tmp_path)
 }
 
@@ -168,9 +169,8 @@ pub fn sign_bundle(
     // (interactive prompt). Callers that want the prompt can pass
     // `password = Some(...)` directly.
     let password = Some(password.unwrap_or_default());
-    let sk = minisign::SecretKey::from_file(secret_key_file, password).map_err(|e| {
-        MigrateError::IntegrityViolation(format!("minisign secret key load: {e}"))
-    })?;
+    let sk = minisign::SecretKey::from_file(secret_key_file, password)
+        .map_err(|e| MigrateError::IntegrityViolation(format!("minisign secret key load: {e}")))?;
     let bundle_file = fs::File::open(bundle).map_err(MigrateError::from)?;
     let signature = minisign::sign(None, &sk, bundle_file, None, None)
         .map_err(|e| MigrateError::Serialize(format!("minisign sign: {e}")))?;
@@ -185,10 +185,7 @@ pub fn sign_bundle(
 /// Returns `Ok(())` only on a valid signature; mismatch or any I/O
 /// error becomes `IntegrityViolation`. Use this on the import path
 /// when the user supplies `--verify-key`.
-pub fn verify_bundle_signature(
-    bundle: &Path,
-    public_key_file: &Path,
-) -> Result<(), MigrateError> {
+pub fn verify_bundle_signature(bundle: &Path, public_key_file: &Path) -> Result<(), MigrateError> {
     let mut sig_path = bundle.as_os_str().to_os_string();
     sig_path.push(SIGNATURE_SUFFIX);
     let sig_path = PathBuf::from(sig_path);
@@ -199,17 +196,14 @@ pub fn verify_bundle_signature(
         )));
     }
     let pk_bytes = fs::read_to_string(public_key_file).map_err(MigrateError::from)?;
-    let pk = minisign_verify::PublicKey::decode(&pk_bytes).map_err(|e| {
-        MigrateError::IntegrityViolation(format!("minisign public key parse: {e}"))
-    })?;
+    let pk = minisign_verify::PublicKey::decode(&pk_bytes)
+        .map_err(|e| MigrateError::IntegrityViolation(format!("minisign public key parse: {e}")))?;
     let sig_bytes = fs::read_to_string(&sig_path).map_err(MigrateError::from)?;
-    let sig = minisign_verify::Signature::decode(&sig_bytes).map_err(|e| {
-        MigrateError::IntegrityViolation(format!("minisign signature parse: {e}"))
-    })?;
+    let sig = minisign_verify::Signature::decode(&sig_bytes)
+        .map_err(|e| MigrateError::IntegrityViolation(format!("minisign signature parse: {e}")))?;
     let bundle_bytes = fs::read(bundle).map_err(MigrateError::from)?;
-    pk.verify(&bundle_bytes, &sig, false).map_err(|e| {
-        MigrateError::IntegrityViolation(format!("signature verify: {e}"))
-    })?;
+    pk.verify(&bundle_bytes, &sig, false)
+        .map_err(|e| MigrateError::IntegrityViolation(format!("signature verify: {e}")))?;
     Ok(())
 }
 
@@ -242,8 +236,7 @@ mod tests {
         // working tree.
         fs::remove_file(&plaintext_path).unwrap();
         let decrypt_tmpdir = tmp.path().join("staging");
-        let decrypted =
-            decrypt_bundle_with_passphrase(&enc, &pwd, &decrypt_tmpdir).unwrap();
+        let decrypted = decrypt_bundle_with_passphrase(&enc, &pwd, &decrypt_tmpdir).unwrap();
         assert!(decrypted.starts_with(&decrypt_tmpdir));
         assert_eq!(fs::read(&decrypted).unwrap(), plaintext);
         // The original plaintext sibling path was NOT touched.
@@ -258,19 +251,13 @@ mod tests {
         let tmp = tempfile::tempdir().unwrap();
         let plaintext_path = tmp.path().join("p.tar.zst");
         fs::write(&plaintext_path, b"original-content").unwrap();
-        let enc = encrypt_bundle_with_passphrase(&plaintext_path, &passphrase("pw"))
-            .unwrap();
+        let enc = encrypt_bundle_with_passphrase(&plaintext_path, &passphrase("pw")).unwrap();
         // Now we simulate a SECOND, unrelated plaintext at the same
         // sibling path that should NOT be overwritten by a decrypt
         // pass.
         fs::write(&plaintext_path, b"unrelated-pre-existing").unwrap();
         let stage = tmp.path().join("stage");
-        let _decrypted = decrypt_bundle_with_passphrase(
-            &enc,
-            &passphrase("pw"),
-            &stage,
-        )
-        .unwrap();
+        let _decrypted = decrypt_bundle_with_passphrase(&enc, &passphrase("pw"), &stage).unwrap();
         // The pre-existing sibling is intact.
         assert_eq!(
             fs::read(&plaintext_path).unwrap(),
@@ -283,14 +270,10 @@ mod tests {
         let tmp = tempfile::tempdir().unwrap();
         let plaintext_path = tmp.path().join("p.tar.zst");
         fs::write(&plaintext_path, b"x").unwrap();
-        let enc = encrypt_bundle_with_passphrase(&plaintext_path, &passphrase("right"))
-            .unwrap();
-        let err = decrypt_bundle_with_passphrase(
-            &enc,
-            &passphrase("wrong"),
-            &tmp.path().join("stage"),
-        )
-        .unwrap_err();
+        let enc = encrypt_bundle_with_passphrase(&plaintext_path, &passphrase("right")).unwrap();
+        let err =
+            decrypt_bundle_with_passphrase(&enc, &passphrase("wrong"), &tmp.path().join("stage"))
+                .unwrap_err();
         match err {
             MigrateError::IntegrityViolation(_) => {}
             other => panic!("expected IntegrityViolation, got {other:?}"),
@@ -302,12 +285,9 @@ mod tests {
         let tmp = tempfile::tempdir().unwrap();
         let p = tmp.path().join("not-encrypted.tar.zst.age");
         fs::write(&p, b"this is not an age file").unwrap();
-        let err = decrypt_bundle_with_passphrase(
-            &p,
-            &passphrase("anything"),
-            &tmp.path().join("stage"),
-        )
-        .unwrap_err();
+        let err =
+            decrypt_bundle_with_passphrase(&p, &passphrase("anything"), &tmp.path().join("stage"))
+                .unwrap_err();
         assert!(matches!(err, MigrateError::IntegrityViolation(_)));
     }
 

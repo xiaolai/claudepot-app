@@ -103,7 +103,13 @@ mod tests {
 
     #[test]
     fn rejects_uppercase_and_punct() {
-        for bad in ["Morning", "morning_pr", "morning.pr", "morning/pr", "MORNING"] {
+        for bad in [
+            "Morning",
+            "morning_pr",
+            "morning.pr",
+            "morning/pr",
+            "MORNING",
+        ] {
             assert!(validate_name(bad).is_err(), "expected err: {bad:?}");
         }
     }

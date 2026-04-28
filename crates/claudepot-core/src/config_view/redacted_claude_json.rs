@@ -56,7 +56,10 @@ pub fn redact(raw: &Value) -> Redacted {
     let mut collapsed = Vec::new();
 
     let Some(obj) = raw.as_object() else {
-        return Redacted { allowed, collapsed_keys: collapsed };
+        return Redacted {
+            allowed,
+            collapsed_keys: collapsed,
+        };
     };
     for (k, v) in obj {
         if DENY.contains(&k.as_str()) {
@@ -74,7 +77,10 @@ pub fn redact(raw: &Value) -> Redacted {
         }
     }
     collapsed.sort();
-    Redacted { allowed, collapsed_keys: collapsed }
+    Redacted {
+        allowed,
+        collapsed_keys: collapsed,
+    }
 }
 
 fn redact_projects(v: &Value) -> Value {

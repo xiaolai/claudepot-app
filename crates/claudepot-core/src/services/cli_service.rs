@@ -57,9 +57,10 @@ async fn clear_credentials_with_platform_inner(
     // our store can drift (stale, never set, manually edited). Treating
     // it as the sole source of truth means we'd happily wipe a live
     // unknown blob without saving it. Resolve from the live keychain.
-    let live_blob = platform.read_default().await.map_err(|e| {
-        ClearError::SaveFailed(format!("failed to read current credentials: {e}"))
-    })?;
+    let live_blob = platform
+        .read_default()
+        .await
+        .map_err(|e| ClearError::SaveFailed(format!("failed to read current credentials: {e}")))?;
 
     let active_uuid_opt = store
         .active_cli_uuid()
@@ -127,7 +128,9 @@ pub enum ClearError {
     /// CC holds live credentials but Claudepot has no active-CLI
     /// pointer to attribute them to. Refusing the destructive clear
     /// because we can't safely back the blob up.
-    #[error("CC holds credentials with no Claudepot account claim — register the account or pass force")]
+    #[error(
+        "CC holds credentials with no Claudepot account claim — register the account or pass force"
+    )]
     UnknownLiveBlob,
 }
 

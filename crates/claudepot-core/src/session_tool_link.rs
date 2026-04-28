@@ -61,10 +61,7 @@ pub enum LinkedEvent {
     Standalone { index: usize },
     /// Render the linked tool block at this position.
     #[serde(rename = "linked")]
-    Linked {
-        index: usize,
-        tool: Box<LinkedTool>,
-    },
+    Linked { index: usize, tool: Box<LinkedTool> },
     /// Skip — already rendered as part of a `Linked` anchor.
     #[serde(rename = "absorbed")]
     Absorbed { index: usize, call_index: usize },
@@ -150,7 +147,10 @@ pub fn annotate_linked(events: &[SessionEvent]) -> Vec<LinkedEvent> {
                     tool: Box::new(tool),
                 }
             } else if let Some(&call_index) = result_to_call.get(&idx) {
-                LinkedEvent::Absorbed { index: idx, call_index }
+                LinkedEvent::Absorbed {
+                    index: idx,
+                    call_index,
+                }
             } else {
                 LinkedEvent::Standalone { index: idx }
             }
@@ -212,9 +212,7 @@ fn index_results(events: &[SessionEvent]) -> HashMap<String, usize> {
     m
 }
 
-fn extract_result(
-    ev: &SessionEvent,
-) -> (Option<DateTime<Utc>>, Option<String>, bool) {
+fn extract_result(ev: &SessionEvent) -> (Option<DateTime<Utc>>, Option<String>, bool) {
     match ev {
         SessionEvent::UserToolResult {
             ts,
@@ -308,7 +306,10 @@ mod tests {
 
     #[test]
     fn empty_tool_use_id_is_skipped() {
-        let events = vec![tool_use("", "Read", None), tool_result("", "x", false, None)];
+        let events = vec![
+            tool_use("", "Read", None),
+            tool_result("", "x", false, None),
+        ];
         let linked = link_tools(&events);
         assert!(linked.is_empty());
     }
