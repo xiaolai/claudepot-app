@@ -3,6 +3,7 @@
 // domain slice into the canonical `api` object.
 
 import { invoke } from "@tauri-apps/api/core";
+import { emit } from "@tauri-apps/api/event";
 import type {
   ActivityCard,
   ActivityTrends,
@@ -13,6 +14,17 @@ import type {
   LiveSessionSummary,
   Preferences,
 } from "../types";
+
+/**
+ * Frontend broadcast emitted after any preference mutation. Hooks
+ * that depend on the Preferences shape (useActivityNotifications,
+ * useCardNotifications) listen for this so they can re-fetch on
+ * change instead of polling. Fire-and-forget — the listen()
+ * subscribers swallow non-Tauri-env failures already.
+ */
+const broadcastPrefsChanged = () => {
+  void emit("cp-prefs-changed").catch(() => {});
+};
 
 export const activityApi = {
   // ─── session_live (Activity feature) ─────────────────────────────
@@ -39,6 +51,9 @@ export const activityApi = {
       consentSeen: patch.consentSeen,
       hideThinking: patch.hideThinking,
       excludedPaths: patch.excludedPaths,
+    }).then((p) => {
+      broadcastPrefsChanged();
+      return p;
     }),
 
   /** Partial update of the `notify_*` preference block. */
@@ -53,6 +68,9 @@ export const activityApi = {
       onIdleDone: patch.onIdleDone,
       onStuckMinutes: patch.onStuckMinutes,
       onSpendUsd: patch.onSpendUsd,
+    }).then((p) => {
+      broadcastPrefsChanged();
+      return p;
     }),
 
   sessionLiveStart: () => invoke<void>("session_live_start"),
