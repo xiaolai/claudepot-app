@@ -16,14 +16,21 @@ import type {
 } from "../types";
 
 /**
- * Frontend broadcast emitted after any preference mutation. Hooks
- * that depend on the Preferences shape (useActivityNotifications,
- * useCardNotifications) listen for this so they can re-fetch on
- * change instead of polling. Fire-and-forget — the listen()
- * subscribers swallow non-Tauri-env failures already.
+ * Frontend broadcast emitted after any preference mutation. The
+ * payload IS the freshly-saved Preferences snapshot, so listeners
+ * (useActivityNotifications, useCardNotifications) can update
+ * directly from the event without round-tripping a second
+ * `preferencesGet()`. The bare-emit form raced under network
+ * jitter — two rapid setters could enqueue two reads, and an
+ * older `preferencesGet()` resolving last would stomp the newer
+ * value. Tauri events deliver in emission order, so passing the
+ * snapshot through eliminates the ordering race entirely.
+ *
+ * Fire-and-forget — listen() subscribers already swallow non-Tauri
+ * failures.
  */
-const broadcastPrefsChanged = () => {
-  void emit("cp-prefs-changed").catch(() => {});
+const broadcastPrefsChanged = (prefs: Preferences) => {
+  void emit("cp-prefs-changed", prefs).catch(() => {});
 };
 
 export const activityApi = {
@@ -52,7 +59,7 @@ export const activityApi = {
       hideThinking: patch.hideThinking,
       excludedPaths: patch.excludedPaths,
     }).then((p) => {
-      broadcastPrefsChanged();
+      broadcastPrefsChanged(p);
       return p;
     }),
 
@@ -69,7 +76,7 @@ export const activityApi = {
       onStuckMinutes: patch.onStuckMinutes,
       onSpendUsd: patch.onSpendUsd,
     }).then((p) => {
-      broadcastPrefsChanged();
+      broadcastPrefsChanged(p);
       return p;
     }),
 
