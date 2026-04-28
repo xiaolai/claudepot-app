@@ -4,6 +4,7 @@ import {
   requestPermission,
   sendNotification,
 } from "@tauri-apps/plugin-notification";
+import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { api } from "../api";
 import { useSessionLive } from "./useSessionLive";
 import type { LiveSessionSummary, Preferences } from "../types";
@@ -67,12 +68,14 @@ export function useActivityNotifications(): number {
     "unknown" | "not-requested" | "granted" | "denied"
   >("unknown");
 
-  // Load prefs once + refresh every 10s. The triggers are a user
-  // configuration; getting a fresh read once per 10s is far cheaper
-  // than round-tripping on every tick, and the feature is itself
-  // opt-in so misses during the refresh window are harmless.
+  // Load prefs once on mount + refresh whenever the api setters
+  // broadcast `cp-prefs-changed`. Previously this polled every 10 s,
+  // which was waste — preferences only mutate via Settings /
+  // ConsentLiveModal, and those call sites already round-trip through
+  // the api/activity wrappers that emit the event.
   useEffect(() => {
     let cancelled = false;
+    let unlisten: UnlistenFn | null = null;
     const load = () => {
       api
         .preferencesGet()
@@ -111,10 +114,17 @@ export function useActivityNotifications(): number {
         });
     };
     load();
-    const id = setInterval(load, 10_000);
+    listen("cp-prefs-changed", load)
+      .then((fn) => {
+        if (cancelled) fn();
+        else unlisten = fn;
+      })
+      .catch(() => {
+        /* no-tauri env */
+      });
     return () => {
       cancelled = true;
-      clearInterval(id);
+      unlisten?.();
     };
   }, []);
 
