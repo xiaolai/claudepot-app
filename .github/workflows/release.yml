@@ -263,10 +263,12 @@ jobs:
 
       - name: Build GUI bundle (Tauri)
         env:
-          # Updater bundles for Linux: `.AppImage.tar.gz` + `.sig`. `.deb`
-          # users are expected to upgrade via apt, so the in-app updater
-          # only surfaces an "Open Releases" link for them; only the
-          # AppImage is signed here.
+          # Updater signature for Linux: Tauri 2 signs the `.AppImage`
+          # directly (a self-contained AppImage file) and writes
+          # `.AppImage.sig` next to it. `.deb` users are expected to
+          # upgrade via apt, so the in-app updater only surfaces an
+          # "Open Releases" link for them; only the AppImage is wired
+          # into latest.json below.
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         run: pnpm tauri build --bundles appimage,deb,updater
@@ -277,12 +279,12 @@ jobs:
           mkdir -p release-staging
           cp target/release/bundle/appimage/*.AppImage "release-staging/Claudepot-x86_64.AppImage" || true
           cp target/release/bundle/deb/*.deb "release-staging/Claudepot-x86_64.deb" || true
-          # Updater bundle for Linux is `.AppImage.tar.gz` (the AppImage
-          # repackaged as a signed tarball).
-          UPDATER=$(ls target/release/bundle/appimage/*.AppImage.tar.gz 2>/dev/null | head -1 || true)
-          if [ -n "$UPDATER" ]; then
-            cp "$UPDATER"      "release-staging/Claudepot-x86_64.AppImage.tar.gz"
-            cp "$UPDATER.sig"  "release-staging/Claudepot-x86_64.AppImage.tar.gz.sig"
+          # Updater signature: in Tauri 2 the AppImage IS the updater
+          # artifact, so the .sig sits next to the .AppImage. Stage it
+          # under a stable name the latest.json job can reference.
+          SIG=$(ls target/release/bundle/appimage/*.AppImage.sig 2>/dev/null | head -1 || true)
+          if [ -n "$SIG" ]; then
+            cp "$SIG" "release-staging/Claudepot-x86_64.AppImage.sig"
           fi
           ls -la release-staging/
 
@@ -387,10 +389,11 @@ jobs:
 
       - name: Build GUI bundle (Tauri)
         env:
-          # Updater bundles for Windows: `.nsis.zip` + `.sig` (the NSIS
-          # installer repackaged as a signed zip). MSI updater bundles
-          # are also produced (`.msi.zip` + `.sig`) so MSI installs can
-          # update too.
+          # Updater signatures for Windows: Tauri 2 signs the NSIS and
+          # MSI installers directly, writing `<installer>.sig` next to
+          # each. The in-app updater downloads the installer the user
+          # originally got — NSIS for `-setup.exe`, MSI for the .msi —
+          # so we stage both .sig files under stable names.
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         run: pnpm tauri build --bundles msi,nsis,updater
@@ -405,19 +408,14 @@ jobs:
           Get-ChildItem -Path target/release/bundle/nsis/*.exe | ForEach-Object {
             Copy-Item $_.FullName "release-staging/Claudepot-x86_64-setup.exe"
           }
-          # Updater bundles + sigs (NSIS preferred; MSI also signed for
-          # users who installed via msiexec).
-          Get-ChildItem -Path target/release/bundle/nsis/*.nsis.zip -ErrorAction SilentlyContinue | ForEach-Object {
-            Copy-Item $_.FullName "release-staging/Claudepot-x86_64-setup.nsis.zip"
+          # Updater signatures (NSIS is what latest.json points at; MSI
+          # signature is shipped alongside for users who installed via
+          # msiexec and want to verify offline).
+          Get-ChildItem -Path target/release/bundle/nsis/*-setup.exe.sig -ErrorAction SilentlyContinue | ForEach-Object {
+            Copy-Item $_.FullName "release-staging/Claudepot-x86_64-setup.exe.sig"
           }
-          Get-ChildItem -Path target/release/bundle/nsis/*.nsis.zip.sig -ErrorAction SilentlyContinue | ForEach-Object {
-            Copy-Item $_.FullName "release-staging/Claudepot-x86_64-setup.nsis.zip.sig"
-          }
-          Get-ChildItem -Path target/release/bundle/msi/*.msi.zip -ErrorAction SilentlyContinue | ForEach-Object {
-            Copy-Item $_.FullName "release-staging/Claudepot-x86_64.msi.zip"
-          }
-          Get-ChildItem -Path target/release/bundle/msi/*.msi.zip.sig -ErrorAction SilentlyContinue | ForEach-Object {
-            Copy-Item $_.FullName "release-staging/Claudepot-x86_64.msi.zip.sig"
+          Get-ChildItem -Path target/release/bundle/msi/*.msi.sig -ErrorAction SilentlyContinue | ForEach-Object {
+            Copy-Item $_.FullName "release-staging/Claudepot-x86_64.msi.sig"
           }
           Get-ChildItem release-staging
 
@@ -452,9 +450,10 @@ jobs:
         run: |
           mkdir -p release
           # Include updater `.sig` files alongside everything else.
-          # `.AppImage.tar.gz` matches via `.tar.gz`; `.app.tar.gz`
-          # matches via `.tar.gz`; `.nsis.zip` / `.msi.zip` match via
-          # `.zip`; `.sig` is its own pattern.
+          # macOS's updater target is `.app.tar.gz` (matches `.tar.gz`);
+          # Linux signs the `.AppImage` directly; Windows signs the
+          # `.msi` and `-setup.exe` directly. The `.sig` pattern catches
+          # all three signature flavors.
           find artifacts -type f \( \
             -name '*.zip' -o \
             -name '*.tar.gz' -o \
@@ -539,17 +538,17 @@ jobs:
               echo "    }"
               sep=","
             fi
-            if SIG=$(read_sig "Claudepot-x86_64.AppImage.tar.gz.sig"); then
+            if SIG=$(read_sig "Claudepot-x86_64.AppImage.sig"); then
               echo "$sep    \"linux-x86_64\": {"
               echo "      \"signature\": \"$SIG\","
-              echo "      \"url\": \"$BASE_URL/Claudepot-x86_64.AppImage.tar.gz\""
+              echo "      \"url\": \"$BASE_URL/Claudepot-x86_64.AppImage\""
               echo "    }"
               sep=","
             fi
-            if SIG=$(read_sig "Claudepot-x86_64-setup.nsis.zip.sig"); then
+            if SIG=$(read_sig "Claudepot-x86_64-setup.exe.sig"); then
               echo "$sep    \"windows-x86_64\": {"
               echo "      \"signature\": \"$SIG\","
-              echo "      \"url\": \"$BASE_URL/Claudepot-x86_64-setup.nsis.zip\""
+              echo "      \"url\": \"$BASE_URL/Claudepot-x86_64-setup.exe\""
               echo "    }"
               sep=","
             fi
