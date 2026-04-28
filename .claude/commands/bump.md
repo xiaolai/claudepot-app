@@ -5,17 +5,18 @@ description: Bump Claudepot version numbers in lock-step across Cargo.toml, pack
 # Bump version
 
 Bump Claudepot's version in every file that holds one. Version lives
-in three sources of truth:
+in four sources of truth:
 
 | File | Line | Notes |
 |---|---|---|
 | `Cargo.toml` | top-level `[workspace.package] version = "X.Y.Z"` | Feeds every Rust crate via `version.workspace = true` |
 | `package.json` | `"version": "X.Y.Z"` | Frontend build stamp |
 | `src-tauri/tauri.conf.json` | `"version": "X.Y.Z"` | Shown to the OS (menu bar "About", bundle metadata) |
+| `README.md` | `> **Status: {stage}** (\`X.Y.Z\`).` line | Public-facing status banner — the first thing visitors see in the repo |
 
-All three MUST match byte-for-byte. A mismatch produces a release with
-a wrong "About" dialog or bundles that refuse to install over previous
-versions.
+All four MUST match byte-for-byte. A mismatch produces a release with
+a wrong "About" dialog, bundles that refuse to install over previous
+versions, or a README that lies about the current stage.
 
 ## Inputs
 
@@ -60,7 +61,7 @@ Store as `NEXT`.
 
 ### Step 3 — Apply edits
 
-Edit exactly these three locations:
+Edit exactly these four locations:
 
 1. `Cargo.toml` → the `version = "CURRENT"` line under
    `[workspace.package]`. Use `Edit` with the full surrounding line to
@@ -69,6 +70,16 @@ Edit exactly these three locations:
    the surrounding JSON formatting (2-space indent, trailing comma
    where present).
 3. `src-tauri/tauri.conf.json` → the top-level `"version"` field.
+4. `README.md` → the status banner near the top (find the line
+   matching `> **Status: <stage>** (\`X.Y.Z\`).`). Rewrite both
+   the stage word and the version, since a major-tier crossing
+   (e.g. `0.0.x` → `0.1.x`) flips `alpha` → `beta`. Stage rule is
+   the same as Step 4's CHANGELOG rule:
+   - `0.0.x` → `alpha`
+   - `0.1.x` → `beta`
+   - `1.0.x`+ → `stable`
+   The rest of the line ("Daily-driven on macOS…") stays untouched —
+   that's editorial copy, not version-derived.
 
 Do NOT rewrite `Cargo.lock` manually — `cargo check --workspace` will
 regenerate it on the next build. Run `cargo check -p claudepot-cli`
@@ -119,7 +130,7 @@ Show the final diff:
 
 ```bash
 git diff --stat
-git diff Cargo.toml package.json src-tauri/tauri.conf.json CHANGELOG.md
+git diff Cargo.toml package.json src-tauri/tauri.conf.json CHANGELOG.md README.md
 ```
 
 ### Step 6 — Do NOT commit
@@ -131,7 +142,7 @@ maybe `dev-docs/`. The user drives that final edit pass.
 End with a one-line summary:
 
 ```
-Bumped CURRENT → NEXT. 4 files changed. Review + commit when ready.
+Bumped CURRENT → NEXT. 5 files changed. Review + commit when ready.
 ```
 
 ## Rules
@@ -140,11 +151,15 @@ Bumped CURRENT → NEXT. 4 files changed. Review + commit when ready.
   literal version, or adds pre-release suffixes.
 - Refuse to bump backwards (`NEXT <= CURRENT`). If the user really
   wants that, they can edit the files directly.
-- Refuse if the working tree is dirty in any of the four touched
-  files — let the user commit or stash first so the bump diff is
-  isolated.
-- Do not touch any other file. Version strings in doc examples (e.g.
-  `dev-docs/*.md`) are intentionally pinned and must not drift with
-  the bump.
+- Refuse if the working tree is dirty in any of the five touched
+  files (Cargo.toml, package.json, src-tauri/tauri.conf.json,
+  CHANGELOG.md, README.md) — let the user commit or stash first so
+  the bump diff is isolated.
+- Do not touch any other file, and do not touch other parts of the
+  five files. Specifically: in README.md only the status banner
+  line is in scope; do not retouch install snippets, version
+  strings in code blocks, or anything else. Version strings in doc
+  examples (e.g. `dev-docs/*.md`) are intentionally pinned and must
+  not drift with the bump.
 - Do not run `cargo build --release` or `pnpm tauri build` — those
   are release-step work, not bump-step work.
