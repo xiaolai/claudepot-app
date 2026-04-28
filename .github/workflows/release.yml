@@ -261,6 +261,21 @@ jobs:
           cd target/release
           tar czf claudepot-x86_64-linux.tar.gz claudepot
 
+      # Stage CLI for tauri.conf.json `bundle.externalBin`. Without
+      # this, the GUI bundle ships without `claudepot-cli-<triple>` in
+      # Contents/MacOS/ (or its Linux/Windows equivalents) and the
+      # macOS cask's `binary` symlink fails at install time. Linux
+      # users mostly install the standalone CLI tarball, but bundling
+      # it inside the .AppImage / .deb is harmless and matches the
+      # macOS / Windows patterns.
+      - name: Stage CLI into Tauri externalBin slot
+        run: |
+          set -eu
+          mkdir -p src-tauri/binaries
+          cp target/release/claudepot \
+             src-tauri/binaries/claudepot-cli-x86_64-unknown-linux-gnu
+          chmod +x src-tauri/binaries/claudepot-cli-x86_64-unknown-linux-gnu
+
       - name: Build GUI bundle (Tauri)
         env:
           # Updater signature for Linux: Tauri 2 signs the `.AppImage`
@@ -386,6 +401,16 @@ jobs:
         run: |
           cd target/release
           Compress-Archive -Path claudepot.exe -DestinationPath claudepot-x86_64-windows.zip
+
+      # Stage CLI for tauri.conf.json `bundle.externalBin`. Tauri's
+      # Windows convention requires the `.exe` extension on the
+      # staged file; macOS / Linux don't.
+      - name: Stage CLI into Tauri externalBin slot
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force src-tauri/binaries | Out-Null
+          Copy-Item target/release/claudepot.exe `
+                    src-tauri/binaries/claudepot-cli-x86_64-pc-windows-msvc.exe
 
       - name: Build GUI bundle (Tauri)
         env:
