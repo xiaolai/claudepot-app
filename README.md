@@ -51,7 +51,7 @@ If you use Claude Code or Claude Desktop daily, you've probably hit at least one
 
 ### Install
 
-> **Status: alpha** (`0.0.5`). Daily-driven on macOS. Windows and Linux builds are green but less seasoned.
+> **Status: alpha** (`0.0.8`). Daily-driven on macOS. Windows and Linux builds are green but less seasoned.
 
 You'll need a recent **Rust toolchain** ([rustup.rs](https://rustup.rs)) and **Node 20+** with **pnpm** ([pnpm.io](https://pnpm.io)). No other system dependencies.
 
