@@ -82,7 +82,6 @@ pub fn delete_events_for_file(db: &Connection, file_path: &str) -> SqlResult<usi
         "DELETE FROM usage_event WHERE file_path = ?1",
         params![file_path],
     )
-    .map(|n| n)
 }
 
 /// Subtract the per-day aggregate of `file_path`'s raw events from

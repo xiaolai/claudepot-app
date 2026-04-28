@@ -70,7 +70,7 @@ fn is_exdev(err: &std::io::Error) -> bool {
     let raw = err.raw_os_error();
     #[cfg(unix)]
     {
-        return raw == Some(libc::EXDEV);
+        raw == Some(libc::EXDEV)
     }
     #[cfg(windows)]
     {

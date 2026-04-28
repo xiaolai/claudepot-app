@@ -212,7 +212,7 @@ fn classify_hook_slow(
     let command = attachment
         .get("command")
         .and_then(Value::as_str)
-        .map(|c| redact_secrets(c));
+        .map(redact_secrets);
 
     let plugin = plugin_from_hook(attachment);
     Some(Card {
@@ -728,7 +728,7 @@ fn extract_path_from_body(body: &str) -> Option<String> {
     if let Some(idx) = body.find(" in ") {
         let rest = &body[idx + 4..];
         let end = rest
-            .find(|c: char| c == '\n' || c == '.' || c == ')' || c == ',')
+            .find(['\n', '.', ')', ','])
             .unwrap_or(rest.len());
         let candidate = rest[..end].trim();
         if candidate.starts_with('/') || candidate.starts_with('~') {
@@ -799,9 +799,7 @@ fn extract_missing_command(body: &str) -> Option<String> {
     let line_start = prefix.rfind('\n').map(|p| p + 1).unwrap_or(0);
     let raw = &prefix[line_start..];
     // Common shell prefixes: "bash: foo", "(eval):1: foo", "zsh: foo".
-    let stripped = raw
-        .splitn(2, ':')
-        .nth(1)
+    let stripped = raw.split_once(':').map(|x| x.1)
         .map(str::trim)
         .filter(|s| !s.is_empty())
         .unwrap_or(raw.trim());

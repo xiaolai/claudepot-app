@@ -17,17 +17,14 @@ use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
+#[derive(Default)]
 pub enum ConflictMode {
+    #[default]
     Skip,
     Merge,
     Replace,
 }
 
-impl Default for ConflictMode {
-    fn default() -> Self {
-        Self::Skip
-    }
-}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]

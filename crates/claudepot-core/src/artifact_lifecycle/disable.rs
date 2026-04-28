@@ -26,16 +26,13 @@ use std::path::{Path, PathBuf};
 /// retries with `Suffix` only after explicit user click.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
+#[derive(Default)]
 pub enum OnConflict {
+    #[default]
     Refuse,
     Suffix,
 }
 
-impl Default for OnConflict {
-    fn default() -> Self {
-        Self::Refuse
-    }
-}
 
 /// What the caller gets back after a successful disable/enable.
 #[derive(Debug, Clone, Serialize, Deserialize)]

@@ -102,7 +102,7 @@ pub trait Scheduler {
 pub fn active_scheduler() -> Box<dyn Scheduler> {
     #[cfg(target_os = "macos")]
     {
-        return Box::new(launchd::LaunchdScheduler);
+        Box::new(launchd::LaunchdScheduler)
     }
     #[cfg(target_os = "linux")]
     {

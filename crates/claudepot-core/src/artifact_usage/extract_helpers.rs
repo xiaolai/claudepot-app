@@ -23,7 +23,7 @@ pub(super) fn extract_slash_commands(body: &str) -> Vec<String> {
         // Slice up to the next `<` or end-of-line / end-of-string —
         // whichever closes the command name first.
         let end = rest
-            .find(|c: char| c == '<' || c == '\n')
+            .find(['<', '\n'])
             .unwrap_or(rest.len());
         let cmd = rest[..end].trim();
         if cmd.starts_with('/') && cmd.len() > 1 {

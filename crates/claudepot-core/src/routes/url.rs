@@ -44,7 +44,7 @@ pub fn validate_base_url(input: &str) -> Result<String, BaseUrlError> {
 
     // Strip path/query/fragment to get the authority component.
     let authority_end = after_scheme
-        .find(|c: char| c == '/' || c == '?' || c == '#')
+        .find(['/', '?', '#'])
         .unwrap_or(after_scheme.len());
     let authority = &after_scheme[..authority_end];
 
