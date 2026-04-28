@@ -3,6 +3,7 @@
 // domain slice into the canonical `api` object.
 
 import { invoke } from "@tauri-apps/api/core";
+import { emit } from "@tauri-apps/api/event";
 import type {
   ActivityCard,
   ActivityTrends,
@@ -13,6 +14,24 @@ import type {
   LiveSessionSummary,
   Preferences,
 } from "../types";
+
+/**
+ * Frontend broadcast emitted after any preference mutation. The
+ * payload IS the freshly-saved Preferences snapshot, so listeners
+ * (useActivityNotifications, useCardNotifications) can update
+ * directly from the event without round-tripping a second
+ * `preferencesGet()`. The bare-emit form raced under network
+ * jitter — two rapid setters could enqueue two reads, and an
+ * older `preferencesGet()` resolving last would stomp the newer
+ * value. Tauri events deliver in emission order, so passing the
+ * snapshot through eliminates the ordering race entirely.
+ *
+ * Fire-and-forget — listen() subscribers already swallow non-Tauri
+ * failures.
+ */
+const broadcastPrefsChanged = (prefs: Preferences) => {
+  void emit("cp-prefs-changed", prefs).catch(() => {});
+};
 
 export const activityApi = {
   // ─── session_live (Activity feature) ─────────────────────────────
@@ -39,6 +58,9 @@ export const activityApi = {
       consentSeen: patch.consentSeen,
       hideThinking: patch.hideThinking,
       excludedPaths: patch.excludedPaths,
+    }).then((p) => {
+      broadcastPrefsChanged(p);
+      return p;
     }),
 
   /** Partial update of the `notify_*` preference block. */
@@ -53,6 +75,9 @@ export const activityApi = {
       onIdleDone: patch.onIdleDone,
       onStuckMinutes: patch.onStuckMinutes,
       onSpendUsd: patch.onSpendUsd,
+    }).then((p) => {
+      broadcastPrefsChanged(p);
+      return p;
     }),
 
   sessionLiveStart: () => invoke<void>("session_live_start"),

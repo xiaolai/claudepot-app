@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 
 const STORAGE_KEY = "claudepot.activeSection";
 const START_KEY = "claudepot.startSection";
@@ -134,6 +134,15 @@ export function useSection<Id extends string>(
     [],
   );
 
+  // Mirror `section` into a ref so the keydown handler can read the
+  // current value without forcing the listener effect to re-run on
+  // every navigation. Without this, every section change unwired and
+  // re-wired the global keydown listener.
+  const sectionRef = useRef(section);
+  useEffect(() => {
+    sectionRef.current = section;
+  }, [section]);
+
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       const mod = e.metaKey || e.ctrlKey;
@@ -153,13 +162,13 @@ export function useSection<Id extends string>(
       const n = Number.parseInt(e.key, 10);
       if (!Number.isInteger(n) || n < 1 || n > 9) return;
       const target = ids[n - 1];
-      if (!target || target === section) return;
+      if (!target || target === sectionRef.current) return;
       e.preventDefault();
       setSection(target);
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [ids, section, setSection]);
+  }, [ids, setSection]);
 
   return { section, subRoute, setSection, setSubRoute };
 }

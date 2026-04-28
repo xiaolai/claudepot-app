@@ -70,6 +70,12 @@ export function useRefresh(pushToast: (kind: "info" | "error", text: string) => 
   useEffect(() => {
     authRejectedAtRef.current = authRejectedAt;
   }, [authRejectedAt]);
+  // Pending requestIdleCallback handle for the deferred runVerifyAll
+  // dispatch. Stored so the surrounding effect's cleanup (and any
+  // refresh that supersedes a still-queued idle callback) can cancel
+  // it cleanly instead of letting the rIC fire after teardown and
+  // hit dead state setters.
+  const verifyIdleRef = useRef<number | null>(null);
 
   const refresh = useCallback(async () => {
     if (refreshingRef.current) {
@@ -194,25 +200,51 @@ export function useRefresh(pushToast: (kind: "info" | "error", text: string) => 
         // gates on gen to avoid stale data overwriting fresher data,
         // but the flag itself is now a simple ref-count — can't get
         // stuck on an orphaned set.
-        setVerifyingCount((n) => n + 1);
-        runVerifyAll({
-          patchAccount: (uuid, patch) => {
-            if (gen !== refreshGenRef.current) return;
-            setAccounts((prev) =>
-              prev.map((a) => (a.uuid === uuid ? { ...a, ...patch } : a)),
-            );
-          },
-          setAccounts: (rows) => {
-            if (gen === refreshGenRef.current) setAccounts(rows);
-          },
-        })
-          .catch((e) => {
-            // eslint-disable-next-line no-console
-            console.warn("verify_all_accounts failed:", e);
+        //
+        // Defer the verify burst past first paint. `verify_all_accounts`
+        // fans out one HTTPS `/profile` round-trip per account in
+        // parallel; nothing the user sees on cold start depends on the
+        // result, so paying for it on the boot critical path just
+        // delays ambient network for the same staleness gate that fires
+        // on the next focus event.
+        const rIC: (cb: () => void) => number =
+          (window as typeof window & {
+            requestIdleCallback?: (cb: () => void) => number;
+          }).requestIdleCallback ?? ((cb) => window.setTimeout(cb, 0));
+        const cIC: (h: number) => void =
+          (window as typeof window & {
+            cancelIdleCallback?: (h: number) => void;
+          }).cancelIdleCallback ?? window.clearTimeout;
+        // Cancel any prior pending verify-rIC: a refresh that fires
+        // while one is still queued would otherwise run two verifies
+        // back-to-back (the queued one against stale data, the new
+        // one against fresh).
+        if (verifyIdleRef.current !== null) {
+          cIC(verifyIdleRef.current);
+          verifyIdleRef.current = null;
+        }
+        verifyIdleRef.current = rIC(() => {
+          verifyIdleRef.current = null;
+          setVerifyingCount((n) => n + 1);
+          runVerifyAll({
+            patchAccount: (uuid, patch) => {
+              if (gen !== refreshGenRef.current) return;
+              setAccounts((prev) =>
+                prev.map((a) => (a.uuid === uuid ? { ...a, ...patch } : a)),
+              );
+            },
+            setAccounts: (rows) => {
+              if (gen === refreshGenRef.current) setAccounts(rows);
+            },
           })
-          .finally(() => {
-            setVerifyingCount((n) => Math.max(0, n - 1));
-          });
+            .catch((e) => {
+              // eslint-disable-next-line no-console
+              console.warn("verify_all_accounts failed:", e);
+            })
+            .finally(() => {
+              setVerifyingCount((n) => Math.max(0, n - 1));
+            });
+        });
       }
     } catch (e) {
       const msg = `${e}`;
@@ -247,7 +279,19 @@ export function useRefresh(pushToast: (kind: "info" | "error", text: string) => 
       }
     };
     window.addEventListener("focus", onFocus);
-    return () => window.removeEventListener("focus", onFocus);
+    return () => {
+      window.removeEventListener("focus", onFocus);
+      // Drop any still-queued deferred verify so it can't fire after
+      // teardown and call setVerifyingCount on a dead component.
+      if (verifyIdleRef.current !== null) {
+        const cIC: (h: number) => void =
+          (window as typeof window & {
+            cancelIdleCallback?: (h: number) => void;
+          }).cancelIdleCallback ?? window.clearTimeout;
+        cIC(verifyIdleRef.current);
+        verifyIdleRef.current = null;
+      }
+    };
   }, [refresh]);
 
   return {

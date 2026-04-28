@@ -390,6 +390,10 @@ function AppShell() {
   // session isn't in the snapshot (already ended between click and
   // handler), just switch to Sessions.
   useEffect(() => {
+    // active-flag pattern: if cleanup runs before listen() resolves
+    // (StrictMode double-mount, fast unmount), the .then handler
+    // detaches the listener itself instead of leaking it.
+    let active = true;
     let unlisten: (() => void) | null = null;
     listen<string>("cp-activity-open-session", async (ev) => {
       const sid = ev.payload;
@@ -412,12 +416,14 @@ function AppShell() {
       setSection("projects");
     })
       .then((fn) => {
-        unlisten = fn;
+        if (!active) fn();
+        else unlisten = fn;
       })
       .catch(() => {
         /* no-tauri env */
       });
     return () => {
+      active = false;
       unlisten?.();
     };
   }, [setSection]);
@@ -427,11 +433,16 @@ function AppShell() {
   // the main window converts into the same DesktopConfirmDialog
   // flow as the in-window context menu + palette.
   useEffect(() => {
+    // active-flag pattern: same fix as the cp-activity-open-session
+    // effect above — without it, a cleanup landing before either
+    // listen() promise resolves would leak the listener.
+    let active = true;
     let unlistenClear: (() => void) | null = null;
     let unlistenBind: (() => void) | null = null;
     listen("cp-tray-desktop-clear", () => requestDesktopSignOut())
       .then((fn) => {
-        unlistenClear = fn;
+        if (!active) fn();
+        else unlistenClear = fn;
       })
       .catch(() => {});
     listen("cp-tray-desktop-bind", () => {
@@ -440,10 +451,12 @@ function AppShell() {
       setSection("accounts");
     })
       .then((fn) => {
-        unlistenBind = fn;
+        if (!active) fn();
+        else unlistenBind = fn;
       })
       .catch(() => {});
     return () => {
+      active = false;
       unlistenClear?.();
       unlistenBind?.();
     };
