@@ -1867,6 +1867,62 @@ fn test_resolve_path_strips_windows_verbatim_prefix() {
 }
 
 #[test]
+fn test_resolve_path_expands_bare_tilde() {
+    // `~` alone must expand to $HOME. Without expansion, the literal
+    // `~` falls through to `current_dir().join("~")` and produces a
+    // garbage path under the test's cwd.
+    let resolved = resolve_path("~").expect("~ should expand");
+    let home = dirs::home_dir().expect("HOME available in tests");
+    // Compare to canonical home (resolve_path canonicalizes existing
+    // paths; macOS may symlink-resolve `/Users/x` and `$HOME` may differ
+    // from the canonical form).
+    let canonical_home = home.canonicalize().unwrap_or(home).to_string_lossy().to_string();
+    assert_eq!(resolved, canonical_home);
+}
+
+#[test]
+fn test_resolve_path_expands_tilde_subpath() {
+    // `~/foo` (with `foo` non-existent) must expand to $HOME/foo, NOT
+    // `<cwd>/~/foo`. This is the regression test for the rename-to-
+    // `~/path` bug that left a stranded `myprojects/~/github/...` tree
+    // on 2026-04-28.
+    let nonexistent = "~/__claudepot_nonexistent_test_dir_4f7e2a__";
+    let resolved = resolve_path(nonexistent).expect("~/x should expand");
+    let home = dirs::home_dir().expect("HOME available in tests");
+    let expected = home.join("__claudepot_nonexistent_test_dir_4f7e2a__")
+        .to_string_lossy()
+        .to_string();
+    assert_eq!(resolved, expected);
+    assert!(
+        !resolved.contains("/~/"),
+        "literal ~ leaked into resolved path: {resolved}"
+    );
+}
+
+#[test]
+fn test_resolve_path_rejects_user_home_tilde() {
+    // `~user/foo` is a POSIX-shell user-home-expansion form we don't
+    // support. Returning the literal would let `~user` slip through
+    // to `current_dir().join("~user/foo")` — same footgun shape as the
+    // original bug. Reject explicitly.
+    let err = resolve_path("~root/foo").expect_err("~user/foo must error");
+    assert!(
+        format!("{err:?}").contains("tilde"),
+        "expected a tilde-related error, got: {err:?}"
+    );
+}
+
+#[test]
+fn test_resolve_path_rejects_bare_user_tilde() {
+    // `~root` (no `/`) — same rejection.
+    let err = resolve_path("~root").expect_err("~user must error");
+    assert!(
+        format!("{err:?}").contains("tilde"),
+        "expected a tilde-related error, got: {err:?}"
+    );
+}
+
+#[test]
 fn test_resolve_path_nfc_ascii_unchanged() {
     // ASCII paths must pass through NFC unchanged
     let tmp = tempfile::tempdir().unwrap();
