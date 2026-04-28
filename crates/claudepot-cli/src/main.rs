@@ -407,9 +407,13 @@ enum AutomationAction {
         run_id: String,
         #[arg(long)]
         exit: i32,
-        #[arg(long)]
+        /// Unix seconds of start time. Optional — defaults to
+        /// "now". Useful for environments where the shim can't
+        /// compute timestamps reliably (e.g. Windows Task Scheduler
+        /// contexts that don't inherit PATH).
+        #[arg(long, default_value = "")]
         start: String,
-        #[arg(long)]
+        #[arg(long, default_value = "")]
         end: String,
         #[arg(long, default_value = "scheduled")]
         trigger: String,

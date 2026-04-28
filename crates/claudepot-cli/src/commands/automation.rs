@@ -29,10 +29,16 @@ fn parse_trigger(s: &str) -> Result<TriggerKind> {
     }
 }
 
-/// Parse a unix timestamp (seconds, integer string).
+/// Parse a unix timestamp (seconds, integer string). Empty input
+/// falls back to "now" — useful when the calling shim can't
+/// reliably compute timestamps (e.g. Task Scheduler contexts that
+/// don't inherit PowerShell on PATH).
 fn parse_unix_seconds(raw: &str) -> Result<DateTime<Utc>> {
-    let secs: i64 = raw
-        .trim()
+    let trimmed = raw.trim();
+    if trimmed.is_empty() {
+        return Ok(Utc::now());
+    }
+    let secs: i64 = trimmed
         .parse()
         .with_context(|| format!("invalid unix timestamp: {raw:?}"))?;
     Utc.timestamp_opt(secs, 0)
@@ -116,6 +122,16 @@ mod tests {
         let dt = parse_unix_seconds("1745836800").unwrap();
         assert_eq!(dt.timestamp(), 1745836800);
         assert!(parse_unix_seconds("not a number").is_err());
-        assert!(parse_unix_seconds("").is_err());
+    }
+
+    #[test]
+    fn parse_unix_seconds_empty_falls_back_to_now() {
+        let dt = parse_unix_seconds("").unwrap();
+        let now = Utc::now();
+        // Within 5 seconds of "now" — the shim falls back to
+        // current time when it can't compute its own.
+        assert!((now - dt).num_seconds().abs() < 5);
+        let dt2 = parse_unix_seconds("   ").unwrap();
+        assert!((now - dt2).num_seconds().abs() < 5);
     }
 }
