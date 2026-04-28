@@ -79,13 +79,19 @@ export function useCardNotifications() {
   }, []);
 
   useEffect(() => {
+    // Mount-guard for the whole bootstrap chain. Cleanup may run
+    // partway through ensurePermission / sessionLiveSnapshot /
+    // subscribeNew / listen("live-all"). Without `active`, any of
+    // those can finish after teardown and silently attach a
+    // listener no one will ever release.
+    let active = true;
     let aliveUnlisten: UnlistenFn | null = null;
     let permissionGranted = false;
 
     async function ensurePermission() {
       try {
         permissionGranted = await isPermissionGranted();
-        if (!permissionGranted) {
+        if (!permissionGranted && active) {
           const r = await requestPermission();
           permissionGranted = r === "granted";
         }
@@ -95,6 +101,7 @@ export function useCardNotifications() {
     }
 
     async function subscribeNew(sessions: LiveSessionSummary[]) {
+      if (!active) return;
       const live = new Set(sessions.map((s) => s.session_id));
       // Subscribe in parallel — N live sessions used to serialize 2 N
       // IPC round-trips before the first delta could arrive. The
@@ -111,24 +118,36 @@ export function useCardNotifications() {
           } catch {
             return;
           }
-          if (subscriptions.current.has(s.session_id)) return;
+          if (!active || subscriptions.current.has(s.session_id)) {
+            // Teardown raced us, or another concurrent subscribeNew
+            // already wired this session. Backend now holds the
+            // singleton sub for s — paired unsubscribe so the next
+            // mount can re-subscribe without AlreadySubscribed.
+            void api.sessionLiveUnsubscribe(s.session_id).catch(() => {});
+            return;
+          }
           const unlisten = await listen(
             `live::${s.session_id}`,
             (ev) => handleDelta(ev.payload as LiveDeltaWire),
           );
-          if (subscriptions.current.has(s.session_id)) {
-            // Race winner already inserted an unlisten — drop ours.
+          if (!active || subscriptions.current.has(s.session_id)) {
+            // Same race outcomes as above — drop our frontend
+            // unlisten AND release the backend forwarder.
             try {
               unlisten();
             } catch {
               /* ignore */
             }
+            void api.sessionLiveUnsubscribe(s.session_id).catch(() => {});
             return;
           }
           subscriptions.current.set(s.session_id, unlisten);
         }),
       );
-      // Unsub gone
+      // Unsub gone — pair the frontend unlisten with the backend
+      // sessionLiveUnsubscribe so the rust forwarder doesn't keep
+      // running and a future re-subscribe doesn't fail with
+      // AlreadySubscribed (see api/activity.ts:93-98).
       for (const [sid, unlisten] of Array.from(subscriptions.current.entries())) {
         if (!live.has(sid)) {
           try {
@@ -136,6 +155,7 @@ export function useCardNotifications() {
           } catch {
             /* ignore */
           }
+          void api.sessionLiveUnsubscribe(sid).catch(() => {});
           subscriptions.current.delete(sid);
         }
       }
@@ -192,38 +212,51 @@ export function useCardNotifications() {
     }
 
     void ensurePermission().then(async () => {
+      if (!active) return;
       // Bootstrap: subscribe to whatever's live right now.
       try {
         const initial = await api.sessionLiveSnapshot();
+        if (!active) return;
         await subscribeNew(initial);
       } catch {
         /* no-tauri env */
       }
+      if (!active) return;
       // Track session-list changes via the existing aggregate
       // channel. Payload: `LiveSessionSummary[]`.
       try {
-        aliveUnlisten = await listen<LiveSessionSummary[]>(
+        const fn = await listen<LiveSessionSummary[]>(
           "live-all",
           (ev) => {
-            void subscribeNew(ev.payload ?? []);
+            if (active) void subscribeNew(ev.payload ?? []);
           },
         );
+        if (active) aliveUnlisten = fn;
+        else fn();
       } catch {
         /* ignore */
       }
     });
 
+    const sessionsRef = subscriptions.current;
+    const recentRef = recent.current;
     return () => {
+      active = false;
       if (aliveUnlisten) aliveUnlisten();
-      for (const [, u] of subscriptions.current) {
+      // Pair every frontend unlisten with the backend unsubscribe
+      // so future mounts can re-subscribe (single-subscriber
+      // contract on the rust side). Fire-and-forget — the backend
+      // already swallows unknown-session unsubscribes.
+      for (const [sid, u] of sessionsRef) {
         try {
           u();
         } catch {
           /* ignore */
         }
+        void api.sessionLiveUnsubscribe(sid).catch(() => {});
       }
-      subscriptions.current.clear();
-      recent.current.clear();
+      sessionsRef.clear();
+      recentRef.clear();
     };
   }, []);
 }
