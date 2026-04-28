@@ -386,9 +386,17 @@ mod tests {
         let mut t = FileTail::at_start(&path).unwrap();
         let _ = t.poll().unwrap();
 
-        // Remove and recreate — new inode.
-        std::fs::remove_file(&path).unwrap();
-        write_all(&path, "{\"y\":1}\n");
+        // Replace via atomic rename — guarantees a fresh inode under
+        // every filesystem we ship to. The earlier `remove_file +
+        // write_all(path)` form is racy on Linux tmpfs (the GitHub
+        // Actions runner default), where the inode allocator hands
+        // the just-freed inode back to the next file with the same
+        // name and `detect_rotation` then sees no change. `rename`
+        // moves a separately-created inode onto the target, so
+        // before-and-after inode numbers can never collide.
+        let sibling = dir.path().join("s.jsonl.new");
+        write_all(&sibling, "{\"y\":1}\n");
+        std::fs::rename(&sibling, &path).unwrap();
         let p = t.poll().unwrap();
         assert!(p.rotated, "inode change must be reported as rotation");
         assert_eq!(p.new_lines, vec!["{\"y\":1}"]);
