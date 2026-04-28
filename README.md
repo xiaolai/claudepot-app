@@ -16,10 +16,6 @@
   <a href="#for-developers">For developers</a>
 </p>
 
-<p align="center">
-  <img src="assets/screenshots/activities.png" alt="Claudepot — Activities tab showing live sessions, today/month dashboard, and recent events" width="900">
-</p>
-
 ---
 
 ## What
@@ -40,16 +36,16 @@ It's macOS-first today. Windows and Linux build clean and work, with less polish
 
 If you use Claude Code or Claude Desktop daily, you've probably hit at least one of these. Each one is a first-class fix in Claudepot, not a workaround.
 
-| Pain | What's actually going on |
-|---|---|
-| `/login` doesn't switch accounts when one is already signed in | Claude reads from a single keychain slot. There's no concept of "the other account." |
-| You renamed a project folder and your old sessions disappeared | Claude indexes sessions by the folder's full path. Rename the folder and the index breaks. |
-| `~/.claude/` is using 8 GB and you don't know why | Every chat is kept forever as a transcript file, including image data and tool output. Nothing prunes it. |
-| Claude Code freezes on a long conversation | A single transcript over ~50 MB stalls the parser. |
-| You can't tell which Claude session needs your attention | Claude has no notion of "I'm waiting on you" — you have to check each terminal. |
-| You've leaked tokens by pasting a screenshot or exporting a chat | Tokens appear verbatim in transcripts and exports. |
-| You want Claude to run a daily summary at 8am | There's no scheduler. |
-| You hit a rate limit you didn't know existed | The 5-hour window, 7-day window, and Opus split are invisible until you trip them. |
+| Pain                                                             | What's actually going on                                                                                  |
+| ---------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------- |
+| `/login` doesn't switch accounts when one is already signed in   | Claude reads from a single keychain slot. There's no concept of "the other account."                      |
+| You renamed a project folder and your old sessions disappeared   | Claude indexes sessions by the folder's full path. Rename the folder and the index breaks.                |
+| `~/.claude/` is using 8 GB and you don't know why                | Every chat is kept forever as a transcript file, including image data and tool output. Nothing prunes it. |
+| Claude Code freezes on a long conversation                       | A single transcript over \~50 MB stalls the parser.                                                       |
+| You can't tell which Claude session needs your attention         | Claude has no notion of "I'm waiting on you" — you have to check each terminal.                           |
+| You've leaked tokens by pasting a screenshot or exporting a chat | Tokens appear verbatim in transcripts and exports.                                                        |
+| You want Claude to run a daily summary at 8am                    | There's no scheduler.                                                                                     |
+| You hit a rate limit you didn't know existed                     | The 5-hour window, 7-day window, and Opus split are invisible until you trip them.                        |
 
 ## How
 
@@ -126,11 +122,11 @@ After that, switch with one click from the sidebar, the ⌘K command palette, or
 
 Four user-facing nouns: **account**, **cli**, **desktop**, **project**. Three Rust crates:
 
-| Crate | Purpose |
-|---|---|
-| `claudepot-core` | Pure Rust library. All business logic. No Tauri dependency — testable without a webview. |
-| `claudepot-cli` | Thin clap wrapper over core. No business logic, no HTTP, no keychain. |
-| `src-tauri` | Tauri 2 desktop shell calling the same core. DTOs in `dto.rs`; secrets never cross to JS. |
+| Crate            | Purpose                                                                                   |
+| ---------------- | ----------------------------------------------------------------------------------------- |
+| `claudepot-core` | Pure Rust library. All business logic. No Tauri dependency — testable without a webview.  |
+| `claudepot-cli`  | Thin clap wrapper over core. No business logic, no HTTP, no keychain.                     |
+| `src-tauri`      | Tauri 2 desktop shell calling the same core. DTOs in `dto.rs`; secrets never cross to JS. |
 
 The CLI handler is the reference implementation; the GUI wraps the same function with a DTO layer. Both reach the same code.
 
