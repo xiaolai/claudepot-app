@@ -185,18 +185,31 @@ export function useStatusIssues(opts: {
       // (partial) or the stored email has a case difference beyond
       // ASCII. Accept only a unique prefix; if multiple accounts
       // match or none, fall back to the re-login action path.
+      //
+      // Single pass — one toLowerCase per account, no intermediate
+      // arrays. Old form did three traversals (exact filter +
+      // prefix filter + length checks), each toLowerCase'ing every
+      // row twice. This memo runs on every accounts/ccIdentity tick.
       const q = ccIdentity.email!.toLowerCase();
-      const exactMatches = accounts.filter(
-        (a) => a.email.toLowerCase() === q,
-      );
-      const prefixMatches = accounts.filter((a) =>
-        a.email.toLowerCase().startsWith(q),
-      );
+      let exactCount = 0;
+      let exactHit: AccountSummary | undefined;
+      let prefixCount = 0;
+      let prefixHit: AccountSummary | undefined;
+      for (const a of accounts) {
+        const lower = a.email.toLowerCase();
+        if (lower === q) {
+          exactCount++;
+          exactHit = a;
+        } else if (lower.startsWith(q)) {
+          prefixCount++;
+          prefixHit = a;
+        }
+      }
       const target =
-        exactMatches.length === 1
-          ? exactMatches[0]
-          : prefixMatches.length === 1
-            ? prefixMatches[0]
+        exactCount === 1
+          ? exactHit
+          : prefixCount === 1
+            ? prefixHit
             : undefined;
       // Action shape depends on whether CC's current email resolves
       // to a registered Claudepot account.
