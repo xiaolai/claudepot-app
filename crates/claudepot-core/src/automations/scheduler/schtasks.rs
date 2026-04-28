@@ -138,7 +138,14 @@ impl Scheduler for SchtasksScheduler {
         SchedulerCapabilities {
             wake_to_run: true,
             catch_up_if_missed: true,
-            run_when_logged_out: true,
+            // `run_when_logged_out` requires `<LogonType>Password</LogonType>`
+            // which in turn requires storing user credentials at
+            // registration time. We do not yet have a secure
+            // credential capture flow (the GUI would need to prompt
+            // the user for their Windows password and pass it via
+            // `schtasks /RU /RP`, then zeroize). Until that lands,
+            // report `false` so the UI greys out the toggle.
+            run_when_logged_out: false,
             native_label: "Task Scheduler",
             artifact_dir: Some(
                 crate::paths::claudepot_data_dir()
@@ -190,11 +197,12 @@ pub fn render_xml(automation: &Automation) -> Result<String, AutomationError> {
     };
 
     let opts = &automation.platform_options;
-    let logon_type = if opts.run_when_logged_out {
-        "Password"
-    } else {
-        "InteractiveToken"
-    };
+    // We force `InteractiveToken` until the credential-capture flow
+    // for `run_when_logged_out=true` ships. Capabilities() returns
+    // `false` for this knob, so the UI shouldn't even let it through;
+    // this is belt-and-braces in case a stale record arrives.
+    let logon_type = "InteractiveToken";
+    let _ = opts.run_when_logged_out;
 
     let mut xml = String::new();
     xml.push_str("<?xml version=\"1.0\" encoding=\"UTF-16\"?>\n");
@@ -314,21 +322,66 @@ fn emit_calendar_trigger(out: &mut String, level: usize, slot: &LaunchSlot) {
     indent(out, level + 1);
     out.push_str("<Enabled>true</Enabled>\n");
 
-    if let Some(w) = slot.day_of_week {
-        // Weekly schedule with single-day-of-week selection.
+    // Branch order matters: a slot with both `day_of_week` and
+    // `month` set is a "this weekday in this month" schedule; emit
+    // a `ScheduleByMonthDayOfWeek` so the month constraint is
+    // preserved. Plain weekday-only collapses to ScheduleByWeek.
+    // DOM-with-or-without month falls through to ScheduleByMonth.
+    // Everything else is a daily.
+    let all_months_array = |out: &mut String, lvl: usize| {
+        for m in [
+            "January", "February", "March", "April", "May", "June",
+            "July", "August", "September", "October", "November", "December",
+        ] {
+            indent(out, lvl);
+            out.push_str(&format!("<{m} />\n"));
+        }
+    };
+    let day_tag_for = |w: u8| match w {
+        0 => "Sunday",
+        1 => "Monday",
+        2 => "Tuesday",
+        3 => "Wednesday",
+        4 => "Thursday",
+        5 => "Friday",
+        _ => "Saturday",
+    };
+    if let (Some(w), Some(m)) = (slot.day_of_week, slot.month) {
+        // Weekday + month: ScheduleByMonthDayOfWeek (monthly XX-day,
+        // first/second/.../last week — but the cron we accept doesn't
+        // distinguish weeks-of-month, so we use Weeks::All).
+        indent(out, level + 1);
+        out.push_str("<ScheduleByMonthDayOfWeek>\n");
+        indent(out, level + 2);
+        out.push_str("<Weeks><Week>1</Week><Week>2</Week><Week>3</Week><Week>4</Week><Week>Last</Week></Weeks>\n");
+        indent(out, level + 2);
+        out.push_str("<DaysOfWeek>\n");
+        let day_tag = day_tag_for(w);
+        indent(out, level + 3);
+        out.push_str(&format!("<{day_tag} />\n"));
+        indent(out, level + 2);
+        out.push_str("</DaysOfWeek>\n");
+        indent(out, level + 2);
+        out.push_str("<Months>\n");
+        let mtag = match m {
+            1 => "January", 2 => "February", 3 => "March", 4 => "April",
+            5 => "May", 6 => "June", 7 => "July", 8 => "August",
+            9 => "September", 10 => "October", 11 => "November",
+            _ => "December",
+        };
+        indent(out, level + 3);
+        out.push_str(&format!("<{mtag} />\n"));
+        indent(out, level + 2);
+        out.push_str("</Months>\n");
+        indent(out, level + 1);
+        out.push_str("</ScheduleByMonthDayOfWeek>\n");
+    } else if let Some(w) = slot.day_of_week {
+        // Weekly only.
         indent(out, level + 1);
         out.push_str("<ScheduleByWeek>\n");
         indent(out, level + 2);
         out.push_str("<DaysOfWeek>\n");
-        let day_tag = match w {
-            0 => "Sunday",
-            1 => "Monday",
-            2 => "Tuesday",
-            3 => "Wednesday",
-            4 => "Thursday",
-            5 => "Friday",
-            _ => "Saturday",
-        };
+        let day_tag = day_tag_for(w);
         indent(out, level + 3);
         out.push_str(&format!("<{day_tag} />\n"));
         indent(out, level + 2);
@@ -338,14 +391,23 @@ fn emit_calendar_trigger(out: &mut String, level: usize, slot: &LaunchSlot) {
         indent(out, level + 1);
         out.push_str("</ScheduleByWeek>\n");
     } else if slot.day_of_month.is_some() || slot.month.is_some() {
-        // Monthly schedule.
+        // Monthly. If `day_of_month` is wildcard but `month` is set,
+        // fan out across every day of the month rather than
+        // collapsing to day 1 (the previous behavior silently dropped
+        // 30 of the 31 fire days).
         indent(out, level + 1);
         out.push_str("<ScheduleByMonth>\n");
         indent(out, level + 2);
         out.push_str("<DaysOfMonth>\n");
-        let dom = slot.day_of_month.unwrap_or(1);
-        indent(out, level + 3);
-        out.push_str(&format!("<Day>{dom}</Day>\n"));
+        if let Some(d) = slot.day_of_month {
+            indent(out, level + 3);
+            out.push_str(&format!("<Day>{d}</Day>\n"));
+        } else {
+            for d in 1u8..=31 {
+                indent(out, level + 3);
+                out.push_str(&format!("<Day>{d}</Day>\n"));
+            }
+        }
         indent(out, level + 2);
         out.push_str("</DaysOfMonth>\n");
         indent(out, level + 2);
@@ -360,21 +422,13 @@ fn emit_calendar_trigger(out: &mut String, level: usize, slot: &LaunchSlot) {
             indent(out, level + 3);
             out.push_str(&format!("<{mtag} />\n"));
         } else {
-            // Every month.
-            for m in [
-                "January", "February", "March", "April", "May", "June",
-                "July", "August", "September", "October", "November", "December",
-            ] {
-                indent(out, level + 3);
-                out.push_str(&format!("<{m} />\n"));
-            }
+            all_months_array(out, level + 3);
         }
         indent(out, level + 2);
         out.push_str("</Months>\n");
         indent(out, level + 1);
         out.push_str("</ScheduleByMonth>\n");
     } else {
-        // Daily schedule.
         indent(out, level + 1);
         out.push_str("<ScheduleByDay>\n");
         indent(out, level + 2);

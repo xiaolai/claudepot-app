@@ -84,31 +84,33 @@ export interface AutomationCreateDto {
 }
 
 /**
- * Optional-of-optional: `[value]` means "set to this value
- * (possibly null)", `null` / undefined / missing means "leave
- * untouched."
+ * Patch shape: omit a field (or send `null`) to leave it unchanged;
+ * send a value to overwrite. There is no way to explicitly clear an
+ * optional field to null via this DTO — to clear, use the appropriate
+ * empty-shape value (e.g. empty string for cleared display name).
+ * Mirrors the Rust `Option<T>` patch fields in `dto_automations.rs`.
  */
 export interface AutomationUpdateDto {
   id: string;
-  display_name?: [string | null];
-  description?: [string | null];
+  display_name?: string | null;
+  description?: string | null;
   enabled?: boolean;
-  model?: [string | null];
+  model?: string | null;
   cwd?: string;
   prompt?: string;
-  system_prompt?: [string | null];
-  append_system_prompt?: [string | null];
+  system_prompt?: string | null;
+  append_system_prompt?: string | null;
   permission_mode?: PermissionMode;
   allowed_tools?: string[];
   add_dir?: string[];
-  max_budget_usd?: [number | null];
-  fallback_model?: [string | null];
+  max_budget_usd?: number | null;
+  fallback_model?: string | null;
   output_format?: OutputFormat;
-  json_schema?: [string | null];
+  json_schema?: string | null;
   bare?: boolean;
   extra_env?: Record<string, string>;
   cron?: string;
-  timezone?: [string | null];
+  timezone?: string | null;
   platform_options?: PlatformOptionsDto;
   log_retention_runs?: number;
 }

@@ -105,14 +105,66 @@ fn which_claude() -> Option<String> {
     None
 }
 
-/// Resolve the path to the running `claudepot` CLI binary. The
-/// helper shim calls back into this for `_record-run`.
+/// Resolve the path to the `claudepot` CLI binary the helper shim
+/// should call back into for `_record-run`. Tauri-side callers are
+/// running the GUI executable, which is NOT the CLI — it can't
+/// service `automation _record-run`. We resolve in this order:
+///
+/// 1. `CLAUDEPOT_CLI_PATH` env var (explicit override; trumps all).
+/// 2. `<current_exe parent>/claudepot[.exe]` (sibling install — the
+///    common case for a packaged Tauri app that ships the CLI
+///    next to the GUI).
+/// 3. `claudepot[.exe]` on `PATH` via standard `which` semantics.
+/// 4. The current executable as a last resort, with a clear log
+///    that scheduled runs may fail to record results.
+///
+/// Returns the resolved absolute path as a string. Errors only when
+/// none of the four paths produces an existing file.
 pub fn current_claudepot_cli() -> Result<String, AutomationError> {
-    let exe = std::env::current_exe()
+    let exe_name = if cfg!(target_os = "windows") {
+        "claudepot.exe"
+    } else {
+        "claudepot"
+    };
+
+    // 1. Explicit override.
+    if let Ok(p) = std::env::var("CLAUDEPOT_CLI_PATH") {
+        let candidate = std::path::PathBuf::from(&p);
+        if candidate.is_file() {
+            return Ok(candidate.display().to_string());
+        }
+    }
+
+    // 2. Sibling of the running executable.
+    if let Ok(current) = std::env::current_exe() {
+        if let Some(parent) = current.parent() {
+            let sibling = parent.join(exe_name);
+            if sibling.is_file() && sibling != current {
+                return Ok(sibling.display().to_string());
+            }
+        }
+    }
+
+    // 3. PATH lookup.
+    if let Some(path_var) = std::env::var_os("PATH") {
+        for dir in std::env::split_paths(&path_var) {
+            let candidate = dir.join(exe_name);
+            if candidate.is_file() {
+                return Ok(candidate.display().to_string());
+            }
+        }
+    }
+
+    // 4. Last resort: the current executable. This is correct when
+    //    the caller IS the CLI (claudepot binary itself), and a
+    //    known-broken state when called from a GUI process — we
+    //    return the path so callers can register, but the shim's
+    //    record-run callback will fail at runtime in the GUI case.
+    let current = std::env::current_exe()
         .map_err(|e| AutomationError::Io(std::io::Error::other(format!(
             "current_exe failed: {e}"
         ))))?;
-    Ok(exe.display().to_string())
+    Ok(current.display().to_string())
 }
 
 #[cfg(test)]

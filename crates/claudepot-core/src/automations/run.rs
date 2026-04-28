@@ -103,51 +103,77 @@ fn file_name_or_empty(p: &Path) -> String {
         .unwrap_or_default()
 }
 
-/// Parse the last `result` event from a `claude -p
-/// --output-format=json` stdout dump. Returns `None` if no parsable
-/// result event is present (caller should fall back to exit code).
+/// Parse the terminal `result` event from `claude -p` stdout.
+/// Handles both `--output-format=json` (a JSON array of events) and
+/// `--output-format=stream-json` (newline-delimited JSON, one event
+/// per line). Returns `None` if no parsable result event is present
+/// (caller falls back to exit code).
 pub fn parse_result_event(stdout_bytes: &[u8]) -> Option<RunResult> {
     if stdout_bytes.is_empty() {
         return None;
     }
-    // The output format is a JSON array; tolerate trailing whitespace.
-    let v: serde_json::Value = serde_json::from_slice(stdout_bytes).ok()?;
-    let arr = v.as_array()?;
-    // Walk in reverse — pick the last element with type=="result".
-    arr.iter()
-        .rev()
-        .find(|el| el.get("type").and_then(|t| t.as_str()) == Some("result"))
-        .and_then(|result_el| {
-            // Use a helper struct so unknown fields are tolerated
-            // (serde-untagged default behavior).
-            #[derive(Deserialize)]
-            struct Raw {
-                #[serde(default)]
-                subtype: Option<String>,
-                #[serde(default)]
-                is_error: Option<bool>,
-                #[serde(default)]
-                num_turns: Option<i64>,
-                #[serde(default)]
-                total_cost_usd: Option<f64>,
-                #[serde(default)]
-                stop_reason: Option<String>,
-                #[serde(default)]
-                session_id: Option<String>,
-                #[serde(default)]
-                errors: Vec<String>,
+    // Use a helper struct so unknown fields are tolerated.
+    #[derive(Deserialize)]
+    struct Raw {
+        #[serde(default)]
+        subtype: Option<String>,
+        #[serde(default)]
+        is_error: Option<bool>,
+        #[serde(default)]
+        num_turns: Option<i64>,
+        #[serde(default)]
+        total_cost_usd: Option<f64>,
+        #[serde(default)]
+        stop_reason: Option<String>,
+        #[serde(default)]
+        session_id: Option<String>,
+        #[serde(default)]
+        errors: Vec<String>,
+    }
+    fn build(raw: Raw) -> RunResult {
+        RunResult {
+            subtype: raw.subtype,
+            is_error: raw.is_error,
+            num_turns: raw.num_turns,
+            total_cost_usd: raw.total_cost_usd,
+            stop_reason: raw.stop_reason,
+            session_id: raw.session_id,
+            errors: raw.errors,
+        }
+    }
+
+    // First try `--output-format=json` (a JSON array of events).
+    if let Ok(v) = serde_json::from_slice::<serde_json::Value>(stdout_bytes) {
+        if let Some(arr) = v.as_array() {
+            return arr
+                .iter()
+                .rev()
+                .find(|el| el.get("type").and_then(|t| t.as_str()) == Some("result"))
+                .and_then(|el| serde_json::from_value::<Raw>(el.clone()).ok())
+                .map(build);
+        }
+    }
+
+    // Fall back to `--output-format=stream-json`: NDJSON, one JSON
+    // object per line. Walk in reverse to pick the last `result`.
+    let stdout = std::str::from_utf8(stdout_bytes).ok()?;
+    let mut last_result: Option<RunResult> = None;
+    for line in stdout.lines() {
+        let trimmed = line.trim();
+        if trimmed.is_empty() {
+            continue;
+        }
+        let v: serde_json::Value = match serde_json::from_str(trimmed) {
+            Ok(x) => x,
+            Err(_) => continue,
+        };
+        if v.get("type").and_then(|t| t.as_str()) == Some("result") {
+            if let Ok(raw) = serde_json::from_value::<Raw>(v) {
+                last_result = Some(build(raw));
             }
-            let raw: Raw = serde_json::from_value(result_el.clone()).ok()?;
-            Some(RunResult {
-                subtype: raw.subtype,
-                is_error: raw.is_error,
-                num_turns: raw.num_turns,
-                total_cost_usd: raw.total_cost_usd,
-                stop_reason: raw.stop_reason,
-                session_id: raw.session_id,
-                errors: raw.errors,
-            })
-        })
+        }
+    }
+    last_result
 }
 
 /// Best-effort: given a CC `session_id`, find the `.jsonl`
@@ -338,14 +364,69 @@ pub fn list_run_ids(id: &AutomationId) -> Result<Vec<String>, AutomationError> {
     Ok(out)
 }
 
-/// Read a single run record by id.
+/// Read a single run record by id. Validates `run_id` is a single
+/// safe filename component and pins the resolved path under the
+/// automation's runs dir so a malicious caller cannot escape with
+/// `..` or absolute paths.
 pub fn read_run(automation_id: &AutomationId, run_id: &str) -> Result<AutomationRun, AutomationError> {
-    let path = automation_runs_dir(automation_id)
-        .join(run_id)
-        .join("result.json");
+    validate_run_id(run_id)?;
+    let runs_root = automation_runs_dir(automation_id);
+    let path = runs_root.join(run_id).join("result.json");
+    // Defense in depth: confirm the resolved canonical path stays
+    // inside the runs root. We use the raw join because the path
+    // may not exist yet on disk; the canonicalize-after-read happens
+    // on the read step below.
+    if !path.starts_with(&runs_root) {
+        return Err(AutomationError::InvalidPath(
+            run_id.to_string(),
+            "run_id resolved outside automation runs dir",
+        ));
+    }
     let bytes = std::fs::read(&path)?;
     let run: AutomationRun = serde_json::from_slice(&bytes)?;
     Ok(run)
+}
+
+/// A run id must be a single non-empty path component, ASCII-only,
+/// composed of `[A-Za-z0-9._-]` (so it can serve as a filesystem
+/// directory name on every supported host without escaping). This
+/// matches the shape the unix and Windows shims emit
+/// (`<ISO-timestamp>-<pid|random>`).
+fn validate_run_id(s: &str) -> Result<(), AutomationError> {
+    if s.is_empty() {
+        return Err(AutomationError::InvalidPath(
+            s.to_string(),
+            "run_id cannot be empty",
+        ));
+    }
+    if s.len() > 128 {
+        return Err(AutomationError::InvalidPath(
+            s.to_string(),
+            "run_id exceeds 128 characters",
+        ));
+    }
+    if s.starts_with('.') {
+        return Err(AutomationError::InvalidPath(
+            s.to_string(),
+            "run_id cannot start with `.`",
+        ));
+    }
+    for b in s.bytes() {
+        let ok = b.is_ascii_alphanumeric() || b == b'-' || b == b'_' || b == b'.';
+        if !ok {
+            return Err(AutomationError::InvalidPath(
+                s.to_string(),
+                "run_id contains characters outside [A-Za-z0-9._-]",
+            ));
+        }
+    }
+    if s.contains("..") {
+        return Err(AutomationError::InvalidPath(
+            s.to_string(),
+            "run_id cannot contain `..`",
+        ));
+    }
+    Ok(())
 }
 
 #[cfg(test)]

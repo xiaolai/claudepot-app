@@ -206,18 +206,26 @@ pub fn render_units(automation: &Automation) -> Result<(String, String), Automat
     svc.push_str("[Unit]\n");
     svc.push_str(&format!(
         "Description=Claudepot automation: {}\n",
-        sanitize_one_line(&display_label)
+        unit_value_escape(&display_label)
     ));
     svc.push('\n');
     svc.push_str("[Service]\n");
     svc.push_str("Type=oneshot\n");
     svc.push_str(&format!(
         "WorkingDirectory={}\n",
-        sanitize_one_line(&automation.cwd)
+        unit_value_escape(&automation.cwd)
     ));
+    // Quote ExecStart's argument so paths with spaces (or any
+    // shell-relevant char) don't get split by systemd's tokenizer.
+    // systemd accepts `"…"` quoting around individual args.
     svc.push_str(&format!(
-        "ExecStart=/bin/sh {}\n",
-        sanitize_one_line(&shim_path.display().to_string())
+        "ExecStart=/bin/sh \"{}\"\n",
+        unit_value_escape(&shim_path.display().to_string())
+            // Reject embedded `"` inside quoted ExecStart arg to keep
+            // tokenization unambiguous. The path validator already
+            // accepts only printable ASCII, so this is defense in
+            // depth.
+            .replace('"', "")
     ));
     svc.push_str("Nice=5\n");
 
@@ -234,7 +242,7 @@ pub fn render_units(automation: &Automation) -> Result<(String, String), Automat
     timer.push_str("[Unit]\n");
     timer.push_str(&format!(
         "Description=Claudepot automation timer: {}\n",
-        sanitize_one_line(&display_label)
+        unit_value_escape(&display_label)
     ));
     timer.push('\n');
     timer.push_str("[Timer]\n");
@@ -298,6 +306,17 @@ fn on_calendar_for(slot: &LaunchSlot) -> String {
 
 fn sanitize_one_line(s: &str) -> String {
     s.replace(['\n', '\r'], " ")
+}
+
+/// Escape a string for embedding in a systemd unit-file value:
+/// strip newlines (one-line invariant) and double `%` so it isn't
+/// interpreted as a systemd specifier (e.g. `%h` for home dir).
+/// systemd's specifier syntax is documented in
+/// `systemd.unit(5)` under "SPECIFIERS"; we don't use any specifiers
+/// in our generated units, so escaping all `%` is the safe default.
+fn unit_value_escape(s: &str) -> String {
+    let single = sanitize_one_line(s);
+    single.replace('%', "%%")
 }
 
 #[cfg(test)]

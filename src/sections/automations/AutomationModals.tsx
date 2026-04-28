@@ -1,5 +1,9 @@
 import { useEffect, useState } from "react";
-import { Modal } from "../../components/primitives/Modal";
+import {
+  Modal,
+  ModalBody,
+  ModalHeader,
+} from "../../components/primitives/Modal";
 import { api } from "../../api";
 import type {
   AutomationCreateDto,
@@ -43,6 +47,7 @@ export function AddAutomationModal({
     }
   }
 
+  if (!open) return null;
   return (
     <Modal
       open={open}
@@ -50,17 +55,12 @@ export function AddAutomationModal({
       width="lg"
       aria-labelledby="add-automation-title"
     >
-      <div
-        style={{
-          display: "flex",
-          flexDirection: "column",
-          gap: "var(--sp-12)",
-          padding: "var(--sp-16)",
-        }}
-      >
-        <h2 id="add-automation-title" style={{ margin: 0 }}>
-          Add automation
-        </h2>
+      <ModalHeader
+        title="Add automation"
+        id="add-automation-title"
+        onClose={onClose}
+      />
+      <ModalBody>
         <AutomationForm
           routes={routes}
           capabilities={capabilities}
@@ -69,7 +69,7 @@ export function AddAutomationModal({
           onSubmit={submit}
           onCancel={onClose}
         />
-      </div>
+      </ModalBody>
     </Modal>
   );
 }
@@ -121,24 +121,24 @@ export function EditAutomationModal({
     try {
       const update: AutomationUpdateDto = {
         id: target.id,
-        display_name: [dto.display_name],
-        description: [dto.description],
-        model: [dto.model],
+        display_name: dto.display_name,
+        description: dto.description,
+        model: dto.model,
         cwd: dto.cwd,
         prompt: dto.prompt,
-        system_prompt: [dto.system_prompt],
-        append_system_prompt: [dto.append_system_prompt],
+        system_prompt: dto.system_prompt,
+        append_system_prompt: dto.append_system_prompt,
         permission_mode: dto.permission_mode,
         allowed_tools: dto.allowed_tools,
         add_dir: dto.add_dir,
-        max_budget_usd: [dto.max_budget_usd],
-        fallback_model: [dto.fallback_model],
+        max_budget_usd: dto.max_budget_usd,
+        fallback_model: dto.fallback_model,
         output_format: dto.output_format,
-        json_schema: [dto.json_schema],
+        json_schema: dto.json_schema,
         bare: dto.bare,
         extra_env: dto.extra_env,
         cron: dto.cron,
-        timezone: [dto.timezone],
+        timezone: dto.timezone,
         platform_options: dto.platform_options,
         log_retention_runs: dto.log_retention_runs,
       };
@@ -152,6 +152,7 @@ export function EditAutomationModal({
     }
   }
 
+  if (!open) return null;
   return (
     <Modal
       open={open}
@@ -159,17 +160,12 @@ export function EditAutomationModal({
       width="lg"
       aria-labelledby="edit-automation-title"
     >
-      <div
-        style={{
-          display: "flex",
-          flexDirection: "column",
-          gap: "var(--sp-12)",
-          padding: "var(--sp-16)",
-        }}
-      >
-        <h2 id="edit-automation-title" style={{ margin: 0 }}>
-          Edit {target?.display_name || target?.name}
-        </h2>
+      <ModalHeader
+        title={`Edit ${target?.display_name || target?.name || ""}`.trim()}
+        id="edit-automation-title"
+        onClose={onClose}
+      />
+      <ModalBody>
         {details ? (
           <AutomationForm
             initial={details}
@@ -185,7 +181,7 @@ export function EditAutomationModal({
             Loading…
           </div>
         )}
-      </div>
+      </ModalBody>
     </Modal>
   );
 }

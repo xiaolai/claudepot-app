@@ -158,29 +158,57 @@ fn default_log_retention() -> u32 {
     50
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+/// Patch shape: omit a field (or send `null`) to leave it unchanged;
+/// send a value to overwrite. Single `Option<T>` per field — the
+/// previous `Option<Option<T>>` shape was indistinguishable from the
+/// outer-only path under default serde and broke TS round-trips.
+/// To "explicitly clear" an optional field via this DTO, the caller
+/// sends an appropriate empty value (e.g. an empty string), and the
+/// patch builder converts it on the way to the store.
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct AutomationUpdateDto {
     pub id: String,
-    pub display_name: Option<Option<String>>,
-    pub description: Option<Option<String>>,
+    #[serde(default)]
+    pub display_name: Option<String>,
+    #[serde(default)]
+    pub description: Option<String>,
+    #[serde(default)]
     pub enabled: Option<bool>,
-    pub model: Option<Option<String>>,
+    #[serde(default)]
+    pub model: Option<String>,
+    #[serde(default)]
     pub cwd: Option<String>,
+    #[serde(default)]
     pub prompt: Option<String>,
-    pub system_prompt: Option<Option<String>>,
-    pub append_system_prompt: Option<Option<String>>,
+    #[serde(default)]
+    pub system_prompt: Option<String>,
+    #[serde(default)]
+    pub append_system_prompt: Option<String>,
+    #[serde(default)]
     pub permission_mode: Option<String>,
+    #[serde(default)]
     pub allowed_tools: Option<Vec<String>>,
+    #[serde(default)]
     pub add_dir: Option<Vec<String>>,
-    pub max_budget_usd: Option<Option<f64>>,
-    pub fallback_model: Option<Option<String>>,
+    #[serde(default)]
+    pub max_budget_usd: Option<f64>,
+    #[serde(default)]
+    pub fallback_model: Option<String>,
+    #[serde(default)]
     pub output_format: Option<String>,
-    pub json_schema: Option<Option<String>>,
+    #[serde(default)]
+    pub json_schema: Option<String>,
+    #[serde(default)]
     pub bare: Option<bool>,
+    #[serde(default)]
     pub extra_env: Option<std::collections::BTreeMap<String, String>>,
+    #[serde(default)]
     pub cron: Option<String>,
-    pub timezone: Option<Option<String>>,
+    #[serde(default)]
+    pub timezone: Option<String>,
+    #[serde(default)]
     pub platform_options: Option<PlatformOptionsDto>,
+    #[serde(default)]
     pub log_retention_runs: Option<u32>,
 }
 
