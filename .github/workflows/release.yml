@@ -68,18 +68,18 @@ jobs:
           targets: ${{ matrix.target }}
 
       - name: Setup pnpm
-        uses: pnpm/action-setup@v4
+        uses: pnpm/action-setup@v5
         with:
           version: 9
 
       - name: Setup Node
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v5
         with:
           node-version: 20
           cache: pnpm
 
       - name: Cache cargo registry & build
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
           path: |
             ~/.cargo/registry
@@ -194,7 +194,7 @@ jobs:
           ls -la release-staging/
 
       - name: Upload artifacts
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: claudepot-${{ matrix.arch }}-apple-darwin
           path: |
@@ -231,12 +231,12 @@ jobs:
             patchelf
 
       - name: Setup pnpm
-        uses: pnpm/action-setup@v4
+        uses: pnpm/action-setup@v5
         with:
           version: 9
 
       - name: Setup Node
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v5
         with:
           node-version: 20
           cache: pnpm
@@ -245,7 +245,7 @@ jobs:
         run: pnpm install --frozen-lockfile
 
       - name: Cache cargo registry & build
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
           path: |
             ~/.cargo/registry
@@ -288,7 +288,7 @@ jobs:
           fi
           ls -la release-staging/
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v6
         with:
           name: claudepot-x86_64-linux
           path: |
@@ -322,7 +322,7 @@ jobs:
           EOF
 
       - name: Cache cargo
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
           path: |
             ~/.cargo/registry
@@ -338,7 +338,7 @@ jobs:
           cd target/aarch64-unknown-linux-gnu/release
           tar czf claudepot-aarch64-linux.tar.gz claudepot
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v6
         with:
           name: claudepot-aarch64-linux
           path: target/aarch64-unknown-linux-gnu/release/claudepot-aarch64-linux.tar.gz
@@ -357,12 +357,12 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
 
       - name: Setup pnpm
-        uses: pnpm/action-setup@v4
+        uses: pnpm/action-setup@v5
         with:
           version: 9
 
       - name: Setup Node
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v5
         with:
           node-version: 20
           cache: pnpm
@@ -371,7 +371,7 @@ jobs:
         run: pnpm install --frozen-lockfile
 
       - name: Cache cargo
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
           path: |
             ~/.cargo/registry
@@ -419,7 +419,7 @@ jobs:
           }
           Get-ChildItem release-staging
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v6
         with:
           name: claudepot-x86_64-windows
           path: |
@@ -442,7 +442,7 @@ jobs:
     permissions:
       contents: write
     steps:
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v7
         with:
           path: artifacts
 
@@ -467,7 +467,7 @@ jobs:
           ls -la release/
 
       - name: Create release (draft)
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@v3
         with:
           files: release/*
           draft: true
