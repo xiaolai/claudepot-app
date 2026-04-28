@@ -584,16 +584,33 @@ mod tests {
         let proj = tmp.path().join("new");
         fs::create_dir_all(proj.join(".claude")).unwrap();
         let settings = proj.join(".claude").join("settings.json");
-        fs::write(
-            &settings,
-            r#"{"autoMemoryDirectory":"/old/project/memdir","other":"keep"}"#,
-        )
-        .unwrap();
 
-        let rewrote = rewrite_project_settings(&proj, "/old/project", "/new/path").unwrap();
+        // Use platform-native absolute paths so `Path::is_absolute`
+        // returns true on both OSes — Windows considers `/foo` to be
+        // *relative* (no drive letter), so the Unix literal would
+        // make the rewrite branch silently skip on the Windows runner.
+        #[cfg(unix)]
+        let (old, new, mem_old, mem_new) = (
+            "/old/project",
+            "/new/path",
+            "/old/project/memdir",
+            "/new/path/memdir",
+        );
+        #[cfg(windows)]
+        let (old, new, mem_old, mem_new) = (
+            r"C:\old\project",
+            r"C:\new\path",
+            r"C:\old\project\memdir",
+            r"C:\new\path\memdir",
+        );
+
+        let initial = json!({"autoMemoryDirectory": mem_old, "other": "keep"});
+        fs::write(&settings, initial.to_string()).unwrap();
+
+        let rewrote = rewrite_project_settings(&proj, old, new).unwrap();
         assert!(rewrote);
         let after: Value = serde_json::from_str(&fs::read_to_string(&settings).unwrap()).unwrap();
-        assert_eq!(after["autoMemoryDirectory"], json!("/new/path/memdir"));
+        assert_eq!(after["autoMemoryDirectory"], json!(mem_new));
         assert_eq!(after["other"], json!("keep"));
     }
 

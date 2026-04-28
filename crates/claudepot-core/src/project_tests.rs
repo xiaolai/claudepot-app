@@ -4,6 +4,24 @@
 //! still resolve `super::*` against the parent module's internals.
 
 use super::*;
+use crate::path_utils::simplify_windows_path;
+
+/// Canonicalize a path (typically a temp-dir root) and strip the
+/// Windows `\\?\` verbatim prefix. Mirrors what `resolve_path` does
+/// in production; without this, fixtures on Windows compute slugs
+/// from the verbatim form while production looks them up in the
+/// simplified form, and every CC-dir lookup misses. No-op on Unix.
+fn canonical_test_path(p: &Path) -> PathBuf {
+    let canon = p.canonicalize().unwrap();
+    PathBuf::from(simplify_windows_path(&canon.to_string_lossy()))
+}
+
+/// String form of `canonical_test_path` — for sites that feed the
+/// path into `sanitize_path` or compare against a stringified
+/// production output.
+fn canonical_test_str(p: &Path) -> String {
+    canonical_test_path(p).to_string_lossy().to_string()
+}
 
 #[test]
 fn test_sanitize_unix_path() {
@@ -601,7 +619,7 @@ fn test_move_project_same_path() {
 fn test_move_project_renames_cc_dir() {
     let tmp = tempfile::tempdir().unwrap();
     // Canonicalize to handle macOS /tmp -> /private/tmp symlink
-    let base = tmp.path().canonicalize().unwrap();
+    let base = canonical_test_path(tmp.path());
 
     // Create source directory
     let src = base.join("old");
@@ -658,7 +676,7 @@ fn test_move_project_renames_cc_dir() {
 #[test]
 fn test_move_project_long_path_prefix_fallback() {
     let tmp = tempfile::tempdir().unwrap();
-    let base = tmp.path().canonicalize().unwrap();
+    let base = canonical_test_path(tmp.path());
 
     // Construct a >200-char source path
     let deep = "a".repeat(210);
@@ -722,7 +740,7 @@ fn test_move_project_long_path_prefix_fallback() {
 #[test]
 fn test_move_rejects_new_inside_old() {
     let tmp = tempfile::tempdir().unwrap();
-    let base = tmp.path().canonicalize().unwrap();
+    let base = canonical_test_path(tmp.path());
     let src = base.join("proj");
     fs::create_dir(&src).unwrap();
     let args = MoveArgs {
@@ -747,7 +765,7 @@ fn test_move_rejects_new_inside_old() {
 #[test]
 fn test_move_rejects_old_inside_new() {
     let tmp = tempfile::tempdir().unwrap();
-    let base = tmp.path().canonicalize().unwrap();
+    let base = canonical_test_path(tmp.path());
     let outer = base.join("outer");
     fs::create_dir(&outer).unwrap();
     let inner = outer.join("inner");
@@ -778,7 +796,7 @@ fn test_move_rejects_old_inside_new() {
 #[test]
 fn test_move_project_rewrites_session_jsonl_cwd() {
     let tmp = tempfile::tempdir().unwrap();
-    let base = tmp.path().canonicalize().unwrap();
+    let base = canonical_test_path(tmp.path());
 
     let src = base.join("old-project");
     fs::create_dir(&src).unwrap();
@@ -857,7 +875,7 @@ fn test_move_project_rewrites_session_jsonl_cwd() {
 #[test]
 fn test_move_project_rewrites_claude_json() {
     let tmp = tempfile::tempdir().unwrap();
-    let base = tmp.path().canonicalize().unwrap();
+    let base = canonical_test_path(tmp.path());
 
     let src = base.join("origproj");
     fs::create_dir(&src).unwrap();
@@ -926,7 +944,7 @@ fn test_move_project_rewrites_claude_json() {
 #[test]
 fn test_move_project_skips_p7_when_claude_json_path_is_none() {
     let tmp = tempfile::tempdir().unwrap();
-    let base = tmp.path().canonicalize().unwrap();
+    let base = canonical_test_path(tmp.path());
 
     let src = base.join("a");
     fs::create_dir(&src).unwrap();
@@ -965,7 +983,7 @@ fn test_move_project_skips_p7_when_claude_json_path_is_none() {
 #[test]
 fn test_move_project_rewrites_history() {
     let tmp = tempfile::tempdir().unwrap();
-    let base = tmp.path().canonicalize().unwrap();
+    let base = canonical_test_path(tmp.path());
 
     let src = base.join("old");
     fs::create_dir(&src).unwrap();
@@ -973,7 +991,7 @@ fn test_move_project_rewrites_history() {
 
     // Use canonical paths in history entries. Build entries via
     // serde_json so Windows backslashes get correctly JSON-escaped.
-    let old_str = src.canonicalize().unwrap().to_string_lossy().to_string();
+    let old_str = canonical_test_str(&src);
     let new_str = dst.to_string_lossy().to_string();
 
     let history = base.join("history.jsonl");
@@ -1027,7 +1045,7 @@ fn test_move_project_rewrites_history() {
 #[test]
 fn test_move_project_dry_run() {
     let tmp = tempfile::tempdir().unwrap();
-    let base = tmp.path().canonicalize().unwrap();
+    let base = canonical_test_path(tmp.path());
 
     let src = base.join("old");
     fs::create_dir(&src).unwrap();
@@ -1753,7 +1771,7 @@ fn test_clean_preview_protected_count_uses_fail_safe_defaults() {
 #[test]
 fn test_move_project_already_moved() {
     let tmp = tempfile::tempdir().unwrap();
-    let base = tmp.path().canonicalize().unwrap();
+    let base = canonical_test_path(tmp.path());
 
     // Only destination exists (user already did `mv`)
     let src = base.join("old");
@@ -1792,7 +1810,7 @@ fn test_move_project_already_moved() {
 #[test]
 fn test_move_project_state_only() {
     let tmp = tempfile::tempdir().unwrap();
-    let base = tmp.path().canonicalize().unwrap();
+    let base = canonical_test_path(tmp.path());
 
     let src = base.join("old");
     fs::create_dir(&src).unwrap();
@@ -1802,7 +1820,7 @@ fn test_move_project_state_only() {
     let projects_dir = base.join("projects");
     fs::create_dir(&projects_dir).unwrap();
     // Use canonical path for sanitization (matches what resolve_path returns)
-    let old_san = sanitize_path(&src.canonicalize().unwrap().to_string_lossy());
+    let old_san = sanitize_path(&canonical_test_str(&src));
     let cc_old = projects_dir.join(&old_san);
     fs::create_dir(&cc_old).unwrap();
 
@@ -1865,12 +1883,14 @@ fn test_resolve_path_expands_bare_tilde() {
     let home = dirs::home_dir().expect("HOME available in tests");
     // Compare to canonical home (resolve_path canonicalizes existing
     // paths; macOS may symlink-resolve `/Users/x` and `$HOME` may differ
-    // from the canonical form).
-    let canonical_home = home
-        .canonicalize()
-        .unwrap_or(home)
-        .to_string_lossy()
-        .to_string();
+    // from the canonical form). Strip `\\?\` on Windows because
+    // `resolve_path` simplifies the verbatim form away.
+    let canonical_home = simplify_windows_path(
+        &home
+            .canonicalize()
+            .unwrap_or(home)
+            .to_string_lossy(),
+    );
     assert_eq!(resolved, canonical_home);
 }
 
@@ -1921,14 +1941,12 @@ fn test_resolve_path_rejects_bare_user_tilde() {
 fn test_resolve_path_nfc_ascii_unchanged() {
     // ASCII paths must pass through NFC unchanged
     let tmp = tempfile::tempdir().unwrap();
-    let ascii_dir = tmp.path().canonicalize().unwrap().join("plain_ascii");
+    let ascii_dir = canonical_test_path(tmp.path()).join("plain_ascii");
     fs::create_dir(&ascii_dir).unwrap();
     let resolved = resolve_path(ascii_dir.to_str().unwrap()).unwrap();
-    let canonical = ascii_dir
-        .canonicalize()
-        .unwrap()
-        .to_string_lossy()
-        .to_string();
+    // Use `canonical_test_str` for the expected so both sides are in
+    // the simplified-Windows shape (`resolve_path` strips `\\?\`).
+    let canonical = canonical_test_str(&ascii_dir);
     assert_eq!(resolved, canonical);
 }
 
@@ -1936,7 +1954,7 @@ fn test_resolve_path_nfc_ascii_unchanged() {
 fn test_resolve_path_nfc_normalizes_nfd() {
     // NFD "café" (e + combining acute) must become NFC "café" (é precomposed)
     let tmp = tempfile::tempdir().unwrap();
-    let base = tmp.path().canonicalize().unwrap();
+    let base = canonical_test_path(tmp.path());
     let nfd_name = "caf\u{0065}\u{0301}"; // NFD: e + combining acute accent
     let nfd_dir = base.join(nfd_name);
     fs::create_dir(&nfd_dir).unwrap();
@@ -1953,7 +1971,7 @@ fn test_sanitize_nfd_nfc_produces_same_output() {
     // NFD and NFC of the same path must produce identical sanitize output
     // after resolve_path normalizes to NFC
     let tmp = tempfile::tempdir().unwrap();
-    let base = tmp.path().canonicalize().unwrap();
+    let base = canonical_test_path(tmp.path());
     let nfd_name = "caf\u{0065}\u{0301}";
     let nfc_name = "caf\u{00e9}";
     let nfd_dir = base.join(nfd_name);
@@ -1974,7 +1992,7 @@ fn test_sanitize_nfd_nfc_produces_same_output() {
 fn test_resolve_path_nfc_korean_jamo() {
     // Korean Jamo (한) must become precomposed Hangul (한)
     let tmp = tempfile::tempdir().unwrap();
-    let base = tmp.path().canonicalize().unwrap();
+    let base = canonical_test_path(tmp.path());
     let jamo = "\u{1112}\u{1161}\u{11AB}"; // 한 (conjoining Jamo)
     let jamo_dir = base.join(jamo);
     fs::create_dir(&jamo_dir).unwrap();
@@ -2153,7 +2171,7 @@ fn test_resolve_path_relative_joins_cwd() {
 #[test]
 fn test_move_project_both_exist_error() {
     let tmp = tempfile::tempdir().unwrap();
-    let base = tmp.path().canonicalize().unwrap();
+    let base = canonical_test_path(tmp.path());
 
     let src = base.join("old");
     let dst = base.join("new");
@@ -2188,7 +2206,7 @@ fn test_move_project_both_exist_error() {
 #[test]
 fn test_move_project_neither_exist_error() {
     let tmp = tempfile::tempdir().unwrap();
-    let base = tmp.path().canonicalize().unwrap();
+    let base = canonical_test_path(tmp.path());
 
     let args = MoveArgs {
         old_path: base.join("nonexistent1"),
@@ -2215,7 +2233,7 @@ fn test_move_project_neither_exist_error() {
 #[test]
 fn test_move_project_merge_cc_dirs() {
     let tmp = tempfile::tempdir().unwrap();
-    let base = tmp.path().canonicalize().unwrap();
+    let base = canonical_test_path(tmp.path());
 
     let src = base.join("old");
     fs::create_dir(&src).unwrap();
@@ -2265,7 +2283,7 @@ fn test_move_project_merge_cc_dirs() {
 #[test]
 fn test_move_project_overwrite_cc_dir() {
     let tmp = tempfile::tempdir().unwrap();
-    let base = tmp.path().canonicalize().unwrap();
+    let base = canonical_test_path(tmp.path());
 
     let src = base.join("old");
     fs::create_dir(&src).unwrap();
@@ -2312,7 +2330,7 @@ fn test_move_project_overwrite_cc_dir() {
 #[test]
 fn test_move_project_conflict_warning() {
     let tmp = tempfile::tempdir().unwrap();
-    let base = tmp.path().canonicalize().unwrap();
+    let base = canonical_test_path(tmp.path());
 
     let src = base.join("old");
     fs::create_dir(&src).unwrap();
@@ -2359,7 +2377,7 @@ fn test_move_project_conflict_warning() {
 #[test]
 fn test_move_project_dry_run_with_conflict() {
     let tmp = tempfile::tempdir().unwrap();
-    let base = tmp.path().canonicalize().unwrap();
+    let base = canonical_test_path(tmp.path());
 
     let src = base.join("old");
     fs::create_dir(&src).unwrap();
@@ -2369,7 +2387,7 @@ fn test_move_project_dry_run_with_conflict() {
     fs::create_dir(&projects_dir).unwrap();
 
     // Create non-empty CC dirs for both paths
-    let old_san = sanitize_path(&src.canonicalize().unwrap().to_string_lossy());
+    let old_san = sanitize_path(&canonical_test_str(&src));
     let cc_old = projects_dir.join(&old_san);
     fs::create_dir(&cc_old).unwrap();
     fs::write(cc_old.join("s.jsonl"), "{}").unwrap();
@@ -2407,7 +2425,7 @@ fn test_move_project_dry_run_with_conflict() {
 #[test]
 fn test_move_project_empty_new_cc_dir_replaced() {
     let tmp = tempfile::tempdir().unwrap();
-    let base = tmp.path().canonicalize().unwrap();
+    let base = canonical_test_path(tmp.path());
 
     let src = base.join("old");
     fs::create_dir(&src).unwrap();
@@ -2554,7 +2572,7 @@ fn mk_move_fixture() -> (
     std::path::PathBuf,
 ) {
     let tmp = tempfile::tempdir().unwrap();
-    let base = tmp.path().canonicalize().unwrap();
+    let base = canonical_test_path(tmp.path());
     let src = base.join("old");
     fs::create_dir(&src).unwrap();
     let dst = base.join("new");
@@ -2692,7 +2710,7 @@ fn test_move_project_orphan_roundtrip_prevents_false_positive() {
     // the cwd-from-sessions recovery, the project would be flagged orphan
     // even though the real dir /tmp/my-project exists.
     let tmp = tempfile::tempdir().unwrap();
-    let base = tmp.path().canonicalize().unwrap();
+    let base = canonical_test_path(tmp.path());
 
     // The real project dir (with a hyphen in the name).
     let project_dir = base.join("my-project");
@@ -2747,7 +2765,7 @@ fn test_move_project_cross_device_no_exdev_on_windows() {
     // Instead, verify the in-same-device happy path still works on all
     // platforms (which it does via fs::rename without the fallback).
     let tmp = tempfile::tempdir().unwrap();
-    let base = tmp.path().canonicalize().unwrap();
+    let base = canonical_test_path(tmp.path());
     let src = base.join("old");
     fs::create_dir(&src).unwrap();
     let dst = base.join("new");

@@ -568,22 +568,26 @@ mod tests {
         // Note: dead_repo does NOT have a `.claude/` directory.
         std::fs::create_dir_all(&dead_repo).unwrap();
 
-        // Plant transcripts that record each project's cwd.
+        // Plant transcripts that record each project's cwd. Build via
+        // `serde_json::json!` so Windows backslashes are correctly
+        // JSON-escaped — interpolating raw `cwd.to_string_lossy()` into
+        // a `format!` string produces invalid JSON on Windows
+        // (`C:\Users\…` becomes a string with unescaped backslashes
+        // that serde_json then refuses to parse).
         let alive_slug = crate::project_sanitize::sanitize_path(&alive_repo.to_string_lossy());
         let dead_slug = crate::project_sanitize::sanitize_path(&dead_repo.to_string_lossy());
         for (slug, cwd) in [(&alive_slug, &alive_repo), (&dead_slug, &dead_repo)] {
             let dir = config.join("projects").join(slug);
             std::fs::create_dir_all(&dir).unwrap();
             let session = dir.join("S.jsonl");
-            std::fs::write(
-                &session,
-                format!(
-                    r#"{{"type":"user","timestamp":"2026-04-10T10:00:00Z","cwd":"{}","sessionId":"S","message":{{"role":"user","content":"hi"}}}}
-"#,
-                    cwd.to_string_lossy()
-                ),
-            )
-            .unwrap();
+            let line = serde_json::json!({
+                "type": "user",
+                "timestamp": "2026-04-10T10:00:00Z",
+                "cwd": cwd.to_string_lossy().as_ref(),
+                "sessionId": "S",
+                "message": {"role": "user", "content": "hi"},
+            });
+            std::fs::write(&session, format!("{line}\n")).unwrap();
         }
 
         let discovered = discover_known_project_roots(&config);

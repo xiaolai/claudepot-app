@@ -464,6 +464,19 @@ mod tests {
             })
             .to_string();
             fs::write(&session, format!("{}\n", line)).unwrap();
+            // Age the session beyond the live-heartbeat window. On
+            // Linux/macOS `detect_live_session` requires a kernel
+            // confirmation signal (lsof / process scan) before treating
+            // a recent mtime as live, but on Windows runners `lsof` is
+            // absent, so the fallback path treats any mtime within
+            // REMOVE_LIVE_HEARTBEAT_SECS (60 s) as a live session and
+            // every test that just wrote a fresh fixture would refuse
+            // to remove with `ClaudeRunning`. Pushing mtime ~2 minutes
+            // back keeps the rest of the production path exercised.
+            let stale = filetime::FileTime::from_system_time(
+                std::time::SystemTime::now() - std::time::Duration::from_secs(120),
+            );
+            filetime::set_file_mtime(&session, stale).unwrap();
         }
 
         let claude_json = tmp.path().join(".claude.json");
