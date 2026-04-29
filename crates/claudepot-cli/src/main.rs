@@ -169,6 +169,27 @@ enum Commands {
     /// Prints MATCH / DRIFT / NOT SIGNED IN. Exit code: 0 match,
     /// 2 drift, 3 couldn't check.
     Status,
+    /// Local cost report — token totals + USD cost rolled up by
+    /// project, derived from CC transcripts on disk.
+    ///
+    /// No network call. Cost computed against the bundled price
+    /// table; per-account attribution is intentionally omitted (CC
+    /// transcripts don't carry an account id, and claudepot doesn't
+    /// keep a swap-event log to reconstruct it).
+    Usage {
+        #[command(subcommand)]
+        action: UsageAction,
+    },
+}
+
+#[derive(Subcommand)]
+enum UsageAction {
+    /// Print the per-project cost + token report.
+    Report {
+        /// Time window: `all` (default) or `<n>d` (e.g. `7d`, `30d`).
+        #[arg(long, default_value = "all")]
+        window: String,
+    },
 }
 
 #[derive(Subcommand)]
@@ -896,6 +917,9 @@ async fn main() -> Result<()> {
         },
         Commands::Doctor => commands::doctor::run(&ctx).await?,
         Commands::Status => commands::status::run(&ctx).await?,
+        Commands::Usage { action } => match action {
+            UsageAction::Report { window } => commands::usage::report(&ctx, &window).await?,
+        },
         Commands::Activity { action } => match action {
             ActivityAction::Recent {
                 since,

@@ -99,3 +99,4 @@ pub mod session_subagents;
 pub mod session_tool_link;
 pub mod session_worktree;
 pub mod trash;
+pub mod usage_local;
