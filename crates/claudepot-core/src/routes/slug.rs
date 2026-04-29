@@ -42,7 +42,10 @@ pub fn sanitize_wrapper_name(name: &str) -> Result<String, WrapperNameError> {
     if trimmed.is_empty() {
         return Err(WrapperNameError::Empty);
     }
-    if RESERVED.contains(&trimmed) {
+    // Case-insensitive: macOS/Windows filesystems are case-insensitive,
+    // so `Claude` would still shadow the real `claude` binary.
+    let lower = trimmed.to_ascii_lowercase();
+    if RESERVED.contains(&lower.as_str()) {
         return Err(WrapperNameError::Reserved(trimmed.to_string()));
     }
     // Allow alnum + dash + underscore. No leading dash. No path

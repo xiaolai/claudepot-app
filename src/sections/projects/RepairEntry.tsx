@@ -61,7 +61,12 @@ export function RepairEntry({
           last error: {e.last_error}
         </div>
       )}
-      {e.status !== "abandoned" && (
+      {e.status !== "abandoned" && e.status !== "running" && (
+        // A `running` journal is owned by an in-flight rename; offering
+        // Resume/Rollback/Abandon here lets the user race that operation
+        // and corrupt the in-memory state machine. Only `pending` and
+        // `stale` (lock present but no live owner) entries get the
+        // mutating actions; `running` is render-only.
         <div className="repair-entry-actions">
           <button type="button" className="btn" title="Re-run the original rename" onClick={onResume}>
             <Icon name="rotate-ccw" />Resume

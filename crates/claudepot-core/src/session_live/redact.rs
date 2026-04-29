@@ -69,8 +69,14 @@ static SENSITIVE_KV_RE: Lazy<Regex> = Lazy::new(|| {
     // specifically so we can preserve the `Authorization: Bearer ***`
     // shape; don't duplicate `auth(orization)?` here or it would
     // overwrite the structured mask with the generic one.
+    //
+    // Explicit OAuth variants (`client_secret`, `id_token`, `client_id`)
+    // are listed before the bare `secret`/`token` keywords because `\b`
+    // does NOT trip between `_` and a letter — both are word chars in
+    // regex — so `\bsecret` would miss `client_secret=…`. Naming the
+    // compound forms in their own alternatives sidesteps that.
     Regex::new(
-        r#"(?i)\b(password|passwd|api[_-]?key|access[_-]?token|refresh[_-]?token|secret|bearer|token)\s*[:=]\s*"?([^"\s&;,}]+)"?"#,
+        r#"(?i)\b(password|passwd|api[_-]?key|access[_-]?token|refresh[_-]?token|client[_-]?secret|client[_-]?id|id[_-]?token|secret|bearer|token)\s*[:=]\s*"?([^"\s&;,}]+)"?"#,
     )
     .expect("static regex")
 });

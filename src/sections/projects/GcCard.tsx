@@ -25,16 +25,26 @@ export function GcCard({
   // 1–365 window.
   const [days, setDays] = useState<number>(30);
   const [busy, setBusy] = useState(false);
+  // `result` is paired with the `previewDays` it was computed for. If
+  // the user changes the days input after Preview, the preview
+  // becomes stale and Execute must not run against the new threshold
+  // — otherwise an unpreviewed value could delete more than the
+  // preview promised. Clearing result on input change forces a fresh
+  // preview before Execute is enabled.
+  const [previewDays, setPreviewDays] = useState<number | null>(null);
   const [result, setResult] = useState<GcOutcome | null>(null);
 
   const daysValid =
     Number.isFinite(days) && days >= GC_DAYS_MIN && days <= GC_DAYS_MAX;
+  const previewMatchesInput = previewDays !== null && previewDays === days;
 
   const dryRun = useCallback(async () => {
     if (!daysValid) return;
     setBusy(true);
     try {
-      setResult(await api.repairGc(days, true));
+      const r = await api.repairGc(days, true);
+      setResult(r);
+      setPreviewDays(days);
     } catch (e) {
       pushToast("error", `GC preview failed: ${e}`);
     } finally {
@@ -43,11 +53,12 @@ export function GcCard({
   }, [days, daysValid, pushToast]);
 
   const execute = useCallback(async () => {
-    if (!daysValid) return;
+    if (!daysValid || !previewMatchesInput) return;
     setBusy(true);
     try {
       const r = await api.repairGc(days, false);
       setResult(null);
+      setPreviewDays(null);
       pushToast(
         "info",
         `GC: removed ${r.removed_journals} journals, ${r.removed_snapshots} snapshots, freed ${formatBytes(
@@ -59,7 +70,7 @@ export function GcCard({
     } finally {
       setBusy(false);
     }
-  }, [days, daysValid, pushToast]);
+  }, [days, daysValid, previewMatchesInput, pushToast]);
 
   return (
     <section className="maintenance-section">
@@ -88,7 +99,14 @@ export function GcCard({
           min={GC_DAYS_MIN}
           max={GC_DAYS_MAX}
           value={Number.isFinite(days) ? days : ""}
-          onChange={(e) => setDays(e.target.valueAsNumber)}
+          onChange={(e) => {
+            setDays(e.target.valueAsNumber);
+            // Days changed → previously-previewed result no longer
+            // describes what Execute would do. Clear it so the user
+            // must Preview again before Execute lights back up.
+            setResult(null);
+            setPreviewDays(null);
+          }}
           aria-invalid={!daysValid}
           style={{
             width: "var(--sp-72)",
@@ -127,13 +145,13 @@ export function GcCard({
           variant="solid"
           danger
           onClick={execute}
-          disabled={busy || !result || !daysValid}
+          disabled={busy || !result || !daysValid || !previewMatchesInput}
           title={
             !daysValid
               ? `Enter a value between ${GC_DAYS_MIN} and ${GC_DAYS_MAX}`
-              : result
-                ? undefined
-                : "Run Preview first"
+              : !result || !previewMatchesInput
+                ? "Run Preview first"
+                : undefined
           }
         >
           Execute GC

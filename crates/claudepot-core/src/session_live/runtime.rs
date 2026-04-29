@@ -550,7 +550,19 @@ impl LiveRuntime {
                                 };
                                 s.seq += 1;
                                 let plugin = card.plugin.clone();
-                                let cwd = card.cwd.to_string_lossy().into_owned();
+                                // Redact cwd and title before they
+                                // cross the IPC boundary into
+                                // notifications/UI. Both fields can
+                                // contain user/plugin-authored text
+                                // that may include `sk-ant-` tokens
+                                // or sensitive query strings; the
+                                // snapshot path already redacts cwd,
+                                // and CardEmitted must match.
+                                let cwd = crate::session_live::redact::redact_secrets(
+                                    &card.cwd.to_string_lossy(),
+                                );
+                                let title =
+                                    crate::session_live::redact::redact_secrets(&card.title);
                                 let _ = self
                                     .detail
                                     .publish_delta(LiveDelta {
@@ -561,7 +573,7 @@ impl LiveRuntime {
                                             id: *id,
                                             card_kind: card.kind.label().to_string(),
                                             severity: card.severity.label().to_string(),
-                                            title: card.title.clone(),
+                                            title,
                                             ts_ms: card.ts.timestamp_millis(),
                                             plugin,
                                             cwd,
