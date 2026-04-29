@@ -347,6 +347,7 @@ mod tests {
             &target,
             ArtifactKind::Agent,
             OnConflict::Refuse,
+            &ActiveRoots::default(),
         )
         .unwrap();
         assert_eq!(restored.final_path, target);
@@ -392,6 +393,7 @@ mod tests {
             &target,
             ArtifactKind::Agent,
             OnConflict::Refuse,
+            &ActiveRoots::default(),
         )
         .unwrap_err();
         assert!(matches!(err, LifecycleError::WrongTrashState { .. }));
@@ -476,6 +478,7 @@ mod tests {
             std::path::Path::new("/x"),
             ArtifactKind::Agent,
             OnConflict::Refuse,
+            &ActiveRoots::default(),
         )
         .unwrap_err();
         assert!(matches!(err, LifecycleError::InvalidTrashId(_)));
@@ -530,6 +533,7 @@ mod tests {
             &target,
             ArtifactKind::Agent,
             OnConflict::Refuse,
+            &ActiveRoots::default(),
         )
         .unwrap();
         // After successful recover the file should land at the

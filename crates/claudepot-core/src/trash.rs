@@ -170,9 +170,19 @@ fn inode_of(_path: &Path) -> u64 {
 
 /// Move a file into the trash.
 ///
-/// Creates a fresh batch directory under `<data_dir>/trash/sessions/`
-/// and moves the source in. Cross-device renames fall back to
-/// copy+fsync+unlink.
+/// Creates a fresh batch directory under `<data_dir>/trash/sessions/`,
+/// writes the manifest atomically, then moves the source in. The
+/// audit fix for trash.rs:193: previously the source was moved first
+/// and the manifest was written second, so a manifest-write failure
+/// (or process kill between) left an orphan payload that `list()`
+/// silently filtered out — invisible disk usage that GC couldn't
+/// reach. The new order writes the manifest first; on payload move
+/// failure we roll back by removing the manifest, so the only states
+/// the world ever sees are "pre-trash" or "fully-trashed".
+///
+/// Cross-device renames fall back to copy+fsync+unlink (see
+/// `move_file`), but only AFTER the manifest is committed — so even
+/// the slow path is atomic from the listing/empty perspective.
 pub fn write(data_dir: &Path, put: TrashPut<'_>) -> Result<TrashEntry, TrashError> {
     let src = put.orig_path;
     let meta = fs::metadata(src).map_err(|e| match e.kind() {
@@ -190,8 +200,6 @@ pub fn write(data_dir: &Path, put: TrashPut<'_>) -> Result<TrashEntry, TrashErro
     let file_name = format!("{}.jsonl", inode);
     let dest = batch_dir.join(&file_name);
 
-    move_file(src, &dest)?;
-
     let entry = TrashEntry {
         id: batch_id.clone(),
         manifest_id: batch_id.clone(),
@@ -206,10 +214,48 @@ pub fn write(data_dir: &Path, put: TrashPut<'_>) -> Result<TrashEntry, TrashErro
         cwd: put.cwd.map(Path::to_path_buf),
         reason: put.reason,
     };
-    let manifest = batch_dir.join("manifest.json");
+    let manifest_path = batch_dir.join("manifest.json");
     let json = serde_json::to_vec_pretty(&entry).expect("TrashEntry serializes");
-    fs::write(&manifest, json).map_err(|e| TrashError::io(&manifest, e))?;
+
+    // Stage 1: write manifest atomically (tmp + rename). After this
+    // returns Ok, list() will see the batch — but only the moved
+    // payload completes the entry. Stage 2 below rolls back on move
+    // failure.
+    write_manifest_atomic(&manifest_path, &json)?;
+
+    // Stage 2: move payload into the batch. On failure, remove the
+    // manifest and batch_dir so we don't leave a phantom entry that
+    // list() would surface and restore would fail on.
+    if let Err(e) = move_file(src, &dest) {
+        let _ = fs::remove_file(&manifest_path);
+        let _ = fs::remove_dir(&batch_dir);
+        return Err(e);
+    }
+
     Ok(entry)
+}
+
+/// Write `bytes` to `path` via tmp-then-rename. The tmp lives in the
+/// same parent directory so the rename is atomic on the same
+/// filesystem. Used for the trash manifest so a `list()` reader
+/// never sees a half-written manifest.
+fn write_manifest_atomic(path: &Path, bytes: &[u8]) -> Result<(), TrashError> {
+    let parent = path
+        .parent()
+        .ok_or_else(|| TrashError::io(path, io::Error::other("manifest has no parent dir")))?;
+    let tmp = parent.join(format!(
+        ".{}.tmp.{}",
+        path.file_name()
+            .and_then(|n| n.to_str())
+            .unwrap_or("manifest.json"),
+        std::process::id()
+    ));
+    fs::write(&tmp, bytes).map_err(|e| TrashError::io(&tmp, e))?;
+    if let Err(e) = fs::rename(&tmp, path) {
+        let _ = fs::remove_file(&tmp);
+        return Err(TrashError::io(path, e));
+    }
+    Ok(())
 }
 
 /// Move `src` to `dest`. First tries a plain rename (atomic on the
@@ -266,10 +312,21 @@ pub fn list(data_dir: &Path, filter: TrashFilter) -> Result<TrashListing, TrashE
             continue;
         }
         let raw = fs::read_to_string(&manifest).map_err(|e| TrashError::io(&manifest, e))?;
-        let te: TrashEntry = serde_json::from_str(&raw).map_err(|e| TrashError::ManifestParse {
+        let mut te: TrashEntry = serde_json::from_str(&raw).map_err(|e| TrashError::ManifestParse {
             path: manifest.clone(),
             source: e,
         })?;
+        // Audit fix for trash.rs:384 — overwrite te.id with the
+        // ACTUAL directory name (validated against batch_id shape).
+        // Whatever the manifest claimed, downstream code (empty,
+        // restore) only ever uses the filesystem-derived id, so a
+        // tampered manifest can't direct `remove_dir_all` outside
+        // the trash root.
+        let dir_name = match path.file_name().and_then(|n| n.to_str()) {
+            Some(n) if is_valid_batch_id(n) => n.to_string(),
+            _ => continue, // unrecognized dir name → skip silently
+        };
+        te.id = dir_name;
         if let Some(k) = filter.kind {
             if te.kind != k {
                 continue;
@@ -377,17 +434,54 @@ pub fn restore(
 
 /// Delete batches matching the filter. Returns the number of bytes
 /// reclaimed (sum of entry `size`). Missing root is a no-op.
+///
+/// Audit fix for trash.rs:384: validate that `te.id` is a single
+/// shell-safe path component before joining it onto trash_root.
+/// The previous shape trusted `manifest.json`'s `id` field as
+/// authoritative; an attacker who could edit a manifest could put
+/// `id: "../../etc"` (or similar) and `remove_dir_all` would walk
+/// outside the trash tree. We now require the id to be the same as
+/// the directory name we discovered while walking — `list()`
+/// guarantees this by overwriting `te.id` with the on-disk dir name
+/// for every entry it returns.
 pub fn empty(data_dir: &Path, filter: TrashFilter) -> Result<u64, TrashError> {
     let listing = list(data_dir, filter)?;
+    let root = trash_root(data_dir);
     let mut freed: u64 = 0;
     for te in &listing.entries {
-        let batch_dir = trash_root(data_dir).join(&te.id);
+        if !is_valid_batch_id(&te.id) {
+            // Defense-in-depth — `list()` already overwrites `te.id`
+            // with the on-disk dir name and filters unrecognized
+            // shapes, but if a future patch loosens that, we still
+            // refuse to build a path here.
+            tracing::warn!(
+                "skipping trash batch with unsafe id {:?} during empty()",
+                te.id
+            );
+            continue;
+        }
+        let batch_dir = root.join(&te.id);
+        // Containment check: the constructed path must stay under
+        // `root` even if `te.id` somehow slipped through above. This
+        // is paranoia given the validator, but the cost is one
+        // canonicalize call per batch and the failure mode it
+        // protects against is `remove_dir_all` outside the trash.
+        if let (Ok(canon_root), Ok(canon_batch)) = (root.canonicalize(), batch_dir.canonicalize()) {
+            if !canon_batch.starts_with(&canon_root) {
+                tracing::warn!(
+                    "trash batch {:?} resolves outside trash root — refusing to remove",
+                    te.id
+                );
+                continue;
+            }
+        }
         if fs::remove_dir_all(&batch_dir).is_ok() {
             freed = freed.saturating_add(te.size);
         }
     }
     Ok(freed)
 }
+
 
 /// Sweep batches older than `older_than`. Convenience wrapper around
 /// `empty` with a preset filter. Called on CLI / app startup.

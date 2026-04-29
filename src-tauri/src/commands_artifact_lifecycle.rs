@@ -331,13 +331,19 @@ pub async fn artifact_recover_trash(
     confirmed_target_path: String,
     confirmed_kind: String,
     on_conflict: String,
+    project_root: Option<String>,
 ) -> Result<RestoredArtifactDto, String> {
     tokio::task::spawn_blocking(move || {
         let trash_root = artifact_lifecycle::default_trash_root();
         let policy = parse_on_conflict(&on_conflict)?;
         let kind = parse_kind(&confirmed_kind)?;
         let target = PathBuf::from(confirmed_target_path);
-        artifact_lifecycle::recover_at(&trash_root, &trash_id, &target, kind, policy)
+        // Audit gate (artifact_lifecycle/trash.rs:253): the renderer
+        // is restricted to ActiveRoots — user_root + already-known
+        // project_roots. A renderer payload with a `confirmed_target`
+        // outside both is refused inside `recover_at`.
+        let roots = build_roots(project_root);
+        artifact_lifecycle::recover_at(&trash_root, &trash_id, &target, kind, policy, &roots)
             .map(RestoredArtifactDto::from)
             .map_err(err_to_string)
     })
