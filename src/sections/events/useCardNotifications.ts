@@ -166,10 +166,21 @@ export function useCardNotifications() {
       // projects with the same basename (e.g. ~/work/foo and
       // ~/personal/foo) from threading into one banner.
       const project = shortCwd(card.cwd);
+      // Click intent: send the user back to the host terminal of
+      // this session. The CardEmittedWire carries the wrapping
+      // delta's `session_id` at the top level (LiveDeltaDto has
+      // session_id alongside the flattened kind), so we can
+      // identify the host process at click time.
+      const sid = (payload as { session_id?: string }).session_id;
+      const target =
+        sid && card.cwd
+          ? ({ kind: "host" as const, session_id: sid, cwd: card.cwd })
+          : ({ kind: "info" as const });
       void dispatchOsNotification(card.title, project, {
         dedupeKey: `card:${card.card_kind}::${card.title}`,
         group: `project:${card.cwd}`,
         sound: "default",
+        target,
       });
     }
 

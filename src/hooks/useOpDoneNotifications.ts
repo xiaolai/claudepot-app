@@ -56,10 +56,16 @@ function dispatchPayload(payload: OpTerminalWire): void {
   // terminal notification, but the bucket is the right defense
   // against a future bug that double-emits). group by op kind
   // so e.g. five back-to-back verify_all completions stack.
+  // Click intent: open Claudepot — op completions ARE about
+  // Claudepot's own state (verify-all, project rename, prune,
+  // share, etc.). No deeper deep-link target today; the running-
+  // ops chip in the shell already animates the terminal state, so
+  // landing on the last-active section is the right behavior.
   void dispatchOsNotification(title, body, {
     dedupeKey: `op:${payload.op_id}`,
     group: `op:${payload.kind}`,
     sound: "default",
+    target: { kind: "info" },
   });
 }
 
