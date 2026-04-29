@@ -65,7 +65,14 @@ pub async fn run(account_id: Uuid, args: &[String]) -> Result<i32, LauncherError
     Ok(status.code().unwrap_or(1))
 }
 
+// Tests serialize through `lock_data_dir()` (a `Mutex<()>`) so they
+// don't trample the shared `CLAUDEPOT_DATA_DIR` env var. The
+// MutexGuard is intentionally held across `.await` for the lifetime
+// of each test, which `clippy::await_holding_lock` flags. The lock
+// is single-threaded, never poisoned, and never contended in a way
+// that could deadlock — silence it at the module boundary.
 #[cfg(test)]
+#[allow(clippy::await_holding_lock)]
 mod tests {
     use super::*;
     use crate::testing::{fresh_blob_json, lock_data_dir, setup_test_data_dir};

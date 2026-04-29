@@ -302,8 +302,10 @@ fn row25_file_history_repath_renames_and_rewrites_keys() {
 // records unchanged; resume still works.
 #[test]
 fn row26_no_file_history_flag_round_trips() {
-    let mut flags = ExportFlags::default();
-    flags.include_file_history = false;
+    let flags = ExportFlags {
+        include_file_history: false,
+        ..ExportFlags::default()
+    };
     let tmp = tempfile::tempdir().unwrap();
     let bundle_path = tmp.path().join("nofh.tar.zst");
     let mut w = BundleWriter::create(&bundle_path).unwrap();

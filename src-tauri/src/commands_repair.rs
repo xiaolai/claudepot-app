@@ -52,9 +52,7 @@ pub struct AbandonedCleanupReportDto {
     pub bytes_freed: u64,
 }
 
-impl From<claudepot_core::project_repair::AbandonedCleanupReport>
-    for AbandonedCleanupReportDto
-{
+impl From<claudepot_core::project_repair::AbandonedCleanupReport> for AbandonedCleanupReportDto {
     fn from(r: claudepot_core::project_repair::AbandonedCleanupReport) -> Self {
         Self {
             entries: r
@@ -112,22 +110,12 @@ fn spawn_repair_op(
         // in the same `~/.claudepot/repair/` tree as the original.
         let state_root_arg = Some(state_root);
         let result = match kind {
-            OpKind::RepairResume => project_repair::resume(
-                &entry,
-                cfg,
-                claude_json,
-                snaps,
-                state_root_arg,
-                &sink,
-            ),
-            OpKind::RepairRollback => project_repair::rollback(
-                &entry,
-                cfg,
-                claude_json,
-                snaps,
-                state_root_arg,
-                &sink,
-            ),
+            OpKind::RepairResume => {
+                project_repair::resume(&entry, cfg, claude_json, snaps, state_root_arg, &sink)
+            }
+            OpKind::RepairRollback => {
+                project_repair::rollback(&entry, cfg, claude_json, snaps, state_root_arg, &sink)
+            }
             OpKind::MoveProject
             | OpKind::CleanProjects
             | OpKind::SessionPrune
@@ -229,10 +217,15 @@ pub async fn project_move_start(
     let ops_for_task = ops.inner().clone();
     let old_path_for_task = args.old_path;
     // See `project_clean_start` for why this is an OS thread.
-    spawn_op_thread(app, ops_for_task, op_id.clone(), move |sink, app, ops, op_id| {
-        let result = project::move_project(&core_args, &sink);
-        finalize_op(&app, &ops, &op_id, &old_path_for_task, result);
-    });
+    spawn_op_thread(
+        app,
+        ops_for_task,
+        op_id.clone(),
+        move |sink, app, ops, op_id| {
+            let result = project::move_project(&core_args, &sink);
+            finalize_op(&app, &ops, &op_id, &old_path_for_task, result);
+        },
+    );
 
     Ok(op_id)
 }

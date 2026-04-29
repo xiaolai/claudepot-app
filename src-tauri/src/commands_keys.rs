@@ -114,7 +114,11 @@ pub async fn key_api_list() -> Result<Vec<ApiKeySummaryDto>, String> {
         let rows = keys
             .list_api_keys()
             .map_err(|e| format!("list api keys: {e}"))?;
-        Ok::<_, String>(rows.into_iter().map(|k| api_summary(k, &email_map)).collect())
+        Ok::<_, String>(
+            rows.into_iter()
+                .map(|k| api_summary(k, &email_map))
+                .collect(),
+        )
     })
     .await
     .map_err(|e| format!("blocking task failed: {e}"))?
@@ -181,9 +185,7 @@ async fn key_api_add_inner(
         return Err("label is required".to_string());
     }
     if !matches!(classify_token(token), Some(KeyPrefix::ApiKey)) {
-        return Err(
-            "not an API key — expected a value starting with `sk-ant-api03-`".to_string(),
-        );
+        return Err("not an API key — expected a value starting with `sk-ant-api03-`".to_string());
     }
 
     let accounts = open_store()?;
@@ -343,8 +345,7 @@ fn now_unix_ms() -> u64 {
 /// own local copy before / after returning to the IPC bridge.
 fn schedule_self_clear(app: AppHandle, mut payload: String) {
     tauri::async_runtime::spawn(async move {
-        tokio::time::sleep(tokio::time::Duration::from_millis(CLIPBOARD_CLEAR_MS))
-            .await;
+        tokio::time::sleep(tokio::time::Duration::from_millis(CLIPBOARD_CLEAR_MS)).await;
         let still_ours = match app.clipboard().read_text() {
             Ok(s) => s == payload,
             Err(_) => false,
@@ -394,8 +395,7 @@ async fn key_copy_inner(
                         .find_oauth_token(id)
                         .map_err(|e| format!("{e}"))?
                         .ok_or_else(|| format!("oauth token {id} not found"))?;
-                    let secret =
-                        keys.find_oauth_secret(id).map_err(|e| format!("{e}"))?;
+                    let secret = keys.find_oauth_secret(id).map_err(|e| format!("{e}"))?;
                     Ok((secret, row.label, row.token_preview))
                 }
             }
@@ -435,20 +435,14 @@ async fn key_copy_inner(
 /// can toast verbatim. Self-clears after 30s if the clipboard still
 /// holds our payload.
 #[tauri::command]
-pub async fn key_api_copy(
-    uuid: String,
-    app: AppHandle,
-) -> Result<KeyCopyReceiptDto, String> {
+pub async fn key_api_copy(uuid: String, app: AppHandle) -> Result<KeyCopyReceiptDto, String> {
     key_copy_inner(uuid, CopyKind::Api, app).await
 }
 
 /// Copy a `CLAUDE_CODE_OAUTH_TOKEN` to the OS clipboard. Sibling of
 /// `key_api_copy`. See that function for the secret-handling contract.
 #[tauri::command]
-pub async fn key_oauth_copy(
-    uuid: String,
-    app: AppHandle,
-) -> Result<KeyCopyReceiptDto, String> {
+pub async fn key_oauth_copy(uuid: String, app: AppHandle) -> Result<KeyCopyReceiptDto, String> {
     key_copy_inner(uuid, CopyKind::Oauth, app).await
 }
 
@@ -502,7 +496,9 @@ pub async fn key_oauth_usage_cached(
         .map_err(|e| format!("{e}"))?
         .ok_or_else(|| format!("oauth token {id} not found"))?;
     let snapshot = cache.peek_cached(token.account_uuid).await;
-    Ok(snapshot.as_ref().map(crate::dto::AccountUsageDto::from_response))
+    Ok(snapshot
+        .as_ref()
+        .map(crate::dto::AccountUsageDto::from_response))
 }
 
 #[cfg(test)]

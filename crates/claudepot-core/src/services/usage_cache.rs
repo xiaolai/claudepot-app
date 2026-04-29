@@ -719,7 +719,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_cache_miss_after_ttl() {
-        let (fetcher, count) = MockFetcher::new(55.0);
+        let (fetcher, _count) = MockFetcher::new(55.0);
         let cache = UsageCache::with_fetcher(Box::new(fetcher));
         let uuid = Uuid::new_v4();
 
@@ -775,7 +775,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_cooldown_expiry_allows_fetch() {
-        let (fetcher, count) = MockFetcher::new(10.0);
+        let (fetcher, _count) = MockFetcher::new(10.0);
         let cache = UsageCache::with_fetcher(Box::new(fetcher));
         let uuid = Uuid::new_v4();
 

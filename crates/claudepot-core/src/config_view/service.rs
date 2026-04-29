@@ -296,9 +296,15 @@ mod tests {
         let svc = ConfigScanService::new();
         assert!(svc.current_tree().is_none());
         assert_eq!(svc.generation(), 0);
-        let h = svc.start_scan();
-        assert_eq!(h.generation(), 1);
-        drop(h);
+        // Block-scope the handle so it goes out of scope between the
+        // generation check and the post-drop state assertions. An
+        // explicit `drop(h)` would lint as `clippy::drop_non_drop`
+        // because `ScanHandle` carries no `Drop` impl — block scoping
+        // expresses the same intent without the misleading call.
+        {
+            let h = svc.start_scan();
+            assert_eq!(h.generation(), 1);
+        }
         assert!(svc.current_tree().is_none());
         assert_eq!(svc.generation(), 0);
         // A subsequent commit with a fresh handle still works —

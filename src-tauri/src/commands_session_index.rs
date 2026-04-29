@@ -63,9 +63,7 @@ pub async fn session_read(session_id: String) -> Result<crate::dto::SessionDetai
 ///
 /// Wrapped in `spawn_blocking` for the same reason as `session_list_all`.
 #[tauri::command]
-pub async fn session_read_path(
-    file_path: String,
-) -> Result<crate::dto::SessionDetailDto, String> {
+pub async fn session_read_path(file_path: String) -> Result<crate::dto::SessionDetailDto, String> {
     tokio::task::spawn_blocking(move || {
         let cfg = paths::claude_config_dir();
         let detail = claudepot_core::session::read_session_detail_at_path(
@@ -111,13 +109,16 @@ pub async fn session_index_rebuild() -> Result<(), String> {
 /// Wrapped in `spawn_blocking` — `load_detail_by_path` parses the full
 /// JSONL synchronously.
 #[tauri::command]
-pub async fn session_chunks(
-    file_path: String,
-) -> Result<Vec<crate::dto::SessionChunkDto>, String> {
+pub async fn session_chunks(file_path: String) -> Result<Vec<crate::dto::SessionChunkDto>, String> {
     tokio::task::spawn_blocking(move || {
         let detail = load_detail_by_path(&file_path)?;
         let chunks = claudepot_core::session_chunks::build_chunks(&detail.events);
-        Ok::<_, String>(chunks.iter().map(crate::dto::SessionChunkDto::from).collect())
+        Ok::<_, String>(
+            chunks
+                .iter()
+                .map(crate::dto::SessionChunkDto::from)
+                .collect(),
+        )
     })
     .await
     .map_err(join_blocking_err)?
@@ -199,17 +200,13 @@ fn session_export_to_file_sync(
         .components()
         .any(|c| matches!(c, std::path::Component::ParentDir))
     {
-        return Err(format!(
-            "output path must not contain `..`: {output_path}"
-        ));
+        return Err(format!("output path must not contain `..`: {output_path}"));
     }
     // Refuse to overwrite a symlink — the user's chosen filesystem
     // might resolve to somewhere unexpected under our permissions.
     match std::fs::symlink_metadata(output) {
         Ok(meta) if meta.file_type().is_symlink() => {
-            return Err(format!(
-                "refusing to overwrite symlink: {output_path}"
-            ));
+            return Err(format!("refusing to overwrite symlink: {output_path}"));
         }
         _ => {}
     }
@@ -268,13 +265,11 @@ fn session_export_to_file_sync(
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;
-        let meta = std::fs::metadata(&tmp_path)
-            .map_err(|e| format!("stat tmp: {e}"))?;
+        let meta = std::fs::metadata(&tmp_path).map_err(|e| format!("stat tmp: {e}"))?;
         if meta.permissions().mode() & 0o077 != 0 {
-            if let Err(e) = std::fs::set_permissions(
-                &tmp_path,
-                std::fs::Permissions::from_mode(0o600),
-            ) {
+            if let Err(e) =
+                std::fs::set_permissions(&tmp_path, std::fs::Permissions::from_mode(0o600))
+            {
                 let _ = std::fs::remove_file(&tmp_path);
                 return Err(format!("chmod tmp: {e}"));
             }
@@ -318,9 +313,8 @@ pub async fn session_search(
         let cfg = paths::claude_config_dir();
         let rows = claudepot_core::session::list_all_sessions(&cfg)
             .map_err(|e| format!("list sessions: {e}"))?;
-        let hits =
-            claudepot_core::session_search::search_rows(&rows, &query, limit.unwrap_or(25))
-                .map_err(|e| format!("search sessions: {e}"))?;
+        let hits = claudepot_core::session_search::search_rows(&rows, &query, limit.unwrap_or(25))
+            .map_err(|e| format!("search sessions: {e}"))?;
         Ok::<_, String>(hits.iter().map(crate::dto::SearchHitDto::from).collect())
     })
     .await
@@ -353,9 +347,6 @@ pub(crate) fn load_detail_by_path(
     file_path: &str,
 ) -> Result<claudepot_core::session::SessionDetail, String> {
     let cfg = paths::claude_config_dir();
-    claudepot_core::session::read_session_detail_at_path(
-        &cfg,
-        std::path::Path::new(file_path),
-    )
-    .map_err(|e| format!("session read failed: {e}"))
+    claudepot_core::session::read_session_detail_at_path(&cfg, std::path::Path::new(file_path))
+        .map_err(|e| format!("session read failed: {e}"))
 }

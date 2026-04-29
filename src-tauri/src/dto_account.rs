@@ -98,8 +98,7 @@ impl From<&claudepot_core::account::Account> for AccountSummary {
         let health =
             claudepot_core::services::account_service::token_health(a.uuid, a.has_cli_credentials);
         let credentials_healthy = health.status.starts_with("valid") || health.status == "expired";
-        let desktop_profile_on_disk =
-            claudepot_core::paths::desktop_profile_dir(a.uuid).exists();
+        let desktop_profile_on_disk = claudepot_core::paths::desktop_profile_dir(a.uuid).exists();
         Self {
             uuid: a.uuid.to_string(),
             email: a.email.clone(),

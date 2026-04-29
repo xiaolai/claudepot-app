@@ -24,9 +24,7 @@ pub struct LiveSessionSummaryDto {
     pub seq: u64,
 }
 
-impl From<claudepot_core::session_live::types::LiveSessionSummary>
-    for LiveSessionSummaryDto
-{
+impl From<claudepot_core::session_live::types::LiveSessionSummary> for LiveSessionSummaryDto {
     fn from(s: claudepot_core::session_live::types::LiveSessionSummary) -> Self {
         use claudepot_core::session_live::types::Status;
         let status = match s.status {
@@ -132,9 +130,7 @@ impl From<claudepot_core::session_live::types::LiveDelta> for LiveDeltaDto {
             LiveDeltaKind::TaskSummaryChanged { summary } => {
                 LiveDeltaKindDto::TaskSummaryChanged { summary }
             }
-            LiveDeltaKind::ModelChanged { model } => {
-                LiveDeltaKindDto::ModelChanged { model }
-            }
+            LiveDeltaKind::ModelChanged { model } => LiveDeltaKindDto::ModelChanged { model },
             LiveDeltaKind::OverlayChanged { errored, stuck } => {
                 LiveDeltaKindDto::OverlayChanged { errored, stuck }
             }

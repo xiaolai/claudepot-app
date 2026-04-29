@@ -306,8 +306,11 @@ mod tests {
         let (n, truncated) = count_md_files(&memory);
         assert_eq!(n, 0, "no .md files exist");
         assert!(truncated, "cap must trigger");
-        // Contract: the caller must KEEP this dir (`!(n == 0 && !truncated)`).
-        assert!(!(n == 0 && !truncated));
+        // Contract: the caller must KEEP this dir — either some `.md`
+        // files were found, or the cap kicked in (so files might exist
+        // beyond the cap). The (0, false) state is the only one that
+        // means "really nothing here, safe to skip."
+        assert!(n != 0 || truncated);
     }
 
     #[test]

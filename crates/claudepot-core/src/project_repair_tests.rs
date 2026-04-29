@@ -433,7 +433,8 @@ fn cleanup_abandoned_removes_journal_sidecar_and_referenced_snapshots() {
 
     let snap = snapshots.join("ts-1-P7.json");
     fs::write(&snap, "bytes").unwrap();
-    let journal_path = write_journal_with_snapshots(&journals, "move-abandoned", &[snap.clone()]);
+    let journal_path =
+        write_journal_with_snapshots(&journals, "move-abandoned", std::slice::from_ref(&snap));
     let sidecar_path = journals.join("move-abandoned.abandoned.json");
     write_sidecar(&journals, "move-abandoned");
 
@@ -466,8 +467,11 @@ fn cleanup_abandoned_leaves_unreferenced_and_non_abandoned_artifacts_alone() {
     // An abandoned journal with its own referenced snapshot.
     let referenced = snapshots.join("ts-1-P7.json");
     fs::write(&referenced, "x").unwrap();
-    let abandoned_journal =
-        write_journal_with_snapshots(&journals, "move-abandoned", &[referenced.clone()]);
+    let abandoned_journal = write_journal_with_snapshots(
+        &journals,
+        "move-abandoned",
+        std::slice::from_ref(&referenced),
+    );
     write_sidecar(&journals, "move-abandoned");
 
     let report = cleanup_abandoned(&journals).expect("cleanup");

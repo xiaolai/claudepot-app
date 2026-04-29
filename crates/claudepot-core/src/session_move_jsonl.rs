@@ -167,6 +167,127 @@ fn compact_kv_value(compact_kv: &str) -> Option<String> {
     serde_json::from_str::<String>(after_colon).ok()
 }
 
+/// Test-only thin wrapper over [`rewrite_history_jsonl_with_progress`].
+#[cfg(test)]
+pub(crate) fn rewrite_history_jsonl(
+    path: &Path,
+    session_id: Uuid,
+    from_cwd: &str,
+    to_cwd: &str,
+) -> Result<(usize, usize), MoveSessionError> {
+    rewrite_history_jsonl_with_progress(path, session_id, from_cwd, to_cwd, &mut |_, _| {})
+}
+
+/// Rewrite `project` fields in `history.jsonl` for lines whose
+/// `sessionId` matches `session_id` AND whose `project` matches
+/// `from_cwd`. Returns `(rewritten, unmapped)` where `unmapped` is lines
+/// whose `project` matches `from_cwd` but which lack a `sessionId`
+/// field — typically pre-sessionId CC writes. Those are left alone
+/// (we cannot attribute them to a single session).
+///
+/// Byte-exact for non-target lines.
+pub(crate) fn rewrite_history_jsonl_with_progress(
+    path: &Path,
+    session_id: Uuid,
+    from_cwd: &str,
+    to_cwd: &str,
+    on_progress: &mut dyn FnMut(usize, usize),
+) -> Result<(usize, usize), MoveSessionError> {
+    let contents = fs::read_to_string(path)?;
+    let total = contents.lines().count();
+    let parent = path
+        .parent()
+        .ok_or_else(|| std::io::Error::other("history.jsonl has no parent"))?;
+    let mut tmp = tempfile::NamedTempFile::new_in(parent)?;
+
+    let old_kv = format!(r#""project":{}"#, encode_json_string(from_cwd)?);
+    let new_kv = format!(r#""project":{}"#, encode_json_string(to_cwd)?);
+    let sid_str = session_id.to_string();
+
+    let mut rewritten = 0usize;
+    let mut unmapped = 0usize;
+    let mut done = 0usize;
+
+    for line in contents.lines() {
+        process_history_line(
+            line,
+            from_cwd,
+            to_cwd,
+            &sid_str,
+            &old_kv,
+            &new_kv,
+            &mut tmp,
+            &mut rewritten,
+            &mut unmapped,
+        )?;
+        done += 1;
+        on_progress(done, total);
+    }
+    tmp.flush()?;
+    tmp.persist(path).map_err(|e| e.error)?;
+    Ok((rewritten, unmapped))
+}
+
+/// Per-line worker for [`rewrite_history_jsonl_with_progress`]. Pulled
+/// out so the caller's loop can fire one `on_progress` per iteration
+/// without touching the original early-return / fallback shape.
+#[allow(clippy::too_many_arguments)]
+fn process_history_line(
+    line: &str,
+    from_cwd: &str,
+    to_cwd: &str,
+    sid_str: &str,
+    old_kv: &str,
+    new_kv: &str,
+    tmp: &mut tempfile::NamedTempFile,
+    rewritten: &mut usize,
+    unmapped: &mut usize,
+) -> Result<(), MoveSessionError> {
+    let parsed: serde_json::Value = match serde_json::from_str(line) {
+        Ok(v) => v,
+        Err(_) => {
+            writeln!(tmp, "{line}")?;
+            return Ok(());
+        }
+    };
+    let Some(obj) = parsed.as_object() else {
+        writeln!(tmp, "{line}")?;
+        return Ok(());
+    };
+    let project_matches = obj.get("project").and_then(|v| v.as_str()) == Some(from_cwd);
+    let sid_matches = obj.get("sessionId").and_then(|v| v.as_str()) == Some(sid_str);
+
+    if project_matches && sid_matches {
+        if let Some(idx) = line.find(old_kv) {
+            let mut out = String::with_capacity(line.len() + new_kv.len());
+            out.push_str(&line[..idx]);
+            out.push_str(new_kv);
+            out.push_str(&line[idx + old_kv.len()..]);
+            writeln!(tmp, "{out}")?;
+            *rewritten += 1;
+            return Ok(());
+        }
+        let old_spaced = format!(r#""project": {}"#, encode_json_string(from_cwd)?);
+        let new_spaced = format!(r#""project": {}"#, encode_json_string(to_cwd)?);
+        if let Some(idx) = line.find(&old_spaced) {
+            let mut out = String::with_capacity(line.len() + new_spaced.len());
+            out.push_str(&line[..idx]);
+            out.push_str(&new_spaced);
+            out.push_str(&line[idx + old_spaced.len()..]);
+            writeln!(tmp, "{out}")?;
+            *rewritten += 1;
+            return Ok(());
+        }
+        writeln!(tmp, "{line}")?;
+    } else if project_matches && !obj.contains_key("sessionId") {
+        *unmapped += 1;
+        writeln!(tmp, "{line}")?;
+    } else {
+        writeln!(tmp, "{line}")?;
+    }
+    Ok(())
+}
+
 #[cfg(test)]
 mod jsonl_tests {
     //! Behavior contract for `stream_rewrite_jsonl` + `rewrite_history_jsonl`:
@@ -179,7 +300,6 @@ mod jsonl_tests {
     //!   - Idempotent under a second call with the same args (no-op)
 
     use super::*;
-    use std::io::Write as _;
     use tempfile::tempdir;
 
     const FROM_CWD: &str = "/tmp/old";
@@ -415,125 +535,4 @@ mod jsonl_tests {
         let out = fs::read_to_string(&path).unwrap();
         assert!(out.starts_with("{not valid json\n"));
     }
-}
-
-/// Test-only thin wrapper over [`rewrite_history_jsonl_with_progress`].
-#[cfg(test)]
-pub(crate) fn rewrite_history_jsonl(
-    path: &Path,
-    session_id: Uuid,
-    from_cwd: &str,
-    to_cwd: &str,
-) -> Result<(usize, usize), MoveSessionError> {
-    rewrite_history_jsonl_with_progress(path, session_id, from_cwd, to_cwd, &mut |_, _| {})
-}
-
-/// Rewrite `project` fields in `history.jsonl` for lines whose
-/// `sessionId` matches `session_id` AND whose `project` matches
-/// `from_cwd`. Returns `(rewritten, unmapped)` where `unmapped` is lines
-/// whose `project` matches `from_cwd` but which lack a `sessionId`
-/// field — typically pre-sessionId CC writes. Those are left alone
-/// (we cannot attribute them to a single session).
-///
-/// Byte-exact for non-target lines.
-pub(crate) fn rewrite_history_jsonl_with_progress(
-    path: &Path,
-    session_id: Uuid,
-    from_cwd: &str,
-    to_cwd: &str,
-    on_progress: &mut dyn FnMut(usize, usize),
-) -> Result<(usize, usize), MoveSessionError> {
-    let contents = fs::read_to_string(path)?;
-    let total = contents.lines().count();
-    let parent = path
-        .parent()
-        .ok_or_else(|| std::io::Error::other("history.jsonl has no parent"))?;
-    let mut tmp = tempfile::NamedTempFile::new_in(parent)?;
-
-    let old_kv = format!(r#""project":{}"#, encode_json_string(from_cwd)?);
-    let new_kv = format!(r#""project":{}"#, encode_json_string(to_cwd)?);
-    let sid_str = session_id.to_string();
-
-    let mut rewritten = 0usize;
-    let mut unmapped = 0usize;
-    let mut done = 0usize;
-
-    for line in contents.lines() {
-        process_history_line(
-            line,
-            from_cwd,
-            to_cwd,
-            &sid_str,
-            &old_kv,
-            &new_kv,
-            &mut tmp,
-            &mut rewritten,
-            &mut unmapped,
-        )?;
-        done += 1;
-        on_progress(done, total);
-    }
-    tmp.flush()?;
-    tmp.persist(path).map_err(|e| e.error)?;
-    Ok((rewritten, unmapped))
-}
-
-/// Per-line worker for [`rewrite_history_jsonl_with_progress`]. Pulled
-/// out so the caller's loop can fire one `on_progress` per iteration
-/// without touching the original early-return / fallback shape.
-#[allow(clippy::too_many_arguments)]
-fn process_history_line(
-    line: &str,
-    from_cwd: &str,
-    to_cwd: &str,
-    sid_str: &str,
-    old_kv: &str,
-    new_kv: &str,
-    tmp: &mut tempfile::NamedTempFile,
-    rewritten: &mut usize,
-    unmapped: &mut usize,
-) -> Result<(), MoveSessionError> {
-    let parsed: serde_json::Value = match serde_json::from_str(line) {
-        Ok(v) => v,
-        Err(_) => {
-            writeln!(tmp, "{line}")?;
-            return Ok(());
-        }
-    };
-    let Some(obj) = parsed.as_object() else {
-        writeln!(tmp, "{line}")?;
-        return Ok(());
-    };
-    let project_matches = obj.get("project").and_then(|v| v.as_str()) == Some(from_cwd);
-    let sid_matches = obj.get("sessionId").and_then(|v| v.as_str()) == Some(sid_str);
-
-    if project_matches && sid_matches {
-        if let Some(idx) = line.find(old_kv) {
-            let mut out = String::with_capacity(line.len() + new_kv.len());
-            out.push_str(&line[..idx]);
-            out.push_str(new_kv);
-            out.push_str(&line[idx + old_kv.len()..]);
-            writeln!(tmp, "{out}")?;
-            *rewritten += 1;
-            return Ok(());
-        }
-        let old_spaced = format!(r#""project": {}"#, encode_json_string(from_cwd)?);
-        let new_spaced = format!(r#""project": {}"#, encode_json_string(to_cwd)?);
-        if let Some(idx) = line.find(&old_spaced) {
-            let mut out = String::with_capacity(line.len() + new_spaced.len());
-            out.push_str(&line[..idx]);
-            out.push_str(&new_spaced);
-            out.push_str(&line[idx + old_spaced.len()..]);
-            writeln!(tmp, "{out}")?;
-            *rewritten += 1;
-            return Ok(());
-        }
-        writeln!(tmp, "{line}")?;
-    } else if project_matches && !obj.contains_key("sessionId") {
-        *unmapped += 1;
-        writeln!(tmp, "{line}")?;
-    } else {
-        writeln!(tmp, "{line}")?;
-    }
-    Ok(())
 }

@@ -3,6 +3,14 @@
 //! `#[cfg(test)] #[path = "swap_tests.rs"] mod tests;` so tests
 //! still resolve `super::*` against the parent module's internals.
 
+// Tests hold `lock_data_dir()` (a `Mutex<()>`) across `.await` to
+// serialize the shared `CLAUDEPOT_DATA_DIR` env-var across the test
+// binary. The `await_holding_lock` lint flags it but the lock is
+// single-threaded and never contended in a deadlock-inducing way.
+// Mocks build patches via `Default::default()` then assign fields —
+// readable for tests even if a struct literal would suit production.
+#![allow(clippy::await_holding_lock, clippy::field_reassign_with_default)]
+
 use super::*;
 use std::sync::Mutex;
 

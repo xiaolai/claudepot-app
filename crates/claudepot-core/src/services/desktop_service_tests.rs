@@ -3,6 +3,11 @@
 //! `#[cfg(test)] #[path = "desktop_service_tests.rs"] mod tests;` so tests
 //! still resolve `super::*` against the parent module's internals.
 
+// See cli_backend/swap_tests.rs for the rationale: tests hold
+// `lock_data_dir()` across `.await` and use `Default::default()`-
+// then-assign patches — both deliberate test-style choices.
+#![allow(clippy::await_holding_lock, clippy::field_reassign_with_default)]
+
 use super::*;
 use crate::account::Account;
 use chrono::Utc;

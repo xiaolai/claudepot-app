@@ -105,7 +105,11 @@ fn verify_cc_parity(args: &[String]) -> Result<()> {
         }
     }
 
-    eprintln!("\n{ok} passed, {} failed (of {} fixtures)", failed.len(), sorted.len());
+    eprintln!(
+        "\n{ok} passed, {} failed (of {} fixtures)",
+        failed.len(),
+        sorted.len()
+    );
     if !failed.is_empty() {
         std::process::exit(1);
     }
@@ -168,8 +172,7 @@ fn run_fixture(fixture: &Path) -> Result<()> {
 
 fn read_json(p: &Path) -> Result<serde_json::Value> {
     let bytes = std::fs::read(p).with_context(|| format!("read {}", p.display()))?;
-    let v = serde_json::from_slice(&bytes)
-        .with_context(|| format!("parse {}", p.display()))?;
+    let v = serde_json::from_slice(&bytes).with_context(|| format!("parse {}", p.display()))?;
     Ok(v)
 }
 
@@ -204,7 +207,8 @@ fn parse_input(v: &serde_json::Value) -> Result<ParsedBundle> {
         .as_object()
         .ok_or_else(|| anyhow!("input.json top level must be an object"))?;
     let take = |k: &str| -> Option<serde_json::Value> {
-        obj.get(k).and_then(|x| if x.is_null() { None } else { Some(x.clone()) })
+        obj.get(k)
+            .and_then(|x| if x.is_null() { None } else { Some(x.clone()) })
     };
 
     let policy = obj
