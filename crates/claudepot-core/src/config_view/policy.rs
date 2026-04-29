@@ -83,9 +83,17 @@ pub fn policy_resolve(
 }
 
 /// `managed-settings.json` + every `managed-settings.d/*.json` merged
-/// alphabetically, top-level shallow merge. The individual files must
-/// each be valid JSON objects; malformed entries are skipped with an
-/// entry in `issues`.
+/// alphabetically. Audit fix for config_view/policy.rs:103: drop-ins
+/// now DEEP-MERGE into the composite — nested objects (e.g.
+/// `permissions: { deny: [...], allow: [...] }`) combine instead of
+/// the drop-in object replacing the base wholesale. The previous
+/// shape did `out.insert(k, vv)` at the top level which silently
+/// dropped `permissions.deny` rules from the base when a drop-in
+/// only set `permissions.allow`.
+///
+/// Arrays and scalars at any level overwrite (no concatenation) —
+/// CC's settings semantics treat arrays as opaque values, so
+/// concatenating would surprise users.
 pub fn build_managed_composite(
     base_json: Option<&Value>,
     drop_in_dir_entries: &[(String, Value)],
@@ -101,11 +109,27 @@ pub fn build_managed_composite(
     for (_name, v) in sorted {
         if let Value::Object(m) = v {
             for (k, vv) in m {
-                out.insert(k, vv);
+                merge_value_into(&mut out, &k, vv);
             }
         }
     }
     Value::Object(out)
+}
+
+/// Deep-merge a single (key, value) pair into `target`. If both
+/// `target[key]` and `value` are objects, recurse; otherwise
+/// `value` overwrites whatever was there.
+fn merge_value_into(target: &mut serde_json::Map<String, Value>, key: &str, value: Value) {
+    match (target.get_mut(key), value) {
+        (Some(Value::Object(existing)), Value::Object(incoming)) => {
+            for (k, v) in incoming {
+                merge_value_into(existing, &k, v);
+            }
+        }
+        (_, value) => {
+            target.insert(key.to_string(), value);
+        }
+    }
 }
 
 fn is_non_empty_object(v: &Value) -> bool {
