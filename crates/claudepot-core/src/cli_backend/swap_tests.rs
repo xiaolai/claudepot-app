@@ -776,31 +776,36 @@ async fn test_swap_auto_refresh_rollback_works_after_refresh() {
 }
 
 // --- maybe_refresh_blob tests ---
+//
+// Audit fix for swap.rs:229: maybe_refresh_blob no longer persists
+// to disk. It returns a `MaybeRefreshed` indicating whether the
+// caller needs to save after verifying identity. The previous
+// "saves to disk" test is gone — that contract was the bug; the
+// new contract is verified at the switch_inner integration level.
 
 #[tokio::test]
 async fn test_swap_maybe_refresh_not_expired_returns_unchanged() {
     let _lock = crate::testing::lock_data_dir();
     let _env = setup_test_data_dir();
-    let id = Uuid::new_v4();
     let blob = crate::testing::fresh_blob_json();
     let refresher = MockRefresher::success();
 
-    let result = maybe_refresh_blob(&blob, id, &refresher).await.unwrap();
-    // Fresh blob should be returned unchanged (same string)
-    assert_eq!(result, blob);
+    let result = maybe_refresh_blob(&blob, &refresher).await.unwrap();
+    assert_eq!(result, MaybeRefreshed::Unchanged);
 }
 
 #[tokio::test]
 async fn test_swap_maybe_refresh_within_margin_triggers_refresh() {
     let _lock = crate::testing::lock_data_dir();
     let _env = setup_test_data_dir();
-    let id = Uuid::new_v4();
     let blob = crate::testing::expiring_soon_blob_json();
     let refresher = MockRefresher::success();
 
-    let result = maybe_refresh_blob(&blob, id, &refresher).await.unwrap();
-    // Should have refreshed — result should contain the new token
-    let parsed = crate::blob::CredentialBlob::from_json(&result).unwrap();
+    let result = maybe_refresh_blob(&blob, &refresher).await.unwrap();
+    let MaybeRefreshed::Refreshed { blob: new_blob } = result else {
+        panic!("expected Refreshed");
+    };
+    let parsed = crate::blob::CredentialBlob::from_json(&new_blob).unwrap();
     assert_eq!(
         parsed.claude_ai_oauth.access_token,
         "sk-ant-oat01-refreshed"
@@ -811,10 +816,9 @@ async fn test_swap_maybe_refresh_within_margin_triggers_refresh() {
 async fn test_swap_maybe_refresh_corrupt_input_errors() {
     let _lock = crate::testing::lock_data_dir();
     let _env = setup_test_data_dir();
-    let id = Uuid::new_v4();
     let refresher = MockRefresher::success();
 
-    let result = maybe_refresh_blob("not valid json", id, &refresher).await;
+    let result = maybe_refresh_blob("not valid json", &refresher).await;
     assert!(matches!(result, Err(SwapError::CorruptBlob(_))));
 }
 
@@ -822,12 +826,14 @@ async fn test_swap_maybe_refresh_corrupt_input_errors() {
 async fn test_swap_maybe_refresh_expired_refreshes() {
     let _lock = crate::testing::lock_data_dir();
     let _env = setup_test_data_dir();
-    let id = Uuid::new_v4();
     let blob = crate::testing::expired_blob_json();
     let refresher = MockRefresher::success();
 
-    let result = maybe_refresh_blob(&blob, id, &refresher).await.unwrap();
-    let parsed = crate::blob::CredentialBlob::from_json(&result).unwrap();
+    let result = maybe_refresh_blob(&blob, &refresher).await.unwrap();
+    let MaybeRefreshed::Refreshed { blob: new_blob } = result else {
+        panic!("expected Refreshed");
+    };
+    let parsed = crate::blob::CredentialBlob::from_json(&new_blob).unwrap();
     assert_eq!(
         parsed.claude_ai_oauth.access_token,
         "sk-ant-oat01-refreshed"
@@ -842,33 +848,31 @@ async fn test_swap_maybe_refresh_expired_refreshes() {
 async fn test_swap_maybe_refresh_refresh_failure_errors() {
     let _lock = crate::testing::lock_data_dir();
     let _env = setup_test_data_dir();
-    let id = Uuid::new_v4();
     let blob = crate::testing::expired_blob_json();
     let refresher = MockRefresher::failing("network timeout");
 
-    let result = maybe_refresh_blob(&blob, id, &refresher).await;
+    let result = maybe_refresh_blob(&blob, &refresher).await;
     assert!(matches!(result, Err(SwapError::RefreshFailed(_))));
 }
 
 #[tokio::test]
-async fn test_swap_maybe_refresh_saves_refreshed_blob() {
+async fn test_swap_maybe_refresh_does_not_persist() {
+    // Audit-fix regression guard: the function MUST NOT touch disk.
+    // Persistence is now the caller's responsibility, gated on the
+    // identity-verification step that runs after refresh.
     let _lock = crate::testing::lock_data_dir();
     let _env = setup_test_data_dir();
     let id = Uuid::new_v4();
     let blob = crate::testing::expired_blob_json();
     let refresher = MockRefresher::success();
 
-    maybe_refresh_blob(&blob, id, &refresher).await.unwrap();
+    let _ = maybe_refresh_blob(&blob, &refresher).await.unwrap();
 
-    // The refreshed blob should be persisted in private storage
-    let saved = load_private(id).unwrap();
-    let parsed = crate::blob::CredentialBlob::from_json(&saved).unwrap();
-    assert_eq!(
-        parsed.claude_ai_oauth.access_token,
-        "sk-ant-oat01-refreshed"
+    // Nothing was saved under id — the slot is empty.
+    assert!(
+        load_private(id).is_err(),
+        "maybe_refresh_blob must not persist anymore"
     );
-
-    delete_private(id).unwrap();
 }
 
 // -- Group 11: Unix-only code gaps --
@@ -1113,13 +1117,20 @@ async fn test_swap_db_failure_with_no_outgoing() {
 }
 
 #[tokio::test]
-async fn test_swap_auto_refresh_then_db_failure() {
-    // auto_refresh=true, target is expired → refresh runs and is
-    // persisted to private storage. Then write_default succeeds.
-    // Then set_active_cli fails. Verify:
-    //   - rollback restores previous CC credentials for current_id
-    //   - refreshed blob stays in target's private storage (was persisted
-    //     by maybe_refresh_blob BEFORE the swap mutations)
+async fn test_swap_auto_refresh_then_db_failure_does_not_misfile() {
+    // Audit-fix-aligned test (swap.rs:229): when auto_refresh runs
+    // and a subsequent DB operation fails, the refreshed blob must
+    // NOT be persisted to private storage. The previous shape saved
+    // the refresh inside `maybe_refresh_blob` BEFORE identity
+    // verification, which would cache mis-filed credentials if the
+    // refresh somehow returned a different account's tokens.
+    //
+    // The new contract: refresh-in-memory → verify → persist-only-
+    // on-success. A failure path (here, dropping the state table
+    // breaks the early `find_by_uuid` call) leaves target's slot
+    // holding the ORIGINAL bytes, never a refreshed-but-unverified
+    // copy. Losing the refresh is fine — the next genuine CC
+    // session will refresh and persist its own copy.
     let _lock = crate::testing::lock_data_dir();
     let _env = setup_test_data_dir();
     let (store, _dir) = test_store();
@@ -1130,8 +1141,6 @@ async fn test_swap_auto_refresh_then_db_failure() {
     save_private(target_id, &crate::testing::expired_blob_json()).unwrap();
 
     let platform = MockPlatform::new(Some("outgoing_cc_blob"));
-
-    // Use a mock refresher that returns fresh tokens.
     let refresher = MockRefresher::success();
 
     store.corrupt_state_table_for_test();
@@ -1148,17 +1157,19 @@ async fn test_swap_auto_refresh_then_db_failure() {
     .await;
     assert!(
         matches!(result, Err(SwapError::WriteFailed(_))),
-        "DB update failure must surface, got {:?}",
+        "DB failure must surface as WriteFailed, got {:?}",
         result
     );
-    // Rollback restored the outgoing CC blob that was in the platform
-    // before the swap (which got saved into private storage for `current`).
+    // Platform must remain at its pre-swap value (no successful write).
     assert_eq!(platform.get(), Some("outgoing_cc_blob".to_string()));
-    // Target's refreshed blob persisted before swap mutations.
+    // Audit-fix invariant: target's private slot still has the ORIGINAL
+    // expired blob, NOT the refreshed one. The refresh happened in
+    // memory but was never committed because the DB error short-
+    // circuited before the persist step.
     let target_priv = load_private(target_id).unwrap();
     assert!(
-        target_priv.contains("sk-ant-oat01-refreshed"),
-        "refreshed token must remain in target's private storage after rollback"
+        !target_priv.contains("sk-ant-oat01-refreshed"),
+        "refreshed token must NOT be persisted on a pre-verify DB failure; got: {target_priv}"
     );
 
     delete_private(current_id).unwrap();

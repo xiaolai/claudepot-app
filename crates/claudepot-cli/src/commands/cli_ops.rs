@@ -236,9 +236,11 @@ pub(crate) fn swap_completion_note(force: bool, cc_running: bool) -> SwapNote {
 }
 
 pub async fn clear(ctx: &AppContext) -> Result<()> {
+    use claudepot_core::cli_backend::swap::DefaultProfileFetcher;
     use claudepot_core::services::cli_service;
 
-    cli_service::clear_credentials(&ctx.store).await?;
+    let fetcher = DefaultProfileFetcher;
+    cli_service::clear_credentials(&ctx.store, &fetcher).await?;
 
     if ctx.json {
         println!("{}", serde_json::json!({"cleared": true}));

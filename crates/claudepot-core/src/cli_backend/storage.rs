@@ -16,6 +16,53 @@ use uuid::Uuid;
 #[cfg(target_os = "macos")]
 const KEYCHAIN_SERVICE: &str = "com.claudepot.credentials";
 
+/// Typed outcome from a `/usr/bin/security` invocation. Distinguishes
+/// "the keychain told us the item isn't there" (safe to fall back to
+/// file storage) from real failures like a locked login keychain or
+/// a TCC/ACL denial (which must NOT fall back, otherwise an attacker
+/// who can deny keychain access can force the load to read stale or
+/// attacker-controlled file storage).
+///
+/// Audit fix for storage.rs:289 / storage.rs:328: callers must
+/// inspect this outcome explicitly. Anything other than `NotFound`
+/// causes the calling public API (`load`/`delete`) to fail closed.
+#[cfg(target_os = "macos")]
+#[derive(Debug)]
+enum KeychainErr {
+    /// macOS login keychain is locked (`security` exit 36, errSecAuthFailed).
+    /// User-recoverable — surface a clear message asking them to
+    /// unlock it in Keychain Access.
+    Locked,
+    /// Anything else: TCC/ACL denial, malformed binary path,
+    /// command exited with an unrecognized code, or an I/O error
+    /// spawning the subprocess. We cannot distinguish "denied" from
+    /// "broken" reliably from the outside, so they share a variant —
+    /// but the calling contract is the same: fail closed, never fall
+    /// back to file storage.
+    Other(String),
+}
+
+#[cfg(target_os = "macos")]
+impl std::fmt::Display for KeychainErr {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Locked => write!(
+                f,
+                "macOS login keychain is locked — open Keychain Access and \
+                 unlock the \"login\" keychain, then retry"
+            ),
+            Self::Other(s) => write!(f, "{s}"),
+        }
+    }
+}
+
+#[cfg(target_os = "macos")]
+impl From<KeychainErr> for SwapError {
+    fn from(e: KeychainErr) -> Self {
+        SwapError::KeychainError(e.to_string())
+    }
+}
+
 /// Backend selector. Reads CLAUDEPOT_CREDENTIAL_BACKEND env var:
 /// - "file"    → always file, no Keychain attempts (used by tests)
 /// - "keyring" → always Keychain (fail closed if unavailable)
@@ -102,25 +149,22 @@ fn validate_keychain_attr(value: &str) -> std::io::Result<()> {
 }
 
 #[cfg(target_os = "macos")]
-fn save_to_keyring(account_id: Uuid, blob: &str) -> std::io::Result<()> {
+fn save_to_keyring(account_id: Uuid, blob: &str) -> Result<(), KeychainErr> {
     use std::io::Write as _;
     use std::process::{Command, Stdio};
 
     let account = account_id.to_string();
-    validate_keychain_attr(&account)?;
-    validate_keychain_attr(KEYCHAIN_SERVICE)?;
+    validate_keychain_attr(&account).map_err(|e| KeychainErr::Other(e.to_string()))?;
+    validate_keychain_attr(KEYCHAIN_SERVICE).map_err(|e| KeychainErr::Other(e.to_string()))?;
 
-    // Idempotent delete; ignore failure (the item may not exist).
-    let _ = Command::new("/usr/bin/security")
-        .args([
-            "delete-generic-password",
-            "-a",
-            &account,
-            "-s",
-            KEYCHAIN_SERVICE,
-        ])
-        .output();
-
+    // Audit fix for storage.rs:113 — DO NOT pre-delete. The previous
+    // shape ran `delete-generic-password` unconditionally before
+    // `add -U`, so a subsequent add failure (TCC denial, ACL gate)
+    // left the slot empty when the user previously had a working
+    // copy. `add-generic-password -U` is documented as
+    // update-or-create; the pre-delete bought nothing and could
+    // destroy the only copy.
+    //
     // Hardened write path:
     //   1. Drop `-A` — never grant blanket access. The keychain item
     //      defaults to the calling executable having access via the
@@ -138,17 +182,22 @@ fn save_to_keyring(account_id: Uuid, blob: &str) -> std::io::Result<()> {
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
-        .spawn()?;
+        .spawn()
+        .map_err(|e| KeychainErr::Other(format!("spawn /usr/bin/security: {e}")))?;
 
     if let Some(mut stdin) = child.stdin.take() {
-        stdin.write_all(command_line.as_bytes())?;
+        stdin
+            .write_all(command_line.as_bytes())
+            .map_err(|e| KeychainErr::Other(format!("stdin write: {e}")))?;
         // Closing stdin signals end-of-input to `security -i`.
         drop(stdin);
     }
 
-    let out = child.wait_with_output()?;
+    let out = child
+        .wait_with_output()
+        .map_err(|e| KeychainErr::Other(format!("wait: {e}")))?;
     if !out.status.success() {
-        return Err(std::io::Error::other(format!(
+        return Err(KeychainErr::Other(format!(
             "security add-generic-password failed (exit {}): {}",
             out.status.code().unwrap_or(-1),
             String::from_utf8_lossy(&out.stderr).trim()
@@ -160,17 +209,17 @@ fn save_to_keyring(account_id: Uuid, blob: &str) -> std::io::Result<()> {
     // success once we observe the blob actually landed.
     match load_from_keyring(account_id)? {
         Some(stored) if stored == blob => Ok(()),
-        Some(_) => Err(std::io::Error::other(
-            "keyring write did not take effect (read-back mismatch)",
+        Some(_) => Err(KeychainErr::Other(
+            "keyring write did not take effect (read-back mismatch)".into(),
         )),
-        None => Err(std::io::Error::other(
-            "keyring write returned success but item is absent on read-back",
+        None => Err(KeychainErr::Other(
+            "keyring write returned success but item is absent on read-back".into(),
         )),
     }
 }
 
 #[cfg(target_os = "macos")]
-fn load_from_keyring(account_id: Uuid) -> std::io::Result<Option<String>> {
+fn load_from_keyring(account_id: Uuid) -> Result<Option<String>, KeychainErr> {
     use std::process::Command;
     let out = Command::new("/usr/bin/security")
         .args([
@@ -181,21 +230,25 @@ fn load_from_keyring(account_id: Uuid) -> std::io::Result<Option<String>> {
             KEYCHAIN_SERVICE,
             "-w",
         ])
-        .output()?;
+        .output()
+        .map_err(|e| KeychainErr::Other(format!("spawn /usr/bin/security: {e}")))?;
     if out.status.success() {
         let blob = String::from_utf8_lossy(&out.stdout).trim_end().to_string();
         Ok(Some(blob))
     } else {
         let code = out.status.code().unwrap_or(-1);
+        // Exit 44 = errSecItemNotFound. This is the only code that
+        // means "item not in keychain"; treat it as a clean miss so
+        // the Auto-mode caller can fall back to file storage.
+        // Everything else (36 locked, TCC denial, ACL gate, parse
+        // failure) is a real problem and must NOT fall back —
+        // see the KeychainErr docstring.
         if code == 44 {
             Ok(None)
         } else if code == 36 {
-            Err(std::io::Error::other(
-                "macOS login keychain is locked — open Keychain Access and \
-                 unlock the \"login\" keychain, then retry",
-            ))
+            Err(KeychainErr::Locked)
         } else {
-            Err(std::io::Error::other(format!(
+            Err(KeychainErr::Other(format!(
                 "security find-generic-password failed (code {code}): {}",
                 String::from_utf8_lossy(&out.stderr).trim()
             )))
@@ -204,7 +257,7 @@ fn load_from_keyring(account_id: Uuid) -> std::io::Result<Option<String>> {
 }
 
 #[cfg(target_os = "macos")]
-fn delete_from_keyring(account_id: Uuid) -> std::io::Result<()> {
+fn delete_from_keyring(account_id: Uuid) -> Result<(), KeychainErr> {
     use std::process::Command;
     let out = Command::new("/usr/bin/security")
         .args([
@@ -214,48 +267,84 @@ fn delete_from_keyring(account_id: Uuid) -> std::io::Result<()> {
             "-s",
             KEYCHAIN_SERVICE,
         ])
-        .output()?;
-    if out.status.success() || out.status.code() == Some(44) {
+        .output()
+        .map_err(|e| KeychainErr::Other(format!("spawn /usr/bin/security: {e}")))?;
+    let code = out.status.code().unwrap_or(-1);
+    // success or exit 44 (item not found) → idempotent ok.
+    if out.status.success() || code == 44 {
         Ok(())
+    } else if code == 36 {
+        Err(KeychainErr::Locked)
     } else {
-        Err(std::io::Error::other(format!(
-            "security delete-generic-password failed: {}",
+        Err(KeychainErr::Other(format!(
+            "security delete-generic-password failed (code {code}): {}",
             String::from_utf8_lossy(&out.stderr).trim()
         )))
     }
 }
 
+// Non-macOS shim. Treat as "keychain not available" by always
+// returning Ok(None) on read and a typed Other error on write/delete.
+// This way, Auto mode on Linux/Windows takes the file-storage path
+// without the typed-error machinery getting in the way.
 #[cfg(not(target_os = "macos"))]
-fn save_to_keyring(_account_id: Uuid, _blob: &str) -> std::io::Result<()> {
-    Err(std::io::Error::other(
-        "keyring backend is only implemented on macOS",
+#[derive(Debug)]
+enum KeychainErr {
+    Other(String),
+}
+
+#[cfg(not(target_os = "macos"))]
+impl std::fmt::Display for KeychainErr {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Other(s) => write!(f, "{s}"),
+        }
+    }
+}
+
+#[cfg(not(target_os = "macos"))]
+impl From<KeychainErr> for SwapError {
+    fn from(e: KeychainErr) -> Self {
+        SwapError::WriteFailed(e.to_string())
+    }
+}
+
+#[cfg(not(target_os = "macos"))]
+fn save_to_keyring(_account_id: Uuid, _blob: &str) -> Result<(), KeychainErr> {
+    Err(KeychainErr::Other(
+        "keyring backend is only implemented on macOS".into(),
     ))
 }
 
 #[cfg(not(target_os = "macos"))]
-fn load_from_keyring(_account_id: Uuid) -> std::io::Result<Option<String>> {
-    Err(std::io::Error::other(
-        "keyring backend is only implemented on macOS",
+fn load_from_keyring(_account_id: Uuid) -> Result<Option<String>, KeychainErr> {
+    Err(KeychainErr::Other(
+        "keyring backend is only implemented on macOS".into(),
     ))
 }
 
 #[cfg(not(target_os = "macos"))]
-fn delete_from_keyring(_account_id: Uuid) -> std::io::Result<()> {
-    Err(std::io::Error::other(
-        "keyring backend is only implemented on macOS",
+fn delete_from_keyring(_account_id: Uuid) -> Result<(), KeychainErr> {
+    Err(KeychainErr::Other(
+        "keyring backend is only implemented on macOS".into(),
     ))
 }
 
 pub fn save(account_id: Uuid, blob: &str) -> Result<(), SwapError> {
     match backend() {
         CredBackend::FileOnly => save_to_file(account_id, blob),
-        CredBackend::KeyringOnly => save_to_keyring(account_id, blob)
-            .map_err(|e| SwapError::WriteFailed(format!("keyring: {e}"))),
+        CredBackend::KeyringOnly => save_to_keyring(account_id, blob).map_err(SwapError::from),
         CredBackend::Auto => match save_to_keyring(account_id, blob) {
             Ok(()) => {
                 let _ = delete_file(account_id);
                 Ok(())
             }
+            // On macOS, Auto-mode save still falls back to file when
+            // the keychain isn't available — the previous behavior is
+            // preserved for save (we'd rather store SOMEWHERE than
+            // refuse the write entirely if the keychain is broken).
+            // The fail-closed discipline lives on the read/delete
+            // side, where stale data is the actual hazard.
             Err(e) => {
                 tracing::warn!("keyring save failed ({e}); falling back to file storage");
                 save_to_file(account_id, blob)
@@ -270,13 +359,19 @@ pub fn load(account_id: Uuid) -> Result<String, SwapError> {
         CredBackend::KeyringOnly => match load_from_keyring(account_id) {
             Ok(Some(blob)) => Ok(blob),
             Ok(None) => Err(SwapError::NoStoredCredentials(account_id)),
-            Err(e) => Err(SwapError::WriteFailed(format!("keyring: {e}"))),
+            Err(e) => Err(e.into()),
         },
         CredBackend::Auto => match load_from_keyring(account_id) {
             Ok(Some(blob)) => {
                 let _ = delete_file(account_id);
                 Ok(blob)
             }
+            // Audit fix for storage.rs:289 — only `NotFound` falls
+            // back to file. A locked keychain or a TCC/ACL denial
+            // means the keychain IS reachable but is refusing us;
+            // falling back to file in that state would surface stale
+            // data after a real keychain that the attacker just
+            // forced unreachable. Fail closed.
             Ok(None) => match load_from_file(account_id) {
                 Ok(blob) => {
                     if save_to_keyring(account_id, &blob).is_ok() {
@@ -286,14 +381,7 @@ pub fn load(account_id: Uuid) -> Result<String, SwapError> {
                 }
                 Err(e) => Err(e),
             },
-            Err(e) => {
-                let msg = e.to_string();
-                if msg.contains("keychain is locked") {
-                    return Err(SwapError::KeychainError(msg));
-                }
-                tracing::warn!("keyring load failed ({e}); trying file storage");
-                load_from_file(account_id)
-            }
+            Err(e) => Err(e.into()),
         },
     }
 }
@@ -305,58 +393,34 @@ pub fn load_opt(account_id: Uuid) -> Option<String> {
 pub fn delete(account_id: Uuid) -> Result<(), SwapError> {
     match backend() {
         CredBackend::FileOnly => delete_file(account_id),
-        CredBackend::KeyringOnly => delete_from_keyring(account_id)
-            .map_err(|e| SwapError::WriteFailed(format!("keyring: {e}"))),
+        CredBackend::KeyringOnly => delete_from_keyring(account_id).map_err(SwapError::from),
         CredBackend::Auto => {
-            // Try both backends. On macOS the private slot lives in
-            // Keychain; on Linux/headless it's a file. A keychain
-            // delete can fail if the keychain is locked or the
-            // `security` subprocess errors. Previously the Auto path
-            // used `let _ = delete_from_keyring(...)` and returned the
-            // file-delete result, silently dropping keychain errors —
-            // callers believed the secret was gone but it could still
-            // live in the keychain slot.
+            // Audit fix for storage.rs:328 — fail-closed on real
+            // keychain errors. The previous shape returned Ok if
+            // EITHER backend reported success, which masked the
+            // case where the keychain delete ran into a TCC denial
+            // (the secret stays in the keychain) and the file path
+            // happened to succeed because no file existed (no-op
+            // delete).
             //
-            // New policy: attempt both, accumulate errors, and return
-            // Err iff BOTH backends errored. "Entry not found" from
-            // either side is treated as success (idempotent delete).
+            // New policy:
+            //   - keychain-side `NotFound` (exit 44) is mapped to
+            //     `Ok` inside `delete_from_keyring`, so it never
+            //     reaches us as Err.
+            //   - any other keychain error is a real failure —
+            //     surface it regardless of what the file path did.
+            //   - the file path only fails for IO errors; a missing
+            //     file is `Ok`. So a file Err is also a real failure.
             let keyring_result = delete_from_keyring(account_id);
             let file_result = delete_file(account_id);
 
-            let keyring_ok = keyring_result.is_ok();
-            let file_ok = file_result.is_ok();
-            if keyring_ok || file_ok {
-                // At least one backend reported success. Surface the
-                // other's error as a log warning but don't fail the
-                // call — the typical case is "this account was stored
-                // in only one of the two backends anyway."
-                if let Err(e) = &keyring_result {
-                    tracing::warn!(
-                        account = %account_id,
-                        "keyring delete reported error (file: {}): {e}",
-                        if file_ok { "deleted" } else { "also failed" }
-                    );
-                }
-                if let Err(e) = &file_result {
-                    tracing::debug!(
-                        account = %account_id,
-                        "file delete reported error (keyring: deleted): {e}"
-                    );
-                }
-                Ok(())
-            } else {
-                // Both backends errored — propagate. This is the case
-                // the old code silently hid: user thought the delete
-                // succeeded because only the file-delete result was
-                // consulted, even when the keychain held the real blob.
-                Err(SwapError::WriteFailed(format!(
-                    "both storage backends errored: keyring={}, file={}",
-                    keyring_result
-                        .err()
-                        .map(|e| e.to_string())
-                        .unwrap_or_default(),
-                    file_result.err().map(|e| e.to_string()).unwrap_or_default()
-                )))
+            match (keyring_result, file_result) {
+                (Ok(()), Ok(())) => Ok(()),
+                (Err(k), Ok(())) => Err(SwapError::from(k)),
+                (Ok(()), Err(f)) => Err(f),
+                (Err(k), Err(f)) => Err(SwapError::WriteFailed(format!(
+                    "both storage backends errored: keyring={k}, file={f}"
+                ))),
             }
         }
     }
