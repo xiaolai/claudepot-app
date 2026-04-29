@@ -164,7 +164,7 @@ mod tests {
         let result = CredentialBlob::from_json(&result_json).unwrap();
 
         let now_ms = chrono::Utc::now().timestamp_millis();
-        assert!(result.claude_ai_oauth.expires_at > now_ms + 3500_000);
-        assert!(result.claude_ai_oauth.expires_at < now_ms + 3700_000);
+        assert!(result.claude_ai_oauth.expires_at > now_ms + 3_500_000);
+        assert!(result.claude_ai_oauth.expires_at < now_ms + 3_700_000);
     }
 }

@@ -60,9 +60,7 @@ fn build_roots(project_root: Option<String>) -> ActiveRoots {
         let candidate = PathBuf::from(p);
         if is_valid_project_root(&candidate, &user_root) {
             let known =
-                claudepot_core::artifact_lifecycle::paths::discover_known_project_roots(
-                    &user_root,
-                );
+                claudepot_core::artifact_lifecycle::paths::discover_known_project_roots(&user_root);
             if known.iter().any(|k| k == &candidate) {
                 roots = roots.with_project(candidate);
             }
@@ -167,10 +165,7 @@ fn validate_scope_root(scope_root: &str, roots: &ActiveRoots) -> Result<PathBuf,
     let p = PathBuf::from(scope_root);
     let ok = roots.iter_scoped().any(|(_, root)| root == p.as_path());
     if !ok {
-        return Err(format!(
-            "scope_root not in active roots: {}",
-            p.display()
-        ));
+        return Err(format!("scope_root not in active roots: {}", p.display()));
     }
     Ok(p)
 }
@@ -188,9 +183,7 @@ fn rebuild_trackable(
     let kind = parse_kind(kind)?;
     validate_relative_path(relative_path)?;
     let scope_root_path = validate_scope_root(scope_root, roots)?;
-    let abs = scope_root_path
-        .join(kind.subdir())
-        .join(relative_path);
+    let abs = scope_root_path.join(kind.subdir()).join(relative_path);
     classify_path(&abs, roots)
         .or_else(|_| {
             // Maybe it's already disabled — try the .disabled location.
@@ -407,8 +400,7 @@ pub async fn artifact_disabled_preview(
         // the spawn_blocking worker pool.
         const PREVIEW_HEAD_BYTES: usize = 256 * 1024;
         use std::io::Read;
-        let file = std::fs::File::open(&read_path)
-            .map_err(|e| format!("read open failed: {e}"))?;
+        let file = std::fs::File::open(&read_path).map_err(|e| format!("read open failed: {e}"))?;
         let mut bytes = Vec::with_capacity(PREVIEW_HEAD_BYTES.min(64 * 1024));
         file.take(PREVIEW_HEAD_BYTES as u64 + 1)
             .read_to_end(&mut bytes)

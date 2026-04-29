@@ -11,17 +11,17 @@
 use claudepot_core::routes::{
     activate_desktop, clear_desktop_active, delete_helpers, delete_keychain_for_route,
     delete_library_profile, delete_wrapper, derive_wrapper_slug, sanitize_wrapper_name,
-    store_keychain_secret, validate_base_url, write_helper, write_library_profile,
-    write_wrapper, AuthScheme, BedrockConfig, FoundryConfig, GatewayConfig, ProviderKind,
-    Route, RouteError, RouteId, RouteProvider, RouteStore, SecretField, VertexConfig,
+    store_keychain_secret, validate_base_url, write_helper, write_library_profile, write_wrapper,
+    AuthScheme, BedrockConfig, FoundryConfig, GatewayConfig, ProviderKind, Route, RouteError,
+    RouteId, RouteProvider, RouteStore, SecretField, VertexConfig,
 };
 use uuid::Uuid;
 use zeroize::Zeroize;
 
 use crate::dto_routes::{
-    BedrockDetailsDto, BedrockInputDto, FoundryDetailsDto, FoundryInputDto,
-    GatewayDetailsDto, GatewayInputDto, RouteCreateDto, RouteDetailsDto, RouteSettingsDto,
-    RouteSummaryDto, RouteUpdateDto, VertexDetailsDto, VertexInputDto,
+    BedrockDetailsDto, BedrockInputDto, FoundryDetailsDto, FoundryInputDto, GatewayDetailsDto,
+    GatewayInputDto, RouteCreateDto, RouteDetailsDto, RouteSettingsDto, RouteSummaryDto,
+    RouteUpdateDto, VertexDetailsDto, VertexInputDto,
 };
 
 fn map_err<E: std::fmt::Display>(e: E) -> String {
@@ -58,8 +58,7 @@ fn build_provider(
 ) -> Result<RouteProvider, String> {
     match kind {
         ProviderKind::Gateway => {
-            let g =
-                gateway.ok_or_else(|| String::from("gateway config missing"))?;
+            let g = gateway.ok_or_else(|| String::from("gateway config missing"))?;
             let base = validate_base_url(&g.base_url)
                 .map_err(|e| format!("invalid gateway base URL: {e}"))?;
             Ok(RouteProvider::Gateway(GatewayConfig {
@@ -71,8 +70,7 @@ fn build_provider(
             }))
         }
         ProviderKind::Bedrock => {
-            let b =
-                bedrock.ok_or_else(|| String::from("bedrock config missing"))?;
+            let b = bedrock.ok_or_else(|| String::from("bedrock config missing"))?;
             let region = b.region.trim();
             if region.is_empty() {
                 return Err(String::from("AWS region is required"));
@@ -102,16 +100,14 @@ fn build_provider(
             }))
         }
         ProviderKind::Vertex => {
-            let v =
-                vertex.ok_or_else(|| String::from("vertex config missing"))?;
+            let v = vertex.ok_or_else(|| String::from("vertex config missing"))?;
             let project_id = v.project_id.trim();
             if project_id.is_empty() {
                 return Err(String::from("GCP project ID is required"));
             }
             let validated_base = match empty_to_none(v.base_url) {
                 Some(url) => Some(
-                    validate_base_url(&url)
-                        .map_err(|e| format!("invalid Vertex base URL: {e}"))?,
+                    validate_base_url(&url).map_err(|e| format!("invalid Vertex base URL: {e}"))?,
                 ),
                 None => None,
             };
@@ -123,8 +119,7 @@ fn build_provider(
             }))
         }
         ProviderKind::Foundry => {
-            let f =
-                foundry.ok_or_else(|| String::from("foundry config missing"))?;
+            let f = foundry.ok_or_else(|| String::from("foundry config missing"))?;
             let base = empty_to_none(f.base_url);
             let resource = empty_to_none(f.resource);
             if base.is_none() && resource.is_none() {
@@ -186,14 +181,9 @@ fn commit_secrets(
         RouteProvider::Gateway(cfg) => {
             if cfg.use_keychain {
                 if !cfg.api_key.is_empty() {
-                    store_keychain_secret(
-                        route_id,
-                        SecretField::GatewayApiKey,
-                        &cfg.api_key,
-                    )
-                    .map_err(map_err)?;
-                    write_helper(route_id, SecretField::GatewayApiKey)
+                    store_keychain_secret(route_id, SecretField::GatewayApiKey, &cfg.api_key)
                         .map_err(map_err)?;
+                    write_helper(route_id, SecretField::GatewayApiKey).map_err(map_err)?;
                 }
                 // Zeroize before truncate — `String::clear` only sets
                 // len = 0, leaving the secret bytes in the buffer until
@@ -209,23 +199,15 @@ fn commit_secrets(
             if cfg.use_keychain {
                 if let Some(mut t) = cfg.bearer_token.take() {
                     if !t.is_empty() {
-                        store_keychain_secret(
-                            route_id,
-                            SecretField::BedrockBearerToken,
-                            &t,
-                        )
-                        .map_err(map_err)?;
-                        write_helper(route_id, SecretField::BedrockBearerToken)
+                        store_keychain_secret(route_id, SecretField::BedrockBearerToken, &t)
                             .map_err(map_err)?;
+                        write_helper(route_id, SecretField::BedrockBearerToken).map_err(map_err)?;
                     }
                     t.zeroize();
                 }
                 cfg.bearer_token = None;
             } else {
-                let need_inherit = cfg
-                    .bearer_token
-                    .as_ref()
-                    .is_some_and(|t| t.is_empty());
+                let need_inherit = cfg.bearer_token.as_ref().is_some_and(|t| t.is_empty());
                 if need_inherit {
                     if let Some(RouteProvider::Bedrock(p)) = prev {
                         cfg.bearer_token = p.bearer_token.clone();
@@ -239,23 +221,15 @@ fn commit_secrets(
             if cfg.use_keychain {
                 if let Some(mut k) = cfg.api_key.take() {
                     if !k.is_empty() {
-                        store_keychain_secret(
-                            route_id,
-                            SecretField::FoundryApiKey,
-                            &k,
-                        )
-                        .map_err(map_err)?;
-                        write_helper(route_id, SecretField::FoundryApiKey)
+                        store_keychain_secret(route_id, SecretField::FoundryApiKey, &k)
                             .map_err(map_err)?;
+                        write_helper(route_id, SecretField::FoundryApiKey).map_err(map_err)?;
                     }
                     k.zeroize();
                 }
                 cfg.api_key = None;
             } else {
-                let need_inherit = cfg
-                    .api_key
-                    .as_ref()
-                    .is_some_and(|k| k.is_empty());
+                let need_inherit = cfg.api_key.as_ref().is_some_and(|k| k.is_empty());
                 if need_inherit {
                     if let Some(RouteProvider::Foundry(p)) = prev {
                         cfg.api_key = p.api_key.clone();
@@ -328,13 +302,9 @@ fn project_summary(r: &Route) -> RouteSummaryDto {
             cfg.enable_tool_search,
             cfg.use_keychain,
         ),
-        RouteProvider::Bedrock(cfg) => {
-            (String::from("bearer"), false, cfg.use_keychain)
-        }
+        RouteProvider::Bedrock(cfg) => (String::from("bearer"), false, cfg.use_keychain),
         RouteProvider::Vertex(_) => (String::from("bearer"), false, false),
-        RouteProvider::Foundry(cfg) => {
-            (String::from("bearer"), false, cfg.use_keychain)
-        }
+        RouteProvider::Foundry(cfg) => (String::from("bearer"), false, cfg.use_keychain),
     };
     RouteSummaryDto {
         id: s.id.to_string(),
@@ -389,8 +359,7 @@ fn project_details(r: &Route) -> RouteDetailsDto {
             Some(BedrockDetailsDto {
                 region: cfg.region.clone(),
                 bearer_token_preview: s.api_key_preview.clone(),
-                has_bearer_token: cfg.use_keychain
-                    || cfg.bearer_token.is_some(),
+                has_bearer_token: cfg.use_keychain || cfg.bearer_token.is_some(),
                 base_url: cfg.base_url.clone(),
                 aws_profile: cfg.aws_profile.clone(),
                 skip_aws_auth: cfg.skip_aws_auth,
@@ -468,9 +437,7 @@ pub async fn routes_settings_get() -> Result<RouteSettingsDto, String> {
 }
 
 #[tauri::command]
-pub async fn routes_settings_set(
-    settings: RouteSettingsDto,
-) -> Result<RouteSettingsDto, String> {
+pub async fn routes_settings_set(settings: RouteSettingsDto) -> Result<RouteSettingsDto, String> {
     let mut store = open_store()?;
     let prev_disable = store.disable_chooser();
     store
@@ -481,16 +448,9 @@ pub async fn routes_settings_set(
     // flag takes effect on the next launch instead of staying stale
     // until the user activates / deactivates the route.
     if prev_disable != settings.disable_deployment_mode_chooser {
-        let active: Option<Route> = store
-            .list()
-            .iter()
-            .find(|r| r.active_on_desktop)
-            .cloned();
+        let active: Option<Route> = store.list().iter().find(|r| r.active_on_desktop).cloned();
         if let Some(route) = active {
-            let _ = activate_desktop(
-                &route,
-                settings.disable_deployment_mode_chooser,
-            );
+            let _ = activate_desktop(&route, settings.disable_deployment_mode_chooser);
         }
     }
     Ok(RouteSettingsDto {
@@ -499,9 +459,7 @@ pub async fn routes_settings_set(
 }
 
 #[tauri::command]
-pub async fn routes_add(
-    mut route: RouteCreateDto,
-) -> Result<RouteSummaryDto, String> {
+pub async fn routes_add(mut route: RouteCreateDto) -> Result<RouteSummaryDto, String> {
     let provider_kind = parse_provider(&route.provider_kind)?;
     let mut provider = build_provider(
         provider_kind,
@@ -572,9 +530,7 @@ pub async fn routes_add(
 }
 
 #[tauri::command]
-pub async fn routes_edit(
-    mut route: RouteUpdateDto,
-) -> Result<RouteSummaryDto, String> {
+pub async fn routes_edit(mut route: RouteUpdateDto) -> Result<RouteSummaryDto, String> {
     let id = parse_route_id(&route.id)?;
     let provider_kind = parse_provider(&route.provider_kind)?;
 
@@ -692,9 +648,7 @@ pub async fn routes_edit(
     if updated.active_on_desktop {
         let disable = store.disable_chooser();
         if let Err(e) = activate_desktop(&updated, disable) {
-            warnings.push(format!(
-                "Desktop activation re-mirror failed: {e}"
-            ));
+            warnings.push(format!("Desktop activation re-mirror failed: {e}"));
         }
     }
 
@@ -802,11 +756,7 @@ pub async fn routes_unuse_desktop() -> Result<(), String> {
     // the persist step fails. Without this, a flag-set failure after
     // the file was cleared would leave a route flagged active in the
     // store with no enterpriseConfig backing it.
-    let prev_active: Option<Route> = store
-        .list()
-        .iter()
-        .find(|r| r.active_on_desktop)
-        .cloned();
+    let prev_active: Option<Route> = store.list().iter().find(|r| r.active_on_desktop).cloned();
     let disable = store.disable_chooser();
     clear_desktop_active().map_err(map_err)?;
     if let Err(e) = store.set_active_desktop(None) {
@@ -825,8 +775,7 @@ pub async fn routes_derive_slug(model: String) -> Result<String, String> {
 
 #[tauri::command]
 pub async fn routes_validate_wrapper_name(name: String) -> Result<String, String> {
-    sanitize_wrapper_name(&name)
-        .map_err(|e| format!("invalid wrapper name '{name}': {e}"))
+    sanitize_wrapper_name(&name).map_err(|e| format!("invalid wrapper name '{name}': {e}"))
 }
 
 /// Best-effort: if the renderer wants to forcibly zero a key it

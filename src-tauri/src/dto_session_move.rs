@@ -111,7 +111,11 @@ impl From<&claudepot_core::session_move::AdoptReport> for AdoptReportDto {
                 })
                 .collect(),
             source_dir_removed: r.source_dir_removed,
-            per_session: r.per_session.iter().map(MoveSessionReportDto::from).collect(),
+            per_session: r
+                .per_session
+                .iter()
+                .map(MoveSessionReportDto::from)
+                .collect(),
         }
     }
 }

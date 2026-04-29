@@ -217,17 +217,21 @@ mod tests {
     #[test]
     fn test_cowork_alias_accepts_both_keys() {
         // New shape: bare `cowork`.
-        let new_shape = r#"{"cowork":{"utilization":33.0,"resets_at":"2026-04-19T00:00:00+00:00"}}"#;
+        let new_shape =
+            r#"{"cowork":{"utilization":33.0,"resets_at":"2026-04-19T00:00:00+00:00"}}"#;
         let new: UsageResponse = serde_json::from_str(new_shape).unwrap();
         let w = new.seven_day_cowork.expect("cowork alias should populate");
         assert_eq!(w.utilization, 33.0);
         assert!(w.resets_at.is_some());
 
         // Old shape: `seven_day_cowork`.
-        let old_shape = r#"{"seven_day_cowork":{"utilization":44.0,"resets_at":"2026-04-19T00:00:00+00:00"}}"#;
+        let old_shape =
+            r#"{"seven_day_cowork":{"utilization":44.0,"resets_at":"2026-04-19T00:00:00+00:00"}}"#;
         let old: UsageResponse = serde_json::from_str(old_shape).unwrap();
         assert_eq!(
-            old.seven_day_cowork.expect("plain key still parses").utilization,
+            old.seven_day_cowork
+                .expect("plain key still parses")
+                .utilization,
             44.0
         );
     }

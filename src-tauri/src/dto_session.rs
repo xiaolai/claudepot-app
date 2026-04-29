@@ -270,11 +270,7 @@ impl From<&claudepot_core::session::SessionEvent> for SessionEventDto {
                 uuid: uuid.clone(),
                 summary: summary.clone(),
             },
-            E::Other {
-                ts,
-                uuid,
-                raw_type,
-            } => Self::Other {
+            E::Other { ts, uuid, raw_type } => Self::Other {
                 ts: *ts,
                 uuid: uuid.clone(),
                 raw_type: raw_type.clone(),

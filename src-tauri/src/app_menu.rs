@@ -12,8 +12,7 @@
 //! macOS-standard ⌘, and ⌘Q on the Claudepot menu.
 
 use tauri::menu::{
-    AboutMetadataBuilder, MenuBuilder, MenuItemBuilder, PredefinedMenuItem,
-    SubmenuBuilder,
+    AboutMetadataBuilder, MenuBuilder, MenuItemBuilder, PredefinedMenuItem, SubmenuBuilder,
 };
 use tauri::{AppHandle, Emitter, Manager, Runtime};
 
@@ -38,14 +37,14 @@ pub fn install<R: Runtime>(app: &AppHandle<R>) -> Result<(), String> {
 
     let services = PredefinedMenuItem::services(app, Some("Services"))
         .map_err(|e| format!("services: {e}"))?;
-    let hide = PredefinedMenuItem::hide(app, Some("Hide Claudepot"))
-        .map_err(|e| format!("hide: {e}"))?;
+    let hide =
+        PredefinedMenuItem::hide(app, Some("Hide Claudepot")).map_err(|e| format!("hide: {e}"))?;
     let hide_others = PredefinedMenuItem::hide_others(app, Some("Hide Others"))
         .map_err(|e| format!("hide_others: {e}"))?;
     let show_all = PredefinedMenuItem::show_all(app, Some("Show All"))
         .map_err(|e| format!("show_all: {e}"))?;
-    let quit = PredefinedMenuItem::quit(app, Some("Quit Claudepot"))
-        .map_err(|e| format!("quit: {e}"))?;
+    let quit =
+        PredefinedMenuItem::quit(app, Some("Quit Claudepot")).map_err(|e| format!("quit: {e}"))?;
 
     let claudepot = SubmenuBuilder::new(app, "Claudepot")
         .item(&about)
@@ -67,16 +66,11 @@ pub fn install<R: Runtime>(app: &AppHandle<R>) -> Result<(), String> {
     // items in an Edit menu, WebKit `<input>` fields don't receive ⌘C/⌘V/
     // ⌘X/⌘A keyboard shortcuts. `app.set_menu()` replaces the default menu
     // entirely, so we have to put these back by hand.
-    let undo = PredefinedMenuItem::undo(app, Some("Undo"))
-        .map_err(|e| format!("undo: {e}"))?;
-    let redo = PredefinedMenuItem::redo(app, Some("Redo"))
-        .map_err(|e| format!("redo: {e}"))?;
-    let cut = PredefinedMenuItem::cut(app, Some("Cut"))
-        .map_err(|e| format!("cut: {e}"))?;
-    let copy = PredefinedMenuItem::copy(app, Some("Copy"))
-        .map_err(|e| format!("copy: {e}"))?;
-    let paste = PredefinedMenuItem::paste(app, Some("Paste"))
-        .map_err(|e| format!("paste: {e}"))?;
+    let undo = PredefinedMenuItem::undo(app, Some("Undo")).map_err(|e| format!("undo: {e}"))?;
+    let redo = PredefinedMenuItem::redo(app, Some("Redo")).map_err(|e| format!("redo: {e}"))?;
+    let cut = PredefinedMenuItem::cut(app, Some("Cut")).map_err(|e| format!("cut: {e}"))?;
+    let copy = PredefinedMenuItem::copy(app, Some("Copy")).map_err(|e| format!("copy: {e}"))?;
+    let paste = PredefinedMenuItem::paste(app, Some("Paste")).map_err(|e| format!("paste: {e}"))?;
     let select_all = PredefinedMenuItem::select_all(app, Some("Select All"))
         .map_err(|e| format!("select_all: {e}"))?;
 
@@ -96,12 +90,10 @@ pub fn install<R: Runtime>(app: &AppHandle<R>) -> Result<(), String> {
     // No "Manage accounts…" entry — it would emit `app-menu:nav:accounts`
     // (the router strips the `:manage` suffix), which is the same target
     // as View → Accounts. One nav target, one menu item.
-    let login_browser = MenuItemBuilder::with_id(
-        "app-menu:account:login-browser",
-        "Sign in from browser…",
-    )
-    .build(app)
-    .map_err(|e| format!("login-browser: {e}"))?;
+    let login_browser =
+        MenuItemBuilder::with_id("app-menu:account:login-browser", "Sign in from browser…")
+            .build(app)
+            .map_err(|e| format!("login-browser: {e}"))?;
     let sync_cc = MenuItemBuilder::with_id("app-menu:account:sync-cc", "Sync from current CC")
         .build(app)
         .map_err(|e| format!("sync-cc: {e}"))?;
@@ -123,28 +115,38 @@ pub fn install<R: Runtime>(app: &AppHandle<R>) -> Result<(), String> {
     // Note: Activities's section id is `events` for localStorage
     // back-compat; the label is "Activities".
     let nav_accounts = MenuItemBuilder::with_id("app-menu:nav:accounts", "Accounts")
-        .build(app).map_err(|e| format!("nav-accounts: {e}"))?;
+        .build(app)
+        .map_err(|e| format!("nav-accounts: {e}"))?;
     let nav_activities = MenuItemBuilder::with_id("app-menu:nav:events", "Activities")
-        .build(app).map_err(|e| format!("nav-activities: {e}"))?;
+        .build(app)
+        .map_err(|e| format!("nav-activities: {e}"))?;
     let nav_projects = MenuItemBuilder::with_id("app-menu:nav:projects", "Projects")
-        .build(app).map_err(|e| format!("nav-projects: {e}"))?;
+        .build(app)
+        .map_err(|e| format!("nav-projects: {e}"))?;
     let nav_keys = MenuItemBuilder::with_id("app-menu:nav:keys", "Keys")
-        .build(app).map_err(|e| format!("nav-keys: {e}"))?;
+        .build(app)
+        .map_err(|e| format!("nav-keys: {e}"))?;
     let nav_third_party = MenuItemBuilder::with_id("app-menu:nav:third-party", "Third-parties")
-        .build(app).map_err(|e| format!("nav-third-party: {e}"))?;
+        .build(app)
+        .map_err(|e| format!("nav-third-party: {e}"))?;
     let nav_automations = MenuItemBuilder::with_id("app-menu:nav:automations", "Automations")
-        .build(app).map_err(|e| format!("nav-automations: {e}"))?;
+        .build(app)
+        .map_err(|e| format!("nav-automations: {e}"))?;
     let nav_global = MenuItemBuilder::with_id("app-menu:nav:global", "Global")
-        .build(app).map_err(|e| format!("nav-global: {e}"))?;
+        .build(app)
+        .map_err(|e| format!("nav-global: {e}"))?;
     let nav_settings = MenuItemBuilder::with_id("app-menu:nav:settings", "Settings")
-        .build(app).map_err(|e| format!("nav-settings: {e}"))?;
+        .build(app)
+        .map_err(|e| format!("nav-settings: {e}"))?;
     let toggle_theme = MenuItemBuilder::with_id("app-menu:view:toggle-theme", "Toggle theme")
-        .build(app).map_err(|e| format!("toggle-theme: {e}"))?;
+        .build(app)
+        .map_err(|e| format!("toggle-theme: {e}"))?;
     // Honest label: the handler in App.tsx only refreshes the Accounts
     // section. A section-aware refresh contract doesn't exist yet, so
     // don't promise one in the label.
     let reload = MenuItemBuilder::with_id("app-menu:view:reload", "Refresh Accounts")
-        .build(app).map_err(|e| format!("reload: {e}"))?;
+        .build(app)
+        .map_err(|e| format!("reload: {e}"))?;
 
     let view = SubmenuBuilder::new(app, "View")
         .item(&nav_accounts)
@@ -164,8 +166,8 @@ pub fn install<R: Runtime>(app: &AppHandle<R>) -> Result<(), String> {
     // ---- Window submenu (standard macOS set) -------------------------------
     let minimize = PredefinedMenuItem::minimize(app, Some("Minimize"))
         .map_err(|e| format!("minimize: {e}"))?;
-    let maximize = PredefinedMenuItem::maximize(app, Some("Zoom"))
-        .map_err(|e| format!("maximize: {e}"))?;
+    let maximize =
+        PredefinedMenuItem::maximize(app, Some("Zoom")).map_err(|e| format!("maximize: {e}"))?;
     let close_window = PredefinedMenuItem::close_window(app, Some("Close Window"))
         .map_err(|e| format!("close_window: {e}"))?;
 
@@ -179,11 +181,15 @@ pub fn install<R: Runtime>(app: &AppHandle<R>) -> Result<(), String> {
 
     // ---- Help submenu ------------------------------------------------------
     let help_github = MenuItemBuilder::with_id("app-menu:help:github", "Open GitHub")
-        .build(app).map_err(|e| format!("help-github: {e}"))?;
+        .build(app)
+        .map_err(|e| format!("help-github: {e}"))?;
     let help_diag = MenuItemBuilder::with_id("app-menu:help:copy-diag", "Copy diagnostics")
-        .build(app).map_err(|e| format!("help-diag: {e}"))?;
-    let help_data = MenuItemBuilder::with_id("app-menu:help:reveal-data-dir", "Reveal data dir in Finder")
-        .build(app).map_err(|e| format!("help-data: {e}"))?;
+        .build(app)
+        .map_err(|e| format!("help-diag: {e}"))?;
+    let help_data =
+        MenuItemBuilder::with_id("app-menu:help:reveal-data-dir", "Reveal data dir in Finder")
+            .build(app)
+            .map_err(|e| format!("help-data: {e}"))?;
 
     let help = SubmenuBuilder::new(app, "Help")
         .item(&help_github)
@@ -202,8 +208,8 @@ pub fn install<R: Runtime>(app: &AppHandle<R>) -> Result<(), String> {
 }
 
 /// Route a menu event. Settings gets opened directly (section switch
-/// + window focus); everything else forwards to the webview via a
-/// single `app-menu` event, with the menu id as payload.
+/// plus window focus); everything else forwards to the webview via
+/// a single `app-menu` event, with the menu id as payload.
 pub fn handle_menu_event<R: Runtime>(app: &AppHandle<R>, id: &str) {
     // "app-menu:settings" is identical to "app-menu:nav:settings" for
     // the webview. Collapse here so React only binds one handler.
@@ -222,13 +228,9 @@ pub fn handle_menu_event<R: Runtime>(app: &AppHandle<R>, id: &str) {
             .arg(&path)
             .spawn();
         #[cfg(target_os = "linux")]
-        let _ = std::process::Command::new("xdg-open")
-            .arg(&path)
-            .spawn();
+        let _ = std::process::Command::new("xdg-open").arg(&path).spawn();
         #[cfg(target_os = "windows")]
-        let _ = std::process::Command::new("explorer")
-            .arg(&path)
-            .spawn();
+        let _ = std::process::Command::new("explorer").arg(&path).spawn();
         return;
     }
     if id == "app-menu:help:github" {
@@ -238,7 +240,9 @@ pub fn handle_menu_event<R: Runtime>(app: &AppHandle<R>, id: &str) {
         #[cfg(target_os = "linux")]
         let _ = std::process::Command::new("xdg-open").arg(url).spawn();
         #[cfg(target_os = "windows")]
-        let _ = std::process::Command::new("cmd").args(["/c", "start", "", url]).spawn();
+        let _ = std::process::Command::new("cmd")
+            .args(["/c", "start", "", url])
+            .spawn();
         return;
     }
 

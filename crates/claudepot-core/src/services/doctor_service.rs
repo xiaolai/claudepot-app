@@ -233,7 +233,11 @@ async fn check_api(beta_header: &str) -> ApiStatus {
     }
 }
 
+// See launcher.rs for the rationale: tests hold `lock_data_dir()`
+// across `.await` deliberately to serialize the shared data-dir
+// env-var across the test binary.
 #[cfg(test)]
+#[allow(clippy::await_holding_lock)]
 mod tests {
     use super::*;
     use crate::cli_backend::swap;
@@ -253,7 +257,7 @@ mod tests {
         let _lock = lock_data_dir();
         let _env = setup_test_data_dir();
 
-        let mut account = make_account("health@example.com");
+        let account = make_account("health@example.com");
         let id = account.uuid;
         swap::save_private(id, &fresh_blob_json()).unwrap();
 
@@ -271,7 +275,7 @@ mod tests {
         let _lock = lock_data_dir();
         let _env = setup_test_data_dir();
 
-        let mut account = make_account("expired@example.com");
+        let account = make_account("expired@example.com");
         let id = account.uuid;
         swap::save_private(id, &expired_blob_json()).unwrap();
 

@@ -167,12 +167,11 @@ pub async fn refresh_usage_for(
     // account's usage to this UUID (audit H4).
     let store = open_store()?;
     let batch = cache.fetch_batch_detailed_verified(&store, &[id]).await;
-    let outcome = batch
-        .into_values()
-        .next()
-        .unwrap_or(claudepot_core::services::usage_cache::UsageOutcome::Error(
+    let outcome = batch.into_values().next().unwrap_or(
+        claudepot_core::services::usage_cache::UsageOutcome::Error(
             "no outcome produced".to_string(),
-        ));
+        ),
+    );
     Ok(UsageEntryDto::from_outcome(outcome))
 }
 
@@ -381,14 +380,12 @@ pub async fn account_login_start(
                 op_id: op_id.clone(),
                 ops: ops.clone(),
             };
-            let result = rt.block_on(
-                services::account_service::login_and_reimport_with_progress(
-                    &store,
-                    id,
-                    Some(notify),
-                    &login_sink,
-                ),
-            );
+            let result = rt.block_on(services::account_service::login_and_reimport_with_progress(
+                &store,
+                id,
+                Some(notify),
+                &login_sink,
+            ));
             // Always release the LoginState slot on terminal — same
             // invariant as the legacy `account_login`.
             login_state_clone.clear();
@@ -505,11 +502,9 @@ pub async fn verify_all_accounts_start(
     // Defensive concurrency guard: bail out if any VerifyAll op is still
     // running. Polling backstop guarantees the prior op_id is reachable
     // until the 5s grace window expires.
-    if ops
-        .list()
-        .iter()
-        .any(|op| matches!(op.kind, OpKind::VerifyAll) && op.status == crate::ops::OpStatus::Running)
-    {
+    if ops.list().iter().any(|op| {
+        matches!(op.kind, OpKind::VerifyAll) && op.status == crate::ops::OpStatus::Running
+    }) {
         return Err("verify_all is already in progress".to_string());
     }
 

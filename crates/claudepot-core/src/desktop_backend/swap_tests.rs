@@ -3,9 +3,14 @@
 //! `#[cfg(test)] #[path = "swap_tests.rs"] mod tests;` so tests
 //! still resolve `super::*` against the parent module's internals.
 
+// See cli_backend/swap_tests.rs for the rationale: tests hold
+// `lock_data_dir()` across `.await` and use `Default::default()`-
+// then-assign patches — both deliberate test-style choices.
+#![allow(clippy::await_holding_lock, clippy::field_reassign_with_default)]
+
 use super::*;
 use crate::error::DesktopSwapError;
-use crate::testing::{make_account, setup_test_data_dir, test_store, DATA_DIR_LOCK};
+use crate::testing::{make_account, setup_test_data_dir, test_store};
 use std::fs;
 use std::sync::atomic::{AtomicBool, Ordering};
 
@@ -315,11 +320,11 @@ async fn test_switch_full_lifecycle() {
     fs::create_dir_all(&data_dir).unwrap();
 
     let (store, _db_dir) = test_store();
-    let items: &[&str] = &["config.json"];
+    let _items: &[&str] = &["config.json"];
 
     // Set up two accounts
-    let mut out_acct = make_account("outgoing@example.com");
-    let mut tgt_acct = make_account("target@example.com");
+    let out_acct = make_account("outgoing@example.com");
+    let tgt_acct = make_account("target@example.com");
     store.insert(&out_acct).unwrap();
     store.insert(&tgt_acct).unwrap();
 
@@ -331,7 +336,7 @@ async fn test_switch_full_lifecycle() {
     fs::create_dir_all(&tgt_profile).unwrap();
     fs::write(tgt_profile.join("config.json"), "target-config").unwrap();
 
-    let mut platform = MockDesktopPlatform::new(&data_dir, &["config.json"]);
+    let platform = MockDesktopPlatform::new(&data_dir, &["config.json"]);
     platform.running.store(true, Ordering::SeqCst);
 
     switch(&platform, &store, Some(out_acct.uuid), tgt_acct.uuid, false)
@@ -645,7 +650,7 @@ fn test_desktop_restore_phase3_failure_cleans_partial() {
     // synchronously inside restore()). To fail phase 3 only, we pre-create
     // an unwritable DIRECTORY at the target path for item `c`, which
     // causes `fs::copy` to fail without disturbing phase 2.
-    use std::os::unix::fs::PermissionsExt;
+
     let _lock = crate::testing::lock_data_dir();
     let _env_dir = setup_test_data_dir();
     let data_dir = _env_dir.path().join("Claude");
@@ -796,7 +801,7 @@ async fn test_desktop_switch_with_windows_items() {
     fs::write(tgt_profile.join("Network/Cookies"), "tgt-cookies").unwrap();
     fs::write(tgt_profile.join("config.json"), "tgt-config").unwrap();
 
-    let mut platform = MockDesktopPlatform::new(&data_dir, WINDOWS_ITEMS);
+    let platform = MockDesktopPlatform::new(&data_dir, WINDOWS_ITEMS);
     platform.running.store(true, Ordering::SeqCst);
 
     switch(&platform, &store, Some(out.uuid), tgt.uuid, true)

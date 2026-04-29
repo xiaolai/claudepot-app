@@ -6,8 +6,8 @@
 //! this boundary — automations don't carry credentials.
 
 use claudepot_core::automations::{
-    Automation, AutomationBinary, AutomationRun, OutputFormat, PermissionMode,
-    PlatformOptions, RunResult, SchedulerCapabilities, Trigger, TriggerKind,
+    Automation, AutomationBinary, AutomationRun, OutputFormat, PermissionMode, PlatformOptions,
+    RunResult, SchedulerCapabilities, Trigger, TriggerKind,
 };
 use serde::{Deserialize, Serialize};
 

@@ -6,10 +6,9 @@
 //! in `commands_repair.rs`.
 
 use crate::dto::{
-    CleanPreviewDto, DryRunPlanDto, JournalEntryDto, MoveArgsDto, ProjectDetailDto,
-    ProjectInfoDto, ProjectRestoreReportDto, ProjectTrashListingDto,
-    RemoveProjectPreviewBasicDto, RemoveProjectPreviewDto,
-    RemoveProjectPreviewExtrasDto, RemoveProjectResultDto,
+    CleanPreviewDto, DryRunPlanDto, JournalEntryDto, MoveArgsDto, ProjectDetailDto, ProjectInfoDto,
+    ProjectRestoreReportDto, ProjectTrashListingDto, RemoveProjectPreviewBasicDto,
+    RemoveProjectPreviewDto, RemoveProjectPreviewExtrasDto, RemoveProjectResultDto,
 };
 use crate::ops::{
     emit_terminal, new_op_id, new_running_op, spawn_op_thread, CleanResultSummary, OpKind,
@@ -19,8 +18,8 @@ use claudepot_core::paths;
 use claudepot_core::project;
 use claudepot_core::project_dry_run_service::DryRunOutcome;
 use claudepot_core::project_remove::{
-    remove_project as core_remove_project, remove_project_preview,
-    remove_project_preview_basic, remove_project_preview_extras, RemoveArgs,
+    remove_project as core_remove_project, remove_project_preview, remove_project_preview_basic,
+    remove_project_preview_extras, RemoveArgs,
 };
 use claudepot_core::project_repair;
 use claudepot_core::project_trash;
@@ -29,8 +28,7 @@ use tauri::{AppHandle, State};
 /// Default journal nag threshold per spec §8 Q7 — mirrors the CLI.
 pub(crate) const JOURNAL_NAG_THRESHOLD_SECS: u64 = 86_400;
 
-pub(crate) fn claudepot_home_dirs()
-    -> (std::path::PathBuf, std::path::PathBuf, std::path::PathBuf)
+pub(crate) fn claudepot_home_dirs() -> (std::path::PathBuf, std::path::PathBuf, std::path::PathBuf)
 {
     paths::claudepot_repair_dirs()
 }
@@ -59,8 +57,7 @@ pub async fn project_show(path: String) -> Result<ProjectDetailDto, String> {
     // stat-slow source paths.
     tauri::async_runtime::spawn_blocking(move || {
         let cfg = paths::claude_config_dir();
-        let detail =
-            project::show_project(&cfg, &path).map_err(|e| format!("show failed: {e}"))?;
+        let detail = project::show_project(&cfg, &path).map_err(|e| format!("show failed: {e}"))?;
         Ok(ProjectDetailDto::from(&detail))
     })
     .await
@@ -164,9 +161,8 @@ pub async fn project_clean_start(
 ) -> Result<String, String> {
     let (journals, locks, snaps) = claudepot_home_dirs();
 
-    let actionable =
-        project_repair::list_actionable(&journals, &locks, JOURNAL_NAG_THRESHOLD_SECS)
-            .map_err(|e| format!("journal check failed: {e}"))?;
+    let actionable = project_repair::list_actionable(&journals, &locks, JOURNAL_NAG_THRESHOLD_SECS)
+        .map_err(|e| format!("journal check failed: {e}"))?;
     if !actionable.is_empty() {
         return Err(format!(
             "refusing to clean while {} rename journal(s) are pending. Resolve them in the Repair view first.",
@@ -185,9 +181,8 @@ pub async fn project_clean_start(
     // read failure, fall back to built-in defaults (audit fix: an
     // empty set would silently disable protection for `/`, `~`,
     // `/Users`, etc.).
-    let protected = claudepot_core::protected_paths::resolved_set_or_defaults(
-        &paths::claudepot_data_dir(),
-    );
+    let protected =
+        claudepot_core::protected_paths::resolved_set_or_defaults(&paths::claudepot_data_dir());
 
     // `spawn_op_thread` uses a plain OS thread, not `spawn_blocking`
     // — Tauri's sync #[command] runs outside a tokio runtime context
@@ -195,30 +190,35 @@ pub async fn project_clean_start(
     // with "no reactor running" there. Our work is blocking I/O (fs
     // scans, remove_dir_all) with no await points anyway.
     let ops_for_task = ops.inner().clone();
-    spawn_op_thread(app, ops_for_task, op_id.clone(), move |sink, app, ops, op_id| {
-        let repair_root = paths::claudepot_repair_dir();
-        let result = project::clean_orphans_with_progress(
-            &cfg,
-            claude_json.as_deref(),
-            Some(snaps.as_path()),
-            Some(locks.as_path()),
-            Some(repair_root.as_path()),
-            &protected,
-            false,
-            &sink,
-        );
-        match result {
-            Ok((clean, _orphans)) => {
-                ops.update(&op_id, |op| {
-                    op.clean_result = Some(CleanResultSummary::from_core(&clean));
-                });
-                emit_terminal(&app, &ops, &op_id, None);
+    spawn_op_thread(
+        app,
+        ops_for_task,
+        op_id.clone(),
+        move |sink, app, ops, op_id| {
+            let repair_root = paths::claudepot_repair_dir();
+            let result = project::clean_orphans_with_progress(
+                &cfg,
+                claude_json.as_deref(),
+                Some(snaps.as_path()),
+                Some(locks.as_path()),
+                Some(repair_root.as_path()),
+                &protected,
+                false,
+                &sink,
+            );
+            match result {
+                Ok((clean, _orphans)) => {
+                    ops.update(&op_id, |op| {
+                        op.clean_result = Some(CleanResultSummary::from_core(&clean));
+                    });
+                    emit_terminal(&app, &ops, &op_id, None);
+                }
+                Err(e) => {
+                    emit_terminal(&app, &ops, &op_id, Some(format!("clean failed: {e}")));
+                }
             }
-            Err(e) => {
-                emit_terminal(&app, &ops, &op_id, Some(format!("clean failed: {e}")));
-            }
-        }
-    });
+        },
+    );
 
     Ok(op_id)
 }
@@ -241,12 +241,9 @@ pub async fn repair_list() -> Result<Vec<JournalEntryDto>, String> {
     // Maintenance view fans it out with other ops.
     tauri::async_runtime::spawn_blocking(|| {
         let (journals, locks, _snaps) = claudepot_home_dirs();
-        let entries = project_repair::list_pending_with_status(
-            &journals,
-            &locks,
-            JOURNAL_NAG_THRESHOLD_SECS,
-        )
-        .map_err(|e| format!("repair list failed: {e}"))?;
+        let entries =
+            project_repair::list_pending_with_status(&journals, &locks, JOURNAL_NAG_THRESHOLD_SECS)
+                .map_err(|e| format!("repair list failed: {e}"))?;
         Ok(entries.iter().map(JournalEntryDto::from).collect())
     })
     .await
@@ -279,12 +276,9 @@ pub async fn repair_status_summary() -> Result<crate::dto::PendingJournalsSummar
     tauri::async_runtime::spawn_blocking(|| {
         use claudepot_core::project_journal::JournalStatus;
         let (journals, locks, _snaps) = claudepot_home_dirs();
-        let entries = project_repair::list_pending_with_status(
-            &journals,
-            &locks,
-            JOURNAL_NAG_THRESHOLD_SECS,
-        )
-        .map_err(|e| format!("repair summary failed: {e}"))?;
+        let entries =
+            project_repair::list_pending_with_status(&journals, &locks, JOURNAL_NAG_THRESHOLD_SECS)
+                .map_err(|e| format!("repair summary failed: {e}"))?;
 
         let mut pending = 0usize;
         let mut stale = 0usize;
@@ -393,9 +387,7 @@ pub async fn project_remove_preview_extras(
 /// the reason and disable the confirm path itself, per the design rule
 /// ("disabled buttons state a reason inline").
 #[tauri::command]
-pub async fn project_remove_preview(
-    target: String,
-) -> Result<RemoveProjectPreviewDto, String> {
+pub async fn project_remove_preview(target: String) -> Result<RemoveProjectPreviewDto, String> {
     tauri::async_runtime::spawn_blocking(move || {
         let (config_dir, claude_json, history, snaps, locks, data_dir) = remove_paths();
         let args = RemoveArgs {
@@ -407,8 +399,7 @@ pub async fn project_remove_preview(
             data_dir: &data_dir,
             target: &target,
         };
-        let preview = remove_project_preview(&args)
-            .map_err(|e| format!("preview failed: {e}"))?;
+        let preview = remove_project_preview(&args).map_err(|e| format!("preview failed: {e}"))?;
         Ok(RemoveProjectPreviewDto::from(&preview))
     })
     .await
@@ -420,9 +411,7 @@ pub async fn project_remove_preview(
 /// op-progress channel. The pending-journals gate fires here, mirroring
 /// the CLI gate.
 #[tauri::command]
-pub async fn project_remove_execute(
-    target: String,
-) -> Result<RemoveProjectResultDto, String> {
+pub async fn project_remove_execute(target: String) -> Result<RemoveProjectResultDto, String> {
     tauri::async_runtime::spawn_blocking(move || {
         let (journals, locks_dir, _snaps) = claudepot_home_dirs();
         let actionable =
@@ -457,11 +446,8 @@ pub async fn project_remove_execute(
 pub async fn project_trash_list() -> Result<ProjectTrashListingDto, String> {
     tauri::async_runtime::spawn_blocking(|| {
         let data_dir = paths::claudepot_data_dir();
-        let listing = project_trash::list(
-            &data_dir,
-            project_trash::ProjectTrashFilter::default(),
-        )
-        .map_err(|e| format!("trash list failed: {e}"))?;
+        let listing = project_trash::list(&data_dir, project_trash::ProjectTrashFilter::default())
+            .map_err(|e| format!("trash list failed: {e}"))?;
         Ok(ProjectTrashListingDto::from(&listing))
     })
     .await
@@ -469,9 +455,7 @@ pub async fn project_trash_list() -> Result<ProjectTrashListingDto, String> {
 }
 
 #[tauri::command]
-pub async fn project_trash_restore(
-    entry_id: String,
-) -> Result<ProjectRestoreReportDto, String> {
+pub async fn project_trash_restore(entry_id: String) -> Result<ProjectRestoreReportDto, String> {
     tauri::async_runtime::spawn_blocking(move || {
         let (config_dir, claude_json, history, _snaps, _locks, data_dir) = remove_paths();
         let report = project_trash::restore(
@@ -489,9 +473,7 @@ pub async fn project_trash_restore(
 }
 
 #[tauri::command]
-pub async fn project_trash_empty(
-    older_than_days: Option<u64>,
-) -> Result<u64, String> {
+pub async fn project_trash_empty(older_than_days: Option<u64>) -> Result<u64, String> {
     tauri::async_runtime::spawn_blocking(move || {
         let data_dir = paths::claudepot_data_dir();
         let filter = project_trash::ProjectTrashFilter {

@@ -4,14 +4,10 @@
 //! and stays under the LOC ceiling. All types here are public so the
 //! command module imports them verbatim.
 
-use crate::config_dto::{
-    flatten_files, kind_to_str, scope_kind_label, FileNodeDto,
-};
+use crate::config_dto::{flatten_files, kind_to_str, scope_kind_label, FileNodeDto};
 use claudepot_core::config_view::{
     effective_mcp::McpSimulationMode,
-    model::{
-        DetectSource, EditorCandidate, EditorDefaults, Kind, LaunchKind, ScopeNode,
-    },
+    model::{DetectSource, EditorCandidate, EditorDefaults, Kind, LaunchKind, ScopeNode},
 };
 use serde::{Deserialize, Serialize};
 
@@ -87,10 +83,7 @@ impl From<&EditorCandidate> for EditorCandidateDto {
         Self {
             id: c.id.clone(),
             label: c.label.clone(),
-            binary_path: c
-                .binary_path
-                .as_ref()
-                .map(|p| p.display().to_string()),
+            binary_path: c.binary_path.as_ref().map(|p| p.display().to_string()),
             bundle_id: c.bundle_id.clone(),
             launch_kind,
             detected_via,
@@ -226,9 +219,7 @@ pub struct EffectiveMcpServerDto {
 }
 
 /// Render a JSON path segment list as a dotted string.
-pub fn render_path(
-    segs: &[claudepot_core::config_view::model::JsonPathSeg],
-) -> String {
+pub fn render_path(segs: &[claudepot_core::config_view::model::JsonPathSeg]) -> String {
     use claudepot_core::config_view::model::JsonPathSeg;
     let mut out = String::new();
     for (i, seg) in segs.iter().enumerate() {

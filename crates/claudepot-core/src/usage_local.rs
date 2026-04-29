@@ -37,8 +37,8 @@
 
 use crate::pricing::{resolve_model_rates, ModelRates, PriceTable};
 use crate::session::SessionRow;
-use crate::session_index::SessionIndex;
 use crate::session_index::error::SessionIndexError;
+use crate::session_index::SessionIndex;
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use std::path::Path;
@@ -207,9 +207,7 @@ pub fn aggregate_from_rows(
 
         let session_cost = compute_session_cost(&s, prices);
 
-        let acc = by_project
-            .entry(s.project_path.clone())
-            .or_default();
+        let acc = by_project.entry(s.project_path.clone()).or_default();
         acc.session_count += 1;
         acc.tokens_input += s.tokens.input;
         acc.tokens_output += s.tokens.output;
@@ -354,12 +352,7 @@ mod tests {
         }
     }
 
-    fn row(
-        project: &str,
-        last_ts_ms: i64,
-        models: Vec<&str>,
-        tokens: TokenUsage,
-    ) -> SessionRow {
+    fn row(project: &str, last_ts_ms: i64, models: Vec<&str>, tokens: TokenUsage) -> SessionRow {
         SessionRow {
             session_id: "sess".into(),
             slug: "slug".into(),

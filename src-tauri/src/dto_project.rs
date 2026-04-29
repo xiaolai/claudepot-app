@@ -230,9 +230,7 @@ pub struct RemoveProjectPreviewBasicDto {
     pub last_modified_ms: Option<i64>,
 }
 
-impl From<&claudepot_core::project_remove::RemovePreviewBasic>
-    for RemoveProjectPreviewBasicDto
-{
+impl From<&claudepot_core::project_remove::RemovePreviewBasic> for RemoveProjectPreviewBasicDto {
     fn from(p: &claudepot_core::project_remove::RemovePreviewBasic) -> Self {
         Self {
             slug: p.slug.clone(),
@@ -254,9 +252,7 @@ pub struct RemoveProjectPreviewExtrasDto {
     pub history_lines_count: usize,
 }
 
-impl From<&claudepot_core::project_remove::RemovePreviewExtras>
-    for RemoveProjectPreviewExtrasDto
-{
+impl From<&claudepot_core::project_remove::RemovePreviewExtras> for RemoveProjectPreviewExtrasDto {
     fn from(p: &claudepot_core::project_remove::RemovePreviewExtras) -> Self {
         Self {
             has_live_session: p.has_live_session,

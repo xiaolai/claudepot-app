@@ -166,12 +166,6 @@ pub async fn app_status() -> Result<AppStatus, String> {
     })
 }
 
-/// Preflight probe: is a `claude` process currently running? The GUI
-/// uses this before `cli_use` to raise a split-brain confirmation
-/// instead of letting the swap silently race with a live session's
-/// next token refresh.
-
-
 /// macOS-only: request a keychain unlock via the system's native dialog.
 /// Spawns `security unlock-keychain` without -p so macOS shows its built-in
 /// "Unlock Keychain" password prompt. The user's password never reaches
@@ -426,7 +420,12 @@ pub async fn tray_set_alert_count(
 //   - Config tree / watcher:                      `commands_config.rs`
 //   - Pricing:                                    `commands_pricing.rs`
 
+// Tests hold a per-binary `Mutex<()>` across `.await` deliberately
+// so they don't trample the shared `CLAUDEPOT_DATA_DIR` env-var.
+// `clippy::await_holding_lock` is irrelevant here — the lock is
+// single-threaded, never poisoned, never contended.
 #[cfg(test)]
+#[allow(clippy::await_holding_lock)]
 mod tests {
     use super::*;
     use claudepot_core::cli_backend::swap;

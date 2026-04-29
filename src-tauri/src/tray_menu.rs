@@ -16,8 +16,7 @@ use crate::tray_icons::{
 use claudepot_core::oauth::usage::UsageResponse;
 use tauri::image::Image;
 use tauri::menu::{
-    IconMenuItem, IconMenuItemBuilder, MenuItemBuilder, PredefinedMenuItem, Submenu,
-    SubmenuBuilder,
+    IconMenuItem, IconMenuItemBuilder, MenuItemBuilder, PredefinedMenuItem, Submenu, SubmenuBuilder,
 };
 use tauri::{AppHandle, Manager, Wry};
 
@@ -106,11 +105,7 @@ fn active_label(a: &AccountSummary, surface: Option<&str>) -> String {
     }
 }
 
-fn make_active_item(
-    app: &AppHandle,
-    id: &str,
-    label: &str,
-) -> Result<IconMenuItem<Wry>, String> {
+fn make_active_item(app: &AppHandle, id: &str, label: &str) -> Result<IconMenuItem<Wry>, String> {
     let img = Image::from_bytes(ICON_CHECK).map_err(|e| format!("check icon: {e}"))?;
     IconMenuItemBuilder::with_id(id, label)
         .icon(img)
@@ -225,16 +220,13 @@ pub fn build_desktop_submenu(
         builder = builder.item(&item);
     }
     if !any {
-        let empty =
-            MenuItemBuilder::with_id("tray:desktop-switch:empty", "No eligible accounts")
-                .enabled(false)
-                .build(app)
-                .map_err(|e| format!("desktop empty: {e}"))?;
+        let empty = MenuItemBuilder::with_id("tray:desktop-switch:empty", "No eligible accounts")
+            .enabled(false)
+            .build(app)
+            .map_err(|e| format!("desktop empty: {e}"))?;
         builder = builder.item(&empty);
     }
-    builder
-        .build()
-        .map_err(|e| format!("desktop submenu: {e}"))
+    builder.build().map_err(|e| format!("desktop submenu: {e}"))
 }
 
 /// One submenu row per account with credentials:
@@ -302,8 +294,7 @@ pub fn build_usage_submenu(
             .map_err(|e| format!("usage empty: {e}"))?;
         builder = builder.item(&empty);
     } else {
-        let sep =
-            PredefinedMenuItem::separator(app).map_err(|e| format!("usage sep: {e}"))?;
+        let sep = PredefinedMenuItem::separator(app).map_err(|e| format!("usage sep: {e}"))?;
         builder = builder.item(&sep);
         let refresh_img =
             Image::from_bytes(ICON_REFRESH).map_err(|e| format!("usage refresh icon: {e}"))?;
@@ -338,20 +329,17 @@ pub fn build_live_submenu(app: &AppHandle) -> Result<Option<Submenu<Wry>>, Strin
     }
     for s in list.iter() {
         use claudepot_core::session_live::types::Status;
-        let action = s
-            .current_action
-            .clone()
-            .unwrap_or_else(|| match s.status {
-                Status::Waiting => {
-                    if let Some(w) = &s.waiting_for {
-                        format!("waiting — {w}")
-                    } else {
-                        "waiting".to_string()
-                    }
+        let action = s.current_action.clone().unwrap_or_else(|| match s.status {
+            Status::Waiting => {
+                if let Some(w) = &s.waiting_for {
+                    format!("waiting — {w}")
+                } else {
+                    "waiting".to_string()
                 }
-                Status::Idle => "idle".to_string(),
-                Status::Busy => "working".to_string(),
-            });
+            }
+            Status::Idle => "idle".to_string(),
+            Status::Busy => "working".to_string(),
+        });
         let line = format_live_row(&s.cwd, s.model.as_deref(), &action, s.idle_ms);
         let id = format!("{}{}", PREFIX_LIVE, s.session_id);
         // Status-varied per-row glyph so the tray conveys

@@ -35,8 +35,8 @@ pub async fn protected_paths_list() -> Result<Vec<ProtectedPathDto>, String> {
 pub async fn protected_paths_add(path: String) -> Result<ProtectedPathDto, String> {
     tokio::task::spawn_blocking(move || {
         let dir = paths::claudepot_data_dir();
-        let added = claudepot_core::protected_paths::add(&dir, &path)
-            .map_err(|e| format!("{e}"))?;
+        let added =
+            claudepot_core::protected_paths::add(&dir, &path).map_err(|e| format!("{e}"))?;
         Ok::<_, String>(ProtectedPathDto::from(&added))
     })
     .await

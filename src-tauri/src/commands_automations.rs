@@ -8,8 +8,7 @@ use chrono::Utc;
 use claudepot_core::automations::{
     active_scheduler, current_claudepot_cli, install_shim, read_run as core_read_run,
     resolve_binary, scheduler::cron_next_runs, store::automation_runs_dir, Automation,
-    AutomationBinary, AutomationId, AutomationPatch, AutomationStore, PlatformOptions,
-    Trigger,
+    AutomationBinary, AutomationId, AutomationPatch, AutomationStore, PlatformOptions, Trigger,
 };
 use claudepot_core::routes::RouteStore;
 use uuid::Uuid;
@@ -50,9 +49,7 @@ fn route_lookup_fn() -> impl Fn(&Uuid) -> Option<String> {
     }
 }
 
-fn build_automation_from_create(
-    dto: AutomationCreateDto,
-) -> Result<Automation, String> {
+fn build_automation_from_create(dto: AutomationCreateDto) -> Result<Automation, String> {
     claudepot_core::automations::validate_name(&dto.name).map_err(err)?;
     let permission_mode = parse_permission_mode(&dto.permission_mode)
         .ok_or_else(|| format!("invalid permission_mode: {}", dto.permission_mode))?;
@@ -77,7 +74,8 @@ fn build_automation_from_create(
                 .as_deref()
                 .ok_or_else(|| String::from("route binary requires binary_route_id"))?;
             AutomationBinary::Route {
-                route_id: Uuid::parse_str(route_id).map_err(|e| format!("invalid route id: {e}"))?,
+                route_id: Uuid::parse_str(route_id)
+                    .map_err(|e| format!("invalid route id: {e}"))?,
             }
         }
         other => return Err(format!("unknown binary_kind: {other}")),
@@ -132,45 +130,44 @@ fn build_patch_from_update(
     dto: AutomationUpdateDto,
     existing: &Automation,
 ) -> Result<AutomationPatch, String> {
-    let mut patch = AutomationPatch::default();
-    patch.display_name = dto.display_name;
-    patch.description = dto.description;
-    patch.enabled = dto.enabled;
-    patch.model = dto.model;
-    patch.cwd = dto.cwd;
-    patch.prompt = dto.prompt;
-    patch.system_prompt = dto.system_prompt;
-    patch.append_system_prompt = dto.append_system_prompt;
-    if let Some(s) = dto.permission_mode {
-        let pm = parse_permission_mode(&s)
-            .ok_or_else(|| format!("invalid permission_mode: {s}"))?;
-        patch.permission_mode = Some(pm);
-    }
-    patch.allowed_tools = dto.allowed_tools;
-    patch.add_dir = dto.add_dir;
-    if let Some(b) = dto.max_budget_usd {
-        if !b.is_finite() || b < 0.0 {
-            return Err(format!(
-                "max_budget_usd must be a finite non-negative number (got {b})"
-            ));
+    // Resolve every fallible / branchy field BEFORE constructing the
+    // patch — keeps the struct literal below a single, scannable
+    // shape and avoids the field_reassign_with_default lint that
+    // accumulating `patch.x = …` after `Default::default()` triggers.
+    let permission_mode = match dto.permission_mode {
+        Some(s) => {
+            Some(parse_permission_mode(&s).ok_or_else(|| format!("invalid permission_mode: {s}"))?)
         }
-        patch.max_budget_usd = Some(b);
-    }
-    patch.fallback_model = dto.fallback_model;
-    if let Some(s) = dto.output_format {
-        let of = parse_output_format(&s).ok_or_else(|| format!("invalid output_format: {s}"))?;
-        patch.output_format = Some(of);
-    }
-    patch.json_schema = dto.json_schema;
-    patch.bare = dto.bare;
-    if let Some(env) = dto.extra_env {
-        claudepot_core::automations::env::validate_map(&env).map_err(err)?;
-        patch.extra_env = Some(env);
-    }
+        None => None,
+    };
+    let max_budget_usd = match dto.max_budget_usd {
+        Some(b) => {
+            if !b.is_finite() || b < 0.0 {
+                return Err(format!(
+                    "max_budget_usd must be a finite non-negative number (got {b})"
+                ));
+            }
+            Some(b)
+        }
+        None => None,
+    };
+    let output_format = match dto.output_format {
+        Some(s) => {
+            Some(parse_output_format(&s).ok_or_else(|| format!("invalid output_format: {s}"))?)
+        }
+        None => None,
+    };
+    let extra_env = match dto.extra_env {
+        Some(env) => {
+            claudepot_core::automations::env::validate_map(&env).map_err(err)?;
+            Some(env)
+        }
+        None => None,
+    };
     // Trigger merge: `cron` and `timezone` arrive independently; we
     // build a Cron trigger only when at least one of them changes,
     // preserving the un-supplied side from the existing record.
-    if dto.cron.is_some() || dto.timezone.is_some() {
+    let trigger = if dto.cron.is_some() || dto.timezone.is_some() {
         let (existing_cron, existing_tz) = match &existing.trigger {
             Trigger::Cron { cron, timezone } => (cron.clone(), timezone.clone()),
         };
@@ -184,16 +181,38 @@ fn build_patch_from_update(
             Some(s) => Some(s),
             None => existing_tz,
         };
-        patch.trigger = Some(Trigger::Cron { cron, timezone });
-    }
-    if let Some(po) = dto.platform_options {
-        patch.platform_options = Some(PlatformOptions {
-            wake_to_run: po.wake_to_run,
-            catch_up_if_missed: po.catch_up_if_missed,
-            run_when_logged_out: po.run_when_logged_out,
-        });
-    }
-    patch.log_retention_runs = dto.log_retention_runs;
+        Some(Trigger::Cron { cron, timezone })
+    } else {
+        None
+    };
+    let platform_options = dto.platform_options.map(|po| PlatformOptions {
+        wake_to_run: po.wake_to_run,
+        catch_up_if_missed: po.catch_up_if_missed,
+        run_when_logged_out: po.run_when_logged_out,
+    });
+
+    let patch = AutomationPatch {
+        display_name: dto.display_name,
+        description: dto.description,
+        enabled: dto.enabled,
+        model: dto.model,
+        cwd: dto.cwd,
+        prompt: dto.prompt,
+        system_prompt: dto.system_prompt,
+        append_system_prompt: dto.append_system_prompt,
+        permission_mode,
+        allowed_tools: dto.allowed_tools,
+        add_dir: dto.add_dir,
+        max_budget_usd,
+        fallback_model: dto.fallback_model,
+        output_format,
+        json_schema: dto.json_schema,
+        bare: dto.bare,
+        extra_env,
+        trigger,
+        platform_options,
+        log_retention_runs: dto.log_retention_runs,
+    };
 
     // Cross-field invariant: bypassPermissions + non-empty
     // allowed_tools. Compute the post-merge state and reject
@@ -238,9 +257,7 @@ pub async fn automations_get(id: String) -> Result<AutomationDetailsDto, String>
 }
 
 #[tauri::command]
-pub async fn automations_add(
-    dto: AutomationCreateDto,
-) -> Result<AutomationSummaryDto, String> {
+pub async fn automations_add(dto: AutomationCreateDto) -> Result<AutomationSummaryDto, String> {
     let mut store = open_store()?;
     if store.get_by_name(&dto.name).is_some() {
         return Err(format!("automation name '{}' is already taken", dto.name));
@@ -283,9 +300,7 @@ pub async fn automations_add(
 }
 
 #[tauri::command]
-pub async fn automations_update(
-    dto: AutomationUpdateDto,
-) -> Result<AutomationSummaryDto, String> {
+pub async fn automations_update(dto: AutomationUpdateDto) -> Result<AutomationSummaryDto, String> {
     let mut store = open_store()?;
     let id = parse_id(&dto.id)?;
     // Snapshot the existing record so the patch builder can merge
@@ -338,14 +353,13 @@ pub async fn automations_remove(id: String) -> Result<(), String> {
 }
 
 #[tauri::command]
-pub async fn automations_set_enabled(
-    id: String,
-    enabled: bool,
-) -> Result<(), String> {
+pub async fn automations_set_enabled(id: String, enabled: bool) -> Result<(), String> {
     let mut store = open_store()?;
     let aid = parse_id(&id)?;
-    let mut patch = AutomationPatch::default();
-    patch.enabled = Some(enabled);
+    let patch = AutomationPatch {
+        enabled: Some(enabled),
+        ..AutomationPatch::default()
+    };
     store.update(&aid, patch).map_err(err)?;
     // Persist BEFORE touching the OS scheduler — same rationale as
     // automations_add/update/remove: a failed register/unregister
@@ -411,17 +425,12 @@ pub async fn automations_run_now_start(
                 }
             };
             let result = rt.block_on(async move {
-                let binary_path = resolve_binary(&automation, &route_lookup_fn())
-                    .map_err(|e| e.to_string())?;
+                let binary_path =
+                    resolve_binary(&automation, &route_lookup_fn()).map_err(|e| e.to_string())?;
                 let cli_path = current_claudepot_cli().map_err(|e| e.to_string())?;
-                claudepot_core::automations::run_now(
-                    &automation,
-                    &binary_path,
-                    &cli_path,
-                    &sink,
-                )
-                .await
-                .map_err(|e| e.to_string())
+                claudepot_core::automations::run_now(&automation, &binary_path, &cli_path, &sink)
+                    .await
+                    .map_err(|e| e.to_string())
             });
             match result {
                 Ok(_run) => emit_terminal(&app, &ops, &op_id, None),
@@ -458,9 +467,8 @@ pub async fn automations_runs_list(
     for name in names.into_iter().take(cap) {
         let result_path = runs_dir.join(&name).join("result.json");
         if let Ok(raw) = std::fs::read(&result_path) {
-            if let Ok(run) = serde_json::from_slice::<
-                claudepot_core::automations::AutomationRun,
-            >(&raw)
+            if let Ok(run) =
+                serde_json::from_slice::<claudepot_core::automations::AutomationRun>(&raw)
             {
                 out.push(AutomationRunDto::from(run));
             }
@@ -470,19 +478,14 @@ pub async fn automations_runs_list(
 }
 
 #[tauri::command]
-pub async fn automations_run_get(
-    id: String,
-    run_id: String,
-) -> Result<AutomationRunDto, String> {
+pub async fn automations_run_get(id: String, run_id: String) -> Result<AutomationRunDto, String> {
     let aid = parse_id(&id)?;
     let run = core_read_run(&aid, &run_id).map_err(err)?;
     Ok(AutomationRunDto::from(run))
 }
 
 #[tauri::command]
-pub async fn automations_validate_name(
-    name: String,
-) -> Result<NameValidationDto, String> {
+pub async fn automations_validate_name(name: String) -> Result<NameValidationDto, String> {
     let mut already_taken = false;
     let validation = match claudepot_core::automations::validate_name(&name) {
         Ok(_) => {
@@ -511,9 +514,7 @@ pub async fn automations_validate_name(
 }
 
 #[tauri::command]
-pub async fn automations_validate_cron(
-    expr: String,
-) -> Result<CronValidationDto, String> {
+pub async fn automations_validate_cron(expr: String) -> Result<CronValidationDto, String> {
     match claudepot_core::automations::cron::expand(&expr) {
         Ok(_) => {
             let from = Utc::now();
@@ -533,8 +534,7 @@ pub async fn automations_validate_cron(
 }
 
 #[tauri::command]
-pub async fn automations_scheduler_capabilities(
-) -> Result<SchedulerCapabilitiesDto, String> {
+pub async fn automations_scheduler_capabilities() -> Result<SchedulerCapabilitiesDto, String> {
     let scheduler = active_scheduler();
     Ok(SchedulerCapabilitiesDto::from(scheduler.capabilities()))
 }
@@ -549,8 +549,7 @@ pub async fn automations_dry_run_artifact(id: String) -> Result<String, String> 
 
     #[cfg(target_os = "macos")]
     {
-        return claudepot_core::automations::scheduler::launchd::render_plist(automation)
-            .map_err(err);
+        claudepot_core::automations::scheduler::launchd::render_plist(automation).map_err(err)
     }
     #[cfg(target_os = "linux")]
     {
@@ -584,7 +583,9 @@ pub async fn automations_open_artifact_dir() -> Result<(), String> {
     let status = if cfg!(target_os = "macos") {
         std::process::Command::new("open").arg(&dir).status()
     } else if cfg!(target_os = "windows") {
-        std::process::Command::new("cmd").args(["/C", "start", "", &dir]).status()
+        std::process::Command::new("cmd")
+            .args(["/C", "start", "", &dir])
+            .status()
     } else {
         std::process::Command::new("xdg-open").arg(&dir).status()
     };
@@ -599,8 +600,7 @@ pub async fn automations_open_artifact_dir() -> Result<(), String> {
 pub async fn automations_linger_status() -> Result<bool, String> {
     #[cfg(target_os = "linux")]
     {
-        return claudepot_core::automations::scheduler::systemd::linger_status()
-            .map_err(err);
+        return claudepot_core::automations::scheduler::systemd::linger_status().map_err(err);
     }
     #[cfg(not(target_os = "linux"))]
     {
@@ -627,4 +627,3 @@ pub async fn automations_linger_enable() -> Result<(), String> {
         Err(String::from("linger is a Linux-only feature"))
     }
 }
-

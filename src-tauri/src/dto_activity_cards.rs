@@ -132,20 +132,27 @@ pub struct CardsRecentQueryDto {
 
 impl CardsRecentQueryDto {
     pub fn into_core(self) -> Result<claudepot_core::activity::RecentQuery, String> {
-        let mut q = claudepot_core::activity::RecentQuery::default();
-        q.since_ms = self.since_ms;
-        for k in &self.kinds {
-            q.kinds.push(parse_card_kind(k)?);
-        }
-        if let Some(s) = self.min_severity.as_deref() {
-            q.min_severity = Some(parse_severity(s)?);
-        }
-        if let Some(p) = self.project_path_prefix {
-            q.project_path_prefix = Some(std::path::PathBuf::from(p));
-        }
-        q.plugin = self.plugin;
-        q.limit = self.limit.map(|n| n as usize);
-        Ok(q)
+        // Resolve the fallible fields first so the struct literal
+        // below is a clean one-shot — avoids the
+        // field_reassign_with_default lint on top of `Default::default()`.
+        let kinds = self
+            .kinds
+            .iter()
+            .map(|k| parse_card_kind(k))
+            .collect::<Result<Vec<_>, _>>()?;
+        let min_severity = self
+            .min_severity
+            .as_deref()
+            .map(parse_severity)
+            .transpose()?;
+        Ok(claudepot_core::activity::RecentQuery {
+            since_ms: self.since_ms,
+            kinds,
+            min_severity,
+            project_path_prefix: self.project_path_prefix.map(std::path::PathBuf::from),
+            plugin: self.plugin,
+            limit: self.limit.map(|n| n as usize),
+        })
     }
 }
 

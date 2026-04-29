@@ -48,15 +48,10 @@ fn promote_secret(mut raw: Option<String>) -> Option<SecretString> {
 #[tauri::command]
 pub async fn migrate_inspect(args: InspectArgsDto) -> Result<ImportPlanDto, String> {
     let bundle = PathBuf::from(args.bundle_path);
-    if bundle
-        .extension()
-        .map(|e| e == "age")
-        .unwrap_or(false)
-    {
+    if bundle.extension().map(|e| e == "age").unwrap_or(false) {
         let pwd = promote_secret(args.passphrase)
             .ok_or_else(|| "encrypted bundle requires passphrase".to_string())?;
-        let m = migrate::inspect_encrypted(&bundle, &pwd)
-            .map_err(|e| e.to_string())?;
+        let m = migrate::inspect_encrypted(&bundle, &pwd).map_err(|e| e.to_string())?;
         return Ok(m.into());
     }
     let m = migrate::inspect(&bundle).map_err(|e| e.to_string())?;
@@ -80,8 +75,7 @@ pub async fn migrate_export(args: ExportArgsDto) -> Result<ExportReceiptDto, Str
 
     let account_stubs = if args.include_claudepot_state {
         let data_dir = paths::claudepot_data_dir();
-        let store =
-            AccountStore::open(&data_dir.join("accounts.db")).map_err(|e| e.to_string())?;
+        let store = AccountStore::open(&data_dir.join("accounts.db")).map_err(|e| e.to_string())?;
         Some(migrate_state::account_stubs_from_store(&store).map_err(|e| e.to_string())?)
     } else {
         None
@@ -146,12 +140,9 @@ pub async fn migrate_import(args: ImportArgsDto) -> Result<ImportReceiptDto, Str
         decrypt_passphrase: promote_secret(args.passphrase),
         verify_key: args.verify_key_path.map(PathBuf::from),
     };
-    let receipt = migrate::import_bundle(
-        &config_dir,
-        std::path::Path::new(&args.bundle_path),
-        opts,
-    )
-    .map_err(|e| e.to_string())?;
+    let receipt =
+        migrate::import_bundle(&config_dir, std::path::Path::new(&args.bundle_path), opts)
+            .map_err(|e| e.to_string())?;
     Ok(receipt.into())
 }
 
