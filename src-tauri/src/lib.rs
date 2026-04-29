@@ -340,6 +340,7 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             commands::app_status,
             commands::updater_supported,
+            commands::quit_now,
             commands::tray_set_alert_count,
             commands_cli::sync_from_current_cc,
             commands::unlock_keychain,

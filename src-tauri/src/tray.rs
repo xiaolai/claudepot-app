@@ -377,7 +377,9 @@ pub fn handle_menu_event(app: &AppHandle, id: &str) {
     } else if id == ID_DESKTOP_RECONCILE {
         handle_desktop_reconcile(app);
     } else if id == ID_QUIT {
-        app.exit(0);
+        // Same RunningOps gate as the menubar's ⌘Q — the tray's Quit
+        // row would otherwise bypass the in-flight-op check entirely.
+        crate::app_menu::attempt_quit(app);
     }
 }
 

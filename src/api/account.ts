@@ -22,6 +22,12 @@ import type {
 export const accountApi = {
   appStatus: () => invoke<AppStatus>("app_status"),
   /**
+   * Confirmed quit. Called from QuitConfirm after the user agrees to
+   * abandon in-flight ops. The Rust side calls `app.exit(0)` directly;
+   * there is no second gate.
+   */
+  quitNow: () => invoke<void>("quit_now"),
+  /**
    * Whether the in-app updater is supported on this install. False on
    * Linux when the binary isn't running from an AppImage (e.g. a .deb
    * install or a system package), where in-place replacement would
