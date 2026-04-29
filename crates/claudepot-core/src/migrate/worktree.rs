@@ -166,6 +166,22 @@ pub fn apply_worktree(
             if let Some(parent) = target.parent() {
                 fs::create_dir_all(parent).map_err(MigrateError::from)?;
             }
+
+            // Audit fix: project-level `.claude/settings.json`
+            // carries hooks that CC will execute on session start /
+            // tool-use. Copying verbatim from the bundle bypasses
+            // the trust gate the global path applies in
+            // `migrate::global`. Route it through the same
+            // split-then-scrub flow: write a scrubbed
+            // `settings.json` and (if hooks were present) a
+            // `proposed-hooks.json` next to it for the user to
+            // review before they re-merge.
+            if rel == ".claude/settings.json" {
+                let extra = apply_settings_with_hook_split(&p, &target, bundle_id)?;
+                steps.extend(extra);
+                continue;
+            }
+
             let kind = if target.exists() {
                 let cur = fs::read(&target).map_err(MigrateError::from)?;
                 let new = fs::read(&p).map_err(MigrateError::from)?;
@@ -194,6 +210,101 @@ pub fn apply_worktree(
         }
     }
     Ok(steps)
+}
+
+/// Apply project-level `.claude/settings.json` with hook scrubbing.
+/// Splits the bundled file into `scrubbed + hooks` via
+/// `trust::split_settings`, writes the scrubbed half to the target
+/// (using the established collision rules), and parks any hooks at
+/// `<target_dot_claude>/proposed-hooks.json` (or a bundle-suffixed
+/// variant on collision) for the user to review before re-merging.
+fn apply_settings_with_hook_split(
+    src: &Path,
+    target: &Path,
+    bundle_id: &str,
+) -> Result<Vec<WorktreeApplyStep>, MigrateError> {
+    use crate::migrate::trust;
+    let raw = fs::read(src).map_err(MigrateError::from)?;
+    // Parse failures fall through to verbatim copy: a malformed
+    // settings.json on the source can't be split, but should still
+    // land for the user to fix manually. Better than refusing the
+    // whole worktree apply.
+    let parsed: serde_json::Value = match serde_json::from_slice(&raw) {
+        Ok(v) => v,
+        Err(_) => {
+            // Fall back to verbatim landing.
+            if target.exists() {
+                let cur = fs::read(target).map_err(MigrateError::from)?;
+                if cur == raw {
+                    return Ok(Vec::new());
+                }
+                let imported = imported_sibling(target, bundle_id);
+                fs::write(&imported, &raw).map_err(MigrateError::from)?;
+                return Ok(vec![WorktreeApplyStep {
+                    after: imported.to_string_lossy().to_string(),
+                    kind: WorktreeApplyKind::SideBySide,
+                }]);
+            }
+            fs::write(target, &raw).map_err(MigrateError::from)?;
+            return Ok(vec![WorktreeApplyStep {
+                after: target.to_string_lossy().to_string(),
+                kind: WorktreeApplyKind::Created,
+            }]);
+        }
+    };
+    let split = trust::split_settings(parsed);
+    let scrubbed_bytes = serde_json::to_vec_pretty(&split.scrubbed)
+        .map_err(|e| MigrateError::Serialize(e.to_string()))?;
+
+    let mut out = Vec::new();
+
+    // Write the scrubbed settings to target with the same collision
+    // rules as the verbatim path: side-by-side `.imported` if a
+    // different file exists; skip if identical; create otherwise.
+    if target.exists() {
+        let cur = fs::read(target).map_err(MigrateError::from)?;
+        if cur != scrubbed_bytes {
+            let imported = imported_sibling(target, bundle_id);
+            fs::write(&imported, &scrubbed_bytes).map_err(MigrateError::from)?;
+            out.push(WorktreeApplyStep {
+                after: imported.to_string_lossy().to_string(),
+                kind: WorktreeApplyKind::SideBySide,
+            });
+        }
+        // identical → no step
+    } else {
+        fs::write(target, &scrubbed_bytes).map_err(MigrateError::from)?;
+        out.push(WorktreeApplyStep {
+            after: target.to_string_lossy().to_string(),
+            kind: WorktreeApplyKind::Created,
+        });
+    }
+
+    // Hooks (if any) go to `<dot_claude>/proposed-hooks.json` next
+    // to the settings file. Collision: suffix with bundle_id like
+    // global::unique_proposed_path does.
+    if let Some(hooks) = split.hooks {
+        let hooks_bytes = serde_json::to_vec_pretty(&hooks)
+            .map_err(|e| MigrateError::Serialize(e.to_string()))?;
+        let dot_claude = target
+            .parent()
+            .map(|p| p.to_path_buf())
+            .unwrap_or_else(|| PathBuf::from("."));
+        let bare = dot_claude.join("proposed-hooks.json");
+        let proposed = if bare.exists() {
+            let suffix = bundle_id.split('-').next().unwrap_or(bundle_id);
+            dot_claude.join(format!("proposed-hooks.{suffix}.json"))
+        } else {
+            bare
+        };
+        fs::write(&proposed, &hooks_bytes).map_err(MigrateError::from)?;
+        out.push(WorktreeApplyStep {
+            after: proposed.to_string_lossy().to_string(),
+            kind: WorktreeApplyKind::Created,
+        });
+    }
+
+    Ok(out)
 }
 
 #[derive(Debug, Clone)]
@@ -245,6 +356,7 @@ mod tests {
                 include_worktree: true,
                 ..Default::default()
             },
+            file_inventory: vec![],
         }
     }
 

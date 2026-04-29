@@ -8,9 +8,10 @@
 //!
 //! What ships:
 //!   - Bundle format (`*.claudepot.tar.zst`): writer + reader, outer
-//!     sidecar sha256 (REQUIRED at open), inner `integrity.sha256`
-//!     (cross-checked against on-disk after extract), manifest with
-//!     self-trailer (REQUIRED).
+//!     sidecar sha256 (REQUIRED at open), `BundleManifest.file_inventory`
+//!     (cross-checked against on-disk after extract — listed files
+//!     hash, AND staging tree contains nothing the manifest doesn't
+//!     list), manifest with self-trailer (REQUIRED).
 //!   - Path-rewrite engine: NFC normalization on both sides of every
 //!     substitution rule AND on lookups, multi-rule table with
 //!     longest-prefix-wins, slug recompute, target-native separator
@@ -190,11 +191,14 @@ pub fn export_projects(
         }
         let project_id = uuid::Uuid::new_v4().to_string();
         let mut session_ids = Vec::new();
-        let mut inventory = Vec::new();
 
         // Append every file under the slug as `claude/projects/<slug>/...`.
+        // The writer's own inventory captures hashes — schema 2 doesn't
+        // double-record them on the per-project manifest, so we only
+        // need the count back here.
         let prefix = format!("projects/{}/claude/projects/{}", project_id, slug);
-        walk_and_append(&slug_dir, &slug_dir, &prefix, &mut writer, &mut inventory)?;
+        let project_file_count =
+            walk_and_append(&slug_dir, &slug_dir, &prefix, &mut writer)?;
 
         // Collect sessionIds from `*.jsonl` filenames at the slug root.
         for entry in fs::read_dir(&slug_dir).map_err(MigrateError::from)? {
@@ -210,7 +214,7 @@ pub fn export_projects(
         }
 
         let session_count = session_ids.len() as u32;
-        file_count += inventory.len();
+        file_count += project_file_count;
 
         // Optional: tarball <cwd>/.claude/** + <cwd>/CLAUDE.md when
         // --include-worktree was set. The cwd may not exist on the
@@ -238,7 +242,6 @@ pub fn export_projects(
             source_canonical_git_root: nfc_cwd.clone(),
             source_slug: slug.clone(),
             session_ids,
-            file_inventory: inventory,
             live_at_export: false,
             worktree_set,
         };
@@ -292,6 +295,9 @@ pub fn export_projects(
         }
     }
 
+    // file_inventory is populated by BundleWriter::finalize from its
+    // own accumulated inventory; we leave it empty here so a stale
+    // value can't sneak through.
     let m = manifest::BundleManifest {
         schema_version: manifest::SCHEMA_VERSION,
         claudepot_version: env!("CARGO_PKG_VERSION").to_string(),
@@ -303,6 +309,7 @@ pub fn export_projects(
         source_home: home_string(),
         source_claude_config_dir: config_dir.to_string_lossy().to_string(),
         projects,
+        file_inventory: vec![],
         flags: manifest::ExportFlags {
             include_global: opts.include_global,
             include_worktree: opts.include_worktree,
@@ -351,9 +358,9 @@ pub fn export_projects(
     // Optional signing — runs against the canonical manifest bytes
     // we captured from `finalize`, with the sidecar placed next to
     // the final artifact regardless of encryption. The manifest
-    // already commits to every payload file via `FileInventoryEntry`,
-    // so signing the manifest bytes commits to the whole tree by
-    // transitivity (verified at extract time by `verify_extracted_dir`).
+    // commits to every payload file via `file_inventory`, so signing
+    // the manifest bytes commits to the whole tree by transitivity
+    // (verified at extract time by `verify_extracted_dir`).
     if let Some(keyfile) = opts.sign_keyfile.as_ref() {
         crypto::sign_manifest_digest(
             &final_path,
@@ -647,10 +654,10 @@ pub fn import_bundle(
     // signature is over the manifest digest, not the bundle bytes,
     // so encryption is transparent: the same `.manifest.minisig`
     // verifies against the same logical bundle whether it shipped as
-    // `.tar.zst` or `.tar.zst.age`. The manifest's `FileInventoryEntry`
+    // `.tar.zst` or `.tar.zst.age`. The manifest's `file_inventory`
     // list then closes the loop — `verify_extracted_dir` re-hashes
-    // every payload file against `integrity.sha256` (which the
-    // manifest digest covers transitively).
+    // every payload file against it AND rejects extras the manifest
+    // doesn't acknowledge.
     if let Some(verify_key) = opts.verify_key.as_ref() {
         let manifest_bytes = reader.read_entry("manifest.json")?;
         crypto::verify_manifest_signature(
@@ -740,8 +747,9 @@ pub fn import_bundle(
     // compressed bytes; this gate covers each unpacked file. Without
     // it, a bundle whose tar contents were swapped after a re-pack
     // (with a fresh outer sidecar) would still pass open(). With it,
-    // every payload digest must match `integrity.sha256` or we abort.
-    if let Err(e) = bundle::verify_extracted_dir(&staging) {
+    // every payload digest must match `manifest.file_inventory` AND
+    // the staging tree must contain nothing the manifest doesn't list.
+    if let Err(e) = bundle::verify_extracted_dir(&staging, &manifest) {
         let _ = apply::discard_staging(&bundle_id);
         return Err(e);
     }
@@ -997,7 +1005,38 @@ pub fn import_bundle(
     }
 
     journal.mark_committed();
-    journal.persist(&journal_path)?;
+    // Audit fix: if persisting the journal fails AFTER apply
+    // succeeded, the user's tree is in the post-apply state but
+    // there's no on-disk journal to undo with later. Walking the
+    // in-memory journal in reverse and rolling back NOW returns the
+    // tree to its pre-apply shape, at the cost of the user not
+    // getting their import. Note: this still leaves a residual gap
+    // — process death between apply and persist would land us in
+    // the same stranded state without the rollback opportunity. A
+    // proper write-ahead journal (durable BEFORE mutation) is the
+    // architectural fix; this is the surgical patch.
+    if let Err(persist_err) = journal.persist(&journal_path) {
+        let rollback_report = apply::rollback(&journal).ok();
+        let _ = apply::discard_staging(&bundle_id);
+        let _ = apply::discard_snapshots(&bundle_id);
+        // Best-effort: also remove a partial journal file if one
+        // was written before the failure.
+        let _ = fs::remove_file(&journal_path);
+        let suffix = match rollback_report {
+            Some(r) if r.errors.is_empty() && r.skipped_tampered.is_empty() => {
+                "rollback completed cleanly".to_string()
+            }
+            Some(r) => format!(
+                "rollback completed with {} skipped, {} errored",
+                r.skipped_tampered.len(),
+                r.errors.len()
+            ),
+            None => "rollback itself failed".to_string(),
+        };
+        return Err(MigrateError::Io(std::io::Error::other(format!(
+            "journal persist failed: {persist_err}; {suffix}"
+        ))));
+    }
     apply::discard_staging(&bundle_id)?;
 
     Ok(ImportReceipt {
@@ -1056,13 +1095,18 @@ fn copy_dir_recursive(src: &Path, dst: &Path) -> Result<(), MigrateError> {
     Ok(())
 }
 
+/// Walk `root` recursively and append every regular file to the
+/// bundle writer. Returns the count of files added. The writer
+/// accumulates file_inventory internally — that's the single source
+/// of truth in schema 2, so callers don't need a separate inventory
+/// list.
 fn walk_and_append(
     root: &Path,
     base: &Path,
     bundle_prefix: &str,
     writer: &mut bundle::BundleWriter,
-    inventory: &mut Vec<manifest::FileInventoryEntry>,
-) -> Result<(), MigrateError> {
+) -> Result<usize, MigrateError> {
+    let mut count = 0usize;
     for entry in fs::read_dir(root).map_err(MigrateError::from)? {
         let entry = entry.map_err(MigrateError::from)?;
         let ft = entry.file_type().map_err(MigrateError::from)?;
@@ -1079,7 +1123,7 @@ fn walk_and_append(
             )));
         }
         if ft.is_dir() {
-            walk_and_append(&path, base, bundle_prefix, writer, inventory)?;
+            count += walk_and_append(&path, base, bundle_prefix, writer)?;
         } else if ft.is_file() {
             let rel = path
                 .strip_prefix(base)
@@ -1087,15 +1131,11 @@ fn walk_and_append(
                 .to_string_lossy()
                 .replace('\\', "/");
             let bundle_path = format!("{bundle_prefix}/{rel}");
-            let len_before = writer.inventory().len();
             writer.append_file(&bundle_path, &path, None)?;
-            // Pull the just-added entry into our local inventory copy.
-            if let Some(last) = writer.inventory().get(len_before) {
-                inventory.push(last.clone());
-            }
+            count += 1;
         }
     }
-    Ok(())
+    Ok(count)
 }
 
 fn now_secs() -> u64 {

@@ -19,6 +19,7 @@ fn fixture_manifest() -> BundleManifest {
         source_claude_config_dir: "/Users/joker/.claude".to_string(),
         projects: vec![],
         flags: ExportFlags::default(),
+        file_inventory: vec![],
     }
 }
 
@@ -96,7 +97,6 @@ fn row30_plugin_import_independent_of_project_import() {
         source_canonical_git_root: "/x".to_string(),
         source_slug: "-x".to_string(),
         session_ids: vec![],
-        file_inventory: vec![],
         live_at_export: false,
         worktree_set: false,
     };
