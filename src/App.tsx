@@ -882,7 +882,7 @@ function AppShell() {
       style={{
         display: "flex",
         flexDirection: "column",
-        height: "100vh",
+        height: "var(--viewport-h-full)",
         background: "var(--bg)",
         color: "var(--fg)",
         fontFamily: "var(--font)",

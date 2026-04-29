@@ -87,7 +87,7 @@
 
 .adopt-orphans-modal {
   width: min(680px, calc(100vw - var(--sp-48)));
-  max-height: calc(100vh - var(--sp-80));
+  max-height: calc(var(--viewport-h-full) - var(--sp-80));
 }
 .adopt-orphans-list {
   list-style: none;
