@@ -19,6 +19,7 @@ fn fixture_manifest(version: u32, projects: Vec<ProjectManifestRef>) -> BundleMa
         source_claude_config_dir: "/Users/joker/.claude".to_string(),
         projects,
         flags: ExportFlags::default(),
+        file_inventory: vec![],
     }
 }
 
@@ -251,7 +252,6 @@ fn row24_live_at_export_flag_round_trips() {
         source_canonical_git_root: "/x".to_string(),
         source_slug: "-x".to_string(),
         session_ids: vec!["s1".to_string()],
-        file_inventory: vec![],
         live_at_export: true,
         worktree_set: false,
     };
@@ -333,7 +333,6 @@ fn row27_canonical_git_root_equal_to_cwd_is_legal() {
         source_canonical_git_root: "/Users/joker/wt".to_string(),
         source_slug: "-Users-joker-wt".to_string(),
         session_ids: vec![],
-        file_inventory: vec![],
         live_at_export: false,
         worktree_set: false,
     };

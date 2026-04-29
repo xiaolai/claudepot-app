@@ -14,9 +14,16 @@
 use serde::{Deserialize, Serialize};
 
 /// Wire-format version. Bumped on any **breaking** change to the
-/// manifest, integrity-file shape, or per-project artifact layout.
+/// manifest, integrity record, or per-project artifact layout.
 /// Additive fields do not bump this — `serde(default)` carries the gap.
-pub const SCHEMA_VERSION: u32 = 1;
+///
+/// Schema 2 (current): integrity is consolidated into the
+/// `BundleManifest.file_inventory` field. The previous standalone
+/// `integrity.sha256` file is gone — the manifest is the one source
+/// of truth for which files are in the bundle and what their hashes
+/// should be. Signing the manifest digest (`<bundle>.manifest.minisig`)
+/// therefore covers integrity for every payload file by transitivity.
+pub const SCHEMA_VERSION: u32 = 2;
 
 /// Top-level bundle manifest, written as `manifest.json` at the bundle
 /// root. The trailing self-sha256 line (`§3.3`) is appended by the
@@ -71,6 +78,18 @@ pub struct BundleManifest {
     /// when `include_global` is false, the importer doesn't surface
     /// the global trust gate panel even if `global/` is empty.
     pub flags: ExportFlags,
+
+    /// Single source of truth for "what files are in this bundle and
+    /// what should their bytes hash to". One entry per regular file in
+    /// the tar except `manifest.json` itself (which is self-verified
+    /// via its sha trailer). Signing the manifest digest commits to
+    /// every file in this list by transitivity.
+    ///
+    /// Replaces the standalone `integrity.sha256` file shipped in
+    /// schema 1. `serde(default)` is intentionally absent — schema 2
+    /// requires this field; older bundles trip
+    /// `UnsupportedSchemaVersion` before deserialization is reached.
+    pub file_inventory: Vec<FileInventoryEntry>,
 }
 
 /// Pointer to a per-project manifest under `projects/<id>/manifest.json`.
@@ -116,10 +135,6 @@ pub struct ProjectManifest {
     /// siblings, see §4 sub-bucket B enumeration). Used to filter
     /// Bucket B siblings in the apply phase.
     pub session_ids: Vec<String>,
-
-    /// One entry per file in the bundle's `claude/projects/<slug>/`
-    /// tree. Used for integrity verification at import.
-    pub file_inventory: Vec<FileInventoryEntry>,
 
     /// `--include-live` was set and at least one of `session_ids`
     /// changed under us during export. Surfaces on import as a banner
@@ -201,6 +216,7 @@ mod tests {
             source_claude_config_dir: "/Users/joker/.claude".to_string(),
             projects: vec![],
             flags: ExportFlags::default(),
+            file_inventory: vec![],
         };
         let s = serde_json::to_string(&m).unwrap();
         let back: BundleManifest = serde_json::from_str(&s).unwrap();
@@ -227,7 +243,6 @@ mod tests {
             source_canonical_git_root: "/x".to_string(),
             source_slug: "-x".to_string(),
             session_ids: vec![],
-            file_inventory: vec![],
             live_at_export: false,
             worktree_set: false,
         };

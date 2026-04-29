@@ -28,7 +28,7 @@ use crate::migrate::error::MigrateError;
 use crate::migrate::manifest::FileInventoryEntry;
 use crate::migrate::trust;
 use std::fs;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 /// Top-level files in `~/.claude/` that Bucket C copies verbatim
 /// (after the per-file scrubbing rules below).
@@ -41,8 +41,12 @@ pub const GLOBAL_DIRS: &[&str] = &["agents", "skills", "commands", "memory"];
 /// to the bundle. Returns the inventory entries written (so the
 /// caller can fold them into the per-bundle integrity file).
 ///
-/// Symlinks under any walked directory are rejected — same zero-
-/// symlink policy as the bundle reader.
+/// Symlinks at every layer — including the top-level entries the
+/// recursive walker normally follows once before its own symlink
+/// guard kicks in — are rejected. `is_file`/`is_dir` follow symlinks,
+/// so a `~/.claude/agents` symlink to `/etc` would export `/etc`'s
+/// contents under `global/agents/...`. Use `symlink_metadata` for
+/// every top-level probe to keep that path closed.
 pub fn append_global(
     config_dir: &Path,
     writer: &mut BundleWriter,
@@ -50,63 +54,110 @@ pub fn append_global(
     let mut inv = Vec::new();
     let before = writer.inventory().len();
 
-    // Top-level files — verbatim.
+    // Top-level files — verbatim. Reject symlinks here, not just in
+    // the recursive walker (which only sees children, not the named
+    // entry the export targets).
     for name in GLOBAL_TOP_LEVEL_FILES {
         let src = config_dir.join(name);
-        if src.exists() && src.is_file() {
-            writer.append_file(&format!("global/{name}"), &src, None)?;
+        match fs::symlink_metadata(&src) {
+            Ok(md) if md.file_type().is_symlink() => {
+                return Err(MigrateError::IntegrityViolation(format!(
+                    "global path is a symlink, refusing to export: {}",
+                    src.display()
+                )));
+            }
+            Ok(md) if md.is_file() => {
+                writer.append_file(&format!("global/{name}"), &src, None)?;
+            }
+            _ => {}
         }
     }
 
     // Top-level directories — recursive verbatim.
     for d in GLOBAL_DIRS {
         let src = config_dir.join(d);
-        if src.exists() && src.is_dir() {
-            walk_append(&src, &src, &format!("global/{d}"), writer)?;
+        match fs::symlink_metadata(&src) {
+            Ok(md) if md.file_type().is_symlink() => {
+                return Err(MigrateError::IntegrityViolation(format!(
+                    "global directory is a symlink, refusing to export: {}",
+                    src.display()
+                )));
+            }
+            Ok(md) if md.is_dir() => {
+                walk_append(&src, &src, &format!("global/{d}"), writer)?;
+            }
+            _ => {}
         }
     }
 
     // Plugins registry — file only, not the cache payload.
     let plugins_registry = config_dir.join("plugins/installed_plugins.json");
-    if plugins_registry.exists() && plugins_registry.is_file() {
-        writer.append_file(
-            "global/plugins/installed_plugins.json",
-            &plugins_registry,
-            None,
-        )?;
+    match fs::symlink_metadata(&plugins_registry) {
+        Ok(md) if md.file_type().is_symlink() => {
+            return Err(MigrateError::IntegrityViolation(format!(
+                "plugins registry is a symlink, refusing to export: {}",
+                plugins_registry.display()
+            )));
+        }
+        Ok(md) if md.is_file() => {
+            writer.append_file(
+                "global/plugins/installed_plugins.json",
+                &plugins_registry,
+                None,
+            )?;
+        }
+        _ => {}
     }
 
     // settings.json — scrub + split.
     let settings_path = config_dir.join("settings.json");
-    if settings_path.exists() && settings_path.is_file() {
-        let raw = fs::read(&settings_path).map_err(MigrateError::from)?;
-        let parsed: serde_json::Value = serde_json::from_slice(&raw)
-            .map_err(|e| MigrateError::Serialize(format!("settings.json parse: {e}")))?;
-        let split = trust::scrub_user_settings(parsed);
-        let scrubbed = serde_json::to_vec_pretty(&split.scrubbed)
-            .map_err(|e| MigrateError::Serialize(e.to_string()))?;
-        writer.append_bytes("global/settings.json.scrubbed", &scrubbed, 0o644)?;
-        if let Some(hooks) = split.hooks {
-            let hooks_bytes = serde_json::to_vec_pretty(&hooks)
-                .map_err(|e| MigrateError::Serialize(e.to_string()))?;
-            writer.append_bytes("global/proposed-hooks.json", &hooks_bytes, 0o644)?;
+    match fs::symlink_metadata(&settings_path) {
+        Ok(md) if md.file_type().is_symlink() => {
+            return Err(MigrateError::IntegrityViolation(format!(
+                "settings.json is a symlink, refusing to export: {}",
+                settings_path.display()
+            )));
         }
+        Ok(md) if md.is_file() => {
+            let raw = fs::read(&settings_path).map_err(MigrateError::from)?;
+            let parsed: serde_json::Value = serde_json::from_slice(&raw)
+                .map_err(|e| MigrateError::Serialize(format!("settings.json parse: {e}")))?;
+            let split = trust::scrub_user_settings(parsed);
+            let scrubbed = serde_json::to_vec_pretty(&split.scrubbed)
+                .map_err(|e| MigrateError::Serialize(e.to_string()))?;
+            writer.append_bytes("global/settings.json.scrubbed", &scrubbed, 0o644)?;
+            if let Some(hooks) = split.hooks {
+                let hooks_bytes = serde_json::to_vec_pretty(&hooks)
+                    .map_err(|e| MigrateError::Serialize(e.to_string()))?;
+                writer.append_bytes("global/proposed-hooks.json", &hooks_bytes, 0o644)?;
+            }
+        }
+        _ => {}
     }
 
     // mcpServers.json — scrub absolute-path commands.
     let mcp_path = config_dir.join("mcpServers.json");
-    if mcp_path.exists() && mcp_path.is_file() {
-        let raw = fs::read(&mcp_path).map_err(MigrateError::from)?;
-        let mut parsed: serde_json::Value = serde_json::from_slice(&raw)
-            .map_err(|e| MigrateError::Serialize(format!("mcpServers.json parse: {e}")))?;
-        trust::scrub_mcp_block(&mut parsed);
-        let scrubbed = serde_json::to_vec_pretty(&parsed)
-            .map_err(|e| MigrateError::Serialize(e.to_string()))?;
-        writer.append_bytes("global/mcp-servers.scrubbed.json", &scrubbed, 0o644)?;
+    match fs::symlink_metadata(&mcp_path) {
+        Ok(md) if md.file_type().is_symlink() => {
+            return Err(MigrateError::IntegrityViolation(format!(
+                "mcpServers.json is a symlink, refusing to export: {}",
+                mcp_path.display()
+            )));
+        }
+        Ok(md) if md.is_file() => {
+            let raw = fs::read(&mcp_path).map_err(MigrateError::from)?;
+            let mut parsed: serde_json::Value = serde_json::from_slice(&raw)
+                .map_err(|e| MigrateError::Serialize(format!("mcpServers.json parse: {e}")))?;
+            trust::scrub_mcp_block(&mut parsed);
+            let scrubbed = serde_json::to_vec_pretty(&parsed)
+                .map_err(|e| MigrateError::Serialize(e.to_string()))?;
+            writer.append_bytes("global/mcp-servers.scrubbed.json", &scrubbed, 0o644)?;
+        }
+        _ => {}
     }
 
     // Pull all just-added entries into the local inventory snapshot
-    // so the caller can roll them into integrity.sha256.
+    // so the caller can roll them into the bundle's integrity record.
     for entry in &writer.inventory()[before..] {
         inv.push(entry.clone());
     }
@@ -263,8 +314,16 @@ fn apply_one(
                 apply_hooks(src, target_config_dir, bundle_id)
             } else {
                 // Place proposed-hooks.json next to settings.json so
-                // the user can review.
-                let proposed = target_config_dir.join("proposed-hooks.json");
+                // the user can review. If a previous import already
+                // wrote one, append the bundle_id suffix so we don't
+                // clobber the prior review artifact (matches the
+                // settings/CLAUDE.md side-by-side pattern in
+                // `apply_plain_or_settings`).
+                let proposed = unique_proposed_path(
+                    target_config_dir,
+                    "proposed-hooks.json",
+                    bundle_id,
+                );
                 fs::copy(src, &proposed).map_err(MigrateError::from)?;
                 Ok(Some(GlobalApplyStep {
                     after: proposed.to_string_lossy().to_string(),
@@ -275,15 +334,44 @@ fn apply_one(
         }
         Hint::Mcp => {
             // Always proposed-only in v0; --accept-mcp is the next
-            // layer.
-            fs::copy(src, &target_path).map_err(MigrateError::from)?;
+            // layer. Same collision pattern as proposed-hooks: if a
+            // prior import already wrote `mcpServers.imported.json`,
+            // suffix this one so we don't overwrite the earlier
+            // review artifact.
+            let final_path =
+                unique_proposed_path(target_config_dir, "mcpServers.imported.json", bundle_id);
+            fs::copy(src, &final_path).map_err(MigrateError::from)?;
             Ok(Some(GlobalApplyStep {
-                after: target_path.to_string_lossy().to_string(),
+                after: final_path.to_string_lossy().to_string(),
                 snapshot: None,
                 kind: GlobalApplyKind::McpProposed,
             }))
         }
     }
+}
+
+/// Pick a non-colliding path for a "proposed" review artifact
+/// (`proposed-hooks.json`, `mcpServers.imported.json`). If the bare
+/// name doesn't exist, return that. Otherwise insert the short
+/// bundle_id before the file extension so repeated imports each get
+/// their own review artifact.
+fn unique_proposed_path(
+    target_config_dir: &Path,
+    base_name: &str,
+    bundle_id: &str,
+) -> PathBuf {
+    let bare = target_config_dir.join(base_name);
+    if !bare.exists() {
+        return bare;
+    }
+    let suffix = bundle_id.split('-').next().unwrap_or(bundle_id);
+    // Split base_name into stem + ext so we land at e.g.
+    // `proposed-hooks.<id>.json`, not `proposed-hooks.json.<id>`.
+    let (stem, ext) = match base_name.rsplit_once('.') {
+        Some((s, e)) => (s, format!(".{e}")),
+        None => (base_name, String::new()),
+    };
+    target_config_dir.join(format!("{stem}.{suffix}{ext}"))
 }
 
 #[derive(Clone, Copy)]
@@ -401,6 +489,7 @@ mod tests {
                 include_global: true,
                 ..Default::default()
             },
+            file_inventory: vec![],
         }
     }
 
