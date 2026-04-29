@@ -559,10 +559,15 @@ pub async fn routes_edit(mut route: RouteUpdateDto) -> Result<RouteSummaryDto, S
         route.vertex.take(),
         route.foundry.take(),
     )?;
-    if let Err(e) = commit_secrets(&mut provider, id, Some(&prev_provider)) {
-        zeroize_provider_secrets(&mut provider);
-        return Err(e);
-    }
+    // Audit fix for commands_routes.rs:562 — validate everything we
+    // can BEFORE rotating any keychain secrets. The previous order
+    // committed secrets first and then did wrapper-name validation;
+    // a wrapper-name failure left the keychain rotated but no route
+    // update applied, so the old route stopped working without a
+    // visible Save success. Rotating keychain entries is still not
+    // transactional (we can't atomically swap an old value with a
+    // new one and roll back on a later failure), but moving the
+    // pure-data validation up shrinks the window where that matters.
     let wrapper = match pick_wrapper_name(&route.wrapper_name, &route.model) {
         Ok(w) => w,
         Err(e) => {
@@ -570,6 +575,10 @@ pub async fn routes_edit(mut route: RouteUpdateDto) -> Result<RouteSummaryDto, S
             return Err(e);
         }
     };
+    if let Err(e) = commit_secrets(&mut provider, id, Some(&prev_provider)) {
+        zeroize_provider_secrets(&mut provider);
+        return Err(e);
+    }
 
     let candidate = Route {
         id,
@@ -606,13 +615,20 @@ pub async fn routes_edit(mut route: RouteUpdateDto) -> Result<RouteSummaryDto, S
             for s in shadow_secrets.iter_mut() {
                 s.zeroize();
             }
-            // Best-effort: roll any keychain helpers we just wrote.
-            // Any keychain entry that `commit_secrets` overwrote
-            // already replaced the prior value and we don't have
-            // the old one to restore, so flag that to the caller.
-            let _ = delete_helpers(id, None);
+            // Audit fix for commands_routes.rs:613 — DO NOT delete
+            // helpers here. The previous shape ran
+            // `delete_helpers(id, None)` on store.update failure,
+            // which removed helper scripts the still-existing
+            // (un-updated) route depends on. The route's persisted
+            // state is unchanged by a failed update, so its
+            // helpers must stay too. The keychain entry
+            // commit_secrets just wrote may now hold the new
+            // secret while the route still references the old
+            // shape — surface that explicitly so the user knows
+            // to re-save (which will rewrite the keychain).
             return Err(format!(
-                "{e}; helper scripts cleaned up but keychain entries may still hold the new secret",
+                "{e}; the previously-saved route remains active. \
+                 If the route stops working after retry, re-enter the secret and save again."
             ));
         }
     };
