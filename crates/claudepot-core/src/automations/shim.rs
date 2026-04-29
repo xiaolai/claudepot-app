@@ -318,18 +318,29 @@ fn cmd_set_assignment(name: &str, value: &str) -> String {
     format!("\"{name}={escaped}\"")
 }
 
-/// Quote a single argument for cmd.exe. Wraps in `"…"`, escapes any
-/// embedded `"` as `\"`, doubles `%` (so `%FOO%` substitution doesn't
-/// fire on data values), and rejects newlines / NUL bytes (the env
-/// validator already does this for user input; this is defense in
-/// depth so a future caller that bypasses the validator can't sneak
-/// such bytes through).
+/// Quote a single argument for cmd.exe.
+///
+/// Audit fix for automations/shim.rs:332 — escape embedded `"` as
+/// `""` (cmd.exe's documented quote-doubling escape inside a
+/// double-quoted string), NOT `\"` (which is the Bourne-shell
+/// convention; cmd.exe treats `\` literally and `"` as the quote
+/// terminator). The previous shape would let a `"` in the input
+/// terminate the wrapping quote, so a subsequent `&` or `|` could
+/// chain a fresh command. Concretely: input `foo"&calc.exe&"bar`
+/// became `"foo\"&calc.exe&\"bar"` — cmd.exe parsed the
+/// embedded `"` as the closing quote, ran `calc.exe`, then
+/// continued parsing.
+///
+/// Doubles `%` (so `%FOO%` substitution doesn't fire on data
+/// values), drops newlines / NUL bytes (the env validator already
+/// rejects these from user input; defense in depth so a future
+/// caller that bypasses the validator can't sneak them through).
 fn cmd_quote_arg(s: &str) -> String {
     let mut out = String::with_capacity(s.len() + 2);
     out.push('"');
     for ch in s.chars() {
         match ch {
-            '"' => out.push_str("\\\""),
+            '"' => out.push_str("\"\""),
             '%' => out.push_str("%%"),
             '\r' | '\n' | '\0' => {
                 // drop — env validator should have rejected these
