@@ -315,21 +315,15 @@ pub fn export_projects(
     };
 
     let project_count = m.projects.len();
-    let bundle_path = writer.finalize(&m)?;
+    let (bundle_path, manifest_bytes) = writer.finalize(&m)?;
     let mut sidecar_path = bundle::sidecar_path_for(&bundle_path);
 
-    // Optional signing — done before encryption so the signature is
-    // over the unencrypted (canonical) bundle bytes. Verifiers can
-    // then check the signature without needing the passphrase first.
-    if let Some(keyfile) = opts.sign_keyfile.as_ref() {
-        crypto::sign_bundle(
-            &bundle_path,
-            std::path::Path::new(keyfile),
-            opts.sign_password.clone(),
-        )?;
-    }
-
-    // Optional encryption.
+    // Optional encryption first. We delay signing until after encryption
+    // so the .manifest.minisig sidecar always sits next to the FINAL
+    // shipping artifact (encrypted or not). Signing only commits to
+    // the manifest bytes, which are unchanged by encryption — so
+    // ordering doesn't affect the signature payload, only where the
+    // sidecar lives on disk.
     let final_path = if opts.encrypt {
         let pwd = opts.encrypt_passphrase.clone().ok_or_else(|| {
             MigrateError::NotImplemented(
@@ -353,6 +347,21 @@ pub fn export_projects(
     } else {
         bundle_path
     };
+
+    // Optional signing — runs against the canonical manifest bytes
+    // we captured from `finalize`, with the sidecar placed next to
+    // the final artifact regardless of encryption. The manifest
+    // already commits to every payload file via `FileInventoryEntry`,
+    // so signing the manifest bytes commits to the whole tree by
+    // transitivity (verified at extract time by `verify_extracted_dir`).
+    if let Some(keyfile) = opts.sign_keyfile.as_ref() {
+        crypto::sign_manifest_digest(
+            &final_path,
+            &manifest_bytes,
+            std::path::Path::new(keyfile),
+            opts.sign_password.clone(),
+        )?;
+    }
 
     Ok(ExportReceipt {
         bundle_path: final_path,
@@ -597,18 +606,11 @@ pub fn import_bundle(
     bundle_path: &Path,
     opts: ImportOptions,
 ) -> Result<ImportReceipt, MigrateError> {
-    // Optional minisign verification — done against whatever the user
-    // pointed us at. Verification is byte-level over the bundle file,
-    // so encrypted bundles get verified before any decryption. The
-    // signature was made over the *plaintext* during export, so for
-    // encrypted bundles the user must verify against the encrypted
-    // bytes — by writing a signature over the encrypted artifact
-    // separately. v0 keeps verification simple: signature is over
-    // whatever file the user hands us. Spec §3.3 documents this
-    // (signature over `manifest.json sha256` is the future contract).
-    if let Some(verify_key) = opts.verify_key.as_ref() {
-        crypto::verify_bundle_signature(bundle_path, verify_key)?;
-    }
+    // Capture the user-supplied path BEFORE we shadow it below: the
+    // signature sidecar (`<bundle>.manifest.minisig`) lives next to
+    // the artifact the user actually has on disk, not next to the
+    // decrypted tempfile we may be about to create.
+    let original_bundle_path = bundle_path.to_path_buf();
 
     // If the path ends in `.age`, decrypt into a tempfile under our
     // staging tree (NOT next to the user's encrypted bundle — that
@@ -637,6 +639,27 @@ pub fn import_bundle(
     } else {
         bundle::BundleReader::open(bundle_path)?
     };
+
+    // Optional minisign verification — runs after we have the manifest
+    // bytes (decrypting first if needed) so we can verify the sidecar
+    // signature against the actual canonical manifest bytes embedded
+    // in the bundle. Per `dev-docs/project-migrate-spec.md` §3.3 the
+    // signature is over the manifest digest, not the bundle bytes,
+    // so encryption is transparent: the same `.manifest.minisig`
+    // verifies against the same logical bundle whether it shipped as
+    // `.tar.zst` or `.tar.zst.age`. The manifest's `FileInventoryEntry`
+    // list then closes the loop — `verify_extracted_dir` re-hashes
+    // every payload file against `integrity.sha256` (which the
+    // manifest digest covers transitively).
+    if let Some(verify_key) = opts.verify_key.as_ref() {
+        let manifest_bytes = reader.read_entry("manifest.json")?;
+        crypto::verify_manifest_signature(
+            &original_bundle_path,
+            &manifest_bytes,
+            verify_key,
+        )?;
+    }
+
     let manifest = reader.read_manifest()?;
     let _cleanup_guard = PlaintextCleanupGuard::new(plaintext_to_cleanup);
     if manifest.schema_version != manifest::SCHEMA_VERSION {
@@ -1658,6 +1681,219 @@ mod tests {
             }
         }
         assert!(found_jsonl, "expected at least one rewritten jsonl");
+
+        std::env::remove_var("CLAUDEPOT_DATA_DIR");
+    }
+
+    /// Helper for the sign/verify round-trip tests below: produce an
+    /// unprotected minisign keypair on disk and return both paths.
+    /// Mirrors `crypto::tests::make_keypair` but kept private to this
+    /// module so the migrate-level tests can stay free of crypto-test
+    /// imports.
+    fn make_keypair_for_test(tmp: &Path) -> (PathBuf, PathBuf) {
+        use minisign::KeyPair;
+        let kp = KeyPair::generate_encrypted_keypair(Some(String::new())).unwrap();
+        let sk = tmp.join("sk.key");
+        fs::write(&sk, kp.sk.to_box(None).unwrap().into_string()).unwrap();
+        let pk = tmp.join("pk.pub");
+        fs::write(&pk, kp.pk.to_box().unwrap().into_string()).unwrap();
+        (sk, pk)
+    }
+
+    #[test]
+    fn signed_unencrypted_bundle_round_trips_through_verify() {
+        let _lock = lock_data_dir();
+        let tmp = tempfile::tempdir().unwrap();
+        std::env::set_var("CLAUDEPOT_DATA_DIR", tmp.path().join("claudepot"));
+        let cfg_src = tmp.path().join("src/.claude");
+        fs::create_dir_all(cfg_src.join("projects")).unwrap();
+        let cwd = "/tmp/test-sign-plain".to_string();
+        seed_project(&cfg_src, &cwd);
+
+        let (sk_path, pk_path) = make_keypair_for_test(tmp.path());
+        let bundle = tmp.path().join("plain-signed.tar.zst");
+        export_projects(
+            &cfg_src,
+            ExportOptions {
+                output: bundle.clone(),
+                project_cwds: vec![cwd.clone()],
+                include_global: false,
+                include_worktree: false,
+                include_live: false,
+                include_claudepot_state: false,
+                include_file_history: true,
+                encrypt: false,
+                sign_keyfile: Some(sk_path.to_string_lossy().to_string()),
+                account_stubs: None,
+                encrypt_passphrase: None,
+                sign_password: None,
+            },
+        )
+        .unwrap();
+
+        // Sidecar lives next to the unencrypted artifact, named
+        // `<bundle>.manifest.minisig`.
+        let mut sig_os = bundle.as_os_str().to_os_string();
+        sig_os.push(".manifest.minisig");
+        let sig_path = PathBuf::from(sig_os);
+        assert!(
+            sig_path.exists(),
+            "expected manifest sidecar at {}",
+            sig_path.display()
+        );
+
+        let cfg_target = tmp.path().join("dst/.claude");
+        fs::create_dir_all(cfg_target.join("projects")).unwrap();
+        let receipt = import_bundle(
+            &cfg_target,
+            &bundle,
+            ImportOptions {
+                verify_key: Some(pk_path),
+                ..ImportOptions::default()
+            },
+        )
+        .unwrap();
+        assert_eq!(receipt.projects_imported.len(), 1);
+
+        std::env::remove_var("CLAUDEPOT_DATA_DIR");
+    }
+
+    #[test]
+    fn signed_encrypted_bundle_round_trips_through_verify() {
+        // This case was unreachable before: the previous protocol
+        // signed the plaintext bundle and then deleted it, leaving the
+        // .minisig orphaned at a path the verifier never looked at. We
+        // now sign the manifest digest and place the sidecar next to
+        // the encrypted artifact, so verification works regardless of
+        // whether encryption ran.
+        let _lock = lock_data_dir();
+        let tmp = tempfile::tempdir().unwrap();
+        std::env::set_var("CLAUDEPOT_DATA_DIR", tmp.path().join("claudepot"));
+        let cfg_src = tmp.path().join("src/.claude");
+        fs::create_dir_all(cfg_src.join("projects")).unwrap();
+        let cwd = "/tmp/test-sign-encrypted".to_string();
+        seed_project(&cfg_src, &cwd);
+
+        let (sk_path, pk_path) = make_keypair_for_test(tmp.path());
+        let bundle = tmp.path().join("encrypted-signed.tar.zst");
+        let receipt = export_projects(
+            &cfg_src,
+            ExportOptions {
+                output: bundle.clone(),
+                project_cwds: vec![cwd.clone()],
+                include_global: false,
+                include_worktree: false,
+                include_live: false,
+                include_claudepot_state: false,
+                include_file_history: true,
+                encrypt: true,
+                sign_keyfile: Some(sk_path.to_string_lossy().to_string()),
+                account_stubs: None,
+                encrypt_passphrase: Some(age::secrecy::SecretString::from("pw".to_string())),
+                sign_password: None,
+            },
+        )
+        .unwrap();
+
+        // The shipped artifact is the .age file; the sidecar sits
+        // next to it, NOT next to the (deleted) plaintext.
+        assert!(
+            receipt
+                .bundle_path
+                .extension()
+                .map(|e| e == "age")
+                .unwrap_or(false),
+            "expected .age artifact, got {}",
+            receipt.bundle_path.display()
+        );
+        let mut sig_os = receipt.bundle_path.as_os_str().to_os_string();
+        sig_os.push(".manifest.minisig");
+        let sig_path = PathBuf::from(sig_os);
+        assert!(
+            sig_path.exists(),
+            "expected manifest sidecar at {}",
+            sig_path.display()
+        );
+
+        let cfg_target = tmp.path().join("dst/.claude");
+        fs::create_dir_all(cfg_target.join("projects")).unwrap();
+        let import_receipt = import_bundle(
+            &cfg_target,
+            &receipt.bundle_path,
+            ImportOptions {
+                verify_key: Some(pk_path),
+                decrypt_passphrase: Some(age::secrecy::SecretString::from("pw".to_string())),
+                ..ImportOptions::default()
+            },
+        )
+        .unwrap();
+        assert_eq!(import_receipt.projects_imported.len(), 1);
+
+        std::env::remove_var("CLAUDEPOT_DATA_DIR");
+    }
+
+    #[test]
+    fn import_with_tampered_manifest_signature_fails() {
+        // Strongest-form regression: a flipped byte in the
+        // .manifest.minisig sidecar must fail verification before any
+        // staging happens. Pairs with the crypto-level unit tests that
+        // assert tampered manifest BYTES fail; this one asserts the
+        // wiring at the import path catches a tampered SIDECAR.
+        let _lock = lock_data_dir();
+        let tmp = tempfile::tempdir().unwrap();
+        std::env::set_var("CLAUDEPOT_DATA_DIR", tmp.path().join("claudepot"));
+        let cfg_src = tmp.path().join("src/.claude");
+        fs::create_dir_all(cfg_src.join("projects")).unwrap();
+        let cwd = "/tmp/test-tamper-sig".to_string();
+        seed_project(&cfg_src, &cwd);
+
+        let (sk_path, pk_path) = make_keypair_for_test(tmp.path());
+        let bundle = tmp.path().join("tamper.tar.zst");
+        export_projects(
+            &cfg_src,
+            ExportOptions {
+                output: bundle.clone(),
+                project_cwds: vec![cwd.clone()],
+                include_global: false,
+                include_worktree: false,
+                include_live: false,
+                include_claudepot_state: false,
+                include_file_history: true,
+                encrypt: false,
+                sign_keyfile: Some(sk_path.to_string_lossy().to_string()),
+                account_stubs: None,
+                encrypt_passphrase: None,
+                sign_password: None,
+            },
+        )
+        .unwrap();
+
+        let mut sig_os = bundle.as_os_str().to_os_string();
+        sig_os.push(".manifest.minisig");
+        let sig_path = PathBuf::from(sig_os);
+        // Replace with another well-formed minisign signature over
+        // unrelated content — this exercises the verify path's
+        // signature-mismatch branch (rather than parse failure).
+        let mut other_sig_os = bundle.as_os_str().to_os_string();
+        other_sig_os.push(".other.tmp");
+        let other_artifact = PathBuf::from(other_sig_os);
+        fs::write(&other_artifact, b"unrelated").unwrap();
+        let other_sig =
+            crypto::sign_manifest_digest(&other_artifact, b"unrelated", &sk_path, None).unwrap();
+        fs::copy(&other_sig, &sig_path).unwrap();
+
+        let cfg_target = tmp.path().join("dst/.claude");
+        fs::create_dir_all(cfg_target.join("projects")).unwrap();
+        let err = import_bundle(
+            &cfg_target,
+            &bundle,
+            ImportOptions {
+                verify_key: Some(pk_path),
+                ..ImportOptions::default()
+            },
+        )
+        .unwrap_err();
+        assert!(matches!(err, MigrateError::IntegrityViolation(_)));
 
         std::env::remove_var("CLAUDEPOT_DATA_DIR");
     }

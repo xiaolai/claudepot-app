@@ -16,22 +16,35 @@
 //! `--no-encrypt` opts out (e.g. for pipelines that already run over
 //! encrypted transport).
 //!
-//! ## Signing (`minisign`)
+//! ## Signing (`minisign`) — sign the manifest digest
 //!
-//! Optional. When `--sign KEYFILE` is set, the **entire bundle file
-//! bytes** are signed with the supplied minisign secret key, and the
-//! signature is written next to the bundle as `<bundle>.minisig`.
+//! Optional. When `--sign KEYFILE` is set, the **canonical bytes of
+//! `manifest.json`** (body + the self-sha trailer that already lands
+//! in the tar) are signed with the supplied minisign secret key. The
+//! signature is written next to the final artifact as
+//! `<bundle>.manifest.minisig` — same neighbor for plaintext bundles
+//! (`*.tar.zst`) and encrypted ones (`*.tar.zst.age`).
 //!
-//! This is a deliberate deviation from `dev-docs/project-migrate-spec.md`
-//! §3.3, which proposes signing only the manifest sha256. Signing the
-//! bundle bytes is strictly stronger (covers payload tampering as well
-//! as manifest tampering), at the cost of forcing the verifier to
-//! read the whole file. The deviation is documented in `bundle.rs`
-//! and is the contract this module implements; a future PR can either
-//! align both sides if the spec wants the lighter form.
+//! Why sign the manifest, not the bundle bytes:
+//!   1. The manifest carries `FileInventoryEntry { path, size, sha256 }`
+//!      for every payload file, plus a sha256 of itself in the trailer.
+//!      Signing the manifest therefore commits to every byte of every
+//!      payload by transitivity — without forcing the verifier to read
+//!      the whole archive before deciding whether to trust it.
+//!   2. The signature is independent of encryption: the same `.minisig`
+//!      is valid for both the plaintext and encrypted forms of the same
+//!      logical bundle. The previous shape (sign bundle bytes) wrote
+//!      the sidecar at the plaintext path and then deleted the
+//!      plaintext during encryption, leaving an orphaned sidecar that
+//!      could never be verified — so encrypted+signed never produced
+//!      a verifiable artifact.
+//!   3. Aligns with `dev-docs/project-migrate-spec.md` §3.3.
 //!
-//! Verification on the import side reads the sidecar `<bundle>.minisig`
-//! and a public key (provided via `--verify-key PUBFILE`).
+//! On import, after the manifest is read out of the bundle (decrypting
+//! first if needed), `verify_manifest_signature` is called against the
+//! sidecar and the user-supplied public key (`--verify-key PUBFILE`).
+//! Per-file integrity is then enforced by `verify_extracted_dir`'s pass
+//! over `integrity.sha256` — which the manifest digest already covers.
 
 use crate::migrate::error::MigrateError;
 use age::secrecy::SecretString;
@@ -41,8 +54,10 @@ use std::path::{Path, PathBuf};
 /// Suffix appended to the bundle filename when encryption is enabled.
 pub const ENCRYPTED_SUFFIX: &str = ".age";
 
-/// Suffix for the minisign signature file.
-pub const SIGNATURE_SUFFIX: &str = ".minisig";
+/// Suffix for the manifest-digest minisign signature file. Distinct
+/// from the legacy `.minisig` (which signed bundle bytes) so old and
+/// new artifacts can't be confused at the filesystem level.
+pub const MANIFEST_SIGNATURE_SUFFIX: &str = ".manifest.minisig";
 
 /// Encrypt a plaintext bundle into a sibling `.age` file using a
 /// passphrase. Returns the path to the encrypted output. The plaintext
@@ -149,49 +164,72 @@ pub fn decrypt_bundle_with_passphrase(
     Ok(tmp_path)
 }
 
-/// Sign the bundle (entire file bytes) using a minisign secret key.
-/// The signature is over the bundle bytes, giving us a one-shot
-/// integrity + authenticity gate that survives transport.
+/// Compute the sidecar path `<artifact>.manifest.minisig`. Public so
+/// the export path can describe the produced artifacts in its receipt
+/// without re-deriving the suffix.
+pub fn manifest_signature_path_for(artifact: &Path) -> PathBuf {
+    let mut s = artifact.as_os_str().to_os_string();
+    s.push(MANIFEST_SIGNATURE_SUFFIX);
+    PathBuf::from(s)
+}
+
+/// Sign the canonical `manifest.json` bytes (body + self-sha trailer,
+/// exactly as written into the bundle's tar) with the supplied minisign
+/// secret key, and write the signature to
+/// `<artifact>.manifest.minisig`. `artifact` is the final shipping path
+/// — the encrypted `.age` when encryption ran, the plaintext `.tar.zst`
+/// otherwise — so the sidecar always sits next to whichever file the
+/// user distributes.
 ///
-/// `password` is the secret-key passphrase. Pass `Some("")` for
-/// unprotected keys; passing `None` causes minisign to prompt
-/// interactively, which is unusable in CI / scripted contexts. The
-/// migrate CLI normalizes its `--sign KEYFILE [--sign-password PASS]`
-/// args into the right shape before calling this.
+/// `password` is the secret-key passphrase. Pass `Some("")` (or `None`,
+/// which we coerce to empty) for unprotected keys; an actual interactive
+/// prompt would be unusable in CI / scripted contexts.
 ///
-/// Returns the path to the `.minisig` file written next to the bundle.
-pub fn sign_bundle(
-    bundle: &Path,
+/// Returns the path to the written `.manifest.minisig` file.
+pub fn sign_manifest_digest(
+    artifact: &Path,
+    manifest_bytes: &[u8],
     secret_key_file: &Path,
     password: Option<String>,
 ) -> Result<PathBuf, MigrateError> {
-    // Default to empty-string (unencrypted-key flow) rather than None
-    // (interactive prompt). Callers that want the prompt can pass
-    // `password = Some(...)` directly.
     let password = Some(password.unwrap_or_default());
     let sk = minisign::SecretKey::from_file(secret_key_file, password)
         .map_err(|e| MigrateError::IntegrityViolation(format!("minisign secret key load: {e}")))?;
-    let bundle_file = fs::File::open(bundle).map_err(MigrateError::from)?;
-    let signature = minisign::sign(None, &sk, bundle_file, None, None)
-        .map_err(|e| MigrateError::Serialize(format!("minisign sign: {e}")))?;
-    let mut out_os = bundle.as_os_str().to_os_string();
-    out_os.push(SIGNATURE_SUFFIX);
-    let out_path = PathBuf::from(out_os);
+    // minisign::sign takes any Read; an in-memory cursor over the
+    // manifest bytes keeps the call site uniform with the streaming
+    // shape minisign expects.
+    let signature = minisign::sign(
+        None,
+        &sk,
+        std::io::Cursor::new(manifest_bytes),
+        None,
+        None,
+    )
+    .map_err(|e| MigrateError::Serialize(format!("minisign sign: {e}")))?;
+    let out_path = manifest_signature_path_for(artifact);
     fs::write(&out_path, signature.into_string()).map_err(MigrateError::from)?;
     Ok(out_path)
 }
 
-/// Verify the bundle's `.minisig` sidecar against a known public key.
-/// Returns `Ok(())` only on a valid signature; mismatch or any I/O
-/// error becomes `IntegrityViolation`. Use this on the import path
-/// when the user supplies `--verify-key`.
-pub fn verify_bundle_signature(bundle: &Path, public_key_file: &Path) -> Result<(), MigrateError> {
-    let mut sig_path = bundle.as_os_str().to_os_string();
-    sig_path.push(SIGNATURE_SUFFIX);
-    let sig_path = PathBuf::from(sig_path);
+/// Verify `<artifact>.manifest.minisig` against the canonical
+/// manifest bytes (which the caller has already extracted from the
+/// bundle, decrypting first if needed) and the user-supplied public
+/// key. Returns `Ok(())` only on a valid signature; missing sidecar,
+/// parse failure, or signature mismatch becomes `IntegrityViolation`.
+///
+/// The artifact path is used to derive the sidecar location only;
+/// the function never reads the artifact bytes, which is the entire
+/// point of this protocol shape — verification is `O(manifest_size)`,
+/// independent of bundle size and unchanged by encryption.
+pub fn verify_manifest_signature(
+    artifact: &Path,
+    manifest_bytes: &[u8],
+    public_key_file: &Path,
+) -> Result<(), MigrateError> {
+    let sig_path = manifest_signature_path_for(artifact);
     if !sig_path.exists() {
         return Err(MigrateError::IntegrityViolation(format!(
-            "bundle signature missing: {}",
+            "manifest signature missing: {}",
             sig_path.display()
         )));
     }
@@ -201,8 +239,7 @@ pub fn verify_bundle_signature(bundle: &Path, public_key_file: &Path) -> Result<
     let sig_bytes = fs::read_to_string(&sig_path).map_err(MigrateError::from)?;
     let sig = minisign_verify::Signature::decode(&sig_bytes)
         .map_err(|e| MigrateError::IntegrityViolation(format!("minisign signature parse: {e}")))?;
-    let bundle_bytes = fs::read(bundle).map_err(MigrateError::from)?;
-    pk.verify(&bundle_bytes, &sig, false)
+    pk.verify(manifest_bytes, &sig, false)
         .map_err(|e| MigrateError::IntegrityViolation(format!("signature verify: {e}")))?;
     Ok(())
 }
@@ -291,31 +328,97 @@ mod tests {
         assert!(matches!(err, MigrateError::IntegrityViolation(_)));
     }
 
-    #[test]
-    fn sign_and_verify_round_trip() {
-        // minisign keys at rest are always "encrypted" — even an
-        // unprotected key uses the empty-password XOR so the checksum
-        // round-trips. `generate_encrypted_keypair(Some(""))` is the
-        // canonical way to produce a key that loads via
-        // `SecretKey::from_file(path, Some(""))`.
+    /// Helper: produce an unprotected minisign keypair on disk. The
+    /// "encrypted" name is misleading — even unprotected keys go
+    /// through the empty-password XOR so `SecretKey::from_file(path,
+    /// Some(""))` round-trips.
+    fn make_keypair(tmp: &Path) -> (PathBuf, PathBuf) {
         use minisign::KeyPair;
-        let tmp = tempfile::tempdir().unwrap();
-
         let kp = KeyPair::generate_encrypted_keypair(Some(String::new())).unwrap();
-        let sk_path = tmp.path().join("minisign.key");
+        let sk_path = tmp.join("minisign.key");
         fs::write(&sk_path, kp.sk.to_box(None).unwrap().into_string()).unwrap();
-        let pk_path = tmp.path().join("minisign.pub");
+        let pk_path = tmp.join("minisign.pub");
         fs::write(&pk_path, kp.pk.to_box().unwrap().into_string()).unwrap();
+        (sk_path, pk_path)
+    }
 
-        let bundle_path = tmp.path().join("b.tar.zst");
-        fs::write(&bundle_path, b"bundle bytes").unwrap();
-        let sig_path = sign_bundle(&bundle_path, &sk_path, None).unwrap();
+    #[test]
+    fn sign_manifest_digest_writes_sidecar_at_artifact() {
+        // The signature sidecar is named relative to the *final*
+        // artifact (encrypted or not), not the manifest bytes; this
+        // test pins that naming so encrypted+signed and plain+signed
+        // both put the .manifest.minisig in the predictable place.
+        let tmp = tempfile::tempdir().unwrap();
+        let (sk_path, _pk_path) = make_keypair(tmp.path());
+
+        let artifact = tmp.path().join("foo.tar.zst.age");
+        let manifest_bytes = b"{\"schema_version\":1}\n# manifest-sha256: deadbeef\n";
+
+        let sig_path = sign_manifest_digest(&artifact, manifest_bytes, &sk_path, None).unwrap();
+        // The suffix is APPENDED, not replacing the extension — paths
+        // like `foo.tar.zst.age` need `foo.tar.zst.age.manifest.minisig`,
+        // not `foo.tar.zst.manifest.minisig`. `Path::with_extension`
+        // would replace the last component, which is the wrong shape.
+        let mut expected_os = artifact.as_os_str().to_os_string();
+        expected_os.push(MANIFEST_SIGNATURE_SUFFIX);
+        assert_eq!(sig_path, PathBuf::from(expected_os));
         assert!(sig_path.exists());
-        verify_bundle_signature(&bundle_path, &pk_path).unwrap();
+    }
 
-        // Tamper one byte → verify fails.
-        fs::write(&bundle_path, b"tampered bytes").unwrap();
-        let err = verify_bundle_signature(&bundle_path, &pk_path).unwrap_err();
+    #[test]
+    fn manifest_sign_verify_round_trip() {
+        let tmp = tempfile::tempdir().unwrap();
+        let (sk_path, pk_path) = make_keypair(tmp.path());
+        let artifact = tmp.path().join("rt.tar.zst");
+        // Artifact contents are irrelevant — this protocol signs
+        // manifest bytes, never the artifact. We still create the
+        // file so the sidecar has a real neighbor.
+        fs::write(&artifact, b"opaque").unwrap();
+
+        let manifest_bytes = b"manifest body + trailer";
+        sign_manifest_digest(&artifact, manifest_bytes, &sk_path, None).unwrap();
+        verify_manifest_signature(&artifact, manifest_bytes, &pk_path).unwrap();
+    }
+
+    #[test]
+    fn manifest_verify_rejects_tampered_manifest_bytes() {
+        // Core property: signature is over the manifest, so flipping
+        // a byte in the manifest must fail verification even though
+        // the artifact path and sidecar are untouched.
+        let tmp = tempfile::tempdir().unwrap();
+        let (sk_path, pk_path) = make_keypair(tmp.path());
+        let artifact = tmp.path().join("t.tar.zst");
+        fs::write(&artifact, b"opaque").unwrap();
+
+        let original = b"original manifest";
+        sign_manifest_digest(&artifact, original, &sk_path, None).unwrap();
+
+        let tampered = b"tampered manifest";
+        let err = verify_manifest_signature(&artifact, tampered, &pk_path).unwrap_err();
         assert!(matches!(err, MigrateError::IntegrityViolation(_)));
+    }
+
+    #[test]
+    fn manifest_verify_rejects_missing_sidecar() {
+        // No sidecar present → IntegrityViolation, not Io. The
+        // distinction matters because the verify call is the import-
+        // path gate; a missing sidecar must fail closed (refuse import)
+        // rather than slip through as a transient I/O error.
+        let tmp = tempfile::tempdir().unwrap();
+        let (_sk_path, pk_path) = make_keypair(tmp.path());
+        let artifact = tmp.path().join("never-signed.tar.zst");
+        fs::write(&artifact, b"opaque").unwrap();
+
+        let err = verify_manifest_signature(&artifact, b"any", &pk_path).unwrap_err();
+        assert!(matches!(err, MigrateError::IntegrityViolation(_)));
+    }
+
+    #[test]
+    fn manifest_signature_path_appends_suffix() {
+        // Belt-and-braces: the suffix is `.manifest.minisig` (not
+        // bare `.minisig`) so legacy artifacts can't be confused with
+        // the new shape at the filesystem level.
+        let p = manifest_signature_path_for(Path::new("a/b/c.tar.zst.age"));
+        assert!(p.to_string_lossy().ends_with(".tar.zst.age.manifest.minisig"));
     }
 }
