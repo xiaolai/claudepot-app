@@ -22,6 +22,11 @@ export interface Preferences {
    *  Cmd+Tab, no app menu bar). No-op on Windows/Linux. */
   hide_dock_icon: boolean;
 
+  /** When false, the main window starts hidden on app launch; the
+   *  tray icon brings it back. Pairs with `Launch at login` for a
+   *  quiet tray-only background. Defaults to true. */
+  show_window_on_startup: boolean;
+
   /** User opted in to the live Activity feature. Gate for starting
    *  the LiveRuntime. Defaults to false until the consent modal is
    *  accepted. */

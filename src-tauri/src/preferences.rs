@@ -18,6 +18,13 @@ pub struct Preferences {
     /// icon, no Cmd+Tab entry, no application menu bar. Tray-only.
     pub hide_dock_icon: bool,
 
+    /// When false, the main window starts hidden on app launch. The
+    /// user re-opens it via the tray icon. Pairs with `Launch at
+    /// login` for a quiet tray-only background. Defaults to true so
+    /// existing users keep seeing the window appear at start-up.
+    #[serde(default = "default_true")]
+    pub show_window_on_startup: bool,
+
     /// Whether the user has enabled the live Activity feature. Gate
     /// for starting the `LiveRuntime`: false until the consent modal
     /// is accepted. Defaults to false — no PID files or transcripts

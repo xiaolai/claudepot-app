@@ -78,6 +78,7 @@ pub fn run() {
     // avoid a visible dock-icon flash on cold launch.
     let prefs = preferences::Preferences::load();
     let hide_dock = prefs.hide_dock_icon;
+    let show_window_on_startup = prefs.show_window_on_startup;
 
     // Open the activity-cards index before the builder chain so we can
     // wire it into the live runtime AND publish it as IPC state in the
@@ -149,6 +150,17 @@ pub fn run() {
             #[cfg(target_os = "macos")]
             if hide_dock {
                 app.set_activation_policy(tauri::ActivationPolicy::Accessory);
+            }
+
+            // Honor the "show window on startup" preference. The window
+            // is configured `visible: true` in tauri.conf.json so the
+            // default cold-launch path stays unchanged; users who opt
+            // out get an immediate `hide()` here. Recovery path is the
+            // tray icon (left-click toggles visibility).
+            if !show_window_on_startup {
+                if let Some(window) = app.get_webview_window("main") {
+                    let _ = window.hide();
+                }
             }
 
             // Application menu bar (macOS top-of-screen; Windows/Linux
@@ -417,6 +429,7 @@ pub fn run() {
             commands_protected::protected_paths_reset,
             commands_preferences::preferences_get,
             commands_preferences::preferences_set_hide_dock_icon,
+            commands_preferences::preferences_set_show_window_on_startup,
             commands_keys::key_api_list,
             commands_keys::key_api_add,
             commands_keys::key_api_remove,
