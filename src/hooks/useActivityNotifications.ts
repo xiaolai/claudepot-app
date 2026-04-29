@@ -1,11 +1,7 @@
 import { useEffect, useRef, useState } from "react";
-import {
-  isPermissionGranted,
-  requestPermission,
-  sendNotification,
-} from "@tauri-apps/plugin-notification";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { api } from "../api";
+import { dispatchOsNotification } from "../lib/notify";
 import { useSessionLive } from "./useSessionLive";
 import type { LiveSessionSummary, Preferences } from "../types";
 
@@ -42,7 +38,6 @@ interface SessionMemo {
   lastErrored: boolean;
   lastStuck: boolean;
   busyStartedMs: number | null;
-  lastFiredMs: number;
 }
 
 /** Returns the count of sessions currently in an alerting state
@@ -57,16 +52,11 @@ export function useActivityNotifications(): number {
   // transitions that arrive before the first prefsGet round-trip are
   // silently dropped because the effect exits early on prefs === null.
   const [prefsVersion, setPrefsVersion] = useState(0);
-  // Three-state permission machine:
-  //   * "unknown": no probe yet — ask on next pref-enabled tick
-  //   * "not-requested": probed isPermissionGranted, got false, but
-  //     no requestPermission call has fired. First trigger will ask.
-  //   * "granted" / "denied": terminal after requestPermission
-  //     result. "denied" sticks for the session — we never
-  //     re-prompt; user opts back in via System Settings.
-  const osPermissionRef = useRef<
-    "unknown" | "not-requested" | "granted" | "denied"
-  >("unknown");
+
+  // Permission probing now lives in `lib/notify.ts` as a singleton —
+  // shared across this hook, useCardNotifications, useOpDoneNotifications,
+  // and the Settings "Send test" / "Request" buttons. One probe state,
+  // one prompt, one focus gate.
 
   // Load prefs once on mount; subsequent updates ride on the
   // `cp-prefs-changed` event whose payload IS the new Preferences
@@ -76,43 +66,20 @@ export function useActivityNotifications(): number {
     let cancelled = false;
     let unlisten: UnlistenFn | null = null;
 
-    const applyPrefs = async (p: Preferences) => {
+    const applyPrefs = (p: Preferences) => {
       if (cancelled) return;
       prefsRef.current = p;
       setPrefsVersion((v) => v + 1);
-      // Probe OS-notification permission the first time any
-      // notification pref is flipped on. No request until a
-      // trigger actually fires, so a cautious user who never
-      // enables alerts never sees the OS prompt.
-      const wantsOs =
-        p.notify_on_error ||
-        p.notify_on_idle_done ||
-        p.notify_on_stuck_minutes != null ||
-        p.notify_on_spend_usd != null;
-      if (wantsOs && osPermissionRef.current === "unknown") {
-        try {
-          const granted = await isPermissionGranted();
-          // If not yet granted, leave as "not-requested" so the
-          // next trigger does a user-facing requestPermission.
-          // isPermissionGranted returns false BEFORE any prompt
-          // has been shown, so treating that as terminal
-          // "denied" would silently suppress all future OS
-          // notifications on a fresh install.
-          osPermissionRef.current = granted ? "granted" : "not-requested";
-        } catch {
-          osPermissionRef.current = "denied";
-        }
-      }
     };
 
     api
       .preferencesGet()
-      .then((p) => applyPrefs(p))
+      .then(applyPrefs)
       .catch(() => {
         /* no-tauri env */
       });
     listen<Preferences>("cp-prefs-changed", (ev) => {
-      if (ev.payload) void applyPrefs(ev.payload);
+      if (ev.payload) applyPrefs(ev.payload);
     })
       .then((fn) => {
         if (cancelled) fn();
@@ -132,45 +99,25 @@ export function useActivityNotifications(): number {
     if (!prefs) return;
     const memo = memoRef.current;
     const now = Date.now();
-    const RATE_LIMIT_MS = 60_000;
 
-    /** Fire an OS notification for the given transition.
-     *  Fire-and-forget; any error is swallowed so a denied
-     *  permission never interrupts the detection loop.
-     *
-     *  Named `dispatch` deliberately — `alert` would shadow
-     *  `window.alert` and set a footgun for any future
-     *  `globalThis.alert(...)` audit grep. */
-    const dispatch = (title: string, body: string) => {
-      if (osPermissionRef.current === "granted") {
-        try {
-          sendNotification({ title, body });
-        } catch {
-          /* swallow */
-        }
-      } else if (
-        osPermissionRef.current === "unknown" ||
-        osPermissionRef.current === "not-requested"
-      ) {
-        // First trigger after pref-enable: ask for permission. If
-        // the user grants it, fire this alert AND every future
-        // one. If they deny, stay denied for the session.
-        requestPermission()
-          .then((perm) => {
-            osPermissionRef.current =
-              perm === "granted" ? "granted" : "denied";
-            if (perm === "granted") {
-              try {
-                sendNotification({ title, body });
-              } catch {
-                /* swallow */
-              }
-            }
-          })
-          .catch(() => {
-            osPermissionRef.current = "denied";
-          });
-      }
+    /** Fire an OS notification for the given transition. The shared
+     *  dispatcher applies the focus gate, the permission probe, AND
+     *  the unified token-bucket coalescing — per-session+kind keys
+     *  let one busy session burn its tokens without starving another.
+     *  `group` threads OS notifications by session so the user gets
+     *  one expandable banner per project rather than a stack of
+     *  five lookalike toasts. */
+    const dispatch = (
+      sessionId: string,
+      kind: "error" | "stuck" | "idle-done",
+      title: string,
+      body: string,
+    ) => {
+      void dispatchOsNotification(title, body, {
+        dedupeKey: `session:${sessionId}:${kind}`,
+        group: `session:${sessionId}`,
+        sound: "default",
+      });
     };
 
     const seen = new Set<string>();
@@ -182,32 +129,32 @@ export function useActivityNotifications(): number {
           ? (prev?.busyStartedMs ?? now)
           : null;
 
-      const canFire = (prev?.lastFiredMs ?? 0) + RATE_LIMIT_MS <= now;
-
       const project = projectBasename(s.cwd);
 
-      // Error-burst transition
+      // Error-burst transition. Coalescing now lives in the shared
+      // dispatcher's token bucket — the per-session canFire check
+      // that used to live here was a hand-rolled rate-limit; one
+      // policy is easier to reason about than three.
       if (
         prefs.notify_on_error &&
         s.errored &&
-        !(prev?.lastErrored ?? false) &&
-        canFire
+        !(prev?.lastErrored ?? false)
       ) {
-        dispatch(project, "multiple errors in the last minute");
-        memo.set(s.session_id, nextMemo(s, busyStartedMs, now));
-        continue;
+        dispatch(s.session_id, "error", project, "multiple errors in the last minute");
       }
 
       // Stuck transition
       if (
         prefs.notify_on_stuck_minutes != null &&
         s.stuck &&
-        !(prev?.lastStuck ?? false) &&
-        canFire
+        !(prev?.lastStuck ?? false)
       ) {
-        dispatch(project, `possibly stuck (tool call > ${prefs.notify_on_stuck_minutes ?? 10} min)`);
-        memo.set(s.session_id, nextMemo(s, busyStartedMs, now));
-        continue;
+        dispatch(
+          s.session_id,
+          "stuck",
+          project,
+          `possibly stuck (tool call > ${prefs.notify_on_stuck_minutes ?? 10} min)`,
+        );
       }
 
       // Idle-after-work transition
@@ -216,18 +163,16 @@ export function useActivityNotifications(): number {
         s.status === "idle" &&
         prev?.lastStatus === "busy" &&
         prev.busyStartedMs != null &&
-        now - prev.busyStartedMs >= 120_000 &&
-        canFire
+        now - prev.busyStartedMs >= 120_000
       ) {
         const minutes = Math.floor((now - prev.busyStartedMs) / 60_000);
-        dispatch(project, `done (${minutes}m)`);
-        memo.set(s.session_id, nextMemo(s, busyStartedMs, now));
-        continue;
+        dispatch(s.session_id, "idle-done", project, `done (${minutes}m)`);
       }
 
-      // No transition fired — just refresh the memo so next tick
-      // has the current state to diff against.
-      memo.set(s.session_id, nextMemo(s, busyStartedMs, prev?.lastFiredMs ?? 0));
+      // Refresh the memo so the next tick can diff against current
+      // state. Single update site keeps lastErrored / lastStuck /
+      // status/busyStartedMs in lockstep.
+      memo.set(s.session_id, nextMemo(s, busyStartedMs));
     }
 
     // Reap memo entries for sessions that dropped off the list so
@@ -243,14 +188,12 @@ export function useActivityNotifications(): number {
 function nextMemo(
   s: LiveSessionSummary,
   busyStartedMs: number | null,
-  lastFiredMs: number,
 ): SessionMemo {
   return {
     lastStatus: s.status,
     lastErrored: s.errored,
     lastStuck: s.stuck,
     busyStartedMs,
-    lastFiredMs,
   };
 }
 

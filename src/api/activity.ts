@@ -68,13 +68,13 @@ export const activityApi = {
     onError?: boolean;
     onIdleDone?: boolean;
     onStuckMinutes?: number | null;
-    onSpendUsd?: number | null;
+    onOpDone?: boolean;
   }) =>
     invoke<Preferences>("preferences_set_notifications", {
       onError: patch.onError,
       onIdleDone: patch.onIdleDone,
       onStuckMinutes: patch.onStuckMinutes,
-      onSpendUsd: patch.onSpendUsd,
+      onOpDone: patch.onOpDone,
     }).then((p) => {
       broadcastPrefsChanged(p);
       return p;
@@ -108,9 +108,11 @@ export const activityApi = {
    * via `useTauriEvent` or raw `listen`.
    *
    * Single-subscriber per session — concurrent calls for the same
-   * id will reject. Callers must call `session_live_stop` then
-   * `session_live_start` again to detach, or simply drop the local
-   * listener (the backend detects the channel close on next send).
+   * id will reject with `AlreadySubscribed`. Detach by calling
+   * `sessionLiveUnsubscribe(sessionId)` (paired below); dropping the
+   * frontend listener alone is NOT sufficient because the backend
+   * forwarder keeps running until either the session ends or the
+   * paired unsubscribe lands.
    */
   sessionLiveSubscribe: (sessionId: string) =>
     invoke<void>("session_live_subscribe", { sessionId }),

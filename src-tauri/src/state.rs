@@ -147,3 +147,32 @@ impl LiveSessionState {
         Self { service }
     }
 }
+
+/// Live count of "alerting" sessions (errored or stuck) reflected in
+/// the tray. The frontend pushes the count via `tray_set_alert_count`;
+/// `tray::rebuild` reads it back so the count survives full menu
+/// rebuilds (account changes, sync events). Default 0.
+///
+/// Wrapped in a `std::sync::Mutex` because reads are sync and very
+/// brief — both the command handler and `rebuild()` only hold the
+/// guard long enough to clone a `u32`.
+#[derive(Default)]
+pub struct TrayAlertState(pub Mutex<u32>);
+
+impl TrayAlertState {
+    pub fn get(&self) -> u32 {
+        // Recover from poison rather than panic — a poisoned alert
+        // counter is a UI-only concern and must not propagate.
+        match self.0.lock() {
+            Ok(g) => *g,
+            Err(p) => *p.into_inner(),
+        }
+    }
+
+    pub fn set(&self, count: u32) {
+        match self.0.lock() {
+            Ok(mut g) => *g = count,
+            Err(p) => *p.into_inner() = count,
+        }
+    }
+}

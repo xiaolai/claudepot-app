@@ -53,9 +53,12 @@ pub struct Preferences {
     pub notify_on_idle_done: bool,
     /// None = feature off; Some(N) = fire after N minutes stuck.
     pub notify_on_stuck_minutes: Option<u32>,
-    /// None = feature off; Some(x) = fire when session spend ≥ $x.
-    /// Populated once the pricing module lands in M4.
-    pub notify_on_spend_usd: Option<f32>,
+    /// Fires an OS notification when a long-running op (verify_all,
+    /// project rename, session prune/slim/share, account login/register,
+    /// clean projects) terminates while the main window is unfocused.
+    /// Default off — opt-in. The window-focus gate lives in the
+    /// frontend dispatcher (`src/lib/notify.ts`).
+    pub notify_on_op_done: bool,
 
     /// Config section — per-kind "Open in…" editor preferences. Defaults
     /// to an empty `by_kind` + `fallback = "system"`, meaning the OS
