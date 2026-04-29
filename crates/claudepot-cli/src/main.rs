@@ -12,6 +12,11 @@ mod time_fmt;
 #[derive(Parser)]
 #[command(
     name = "claudepot",
+    // Pulled from `version` in the workspace's root `Cargo.toml` via
+    // CARGO_PKG_VERSION. Bumps land in lock-step across `Cargo.toml`,
+    // `package.json`, and `tauri.conf.json` (see the `bump` skill);
+    // wiring this through env! keeps the CLI in sync automatically.
+    version = env!("CARGO_PKG_VERSION"),
     about = "Multi-account Claude Code / Desktop switcher"
 )]
 struct Cli {
