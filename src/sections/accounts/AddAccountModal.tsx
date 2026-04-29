@@ -12,6 +12,7 @@ import {
 import { Tag } from "../../components/primitives/Tag";
 import { useFocusTrap } from "../../hooks/useFocusTrap";
 import { useOperations } from "../../hooks/useOperations";
+import { redactSecrets } from "../../lib/redactSecrets";
 import { NF } from "../../icons";
 import type { AccountSummary } from "../../types";
 import { ActionCard } from "./ActionCard";
@@ -79,7 +80,13 @@ export function AddAccountModal({
         const identity = await api.currentCcIdentity();
         if (cancelled) return;
         if (identity.error) {
-          setPreflight({ kind: "error", message: identity.error });
+          // Backend may interpolate user input or token bodies into
+          // the error string before returning it as a structured
+          // field — same reason the catch arm runs through redactSecrets.
+          setPreflight({
+            kind: "error",
+            message: redactSecrets(identity.error),
+          });
           return;
         }
         if (!identity.email) {
@@ -105,10 +112,11 @@ export function AddAccountModal({
         }
       } catch (e) {
         if (cancelled) return;
-        setPreflight({
-          kind: "error",
-          message: e instanceof Error ? e.message : String(e),
-        });
+        // Backend errors can interpolate user input or token bodies;
+        // run them through the UI redactor before they reach the DOM
+        // or the toast pipeline.
+        const raw = e instanceof Error ? e.message : String(e);
+        setPreflight({ kind: "error", message: redactSecrets(raw) });
       }
     })();
 
@@ -124,7 +132,8 @@ export function AddAccountModal({
       onAdded(outcome.email);
       onClose();
     } catch (e) {
-      onError(e instanceof Error ? e.message : String(e));
+      const raw = e instanceof Error ? e.message : String(e);
+      onError(redactSecrets(raw));
     } finally {
       setImporting(false);
     }
@@ -155,7 +164,7 @@ export function AddAccountModal({
         onError: (detail) => {
           const msg = detail ?? "";
           if (!/cancel/i.test(msg)) {
-            onError(msg || "register failed");
+            onError(msg ? redactSecrets(msg) : "register failed");
           }
         },
       });
@@ -166,7 +175,7 @@ export function AddAccountModal({
       // case — the user just clicked Cancel, they don't need a warning.
       const msg = e instanceof Error ? e.message : String(e);
       if (!/cancel/i.test(msg)) {
-        onError(msg);
+        onError(redactSecrets(msg));
       }
     } finally {
       setBrowserLoggingIn(false);

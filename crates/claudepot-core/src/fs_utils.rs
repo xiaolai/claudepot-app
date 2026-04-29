@@ -53,17 +53,25 @@ pub fn atomic_write(path: &Path, contents: &[u8]) -> std::io::Result<()> {
         std::process::id()
     ));
 
-    // Write + fsync under a scope so the file handle is closed before rename.
+    // Write + fsync under a scope so the file handle is closed before
+    // rename. On Unix the temp file is opened with mode 0o600 from the
+    // start, so secrets are never world-readable, even briefly between
+    // the create() and a follow-up chmod.
     {
+        #[cfg(unix)]
+        let mut f = {
+            use std::os::unix::fs::OpenOptionsExt;
+            std::fs::OpenOptions::new()
+                .write(true)
+                .create(true)
+                .truncate(true)
+                .mode(0o600)
+                .open(&tmp)?
+        };
+        #[cfg(not(unix))]
         let mut f = std::fs::File::create(&tmp)?;
         f.write_all(contents)?;
         f.sync_all()?;
-    }
-
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt;
-        std::fs::set_permissions(&tmp, std::fs::Permissions::from_mode(0o600))?;
     }
 
     // rename is atomic within a filesystem. If it fails, clean up the

@@ -24,18 +24,30 @@ pub enum KeyPrefix {
 pub fn classify_token(token: &str) -> Option<KeyPrefix> {
     // A bare prefix (e.g. just `sk-ant-api03-`) is not a real token;
     // require a non-empty opaque body so the "paste the full value"
-    // contract the add flow depends on actually holds.
+    // contract the add flow depends on actually holds. The body must
+    // also be shell-safe — `key oauth copy-shell` and similar paths
+    // compose this value into shell text, so quotes, whitespace, and
+    // control chars must be rejected at classification time, not
+    // patched up later at copy time.
     if let Some(body) = token.strip_prefix(API_KEY_PREFIX) {
-        if !body.is_empty() {
+        if !body.is_empty() && is_token_body_safe(body) {
             return Some(KeyPrefix::ApiKey);
         }
     }
     if let Some(body) = token.strip_prefix(OAUTH_TOKEN_PREFIX) {
-        if !body.is_empty() {
+        if !body.is_empty() && is_token_body_safe(body) {
             return Some(KeyPrefix::OauthToken);
         }
     }
     None
+}
+
+/// Anthropic-issued tokens are base64url-shaped: alnum plus `-` and `_`.
+/// Anything else (quotes, whitespace, control chars, shell metachars)
+/// is either a malformed paste or an attempted injection — refuse.
+fn is_token_body_safe(body: &str) -> bool {
+    body.bytes()
+        .all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'_')
 }
 
 /// Truncate `sk-ant-oat01-ABCDEF...XYZQ` to `sk-ant-oat01-ABC…XYZ`.

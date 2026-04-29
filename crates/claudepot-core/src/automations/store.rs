@@ -182,7 +182,13 @@ impl AutomationStore {
             .iter()
             .position(|a| &a.id == id)
             .ok_or_else(|| AutomationError::NotFound(id.to_string()))?;
-        let a = &mut self.file.automations[idx];
+        // Apply the patch to a clone first; only swap into the live
+        // store after the cross-field invariant check passes. The
+        // previous code mutated in place and only validated at the
+        // end, so a rejected patch (e.g. bypassPermissions with an
+        // empty allow-list) would leave the live record in a state
+        // that disagreed with what `save()` would persist.
+        let mut a = self.file.automations[idx].clone();
         // Helper: empty string in a single-level patch means "clear to None".
         fn nz(v: String) -> Option<String> {
             if v.is_empty() {
@@ -269,6 +275,10 @@ impl AutomationStore {
             ));
         }
         a.updated_at = chrono::Utc::now();
+        // Commit the validated clone back into the live store. Any
+        // earlier `Err` return path leaves `self.file.automations[idx]`
+        // untouched, preserving the previous valid record.
+        self.file.automations[idx] = a;
         Ok(())
     }
 

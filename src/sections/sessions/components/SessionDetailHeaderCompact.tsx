@@ -5,6 +5,7 @@ import { Tag } from "../../../components/primitives/Tag";
 import { NF } from "../../../icons";
 import type { SessionRow } from "../../../types";
 import { modelBadge, projectBasename, shortSessionId } from "../format";
+import { maybeRedact } from "../../../lib/redactSecrets";
 
 /**
  * Compact session-header layout — single ~40px row that takes over
@@ -114,7 +115,7 @@ export function SessionDetailHeaderCompact({
           textOverflow: "ellipsis",
           minWidth: 0,
         }}
-        title={row.first_user_prompt ?? title}
+        title={maybeRedact(row.first_user_prompt) ?? title}
       >
         {title}
       </h3>

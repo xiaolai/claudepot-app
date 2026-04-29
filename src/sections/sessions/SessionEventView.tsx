@@ -7,6 +7,7 @@ import type { SessionEvent } from "../../types";
 import { useActivityPrefs } from "../../hooks/useActivityPrefs";
 import { Body, Bubble, Divider } from "./components/transcriptAtoms";
 import { formatTokens, modelBadge } from "./format";
+import { redactSecrets } from "../../lib/redactSecrets";
 
 const MESSAGE_CLAMP = 4000;
 const CODE_CLAMP = 4000;
@@ -56,7 +57,11 @@ export function SessionEventView({
       return (
         <Bubble side="left" tone="sunken">
           {header("You")}
-          <Body text={event.text} searchTerm={searchTerm} clamp={MESSAGE_CLAMP} />
+          <Body
+            text={redactSecrets(event.text)}
+            searchTerm={searchTerm}
+            clamp={MESSAGE_CLAMP}
+          />
         </Bubble>
       );
 
@@ -70,7 +75,7 @@ export function SessionEventView({
             </span>,
           )}
           <Body
-            text={event.content}
+            text={redactSecrets(event.content)}
             searchTerm={searchTerm}
             mono
             clamp={CODE_CLAMP}
@@ -111,7 +116,11 @@ export function SessionEventView({
               )}
             </span>,
           )}
-          <Body text={event.text} searchTerm={searchTerm} clamp={MESSAGE_CLAMP} />
+          <Body
+            text={redactSecrets(event.text)}
+            searchTerm={searchTerm}
+            clamp={MESSAGE_CLAMP}
+          />
         </Bubble>
       );
     }
@@ -126,7 +135,7 @@ export function SessionEventView({
             </span>,
           )}
           <Body
-            text={event.input_preview}
+            text={redactSecrets(event.input_preview)}
             searchTerm={searchTerm}
             mono
             clamp={CODE_CLAMP}
@@ -139,7 +148,7 @@ export function SessionEventView({
         <Bubble side="right" tone="ghost">
           {header("Thinking")}
           <ThinkingBody
-            text={event.text}
+            text={redactSecrets(event.text)}
             searchTerm={searchTerm}
             hideByDefault={prefs.hideThinking}
           />
@@ -153,7 +162,7 @@ export function SessionEventView({
             Compacted
           </Tag>
           <Body
-            text={event.text}
+            text={redactSecrets(event.text)}
             searchTerm={searchTerm}
             clamp={MESSAGE_CLAMP}
             tone="ghost"
@@ -192,7 +201,7 @@ export function SessionEventView({
       // kind above — both are end-of-arc markers visually.
       return (
         <MiniLine glyph={NF.book} tone="ghost">
-          Task summary · {event.summary}
+          Task summary · {redactSecrets(event.summary)}
         </MiniLine>
       );
 
@@ -206,7 +215,7 @@ export function SessionEventView({
     case "malformed":
       return (
         <MiniLine glyph={NF.warn} tone="warn">
-          Malformed JSONL line {event.line_number}: {event.error}
+          Malformed JSONL line {event.line_number}: {redactSecrets(event.error)}
         </MiniLine>
       );
   }

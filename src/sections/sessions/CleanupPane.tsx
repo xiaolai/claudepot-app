@@ -37,7 +37,15 @@ export function CleanupPane({
   const [largerThanMb, setLargerThanMb] = useState<string>("");
   const [hasError, setHasError] = useState(false);
   const [sidechain, setSidechain] = useState(false);
-  const [plan, setPlan] = useState<PrunePlan | null>(null);
+  // Plan is paired with the exact filter that produced it. Execute
+  // uses this captured filter — never `buildFilter()` at click time —
+  // so a filter change between Preview and Execute cannot widen the
+  // prune to an unpreviewed set. The `useEffect` below clears both
+  // when filter inputs change so the user must Preview again.
+  const [plan, setPlan] = useState<{
+    plan: PrunePlan;
+    filter: PruneFilterInput;
+  } | null>(null);
   const [loading, setLoading] = useState(false);
   const [err, setErr] = useState<string | null>(null);
   const [running, setRunning] = useState(false);
@@ -66,13 +74,16 @@ export function CleanupPane({
     const mySeq = ++previewSeqRef.current;
     setErr(null);
     setLoading(true);
+    // Snapshot the filter once so the plan and the filter that
+    // produced it travel together.
+    const filter = buildFilter();
     try {
-      const p = await api.sessionPrunePlan(buildFilter());
+      const p = await api.sessionPrunePlan(filter);
       // Discard the response if the user changed filters (or
       // re-clicked Preview) while we were waiting — the plan we'd
       // commit would not match the current filter row.
       if (mySeq !== previewSeqRef.current) return;
-      setPlan(p);
+      setPlan({ plan: p, filter });
     } catch (e) {
       if (mySeq !== previewSeqRef.current) return;
       setErr(String(e));
@@ -83,11 +94,14 @@ export function CleanupPane({
   }, [buildFilter]);
 
   const execute = useCallback(async () => {
-    if (!plan || plan.entries.length === 0) return;
+    if (!plan || plan.plan.entries.length === 0) return;
     setRunning(true);
     setErr(null);
     try {
-      const opId = await api.sessionPruneStart(buildFilter());
+      // Use the filter the plan was built from, not a fresh
+      // buildFilter() — otherwise editing inputs after Preview would
+      // execute a different cut than the user just inspected.
+      const opId = await api.sessionPruneStart(plan.filter);
       onOpChange?.(opId);
       onTrashChanged?.();
     } catch (e) {
@@ -95,7 +109,7 @@ export function CleanupPane({
     } finally {
       setRunning(false);
     }
-  }, [plan, buildFilter, onOpChange, onTrashChanged]);
+  }, [plan, onOpChange, onTrashChanged]);
 
   // Filter changes invalidate the prune preview. The slim
   // subsection owns its own plan and invalidates it on the same
@@ -167,11 +181,11 @@ export function CleanupPane({
         <Button
           variant="solid"
           onClick={execute}
-          disabled={!plan || plan.entries.length === 0 || running}
+          disabled={!plan || plan.plan.entries.length === 0 || running}
           title={
             !plan
               ? "Run Preview first"
-              : plan.entries.length === 0
+              : plan.plan.entries.length === 0
                 ? "Nothing matches the filter"
                 : undefined
           }
@@ -196,10 +210,10 @@ export function CleanupPane({
         <CleanupPlanPreview
           testid="prune-preview"
           summaryText={
-            `Plan · ${plan.entries.length} file(s) · ${formatSize(plan.total_bytes)}` +
-            (plan.entries.length === 0 ? " · nothing to prune" : "")
+            `Plan · ${plan.plan.entries.length} file(s) · ${formatSize(plan.plan.total_bytes)}` +
+            (plan.plan.entries.length === 0 ? " · nothing to prune" : "")
           }
-          rows={plan.entries.map((e) => ({
+          rows={plan.plan.entries.map((e) => ({
             id: e.file_path,
             leftText: e.file_path,
             rightText: formatSize(e.size_bytes),

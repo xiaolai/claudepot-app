@@ -525,11 +525,29 @@ pub fn gc(
 
 /// Resolve a user-supplied project hint (sanitized or raw path) to a
 /// lock file. Returns `None` if no lock exists under either form.
+///
+/// The "alt" branch (using the raw hint as a slug) must NOT accept a
+/// hint that would let a `../foo` style input escape `locks_dir` and
+/// touch a sibling/parent directory. `sanitize_path` normalizes safely
+/// for the primary form; the alt form needs its own gate because it
+/// honors user input verbatim.
 pub fn resolve_lock_file(locks_dir: &Path, project_hint: &str) -> Option<PathBuf> {
     let san = project::sanitize_path(project_hint);
     let primary = locks_dir.join(format!("{san}.lock"));
     if primary.exists() {
         return Some(primary);
+    }
+    // Reject any hint with path separators or `..` components — the
+    // alt path treats `project_hint` as a bare slug, so it must look
+    // like one. If the user has a real path, the primary `sanitize_path`
+    // branch is what they want anyway.
+    if project_hint.contains('/')
+        || project_hint.contains('\\')
+        || project_hint.split('-').any(|seg| seg == "..")
+        || project_hint == ".."
+        || project_hint == "."
+    {
+        return None;
     }
     let alt = locks_dir.join(format!("{project_hint}.lock"));
     if alt.exists() {

@@ -669,16 +669,42 @@ pub async fn routes_remove(id: String) -> Result<(), String> {
     // Side effects: tear down wrapper + clear Desktop activation +
     // delete the library profile (which may carry plaintext secrets) +
     // forget any keychain entries / helper scripts the route owned.
+    //
+    // Each cleanup step that fails leaves a real artifact behind
+    // (a wrapper script, a library profile carrying plaintext, a
+    // keychain entry, a helper script). Returning Ok in those cases
+    // lies to the UI and lets the user move on while secrets persist
+    // on disk. Collect the failures and surface them as an aggregate
+    // error so the user can rerun or hand-clean the residue.
+    let mut errors: Vec<String> = Vec::new();
     if removed.installed_on_cli {
-        let _ = delete_wrapper(&removed.wrapper_name);
+        if let Err(e) = delete_wrapper(&removed.wrapper_name) {
+            errors.push(format!("wrapper {}: {e}", removed.wrapper_name));
+        }
     }
     if removed.active_on_desktop {
-        let _ = clear_desktop_active();
+        if let Err(e) = clear_desktop_active() {
+            errors.push(format!("desktop activation: {e}"));
+        }
     }
-    let _ = delete_library_profile(id);
-    let _ = delete_keychain_for_route(id);
-    let _ = delete_helpers(id, None);
-    Ok(())
+    if let Err(e) = delete_library_profile(id) {
+        errors.push(format!("library profile: {e}"));
+    }
+    if let Err(e) = delete_keychain_for_route(id) {
+        errors.push(format!("keychain: {e}"));
+    }
+    if let Err(e) = delete_helpers(id, None) {
+        errors.push(format!("helpers: {e}"));
+    }
+    if errors.is_empty() {
+        Ok(())
+    } else {
+        Err(format!(
+            "route removed but {} cleanup step(s) failed: {}",
+            errors.len(),
+            errors.join("; ")
+        ))
+    }
 }
 
 #[tauri::command]

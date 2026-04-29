@@ -508,11 +508,13 @@ pub fn redact_secrets(text: &str) -> String {
     while cursor < bytes.len() {
         if let Some(start) = find_from(bytes, cursor, needle.as_bytes()) {
             let tok_end = token_end(bytes, start);
-            // Idempotency: if the needle is immediately followed by
-            // `*` (the mask sentinel), the token is already redacted.
-            // Skip past the full `sk-ant-***<last4>` form so we don't
-            // re-wrap it into `sk-ant-******<last4>`.
-            if tok_end < bytes.len() && bytes[tok_end] == b'*' {
+            // Idempotency: the mask form is `sk-ant-***<last4>`, so
+            // the `*` sentinel always sits immediately after the
+            // `sk-ant-` prefix, with no token chars in between. If
+            // any token chars were consumed before the `*`, this is a
+            // real `sk-ant-realToken*` — redact instead of skipping.
+            let prefix_end = start + needle.len();
+            if tok_end == prefix_end && tok_end < bytes.len() && bytes[tok_end] == b'*' {
                 let mask_end = skip_existing_mask(bytes, tok_end);
                 out.push_str(&text[cursor..mask_end]);
                 cursor = mask_end;

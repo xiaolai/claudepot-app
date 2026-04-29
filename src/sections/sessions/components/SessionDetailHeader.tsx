@@ -10,6 +10,7 @@ import type { SessionChunk, SessionRow } from "../../../types";
 import { sessionCostEstimate, usePriceTable } from "../../../costs";
 import { deriveSessionTitle } from "../format";
 import { exportSession } from "../sessionExport";
+import { maybeRedact } from "../../../lib/redactSecrets";
 import { SessionDetailHeaderFull } from "./SessionDetailHeaderFull";
 import { SessionDetailHeaderCompact } from "./SessionDetailHeaderCompact";
 
@@ -57,7 +58,12 @@ export function SessionDetailHeader({
   /** Optional error sink for the export pipeline. */
   onError?: (message: string) => void;
 }) {
-  const cleanTitle = deriveSessionTitle(row.first_user_prompt);
+  // Redact the first prompt before deriving the title so an
+  // `sk-ant-…` token in the user's first message can't surface in the
+  // window header. The redactor is idempotent, so passing it through
+  // again on the tooltip path is safe and cheap.
+  const safeFirstPrompt = maybeRedact(row.first_user_prompt);
+  const cleanTitle = deriveSessionTitle(safeFirstPrompt);
   const title =
     cleanTitle ??
     (row.is_sidechain ? "Agent subsession" : "(untitled session)");

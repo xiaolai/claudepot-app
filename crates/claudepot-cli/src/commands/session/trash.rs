@@ -53,9 +53,11 @@ pub fn trash_restore_cmd(ctx: &AppContext, id: &str, to: Option<&str>) -> Result
 
 pub fn trash_empty_cmd(ctx: &AppContext, older_than: Option<&str>) -> Result<()> {
     use claudepot_core::trash::{self, TrashFilter};
-    // Refuse on a TTY without --yes.
-    if !ctx.yes && atty_like() {
-        bail!("`trash empty` requires --yes on a TTY. Pass -y to confirm.");
+    // Always require --yes: scripts (non-TTY) deserve the same
+    // explicit confirmation gate as interactive shells, otherwise a
+    // piped invocation can permanently delete trash without intent.
+    if !ctx.yes {
+        bail!("`trash empty` requires --yes to confirm permanent deletion.");
     }
     let filter = TrashFilter {
         older_than: older_than.map(parse_duration).transpose()?,

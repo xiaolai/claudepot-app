@@ -220,15 +220,20 @@ fn looks_like_env_line(line: &str) -> bool {
             .unwrap_or(false)
 }
 
-/// Dumb literal substring replacement as the "custom regex" fallback
-/// to avoid adding a `regex` dependency for this first pass. Users
-/// who need a real regex can compose multiple literals; a real engine
-/// can land later without changing the policy surface.
+/// Apply a single user-supplied custom redaction pattern. The field is
+/// named `custom_regex`, so we honor that contract: try to compile it
+/// as a real `regex::Regex` first. If compilation fails, fall back to
+/// literal substring replacement so older configs that relied on the
+/// previous behavior still work, but the regex path is now what users
+/// expect when they ship a pattern like `(?i)password=\S+`.
 fn apply_custom(input: &str, pattern: &str) -> String {
     if pattern.is_empty() {
         return input.to_string();
     }
-    input.replace(pattern, "<redacted>")
+    match regex::Regex::new(pattern) {
+        Ok(re) => re.replace_all(input, "<redacted>").into_owned(),
+        Err(_) => input.replace(pattern, "<redacted>"),
+    }
 }
 
 // ---------------------------------------------------------------------------

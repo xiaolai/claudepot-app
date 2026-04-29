@@ -34,10 +34,12 @@ export function redactSecrets(text: string): string {
       break;
     }
     const tokenEnd = scanTokenEnd(text, start);
-    // Idempotency guard: if the next char is `*`, the token is
-    // already in the mask form. Skip past the full `sk-ant-***<last4>`
-    // run so re-redaction is a no-op.
-    if (tokenEnd < text.length && text[tokenEnd] === "*") {
+    // Idempotency guard: the mask form is `sk-ant-***<last4>`, so the
+    // `*` always sits immediately after `sk-ant-`, before any token
+    // chars. If we consumed any token chars before hitting `*`, this
+    // is a real `sk-ant-realToken*` — redact, do not skip.
+    const prefixEnd = start + NEEDLE.length;
+    if (tokenEnd === prefixEnd && tokenEnd < text.length && text[tokenEnd] === "*") {
       const maskEnd = skipExistingMask(text, tokenEnd);
       out += text.slice(cursor, maskEnd);
       cursor = maskEnd;

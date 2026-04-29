@@ -33,7 +33,19 @@ export function RecoverDialog({
   const [kind, setKind] = useState<LifecycleKind>(
     (m?.kind as LifecycleKind) ?? "agent",
   );
-  const submittable = target.trim().length > 0;
+  // Recovery writes the synthesized manifest then asks the backend to
+  // restore the payload at `target`. A relative path here is dangerous
+  // — the backend would resolve it against its own cwd (the app
+  // working directory), which is not where the user thinks they're
+  // restoring. Require an absolute Unix or Windows-shaped path. The
+  // backend revalidates this; the UI gate is the first line of
+  // defense and the better UX (Recover stays disabled until valid).
+  const trimmed = target.trim();
+  const isAbsolute =
+    trimmed.startsWith("/") ||
+    trimmed.startsWith("\\\\") ||
+    /^[A-Za-z]:[\\/]/.test(trimmed);
+  const submittable = trimmed.length > 0 && isAbsolute;
   return (
     <Modal open onClose={onCancel} aria-labelledby={titleId}>
       <ModalHeader title="Recover trash entry" id={titleId} onClose={onCancel} />
