@@ -10,19 +10,40 @@ pub struct UsageResponse {
     pub five_hour: Option<UsageWindow>,
     #[serde(default)]
     pub seven_day: Option<UsageWindow>,
+    /// CC 2.1.123 dropped this field from its typed read (we
+    /// confirmed via `strings` against the live binary), but we
+    /// don't know if the server stopped emitting it. The
+    /// frontend's `UsageBlock` and `OAuthUsageModal` still render a
+    /// 7-day OAuth-apps row when the field is non-null, and the
+    /// render-if-nonzero rule means a `null` from the server hides
+    /// the row cleanly. Keep the typed field so live data isn't
+    /// dropped on the floor; let the catch-all handle it the day
+    /// the wire truly removes it.
     #[serde(default)]
     pub seven_day_oauth_apps: Option<UsageWindow>,
     #[serde(default)]
     pub seven_day_opus: Option<UsageWindow>,
     #[serde(default)]
     pub seven_day_sonnet: Option<UsageWindow>,
-    #[serde(default)]
+    /// Cowork/team-shared budget window. Earlier client versions
+    /// emitted `seven_day_cowork`; the 2.1.x line normalised the key
+    /// shape to plain `cowork` (still a `UsageWindow`). Both spellings
+    /// are accepted: the alias keeps the field populated whichever
+    /// shape the server returns.
+    #[serde(default, alias = "cowork")]
     pub seven_day_cowork: Option<UsageWindow>,
+    /// Experimental codename observed during 0.0.6 — stopped
+    /// appearing in CC 2.1.123. May reappear under a new name; the
+    /// catch-all picks it up if so. Kept here only because removing
+    /// the typed field would silently swallow the value if the
+    /// server were to emit it again. Scheduled for removal once we
+    /// have two consecutive releases with no live observation.
     #[serde(default)]
     pub iguana_necktie: Option<UsageWindow>,
     #[serde(default)]
     pub extra_usage: Option<ExtraUsage>,
-    /// Catch-all for new fields Anthropic adds.
+    /// Catch-all for any future field Anthropic adds — keeps the
+    /// response parseable so UI doesn't blank when the wire grows.
     #[serde(flatten)]
     pub unknown: HashMap<String, serde_json::Value>,
 }
@@ -188,6 +209,29 @@ mod tests {
     /// the ISO code for the symbol. Regression guard for the bug
     /// where the GUI showed $15000 / $1911 because the currency
     /// field was dropped and values were treated as major units.
+    /// CC 2.1.x uses the bare key `cowork` for the cowork/team window;
+    /// older payloads emit `seven_day_cowork`. Both must populate the
+    /// same `seven_day_cowork` field so the UI doesn't drift when the
+    /// server flips between key shapes. Regression guard for the
+    /// rename observed against the 2.1.123 binary.
+    #[test]
+    fn test_cowork_alias_accepts_both_keys() {
+        // New shape: bare `cowork`.
+        let new_shape = r#"{"cowork":{"utilization":33.0,"resets_at":"2026-04-19T00:00:00+00:00"}}"#;
+        let new: UsageResponse = serde_json::from_str(new_shape).unwrap();
+        let w = new.seven_day_cowork.expect("cowork alias should populate");
+        assert_eq!(w.utilization, 33.0);
+        assert!(w.resets_at.is_some());
+
+        // Old shape: `seven_day_cowork`.
+        let old_shape = r#"{"seven_day_cowork":{"utilization":44.0,"resets_at":"2026-04-19T00:00:00+00:00"}}"#;
+        let old: UsageResponse = serde_json::from_str(old_shape).unwrap();
+        assert_eq!(
+            old.seven_day_cowork.expect("plain key still parses").utilization,
+            44.0
+        );
+    }
+
     #[test]
     fn test_extra_usage_deserialize_gbp_minor_units() {
         let json = r#"{
