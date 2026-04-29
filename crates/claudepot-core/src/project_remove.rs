@@ -204,7 +204,19 @@ fn resolve_original_path(
             }
         }
     }
-    Some(candidate)
+    // Audit fix for project_remove.rs:207 — refuse to return the
+    // lossy unsanitize guess when neither sessions nor .claude.json
+    // could corroborate it. CC's `sanitize` is destructive on cwds
+    // containing literal `-`, so the unsanitize is a hint, not a
+    // truth. The previous code returned the guess anyway, and
+    // downstream history-line rewrite would strip entries for the
+    // guessed (often wrong) path — silently mutating unrelated
+    // project history. Returning None here makes the caller treat
+    // the project as "unknown original path" and skip the
+    // history-side cleanup; the on-disk slug dir is still removed,
+    // so the user gets the cleanup they asked for without the
+    // collateral damage.
+    None
 }
 
 /// Read `~/.claude.json` and return the value at `projects.<key>`,

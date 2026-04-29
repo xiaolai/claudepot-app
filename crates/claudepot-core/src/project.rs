@@ -1298,13 +1298,26 @@ pub(crate) fn remove_history_lines_batch(
         return Ok((0, None));
     }
 
+    // Audit fix for project.rs:1301 — write the snapshot BEFORE
+    // persisting the rewritten history. The previous order
+    // (persist-then-snapshot) lost the dropped lines if the
+    // snapshot write failed: history.jsonl already had them
+    // removed and the snapshot we'd undo from never landed. The
+    // config-batch path mirrored here writes the snapshot first;
+    // we follow the same shape now so a snapshot failure leaves
+    // history.jsonl intact and the user can retry.
+    let count = dropped.len();
+    let payload = serde_json::Value::Array(
+        dropped
+            .into_iter()
+            .map(serde_json::Value::String)
+            .collect(),
+    );
+    let snap = write_clean_snapshot(snapshots_dir, "batch", "history", &payload)?;
+
     tmp.persist(history_path)
         .map_err(|e| ProjectError::Io(e.error))?;
 
-    let count = dropped.len();
-    let payload =
-        serde_json::Value::Array(dropped.into_iter().map(serde_json::Value::String).collect());
-    let snap = write_clean_snapshot(snapshots_dir, "batch", "history", &payload)?;
     Ok((count, Some(snap)))
 }
 

@@ -446,6 +446,47 @@ pub fn gc(
 
     let mut result = GcResult::default();
 
+    // Audit fix for project_repair.rs:515 — pre-collect every
+    // snapshot path referenced by a NON-abandoned journal so the
+    // snapshot sweep below skips them. The previous shape walked
+    // `snapshots_dir` blindly and removed any file older than the
+    // cutoff, including snapshots a pending rename journal still
+    // needs to roll back. After GC, that journal couldn't undo —
+    // user data lost.
+    let referenced_by_pending: std::collections::HashSet<PathBuf> = {
+        let mut set = std::collections::HashSet::new();
+        if journals_dir.exists() {
+            if let Ok(entries) = fs::read_dir(journals_dir) {
+                for e in entries.flatten() {
+                    let name = e.file_name().to_string_lossy().to_string();
+                    // Only the `.json` (live) journals matter here.
+                    // `.abandoned.json` sidecars mark the journal AS
+                    // abandoned — those snapshots are fair GC game.
+                    if !name.ends_with(".json") || name.ends_with(".abandoned.json") {
+                        continue;
+                    }
+                    let base = name.trim_end_matches(".json");
+                    let abandoned = journals_dir.join(format!("{base}.abandoned.json"));
+                    if abandoned.exists() {
+                        continue;
+                    }
+                    if let Ok(body) = fs::read_to_string(e.path()) {
+                        if let Ok(j) = serde_json::from_str::<Journal>(&body) {
+                            for snap in j.snapshot_paths {
+                                if let Ok(canon) = snap.canonicalize() {
+                                    set.insert(canon);
+                                } else {
+                                    set.insert(snap);
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        set
+    };
+
     // Abandoned journals (identified by `.abandoned.json` sidecar).
     if journals_dir.exists() {
         for entry in fs::read_dir(journals_dir).map_err(ProjectError::Io)? {
@@ -493,10 +534,23 @@ pub fn gc(
         }
     }
 
-    // Snapshots older than cutoff.
+    // Snapshots older than cutoff — skip any referenced by a pending
+    // (non-abandoned) journal.
     if snapshots_dir.exists() {
         for entry in fs::read_dir(snapshots_dir).map_err(ProjectError::Io)? {
             let entry = entry.map_err(ProjectError::Io)?;
+            let path = entry.path();
+            // Match against both the canonicalized path and the
+            // raw entry path so the exclusion catches whichever
+            // form the journal stored.
+            let canon = path.canonicalize().ok();
+            let referenced = referenced_by_pending.contains(&path)
+                || canon
+                    .as_ref()
+                    .is_some_and(|c| referenced_by_pending.contains(c));
+            if referenced {
+                continue;
+            }
             let meta = entry.metadata().map_err(ProjectError::Io)?;
             let age = meta
                 .modified()
@@ -508,11 +562,11 @@ pub fn gc(
                 continue;
             }
             if dry_run {
-                result.would_remove.push(entry.path());
+                result.would_remove.push(path.clone());
             } else {
                 // M12: same honesty requirement as above.
                 let size = meta.len();
-                if fs::remove_file(entry.path()).is_ok() {
+                if fs::remove_file(&path).is_ok() {
                     result.bytes_freed += size;
                     result.removed_snapshots += 1;
                 }
