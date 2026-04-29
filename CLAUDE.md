@@ -24,7 +24,8 @@ pnpm test:coverage                   # React with coverage report
 
 - `src-tauri/src/commands.rs` — async Tauri commands wrapping `claudepot-core`. NO business logic.
 - `src-tauri/src/dto.rs` — serde DTOs crossing to JS. Credentials never cross.
-- `src/App.tsx` + `src/api.ts` + `src/types.ts` — React UI, plain CSS.
+- `src/App.tsx` + `src/api/` (sliced by domain — `account`, `project`,
+  `notification`, `activity`, etc., merged in `index.ts`) + `src/types.ts` — React UI, plain CSS.
 - `AccountStore.db` is `Mutex<Connection>` so stores can cross `await` points in Tauri commands.
 - Two SQLite files live in `~/.claudepot/` (override with `CLAUDEPOT_DATA_DIR`):
   - `accounts.db` — authoritative account + verification state, linked to Keychain.
@@ -63,11 +64,11 @@ See `dev-docs/implementation-plan.md` for the full plan.
   Primitives live in `src/components/primitives/`. Sections live
   under `src/sections/`; the registry (`src/sections/registry.tsx`)
   is the single source of truth for primary nav. Sections in order:
-  Accounts, Projects (hosts per-project sessions in
-  ProjectDetail's master-detail pane), Activities (live + today/month
-  dashboard + cards stream — three time scales of "what's
-  happening"; id `events` for localStorage compatibility, label
-  "Activities"), Global, Keys, Settings. Six top-level tabs total.
+  Accounts, Activities (id `events` for localStorage compatibility,
+  label "Activities" — live + today/month dashboard + cards stream),
+  Projects (hosts per-project sessions in ProjectDetail's
+  master-detail pane), Keys, Third-parties, Automations, Global,
+  Settings. Eight top-level tabs total.
   Cleanup (session prune + trash) lives at Settings → Cleanup.
 - Long-running ops (project rename, repair resume/rollback) flow
   through a single op-progress pipeline:
