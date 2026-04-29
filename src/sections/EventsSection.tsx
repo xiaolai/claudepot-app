@@ -17,15 +17,18 @@ import {
   TopKinds,
 } from "./events/charts";
 import { UsageView } from "./events/UsageView";
+import { CostTab } from "./events/CostTab";
 
-type EventsTab = "stream" | "usage";
+type EventsTab = "stream" | "usage" | "cost";
 
 const TAB_STORAGE_KEY = "claudepot.events.tab";
 
 function loadTab(): EventsTab {
   try {
     const v = localStorage.getItem(TAB_STORAGE_KEY);
-    return v === "usage" ? "usage" : "stream";
+    if (v === "usage") return "usage";
+    if (v === "cost") return "cost";
+    return "stream";
   } catch {
     return "stream";
   }
@@ -297,13 +300,18 @@ export function EventsSection() {
           onRefresh={() => {
             if (tab === "usage") {
               usageRefreshRef.current?.();
+            } else if (tab === "cost") {
+              // CostTab refetches on its own when the window
+              // selector changes; the header's manual refresh has
+              // no immediate work to dispatch here. The next
+              // localStorage tick will refresh anyway.
             } else {
               void refresh();
             }
           }}
         />
         <TabStrip current={tab} onPick={setTab} />
-        {tab === "stream" ? (
+        {tab === "stream" && (
           <>
             <DashboardStrip />
             <MetricsStrip cards={aggCards} loading={loading} />
@@ -315,13 +323,15 @@ export function EventsSection() {
               onCardClick={handleCardClick}
             />
           </>
-        ) : (
+        )}
+        {tab === "usage" && (
           <UsageView
             registerRefresh={(fn) => {
               usageRefreshRef.current = fn;
             }}
           />
         )}
+        {tab === "cost" && <CostTab />}
       </div>
     </div>
   );
@@ -363,6 +373,12 @@ function TabStrip({
         label="Usage"
         sub="Per-artifact invocation counts"
         onClick={() => onPick("usage")}
+      />
+      <TabButton
+        active={current === "cost"}
+        label="Cost"
+        sub="Per-project tokens + USD"
+        onClick={() => onPick("cost")}
       />
     </div>
   );

@@ -22,6 +22,7 @@ mod commands_session_index;
 mod commands_session_move;
 mod commands_session_prune;
 mod commands_session_share;
+mod commands_usage_local;
 mod config_dto;
 mod config_watch;
 mod config_watch_types;
@@ -486,6 +487,7 @@ pub fn run() {
             commands_config::config_effective_mcp,
             commands_pricing::pricing_get,
             commands_pricing::pricing_refresh,
+            commands_usage_local::local_usage_aggregate,
             config_watch::config_watch_start,
             config_watch::config_watch_stop,
             commands_migrate::migrate_inspect,

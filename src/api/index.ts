@@ -17,6 +17,7 @@ import { artifactLifecycleApi } from "./artifact-lifecycle";
 import { migrateApi } from "./migrate";
 import { routeApi } from "./route";
 import { automationApi } from "./automation";
+import { usageApi } from "./usage";
 
 export const api = {
   ...accountApi,
@@ -32,6 +33,7 @@ export const api = {
   ...artifactLifecycleApi,
   ...routeApi,
   ...automationApi,
+  ...usageApi,
   migrate: migrateApi,
 };
 
