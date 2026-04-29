@@ -142,8 +142,21 @@ pub fn parse_result_event(stdout_bytes: &[u8]) -> Option<RunResult> {
         }
     }
 
-    // First try `--output-format=json` (a JSON array of events).
+    // Audit fix for automations/run.rs:146 — accept BOTH the array
+    // shape and a top-level result object. CC's `--output-format=json`
+    // (without `--verbose`) emits a single `{type:"result",...}`
+    // object, not an array; the previous code only matched the array
+    // shape and silently dropped the run result for the bare-object
+    // case. We try the object shape first, fall back to the array
+    // shape, then to the stream-json line scan.
     if let Ok(v) = serde_json::from_slice::<serde_json::Value>(stdout_bytes) {
+        if v.is_object()
+            && v.get("type").and_then(|t| t.as_str()) == Some("result")
+        {
+            if let Ok(raw) = serde_json::from_value::<Raw>(v.clone()) {
+                return Some(build(raw));
+            }
+        }
         if let Some(arr) = v.as_array() {
             return arr
                 .iter()
