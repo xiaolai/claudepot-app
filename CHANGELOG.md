@@ -6,7 +6,7 @@ Versioning scheme:
 - `0.1.x` — beta
 - `1.0.0+` — stable
 
-## 0.0.9 — alpha (2026-04-29)
+## 0.0.10 — alpha (2026-04-29)
 
 ### Added
 
@@ -157,6 +157,24 @@ Versioning scheme:
   now — removing them would silently drop live data if the server
   still emits them; the catch-all `unknown` HashMap covers the
   graceful-degradation path the day they're truly retired.
+- **macOS Homebrew cask install.** The cask symlinks
+  `/opt/homebrew/bin/claudepot` →
+  `Claudepot.app/Contents/MacOS/claudepot-cli-<triple>`, but the v0.0.8
+  build produced a `.app` that didn't actually contain the CLI. CI
+  staged the binary at `src-tauri/binaries/` correctly, but
+  `tauri.conf.json` never declared `bundle.externalBin`, so the
+  Tauri bundler ignored the staged file. Adding the declaration
+  makes `brew install --cask claudepot` install both the GUI and
+  the CLI in one step, as the cask intends.
+- **Linux / Windows bundles also include the CLI.** Same fix
+  extended to .deb / .AppImage / .msi / .nsis.zip bundles. Adds ~5 MB
+  per bundle; standalone CLI tarballs / zips still ship for
+  CLI-only users.
+
+## 0.0.9 — alpha (2026-04-29)
+
+### Fixed
+
 - **macOS Homebrew cask install.** The cask symlinks
   `/opt/homebrew/bin/claudepot` →
   `Claudepot.app/Contents/MacOS/claudepot-cli-<triple>`, but the v0.0.8
