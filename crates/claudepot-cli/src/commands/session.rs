@@ -97,12 +97,6 @@ fn format_ts_ms(ms: i64) -> String {
         .unwrap_or_else(|| "—".to_string())
 }
 
-fn atty_like() -> bool {
-    // Used by `trash empty` to refuse without `--yes`. On a non-TTY
-    // (pipe, CI, test harness) we don't demand the confirmation.
-    std::io::IsTerminal::is_terminal(&std::io::stdin())
-}
-
 fn parse_duration(s: &str) -> Result<std::time::Duration> {
     let t = s.trim();
     if t.is_empty() {

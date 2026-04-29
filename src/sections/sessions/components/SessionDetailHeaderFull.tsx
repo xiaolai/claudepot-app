@@ -6,6 +6,7 @@ import { Tag } from "../../../components/primitives/Tag";
 import { NF } from "../../../icons";
 import type { SessionRow } from "../../../types";
 import { formatUsd } from "../../../costs";
+import { maybeRedact } from "../../../lib/redactSecrets";
 import { formatRelativeTime, formatSize } from "../../projects/format";
 import {
   bestTimestampMs,
@@ -108,7 +109,7 @@ export function SessionDetailHeaderFull({
           WebkitLineClamp: 2,
           WebkitBoxOrient: "vertical",
         }}
-        title={row.first_user_prompt ?? undefined}
+        title={maybeRedact(row.first_user_prompt) ?? undefined}
       >
         {title}
       </h3>

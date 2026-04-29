@@ -1,5 +1,5 @@
 use crate::error::OAuthError;
-use crate::oauth::http_client;
+use crate::oauth::{beta_header, http_client};
 use serde::Deserialize;
 
 const TOKEN_URL: &str = "https://platform.claude.com/v1/oauth/token";
@@ -24,6 +24,7 @@ pub async fn refresh(refresh_token: &str) -> Result<TokenResponse, OAuthError> {
     let resp = client
         .post(TOKEN_URL)
         .header("Content-Type", "application/json")
+        .header("anthropic-beta", beta_header::get_or_default())
         .json(&serde_json::json!({
             "grant_type": "refresh_token",
             "refresh_token": refresh_token,

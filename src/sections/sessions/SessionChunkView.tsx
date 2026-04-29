@@ -217,7 +217,7 @@ function EventInlineView({
           }}
         >
           {event.is_error ? "⚠ " : "↩ "}
-          {redactSecrets(event.content.slice(0, 400))}
+          {redactSecrets(event.content).slice(0, 400)}
         </div>
       );
     case "malformed":
