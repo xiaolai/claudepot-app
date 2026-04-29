@@ -103,6 +103,24 @@ pub async fn preferences_set_notifications(
     Ok(prefs.clone())
 }
 
+/// Persist the "show main window on startup" toggle. Pure persistence
+/// — the value is read at the next cold launch from `setup()` and
+/// applied via `window.hide()` before the window is presented. Toggling
+/// at runtime does not affect the currently-visible window; that is
+/// intentional, the user can hide/show through the tray.
+#[tauri::command]
+pub async fn preferences_set_show_window_on_startup(
+    state: tauri::State<'_, crate::preferences::PreferencesState>,
+    show: bool,
+) -> Result<(), String> {
+    let mut p = state
+        .0
+        .lock()
+        .map_err(|e| format!("preferences lock: {e}"))?;
+    p.show_window_on_startup = show;
+    p.save()
+}
+
 /// Toggle the dock-icon visibility (macOS only). On non-macOS platforms
 /// the call still persists the boolean so the UI round-trips cleanly,
 /// but the activation policy is a no-op.

@@ -220,6 +220,9 @@ function GeneralPane({
     }
   });
   const [hideDock, setHideDock] = useState<boolean | null>(null);
+  const [showWindowOnStartup, setShowWindowOnStartup] = useState<
+    boolean | null
+  >(null);
   const [launchAtLogin, setLaunchAtLogin] = useState<boolean | null>(null);
   const [isMac, setIsMac] = useState<boolean>(false);
 
@@ -234,6 +237,7 @@ function GeneralPane({
         ]);
         if (cancelled) return;
         setHideDock(prefs.hide_dock_icon);
+        setShowWindowOnStartup(prefs.show_window_on_startup);
         setIsMac(status.platform === "macos");
         try {
           setLaunchAtLogin(await isEnabled());
@@ -280,6 +284,20 @@ function GeneralPane({
     [hideDock, pushToast],
   );
 
+  const toggleShowWindowOnStartup = useCallback(
+    async (next: boolean) => {
+      const prev = showWindowOnStartup;
+      setShowWindowOnStartup(next);
+      try {
+        await api.preferencesSetShowWindowOnStartup(next);
+      } catch (e) {
+        setShowWindowOnStartup(prev);
+        pushToast("error", `Toggle failed: ${e}`);
+      }
+    },
+    [showWindowOnStartup, pushToast],
+  );
+
   const toggleLaunchAtLogin = useCallback(
     async (next: boolean) => {
       const prev = launchAtLogin;
@@ -320,6 +338,15 @@ function GeneralPane({
         <Toggle
           on={launchAtLogin === true}
           onChange={toggleLaunchAtLogin}
+        />
+      </Row>
+      <Row
+        label="Show window on startup"
+        hint="Off: Claudepot launches into the tray with no window. Click the tray icon to open it."
+      >
+        <Toggle
+          on={showWindowOnStartup === true}
+          onChange={toggleShowWindowOnStartup}
         />
       </Row>
       {isMac && (

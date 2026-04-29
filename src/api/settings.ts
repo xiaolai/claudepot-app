@@ -43,4 +43,12 @@ export const settingsApi = {
   preferencesSetHideDockIcon: (hide: boolean) =>
     invoke<void>("preferences_set_hide_dock_icon", { hide }),
 
+  /**
+   * Persist the "show main window on startup" toggle. The new value
+   * applies on the next launch — the currently-visible window is not
+   * touched. The user can hide / show through the tray icon.
+   */
+  preferencesSetShowWindowOnStartup: (show: boolean) =>
+    invoke<void>("preferences_set_show_window_on_startup", { show }),
+
 };
