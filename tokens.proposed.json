@@ -1,0 +1,14 @@
+{
+  "proposals": [
+    {
+      "id": "prop_2026-04-29_002",
+      "value": "100dvh",
+      "intent": "viewport-h-full",
+      "proposedTokenName": "space.viewport-h-full",
+      "callerFile": null,
+      "timestamp": "2026-04-29T10:35:51.959Z",
+      "status": "pending",
+      "tempName": "__proposed.viewportHFull"
+    }
+  ]
+}
