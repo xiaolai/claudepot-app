@@ -178,7 +178,19 @@ pub fn restore(
                 }
             };
             if let Err(e) = result {
-                // Phase-3 failure: clean up partially-restored targets, then rollback
+                // Audit fix for swap.rs:180 — Phase-3 failure must
+                // clear `dst` for the FAILED item before rollback,
+                // not just for previously-restored items. The failed
+                // copy/rename may have partially populated `dst`,
+                // and rollback's `copy_dir_recursive` would then
+                // merge old content over the new partial — files
+                // that exist in the partial but not in the holding
+                // snapshot would survive as orphans on the wrong
+                // account's profile.
+                //
+                // Clear EVERY dst we've touched (the failing one
+                // and all earlier successes) so rollback paints
+                // onto an empty canvas.
                 for r in &restored {
                     let p = data_dir.join(r);
                     if p.is_dir() {
@@ -186,6 +198,12 @@ pub fn restore(
                     } else if p.exists() {
                         let _ = std::fs::remove_file(&p);
                     }
+                }
+                let failed_dst = data_dir.join(item);
+                if failed_dst.is_dir() {
+                    let _ = std::fs::remove_dir_all(&failed_dst);
+                } else if failed_dst.exists() {
+                    let _ = std::fs::remove_file(&failed_dst);
                 }
                 rollback(data_dir, holding_dir.path(), &moved);
                 return Err(DesktopSwapError::FileCopyFailed(format!(
@@ -203,9 +221,21 @@ fn rollback(data_dir: &Path, holding_dir: &Path, items: &[String]) {
     for item in items {
         let src = holding_dir.join(item);
         let dst = data_dir.join(item);
+        // Clear dst FIRST so a subsequent merge-style copy can't
+        // leave partial new content underneath the rolled-back old
+        // tree. The Phase-3 cleanup also clears these, but rollback
+        // is the last word — keep it self-sufficient.
+        if dst.is_dir() {
+            let _ = std::fs::remove_dir_all(&dst);
+        } else if dst.exists() {
+            let _ = std::fs::remove_file(&dst);
+        }
         if src.is_dir() {
             let _ = copy_dir_recursive(&src, &dst);
         } else if src.is_file() {
+            if let Some(parent) = dst.parent() {
+                let _ = std::fs::create_dir_all(parent);
+            }
             let _ = std::fs::copy(&src, &dst);
         }
     }
@@ -217,6 +247,18 @@ fn copy_dir_recursive(src: &Path, dst: &Path) -> std::io::Result<()> {
 
 /// Full Desktop switch: quit -> snapshot outgoing -> restore target -> relaunch.
 /// Updates `has_desktop_profile` and `active_desktop` in the store.
+///
+/// Audit fix for desktop_backend/swap.rs:220 — acquires the
+/// process-wide `desktop_lock` for the full duration of the swap.
+/// Without this, two concurrent invocations (e.g. a CLI command and
+/// the GUI tray menu firing at the same time) could interleave
+/// snapshot/restore phases and leave the data_dir in a state where
+/// neither account is intact. The lock is held until this function
+/// returns, including through Phase 2's holding-dir + Phase 3's
+/// rename to data_dir. A 30-second wait covers the longest
+/// reasonable swap window; if you're holding it longer than that
+/// something else has gone wrong and queueing further would just
+/// hide the problem.
 pub async fn switch(
     platform: &dyn DesktopPlatform,
     store: &crate::account::AccountStore,
@@ -224,6 +266,12 @@ pub async fn switch(
     target_id: Uuid,
     no_launch: bool,
 ) -> Result<(), DesktopSwapError> {
+    let _lock = crate::desktop_lock::acquire(std::time::Duration::from_secs(30)).map_err(|e| {
+        DesktopSwapError::Io(std::io::Error::other(format!(
+            "could not acquire desktop swap lock: {e}"
+        )))
+    })?;
+
     let data_dir = platform.data_dir().ok_or(DesktopSwapError::NotInstalled)?;
 
     if !data_dir.exists() {

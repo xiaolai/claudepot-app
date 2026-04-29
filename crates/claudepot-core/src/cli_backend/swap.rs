@@ -95,7 +95,7 @@ impl ProfileFetcher for DefaultProfileFetcher {
 /// `services::identity::verify_account_identity_with`, invoked from
 /// reconciliation passes, which is the intended recovery mechanism for
 /// an expired-but-refreshable blob that swap rejects.
-async fn verify_blob_identity(
+pub(crate) async fn verify_blob_identity(
     blob_str: &str,
     expected_email: &str,
     fetcher: &dyn ProfileFetcher,
@@ -204,19 +204,51 @@ fn acquire_swap_lock() -> Result<fs::File, SwapError> {
     Ok(file)
 }
 
+/// Result of a `maybe_refresh_blob` call. Carries the (possibly
+/// refreshed) blob string and a flag the caller uses to decide
+/// whether to persist after identity verification has passed.
+///
+/// Audit fix for swap.rs:229: the previous shape persisted the
+/// refreshed blob inside `maybe_refresh_blob`, before the caller
+/// had a chance to verify the new blob's identity matches the slot.
+/// A misfiled or attacker-controlled refresh token would then write
+/// the wrong account's credentials into a slot before anyone
+/// noticed. Now we hand the refreshed bytes back without touching
+/// disk; the caller persists if and only if `verify_blob_identity`
+/// approves.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum MaybeRefreshed {
+    /// Token was not expired (no refresh needed); the original blob
+    /// stays in the slot, no save is required.
+    Unchanged,
+    /// Token was refreshed in memory. Caller must verify identity
+    /// against `blob` and then persist via `storage::save` to commit.
+    Refreshed { blob: String },
+}
+
+impl MaybeRefreshed {
+    /// Borrow the live blob — refreshed if so, original otherwise.
+    pub fn blob<'a>(&'a self, original: &'a str) -> &'a str {
+        match self {
+            Self::Unchanged => original,
+            Self::Refreshed { blob } => blob.as_str(),
+        }
+    }
+}
+
 /// Conditionally refresh the credential blob if it is expired or expiring
-/// within a 5-minute margin. Returns the (possibly refreshed) blob JSON string.
-/// On refresh, the new blob is persisted to private storage.
+/// within a 5-minute margin. Returns a `MaybeRefreshed` describing
+/// the new bytes (if any). The caller is responsible for persisting
+/// after verifying identity.
 pub(crate) async fn maybe_refresh_blob(
     blob_str: &str,
-    account_id: Uuid,
     refresher: &dyn TokenRefresher,
-) -> Result<String, SwapError> {
+) -> Result<MaybeRefreshed, SwapError> {
     let blob = crate::blob::CredentialBlob::from_json(blob_str)
         .map_err(|e| SwapError::CorruptBlob(e.to_string()))?;
 
     if !blob.is_expired(300) {
-        return Ok(blob_str.to_string());
+        return Ok(MaybeRefreshed::Unchanged);
     }
 
     tracing::info!("token expired or expiring soon, refreshing...");
@@ -226,8 +258,7 @@ pub(crate) async fn maybe_refresh_blob(
         .map_err(|e| SwapError::RefreshFailed(e.to_string()))?;
 
     let new_blob = crate::oauth::refresh::build_blob(&token_resp, Some(&blob));
-    storage::save(account_id, &new_blob)?;
-    Ok(new_blob)
+    Ok(MaybeRefreshed::Refreshed { blob: new_blob })
 }
 
 /// Swap the active CLI account from `current_id` to `target_id`.
@@ -331,14 +362,17 @@ async fn switch_inner(
     // Load target blob from Claudepot private storage first.
     // If it doesn't exist, fail before touching anything.
     tracing::debug!(target = %target_id, "loading target credentials");
-    let target_blob = storage::load(target_id)?;
+    let target_blob_original = storage::load(target_id)?;
 
-    // Conditionally refresh if expired/expiring and auto_refresh is enabled.
-    let target_blob = if auto_refresh {
-        maybe_refresh_blob(&target_blob, target_id, refresher).await?
+    // Conditionally refresh in MEMORY if expired/expiring. The
+    // refreshed bytes don't touch disk yet — see MaybeRefreshed
+    // docstring. Persist below, after identity verification passes.
+    let refresh_outcome = if auto_refresh {
+        maybe_refresh_blob(&target_blob_original, refresher).await?
     } else {
-        target_blob
+        MaybeRefreshed::Unchanged
     };
+    let target_blob = refresh_outcome.blob(&target_blob_original).to_string();
 
     // Verify target blob actually belongs to target_id's stored email. If it
     // doesn't, the slot is mis-filed — abort before writing to CC.
@@ -349,6 +383,14 @@ async fn switch_inner(
         .email;
     tracing::debug!(target = %target_id, "verifying target blob identity");
     verify_blob_identity(&target_blob, &target_email, fetcher).await?;
+
+    // Identity verified — NOW persist if a refresh actually happened.
+    // A verify failure leaves the original (un-refreshed) blob on
+    // disk so a stale-but-correct slot is preferable to a fresh-but-
+    // misattributed one.
+    if let MaybeRefreshed::Refreshed { blob } = &refresh_outcome {
+        storage::save(target_id, blob)?;
+    }
 
     // Save outgoing (current CC blob may have been refreshed by the CLI).
     //
@@ -561,11 +603,21 @@ async fn switch_inner(
     // Update active pointer in account store.
     tracing::debug!(target = %target_id, "updating active CLI pointer");
     if let Err(e) = store.set_active_cli(target_id) {
-        // Best-effort rollback: restore previous CC credentials AND
-        // the prior oauthAccount block so the two stay consistent.
-        if let Some(cur) = current_id {
-            if let Ok(prev_blob) = storage::load(cur) {
-                let _ = platform.write_default(&prev_blob).await;
+        // Audit fix for swap.rs:563 — restore CC's PRE-WRITE state,
+        // not whatever `storage::load(cur)` yields. The captured
+        // `pre_write_default` is the exact bytes (or absence) that
+        // CC held before we wrote `target_blob` over it; falling
+        // back to `storage::load(cur)` could substitute a different
+        // (older / refreshed) blob that wasn't what CC was actually
+        // showing the user. The `None` arm — CC had no creds before
+        // the swap — must clear the keychain rather than leave the
+        // target blob in place.
+        match pre_write_default.as_deref() {
+            Some(prev) => {
+                let _ = platform.write_default(prev).await;
+            }
+            None => {
+                let _ = platform.clear_default().await;
             }
         }
         if let Some(cj_path) = claude_json_path {
