@@ -1,0 +1,4 @@
+{
+  "_comment": "Claudepot is a Tauri desktop app: macOS / Windows / Linux native webviews, no mobile build, no iOS Safari. The ui-responsive C2 check (100vh-may-overflow-when-the-address-bar-collapses) doesn't apply, and there are no @media breakpoints in the codebase to police. `disabled: true` silences the post-tool-use advisory stream; the session-start catalog still prints (informational only, doesn't gate edits). Re-enable if a mobile or web-shipped build is added. Unknown keys (like this `_comment`) are tolerated by the plugin's config merger.",
+  "disabled": true
+}
