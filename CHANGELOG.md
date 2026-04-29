@@ -10,6 +10,17 @@ Versioning scheme:
 
 ### Added
 
+- **Activities → Cost — GUI surface for the local cost report.**
+  New tab inside the Activities section (alongside Stream and
+  Usage) showing the same per-project token + USD totals as the
+  CLI, with a window selector (7d / 30d / 90d / all), four summary
+  tiles (Total cost · Tokens in · Tokens out · Sessions), and a
+  sortable table. Project rows display the CWD's basename with the
+  full path on hover; cost-desc is the default sort; columns
+  toggle ascending/descending on re-click. A pricing-source pill
+  ("bundled · verified 2026-01-15", "live · 2h ago") declares the
+  trust signal on the figure, and a footer note plus a Refresh
+  prices button surface when any session lacked a priced model.
 - **`claudepot usage report` — local cost tracking from on-disk
   transcripts.** New CLI subcommand that rolls up token counts and
   USD cost per project, with `--window all|<n>d` for time-bounded
