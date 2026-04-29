@@ -10,6 +10,18 @@ Versioning scheme:
 
 ### Added
 
+- **`claudepot usage report` — local cost tracking from on-disk
+  transcripts.** New CLI subcommand that rolls up token counts and
+  USD cost per project, with `--window all|<n>d` for time-bounded
+  views and `--json` for scripts. Mirrors CC's own `/usage` "this
+  install" totals — no extra network call; cost computed against
+  claudepot's bundled price table. Per-account attribution is
+  intentionally omitted (CC transcripts don't carry an account id,
+  and claudepot keeps no swap-event log to reconstruct one);
+  building that infrastructure is reserved for a separate change.
+  Sessions whose models aren't in the price table contribute their
+  token totals but not their cost, with a footer note calling out
+  the unpriced count so the gap is visible rather than silent.
 - **OS notification when a long operation finishes.** New
   `Alert when long operations complete` toggle under
   Settings → Activity → Notifications. When the main window is
@@ -94,6 +106,17 @@ Versioning scheme:
 
 ### Fixed
 
+- **`/api/oauth/usage` accepts the new `cowork` key shape.** CC 2.1.x
+  renamed the team/cowork window's wire field from `seven_day_cowork`
+  to a bare `cowork`. Both spellings now populate the same
+  `seven_day_cowork` slot, so the Accounts/Keys usage views don't
+  blank out for accounts whose budget is on the new shape. Older
+  payloads keep working unchanged. The two adjacent fields that
+  disappeared from CC's typed read in 2.1.123
+  (`seven_day_oauth_apps`, `iguana_necktie`) stay in our type for
+  now — removing them would silently drop live data if the server
+  still emits them; the catch-all `unknown` HashMap covers the
+  graceful-degradation path the day they're truly retired.
 - **macOS Homebrew cask install.** The cask symlinks
   `/opt/homebrew/bin/claudepot` →
   `Claudepot.app/Contents/MacOS/claudepot-cli-<triple>`, but the v0.0.8
