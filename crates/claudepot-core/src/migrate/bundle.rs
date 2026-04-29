@@ -17,13 +17,14 @@
 //!     fail this gate.
 //!   - `manifest.json` is self-verifying via a REQUIRED trailer line
 //!     (`# manifest-sha256: <hex>`). Missing trailer → IntegrityViolation.
-//!   - `.minisig` signature sidecar — optional, written when
-//!     `--sign KEYFILE` is used. Real implementation in `crypto.rs`
-//!     (sign_bundle / verify_bundle_signature). The current shape
-//!     signs the bundle bytes directly (bundle-bytes signature, not
-//!     manifest-sha256-only as suggested by §3.3). Documented as a
-//!     known deviation from the spec; either align via a follow-up
-//!     PR or update the spec to match the implementation.
+//!   - `<bundle>.manifest.minisig` signature sidecar — optional,
+//!     written when `--sign KEYFILE` is used. The signature is over
+//!     the canonical `manifest.json` bytes embedded in the tar
+//!     (body + the `# manifest-sha256: <hex>` trailer); the manifest
+//!     itself commits to every other bundle file via its inventory,
+//!     so signing the manifest bytes commits to the whole tree by
+//!     transitivity. See `crypto.rs` for the rationale and
+//!     `dev-docs/project-migrate-spec.md` §3.3 for the spec contract.
 //!
 //! Symlinks inside the bundle are forbidden — the reader rejects any
 //! entry whose typeflag is symlink, and any entry whose path contains
@@ -226,7 +227,19 @@ impl BundleWriter {
     /// post-hoc self-reference); the manifest's self-trailer covers
     /// the manifest, and the outer sidecar `<bundle>.sha256` covers
     /// the entire compressed file.
-    pub fn finalize(mut self, manifest: &BundleManifest) -> Result<PathBuf, MigrateError> {
+    ///
+    /// Returns `(final_path, manifest_bytes)` where `manifest_bytes`
+    /// is the exact byte sequence written into the tar's
+    /// `manifest.json` entry (body + `# manifest-sha256: <hex>`
+    /// trailer). The signing path uses these bytes directly so the
+    /// signature covers what the verifier will read out of the
+    /// bundle byte-for-byte; re-serializing on the export side
+    /// would risk drift between the signed bytes and the embedded
+    /// bytes.
+    pub fn finalize(
+        mut self,
+        manifest: &BundleManifest,
+    ) -> Result<(PathBuf, Vec<u8>), MigrateError> {
         // 1. Build manifest with self-trailer (sha256 of body).
         let manifest_json = serde_json::to_vec_pretty(manifest)
             .map_err(|e| MigrateError::Serialize(e.to_string()))?;
@@ -308,7 +321,7 @@ impl BundleWriter {
         )
         .map_err(MigrateError::from)?;
 
-        Ok(self.final_path)
+        Ok((self.final_path, manifest_with_trailer))
     }
 
     /// Abort the bundle write; remove the tempfile.
@@ -756,8 +769,13 @@ mod tests {
         let bundle_path = tmp.path().join("test.claudepot.tar.zst");
         let mut writer = BundleWriter::create(&bundle_path).unwrap();
         writer.append_bytes("hello.txt", b"world\n", 0o644).unwrap();
-        let final_path = writer.finalize(&fixture_manifest()).unwrap();
+        let (final_path, manifest_bytes) = writer.finalize(&fixture_manifest()).unwrap();
         assert_eq!(final_path, bundle_path);
+        // Returned manifest bytes must match what landed in the tar
+        // — the signing path relies on this equality.
+        let r_peek = BundleReader::open(&bundle_path).unwrap();
+        let on_disk = r_peek.read_entry("manifest.json").unwrap();
+        assert_eq!(manifest_bytes, on_disk);
         assert!(bundle_path.exists());
         assert!(sidecar_path_for(&bundle_path).exists());
 
