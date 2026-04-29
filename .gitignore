@@ -31,7 +31,13 @@ src-tauri/binaries/
 *.sw?
 typescript
 *.tsbuildinfo
-/scripts/
+# Local artisan scripts are excluded by default. Build-essential scripts
+# that produce committed artifacts (so future contributors can rebuild
+# them) are listed as exceptions below. Note: `!` re-inclusion only
+# works against `/scripts/*`, not `/scripts/` — git cannot re-include
+# a file once its parent directory is excluded.
+/scripts/*
+!/scripts/generate-menu-icons.sh
 dev-docs/
 
 # tdd-guardian generated artifacts
