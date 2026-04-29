@@ -6,10 +6,29 @@ Versioning scheme:
 - `0.1.x` — beta
 - `1.0.0+` — stable
 
-## 0.0.9 — alpha (unreleased)
+## 0.0.9 — alpha (2026-04-29)
 
 ### Added
 
+- **`claudepot --version`.** Prints `claudepot <semver>`. Wired via clap's
+  built-in `version` attribute against `CARGO_PKG_VERSION`, so the CLI's
+  reported version stays in lock-step with the workspace bump.
+- **Notification clicks route to where the work actually lives.**
+  Session notifications (errored / stuck / idle-done / card-emitted
+  Warn+) now bring forward the terminal or editor that's running
+  `claude`, not Claudepot. Implemented as a focus-event heuristic
+  with a 10 s TTL queue (the Tauri 2 desktop notification plugin
+  doesn't surface body-click events to JS, verified by reading
+  tauri-plugin-notification 2.3.3's `desktop.rs`). The new
+  `notification_activate_host_for_session` Tauri command walks the
+  session's process tree via sysinfo, matches the topmost ancestor
+  against a hardcoded macOS terminal/editor table (Terminal, iTerm2,
+  Alacritty, kitty, Ghostty, WezTerm, Hyper, Tabby, Warp, VS Code,
+  Cursor, Windsurf), and asks LaunchServices (`open -b`) to bring
+  it forward. Falls back to deep-linking the transcript inside
+  Claudepot when the host can't be resolved (SSH'd sessions,
+  daemonized runs, unknown bundles). Op-completion notifications
+  still focus Claudepot itself — those ARE about Claudepot's state.
 - **Activities → Cost — GUI surface for the local cost report.**
   New tab inside the Activities section (alongside Stream and
   Usage) showing the same per-project token + USD totals as the
@@ -54,6 +73,16 @@ Versioning scheme:
   notification class against denied permission no longer fails
   silently — the row spells out the current state and points to
   System Settings when reset is needed.
+
+### Fixed
+
+- **Same-basename projects no longer notify under identical titles.**
+  Two live sessions in `~/work/foo` and `~/personal/foo` used to
+  emit notifications whose titles both read `foo`, indistinguishable
+  in macOS Notification Center. The activity-notifications hook now
+  computes a per-render label map: pure basename when unique,
+  `parent/basename` when colliding, so the disambiguator only appears
+  where it actually matters.
 
 ### Changed
 
