@@ -809,11 +809,21 @@ fn apply_schema(db: &Connection) -> Result<(), ActivityIndexError> {
         );
 
         -- Idempotency: a re-fed JSONL line with the same uuid is a
-        -- no-op insert. Lines without a uuid (rare; pre-2.1 envelope
-        -- shapes) fall back to (session_path, byte_offset) which is
-        -- guaranteed unique within one file.
+        -- no-op insert. The unique key includes `kind` because a
+        -- single envelope can produce multiple cards (e.g. an
+        -- assistant message that emits both TextStreaming AND
+        -- AgentStranded). Audit fix for activity/index.rs:815: the
+        -- previous shape `(session_path, event_uuid)` dropped the
+        -- second card from any multi-card event. The new shape
+        -- `(session_path, event_uuid, kind)` accepts every distinct
+        -- (event, kind) pair while still rejecting genuine
+        -- duplicates from a re-feed of the same JSONL line.
+        --
+        -- Schema migration: existing databases land with the old
+        -- shape; `ensure_uniq_index_includes_kind()` runs after
+        -- `apply_schema` to drop and recreate when needed.
         CREATE UNIQUE INDEX IF NOT EXISTS uniq_activity_cards_uuid
-            ON activity_cards(session_path, event_uuid)
+            ON activity_cards(session_path, event_uuid, kind)
             WHERE event_uuid IS NOT NULL;
         CREATE UNIQUE INDEX IF NOT EXISTS uniq_activity_cards_offset
             ON activity_cards(session_path, byte_offset)
@@ -828,10 +838,41 @@ fn apply_schema(db: &Connection) -> Result<(), ActivityIndexError> {
         "#,
     )?;
     ensure_plugin_column(db)?;
+    ensure_uniq_index_includes_kind(db)?;
     db.execute_batch(
         "CREATE INDEX IF NOT EXISTS idx_activity_cards_plugin_ts \
          ON activity_cards(plugin, ts_ms DESC) WHERE plugin IS NOT NULL;",
     )?;
+    Ok(())
+}
+
+/// Migration helper: bring an old `uniq_activity_cards_uuid` index
+/// (shape `(session_path, event_uuid)`) up to the schema-2 shape
+/// `(session_path, event_uuid, kind)`. Read the existing index's
+/// column list and only recreate when it's the old shape, so this
+/// is idempotent on fresh DBs (the apply_schema CREATE already
+/// gives the new shape).
+fn ensure_uniq_index_includes_kind(db: &Connection) -> Result<(), ActivityIndexError> {
+    // SQLite reports indexed columns via PRAGMA index_info(<name>).
+    let mut cols = Vec::new();
+    {
+        let mut stmt = db.prepare("PRAGMA index_info(uniq_activity_cards_uuid)")?;
+        let rows = stmt.query_map([], |r| r.get::<_, String>(2))?;
+        for row in rows {
+            cols.push(row?);
+        }
+    }
+    // Old shape: 2 columns. New shape: 3 columns. If 0 → no
+    // index yet (apply_schema will create it directly). If 3 →
+    // already migrated.
+    if cols.len() == 2 {
+        db.execute_batch(
+            "DROP INDEX uniq_activity_cards_uuid; \
+             CREATE UNIQUE INDEX uniq_activity_cards_uuid \
+                 ON activity_cards(session_path, event_uuid, kind) \
+                 WHERE event_uuid IS NOT NULL;",
+        )?;
+    }
     Ok(())
 }
 

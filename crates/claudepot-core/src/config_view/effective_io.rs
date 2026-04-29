@@ -152,8 +152,22 @@ fn load_managed_composite(home: &Path) -> Option<Value> {
 /// MERGED settings.
 pub fn load_mcp_bundle(cwd: &Path, effective_settings: Value) -> McpSourceBundle {
     // Enterprise: ~/.claude/managed-mcp.json
+    //
+    // Audit fix for config_view/effective_io.rs:156 — drop entries
+    // whose value isn't an object before returning enterprise
+    // servers. A managed-mcp.json with malformed entries (e.g. a
+    // value that's a bare string or null) used to flow through to
+    // CC's startup gate, which then refused to launch with an
+    // enterprise-lockout error. Treating malformed entries as
+    // absent lets the rest of the bundle merge cleanly; the user
+    // can still see the missing entries in the GUI's effective-MCP
+    // view because they're omitted, and a later edit fixes the
+    // file without an outage.
     let home = claude_config_dir();
-    let enterprise = read_mcp_servers_obj(&home.join("managed-mcp.json"));
+    let enterprise = read_mcp_servers_obj(&home.join("managed-mcp.json"))
+        .into_iter()
+        .filter(|(_, v)| v.is_object())
+        .collect();
 
     // User: `mcpServers` from ~/.claude.json. The file lives as a
     // sibling of `~/.claude/`, NOT inside it — see
