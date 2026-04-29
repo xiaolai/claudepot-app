@@ -282,18 +282,23 @@ fn move_session_moves_subagent_and_remote_agent_subdirs() {
 
 #[cfg(unix)]
 #[test]
-fn move_session_preserves_non_cwd_fields_byte_exact() {
-    // The bar is intentionally high: a JSONL line with nested objects,
-    // arrays, unicode, and multiple non-cwd fields should come out
-    // the other side with ONLY the cwd string changed. The rewriter
-    // must not reorder keys, drop unknown fields, or re-escape.
+fn move_session_rewrites_top_level_cwd_and_preserves_fields() {
+    // Audit-fix-aligned (session_move_jsonl.rs:139): the rewrite is
+    // now a STRUCTURAL re-serialization rather than a substring
+    // splice — the previous shape could match a nested `cwd` key
+    // before the top-level one. Byte-exact preservation of non-cwd
+    // text is therefore no longer the contract; what we DO promise:
+    //
+    //   1. The top-level cwd is replaced with the new value.
+    //   2. Every other top-level field round-trips with its original
+    //      value (including nested objects, arrays, and unicode).
+    //   3. The output line still parses as valid JSON.
     let f = Fixture::new();
     let from = f.make_live_cwd("feat-x");
     let to = f.make_live_cwd("main");
     let sid = Uuid::new_v4();
     let from_s = from.to_string_lossy().to_string();
 
-    // Build a line by hand so we control byte order exactly.
     let line = format!(
         r#"{{"parentUuid":"abc","type":"user","cwd":"{from}","sessionId":"{sid}","message":{{"role":"user","content":[{{"type":"text","text":"héllo — «world»"}}]}},"timestamp":"2026-04-18T22:31:00Z"}}"#,
         from = from_s,
@@ -302,20 +307,21 @@ fn move_session_preserves_non_cwd_fields_byte_exact() {
     let slug = f.ensure_slug(&from);
     let path = slug.join(format!("{sid}.jsonl"));
     fs::write(&path, format!("{line}\n")).unwrap();
-    // Age past the live-session guard (the fixture helper is
-    // bypassed in this test, so we do it manually).
     f.set_mtime(&path, SystemTime::now() - Duration::from_secs(3600));
 
-    move_session(f.config_dir(), sid, &from, &to, MoveSessionOpts::default())
-        .expect("byte-fidelity move");
+    move_session(f.config_dir(), sid, &from, &to, MoveSessionOpts::default()).expect("move");
 
     let moved = f.slug_dir(&to).join(format!("{sid}.jsonl"));
     let got = fs::read_to_string(&moved).unwrap();
-    let expected = line.replace(&from_s, &to.to_string_lossy());
+    let parsed: serde_json::Value =
+        serde_json::from_str(got.trim_end_matches('\n')).expect("output is valid JSON");
+    assert_eq!(parsed["cwd"].as_str(), Some(to.to_string_lossy().as_ref()));
+    assert_eq!(parsed["parentUuid"].as_str(), Some("abc"));
+    assert_eq!(parsed["sessionId"].as_str(), Some(sid.to_string().as_str()));
+    assert_eq!(parsed["timestamp"].as_str(), Some("2026-04-18T22:31:00Z"));
     assert_eq!(
-        got.trim_end_matches('\n'),
-        expected,
-        "non-cwd fields must be preserved byte-for-byte"
+        parsed["message"]["content"][0]["text"].as_str(),
+        Some("héllo — «world»")
     );
 }
 

@@ -200,14 +200,25 @@ pub fn move_session_with_progress(
     // a rollback that wipes `to_sub` could destroy unrelated user data
     // that lived there before we ever started.
     let to_sub_preexisted = to_sub.exists();
+    // Audit fix for session_move.rs:276 — track whether S2 actually
+    // moved sidecars from `from_sub` to `to_sub`, so a rollback after
+    // S3/S4 failure can move them BACK instead of deleting `to_sub`
+    // (which destroyed user data in the previous shape).
+    let mut s2_moved_sidecars = false;
     let result: Result<(usize, usize, usize, usize, u8), (MoveSessionError, &'static str)> =
         (|| {
             // Phase S2: sibling per-session dir (subagents/, remote-agents/).
             let (subagent_files_moved, remote_agent_files_moved) = if from_sub.is_dir() {
-                move_session_subdir_with_progress(&from_sub, &to_sub, &mut |done, total| {
-                    sink.sub_progress("S2", done, total)
-                })
-                .map_err(|e| (e, "S2"))?
+                let moved = move_session_subdir_with_progress(
+                    &from_sub,
+                    &to_sub,
+                    &mut |done, total| sink.sub_progress("S2", done, total),
+                )
+                .map_err(|e| (e, "S2"))?;
+                if moved.0 > 0 || moved.1 > 0 {
+                    s2_moved_sidecars = true;
+                }
+                moved
             } else {
                 (0, 0)
             };
@@ -267,13 +278,28 @@ pub fn move_session_with_progress(
             // the file we just renamed in is owned by us), the original
             // error wins because that's what the caller asked about.
             let _ = fs::remove_file(&to_session);
-            // Best-effort sidecar rollback. Only wipe `to_sub` if we
-            // *created* it during this attempt — otherwise we'd
-            // destroy whatever pre-existing sidecars the user already
-            // had under that session id. If sidecars were partially
-            // copied into a freshly-created `to_sub`, this sweep keeps
-            // a retry from tripping the `SidecarCollision` guard.
-            if !to_sub_preexisted {
+            // Audit fix for session_move.rs:276 — sidecar rollback.
+            // If S2 already MOVED sidecar files from from_sub into
+            // to_sub, deleting to_sub now would destroy user data
+            // that the source no longer carries. Move them back to
+            // from_sub instead. If S2 never moved anything (no
+            // from_sub originally, or S2 failed itself before any
+            // file moved), then either to_sub is empty or it
+            // pre-existed and we leave it alone.
+            if s2_moved_sidecars {
+                // Best-effort: re-move sidecars back to source. If
+                // this fails the user will have the contents under
+                // to_sub instead of from_sub — surfaceable as a
+                // post-rollback inventory check, but no data loss.
+                let _ = fs::create_dir_all(&from_sub);
+                let _ = move_session_subdir_with_progress(&to_sub, &from_sub, &mut |_, _| {});
+                // After the back-move, to_sub should be empty;
+                // remove the now-empty dir we created.
+                let _ = fs::remove_dir(&to_sub);
+            } else if !to_sub_preexisted {
+                // S2 never moved data into to_sub, but we may have
+                // created it as a side effect. Remove only the
+                // freshly-created empty dir; pre-existing dirs stay.
                 let _ = fs::remove_dir_all(&to_sub);
             }
             return Err(e);

@@ -119,46 +119,38 @@ fn rewrite_cwd_in_line(
     old_kv_compact: &str,
     new_kv_compact: &str,
 ) -> Result<(String, bool), MoveSessionError> {
-    // Fast reject: parse first, confirm it's an object with the matching
-    // cwd. This guards against a needle appearing inside user-quoted
-    // content (message text, tool input, etc.).
-    let parsed: serde_json::Value = match serde_json::from_str(line) {
+    // Audit fix for session_move_jsonl.rs:139 — structural rewrite
+    // instead of substring `find()`. The previous shape located the
+    // FIRST occurrence of `"cwd":"<from>"` in the raw line, but CC
+    // session JSONL nests sub-objects (e.g. `meta`, `tool_input`,
+    // tool result fragments) that can carry their own `cwd` key.
+    // serde-emitted JSON serializes keys in insertion order, so a
+    // nested cwd can appear in the byte stream BEFORE the top-level
+    // cwd — find() would then rewrite the wrong field. We now parse
+    // the line, mutate `obj["cwd"]` directly, and re-serialize,
+    // which guarantees the rewrite hits the structural top-level
+    // field regardless of ordering.
+    let _ = old_kv_compact; // legacy hint kept for caller compatibility
+    let _ = new_kv_compact;
+    let mut parsed: serde_json::Value = match serde_json::from_str(line) {
         Ok(v) => v,
         Err(_) => return Ok((line.to_string(), false)),
     };
-    let Some(obj) = parsed.as_object() else {
+    let Some(obj) = parsed.as_object_mut() else {
         return Ok((line.to_string(), false));
     };
-    let Some(cwd_str) = obj.get("cwd").and_then(|v| v.as_str()) else {
+    let Some(cwd_val) = obj.get("cwd").and_then(|v| v.as_str()) else {
         return Ok((line.to_string(), false));
     };
-    if cwd_str != from_cwd {
+    if cwd_val != from_cwd {
         return Ok((line.to_string(), false));
     }
-    // Try compact form first (CC's default).
-    if let Some(idx) = line.find(old_kv_compact) {
-        let mut out = String::with_capacity(line.len() + new_kv_compact.len());
-        out.push_str(&line[..idx]);
-        out.push_str(new_kv_compact);
-        out.push_str(&line[idx + old_kv_compact.len()..]);
-        return Ok((out, true));
-    }
-    // Spaced form fallback (`"cwd": "…"`).
-    let spaced_old = format!(r#""cwd": {}"#, encode_json_string(from_cwd)?);
-    // Recover the raw target value from the precomputed compact kv
-    // (`"cwd":"<escaped>"`) — parse the value side after the colon.
-    let to_value = compact_kv_value(new_kv_compact).unwrap_or_default();
-    let spaced_new = format!(r#""cwd": {}"#, encode_json_string(&to_value)?);
-    if let Some(idx) = line.find(&spaced_old) {
-        let mut out = String::with_capacity(line.len() + spaced_new.len());
-        out.push_str(&line[..idx]);
-        out.push_str(&spaced_new);
-        out.push_str(&line[idx + spaced_old.len()..]);
-        return Ok((out, true));
-    }
-    // Unusual whitespace we don't recognize — parse validated but splice
-    // failed. Leave the line alone rather than risk a wrong rewrite.
-    Ok((line.to_string(), false))
+    let to_cwd = compact_kv_value(new_kv_compact).unwrap_or_default();
+    obj.insert("cwd".to_string(), serde_json::Value::String(to_cwd));
+    let out = serde_json::to_string(&parsed).map_err(|e| {
+        MoveSessionError::Io(std::io::Error::other(format!("re-serialize cwd line: {e}")))
+    })?;
+    Ok((out, true))
 }
 
 /// Parse a `"key":"<escaped>"` fragment and return the raw string value.
@@ -258,22 +250,34 @@ fn process_history_line(
     let sid_matches = obj.get("sessionId").and_then(|v| v.as_str()) == Some(sid_str);
 
     if project_matches && sid_matches {
-        if let Some(idx) = line.find(old_kv) {
-            let mut out = String::with_capacity(line.len() + new_kv.len());
-            out.push_str(&line[..idx]);
-            out.push_str(new_kv);
-            out.push_str(&line[idx + old_kv.len()..]);
-            writeln!(tmp, "{out}")?;
-            *rewritten += 1;
-            return Ok(());
-        }
-        let old_spaced = format!(r#""project": {}"#, encode_json_string(from_cwd)?);
-        let new_spaced = format!(r#""project": {}"#, encode_json_string(to_cwd)?);
-        if let Some(idx) = line.find(&old_spaced) {
-            let mut out = String::with_capacity(line.len() + new_spaced.len());
-            out.push_str(&line[..idx]);
-            out.push_str(&new_spaced);
-            out.push_str(&line[idx + old_spaced.len()..]);
+        // Audit fix for session_move_jsonl.rs:261 — structural
+        // splice instead of `find()`. Same rationale as the cwd
+        // path: nested `project` keys (e.g. inside a `meta` block
+        // recorded by some CC versions) can appear before the
+        // top-level project in serialized order.
+        let _ = old_kv;
+        let _ = new_kv;
+        // Re-parse mutably so we can hand-modify obj["project"].
+        // The earlier parse used `as_object()` (immutable); we
+        // re-parse here rather than thread a mutable view through
+        // the helper signature.
+        let mut mutable: serde_json::Value = match serde_json::from_str(line) {
+            Ok(v) => v,
+            Err(_) => {
+                writeln!(tmp, "{line}")?;
+                return Ok(());
+            }
+        };
+        if let Some(m) = mutable.as_object_mut() {
+            m.insert(
+                "project".to_string(),
+                serde_json::Value::String(to_cwd.to_string()),
+            );
+            let out = serde_json::to_string(&mutable).map_err(|e| {
+                MoveSessionError::Io(std::io::Error::other(format!(
+                    "re-serialize project line: {e}"
+                )))
+            })?;
             writeln!(tmp, "{out}")?;
             *rewritten += 1;
             return Ok(());
@@ -392,18 +396,26 @@ mod jsonl_tests {
     }
 
     #[test]
-    fn stream_rewrite_spaced_form_fallback() {
+    fn stream_rewrite_handles_spaced_form() {
+        // Audit-fix-aligned (session_move_jsonl.rs:139): the rewrite
+        // is now structural, so the input's whitespace/key order
+        // doesn't matter — we just assert the top-level cwd was
+        // replaced and the output remains valid JSON. The previous
+        // test asserted byte-level "compact form fallback"; that
+        // guarantee was tied to substring splicing and is gone with
+        // the structural rewrite.
         let dir = tempdir().unwrap();
         let src = dir.path().join("src.jsonl");
         let dst = dir.path().join("dst.jsonl");
-        // Simulated writer with pretty spacing (uncommon but valid).
         write(&src, "{\"cwd\": \"/tmp/old\", \"m\": \"y\"}\n");
 
         let n = stream_rewrite_jsonl(&src, &dst, FROM_CWD, TO_CWD).unwrap();
         assert_eq!(n, 1);
 
         let out = fs::read_to_string(&dst).unwrap();
-        assert!(out.contains(r#""cwd": "/tmp/new""#));
+        let parsed: serde_json::Value = serde_json::from_str(out.trim()).unwrap();
+        assert_eq!(parsed["cwd"].as_str(), Some("/tmp/new"));
+        assert_eq!(parsed["m"].as_str(), Some("y"));
     }
 
     #[test]
