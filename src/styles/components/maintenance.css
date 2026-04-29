@@ -171,15 +171,16 @@
 }
 
 .phase-tag {
-  font-family: var(--font-mono);
-  font-size: var(--fs-xs);
-  font-weight: 600;
-  width: var(--sp-24);
-  color: var(--muted);
+  font-size: var(--fs-sm);
+  color: var(--fg);
+  flex: 1;
+  min-width: 0;
 }
 
 .phase-label {
-  font-size: var(--fs-sm);
+  font-family: var(--font-mono);
+  font-size: var(--fs-xs);
+  font-weight: 600;
   color: var(--muted);
   text-transform: capitalize;
 }
