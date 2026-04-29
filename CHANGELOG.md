@@ -8,6 +8,90 @@ Versioning scheme:
 
 ## 0.0.9 — alpha (unreleased)
 
+### Added
+
+- **OS notification when a long operation finishes.** New
+  `Alert when long operations complete` toggle under
+  Settings → Activity → Notifications. When the main window is
+  unfocused, verify-all, project rename, session prune/slim/share/move,
+  account login/register, clean projects, and automation runs all post
+  a system-level notification on completion. The single `cp-op-terminal`
+  channel emitted from `ops::emit_terminal` is the source — every op
+  type funnels through one place, so future ops light up the toggle for
+  free.
+- **Tray reflects alerting sessions.** macOS shows a `• N` badge next
+  to the menubar icon when sessions are errored or stuck; every
+  platform receives a tooltip suffix (`⚠ N alerting sessions`). The
+  count survives full menu rebuilds (account adds, syncs, etc.) so a
+  tray-only user has a persistent signal instead of just transient OS
+  toasts. Click the tray icon → existing menu — no extra UI.
+- **Notification permission status in Settings.** The Notifications
+  group now opens with the OS permission state (`Granted`, `Denied`,
+  `Not requested`) and a Request button when applicable. Toggling a
+  notification class against denied permission no longer fails
+  silently — the row spells out the current state and points to
+  System Settings when reset is needed.
+
+### Changed
+
+- **OS notifications respect window focus.** When Claudepot is the
+  foreground window, OS toasts are suppressed in favour of the in-app
+  signal that already shows the same state (errored row, banner,
+  running-ops chip). Blurred windows still receive every alert. Pass
+  `ignoreFocus: true` from a fatal-class call site (auth-rejected,
+  keychain-locked) to bypass the gate; nothing in 0.0.9 uses it yet
+  but the option is reserved.
+- **Unified notification coalescing.** Three different per-hook
+  rate-limit policies (1-per-60s, 3-in-60s-then-summary, no
+  coalescing) were folded into one shared token bucket on
+  `dedupeKey` (default 3 dispatches per 60s window per key). Activity
+  alerts, activity cards, and op-completion all consume it.
+  Eviction sweeps run on every dispatch so single-shot keys
+  (`op:<uuid>`) don't accumulate.
+- **Error toasts stay until dismissed.** `kind: "error"` toasts are
+  sticky by default — they carry diagnostic copy worth screenshotting
+  or quoting into a bug report, and a 10 s auto-dismiss was the wrong
+  default for that role. The close button + dedupeKey bound
+  accumulation; transient errors can still pass an explicit
+  `durationMs` to opt out of stickiness. Info toasts continue to
+  auto-dismiss after 10 s.
+- **OS-side notification grouping.** Each dispatch now passes a
+  `group` value through to the OS — macOS reads it as `threadId` so
+  related notifications stack into one expandable banner instead of
+  five lookalikes. Hooks group by session (`session:<sid>`), full
+  cwd (`project:<cwd>` — full path so two projects with the same
+  basename don't collide), or op kind (`op:<kind>`). A
+  `sound: "default"` is also forwarded so macOS plays the system
+  chime. Linux libnotify ignores both fields gracefully.
+- **Warning-severity banners announce as alerts.** The
+  `StatusIssuesBanner` previously rendered warnings with `role="status"`
+  — politely-announced to screen readers — while the visual styling
+  matched errors. Severity above `info` now uses `role="alert"` so
+  AT users hear the same urgency sighted users see.
+- **Snoozed banners auto-clear when their condition resolves.** The
+  24 h snooze used to persist even after the underlying drift / sync
+  error went away, which masked re-occurrences against a stale timer.
+  The shell now drops snooze entries when their issue id leaves the
+  live set, including a first-mount reconciliation pass against the
+  persisted store so a condition that resolves while the app is
+  closed doesn't carry a silent snooze into the next launch.
+- **`preferences_set_notifications` no longer blocks the IPC worker
+  on disk fsync.** Mirrors the spawn_blocking pattern from
+  `preferences_set_activity` — the std::sync mutex guard is dropped
+  before the JSON write is handed to a blocking task. Rapid
+  toggle-mashing no longer makes other prefs reads contend with the
+  write.
+
+### Removed
+
+- **`notify_on_spend_usd` preference.** The pref was persisted, the
+  Settings UI shipped an input for it, and the activity hook read it
+  as a permission gate — but no detector ever fired a notification
+  when a session crossed the threshold. The pricing module needed to
+  expose per-session running spend before this could land
+  honestly. Removed so users no longer set $5 and get nothing;
+  serde-default keeps existing `preferences.json` files compatible.
+
 ### Fixed
 
 - **macOS Homebrew cask install.** The cask symlinks
