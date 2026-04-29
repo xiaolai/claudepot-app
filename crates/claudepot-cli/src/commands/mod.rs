@@ -8,3 +8,4 @@ pub mod project;
 pub mod project_migrate;
 pub mod session;
 pub mod status;
+pub mod usage;
