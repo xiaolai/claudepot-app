@@ -180,6 +180,14 @@
   --content-cap-sm:        400px;
   --content-cap-md:        640px;
   --content-cap-lg:        820px;   /* wide reading column for transcripts */
+  /* Full-viewport height. `dvh` (dynamic viewport height) over `vh`
+     because `100vh` overflows on iOS Safari when the address bar
+     collapses. Tauri webviews don't have collapsing chrome, so the
+     two are equivalent in production — `dvh` is kept as the safer
+     default and so a future browser-preview workflow stays correct.
+     Used by the app shell's outermost container in `App.tsx` and
+     by `.app-layout` in `base.css`. */
+  --viewport-h-full:       100dvh;
   --filter-input-width:    300px;
   --filter-input-min:      160px;   /* shrink floor for the Sessions/Projects name-filter input */
   --input-width-compact:    80px;   /* short number inputs (Activity stuck-minutes, spend-$) */

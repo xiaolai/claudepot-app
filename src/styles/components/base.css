@@ -85,7 +85,7 @@ body {
 
 .app-layout {
   display: flex;
-  height: 100vh;
+  height: var(--viewport-h-full);
   overflow: hidden;
   position: relative;
   /* Hairline along the top of the webview — reads as the native title
