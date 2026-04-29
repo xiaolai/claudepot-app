@@ -1,9 +1,4 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import {
-  isPermissionGranted,
-  requestPermission,
-  sendNotification,
-} from "@tauri-apps/plugin-notification";
 import type { NfIcon } from "../icons";
 import { api } from "../api";
 import { Button } from "../components/primitives/Button";
@@ -15,6 +10,13 @@ import { useTheme, type ThemeMode } from "../hooks/useTheme";
 import { useAppState } from "../providers/AppStateProvider";
 import { useUpdater, type CheckFrequency } from "../providers/UpdateProvider";
 import { toastError } from "../lib/toastError";
+import {
+  dispatchOsNotification,
+  getPermissionStatus,
+  requestNotificationPermission,
+  subscribePermissionStatus,
+  type PermissionStatus,
+} from "../lib/notify";
 import { NF } from "../icons";
 import { ScreenHeader } from "../shell/ScreenHeader";
 import { ProtectedPathsPane } from "./settings/ProtectedPathsPane";
@@ -1175,7 +1177,7 @@ function ActivityPane({
   const [notifyError, setNotifyError] = useState(false);
   const [notifyIdleDone, setNotifyIdleDone] = useState(false);
   const [notifyStuckMin, setNotifyStuckMin] = useState<number | null>(null);
-  const [notifySpendUsd, setNotifySpendUsd] = useState<number | null>(null);
+  const [notifyOpDone, setNotifyOpDone] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -1188,7 +1190,7 @@ function ActivityPane({
         setNotifyError(p.notify_on_error);
         setNotifyIdleDone(p.notify_on_idle_done);
         setNotifyStuckMin(p.notify_on_stuck_minutes);
-        setNotifySpendUsd(p.notify_on_spend_usd);
+        setNotifyOpDone(p.notify_on_op_done);
         setLoaded(true);
       })
       .catch((e) => {
@@ -1244,7 +1246,7 @@ function ActivityPane({
 
   const setNotifyBool = useCallback(
     async (
-      key: "onError" | "onIdleDone",
+      key: "onError" | "onIdleDone" | "onOpDone",
       setter: (v: boolean) => void,
       prev: boolean,
       next: boolean,
@@ -1281,27 +1283,6 @@ function ActivityPane({
     [notifyStuckMin, pushToast],
   );
 
-  const setSpendUsd = useCallback(
-    async (raw: string) => {
-      const parsed = raw === "" ? null : Number(raw);
-      const normalized =
-        parsed !== null && Number.isFinite(parsed) && parsed > 0
-          ? parsed
-          : null;
-      const prev = notifySpendUsd;
-      setNotifySpendUsd(normalized);
-      try {
-        await api.preferencesSetNotifications({
-          onSpendUsd: normalized,
-        });
-      } catch (e) {
-        setNotifySpendUsd(prev);
-        pushToast("error", `Save failed: ${e}`);
-      }
-    },
-    [notifySpendUsd, pushToast],
-  );
-
   if (!loaded) {
     return (
       <div style={{ color: "var(--fg-faint)", fontSize: "var(--fs-sm)" }}>
@@ -1330,7 +1311,8 @@ function ActivityPane({
         </Row>
       </SettingsGroup>
 
-      <SettingsGroup desc="Toast alerts when a live session crosses one of these thresholds. One per session per minute, hard-capped. All default off.">
+      <SettingsGroup desc="OS notifications when a live session or long-running operation crosses one of these thresholds. All default off; OS notifications only fire when the Claudepot window is unfocused.">
+        <NotificationPermissionRow pushToast={pushToast} />
         <Row
           label="Alert on error burst"
           hint="At least two tool results with is_error=true inside a 60-second window."
@@ -1379,6 +1361,22 @@ function ActivityPane({
           />
         </Row>
         <Row
+          label="Alert when long operations complete"
+          hint="Verify-all, project rename, session prune/slim/share/move, account login, or clean projects — fires an OS notification when any of these terminate while the window is unfocused."
+        >
+          <Toggle
+            on={notifyOpDone}
+            onChange={(next) =>
+              setNotifyBool(
+                "onOpDone",
+                setNotifyOpDone,
+                notifyOpDone,
+                next,
+              )
+            }
+          />
+        </Row>
+        <Row
           label="Send test notification"
           hint="Fire a sample OS notification to verify permissions and that the runtime path is wired. Doesn't toggle any preference."
         >
@@ -1386,22 +1384,37 @@ function ActivityPane({
             variant="ghost"
             onClick={async () => {
               try {
-                const granted = await isPermissionGranted();
-                if (!granted) {
-                  const perm = await requestPermission();
-                  if (perm !== "granted") {
-                    pushToast(
-                      "error",
-                      "OS notification permission denied. Check System Settings.",
-                    );
-                    return;
-                  }
+                const ok = await dispatchOsNotification(
+                  "Claudepot test",
+                  "If you see this, notifications are working.",
+                  { ignoreFocus: true },
+                );
+                if (ok) {
+                  pushToast("info", "Test notification sent.");
+                  return;
                 }
-                sendNotification({
-                  title: "Claudepot test",
-                  body: "If you see this, notifications are working.",
-                });
-                pushToast("info", "Test notification sent.");
+                // `dispatchOsNotification` returns false for several
+                // reasons besides denial — probe failure (Tauri
+                // plugin not ready), unknown state, or a swallowed
+                // sendNotification throw. Read the live status to
+                // give the user the right remediation copy.
+                const status = getPermissionStatus();
+                if (status === "denied") {
+                  pushToast(
+                    "error",
+                    "OS notification permission denied. Open System Settings to re-enable.",
+                  );
+                } else if (status === "not-requested") {
+                  pushToast(
+                    "info",
+                    "Notification permission was not granted. Click Request to retry.",
+                  );
+                } else {
+                  pushToast(
+                    "error",
+                    "Couldn't reach the OS notification system. Try again, or check that Claudepot has Notification permission in System Settings.",
+                  );
+                }
               } catch (e) {
                 const msg = e instanceof Error ? e.message : String(e);
                 pushToast("error", `Couldn't send notification: ${msg}`);
@@ -1411,28 +1424,74 @@ function ActivityPane({
             Send test
           </Button>
         </Row>
-        <Row
-          label="Alert on spend"
-          hint="Empty = off. Dollar amount to alert at when a session exceeds that cumulative spend. Requires the pricing module (ships with estimated rates for Opus / Sonnet / Haiku 4.x)."
-        >
-          <input
-            type="number"
-            min="0.01"
-            step="0.01"
-            inputMode="decimal"
-            placeholder="off"
-            value={notifySpendUsd ?? ""}
-            onChange={(e) => setSpendUsd(e.target.value)}
-            style={{
-              ...selectStyle,
-              width: "var(--input-width-compact)",
-              textAlign: "right",
-              fontVariantNumeric: "tabular-nums",
-            }}
-          />
-        </Row>
       </SettingsGroup>
     </>
+  );
+}
+
+/* ──────────────────────────────────────────────────────────── */
+/*               Notification permission status row             */
+/* ──────────────────────────────────────────────────────────── */
+
+/**
+ * Surfaces the current OS notification permission state so a user
+ * who toggles a notify_* preference with denied permission isn't
+ * silently dropped. Subscribes to the singleton in `lib/notify.ts`
+ * so the row updates in real time after a Request click.
+ */
+function NotificationPermissionRow({
+  pushToast,
+}: {
+  pushToast: (k: "info" | "error", t: string) => void;
+}) {
+  const [status, setStatus] = useState<PermissionStatus>(() =>
+    getPermissionStatus(),
+  );
+
+  useEffect(() => subscribePermissionStatus(setStatus), []);
+
+  const label = "OS notification permission";
+  let hint: string;
+  switch (status) {
+    case "granted":
+      hint = "Granted. Claudepot can post system-level alerts when the window is unfocused.";
+      break;
+    case "denied":
+      hint = "Denied. Re-enable Claudepot in System Settings → Notifications to receive alerts.";
+      break;
+    case "not-requested":
+      hint = "Not yet requested. Click Request to enable system-level alerts.";
+      break;
+    case "unknown":
+    default:
+      hint = "Probing OS permission state…";
+      break;
+  }
+
+  return (
+    <Row label={label} hint={hint}>
+      {status === "granted" && <Tag>Granted</Tag>}
+      {status === "denied" && <Tag tone="danger">Denied</Tag>}
+      {status === "not-requested" && (
+        <Button
+          variant="ghost"
+          onClick={async () => {
+            const next = await requestNotificationPermission();
+            if (next === "granted") {
+              pushToast("info", "Notifications enabled.");
+            } else if (next === "denied") {
+              pushToast(
+                "error",
+                "Notification permission denied. Open System Settings to re-enable.",
+              );
+            }
+          }}
+        >
+          Request
+        </Button>
+      )}
+      {status === "unknown" && <Tag tone="ghost">Unknown</Tag>}
+    </Row>
   );
 }
 

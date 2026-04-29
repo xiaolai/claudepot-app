@@ -164,14 +164,21 @@ export function useToasts() {
         },
       ]);
       // Auto-dismiss policy:
-      //   onUndo → short (undoMs, default 3 s) — undo is an action
-      //     commit timer, not a notification.
-      //   otherwise → durationMs (default 10 s) for BOTH info and
-      //     error. Errors used to stick forever, which hid real state
-      //     behind a banner the user forgot about; 10 s is long enough
-      //     to read and still auto-heals if the user steps away.
-      //     Callers needing persistence can pass `Infinity`.
-      const delay = onUndo ? opts?.undoMs ?? 3000 : opts?.durationMs ?? 10_000;
+      //   onUndo  → short (undoMs, default 3 s) — undo is an action
+      //             commit timer, not a notification.
+      //   error   → sticky by default (Infinity). Errors carry copy
+      //             worth screenshotting / dictating into a bug
+      //             report; the auto-dismiss is the wrong default
+      //             when the message is the diagnostic. The toast
+      //             carries a close button + dedupeKey, so accidental
+      //             accumulation is bounded by user dismissal.
+      //   info    → durationMs (default 10 s) — short enough that
+      //             stale acknowledgements don't pile up.
+      //   Callers can override with explicit `durationMs` (Infinity
+      //   for sticky, a number for finite).
+      const delay = onUndo
+        ? opts?.undoMs ?? 3000
+        : opts?.durationMs ?? (kind === "error" ? Infinity : 10_000);
       if (Number.isFinite(delay)) {
         const timer = setTimeout(() => {
           // If the user never clicked Undo, run the commit callback

@@ -191,9 +191,24 @@ pub async fn rebuild(app: &AppHandle) -> Result<(), String> {
     if let Some(tray) = app.tray_by_id("main") {
         tray.set_menu(Some(menu))
             .map_err(|e| format!("set menu: {e}"))?;
-        let tooltip = build_tooltip(cli_active, desktop_active);
+        // Pull the live alert count so the tooltip + macOS title text
+        // survive a full rebuild (account-list change shouldn't reset
+        // the alert badge to 0). State may be unmanaged in test
+        // harness builds — fall through with 0.
+        let alert_count = app
+            .try_state::<crate::state::TrayAlertState>()
+            .map(|s| s.get())
+            .unwrap_or(0);
+        let tooltip = compose_tooltip(cli_active, desktop_active, alert_count);
         tray.set_tooltip(Some(&tooltip))
             .map_err(|e| format!("tooltip: {e}"))?;
+        // macOS shows the title next to the menu-bar icon; Linux
+        // SNI implementations vary (GNOME hides it; KDE shows it);
+        // Windows ignores it. Calling unconditionally is safe — the
+        // platforms that don't render text titles are no-ops.
+        let title = compose_title(alert_count);
+        tray.set_title(title.as_deref())
+            .map_err(|e| format!("title: {e}"))?;
     } else {
         // Reaching this branch means the "main" tray was never
         // registered (setup hook failure or feature flag drift).
@@ -203,6 +218,130 @@ pub async fn rebuild(app: &AppHandle) -> Result<(), String> {
     }
 
     Ok(())
+}
+
+/// Tray-only fast path for alert-count flips. The full rebuild touches
+/// the usage cache + builds every submenu; that's too expensive for
+/// every transition into / out of an errored or stuck session.
+///
+/// Updates state, then patches title (macOS) and tooltip (everywhere)
+/// without touching the menu. Errors out silently if the tray isn't
+/// registered yet — the next full rebuild will pick up the new count
+/// from `TrayAlertState`.
+pub fn refresh_alert_chrome(app: &AppHandle) {
+    let alert_count = app
+        .try_state::<crate::state::TrayAlertState>()
+        .map(|s| s.get())
+        .unwrap_or(0);
+    let Some(tray) = app.tray_by_id("main") else {
+        return;
+    };
+    // Recompute the tooltip with the same identity inputs the menu
+    // build uses — but skip the per-account list lookup; this path
+    // runs frequently and a stale tooltip is fine until the next
+    // rebuild lands.
+    let title = compose_title(alert_count);
+    if let Err(e) = tray.set_title(title.as_deref()) {
+        tracing::warn!("tray::refresh_alert_chrome: set_title failed: {e}");
+    }
+    // For the tooltip, we need the active accounts; use the existing
+    // build by re-doing the (cheap) store lookup. Tray rebuilds run on
+    // the same hot path; this duplicates a few sync calls but stays
+    // well under a millisecond on the typical 0–10 account list.
+    if let Ok(store) = crate::commands::open_store() {
+        if let Ok(accounts) = store.list() {
+            let summaries: Vec<crate::dto::AccountSummary> = accounts
+                .iter()
+                .map(crate::dto::AccountSummary::from)
+                .collect();
+            let cli = summaries.iter().find(|a| a.is_cli_active);
+            let desktop = summaries.iter().find(|a| a.is_desktop_active);
+            let tooltip = compose_tooltip(cli, desktop, alert_count);
+            if let Err(e) = tray.set_tooltip(Some(&tooltip)) {
+                tracing::warn!("tray::refresh_alert_chrome: set_tooltip failed: {e}");
+            }
+        }
+    }
+}
+
+/// Macros-y title text: `None` when no alerts (empty title preserves
+/// the icon-only menubar look); a short count otherwise.
+///
+/// Uses a leading bullet rather than a glyph so AppKit's monospace-y
+/// font hinting renders cleanly without depending on a system emoji
+/// font that may differ across releases. The bullet is U+2022 — one
+/// codepoint, one cell, no width drift.
+fn compose_title(alert_count: u32) -> Option<String> {
+    if alert_count == 0 {
+        None
+    } else {
+        Some(format!("• {alert_count}"))
+    }
+}
+
+/// Compose the tray tooltip with optional alert annotation. Falls back
+/// to `build_tooltip` when alerts == 0 so existing test fixtures keep
+/// matching byte-for-byte.
+fn compose_tooltip(
+    cli_active: Option<&AccountSummary>,
+    desktop_active: Option<&AccountSummary>,
+    alert_count: u32,
+) -> String {
+    let base = build_tooltip(cli_active, desktop_active);
+    if alert_count == 0 {
+        base
+    } else {
+        let suffix = if alert_count == 1 {
+            "1 alerting session".to_string()
+        } else {
+            format!("{alert_count} alerting sessions")
+        };
+        format!("{base}\n⚠ {suffix}")
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn compose_title_zero_alerts_returns_none() {
+        assert_eq!(compose_title(0), None);
+    }
+
+    #[test]
+    fn compose_title_one_alert_returns_count() {
+        assert_eq!(compose_title(1), Some("• 1".to_string()));
+    }
+
+    #[test]
+    fn compose_title_many_alerts_returns_count() {
+        assert_eq!(compose_title(42), Some("• 42".to_string()));
+    }
+
+    #[test]
+    fn compose_tooltip_zero_alerts_matches_build_tooltip() {
+        // Byte-for-byte identical when alerts == 0 so the no-alert
+        // path doesn't drift from the existing identity-only tooltip.
+        let plain = build_tooltip(None, None);
+        let composed = compose_tooltip(None, None, 0);
+        assert_eq!(plain, composed);
+    }
+
+    #[test]
+    fn compose_tooltip_with_alerts_appends_suffix() {
+        let composed = compose_tooltip(None, None, 3);
+        assert!(composed.starts_with("Claudepot"));
+        assert!(composed.contains("3 alerting sessions"));
+        assert!(composed.contains('⚠'));
+    }
+
+    #[test]
+    fn compose_tooltip_one_alert_singular() {
+        let composed = compose_tooltip(None, None, 1);
+        assert!(composed.contains("1 alerting session"));
+        assert!(!composed.contains("sessions"));
+    }
 }
 
 

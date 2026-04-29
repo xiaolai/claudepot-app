@@ -72,7 +72,7 @@ function BannerRow({
 
   return (
     <div
-      role={issue.severity === "error" ? "alert" : "status"}
+      role={issue.severity === "info" ? "status" : "alert"}
       style={{
         display: "flex",
         alignItems: "flex-start",

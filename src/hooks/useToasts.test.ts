@@ -26,14 +26,32 @@ describe("useToasts — auto-dismiss policy", () => {
     expect(result.current.toasts).toHaveLength(0);
   });
 
-  it("auto-dismisses error toasts after 10 000 ms (previously sticky)", () => {
-    // Regression guard: before this change errors had no timer, which
-    // let a transient error linger across unrelated navigation.
+  it("error toasts are sticky by default", () => {
+    // Errors carry diagnostic copy worth screenshotting / dictating —
+    // auto-dismiss is the wrong default when the message IS the
+    // diagnostic. The toast still has a close button + dedupeKey;
+    // accidental accumulation is bounded by user dismissal. Callers
+    // can override with an explicit `durationMs` for transient
+    // errors that don't need to persist.
     const { result } = renderHook(() => useToasts());
     act(() => result.current.pushToast("error", "oops"));
     expect(result.current.toasts).toHaveLength(1);
 
-    act(() => vi.advanceTimersByTime(10_000));
+    // 60 s well past the 10 s info default — error stays.
+    act(() => vi.advanceTimersByTime(60_000));
+    expect(result.current.toasts).toHaveLength(1);
+  });
+
+  it("explicit durationMs overrides the sticky default for errors", () => {
+    // Regression guard for the override path: callers that DO want a
+    // transient error toast can still pass a finite duration.
+    const { result } = renderHook(() => useToasts());
+    act(() =>
+      result.current.pushToast("error", "transient", undefined, {
+        durationMs: 1_000,
+      }),
+    );
+    act(() => vi.advanceTimersByTime(1_000));
     act(() => vi.advanceTimersByTime(200));
     expect(result.current.toasts).toHaveLength(0);
   });
@@ -146,8 +164,17 @@ describe("useToasts — lastDismissed echo", () => {
   });
 
   it("preserves the kind so the status bar can pick a tone", () => {
+    // Error toasts are sticky, so we override durationMs to force
+    // an auto-dismiss and exercise the kind-preservation path. The
+    // status bar's echo segment renders error tone differently, so
+    // the kind tag travelling through the dismissal pipeline still
+    // matters even after the sticky-by-default change.
     const { result } = renderHook(() => useToasts());
-    act(() => result.current.pushToast("error", "oops"));
+    act(() =>
+      result.current.pushToast("error", "oops", undefined, {
+        durationMs: 10_000,
+      }),
+    );
     act(() => vi.advanceTimersByTime(10_200));
     expect(result.current.lastDismissed?.kind).toBe("error");
   });

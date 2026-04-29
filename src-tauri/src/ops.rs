@@ -432,8 +432,83 @@ impl ProgressSink for TauriProgressSink {
     }
 }
 
+/// Global terminal payload — one emission per op completion on the
+/// shared `cp-op-terminal` channel. The per-op `op-progress::<op_id>`
+/// channel still carries the same terminal `ProgressEvent` for any
+/// modal that's still subscribed; this sibling event is what
+/// notification-style consumers listen on (they don't know op_ids
+/// up-front, so a wildcard channel beats N targeted subscriptions).
+#[derive(Debug, Clone, Serialize)]
+pub struct OpTerminalEvent {
+    pub op_id: String,
+    pub kind: OpKind,
+    /// "complete" | "error" — overall op outcome, mirrors
+    /// `OpStatus::Complete` / `OpStatus::Error`.
+    pub status: String,
+    /// Human-readable summary suitable for an OS-notification body
+    /// ("Renamed proj-foo → proj-bar", "Verified 4 accounts", etc.).
+    /// Frontend can ignore it and build its own copy from `kind` if
+    /// it wants to localize.
+    pub label: String,
+    /// Truncated error message on failure, None on success. Already
+    /// stripped of sk-ant-* tokens upstream.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub error: Option<String>,
+}
+
+/// Build a one-line label from a `RunningOpInfo` snapshot. Mirrors the
+/// frontend `RunningOpsChip.labelFor` shape so the notification body
+/// reads like the chip popover. Lives backend-side so the global
+/// terminal event carries a self-contained payload — the frontend
+/// notification handler doesn't need to re-fetch op state.
+fn op_terminal_label(op: &RunningOpInfo) -> String {
+    let from = basename(&op.old_path);
+    let to = basename(&op.new_path);
+    match op.kind {
+        OpKind::CleanProjects => "Cleaned projects".to_string(),
+        OpKind::SessionPrune => "Pruned sessions".to_string(),
+        OpKind::SessionSlim => {
+            let f = if from.is_empty() { "session" } else { from };
+            format!("Slimmed {f}")
+        }
+        OpKind::SessionShare => "Shared session".to_string(),
+        OpKind::SessionMove => format!("Moved session {from} → {to}"),
+        OpKind::MoveProject => format!("Renamed {from} → {to}"),
+        OpKind::RepairResume => format!("Resumed {from} → {to}"),
+        OpKind::RepairRollback => format!("Rolled back {from} → {to}"),
+        OpKind::AccountLogin => "Account login".to_string(),
+        OpKind::AccountRegister => "Added account".to_string(),
+        OpKind::VerifyAll => match &op.verify_results {
+            Some(r) => format!("Verified {} account{}", r.total, if r.total == 1 { "" } else { "s" }),
+            None => "Verified accounts".to_string(),
+        },
+        OpKind::AutomationRun => "Automation run".to_string(),
+    }
+}
+
+fn basename(path: &str) -> &str {
+    if path.is_empty() {
+        return path;
+    }
+    let trimmed = path.trim_end_matches(['/', '\\']);
+    let idx = trimmed
+        .rfind(|c: char| c == '/' || c == '\\')
+        .map(|i| i + 1)
+        .unwrap_or(0);
+    &trimmed[idx..]
+}
+
 /// Emit the terminal event for an op. Call once, after the core
 /// function returns. `error` should be None on success.
+///
+/// Emits two events:
+///   1. The per-op `op-progress::<op_id>` `ProgressEvent` with
+///      `phase="op"` and `status=complete|error` — kept for any
+///      modal still subscribed to that channel.
+///   2. A sibling `cp-op-terminal` event carrying a typed
+///      `OpTerminalEvent` payload. This is the channel
+///      notification-style consumers listen on (single
+///      subscription, all ops).
 pub fn emit_terminal(
     app: &AppHandle,
     ops: &RunningOps,
@@ -457,10 +532,26 @@ pub fn emit_terminal(
         } else {
             OpStatus::Complete
         };
-        if let Some(msg) = error {
+        if let Some(msg) = error.clone() {
             op.last_error = Some(msg);
         }
     });
+    // Read the (now-updated) snapshot so the global event carries the
+    // op's kind + path context. If the op was reaped from the map
+    // before the terminal event lands (shouldn't happen — we reap on
+    // a 5 s grace), skip the global emit rather than fabricating a
+    // partial payload.
+    if let Some(snapshot) = ops.get(op_id) {
+        let label = op_terminal_label(&snapshot);
+        let global = OpTerminalEvent {
+            op_id: op_id.to_string(),
+            kind: snapshot.kind,
+            status: status_str.to_string(),
+            label,
+            error,
+        };
+        let _ = app.emit("cp-op-terminal", global);
+    }
     ops.remove_after_grace(op_id.to_string());
 }
 

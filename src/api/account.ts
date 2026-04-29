@@ -29,6 +29,17 @@ export const accountApi = {
    * returns false.
    */
   updaterSupported: () => invoke<boolean>("updater_supported"),
+
+  /**
+   * Push the current count of "alerting" sessions (errored or stuck)
+   * to the tray. The macOS menubar shows it next to the icon; Windows
+   * and Linux receive it in the tooltip. Cheap — fires whenever the
+   * count changes; the backend takes the fast path that updates
+   * title + tooltip without rebuilding the full tray menu.
+   */
+  traySetAlertCount: (count: number) =>
+    invoke<void>("tray_set_alert_count", { count }),
+
   /// Idempotent startup adoption: if CC holds credentials for one of the
   /// registered accounts, imports them into the matching slot. Returns
   /// the synced email (empty string when nothing matched).

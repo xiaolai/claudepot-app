@@ -57,6 +57,10 @@ interface AppStateValue {
   isDismissed: (id: string) => boolean;
   dismiss: (id: string) => void;
   clearDismissed: (id: string) => void;
+  /** Live (non-expired) dismissed-issue keys; for the App.tsx snooze
+   *  auto-clear effect to reconcile entries from a prior renderer
+   *  lifetime against the currently-live issue set. */
+  knownDismissedKeys: () => string[];
 
   // Action helpers — single instance so sidebar binds and
   // AccountsSection share the busy keyring, toast queue, and
@@ -132,7 +136,7 @@ export function AppStateProvider({ children }: { children: ReactNode }) {
     verifying,
     refresh,
   } = useRefresh(pushToast);
-  const { isDismissed, dismiss, clear } = useDismissedIssues();
+  const { isDismissed, dismiss, clear, knownKeys } = useDismissedIssues();
   const busy = useBusy();
   const { open: openOpModal } = useOperations();
   const actions = useActions({
@@ -232,6 +236,7 @@ export function AppStateProvider({ children }: { children: ReactNode }) {
       isDismissed,
       dismiss,
       clearDismissed: clear,
+      knownDismissedKeys: knownKeys,
       busyKeys: busy.busyKeys,
       actions,
       requestCliSwap,
@@ -266,6 +271,7 @@ export function AppStateProvider({ children }: { children: ReactNode }) {
       isDismissed,
       dismiss,
       clear,
+      knownKeys,
       busy.busyKeys,
       actions,
       requestCliSwap,

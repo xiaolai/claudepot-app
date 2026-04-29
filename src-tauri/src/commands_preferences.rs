@@ -81,26 +81,37 @@ pub async fn preferences_set_notifications(
     on_error: Option<bool>,
     on_idle_done: Option<bool>,
     on_stuck_minutes: Option<Option<u32>>,
-    on_spend_usd: Option<Option<f32>>,
+    on_op_done: Option<bool>,
 ) -> Result<crate::preferences::Preferences, String> {
-    let mut prefs = state
-        .0
-        .lock()
-        .map_err(|e| format!("preferences lock: {e}"))?;
-    if let Some(v) = on_error {
-        prefs.notify_on_error = v;
-    }
-    if let Some(v) = on_idle_done {
-        prefs.notify_on_idle_done = v;
-    }
-    if let Some(v) = on_stuck_minutes {
-        prefs.notify_on_stuck_minutes = v;
-    }
-    if let Some(v) = on_spend_usd {
-        prefs.notify_on_spend_usd = v;
-    }
-    prefs.save()?;
-    Ok(prefs.clone())
+    // Mirror the audit-B8 pattern from `preferences_set_activity`:
+    // mutate the in-memory snapshot under the std::sync guard, drop
+    // the guard, then hand the disk write to a blocking task so the
+    // IPC worker doesn't sit on a `write_all` while every other
+    // preferences read contends for the same mutex.
+    let snapshot = {
+        let mut prefs = state
+            .0
+            .lock()
+            .map_err(|e| format!("preferences lock: {e}"))?;
+        if let Some(v) = on_error {
+            prefs.notify_on_error = v;
+        }
+        if let Some(v) = on_idle_done {
+            prefs.notify_on_idle_done = v;
+        }
+        if let Some(v) = on_stuck_minutes {
+            prefs.notify_on_stuck_minutes = v;
+        }
+        if let Some(v) = on_op_done {
+            prefs.notify_on_op_done = v;
+        }
+        prefs.clone()
+    };
+    let to_persist = snapshot.clone();
+    tokio::task::spawn_blocking(move || to_persist.save())
+        .await
+        .map_err(|e| format!("blocking task failed: {e}"))??;
+    Ok(snapshot)
 }
 
 /// Persist the "show main window on startup" toggle. Pure persistence

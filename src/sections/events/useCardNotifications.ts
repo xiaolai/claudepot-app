@@ -1,11 +1,7 @@
 import { useEffect, useRef } from "react";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
-import {
-  isPermissionGranted,
-  requestPermission,
-  sendNotification,
-} from "@tauri-apps/plugin-notification";
 import { api } from "../../api";
+import { dispatchOsNotification } from "../../lib/notify";
 import type { LiveSessionSummary, Preferences } from "../../types";
 
 /**
@@ -13,10 +9,13 @@ import type { LiveSessionSummary, Preferences } from "../../types";
  * activity classifier emits a `CardEmitted` delta with severity
  * Warn or above.
  *
- * Coalescing rule (design v2 §8): ≥3 cards of the same template_id
- * within 60 seconds collapse into one notification with the count.
- * Prevents the "100 plugin_missing" notification storm when a
- * single broken hook fires repeatedly across a turn.
+ * Coalescing now lives in the shared dispatcher (`lib/notify.ts`).
+ * The bucket key `card:<kind>:<title>` matches the previous per-
+ * (kind+title) grouping, with the same default of 3 dispatches per
+ * 60s window — once that's exhausted, the bucket silently absorbs
+ * further hits until the window rolls over. Replaces the
+ * hand-rolled "≥3 in 60s → fire summary, reset" logic that
+ * duplicated state across this hook and `useActivityNotifications`.
  *
  * Gated on the existing `notify_on_error` preference. Adding a
  * dedicated `notify_on_card` toggle later is a Settings change;
@@ -33,12 +32,6 @@ export function useCardNotifications() {
   // per session keeps the unsubscribe story clean.
   const subscriptions = useRef<Map<string, UnlistenFn>>(new Map());
   const enabledRef = useRef(false);
-  // Coalescer state: per template_id, the timestamps of recent
-  // notifications (within the 60s window). When ≥3 land in
-  // the window, fire one summary notification and reset.
-  const recent = useRef<Map<string, number[]>>(new Map());
-  const COALESCE_WINDOW_MS = 60_000;
-  const COALESCE_THRESHOLD = 3;
 
   // Fetch preference once on mount + listen for changes via the
   // cp-prefs-changed event whose payload IS the new Preferences. No
@@ -80,25 +73,18 @@ export function useCardNotifications() {
 
   useEffect(() => {
     // Mount-guard for the whole bootstrap chain. Cleanup may run
-    // partway through ensurePermission / sessionLiveSnapshot /
-    // subscribeNew / listen("live-all"). Without `active`, any of
-    // those can finish after teardown and silently attach a
-    // listener no one will ever release.
+    // partway through sessionLiveSnapshot / subscribeNew /
+    // listen("live-all"). Without `active`, any of those can finish
+    // after teardown and silently attach a listener no one will ever
+    // release.
+    //
+    // Permission probing previously ran here (and prompted on mount
+    // even before the user enabled `notify_on_error`). It now lives
+    // in `lib/notify.ts` as a lazy singleton — `dispatchOsNotification`
+    // probes on first use and prompts only when an actual trigger
+    // fires. That removes the unconditional first-mount prompt.
     let active = true;
     let aliveUnlisten: UnlistenFn | null = null;
-    let permissionGranted = false;
-
-    async function ensurePermission() {
-      try {
-        permissionGranted = await isPermissionGranted();
-        if (!permissionGranted && active) {
-          const r = await requestPermission();
-          permissionGranted = r === "granted";
-        }
-      } catch {
-        permissionGranted = false;
-      }
-    }
 
     async function subscribeNew(sessions: LiveSessionSummary[]) {
       if (!active) return;
@@ -162,7 +148,7 @@ export function useCardNotifications() {
     }
 
     function handleDelta(payload: LiveDeltaWire) {
-      if (!enabledRef.current || !permissionGranted) return;
+      if (!enabledRef.current) return;
       if (payload.kind !== "card_emitted") return;
       const card = payload as unknown as CardEmittedWire;
       const sev = card.severity;
@@ -170,48 +156,24 @@ export function useCardNotifications() {
       // visible in the Events surface but doesn't push.
       if (sev !== "WARN" && sev !== "ERROR") return;
 
-      // Coalescing: track per (kind+title) bucket. CardEmitted
-      // deltas don't carry the template_id directly, so title-as-key
-      // is the right grain — identical failures produce identical
-      // titles (e.g. "Hook failed: PostToolUse:Edit").
-      const key = `${card.card_kind}::${card.title}`;
-      const now = Date.now();
-      const arr = recent.current.get(key) ?? [];
-      const filtered = arr.filter((t) => now - t < COALESCE_WINDOW_MS);
-      filtered.push(now);
-      recent.current.set(key, filtered);
-
-      if (filtered.length === COALESCE_THRESHOLD) {
-        // Hit the threshold this exact tick — coalesce: one summary
-        // notification, then reset the window so we don't double-fire.
-        try {
-          sendNotification({
-            title: `${filtered.length}× ${card.title}`,
-            body: `Repeated ${sev.toLowerCase()} in ${shortCwd(
-              card.cwd,
-            )}. Open Events to inspect.`,
-          });
-        } catch {
-          /* ignore */
-        }
-        recent.current.set(key, []);
-      } else if (filtered.length < COALESCE_THRESHOLD) {
-        // Below threshold: emit each card individually.
-        try {
-          sendNotification({
-            title: card.title,
-            body: shortCwd(card.cwd),
-          });
-        } catch {
-          /* ignore */
-        }
-      }
-      // > threshold: silently absorb — the threshold-hit firing
-      // already represents the burst. Window will roll over and
-      // the next batch starts fresh.
+      // dedupeKey grain: kind+title — identical failures produce
+      // identical titles (e.g. "Hook failed: PostToolUse:Edit") so
+      // they land in the same bucket and stop after `maxBurst`.
+      // group: full cwd — macOS threads notifications about the
+      // same project regardless of which template fired, which is
+      // what users actually care about ("what's wrong in foo?").
+      // Using the full cwd (not the basename) prevents two different
+      // projects with the same basename (e.g. ~/work/foo and
+      // ~/personal/foo) from threading into one banner.
+      const project = shortCwd(card.cwd);
+      void dispatchOsNotification(card.title, project, {
+        dedupeKey: `card:${card.card_kind}::${card.title}`,
+        group: `project:${card.cwd}`,
+        sound: "default",
+      });
     }
 
-    void ensurePermission().then(async () => {
+    void (async () => {
       if (!active) return;
       // Bootstrap: subscribe to whatever's live right now.
       try {
@@ -236,10 +198,9 @@ export function useCardNotifications() {
       } catch {
         /* ignore */
       }
-    });
+    })();
 
     const sessionsRef = subscriptions.current;
-    const recentRef = recent.current;
     return () => {
       active = false;
       if (aliveUnlisten) aliveUnlisten();
@@ -256,7 +217,9 @@ export function useCardNotifications() {
         void api.sessionLiveUnsubscribe(sid).catch(() => {});
       }
       sessionsRef.clear();
-      recentRef.clear();
+      // Bucket state used to be cleared here; it now lives in the
+      // shared dispatcher's module-level Map and self-evicts on
+      // window expiry.
     };
   }, []);
 }
