@@ -13,14 +13,14 @@
 
 use crate::dto::AccountSummary;
 use crate::tray_icons::{
-    icon_item, ICON_CHECK, ICON_HOME, ICON_POWER, ICON_REFRESH, ICON_SLIDERS, ICON_USER_PLUS,
-    ID_ACTIVE_DISPLAY, ID_ADD, ID_DESKTOP_BIND, ID_DESKTOP_CLEAR, ID_DESKTOP_LAUNCH,
-    ID_DESKTOP_RECONCILE, ID_QUIT, ID_SETTINGS, ID_SHOW, ID_SYNC, ID_USAGE_REFRESH, PREFIX_CLI,
-    PREFIX_DESKTOP, PREFIX_LIVE,
+    icon_item, ICON_BADGE_CHECK, ICON_HOME, ICON_LAYERS, ICON_POWER, ICON_REFRESH, ICON_SLIDERS,
+    ICON_USER_PLUS, ID_ACTIVITIES, ID_ADD, ID_DESKTOP_BIND, ID_DESKTOP_CLEAR, ID_DESKTOP_LAUNCH,
+    ID_DESKTOP_RECONCILE, ID_QUIT, ID_SETTINGS, ID_SHOW, ID_SYNC, ID_USAGE_REFRESH,
+    ID_VERIFY_ALL, PREFIX_CLI, PREFIX_DESKTOP, PREFIX_LIVE,
 };
 use crate::tray_menu::{
-    build_cli_submenu, build_desktop_submenu, build_live_submenu, build_tooltip,
-    build_usage_submenu,
+    build_active_items, build_cli_submenu, build_desktop_submenu, build_live_submenu,
+    build_tooltip, build_usage_submenu,
 };
 use claudepot_core::oauth::usage::UsageResponse;
 use claudepot_core::services::usage_cache::UsageCache;
@@ -69,42 +69,17 @@ pub async fn rebuild(app: &AppHandle) -> Result<(), String> {
             summaries.iter().cloned().map(|s| (s, None)).collect()
         };
 
-    // 1. Active-account row (display-only — disabled). Uses
+    // 1. Active-account row(s) (display-only — disabled). Uses
     // IconMenuItem with a check glyph instead of CheckMenuItem so
     // the glyph sits in the same image column as every other row;
     // AppKit renders CheckMenuItem.state in its own (leftmost)
     // slot, which visually misaligned the active row from the
     // icon stack below it.
-    // Active-account display priority (Codex G7 — v1 showed CLI only,
-    // leaving Desktop bindings invisible in the menu header when CLI
-    // was unbound):
-    //   CLI bound → show CLI (existing behavior)
-    //   CLI unbound + Desktop bound → show Desktop
-    //   neither → "No accounts active"
-    let active_label = match (cli_active, desktop_active) {
-        (Some(a), _) if !a.credentials_healthy => format!("{} — re-auth needed", a.email),
-        (Some(a), _) => a.email.clone(),
-        (None, Some(d)) => format!("{} (Desktop)", d.email),
-        (None, None) => "No accounts active".to_string(),
-    };
-    let has_active = cli_active.is_some() || desktop_active.is_some();
-    let active_item = if has_active {
-        let img = Image::from_bytes(ICON_CHECK)
-            .map_err(|e| format!("check icon: {e}"))?;
-        IconMenuItemBuilder::with_id(ID_ACTIVE_DISPLAY, active_label)
-            .icon(img)
-            .enabled(false)
-            .build(app)
-            .map_err(|e| format!("active item: {e}"))?
-    } else {
-        // No icon when nothing's active — the label itself carries
-        // the state. Still an IconMenuItem (just without an image)
-        // so the column alignment stays consistent.
-        IconMenuItemBuilder::with_id(ID_ACTIVE_DISPLAY, active_label)
-            .enabled(false)
-            .build(app)
-            .map_err(|e| format!("active item: {e}"))?
-    };
+    //
+    // Two-row when CLI ≠ Desktop. The single-row form (G7) hid the
+    // Desktop identity from users who deliberately split surfaces;
+    // see `build_active_items` for the full case table.
+    let active_items = build_active_items(app, cli_active, desktop_active)?;
 
     // 2. Switch CLI submenu.
     let cli_submenu = build_cli_submenu(app, &summaries)?;
@@ -134,11 +109,23 @@ pub async fn rebuild(app: &AppHandle) -> Result<(), String> {
 
     let add_item = icon_item(app, ID_ADD, "Add account from browser…", ICON_USER_PLUS)?;
     let sync_item = icon_item(app, ID_SYNC, "Sync from current CC", ICON_REFRESH)?;
+    // `Verify all` is the natural quick-maintenance action after the
+    // user comes back from a break — credential health goes stale on
+    // its own schedule. The handler reuses the existing `app-menu:
+    // account:verify-all` listener in App.tsx (no new IPC needed).
+    let verify_item = icon_item(app, ID_VERIFY_ALL, "Verify all", ICON_BADGE_CHECK)?;
 
     let sep2 =
         PredefinedMenuItem::separator(app).map_err(|e| format!("sep2: {e}"))?;
 
     let show_item = icon_item(app, ID_SHOW, "Show Claudepot", ICON_HOME)?;
+    // `Open Activities` is the only stable Activities entry-point
+    // from the tray. The pre-existing "Active: N ▸" submenu is
+    // conditional (renders only when a session is live) and only
+    // covers the live time-scale; the Activities section itself is
+    // the today/month dashboard. Reuses the existing
+    // `app-menu:nav:events` listener in App.tsx.
+    let activities_item = icon_item(app, ID_ACTIVITIES, "Open Activities", ICON_LAYERS)?;
     let settings_item = icon_item(app, ID_SETTINGS, "Settings…", ICON_SLIDERS)?;
 
     // Quit carries a power glyph for column consistency with the
@@ -153,12 +140,35 @@ pub async fn rebuild(app: &AppHandle) -> Result<(), String> {
         .build(app)
         .map_err(|e| format!("quit: {e}"))?;
 
-    // Final assembly. Exactly 10 top-level items including 2
-    // separators — one below the account group, one below the
-    // actions group. No separator before Quit; matches the layout
-    // used by common status-bar apps (Tailscale, Raycast).
-    let mut menu_builder = MenuBuilder::new(app)
-        .item(&active_item)
+    // Final assembly. Three groups separated by horizontal rules:
+    //
+    //   identity + state
+    //     - active row(s) (1 if CLI = Desktop, 2 if they differ)
+    //     - Switch CLI ▸
+    //     - Set Desktop ▸
+    //     - Usage ▸
+    //     - (Active: N ▸ — conditional)
+    //   ──
+    //   account-management actions
+    //     - Add account from browser…
+    //     - Sync from current CC
+    //     - Verify all
+    //   ──
+    //   window + app
+    //     - Show Claudepot
+    //     - Open Activities
+    //     - Settings…
+    //     - Quit Claudepot
+    //
+    // Top-level item count: 11–14 depending on whether the live
+    // submenu renders and whether CLI/Desktop bind to the same
+    // account. AppKit handles vertical scroll on overflow; we
+    // budget for legibility, not absolute count.
+    let mut menu_builder = MenuBuilder::new(app);
+    for item in &active_items {
+        menu_builder = menu_builder.item(item);
+    }
+    menu_builder = menu_builder
         .item(&cli_submenu)
         .item(&desktop_submenu)
         .item(&usage_submenu);
@@ -169,8 +179,10 @@ pub async fn rebuild(app: &AppHandle) -> Result<(), String> {
         .item(&sep1)
         .item(&add_item)
         .item(&sync_item)
+        .item(&verify_item)
         .item(&sep2)
         .item(&show_item)
+        .item(&activities_item)
         .item(&settings_item)
         .item(&quit_item)
         .build()
@@ -182,6 +194,12 @@ pub async fn rebuild(app: &AppHandle) -> Result<(), String> {
         let tooltip = build_tooltip(cli_active, desktop_active);
         tray.set_tooltip(Some(&tooltip))
             .map_err(|e| format!("tooltip: {e}"))?;
+    } else {
+        // Reaching this branch means the "main" tray was never
+        // registered (setup hook failure or feature flag drift).
+        // Silently succeeding hid setup bugs in the past — log so
+        // the cause is diagnosable from the run log.
+        tracing::warn!("tray::rebuild: no tray registered with id \"main\"; menu update skipped");
     }
 
     Ok(())
@@ -218,8 +236,31 @@ pub fn handle_menu_event(app: &AppHandle, id: &str) {
             tracing::warn!("emit add-account failed: {e}");
         }
     } else if id == ID_SYNC {
+        // Show the window first — Sync's only success/failure feedback
+        // is a React toast (see App.tsx for app-menu:account:sync-cc).
+        // In accessory mode the tray is the only entry-point; without
+        // showing the window the toast is invisible and the action
+        // looks broken.
+        show_window(app);
         if let Err(e) = app.emit("app-menu", "app-menu:account:sync-cc") {
             tracing::warn!("emit sync-cc failed: {e}");
+        }
+    } else if id == ID_VERIFY_ALL {
+        // Same rationale as ID_SYNC — Verify all reports through a
+        // React toast, so the window must be visible for the user to
+        // see the result. Reuses the existing
+        // `app-menu:account:verify-all` listener.
+        show_window(app);
+        if let Err(e) = app.emit("app-menu", "app-menu:account:verify-all") {
+            tracing::warn!("emit verify-all failed: {e}");
+        }
+    } else if id == ID_ACTIVITIES {
+        // Activities's section id is `events` in the registry (kept
+        // for localStorage back-compat); the label is "Activities".
+        // Pop the window so the user lands on the dashboard.
+        show_window(app);
+        if let Err(e) = app.emit("app-menu", "app-menu:nav:events") {
+            tracing::warn!("emit nav-activities failed: {e}");
         }
     } else if id == ID_USAGE_REFRESH {
         handle_usage_refresh(app);

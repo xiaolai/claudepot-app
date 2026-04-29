@@ -27,6 +27,13 @@ pub const ICON_CHECK: &[u8] = include_bytes!("../icons/menu/check.png");
 pub const ICON_POWER: &[u8] = include_bytes!("../icons/menu/power.png");
 pub const ICON_BAR_CHART: &[u8] = include_bytes!("../icons/menu/bar-chart.png");
 pub const ICON_BOLT: &[u8] = include_bytes!("../icons/menu/bolt.png");
+// `Verify all` carries a badge-check (validity-confirmation glyph),
+// keeping it visually distinct from `Sync` (refresh) and `Active` (check).
+pub const ICON_BADGE_CHECK: &[u8] = include_bytes!("../icons/menu/badge-check.png");
+// `Open Activities` mirrors the sidebar — `NF.dashboard` maps to
+// Lucide `Layers`, so the tray uses the same glyph for the same
+// destination.
+pub const ICON_LAYERS: &[u8] = include_bytes!("../icons/menu/layers.png");
 // Per-row glyphs. Usage rows carry a single account-identity anchor
 // (circle-user); Live/Activity rows vary by status so the user can
 // scan "what's actually happening" from the tray without opening
@@ -48,7 +55,15 @@ pub const ID_DESKTOP_CLEAR: &str = "tray:desktop-clear";
 pub const ID_DESKTOP_RECONCILE: &str = "tray:desktop-reconcile";
 pub const ID_DESKTOP_LAUNCH: &str = "tray:desktop-launch";
 pub const ID_ACTIVE_DISPLAY: &str = "tray:active-display";
+// Distinct IDs for the dual-bound case (CLI ≠ Desktop) so the two
+// rows can both live in the menu without an id collision. Both are
+// disabled (display-only); the IDs are never matched in
+// `handle_menu_event`.
+pub const ID_ACTIVE_DISPLAY_CLI: &str = "tray:active-display:cli";
+pub const ID_ACTIVE_DISPLAY_DESKTOP: &str = "tray:active-display:desktop";
 pub const ID_USAGE_REFRESH: &str = "tray:usage:refresh";
+pub const ID_VERIFY_ALL: &str = "tray:verify-all";
+pub const ID_ACTIVITIES: &str = "tray:open-activities";
 
 // Prefixes for dynamic per-account / per-session menu items.
 pub const PREFIX_CLI: &str = "tray:cli-switch:";

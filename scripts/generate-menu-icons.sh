@@ -50,6 +50,7 @@ command -v magick >/dev/null || {
 # constants in src-tauri/src/tray_icons.rs; Lucide names are pinned to
 # the v1.8 catalogue. Update both sides together if either renames.
 MAP=(
+    "badge-check:badge-check"
     "bar-chart:bar-chart"
     "bolt:zap"
     "check:check"
@@ -59,6 +60,7 @@ MAP=(
     "circle-user:circle-user"
     "desktop:monitor"
     "home:home"
+    "layers:layers"
     "power:power"
     "refresh:refresh-cw"
     "sliders:sliders-horizontal"
