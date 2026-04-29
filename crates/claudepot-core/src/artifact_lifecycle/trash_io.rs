@@ -50,6 +50,47 @@ pub(super) fn move_or_copy(source: &Path, target: &Path, kind: PayloadKind) -> R
             }
         }
     }
+    // Audit fix for trash_io.rs:55 — preserve symlink shape on the
+    // cross-volume fallback. `std::fs::copy` resolves the symlink
+    // and copies the target's bytes, so a trashed symlink would
+    // restore as a regular file (losing link semantics, possibly
+    // copying secret contents from outside the project root). We
+    // probe the source via `symlink_metadata` first; if it's a
+    // symlink, we preserve it as a symlink at the target. On
+    // Windows where unprivileged symlink creation isn't always
+    // available, we fall back to copying the resolved target — the
+    // trash is recoverable so a lossy fallback is acceptable.
+    let src_meta =
+        std::fs::symlink_metadata(source).map_err(LifecycleError::io("stat trash source"))?;
+    if src_meta.file_type().is_symlink() {
+        let link_target =
+            std::fs::read_link(source).map_err(LifecycleError::io("read trash symlink"))?;
+        #[cfg(unix)]
+        {
+            std::os::unix::fs::symlink(&link_target, target)
+                .map_err(LifecycleError::io("write trash symlink"))?;
+        }
+        #[cfg(windows)]
+        {
+            // Best-effort: symlinkw if elevated, otherwise copy
+            // the resolved bytes (lossy — see copy_dir_recursive).
+            let abs = if link_target.is_absolute() {
+                link_target.clone()
+            } else {
+                source
+                    .parent()
+                    .map(|p| p.join(&link_target))
+                    .unwrap_or(link_target.clone())
+            };
+            if abs.is_dir() {
+                copy_dir_recursive(&abs, target)?;
+            } else {
+                std::fs::copy(&abs, target)
+                    .map_err(LifecycleError::io("copy symlink target"))?;
+            }
+        }
+        return Ok(());
+    }
     match kind {
         PayloadKind::File => {
             std::fs::copy(source, target).map_err(LifecycleError::io("copy file to trash"))?;

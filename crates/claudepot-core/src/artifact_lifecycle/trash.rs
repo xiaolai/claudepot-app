@@ -250,14 +250,28 @@ pub fn restore_at(
 /// Recover a `MissingManifest` or `AbandonedStaging` entry by
 /// promoting it to a synthetic manifest then performing the restore.
 /// The user has confirmed the target path and kind via UI dialog.
+///
+/// Audit fix for artifact_lifecycle/trash.rs:253: validates that
+/// `confirmed_target` resolves under one of the supplied
+/// `ActiveRoots`. The previous shape accepted any path — a renderer
+/// (or a tampered IPC payload from a future surface) could pass
+/// `/etc/passwd` and the restore would happily write the trashed
+/// payload there. The check resolves the target's canonical form
+/// and demands it start with a canonical user_root or project_root.
+/// Passing an empty `ActiveRoots` skips the check (lets old call
+/// sites that don't yet have the roots compile until they're
+/// updated). Today the only caller is `commands_artifact_lifecycle`,
+/// which threads the live `ActiveRoots`.
 pub fn recover_at(
     trash_root: &Path,
     trash_id: &str,
     confirmed_target: &Path,
     confirmed_kind: ArtifactKind,
     on_conflict: super::disable::OnConflict,
+    roots: &super::paths::ActiveRoots,
 ) -> Result<RestoredArtifact> {
     validate_trash_id(trash_id)?;
+    validate_recover_target_in_roots(confirmed_target, roots)?;
     let entry = read_one(trash_root, trash_id)?;
     match entry.state {
         TrashState::MissingManifest | TrashState::AbandonedStaging => {}
@@ -464,6 +478,64 @@ pub(super) fn validate_trash_id(trash_id: &str) -> Result<()> {
         return Err(LifecycleError::InvalidTrashId(trash_id.to_string()));
     }
     Ok(())
+}
+
+/// Reject a `confirmed_target` that doesn't fall under one of the
+/// active user/project roots. Audit gate for `recover_at`. Empty
+/// roots → check is skipped (back-compat for callers that haven't
+/// threaded ActiveRoots through yet — there's only one production
+/// caller today, but tests sometimes default-construct).
+fn validate_recover_target_in_roots(
+    target: &Path,
+    roots: &super::paths::ActiveRoots,
+) -> Result<()> {
+    let any_root_known = roots.user_root.is_some() || !roots.project_roots.is_empty();
+    if !any_root_known {
+        return Ok(());
+    }
+    // Resolve target up to its existing parent — `target` itself
+    // may not exist yet (recover writes it). Walk up until we hit
+    // an existing ancestor, canonicalize THAT, then compare.
+    let probe = first_existing_ancestor(target).unwrap_or_else(|| target.to_path_buf());
+    let canon_target = match probe.canonicalize() {
+        Ok(p) => p,
+        Err(_) => {
+            // Couldn't resolve at all — refuse rather than risk
+            // writing somewhere unintended.
+            return Err(LifecycleError::from(RefuseReason::OutOfScope {
+                path: target.to_path_buf(),
+            }));
+        }
+    };
+    let mut allowed = Vec::new();
+    if let Some(user) = roots.user_root.as_deref() {
+        if let Ok(c) = user.canonicalize() {
+            allowed.push(c);
+        }
+    }
+    for project in &roots.project_roots {
+        if let Ok(c) = project.canonicalize() {
+            allowed.push(c);
+        }
+    }
+    if allowed.iter().any(|root| canon_target.starts_with(root)) {
+        Ok(())
+    } else {
+        Err(LifecycleError::from(RefuseReason::OutOfScope {
+            path: target.to_path_buf(),
+        }))
+    }
+}
+
+fn first_existing_ancestor(p: &Path) -> Option<PathBuf> {
+    let mut cur = Some(p);
+    while let Some(c) = cur {
+        if c.exists() {
+            return Some(c.to_path_buf());
+        }
+        cur = c.parent();
+    }
+    None
 }
 
 // Listing (`list_at`, `read_one`, `classify_entry`), IO helpers
