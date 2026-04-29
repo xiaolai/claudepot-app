@@ -15,8 +15,8 @@ use crate::dto::AccountSummary;
 use crate::tray_icons::{
     icon_item, ICON_BADGE_CHECK, ICON_HOME, ICON_LAYERS, ICON_POWER, ICON_REFRESH, ICON_SLIDERS,
     ICON_USER_PLUS, ID_ACTIVITIES, ID_ADD, ID_DESKTOP_BIND, ID_DESKTOP_CLEAR, ID_DESKTOP_LAUNCH,
-    ID_DESKTOP_RECONCILE, ID_QUIT, ID_SETTINGS, ID_SHOW, ID_SYNC, ID_USAGE_REFRESH,
-    ID_VERIFY_ALL, PREFIX_CLI, PREFIX_DESKTOP, PREFIX_LIVE,
+    ID_DESKTOP_RECONCILE, ID_QUIT, ID_SETTINGS, ID_SHOW, ID_SYNC, ID_USAGE_REFRESH, ID_VERIFY_ALL,
+    PREFIX_CLI, PREFIX_DESKTOP, PREFIX_LIVE,
 };
 use crate::tray_menu::{
     build_active_items, build_cli_submenu, build_desktop_submenu, build_live_submenu,
@@ -104,8 +104,7 @@ pub async fn rebuild(app: &AppHandle) -> Result<(), String> {
     // register as the webview. Windows/Linux fall back to plain
     // MenuItem (IconMenuItemBuilder exists cross-platform but the
     // visual result isn't worth the weight without template-tinting).
-    let sep1 =
-        PredefinedMenuItem::separator(app).map_err(|e| format!("sep1: {e}"))?;
+    let sep1 = PredefinedMenuItem::separator(app).map_err(|e| format!("sep1: {e}"))?;
 
     let add_item = icon_item(app, ID_ADD, "Add account from browser…", ICON_USER_PLUS)?;
     let sync_item = icon_item(app, ID_SYNC, "Sync from current CC", ICON_REFRESH)?;
@@ -115,8 +114,7 @@ pub async fn rebuild(app: &AppHandle) -> Result<(), String> {
     // account:verify-all` listener in App.tsx (no new IPC needed).
     let verify_item = icon_item(app, ID_VERIFY_ALL, "Verify all", ICON_BADGE_CHECK)?;
 
-    let sep2 =
-        PredefinedMenuItem::separator(app).map_err(|e| format!("sep2: {e}"))?;
+    let sep2 = PredefinedMenuItem::separator(app).map_err(|e| format!("sep2: {e}"))?;
 
     let show_item = icon_item(app, ID_SHOW, "Show Claudepot", ICON_HOME)?;
     // `Open Activities` is the only stable Activities entry-point
@@ -132,8 +130,7 @@ pub async fn rebuild(app: &AppHandle) -> Result<(), String> {
     // rest of the stack. macOS convention leaves system Quit items
     // bare, but here every other row is iconized and a lone
     // text-only Quit row misaligned the whole menu.
-    let quit_icon = Image::from_bytes(ICON_POWER)
-        .map_err(|e| format!("power icon: {e}"))?;
+    let quit_icon = Image::from_bytes(ICON_POWER).map_err(|e| format!("power icon: {e}"))?;
     let quit_item = IconMenuItemBuilder::with_id(ID_QUIT, "Quit Claudepot")
         .icon(quit_icon)
         .accelerator("CmdOrCtrl+Q")
@@ -299,51 +296,6 @@ fn compose_tooltip(
         format!("{base}\n⚠ {suffix}")
     }
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn compose_title_zero_alerts_returns_none() {
-        assert_eq!(compose_title(0), None);
-    }
-
-    #[test]
-    fn compose_title_one_alert_returns_count() {
-        assert_eq!(compose_title(1), Some("• 1".to_string()));
-    }
-
-    #[test]
-    fn compose_title_many_alerts_returns_count() {
-        assert_eq!(compose_title(42), Some("• 42".to_string()));
-    }
-
-    #[test]
-    fn compose_tooltip_zero_alerts_matches_build_tooltip() {
-        // Byte-for-byte identical when alerts == 0 so the no-alert
-        // path doesn't drift from the existing identity-only tooltip.
-        let plain = build_tooltip(None, None);
-        let composed = compose_tooltip(None, None, 0);
-        assert_eq!(plain, composed);
-    }
-
-    #[test]
-    fn compose_tooltip_with_alerts_appends_suffix() {
-        let composed = compose_tooltip(None, None, 3);
-        assert!(composed.starts_with("Claudepot"));
-        assert!(composed.contains("3 alerting sessions"));
-        assert!(composed.contains('⚠'));
-    }
-
-    #[test]
-    fn compose_tooltip_one_alert_singular() {
-        let composed = compose_tooltip(None, None, 1);
-        assert!(composed.contains("1 alerting session"));
-        assert!(!composed.contains("sessions"));
-    }
-}
-
 
 /// Handle a tray menu item click. The app_menu module handles any id
 /// starting with `app-menu:`; the rest live here.
@@ -597,4 +549,48 @@ fn find_email_for_uuid(uuid_str: &str) -> Option<String> {
         .iter()
         .find(|a| a.uuid.to_string() == uuid_str)
         .map(|a| a.email.clone())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn compose_title_zero_alerts_returns_none() {
+        assert_eq!(compose_title(0), None);
+    }
+
+    #[test]
+    fn compose_title_one_alert_returns_count() {
+        assert_eq!(compose_title(1), Some("• 1".to_string()));
+    }
+
+    #[test]
+    fn compose_title_many_alerts_returns_count() {
+        assert_eq!(compose_title(42), Some("• 42".to_string()));
+    }
+
+    #[test]
+    fn compose_tooltip_zero_alerts_matches_build_tooltip() {
+        // Byte-for-byte identical when alerts == 0 so the no-alert
+        // path doesn't drift from the existing identity-only tooltip.
+        let plain = build_tooltip(None, None);
+        let composed = compose_tooltip(None, None, 0);
+        assert_eq!(plain, composed);
+    }
+
+    #[test]
+    fn compose_tooltip_with_alerts_appends_suffix() {
+        let composed = compose_tooltip(None, None, 3);
+        assert!(composed.starts_with("Claudepot"));
+        assert!(composed.contains("3 alerting sessions"));
+        assert!(composed.contains('⚠'));
+    }
+
+    #[test]
+    fn compose_tooltip_one_alert_singular() {
+        let composed = compose_tooltip(None, None, 1);
+        assert!(composed.contains("1 alerting session"));
+        assert!(!composed.contains("sessions"));
+    }
 }

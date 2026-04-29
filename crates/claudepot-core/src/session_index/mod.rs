@@ -720,8 +720,8 @@ mod tests {
         let newer = format!(
             r#"{{"type":"user","message":{{"role":"user","content":"new"}},"timestamp":"2026-04-20T00:00:00Z","cwd":"/b","sessionId":"S2"}}"#
         );
-        write_session(cfg.path(), "-a", "S1", &vec![older]);
-        write_session(cfg.path(), "-b", "S2", &vec![newer]);
+        write_session(cfg.path(), "-a", "S1", &[older]);
+        write_session(cfg.path(), "-b", "S2", &[newer]);
 
         let rows = idx.list_all(cfg.path()).unwrap();
         assert_eq!(rows.len(), 2);
@@ -759,7 +759,7 @@ mod tests {
         assert!(r.file_size_bytes > 0);
         assert!(r.last_modified.is_some());
         // project_path falls back to unsanitize(slug) when no cwd.
-        assert!(r.project_from_transcript == false);
+        assert!(!r.project_from_transcript);
         // Path round-trips byte-exactly.
         assert_eq!(r.file_path, path);
     }
@@ -772,7 +772,7 @@ mod tests {
         // round-tripped through a latin-1 path or corrupts the bytes,
         // the assertion will fire.
         let line = r#"{"type":"user","message":{"role":"user","content":"修复 build 🐛 café"},"timestamp":"2026-04-10T10:00:00Z","cwd":"/á","gitBranch":"feature/中文-branch","sessionId":"N1"}"#;
-        write_session(cfg.path(), "-accented", "N1", &vec![line.to_string()]);
+        write_session(cfg.path(), "-accented", "N1", &[line.to_string()]);
 
         let rows = idx.list_all(cfg.path()).unwrap();
         assert_eq!(rows.len(), 1);
@@ -790,7 +790,7 @@ mod tests {
         let line = format!(
             r#"{{"type":"user","message":{{"role":"user","content":"{prompt}"}},"timestamp":"2026-04-10T10:00:00Z","cwd":"/x","sessionId":"S1"}}"#
         );
-        write_session(cfg.path(), "-x", "S1", &vec![line]);
+        write_session(cfg.path(), "-x", "S1", &[line]);
 
         let rows = idx.list_all(cfg.path()).unwrap();
         assert_eq!(rows.len(), 1);
@@ -815,7 +815,7 @@ mod tests {
             cfg.path(),
             "-repo-foo",
             "AAA",
-            &vec![user.to_string(), asst.to_string()],
+            &[user.to_string(), asst.to_string()],
         );
 
         let rows = idx.list_all(cfg.path()).unwrap();

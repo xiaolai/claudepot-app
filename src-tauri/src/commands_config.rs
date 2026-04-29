@@ -27,11 +27,9 @@ use crate::commands_config_types::{
     SearchSummaryDto,
 };
 use crate::config_dto::{kind_from_str, policy_origin_label, scope_label_with_origin, FileNodeDto};
-use serde::Serialize;
 use crate::preferences::PreferencesState;
 use claudepot_core::config_view::{
-    discover,
-    effective_io,
+    discover, effective_io,
     effective_mcp::{self, ApprovalState, BlockReason, McpSimulationMode},
     effective_settings,
     launcher::{self, LaunchError},
@@ -39,6 +37,7 @@ use claudepot_core::config_view::{
     search::{self, CancelToken},
     ConfigScanService,
 };
+use serde::Serialize;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
@@ -70,11 +69,9 @@ pub async fn config_scan(
     // full scan on the blocking pool so the IPC worker isn't pinned
     // by filesystem stalls.
     let svc = Arc::clone(svc.inner());
-    let tree = tauri::async_runtime::spawn_blocking(move || {
-        svc.scan_and_commit(anchor.as_deref())
-    })
-    .await
-    .map_err(|e| format!("scan join: {e}"))?;
+    let tree = tauri::async_runtime::spawn_blocking(move || svc.scan_and_commit(anchor.as_deref()))
+        .await
+        .map_err(|e| format!("scan join: {e}"))?;
 
     let dto = ConfigTreeDto {
         scopes: tree.scopes.iter().map(ScopeNodeDto::from).collect(),
@@ -118,7 +115,7 @@ pub async fn config_preview(
         .with_tree(|tree| {
             discover::find_file(tree, &node_id)
                 .ok_or_else(|| format!("node not found: {node_id}"))
-                .map(Clone::clone)
+                .cloned()
         })
         .ok_or_else(|| "tree not scanned yet".to_string())??;
 
@@ -181,9 +178,7 @@ fn is_json_kind(kind: &Kind) -> bool {
 /// Detected editors, cached for 5 minutes. Pass `force = true` to
 /// bypass the cache (e.g. after a user installs a new editor).
 #[tauri::command]
-pub async fn config_list_editors(
-    force: Option<bool>,
-) -> Result<Vec<EditorCandidateDto>, String> {
+pub async fn config_list_editors(force: Option<bool>) -> Result<Vec<EditorCandidateDto>, String> {
     let force = force.unwrap_or(false);
     let cands = launcher::detect_cached(force);
     Ok(cands.iter().map(EditorCandidateDto::from).collect())
@@ -317,7 +312,7 @@ pub async fn config_search_start(
     tauri::async_runtime::spawn_blocking(move || {
         let sid_hit = search_id_for_task.clone();
         let app_hit = app_for_task.clone();
-        let summary = search::search(&*tree, query_core, &cancel, |hit| {
+        let summary = search::search(&tree, query_core, &cancel, |hit| {
             let _ = app_hit.emit(
                 &format!("config-search-hit::{sid_hit}"),
                 SearchHitDto {
@@ -346,10 +341,7 @@ pub async fn config_search_start(
             }
             .with_error(&msg),
         };
-        let _ = app_for_task.emit(
-            &format!("config-search-done::{search_id_for_task}"),
-            &dto,
-        );
+        let _ = app_for_task.emit(&format!("config-search-done::{search_id_for_task}"), &dto);
     });
 
     Ok(())
@@ -392,11 +384,7 @@ pub async fn config_effective_settings(
                 .map(|p| ProvenanceLeafDto {
                     path: render_path(&p.key_path),
                     winner: scope_label_with_origin(&p.winner),
-                    contributors: p
-                        .contributors
-                        .iter()
-                        .map(scope_label_with_origin)
-                        .collect(),
+                    contributors: p.contributors.iter().map(scope_label_with_origin).collect(),
                     suppressed: p.suppressed,
                 })
                 .collect(),
@@ -457,11 +445,7 @@ pub async fn config_effective_mcp(
                 EffectiveMcpServerDto {
                     name: s.name,
                     source_scope: scope_label_with_origin(&s.source_scope),
-                    contributors: s
-                        .contributors
-                        .iter()
-                        .map(scope_label_with_origin)
-                        .collect(),
+                    contributors: s.contributors.iter().map(scope_label_with_origin).collect(),
                     approval,
                     approval_reason: reason,
                     blocked_by: blocked,

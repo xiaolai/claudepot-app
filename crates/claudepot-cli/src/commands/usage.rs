@@ -35,9 +35,7 @@ fn parse_window(raw: &str, now_ms: i64) -> Result<TimeWindow> {
     }
     let bytes = raw.as_bytes();
     if bytes.len() < 2 || bytes[bytes.len() - 1] != b'd' {
-        anyhow::bail!(
-            "window must be `all` or `<n>d` (e.g. `7d`, `30d`); got `{raw}`"
-        );
+        anyhow::bail!("window must be `all` or `<n>d` (e.g. `7d`, `30d`); got `{raw}`");
     }
     let n: u32 = raw[..raw.len() - 1]
         .parse()
@@ -50,8 +48,8 @@ pub async fn report(ctx: &AppContext, window: &str) -> Result<()> {
     let tw = parse_window(window, now_ms)?;
 
     let config_dir = claudepot_core::paths::claude_config_dir();
-    let sessions = list_all_sessions(&config_dir)
-        .with_context(|| "failed to read CC session index")?;
+    let sessions =
+        list_all_sessions(&config_dir).with_context(|| "failed to read CC session index")?;
 
     // Pricing comes from the bundled defaults. The cache-and-refresh
     // service exists for the GUI; CLI is one-shot, so paying the
@@ -85,8 +83,8 @@ fn print_human(r: &LocalUsageReport) {
     // Column widths chosen to fit a typical 100-col terminal. Project
     // path takes the residual slack so long paths don't wrap.
     println!(
-        "{:<10}  {:>5}  {:>13}  {:>13}  {:>13}  {:>15}  {:>11}  {}",
-        "LAST", "SESS", "INPUT", "OUTPUT", "C-WRITE", "C-READ", "COST USD", "PROJECT"
+        "{:<10}  {:>5}  {:>13}  {:>13}  {:>13}  {:>15}  {:>11}  PROJECT",
+        "LAST", "SESS", "INPUT", "OUTPUT", "C-WRITE", "C-READ", "COST USD"
     );
     println!("{}", "-".repeat(110));
     for row in &r.rows {
@@ -152,8 +150,10 @@ fn print_totals(r: &LocalUsageReport) {
         .cost_usd
         .map(|c| format!("${c:.2}"))
         .unwrap_or_else(|| "n/a".to_string());
+    let n_rows = r.rows.len();
+    let plural = if n_rows == 1 { "" } else { "s" };
     println!(
-        "{:<10}  {:>5}  {:>13}  {:>13}  {:>13}  {:>15}  {:>11}  {}",
+        "{:<10}  {:>5}  {:>13}  {:>13}  {:>13}  {:>15}  {:>11}  ({n_rows} project{plural})",
         "TOTAL",
         r.totals.session_count,
         thousands(r.totals.tokens_input),
@@ -161,11 +161,6 @@ fn print_totals(r: &LocalUsageReport) {
         thousands(r.totals.tokens_cache_creation),
         thousands(r.totals.tokens_cache_read),
         cost,
-        format!(
-            "({} project{})",
-            r.rows.len(),
-            if r.rows.len() == 1 { "" } else { "s" }
-        ),
     );
 }
 
@@ -178,7 +173,7 @@ fn thousands(n: u64) -> String {
     let mut out = String::with_capacity(s.len() + s.len() / 3);
     let len = bytes.len();
     for (i, b) in bytes.iter().enumerate() {
-        if i > 0 && (len - i) % 3 == 0 {
+        if i > 0 && (len - i).is_multiple_of(3) {
             out.push(',');
         }
         out.push(*b as char);

@@ -76,7 +76,7 @@ pub fn flatten_files(nodes: &[Node]) -> Vec<FileNodeDto> {
 
 /// Reference-flavored variant of `flatten_files` for callers that need
 /// to inspect the underlying `FileNode` (rather than emit a DTO).
-pub fn flatten_file_refs<'a>(nodes: &'a [Node]) -> Vec<&'a FileNode> {
+pub fn flatten_file_refs(nodes: &[Node]) -> Vec<&FileNode> {
     let mut out = Vec::new();
     for n in nodes {
         match n {

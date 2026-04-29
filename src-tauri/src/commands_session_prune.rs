@@ -4,15 +4,11 @@
 //! `ops.rs` op-progress pipeline. `session_trash_*` is a
 //! read/restore/empty surface over `claudepot_core::trash`.
 
-use crate::ops::{
-    emit_terminal, new_op_id, new_running_op, spawn_op_thread, OpKind, RunningOps,
-};
+use crate::ops::{emit_terminal, new_op_id, new_running_op, spawn_op_thread, OpKind, RunningOps};
 use claudepot_core::paths;
 use tauri::{AppHandle, State};
 
-fn filter_from_dto(
-    dto: crate::dto::PruneFilterDto,
-) -> claudepot_core::session_prune::PruneFilter {
+fn filter_from_dto(dto: crate::dto::PruneFilterDto) -> claudepot_core::session_prune::PruneFilter {
     claudepot_core::session_prune::PruneFilter {
         older_than: dto.older_than_secs.map(std::time::Duration::from_secs),
         larger_than: dto.larger_than_bytes,
@@ -26,9 +22,7 @@ fn filter_from_dto(
     }
 }
 
-fn slim_opts_from_dto(
-    dto: crate::dto::SlimOptsDto,
-) -> claudepot_core::session_slim::SlimOpts {
+fn slim_opts_from_dto(dto: crate::dto::SlimOptsDto) -> claudepot_core::session_slim::SlimOpts {
     claudepot_core::session_slim::SlimOpts {
         drop_tool_results_over_bytes: dto.drop_tool_results_over_bytes,
         exclude_tools: dto.exclude_tools,
@@ -112,9 +106,7 @@ pub async fn session_slim_start(
     let ops_c = ops.inner().clone();
     spawn_op_thread(app, ops_c, op_id.clone(), move |sink, app, ops, op_id| {
         let data_dir = paths::claudepot_data_dir();
-        let res = claudepot_core::session_slim::execute_slim(
-            &data_dir, &path_buf, &opts, &sink,
-        );
+        let res = claudepot_core::session_slim::execute_slim(&data_dir, &path_buf, &opts, &sink);
         let err = res.err().map(|e| e.to_string());
         emit_terminal(&app, &ops, &op_id, err);
     });
@@ -160,19 +152,14 @@ pub async fn session_slim_start_all(
     spawn_op_thread(app, ops_c, op_id.clone(), move |sink, app, ops, op_id| {
         let config_dir = paths::claude_config_dir();
         let data_dir = paths::claudepot_data_dir();
-        let plan = match claudepot_core::session_slim::plan_slim_all(
-            &config_dir,
-            &filter,
-            &opts,
-        ) {
+        let plan = match claudepot_core::session_slim::plan_slim_all(&config_dir, &filter, &opts) {
             Ok(p) => p,
             Err(e) => {
                 emit_terminal(&app, &ops, &op_id, Some(e.to_string()));
                 return;
             }
         };
-        let report =
-            claudepot_core::session_slim::execute_slim_all(&data_dir, &plan, &opts, &sink);
+        let report = claudepot_core::session_slim::execute_slim_all(&data_dir, &plan, &opts, &sink);
         // Propagate per-file failures to the UI. Planning errors
         // (rows that couldn't be scanned) and execute failures are
         // both reported — a partial success with any failures is not
@@ -226,9 +213,8 @@ pub async fn session_trash_restore(
     // `spawn_blocking` — file move + manifest write.
     tokio::task::spawn_blocking(move || {
         let cwd = override_cwd.as_deref().map(std::path::Path::new);
-        let restored =
-            claudepot_core::trash::restore(&paths::claudepot_data_dir(), &entry_id, cwd)
-                .map_err(|e| format!("trash restore: {e}"))?;
+        let restored = claudepot_core::trash::restore(&paths::claudepot_data_dir(), &entry_id, cwd)
+            .map_err(|e| format!("trash restore: {e}"))?;
         Ok::<_, String>(restored.to_string_lossy().to_string())
     })
     .await

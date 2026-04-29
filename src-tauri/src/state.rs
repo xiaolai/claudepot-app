@@ -113,9 +113,7 @@ mod tests {
 /// service itself is `Arc<DryRunService>`; this newtype just lets
 /// Tauri manage it via `State<'_, DryRunState>` without colliding
 /// with other `Arc<...>` managed types.
-pub struct DryRunState(
-    pub Arc<claudepot_core::project_dry_run_service::DryRunService>,
-);
+pub struct DryRunState(pub Arc<claudepot_core::project_dry_run_service::DryRunService>);
 
 impl DryRunState {
     pub fn new() -> Self {
@@ -134,15 +132,12 @@ impl Default for DryRunState {
 /// fan-out, membership-debounce, and bridge-task lifecycle — every
 /// piece of policy that previously lived in `commands_activity.rs`.
 pub struct LiveSessionState {
-    pub service:
-        Arc<claudepot_core::services::live_activity_service::LiveActivityService>,
+    pub service: Arc<claudepot_core::services::live_activity_service::LiveActivityService>,
 }
 
 impl LiveSessionState {
     pub fn new(
-        service: Arc<
-            claudepot_core::services::live_activity_service::LiveActivityService,
-        >,
+        service: Arc<claudepot_core::services::live_activity_service::LiveActivityService>,
     ) -> Self {
         Self { service }
     }

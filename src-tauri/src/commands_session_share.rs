@@ -9,9 +9,7 @@
 //! second — matching the CLI. The settings UI reads / writes only the
 //! keychain slot.
 
-use crate::ops::{
-    emit_terminal, new_op_id, new_running_op, OpKind, RunningOps, TauriProgressSink,
-};
+use crate::ops::{emit_terminal, new_op_id, new_running_op, OpKind, RunningOps, TauriProgressSink};
 use claudepot_core::paths;
 use tauri::{AppHandle, State};
 use zeroize::Zeroize;
@@ -84,9 +82,7 @@ fn format_from_dto(f: ExportFormatDto) -> claudepot_core::session_export::Export
     }
 }
 
-fn resolve_session_detail(
-    target: &str,
-) -> Result<claudepot_core::session::SessionDetail, String> {
+fn resolve_session_detail(target: &str) -> Result<claudepot_core::session::SessionDetail, String> {
     let cfg = paths::claude_config_dir();
     if target.ends_with(".jsonl") {
         let p = std::path::PathBuf::from(target);
@@ -138,12 +134,7 @@ pub async fn session_share_gist_start(
         Some((_, base)) => base.to_string(),
         None => target.clone(),
     };
-    ops.insert(new_running_op(
-        &op_id,
-        OpKind::SessionShare,
-        display,
-        "",
-    ));
+    ops.insert(new_running_op(&op_id, OpKind::SessionShare, display, ""));
     let app_c = app.clone();
     let ops_c = ops.inner().clone();
     let op_id_c = op_id.clone();
@@ -164,17 +155,13 @@ pub async fn session_share_gist_start(
                 return;
             }
         };
-        let body =
-            claudepot_core::session_export::export_with(&detail, fmt.clone(), &pol);
+        let body = claudepot_core::session_export::export_with(&detail, fmt.clone(), &pol);
         let dest = claudepot_core::session_export_delivery::ExportDestination::Gist {
             filename: claudepot_core::session_export_delivery::default_export_filename(
                 &detail.row.session_id,
                 claudepot_core::session_export_delivery::extension_for(&fmt),
             ),
-            description: format!(
-                "Claudepot session export: {}",
-                detail.row.session_id
-            ),
+            description: format!("Claudepot session export: {}", detail.row.session_id),
             public,
         };
         let rt = match tokio::runtime::Builder::new_current_thread()
@@ -307,9 +294,7 @@ pub async fn settings_github_token_get() -> Result<GithubTokenStatus, String> {
 }
 
 #[tauri::command]
-pub async fn settings_github_token_set(
-    mut value: String,
-) -> Result<GithubTokenStatus, String> {
+pub async fn settings_github_token_set(mut value: String) -> Result<GithubTokenStatus, String> {
     // Trim into a fresh owned `String`; the original IPC arg `value`
     // gets zeroized at the end regardless of outcome (D-5/6/7).
     let mut trimmed = value.trim().to_string();

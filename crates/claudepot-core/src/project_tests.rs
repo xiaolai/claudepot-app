@@ -1003,7 +1003,7 @@ fn test_move_project_rewrites_history() {
     let new_str = dst.to_string_lossy().to_string();
 
     let history = base.join("history.jsonl");
-    let entries = vec![
+    let entries = [
         serde_json::json!({"project": old_str, "sessionId": "abc", "timestamp": 1}).to_string(),
         serde_json::json!({"project": "/other/path", "sessionId": "def", "timestamp": 2})
             .to_string(),
@@ -1161,10 +1161,7 @@ fn test_clean_skips_unreachable_mount_prefix() {
         // mount point doesn't exist → unreachable → NOT orphan.
         assert_eq!(result.orphans_found, 0);
         assert_eq!(result.unreachable_skipped, 1);
-        let info = orphans
-            .iter()
-            .find(|p| p.sanitized_name == san)
-            .or_else(|| None);
+        let info = orphans.iter().find(|p| p.sanitized_name == san).or(None);
         // (orphans is the orphan list, so the unreachable project
         // won't appear there; that's by design.)
         assert!(info.is_none());
@@ -2148,7 +2145,7 @@ fn test_rewrite_history_invalid_json_passthrough() {
     let old_path = "/old/path";
     let new_path = "/new/path";
 
-    let lines = vec![
+    let lines = [
         format!(r#"{{"project":"{}","sessionId":"abc"}}"#, old_path),
         format!("not valid json but contains {}", old_path),
         "totally unrelated line".to_string(),
@@ -2182,7 +2179,7 @@ fn test_resolve_path_relative_joins_cwd() {
     // resolve_path with a relative path should join it with cwd
     let result = resolve_path("some-relative-dir").unwrap();
     let cwd = std::env::current_dir().unwrap();
-    let expected = cwd.join("some-relative-dir").to_string_lossy().to_string();
+    let _expected = cwd.join("some-relative-dir").to_string_lossy().to_string();
     // NFC normalization may change the string slightly on macOS
     assert!(result.contains("some-relative-dir"));
     assert!(result.starts_with('/') || result.contains(':')); // absolute

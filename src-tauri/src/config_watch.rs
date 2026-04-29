@@ -228,12 +228,7 @@ fn run_loop(
                     continue;
                 }
                 generation_counter = generation_counter.wrapping_add(1);
-                emit_patch(
-                    &app,
-                    anchor.as_deref(),
-                    &svc,
-                    generation_counter,
-                );
+                emit_patch(&app, anchor.as_deref(), &svc, generation_counter);
                 last_keepalive = std::time::Instant::now();
             }
             Ok(WorkerMsg::Event(Err(e))) => {
@@ -245,12 +240,7 @@ fn run_loop(
                 if last_keepalive.elapsed() >= KEEPALIVE {
                     gen.bump();
                     generation_counter = generation_counter.wrapping_add(1);
-                    emit_patch(
-                        &app,
-                        anchor.as_deref(),
-                        &svc,
-                        generation_counter,
-                    );
+                    emit_patch(&app, anchor.as_deref(), &svc, generation_counter);
                     last_keepalive = std::time::Instant::now();
                 }
             }
@@ -446,9 +436,7 @@ pub async fn config_watch_start(
 }
 
 #[tauri::command]
-pub async fn config_watch_stop(
-    state: tauri::State<'_, ConfigWatchState>,
-) -> Result<(), String> {
+pub async fn config_watch_stop(state: tauri::State<'_, ConfigWatchState>) -> Result<(), String> {
     // Same pattern as `config_watch_start`: release the mutex before
     // joining the worker so other commands can make progress while
     // shutdown is in flight (audit 2026-04-24, B9).

@@ -103,7 +103,10 @@ fn to_source_dto(src: PriceSource) -> PriceSourceDto {
             timestamp: verified_at,
             url: String::new(),
         },
-        PriceSource::Live { url, fetched_at_unix } => PriceSourceDto {
+        PriceSource::Live {
+            url,
+            fetched_at_unix,
+        } => PriceSourceDto {
             kind: "live".to_string(),
             timestamp: unix_to_iso(fetched_at_unix),
             url,

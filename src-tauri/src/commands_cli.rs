@@ -35,14 +35,24 @@ pub async fn cli_use(email: String, force: Option<bool>) -> Result<(), String> {
     // …") and leaked CLI-binary phrasing into a GUI surface.
     if force.unwrap_or(false) {
         cli_backend::swap::switch_force(
-            &store, current_id, target.uuid,
-            platform.as_ref(), true, &refresher, &fetcher,
+            &store,
+            current_id,
+            target.uuid,
+            platform.as_ref(),
+            true,
+            &refresher,
+            &fetcher,
         )
         .await
     } else {
         cli_backend::swap::switch(
-            &store, current_id, target.uuid,
-            platform.as_ref(), true, &refresher, &fetcher,
+            &store,
+            current_id,
+            target.uuid,
+            platform.as_ref(),
+            true,
+            &refresher,
+            &fetcher,
         )
         .await
     }

@@ -402,9 +402,11 @@ mod tests {
         let id = a.id;
         store.add(a).unwrap();
 
-        let mut patch = AutomationPatch::default();
-        patch.enabled = Some(false);
-        patch.prompt = Some("new prompt".into());
+        let patch = AutomationPatch {
+            enabled: Some(false),
+            prompt: Some("new prompt".into()),
+            ..AutomationPatch::default()
+        };
         store.update(&id, patch).unwrap();
 
         let updated = store.get(&id).unwrap();

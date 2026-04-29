@@ -134,7 +134,11 @@ pub enum ClearError {
     UnknownLiveBlob,
 }
 
+// See launcher.rs for the rationale: tests hold `lock_data_dir()`
+// across `.await` deliberately to serialize the shared data-dir
+// env-var across the test binary.
 #[cfg(test)]
+#[allow(clippy::await_holding_lock)]
 mod tests {
     use super::*;
     use crate::error::SwapError;

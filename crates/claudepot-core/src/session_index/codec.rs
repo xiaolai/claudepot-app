@@ -214,42 +214,6 @@ fn is_token_char(c: char) -> bool {
     c.is_ascii_alphanumeric() || c == '_' || c == '-'
 }
 
-#[cfg(test)]
-mod redact_tests {
-    use super::redact_secrets;
-
-    #[test]
-    fn passthrough_when_no_token() {
-        assert_eq!(redact_secrets("debug this"), "debug this");
-    }
-
-    #[test]
-    fn redacts_a_bare_token() {
-        let out = redact_secrets("here is sk-ant-oat01-AbC123_-xYz end");
-        assert_eq!(out, "here is sk-ant-**** end");
-    }
-
-    #[test]
-    fn redacts_multiple_tokens() {
-        let out = redact_secrets("sk-ant-one sk-ant-two_-MixEd");
-        assert_eq!(out, "sk-ant-**** sk-ant-****");
-    }
-
-    #[test]
-    fn redacts_at_string_boundaries() {
-        assert_eq!(redact_secrets("sk-ant-Abc"), "sk-ant-****");
-        assert_eq!(redact_secrets("sk-ant-Abc\n"), "sk-ant-****\n");
-    }
-
-    #[test]
-    fn leaves_the_bare_prefix_alone_when_not_a_token() {
-        // An `sk-ant-` with no continuation chars becomes the redacted
-        // form anyway (still matches the prefix), which is fine —
-        // better to over-redact than leak.
-        assert_eq!(redact_secrets("sk-ant- space"), "sk-ant-**** space");
-    }
-}
-
 /// Remove one row by path. Used for files that vanished from disk.
 pub(super) fn delete_row(db: &Connection, file_path: &str) -> Result<(), SessionIndexError> {
     db.execute(
@@ -414,3 +378,39 @@ FROM sessions
 ORDER BY
     COALESCE(last_ts_ms, file_mtime_ns / 1000000) DESC
 "#;
+
+#[cfg(test)]
+mod redact_tests {
+    use super::redact_secrets;
+
+    #[test]
+    fn passthrough_when_no_token() {
+        assert_eq!(redact_secrets("debug this"), "debug this");
+    }
+
+    #[test]
+    fn redacts_a_bare_token() {
+        let out = redact_secrets("here is sk-ant-oat01-AbC123_-xYz end");
+        assert_eq!(out, "here is sk-ant-**** end");
+    }
+
+    #[test]
+    fn redacts_multiple_tokens() {
+        let out = redact_secrets("sk-ant-one sk-ant-two_-MixEd");
+        assert_eq!(out, "sk-ant-**** sk-ant-****");
+    }
+
+    #[test]
+    fn redacts_at_string_boundaries() {
+        assert_eq!(redact_secrets("sk-ant-Abc"), "sk-ant-****");
+        assert_eq!(redact_secrets("sk-ant-Abc\n"), "sk-ant-****\n");
+    }
+
+    #[test]
+    fn leaves_the_bare_prefix_alone_when_not_a_token() {
+        // An `sk-ant-` with no continuation chars becomes the redacted
+        // form anyway (still matches the prefix), which is fine —
+        // better to over-redact than leak.
+        assert_eq!(redact_secrets("sk-ant- space"), "sk-ant-**** space");
+    }
+}

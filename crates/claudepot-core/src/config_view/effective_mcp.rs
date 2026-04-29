@@ -468,7 +468,7 @@ mod tests {
         let r = compute(&bundle, McpSimulationMode::Interactive);
         let foo = r.iter().find(|s| s.name == "foo").unwrap();
         // Plugin overwrote (last-wins) but both contributors recorded.
-        assert!(foo.contributors.len() >= 1);
+        assert!(!foo.contributors.is_empty());
     }
 
     #[test]

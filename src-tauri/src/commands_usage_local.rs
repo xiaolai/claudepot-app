@@ -11,8 +11,7 @@
 use claudepot_core::pricing;
 use claudepot_core::session::list_all_sessions;
 use claudepot_core::usage_local::{
-    aggregate_from_rows, LocalUsageReport, ProjectUsageRow, ReportWindow, TimeWindow,
-    UsageTotals,
+    aggregate_from_rows, LocalUsageReport, ProjectUsageRow, ReportWindow, TimeWindow, UsageTotals,
 };
 use serde::{Deserialize, Serialize};
 
@@ -215,15 +214,12 @@ fn relative_when(unix_secs: u64) -> String {
 /// main thread per the threading-policy comment in
 /// `commands.rs`.
 #[tauri::command]
-pub async fn local_usage_aggregate(
-    spec: WindowSpec,
-) -> Result<LocalUsageReportDto, String> {
+pub async fn local_usage_aggregate(spec: WindowSpec) -> Result<LocalUsageReportDto, String> {
     let now_ms = chrono::Utc::now().timestamp_millis();
     let window = spec.into_time_window(now_ms)?;
 
     let config_dir = claudepot_core::paths::claude_config_dir();
-    let sessions = list_all_sessions(&config_dir)
-        .map_err(|e| format!("session index: {e}"))?;
+    let sessions = list_all_sessions(&config_dir).map_err(|e| format!("session index: {e}"))?;
 
     let table = pricing::load();
     let pricing_source = format_pricing_source(&table);
@@ -237,7 +233,7 @@ pub async fn local_usage_aggregate(
 mod tests {
     use super::*;
     use claudepot_core::pricing::{ModelRates, PriceSource, PriceTable};
-    use claudepot_core::session::TokenUsage;
+
     use std::collections::BTreeMap;
 
     #[test]

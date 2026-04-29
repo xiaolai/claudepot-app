@@ -85,8 +85,7 @@ impl AccountUsageDto {
 ///   - "ok"            — fresh data
 ///   - "stale"         — cached data, see `age_secs`
 ///   - "no_credentials"— account has no stored blob (shouldn't happen
-///                       for has_cli_credentials=true, included for
-///                       completeness)
+///     for has_cli_credentials=true, included for completeness)
 ///   - "expired"       — token past local expiry
 ///   - "rate_limited"  — on cooldown, no cache fallback
 ///   - "error"         — see `error_detail`
@@ -111,9 +110,7 @@ pub struct UsageEntryDto {
 }
 
 impl UsageEntryDto {
-    pub fn from_outcome(
-        outcome: claudepot_core::services::usage_cache::UsageOutcome,
-    ) -> Self {
+    pub fn from_outcome(outcome: claudepot_core::services::usage_cache::UsageOutcome) -> Self {
         use claudepot_core::services::usage_cache::UsageOutcome;
         match outcome {
             UsageOutcome::Fresh { response, age_secs } => Self {

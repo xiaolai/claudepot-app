@@ -95,8 +95,7 @@ impl Preferences {
         }
         let s = serde_json::to_string_pretty(self)
             .map_err(|e| format!("preferences: serialize: {e}"))?;
-        std::fs::write(&p, s)
-            .map_err(|e| format!("preferences: write {}: {}", p.display(), e))?;
+        std::fs::write(&p, s).map_err(|e| format!("preferences: write {}: {}", p.display(), e))?;
         Ok(())
     }
 }

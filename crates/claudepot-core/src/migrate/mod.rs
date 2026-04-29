@@ -1430,8 +1430,10 @@ mod tests {
 
         let cfg_target = tmp.path().join("dst/.claude");
         fs::create_dir_all(cfg_target.join("projects")).unwrap();
-        let mut opts = ImportOptions::default();
-        opts.accept_hooks = true;
+        let opts = ImportOptions {
+            accept_hooks: true,
+            ..ImportOptions::default()
+        };
         import_bundle(&cfg_target, &bundle, opts).unwrap();
 
         let settings_v: serde_json::Value =
@@ -1489,8 +1491,10 @@ mod tests {
         // Import works with the passphrase.
         let cfg_target = tmp.path().join("dst/.claude");
         fs::create_dir_all(cfg_target.join("projects")).unwrap();
-        let mut imp = ImportOptions::default();
-        imp.decrypt_passphrase = Some(pwd.clone());
+        let imp = ImportOptions {
+            decrypt_passphrase: Some(pwd.clone()),
+            ..ImportOptions::default()
+        };
         let r = import_bundle(&cfg_target, &receipt.bundle_path, imp).unwrap();
         assert_eq!(r.projects_imported.len(), 1);
 

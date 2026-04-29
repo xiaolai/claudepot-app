@@ -46,8 +46,7 @@ pub async fn session_move(
     force_conflict: bool,
     cleanup_source: bool,
 ) -> Result<crate::dto::MoveSessionReportDto, String> {
-    let sid = Uuid::parse_str(&session_id)
-        .map_err(|e| format!("invalid session id: {e}"))?;
+    let sid = Uuid::parse_str(&session_id).map_err(|e| format!("invalid session id: {e}"))?;
     // `move_session` rewrites transcript files, mutates `.claude.json`,
     // and can touch the live-runtime lockfile. Blocking I/O with no
     // await points — push it off the Tokio worker.
@@ -101,9 +100,7 @@ pub async fn session_adopt_orphan(
 /// it from Trash if they change their mind; the guard that the slug is
 /// valid + resolves to a real dir happens in core.
 #[tauri::command]
-pub async fn session_discard_orphan(
-    slug: String,
-) -> Result<crate::dto::DiscardReportDto, String> {
+pub async fn session_discard_orphan(slug: String) -> Result<crate::dto::DiscardReportDto, String> {
     tauri::async_runtime::spawn_blocking(move || {
         let cfg = paths::claude_config_dir();
         let report = claudepot_core::session_move::discard_orphan_project(&cfg, &slug)
@@ -124,6 +121,10 @@ pub async fn session_discard_orphan(
 /// for now — see migration plan in
 /// `dev-docs/reports/codex-mini-audit-fix-deferred-design-2026-04-25.md`
 /// (A-2 step 7).
+// Tauri command argument names must match the renderer's invoke
+// payload, so collapsing into a struct would silently rename the
+// IPC contract. Keep the explicit list and silence the lint.
+#[allow(clippy::too_many_arguments)]
 #[tauri::command]
 pub async fn session_move_start(
     session_id: String,
@@ -135,8 +136,7 @@ pub async fn session_move_start(
     app: AppHandle,
     ops: State<'_, RunningOps>,
 ) -> Result<String, String> {
-    let sid = Uuid::parse_str(&session_id)
-        .map_err(|e| format!("invalid session id: {e}"))?;
+    let sid = Uuid::parse_str(&session_id).map_err(|e| format!("invalid session id: {e}"))?;
 
     let op_id = new_op_id();
     ops.insert(new_running_op(

@@ -77,7 +77,10 @@ pub fn cards_set_last_seen(
     state: State<'_, ActivityCardsState>,
     card_id: i64,
 ) -> Result<(), String> {
-    state.index.set_last_seen(card_id).map_err(|e| e.to_string())
+    state
+        .index
+        .set_last_seen(card_id)
+        .map_err(|e| e.to_string())
 }
 
 /// Resolve a card id to a navigation payload — session path +

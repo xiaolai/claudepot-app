@@ -42,9 +42,7 @@ pub use crate::{
         AccountSummary, AccountSummaryBasic, AppStatus, CcIdentity, ReconcileReportDto,
         RegisterOutcome, RemoveOutcome,
     },
-    dto_activity::{
-        ActivityTrendsDto, LiveDeltaDto, LiveDeltaKindDto, LiveSessionSummaryDto,
-    },
+    dto_activity::{ActivityTrendsDto, LiveDeltaDto, LiveDeltaKindDto, LiveSessionSummaryDto},
     dto_activity_cards::{
         ActivityCardDto, CardNavigateDto, CardsCountDto, CardsRecentQueryDto,
         CardsReindexFailureDto, CardsReindexResultDto, HelpRefDto, SourceRefDto,
@@ -55,24 +53,22 @@ pub use crate::{
     },
     dto_keys::{ApiKeySummaryDto, OauthTokenSummaryDto},
     dto_project::{
-        CleanPreviewDto, DryRunPlanDto, MoveArgsDto, PendingJournalsSummaryDto,
-        ProjectDetailDto, ProjectInfoDto, ProjectRestoreReportDto,
-        ProjectTrashEntryDto, ProjectTrashListingDto,
-        RemoveProjectPreviewBasicDto, RemoveProjectPreviewDto,
-        RemoveProjectPreviewExtrasDto, RemoveProjectResultDto, SessionInfoDto,
+        CleanPreviewDto, DryRunPlanDto, MoveArgsDto, PendingJournalsSummaryDto, ProjectDetailDto,
+        ProjectInfoDto, ProjectRestoreReportDto, ProjectTrashEntryDto, ProjectTrashListingDto,
+        RemoveProjectPreviewBasicDto, RemoveProjectPreviewDto, RemoveProjectPreviewExtrasDto,
+        RemoveProjectResultDto, SessionInfoDto,
     },
     dto_project_repair::{JournalEntryDto, JournalFlagsDto},
     dto_session::{
         ProtectedPathDto, SessionDetailDto, SessionEventDto, SessionRowDto, TokenUsageDto,
     },
     dto_session_debug::{
-        ChunkHeaderDto, ChunkMetricsDto, ContextCategoryDto, ContextInjectionDto,
-        ContextPhaseDto, ContextStatsDto, LinkedToolDto, RepositoryGroupDto, SearchHitDto,
-        SessionChunkDto, TokensByCategoryDto,
+        ChunkHeaderDto, ChunkMetricsDto, ContextCategoryDto, ContextInjectionDto, ContextPhaseDto,
+        ContextStatsDto, LinkedToolDto, RepositoryGroupDto, SearchHitDto, SessionChunkDto,
+        TokensByCategoryDto,
     },
     dto_session_move::{
-        AdoptFailureDto, AdoptReportDto, DiscardReportDto, MoveSessionReportDto,
-        OrphanedProjectDto,
+        AdoptFailureDto, AdoptReportDto, DiscardReportDto, MoveSessionReportDto, OrphanedProjectDto,
     },
     dto_session_prune::{
         BulkSlimEntryDto, BulkSlimPlanDto, PruneEntryDto, PruneFilterDto, PrunePlanDto,

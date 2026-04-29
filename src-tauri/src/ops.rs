@@ -324,9 +324,7 @@ impl RunningOps {
     /// panicking. If an earlier panic poisoned the map, the ops
     /// pipeline would propagate the panic forever — this turns a
     /// single transient panic into a logged-and-continue condition.
-    fn guard(
-        &self,
-    ) -> std::sync::MutexGuard<'_, HashMap<String, RunningOpInfo>> {
+    fn guard(&self) -> std::sync::MutexGuard<'_, HashMap<String, RunningOpInfo>> {
         match self.inner.lock() {
             Ok(g) => g,
             Err(poisoned) => {
@@ -479,7 +477,11 @@ fn op_terminal_label(op: &RunningOpInfo) -> String {
         OpKind::AccountLogin => "Account login".to_string(),
         OpKind::AccountRegister => "Added account".to_string(),
         OpKind::VerifyAll => match &op.verify_results {
-            Some(r) => format!("Verified {} account{}", r.total, if r.total == 1 { "" } else { "s" }),
+            Some(r) => format!(
+                "Verified {} account{}",
+                r.total,
+                if r.total == 1 { "" } else { "s" }
+            ),
             None => "Verified accounts".to_string(),
         },
         OpKind::AutomationRun => "Automation run".to_string(),
@@ -491,10 +493,7 @@ fn basename(path: &str) -> &str {
         return path;
     }
     let trimmed = path.trim_end_matches(['/', '\\']);
-    let idx = trimmed
-        .rfind(|c: char| c == '/' || c == '\\')
-        .map(|i| i + 1)
-        .unwrap_or(0);
+    let idx = trimmed.rfind(['/', '\\']).map(|i| i + 1).unwrap_or(0);
     &trimmed[idx..]
 }
 
@@ -509,12 +508,7 @@ fn basename(path: &str) -> &str {
 ///      `OpTerminalEvent` payload. This is the channel
 ///      notification-style consumers listen on (single
 ///      subscription, all ops).
-pub fn emit_terminal(
-    app: &AppHandle,
-    ops: &RunningOps,
-    op_id: &str,
-    error: Option<String>,
-) {
+pub fn emit_terminal(app: &AppHandle, ops: &RunningOps, op_id: &str, error: Option<String>) {
     let status_str = if error.is_some() { "error" } else { "complete" };
     let payload = ProgressEvent {
         op_id: op_id.to_string(),
@@ -783,12 +777,8 @@ impl claudepot_core::services::account_service::VerifyProgressSink for TauriVeri
 /// `std::thread::spawn` rather than `tokio::spawn`: Tauri's sync
 /// command path doesn't always have a reactor running, and the work
 /// is blocking I/O anyway.
-pub fn spawn_op_thread<F>(
-    app: AppHandle,
-    ops: RunningOps,
-    op_id: String,
-    work: F,
-) where
+pub fn spawn_op_thread<F>(app: AppHandle, ops: RunningOps, op_id: String, work: F)
+where
     F: FnOnce(TauriProgressSink, AppHandle, RunningOps, String) + Send + 'static,
 {
     std::thread::spawn(move || {

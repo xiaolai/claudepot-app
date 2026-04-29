@@ -201,12 +201,6 @@ impl DetailBus {
         let mut map = self.inner.lock().await;
         map.remove(session_id);
     }
-
-    #[cfg(test)]
-    async fn dropped_count(&self, session_id: &str) -> u64 {
-        let map = self.inner.lock().await;
-        map.get(session_id).map(|s| s.dropped).unwrap_or(0)
-    }
 }
 
 /// Errors the bus surfaces to callers. Silent drops under channel

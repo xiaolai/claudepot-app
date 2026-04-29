@@ -3,12 +3,15 @@
 //! `#[cfg(test)] #[path = "account_service_tests.rs"] mod tests;` so tests
 //! still resolve `super::*` against the parent module's internals.
 
+// See cli_backend/swap_tests.rs for the rationale: tests hold
+// `lock_data_dir()` across `.await` and use `Default::default()`-
+// then-assign patches — both deliberate test-style choices.
+#![allow(clippy::await_holding_lock, clippy::field_reassign_with_default)]
+
 use super::*;
 use crate::error::{OAuthError, SwapError};
 use crate::oauth::refresh::TokenResponse;
-use crate::testing::{
-    fresh_blob_json, make_account, setup_test_data_dir, test_store, DATA_DIR_LOCK,
-};
+use crate::testing::{fresh_blob_json, make_account, setup_test_data_dir, test_store};
 
 fn insert_account(store: &AccountStore, email: &str) -> Account {
     let account = make_account(email);
