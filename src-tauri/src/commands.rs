@@ -166,6 +166,17 @@ pub async fn app_status() -> Result<AppStatus, String> {
     })
 }
 
+/// Quit-confirm follow-through. Renderer calls this after the user
+/// confirms in the QuitConfirm modal that they want to abandon
+/// in-flight ops. The `attempt_quit` gate (see `app_menu.rs`) is the
+/// only reason the modal exists; once the user confirms, we exit
+/// directly — no second gate, no second event.
+#[tauri::command]
+pub async fn quit_now(app: tauri::AppHandle) -> Result<(), String> {
+    app.exit(0);
+    Ok(())
+}
+
 /// macOS-only: request a keychain unlock via the system's native dialog.
 /// Spawns `security unlock-keychain` without -p so macOS shows its built-in
 /// "Unlock Keychain" password prompt. The user's password never reaches

@@ -11,6 +11,7 @@ import { StatusIssuesBanner } from "./components/StatusIssuesBanner";
 import { ToastContainer } from "./components/ToastContainer";
 import { CommandPalette } from "./components/CommandPalette";
 import { ConfirmDialog } from "./components/ConfirmDialog";
+import { QuitConfirm } from "./components/QuitConfirm";
 import { ShortcutsModal } from "./components/ShortcutsModal";
 import { SplitBrainConfirm } from "./sections/accounts/SplitBrainConfirm";
 import { DesktopConfirmDialog } from "./sections/accounts/DesktopConfirmDialog";
@@ -1112,6 +1113,12 @@ function AppShell() {
         open={showConsentModal}
         onDismiss={() => setShowConsentModal(false)}
       />
+
+      {/* Quit-gate modal. Self-contained — listens on
+          `cp-quit-requested` and is a no-op until the Rust side
+          decides ⌘Q (or tray Quit) needs confirmation because
+          `RunningOps` has live entries. */}
+      <QuitConfirm />
     </div>
   );
 }

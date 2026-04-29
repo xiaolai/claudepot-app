@@ -10,7 +10,17 @@
 //! NOT bind accelerators on View items (⌘1..⌘4 / ⌘R) here so the React
 //! listeners stay authoritative. The only accelerators we keep are the
 //! macOS-standard ⌘, and ⌘Q on the Claudepot menu.
+//!
+//! Quit gate. ⌘Q is a custom menu item (id `app-menu:quit`), not the
+//! Tauri-predefined Quit, because the predefined item ignores Rust-side
+//! state and would tear down the process mid-op. The gate consults the
+//! `RunningOps` map: empty → `app.exit(0)`; non-empty → emit
+//! `cp-quit-requested` with an op snapshot so the renderer can show a
+//! confirm modal. Both this menu and the tray's Quit row route through
+//! the same `attempt_quit` helper so the gate is not a sieve.
 
+use crate::ops::{OpKind, OpStatus, RunningOps};
+use serde::Serialize;
 use tauri::menu::{
     AboutMetadataBuilder, MenuBuilder, MenuItemBuilder, PredefinedMenuItem, SubmenuBuilder,
 };
@@ -43,8 +53,15 @@ pub fn install<R: Runtime>(app: &AppHandle<R>) -> Result<(), String> {
         .map_err(|e| format!("hide_others: {e}"))?;
     let show_all = PredefinedMenuItem::show_all(app, Some("Show All"))
         .map_err(|e| format!("show_all: {e}"))?;
-    let quit =
-        PredefinedMenuItem::quit(app, Some("Quit Claudepot")).map_err(|e| format!("quit: {e}"))?;
+    // Custom quit item — accelerator binds ⌘Q so macOS routes it here
+    // before the system Quit fires. Click handler in `handle_menu_event`
+    // calls `attempt_quit`, which gates on `RunningOps`.
+    // `CmdOrCtrl+Q` so Linux/Windows builds keep their conventional
+    // Ctrl+Q accelerator. macOS resolves CmdOrCtrl to ⌘.
+    let quit = MenuItemBuilder::with_id("app-menu:quit", "Quit Claudepot")
+        .accelerator("CmdOrCtrl+Q")
+        .build(app)
+        .map_err(|e| format!("quit: {e}"))?;
 
     let claudepot = SubmenuBuilder::new(app, "Claudepot")
         .item(&about)
@@ -211,6 +228,14 @@ pub fn install<R: Runtime>(app: &AppHandle<R>) -> Result<(), String> {
 /// plus window focus); everything else forwards to the webview via
 /// a single `app-menu` event, with the menu id as payload.
 pub fn handle_menu_event<R: Runtime>(app: &AppHandle<R>, id: &str) {
+    // ⌘Q (and the menubar Quit click) — gate on RunningOps. Returns
+    // before the generic forward path so the renderer never sees a
+    // stray `app-menu:quit` event.
+    if id == "app-menu:quit" {
+        attempt_quit(app);
+        return;
+    }
+
     // "app-menu:settings" is identical to "app-menu:nav:settings" for
     // the webview. Collapse here so React only binds one handler.
     let payload = if id == "app-menu:settings" {
@@ -259,4 +284,153 @@ pub fn handle_menu_event<R: Runtime>(app: &AppHandle<R>, id: &str) {
     if let Err(e) = app.emit("app-menu", &payload) {
         tracing::warn!("emit app-menu failed: {e}");
     }
+}
+
+/// Snapshot row sent to the renderer when quit is gated. Carries only
+/// what the modal needs — kind for the icon, label for the body. Full
+/// `RunningOpInfo` would leak file paths into the JS heap unnecessarily.
+#[derive(Debug, Clone, Serialize)]
+pub struct QuitGateOp {
+    pub op_id: String,
+    pub kind: OpKind,
+    pub label: String,
+}
+
+/// Quit gate. Reads `RunningOps`; if any op is still in `Running` status
+/// (the map also lingers Complete/Error rows for a 5 s grace), emits
+/// `cp-quit-requested` with a snapshot so the renderer can show a
+/// confirm modal. Otherwise exits immediately.
+///
+/// Both the menubar Quit and the tray Quit route through this — adding
+/// a third quit surface (e.g., a window-close handler) without using
+/// this helper turns the gate into a sieve.
+pub fn attempt_quit<R: Runtime>(app: &AppHandle<R>) {
+    let in_flight: Vec<QuitGateOp> = match app.try_state::<RunningOps>() {
+        Some(ops) => ops
+            .list()
+            .into_iter()
+            .filter(|op| op.status == OpStatus::Running)
+            .map(|op| QuitGateOp {
+                op_id: op.op_id.clone(),
+                kind: op.kind,
+                label: inflight_label(&op),
+            })
+            .collect(),
+        // No state managed — happens in unusual harness builds. Quit
+        // is the safe default; there are no tracked ops to lose.
+        None => Vec::new(),
+    };
+
+    if in_flight.is_empty() {
+        app.exit(0);
+        return;
+    }
+
+    // Preferred path: surface the rich React modal in the main
+    // webview. Falls back to a native dialog when the webview is
+    // unavailable (window destroyed, or emit failure) so the user
+    // always has an explicit quit/stay choice — never a silent
+    // dead-end and never a silent exit mid-op.
+    if let Some(window) = app.get_webview_window("main") {
+        let _ = window.show();
+        let _ = window.set_focus();
+        match app.emit("cp-quit-requested", &in_flight) {
+            Ok(()) => return,
+            Err(e) => {
+                tracing::warn!(
+                    "quit gate: emit cp-quit-requested failed: {e}; falling back to native dialog"
+                );
+            }
+        }
+    } else {
+        tracing::info!(
+            "quit gate: no main webview — falling back to native dialog ({} op(s) in flight)",
+            in_flight.len()
+        );
+    }
+
+    show_native_quit_dialog(app, &in_flight);
+}
+
+/// Last-resort quit confirmation. Used when the React modal can't be
+/// shown (no main webview, or emit failure). Leans on
+/// `tauri-plugin-dialog` — a non-blocking message dialog so the menu
+/// event handler returns promptly. The dialog runs on the OS main
+/// thread; the callback fires when the user clicks a button.
+fn show_native_quit_dialog<R: Runtime>(app: &AppHandle<R>, in_flight: &[QuitGateOp]) {
+    use tauri_plugin_dialog::{
+        DialogExt, MessageDialogButtons, MessageDialogKind,
+    };
+
+    let count = in_flight.len();
+    let heading = if count == 1 {
+        "1 operation in progress".to_string()
+    } else {
+        format!("{count} operations in progress")
+    };
+    let body = {
+        let mut lines = String::from(
+            "Quitting now will abandon the work below. \
+             Repairable operations leave a journal entry you can resume \
+             later; one-shot operations will need to be restarted.\n\n",
+        );
+        for op in in_flight {
+            lines.push_str("• ");
+            lines.push_str(&op.label);
+            lines.push('\n');
+        }
+        lines
+    };
+
+    let app_for_cb = app.clone();
+    app.dialog()
+        .message(body)
+        .title(heading)
+        .kind(MessageDialogKind::Warning)
+        .buttons(MessageDialogButtons::OkCancelCustom(
+            "Quit anyway".to_string(),
+            "Stay".to_string(),
+        ))
+        .show(move |ok| {
+            if ok {
+                app_for_cb.exit(0);
+            }
+        });
+}
+
+/// One-line in-flight label for the quit modal. Mirrors the shape of
+/// `op_terminal_label` in `ops.rs` but uses gerunds ("Renaming", not
+/// "Renamed") since the op is still running.
+fn inflight_label(op: &crate::ops::RunningOpInfo) -> String {
+    let from = basename(&op.old_path);
+    let to = basename(&op.new_path);
+    match op.kind {
+        OpKind::CleanProjects => "Cleaning projects".to_string(),
+        OpKind::SessionPrune => "Pruning sessions".to_string(),
+        OpKind::SessionSlim => {
+            if from.is_empty() {
+                "Slimming session".to_string()
+            } else {
+                format!("Slimming {from}")
+            }
+        }
+        OpKind::SessionShare => "Sharing session".to_string(),
+        OpKind::SessionMove => format!("Moving session {from} → {to}"),
+        OpKind::MoveProject => format!("Renaming {from} → {to}"),
+        OpKind::RepairResume => format!("Resuming {from} → {to}"),
+        OpKind::RepairRollback => format!("Rolling back {from} → {to}"),
+        OpKind::AccountLogin => "Account login".to_string(),
+        OpKind::AccountRegister => "Adding account".to_string(),
+        OpKind::VerifyAll => "Verifying accounts".to_string(),
+        OpKind::AutomationRun => "Running automation".to_string(),
+    }
+}
+
+fn basename(path: &str) -> &str {
+    if path.is_empty() {
+        return path;
+    }
+    let trimmed = path.trim_end_matches(['/', '\\']);
+    let idx = trimmed.rfind(['/', '\\']).map(|i| i + 1).unwrap_or(0);
+    &trimmed[idx..]
 }
