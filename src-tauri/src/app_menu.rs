@@ -93,6 +93,9 @@ pub fn install<R: Runtime>(app: &AppHandle<R>) -> Result<(), String> {
         .map_err(|e| format!("edit submenu: {e}"))?;
 
     // ---- Account submenu (static; no dynamic rebuild needed) ---------------
+    // No "Manage accounts…" entry — it would emit `app-menu:nav:accounts`
+    // (the router strips the `:manage` suffix), which is the same target
+    // as View → Accounts. One nav target, one menu item.
     let login_browser = MenuItemBuilder::with_id(
         "app-menu:account:login-browser",
         "Sign in from browser…",
@@ -105,37 +108,52 @@ pub fn install<R: Runtime>(app: &AppHandle<R>) -> Result<(), String> {
     let verify_all = MenuItemBuilder::with_id("app-menu:account:verify-all", "Verify all")
         .build(app)
         .map_err(|e| format!("verify-all: {e}"))?;
-    let manage = MenuItemBuilder::with_id("app-menu:nav:accounts:manage", "Manage accounts…")
-        .build(app)
-        .map_err(|e| format!("manage: {e}"))?;
 
     let account = SubmenuBuilder::new(app, "Account")
         .item(&login_browser)
         .item(&sync_cc)
         .item(&verify_all)
-        .separator()
-        .item(&manage)
         .build()
         .map_err(|e| format!("account submenu: {e}"))?;
 
     // ---- View submenu ------------------------------------------------------
+    // Mirrors `src/sections/registry.tsx` in order. Each id must match
+    // a registered section id — App.tsx silently drops unknown ids
+    // (`sectionIds.includes(sub)`), so a typo here = dead menu item.
+    // Note: Activities's section id is `events` for localStorage
+    // back-compat; the label is "Activities".
     let nav_accounts = MenuItemBuilder::with_id("app-menu:nav:accounts", "Accounts")
         .build(app).map_err(|e| format!("nav-accounts: {e}"))?;
+    let nav_activities = MenuItemBuilder::with_id("app-menu:nav:events", "Activities")
+        .build(app).map_err(|e| format!("nav-activities: {e}"))?;
     let nav_projects = MenuItemBuilder::with_id("app-menu:nav:projects", "Projects")
         .build(app).map_err(|e| format!("nav-projects: {e}"))?;
-    let nav_sessions = MenuItemBuilder::with_id("app-menu:nav:sessions", "Sessions")
-        .build(app).map_err(|e| format!("nav-sessions: {e}"))?;
+    let nav_keys = MenuItemBuilder::with_id("app-menu:nav:keys", "Keys")
+        .build(app).map_err(|e| format!("nav-keys: {e}"))?;
+    let nav_third_party = MenuItemBuilder::with_id("app-menu:nav:third-party", "Third-parties")
+        .build(app).map_err(|e| format!("nav-third-party: {e}"))?;
+    let nav_automations = MenuItemBuilder::with_id("app-menu:nav:automations", "Automations")
+        .build(app).map_err(|e| format!("nav-automations: {e}"))?;
+    let nav_global = MenuItemBuilder::with_id("app-menu:nav:global", "Global")
+        .build(app).map_err(|e| format!("nav-global: {e}"))?;
     let nav_settings = MenuItemBuilder::with_id("app-menu:nav:settings", "Settings")
         .build(app).map_err(|e| format!("nav-settings: {e}"))?;
     let toggle_theme = MenuItemBuilder::with_id("app-menu:view:toggle-theme", "Toggle theme")
         .build(app).map_err(|e| format!("toggle-theme: {e}"))?;
-    let reload = MenuItemBuilder::with_id("app-menu:view:reload", "Refresh")
+    // Honest label: the handler in App.tsx only refreshes the Accounts
+    // section. A section-aware refresh contract doesn't exist yet, so
+    // don't promise one in the label.
+    let reload = MenuItemBuilder::with_id("app-menu:view:reload", "Refresh Accounts")
         .build(app).map_err(|e| format!("reload: {e}"))?;
 
     let view = SubmenuBuilder::new(app, "View")
         .item(&nav_accounts)
+        .item(&nav_activities)
         .item(&nav_projects)
-        .item(&nav_sessions)
+        .item(&nav_keys)
+        .item(&nav_third_party)
+        .item(&nav_automations)
+        .item(&nav_global)
         .item(&nav_settings)
         .separator()
         .item(&toggle_theme)
