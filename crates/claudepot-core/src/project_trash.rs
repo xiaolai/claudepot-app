@@ -194,9 +194,12 @@ pub fn write(
     let batch_dir = trash_root(data_dir).join(&batch_id);
     fs::create_dir_all(&batch_dir).map_err(|e| ProjectTrashError::io(&batch_dir, e))?;
 
-    let payload = batch_dir.join("payload");
-    move_dir(src, &payload)?;
-
+    // Audit fix for project_trash.rs:214 — write the manifest BEFORE
+    // moving the payload. The previous order moved the directory
+    // first and wrote the manifest second, so a manifest-write
+    // failure stranded an unlisted payload that `list()` filtered
+    // away. With manifest-first, a failed payload move can be
+    // rolled back by removing the manifest+batch_dir.
     let entry = ProjectTrashEntry {
         id: batch_id.clone(),
         manifest_id: batch_id.clone(),
@@ -209,29 +212,105 @@ pub fn write(
         history_lines: put.history_lines,
         reason: put.reason,
     };
-    let manifest = batch_dir.join("manifest.json");
+    let manifest_path = batch_dir.join("manifest.json");
     let json = serde_json::to_vec_pretty(&entry).expect("ProjectTrashEntry serializes");
-    fs::write(&manifest, json).map_err(|e| ProjectTrashError::io(&manifest, e))?;
+    write_atomic(&manifest_path, &json)?;
+
+    let payload = batch_dir.join("payload");
+    if let Err(e) = move_dir(src, &payload) {
+        // Roll back: payload didn't land, the manifest-only batch
+        // would mislead list(). Best-effort cleanup.
+        let _ = fs::remove_file(&manifest_path);
+        let _ = fs::remove_dir_all(&batch_dir);
+        return Err(e);
+    }
+
     Ok(entry)
 }
 
-/// Move `src` directory to `dest`. Plain rename first; on failure,
-/// fall back to copy + fsync + remove.
+/// Atomic write: tmp + rename. Used so a partial manifest is
+/// never observable.
+fn write_atomic(path: &Path, bytes: &[u8]) -> Result<(), ProjectTrashError> {
+    let parent = path.parent().ok_or_else(|| {
+        ProjectTrashError::io(path, io::Error::other("manifest has no parent"))
+    })?;
+    let tmp = parent.join(format!(
+        ".{}.tmp.{}",
+        path.file_name()
+            .and_then(|n| n.to_str())
+            .unwrap_or("manifest.json"),
+        std::process::id()
+    ));
+    fs::write(&tmp, bytes).map_err(|e| ProjectTrashError::io(&tmp, e))?;
+    if let Err(e) = fs::rename(&tmp, path) {
+        let _ = fs::remove_file(&tmp);
+        return Err(ProjectTrashError::io(path, e));
+    }
+    Ok(())
+}
+
+/// Move `src` directory to `dest`. Plain rename first; on a genuine
+/// cross-device error (EXDEV/ERROR_NOT_SAME_DEVICE), fall back to
+/// recursive copy + fsync + remove via a unique staging dir, then
+/// atomic rename into place.
+///
+/// Audit fix for project_trash.rs:226 — restrict the copy fallback
+/// to EXDEV. The previous shape fell back on ANY rename error,
+/// which masked permission errors AND opened a race where a
+/// concurrent process creating `dest` between the failed rename and
+/// the copy would let copy_dir_recursive merge into the existing
+/// dir, then `remove_dir_all(src)` would delete the source — losing
+/// project data. Restricting to EXDEV plus copying to a staging
+/// path first eliminates both.
 fn move_dir(src: &Path, dest: &Path) -> Result<(), ProjectTrashError> {
     if let Some(parent) = dest.parent() {
         fs::create_dir_all(parent).map_err(|e| ProjectTrashError::io(parent, e))?;
     }
-    match fs::rename(src, dest) {
-        Ok(()) => Ok(()),
-        Err(_) => {
-            // Cross-device or other rename failure: recursive copy,
-            // then remove the source. Pure-rename errors that would
-            // also break copy (permission denied on destination)
-            // re-surface from copy_dir_recursive.
-            copy_dir_recursive(src, dest)?;
-            fs::remove_dir_all(src).map_err(|e| ProjectTrashError::io(src, e))?;
-            Ok(())
-        }
+    let rename_err = match fs::rename(src, dest) {
+        Ok(()) => return Ok(()),
+        Err(e) => e,
+    };
+    if !is_exdev(&rename_err) {
+        return Err(ProjectTrashError::io(src, rename_err));
+    }
+
+    // EXDEV path: copy to a unique staging dir adjacent to dest,
+    // then atomic-rename into place. Avoids the race where a
+    // concurrent process creates `dest` between rename and copy.
+    let stage = dest.with_file_name(format!(
+        "{}.staging.{}",
+        dest.file_name()
+            .and_then(|n| n.to_str())
+            .unwrap_or("payload"),
+        std::process::id()
+    ));
+    let copy_result = copy_dir_recursive(src, &stage);
+    if let Err(e) = copy_result {
+        let _ = fs::remove_dir_all(&stage);
+        return Err(e);
+    }
+    if let Err(e) = fs::rename(&stage, dest) {
+        let _ = fs::remove_dir_all(&stage);
+        return Err(ProjectTrashError::io(dest, e));
+    }
+    fs::remove_dir_all(src).map_err(|e| ProjectTrashError::io(src, e))?;
+    Ok(())
+}
+
+fn is_exdev(err: &io::Error) -> bool {
+    let raw = err.raw_os_error();
+    #[cfg(unix)]
+    {
+        raw == Some(libc::EXDEV)
+    }
+    #[cfg(windows)]
+    {
+        // ERROR_NOT_SAME_DEVICE == 17
+        return raw == Some(17);
+    }
+    #[cfg(not(any(unix, windows)))]
+    {
+        return raw == Some(18);
     }
 }
 
