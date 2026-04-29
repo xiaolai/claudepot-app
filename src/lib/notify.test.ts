@@ -13,10 +13,13 @@ vi.mock("@tauri-apps/plugin-notification", () => ({
 import {
   __bucketsSizeForTests,
   __resetForTests,
+  __targetQueueSizeForTests,
+  consumeRecentTarget,
   dispatchOsNotification,
   getPermissionStatus,
   requestNotificationPermission,
   subscribePermissionStatus,
+  type NotificationTarget,
 } from "./notify";
 
 describe("lib/notify — singleton dispatcher", () => {
@@ -261,6 +264,91 @@ describe("lib/notify — singleton dispatcher", () => {
         title: "t",
         body: "b",
       });
+    });
+  });
+
+  describe("click-target queue", () => {
+    const hostTarget: NotificationTarget = {
+      kind: "host",
+      session_id: "s1",
+      cwd: "/home/u/foo",
+    };
+    const appTarget: NotificationTarget = {
+      kind: "app",
+      route: { section: "accounts", email: "a@b" },
+    };
+
+    it("returns null when nothing has been dispatched", () => {
+      expect(consumeRecentTarget()).toBeNull();
+      expect(__targetQueueSizeForTests()).toBe(0);
+    });
+
+    it("records a target only when the dispatch is accepted", async () => {
+      await dispatchOsNotification("t", "b", { target: hostTarget });
+      expect(__targetQueueSizeForTests()).toBe(1);
+      expect(consumeRecentTarget()).toEqual(hostTarget);
+      expect(__targetQueueSizeForTests()).toBe(0);
+    });
+
+    it("does not record a target when focus-gated", async () => {
+      (document.hasFocus as ReturnType<typeof vi.fn>).mockReturnValue(true);
+      await dispatchOsNotification("t", "b", { target: hostTarget });
+      expect(__targetQueueSizeForTests()).toBe(0);
+      expect(consumeRecentTarget()).toBeNull();
+    });
+
+    it("does not record a target when rate-limited", async () => {
+      const opts = {
+        target: hostTarget,
+        dedupeKey: "k",
+        maxBurst: 2,
+      } as const;
+      await dispatchOsNotification("t", "1", opts);
+      await dispatchOsNotification("t", "2", opts);
+      // Third dispatch is dropped by the bucket.
+      const ok = await dispatchOsNotification("t", "3", opts);
+      expect(ok).toBe(false);
+      // Two targets queued — the dropped dispatch left no trace.
+      expect(__targetQueueSizeForTests()).toBe(2);
+    });
+
+    it("consumes the most recent target and clears older ones", async () => {
+      // Two dispatches; the newer banner is what the user clicked on.
+      // Older queued targets belong to dismissed banners and must be
+      // dropped — otherwise the next focus event would route to them.
+      await dispatchOsNotification("t", "1", { target: hostTarget });
+      await dispatchOsNotification("t", "2", { target: appTarget });
+      expect(consumeRecentTarget()).toEqual(appTarget);
+      expect(consumeRecentTarget()).toBeNull();
+    });
+
+    it("expires entries after the 10 s TTL", async () => {
+      // Advance time past the TTL by stubbing Date.now via the
+      // dispatcher's `now` reads. Vitest fake timers don't shim
+      // Date.now in this codebase's harness; spy directly.
+      const realNow = Date.now;
+      const baseline = 1_000_000;
+      let current = baseline;
+      vi.spyOn(Date, "now").mockImplementation(() => current);
+
+      await dispatchOsNotification("t", "b", { target: hostTarget });
+      expect(__targetQueueSizeForTests()).toBe(1);
+
+      // 11 s later — past the 10 s TTL.
+      current = baseline + 11_000;
+      expect(consumeRecentTarget()).toBeNull();
+      // The next push should evict the expired entry too.
+      await dispatchOsNotification("t", "b", { target: appTarget });
+      expect(__targetQueueSizeForTests()).toBe(1);
+
+      Date.now = realNow;
+    });
+
+    it("preserves queue across reset only via __resetForTests", async () => {
+      await dispatchOsNotification("t", "b", { target: hostTarget });
+      expect(__targetQueueSizeForTests()).toBe(1);
+      __resetForTests();
+      expect(__targetQueueSizeForTests()).toBe(0);
     });
   });
 });

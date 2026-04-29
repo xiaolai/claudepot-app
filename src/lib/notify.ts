@@ -147,6 +147,38 @@ export async function requestNotificationPermission(): Promise<PermissionStatus>
   }
 }
 
+/**
+ * What the user wants to do when they click a notification's banner.
+ *
+ * `host` — focus the terminal/editor running the session. The
+ *   App-shell consumer translates this to a Tauri command that walks
+ *   the session's process tree and activates the host app. Falls
+ *   back to `app:projects:<sid>` when the host can't be resolved.
+ *
+ * `app` — focus Claudepot, deep-linked to a specific surface. The
+ *   `route` field is one of the known internal nav targets (a
+ *   section id, optionally with a sub-route).
+ *
+ * `info` — purely informational; click is a no-op (focus alone is
+ *   the action). Reserved for tray-only signals where there's no
+ *   meaningful "where to go."
+ *
+ * The discriminator is intentionally narrow: every Claudepot
+ * notification site declares its intent at dispatch time; the
+ * shell-level consumer routes without further interpretation.
+ */
+export type NotificationTarget =
+  | { kind: "host"; session_id: string; cwd: string }
+  | {
+      kind: "app";
+      route:
+        | { section: "projects"; session_id?: string; cwd?: string }
+        | { section: "accounts"; email?: string }
+        | { section: "settings"; sub?: string }
+        | { section: "events" };
+    }
+  | { kind: "info" };
+
 interface DispatchOpts {
   /** Bypass the `document.hasFocus()` gate. Use only for fatal-class
    *  alerts where the OS-level prominence is the point (auth rejected,
@@ -174,6 +206,27 @@ interface DispatchOpts {
    *  on Linux/Windows, default chime on macOS). Pass "default" to
    *  force the OS default sound. */
   sound?: string;
+  /** Where the user goes when they click this notification's banner.
+   *
+   *  The Tauri 2 desktop notification plugin (v2.3.3) does NOT wire
+   *  body-click events back to JS — `onAction` and
+   *  `registerActionTypes` are mobile-only. Verified by reading the
+   *  plugin source at `tauri-plugin-notification/src/desktop.rs`,
+   *  which spawns `notify_rust::Notification::show()` and discards
+   *  the handle.
+   *
+   *  Workaround: when an OS notification is actually dispatched, we
+   *  push the target onto a small in-memory queue with the dispatch
+   *  timestamp. The App-shell focus listener consumes the most
+   *  recent unexpired entry whenever the window gains focus. The
+   *  10-second window keeps false-positives bounded — a user who
+   *  ignores a notification and opens Claudepot manually 11 seconds
+   *  later doesn't get routed to a stale destination.
+   *
+   *  Targets are recorded only for accepted dispatches (not for
+   *  focus-gated, permission-denied, or rate-limited drops), so
+   *  the queue size is bounded by the rate-limit policy itself. */
+  target?: NotificationTarget;
 }
 
 // Token-bucket state: per-key list of recent dispatch timestamps
@@ -191,6 +244,63 @@ const buckets = new Map<string, Bucket>();
 
 const DEFAULT_BURST = 3;
 const DEFAULT_WINDOW_MS = 60_000;
+
+/** How long a dispatched click target stays consumable. macOS surfaces
+ *  banners for ~5 s by default; we double that to absorb user latency
+ *  (slide cursor up, click). After this window the target expires —
+ *  if the user opens Claudepot from the dock or tray later, they
+ *  shouldn't get routed to a stale destination. */
+const TARGET_TTL_MS = 10_000;
+
+/** Click-target queue. One entry per dispatched notification that
+ *  declared an intent. `consumeRecentTarget()` pops the most-recent
+ *  unexpired entry; older entries are evicted on each push and on
+ *  each consumption attempt.
+ *
+ *  Bounded implicitly by the rate-limit policy — the dispatcher only
+ *  pushes when a notification was actually accepted, and per-key
+ *  rate limits keep accept rate to single-digit per minute under
+ *  normal conditions. The 32-entry hard cap below is a defense
+ *  against a future bug that bypasses dedupe; never expected to
+ *  trip in practice. */
+interface QueuedTarget {
+  target: NotificationTarget;
+  dispatched_at: number;
+}
+const targetQueue: QueuedTarget[] = [];
+const TARGET_QUEUE_HARD_CAP = 32;
+
+function pushTarget(target: NotificationTarget, now: number): void {
+  // Evict expired entries on every push so the queue stays small
+  // even when consumers never call consumeRecentTarget.
+  while (targetQueue.length > 0 && now - targetQueue[0].dispatched_at > TARGET_TTL_MS) {
+    targetQueue.shift();
+  }
+  targetQueue.push({ target, dispatched_at: now });
+  while (targetQueue.length > TARGET_QUEUE_HARD_CAP) {
+    targetQueue.shift();
+  }
+}
+
+/** Pop the most-recent unexpired target. Returns `null` when the
+ *  queue is empty or every entry has expired. The "most recent"
+ *  policy matches user intent: when the user clicks a banner, the
+ *  banner that most recently appeared is what they're acting on. */
+export function consumeRecentTarget(): NotificationTarget | null {
+  const now = Date.now();
+  while (targetQueue.length > 0) {
+    const entry = targetQueue.pop();
+    if (!entry) return null;
+    if (now - entry.dispatched_at <= TARGET_TTL_MS) {
+      // Drop everything older than the consumed entry — they belong
+      // to earlier banners the user dismissed by acting on this one.
+      targetQueue.length = 0;
+      return entry.target;
+    }
+    // Expired; loop continues to try the next-most-recent.
+  }
+  return null;
+}
 
 /** Sweep every bucket: drop expired stamps, delete fully-empty
  *  entries. Called from `dispatchOsNotification` so eviction stays
@@ -300,6 +410,11 @@ export async function dispatchOsNotification(
     if (opts.group) payload.group = opts.group;
     if (opts.sound) payload.sound = opts.sound;
     sendNotification(payload);
+    // Record the click target only for accepted dispatches. The
+    // App-shell focus listener consumes the most-recent unexpired
+    // entry on `window` focus. See the `target` field's docstring
+    // for the rationale.
+    if (opts.target) pushTarget(opts.target, now);
     return true;
   } catch {
     return false;
@@ -315,6 +430,14 @@ export function __resetForTests(): void {
   probeInFlight = null;
   requestInFlight = null;
   resetBuckets();
+  targetQueue.length = 0;
+}
+
+/** Test-only: introspect the click-target queue size. Catches leaks
+ *  from a future bug that pushes targets without the rate-limit gate
+ *  in front of them. */
+export function __targetQueueSizeForTests(): number {
+  return targetQueue.length;
 }
 
 /** Test-only: introspect bucket map size (catches leaks where unique

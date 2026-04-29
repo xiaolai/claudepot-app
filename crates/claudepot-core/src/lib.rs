@@ -48,6 +48,7 @@ pub mod desktop_identity;
 pub mod desktop_lock;
 pub mod error;
 pub mod fs_utils;
+pub mod host_activate;
 pub mod keys;
 pub mod launcher;
 pub mod migrate;

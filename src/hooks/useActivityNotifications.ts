@@ -109,16 +109,32 @@ export function useActivityNotifications(): number {
      *  five lookalike toasts. */
     const dispatch = (
       sessionId: string,
+      cwd: string,
       kind: "error" | "stuck" | "idle-done",
       title: string,
       body: string,
     ) => {
+      // Intent: send the user back to wherever `claude` is running.
+      // The shell-level focus consumer translates this to a Tauri
+      // command that walks the session's process tree and activates
+      // the host terminal/editor; falls back to opening the
+      // transcript in Claudepot's Projects pane when the host can't
+      // be resolved.
       void dispatchOsNotification(title, body, {
         dedupeKey: `session:${sessionId}:${kind}`,
         group: `session:${sessionId}`,
         sound: "default",
+        target: { kind: "host", session_id: sessionId, cwd },
       });
     };
+
+    // Pre-compute disambiguated labels so notifications for two
+    // sibling projects with the same basename (e.g. ~/work/foo vs
+    // ~/personal/foo) don't render an identical title in macOS
+    // Notification Center. Pure basename when unique, parent/basename
+    // when colliding — minimum extra noise for unambiguous projects,
+    // unambiguous-by-construction when it matters.
+    const labels = projectLabels(sessions.map((s) => s.cwd));
 
     const seen = new Set<string>();
     for (const s of sessions) {
@@ -129,7 +145,7 @@ export function useActivityNotifications(): number {
           ? (prev?.busyStartedMs ?? now)
           : null;
 
-      const project = projectBasename(s.cwd);
+      const project = labels.get(s.cwd) ?? projectBasename(s.cwd);
 
       // Error-burst transition. Coalescing now lives in the shared
       // dispatcher's token bucket — the per-session canFire check
@@ -140,7 +156,7 @@ export function useActivityNotifications(): number {
         s.errored &&
         !(prev?.lastErrored ?? false)
       ) {
-        dispatch(s.session_id, "error", project, "multiple errors in the last minute");
+        dispatch(s.session_id, s.cwd, "error", project, "multiple errors in the last minute");
       }
 
       // Stuck transition
@@ -151,6 +167,7 @@ export function useActivityNotifications(): number {
       ) {
         dispatch(
           s.session_id,
+          s.cwd,
           "stuck",
           project,
           `possibly stuck (tool call > ${prefs.notify_on_stuck_minutes ?? 10} min)`,
@@ -166,7 +183,7 @@ export function useActivityNotifications(): number {
         now - prev.busyStartedMs >= 120_000
       ) {
         const minutes = Math.floor((now - prev.busyStartedMs) / 60_000);
-        dispatch(s.session_id, "idle-done", project, `done (${minutes}m)`);
+        dispatch(s.session_id, s.cwd, "idle-done", project, `done (${minutes}m)`);
       }
 
       // Refresh the memo so the next tick can diff against current
@@ -203,4 +220,51 @@ export function projectBasename(cwd: string): string {
   const idx = Math.max(trimmed.lastIndexOf("/"), trimmed.lastIndexOf("\\"));
   const base = idx >= 0 ? trimmed.slice(idx + 1) : trimmed;
   return base || trimmed;
+}
+
+/** Split `cwd` into its non-empty path components, separator-agnostic.
+ *  Drops any trailing separator, then splits on `/` or `\` greedily.
+ *  Used by `projectLabels` for collision detection. */
+function pathParts(cwd: string): string[] {
+  const trimmed = cwd.replace(/[/\\]+$/, "");
+  if (!trimmed) return [];
+  return trimmed.split(/[/\\]+/).filter((p) => p.length > 0);
+}
+
+/** Build a `cwd → human label` map that disambiguates same-basename
+ *  collisions. Pure basename for unique projects (one-word, scannable
+ *  in macOS Notification Center); `parent/basename` only for those
+ *  that would otherwise collide. Pure function — no side effects, no
+ *  dependence on render order — so swapping in `projectLabels` for
+ *  ad-hoc `projectBasename` calls is a drop-in.
+ *
+ *  Worth disambiguating because two sessions in `~/work/foo` and
+ *  `~/personal/foo` would render identical titles, and macOS stacks
+ *  them by `threadId` which makes the basename collision invisible
+ *  until the user expands the stack. */
+export function projectLabels(cwds: string[]): Map<string, string> {
+  const result = new Map<string, string>();
+  // First pass: count basename occurrences across the input set.
+  const counts = new Map<string, number>();
+  for (const cwd of cwds) {
+    const base = projectBasename(cwd);
+    counts.set(base, (counts.get(base) ?? 0) + 1);
+  }
+  // Second pass: emit labels, prepending the parent for collisions.
+  for (const cwd of cwds) {
+    if (result.has(cwd)) continue;
+    const parts = pathParts(cwd);
+    if (parts.length === 0) {
+      result.set(cwd, cwd);
+      continue;
+    }
+    const base = parts[parts.length - 1];
+    const collides = (counts.get(base) ?? 0) > 1;
+    if (!collides || parts.length < 2) {
+      result.set(cwd, base);
+    } else {
+      result.set(cwd, `${parts[parts.length - 2]}/${base}`);
+    }
+  }
+  return result;
 }

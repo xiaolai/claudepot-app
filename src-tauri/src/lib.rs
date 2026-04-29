@@ -1,19 +1,20 @@
 mod app_menu;
 mod commands;
-mod commands_automations;
-mod commands_config;
-mod commands_config_types;
-mod commands_preferences;
-mod commands_pricing;
 mod commands_account;
 mod commands_activity;
 mod commands_activity_cards;
 mod commands_artifact_lifecycle;
 mod commands_artifact_usage;
+mod commands_automations;
 mod commands_cli;
+mod commands_config;
+mod commands_config_types;
 mod commands_desktop;
 mod commands_keys;
 mod commands_migrate;
+mod commands_notification;
+mod commands_preferences;
+mod commands_pricing;
 mod commands_project;
 mod commands_protected;
 mod commands_repair;
@@ -28,11 +29,11 @@ mod config_watch;
 mod config_watch_types;
 mod dto;
 mod dto_account;
-mod dto_automations;
 mod dto_activity;
 mod dto_activity_cards;
 mod dto_artifact_lifecycle;
 mod dto_artifact_usage;
+mod dto_automations;
 mod dto_desktop;
 mod dto_keys;
 mod dto_migrate;
@@ -277,9 +278,8 @@ pub fn run() {
             // itself is framework-free.
             let live_state = app.state::<state::LiveSessionState>();
             let service = std::sync::Arc::clone(&live_state.service);
-            let listener = live_activity_bridge::TauriSessionEventListener::new(
-                app.handle().clone(),
-            );
+            let listener =
+                live_activity_bridge::TauriSessionEventListener::new(app.handle().clone());
             tauri::async_runtime::spawn(async move {
                 service.subscribe(listener).await;
             });
@@ -297,8 +297,7 @@ pub fn run() {
             // bridge listener) reads the same `LiveSessionState`
             // afterwards and sees both the service AND the wired
             // activity index.
-            let svc =
-                claudepot_core::services::live_activity_service::LiveActivityService::new();
+            let svc = claudepot_core::services::live_activity_service::LiveActivityService::new();
             if let Some(idx) = cards_index.as_ref() {
                 svc.enable_activity(std::sync::Arc::clone(idx));
             }
@@ -337,7 +336,8 @@ pub fn run() {
         builder = builder.plugin(tauri_plugin_mcp_bridge::init());
     }
 
-    builder.invoke_handler(tauri::generate_handler![
+    builder
+        .invoke_handler(tauri::generate_handler![
             commands::app_status,
             commands::updater_supported,
             commands::tray_set_alert_count,
@@ -526,6 +526,7 @@ pub fn run() {
             commands_automations::automations_open_artifact_dir,
             commands_automations::automations_linger_status,
             commands_automations::automations_linger_enable,
+            commands_notification::notification_activate_host_for_session,
         ])
         .run(tauri::generate_context!())
         .unwrap_or_else(|e| {
