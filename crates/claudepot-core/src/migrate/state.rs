@@ -225,6 +225,7 @@ mod tests {
                 include_claudepot_state: true,
                 ..Default::default()
             },
+            file_inventory: vec![],
         }
     }
 

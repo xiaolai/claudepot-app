@@ -76,9 +76,46 @@ pub fn encrypt_bundle_with_passphrase(
     out_path_os.push(ENCRYPTED_SUFFIX);
     let out_path = PathBuf::from(out_path_os);
 
+    // Atomic write: encrypt to a unique sibling temp, fsync, then
+    // rename into place. Without this, an encryption failure (or an
+    // interruption mid-stream) leaves a truncated `.age` file at the
+    // final path, and any pre-existing `.age` at that path is gone.
+    // The `.tmp.<pid>` name is unique per concurrent caller and lives
+    // in the same dir as the final path, so the rename stays atomic.
+    let parent = out_path.parent().ok_or_else(|| {
+        MigrateError::Io(std::io::Error::new(
+            std::io::ErrorKind::InvalidInput,
+            format!(
+                "encrypt target has no parent dir: {}",
+                out_path.display()
+            ),
+        ))
+    })?;
+    let tmp_name = format!(
+        ".{}.tmp.{}",
+        out_path
+            .file_name()
+            .and_then(|n| n.to_str())
+            .unwrap_or("bundle.age"),
+        std::process::id()
+    );
+    let tmp_path = parent.join(tmp_name);
+
+    // Cleanup guard: if anything below errors out, remove the temp
+    // so we don't litter `.tmp.<pid>` files on failure.
+    struct TempGuard(PathBuf, bool);
+    impl Drop for TempGuard {
+        fn drop(&mut self) {
+            if !self.1 {
+                let _ = fs::remove_file(&self.0);
+            }
+        }
+    }
+    let mut guard = TempGuard(tmp_path.clone(), false);
+
     let plaintext_file = fs::File::open(plaintext_bundle).map_err(MigrateError::from)?;
     let mut reader = std::io::BufReader::new(plaintext_file);
-    let out_file = fs::File::create(&out_path).map_err(MigrateError::from)?;
+    let out_file = fs::File::create(&tmp_path).map_err(MigrateError::from)?;
     let writer_buf = std::io::BufWriter::new(out_file);
 
     let encryptor = age::Encryptor::with_user_passphrase(passphrase.clone());
@@ -95,6 +132,12 @@ pub fn encrypt_bundle_with_passphrase(
     use std::io::Write;
     out_file.flush().map_err(MigrateError::from)?;
     out_file.sync_all().map_err(MigrateError::from)?;
+    drop(out_file);
+
+    // Atomic rename now: any pre-existing `.age` at `out_path` is
+    // overwritten in one syscall, never truncated-then-overwritten.
+    fs::rename(&tmp_path, &out_path).map_err(MigrateError::from)?;
+    guard.1 = true; // success — don't clean up the temp (it's been renamed)
     Ok(out_path)
 }
 

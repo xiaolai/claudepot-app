@@ -9,12 +9,18 @@
 //!     Missing sidecar → `IntegrityViolation`; making it optional
 //!     would let an attacker bypass the outer integrity gate by
 //!     dropping the sidecar.
-//!   - `integrity.sha256` inside the bundle holds per-file digests
-//!     (every payload file plus `manifest.json`). The orchestrator
-//!     calls `verify_extracted_dir(&staging)` after `extract_all` to
-//!     re-hash every on-disk file against this list — a repacked
-//!     bundle that swapped contents but kept the outer sidecar would
-//!     fail this gate.
+//!   - `BundleManifest.file_inventory` is the **single source of
+//!     truth** for what files belong in the bundle and what their
+//!     hashes should be. One entry per regular file in the tar except
+//!     `manifest.json` itself. The orchestrator calls
+//!     `verify_extracted_dir(&staging, &manifest)` after `extract_all`
+//!     to re-hash every on-disk file against the manifest's inventory
+//!     AND to reject any extracted file that the manifest doesn't list
+//!     — closing the symptom of repacking attacks at the staging gate.
+//!     (Schema 1 carried this in a parallel `integrity.sha256` text
+//!     file. Schema 2 dropped that file entirely; the manifest is
+//!     authoritative and the manifest signature
+//!     `<bundle>.manifest.minisig` is the integrity gate.)
 //!   - `manifest.json` is self-verifying via a REQUIRED trailer line
 //!     (`# manifest-sha256: <hex>`). Missing trailer → IntegrityViolation.
 //!   - `<bundle>.manifest.minisig` signature sidecar — optional,
@@ -105,9 +111,9 @@ impl BundleWriter {
 
     /// Append a regular file to the bundle. The path is bundle-relative
     /// (e.g. `manifest.json` or `projects/<id>/manifest.json`). The
-    /// content's sha256 is recorded into the inventory; callers fold
-    /// the inventory into `integrity.sha256` before calling
-    /// `append_integrity`.
+    /// content's sha256 is recorded into the inventory; `finalize`
+    /// then folds the inventory into `BundleManifest.file_inventory`
+    /// before serializing the manifest into the tar.
     ///
     /// Uses `Builder::append_data`, which transparently emits the GNU
     /// `LongLink` extension when the path exceeds the legacy ustar 100-
@@ -209,24 +215,23 @@ impl BundleWriter {
         Ok(())
     }
 
-    /// Yield the inventory built so far. Callers fold this into
-    /// `integrity.sha256` and then call `finalize`.
+    /// Yield the inventory built so far. Callers don't need to fold
+    /// this anywhere — `finalize` reads it directly when populating
+    /// the manifest's `file_inventory`.
     pub fn inventory(&self) -> &[FileInventoryEntry] {
         &self.inventory
     }
 
-    /// Write `integrity.sha256` and `manifest.json` (with self-trailer)
-    /// to the bundle and finalize. The bundle is then atomically
-    /// renamed to its final path; a sidecar `<file>.sha256` is written
-    /// next to it.
+    /// Write `manifest.json` (with self-trailer + populated
+    /// `file_inventory`) to the bundle and finalize. The bundle is
+    /// then atomically renamed to its final path; a sidecar
+    /// `<file>.sha256` is written next to it.
     ///
-    /// Order matters per §3.3: we build the manifest first (so its
-    /// sha256 can land in the trailer), then `integrity.sha256` includes
-    /// the manifest digest, then both are written into the tar.
-    /// `integrity.sha256` itself is not self-listed (it would need
-    /// post-hoc self-reference); the manifest's self-trailer covers
-    /// the manifest, and the outer sidecar `<bundle>.sha256` covers
-    /// the entire compressed file.
+    /// `BundleManifest.file_inventory` is overwritten here with the
+    /// writer's accumulated inventory — callers MUST NOT pre-fill it,
+    /// otherwise their entries would be discarded. (Pre-filling would
+    /// also be a footgun because the writer's inventory is the only
+    /// place where the actual bytes-on-tape hashes live.)
     ///
     /// Returns `(final_path, manifest_bytes)` where `manifest_bytes`
     /// is the exact byte sequence written into the tar's
@@ -240,8 +245,16 @@ impl BundleWriter {
         mut self,
         manifest: &BundleManifest,
     ) -> Result<(PathBuf, Vec<u8>), MigrateError> {
-        // 1. Build manifest with self-trailer (sha256 of body).
-        let manifest_json = serde_json::to_vec_pretty(manifest)
+        // 1. Fold the writer's inventory into the manifest. We clone
+        //    the user-supplied manifest and overwrite file_inventory —
+        //    callers' values would be wrong (only the writer knows the
+        //    actual bytes-on-tape sha256s) and silently shadowing them
+        //    avoids a footgun where a stale fixture sneaks past tests.
+        let mut manifest = manifest.clone();
+        manifest.file_inventory = self.inventory.clone();
+
+        // 2. Serialize manifest with self-trailer (sha256 of body).
+        let manifest_json = serde_json::to_vec_pretty(&manifest)
             .map_err(|e| MigrateError::Serialize(e.to_string()))?;
         let manifest_sha = sha256_hex(&manifest_json);
         let mut manifest_with_trailer = manifest_json;
@@ -250,34 +263,8 @@ impl BundleWriter {
         manifest_with_trailer.extend_from_slice(manifest_sha.as_bytes());
         manifest_with_trailer.push(b'\n');
 
-        // 2. integrity.sha256 — line per payload file (existing
-        // inventory) PLUS the manifest. Sha256 of the manifest covers
-        // the trailer too because the trailer was appended above.
-        let manifest_full_sha = sha256_hex(&manifest_with_trailer);
-        let mut integrity_lines = String::new();
-        for entry in &self.inventory {
-            integrity_lines.push_str(&entry.sha256);
-            integrity_lines.push(' ');
-            integrity_lines.push_str(&entry.path);
-            integrity_lines.push('\n');
-        }
-        integrity_lines.push_str(&manifest_full_sha);
-        integrity_lines.push(' ');
-        integrity_lines.push_str("manifest.json");
-        integrity_lines.push('\n');
-        let integrity_bytes = integrity_lines.into_bytes();
-
-        // 3. Write integrity.sha256 then manifest.json into the tar.
-        let mut header = tar::Header::new_gnu();
-        header.set_size(integrity_bytes.len() as u64);
-        header.set_mode(0o644);
-        header.set_mtime(0);
-        header.set_entry_type(tar::EntryType::Regular);
-        header.set_cksum();
-        self.builder
-            .append_data(&mut header, "integrity.sha256", integrity_bytes.as_slice())
-            .map_err(MigrateError::from)?;
-
+        // 3. Write manifest.json into the tar. No more integrity.sha256
+        //    sibling — manifest.file_inventory is the integrity record.
         let mut header = tar::Header::new_gnu();
         header.set_size(manifest_with_trailer.len() as u64);
         header.set_mode(0o644);
@@ -292,7 +279,7 @@ impl BundleWriter {
             )
             .map_err(MigrateError::from)?;
 
-        // 3. Close tar → finish zstd → flush BufWriter → fsync File.
+        // 4. Close tar → finish zstd → flush BufWriter → fsync File.
         let encoder = self.builder.into_inner().map_err(MigrateError::from)?;
         let buf = encoder.finish().map_err(MigrateError::from)?;
         let mut file = buf
@@ -302,10 +289,10 @@ impl BundleWriter {
         file.sync_all().map_err(MigrateError::from)?;
         drop(file);
 
-        // 4. Sidecar sha256 of the entire bundle file (§3.3).
+        // 5. Sidecar sha256 of the entire bundle file (§3.3).
         let bundle_sha = sha256_of_file(&self.tmp_path)?;
 
-        // 5. Atomic rename + sidecar write.
+        // 6. Atomic rename + sidecar write.
         fs::rename(&self.tmp_path, &self.final_path).map_err(MigrateError::from)?;
         let sidecar_path = sidecar_path_for(&self.final_path);
         fs::write(
@@ -437,9 +424,10 @@ impl BundleReader {
     /// returns `IntegrityViolation` and stops extraction. Caller is
     /// responsible for removing `dest` before extraction if it exists.
     ///
-    /// After extraction, parses `integrity.sha256` and verifies every
-    /// listed digest matches what landed on disk. A mismatch on any
-    /// entry → `IntegrityViolation` with the file name, leaving the
+    /// After extraction, the orchestrator runs `verify_extracted_dir`
+    /// which walks `manifest.file_inventory` and verifies every listed
+    /// digest matches what landed on disk. A mismatch on any entry →
+    /// `IntegrityViolation` with the file name, leaving the
     /// (now untrusted) staging tree for the caller to remove.
     ///
     /// Returns the per-file digests collected during extraction.
@@ -495,10 +483,12 @@ impl BundleReader {
         }
 
         // The orchestrator (`migrate::import_bundle`) calls
-        // `verify_extracted_dir(dest)` immediately after this returns,
-        // which re-hashes every on-disk file and matches each line of
-        // `integrity.sha256` against it. Inline structural sanity here:
-        // the extraction pass must have produced a manifest entry.
+        // `verify_extracted_dir(dest, &manifest)` immediately after
+        // this returns, which re-hashes every on-disk file against
+        // `manifest.file_inventory` AND rejects any extracted file
+        // the manifest doesn't list (closing the symptom of repacking
+        // attacks at the staging gate). Inline structural sanity
+        // here: the extraction pass must have produced a manifest.
         if !digests.iter().any(|e| e.path == "manifest.json") {
             return Err(MigrateError::IntegrityViolation(
                 "bundle missing manifest.json after extraction".to_string(),
@@ -553,56 +543,99 @@ impl<R: std::io::Read> std::io::Read for HashingReader<R> {
 }
 
 /// Cross-check the contents of an extracted bundle directory against
-/// the `integrity.sha256` file inside it. Called by the orchestrator
-/// after `extract_all` returns successfully (which already validates
-/// the in-memory inventory has the structural files); this second
-/// pass closes the loop by re-hashing the on-disk files and matching
-/// each line of `integrity.sha256` against them.
-pub fn verify_extracted_dir(dest: &Path) -> Result<(), MigrateError> {
-    let integrity_path = dest.join("integrity.sha256");
-    if !integrity_path.exists() {
-        return Err(MigrateError::IntegrityViolation(
-            "bundle missing integrity.sha256 in staging".to_string(),
-        ));
-    }
-    let body = fs::read_to_string(&integrity_path).map_err(MigrateError::from)?;
-    for (lineno, line) in body.lines().enumerate() {
-        if line.trim().is_empty() {
-            continue;
-        }
-        // `<sha> <path>` per line.
-        let mut parts = line.splitn(2, ' ');
-        let expected = parts.next().unwrap_or("");
-        let rel = parts.next().unwrap_or("").trim_start();
-        if expected.len() != 64 || !expected.chars().all(|c| c.is_ascii_hexdigit()) {
+/// `manifest.file_inventory`. Called by the orchestrator after
+/// `extract_all` returns successfully. Two-direction match:
+///
+///   1. **Every manifest entry exists on disk and hashes correctly.**
+///      A missing or mutated file → `IntegrityViolation`.
+///   2. **Every on-disk file (except `manifest.json`) is in the
+///      manifest's inventory.** An on-disk extra that the manifest
+///      doesn't list → `IntegrityViolation`. Closes the audit symptom
+///      where a repacked bundle could smuggle in extra files that
+///      slipped through the previous flat-list check.
+///
+/// `manifest.json` itself is exempt from the inventory check — the
+/// manifest's self-trailer (`# manifest-sha256: <hex>`) plus the
+/// outer signature sidecar (`<bundle>.manifest.minisig`) cover the
+/// manifest separately.
+pub fn verify_extracted_dir(
+    dest: &Path,
+    manifest: &BundleManifest,
+) -> Result<(), MigrateError> {
+    use std::collections::HashSet;
+
+    // Pass 1: every manifest entry exists + matches its hash.
+    let mut listed: HashSet<String> = HashSet::with_capacity(manifest.file_inventory.len() + 1);
+    listed.insert("manifest.json".to_string());
+    for entry in &manifest.file_inventory {
+        if entry.sha256.len() != 64 || !entry.sha256.chars().all(|c| c.is_ascii_hexdigit()) {
             return Err(MigrateError::IntegrityViolation(format!(
-                "integrity.sha256 line {}: malformed digest",
-                lineno + 1
+                "manifest.file_inventory entry for {}: malformed digest",
+                entry.path
             )));
         }
-        if rel.is_empty() {
-            return Err(MigrateError::IntegrityViolation(format!(
-                "integrity.sha256 line {}: missing path",
-                lineno + 1
-            )));
-        }
-        // integrity.sha256 entries don't reference itself; any other
-        // listed path must be present and match.
-        if rel == "integrity.sha256" {
-            continue;
-        }
-        let on_disk = dest.join(rel);
+        let on_disk = dest.join(&entry.path);
         if !on_disk.exists() {
             return Err(MigrateError::IntegrityViolation(format!(
-                "integrity.sha256 references missing file: {rel}"
+                "manifest references missing file: {}",
+                entry.path
             )));
         }
         let actual = sha256_of_file(&on_disk)?;
-        if actual != expected {
+        if actual != entry.sha256 {
             return Err(MigrateError::IntegrityViolation(format!(
-                "integrity.sha256 mismatch for {rel}: expected {expected}, got {actual}"
+                "manifest.file_inventory mismatch for {}: expected {}, got {}",
+                entry.path, entry.sha256, actual
             )));
         }
+        listed.insert(entry.path.clone());
+    }
+
+    // Pass 2: reject extras. Walk every regular file under `dest` and
+    // demand it appear in `listed`. This catches repacks that added
+    // payload files the manifest doesn't acknowledge.
+    walk_and_check_listed(dest, dest, &listed)?;
+    Ok(())
+}
+
+/// Recursive helper for `verify_extracted_dir` pass 2. Reports the
+/// path relative to the extraction root for any regular file not in
+/// the listed set.
+fn walk_and_check_listed(
+    root: &Path,
+    cur: &Path,
+    listed: &std::collections::HashSet<String>,
+) -> Result<(), MigrateError> {
+    for entry in fs::read_dir(cur).map_err(MigrateError::from)? {
+        let entry = entry.map_err(MigrateError::from)?;
+        let ft = entry.file_type().map_err(MigrateError::from)?;
+        let p = entry.path();
+        if ft.is_dir() {
+            walk_and_check_listed(root, &p, listed)?;
+        } else if ft.is_file() {
+            // Bundle-relative path with forward slashes (matches what
+            // we put into `manifest.file_inventory.path`).
+            let rel = p
+                .strip_prefix(root)
+                .map_err(|_| {
+                    MigrateError::IntegrityViolation(format!(
+                        "extracted path {} not under staging root {}",
+                        p.display(),
+                        root.display()
+                    ))
+                })?
+                .to_string_lossy()
+                .replace('\\', "/");
+            if !listed.contains(&rel) {
+                return Err(MigrateError::IntegrityViolation(format!(
+                    "extracted file not listed in manifest.file_inventory: {rel}"
+                )));
+            }
+        }
+        // Symlinks are already refused at extract time; if one
+        // somehow survives here, it's neither file nor dir and we
+        // skip silently — the staging tree was built by us and
+        // doesn't contain symlinks.
     }
     Ok(())
 }
@@ -729,6 +762,9 @@ mod tests {
             source_claude_config_dir: "/Users/joker/.claude".to_string(),
             projects: vec![],
             flags: ExportFlags::default(),
+            // Empty here — finalize overwrites with the writer's
+            // accumulated inventory. See the docstring on `finalize`.
+            file_inventory: vec![],
         }
     }
 
@@ -849,13 +885,62 @@ mod tests {
         assert!(dest.join("a/b.txt").exists());
         assert!(dest.join("c.txt").exists());
         assert_eq!(fs::read_to_string(dest.join("a/b.txt")).unwrap(), "hello");
-        // Inventory carries our two payload files plus integrity.sha256
-        // and manifest.json.
+        // Inventory carries our two payload files plus manifest.json.
+        // Schema 2: integrity.sha256 is gone; manifest.file_inventory
+        // is the integrity record.
         let names: Vec<_> = digests.iter().map(|e| e.path.as_str()).collect();
         assert!(names.contains(&"a/b.txt"));
         assert!(names.contains(&"c.txt"));
         assert!(names.contains(&"manifest.json"));
-        assert!(names.contains(&"integrity.sha256"));
+        assert!(!names.contains(&"integrity.sha256"));
+
+        // verify_extracted_dir round-trips against the manifest — the
+        // payload files are listed and hash correctly, manifest.json
+        // is exempt.
+        let manifest = r.read_manifest().unwrap();
+        verify_extracted_dir(&dest, &manifest).unwrap();
+    }
+
+    #[test]
+    fn verify_extracted_dir_rejects_extras() {
+        // Drop a file that the manifest doesn't list into the
+        // staging dir and verify it gets caught. This is the
+        // "audit symptom" fix — repacking attacks that add files
+        // beyond the manifest's inventory must fail this gate.
+        let tmp = tempfile::tempdir().unwrap();
+        let bundle_path = tmp.path().join("e.claudepot.tar.zst");
+        let mut w = BundleWriter::create(&bundle_path).unwrap();
+        w.append_bytes("a.txt", b"a", 0o644).unwrap();
+        w.finalize(&fixture_manifest()).unwrap();
+
+        let r = BundleReader::open(&bundle_path).unwrap();
+        let dest = tmp.path().join("out");
+        r.extract_all(&dest).unwrap();
+        // Plant a stray file the manifest doesn't list.
+        fs::write(dest.join("smuggled.bin"), b"oops").unwrap();
+
+        let manifest = r.read_manifest().unwrap();
+        let err = verify_extracted_dir(&dest, &manifest).unwrap_err();
+        assert!(matches!(err, MigrateError::IntegrityViolation(_)));
+    }
+
+    #[test]
+    fn verify_extracted_dir_rejects_mutated_payload() {
+        let tmp = tempfile::tempdir().unwrap();
+        let bundle_path = tmp.path().join("m.claudepot.tar.zst");
+        let mut w = BundleWriter::create(&bundle_path).unwrap();
+        w.append_bytes("a.txt", b"original", 0o644).unwrap();
+        w.finalize(&fixture_manifest()).unwrap();
+
+        let r = BundleReader::open(&bundle_path).unwrap();
+        let dest = tmp.path().join("out");
+        r.extract_all(&dest).unwrap();
+        // Mutate an extracted file; manifest hash no longer matches.
+        fs::write(dest.join("a.txt"), b"tampered").unwrap();
+
+        let manifest = r.read_manifest().unwrap();
+        let err = verify_extracted_dir(&dest, &manifest).unwrap_err();
+        assert!(matches!(err, MigrateError::IntegrityViolation(_)));
     }
 
     #[test]
@@ -863,8 +948,8 @@ mod tests {
         // Audit Performance fix: large files take a streaming path
         // that hashes via fan-out instead of buffering the whole
         // file. The streaming sha256 must match a fresh full-read
-        // hash; if it diverges, integrity.sha256 verification at
-        // import would falsely flag the bundle as corrupt.
+        // hash; if it diverges, manifest.file_inventory verification
+        // at import would falsely flag the bundle as corrupt.
         use sha2::{Digest, Sha256};
 
         let tmp = tempfile::tempdir().unwrap();

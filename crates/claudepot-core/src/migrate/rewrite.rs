@@ -138,12 +138,50 @@ fn rewrite_value_inner(v: &mut Value, table: &SubstitutionTable, count: &mut usi
                 .keys()
                 .filter_map(|k| table.apply_path(k).map(|new| (k.clone(), new)))
                 .collect();
-            for (old_key, new_key) in key_rewrites {
+
+            // Audit fix: detect collisions before mutating. Two
+            // distinct source keys can rewrite to the same target
+            // (e.g. `/Users/joker/x` and `/Users/alice/x` both
+            // mapped to `/home/joker/x` after worktree
+            // consolidation). The pre-fix code applied them in
+            // sequence and the second `map.insert` silently
+            // overwrote the first — losing the value at the first
+            // source key. We now leave both source keys in place
+            // and log a warn; data is preserved, the un-rewritten
+            // key surfaces as a broken absolute path on the target,
+            // and the warning is the operator's signal to resolve
+            // the conflict by hand.
+            //
+            // Two collision shapes are detected:
+            //   1. Two `key_rewrites` entries share a `new_key`.
+            //   2. A `new_key` already exists as a static (non-
+            //      rewriting) key in `map`.
+            use std::collections::{BTreeMap, BTreeSet};
+            let mut new_key_targets: BTreeMap<&str, usize> = BTreeMap::new();
+            for (_, new) in &key_rewrites {
+                *new_key_targets.entry(new.as_str()).or_insert(0) += 1;
+            }
+            let old_key_set: BTreeSet<&str> =
+                key_rewrites.iter().map(|(o, _)| o.as_str()).collect();
+
+            for (old_key, new_key) in &key_rewrites {
                 if old_key == new_key {
                     continue;
                 }
-                if let Some(val) = map.remove(&old_key) {
-                    map.insert(new_key, val);
+                let dup_in_rewrites =
+                    new_key_targets.get(new_key.as_str()).copied().unwrap_or(0) > 1;
+                let collides_with_static =
+                    map.contains_key(new_key) && !old_key_set.contains(new_key.as_str());
+                if dup_in_rewrites || collides_with_static {
+                    tracing::warn!(
+                        old = %old_key,
+                        new = %new_key,
+                        "migrate::rewrite: object key collision — preserving original key, no rewrite applied"
+                    );
+                    continue;
+                }
+                if let Some(val) = map.remove(old_key) {
+                    map.insert(new_key.clone(), val);
                     *count += 1;
                 }
             }

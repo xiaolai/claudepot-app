@@ -376,6 +376,21 @@ fn rollback_one(step: &JournalStep) -> Result<StepRollback, MigrateError> {
                 return Ok(StepRollback::SkippedNoOp);
             };
             let target = Path::new(after);
+            // Tamper check before mutating: if the user edited the
+            // file after the apply, undo would silently overwrite
+            // their work with the snapshot. Mirror what CreateFile
+            // already does — refuse if the recorded after_sha256
+            // doesn't match what's on disk now, and surface the
+            // tamper through the receipt rather than blowing up.
+            if let Some(expected) = step.after_sha256.as_ref() {
+                if let Some(actual) = sha256_of_file_optional(target) {
+                    if &actual != expected {
+                        return Ok(StepRollback::SkippedTampered(format!(
+                            "{after}: sha256 mismatch (was modified after apply)"
+                        )));
+                    }
+                }
+            }
             if let Some(snap) = step.snapshot_path.as_ref() {
                 let snap_p = Path::new(snap);
                 if !snap_p.exists() {
@@ -723,6 +738,43 @@ mod tests {
         let report = rollback(&j).unwrap();
         assert_eq!(report.reversed, 1);
         assert_eq!(fs::read(&target).unwrap(), b"old content");
+    }
+
+    #[test]
+    fn rollback_replace_skips_user_edits_post_apply() {
+        // Audit fix: ReplaceFile undo used to overwrite blindly with
+        // the snapshot, wiping any edits the user made after apply.
+        // Now it checks `after_sha256` first and surfaces a tamper
+        // notice instead.
+        let _lock = lock_data_dir();
+        let tmp = tempfile::tempdir().unwrap();
+        let target = tmp.path().join("config.json");
+        let snap = tmp.path().join("snap-edited.json");
+        // What apply landed on disk:
+        fs::write(&target, b"applied content").unwrap();
+        // Snapshot of what was there before apply:
+        fs::write(&snap, b"original content").unwrap();
+
+        let mut j = ImportJournal::new("rb-replace-tamper".to_string());
+        let mut s = step(
+            JournalStepKind::ReplaceFile,
+            None,
+            Some(target.to_str().unwrap()),
+        );
+        s.snapshot_path = Some(snap.to_str().unwrap().to_string());
+        // Recorded after_sha256 doesn't match what's on disk → user
+        // edited the file after apply.
+        s.after_sha256 = Some("0".repeat(64));
+        j.record(s);
+
+        // User now overwrites the file with their own edit:
+        fs::write(&target, b"user edit they would lose").unwrap();
+
+        let report = rollback(&j).unwrap();
+        assert_eq!(report.reversed, 0);
+        assert_eq!(report.skipped_tampered.len(), 1);
+        // The user's edit survives — undo did NOT silently restore the snapshot.
+        assert_eq!(fs::read(&target).unwrap(), b"user edit they would lose");
     }
 
     #[test]
