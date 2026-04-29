@@ -391,6 +391,26 @@ fn windows_is_nsis_install() -> bool {
     path.contains(r"\programs\")
 }
 
+/// Set the tray's "alerting sessions" count. Updates the macOS
+/// menubar title and the cross-platform tooltip without rebuilding
+/// the whole tray menu (full rebuild is async and walks the usage
+/// cache; this hot path must stay cheap).
+///
+/// Called from the frontend whenever `useActivityNotifications`
+/// reports a new count. State persists in `TrayAlertState` so the
+/// next full rebuild — triggered by an account list change — picks
+/// up the count and doesn't reset the badge to 0.
+#[tauri::command]
+pub async fn tray_set_alert_count(
+    app: tauri::AppHandle,
+    state: tauri::State<'_, crate::state::TrayAlertState>,
+    count: u32,
+) -> Result<(), String> {
+    state.set(count);
+    crate::tray::refresh_alert_chrome(&app);
+    Ok(())
+}
+
 // Every topic-specific command surface lives in its own sibling
 // `commands_<topic>.rs`; see:
 //   - Projects read surface + clean preview/start: `commands_project.rs`

@@ -41,6 +41,11 @@ export function useDismissedIssues(): {
   isDismissed: (id: string) => boolean;
   dismiss: (id: string) => void;
   clear: (id: string) => void;
+  /** Snapshot of the live (non-expired) dismissed-issue keys. Used by
+   *  the App.tsx snooze auto-clear effect to reconcile stale entries
+   *  carried over from a previous renderer lifetime against the
+   *  currently-live `rawIssues` set. */
+  knownKeys: () => string[];
 } {
   const [store, setStore] = useState<Payload>(() => readStore());
 
@@ -86,5 +91,7 @@ export function useDismissedIssues(): {
     });
   }, []);
 
-  return { isDismissed, dismiss, clear };
+  const knownKeys = useCallback(() => Object.keys(store), [store]);
+
+  return { isDismissed, dismiss, clear, knownKeys };
 }

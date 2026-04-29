@@ -304,6 +304,7 @@ pub fn run() {
             state::LiveSessionState::new(svc)
         })
         .manage(ops::RunningOps::new())
+        .manage(state::TrayAlertState::default())
         .manage(preferences::PreferencesState::new(prefs))
         // D-1: shared config-scan cache + commit race arbiter. Owns
         // the latest scanned `ConfigTree`, hands out generation tokens,
@@ -338,6 +339,7 @@ pub fn run() {
     builder.invoke_handler(tauri::generate_handler![
             commands::app_status,
             commands::updater_supported,
+            commands::tray_set_alert_count,
             commands_cli::sync_from_current_cc,
             commands::unlock_keychain,
             commands::reveal_in_finder,

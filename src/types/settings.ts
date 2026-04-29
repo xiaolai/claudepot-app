@@ -49,6 +49,7 @@ export interface Preferences {
   notify_on_idle_done: boolean;
   /** null = feature off; number = fire after N minutes stuck. */
   notify_on_stuck_minutes: number | null;
-  /** null = feature off; number = fire when session spend >= $. */
-  notify_on_spend_usd: number | null;
+  /** Fires an OS notification when a long-running op terminates while
+   *  the main window is unfocused. Default false — opt-in. */
+  notify_on_op_done: boolean;
 }
