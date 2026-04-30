@@ -44,6 +44,16 @@ const TRAY_ALERT_BYTES: &[u8] = include_bytes!("../icons/tray-iconAlertTemplate@
 
 /// Swap the tray icon to match the current alert state. Logged-only
 /// on failure — a stale icon is far less bad than a failed rebuild.
+///
+/// On macOS, `set_icon` alone is *not* enough: `tray-icon`'s impl
+/// hard-codes `setTemplate(false)` on the new NSImage, clobbering the
+/// template flag we set at startup in `lib.rs`. Once that flag is
+/// gone, AppKit renders the raw bitmap instead of tinting against the
+/// menubar foreground, and a pure-black silhouette disappears against
+/// a dark menubar. The fix is to re-apply the template flag after
+/// every swap. See tauri-apps/tray-icon
+/// `platform_impl/macos/mod.rs` — `set_icon` (~line 118, hard-codes
+/// `false`) vs. `set_icon_as_template` (~line 206, applies it back).
 fn apply_tray_icon(tray: &tauri::tray::TrayIcon, alert_count: u32) {
     let bytes = if alert_count == 0 {
         TRAY_IDLE_BYTES
@@ -54,6 +64,10 @@ fn apply_tray_icon(tray: &tauri::tray::TrayIcon, alert_count: u32) {
         Ok(img) => {
             if let Err(e) = tray.set_icon(Some(img)) {
                 tracing::warn!("tray::apply_tray_icon: set_icon failed: {e}");
+                return;
+            }
+            if let Err(e) = tray.set_icon_as_template(true) {
+                tracing::warn!("tray::apply_tray_icon: set_icon_as_template failed: {e}");
             }
         }
         Err(e) => {
