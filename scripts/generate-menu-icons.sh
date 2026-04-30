@@ -9,10 +9,17 @@
 #   STROKE_WIDTH=1.5   — Lucide ships at 2; 1.5 matches the paper-mono
 #                        register used in the webview (`<Glyph>` runs
 #                        1.75 but at smaller pixel sizes).
-#   STROKE_COLOR=#888  — mid-gray reads on both Light and Dark menu
-#                        backgrounds; muda doesn't call setTemplate:YES
-#                        on custom bitmaps, so pure black/white would
-#                        disappear in one mode.
+#   STROKE_COLOR=#3a3a3a — dark gray (~22% luminance), close to native
+#                        macOS Light-mode label color. macOS NSMenu
+#                        Vibrant Light material renders as a mid-gray
+#                        (≈ rgb(160,160,160)); a #888 stroke (53%) sat
+#                        nearly on top of that bg and read as invisible.
+#                        muda 0.17 doesn't call setTemplate:YES on
+#                        custom bitmaps, so we can't tint adaptively —
+#                        this value targets Light dropdowns. If a user
+#                        on a Dark dropdown (system appearance = Dark)
+#                        reports them as too dark, we'll need a paired
+#                        light-stroke set + appearance-aware swap.
 #   CONTENT_PX=96      — the glyph's rendered size, ...
 #   CANVAS_PX=144      — ...inside this transparent canvas. The 33%
 #                        padding shrinks the visible glyph to roughly
@@ -29,7 +36,7 @@ LUCIDE_DIR="node_modules/lucide-static/icons"
 OUT_DIR="src-tauri/icons/menu"
 
 STROKE_WIDTH="1.5"
-STROKE_COLOR="#888888"
+STROKE_COLOR="#3a3a3a"
 CONTENT_PX=96
 CANVAS_PX=144
 
