@@ -155,7 +155,7 @@ cargo check --workspace
 cargo test  --workspace               # 1700+ Rust tests
 pnpm test                             # Vitest + RTL, jsdom (~400 tests)
 pnpm test:coverage                    # with coverage report
-pnpm tauri dev                        # GUI hot reload (Vite :1430, HMR :1431)
+pnpm tauri dev                        # GUI hot reload (Vite :11220, HMR :11221)
 ```
 
 Path-handling code (sanitize, unsanitize, canonicalize, tilde expansion) is the highest-risk surface; it's golden-tested on Linux / macOS / Windows in CI. See [`.claude/rules/paths.md`](.claude/rules/paths.md).
