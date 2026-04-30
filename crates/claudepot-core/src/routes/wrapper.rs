@@ -7,12 +7,23 @@
 
 use std::path::{Path, PathBuf};
 
+// `fs_utils` and `sanitize_wrapper_name` are only reached from inside
+// `write_wrapper`'s `#[cfg(unix)]` branch — Windows .cmd wrappers are
+// out of scope (see `write_wrapper`'s `#[cfg(not(unix))]` early-return).
+// On Windows the lib build sees these as unused. Suppress just the
+// import warning on non-Unix; the helpers themselves get the same
+// treatment on each `fn` definition below so the lib build stays clean
+// without forcing the cfg(test) tests (which call render_script on
+// every platform — they're pure string checks, no fs/perms) to also
+// be cfg-gated.
+#[cfg_attr(not(unix), allow(unused_imports))]
 use crate::fs_utils;
 use crate::paths::claudepot_data_dir;
 
 use super::error::RouteError;
 use super::helper::helper_path;
 use super::keychain::SecretField;
+#[cfg_attr(not(unix), allow(unused_imports))]
 use super::slug::sanitize_wrapper_name;
 use super::types::{AuthScheme, BedrockConfig, FoundryConfig, Route, RouteProvider, VertexConfig};
 use super::CLAUDEPOT_MANAGED_MARKER;
@@ -103,6 +114,12 @@ pub fn delete_wrapper(name: &str) -> Result<(), RouteError> {
     }
 }
 
+// Render helpers below: dead in the Windows lib build (see import
+// comment above), live on every platform via cfg(test). The
+// `cfg_attr(not(unix), allow(dead_code))` annotations keep
+// `cargo build --release` clean on Windows without forcing the
+// tests to be cfg-gated.
+#[cfg_attr(not(unix), allow(dead_code))]
 fn render_script(route: &Route) -> String {
     match &route.provider {
         RouteProvider::Gateway(cfg) => render_gateway(route, cfg),
@@ -112,6 +129,7 @@ fn render_script(route: &Route) -> String {
     }
 }
 
+#[cfg_attr(not(unix), allow(dead_code))]
 fn render_gateway(route: &Route, cfg: &super::types::GatewayConfig) -> String {
     let mut out = render_header(route);
     if cfg.auth_scheme == AuthScheme::Basic {
@@ -151,6 +169,7 @@ fn render_gateway(route: &Route, cfg: &super::types::GatewayConfig) -> String {
     out
 }
 
+#[cfg_attr(not(unix), allow(dead_code))]
 fn render_header(route: &Route) -> String {
     let mut out = String::with_capacity(256);
     out.push_str("#!/bin/sh\n");
@@ -165,6 +184,7 @@ fn render_header(route: &Route) -> String {
     out
 }
 
+#[cfg_attr(not(unix), allow(dead_code))]
 fn render_bedrock(route: &Route, cfg: &BedrockConfig) -> String {
     let mut out = render_header(route);
     out.push_str("exec env \\\n");
@@ -200,6 +220,7 @@ fn render_bedrock(route: &Route, cfg: &BedrockConfig) -> String {
     out
 }
 
+#[cfg_attr(not(unix), allow(dead_code))]
 fn render_vertex(route: &Route, cfg: &VertexConfig) -> String {
     let mut out = render_header(route);
     out.push_str("exec env \\\n");
@@ -222,6 +243,7 @@ fn render_vertex(route: &Route, cfg: &VertexConfig) -> String {
     out
 }
 
+#[cfg_attr(not(unix), allow(dead_code))]
 fn render_foundry(route: &Route, cfg: &FoundryConfig) -> String {
     let mut out = render_header(route);
     out.push_str("exec env \\\n");
@@ -252,11 +274,13 @@ fn render_foundry(route: &Route, cfg: &FoundryConfig) -> String {
 }
 
 /// `KEY="value" \` with the value shell-escaped.
+#[cfg_attr(not(unix), allow(dead_code))]
 fn kv_line(k: &str, v: &str) -> String {
     format!("  {k}={} \\\n", shell_quote(v))
 }
 
 /// Single-quote-wrap with embedded-quote escaping (POSIX-safe).
+#[cfg_attr(not(unix), allow(dead_code))]
 fn shell_quote(s: &str) -> String {
     let mut out = String::with_capacity(s.len() + 2);
     out.push('\'');
@@ -273,6 +297,7 @@ fn shell_quote(s: &str) -> String {
 }
 
 /// For comments — strip newlines that could break the comment block.
+#[cfg_attr(not(unix), allow(dead_code))]
 fn shell_comment_safe(s: &str) -> String {
     s.replace(['\n', '\r'], " ")
 }
