@@ -11,7 +11,7 @@ use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 use std::sync::Mutex;
 
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default)]
 pub struct Preferences {
     /// macOS-only. When true, the app runs as an accessory: no dock
@@ -68,11 +68,26 @@ pub struct Preferences {
     pub editor_defaults: EditorDefaults,
 }
 
-/// Helper for serde's `#[serde(default = "...")]` on a bool field.
-/// Lets us default `activity_hide_thinking` to `true` without hand-
-/// rolling a `Default` impl for the whole struct.
 fn default_true() -> bool {
     true
+}
+
+impl Default for Preferences {
+    fn default() -> Self {
+        Self {
+            hide_dock_icon: false,
+            show_window_on_startup: true,
+            activity_enabled: false,
+            activity_consent_seen: false,
+            activity_hide_thinking: true,
+            activity_excluded_paths: vec![],
+            notify_on_error: false,
+            notify_on_idle_done: false,
+            notify_on_stuck_minutes: None,
+            notify_on_op_done: false,
+            editor_defaults: EditorDefaults::default(),
+        }
+    }
 }
 
 impl Preferences {
