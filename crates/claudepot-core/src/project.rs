@@ -1307,12 +1307,8 @@ pub(crate) fn remove_history_lines_batch(
     // we follow the same shape now so a snapshot failure leaves
     // history.jsonl intact and the user can retry.
     let count = dropped.len();
-    let payload = serde_json::Value::Array(
-        dropped
-            .into_iter()
-            .map(serde_json::Value::String)
-            .collect(),
-    );
+    let payload =
+        serde_json::Value::Array(dropped.into_iter().map(serde_json::Value::String).collect());
     let snap = write_clean_snapshot(snapshots_dir, "batch", "history", &payload)?;
 
     tmp.persist(history_path)

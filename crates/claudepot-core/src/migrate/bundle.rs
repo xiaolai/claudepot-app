@@ -558,10 +558,7 @@ impl<R: std::io::Read> std::io::Read for HashingReader<R> {
 /// manifest's self-trailer (`# manifest-sha256: <hex>`) plus the
 /// outer signature sidecar (`<bundle>.manifest.minisig`) cover the
 /// manifest separately.
-pub fn verify_extracted_dir(
-    dest: &Path,
-    manifest: &BundleManifest,
-) -> Result<(), MigrateError> {
+pub fn verify_extracted_dir(dest: &Path, manifest: &BundleManifest) -> Result<(), MigrateError> {
     use std::collections::HashSet;
 
     // Pass 1: every manifest entry exists + matches its hash.
