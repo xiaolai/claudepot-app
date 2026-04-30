@@ -6,6 +6,44 @@ Versioning scheme:
 - `0.1.x` — beta
 - `1.0.0+` — stable
 
+## 0.0.12 — alpha (2026-04-30)
+
+### Fixed
+
+- **Proxy env vars work for rustls-tls clients.** (#2, thanks
+  @XIYINGDU.) Two trapped bugs prevented `https_proxy` from being
+  honoured when launched from a shell with the variable set:
+  `reqwest` built with `default-features = false` + `rustls-tls`
+  doesn't auto-discover system proxy, and the previous `or_else`
+  chain short-circuited on `HTTPS_PROXY=""` (env-set-but-empty),
+  so the lower-precedence variants were never reached even when
+  they held the actual value. The fix iterates
+  `[HTTPS_PROXY, https_proxy, ALL_PROXY, all_proxy]`,
+  filter-maps to non-empty, and explicitly hands the first match
+  to `reqwest::ClientBuilder::proxy(...)` plus
+  `NoProxy::from_env()` so existing `NO_PROXY` exclusions are
+  preserved. Applied to both the shared OAuth client
+  (`oauth/mod.rs`) and the one-off doctor client
+  (`services/doctor_service.rs`). Known follow-up: launching from
+  Finder/Dock doesn't inherit shell env, so the proxy still
+  isn't found in that path — tracked in #4 for a macOS
+  `SystemConfiguration` lookup.
+- **Release build is warning-clean on Windows and Linux.** The
+  0.0.11 release CI emitted 13 dead-code warnings on Windows
+  (`render_script` and 9 helpers in `routes/wrapper.rs`,
+  plus two unused imports — `write_wrapper` early-returns on
+  non-Unix because Windows `.cmd` wrappers are out of scope, so
+  the lib never reaches them) and an `unused_variable: hide_dock`
+  warning on both Linux and Windows (consumed only inside
+  `#[cfg(target_os = "macos")]`). Annotated each item with
+  `#[cfg_attr(not(unix), allow(dead_code))]` /
+  `#[cfg_attr(not(unix), allow(unused_imports))]` and gated the
+  `hide_dock` bind to macOS. Tests still reach the wrapper
+  helpers on every platform (they're pure string checks, no
+  fs/perms), so cfg-gating the `fn` definitions themselves
+  would have forced a parallel cfg-gate sweep across the test
+  suite — the per-item `cfg_attr` is precise without that cost.
+
 ## 0.0.11 — alpha (2026-04-30)
 
 ### Added
