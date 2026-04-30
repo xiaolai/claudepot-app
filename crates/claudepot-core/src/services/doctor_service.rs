@@ -22,6 +22,9 @@ pub struct HealthReport {
     pub account_health: Vec<AccountHealth>,
     pub desktop_profiles: Vec<ProfileInfo>,
     pub db_error: Option<String>,
+    /// Which proxy path was used for the API reachability check.
+    /// Displayed as `env-var: HTTPS_PROXY`, `SystemConfiguration`, or `none`.
+    pub proxy_source: String,
 }
 
 #[derive(Debug)]
@@ -68,8 +71,12 @@ pub async fn check_health(store: &AccountStore) -> HealthReport {
     // Beta header
     let beta_header = crate::oauth::beta_header::get_or_default().to_string();
 
+    // Proxy detection (once, shared with API check)
+    let proxy_config = crate::proxy::detect();
+    let proxy_source = proxy_config.source.to_string();
+
     // API reachability
-    let api_status = check_api(&beta_header).await;
+    let api_status = check_api(&beta_header, &proxy_config).await;
 
     // Account health
     let (accounts, db_error) = match store.list() {
@@ -95,6 +102,7 @@ pub async fn check_health(store: &AccountStore) -> HealthReport {
         account_health,
         desktop_profiles,
         db_error,
+        proxy_source,
     }
 }
 
@@ -203,17 +211,9 @@ fn build_profile_info(accounts: &[crate::account::Account]) -> Vec<ProfileInfo> 
         .collect()
 }
 
-async fn check_api(beta_header: &str) -> ApiStatus {
-    let mut builder = reqwest::Client::builder().timeout(std::time::Duration::from_secs(10));
-    let proxy_url = ["HTTPS_PROXY", "https_proxy", "ALL_PROXY", "all_proxy"]
-        .iter()
-        .filter_map(|var| std::env::var(var).ok())
-        .find(|v| !v.is_empty());
-    if let Some(url) = proxy_url {
-        if let Ok(proxy) = reqwest::Proxy::all(&url) {
-            builder = builder.proxy(proxy.no_proxy(reqwest::NoProxy::from_env()));
-        }
-    }
+async fn check_api(beta_header: &str, proxy_config: &crate::proxy::ProxyConfig) -> ApiStatus {
+    let builder = reqwest::Client::builder().timeout(std::time::Duration::from_secs(10));
+    let builder = crate::proxy::apply(builder, proxy_config);
     match builder.build() {
         Err(_) => ApiStatus::Unreachable("failed to build HTTP client".into()),
         Ok(client) => {
