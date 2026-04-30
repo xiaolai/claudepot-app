@@ -1339,7 +1339,7 @@ function NotificationsPane({
         </Row>
       </SettingsGroup>
 
-      <SettingsGroup desc="OS notifications when a live session or long-running operation crosses one of these thresholds. All default off; OS notifications only fire when the Claudepot window is unfocused.">
+      <SettingsGroup desc="OS notifications when a live session or long-running operation crosses one of these thresholds. 'Waiting for you' and the usage thresholds (80% / 90%) default on; the rest are opt-in. OS notifications only fire when the Claudepot window is unfocused.">
         <NotificationPermissionRow pushToast={pushToast} />
         <Row
           label="Alert on error burst"
@@ -1516,12 +1516,12 @@ function UsageThresholdChips({
             onClick={() => onToggle(t)}
             aria-pressed={on}
             style={{
-              padding: "tokens.sp[2] tokens.sp[8]",
+              padding: "var(--sp-2) var(--sp-8)",
               fontFamily: "inherit",
               fontSize: "var(--fs-xs)",
               fontVariantNumeric: "tabular-nums",
               borderRadius: "var(--radius-sm)",
-              border: "tokens.sp.px solid var(--line)",
+              border: "var(--sp-px) solid var(--line)",
               background: on ? "var(--accent-soft)" : "transparent",
               color: on ? "var(--accent-ink)" : "var(--fg)",
               cursor: "pointer",

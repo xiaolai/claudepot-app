@@ -11,7 +11,7 @@ use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 use std::sync::Mutex;
 
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default)]
 pub struct Preferences {
     /// macOS-only. When true, the app runs as an accessory: no dock
@@ -89,7 +89,10 @@ pub struct Preferences {
 
 /// Helper for serde's `#[serde(default = "...")]` on a bool field.
 /// Lets us default `activity_hide_thinking` to `true` without hand-
-/// rolling a `Default` impl for the whole struct.
+/// rolling per-field defaults — the manual `Default` impl below
+/// reuses the same helper so the cold-start (no preferences.json on
+/// disk) and the partial-read (file exists, field missing) paths
+/// agree.
 fn default_true() -> bool {
     true
 }
@@ -100,6 +103,35 @@ fn default_true() -> bool {
 /// chatty. Users can edit the list in Settings → Notifications.
 fn default_usage_thresholds() -> Vec<u32> {
     vec![80, 90]
+}
+
+/// Manual `Default` so cold-start (no `preferences.json` on disk;
+/// `load()` returns `Self::default()` directly) gets the same field
+/// values as a partial-read (where `serde(default = "…")` per field
+/// kicks in). Pre-fix, the derived `Default` set every bool to
+/// `false` and every `Vec<u32>` to empty, so a fresh-install user
+/// never received a "needs your answer" toast and never received a
+/// usage-threshold notification — even though both are documented
+/// as default-on. Reuse the helpers above so a future change to the
+/// per-field defaults stays in lockstep with the cold-start defaults.
+impl Default for Preferences {
+    fn default() -> Self {
+        Self {
+            hide_dock_icon: false,
+            show_window_on_startup: default_true(),
+            activity_enabled: false,
+            activity_consent_seen: false,
+            activity_hide_thinking: default_true(),
+            activity_excluded_paths: Vec::new(),
+            notify_on_error: false,
+            notify_on_idle_done: false,
+            notify_on_stuck_minutes: None,
+            notify_on_op_done: false,
+            notify_on_waiting: default_true(),
+            notify_on_usage_thresholds: default_usage_thresholds(),
+            editor_defaults: Default::default(),
+        }
+    }
 }
 
 impl Preferences {
