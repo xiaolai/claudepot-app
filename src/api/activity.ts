@@ -70,6 +70,7 @@ export const activityApi = {
     onStuckMinutes?: number | null;
     onOpDone?: boolean;
     onWaiting?: boolean;
+    onUsageThresholds?: number[];
   }) =>
     invoke<Preferences>("preferences_set_notifications", {
       onError: patch.onError,
@@ -77,6 +78,7 @@ export const activityApi = {
       onStuckMinutes: patch.onStuckMinutes,
       onOpDone: patch.onOpDone,
       onWaiting: patch.onWaiting,
+      onUsageThresholds: patch.onUsageThresholds,
     }).then((p) => {
       broadcastPrefsChanged(p);
       return p;
