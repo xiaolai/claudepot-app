@@ -51,7 +51,7 @@ If you use Claude Code or Claude Desktop daily, you've probably hit at least one
 
 ### Install
 
-> **Status: alpha** (`0.0.10`). Daily-driven on macOS. Windows and Linux builds are green but less seasoned.
+> **Status: alpha** (`0.0.11`). Daily-driven on macOS. Windows and Linux builds are green but less seasoned.
 
 You'll need a recent **Rust toolchain** ([rustup.rs](https://rustup.rs)) and **Node 20+** with **pnpm** ([pnpm.io](https://pnpm.io)). No other system dependencies.
 
@@ -155,7 +155,7 @@ cargo check --workspace
 cargo test  --workspace               # 1700+ Rust tests
 pnpm test                             # Vitest + RTL, jsdom (~400 tests)
 pnpm test:coverage                    # with coverage report
-pnpm tauri dev                        # GUI hot reload (Vite :1430, HMR :1431)
+pnpm tauri dev                        # GUI hot reload (Vite :11220, HMR :11221)
 ```
 
 Path-handling code (sanitize, unsanitize, canonicalize, tilde expansion) is the highest-risk surface; it's golden-tested on Linux / macOS / Windows in CI. See [`.claude/rules/paths.md`](.claude/rules/paths.md).
