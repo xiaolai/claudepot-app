@@ -6,7 +6,24 @@ Versioning scheme:
 - `0.1.x` — beta
 - `1.0.0+` — stable
 
-## 0.0.14 — alpha (unreleased)
+## 0.0.15 — alpha (unreleased)
+
+### Fixed
+
+- **Destructive-confirm dialogs now show the project's distinguishing
+  tail.** "Clean project data", recovery snapshot lists, and the
+  Settings → Cleanup → Protected paths list truncate paths with
+  `text-overflow: ellipsis`. Because every path begins
+  `/Users/<user>/…`, the visible portion (`/Users/…`) was the
+  shared prefix and the project basename — the only thing that
+  differs between rows — got hidden behind the ellipsis. Two rows
+  in a "Remove 2 projects" confirmation rendered as identical
+  `/Users/…` lines, leaving no way to tell what was about to be
+  deleted. Truncation now flips to the head so the basename stays
+  visible (`…/myprojects/claudepot-app`); the full path stays
+  selectable and on hover.
+
+## 0.0.14 — alpha (2026-04-30)
 
 ### Added
 
