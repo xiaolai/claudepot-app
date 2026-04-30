@@ -249,13 +249,8 @@ fn resolve_active_cli() -> Result<Option<(Uuid, Option<String>)>, String> {
         Some(s) => s,
         None => return Ok(None),
     };
-    let uuid =
-        Uuid::parse_str(&uuid_str).map_err(|e| format!("active uuid parse failed: {e}"))?;
-    let email = store
-        .find_by_uuid(uuid)
-        .ok()
-        .flatten()
-        .map(|a| a.email);
+    let uuid = Uuid::parse_str(&uuid_str).map_err(|e| format!("active uuid parse failed: {e}"))?;
+    let email = store.find_by_uuid(uuid).ok().flatten().map(|a| a.email);
     Ok(Some((uuid, email)))
 }
 

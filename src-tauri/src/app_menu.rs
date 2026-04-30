@@ -381,9 +381,7 @@ pub fn attempt_quit<R: Runtime>(app: &AppHandle<R>) {
 /// event handler returns promptly. The dialog runs on the OS main
 /// thread; the callback fires when the user clicks a button.
 fn show_native_quit_dialog<R: Runtime>(app: &AppHandle<R>, in_flight: &[QuitGateOp]) {
-    use tauri_plugin_dialog::{
-        DialogExt, MessageDialogButtons, MessageDialogKind,
-    };
+    use tauri_plugin_dialog::{DialogExt, MessageDialogButtons, MessageDialogKind};
 
     let count = in_flight.len();
     let heading = if count == 1 {

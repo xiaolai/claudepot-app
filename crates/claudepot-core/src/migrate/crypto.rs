@@ -85,10 +85,7 @@ pub fn encrypt_bundle_with_passphrase(
     let parent = out_path.parent().ok_or_else(|| {
         MigrateError::Io(std::io::Error::new(
             std::io::ErrorKind::InvalidInput,
-            format!(
-                "encrypt target has no parent dir: {}",
-                out_path.display()
-            ),
+            format!("encrypt target has no parent dir: {}", out_path.display()),
         ))
     })?;
     let tmp_name = format!(
@@ -241,14 +238,8 @@ pub fn sign_manifest_digest(
     // minisign::sign takes any Read; an in-memory cursor over the
     // manifest bytes keeps the call site uniform with the streaming
     // shape minisign expects.
-    let signature = minisign::sign(
-        None,
-        &sk,
-        std::io::Cursor::new(manifest_bytes),
-        None,
-        None,
-    )
-    .map_err(|e| MigrateError::Serialize(format!("minisign sign: {e}")))?;
+    let signature = minisign::sign(None, &sk, std::io::Cursor::new(manifest_bytes), None, None)
+        .map_err(|e| MigrateError::Serialize(format!("minisign sign: {e}")))?;
     let out_path = manifest_signature_path_for(artifact);
     fs::write(&out_path, signature.into_string()).map_err(MigrateError::from)?;
     Ok(out_path)
@@ -462,6 +453,8 @@ mod tests {
         // bare `.minisig`) so legacy artifacts can't be confused with
         // the new shape at the filesystem level.
         let p = manifest_signature_path_for(Path::new("a/b/c.tar.zst.age"));
-        assert!(p.to_string_lossy().ends_with(".tar.zst.age.manifest.minisig"));
+        assert!(p
+            .to_string_lossy()
+            .ends_with(".tar.zst.age.manifest.minisig"));
     }
 }

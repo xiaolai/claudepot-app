@@ -312,10 +312,11 @@ pub fn list(data_dir: &Path, filter: TrashFilter) -> Result<TrashListing, TrashE
             continue;
         }
         let raw = fs::read_to_string(&manifest).map_err(|e| TrashError::io(&manifest, e))?;
-        let mut te: TrashEntry = serde_json::from_str(&raw).map_err(|e| TrashError::ManifestParse {
-            path: manifest.clone(),
-            source: e,
-        })?;
+        let mut te: TrashEntry =
+            serde_json::from_str(&raw).map_err(|e| TrashError::ManifestParse {
+                path: manifest.clone(),
+                source: e,
+            })?;
         // Audit fix for trash.rs:384 — overwrite te.id with the
         // ACTUAL directory name (validated against batch_id shape).
         // Whatever the manifest claimed, downstream code (empty,
@@ -481,7 +482,6 @@ pub fn empty(data_dir: &Path, filter: TrashFilter) -> Result<u64, TrashError> {
     }
     Ok(freed)
 }
-
 
 /// Sweep batches older than `older_than`. Convenience wrapper around
 /// `empty` with a preset filter. Called on CLI / app startup.

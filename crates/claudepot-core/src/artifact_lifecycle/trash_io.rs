@@ -85,8 +85,7 @@ pub(super) fn move_or_copy(source: &Path, target: &Path, kind: PayloadKind) -> R
             if abs.is_dir() {
                 copy_dir_recursive(&abs, target)?;
             } else {
-                std::fs::copy(&abs, target)
-                    .map_err(LifecycleError::io("copy symlink target"))?;
+                std::fs::copy(&abs, target).map_err(LifecycleError::io("copy symlink target"))?;
             }
         }
         return Ok(());

@@ -288,7 +288,11 @@ mod tests {
         let uuid = Uuid::new_v4();
         let resets = "2026-04-30T10:00:00+00:00";
         // First poll under threshold.
-        let _ = st.apply_crossings(uuid, &response_with_five_hour(70.0, Some(resets)), &[80, 90]);
+        let _ = st.apply_crossings(
+            uuid,
+            &response_with_five_hour(70.0, Some(resets)),
+            &[80, 90],
+        );
         // Second poll crosses 80.
         let crossings = st.apply_crossings(
             uuid,
@@ -410,13 +414,13 @@ mod tests {
         let resets = "2026-04-30T10:00:00+00:00";
         // Threshold list passed out-of-order; algorithm must still
         // produce a sorted+deduped fired list afterwards.
-        let _ = st.apply_crossings(uuid, &response_with_five_hour(95.0, Some(resets)), &[90, 80]);
+        let _ = st.apply_crossings(
+            uuid,
+            &response_with_five_hour(95.0, Some(resets)),
+            &[90, 80],
+        );
         let acct = st.file.accounts.get(&uuid).unwrap();
-        let fired = &acct
-            .windows
-            .get(&UsageWindowKind::FiveHour)
-            .unwrap()
-            .fired;
+        let fired = &acct.windows.get(&UsageWindowKind::FiveHour).unwrap().fired;
         assert_eq!(fired, &vec![80, 90]);
     }
 

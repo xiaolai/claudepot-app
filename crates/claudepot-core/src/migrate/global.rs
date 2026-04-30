@@ -319,11 +319,8 @@ fn apply_one(
                 // clobber the prior review artifact (matches the
                 // settings/CLAUDE.md side-by-side pattern in
                 // `apply_plain_or_settings`).
-                let proposed = unique_proposed_path(
-                    target_config_dir,
-                    "proposed-hooks.json",
-                    bundle_id,
-                );
+                let proposed =
+                    unique_proposed_path(target_config_dir, "proposed-hooks.json", bundle_id);
                 fs::copy(src, &proposed).map_err(MigrateError::from)?;
                 Ok(Some(GlobalApplyStep {
                     after: proposed.to_string_lossy().to_string(),
@@ -355,11 +352,7 @@ fn apply_one(
 /// name doesn't exist, return that. Otherwise insert the short
 /// bundle_id before the file extension so repeated imports each get
 /// their own review artifact.
-fn unique_proposed_path(
-    target_config_dir: &Path,
-    base_name: &str,
-    bundle_id: &str,
-) -> PathBuf {
+fn unique_proposed_path(target_config_dir: &Path, base_name: &str, bundle_id: &str) -> PathBuf {
     let bare = target_config_dir.join(base_name);
     if !bare.exists() {
         return bare;

@@ -150,9 +150,7 @@ pub fn parse_result_event(stdout_bytes: &[u8]) -> Option<RunResult> {
     // case. We try the object shape first, fall back to the array
     // shape, then to the stream-json line scan.
     if let Ok(v) = serde_json::from_slice::<serde_json::Value>(stdout_bytes) {
-        if v.is_object()
-            && v.get("type").and_then(|t| t.as_str()) == Some("result")
-        {
+        if v.is_object() && v.get("type").and_then(|t| t.as_str()) == Some("result") {
             if let Ok(raw) = serde_json::from_value::<Raw>(v.clone()) {
                 return Some(build(raw));
             }
