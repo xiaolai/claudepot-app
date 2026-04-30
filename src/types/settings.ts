@@ -52,4 +52,9 @@ export interface Preferences {
   /** Fires an OS notification when a long-running op terminates while
    *  the main window is unfocused. Default false — opt-in. */
   notify_on_op_done: boolean;
+  /** Fires when a session transitions to Waiting (CC paused pending
+   *  user input — permission, plan-mode approval, clarifying answer).
+   *  Defaults to **true**: this is the highest-leverage alert in the
+   *  set, gated behind `activity_enabled` which is already opt-in. */
+  notify_on_waiting: boolean;
 }
