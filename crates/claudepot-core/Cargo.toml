@@ -51,6 +51,7 @@ pbkdf2.workspace = true
 hmac.workspace = true
 sha1.workspace = true
 cbc.workspace = true
+system-configuration.workspace = true
 
 [target.'cfg(target_os = "windows")'.dependencies]
 aes-gcm.workspace = true
