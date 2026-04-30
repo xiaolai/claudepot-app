@@ -42,6 +42,17 @@ use uuid::Uuid;
 /// `UsageCache::CACHE_TTL` (every 5 min poll IS a fresh fetch).
 const POLL_INTERVAL: Duration = Duration::from_secs(5 * 60);
 
+/// Delay before the very first tick. Without it, a cold-start where
+/// utilization is already past a threshold could fire + persist
+/// before the renderer's `useUsageThresholdNotifications` listener
+/// is wired up — and the persisted fired-set means the alert is
+/// never re-emitted for that cycle, so the OS toast is silently
+/// lost. 5 s is a generous upper bound on how long the webview
+/// needs to mount + register the listener; well below the 5-minute
+/// tick cadence, so users still see toggle effects "immediately"
+/// in any human sense.
+const FIRST_TICK_DELAY: Duration = Duration::from_secs(5);
+
 /// Frontend event payload for a single threshold crossing. The
 /// renderer (`src/hooks/useUsageThresholdNotifications.ts`) listens
 /// on the `usage-threshold-crossed` channel and translates each
@@ -98,10 +109,14 @@ pub fn spawn(app: AppHandle) {
             }
         };
 
+        // Wait for the renderer's listener to come up before the
+        // first tick (see FIRST_TICK_DELAY for why). After that, run
+        // ticks continuously: the user wants toggle effects visible
+        // within minutes of flipping a switch, not after a full poll
+        // window.
+        tokio::time::sleep(FIRST_TICK_DELAY).await;
+
         loop {
-            // Tick first, sleep last. On launch the user wants a fresh
-            // fetch so the toggle's effect is visible quickly, not
-            // five minutes from now.
             run_tick(&app, &mut state).await;
             tokio::time::sleep(POLL_INTERVAL).await;
         }
@@ -116,7 +131,15 @@ async fn run_tick(app: &AppHandle, state: &mut UsageAlertState) {
     // 1. Snapshot prefs. Holding the std::sync mutex across an
     //    `await` is forbidden, so we clone the relevant fields and
     //    drop the guard before any async call.
-    let (thresholds, activity_enabled) = {
+    //
+    //    Usage-threshold polling is a separate concern from the live
+    //    transcript runtime — it hits Anthropic's /usage endpoint
+    //    directly and never touches PID files or transcript JSONL.
+    //    Gating this on `activity_enabled` would silently link two
+    //    independent opt-ins (a user who disabled the activity
+    //    feature for privacy reasons would also lose their quota
+    //    alerts). The threshold list IS the opt-in for this watcher.
+    let thresholds = {
         let prefs_state = app.state::<crate::preferences::PreferencesState>();
         let guard = match prefs_state.0.lock() {
             Ok(g) => g,
@@ -125,12 +148,9 @@ async fn run_tick(app: &AppHandle, state: &mut UsageAlertState) {
                 return;
             }
         };
-        (
-            guard.notify_on_usage_thresholds.clone(),
-            guard.activity_enabled,
-        )
+        guard.notify_on_usage_thresholds.clone()
     };
-    if thresholds.is_empty() || !activity_enabled {
+    if thresholds.is_empty() {
         // Feature off — nothing to do. We deliberately do NOT clear
         // `state` here; if the user re-enables, the existing fired-set
         // is still valid for the current cycles.
@@ -176,13 +196,37 @@ async fn run_tick(app: &AppHandle, state: &mut UsageAlertState) {
         return;
     }
 
-    // 5. Persist updated fired-sets BEFORE emitting events. If the
-    //    emit succeeds and the save fails we'd duplicate notifications
-    //    on next launch — strictly worse than the inverse (notify is
-    //    fire-and-forget; missing one is recoverable, dupe is not).
+    // 5. Persist updated fired-sets BEFORE emitting events. The order
+    //    matters: when persistence fails, we MUST NOT emit, because
+    //    the in-memory fired-set is the next-launch dedupe and a
+    //    successful emit + failed save means the user gets a
+    //    duplicate toast on the next cold start.
+    //
+    //    Trade-off when save fails: the user silently misses this
+    //    cycle's alert, but they don't get spammed on restart. The
+    //    failure path is rare (disk full or ~/.claudepot/ permissions
+    //    are unusual), and the journal warning gives ops a recovery
+    //    breadcrumb. The previous version logged JoinError but
+    //    silently dropped real I/O failures AND emitted anyway,
+    //    which guaranteed dupe-on-restart with no diagnostic.
     let save_state = state.clone();
-    if let Err(e) = tauri::async_runtime::spawn_blocking(move || save_state.save()).await {
-        tracing::warn!(error = %e, "usage_watcher: persistence join failed");
+    let save_outcome = tauri::async_runtime::spawn_blocking(move || save_state.save()).await;
+    match save_outcome {
+        Ok(Ok(())) => {}
+        Ok(Err(e)) => {
+            tracing::warn!(
+                error = %e,
+                "usage_watcher: alert state save failed; suppressing emit to avoid dupe-on-restart"
+            );
+            return;
+        }
+        Err(e) => {
+            tracing::warn!(
+                error = %e,
+                "usage_watcher: persistence join failed; suppressing emit to avoid dupe-on-restart"
+            );
+            return;
+        }
     }
 
     // 6. Emit one event per crossing. The dispatcher on the JS side
