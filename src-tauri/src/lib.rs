@@ -80,6 +80,13 @@ pub fn run() {
     // `set_activation_policy()` inside the very first `setup()` tick to
     // avoid a visible dock-icon flash on cold launch.
     let prefs = preferences::Preferences::load();
+    // `hide_dock` is only consumed inside `#[cfg(target_os = "macos")]`
+    // (set_activation_policy is a no-op everywhere else), so binding it
+    // unconditionally would emit `unused_variable` on Linux + Windows.
+    // Gate the bind to keep the production build clean while still
+    // honouring the cold-load order — `prefs` itself is read on every
+    // platform; only the macOS-specific extraction is gated.
+    #[cfg(target_os = "macos")]
     let hide_dock = prefs.hide_dock_icon;
     let show_window_on_startup = prefs.show_window_on_startup;
 
