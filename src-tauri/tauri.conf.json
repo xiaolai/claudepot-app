@@ -5,7 +5,7 @@
   "identifier": "com.claudepot.app",
   "build": {
     "beforeDevCommand": "pnpm dev",
-    "devUrl": "http://localhost:1430",
+    "devUrl": "http://localhost:11220",
     "beforeBuildCommand": "pnpm build",
     "frontendDist": "../dist"
   },
