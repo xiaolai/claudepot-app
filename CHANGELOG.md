@@ -6,6 +6,79 @@ Versioning scheme:
 - `0.1.x` — beta
 - `1.0.0+` — stable
 
+## 0.0.14 — alpha (unreleased)
+
+### Added
+
+- **Skeleton placeholders for list surfaces.** Bare "Loading…" text on
+  list/grid panes flashed a single word where structure was about to
+  appear. New `Skeleton` / `SkeletonList` / `SkeletonRows` primitives
+  (`src/components/primitives/Skeleton.tsx`) wrap the existing
+  `.skeleton` CSS classes with `role="status"` + `aria-live="polite"`
+  + a visually-hidden label, so the loading state announces itself
+  to screen readers while the sighted UI shows shimmer blocks.
+  Applied at Accounts (initial load), Keys (both tables), Activities
+  card stream, Automations, Third-parties, Config preview, Settings
+  notifications + diagnostics panes, and Protected paths.
+- **Inline reasons on disabled buttons.** Settings → Cleanup
+  "Break lock" now shows "Enter a lock file path" / "Breaking lock…"
+  beside the disabled button. Settings → Updates "Frequency" row
+  hints "Enable auto-check to set" when disabled. The auto-update
+  "Check now" button switches its label by status (Checking… /
+  Downloading… / Update ready) instead of staying as a flat
+  "Check now". Closes a long-standing `.claude/rules/design.md`
+  violation.
+- **Empty-state CTAs in Keys.** Both API keys and OAuth tokens now
+  render a ghost "Add …" button in their empty state, alongside
+  the existing console link / `claude setup-token` instructions.
+  Header solid-Add stays the single primary action per
+  one-primary-per-view rule.
+- **Inline path validation in the recovery dialog.** Settings →
+  Cleanup → Recover now surfaces "Path must be absolute (starts with
+  `/` or `C:\`)" beneath the input when the path is non-empty but
+  relative, instead of silently disabling the Recover button.
+
+### Changed
+
+- **Notifications carry the project name in the body.** macOS stacks
+  banners by `threadId` and shows only the body line in the
+  Notification Center summary, so a stand-alone "task finished (3m)"
+  lost its project attribution the moment two finished near each
+  other. Body now appends `@ <project>` for all four kinds (error,
+  stuck, idle-done, waiting). Title still carries the project for
+  the un-stacked banner case.
+- **Download progress visible on the button.** The auto-update card
+  already had a progress bar in the same card; the disabled
+  "Downloading…" button itself now shows the percentage too
+  (`Downloading… 42%`), so the user gets progress at a glance even
+  when the bar scrolls out of view.
+- **Terminology: "transcript" → "session" in user-facing strings.**
+  Project detail context menu items ("Reveal session in Finder",
+  "Copy session file path") and adopt-orphans dialog copy now match
+  the section's "Sessions" tab label. Internal variable names
+  (`transcriptPath`, etc.) stay — only user-visible strings changed.
+- **Specific failure copy when accounts can't load.** The startup
+  load-error screen now says "Couldn't load accounts" instead of
+  the misleading "Couldn't load Claudepot", with one actionable
+  sentence and the raw error tucked behind `<details>`.
+
+### Fixed
+
+- **OAuth token rows no longer show truncated UUIDs when the linked
+  account is removed.** Previously the row rendered
+  `account_uuid.slice(0, 8)` as a fallback (e.g. `a3f8c2d1`),
+  violating the "no internal identifiers in primary UI" rule. Now
+  shows a `warn`-tone "account removed" tag, and the tag stays
+  clickable for cached-usage inspection (cache is keyed by token
+  UUID, not account, so the lookup still resolves). Same fix lands
+  in the OAuth usage modal title.
+- **Skeleton primitive carries a screen-reader label.** First pass
+  introduced shimmer blocks with no `role="status"` or aria text,
+  which would have regressed the a11y floor for every section that
+  swapped "Loading…" for the new primitive. Container now declares
+  `role="status"` / `aria-live="polite"` / `aria-busy="true"` and
+  carries a visually hidden "Loading…" label.
+
 ## 0.0.13 — alpha (2026-04-30)
 
 ### Fixed
