@@ -204,10 +204,17 @@ fn build_profile_info(accounts: &[crate::account::Account]) -> Vec<ProfileInfo> 
 }
 
 async fn check_api(beta_header: &str) -> ApiStatus {
-    match reqwest::Client::builder()
-        .timeout(std::time::Duration::from_secs(10))
-        .build()
-    {
+    let mut builder = reqwest::Client::builder().timeout(std::time::Duration::from_secs(10));
+    let proxy_url = ["HTTPS_PROXY", "https_proxy", "ALL_PROXY", "all_proxy"]
+        .iter()
+        .filter_map(|var| std::env::var(var).ok())
+        .find(|v| !v.is_empty());
+    if let Some(url) = proxy_url {
+        if let Ok(proxy) = reqwest::Proxy::all(&url) {
+            builder = builder.proxy(proxy);
+        }
+    }
+    match builder.build() {
         Err(_) => ApiStatus::Unreachable("failed to build HTTP client".into()),
         Ok(client) => {
             match client
