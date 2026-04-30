@@ -6,6 +6,119 @@ Versioning scheme:
 - `0.1.x` — beta
 - `1.0.0+` — stable
 
+## 0.0.11 — alpha (2026-04-30)
+
+### Added
+
+- **OS notification when a CLI session is waiting for you.** The
+  highest-leverage trigger in the set: when CC pauses pending a
+  permission, plan-mode approval, or clarifying answer, a toast fires
+  with the project name as title and the `waiting_for` reason as
+  body. Click the toast to bring the host terminal forward (same
+  routing as the existing error/stuck toasts). Detection rides the
+  existing `Status::Waiting` field already populated from CC's PID
+  file `waitingFor` and the `permission-mode` transcript fallback —
+  no new polling. Re-fires only when the session leaves Waiting and
+  re-enters with a *different* reason, so a multi-turn approval flow
+  doesn't spam. Defaults **on** because it's the alert the product
+  exists for; the activity feature itself is already opt-in
+  (`activity_enabled`), so a fresh-install user doesn't see surprise
+  toasts before consenting to live tracking. New
+  `notify_on_waiting` preference under Settings → Notifications.
+- **OS notification when an Anthropic usage window crosses a
+  threshold.** New `Alert at usage thresholds` chip group under
+  Settings → Notifications (50 / 70 / 80 / 90 / 95) — defaults
+  to `[80, 90]`. A Rust-side watcher polls `/usage` every 5 min
+  for the CLI-active account and emits one toast per (window ×
+  threshold) per reset cycle. The fired-set persists to
+  `~/.claudepot/usage_alert_state.json` so a restart doesn't dupe;
+  cycle resets clear the set so the next cycle re-arms. Click the
+  toast to open the Accounts view for that email. Independent of
+  `activity_enabled` — usage polling has no dependency on the
+  transcript runtime.
+- **Tray icon shows a dot when sessions need attention.** The
+  menubar icon switches to an alert variant (same teapot glyph plus
+  a 2 × 2 black square in the top-right corner) whenever any session
+  is errored, stuck, or waiting. Both variants ship as template PNGs
+  derived from `assets/pixel-claudepot-menubar.svg` /
+  `pixel-claudepot-menubar-alert.svg` via `rsvg-convert`, so AppKit
+  re-tints the dot to match the menubar foreground in light + dark
+  modes. Replaces the previous `• N` text-title approach, which was
+  macOS-only (GNOME hides title text; Windows ignores it) — the
+  icon swap is the visible signal on every platform Tauri targets.
+
+### Changed
+
+- **⌘Q, ⌘W, and the red ✕ now hide the window instead of quitting.**
+  Claudepot is meant to live in the menubar; background watchers
+  (live activity runtime, usage poller) and OS notifications keep
+  firing only while the process is alive, and the previous
+  behaviour ended the process whenever the main window was the
+  only one. The single Quit that actually exits the process is the
+  `Quit` row in the tray dropdown — it routes through `attempt_quit`
+  and the existing RunningOps gate so in-flight project renames /
+  prunes / verifies surface a confirm modal before being abandoned.
+  ⌘Q's old in-app accelerator is rebound to the same hide handler;
+  Window menu's `Close Window ⌘W` is a custom item (not the Tauri
+  predefined, which would tear the window down); red ✕ intercepts
+  `CloseRequested` and calls `prevent_close` + `hide()`.
+- **Settings tab "Activity" → "Notifications".** The pane was
+  renamed and given the Bell icon; the body still hosts the live-
+  activity master switch alongside the per-trigger toggles, since
+  the trigger detection rides the live runtime. Pane copy now states
+  the actual defaults (waiting and usage thresholds default on; the
+  rest are opt-in) instead of the previous "all default off"
+  promise that was no longer true.
+- **"Alert when work completes" relabelled "Alert when task
+  finished".** Same preference (`notify_on_idle_done`), same 2-min
+  busy gate (the gate filters out drive-by edits so every successful
+  turn doesn't fire a toast). Notification body now reads
+  `task finished (Nm)` instead of `done (Nm)`.
+- **Tray dot is just a dot — no count.** The previous title text
+  rendered `• N` next to the menubar icon; the user's next action is
+  binary regardless (open the app to see what), so the count was
+  cognitive load. The hover tooltip still surfaces the count
+  (`⚠ N alerting sessions`) for callers who want it on demand.
+- **Waiting sessions count toward the tray dot.** The "alerting"
+  count was `errored + stuck` only — the dot would dark while a
+  session was paused for a permission, exactly the case the
+  product exists for. Now `errored + stuck + waiting` lights it up.
+
+### Fixed
+
+- **Cold-install users get the documented defaults.** `Preferences`
+  derived `Default`, which set every field to its type default —
+  so the documented `notify_on_waiting = true` and
+  `notify_on_usage_thresholds = [80, 90]` came up `false` and `[]`
+  whenever `preferences.json` was missing on disk. Manual `Default`
+  impl now reuses the same helpers serde uses for partial-read
+  defaults, so cold start agrees with field-level fallback.
+- **Usage threshold polling decoupled from the live activity
+  feature.** A user who disabled the live Activity feature for
+  privacy reasons would also lose their quota alerts, even though
+  `/usage` polling has no dependency on transcript watching. The
+  watcher now keys only off `notify_on_usage_thresholds`.
+- **First-tick race for usage notifications mitigated.** The Rust
+  watcher used to run its first tick immediately on app start; if
+  the first tick crossed a threshold before the renderer's listener
+  was wired up, the fired-set persisted but no OS toast fired.
+  A 5 s `FIRST_TICK_DELAY` now gives the webview time to mount
+  before the watcher's first emit.
+- **Usage save errors no longer cause dupe-on-restart.** When the
+  alert-state save to `~/.claudepot/usage_alert_state.json` failed
+  (disk full, permissions), the previous code logged only the
+  outer `JoinError`, dropped the inner `io::Error`, and emitted the
+  toast anyway — guaranteeing the same threshold re-fired on the
+  next launch. Both error layers now surface in the journal, and
+  emit is suppressed when persistence fails. Trade: a rare missed
+  alert vs. a rare dupe; the dupe is the more annoying outcome.
+- **Settings usage-threshold chips render correctly.** The chip
+  styles had been auto-rewritten to invalid token strings
+  (`"tokens.sp[2] tokens.sp[8]"`, `"tokens.sp.px solid …"`); the
+  browser dropped the declarations and the chips lost their
+  padding/border. Replaced with valid CSS vars (`var(--sp-2)`,
+  `var(--sp-8)`, `var(--sp-px)`).
+
 ## 0.0.10 — alpha (2026-04-29)
 
 ### Added
