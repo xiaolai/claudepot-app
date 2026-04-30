@@ -70,6 +70,15 @@ pub struct Preferences {
     #[serde(default = "default_true")]
     pub notify_on_waiting: bool,
 
+    /// Anthropic usage-window utilization thresholds (integer percent
+    /// values) that fire OS notifications when the CLI-active account
+    /// crosses them. Empty vec = feature off; the default `[80, 90]`
+    /// gives one early-warning + one near-cap nudge per (window ×
+    /// reset cycle). The watcher polls every 5 min, so crossing
+    /// detection latency is bounded by that cadence.
+    #[serde(default = "default_usage_thresholds")]
+    pub notify_on_usage_thresholds: Vec<u32>,
+
     /// Config section — per-kind "Open in…" editor preferences. Defaults
     /// to an empty `by_kind` + `fallback = "system"`, meaning the OS
     /// default handler is used until the user sets a preference. Never
@@ -83,6 +92,14 @@ pub struct Preferences {
 /// rolling a `Default` impl for the whole struct.
 fn default_true() -> bool {
     true
+}
+
+/// Default usage-threshold list used when the field is missing in
+/// the on-disk preferences file. Picked to give one early warning
+/// (80%) and one near-cap nudge (90%) per cycle without being
+/// chatty. Users can edit the list in Settings → Notifications.
+fn default_usage_thresholds() -> Vec<u32> {
+    vec![80, 90]
 }
 
 impl Preferences {

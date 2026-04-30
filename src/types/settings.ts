@@ -57,4 +57,9 @@ export interface Preferences {
    *  Defaults to **true**: this is the highest-leverage alert in the
    *  set, gated behind `activity_enabled` which is already opt-in. */
   notify_on_waiting: boolean;
+  /** Integer-percent thresholds (e.g. 80, 90) that fire when the
+   *  CLI-active account's usage crosses them. Empty = feature off.
+   *  Default `[80, 90]`. The watcher polls every 5 min on the Rust
+   *  side. */
+  notify_on_usage_thresholds: number[];
 }

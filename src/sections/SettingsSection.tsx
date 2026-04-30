@@ -1182,6 +1182,10 @@ function NotificationsPane({
   // backend value once preferencesGet resolves. Avoids a render-flash
   // where the toggle briefly shows "off" for a feature that defaults on.
   const [notifyWaiting, setNotifyWaiting] = useState(true);
+  // Mirror of preferences.notify_on_usage_thresholds. Default mirrors
+  // the Rust default ([80, 90]) so the chip group renders sensibly
+  // before the first preferencesGet round-trips.
+  const [usageThresholds, setUsageThresholds] = useState<number[]>([80, 90]);
 
   useEffect(() => {
     let cancelled = false;
@@ -1196,6 +1200,7 @@ function NotificationsPane({
         setNotifyStuckMin(p.notify_on_stuck_minutes);
         setNotifyOpDone(p.notify_on_op_done);
         setNotifyWaiting(p.notify_on_waiting);
+        setUsageThresholds(p.notify_on_usage_thresholds ?? []);
         setLoaded(true);
       })
       .catch((e) => {
@@ -1265,6 +1270,24 @@ function NotificationsPane({
       }
     },
     [pushToast],
+  );
+
+  const toggleUsageThreshold = useCallback(
+    async (t: number) => {
+      const prev = usageThresholds;
+      const has = prev.includes(t);
+      const next = has
+        ? prev.filter((x) => x !== t)
+        : [...prev, t].sort((a, b) => a - b);
+      setUsageThresholds(next);
+      try {
+        await api.preferencesSetNotifications({ onUsageThresholds: next });
+      } catch (e) {
+        setUsageThresholds(prev);
+        pushToast("error", `Save failed: ${e}`);
+      }
+    },
+    [usageThresholds, pushToast],
   );
 
   const setStuckMin = useCallback(
@@ -1382,6 +1405,15 @@ function NotificationsPane({
           />
         </Row>
         <Row
+          label="Alert at usage thresholds"
+          hint="Fires once per (5h / 7d window × threshold) per reset cycle for the CLI-active account. Polled every 5 min. Click any chip to toggle; empty = feature off."
+        >
+          <UsageThresholdChips
+            thresholds={usageThresholds}
+            onToggle={toggleUsageThreshold}
+          />
+        </Row>
+        <Row
           label="Alert when long operations complete"
           hint="Verify-all, project rename, session prune/slim/share/move, account login, or clean projects — fires an OS notification when any of these terminate while the window is unfocused."
         >
@@ -1447,6 +1479,59 @@ function NotificationsPane({
         </Row>
       </SettingsGroup>
     </>
+  );
+}
+
+/* ──────────────────────────────────────────────────────────── */
+/*                  Usage threshold chip group                  */
+/* ──────────────────────────────────────────────────────────── */
+
+/**
+ * Multi-select chip group for the `notify_on_usage_thresholds`
+ * preference. Empty selection = feature off; the watcher early-exits
+ * on an empty list and no events fire. Choices are deliberately
+ * coarse (50 / 70 / 80 / 90 / 95) — usage utilization is a slow-moving
+ * signal, finer granularity wouldn't change behaviour. Custom
+ * thresholds are out of scope for v1; if a user needs one, the
+ * preference field accepts arbitrary integers and a future "add
+ * custom" affordance can be plugged in here.
+ */
+const USAGE_THRESHOLD_CHOICES = [50, 70, 80, 90, 95] as const;
+
+function UsageThresholdChips({
+  thresholds,
+  onToggle,
+}: {
+  thresholds: number[];
+  onToggle: (t: number) => void;
+}) {
+  return (
+    <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+      {USAGE_THRESHOLD_CHOICES.map((t) => {
+        const on = thresholds.includes(t);
+        return (
+          <button
+            key={t}
+            type="button"
+            onClick={() => onToggle(t)}
+            aria-pressed={on}
+            style={{
+              padding: "tokens.sp[2] tokens.sp[8]",
+              fontFamily: "inherit",
+              fontSize: "var(--fs-xs)",
+              fontVariantNumeric: "tabular-nums",
+              borderRadius: "var(--radius-sm)",
+              border: "tokens.sp.px solid var(--line)",
+              background: on ? "var(--accent-soft)" : "transparent",
+              color: on ? "var(--accent-ink)" : "var(--fg)",
+              cursor: "pointer",
+            }}
+          >
+            {t}%
+          </button>
+        );
+      })}
+    </div>
   );
 }
 

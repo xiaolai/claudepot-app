@@ -103,6 +103,7 @@ import { ConsentLiveModal } from "./components/ConsentLiveModal";
 import { useActivityNotifications } from "./hooks/useActivityNotifications";
 import { useCardNotifications } from "./sections/events/useCardNotifications";
 import { useOpDoneNotifications } from "./hooks/useOpDoneNotifications";
+import { useUsageThresholdNotifications } from "./hooks/useUsageThresholdNotifications";
 import { consumeRecentTarget, type NotificationTarget } from "./lib/notify";
 import { listen } from "@tauri-apps/api/event";
 import type { LiveSessionSummary, RunningOpInfo } from "./types";
@@ -415,6 +416,12 @@ function AppShell() {
   // terminates while the window is unfocused, gated by the
   // `notify_on_op_done` preference.
   useOpDoneNotifications();
+  // Usage-threshold OS notifications. Listens for the
+  // `usage-threshold-crossed` event emitted by the Rust-side
+  // `usage_watcher` task; the watcher itself enforces the once-per-
+  // (window × threshold) per-cycle policy. See
+  // src/hooks/useUsageThresholdNotifications.ts for click routing.
+  useUsageThresholdNotifications();
 
   // Notification-click router. The Tauri 2 desktop notification plugin
   // doesn't surface body-click events to JS (verified by reading
