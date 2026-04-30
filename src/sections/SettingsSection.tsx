@@ -29,7 +29,7 @@ import { APP_VERSION } from "../version";
 type Tab =
   | "general"
   | "appearance"
-  | "activity"
+  | "notifications"
   | "cleanup"
   | "protected"
   | "github"
@@ -51,7 +51,7 @@ const TAB_DEFS: ReadonlyArray<{
 }> = [
   { id: "general",     label: "General",        glyph: NF.sliders,  group: "core" },
   { id: "appearance",  label: "Appearance",     glyph: NF.sun,      group: "core" },
-  { id: "activity",    label: "Activity",       glyph: NF.bolt,     group: "core" },
+  { id: "notifications", label: "Notifications", glyph: NF.bell,     group: "core" },
   { id: "cleanup",     label: "Cleanup",        glyph: NF.trash,    group: "advanced" },
   { id: "protected",   label: "Protected paths", glyph: NF.shield,  group: "advanced" },
   { id: "github",      label: "GitHub",         glyph: NF.key,      group: "advanced" },
@@ -105,7 +105,7 @@ export function SettingsSection() {
 
           {tab === "general" && <GeneralPane pushToast={pushToast} />}
           {tab === "appearance" && <AppearancePane />}
-          {tab === "activity" && <ActivityPane pushToast={pushToast} />}
+          {tab === "notifications" && <NotificationsPane pushToast={pushToast} />}
           {tab === "cleanup" && <CleanupTabPane pushToast={pushToast} />}
           {tab === "protected" && <ProtectedPathsPane pushToast={pushToast} />}
           {tab === "github" && <GithubPane pushToast={pushToast} />}
@@ -1163,10 +1163,10 @@ function CleanupTabPane({
 }
 
 /* ──────────────────────────────────────────────────────────── */
-/*                        Activity pane                        */
+/*                      Notifications pane                      */
 /* ──────────────────────────────────────────────────────────── */
 
-function ActivityPane({
+function NotificationsPane({
   pushToast,
 }: {
   pushToast: (k: "info" | "error", t: string) => void;
