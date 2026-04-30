@@ -29,7 +29,7 @@ import { APP_VERSION } from "../version";
 type Tab =
   | "general"
   | "appearance"
-  | "activity"
+  | "notifications"
   | "cleanup"
   | "protected"
   | "github"
@@ -51,7 +51,7 @@ const TAB_DEFS: ReadonlyArray<{
 }> = [
   { id: "general",     label: "General",        glyph: NF.sliders,  group: "core" },
   { id: "appearance",  label: "Appearance",     glyph: NF.sun,      group: "core" },
-  { id: "activity",    label: "Activity",       glyph: NF.bolt,     group: "core" },
+  { id: "notifications", label: "Notifications", glyph: NF.bell,     group: "core" },
   { id: "cleanup",     label: "Cleanup",        glyph: NF.trash,    group: "advanced" },
   { id: "protected",   label: "Protected paths", glyph: NF.shield,  group: "advanced" },
   { id: "github",      label: "GitHub",         glyph: NF.key,      group: "advanced" },
@@ -105,7 +105,7 @@ export function SettingsSection() {
 
           {tab === "general" && <GeneralPane pushToast={pushToast} />}
           {tab === "appearance" && <AppearancePane />}
-          {tab === "activity" && <ActivityPane pushToast={pushToast} />}
+          {tab === "notifications" && <NotificationsPane pushToast={pushToast} />}
           {tab === "cleanup" && <CleanupTabPane pushToast={pushToast} />}
           {tab === "protected" && <ProtectedPathsPane pushToast={pushToast} />}
           {tab === "github" && <GithubPane pushToast={pushToast} />}
@@ -1163,10 +1163,10 @@ function CleanupTabPane({
 }
 
 /* ──────────────────────────────────────────────────────────── */
-/*                        Activity pane                        */
+/*                      Notifications pane                      */
 /* ──────────────────────────────────────────────────────────── */
 
-function ActivityPane({
+function NotificationsPane({
   pushToast,
 }: {
   pushToast: (k: "info" | "error", t: string) => void;
@@ -1178,6 +1178,14 @@ function ActivityPane({
   const [notifyIdleDone, setNotifyIdleDone] = useState(false);
   const [notifyStuckMin, setNotifyStuckMin] = useState<number | null>(null);
   const [notifyOpDone, setNotifyOpDone] = useState(false);
+  // Default-true to match the Preferences default; flipped to the
+  // backend value once preferencesGet resolves. Avoids a render-flash
+  // where the toggle briefly shows "off" for a feature that defaults on.
+  const [notifyWaiting, setNotifyWaiting] = useState(true);
+  // Mirror of preferences.notify_on_usage_thresholds. Default mirrors
+  // the Rust default ([80, 90]) so the chip group renders sensibly
+  // before the first preferencesGet round-trips.
+  const [usageThresholds, setUsageThresholds] = useState<number[]>([80, 90]);
 
   useEffect(() => {
     let cancelled = false;
@@ -1191,6 +1199,8 @@ function ActivityPane({
         setNotifyIdleDone(p.notify_on_idle_done);
         setNotifyStuckMin(p.notify_on_stuck_minutes);
         setNotifyOpDone(p.notify_on_op_done);
+        setNotifyWaiting(p.notify_on_waiting);
+        setUsageThresholds(p.notify_on_usage_thresholds ?? []);
         setLoaded(true);
       })
       .catch((e) => {
@@ -1246,7 +1256,7 @@ function ActivityPane({
 
   const setNotifyBool = useCallback(
     async (
-      key: "onError" | "onIdleDone" | "onOpDone",
+      key: "onError" | "onIdleDone" | "onOpDone" | "onWaiting",
       setter: (v: boolean) => void,
       prev: boolean,
       next: boolean,
@@ -1260,6 +1270,24 @@ function ActivityPane({
       }
     },
     [pushToast],
+  );
+
+  const toggleUsageThreshold = useCallback(
+    async (t: number) => {
+      const prev = usageThresholds;
+      const has = prev.includes(t);
+      const next = has
+        ? prev.filter((x) => x !== t)
+        : [...prev, t].sort((a, b) => a - b);
+      setUsageThresholds(next);
+      try {
+        await api.preferencesSetNotifications({ onUsageThresholds: next });
+      } catch (e) {
+        setUsageThresholds(prev);
+        pushToast("error", `Save failed: ${e}`);
+      }
+    },
+    [usageThresholds, pushToast],
   );
 
   const setStuckMin = useCallback(
@@ -1311,7 +1339,7 @@ function ActivityPane({
         </Row>
       </SettingsGroup>
 
-      <SettingsGroup desc="OS notifications when a live session or long-running operation crosses one of these thresholds. All default off; OS notifications only fire when the Claudepot window is unfocused.">
+      <SettingsGroup desc="OS notifications when a live session or long-running operation crosses one of these thresholds. 'Waiting for you' and the usage thresholds (80% / 90%) default on; the rest are opt-in. OS notifications only fire when the Claudepot window is unfocused.">
         <NotificationPermissionRow pushToast={pushToast} />
         <Row
           label="Alert on error burst"
@@ -1325,8 +1353,24 @@ function ActivityPane({
           />
         </Row>
         <Row
-          label="Alert when work completes"
-          hint="A session that was busy for 2+ minutes transitions to idle."
+          label="Alert when waiting for you"
+          hint="A session paused for permission, plan-mode approval, or a clarifying answer."
+        >
+          <Toggle
+            on={notifyWaiting}
+            onChange={(next) =>
+              setNotifyBool(
+                "onWaiting",
+                setNotifyWaiting,
+                notifyWaiting,
+                next,
+              )
+            }
+          />
+        </Row>
+        <Row
+          label="Alert when task finished"
+          hint="A session busy for 2+ minutes returned to idle. The 2-minute gate filters out drive-by edits."
         >
           <Toggle
             on={notifyIdleDone}
@@ -1358,6 +1402,15 @@ function ActivityPane({
               textAlign: "right",
               fontVariantNumeric: "tabular-nums",
             }}
+          />
+        </Row>
+        <Row
+          label="Alert at usage thresholds"
+          hint="Fires once per (5h / 7d window × threshold) per reset cycle for the CLI-active account. Polled every 5 min. Click any chip to toggle; empty = feature off."
+        >
+          <UsageThresholdChips
+            thresholds={usageThresholds}
+            onToggle={toggleUsageThreshold}
           />
         </Row>
         <Row
@@ -1426,6 +1479,59 @@ function ActivityPane({
         </Row>
       </SettingsGroup>
     </>
+  );
+}
+
+/* ──────────────────────────────────────────────────────────── */
+/*                  Usage threshold chip group                  */
+/* ──────────────────────────────────────────────────────────── */
+
+/**
+ * Multi-select chip group for the `notify_on_usage_thresholds`
+ * preference. Empty selection = feature off; the watcher early-exits
+ * on an empty list and no events fire. Choices are deliberately
+ * coarse (50 / 70 / 80 / 90 / 95) — usage utilization is a slow-moving
+ * signal, finer granularity wouldn't change behaviour. Custom
+ * thresholds are out of scope for v1; if a user needs one, the
+ * preference field accepts arbitrary integers and a future "add
+ * custom" affordance can be plugged in here.
+ */
+const USAGE_THRESHOLD_CHOICES = [50, 70, 80, 90, 95] as const;
+
+function UsageThresholdChips({
+  thresholds,
+  onToggle,
+}: {
+  thresholds: number[];
+  onToggle: (t: number) => void;
+}) {
+  return (
+    <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+      {USAGE_THRESHOLD_CHOICES.map((t) => {
+        const on = thresholds.includes(t);
+        return (
+          <button
+            key={t}
+            type="button"
+            onClick={() => onToggle(t)}
+            aria-pressed={on}
+            style={{
+              padding: "var(--sp-2) var(--sp-8)",
+              fontFamily: "inherit",
+              fontSize: "var(--fs-xs)",
+              fontVariantNumeric: "tabular-nums",
+              borderRadius: "var(--radius-sm)",
+              border: "var(--sp-px) solid var(--line)",
+              background: on ? "var(--accent-soft)" : "transparent",
+              color: on ? "var(--accent-ink)" : "var(--fg)",
+              cursor: "pointer",
+            }}
+          >
+            {t}%
+          </button>
+        );
+      })}
+    </div>
   );
 }
 

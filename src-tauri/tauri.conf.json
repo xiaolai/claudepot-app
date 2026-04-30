@@ -1,11 +1,11 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
   "productName": "Claudepot",
-  "version": "0.0.10",
+  "version": "0.0.11",
   "identifier": "com.claudepot.app",
   "build": {
     "beforeDevCommand": "pnpm dev",
-    "devUrl": "http://localhost:1430",
+    "devUrl": "http://localhost:11220",
     "beforeBuildCommand": "pnpm build",
     "frontendDist": "../dist"
   },
