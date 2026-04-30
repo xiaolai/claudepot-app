@@ -178,6 +178,11 @@
   text-overflow: ellipsis;
   background: transparent;
   padding: 0;
+  /* Truncate from the head so the meaningful tail (project basename)
+     stays visible. Without this, every `/Users/joker/…` row looks
+     identical. */
+  direction: rtl;
+  text-align: left;
 }
 
 .protected-add-form {
