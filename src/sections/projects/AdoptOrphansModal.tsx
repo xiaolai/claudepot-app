@@ -118,7 +118,7 @@ export function AdoptOrphansModal({
         <p className="muted" style={{ marginTop: 0 }}>
           Each orphan's original cwd no longer exists. <strong>Adopt</strong>{" "}
           to keep the history — choose a live target cwd and every
-          session transcript is rewritten so <code>--resume</code> will
+          session file is rewritten so <code>--resume</code> will
           cd into the new target. <strong>Remove</strong> to forget the
           orphan entirely — the slug dir is moved to the Trash and can
           be restored from there if you change your mind.

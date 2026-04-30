@@ -72,8 +72,8 @@ export function OAuthUsageModal({
               flexWrap: "wrap",
             }}
           >
-            <Tag tone="accent">
-              {token.account_email ?? token.account_uuid.slice(0, 8)}
+            <Tag tone={token.account_email ? "accent" : "warn"}>
+              {token.account_email ?? "account removed"}
             </Tag>
             <code
               style={{

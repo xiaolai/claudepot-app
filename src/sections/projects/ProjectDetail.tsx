@@ -356,7 +356,7 @@ export function ProjectDetail({
               ? ([
                   { label: "", separator: true, onClick: () => {} },
                   {
-                    label: "Reveal transcript in Finder",
+                    label: "Reveal session in Finder",
                     onClick: () => {
                       api.revealInFinder(transcriptPath).catch((e) => {
                         const msg = `Couldn't reveal: ${e}`;
@@ -366,7 +366,7 @@ export function ProjectDetail({
                     },
                   },
                   {
-                    label: "Copy transcript path",
+                    label: "Copy session file path",
                     onClick: () => {
                       navigator.clipboard.writeText(transcriptPath);
                     },

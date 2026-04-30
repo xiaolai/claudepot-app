@@ -9,6 +9,7 @@ import { useAppState } from "../providers/AppStateProvider";
 import { Button } from "../components/primitives/Button";
 import { IconButton } from "../components/primitives/IconButton";
 import { NF } from "../icons";
+import { SkeletonList } from "../components/primitives/Skeleton";
 import { ScreenHeader } from "../shell/ScreenHeader";
 import { AccountsGrid } from "./accounts/AccountsGrid";
 import { AddAccountModal } from "./accounts/AddAccountModal";
@@ -260,6 +261,8 @@ export function AccountsSection({
             flexDirection: "column",
             alignItems: "center",
             gap: "var(--sp-12)",
+            maxWidth: "var(--content-cap-md)",
+            margin: "0 auto",
           }}
         >
           <h2
@@ -270,33 +273,59 @@ export function AccountsSection({
               margin: 0,
             }}
           >
-            Couldn't load Claudepot
+            Couldn't load accounts
           </h2>
           <p
             style={{
               color: "var(--fg-muted)",
-              fontSize: "var(--fs-xs)",
+              fontSize: "var(--fs-sm)",
               margin: 0,
+              textAlign: "center",
             }}
           >
-            {loadError}
+            Claudepot couldn't read its account database. Retrying often
+            resolves this; if it persists, check the data directory in
+            Settings → Diagnostics.
           </p>
           <Button variant="solid" onClick={() => refresh()}>
             Retry
           </Button>
+          <details style={{ width: "100%" }}>
+            <summary
+              style={{
+                fontSize: "var(--fs-2xs)",
+                color: "var(--fg-faint)",
+                cursor: "pointer",
+                textTransform: "uppercase",
+                letterSpacing: "var(--ls-wide)",
+              }}
+            >
+              Error detail
+            </summary>
+            <pre
+              style={{
+                margin: "var(--sp-6) 0 0",
+                padding: "var(--sp-8)",
+                fontSize: "var(--fs-2xs)",
+                color: "var(--fg-muted)",
+                background: "var(--bg-sunken)",
+                borderRadius: "var(--r-1)",
+                whiteSpace: "pre-wrap",
+                wordBreak: "break-word",
+              }}
+            >
+              {loadError}
+            </pre>
+          </details>
         </div>
       );
     }
     return (
-      <div
-        style={{
-          padding: "var(--sp-48)",
-          color: "var(--fg-muted)",
-          fontSize: "var(--fs-sm)",
-        }}
-      >
-        Loading accounts…
-      </div>
+      <SkeletonList
+        rows={2}
+        label="Loading accounts…"
+        style={{ padding: "var(--sp-32)" }}
+      />
     );
   }
 
