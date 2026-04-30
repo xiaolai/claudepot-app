@@ -45,7 +45,7 @@ impl UsageWindowKind {
         }
     }
 
-    fn pick<'a>(self, resp: &'a UsageResponse) -> Option<&'a UsageWindow> {
+    fn pick(self, resp: &UsageResponse) -> Option<&UsageWindow> {
         match self {
             Self::FiveHour => resp.five_hour.as_ref(),
             Self::SevenDay => resp.seven_day.as_ref(),
