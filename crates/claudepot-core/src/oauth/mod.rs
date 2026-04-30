@@ -24,7 +24,7 @@ pub fn http_client() -> Result<&'static reqwest::Client, OAuthError> {
             .find(|v| !v.is_empty());
         if let Some(url) = proxy_url {
             if let Ok(proxy) = reqwest::Proxy::all(&url) {
-                builder = builder.proxy(proxy);
+                builder = builder.proxy(proxy.no_proxy(reqwest::NoProxy::from_env()));
             }
         }
 

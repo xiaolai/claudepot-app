@@ -211,7 +211,7 @@ async fn check_api(beta_header: &str) -> ApiStatus {
         .find(|v| !v.is_empty());
     if let Some(url) = proxy_url {
         if let Ok(proxy) = reqwest::Proxy::all(&url) {
-            builder = builder.proxy(proxy);
+            builder = builder.proxy(proxy.no_proxy(reqwest::NoProxy::from_env()));
         }
     }
     match builder.build() {
