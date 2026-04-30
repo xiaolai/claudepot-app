@@ -75,7 +75,7 @@ jobs:
       - name: Setup Node
         uses: actions/setup-node@v5
         with:
-          node-version: 20
+          node-version: 24
           cache: pnpm
 
       - name: Cache cargo registry & build
@@ -238,7 +238,7 @@ jobs:
       - name: Setup Node
         uses: actions/setup-node@v5
         with:
-          node-version: 20
+          node-version: 24
           cache: pnpm
 
       - name: Install JS deps
@@ -379,7 +379,7 @@ jobs:
       - name: Setup Node
         uses: actions/setup-node@v5
         with:
-          node-version: 20
+          node-version: 24
           cache: pnpm
 
       - name: Install JS deps
