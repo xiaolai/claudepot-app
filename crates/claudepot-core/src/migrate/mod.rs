@@ -197,8 +197,7 @@ pub fn export_projects(
         // double-record them on the per-project manifest, so we only
         // need the count back here.
         let prefix = format!("projects/{}/claude/projects/{}", project_id, slug);
-        let project_file_count =
-            walk_and_append(&slug_dir, &slug_dir, &prefix, &mut writer)?;
+        let project_file_count = walk_and_append(&slug_dir, &slug_dir, &prefix, &mut writer)?;
 
         // Collect sessionIds from `*.jsonl` filenames at the slug root.
         for entry in fs::read_dir(&slug_dir).map_err(MigrateError::from)? {
@@ -660,11 +659,7 @@ pub fn import_bundle(
     // doesn't acknowledge.
     if let Some(verify_key) = opts.verify_key.as_ref() {
         let manifest_bytes = reader.read_entry("manifest.json")?;
-        crypto::verify_manifest_signature(
-            &original_bundle_path,
-            &manifest_bytes,
-            verify_key,
-        )?;
+        crypto::verify_manifest_signature(&original_bundle_path, &manifest_bytes, verify_key)?;
     }
 
     let manifest = reader.read_manifest()?;

@@ -231,9 +231,9 @@ pub fn write(
 /// Atomic write: tmp + rename. Used so a partial manifest is
 /// never observable.
 fn write_atomic(path: &Path, bytes: &[u8]) -> Result<(), ProjectTrashError> {
-    let parent = path.parent().ok_or_else(|| {
-        ProjectTrashError::io(path, io::Error::other("manifest has no parent"))
-    })?;
+    let parent = path
+        .parent()
+        .ok_or_else(|| ProjectTrashError::io(path, io::Error::other("manifest has no parent")))?;
     let tmp = parent.join(format!(
         ".{}.tmp.{}",
         path.file_name()

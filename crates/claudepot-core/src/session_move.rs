@@ -209,12 +209,11 @@ pub fn move_session_with_progress(
         (|| {
             // Phase S2: sibling per-session dir (subagents/, remote-agents/).
             let (subagent_files_moved, remote_agent_files_moved) = if from_sub.is_dir() {
-                let moved = move_session_subdir_with_progress(
-                    &from_sub,
-                    &to_sub,
-                    &mut |done, total| sink.sub_progress("S2", done, total),
-                )
-                .map_err(|e| (e, "S2"))?;
+                let moved =
+                    move_session_subdir_with_progress(&from_sub, &to_sub, &mut |done, total| {
+                        sink.sub_progress("S2", done, total)
+                    })
+                    .map_err(|e| (e, "S2"))?;
                 if moved.0 > 0 || moved.1 > 0 {
                     s2_moved_sidecars = true;
                 }

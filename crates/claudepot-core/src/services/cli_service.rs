@@ -274,9 +274,8 @@ mod tests {
         // under the active uuid (audit fix). Use a real CredentialBlob
         // shape so the parse step succeeds and the fetcher's "save@…"
         // matches the stored email.
-        let blob_json = crate::testing::sample_blob_json(
-            chrono::Utc::now().timestamp_millis() + 3_600_000,
-        );
+        let blob_json =
+            crate::testing::sample_blob_json(chrono::Utc::now().timestamp_millis() + 3_600_000);
         let platform = MockPlatform::new(Some(&blob_json));
         let fetcher = ConstFetcher("save@example.com");
         clear_credentials_with_platform(&store, &platform, &fetcher)
@@ -303,9 +302,8 @@ mod tests {
         store.insert(&account).unwrap();
         store.set_active_cli(account.uuid).unwrap();
 
-        let blob_json = crate::testing::sample_blob_json(
-            chrono::Utc::now().timestamp_millis() + 3_600_000,
-        );
+        let blob_json =
+            crate::testing::sample_blob_json(chrono::Utc::now().timestamp_millis() + 3_600_000);
         let platform = MockPlatform::new(Some(&blob_json));
         // Fetcher claims the blob belongs to a DIFFERENT email — i.e.
         // CC was manually swapped or our active pointer is stale.
