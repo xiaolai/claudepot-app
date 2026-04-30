@@ -82,6 +82,7 @@ pub async fn preferences_set_notifications(
     on_idle_done: Option<bool>,
     on_stuck_minutes: Option<Option<u32>>,
     on_op_done: Option<bool>,
+    on_waiting: Option<bool>,
 ) -> Result<crate::preferences::Preferences, String> {
     // Mirror the audit-B8 pattern from `preferences_set_activity`:
     // mutate the in-memory snapshot under the std::sync guard, drop
@@ -104,6 +105,9 @@ pub async fn preferences_set_notifications(
         }
         if let Some(v) = on_op_done {
             prefs.notify_on_op_done = v;
+        }
+        if let Some(v) = on_waiting {
+            prefs.notify_on_waiting = v;
         }
         prefs.clone()
     };

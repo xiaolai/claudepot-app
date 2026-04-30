@@ -47,8 +47,9 @@ pub struct Preferences {
     /// Compared as path-prefix matches against `PidRecord.cwd`.
     pub activity_excluded_paths: Vec<String>,
 
-    /// Per-trigger notification toggles, all default off. M5 wires
-    /// these to the tauri-plugin-notification backend.
+    /// Per-trigger notification toggles. Most default off; the one
+    /// exception is `notify_on_waiting` (see below). M5 wires these
+    /// to the tauri-plugin-notification backend.
     pub notify_on_error: bool,
     pub notify_on_idle_done: bool,
     /// None = feature off; Some(N) = fire after N minutes stuck.
@@ -59,6 +60,15 @@ pub struct Preferences {
     /// Default off — opt-in. The window-focus gate lives in the
     /// frontend dispatcher (`src/lib/notify.ts`).
     pub notify_on_op_done: bool,
+    /// Fires when a session transitions into `Waiting` — CC has paused
+    /// pending a permission, plan-mode approval, or clarifying answer.
+    /// Defaults to **true** because this is the highest-leverage alert
+    /// (a CLI the user can't see has stalled waiting on them) and the
+    /// activity feature itself is already opt-in (`activity_enabled`),
+    /// so a fresh-install user only sees these toasts after consenting
+    /// to live tracking.
+    #[serde(default = "default_true")]
+    pub notify_on_waiting: bool,
 
     /// Config section — per-kind "Open in…" editor preferences. Defaults
     /// to an empty `by_kind` + `fallback = "system"`, meaning the OS

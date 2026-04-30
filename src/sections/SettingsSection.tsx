@@ -1178,6 +1178,10 @@ function NotificationsPane({
   const [notifyIdleDone, setNotifyIdleDone] = useState(false);
   const [notifyStuckMin, setNotifyStuckMin] = useState<number | null>(null);
   const [notifyOpDone, setNotifyOpDone] = useState(false);
+  // Default-true to match the Preferences default; flipped to the
+  // backend value once preferencesGet resolves. Avoids a render-flash
+  // where the toggle briefly shows "off" for a feature that defaults on.
+  const [notifyWaiting, setNotifyWaiting] = useState(true);
 
   useEffect(() => {
     let cancelled = false;
@@ -1191,6 +1195,7 @@ function NotificationsPane({
         setNotifyIdleDone(p.notify_on_idle_done);
         setNotifyStuckMin(p.notify_on_stuck_minutes);
         setNotifyOpDone(p.notify_on_op_done);
+        setNotifyWaiting(p.notify_on_waiting);
         setLoaded(true);
       })
       .catch((e) => {
@@ -1246,7 +1251,7 @@ function NotificationsPane({
 
   const setNotifyBool = useCallback(
     async (
-      key: "onError" | "onIdleDone" | "onOpDone",
+      key: "onError" | "onIdleDone" | "onOpDone" | "onWaiting",
       setter: (v: boolean) => void,
       prev: boolean,
       next: boolean,
@@ -1325,8 +1330,24 @@ function NotificationsPane({
           />
         </Row>
         <Row
-          label="Alert when work completes"
-          hint="A session that was busy for 2+ minutes transitions to idle."
+          label="Alert when waiting for you"
+          hint="A session paused for permission, plan-mode approval, or a clarifying answer."
+        >
+          <Toggle
+            on={notifyWaiting}
+            onChange={(next) =>
+              setNotifyBool(
+                "onWaiting",
+                setNotifyWaiting,
+                notifyWaiting,
+                next,
+              )
+            }
+          />
+        </Row>
+        <Row
+          label="Alert when task finished"
+          hint="A session busy for 2+ minutes returned to idle. The 2-minute gate filters out drive-by edits."
         >
           <Toggle
             on={notifyIdleDone}

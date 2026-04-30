@@ -69,12 +69,14 @@ export const activityApi = {
     onIdleDone?: boolean;
     onStuckMinutes?: number | null;
     onOpDone?: boolean;
+    onWaiting?: boolean;
   }) =>
     invoke<Preferences>("preferences_set_notifications", {
       onError: patch.onError,
       onIdleDone: patch.onIdleDone,
       onStuckMinutes: patch.onStuckMinutes,
       onOpDone: patch.onOpDone,
+      onWaiting: patch.onWaiting,
     }).then((p) => {
       broadcastPrefsChanged(p);
       return p;

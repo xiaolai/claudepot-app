@@ -229,6 +229,7 @@ describe("App shell — paper-mono", () => {
         notify_on_idle_done: false,
         notify_on_stuck_minutes: null,
         notify_on_op_done: false,
+        notify_on_waiting: false,
       }),
     });
 
