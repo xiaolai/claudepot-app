@@ -6,6 +6,31 @@ Versioning scheme:
 - `0.1.x` — beta
 - `1.0.0+` — stable
 
+## 0.0.13 — alpha (2026-04-30)
+
+### Fixed
+
+- **macOS menubar tray icon visible again on dark menubars.** The
+  pixel-art ghost was rasterized with binary alpha (every silhouette
+  pixel at full opacity) and white-fill eyes, then submitted to
+  `tray.set_icon` on every menu rebuild. `tray-icon`'s macOS impl
+  hard-codes `setTemplate(false)` inside `set_icon`, so the template
+  flag we set at startup was stripped on the first rebuild and AppKit
+  rendered the raw bitmap — a pure-black silhouette on a near-black
+  menubar = invisible. Now we re-apply `set_icon_as_template(true)`
+  after every swap, and the SVG sources encode the eyes as
+  transparent gaps (so the body tints to the menubar foreground while
+  the eyes punch through) — matching the original ghost design.
+- **Dropdown menu icons readable on Light-mode menus.** The Lucide
+  glyph stroke was painted `#888888` (~53% luminance), which sat
+  almost on top of the macOS NSMenu Vibrant Light material
+  (~rgb(160,160,160)) and read as invisible. Re-rasterized at
+  `#3a3a3a` (~22% luminance) so the icons read as dark strokes
+  against the light dropdown bg, alongside the menu's black text.
+  muda 0.17 doesn't expose a template-tint hook for custom bitmaps,
+  so this single value targets Light dropdowns; paired Dark assets
+  will land if Dark-appearance users report low contrast.
+
 ## 0.0.12 — alpha (2026-04-30)
 
 ### Fixed
