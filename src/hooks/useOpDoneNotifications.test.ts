@@ -70,6 +70,7 @@ describe("useOpDoneNotifications", () => {
       notify_on_error: false,
       notify_on_idle_done: false,
       notify_on_stuck_minutes: null,
+      notify_on_waiting: false,
     });
     const bus = setupTauriEventBus();
     renderHook(() => useOpDoneNotifications());
@@ -93,6 +94,7 @@ describe("useOpDoneNotifications", () => {
       notify_on_error: false,
       notify_on_idle_done: false,
       notify_on_stuck_minutes: null,
+      notify_on_waiting: false,
     });
     const bus = setupTauriEventBus();
     renderHook(() => useOpDoneNotifications());
@@ -130,6 +132,7 @@ describe("useOpDoneNotifications", () => {
       notify_on_error: false,
       notify_on_idle_done: false,
       notify_on_stuck_minutes: null,
+      notify_on_waiting: false,
     });
     const bus = setupTauriEventBus();
     renderHook(() => useOpDoneNotifications());
@@ -246,6 +249,7 @@ describe("useOpDoneNotifications", () => {
       notify_on_error: false,
       notify_on_idle_done: false,
       notify_on_stuck_minutes: null,
+      notify_on_waiting: false,
     });
     const bus = setupTauriEventBus();
     renderHook(() => useOpDoneNotifications());

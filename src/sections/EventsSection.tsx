@@ -282,7 +282,6 @@ export function EventsSection() {
         background: "var(--bg)",
       }}
     >
-      {tab === "stream" && <FilterRail filters={filters} onChange={setFilters} />}
       <div
         style={{
           flex: 1,
@@ -312,17 +311,34 @@ export function EventsSection() {
         />
         <TabStrip current={tab} onPick={setTab} />
         {tab === "stream" && (
-          <>
-            <DashboardStrip />
-            <MetricsStrip cards={aggCards} loading={loading} />
-            <CardStream
-              cards={cards}
-              loading={loading}
-              error={error}
-              lastSeenId={counts?.lastSeenId ?? null}
-              onCardClick={handleCardClick}
-            />
-          </>
+          <div
+            style={{
+              flex: 1,
+              minHeight: 0,
+              display: "flex",
+            }}
+          >
+            <FilterRail filters={filters} onChange={setFilters} />
+            <div
+              style={{
+                flex: 1,
+                minWidth: 0,
+                display: "flex",
+                flexDirection: "column",
+                minHeight: 0,
+              }}
+            >
+              <DashboardStrip />
+              <MetricsStrip cards={aggCards} loading={loading} />
+              <CardStream
+                cards={cards}
+                loading={loading}
+                error={error}
+                lastSeenId={counts?.lastSeenId ?? null}
+                onCardClick={handleCardClick}
+              />
+            </div>
+          </div>
         )}
         {tab === "usage" && (
           <UsageView

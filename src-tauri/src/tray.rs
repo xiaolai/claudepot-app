@@ -28,6 +28,40 @@ use tauri::image::Image;
 use tauri::menu::{IconMenuItemBuilder, MenuBuilder, PredefinedMenuItem};
 use tauri::{AppHandle, Emitter, Manager};
 
+/// Idle (no-alert) tray icon. Same bytes lib.rs feeds to
+/// `TrayIconBuilder::icon` at startup; loaded here so runtime icon
+/// swaps in `apply_tray_icon` can revert without an extra allocation
+/// path. `@2x` is the canonical asset on macOS — AppKit downsamples
+/// to 1x when needed; bundling the higher-res file by default keeps
+/// the menubar crisp on retina displays.
+const TRAY_IDLE_BYTES: &[u8] = include_bytes!("../icons/tray-iconTemplate@2x.png");
+
+/// Alerting variant — same teapot glyph plus a small black dot in
+/// the top-right corner. Filename keeps the `Template` suffix so
+/// AppKit re-tints both bytes-blobs identically and the alert dot
+/// inherits the menubar's foreground colour in light + dark modes.
+const TRAY_ALERT_BYTES: &[u8] = include_bytes!("../icons/tray-iconAlertTemplate@2x.png");
+
+/// Swap the tray icon to match the current alert state. Logged-only
+/// on failure — a stale icon is far less bad than a failed rebuild.
+fn apply_tray_icon(tray: &tauri::tray::TrayIcon, alert_count: u32) {
+    let bytes = if alert_count == 0 {
+        TRAY_IDLE_BYTES
+    } else {
+        TRAY_ALERT_BYTES
+    };
+    match Image::from_bytes(bytes) {
+        Ok(img) => {
+            if let Err(e) = tray.set_icon(Some(img)) {
+                tracing::warn!("tray::apply_tray_icon: set_icon failed: {e}");
+            }
+        }
+        Err(e) => {
+            tracing::warn!("tray::apply_tray_icon: decode failed: {e}");
+        }
+    }
+}
+
 /// Build and set the tray menu from the current account state.
 ///
 /// Async because the Usage submenu peeks the UsageCache (tokio Mutex).
@@ -199,13 +233,14 @@ pub async fn rebuild(app: &AppHandle) -> Result<(), String> {
         let tooltip = compose_tooltip(cli_active, desktop_active, alert_count);
         tray.set_tooltip(Some(&tooltip))
             .map_err(|e| format!("tooltip: {e}"))?;
-        // macOS shows the title next to the menu-bar icon; Linux
-        // SNI implementations vary (GNOME hides it; KDE shows it);
-        // Windows ignores it. Calling unconditionally is safe — the
-        // platforms that don't render text titles are no-ops.
-        let title = compose_title(alert_count);
-        tray.set_title(title.as_deref())
+        // The dot moved from a text title to the icon glyph itself
+        // (alert variant has a 2×2 black square in the top-right
+        // corner). Setting the title to None keeps the menubar
+        // visually clean on macOS/KDE — and GNOME/Windows already
+        // ignored it. Icon swap reaches every platform.
+        tray.set_title(None::<&str>)
             .map_err(|e| format!("title: {e}"))?;
+        apply_tray_icon(&tray, alert_count);
     } else {
         // Reaching this branch means the "main" tray was never
         // registered (setup hook failure or feature flag drift).
@@ -236,11 +271,13 @@ pub fn refresh_alert_chrome(app: &AppHandle) {
     // Recompute the tooltip with the same identity inputs the menu
     // build uses — but skip the per-account list lookup; this path
     // runs frequently and a stale tooltip is fine until the next
-    // rebuild lands.
-    let title = compose_title(alert_count);
-    if let Err(e) = tray.set_title(title.as_deref()) {
+    // rebuild lands. The dot now lives in the icon glyph (see
+    // `apply_tray_icon`), so we explicitly clear any prior title
+    // text to keep the previous "• N" remnant from sticking.
+    if let Err(e) = tray.set_title(None::<&str>) {
         tracing::warn!("tray::refresh_alert_chrome: set_title failed: {e}");
     }
+    apply_tray_icon(&tray, alert_count);
     // For the tooltip, we need the active accounts; use the existing
     // build by re-doing the (cheap) store lookup. Tray rebuilds run on
     // the same hot path; this duplicates a few sync calls but stays
@@ -261,20 +298,11 @@ pub fn refresh_alert_chrome(app: &AppHandle) {
     }
 }
 
-/// Macros-y title text: `None` when no alerts (empty title preserves
-/// the icon-only menubar look); a short count otherwise.
-///
-/// Uses a leading bullet rather than a glyph so AppKit's monospace-y
-/// font hinting renders cleanly without depending on a system emoji
-/// font that may differ across releases. The bullet is U+2022 — one
-/// codepoint, one cell, no width drift.
-fn compose_title(alert_count: u32) -> Option<String> {
-    if alert_count == 0 {
-        None
-    } else {
-        Some(format!("• {alert_count}"))
-    }
-}
+// The alert dot is now part of the tray icon image itself (see the
+// `tray-iconAlertTemplate*.png` assets and `apply_tray_icon`), so the
+// previous `compose_title` text-bullet helper is gone. The hover
+// tooltip below still surfaces the alerting-session count for
+// callers who want it on demand.
 
 /// Compose the tray tooltip with optional alert annotation. Falls back
 /// to `build_tooltip` when alerts == 0 so existing test fixtures keep
@@ -557,20 +585,10 @@ fn find_email_for_uuid(uuid_str: &str) -> Option<String> {
 mod tests {
     use super::*;
 
-    #[test]
-    fn compose_title_zero_alerts_returns_none() {
-        assert_eq!(compose_title(0), None);
-    }
-
-    #[test]
-    fn compose_title_one_alert_returns_count() {
-        assert_eq!(compose_title(1), Some("• 1".to_string()));
-    }
-
-    #[test]
-    fn compose_title_many_alerts_returns_count() {
-        assert_eq!(compose_title(42), Some("• 42".to_string()));
-    }
+    // compose_title is gone — the alert-dot moved from text-title to
+    // an alternate tray icon (`tray-iconAlertTemplate*.png`). The
+    // image swap is exercised by the AppKit/SNI layer at runtime;
+    // there's no pure-string output left to assert here.
 
     #[test]
     fn compose_tooltip_zero_alerts_matches_build_tooltip() {

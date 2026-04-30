@@ -12,8 +12,10 @@ import type { LiveSessionSummary, Preferences } from "../types";
  * Detection rules:
  *   * `on_error`: `errored` overlay flipped false → true on any
  *     session. One notification per session per 60 s, hard-capped.
- *   * `on_idle_done`: a session that had been `busy` for ≥ 2 min
- *     transitioned to `idle`. Same 60-s-per-session rate limit.
+ *   * `on_idle_done` ("Task finished"): a session that had been
+ *     `busy` for ≥ 2 min transitioned to `idle`. Same 60-s-per-
+ *     session rate limit. The 2-min gate is a noise filter so
+ *     drive-by edits don't generate one toast per turn.
  *   * `on_stuck_minutes`: `stuck` overlay fires when a tool call
  *     has been open longer than the configured threshold. Backend
  *     already computes the `stuck` bool using its own threshold
@@ -22,6 +24,13 @@ import type { LiveSessionSummary, Preferences } from "../types";
  *     when value is set"; the threshold number itself is advisory
  *     and only used in the notification copy, not for client-side
  *     detection.
+ *   * `on_waiting`: a session entered `Status::Waiting` from any
+ *     other status — CC paused pending a permission, plan-mode
+ *     approval, or clarifying answer. Re-fires when the session
+ *     leaves Waiting and re-enters with a *different* `waiting_for`
+ *     reason (e.g. one approval landed and another arrived).
+ *     Same `waiting_for` repeating in-place is suppressed by the
+ *     dispatcher's token bucket.
  *
  * In-app signal lives on the session row itself (errored border +
  * tag) and the Activity nav badge — not in ephemeral toasts.
@@ -38,6 +47,12 @@ interface SessionMemo {
   lastErrored: boolean;
   lastStuck: boolean;
   busyStartedMs: number | null;
+  /** Last `waiting_for` reason that produced a notification. Used to
+   *  suppress identical re-fires while still re-arming when the
+   *  reason changes (e.g. session approved one tool and now waits
+   *  on another). `null` means "didn't fire a waiting notification
+   *  for this session yet" — set on entry, cleared on exit. */
+  lastWaitingReason: string | null;
 }
 
 /** Returns the count of sessions currently in an alerting state
@@ -110,7 +125,7 @@ export function useActivityNotifications(): number {
     const dispatch = (
       sessionId: string,
       cwd: string,
-      kind: "error" | "stuck" | "idle-done",
+      kind: "error" | "stuck" | "idle-done" | "waiting",
       title: string,
       body: string,
     ) => {
@@ -174,7 +189,7 @@ export function useActivityNotifications(): number {
         );
       }
 
-      // Idle-after-work transition
+      // Idle-after-work transition (user-facing copy: "task finished")
       if (
         prefs.notify_on_idle_done &&
         s.status === "idle" &&
@@ -183,13 +198,53 @@ export function useActivityNotifications(): number {
         now - prev.busyStartedMs >= 120_000
       ) {
         const minutes = Math.floor((now - prev.busyStartedMs) / 60_000);
-        dispatch(s.session_id, s.cwd, "idle-done", project, `done (${minutes}m)`);
+        dispatch(
+          s.session_id,
+          s.cwd,
+          "idle-done",
+          project,
+          `task finished (${minutes}m)`,
+        );
+      }
+
+      // Waiting transition. Fires when the session enters Waiting from
+      // any non-Waiting status, OR when the same session is still
+      // Waiting but with a different `waiting_for` reason (CC re-arms
+      // for a fresh approval). Same reason repeating is suppressed both
+      // here (lastWaitingReason memo) and downstream (dispatcher
+      // token bucket on `session:<sid>:waiting`).
+      const reason = s.waiting_for ?? null;
+      const enteredWaiting =
+        s.status === "waiting" && prev?.lastStatus !== "waiting";
+      const reasonChanged =
+        s.status === "waiting" &&
+        prev?.lastStatus === "waiting" &&
+        reason !== null &&
+        prev.lastWaitingReason !== null &&
+        reason !== prev.lastWaitingReason;
+      let waitingReasonForMemo = prev?.lastWaitingReason ?? null;
+      if (s.status !== "waiting") {
+        waitingReasonForMemo = null;
+      }
+      if (prefs.notify_on_waiting && (enteredWaiting || reasonChanged)) {
+        dispatch(
+          s.session_id,
+          s.cwd,
+          "waiting",
+          project,
+          reason ?? "needs your answer",
+        );
+        waitingReasonForMemo = reason;
+      } else if (s.status === "waiting" && waitingReasonForMemo === null) {
+        // Track that we saw the entry even when the toggle was off,
+        // so flipping it on later doesn't replay an old waiting state.
+        waitingReasonForMemo = reason;
       }
 
       // Refresh the memo so the next tick can diff against current
       // state. Single update site keeps lastErrored / lastStuck /
-      // status/busyStartedMs in lockstep.
-      memo.set(s.session_id, nextMemo(s, busyStartedMs));
+      // status/busyStartedMs / lastWaitingReason in lockstep.
+      memo.set(s.session_id, nextMemo(s, busyStartedMs, waitingReasonForMemo));
     }
 
     // Reap memo entries for sessions that dropped off the list so
@@ -199,18 +254,30 @@ export function useActivityNotifications(): number {
     }
   }, [sessions, prefsVersion]);
 
-  return sessions.filter((s) => s.errored || s.stuck).length;
+  // Tray-badge count includes every attention-worthy state — error
+  // bursts, stuck tool calls, AND sessions waiting on the user
+  // (permission, plan-mode approval, clarifying answer). Waiting was
+  // added with WI-A; it's the case the product exists for, so the
+  // tray dot must light up for it. The badge IS the dot — only
+  // count > 0 vs == 0 changes anything in the tray (compose_title
+  // drops the numeric value), but downstream consumers (sidebar
+  // badge etc.) still want the count for their own reasons.
+  return sessions.filter(
+    (s) => s.errored || s.stuck || s.status === "waiting",
+  ).length;
 }
 
 function nextMemo(
   s: LiveSessionSummary,
   busyStartedMs: number | null,
+  lastWaitingReason: string | null,
 ): SessionMemo {
   return {
     lastStatus: s.status,
     lastErrored: s.errored,
     lastStuck: s.stuck,
     busyStartedMs,
+    lastWaitingReason,
   };
 }
 

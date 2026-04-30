@@ -9,15 +9,17 @@
 //! double-firing with in-app keyboard shortcuts: we deliberately do
 //! NOT bind accelerators on View items (⌘1..⌘4 / ⌘R) here so the React
 //! listeners stay authoritative. The only accelerators we keep are the
-//! macOS-standard ⌘, and ⌘Q on the Claudepot menu.
+//! macOS-standard ⌘, ⌘Q, and ⌘W.
 //!
-//! Quit gate. ⌘Q is a custom menu item (id `app-menu:quit`), not the
-//! Tauri-predefined Quit, because the predefined item ignores Rust-side
-//! state and would tear down the process mid-op. The gate consults the
-//! `RunningOps` map: empty → `app.exit(0)`; non-empty → emit
-//! `cp-quit-requested` with an op snapshot so the renderer can show a
-//! confirm modal. Both this menu and the tray's Quit row route through
-//! the same `attempt_quit` helper so the gate is not a sieve.
+//! Tray-resident model. The app is meant to live in the menubar; ⌘Q,
+//! ⌘W, and the red ✕ all hide the main window rather than quitting.
+//! Background work (live activity runtime, usage_watcher, OS
+//! notifications) keeps running. The single "Quit" entry that
+//! actually exits the process is in the tray icon's dropdown — it
+//! routes through `attempt_quit`, which gates on the `RunningOps`
+//! map and surfaces a confirm modal when in-flight ops would be
+//! abandoned. Window close handlers must NOT call `attempt_quit`
+//! or `app.exit`, otherwise this surface stops being tray-resident.
 
 use crate::ops::{OpKind, OpStatus, RunningOps};
 use serde::Serialize;
@@ -53,12 +55,18 @@ pub fn install<R: Runtime>(app: &AppHandle<R>) -> Result<(), String> {
         .map_err(|e| format!("hide_others: {e}"))?;
     let show_all = PredefinedMenuItem::show_all(app, Some("Show All"))
         .map_err(|e| format!("show_all: {e}"))?;
-    // Custom quit item — accelerator binds ⌘Q so macOS routes it here
-    // before the system Quit fires. Click handler in `handle_menu_event`
-    // calls `attempt_quit`, which gates on `RunningOps`.
-    // `CmdOrCtrl+Q` so Linux/Windows builds keep their conventional
-    // Ctrl+Q accelerator. macOS resolves CmdOrCtrl to ⌘.
-    let quit = MenuItemBuilder::with_id("app-menu:quit", "Quit Claudepot")
+    // ⌘Q is rebound to "Close Window" so the app behaves as a tray-
+    // resident background worker: the gesture users press to dismiss
+    // the UI hides the window and lets background tasks (live runtime,
+    // usage watcher, notifications) keep running. The id stays
+    // `app-menu:quit` to avoid churning the menu-event router; the
+    // handler in `handle_menu_event` is what changed (now hides
+    // instead of calling `attempt_quit`). `CmdOrCtrl+Q` so Linux /
+    // Windows builds use Ctrl+Q.
+    //
+    // The actual process-terminating Quit lives in the tray dropdown
+    // — see `tray.rs::handle_menu_event` (id `quit`) → `attempt_quit`.
+    let quit = MenuItemBuilder::with_id("app-menu:quit", "Close Window")
         .accelerator("CmdOrCtrl+Q")
         .build(app)
         .map_err(|e| format!("quit: {e}"))?;
@@ -181,11 +189,18 @@ pub fn install<R: Runtime>(app: &AppHandle<R>) -> Result<(), String> {
         .map_err(|e| format!("view submenu: {e}"))?;
 
     // ---- Window submenu (standard macOS set) -------------------------------
+    // `close_window` is a CUSTOM item, not `PredefinedMenuItem::close_window`.
+    // The predefined variant tears the window down; we want ⌘W to
+    // *hide* it so the tray-resident model holds (the only Quit lives
+    // in the tray dropdown — see the `quit` item above for full
+    // rationale). Same handler as `app-menu:quit`; same intent.
     let minimize = PredefinedMenuItem::minimize(app, Some("Minimize"))
         .map_err(|e| format!("minimize: {e}"))?;
     let maximize =
         PredefinedMenuItem::maximize(app, Some("Zoom")).map_err(|e| format!("maximize: {e}"))?;
-    let close_window = PredefinedMenuItem::close_window(app, Some("Close Window"))
+    let close_window = MenuItemBuilder::with_id("app-menu:close-window", "Close Window")
+        .accelerator("CmdOrCtrl+W")
+        .build(app)
         .map_err(|e| format!("close_window: {e}"))?;
 
     let window = SubmenuBuilder::new(app, "Window")
@@ -228,11 +243,19 @@ pub fn install<R: Runtime>(app: &AppHandle<R>) -> Result<(), String> {
 /// plus window focus); everything else forwards to the webview via
 /// a single `app-menu` event, with the menu id as payload.
 pub fn handle_menu_event<R: Runtime>(app: &AppHandle<R>, id: &str) {
-    // ⌘Q (and the menubar Quit click) — gate on RunningOps. Returns
-    // before the generic forward path so the renderer never sees a
-    // stray `app-menu:quit` event.
-    if id == "app-menu:quit" {
-        attempt_quit(app);
+    // ⌘Q (id `app-menu:quit`) and ⌘W (id `app-menu:close-window`)
+    // both hide the main window — the app is tray-resident, so
+    // these gestures dismiss the UI rather than ending the process.
+    // The actual process-terminating Quit lives in the tray dropdown
+    // (see `tray::handle_menu_event` for id `quit` → `attempt_quit`).
+    // Return before the generic forward path so the renderer never
+    // sees a stray `app-menu:quit` / `app-menu:close-window` event.
+    if id == "app-menu:quit" || id == "app-menu:close-window" {
+        if let Some(window) = app.get_webview_window("main") {
+            if let Err(e) = window.hide() {
+                tracing::warn!("hide main window failed: {e}");
+            }
+        }
         return;
     }
 

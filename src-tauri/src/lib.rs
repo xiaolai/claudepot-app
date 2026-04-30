@@ -52,6 +52,7 @@ mod state;
 mod tray;
 mod tray_icons;
 mod tray_menu;
+mod usage_watcher;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
@@ -159,10 +160,28 @@ pub fn run() {
             // default cold-launch path stays unchanged; users who opt
             // out get an immediate `hide()` here. Recovery path is the
             // tray icon (left-click toggles visibility).
-            if !show_window_on_startup {
-                if let Some(window) = app.get_webview_window("main") {
+            //
+            // While we have the window handle, install the close-button
+            // intercept: red ✕ → hide window, NOT exit. The app is
+            // tray-resident — see `app_menu.rs` for the same policy on
+            // ⌘Q and ⌘W. The only surface that actually terminates
+            // the process is the tray dropdown's Quit (gated by
+            // RunningOps in `attempt_quit`). Without `prevent_close`
+            // here, Tauri tears down the only window and macOS exits
+            // the app, breaking every background watcher.
+            if let Some(window) = app.get_webview_window("main") {
+                if !show_window_on_startup {
                     let _ = window.hide();
                 }
+                let win_for_handler = window.clone();
+                window.on_window_event(move |event| {
+                    if let tauri::WindowEvent::CloseRequested { api, .. } = event {
+                        api.prevent_close();
+                        if let Err(e) = win_for_handler.hide() {
+                            tracing::warn!("close-button: hide failed: {e}");
+                        }
+                    }
+                });
             }
 
             // Application menu bar (macOS top-of-screen; Windows/Linux
@@ -283,6 +302,21 @@ pub fn run() {
             tauri::async_runtime::spawn(async move {
                 service.subscribe(listener).await;
             });
+
+            // Usage-threshold watcher: every 5 min, polls /usage for the
+            // CLI-active account and emits `usage-threshold-crossed`
+            // events when utilization first crosses each configured
+            // threshold per cycle. Pure detector + persistence live in
+            // `claudepot_core::services::usage_alerts`; this is just
+            // the orchestration. No-op when the threshold list is empty
+            // or activity is disabled — guarded inside `run_tick`.
+            //
+            // The watcher reaches the shared `UsageCache` via
+            // `app.state::<UsageCache>()` inside each tick, so it
+            // consumes the same cache the rest of the app uses without
+            // forcing an Arc<UsageCache> at the manage() site (which
+            // would break every `State<'_, UsageCache>` consumer).
+            usage_watcher::spawn(app.handle().clone());
 
             Ok(())
         })
