@@ -262,17 +262,22 @@ pub fn refresh_alert_chrome(app: &AppHandle) {
 }
 
 /// Macros-y title text: `None` when no alerts (empty title preserves
-/// the icon-only menubar look); a short count otherwise.
+/// the icon-only menubar look); a single bullet "•" otherwise.
 ///
-/// Uses a leading bullet rather than a glyph so AppKit's monospace-y
+/// We deliberately drop the numeric count from the menubar title.
+/// The user's next action is binary — open the app to see what's
+/// up — so a count adds cognitive load without changing behaviour.
+/// The hover tooltip (`compose_tooltip`) still surfaces the count
+/// for callers who want it on demand.
+///
+/// Uses U+2022 BULLET rather than a glyph so AppKit's monospace-y
 /// font hinting renders cleanly without depending on a system emoji
-/// font that may differ across releases. The bullet is U+2022 — one
-/// codepoint, one cell, no width drift.
+/// font that may differ across releases. One codepoint, one cell.
 fn compose_title(alert_count: u32) -> Option<String> {
     if alert_count == 0 {
         None
     } else {
-        Some(format!("• {alert_count}"))
+        Some("•".to_string())
     }
 }
 
@@ -563,13 +568,12 @@ mod tests {
     }
 
     #[test]
-    fn compose_title_one_alert_returns_count() {
-        assert_eq!(compose_title(1), Some("• 1".to_string()));
-    }
-
-    #[test]
-    fn compose_title_many_alerts_returns_count() {
-        assert_eq!(compose_title(42), Some("• 42".to_string()));
+    fn compose_title_any_alert_returns_bare_dot() {
+        // Whether one alert or forty-two, the menubar shows the same
+        // single bullet. The numeric count moved to the hover tooltip
+        // because the user's next action is binary regardless.
+        assert_eq!(compose_title(1), Some("•".to_string()));
+        assert_eq!(compose_title(42), Some("•".to_string()));
     }
 
     #[test]

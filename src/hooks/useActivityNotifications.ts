@@ -254,7 +254,17 @@ export function useActivityNotifications(): number {
     }
   }, [sessions, prefsVersion]);
 
-  return sessions.filter((s) => s.errored || s.stuck).length;
+  // Tray-badge count includes every attention-worthy state — error
+  // bursts, stuck tool calls, AND sessions waiting on the user
+  // (permission, plan-mode approval, clarifying answer). Waiting was
+  // added with WI-A; it's the case the product exists for, so the
+  // tray dot must light up for it. The badge IS the dot — only
+  // count > 0 vs == 0 changes anything in the tray (compose_title
+  // drops the numeric value), but downstream consumers (sidebar
+  // badge etc.) still want the count for their own reasons.
+  return sessions.filter(
+    (s) => s.errored || s.stuck || s.status === "waiting",
+  ).length;
 }
 
 function nextMemo(
