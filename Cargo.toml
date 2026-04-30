@@ -117,6 +117,7 @@ base64 = "0.22"
 aes = "0.8"
 # macOS-only
 pbkdf2 = { version = "0.12", default-features = false, features = ["hmac", "sha1"] }
+system-configuration = "0.6"
 hmac = "0.12"
 sha1 = "0.10"
 cbc = { version = "0.1", features = ["alloc"] }
