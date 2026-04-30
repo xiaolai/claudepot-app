@@ -8,6 +8,7 @@ import type {
   CardsRecentQuery,
   SeverityLabel,
 } from "../types";
+import { SkeletonList } from "../components/primitives/Skeleton";
 import { DashboardStrip } from "./activities/DashboardStrip";
 import {
   aggregate,
@@ -771,9 +772,7 @@ interface CardStreamProps {
 
 function CardStream({ cards, loading, error, lastSeenId, onCardClick }: CardStreamProps) {
   if (loading) {
-    return (
-      <div style={emptyStyle}>Loading…</div>
-    );
+    return <SkeletonList rows={4} style={{ padding: "var(--sp-16)" }} />;
   }
   if (error) {
     return (

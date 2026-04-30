@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import { Icon } from "../../components/Icon";
+import { SkeletonRows } from "../../components/primitives/Skeleton";
 import { api } from "../../api";
 import type { ProtectedPath } from "../../types";
 
@@ -161,7 +162,7 @@ export function ProtectedPathsPane({ pushToast }: Props) {
       </p>
 
       {loading ? (
-        <p className="muted small">Loading…</p>
+        <SkeletonRows rows={3} />
       ) : (
         <ul className="protected-list" role="list" aria-label="Protected paths">
           {items.length === 0 && (

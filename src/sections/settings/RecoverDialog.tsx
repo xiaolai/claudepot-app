@@ -76,6 +76,19 @@ export function RecoverDialog({
               placeholder="/Users/you/.claude/agents/foo.md"
               autoFocus
             />
+            {trimmed.length > 0 && !isAbsolute && (
+              <span
+                style={{
+                  fontSize: "var(--fs-2xs)",
+                  color: "var(--danger)",
+                  textTransform: "none",
+                  letterSpacing: "normal",
+                  marginTop: "var(--sp-2)",
+                }}
+              >
+                Path must be absolute (starts with <code>/</code> or <code>C:\</code>).
+              </span>
+            )}
           </label>
           <label style={fieldLabelStyle()}>
             <span>Artifact kind</span>

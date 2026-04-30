@@ -18,6 +18,7 @@ import type {
 } from "../types";
 import { ScreenHeader } from "../shell/ScreenHeader";
 import { PreviewHeader } from "../components/primitives/PreviewHeader";
+import { Skeleton } from "../components/primitives/Skeleton";
 import { Button } from "../components/primitives/Button";
 import { IconButton } from "../components/primitives/IconButton";
 import { BackAffordance } from "../components/primitives/BackAffordance";
@@ -2037,14 +2038,9 @@ function FilePreview({
             Preview failed: {previewError}
           </div>
         ) : !preview ? (
-          <div
-            style={{
-              padding: "var(--sp-16) var(--sp-20)",
-              color: "var(--fg-faint)",
-              fontSize: "var(--fs-sm)",
-            }}
-          >
-            Loading…
+          <div style={{ padding: "var(--sp-16) var(--sp-20)" }}>
+            <Skeleton variant="header" />
+            <Skeleton variant="card" />
           </div>
         ) : isMarkdown ? (
           <>
