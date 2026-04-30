@@ -56,6 +56,7 @@ pub mod migrations;
 pub mod oauth;
 pub mod onboard;
 pub mod path_utils;
+pub mod proxy;
 pub mod paths;
 pub mod pricing;
 pub mod project;
