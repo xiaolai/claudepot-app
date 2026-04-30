@@ -135,7 +135,15 @@ export function useActivityNotifications(): number {
       // the host terminal/editor; falls back to opening the
       // transcript in Claudepot's Projects pane when the host can't
       // be resolved.
-      void dispatchOsNotification(title, body, {
+      //
+      // Body carries `@ <project>` even though `title` is the project
+      // too. macOS stacks notifications by `threadId` and renders only
+      // the body line in the collapsed/Notification-Center summary,
+      // so a stand-alone "task finished (3m)" loses its project
+      // attribution the moment two finish near each other. The small
+      // redundancy in the expanded banner is the price for unambiguous
+      // identification when stacked.
+      void dispatchOsNotification(title, `${body} @ ${title}`, {
         dedupeKey: `session:${sessionId}:${kind}`,
         group: `session:${sessionId}`,
         sound: "default",

@@ -176,7 +176,7 @@ describe("ProjectDetail", () => {
     expect(revealSpy).toHaveBeenCalledWith("/p");
   });
 
-  it("context menu exposes Reveal transcript + Copy transcript path (B4/G6)", async () => {
+  it("context menu exposes Reveal session + Copy session file path (B4/G6)", async () => {
     showSpy.mockResolvedValue(
       mkDetail([{ id: "aaaa0000-0000-0000-0000-000000000000", size: 10 }]),
     );
@@ -201,7 +201,7 @@ describe("ProjectDetail", () => {
       await screen.findByRole("button", { name: /session actions/i }),
     );
 
-    await user.click(screen.getByText(/reveal transcript in finder/i));
+    await user.click(screen.getByText(/reveal session in finder/i));
     expect(revealSpy).toHaveBeenCalledWith(
       "/tmp/claudepot-test/.claude/projects/-p/aaaa0000-0000-0000-0000-000000000000.jsonl",
     );
@@ -210,7 +210,7 @@ describe("ProjectDetail", () => {
     await user.click(
       screen.getByRole("button", { name: /session actions/i }),
     );
-    await user.click(screen.getByText(/copy transcript path/i));
+    await user.click(screen.getByText(/copy session file path/i));
     expect(writeText).toHaveBeenCalledWith(
       "/tmp/claudepot-test/.claude/projects/-p/aaaa0000-0000-0000-0000-000000000000.jsonl",
     );

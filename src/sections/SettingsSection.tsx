@@ -4,6 +4,7 @@ import { api } from "../api";
 import { Button } from "../components/primitives/Button";
 import { ExternalLink } from "../components/primitives/ExternalLink";
 import { Glyph } from "../components/primitives/Glyph";
+import { SkeletonList } from "../components/primitives/Skeleton";
 import { Tag } from "../components/primitives/Tag";
 import { useSettingsActions } from "../hooks/useSettingsActions";
 import { useTheme, type ThemeMode } from "../hooks/useTheme";
@@ -473,6 +474,11 @@ function LocksPane({
         >
           Break lock
         </Button>
+        {(gc.lockBusy || !gc.lockPath.trim()) && (
+          <DisabledReason>
+            {gc.lockBusy ? "Breaking lock…" : "Enter a lock file path"}
+          </DisabledReason>
+        )}
       </div>
     </SettingsGroup>
   );
@@ -565,9 +571,7 @@ function DiagnosticsPane({
           )}
         </dl>
       ) : (
-        <p className="mono-muted" style={{ fontSize: "var(--fs-xs)" }}>
-          Loading…
-        </p>
+        <SkeletonList rows={4} />
       )}
       <div style={actionsStyle}>
         <Button
@@ -766,8 +770,21 @@ function UpdatesPane() {
             variant="ghost"
             onClick={() => void checkNow()}
             disabled={checkDisabled}
+            title={
+              status === "downloading"
+                ? "Update is downloading"
+                : status === "ready"
+                  ? "Update is ready to install"
+                  : undefined
+            }
           >
-            {status === "checking" ? "Checking…" : "Check now"}
+            {status === "checking"
+              ? "Checking…"
+              : status === "downloading"
+                ? "Downloading…"
+                : status === "ready"
+                  ? "Update ready"
+                  : "Check now"}
           </Button>
         </div>
       </Row>
@@ -805,7 +822,10 @@ function UpdatesPane() {
         <Toggle on={autoCheckEnabled} onChange={setAutoCheckEnabled} />
       </Row>
 
-      <Row label="Frequency">
+      <Row
+        label="Frequency"
+        hint={!autoCheckEnabled ? "Enable auto-check to set." : undefined}
+      >
         <select
           value={checkFrequency}
           onChange={(e) =>
@@ -1007,7 +1027,7 @@ function UpdateAvailableCard({
           )}
           {status === "downloading" && (
             <Button variant="solid" disabled>
-              Downloading…
+              {total > 0 ? `Downloading… ${pct}%` : "Downloading…"}
             </Button>
           )}
           {status === "ready" && (
@@ -1312,11 +1332,7 @@ function NotificationsPane({
   );
 
   if (!loaded) {
-    return (
-      <div style={{ color: "var(--fg-faint)", fontSize: "var(--fs-sm)" }}>
-        Loading…
-      </div>
-    );
+    return <SkeletonList rows={5} />;
   }
 
   return (
@@ -1893,6 +1909,20 @@ const actionsStyle: React.CSSProperties = {
   gap: "var(--sp-8)",
   alignItems: "center",
 };
+
+function DisabledReason({ children }: { children: React.ReactNode }) {
+  return (
+    <span
+      style={{
+        fontSize: "var(--fs-xs)",
+        color: "var(--fg-faint)",
+        fontStyle: "italic",
+      }}
+    >
+      {children}
+    </span>
+  );
+}
 
 const gridStyle: React.CSSProperties = {
   display: "grid",

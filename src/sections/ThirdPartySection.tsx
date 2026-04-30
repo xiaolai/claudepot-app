@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { ScreenHeader } from "../shell/ScreenHeader";
 import { Button } from "../components/primitives/Button";
+import { SkeletonList } from "../components/primitives/Skeleton";
 import { NF } from "../icons";
 import { api } from "../api";
 import type { RouteSettingsDto, RouteSummaryDto } from "../types";
@@ -317,7 +318,7 @@ export function ThirdPartySection() {
         )}
 
         {routes === null ? (
-          <p style={{ color: "var(--fg-faint)" }}>Loading…</p>
+          <SkeletonList rows={3} />
         ) : routes.length === 0 ? (
           <EmptyState onAdd={() => setShowAdd(true)} />
         ) : (

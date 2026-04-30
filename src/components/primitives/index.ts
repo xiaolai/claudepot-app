@@ -17,3 +17,4 @@ export { FilterChip } from "./FilterChip";
 export { TargetButton } from "./TargetButton";
 export type { TargetButtonState } from "./TargetButton";
 export { BackAffordance } from "./BackAffordance";
+export { Skeleton, SkeletonList, SkeletonRows } from "./Skeleton";

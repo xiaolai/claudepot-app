@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from "react";
 import { listen } from "@tauri-apps/api/event";
 import { ScreenHeader } from "../shell/ScreenHeader";
 import { Button } from "../components/primitives/Button";
+import { SkeletonList } from "../components/primitives/Skeleton";
 import { NF } from "../icons";
 import { api } from "../api";
 import type {
@@ -240,7 +241,7 @@ export function AutomationsSection() {
       )}
 
       {automations === null ? (
-        <div style={{ color: "var(--fg-3)" }}>Loading…</div>
+        <SkeletonList rows={3} />
       ) : automations.length === 0 ? (
         <EmptyState onAdd={() => setShowAdd(true)} />
       ) : (

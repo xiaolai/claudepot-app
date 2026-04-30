@@ -13,6 +13,7 @@ import { Glyph } from "../components/primitives/Glyph";
 import { IconButton } from "../components/primitives/IconButton";
 import { Input } from "../components/primitives/Input";
 import { SectionLabel } from "../components/primitives/SectionLabel";
+import { SkeletonRows } from "../components/primitives/Skeleton";
 import { Tag } from "../components/primitives/Tag";
 import { useAppState } from "../providers/AppStateProvider";
 import { NF } from "../icons";
@@ -275,6 +276,7 @@ export function KeysSection() {
           }
           onRemove={(row) => setPendingRemoval({ kind: "api", row })}
           onRename={(row, label) => onRename("api", row.uuid, label)}
+          onAddRequested={() => setAdding(true)}
         />
 
         <OauthTokensTable
@@ -285,6 +287,7 @@ export function KeysSection() {
           onRemove={(row) => setPendingRemoval({ kind: "oauth", row })}
           onOpenUsage={setUsageModalFor}
           onRename={(row, label) => onRename("oauth", row.uuid, label)}
+          onAddRequested={() => setAdding(true)}
         />
       </main>
 
@@ -337,6 +340,7 @@ function ApiKeysTable({
   onProbe,
   onRemove,
   onRename,
+  onAddRequested,
 }: {
   rows: ApiKeySummary[];
   loading: boolean;
@@ -344,6 +348,7 @@ function ApiKeysTable({
   onProbe: (row: ApiKeySummary) => void;
   onRemove: (row: ApiKeySummary) => void;
   onRename: (row: ApiKeySummary, label: string) => Promise<void>;
+  onAddRequested: () => void;
 }) {
   return (
     <section>
@@ -362,14 +367,25 @@ function ApiKeysTable({
       </p>
 
       {loading && rows.length === 0 ? (
-        <EmptyHint>Loading…</EmptyHint>
+        <SkeletonRows rows={3} />
       ) : rows.length === 0 ? (
         <EmptyHint>
-          No API keys yet. Add one from your{" "}
-          <ExternalLink href="https://console.anthropic.com/settings/keys">
-            Anthropic console
-          </ExternalLink>
-          .
+          <div style={{ display: "flex", flexDirection: "column", gap: "var(--sp-8)", alignItems: "flex-start" }}>
+            <span>
+              No API keys yet. Create one in your{" "}
+              <ExternalLink href="https://console.anthropic.com/settings/keys">
+                Anthropic console
+              </ExternalLink>
+              , then paste it here.
+            </span>
+            <Button
+              variant="ghost"
+              glyph={NF.plus}
+              onClick={onAddRequested}
+            >
+              Add API key
+            </Button>
+          </div>
         </EmptyHint>
       ) : (
         <Table>
@@ -451,6 +467,7 @@ function OauthTokensTable({
   onRemove,
   onOpenUsage,
   onRename,
+  onAddRequested,
 }: {
   rows: OauthTokenSummary[];
   loading: boolean;
@@ -459,6 +476,7 @@ function OauthTokensTable({
   onRemove: (row: OauthTokenSummary) => void;
   onOpenUsage: (row: OauthTokenSummary) => void;
   onRename: (row: OauthTokenSummary, label: string) => Promise<void>;
+  onAddRequested: () => void;
 }) {
   return (
     <section>
@@ -477,11 +495,22 @@ function OauthTokensTable({
       </p>
 
       {loading && rows.length === 0 ? (
-        <EmptyHint>Loading…</EmptyHint>
+        <SkeletonRows rows={3} />
       ) : rows.length === 0 ? (
         <EmptyHint>
-          No OAuth tokens yet. Run <code>claude setup-token</code> and paste
-          the value into “Add key”.
+          <div style={{ display: "flex", flexDirection: "column", gap: "var(--sp-8)", alignItems: "flex-start" }}>
+            <span>
+              No OAuth tokens yet. Run <code>claude setup-token</code> and
+              paste the value into “Add key”.
+            </span>
+            <Button
+              variant="ghost"
+              glyph={NF.plus}
+              onClick={onAddRequested}
+            >
+              Add OAuth token
+            </Button>
+          </div>
         </EmptyHint>
       ) : (
         <Table>
@@ -515,7 +544,11 @@ function OauthTokensTable({
                   <button
                     type="button"
                     onClick={() => onOpenUsage(row)}
-                    title="View usage"
+                    title={
+                      row.account_email
+                        ? "View usage"
+                        : "View cached usage (linked account has been removed)"
+                    }
                     style={{
                       background: "transparent",
                       border: "none",
@@ -524,10 +557,10 @@ function OauthTokensTable({
                     }}
                   >
                     <Tag
-                      tone="accent"
+                      tone={row.account_email ? "accent" : "warn"}
                       style={{ textTransform: "none", letterSpacing: "normal" }}
                     >
-                      {row.account_email ?? row.account_uuid.slice(0, 8)}
+                      {row.account_email ?? "account removed"}
                     </Tag>
                   </button>
                 </Td>
