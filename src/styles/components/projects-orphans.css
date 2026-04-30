@@ -66,6 +66,16 @@
   font-size: var(--fs-sm);
   flex: 1;
   min-width: 0;
+  /* Truncate from the left so the path's distinguishing tail
+     (project basename) stays visible. Without this, `/Users/joker/...`
+     prefixes are preserved and every row looks identical in a
+     destructive-confirm dialog. `direction: rtl` flips the inline
+     ellipsis to the start; `text-align: left` keeps the text
+     left-aligned. ASCII paths (LTR runs anchored by the leading
+     slash) render in natural left-to-right order — the trick
+     only flips where the cut happens, not the character order. */
+  direction: rtl;
+  text-align: left;
 }
 .clean-orphan-main > .muted {
   flex-shrink: 0;
@@ -157,6 +167,11 @@
   white-space: nowrap;
   flex: 1;
   min-width: 0;
+  /* Same path-truncation reasoning as `.clean-orphan-main > .mono`:
+     keep the project-identifying tail visible, hide the shared
+     `/Users/...` prefix. */
+  direction: rtl;
+  text-align: left;
 }
 
 .link-btn {
