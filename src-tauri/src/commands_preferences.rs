@@ -83,6 +83,7 @@ pub async fn preferences_set_notifications(
     on_stuck_minutes: Option<Option<u32>>,
     on_op_done: Option<bool>,
     on_waiting: Option<bool>,
+    on_usage_thresholds: Option<Vec<u32>>,
 ) -> Result<crate::preferences::Preferences, String> {
     // Mirror the audit-B8 pattern from `preferences_set_activity`:
     // mutate the in-memory snapshot under the std::sync guard, drop
@@ -108,6 +109,17 @@ pub async fn preferences_set_notifications(
         }
         if let Some(v) = on_waiting {
             prefs.notify_on_waiting = v;
+        }
+        if let Some(mut v) = on_usage_thresholds {
+            // Normalize: clamp to 1..=100, sort ascending, dedupe.
+            // 0 is a no-op (always crossed), 100 is unreachable on the
+            // server-reported utilization scale, so trim both ends to
+            // the meaningful range. Empty vec is allowed (= feature
+            // off) and survives the normalization unchanged.
+            v.retain(|&t| (1..=100).contains(&t));
+            v.sort_unstable();
+            v.dedup();
+            prefs.notify_on_usage_thresholds = v;
         }
         prefs.clone()
     };
