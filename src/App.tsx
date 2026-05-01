@@ -104,7 +104,11 @@ import { useActivityNotifications } from "./hooks/useActivityNotifications";
 import { useCardNotifications } from "./sections/events/useCardNotifications";
 import { useOpDoneNotifications } from "./hooks/useOpDoneNotifications";
 import { useUsageThresholdNotifications } from "./hooks/useUsageThresholdNotifications";
-import { consumeRecentTarget, type NotificationTarget } from "./lib/notify";
+import {
+  consumeRecentTarget,
+  dispatchOsNotification,
+  type NotificationTarget,
+} from "./lib/notify";
 import { listen } from "@tauri-apps/api/event";
 import type { LiveSessionSummary, RunningOpInfo } from "./types";
 import { WindowChrome, AppSidebar, AppStatusBar } from "./shell";
@@ -625,6 +629,143 @@ function AppShell() {
       unlistenBind?.();
     };
   }, [requestDesktopSignOut, setSection]);
+
+  // Tray → CLI switch feedback. The tray now performs the swap with
+  // `force=true` and emits `tray-cli-switched` with `{ to_email,
+  // from_email, cc_was_running }`. Two channels surface the result so
+  // the user is never left wondering whether the click landed:
+  //
+  //   - Toast in-window with a 10 s Undo button. Visible immediately
+  //     when the user is on Claudepot, and still visible (paused
+  //     animation aside) when they bring the window forward.
+  //   - OS notification when the window is in the background. The
+  //     notification dispatcher gates on `document.hasFocus()` so
+  //     foregrounded users never get duplicate signals. Clicking the
+  //     banner deep-links to Accounts where the toast (still alive)
+  //     carries the actual Undo affordance — Tauri's desktop
+  //     notification plugin doesn't expose action buttons, so the
+  //     in-window toast is the only place an Undo click can live.
+  //
+  // The cc-was-running caveat is appended to both surfaces: a forced
+  // swap can be silently reverted by CC's next token refresh, and the
+  // user has to know to quit + restart Claude Code.
+  type TrayCliSwitchedPayload = {
+    to_email: string;
+    from_email: string | null;
+    cc_was_running: boolean;
+  };
+  // Refs let the listener stay registered for the shell's lifetime
+  // even though the Undo closure needs the latest accounts and
+  // actions. Without this, the effect re-subscribed every time
+  // `accounts` changed (which the handler itself triggers via
+  // `refreshAccounts`), opening a small window between cleanup and
+  // the next async `listen()` resolution where a tray event could
+  // land unobserved.
+  const accountsRef = useRef(accounts);
+  const actionsRef = useRef(actions);
+  const pushToastRef = useRef(pushToast);
+  const refreshAccountsRef = useRef(refreshAccounts);
+  useEffect(() => {
+    accountsRef.current = accounts;
+    actionsRef.current = actions;
+    pushToastRef.current = pushToast;
+    refreshAccountsRef.current = refreshAccounts;
+  }, [accounts, actions, pushToast, refreshAccounts]);
+  useEffect(() => {
+    let active = true;
+    let unlisten: (() => void) | null = null;
+    listen<TrayCliSwitchedPayload>("tray-cli-switched", (ev) => {
+      const p = ev.payload;
+      // Defensive: tolerate older payloads (none / shape drift) by
+      // refreshing and bailing — the user still sees the active-flag
+      // change land in the cards, just without the toast/notification.
+      if (!p || typeof p.to_email !== "string") {
+        void refreshAccountsRef.current();
+        return;
+      }
+      void refreshAccountsRef.current();
+
+      const caveat = p.cc_was_running
+        ? " — restart Claude Code to apply"
+        : "";
+      const undoFn = p.from_email
+        ? () => {
+            const prev = accountsRef.current.find(
+              (a) => a.email === p.from_email,
+            );
+            if (!prev) {
+              pushToastRef.current(
+                "error",
+                `Undo failed: ${p.from_email} not found`,
+              );
+              return;
+            }
+            // Mirror the tray's force semantics on undo: the user is
+            // already inside the same one-click flow, the SplitBrain
+            // modal would just re-introduce the visibility problem
+            // this whole change exists to fix.
+            void actionsRef.current.useCli(prev, true);
+          }
+        : undefined;
+      pushToastRef.current(
+        "info",
+        `CLI → ${p.to_email}${caveat}`,
+        undoFn,
+        { undoLabel: "Undo", undoMs: 10_000 },
+      );
+
+      void dispatchOsNotification(
+        `CLI switched to ${p.to_email}`,
+        p.cc_was_running
+          ? "Restart Claude Code to apply. Open Claudepot to undo."
+          : "Open Claudepot within 10 s to undo.",
+        {
+          target: { kind: "app", route: { section: "accounts" } },
+          group: "claudepot.cli-switch",
+          sound: "default",
+        },
+      );
+    })
+      .then((fn) => {
+        if (!active) fn();
+        else unlisten = fn;
+      })
+      .catch(() => {});
+    return () => {
+      active = false;
+      unlisten?.();
+    };
+  }, []);
+
+  // Tray → CLI switch failure. Same hidden-window concern as the
+  // success path: the in-window error toast is invisible when the
+  // user is in another app, so mirror to OS notification. Failures
+  // are rare (live conflicts are now forced past, so the residual is
+  // store/keychain class), and don't carry an Undo affordance.
+  useEffect(() => {
+    let active = true;
+    let unlisten: (() => void) | null = null;
+    listen<string>("tray-cli-switch-failed", (ev) => {
+      const detail =
+        typeof ev?.payload === "string" && ev.payload.length > 0
+          ? ev.payload
+          : "unknown";
+      pushToast("error", `Switch failed: ${detail}`);
+      void dispatchOsNotification("CLI switch failed", detail, {
+        target: { kind: "app", route: { section: "accounts" } },
+        group: "claudepot.cli-switch",
+      });
+    })
+      .then((fn) => {
+        if (!active) fn();
+        else unlisten = fn;
+      })
+      .catch(() => {});
+    return () => {
+      active = false;
+      unlisten?.();
+    };
+  }, [pushToast]);
 
   // ⌘⇧L — focus the first SidebarLiveStrip row. Light-weight
   // fallback until the Activity section lands (M4) and claims this

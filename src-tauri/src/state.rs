@@ -19,6 +19,20 @@ use tokio::sync::{Mutex as AsyncMutex, Notify};
 #[derive(Default)]
 pub struct DesktopOpState(pub AsyncMutex<()>);
 
+/// Process-wide async mutex that serializes tray-initiated CLI
+/// switches. Without it, two rapid tray clicks (A→B, then A→C before
+/// the first swap finishes) can both snapshot the same pre-switch
+/// active account, leaking a stale `from_email` into the second
+/// switch's `tray-cli-switched` payload — Undo would jump to A
+/// instead of B. Locking around the (snapshot + cli_use + emit)
+/// sequence makes each tray switch see the result of the prior one.
+///
+/// Tray-scoped on purpose: in-window CLI swaps go through a different
+/// surface where the user can only have one click in flight at a
+/// time anyway.
+#[derive(Default)]
+pub struct CliOpState(pub AsyncMutex<()>);
+
 /// Tracks the currently running `claude auth login` flow, if any.
 /// `None` when idle; `Some(notify)` when a login is in progress and
 /// calling `notify.notify_one()` will abort it.
