@@ -96,6 +96,46 @@ const BUNDLED: &[BundledEntry] = &[
         toml: include_str!("blueprints/house.receipts-triage.toml"),
         sample_md: Some(include_str!("blueprints/samples/receipts-triage.md")),
     },
+    BundledEntry {
+        id: "network.lan-census",
+        toml: include_str!("blueprints/network.lan-census.toml"),
+        sample_md: Some(include_str!("blueprints/samples/lan-census.md")),
+    },
+    BundledEntry {
+        id: "network.new-device-alert",
+        toml: include_str!("blueprints/network.new-device-alert.toml"),
+        sample_md: Some(include_str!("blueprints/samples/new-device-alert.md")),
+    },
+    BundledEntry {
+        id: "network.upstream-health",
+        toml: include_str!("blueprints/network.upstream-health.toml"),
+        sample_md: Some(include_str!("blueprints/samples/upstream-health.md")),
+    },
+    BundledEntry {
+        id: "network.dns-health",
+        toml: include_str!("blueprints/network.dns-health.toml"),
+        sample_md: Some(include_str!("blueprints/samples/dns-health.md")),
+    },
+    BundledEntry {
+        id: "network.service-liveness",
+        toml: include_str!("blueprints/network.service-liveness.toml"),
+        sample_md: Some(include_str!("blueprints/samples/service-liveness.md")),
+    },
+    BundledEntry {
+        id: "network.wifi-quality",
+        toml: include_str!("blueprints/network.wifi-quality.toml"),
+        sample_md: Some(include_str!("blueprints/samples/wifi-quality.md")),
+    },
+    BundledEntry {
+        id: "network.router-admin-audit",
+        toml: include_str!("blueprints/network.router-admin-audit.toml"),
+        sample_md: Some(include_str!("blueprints/samples/router-admin.md")),
+    },
+    BundledEntry {
+        id: "network.bandwidth-hog",
+        toml: include_str!("blueprints/network.bandwidth-hog.toml"),
+        sample_md: Some(include_str!("blueprints/samples/bandwidth-hog.md")),
+    },
 ];
 
 /// Registry of all bundled blueprints. Built once at startup;

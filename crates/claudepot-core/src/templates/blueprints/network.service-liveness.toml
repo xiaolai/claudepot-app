@@ -1,0 +1,82 @@
+# Service liveness
+#
+# TCP/HTTP probes for the user's home services (printer, NAS,
+# Plex, Home Assistant, etc.). Daytime cadence; no probing at
+# night.
+
+id              = "network.service-liveness"
+schema_version  = 1
+version         = 1
+name            = "Service liveness"
+tagline         = "Are your home services up?"
+description     = """
+Probes a user-configured list of home services every 5 minutes
+during the day and reports uptime. Catches "the printer is
+offline again" within the same workday rather than at the next
+print job.
+
+Configure via ~/.claudepot/network-services.txt — one
+host:port[/path] per line.
+"""
+category        = "network"
+icon            = "heart-pulse"
+tier            = "ambient"
+
+capabilities_required = ["tool_use"]
+min_context_tokens    = 8192
+recommended_class     = "local-ok"
+cost_class            = "trivial"
+cost_cap_usd          = 0.02
+privacy               = "any"
+consent_required      = false
+fallback_policy       = "skip"
+
+prompt = """
+You are a personal IT assistant probing home-network services.
+
+Read ~/.claudepot/network-services.txt (one entry per line).
+Skip empty lines and comments (# prefix).
+
+Each line is one of:
+- host:port           (TCP-only liveness)
+- host:port/path      (HTTP GET against http://host:port/path)
+- https://...         (HTTPS GET, full URL)
+
+For each entry, probe with a 3-second timeout. Capture: latency
+(ms), status (alive | dead | http-error), HTTP status code if
+applicable.
+
+Append one row to
+~/.claudepot/network-reports/service-liveness.csv:
+
+timestamp,target,latency_ms,status,http_code
+
+Then produce a small markdown report listing currently-down
+services prominently.
+
+Save report at CLAUDEPOT_OUTPUT_PATH or
+~/.claudepot/network-reports/service-liveness-<timestamp>.md.
+"""
+
+sample_report = "samples/service-liveness.md"
+
+[scope]
+reads                       = "Your ~/.claudepot/network-services.txt list and the network reachability of those services."
+writes                      = "Appends to ~/.claudepot/network-reports/service-liveness.csv plus one short report per run."
+could_change                = "Nothing on the network."
+network                     = "Small TCP/HTTP probes to your configured services only — no internet traffic."
+requires_full_disk_access   = false
+
+[schedule]
+default        = "*/5 8-22 * * *"
+default_label  = "Every 5 minutes during waking hours"
+allowed_shapes = ["hourly", "manual", "custom"]
+
+[output]
+path_template = "~/.claudepot/network-reports/service-liveness-{date}.md"
+format        = "markdown"
+
+[runtime]
+permission_mode = "plan"
+allowed_tools   = ["Bash", "Read", "Write"]
+timeout_secs    = 60

@@ -1,0 +1,100 @@
+# Router admin port audit
+#
+# Once a week, probes the router's admin page from the LAN side
+# and flags if it's reachable from outside via UPnP. Never logs
+# in.
+
+id              = "network.router-admin-audit"
+schema_version  = 1
+version         = 1
+name            = "Router admin port audit"
+tagline         = "Is your router admin page exposed?"
+description     = """
+Once a week, this checks whether your router's HTTP/HTTPS admin
+page is reachable, and (best-effort) whether UPnP would expose
+it from the internet. Never tries to authenticate; never reads
+configuration.
+
+Catches the "I forgot the router was open to the internet"
+class of misconfiguration.
+"""
+category        = "network"
+icon            = "shield-alert"
+tier            = "periodic"
+
+capabilities_required = ["tool_use"]
+min_context_tokens    = 8192
+recommended_class     = "local-ok"
+cost_class            = "trivial"
+cost_cap_usd          = 0.05
+privacy               = "any"
+consent_required      = false
+fallback_policy       = "skip"
+
+prompt = """
+You are a personal IT assistant auditing router admin exposure.
+
+Find the gateway IP:
+- Mac: route -n get default | awk '/gateway/ {print $2}'
+- Linux: ip route | awk '/default/ {print $3}'
+Default to "192.168.1.1" if detection fails.
+
+Probe the admin page (LAN-side only):
+- HEAD http://<gateway>/   (5s timeout)
+- HEAD https://<gateway>/  (5s timeout)
+
+If either responds, capture: HTTP status, Server header,
+realm/title from the response (if visible).
+
+Then check UPnP:
+- Look at the IGD description if reachable. Most consumer
+  routers respond to:
+  GET http://<gateway>:1900/desc.xml or :49152/upnp/desc.xml
+- If the IGD claims "Allow internet access to router admin
+  page", flag it.
+
+Produce a markdown report:
+
+# Router admin port audit — <YYYY-MM-DD>
+
+**Status:** <safe | warning>
+
+## LAN-side admin page
+
+- HTTP / HTTPS reachability
+- Vendor identification (from Server header / response)
+
+## UPnP / external exposure
+
+If UPnP queryable: list any forwarded ports targeting the
+router itself. If not queryable: say so.
+
+DO NOT attempt to authenticate. DO NOT try default credentials.
+Reporting only.
+
+Save at CLAUDEPOT_OUTPUT_PATH or
+~/.claudepot/network-reports/router-admin-<date>.md.
+"""
+
+sample_report = "samples/router-admin.md"
+
+[scope]
+reads                       = "HTTP HEAD probes against your router's admin page; an optional UPnP IGD description if your router exposes one."
+writes                      = "One report per run."
+could_change                = "Nothing. Never authenticates, never modifies router config."
+network                     = "A few probes against your local router only — no internet traffic."
+requires_full_disk_access   = false
+
+[schedule]
+default        = "0 10 * * 0"
+default_label  = "Each Sunday at 10 AM"
+allowed_shapes = ["weekly", "manual"]
+
+[output]
+path_template = "~/.claudepot/network-reports/router-admin-{date}.md"
+format        = "markdown"
+
+[runtime]
+permission_mode = "plan"
+allowed_tools   = ["Bash", "Read", "Write"]
+timeout_secs    = 60
