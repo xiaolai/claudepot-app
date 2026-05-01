@@ -84,6 +84,7 @@ pub async fn preferences_set_notifications(
     on_op_done: Option<bool>,
     on_waiting: Option<bool>,
     on_usage_thresholds: Option<Vec<u32>>,
+    on_sub_windows: Option<bool>,
 ) -> Result<crate::preferences::Preferences, String> {
     // Mirror the audit-B8 pattern from `preferences_set_activity`:
     // mutate the in-memory snapshot under the std::sync guard, drop
@@ -120,6 +121,9 @@ pub async fn preferences_set_notifications(
             v.sort_unstable();
             v.dedup();
             prefs.notify_on_usage_thresholds = v;
+        }
+        if let Some(v) = on_sub_windows {
+            prefs.notify_on_sub_windows = v;
         }
         prefs.clone()
     };

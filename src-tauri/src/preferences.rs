@@ -72,12 +72,31 @@ pub struct Preferences {
 
     /// Anthropic usage-window utilization thresholds (integer percent
     /// values) that fire OS notifications when the CLI-active account
-    /// crosses them. Empty vec = feature off; the default `[80, 90]`
-    /// gives one early-warning + one near-cap nudge per (window ×
-    /// reset cycle). The watcher polls every 5 min, so crossing
-    /// detection latency is bounded by that cadence.
+    /// crosses them. Empty vec = feature off; the default `[90]`
+    /// gives one near-cap nudge per (window × reset cycle). The
+    /// watcher polls every 5 min, so crossing detection latency is
+    /// bounded by that cadence.
+    ///
+    /// Pre-2026-05 default was `[80, 90]` — two thresholds per
+    /// window per cycle, on the theory "one early warning, one near
+    /// cap." In practice that produced ~10 toasts/day worst-case
+    /// per active account; users reported it as too chatty. The
+    /// 90-only default trims a class of "you're approaching limits"
+    /// nudges that the 80% one already conveyed, keeping only the
+    /// "actually near cap" signal users acted on. Add `80` back via
+    /// Settings → Notifications if you want the early warning.
     #[serde(default = "default_usage_thresholds")]
     pub notify_on_usage_thresholds: Vec<u32>,
+
+    /// Whether the per-model 7-day sub-windows (`seven_day_opus`,
+    /// `seven_day_sonnet`) participate in usage-threshold alerts.
+    /// Default **false** — these sub-quotas typically track the
+    /// umbrella `seven_day` window for users near cap, so leaving
+    /// them on triples the 7-day alert volume for what most users
+    /// experience as "one cap." The umbrella `seven_day` window is
+    /// always checked regardless of this flag.
+    #[serde(default)]
+    pub notify_on_sub_windows: bool,
 
     /// Config section — per-kind "Open in…" editor preferences. Defaults
     /// to an empty `by_kind` + `fallback = "system"`, meaning the OS
@@ -98,11 +117,12 @@ fn default_true() -> bool {
 }
 
 /// Default usage-threshold list used when the field is missing in
-/// the on-disk preferences file. Picked to give one early warning
-/// (80%) and one near-cap nudge (90%) per cycle without being
-/// chatty. Users can edit the list in Settings → Notifications.
+/// the on-disk preferences file. Single near-cap threshold — see the
+/// `notify_on_usage_thresholds` doc above for why this is `[90]`
+/// rather than `[80, 90]`. Users can add `80` back in Settings →
+/// Notifications if they want the early warning.
 fn default_usage_thresholds() -> Vec<u32> {
-    vec![80, 90]
+    vec![90]
 }
 
 /// Manual `Default` so cold-start (no `preferences.json` on disk;
@@ -129,6 +149,7 @@ impl Default for Preferences {
             notify_on_op_done: false,
             notify_on_waiting: default_true(),
             notify_on_usage_thresholds: default_usage_thresholds(),
+            notify_on_sub_windows: false,
             editor_defaults: Default::default(),
         }
     }

@@ -191,18 +191,36 @@ impl UsageAlertState {
     /// Compute and record crossings for one account's response. Any
     /// crossings detected are returned AND folded into the in-memory
     /// state; the caller is responsible for calling `save` afterwards.
+    ///
     /// `thresholds` should be sorted ascending and deduped; the
     /// algorithm itself doesn't rely on order, but the consumer's
     /// notification copy reads cleaner that way.
+    ///
+    /// `kinds` selects which windows are checked. The caller filters
+    /// based on user preferences (e.g. opt-in for sub-windows like
+    /// `seven_day_opus`) before passing the list — keeping that
+    /// gating outside the algorithm so this stays preference-agnostic.
+    /// Use [`UsageWindowKind::all`] for every window.
+    ///
+    /// **Within-poll coalescing.** When a window crosses multiple
+    /// thresholds in a single poll (e.g. utilization jumps 50 → 95
+    /// past both 80 and 90), this returns ONE [`Crossing`] for the
+    /// highest newly-crossed threshold rather than one per threshold.
+    /// All newly-crossed thresholds still land in `fired` so they
+    /// don't refire next poll. Rationale: two near-simultaneous
+    /// banners ("at 80%" then "at 90%") are noise; the higher one
+    /// carries strictly more signal — the user already knows they're
+    /// past 80.
     pub fn apply_crossings(
         &mut self,
         account_uuid: Uuid,
         resp: &UsageResponse,
         thresholds: &[u32],
+        kinds: &[UsageWindowKind],
     ) -> Vec<Crossing> {
         let acct = self.file.accounts.entry(account_uuid).or_default();
         let mut out = Vec::new();
-        for kind in UsageWindowKind::all() {
+        for &kind in kinds {
             let window = match kind.pick(resp) {
                 Some(w) => w,
                 None => continue,
@@ -227,17 +245,25 @@ impl UsageAlertState {
             // comparison so 79.999 doesn't trip 80; the user's mental
             // model is "the percent shown in the UI."
             let pct = window.utilization;
+            // Collect all thresholds that newly crossed in this poll.
+            // We record every one in `fired` (so they don't refire
+            // next cycle) but emit only the highest as a Crossing
+            // (the within-poll coalescing rule — see method docs).
+            let mut newly_crossed: Vec<u32> = Vec::new();
             for &t in thresholds {
                 if pct >= t as f64 && !entry.fired.contains(&t) {
+                    newly_crossed.push(t);
                     entry.fired.push(t);
-                    out.push(Crossing {
-                        account_uuid,
-                        window: kind,
-                        threshold_pct: t,
-                        utilization_pct: pct,
-                        resets_at: Some(resets),
-                    });
                 }
+            }
+            if let Some(&highest) = newly_crossed.iter().max() {
+                out.push(Crossing {
+                    account_uuid,
+                    window: kind,
+                    threshold_pct: highest,
+                    utilization_pct: pct,
+                    resets_at: Some(resets),
+                });
             }
             // Keep `fired` sorted+deduped for stable serialization
             // and so the file is readable at a glance.
@@ -273,12 +299,19 @@ mod tests {
         }
     }
 
+    /// Shorthand for "every window kind" — most tests don't care
+    /// about sub-window filtering and just want the algorithm to look
+    /// at every window present in the response.
+    fn all_kinds() -> Vec<UsageWindowKind> {
+        UsageWindowKind::all().to_vec()
+    }
+
     #[test]
     fn first_observation_below_thresholds_fires_nothing() {
         let mut st = UsageAlertState::new();
         let uuid = Uuid::new_v4();
         let r = response_with_five_hour(42.0, Some("2026-04-30T10:00:00+00:00"));
-        let crossings = st.apply_crossings(uuid, &r, &[80, 90]);
+        let crossings = st.apply_crossings(uuid, &r, &[80, 90], &all_kinds());
         assert!(crossings.is_empty());
     }
 
@@ -292,12 +325,14 @@ mod tests {
             uuid,
             &response_with_five_hour(70.0, Some(resets)),
             &[80, 90],
+            &all_kinds(),
         );
         // Second poll crosses 80.
         let crossings = st.apply_crossings(
             uuid,
             &response_with_five_hour(82.5, Some(resets)),
             &[80, 90],
+            &all_kinds(),
         );
         assert_eq!(crossings.len(), 1);
         assert_eq!(crossings[0].threshold_pct, 80);
@@ -307,24 +342,69 @@ mod tests {
             uuid,
             &response_with_five_hour(85.0, Some(resets)),
             &[80, 90],
+            &all_kinds(),
         );
         assert!(crossings.is_empty());
     }
 
     #[test]
-    fn jump_past_two_thresholds_fires_both() {
+    fn within_poll_coalesces_to_highest_crossed() {
+        // Single poll, utilization shoots from 0 to 95 (e.g. cold start
+        // followed by the user using the API hard). Pre-coalesce, this
+        // returned two Crossings (80 and 90) which became two near-
+        // simultaneous OS toasts — chatty noise. Post-coalesce, the
+        // higher threshold (90) is emitted alone; the lower one (80)
+        // is recorded as fired so it doesn't refire next poll.
         let mut st = UsageAlertState::new();
         let uuid = Uuid::new_v4();
         let resets = "2026-04-30T10:00:00+00:00";
-        // Single poll, utilization shoots from 0 to 95 (e.g. cold start
-        // followed by the user using the API hard).
         let crossings = st.apply_crossings(
             uuid,
             &response_with_five_hour(95.0, Some(resets)),
             &[80, 90],
+            &all_kinds(),
         );
-        let firing: Vec<u32> = crossings.iter().map(|c| c.threshold_pct).collect();
-        assert_eq!(firing, vec![80, 90]);
+        assert_eq!(crossings.len(), 1, "coalesce to one crossing per window");
+        assert_eq!(crossings[0].threshold_pct, 90, "emit the highest");
+
+        // Both thresholds must still be in `fired` so neither refires
+        // when the next poll arrives still above 90.
+        let acct = st.file.accounts.get(&uuid).unwrap();
+        let fired = &acct.windows.get(&UsageWindowKind::FiveHour).unwrap().fired;
+        assert_eq!(fired, &vec![80, 90]);
+
+        // Confirm: subsequent poll in the same cycle returns nothing.
+        let crossings = st.apply_crossings(
+            uuid,
+            &response_with_five_hour(99.0, Some(resets)),
+            &[80, 90],
+            &all_kinds(),
+        );
+        assert!(crossings.is_empty());
+    }
+
+    #[test]
+    fn coalescing_does_not_skip_unfired_lower_thresholds() {
+        // Edge case: 80 already fired previous poll; a new poll at 95
+        // crosses 90 but not 80 (already done). Coalescing must still
+        // fire 90 — it wasn't suppressed by 80's prior firing.
+        let mut st = UsageAlertState::new();
+        let uuid = Uuid::new_v4();
+        let resets = "2026-04-30T10:00:00+00:00";
+        let _ = st.apply_crossings(
+            uuid,
+            &response_with_five_hour(82.0, Some(resets)),
+            &[80, 90],
+            &all_kinds(),
+        );
+        let crossings = st.apply_crossings(
+            uuid,
+            &response_with_five_hour(95.0, Some(resets)),
+            &[80, 90],
+            &all_kinds(),
+        );
+        assert_eq!(crossings.len(), 1);
+        assert_eq!(crossings[0].threshold_pct, 90);
     }
 
     #[test]
@@ -336,12 +416,14 @@ mod tests {
             uuid,
             &response_with_five_hour(85.0, Some("2026-04-30T10:00:00+00:00")),
             &[80, 90],
+            &all_kinds(),
         );
         // Cycle 2: same utilization, new reset timestamp → re-fires.
         let crossings = st.apply_crossings(
             uuid,
             &response_with_five_hour(85.0, Some("2026-04-30T15:00:00+00:00")),
             &[80, 90],
+            &all_kinds(),
         );
         assert_eq!(crossings.len(), 1);
         assert_eq!(crossings[0].threshold_pct, 80);
@@ -352,7 +434,12 @@ mod tests {
         let mut st = UsageAlertState::new();
         let uuid = Uuid::new_v4();
         // Window present but inactive (resets_at None).
-        let crossings = st.apply_crossings(uuid, &response_with_five_hour(99.0, None), &[80, 90]);
+        let crossings = st.apply_crossings(
+            uuid,
+            &response_with_five_hour(99.0, None),
+            &[80, 90],
+            &all_kinds(),
+        );
         assert!(crossings.is_empty(), "inactive windows must not fire");
     }
 
@@ -364,6 +451,7 @@ mod tests {
             uuid,
             &response_with_five_hour(99.0, Some("2026-04-30T10:00:00+00:00")),
             &[],
+            &all_kinds(),
         );
         assert!(crossings.is_empty());
     }
@@ -375,10 +463,20 @@ mod tests {
         let b = Uuid::new_v4();
         let resets = "2026-04-30T10:00:00+00:00";
         // Account A crosses 80.
-        let _ = st.apply_crossings(a, &response_with_five_hour(85.0, Some(resets)), &[80]);
+        let _ = st.apply_crossings(
+            a,
+            &response_with_five_hour(85.0, Some(resets)),
+            &[80],
+            &all_kinds(),
+        );
         // Account B at the same utilization must still fire (different
         // account, different state).
-        let crossings = st.apply_crossings(b, &response_with_five_hour(85.0, Some(resets)), &[80]);
+        let crossings = st.apply_crossings(
+            b,
+            &response_with_five_hour(85.0, Some(resets)),
+            &[80],
+            &all_kinds(),
+        );
         assert_eq!(crossings.len(), 1);
         assert_eq!(crossings[0].account_uuid, b);
     }
@@ -399,12 +497,51 @@ mod tests {
             extra_usage: None,
             unknown: HashMap::new(),
         };
-        let crossings = st.apply_crossings(uuid, &r, &[80]);
-        // Both windows over 80 → two crossings.
+        let crossings = st.apply_crossings(uuid, &r, &[80], &all_kinds());
+        // Both windows over 80 → two crossings (one per window).
+        // Coalescing is per-window, so different windows still fire
+        // independently.
         assert_eq!(crossings.len(), 2);
         let kinds: Vec<UsageWindowKind> = crossings.iter().map(|c| c.window).collect();
         assert!(kinds.contains(&UsageWindowKind::FiveHour));
         assert!(kinds.contains(&UsageWindowKind::SevenDay));
+    }
+
+    #[test]
+    fn kinds_filter_skips_excluded_windows() {
+        // Caller-side filter: when `kinds` excludes the per-model
+        // sub-windows (the new default), Opus + Sonnet are skipped
+        // even though they cross thresholds in the response. The
+        // umbrella `seven_day` still fires.
+        let mut st = UsageAlertState::new();
+        let uuid = Uuid::new_v4();
+        let resets = "2026-04-30T10:00:00+00:00";
+        let r = UsageResponse {
+            five_hour: None,
+            seven_day: Some(make_window(95.0, Some(resets))),
+            seven_day_oauth_apps: None,
+            seven_day_opus: Some(make_window(95.0, Some(resets))),
+            seven_day_sonnet: Some(make_window(95.0, Some(resets))),
+            seven_day_cowork: None,
+            iguana_necktie: None,
+            extra_usage: None,
+            unknown: HashMap::new(),
+        };
+        let umbrella_only = vec![UsageWindowKind::FiveHour, UsageWindowKind::SevenDay];
+        let crossings = st.apply_crossings(uuid, &r, &[90], &umbrella_only);
+        assert_eq!(
+            crossings.len(),
+            1,
+            "only seven_day fires when sub-windows excluded"
+        );
+        assert_eq!(crossings[0].window, UsageWindowKind::SevenDay);
+
+        // The excluded sub-windows must not have any state recorded
+        // either — the caller's exclusion is total, not "check but
+        // suppress."
+        let acct = st.file.accounts.get(&uuid).unwrap();
+        assert!(!acct.windows.contains_key(&UsageWindowKind::SevenDayOpus));
+        assert!(!acct.windows.contains_key(&UsageWindowKind::SevenDaySonnet));
     }
 
     #[test]
@@ -418,6 +555,7 @@ mod tests {
             uuid,
             &response_with_five_hour(95.0, Some(resets)),
             &[90, 80],
+            &all_kinds(),
         );
         let acct = st.file.accounts.get(&uuid).unwrap();
         let fired = &acct.windows.get(&UsageWindowKind::FiveHour).unwrap().fired;
