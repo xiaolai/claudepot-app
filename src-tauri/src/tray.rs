@@ -510,35 +510,65 @@ fn handle_cli_switch(app: &AppHandle, uuid_str: &str) {
     if uuid_str == "empty" {
         return;
     }
-    let Some(email) = find_email_for_uuid(uuid_str) else {
+    let Some(to_email) = find_email_for_uuid(uuid_str) else {
         tracing::warn!("tray: no account found for UUID {uuid_str}");
         return;
     };
     let app = app.clone();
     tauri::async_runtime::spawn(async move {
-        match crate::commands_cli::cli_use(email.clone(), None).await {
+        // The old "is CC running?" gate routed back through the
+        // webview to raise SplitBrainConfirm — invisible when the
+        // window was hidden, leaving tray users with a click that
+        // looked dead. The tray is a one-click surface; force the
+        // swap and surface the cc-running caveat in the OS
+        // notification body instead. The post-switch payload carries
+        // the previous active email so the React side can offer Undo.
+        //
+        // Serialize tray switches with `CliOpState` so two rapid
+        // clicks (A→B then A→C before the first finishes) don't both
+        // snapshot the same pre-switch active account. Without the
+        // lock, the second switch's `from_email` would still point at
+        // A and Undo would jump back to A instead of B. Lock-or-skip:
+        // if the state isn't managed (test harness), fall through
+        // unserialized rather than dropping the click.
+        let cli_op_state = app.try_state::<crate::state::CliOpState>();
+        let _guard = match cli_op_state.as_ref() {
+            Some(s) => Some(s.0.lock().await),
+            None => None,
+        };
+        let from_email = active_cli_email();
+        let cc_was_running =
+            claudepot_core::cli_backend::swap::is_cc_process_running_public().await;
+        match crate::commands_cli::cli_use(to_email.clone(), Some(true)).await {
             Ok(()) => {
                 if let Err(e) = rebuild(&app).await {
                     tracing::warn!("tray rebuild after cli switch failed: {e}");
                 }
-                let _ = app.emit("tray-cli-switched", ());
+                let payload = serde_json::json!({
+                    "to_email": to_email,
+                    "from_email": from_email,
+                    "cc_was_running": cc_was_running,
+                });
+                let _ = app.emit("tray-cli-switched", payload);
             }
             Err(e) => {
                 tracing::warn!("tray cli_use failed: {e}");
-                // Route the live-session conflict to a typed event so
-                // the React layer can surface the same Override
-                // affordance the in-app card path already has via
-                // `useActions.useCli`. The tray's own click handler
-                // has no `--force` channel, so a generic error toast
-                // here would leave the user with no way to proceed.
-                if e.to_lowercase().contains("claude code process is running") {
-                    let _ = app.emit("tray-cli-switch-needs-override", email);
-                } else {
-                    let _ = app.emit("tray-cli-switch-failed", e);
-                }
+                let _ = app.emit("tray-cli-switch-failed", e);
             }
         }
     });
+}
+
+/// Best-effort lookup of the currently active CLI account's email.
+/// Returns `None` when no CLI is bound or the store can't be opened —
+/// callers treat that as "no undo target available". Never panics; the
+/// tray flow must keep moving even when the store has a transient
+/// hiccup.
+fn active_cli_email() -> Option<String> {
+    let store = crate::commands::open_store().ok()?;
+    let uuid_str = store.active_cli_uuid().ok().flatten()?;
+    let uuid = uuid::Uuid::parse_str(&uuid_str).ok()?;
+    store.find_by_uuid(uuid).ok().flatten().map(|a| a.email)
 }
 
 fn handle_desktop_switch(app: &AppHandle, uuid_str: &str) {

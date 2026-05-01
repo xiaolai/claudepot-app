@@ -187,29 +187,25 @@ export function AccountsSection({
     return () => window.removeEventListener("cp-focus-account", onFocus);
   }, []);
 
-  const trayRefresh = useCallback(() => {
+  const trayRefreshAll = useCallback(() => {
     refresh();
     refreshUsage();
   }, [refresh, refreshUsage]);
-  useTauriEvent("tray-cli-switched", trayRefresh);
-  useTauriEvent("tray-refresh-requested", trayRefresh);
-  useTauriEvent<string>("tray-cli-switch-failed", (e) => {
-    const detail = typeof e?.payload === "string" ? e.payload : "unknown";
-    pushToast("error", `Switch failed: ${detail}`);
-  });
-  // The tray click had no Override affordance of its own — re-enter
-  // the standard request flow so the shell-level SplitBrainDialog
-  // (or, if the preflight probe fails, the Override toast in
-  // `useActions.useCli`) becomes the single UX for "CC is live".
-  useTauriEvent<string>("tray-cli-switch-needs-override", (e) => {
-    const email = typeof e?.payload === "string" ? e.payload : "";
-    const account = accounts.find((a) => a.email === email);
-    if (!account) {
-      pushToast("error", `Switch failed: account ${email || "unknown"} not found`);
-      return;
-    }
-    void requestCliSwap(account);
-  });
+  // Split the two channels: the shell-level App listener already
+  // calls `refreshAccounts()` on `tray-cli-switched`, so this
+  // section only needs to refetch the per-account usage chips. A
+  // CLI swap doesn't change usage data, but the tray's Usage submenu
+  // re-emits `rebuild-tray-menu` after a refresh and that path
+  // expects the section's cache to be primed. `tray-refresh-requested`
+  // is the broader "something material changed" signal; keep both
+  // refreshes there. The "needs-override" branch is gone: the tray
+  // now always forces the swap (the SplitBrainConfirm modal it used
+  // to raise was invisible when the window was hidden, which is the
+  // failure mode that drove this change). User-visible feedback for
+  // the tray switch (toast + OS notification + Undo on success, OS
+  // notification on failure) lives in the App shell.
+  useTauriEvent("tray-cli-switched", refreshUsage);
+  useTauriEvent("tray-refresh-requested", trayRefreshAll);
 
   const shown = useMemo(() => {
     if (!filter.trim()) return accounts;

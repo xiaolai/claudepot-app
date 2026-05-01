@@ -329,6 +329,7 @@ pub fn run() {
         })
         .manage(state::LoginState::default())
         .manage(state::DesktopOpState::default())
+        .manage(state::CliOpState::default())
         .manage(state::DryRunState::new())
         .manage({
             // Build the live state with the service refactor's
