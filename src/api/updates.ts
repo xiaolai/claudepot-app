@@ -13,19 +13,23 @@ import type {
 } from "../types/updates";
 
 export interface UpdatesSettingsPatch {
-  cli_notify_on_available?: boolean;
-  cli_notify_os_on_available?: boolean;
-  cli_force_update_on_check?: boolean;
-  desktop_notify_on_available?: boolean;
-  desktop_notify_os_on_available?: boolean;
-  desktop_auto_install_when_quit?: boolean;
+  cliNotifyOnAvailable?: boolean;
+  cliNotifyOsOnAvailable?: boolean;
+  cliForceUpdateOnCheck?: boolean;
+  desktopNotifyOnAvailable?: boolean;
+  desktopNotifyOsOnAvailable?: boolean;
+  desktopAutoInstallWhenQuit?: boolean;
   /**
    * Outer-Optional vs inner-null: pass `undefined` to leave unchanged,
-   * or pass `{ poll_interval_minutes: null }` to clear the override
+   * or pass `{ pollIntervalMinutes: null }` to clear the override
    * and fall back to the default (240 min). The Rust side accepts
    * `Option<Option<u32>>` to model this.
+   *
+   * Keys are camelCase — Tauri 2 auto-converts to the snake_case Rust
+   * arg names. Sending snake_case here would silently drop every
+   * field (the Rust args would all default to `None`).
    */
-  poll_interval_minutes?: number | null;
+  pollIntervalMinutes?: number | null;
 }
 
 export const updatesApi = {
