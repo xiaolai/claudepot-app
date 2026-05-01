@@ -97,13 +97,6 @@ pub fn run() {
     let hide_dock = prefs.hide_dock_icon;
     let show_window_on_startup = prefs.show_window_on_startup;
 
-    // Open the activity-cards index before the builder chain so we can
-    // wire it into the live runtime AND publish it as IPC state in the
-    // same `.manage()` series. Lives in the same `sessions.db` file as
-    // SessionIndex (SQLite WAL lets the two handles coexist). Open
-    // failure (disk full, perms, corrupt) degrades gracefully — the
-    // cards surface goes dark; the live-strip and everything else
-    // continues to work.
     // Open the persistent notification log before the builder chain
     // so its handle can be `.manage()`d alongside the other state. The
     // log lives at `~/.claudepot/notifications.json`; `open` returns
@@ -133,6 +126,13 @@ pub fn run() {
         }
     };
 
+    // Open the activity-cards index before the builder chain so we can
+    // wire it into the live runtime AND publish it as IPC state in the
+    // same `.manage()` series. Lives in the same `sessions.db` file as
+    // SessionIndex (SQLite WAL lets the two handles coexist). Open
+    // failure (disk full, perms, corrupt) degrades gracefully — the
+    // cards surface goes dark; the live-strip and everything else
+    // continues to work.
     let cards_db_path = claudepot_core::paths::claudepot_data_dir().join("sessions.db");
     let cards_index: Option<std::sync::Arc<claudepot_core::activity::ActivityIndex>> =
         match claudepot_core::activity::ActivityIndex::open(&cards_db_path) {

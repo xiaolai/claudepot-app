@@ -26,6 +26,14 @@ import {
   requestPermission,
   sendNotification,
 } from "@tauri-apps/plugin-notification";
+import { invoke } from "@tauri-apps/api/core";
+
+/** Severity passed through to the notification log. Toasts pick
+ *  `info` / `error`; OS dispatchers usually pick `notice` (non-error
+ *  but prominent) or `error`. Defaults to `notice` when the caller
+ *  doesn't specify, matching the OS-banner mental model — banners
+ *  are never routine. */
+export type OsNotificationKind = "info" | "notice" | "error";
 
 export type PermissionStatus =
   | "unknown"
@@ -227,6 +235,10 @@ interface DispatchOpts {
    *  focus-gated, permission-denied, or rate-limited drops), so
    *  the queue size is bounded by the rate-limit policy itself. */
   target?: NotificationTarget;
+  /** Severity recorded in the notification log. Doesn't affect OS
+   *  dispatch (the OS picks the visual). Defaults to `notice` —
+   *  banners are by definition not routine. */
+  kind?: OsNotificationKind;
 }
 
 // Token-bucket state: per-key list of recent dispatch timestamps
@@ -415,6 +427,22 @@ export async function dispatchOsNotification(
     // entry on `window` focus. See the `target` field's docstring
     // for the rationale.
     if (opts.target) pushTarget(opts.target, now);
+    // Persist into the notification-log ring buffer so the bell-icon
+    // popover can show this dispatch later. Fire-and-forget — the
+    // OS banner already showed the user the message; a log-write
+    // failure must never propagate. The Rust side is no-op-safe
+    // when the file open failed at boot (see lib.rs fallback path).
+    void invoke("notification_log_append", {
+      args: {
+        source: "os",
+        kind: opts.kind ?? "notice",
+        title,
+        body,
+        target: opts.target ?? null,
+      },
+    }).catch(() => {
+      /* swallow — log persistence is advisory, never load-bearing */
+    });
     return true;
   } catch {
     return false;
