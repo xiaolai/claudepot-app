@@ -71,6 +71,7 @@ export const activityApi = {
     onOpDone?: boolean;
     onWaiting?: boolean;
     onUsageThresholds?: number[];
+    onSubWindows?: boolean;
   }) =>
     invoke<Preferences>("preferences_set_notifications", {
       onError: patch.onError,
@@ -79,6 +80,7 @@ export const activityApi = {
       onOpDone: patch.onOpDone,
       onWaiting: patch.onWaiting,
       onUsageThresholds: patch.onUsageThresholds,
+      onSubWindows: patch.onSubWindows,
     }).then((p) => {
       broadcastPrefsChanged(p);
       return p;
