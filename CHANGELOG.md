@@ -6,6 +6,52 @@ Versioning scheme:
 - `0.1.x` — beta
 - `1.0.0+` — stable
 
+## 0.0.17 — alpha (2026-05-01)
+
+### Added
+
+- **Auto-update manager for Claude Code CLI and Claude Desktop**
+  (Global → Updates tab). Detects every install on the box (native
+  curl, npm global, Homebrew Cask `claude-code` / `claude-code@latest`,
+  apt/dnf/apk, WinGet) and the active Desktop install (Homebrew Cask,
+  direct DMG, Setapp, Mac App Store, user-local). Surfaces installed
+  vs upstream-latest with a colour-coded delta, a one-click "Update
+  now" that routes through the right channel for each kind (`claude
+  update` / `brew upgrade --cask` / direct .zip with `codesign`
+  verification + `ditto` install + quarantine strip), a "Check now"
+  refresh, and a `Channel` toggle that mirrors CC's `autoUpdatesChannel`
+  with `latest → stable` minimum-version pinning (`--allow-downgrade`
+  CLI flag, opt-in clear). All of this is also driven from
+  `claudepot update {check,cli,desktop,config}` — same code path,
+  same single-flight gate.
+
+- **Background updates poller** that probes the version endpoints on
+  a cadence (default 4 h, 30 min – 24 h via `poll_interval_minutes`),
+  updates the tray badge, and runs the auto-install pass when the
+  toggles allow. Single-flights against manual clicks via a shared
+  `Arc<PollerGate>` so a user clicking "Update now" while the poller
+  is mid-cycle gets a clean refusal instead of two `claude update`
+  invocations racing.
+
+- **OS-notification toggle (per surface)** alongside the existing
+  tray-badge toggle, so tray-only users can opt into a system toast
+  when an update is detected without making the tray noisy. Deduped
+  per-version so the toast fires once per new release, not on every
+  poll. Uses `tauri-plugin-notification` Rust-direct so it works when
+  Claudepot's main window is closed.
+
+- **`claudepot update` CLI verbs**: `check` (probe + table), `cli`
+  (force `claude update`), `desktop` (force install via brew or
+  direct DMG), `config` (show / set channel + toggles). All support
+  `--json` for scripting.
+
+### Changed
+
+- **Global section now hosts two tabs**: Config (the existing
+  user-wide CC config tree, unchanged) and Updates (new). Tab
+  selection persists in localStorage; sub-routes inside Config
+  continue to work as before.
+
 ## 0.0.16 — alpha (2026-05-01)
 
 ### Fixed
