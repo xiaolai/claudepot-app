@@ -305,15 +305,33 @@ pub fn instantiate(
         None => ("first_party".to_string(), None),
     };
 
-    // 7. Display + name.
+    // 7. Display + slug.
+    //
+    // `name` is the internal slug used for uniqueness and path
+    // derivation — `validate_name` requires lowercase ASCII
+    // alphanumerics + dashes. Blueprint names like "Disk is full —
+    // what's eating space?" can't be slugs, so derive one from the
+    // blueprint id's suffix (the part after the dot). The
+    // user-facing label lives in `display_name`.
+    let derived_slug = blueprint
+        .id()
+        .0
+        .split_once('.')
+        .map(|(_, s)| s.to_string())
+        .unwrap_or_else(|| blueprint.id().0.clone());
     let name = instance
         .name_override
+        .as_ref()
+        .map(|n| slugify(n))
+        .unwrap_or(derived_slug);
+    let display_name = instance
+        .name_override
         .clone()
-        .unwrap_or_else(|| blueprint.name.clone());
+        .or_else(|| Some(blueprint.name.clone()));
 
     Ok(ResolvedAutomation {
         name,
-        display_name: instance.name_override.clone(),
+        display_name,
         description: Some(blueprint.tagline.clone()),
         binary_kind,
         binary_route_id,
@@ -336,6 +354,47 @@ fn home_dir_string() -> String {
     dirs::home_dir()
         .map(|p| p.display().to_string())
         .unwrap_or_else(|| "/".to_string())
+}
+
+/// Slugify a free-form name into a `validate_name`-safe form.
+/// Lowercases ASCII letters and digits, collapses anything else
+/// to a single dash, trims leading/trailing dashes, and caps at
+/// 64 chars (matching the slug rule). The result must still be
+/// non-empty and start with `[a-z0-9]`; if the input collapses
+/// to nothing useful, returns `template`.
+fn slugify(input: &str) -> String {
+    let mut out = String::with_capacity(input.len());
+    let mut last_was_dash = false;
+    for c in input.chars() {
+        let lo = c.to_ascii_lowercase();
+        if lo.is_ascii_lowercase() || lo.is_ascii_digit() {
+            out.push(lo);
+            last_was_dash = false;
+        } else if !last_was_dash && !out.is_empty() {
+            out.push('-');
+            last_was_dash = true;
+        }
+    }
+    while out.ends_with('-') {
+        out.pop();
+    }
+    if out.is_empty() {
+        return "template".to_string();
+    }
+    if out.len() > 64 {
+        out.truncate(64);
+        while out.ends_with('-') {
+            out.pop();
+        }
+    }
+    // Slug must start with [a-z0-9]; if the first byte after
+    // dash-trimming is somehow not, prefix `t-`.
+    if let Some(first) = out.chars().next() {
+        if !(first.is_ascii_lowercase() || first.is_ascii_digit()) {
+            return format!("t-{out}");
+        }
+    }
+    out
 }
 
 /// Validate user-supplied placeholder values against the
@@ -571,6 +630,33 @@ mod tests {
         assert!(resolved.binary_route_id.is_none());
         assert_eq!(resolved.template_id, "it.morning-health-check");
         assert!(resolved.prompt.contains("morning health check"));
+        // Slug is the blueprint id's suffix (after the dot);
+        // display name is the human-readable blueprint name.
+        assert_eq!(resolved.name, "morning-health-check");
+        assert_eq!(
+            resolved.display_name.as_deref(),
+            Some("Morning health check")
+        );
+    }
+
+    #[test]
+    fn slugify_handles_freeform_punctuation() {
+        assert_eq!(slugify("Disk is full — what's eating space?"), "disk-is-full-what-s-eating-space");
+        assert_eq!(slugify("  --foo  --bar--  "), "foo-bar");
+        assert_eq!(slugify("123abc"), "123abc");
+        assert_eq!(slugify("___"), "template");
+        assert_eq!(slugify(""), "template");
+    }
+
+    #[test]
+    fn slug_from_diagnostic_blueprint_id() {
+        let r = TemplateRegistry::load_bundled().unwrap();
+        let bp = r.get("diag.disk-full").unwrap().clone();
+        let mut inst = instance(ScheduleDto::Manual);
+        inst.blueprint_id = "diag.disk-full".into();
+        let resolved = instantiate(&bp, &inst).unwrap();
+        assert_eq!(resolved.name, "disk-full");
+        assert!(resolved.display_name.is_some());
     }
 
     #[test]
