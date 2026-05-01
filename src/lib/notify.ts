@@ -339,17 +339,26 @@ function resetBuckets(): void {
  *  the call, false if the dispatch was suppressed (focused window,
  *  denied permission, no Tauri, rate-limited).
  *
- *  Three independent gates apply in order:
- *    1. Focus gate: drop when `document.hasFocus()` (override with
- *       `ignoreFocus: true` for fatal-class alerts).
+ *  Three independent gates apply to the OS-banner pipeline:
+ *    1. Rate-limit gate: when `dedupeKey` is set, apply a per-key
+ *       token bucket. Max `maxBurst` per `windowMs` per `dedupeKey`.
  *    2. Permission gate: probe → request-on-first-trigger → grant
  *       check.
- *    3. Coalescing gate: when `dedupeKey` is set, apply a per-key
- *       token bucket. Replaces the three different per-hook policies
- *       that used to live in useActivityNotifications (1-per-60s),
- *       useCardNotifications (3-in-60-then-summary), and the toast
- *       layer (no coalescing). Now one rule: max `maxBurst` per
- *       `windowMs` per `dedupeKey`.
+ *    3. Focus gate: skip the OS banner when `document.hasFocus()`
+ *       (override with `ignoreFocus: true` for fatal-class alerts).
+ *
+ *  **The notification log writes BEFORE the OS-banner gates.** A
+ *  rate-limited entry still records the intent (so the bell shows
+ *  the burst even when the OS center is correctly suppressed); a
+ *  focus-gated entry still records (so the user, who saw nothing,
+ *  can find what they were notified-about-but-didn't-see). The log
+ *  records what Claudepot WANTED to surface; OS delivery is a
+ *  separate concern with its own gates.
+ *
+ *  The return value reflects the OS-banner outcome only — `true` if
+ *  the OS notification fired, `false` if any gate suppressed it.
+ *  Callers that care about delivery (none today) read the boolean;
+ *  the log records intent regardless.
  *
  *  Errors are swallowed — a denied permission must not interrupt
  *  the calling detection loop. */
@@ -358,13 +367,40 @@ export async function dispatchOsNotification(
   body: string,
   opts: DispatchOpts = {},
 ): Promise<boolean> {
-  if (!opts.ignoreFocus && typeof document !== "undefined") {
-    try {
-      if (document.hasFocus()) return false;
-    } catch {
-      /* JSDOM without window — fall through and dispatch anyway */
-    }
-  }
+  // ── Step 1: ALWAYS log the intent to notify ──────────────────
+  //
+  // Fire-and-forget IPC. The Rust side is no-op-safe when the file
+  // open failed at boot (see lib.rs fallback path). We write the
+  // log entry before any OS-banner gating so:
+  //
+  //   - Focus-gated dispatches (window focused, banner suppressed)
+  //     still surface in the bell. Pre-fix, focus-gated usage-
+  //     threshold notifications were silently lost — no toast, no
+  //     banner, no log entry. Now the bell catches them.
+  //   - Rate-limited dispatches (token-bucket cap reached) still
+  //     log so the user can see how many crossings happened even
+  //     when the OS center was correctly suppressing the noise.
+  //   - Permission-denied dispatches log too — the user opted out
+  //     of OS banners, not out of in-app history. The log is the
+  //     in-app surface; gating it on permission would conflate two
+  //     opt-ins.
+  void invoke("notification_log_append", {
+    args: {
+      source: "os",
+      kind: opts.kind ?? "notice",
+      title,
+      body,
+      target: opts.target ?? null,
+    },
+  })
+    .then(() => {
+      window.dispatchEvent(new Event("claudepot:notification-logged"));
+    })
+    .catch(() => {
+      /* swallow — log persistence is advisory, never load-bearing */
+    });
+
+  // ── Step 2: OS-banner pipeline ───────────────────────────────
 
   // Sweep expired buckets on EVERY dispatch (deduped or not), so
   // single-shot keys like `op:<uuid>` don't linger until the next
@@ -395,6 +431,20 @@ export async function dispatchOsNotification(
     buckets.set(opts.dedupeKey, { stamps, windowMs });
   }
 
+  // Focus gate — moved AFTER the log write but before the permission
+  // probe. Focused window means we don't need an OS banner; the user
+  // is already looking, the bell badge just incremented, the log
+  // popover is one click away. Pass `ignoreFocus: true` for fatal-
+  // class alerts (auth rejected, keychain locked) where the OS-level
+  // prominence is the point.
+  if (!opts.ignoreFocus && typeof document !== "undefined") {
+    try {
+      if (document.hasFocus()) return false;
+    } catch {
+      /* JSDOM without window — fall through and dispatch anyway */
+    }
+  }
+
   if (cached === "unknown") {
     await probe();
   }
@@ -422,35 +472,12 @@ export async function dispatchOsNotification(
     if (opts.group) payload.group = opts.group;
     if (opts.sound) payload.sound = opts.sound;
     sendNotification(payload);
-    // Record the click target only for accepted dispatches. The
+    // Record the click target only for accepted OS dispatches. The
     // App-shell focus listener consumes the most-recent unexpired
     // entry on `window` focus. See the `target` field's docstring
-    // for the rationale.
+    // for the rationale. (Bell-popover clicks consume the entry's
+    // own stored target through a separate event, not this queue.)
     if (opts.target) pushTarget(opts.target, now);
-    // Persist into the notification-log ring buffer so the bell-icon
-    // popover can show this dispatch later. Fire-and-forget — the
-    // OS banner already showed the user the message; a log-write
-    // failure must never propagate. The Rust side is no-op-safe
-    // when the file open failed at boot (see lib.rs fallback path).
-    void invoke("notification_log_append", {
-      args: {
-        source: "os",
-        kind: opts.kind ?? "notice",
-        title,
-        body,
-        target: opts.target ?? null,
-      },
-    })
-      .then(() => {
-        // Notify the bell so the badge updates synchronously rather
-        // than on the next 8 s poll. Same-process only — `dispatchEvent`
-        // doesn't cross window boundaries, but this dispatcher always
-        // runs in the same window as the bell.
-        window.dispatchEvent(new Event("claudepot:notification-logged"));
-      })
-      .catch(() => {
-        /* swallow — log persistence is advisory, never load-bearing */
-      });
     return true;
   } catch {
     return false;

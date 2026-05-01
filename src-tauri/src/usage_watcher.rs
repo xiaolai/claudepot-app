@@ -30,6 +30,9 @@
 use std::time::Duration;
 
 use claudepot_core::services::usage_alerts::{Crossing, UsageAlertState, UsageWindowKind};
+// `Vec<UsageWindowKind>` is built per-tick from the user's
+// `notify_on_sub_windows` preference; the umbrella `seven_day` and
+// `five_hour` are always included.
 use claudepot_core::services::usage_cache::UsageCache;
 use serde::Serialize;
 use tauri::{AppHandle, Emitter, Manager};
@@ -139,7 +142,7 @@ async fn run_tick(app: &AppHandle, state: &mut UsageAlertState) {
     //    independent opt-ins (a user who disabled the activity
     //    feature for privacy reasons would also lose their quota
     //    alerts). The threshold list IS the opt-in for this watcher.
-    let thresholds = {
+    let (thresholds, kinds) = {
         let prefs_state = app.state::<crate::preferences::PreferencesState>();
         let guard = match prefs_state.0.lock() {
             Ok(g) => g,
@@ -148,7 +151,20 @@ async fn run_tick(app: &AppHandle, state: &mut UsageAlertState) {
                 return;
             }
         };
-        guard.notify_on_usage_thresholds.clone()
+        // `kinds` is the per-poll filter passed to apply_crossings.
+        // The umbrella windows (5-hour and 7-day) are always checked;
+        // the per-model sub-windows (Opus, Sonnet) are gated behind
+        // `notify_on_sub_windows` because they typically track the
+        // umbrella for users near cap, so leaving them on triples the
+        // 7-day toast volume for what most users experience as "one
+        // cap." See preferences::Preferences::notify_on_sub_windows
+        // for the rationale.
+        let mut kinds = vec![UsageWindowKind::FiveHour, UsageWindowKind::SevenDay];
+        if guard.notify_on_sub_windows {
+            kinds.push(UsageWindowKind::SevenDayOpus);
+            kinds.push(UsageWindowKind::SevenDaySonnet);
+        }
+        (guard.notify_on_usage_thresholds.clone(), kinds)
     };
     if thresholds.is_empty() {
         // Feature off — nothing to do. We deliberately do NOT clear
@@ -190,8 +206,11 @@ async fn run_tick(app: &AppHandle, state: &mut UsageAlertState) {
         }
     };
 
-    // 4. Detect crossings.
-    let crossings = state.apply_crossings(account_uuid, &resp, &thresholds);
+    // 4. Detect crossings. `kinds` reflects the user's
+    //    sub-window opt-in; `apply_crossings` coalesces multi-
+    //    threshold crossings within a single window/poll to one
+    //    Crossing for the highest threshold.
+    let crossings = state.apply_crossings(account_uuid, &resp, &thresholds, &kinds);
     if crossings.is_empty() {
         return;
     }
