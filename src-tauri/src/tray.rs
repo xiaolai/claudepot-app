@@ -243,7 +243,11 @@ pub async fn rebuild(app: &AppHandle) -> Result<(), String> {
         let alert_count = app
             .try_state::<crate::state::TrayAlertState>()
             .map(|s| s.get())
-            .unwrap_or(0);
+            .unwrap_or(0)
+            + app
+                .try_state::<crate::state::UpdatesAlertState>()
+                .map(|s| s.get())
+                .unwrap_or(0);
         let tooltip = compose_tooltip(cli_active, desktop_active, alert_count);
         tray.set_tooltip(Some(&tooltip))
             .map_err(|e| format!("tooltip: {e}"))?;
@@ -275,10 +279,16 @@ pub async fn rebuild(app: &AppHandle) -> Result<(), String> {
 /// registered yet — the next full rebuild will pick up the new count
 /// from `TrayAlertState`.
 pub fn refresh_alert_chrome(app: &AppHandle) {
+    // Sum both alert sources so the badge survives whichever channel
+    // last wrote. See `state::UpdatesAlertState` doc-comment.
     let alert_count = app
         .try_state::<crate::state::TrayAlertState>()
         .map(|s| s.get())
-        .unwrap_or(0);
+        .unwrap_or(0)
+        + app
+            .try_state::<crate::state::UpdatesAlertState>()
+            .map(|s| s.get())
+            .unwrap_or(0);
     let Some(tray) = app.tray_by_id("main") else {
         return;
     };

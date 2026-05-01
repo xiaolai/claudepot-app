@@ -15,6 +15,7 @@ mod commands_migrate;
 mod commands_notification;
 mod commands_preferences;
 mod commands_pricing;
+mod commands_updates;
 mod commands_project;
 mod commands_protected;
 mod commands_repair;
@@ -42,6 +43,7 @@ mod dto_project_repair;
 mod dto_routes;
 mod dto_session;
 mod dto_session_debug;
+mod dto_updates;
 mod dto_session_move;
 mod dto_session_prune;
 mod dto_usage;
@@ -52,6 +54,7 @@ mod state;
 mod tray;
 mod tray_icons;
 mod tray_menu;
+mod updates_watcher;
 mod usage_watcher;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -80,6 +83,10 @@ pub fn run() {
     // `set_activation_policy()` inside the very first `setup()` tick to
     // avoid a visible dock-icon flash on cold launch.
     let prefs = preferences::Preferences::load();
+    // Load update settings + cached probe state alongside prefs so the
+    // first `updates_status_get` call from the webview is a pure clone
+    // off the mutex (no disk I/O on the hot UI render path).
+    let updates_state = claudepot_core::updates::UpdateState::load();
     // `hide_dock` is only consumed inside `#[cfg(target_os = "macos")]`
     // (set_activation_policy is a no-op everywhere else), so binding it
     // unconditionally would emit `unused_variable` on Linux + Windows.
@@ -325,6 +332,13 @@ pub fn run() {
             // would break every `State<'_, UsageCache>` consumer).
             usage_watcher::spawn(app.handle().clone());
 
+            // Background poller for CC CLI + Claude Desktop updates.
+            // Probes upstream every `poll_interval_minutes` (default
+            // 4 h), updates the tray badge, and runs the auto-install
+            // pass when the user has opted in. See
+            // `src-tauri/src/updates_watcher.rs`.
+            updates_watcher::spawn(app.handle().clone());
+
             Ok(())
         })
         .manage(state::LoginState::default())
@@ -347,7 +361,13 @@ pub fn run() {
         })
         .manage(ops::RunningOps::new())
         .manage(state::TrayAlertState::default())
+        .manage(state::UpdatesAlertState::default())
         .manage(preferences::PreferencesState::new(prefs))
+        .manage(claudepot_core::updates::UpdateStateMutex::new(updates_state))
+        // Single shared gate: serializes background poller, manual
+        // check, and manual install across the whole process. See
+        // `updates_watcher::tick` and `commands_updates`.
+        .manage(std::sync::Arc::new(claudepot_core::updates::PollerGate::default()))
         // D-1: shared config-scan cache + commit race arbiter. Owns
         // the latest scanned `ConfigTree`, hands out generation tokens,
         // and arbitrates between concurrent writers (`config_scan`
@@ -570,6 +590,14 @@ pub fn run() {
             commands_automations::automations_linger_status,
             commands_automations::automations_linger_enable,
             commands_notification::notification_activate_host_for_session,
+            commands_updates::updates_status_get,
+            commands_updates::updates_check_now,
+            commands_updates::updates_cli_install,
+            commands_updates::updates_desktop_install,
+            commands_updates::updates_settings_get,
+            commands_updates::updates_settings_set,
+            commands_updates::updates_channel_set,
+            commands_updates::updates_minimum_version_set,
         ])
         .run(tauri::generate_context!())
         .unwrap_or_else(|e| {

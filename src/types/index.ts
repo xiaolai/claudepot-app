@@ -17,3 +17,4 @@ export * from "./artifact-lifecycle";
 export * from "./route";
 export * from "./automation";
 export * from "./usage";
+export * from "./updates";
