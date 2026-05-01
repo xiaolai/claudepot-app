@@ -7,17 +7,26 @@
 //! "Anthropic" before touching `/Applications`. Backup-and-replace
 //! via `ditto` so a botched copy is recoverable.
 
-// Imports split by platform — `DesktopSource`, `DesktopRelease`,
-// and `fetch_desktop_latest` are only consumed inside the macOS
-// branch of `install_desktop_latest`, so on Linux they are
-// "unused import" lints (= errors under CI's -D warnings).
-use crate::updates::detect::{detect_desktop_install, is_desktop_running, DesktopInstall};
-#[cfg(target_os = "macos")]
+// Imports split by platform so Linux clippy's -D warnings doesn't
+// flag them as unused:
+//
+//   - `DesktopSource` is the routing enum, used in both the macOS
+//     `match install.source { Homebrew => brew_upgrade_cask, ... }`
+//     and the Windows `match install.source { Homebrew =>
+//     winget_upgrade_cask, ... }` arms. Gated to `any(macos, windows)`.
+//   - `fetch_desktop_latest` is only called from the macOS arm
+//     (the Windows path routes through `winget_upgrade_cask` which
+//     never needs the version metadata). Gated to `macos` only.
+//
+// Linux falls into the explicit `cfg(target_os = "linux")` no-op
+// branch in `install_desktop_latest`; neither symbol is needed there.
+#[cfg(any(target_os = "macos", target_os = "windows"))]
 use crate::updates::detect::DesktopSource;
+use crate::updates::detect::{detect_desktop_install, is_desktop_running, DesktopInstall};
 use crate::updates::errors::{Result, UpdateError};
-use crate::updates::version::DesktopRelease;
 #[cfg(target_os = "macos")]
 use crate::updates::version::fetch_desktop_latest;
+use crate::updates::version::DesktopRelease;
 use std::path::Path;
 use std::process::Stdio;
 use tokio::process::Command;
