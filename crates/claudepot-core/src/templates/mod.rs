@@ -30,6 +30,7 @@
 pub mod apply;
 pub mod blueprint;
 pub mod capabilities;
+pub mod caregiver;
 pub mod error;
 pub mod instantiate;
 pub mod registry;
