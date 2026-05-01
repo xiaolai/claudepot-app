@@ -41,6 +41,26 @@ const BUNDLED: &[BundledEntry] = &[
         toml: include_str!("blueprints/it.morning-health-check.toml"),
         sample_md: Some(include_str!("blueprints/samples/morning-health-check.md")),
     },
+    BundledEntry {
+        id: "it.backup-heartbeat",
+        toml: include_str!("blueprints/it.backup-heartbeat.toml"),
+        sample_md: Some(include_str!("blueprints/samples/backup-heartbeat.md")),
+    },
+    BundledEntry {
+        id: "it.update-lag-report",
+        toml: include_str!("blueprints/it.update-lag-report.toml"),
+        sample_md: Some(include_str!("blueprints/samples/update-lag-report.md")),
+    },
+    BundledEntry {
+        id: "it.weekly-health-summary",
+        toml: include_str!("blueprints/it.weekly-health-summary.toml"),
+        sample_md: Some(include_str!("blueprints/samples/weekly-health-summary.md")),
+    },
+    BundledEntry {
+        id: "diag.disk-full",
+        toml: include_str!("blueprints/diag.disk-full.toml"),
+        sample_md: Some(include_str!("blueprints/samples/disk-full.md")),
+    },
 ];
 
 /// Registry of all bundled blueprints. Built once at startup;
