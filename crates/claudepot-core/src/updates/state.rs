@@ -130,10 +130,11 @@ impl UpdateState {
         let tmp = tempfile::NamedTempFile::new_in(parent)?;
         std::fs::write(tmp.path(), body)?;
         tmp.persist(&p).map_err(|e| {
-            UpdateError::Io(std::io::Error::new(
-                std::io::ErrorKind::Other,
-                format!("updates state: persist {}: {}", p.display(), e),
-            ))
+            UpdateError::Io(std::io::Error::other(format!(
+                "updates state: persist {}: {}",
+                p.display(),
+                e
+            )))
         })?;
         Ok(())
     }
