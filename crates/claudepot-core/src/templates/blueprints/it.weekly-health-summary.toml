@@ -1,0 +1,106 @@
+# Weekly health summary
+#
+# Sunday morning rollup. Reads the past week of morning-health-check
+# reports (if installed) and produces a single trend digest. When
+# the morning-check template isn't installed, falls back to a
+# fresh sweep of the same surfaces.
+
+id              = "it.weekly-health-summary"
+schema_version  = 1
+version         = 1
+name            = "Weekly health summary"
+tagline         = "What changed on your Mac this week."
+description     = """
+Each Sunday morning, this template produces a one-page summary of
+how your Mac is trending: disk space delta, average battery
+charging time, app counts, login-item additions, and crash trends.
+
+If the daily Morning health check is installed, this rolls up the
+last 7 days of those reports. Otherwise it does a one-shot sweep
+of the same data.
+
+It only reads system state. Nothing is changed.
+"""
+category        = "it-health"
+icon            = "trending-up"
+tier            = "ambient"
+
+capabilities_required = ["tool_use"]
+min_context_tokens    = 32768
+recommended_class     = "fast"
+cost_class            = "low"
+cost_cap_usd          = 0.10
+privacy               = "any"
+consent_required      = false
+fallback_policy       = "skip"
+
+prompt = """
+You are a personal IT assistant producing a weekly trend report.
+
+Step 1 — find this week's data:
+
+- List ~/.claudepot/it-reports/morning-*.md from the last 7 days
+  (use: ls -1t ~/.claudepot/it-reports/morning-*.md 2>/dev/null | head -7)
+- If 3+ daily reports are present, READ each (Read tool) and
+  treat them as the source of trends. Skip any unreadable file.
+- Otherwise, do a one-shot fresh sweep:
+  df -h /; system_profiler SPPowerDataType | head -30;
+  ls /Applications | wc -l;
+  ls -1t ~/Library/Logs/DiagnosticReports/ 2>/dev/null | head -10
+
+Step 2 — produce trends. For each section below, compare this
+week vs prior week (when daily reports cover both); otherwise
+note "single-week snapshot."
+
+Sections:
+
+- **Disk space** — used/free deltas in GB. Project the next
+  fill-up date if trend is monotonic.
+- **Battery** — cycle count delta; average charging vs discharging
+  hours.
+- **Applications** — net app count change; list of new entries
+  in /Applications and ~/Applications since last week.
+- **Login items / startup programs** — new entries detected.
+- **Crashes** — count and the top three crash sources by app name.
+
+Format:
+
+# Weekly health summary — week ending <YYYY-MM-DD>
+
+**Status:** <one-line headline — biggest thing the user should know>
+
+## Disk space
+## Battery
+## Applications
+## Login items
+## Crashes
+
+Keep each section to under 5 lines. Lead with the delta when
+available; absolute numbers second.
+
+Save with Write to CLAUDEPOT_OUTPUT_PATH or
+~/.claudepot/it-reports/weekly-<YYYY-WW>.md.
+"""
+
+sample_report = "samples/weekly-health-summary.md"
+
+[scope]
+reads                       = "Last 7 days of Morning-health-check reports if installed; otherwise a fresh sweep of disk/battery/apps/crashes."
+writes                      = "One weekly report at ~/.claudepot/it-reports/weekly-<YYYY-WW>.md"
+could_change                = "Nothing."
+network                     = "None."
+requires_full_disk_access   = false
+
+[schedule]
+default        = "0 9 * * 0"
+default_label  = "Each Sunday at 9 AM"
+allowed_shapes = ["weekly", "manual"]
+
+[output]
+path_template = "~/.claudepot/it-reports/weekly-{date}.md"
+format        = "markdown"
+
+[runtime]
+permission_mode = "plan"
+allowed_tools   = ["Bash", "Read", "Write"]
+timeout_secs    = 180
