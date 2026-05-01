@@ -237,10 +237,68 @@ pub struct AutomationRunDto {
     pub trigger_kind: String,
     pub host_platform: String,
     pub claudepot_version: String,
+    /// Files the run produced under its blueprint's output path.
+    /// Empty for non-template automations and for runs whose
+    /// template generated nothing yet.
+    #[serde(default)]
+    pub output_artifacts: Vec<OutputArtifactDto>,
+    /// Pre-run gate decision recorded by `_prerun`.
+    #[serde(default)]
+    pub route_decision: Option<RouteDecisionDto>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct OutputArtifactDto {
+    pub kind: String,
+    pub path: String,
+    pub format: String,
+    pub bytes: u64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum RouteDecisionDto {
+    Ran { route_id: Option<String> },
+    Fallback {
+        from: String,
+        to: Option<String>,
+        reason: String,
+    },
+    Skipped { reason: String },
+    SkippedAlerted { reason: String },
 }
 
 impl From<AutomationRun> for AutomationRunDto {
     fn from(r: AutomationRun) -> Self {
+        use claudepot_core::automations::types::{ArtifactKind, RouteDecision};
+        let output_artifacts = r
+            .output_artifacts
+            .into_iter()
+            .map(|a| OutputArtifactDto {
+                kind: match a.kind {
+                    ArtifactKind::Report => "report",
+                    ArtifactKind::PendingChanges => "pending_changes",
+                    ArtifactKind::ApplyReceipt => "apply_receipt",
+                    ArtifactKind::Email => "email",
+                }
+                .to_string(),
+                path: a.path,
+                format: a.format,
+                bytes: a.bytes,
+            })
+            .collect();
+        let route_decision = r.route_decision.map(|d| match d {
+            RouteDecision::Ran { route_id } => RouteDecisionDto::Ran { route_id },
+            RouteDecision::Fallback { from, to, reason } => RouteDecisionDto::Fallback {
+                from,
+                to,
+                reason,
+            },
+            RouteDecision::Skipped { reason } => RouteDecisionDto::Skipped { reason },
+            RouteDecision::SkippedAlerted { reason } => {
+                RouteDecisionDto::SkippedAlerted { reason }
+            }
+        });
         AutomationRunDto {
             id: r.id,
             automation_id: r.automation_id.to_string(),
@@ -258,6 +316,8 @@ impl From<AutomationRun> for AutomationRunDto {
             },
             host_platform: format!("{:?}", r.host_platform).to_lowercase(),
             claudepot_version: r.claudepot_version,
+            output_artifacts,
+            route_decision,
         }
     }
 }
