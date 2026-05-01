@@ -129,6 +129,7 @@ export function TemplateInstallView({
           // Match the loaded view's pinned height so the modal box
           // doesn't shrink during the loading frame and snap back.
           height: "min(620px, 80vh)",
+          width: "100%",
         }}
       >
         Loading template…
@@ -143,9 +144,11 @@ export function TemplateInstallView({
         flexDirection: "column",
         // Pin to the same vertical extent as the gallery so the
         // gallery → install swap doesn't resize the dialog box.
+        // No `flex: 1` — see TemplateGallery for the explanation;
+        // it collides with the explicit `height`.
         height: "min(620px, 80vh)",
+        width: "100%",
         minHeight: 0,
-        flex: 1,
       }}
     >
       {/* Header — fixed at top */}
