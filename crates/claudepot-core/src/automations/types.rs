@@ -61,6 +61,13 @@ pub struct Automation {
     pub updated_at: chrono::DateTime<chrono::Utc>,
     #[serde(default = "default_managed")]
     pub claudepot_managed: bool,
+    /// Set when this automation was instantiated from a bundled
+    /// template. Drives template-aware post-run behavior in
+    /// `record_run` (output-artifact discovery, apply-sidecar
+    /// parsing, caregiver SMTP delivery). `None` for automations
+    /// created via the regular Add Automation flow.
+    #[serde(default)]
+    pub template_id: Option<String>,
 }
 
 fn default_enabled() -> bool {
@@ -141,6 +148,28 @@ pub enum Trigger {
         #[serde(default)]
         timezone: Option<String>,
     },
+    /// On-demand only — never fires from a scheduler artifact.
+    /// Required by template-driven automations (caregiver
+    /// heartbeat, on-demand diagnostics) where Run Now is the
+    /// sole entry point.
+    ///
+    /// Scheduler adapters short-circuit on this variant: no
+    /// launchd plist, no systemd unit, no Task Scheduler XML
+    /// is materialized; `next_runs` returns an empty vec.
+    Manual,
+}
+
+impl Trigger {
+    /// True for `Trigger::Manual`. Used by scheduler adapters
+    /// to short-circuit registration.
+    pub fn is_manual(&self) -> bool {
+        matches!(self, Trigger::Manual)
+    }
+
+    /// True for `Trigger::Cron { .. }`.
+    pub fn is_cron(&self) -> bool {
+        matches!(self, Trigger::Cron { .. })
+    }
 }
 
 /// Cross-platform behavior toggles. Each scheduler adapter honors
@@ -189,6 +218,76 @@ pub struct AutomationRun {
     pub trigger_kind: TriggerKind,
     pub host_platform: HostPlatform,
     pub claudepot_version: String,
+    /// Files the automation produced under its blueprint's
+    /// `output.path_template`. Discovered by `record_run` after
+    /// `claude -p` exits. Empty for non-template automations and
+    /// for runs whose template generated nothing yet.
+    #[serde(default)]
+    pub output_artifacts: Vec<OutputArtifact>,
+    /// Decision recorded by the pre-run gate (`claudepot
+    /// automation _prerun`). `None` when the run skipped the
+    /// gate (legacy automations) or when no route was assigned.
+    #[serde(default)]
+    pub route_decision: Option<RouteDecision>,
+}
+
+/// Output produced by a template-driven run, persisted to the
+/// run record so the Reports panel and the apply pipeline can
+/// locate artifacts without scanning the filesystem.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct OutputArtifact {
+    pub kind: ArtifactKind,
+    pub path: String,
+    /// MIME-ish format hint, mirroring the blueprint's
+    /// `output.format` field. Common values: `markdown`, `json`,
+    /// `text`.
+    pub format: String,
+    pub bytes: u64,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum ArtifactKind {
+    /// Human-readable narrative — what the user opens via
+    /// "View latest report".
+    Report,
+    /// Structured proposed-changes manifest for apply-pipeline
+    /// templates. Read by the apply executor.
+    PendingChanges,
+    /// Receipt of a completed apply step. Persisted alongside
+    /// the report.
+    ApplyReceipt,
+    /// Email body/subject artifact for caregiver-style
+    /// templates that deliver via SMTP.
+    Email,
+}
+
+/// Decision recorded by the pre-run gate before invoking
+/// `claude -p`. The gate runs route-reachability probes and
+/// applies the blueprint's `fallback_policy`.
+///
+/// See `dev-docs/templates-implementation-plan.md` §5.3 for the
+/// truth table.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum RouteDecision {
+    /// Run proceeded against the assigned route (or the default
+    /// route if `route_id` is `None`).
+    Ran { route_id: Option<String> },
+    /// Assigned route was unreachable; fell back to the default
+    /// route. Only legal when `privacy != local`.
+    Fallback {
+        from: String,
+        to: Option<String>,
+        reason: String,
+    },
+    /// Run skipped silently (assigned route unreachable + policy
+    /// = `skip`, or the route was outright invalid).
+    Skipped { reason: String },
+    /// Run skipped and a notification was posted (policy =
+    /// `alert`, or `privacy = local` and the local route is
+    /// unreachable).
+    SkippedAlerted { reason: String },
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
@@ -313,6 +412,7 @@ mod tests {
             created_at: now,
             updated_at: now,
             claudepot_managed: true,
+            template_id: None,
         };
         let s = serde_json::to_string(&a).unwrap();
         let back: Automation = serde_json::from_str(&s).unwrap();

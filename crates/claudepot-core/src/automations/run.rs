@@ -75,6 +75,13 @@ pub fn record_run(inputs: &RecordInputs<'_>) -> Result<AutomationRun, Automation
         trigger_kind: inputs.trigger_kind,
         host_platform: HostPlatform::current(),
         claudepot_version: inputs.claudepot_version.to_string(),
+        // `record_run` is the post-run hook for non-template
+        // automations; template-aware enrichment (output-artifact
+        // discovery, prerun-decision merge) is layered on by
+        // `record_run_with_template_context` once the templates
+        // pre-run gate is wired through the shim.
+        output_artifacts: Vec::new(),
+        route_decision: None,
     };
 
     write_result_json(&run, inputs.stdout_log_path)?;
@@ -336,6 +343,8 @@ fn synthesize_run(
         trigger_kind: TriggerKind::Manual,
         host_platform: HostPlatform::current(),
         claudepot_version: env!("CARGO_PKG_VERSION").to_string(),
+        output_artifacts: Vec::new(),
+        route_decision: None,
     }
 }
 
