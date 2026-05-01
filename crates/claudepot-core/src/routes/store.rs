@@ -241,6 +241,8 @@ mod tests {
             deployment_organization_uuid: Uuid::nil(),
             active_on_desktop: false,
             installed_on_cli: false,
+            is_private_cloud: false,
+            capabilities_override: None,
         }
     }
 
