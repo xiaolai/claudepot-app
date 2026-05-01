@@ -19,6 +19,16 @@
       "timestamp": "2026-05-01T07:30:24.542Z",
       "status": "pending",
       "tempName": "__proposed.letterSpacingForSmallCaptionTagTextSubtlerThanLsWide008emUsedByProjectTagAndTargetbuttonSDisabledreasonCaption"
+    },
+    {
+      "id": "prop_2026-05-01_003",
+      "value": "min(620px, 80vh)",
+      "intent": "stable-dialog-body-height for content-swap modals (templates gallery↔install) so swapping content does not resize the dialog box",
+      "proposedTokenName": "token.stable-dialog-body-height-for-content-swap-modals-templates-gallery-install-so-swapping-content-does-not-resize-the-dialog-box",
+      "callerFile": null,
+      "timestamp": "2026-05-01T23:34:47.099Z",
+      "status": "pending",
+      "tempName": "__proposed.stableDialogBodyHeightForContentSwapModalsTemplatesGalleryInstallSoSwappingContentDoesNotResizeTheDialogBox"
     }
   ]
 }
