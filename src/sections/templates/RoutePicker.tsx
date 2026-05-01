@@ -1,3 +1,4 @@
+import { useEffect } from "react";
 import type { TemplateRouteSummaryDto } from "../../types";
 
 interface Props {
@@ -30,6 +31,25 @@ export function RoutePicker({
 }: Props) {
   const capable = routes.filter((r) => r.is_capable);
   const ineligible = routes.filter((r) => !r.is_capable);
+
+  // Auto-select the only capable route when there's exactly one.
+  // Side effects must live in useEffect — calling onChange via
+  // queueMicrotask during render scheduled a state update on
+  // every render, causing a visible re-render flash on first
+  // mount.
+  useEffect(() => {
+    if (
+      capable.length === 1 &&
+      ineligible.length === 0 &&
+      selectedRouteId !== capable[0].id
+    ) {
+      onChange(capable[0].id);
+    }
+    // We intentionally depend on the route ids only — full
+    // route objects re-allocate every render, but their ids
+    // don't.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [capable.map((r) => r.id).join(","), ineligible.length, selectedRouteId]);
 
   if (privacyClass === "local" && capable.length === 0) {
     return (
@@ -65,15 +85,9 @@ export function RoutePicker({
   }
 
   // 0 routes → nothing rendered; the install proceeds against default `claude`.
-  // 1 capable route → silently use it.
+  // 1 capable route → silently used (auto-select via the effect above).
   if (capable.length === 0) return null;
-  if (capable.length === 1 && ineligible.length === 0) {
-    if (selectedRouteId !== capable[0].id) {
-      // Auto-select; the parent's effect picks this up via onChange.
-      queueMicrotask(() => onChange(capable[0].id));
-    }
-    return null;
-  }
+  if (capable.length === 1 && ineligible.length === 0) return null;
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: "var(--sp-6)" }}>
