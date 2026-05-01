@@ -53,6 +53,7 @@ pub mod keys;
 pub mod launcher;
 pub mod migrate;
 pub mod migrations;
+pub mod notification_log;
 pub mod oauth;
 pub mod onboard;
 pub mod path_utils;

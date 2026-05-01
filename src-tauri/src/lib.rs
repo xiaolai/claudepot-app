@@ -15,7 +15,6 @@ mod commands_migrate;
 mod commands_notification;
 mod commands_preferences;
 mod commands_pricing;
-mod commands_updates;
 mod commands_project;
 mod commands_protected;
 mod commands_repair;
@@ -24,6 +23,7 @@ mod commands_session_index;
 mod commands_session_move;
 mod commands_session_prune;
 mod commands_session_share;
+mod commands_updates;
 mod commands_usage_local;
 mod config_dto;
 mod config_watch;
@@ -43,9 +43,9 @@ mod dto_project_repair;
 mod dto_routes;
 mod dto_session;
 mod dto_session_debug;
-mod dto_updates;
 mod dto_session_move;
 mod dto_session_prune;
+mod dto_updates;
 mod dto_usage;
 mod live_activity_bridge;
 mod ops;
@@ -104,6 +104,35 @@ pub fn run() {
     // failure (disk full, perms, corrupt) degrades gracefully — the
     // cards surface goes dark; the live-strip and everything else
     // continues to work.
+    // Open the persistent notification log before the builder chain
+    // so its handle can be `.manage()`d alongside the other state. The
+    // log lives at `~/.claudepot/notifications.json`; `open` returns
+    // an empty log on missing or corrupt files (the corrupt file gets
+    // moved aside for forensics) so this never blocks startup.
+    let notification_log_path = claudepot_core::notification_log::default_path();
+    let notification_log_state = match claudepot_core::notification_log::NotificationLog::open(
+        notification_log_path.clone(),
+    ) {
+        Ok(log) => commands_notification::NotificationLogState::new(log),
+        Err(e) => {
+            tracing::warn!(
+                target = "claudepot_tauri",
+                error = %e,
+                path = %notification_log_path.display(),
+                "notification log open failed — appends will be no-ops, surface stays empty"
+            );
+            // Re-attempt with a temp path so the State is still
+            // present; appends will silently no-op (write failures
+            // surface back to the renderer as `Err(...)` strings, but
+            // none of the dispatch sites await the result).
+            let fallback = std::env::temp_dir().join("claudepot-notifications.json");
+            commands_notification::NotificationLogState::new(
+                claudepot_core::notification_log::NotificationLog::open(fallback)
+                    .expect("temp notification log open"),
+            )
+        }
+    };
+
     let cards_db_path = claudepot_core::paths::claudepot_data_dir().join("sessions.db");
     let cards_index: Option<std::sync::Arc<claudepot_core::activity::ActivityIndex>> =
         match claudepot_core::activity::ActivityIndex::open(&cards_db_path) {
@@ -363,11 +392,15 @@ pub fn run() {
         .manage(state::TrayAlertState::default())
         .manage(state::UpdatesAlertState::default())
         .manage(preferences::PreferencesState::new(prefs))
-        .manage(claudepot_core::updates::UpdateStateMutex::new(updates_state))
+        .manage(claudepot_core::updates::UpdateStateMutex::new(
+            updates_state,
+        ))
         // Single shared gate: serializes background poller, manual
         // check, and manual install across the whole process. See
         // `updates_watcher::tick` and `commands_updates`.
-        .manage(std::sync::Arc::new(claudepot_core::updates::PollerGate::default()))
+        .manage(std::sync::Arc::new(
+            claudepot_core::updates::PollerGate::default(),
+        ))
         // D-1: shared config-scan cache + commit race arbiter. Owns
         // the latest scanned `ConfigTree`, hands out generation tokens,
         // and arbitrates between concurrent writers (`config_scan`
@@ -382,7 +415,8 @@ pub fn run() {
         // Replaces the old `static REFRESH_IN_FLIGHT: AtomicBool` in
         // `commands_pricing.rs`, and now correctly singleflights the
         // `pricing_refresh` button-mash path too.
-        .manage(claudepot_core::pricing::PricingCacheService::new());
+        .manage(claudepot_core::pricing::PricingCacheService::new())
+        .manage(notification_log_state);
 
     // Conditionally publish the cards index — `None` means open
     // failed at startup, in which case the cards-* commands return
@@ -590,6 +624,11 @@ pub fn run() {
             commands_automations::automations_linger_status,
             commands_automations::automations_linger_enable,
             commands_notification::notification_activate_host_for_session,
+            commands_notification::notification_log_append,
+            commands_notification::notification_log_list,
+            commands_notification::notification_log_mark_all_read,
+            commands_notification::notification_log_clear,
+            commands_notification::notification_log_unread_count,
             commands_updates::updates_status_get,
             commands_updates::updates_check_now,
             commands_updates::updates_cli_install,

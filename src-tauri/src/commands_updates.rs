@@ -200,9 +200,7 @@ pub async fn updates_desktop_install(
     let _lease = arc_gate.try_acquire().ok_or_else(|| {
         "another update operation is in progress; try again in a moment".to_string()
     })?;
-    let outcome = install_desktop_latest()
-        .await
-        .map_err(|e| e.to_string())?;
+    let outcome = install_desktop_latest().await.map_err(|e| e.to_string())?;
     Ok(DesktopInstallResultDto {
         method: outcome.method,
         version_after: outcome.version_after,
