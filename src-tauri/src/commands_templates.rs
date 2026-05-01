@@ -19,6 +19,9 @@
 
 use claudepot_core::automations::AutomationStore;
 use claudepot_core::routes::{Route, RouteProvider, RouteStore};
+use claudepot_core::templates::apply::{
+    apply_selected, sidecar, ApplyReceipt, PendingChanges,
+};
 use claudepot_core::templates::{
     self as tpl, Blueprint, PrivacyClass, TemplateInstance, TemplateRegistry,
 };
@@ -72,6 +75,69 @@ pub async fn templates_sample_report(id: String) -> Result<String, String> {
     r.sample_report(&id)
         .map(|s| s.to_string())
         .ok_or_else(|| format!("no sample report bundled for template id: {id}"))
+}
+
+/// Read a `pending-changes.json` side-car for a specific run.
+/// The path is scoped to `~/.claudepot/` like other report
+/// reads. Returns the parsed structure.
+#[tauri::command]
+pub async fn templates_pending_changes(path: String) -> Result<PendingChanges, String> {
+    use std::path::PathBuf;
+    let claudepot_root = dirs::home_dir()
+        .ok_or_else(|| "could not resolve home dir".to_string())?
+        .join(".claudepot");
+    let target = PathBuf::from(&path);
+    let canonical_target = target
+        .canonicalize()
+        .map_err(|e| format!("cannot resolve {path}: {e}"))?;
+    let canonical_root = claudepot_root
+        .canonicalize()
+        .unwrap_or(claudepot_root.clone());
+    if !canonical_target.starts_with(&canonical_root) {
+        return Err(format!(
+            "pending-changes path is outside ~/.claudepot/: {}",
+            canonical_target.display()
+        ));
+    }
+    sidecar::read(&canonical_target)
+}
+
+/// Apply selected items from a `pending-changes.json` side-car.
+/// Re-validates every operation against the blueprint's apply
+/// configuration before execution; rejected items appear in
+/// the receipt as `Rejected` (and are never executed).
+#[tauri::command]
+pub async fn templates_apply_pending(
+    automation_id: String,
+    pending_path: String,
+    selected_ids: Vec<String>,
+) -> Result<ApplyReceipt, String> {
+    let pending = templates_pending_changes(pending_path).await?;
+
+    // Resolve the blueprint via the automation's template_id.
+    let store = AutomationStore::open()
+        .map_err(|e| format!("automations store open failed: {e}"))?;
+    let auto = store
+        .list()
+        .iter()
+        .find(|a| a.id.to_string() == automation_id)
+        .ok_or_else(|| format!("automation {automation_id} not found"))?
+        .clone();
+    let template_id = auto
+        .template_id
+        .clone()
+        .ok_or_else(|| format!("automation {automation_id} is not template-driven"))?;
+    let r = registry()?;
+    let bp = r
+        .get(&template_id)
+        .ok_or_else(|| format!("blueprint {template_id} not in registry"))?;
+    let apply = bp
+        .apply
+        .as_ref()
+        .ok_or_else(|| format!("blueprint {template_id} has no apply config"))?;
+
+    let receipt = apply_selected(&pending, apply, &selected_ids).await;
+    Ok(receipt)
 }
 
 /// Read a generated report file. Scoped to `~/.claudepot/` —
