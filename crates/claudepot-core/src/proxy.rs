@@ -199,6 +199,12 @@ fn no_proxy_from_env() -> Option<String> {
 /// literals (containing `:`) are wrapped in brackets so the URL is
 /// parseable by `reqwest::Proxy`. The host is otherwise passed through
 /// unchanged — we trust SystemConfiguration's typing of the field.
+//
+// `dead_code` allow: only called from macOS-gated paths today, but
+// the test module exercises it on every platform so Linux CI catches
+// drift in this pure-string helper before anyone wires it up from
+// non-macOS code. Gating the definition would break the tests.
+#[allow(dead_code)]
 fn format_proxy_url(scheme: &str, host: &str, port_i64: i64) -> Option<String> {
     if host.is_empty() {
         return None;
@@ -217,6 +223,10 @@ fn format_proxy_url(scheme: &str, host: &str, port_i64: i64) -> Option<String> {
 /// `doctor` output or JSON. Returns the URL unchanged if no userinfo
 /// component is present, or if the input doesn't have a recognizable
 /// `scheme://...` shape.
+//
+// Same `dead_code` rationale as `format_proxy_url`: macOS-only call
+// site, cross-platform tests.
+#[allow(dead_code)]
 fn redact_proxy_userinfo(url: &str) -> String {
     let Some(scheme_end) = url.find("://") else {
         return url.to_string();
