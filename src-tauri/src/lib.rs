@@ -114,15 +114,26 @@ pub fn run() {
                 path = %notification_log_path.display(),
                 "notification log open failed — appends will be no-ops, surface stays empty"
             );
-            // Re-attempt with a temp path so the State is still
-            // present; appends will silently no-op (write failures
-            // surface back to the renderer as `Err(...)` strings, but
-            // none of the dispatch sites await the result).
+            // Two-step fallback: first try a temp-dir path so at
+            // least the current process gets persistence inside the
+            // session. If even that fails (no temp dir, permissions,
+            // disk full), drop to a fully in-memory log so the bell
+            // still works for this run instead of panicking startup.
+            // The previous version `.expect()`d on the temp-path
+            // open and aborted the whole app on a deeper environment
+            // issue — strictly worse than degraded notifications.
             let fallback = std::env::temp_dir().join("claudepot-notifications.json");
-            commands_notification::NotificationLogState::new(
-                claudepot_core::notification_log::NotificationLog::open(fallback)
-                    .expect("temp notification log open"),
-            )
+            let log = claudepot_core::notification_log::NotificationLog::open(fallback.clone())
+                .unwrap_or_else(|e2| {
+                    tracing::warn!(
+                        target = "claudepot_tauri",
+                        error = %e2,
+                        path = %fallback.display(),
+                        "notification log temp-dir fallback also failed — using volatile in-memory log; entries will not survive restart"
+                    );
+                    claudepot_core::notification_log::NotificationLog::in_memory_only()
+                });
+            commands_notification::NotificationLogState::new(log)
         }
     };
 

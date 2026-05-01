@@ -60,15 +60,28 @@ export function NotificationLogPopover({
   const [query, setQuery] = useState<string>("");
   const [order, setOrder] = useState<NotificationLogOrder>("newestFirst");
 
+  // Filter object excludes the time-window — that's resolved at
+  // refresh time so "Last 1h" means relative-to-NOW on every fetch.
+  // Pre-fix, sinceMs was frozen when windowKey changed; a popover
+  // left open for 30 min would still show "Last 1h" anchored to
+  // when the user touched the dropdown, drifting further from
+  // reality each tick.
   const filter = useMemo<NotificationLogFilter>(() => {
     const f: NotificationLogFilter = {};
     if (kinds.size > 0) f.kinds = Array.from(kinds);
     if (source !== "both") f.source = source;
-    if (windowKey !== "all") f.sinceMs = Date.now() - parseInt(windowKey, 10);
     const trimmed = query.trim();
     if (trimmed) f.query = trimmed;
     return f;
-  }, [kinds, source, windowKey, query]);
+  }, [kinds, source, query]);
+
+  // Window duration in ms ("all" → null). Resolved into a fresh
+  // `sinceMs` inside refresh() so the cutoff slides with wall-clock
+  // time even if the popover stays open across multiple polls.
+  const windowMs = useMemo<number | null>(() => {
+    if (windowKey === "all") return null;
+    return parseInt(windowKey, 10);
+  }, [windowKey]);
 
   // Anchor by viewport-right so the panel never clips off-screen on a
   // narrow window. We push the popover in from the right edge by the
@@ -88,35 +101,70 @@ export function NotificationLogPopover({
     return () => window.removeEventListener("resize", compute);
   }, [anchorRef]);
 
+  // Tracks whether we've already cleared the unread badge for this
+  // popover lifecycle. Mark-read fires once after the FIRST
+  // successful load — not before, so a backend hiccup doesn't clear
+  // the badge while showing the user only an error state. Filter
+  // changes trigger refresh() but should not re-fire mark-read; the
+  // user already saw the unread entries on the initial open.
+  const markedReadRef = useRef(false);
+
   const refresh = useCallback(async () => {
     setError(null);
     try {
-      const list = await api.notificationLogList(filter, order, 200);
+      // Resolve sinceMs at fetch time so the time-window slides
+      // with wall-clock instead of being frozen at filter-change
+      // time. See `windowMs` memo above for the rationale.
+      const effective: NotificationLogFilter =
+        windowMs == null ? filter : { ...filter, sinceMs: Date.now() - windowMs };
+      // Pass the backend's MAX_ENTRIES (500) so the popover surfaces
+      // the entire ring buffer rather than truncating to the most-
+      // recent 200. The earlier 200 cap meant 60% of the buffer was
+      // permanently unreachable from the UI — defeats the point of
+      // a persistent history viewer.
+      const list = await api.notificationLogList(effective, order, 500);
       setEntries(list);
       setLoading(false);
+      // Mark-read tied to a successful load. The popover IS the user
+      // looking — but only at content they actually got to see. If
+      // the IPC errors and we render an error state, the unread
+      // badge must NOT clear, otherwise the user loses the only
+      // signal that something was waiting for them.
+      if (!markedReadRef.current) {
+        markedReadRef.current = true;
+        try {
+          await api.notificationLogMarkAllRead();
+          onCountMaybeChanged();
+        } catch {
+          // Best-effort — leave the badge as-is on failure. Re-arm
+          // the ref so the next refresh can retry.
+          markedReadRef.current = false;
+        }
+      }
     } catch (e) {
       setError(String(e));
       setLoading(false);
     }
-  }, [filter, order]);
+  }, [filter, order, windowMs, onCountMaybeChanged]);
 
   useEffect(() => {
     void refresh();
   }, [refresh]);
 
-  // Mark-all-read on open — the popover IS the user looking.
-  useEffect(() => {
-    void api
-      .notificationLogMarkAllRead()
-      .then(() => onCountMaybeChanged())
-      .catch(() => {
-        /* swallow */
-      });
-  }, [onCountMaybeChanged]);
-
   // Close on outside click. Mousedown so we close before any
   // down-stream click handlers fire (matches ContextMenu pattern).
+  //
+  // Suspended while the Clear-confirm modal is open. The Modal
+  // primitive renders the dialog as a sibling of the popover panel
+  // (no portal), so its scrim/buttons are NOT inside `panelRef`.
+  // Without this gate, clicking Cancel or Clear in the confirm
+  // would tear down the popover before the button's onClick runs,
+  // making the destructive action unreliable. Modal owns its own
+  // Esc + scrim-click dismissal, so suspending the popover's
+  // outside-click is safe — the user can still escape the confirm
+  // and then click outside the popover normally.
   useEffect(() => {
+    if (confirmClear) return;
     const onMouseDown = (e: globalThis.MouseEvent) => {
       const t = e.target as Node | null;
       if (!t) return;
@@ -126,9 +174,16 @@ export function NotificationLogPopover({
     };
     document.addEventListener("mousedown", onMouseDown);
     return () => document.removeEventListener("mousedown", onMouseDown);
-  }, [anchorRef, onClose]);
+  }, [anchorRef, onClose, confirmClear]);
 
+  // Esc closes the popover — but yields to the Clear-confirm modal
+  // when it's open, so a single Esc closes the confirm without
+  // also tearing down the popover behind it. Standard one-layer-
+  // at-a-time dismissal pattern; matches macOS / web modal behavior.
+  // The Modal primitive owns its own Esc handler that closes the
+  // confirm.
   useEffect(() => {
+    if (confirmClear) return;
     const onKey = (e: KeyboardEvent) => {
       if (e.key === "Escape") {
         e.preventDefault();
@@ -137,7 +192,7 @@ export function NotificationLogPopover({
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [onClose]);
+  }, [onClose, confirmClear]);
 
   const toggleKind = useCallback((k: NotificationKind) => {
     setKinds((prev) => {
@@ -245,7 +300,7 @@ export function NotificationLogPopover({
             <EmptyHint danger>{error}</EmptyHint>
           ) : entries.length === 0 ? (
             <EmptyHint>
-              {hasFilter(filter)
+              {hasFilter(filter, windowMs)
                 ? "No matches. Adjust the filter or clear it."
                 : "No notifications yet. Toasts and OS banners will collect here."}
             </EmptyHint>
@@ -281,11 +336,14 @@ export function NotificationLogPopover({
   );
 }
 
-function hasFilter(f: NotificationLogFilter): boolean {
+function hasFilter(
+  f: NotificationLogFilter,
+  windowMs: number | null,
+): boolean {
   return (
     (f.kinds && f.kinds.length > 0) ||
     f.source !== undefined ||
-    f.sinceMs !== undefined ||
+    windowMs != null ||
     (f.query && f.query.length > 0) ||
     false
   );

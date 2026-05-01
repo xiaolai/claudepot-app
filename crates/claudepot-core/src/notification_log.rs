@@ -157,6 +157,40 @@ struct Inner {
     entries: VecDeque<NotificationEntry>,
     next_id: u64,
     last_seen_id: u64,
+    /// When true, `persist_locked` returns Ok without touching disk.
+    /// Set by `in_memory_only()` for the boot-fallback path so a
+    /// degraded log doesn't spam attempted writes against a path
+    /// that's already known to be unreachable.
+    volatile: bool,
+}
+
+/// Mutex-poison recovery — `unwrap_or_else(PoisonError::into_inner)`
+/// in one place so every method handles a poisoned lock the same way:
+/// recover via `into_inner()` after a `tracing::warn!`. The
+/// notification log is advisory state (no correctness guarantees
+/// ride on it), so panicking the process — or worse, panicking every
+/// subsequent caller — is the wrong tradeoff. The previous
+/// `.expect()` per call site violated `.claude/rules/rust-conventions.md`'s
+/// "no unwrap/expect in core" gate.
+///
+/// Note: a poisoned mutex stays poisoned for the process lifetime,
+/// so every subsequent acquire under poison logs another warn. The
+/// noise is informative — it tells operators that an earlier panic
+/// is still unresolved rather than silently masking it. If the
+/// volume becomes a problem we can hoist a `OnceCell` to log once;
+/// for now the explicit per-call signal is correct.
+fn lock_inner(m: &Mutex<Inner>) -> std::sync::MutexGuard<'_, Inner> {
+    match m.lock() {
+        Ok(g) => g,
+        Err(poisoned) => {
+            tracing::warn!(
+                "notification_log: mutex was poisoned by an earlier panic; \
+                 recovering with under-lock data (advisory state, no \
+                 correctness guarantees ride on it)"
+            );
+            poisoned.into_inner()
+        }
+    }
 }
 
 /// Persistent ring-buffer log of dispatched notifications. Cheap to
@@ -168,6 +202,30 @@ pub struct NotificationLog {
 }
 
 impl NotificationLog {
+    /// Build a volatile in-memory-only log — appends and reads work,
+    /// but persistence is skipped entirely (the `volatile` flag
+    /// short-circuits `persist_locked`). Used as the last-resort
+    /// boot fallback when both the real and temp-dir file paths
+    /// refused to open. The bell still works for the current
+    /// process; nothing survives a restart.
+    ///
+    /// The `path` field is kept (set to a unique per-process value)
+    /// so the Inner shape is uniform across both code paths, but
+    /// nothing ever writes to it.
+    pub fn in_memory_only() -> Self {
+        let path =
+            std::env::temp_dir().join(format!("claudepot-notif-volatile-{}", std::process::id()));
+        Self {
+            inner: Mutex::new(Inner {
+                path,
+                entries: VecDeque::new(),
+                next_id: 1,
+                last_seen_id: 0,
+                volatile: true,
+            }),
+        }
+    }
+
     /// Open the log at `path`, creating the parent directory if
     /// necessary. A missing file is treated as an empty log; a
     /// corrupt file is moved aside to `<path>.corrupt` and the log
@@ -209,6 +267,7 @@ impl NotificationLog {
                 entries,
                 next_id,
                 last_seen_id,
+                volatile: false,
             }),
         })
     }
@@ -225,7 +284,7 @@ impl NotificationLog {
         body: String,
         target: serde_json::Value,
     ) -> std::io::Result<u64> {
-        let mut g = self.inner.lock().expect("notification log mutex poisoned");
+        let mut g = lock_inner(&self.inner);
         let id = g.next_id;
         g.next_id = g.next_id.saturating_add(1);
         let ts_ms = chrono::Utc::now().timestamp_millis();
@@ -255,7 +314,7 @@ impl NotificationLog {
         order: SortOrder,
         limit: Option<usize>,
     ) -> Vec<NotificationEntry> {
-        let g = self.inner.lock().expect("notification log mutex poisoned");
+        let g = lock_inner(&self.inner);
         let q_lower = filter
             .query
             .as_deref()
@@ -300,7 +359,7 @@ impl NotificationLog {
     /// Mark every current entry as seen. The next [`unread_count`]
     /// returns 0 until a fresh entry lands.
     pub fn mark_all_read(&self) -> std::io::Result<()> {
-        let mut g = self.inner.lock().expect("notification log mutex poisoned");
+        let mut g = lock_inner(&self.inner);
         let highest = g.entries.iter().map(|e| e.id).max().unwrap_or(0);
         if g.last_seen_id == highest {
             return Ok(());
@@ -313,7 +372,7 @@ impl NotificationLog {
     /// rewritten as an empty doc rather than deleted so subsequent
     /// reads don't hit the not-found branch in `open`.
     pub fn clear(&self) -> std::io::Result<()> {
-        let mut g = self.inner.lock().expect("notification log mutex poisoned");
+        let mut g = lock_inner(&self.inner);
         g.entries.clear();
         g.next_id = 1;
         g.last_seen_id = 0;
@@ -323,7 +382,7 @@ impl NotificationLog {
     /// Number of entries with `id > last_seen_id`. Drives the bell
     /// badge.
     pub fn unread_count(&self) -> u32 {
-        let g = self.inner.lock().expect("notification log mutex poisoned");
+        let g = lock_inner(&self.inner);
         // u32 is wide enough — MAX_ENTRIES is 500 and the badge
         // would render "99+" past two digits anyway.
         g.entries.iter().filter(|e| e.id > g.last_seen_id).count() as u32
@@ -331,7 +390,7 @@ impl NotificationLog {
 
     /// Total entry count.
     pub fn len(&self) -> usize {
-        let g = self.inner.lock().expect("notification log mutex poisoned");
+        let g = lock_inner(&self.inner);
         g.entries.len()
     }
 
@@ -342,7 +401,14 @@ impl NotificationLog {
     /// Persist the current state to disk. Caller must hold the inner
     /// lock; we re-read from `g` so the on-disk file always matches
     /// the in-memory state at the lock-release point.
+    ///
+    /// No-op when `g.volatile` is set (the boot-fallback degraded
+    /// log) — see [`NotificationLog::in_memory_only`] for the
+    /// rationale.
     fn persist_locked(g: &Inner) -> std::io::Result<()> {
+        if g.volatile {
+            return Ok(());
+        }
         let doc = PersistedDoc {
             last_seen_id: g.last_seen_id,
             entries: g.entries.iter().cloned().collect(),

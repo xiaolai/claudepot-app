@@ -25,9 +25,31 @@ interface EntryRowProps {
 export function NotificationLogEntry({ entry, onClick }: EntryRowProps) {
   const clickable = entry.target != null;
   const colors = kindColors(entry.kind);
+  // Keyboard activation for clickable rows. Pre-fix this was a bare
+  // `<li onClick>` — mouse-only, failing the project's a11y floor
+  // ("every interactive element is keyboard-reachable"). Promoting
+  // the row to role="button" + tabIndex + Enter/Space keeps the
+  // <li> semantics for screen readers (this is a list of
+  // notifications) while still letting the user activate without a
+  // mouse. Non-clickable rows stay role-less; they have nothing to
+  // activate.
+  const interactiveProps = clickable
+    ? {
+        role: "button" as const,
+        tabIndex: 0,
+        onClick,
+        onKeyDown: (e: React.KeyboardEvent<HTMLLIElement>) => {
+          if (e.key === "Enter" || e.key === " ") {
+            e.preventDefault();
+            onClick();
+          }
+        },
+      }
+    : {};
   return (
     <li
-      onClick={clickable ? onClick : undefined}
+      {...interactiveProps}
+      className={clickable ? "pm-focus" : undefined}
       style={{
         padding: "var(--sp-8) var(--sp-12)",
         borderBottom: "var(--bw-subhair) solid var(--border)",
