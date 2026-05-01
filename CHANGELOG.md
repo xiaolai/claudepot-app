@@ -6,6 +6,67 @@ Versioning scheme:
 - `0.1.x` — beta
 - `1.0.0+` — stable
 
+## 0.0.18 — alpha (2026-05-01)
+
+### Added
+
+- **In-app notification history (bell icon).** Toasts and OS desktop
+  notifications used to be fire-and-forget — only the last dismissed
+  toast echoed in the status bar; OS banners lived only in the OS
+  Notification Center, where macOS aggressively expires them and
+  Linux libnotify often doesn't surface them at all. A new bell icon
+  in the top chrome (between the ⌘K palette hint and the theme
+  toggle) shows an unread badge and opens a popover with the
+  persisted history: filter by kind (info / notice / error), source
+  (in-app / OS / both), time window (1h / 24h / 7d / all), and
+  free-text search; sort newest- or oldest-first; mark-all-read on
+  open; clear via a confirm dialog. Logged entries with click
+  targets route through the same `NotificationTarget` discriminator
+  as fresh banner clicks, so a click in the popover lands the user
+  wherever the live banner would have. Persisted as a 500-entry
+  ring buffer at `~/.claudepot/notifications.json`; corrupt files
+  move aside to `.corrupt` and the log starts empty rather than
+  wedging the bell.
+
+- **Focus-gated notifications now surface in the bell.** Pre-fix,
+  `dispatchOsNotification` dropped the entire dispatch when the
+  window had focus — for usage-threshold and other no-toast surfaces,
+  focused users got nothing (no banner, no toast, no log entry). The
+  dispatcher now writes to the notification log BEFORE the focus /
+  permission / rate-limit gates, so the bell catches every intent
+  regardless of OS delivery. Permission-denied and rate-limited
+  dispatches log too — the user can scroll back through what
+  Claudepot wanted to tell them even when the OS center suppressed
+  the banner.
+
+### Changed
+
+- **Usage-threshold notifications cut from ~10/day to ~1/day per
+  active account.** Four targeted changes: default threshold list
+  trimmed `[80, 90]` → `[90]` (one near-cap nudge per cycle instead
+  of two — add `80` back via Settings if you want the early warning);
+  within-poll coalescing in `apply_crossings` so a 50→95 utilization
+  jump emits one "at 90%" Crossing instead of "at 80%" + "at 90%"
+  back-to-back; per-model 7-day sub-windows (Opus, Sonnet) now
+  opt-in via a new `notify_on_sub_windows` preference (default off —
+  the umbrella `seven_day` window is always checked, and the
+  sub-quotas typically track it for users near cap, so leaving them
+  on tripled the 7-day toast volume for what users perceive as one
+  cap); and focus-suppressed dispatches now log to the bell so
+  focused users don't silently miss crossings. Settings →
+  Notifications gains the `Include 7-day Opus / Sonnet sub-windows`
+  toggle.
+
+### Fixed
+
+- **Tokenized the usage-threshold chip group in Settings.** The
+  chip styles referenced `var(--radius-sm)`, which doesn't exist in
+  `tokens.css` — chips rendered with sharp corners due to the CSS
+  fallback to `0`. Also fixed a raw `gap: 6` literal and a misuse of
+  the `--sp-px` spacing token as a border-width. Chips now render
+  with the documented rounded corners using `var(--r-1)` and
+  `var(--bw-hair)`.
+
 ## 0.0.17 — alpha (2026-05-01)
 
 ### Added
