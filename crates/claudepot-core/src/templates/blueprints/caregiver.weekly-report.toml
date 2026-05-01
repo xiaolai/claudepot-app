@@ -1,0 +1,135 @@
+# Caregiver weekly report
+#
+# Highest-trust template in the gallery. Runs on the dependent's
+# machine, produces a structured JSON report against a typed
+# schema, the Rust side renders to plain-text email and sends to
+# a single caregiver address.
+#
+# The LLM never produces the email body directly. The schema is
+# the privacy boundary.
+
+id              = "caregiver.weekly-report"
+schema_version  = 1
+version         = 1
+name            = "Caregiver weekly report"
+tagline         = "A weekly health summary, emailed to one trusted person."
+description     = """
+Each Sunday, this generates a one-page health report for this
+machine — disk space, backups, pending updates, battery health
+on laptops, login items, new app installs, login attempts, and
+crash counts — and emails it to a single trusted person.
+
+The dependent must affirmatively consent at install time, by
+typing their full name, after seeing a sample of what gets
+sent. The report contains operational health only — no files,
+no browser history, no message contents.
+"""
+category        = "caregiver"
+icon            = "heart-handshake"
+tier            = "ambient"
+
+# Structured-output schema is the privacy boundary; require it.
+capabilities_required = ["tool_use", "structured_output"]
+min_context_tokens    = 16384
+recommended_class     = "fast"
+cost_class            = "low"
+cost_cap_usd          = 0.10
+privacy               = "local"
+consent_required      = true
+fallback_policy       = "alert"
+
+prompt = """
+You are an IT assistant generating a weekly health report for the dependent's
+Mac. The report is sent by email to ONE trusted person who has been granted
+permission by the dependent.
+
+Run these read-only system probes:
+
+1. Disk:        df -h /
+2. Backup:      tmutil status; tmutil latestbackup; brctl status 2>/dev/null
+3. Updates:     softwareupdate -l 2>&1 | head -30; mas outdated 2>/dev/null
+4. Battery:     pmset -g batt; system_profiler SPPowerDataType | grep -A 3 "Cycle"
+5. Login items: osascript -e 'tell app "System Events" to get name of every login item' 2>/dev/null
+6. Apps:        ls -la /Applications/ | head -30
+7. Logins:      last -n 50 2>/dev/null | head -20
+8. Crashes:     ls -1t ~/Library/Logs/DiagnosticReports/ 2>/dev/null | head -10
+
+Now produce a JSON object EXACTLY matching this schema (all
+numeric fields are numbers, not strings):
+
+{
+  "period_start": "<YYYY-MM-DD seven days ago>",
+  "period_end":   "<YYYY-MM-DD today>",
+  "disk": {
+    "used_pct":            <number 0..100>,
+    "free_gb":             <number>,
+    "trend_gb_per_week":   <number or null>
+  },
+  "backups": {
+    "time_machine_last_success": "<ISO datetime or null>",
+    "icloud_in_sync":            <bool>
+  },
+  "updates": {
+    "macos_pending_count":         <integer>,
+    "app_store_pending_count":     <integer>,
+    "security_critical_pending":   <bool>
+  },
+  "battery": {
+    "cycle_count":         <integer>,
+    "max_capacity_pct":    <integer 0..100>
+  } OR null on desktops,
+  "login_items_added": [{"name": "..."}, ...],
+  "apps_installed":    [{"name": "..."}, ...],
+  "login_attempts": {
+    "count":      <integer>,
+    "anomalies":  <integer>
+  },
+  "crashes": {
+    "count":     <integer>,
+    "top_apps":  ["...", ...]
+  },
+  "concerns_to_raise": [
+    "<short, plain-language one-liner. Max 3 entries, each <=200 chars.>"
+  ]
+}
+
+CRITICAL constraints:
+- Every value must be a JSON number / boolean / string / null /
+  array / object as the schema dictates. No prose substituted
+  for numeric fields.
+- `concerns_to_raise` is the ONLY free-form text field, and
+  it's bounded. Use it for things like "disk filling fast" or
+  "backups overdue" — never for file paths, app activity, or
+  user behavior.
+- Do not include browser history, file contents, or any user
+  activity beyond the schema-listed fields.
+
+Save the JSON to CLAUDEPOT_OUTPUT_PATH or
+~/.claudepot/caregiver-reports/<YYYY-MM-DD>.json. The Rust
+side validates against the schema and either renders to email
+or — on validation failure — writes an alert and skips
+sending.
+"""
+
+sample_report = "samples/caregiver-weekly-report.md"
+
+[scope]
+reads                       = "Operational system state only: disk, backups, updates, battery, login items, app inventory, login history (counts), crash counts. Never files, browser history, messages, calendar, or any application contents."
+writes                      = "One JSON file per run at ~/.claudepot/caregiver-reports/. The Rust side renders that JSON to a plain-text email and sends it to the consented recipient."
+could_change                = "Nothing. Read-only on the dependent's machine."
+network                     = "One outbound SMTP send per run, to the email address you consent to."
+requires_full_disk_access   = false
+
+[schedule]
+default        = "0 9 * * 0"
+default_label  = "Each Sunday at 9 AM"
+allowed_shapes = ["weekly", "manual"]
+
+[output]
+path_template = "~/.claudepot/caregiver-reports/{date}.json"
+format        = "json"
+
+[runtime]
+permission_mode = "plan"
+allowed_tools   = ["Bash", "Read", "Write"]
+timeout_secs    = 240

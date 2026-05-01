@@ -136,6 +136,16 @@ const BUNDLED: &[BundledEntry] = &[
         toml: include_str!("blueprints/network.bandwidth-hog.toml"),
         sample_md: Some(include_str!("blueprints/samples/bandwidth-hog.md")),
     },
+    BundledEntry {
+        id: "caregiver.weekly-report",
+        toml: include_str!("blueprints/caregiver.weekly-report.toml"),
+        sample_md: Some(include_str!("blueprints/samples/caregiver-weekly-report.md")),
+    },
+    BundledEntry {
+        id: "caregiver.heartbeat",
+        toml: include_str!("blueprints/caregiver.heartbeat.toml"),
+        sample_md: Some(include_str!("blueprints/samples/caregiver-heartbeat.md")),
+    },
 ];
 
 /// Registry of all bundled blueprints. Built once at startup;
