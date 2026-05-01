@@ -292,3 +292,197 @@ fn render_placeholder_type(t: claudepot_core::templates::PlaceholderType) -> Str
     }
     .to_string()
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Wire-format pinning: the renderer's TypeScript discriminated
+    /// unions hard-code these exact strings (kebab-case for the user-
+    /// facing classes; snake_case for capability tags). If a Rust
+    /// enum gains a variant or a render arm is renamed, this test
+    /// fails before the bug reaches the renderer's `switch` statement.
+    #[test]
+    fn category_renders_kebab_case() {
+        assert_eq!(render_category(Category::ItHealth), "it-health");
+        assert_eq!(render_category(Category::Diagnostics), "diagnostics");
+        assert_eq!(render_category(Category::Housekeeping), "housekeeping");
+        assert_eq!(render_category(Category::Audit), "audit");
+        assert_eq!(render_category(Category::Caregiver), "caregiver");
+        assert_eq!(render_category(Category::Network), "network");
+    }
+
+    #[test]
+    fn tier_renders_kebab_case_on_demand() {
+        // OnDemand is the canonical drift trap: snake_case in Rust,
+        // kebab-case on the wire.
+        assert_eq!(render_tier(Tier::OnDemand), "on-demand");
+        assert_eq!(render_tier(Tier::Ambient), "ambient");
+        assert_eq!(render_tier(Tier::Triggered), "triggered");
+        assert_eq!(render_tier(Tier::Periodic), "periodic");
+    }
+
+    #[test]
+    fn privacy_class_renders_kebab_case() {
+        assert_eq!(render_privacy(PrivacyClass::PrivateCloud), "private-cloud");
+        assert_eq!(render_privacy(PrivacyClass::Local), "local");
+        assert_eq!(render_privacy(PrivacyClass::Any), "any");
+    }
+
+    #[test]
+    fn model_class_renders_kebab_case() {
+        assert_eq!(render_model_class(ModelClass::LocalOk), "local-ok");
+        assert_eq!(render_model_class(ModelClass::Fast), "fast");
+        assert_eq!(render_model_class(ModelClass::Frontier), "frontier");
+    }
+
+    #[test]
+    fn cost_class_renders_lowercase_words() {
+        assert_eq!(render_cost_class(CostClass::Trivial), "trivial");
+        assert_eq!(render_cost_class(CostClass::Low), "low");
+        assert_eq!(render_cost_class(CostClass::Medium), "medium");
+        assert_eq!(render_cost_class(CostClass::High), "high");
+    }
+
+    #[test]
+    fn capability_renders_snake_case() {
+        // Capability tags travel as snake_case to match the
+        // blueprint TOML format and the validator's literal matches.
+        assert_eq!(render_capability(Capability::ToolUse), "tool_use");
+        assert_eq!(render_capability(Capability::LongContext), "long_context");
+        assert_eq!(render_capability(Capability::Vision), "vision");
+        assert_eq!(
+            render_capability(Capability::StructuredOutput),
+            "structured_output",
+        );
+    }
+
+    #[test]
+    fn fallback_policy_renders_snake_case() {
+        assert_eq!(render_fallback(FallbackPolicy::Skip), "skip");
+        assert_eq!(
+            render_fallback(FallbackPolicy::UseDefaultRoute),
+            "use_default_route",
+        );
+        assert_eq!(render_fallback(FallbackPolicy::Alert), "alert");
+    }
+
+    #[test]
+    fn schedule_dto_into_core_accepts_short_lowercase_weekdays() {
+        let s = ScheduleDto::Weekly { day: "mon".into(), time: "09:00".into() };
+        let core = s.into_core().expect("mon should parse");
+        match core {
+            inst::ScheduleDto::Weekly { day, time } => {
+                assert_eq!(day, inst::Weekday::Mon);
+                assert_eq!(time, "09:00");
+            }
+            other => panic!("expected Weekly, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn schedule_dto_into_core_accepts_full_weekdays() {
+        let s = ScheduleDto::Weekly { day: "Sunday".into(), time: "09:00".into() };
+        match s.into_core().unwrap() {
+            inst::ScheduleDto::Weekly { day, .. } => {
+                assert_eq!(day, inst::Weekday::Sun);
+            }
+            _ => panic!("expected Weekly"),
+        }
+    }
+
+    #[test]
+    fn schedule_dto_into_core_accepts_numeric_weekdays() {
+        // The TS picker emits short names today, but accepting "0".."6"
+        // keeps a valid escape hatch for cron-savvy users / future
+        // surfaces. This test pins that intent.
+        let s = ScheduleDto::Weekly { day: "5".into(), time: "07:30".into() };
+        match s.into_core().unwrap() {
+            inst::ScheduleDto::Weekly { day, .. } => {
+                assert_eq!(day, inst::Weekday::Fri);
+            }
+            _ => panic!("expected Weekly"),
+        }
+    }
+
+    #[test]
+    fn schedule_dto_into_core_rejects_unknown_weekday() {
+        let s = ScheduleDto::Weekly { day: "wendsdayy".into(), time: "09:00".into() };
+        let err = s.into_core().expect_err("typo should not parse");
+        assert!(err.contains("unknown weekday"));
+    }
+
+    #[test]
+    fn schedule_dto_serializes_with_tagged_kind() {
+        // Wire format: { "kind": "daily", "time": "08:00" }
+        let s = ScheduleDto::Daily { time: "08:00".into() };
+        let json = serde_json::to_value(&s).unwrap();
+        assert_eq!(json["kind"], "daily");
+        assert_eq!(json["time"], "08:00");
+    }
+
+    #[test]
+    fn schedule_dto_manual_serializes_with_just_kind() {
+        let s = ScheduleDto::Manual;
+        let json = serde_json::to_value(&s).unwrap();
+        assert_eq!(json["kind"], "manual");
+    }
+
+    #[test]
+    fn schedule_shape_renders_lowercase() {
+        use claudepot_core::templates::ScheduleShape::*;
+        assert_eq!(render_schedule_shape(Daily), "daily");
+        assert_eq!(render_schedule_shape(Weekdays), "weekdays");
+        assert_eq!(render_schedule_shape(Weekly), "weekly");
+        assert_eq!(render_schedule_shape(Hourly), "hourly");
+        assert_eq!(render_schedule_shape(Manual), "manual");
+        assert_eq!(render_schedule_shape(Custom), "custom");
+    }
+
+    #[test]
+    fn placeholder_type_renders_lowercase() {
+        use claudepot_core::templates::PlaceholderType::*;
+        assert_eq!(render_placeholder_type(Path), "path");
+        assert_eq!(render_placeholder_type(Text), "text");
+        assert_eq!(render_placeholder_type(Boolean), "boolean");
+        assert_eq!(render_placeholder_type(Number), "number");
+        assert_eq!(render_placeholder_type(List), "list");
+    }
+
+    #[test]
+    fn placeholder_dto_serializes_kind_as_type_field() {
+        // The Rust struct member is `kind` (avoiding the `type`
+        // reserved word) but the wire shape MUST be `"type"` —
+        // pin it.
+        let p = PlaceholderDto {
+            name: "p".into(),
+            label: "P".into(),
+            kind: "path".into(),
+            required: true,
+            default: None,
+            help: None,
+        };
+        let json = serde_json::to_value(&p).unwrap();
+        assert!(json.get("type").is_some(), "wire field must be `type`");
+        assert!(json.get("kind").is_none(), "no `kind` leak on the wire");
+    }
+
+    #[test]
+    fn template_instance_dto_round_trips_with_optional_fields_omitted() {
+        // The renderer omits placeholder_values, route_id, and
+        // name_override when they aren't set. The serde defaults
+        // make those round-trip safe.
+        let json = serde_json::json!({
+            "blueprint_id": "it.morning-health-check",
+            "blueprint_schema_version": 1,
+            "schedule": { "kind": "daily", "time": "08:00" },
+        });
+        let parsed: TemplateInstanceDto = serde_json::from_value(json).unwrap();
+        assert_eq!(parsed.blueprint_id, "it.morning-health-check");
+        assert_eq!(parsed.blueprint_schema_version, 1);
+        assert!(parsed.placeholder_values.is_empty());
+        assert!(parsed.route_id.is_none());
+        assert!(parsed.name_override.is_none());
+        assert!(matches!(parsed.schedule, ScheduleDto::Daily { .. }));
+    }
+}
