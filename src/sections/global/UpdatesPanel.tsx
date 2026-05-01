@@ -839,30 +839,29 @@ export function UpdatesPanel() {
   );
 
   const onCliNotifyToggle = useCallback(
-    (v: boolean) => setSettingsField({ cli_notify_on_available: v }, "Saved"),
+    (v: boolean) => setSettingsField({ cliNotifyOnAvailable: v }, "Saved"),
     [setSettingsField],
   );
   const onCliNotifyOsToggle = useCallback(
-    (v: boolean) => setSettingsField({ cli_notify_os_on_available: v }, "Saved"),
+    (v: boolean) => setSettingsField({ cliNotifyOsOnAvailable: v }, "Saved"),
     [setSettingsField],
   );
   const onDesktopNotifyToggle = useCallback(
-    (v: boolean) => setSettingsField({ desktop_notify_on_available: v }, "Saved"),
+    (v: boolean) => setSettingsField({ desktopNotifyOnAvailable: v }, "Saved"),
     [setSettingsField],
   );
   const onDesktopNotifyOsToggle = useCallback(
     (v: boolean) =>
-      setSettingsField({ desktop_notify_os_on_available: v }, "Saved"),
+      setSettingsField({ desktopNotifyOsOnAvailable: v }, "Saved"),
     [setSettingsField],
   );
   const onCliAutoToggle = useCallback(
-    (v: boolean) =>
-      setSettingsField({ cli_force_update_on_check: v }, "Saved"),
+    (v: boolean) => setSettingsField({ cliForceUpdateOnCheck: v }, "Saved"),
     [setSettingsField],
   );
   const onDesktopAutoToggle = useCallback(
     (v: boolean) =>
-      setSettingsField({ desktop_auto_install_when_quit: v }, "Saved"),
+      setSettingsField({ desktopAutoInstallWhenQuit: v }, "Saved"),
     [setSettingsField],
   );
   const onMinimumVersionClear = useCallback(async () => {
