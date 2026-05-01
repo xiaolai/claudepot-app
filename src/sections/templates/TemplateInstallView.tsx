@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { api } from "../../api";
 import { Button } from "../../components/primitives/Button";
 import { FieldBlock } from "../../components/primitives/modalParts";
@@ -57,6 +57,16 @@ export function TemplateInstallView({
   const [sampleOpen, setSampleOpen] = useState(false);
   const [busy, setBusy] = useState(false);
 
+  // Parent callsites pass inline `(msg) => setToast(...)` lambdas
+  // for onError, so the identity flips on every parent render.
+  // Keep the latest in a ref and depend only on `templateId`,
+  // otherwise the fetch effect would refire mid-load and reset
+  // local state — visible as a flash back to the loading state.
+  const onErrorRef = useRef(onError);
+  useEffect(() => {
+    onErrorRef.current = onError;
+  }, [onError]);
+
   useEffect(() => {
     let cancelled = false;
     setDetails(null);
@@ -77,12 +87,12 @@ export function TemplateInstallView({
         setSchedule(initialSchedule(d.allowed_schedule_shapes, d));
       })
       .catch((e: unknown) => {
-        if (!cancelled) onError(String(e));
+        if (!cancelled) onErrorRef.current(String(e));
       });
     return () => {
       cancelled = true;
     };
-  }, [templateId, onError]);
+  }, [templateId]);
 
   const ready = details !== null && schedule !== null;
 

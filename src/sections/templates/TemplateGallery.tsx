@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { api } from "../../api";
 import { Button } from "../../components/primitives/Button";
 import { Modal } from "../../components/primitives/Modal";
@@ -44,6 +44,17 @@ export function TemplateGallery({
   const [filter, setFilter] = useState<TemplateCategory | "all">("all");
   const [installTarget, setInstallTarget] = useState<string | null>(null);
 
+  // Parent callsites pass inline lambdas, so onError changes
+  // identity on every parent render. Keep the latest in a ref so
+  // the fetch effect only fires on `open` transitions — otherwise
+  // every parent re-render (toast, runsRefreshKey, etc.) reset
+  // installTarget to null and snapped the install view back to
+  // the gallery mid-transition.
+  const onErrorRef = useRef(onError);
+  useEffect(() => {
+    onErrorRef.current = onError;
+  }, [onError]);
+
   useEffect(() => {
     if (!open) return;
     setTemplates(null);
@@ -51,8 +62,8 @@ export function TemplateGallery({
     api
       .templatesList()
       .then(setTemplates)
-      .catch((e: unknown) => onError(String(e)));
-  }, [open, onError]);
+      .catch((e: unknown) => onErrorRef.current(String(e)));
+  }, [open]);
 
   const visible = useMemo(
     () =>
