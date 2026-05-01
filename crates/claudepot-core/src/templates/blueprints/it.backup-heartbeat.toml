@@ -1,0 +1,92 @@
+# Backup heartbeat
+#
+# Daily early-morning check that backups actually ran. Reports
+# silence loudly: a `~/.claudepot/alerts/backup.txt` file appears
+# only when something is overdue. The Reports panel shows the
+# full state every day.
+
+id              = "it.backup-heartbeat"
+schema_version  = 1
+version         = 1
+name            = "Backup heartbeat"
+tagline         = "A one-line check that your backups are running."
+description     = """
+Each morning, this checks Time Machine and iCloud Drive sync state.
+If your last backup is more than 36 hours stale, a one-line note
+lands in ~/.claudepot/alerts/backup.txt — easy to spot in Finder
+or in the Reports panel.
+
+It only reads system state. Backups are not started or modified.
+"""
+category        = "it-health"
+icon            = "shield-check"
+tier            = "ambient"
+
+capabilities_required = ["tool_use"]
+min_context_tokens    = 4096
+recommended_class     = "local-ok"
+cost_class            = "trivial"
+cost_cap_usd          = 0.02
+privacy               = "any"
+consent_required      = false
+fallback_policy       = "skip"
+
+prompt = """
+You are a personal IT assistant verifying that this Mac's backups are healthy.
+
+Run these read-only checks and produce a short markdown report at the configured output path.
+
+1. Time Machine status:
+   - Run: tmutil status
+   - Run: tmutil latestbackup 2>&1
+   Combine into one paragraph: "Last successful backup: <when>; currently <running|idle>."
+   If `tmutil` reports no destination, write: "No Time Machine destination configured."
+
+2. iCloud Drive sync:
+   - Run: brctl status 2>&1 | head -40
+   Look for indicators of an in-progress upload/download or stuck state.
+   Summarize in one sentence: "iCloud Drive is in sync." or describe the issue.
+
+Format the report:
+
+# Backup heartbeat — <YYYY-MM-DD>
+
+**Status:** <one-line headline>
+
+## Time Machine
+## iCloud Drive
+
+If the last successful Time Machine backup is older than 36 hours OR
+iCloud Drive shows a stuck/error state, ALSO write a one-line note to
+~/.claudepot/alerts/backup.txt (overwriting any prior contents). The
+note should start with "[<YYYY-MM-DD>]" and end with the headline
+above. Otherwise leave the alerts file untouched.
+
+Save the report markdown using the Write tool to the path supplied via
+the CLAUDEPOT_OUTPUT_PATH environment variable (or
+~/.claudepot/it-reports/backup-<today>.md if unset). Don't narrate;
+just produce the report.
+"""
+
+sample_report = "samples/backup-heartbeat.md"
+
+[scope]
+reads                       = "Your Mac's Time Machine status and iCloud Drive sync state."
+writes                      = "A daily report at ~/.claudepot/it-reports/backup-<date>.md, plus an alerts/backup.txt note when something looks overdue."
+could_change                = "Nothing. This template never starts or modifies a backup."
+network                     = "None."
+requires_full_disk_access   = false
+
+[schedule]
+default        = "0 7 * * *"
+default_label  = "Each morning at 7 AM"
+allowed_shapes = ["daily", "weekdays", "manual"]
+
+[output]
+path_template = "~/.claudepot/it-reports/backup-{date}.md"
+format        = "markdown"
+
+[runtime]
+permission_mode = "plan"
+allowed_tools   = ["Bash", "Read", "Write"]
+timeout_secs    = 60
