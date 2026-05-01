@@ -33,6 +33,14 @@ pnpm test:coverage                   # React with coverage report
     `.jsonl` transcript, keyed by file_path; `(size, mtime_ns)` is the
     re-parse guard. Owned by `claudepot-core::session_index`. Rebuild
     via Settings → Cleanup or `claudepot session rebuild-index`.
+- One JSON ring buffer also lives in `~/.claudepot/`:
+  - `notifications.json` — ≤ 500 dispatched toast + OS-banner entries
+    surfaced by the WindowChrome bell-icon popover. Owned by
+    `claudepot-core::notification_log`. Capture sites: `pushToast` in
+    `src/hooks/useToasts.ts` and `dispatchOsNotification` in
+    `src/lib/notify.ts`. Corrupt files are moved aside to
+    `notifications.json.corrupt` and the log starts empty — never
+    fatal at boot.
 
 ## Test on test-host
 
@@ -58,7 +66,7 @@ See `dev-docs/implementation-plan.md` for the full plan.
 - Two separate keychain surfaces on macOS (see rules/architecture.md)
 - Account identity = email, resolved by prefix matching
 - GUI is paper-mono shell: custom 38px `WindowChrome` at top
-  (breadcrumb + ⌘K palette hint + theme toggle), 240px `Sidebar`
+  (breadcrumb + ⌘K palette hint + bell + theme toggle), 240px `Sidebar`
   on the left (swap targets + primary nav + live Activity strip
   + synced strip), content column, 24px `StatusBar` at bottom.
   Primitives live in `src/components/primitives/`. Sections live

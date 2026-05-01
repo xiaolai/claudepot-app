@@ -96,9 +96,7 @@ async fn tick(app: &AppHandle) {
     let lease = match gate.try_acquire() {
         Some(l) => l,
         None => {
-            tracing::info!(
-                "updates_watcher: previous cycle still in flight; skipping tick"
-            );
+            tracing::info!("updates_watcher: previous cycle still in flight; skipping tick");
             return;
         }
     };
@@ -166,10 +164,7 @@ async fn tick(app: &AppHandle) {
     }
 
     // Emit so the panel refreshes without polling.
-    if let Err(e) = app.emit(
-        "updates::cycle-complete",
-        UpdatesCycleEvent::from(&outcome),
-    ) {
+    if let Err(e) = app.emit("updates::cycle-complete", UpdatesCycleEvent::from(&outcome)) {
         tracing::warn!(error = %e, "updates_watcher: emit failed");
     }
 }
@@ -224,8 +219,8 @@ fn compute_signals(app: &AppHandle, outcome: &CheckCycleOutcome) -> CycleSignals
         desktop_os_notify = g.settings.desktop.notify_os_on_available;
         cli_already_notified =
             g.cache.cli.last_notified_version.as_deref() == outcome.cli_latest.as_deref();
-        desktop_already_notified = g.cache.desktop.last_notified_version.as_deref()
-            == outcome.desktop_latest.as_deref();
+        desktop_already_notified =
+            g.cache.desktop.last_notified_version.as_deref() == outcome.desktop_latest.as_deref();
 
         if outcome.cli_update_available && cli_os_notify && !cli_already_notified {
             g.cache.cli.last_notified_version = outcome.cli_latest.clone();
@@ -243,9 +238,7 @@ fn compute_signals(app: &AppHandle, outcome: &CheckCycleOutcome) -> CycleSignals
         badge_count += 1;
     }
 
-    let cli_notification = if outcome.cli_update_available
-        && cli_os_notify
-        && !cli_already_notified
+    let cli_notification = if outcome.cli_update_available && cli_os_notify && !cli_already_notified
     {
         Some(NotificationPayload {
             title: "Claude Code update available".into(),
@@ -257,20 +250,18 @@ fn compute_signals(app: &AppHandle, outcome: &CheckCycleOutcome) -> CycleSignals
     } else {
         None
     };
-    let desktop_notification = if outcome.desktop_update_available
-        && desktop_os_notify
-        && !desktop_already_notified
-    {
-        Some(NotificationPayload {
-            title: "Claude Desktop update available".into(),
-            body: match outcome.desktop_latest.as_deref() {
-                Some(v) => format!("Version {v} is available. Quit Desktop to auto-install."),
-                None => "A new version is available.".into(),
-            },
-        })
-    } else {
-        None
-    };
+    let desktop_notification =
+        if outcome.desktop_update_available && desktop_os_notify && !desktop_already_notified {
+            Some(NotificationPayload {
+                title: "Claude Desktop update available".into(),
+                body: match outcome.desktop_latest.as_deref() {
+                    Some(v) => format!("Version {v} is available. Quit Desktop to auto-install."),
+                    None => "A new version is available.".into(),
+                },
+            })
+        } else {
+            None
+        };
 
     CycleSignals {
         badge_count,

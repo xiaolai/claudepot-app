@@ -1203,9 +1203,16 @@ function NotificationsPane({
   // where the toggle briefly shows "off" for a feature that defaults on.
   const [notifyWaiting, setNotifyWaiting] = useState(true);
   // Mirror of preferences.notify_on_usage_thresholds. Default mirrors
-  // the Rust default ([80, 90]) so the chip group renders sensibly
-  // before the first preferencesGet round-trips.
-  const [usageThresholds, setUsageThresholds] = useState<number[]>([80, 90]);
+  // the Rust default ([90]) so the chip group renders sensibly before
+  // the first preferencesGet round-trips. Pre-2026-05 the default was
+  // [80, 90]; trimmed to one threshold to cut toast volume in half
+  // without removing the user's ability to add 80 back via this row.
+  const [usageThresholds, setUsageThresholds] = useState<number[]>([90]);
+  // Mirror of preferences.notify_on_sub_windows. Default false to
+  // match Rust — the per-model 7-day sub-windows usually track the
+  // umbrella for users near cap, so leaving them on triples the
+  // 7-day toast volume for what most users experience as one cap.
+  const [notifySubWindows, setNotifySubWindows] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -1221,6 +1228,7 @@ function NotificationsPane({
         setNotifyOpDone(p.notify_on_op_done);
         setNotifyWaiting(p.notify_on_waiting);
         setUsageThresholds(p.notify_on_usage_thresholds ?? []);
+        setNotifySubWindows(p.notify_on_sub_windows);
         setLoaded(true);
       })
       .catch((e) => {
@@ -1310,6 +1318,20 @@ function NotificationsPane({
     [usageThresholds, pushToast],
   );
 
+  const toggleSubWindows = useCallback(
+    async (next: boolean) => {
+      const prev = notifySubWindows;
+      setNotifySubWindows(next);
+      try {
+        await api.preferencesSetNotifications({ onSubWindows: next });
+      } catch (e) {
+        setNotifySubWindows(prev);
+        pushToast("error", `Toggle failed: ${e}`);
+      }
+    },
+    [notifySubWindows, pushToast],
+  );
+
   const setStuckMin = useCallback(
     async (raw: string) => {
       const parsed = raw === "" ? null : Number(raw);
@@ -1355,7 +1377,7 @@ function NotificationsPane({
         </Row>
       </SettingsGroup>
 
-      <SettingsGroup desc="OS notifications when a live session or long-running operation crosses one of these thresholds. 'Waiting for you' and the usage thresholds (80% / 90%) default on; the rest are opt-in. OS notifications only fire when the Claudepot window is unfocused.">
+      <SettingsGroup desc="OS notifications when a live session or long-running operation crosses one of these thresholds. 'Waiting for you' and the 90% usage threshold default on; the rest are opt-in. OS notifications only fire when the Claudepot window is unfocused — the bell icon in the top bar shows the in-app history either way.">
         <NotificationPermissionRow pushToast={pushToast} />
         <Row
           label="Alert on error burst"
@@ -1422,12 +1444,18 @@ function NotificationsPane({
         </Row>
         <Row
           label="Alert at usage thresholds"
-          hint="Fires once per (5h / 7d window × threshold) per reset cycle for the CLI-active account. Polled every 5 min. Click any chip to toggle; empty = feature off."
+          hint="Fires once per (5h / 7d window × threshold) per reset cycle for the CLI-active account. Polled every 5 min. When utilization jumps past two thresholds in one poll, only the higher one fires. Click any chip to toggle; empty = feature off."
         >
           <UsageThresholdChips
             thresholds={usageThresholds}
             onToggle={toggleUsageThreshold}
           />
+        </Row>
+        <Row
+          label="Include 7-day Opus / Sonnet sub-windows"
+          hint="The umbrella 7-day window is always checked. Per-model sub-quotas usually track it for users near cap, so leaving them off avoids triple-firing for what reads as one cap. Turn on if you watch each model's quota separately."
+        >
+          <Toggle on={notifySubWindows} onChange={toggleSubWindows} />
         </Row>
         <Row
           label="Alert when long operations complete"
