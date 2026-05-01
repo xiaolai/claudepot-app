@@ -155,17 +155,15 @@ pub async fn templates_install(
 // ---------- Helpers ----------
 
 /// Build a [`RouteSummaryDto`] for one route, deriving capability
-/// and privacy compatibility flags from the templates module's
-/// hint table.
+/// and privacy compatibility flags. Honors the Route's
+/// `capabilities_override` (the enforcement boundary) before
+/// falling back to the templates module's default-by-prefix hint
+/// table.
 fn route_summary(rt: &Route, bp: &Blueprint) -> RouteSummaryDto {
-    let caps = tpl::default_capabilities_for(&rt.model);
+    let caps = effective_capabilities(rt);
     let missing = caps.missing(&bp.capabilities_required);
     let is_local = is_local_route(rt);
-    // Until `is_private_cloud` lands on the Route record, default
-    // to false. PrivateCloud-class templates will not surface
-    // user-marked routes yet — design choice until the routes
-    // module exposes the flag.
-    let is_private_cloud = false;
+    let is_private_cloud = rt.is_private_cloud;
 
     let (is_capable, reason) = match (
         bp.privacy,
@@ -205,6 +203,24 @@ fn route_summary(rt: &Route, bp: &Blueprint) -> RouteSummaryDto {
         is_capable,
         ineligibility_reason: reason,
     }
+}
+
+/// Resolve a route's effective capabilities. The Route's
+/// `capabilities_override` is the enforcement boundary; when
+/// absent, fall back to the templates module's default-by-prefix
+/// hint table.
+fn effective_capabilities(rt: &Route) -> tpl::CapabilitySet {
+    if let Some(strs) = &rt.capabilities_override {
+        let mut out = std::collections::HashSet::new();
+        for s in strs {
+            // Parse via the same serde rename used by Capability.
+            if let Ok(c) = serde_json::from_value::<tpl::Capability>(serde_json::json!(s)) {
+                out.insert(c);
+            }
+        }
+        return tpl::CapabilitySet(out);
+    }
+    tpl::default_capabilities_for(&rt.model)
 }
 
 /// Derive `is_local` from a route's gateway URL when the
