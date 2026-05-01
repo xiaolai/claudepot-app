@@ -55,6 +55,42 @@ Automated login for setting up CC state on test-host:
 ssh joker@192.0.2.1 "security unlock-keychain -p <password>; bash /tmp/claude-login-local.sh <email>"
 ```
 
+## Release validation (Linux + Windows)
+
+CI's clippy + Windows-test gates run on Linux/Windows runners that
+local macOS can't reproduce. A four-round cascade of "fix-and-pray"
+clippy commits in v0.0.18 prompted this setup:
+
+- **`spark01`** (legio network, Ubuntu aarch64) — runs the same
+  command as CI's `Format / Clippy (Linux)` job:
+  ```bash
+  cargo clippy -p claudepot-core -p claudepot-cli -- -D warnings
+  ```
+  Catches new-clippy-version lints (1.95 added `io_other_error`,
+  `manual_pattern_char_comparison`) and `cfg(target_os = "macos")`-only
+  items that the macOS-local clippy never sees.
+
+- **`jokershp`** (legio network, Win 11 MSVC x86_64) — runs the
+  same compile-step as CI's `Tests (windows-latest)` job:
+  ```bash
+  cargo test -p claudepot-core -p claudepot-cli --no-run
+  ```
+  Catches Windows-only compile errors (e.g. types referenced in
+  `cfg(target_os = "windows")` arms but cfg-gated to macOS only).
+
+A `pre-push` hook at `.git/hooks/pre-push` (per-clone, not committed
+because git refuses to track `.git/`) auto-runs both validators
+against the pushed SHA when — and only when — the push contains a
+`refs/tags/v*` release tag. Branch pushes skip validation. Failure
+aborts the push and prints the recovery recipe (delete tag, fix
+locally, re-tag, re-push).
+
+The hook source lives in this repo's history at any commit that
+touched `dev-docs/release-validation.md` if it ever gets written
+down; otherwise it's reconstructable from this CLAUDE.md section.
+Bypass with `git push --no-verify` if a host is unreachable, but
+note CI is unforgiving about red main.
+
 ## Architecture
 
 See `dev-docs/implementation-plan.md` for the full plan.
