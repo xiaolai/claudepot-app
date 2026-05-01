@@ -7,11 +7,17 @@
 //! "Anthropic" before touching `/Applications`. Backup-and-replace
 //! via `ditto` so a botched copy is recoverable.
 
-use crate::updates::detect::{
-    detect_desktop_install, is_desktop_running, DesktopInstall, DesktopSource,
-};
+// Imports split by platform — `DesktopSource`, `DesktopRelease`,
+// and `fetch_desktop_latest` are only consumed inside the macOS
+// branch of `install_desktop_latest`, so on Linux they are
+// "unused import" lints (= errors under CI's -D warnings).
+use crate::updates::detect::{detect_desktop_install, is_desktop_running, DesktopInstall};
+#[cfg(target_os = "macos")]
+use crate::updates::detect::DesktopSource;
 use crate::updates::errors::{Result, UpdateError};
-use crate::updates::version::{fetch_desktop_latest, DesktopRelease};
+use crate::updates::version::DesktopRelease;
+#[cfg(target_os = "macos")]
+use crate::updates::version::fetch_desktop_latest;
 use std::path::Path;
 use std::process::Stdio;
 use tokio::process::Command;
@@ -129,6 +135,10 @@ async fn winget_upgrade_cask() -> Result<DesktopUpdateOutcome> {
     })
 }
 
+// Only the macOS routing branch invokes brew_upgrade_cask; on
+// Linux the whole `match` arm is cfg'd away, so the helper would
+// be dead code without this gate.
+#[cfg(target_os = "macos")]
 async fn brew_upgrade_cask() -> Result<DesktopUpdateOutcome> {
     let fut = Command::new("brew")
         .args(["upgrade", "--cask", "claude"])
