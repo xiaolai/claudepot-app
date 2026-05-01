@@ -26,6 +26,9 @@ serde_json = "1"
 # TOML — bundled template blueprints. Author-friendly multi-line
 # strings for prompts and descriptions; round-trips via serde.
 toml = { version = "0.8", default-features = false, features = ["parse"] }
+# SMTP — caregiver weekly-report email delivery. Pure-Rust
+# rustls, no openssl. Tokio runtime.
+lettre = { version = "0.11", default-features = false, features = ["smtp-transport", "rustls-tls", "tokio1-rustls-tls", "tokio1", "builder"] }
 
 # Time
 chrono = { version = "0.4", features = ["serde"] }

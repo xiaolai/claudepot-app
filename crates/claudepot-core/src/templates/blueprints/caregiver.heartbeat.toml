@@ -1,0 +1,70 @@
+# Caregiver heartbeat
+#
+# Companion to the weekly report. Sends a one-line "still alive"
+# email weekly so silence (when the dependent's machine is
+# offline or off) is distinguishable from "this week was fine."
+#
+# Shipped, installed, and consented as ONE bundle with
+# caregiver.weekly-report — see consent install flow.
+
+id              = "caregiver.heartbeat"
+schema_version  = 1
+version         = 1
+name            = "Caregiver heartbeat"
+tagline         = "A weekly 'still alive' ping so silence means a real problem."
+description     = """
+Companion to the caregiver weekly report. Sends a one-line
+heartbeat email weekly. If the caregiver receives a heartbeat
+but no report (or vice versa), they know something is off.
+
+Bundled with the weekly report — single consent covers both.
+"""
+category        = "caregiver"
+icon            = "heart-pulse"
+tier            = "ambient"
+
+capabilities_required = ["tool_use", "structured_output"]
+min_context_tokens    = 4096
+recommended_class     = "local-ok"
+cost_class            = "trivial"
+cost_cap_usd          = 0.02
+privacy               = "local"
+consent_required      = true
+fallback_policy       = "alert"
+
+prompt = """
+You are an IT assistant generating a heartbeat ping. Output JSON
+exactly:
+
+{
+  "alive": true,
+  "machine_label": "<the dependent_label from the install consent>",
+  "now": "<ISO 8601 timestamp>"
+}
+
+Save to CLAUDEPOT_OUTPUT_PATH or
+~/.claudepot/caregiver-reports/heartbeat-<date>.json.
+"""
+
+sample_report = "samples/caregiver-heartbeat.md"
+
+[scope]
+reads                       = "Nothing beyond the current time."
+writes                      = "One tiny JSON heartbeat per run. Rust side mails a one-line plain-text email."
+could_change                = "Nothing."
+network                     = "One small outbound SMTP send per run."
+requires_full_disk_access   = false
+
+[schedule]
+default        = "0 9 * * 6"
+default_label  = "Each Saturday at 9 AM"
+allowed_shapes = ["weekly", "manual"]
+
+[output]
+path_template = "~/.claudepot/caregiver-reports/heartbeat-{date}.json"
+format        = "json"
+
+[runtime]
+permission_mode = "plan"
+allowed_tools   = ["Bash", "Read", "Write"]
+timeout_secs    = 30
