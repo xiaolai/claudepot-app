@@ -1550,7 +1550,7 @@ function UsageThresholdChips({
   onToggle: (t: number) => void;
 }) {
   return (
-    <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+    <div style={{ display: "flex", gap: "var(--sp-6)", flexWrap: "wrap" }}>
       {USAGE_THRESHOLD_CHOICES.map((t) => {
         const on = thresholds.includes(t);
         return (
@@ -1564,8 +1564,8 @@ function UsageThresholdChips({
               fontFamily: "inherit",
               fontSize: "var(--fs-xs)",
               fontVariantNumeric: "tabular-nums",
-              borderRadius: "var(--radius-sm)",
-              border: "var(--sp-px) solid var(--line)",
+              borderRadius: "var(--r-1)",
+              border: "var(--bw-hair) solid var(--line)",
               background: on ? "var(--accent-soft)" : "transparent",
               color: on ? "var(--accent-ink)" : "var(--fg)",
               cursor: "pointer",
