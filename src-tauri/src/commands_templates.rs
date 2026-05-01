@@ -74,6 +74,39 @@ pub async fn templates_sample_report(id: String) -> Result<String, String> {
         .ok_or_else(|| format!("no sample report bundled for template id: {id}"))
 }
 
+/// Read a generated report file. Scoped to `~/.claudepot/` —
+/// any path outside that directory is rejected. Caps file size
+/// at 4 MB to bound the wire payload.
+#[tauri::command]
+pub async fn templates_read_report(path: String) -> Result<String, String> {
+    use std::path::PathBuf;
+    let claudepot_root = dirs::home_dir()
+        .ok_or_else(|| "could not resolve home dir".to_string())?
+        .join(".claudepot");
+    let target = PathBuf::from(&path);
+    let canonical_target = target
+        .canonicalize()
+        .map_err(|e| format!("cannot resolve {path}: {e}"))?;
+    let canonical_root = claudepot_root
+        .canonicalize()
+        .unwrap_or(claudepot_root.clone());
+    if !canonical_target.starts_with(&canonical_root) {
+        return Err(format!(
+            "report path is outside ~/.claudepot/: {}",
+            canonical_target.display()
+        ));
+    }
+    let meta = std::fs::metadata(&canonical_target)
+        .map_err(|e| format!("stat {path}: {e}"))?;
+    if !meta.is_file() {
+        return Err(format!("not a file: {path}"));
+    }
+    if meta.len() > 4 * 1024 * 1024 {
+        return Err(format!("report is too large to display: {} bytes", meta.len()));
+    }
+    std::fs::read_to_string(&canonical_target).map_err(|e| format!("read {path}: {e}"))
+}
+
 #[tauri::command]
 pub async fn templates_capable_routes(id: String) -> Result<Vec<RouteSummaryDto>, String> {
     let r = registry()?;

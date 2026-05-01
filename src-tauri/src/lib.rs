@@ -641,6 +641,7 @@ pub fn run() {
             commands_templates::templates_sample_report,
             commands_templates::templates_capable_routes,
             commands_templates::templates_install,
+            commands_templates::templates_read_report,
             commands_notification::notification_activate_host_for_session,
             commands_notification::notification_log_append,
             commands_notification::notification_log_list,
