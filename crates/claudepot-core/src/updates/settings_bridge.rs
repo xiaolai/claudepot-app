@@ -69,10 +69,11 @@ fn write_root(root: &Map<String, Value>) -> Result<()> {
     let tmp = tempfile::NamedTempFile::new_in(parent)?;
     std::fs::write(tmp.path(), body)?;
     tmp.persist(&p).map_err(|e| {
-        UpdateError::Io(std::io::Error::new(
-            std::io::ErrorKind::Other,
-            format!("settings_bridge: persist {}: {}", p.display(), e),
-        ))
+        UpdateError::Io(std::io::Error::other(format!(
+            "settings_bridge: persist {}: {}",
+            p.display(),
+            e
+        )))
     })?;
     Ok(())
 }

@@ -232,6 +232,11 @@ pub async fn updates_settings_get(
 /// Without that, a settings toggle could land an in-memory write
 /// while the watcher's older snapshot is still being written to
 /// disk — losing the toggle.
+// One arg per setting — Tauri commands deserialize each named arg
+// from the JS side, so a struct here would force the renderer to
+// nest the patch one level deeper. Same rationale as
+// preferences_set_notifications; allow per-function.
+#[allow(clippy::too_many_arguments)]
 #[tauri::command]
 pub async fn updates_settings_set(
     state: tauri::State<'_, UpdateStateMutex>,

@@ -75,6 +75,12 @@ pub async fn preferences_set_activity(
 /// Set the `notify_*` preference block in one call. Same "optional
 /// per field" shape as `preferences_set_activity` — callers send
 /// only the fields they changed.
+//
+// One arg per preference — Tauri commands deserialize each named
+// arg from the JS side, so bundling these into a struct would mean
+// every JS caller has to send one nested object instead of a flat
+// patch. Keep the flat shape; allow the lint per-function.
+#[allow(clippy::too_many_arguments)]
 #[tauri::command]
 pub async fn preferences_set_notifications(
     state: tauri::State<'_, crate::preferences::PreferencesState>,
