@@ -30,6 +30,7 @@
 pub mod blueprint;
 pub mod capabilities;
 pub mod error;
+pub mod instantiate;
 pub mod registry;
 
 pub use blueprint::{
@@ -40,4 +41,8 @@ pub use blueprint::{
 };
 pub use capabilities::{default_capabilities_for, CapabilitySet};
 pub use error::TemplateError;
+pub use instantiate::{
+    instantiate, schedule_to_cron, PlaceholderValue, ResolvedAutomation, ResolvedSchedule,
+    ScheduleDto, TemplateInstance, Weekday,
+};
 pub use registry::TemplateRegistry;
