@@ -22,6 +22,7 @@ use claudepot_core::routes::{Route, RouteProvider, RouteStore};
 use claudepot_core::templates::apply::{
     apply_selected, sidecar, ApplyReceipt, PendingChanges,
 };
+use claudepot_core::templates::routing::{evaluate, RoutingRules, RoutingStore, Suggestion};
 use claudepot_core::templates::{
     self as tpl, Blueprint, PrivacyClass, TemplateInstance, TemplateRegistry,
 };
@@ -138,6 +139,72 @@ pub async fn templates_apply_pending(
 
     let receipt = apply_selected(&pending, apply, &selected_ids).await;
     Ok(receipt)
+}
+
+// ---------- Routing rules ----------
+
+#[tauri::command]
+pub async fn routing_rules_get() -> Result<RoutingRules, String> {
+    let store = RoutingStore::open().map_err(|e| format!("routing rules open: {e}"))?;
+    Ok(store.rules().clone())
+}
+
+#[tauri::command]
+pub async fn routing_rules_set(rules: RoutingRules) -> Result<(), String> {
+    let mut store = RoutingStore::open().map_err(|e| format!("routing rules open: {e}"))?;
+    store.replace(rules);
+    store.save().map_err(|e| format!("routing rules save: {e}"))?;
+    Ok(())
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct RoutingSuggestionDto {
+    pub kind: String,
+    pub route_id: Option<String>,
+}
+
+#[tauri::command]
+pub async fn routing_rules_evaluate_for(
+    blueprint_id: String,
+) -> Result<RoutingSuggestionDto, String> {
+    let r = registry()?;
+    let bp = r
+        .get(&blueprint_id)
+        .ok_or_else(|| format!("unknown template id: {blueprint_id}"))?;
+    let store = RoutingStore::open().map_err(|e| format!("routing rules open: {e}"))?;
+    let route_store = RouteStore::open().map_err(|e| format!("routes store open: {e}"))?;
+    let routes: Vec<&Route> = route_store.list().iter().collect();
+    let privacy_str = match bp.privacy {
+        PrivacyClass::Local => "local",
+        PrivacyClass::PrivateCloud => "private_cloud",
+        PrivacyClass::Any => "any",
+    };
+    let category_str = format!("{:?}", bp.category).to_lowercase();
+    let cost_str = format!("{:?}", bp.cost_class).to_lowercase();
+
+    let suggestion = evaluate(
+        store.rules(),
+        privacy_str,
+        &category_str,
+        &cost_str,
+        &bp.id().0,
+        &routes,
+        &|r| is_local_route(r),
+        &|r| {
+            let caps = effective_capabilities(r);
+            caps.contains_all(&bp.capabilities_required)
+        },
+    );
+    Ok(match suggestion {
+        Suggestion::Route(id) => RoutingSuggestionDto {
+            kind: "route".into(),
+            route_id: Some(id),
+        },
+        Suggestion::DefaultClaude => RoutingSuggestionDto {
+            kind: "default_claude".into(),
+            route_id: None,
+        },
+    })
 }
 
 /// Read a generated report file. Scoped to `~/.claudepot/` —

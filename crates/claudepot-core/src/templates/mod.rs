@@ -33,6 +33,7 @@ pub mod capabilities;
 pub mod error;
 pub mod instantiate;
 pub mod registry;
+pub mod routing;
 
 pub use blueprint::{
     ApplyConfig, ApplyOperation, ApplyScope, Blueprint, Capability, Category, CostClass,
