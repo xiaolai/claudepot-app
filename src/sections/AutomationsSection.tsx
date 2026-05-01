@@ -16,6 +16,7 @@ import {
   EditAutomationModal,
 } from "./automations/AutomationModals";
 import { AutomationCard } from "./automations/AutomationCard";
+import { TemplateGallery } from "./templates/TemplateGallery";
 
 /**
  * Automations section — define + run scheduled `claude -p` jobs.
@@ -45,6 +46,7 @@ export function AutomationsSection() {
   } | null>(null);
   const [busyIds, setBusyIds] = useState<Set<string>>(new Set());
   const [showAdd, setShowAdd] = useState(false);
+  const [showGallery, setShowGallery] = useState(false);
   const [editTarget, setEditTarget] =
     useState<AutomationSummaryDto | null>(null);
   const [removeTarget, setRemoveTarget] =
@@ -194,6 +196,13 @@ export function AutomationsSection() {
               Refresh
             </Button>
             <Button
+              variant="ghost"
+              glyph={NF.copy}
+              onClick={() => setShowGallery(true)}
+            >
+              From template…
+            </Button>
+            <Button
               variant="solid"
               glyph={NF.plus}
               onClick={() => setShowAdd(true)}
@@ -277,6 +286,25 @@ export function AutomationsSection() {
           setToast({ kind: "info", msg: "Automation created." });
         }}
         onError={(msg) => setToast({ kind: "error", msg })}
+      />
+
+      <TemplateGallery
+        open={showGallery}
+        onClose={() => setShowGallery(false)}
+        onInstalled={() => {
+          refresh();
+          setToast({ kind: "info", msg: "Template installed." });
+        }}
+        onError={(msg) => setToast({ kind: "error", msg })}
+        onOpenThirdParties={() => {
+          // Best-effort deep-link: dispatch a custom event the
+          // sidebar/router listens to. If nothing handles it,
+          // close the gallery so the user can navigate manually.
+          window.dispatchEvent(new CustomEvent("claudepot:nav", {
+            detail: { section: "third-parties" },
+          }));
+          setShowGallery(false);
+        }}
       />
 
       <EditAutomationModal
