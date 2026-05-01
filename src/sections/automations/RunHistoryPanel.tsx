@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { api } from "../../api";
-import type { AutomationRunDto } from "../../types";
+import type { AutomationRunDto, OutputArtifactDto } from "../../types";
+import { ReportViewer } from "./reports/ReportViewer";
 
 interface Props {
   automationId: string;
@@ -8,9 +9,15 @@ interface Props {
   refreshKey: number;
 }
 
+function reportArtifact(run: AutomationRunDto): OutputArtifactDto | null {
+  const arts = run.output_artifacts ?? [];
+  return arts.find((a) => a.kind === "report") ?? null;
+}
+
 export function RunHistoryPanel({ automationId, refreshKey }: Props) {
   const [runs, setRuns] = useState<AutomationRunDto[] | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [reportPath, setReportPath] = useState<string | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -65,7 +72,7 @@ export function RunHistoryPanel({ automationId, refreshKey }: Props) {
       <div
         style={{
           display: "grid",
-          gridTemplateColumns: "auto 1fr auto auto auto auto",
+          gridTemplateColumns: "auto 1fr auto auto auto auto auto",
           gap: "var(--sp-8)",
           color: "var(--fg-3)",
           paddingBottom: "var(--sp-4)",
@@ -78,22 +85,25 @@ export function RunHistoryPanel({ automationId, refreshKey }: Props) {
         <span>cost</span>
         <span>turns</span>
         <span>trigger</span>
+        <span>report</span>
       </div>
       {runs.map((run) => {
         const ok = !run.result?.is_error && run.exit_code === 0;
         const symbol = ok ? "ok" : "ERR";
+        const report = reportArtifact(run);
         return (
           <div
             key={run.id}
             style={{
               display: "grid",
-              gridTemplateColumns: "auto 1fr auto auto auto auto",
+              gridTemplateColumns: "auto 1fr auto auto auto auto auto",
               gap: "var(--sp-8)",
               padding: "var(--sp-2) 0",
               color: ok ? "var(--fg-2)" : "var(--danger)",
+              alignItems: "center",
             }}
           >
-            <span style={{ width: "32px" }}>{symbol}</span>
+            <span style={{ width: "tokens.sp[32]" }}>{symbol}</span>
             <span style={{ color: "var(--fg-2)" }}>
               {fmtIso(run.started_at)}
             </span>
@@ -101,9 +111,35 @@ export function RunHistoryPanel({ automationId, refreshKey }: Props) {
             <span>{fmtCost(run.result?.total_cost_usd ?? null)}</span>
             <span>{run.result?.num_turns ?? "—"}</span>
             <span style={{ color: "var(--fg-3)" }}>{run.trigger_kind}</span>
+            <span>
+              {report ? (
+                <button
+                  type="button"
+                  onClick={() => setReportPath(report.path)}
+                  style={{
+                    background: "none",
+                    border: "none",
+                    color: "var(--accent)",
+                    textDecoration: "underline",
+                    cursor: "pointer",
+                    font: "inherit",
+                    padding: 0,
+                  }}
+                >
+                  report
+                </button>
+              ) : (
+                <span style={{ color: "var(--fg-3)" }}>—</span>
+              )}
+            </span>
           </div>
         );
       })}
+
+      <ReportViewer
+        path={reportPath}
+        onClose={() => setReportPath(null)}
+      />
     </div>
   );
 }
