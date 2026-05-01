@@ -75,7 +75,7 @@ export function SessionIndexRebuild({
             onClick={() => setConfirming(true)}
             disabled={busy}
           >
-            Rebuild session index
+            Rebuild
           </Button>
         </div>
       </section>
