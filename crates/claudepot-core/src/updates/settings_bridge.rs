@@ -136,7 +136,10 @@ pub fn write_channel(channel: Option<&str>) -> Result<()> {
     let mut root = read_root()?;
     match channel {
         Some(c) => {
-            root.insert("autoUpdatesChannel".to_string(), Value::String(c.to_string()));
+            root.insert(
+                "autoUpdatesChannel".to_string(),
+                Value::String(c.to_string()),
+            );
         }
         None => {
             root.remove("autoUpdatesChannel");
@@ -284,11 +287,7 @@ mod tests {
     fn write_channel_preserves_other_keys() {
         with_temp_config(|| {
             let path = paths::claude_config_dir().join("settings.json");
-            std::fs::write(
-                &path,
-                r#"{"theme":"dark","permissions":{"allow":["x"]}}"#,
-            )
-            .unwrap();
+            std::fs::write(&path, r#"{"theme":"dark","permissions":{"allow":["x"]}}"#).unwrap();
             write_channel(Some("stable")).unwrap();
             let body: Value =
                 serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
