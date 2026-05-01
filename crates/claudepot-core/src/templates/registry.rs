@@ -61,6 +61,26 @@ const BUNDLED: &[BundledEntry] = &[
         toml: include_str!("blueprints/diag.disk-full.toml"),
         sample_md: Some(include_str!("blueprints/samples/disk-full.md")),
     },
+    BundledEntry {
+        id: "audit.stale-apps",
+        toml: include_str!("blueprints/audit.stale-apps.toml"),
+        sample_md: Some(include_str!("blueprints/samples/stale-apps.md")),
+    },
+    BundledEntry {
+        id: "audit.login-items",
+        toml: include_str!("blueprints/audit.login-items.toml"),
+        sample_md: Some(include_str!("blueprints/samples/login-items.md")),
+    },
+    BundledEntry {
+        id: "audit.browser-extensions",
+        toml: include_str!("blueprints/audit.browser-extensions.toml"),
+        sample_md: Some(include_str!("blueprints/samples/browser-extensions.md")),
+    },
+    BundledEntry {
+        id: "audit.cache-cleanup",
+        toml: include_str!("blueprints/audit.cache-cleanup.toml"),
+        sample_md: Some(include_str!("blueprints/samples/cache-cleanup.md")),
+    },
 ];
 
 /// Registry of all bundled blueprints. Built once at startup;
