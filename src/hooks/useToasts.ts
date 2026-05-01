@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
+import { invoke } from "@tauri-apps/api/core";
 
 export type Toast = {
   id: number;
@@ -163,6 +164,23 @@ export function useToasts() {
           dedupeKey: opts?.dedupeKey,
         },
       ]);
+      // Persist into the notification-log ring buffer so the
+      // bell-icon popover can show this toast after it auto-dismisses.
+      // Fire-and-forget — log writes are advisory and must never
+      // affect the in-app surface. The Rust handler tolerates being
+      // called with a no-op state (the boot-fallback path) and simply
+      // returns Err that we discard here.
+      void invoke("notification_log_append", {
+        args: {
+          source: "toast",
+          kind,
+          title: text,
+          body: "",
+          target: null,
+        },
+      }).catch(() => {
+        /* swallow — log persistence is advisory, never load-bearing */
+      });
       // Auto-dismiss policy:
       //   onUndo  → short (undoMs, default 3 s) — undo is an action
       //             commit timer, not a notification.
