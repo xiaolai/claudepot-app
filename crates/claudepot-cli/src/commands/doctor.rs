@@ -21,7 +21,10 @@ pub async fn run(ctx: &AppContext) -> Result<()> {
                 "desktop_version": report.desktop_version,
                 "beta_header": report.beta_header,
                 "api_reachable": matches!(report.api_status, doctor_service::ApiStatus::Reachable),
-                "proxy_source": report.proxy_source,
+                // Display string is sanitized: PAC URLs have userinfo
+                // redacted before they reach this surface. Safe for logs
+                // and diagnostics tickets.
+                "proxy_source": report.proxy_source.to_string(),
                 "accounts": report.account_health.iter().map(|a| {
                     serde_json::json!({
                         "email": a.email,
@@ -111,8 +114,14 @@ pub async fn run(ctx: &AppContext) -> Result<()> {
     // Beta header
     ok("Beta header", &report.beta_header);
 
-    // Proxy
-    ok("Proxy", &report.proxy_source);
+    // Proxy — PAC-unsupported is the one state where the user has
+    // configured something but Claudepot can't honour it; everything
+    // else (env var, system HTTPS/SOCKS, or genuinely none) is healthy.
+    if report.proxy_source.is_warning() {
+        warn("Proxy", &report.proxy_source.to_string());
+    } else {
+        ok("Proxy", &report.proxy_source.to_string());
+    }
 
     // API
     match &report.api_status {

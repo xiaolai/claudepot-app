@@ -18,7 +18,7 @@ license = "ISC"
 tokio = { version = "1", features = ["full"] }
 
 # HTTP
-reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls", "socks"] }
 
 # Serialization
 serde = { version = "1", features = ["derive"] }
