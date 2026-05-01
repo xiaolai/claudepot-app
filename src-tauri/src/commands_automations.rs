@@ -106,9 +106,19 @@ fn build_automation_from_create(dto: AutomationCreateDto) -> Result<Automation, 
         json_schema: dto.json_schema,
         bare: dto.bare,
         extra_env: dto.extra_env,
-        trigger: Trigger::Cron {
-            cron: dto.cron,
-            timezone: dto.timezone,
+        trigger: match dto.trigger_kind.as_deref() {
+            // Templates with `default_schedule = "manual"` arrive
+            // with `trigger_kind = "manual"` and an empty `cron`
+            // string from the install path. The cron field is
+            // ignored on this path.
+            Some("manual") => Trigger::Manual,
+            // Default = "cron" — same as the historical shape;
+            // an unspecified `trigger_kind` keeps the existing
+            // call sites unchanged.
+            _ => Trigger::Cron {
+                cron: dto.cron,
+                timezone: dto.timezone,
+            },
         },
         platform_options: PlatformOptions {
             wake_to_run: dto.platform_options.wake_to_run,
@@ -119,6 +129,7 @@ fn build_automation_from_create(dto: AutomationCreateDto) -> Result<Automation, 
         created_at: now,
         updated_at: now,
         claudepot_managed: true,
+        template_id: dto.template_id.clone(),
     })
 }
 
@@ -168,8 +179,12 @@ fn build_patch_from_update(
     // build a Cron trigger only when at least one of them changes,
     // preserving the un-supplied side from the existing record.
     let trigger = if dto.cron.is_some() || dto.timezone.is_some() {
+        // Pull existing cron/tz when the existing trigger is Cron;
+        // when transitioning from Manual, defaults are empty and
+        // the patch must supply a usable cron string.
         let (existing_cron, existing_tz) = match &existing.trigger {
             Trigger::Cron { cron, timezone } => (cron.clone(), timezone.clone()),
+            Trigger::Manual => (String::new(), None),
         };
         let cron = dto.cron.unwrap_or(existing_cron);
         // Validate the cron string before building the trigger.

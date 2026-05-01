@@ -43,6 +43,12 @@ pub fn xml_path_for(id: &AutomationId) -> PathBuf {
 
 impl Scheduler for SchtasksScheduler {
     fn register(&self, automation: &Automation) -> Result<(), AutomationError> {
+        // Manual triggers don't materialize Task Scheduler XML.
+        if automation.trigger.is_manual() {
+            let _ = self.unregister(&automation.id);
+            return Ok(());
+        }
+
         let xml = render_xml(automation)?;
         let xml_path = xml_path_for(&automation.id);
         if let Some(parent) = xml_path.parent() {
@@ -131,6 +137,7 @@ impl Scheduler for SchtasksScheduler {
     ) -> Result<Vec<DateTime<Utc>>, AutomationError> {
         match trigger {
             Trigger::Cron { cron, .. } => cron_next_runs(cron, from, n),
+            Trigger::Manual => Ok(Vec::new()),
         }
     }
 
@@ -194,6 +201,9 @@ pub fn render_xml(automation: &Automation) -> Result<String, AutomationError> {
 
     let slots = match &automation.trigger {
         Trigger::Cron { cron: expr, .. } => cron::expand(expr)?,
+        // Manual triggers short-circuit `register`; this arm is
+        // unreachable in practice.
+        Trigger::Manual => return Ok(String::new()),
     };
 
     let opts = &automation.platform_options;
@@ -506,6 +516,7 @@ mod tests {
             created_at: now,
             updated_at: now,
             claudepot_managed: true,
+            template_id: None,
         }
     }
 

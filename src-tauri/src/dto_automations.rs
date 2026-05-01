@@ -44,6 +44,7 @@ impl From<&Automation> for AutomationSummaryDto {
             Trigger::Cron { cron, timezone } => {
                 ("cron".to_string(), Some(cron.clone()), timezone.clone())
             }
+            Trigger::Manual => ("manual".to_string(), None, None),
         };
         AutomationSummaryDto {
             id: a.id.to_string(),
@@ -147,11 +148,20 @@ pub struct AutomationCreateDto {
     pub json_schema: Option<String>,
     pub bare: bool,
     pub extra_env: std::collections::BTreeMap<String, String>,
+    /// Kind of trigger to install. Defaults to `"cron"` so existing
+    /// call sites stay unchanged. `"manual"` builds a `Trigger::Manual`
+    /// automation (no scheduler artifact, only Run-Now).
+    #[serde(default)]
+    pub trigger_kind: Option<String>,
     pub cron: String,
     pub timezone: Option<String>,
     pub platform_options: PlatformOptionsDto,
     #[serde(default = "default_log_retention")]
     pub log_retention_runs: u32,
+    /// Set when this automation was instantiated from a bundled
+    /// template. Drives template-aware post-run behavior.
+    #[serde(default)]
+    pub template_id: Option<String>,
 }
 
 fn default_log_retention() -> u32 {
