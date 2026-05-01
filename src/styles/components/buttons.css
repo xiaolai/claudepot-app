@@ -35,9 +35,10 @@
   white-space: nowrap;
   display: inline-flex;
   align-items: center;
+  justify-content: center;
   /* `--sp-6` between an inline icon and its label. Paired with the
-     `.btn > svg { width: 1em }` rule below so the icon reads as a
-     peer of the body text rather than a badge. */
+     `.btn > svg` width rule below so the icon reads as a peer of
+     the body text rather than a badge. */
   gap: var(--sp-6);
   flex-shrink: 0;
 }
@@ -103,7 +104,8 @@
   color: var(--on-color);
   font-weight: 500;
   border-color: transparent;
-  box-shadow: inset 0 var(--bw-subhair) 0 oklch(100% 0 0 / 0.18);
+  box-shadow: inset 0 var(--bw-subhair) 0
+    color-mix(in oklch, var(--on-color) 18%, transparent);
 }
 
 .btn.primary:hover:not(:disabled) {
