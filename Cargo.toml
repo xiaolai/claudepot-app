@@ -23,6 +23,9 @@ reqwest = { version = "0.12", default-features = false, features = ["json", "rus
 # Serialization
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
+# TOML — bundled template blueprints. Author-friendly multi-line
+# strings for prompts and descriptions; round-trips via serde.
+toml = { version = "0.8", default-features = false, features = ["parse"] }
 
 # Time
 chrono = { version = "0.4", features = ["serde"] }
