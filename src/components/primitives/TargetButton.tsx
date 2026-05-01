@@ -120,6 +120,7 @@ export function TargetButton({
           style={{
             display: "inline-flex",
             alignItems: "center",
+            justifyContent: "center",
             gap: "var(--sp-6)",
             height: "100%",
             padding: "0 var(--sp-8)",

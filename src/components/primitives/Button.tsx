@@ -95,6 +95,7 @@ export function Button({
       style={{
         display: "inline-flex",
         alignItems: "center",
+        justifyContent: "center",
         gap: "var(--sp-8)",
         height: s.h,
         padding: `0 ${s.px}`,

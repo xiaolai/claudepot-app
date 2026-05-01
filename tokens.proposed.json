@@ -9,6 +9,16 @@
       "timestamp": "2026-04-29T10:35:51.959Z",
       "status": "pending",
       "tempName": "__proposed.viewportHFull"
+    },
+    {
+      "id": "prop_2026-05-01_002",
+      "value": "0.02em",
+      "intent": "letter-spacing for small caption/tag text — subtler than --ls-wide (0.08em); used by .project-tag and TargetButton's disabledReason caption",
+      "proposedTokenName": "space.letter-spacing-for-small-caption-tag-text-subtler-than-ls-wide-0-08em-used-by-project-tag-and-targetbutton-s-disabledreason-caption",
+      "callerFile": null,
+      "timestamp": "2026-05-01T07:30:24.542Z",
+      "status": "pending",
+      "tempName": "__proposed.letterSpacingForSmallCaptionTagTextSubtlerThanLsWide008emUsedByProjectTagAndTargetbuttonSDisabledreasonCaption"
     }
   ]
 }
