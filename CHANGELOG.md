@@ -6,6 +6,25 @@ Versioning scheme:
 - `0.1.x` — beta
 - `1.0.0+` — stable
 
+## 0.0.20 — alpha (2026-05-01)
+
+### Fixed
+
+- **Global → Updates toggles persist clicks again.** Every toggle on
+  the Updates panel (CLI auto-update, CLI/Desktop tray-badge notify,
+  CLI/Desktop OS-banner notify, Desktop auto-install-when-quit)
+  appeared frozen: clicks fired no error and the UI reverted to the
+  prior state on the next refresh. The renderer was sending
+  snake_case keys (`cli_notify_on_available`, …) to the
+  `updates_settings_set` Tauri command, but Tauri 2's IPC layer
+  expects camelCase from JS and auto-converts to snake_case for the
+  Rust args — so every `Option<bool>` arg deserialized to `None`,
+  the handler wrote nothing, and `~/.claudepot/updates.json` stayed
+  at its prior values. Renamed the `UpdatesSettingsPatch` interface
+  fields and the six call sites in `UpdatesPanel.tsx` to camelCase,
+  matching every other API file in the codebase. Existing settings
+  on disk are preserved.
+
 ## 0.0.19 — alpha (2026-05-01)
 
 ### Fixed
