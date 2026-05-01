@@ -6,6 +6,19 @@ Versioning scheme:
 - `0.1.x` — beta
 - `1.0.0+` — stable
 
+## 0.0.19 — alpha (2026-05-01)
+
+### Fixed
+
+- **Collapsed the duplicate label on Settings → Cleanup → Rebuild
+  session index.** The card heading already established the noun
+  ("Rebuild session index"); the trigger button below repeated the
+  full phrase verbatim, so the card read its own name twice. The
+  button now reads just **Rebuild** — the heading is the noun, the
+  button is the verb. The confirm dialog already used the same
+  shorter `Rebuild` label, so the click-through path is now
+  consistent end-to-end.
+
 ## 0.0.18 — alpha (2026-05-01)
 
 ### Added
