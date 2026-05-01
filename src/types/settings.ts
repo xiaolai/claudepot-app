@@ -59,7 +59,15 @@ export interface Preferences {
   notify_on_waiting: boolean;
   /** Integer-percent thresholds (e.g. 80, 90) that fire when the
    *  CLI-active account's usage crosses them. Empty = feature off.
-   *  Default `[80, 90]`. The watcher polls every 5 min on the Rust
-   *  side. */
+   *  Default `[90]` — single near-cap nudge per (window × cycle).
+   *  The watcher polls every 5 min on the Rust side. Add 80 back
+   *  via Settings → Notifications if you want the early warning. */
   notify_on_usage_thresholds: number[];
+
+  /** Whether the per-model 7-day sub-windows (Opus, Sonnet)
+   *  participate in usage-threshold alerts. Default false — these
+   *  sub-quotas typically track the umbrella 7-day window for users
+   *  near cap, so leaving them on triples the 7-day toast volume.
+   *  The umbrella `seven_day` window is always checked regardless. */
+  notify_on_sub_windows: boolean;
 }
