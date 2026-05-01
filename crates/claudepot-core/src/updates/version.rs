@@ -167,7 +167,7 @@ pub fn compare_versions(installed: &str, latest: &str) -> Ordering {
 }
 
 fn parse_version_components(s: &str) -> Vec<u64> {
-    s.split(|c: char| c == '.' || c == '-')
+    s.split(['.', '-'])
         .map(|p| p.parse::<u64>().unwrap_or(0))
         .collect()
 }

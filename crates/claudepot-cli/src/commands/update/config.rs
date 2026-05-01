@@ -4,6 +4,11 @@ use claudepot_core::updates::detect::detect_cli_installs;
 use claudepot_core::updates::settings_bridge;
 use claudepot_core::updates::state::UpdateState;
 
+// One arg per toggle is the right shape here — the CLI parser
+// hands them through individually because each maps to a distinct
+// `--cli-notify` / `--desktop-auto` / etc. flag, and bundling them
+// into a config struct would just hide the trivial pass-through.
+#[allow(clippy::too_many_arguments)]
 pub async fn run(
     ctx: &AppContext,
     channel: Option<String>,
