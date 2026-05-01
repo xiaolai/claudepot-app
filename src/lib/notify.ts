@@ -440,9 +440,17 @@ export async function dispatchOsNotification(
         body,
         target: opts.target ?? null,
       },
-    }).catch(() => {
-      /* swallow — log persistence is advisory, never load-bearing */
-    });
+    })
+      .then(() => {
+        // Notify the bell so the badge updates synchronously rather
+        // than on the next 8 s poll. Same-process only — `dispatchEvent`
+        // doesn't cross window boundaries, but this dispatcher always
+        // runs in the same window as the bell.
+        window.dispatchEvent(new Event("claudepot:notification-logged"));
+      })
+      .catch(() => {
+        /* swallow — log persistence is advisory, never load-bearing */
+      });
     return true;
   } catch {
     return false;
