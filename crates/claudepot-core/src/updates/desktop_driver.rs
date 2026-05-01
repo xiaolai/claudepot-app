@@ -28,8 +28,15 @@ use crate::updates::errors::{Result, UpdateError};
 use crate::updates::version::fetch_desktop_latest;
 use crate::updates::version::DesktopRelease;
 use std::path::Path;
+// Process / timeout machinery is only used by `brew_upgrade_cask`
+// (macOS), `winget_upgrade_cask` (windows), and the macOS
+// `install_via_zip` — i.e. the platforms with a real updater path.
+// Linux falls into the no-op branch and never touches a subprocess.
+#[cfg(any(target_os = "macos", target_os = "windows"))]
 use std::process::Stdio;
+#[cfg(any(target_os = "macos", target_os = "windows"))]
 use tokio::process::Command;
+#[cfg(any(target_os = "macos", target_os = "windows"))]
 use tokio::time::{timeout, Duration};
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
@@ -335,6 +342,7 @@ async fn install_via_zip(
 }
 
 #[cfg(not(target_os = "macos"))]
+#[allow(dead_code)]
 async fn install_via_zip(
     _release: &DesktopRelease,
     _install: &DesktopInstall,
