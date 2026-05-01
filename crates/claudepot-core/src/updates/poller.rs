@@ -209,17 +209,21 @@ pub async fn run_one_check_cycle(state: &UpdateStateMutex) -> CheckCycleOutcome 
     } else {
         cli_update_available
     };
-    let desktop_update_available =
-        if matches!(desktop_auto, AutoInstallOutcome::Installed { .. }) {
-            let post = detect_desktop_install();
-            let post_installed = post.as_ref().and_then(|i| i.version.as_deref().map(|s| s.to_string()));
-            match (post_installed.as_deref(), desktop_release.as_ref().map(|d| d.version.as_str())) {
-                (Some(have), Some(want)) => compare_versions(have, want) == Ordering::Less,
-                _ => false,
-            }
-        } else {
-            desktop_update_available
-        };
+    let desktop_update_available = if matches!(desktop_auto, AutoInstallOutcome::Installed { .. }) {
+        let post = detect_desktop_install();
+        let post_installed = post
+            .as_ref()
+            .and_then(|i| i.version.as_deref().map(|s| s.to_string()));
+        match (
+            post_installed.as_deref(),
+            desktop_release.as_ref().map(|d| d.version.as_str()),
+        ) {
+            (Some(have), Some(want)) => compare_versions(have, want) == Ordering::Less,
+            _ => false,
+        }
+    } else {
+        desktop_update_available
+    };
 
     CheckCycleOutcome {
         cli_latest,

@@ -2,9 +2,7 @@ use crate::AppContext;
 use anyhow::Result;
 use claudepot_core::updates::settings_bridge;
 use claudepot_core::updates::state::UpdateState;
-use claudepot_core::updates::{
-    compare_versions, fetch_cli_latest, fetch_desktop_latest, Channel,
-};
+use claudepot_core::updates::{compare_versions, fetch_cli_latest, fetch_desktop_latest, Channel};
 use std::cmp::Ordering;
 
 pub async fn run(ctx: &AppContext) -> Result<()> {
@@ -108,7 +106,11 @@ pub async fn run(ctx: &AppContext) -> Result<()> {
         println!("  Installed: {}", super::desktop_install_summary(d));
         println!(
             "  Running:   {}",
-            if snapshot.desktop_running { "yes" } else { "no" }
+            if snapshot.desktop_running {
+                "yes"
+            } else {
+                "no"
+            }
         );
         match desktop_latest.as_ref() {
             Some(latest) => {
