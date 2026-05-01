@@ -1,6 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { MouseEvent } from "react";
-import { listen } from "@tauri-apps/api/event";
 import { IconButton } from "../components/primitives/IconButton";
 import { NF } from "../icons";
 import { api } from "../api";
@@ -68,16 +67,6 @@ export function NotificationBell({ onMouseDown }: NotificationBellProps) {
       window.removeEventListener("claudepot:notification-logged", handler);
   }, [refreshUnread]);
 
-  // Cross-window log mutations (future surfaces). Subscribe lazily
-  // so we only carry the listener when one is actually needed.
-  useEffect(() => {
-    const unsub = listen("notification-log-changed", () => {
-      void refreshUnread();
-    });
-    return () => {
-      void unsub.then((u) => u());
-    };
-  }, [refreshUnread]);
 
   const onToggle = useCallback(() => {
     setOpen((o) => !o);

@@ -178,9 +178,16 @@ export function useToasts() {
           body: "",
           target: null,
         },
-      }).catch(() => {
-        /* swallow — log persistence is advisory, never load-bearing */
-      });
+      })
+        .then(() => {
+          // Same-process signal so the bell badge updates without
+          // waiting for the 8 s poll. See notify.ts for the matching
+          // OS-side dispatcher.
+          window.dispatchEvent(new Event("claudepot:notification-logged"));
+        })
+        .catch(() => {
+          /* swallow — log persistence is advisory, never load-bearing */
+        });
       // Auto-dismiss policy:
       //   onUndo  → short (undoMs, default 3 s) — undo is an action
       //             commit timer, not a notification.
