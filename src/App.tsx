@@ -503,9 +503,20 @@ function AppShell() {
       if (r.section === "accounts") {
         setSection("accounts");
         if (r.email) {
-          window.dispatchEvent(
-            new CustomEvent("cp-focus-account", { detail: { email: r.email } }),
-          );
+          // The Accounts focus listener (AccountsSection.tsx ~L172)
+          // expects `event.detail` to be a bare uuid string, not an
+          // object — it scrolls to `[data-account-uuid="${detail}"]`.
+          // Resolve email → uuid here using the same `accounts`
+          // snapshot the rest of the shell renders against. If the
+          // email isn't in the live list (just removed, or the
+          // notification fired against a stale snapshot), the section
+          // switch still happens; only the scroll-into-view is lost.
+          const acct = accounts.find((a) => a.email === r.email);
+          if (acct?.uuid) {
+            window.dispatchEvent(
+              new CustomEvent("cp-focus-account", { detail: acct.uuid }),
+            );
+          }
         }
         return;
       }
@@ -556,7 +567,14 @@ function AppShell() {
         popoverHandler,
       );
     };
-  }, [setSection]);
+    // `accounts` is read inside routeNotificationTarget (the
+    // accounts-route branch resolves email → uuid against this list).
+    // Without it in the dep array the closure captures whatever
+    // accounts looked like at first mount, and account adds/removes
+    // would silently miss the focus dispatch. Re-running on accounts
+    // change is cheap — just rebinds two window listeners — and the
+    // route function only fires when a notification clicks through.
+  }, [setSection, accounts]);
 
   // Mirror the alert count into the tray so tray-only users see a
   // persistent signal when the window is hidden. Diffed against a ref
