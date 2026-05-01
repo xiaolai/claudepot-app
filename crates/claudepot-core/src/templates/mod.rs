@@ -27,6 +27,7 @@
 //! apply pipeline) lives in later tiers per the build plan and
 //! is not exposed here yet.
 
+pub mod apply;
 pub mod blueprint;
 pub mod capabilities;
 pub mod error;
