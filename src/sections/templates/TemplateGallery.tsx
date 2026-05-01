@@ -137,6 +137,12 @@ function GalleryGrid({
       style={{
         display: "flex",
         flexDirection: "column",
+        // Pin both gallery and install view to the same vertical
+        // extent so swapping content inside the same Modal does
+        // not resize the dialog box (the resize was visible as a
+        // flash). 70vh stays comfortable on a 13" laptop while
+        // capping the dialog on tall displays.
+        height: "min(620px, 80vh)",
         minHeight: 0,
         flex: 1,
       }}

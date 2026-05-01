@@ -126,7 +126,9 @@ export function TemplateInstallView({
           padding: "var(--sp-32)",
           color: "var(--fg-faint)",
           fontSize: "var(--fs-sm)",
-          minHeight: "tokens.banner.min.width",
+          // Match the loaded view's pinned height so the modal box
+          // doesn't shrink during the loading frame and snap back.
+          height: "min(620px, 80vh)",
         }}
       >
         Loading template…
@@ -139,7 +141,9 @@ export function TemplateInstallView({
       style={{
         display: "flex",
         flexDirection: "column",
-        // The modal itself caps height; this view fills it.
+        // Pin to the same vertical extent as the gallery so the
+        // gallery → install swap doesn't resize the dialog box.
+        height: "min(620px, 80vh)",
         minHeight: 0,
         flex: 1,
       }}
