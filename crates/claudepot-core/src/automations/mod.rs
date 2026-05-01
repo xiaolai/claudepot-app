@@ -36,6 +36,7 @@ pub mod cron;
 pub mod env;
 pub mod error;
 pub mod install;
+pub mod prerun;
 pub mod run;
 pub mod scheduler;
 pub mod shim;
