@@ -15,7 +15,7 @@
   },
   "dependencies": {
     "@tanstack/react-virtual": "^3.13.24",
-    "@tauri-apps/api": "^2",
+    "@tauri-apps/api": "^2.11.0",
     "@tauri-apps/plugin-autostart": "^2.5.1",
     "@tauri-apps/plugin-clipboard-manager": "^2.3.0",
     "@tauri-apps/plugin-dialog": "^2.7.0",
@@ -33,7 +33,7 @@
     "remark-gfm": "^4.0.1"
   },
   "devDependencies": {
-    "@tauri-apps/cli": "^2",
+    "@tauri-apps/cli": "^2.11.0",
     "@testing-library/jest-dom": "^6.9.1",
     "@testing-library/react": "^16.3.2",
     "@testing-library/user-event": "^14.6.1",

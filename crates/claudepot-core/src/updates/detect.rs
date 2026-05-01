@@ -505,9 +505,13 @@ fn windows_desktop_running() -> bool {
     if candidates.is_empty() {
         return false;
     }
+    // sysinfo 0.32 API: `new()` is the empty-refresh constructor;
+    // `nothing()` is a 0.33+ rename. We're on 0.32 (workspace pin),
+    // so use the older spelling. `with_processes` + `.with_exe` are
+    // available in both.
     let sys = System::new_with_specifics(
-        RefreshKind::nothing()
-            .with_processes(ProcessRefreshKind::nothing().with_exe(UpdateKind::Always)),
+        RefreshKind::new()
+            .with_processes(ProcessRefreshKind::new().with_exe(UpdateKind::Always)),
     );
     for proc in sys.processes().values() {
         if let Some(exe) = proc.exe() {
