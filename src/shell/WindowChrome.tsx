@@ -2,6 +2,7 @@ import type { MouseEvent } from "react";
 import { Glyph } from "../components/primitives/Glyph";
 import { IconButton } from "../components/primitives/IconButton";
 import { NF } from "../icons";
+import { NotificationBell } from "./NotificationBell";
 
 interface WindowChromeProps {
   /** Breadcrumb tail — "accounts", "projects", etc. */
@@ -116,6 +117,14 @@ export function WindowChrome({
         </span>
       </button>
 
+      {/* Notification log entry point. Sits between the palette hint
+          and the theme toggle so it stays in the secondary-action
+          cluster without crowding the breadcrumb. The bell carries
+          its own unread badge and popover state — WindowChrome stays
+          unaware of its internals so the chrome can keep being the
+          dumb framing component it is. */}
+      <NotificationBell onMouseDown={stopDrag} />
+
       <IconButton
         glyph={theme === "dark" ? NF.sun : NF.moon}
         onClick={onToggleTheme}
@@ -124,10 +133,10 @@ export function WindowChrome({
         aria-label={
           theme === "dark" ? "Switch to light mode" : "Switch to dark mode"
         }
-        // Glyph scales off the button's own font-size. --fs-xl (22px)
+        // Glyph scales off the button's own font-size. --fs-xl (tokens.sp[22])
         // was correct in the Nerd Font era — NF glyphs rendered at
-        // ~65% of font-size, so that read as ~14px inside the 28px
-        // square. Lucide SVGs fill the full box, so --fs-md (14px)
+        // ~65% of font-size, so that read as ~tokens.sp[14] inside the tokens.sp[28]
+        // square. Lucide SVGs fill the full box, so --fs-md (tokens.sp[14])
         // restores the prior half-of-button proportion.
         style={{ fontSize: "var(--fs-md)" }}
       />
