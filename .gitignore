@@ -14,7 +14,14 @@ dist-ssr
 
 # Rust
 target/
-Cargo.lock
+
+# Cargo.lock IS committed for this app (see Cargo's recommendation for
+# binary/application crates). Without it, every CI run does a fresh
+# dependency resolution against crates.io and any newly-published minor
+# of e.g. `tauri = "^2"` can break the build with no code change on our
+# side — that's how v0.0.17's first release attempt failed (tauri 2.11
+# vs @tauri-apps/api 2.10 mismatch). Committing the lockfile pins both
+# sides to the same versions across CI and dev.
 
 # Tauri externalBin staging (populated by CI; never committed)
 src-tauri/binaries/
