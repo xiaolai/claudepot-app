@@ -6,6 +6,52 @@ Versioning scheme:
 - `0.1.x` — beta
 - `1.0.0+` — stable
 
+## 0.0.16 — alpha (2026-05-01)
+
+### Fixed
+
+- **Tray-initiated CLI switch is now one-click with OS-notification
+  feedback.** Picking an account from the menubar's "Switch CLI"
+  submenu used to route the live-session conflict back through the
+  webview to raise `SplitBrainConfirm` — invisible when the window
+  was hidden, so the click looked dead and the user had no way to
+  know what happened or how to proceed. The tray now force-switches
+  in one click, shows a 10-second Undo toast in-window, and
+  dispatches an OS notification when the window isn't focused. The
+  notification body surfaces the "restart Claude Code to apply"
+  caveat when CC was running at the time of the switch, since CC's
+  next token refresh can otherwise revert the swap silently. Tauri
+  2's desktop notification plugin can't render action buttons, so
+  the notification deep-links to the Accounts section where the
+  Undo toast (still alive within its 10s window) carries the
+  actual click. Backed by a new `CliOpState` async mutex that
+  serializes tray clicks so two rapid swaps can't both record a
+  stale "from" account in the undo target.
+- **macOS proxy detection now handles SOCKS-only and PAC setups.**
+  The Finder/Dock launch path previously read only `HTTPSEnable`
+  from `SystemConfiguration` — SOCKS-only setups (Surge, Clash,
+  ssh -D) silently went direct, and PAC setups failed with no
+  diagnostic. Detection now classifies HTTPS → SOCKS → PAC: SOCKS
+  uses `socks5h://` so DNS resolves through the proxy (which
+  matches the typical local-rules-engine setup), and PAC is
+  surfaced as a typed `MacosPacUnsupported(url)` warning in
+  `claudepot doctor` (Claudepot doesn't ship a JS engine, so
+  evaluating `FindProxyForURL` is out of scope — the URL is
+  redacted of any embedded credentials before display). Set-but-
+  malformed proxy env vars (`HTTPS_PROXY=garbage`) used to silently
+  disable the proxy entirely; they now fall through to the next
+  source with a `tracing::warn!` so the user still gets system
+  proxy as a fallback.
+- **OAuth HTTP client picks up proxy changes mid-session.** The
+  shared client was a `OnceLock<reqwest::Client>` built on first
+  use and never rebuilt. Toggling the system proxy or setting
+  `HTTPS_PROXY` after the app launched had no effect until the
+  next restart. The client now re-detects on every call with a
+  `(url, no_proxy)` cache key — same key, cached `Arc<Client>` is
+  cloned (cheap); changed key, the client is rebuilt. `apply()`
+  no longer falls back to env `NO_PROXY` so the cache key
+  faithfully reflects every input that affects the built client.
+
 ## 0.0.15 — alpha (unreleased)
 
 ### Fixed
