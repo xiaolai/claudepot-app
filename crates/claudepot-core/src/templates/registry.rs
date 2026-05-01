@@ -81,6 +81,21 @@ const BUNDLED: &[BundledEntry] = &[
         toml: include_str!("blueprints/audit.cache-cleanup.toml"),
         sample_md: Some(include_str!("blueprints/samples/cache-cleanup.md")),
     },
+    BundledEntry {
+        id: "house.downloads-tidy",
+        toml: include_str!("blueprints/house.downloads-tidy.toml"),
+        sample_md: Some(include_str!("blueprints/samples/downloads-tidy.md")),
+    },
+    BundledEntry {
+        id: "house.screenshots-folder",
+        toml: include_str!("blueprints/house.screenshots-folder.toml"),
+        sample_md: Some(include_str!("blueprints/samples/screenshots-folder.md")),
+    },
+    BundledEntry {
+        id: "house.receipts-triage",
+        toml: include_str!("blueprints/house.receipts-triage.toml"),
+        sample_md: Some(include_str!("blueprints/samples/receipts-triage.md")),
+    },
 ];
 
 /// Registry of all bundled blueprints. Built once at startup;
