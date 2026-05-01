@@ -531,8 +531,31 @@ function AppShell() {
       }
     };
 
+    // Bell-icon popover: a click on a logged entry dispatches the
+    // entry's stored target through this same routing function.
+    // The popover doesn't import routeNotificationTarget directly —
+    // it lives inside this useEffect closure — so we round-trip
+    // through a window event. Same shape as the focus path; if the
+    // target lacks a click destination the popover never dispatches.
+    const popoverHandler = (ev: Event) => {
+      const detail = (ev as CustomEvent<{ target?: NotificationTarget }>)
+        .detail;
+      if (!detail?.target) return;
+      void routeNotificationTarget(detail.target);
+    };
+
     window.addEventListener("focus", handler);
-    return () => window.removeEventListener("focus", handler);
+    window.addEventListener(
+      "claudepot:notification-log-target",
+      popoverHandler,
+    );
+    return () => {
+      window.removeEventListener("focus", handler);
+      window.removeEventListener(
+        "claudepot:notification-log-target",
+        popoverHandler,
+      );
+    };
   }, [setSection]);
 
   // Mirror the alert count into the tray so tray-only users see a
