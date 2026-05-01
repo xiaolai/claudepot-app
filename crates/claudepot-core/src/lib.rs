@@ -101,6 +101,7 @@ pub mod session_slim;
 pub mod session_subagents;
 pub mod session_tool_link;
 pub mod session_worktree;
+pub mod templates;
 pub mod trash;
 pub mod updates;
 pub mod usage_local;
