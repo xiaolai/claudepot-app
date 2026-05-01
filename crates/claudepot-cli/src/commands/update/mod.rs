@@ -23,7 +23,11 @@ use claudepot_core::updates::{
 
 pub(crate) fn cli_install_summary(c: &CliInstall) -> String {
     let active = if c.is_active { "active" } else { "inactive" };
-    let auto = if c.auto_updates { "auto-updates" } else { "manual" };
+    let auto = if c.auto_updates {
+        "auto-updates"
+    } else {
+        "manual"
+    };
     let v = c.version.as_deref().unwrap_or("?");
     format!(
         "{} {} ({}, {}, {})",

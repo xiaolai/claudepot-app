@@ -101,7 +101,9 @@ async fn winget_upgrade_cask() -> Result<DesktopUpdateOutcome> {
         .output();
     let output = timeout(Duration::from_secs(600), fut)
         .await
-        .map_err(|_| UpdateError::Refused("`winget upgrade Anthropic.ClaudeCode` timed out".into()))?
+        .map_err(|_| {
+            UpdateError::Refused("`winget upgrade Anthropic.ClaudeCode` timed out".into())
+        })?
         .map_err(|e| {
             if e.kind() == std::io::ErrorKind::NotFound {
                 UpdateError::ToolMissing("winget".into())
@@ -251,15 +253,17 @@ async fn install_via_zip(
     // ditto preserves resource forks and metadata. If ditto fails we
     // restore the backup.
     let target = &install.app_path;
-    let backup = target.with_file_name(format!(
-        "Claude.app.bak-{}",
-        chrono::Utc::now().timestamp()
-    ));
+    let backup =
+        target.with_file_name(format!("Claude.app.bak-{}", chrono::Utc::now().timestamp()));
     if target.exists() {
         std::fs::rename(target, &backup)?;
     }
     let ditto = Command::new("ditto")
-        .args(["--rsrc", new_app.to_str().unwrap(), target.to_str().unwrap()])
+        .args([
+            "--rsrc",
+            new_app.to_str().unwrap(),
+            target.to_str().unwrap(),
+        ])
         .output()
         .await
         .map_err(|e| {
@@ -303,7 +307,10 @@ async fn install_via_zip(
     Ok(DesktopUpdateOutcome {
         method: "direct-zip".into(),
         version_after,
-        stdout: format!("Installed Claude.app {} via direct download", release.version),
+        stdout: format!(
+            "Installed Claude.app {} via direct download",
+            release.version
+        ),
         stderr: String::new(),
     })
 }
@@ -342,8 +349,7 @@ fn verify_codesign(app: &Path) -> Result<()> {
     // pass for any cert whose subject happens to mention Anthropic in
     // an unrelated field; pinning the full leaf-authority line is the
     // tight check.
-    const EXPECTED_LEAF_AUTHORITY: &str =
-        "Authority=Developer ID Application: Anthropic, PBC";
+    const EXPECTED_LEAF_AUTHORITY: &str = "Authority=Developer ID Application: Anthropic, PBC";
     let dv = std::process::Command::new("codesign")
         .args(["-dv", "--verbose=4", app.to_str().unwrap()])
         .output()?;

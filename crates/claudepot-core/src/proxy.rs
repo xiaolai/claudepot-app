@@ -255,11 +255,7 @@ enum MacosProxy {
 /// `SCDynamicStore`. Production callers wire CF-backed closures in
 /// via `macos_system_proxy()`; tests pass closures backed by literals.
 #[cfg(target_os = "macos")]
-fn classify_macos_proxy<N, S, L>(
-    get_num: N,
-    get_str: S,
-    read_exceptions: L,
-) -> Option<MacosProxy>
+fn classify_macos_proxy<N, S, L>(get_num: N, get_str: S, read_exceptions: L) -> Option<MacosProxy>
 where
     N: Fn(&str) -> Option<i64>,
     S: Fn(&str) -> Option<String>,
@@ -345,9 +341,7 @@ fn read_exceptions_list(
     >,
 ) -> Option<String> {
     use std::ffi::c_void;
-    use system_configuration::core_foundation::{
-        array::CFArray, base::TCFType, string::CFString,
-    };
+    use system_configuration::core_foundation::{array::CFArray, base::TCFType, string::CFString};
 
     let exc_key = CFString::new("ExceptionsList");
     let val = dict.find(&exc_key)?;

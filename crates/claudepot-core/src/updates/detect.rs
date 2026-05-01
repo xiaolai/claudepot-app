@@ -158,7 +158,8 @@ fn detect_cli_installs_at(home: Option<&Path>) -> Vec<CliInstall> {
         let bin = home.join(NATIVE_BIN_REL);
         if bin.exists() {
             let resolved = std::fs::canonicalize(&bin).unwrap_or_else(|_| bin.clone());
-            let version = native_version_from_target(&resolved).or_else(|| query_binary_version(&bin));
+            let version =
+                native_version_from_target(&resolved).or_else(|| query_binary_version(&bin));
             out.push(CliInstall {
                 kind: CliInstallKind::NativeCurl,
                 version,
@@ -198,9 +199,7 @@ fn detect_cli_installs_at(home: Option<&Path>) -> Vec<CliInstall> {
     // entries we've already pushed).
     if let Some(npm_bin) = npm_global_bin() {
         let candidate = npm_bin.join(cli_filename());
-        if candidate.exists()
-            && !out.iter().any(|c| same_path(&c.binary_path, &candidate))
-        {
+        if candidate.exists() && !out.iter().any(|c| same_path(&c.binary_path, &candidate)) {
             out.push(CliInstall {
                 kind: CliInstallKind::NpmGlobal,
                 version: query_binary_version(&candidate),
@@ -287,7 +286,9 @@ fn npm_global_bin() -> Option<PathBuf> {
     let s = String::from_utf8(output.stdout).ok()?;
     let root = PathBuf::from(s.trim());
     // root: .../lib/node_modules → bin: .../bin
-    root.parent().and_then(|p| p.parent()).map(|p| p.join("bin"))
+    root.parent()
+        .and_then(|p| p.parent())
+        .map(|p| p.join("bin"))
 }
 
 fn brew_cask_installed(cask: &str) -> bool {
@@ -510,8 +511,7 @@ fn windows_desktop_running() -> bool {
     // so use the older spelling. `with_processes` + `.with_exe` are
     // available in both.
     let sys = System::new_with_specifics(
-        RefreshKind::new()
-            .with_processes(ProcessRefreshKind::new().with_exe(UpdateKind::Always)),
+        RefreshKind::new().with_processes(ProcessRefreshKind::new().with_exe(UpdateKind::Always)),
     );
     for proc in sys.processes().values() {
         if let Some(exe) = proc.exe() {
@@ -678,9 +678,7 @@ mod tests {
         let alive_pid = std::process::id();
         std::fs::write(
             lock_dir.join("alive.lock"),
-            format!(
-                r#"{{"pid": {alive_pid}, "version": "x", "execPath": "/x", "acquiredAt": 0}}"#
-            ),
+            format!(r#"{{"pid": {alive_pid}, "version": "x", "execPath": "/x", "acquiredAt": 0}}"#),
         )
         .unwrap();
         std::fs::write(

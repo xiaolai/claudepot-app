@@ -209,7 +209,13 @@ mod tests {
     fn channel_as_str_roundtrips() {
         assert_eq!(Channel::Latest.as_str(), "latest");
         assert_eq!(Channel::Stable.as_str(), "stable");
-        assert_eq!(Channel::Latest.as_str().parse::<Channel>().unwrap(), Channel::Latest);
-        assert_eq!(Channel::Stable.as_str().parse::<Channel>().unwrap(), Channel::Stable);
+        assert_eq!(
+            Channel::Latest.as_str().parse::<Channel>().unwrap(),
+            Channel::Latest
+        );
+        assert_eq!(
+            Channel::Stable.as_str().parse::<Channel>().unwrap(),
+            Channel::Stable
+        );
     }
 }
