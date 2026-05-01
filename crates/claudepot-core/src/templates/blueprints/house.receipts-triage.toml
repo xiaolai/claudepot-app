@@ -1,0 +1,106 @@
+# Receipts triage
+#
+# Weekly housekeeping for ~/Documents/Receipts/inbox/. OCRs each
+# PDF, proposes a structured rename + move into the year/category
+# subfolders, and appends a row to receipts-ledger.csv.
+
+id              = "house.receipts-triage"
+schema_version  = 1
+version         = 1
+name            = "Receipts triage"
+tagline         = "Rename + file inbox receipts by year and category."
+description     = """
+Each Monday morning, this scans ~/Documents/Receipts/inbox/ for
+PDFs, extracts vendor / date / amount / category from each, and
+proposes a rename to vendor-YYYY-MM-DD-amount.pdf plus a move
+into ~/Documents/Receipts/<YYYY>/<category>/.
+
+A row is also appended to ~/Documents/Receipts/receipts-ledger.csv
+when you Apply.
+"""
+category        = "housekeeping"
+icon            = "receipt"
+tier            = "ambient"
+
+capabilities_required = ["tool_use", "structured_output"]
+min_context_tokens    = 16384
+recommended_class     = "fast"
+cost_class            = "low"
+cost_cap_usd          = 0.20
+privacy               = "any"
+consent_required      = false
+fallback_policy       = "skip"
+
+prompt = """
+You are a personal IT assistant triaging an inbox of receipt PDFs.
+
+Inventory ~/Documents/Receipts/inbox/:
+- find ~/Documents/Receipts/inbox -maxdepth 1 -name "*.pdf" -type f
+
+For each PDF, OCR or read the metadata to extract:
+- vendor (lowercase, no spaces, e.g. "amazon")
+- date (YYYY-MM-DD)
+- amount (in dollars, no symbol)
+- category — one of: groceries, dining, transport, software,
+  utilities, hardware, services, other
+
+Proposed move target: ~/Documents/Receipts/<year>/<category>/<vendor>-<date>-$<amount>.pdf
+
+Write three files:
+
+1. Markdown report at CLAUDEPOT_OUTPUT_PATH (or
+   ~/.claudepot/house-reports/receipts-triage-<date>.md).
+   Format: status headline, then a table of proposed moves with
+   vendor/date/amount/category/from/to.
+
+2. Pending-changes.json at the same directory, named
+   ".pending-changes.json".
+   - One mkdir item per missing year/category subfolder.
+   - One move item per receipt.
+   - Item ids are deterministic (first 12 of sha256(from-path)).
+
+3. Append rows to ~/Documents/Receipts/receipts-ledger.csv.
+   Header: date,vendor,amount,category,filename. Use a `write`
+   operation in pending-changes.json — content_b64 is the
+   full new file contents (existing rows + new ones), so the
+   user-Apply step replaces the file atomically.
+
+Constraints:
+- Every from/to path must live under ~/Documents/Receipts/.
+- Don't execute any move; only produce the side-car.
+- Format amounts as plain decimal (e.g. "23.99", not "$23.99")
+  in the filename.
+"""
+
+sample_report = "samples/receipts-triage.md"
+
+[scope]
+reads                       = "PDFs in ~/Documents/Receipts/inbox/, with OCR if needed."
+writes                      = "One report, one pending-changes.json per run."
+could_change                = "Files inside ~/Documents/Receipts/ only — renames, moves into year/category subfolders, and an append to receipts-ledger.csv. Only after you review and click Apply."
+network                     = "None."
+requires_full_disk_access   = false
+
+[apply]
+pending_changes_path = "{output_dir}/.pending-changes.json"
+schema_version       = 1
+allowed_operations   = ["move", "mkdir", "write"]
+item_id_strategy     = "content_hash"
+
+[apply.scope]
+allowed_paths = ["~/Documents/Receipts/**"]
+deny_outside  = true
+
+[schedule]
+default        = "0 9 * * 1"
+default_label  = "Each Monday at 9 AM"
+allowed_shapes = ["weekly", "manual"]
+
+[output]
+path_template = "~/.claudepot/house-reports/receipts-triage-{date}.md"
+format        = "markdown"
+
+[runtime]
+permission_mode = "plan"
+allowed_tools   = ["Bash", "Read", "Write"]
+timeout_secs    = 360
