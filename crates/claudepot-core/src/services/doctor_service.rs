@@ -23,8 +23,12 @@ pub struct HealthReport {
     pub desktop_profiles: Vec<ProfileInfo>,
     pub db_error: Option<String>,
     /// Which proxy path was used for the API reachability check.
-    /// Displayed as `env-var: HTTPS_PROXY`, `SystemConfiguration`, or `none`.
-    pub proxy_source: String,
+    /// Carries the typed `ProxySource` so callers can distinguish
+    /// healthy detection from `MacosPacUnsupported` (warning) — the CLI
+    /// uses `is_warning()` to pick the indicator. `Display` produces
+    /// the human form (`env-var: HTTPS_PROXY`, `SystemConfiguration
+    /// (HTTPS)`, etc.) for both text and JSON output.
+    pub proxy_source: crate::proxy::ProxySource,
 }
 
 #[derive(Debug)]
@@ -73,7 +77,7 @@ pub async fn check_health(store: &AccountStore) -> HealthReport {
 
     // Proxy detection (once, shared with API check)
     let proxy_config = crate::proxy::detect();
-    let proxy_source = proxy_config.source.to_string();
+    let proxy_source = proxy_config.source.clone();
 
     // API reachability
     let api_status = check_api(&beta_header, &proxy_config).await;
