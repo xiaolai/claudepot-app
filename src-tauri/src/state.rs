@@ -185,3 +185,30 @@ impl TrayAlertState {
         }
     }
 }
+
+/// Live count of "available updates" reflected in the tray. Separate
+/// from [`TrayAlertState`] so the activity-alert and updates-alert
+/// channels don't trample each other — `tray::refresh_alert_chrome`
+/// sums both. The poller writes here after each cycle (see
+/// `claudepot_core::updates::poller::CheckCycleOutcome`).
+///
+/// Counter scheme: 1 per surface (CLI / Desktop) with an available
+/// update AND `notify_on_available` set. So 0..=2.
+#[derive(Default)]
+pub struct UpdatesAlertState(pub Mutex<u32>);
+
+impl UpdatesAlertState {
+    pub fn get(&self) -> u32 {
+        match self.0.lock() {
+            Ok(g) => *g,
+            Err(p) => *p.into_inner(),
+        }
+    }
+
+    pub fn set(&self, count: u32) {
+        match self.0.lock() {
+            Ok(mut g) => *g = count,
+            Err(p) => *p.into_inner() = count,
+        }
+    }
+}

@@ -19,6 +19,7 @@ import { routeApi } from "./route";
 import { automationApi } from "./automation";
 import { usageApi } from "./usage";
 import { notificationApi } from "./notification";
+import { updatesApi } from "./updates";
 
 export const api = {
   ...accountApi,
@@ -36,6 +37,7 @@ export const api = {
   ...automationApi,
   ...usageApi,
   ...notificationApi,
+  ...updatesApi,
   migrate: migrateApi,
 };
 

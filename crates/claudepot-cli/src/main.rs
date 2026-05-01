@@ -185,6 +185,18 @@ enum Commands {
         #[command(subcommand)]
         action: UsageAction,
     },
+    /// Manage Claude Code CLI and Claude Desktop updates.
+    ///
+    /// Surfaces detected installs, probes upstream for the latest
+    /// version, and (on request) drives an install. CC's native
+    /// installer auto-updates in the background; this verb is for
+    /// manual checks and for forcing the update right now. Desktop
+    /// installs route through Homebrew Cask when brew-managed,
+    /// direct .zip download otherwise. See `dev-docs/auto-updates.md`.
+    Update {
+        #[command(subcommand)]
+        action: UpdateAction,
+    },
 }
 
 #[derive(Subcommand)]
@@ -194,6 +206,56 @@ enum UsageAction {
         /// Time window: `all` (default) or `<n>d` (e.g. `7d`, `30d`).
         #[arg(long, default_value = "all")]
         window: String,
+    },
+}
+
+#[derive(Subcommand)]
+enum UpdateAction {
+    /// Detect installs and probe upstream for the latest version
+    /// (CC + Desktop). Persists the probe result to
+    /// `~/.claudepot/updates.json`.
+    Check,
+    /// Force-update the active CC CLI install now (runs `claude
+    /// update`). Refuses if `DISABLE_UPDATES=1` is set in CC's
+    /// settings.json.
+    Cli,
+    /// Force-update Claude Desktop now. Refuses if Desktop is
+    /// running. Routes through `brew upgrade --cask claude` when
+    /// brew-managed, direct .zip + codesign-verified install
+    /// otherwise.
+    Desktop,
+    /// Show or modify update settings. With no flags, prints the
+    /// current configuration. Each flag triggers exactly one write.
+    Config {
+        /// CC release channel — writes `autoUpdatesChannel` to
+        /// `~/.claude/settings.json` (CC's own settings file, not
+        /// Claudepot's). Single source of truth — see
+        /// `dev-docs/auto-updates.md` mechanism callout #2.
+        #[arg(long, value_parser = ["latest", "stable"])]
+        channel: Option<String>,
+        /// For `--channel stable` from `latest`: explicitly accept
+        /// the downgrade. Without this, the CLI pins
+        /// `minimumVersion` to the currently-installed version so
+        /// you stay on it (CC's "stay" default).
+        #[arg(long)]
+        allow_downgrade: bool,
+        /// Toggle CLI tray-badge update notifications.
+        #[arg(long)]
+        cli_notify: Option<bool>,
+        /// Toggle CLI OS notifications (toast / banner) when an
+        /// update is detected. Independent from the badge.
+        #[arg(long)]
+        cli_notify_os: Option<bool>,
+        /// Toggle Desktop tray-badge update notifications.
+        #[arg(long)]
+        desktop_notify: Option<bool>,
+        /// Toggle Desktop OS notifications.
+        #[arg(long)]
+        desktop_notify_os: Option<bool>,
+        /// Toggle "auto-install Desktop in background when not
+        /// running" — the asymmetry-fix toggle.
+        #[arg(long)]
+        desktop_auto: Option<bool>,
     },
 }
 
@@ -924,6 +986,32 @@ async fn main() -> Result<()> {
         Commands::Status => commands::status::run(&ctx).await?,
         Commands::Usage { action } => match action {
             UsageAction::Report { window } => commands::usage::report(&ctx, &window).await?,
+        },
+        Commands::Update { action } => match action {
+            UpdateAction::Check => commands::update::check::run(&ctx).await?,
+            UpdateAction::Cli => commands::update::cli::run(&ctx).await?,
+            UpdateAction::Desktop => commands::update::desktop::run(&ctx).await?,
+            UpdateAction::Config {
+                channel,
+                allow_downgrade,
+                cli_notify,
+                cli_notify_os,
+                desktop_notify,
+                desktop_notify_os,
+                desktop_auto,
+            } => {
+                commands::update::config::run(
+                    &ctx,
+                    channel,
+                    allow_downgrade,
+                    cli_notify,
+                    cli_notify_os,
+                    desktop_notify,
+                    desktop_notify_os,
+                    desktop_auto,
+                )
+                .await?
+            }
         },
         Commands::Activity { action } => match action {
             ActivityAction::Recent {
