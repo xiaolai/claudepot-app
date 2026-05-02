@@ -72,7 +72,9 @@ pub fn recent(
     }
 
     if cards.is_empty() {
-        eprintln!("No activity cards. Run `claudepot activity reindex` to populate.");
+        if !ctx.quiet {
+            eprintln!("No activity cards. Run `claudepot activity reindex` to populate.");
+        }
         return Ok(());
     }
     print_human(&cards);
@@ -105,7 +107,7 @@ pub fn reindex(ctx: &AppContext) -> Result<()> {
                 "elapsed_ms": stats.elapsed.as_millis(),
             })
         );
-    } else {
+    } else if !ctx.quiet {
         let pruned_note = if stats.cards_pruned > 0 {
             format!(", {} pruned (source JSONL gone)", stats.cards_pruned)
         } else {
