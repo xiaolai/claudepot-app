@@ -16,8 +16,22 @@
 //! is NOT cascade-deleted — those are aggregates that survive
 //! transcript deletion. A full `rebuild()` truncates both.
 
-/// Bumped from v1 to v2 by this module.
-pub const SCHEMA_VERSION: &str = "2";
+/// Schema version stamped into `meta.schema_version`. Acts as the
+/// migration trigger across the whole `sessions.db` file (the
+/// `sessions` table itself stays at v1 — see the per-table version
+/// in `session_index/schema.rs`). Bumped each time *any* table that
+/// shares this DB needs an existing-user backfill.
+///
+/// History:
+///   - v1: original `sessions` table.
+///   - v2: added `usage_event` + `usage_daily` (artifact usage tracking).
+///   - v3: added `session_turns` (per-turn token detail). Bumping this
+///     forces a re-scan for existing users so historical transcripts
+///     populate the new table on next `refresh()`. Without the bump,
+///     unchanged transcripts would never produce per-turn rows and the
+///     `top_costly_turns` query would silently return only fresh-after-
+///     this-release sessions.
+pub const SCHEMA_VERSION: &str = "3";
 
 pub const SCHEMA: &str = r#"
 CREATE TABLE IF NOT EXISTS usage_event (

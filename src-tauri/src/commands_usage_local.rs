@@ -283,15 +283,30 @@ pub async fn pricing_tier_set(
 ) -> Result<(), String> {
     let parsed = PriceTier::parse(&tier)
         .ok_or_else(|| format!("unknown pricing tier: {tier}"))?;
-    let snapshot = {
-        let mut guard = prefs
+    // Save first; only commit to in-memory state on success. If the
+    // disk write fails (out-of-space, permission revoked between
+    // launch and now), the in-memory pricing_tier stays at its
+    // pre-call value so a subsequent `pricing_tier_get` and the next
+    // `local_usage_aggregate` agree on what's actually persisted.
+    // The candidate snapshot is built without holding the prefs
+    // lock so the save's blocking I/O doesn't serialize unrelated
+    // preference reads.
+    let candidate = {
+        let guard = prefs
             .0
             .lock()
             .map_err(|e| format!("preferences lock poisoned: {e}"))?;
-        guard.pricing_tier = parsed;
-        guard.clone()
+        let mut snapshot = guard.clone();
+        snapshot.pricing_tier = parsed;
+        snapshot
     };
-    snapshot.save()
+    candidate.save()?;
+    let mut guard = prefs
+        .0
+        .lock()
+        .map_err(|e| format!("preferences lock poisoned: {e}"))?;
+    guard.pricing_tier = parsed;
+    Ok(())
 }
 
 /// Read the user's current pricing tier as the wire form. Lets the
@@ -358,14 +373,22 @@ pub struct TopCostlyPromptsDto {
 
 /// Tauri command — return the install's `final_n` costliest prompts
 /// in the supplied `spec` window, scored against the user's active
-/// pricing tier. The session index is refreshed in-band so newly-
-/// landed transcripts contribute to the ranking on the next
-/// dashboard tick. `final_n` is capped at 50 server-side to bound
-/// the UI footprint and the in-memory candidate pool.
+/// pricing tier. `final_n` is capped at 50 server-side to bound the
+/// UI footprint and the in-memory candidate pool.
+///
+/// `refresh_index` defaults to `true`; callers that have just run
+/// another command which refreshed the index (e.g. the dashboard
+/// fires `local_usage_aggregate` immediately before this) can pass
+/// `false` to avoid a redundant filesystem walk + stat-per-file
+/// pass. The (size, mtime, inode) guard makes the redundant case
+/// cheap (no re-parses) but it still walks `~/.claude/projects/`
+/// and stats every transcript, which is unnecessary work on every
+/// dashboard tick.
 #[tauri::command]
 pub async fn top_costly_prompts(
     spec: WindowSpec,
     final_n: usize,
+    refresh_index: Option<bool>,
     prefs: State<'_, PreferencesState>,
 ) -> Result<TopCostlyPromptsDto, String> {
     let now_ms = chrono::Utc::now().timestamp_millis();
@@ -384,15 +407,16 @@ pub async fn top_costly_prompts(
     let table = bundled.with_tier(tier);
 
     // The session index lives in the on-disk DB; opening it is cheap
-    // (idempotent + lazy). Refresh inline so newly-landed transcripts
-    // contribute to the ranking; the refresh itself is bounded by
-    // the (size, mtime, inode) re-parse guard.
+    // (idempotent + lazy). Skip the refresh when the caller signals
+    // they've already done one — see the doc-comment above.
     let config_dir = claudepot_core::paths::claude_config_dir();
     let db_path = claudepot_core::paths::claudepot_data_dir().join("sessions.db");
     let index = SessionIndex::open(&db_path).map_err(|e| format!("session index open: {e}"))?;
-    index
-        .refresh(&config_dir)
-        .map_err(|e| format!("session index refresh: {e}"))?;
+    if refresh_index.unwrap_or(true) {
+        index
+            .refresh(&config_dir)
+            .map_err(|e| format!("session index refresh: {e}"))?;
+    }
 
     let turns = top_costly_turns(&index, &table, window, n)
         .map_err(|e| format!("top_costly_turns: {e}"))?;

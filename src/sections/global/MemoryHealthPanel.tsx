@@ -203,7 +203,7 @@ function FileHealthCard({
           style={{
             fontSize: "var(--fs-2xs)",
             color: "var(--fg-faint)",
-            maxWidth: "var(--memory-path-max, tokens.settings.nav.width)",
+            maxWidth: "var(--settings-nav-width)",
             overflow: "hidden",
             textOverflow: "ellipsis",
             whiteSpace: "nowrap",

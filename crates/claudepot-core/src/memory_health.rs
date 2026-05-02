@@ -140,11 +140,17 @@ pub fn audit_text(path: &str, text: &str) -> FileHealth {
     let (lines_past_cutoff, chars_past_cutoff) = if line_count > GLOBAL_MEMORY_LINE_CUTOFF {
         let tail = &lines[GLOBAL_MEMORY_LINE_CUTOFF..];
         let count = tail.len();
-        // Re-count chars in the tail. Each `&str` in `lines` excludes
-        // its terminator, so the +count term restores the newlines
-        // that were stripped (an upper bound matching what the file
-        // actually contained for files with `\n` line endings).
-        let chars = tail.iter().map(|l| l.chars().count()).sum::<usize>() + count;
+        // Re-count chars in the tail. `lines()` strips terminators,
+        // so we add one byte per line for the newlines that were
+        // present — minus one if the file didn't end with `\n`,
+        // because the last past-cutoff line contributed no newline
+        // to the byte total. Without this adjustment the figure
+        // overstated invisible bytes by 1 char per no-trailing-newline
+        // file.
+        let raw_chars = tail.iter().map(|l| l.chars().count()).sum::<usize>();
+        let trailing_newline = text.ends_with('\n');
+        let newlines_in_tail = if trailing_newline { count } else { count - 1 };
+        let chars = raw_chars + newlines_in_tail;
         (count, chars)
     } else {
         (0, 0)
@@ -217,6 +223,21 @@ mod tests {
         assert_eq!(h.line_count, 250);
         assert_eq!(h.lines_past_cutoff, 50);
         assert_eq!(h.chars_past_cutoff, 100);
+    }
+
+    #[test]
+    fn audit_text_chars_past_cutoff_excludes_missing_trailing_newline() {
+        // 250 lines of "x" *without* a final \n on the last past-cutoff
+        // line. `lines()` still emits 250 entries; the past-cutoff
+        // tail is 50 lines totalling 50 chars + 49 newlines = 99 chars.
+        // Pre-fix the count was 100 — one phantom newline added for
+        // the EOF-terminated last line.
+        let mut body: String = (0..249).map(|_| "x\n").collect();
+        body.push('x'); // 250th line, no trailing newline
+        let h = audit_text("/x", &body);
+        assert_eq!(h.line_count, 250);
+        assert_eq!(h.lines_past_cutoff, 50);
+        assert_eq!(h.chars_past_cutoff, 99);
     }
 
     #[test]

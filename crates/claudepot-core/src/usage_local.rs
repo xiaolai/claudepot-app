@@ -403,13 +403,17 @@ pub fn rank_candidates(
             })
         })
         .collect();
-    // Descending by cost; ties broken by turn_index so output is
-    // deterministic across runs (matters for snapshot tests + the
-    // GUI's stable-row-key strategy).
+    // Descending by cost; ties broken by file_path then turn_index so
+    // output is deterministic even when two different transcripts
+    // produced equally-priced turns at the same ordinal. Without the
+    // file_path tiebreak, the order between equal-cost cross-file
+    // turns depended on input ordering, which jittered the GUI's
+    // stable-row-key strategy across re-fetches.
     scored.sort_by(|a, b| {
         b.cost_usd
             .partial_cmp(&a.cost_usd)
             .unwrap_or(std::cmp::Ordering::Equal)
+            .then_with(|| a.file_path.cmp(&b.file_path))
             .then_with(|| a.turn_index.cmp(&b.turn_index))
     });
     scored.truncate(final_n);
