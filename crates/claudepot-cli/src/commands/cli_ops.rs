@@ -158,7 +158,7 @@ pub async fn use_account(
                 "to": email,
             })
         );
-    } else {
+    } else if !ctx.quiet {
         println!("CLI: {from} → {email}");
         // Ask the core whether a CC process is alive only once, then
         // decide what to print. Skipping the probe entirely on non-force
