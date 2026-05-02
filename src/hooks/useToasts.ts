@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { invoke } from "@tauri-apps/api/core";
+import { notificationApi } from "../api/notification";
 
 export type Toast = {
   id: number;
@@ -170,15 +170,14 @@ export function useToasts() {
       // affect the in-app surface. The Rust handler tolerates being
       // called with a no-op state (the boot-fallback path) and simply
       // returns Err that we discard here.
-      void invoke("notification_log_append", {
-        args: {
+      void notificationApi
+        .notificationLogAppend({
           source: "toast",
           kind,
           title: text,
           body: "",
           target: null,
-        },
-      })
+        })
         .then(() => {
           // Same-process signal so the bell badge updates without
           // waiting for the 8 s poll. See notify.ts for the matching

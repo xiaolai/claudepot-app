@@ -26,7 +26,7 @@ import {
   requestPermission,
   sendNotification,
 } from "@tauri-apps/plugin-notification";
-import { invoke } from "@tauri-apps/api/core";
+import { notificationApi } from "../api/notification";
 
 /** Severity passed through to the notification log. Toasts pick
  *  `info` / `error`; OS dispatchers usually pick `notice` (non-error
@@ -384,15 +384,14 @@ export async function dispatchOsNotification(
   //     of OS banners, not out of in-app history. The log is the
   //     in-app surface; gating it on permission would conflate two
   //     opt-ins.
-  void invoke("notification_log_append", {
-    args: {
+  void notificationApi
+    .notificationLogAppend({
       source: "os",
       kind: opts.kind ?? "notice",
       title,
       body,
       target: opts.target ?? null,
-    },
-  })
+    })
     .then(() => {
       window.dispatchEvent(new Event("claudepot:notification-logged"));
     })

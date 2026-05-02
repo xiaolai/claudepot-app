@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { ScreenHeader } from "../shell/ScreenHeader";
 import { Button } from "../components/primitives/Button";
 import { SkeletonList } from "../components/primitives/Skeleton";
@@ -33,6 +33,17 @@ export function ThirdPartySection() {
     msg: string;
   } | null>(null);
   const [busyIds, setBusyIds] = useState<Set<string>>(new Set());
+  // Track the auto-dismiss timer so a fast unmount or a second toast
+  // doesn't fire setToast on a dead component / replace the timer with
+  // a stale one. `clearTimeout` on undefined is a no-op.
+  const toastTimerRef = useRef<number | undefined>(undefined);
+  useEffect(() => {
+    return () => {
+      if (toastTimerRef.current !== undefined) {
+        window.clearTimeout(toastTimerRef.current);
+      }
+    };
+  }, []);
   const [showAdd, setShowAdd] = useState(false);
   const [editTarget, setEditTarget] = useState<RouteSummaryDto | null>(null);
   const [removeTarget, setRemoveTarget] = useState<RouteSummaryDto | null>(
@@ -72,7 +83,13 @@ export function ThirdPartySection() {
 
   const showToast = (kind: "info" | "error", msg: string) => {
     setToast({ kind, msg });
-    window.setTimeout(() => setToast(null), 4500);
+    if (toastTimerRef.current !== undefined) {
+      window.clearTimeout(toastTimerRef.current);
+    }
+    toastTimerRef.current = window.setTimeout(() => {
+      setToast(null);
+      toastTimerRef.current = undefined;
+    }, 4500);
   };
 
   const handleUseCli = async (id: string) => {
