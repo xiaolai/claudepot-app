@@ -8,7 +8,7 @@
 //!     NULL-able (transcripts can have zero timestamped events).
 //!   - `indexed_at_ms` — wall-clock ms when the row was written.
 
-use crate::session::{SessionRow, TokenUsage, TurnRecord};
+use crate::session::{SessionRow, TokenUsage};
 use chrono::{DateTime, Utc};
 use rusqlite::{params, Connection};
 use std::fs;
@@ -215,81 +215,25 @@ fn is_token_char(c: char) -> bool {
 }
 
 /// Remove one row by path. Used for files that vanished from disk.
-/// Also drops every per-turn row associated with the same file —
-/// the cascade is by convention (no SQLite FK), but the rule is
-/// always "session row goes, its turns go too."
+/// Also drops every per-turn row associated with the same file via
+/// `turns::delete_turns_for_file` — the cascade is by convention
+/// (no SQLite FK), but the rule is always "session row goes, its
+/// turns go too."
 pub(super) fn delete_row(db: &Connection, file_path: &str) -> Result<(), SessionIndexError> {
     db.execute(
         "DELETE FROM sessions WHERE file_path = ?1",
         params![file_path],
     )?;
-    db.execute(
-        "DELETE FROM session_turns WHERE file_path = ?1",
-        params![file_path],
-    )?;
+    super::turns::delete_turns_for_file(db, file_path)?;
     Ok(())
 }
 
-/// Replace every per-turn row for `file_path` with the freshly-scanned
-/// `turns`. Called inside the same transaction as `upsert_row` so the
-/// cache stays internally consistent: either both the session
-/// aggregate and its per-turn detail update, or neither does.
-///
-/// `first_user_prompt` is already redacted at the SessionRow level;
-/// here we redact each per-turn `user_prompt_preview` independently
-/// because a transcript can paste a token mid-conversation and the
-/// first-prompt path won't catch later instances.
-pub(super) fn replace_turns(
-    db: &Connection,
-    file_path: &str,
-    turns: &[TurnRecord],
-) -> Result<(), SessionIndexError> {
-    db.execute(
-        "DELETE FROM session_turns WHERE file_path = ?1",
-        params![file_path],
-    )?;
-    let mut stmt = db.prepare_cached(SQL_INSERT_TURN)?;
-    for t in turns {
-        let preview = t.user_prompt_preview.as_deref().map(redact_secrets);
-        stmt.execute(params![
-            file_path,
-            t.turn_index as i64,
-            t.ts_ms,
-            t.model,
-            i64::try_from(t.tokens.input).unwrap_or(i64::MAX),
-            i64::try_from(t.tokens.output).unwrap_or(i64::MAX),
-            i64::try_from(t.tokens.cache_creation).unwrap_or(i64::MAX),
-            i64::try_from(t.tokens.cache_read).unwrap_or(i64::MAX),
-            preview,
-        ])?;
-    }
-    Ok(())
-}
-
-/// Load every persisted turn for one file, ordered by `turn_index`.
-/// Empty result is normal (sessions on disk before this table existed
-/// have no turns until their next re-scan).
-pub fn load_turns(
-    db: &Connection,
-    file_path: &str,
-) -> Result<Vec<TurnRecord>, SessionIndexError> {
-    let mut stmt = db.prepare(SQL_SELECT_TURNS_BY_FILE)?;
-    let rows = stmt.query_map(params![file_path], |r| {
-        Ok(TurnRecord {
-            turn_index: usize::try_from(r.get::<_, i64>("turn_index")?).unwrap_or(0),
-            ts_ms: r.get("ts_ms")?,
-            model: r.get("model")?,
-            tokens: TokenUsage {
-                input: u64::try_from(r.get::<_, i64>("tokens_input")?).unwrap_or(0),
-                output: u64::try_from(r.get::<_, i64>("tokens_output")?).unwrap_or(0),
-                cache_creation: u64::try_from(r.get::<_, i64>("tokens_cache_creation")?)
-                    .unwrap_or(0),
-                cache_read: u64::try_from(r.get::<_, i64>("tokens_cache_read")?).unwrap_or(0),
-            },
-            user_prompt_preview: r.get("user_prompt_preview")?,
-        })
-    })?;
-    Ok(rows.collect::<Result<Vec<_>, _>>()?)
+/// Same redactor as `redact_secrets`, exposed to the sibling `turns`
+/// module so per-turn writes can scrub each prompt preview
+/// independently (a token pasted mid-conversation lands only in
+/// `user_prompt_preview`, not in the session-level first-prompt path).
+pub(super) fn redact_secrets_for_turns(input: &str) -> String {
+    redact_secrets(input)
 }
 
 /// Load every cached row back as `SessionRow`, ordered newest-first
@@ -432,24 +376,6 @@ SELECT
     git_branch, cc_version, display_slug, has_error, is_sidechain,
     indexed_at_ms
 FROM sessions
-"#;
-
-const SQL_INSERT_TURN: &str = r#"
-INSERT INTO session_turns (
-    file_path, turn_index, ts_ms, model,
-    tokens_input, tokens_output, tokens_cache_creation, tokens_cache_read,
-    user_prompt_preview
-) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)
-"#;
-
-const SQL_SELECT_TURNS_BY_FILE: &str = r#"
-SELECT
-    turn_index, ts_ms, model,
-    tokens_input, tokens_output, tokens_cache_creation, tokens_cache_read,
-    user_prompt_preview
-FROM session_turns
-WHERE file_path = ?1
-ORDER BY turn_index ASC
 "#;
 
 const SQL_SELECT_ALL_SORTED: &str = r#"
