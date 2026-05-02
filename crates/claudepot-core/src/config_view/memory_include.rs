@@ -26,6 +26,8 @@ use regex::Regex;
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 
+use crate::path_utils::canonicalize_simplified;
+
 /// CC's extraction regex, compiled once at first use.
 /// Pattern: `/(?:^|\s)@((?:[^\s\\]|\\ )+)/g` (`claudemd.ts:459`).
 static INCLUDE_RE: Lazy<Regex> =
@@ -544,7 +546,7 @@ fn walk(
     if depth >= MAX_DEPTH {
         return;
     }
-    let canon_original = std::fs::canonicalize(file).unwrap_or_else(|_| file.to_path_buf());
+    let canon_original = canonicalize_simplified(file).unwrap_or_else(|_| file.to_path_buf());
     if !processed.insert(canon_original.clone()) {
         return;
     }
@@ -565,7 +567,7 @@ fn walk(
     // neighbour.
     let base_dir = canon_original.parent().unwrap_or_else(|| Path::new("."));
     for target in extract_includes(body, base_dir) {
-        let canon = std::fs::canonicalize(&target).unwrap_or_else(|_| target.clone());
+        let canon = canonicalize_simplified(&target).unwrap_or_else(|_| target.clone());
         if !canon.is_file() {
             continue;
         }
@@ -598,8 +600,8 @@ fn walk(
 }
 
 fn is_inside(candidate: &Path, anchor: &Path) -> bool {
-    let c = std::fs::canonicalize(candidate).unwrap_or_else(|_| candidate.to_path_buf());
-    let a = std::fs::canonicalize(anchor).unwrap_or_else(|_| anchor.to_path_buf());
+    let c = canonicalize_simplified(candidate).unwrap_or_else(|_| candidate.to_path_buf());
+    let a = canonicalize_simplified(anchor).unwrap_or_else(|_| anchor.to_path_buf());
     c.starts_with(a)
 }
 

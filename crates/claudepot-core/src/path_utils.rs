@@ -5,6 +5,8 @@
 //! peculiarities (verbatim `\\?\` prefix, UNC forms, drive letters, `\`
 //! separator) are handled uniformly. See `.claude/rules/paths.md`.
 
+use std::path::{Path, PathBuf};
+
 /// Strip Windows verbatim / extended-length path prefix (`\\?\`).
 ///
 /// `std::fs::canonicalize` on Windows returns `\\?\C:\Users\...` (or
@@ -87,6 +89,27 @@ pub fn is_absolute_path_str(path: &str) -> bool {
         return true;
     }
     std::path::Path::new(path).is_absolute()
+}
+
+/// `std::fs::canonicalize` paired with [`simplify_windows_path`] so the
+/// returned `PathBuf` never carries the `\\?\` verbatim prefix. Use
+/// this everywhere instead of `fs::canonicalize` so downstream
+/// `starts_with`, hash-set membership, and `sanitize_path` parity all
+/// see a canonical form that matches what CC writes to disk.
+///
+/// On non-Windows hosts this is a thin wrapper. On Windows it strips
+/// the verbatim prefix that `fs::canonicalize` adds.
+pub fn canonicalize_simplified(path: &Path) -> std::io::Result<PathBuf> {
+    let canon = std::fs::canonicalize(path)?;
+    #[cfg(windows)]
+    {
+        let s = canon.to_string_lossy().into_owned();
+        let simplified = simplify_windows_path(&s);
+        if simplified != s {
+            return Ok(PathBuf::from(simplified));
+        }
+    }
+    Ok(canon)
 }
 
 /// Expand `~` or `~/...` against `$HOME`. Returns `None` if the input
@@ -311,5 +334,30 @@ mod tests {
         let result = expand_tilde("~/foo").expect("HOME available");
         assert!(!result.contains("//"));
         assert!(!result.ends_with('/') || result == "/");
+    }
+
+    // -------------------------------------------------------------------
+    // canonicalize_simplified — runs on every host OS
+    // -------------------------------------------------------------------
+
+    #[test]
+    fn canonicalize_simplified_returns_real_path() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let canon = canonicalize_simplified(tmp.path()).expect("canonicalize");
+        assert!(canon.is_absolute());
+        // Result must never carry a verbatim prefix, regardless of host.
+        let s = canon.to_string_lossy();
+        assert!(
+            !s.starts_with(r"\\?\"),
+            "canonicalize_simplified leaked \\\\?\\ prefix: {s}"
+        );
+    }
+
+    #[test]
+    fn canonicalize_simplified_propagates_io_error() {
+        let result = canonicalize_simplified(std::path::Path::new(
+            "/nonexistent-claudepot-test-path-9f2c",
+        ));
+        assert!(result.is_err());
     }
 }

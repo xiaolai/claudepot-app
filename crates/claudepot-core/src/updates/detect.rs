@@ -9,6 +9,8 @@ use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
+use crate::path_utils::canonicalize_simplified;
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum CliInstallKind {
@@ -122,7 +124,7 @@ pub fn resolve_active_cli_binary() -> Option<PathBuf> {
         let candidate = dir.join(target);
         if let Ok(meta) = std::fs::metadata(&candidate) {
             if meta.is_file() {
-                return Some(std::fs::canonicalize(&candidate).unwrap_or(candidate));
+                return Some(canonicalize_simplified(&candidate).unwrap_or(candidate));
             }
         }
     }
@@ -157,7 +159,7 @@ fn detect_cli_installs_at(home: Option<&Path>) -> Vec<CliInstall> {
     if let Some(home) = home {
         let bin = home.join(NATIVE_BIN_REL);
         if bin.exists() {
-            let resolved = std::fs::canonicalize(&bin).unwrap_or_else(|_| bin.clone());
+            let resolved = canonicalize_simplified(&bin).unwrap_or_else(|_| bin.clone());
             let version =
                 native_version_from_target(&resolved).or_else(|| query_binary_version(&bin));
             out.push(CliInstall {

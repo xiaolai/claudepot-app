@@ -165,12 +165,8 @@ fn check_in_scope(path: &Path, scope: &ApplyScope) -> Result<(), ValidationError
 /// traverses through a missing prefix.
 fn resolve_for_check(path: &Path) -> Result<PathBuf, ValidationError> {
     let path = expand_user(path);
-    if let Ok(canon) = std::fs::canonicalize(&path) {
-        // Strip Windows verbatim `\\?\` prefix so the resolved
-        // form compares equal to the user-typed glob prefix.
-        let s = canon.display().to_string();
-        let simplified = crate::path_utils::simplify_windows_path(&s);
-        return Ok(PathBuf::from(simplified));
+    if let Ok(canon) = crate::path_utils::canonicalize_simplified(&path) {
+        return Ok(canon);
     }
     // Pre-normalize the input so `..` segments after a missing
     // prefix collapse before we walk. Otherwise
@@ -182,12 +178,8 @@ fn resolve_for_check(path: &Path) -> Result<PathBuf, ValidationError> {
     let mut tail: Vec<std::ffi::OsString> = Vec::new();
     let mut cursor: PathBuf = pre_normalized.clone();
     loop {
-        if let Ok(canon) = std::fs::canonicalize(&cursor) {
-            // Strip the Windows verbatim prefix so the joined form
-            // matches user-friendly globs.
-            let canon_str = canon.display().to_string();
-            let simplified = crate::path_utils::simplify_windows_path(&canon_str);
-            let mut full = PathBuf::from(simplified);
+        if let Ok(canon) = crate::path_utils::canonicalize_simplified(&cursor) {
+            let mut full = canon;
             // Re-join the captured tail (in reverse-chronological
             // order, hence the .rev() below).
             for piece in tail.iter().rev() {
@@ -397,7 +389,6 @@ fn base64_decode(input: &str) -> Result<Vec<u8>, String> {
 mod tests {
     use super::*;
     use crate::templates::blueprint::{ApplyConfig, ApplyOperation, ApplyScope, ItemIdStrategy};
-    use std::path::PathBuf;
 
     fn config(allow_ops: &[ApplyOperation], allowed_paths: &[&str]) -> ApplyConfig {
         ApplyConfig {
@@ -501,7 +492,7 @@ mod tests {
 
     #[test]
     fn glob_double_star_matches_subtree() {
-        let mut p = PathBuf::from(std::env::temp_dir());
+        let mut p = std::env::temp_dir();
         p.push("claudepot-test-deep");
         p.push("a");
         p.push("b");
