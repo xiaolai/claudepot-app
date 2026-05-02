@@ -325,7 +325,7 @@ fn canonicalize_glob_prefix(pattern: &str) -> String {
     // Split on either separator so Windows-shaped patterns also
     // work. The output is forward-slash-shaped so it pairs with
     // the haystack normalization below.
-    let segments: Vec<&str> = pattern.split(|c| c == '/' || c == '\\').collect();
+    let segments: Vec<&str> = pattern.split(['/', '\\']).collect();
     let mut prefix = PathBuf::new();
     let mut wild_idx = segments.len();
     for (i, seg) in segments.iter().enumerate() {
