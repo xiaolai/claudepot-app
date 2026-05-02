@@ -590,9 +590,14 @@ pub(crate) fn scan_session(slug: &str, path: &Path) -> Result<SessionScan, Sessi
                 message_count += 1;
                 user_message_count += 1;
                 let prompt_text = extract_user_text(&v).map(|t| truncate_prompt(&t));
-                if let Some(p) = prompt_text.as_ref() {
-                    last_user_prompt = Some(p.clone());
-                }
+                // Always replace the carry-over, even when the new user
+                // line has no extractable text (image-only message,
+                // tool-result-only line, or a caveat-stripped CLI
+                // command). Carrying a stale text prompt forward would
+                // mis-attribute it to a later assistant turn and the
+                // top-costly-prompts panel would show the wrong text
+                // alongside the right cost.
+                last_user_prompt = prompt_text.clone();
                 if first_user_prompt.is_none() {
                     if let Some(p) = prompt_text {
                         first_user_prompt = Some(p);

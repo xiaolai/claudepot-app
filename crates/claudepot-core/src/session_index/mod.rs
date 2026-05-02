@@ -437,12 +437,23 @@ fn apply_schema(db: &Connection) -> Result<(), SessionIndexError> {
         params![crate::artifact_usage::schema::SCHEMA_VERSION],
     )?;
 
-    if matches!(prior_version.as_deref(), Some("1")) {
+    let current_version = crate::artifact_usage::schema::SCHEMA_VERSION;
+    let needs_upgrade_rescan = match prior_version.as_deref() {
+        Some(v) if v != current_version => true,
+        _ => false,
+    };
+    if needs_upgrade_rescan {
         // Drop cached session rows so the next refresh re-scans every
-        // transcript. Cheaper than walking every existing row to extract
-        // events — a cold scan of ~6 k JSONL files takes ~10 s, well
-        // under any user-perceptible threshold for an upgrade event.
+        // transcript and repopulates every co-located table that
+        // depends on per-line JSONL extraction (artifact_usage,
+        // session_turns). Cheaper than walking every existing row to
+        // emit events — a cold scan of ~6 k JSONL files takes ~10 s,
+        // well under any user-perceptible threshold for an upgrade
+        // event. The session_turns rows are dropped in the same pass
+        // because `delete_row` cascades them; without that, stale
+        // turn rows for files that vanished from disk would linger.
         db.execute("DELETE FROM sessions", [])?;
+        db.execute("DELETE FROM session_turns", [])?;
     }
     Ok(())
 }
@@ -1257,6 +1268,76 @@ mod tests {
             idx.schema_version().unwrap().as_deref(),
             Some(crate::artifact_usage::schema::SCHEMA_VERSION),
             "schema_version must advance to v2 after upgrade"
+        );
+    }
+
+    #[test]
+    fn schema_v2_to_v3_upgrade_clears_sessions_and_session_turns() {
+        // Field condition: a sessions.db from before the session_turns
+        // table existed (i.e. schema_version='2' but no per-turn rows).
+        // After re-opening, both `sessions` and `session_turns` must be
+        // empty so the next refresh re-scans every file from cold and
+        // populates per-turn data for historical transcripts. Without
+        // the bump, top_costly_turns would silently miss every session
+        // older than this release.
+        let tmp = TempDir::new().unwrap();
+        let path = tmp.path().join("sessions.db");
+
+        // Hand-craft a v2 DB with a session row + a stale turn row.
+        {
+            let db = Connection::open(&path).unwrap();
+            db.execute_batch(schema::SCHEMA).unwrap();
+            db.execute_batch(crate::artifact_usage::schema::SCHEMA).unwrap();
+            db.execute(
+                "INSERT OR REPLACE INTO meta (k, v) VALUES ('schema_version', '2')",
+                [],
+            )
+            .unwrap();
+            db.execute(
+                "INSERT INTO sessions (
+                    file_path, slug, session_id, file_size_bytes,
+                    file_mtime_ns, file_inode, project_path,
+                    project_from_transcript, event_count, message_count,
+                    user_message_count, assistant_message_count,
+                    models_json, tokens_input, tokens_output,
+                    tokens_cache_creation, tokens_cache_read, has_error,
+                    is_sidechain, indexed_at_ms
+                 ) VALUES (
+                    '/legacy.jsonl', '-legacy', 'OLD', 1, 1, 1, '/x',
+                    0, 0, 0, 0, 0, '[]', 0, 0, 0, 0, 0, 0, 0
+                 )",
+                [],
+            )
+            .unwrap();
+            db.execute(
+                "INSERT INTO session_turns (
+                    file_path, turn_index, ts_ms, model,
+                    tokens_input, tokens_output, tokens_cache_creation, tokens_cache_read,
+                    user_prompt_preview
+                 ) VALUES ('/legacy.jsonl', 0, 0, 'old-model', 0, 0, 0, 0, NULL)",
+                [],
+            )
+            .unwrap();
+        }
+
+        let idx = SessionIndex::open(&path).unwrap();
+        assert_eq!(
+            idx.row_count().unwrap(),
+            0,
+            "v2→v3 upgrade must clear sessions so refresh repopulates"
+        );
+        let turn_count: i64 = idx
+            .db()
+            .query_row("SELECT COUNT(*) FROM session_turns", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(
+            turn_count, 0,
+            "v2→v3 upgrade must clear session_turns so per-turn data repopulates from disk"
+        );
+        assert_eq!(
+            idx.schema_version().unwrap().as_deref(),
+            Some("3"),
+            "schema_version must advance to v3 after upgrade"
         );
     }
 

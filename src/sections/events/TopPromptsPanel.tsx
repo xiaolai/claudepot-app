@@ -66,9 +66,10 @@ function CostlyTurnRow({ turn, rank }: { turn: CostlyTurn; rank: number }) {
         background: "var(--bg-raised)",
         border: "var(--bw-hair) solid var(--line)",
         borderRadius: "var(--r-1)",
-        // The rank-col custom prop lets us keep the rank column tight
-        // without a magic number. 28px fits "10." at the current font.
-        ["--rank-col" as keyof React.CSSProperties]: "tokens.sp[28]",
+        // 28px column fits two-digit ordinals at the current font.
+        // Uses the existing `--sp-28` spacing token rather than a
+        // bare literal so the value flows through the design system.
+        ["--rank-col" as keyof React.CSSProperties]: "var(--sp-28)",
       } as React.CSSProperties}
     >
       <div
@@ -134,7 +135,7 @@ function CostlyTurnRow({ turn, rank }: { turn: CostlyTurn; rank: number }) {
           color: "var(--fg)",
           fontVariantNumeric: "tabular-nums",
           textAlign: "right",
-          minWidth: "var(--cost-col, tokens.sp[60])",
+          minWidth: "var(--sp-60)",
         }}
       >
         ${turn.cost_usd.toFixed(2)}

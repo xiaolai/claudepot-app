@@ -45,10 +45,20 @@ export const usageApi = {
    * truncated. Returns `{ turns: [], pricing_tier }` when no turns
    * have been indexed yet (fresh install with sessions on disk but
    * no re-scan to populate the per-turn table).
+   *
+   * `options.refreshIndex` defaults to `true`. Callers that have just
+   * run `localUsageAggregate` (which refreshes the same index) can
+   * pass `false` to skip a redundant filesystem walk on every
+   * dashboard tick.
    */
-  topCostlyPrompts: (window: UsageWindowSpec, finalN: number) =>
+  topCostlyPrompts: (
+    window: UsageWindowSpec,
+    finalN: number,
+    options?: { refreshIndex?: boolean },
+  ) =>
     invoke<TopCostlyPrompts>("top_costly_prompts", {
       spec: toWire(window),
       finalN,
+      refreshIndex: options?.refreshIndex ?? true,
     }),
 };

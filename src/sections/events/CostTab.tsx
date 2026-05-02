@@ -85,6 +85,12 @@ export function CostTab() {
   const [choice, setChoice] = useState<WindowChoice>("7d");
   const [report, setReport] = useState<LocalUsageReport | null>(null);
   const [topPrompts, setTopPrompts] = useState<TopCostlyPrompts | null>(null);
+  // Active pricing tier hydrated independently of the report so the
+  // Tier picker doesn't flicker through the default value on cold
+  // start when a user has previously chosen Bedrock / Vertex. Falls
+  // back to the report's `pricing_tier` echo (and ultimately to
+  // `anthropic_api`) until the standalone fetch lands.
+  const [activeTier, setActiveTier] = useState<PriceTierId | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [sortKey, setSortKey] = useState<SortKey>("cost");
@@ -95,22 +101,28 @@ export function CostTab() {
     async (c: WindowChoice) => {
       const seq = ++seqRef.current;
       setLoading(true);
-      // Fire both requests in parallel — the top-prompts query reads
-      // the session_turns table while the aggregate reads the
-      // sessions table; both refresh the index before reading. The
-      // user-facing result lands when the slower of the two
-      // resolves, which is the aggregate (it walks the full index).
+      // Serialize the two backend calls so the second one (top-N) can
+      // skip the redundant index refresh — the aggregate just did
+      // it. Promise.all triggered two filesystem walks per tab tick,
+      // wasting a stat-per-transcript pass each time.
       try {
-        const [r, tp] = await Promise.all([
-          api.localUsageAggregate(toSpec(c)),
-          api.topCostlyPrompts(toSpec(c), TOP_PROMPTS_LIMIT),
-        ]);
+        const r = await api.localUsageAggregate(toSpec(c));
+        if (seq !== seqRef.current) return;
+        const tp = await api.topCostlyPrompts(toSpec(c), TOP_PROMPTS_LIMIT, {
+          refreshIndex: false,
+        });
         if (seq !== seqRef.current) return;
         setReport(r);
         setTopPrompts(tp);
         setError(null);
       } catch (e) {
         if (seq !== seqRef.current) return;
+        // Drop stale data on error — otherwise the UI shows old
+        // summary tiles + old project rows alongside a fresh error
+        // banner, which is worse than an empty pane that says
+        // "couldn't load."
+        setReport(null);
+        setTopPrompts(null);
         setError(e instanceof Error ? e.message : String(e));
       } finally {
         if (seq === seqRef.current) setLoading(false);
@@ -118,6 +130,27 @@ export function CostTab() {
     },
     [],
   );
+
+  // Hydrate the active tier on mount via the dedicated getter. Done
+  // once per component lifetime — subsequent setTier calls update
+  // local state directly, and the report-echo path keeps the
+  // value in sync if a different surface mutates the preference.
+  useEffect(() => {
+    let cancelled = false;
+    void (async () => {
+      try {
+        const t = await api.pricingTierGet();
+        if (!cancelled) setActiveTier(t);
+      } catch {
+        // Failure is non-fatal — the report's `pricing_tier` echo
+        // will populate the picker on the first successful fetch,
+        // which lands within ~100ms of mount in the normal path.
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   useEffect(() => {
     void fetchReport(choice);
@@ -156,9 +189,10 @@ export function CostTab() {
     async (t: PriceTierId) => {
       try {
         await api.pricingTierSet(t);
-        // The fresh report carries the updated tier label in its
-        // `pricing_tier` field, so a single re-fetch keeps the UI
-        // in sync without a separate state path.
+        setActiveTier(t);
+        // Re-fetch so the table's dollar figures reflect the new
+        // tier's rate multiplier; the report's pricing_tier echo
+        // cross-checks our local state on the way back.
         await fetchReport(choice);
       } catch (e) {
         setError(e instanceof Error ? e.message : String(e));
@@ -189,7 +223,11 @@ export function CostTab() {
         onChoice={setChoice}
         pricingSource={report?.pricing_source ?? null}
         pricingError={report?.pricing_error ?? null}
-        pricingTier={report?.pricing_tier ?? null}
+        // Prefer the explicitly-hydrated tier; fall back to the
+        // report echo for users on a slow first-load path. Keeps
+        // the picker stable through state transitions even when the
+        // report is briefly null (e.g. during a re-fetch).
+        pricingTier={activeTier ?? report?.pricing_tier ?? null}
         onTier={setTier}
         loading={loading}
       />
@@ -395,7 +433,11 @@ function SummaryTiles({
       />
       <Tile
         label="Sessions"
-        value={t ? String(t.session_count) : dash}
+        // Render `—` for zero so the empty-window state matches the
+        // project-wide "render-if-nonzero" rule. A literal `0` reads
+        // as a real value and competes with the "no sessions in this
+        // window" notice in the table below.
+        value={t && t.session_count > 0 ? String(t.session_count) : dash}
         sub={
           t && t.unpriced_sessions > 0
             ? `${t.unpriced_sessions} unpriced`
@@ -851,26 +893,52 @@ function sortRows(
   key: SortKey,
   dir: SortDir,
 ): ProjectUsageRow[] {
-  const cmp = (a: ProjectUsageRow, b: ProjectUsageRow): number => {
+  // Partition nulls out FIRST so they always land at the end
+  // regardless of `dir`. Reversing the post-sort array flipped the
+  // null position with the rest of the data, which made the
+  // ascending view of cost / cache-hit / last-active put unpriced
+  // rows above every real row. The partition keeps "nulls last" as
+  // an invariant the caller can rely on.
+  const nullKey = (r: ProjectUsageRow): boolean => {
     switch (key) {
       case "cost":
-        return nullableNumberCmp(a.cost_usd, b.cost_usd);
+        return r.cost_usd == null;
+      case "last":
+        return r.last_active_ms == null;
+      case "cache_hit":
+        return cacheHitRate(r) == null;
+      default:
+        return false;
+    }
+  };
+  const realCmp = (a: ProjectUsageRow, b: ProjectUsageRow): number => {
+    switch (key) {
+      case "cost":
+        // Both are non-null in this branch — coerce safely.
+        return (a.cost_usd ?? 0) - (b.cost_usd ?? 0);
       case "sessions":
         return a.session_count - b.session_count;
       case "last":
-        return nullableNumberCmp(a.last_active_ms, b.last_active_ms);
+        return (a.last_active_ms ?? 0) - (b.last_active_ms ?? 0);
       case "input":
         return a.tokens_input - b.tokens_input;
       case "output":
         return a.tokens_output - b.tokens_output;
       case "cache_hit":
-        return nullableNumberCmp(cacheHitRate(a), cacheHitRate(b));
+        return (cacheHitRate(a) ?? 0) - (cacheHitRate(b) ?? 0);
       case "project":
         return a.project_path.localeCompare(b.project_path);
     }
   };
-  const sorted = [...rows].sort(cmp);
-  return dir === "asc" ? sorted : sorted.reverse();
+  const real: ProjectUsageRow[] = [];
+  const nullsAtEnd: ProjectUsageRow[] = [];
+  for (const r of rows) {
+    if (nullKey(r)) nullsAtEnd.push(r);
+    else real.push(r);
+  }
+  real.sort(realCmp);
+  if (dir === "desc") real.reverse();
+  return [...real, ...nullsAtEnd];
 }
 
 /** Render the project's basename — the CWD's leaf folder name. CC
@@ -886,18 +954,12 @@ function displayPath(p: string): string {
   return segs[segs.length - 1] ?? trimmed;
 }
 
-/** Compare two `T | null` numerics so nulls sort to the end in ascending
- *  order. Without this, a sort by `cost` puts the unpriced-cost rows at
- *  the top of the descending view, hiding the actually-expensive ones. */
-function nullableNumberCmp(
-  a: number | null,
-  b: number | null,
-): number {
-  if (a == null && b == null) return 0;
-  if (a == null) return -1;
-  if (b == null) return 1;
-  return a - b;
-}
+// `nullableNumberCmp` was removed when sortRows started partitioning
+// nulls explicitly. The previous impl returned -1 for `a == null` and
+// then relied on the caller reversing the array for descending order,
+// which silently inverted the "nulls last" invariant in ascending
+// mode and floated unpriced rows above every priced one. The new
+// partition is direction-independent and easier to test.
 
 // `TopPromptsPanel` was extracted to `./TopPromptsPanel.tsx` to keep
 // this file under the loc-guardian limit. Imported at the top.
