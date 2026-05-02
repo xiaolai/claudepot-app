@@ -17,7 +17,9 @@
 //! defaults to false until the routes module exposes a flag.
 //! `capabilities_override` is read when present.
 
+use claudepot_core::automations::types::HostPlatform;
 use claudepot_core::automations::AutomationStore;
+use claudepot_core::paths::claudepot_data_dir;
 use claudepot_core::routes::{Route, RouteProvider, RouteStore};
 use claudepot_core::templates::apply::{
     apply_selected, sidecar, ApplyReceipt, PendingChanges,
@@ -85,14 +87,13 @@ pub async fn templates_sample_report(id: String) -> Result<String, String> {
 }
 
 /// Read a `pending-changes.json` side-car for a specific run.
-/// The path is scoped to `~/.claudepot/` like other report
-/// reads. Returns the parsed structure.
+/// The path is scoped to the claudepot data dir (which honors
+/// `CLAUDEPOT_DATA_DIR`) like other report reads. Returns the
+/// parsed structure.
 #[tauri::command]
 pub async fn templates_pending_changes(path: String) -> Result<PendingChanges, String> {
     use std::path::PathBuf;
-    let claudepot_root = dirs::home_dir()
-        .ok_or_else(|| "could not resolve home dir".to_string())?
-        .join(".claudepot");
+    let claudepot_root = claudepot_data_dir();
     let target = PathBuf::from(&path);
     let canonical_target = target
         .canonicalize()
@@ -102,7 +103,8 @@ pub async fn templates_pending_changes(path: String) -> Result<PendingChanges, S
         .unwrap_or(claudepot_root.clone());
     if !canonical_target.starts_with(&canonical_root) {
         return Err(format!(
-            "pending-changes path is outside ~/.claudepot/: {}",
+            "pending-changes path is outside {}: {}",
+            canonical_root.display(),
             canonical_target.display()
         ));
     }
@@ -120,6 +122,18 @@ pub async fn templates_apply_pending(
     selected_ids: Vec<String>,
 ) -> Result<ApplyReceipt, String> {
     let pending = templates_pending_changes(pending_path).await?;
+
+    // Refuse to apply pending changes whose recorded
+    // `automation_id` doesn't match the caller's argument.
+    // Otherwise a sidecar from automation A could be paired with
+    // automation B's broader apply policy and execute under the
+    // wrong scope.
+    if pending.automation_id != automation_id {
+        return Err(format!(
+            "pending-changes file belongs to automation {} but apply was requested for {}",
+            pending.automation_id, automation_id
+        ));
+    }
 
     // Resolve the blueprint via the automation's template_id.
     let store = AutomationStore::open()
@@ -219,9 +233,7 @@ pub async fn routing_rules_evaluate_for(
 #[tauri::command]
 pub async fn templates_read_report(path: String) -> Result<String, String> {
     use std::path::PathBuf;
-    let claudepot_root = dirs::home_dir()
-        .ok_or_else(|| "could not resolve home dir".to_string())?
-        .join(".claudepot");
+    let claudepot_root = claudepot_data_dir();
     let target = PathBuf::from(&path);
     let canonical_target = target
         .canonicalize()
@@ -231,7 +243,8 @@ pub async fn templates_read_report(path: String) -> Result<String, String> {
         .unwrap_or(claudepot_root.clone());
     if !canonical_target.starts_with(&canonical_root) {
         return Err(format!(
-            "report path is outside ~/.claudepot/: {}",
+            "report path is outside {}: {}",
+            canonical_root.display(),
             canonical_target.display()
         ));
     }
@@ -265,6 +278,19 @@ pub async fn templates_install(
     let bp = r
         .get(&instance.blueprint_id)
         .ok_or_else(|| format!("unknown template id: {}", instance.blueprint_id))?;
+    // Defense-in-depth: the gallery filters by `supported_platforms`
+    // via `templates_list`, but a direct IPC call to
+    // `templates_install` would otherwise still let a macOS-only
+    // template instantiate on Linux/Windows. Reject here so the
+    // contract is symmetric.
+    let host = HostPlatform::current();
+    if !bp.supports(host) {
+        return Err(format!(
+            "template {} does not declare support for {:?}",
+            bp.id().0,
+            host
+        ));
+    }
 
     // Translate the wire DTO to the core `TemplateInstance`.
     let placeholder_values = decode_placeholder_values(bp, &instance.placeholder_values)?;

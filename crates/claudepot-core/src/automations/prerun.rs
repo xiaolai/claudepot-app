@@ -62,13 +62,24 @@ pub enum ProbeKind {
     None,
 }
 
-/// Choose a probe shape from a route's provider.
+/// Choose a probe shape from a route's provider. Ollama
+/// detection is intentionally narrow — only the default port
+/// `11434` and the explicit `/v1/api/tags` style trigger the
+/// Ollama branch. A generic `/api/` substring would
+/// false-positive on OpenRouter / LiteLLM whose normal base URL
+/// contains `/api/v1`.
 pub fn probe_for(route: &Route) -> ProbeKind {
     match &route.provider {
         RouteProvider::Gateway(cfg) => {
-            if cfg.base_url.contains("/api/")
-                || cfg.base_url.contains("11434") /* default Ollama port */
-            {
+            let url = cfg.base_url.as_str();
+            // Heuristic: Ollama's default install runs on
+            // localhost:11434 OR the user typed an explicit
+            // `/api/tags` path into the base URL. Anything else
+            // is treated as a generic OpenAI-compatible gateway.
+            let is_ollama = url.contains(":11434")
+                || url.ends_with("/api/tags")
+                || url.contains("/api/tags?");
+            if is_ollama {
                 ProbeKind::OllamaTags
             } else {
                 ProbeKind::HttpHead
@@ -91,8 +102,22 @@ pub fn probe_sync(route: &Route, timeout: Duration) -> Result<(), String> {
         return Ok(());
     }
 
-    let base = match &route.provider {
-        RouteProvider::Gateway(cfg) => cfg.base_url.clone(),
+    // Capture base URL + the optional gateway auth so probes
+    // against authenticated endpoints (LiteLLM with API key,
+    // Cloudflare AI Gateway, etc.) don't false-fail with 401.
+    // Ollama accepts any token (or none); attaching one is
+    // harmless.
+    let (base, auth) = match &route.provider {
+        RouteProvider::Gateway(cfg) => {
+            let scheme = cfg.auth_scheme.as_str().to_string();
+            let key = cfg.api_key.clone();
+            let header = if key.trim().is_empty() {
+                None
+            } else {
+                Some((scheme, key))
+            };
+            (cfg.base_url.clone(), header)
+        }
         _ => return Ok(()), // unreachable — already handled by ProbeKind::None
     };
 
@@ -117,10 +142,21 @@ pub fn probe_sync(route: &Route, timeout: Duration) -> Result<(), String> {
             .build()
             .map_err(|e| format!("reqwest client build: {e}"))?;
 
-        let resp: Result<reqwest::Response, reqwest::Error> = match kind {
-            ProbeKind::OllamaTags => client.get(&url).send().await,
-            _ => client.head(&url).send().await,
+        let mut req = match kind {
+            ProbeKind::OllamaTags => client.get(&url),
+            _ => client.head(&url),
         };
+        if let Some((scheme, key)) = &auth {
+            // `Bearer` and `Basic` are the only schemes the
+            // route DTO models today; both render to a single
+            // `Authorization` header.
+            let header_value = match scheme.as_str() {
+                "basic" => format!("Basic {key}"),
+                _ => format!("Bearer {key}"),
+            };
+            req = req.header("Authorization", header_value);
+        }
+        let resp: Result<reqwest::Response, reqwest::Error> = req.send().await;
 
         match resp {
             Ok(r) if r.status().is_success() || r.status().is_redirection() => Ok(()),
