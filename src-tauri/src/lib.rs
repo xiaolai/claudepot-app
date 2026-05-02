@@ -598,6 +598,8 @@ pub fn run() {
             commands_pricing::pricing_get,
             commands_pricing::pricing_refresh,
             commands_usage_local::local_usage_aggregate,
+            commands_usage_local::pricing_tier_get,
+            commands_usage_local::pricing_tier_set,
             config_watch::config_watch_start,
             config_watch::config_watch_stop,
             commands_migrate::migrate_inspect,
