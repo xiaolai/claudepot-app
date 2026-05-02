@@ -18,6 +18,8 @@
 
 use std::collections::BTreeMap;
 
+use crate::automations::types::HostPlatform;
+
 use super::blueprint::Blueprint;
 use super::error::TemplateError;
 
@@ -216,6 +218,15 @@ impl TemplateRegistry {
 
     pub fn list(&self) -> impl Iterator<Item = &Blueprint> {
         self.by_id.values()
+    }
+
+    /// Iterator over blueprints that declare support for `host`.
+    /// The Tauri `templates_list` command projects this so the
+    /// gallery never surfaces a template the user cannot run.
+    pub fn list_for(&self, host: HostPlatform) -> impl Iterator<Item = &Blueprint> {
+        self.by_id
+            .values()
+            .filter(move |bp| bp.supports(host))
     }
 
     pub fn len(&self) -> usize {

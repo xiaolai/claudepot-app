@@ -164,7 +164,11 @@ fn check_in_scope(path: &Path, scope: &ApplyScope) -> Result<(), ValidationError
 fn resolve_for_check(path: &Path) -> Result<PathBuf, ValidationError> {
     let path = expand_user(path);
     if let Ok(canon) = std::fs::canonicalize(&path) {
-        return Ok(canon);
+        // Strip Windows verbatim `\\?\` prefix so the resolved
+        // form compares equal to the user-typed glob prefix.
+        let s = canon.display().to_string();
+        let simplified = crate::path_utils::simplify_windows_path(&s);
+        return Ok(PathBuf::from(simplified));
     }
     // Pre-normalize the input so `..` segments after a missing
     // prefix collapse before we walk. Otherwise
@@ -177,9 +181,13 @@ fn resolve_for_check(path: &Path) -> Result<PathBuf, ValidationError> {
     let mut cursor: PathBuf = pre_normalized.clone();
     loop {
         if let Ok(canon) = std::fs::canonicalize(&cursor) {
+            // Strip the Windows verbatim prefix so the joined form
+            // matches user-friendly globs.
+            let canon_str = canon.display().to_string();
+            let simplified = crate::path_utils::simplify_windows_path(&canon_str);
+            let mut full = PathBuf::from(simplified);
             // Re-join the captured tail (in reverse-chronological
             // order, hence the .rev() below).
-            let mut full = canon;
             for piece in tail.iter().rev() {
                 full = full.join(piece);
             }
@@ -245,28 +253,68 @@ fn normalize(path: &Path) -> PathBuf {
     out
 }
 
-/// Tiny glob matcher. Supports `**` (any depth), `*` (any
-/// segment but not `/`), and literal text. Adequate for
-/// `apply.scope.allowed_paths` patterns; not a full glob crate.
+/// Match a candidate path against one `apply.scope.allowed_paths`
+/// glob, in a way that is correct on Windows as well as on
+/// Unix.
 ///
-/// Glob prefixes (the literal part before any wildcard) are
-/// canonicalized so platforms with symlinked roots (macOS's
-/// `/tmp` → `/private/tmp`) compare correctly against
-/// canonicalized targets.
+/// Implementation notes:
+///
+/// - Patterns are normalized to forward-slash form before
+///   compilation. `globset` does its own separator handling on
+///   Windows, but we additionally normalize the haystack to `/`
+///   so a pattern like `~/Downloads/**` matches a Windows path
+///   `C:\Users\joker\Downloads\foo.txt`.
+/// - The literal prefix (everything before the first wildcard) is
+///   canonicalized so platforms with symlinked roots (macOS's
+///   `/tmp` → `/private/tmp`) compare correctly against the
+///   already-canonicalized haystack. After canonicalize on
+///   Windows we strip the verbatim `\\?\` prefix via
+///   `simplify_windows_path` so user-friendly paths still match.
+/// - Matching is case-insensitive on Windows and macOS to track
+///   filesystem semantics (NTFS and APFS are case-insensitive by
+///   default; Linux ext4 is case-sensitive).
 fn path_matches_glob(path: &Path, pattern: &str) -> bool {
     let pat_expanded = expand_user(Path::new(pattern));
     let pat_str = match pat_expanded.to_str() {
         Some(s) => s.to_string(),
         None => return false,
     };
-    // Canonicalize the literal prefix of the glob (everything
-    // up to the first wildcard segment).
     let canonical_pat = canonicalize_glob_prefix(&pat_str);
-    let path_str = match path.to_str() {
-        Some(s) => s.to_string(),
+    let haystack = match path.to_str() {
+        Some(s) => normalize_separators(s),
         None => return false,
     };
-    glob_match(&path_str, &canonical_pat) || glob_match(&path_str, &pat_str)
+    glob_compile_and_match(&canonical_pat, &haystack)
+        || glob_compile_and_match(&pat_str, &haystack)
+}
+
+fn glob_compile_and_match(pattern: &str, haystack: &str) -> bool {
+    // Normalize both sides so a `\`-shaped pattern matches a
+    // `/`-shaped haystack and vice versa. Callers that already
+    // normalized are idempotent here.
+    let normalized_pattern = normalize_separators(pattern);
+    let normalized_haystack = normalize_separators(haystack);
+    let mut builder = globset::GlobBuilder::new(&normalized_pattern);
+    builder.literal_separator(true);
+    // NTFS + APFS are case-insensitive by default; Linux ext4 is
+    // case-sensitive. Match the host filesystem's behavior so the
+    // validator doesn't reject legitimate operations whose paths
+    // differ from the canonical form only in case.
+    if cfg!(any(target_os = "windows", target_os = "macos")) {
+        builder.case_insensitive(true);
+    }
+    match builder.build() {
+        Ok(g) => g.compile_matcher().is_match(&normalized_haystack),
+        Err(_) => false,
+    }
+}
+
+/// Replace `\` with `/` unconditionally so the same glob works on
+/// Windows (`\`) and Unix (`/`). `globset` interprets `\` as a
+/// regex-style escape on Unix; converting to `/` avoids that
+/// pitfall and gives a consistent matching surface across hosts.
+fn normalize_separators(s: &str) -> String {
+    s.replace('\\', "/")
 }
 
 /// Resolve the literal prefix of a glob (the part before any
@@ -274,7 +322,10 @@ fn path_matches_glob(path: &Path, pattern: &str) -> bool {
 /// pattern. Used to make scope checks stable on platforms with
 /// symlinked roots.
 fn canonicalize_glob_prefix(pattern: &str) -> String {
-    let segments: Vec<&str> = pattern.split('/').collect();
+    // Split on either separator so Windows-shaped patterns also
+    // work. The output is forward-slash-shaped so it pairs with
+    // the haystack normalization below.
+    let segments: Vec<&str> = pattern.split(|c| c == '/' || c == '\\').collect();
     let mut prefix = PathBuf::new();
     let mut wild_idx = segments.len();
     for (i, seg) in segments.iter().enumerate() {
@@ -283,75 +334,32 @@ fn canonicalize_glob_prefix(pattern: &str) -> String {
             break;
         }
         if i == 0 && seg.is_empty() {
-            // Leading "/" — start absolute.
+            // Leading "/" — start absolute (Unix only). On
+            // Windows the first segment is the drive letter or
+            // empty for UNC; either way Path::push handles it.
             prefix.push("/");
         } else {
             prefix.push(seg);
         }
     }
-    let canonical = std::fs::canonicalize(&prefix).unwrap_or(prefix);
-    let mut out = canonical.display().to_string();
+    let canonical = match std::fs::canonicalize(&prefix) {
+        Ok(p) => {
+            // On Windows canonicalize returns the verbatim
+            // `\\?\C:\…` form. Strip it so user-friendly paths
+            // still compare equal — this is the rule documented
+            // in `.claude/rules/paths.md`.
+            let s = p.display().to_string();
+            let simplified = crate::path_utils::simplify_windows_path(&s);
+            PathBuf::from(simplified)
+        }
+        Err(_) => prefix,
+    };
+    let mut out = normalize_separators(&canonical.display().to_string());
     if wild_idx < segments.len() {
         out.push('/');
         out.push_str(&segments[wild_idx..].join("/"));
     }
     out
-}
-
-/// Compare strings with `*` and `**` semantics. `**` matches any
-/// sequence including separators; `*` matches any sequence
-/// excluding separators.
-fn glob_match(haystack: &str, pattern: &str) -> bool {
-    let h: Vec<char> = haystack.chars().collect();
-    let p: Vec<char> = pattern.chars().collect();
-    glob_match_inner(&h, 0, &p, 0)
-}
-
-fn glob_match_inner(h: &[char], hi: usize, p: &[char], pi: usize) -> bool {
-    let mut hi = hi;
-    let mut pi = pi;
-    loop {
-        if pi >= p.len() {
-            return hi >= h.len();
-        }
-        if p[pi] == '*' {
-            // `**` — any chars including '/'.
-            let double = pi + 1 < p.len() && p[pi + 1] == '*';
-            let next_pi = if double { pi + 2 } else { pi + 1 };
-            // Skip a trailing separator after `**`.
-            let next_pi = if double && next_pi < p.len() && p[next_pi] == '/' {
-                next_pi + 1
-            } else {
-                next_pi
-            };
-            // Try matching zero or more chars from h.
-            for skip in 0..=h.len().saturating_sub(hi) {
-                if !double {
-                    // `*` can't cross '/'.
-                    let chunk: &[char] = &h[hi..hi + skip];
-                    if chunk.contains(&'/') {
-                        break;
-                    }
-                }
-                if glob_match_inner(h, hi + skip, p, next_pi) {
-                    return true;
-                }
-            }
-            return false;
-        }
-        if hi >= h.len() {
-            return false;
-        }
-        if p[pi] == '?' {
-            if h[hi] == '/' {
-                return false;
-            }
-        } else if p[pi] != h[hi] {
-            return false;
-        }
-        hi += 1;
-        pi += 1;
-    }
 }
 
 /// Tiny base64 decoder so we don't pull a new dep just for one
@@ -511,9 +519,33 @@ mod tests {
     #[test]
     fn glob_single_star_does_not_cross_separator() {
         // Pattern: /tmp/foo/*  matches /tmp/foo/a but not /tmp/foo/a/b.
-        assert!(glob_match("/tmp/foo/a", "/tmp/foo/*"));
-        assert!(!glob_match("/tmp/foo/a/b", "/tmp/foo/*"));
-        assert!(glob_match("/tmp/foo/a/b", "/tmp/foo/**"));
+        assert!(glob_compile_and_match("/tmp/foo/*", "/tmp/foo/a"));
+        assert!(!glob_compile_and_match("/tmp/foo/*", "/tmp/foo/a/b"));
+        assert!(glob_compile_and_match("/tmp/foo/**", "/tmp/foo/a/b"));
+    }
+
+    #[test]
+    fn glob_normalizes_windows_separators() {
+        // Even on Unix, the matcher accepts a `\\`-shaped haystack
+        // via `normalize_separators`. This pins Windows behavior
+        // on macOS/Linux CI.
+        assert!(glob_compile_and_match(
+            r"C:\Users\joker\Downloads\**",
+            r"C:\Users\joker\Downloads\sub\file.txt",
+        ));
+    }
+
+    #[test]
+    fn glob_case_insensitive_on_windows_macos() {
+        // NTFS + APFS are case-insensitive; the matcher matches.
+        // Linux (case-sensitive) would reject the differing case
+        // — that's the correct OS-tracking behavior.
+        let matches = glob_compile_and_match("/foo/**/*.PDF", "/foo/sub/file.pdf");
+        if cfg!(any(target_os = "windows", target_os = "macos")) {
+            assert!(matches, "expected case-insensitive match on this OS");
+        } else {
+            assert!(!matches, "expected case-sensitive on Linux");
+        }
     }
 
     #[test]

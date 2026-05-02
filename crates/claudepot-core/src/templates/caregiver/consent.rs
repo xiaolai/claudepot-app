@@ -110,13 +110,7 @@ impl ConsentStore {
         let path = self.dir.join(format!("{}.json", record.id));
         let bytes = serde_json::to_vec_pretty(&record)?;
         fs_utils::atomic_write(&path, &bytes)?;
-        // Tighten permissions to 0600 on Unix. Best-effort on
-        // other platforms.
-        #[cfg(unix)]
-        {
-            use std::os::unix::fs::PermissionsExt;
-            let _ = std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600));
-        }
+        tighten_consent_acl(&path);
         Ok(record)
     }
 
@@ -158,12 +152,45 @@ impl ConsentStore {
             let path = self.dir.join(format!("{id}.json"));
             let bytes = serde_json::to_vec_pretty(&record)?;
             fs_utils::atomic_write(&path, &bytes)?;
+            tighten_consent_acl(&path);
         }
         Ok(record)
     }
 
     pub fn dir(&self) -> &Path {
         &self.dir
+    }
+}
+
+/// Tighten access on a consent record file so only the current
+/// user can read it. The record contains caregiver email + the
+/// dependent's typed name — multi-user-host PII leak risk
+/// otherwise. Best-effort on every platform: we never fail the
+/// create/revoke call if the OS rejects the tightening.
+fn tighten_consent_acl(path: &Path) {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let _ = std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o600));
+    }
+    #[cfg(windows)]
+    {
+        // Reset ACL inheritance and grant the current user full
+        // control. On a default Windows install this restricts
+        // the file to the user SID + SYSTEM (which icacls grants
+        // implicitly). Other local users can no longer read.
+        if let Ok(user) = std::env::var("USERNAME") {
+            let _ = std::process::Command::new("icacls")
+                .arg(path)
+                .args([
+                    "/inheritance:r",
+                    "/grant:r",
+                    &format!("{}:F", user),
+                    "/grant:r",
+                    "SYSTEM:F",
+                ])
+                .output();
+        }
     }
 }
 
