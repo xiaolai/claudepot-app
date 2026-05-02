@@ -29,6 +29,12 @@ export interface ProjectUsageRow {
   /** Sessions whose models couldn't be priced. Drives the row's
    *  warning glyph + the footer note. */
   unpriced_sessions: number;
+  /** Session-count breakdown by model id. A session that mixed
+   *  Opus + Sonnet contributes 1 to each bucket, so the sum of
+   *  values is ≥ `session_count`. Sessions with no recorded models
+   *  contribute nothing. Used by the GUI to render the model-mix
+   *  badge column on each project row. */
+  models_by_session: Record<string, number>;
 }
 
 export interface UsageTotals {
@@ -41,7 +47,17 @@ export interface UsageTotals {
   tokens_cache_read: number;
   cost_usd: number | null;
   unpriced_sessions: number;
+  /** Install-wide model-mix; mirrors `ProjectUsageRow.models_by_session`. */
+  models_by_session: Record<string, number>;
 }
+
+/** Wire form of `claudepot_core::pricing::PriceTier`. Lowercase
+ *  snake_case matches the Rust enum's `serde(rename_all)`. */
+export type PriceTierId =
+  | "anthropic_api"
+  | "vertex_global"
+  | "vertex_regional"
+  | "aws_bedrock";
 
 export interface LocalUsageReport {
   window: ReportWindow;
@@ -54,6 +70,33 @@ export interface LocalUsageReport {
   /** Non-null when the most recent pricing-refresh attempt failed.
    *  GUI surfaces it as a tooltip on the pricing-source pill. */
   pricing_error: string | null;
+  /** Wire-form pricing tier the cost figures were computed against.
+   *  Drives the active option in the tier picker and the platform
+   *  label rendered alongside the source pill. */
+  pricing_tier: PriceTierId;
+}
+
+/** One row of the "top costly prompts" panel. Mirrors the
+ *  `CostlyTurnDto` Tauri DTO byte-for-byte. */
+export interface CostlyTurn {
+  file_path: string;
+  project_path: string;
+  turn_index: number;
+  ts_ms: number | null;
+  model: string;
+  tokens_input: number;
+  tokens_output: number;
+  tokens_cache_creation: number;
+  tokens_cache_read: number;
+  user_prompt_preview: string | null;
+  /** Always populated — the backend filters out unresolved-model
+   *  rows so the UI doesn't have to null-guard each cell. */
+  cost_usd: number;
+}
+
+export interface TopCostlyPrompts {
+  turns: CostlyTurn[];
+  pricing_tier: PriceTierId;
 }
 
 /**

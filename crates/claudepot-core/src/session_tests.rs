@@ -58,6 +58,40 @@ fn single_session_scan_captures_everything() {
 }
 
 #[test]
+fn turn_record_user_prompt_carry_over_clears_when_intervening_user_line_has_no_text() {
+    // Regression: a user line without extractable text (tool-result-only,
+    // image-only, etc.) used to leave the per-turn carry-over pointing at
+    // the previous text prompt, so the next assistant turn would render
+    // someone else's prompt in the top-costly-prompts panel. The carry
+    // must clear.
+    let tmp = TempDir::new().unwrap();
+    let user_text = r#"{"type":"user","message":{"role":"user","content":"explain it"},"timestamp":"2026-04-10T10:00:00Z","cwd":"/p","sessionId":"S1"}"#;
+    let asst_first = r#"{"type":"assistant","message":{"role":"assistant","model":"claude-opus-4-7","content":[{"type":"text","text":"a1"}],"usage":{"input_tokens":1,"output_tokens":1}},"timestamp":"2026-04-10T10:00:01Z","cwd":"/p","sessionId":"S1"}"#;
+    // Tool-result-only user line — no extractable text.
+    let user_tool_only = r#"{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"t1","content":"ok","is_error":false}]},"timestamp":"2026-04-10T10:00:02Z","cwd":"/p","sessionId":"S1"}"#;
+    let asst_second = r#"{"type":"assistant","message":{"role":"assistant","model":"claude-opus-4-7","content":[{"type":"text","text":"a2"}],"usage":{"input_tokens":1,"output_tokens":1}},"timestamp":"2026-04-10T10:00:03Z","cwd":"/p","sessionId":"S1"}"#;
+
+    let path = write_session(
+        tmp.path(),
+        "-p",
+        "S1",
+        &[user_text, asst_first, user_tool_only, asst_second],
+    );
+    let scan = scan_session("-p", &path).unwrap();
+    assert_eq!(scan.turns.len(), 2);
+    assert_eq!(
+        scan.turns[0].user_prompt_preview.as_deref(),
+        Some("explain it")
+    );
+    // Crucial: turn 1's preview is None (the tool-result-only user line
+    // cleared the carry), not "explain it" carried over from turn 0.
+    assert_eq!(
+        scan.turns[1].user_prompt_preview, None,
+        "tool-result-only user line must clear the carry, not leave the prior text in place"
+    );
+}
+
+#[test]
 fn first_user_prompt_skips_tool_result_and_caveat() {
     let tmp = TempDir::new().unwrap();
     let caveat = r#"{"type":"user","message":{"role":"user","content":"<local-command-caveat>ignore</local-command-caveat>"},"timestamp":"2026-04-10T10:00:00Z","cwd":"/a","sessionId":"S1"}"#;
