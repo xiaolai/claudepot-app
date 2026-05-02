@@ -23,13 +23,19 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { api } from "../../api";
 import { formatRelative } from "../../lib/formatRelative";
 import type {
-  CostlyTurn,
   LocalUsageReport,
   PriceTierId,
   ProjectUsageRow,
   TopCostlyPrompts,
   UsageWindowSpec,
 } from "../../types";
+import { cacheHitRate, formatHitRate, shortModelId } from "./CostTabHelpers";
+import { TopPromptsPanel } from "./TopPromptsPanel";
+
+// Re-exported for backward compatibility with tests that imported
+// these helpers directly from CostTab. New callers should import
+// from CostTabHelpers.
+export { cacheHitRate, formatHitRate, shortModelId };
 
 /** How many rows the top-prompts panel surfaces. Server caps at 50;
  *  5 keeps the panel a glance, not a deep dive. The user can drill
@@ -74,44 +80,6 @@ type SortKey =
   | "cache_hit"
   | "project";
 type SortDir = "asc" | "desc";
-
-/**
- * Prompt-cache hit rate for a row of input-side token totals.
- *
- * Definition matches Anthropic's billing model: every prompt token is
- * categorised as fresh `input`, `cache_creation` (writing the prefix
- * for future hits), or `cache_read` (served from cache). Hit rate is
- * the read share of that pie.
- *
- * Returns `null` when the denominator is zero (no input-side tokens
- * yet — usually a never-active session). Caller renders `—`.
- */
-export function cacheHitRate(row: {
-  tokens_input: number;
-  tokens_cache_creation: number;
-  tokens_cache_read: number;
-}): number | null {
-  const denom =
-    row.tokens_input + row.tokens_cache_creation + row.tokens_cache_read;
-  if (denom === 0) return null;
-  return row.tokens_cache_read / denom;
-}
-
-/** Pretty-print a hit rate as `"83%"`, or `"—"` for null. */
-export function formatHitRate(r: number | null): string {
-  if (r == null) return "—";
-  return `${Math.round(r * 100)}%`;
-}
-
-/**
- * Strip the leading `claude-` family prefix when rendering a model
- * id in tight column space. `claude-opus-4-7` → `opus-4-7`. Falls
- * back to the raw id for unknown shapes.
- */
-export function shortModelId(id: string): string {
-  if (id.startsWith("claude-")) return id.slice("claude-".length);
-  return id;
-}
 
 export function CostTab() {
   const [choice, setChoice] = useState<WindowChoice>("7d");
@@ -931,141 +899,5 @@ function nullableNumberCmp(
   return a - b;
 }
 
-// ────────────────────────────────────────────── top costly prompts panel
-
-/** Compact ranked list of the install's costliest prompts in the
- *  current window. Renders only when the backend returns at least
- *  one row — fresh installs with no per-turn data yet show no panel
- *  at all (render-if-nonzero per design.md). */
-function TopPromptsPanel({ data }: { data: TopCostlyPrompts }) {
-  return (
-    <div
-      style={{
-        display: "flex",
-        flexDirection: "column",
-        gap: "var(--sp-6)",
-      }}
-    >
-      <div
-        style={{
-          fontSize: "var(--fs-2xs)",
-          color: "var(--fg-faint)",
-          letterSpacing: "var(--ls-wide)",
-          textTransform: "uppercase",
-        }}
-      >
-        Top {data.turns.length} costly prompt{data.turns.length === 1 ? "" : "s"}
-      </div>
-      <ol
-        style={{
-          listStyle: "none",
-          margin: 0,
-          padding: 0,
-          display: "flex",
-          flexDirection: "column",
-          gap: "var(--sp-4)",
-        }}
-      >
-        {data.turns.map((t, i) => (
-          <CostlyTurnRow key={`${t.file_path}:${t.turn_index}`} turn={t} rank={i + 1} />
-        ))}
-      </ol>
-    </div>
-  );
-}
-
-function CostlyTurnRow({ turn, rank }: { turn: CostlyTurn; rank: number }) {
-  const project = displayPath(turn.project_path);
-  const preview = turn.user_prompt_preview ?? "(no prompt recorded)";
-  return (
-    <li
-      style={{
-        display: "grid",
-        gridTemplateColumns:
-          "var(--rank-col) minmax(0, 1fr) auto auto",
-        alignItems: "center",
-        gap: "var(--sp-10)",
-        padding: "var(--sp-6) var(--sp-8)",
-        background: "var(--bg-raised)",
-        border: "var(--bw-hair) solid var(--line)",
-        borderRadius: "var(--r-1)",
-        // The rank-col custom prop lets us keep the rank column
-        // tight without a magic number. 28px is enough for "10."
-        // at the current font size; over-rank scenarios would
-        // need a wider value but the panel caps at 5.
-        ["--rank-col" as keyof React.CSSProperties]: "tokens.sp[28]",
-      } as React.CSSProperties}
-    >
-      <div
-        style={{
-          fontSize: "var(--fs-2xs)",
-          color: "var(--fg-faint)",
-          fontVariantNumeric: "tabular-nums",
-          textAlign: "right",
-        }}
-      >
-        {rank}.
-      </div>
-      <div
-        style={{
-          minWidth: 0,
-          display: "flex",
-          flexDirection: "column",
-          gap: "var(--sp-1)",
-        }}
-      >
-        <div
-          title={preview}
-          style={{
-            fontSize: "var(--fs-xs)",
-            color: "var(--fg)",
-            overflow: "hidden",
-            textOverflow: "ellipsis",
-            whiteSpace: "nowrap",
-          }}
-        >
-          {preview}
-        </div>
-        <div
-          title={turn.project_path}
-          style={{
-            fontSize: "var(--fs-2xs)",
-            color: "var(--fg-faint)",
-            overflow: "hidden",
-            textOverflow: "ellipsis",
-            whiteSpace: "nowrap",
-          }}
-        >
-          {project} · turn {turn.turn_index + 1}
-        </div>
-      </div>
-      <span
-        title={`${turn.model} · ${formatCompact(
-          turn.tokens_input + turn.tokens_output + turn.tokens_cache_creation + turn.tokens_cache_read,
-        )} tokens`}
-        style={{
-          fontSize: "var(--fs-2xs)",
-          color: "var(--fg-muted)",
-          background: "var(--bg-sunken)",
-          border: "var(--bw-hair) solid var(--line)",
-          borderRadius: "var(--r-1)",
-          padding: "var(--sp-1) var(--sp-4)",
-          whiteSpace: "nowrap",
-        }}
-      >
-        {shortModelId(turn.model)}
-      </span>
-      <div
-        style={{
-          fontSize: "var(--fs-xs)",
-          color: "var(--fg)",
-          fontVariantNumeric: "tabular-nums",
-          textAlign: "right",
-          minWidth: "var(--cost-col, tokens.sp[60])",
-        }}
-      >
-        ${turn.cost_usd.toFixed(2)}
-      </div>
-    </li>
-  );
-}
+// `TopPromptsPanel` was extracted to `./TopPromptsPanel.tsx` to keep
+// this file under the loc-guardian limit. Imported at the top.
