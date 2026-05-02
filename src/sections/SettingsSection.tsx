@@ -633,6 +633,27 @@ function AboutPane() {
           />
           <Kv label="Version" value={APP_VERSION} mono />
           <Kv
+            label="Website"
+            value={
+              <span
+                style={{
+                  display: "inline-flex",
+                  alignItems: "center",
+                  gap: "var(--sp-6)",
+                }}
+              >
+                <Glyph
+                  g={NF.globe}
+                  color="var(--fg-muted)"
+                  style={{ fontSize: "var(--fs-base)" }}
+                />
+                <ExternalLink href="https://claudepot.com">
+                  claudepot.com
+                </ExternalLink>
+              </span>
+            }
+          />
+          <Kv
             label="Author"
             value={
               <div
