@@ -177,6 +177,12 @@
   --modal-width-md:        480px;
   --modal-width-lg:        520px;
   --modal-width-xl:        560px;
+  /* Modal-body height caps. Each modal that hosts a scrollable body
+     (gallery, install view, route-add form) clamps its content to one
+     of these so a tall viewport doesn't stretch the dialog edge-to-edge.
+     `min(px, vh)` keeps short viewports honest. */
+  --modal-body-cap-md:     min(620px, 80vh);
+  --modal-body-cap-lg:     min(720px, 85vh);
   --content-cap-sm:        400px;
   --content-cap-md:        640px;
   --content-cap-lg:        820px;   /* wide reading column for transcripts */

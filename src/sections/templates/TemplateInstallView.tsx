@@ -128,7 +128,7 @@ export function TemplateInstallView({
           fontSize: "var(--fs-sm)",
           // Match the loaded view's pinned height so the modal box
           // doesn't shrink during the loading frame and snap back.
-          height: "min(620px, 80vh)",
+          height: "var(--modal-body-cap-md)",
           width: "100%",
         }}
       >
@@ -146,7 +146,7 @@ export function TemplateInstallView({
         // gallery → install swap doesn't resize the dialog box.
         // No `flex: 1` — see TemplateGallery for the explanation;
         // it collides with the explicit `height`.
-        height: "min(620px, 80vh)",
+        height: "var(--modal-body-cap-md)",
         width: "100%",
         minHeight: 0,
       }}

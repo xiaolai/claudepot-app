@@ -47,7 +47,7 @@ export function Chip({
       style={{
         display: "inline-flex",
         alignItems: "center",
-        padding: "2px var(--sp-6)",
+        padding: "var(--sp-2) var(--sp-6)",
         border: `var(--bw-hair) solid ${p.border}`,
         borderRadius: "var(--r-1)",
         color: p.fg,
