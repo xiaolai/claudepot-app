@@ -17,10 +17,10 @@ interface ModalProps {
   onClose?: () => void;
   /**
    * Modal width — named variants map to `--modal-width-*` tokens
-   * (sm = 440, md = 480, lg = 520). Numeric sizes are allowed but
-   * bypass the token set.
+   * (sm = 440, md = 480, lg = 520). Numeric sizes are deliberately
+   * disallowed so callers can't bypass the token set.
    */
-  width?: "sm" | "md" | "lg" | number;
+  width?: "sm" | "md" | "lg";
   children: ReactNode;
   /** Optional aria-labelledby target. When omitted, the Modal
    *  auto-wires its dialog to the embedded ModalHeader's title via a
@@ -45,9 +45,7 @@ const WIDTH_TOKEN: Record<"sm" | "md" | "lg", string> = {
 };
 
 function resolveWidth(width: ModalProps["width"]): string {
-  if (typeof width === "string") return WIDTH_TOKEN[width];
-  if (typeof width === "number") return `${width}px`;
-  return WIDTH_TOKEN.md;
+  return WIDTH_TOKEN[width ?? "md"];
 }
 
 /**

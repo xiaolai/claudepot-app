@@ -367,7 +367,7 @@ export function AccountsSection({
                     style={{
                       fontSize: "var(--fs-2xs)",
                       color: "var(--fg-faint)",
-                      letterSpacing: "0.03em",
+                      letterSpacing: "var(--ls-wide)",
                     }}
                     title={
                       lastFetchedAt
