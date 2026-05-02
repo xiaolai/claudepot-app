@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { ConfigSection } from "./ConfigSection";
 import { UpdatesPanel } from "./global/UpdatesPanel";
+import { MemoryHealthPanel } from "./global/MemoryHealthPanel";
 import { Button } from "../components/primitives/Button";
 
 /**
@@ -22,14 +23,15 @@ import { Button } from "../components/primitives/Button";
  * untouched.
  */
 
-type GlobalTab = "config" | "updates";
+type GlobalTab = "config" | "updates" | "memory";
 const TAB_STORAGE_KEY = "claudepot.global.tab";
 
 function loadTab(): GlobalTab {
   try {
-    return localStorage.getItem(TAB_STORAGE_KEY) === "updates"
-      ? "updates"
-      : "config";
+    const raw = localStorage.getItem(TAB_STORAGE_KEY);
+    if (raw === "updates") return "updates";
+    if (raw === "memory") return "memory";
+    return "config";
   } catch {
     return "config";
   }
@@ -83,17 +85,25 @@ export function GlobalSection({
         >
           Updates
         </Button>
+        <Button
+          size="sm"
+          variant={tab === "memory" ? "subtle" : "ghost"}
+          active={tab === "memory"}
+          onClick={() => switchTab("memory")}
+        >
+          Memory
+        </Button>
       </div>
       <div style={{ flex: 1, minHeight: 0, overflow: "auto" }}>
-        {tab === "config" ? (
+        {tab === "config" && (
           <ConfigSection
             subRoute={subRoute}
             onSubRouteChange={onSubRouteChange}
             forcedAnchor={{ kind: "global" }}
           />
-        ) : (
-          <UpdatesPanel />
         )}
+        {tab === "updates" && <UpdatesPanel />}
+        {tab === "memory" && <MemoryHealthPanel />}
       </div>
     </div>
   );

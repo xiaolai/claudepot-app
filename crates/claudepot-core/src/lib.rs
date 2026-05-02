@@ -52,6 +52,7 @@ pub mod host_activate;
 pub mod keys;
 pub mod launcher;
 pub mod migrate;
+pub mod memory_health;
 pub mod migrations;
 pub mod notification_log;
 pub mod oauth;
