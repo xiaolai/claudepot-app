@@ -5,6 +5,7 @@ import userEvent from "@testing-library/user-event";
 const localUsageAggregateMock = vi.fn();
 const pricingRefreshMock = vi.fn();
 const pricingTierSetMock = vi.fn();
+const pricingTierGetMock = vi.fn();
 const topCostlyPromptsMock = vi.fn();
 
 vi.mock("../../api", () => ({
@@ -12,6 +13,7 @@ vi.mock("../../api", () => ({
     localUsageAggregate: (...args: unknown[]) =>
       localUsageAggregateMock(...args),
     pricingRefresh: (...args: unknown[]) => pricingRefreshMock(...args),
+    pricingTierGet: (...args: unknown[]) => pricingTierGetMock(...args),
     pricingTierSet: (...args: unknown[]) => pricingTierSetMock(...args),
     topCostlyPrompts: (...args: unknown[]) => topCostlyPromptsMock(...args),
   },
@@ -107,6 +109,7 @@ describe("CostTab", () => {
     localUsageAggregateMock.mockReset();
     pricingRefreshMock.mockReset();
     pricingTierSetMock.mockReset();
+    pricingTierGetMock.mockReset();
     topCostlyPromptsMock.mockReset();
     // Default the top-prompts mock to "empty" so existing tests
     // that don't care about the panel still resolve cleanly. Tests
@@ -115,6 +118,9 @@ describe("CostTab", () => {
       turns: [],
       pricing_tier: "anthropic_api",
     });
+    // Default tier hydration to Anthropic API so the picker tests
+    // that don't override this still see a deterministic mount value.
+    pricingTierGetMock.mockResolvedValue("anthropic_api");
   });
 
   afterEach(() => {
@@ -127,10 +133,13 @@ describe("CostTab", () => {
     await waitFor(() =>
       expect(screen.getByText(/No sessions in this window/i)).toBeInTheDocument(),
     );
-    // Empty totals: cost dash, sessions zero. The "0" is the literal
-    // session count rendered in the Sessions tile.
+    // Empty totals: every tile shows the em-dash placeholder per the
+    // project's render-if-nonzero rule. A literal "0" would compete
+    // with the "No sessions" notice below for the user's attention.
     expect(screen.getByText("Sessions")).toBeInTheDocument();
-    expect(screen.getByText("0")).toBeInTheDocument();
+    // Multiple tiles render the dash; just verify at least one.
+    expect(screen.getAllByText("—").length).toBeGreaterThan(0);
+    expect(screen.queryByText("0")).not.toBeInTheDocument();
   });
 
   it("renders summary tiles + per-project rows with formatted values", async () => {
@@ -335,13 +344,17 @@ describe("CostTab", () => {
     expect(screen.queryByText(/costly prompts?/i)).not.toBeInTheDocument();
   });
 
-  it("requests top prompts with the matching window spec", async () => {
+  it("requests top prompts with the matching window spec and skips redundant index refresh", async () => {
     localUsageAggregateMock.mockResolvedValue(emptyReport());
     render(<CostTab />);
+    // The aggregate call refreshes the index; the top-prompts call
+    // that follows passes refreshIndex:false so the backend skips
+    // a redundant filesystem walk.
     await waitFor(() =>
       expect(topCostlyPromptsMock).toHaveBeenCalledWith(
         { kind: "lastDays", days: 7 },
         5,
+        { refreshIndex: false },
       ),
     );
   });
