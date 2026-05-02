@@ -48,8 +48,9 @@ use std::time::{Duration, Instant};
 
 use chrono::Utc;
 use claudepot_core::automations::{
-    active_scheduler, install_shim, store::automation_runs_dir, Automation, AutomationBinary,
-    AutomationId, OutputFormat, PermissionMode, PlatformOptions, Trigger,
+    active_scheduler, install_shim, record_run_for_automation, store::automation_runs_dir,
+    Automation, AutomationBinary, AutomationId, OutputFormat, PermissionMode, PlatformOptions,
+    RecordInputs, Trigger, TriggerKind,
 };
 use claudepot_core::templates::apply::{
     apply_selected, validate_item, ItemOutcome, PendingChanges,
@@ -732,5 +733,204 @@ fn real_llm_emits_pending_changes_then_executor_applies_them() {
     assert!(
         moved_count >= 3,
         "expected 3 category subfolders to contain moved files; got {moved_count}"
+    );
+}
+
+// =====================================================================
+// (c) Real LLM writes report at output_path → record_run_for_automation
+//     populates output_artifacts
+// =====================================================================
+//
+// Closes two production-relevant gaps the cron test (a) does not
+// touch:
+//
+// - The blueprint instructs the LLM to write its report to
+//   `output_path_template` using the Write tool. The shim
+//   doesn't redirect stdout to that path; the LLM owns the file
+//   write. If the prompt or the Write path breaks, no other test
+//   catches it.
+// - `record_run_for_automation` calls `discover_artifacts` to
+//   scan the output path for files modified during the run
+//   window and populates `run.output_artifacts`. Without a real
+//   file at the resolved path, that field is empty in test (a).
+//
+// Mechanism: build a tempdir as the resolved output dir. Run
+// `claude -p` with --add-dir scoped to the tempdir and a
+// guardrail prompt that asks the LLM to write a one-line markdown
+// at a specific path inside it. After the LLM exits, build a
+// synthetic RecordInputs and call `record_run_for_automation`
+// against a fake Automation with `template_id` set. Assert the
+// resulting `AutomationRun.output_artifacts` non-empty and points
+// at the LLM-written file.
+//
+// Cost: ~$0.30. Wall: ~20-30s.
+
+#[test]
+#[ignore = "real LLM writes file (~$0.30 + ~30s); needs CLAUDE_OAUTH_TOKEN"]
+fn real_llm_writes_report_and_record_run_discovers_it() {
+    let Some(token) =
+        oauth_token_or_skip("real_llm_writes_report_and_record_run_discovers_it")
+    else {
+        return;
+    };
+    let Some(_claude) =
+        current_claude_binary_or_skip("real_llm_writes_report_and_record_run_discovers_it")
+    else {
+        return;
+    };
+
+    // Single tempdir holds both the output dir (where the LLM
+    // writes the report) and the run dir (where the shim would
+    // have written stdout.log). In production these live under
+    // ~/.claudepot/<reports>/ and ~/.claudepot/automations/<id>/runs/<run_id>/
+    // respectively; test isolation uses two subdirs of one tempdir.
+    let tmp = tempfile::tempdir().expect("tempdir");
+    let output_dir = tmp.path().join("reports");
+    let run_dir = tmp.path().join("run");
+    std::fs::create_dir_all(&output_dir).unwrap();
+    std::fs::create_dir_all(&run_dir).unwrap();
+
+    let report_path = output_dir.join("morning-2026-05-02.md");
+
+    // Ask the LLM to write a one-liner at the resolved output
+    // path using its Write tool. Keeps cost bounded; verifies
+    // the prompt → Write → file-on-disk path.
+    let prompt = format!(
+        "TEST MODE — write a single-line markdown file at exactly \
+         this absolute path: {report}\n\n\
+         File content: 'Morning health check OK'\n\n\
+         After writing the file, reply with the literal string \
+         'WROTE_REPORT' and nothing else.",
+        report = report_path.display(),
+    );
+
+    let started_at = Utc::now();
+    let stdout_log = run_dir.join("stdout.log");
+    let stderr_log = run_dir.join("stderr.log");
+
+    let out = Command::new("claude")
+        .args([
+            "-p",
+            &prompt,
+            "--output-format=json",
+            "--permission-mode=acceptEdits",
+            "--add-dir",
+            output_dir.to_str().unwrap(),
+        ])
+        .env("CLAUDE_OAUTH_TOKEN", &token)
+        .env_remove("CLAUDE_CODE_ENTRYPOINT")
+        .env_remove("CLAUDECODE")
+        .output()
+        .expect("claude -p must spawn");
+
+    // Persist stdout/stderr next to the run dir so the
+    // synthetic record_run_for_automation has the same shape it
+    // would in production.
+    std::fs::write(&stdout_log, &out.stdout).unwrap();
+    std::fs::write(&stderr_log, &out.stderr).unwrap();
+    let ended_at = Utc::now();
+
+    assert!(
+        out.status.success(),
+        "claude -p exited non-zero; stderr: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    assert!(
+        report_path.exists(),
+        "LLM did not write the report at {}; stdout (first 600 chars): {}",
+        report_path.display(),
+        String::from_utf8_lossy(&out.stdout)
+            .chars()
+            .take(600)
+            .collect::<String>()
+    );
+
+    let body = std::fs::read_to_string(&report_path).unwrap();
+    assert!(
+        body.to_lowercase().contains("morning health check"),
+        "report body unexpected: {body}"
+    );
+
+    // Build a synthetic Automation with `template_id` set so
+    // `record_run_for_automation` follows the
+    // template-aware path through `discover_artifacts`.
+    let now_ts = Utc::now();
+    let automation = Automation {
+        id: Uuid::new_v4(),
+        name: "test-output-artifacts".into(),
+        display_name: None,
+        description: None,
+        enabled: true,
+        binary: AutomationBinary::FirstParty,
+        model: None,
+        cwd: tmp.path().display().to_string(),
+        prompt: prompt.clone(),
+        system_prompt: None,
+        append_system_prompt: None,
+        permission_mode: PermissionMode::DontAsk,
+        allowed_tools: vec!["Write".into()],
+        add_dir: vec![],
+        max_budget_usd: None,
+        fallback_model: None,
+        output_format: OutputFormat::Json,
+        json_schema: None,
+        bare: false,
+        extra_env: Default::default(),
+        trigger: Trigger::Manual,
+        platform_options: PlatformOptions::default(),
+        log_retention_runs: 5,
+        created_at: now_ts,
+        updated_at: now_ts,
+        claudepot_managed: true,
+        template_id: Some("it.morning-health-check".into()),
+    };
+
+    let inputs = RecordInputs {
+        automation_id: automation.id,
+        run_id: "test-run-001",
+        exit_code: 0,
+        started_at,
+        ended_at,
+        trigger_kind: TriggerKind::Manual,
+        stdout_log_path: &stdout_log,
+        stderr_log_path: &stderr_log,
+        claudepot_version: env!("CARGO_PKG_VERSION"),
+    };
+
+    let run = record_run_for_automation(&automation, &inputs, Some(&report_path))
+        .expect("record_run_for_automation must succeed");
+
+    assert_eq!(
+        run.exit_code, 0,
+        "record_run reported non-zero exit_code: {}",
+        run.exit_code
+    );
+    assert!(
+        !run.output_artifacts.is_empty(),
+        "output_artifacts is empty — discover_artifacts did not pick up the LLM-written file"
+    );
+    let report_artifact = run
+        .output_artifacts
+        .iter()
+        .find(|a| {
+            std::path::Path::new(&a.path).file_name()
+                == Some(std::ffi::OsStr::new("morning-2026-05-02.md"))
+        })
+        .expect("output_artifacts must contain morning-2026-05-02.md");
+    assert!(report_artifact.bytes > 0, "artifact bytes should be > 0");
+    assert_eq!(
+        report_artifact.format, "markdown",
+        "artifact format must be `markdown` (extension-derived)"
+    );
+
+    // result.json should also have been rewritten with the
+    // enriched record. Pin that as well so a future regression
+    // in `write_result_json` would fail this test.
+    let result_json = run_dir.join("result.json");
+    assert!(result_json.exists(), "result.json must be written");
+    let result_str = std::fs::read_to_string(&result_json).unwrap();
+    assert!(
+        result_str.contains("output_artifacts"),
+        "result.json missing output_artifacts field: {result_str}"
     );
 }
