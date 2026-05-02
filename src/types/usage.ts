@@ -51,6 +51,14 @@ export interface UsageTotals {
   models_by_session: Record<string, number>;
 }
 
+/** Wire form of `claudepot_core::pricing::PriceTier`. Lowercase
+ *  snake_case matches the Rust enum's `serde(rename_all)`. */
+export type PriceTierId =
+  | "anthropic_api"
+  | "vertex_global"
+  | "vertex_regional"
+  | "aws_bedrock";
+
 export interface LocalUsageReport {
   window: ReportWindow;
   rows: ProjectUsageRow[];
@@ -62,6 +70,10 @@ export interface LocalUsageReport {
   /** Non-null when the most recent pricing-refresh attempt failed.
    *  GUI surfaces it as a tooltip on the pricing-source pill. */
   pricing_error: string | null;
+  /** Wire-form pricing tier the cost figures were computed against.
+   *  Drives the active option in the tier picker and the platform
+   *  label rendered alongside the source pill. */
+  pricing_tier: PriceTierId;
 }
 
 /**
