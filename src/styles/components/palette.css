@@ -5,6 +5,10 @@
 
 /* ---------- command palette (P1.1) ---------- */
 
+/* Rendered as a <button> so click-to-dismiss is keyboard-reachable
+   without a parallel onKeyDown handler on a bare <div>. The button
+   defaults (border, padding, font) need explicit neutralizing so it
+   reads as a plain scrim. */
 .palette-backdrop {
   position: fixed;
   inset: 0;
@@ -13,6 +17,15 @@
   justify-content: center;
   padding-top: var(--sp-80);
   z-index: var(--z-modal);
+  border: 0;
+  font: inherit;
+  color: inherit;
+  cursor: default;
+}
+.palette-backdrop:focus-visible {
+  /* The backdrop has tabIndex={-1} (skipped in tab order), but
+     programmatic focus shouldn't paint a stray ring. */
+  outline: none;
 }
 
 .palette {

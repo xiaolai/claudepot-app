@@ -1,8 +1,16 @@
-import { type ReactNode, useEffect, useRef } from "react";
+import { createContext, type ReactNode, useContext, useEffect, useId, useRef } from "react";
 import type { NfIcon } from "../../icons";
 import { Glyph } from "./Glyph";
 import { IconButton } from "./IconButton";
 import { NF } from "../../icons";
+
+/** Internal: lets ModalHeader pick up an auto-generated `id` so
+ *  callers don't have to manually thread `aria-labelledby` through
+ *  every Modal+ModalHeader pair. The Modal generates a unique id with
+ *  `useId()`, advertises it via this context, and sets the dialog's
+ *  `aria-labelledby` to match. ModalHeader reads from the context and
+ *  applies the id to its `<h2>` when no explicit `id` prop is set. */
+const ModalLabelContext = createContext<string | null>(null);
 
 interface ModalProps {
   open: boolean;
@@ -14,7 +22,11 @@ interface ModalProps {
    */
   width?: "sm" | "md" | "lg" | number;
   children: ReactNode;
-  /** Optional aria-labelledby target for the header element id. */
+  /** Optional aria-labelledby target. When omitted, the Modal
+   *  auto-wires its dialog to the embedded ModalHeader's title via a
+   *  context-shared id, so simple Modal+ModalHeader compositions are
+   *  always labelled. Pass an explicit id when the dialog has no
+   *  ModalHeader or you need to point at a custom title element. */
   "aria-labelledby"?: string;
   /**
    * If false, scrim clicks no longer call `onClose`. Esc still
@@ -53,6 +65,11 @@ export function Modal({
 }: ModalProps) {
   const dialogRef = useRef<HTMLDivElement | null>(null);
   const prevFocusRef = useRef<HTMLElement | null>(null);
+  const autoLabelId = useId();
+  // If the caller passed an explicit `aria-labelledby`, honor it; else
+  // use the auto-id. ModalHeader reads from context with the same
+  // value, so its <h2> picks up `id={autoLabelId}` automatically.
+  const labelId = aria["aria-labelledby"] ?? autoLabelId;
 
   useEffect(() => {
     if (!open) return;
@@ -143,7 +160,7 @@ export function Modal({
         onClick={(e) => e.stopPropagation()}
         role="dialog"
         aria-modal="true"
-        {...aria}
+        aria-labelledby={labelId}
         style={{
           width: resolveWidth(width),
           maxWidth: "100%",
@@ -159,7 +176,9 @@ export function Modal({
           outline: "none",
         }}
       >
-        {children}
+        <ModalLabelContext.Provider value={labelId}>
+          {children}
+        </ModalLabelContext.Provider>
       </div>
     </div>
   );
@@ -174,6 +193,11 @@ interface ModalHeaderProps {
 }
 
 export function ModalHeader({ glyph, title, onClose, id }: ModalHeaderProps) {
+  // When the caller doesn't pass an `id`, fall back to the Modal's
+  // shared auto-id so the dialog's `aria-labelledby` resolves without
+  // any per-call wiring.
+  const ctxId = useContext(ModalLabelContext);
+  const headingId = id ?? ctxId ?? undefined;
   return (
     <div
       style={{
@@ -192,7 +216,7 @@ export function ModalHeader({ glyph, title, onClose, id }: ModalHeaderProps) {
         />
       )}
       <h2
-        id={id}
+        id={headingId}
         className="mono-cap"
         style={{
           flex: 1,

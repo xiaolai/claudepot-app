@@ -16,6 +16,7 @@ import { ShortcutsModal } from "./components/ShortcutsModal";
 import { SplitBrainConfirm } from "./sections/accounts/SplitBrainConfirm";
 import { DesktopConfirmDialog } from "./sections/accounts/DesktopConfirmDialog";
 import { sections, sectionIds } from "./sections/registry";
+import { ErrorBoundary } from "./ErrorBoundary";
 // Sections are code-split. The initial paint ships just the shell +
 // AccountsSection (the default landing tab); Projects / Sessions /
 // Settings + their heavy modal trees load on first navigation. Saves
@@ -1137,32 +1138,63 @@ function AppShell() {
             }}
           >
             <Suspense fallback={null}>
+              {/* Per-section ErrorBoundary keys on the section id so a
+                  prior error state resets cleanly when the user
+                  navigates away — no stale "Try again" panel after a
+                  tab switch. The label is the user-facing section name
+                  from the registry. */}
               {section === "accounts" && (
-                <AccountsSection onNavigate={setSection} />
+                <ErrorBoundary key="accounts" label="Accounts">
+                  <AccountsSection onNavigate={setSection} />
+                </ErrorBoundary>
               )}
               {section === "projects" && (
-                <ProjectsSection
-                  subRoute={subRoute}
-                  onSubRouteChange={setSubRoute}
-                  pendingProjectPath={pendingProjectPath}
-                  pendingSessionPath={pendingSessionPath}
-                  onPendingConsumed={() => {
-                    setPendingProjectPath(null);
-                    setPendingSessionPath(null);
-                  }}
-                />
+                <ErrorBoundary key="projects" label="Projects">
+                  <ProjectsSection
+                    subRoute={subRoute}
+                    onSubRouteChange={setSubRoute}
+                    pendingProjectPath={pendingProjectPath}
+                    pendingSessionPath={pendingSessionPath}
+                    onPendingConsumed={() => {
+                      setPendingProjectPath(null);
+                      setPendingSessionPath(null);
+                    }}
+                  />
+                </ErrorBoundary>
               )}
-              {section === "events" && <EventsSection />}
+              {section === "events" && (
+                <ErrorBoundary key="events" label="Activities">
+                  <EventsSection />
+                </ErrorBoundary>
+              )}
               {section === "global" && (
-                <GlobalSection
-                  subRoute={subRoute}
-                  onSubRouteChange={setSubRoute}
-                />
+                <ErrorBoundary key="global" label="Global">
+                  <GlobalSection
+                    subRoute={subRoute}
+                    onSubRouteChange={setSubRoute}
+                  />
+                </ErrorBoundary>
               )}
-              {section === "keys" && <KeysSection />}
-              {section === "third-party" && <ThirdPartySection />}
-              {section === "automations" && <AutomationsSection />}
-              {section === "settings" && <SettingsSection />}
+              {section === "keys" && (
+                <ErrorBoundary key="keys" label="Keys">
+                  <KeysSection />
+                </ErrorBoundary>
+              )}
+              {section === "third-party" && (
+                <ErrorBoundary key="third-party" label="Third-parties">
+                  <ThirdPartySection />
+                </ErrorBoundary>
+              )}
+              {section === "automations" && (
+                <ErrorBoundary key="automations" label="Automations">
+                  <AutomationsSection />
+                </ErrorBoundary>
+              )}
+              {section === "settings" && (
+                <ErrorBoundary key="settings" label="Settings">
+                  <SettingsSection />
+                </ErrorBoundary>
+              )}
             </Suspense>
           </div>
         </main>

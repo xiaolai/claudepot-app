@@ -163,7 +163,18 @@ export function CommandPalette({
   let idx = 0;
 
   return (
-    <div className="palette-backdrop" onClick={onClose}>
+    // Backdrop is a <button> so click-to-dismiss is keyboard-reachable
+    // out of the box (Enter/Space activate). The dialog inside stops
+    // propagation, so clicks inside the palette never reach this
+    // button. Esc-to-close is wired separately on the dialog
+    // (handleKeyDown L157).
+    <button
+      type="button"
+      className="palette-backdrop"
+      onClick={onClose}
+      aria-label="Close palette"
+      tabIndex={-1}
+    >
       <div ref={trapRef} className="palette" onClick={(e) => e.stopPropagation()}
         onKeyDown={handleKeyDown} role="dialog" aria-modal="true" aria-label="Command palette">
         <div className="palette-input-row">
@@ -250,7 +261,7 @@ export function CommandPalette({
           )}
         </div>
       </div>
-    </div>
+    </button>
   );
 }
 

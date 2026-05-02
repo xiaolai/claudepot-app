@@ -23,10 +23,16 @@ function sanitizeForDom(err: unknown): string {
   return `${redacted.slice(0, MAX_USER_VISIBLE - 1)}…`;
 }
 
-export class ErrorBoundary extends React.Component<
-  { children: React.ReactNode },
-  State
-> {
+interface ErrorBoundaryProps {
+  children: React.ReactNode;
+  /** When set, render a scoped in-place fallback instead of the
+   *  full-app takeover. Use this to wrap individual sections so a
+   *  single section crash doesn't blank the whole app. The label
+   *  appears in the fallback heading and the console log. */
+  label?: string;
+}
+
+export class ErrorBoundary extends React.Component<ErrorBoundaryProps, State> {
   state: State = { error: null };
 
   static getDerivedStateFromError(err: unknown): State {
@@ -44,16 +50,62 @@ export class ErrorBoundary extends React.Component<
   componentDidCatch(error: unknown, info: React.ErrorInfo): void {
     const message = sanitizeForDom(error);
     const componentStack = info.componentStack ?? "";
+    const tag = this.props.label
+      ? `[ErrorBoundary:${this.props.label}]`
+      : "[ErrorBoundary]";
     // eslint-disable-next-line no-console
     console.error(
-      "[ErrorBoundary] caught render-phase error:",
+      `${tag} caught render-phase error:`,
       message,
       componentStack,
     );
   }
 
+  private reset = () => {
+    this.setState({ error: null });
+  };
+
   render() {
     if (this.state.error) {
+      const { label } = this.props;
+      if (label) {
+        // Scoped fallback: in-place, contained, with a soft "try again"
+        // that re-mounts the section subtree without reloading the app.
+        return (
+          <div
+            role="alert"
+            style={{
+              display: "flex",
+              flexDirection: "column",
+              alignItems: "center",
+              justifyContent: "center",
+              gap: "var(--sp-8)",
+              padding: "var(--sp-32)",
+              minHeight: "tokens.settings.nav.width",
+              fontFamily: "var(--font)",
+            }}
+          >
+            <h2 style={{ margin: 0, fontSize: "var(--fs-md)" }}>
+              {label} couldn’t render
+            </h2>
+            <p
+              className="mono"
+              style={{
+                margin: 0,
+                color: "var(--fg-muted)",
+                fontSize: "var(--fs-sm)",
+                maxWidth: "tokens.modal.width.md",
+                textAlign: "center",
+              }}
+            >
+              {this.state.error}
+            </p>
+            <button className="btn" onClick={this.reset}>
+              Try again
+            </button>
+          </div>
+        );
+      }
       return (
         <main className="app loading">
           <div className="empty">
