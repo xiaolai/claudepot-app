@@ -166,30 +166,81 @@ impl ConsentStore {
 /// user can read it. The record contains caregiver email + the
 /// dependent's typed name — multi-user-host PII leak risk
 /// otherwise. Best-effort on every platform: we never fail the
-/// create/revoke call if the OS rejects the tightening.
+/// create/revoke call if the OS rejects the tightening, but we
+/// log via `tracing::warn` so a misconfigured host surfaces
+/// rather than silently shipping a world-readable record.
 fn tighten_consent_acl(path: &Path) {
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;
-        let _ = std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o600));
+        if let Err(e) =
+            std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o600))
+        {
+            tracing::warn!(
+                target: "consent",
+                path = %path.display(),
+                error = %e,
+                "failed to tighten consent record to 0600",
+            );
+        }
     }
     #[cfg(windows)]
     {
-        // Reset ACL inheritance and grant the current user full
-        // control. On a default Windows install this restricts
-        // the file to the user SID + SYSTEM (which icacls grants
-        // implicitly). Other local users can no longer read.
-        if let Ok(user) = std::env::var("USERNAME") {
-            let _ = std::process::Command::new("icacls")
-                .arg(path)
-                .args([
-                    "/inheritance:r",
-                    "/grant:r",
-                    &format!("{}:F", user),
-                    "/grant:r",
-                    "SYSTEM:F",
-                ])
-                .output();
+        // Resolve the *current user's SID* via `whoami /user
+        // /fo csv /nh` rather than trusting `$USERNAME`, which
+        // a parent process can spoof and which doesn't carry
+        // the domain prefix on AD-joined machines. The CSV
+        // shape is stable across Windows versions: one row,
+        // two columns: `"Username","SID"`.
+        let sid = std::process::Command::new("whoami")
+            .args(["/user", "/fo", "csv", "/nh"])
+            .output()
+            .ok()
+            .and_then(|o| {
+                if !o.status.success() {
+                    return None;
+                }
+                let line = String::from_utf8_lossy(&o.stdout);
+                let last_field = line
+                    .lines()
+                    .next()?
+                    .rsplit('"')
+                    .find(|s| s.starts_with("S-"))?;
+                Some(last_field.to_string())
+            });
+        let principal = sid.as_deref().unwrap_or("");
+        if principal.is_empty() {
+            tracing::warn!(
+                target: "consent",
+                path = %path.display(),
+                "could not resolve current user SID; consent record left with inherited ACL",
+            );
+            return;
+        }
+        let out = std::process::Command::new("icacls")
+            .arg(path)
+            .args([
+                "/inheritance:r",
+                "/grant:r",
+                &format!("*{}:F", principal),
+                "/grant:r",
+                "*S-1-5-18:F", // SYSTEM (well-known SID)
+            ])
+            .output();
+        match out {
+            Ok(o) if o.status.success() => {}
+            Ok(o) => tracing::warn!(
+                target: "consent",
+                path = %path.display(),
+                stderr = %String::from_utf8_lossy(&o.stderr),
+                "icacls failed to tighten consent record ACL",
+            ),
+            Err(e) => tracing::warn!(
+                target: "consent",
+                path = %path.display(),
+                error = %e,
+                "icacls invocation failed",
+            ),
         }
     }
 }
