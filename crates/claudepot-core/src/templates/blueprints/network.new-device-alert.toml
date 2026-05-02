@@ -1,0 +1,99 @@
+# New device alert
+#
+# Diffs today's LAN census against yesterday's. Reports any new
+# MAC addresses and any that disappeared.
+
+id              = "network.new-device-alert"
+schema_version  = 1
+version         = 1
+name            = "New device alert"
+tagline         = "Tell me when something joins the home network."
+description     = """
+Each morning, this compares yesterday's LAN census report to
+today's and surfaces:
+
+- New MAC addresses (could be a guest, a new IoT device, or
+  something you should know about).
+- MACs that disappeared (a device went offline or moved).
+- An always-allowlist of MACs you've already approved.
+
+Requires the LAN census template to be running.
+"""
+category        = "network"
+icon            = "alert-circle"
+tier            = "ambient"
+
+capabilities_required = ["tool_use"]
+min_context_tokens    = 16384
+recommended_class     = "local-ok"
+cost_class            = "trivial"
+cost_cap_usd          = 0.05
+privacy               = "any"
+consent_required      = false
+fallback_policy       = "skip"
+
+prompt = """
+You are a personal IT assistant tracking new devices on the LAN.
+
+Find the most recent two LAN-census reports:
+
+ls -1t ~/.claudepot/network-reports/lan-census-*.md 2>/dev/null | head -2
+
+If fewer than two reports exist, write a one-paragraph note
+saying so and stop.
+
+Otherwise read both with the Read tool, parse the device
+tables, and compute:
+
+- New MACs: in today's report, not in yesterday's.
+- Departed MACs: in yesterday's but not today's.
+
+Look for ~/.claudepot/network-allowlist.txt — if present, treat
+each non-empty line as an MAC to suppress from the "new"
+section (the user has already vetted it).
+
+Produce a markdown report:
+
+# New device alert — <YYYY-MM-DD>
+
+**Status:** <N new, M departed since yesterday>
+
+## New since <yesterday>
+
+For each new MAC: IP, hostname, vendor, when it appeared.
+
+## Departed since <yesterday>
+
+For each: same columns. Note that "departed" can mean asleep or
+off-network; not necessarily concerning.
+
+## Allowlist
+
+A short list of MACs the user has marked as known.
+
+Save with Write to CLAUDEPOT_OUTPUT_PATH or
+~/.claudepot/network-reports/new-devices-<date>.md.
+"""
+
+sample_report = "samples/new-device-alert.md"
+
+[scope]
+reads                       = "Recent LAN-census report files and an optional ~/.claudepot/network-allowlist.txt."
+writes                      = "One report per run at ~/.claudepot/network-reports/new-devices-<date>.md"
+could_change                = "Nothing."
+network                     = "None — works only on cached census data."
+requires_full_disk_access   = false
+
+[schedule]
+default        = "0 8 * * *"
+default_label  = "Each morning at 8 AM"
+allowed_shapes = ["daily", "weekdays", "manual"]
+
+[output]
+path_template = "~/.claudepot/network-reports/new-devices-{date}.md"
+format        = "markdown"
+
+[runtime]
+permission_mode = "plan"
+allowed_tools   = ["Bash", "Read", "Write"]
+timeout_secs    = 60

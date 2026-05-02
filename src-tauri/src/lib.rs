@@ -23,6 +23,7 @@ mod commands_session_index;
 mod commands_session_move;
 mod commands_session_prune;
 mod commands_session_share;
+mod commands_templates;
 mod commands_updates;
 mod commands_usage_local;
 mod config_dto;
@@ -45,6 +46,7 @@ mod dto_session;
 mod dto_session_debug;
 mod dto_session_move;
 mod dto_session_prune;
+mod dto_templates;
 mod dto_updates;
 mod dto_usage;
 mod live_activity_bridge;
@@ -634,6 +636,17 @@ pub fn run() {
             commands_automations::automations_open_artifact_dir,
             commands_automations::automations_linger_status,
             commands_automations::automations_linger_enable,
+            commands_templates::templates_list,
+            commands_templates::templates_get,
+            commands_templates::templates_sample_report,
+            commands_templates::templates_capable_routes,
+            commands_templates::templates_install,
+            commands_templates::templates_read_report,
+            commands_templates::templates_pending_changes,
+            commands_templates::templates_apply_pending,
+            commands_templates::routing_rules_get,
+            commands_templates::routing_rules_set,
+            commands_templates::routing_rules_evaluate_for,
             commands_notification::notification_activate_host_for_session,
             commands_notification::notification_log_append,
             commands_notification::notification_log_list,

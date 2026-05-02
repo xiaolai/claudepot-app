@@ -1,0 +1,98 @@
+# Update lag report
+#
+# Weekly check of pending OS, App Store, and Homebrew updates.
+# The report classifies each pending update as security-critical
+# vs cosmetic so the user can act on the urgent ones.
+
+id              = "it.update-lag-report"
+schema_version  = 1
+version         = 1
+name            = "Update lag report"
+tagline         = "What's pending — and which updates can wait."
+description     = """
+Each Wednesday morning, this template surveys what's waiting to be
+updated: macOS, App Store apps, and Homebrew packages (if installed).
+The report classifies each by likely urgency so you can pick what to
+apply now and what to defer.
+
+It never installs anything. It only reads what's pending.
+"""
+category        = "it-health"
+icon            = "package-2"
+tier            = "ambient"
+
+capabilities_required = ["tool_use"]
+min_context_tokens    = 8192
+recommended_class     = "local-ok"
+cost_class            = "trivial"
+cost_cap_usd          = 0.02
+privacy               = "any"
+consent_required      = false
+fallback_policy       = "skip"
+
+prompt = """
+You are a personal IT assistant surveying pending software updates on this Mac.
+
+Run these read-only checks and produce a one-page markdown report.
+
+1. macOS:
+   - Run: softwareupdate -l 2>&1 | head -50
+   - For each entry, capture the label and any "[ recommended ]" /
+     "[ requires restart ]" markers.
+
+2. App Store:
+   - Run: mas outdated 2>&1 || echo "mas not installed"
+   - If `mas` is installed, list each pending app with its version.
+
+3. Homebrew (if present):
+   - Run: command -v brew >/dev/null 2>&1 && brew outdated --verbose
+   - Otherwise emit "Homebrew not installed" and skip.
+
+For each pending update, classify it as:
+
+- **security-critical** if the label or vendor advisory mentions
+  security, privacy, vulnerability, CVE, or sandbox.
+- **recommended** if marked recommended by the vendor or a major
+  version bump.
+- **cosmetic** otherwise.
+
+Format the report:
+
+# Update lag report — <YYYY-MM-DD>
+
+**Status:** <X security-critical, Y recommended, Z cosmetic pending>
+
+## macOS
+## App Store
+## Homebrew
+
+Group each section's items by classification. Use plain bullets,
+no tables. End with one sentence about what you'd apply this week
+if you only had 30 minutes to spend.
+
+Save the report using the Write tool to CLAUDEPOT_OUTPUT_PATH (or
+~/.claudepot/it-reports/updates-<today>.md). Do not install anything.
+"""
+
+sample_report = "samples/update-lag-report.md"
+
+[scope]
+reads                       = "Pending macOS updates, App Store updates, and Homebrew package versions (if Homebrew is installed)."
+writes                      = "One report per run at ~/.claudepot/it-reports/updates-<date>.md"
+could_change                = "Nothing. This template only reports."
+network                     = "Reads update metadata from Apple's servers (and Homebrew's, if installed)."
+requires_full_disk_access   = false
+
+[schedule]
+default        = "0 10 * * 3"
+default_label  = "Each Wednesday at 10 AM"
+allowed_shapes = ["weekly", "weekdays", "daily", "manual"]
+
+[output]
+path_template = "~/.claudepot/it-reports/updates-{date}.md"
+format        = "markdown"
+
+[runtime]
+permission_mode = "plan"
+allowed_tools   = ["Bash", "Read", "Write"]
+timeout_secs    = 120

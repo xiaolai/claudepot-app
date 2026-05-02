@@ -1,0 +1,88 @@
+# Bandwidth-hog inference
+#
+# Daily snapshot of which processes are using bandwidth. Catches
+# the "why is the wifi slow today" case.
+
+id              = "network.bandwidth-hog"
+schema_version  = 1
+version         = 1
+name            = "Bandwidth-hog inference"
+tagline         = "Which app is eating your bandwidth right now."
+description     = """
+Each day, this samples per-process network I/O for a minute
+and reports the top consumers. Without router cooperation
+(SNMP, UniFi API), this is local-only — it sees what *this
+machine* is sending and receiving, not other devices on the
+LAN.
+
+Uses `nettop` on macOS, `nethogs` on Linux. Both are read-only.
+"""
+category        = "network"
+icon            = "gauge"
+tier            = "ambient"
+
+capabilities_required = ["tool_use"]
+min_context_tokens    = 8192
+recommended_class     = "local-ok"
+cost_class            = "trivial"
+cost_cap_usd          = 0.02
+privacy               = "any"
+consent_required      = false
+fallback_policy       = "skip"
+
+prompt = """
+You are a personal IT assistant inferring bandwidth use.
+
+Sample per-process network I/O:
+
+- macOS: timeout 60 nettop -P -L 6 -J bytes_in,bytes_out -k state,interface
+  (one snapshot every 10s, total 60s of data)
+- Linux: timeout 60 nethogs -t 2>/dev/null
+- If neither is available: emit "no per-process tooling
+  available; install nettop (macOS, default) or nethogs (Linux:
+  apt install nethogs)" and stop.
+
+Aggregate by process. Compute total bytes_in + bytes_out per
+process over the 60-second window.
+
+Produce a markdown report:
+
+# Bandwidth-hog inference — <YYYY-MM-DD>
+
+**Status:** <highest consumer> at <bytes/s>.
+
+## Top 10 processes (by total bytes)
+
+| Process | Bytes in | Bytes out | Notes |
+|---|---|---|---|
+
+Bytes columns formatted as MB or KB; "Notes" can mention if a
+process is unusually high (Slack > 50 MB in 60s = videoconference;
+Backblaze > 100 MB = upload running, etc.).
+
+Save at CLAUDEPOT_OUTPUT_PATH or
+~/.claudepot/network-reports/bandwidth-hog-<date>.md.
+"""
+
+sample_report = "samples/bandwidth-hog.md"
+
+[scope]
+reads                       = "Per-process network I/O for a one-minute window via nettop (macOS) or nethogs (Linux)."
+writes                      = "One report per run."
+could_change                = "Nothing."
+network                     = "Reads only. Doesn't generate any traffic of its own."
+requires_full_disk_access   = false
+
+[schedule]
+default        = "0 14 * * *"
+default_label  = "Each afternoon at 2 PM"
+allowed_shapes = ["daily", "weekdays", "manual"]
+
+[output]
+path_template = "~/.claudepot/network-reports/bandwidth-hog-{date}.md"
+format        = "markdown"
+
+[runtime]
+permission_mode = "plan"
+allowed_tools   = ["Bash", "Read", "Write"]
+timeout_secs    = 90

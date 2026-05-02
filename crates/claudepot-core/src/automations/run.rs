@@ -27,8 +27,12 @@ use crate::project_progress::{PhaseStatus, ProgressSink};
 
 use super::error::AutomationError;
 use super::install::install_shim;
+use super::prerun::PrerunDecision;
 use super::store::automation_runs_dir;
-use super::types::{Automation, AutomationId, AutomationRun, HostPlatform, RunResult, TriggerKind};
+use super::types::{
+    ArtifactKind, Automation, AutomationId, AutomationRun, HostPlatform, OutputArtifact,
+    RouteDecision, RunResult, TriggerKind,
+};
 
 /// Inputs to [`record_run`]. All values are knowable by the helper
 /// shim at exit time.
@@ -75,10 +79,186 @@ pub fn record_run(inputs: &RecordInputs<'_>) -> Result<AutomationRun, Automation
         trigger_kind: inputs.trigger_kind,
         host_platform: HostPlatform::current(),
         claudepot_version: inputs.claudepot_version.to_string(),
+        // `record_run` is the post-run hook for non-template
+        // automations; template-aware enrichment (output-artifact
+        // discovery, prerun-decision merge) is layered on by
+        // `record_run_with_template_context` once the templates
+        // pre-run gate is wired through the shim.
+        output_artifacts: Vec::new(),
+        route_decision: None,
     };
 
     write_result_json(&run, inputs.stdout_log_path)?;
     Ok(run)
+}
+
+/// Template-aware record-run.
+///
+/// Calls [`record_run`], then enriches the resulting record with
+/// the template-driven post-run pipeline:
+///
+/// 1. If the run dir contains `prerun-decision.json`, parse it
+///    and merge into `route_decision`.
+/// 2. If the automation has a `template_id`, scan the
+///    blueprint's output-path neighborhood for files modified
+///    during the run window, populate `output_artifacts`.
+///
+/// The result.json file is rewritten with the enriched record
+/// so the Reports panel and apply pipeline see the same data.
+pub fn record_run_for_automation(
+    automation: &Automation,
+    inputs: &RecordInputs<'_>,
+    output_path: Option<&Path>,
+) -> Result<AutomationRun, AutomationError> {
+    let mut run = record_run(inputs)?;
+
+    let run_dir = inputs
+        .stdout_log_path
+        .parent()
+        .ok_or_else(|| {
+            AutomationError::InvalidPath(
+                inputs.stdout_log_path.display().to_string(),
+                "stdout log has no parent dir",
+            )
+        })?;
+
+    // 1. Pre-run decision merge.
+    if let Some(decision) = read_prerun_decision(run_dir) {
+        run.route_decision = Some(prerun_to_route_decision(decision));
+    }
+
+    // 2. Output-artifact discovery, scoped to the resolved
+    //    output path. Only template-driven automations carry
+    //    one; non-template automations leave the field empty.
+    if automation.template_id.is_some() {
+        if let Some(path) = output_path {
+            run.output_artifacts = discover_artifacts(path, inputs.started_at, inputs.ended_at);
+        }
+    }
+
+    // Rewrite result.json with the enriched record so consumers
+    // (Reports panel, apply pipeline) see the artifact metadata.
+    write_result_json(&run, inputs.stdout_log_path)?;
+    Ok(run)
+}
+
+fn read_prerun_decision(run_dir: &Path) -> Option<PrerunDecision> {
+    let path = run_dir.join("prerun-decision.json");
+    let bytes = std::fs::read(&path).ok()?;
+    serde_json::from_slice(&bytes).ok()
+}
+
+fn prerun_to_route_decision(d: PrerunDecision) -> RouteDecision {
+    match d {
+        PrerunDecision::Ran { route_id, .. } => RouteDecision::Ran { route_id },
+        PrerunDecision::Fallback { from, to_wrapper, reason } => RouteDecision::Fallback {
+            from,
+            to: to_wrapper,
+            reason,
+        },
+        PrerunDecision::Skipped { reason } => RouteDecision::Skipped { reason },
+        PrerunDecision::SkippedAlerted { reason } => RouteDecision::SkippedAlerted { reason },
+    }
+}
+
+/// Look for files at or near `output_path` modified during the
+/// run window. Pure: no mutations. Returns the list ordered by
+/// modification time, oldest first, capped at 32 entries to keep
+/// rogue templates from polluting the run record.
+fn discover_artifacts(
+    output_path: &Path,
+    started: DateTime<Utc>,
+    ended: DateTime<Utc>,
+) -> Vec<OutputArtifact> {
+    use std::time::SystemTime;
+
+    let started_st: SystemTime = started.into();
+    // Allow a small grace window after `ended` to capture files
+    // the shim flushes after `claude -p` exits. Use a bounded
+    // grace so tests don't have to wait, but generous enough for
+    // real-world fs flush.
+    let grace = std::time::Duration::from_secs(5);
+    let ended_st: SystemTime = ended.into();
+    let ended_st = ended_st + grace;
+
+    // The blueprint may name a single file (the report) or a
+    // directory. Resolve both shapes.
+    let candidates: Vec<PathBuf> = if output_path.is_dir() {
+        match std::fs::read_dir(output_path) {
+            Ok(rd) => rd.flatten().map(|e| e.path()).collect(),
+            Err(_) => Vec::new(),
+        }
+    } else if output_path.is_file() {
+        vec![output_path.to_path_buf()]
+    } else {
+        // Path doesn't exist (template wrote nothing or wrote
+        // somewhere we can't see). Try the parent dir as a
+        // fall-back so we still catch a report sibling.
+        match output_path.parent().and_then(|p| std::fs::read_dir(p).ok()) {
+            Some(rd) => rd.flatten().map(|e| e.path()).collect(),
+            None => Vec::new(),
+        }
+    };
+
+    let mut out: Vec<OutputArtifact> = candidates
+        .into_iter()
+        .filter_map(|path| {
+            let meta = std::fs::metadata(&path).ok()?;
+            if !meta.is_file() {
+                return None;
+            }
+            let modified = meta.modified().ok()?;
+            // Window check: file mtime must be within the run.
+            if modified < started_st || modified > ended_st {
+                return None;
+            }
+            let kind = classify_artifact(&path);
+            let format = path
+                .extension()
+                .and_then(|s| s.to_str())
+                .unwrap_or("")
+                .to_string();
+            Some(OutputArtifact {
+                kind,
+                path: path.display().to_string(),
+                format: format_for(format.as_str()),
+                bytes: meta.len(),
+            })
+        })
+        .collect();
+
+    // Stable order — by mtime asc — capped at 32 entries.
+    out.sort_by_key(|a| a.path.clone());
+    out.truncate(32);
+    out
+}
+
+fn format_for(ext: &str) -> String {
+    match ext {
+        "md" | "markdown" => "markdown".to_string(),
+        "json" => "json".to_string(),
+        "txt" => "text".to_string(),
+        "csv" => "csv".to_string(),
+        "" => "text".to_string(),
+        other => other.to_string(),
+    }
+}
+
+fn classify_artifact(path: &Path) -> ArtifactKind {
+    let name = path
+        .file_name()
+        .and_then(|s| s.to_str())
+        .unwrap_or("")
+        .to_lowercase();
+    if name == ".pending-changes.json" || name.ends_with(".pending-changes.json") {
+        ArtifactKind::PendingChanges
+    } else if name.contains("apply-receipt") || name.contains("receipt") {
+        ArtifactKind::ApplyReceipt
+    } else if name.ends_with(".eml") || name.ends_with(".email") {
+        ArtifactKind::Email
+    } else {
+        ArtifactKind::Report
+    }
 }
 
 /// Find the run directory containing `stdout.log` and write
@@ -336,6 +516,8 @@ fn synthesize_run(
         trigger_kind: TriggerKind::Manual,
         host_platform: HostPlatform::current(),
         claudepot_version: env!("CARGO_PKG_VERSION").to_string(),
+        output_artifacts: Vec::new(),
+        route_decision: None,
     }
 }
 

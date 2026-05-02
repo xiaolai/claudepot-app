@@ -1,0 +1,118 @@
+# Screenshots foldering
+#
+# Daily housekeeping for screenshots that pile up on the
+# Desktop. Proposes renames + moves into ~/Pictures/Screenshots/<YYYY-MM>/.
+
+id              = "house.screenshots-folder"
+schema_version  = 1
+version         = 1
+name            = "Screenshots foldering"
+tagline         = "Sort yesterday's screenshots into month folders."
+description     = """
+Each evening, this scans ~/Desktop for default-named macOS
+screenshots ("Screen Shot YYYY-MM-DD..." or "Screenshot
+YYYY-MM-DD...") older than 1 day, proposes content-based
+renames where the filename is unhelpful, and moves them into
+~/Pictures/Screenshots/<YYYY-MM>/.
+
+Screenshots already content-named are left alone.
+"""
+category        = "housekeeping"
+icon            = "image"
+tier            = "ambient"
+
+capabilities_required = ["tool_use", "structured_output"]
+min_context_tokens    = 16384
+recommended_class     = "fast"
+cost_class            = "trivial"
+cost_cap_usd          = 0.05
+privacy               = "any"
+consent_required      = false
+fallback_policy       = "skip"
+
+prompt = """
+You are a personal IT assistant proposing screenshot foldering.
+
+Find candidate screenshots:
+- find ~/Desktop -maxdepth 1 -type f \\( -name "Screen Shot *.png" -o -name "Screenshot *.png" -o -name "Screen Shot *.heic" -o -name "Screenshot *.heic" \\) -mtime +1
+
+For each candidate file, derive:
+- The YYYY-MM month folder it should land in (from the filename's date prefix or the file's mtime).
+- Destination path: ~/Pictures/Screenshots/<YYYY-MM>/<original filename>
+
+Write TWO files:
+
+1. Markdown report at CLAUDEPOT_OUTPUT_PATH (or
+   ~/.claudepot/house-reports/screenshots-folder-<date>.md).
+
+2. Pending-changes.json at the same directory, named
+   ".pending-changes.json". Schema:
+   {
+     "schema_version": 1,
+     "automation_id": "...",
+     "run_id": "...",
+     "generated_at": "...",
+     "summary": "<N moves>",
+     "groups": [
+       {
+         "id": "<YYYY-MM>",
+         "title": "Move N screenshots to ~/Pictures/Screenshots/<YYYY-MM>/",
+         "items": [
+           {
+             "id": "<first-12 of sha256(from-path)>",
+             "description": "<filename>",
+             "operation": {
+               "type": "move",
+               "from": "<absolute path>",
+               "to":   "<absolute path under ~/Pictures/Screenshots/...>"
+             }
+           }
+         ]
+       }
+     ]
+   }
+
+   For each month folder that doesn't yet exist, prepend an
+   `mkdir` item before the moves into it.
+
+Constraints:
+- Every from-path must be under ~/Desktop.
+- Every to-path must be under ~/Pictures/Screenshots/.
+- Item ids are deterministic (sha256 prefix) so reruns don't
+  re-propose dismissed items.
+
+Do NOT execute any move yourself.
+"""
+
+sample_report = "samples/screenshots-folder.md"
+
+[scope]
+reads                       = "~/Desktop file listing for screenshot files."
+writes                      = "One report and one pending-changes.json per run."
+could_change                = "Screenshots on your Desktop, after you review and click Apply. Targets land under ~/Pictures/Screenshots/<YYYY-MM>/."
+network                     = "None."
+requires_full_disk_access   = false
+
+[apply]
+pending_changes_path = "{output_dir}/.pending-changes.json"
+schema_version       = 1
+allowed_operations   = ["move", "mkdir"]
+item_id_strategy     = "content_hash"
+
+[apply.scope]
+allowed_paths = ["~/Desktop/**", "~/Pictures/Screenshots/**"]
+deny_outside  = true
+
+[schedule]
+default        = "0 23 * * *"
+default_label  = "Each evening at 11 PM"
+allowed_shapes = ["daily", "weekdays", "manual"]
+
+[output]
+path_template = "~/.claudepot/house-reports/screenshots-folder-{date}.md"
+format        = "markdown"
+
+[runtime]
+permission_mode = "plan"
+allowed_tools   = ["Bash", "Read", "Write"]
+timeout_secs    = 120

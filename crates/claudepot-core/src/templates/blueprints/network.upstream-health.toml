@@ -1,0 +1,81 @@
+# Upstream health
+#
+# Continuous ping/loss/jitter check against the gateway and a
+# few well-known endpoints. Logs to a CSV; produces a daily
+# digest summary.
+
+id              = "network.upstream-health"
+schema_version  = 1
+version         = 1
+name            = "Upstream health log"
+tagline         = "Track home internet jitter and outages."
+description     = """
+Every 30 minutes, this pings your gateway and a small panel of
+well-known endpoints (1.1.1.1, 8.8.8.8) and appends a row to a
+CSV. The accumulating log is what makes "is it slow lately?"
+answerable.
+
+A weekly summary report picks out the worst hours.
+"""
+category        = "network"
+icon            = "activity"
+tier            = "ambient"
+
+capabilities_required = ["tool_use"]
+min_context_tokens    = 8192
+recommended_class     = "local-ok"
+cost_class            = "trivial"
+cost_cap_usd          = 0.02
+privacy               = "any"
+consent_required      = false
+fallback_policy       = "skip"
+
+prompt = """
+You are a personal IT assistant logging upstream network health.
+
+Find the gateway:
+- Mac/Linux: route -n get default 2>/dev/null | grep gateway | awk '{print $2}'
+  (Linux: ip route | awk '/default/ {print $3}')
+  Default to "192.168.1.1" if detection fails.
+
+Run three small probes (use mtr if available, else ping):
+- gateway: 5 packets
+- 1.1.1.1: 5 packets
+- 8.8.8.8: 5 packets
+
+For each, capture: avg latency (ms), max latency (ms), packet loss (%).
+
+Append one row to ~/.claudepot/network-reports/upstream-health.csv:
+
+timestamp,gateway_avg,gateway_max,gateway_loss,cf_avg,cf_max,cf_loss,goog_avg,goog_max,goog_loss
+
+(Create the file with a header row if it doesn't exist.)
+
+Then produce a tiny markdown report at CLAUDEPOT_OUTPUT_PATH or
+~/.claudepot/network-reports/upstream-health-<timestamp>.md
+with the same data formatted as a one-line summary plus
+sparkline-friendly numbers.
+"""
+
+sample_report = "samples/upstream-health.md"
+
+[scope]
+reads                       = "Network-routing table to find your gateway; ICMP probes to your gateway and 1.1.1.1 / 8.8.8.8."
+writes                      = "Appends to ~/.claudepot/network-reports/upstream-health.csv plus one short report per run."
+could_change                = "Nothing in your network — only writes to its own log file."
+network                     = "ICMP probes to your gateway and two public DNS endpoints. Tiny traffic."
+requires_full_disk_access   = false
+
+[schedule]
+default        = "*/30 * * * *"
+default_label  = "Every 30 minutes"
+allowed_shapes = ["hourly", "manual", "custom"]
+
+[output]
+path_template = "~/.claudepot/network-reports/upstream-health-{date}.md"
+format        = "markdown"
+
+[runtime]
+permission_mode = "plan"
+allowed_tools   = ["Bash", "Read", "Write"]
+timeout_secs    = 60
