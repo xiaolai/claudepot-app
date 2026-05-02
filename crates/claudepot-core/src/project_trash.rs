@@ -51,6 +51,12 @@ pub enum ProjectTrashError {
         #[source]
         source: serde_json::Error,
     },
+    #[error("serialize error at {path}: {source}")]
+    Serialize {
+        path: PathBuf,
+        #[source]
+        source: serde_json::Error,
+    },
     #[error("restore target already exists: {0}")]
     RestoreCollision(PathBuf),
     #[error("invalid slug: {0:?}")]
@@ -213,7 +219,12 @@ pub fn write(
         reason: put.reason,
     };
     let manifest_path = batch_dir.join("manifest.json");
-    let json = serde_json::to_vec_pretty(&entry).expect("ProjectTrashEntry serializes");
+    let json = serde_json::to_vec_pretty(&entry).map_err(|source| {
+        ProjectTrashError::Serialize {
+            path: manifest_path.clone(),
+            source,
+        }
+    })?;
     write_atomic(&manifest_path, &json)?;
 
     let payload = batch_dir.join("payload");
@@ -479,11 +490,27 @@ pub fn restore(
         )));
     }
     let dest = config_dir.join("projects").join(&te.slug);
-    if dest.exists() {
-        return Err(ProjectTrashError::RestoreCollision(dest));
-    }
     if let Some(parent) = dest.parent() {
         fs::create_dir_all(parent).map_err(|e| ProjectTrashError::io(parent, e))?;
+    }
+    // Atomic claim. `fs::create_dir` is the cross-platform "fail if
+    // exists" primitive — replaces the prior `if dest.exists()` TOCTOU
+    // (race between the check and `move_dir`'s rename, where two
+    // concurrent restores of the same slug could both pass the check
+    // and then either clobber an empty dir on Unix or surface a
+    // confusing ENOTEMPTY).
+    match fs::create_dir(&dest) {
+        Ok(()) => {
+            // We own the slot; remove the placeholder so rename can
+            // target it. The window between this remove and `move_dir`
+            // is tiny — a third restore could re-claim, but that's a
+            // rare and acceptable failure mode.
+            fs::remove_dir(&dest).map_err(|e| ProjectTrashError::io(&dest, e))?;
+        }
+        Err(e) if e.kind() == io::ErrorKind::AlreadyExists => {
+            return Err(ProjectTrashError::RestoreCollision(dest));
+        }
+        Err(e) => return Err(ProjectTrashError::io(&dest, e)),
     }
     move_dir(&payload, &dest)?;
 
@@ -507,10 +534,12 @@ pub fn restore(
                         if !map.contains_key(orig) {
                             map.insert(orig.to_string(), value.clone());
                             claude_json_restored = true;
-                            let bytes =
-                                serde_json::to_vec_pretty(&root).expect("re-serialize claude.json");
-                            // Best-effort write: failures here surface
-                            // through Io error.
+                            let bytes = serde_json::to_vec_pretty(&root).map_err(|source| {
+                                ProjectTrashError::Serialize {
+                                    path: path.to_path_buf(),
+                                    source,
+                                }
+                            })?;
                             fs::write(path, bytes).map_err(|e| ProjectTrashError::io(path, e))?;
                         }
                     }
