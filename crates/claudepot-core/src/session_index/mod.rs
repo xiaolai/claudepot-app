@@ -28,6 +28,7 @@ mod codec;
 pub mod diff;
 pub mod error;
 pub mod schema;
+mod turns;
 
 pub use error::SessionIndexError;
 
@@ -231,7 +232,7 @@ impl SessionIndex {
                 // grew the transcript by 5 turns ends up with exactly
                 // those 5 new rows; one that shrank it (slim) ends up
                 // with the new shorter set.
-                codec::replace_turns(&tx, &file_path, turns)?;
+                turns::replace_turns(&tx, &file_path, turns)?;
                 // Order matters: subtract the existing per-day counts
                 // BEFORE deleting the raw events that produced them,
                 // otherwise the ensuing inserts double-bump the daily
@@ -285,7 +286,7 @@ impl SessionIndex {
     /// stale data) at call sites that want fresh numbers.
     pub fn turns_for(&self, file_path: &str) -> Result<Vec<TurnRecord>, SessionIndexError> {
         let db = self.db();
-        codec::load_turns(&db, file_path)
+        turns::load_turns(&db, file_path)
     }
 
     /// Refresh the cache against `config_dir` and return every row,
