@@ -2635,7 +2635,7 @@ function AnchorMenuGroup({
           padding: "var(--sp-6) var(--sp-12) var(--sp-4)",
           fontSize: "var(--fs-2xs)",
           color: "var(--fg-faint)",
-          letterSpacing: "0.08em",
+          letterSpacing: "var(--ls-wide)",
           textTransform: "uppercase",
         }}
       >

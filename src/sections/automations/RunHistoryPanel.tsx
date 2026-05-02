@@ -60,89 +60,132 @@ export function RunHistoryPanel({ automationId, refreshKey }: Props) {
   }
 
   return (
-    <div
-      style={{
-        display: "flex",
-        flexDirection: "column",
-        gap: "var(--sp-4)",
-        fontSize: "var(--fs-2xs)",
-        fontFamily: "var(--ff-mono)",
-      }}
-    >
-      <div
+    <>
+      <table
         style={{
-          display: "grid",
-          gridTemplateColumns: "auto 1fr auto auto auto auto auto",
-          gap: "var(--sp-8)",
-          color: "var(--fg-3)",
-          paddingBottom: "var(--sp-4)",
-          borderBottom: "var(--bw-hair) solid var(--line)",
+          width: "100%",
+          borderCollapse: "collapse",
+          fontSize: "var(--fs-2xs)",
+          fontFamily: "var(--ff-mono)",
+          fontVariantNumeric: "tabular-nums",
         }}
       >
-        <span>status</span>
-        <span>started</span>
-        <span>dur</span>
-        <span>cost</span>
-        <span>turns</span>
-        <span>trigger</span>
-        <span>report</span>
-      </div>
-      {runs.map((run) => {
-        const ok = !run.result?.is_error && run.exit_code === 0;
-        const symbol = ok ? "ok" : "ERR";
-        const report = reportArtifact(run);
-        return (
-          <div
-            key={run.id}
-            style={{
-              display: "grid",
-              gridTemplateColumns: "auto 1fr auto auto auto auto auto",
-              gap: "var(--sp-8)",
-              padding: "var(--sp-2) 0",
-              color: ok ? "var(--fg-2)" : "var(--danger)",
-              alignItems: "center",
-            }}
-          >
-            <span style={{ width: "var(--sp-32)" }}>{symbol}</span>
-            <span style={{ color: "var(--fg-2)" }}>
-              {fmtIso(run.started_at)}
-            </span>
-            <span>{fmtDuration(run.duration_ms)}</span>
-            <span>{fmtCost(run.result?.total_cost_usd ?? null)}</span>
-            <span>{run.result?.num_turns ?? "—"}</span>
-            <span style={{ color: "var(--fg-3)" }}>{run.trigger_kind}</span>
-            <span>
-              {report ? (
-                <button
-                  type="button"
-                  onClick={() => setReportPath(report.path)}
-                  style={{
-                    background: "none",
-                    border: "none",
-                    color: "var(--accent)",
-                    textDecoration: "underline",
-                    cursor: "pointer",
-                    font: "inherit",
-                    padding: 0,
-                  }}
-                >
-                  report
-                </button>
-              ) : (
-                <span style={{ color: "var(--fg-3)" }}>—</span>
-              )}
-            </span>
-          </div>
-        );
-      })}
+        <thead>
+          <tr>
+            <Th>status</Th>
+            <Th>started</Th>
+            <Th>dur</Th>
+            <Th>cost</Th>
+            <Th>turns</Th>
+            <Th>trigger</Th>
+            <Th align="right">report</Th>
+          </tr>
+        </thead>
+        <tbody>
+          {runs.map((run) => {
+            const ok = !run.result?.is_error && run.exit_code === 0;
+            const symbol = ok ? "ok" : "ERR";
+            const report = reportArtifact(run);
+            return (
+              <tr
+                key={run.id}
+                style={{
+                  borderTop: "var(--bw-hair) solid var(--line)",
+                  color: ok ? "var(--fg-2)" : "var(--danger)",
+                }}
+              >
+                <Td>{symbol}</Td>
+                <Td muted>{fmtIso(run.started_at)}</Td>
+                <Td>{fmtDuration(run.duration_ms)}</Td>
+                <Td>{fmtCost(run.result?.total_cost_usd ?? null)}</Td>
+                <Td>{run.result?.num_turns ?? "—"}</Td>
+                <Td muted>{run.trigger_kind}</Td>
+                <Td align="right">
+                  {report ? (
+                    <button
+                      type="button"
+                      onClick={() => setReportPath(report.path)}
+                      style={reportLinkStyle}
+                      aria-label={`Open report for run started ${run.started_at}`}
+                    >
+                      report
+                    </button>
+                  ) : (
+                    <span style={{ color: "var(--fg-3)" }}>—</span>
+                  )}
+                </Td>
+              </tr>
+            );
+          })}
+        </tbody>
+      </table>
 
       <ReportViewer
         path={reportPath}
         onClose={() => setReportPath(null)}
       />
-    </div>
+    </>
   );
 }
+
+function Th({
+  children,
+  align,
+}: {
+  children: React.ReactNode;
+  align?: "left" | "right";
+}) {
+  return (
+    <th
+      className="mono-cap"
+      style={{
+        padding: "var(--sp-4) var(--sp-8)",
+        textAlign: align ?? "left",
+        fontSize: "var(--fs-2xs)",
+        fontWeight: 500,
+        color: "var(--fg-faint)",
+        borderBottom: "var(--bw-hair) solid var(--line)",
+        letterSpacing: "var(--ls-wide)",
+        textTransform: "uppercase",
+      }}
+    >
+      {children}
+    </th>
+  );
+}
+
+function Td({
+  children,
+  align,
+  muted,
+}: {
+  children: React.ReactNode;
+  align?: "left" | "right";
+  muted?: boolean;
+}) {
+  return (
+    <td
+      style={{
+        padding: "var(--sp-4) var(--sp-8)",
+        textAlign: align ?? "left",
+        verticalAlign: "middle",
+        color: muted ? "var(--fg-3)" : undefined,
+      }}
+    >
+      {children}
+    </td>
+  );
+}
+
+const reportLinkStyle: React.CSSProperties = {
+  background: "none",
+  border: "none",
+  color: "var(--accent)",
+  textDecoration: "underline",
+  cursor: "pointer",
+  font: "inherit",
+  padding: 0,
+};
 
 function fmtIso(iso: string): string {
   const m = /^(\d{4}-\d{2}-\d{2})T(\d{2}:\d{2}:\d{2})/.exec(iso);
