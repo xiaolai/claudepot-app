@@ -13,7 +13,12 @@ vi.mock("../../api", () => ({
   },
 }));
 
-import { CostTab } from "./CostTab";
+import {
+  CostTab,
+  cacheHitRate,
+  formatHitRate,
+  shortModelId,
+} from "./CostTab";
 import type { LocalUsageReport } from "../../types";
 
 function emptyReport(): LocalUsageReport {
@@ -30,6 +35,7 @@ function emptyReport(): LocalUsageReport {
       tokens_cache_read: 0,
       cost_usd: null,
       unpriced_sessions: 0,
+      models_by_session: {},
     },
     pricing_source: "bundled · verified 2026-01-15",
     pricing_error: null,
@@ -51,6 +57,10 @@ function reportWithRows(): LocalUsageReport {
         tokens_cache_read: 8_000_000,
         cost_usd: 42.5,
         unpriced_sessions: 0,
+        models_by_session: {
+          "claude-opus-4-7": 10,
+          "claude-sonnet-4-6": 3,
+        },
       },
       {
         project_path: "/work/bar",
@@ -63,6 +73,7 @@ function reportWithRows(): LocalUsageReport {
         tokens_cache_read: 200_000,
         cost_usd: null,
         unpriced_sessions: 3,
+        models_by_session: {},
       },
     ],
     totals: {
@@ -75,6 +86,10 @@ function reportWithRows(): LocalUsageReport {
       tokens_cache_read: 8_200_000,
       cost_usd: 42.5,
       unpriced_sessions: 3,
+      models_by_session: {
+        "claude-opus-4-7": 10,
+        "claude-sonnet-4-6": 3,
+      },
     },
     pricing_source: "bundled · verified 2026-01-15",
     pricing_error: null,
@@ -145,6 +160,68 @@ describe("CostTab", () => {
       expect(pricingRefreshMock).toHaveBeenCalledTimes(1),
     );
     expect(localUsageAggregateMock).toHaveBeenCalled();
+  });
+
+  it("renders cache hit % column and model badges per row", async () => {
+    localUsageAggregateMock.mockResolvedValue(reportWithRows());
+    render(<CostTab />);
+    // Hit rate for /work/foo:
+    //   cache_read 8M / (input 1.5M + cache_create 0.1M + cache_read 8M)
+    //   = 8 / 9.6 ≈ 83%
+    await waitFor(() =>
+      expect(screen.getAllByText("83%").length).toBeGreaterThan(0),
+    );
+    // /work/bar: cache_read 200k / (50k + 0 + 200k) = 200/250 = 80%
+    expect(screen.getByText("80%")).toBeInTheDocument();
+
+    // Model badges render with stripped `claude-` prefix and `·count` suffix.
+    expect(screen.getByText("opus-4-7")).toBeInTheDocument();
+    expect(screen.getByText("sonnet-4-6")).toBeInTheDocument();
+    expect(screen.getByText("·10")).toBeInTheDocument();
+    expect(screen.getByText("·3")).toBeInTheDocument();
+  });
+
+  it("totals tile shows install-wide cache hit rate", async () => {
+    localUsageAggregateMock.mockResolvedValue(reportWithRows());
+    render(<CostTab />);
+    // Totals: cache_read 8.2M / (1.55M + 0.1M + 8.2M) = 8.2 / 9.85 ≈ 83%
+    await waitFor(() =>
+      expect(screen.getByText(/cache hit 83%/i)).toBeInTheDocument(),
+    );
+  });
+
+  it("cacheHitRate handles zero-input rows by returning null", () => {
+    expect(
+      cacheHitRate({
+        tokens_input: 0,
+        tokens_cache_creation: 0,
+        tokens_cache_read: 0,
+      }),
+    ).toBeNull();
+    expect(formatHitRate(null)).toBe("—");
+    // Pure cache-read row → 100%.
+    expect(
+      cacheHitRate({
+        tokens_input: 0,
+        tokens_cache_creation: 0,
+        tokens_cache_read: 1_000,
+      }),
+    ).toBe(1);
+    // No cache at all → 0%.
+    expect(
+      cacheHitRate({
+        tokens_input: 1_000,
+        tokens_cache_creation: 0,
+        tokens_cache_read: 0,
+      }),
+    ).toBe(0);
+  });
+
+  it("shortModelId strips the claude- prefix when present", () => {
+    expect(shortModelId("claude-opus-4-7")).toBe("opus-4-7");
+    expect(shortModelId("claude-sonnet-4-6")).toBe("sonnet-4-6");
+    // Unknown shape passes through unchanged.
+    expect(shortModelId("foo-bar")).toBe("foo-bar");
   });
 
   it("changing the window selector triggers a re-fetch with the new spec", async () => {

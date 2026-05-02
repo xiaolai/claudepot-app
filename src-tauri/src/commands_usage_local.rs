@@ -100,6 +100,9 @@ pub struct ProjectUsageRowDto {
     pub tokens_cache_read: u64,
     pub cost_usd: Option<f64>,
     pub unpriced_sessions: usize,
+    /// Session-count breakdown by model id. Order is deterministic
+    /// (BTreeMap → sorted by key) so snapshot tests stay stable.
+    pub models_by_session: std::collections::BTreeMap<String, usize>,
 }
 
 impl From<ProjectUsageRow> for ProjectUsageRowDto {
@@ -115,6 +118,7 @@ impl From<ProjectUsageRow> for ProjectUsageRowDto {
             tokens_cache_read: r.tokens_cache_read,
             cost_usd: r.cost_usd,
             unpriced_sessions: r.unpriced_sessions,
+            models_by_session: r.models_by_session,
         }
     }
 }
@@ -130,6 +134,8 @@ pub struct UsageTotalsDto {
     pub tokens_cache_read: u64,
     pub cost_usd: Option<f64>,
     pub unpriced_sessions: usize,
+    /// Install-wide session-count breakdown by model id.
+    pub models_by_session: std::collections::BTreeMap<String, usize>,
 }
 
 impl From<UsageTotals> for UsageTotalsDto {
@@ -144,6 +150,7 @@ impl From<UsageTotals> for UsageTotalsDto {
             tokens_cache_read: t.tokens_cache_read,
             cost_usd: t.cost_usd,
             unpriced_sessions: t.unpriced_sessions,
+            models_by_session: t.models_by_session,
         }
     }
 }

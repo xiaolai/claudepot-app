@@ -121,6 +121,13 @@ pub struct ProjectUsageRow {
     /// Sessions whose models couldn't be priced. Never zero when
     /// `cost_usd` is None and tokens are non-zero.
     pub unpriced_sessions: usize,
+    /// Session-count breakdown by model. Each session contributes
+    /// once per *distinct* model it used, so a session that mixed
+    /// Opus and Sonnet adds 1 to both buckets — the sum of values is
+    /// ≥ `session_count`. Sessions with zero recorded models (no
+    /// assistant turn yet) contribute nothing here. Used by the GUI
+    /// to render the "model mix" badge column.
+    pub models_by_session: BTreeMap<String, usize>,
 }
 
 /// Total roll-up across every project row. Same fields as a row,
@@ -137,6 +144,10 @@ pub struct UsageTotals {
     pub tokens_cache_read: u64,
     pub cost_usd: Option<f64>,
     pub unpriced_sessions: usize,
+    /// Install-wide session-count breakdown by model — mirrors
+    /// `ProjectUsageRow.models_by_session` aggregated across every
+    /// row in the report.
+    pub models_by_session: BTreeMap<String, usize>,
 }
 
 /// Output of `aggregate_local_usage`. Rows sort newest-first by
@@ -219,6 +230,17 @@ pub fn aggregate_from_rows(
             Some(c) => *acc.cost_usd.get_or_insert(0.0) += c,
             None => acc.unpriced_sessions += 1,
         }
+        // Distinct-models-per-session: dedupe at the session boundary
+        // so a single session that emitted three Opus turns and one
+        // Sonnet turn adds 1 to each bucket, not 4. Sessions with no
+        // recorded models simply don't contribute.
+        let mut seen = std::collections::HashSet::new();
+        for m in &s.models {
+            if seen.insert(m.as_str()) {
+                *acc.models_by_session.entry(m.clone()).or_insert(0) += 1;
+                *totals.models_by_session.entry(m.clone()).or_insert(0) += 1;
+            }
+        }
 
         totals.session_count += 1;
         totals.tokens_input += s.tokens.input;
@@ -246,6 +268,7 @@ pub fn aggregate_from_rows(
             tokens_cache_read: acc.tokens_cache_read,
             cost_usd: acc.cost_usd,
             unpriced_sessions: acc.unpriced_sessions,
+            models_by_session: acc.models_by_session,
         })
         .collect();
     // Newest-first by recent activity; ties broken by project path so
@@ -275,6 +298,7 @@ struct ProjectAccumulator {
     tokens_cache_read: u64,
     cost_usd: Option<f64>,
     unpriced_sessions: usize,
+    models_by_session: BTreeMap<String, usize>,
 }
 
 /// Compute USD cost for one session's aggregate token totals using its
@@ -594,6 +618,109 @@ mod tests {
         // Only the second row falls inside.
         assert_eq!(r.totals.session_count, 1);
         assert_eq!(r.totals.tokens_input, 1);
+    }
+
+    #[test]
+    fn models_by_session_counts_distinct_models_per_session() {
+        let prices = rates_for_test();
+        let rows = vec![
+            // Two sessions on /a, one Opus, one mixed Opus+Sonnet.
+            row(
+                "/a",
+                1_000,
+                vec!["claude-opus-4-7"],
+                TokenUsage {
+                    input: 1,
+                    output: 0,
+                    cache_creation: 0,
+                    cache_read: 0,
+                },
+            ),
+            row(
+                "/a",
+                2_000,
+                vec!["claude-opus-4-7", "claude-sonnet-4-6"],
+                TokenUsage {
+                    input: 1,
+                    output: 0,
+                    cache_creation: 0,
+                    cache_read: 0,
+                },
+            ),
+            // One session on /b, Sonnet only.
+            row(
+                "/b",
+                3_000,
+                vec!["claude-sonnet-4-6"],
+                TokenUsage {
+                    input: 1,
+                    output: 0,
+                    cache_creation: 0,
+                    cache_read: 0,
+                },
+            ),
+            // No-models session — should not contribute to mix.
+            row(
+                "/b",
+                4_000,
+                vec![],
+                TokenUsage {
+                    input: 1,
+                    output: 0,
+                    cache_creation: 0,
+                    cache_read: 0,
+                },
+            ),
+        ];
+        let r = aggregate_from_rows(rows, &prices, TimeWindow::open());
+        // Rows are sorted newest-first by last_active_ms, so /b appears
+        // before /a (last 4_000 vs last 2_000).
+        let b = r.rows.iter().find(|r| r.project_path == "/b").unwrap();
+        let a = r.rows.iter().find(|r| r.project_path == "/a").unwrap();
+
+        // /a: opus appears in 2 sessions, sonnet in 1.
+        assert_eq!(a.models_by_session.get("claude-opus-4-7"), Some(&2));
+        assert_eq!(a.models_by_session.get("claude-sonnet-4-6"), Some(&1));
+        // /b: sonnet in 1 session; the empty-models session contributes nothing.
+        assert_eq!(b.models_by_session.get("claude-sonnet-4-6"), Some(&1));
+        assert_eq!(b.models_by_session.len(), 1);
+
+        // Totals: opus 2, sonnet 2 across the two projects.
+        assert_eq!(r.totals.models_by_session.get("claude-opus-4-7"), Some(&2));
+        assert_eq!(
+            r.totals.models_by_session.get("claude-sonnet-4-6"),
+            Some(&2)
+        );
+    }
+
+    #[test]
+    fn models_by_session_dedupes_within_a_session() {
+        // Defensive: SessionRow.models is already a deduped Vec on the
+        // scan path, but a future change might pass duplicates. The
+        // aggregator must dedupe at the session boundary so the mix
+        // count is "sessions that used model X", not "rows mentioning X".
+        let prices = rates_for_test();
+        let mut row = row(
+            "/p",
+            1,
+            vec![],
+            TokenUsage {
+                input: 1,
+                output: 0,
+                cache_creation: 0,
+                cache_read: 0,
+            },
+        );
+        row.models = vec![
+            "claude-opus-4-7".into(),
+            "claude-opus-4-7".into(),
+            "claude-opus-4-7".into(),
+        ];
+        let r = aggregate_from_rows(vec![row], &prices, TimeWindow::open());
+        let p = &r.rows[0];
+        // Three duplicates collapse to one; same on totals.
+        assert_eq!(p.models_by_session.get("claude-opus-4-7"), Some(&1));
+        assert_eq!(r.totals.models_by_session.get("claude-opus-4-7"), Some(&1));
     }
 
     #[test]

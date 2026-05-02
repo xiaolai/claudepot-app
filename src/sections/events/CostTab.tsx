@@ -49,8 +49,47 @@ type SortKey =
   | "last"
   | "input"
   | "output"
+  | "cache_hit"
   | "project";
 type SortDir = "asc" | "desc";
+
+/**
+ * Prompt-cache hit rate for a row of input-side token totals.
+ *
+ * Definition matches Anthropic's billing model: every prompt token is
+ * categorised as fresh `input`, `cache_creation` (writing the prefix
+ * for future hits), or `cache_read` (served from cache). Hit rate is
+ * the read share of that pie.
+ *
+ * Returns `null` when the denominator is zero (no input-side tokens
+ * yet — usually a never-active session). Caller renders `—`.
+ */
+export function cacheHitRate(row: {
+  tokens_input: number;
+  tokens_cache_creation: number;
+  tokens_cache_read: number;
+}): number | null {
+  const denom =
+    row.tokens_input + row.tokens_cache_creation + row.tokens_cache_read;
+  if (denom === 0) return null;
+  return row.tokens_cache_read / denom;
+}
+
+/** Pretty-print a hit rate as `"83%"`, or `"—"` for null. */
+export function formatHitRate(r: number | null): string {
+  if (r == null) return "—";
+  return `${Math.round(r * 100)}%`;
+}
+
+/**
+ * Strip the leading `claude-` family prefix when rendering a model
+ * id in tight column space. `claude-opus-4-7` → `opus-4-7`. Falls
+ * back to the raw id for unknown shapes.
+ */
+export function shortModelId(id: string): string {
+  if (id.startsWith("claude-")) return id.slice("claude-".length);
+  return id;
+}
 
 export function CostTab() {
   const [choice, setChoice] = useState<WindowChoice>("7d");
@@ -288,7 +327,11 @@ function SummaryTiles({
       <Tile
         label="Tokens in"
         value={renderTokens(t?.tokens_input)}
-        sub={renderTokens(t?.tokens_cache_read, "cache read")}
+        sub={
+          t
+            ? `cache hit ${formatHitRate(cacheHitRate(t))}`
+            : renderTokens(undefined, "cache read")
+        }
       />
       <Tile
         label="Tokens out"
@@ -456,6 +499,15 @@ function CostTable({
             Output
           </ThSort>
           <ThSort
+            value="cache_hit"
+            current={sortKey}
+            dir={sortDir}
+            onSort={onSort}
+          >
+            Cache hit
+          </ThSort>
+          <Th align="left">Models</Th>
+          <ThSort
             value="cost"
             current={sortKey}
             dir={sortDir}
@@ -483,6 +535,7 @@ function Row({ row }: { row: ProjectUsageRow }) {
       ? formatRelative(row.last_active_ms, { ago: false })
       : "—";
   const warn = row.unpriced_sessions > 0 ? row.unpriced_sessions : null;
+  const hit = cacheHitRate(row);
   // Most projects share a long `/Users/<user>/...` prefix; the
   // basename + parent (one or two trailing segments) is the
   // discriminating part. Render that as the cell text, and put the
@@ -506,6 +559,19 @@ function Row({ row }: { row: ProjectUsageRow }) {
       <Td align="right">{last}</Td>
       <Td align="right">{formatCompact(row.tokens_input)}</Td>
       <Td align="right">{formatCompact(row.tokens_output)}</Td>
+      <Td
+        align="right"
+        title={
+          hit == null
+            ? "no input-side tokens"
+            : `${formatCompact(row.tokens_cache_read)} cache-read of ${formatCompact(row.tokens_input + row.tokens_cache_creation + row.tokens_cache_read)} prompt tokens`
+        }
+      >
+        {formatHitRate(hit)}
+      </Td>
+      <Td align="left">
+        <ModelBadges mix={row.models_by_session} />
+      </Td>
       <Td align="right">{cost}</Td>
       <Td align="center">
         {warn != null ? (
@@ -518,6 +584,55 @@ function Row({ row }: { row: ProjectUsageRow }) {
         ) : null}
       </Td>
     </tr>
+  );
+}
+
+/** Inline badge group for the row's model-mix column. Sorted by
+ *  session-count descending so the most-used model shows first.
+ *  Renders nothing for empty mixes — keeps the column quiet on
+ *  user-only sessions. */
+function ModelBadges({ mix }: { mix: Record<string, number> }) {
+  const entries = Object.entries(mix).sort(
+    (a, b) => b[1] - a[1] || a[0].localeCompare(b[0]),
+  );
+  if (entries.length === 0) {
+    return (
+      <span style={{ color: "var(--fg-faint)", fontSize: "var(--fs-2xs)" }}>
+        —
+      </span>
+    );
+  }
+  return (
+    <span
+      style={{
+        display: "inline-flex",
+        gap: "var(--sp-4)",
+        flexWrap: "wrap",
+      }}
+    >
+      {entries.map(([model, count]) => (
+        <span
+          key={model}
+          title={`${model} · ${count} session${count === 1 ? "" : "s"}`}
+          style={{
+            display: "inline-flex",
+            alignItems: "baseline",
+            gap: "var(--sp-3)",
+            background: "var(--bg-sunken)",
+            border: "var(--bw-hair) solid var(--line)",
+            borderRadius: "var(--r-1)",
+            padding: "var(--sp-1) var(--sp-4)",
+            fontSize: "var(--fs-2xs)",
+            color: "var(--fg-muted)",
+            fontVariantNumeric: "tabular-nums",
+            whiteSpace: "nowrap",
+          }}
+        >
+          <span style={{ color: "var(--fg)" }}>{shortModelId(model)}</span>
+          <span style={{ color: "var(--fg-faint)" }}>·{count}</span>
+        </span>
+      ))}
+    </span>
   );
 }
 
@@ -693,6 +808,8 @@ function sortRows(
         return a.tokens_input - b.tokens_input;
       case "output":
         return a.tokens_output - b.tokens_output;
+      case "cache_hit":
+        return nullableNumberCmp(cacheHitRate(a), cacheHitRate(b));
       case "project":
         return a.project_path.localeCompare(b.project_path);
     }
