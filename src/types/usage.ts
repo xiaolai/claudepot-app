@@ -29,6 +29,12 @@ export interface ProjectUsageRow {
   /** Sessions whose models couldn't be priced. Drives the row's
    *  warning glyph + the footer note. */
   unpriced_sessions: number;
+  /** Session-count breakdown by model id. A session that mixed
+   *  Opus + Sonnet contributes 1 to each bucket, so the sum of
+   *  values is ≥ `session_count`. Sessions with no recorded models
+   *  contribute nothing. Used by the GUI to render the model-mix
+   *  badge column on each project row. */
+  models_by_session: Record<string, number>;
 }
 
 export interface UsageTotals {
@@ -41,6 +47,8 @@ export interface UsageTotals {
   tokens_cache_read: number;
   cost_usd: number | null;
   unpriced_sessions: number;
+  /** Install-wide model-mix; mirrors `ProjectUsageRow.models_by_session`. */
+  models_by_session: Record<string, number>;
 }
 
 export interface LocalUsageReport {
