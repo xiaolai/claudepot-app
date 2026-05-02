@@ -24,9 +24,24 @@ import { api } from "../../api";
 import { formatRelative } from "../../lib/formatRelative";
 import type {
   LocalUsageReport,
+  PriceTierId,
   ProjectUsageRow,
   UsageWindowSpec,
 } from "../../types";
+
+/** Picker options for the pricing tier — keeps the labels stable
+ *  alongside the wire-form ids. Order mirrors the Rust
+ *  `PriceTier::all()` so the default lands at the top. */
+const TIER_OPTIONS: { value: PriceTierId; label: string }[] = [
+  { value: "anthropic_api", label: "Anthropic API" },
+  { value: "vertex_global", label: "Vertex Global" },
+  { value: "vertex_regional", label: "Vertex Regional" },
+  { value: "aws_bedrock", label: "AWS Bedrock" },
+];
+
+function labelForTier(t: PriceTierId): string {
+  return TIER_OPTIONS.find((o) => o.value === t)?.label ?? t;
+}
 
 type WindowChoice = "7d" | "30d" | "90d" | "all";
 
@@ -152,6 +167,21 @@ export function CostTab() {
     }
   }, [choice, fetchReport]);
 
+  const setTier = useCallback(
+    async (t: PriceTierId) => {
+      try {
+        await api.pricingTierSet(t);
+        // The fresh report carries the updated tier label in its
+        // `pricing_tier` field, so a single re-fetch keeps the UI
+        // in sync without a separate state path.
+        await fetchReport(choice);
+      } catch (e) {
+        setError(e instanceof Error ? e.message : String(e));
+      }
+    },
+    [choice, fetchReport],
+  );
+
   return (
     <div
       style={{
@@ -174,6 +204,8 @@ export function CostTab() {
         onChoice={setChoice}
         pricingSource={report?.pricing_source ?? null}
         pricingError={report?.pricing_error ?? null}
+        pricingTier={report?.pricing_tier ?? null}
+        onTier={setTier}
         loading={loading}
       />
       <SummaryTiles report={report} loading={loading} />
@@ -208,12 +240,16 @@ function Controls({
   onChoice,
   pricingSource,
   pricingError,
+  pricingTier,
+  onTier,
   loading,
 }: {
   choice: WindowChoice;
   onChoice: (c: WindowChoice) => void;
   pricingSource: string | null;
   pricingError: string | null;
+  pricingTier: PriceTierId | null;
+  onTier: (t: PriceTierId) => void;
   loading: boolean;
 }) {
   return (
@@ -254,6 +290,36 @@ function Controls({
           </option>
         ))}
       </select>
+      <label
+        htmlFor="cost-tab-tier"
+        style={{
+          fontSize: "var(--fs-xs)",
+          color: "var(--fg-muted)",
+        }}
+      >
+        Tier
+      </label>
+      <select
+        id="cost-tab-tier"
+        value={pricingTier ?? "anthropic_api"}
+        onChange={(e) => onTier(e.target.value as PriceTierId)}
+        title="Platform you're billed through. Drives the cost label and (where verified) the rate multiplier."
+        style={{
+          fontSize: "var(--fs-xs)",
+          padding: "var(--sp-3) var(--sp-8)",
+          background: "var(--bg-raised)",
+          border: "var(--bw-hair) solid var(--line-strong)",
+          borderRadius: "var(--r-1)",
+          color: "var(--fg)",
+          fontFamily: "inherit",
+        }}
+      >
+        {TIER_OPTIONS.map((o) => (
+          <option key={o.value} value={o.value}>
+            {o.label}
+          </option>
+        ))}
+      </select>
       {pricingSource && (
         <span
           title={pricingError ?? `Price table source: ${pricingSource}`}
@@ -268,7 +334,8 @@ function Controls({
             textTransform: "uppercase",
           }}
         >
-          Pricing · {pricingSource}
+          {pricingTier ? `${labelForTier(pricingTier)} · ` : ""}
+          {pricingSource}
           {pricingError ? " · stale" : ""}
         </span>
       )}

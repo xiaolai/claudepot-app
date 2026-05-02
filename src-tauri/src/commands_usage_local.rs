@@ -8,12 +8,15 @@
 //! Activities → Cost tab. The CLI's `claudepot usage report`
 //! consumes the same core API directly.
 
-use claudepot_core::pricing;
+use claudepot_core::pricing::{self, PriceTier};
 use claudepot_core::session::list_all_sessions;
 use claudepot_core::usage_local::{
     aggregate_from_rows, LocalUsageReport, ProjectUsageRow, ReportWindow, TimeWindow, UsageTotals,
 };
 use serde::{Deserialize, Serialize};
+use tauri::State;
+
+use crate::preferences::PreferencesState;
 
 /// Wire shape for the time window. The frontend constructs one of
 /// these and ships it across IPC; the backend translates to the
@@ -71,6 +74,13 @@ pub struct LocalUsageReportDto {
     /// failed; the GUI can render it in a tooltip next to the pill.
     /// `None` on success.
     pub pricing_error: Option<String>,
+    /// Wire-form pricing tier the cost figures were computed against
+    /// (`anthropic_api`, `vertex_global`, `vertex_regional`,
+    /// `aws_bedrock`). Driven by the user's preference; the GUI
+    /// renders the matching display label in the pricing-source pill
+    /// and uses this id to select the active option in the tier
+    /// picker.
+    pub pricing_tier: String,
 }
 
 #[derive(Debug, Serialize)]
@@ -157,6 +167,7 @@ impl From<UsageTotals> for UsageTotalsDto {
 
 fn report_to_dto(
     report: LocalUsageReport,
+    pricing_tier: String,
     pricing_source: String,
     pricing_error: Option<String>,
 ) -> LocalUsageReportDto {
@@ -166,6 +177,7 @@ fn report_to_dto(
         totals: report.totals.into(),
         pricing_source,
         pricing_error,
+        pricing_tier,
     }
 }
 
@@ -221,19 +233,76 @@ fn relative_when(unix_secs: u64) -> String {
 /// main thread per the threading-policy comment in
 /// `commands.rs`.
 #[tauri::command]
-pub async fn local_usage_aggregate(spec: WindowSpec) -> Result<LocalUsageReportDto, String> {
+pub async fn local_usage_aggregate(
+    spec: WindowSpec,
+    prefs: State<'_, PreferencesState>,
+) -> Result<LocalUsageReportDto, String> {
     let now_ms = chrono::Utc::now().timestamp_millis();
     let window = spec.into_time_window(now_ms)?;
 
     let config_dir = claudepot_core::paths::claude_config_dir();
     let sessions = list_all_sessions(&config_dir).map_err(|e| format!("session index: {e}"))?;
 
-    let table = pricing::load();
+    // Read the user's pricing tier from preferences. The lock is
+    // released immediately — we only need the enum value, not a live
+    // reference, and the aggregation that follows is the slow part.
+    let tier = {
+        let guard = prefs
+            .0
+            .lock()
+            .map_err(|e| format!("preferences lock poisoned: {e}"))?;
+        guard.pricing_tier
+    };
+
+    let bundled = pricing::load();
+    let table = bundled.with_tier(tier);
     let pricing_source = format_pricing_source(&table);
     let pricing_error = table.last_fetch_error.clone();
 
     let report = aggregate_from_rows(sessions, &table, window);
-    Ok(report_to_dto(report, pricing_source, pricing_error))
+    Ok(report_to_dto(
+        report,
+        tier.as_str().to_string(),
+        pricing_source,
+        pricing_error,
+    ))
+}
+
+/// Update the user's pricing tier. The wire form is the lowercase
+/// `PriceTier::as_str` value (`anthropic_api`, `vertex_global`,
+/// `vertex_regional`, `aws_bedrock`); unknown values yield an
+/// explicit error so the GUI can show a toast instead of silently
+/// reverting to the default. Persists the change to disk before
+/// returning so a hard crash mid-flight doesn't lose the choice.
+#[tauri::command]
+pub async fn pricing_tier_set(
+    tier: String,
+    prefs: State<'_, PreferencesState>,
+) -> Result<(), String> {
+    let parsed = PriceTier::parse(&tier)
+        .ok_or_else(|| format!("unknown pricing tier: {tier}"))?;
+    let snapshot = {
+        let mut guard = prefs
+            .0
+            .lock()
+            .map_err(|e| format!("preferences lock poisoned: {e}"))?;
+        guard.pricing_tier = parsed;
+        guard.clone()
+    };
+    snapshot.save()
+}
+
+/// Read the user's current pricing tier as the wire form. Lets the
+/// frontend hydrate the tier picker on cold start before the first
+/// `local_usage_aggregate` round-trip lands, so the picker doesn't
+/// flicker from the default value to the saved value.
+#[tauri::command]
+pub fn pricing_tier_get(prefs: State<'_, PreferencesState>) -> Result<String, String> {
+    let guard = prefs
+        .0
+        .lock()
+        .map_err(|e| format!("preferences lock poisoned: {e}"))?;
+    Ok(guard.pricing_tier.as_str().to_string())
 }
 
 #[cfg(test)]
@@ -323,6 +392,7 @@ mod tests {
                 tokens_cache_read: 1000,
                 cost_usd: Some(1.23),
                 unpriced_sessions: 1,
+                models_by_session: BTreeMap::new(),
             }],
             totals: CoreTotals {
                 session_count: 4,
@@ -334,10 +404,12 @@ mod tests {
                 tokens_cache_read: 1000,
                 cost_usd: Some(1.23),
                 unpriced_sessions: 1,
+                models_by_session: BTreeMap::new(),
             },
         };
-        let dto = report_to_dto(core, "test-source".into(), None);
+        let dto = report_to_dto(core, "anthropic_api".into(), "test-source".into(), None);
         assert_eq!(dto.pricing_source, "test-source");
+        assert_eq!(dto.pricing_tier, "anthropic_api");
         assert!(dto.pricing_error.is_none());
         assert_eq!(dto.rows.len(), 1);
         assert_eq!(dto.rows[0].project_path, "/p");
@@ -398,6 +470,7 @@ mod tests {
                 tokens_cache_read: 0,
                 cost_usd: None,
                 unpriced_sessions: 1,
+                models_by_session: BTreeMap::new(),
             }],
             totals: CoreTotals {
                 session_count: 1,
@@ -409,6 +482,7 @@ mod tests {
                 tokens_cache_read: 0,
                 cost_usd: None,
                 unpriced_sessions: 1,
+                models_by_session: BTreeMap::new(),
             },
         };
         let _used: ModelRates = ModelRates {
@@ -417,7 +491,7 @@ mod tests {
             cache_write_per_mtok: 1.0,
             cache_read_per_mtok: 1.0,
         };
-        let dto = report_to_dto(core, "bundled".into(), None);
+        let dto = report_to_dto(core, "anthropic_api".into(), "bundled".into(), None);
         assert!(dto.totals.cost_usd.is_none());
         assert_eq!(dto.totals.unpriced_sessions, 1);
     }

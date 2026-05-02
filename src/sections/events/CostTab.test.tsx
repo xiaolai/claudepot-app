@@ -4,12 +4,14 @@ import userEvent from "@testing-library/user-event";
 
 const localUsageAggregateMock = vi.fn();
 const pricingRefreshMock = vi.fn();
+const pricingTierSetMock = vi.fn();
 
 vi.mock("../../api", () => ({
   api: {
     localUsageAggregate: (...args: unknown[]) =>
       localUsageAggregateMock(...args),
     pricingRefresh: (...args: unknown[]) => pricingRefreshMock(...args),
+    pricingTierSet: (...args: unknown[]) => pricingTierSetMock(...args),
   },
 }));
 
@@ -39,6 +41,7 @@ function emptyReport(): LocalUsageReport {
     },
     pricing_source: "bundled · verified 2026-01-15",
     pricing_error: null,
+    pricing_tier: "anthropic_api",
   };
 }
 
@@ -93,6 +96,7 @@ function reportWithRows(): LocalUsageReport {
     },
     pricing_source: "bundled · verified 2026-01-15",
     pricing_error: null,
+    pricing_tier: "anthropic_api",
   };
 }
 
@@ -100,6 +104,7 @@ describe("CostTab", () => {
   beforeEach(() => {
     localUsageAggregateMock.mockReset();
     pricingRefreshMock.mockReset();
+    pricingTierSetMock.mockReset();
   });
 
   afterEach(() => {
@@ -222,6 +227,39 @@ describe("CostTab", () => {
     expect(shortModelId("claude-sonnet-4-6")).toBe("sonnet-4-6");
     // Unknown shape passes through unchanged.
     expect(shortModelId("foo-bar")).toBe("foo-bar");
+  });
+
+  it("renders the active pricing tier in the source pill and the picker", async () => {
+    localUsageAggregateMock.mockResolvedValue(reportWithRows());
+    render(<CostTab />);
+    await waitFor(() =>
+      expect(localUsageAggregateMock).toHaveBeenCalled(),
+    );
+    // Tier label appears in the source pill alongside the source text.
+    expect(
+      screen.getByText(/Anthropic API · bundled · verified 2026-01-15/i),
+    ).toBeInTheDocument();
+    // Picker is hydrated to the report's tier.
+    const select = screen.getByLabelText("Tier") as HTMLSelectElement;
+    expect(select.value).toBe("anthropic_api");
+  });
+
+  it("changing the tier picker calls pricingTierSet and re-fetches", async () => {
+    localUsageAggregateMock.mockResolvedValue(reportWithRows());
+    pricingTierSetMock.mockResolvedValue(undefined);
+    render(<CostTab />);
+    await waitFor(() =>
+      expect(localUsageAggregateMock).toHaveBeenCalled(),
+    );
+    const select = screen.getByLabelText("Tier") as HTMLSelectElement;
+    const user = userEvent.setup();
+    localUsageAggregateMock.mockClear();
+    await user.selectOptions(select, "aws_bedrock");
+    await waitFor(() =>
+      expect(pricingTierSetMock).toHaveBeenCalledWith("aws_bedrock"),
+    );
+    // The setter triggers a re-fetch so the new tier label lands.
+    expect(localUsageAggregateMock).toHaveBeenCalled();
   });
 
   it("changing the window selector triggers a re-fetch with the new spec", async () => {
