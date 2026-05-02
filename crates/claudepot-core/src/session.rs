@@ -17,7 +17,7 @@
 
 use crate::artifact_usage::extract as usage_extract;
 use crate::artifact_usage::model::{Outcome, UsageEvent};
-use crate::path_utils::simplify_windows_path;
+use crate::path_utils::canonicalize_simplified;
 use chrono::{DateTime, Utc};
 #[cfg(test)]
 use rayon::prelude::*;
@@ -374,19 +374,6 @@ pub fn read_session_detail_at_path(
 // ---------------------------------------------------------------------------
 // Internals
 // ---------------------------------------------------------------------------
-
-/// Canonicalize a path and strip the Windows `\\?\` verbatim prefix.
-///
-/// `fs::canonicalize` on Windows returns `\\?\C:\...`; comparing such a
-/// path against a non-verbatim path with `Path::starts_with` fails even
-/// when they point at the same location. On Unix this is just a
-/// canonicalize — `simplify_windows_path` is a no-op.
-fn canonicalize_simplified(path: &Path) -> std::io::Result<PathBuf> {
-    let canonical = fs::canonicalize(path)?;
-    Ok(PathBuf::from(simplify_windows_path(
-        &canonical.to_string_lossy(),
-    )))
-}
 
 fn locate_session(config_dir: &Path, session_id: &str) -> Result<(String, PathBuf), SessionError> {
     if session_id.contains('/')

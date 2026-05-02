@@ -12,7 +12,6 @@
 //! fallback combo) are validated by [`Blueprint::from_toml`].
 
 use serde::{Deserialize, Serialize};
-use std::collections::BTreeMap;
 
 use crate::automations::types::HostPlatform;
 
@@ -750,7 +749,3 @@ reads = "..."
         assert!(peek_id("[scope]\nreads = \"x\"").is_none());
     }
 }
-
-// Avoid unused-import warning when the registry hasn't loaded yet.
-#[allow(dead_code)]
-type _Use<T> = BTreeMap<String, T>;
