@@ -57,8 +57,14 @@ fn registry() -> Result<&'static TemplateRegistry, String> {
 
 #[tauri::command]
 pub async fn templates_list() -> Result<Vec<TemplateSummaryDto>, String> {
+    use claudepot_core::automations::types::HostPlatform;
     let r = registry()?;
-    Ok(r.list().map(TemplateSummaryDto::from).collect())
+    // Filter to templates that declare support for the current
+    // host. Without this, every macOS-shaped blueprint shows up
+    // on Linux/Windows and fails opaquely at run time.
+    Ok(r.list_for(HostPlatform::current())
+        .map(TemplateSummaryDto::from)
+        .collect())
 }
 
 #[tauri::command]

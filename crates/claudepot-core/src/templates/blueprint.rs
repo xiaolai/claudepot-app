@@ -14,6 +14,8 @@
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 
+use crate::automations::types::HostPlatform;
+
 use super::error::TemplateError;
 
 // ---------- Top-level blueprint ----------
@@ -66,6 +68,26 @@ pub struct Blueprint {
     /// registry; not loaded into the blueprint itself.
     #[serde(default)]
     pub sample_report: Option<String>,
+
+    /// Platforms this blueprint is intended to run on. Empty (the
+    /// historical default) is treated as "macOS only" because every
+    /// shipped blueprint hardcodes macOS shell tooling — see the
+    /// 2026-05-02 cross-platform audit for the rationale. Future
+    /// blueprints can declare an explicit list to broaden support.
+    /// `TemplateRegistry::list_for(...)` filters by this field.
+    #[serde(default = "default_supported_platforms")]
+    pub supported_platforms: Vec<HostPlatform>,
+}
+
+fn default_supported_platforms() -> Vec<HostPlatform> {
+    vec![HostPlatform::Macos]
+}
+
+impl Blueprint {
+    /// True when this blueprint declares support for `host`.
+    pub fn supports(&self, host: HostPlatform) -> bool {
+        self.supported_platforms.contains(&host)
+    }
 }
 
 /// Stable namespaced identifier (`it.morning-health-check`).
