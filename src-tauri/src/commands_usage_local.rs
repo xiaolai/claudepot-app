@@ -10,8 +10,10 @@
 
 use claudepot_core::pricing::{self, PriceTier};
 use claudepot_core::session::list_all_sessions;
+use claudepot_core::session_index::SessionIndex;
 use claudepot_core::usage_local::{
-    aggregate_from_rows, LocalUsageReport, ProjectUsageRow, ReportWindow, TimeWindow, UsageTotals,
+    aggregate_from_rows, top_costly_turns, CostlyTurn, LocalUsageReport, ProjectUsageRow,
+    ReportWindow, TimeWindow, UsageTotals,
 };
 use serde::{Deserialize, Serialize};
 use tauri::State;
@@ -303,6 +305,102 @@ pub fn pricing_tier_get(prefs: State<'_, PreferencesState>) -> Result<String, St
         .lock()
         .map_err(|e| format!("preferences lock poisoned: {e}"))?;
     Ok(guard.pricing_tier.as_str().to_string())
+}
+
+/// Wire shape for one row of the "top costly prompts" panel. Mirrors
+/// `claudepot_core::usage_local::CostlyTurn` byte-for-byte except the
+/// JS-side never sees `None` for `cost_usd` — the core path drops
+/// unresolved-model rows, so this DTO surfaces a concrete `f64`.
+#[derive(Debug, Serialize)]
+pub struct CostlyTurnDto {
+    pub file_path: String,
+    pub project_path: String,
+    pub turn_index: usize,
+    pub ts_ms: Option<i64>,
+    pub model: String,
+    pub tokens_input: u64,
+    pub tokens_output: u64,
+    pub tokens_cache_creation: u64,
+    pub tokens_cache_read: u64,
+    pub user_prompt_preview: Option<String>,
+    /// Always populated — `top_costly_turns` filters out rows with
+    /// unresolved cost. Kept as `f64` (not Option<f64>) on the wire
+    /// so the UI can render `$X.XX` without a null guard per cell.
+    pub cost_usd: f64,
+}
+
+impl From<CostlyTurn> for CostlyTurnDto {
+    fn from(t: CostlyTurn) -> Self {
+        Self {
+            file_path: t.file_path,
+            project_path: t.project_path,
+            turn_index: t.turn_index,
+            ts_ms: t.ts_ms,
+            model: t.model,
+            tokens_input: t.tokens_input,
+            tokens_output: t.tokens_output,
+            tokens_cache_creation: t.tokens_cache_creation,
+            tokens_cache_read: t.tokens_cache_read,
+            user_prompt_preview: t.user_prompt_preview,
+            cost_usd: t.cost_usd.unwrap_or(0.0),
+        }
+    }
+}
+
+/// Wire envelope for the top-N response. Carries the same
+/// `pricing_tier` echo as `LocalUsageReportDto` so the consumer can
+/// render the active tier alongside the dollar figures.
+#[derive(Debug, Serialize)]
+pub struct TopCostlyPromptsDto {
+    pub turns: Vec<CostlyTurnDto>,
+    pub pricing_tier: String,
+}
+
+/// Tauri command — return the install's `final_n` costliest prompts
+/// in the supplied `spec` window, scored against the user's active
+/// pricing tier. The session index is refreshed in-band so newly-
+/// landed transcripts contribute to the ranking on the next
+/// dashboard tick. `final_n` is capped at 50 server-side to bound
+/// the UI footprint and the in-memory candidate pool.
+#[tauri::command]
+pub async fn top_costly_prompts(
+    spec: WindowSpec,
+    final_n: usize,
+    prefs: State<'_, PreferencesState>,
+) -> Result<TopCostlyPromptsDto, String> {
+    let now_ms = chrono::Utc::now().timestamp_millis();
+    let window = spec.into_time_window(now_ms)?;
+    let n = final_n.min(50);
+
+    let tier = {
+        let guard = prefs
+            .0
+            .lock()
+            .map_err(|e| format!("preferences lock poisoned: {e}"))?;
+        guard.pricing_tier
+    };
+
+    let bundled = pricing::load();
+    let table = bundled.with_tier(tier);
+
+    // The session index lives in the on-disk DB; opening it is cheap
+    // (idempotent + lazy). Refresh inline so newly-landed transcripts
+    // contribute to the ranking; the refresh itself is bounded by
+    // the (size, mtime, inode) re-parse guard.
+    let config_dir = claudepot_core::paths::claude_config_dir();
+    let db_path = claudepot_core::paths::claudepot_data_dir().join("sessions.db");
+    let index = SessionIndex::open(&db_path).map_err(|e| format!("session index open: {e}"))?;
+    index
+        .refresh(&config_dir)
+        .map_err(|e| format!("session index refresh: {e}"))?;
+
+    let turns = top_costly_turns(&index, &table, window, n)
+        .map_err(|e| format!("top_costly_turns: {e}"))?;
+
+    Ok(TopCostlyPromptsDto {
+        turns: turns.into_iter().map(Into::into).collect(),
+        pricing_tier: tier.as_str().to_string(),
+    })
 }
 
 #[cfg(test)]

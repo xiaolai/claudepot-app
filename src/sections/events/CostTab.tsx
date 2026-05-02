@@ -23,11 +23,18 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { api } from "../../api";
 import { formatRelative } from "../../lib/formatRelative";
 import type {
+  CostlyTurn,
   LocalUsageReport,
   PriceTierId,
   ProjectUsageRow,
+  TopCostlyPrompts,
   UsageWindowSpec,
 } from "../../types";
+
+/** How many rows the top-prompts panel surfaces. Server caps at 50;
+ *  5 keeps the panel a glance, not a deep dive. The user can drill
+ *  into the per-session detail for more. */
+const TOP_PROMPTS_LIMIT = 5;
 
 /** Picker options for the pricing tier — keeps the labels stable
  *  alongside the wire-form ids. Order mirrors the Rust
@@ -109,6 +116,7 @@ export function shortModelId(id: string): string {
 export function CostTab() {
   const [choice, setChoice] = useState<WindowChoice>("7d");
   const [report, setReport] = useState<LocalUsageReport | null>(null);
+  const [topPrompts, setTopPrompts] = useState<TopCostlyPrompts | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [sortKey, setSortKey] = useState<SortKey>("cost");
@@ -119,10 +127,19 @@ export function CostTab() {
     async (c: WindowChoice) => {
       const seq = ++seqRef.current;
       setLoading(true);
+      // Fire both requests in parallel — the top-prompts query reads
+      // the session_turns table while the aggregate reads the
+      // sessions table; both refresh the index before reading. The
+      // user-facing result lands when the slower of the two
+      // resolves, which is the aggregate (it walks the full index).
       try {
-        const r = await api.localUsageAggregate(toSpec(c));
+        const [r, tp] = await Promise.all([
+          api.localUsageAggregate(toSpec(c)),
+          api.topCostlyPrompts(toSpec(c), TOP_PROMPTS_LIMIT),
+        ]);
         if (seq !== seqRef.current) return;
         setReport(r);
+        setTopPrompts(tp);
         setError(null);
       } catch (e) {
         if (seq !== seqRef.current) return;
@@ -227,6 +244,9 @@ export function CostTab() {
           sortDir={sortDir}
           onSort={onSort}
         />
+      )}
+      {!error && topPrompts && topPrompts.turns.length > 0 && (
+        <TopPromptsPanel data={topPrompts} />
       )}
       <UnpricedFooter report={report} onRefreshPrices={refreshPrices} />
     </div>
@@ -909,4 +929,143 @@ function nullableNumberCmp(
   if (a == null) return -1;
   if (b == null) return 1;
   return a - b;
+}
+
+// ────────────────────────────────────────────── top costly prompts panel
+
+/** Compact ranked list of the install's costliest prompts in the
+ *  current window. Renders only when the backend returns at least
+ *  one row — fresh installs with no per-turn data yet show no panel
+ *  at all (render-if-nonzero per design.md). */
+function TopPromptsPanel({ data }: { data: TopCostlyPrompts }) {
+  return (
+    <div
+      style={{
+        display: "flex",
+        flexDirection: "column",
+        gap: "var(--sp-6)",
+      }}
+    >
+      <div
+        style={{
+          fontSize: "var(--fs-2xs)",
+          color: "var(--fg-faint)",
+          letterSpacing: "var(--ls-wide)",
+          textTransform: "uppercase",
+        }}
+      >
+        Top {data.turns.length} costly prompt{data.turns.length === 1 ? "" : "s"}
+      </div>
+      <ol
+        style={{
+          listStyle: "none",
+          margin: 0,
+          padding: 0,
+          display: "flex",
+          flexDirection: "column",
+          gap: "var(--sp-4)",
+        }}
+      >
+        {data.turns.map((t, i) => (
+          <CostlyTurnRow key={`${t.file_path}:${t.turn_index}`} turn={t} rank={i + 1} />
+        ))}
+      </ol>
+    </div>
+  );
+}
+
+function CostlyTurnRow({ turn, rank }: { turn: CostlyTurn; rank: number }) {
+  const project = displayPath(turn.project_path);
+  const preview = turn.user_prompt_preview ?? "(no prompt recorded)";
+  return (
+    <li
+      style={{
+        display: "grid",
+        gridTemplateColumns:
+          "var(--rank-col) minmax(0, 1fr) auto auto",
+        alignItems: "center",
+        gap: "var(--sp-10)",
+        padding: "var(--sp-6) var(--sp-8)",
+        background: "var(--bg-raised)",
+        border: "var(--bw-hair) solid var(--line)",
+        borderRadius: "var(--r-1)",
+        // The rank-col custom prop lets us keep the rank column
+        // tight without a magic number. 28px is enough for "10."
+        // at the current font size; over-rank scenarios would
+        // need a wider value but the panel caps at 5.
+        ["--rank-col" as keyof React.CSSProperties]: "tokens.sp[28]",
+      } as React.CSSProperties}
+    >
+      <div
+        style={{
+          fontSize: "var(--fs-2xs)",
+          color: "var(--fg-faint)",
+          fontVariantNumeric: "tabular-nums",
+          textAlign: "right",
+        }}
+      >
+        {rank}.
+      </div>
+      <div
+        style={{
+          minWidth: 0,
+          display: "flex",
+          flexDirection: "column",
+          gap: "var(--sp-1)",
+        }}
+      >
+        <div
+          title={preview}
+          style={{
+            fontSize: "var(--fs-xs)",
+            color: "var(--fg)",
+            overflow: "hidden",
+            textOverflow: "ellipsis",
+            whiteSpace: "nowrap",
+          }}
+        >
+          {preview}
+        </div>
+        <div
+          title={turn.project_path}
+          style={{
+            fontSize: "var(--fs-2xs)",
+            color: "var(--fg-faint)",
+            overflow: "hidden",
+            textOverflow: "ellipsis",
+            whiteSpace: "nowrap",
+          }}
+        >
+          {project} · turn {turn.turn_index + 1}
+        </div>
+      </div>
+      <span
+        title={`${turn.model} · ${formatCompact(
+          turn.tokens_input + turn.tokens_output + turn.tokens_cache_creation + turn.tokens_cache_read,
+        )} tokens`}
+        style={{
+          fontSize: "var(--fs-2xs)",
+          color: "var(--fg-muted)",
+          background: "var(--bg-sunken)",
+          border: "var(--bw-hair) solid var(--line)",
+          borderRadius: "var(--r-1)",
+          padding: "var(--sp-1) var(--sp-4)",
+          whiteSpace: "nowrap",
+        }}
+      >
+        {shortModelId(turn.model)}
+      </span>
+      <div
+        style={{
+          fontSize: "var(--fs-xs)",
+          color: "var(--fg)",
+          fontVariantNumeric: "tabular-nums",
+          textAlign: "right",
+          minWidth: "var(--cost-col, tokens.sp[60])",
+        }}
+      >
+        ${turn.cost_usd.toFixed(2)}
+      </div>
+    </li>
+  );
 }

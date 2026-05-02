@@ -76,6 +76,29 @@ export interface LocalUsageReport {
   pricing_tier: PriceTierId;
 }
 
+/** One row of the "top costly prompts" panel. Mirrors the
+ *  `CostlyTurnDto` Tauri DTO byte-for-byte. */
+export interface CostlyTurn {
+  file_path: string;
+  project_path: string;
+  turn_index: number;
+  ts_ms: number | null;
+  model: string;
+  tokens_input: number;
+  tokens_output: number;
+  tokens_cache_creation: number;
+  tokens_cache_read: number;
+  user_prompt_preview: string | null;
+  /** Always populated — the backend filters out unresolved-model
+   *  rows so the UI doesn't have to null-guard each cell. */
+  cost_usd: number;
+}
+
+export interface TopCostlyPrompts {
+  turns: CostlyTurn[];
+  pricing_tier: PriceTierId;
+}
+
 /**
  * Wire shape for the time window argument to `localUsageAggregate`.
  *

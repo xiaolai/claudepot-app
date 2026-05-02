@@ -5,6 +5,7 @@ import userEvent from "@testing-library/user-event";
 const localUsageAggregateMock = vi.fn();
 const pricingRefreshMock = vi.fn();
 const pricingTierSetMock = vi.fn();
+const topCostlyPromptsMock = vi.fn();
 
 vi.mock("../../api", () => ({
   api: {
@@ -12,6 +13,7 @@ vi.mock("../../api", () => ({
       localUsageAggregateMock(...args),
     pricingRefresh: (...args: unknown[]) => pricingRefreshMock(...args),
     pricingTierSet: (...args: unknown[]) => pricingTierSetMock(...args),
+    topCostlyPrompts: (...args: unknown[]) => topCostlyPromptsMock(...args),
   },
 }));
 
@@ -105,6 +107,14 @@ describe("CostTab", () => {
     localUsageAggregateMock.mockReset();
     pricingRefreshMock.mockReset();
     pricingTierSetMock.mockReset();
+    topCostlyPromptsMock.mockReset();
+    // Default the top-prompts mock to "empty" so existing tests
+    // that don't care about the panel still resolve cleanly. Tests
+    // that exercise the panel override this with a specific value.
+    topCostlyPromptsMock.mockResolvedValue({
+      turns: [],
+      pricing_tier: "anthropic_api",
+    });
   });
 
   afterEach(() => {
@@ -260,6 +270,80 @@ describe("CostTab", () => {
     );
     // The setter triggers a re-fetch so the new tier label lands.
     expect(localUsageAggregateMock).toHaveBeenCalled();
+  });
+
+  it("renders the top-prompts panel when the API returns turns", async () => {
+    localUsageAggregateMock.mockResolvedValue(reportWithRows());
+    topCostlyPromptsMock.mockResolvedValue({
+      turns: [
+        {
+          file_path: "/work/foo/sess1.jsonl",
+          project_path: "/work/foo",
+          turn_index: 4,
+          ts_ms: 1_700_000_000_000,
+          model: "claude-opus-4-7",
+          tokens_input: 2_000_000,
+          tokens_output: 100_000,
+          tokens_cache_creation: 0,
+          tokens_cache_read: 0,
+          user_prompt_preview: "Analyze the entire codebase and ...",
+          cost_usd: 37.5,
+        },
+        {
+          file_path: "/work/bar/sess2.jsonl",
+          project_path: "/work/bar",
+          turn_index: 0,
+          ts_ms: 1_700_000_001_000,
+          model: "claude-sonnet-4-6",
+          tokens_input: 5_000_000,
+          tokens_output: 50_000,
+          tokens_cache_creation: 0,
+          tokens_cache_read: 0,
+          user_prompt_preview: "Refactor the auth module",
+          cost_usd: 15.75,
+        },
+      ],
+      pricing_tier: "anthropic_api",
+    });
+    render(<CostTab />);
+    await waitFor(() =>
+      expect(screen.getByText(/Top 2 costly prompts/i)).toBeInTheDocument(),
+    );
+    expect(
+      screen.getByText("Analyze the entire codebase and ..."),
+    ).toBeInTheDocument();
+    expect(screen.getByText("Refactor the auth module")).toBeInTheDocument();
+    expect(screen.getByText("$37.50")).toBeInTheDocument();
+    expect(screen.getByText("$15.75")).toBeInTheDocument();
+    // Project + turn-number caption.
+    expect(screen.getByText(/foo · turn 5/)).toBeInTheDocument();
+    expect(screen.getByText(/bar · turn 1/)).toBeInTheDocument();
+  });
+
+  it("hides the top-prompts panel when the API returns no turns", async () => {
+    localUsageAggregateMock.mockResolvedValue(reportWithRows());
+    topCostlyPromptsMock.mockResolvedValue({
+      turns: [],
+      pricing_tier: "anthropic_api",
+    });
+    render(<CostTab />);
+    await waitFor(() =>
+      expect(localUsageAggregateMock).toHaveBeenCalled(),
+    );
+    // The "Top N costly prompts" header must be absent when N=0.
+    // render-if-nonzero per design.md.
+    expect(screen.queryByText(/costly prompts?/i)).not.toBeInTheDocument();
+  });
+
+  it("requests top prompts with the matching window spec", async () => {
+    localUsageAggregateMock.mockResolvedValue(emptyReport());
+    render(<CostTab />);
+    await waitFor(() =>
+      expect(topCostlyPromptsMock).toHaveBeenCalledWith(
+        { kind: "lastDays", days: 7 },
+        5,
+      ),
+    );
   });
 
   it("changing the window selector triggers a re-fetch with the new spec", async () => {
