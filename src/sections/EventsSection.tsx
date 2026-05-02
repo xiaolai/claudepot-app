@@ -667,7 +667,7 @@ function FilterGroup({
         style={{
           fontSize: "var(--fs-xs)",
           textTransform: "uppercase",
-          letterSpacing: "0.06em",
+          letterSpacing: "var(--ls-wide)",
           color: "var(--muted)",
         }}
       >
@@ -972,7 +972,7 @@ function SeverityChip({ severity }: { severity: SeverityLabel }) {
         fontWeight: 600,
         textAlign: "center",
         textTransform: "uppercase",
-        letterSpacing: "0.04em",
+        letterSpacing: "var(--ls-wide)",
         lineHeight: "var(--lh-base)",
       }}
     >
