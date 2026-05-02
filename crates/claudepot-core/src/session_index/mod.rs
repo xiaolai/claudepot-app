@@ -38,7 +38,7 @@ use std::path::Path;
 use std::sync::{Mutex, MutexGuard};
 
 use crate::artifact_usage::{model::UsageEvent, store as usage_store};
-use crate::session::{scan_session, SessionRow};
+use crate::session::{scan_session, SessionRow, TurnRecord};
 
 /// Handle to the persistent session index.
 ///
@@ -186,21 +186,20 @@ impl SessionIndex {
         // captured with their path + message so the caller can log /
         // surface them; the file will also be retried on the next
         // refresh because its tuple stays absent or different.
-        type ScanOk = (SessionRow, Vec<UsageEvent>);
+        type ScanOk = (SessionRow, Vec<UsageEvent>, Vec<TurnRecord>);
         let scan_results: Vec<Result<ScanOk, (std::path::PathBuf, String)>> = plan
             .to_upsert
             .par_iter()
             .filter_map(|path_key| {
                 by_path.get(path_key.as_str()).map(|entry| {
                     scan_session(&entry.slug, &entry.path)
-                        .map(|s| (s.row, s.usage))
+                        .map(|s| (s.row, s.usage, s.turns))
                         .map_err(|e| (entry.path.clone(), e.to_string()))
                 })
             })
             .collect();
 
-        let mut scanned: Vec<(SessionRow, Vec<UsageEvent>)> =
-            Vec::with_capacity(scan_results.len());
+        let mut scanned: Vec<ScanOk> = Vec::with_capacity(scan_results.len());
         let mut failed: Vec<(std::path::PathBuf, String)> = walk.stat_failed;
         for r in scan_results {
             match r {
@@ -224,9 +223,15 @@ impl SessionIndex {
         {
             let mut db = self.db();
             let tx = db.transaction()?;
-            for (row, events) in &scanned {
+            for (row, events, turns) in &scanned {
                 codec::upsert_row(&tx, row, indexed_at_ms)?;
                 let file_path = row.file_path.to_string_lossy();
+                // Per-turn rows: replace-all in the same transaction so
+                // the cache is internally consistent. A re-scan that
+                // grew the transcript by 5 turns ends up with exactly
+                // those 5 new rows; one that shrank it (slim) ends up
+                // with the new shorter set.
+                codec::replace_turns(&tx, &file_path, turns)?;
                 // Order matters: subtract the existing per-day counts
                 // BEFORE deleting the raw events that produced them,
                 // otherwise the ensuing inserts double-bump the daily
@@ -267,6 +272,20 @@ impl SessionIndex {
             failed,
             elapsed,
         })
+    }
+
+    /// Read every persisted per-turn row for one transcript file,
+    /// ordered by `turn_index`. This is the consumer surface for
+    /// per-turn dashboards (top-N costliest prompts, per-turn
+    /// pacing). Empty for transcripts that haven't been re-scanned
+    /// since this table was added — consumers should treat absence
+    /// the same as "no data yet" rather than "no turns ever ran."
+    ///
+    /// Does not refresh the cache; pair with `list_all` (or accept
+    /// stale data) at call sites that want fresh numbers.
+    pub fn turns_for(&self, file_path: &str) -> Result<Vec<TurnRecord>, SessionIndexError> {
+        let db = self.db();
+        codec::load_turns(&db, file_path)
     }
 
     /// Refresh the cache against `config_dir` and return every row,
@@ -557,6 +576,139 @@ mod tests {
             .unwrap();
         assert!(names.contains(&"meta".to_string()));
         assert!(names.contains(&"sessions".to_string()));
+        // session_turns is the per-turn token-detail table — must
+        // exist alongside the rest of the schema for the cost
+        // surface's drill-down queries to work.
+        assert!(
+            names.contains(&"session_turns".to_string()),
+            "session_turns table must be created at schema time, not lazily on first insert"
+        );
+    }
+
+    #[test]
+    fn refresh_populates_per_turn_records() {
+        let (idx, _tmp) = open_index();
+        let cfg = TempDir::new().unwrap();
+        // Two assistant turns in one transcript with distinct token
+        // counts so we can verify per-turn data round-trips.
+        let lines = vec![
+            r#"{"type":"user","message":{"role":"user","content":"first ask"},"timestamp":"2026-04-10T10:00:00Z","cwd":"/p","sessionId":"S1"}"#.to_string(),
+            r#"{"type":"assistant","message":{"role":"assistant","model":"claude-opus-4-7","content":[{"type":"text","text":"a1"}],"usage":{"input_tokens":100,"output_tokens":50,"cache_read_input_tokens":2000}},"timestamp":"2026-04-10T10:00:01Z","cwd":"/p","sessionId":"S1"}"#.to_string(),
+            r#"{"type":"user","message":{"role":"user","content":"second ask"},"timestamp":"2026-04-10T10:01:00Z","cwd":"/p","sessionId":"S1"}"#.to_string(),
+            r#"{"type":"assistant","message":{"role":"assistant","model":"claude-sonnet-4-6","content":[{"type":"text","text":"a2"}],"usage":{"input_tokens":300,"output_tokens":80,"cache_creation_input_tokens":150}},"timestamp":"2026-04-10T10:01:02Z","cwd":"/p","sessionId":"S1"}"#.to_string(),
+        ];
+        let path = write_session(cfg.path(), "-p", "S1", &lines);
+        idx.refresh(cfg.path()).unwrap();
+
+        let turns = idx.turns_for(&path.to_string_lossy()).unwrap();
+        assert_eq!(turns.len(), 2);
+        // First assistant turn — Opus, prompt = "first ask".
+        assert_eq!(turns[0].turn_index, 0);
+        assert_eq!(turns[0].model, "claude-opus-4-7");
+        assert_eq!(turns[0].tokens.input, 100);
+        assert_eq!(turns[0].tokens.output, 50);
+        assert_eq!(turns[0].tokens.cache_read, 2000);
+        assert_eq!(turns[0].user_prompt_preview.as_deref(), Some("first ask"));
+        // Second turn — Sonnet, prompt switched to "second ask".
+        assert_eq!(turns[1].turn_index, 1);
+        assert_eq!(turns[1].model, "claude-sonnet-4-6");
+        assert_eq!(turns[1].tokens.input, 300);
+        assert_eq!(turns[1].tokens.output, 80);
+        assert_eq!(turns[1].tokens.cache_creation, 150);
+        assert_eq!(turns[1].user_prompt_preview.as_deref(), Some("second ask"));
+        // Aggregate row must equal the sum of per-turn tokens — the
+        // two paths read from the same JSONL line and must agree.
+        let db = idx.db();
+        let row = codec::get_row_by_path(&db, &path.to_string_lossy())
+            .unwrap()
+            .unwrap();
+        assert_eq!(row.tokens.input, 400);
+        assert_eq!(row.tokens.output, 130);
+        assert_eq!(row.tokens.cache_creation, 150);
+        assert_eq!(row.tokens.cache_read, 2000);
+    }
+
+    #[test]
+    fn refresh_replaces_turns_on_rescan() {
+        // Re-scanning a file (mtime changes) must rebuild the per-turn
+        // rowset for that file from scratch — leftover rows from a
+        // longer prior version of the transcript would corrupt
+        // downstream "top N" queries.
+        let (idx, _tmp) = open_index();
+        let cfg = TempDir::new().unwrap();
+        let path = write_session(cfg.path(), "-p", "S1", &sample_lines("/p", "S1"));
+        idx.refresh(cfg.path()).unwrap();
+        assert_eq!(idx.turns_for(&path.to_string_lossy()).unwrap().len(), 1);
+
+        // Rewrite with two assistant turns this time, then bump mtime
+        // forward so the (size, mtime, inode) guard fires a re-scan.
+        let new_lines = vec![
+            r#"{"type":"user","message":{"role":"user","content":"q1"},"timestamp":"2026-04-10T10:00:00Z","cwd":"/p","sessionId":"S1"}"#.to_string(),
+            r#"{"type":"assistant","message":{"role":"assistant","model":"claude-opus-4-7","content":[{"type":"text","text":"a1"}],"usage":{"input_tokens":1,"output_tokens":1}},"timestamp":"2026-04-10T10:00:01Z","cwd":"/p","sessionId":"S1"}"#.to_string(),
+            r#"{"type":"assistant","message":{"role":"assistant","model":"claude-opus-4-7","content":[{"type":"text","text":"a2"}],"usage":{"input_tokens":1,"output_tokens":1}},"timestamp":"2026-04-10T10:00:02Z","cwd":"/p","sessionId":"S1"}"#.to_string(),
+        ];
+        // Bump mtime by one second to force a re-scan even on
+        // filesystems that round mtime to seconds.
+        std::thread::sleep(std::time::Duration::from_millis(20));
+        let mut f = std::fs::File::create(&path).unwrap();
+        for l in &new_lines {
+            writeln!(f, "{l}").unwrap();
+        }
+        let new_mtime = std::time::SystemTime::now() + std::time::Duration::from_secs(2);
+        let _ = filetime::set_file_mtime(
+            &path,
+            filetime::FileTime::from_system_time(new_mtime),
+        );
+
+        idx.refresh(cfg.path()).unwrap();
+        let turns = idx.turns_for(&path.to_string_lossy()).unwrap();
+        assert_eq!(turns.len(), 2);
+        assert_eq!(turns[0].turn_index, 0);
+        assert_eq!(turns[1].turn_index, 1);
+    }
+
+    #[test]
+    fn refresh_redacts_sk_ant_tokens_in_turn_prompts() {
+        // The per-turn `user_prompt_preview` must be redacted at write
+        // time — same rule as `first_user_prompt` on the session row.
+        // A user pasting a token mid-conversation could end up only in
+        // the per-turn store; the session-level redaction wouldn't
+        // catch it.
+        let (idx, _tmp) = open_index();
+        let cfg = TempDir::new().unwrap();
+        let lines = vec![
+            r#"{"type":"user","message":{"role":"user","content":"safe first ask"},"timestamp":"2026-04-10T10:00:00Z","cwd":"/p","sessionId":"S1"}"#.to_string(),
+            r#"{"type":"assistant","message":{"role":"assistant","model":"claude-opus-4-7","content":[{"type":"text","text":"a"}],"usage":{"input_tokens":1,"output_tokens":1}},"timestamp":"2026-04-10T10:00:01Z","cwd":"/p","sessionId":"S1"}"#.to_string(),
+            r#"{"type":"user","message":{"role":"user","content":"now my key sk-ant-oat01-AbC123_xyz"},"timestamp":"2026-04-10T10:00:02Z","cwd":"/p","sessionId":"S1"}"#.to_string(),
+            r#"{"type":"assistant","message":{"role":"assistant","model":"claude-opus-4-7","content":[{"type":"text","text":"b"}],"usage":{"input_tokens":1,"output_tokens":1}},"timestamp":"2026-04-10T10:00:03Z","cwd":"/p","sessionId":"S1"}"#.to_string(),
+        ];
+        let path = write_session(cfg.path(), "-p", "S1", &lines);
+        idx.refresh(cfg.path()).unwrap();
+
+        let turns = idx.turns_for(&path.to_string_lossy()).unwrap();
+        assert_eq!(turns.len(), 2);
+        let preview = turns[1].user_prompt_preview.as_deref().unwrap();
+        assert!(
+            !preview.contains("sk-ant-oat01-AbC123_xyz"),
+            "raw token must not survive into session_turns: {preview}"
+        );
+        assert!(preview.contains("sk-ant-****"));
+    }
+
+    #[test]
+    fn delete_row_cascades_to_turns() {
+        // When a transcript vanishes from disk, the cache must drop
+        // both its session row AND its per-turn rows. Otherwise turn
+        // rows accumulate orphaned forever.
+        let (idx, _tmp) = open_index();
+        let cfg = TempDir::new().unwrap();
+        let path = write_session(cfg.path(), "-p", "S1", &sample_lines("/p", "S1"));
+        idx.refresh(cfg.path()).unwrap();
+        assert_eq!(idx.turns_for(&path.to_string_lossy()).unwrap().len(), 1);
+
+        std::fs::remove_file(&path).unwrap();
+        idx.refresh(cfg.path()).unwrap();
+        assert_eq!(idx.turns_for(&path.to_string_lossy()).unwrap().len(), 0);
     }
 
     // -----------------------------------------------------------------
