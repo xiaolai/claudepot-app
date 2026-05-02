@@ -146,8 +146,8 @@ pub(super) fn copy_dir_recursive(source: &Path, target: &Path) -> Result<()> {
             }
             #[cfg(windows)]
             {
-                let resolved =
-                    std::fs::canonicalize(&src).map_err(LifecycleError::io("resolve symlink"))?;
+                let resolved = crate::path_utils::canonicalize_simplified(&src)
+                    .map_err(LifecycleError::io("resolve symlink"))?;
                 if resolved.is_dir() {
                     copy_dir_recursive(&resolved, &dst)?;
                 } else {

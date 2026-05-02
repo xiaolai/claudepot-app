@@ -12,6 +12,7 @@
 //! `.git` worktree pointer file, caches the result by path, and emits
 //! `RepositoryGroup`s.
 
+use crate::path_utils::canonicalize_simplified;
 use crate::session::SessionRow;
 use serde::Serialize;
 use std::collections::HashMap;
@@ -109,7 +110,7 @@ pub fn find_repo_root(start: &Path) -> Option<PathBuf> {
     // Orphaned project paths that no longer exist must NOT be walked;
     // their `ancestors()` can fortuitously land on a live repo above,
     // which would mis-group the orphan.
-    let canonical = fs::canonicalize(start).ok()?;
+    let canonical = canonicalize_simplified(start).ok()?;
     for ancestor in canonical.ancestors() {
         let git = ancestor.join(".git");
         if git.exists() {
@@ -162,7 +163,7 @@ fn read_gitdir_pointer(git_file: &Path) -> Option<PathBuf> {
     let main_root = git_dir.parent()?; // /.../repo
                                        // Canonicalize so matches stay stable across symlinked tempdirs
                                        // (e.g. `/var` vs `/private/var` on macOS).
-    Some(fs::canonicalize(main_root).unwrap_or_else(|_| main_root.to_path_buf()))
+    Some(canonicalize_simplified(main_root).unwrap_or_else(|_| main_root.to_path_buf()))
 }
 
 fn label_for(root: &Option<PathBuf>) -> String {

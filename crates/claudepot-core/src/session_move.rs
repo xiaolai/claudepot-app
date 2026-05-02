@@ -35,7 +35,7 @@
 //!   `~/.claude/paste-cache/`, `~/.claude/shell-snapshots/`,
 //!   `~/.claude/todos/` (dead in current CC).
 
-use crate::path_utils::simplify_windows_path;
+use crate::path_utils::canonicalize_simplified;
 use crate::project_progress::{NoopSink, PhaseStatus, ProgressSink};
 use crate::project_sanitize::sanitize_path;
 use crate::session_move_helpers::{
@@ -65,15 +65,14 @@ use uuid::Uuid;
 /// (orphan adoption) has a source cwd that is guaranteed not to exist.
 pub fn canonicalize_cc_path(p: &Path) -> PathBuf {
     use unicode_normalization::UnicodeNormalization;
-    let attempted = std::fs::canonicalize(p).unwrap_or_else(|_| p.to_path_buf());
-    // Strip the Windows `\\?\` verbatim prefix that canonicalize adds —
-    // CC never writes that form into slugs, so feeding it into
-    // `sanitize_path` would produce a slug that doesn't match the
-    // on-disk directory. No-op on Unix.
-    let simplified = simplify_windows_path(&attempted.to_string_lossy());
+    // canonicalize_simplified strips the Windows `\\?\` verbatim
+    // prefix; CC never writes that form into slugs, so feeding it
+    // into `sanitize_path` would produce a slug that doesn't match
+    // the on-disk directory. No-op on Unix.
+    let attempted = canonicalize_simplified(p).unwrap_or_else(|_| p.to_path_buf());
     // Normalize to NFC. CC's input comes from JavaScript strings
     // (UTF-16) and is already UTF-8-clean.
-    let normalized: String = simplified.nfc().collect();
+    let normalized: String = attempted.to_string_lossy().nfc().collect();
     PathBuf::from(normalized)
 }
 
