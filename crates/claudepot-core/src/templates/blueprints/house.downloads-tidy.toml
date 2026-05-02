@@ -1,0 +1,131 @@
+# Downloads tidy-up
+#
+# Weekly housekeeping for ~/Downloads. Produces a markdown
+# report and a structured pending-changes.json proposing moves
+# into category folders. No file is moved until the user
+# reviews and clicks Apply.
+
+id              = "house.downloads-tidy"
+schema_version  = 1
+version         = 1
+name            = "Downloads tidy-up"
+tagline         = "Sort old Downloads into category folders."
+description     = """
+Each Sunday, this scans ~/Downloads and proposes moves: PDFs to
+Documents, dmgs to Installers, images to Images, screenshots to
+Screenshots, leaving anything modified in the last 7 days
+untouched.
+
+The report shows what would move; nothing is moved until you
+review the pending changes and click Apply.
+"""
+category        = "housekeeping"
+icon            = "folder-tree"
+tier            = "ambient"
+
+capabilities_required = ["tool_use", "structured_output"]
+min_context_tokens    = 16384
+recommended_class     = "fast"
+cost_class            = "low"
+cost_cap_usd          = 0.10
+privacy               = "any"
+consent_required      = false
+fallback_policy       = "skip"
+
+prompt = """
+You are a personal IT assistant proposing a Downloads-folder cleanup.
+
+Inventory ~/Downloads (read-only):
+- ls -la ~/Downloads
+- For each file older than 7 days, note its name, size, and extension.
+
+Propose moves into these category subfolders under ~/Downloads:
+- Documents/   (.pdf, .doc, .docx, .pages)
+- Installers/  (.dmg, .pkg)
+- Images/      (.png, .jpg, .jpeg, .heic, .gif, .webp)
+- Archives/    (.zip, .tar, .tar.gz, .7z)
+- Misc/        (everything else older than 30 days)
+
+Skip anything from the last 7 days. Skip files already inside
+one of the category subfolders (don't recurse into them).
+
+Write TWO files:
+
+1. A markdown report at the path supplied via CLAUDEPOT_OUTPUT_PATH
+   (or ~/.claudepot/house-reports/downloads-tidy-<date>.md).
+   Format: a one-line headline, then a table of proposed moves
+   with file/size/from/to columns.
+
+2. A structured pending-changes.json at the same directory but
+   named ".pending-changes.json". Schema:
+   {
+     "schema_version": 1,
+     "automation_id": "<from CLAUDEPOT_AUTOMATION_ID>",
+     "run_id": "<from CLAUDEPOT_RUN_ID>",
+     "generated_at": "<ISO 8601 now>",
+     "summary": "<N proposed changes>",
+     "groups": [
+       {
+         "id": "documents",
+         "title": "Move N PDFs and Word docs to Documents/",
+         "items": [
+           {
+             "id": "<sha256 of from-path, first 12 chars>",
+             "description": "<filename> (<size>)",
+             "operation": {
+               "type": "move",
+               "from": "<absolute path>",
+               "to":   "<absolute path>"
+             }
+           }
+         ]
+       }
+     ]
+   }
+
+   Group items by category. Each item's id MUST be deterministic
+   (use shasum -a 256 on the from-path; take the first 12 hex
+   chars) so rerunning the template doesn't re-propose items the
+   user already rejected.
+
+Requirements:
+- Every `from` and `to` path must live under ~/Downloads (no escaping the scope).
+- Operations are typed; do not include any "shell" or "exec" keys.
+- If a destination directory doesn't exist, propose a separate `mkdir`
+  item before the moves into it.
+
+Do NOT execute any move yourself. Only write the two files.
+"""
+
+sample_report = "samples/downloads-tidy.md"
+
+[scope]
+reads                       = "~/Downloads file listing and metadata."
+writes                      = "One report and one pending-changes.json per run, both under ~/.claudepot/house-reports/."
+could_change                = "Files inside ~/Downloads only — and only after you review and click Apply."
+network                     = "None."
+requires_full_disk_access   = false
+
+[apply]
+pending_changes_path = "{output_dir}/.pending-changes.json"
+schema_version       = 1
+allowed_operations   = ["move", "mkdir"]
+item_id_strategy     = "content_hash"
+
+[apply.scope]
+allowed_paths = ["~/Downloads/**"]
+deny_outside  = true
+
+[schedule]
+default        = "0 10 * * 0"
+default_label  = "Each Sunday at 10 AM"
+allowed_shapes = ["weekly", "manual"]
+
+[output]
+path_template = "~/.claudepot/house-reports/downloads-tidy-{date}.md"
+format        = "markdown"
+
+[runtime]
+permission_mode = "plan"
+allowed_tools   = ["Bash", "Read", "Write"]
+timeout_secs    = 240

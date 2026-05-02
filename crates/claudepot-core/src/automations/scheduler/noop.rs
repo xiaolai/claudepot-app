@@ -13,7 +13,13 @@ use super::{cron_next_runs, RegisteredEntry, Scheduler, SchedulerCapabilities};
 pub struct NoopScheduler;
 
 impl Scheduler for NoopScheduler {
-    fn register(&self, _automation: &Automation) -> Result<(), AutomationError> {
+    fn register(&self, automation: &Automation) -> Result<(), AutomationError> {
+        // Manual triggers don't need a scheduler. The Noop adapter
+        // can honor them even on unsupported hosts; Run-Now does
+        // not depend on platform-specific scheduling.
+        if automation.trigger.is_manual() {
+            return Ok(());
+        }
         Err(AutomationError::UnsupportedPlatform(
             "no scheduler adapter is wired for this host yet",
         ))
@@ -42,6 +48,7 @@ impl Scheduler for NoopScheduler {
     ) -> Result<Vec<DateTime<Utc>>, AutomationError> {
         match trigger {
             Trigger::Cron { cron, timezone: _ } => cron_next_runs(cron, from, n),
+            Trigger::Manual => Ok(Vec::new()),
         }
     }
 

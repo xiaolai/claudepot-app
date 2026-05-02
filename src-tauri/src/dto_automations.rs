@@ -44,6 +44,7 @@ impl From<&Automation> for AutomationSummaryDto {
             Trigger::Cron { cron, timezone } => {
                 ("cron".to_string(), Some(cron.clone()), timezone.clone())
             }
+            Trigger::Manual => ("manual".to_string(), None, None),
         };
         AutomationSummaryDto {
             id: a.id.to_string(),
@@ -147,11 +148,20 @@ pub struct AutomationCreateDto {
     pub json_schema: Option<String>,
     pub bare: bool,
     pub extra_env: std::collections::BTreeMap<String, String>,
+    /// Kind of trigger to install. Defaults to `"cron"` so existing
+    /// call sites stay unchanged. `"manual"` builds a `Trigger::Manual`
+    /// automation (no scheduler artifact, only Run-Now).
+    #[serde(default)]
+    pub trigger_kind: Option<String>,
     pub cron: String,
     pub timezone: Option<String>,
     pub platform_options: PlatformOptionsDto,
     #[serde(default = "default_log_retention")]
     pub log_retention_runs: u32,
+    /// Set when this automation was instantiated from a bundled
+    /// template. Drives template-aware post-run behavior.
+    #[serde(default)]
+    pub template_id: Option<String>,
 }
 
 fn default_log_retention() -> u32 {
@@ -227,10 +237,68 @@ pub struct AutomationRunDto {
     pub trigger_kind: String,
     pub host_platform: String,
     pub claudepot_version: String,
+    /// Files the run produced under its blueprint's output path.
+    /// Empty for non-template automations and for runs whose
+    /// template generated nothing yet.
+    #[serde(default)]
+    pub output_artifacts: Vec<OutputArtifactDto>,
+    /// Pre-run gate decision recorded by `_prerun`.
+    #[serde(default)]
+    pub route_decision: Option<RouteDecisionDto>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct OutputArtifactDto {
+    pub kind: String,
+    pub path: String,
+    pub format: String,
+    pub bytes: u64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum RouteDecisionDto {
+    Ran { route_id: Option<String> },
+    Fallback {
+        from: String,
+        to: Option<String>,
+        reason: String,
+    },
+    Skipped { reason: String },
+    SkippedAlerted { reason: String },
 }
 
 impl From<AutomationRun> for AutomationRunDto {
     fn from(r: AutomationRun) -> Self {
+        use claudepot_core::automations::types::{ArtifactKind, RouteDecision};
+        let output_artifacts = r
+            .output_artifacts
+            .into_iter()
+            .map(|a| OutputArtifactDto {
+                kind: match a.kind {
+                    ArtifactKind::Report => "report",
+                    ArtifactKind::PendingChanges => "pending_changes",
+                    ArtifactKind::ApplyReceipt => "apply_receipt",
+                    ArtifactKind::Email => "email",
+                }
+                .to_string(),
+                path: a.path,
+                format: a.format,
+                bytes: a.bytes,
+            })
+            .collect();
+        let route_decision = r.route_decision.map(|d| match d {
+            RouteDecision::Ran { route_id } => RouteDecisionDto::Ran { route_id },
+            RouteDecision::Fallback { from, to, reason } => RouteDecisionDto::Fallback {
+                from,
+                to,
+                reason,
+            },
+            RouteDecision::Skipped { reason } => RouteDecisionDto::Skipped { reason },
+            RouteDecision::SkippedAlerted { reason } => {
+                RouteDecisionDto::SkippedAlerted { reason }
+            }
+        });
         AutomationRunDto {
             id: r.id,
             automation_id: r.automation_id.to_string(),
@@ -248,6 +316,8 @@ impl From<AutomationRun> for AutomationRunDto {
             },
             host_platform: format!("{:?}", r.host_platform).to_lowercase(),
             claudepot_version: r.claudepot_version,
+            output_artifacts,
+            route_decision,
         }
     }
 }
@@ -331,5 +401,120 @@ pub fn parse_output_format(s: &str) -> Option<OutputFormat> {
         "json" => Some(OutputFormat::Json),
         "stream-json" => Some(OutputFormat::StreamJson),
         _ => None,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Wire-format pin: the renderer matches on the literal kinds
+    /// "report" / "pending_changes" / "apply_receipt" / "email".
+    /// If a new ArtifactKind is added in core, the From impl must
+    /// add an arm — this test fails before the bug reaches
+    /// AutomationsSection's report-button rendering.
+    #[test]
+    fn artifact_kind_renders_snake_case_strings() {
+        use chrono::Utc;
+        use claudepot_core::automations::types::{
+            ArtifactKind, AutomationRun, HostPlatform, OutputArtifact, RouteDecision,
+            TriggerKind,
+        };
+
+        let make = |kind: ArtifactKind| AutomationRun {
+            id: format!("r-{}", Utc::now().timestamp_micros()),
+            automation_id: uuid::Uuid::new_v4(),
+            started_at: Utc::now(),
+            ended_at: Utc::now(),
+            duration_ms: 0,
+            exit_code: 0,
+            result: None,
+            session_jsonl_path: None,
+            stdout_log: String::new(),
+            stderr_log: String::new(),
+            trigger_kind: TriggerKind::Manual,
+            host_platform: HostPlatform::Macos,
+            claudepot_version: env!("CARGO_PKG_VERSION").to_string(),
+            output_artifacts: vec![OutputArtifact {
+                kind,
+                path: "/tmp/r.md".to_string(),
+                format: "markdown".to_string(),
+                bytes: 1024,
+            }],
+            route_decision: Some(RouteDecision::Ran { route_id: None }),
+        };
+
+        let cases = [
+            (ArtifactKind::Report, "report"),
+            (ArtifactKind::PendingChanges, "pending_changes"),
+            (ArtifactKind::ApplyReceipt, "apply_receipt"),
+            (ArtifactKind::Email, "email"),
+        ];
+        for (kind, expected) in cases {
+            let dto = AutomationRunDto::from(make(kind));
+            assert_eq!(dto.output_artifacts[0].kind, expected);
+            assert_eq!(dto.output_artifacts[0].path, "/tmp/r.md");
+            assert_eq!(dto.output_artifacts[0].bytes, 1024);
+        }
+    }
+
+    #[test]
+    fn route_decision_serializes_with_kind_tag_snake_case() {
+        let cases = [
+            (
+                RouteDecisionDto::Ran { route_id: Some("r1".into()) },
+                "ran",
+            ),
+            (
+                RouteDecisionDto::Fallback {
+                    from: "r1".into(),
+                    to: None,
+                    reason: "ctx".into(),
+                },
+                "fallback",
+            ),
+            (
+                RouteDecisionDto::Skipped { reason: "no route".into() },
+                "skipped",
+            ),
+            (
+                RouteDecisionDto::SkippedAlerted { reason: "alerted".into() },
+                "skipped_alerted",
+            ),
+        ];
+        for (dto, expected_kind) in cases {
+            let json = serde_json::to_value(&dto).unwrap();
+            assert_eq!(json["kind"], expected_kind);
+        }
+    }
+
+    #[test]
+    fn run_dto_omits_trigger_kind_manual_label_consistently() {
+        // Manual + Scheduled are both surfaced as lowercase strings.
+        // This pins the literal that AutomationCard / RunHistoryPanel
+        // assume when filtering / labeling rows.
+        use chrono::Utc;
+        use claudepot_core::automations::types::{AutomationRun, HostPlatform, TriggerKind};
+
+        let mut r = AutomationRun {
+            id: "r1".into(),
+            automation_id: uuid::Uuid::new_v4(),
+            started_at: Utc::now(),
+            ended_at: Utc::now(),
+            duration_ms: 0,
+            exit_code: 0,
+            result: None,
+            session_jsonl_path: None,
+            stdout_log: String::new(),
+            stderr_log: String::new(),
+            trigger_kind: TriggerKind::Manual,
+            host_platform: HostPlatform::Macos,
+            claudepot_version: "0.0.0".into(),
+            output_artifacts: vec![],
+            route_decision: None,
+        };
+        assert_eq!(AutomationRunDto::from(r.clone()).trigger_kind, "manual");
+        r.trigger_kind = TriggerKind::Scheduled;
+        assert_eq!(AutomationRunDto::from(r).trigger_kind, "scheduled");
     }
 }

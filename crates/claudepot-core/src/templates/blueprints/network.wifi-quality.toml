@@ -1,0 +1,80 @@
+# Wifi quality
+#
+# Periodic snapshot of wifi signal strength + channel + link
+# rate. Lets you see "where in the house is wifi worst" by
+# walking around with the laptop.
+
+id              = "network.wifi-quality"
+schema_version  = 1
+version         = 1
+name            = "Wifi quality"
+tagline         = "RSSI, channel, and link rate over time."
+description     = """
+Every 15 minutes, this captures wifi signal strength (RSSI),
+channel, and negotiated link rate from the active wireless
+interface. The accumulating CSV makes it possible to compare
+hour-by-hour or to walk around with the laptop and see where the
+signal drops.
+
+Mac-only for v1 — `airport -I` is the source. Linux equivalent
+(`iw dev`) lands when the LAN tier expands.
+"""
+category        = "network"
+icon            = "wifi"
+tier            = "ambient"
+
+capabilities_required = ["tool_use"]
+min_context_tokens    = 8192
+recommended_class     = "local-ok"
+cost_class            = "trivial"
+cost_cap_usd          = 0.02
+privacy               = "any"
+consent_required      = false
+fallback_policy       = "skip"
+
+prompt = """
+You are a personal IT assistant snapshotting wifi quality.
+
+Run:
+/System/Library/PrivateFrameworks/Apple80211.framework/Versions/Current/Resources/airport -I
+
+(Or on Linux: iw dev <iface> link.)
+
+Parse:
+- agrCtlRSSI (signal strength, dBm)
+- channel
+- lastTxRate (link rate, Mbps)
+- BSSID (which AP you're attached to)
+
+Append a row to
+~/.claudepot/network-reports/wifi-quality.csv:
+
+timestamp,bssid,rssi_dbm,channel,link_mbps
+
+Then produce a one-paragraph markdown report at
+CLAUDEPOT_OUTPUT_PATH or
+~/.claudepot/network-reports/wifi-quality-<timestamp>.md.
+"""
+
+sample_report = "samples/wifi-quality.md"
+
+[scope]
+reads                       = "Wifi-interface state from the OS (signal strength, channel, link rate, BSSID)."
+writes                      = "Appends to ~/.claudepot/network-reports/wifi-quality.csv plus one short report per run."
+could_change                = "Nothing."
+network                     = "None — the data is local OS state."
+requires_full_disk_access   = false
+
+[schedule]
+default        = "*/15 * * * *"
+default_label  = "Every 15 minutes"
+allowed_shapes = ["hourly", "manual", "custom"]
+
+[output]
+path_template = "~/.claudepot/network-reports/wifi-quality-{date}.md"
+format        = "markdown"
+
+[runtime]
+permission_mode = "plan"
+allowed_tools   = ["Bash", "Read", "Write"]
+timeout_secs    = 30

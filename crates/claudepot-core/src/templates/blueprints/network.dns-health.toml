@@ -1,0 +1,95 @@
+# DNS health
+#
+# Compares lookup time across local DNS, 1.1.1.1, and 8.8.8.8.
+# Reports when the local resolver is significantly slower.
+
+id              = "network.dns-health"
+schema_version  = 1
+version         = 1
+name            = "DNS health"
+tagline         = "Is your local DNS slow?"
+description     = """
+Each morning, this resolves about 20 well-known hostnames against
+your local resolver and against 1.1.1.1 and 8.8.8.8. Reports
+average lookup time per resolver and flags the local one if it's
+more than 2× slower.
+
+Useful for catching Pi-hole upstream issues, ISP DNS hijacking,
+or just stale NXDOMAIN caching.
+"""
+category        = "network"
+icon            = "globe"
+tier            = "ambient"
+
+capabilities_required = ["tool_use"]
+min_context_tokens    = 8192
+recommended_class     = "local-ok"
+cost_class            = "trivial"
+cost_cap_usd          = 0.02
+privacy               = "any"
+consent_required      = false
+fallback_policy       = "skip"
+
+prompt = """
+You are a personal IT assistant comparing DNS resolvers.
+
+Hostnames to resolve (don't customize — keep this stable so
+day-over-day comparisons are meaningful):
+
+apple.com, google.com, github.com, cloudflare.com, microsoft.com,
+amazon.com, anthropic.com, openai.com, mozilla.org, wikipedia.org,
+ietf.org, debian.org, archlinux.org, kernel.org, openssl.org,
+postgresql.org, redis.io, signal.org, hackernews.com, ycombinator.com
+
+For each, resolve with `dig` against three resolvers:
+- @<empty>     (your local default)
+- @1.1.1.1
+- @8.8.8.8
+
+Capture the "Query time:" line. (`dig +stats <name> @<resolver>`).
+
+Compute mean and median per resolver. Flag the local resolver
+if its mean is more than 2× the better of 1.1.1.1 or 8.8.8.8.
+
+Produce a markdown report:
+
+# DNS health — <YYYY-MM-DD>
+
+**Status:** <flag if local resolver is slow, else "all resolvers healthy">
+
+## Per-resolver
+
+| Resolver | Mean (ms) | Median (ms) |
+|---|---|---|
+
+## Outliers
+
+For any hostname where the spread between resolvers is >100ms,
+list it with its three timings.
+
+Save with Write to CLAUDEPOT_OUTPUT_PATH or
+~/.claudepot/network-reports/dns-health-<date>.md.
+"""
+
+sample_report = "samples/dns-health.md"
+
+[scope]
+reads                       = "DNS lookups against your local resolver and two public ones."
+writes                      = "One report per run."
+could_change                = "Nothing."
+network                     = "About 60 small DNS queries per run (three resolvers × 20 names)."
+requires_full_disk_access   = false
+
+[schedule]
+default        = "0 9 * * *"
+default_label  = "Each morning at 9 AM"
+allowed_shapes = ["daily", "weekdays", "manual"]
+
+[output]
+path_template = "~/.claudepot/network-reports/dns-health-{date}.md"
+format        = "markdown"
+
+[runtime]
+permission_mode = "plan"
+allowed_tools   = ["Bash", "Read", "Write"]
+timeout_secs    = 90

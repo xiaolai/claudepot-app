@@ -1,0 +1,113 @@
+# Cache-cleanup audit
+#
+# Surveys the usual cache hotspots and reports total size with
+# concrete reclamation commands. Does not delete; tells you which
+# `rm -rf` would reclaim what.
+
+id              = "audit.cache-cleanup"
+schema_version  = 1
+version         = 1
+name            = "Cache cleanup audit"
+tagline         = "What's safe to clear, with the exact command."
+description     = """
+Each month, this measures the size of common cache directories
+(Library/Caches, Xcode DerivedData, simulators, browser caches,
+package-manager caches) and reports each with a one-line
+reclamation command.
+
+Read-only. You decide what to clear and run the commands
+yourself; nothing is deleted by this report.
+"""
+category        = "audit"
+icon            = "trash-2"
+tier            = "periodic"
+
+capabilities_required = ["tool_use"]
+min_context_tokens    = 8192
+recommended_class     = "local-ok"
+cost_class            = "trivial"
+cost_cap_usd          = 0.05
+privacy               = "any"
+consent_required      = false
+fallback_policy       = "skip"
+
+prompt = """
+You are a personal IT assistant surveying cache directories on this Mac.
+
+Measure each of these (use `du -sh` and skip any that don't
+exist; report 0 / "not present"):
+
+- ~/Library/Caches
+- ~/Library/Developer/Xcode/DerivedData
+- ~/Library/Developer/CoreSimulator/Devices
+- ~/Library/Developer/CoreSimulator/Caches
+- ~/Library/Containers/com.docker.docker
+- ~/.cache
+- ~/.npm
+- ~/Library/pnpm/store
+- ~/Library/Caches/Yarn
+- ~/Library/Caches/Homebrew
+- ~/Library/Caches/com.apple.Safari
+- ~/Library/Caches/Google/Chrome
+- ~/.Trash
+
+Write the report:
+
+# Cache cleanup audit — <YYYY-MM-DD>
+
+**Status:** <total reclaimable: X GB>
+
+## What's where
+
+| Path | Size | What it is | Safe to clear? | Command |
+|---|---|---|---|---|
+
+For each non-zero path, write a row. The "what it is" column
+is one short sentence ("Xcode keeps build artifacts here…").
+The "Safe to clear?" column is one of:
+
+- ✓ — yes, system regenerates
+- ⚠ — yes, but you may lose preferences (browser data, sessions)
+- ✗ — no, listed for visibility only
+
+The "Command" column is a literal `rm -rf <path>` (or in the
+case of Trash, `rm -rf ~/.Trash/*`). For ⚠ rows, include a
+note ("clears browser cache; you stay logged in.").
+
+Sort by size descending.
+
+## Recommendation
+
+A 3-line "if you have 5 minutes" suggestion. Lowest risk first:
+empty Trash; then Xcode DerivedData; then iOS Simulator
+caches.
+
+Save with Write to CLAUDEPOT_OUTPUT_PATH or
+~/.claudepot/audit-reports/cache-cleanup-<YYYY-MM-DD>.md.
+
+Do not run any rm command. The report tells the user what to
+run.
+"""
+
+sample_report = "samples/cache-cleanup.md"
+
+[scope]
+reads                       = "Sizes of well-known cache directories under your Home."
+writes                      = "One report per run at ~/.claudepot/audit-reports/cache-cleanup-<date>.md"
+could_change                = "Nothing. The report shows commands you can run yourself."
+network                     = "None."
+requires_full_disk_access   = false
+
+[schedule]
+default        = "0 10 1 * *"
+default_label  = "First day of each month at 10 AM"
+allowed_shapes = ["weekly", "daily", "manual"]
+
+[output]
+path_template = "~/.claudepot/audit-reports/cache-cleanup-{date}.md"
+format        = "markdown"
+
+[runtime]
+permission_mode = "plan"
+allowed_tools   = ["Bash", "Read", "Write"]
+timeout_secs    = 120

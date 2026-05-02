@@ -50,6 +50,14 @@ pub fn service_path_for(id: &AutomationId) -> Result<PathBuf, AutomationError> {
 
 impl Scheduler for SystemdScheduler {
     fn register(&self, automation: &Automation) -> Result<(), AutomationError> {
+        // Manual triggers don't materialize systemd units. Best-
+        // effort cleanup of any prior schedule artifact, then
+        // success.
+        if automation.trigger.is_manual() {
+            let _ = self.unregister(&automation.id);
+            return Ok(());
+        }
+
         let timer_path = timer_path_for(&automation.id)?;
         let service_path = service_path_for(&automation.id)?;
         let (timer, service) = render_units(automation)?;
@@ -132,6 +140,7 @@ impl Scheduler for SystemdScheduler {
     ) -> Result<Vec<DateTime<Utc>>, AutomationError> {
         match trigger {
             Trigger::Cron { cron, .. } => cron_next_runs(cron, from, n),
+            Trigger::Manual => Ok(Vec::new()),
         }
     }
 
@@ -231,6 +240,9 @@ pub fn render_units(automation: &Automation) -> Result<(String, String), Automat
     // --- timer ---
     let slots = match &automation.trigger {
         Trigger::Cron { cron: expr, .. } => cron::expand(expr)?,
+        // Manual triggers short-circuit `register` before reaching
+        // unit rendering, so this arm is unreachable in practice.
+        Trigger::Manual => return Ok((String::new(), String::new())),
     };
     let mut timer = String::new();
     timer.push_str("# claudepot_managed: true\n");
@@ -357,6 +369,7 @@ mod tests {
             created_at: now,
             updated_at: now,
             claudepot_managed: true,
+            template_id: None,
         }
     }
 

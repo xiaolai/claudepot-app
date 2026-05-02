@@ -1,0 +1,114 @@
+# Morning health check
+#
+# A small, daily, read-only sweep of system state. The user reads
+# a one-page markdown report each morning to know whether anything
+# needs attention.
+#
+# Stays read-only intentionally: this is the trust-anchor template
+# for the IT-agent gallery. It must never move files, restart
+# services, or surprise the user. Apply pipelines belong on
+# templates with explicit `apply` configuration.
+
+id              = "it.morning-health-check"
+schema_version  = 1
+version         = 1
+name            = "Morning health check"
+tagline         = "A quick read on how your Mac's doing."
+description     = """
+Each morning around 8 AM, this template gives your Mac a brief
+once-over: disk space, what's running, battery health, recent
+software updates, and whether your backups are up to date. It
+saves a one-page report to ~/.claudepot/it-reports/ so you can
+read it whenever — no notifications, no pop-ups.
+
+It only reads system state. It never moves files, restarts
+services, or changes settings.
+"""
+category        = "it-health"
+icon            = "stethoscope"
+tier            = "ambient"
+
+# Capability requirements — keep this minimal. The template just
+# needs to call shell tools and write a markdown file. Tool use
+# is required; the rest is optional.
+capabilities_required = ["tool_use"]
+min_context_tokens    = 8192
+recommended_class     = "fast"
+cost_class            = "trivial"
+cost_cap_usd          = 0.05
+privacy               = "any"
+consent_required      = false
+fallback_policy       = "skip"
+
+# The prompt. Keep it focused — the LLM is doing one thing:
+# turning the output of a few shell commands into a readable
+# one-pager. No agentic exploration, no tool sprawl.
+prompt = """
+You are a personal IT assistant performing a morning health check on this Mac.
+
+Your job: run a small set of read-only shell commands, interpret their output, and write a one-page markdown report. The report goes at the configured output path. Do NOT modify anything on the system.
+
+Run these checks (use the Bash tool):
+
+1. Disk usage:    df -h /
+2. Memory:        vm_stat | head -10
+3. Top processes: ps aux | sort -nrk 3 | head -10
+4. Battery:       pmset -g batt
+5. Updates:       softwareupdate -l 2>&1 | head -20
+6. Backup:        tmutil latestbackup 2>&1 || echo "No Time Machine destination configured"
+7. Crashes:       ls -1t ~/Library/Logs/DiagnosticReports/ 2>/dev/null | head -10
+
+For each section, briefly note what you found. Lead the report with a one-line headline:
+
+- "All systems fine" if nothing needs attention.
+- A specific concern in second person if something does ("Your disk is 92% full — about 4 GB left.").
+
+Format the report as markdown. Use these section headings (in this order):
+
+# Morning health check — <YYYY-MM-DD>
+
+**Status:** <one-line headline>
+
+## Storage
+## Memory and processes
+## Battery
+## Updates
+## Backups
+## Crashes
+
+Keep the whole report under one screen. If a section has nothing interesting, write "Nothing to report" — don't fabricate items.
+
+Save the report using the Write tool to the path supplied via the CLAUDEPOT_OUTPUT_PATH environment variable. If that variable is unset, save to ~/.claudepot/it-reports/morning-<today's date>.md, creating the directory if needed.
+
+Don't tell the user what you're doing as you go — just produce the report.
+"""
+
+sample_report = "samples/morning-health-check.md"
+
+# Trust statements — shown verbatim in the install dialog. Plain
+# English, second person, honest about scope.
+[scope]
+reads                       = "Your Mac's system status: disk usage, top processes, battery health, pending updates, recent crash reports, backup status."
+writes                      = "One markdown report per morning at ~/.claudepot/it-reports/morning-<date>.md"
+could_change                = "Nothing. This template only reports."
+network                     = "None. Everything runs locally on your Mac."
+requires_full_disk_access   = false
+
+[schedule]
+default        = "0 8 * * *"
+default_label  = "Each morning at 8 AM"
+allowed_shapes = ["daily", "weekdays", "manual"]
+
+[output]
+path_template = "~/.claudepot/it-reports/morning-{date}.md"
+format        = "markdown"
+
+# No placeholders — the defaults are good for most users. A power
+# user can override the schedule from the install dialog; the
+# output path is fixed because every morning's report needs to
+# land in the same directory the Reports panel watches.
+
+[runtime]
+permission_mode = "plan"
+allowed_tools   = ["Bash", "Read", "Write"]
+timeout_secs    = 120

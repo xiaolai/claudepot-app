@@ -1,0 +1,120 @@
+# Disk full diagnostic
+#
+# On-demand. The user runs this when they get a "your startup disk
+# is almost full" warning. Reports where the GB went and what's
+# safe to clear.
+
+id              = "diag.disk-full"
+schema_version  = 1
+version         = 1
+name            = "Disk is full — what's eating space?"
+tagline         = "Where your gigabytes went, ranked."
+description     = """
+Run this when your Mac is low on disk space. The report shows
+which directories under your Home are consuming the most space,
+flags large files, and identifies categories that are usually
+safe to clear (caches, sleep image, simulators, old downloads).
+
+Nothing is moved or deleted. The report tells you what to clean;
+the cleaning is a separate, deliberate step.
+"""
+category        = "diagnostics"
+icon            = "hard-drive"
+tier            = "on-demand"
+
+capabilities_required = ["tool_use"]
+min_context_tokens    = 16384
+recommended_class     = "local-ok"
+cost_class            = "trivial"
+cost_cap_usd          = 0.05
+privacy               = "any"
+consent_required      = false
+fallback_policy       = "skip"
+
+prompt = """
+You are a personal IT assistant diagnosing low disk space on this Mac.
+
+Run these read-only commands and produce a markdown report.
+
+1. Headline numbers:
+   df -h /
+
+2. Top-level Home subdirectories by size:
+   du -sh ~/* 2>/dev/null | sort -hr | head -20
+
+3. Large individual files (>1 GB) anywhere under Home:
+   find ~ -type f -size +1G 2>/dev/null | head -30
+   For each, also note the size: "ls -lh <file>".
+
+4. Common-suspects audit. For each, run `du -sh` and report:
+   - ~/Library/Caches
+   - ~/Library/Developer/Xcode/DerivedData
+   - ~/Library/Developer/CoreSimulator/Devices
+   - ~/Library/Developer/CoreSimulator/Caches
+   - ~/Library/Containers/com.docker.docker (if present)
+   - ~/.Trash
+   - sleep image:  ls -lh /private/var/vm/sleepimage 2>/dev/null
+
+5. Downloads:
+   - ~/Downloads total: du -sh ~/Downloads
+   - Files older than 30 days:
+     find ~/Downloads -type f -mtime +30 2>/dev/null | wc -l
+
+Then produce the report:
+
+# Disk is full — <YYYY-MM-DD HH:MM>
+
+**Status:** <one-line summary: how full + the biggest single
+contributor>
+
+## Top of Home
+
+(Bullet list of top 10 directories with size.)
+
+## Big files (>1 GB)
+
+(Bullet list with size + path. If none, write "No files larger than 1 GB.")
+
+## Safe-to-clear categories
+
+For each category that has >100 MB, write a short paragraph:
+
+- What it is, in plain English ("Xcode keeps build artifacts here…")
+- Current size
+- A recommendation: "safe to clear with the X Y Z command" or
+  "review before clearing — may break <thing>".
+
+Be specific about commands. Don't tell the user to "clean up";
+tell them WHICH command to run.
+
+## Recommendation
+
+A 3-line "if you have 5 minutes" suggestion ranked by reclaimable
+space and risk. Lowest risk first.
+
+Save with Write to CLAUDEPOT_OUTPUT_PATH or
+~/.claudepot/diag-reports/disk-full-<YYYY-MM-DD-HH-MM>.md.
+"""
+
+sample_report = "samples/disk-full.md"
+
+[scope]
+reads                       = "Disk usage of your Home directory and a few well-known cache locations. Big-file scan under your Home."
+writes                      = "One report per run at ~/.claudepot/diag-reports/disk-full-<timestamp>.md"
+could_change                = "Nothing. This template only reports — clearing files is a separate step you control."
+network                     = "None."
+requires_full_disk_access   = false
+
+[schedule]
+default        = "manual"
+default_label  = "On demand"
+allowed_shapes = ["manual"]
+
+[output]
+path_template = "~/.claudepot/diag-reports/disk-full-{date}.md"
+format        = "markdown"
+
+[runtime]
+permission_mode = "plan"
+allowed_tools   = ["Bash", "Read", "Write"]
+timeout_secs    = 240

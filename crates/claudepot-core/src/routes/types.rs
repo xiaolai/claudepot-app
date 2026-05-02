@@ -201,6 +201,26 @@ pub struct Route {
     /// Whether the wrapper script currently exists on disk.
     #[serde(default)]
     pub installed_on_cli: bool,
+    /// User-marked "this route runs in my own private cloud
+    /// account" flag. Used by templates with
+    /// `privacy = private_cloud` to filter eligible routes.
+    /// Defaults to `false` because only the user knows whether a
+    /// Bedrock/Vertex/Foundry route is in their own VPC vs a
+    /// shared corporate account.
+    #[serde(default)]
+    pub is_private_cloud: bool,
+    /// User-supplied capability override. When `Some`, takes
+    /// precedence over the templates module's default-by-prefix
+    /// hint table — the actual enforcement boundary for "can
+    /// this route run that template?" decisions.
+    ///
+    /// Values are kebab/snake case strings matching
+    /// `claudepot_core::templates::Capability`'s serde rename:
+    /// `tool_use`, `long_context`, `vision`, `structured_output`.
+    /// Stored as strings so this module doesn't pull in a
+    /// templates dependency for the type.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub capabilities_override: Option<Vec<String>>,
 }
 
 /// Lightweight projection for IPC / GUI list views. Carries no
@@ -366,6 +386,8 @@ mod tests {
             deployment_organization_uuid: Uuid::nil(),
             active_on_desktop: false,
             installed_on_cli: false,
+            is_private_cloud: false,
+            capabilities_override: None,
         };
         let s = r.summary();
         // Preview must not leak any leading characters and must

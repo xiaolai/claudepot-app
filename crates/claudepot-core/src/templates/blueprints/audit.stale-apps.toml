@@ -1,0 +1,105 @@
+# Stale apps audit
+#
+# Lists applications in /Applications that haven't been opened
+# recently. Does not delete anything; the report tells you which
+# ones to consider uninstalling.
+
+id              = "audit.stale-apps"
+schema_version  = 1
+version         = 1
+name            = "Stale apps audit"
+tagline         = "What's installed but unused."
+description     = """
+Each month, this checks every app in /Applications for its last
+launch time. Apps not opened in six months show up as candidates
+for uninstall. The report lists them with sizes — uninstalling is
+your call, not the agent's.
+
+Reads system metadata only. Does not move, modify, or delete
+anything.
+"""
+category        = "audit"
+icon            = "archive-x"
+tier            = "periodic"
+
+capabilities_required = ["tool_use"]
+min_context_tokens    = 16384
+recommended_class     = "fast"
+cost_class            = "low"
+cost_cap_usd          = 0.10
+privacy               = "any"
+consent_required      = false
+fallback_policy       = "skip"
+
+prompt = """
+You are a personal IT assistant auditing stale applications on this Mac.
+
+Run these read-only checks:
+
+1. List every app in /Applications:
+   ls -1d /Applications/*.app 2>/dev/null
+
+2. For each app, get last-used metadata:
+   mdls -name kMDItemLastUsedDate "<app-path>"
+   mdls -name kMDItemPhysicalSize "<app-path>"
+
+3. Detect App Store provenance (matters for uninstall path):
+   mdls -name kMDItemAppStoreReceipt -name kMDItemAppStoreInstallerVersionID "<app-path>"
+
+Build a report with:
+
+# Stale apps audit — <YYYY-MM-DD>
+
+**Status:** <X apps unused for 6+ months, total Y GB recoverable>
+
+## Stale (>6 months unused)
+
+| App | Last opened | Size | Source |
+|---|---|---|---|
+| <name> | <YYYY-MM-DD> | <XX MB> | App Store / direct |
+
+Sort the table by size descending so the largest reclaimable
+items lead.
+
+## Recently used (<6 months)
+
+Just a count. No table.
+
+## Suggested actions
+
+For each Stale row, write a one-line suggestion:
+- App Store apps: "Uninstall via Launchpad (long-press → X)."
+- Direct installs: "Move <path> to Trash, then check
+  ~/Library/Application Support/<bundle-id>/ for leftovers."
+- Anything paid (Adobe, MS Office, etc.): "Verify license
+  before removing."
+
+Save with Write to CLAUDEPOT_OUTPUT_PATH or
+~/.claudepot/audit-reports/stale-apps-<YYYY-MM-DD>.md.
+
+Do not execute any uninstall command. The user reviews and
+acts manually.
+"""
+
+sample_report = "samples/stale-apps.md"
+
+[scope]
+reads                       = "Application metadata under /Applications (last-used dates, sizes, App Store provenance)."
+writes                      = "One report per run at ~/.claudepot/audit-reports/stale-apps-<date>.md"
+could_change                = "Nothing. Uninstall recommendations are produced; you execute them manually."
+network                     = "None."
+requires_full_disk_access   = false
+
+[schedule]
+default        = "0 10 1 * *"
+default_label  = "First day of each month at 10 AM"
+allowed_shapes = ["weekly", "manual"]
+
+[output]
+path_template = "~/.claudepot/audit-reports/stale-apps-{date}.md"
+format        = "markdown"
+
+[runtime]
+permission_mode = "plan"
+allowed_tools   = ["Bash", "Read", "Write"]
+timeout_secs    = 240

@@ -14,6 +14,30 @@ export type AutomationBinaryKind = "first_party" | "route";
 
 export type TriggerKind = "scheduled" | "manual";
 
+export type ArtifactKind =
+  | "report"
+  | "pending_changes"
+  | "apply_receipt"
+  | "email";
+
+export interface OutputArtifactDto {
+  kind: ArtifactKind;
+  path: string;
+  format: string;
+  bytes: number;
+}
+
+export type RouteDecisionDto =
+  | { kind: "ran"; route_id: string | null }
+  | {
+      kind: "fallback";
+      from: string;
+      to: string | null;
+      reason: string;
+    }
+  | { kind: "skipped"; reason: string }
+  | { kind: "skipped_alerted"; reason: string };
+
 export type HostPlatform = "macos" | "windows" | "linux" | "other";
 
 export interface PlatformOptionsDto {
@@ -139,6 +163,8 @@ export interface AutomationRunDto {
   trigger_kind: TriggerKind;
   host_platform: HostPlatform;
   claudepot_version: string;
+  output_artifacts?: OutputArtifactDto[];
+  route_decision?: RouteDecisionDto | null;
 }
 
 export interface SchedulerCapabilitiesDto {

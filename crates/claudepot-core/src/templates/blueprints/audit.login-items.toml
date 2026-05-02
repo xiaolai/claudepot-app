@@ -1,0 +1,113 @@
+# Login-items audit
+#
+# Inventory of everything that auto-starts when you log in. Catches
+# new persistent agents that snuck in during recent installs — the
+# usual route for "where did this thing come from?" surprises.
+
+id              = "audit.login-items"
+schema_version  = 1
+version         = 1
+name            = "Login items audit"
+tagline         = "What auto-starts on this Mac."
+description     = """
+Each month, this lists everything that runs at login: System
+Settings login items, LaunchAgents in your Home, system-wide
+LaunchAgents and LaunchDaemons, and Safari/Chrome content
+blockers. Anything you don't recognize is flagged.
+
+Read-only. Disabling items remains your call.
+"""
+category        = "audit"
+icon            = "list-checks"
+tier            = "periodic"
+
+capabilities_required = ["tool_use"]
+min_context_tokens    = 16384
+recommended_class     = "fast"
+cost_class            = "low"
+cost_cap_usd          = 0.10
+privacy               = "any"
+consent_required      = false
+fallback_policy       = "skip"
+
+prompt = """
+You are a personal IT assistant auditing what auto-starts on this Mac.
+
+Inventory these surfaces (read-only):
+
+1. System Settings login items:
+   osascript -e 'tell application "System Events" to get the name of every login item'
+
+2. User-level LaunchAgents:
+   ls -la ~/Library/LaunchAgents/ 2>/dev/null
+
+3. System-wide LaunchAgents (read /Library/LaunchAgents):
+   ls -la /Library/LaunchAgents/ 2>/dev/null
+
+4. LaunchDaemons (read-only, root-owned but world-readable):
+   ls -la /Library/LaunchDaemons/ 2>/dev/null
+
+5. Browser content blockers (Safari):
+   defaults read com.apple.Safari "ExtensionsEnabled" 2>/dev/null
+
+For each item, note:
+- File path or bundle identifier
+- Owner (user / system / Apple-shipped / unknown)
+- Last modified date if visible
+
+Build the report:
+
+# Login items audit — <YYYY-MM-DD>
+
+**Status:** <total entries; X new since last audit if a prior
+report exists in ~/.claudepot/audit-reports/login-items-*.md>
+
+## Apple-shipped (expected)
+
+Bullet list. Trust these — they ship with macOS.
+
+## Third-party — recognized
+
+Bullet list. Each line names the publisher and what it does
+(e.g. "1Password 8 — pasteboard agent and CLI helper").
+
+## Unrecognized — investigate
+
+Bullet list. For each, write:
+- Path / bundle id
+- A guess at what it is (based on the filename — be honest if
+  you don't know)
+- "Search this filename online before disabling."
+
+If a `~/.claudepot/audit-reports/login-items-*.md` file exists
+from a prior run, diff against it and call out anything new in a
+"## New since <prior date>" section.
+
+Save with Write to CLAUDEPOT_OUTPUT_PATH or
+~/.claudepot/audit-reports/login-items-<YYYY-MM-DD>.md.
+
+Do not modify any LaunchAgent or login item. Reporting only.
+"""
+
+sample_report = "samples/login-items.md"
+
+[scope]
+reads                       = "System Settings login items, LaunchAgents/Daemons in your Home and system-wide locations, browser content-blocker state."
+writes                      = "One report per run at ~/.claudepot/audit-reports/login-items-<date>.md"
+could_change                = "Nothing. Disabling items remains a manual step."
+network                     = "None."
+requires_full_disk_access   = false
+
+[schedule]
+default        = "0 10 1 * *"
+default_label  = "First day of each month at 10 AM"
+allowed_shapes = ["weekly", "manual"]
+
+[output]
+path_template = "~/.claudepot/audit-reports/login-items-{date}.md"
+format        = "markdown"
+
+[runtime]
+permission_mode = "plan"
+allowed_tools   = ["Bash", "Read", "Write"]
+timeout_secs    = 180
