@@ -30,6 +30,8 @@ pub mod error;
 pub mod schema;
 mod turns;
 
+pub use turns::TurnCandidate;
+
 pub use error::SessionIndexError;
 
 use chrono::Utc;
@@ -287,6 +289,23 @@ impl SessionIndex {
     pub fn turns_for(&self, file_path: &str) -> Result<Vec<TurnRecord>, SessionIndexError> {
         let db = self.db();
         turns::load_turns(&db, file_path)
+    }
+
+    /// Coarse top-K-by-token-sum across the install. Used by the
+    /// `usage_local::top_costly_turns` consumer to seed a model-aware
+    /// re-rank in Rust. Open-ended bounds on either end of `window`
+    /// translate to "no constraint on that side." Returns up to
+    /// `pool_limit` rows; consumer typically passes `final_n × 50`
+    /// so the re-rank can correct for cross-model rate divergences
+    /// without touching the whole table.
+    pub fn turn_candidates(
+        &self,
+        from_ms: Option<i64>,
+        to_ms: Option<i64>,
+        pool_limit: usize,
+    ) -> Result<Vec<turns::TurnCandidate>, SessionIndexError> {
+        let db = self.db();
+        turns::fetch_turn_candidates(&db, from_ms, to_ms, pool_limit)
     }
 
     /// Refresh the cache against `config_dir` and return every row,

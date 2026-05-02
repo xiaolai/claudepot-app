@@ -8,6 +8,7 @@
 import { invoke } from "@tauri-apps/api/core";
 import type {
   LocalUsageReport,
+  TopCostlyPrompts,
   UsageWindowSpec,
 } from "../types";
 
@@ -36,5 +37,18 @@ export const usageApi = {
   localUsageAggregate: (window: UsageWindowSpec) =>
     invoke<LocalUsageReport>("local_usage_aggregate", {
       spec: toWire(window),
+    }),
+  /**
+   * Install-wide top-N costliest prompts for the supplied window,
+   * scored against the user's active pricing tier. The backend caps
+   * `final_n` at 50 server-side; passing a larger value is silently
+   * truncated. Returns `{ turns: [], pricing_tier }` when no turns
+   * have been indexed yet (fresh install with sessions on disk but
+   * no re-scan to populate the per-turn table).
+   */
+  topCostlyPrompts: (window: UsageWindowSpec, finalN: number) =>
+    invoke<TopCostlyPrompts>("top_costly_prompts", {
+      spec: toWire(window),
+      finalN,
     }),
 };
