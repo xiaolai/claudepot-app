@@ -151,7 +151,9 @@ pub struct ResolvedSchedule {
 /// `every_n_hours` range `1..=23`.
 pub fn schedule_to_cron(s: &ScheduleDto) -> Result<ResolvedSchedule, TemplateError> {
     fn parse_hhmm(s: &str) -> Result<(u8, u8), String> {
-        let (h, m) = s.split_once(':').ok_or_else(|| format!("expected HH:MM, got {s:?}"))?;
+        let (h, m) = s
+            .split_once(':')
+            .ok_or_else(|| format!("expected HH:MM, got {s:?}"))?;
         let h: u8 = h.parse().map_err(|_| format!("bad hour: {h}"))?;
         let m: u8 = m.parse().map_err(|_| format!("bad minute: {m}"))?;
         if h >= 24 {
@@ -291,7 +293,10 @@ pub fn instantiate(
     // 5. Manual triggers and the blueprint's allowed_shapes must
     //    agree. Honor the blueprint contract.
     if matches!(instance.schedule, ScheduleDto::Manual)
-        && !blueprint.schedule.allowed_shapes.contains(&ScheduleShape::Manual)
+        && !blueprint
+            .schedule
+            .allowed_shapes
+            .contains(&ScheduleShape::Manual)
     {
         return Err(TemplateError::malformed(
             blueprint.id().0.clone(),
@@ -534,7 +539,9 @@ fn validate_path_placeholder(
         let target = if path.exists() {
             path.clone()
         } else {
-            path.parent().map(|p| p.to_path_buf()).unwrap_or(path.clone())
+            path.parent()
+                .map(|p| p.to_path_buf())
+                .unwrap_or(path.clone())
         };
         let meta = std::fs::metadata(&target).map_err(|e| {
             TemplateError::malformed(
@@ -641,7 +648,10 @@ mod tests {
 
     #[test]
     fn slugify_handles_freeform_punctuation() {
-        assert_eq!(slugify("Disk is full — what's eating space?"), "disk-is-full-what-s-eating-space");
+        assert_eq!(
+            slugify("Disk is full — what's eating space?"),
+            "disk-is-full-what-s-eating-space"
+        );
         assert_eq!(slugify("  --foo  --bar--  "), "foo-bar");
         assert_eq!(slugify("123abc"), "123abc");
         assert_eq!(slugify("___"), "template");
@@ -767,24 +777,17 @@ mod tests {
     fn substitute_replaces_known_tokens_only() {
         let mut values = BTreeMap::new();
         values.insert("download_path".into(), "/tmp/downloads".into());
-        let out = substitute(
-            "Scan {download_path}; today is {date}; bye.",
-            &values,
-        );
+        let out = substitute("Scan {download_path}; today is {date}; bye.", &values);
         // Known token replaced; unknown `{date}` passes through.
         assert_eq!(out, "Scan /tmp/downloads; today is {date}; bye.");
     }
 
     #[test]
     fn placeholder_value_kind_check() {
-        assert!(PlaceholderValue::Path {
-            value: "/x".into(),
-        }
-        .matches_kind(PlaceholderType::Path));
-        assert!(!PlaceholderValue::Path {
-            value: "/x".into(),
-        }
-        .matches_kind(PlaceholderType::Number));
+        assert!(PlaceholderValue::Path { value: "/x".into() }.matches_kind(PlaceholderType::Path));
+        assert!(
+            !PlaceholderValue::Path { value: "/x".into() }.matches_kind(PlaceholderType::Number)
+        );
     }
 
     #[test]

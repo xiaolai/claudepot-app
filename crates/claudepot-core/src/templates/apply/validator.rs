@@ -90,7 +90,9 @@ pub fn validate_item(op: &Operation, apply: &ApplyConfig) -> Result<(), Validati
         }
         Operation::Delete { path, .. } => {
             if path.exists() && path.is_dir() {
-                return Err(ValidationError::DeleteOnDirectory(path.display().to_string()));
+                return Err(ValidationError::DeleteOnDirectory(
+                    path.display().to_string(),
+                ));
             }
         }
         Operation::Move { .. } | Operation::Mkdir { .. } => {}
@@ -284,8 +286,7 @@ fn path_matches_glob(path: &Path, pattern: &str) -> bool {
         Some(s) => normalize_separators(s),
         None => return false,
     };
-    glob_compile_and_match(&canonical_pat, &haystack)
-        || glob_compile_and_match(&pat_str, &haystack)
+    glob_compile_and_match(&canonical_pat, &haystack) || glob_compile_and_match(&pat_str, &haystack)
 }
 
 fn glob_compile_and_match(pattern: &str, haystack: &str) -> bool {
@@ -365,8 +366,7 @@ fn canonicalize_glob_prefix(pattern: &str) -> String {
 /// Tiny base64 decoder so we don't pull a new dep just for one
 /// decode call. Standard alphabet, no padding required.
 fn base64_decode(input: &str) -> Result<Vec<u8>, String> {
-    const ALPHABET: &[u8; 64] =
-        b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    const ALPHABET: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
     let mut table = [255u8; 256];
     for (i, &b) in ALPHABET.iter().enumerate() {
         table[b as usize] = i as u8;
@@ -510,7 +510,10 @@ mod tests {
         let op = Operation::Mkdir { path: p.clone() };
         let cfg = config(
             &[ApplyOperation::Mkdir],
-            &[&format!("{}/**", std::env::temp_dir().join("claudepot-test-deep").display())],
+            &[&format!(
+                "{}/**",
+                std::env::temp_dir().join("claudepot-test-deep").display()
+            )],
         );
         validate_item(&op, &cfg).unwrap();
         std::fs::remove_dir_all(std::env::temp_dir().join("claudepot-test-deep")).ok();

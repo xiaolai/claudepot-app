@@ -686,10 +686,7 @@ mod tests {
             writeln!(f, "{l}").unwrap();
         }
         let new_mtime = std::time::SystemTime::now() + std::time::Duration::from_secs(2);
-        let _ = filetime::set_file_mtime(
-            &path,
-            filetime::FileTime::from_system_time(new_mtime),
-        );
+        let _ = filetime::set_file_mtime(&path, filetime::FileTime::from_system_time(new_mtime));
 
         idx.refresh(cfg.path()).unwrap();
         let turns = idx.turns_for(&path.to_string_lossy()).unwrap();
@@ -1287,7 +1284,8 @@ mod tests {
         {
             let db = Connection::open(&path).unwrap();
             db.execute_batch(schema::SCHEMA).unwrap();
-            db.execute_batch(crate::artifact_usage::schema::SCHEMA).unwrap();
+            db.execute_batch(crate::artifact_usage::schema::SCHEMA)
+                .unwrap();
             db.execute(
                 "INSERT OR REPLACE INTO meta (k, v) VALUES ('schema_version', '2')",
                 [],

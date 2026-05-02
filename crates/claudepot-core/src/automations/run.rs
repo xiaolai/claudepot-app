@@ -112,15 +112,12 @@ pub fn record_run_for_automation(
 ) -> Result<AutomationRun, AutomationError> {
     let mut run = record_run(inputs)?;
 
-    let run_dir = inputs
-        .stdout_log_path
-        .parent()
-        .ok_or_else(|| {
-            AutomationError::InvalidPath(
-                inputs.stdout_log_path.display().to_string(),
-                "stdout log has no parent dir",
-            )
-        })?;
+    let run_dir = inputs.stdout_log_path.parent().ok_or_else(|| {
+        AutomationError::InvalidPath(
+            inputs.stdout_log_path.display().to_string(),
+            "stdout log has no parent dir",
+        )
+    })?;
 
     // 1. Pre-run decision merge.
     if let Some(decision) = read_prerun_decision(run_dir) {
@@ -151,7 +148,11 @@ fn read_prerun_decision(run_dir: &Path) -> Option<PrerunDecision> {
 fn prerun_to_route_decision(d: PrerunDecision) -> RouteDecision {
     match d {
         PrerunDecision::Ran { route_id, .. } => RouteDecision::Ran { route_id },
-        PrerunDecision::Fallback { from, to_wrapper, reason } => RouteDecision::Fallback {
+        PrerunDecision::Fallback {
+            from,
+            to_wrapper,
+            reason,
+        } => RouteDecision::Fallback {
             from,
             to: to_wrapper,
             reason,

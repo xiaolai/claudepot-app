@@ -177,10 +177,7 @@ pub fn evaluate(
                 }
             }
             UseRoute::FirstLocalCapable => {
-                if let Some(rt) = routes
-                    .iter()
-                    .find(|r| is_local(r) && capabilities_match(r))
-                {
+                if let Some(rt) = routes.iter().find(|r| is_local(r) && capabilities_match(r)) {
                     return Suggestion::Route(rt.id.to_string());
                 }
             }
@@ -210,13 +207,7 @@ pub enum Suggestion {
     DefaultClaude,
 }
 
-fn match_rule(
-    m: &Match,
-    privacy: &str,
-    category: &str,
-    cost: &str,
-    bp_id: &str,
-) -> bool {
+fn match_rule(m: &Match, privacy: &str, category: &str, cost: &str, bp_id: &str) -> bool {
     if let Some(p) = &m.blueprint_privacy {
         if p != privacy {
             return false;
@@ -330,7 +321,16 @@ mod tests {
         let rules = RoutingRules::default();
         let r1 = route("ollama", "llama", "http://127.0.0.1:11434");
         let routes: Vec<&Route> = vec![&r1];
-        let s = evaluate(&rules, "any", "it-health", "trivial", "it.x", &routes, &is_local, &caps_ok);
+        let s = evaluate(
+            &rules,
+            "any",
+            "it-health",
+            "trivial",
+            "it.x",
+            &routes,
+            &is_local,
+            &caps_ok,
+        );
         assert_eq!(s, Suggestion::DefaultClaude);
     }
 
@@ -350,7 +350,16 @@ mod tests {
         let r1 = route("ollama", "llama", "http://127.0.0.1:11434");
         let r2 = route("anthropic", "claude", "https://api.anthropic.com");
         let routes: Vec<&Route> = vec![&r1, &r2];
-        let s = evaluate(&rules, "local", "it-health", "trivial", "it.x", &routes, &is_local, &caps_ok);
+        let s = evaluate(
+            &rules,
+            "local",
+            "it-health",
+            "trivial",
+            "it.x",
+            &routes,
+            &is_local,
+            &caps_ok,
+        );
         match s {
             Suggestion::Route(id) => assert_eq!(id, r1.id.to_string()),
             other => panic!("expected local route, got {other:?}"),

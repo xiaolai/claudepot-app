@@ -76,9 +76,8 @@ pub fn probe_for(route: &Route) -> ProbeKind {
             // localhost:11434 OR the user typed an explicit
             // `/api/tags` path into the base URL. Anything else
             // is treated as a generic OpenAI-compatible gateway.
-            let is_ollama = url.contains(":11434")
-                || url.ends_with("/api/tags")
-                || url.contains("/api/tags?");
+            let is_ollama =
+                url.contains(":11434") || url.ends_with("/api/tags") || url.contains("/api/tags?");
             if is_ollama {
                 ProbeKind::OllamaTags
             } else {

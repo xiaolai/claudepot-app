@@ -136,7 +136,10 @@ pub fn fetch_turn_candidates(
     };
     let rows: Vec<TurnCandidate> = match (has_from, has_to) {
         (true, true) => stmt
-            .query_map(params![from_ms.unwrap(), to_ms.unwrap(), limit_i64], map_row)?
+            .query_map(
+                params![from_ms.unwrap(), to_ms.unwrap(), limit_i64],
+                map_row,
+            )?
             .collect::<Result<_, _>>()?,
         (true, false) => stmt
             .query_map(params![from_ms.unwrap(), limit_i64], map_row)?
@@ -154,10 +157,7 @@ pub fn fetch_turn_candidates(
 /// Load every persisted turn for one file, ordered by `turn_index`.
 /// Empty result is normal — sessions on disk before this table
 /// existed have no turns until their next re-scan.
-pub fn load_turns(
-    db: &Connection,
-    file_path: &str,
-) -> Result<Vec<TurnRecord>, SessionIndexError> {
+pub fn load_turns(db: &Connection, file_path: &str) -> Result<Vec<TurnRecord>, SessionIndexError> {
     let mut stmt = db.prepare(SQL_SELECT_TURNS_BY_FILE)?;
     let rows = stmt.query_map(params![file_path], |r| {
         Ok(TurnRecord {
@@ -181,7 +181,8 @@ pub fn load_turns(
 /// is shared across the four bounded variants below to keep them in
 /// lock-step — a future tweak (e.g. weighting cache_read lower)
 /// only needs to land here once.
-const TURN_RANK_EXPR: &str = "(tokens_input + tokens_output + tokens_cache_creation + tokens_cache_read)";
+const TURN_RANK_EXPR: &str =
+    "(tokens_input + tokens_output + tokens_cache_creation + tokens_cache_read)";
 
 const SQL_TURN_CANDIDATES_BOTH: &str = r#"
 SELECT t.file_path, s.project_path, t.turn_index, t.ts_ms, t.model,

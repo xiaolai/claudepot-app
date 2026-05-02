@@ -188,9 +188,7 @@ impl ScheduleDto {
                 };
                 inst::ScheduleDto::Weekly { day: weekday, time }
             }
-            ScheduleDto::Hourly { every_n_hours } => {
-                inst::ScheduleDto::Hourly { every_n_hours }
-            }
+            ScheduleDto::Hourly { every_n_hours } => inst::ScheduleDto::Hourly { every_n_hours },
             ScheduleDto::Manual => inst::ScheduleDto::Manual,
             ScheduleDto::Custom { cron } => inst::ScheduleDto::Custom { cron },
         })
@@ -369,7 +367,10 @@ mod tests {
 
     #[test]
     fn schedule_dto_into_core_accepts_short_lowercase_weekdays() {
-        let s = ScheduleDto::Weekly { day: "mon".into(), time: "09:00".into() };
+        let s = ScheduleDto::Weekly {
+            day: "mon".into(),
+            time: "09:00".into(),
+        };
         let core = s.into_core().expect("mon should parse");
         match core {
             inst::ScheduleDto::Weekly { day, time } => {
@@ -382,7 +383,10 @@ mod tests {
 
     #[test]
     fn schedule_dto_into_core_accepts_full_weekdays() {
-        let s = ScheduleDto::Weekly { day: "Sunday".into(), time: "09:00".into() };
+        let s = ScheduleDto::Weekly {
+            day: "Sunday".into(),
+            time: "09:00".into(),
+        };
         match s.into_core().unwrap() {
             inst::ScheduleDto::Weekly { day, .. } => {
                 assert_eq!(day, inst::Weekday::Sun);
@@ -396,7 +400,10 @@ mod tests {
         // The TS picker emits short names today, but accepting "0".."6"
         // keeps a valid escape hatch for cron-savvy users / future
         // surfaces. This test pins that intent.
-        let s = ScheduleDto::Weekly { day: "5".into(), time: "07:30".into() };
+        let s = ScheduleDto::Weekly {
+            day: "5".into(),
+            time: "07:30".into(),
+        };
         match s.into_core().unwrap() {
             inst::ScheduleDto::Weekly { day, .. } => {
                 assert_eq!(day, inst::Weekday::Fri);
@@ -407,7 +414,10 @@ mod tests {
 
     #[test]
     fn schedule_dto_into_core_rejects_unknown_weekday() {
-        let s = ScheduleDto::Weekly { day: "wendsdayy".into(), time: "09:00".into() };
+        let s = ScheduleDto::Weekly {
+            day: "wendsdayy".into(),
+            time: "09:00".into(),
+        };
         let err = s.into_core().expect_err("typo should not parse");
         assert!(err.contains("unknown weekday"));
     }
@@ -415,7 +425,9 @@ mod tests {
     #[test]
     fn schedule_dto_serializes_with_tagged_kind() {
         // Wire format: { "kind": "daily", "time": "08:00" }
-        let s = ScheduleDto::Daily { time: "08:00".into() };
+        let s = ScheduleDto::Daily {
+            time: "08:00".into(),
+        };
         let json = serde_json::to_value(&s).unwrap();
         assert_eq!(json["kind"], "daily");
         assert_eq!(json["time"], "08:00");
