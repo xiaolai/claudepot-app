@@ -1,0 +1,85 @@
+# LAN census
+#
+# Daily inventory of devices on the local network. Diff against
+# the prior day's census via the new-device alert template.
+
+id              = "network.lan-census"
+schema_version  = 1
+version         = 1
+name            = "LAN census"
+tagline         = "Who's on your home network."
+description     = """
+Each evening, this scans the local subnet and lists every
+reachable device with its IP, MAC address, hostname (if mDNS
+publishes one), and best-guess vendor (from the OUI of the MAC).
+
+The report writes to a stable path so the new-device-alert
+template can diff today vs. yesterday.
+"""
+category        = "network"
+icon            = "wifi"
+tier            = "ambient"
+
+capabilities_required = ["tool_use"]
+min_context_tokens    = 8192
+recommended_class     = "local-ok"
+cost_class            = "trivial"
+cost_cap_usd          = 0.05
+privacy               = "any"
+consent_required      = false
+fallback_policy       = "skip"
+
+prompt = """
+You are a personal IT assistant inventorying the local network.
+
+Run these read-only commands:
+
+1. ARP table:    arp -a 2>/dev/null | head -100
+2. mDNS scan:    dns-sd -B _services._dns-sd._udp local. 2>/dev/null & sleep 2; kill %1 2>/dev/null
+                 (best-effort; if dns-sd unavailable, skip silently)
+3. Subnet:       ifconfig | grep -E 'inet [0-9]' | head -5
+
+Produce a markdown report:
+
+# LAN census — <YYYY-MM-DD>
+
+**Status:** <count> devices reachable on <subnet>.
+
+## Devices
+
+| IP | MAC | Hostname | Vendor (best guess) |
+|---|---|---|---|
+
+For each ARP entry, fill the row. Vendor is derived from the
+first 3 bytes of the MAC (the OUI). Use a small in-memory
+table for the most common vendors (Apple, Dell, Cisco,
+Ubiquiti, Synology, Raspberry Pi, etc.); leave "unknown" for
+others.
+
+Save with Write to CLAUDEPOT_OUTPUT_PATH (or
+~/.claudepot/network-reports/lan-census-<date>.md). Do not
+modify any network state.
+"""
+
+sample_report = "samples/lan-census.md"
+
+[scope]
+reads                       = "Local-network ARP table and mDNS announcements; your network interface configuration."
+writes                      = "One report per run at ~/.claudepot/network-reports/lan-census-<date>.md"
+could_change                = "Nothing."
+network                     = "Reads from your local subnet only — no internet traffic."
+requires_full_disk_access   = false
+
+[schedule]
+default        = "0 22 * * *"
+default_label  = "Each evening at 10 PM"
+allowed_shapes = ["daily", "weekdays", "manual"]
+
+[output]
+path_template = "~/.claudepot/network-reports/lan-census-{date}.md"
+format        = "markdown"
+
+[runtime]
+permission_mode = "plan"
+allowed_tools   = ["Bash", "Read", "Write"]
+timeout_secs    = 60

@@ -367,6 +367,7 @@ mod tests {
             created_at: now,
             updated_at: now,
             claudepot_managed: true,
+            template_id: None,
         }
     }
 

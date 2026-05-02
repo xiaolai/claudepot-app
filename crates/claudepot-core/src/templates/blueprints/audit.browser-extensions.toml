@@ -1,0 +1,118 @@
+# Browser-extensions audit
+#
+# Quarterly review of Chrome / Brave / Edge / Safari / Firefox
+# extensions. Flags abandoned ones, permission-greedy ones, and
+# anything with low ratings.
+
+id              = "audit.browser-extensions"
+schema_version  = 1
+version         = 1
+name            = "Browser extensions audit"
+tagline         = "Stale or risky extensions, found and named."
+description     = """
+Each quarter, this surveys what's installed across your browsers
+and flags entries that haven't been updated in a year, request
+unusual permissions, or have low store ratings.
+
+Read-only. The report tells you what to consider removing.
+"""
+category        = "audit"
+icon            = "puzzle"
+tier            = "periodic"
+
+capabilities_required = ["tool_use"]
+min_context_tokens    = 16384
+recommended_class     = "fast"
+cost_class            = "low"
+cost_cap_usd          = 0.10
+privacy               = "any"
+consent_required      = false
+fallback_policy       = "skip"
+
+prompt = """
+You are a personal IT assistant auditing browser extensions on this Mac.
+
+Inventory each browser's extension store. All paths are
+read-only listings of bundled manifests:
+
+1. Safari Web Extensions:
+   - find ~/Library/Safari/Extensions -name "*.appex" 2>/dev/null
+   - find ~/Library/Containers -path "*Safari*Extension*" 2>/dev/null
+
+2. Chrome / Brave / Edge (Chromium):
+   - For each profile dir under
+     ~/Library/Application\\ Support/Google/Chrome/*/Extensions/
+     and similar for Brave (BraveSoftware/Brave-Browser) and
+     Edge (Microsoft\\ Edge):
+     ls -1 .../Extensions/<id>/*/manifest.json 2>/dev/null
+
+3. Firefox:
+   - find ~/Library/Application\\ Support/Firefox/Profiles -name "extensions" 2>/dev/null
+
+For each found extension, READ the manifest.json (Read tool) and
+extract:
+- name
+- version
+- description
+- permissions (list)
+
+Classify each extension:
+
+- **trusted** — well-known publisher or first-party (uBlock
+  Origin, 1Password, Vimium, etc.)
+- **permission-greedy** — requests "tabs", "history",
+  "<all_urls>", or "webRequestBlocking" without an obvious need
+- **likely-abandoned** — version unchanged for >1 year (best-
+  effort: check the manifest's "version" against any visible
+  modification time on the manifest file)
+- **unknown** — first time seeing this name; flag for review
+
+Format:
+
+# Browser extensions audit — <YYYY-MM-DD>
+
+**Status:** <X total extensions across N browsers; Y flagged
+for review>
+
+## By browser
+
+For each browser with extensions:
+
+### <Browser name>
+
+- **trusted**: <names>
+- **flagged**: <name> — <one line on why>
+
+For flagged items, suggest:
+- Delete (Settings → Extensions → Remove) if no longer needed
+- Audit permissions (Settings → Extensions → Permissions) if
+  trusted but permission-greedy
+
+Save with Write to CLAUDEPOT_OUTPUT_PATH or
+~/.claudepot/audit-reports/browser-extensions-<YYYY-MM-DD>.md.
+
+Do not remove any extension. Reporting only.
+"""
+
+sample_report = "samples/browser-extensions.md"
+
+[scope]
+reads                       = "Browser extension manifests in your Safari/Chrome/Brave/Edge/Firefox profile directories."
+writes                      = "One report per run at ~/.claudepot/audit-reports/browser-extensions-<date>.md"
+could_change                = "Nothing. Extension removal is your call."
+network                     = "None."
+requires_full_disk_access   = false
+
+[schedule]
+default        = "0 10 1 1,4,7,10 *"
+default_label  = "First day of each quarter at 10 AM"
+allowed_shapes = ["weekly", "manual"]
+
+[output]
+path_template = "~/.claudepot/audit-reports/browser-extensions-{date}.md"
+format        = "markdown"
+
+[runtime]
+permission_mode = "plan"
+allowed_tools   = ["Bash", "Read", "Write"]
+timeout_secs    = 240

@@ -16,5 +16,6 @@ export * from "./artifact-usage";
 export * from "./artifact-lifecycle";
 export * from "./route";
 export * from "./automation";
+export * from "./template";
 export * from "./usage";
 export * from "./updates";
