@@ -26,6 +26,11 @@ serde_json = "1"
 # TOML — bundled template blueprints. Author-friendly multi-line
 # strings for prompts and descriptions; round-trips via serde.
 toml = { version = "0.8", default-features = false, features = ["parse"] }
+# Glob matching for templates' apply.scope.allowed_paths. Used in
+# place of a hand-rolled matcher because globset handles
+# cross-platform separators (`/` and `\`) and case-insensitive
+# matching natively.
+globset = "0.4"
 # SMTP — caregiver weekly-report email delivery. Pure-Rust
 # rustls, no openssl. Tokio runtime.
 lettre = { version = "0.11", default-features = false, features = ["smtp-transport", "rustls-tls", "tokio1-rustls-tls", "tokio1", "builder"] }

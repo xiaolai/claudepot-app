@@ -38,6 +38,7 @@ use claudepot_core::templates::routing::{
     at_path as routing_at_path, evaluate, Match, RoutingRule, RoutingRules, RoutingStore,
     Suggestion, UseRoute,
 };
+use claudepot_core::automations::types::HostPlatform;
 use claudepot_core::templates::{
     instantiate, schedule_to_cron, ScheduleDto, TemplateInstance, TemplateRegistry, Weekday,
 };
@@ -96,6 +97,46 @@ fn registry_includes_known_canonical_ids() {
             "missing canonical blueprint {id}"
         );
     }
+}
+
+#[test]
+fn every_bundled_blueprint_currently_supports_only_macos() {
+    // Pin the cross-platform audit decision: every shipped
+    // blueprint hardcodes macOS shell tools (`defaults`, `pmset`,
+    // `system_profiler`, `~/Library/...`). Until per-platform
+    // variants are authored, the registry filters them out on
+    // Linux/Windows. This test fails the moment a blueprint
+    // declares broader support without a Linux/Windows
+    // implementation — forcing the author to think about it.
+    let registry = TemplateRegistry::load_bundled().unwrap();
+    for bp in registry.list() {
+        assert_eq!(
+            bp.supported_platforms,
+            vec![HostPlatform::Macos],
+            "blueprint {} must declare only macOS support until a non-macOS variant ships",
+            bp.id().0
+        );
+    }
+}
+
+#[test]
+fn registry_list_for_filters_by_host_platform() {
+    let registry = TemplateRegistry::load_bundled().unwrap();
+    let mac_count = registry.list_for(HostPlatform::Macos).count();
+    let linux_count = registry.list_for(HostPlatform::Linux).count();
+    let windows_count = registry.list_for(HostPlatform::Windows).count();
+    assert!(
+        mac_count >= 22,
+        "macOS must see every shipped blueprint, got {mac_count}"
+    );
+    assert_eq!(
+        linux_count, 0,
+        "Linux must currently see zero blueprints (none declare Linux support yet)"
+    );
+    assert_eq!(
+        windows_count, 0,
+        "Windows must currently see zero blueprints (none declare Windows support yet)"
+    );
 }
 
 #[test]
