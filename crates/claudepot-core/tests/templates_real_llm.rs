@@ -934,3 +934,126 @@ fn real_llm_writes_report_and_record_run_discovers_it() {
         "result.json missing output_artifacts field: {result_str}"
     );
 }
+
+// =====================================================================
+// (d) Every bundled blueprint runs against the real LLM
+// =====================================================================
+//
+// Closes the "20 of 22 blueprints unverified end-to-end" gap.
+// Iterates every bundled blueprint that declares macOS support,
+// instantiates the verbatim prompt (no test-mode guardrail —
+// the LLM actually runs the blueprint's instructions), and
+// asserts the terminal `result` event reports `is_error: false`.
+//
+// Side effects: each blueprint's prompt instructs the LLM to run
+// shell commands and write a markdown report to disk. The shell
+// commands are real (`du`, `system_profiler`, `pmset`, etc.) but
+// scoped to read-only system inspection plus writes under
+// $HOME/.claudepot/. Templates that ask the LLM to scan
+// ~/Downloads or ~/Library will read those directories on the
+// test host. Run on a controlled box (mac-mini-home), not the
+// dev machine.
+//
+// Cost: ~$0.30 first call, ~$0.05 per cached follow-up — ~$1.40
+// total for 22 blueprints. Wall: ~3-5 min, mostly LLM compute.
+
+#[test]
+#[ignore = "real LLM × every bundled blueprint (~$1.40, ~3-5min); needs CLAUDE_OAUTH_TOKEN; intended for controlled test host"]
+fn every_bundled_blueprint_runs_against_real_llm() {
+    let Some(token) =
+        oauth_token_or_skip("every_bundled_blueprint_runs_against_real_llm")
+    else {
+        return;
+    };
+    let Some(_claude) =
+        current_claude_binary_or_skip("every_bundled_blueprint_runs_against_real_llm")
+    else {
+        return;
+    };
+
+    let registry = TemplateRegistry::load_bundled().unwrap();
+    let host = claudepot_core::automations::types::HostPlatform::current();
+
+    // Collect blueprints that declare support for the current
+    // host, then run each one. Linux/Windows hosts will see zero
+    // (every shipped blueprint is currently macOS-only); on
+    // macOS this is all 22.
+    let mut targets: Vec<&_> = registry.list_for(host).collect();
+    targets.sort_by_key(|bp| bp.id().0.clone());
+    let total = targets.len();
+    eprintln!(
+        "running {total} bundled blueprints against the real LLM on {host:?}"
+    );
+
+    let mut failures: Vec<String> = Vec::new();
+    let mut total_cost: f64 = 0.0;
+
+    for (idx, bp) in targets.iter().enumerate() {
+        eprintln!("[{}/{}] {}", idx + 1, total, bp.id().0);
+
+        let started = Instant::now();
+        let out = Command::new("claude")
+            .args([
+                "-p",
+                &bp.prompt,
+                "--output-format=json",
+                "--permission-mode=default",
+            ])
+            .env("CLAUDE_OAUTH_TOKEN", &token)
+            .env_remove("CLAUDE_CODE_ENTRYPOINT")
+            .env_remove("CLAUDECODE")
+            .output()
+            .expect("claude -p must spawn");
+
+        if !out.status.success() {
+            failures.push(format!(
+                "{}: claude -p exited non-zero ({:?}); stderr: {}",
+                bp.id().0,
+                out.status.code(),
+                String::from_utf8_lossy(&out.stderr)
+                    .chars()
+                    .take(200)
+                    .collect::<String>()
+            ));
+            continue;
+        }
+
+        let stdout = String::from_utf8_lossy(&out.stdout).to_string();
+        let result = match parse_terminal_result(&stdout) {
+            Ok(r) => r,
+            Err(e) => {
+                failures.push(format!("{}: parse_terminal_result: {e}", bp.id().0));
+                continue;
+            }
+        };
+        if result["is_error"] != false {
+            failures.push(format!(
+                "{}: is_error={}; first 200 chars: {}",
+                bp.id().0,
+                result["is_error"],
+                stdout.chars().take(200).collect::<String>()
+            ));
+            continue;
+        }
+
+        if let Some(cost) = result["total_cost_usd"].as_f64() {
+            total_cost += cost;
+        }
+        eprintln!(
+            "      ok ({:.1}s, ${:.4} so far)",
+            started.elapsed().as_secs_f64(),
+            total_cost,
+        );
+    }
+
+    eprintln!(
+        "completed {total} blueprints; total spend ${total_cost:.4}"
+    );
+    if !failures.is_empty() {
+        panic!(
+            "{n} of {total} blueprints failed:\n{joined}",
+            n = failures.len(),
+            joined = failures.join("\n"),
+        );
+    }
+}
