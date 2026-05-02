@@ -438,10 +438,10 @@ fn apply_schema(db: &Connection) -> Result<(), SessionIndexError> {
     )?;
 
     let current_version = crate::artifact_usage::schema::SCHEMA_VERSION;
-    let needs_upgrade_rescan = match prior_version.as_deref() {
-        Some(v) if v != current_version => true,
-        _ => false,
-    };
+    let needs_upgrade_rescan = matches!(
+        prior_version.as_deref(),
+        Some(v) if v != current_version
+    );
     if needs_upgrade_rescan {
         // Drop cached session rows so the next refresh re-scans every
         // transcript and repopulates every co-located table that
