@@ -41,7 +41,10 @@ use std::path::PathBuf;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 pub mod service;
+mod tier;
+
 pub use service::{Fetcher, LiveFetcher, PricingCacheService};
+pub use tier::PriceTier;
 
 /// USD per *million tokens*. Kept in an "easy to eyeball" unit so
 /// table edits don't drown in trailing zeros. Multiplication by

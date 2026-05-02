@@ -66,4 +66,31 @@ CREATE INDEX IF NOT EXISTS idx_sessions_last_ts      ON sessions(last_ts_ms DESC
 CREATE INDEX IF NOT EXISTS idx_sessions_slug         ON sessions(slug);
 CREATE INDEX IF NOT EXISTS idx_sessions_project_path ON sessions(project_path);
 CREATE INDEX IF NOT EXISTS idx_sessions_session_id   ON sessions(session_id);
+
+-- Per-turn token usage. Populated alongside the session row on every
+-- UPSERT (i.e. cold first scan and any subsequent re-scan triggered
+-- by the (size, mtime, inode) re-parse guard). Rows for re-scanned
+-- files are deleted-and-reinserted in the same transaction so the
+-- cache stays consistent with the transcript.
+--
+-- Sessions on disk before this table existed will be missing turn
+-- rows until their next re-scan. Consumer queries must tolerate
+-- empty results — the foreign-key relation to `sessions(file_path)`
+-- is by convention, not by SQLite constraint, to preserve the
+-- existing wipe-and-rebuild recovery semantics.
+CREATE TABLE IF NOT EXISTS session_turns (
+    file_path           TEXT    NOT NULL,
+    turn_index          INTEGER NOT NULL,  -- 0-based assistant-turn ordinal in the transcript
+    ts_ms               INTEGER,           -- server-side message timestamp, NULL when unparseable
+    model               TEXT    NOT NULL,  -- model id ("claude-opus-4-7"); empty string if missing
+    tokens_input        INTEGER NOT NULL,
+    tokens_output       INTEGER NOT NULL,
+    tokens_cache_creation INTEGER NOT NULL,
+    tokens_cache_read   INTEGER NOT NULL,
+    user_prompt_preview TEXT,              -- truncated user prompt that drove this assistant turn (NULL if none)
+    PRIMARY KEY (file_path, turn_index)
+);
+
+CREATE INDEX IF NOT EXISTS idx_turns_file_path ON session_turns(file_path);
+CREATE INDEX IF NOT EXISTS idx_turns_ts        ON session_turns(ts_ms DESC);
 "#;

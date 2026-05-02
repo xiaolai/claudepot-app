@@ -791,7 +791,7 @@ checksum = "c8d4a3bb8b1e0c1050499d1815f5ab16d04f0959b233085fb31653fbfc9d98f9"
 
 [[package]]
 name = "claudepot-cli"
-version = "0.0.20"
+version = "0.1.1"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -812,7 +812,7 @@ dependencies = [
 
 [[package]]
 name = "claudepot-core"
-version = "0.0.20"
+version = "0.1.1"
 dependencies = [
  "aes",
  "aes-gcm",
@@ -864,7 +864,7 @@ dependencies = [
 
 [[package]]
 name = "claudepot-tauri"
-version = "0.0.20"
+version = "0.1.1"
 dependencies = [
  "chrono",
  "claudepot-core",
@@ -7991,7 +7991,7 @@ dependencies = [
 
 [[package]]
 name = "xtask"
-version = "0.0.20"
+version = "0.1.1"
 dependencies = [
  "anyhow",
  "claudepot-core",

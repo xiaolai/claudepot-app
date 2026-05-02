@@ -6,6 +6,142 @@ Versioning scheme:
 - `0.1.x` — beta
 - `1.0.0+` — stable
 
+## 0.1.1 — beta (2026-05-02)
+
+First beta release. The version scheme tier crosses from `0.0.x`
+(alpha) to `0.1.x` (beta) — same daily-driven build as 0.0.20, with a
+substantially expanded Activities → Cost surface and a new memory-
+health surface on Global. Everyone gets a one-time re-scan of
+`~/.claude/projects/` on first launch (the schema_version bump from 2
+to 3) so historical transcripts populate the new per-turn data store;
+the cold scan of ~6 k JSONL files takes ~10 s and never blocks the
+UI.
+
+### Added
+
+- **Activities → Cost gets a per-row Cache hit % column and a per-row
+  Models column.** Cache-hit is computed client-side from the existing
+  token totals (`cache_read / (input + cache_creation + cache_read)`)
+  and surfaced both as a sortable column and as a sub-line on the
+  install-wide "Tokens in" tile. Models is a new badge group on each
+  project row showing how many sessions used each model (Opus, Sonnet,
+  Haiku) — sessions that mixed models contribute to every bucket they
+  touched. Both fields cost zero new disk space; they read from data
+  the session index already had.
+
+- **Pricing tier picker (Anthropic API / Vertex Global / Vertex
+  Regional / AWS Bedrock).** Choose the platform you're billed
+  through; the active tier renders alongside the source freshness in
+  the pill ("Anthropic API · bundled · verified 2026-01-15") and is
+  persisted to `~/.claudepot/preferences.json`. Every published
+  Claude model is currently at parity across the four tiers (verified
+  against Anthropic, Bedrock, and Vertex rate cards on 2026-01-15);
+  the multipliers will diverge in code only when a specific premium
+  is verified on a primary source. The picker is a transparency
+  surface today, not a different number.
+
+- **Per-turn token usage in `sessions.db`.** Every assistant message
+  in every transcript now persists as one row in a new `session_turns`
+  table: turn ordinal, timestamp, model, the four token fields, and a
+  redacted preview of the user prompt that drove the turn. Replace-all
+  semantics on every re-scan keep the cache consistent with growing or
+  shrunk transcripts. `delete_row` cascades — when a transcript
+  vanishes from disk, its turn rows go with it. The schema bump
+  (v2 → v3) triggers a one-time re-scan on first launch so historical
+  transcripts populate this table immediately rather than waiting on
+  natural mtime changes.
+
+- **Top costly prompts panel** on Activities → Cost. Below the per-
+  project table, a compact ranked list of the install's five
+  costliest prompts in the active window, each row showing the
+  truncated prompt, the project, the turn ordinal, the model badge,
+  and the computed dollar cost. The ranking is two-stage: SQLite
+  pulls a coarse top-N×50 candidates by total token count (a fast
+  cost-proxy), then Rust re-ranks against the active price table
+  because Opus tokens cost ~20× Haiku tokens and the proxy can
+  reorder across model families. Unresolved-model rows are dropped
+  rather than surfaced with null costs.
+
+- **Global → Memory tab with CLAUDE.md / MEMORY.md health cards.**
+  Static analysis on `~/.claude/CLAUDE.md` and
+  `~/.claude/memory/MEMORY.md`: line count, char count, lines past
+  CC's truncation cutoff (200 lines for global memory), and a rough
+  token estimate (`char_count / 4`). The "past line N" tile turns
+  warning-coloured and the card's left border picks up the warning
+  accent when any content sits past the cutoff — a glanceable cue
+  that you've shipped instructions Claude Code can't actually see.
+  Pure read; no edit affordances.
+
+### Changed
+
+- **Activities → Cost summary "Tokens in" tile shows install-wide
+  cache hit rate** in its sub-line ("cache hit 83%") instead of just
+  raw cache-read tokens. Cache-hit is the single number that
+  describes how cheaply the prompt cache is doing its job.
+
+- **Activities → Cost "Sessions" tile renders `—` for empty windows**
+  instead of a literal `0`, matching the project's render-if-nonzero
+  rule. The empty-state notice in the table below already conveys
+  "no sessions"; a numeric tile competing for attention was visual
+  noise.
+
+- **Activities → Cost ascending sort puts unpriced rows last.**
+  Sorting cost / last-active / cache-hit ascending used to surface
+  unpriced rows above every priced row (the comparator put nulls
+  first; the descending reverse hid the bug for the most common
+  view). Sort now partitions nulls explicitly so they always land at
+  the end regardless of direction.
+
+### Fixed
+
+- **`last_user_prompt` carry-over no longer leaks into the wrong
+  assistant turn.** A user line without extractable text (image-only
+  message, tool-result-only, caveat-stripped CLI command) used to
+  leave the per-turn carry pointing at the previous text prompt, so
+  the next assistant turn would render someone else's prompt in the
+  Top costly prompts panel. The carry now clears on every user line
+  regardless of payload.
+
+- **`pricing_tier_set` no longer leaves disk and memory out of sync
+  on a failed save.** The setter previously mutated the in-memory
+  preference *before* attempting the disk write; an out-of-space or
+  permission-revoked error left the running app on the new tier
+  while `preferences.json` stayed on the old one. Saves a clone
+  first, only commits to in-memory on success.
+
+- **`memory_health` no longer overcounts past-cutoff bytes by 1 for
+  files that lack a trailing newline.** A `~/.claude/CLAUDE.md` of
+  exactly 250 lines whose last line had no `\n` reported one phantom
+  newline in `chars_past_cutoff`. Edge case, but the fix is one
+  branch and a regression test.
+
+- **Activities → Cost dashboard no longer doubles its filesystem
+  walk per tab tick.** The aggregate query and the top-prompts query
+  both refresh `sessions.db` against `~/.claude/projects/`; running
+  them as `Promise.all` walked the directory twice. Frontend now
+  serializes them and the second call passes `refreshIndex: false`,
+  collapsing the per-tick work to one walk.
+
+- **Stale data is cleared on fetch error.** A failed
+  `local_usage_aggregate` call used to leave the previous report's
+  summary tiles and project rows in place beside a fresh error
+  banner. The pane now blanks on error, which is more honest than
+  showing yesterday's numbers under today's failure.
+
+- **Tier picker hydrates from persisted preference on cold start.**
+  Previously the picker fell through to `anthropic_api` until the
+  first aggregate fetch landed, which flickered for users on
+  Bedrock or Vertex. The picker now hits `pricing_tier_get` on
+  mount.
+
+- **Inline-style CSS values use real `var(--*)` references.** The
+  `TopPromptsPanel` and `MemoryHealthPanel` initially shipped with
+  invalid token strings (`"tokens.sp[28]"`, `"tokens.settings.nav.width"`)
+  because bare pixel literals were silently rewritten by an editor-
+  side tooling hook. Replaced with the canonical `var(--sp-28)`,
+  `var(--sp-60)`, `var(--settings-nav-width)` form so the layout
+  actually applies.
+
 ## 0.0.20 — alpha (2026-05-01)
 
 ### Fixed
