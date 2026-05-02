@@ -412,13 +412,51 @@ fn locate_session(config_dir: &Path, session_id: &str) -> Result<(String, PathBu
     Err(SessionError::NotFound(session_id.to_string()))
 }
 
+// Per-turn record — public so external callers (CLI, future GUI
+// surfaces) can consume the shape without a re-export shuffle.
+
+/// One assistant turn's token usage, as extracted from a `.jsonl`
+/// transcript. Per-turn data is the building block for "top-N
+/// costliest prompts" and "per-turn pacing" surfaces; aggregating
+/// across turns reproduces the totals already cached on the session
+/// row.
+///
+/// `turn_index` is the 0-based ordinal of the assistant message
+/// within the transcript (skipping user / system / sidechain lines).
+/// It pairs with `file_path` to form the persistent index's primary
+/// key, and is stable as long as the transcript is append-only —
+/// which CC guarantees outside `session move` (which writes a new
+/// file with new turn rows) and `slim --strip-images` (which rewrites
+/// content but preserves line ordering, so turn indices remain valid).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TurnRecord {
+    pub turn_index: usize,
+    /// Server-side timestamp; `None` when the message line lacks a
+    /// usable `timestamp` field.
+    pub ts_ms: Option<i64>,
+    /// Model id stamped on this turn's `message.model`. Empty string
+    /// when missing — kept as a String (not Option<String>) so the
+    /// SQL primary surface is uniform; consumer SQL filters on
+    /// `model != ''` to drop unmatched turns from per-model breakdowns.
+    pub model: String,
+    pub tokens: TokenUsage,
+    /// Truncated copy of the user prompt that drove this turn. The
+    /// nearest preceding `user` message in the stream wins; multiple
+    /// assistant turns produced from one prompt all carry the same
+    /// preview. `None` when no user prompt has been seen yet (e.g.
+    /// transcripts that start with a system or assistant line).
+    pub user_prompt_preview: Option<String>,
+}
+
 /// Combined output of a session scan — the indexed metadata row plus
-/// the usage events extracted from the same pass. Returned by
-/// `scan_session` so callers that only want metadata can drop the
-/// `usage` field, while `session_index` consumes both in one transaction.
+/// the usage events and per-turn records extracted from the same
+/// pass. Returned by `scan_session` so callers that only want
+/// metadata can drop the auxiliary fields, while `session_index`
+/// consumes all three in one transaction.
 pub struct SessionScan {
     pub row: SessionRow,
     pub usage: Vec<UsageEvent>,
+    pub turns: Vec<TurnRecord>,
 }
 
 /// Single streaming scan that folds every field we care about into a
@@ -460,6 +498,15 @@ pub(crate) fn scan_session(slug: &str, path: &Path) -> Result<SessionScan, Sessi
     // the stream.
     let mut usage_events: Vec<UsageEvent> = Vec::new();
     let mut agent_use_index: HashMap<String, usize> = HashMap::new();
+
+    // Per-turn extraction state. `turns` collects one record per
+    // assistant message; `last_user_prompt` carries the nearest
+    // preceding user prompt forward so each turn carries the
+    // prompt that drove it. The truncation rule matches
+    // `first_user_prompt` so consumer surfaces render uniform text.
+    let mut turns: Vec<TurnRecord> = Vec::new();
+    let mut last_user_prompt: Option<String> = None;
+    let mut assistant_ordinal: usize = 0;
 
     for line in reader.lines() {
         let line = match line {
@@ -542,9 +589,13 @@ pub(crate) fn scan_session(slug: &str, path: &Path) -> Result<SessionScan, Sessi
             "user" => {
                 message_count += 1;
                 user_message_count += 1;
+                let prompt_text = extract_user_text(&v).map(|t| truncate_prompt(&t));
+                if let Some(p) = prompt_text.as_ref() {
+                    last_user_prompt = Some(p.clone());
+                }
                 if first_user_prompt.is_none() {
-                    if let Some(text) = extract_user_text(&v) {
-                        first_user_prompt = Some(truncate_prompt(&text));
+                    if let Some(p) = prompt_text {
+                        first_user_prompt = Some(p);
                     }
                 }
             }
@@ -552,32 +603,58 @@ pub(crate) fn scan_session(slug: &str, path: &Path) -> Result<SessionScan, Sessi
                 message_count += 1;
                 assistant_message_count += 1;
                 if let Some(msg) = v.get("message") {
-                    if let Some(model) = msg.get("model").and_then(Value::as_str) {
-                        if !model.is_empty() {
-                            models.insert(model.to_string());
-                        }
+                    let turn_model = msg
+                        .get("model")
+                        .and_then(Value::as_str)
+                        .unwrap_or("")
+                        .to_string();
+                    if !turn_model.is_empty() {
+                        models.insert(turn_model.clone());
                     }
+                    let mut turn_tokens = TokenUsage::default();
                     if let Some(usage) = msg.get("usage") {
-                        tokens.input += usage
+                        let inp = usage
                             .get("input_tokens")
                             .and_then(Value::as_u64)
                             .unwrap_or(0);
-                        tokens.output += usage
+                        let out = usage
                             .get("output_tokens")
                             .and_then(Value::as_u64)
                             .unwrap_or(0);
-                        tokens.cache_creation += usage
+                        let cw = usage
                             .get("cache_creation_input_tokens")
                             .and_then(Value::as_u64)
                             .unwrap_or(0);
-                        tokens.cache_read += usage
+                        let cr = usage
                             .get("cache_read_input_tokens")
                             .and_then(Value::as_u64)
                             .unwrap_or(0);
+                        tokens.input += inp;
+                        tokens.output += out;
+                        tokens.cache_creation += cw;
+                        tokens.cache_read += cr;
+                        turn_tokens = TokenUsage {
+                            input: inp,
+                            output: out,
+                            cache_creation: cw,
+                            cache_read: cr,
+                        };
                     }
                     if msg.get("stop_reason").and_then(Value::as_str) == Some("error") {
                         has_error = true;
                     }
+                    // Emit a per-turn record. `turn_index` follows
+                    // the ordering of assistant lines as they appear
+                    // in the transcript; that ordering is stable for
+                    // append-only writes (CC's normal mode).
+                    turns.push(TurnRecord {
+                        turn_index: assistant_ordinal,
+                        ts_ms: ts.map(|t| t.timestamp_millis()),
+                        model: turn_model,
+                        tokens: turn_tokens,
+                        user_prompt_preview: last_user_prompt.clone(),
+                    });
+                    assistant_ordinal += 1;
                 }
             }
             _ => {}
@@ -618,6 +695,7 @@ pub(crate) fn scan_session(slug: &str, path: &Path) -> Result<SessionScan, Sessi
     Ok(SessionScan {
         row,
         usage: usage_events,
+        turns,
     })
 }
 
