@@ -173,9 +173,7 @@ fn tighten_consent_acl(path: &Path) {
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;
-        if let Err(e) =
-            std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o600))
-        {
+        if let Err(e) = std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o600)) {
             tracing::warn!(
                 target: "consent",
                 path = %path.display(),
@@ -299,7 +297,9 @@ mod tests {
         let id = r.id.clone();
         store.create(r).unwrap();
         let r1 = store.revoke(&id, RevokeReason::UserRequest).unwrap();
-        let r2 = store.revoke(&id, RevokeReason::PrivacyClassChanged).unwrap();
+        let r2 = store
+            .revoke(&id, RevokeReason::PrivacyClassChanged)
+            .unwrap();
         // Second revoke does not change the timestamp/reason.
         assert_eq!(r1.revoked_at, r2.revoked_at);
         assert_eq!(r1.revoke_reason, r2.revoke_reason);

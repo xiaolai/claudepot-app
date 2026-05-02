@@ -27,22 +27,20 @@ use std::collections::BTreeMap;
 use std::fs;
 use std::path::Path;
 
+use claudepot_core::automations::types::HostPlatform;
+use claudepot_core::routes::Route;
 use claudepot_core::templates::apply::{
     apply_selected, validate_item, ItemOutcome, Operation, PendingChanges, PendingGroup,
     PendingItem,
 };
-use claudepot_core::templates::caregiver::consent::{
-    ConsentRecord, ConsentStore, SmtpProvider,
-};
+use claudepot_core::templates::caregiver::consent::{ConsentRecord, ConsentStore, SmtpProvider};
 use claudepot_core::templates::routing::{
     at_path as routing_at_path, evaluate, Match, RoutingRule, RoutingRules, RoutingStore,
     Suggestion, UseRoute,
 };
-use claudepot_core::automations::types::HostPlatform;
 use claudepot_core::templates::{
     instantiate, schedule_to_cron, ScheduleDto, TemplateInstance, TemplateRegistry, Weekday,
 };
-use claudepot_core::routes::Route;
 
 // ===================================================================
 // Section 1 — Registry boots cleanly with every bundled blueprint.
@@ -84,12 +82,12 @@ fn registry_includes_known_canonical_ids() {
     // refactor.
     let registry = TemplateRegistry::load_bundled().unwrap();
     let must_have = [
-        "it.morning-health-check",  // it-health
-        "diag.disk-full",           // diagnostics
-        "audit.cache-cleanup",      // audit
-        "house.downloads-tidy",     // housekeeping
-        "network.lan-census",       // network
-        "caregiver.heartbeat",      // caregiver
+        "it.morning-health-check", // it-health
+        "diag.disk-full",          // diagnostics
+        "audit.cache-cleanup",     // audit
+        "house.downloads-tidy",    // housekeeping
+        "network.lan-census",      // network
+        "caregiver.heartbeat",     // caregiver
     ];
     for id in must_have {
         assert!(
@@ -188,29 +186,32 @@ fn every_bundled_blueprint_instantiates_with_default_schedule() {
             schedule,
             name_override: None,
         };
-        let resolved = instantiate(bp, &instance).unwrap_or_else(|e| {
-            panic!("instantiate failed for {}: {e:?}", bp.id().0)
-        });
+        let resolved = instantiate(bp, &instance)
+            .unwrap_or_else(|e| panic!("instantiate failed for {}: {e:?}", bp.id().0));
         assert_eq!(resolved.template_id, bp.id().0);
         assert!(!resolved.name.is_empty());
         assert!(!resolved.prompt.is_empty());
     }
 }
 
-fn synth_schedule(
-    shape: claudepot_core::templates::ScheduleShape,
-) -> ScheduleDto {
+fn synth_schedule(shape: claudepot_core::templates::ScheduleShape) -> ScheduleDto {
     use claudepot_core::templates::ScheduleShape::*;
     match shape {
-        Daily => ScheduleDto::Daily { time: "08:00".into() },
-        Weekdays => ScheduleDto::Weekdays { time: "08:00".into() },
+        Daily => ScheduleDto::Daily {
+            time: "08:00".into(),
+        },
+        Weekdays => ScheduleDto::Weekdays {
+            time: "08:00".into(),
+        },
         Weekly => ScheduleDto::Weekly {
             day: Weekday::Mon,
             time: "08:00".into(),
         },
         Hourly => ScheduleDto::Hourly { every_n_hours: 4 },
         Manual => ScheduleDto::Manual,
-        Custom => ScheduleDto::Custom { cron: "0 8 * * *".into() },
+        Custom => ScheduleDto::Custom {
+            cron: "0 8 * * *".into(),
+        },
     }
 }
 
@@ -220,7 +221,10 @@ fn synth_schedule(
 
 #[test]
 fn schedule_to_cron_daily() {
-    let r = schedule_to_cron(&ScheduleDto::Daily { time: "09:30".into() }).unwrap();
+    let r = schedule_to_cron(&ScheduleDto::Daily {
+        time: "09:30".into(),
+    })
+    .unwrap();
     assert_eq!(r.trigger_kind, "cron");
     assert_eq!(r.cron, "30 9 * * *");
 }
@@ -242,7 +246,10 @@ fn schedule_to_cron_weekly_uses_cron_field_for_weekday() {
 
 #[test]
 fn schedule_to_cron_weekdays_emits_1_5_field() {
-    let r = schedule_to_cron(&ScheduleDto::Weekdays { time: "07:00".into() }).unwrap();
+    let r = schedule_to_cron(&ScheduleDto::Weekdays {
+        time: "07:00".into(),
+    })
+    .unwrap();
     assert_eq!(r.cron, "0 7 * * 1-5");
 }
 
@@ -261,14 +268,20 @@ fn schedule_to_cron_manual_emits_manual_kind_no_cron() {
 
 #[test]
 fn schedule_to_cron_custom_round_trips() {
-    let r = schedule_to_cron(&ScheduleDto::Custom { cron: "*/15 * * * *".into() }).unwrap();
+    let r = schedule_to_cron(&ScheduleDto::Custom {
+        cron: "*/15 * * * *".into(),
+    })
+    .unwrap();
     assert_eq!(r.trigger_kind, "cron");
     assert_eq!(r.cron, "*/15 * * * *");
 }
 
 #[test]
 fn schedule_to_cron_rejects_bad_inputs() {
-    assert!(schedule_to_cron(&ScheduleDto::Daily { time: "25:00".into() }).is_err());
+    assert!(schedule_to_cron(&ScheduleDto::Daily {
+        time: "25:00".into()
+    })
+    .is_err());
     assert!(schedule_to_cron(&ScheduleDto::Hourly { every_n_hours: 0 }).is_err());
     assert!(schedule_to_cron(&ScheduleDto::Hourly { every_n_hours: 99 }).is_err());
     assert!(schedule_to_cron(&ScheduleDto::Custom { cron: "".into() }).is_err());

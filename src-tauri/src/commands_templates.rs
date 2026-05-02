@@ -21,9 +21,7 @@ use claudepot_core::automations::types::HostPlatform;
 use claudepot_core::automations::AutomationStore;
 use claudepot_core::paths::claudepot_data_dir;
 use claudepot_core::routes::{Route, RouteProvider, RouteStore};
-use claudepot_core::templates::apply::{
-    apply_selected, sidecar, ApplyReceipt, PendingChanges,
-};
+use claudepot_core::templates::apply::{apply_selected, sidecar, ApplyReceipt, PendingChanges};
 use claudepot_core::templates::routing::{evaluate, RoutingRules, RoutingStore, Suggestion};
 use claudepot_core::templates::{
     self as tpl, Blueprint, PrivacyClass, TemplateInstance, TemplateRegistry,
@@ -31,9 +29,7 @@ use claudepot_core::templates::{
 use serde::Serialize;
 
 use crate::dto_automations::{AutomationCreateDto, AutomationSummaryDto, PlatformOptionsDto};
-use crate::dto_templates::{
-    TemplateDetailsDto, TemplateInstanceDto, TemplateSummaryDto,
-};
+use crate::dto_templates::{TemplateDetailsDto, TemplateInstanceDto, TemplateSummaryDto};
 
 #[derive(Debug, Clone, Serialize)]
 pub struct RouteSummaryDto {
@@ -136,8 +132,8 @@ pub async fn templates_apply_pending(
     }
 
     // Resolve the blueprint via the automation's template_id.
-    let store = AutomationStore::open()
-        .map_err(|e| format!("automations store open failed: {e}"))?;
+    let store =
+        AutomationStore::open().map_err(|e| format!("automations store open failed: {e}"))?;
     let auto = store
         .list()
         .iter()
@@ -173,7 +169,9 @@ pub async fn routing_rules_get() -> Result<RoutingRules, String> {
 pub async fn routing_rules_set(rules: RoutingRules) -> Result<(), String> {
     let mut store = RoutingStore::open().map_err(|e| format!("routing rules open: {e}"))?;
     store.replace(rules);
-    store.save().map_err(|e| format!("routing rules save: {e}"))?;
+    store
+        .save()
+        .map_err(|e| format!("routing rules save: {e}"))?;
     Ok(())
 }
 
@@ -248,13 +246,15 @@ pub async fn templates_read_report(path: String) -> Result<String, String> {
             canonical_target.display()
         ));
     }
-    let meta = std::fs::metadata(&canonical_target)
-        .map_err(|e| format!("stat {path}: {e}"))?;
+    let meta = std::fs::metadata(&canonical_target).map_err(|e| format!("stat {path}: {e}"))?;
     if !meta.is_file() {
         return Err(format!("not a file: {path}"));
     }
     if meta.len() > 4 * 1024 * 1024 {
-        return Err(format!("report is too large to display: {} bytes", meta.len()));
+        return Err(format!(
+            "report is too large to display: {} bytes",
+            meta.len()
+        ));
     }
     std::fs::read_to_string(&canonical_target).map_err(|e| format!("read {path}: {e}"))
 }
@@ -266,7 +266,11 @@ pub async fn templates_capable_routes(id: String) -> Result<Vec<RouteSummaryDto>
         .get(&id)
         .ok_or_else(|| format!("unknown template id: {id}"))?;
     let store = RouteStore::open().map_err(|e| format!("routes store open failed: {e}"))?;
-    let summaries = store.list().iter().map(|rt| route_summary(rt, bp)).collect();
+    let summaries = store
+        .list()
+        .iter()
+        .map(|rt| route_summary(rt, bp))
+        .collect();
     Ok(filter_for_privacy(summaries, bp))
 }
 
@@ -363,16 +367,10 @@ fn route_summary(rt: &Route, bp: &Blueprint) -> RouteSummaryDto {
     let is_local = is_local_route(rt);
     let is_private_cloud = rt.is_private_cloud;
 
-    let (is_capable, reason) = match (
-        bp.privacy,
-        is_local,
-        is_private_cloud,
-        missing.is_empty(),
-    ) {
-        (PrivacyClass::Local, false, _, _) => (
-            false,
-            "this template requires a local route".to_string(),
-        ),
+    let (is_capable, reason) = match (bp.privacy, is_local, is_private_cloud, missing.is_empty()) {
+        (PrivacyClass::Local, false, _, _) => {
+            (false, "this template requires a local route".to_string())
+        }
         (PrivacyClass::PrivateCloud, false, false, _) => (
             false,
             "this template requires a local or private-cloud route".to_string(),
@@ -439,10 +437,7 @@ fn is_local_route(rt: &Route) -> bool {
 
 /// `local-only` and `private-cloud` blueprints get a hard filter:
 /// only matching routes are returned. `any` returns the full list.
-fn filter_for_privacy(
-    summaries: Vec<RouteSummaryDto>,
-    bp: &Blueprint,
-) -> Vec<RouteSummaryDto> {
+fn filter_for_privacy(summaries: Vec<RouteSummaryDto>, bp: &Blueprint) -> Vec<RouteSummaryDto> {
     match bp.privacy {
         PrivacyClass::Local => summaries.into_iter().filter(|r| r.is_local).collect(),
         PrivacyClass::PrivateCloud => summaries
@@ -510,7 +505,8 @@ fn decode_placeholder_values(
 /// check"); two installs would collide on the existing-store
 /// uniqueness rule. Append a numeric suffix until unique.
 fn derive_unique_name(base: &str) -> Result<String, String> {
-    let store = AutomationStore::open().map_err(|e| format!("automations store open failed: {e}"))?;
+    let store =
+        AutomationStore::open().map_err(|e| format!("automations store open failed: {e}"))?;
     let existing: std::collections::HashSet<String> =
         store.list().iter().map(|a| a.name.clone()).collect();
     if !existing.contains(base) {

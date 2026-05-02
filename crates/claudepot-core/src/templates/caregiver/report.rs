@@ -140,7 +140,10 @@ pub fn render_email(r: &CaregiverReport) -> String {
             r.dependent_label.as_str()
         }
     ));
-    s.push_str(&format!("Period: {} to {}\n\n", r.period_start, r.period_end));
+    s.push_str(&format!(
+        "Period: {} to {}\n\n",
+        r.period_start, r.period_end
+    ));
 
     if let Some(c) = r.concerns_to_raise.first() {
         s.push_str(&format!("Concern to raise: {c}\n\n"));
@@ -163,8 +166,14 @@ pub fn render_email(r: &CaregiverReport) -> String {
     s.push('\n');
 
     match &r.backups.time_machine_last_success {
-        Some(when) => s.push_str(&format!("Backups: Time Machine last completed {when}; iCloud {}.\n",
-            if r.backups.icloud_in_sync { "in sync" } else { "out of sync" })),
+        Some(when) => s.push_str(&format!(
+            "Backups: Time Machine last completed {when}; iCloud {}.\n",
+            if r.backups.icloud_in_sync {
+                "in sync"
+            } else {
+                "out of sync"
+            }
+        )),
         None => s.push_str("Backups: Time Machine has no recorded completion.\n"),
     }
 

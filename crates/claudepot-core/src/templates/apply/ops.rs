@@ -54,10 +54,7 @@ pub enum Operation {
     /// Write a file. Content is base64-encoded to keep the JSON
     /// safe for arbitrary bytes; size is bounded by
     /// `max_bytes` in the blueprint config.
-    Write {
-        path: PathBuf,
-        content_b64: String,
-    },
+    Write { path: PathBuf, content_b64: String },
     /// Delete a file. Refuses to operate on directories
     /// regardless of `must_be_empty` for v1 — directory deletes
     /// require their own opt-in down the road.
