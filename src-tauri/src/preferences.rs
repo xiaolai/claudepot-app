@@ -7,6 +7,7 @@
 
 use claudepot_core::config_view::model::EditorDefaults;
 use claudepot_core::paths;
+use claudepot_core::pricing::PriceTier;
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 use std::sync::Mutex;
@@ -104,6 +105,16 @@ pub struct Preferences {
     /// written to CC configuration.
     #[serde(default)]
     pub editor_defaults: EditorDefaults,
+
+    /// Pricing tier the user is billed through (Anthropic API direct,
+    /// Vertex Global / Regional, AWS Bedrock). Drives the cost-report
+    /// label pill and the rate multiplier applied when rendering
+    /// dollar figures. Defaults to Anthropic API — bundled rates are
+    /// quoted in this tier's prices, so a fresh-install user sees the
+    /// canonical numbers without a preference write. See
+    /// `claudepot_core::pricing::PriceTier` for the divergence policy.
+    #[serde(default)]
+    pub pricing_tier: PriceTier,
 }
 
 /// Helper for serde's `#[serde(default = "...")]` on a bool field.
@@ -151,6 +162,7 @@ impl Default for Preferences {
             notify_on_usage_thresholds: default_usage_thresholds(),
             notify_on_sub_windows: false,
             editor_defaults: Default::default(),
+            pricing_tier: PriceTier::default(),
         }
     }
 }

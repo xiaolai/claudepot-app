@@ -11,6 +11,7 @@ mod commands_config;
 mod commands_config_types;
 mod commands_desktop;
 mod commands_keys;
+mod commands_memory_health;
 mod commands_migrate;
 mod commands_notification;
 mod commands_preferences;
@@ -598,6 +599,10 @@ pub fn run() {
             commands_pricing::pricing_get,
             commands_pricing::pricing_refresh,
             commands_usage_local::local_usage_aggregate,
+            commands_usage_local::pricing_tier_get,
+            commands_usage_local::pricing_tier_set,
+            commands_usage_local::top_costly_prompts,
+            commands_memory_health::memory_health_get,
             config_watch::config_watch_start,
             config_watch::config_watch_stop,
             commands_migrate::migrate_inspect,

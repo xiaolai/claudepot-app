@@ -215,12 +215,25 @@ fn is_token_char(c: char) -> bool {
 }
 
 /// Remove one row by path. Used for files that vanished from disk.
+/// Also drops every per-turn row associated with the same file via
+/// `turns::delete_turns_for_file` — the cascade is by convention
+/// (no SQLite FK), but the rule is always "session row goes, its
+/// turns go too."
 pub(super) fn delete_row(db: &Connection, file_path: &str) -> Result<(), SessionIndexError> {
     db.execute(
         "DELETE FROM sessions WHERE file_path = ?1",
         params![file_path],
     )?;
+    super::turns::delete_turns_for_file(db, file_path)?;
     Ok(())
+}
+
+/// Same redactor as `redact_secrets`, exposed to the sibling `turns`
+/// module so per-turn writes can scrub each prompt preview
+/// independently (a token pasted mid-conversation lands only in
+/// `user_prompt_preview`, not in the session-level first-prompt path).
+pub(super) fn redact_secrets_for_turns(input: &str) -> String {
+    redact_secrets(input)
 }
 
 /// Load every cached row back as `SessionRow`, ordered newest-first
