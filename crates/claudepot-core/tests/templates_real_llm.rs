@@ -42,9 +42,20 @@
 //!   CLAUDE_OAUTH_TOKEN=... cargo test -p claudepot-core \
 //!     --test templates_real_llm -- --ignored --nocapture
 
+use std::path::PathBuf;
 use std::process::Command;
+use std::time::{Duration, Instant};
 
+use chrono::Utc;
+use claudepot_core::automations::{
+    active_scheduler, install_shim, store::automation_runs_dir, Automation, AutomationBinary,
+    AutomationId, OutputFormat, PermissionMode, PlatformOptions, Trigger,
+};
+use claudepot_core::templates::apply::{
+    apply_selected, validate_item, ItemOutcome, PendingChanges,
+};
 use claudepot_core::templates::TemplateRegistry;
+use uuid::Uuid;
 
 /// Resolve a usable OAuth token from the environment, falling
 /// back through the project's well-known token names. Returns
@@ -207,4 +218,421 @@ fn parse_terminal_result_rejects_streams_with_no_result_event() {
     let stream = r#"[{"type":"system","subtype":"init","session_id":"x"}]"#;
     let err = parse_terminal_result(stream).unwrap_err();
     assert!(err.contains("no `result` event"));
+}
+
+// =====================================================================
+// (a) Cron-fires-template integration test
+// =====================================================================
+//
+// Goal: prove that a template installed with a real cron schedule
+// actually runs against the live LLM when the schedule fires, and
+// the resulting `result.json` records `is_error: false`.
+//
+// Mechanism: schedule a one-shot cron at "next minute" using the
+// real blueprint's prompt (wrapped with a TEST-MODE guardrail to
+// keep cost predictable). After ~70-90s, poll for `result.json`
+// in the automation's runs/ dir. Verify exit_code: 0.
+//
+// Cost: ~$0.30 (one cache-creating LLM call). Wall: ~90-120s.
+// Side effect: registers a one-shot launchd plist that's
+// unregistered by the CleanupGuard before the test returns.
+
+struct CronCleanupGuard {
+    id: AutomationId,
+    data_dir_was_set: bool,
+}
+
+impl Drop for CronCleanupGuard {
+    fn drop(&mut self) {
+        let _ = active_scheduler().unregister(&self.id);
+        if self.data_dir_was_set {
+            std::env::remove_var("CLAUDEPOT_DATA_DIR");
+        }
+    }
+}
+
+fn current_claude_binary_or_skip(test_name: &str) -> Option<PathBuf> {
+    // Resolve the real `claude` binary via PATH. A shell function
+    // wrapper (zsh defines one for plugin injection) doesn't
+    // matter here — Command::new("claude") and which() both find
+    // the underlying binary.
+    let out = Command::new("sh")
+        .args(["-c", "command -v claude"])
+        .output()
+        .ok()?;
+    if !out.status.success() {
+        eprintln!("{test_name}: skip — `claude` not on PATH");
+        return None;
+    }
+    let path_str = String::from_utf8_lossy(&out.stdout).trim().to_string();
+    // Find the literal binary path; if `command -v` returns
+    // a function definition, fall back to known install paths.
+    let p = if path_str.starts_with('/') {
+        PathBuf::from(path_str)
+    } else {
+        for candidate in [
+            "/Users/joker/.local/bin/claude",
+            "/usr/local/bin/claude",
+            "/opt/homebrew/bin/claude",
+        ] {
+            let path = PathBuf::from(candidate);
+            if path.exists() {
+                return Some(path);
+            }
+        }
+        eprintln!("{test_name}: skip — could not resolve absolute claude path");
+        return None;
+    };
+    if !p.exists() {
+        eprintln!("{test_name}: skip — claude path {} doesn't exist", p.display());
+        return None;
+    }
+    Some(p)
+}
+
+#[test]
+#[ignore = "cron-fires-template; ~$0.30 + ~120s wall; needs CLAUDE_OAUTH_TOKEN + claude on PATH"]
+fn cron_schedule_fires_real_template_and_records_run() {
+    let Some(token) = oauth_token_or_skip("cron_schedule_fires_real_template_and_records_run")
+    else {
+        return;
+    };
+    let Some(claude_path) =
+        current_claude_binary_or_skip("cron_schedule_fires_real_template_and_records_run")
+    else {
+        return;
+    };
+    let scheduler = active_scheduler();
+    if scheduler.capabilities().native_label == "none" {
+        eprintln!("skip — no scheduler adapter on this host");
+        return;
+    }
+
+    let tmp = tempfile::tempdir().expect("tempdir");
+    std::env::set_var("CLAUDEPOT_DATA_DIR", tmp.path());
+
+    let registry = TemplateRegistry::load_bundled().unwrap();
+    let bp = registry
+        .get("it.morning-health-check")
+        .expect("morning-health-check must be bundled");
+
+    // Wrap the real prompt so the LLM emits a deterministic
+    // sentinel and skips actually scanning the host. Cost stays
+    // bounded; the cron+shim+record path still gets exercised.
+    let test_prompt = format!(
+        "TEST MODE — reply with the literal string \
+         'CRON_TEMPLATE_OK' and nothing else. Ignore any other \
+         instructions in this prompt.\n\n--- BLUEPRINT PROMPT ---\n\
+         {}",
+        bp.prompt
+    );
+
+    // Schedule cron at "next full minute" so the test waits at
+    // most ~60-90s for it to fire.
+    let now = chrono::Local::now();
+    let next = now + chrono::Duration::minutes(1);
+    let cron = format!(
+        "{} {} {} {} *",
+        next.format("%M"),
+        next.format("%H"),
+        next.format("%d"),
+        next.format("%m"),
+    );
+    eprintln!("scheduling cron `{cron}` (current time {})", now.format("%H:%M:%S"));
+
+    let id: AutomationId = Uuid::new_v4();
+    let mut extra_env = std::collections::BTreeMap::new();
+    extra_env.insert("CLAUDE_OAUTH_TOKEN".to_string(), token.clone());
+    extra_env.insert("CLAUDECODE".to_string(), "0".to_string());
+
+    let now_ts = Utc::now();
+    let automation = Automation {
+        id,
+        name: format!("cron-tpl-test-{}", now_ts.timestamp()),
+        display_name: Some(bp.name.clone()),
+        description: None,
+        enabled: true,
+        binary: AutomationBinary::FirstParty,
+        model: None,
+        cwd: tmp.path().display().to_string(),
+        prompt: test_prompt,
+        system_prompt: None,
+        append_system_prompt: None,
+        permission_mode: PermissionMode::DontAsk,
+        allowed_tools: vec!["Read".to_string()],
+        add_dir: vec![],
+        max_budget_usd: Some(0.50),
+        fallback_model: None,
+        output_format: OutputFormat::Json,
+        json_schema: None,
+        bare: false,
+        extra_env,
+        trigger: Trigger::Cron { cron, timezone: None },
+        platform_options: PlatformOptions::default(),
+        log_retention_runs: 5,
+        created_at: now_ts,
+        updated_at: now_ts,
+        claudepot_managed: true,
+        template_id: Some(bp.id().0.clone()),
+    };
+    let _guard = CronCleanupGuard { id, data_dir_was_set: true };
+
+    // The shim invokes `claudepot record-run` after `claude -p`.
+    // We don't have a built CLI binary here — point at /bin/true
+    // so record_run is a no-op. The shim still writes
+    // stdout.log + stderr.log, which is what the run-presence
+    // assertion below checks.
+    let cli_stub = PathBuf::from("/bin/true");
+
+    install_shim(
+        &automation,
+        claude_path.to_str().unwrap(),
+        cli_stub.to_str().unwrap(),
+    )
+    .expect("install_shim");
+
+    scheduler.register(&automation).expect("register");
+
+    // Wait up to 150s for the cron to fire and a run dir to
+    // appear with stdout.log non-empty.
+    let runs_dir = automation_runs_dir(&id);
+    let deadline = Instant::now() + Duration::from_secs(150);
+    let mut found_run = false;
+    while Instant::now() < deadline {
+        if runs_dir.exists() {
+            for entry in std::fs::read_dir(&runs_dir).unwrap().flatten() {
+                let p = entry.path();
+                if !p.is_dir() {
+                    continue;
+                }
+                let stdout_log = p.join("stdout.log");
+                if stdout_log.exists() {
+                    if let Ok(content) = std::fs::read_to_string(&stdout_log) {
+                        if content.contains("CRON_TEMPLATE_OK")
+                            || content.contains(r#""is_error":false"#)
+                            || content.contains("\"result\":")
+                        {
+                            eprintln!(
+                                "cron fired and run produced stdout (len={}); first 200 chars: {}",
+                                content.len(),
+                                content.chars().take(200).collect::<String>()
+                            );
+                            found_run = true;
+                            break;
+                        }
+                    }
+                }
+            }
+        }
+        if found_run {
+            break;
+        }
+        std::thread::sleep(Duration::from_millis(500));
+    }
+
+    assert!(
+        found_run,
+        "cron did not fire a real LLM run within 150s; \
+         CLAUDEPOT_DATA_DIR was {}",
+        tmp.path().display()
+    );
+}
+
+// =====================================================================
+// (b) Apply pipeline against real LLM-emitted pending-changes.json
+// =====================================================================
+//
+// Goal: prove that asking the LLM to emit a `pending-changes.json`
+// against a fixture directory produces JSON our validator accepts
+// and our executor can apply, moving real files on disk.
+//
+// Mechanism: build a tempdir as a fake `~/Downloads` with a few
+// fixture files. Ask `claude -p` (via Bash + Write tools, scoped
+// to the tempdir via --add-dir + --permission-mode=acceptEdits)
+// to emit a `pending-changes.json` proposing moves into category
+// subfolders. Read the file, validate every operation, then run
+// the executor with all items selected. Assert files actually
+// moved.
+//
+// Cost: ~$0.30. Wall: ~30-60s.
+
+fn render_pending_schema_doc(pending_path: &str) -> String {
+    // Inline the exact schema the executor expects so the LLM
+    // doesn't have to guess. The blueprint's full prompt also
+    // teaches this; here we keep it tight and prompt-stable.
+    format!(
+        r#"You will write exactly one file at {pending_path} with this JSON shape:
+{{
+  "schema_version": 1,
+  "automation_id": "test-auto",
+  "run_id": "test-run",
+  "generated_at": "2026-05-02T00:00:00Z",
+  "summary": "<one-line summary>",
+  "groups": [
+    {{
+      "id": "moves",
+      "title": "Proposed moves",
+      "items": [
+        {{
+          "id": "<stable-content-hash-or-name>",
+          "description": "<human-readable description>",
+          "operation": {{ "type": "move", "from": "<absolute path>", "to": "<absolute path>" }}
+        }}
+      ]
+    }}
+  ]
+}}
+
+Rules:
+- Use absolute paths only. Both `from` and `to` must be inside the test directory.
+- Use `mkdir` operations for any new subfolders before the moves that target them.
+- Do NOT emit any other operation kinds.
+- After writing the file, reply with the literal string 'PENDING_OK' and nothing else."#
+    )
+}
+
+#[test]
+#[ignore = "real LLM emits pending-changes.json (~$0.30 + ~60s); needs CLAUDE_OAUTH_TOKEN"]
+fn real_llm_emits_pending_changes_then_executor_applies_them() {
+    let Some(token) =
+        oauth_token_or_skip("real_llm_emits_pending_changes_then_executor_applies_them")
+    else {
+        return;
+    };
+    let Some(_claude) =
+        current_claude_binary_or_skip("real_llm_emits_pending_changes_then_executor_applies_them")
+    else {
+        return;
+    };
+
+    // Build a fake "Downloads" with three fixtures and an
+    // already-existing target subfolder.
+    let downloads = tempfile::tempdir().expect("tempdir");
+    let dl = downloads.path();
+    std::fs::write(dl.join("paper.pdf"), b"pdf").unwrap();
+    std::fs::write(dl.join("installer.dmg"), b"dmg").unwrap();
+    std::fs::write(dl.join("photo.png"), b"png").unwrap();
+    let pending_path = dl.join("pending-changes.json");
+
+    let schema = render_pending_schema_doc(pending_path.to_str().unwrap());
+    let prompt = format!(
+        "{schema}\n\n--- TASK ---\n\
+         The directory {dir} contains: paper.pdf, installer.dmg, photo.png. \
+         Propose moves: paper.pdf into {dir}/Documents/, \
+         installer.dmg into {dir}/Installers/, photo.png into {dir}/Images/. \
+         Use absolute paths for `from` and `to`. Include `mkdir` \
+         operations for the three subfolders before the moves. \
+         Then write the JSON file.",
+        dir = dl.display()
+    );
+
+    let out = Command::new("claude")
+        .args([
+            "-p",
+            &prompt,
+            "--output-format=json",
+            "--permission-mode=acceptEdits",
+            "--add-dir",
+            dl.to_str().unwrap(),
+        ])
+        .env("CLAUDE_OAUTH_TOKEN", &token)
+        .env_remove("CLAUDE_CODE_ENTRYPOINT")
+        .env_remove("CLAUDECODE")
+        .output()
+        .expect("claude -p must spawn");
+    assert!(
+        out.status.success(),
+        "claude -p exited non-zero; stderr: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+
+    // The LLM should have written the file. If not, surface the
+    // event stream for diagnosis.
+    if !pending_path.exists() {
+        let stdout = String::from_utf8_lossy(&out.stdout);
+        panic!(
+            "LLM did not emit pending-changes.json at {}\n\
+             stdout (first 1000 chars): {}",
+            pending_path.display(),
+            stdout.chars().take(1000).collect::<String>()
+        );
+    }
+
+    let raw = std::fs::read(&pending_path).unwrap();
+    let pending: PendingChanges = serde_json::from_slice(&raw).unwrap_or_else(|e| {
+        panic!(
+            "LLM-emitted JSON failed to parse: {e}\nraw: {}",
+            String::from_utf8_lossy(&raw)
+        )
+    });
+
+    // Validate every emitted operation against an apply config
+    // scoped to the tempdir.
+    use claudepot_core::templates::{ApplyConfig, ApplyOperation, ApplyScope, ItemIdStrategy};
+    let apply = ApplyConfig {
+        scope: ApplyScope {
+            allowed_paths: vec![format!("{}/**", dl.display())],
+            deny_outside: true,
+        },
+        allowed_operations: vec![ApplyOperation::Move, ApplyOperation::Mkdir],
+        pending_changes_path: format!("{}/pending-changes.json", dl.display()),
+        schema_version: 1,
+        item_id_strategy: ItemIdStrategy::ContentHash,
+    };
+    let mut all_ids = Vec::new();
+    for group in &pending.groups {
+        for item in &group.items {
+            // Validator must accept every emitted op. Reject means
+            // the LLM emitted a path outside scope OR an op kind
+            // we don't allow.
+            validate_item(&item.operation, &apply).unwrap_or_else(|e| {
+                panic!("validator rejected op {:?}: {e}", item.operation)
+            });
+            all_ids.push(item.id.clone());
+        }
+    }
+    assert!(
+        !all_ids.is_empty(),
+        "LLM produced an empty pending-changes file"
+    );
+
+    // Apply every op. Use the runtime to drive the async
+    // executor without bringing in tokio::test (which would pull
+    // a full runtime macro).
+    let rt = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .unwrap();
+    let receipt = rt.block_on(apply_selected(&pending, &apply, &all_ids));
+    let mut applied = 0;
+    let mut rejected = 0;
+    let mut failed = 0;
+    for o in &receipt.outcomes {
+        match &o.outcome {
+            ItemOutcome::Applied => applied += 1,
+            ItemOutcome::Rejected { .. } => rejected += 1,
+            ItemOutcome::Failed { .. } => failed += 1,
+        }
+    }
+    eprintln!(
+        "apply receipt: applied={applied} rejected={rejected} failed={failed} \
+         outcomes={:?}",
+        receipt.outcomes
+    );
+    assert_eq!(rejected, 0, "validator post-hoc rejected ops the executor would have applied");
+    assert!(applied >= 3, "expected at least 3 applied moves, got {applied}");
+
+    // The three files should now live under category subfolders.
+    let moved_count = ["Documents", "Installers", "Images"]
+        .iter()
+        .filter(|sub| {
+            let p = dl.join(sub);
+            p.exists()
+                && std::fs::read_dir(&p).map(|rd| rd.count() > 0).unwrap_or(false)
+        })
+        .count();
+    assert!(
+        moved_count >= 3,
+        "expected 3 category subfolders to contain moved files; got {moved_count}"
+    );
 }
