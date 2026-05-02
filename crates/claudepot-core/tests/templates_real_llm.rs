@@ -237,16 +237,32 @@ fn parse_terminal_result_rejects_streams_with_no_result_event() {
 // Side effect: registers a one-shot launchd plist that's
 // unregistered by the CleanupGuard before the test returns.
 
+/// Cleanup guard for the cron test — captures the previous
+/// `CLAUDEPOT_DATA_DIR` so the env restoration is idempotent
+/// even when other tests in the same process care.
 struct CronCleanupGuard {
     id: AutomationId,
-    data_dir_was_set: bool,
+    prev_data_dir: Option<std::ffi::OsString>,
+    token_path: Option<PathBuf>,
 }
 
 impl Drop for CronCleanupGuard {
     fn drop(&mut self) {
         let _ = active_scheduler().unregister(&self.id);
-        if self.data_dir_was_set {
-            std::env::remove_var("CLAUDEPOT_DATA_DIR");
+        // Best-effort token wipe: overwrite with zeros, then
+        // unlink. Tempdir cleanup will follow but this leaves no
+        // artifact even if `tempfile::tempdir` is itself unable
+        // to remove the dir.
+        if let Some(p) = &self.token_path {
+            if let Ok(meta) = std::fs::metadata(p) {
+                let zeros = vec![0u8; meta.len() as usize];
+                let _ = std::fs::write(p, &zeros);
+            }
+            let _ = std::fs::remove_file(p);
+        }
+        match &self.prev_data_dir {
+            Some(prev) => std::env::set_var("CLAUDEPOT_DATA_DIR", prev),
+            None => std::env::remove_var("CLAUDEPOT_DATA_DIR"),
         }
     }
 }
@@ -309,7 +325,40 @@ fn cron_schedule_fires_real_template_and_records_run() {
     }
 
     let tmp = tempfile::tempdir().expect("tempdir");
+    let prev_data_dir = std::env::var_os("CLAUDEPOT_DATA_DIR");
     std::env::set_var("CLAUDEPOT_DATA_DIR", tmp.path());
+
+    // Stash the token in a sibling 0600 file rather than baking
+    // it into `extra_env`, which install_shim would otherwise
+    // render literally into `run.sh`. The wrapper below reads
+    // it at fire time, exports it, and execs claude.
+    let token_path = tmp.path().join(".oauth-token");
+    std::fs::write(&token_path, &token).expect("write token");
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(&token_path, std::fs::Permissions::from_mode(0o600))
+            .expect("token mode 0600");
+    }
+
+    // Wrapper script: sources the token, exports it, exec's the
+    // real claude. Mode 0700 — only readable + executable by us.
+    let wrapper = tmp.path().join("claude-with-token.sh");
+    std::fs::write(
+        &wrapper,
+        format!(
+            "#!/bin/sh\nexport CLAUDE_OAUTH_TOKEN=\"$(cat {token})\"\nexec {claude} \"$@\"\n",
+            token = shell_quote(&token_path.display().to_string()),
+            claude = shell_quote(claude_path.to_str().unwrap()),
+        ),
+    )
+    .expect("write wrapper");
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(&wrapper, std::fs::Permissions::from_mode(0o700))
+            .expect("wrapper mode 0700");
+    }
 
     let registry = TemplateRegistry::load_bundled().unwrap();
     let bp = registry
@@ -327,10 +376,13 @@ fn cron_schedule_fires_real_template_and_records_run() {
         bp.prompt
     );
 
-    // Schedule cron at "next full minute" so the test waits at
-    // most ~60-90s for it to fire.
+    // Schedule cron at "two full minutes from now". A single-
+    // minute lead would race the case where install_shim +
+    // scheduler.register span past the next minute boundary —
+    // launchd would then defer the first fire to the *next* day
+    // and the test would hang.
     let now = chrono::Local::now();
-    let next = now + chrono::Duration::minutes(1);
+    let next = now + chrono::Duration::minutes(2);
     let cron = format!(
         "{} {} {} {} *",
         next.format("%M"),
@@ -338,11 +390,16 @@ fn cron_schedule_fires_real_template_and_records_run() {
         next.format("%d"),
         next.format("%m"),
     );
-    eprintln!("scheduling cron `{cron}` (current time {})", now.format("%H:%M:%S"));
+    eprintln!(
+        "scheduling cron `{cron}` (current time {}, target {})",
+        now.format("%H:%M:%S"),
+        next.format("%H:%M:%S")
+    );
 
     let id: AutomationId = Uuid::new_v4();
+    // No CLAUDE_OAUTH_TOKEN here — see wrapper above. CLAUDECODE
+    // unset is the only env hint we need to communicate.
     let mut extra_env = std::collections::BTreeMap::new();
-    extra_env.insert("CLAUDE_OAUTH_TOKEN".to_string(), token.clone());
     extra_env.insert("CLAUDECODE".to_string(), "0".to_string());
 
     let now_ts = Utc::now();
@@ -375,7 +432,11 @@ fn cron_schedule_fires_real_template_and_records_run() {
         claudepot_managed: true,
         template_id: Some(bp.id().0.clone()),
     };
-    let _guard = CronCleanupGuard { id, data_dir_was_set: true };
+    let _guard = CronCleanupGuard {
+        id,
+        prev_data_dir,
+        token_path: Some(token_path.clone()),
+    };
 
     // The shim invokes `claudepot record-run` after `claude -p`.
     // We don't have a built CLI binary here — point at /bin/true
@@ -386,18 +447,18 @@ fn cron_schedule_fires_real_template_and_records_run() {
 
     install_shim(
         &automation,
-        claude_path.to_str().unwrap(),
+        wrapper.to_str().unwrap(),
         cli_stub.to_str().unwrap(),
     )
     .expect("install_shim");
 
     scheduler.register(&automation).expect("register");
 
-    // Wait up to 150s for the cron to fire and a run dir to
-    // appear with stdout.log non-empty.
+    // Wait up to 180s (target is ~120s out + 60s slack) for the
+    // cron to fire and stdout.log to materialize.
     let runs_dir = automation_runs_dir(&id);
-    let deadline = Instant::now() + Duration::from_secs(150);
-    let mut found_run = false;
+    let deadline = Instant::now() + Duration::from_secs(180);
+    let mut verified = false;
     while Instant::now() < deadline {
         if runs_dir.exists() {
             for entry in std::fs::read_dir(&runs_dir).unwrap().flatten() {
@@ -406,36 +467,73 @@ fn cron_schedule_fires_real_template_and_records_run() {
                     continue;
                 }
                 let stdout_log = p.join("stdout.log");
-                if stdout_log.exists() {
-                    if let Ok(content) = std::fs::read_to_string(&stdout_log) {
-                        if content.contains("CRON_TEMPLATE_OK")
-                            || content.contains(r#""is_error":false"#)
-                            || content.contains("\"result\":")
-                        {
-                            eprintln!(
-                                "cron fired and run produced stdout (len={}); first 200 chars: {}",
-                                content.len(),
-                                content.chars().take(200).collect::<String>()
-                            );
-                            found_run = true;
-                            break;
-                        }
+                if !stdout_log.exists() {
+                    continue;
+                }
+                let Ok(content) = std::fs::read_to_string(&stdout_log) else {
+                    continue;
+                };
+                if content.trim().is_empty() {
+                    continue;
+                }
+                // Parse the CC --output-format=json envelope and
+                // require a non-error terminal `result` event.
+                // Substring matches like `\"result\":` were too
+                // permissive and could pass on error rows whose
+                // body happens to mention `result`.
+                let parsed: Result<serde_json::Value, _> =
+                    serde_json::from_str(&content);
+                if let Ok(events) = parsed {
+                    let events = events.as_array().cloned().unwrap_or_default();
+                    if let Some(result_ev) =
+                        events.iter().rfind(|ev| ev["type"] == "result")
+                    {
+                        eprintln!(
+                            "cron fired; result event: is_error={} result_first_80={}",
+                            result_ev["is_error"],
+                            result_ev["result"]
+                                .as_str()
+                                .map(|s| s.chars().take(80).collect::<String>())
+                                .unwrap_or_default()
+                        );
+                        assert_eq!(
+                            result_ev["is_error"], false,
+                            "cron run reported is_error=true: full stdout follows\n{content}"
+                        );
+                        verified = true;
+                        break;
                     }
                 }
             }
         }
-        if found_run {
+        if verified {
             break;
         }
         std::thread::sleep(Duration::from_millis(500));
     }
 
     assert!(
-        found_run,
-        "cron did not fire a real LLM run within 150s; \
+        verified,
+        "cron did not fire a real LLM run within 180s; \
          CLAUDEPOT_DATA_DIR was {}",
         tmp.path().display()
     );
+}
+
+/// POSIX-shell-safe single-quoting. Inputs that contain `'` are
+/// escaped via the standard `'\''` trick.
+fn shell_quote(s: &str) -> String {
+    let mut out = String::with_capacity(s.len() + 2);
+    out.push('\'');
+    for ch in s.chars() {
+        if ch == '\'' {
+            out.push_str("'\\''");
+        } else {
+            out.push(ch);
+        }
+    }
+    out.push('\'');
+    out
 }
 
 // =====================================================================
