@@ -389,7 +389,7 @@ export function ThirdPartySection() {
           confirmLabel="Delete route"
           confirmDanger
           body={
-            <p style={{ margin: 0, lineHeight: 1.5 }}>
+            <p style={{ margin: 0, lineHeight: "var(--lh-body)" }}>
               <code>{removeTarget.name}</code>'s CLI wrapper will be
               removed and its Desktop activation cleared. The route
               definition cannot be recovered without recreating it.
@@ -419,7 +419,7 @@ function EmptyState({ onAdd }: { onAdd: () => void }) {
         maxWidth: 720,
         color: "var(--fg)",
         fontSize: "var(--fs-sm)",
-        lineHeight: 1.6,
+        lineHeight: "var(--lh-loose)",
       }}
     >
       <p style={{ margin: 0 }}>

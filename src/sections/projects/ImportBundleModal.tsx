@@ -107,7 +107,7 @@ export function ImportBundleModal({
 
         {isEncrypted && (
           <>
-            <label htmlFor={passId} style={{ display: "block", marginTop: 8 }}>
+            <label htmlFor={passId} style={{ display: "block", marginTop: "var(--sp-8)" }}>
               Passphrase
             </label>
             <input
@@ -121,14 +121,14 @@ export function ImportBundleModal({
           </>
         )}
 
-        <div style={{ marginTop: 12 }}>
+        <div style={{ marginTop: "var(--sp-12)" }}>
           <Button onClick={handleInspect} disabled={inspecting || !bundlePath}>
             {inspecting ? "Inspecting…" : "Inspect"}
           </Button>
         </div>
 
         {planError && (
-          <p style={{ color: "var(--danger)", marginTop: 12 }}>
+          <p style={{ color: "var(--danger)", marginTop: "var(--sp-12)" }}>
             {planError}
           </p>
         )}
@@ -136,21 +136,21 @@ export function ImportBundleModal({
         {plan && (
           <section
             style={{
-              marginTop: 16,
-              border: "tokens.sp.px solid var(--line)",
-              borderRadius: 6,
-              padding: 12,
+              marginTop: "var(--sp-16)",
+              border: "var(--bw-hair) solid var(--line)",
+              borderRadius: "var(--r-2)",
+              padding: "var(--sp-12)",
             }}
           >
-            <h3 style={{ margin: 0, marginBottom: 8 }}>Bundle manifest</h3>
-            <p style={{ margin: 0, marginBottom: 4 }}>
+            <h3 style={{ margin: 0, marginBottom: "var(--sp-8)" }}>Bundle manifest</h3>
+            <p style={{ margin: 0, marginBottom: "var(--sp-4)" }}>
               schema {plan.schemaVersion} · claudepot {plan.claudepotVersion} ·{" "}
               {plan.sourceOs}/{plan.sourceArch}
             </p>
-            <p style={{ margin: 0, marginBottom: 4 }}>
+            <p style={{ margin: 0, marginBottom: "var(--sp-4)" }}>
               Created: {plan.createdAt}
             </p>
-            <p style={{ margin: 0, marginBottom: 8 }}>
+            <p style={{ margin: 0, marginBottom: "var(--sp-8)" }}>
               Flags: global={String(plan.flags.includeGlobal)} · worktree=
               {String(plan.flags.includeWorktree)} · live=
               {String(plan.flags.includeLive)} · state=
@@ -158,10 +158,10 @@ export function ImportBundleModal({
               {String(plan.flags.encrypted)} · sig=
               {String(plan.flags.signed)}
             </p>
-            <p style={{ margin: 0, marginBottom: 4 }}>
+            <p style={{ margin: 0, marginBottom: "var(--sp-4)" }}>
               Projects ({plan.projects.length}):
             </p>
-            <ul style={{ marginTop: 4 }}>
+            <ul style={{ marginTop: "var(--sp-4)" }}>
               {plan.projects.map((p) => (
                 <li key={p.id}>
                   <code>{p.sourceCwd}</code> ({p.sessionCount} sessions)
@@ -171,12 +171,12 @@ export function ImportBundleModal({
           </section>
         )}
 
-        <fieldset style={{ marginTop: 16, border: 0, padding: 0 }}>
-          <legend style={{ marginBottom: 6 }}>Conflict mode</legend>
+        <fieldset style={{ marginTop: "var(--sp-16)", border: 0, padding: 0 }}>
+          <legend style={{ marginBottom: "var(--sp-6)" }}>Conflict mode</legend>
           {(["skip", "merge", "replace"] as const).map((m) => (
             <label
               key={m}
-              style={{ display: "inline-block", marginRight: 12 }}
+              style={{ display: "inline-block", marginRight: "var(--sp-12)" }}
             >
               <input
                 type="radio"
@@ -189,8 +189,8 @@ export function ImportBundleModal({
           ))}
         </fieldset>
 
-        <fieldset style={{ marginTop: 12, border: 0, padding: 0 }}>
-          <legend style={{ marginBottom: 6 }}>Trust gates</legend>
+        <fieldset style={{ marginTop: "var(--sp-12)", border: 0, padding: 0 }}>
+          <legend style={{ marginBottom: "var(--sp-6)" }}>Trust gates</legend>
           <label style={{ display: "block" }}>
             <input
               type="checkbox"
@@ -210,7 +210,7 @@ export function ImportBundleModal({
           </label>
         </fieldset>
 
-        <label style={{ display: "block", marginTop: 12 }}>
+        <label style={{ display: "block", marginTop: "var(--sp-12)" }}>
           <input
             type="checkbox"
             checked={dryRun}

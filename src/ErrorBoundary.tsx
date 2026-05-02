@@ -81,7 +81,7 @@ export class ErrorBoundary extends React.Component<ErrorBoundaryProps, State> {
               justifyContent: "center",
               gap: "var(--sp-8)",
               padding: "var(--sp-32)",
-              minHeight: "tokens.settings.nav.width",
+              minHeight: "var(--settings-nav-width)",
               fontFamily: "var(--font)",
             }}
           >
@@ -94,7 +94,7 @@ export class ErrorBoundary extends React.Component<ErrorBoundaryProps, State> {
                 margin: 0,
                 color: "var(--fg-muted)",
                 fontSize: "var(--fs-sm)",
-                maxWidth: "tokens.modal.width.md",
+                maxWidth: "var(--modal-width-md)",
                 textAlign: "center",
               }}
             >

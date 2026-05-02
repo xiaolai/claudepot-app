@@ -196,7 +196,7 @@ export function TemplateInstallView({
           style={{
             margin: 0,
             fontSize: "var(--fs-sm)",
-            lineHeight: 1.6,
+            lineHeight: "var(--lh-loose)",
             color: "var(--fg)",
             whiteSpace: "pre-wrap",
           }}

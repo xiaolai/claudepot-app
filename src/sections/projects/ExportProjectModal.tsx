@@ -82,7 +82,7 @@ export function ExportProjectModal({
           file. Credentials never travel.
         </p>
 
-        <label htmlFor={outId} style={{ display: "block", marginTop: 12 }}>
+        <label htmlFor={outId} style={{ display: "block", marginTop: "var(--sp-12)" }}>
           Output file
         </label>
         <input
@@ -94,9 +94,9 @@ export function ExportProjectModal({
           style={{ width: "100%", padding: "var(--sp-6) var(--sp-8)" }}
         />
 
-        <fieldset style={{ marginTop: 16, border: 0, padding: 0 }}>
-          <legend style={{ marginBottom: 6 }}>Include</legend>
-          <label style={{ display: "block", marginBottom: 6 }}>
+        <fieldset style={{ marginTop: "var(--sp-16)", border: 0, padding: 0 }}>
+          <legend style={{ marginBottom: "var(--sp-6)" }}>Include</legend>
+          <label style={{ display: "block", marginBottom: "var(--sp-6)" }}>
             <input
               type="checkbox"
               checked={includeGlobal}
@@ -105,7 +105,7 @@ export function ExportProjectModal({
             Global content (CLAUDE.md, agents/, skills/, scrubbed
             settings, plugin registry)
           </label>
-          <label style={{ display: "block", marginBottom: 6 }}>
+          <label style={{ display: "block", marginBottom: "var(--sp-6)" }}>
             <input
               type="checkbox"
               checked={includeWorktree}
@@ -114,7 +114,7 @@ export function ExportProjectModal({
             Worktree (project's <code>.claude/</code> dir + CLAUDE.md;
             local settings excluded)
           </label>
-          <label style={{ display: "block", marginBottom: 6 }}>
+          <label style={{ display: "block", marginBottom: "var(--sp-6)" }}>
             <input
               type="checkbox"
               checked={includeClaudepotState}
@@ -122,7 +122,7 @@ export function ExportProjectModal({
             />{" "}
             Claudepot state (account stubs only — no credentials)
           </label>
-          <label style={{ display: "block", marginBottom: 6 }}>
+          <label style={{ display: "block", marginBottom: "var(--sp-6)" }}>
             <input
               type="checkbox"
               checked={encrypt}
@@ -136,7 +136,7 @@ export function ExportProjectModal({
           <>
             <label
               htmlFor={passId}
-              style={{ display: "block", marginTop: 12 }}
+              style={{ display: "block", marginTop: "var(--sp-12)" }}
             >
               Passphrase
             </label>

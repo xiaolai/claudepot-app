@@ -72,7 +72,7 @@ export function TemplateSampleReport({ templateId }: Props) {
         color: "var(--fg)",
         fontSize: "var(--fs-sm)",
         fontFamily: "var(--font-mono)",
-        lineHeight: 1.5,
+        lineHeight: "var(--lh-code)",
         whiteSpace: "pre-wrap",
         overflowX: "auto",
         maxHeight: "32vh",

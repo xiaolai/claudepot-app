@@ -337,7 +337,7 @@ function Tag({
   return (
     <span
       style={{
-        padding: "tokens.sp.px tokens.sp[6]",
+        padding: "var(--sp-px) var(--sp-6)",
         border: "var(--bw-hair) solid var(--line)",
         borderRadius: "var(--r-1)",
         background: tone === "accent" ? "var(--accent-soft)" : "var(--bg-sunken)",

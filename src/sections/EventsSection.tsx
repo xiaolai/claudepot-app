@@ -8,6 +8,8 @@ import type {
   CardsRecentQuery,
   SeverityLabel,
 } from "../types";
+import { Glyph } from "../components/primitives/Glyph";
+import { NF } from "../icons";
 import { SkeletonList } from "../components/primitives/Skeleton";
 import { DashboardStrip } from "./activities/DashboardStrip";
 import {
@@ -746,7 +748,12 @@ function Header({
         >
           Mark all seen
         </button>
-        <button onClick={onRefresh} style={btnStyle} title="Re-fetch from the index">
+        <button
+          onClick={onRefresh}
+          style={btnStyle}
+          title="Re-fetch from the index"
+          aria-label="Refresh events"
+        >
           Refresh
         </button>
         <button
@@ -776,8 +783,17 @@ function CardStream({ cards, loading, error, lastSeenId, onCardClick }: CardStre
   }
   if (error) {
     return (
-      <div style={{ ...emptyStyle, color: "var(--danger)" }}>
-        {error}
+      <div
+        role="alert"
+        style={{
+          ...emptyStyle,
+          color: "var(--danger)",
+          gap: "var(--sp-8)",
+          flexDirection: "row",
+        }}
+      >
+        <Glyph g={NF.warn} aria-hidden />
+        <span>{error}</span>
       </div>
     );
   }
@@ -952,12 +968,12 @@ function SeverityChip({ severity }: { severity: SeverityLabel }) {
         borderRadius: "var(--r-1)",
         background: bg,
         color: fg,
-        fontSize: 10,
+        fontSize: "var(--fs-2xs)",
         fontWeight: 600,
         textAlign: "center",
         textTransform: "uppercase",
         letterSpacing: "0.04em",
-        lineHeight: 1.4,
+        lineHeight: "var(--lh-base)",
       }}
     >
       {severity}

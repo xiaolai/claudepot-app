@@ -159,14 +159,14 @@ export function SeverityMix({ agg }: { agg: Aggregates }) {
         {order.map(({ sev, color }) => (
           <span
             key={sev}
-            style={{ display: "inline-flex", alignItems: "center", gap: 4 }}
+            style={{ display: "inline-flex", alignItems: "center", gap: "var(--sp-4)" }}
           >
             <span
               style={{
                 display: "inline-block",
-                width: 6,
-                height: 6,
-                borderRadius: 1,
+                width: "var(--sp-6)",
+                height: "var(--sp-6)",
+                borderRadius: "var(--sp-px)",
                 background: color,
               }}
             />
@@ -201,7 +201,7 @@ export function TopKinds({
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: "var(--sp-4)" }}>
       {data.map(([k, v]) => (
-        <div key={k} style={{ display: "flex", flexDirection: "column", gap: 1 }}>
+        <div key={k} style={{ display: "flex", flexDirection: "column", gap: "var(--sp-px)" }}>
           <div
             style={{
               display: "flex",
