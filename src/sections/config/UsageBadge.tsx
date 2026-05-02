@@ -4,7 +4,9 @@
 //                        tree row. Renders nothing at count===0
 //                        (the row dim treatment carries that signal).
 //   <UsageStrip>       — full one-line strip for the preview pane:
-//                        "12 fires · last 2h · 0 errors · p50 28ms".
+//                        "12 fires (30d) · last 2h · p50 28ms"
+//                        (zero-value fields are filtered out per
+//                        the render-if-nonzero rule in design.md).
 //
 // Both accept the same `ArtifactUsageStatsDto`. They render nothing
 // when given `null` (haven't fetched yet) — the calling component is

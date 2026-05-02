@@ -171,7 +171,7 @@ export function SchedulePicker({
                   if (value.kind === "hourly")
                     onChange({ kind: "hourly", every_n_hours: n });
                 }}
-                style={{ ...inputStyle, width: "tokens.sp[32]" }}
+                style={{ ...inputStyle, width: "var(--sp-32)" }}
               />{" "}
               hours
             </span>
@@ -267,7 +267,7 @@ function TimeInput({
 }
 
 const inputStyle: React.CSSProperties = {
-  padding: "tokens.sp[2] tokens.sp[6]",
+  padding: "var(--sp-2) var(--sp-6)",
   border: "var(--bw-hair) solid var(--line)",
   borderRadius: "var(--r-1)",
   background: "var(--bg-raised)",

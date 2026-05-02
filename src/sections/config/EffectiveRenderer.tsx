@@ -155,7 +155,7 @@ function TreeView({
     return (
       <div>
         <Bracket>[</Bracket>
-        <div style={{ marginLeft: 16 }}>
+        <div style={{ marginLeft: "var(--sp-16)" }}>
           {value.map((v, i) => {
             const childPath = `${path}[${i}]`;
             return (
@@ -180,7 +180,7 @@ function TreeView({
   return (
     <div>
       <Bracket>{"{"}</Bracket>
-      <div style={{ marginLeft: 16 }}>
+      <div style={{ marginLeft: "var(--sp-16)" }}>
         {keys.map((k, i) => {
           const childPath = path ? `${path}.${k}` : k;
           return (
