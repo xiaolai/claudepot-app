@@ -183,7 +183,7 @@ function ThSort({
       onClick={() => onSort(value)}
     >
       {children}
-      {active && <span aria-hidden style={{ marginLeft: 4 }}>↓</span>}
+      {active && <span aria-hidden style={{ marginLeft: "var(--sp-4)" }}>↓</span>}
     </th>
   );
 }

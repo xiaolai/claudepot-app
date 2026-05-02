@@ -103,7 +103,7 @@ export function RunHistoryPanel({ automationId, refreshKey }: Props) {
               alignItems: "center",
             }}
           >
-            <span style={{ width: "tokens.sp[32]" }}>{symbol}</span>
+            <span style={{ width: "var(--sp-32)" }}>{symbol}</span>
             <span style={{ color: "var(--fg-2)" }}>
               {fmtIso(run.started_at)}
             </span>
