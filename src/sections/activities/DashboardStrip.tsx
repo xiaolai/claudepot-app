@@ -489,7 +489,7 @@ function RateSourceChip({
         display: "inline-flex",
         alignItems: "center",
         gap: "var(--sp-4)",
-        padding: "2px var(--sp-6)",
+        padding: "var(--sp-2) var(--sp-6)",
         fontSize: "var(--fs-2xs)",
         fontWeight: 500,
         letterSpacing: "0.04em",

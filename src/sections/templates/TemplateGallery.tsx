@@ -145,7 +145,7 @@ function GalleryGrid({
         // non-flex children's intrinsic height, which would
         // override the explicit `height` and leave the body
         // body shrunk to ~0. The `height` alone is sufficient.
-        height: "min(620px, 80vh)",
+        height: "var(--modal-body-cap-md)",
         width: "100%",
         minHeight: 0,
       }}

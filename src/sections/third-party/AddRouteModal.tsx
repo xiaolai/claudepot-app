@@ -30,7 +30,7 @@ export function AddRouteModal({
           flexDirection: "column",
           gap: "var(--sp-12)",
           padding: "var(--sp-20) var(--sp-24)",
-          maxHeight: "min(85vh, 720px)",
+          maxHeight: "var(--modal-body-cap-lg)",
           overflowY: "auto",
         }}
       >
@@ -140,7 +140,7 @@ export function EditRouteModal({
           flexDirection: "column",
           gap: "var(--sp-12)",
           padding: "var(--sp-20) var(--sp-24)",
-          maxHeight: "min(85vh, 720px)",
+          maxHeight: "var(--modal-body-cap-lg)",
           overflowY: "auto",
         }}
       >
