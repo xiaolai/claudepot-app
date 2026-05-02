@@ -258,14 +258,20 @@ pub struct OutputArtifactDto {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum RouteDecisionDto {
-    Ran { route_id: Option<String> },
+    Ran {
+        route_id: Option<String>,
+    },
     Fallback {
         from: String,
         to: Option<String>,
         reason: String,
     },
-    Skipped { reason: String },
-    SkippedAlerted { reason: String },
+    Skipped {
+        reason: String,
+    },
+    SkippedAlerted {
+        reason: String,
+    },
 }
 
 impl From<AutomationRun> for AutomationRunDto {
@@ -289,15 +295,11 @@ impl From<AutomationRun> for AutomationRunDto {
             .collect();
         let route_decision = r.route_decision.map(|d| match d {
             RouteDecision::Ran { route_id } => RouteDecisionDto::Ran { route_id },
-            RouteDecision::Fallback { from, to, reason } => RouteDecisionDto::Fallback {
-                from,
-                to,
-                reason,
-            },
-            RouteDecision::Skipped { reason } => RouteDecisionDto::Skipped { reason },
-            RouteDecision::SkippedAlerted { reason } => {
-                RouteDecisionDto::SkippedAlerted { reason }
+            RouteDecision::Fallback { from, to, reason } => {
+                RouteDecisionDto::Fallback { from, to, reason }
             }
+            RouteDecision::Skipped { reason } => RouteDecisionDto::Skipped { reason },
+            RouteDecision::SkippedAlerted { reason } => RouteDecisionDto::SkippedAlerted { reason },
         });
         AutomationRunDto {
             id: r.id,
@@ -417,8 +419,7 @@ mod tests {
     fn artifact_kind_renders_snake_case_strings() {
         use chrono::Utc;
         use claudepot_core::automations::types::{
-            ArtifactKind, AutomationRun, HostPlatform, OutputArtifact, RouteDecision,
-            TriggerKind,
+            ArtifactKind, AutomationRun, HostPlatform, OutputArtifact, RouteDecision, TriggerKind,
         };
 
         let make = |kind: ArtifactKind| AutomationRun {
@@ -462,7 +463,9 @@ mod tests {
     fn route_decision_serializes_with_kind_tag_snake_case() {
         let cases = [
             (
-                RouteDecisionDto::Ran { route_id: Some("r1".into()) },
+                RouteDecisionDto::Ran {
+                    route_id: Some("r1".into()),
+                },
                 "ran",
             ),
             (
@@ -474,11 +477,15 @@ mod tests {
                 "fallback",
             ),
             (
-                RouteDecisionDto::Skipped { reason: "no route".into() },
+                RouteDecisionDto::Skipped {
+                    reason: "no route".into(),
+                },
                 "skipped",
             ),
             (
-                RouteDecisionDto::SkippedAlerted { reason: "alerted".into() },
+                RouteDecisionDto::SkippedAlerted {
+                    reason: "alerted".into(),
+                },
                 "skipped_alerted",
             ),
         ];

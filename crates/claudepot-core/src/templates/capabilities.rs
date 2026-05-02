@@ -187,8 +187,14 @@ mod tests {
             "us.anthropic.claude-3-5-sonnet-20240620-v1:0",
         ] {
             let caps = default_capabilities_for(alias);
-            assert!(caps.contains(&Capability::ToolUse), "alias {alias} should have tool use");
-            assert!(caps.contains(&Capability::Vision), "alias {alias} should have vision");
+            assert!(
+                caps.contains(&Capability::ToolUse),
+                "alias {alias} should have tool use"
+            );
+            assert!(
+                caps.contains(&Capability::Vision),
+                "alias {alias} should have vision"
+            );
         }
     }
 

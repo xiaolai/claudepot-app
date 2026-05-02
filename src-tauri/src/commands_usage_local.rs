@@ -281,8 +281,7 @@ pub async fn pricing_tier_set(
     tier: String,
     prefs: State<'_, PreferencesState>,
 ) -> Result<(), String> {
-    let parsed = PriceTier::parse(&tier)
-        .ok_or_else(|| format!("unknown pricing tier: {tier}"))?;
+    let parsed = PriceTier::parse(&tier).ok_or_else(|| format!("unknown pricing tier: {tier}"))?;
     // Save first; only commit to in-memory state on success. If the
     // disk write fails (out-of-space, permission revoked between
     // launch and now), the in-memory pricing_tier stays at its

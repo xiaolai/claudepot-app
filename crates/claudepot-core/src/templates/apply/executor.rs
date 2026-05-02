@@ -159,8 +159,7 @@ fn expand_user(path: &Path) -> PathBuf {
 }
 
 fn base64_decode(input: &str) -> Result<Vec<u8>, String> {
-    const ALPHABET: &[u8; 64] =
-        b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    const ALPHABET: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
     let mut table = [255u8; 256];
     for (i, &b) in ALPHABET.iter().enumerate() {
         table[b as usize] = i as u8;

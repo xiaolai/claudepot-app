@@ -30,11 +30,7 @@ impl SmtpConfig {
     /// Provider presets. The user supplies the username (their
     /// email) and password (an app-password); host/port are
     /// fixed.
-    pub fn from_provider(
-        provider: &SmtpProvider,
-        username: String,
-        password: String,
-    ) -> Self {
+    pub fn from_provider(provider: &SmtpProvider, username: String, password: String) -> Self {
         match provider {
             SmtpProvider::GmailAppPassword => Self {
                 host: "smtp.gmail.com".into(),
@@ -60,7 +56,13 @@ impl SmtpConfig {
         }
     }
 
-    pub fn generic(host: String, port: u16, username: String, password: String, use_starttls: bool) -> Self {
+    pub fn generic(
+        host: String,
+        port: u16,
+        username: String,
+        password: String,
+        use_starttls: bool,
+    ) -> Self {
         Self {
             host,
             port,
@@ -108,9 +110,8 @@ pub async fn send_email(
     let creds = Credentials::new(config.username.clone(), config.password.clone());
 
     let mailer = if config.use_starttls {
-        let tls = TlsParameters::new(config.host.clone()).map_err(|e| {
-            SmtpError::Transport(format!("TLS params for {}: {e}", config.host))
-        })?;
+        let tls = TlsParameters::new(config.host.clone())
+            .map_err(|e| SmtpError::Transport(format!("TLS params for {}: {e}", config.host)))?;
         AsyncSmtpTransport::<Tokio1Executor>::builder_dangerous(&config.host)
             .port(config.port)
             .tls(Tls::Required(tls))

@@ -134,9 +134,7 @@ fn parse_terminal_result(stdout: &str) -> Result<serde_json::Value, String> {
         let last = arr
             .iter()
             .rfind(|ev| ev["type"] == "result")
-            .ok_or_else(|| {
-                format!("no `result` event in stream of {} events", arr.len())
-            })?;
+            .ok_or_else(|| format!("no `result` event in stream of {} events", arr.len()))?;
         return Ok(last.clone());
     }
     if parsed["type"] == "result" {
@@ -151,8 +149,7 @@ fn parse_terminal_result(stdout: &str) -> Result<serde_json::Value, String> {
 #[test]
 #[ignore = "real LLM call (~$0.30); needs CLAUDE_CODE_OAUTH_TOKEN"]
 fn morning_health_check_prompt_runs_without_error() {
-    let Some(token) = oauth_token_or_skip("morning_health_check_prompt_runs_without_error")
-    else {
+    let Some(token) = oauth_token_or_skip("morning_health_check_prompt_runs_without_error") else {
         return;
     };
     let registry = TemplateRegistry::load_bundled().unwrap();
@@ -198,9 +195,7 @@ fn morning_health_check_prompt_runs_without_error() {
 #[test]
 #[ignore = "real LLM call (~$0.30); needs CLAUDE_CODE_OAUTH_TOKEN"]
 fn caregiver_heartbeat_prompt_runs_without_error() {
-    let Some(token) =
-        oauth_token_or_skip("caregiver_heartbeat_prompt_runs_without_error")
-    else {
+    let Some(token) = oauth_token_or_skip("caregiver_heartbeat_prompt_runs_without_error") else {
         return;
     };
     let registry = TemplateRegistry::load_bundled().unwrap();
@@ -328,7 +323,10 @@ fn current_claude_binary_or_skip(test_name: &str) -> Option<PathBuf> {
         return None;
     };
     if !p.exists() {
-        eprintln!("{test_name}: skip — claude path {} doesn't exist", p.display());
+        eprintln!(
+            "{test_name}: skip — claude path {} doesn't exist",
+            p.display()
+        );
         return None;
     }
     Some(p)
@@ -453,7 +451,10 @@ fn cron_schedule_fires_real_template_and_records_run() {
         json_schema: None,
         bare: false,
         extra_env,
-        trigger: Trigger::Cron { cron, timezone: None },
+        trigger: Trigger::Cron {
+            cron,
+            timezone: None,
+        },
         platform_options: PlatformOptions::default(),
         log_retention_runs: 5,
         created_at: now_ts,
@@ -510,13 +511,10 @@ fn cron_schedule_fires_real_template_and_records_run() {
                 // Substring matches like `\"result\":` were too
                 // permissive and could pass on error rows whose
                 // body happens to mention `result`.
-                let parsed: Result<serde_json::Value, _> =
-                    serde_json::from_str(&content);
+                let parsed: Result<serde_json::Value, _> = serde_json::from_str(&content);
                 if let Ok(events) = parsed {
                     let events = events.as_array().cloned().unwrap_or_default();
-                    if let Some(result_ev) =
-                        events.iter().rfind(|ev| ev["type"] == "result")
-                    {
+                    if let Some(result_ev) = events.iter().rfind(|ev| ev["type"] == "result") {
                         eprintln!(
                             "cron fired; result event: is_error={} result_first_80={}",
                             result_ev["is_error"],
@@ -718,9 +716,8 @@ fn real_llm_emits_pending_changes_then_executor_applies_them() {
             // Validator must accept every emitted op. Reject means
             // the LLM emitted a path outside scope OR an op kind
             // we don't allow.
-            validate_item(&item.operation, &apply).unwrap_or_else(|e| {
-                panic!("validator rejected op {:?}: {e}", item.operation)
-            });
+            validate_item(&item.operation, &apply)
+                .unwrap_or_else(|e| panic!("validator rejected op {:?}: {e}", item.operation));
             all_ids.push(item.id.clone());
         }
     }
@@ -752,8 +749,14 @@ fn real_llm_emits_pending_changes_then_executor_applies_them() {
          outcomes={:?}",
         receipt.outcomes
     );
-    assert_eq!(rejected, 0, "validator post-hoc rejected ops the executor would have applied");
-    assert!(applied >= 3, "expected at least 3 applied moves, got {applied}");
+    assert_eq!(
+        rejected, 0,
+        "validator post-hoc rejected ops the executor would have applied"
+    );
+    assert!(
+        applied >= 3,
+        "expected at least 3 applied moves, got {applied}"
+    );
 
     // The three files should now live under category subfolders.
     let moved_count = ["Documents", "Installers", "Images"]
@@ -761,7 +764,9 @@ fn real_llm_emits_pending_changes_then_executor_applies_them() {
         .filter(|sub| {
             let p = dl.join(sub);
             p.exists()
-                && std::fs::read_dir(&p).map(|rd| rd.count() > 0).unwrap_or(false)
+                && std::fs::read_dir(&p)
+                    .map(|rd| rd.count() > 0)
+                    .unwrap_or(false)
         })
         .count();
     assert!(
@@ -802,8 +807,7 @@ fn real_llm_emits_pending_changes_then_executor_applies_them() {
 #[test]
 #[ignore = "real LLM writes file (~$0.30 + ~30s); needs CLAUDE_CODE_OAUTH_TOKEN"]
 fn real_llm_writes_report_and_record_run_discovers_it() {
-    let Some(token) =
-        oauth_token_or_skip("real_llm_writes_report_and_record_run_discovers_it")
+    let Some(token) = oauth_token_or_skip("real_llm_writes_report_and_record_run_discovers_it")
     else {
         return;
     };
@@ -1006,9 +1010,7 @@ fn real_llm_writes_report_and_record_run_discovers_it() {
 #[test]
 #[ignore = "real LLM × every blueprint dispatches (~$0.80, ~3min); needs CLAUDE_CODE_OAUTH_TOKEN"]
 fn every_bundled_blueprint_dispatches_to_real_llm() {
-    let Some(token) =
-        oauth_token_or_skip("every_bundled_blueprint_dispatches_to_real_llm")
-    else {
+    let Some(token) = oauth_token_or_skip("every_bundled_blueprint_dispatches_to_real_llm") else {
         return;
     };
     let Some(_claude) =
@@ -1137,9 +1139,7 @@ fn every_bundled_blueprint_dispatches_to_real_llm() {
         );
     }
 
-    eprintln!(
-        "completed {total} blueprints; total spend ${total_cost:.4}"
-    );
+    eprintln!("completed {total} blueprints; total spend ${total_cost:.4}");
     if !failures.is_empty() {
         panic!(
             "{n} of {total} blueprints failed:\n{joined}",

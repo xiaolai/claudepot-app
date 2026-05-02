@@ -506,9 +506,9 @@ pub async fn routes_add(mut route: RouteCreateDto) -> Result<RouteSummaryDto, St
         deployment_organization_uuid: Uuid::nil(),
         active_on_desktop: false,
         installed_on_cli: false,
-            is_private_cloud: false,
-            capabilities_override: None,
-        };
+        is_private_cloud: false,
+        capabilities_override: None,
+    };
 
     let mut store = open_store()?;
     let saved = match store.add(new_route) {
@@ -602,9 +602,9 @@ pub async fn routes_edit(mut route: RouteUpdateDto) -> Result<RouteSummaryDto, S
         deployment_organization_uuid: Uuid::nil(),
         active_on_desktop: false,
         installed_on_cli: false,
-            is_private_cloud: false,
-            capabilities_override: None,
-        };
+        is_private_cloud: false,
+        capabilities_override: None,
+    };
 
     let mut store = open_store()?;
     // Snapshot any inline secrets in the candidate into local Strings

@@ -141,7 +141,9 @@ const BUNDLED: &[BundledEntry] = &[
     BundledEntry {
         id: "caregiver.weekly-report",
         toml: include_str!("blueprints/caregiver.weekly-report.toml"),
-        sample_md: Some(include_str!("blueprints/samples/caregiver-weekly-report.md")),
+        sample_md: Some(include_str!(
+            "blueprints/samples/caregiver-weekly-report.md"
+        )),
     },
     BundledEntry {
         id: "caregiver.heartbeat",
@@ -224,9 +226,7 @@ impl TemplateRegistry {
     /// The Tauri `templates_list` command projects this so the
     /// gallery never surfaces a template the user cannot run.
     pub fn list_for(&self, host: HostPlatform) -> impl Iterator<Item = &Blueprint> {
-        self.by_id
-            .values()
-            .filter(move |bp| bp.supports(host))
+        self.by_id.values().filter(move |bp| bp.supports(host))
     }
 
     pub fn len(&self) -> usize {

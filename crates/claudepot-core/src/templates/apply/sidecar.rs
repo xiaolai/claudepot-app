@@ -11,15 +11,13 @@ use super::ops::PendingChanges;
 /// blueprint's `pending_changes_path` template (e.g.
 /// `"{output_dir}/.pending-changes.json"`) and the actual
 /// resolved output path of this run.
-pub fn pending_path_for(
-    pending_changes_path_template: &str,
-    output_path: &Path,
-) -> PathBuf {
+pub fn pending_path_for(pending_changes_path_template: &str, output_path: &Path) -> PathBuf {
     let dir = output_path
         .parent()
         .map(|p| p.to_path_buf())
         .unwrap_or_else(|| PathBuf::from("."));
-    let resolved = pending_changes_path_template.replace("{output_dir}", &dir.display().to_string());
+    let resolved =
+        pending_changes_path_template.replace("{output_dir}", &dir.display().to_string());
     PathBuf::from(resolved)
 }
 
@@ -29,11 +27,9 @@ pub fn read(path: &Path) -> Result<PendingChanges, String> {
 }
 
 pub fn write(path: &Path, value: &PendingChanges) -> Result<(), String> {
-    let bytes =
-        serde_json::to_vec_pretty(value).map_err(|e| format!("serialize: {e}"))?;
+    let bytes = serde_json::to_vec_pretty(value).map_err(|e| format!("serialize: {e}"))?;
     if let Some(parent) = path.parent() {
-        std::fs::create_dir_all(parent)
-            .map_err(|e| format!("mkdir {}: {e}", parent.display()))?;
+        std::fs::create_dir_all(parent).map_err(|e| format!("mkdir {}: {e}", parent.display()))?;
     }
     fs_utils::atomic_write(path, &bytes).map_err(|e| format!("write {}: {e}", path.display()))?;
     Ok(())

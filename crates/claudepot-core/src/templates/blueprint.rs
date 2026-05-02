@@ -689,10 +689,7 @@ allowed_tools   = ["Bash"]
         // Uppercase.
         let toml = minimal_toml("It.x", "");
         let err = Blueprint::from_toml(&toml).unwrap_err();
-        assert!(
-            err.to_string().contains("[a-z0-9.-]"),
-            "got: {err}"
-        );
+        assert!(err.to_string().contains("[a-z0-9.-]"), "got: {err}");
     }
 
     #[test]
