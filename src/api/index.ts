@@ -21,6 +21,7 @@ import { automationApi } from "./automation";
 import { templateApi } from "./template";
 import { usageApi } from "./usage";
 import { notificationApi } from "./notification";
+import { serviceStatusApi } from "./service-status";
 import { updatesApi } from "./updates";
 
 export const api = {
@@ -41,6 +42,7 @@ export const api = {
   ...templateApi,
   ...usageApi,
   ...notificationApi,
+  ...serviceStatusApi,
   ...updatesApi,
   migrate: migrateApi,
 };

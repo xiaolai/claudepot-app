@@ -3,6 +3,7 @@ import { useSessionLive } from "../hooks/useSessionLive";
 import { useAppState } from "../providers/AppStateProvider";
 import { RunningOpsChip } from "../components/RunningOpsChip";
 import { PendingJournalsChip } from "../components/PendingJournalsChip";
+import { ServiceStatusDot } from "./ServiceStatusDot";
 import type {
   LiveSessionSummary,
   PendingJournalsSummary,
@@ -116,7 +117,11 @@ export function AppStatusBar({
     !!runningOps && runningOps.some((o) => o.status === "running");
   const hasPending =
     !!pendingSummary && pendingSummary.pending + pendingSummary.stale > 0;
-  const hasRightCluster = hasRunningOps || hasPending;
+  // ServiceStatusDot self-decides visibility from preferences. The
+  // right cluster is always rendered as a wrapper so the dot — which
+  // sits at the cluster's far-left — keeps a stable position even
+  // when no running ops or pending journals exist.
+  const hasRightCluster = true;
 
   return (
     <div
@@ -186,6 +191,7 @@ export function AppStatusBar({
               onOpen={onOpenRepair}
             />
           )}
+          <ServiceStatusDot />
         </span>
       )}
 
