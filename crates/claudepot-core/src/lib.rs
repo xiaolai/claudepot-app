@@ -80,6 +80,7 @@ pub mod proxy;
 pub mod redaction;
 pub mod resolve;
 pub mod routes;
+pub mod service_status;
 pub mod services;
 pub mod session;
 pub mod session_chunks;

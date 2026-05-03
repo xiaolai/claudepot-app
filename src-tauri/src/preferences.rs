@@ -115,6 +115,50 @@ pub struct Preferences {
     /// `claudepot_core::pricing::PriceTier` for the divergence policy.
     #[serde(default)]
     pub pricing_tier: PriceTier,
+
+    /// Network-status feature toggles. See
+    /// `dev-docs/network-status.md` for the cost / cadence rationale
+    /// behind each default.
+    #[serde(default)]
+    pub service_status: ServiceStatusPrefs,
+}
+
+/// Toggles for the network-status feature. Field defaults are tuned
+/// for "show useful information when something is wrong, stay silent
+/// otherwise":
+///
+/// - Status-page polling defaults ON (one cheap GET every 5 min;
+///   benefit of "Anthropic is degraded" awareness outweighs the
+///   negligible cost).
+/// - Latency probing defaults ON for window-focus only (no background
+///   polling — see plan doc).
+/// - OS notification defaults OFF (status-page false-positives would
+///   train the user to ignore real signals).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
+pub struct ServiceStatusPrefs {
+    /// Background poller of `status.claude.com/api/v2/summary.json`.
+    pub poll_status_page: bool,
+    /// Cadence for the poller. Clamped to `[2, 60]` at consumption
+    /// time so a hand-edited `preferences.json` can't DoS Anthropic's
+    /// status page.
+    pub poll_interval_minutes: u32,
+    /// Fire an OS banner on each status transition (OK ↔ Degraded ↔
+    /// Down). The bell-icon log gets the entry regardless.
+    pub os_notify_on_status_change: bool,
+    /// Run a HEAD-probe batch every time the window gains focus.
+    pub probe_latency_on_focus: bool,
+}
+
+impl Default for ServiceStatusPrefs {
+    fn default() -> Self {
+        Self {
+            poll_status_page: true,
+            poll_interval_minutes: 5,
+            os_notify_on_status_change: false,
+            probe_latency_on_focus: true,
+        }
+    }
 }
 
 /// Helper for serde's `#[serde(default = "...")]` on a bool field.
@@ -163,6 +207,7 @@ impl Default for Preferences {
             notify_on_sub_windows: false,
             editor_defaults: Default::default(),
             pricing_tier: PriceTier::default(),
+            service_status: ServiceStatusPrefs::default(),
         }
     }
 }
