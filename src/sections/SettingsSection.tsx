@@ -782,7 +782,14 @@ function UpdatesPane() {
 
   return (
     <SettingsGroup desc="Claudepot checks an authenticated, minisign-signed manifest hosted on GitHub Releases. Your install only updates to versions signed by the project's release key.">
-      {/* Status row + manual trigger. */}
+      {/* Status row + manual trigger. The "Check now" button only
+          renders for user-actionable states. While the badge is
+          showing a transient state ("Checking…", "Downloading…",
+          "Ready to install — restart Claudepot"), there's nothing
+          for the user to do AND the badge already conveys that
+          state, so adding a second label next to it just duplicates
+          the same word. The detailed download card below carries
+          the progress percentage. */}
       <Row label="Updates">
         <div style={{ display: "flex", alignItems: "center", gap: "var(--sp-12)" }}>
           <UpdateStatusBadge
@@ -791,26 +798,11 @@ function UpdatesPane() {
             error={error}
             isSkipped={isSkipped}
           />
-          <Button
-            variant="ghost"
-            onClick={() => void checkNow()}
-            disabled={checkDisabled}
-            title={
-              status === "downloading"
-                ? "Update is downloading"
-                : status === "ready"
-                  ? "Update is ready to install"
-                  : undefined
-            }
-          >
-            {status === "checking"
-              ? "Checking…"
-              : status === "downloading"
-                ? "Downloading…"
-                : status === "ready"
-                  ? "Update ready"
-                  : "Check now"}
-          </Button>
+          {!checkDisabled && (
+            <Button variant="ghost" onClick={() => void checkNow()}>
+              Check now
+            </Button>
+          )}
         </div>
       </Row>
 
