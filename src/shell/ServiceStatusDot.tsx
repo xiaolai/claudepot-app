@@ -59,10 +59,12 @@ export function ServiceStatusDot() {
   // a missing block as "feature off" instead of crashing the shell.
   const ss = prefs?.service_status;
   const enabled = ss != null && (ss.poll_status_page || ss.probe_latency_on_focus);
+  const pollStatusPage = ss?.poll_status_page ?? false;
   const probeOnFocus = ss?.probe_latency_on_focus ?? false;
 
   const { summary, latency, probing, tier, probeNow } = useServiceStatus({
     enabled,
+    pollStatusPage,
     probeOnFocus,
   });
 
@@ -205,7 +207,14 @@ export function ServiceStatusDot() {
                         style={{
                           color: "var(--fg-muted)",
                           paddingRight: "var(--sp-8)",
+                          // The redacted error message from Rust
+                          // (sk-ant tokens stripped) lives in
+                          // `h.message` for kind === "error". Surface
+                          // it as a native title so the user can hover
+                          // to read "DNS lookup failed", "connection
+                          // refused", etc., instead of just "error".
                         }}
+                        title={h.kind === "error" ? (h.message ?? undefined) : undefined}
                       >
                         {h.name}
                       </td>
@@ -215,6 +224,7 @@ export function ServiceStatusDot() {
                           fontVariantNumeric: "tabular-nums",
                           color: hostColor(h.kind),
                         }}
+                        title={h.kind === "error" ? (h.message ?? undefined) : undefined}
                       >
                         {hostValue(h)}
                       </td>

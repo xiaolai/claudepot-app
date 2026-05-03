@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { api } from "../../api";
 import { tierColor, tierLabel } from "../../api/service-status";
 import { Button } from "../../components/primitives/Button";
@@ -23,6 +23,11 @@ interface Props {
  */
 export function NetworkPane({ pushToast }: Props) {
   const [prefs, setPrefs] = useState<Preferences | null>(null);
+  // Monotonic save token. Each `setField` call increments and captures
+  // its own value; the response is only applied if the captured token
+  // still matches the latest. Guards against fast toggles where save N
+  // resolves after save N+1 and would otherwise stomp the newer state.
+  const saveTokenRef = useRef(0);
 
   useEffect(() => {
     let cancelled = false;
@@ -42,10 +47,12 @@ export function NetworkPane({ pushToast }: Props) {
   // Defensive: tests / partial fixtures may omit `service_status`.
   const ss = prefs?.service_status;
   const enabled = ss != null && (ss.poll_status_page || ss.probe_latency_on_focus);
+  const pollStatusPage = ss?.poll_status_page ?? false;
   const probeOnFocus = ss?.probe_latency_on_focus ?? false;
 
   const { summary, latency, probing, refresh, probeNow } = useServiceStatus({
     enabled,
+    pollStatusPage,
     probeOnFocus,
   });
 
@@ -58,14 +65,19 @@ export function NetworkPane({ pushToast }: Props) {
         probeLatencyOnFocus?: boolean;
       },
     ) => {
-      const prev = prefs;
-      // Optimistic local update so toggles feel instant. Revert on
-      // backend failure.
-      if (prev) {
-        const next: Preferences = {
-          ...prev,
+      const myToken = ++saveTokenRef.current;
+
+      // Optimistic local update via functional setState so back-to-back
+      // toggles compose correctly even when their async saves overlap.
+      // Revert tracked through `prevSnapshot` for the failure path.
+      let prevSnapshot: Preferences | null = null;
+      setPrefs((p) => {
+        if (!p || !p.service_status) return p;
+        prevSnapshot = p;
+        return {
+          ...p,
           service_status: {
-            ...prev.service_status,
+            ...p.service_status,
             ...(patch.pollStatusPage !== undefined && {
               poll_status_page: patch.pollStatusPage,
             }),
@@ -80,17 +92,22 @@ export function NetworkPane({ pushToast }: Props) {
             }),
           },
         };
-        setPrefs(next);
-      }
+      });
+
       try {
         const fresh = await api.preferencesSetServiceStatus(patch);
-        setPrefs(fresh);
+        // Drop the response if a newer save has been issued — the
+        // newer optimistic state is more correct than this stale
+        // snapshot, and applying it would clobber that newer change.
+        if (saveTokenRef.current === myToken) setPrefs(fresh);
       } catch (e) {
-        setPrefs(prev);
+        // Same staleness guard: a later save has already been issued,
+        // its optimistic update is now the truth.
+        if (saveTokenRef.current === myToken) setPrefs(prevSnapshot);
         pushToast("error", `Save failed: ${e}`);
       }
     },
-    [prefs, pushToast],
+    [pushToast],
   );
 
   if (!prefs || !ss) {

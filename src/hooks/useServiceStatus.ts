@@ -30,6 +30,12 @@ interface UseServiceStatusOpts {
    *  no probe. Used to short-circuit when both feature toggles are
    *  disabled in Settings. */
   enabled: boolean;
+  /** Mirrors `Preferences.service_status.poll_status_page`. When the
+   *  user disables status-page polling, the cached summary tier stops
+   *  contributing to `tier` — otherwise a previously-recorded
+   *  Down/Degraded would stick around until the renderer reloads, even
+   *  though the user just told us not to track this anymore. */
+  pollStatusPage: boolean;
   /** When true, trigger a HEAD probe each time the window gains focus.
    *  See `dev-docs/network-status.md` for why this is on-focus rather
    *  than continuous. */
@@ -66,7 +72,7 @@ interface UseServiceStatusResult {
 export function useServiceStatus(
   opts: UseServiceStatusOpts,
 ): UseServiceStatusResult {
-  const { enabled, probeOnFocus } = opts;
+  const { enabled, pollStatusPage, probeOnFocus } = opts;
 
   const [summary, setSummary] = useState<ServiceStatusSummary | null>(null);
   const [latency, setLatency] = useState<LatencyReport | null>(null);
@@ -130,8 +136,11 @@ export function useServiceStatus(
     return () => window.removeEventListener("focus", handler);
   }, [enabled, probeOnFocus, probeNow]);
 
+  // When polling is off, suppress the cached summary tier so a
+  // previously-Degraded/Down result doesn't stick around as a stale
+  // signal after the user disabled the feature.
   const tier = combinedTier(
-    summary?.tier ?? "unknown",
+    pollStatusPage ? (summary?.tier ?? "unknown") : "unknown",
     latency?.tier ?? "unknown",
   );
 

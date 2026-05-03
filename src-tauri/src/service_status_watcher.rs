@@ -90,6 +90,15 @@ async fn tick(app: &AppHandle) -> Duration {
             // explain "last poll failed" without us paging an operator.
             tracing::debug!(error = %e, "service_status_watcher: fetch failed");
             state.store_fetch_error(e.to_string());
+            // Emit on failure too so the renderer can re-read and
+            // render "last poll failed: <message>" without waiting for
+            // the next successful tick. The renderer reads cached
+            // state via `service_status_summary_get`; the event is
+            // just a refresh ping, which is why we use the same
+            // channel as success.
+            if let Err(e) = app.emit("service-status::updated", ()) {
+                tracing::warn!(error = %e, "service_status_watcher: emit (failure path) failed");
+            }
         }
     }
 
