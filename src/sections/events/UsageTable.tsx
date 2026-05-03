@@ -3,6 +3,7 @@
 // owning UsageView passes filtered rows + sort state and gets back
 // `onSort` callbacks; the table itself is pure presentation.
 
+import { Table, Th, ThSort, Tr, Td } from "../../components/primitives";
 import { formatRelative } from "../../lib/formatRelative";
 import type { ArtifactUsageRowDto } from "../../types";
 
@@ -24,35 +25,28 @@ export function UsageTable({
   onSort: (k: SortKey) => void;
 }) {
   return (
-    <table
-      style={{
-        width: "100%",
-        borderCollapse: "collapse",
-        fontSize: "var(--fs-xs)",
-        fontVariantNumeric: "tabular-nums",
-      }}
-    >
+    <Table style={{ fontSize: "var(--fs-xs)" }}>
       <thead>
         <tr style={{ background: "var(--bg-sunken)" }}>
           <Th>Kind</Th>
           <Th>Artifact</Th>
           <Th>Plugin</Th>
-          <ThSort current={sortKey} value="count_24h" onSort={onSort}>
+          <ThSort current={sortKey} value="count_24h" onSort={onSort} align="right">
             24h
           </ThSort>
-          <ThSort current={sortKey} value="count_7d" onSort={onSort}>
+          <ThSort current={sortKey} value="count_7d" onSort={onSort} align="right">
             7d
           </ThSort>
-          <ThSort current={sortKey} value="count_30d" onSort={onSort}>
+          <ThSort current={sortKey} value="count_30d" onSort={onSort} align="right">
             30d
           </ThSort>
-          <ThSort current={sortKey} value="last_seen" onSort={onSort}>
+          <ThSort current={sortKey} value="last_seen" onSort={onSort} align="right">
             Last seen
           </ThSort>
-          <ThSort current={sortKey} value="errors" onSort={onSort}>
+          <ThSort current={sortKey} value="errors" onSort={onSort} align="right">
             Errors
           </ThSort>
-          <ThSort current={sortKey} value="p50" onSort={onSort}>
+          <ThSort current={sortKey} value="p50" onSort={onSort} align="right">
             p50
           </ThSort>
         </tr>
@@ -62,7 +56,7 @@ export function UsageTable({
           <Row key={`${r.kind}|${r.artifact_key}`} row={r} />
         ))}
       </tbody>
-    </table>
+    </Table>
   );
 }
 
@@ -77,7 +71,7 @@ function Row({ row }: { row: ArtifactUsageRowDto }) {
         ? "var(--danger)"
         : "var(--warn)";
   return (
-    <tr style={{ borderBottom: "var(--bw-hair) solid var(--line)" }}>
+    <Tr>
       <Td muted>{row.kind}</Td>
       <Td>
         <span
@@ -103,7 +97,7 @@ function Row({ row }: { row: ArtifactUsageRowDto }) {
         {s.p50_ms_24h ?? s.avg_ms_30d ?? "—"}
         {(s.p50_ms_24h ?? s.avg_ms_30d) != null ? "ms" : ""}
       </Td>
-    </tr>
+    </Tr>
   );
 }
 
@@ -136,82 +130,3 @@ export function displayName(kind: string, key: string): string {
   return key;
 }
 
-function Th({ children }: { children: React.ReactNode }) {
-  return (
-    <th
-      style={{
-        textAlign: "left",
-        padding: "var(--sp-6) var(--sp-12)",
-        borderBottom: "var(--bw-hair) solid var(--line)",
-        fontWeight: 500,
-        color: "var(--fg-muted)",
-        fontSize: "var(--fs-2xs)",
-        letterSpacing: "var(--ls-wide)",
-        textTransform: "uppercase",
-      }}
-    >
-      {children}
-    </th>
-  );
-}
-
-function ThSort({
-  value,
-  current,
-  onSort,
-  children,
-}: {
-  value: SortKey;
-  current: SortKey;
-  onSort: (k: SortKey) => void;
-  children: React.ReactNode;
-}) {
-  const active = current === value;
-  return (
-    <th
-      style={{
-        textAlign: "right",
-        padding: "var(--sp-6) var(--sp-12)",
-        borderBottom: "var(--bw-hair) solid var(--line)",
-        fontWeight: active ? 600 : 500,
-        color: active ? "var(--accent-ink)" : "var(--fg-muted)",
-        fontSize: "var(--fs-2xs)",
-        letterSpacing: "var(--ls-wide)",
-        textTransform: "uppercase",
-        cursor: "pointer",
-      }}
-      onClick={() => onSort(value)}
-    >
-      {children}
-      {active && <span aria-hidden style={{ marginLeft: "var(--sp-4)" }}>↓</span>}
-    </th>
-  );
-}
-
-function Td({
-  children,
-  muted,
-  num,
-  emphasis,
-  style,
-}: {
-  children: React.ReactNode;
-  muted?: boolean;
-  num?: boolean;
-  emphasis?: boolean;
-  style?: React.CSSProperties;
-}) {
-  return (
-    <td
-      style={{
-        padding: "var(--sp-6) var(--sp-12)",
-        textAlign: num ? "right" : "left",
-        color: muted ? "var(--fg-muted)" : "var(--fg)",
-        fontWeight: emphasis ? 600 : 400,
-        ...style,
-      }}
-    >
-      {children}
-    </td>
-  );
-}

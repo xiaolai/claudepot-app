@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { api } from "../../api";
+import { Table, Th, Td } from "../../components/primitives";
 import type { AutomationRunDto, OutputArtifactDto } from "../../types";
 import { ReportViewer } from "./reports/ReportViewer";
 
@@ -61,14 +62,9 @@ export function RunHistoryPanel({ automationId, refreshKey }: Props) {
 
   return (
     <>
-      <table
-        style={{
-          width: "100%",
-          borderCollapse: "collapse",
-          fontSize: "var(--fs-2xs)",
-          fontFamily: "var(--ff-mono)",
-          fontVariantNumeric: "tabular-nums",
-        }}
+      <Table
+        density="compact"
+        style={{ fontSize: "var(--fs-2xs)", fontFamily: "var(--ff-mono)" }}
       >
         <thead>
           <tr>
@@ -118,62 +114,13 @@ export function RunHistoryPanel({ automationId, refreshKey }: Props) {
             );
           })}
         </tbody>
-      </table>
+      </Table>
 
       <ReportViewer
         path={reportPath}
         onClose={() => setReportPath(null)}
       />
     </>
-  );
-}
-
-function Th({
-  children,
-  align,
-}: {
-  children: React.ReactNode;
-  align?: "left" | "right";
-}) {
-  return (
-    <th
-      className="mono-cap"
-      style={{
-        padding: "var(--sp-4) var(--sp-8)",
-        textAlign: align ?? "left",
-        fontSize: "var(--fs-2xs)",
-        fontWeight: 500,
-        color: "var(--fg-faint)",
-        borderBottom: "var(--bw-hair) solid var(--line)",
-        letterSpacing: "var(--ls-wide)",
-        textTransform: "uppercase",
-      }}
-    >
-      {children}
-    </th>
-  );
-}
-
-function Td({
-  children,
-  align,
-  muted,
-}: {
-  children: React.ReactNode;
-  align?: "left" | "right";
-  muted?: boolean;
-}) {
-  return (
-    <td
-      style={{
-        padding: "var(--sp-4) var(--sp-8)",
-        textAlign: align ?? "left",
-        verticalAlign: "middle",
-        color: muted ? "var(--fg-3)" : undefined,
-      }}
-    >
-      {children}
-    </td>
   );
 }
 

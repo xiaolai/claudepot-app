@@ -21,6 +21,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { api } from "../../api";
+import { Table, Th, ThSort, Tr, Td } from "../../components/primitives";
 import { formatRelative } from "../../lib/formatRelative";
 import type {
   LocalUsageReport,
@@ -544,14 +545,7 @@ function CostTable({
     );
   }
   return (
-    <table
-      style={{
-        width: "100%",
-        borderCollapse: "collapse",
-        fontSize: "var(--fs-xs)",
-        fontVariantNumeric: "tabular-nums",
-      }}
-    >
+    <Table density="compact" style={{ fontSize: "var(--fs-xs)" }}>
       <thead>
         <tr style={{ background: "var(--bg-sunken)" }}>
           <ThSort
@@ -568,6 +562,7 @@ function CostTable({
             current={sortKey}
             dir={sortDir}
             onSort={onSort}
+            align="right"
           >
             Sess
           </ThSort>
@@ -576,6 +571,7 @@ function CostTable({
             current={sortKey}
             dir={sortDir}
             onSort={onSort}
+            align="right"
           >
             Last active
           </ThSort>
@@ -584,6 +580,7 @@ function CostTable({
             current={sortKey}
             dir={sortDir}
             onSort={onSort}
+            align="right"
           >
             Input
           </ThSort>
@@ -592,6 +589,7 @@ function CostTable({
             current={sortKey}
             dir={sortDir}
             onSort={onSort}
+            align="right"
           >
             Output
           </ThSort>
@@ -600,6 +598,7 @@ function CostTable({
             current={sortKey}
             dir={sortDir}
             onSort={onSort}
+            align="right"
           >
             Cache hit
           </ThSort>
@@ -609,6 +608,7 @@ function CostTable({
             current={sortKey}
             dir={sortDir}
             onSort={onSort}
+            align="right"
           >
             Cost
           </ThSort>
@@ -620,7 +620,7 @@ function CostTable({
           <Row key={r.project_path} row={r} />
         ))}
       </tbody>
-    </table>
+    </Table>
   );
 }
 
@@ -640,7 +640,7 @@ function Row({ row }: { row: ProjectUsageRow }) {
   // raw path when there are too few segments to abbreviate.
   const display = displayPath(row.project_path);
   return (
-    <tr style={{ borderBottom: "var(--bw-hair) solid var(--line)" }}>
+    <Tr>
       <Td
         title={row.project_path}
         style={{
@@ -680,7 +680,7 @@ function Row({ row }: { row: ProjectUsageRow }) {
           </span>
         ) : null}
       </Td>
-    </tr>
+    </Tr>
   );
 }
 
@@ -730,105 +730,6 @@ function ModelBadges({ mix }: { mix: Record<string, number> }) {
         </span>
       ))}
     </span>
-  );
-}
-
-function Th({
-  children,
-  align,
-}: {
-  children: React.ReactNode;
-  align?: "left" | "right" | "center";
-}) {
-  return (
-    <th
-      style={{
-        textAlign: align ?? "right",
-        padding: "var(--sp-6) var(--sp-8)",
-        fontWeight: 500,
-        fontSize: "var(--fs-2xs)",
-        color: "var(--fg-muted)",
-        letterSpacing: "var(--ls-wide)",
-        textTransform: "uppercase",
-        borderBottom: "var(--bw-hair) solid var(--line)",
-      }}
-    >
-      {children}
-    </th>
-  );
-}
-
-function ThSort({
-  value,
-  current,
-  dir,
-  onSort,
-  children,
-  align,
-}: {
-  value: SortKey;
-  current: SortKey;
-  dir: SortDir;
-  onSort: (k: SortKey) => void;
-  children: React.ReactNode;
-  align?: "left" | "right" | "center";
-}) {
-  const active = current === value;
-  const arrow = active ? (dir === "asc" ? " ▲" : " ▼") : "";
-  return (
-    <th
-      style={{
-        textAlign: align ?? "right",
-        padding: "var(--sp-6) var(--sp-8)",
-        fontWeight: 500,
-        fontSize: "var(--fs-2xs)",
-        color: active ? "var(--fg)" : "var(--fg-muted)",
-        letterSpacing: "var(--ls-wide)",
-        textTransform: "uppercase",
-        borderBottom: "var(--bw-hair) solid var(--line)",
-        cursor: "pointer",
-        userSelect: "none",
-      }}
-      onClick={() => onSort(value)}
-      role="button"
-      tabIndex={0}
-      onKeyDown={(e) => {
-        if (e.key === "Enter" || e.key === " ") {
-          e.preventDefault();
-          onSort(value);
-        }
-      }}
-      aria-sort={active ? (dir === "asc" ? "ascending" : "descending") : "none"}
-    >
-      {children}
-      {arrow}
-    </th>
-  );
-}
-
-function Td({
-  children,
-  align,
-  title,
-  style,
-}: {
-  children: React.ReactNode;
-  align?: "left" | "right" | "center";
-  title?: string;
-  style?: React.CSSProperties;
-}) {
-  return (
-    <td
-      title={title}
-      style={{
-        textAlign: align ?? "left",
-        padding: "var(--sp-6) var(--sp-8)",
-        color: "var(--fg)",
-        ...style,
-      }}
-    >
-      {children}
-    </td>
   );
 }
 

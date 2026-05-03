@@ -9,7 +9,8 @@ import { Button } from "../../components/primitives/Button";
 import { ConfirmDialog } from "../../components/ConfirmDialog";
 import { NF } from "../../icons";
 import type { DisabledRecordDto, LifecycleKind } from "../../types";
-import { Section, Empty, Table, Th, Td, rowStyle } from "./LifecyclePresentational";
+import { Table, Th, Td, Tr } from "../../components/primitives";
+import { Section, Empty } from "./LifecyclePresentational";
 
 export function DisabledArtifactList({
   rows,
@@ -122,7 +123,7 @@ function DisabledRow({
 
   return (
     <>
-      <tr style={rowStyle()}>
+      <Tr>
         <Td muted>{record.kind}</Td>
         <Td>
           <span style={{ fontWeight: 500 }} title={record.current_path}>
@@ -157,7 +158,7 @@ function DisabledRow({
             </Button>
           </span>
         </Td>
-      </tr>
+      </Tr>
       {confirmTrash && (
         <ConfirmDialog
           title={`Move ${record.kind} to trash?`}
