@@ -70,4 +70,22 @@ export interface Preferences {
    *  near cap, so leaving them on triples the 7-day toast volume.
    *  The umbrella `seven_day` window is always checked regardless. */
   notify_on_sub_windows: boolean;
+
+  /** Network-status feature toggles. See `dev-docs/network-status.md`. */
+  service_status: ServiceStatusPrefs;
+}
+
+/** Toggles for the network-status feature (status-page polling +
+ *  on-focus latency probes). Mirrors `ServiceStatusPrefs` in
+ *  `src-tauri/src/preferences.rs`. */
+export interface ServiceStatusPrefs {
+  /** Background poller of `status.claude.com/api/v2/summary.json`. */
+  poll_status_page: boolean;
+  /** Cadence for the poller. Clamped to [2, 60] minutes server-side. */
+  poll_interval_minutes: number;
+  /** OS banner on each tier transition (in-app bell log gets the
+   *  entry regardless). Default off. */
+  os_notify_on_status_change: boolean;
+  /** Run a HEAD-probe batch each time the window gains focus. */
+  probe_latency_on_focus: boolean;
 }
