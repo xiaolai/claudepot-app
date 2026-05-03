@@ -14,7 +14,8 @@ import { ConfirmDialog } from "../../components/ConfirmDialog";
 import { NF } from "../../icons";
 import { formatRelative } from "../../lib/formatRelative";
 import type { LifecycleKind, TrashEntryDto } from "../../types";
-import { Section, Empty, Table, Th, Td, rowStyle } from "./LifecyclePresentational";
+import { Table, Th, Td, Tr } from "../../components/primitives";
+import { Section, Empty } from "./LifecyclePresentational";
 import { RecoverDialog } from "./RecoverDialog";
 
 export const PURGE_AFTER_DAYS = 30;
@@ -180,7 +181,7 @@ function TrashRow({
 
   return (
     <>
-      <tr style={rowStyle()}>
+      <Tr>
         <Td muted>{kind}</Td>
         <Td>
           <span style={{ fontWeight: 500 }} title={m?.original_path ?? row.entry_dir}>
@@ -228,7 +229,7 @@ function TrashRow({
             </Button>
           </span>
         </Td>
-      </tr>
+      </Tr>
       {confirmForget && (
         <ConfirmDialog
           title="Forget this trash entry?"
