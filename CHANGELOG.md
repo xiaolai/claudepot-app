@@ -6,6 +6,35 @@ Versioning scheme:
 - `0.1.x` — beta
 - `1.0.0+` — stable
 
+## 0.1.3 — beta (2026-05-03)
+
+Patch release adding a network-status indicator. One small dot in the
+StatusBar that answers two questions Claudepot users were asking
+indirectly: "is Claude up?" (status.claude.com poll) and "is my path
+to Claude fast right now?" (HEAD probe to the hosts CC actually hits
+at startup). On-demand for the latency probe — no continuous
+background polling, by design.
+
+### Added
+
+- **Service status dot in the StatusBar.** Color-coded (green / amber
+  / red / grey) showing the worst-of two signals: the
+  `status.claude.com/api/v2/summary.json` page tier × per-host
+  latency to the hosts Claude Code actually pings at startup. Hover
+  for the per-host latency table, active incidents, and last-poll
+  age; click to re-probe. Hidden when both Network toggles are off.
+- **Settings → Network.** New tab (core group, globe glyph) with
+  toggles for status-page polling, poll interval (2–60 min),
+  on-focus latency probing, and OS-notification on status
+  transitions. OS notification is off by default — false-positive
+  Anthropic blips would train users to ignore real signals.
+- **Status-page transitions land in the bell-icon notification log.**
+  Background poller (5 min default, gated by the user setting)
+  detects OK ↔ Degraded ↔ Down transitions and writes a
+  `Notice`-kind entry to the existing `notification_log` ring
+  buffer, so the bell popover is the persistent record. OS banner
+  is the opt-in surface on top of that.
+
 ## 0.1.2 — beta (2026-05-03)
 
 Patch release on top of the first beta. Mostly UI polish — error
