@@ -219,12 +219,11 @@ pub fn write(
         reason: put.reason,
     };
     let manifest_path = batch_dir.join("manifest.json");
-    let json = serde_json::to_vec_pretty(&entry).map_err(|source| {
-        ProjectTrashError::Serialize {
+    let json =
+        serde_json::to_vec_pretty(&entry).map_err(|source| ProjectTrashError::Serialize {
             path: manifest_path.clone(),
             source,
-        }
-    })?;
+        })?;
     write_atomic(&manifest_path, &json)?;
 
     let payload = batch_dir.join("payload");
