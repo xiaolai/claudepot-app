@@ -78,10 +78,15 @@ export function TrashDrawer({ onChange }: { onChange?: () => void }) {
         style={{
           display: "flex",
           alignItems: "center",
-          gap: "var(--sp-12)",
+          gap: "var(--sp-8)",
         }}
       >
-        <h2 style={{ fontSize: "var(--fs-md)", margin: 0 }}>Trash</h2>
+        <span
+          className="mono-cap"
+          style={{ color: "var(--fg-faint)" }}
+        >
+          Trash
+        </span>
         {listing && listing.entries.length > 0 && (
           <Tag tone="neutral">{listing.entries.length}</Tag>
         )}
