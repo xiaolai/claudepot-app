@@ -278,12 +278,16 @@ impl PartialOrd for StatusTier {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum LatencyResult {
-    Ok { ms: u32 },
+    Ok {
+        ms: u32,
+    },
     Timeout,
     /// Connection / DNS / TLS failure. The string is rendered verbatim
     /// in tooltips; redact any potentially-sensitive shape (cookies,
     /// auth) in the upstream `reqwest::Error::Display`.
-    Error { message: String },
+    Error {
+        message: String,
+    },
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -633,9 +637,7 @@ mod tests {
         // (`utils/preflightChecks.tsx::checkEndpoints` — `/api/hello`
         // and `/v1/oauth/hello`). Removing either should be a
         // deliberate decision, not an accident.
-        assert!(HOTPATH_HOSTS
-            .iter()
-            .any(|h| h.name == "api.anthropic.com"));
+        assert!(HOTPATH_HOSTS.iter().any(|h| h.name == "api.anthropic.com"));
         assert!(HOTPATH_HOSTS
             .iter()
             .any(|h| h.name == "platform.claude.com"));
@@ -660,9 +662,7 @@ mod tests {
         // CC's GrowthBook SDK is configured with apiHost=api.anthropic.com;
         // the public GrowthBook CDN is not on the runtime path.
         assert!(
-            !HOTPATH_HOSTS
-                .iter()
-                .any(|h| h.name == "cdn.growthbook.io"),
+            !HOTPATH_HOSTS.iter().any(|h| h.name == "cdn.growthbook.io"),
             "cdn.growthbook.io is not on CC's runtime path — its \
              GrowthBook client uses apiHost=api.anthropic.com. See \
              HOTPATH_HOSTS docstring before re-adding."
