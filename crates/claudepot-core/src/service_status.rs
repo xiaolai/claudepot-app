@@ -35,9 +35,22 @@ pub struct ProbeHost {
 /// Seeded from the curated registry at
 /// <https://github.com/xiaolai/anthropic-claude-surge-rules-set>
 /// (`domains.yaml`), filtered to the subset that actually matters for
-/// Claude Code latency. Re-sync from upstream when that file changes.
+/// Claude Code latency. Re-sync from upstream when that file changes,
+/// but cross-check each entry against the CC source at
+/// `~/github/claude_code_src/src` first — the upstream registry can
+/// drift from what CC actually hits at runtime.
 ///
 /// Hosts intentionally excluded:
+/// - `statsig.anthropic.com` — listed in upstream domains.yaml as
+///   "feature flags", but the host returns NXDOMAIN from every public
+///   resolver (verified 2026-05-03 against 1.1.1.1, 8.8.8.8, 1.0.0.1)
+///   and CC's source contains zero references to that URL. CC's
+///   runtime feature-flag stack is GrowthBook
+///   (`services/analytics/growthbook.ts`); Statsig data only exists
+///   as cached values written to user config by something else, never
+///   fetched from a `statsig.anthropic.com` endpoint by the client.
+///   The `console.statsig.com/...` URLs in CC source are
+///   doc-pointers to Anthropic's internal admin dashboard.
 /// - `storage.googleapis.com` (shared host; can't isolate Claude
 ///   traffic — every other GCS user would also be probed).
 /// - `claudeusercontent.com`, `claude.com`, `clau.de` (rarely hit, not
@@ -47,10 +60,6 @@ pub const HOTPATH_HOSTS: &[ProbeHost] = &[
     ProbeHost {
         name: "api.anthropic.com",
         url: "https://api.anthropic.com/",
-    },
-    ProbeHost {
-        name: "statsig.anthropic.com",
-        url: "https://statsig.anthropic.com/",
     },
     ProbeHost {
         name: "cdn.growthbook.io",
@@ -584,16 +593,29 @@ mod tests {
             assert!(!h.name.is_empty());
             assert!(!h.url.is_empty());
         }
-        // Spot-check the four headline hosts the design doc claims.
+        // Spot-check the headline hosts the design doc claims.
         assert!(HOTPATH_HOSTS
             .iter()
             .any(|h| h.name == "api.anthropic.com"));
         assert!(HOTPATH_HOSTS.iter().any(|h| h.name == "claude.ai"));
         assert!(HOTPATH_HOSTS
             .iter()
-            .any(|h| h.name == "statsig.anthropic.com"));
-        assert!(HOTPATH_HOSTS
-            .iter()
             .any(|h| h.name == "cdn.growthbook.io"));
+    }
+
+    /// Lock-in test for the 2026-05-03 audit finding: `statsig.anthropic.com`
+    /// returns NXDOMAIN globally and CC never hits it. Re-adding it would
+    /// paint the StatusBar dot permanently red on every probe. If a future
+    /// audit confirms the host has come back AND CC actually uses it,
+    /// delete this assertion in the same commit.
+    #[test]
+    fn statsig_anthropic_com_stays_excluded() {
+        assert!(
+            !HOTPATH_HOSTS
+                .iter()
+                .any(|h| h.name == "statsig.anthropic.com"),
+            "statsig.anthropic.com is NXDOMAIN globally and not on CC's runtime path; \
+             see HOTPATH_HOSTS docstring before removing this guard"
+        );
     }
 }
