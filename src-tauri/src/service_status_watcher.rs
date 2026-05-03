@@ -72,9 +72,7 @@ async fn tick(app: &AppHandle) -> Duration {
             // Unknown) — we don't want a "Claude services back to
             // normal" toast every cold start.
             if prev_tier != new_tier && prev_tier != core::StatusTier::Unknown {
-                if let Err(e) =
-                    record_transition(app, prev_tier, new_tier, &summary, &settings)
-                {
+                if let Err(e) = record_transition(app, prev_tier, new_tier, &summary, &settings) {
                     tracing::warn!(error = %e, "service_status_watcher: record_transition failed");
                 }
             }
