@@ -1,7 +1,7 @@
-// Tiny presentational primitives shared by DisabledArtifactList,
-// ArtifactTrashList, and ArtifactLifecyclePane. Sharded out so each
-// table file is independently readable and the pane stays under the
-// loc-guardian limit.
+// Section + Empty helpers shared by DisabledArtifactList,
+// ArtifactTrashList, and ArtifactLifecyclePane. The table primitives
+// (Table/Th/Td/Tr) live in `components/primitives/Table.tsx` and are
+// imported directly by the list files.
 
 import { Glyph } from "../../components/primitives/Glyph";
 import { NF } from "../../icons";
@@ -41,70 +41,6 @@ export function Section({
       {children}
     </section>
   );
-}
-
-export function Table({ children }: { children: React.ReactNode }) {
-  return (
-    <table
-      style={{
-        width: "100%",
-        borderCollapse: "collapse",
-        fontSize: "var(--fs-sm)",
-        fontVariantNumeric: "tabular-nums",
-      }}
-    >
-      {children}
-    </table>
-  );
-}
-
-export function Th({
-  children,
-  ...rest
-}: React.ThHTMLAttributes<HTMLTableCellElement>) {
-  return (
-    <th
-      {...rest}
-      style={{
-        textAlign: "left",
-        padding: "var(--sp-6) var(--sp-12)",
-        borderBottom: "var(--bw-hair) solid var(--line)",
-        fontWeight: 500,
-        color: "var(--fg-muted)",
-        fontSize: "var(--fs-2xs)",
-        letterSpacing: "var(--ls-wide)",
-        textTransform: "uppercase",
-      }}
-    >
-      {children}
-    </th>
-  );
-}
-
-export function Td({
-  children,
-  muted,
-  align,
-}: {
-  children: React.ReactNode;
-  muted?: boolean;
-  align?: "left" | "right";
-}) {
-  return (
-    <td
-      style={{
-        padding: "var(--sp-6) var(--sp-12)",
-        textAlign: align ?? "left",
-        color: muted ? "var(--fg-muted)" : "var(--fg)",
-      }}
-    >
-      {children}
-    </td>
-  );
-}
-
-export function rowStyle(): React.CSSProperties {
-  return { borderBottom: "var(--bw-hair) solid var(--line)" };
 }
 
 export function Empty({

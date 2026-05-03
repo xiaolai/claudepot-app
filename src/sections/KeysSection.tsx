@@ -14,6 +14,7 @@ import { IconButton } from "../components/primitives/IconButton";
 import { Input } from "../components/primitives/Input";
 import { SectionLabel } from "../components/primitives/SectionLabel";
 import { SkeletonRows } from "../components/primitives/Skeleton";
+import { Table, Th, Tr, Td } from "../components/primitives/Table";
 import { Tag } from "../components/primitives/Tag";
 import { useAppState } from "../providers/AppStateProvider";
 import { NF } from "../icons";
@@ -389,9 +390,14 @@ function ApiKeysTable({
         </EmptyHint>
       ) : (
         <Table>
-          <Thead
-            cols={["Label", "Created by", "Created", ""]}
-          />
+          <thead>
+            <tr>
+              <Th>Label</Th>
+              <Th>Created by</Th>
+              <Th>Created</Th>
+              <Th align="right" aria-label="Actions" />
+            </tr>
+          </thead>
           <tbody>
             {rows.map((row) => (
               <Tr key={row.uuid}>
@@ -514,23 +520,26 @@ function OauthTokensTable({
         </EmptyHint>
       ) : (
         <Table>
-          <Thead
-            cols={[
-              "Label",
-              "Created by",
-              "Created",
-              "Expires",
-              {
-                label: "Shell",
-                hint:
+          <thead>
+            <tr>
+              <Th>Label</Th>
+              <Th>Created by</Th>
+              <Th>Created</Th>
+              <Th>Expires</Th>
+              <Th
+                title={
                   "Copy a paste-ready terminal command " +
                   "(CLAUDE_CODE_OAUTH_TOKEN='…' claude). " +
                   "Launches Claude Code with this token in a new " +
-                  "terminal without disturbing your current login.",
-              },
-              "",
-            ]}
-          />
+                  "terminal without disturbing your current login."
+                }
+              >
+                Shell{" "}
+                <Glyph g={NF.info} color="var(--fg-faint)" size="var(--fs-xs)" />
+              </Th>
+              <Th align="right" aria-label="Actions" />
+            </tr>
+          </thead>
           <tbody>
             {rows.map((row) => (
               <Tr key={row.uuid}>
@@ -725,97 +734,8 @@ function EditableLabel({
 }
 
 /* ──────────────────────────────────────────────────────────── */
-/*                         Primitives                          */
+/*                       Local helpers                         */
 /* ──────────────────────────────────────────────────────────── */
-
-function Table({ children }: { children: React.ReactNode }) {
-  return (
-    <table
-      style={{
-        width: "100%",
-        borderCollapse: "collapse",
-        fontSize: "var(--fs-sm)",
-      }}
-    >
-      {children}
-    </table>
-  );
-}
-
-type ColSpec = string | { label: string; hint: string };
-
-function Thead({ cols }: { cols: ColSpec[] }) {
-  return (
-    <thead>
-      <tr>
-        {cols.map((c, i) => {
-          const label = typeof c === "string" ? c : c.label;
-          const hint = typeof c === "string" ? undefined : c.hint;
-          return (
-            <th
-              key={i}
-              className="mono-cap"
-              title={hint}
-              style={{
-                padding: "var(--sp-8) var(--sp-10)",
-                textAlign: i === cols.length - 1 ? "right" : "left",
-                fontSize: "var(--fs-xs)",
-                fontWeight: 500,
-                color: "var(--fg-faint)",
-                borderBottom: "var(--bw-hair) solid var(--line)",
-                cursor: hint ? "help" : undefined,
-              }}
-            >
-              {label}
-              {hint && (
-                <>
-                  {" "}
-                  <Glyph
-                    g={NF.info}
-                    color="var(--fg-faint)"
-                    size="var(--fs-xs)"
-                  />
-                </>
-              )}
-            </th>
-          );
-        })}
-      </tr>
-    </thead>
-  );
-}
-
-function Tr({ children }: { children: React.ReactNode }) {
-  return (
-    <tr
-      style={{
-        borderBottom: "var(--bw-hair) solid var(--line)",
-      }}
-    >
-      {children}
-    </tr>
-  );
-}
-
-function Td({
-  children,
-  align,
-}: {
-  children: React.ReactNode;
-  align?: "left" | "right";
-}) {
-  return (
-    <td
-      style={{
-        padding: "var(--sp-10)",
-        textAlign: align ?? "left",
-        verticalAlign: "middle",
-      }}
-    >
-      {children}
-    </td>
-  );
-}
 
 function RowActions({ children }: { children: React.ReactNode }) {
   return (
