@@ -6,6 +6,61 @@ Versioning scheme:
 - `0.1.x` — beta
 - `1.0.0+` — stable
 
+## 0.1.2 — beta (2026-05-03)
+
+Patch release on top of the first beta. Mostly UI polish — error
+boundaries per section so a thrown render in Sessions doesn't take
+the whole window with it, modal accessibility cleanup, and a sweep
+of token literals that were rendering as raw CSS strings instead of
+pulling from the design-token catalog. A handful of real fixes
+underneath: a toast leak that piled up dispatched entries, a
+`.expect()` in the restore-from-trash path that could panic on a
+race, and `--quiet` finally suppresses progress lines on the
+activity / cli-ops CLI handlers.
+
+### Added
+
+- **About → Website row.** New link to <https://claudepot.com>
+  alongside the existing GitHub / Anthropic links. Brand-mark
+  exception applies — uses the GitHub mark inline-SVG for the
+  trademarked logo (see `.claude/rules/design.md`).
+
+### Changed
+
+- **Run history is a table now.** `RunHistoryPanel` switched from
+  cards to the lifted `Table` primitive — the section was already a
+  scan-and-drill surface (one verb per row, likely > 20 rows) so
+  cards were the wrong container per the paper-mono design rules.
+- **Modal width API is tighter.** Modals now declare a single
+  width-cap token instead of overriding `max-width` inline; the
+  command palette and the per-account modals re-use the same caps.
+
+### Fixed
+
+- **Per-section error boundaries.** A render panic in one section
+  no longer wipes the rest of the window — each top-level section
+  now ships its own `ErrorBoundary` and the command palette
+  recovers when its backdrop is clicked through.
+- **Modal a11y auto-wire.** `role="dialog"`, `aria-modal`, and
+  `aria-labelledby` are now wired automatically when a `Modal` has
+  a heading; manual props are no longer required.
+- **Toast leak in the bell-icon popover.** Dispatched toasts were
+  being added to the notification log but the in-memory ledger
+  never expired completed entries; bell-icon counts could climb
+  unbounded across a long session.
+- **Restore-from-trash race.** A collision between the restore
+  target path and a same-name file created concurrently could
+  trigger a `.expect()` panic; the restore now resolves collisions
+  atomically.
+- **CLI `--quiet` honored on activity / cli-ops verbs.** Progress
+  `eprintln!` lines that should have been suppressed under
+  `--quiet` were leaking through; both handler families now gate
+  progress output on the flag.
+- **Seven broken design-token literals.** Inline styles were
+  referencing tokens that didn't resolve (mostly mis-cased custom
+  property names); they now go through `tokenize` and render the
+  intended values in both light and dark themes.
+
 ## 0.1.1 — beta (2026-05-02)
 
 First beta release. The version scheme tier crosses from `0.0.x`
