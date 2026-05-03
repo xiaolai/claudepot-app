@@ -32,46 +32,82 @@ pub struct ProbeHost {
 
 /// Hot-path hosts probed for "is my path to Claude fast" diagnostics.
 ///
-/// Seeded from the curated registry at
-/// <https://github.com/xiaolai/anthropic-claude-surge-rules-set>
-/// (`domains.yaml`), filtered to the subset that actually matters for
-/// Claude Code latency. Re-sync from upstream when that file changes,
-/// but cross-check each entry against the CC source at
-/// `~/github/claude_code_src/src` first — the upstream registry can
-/// drift from what CC actually hits at runtime.
+/// Final list verified 2026-05-03 against the Claude Code source at
+/// `~/github/claude_code_src/src`. Each entry is grounded in a
+/// runtime call site, not just a registry observation.
 ///
-/// Hosts intentionally excluded:
-/// - `statsig.anthropic.com` — listed in upstream domains.yaml as
-///   "feature flags", but the host returns NXDOMAIN from every public
-///   resolver (verified 2026-05-03 against 1.1.1.1, 8.8.8.8, 1.0.0.1)
-///   and CC's source contains zero references to that URL. CC's
-///   runtime feature-flag stack is GrowthBook
-///   (`services/analytics/growthbook.ts`); Statsig data only exists
-///   as cached values written to user config by something else, never
-///   fetched from a `statsig.anthropic.com` endpoint by the client.
-///   The `console.statsig.com/...` URLs in CC source are
-///   doc-pointers to Anthropic's internal admin dashboard.
+/// **Canonical source: CC's own startup preflight**
+/// (`utils/preflightChecks.tsx::checkEndpoints`):
+///
+/// ```text
+/// endpoints = [
+///   `${BASE_API_URL}/api/hello`,            // → api.anthropic.com
+///   `${TOKEN_URL.origin}/v1/oauth/hello`,   // → platform.claude.com
+/// ]
+/// ```
+///
+/// CC pings exactly these two hosts at every startup to decide whether
+/// "Anthropic services" are reachable. They are the floor of any
+/// honest "is my path fast" check.
+///
+/// `claude.ai` is added for the practical case ("is the manifest /
+/// download redirector reachable") even though CC only fetches its
+/// OAuth client-metadata once and caches the result.
+///
+/// Hosts intentionally excluded — each with the reason from the
+/// 2026-05-03 source audit:
+///
+/// - `statsig.anthropic.com` — NXDOMAIN globally; zero references in
+///   CC source. xiaolai's `domains.yaml` lists it as "feature flags"
+///   but the host doesn't exist publicly and CC's runtime FF stack is
+///   GrowthBook configured with `apiHost: 'https://api.anthropic.com/'`,
+///   not a Statsig endpoint. The `console.statsig.com/...` URLs in
+///   CC source are doc-pointers to Anthropic's internal admin
+///   dashboard, not client endpoints. See lock-in test
+///   `statsig_anthropic_com_stays_excluded`.
+///
+/// - `cdn.growthbook.io` — listed in `domains.yaml` as "GrowthBook
+///   feature flag service used by Claude Code CLI", but a `grep` of
+///   CC source returns only one match — a `docs.growthbook.io` URL
+///   in a generated event-schema comment. The GrowthBook SDK in
+///   `services/analytics/growthbook.ts` is constructed with
+///   `apiHost: baseUrl` where `baseUrl = 'https://api.anthropic.com/'`
+///   (lines 503-527), so feature-flag fetches go through
+///   `api.anthropic.com`, not the public GrowthBook CDN. The registry
+///   entry's "active connection monitoring" source is contradicted by
+///   the actual SDK config; until that's reconciled, probing
+///   `cdn.growthbook.io` is misleading.
+///
+/// - `downloads.claude.ai` — only fetched on auto-update
+///   (`utils/autoUpdater.ts`, `utils/nativeInstaller/download.ts`)
+///   and plugin-marketplace install
+///   (`utils/plugins/officialMarketplaceGcs.ts`). Cold path; not
+///   relevant to "CC feels slow right now."
+///
+/// - `mcp-proxy.anthropic.com` — only used when the user has MCP
+///   connectors configured. Cold path for the average user.
+///
 /// - `storage.googleapis.com` (shared host; can't isolate Claude
 ///   traffic — every other GCS user would also be probed).
-/// - `claudeusercontent.com`, `claude.com`, `clau.de` (rarely hit, not
-///   on the latency hot path).
-/// - `modelcontextprotocol.io` (docs, not runtime).
+///
+/// - `claudeusercontent.com`, `claude.com`, `clau.de` (rarely fetched
+///   by the CC client; mostly user-clicked links).
+///
+/// - `modelcontextprotocol.io`, `code.claude.com`, `docs.claude.com`,
+///   `support.{anthropic,claude}.com` (docs / support links, never
+///   auto-fetched by the client).
 pub const HOTPATH_HOSTS: &[ProbeHost] = &[
     ProbeHost {
         name: "api.anthropic.com",
         url: "https://api.anthropic.com/",
     },
     ProbeHost {
-        name: "cdn.growthbook.io",
-        url: "https://cdn.growthbook.io/",
+        name: "platform.claude.com",
+        url: "https://platform.claude.com/",
     },
     ProbeHost {
         name: "claude.ai",
         url: "https://claude.ai/",
-    },
-    ProbeHost {
-        name: "downloads.claude.ai",
-        url: "https://downloads.claude.ai/",
     },
 ];
 
@@ -593,29 +629,43 @@ mod tests {
             assert!(!h.name.is_empty());
             assert!(!h.url.is_empty());
         }
-        // Spot-check the headline hosts the design doc claims.
+        // The two hosts CC's own startup preflight checks
+        // (`utils/preflightChecks.tsx::checkEndpoints` — `/api/hello`
+        // and `/v1/oauth/hello`). Removing either should be a
+        // deliberate decision, not an accident.
         assert!(HOTPATH_HOSTS
             .iter()
             .any(|h| h.name == "api.anthropic.com"));
-        assert!(HOTPATH_HOSTS.iter().any(|h| h.name == "claude.ai"));
         assert!(HOTPATH_HOSTS
             .iter()
-            .any(|h| h.name == "cdn.growthbook.io"));
+            .any(|h| h.name == "platform.claude.com"));
+        assert!(HOTPATH_HOSTS.iter().any(|h| h.name == "claude.ai"));
     }
 
-    /// Lock-in test for the 2026-05-03 audit finding: `statsig.anthropic.com`
-    /// returns NXDOMAIN globally and CC never hits it. Re-adding it would
-    /// paint the StatusBar dot permanently red on every probe. If a future
-    /// audit confirms the host has come back AND CC actually uses it,
-    /// delete this assertion in the same commit.
+    /// Lock-in test for the 2026-05-03 audit findings. Each host below
+    /// was probed and traced through CC source; re-adding any of them
+    /// would re-introduce a known-bad signal. If a future audit
+    /// confirms the underlying conditions changed, delete the matching
+    /// assertion in the same commit (with the source citation).
     #[test]
-    fn statsig_anthropic_com_stays_excluded() {
+    fn known_bad_hosts_stay_excluded() {
+        // NXDOMAIN globally; zero references in CC source.
         assert!(
             !HOTPATH_HOSTS
                 .iter()
                 .any(|h| h.name == "statsig.anthropic.com"),
-            "statsig.anthropic.com is NXDOMAIN globally and not on CC's runtime path; \
-             see HOTPATH_HOSTS docstring before removing this guard"
+            "statsig.anthropic.com is NXDOMAIN globally and not on \
+             CC's runtime path; see HOTPATH_HOSTS docstring."
+        );
+        // CC's GrowthBook SDK is configured with apiHost=api.anthropic.com;
+        // the public GrowthBook CDN is not on the runtime path.
+        assert!(
+            !HOTPATH_HOSTS
+                .iter()
+                .any(|h| h.name == "cdn.growthbook.io"),
+            "cdn.growthbook.io is not on CC's runtime path — its \
+             GrowthBook client uses apiHost=api.anthropic.com. See \
+             HOTPATH_HOSTS docstring before re-adding."
         );
     }
 }
