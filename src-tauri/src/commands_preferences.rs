@@ -158,6 +158,45 @@ pub async fn preferences_set_show_window_on_startup(
     p.save()
 }
 
+/// Set fields on the `service_status` preference block. Same
+/// "optional per field" shape as `preferences_set_activity`. The
+/// poll-interval value is clamped to `[2, 60]` minutes; values
+/// outside that range are silently coerced rather than rejected so
+/// the renderer doesn't have to mirror the policy.
+#[tauri::command]
+pub async fn preferences_set_service_status(
+    state: tauri::State<'_, crate::preferences::PreferencesState>,
+    poll_status_page: Option<bool>,
+    poll_interval_minutes: Option<u32>,
+    os_notify_on_status_change: Option<bool>,
+    probe_latency_on_focus: Option<bool>,
+) -> Result<crate::preferences::Preferences, String> {
+    let snapshot = {
+        let mut prefs = state
+            .0
+            .lock()
+            .map_err(|e| format!("preferences lock: {e}"))?;
+        if let Some(v) = poll_status_page {
+            prefs.service_status.poll_status_page = v;
+        }
+        if let Some(v) = poll_interval_minutes {
+            prefs.service_status.poll_interval_minutes = v.clamp(2, 60);
+        }
+        if let Some(v) = os_notify_on_status_change {
+            prefs.service_status.os_notify_on_status_change = v;
+        }
+        if let Some(v) = probe_latency_on_focus {
+            prefs.service_status.probe_latency_on_focus = v;
+        }
+        prefs.clone()
+    };
+    let to_persist = snapshot.clone();
+    tokio::task::spawn_blocking(move || to_persist.save())
+        .await
+        .map_err(|e| format!("blocking task failed: {e}"))??;
+    Ok(snapshot)
+}
+
 /// Toggle the dock-icon visibility (macOS only). On non-macOS platforms
 /// the call still persists the boolean so the UI round-trips cleanly,
 /// but the activation policy is a no-op.

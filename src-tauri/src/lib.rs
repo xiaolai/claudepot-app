@@ -20,6 +20,7 @@ mod commands_project;
 mod commands_protected;
 mod commands_repair;
 mod commands_routes;
+mod commands_service_status;
 mod commands_session_index;
 mod commands_session_move;
 mod commands_session_prune;
@@ -43,6 +44,7 @@ mod dto_migrate;
 mod dto_project;
 mod dto_project_repair;
 mod dto_routes;
+mod dto_service_status;
 mod dto_session;
 mod dto_session_debug;
 mod dto_session_move;
@@ -53,6 +55,7 @@ mod dto_usage;
 mod live_activity_bridge;
 mod ops;
 mod preferences;
+mod service_status_watcher;
 mod state;
 mod tray;
 mod tray_icons;
@@ -382,6 +385,13 @@ pub fn run() {
             // `src-tauri/src/updates_watcher.rs`.
             updates_watcher::spawn(app.handle().clone());
 
+            // Background poller for `status.claude.com`. 5 min cadence,
+            // gated by the `service_status.poll_status_page` preference.
+            // Surfaces transitions through the existing notification log.
+            // See `src-tauri/src/service_status_watcher.rs` and
+            // `dev-docs/network-status.md`.
+            service_status_watcher::spawn(app.handle().clone());
+
             Ok(())
         })
         .manage(state::LoginState::default())
@@ -430,7 +440,8 @@ pub fn run() {
         // `commands_pricing.rs`, and now correctly singleflights the
         // `pricing_refresh` button-mash path too.
         .manage(claudepot_core::pricing::PricingCacheService::new())
-        .manage(notification_log_state);
+        .manage(notification_log_state)
+        .manage(commands_service_status::ServiceStatusState::new());
 
     // Conditionally publish the cards index — `None` means open
     // failed at startup, in which case the cards-* commands return
@@ -559,6 +570,10 @@ pub fn run() {
             commands_keys::key_oauth_usage_cached,
             commands_preferences::preferences_set_activity,
             commands_preferences::preferences_set_notifications,
+            commands_preferences::preferences_set_service_status,
+            commands_service_status::service_status_summary_get,
+            commands_service_status::service_status_probe_now,
+            commands_service_status::service_status_latency_get,
             commands_activity::session_live_start,
             commands_activity::session_live_stop,
             commands_activity::session_live_snapshot,
