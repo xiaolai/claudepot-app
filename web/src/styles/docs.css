@@ -172,6 +172,14 @@
   margin: var(--sp-32) 0;
 }
 
+.docs-main img {
+  max-width: 100%;
+  height: auto;
+  border: var(--bw-hair) solid var(--border);
+  border-radius: var(--sp-6);
+  background: var(--code-bg);
+}
+
 .docs-main blockquote {
   padding: var(--sp-12) var(--sp-20);
   border-left: var(--bw-accent) solid var(--accent);
