@@ -589,4 +589,68 @@ mod tests {
         assert_eq!(sh_quote("it's"), "'it'\\''s'");
         assert_eq!(sh_quote(""), "''");
     }
+
+    #[test]
+    fn unix_shim_invokes_claude_by_name() {
+        // Locks the FirstParty contract: when the resolver hands us
+        // the bare name "claude", the rendered shim invokes
+        // `'claude' -p …` and lets the shim's own PATH resolve it.
+        // Regression guard for the "GUI PATH ≠ shell PATH" bug — if
+        // anyone re-introduces register-time absolute resolution the
+        // shim will start containing `/usr/local/bin/claude` and
+        // this test will catch it.
+        let a = auto();
+        let (segs, env) = inputs();
+        let inp = ShimInputs {
+            binary_abs_path: "claude",
+            claudepot_cli_abs_path: "/Users/me/.claudepot/bin/claudepot",
+            automation_dir: "/Users/me/.claudepot/automations/x",
+            path_segments: &segs,
+            extra_env: &env,
+        };
+        let s = render_unix(&a, &inp);
+        // sh_quote wraps in single quotes — exact form locked.
+        assert!(
+            s.contains("| 'claude' -p"),
+            "expected shim to invoke `'claude' -p`, got:\n{s}"
+        );
+        // Defense-in-depth: the shim must not embed an absolute
+        // path that someone could have left behind. The test bin
+        // value is the bare name; if we ever start re-resolving in
+        // the renderer, this will trip.
+        assert!(
+            !s.contains("'/usr/local/bin/claude'"),
+            "shim baked in an absolute /usr/local/bin/claude — \
+             register-time resolution was reintroduced"
+        );
+        assert!(
+            !s.contains("'/opt/homebrew/bin/claude'"),
+            "shim baked in an absolute /opt/homebrew/bin/claude — \
+             register-time resolution was reintroduced"
+        );
+    }
+
+    #[test]
+    fn windows_shim_invokes_claude_by_name() {
+        let a = auto();
+        let (segs, env) = inputs();
+        let inp = ShimInputs {
+            binary_abs_path: "claude.exe",
+            claudepot_cli_abs_path: r"C:\cli.exe",
+            automation_dir: r"C:\auto",
+            path_segments: &segs,
+            extra_env: &env,
+        };
+        let s = render_windows(&a, &inp);
+        assert!(
+            s.contains("| \"claude.exe\" -p"),
+            "expected shim to invoke `\"claude.exe\" -p`, got:\n{s}"
+        );
+        // Guard against absolute-path regressions on Windows too.
+        assert!(
+            !s.to_ascii_lowercase()
+                .contains(r"\program files\claude\claude.exe"),
+            "windows shim baked in an absolute Program Files path"
+        );
+    }
 }
