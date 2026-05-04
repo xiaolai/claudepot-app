@@ -299,10 +299,7 @@ mod tests {
             .iter()
             .position(|s| s == "/Users/test/.local/bin")
             .unwrap();
-        let brew_idx = segs
-            .iter()
-            .position(|s| s == "/opt/homebrew/bin")
-            .unwrap();
+        let brew_idx = segs.iter().position(|s| s == "/opt/homebrew/bin").unwrap();
         assert!(
             local_idx < brew_idx,
             "$HOME/.local/bin should rank before /opt/homebrew/bin"

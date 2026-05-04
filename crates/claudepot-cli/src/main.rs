@@ -1132,14 +1132,8 @@ async fn main() -> Result<()> {
                 limit,
                 show_diff,
             } => {
-                commands::memory::log(
-                    &ctx,
-                    project.as_deref(),
-                    file.as_deref(),
-                    limit,
-                    show_diff,
-                )
-                .await?
+                commands::memory::log(&ctx, project.as_deref(), file.as_deref(), limit, show_diff)
+                    .await?
             }
         },
         Commands::Settings { action } => match action {

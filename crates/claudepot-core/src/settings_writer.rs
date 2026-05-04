@@ -160,9 +160,8 @@ pub fn resolve_auto_memory_enabled_global() -> AutoMemoryState {
     let env_simple_set = env_is_truthy(env_simple_raw.as_deref());
     let env_disable_explicit_off = env_is_falsy(env_disable_raw.as_deref());
 
-    let user_value =
-        read_bool_setting(&claude_config_dir().join("settings.json"), AUTO_MEMORY_KEY)
-            .unwrap_or(None);
+    let user_value = read_bool_setting(&claude_config_dir().join("settings.json"), AUTO_MEMORY_KEY)
+        .unwrap_or(None);
 
     if env_disable_set {
         return AutoMemoryState {
@@ -346,11 +345,7 @@ pub fn resolve_auto_memory_enabled(project_root: &Path) -> AutoMemoryState {
 /// with just `{ key: value }`. If the file is malformed JSON, the
 /// caller gets `SettingsWriteError::JsonParse` — we never silently
 /// overwrite a file we couldn't parse.
-fn rmw_settings_bool(
-    path: &Path,
-    key: &str,
-    value: bool,
-) -> Result<(), SettingsWriteError> {
+fn rmw_settings_bool(path: &Path, key: &str, value: bool) -> Result<(), SettingsWriteError> {
     let mut object = match std::fs::read(path) {
         Ok(bytes) if bytes.is_empty() => serde_json::Map::new(),
         Ok(bytes) => {
@@ -552,16 +547,11 @@ mod tests {
         let (_t, project, _l) = isolated();
         let path = SettingsLayer::User.settings_file(&project);
         fs::create_dir_all(path.parent().unwrap()).unwrap();
-        fs::write(
-            &path,
-            br#"{"unrelatedKey":42,"nested":{"keep":"me"}}"#,
-        )
-        .unwrap();
+        fs::write(&path, br#"{"unrelatedKey":42,"nested":{"keep":"me"}}"#).unwrap();
 
         write_auto_memory_enabled(SettingsLayer::User, &project, false).unwrap();
 
-        let after: JsonValue =
-            serde_json::from_slice(&fs::read(&path).unwrap()).unwrap();
+        let after: JsonValue = serde_json::from_slice(&fs::read(&path).unwrap()).unwrap();
         assert_eq!(after["autoMemoryEnabled"], JsonValue::Bool(false));
         assert_eq!(after["unrelatedKey"], JsonValue::from(42));
         assert_eq!(after["nested"]["keep"], JsonValue::from("me"));
@@ -583,7 +573,9 @@ mod tests {
         let (_t, project, _l) = isolated();
         let err = write_auto_memory_enabled(SettingsLayer::Project, &project, false).unwrap_err();
         match err {
-            SettingsWriteError::UnsupportedLayer { layer: SettingsLayer::Project } => {}
+            SettingsWriteError::UnsupportedLayer {
+                layer: SettingsLayer::Project,
+            } => {}
             other => panic!("expected UnsupportedLayer(Project), got {:?}", other),
         }
     }
@@ -614,9 +606,12 @@ mod tests {
 
         clear_auto_memory_enabled(SettingsLayer::LocalProject, &project).unwrap();
 
-        let after: JsonValue =
-            serde_json::from_slice(&fs::read(&path).unwrap()).unwrap();
-        assert!(after.as_object().unwrap().get("autoMemoryEnabled").is_none());
+        let after: JsonValue = serde_json::from_slice(&fs::read(&path).unwrap()).unwrap();
+        assert!(after
+            .as_object()
+            .unwrap()
+            .get("autoMemoryEnabled")
+            .is_none());
         assert_eq!(after["keep"], JsonValue::from(1));
     }
 

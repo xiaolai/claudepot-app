@@ -412,10 +412,7 @@ impl MemoryLog {
 
     /// Latest row for a single path, if any. Used by the watcher to
     /// rebuild its in-memory fingerprint cache after a restart.
-    pub fn latest_for_path(
-        &self,
-        abs_path: &Path,
-    ) -> Result<Option<MemoryChange>, MemoryLogError> {
+    pub fn latest_for_path(&self, abs_path: &Path) -> Result<Option<MemoryChange>, MemoryLogError> {
         let db = self.db();
         let abs = abs_path.to_string_lossy().into_owned();
         let row = db
@@ -433,11 +430,7 @@ impl MemoryLog {
     }
 }
 
-fn push_time_filters(
-    sql: &mut String,
-    bound: &mut Vec<Box<dyn rusqlite::ToSql>>,
-    q: &ChangeQuery,
-) {
+fn push_time_filters(sql: &mut String, bound: &mut Vec<Box<dyn rusqlite::ToSql>>, q: &ChangeQuery) {
     if let Some(since) = q.since_ns {
         sql.push_str(" AND detected_at_ns >= ?");
         bound.push(Box::new(since));
@@ -465,9 +458,10 @@ fn row_to_change(r: &rusqlite::Row<'_>) -> rusqlite::Result<MemoryChange> {
     let diff_omit_reason: Option<String> = r.get(13)?;
     let role: MemoryFileRole = serde_json::from_value(serde_json::Value::String(role_str))
         .unwrap_or(MemoryFileRole::AutoMemoryTopic);
-    let change_type =
-        ChangeType::from_str(&change_type_str).unwrap_or(ChangeType::Modified);
-    let omit_reason = diff_omit_reason.as_deref().and_then(DiffOmitReason::from_str);
+    let change_type = ChangeType::from_str(&change_type_str).unwrap_or(ChangeType::Modified);
+    let omit_reason = diff_omit_reason
+        .as_deref()
+        .and_then(DiffOmitReason::from_str);
     Ok(MemoryChange {
         id,
         project_slug,
@@ -600,10 +594,7 @@ fn quarantine(path: &Path) -> Result<(), MemoryLogError> {
     moved.set_file_name(new_name);
     if path.exists() {
         std::fs::rename(path, &moved)?;
-        tracing::warn!(
-            "memory_log: quarantined corrupt db to {}",
-            moved.display()
-        );
+        tracing::warn!("memory_log: quarantined corrupt db to {}", moved.display());
     }
     Ok(())
 }

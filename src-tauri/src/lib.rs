@@ -197,20 +197,19 @@ pub fn run() {
                 );
                 let fallback = std::env::temp_dir().join("claudepot-memory_changes.db");
                 std::sync::Arc::new(
-                    claudepot_core::memory_log::MemoryLog::open(&fallback)
-                        .unwrap_or_else(|e2| {
-                            // Both writable locations failed — this is
-                            // catastrophic for log persistence but the
-                            // app can still run. Panic with a clear
-                            // message so users see the underlying issue
-                            // rather than a generic "command failed".
-                            panic!(
-                                "memory change-log unrecoverable: primary={} ({e}); \
+                    claudepot_core::memory_log::MemoryLog::open(&fallback).unwrap_or_else(|e2| {
+                        // Both writable locations failed — this is
+                        // catastrophic for log persistence but the
+                        // app can still run. Panic with a clear
+                        // message so users see the underlying issue
+                        // rather than a generic "command failed".
+                        panic!(
+                            "memory change-log unrecoverable: primary={} ({e}); \
                                  fallback={} ({e2})",
-                                primary.display(),
-                                fallback.display(),
-                            );
-                        }),
+                            primary.display(),
+                            fallback.display(),
+                        );
+                    }),
                 )
             }
         }

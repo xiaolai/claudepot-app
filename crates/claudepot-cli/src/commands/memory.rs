@@ -102,10 +102,7 @@ pub async fn list(ctx: &AppContext, project: Option<&str>) -> Result<()> {
 
 fn print_files_table(
     files: &[MemoryFileSummary],
-    stats: &std::collections::HashMap<
-        PathBuf,
-        &claudepot_core::memory_log::MemoryFileStats,
-    >,
+    stats: &std::collections::HashMap<PathBuf, &claudepot_core::memory_log::MemoryFileStats>,
 ) {
     if files.is_empty() {
         println!("No memory files yet.");

@@ -68,21 +68,19 @@ pub fn spawn(app: AppHandle, log: Arc<MemoryLog>) {
 
     let (tx, rx) = mpsc::unbounded_channel::<WatcherEvent>();
 
-    let mut debouncer: Debouncer<RecommendedWatcher> = match new_debouncer(
-        DEBOUNCE_WINDOW,
-        move |res| {
+    let mut debouncer: Debouncer<RecommendedWatcher> =
+        match new_debouncer(DEBOUNCE_WINDOW, move |res| {
             // The notify callback runs on notify's internal worker
             // thread; sending into a tokio mpsc is fine from any
             // thread (the channel itself is sync-safe).
             let _ = tx.send(WatcherEvent::Debounced(res));
-        },
-    ) {
-        Ok(d) => d,
-        Err(e) => {
-            tracing::warn!("memory_watch: failed to build debouncer: {e}");
-            return;
-        }
-    };
+        }) {
+            Ok(d) => d,
+            Err(e) => {
+                tracing::warn!("memory_watch: failed to build debouncer: {e}");
+                return;
+            }
+        };
 
     if let Err(e) = debouncer
         .watcher()
@@ -115,7 +113,10 @@ fn attach_project_watches(
     root: &Path,
     watched_files: &mut HashSet<PathBuf>,
 ) {
-    for candidate in [root.join("CLAUDE.md"), root.join(".claude").join("CLAUDE.md")] {
+    for candidate in [
+        root.join("CLAUDE.md"),
+        root.join(".claude").join("CLAUDE.md"),
+    ] {
         if watched_files.contains(&candidate) {
             continue;
         }
@@ -130,10 +131,7 @@ fn attach_project_watches(
                 watched_files.insert(candidate);
             }
             Err(e) => {
-                tracing::debug!(
-                    "memory_watch: skip watch on {}: {e}",
-                    candidate.display()
-                );
+                tracing::debug!("memory_watch: skip watch on {}: {e}", candidate.display());
             }
         }
     }
@@ -218,7 +216,11 @@ async fn handle_one(
     };
 
     let exists = path.is_file();
-    let new_bytes = if exists { std::fs::read(path).ok() } else { None };
+    let new_bytes = if exists {
+        std::fs::read(path).ok()
+    } else {
+        None
+    };
     let prev = prints.get(path).cloned();
 
     // Bootstrap: if we don't have a fingerprint for this path, try
@@ -269,7 +271,10 @@ async fn handle_one(
     }
 
     let mtime_ns_v = mtime_ns(path);
-    let before_bytes = prev.as_ref().map(|p| p.bytes.as_slice()).filter(|b| !b.is_empty());
+    let before_bytes = prev
+        .as_ref()
+        .map(|p| p.bytes.as_slice())
+        .filter(|b| !b.is_empty());
     let after_bytes = new_bytes.as_deref();
 
     if let Err(e) = log.record(&RecordInput {
@@ -357,4 +362,3 @@ fn mtime_ns(path: &Path) -> i64 {
         .and_then(|d| i64::try_from(d.as_nanos()).ok())
         .unwrap_or(0)
 }
-
