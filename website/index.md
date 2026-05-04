@@ -2,18 +2,18 @@
 layout: home
 
 hero:
-  name: Claudepot
+  name: ClauDepot
   text: A control panel for Claude Code and Claude Desktop.
   tagline: Switch accounts. Watch what's running. Schedule prompts. Find old chats. Reclaim disk space.
   image:
     src: /logo.png
-    alt: Claudepot
+    alt: ClauDepot
   actions:
     - theme: brand
       text: Get started
       link: /guide/getting-started
     - theme: alt
-      text: Why Claudepot?
+      text: Why ClauDepot?
       link: /guide/what-and-why
     - theme: alt
       text: View on GitHub
@@ -37,7 +37,7 @@ features:
     link: /features/automations
     linkText: Automations
   - title: Safe project rename
-    details: Renaming a project folder breaks Claude's session history. Claudepot rewrites every reference, journaled and reversible.
+    details: Renaming a project folder breaks Claude's session history. ClauDepot rewrites every reference, journaled and reversible.
     link: /features/projects
     linkText: Projects
   - title: Reclaim disk space
@@ -48,7 +48,7 @@ features:
 
 <div style="max-width: 1100px; margin: 4rem auto 0; padding: 0 1.5rem;">
 
-![Claudepot — Accounts tab with two slots (CLI and Desktop) and the live session strip](/screenshots/accounts.png)
+![ClauDepot — Accounts tab with two slots (CLI and Desktop) and the live session strip](/screenshots/accounts.png)
 
 </div>
 

@@ -24,7 +24,7 @@ This is the big one.
 
 Claude indexes sessions by the project folder's full path. If you `mv ~/code/old-name ~/code/new-name`, every session under that project becomes orphaned — Claude can't find them anymore. The folder is fine; the session history is gone.
 
-**Rename a project from Claudepot instead.** It rewrites every reference Claude has — session transcripts, the project map, the history file, project memory, settings — in nine journaled phases. If anything fails midway, the operation rolls back. Resumable on crash, fully reversible.
+**Rename a project from ClauDepot instead.** It rewrites every reference Claude has — session transcripts, the project map, the history file, project memory, settings — in nine journaled phases. If anything fails midway, the operation rolls back. Resumable on crash, fully reversible.
 
 ## Repair
 

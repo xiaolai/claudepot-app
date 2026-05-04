@@ -32,8 +32,8 @@ A scrolling feed of every session lifecycle event — started, finished, errored
 
 ## Notifications
 
-When a session goes from `busy` to `waiting`, Claudepot fires a macOS notification — so you don't have to keep tabbing back to check. Tune it in Settings → Activity.
+When a session goes from `busy` to `waiting`, ClauDepot fires a macOS notification — so you don't have to keep tabbing back to check. Tune it in Settings → Activity.
 
 ## Why it matters
 
-Claude has no native notion of "I'm waiting on you." Without a tool like Claudepot, you'd have to switch terminals one by one. With Activities, the answer is always one glance away.
+Claude has no native notion of "I'm waiting on you." Without a tool like ClauDepot, you'd have to switch terminals one by one. With Activities, the answer is always one glance away.

@@ -2,7 +2,7 @@
 
 Open the app. The left sidebar is your map of the whole product — **eight tabs, each one a feature**.
 
-![The Claudepot main window — sidebar on the left, content on the right](/screenshots/accounts.png)
+![The ClauDepot main window — sidebar on the left, content on the right](/screenshots/accounts.png)
 
 ## 1. Add your accounts
 

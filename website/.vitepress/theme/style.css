@@ -1,0 +1,53 @@
+/* Brand mark — "Clau" in neutral text, "Depot" in terracotta accent.
+   The two-color split is the canonical rendering of the product name;
+   use <BrandMark /> in markdown / Vue, or `.brand-mark` HTML in places
+   that only accept strings (footer copyright). */
+
+:root {
+  --brand-clau-color:  var(--vp-c-text-1);
+  --brand-depot-color: oklch(68% 0.13 45);
+}
+
+.dark {
+  /* Terracotta lifts in dark mode for adequate contrast against the
+     near-black VitePress dark background. */
+  --brand-depot-color: oklch(74% 0.14 45);
+}
+
+.brand-mark {
+  font-weight: inherit;
+  white-space: nowrap;
+}
+
+.brand-clau  { color: var(--brand-clau-color); }
+.brand-depot { color: var(--brand-depot-color); }
+
+/* Navbar title — we set themeConfig.siteTitle = false and inject
+   <BrandMark /> via the nav-bar-title-before slot. The slot sits to
+   the left of the (now empty) title, so we lift it up and align it
+   with the logo + sibling nav items. */
+.VPNavBarTitle .title .brand-mark {
+  font-size: var(--vp-nav-logo-height, var(--sp-24));
+  font-weight: 600;
+  letter-spacing: var(--ls-tight);
+}
+
+/* Hero name — keep the literal "ClauDepot" string rendered by
+   VitePress, but paint it via a two-stop gradient on its existing
+   `background-clip: text` machinery. The stop sits at 4/9 because
+   "Clau" is 4 of 9 characters; this requires monospace so character
+   widths are predictable. */
+.VPHero .name .clip {
+  font-family: 'JetBrains Mono', ui-monospace, SFMono-Regular,
+    Menlo, Consolas, monospace;
+  letter-spacing: var(--ls-tight);
+}
+
+:root {
+  --vp-home-hero-name-color: transparent;
+  --vp-home-hero-name-background: linear-gradient(
+    90deg,
+    var(--brand-clau-color)  0 44.44%,
+    var(--brand-depot-color) 44.44% 100%
+  );
+}
