@@ -32,6 +32,37 @@ vi.mock("../../api", () => ({
     repairList: vi.fn().mockResolvedValue([]),
     sessionIndexRebuild: vi.fn(),
     projectCleanPreview: vi.fn().mockResolvedValue({ candidates: [] }),
+    // GeneralPane mounts the AutoMemoryGlobalRow on first render even
+    // when the active tab is "github" — the row's load runs once at
+    // mount time. Stub a default shape so the row renders without
+    // toasting an error.
+    autoMemoryState: vi.fn().mockResolvedValue({
+      project_root: "~",
+      effective: true,
+      decided_by: "default",
+      decided_label: "default",
+      user_writable: true,
+      user_settings_value: null,
+      project_settings_value: null,
+      local_project_settings_value: null,
+      env_disable_set: false,
+      env_simple_set: false,
+      local_settings_gitignored: null,
+    }),
+    autoMemoryStateGlobal: vi.fn().mockResolvedValue({
+      project_root: "",
+      effective: true,
+      decided_by: "default",
+      decided_label: "default",
+      user_writable: true,
+      user_settings_value: null,
+      project_settings_value: null,
+      local_project_settings_value: null,
+      env_disable_set: false,
+      env_simple_set: false,
+      local_settings_gitignored: null,
+    }),
+    autoMemorySet: vi.fn(),
   },
 }));
 

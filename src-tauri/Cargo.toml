@@ -43,6 +43,11 @@ zeroize.workspace = true
 dirs = { workspace = true }
 notify.workspace = true
 notify-debouncer-mini.workspace = true
+# Memory-watch fingerprint comparison (`memory_watch.rs`). sha256 is
+# good enough for content-equality dedup; mirrors what `memory_log`
+# stores so a process restart can reuse persisted hashes.
+sha2.workspace = true
+hex.workspace = true
 
 [dev-dependencies]
 tempfile.workspace = true

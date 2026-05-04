@@ -5,7 +5,7 @@
 
 import { useCallback, useState } from "react";
 import { api } from "../../api";
-import { Button } from "../../components/primitives/Button";
+import { IconButton } from "../../components/primitives/IconButton";
 import { ConfirmDialog } from "../../components/ConfirmDialog";
 import { NF } from "../../icons";
 import type { DisabledRecordDto, LifecycleKind } from "../../types";
@@ -137,25 +137,22 @@ function DisabledRow({
         </Td>
         <Td align="right">
           <span style={{ display: "inline-flex", gap: "var(--sp-6)" }}>
-            <Button
-              variant="ghost"
+            <IconButton
               glyph={NF.refresh}
               onClick={onEnable}
               disabled={busy}
               size="sm"
-            >
-              Re-enable
-            </Button>
-            <Button
-              variant="ghost"
-              danger
+              title="Re-enable"
+              aria-label="Re-enable"
+            />
+            <IconButton
               glyph={NF.trash}
               onClick={() => setConfirmTrash(true)}
               disabled={busy}
               size="sm"
-            >
-              Trash
-            </Button>
+              title="Move to trash"
+              aria-label="Move to trash"
+            />
           </span>
         </Td>
       </Tr>
