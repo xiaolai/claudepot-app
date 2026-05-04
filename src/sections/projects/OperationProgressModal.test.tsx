@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import { render, screen } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 
 import { OperationProgressModal } from "./OperationProgressModal";
 import {
@@ -67,5 +68,38 @@ describe("OperationProgressModal", () => {
       />,
     );
     expect(screen.getByText("Test op title")).toBeInTheDocument();
+  });
+
+  it("renders no Cancel button when onCancel is omitted", () => {
+    render(
+      <OperationProgressModal
+        opId="op-no-cancel"
+        title="Renaming"
+        phases={PROJECT_MOVE_PHASES}
+        fetchStatus={async () => null}
+        onClose={() => {}}
+      />,
+    );
+    expect(
+      screen.queryByRole("button", { name: /cancel/i }),
+    ).not.toBeInTheDocument();
+  });
+
+  it("renders the Cancel button and invokes onCancel on click", async () => {
+    const onCancel = vi.fn();
+    render(
+      <OperationProgressModal
+        opId="op-cancel"
+        title="Re-login: alice@example.com"
+        phases={PROJECT_MOVE_PHASES}
+        fetchStatus={async () => null}
+        onClose={() => {}}
+        onCancel={onCancel}
+        cancelLabel="Cancel login"
+      />,
+    );
+    const btn = screen.getByRole("button", { name: "Cancel login" });
+    await userEvent.click(btn);
+    expect(onCancel).toHaveBeenCalledOnce();
   });
 });
