@@ -6,6 +6,30 @@ Versioning scheme:
 - `0.1.x` — beta
 - `1.0.0+` — stable
 
+## 0.1.7 — beta (2026-05-04)
+
+### Fixed
+
+- **Updates panel showed "installed: unknown" and skipped CC CLI
+  auto-updates with "no active CC install detected"** even when CC
+  was installed and running. Root cause: `resolve_active_cli_binary`
+  walked the Tauri process's `PATH`, but Dock-launched apps on macOS
+  inherit the launchd default (no `~/.local/bin`, no
+  `/opt/homebrew/bin`). The native install was enumerated by the
+  explicit-path probe but never flagged active. Detection now
+  promotes the highest-precedence detected install (native > brew >
+  npm > linux pkg) when `PATH` lookup misses — same behavior covers
+  users whose `claude` is a shell function or alias.
+
+### Changed
+
+- **Settings → About → Website** now points at
+  `https://claudepot.com/app` (the product page) instead of the
+  reader landing.
+- **Global section tab order** is now `Config | Memory | Updates`
+  — `Memory` sits next to the static reference tabs; `Updates` is
+  the action surface and reads last.
+
 ## 0.1.6 — beta (2026-05-04)
 
 ### Fixed
