@@ -84,7 +84,10 @@ export function PrototypeNav({
     <nav className="proto-nav" aria-label="Main">
       <Link href={withAuth("/", as)} className="proto-nav-brand">
         <Logo size={36} className="proto-nav-logo" />
-        <span className="proto-nav-wordmark">SHANNON</span>
+        <span className="proto-nav-wordmark">
+          <span className="proto-nav-wordmark-clau">CLAU</span>
+          <span className="proto-nav-wordmark-depot">DEPOT</span>
+        </span>
       </Link>
       {NAV_ITEMS.map((item) => (
         <Link
