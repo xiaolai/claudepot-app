@@ -49,9 +49,12 @@ interface PlatformAsset {
 const PLATFORMS: PlatformAsset[] = [
   { label: "macOS · Apple Silicon", match: /aarch64.*\.dmg$/i, hint: ".dmg" },
   { label: "macOS · Intel", match: /x86_64.*\.dmg$/i, hint: ".dmg" },
-  { label: "Linux · ARM64", match: /aarch64-linux\.tar\.gz$/i, hint: ".tar.gz" },
-  { label: "Linux · x86_64", match: /x86_64-linux\.tar\.gz$/i, hint: ".tar.gz" },
-  { label: "Windows · x86_64", match: /x86_64.*\.msi$/i, hint: ".msi" },
+  { label: "Linux · ARM64 (tarball)", match: /aarch64-linux\.tar\.gz$/i, hint: ".tar.gz" },
+  { label: "Linux · x86_64 (tarball)", match: /x86_64-linux\.tar\.gz$/i, hint: ".tar.gz" },
+  { label: "Linux · x86_64 (.deb)", match: /x86_64\.deb$/i, hint: ".deb" },
+  { label: "Linux · x86_64 (AppImage)", match: /x86_64\.AppImage$/i, hint: ".AppImage" },
+  { label: "Windows · x86_64 (.msi)", match: /x86_64.*\.msi$/i, hint: ".msi" },
+  { label: "Windows · x86_64 (setup.exe)", match: /x86_64-setup\.exe$/i, hint: ".exe" },
 ];
 
 function bytes(n: number): string {
