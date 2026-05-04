@@ -32,6 +32,12 @@ export interface OpHandle {
   onComplete?: () => void;
   /** Fired on terminal error event, with detail. */
   onError?: (detail: string | null) => void;
+  /** Optional: cancel the in-flight op. When provided, the modal
+   *  surfaces a primary Cancel button until a terminal event lands. */
+  onCancel?: () => void;
+  /** Optional footer label for the Cancel button. Defaults to
+   *  "Cancel"; login flows pass "Cancel login" for clarity. */
+  cancelLabel?: string;
 }
 
 interface OperationsContextValue {
@@ -42,7 +48,9 @@ interface OperationsContextValue {
   close: () => void;
 }
 
-const OperationsContext = createContext<OperationsContextValue | null>(null);
+export const OperationsContext = createContext<OperationsContextValue | null>(
+  null,
+);
 
 /**
  * Shell-level provider for the active op-progress modal. Any child
