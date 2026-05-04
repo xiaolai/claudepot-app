@@ -26,7 +26,7 @@ const baseHandler = createMcpHandler(
   },
   {
     serverInfo: {
-      name: "sha.com",
+      name: "claudepot.com",
       version: "0.1.0",
     },
   },
