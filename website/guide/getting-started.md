@@ -48,7 +48,7 @@ cp target/release/claudepot /usr/local/bin/
 
 `~/.claudepot/` — your registered accounts and the session index. Override with the `CLAUDEPOT_DATA_DIR` environment variable if you want it somewhere else.
 
-Your Claude Code data (`~/.claude/`) is read by Claudepot but stays where Claude put it. Claudepot never moves it.
+Your Claude Code data (`~/.claude/`) is read by ClauDepot but stays where Claude put it. ClauDepot never moves it.
 
 ## Next
 

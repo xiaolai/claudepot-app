@@ -15,12 +15,12 @@ That means you can keep using `claude` exactly as before for first-party Claude,
 
 ## Why a separate Desktop profile
 
-Mixing third-party models into your real Claude Desktop install would risk tangling histories and permissions. Claudepot creates a clean profile per route, so the third-party flow stays isolated.
+Mixing third-party models into your real Claude Desktop install would risk tangling histories and permissions. ClauDepot creates a clean profile per route, so the third-party flow stays isolated.
 
 ## Adding a route
 
-Pick the upstream provider, paste your key, name the wrapper. Claudepot installs the binary, registers the Desktop profile, and updates the keys inventory. Removing a route uninstalls the binary and removes the profile.
+Pick the upstream provider, paste your key, name the wrapper. ClauDepot installs the binary, registers the Desktop profile, and updates the keys inventory. Removing a route uninstalls the binary and removes the profile.
 
 ## Privacy
 
-First-party Claude is never modified. The wrapper talks to whichever provider you pointed it at — Claudepot doesn't proxy your traffic and doesn't see your prompts.
+First-party Claude is never modified. The wrapper talks to whichever provider you pointed it at — ClauDepot doesn't proxy your traffic and doesn't see your prompts.

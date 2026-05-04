@@ -19,10 +19,10 @@ Always in the OS keychain — never in a plain file, never logged, never sent to
 
 ## Self-clearing clipboard
 
-When you **Copy** a key, Claudepot writes it to the clipboard — and starts a **30-second timer**. After the timer fires, the clipboard is wiped (only if it still holds the value Claudepot wrote, so it won't clobber something you copied later).
+When you **Copy** a key, ClauDepot writes it to the clipboard — and starts a **30-second timer**. After the timer fires, the clipboard is wiped (only if it still holds the value ClauDepot wrote, so it won't clobber something you copied later).
 
 You get a small countdown next to the key while the timer is running.
 
 ## Adding a key
 
-Paste the key once into the **Add** modal. Claudepot stores it in the keychain and immediately wipes the in-memory string — both the renderer's input field and every owned copy on the Rust side are zeroized.
+Paste the key once into the **Add** modal. ClauDepot stores it in the keychain and immediately wipes the in-memory string — both the renderer's input field and every owned copy on the Rust side are zeroized.

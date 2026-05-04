@@ -6,7 +6,7 @@ Manage every Claude account you have. Add, remove, verify, and switch between th
 
 ## Two slots, switched independently
 
-Claudepot keeps two "live" slots:
+ClauDepot keeps two "live" slots:
 
 - **CLI** — the account Claude Code uses in your terminal.
 - **Desktop** — the account Claude Desktop uses.
@@ -31,8 +31,8 @@ From any of three places:
 
 ## Verifying
 
-The **Verify** action makes a live API call to confirm the stored credentials still work. Claudepot tracks the last-verified time per account; expired or revoked tokens surface clearly so you don't find out the hard way.
+The **Verify** action makes a live API call to confirm the stored credentials still work. ClauDepot tracks the last-verified time per account; expired or revoked tokens surface clearly so you don't find out the hard way.
 
 ## Where the secrets live
 
-Per-account secrets live in your OS keychain — **macOS Keychain**, **Windows Credential Manager**, **Linux Secret Service**. Claudepot never writes them to plain files and never sends them to the UI layer.
+Per-account secrets live in your OS keychain — **macOS Keychain**, **Windows Credential Manager**, **Linux Secret Service**. ClauDepot never writes them to plain files and never sends them to the UI layer.

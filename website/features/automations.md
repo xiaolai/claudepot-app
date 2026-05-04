@@ -29,4 +29,4 @@ You can open any past run, copy its output, or rerun it on demand.
 
 ## How it runs
 
-Claudepot wires the schedule into your OS scheduler — **launchd** on macOS, **Task Scheduler** on Windows, **systemd-user timers** on Linux. You don't write any plist, XML, or `.timer` file by hand. Disable a job and the OS-level entry is removed too.
+ClauDepot wires the schedule into your OS scheduler — **launchd** on macOS, **Task Scheduler** on Windows, **systemd-user timers** on Linux. You don't write any plist, XML, or `.timer` file by hand. Disable a job and the OS-level entry is removed too.

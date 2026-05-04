@@ -2,13 +2,13 @@
 
 ## What
 
-Claudepot is a desktop app — with a matching command-line tool — that sits next to Claude Code and Claude Desktop and gives you the things they don't have on their own:
+ClauDepot is a desktop app — with a matching command-line tool — that sits next to Claude Code and Claude Desktop and gives you the things they don't have on their own:
 
 - **Account switching.** Keep work and personal accounts side by side; switch in one click.
 - **A live view.** See every Claude session that's running right now, including which one is waiting on you.
 - **Scheduled prompts.** Have Claude run a prompt every morning, every weekday, or on any cron schedule you like.
 - **Searchable history.** Find that chat from last week. Reopen it. Export it.
-- **Safe project rename.** `mv`-ing a project folder breaks Claude's session history. Claudepot doesn't.
+- **Safe project rename.** `mv`-ing a project folder breaks Claude's session history. ClauDepot doesn't.
 - **Disk cleanup.** `~/.claude/` quietly grows to many gigabytes. One click reclaims most of it, with a 7-day undo.
 - **Privacy on export.** Tokens, auth headers, and cookies are stripped before any session leaves your machine.
 
@@ -16,7 +16,7 @@ It's macOS-first today. Windows and Linux work, with less polish.
 
 ## Why
 
-If you use Claude Code or Claude Desktop daily, you've probably hit at least one of these. Each one is a first-class fix in Claudepot, not a workaround.
+If you use Claude Code or Claude Desktop daily, you've probably hit at least one of these. Each one is a first-class fix in ClauDepot, not a workaround.
 
 | Pain | What's actually going on |
 | ---- | ------------------------ |

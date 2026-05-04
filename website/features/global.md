@@ -18,7 +18,7 @@ Pick any item; the right pane shows the file's contents.
 
 ## Read-only
 
-Claudepot doesn't edit these files. The Global tab is an inspection surface — handy when something behaves oddly and you want to know **which config layer is responsible**. You can see, for any setting, exactly where its current value comes from.
+ClauDepot doesn't edit these files. The Global tab is an inspection surface — handy when something behaves oddly and you want to know **which config layer is responsible**. You can see, for any setting, exactly where its current value comes from.
 
 ## When to use it
 
