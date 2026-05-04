@@ -33,7 +33,7 @@ Versioning scheme:
   toast (not error) and no longer carries a redundant Cancel undo
   affordance — the modal owns that action now.
 
-## 0.1.5 — beta (unreleased)
+## 0.1.5 — beta (2026-05-04)
 
 ### Fixed
 
@@ -64,7 +64,7 @@ Versioning scheme:
   `claudepot-core/src/{memory_log,memory_view,settings_writer}.rs`,
   and `main.rs`. No behavioral change — pure formatting.
 
-## 0.1.4 — beta (unreleased)
+## 0.1.4 — beta (2026-05-04)
 
 ### Added
 
@@ -529,7 +529,7 @@ UI.
   no longer falls back to env `NO_PROXY` so the cache key
   faithfully reflects every input that affects the built client.
 
-## 0.0.15 — alpha (unreleased)
+## 0.0.15 — alpha (2026-04-30)
 
 ### Fixed
 
@@ -978,7 +978,7 @@ UI.
   per bundle; standalone CLI tarballs / zips still ship for
   CLI-only users.
 
-## 0.0.8 — alpha (unreleased)
+## 0.0.8 — alpha (2026-04-29)
 
 ### Fixed
 
@@ -991,7 +991,7 @@ UI.
   and the in-app updater for Linux/Windows points at the real
   installer URLs (`.AppImage`, `-setup.exe`).
 
-## 0.0.7 — alpha (unreleased)
+## 0.0.7 — alpha (2026-04-28)
 
 ### Added
 
