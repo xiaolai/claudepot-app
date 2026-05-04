@@ -653,8 +653,8 @@ function AboutPane() {
                   color="var(--fg-muted)"
                   style={{ fontSize: "var(--fs-base)" }}
                 />
-                <ExternalLink href="https://claudepot.com">
-                  claudepot.com
+                <ExternalLink href="https://claudepot.com/app">
+                  claudepot.com/app
                 </ExternalLink>
               </span>
             }
