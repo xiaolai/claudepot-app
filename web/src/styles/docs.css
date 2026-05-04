@@ -157,7 +157,10 @@
   font-size: 0.92em;
 }
 
-.docs-main a {
+/* Underline only inline-context links (paragraphs, list items,
+ * headings, blockquotes). Anchor wrappers used as cards
+ * (.docs-feature-card) keep their own no-underline rule. */
+.docs-main :is(p, li, h1, h2, h3, h4, blockquote) a {
   color: var(--accent-ink);
   text-decoration: underline;
   text-underline-offset: var(--bw-rule);
@@ -225,29 +228,40 @@
   flex-wrap: wrap;
 }
 
+/* CTAs match the reader's design language: pill-shaped accent button
+ * (mirrors .proto-button-primary) for the primary action; outlined
+ * accent for the secondary. Same shape, same weight, same family —
+ * the only difference is fill vs stroke. */
+
 .docs-cta-primary,
 .docs-cta-secondary {
   display: inline-block;
-  padding: var(--sp-12) var(--sp-20);
-  border: var(--bw-hair) solid var(--border);
-  border-radius: var(--sp-4);
+  padding: var(--sp-8) var(--sp-20);
+  border-radius: var(--radius-full);
+  font-family: var(--font-body);
+  font-size: var(--fs-body);
+  font-weight: 500;
   text-decoration: none;
-  font-weight: 600;
-  font-family: var(--font-mono);
-  font-size: var(--fs-meta);
-  letter-spacing: var(--ls-wide);
-  text-transform: uppercase;
+  border: var(--bw-hair) solid var(--accent);
 }
 
 .docs-cta-primary {
-  background: var(--editorial-dark);
-  color: var(--bg);
-  border-color: var(--editorial-dark);
+  background: var(--accent);
+  color: var(--white);
+}
+
+.docs-cta-primary:hover {
+  background: var(--accent-ink);
+  border-color: var(--accent-ink);
 }
 
 .docs-cta-secondary {
-  background: var(--bg);
-  color: var(--editorial-dark);
+  background: transparent;
+  color: var(--accent-ink);
+}
+
+.docs-cta-secondary:hover {
+  background: var(--accent-soft);
 }
 
 .docs-feature-grid {
