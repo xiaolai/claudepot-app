@@ -47,6 +47,15 @@
 .proto-nav-wordmark {
   display: inline-flex;
   font-weight: 700;
+  letter-spacing: var(--ls-masthead);
+}
+
+.proto-nav-wordmark-clau {
+  color: var(--text);
+}
+
+.proto-nav-wordmark-depot {
+  color: var(--accent);
 }
 
 /* :where() drops the descendant-rule specificity to (0,0,1) so any
