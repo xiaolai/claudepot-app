@@ -59,6 +59,16 @@ export function PrototypeNav({
   // this read works in a client component.
   const fallbackAs =
     process.env.NODE_ENV === "production" ? null : searchParams.get("as");
+  // `urlShim` drives URL-rewriting only. Real Auth.js sessions never
+  // need ?as= in URLs (cookies carry the session in production), and
+  // appending it produced links like `/?as=<username>` for signed-in
+  // users — visible in the URL bar and confusing. So URL appending
+  // is gated to the dev URL shim alone.
+  const urlShim = fallbackAs;
+  // `as` drives display + staff checks. Real session first, then dev
+  // shim. Used for avatar display, the @username greeting, and isStaff
+  // fallback. Kept on the same name as the dev-shim URL param so the
+  // template strings below read naturally.
   const as = sessionUsername ?? fallbackAs;
   // Real session: trust sessionIsStaff. Shim path (dev-only): allowlist.
   const isStaff = sessionUsername
@@ -82,7 +92,7 @@ export function PrototypeNav({
 
   return (
     <nav className="proto-nav" aria-label="Main">
-      <Link href={withAuth("/", as)} className="proto-nav-brand">
+      <Link href={withAuth("/", urlShim)} className="proto-nav-brand">
         <Logo size={36} className="proto-nav-logo" />
         <span className="proto-nav-wordmark">
           <span className="proto-nav-wordmark-clau">CLAU</span>
@@ -92,7 +102,7 @@ export function PrototypeNav({
       {NAV_ITEMS.map((item) => (
         <Link
           key={item.href}
-          href={withAuth(item.href, as)}
+          href={withAuth(item.href, urlShim)}
           aria-current={item.match(pathname) ? "page" : undefined}
         >
           {item.label}
@@ -100,14 +110,14 @@ export function PrototypeNav({
       ))}
       {isStaff && (
         <Link
-          href={withAuth("/admin", as)}
+          href={withAuth("/admin", urlShim)}
           className="proto-nav-staff"
           aria-current={pathname.startsWith("/admin") ? "page" : undefined}
         >
           Admin
         </Link>
       )}
-      <Link href={withAuth("/submit", as)} className="proto-nav-cta">
+      <Link href={withAuth("/submit", urlShim)} className="proto-nav-cta">
         Submit
       </Link>
       {as ? (
@@ -128,11 +138,11 @@ export function PrototypeNav({
             )}
           </summary>
           <div className="proto-nav-menu-panel" role="menu">
-            <Link href={withAuth(`/u/${as}`, as)} role="menuitem">
+            <Link href={withAuth(`/u/${as}`, urlShim)} role="menuitem">
               <User size={14} aria-hidden /> Profile
             </Link>
             <Link
-              href={withAuth("/notifications", as)}
+              href={withAuth("/notifications", urlShim)}
               role="menuitem"
             >
               <Bell size={14} aria-hidden /> Notifications
@@ -140,10 +150,10 @@ export function PrototypeNav({
                 <span className="proto-nav-menu-count">{unread}</span>
               )}
             </Link>
-            <Link href={withAuth("/saved", as)} role="menuitem">
+            <Link href={withAuth("/saved", urlShim)} role="menuitem">
               <Bookmark size={14} aria-hidden /> Saved
             </Link>
-            <Link href={withAuth("/settings", as)} role="menuitem">
+            <Link href={withAuth("/settings", urlShim)} role="menuitem">
               <Settings size={14} aria-hidden /> Settings
             </Link>
             <form action={signOutAction} className="proto-nav-menu-signout">
