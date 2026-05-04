@@ -33,12 +33,12 @@
 
 .proto-nav-logo {
   display: block;
-  /* Sized between the wordmark height and a hero scale; not an
-     integer multiple of the SVG's 16-cell pixel grid, so pixels
-     render slightly uneven under image-rendering: pixelated.
-     Accepted for the visual proportion vs the wordmark. */
-  width: var(--sp-36);
-  height: var(--sp-36);
+  /* Sized to match the wordmark cap-height. 1em resolves against
+     .proto-nav-brand's font-size (--fs-title-md), so the pixel
+     icon and the wordmark stay the same visual height regardless
+     of where the wordmark scale is tuned. */
+  width: var(--fs-body);
+  height: var(--fs-body);
   color: var(--accent);
   image-rendering: pixelated;
   flex-shrink: 0;
