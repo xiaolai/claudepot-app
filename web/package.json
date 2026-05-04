@@ -1,0 +1,71 @@
+{
+  "name": "claudepot-com",
+  "version": "0.1.0",
+  "type": "module",
+  "private": true,
+  "engines": {
+    "node": ">=24"
+  },
+  "packageManager": "pnpm@10.30.3",
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start",
+    "test": "tsx tests/build-comment-tree.test.ts && tsx tests/safe-redirect.test.ts && tsx tests/unsubscribe-token.test.ts",
+    "projects:sync": "tsx scripts/sync-projects.ts",
+    "projects:seed": "tsx --env-file=.env.local scripts/sync-projects.ts --seed",
+    "editorial:score": "tsx --env-file=.env.local scripts/editorial-score.ts",
+    "test:editorial": "tsx tests/editorial-routing.test.ts",
+    "social:post": "tsx --env-file=.env.local scripts/social-post.ts",
+    "social:test": "tsx --env-file=.env.local scripts/social-test-auth.ts",
+    "test:social": "tsx tests/social-format.test.ts"
+  },
+  "dependencies": {
+    "@anthropic-ai/claude-agent-sdk": "^0.2.126",
+    "@anthropic-ai/sdk": "^0.92.0",
+    "@atproto/api": "^0.19.11",
+    "@auth/drizzle-adapter": "^1.11.2",
+    "@mdx-js/loader": "^3.1.1",
+    "@mdx-js/react": "^3.1.1",
+    "@modelcontextprotocol/sdk": "~1.26.0",
+    "@neondatabase/serverless": "^1.1.0",
+    "@next/mdx": "^16.2.4",
+    "@types/mdx": "^2.0.13",
+    "@vercel/analytics": "^2.0.1",
+    "boring-avatars": "^2.0.4",
+    "drizzle-orm": "^0.45.2",
+    "js-yaml": "^4.1.1",
+    "lucide-react": "^1.8.0",
+    "marked": "^18.0.2",
+    "mcp-handler": "^1.1.0",
+    "mermaid": "^11.14.0",
+    "next": "15.4.11",
+    "next-auth": "5.0.0-beta.31",
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0",
+    "resend": "^6.12.2",
+    "sanitize-html": "^2.17.3",
+    "shiki": "^4.0.2",
+    "twitter-api-v2": "^1.29.0",
+    "zod": "^4.3.6"
+  },
+  "devDependencies": {
+    "@playwright/mcp": "^0.0.71",
+    "@types/js-yaml": "^4.0.9",
+    "@types/node": "^24.0.0",
+    "@types/react": "^19.0.0",
+    "@types/react-dom": "^19.0.0",
+    "@types/sanitize-html": "^2.16.1",
+    "dotenv": "^17.4.2",
+    "drizzle-kit": "^0.31.10",
+    "n8n-mcp": "^2.49.0",
+    "tsx": "^4.21.0",
+    "typescript": "^5.7.0"
+  },
+  "pnpm": {
+    "onlyBuiltDependencies": [
+      "better-sqlite3",
+      "sharp"
+    ]
+  }
+}

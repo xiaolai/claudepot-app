@@ -1,0 +1,232 @@
+[
+  {
+    "slug": "vmark",
+    "name": "vmark",
+    "tagline": "An AI friendly markdown editor.",
+    "repo_url": "https://github.com/xiaolai/vmark",
+    "site_url": null,
+    "primary_language": "TypeScript",
+    "stars": 301,
+    "updated_at": "2026-05-01T14:21:22Z"
+  },
+  {
+    "slug": "insidebar-ai",
+    "name": "insidebar-ai",
+    "tagline": "A browser extension for Chrome/Edge",
+    "repo_url": "https://github.com/xiaolai/insidebar-ai",
+    "site_url": null,
+    "primary_language": "JavaScript",
+    "stars": 229,
+    "updated_at": "2026-04-26T21:49:36Z"
+  },
+  {
+    "slug": "claudepot-app",
+    "name": "claudepot-app",
+    "tagline": "A control panel for Claude Code and Claude Desktop.",
+    "repo_url": "https://github.com/xiaolai/claudepot-app",
+    "site_url": null,
+    "primary_language": "Rust",
+    "stars": 41,
+    "updated_at": "2026-05-01T15:01:45Z"
+  },
+  {
+    "slug": "claude-agent-sdk-skill-autoupdated",
+    "name": "claude-agent-sdk-skill-autoupdated",
+    "tagline": "Xiaolai's Claude Agent SDK Skill",
+    "repo_url": "https://github.com/xiaolai/claude-agent-sdk-skill-autoupdated",
+    "site_url": null,
+    "primary_language": "TypeScript",
+    "stars": 40,
+    "updated_at": "2026-05-01T09:22:04Z"
+  },
+  {
+    "slug": "tepub",
+    "name": "tepub",
+    "tagline": "TEPUB - Tools for EPUB: Translate books, create audiobooks, and export to various formats",
+    "repo_url": "https://github.com/xiaolai/tepub",
+    "site_url": null,
+    "primary_language": "Python",
+    "stars": 40,
+    "updated_at": "2026-04-14T14:42:32Z"
+  },
+  {
+    "slug": "nlpm-for-claude",
+    "name": "nlpm-for-claude",
+    "tagline": "Natural-Language Programming Manager — scan, lint, and score NL artifacts with Claude-native quality scoring",
+    "repo_url": "https://github.com/xiaolai/nlpm-for-claude",
+    "site_url": null,
+    "primary_language": "Python",
+    "stars": 37,
+    "updated_at": "2026-05-01T12:34:30Z"
+  },
+  {
+    "slug": "claude-plugin-marketplace",
+    "name": "claude-plugin-marketplace",
+    "tagline": "Central marketplace for Claude Code plugins by xiaolai",
+    "repo_url": "https://github.com/xiaolai/claude-plugin-marketplace",
+    "site_url": null,
+    "primary_language": null,
+    "stars": 33,
+    "updated_at": "2026-05-01T10:20:40Z"
+  },
+  {
+    "slug": "codex-toolkit-for-claude",
+    "name": "codex-toolkit-for-claude",
+    "tagline": "OpenAI Codex MCP integration for Claude Code — audit, implement, verify, and debug via Codex",
+    "repo_url": "https://github.com/xiaolai/codex-toolkit-for-claude",
+    "site_url": null,
+    "primary_language": "JavaScript",
+    "stars": 25,
+    "updated_at": "2026-04-29T13:42:38Z"
+  },
+  {
+    "slug": "north-star-system-prompt",
+    "name": "north-star-system-prompt",
+    "tagline": "",
+    "repo_url": "https://github.com/xiaolai/north-star-system-prompt",
+    "site_url": null,
+    "primary_language": null,
+    "stars": 25,
+    "updated_at": "2026-05-01T14:25:17Z"
+  },
+  {
+    "slug": "mecha.im",
+    "name": "mecha.im",
+    "tagline": "Mecha: Run an army of bots on your own machines. ",
+    "repo_url": "https://github.com/xiaolai/mecha.im",
+    "site_url": null,
+    "primary_language": "Go",
+    "stars": 24,
+    "updated_at": "2026-04-28T07:00:49Z"
+  },
+  {
+    "slug": "claude-octopus",
+    "name": "claude-octopus",
+    "tagline": "One brain, many arms — spawn multiple specialized Claude Code agents as MCP servers",
+    "repo_url": "https://github.com/xiaolai/claude-octopus",
+    "site_url": null,
+    "primary_language": "TypeScript",
+    "stars": 13,
+    "updated_at": "2026-04-24T09:25:50Z"
+  },
+  {
+    "slug": "anthropic-claude-surge-rules-set",
+    "name": "anthropic-claude-surge-rules-set",
+    "tagline": "Comprehensive proxy ruleset for Anthropic/Claude services — Surge, Clash, sing-box, Quantumult X, Loon",
+    "repo_url": "https://github.com/xiaolai/anthropic-claude-surge-rules-set",
+    "site_url": null,
+    "primary_language": "Python",
+    "stars": 13,
+    "updated_at": "2026-05-01T09:15:23Z"
+  },
+  {
+    "slug": "codex-octopus",
+    "name": "codex-octopus",
+    "tagline": "One brain, many arms — spawn multiple specialized Codex agents as MCP servers",
+    "repo_url": "https://github.com/xiaolai/codex-octopus",
+    "site_url": null,
+    "primary_language": "TypeScript",
+    "stars": 10,
+    "updated_at": "2026-04-30T18:23:54Z"
+  },
+  {
+    "slug": "claude-english-buddy-for-claude",
+    "name": "claude-english-buddy-for-claude",
+    "tagline": "",
+    "repo_url": "https://github.com/xiaolai/claude-english-buddy-for-claude",
+    "site_url": null,
+    "primary_language": "JavaScript",
+    "stars": 9,
+    "updated_at": "2026-05-01T03:04:39Z"
+  },
+  {
+    "slug": "docs-guardian-for-claude",
+    "name": "docs-guardian-for-claude",
+    "tagline": "Documentation quality and freshness enforcer for Claude Code — detect staleness, check accuracy, measure coverage, and auto-generate docs",
+    "repo_url": "https://github.com/xiaolai/docs-guardian-for-claude",
+    "site_url": null,
+    "primary_language": "Shell",
+    "stars": 5,
+    "updated_at": "2026-04-29T13:44:16Z"
+  },
+  {
+    "slug": "init-workspace",
+    "name": "init-workspace",
+    "tagline": "Initialize any project for AI-assisted development with Claude Code, Codex CLI, and Gemini CLI",
+    "repo_url": "https://github.com/xiaolai/init-workspace",
+    "site_url": null,
+    "primary_language": null,
+    "stars": 5,
+    "updated_at": "2026-02-07T15:05:00Z"
+  },
+  {
+    "slug": "echo-sleuth-for-claude",
+    "name": "echo-sleuth-for-claude",
+    "tagline": "Claude Code plugin: Mine past conversations for decisions, mistakes, patterns, and wisdom",
+    "repo_url": "https://github.com/xiaolai/echo-sleuth-for-claude",
+    "site_url": null,
+    "primary_language": "Shell",
+    "stars": 3,
+    "updated_at": "2026-04-30T08:23:03Z"
+  },
+  {
+    "slug": "mermaid-preview-for-claude",
+    "name": "mermaid-preview-for-claude",
+    "tagline": "Auto-preview Mermaid diagrams in the browser on Write/Edit/MultiEdit/NotebookEdit. Offline-safe, dark-mode aware, per-file preview with auto-reload.",
+    "repo_url": "https://github.com/xiaolai/mermaid-preview-for-claude",
+    "site_url": null,
+    "primary_language": "Shell",
+    "stars": 3,
+    "updated_at": "2026-04-29T13:47:19Z"
+  },
+  {
+    "slug": "loc-guardian-for-claude",
+    "name": "loc-guardian-for-claude",
+    "tagline": "Enforce per-file pure LOC limits with automated optimization strategies — counts, flags violations, and provides opus-powered extraction plans",
+    "repo_url": "https://github.com/xiaolai/loc-guardian-for-claude",
+    "site_url": null,
+    "primary_language": null,
+    "stars": 2,
+    "updated_at": "2026-04-29T13:43:05Z"
+  },
+  {
+    "slug": "tdd-guardian-for-claude",
+    "name": "tdd-guardian-for-claude",
+    "tagline": "TDD Guardian for Claude Code — enforces strict test-driven development with automated quality gates",
+    "repo_url": "https://github.com/xiaolai/tdd-guardian-for-claude",
+    "site_url": null,
+    "primary_language": "JavaScript",
+    "stars": 2,
+    "updated_at": "2026-04-29T13:42:27Z"
+  },
+  {
+    "slug": "ui-tokenize",
+    "name": "ui-tokenize",
+    "tagline": "Block hardcoded UI values; enforce design tokens with rewrite-first hooks and a closed-loop control system",
+    "repo_url": "https://github.com/xiaolai/ui-tokenize",
+    "site_url": null,
+    "primary_language": "JavaScript",
+    "stars": 1,
+    "updated_at": "2026-05-01T07:39:13Z"
+  },
+  {
+    "slug": "ui-responsive",
+    "name": "ui-responsive",
+    "tagline": "Advisory responsive-design coach — flags non-responsive CSS patterns post-write; never blocks tool calls",
+    "repo_url": "https://github.com/xiaolai/ui-responsive",
+    "site_url": null,
+    "primary_language": "JavaScript",
+    "stars": 1,
+    "updated_at": "2026-04-29T13:46:26Z"
+  },
+  {
+    "slug": "grill-for-claude",
+    "name": "grill-for-claude",
+    "tagline": "Deep codebase interrogation — multi-angle architecture review that forces rigorous, actionable analysis",
+    "repo_url": "https://github.com/xiaolai/grill-for-claude",
+    "site_url": null,
+    "primary_language": "Shell",
+    "stars": 0,
+    "updated_at": "2026-04-29T13:44:30Z"
+  }
+]

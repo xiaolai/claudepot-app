@@ -1,0 +1,55 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg width="1024px" height="1024px" viewBox="0 0 1024 1024" version="1.1" xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink">
+    <title>icon-transparent-1024</title>
+    <defs>
+        <path d="M480,768 L352,768 L352,704 L480,704 Z M672,768 L544,768 L544,704 L672,704 Z M416,384 L608,384 L608,320 L672,320 L672,384 L736,384 L736,448 L800,448 L800,512 L864,512 L864,704 L800,704 L800,576 L736,576 L736,704 L672,704 L672,640 L352,640 L352,704 L288,704 L288,576 L224,576 L224,704 L160,704 L160,512 L224,512 L224,448 L288,448 L288,384 L352,384 L352,320 L416,320 Z M352,448 L352,512 L416,512 L416,448 Z M608,448 L608,512 L672,512 L672,448 Z M352,320 L288,320 L288,256 L352,256 Z M736,320 L672,320 L672,256 L736,256 Z" id="path-1"></path>
+    </defs>
+    <g id="icon-transparent-1024" stroke="none" fill="none" xlink:href="#path-1" fill-rule="evenodd">
+        <rect id="px" fill="#C56F52" x="288" y="256" width="64" height="64"></rect>
+        <rect id="px" fill="#C56F52" x="672" y="256" width="64" height="64"></rect>
+        <rect id="px" fill="#C56F52" x="352" y="320" width="64" height="64"></rect>
+        <rect id="px" fill="#C56F52" x="608" y="320" width="64" height="64"></rect>
+        <rect id="px" fill="#C56F52" x="288" y="384" width="64" height="64"></rect>
+        <rect id="px" fill="#C56F52" x="352" y="384" width="64" height="64"></rect>
+        <rect id="px" fill="#C56F52" x="416" y="384" width="64" height="64"></rect>
+        <rect id="px" fill="#C56F52" x="480" y="384" width="64" height="64"></rect>
+        <rect id="px" fill="#C56F52" x="544" y="384" width="64" height="64"></rect>
+        <rect id="px" fill="#C56F52" x="608" y="384" width="64" height="64"></rect>
+        <rect id="px" fill="#C56F52" x="672" y="384" width="64" height="64"></rect>
+        <rect id="px" fill="#C56F52" x="224" y="448" width="64" height="64"></rect>
+        <rect id="px" fill="#C56F52" x="288" y="448" width="64" height="64"></rect>
+        <rect id="px" fill="#C56F52" x="416" y="448" width="64" height="64"></rect>
+        <rect id="px" fill="#C56F52" x="480" y="448" width="64" height="64"></rect>
+        <rect id="px" fill="#C56F52" x="544" y="448" width="64" height="64"></rect>
+        <rect id="px" fill="#C56F52" x="672" y="448" width="64" height="64"></rect>
+        <rect id="px" fill="#C56F52" x="736" y="448" width="64" height="64"></rect>
+        <rect id="px" fill="#C56F52" x="160" y="512" width="64" height="64"></rect>
+        <rect id="px" fill="#C56F52" x="224" y="512" width="64" height="64"></rect>
+        <rect id="px" fill="#C56F52" x="288" y="512" width="64" height="64"></rect>
+        <rect id="px" fill="#C56F52" x="352" y="512" width="64" height="64"></rect>
+        <rect id="px" fill="#C56F52" x="416" y="512" width="64" height="64"></rect>
+        <rect id="px" fill="#C56F52" x="480" y="512" width="64" height="64"></rect>
+        <rect id="px" fill="#C56F52" x="544" y="512" width="64" height="64"></rect>
+        <rect id="px" fill="#C56F52" x="608" y="512" width="64" height="64"></rect>
+        <rect id="px" fill="#C56F52" x="672" y="512" width="64" height="64"></rect>
+        <rect id="px" fill="#C56F52" x="736" y="512" width="64" height="64"></rect>
+        <rect id="px" fill="#C56F52" x="800" y="512" width="64" height="64"></rect>
+        <rect id="px" fill="#C56F52" x="160" y="576" width="64" height="64"></rect>
+        <rect id="px" fill="#C56F52" x="288" y="576" width="64" height="64"></rect>
+        <rect id="px" fill="#C56F52" x="352" y="576" width="64" height="64"></rect>
+        <rect id="px" fill="#C56F52" x="416" y="576" width="64" height="64"></rect>
+        <rect id="px" fill="#C56F52" x="480" y="576" width="64" height="64"></rect>
+        <rect id="px" fill="#C56F52" x="544" y="576" width="64" height="64"></rect>
+        <rect id="px" fill="#C56F52" x="608" y="576" width="64" height="64"></rect>
+        <rect id="px" fill="#C56F52" x="672" y="576" width="64" height="64"></rect>
+        <rect id="px" fill="#C56F52" x="800" y="576" width="64" height="64"></rect>
+        <rect id="px" fill="#C56F52" x="160" y="640" width="64" height="64"></rect>
+        <rect id="px" fill="#C56F52" x="288" y="640" width="64" height="64"></rect>
+        <rect id="px" fill="#C56F52" x="672" y="640" width="64" height="64"></rect>
+        <rect id="px" fill="#C56F52" x="800" y="640" width="64" height="64"></rect>
+        <rect id="px" fill="#C56F52" x="352" y="704" width="64" height="64"></rect>
+        <rect id="px" fill="#C56F52" x="416" y="704" width="64" height="64"></rect>
+        <rect id="px" fill="#C56F52" x="544" y="704" width="64" height="64"></rect>
+        <rect id="px" fill="#C56F52" x="608" y="704" width="64" height="64"></rect>
+    </g>
+</svg>

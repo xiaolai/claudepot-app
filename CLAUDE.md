@@ -121,6 +121,38 @@ See `dev-docs/implementation-plan.md` for the full plan.
   by op_id. The `RunningOps` map on the backend is the polling
   backstop; see `src-tauri/src/ops.rs`.
 
+## Web (claudepot.com)
+
+`web/` is a self-contained Next.js 15 app that ships
+`https://claudepot.com`. Independent install (its own
+`package.json` + `pnpm-lock.yaml`); not a workspace member of the
+root Tauri app. Two surfaces in one app:
+
+- `/` — **reader**: resource aggregator for one-man companies
+  building with AI (ported by copy from sha.nnon.ai, rebranded
+  ClauDepot, fresh Neon DB).
+- `/app/*` — **product docs**: 14 routes (landing + why + install
+  + 8 features + features index + changelog + download), MDX
+  inside the `(docs)` route group.
+
+Stack: Next.js 15 + Drizzle/Neon + Auth.js v5 (GitHub + Google +
+Resend magic-link) + Resend + boring-avatars. `editorial/` carries
+the editorial spec read at runtime by the bot office (a separate
+private repo).
+
+Deploy: Vercel project `lixiaolai/claudepot-com`, Root Directory
+`web/`. CF DNS for the `claudepot.com` zone is unproxied A
+records to `76.76.21.21`. Phase-1 plan and full migration log in
+`dev-docs/domain-realignment.md`.
+
+CI: `.github/workflows/ci-web.yml` runs typecheck + tests on
+`web/**` changes (no build — Vercel handles the build per push).
+
+The `web/.tokenize/` config is set to `disabled: true` during the
+sha.nnon.ai → ClauDepot rebrand transition; re-enable with
+`/ui-tokenize:fix` after the imported codebase's residual hardcoded
+values are absorbed.
+
 ## Reference
 
 `dev-docs/kannon/reference.md` — 3400-line verified reference for CC/Desktop internals.

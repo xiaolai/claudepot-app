@@ -1,0 +1,87 @@
+export const metadata = {
+  title: "Settings",
+  description:
+    "Themes, shortcuts, notifications. Cleanup (session prune + slim + trash with 7-day undo) lives here.",
+};
+
+# Settings
+
+Personal preferences plus the cleanup tools that keep `~/.claude/`
+from quietly growing to many gigabytes.
+
+## Personal
+
+- **Theme** &mdash; light / dark / system. Same surface as Global,
+  exposed here for convenience.
+- **Keyboard shortcuts** &mdash; the cmd-K palette, cmd-R refresh,
+  cmd-N add, cmd-1..cmd-8 section-jump bindings are visible and
+  customisable.
+- **Notifications** &mdash; what fires an OS banner vs. what stays
+  in-app. The bell-icon popover in the WindowChrome shows the last
+  500 entries.
+
+## Cleanup
+
+The bigger half of the Settings tab. Three operations:
+
+### Prune
+
+Removes orphaned session files — transcripts whose project directory
+no longer exists. Lists them first so you can review before
+deleting. CLI:
+
+```bash
+claudepot session prune --dry-run
+claudepot session prune
+```
+
+### Slim
+
+Reduces the size of individual transcripts without losing the
+conversation history. Common targets:
+
+- **Drop image attachments** stored verbatim in `toolUseResult` while
+  preserving the same images in `message.content` (where Claude
+  already transformed them for token-counting). Saved on average
+  ~40% per transcript with images.
+- **Strip cached tool calls** that are deterministic and reproducible.
+- **Compact whitespace** in JSONL fields.
+
+`session slim --strip-images` is the canonical use. CLI:
+
+```bash
+claudepot session slim --strip-images <session-id>
+claudepot session slim --strip-images --all
+```
+
+### Trash
+
+A 7-day soft-delete bin. Anything you remove via Cleanup lands here
+first; after 7 days it&rsquo;s permanently deleted. You can restore
+or empty manually any time.
+
+```bash
+claudepot trash list
+claudepot trash restore <id>
+claudepot trash empty
+```
+
+## What&rsquo;s in the data directories
+
+For reference, the disk locations ClauDepot manages:
+
+- `~/.claude/projects/<slug>/*.jsonl` — Claude&rsquo;s session
+  transcripts. Owned by Claude; ClauDepot reads and (carefully)
+  rewrites.
+- `~/.claudepot/accounts.db` — accounts + verification state.
+  ClauDepot-owned, single-writer.
+- `~/.claudepot/sessions.db` — session-index cache. One row per
+  transcript, keyed by `file_path`, `(size, mtime_ns)` as the
+  re-parse guard. Rebuild any time via *Cleanup → Rebuild index*.
+- `~/.claudepot/notifications.json` — ring buffer of dispatched
+  toasts and OS banners (≤ 500 entries). Corrupt files are moved
+  aside to `notifications.json.corrupt` and the log starts fresh —
+  never fatal at boot.
+
+`CLAUDEPOT_DATA_DIR` overrides the second-to-fourth path. See the
+[Global](/app/features/global) tab.

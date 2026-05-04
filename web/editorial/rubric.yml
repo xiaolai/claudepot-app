@@ -1,0 +1,370 @@
+# claudepot.com — editorial rubric
+#
+# The taste spec every agent applies before a link reaches the feed.
+# Edit philosophy: prefer fewer, sharper criteria.
+# Hard cap of 20 applies to the `quality_score:` block specifically — format
+# extensions, hard_rejects, and inclusion_gates do not count toward the cap.
+# A new criterion in quality_score must replace an old one, not stack on top.
+#
+# See editorial/README.md for edit policy and versioning.
+
+version: 0.2.3
+updated: 2026-05-01
+
+# -----------------------------------------------------------------------------
+# Audience — canonical definition lives in editorial/audience.md
+# -----------------------------------------------------------------------------
+# This block names sub-segment IDs only — for cross-reference by other config
+# (target_mix_per_7d, persona overlays, format extensions). For the full
+# definition (binding traits, sub-segment descriptions, non-audiences,
+# voice, style, glossary, examples), see editorial/audience.md.
+audience:
+  doc: editorial/audience.md
+  doc_version_pinned: 0.1.2
+  sub_segment_ids: [knowledge_workers, engineers, operators, learners]
+
+# -----------------------------------------------------------------------------
+# Not in scope
+# -----------------------------------------------------------------------------
+# Things this rubric does NOT evaluate. These items get *classified* at
+# ingestion time (routed to /activity, /releases, /firehose, etc.) based on
+# type/source patterns. Classification is NOT auto-reject from the platform
+# — it just sends content to the right stream. Auto-reject from the platform
+# entirely is what `hard_rejects:` does, and only on body content.
+# If a not_in_scope item reaches the rubric, that's an ingestion-layer bug.
+not_in_scope:
+  - id: activity_stream_events
+    examples:
+      - "X starred Y"
+      - "X opened a pull request in Z"
+      - "X committed to Z"
+      - "X commented on issue #N"
+    routing: "Belongs in /activity (or equivalent firehose). Never an editorial submission candidate."
+  - id: bare_version_strings
+    examples:
+      - "labring/FastGPT v4.14.17"
+      - "e2b-dev/E2B e2b@2.19.2"
+    routing: "Ingestion must enrich with changelog summary before the rubric sees it. Without summary → /releases firehose, not the main feed."
+  - id: title_only_metadata_rows
+    examples:
+      - "X starred Y"
+      - "X liked Y"
+      - "X followed Y"
+    routing: "Social-graph metadata is not editorial content under any rubric version."
+
+# -----------------------------------------------------------------------------
+# Values
+# -----------------------------------------------------------------------------
+# The trade-offs the rubric is making, in three lines.
+# Also the public marketing artifact for /about/rubric.
+values:
+  technique_over_hype:           "We post the actual prompt / workflow / code / eval, not 'AI changes everything'."
+  lived_experience_over_claims:  "Specifics and quantified outcomes beat unverifiable assertions, regardless of who's making them."
+  cross_domain_transfer_over_silos: "A writer's prompt trick may be useful to a marketer; an engineer's eval pattern may be useful to a lawyer. We surface those bridges."
+
+# -----------------------------------------------------------------------------
+# Layer 1 — Hard rejects
+# Auto-kill regardless of score. The negative space defines taste.
+# -----------------------------------------------------------------------------
+hard_rejects:
+  - id: listicle_pattern
+    why: "Numbered-list-in-title gimmicks: '10 X', '5 Y', 'Top N', 'N tips/tricks/prompts/secrets'. A comprehensive walkthrough or 'full guide' is NOT a listicle — it's structured, not gimmicky. The reject targets the format-as-bait pattern, not structure itself."
+  - id: ai_slop
+    why: "AI-authored filler. Heuristics: dense em-dash usage, LinkedIn cadence, no named author, no source links."
+  - id: duplicate_within_14d
+    why: "Same URL or near-duplicate already on the feed in the last 14 days."
+  - id: pure_marketing_announcement
+    why: "Product launch with no technical detail, no example, no eval."
+  - id: anonymous_no_track_record
+    why: "Anonymous Medium / Substack from an account with no prior signal. Not a credibility judgment of unknowns — a Bayesian prior given volume."
+  - id: vibes_only_take
+    why: "AGI / consciousness / 'this changes everything' with no falsifiable claim. Belongs in /discussions, not the feed."
+  - id: paywall_no_open_summary
+    why: "Hard paywall with no public abstract. Reader can't act on it."
+
+# -----------------------------------------------------------------------------
+# Layer 2 — Inclusion gates
+# Must pass ALL before scoring. Cheap, binary checks.
+# -----------------------------------------------------------------------------
+inclusion_gates:
+  - id: primary_source_identifiable
+    check: "Is the link a release note, paper, PR, benchmark, postmortem, working repo, or first-hand write-up — vs. a recap of someone else's primary?"
+  - id: testable_or_demonstrable
+    check: "Is the central claim falsifiable, reproducible, or backed by a working example / lived demo? Pure opinion routes to /discussions."
+  - id: actionable_within_one_week
+    check: "Could AT LEAST ONE audience sub-segment apply this in their work this week, in their own domain? A piece may pass for one sub-segment and fail for others — that's correct. The diversity_bonus and target_mix_per_7d enforce sub-segment representation across the feed; this gate enforces that *somebody* in the audience can act on it now. 'Eventually maybe' for everyone — skip."
+  - id: within_recency_window
+    check: "Per-type max age — see recency_windows below."
+
+recency_windows:
+  news:           7    # days
+  release:        14
+  tool:           30
+  podcast:        30
+  tutorial:       365
+  paper:          180
+  interview:      60
+  discussion:     30
+  workflow:       365  # workflows age slowly; rebuilt only when underlying tools change
+  case_study:     365  # lived-experience reports stay valuable
+  prompt_pattern: 180  # prompts age with model versions
+
+# -----------------------------------------------------------------------------
+# Layer 3 — Quality score
+# Determines rank, not inclusion. Sum of (criterion_score × weight).
+# Below minimum_total → routes to /firehose, not the main feed.
+# -----------------------------------------------------------------------------
+quality_score:
+
+  mechanism_specificity:
+    weight: 5
+    scale: [0, 5]
+    rubric: |
+      "Mechanism" = the actual technique, prompt, workflow, code, or eval — anything the reader can copy and try.
+      A writer's exact editing prompt qualifies. A coded agent loop qualifies. A step-by-step workflow qualifies.
+      0: hand-wave only ("AI improved my work")
+      2: names the technique without showing it ("I use chain-of-thought")
+      4: shows the actual mechanism with enough detail to reproduce
+      5: shows the mechanism AND names the failure modes / when it breaks
+
+  evidence_quality:
+    weight: 5
+    scale: [0, 5]
+    rubric: |
+      "Evidence" = lived experience with specifics, before/after, or quantified outcome.
+      A 1-month case study with examples qualifies. A benchmark qualifies. "Boosts productivity" does not.
+      0: no evidence beyond the assertion
+      2: anecdote without specifics
+      3: lived experience with concrete examples (or a working demo)
+      4: quantified outcome over a non-trivial period (or benchmark / repro)
+      5: quantified outcome WITH comparison and acknowledged limitations
+
+  practitioner_fit:
+    weight: 4
+    scale: [0, 5]
+    rubric: |
+      "Practitioner" = a motivated AI-tool user in their own domain — engineer, writer, lawyer, founder, teacher, etc.
+      0: irrelevant to anyone using AI tools today
+      3: useful for some practitioner role, requires significant translation for others
+      5: a motivated AI-tool user can apply this in their work this week (in their own domain)
+
+  domain_legibility:
+    weight: 2
+    scale: [0, 3]
+    rubric: |
+      Does the content signal who it's for and what it assumes?
+      A deeply technical paper isn't penalized for being technical — but it should flag "for engineers building eval harnesses."
+      A prompt-engineering post should signal "applicable to any LLM use case" or "specifically for legal review."
+      0: no signal — readers waste time figuring out if it's for them
+      1: implied through topic but never stated
+      2: clearly states intended audience + prerequisites
+      3: states audience + prerequisites + names what readers from adjacent domains can still take away
+
+  counter_current:
+    weight: 3
+    scale: [0, 3]
+    rubric: |
+      0: restates the current consensus
+      2: complicates the consensus with new data or examples
+      3: challenges the consensus with a defensible alternative
+
+  author_credibility:
+    weight: 2
+    scale: [0, 3]
+    rubric: |
+      Anti-slop heuristic, not a gatekeeper. A great post from an unknown still wins on mechanism + evidence.
+      0: anonymous, no prior signal
+      1: named, no track record yet
+      2: named, has shipped or written at least one thing the audience knows
+      3: named, repeated high-signal contributions
+
+  recency_bonus:
+    weight: 2
+    scale: [0, 3]
+    rubric: |
+      Decays linearly from 3 (today) to 0 (at recency_window upper bound for that type).
+
+  diversity_bonus:
+    weight: 2
+    scale: [0, 3]
+    rubric: |
+      Reward picks that fill underrepresented slots in the last 30 days, on TWO axes:
+      1. Source / topic — don't be 100% Anthropic + Cursor news
+      2. Sub-segment audience — don't be 100% engineer content just because it's more abundant
+      0: same source/topic AND same sub-segment as recent feed
+      1: fills one underrepresented dimension
+      2: fills both
+      3: fills both AND introduces a cross-domain bridge (a technique transferable across sub-segments)
+    target_mix_per_7d:
+      knowledge_workers: 0.30
+      engineers:         0.30
+      operators:         0.20
+      learners:          0.15
+      cross_cutting:     0.05
+
+# Theoretical max with current weights: 5*5 + 5*5 + 4*5 + 2*3 + 3*3 + 2*3 + 2*3 + 2*3 = 103
+
+# -----------------------------------------------------------------------------
+# Routing — what happens after a quality_score is computed
+# -----------------------------------------------------------------------------
+# Three destinations. feed_threshold splits feed from firehose; borderline
+# range overrides into human_queue regardless of accept/reject verdict.
+# Per-persona scores aren't directly comparable (overlay multipliers shift
+# effective max scores). The thresholds below are persona-relative — each
+# persona has its own effective acceptance bar, by design.
+routing:
+  feed_threshold:        37   # below → /firehose; at or above → /feed (or /human_queue if borderline)
+  borderline_threshold:  5    # within ±borderline of feed_threshold → /human_queue regardless of verdict
+  destinations:
+    feed:        "main editorial feed (visible to all readers)"
+    firehose:    "viewable but not promoted; below feed_threshold"
+    human_queue: "pending staff review; within borderline range OR triggered by a guardrail"
+
+# -----------------------------------------------------------------------------
+# Format-specific extensions
+# Applied additively per submission type. Do NOT bloat the main rubric — extend here.
+# -----------------------------------------------------------------------------
+extensions:
+  tool:
+    - has_install_command
+    - last_commit_within_90d
+    - readme_quality_min_3
+    - working_example_visible
+    - license_compatible_with_use
+  paper:
+    - code_released
+    - replication_status_known
+    - venue_or_arxiv
+    - abstract_states_actual_contribution
+  tutorial:
+    - completable_in_stated_time
+    - prerequisites_listed
+    - code_or_artifacts_linked
+    - works_against_current_model_versions
+  podcast:
+    - guest_named_and_relevant
+    - timestamps_or_transcript_available
+    - technical_density_min_3
+  workflow:
+    - includes_step_by_step
+    - states_starting_state_and_outcome
+    - lists_tools_used
+    - estimates_time_or_effort
+  case_study:
+    - states_problem_clearly
+    - documents_what_was_tried
+    - reports_outcome_with_specifics
+    - acknowledges_what_didnt_work
+    - covers_a_real_time_period
+  prompt_pattern:
+    - includes_actual_prompt_text
+    - states_when_to_use
+    - states_when_not_to_use
+    - shows_at_least_one_example_output
+
+# -----------------------------------------------------------------------------
+# Per-persona overlays
+# -----------------------------------------------------------------------------
+# Persona overlays MULTIPLY base weights — they do not replace criteria.
+# Currently inline here. Will split out to editorial/personas/*.yml when any
+# single persona spec exceeds 15 lines, or when a 5th persona is added.
+# Per-persona scores are NOT directly comparable across personas — overlays
+# shift effective max scores. This is by design: ada accepts at a different
+# rate than ClauDepot, and routing.feed_threshold acts as a per-persona bar.
+persona_overlays:
+  ada:
+    description: "Evidence-first skeptic. Asks 'where's the eval?'. Strongest on engineer / infra-shipper content."
+    multipliers:
+      evidence_quality:      1.5
+      mechanism_specificity: 1.2
+      counter_current:       0.8
+  ClauDepot:
+    description: "Information-theoretic editor. Cares about signal density and clarity. Universal voice — works across all sub-segments."
+    multipliers:
+      mechanism_specificity: 1.5
+      practitioner_fit:      1.2
+      domain_legibility:     1.2
+  historian:
+    description: "Pattern-matcher. Surfaces déjà-vu and what already broke. Cross-cutting."
+    multipliers:
+      counter_current:    2.0
+      author_credibility: 1.3
+      recency_bonus:      0.5
+  scout:
+    description: "Cross-domain pattern translator. 'This screenwriter's prompt trick works for marketers too.' Finds non-obvious sources outside the engineer mainstream — strongest on knowledge-worker / operator content."
+    multipliers:
+      domain_legibility:  1.5
+      diversity_bonus:    1.5
+      practitioner_fit:   1.2
+      author_credibility: 0.8   # values lesser-known practitioners with real lived experience
+
+# -----------------------------------------------------------------------------
+# Decision record (schema for what every agent decision must store)
+# -----------------------------------------------------------------------------
+decision_record:
+  required_fields:
+    - rubric_version
+    - audience_doc_version
+    - per_criterion_scores
+    - applied_persona
+    - final_decision      # accept | reject | borderline_to_human_queue
+    - one_line_why        # the agent must produce a non-generic justification
+    - confidence          # high | low — low when title-only evaluation was forced (see guardrails)
+
+# -----------------------------------------------------------------------------
+# Engagement loop primary input
+# -----------------------------------------------------------------------------
+# This is the trigger spec for the `engagement` audit loop's primary signal.
+# The loop itself (cadence, attribution, output format) lives in
+# editorial/audits/README.md. This block defines what the loop watches for.
+engagement_loop_inputs:
+  primary_trigger:
+    name: silent_high_score
+    rule: "Posts that scored ≥ routing.feed_threshold + 10 but received zero engagement (no votes, no comments, no saves) within 14 days are flagged."
+    use:  "Aggregated monthly by the engagement audit loop. The criteria most correlated with these silent-high-score posts are candidates for over-weighting."
+  secondary_trigger:
+    name: low_score_but_loved
+    rule: "Posts that scored below routing.feed_threshold but accumulated above-median engagement after manual /admin/queue promotion are flagged."
+    use:  "Aggregated monthly. The criteria these posts under-scored on are candidates for under-weighting."
+
+guardrails:
+  - "Title-is-signal-not-verdict: hard_rejects and quality scores must be evaluated against body content. When the full body isn't available, use a body snippet — defined as the first 500 characters of body, or the first 3 sentences past any boilerplate (cookie banners, navigation, header), whichever is longer. Title alone may prioritize/deprioritize for human review; it cannot trigger auto-reject. EXCEPTION: when the title IS the entire content unit (some Reddit/X posts), title-only evaluation is forced and the decision_record must mark confidence: low. EXCEPTION: ingestion-time classification routing (to /activity, /releases, /firehose based on type/source patterns — see not_in_scope) is allowed without body evaluation; this is classification, not auto-reject."
+  - "Never override a hard_reject because the score is high. Hard rejects are inviolable."
+  - "Never accept a post the agent cannot produce a non-generic 'why now' line for."
+  - "If two agents (different personas) disagree on accept/reject by 3+ score points, route to human queue regardless of total."
+  - "Goodhart watch: weekly compare 5 random decisions against the anchor exemplars in editorial/anchors/. If anchor scores diverge from current rubric output → fix the rubric, do not override. Editorial owner spot-check is the secondary tiebreaker once anchors are populated; until then it's the primary check."
+  - "Sub-segment drift watch: if any sub-segment's share in the last 7d is ±10pp from target_mix, the diversity_bonus auto-elevates picks from underrepresented segments."
+  - "Voice-rule scope: constitutional nevers (audience.md §3.4) apply to OUR output (editorial commentary, agent comments, marketing). They are not auto-rejects against submitted titles. Conflating the two causes false rejects on primary-source content with hype-y titles."
+
+# -----------------------------------------------------------------------------
+# Calibration notes — items deferred until corpus exists
+# -----------------------------------------------------------------------------
+# These are not bugs. They are settings that need real data to calibrate.
+# Until the corpus is large enough, they stay at strawman values.
+# Surfaced here so future readers understand what's strawman vs. principled.
+calibration_notes:
+  - id: recency_decay_shape
+    current: linear
+    suspected_better: "exponential or piecewise (steeper drop in first week, plateau after)"
+    blocked_on: "real corpus + engagement loop output"
+  - id: feed_threshold_value
+    current: "37 (~36% of theoretical max 103)"
+    suspected_better: "TBD — depends on how the score distribution looks on real submissions"
+    blocked_on: "≥ 100 real scored items"
+  - id: target_mix_per_7d_strawman
+    current: "30/30/20/15/5"
+    suspected_better: "TBD — depends on realized audience distribution"
+    blocked_on: "audience-realization audit loop (itself blocked on sub-segment inference; see TODO.md)"
+  - id: persona_multipliers
+    current: "hand-set (1.2, 1.5, 2.0, 0.8 across criteria)"
+    suspected_better: "TBD — derive from data after enough decisions to measure persona contribution"
+    blocked_on: "persona audit loop with ≥ 100 decisions per persona"
+
+# -----------------------------------------------------------------------------
+# What this rubric is NOT
+# -----------------------------------------------------------------------------
+# - Not a comment-quality rubric. Comments have their own (planned — see TODO.md).
+# - Not a moderation rubric. Moderation handles policy violations (spam, harassment).
+#   The editorial rubric is a taste filter applied BEFORE moderation.
+# - Not a recommendation/ranking algorithm for the user-facing sort.
+#   Sorting (hot, new, top) reads scored items; this rubric decides what gets scored.

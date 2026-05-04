@@ -1,0 +1,16 @@
+[
+  {
+    "id": "anchor-reject-hype-listicle",
+    "title": "10 INCREDIBLE ChatGPT Prompts That Will UNLOCK Your Productivity in 2026",
+    "url": "synthetic",
+    "body_excerpt": "Are you tired of being stuck in your old workflow? These 10 game-changing ChatGPT prompts will revolutionize the way you work! Number 7 will blow your mind. (1) Write me a marketing email — game-changer. (2) Summarize this article — saves hours. (3) ...",
+    "type": "news",
+    "sub_segment": "cross_cutting",
+    "expected_verdict": "reject",
+    "expected_reason": "Hits hard_rejects: listicle_pattern (numbered-list-in-title gimmick), pure_marketing_announcement (no source, no specifics), vibes_only_take (manufactured excitement, no falsifiable claim). Body fails inclusion_gates: testable_or_demonstrable, primary_source_identifiable.",
+    "added": "2026-05-01",
+    "added_by": "xiaolai",
+    "rubric_version_at_addition": "0.2.3",
+    "audience_version_at_addition": "0.1.2"
+  }
+]

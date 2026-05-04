@@ -1,0 +1,265 @@
+/* /app/* docs surface. Uses web/'s `theme.css` tokens directly —
+ * no claudepot-app spacing scale, no hardcoded color fallbacks,
+ * no global brand-mark classes. Scoped to `.docs-*` so it doesn't
+ * collide with the reader's `prototype.css`. */
+
+.docs-topbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: var(--sp-12) var(--sp-20);
+  border-bottom: var(--bw-hair) solid var(--border);
+  background: var(--bg);
+  position: sticky;
+  top: 0;
+  z-index: 10;
+}
+
+.docs-brand {
+  text-decoration: none;
+  font-size: var(--fs-section-heading);
+  font-weight: 600;
+  letter-spacing: var(--ls-tight);
+  color: var(--text);
+}
+
+.docs-topbar-nav {
+  display: flex;
+  gap: var(--sp-20);
+  align-items: center;
+}
+
+.docs-topbar-nav a {
+  color: var(--muted);
+  text-decoration: none;
+  font-size: var(--fs-meta);
+}
+
+.docs-topbar-nav a:hover {
+  color: var(--text);
+}
+
+.docs-topbar-reader {
+  border-left: var(--bw-hair) solid var(--border);
+  padding-left: var(--sp-20);
+}
+
+.docs-shell {
+  display: grid;
+  grid-template-columns: 16rem 1fr;
+  gap: var(--sp-32);
+  max-width: 78rem;
+  margin: 0 auto;
+  padding: var(--sp-28) var(--sp-20);
+}
+
+.docs-sidebar {
+  position: sticky;
+  top: calc(var(--sp-28) + 4rem);
+  align-self: flex-start;
+  font-size: var(--fs-meta);
+}
+
+.docs-nav-group + .docs-nav-group {
+  margin-top: var(--sp-24);
+}
+
+.docs-nav-group-title {
+  font-size: var(--fs-eyebrow);
+  text-transform: uppercase;
+  letter-spacing: var(--ls-eyebrow);
+  color: var(--muted);
+  margin: 0 0 var(--sp-8);
+}
+
+.docs-nav-list {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+}
+
+.docs-nav-link {
+  display: block;
+  padding: var(--sp-8) var(--sp-12);
+  color: var(--muted);
+  text-decoration: none;
+  border-radius: var(--sp-4);
+}
+
+.docs-nav-link:hover {
+  background: var(--code-bg);
+  color: var(--text);
+}
+
+.docs-nav-link.is-active {
+  color: var(--text);
+  font-weight: 600;
+  background: var(--accent-soft);
+}
+
+.docs-main {
+  min-width: 0;
+  max-width: 48rem;
+}
+
+.docs-main h1 {
+  font-size: var(--fs-masthead);
+  letter-spacing: var(--ls-tight);
+  margin: 0 0 var(--sp-16);
+}
+
+.docs-main h2 {
+  font-size: var(--fs-section-heading);
+  margin: var(--sp-32) 0 var(--sp-12);
+  letter-spacing: var(--ls-tight);
+}
+
+.docs-main h3 {
+  font-size: var(--fs-playbook-dek);
+  margin: var(--sp-24) 0 var(--sp-8);
+}
+
+.docs-main p,
+.docs-main li {
+  line-height: var(--lh-body);
+}
+
+.docs-main p + p {
+  margin-top: var(--sp-12);
+}
+
+.docs-main pre,
+.docs-main code {
+  font-family: var(--font-mono);
+}
+
+.docs-main pre {
+  padding: var(--sp-16);
+  border: var(--bw-hair) solid var(--border);
+  border-radius: var(--sp-6);
+  overflow-x: auto;
+  background: var(--code-bg);
+}
+
+.docs-main :not(pre) > code {
+  padding: 0.1em 0.35em;
+  border: var(--bw-hair) solid var(--border);
+  border-radius: 3px;
+  background: var(--code-bg);
+  font-size: 0.92em;
+}
+
+.docs-main a {
+  color: var(--accent-ink);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.docs-main blockquote {
+  margin: var(--sp-20) 0;
+  padding: var(--sp-12) var(--sp-20);
+  border-left: var(--bw-accent) solid var(--accent);
+  color: var(--muted);
+  background: var(--accent-soft);
+}
+
+.docs-footer {
+  border-top: var(--bw-hair) solid var(--border);
+  padding: var(--sp-20);
+  text-align: center;
+  color: var(--muted);
+  font-size: var(--fs-meta);
+}
+
+.docs-footer a {
+  color: var(--accent-ink);
+}
+
+/* /app/ landing — hero + features grid */
+
+.docs-hero {
+  padding: var(--sp-36) 0 var(--sp-28);
+  border-bottom: var(--bw-hair) solid var(--border);
+}
+
+.docs-hero h1 {
+  font-size: var(--fs-playbook-title);
+  margin-bottom: var(--sp-16);
+}
+
+.docs-hero-tagline {
+  font-size: var(--fs-playbook-dek);
+  color: var(--muted);
+  max-width: 36rem;
+  margin: 0 0 var(--sp-24);
+}
+
+.docs-hero-actions {
+  display: flex;
+  gap: var(--sp-12);
+  flex-wrap: wrap;
+}
+
+.docs-cta-primary,
+.docs-cta-secondary {
+  display: inline-block;
+  padding: var(--sp-12) var(--sp-20);
+  border: var(--bw-hair) solid var(--border);
+  border-radius: var(--sp-4);
+  text-decoration: none;
+  font-weight: 600;
+}
+
+.docs-cta-primary {
+  background: var(--text);
+  color: var(--bg);
+  border-color: var(--text);
+}
+
+.docs-cta-secondary {
+  background: var(--bg);
+  color: var(--text);
+}
+
+.docs-feature-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(16rem, 1fr));
+  gap: var(--sp-20);
+  padding: var(--sp-24) 0;
+}
+
+.docs-feature-card {
+  padding: var(--sp-20);
+  border: var(--bw-hair) solid var(--border);
+  border-radius: var(--sp-6);
+  text-decoration: none;
+  color: inherit;
+  transition: border-color 120ms ease;
+}
+
+.docs-feature-card:hover {
+  border-color: var(--text);
+}
+
+.docs-feature-card h3 {
+  margin: 0 0 var(--sp-8);
+  font-size: var(--fs-playbook-dek);
+}
+
+.docs-feature-card p {
+  margin: 0;
+  color: var(--muted);
+  font-size: var(--fs-body);
+}
+
+@media (max-width: 720px) {
+  .docs-shell {
+    grid-template-columns: 1fr;
+  }
+  .docs-sidebar {
+    position: static;
+  }
+}

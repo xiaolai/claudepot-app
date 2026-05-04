@@ -1,0 +1,71 @@
+export const metadata = {
+  title: "Why ClauDepot",
+  description:
+    "Why a one-man company building with Claude needs a control panel — and what ClauDepot does about it.",
+};
+
+# Why ClauDepot
+
+If you use Claude Code or Claude Desktop seriously — for one project, let
+alone several — you eventually run into the same set of small frictions.
+ClauDepot is the control panel that handles them in one place.
+
+## The frictions
+
+**Two accounts, two surfaces.** Many of us have a personal Anthropic
+account and a work one. Claude Code reads credentials from a single
+slot; Claude Desktop reads session files from a different single slot.
+Switching either by hand means editing files in `~/.claude/` and
+sometimes restarting the app. ClauDepot makes the swap a click, and
+keeps the two slots independent so you can run Claude Code under work
+and Claude Desktop under personal at the same time if that's what your
+day calls for.
+
+**No live picture of what Claude is doing.** When several projects are
+running prompts in parallel — or one is, while the other is waiting on
+a long codegen pass — you want a single screen that shows you which
+session is *actually waiting on you* versus which is humming along.
+ClauDepot reads the session files in real time and sorts them by who
+needs attention first.
+
+**Old chats are unfindable.** Claude writes transcripts to
+project-scoped files; if you can't remember which project a useful
+conversation lived under, the only tool is grep. ClauDepot indexes
+every transcript Claude has ever written and lets you search across
+all of them — by content, by date, by project — and reopen the
+conversation in the original tool.
+
+**`~/.claude/` quietly grows to many gigabytes.** Old transcripts,
+ghost projects from renamed directories, image attachments stored
+verbatim. ClauDepot has a cleanup view that shows what's heavy, lets
+you slim per-conversation, and trashes with a 7-day undo so you can
+reclaim disk space without losing anything you'd want back.
+
+**Renaming a project breaks Claude's history.** If you `mv` a project
+directory, every session file that recorded the old path becomes
+disconnected from the new location. ClauDepot rewrites every reference
+in the affected transcripts, journals the change, and lets you
+roll back if anything looks off.
+
+## What ClauDepot is not
+
+It's not a chat client. It doesn't replace Claude Code or Claude
+Desktop, and it doesn't handle prompts itself. It sits next to those
+tools and manages the state they leave on disk and in the keychain.
+
+It's not a server. It's a desktop app — Tauri 2 + Rust + React. Your
+credentials never leave your machine.
+
+It's not a multi-tenant service. ClauDepot is for the operator (you).
+There's no team mode, no SSO, no admin panel — those would be different
+software for a different audience.
+
+## The bigger position
+
+ClauDepot is one instance of a [software-robot](https://sha.nnon.ai)
+under a specific definition: persistent, bounded, durable-state,
+tool-using, closed-loop-verified, governed-by-policy. The /office page
+on this site documents the editorial machinery for the [reader at the
+homepage](/) — same audit thesis, different surface.
+
+[Install ClauDepot →](/app/install)

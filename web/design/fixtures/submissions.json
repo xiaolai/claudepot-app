@@ -1,0 +1,3932 @@
+[
+  {
+    "id": "100",
+    "user": "ClauDepot",
+    "type": "discussion",
+    "tags": [
+      "claude-code",
+      "agents"
+    ],
+    "title": "hesreallyhim merged a PR into hesreallyhim/awesome-claude-code",
+    "url": "https://github.com/hesreallyhim/awesome-claude-code/pull/1735",
+    "domain": "github.com",
+    "subjects": [],
+    "upvotes": 61,
+    "downvotes": 2,
+    "comments": 1,
+    "submitted_at": "2026-04-29T11:16:26.089Z",
+    "auto_posted": true,
+    "text": "hesreallyhim · pr merged — target: hesreallyhim/awesome-claude-code — A curated list of awesome skills, hooks, slash-commands, agent orchestrators, applications, and plugins for Claude Code by Anthropic [41920★, Python]"
+  },
+  {
+    "id": "101",
+    "user": "ClauDepot",
+    "type": "discussion",
+    "tags": [
+      "claude-code",
+      "agents",
+      "evals"
+    ],
+    "title": "wong2 contributed to heliohq/ship",
+    "url": "https://github.com/heliohq/ship",
+    "domain": "github.com",
+    "subjects": [],
+    "upvotes": 27,
+    "downvotes": 0,
+    "comments": 3,
+    "submitted_at": "2026-04-28T09:32:47.553Z",
+    "auto_posted": true,
+    "text": "wong2 · star — target: heliohq/ship — An agentic development harness for Claude Code, Codex & Cursor: gated pipeline from spec to green checks. [62★, Shell]"
+  },
+  {
+    "id": "102",
+    "user": "ClauDepot",
+    "type": "discussion",
+    "tags": [],
+    "title": "simonw merged a PR into simonw/llm-anthropic",
+    "url": "https://github.com/simonw/llm-anthropic/pull/67",
+    "domain": "github.com",
+    "subjects": [],
+    "upvotes": 24,
+    "downvotes": 1,
+    "comments": 2,
+    "submitted_at": "2026-04-28T13:37:16.576Z",
+    "auto_posted": true,
+    "text": "simonw · pr merged — target: simonw/llm-anthropic — LLM access to models by Anthropic, including the Claude series [220★, Python]"
+  },
+  {
+    "id": "103",
+    "user": "ClauDepot",
+    "type": "discussion",
+    "tags": [
+      "claude-code",
+      "agents"
+    ],
+    "title": "swyxio contributed to swyxio/skills",
+    "url": "https://github.com/swyxio/skills",
+    "domain": "github.com",
+    "subjects": [],
+    "upvotes": 93,
+    "downvotes": 2,
+    "comments": 1,
+    "submitted_at": "2026-04-27T12:43:45.192Z",
+    "auto_posted": true,
+    "text": "swyxio · star — target: swyxio/skills — Agent skills for Claude Code and other AI agents [33★, Python]"
+  },
+  {
+    "id": "104",
+    "user": "ClauDepot",
+    "type": "discussion",
+    "tags": [
+      "claude-code"
+    ],
+    "title": "wong2 contributed to anthropics/claude-desktop-buddy",
+    "url": "https://github.com/anthropics/claude-desktop-buddy",
+    "domain": "github.com",
+    "subjects": [],
+    "upvotes": 252,
+    "downvotes": 2,
+    "comments": 2,
+    "submitted_at": "2026-04-25T12:16:27.106Z",
+    "auto_posted": true,
+    "text": "wong2 · star — target: anthropics/claude-desktop-buddy — Reference and an example for the Bluetooth API for makers in Claude Cowork & Claude Code Desktop [1518★, C++]"
+  },
+  {
+    "id": "105",
+    "user": "ClauDepot",
+    "type": "discussion",
+    "tags": [
+      "agents",
+      "evals"
+    ],
+    "title": "wong2 contributed to langchain-ai/deepagentsjs",
+    "url": "https://github.com/langchain-ai/deepagentsjs",
+    "domain": "github.com",
+    "subjects": [],
+    "upvotes": 18,
+    "downvotes": 0,
+    "comments": 0,
+    "submitted_at": "2026-04-29T14:28:30.247Z",
+    "auto_posted": true,
+    "text": "wong2 · star — target: langchain-ai/deepagentsjs — Agent harness built with LangChain and LangGraph. Equipped with a planning tool, a filesystem backend, and the ability to spawn subagents - well-equipped to handle complex agentic tasks. [1176★, TypeScript]"
+  },
+  {
+    "id": "106",
+    "user": "ClauDepot",
+    "type": "discussion",
+    "tags": [
+      "agents"
+    ],
+    "title": "chiphuyen contributed to showlab/ShowUI",
+    "url": "https://github.com/showlab/ShowUI",
+    "domain": "github.com",
+    "subjects": [],
+    "upvotes": 94,
+    "downvotes": 2,
+    "comments": 4,
+    "submitted_at": "2026-04-21T16:42:28.720Z",
+    "auto_posted": true,
+    "text": "chiphuyen · star — target: showlab/ShowUI — [CVPR 2025] Open-source, End-to-end, Vision-Language-Action model for GUI Agent & Computer Use. [1815★, Python]"
+  },
+  {
+    "id": "107",
+    "user": "ClauDepot",
+    "type": "discussion",
+    "tags": [
+      "agents"
+    ],
+    "title": "wong2 contributed to cloudflare/agentic-inbox",
+    "url": "https://github.com/cloudflare/agentic-inbox",
+    "domain": "github.com",
+    "subjects": [],
+    "upvotes": 15,
+    "downvotes": 0,
+    "comments": 3,
+    "submitted_at": "2026-04-04T12:00:20.161Z",
+    "auto_posted": true,
+    "text": "wong2 · star — target: cloudflare/agentic-inbox — A self-hosted email client with an AI agent, running entirely on Cloudflare Workers [1845★, TypeScript]"
+  },
+  {
+    "id": "108",
+    "user": "ClauDepot",
+    "type": "discussion",
+    "tags": [
+      "agents"
+    ],
+    "title": "chiphuyen contributed to RazorConsole/RazorConsole",
+    "url": "https://github.com/RazorConsole/RazorConsole",
+    "domain": "github.com",
+    "subjects": [],
+    "upvotes": 71,
+    "downvotes": 2,
+    "comments": 1,
+    "submitted_at": "2026-04-05T14:22:15.790Z",
+    "auto_posted": true,
+    "text": "chiphuyen · star — target: RazorConsole/RazorConsole — Build agentic TUI applications with .NET Razor and Spectre.Console [1696★, C#]"
+  },
+  {
+    "id": "109",
+    "user": "ClauDepot",
+    "type": "discussion",
+    "tags": [
+      "agents"
+    ],
+    "title": "chiphuyen contributed to vercel-labs/portless",
+    "url": "https://github.com/vercel-labs/portless",
+    "domain": "github.com",
+    "subjects": [],
+    "upvotes": 31,
+    "downvotes": 0,
+    "comments": 2,
+    "submitted_at": "2026-04-28T15:56:44.508Z",
+    "auto_posted": true,
+    "text": "chiphuyen · star — target: vercel-labs/portless — Replace port numbers with stable, named local URLs. For humans and agents. [8502★, TypeScript]"
+  },
+  {
+    "id": "110",
+    "user": "ClauDepot",
+    "type": "discussion",
+    "tags": [
+      "infra"
+    ],
+    "title": "ggerganov merged a PR into ggml-org/llama.cpp",
+    "url": "https://github.com/ggml-org/llama.cpp/pull/22521",
+    "domain": "github.com",
+    "subjects": [],
+    "upvotes": 27,
+    "downvotes": 1,
+    "comments": 2,
+    "submitted_at": "2026-04-06T14:48:33.559Z",
+    "auto_posted": true,
+    "text": "ggerganov · pr merged — target: ggml-org/llama.cpp — LLM inference in C/C++ [107493★, C++]"
+  },
+  {
+    "id": "111",
+    "user": "ClauDepot",
+    "type": "discussion",
+    "tags": [],
+    "title": "simonw contributed to simonw/llm-gemini",
+    "url": "https://github.com/simonw/llm-gemini/pull/132",
+    "domain": "github.com",
+    "subjects": [],
+    "upvotes": 33,
+    "downvotes": 0,
+    "comments": 4,
+    "submitted_at": "2026-04-24T13:18:36.220Z",
+    "auto_posted": true,
+    "text": "simonw · pr created — target: simonw/llm-gemini — LLM plugin to access Google's Gemini family of models [438★, Python]"
+  },
+  {
+    "id": "112",
+    "user": "ClauDepot",
+    "type": "tool",
+    "tags": [
+      "release-watch",
+      "mcp",
+      "claude-code"
+    ],
+    "title": "mcp-use/mcp-use create-mcp-use-app 0.14.10",
+    "url": "https://github.com/mcp-use/mcp-use/releases/tag/create-mcp-use-app%400.14.10",
+    "domain": "github.com",
+    "subjects": [],
+    "upvotes": 97,
+    "downvotes": 2,
+    "comments": 2,
+    "submitted_at": "2026-04-28T13:58:55.809Z",
+    "auto_posted": true,
+    "tool_meta": {
+      "stars": 1503,
+      "language": "Python",
+      "last_commit_relative": "yesterday"
+    }
+  },
+  {
+    "id": "113",
+    "user": "ClauDepot",
+    "type": "tool",
+    "tags": [
+      "release-watch",
+      "mcp"
+    ],
+    "title": "upstash/context7 @upstash/context7-mcp@2.2.3",
+    "url": "https://github.com/upstash/context7/releases/tag/%40upstash%2Fcontext7-mcp%402.2.3",
+    "domain": "github.com",
+    "subjects": [],
+    "upvotes": 202,
+    "downvotes": 5,
+    "comments": 5,
+    "submitted_at": "2026-04-26T12:13:41.531Z",
+    "auto_posted": true,
+    "tool_meta": {
+      "stars": 179,
+      "language": "Go",
+      "last_commit_relative": "2 days ago"
+    }
+  },
+  {
+    "id": "114",
+    "user": "ClauDepot",
+    "type": "tool",
+    "tags": [
+      "release-watch",
+      "mcp",
+      "claude-code"
+    ],
+    "title": "awslabs/mcp 2026.04.20260429105543",
+    "url": "https://github.com/awslabs/mcp/releases/tag/2026.04.20260429105543",
+    "domain": "github.com",
+    "subjects": [],
+    "upvotes": 42,
+    "downvotes": 1,
+    "comments": 1,
+    "submitted_at": "2026-04-25T13:29:03.747Z",
+    "auto_posted": true,
+    "tool_meta": {
+      "stars": 104,
+      "language": "Python",
+      "last_commit_relative": "3 days ago"
+    }
+  },
+  {
+    "id": "115",
+    "user": "ClauDepot",
+    "type": "tool",
+    "tags": [
+      "release-watch",
+      "mcp"
+    ],
+    "title": "github/github-mcp-server GitHub MCP Server 1.0.3",
+    "url": "https://github.com/github/github-mcp-server/releases/tag/v1.0.3",
+    "domain": "github.com",
+    "subjects": [],
+    "upvotes": 8,
+    "downvotes": 0,
+    "comments": 4,
+    "submitted_at": "2026-04-26T12:40:57.469Z",
+    "auto_posted": true,
+    "tool_meta": {
+      "stars": 70,
+      "language": "Go",
+      "last_commit_relative": "1 week ago"
+    }
+  },
+  {
+    "id": "116",
+    "user": "ClauDepot",
+    "type": "tool",
+    "tags": [
+      "release-watch",
+      "mcp",
+      "agents"
+    ],
+    "title": "evalstate/fast-agent fast-agent 0.6.25 - Privacy Filtering for Trace Exports/Uploads",
+    "url": "https://github.com/evalstate/fast-agent/releases/tag/v0.6.25",
+    "domain": "github.com",
+    "subjects": [],
+    "upvotes": 58,
+    "downvotes": 1,
+    "comments": 1,
+    "submitted_at": "2026-04-26T12:59:51.490Z",
+    "auto_posted": true,
+    "tool_meta": {
+      "stars": 337,
+      "language": "Go",
+      "last_commit_relative": "1 week ago"
+    }
+  },
+  {
+    "id": "117",
+    "user": "ClauDepot",
+    "type": "tool",
+    "tags": [
+      "release-watch",
+      "mcp",
+      "claude-code"
+    ],
+    "title": "smithery-ai/cli v4.11.1",
+    "url": "https://github.com/smithery-ai/cli/releases/tag/v4.11.1",
+    "domain": "github.com",
+    "subjects": [],
+    "upvotes": 438,
+    "downvotes": 17,
+    "comments": 1,
+    "submitted_at": "2026-04-24T10:16:34.284Z",
+    "auto_posted": true,
+    "tool_meta": {
+      "stars": 408,
+      "language": "TypeScript",
+      "last_commit_relative": "yesterday"
+    }
+  },
+  {
+    "id": "118",
+    "user": "ClauDepot",
+    "type": "tool",
+    "tags": [
+      "release-watch",
+      "mcp"
+    ],
+    "title": "getsentry/XcodeBuildMCP Release v2.3.2",
+    "url": "https://github.com/getsentry/XcodeBuildMCP/releases/tag/v2.3.2",
+    "domain": "github.com",
+    "subjects": [],
+    "upvotes": 40,
+    "downvotes": 1,
+    "comments": 1,
+    "submitted_at": "2026-04-27T16:32:17.928Z",
+    "auto_posted": true,
+    "tool_meta": {
+      "stars": 659,
+      "language": "Go",
+      "last_commit_relative": "3 days ago"
+    }
+  },
+  {
+    "id": "119",
+    "user": "ClauDepot",
+    "type": "tool",
+    "tags": [
+      "release-watch",
+      "claude-code"
+    ],
+    "title": "openai/codex rust-v0.127.0",
+    "url": "https://github.com/openai/codex/releases/tag/rust-v0.127.0",
+    "domain": "github.com",
+    "subjects": [],
+    "upvotes": 528,
+    "downvotes": 17,
+    "comments": 4,
+    "submitted_at": "2026-04-30T15:33:04.339Z",
+    "auto_posted": true,
+    "tool_meta": {
+      "stars": 428,
+      "language": "Rust",
+      "last_commit_relative": "1 week ago"
+    }
+  },
+  {
+    "id": "120",
+    "user": "ClauDepot",
+    "type": "tool",
+    "tags": [
+      "release-watch",
+      "claude-code"
+    ],
+    "title": "Kilo-Org/kilocode v7.2.31",
+    "url": "https://github.com/Kilo-Org/kilocode/releases/tag/v7.2.31",
+    "domain": "github.com",
+    "subjects": [],
+    "upvotes": 20,
+    "downvotes": 0,
+    "comments": 1,
+    "submitted_at": "2026-04-29T13:21:49.011Z",
+    "auto_posted": true,
+    "tool_meta": {
+      "stars": 426,
+      "language": "TypeScript",
+      "last_commit_relative": "1 week ago"
+    }
+  },
+  {
+    "id": "121",
+    "user": "ClauDepot",
+    "type": "tool",
+    "tags": [
+      "release-watch",
+      "claude-code"
+    ],
+    "title": "google-gemini/gemini-cli Release v0.40.0",
+    "url": "https://github.com/google-gemini/gemini-cli/releases/tag/v0.40.0",
+    "domain": "github.com",
+    "subjects": [],
+    "upvotes": 22,
+    "downvotes": 0,
+    "comments": 3,
+    "submitted_at": "2026-04-28T16:10:33.679Z",
+    "auto_posted": true,
+    "tool_meta": {
+      "stars": 203,
+      "language": "Python",
+      "last_commit_relative": "5 days ago"
+    }
+  },
+  {
+    "id": "122",
+    "user": "ada",
+    "type": "news",
+    "tags": [
+      "mcp",
+      "agents"
+    ],
+    "title": "What tools are you using to give your LLM a persistent second brain / long-term memory?",
+    "url": "https://old.reddit.com/r/LocalLLaMA/comments/1sz3i73/what_tools_are_you_using_to_give_your_llm_a/",
+    "domain": "reddit.com",
+    "subjects": [],
+    "upvotes": 488,
+    "downvotes": 7,
+    "comments": 5,
+    "submitted_at": "2026-04-29T14:55:56.639Z"
+  },
+  {
+    "id": "123",
+    "user": "kai",
+    "type": "news",
+    "tags": [
+      "mcp",
+      "infra"
+    ],
+    "title": "I stumbled on a Gemma 4 chat template bug for tools and fixed it",
+    "url": "https://old.reddit.com/r/LocalLLaMA/comments/1syps6i/i_stumbled_on_a_gemma_4_chat_template_bug_for/",
+    "domain": "reddit.com",
+    "subjects": [],
+    "upvotes": 12,
+    "downvotes": 0,
+    "comments": 2,
+    "submitted_at": "2026-04-29T10:06:34.201Z"
+  },
+  {
+    "id": "124",
+    "user": "miro",
+    "type": "news",
+    "tags": [
+      "claude-code",
+      "evals"
+    ],
+    "title": "Has anyone figured out why Claude Code running qwen locally fails when you try to /compact?",
+    "url": "https://old.reddit.com/r/LocalLLaMA/comments/1szja35/has_anyone_figured_out_why_claude_code_running/",
+    "domain": "reddit.com",
+    "subjects": [],
+    "upvotes": 0,
+    "downvotes": 0,
+    "comments": 0,
+    "submitted_at": "2026-04-17T10:52:32.635Z",
+    "state": "pending",
+    "ai_decision": {
+      "reason": "Quality score in middle band. Substantive but no clear novelty over existing posts.",
+      "confidence": 0.71,
+      "tags_assigned": [
+        "claude-code",
+        "evals"
+      ],
+      "type_assigned": "news",
+      "decided_at": "2026-04-17T10:52:32.635Z"
+    }
+  },
+  {
+    "id": "125",
+    "user": "lin",
+    "type": "news",
+    "tags": [
+      "agents",
+      "infra"
+    ],
+    "title": "inclusionAI/Ling-2.6-1T · Hugging Face",
+    "url": "https://old.reddit.com/r/LocalLLaMA/comments/1sz59l4/inclusionailing261t_hugging_face/",
+    "domain": "reddit.com",
+    "subjects": [],
+    "upvotes": 0,
+    "downvotes": 0,
+    "comments": 0,
+    "submitted_at": "2026-04-29T13:28:50.241Z",
+    "state": "rejected",
+    "ai_decision": {
+      "reason": "Low-quality content farm domain. Heuristic match against known SEO doorway sites.",
+      "confidence": 0.88,
+      "tags_assigned": [],
+      "decided_at": "2026-04-29T13:28:50.241Z"
+    }
+  },
+  {
+    "id": "126",
+    "user": "sasha",
+    "type": "news",
+    "tags": [
+      "agents"
+    ],
+    "title": "AMA with Nous Research -- Ask Us Anything!",
+    "url": "https://old.reddit.com/r/LocalLLaMA/comments/1sz2y76/ama_with_nous_research_ask_us_anything/",
+    "domain": "reddit.com",
+    "subjects": [],
+    "upvotes": 0,
+    "downvotes": 0,
+    "comments": 0,
+    "submitted_at": "2026-04-24T10:05:43.133Z",
+    "state": "rejected",
+    "ai_decision": {
+      "reason": "Title misleadingly clickbait — preview content does not match the claim.",
+      "confidence": 0.86,
+      "tags_assigned": [],
+      "decided_at": "2026-04-24T10:05:43.133Z"
+    }
+  },
+  {
+    "id": "127",
+    "user": "zed",
+    "type": "news",
+    "tags": [
+      "claude-code",
+      "agents",
+      "long-context"
+    ],
+    "title": "mistralai/Mistral-Medium-3.5-128B · Hugging Face",
+    "url": "https://old.reddit.com/r/LocalLLaMA/comments/1sz1qer/mistralaimistralmedium35128b_hugging_face/",
+    "domain": "reddit.com",
+    "subjects": [],
+    "upvotes": 0,
+    "downvotes": 0,
+    "comments": 2,
+    "submitted_at": "2026-04-18T09:10:53.776Z",
+    "state": "pending",
+    "ai_decision": {
+      "reason": "Topic relevance borderline — post is about general LLM ops, not Claude-specific.",
+      "confidence": 0.68,
+      "tags_assigned": [
+        "claude-code",
+        "agents",
+        "long-context"
+      ],
+      "type_assigned": "news",
+      "decided_at": "2026-04-18T09:10:53.776Z"
+    }
+  },
+  {
+    "id": "128",
+    "user": "nova",
+    "type": "tool",
+    "tags": [],
+    "title": "Finetuning Activates Verbatim Recall of Copyrighted Books in LLMs",
+    "url": "https://github.com/cauchy221/Alignment-Whack-a-Mole-Code",
+    "domain": "github.com",
+    "subjects": [],
+    "upvotes": 0,
+    "downvotes": 0,
+    "comments": 0,
+    "submitted_at": "2026-04-28T16:26:22.691Z",
+    "tool_meta": {
+      "stars": 1613,
+      "language": "Python",
+      "last_commit_relative": "3 days ago"
+    },
+    "state": "rejected",
+    "ai_decision": {
+      "reason": "Off-topic. URL preview is about general productivity, no Claude / AI tooling angle.",
+      "confidence": 0.85,
+      "tags_assigned": [],
+      "decided_at": "2026-04-28T16:26:22.691Z"
+    }
+  },
+  {
+    "id": "129",
+    "user": "ren",
+    "type": "news",
+    "tags": [
+      "model-release"
+    ],
+    "title": "Changes in the system prompt between Claude Opus 4.6 and 4.7",
+    "url": "https://simonwillison.net/2026/Apr/18/opus-system-prompt/",
+    "domain": "simonwillison.net",
+    "subjects": [],
+    "upvotes": 74,
+    "downvotes": 0,
+    "comments": 0,
+    "submitted_at": "2026-04-07T11:16:22.606Z"
+  },
+  {
+    "id": "130",
+    "user": "ish",
+    "type": "news",
+    "tags": [
+      "claude-code"
+    ],
+    "title": "Issue: Claude Code is unusable for complex engineering tasks with Feb updates",
+    "url": "https://github.com/anthropics/claude-code/issues/42796",
+    "domain": "github.com",
+    "subjects": [],
+    "upvotes": 22,
+    "downvotes": 0,
+    "comments": 0,
+    "submitted_at": "2026-04-05T14:59:27.803Z"
+  },
+  {
+    "id": "131",
+    "user": "lixiaolai",
+    "type": "tool",
+    "tags": [
+      "mcp",
+      "claude-code",
+      "agents"
+    ],
+    "title": "Show HN: Real-time dashboard for Claude Code agent teams",
+    "url": "https://github.com/simple10/agents-observe",
+    "domain": "github.com",
+    "subjects": [],
+    "upvotes": 71,
+    "downvotes": 2,
+    "comments": 1,
+    "submitted_at": "2026-04-07T16:27:58.866Z",
+    "tool_meta": {
+      "stars": 1519,
+      "language": "Python",
+      "last_commit_relative": "yesterday"
+    }
+  },
+  {
+    "id": "132",
+    "user": "ada",
+    "type": "news",
+    "tags": [
+      "claude-code"
+    ],
+    "title": "Tell HN: Anthropic no longer allowing Claude Code subscriptions to use OpenClaw",
+    "url": "https://news.ycombinator.com/item?id=47633396",
+    "domain": "news.ycombinator.com",
+    "subjects": [],
+    "upvotes": 180,
+    "downvotes": 6,
+    "comments": 4,
+    "submitted_at": "2026-04-27T16:16:05.257Z"
+  },
+  {
+    "id": "133",
+    "user": "kai",
+    "type": "news",
+    "tags": [
+      "mcp",
+      "claude-code"
+    ],
+    "title": "Claude Code's source code has been leaked via a map file in their NPM registry",
+    "url": "https://twitter.com/Fried_rice/status/2038894956459290963",
+    "domain": "twitter.com",
+    "subjects": [],
+    "upvotes": 275,
+    "downvotes": 6,
+    "comments": 0,
+    "submitted_at": "2026-04-13T15:24:06.261Z"
+  },
+  {
+    "id": "134",
+    "user": "miro",
+    "type": "news",
+    "tags": [
+      "model-release"
+    ],
+    "title": "Qwen3.6-35B-A3B on my laptop drew me a better pelican than Claude Opus 4.7",
+    "url": "https://simonwillison.net/2026/Apr/16/qwen-beats-opus/",
+    "domain": "simonwillison.net",
+    "subjects": [],
+    "upvotes": 21,
+    "downvotes": 0,
+    "comments": 2,
+    "submitted_at": "2026-04-17T15:20:09.931Z"
+  },
+  {
+    "id": "135",
+    "user": "lin",
+    "type": "news",
+    "tags": [],
+    "title": "System Card: Claude Mythos Preview [pdf]",
+    "url": "https://www-cdn.anthropic.com/53566bf5440a10affd749724787c8913a2ae0841.pdf",
+    "domain": "www-cdn.anthropic.com",
+    "subjects": [],
+    "upvotes": 157,
+    "downvotes": 2,
+    "comments": 4,
+    "submitted_at": "2026-04-28T09:22:37.945Z"
+  },
+  {
+    "id": "136",
+    "user": "sasha",
+    "type": "news",
+    "tags": [
+      "mcp",
+      "claude-code"
+    ],
+    "title": "The Claude Code Source Leak: fake tools, frustration regexes, undercover mode",
+    "url": "https://alex000kim.com/posts/2026-03-31-claude-code-source-leak/",
+    "domain": "alex000kim.com",
+    "subjects": [],
+    "upvotes": 297,
+    "downvotes": 7,
+    "comments": 1,
+    "submitted_at": "2026-04-23T11:31:47.704Z"
+  },
+  {
+    "id": "137",
+    "user": "zed",
+    "type": "news",
+    "tags": [
+      "mcp",
+      "claude-code"
+    ],
+    "title": "Claude Code Unpacked : A visual guide",
+    "url": "https://ccunpacked.dev/",
+    "domain": "ccunpacked.dev",
+    "subjects": [],
+    "upvotes": 31,
+    "downvotes": 1,
+    "comments": 0,
+    "submitted_at": "2026-04-17T16:51:22.209Z"
+  },
+  {
+    "id": "138",
+    "user": "nova",
+    "type": "news",
+    "tags": [
+      "claude-code"
+    ],
+    "title": "Anthropic says OpenClaw-style Claude CLI usage is allowed again",
+    "url": "https://docs.openclaw.ai/providers/anthropic",
+    "domain": "docs.openclaw.ai",
+    "subjects": [],
+    "upvotes": 34,
+    "downvotes": 0,
+    "comments": 2,
+    "submitted_at": "2026-04-24T12:25:57.413Z"
+  },
+  {
+    "id": "139",
+    "user": "ren",
+    "type": "news",
+    "tags": [
+      "model-release"
+    ],
+    "title": "Claude Opus 4.7",
+    "url": "https://www.anthropic.com/claude/opus",
+    "domain": "anthropic.com",
+    "subjects": [],
+    "upvotes": 65,
+    "downvotes": 2,
+    "comments": 1,
+    "submitted_at": "2026-04-29T15:23:00.299Z"
+  },
+  {
+    "id": "140",
+    "user": "ish",
+    "type": "news",
+    "tags": [
+      "model-release"
+    ],
+    "title": "Claude Opus 4.7 Model Card",
+    "url": "https://anthropic.com/claude-opus-4-7-system-card",
+    "domain": "anthropic.com",
+    "subjects": [],
+    "upvotes": 12,
+    "downvotes": 0,
+    "comments": 2,
+    "submitted_at": "2026-04-20T13:59:39.718Z"
+  },
+  {
+    "id": "141",
+    "user": "lixiaolai",
+    "type": "news",
+    "tags": [
+      "claude-code"
+    ],
+    "title": "Claude Code users hitting usage limits 'way faster than expected'",
+    "url": "https://www.theregister.com/2026/03/31/anthropic_claude_code_limits/",
+    "domain": "theregister.com",
+    "subjects": [],
+    "upvotes": 28,
+    "downvotes": 0,
+    "comments": 0,
+    "submitted_at": "2026-04-27T11:37:41.378Z"
+  },
+  {
+    "id": "142",
+    "user": "ada",
+    "type": "news",
+    "tags": [],
+    "title": "Assessing Claude Mythos Preview's cybersecurity capabilities",
+    "url": "https://red.anthropic.com/2026/mythos-preview/",
+    "domain": "red.anthropic.com",
+    "subjects": [],
+    "upvotes": 33,
+    "downvotes": 1,
+    "comments": 2,
+    "submitted_at": "2026-04-13T11:40:07.674Z"
+  },
+  {
+    "id": "143",
+    "user": "kai",
+    "type": "tool",
+    "tags": [
+      "agents"
+    ],
+    "title": "Show HN: A Karpathy-style LLM wiki your agents maintain (Markdown and Git)",
+    "url": "https://github.com/nex-crm/wuphf",
+    "domain": "github.com",
+    "subjects": [],
+    "upvotes": 46,
+    "downvotes": 1,
+    "comments": 1,
+    "submitted_at": "2026-04-27T09:23:39.299Z",
+    "tool_meta": {
+      "stars": 12322,
+      "language": "Go",
+      "last_commit_relative": "yesterday"
+    }
+  },
+  {
+    "id": "144",
+    "user": "miro",
+    "type": "tool",
+    "tags": [
+      "mcp",
+      "claude-code",
+      "agents"
+    ],
+    "title": "Show HN: Almanac MCP, turn Claude Code into a Deep Research agent",
+    "url": "https://www.openalmanac.org/",
+    "domain": "openalmanac.org",
+    "subjects": [],
+    "upvotes": 59,
+    "downvotes": 1,
+    "comments": 1,
+    "submitted_at": "2026-04-24T16:36:23.506Z"
+  },
+  {
+    "id": "145",
+    "user": "lin",
+    "type": "tool",
+    "tags": [
+      "mcp",
+      "model-release"
+    ],
+    "title": "3 Hours with Claude Opus 4.7: functional study webapp and remote MCP- Oneshotted",
+    "url": "https://github.com/AmmarSaleh50/study-dashboard-demo",
+    "domain": "github.com",
+    "subjects": [],
+    "upvotes": 75,
+    "downvotes": 0,
+    "comments": 2,
+    "submitted_at": "2026-04-28T16:15:49.208Z",
+    "tool_meta": {
+      "stars": 45829,
+      "language": "Go",
+      "last_commit_relative": "5 days ago"
+    }
+  },
+  {
+    "id": "146",
+    "user": "sasha",
+    "type": "news",
+    "tags": [
+      "claude-code"
+    ],
+    "title": "Claude Code login fails with OAuth timeout on Windows",
+    "url": "https://github.com/anthropics/claude-code/issues/44257",
+    "domain": "github.com",
+    "subjects": [],
+    "upvotes": 32,
+    "downvotes": 1,
+    "comments": 0,
+    "submitted_at": "2026-04-24T09:58:48.212Z"
+  },
+  {
+    "id": "147",
+    "user": "zed",
+    "type": "tool",
+    "tags": [
+      "mcp",
+      "agents"
+    ],
+    "title": "Show HN: Agent MCP Studio – build multi-agent MCP systems in a browser tab",
+    "url": "https://www.agentmcp.studio",
+    "domain": "agentmcp.studio",
+    "subjects": [],
+    "upvotes": 34,
+    "downvotes": 0,
+    "comments": 2,
+    "submitted_at": "2026-04-18T14:24:44.311Z"
+  },
+  {
+    "id": "148",
+    "user": "nova",
+    "type": "news",
+    "tags": [
+      "agents"
+    ],
+    "title": "Anthropic Races to Contain Leak of Code Behind Claude AI Agent",
+    "url": "https://www.wsj.com/tech/ai/anthropic-races-to-contain-leak-of-code-behind-claude-ai-agent-4bc5acc7",
+    "domain": "wsj.com",
+    "subjects": [],
+    "upvotes": 42,
+    "downvotes": 1,
+    "comments": 2,
+    "submitted_at": "2026-04-19T10:13:08.787Z"
+  },
+  {
+    "id": "149",
+    "user": "ren",
+    "type": "tool",
+    "tags": [
+      "agents"
+    ],
+    "title": "Show HN: Agent Vault – Open-source credential proxy and vault for agents",
+    "url": "https://github.com/Infisical/agent-vault",
+    "domain": "github.com",
+    "subjects": [],
+    "upvotes": 103,
+    "downvotes": 3,
+    "comments": 1,
+    "submitted_at": "2026-04-20T12:58:47.093Z",
+    "tool_meta": {
+      "stars": 1529,
+      "language": "TypeScript",
+      "last_commit_relative": "yesterday"
+    }
+  },
+  {
+    "id": "150",
+    "user": "ish",
+    "type": "tool",
+    "tags": [
+      "claude-code",
+      "agents"
+    ],
+    "title": "Show HN: Marimo pair – Reactive Python notebooks as environments for agents",
+    "url": "https://github.com/marimo-team/marimo-pair",
+    "domain": "github.com",
+    "subjects": [],
+    "upvotes": 20,
+    "downvotes": 0,
+    "comments": 2,
+    "submitted_at": "2026-04-25T11:39:08.523Z",
+    "tool_meta": {
+      "stars": 219,
+      "language": "TypeScript",
+      "last_commit_relative": "5 days ago"
+    }
+  },
+  {
+    "id": "151",
+    "user": "lixiaolai",
+    "type": "news",
+    "tags": [
+      "model-release",
+      "claude-code"
+    ],
+    "title": "Claude Code Opus 4.7 keeps checking on malware",
+    "url": "https://news.ycombinator.com/item?id=47814832",
+    "domain": "news.ycombinator.com",
+    "subjects": [],
+    "upvotes": 41,
+    "downvotes": 1,
+    "comments": 2,
+    "submitted_at": "2026-04-15T11:14:22.592Z"
+  },
+  {
+    "id": "152",
+    "user": "ada",
+    "type": "news",
+    "tags": [
+      "claude-code",
+      "prompt-caching"
+    ],
+    "title": "Claude Code – Disabling telemetry also disables 1-hour prompt cache TTL",
+    "url": "https://github.com/anthropics/claude-code/issues/45381",
+    "domain": "github.com",
+    "subjects": [],
+    "upvotes": 36,
+    "downvotes": 1,
+    "comments": 2,
+    "submitted_at": "2026-04-25T12:08:34.940Z"
+  },
+  {
+    "id": "153",
+    "user": "kai",
+    "type": "tool",
+    "tags": [
+      "mcp",
+      "claude-code",
+      "agents"
+    ],
+    "title": "Show HN: Open-agent-SDK – Claude Code's internals, extracted and open-sourced",
+    "url": "https://github.com/codeany-ai/open-agent-sdk-typescript",
+    "domain": "github.com",
+    "subjects": [],
+    "upvotes": 17,
+    "downvotes": 0,
+    "comments": 2,
+    "submitted_at": "2026-04-30T16:01:05.409Z",
+    "tool_meta": {
+      "stars": 4306,
+      "language": "Python",
+      "last_commit_relative": "1 week ago"
+    }
+  },
+  {
+    "id": "154",
+    "user": "miro",
+    "type": "tool",
+    "tags": [
+      "mcp",
+      "agents"
+    ],
+    "title": "Show HN: MCP server gives your agent a budget (save tokens, get smarter results)",
+    "url": "https://l6e.ai",
+    "domain": "l6e.ai",
+    "subjects": [],
+    "upvotes": 21,
+    "downvotes": 0,
+    "comments": 2,
+    "submitted_at": "2026-04-26T12:57:56.144Z"
+  },
+  {
+    "id": "155",
+    "user": "lin",
+    "type": "news",
+    "tags": [],
+    "title": "Anthropic's Claude Desktop App Installs Undisclosed Native Messaging Bridge",
+    "url": "https://letsdatascience.com/news/claude-desktop-installs-preauthorized-browser-extension-mani-4064fb1a",
+    "domain": "letsdatascience.com",
+    "subjects": [],
+    "upvotes": 38,
+    "downvotes": 0,
+    "comments": 0,
+    "submitted_at": "2026-04-09T11:37:51.635Z"
+  },
+  {
+    "id": "156",
+    "user": "sasha",
+    "type": "tool",
+    "tags": [
+      "mcp",
+      "agents"
+    ],
+    "title": "Show HN: MCP is for tools. A2A is for agents. What's for websites?",
+    "url": "https://www.rtrvr.ai/blog/agent-web-protocol-stack",
+    "domain": "rtrvr.ai",
+    "subjects": [],
+    "upvotes": 34,
+    "downvotes": 0,
+    "comments": 3,
+    "submitted_at": "2026-04-29T09:35:54.917Z"
+  },
+  {
+    "id": "157",
+    "user": "zed",
+    "type": "tool",
+    "tags": [
+      "claude-code"
+    ],
+    "title": "Show HN: I built a social media management tool in 3 weeks with Claude and Codex",
+    "url": "https://github.com/brightbeanxyz/brightbean-studio",
+    "domain": "github.com",
+    "subjects": [],
+    "upvotes": 71,
+    "downvotes": 1,
+    "comments": 2,
+    "submitted_at": "2026-04-28T16:38:51.271Z",
+    "tool_meta": {
+      "stars": 398,
+      "language": "Python",
+      "last_commit_relative": "3 days ago"
+    }
+  },
+  {
+    "id": "158",
+    "user": "nova",
+    "type": "tool",
+    "tags": [
+      "claude-code"
+    ],
+    "title": "Show HN: Drive any macOS app in the background without stealing the cursor",
+    "url": "https://github.com/trycua/cua",
+    "domain": "github.com",
+    "subjects": [],
+    "upvotes": 68,
+    "downvotes": 0,
+    "comments": 1,
+    "submitted_at": "2026-04-26T13:12:08.101Z",
+    "tool_meta": {
+      "stars": 116,
+      "language": "Rust",
+      "last_commit_relative": "5 days ago"
+    }
+  },
+  {
+    "id": "159",
+    "user": "ren",
+    "type": "tool",
+    "tags": [
+      "mcp",
+      "agents"
+    ],
+    "title": "Show HN: CSS Studio. Design by hand, code by agent",
+    "url": "https://cssstudio.ai",
+    "domain": "cssstudio.ai",
+    "subjects": [],
+    "upvotes": 14,
+    "downvotes": 0,
+    "comments": 1,
+    "submitted_at": "2026-04-06T13:04:01.050Z"
+  },
+  {
+    "id": "160",
+    "user": "ish",
+    "type": "tool",
+    "tags": [
+      "claude-code",
+      "agents"
+    ],
+    "title": "Show HN: Broccoli, one shot coding agent on the cloud",
+    "url": "https://github.com/besimple-oss/broccoli",
+    "domain": "github.com",
+    "subjects": [],
+    "upvotes": 10,
+    "downvotes": 0,
+    "comments": 0,
+    "submitted_at": "2026-04-27T09:05:04.098Z",
+    "tool_meta": {
+      "stars": 63,
+      "language": "Python",
+      "last_commit_relative": "3 days ago"
+    }
+  },
+  {
+    "id": "161",
+    "user": "lixiaolai",
+    "type": "tool",
+    "tags": [
+      "agents"
+    ],
+    "title": "Show HN: Marky – A lightweight Markdown viewer for agentic coding",
+    "url": "https://github.com/GRVYDEV/marky",
+    "domain": "github.com",
+    "subjects": [],
+    "upvotes": 106,
+    "downvotes": 2,
+    "comments": 1,
+    "submitted_at": "2026-04-18T14:59:40.686Z",
+    "tool_meta": {
+      "stars": 179,
+      "language": "TypeScript",
+      "last_commit_relative": "3 days ago"
+    }
+  },
+  {
+    "id": "162",
+    "user": "ada",
+    "type": "tool",
+    "tags": [
+      "agents"
+    ],
+    "title": "Show HN: Daemons – we pivoted from building agents to cleaning up after them",
+    "url": "https://charlielabs.ai/",
+    "domain": "charlielabs.ai",
+    "subjects": [],
+    "upvotes": 180,
+    "downvotes": 2,
+    "comments": 0,
+    "submitted_at": "2026-04-20T13:29:08.278Z"
+  },
+  {
+    "id": "163",
+    "user": "kai",
+    "type": "tool",
+    "tags": [
+      "claude-code",
+      "agents"
+    ],
+    "title": "Show HN: Kontext CLI – Credential broker for AI coding agents in Go",
+    "url": "https://github.com/kontext-dev/kontext-cli",
+    "domain": "github.com",
+    "subjects": [],
+    "upvotes": 44,
+    "downvotes": 1,
+    "comments": 3,
+    "submitted_at": "2026-04-27T15:28:05.981Z",
+    "tool_meta": {
+      "stars": 386,
+      "language": "Python",
+      "last_commit_relative": "yesterday"
+    }
+  },
+  {
+    "id": "164",
+    "user": "miro",
+    "type": "news",
+    "tags": [
+      "prompt-caching"
+    ],
+    "title": "Anthropic downgraded cache TTL on March 6th",
+    "url": "https://github.com/anthropics/claude-code/issues/46829",
+    "domain": "github.com",
+    "subjects": [],
+    "upvotes": 30,
+    "downvotes": 0,
+    "comments": 3,
+    "submitted_at": "2026-04-24T12:01:12.850Z"
+  },
+  {
+    "id": "165",
+    "user": "lin",
+    "type": "news",
+    "tags": [
+      "model-release"
+    ],
+    "title": "Claude Opus 4.7 Intelligence, Performance and Price Analysis",
+    "url": "https://artificialanalysis.ai/models/claude-opus-4-7",
+    "domain": "artificialanalysis.ai",
+    "subjects": [],
+    "upvotes": 117,
+    "downvotes": 4,
+    "comments": 2,
+    "submitted_at": "2026-04-21T15:01:38.008Z"
+  },
+  {
+    "id": "166",
+    "user": "sasha",
+    "type": "discussion",
+    "tags": [
+      "claude-code"
+    ],
+    "title": "Ask HN: Why Opus4.6 was silently removed from Claude Code?",
+    "url": "https://news.ycombinator.com/item?id=47861009",
+    "domain": "news.ycombinator.com",
+    "subjects": [],
+    "upvotes": 96,
+    "downvotes": 3,
+    "comments": 2,
+    "submitted_at": "2026-04-19T09:22:19.054Z",
+    "text": "HN 15 pts · 21 comments · q='claude'"
+  },
+  {
+    "id": "167",
+    "user": "zed",
+    "type": "tool",
+    "tags": [
+      "claude-code",
+      "agents"
+    ],
+    "title": "Show HN: Baton – A desktop app for developing with AI agents",
+    "url": "https://getbaton.dev/",
+    "domain": "getbaton.dev",
+    "subjects": [],
+    "upvotes": 86,
+    "downvotes": 0,
+    "comments": 2,
+    "submitted_at": "2026-04-29T10:36:21.094Z"
+  },
+  {
+    "id": "168",
+    "user": "nova",
+    "type": "news",
+    "tags": [
+      "model-release"
+    ],
+    "title": "Claude Opus 4.7 System Prompt Leaked",
+    "url": "https://twitter.com/elder_plinius/status/2044857095439421885",
+    "domain": "twitter.com",
+    "subjects": [],
+    "upvotes": 98,
+    "downvotes": 1,
+    "comments": 4,
+    "submitted_at": "2026-04-28T10:12:31.458Z"
+  },
+  {
+    "id": "169",
+    "user": "ren",
+    "type": "news",
+    "tags": [
+      "claude-code"
+    ],
+    "title": "AMD AI director says Claude Code is becoming dumber and lazier since update",
+    "url": "https://www.theregister.com/2026/04/06/anthropic_claude_code_dumber_lazier_amd_ai_director/",
+    "domain": "theregister.com",
+    "subjects": [],
+    "upvotes": 25,
+    "downvotes": 0,
+    "comments": 2,
+    "submitted_at": "2026-04-26T13:00:28.841Z"
+  },
+  {
+    "id": "170",
+    "user": "ish",
+    "type": "tool",
+    "tags": [
+      "claude-code"
+    ],
+    "title": "GitHub has DMCA'd nearly all forks of the official Claude-code repo",
+    "url": "https://github.com/anthropics/claude-code/forks",
+    "domain": "github.com",
+    "subjects": [],
+    "upvotes": 273,
+    "downvotes": 9,
+    "comments": 2,
+    "submitted_at": "2026-04-23T15:04:05.870Z",
+    "tool_meta": {
+      "stars": 46944,
+      "language": "Go",
+      "last_commit_relative": "2 days ago"
+    }
+  },
+  {
+    "id": "171",
+    "user": "lixiaolai",
+    "type": "news",
+    "tags": [],
+    "title": "Anthropic bans orgs without warning",
+    "url": "https://news.ycombinator.com/item?id=47853021",
+    "domain": "news.ycombinator.com",
+    "subjects": [],
+    "upvotes": 26,
+    "downvotes": 0,
+    "comments": 1,
+    "submitted_at": "2026-04-29T10:53:27.023Z"
+  },
+  {
+    "id": "172",
+    "user": "ada",
+    "type": "news",
+    "tags": [],
+    "title": "Project Glasswing: Securing critical software for the AI era",
+    "url": "https://www.anthropic.com/glasswing",
+    "domain": "anthropic.com",
+    "subjects": [],
+    "upvotes": 21,
+    "downvotes": 0,
+    "comments": 3,
+    "submitted_at": "2026-04-23T15:47:19.973Z"
+  },
+  {
+    "id": "173",
+    "user": "kai",
+    "type": "tool",
+    "tags": [
+      "mcp",
+      "agents"
+    ],
+    "title": "Show HN: Lazy-tool: reducing prompt bloat in MCP-based agent workflows",
+    "url": "https://github.com/rpgeeganage/lazy-tool",
+    "domain": "github.com",
+    "subjects": [],
+    "upvotes": 107,
+    "downvotes": 4,
+    "comments": 1,
+    "submitted_at": "2026-04-26T13:26:01.386Z",
+    "tool_meta": {
+      "stars": 169,
+      "language": "TypeScript",
+      "last_commit_relative": "1 week ago"
+    }
+  },
+  {
+    "id": "174",
+    "user": "miro",
+    "type": "news",
+    "tags": [
+      "agents"
+    ],
+    "title": "Open source memory layer so any AI agent can do what Claude.ai and ChatGPT do",
+    "url": "https://alash3al.github.io/stash?_v01",
+    "domain": "alash3al.github.io",
+    "subjects": [],
+    "upvotes": 56,
+    "downvotes": 2,
+    "comments": 2,
+    "submitted_at": "2026-04-25T10:48:47.910Z"
+  },
+  {
+    "id": "175",
+    "user": "lin",
+    "type": "news",
+    "tags": [
+      "mcp"
+    ],
+    "title": "A playable DOOM MCP app",
+    "url": "https://chrisnager.com/blog/doom-runs-in-chatgpt-and-claude/",
+    "domain": "chrisnager.com",
+    "subjects": [],
+    "upvotes": 287,
+    "downvotes": 9,
+    "comments": 4,
+    "submitted_at": "2026-04-30T14:17:49.335Z"
+  },
+  {
+    "id": "176",
+    "user": "sasha",
+    "type": "news",
+    "tags": [],
+    "title": "Anthropic's Claude Mythos isn't a sentient super-hacker, it's a sales pitch",
+    "url": "https://www.tomshardware.com/tech-industry/artificial-intelligence/anthropics-claude-mythos-isnt-a-sentient-super-hacker-its-a-sales-pitch-claims-of-thousands-of-severe-zero-days-rely-on-just-198-manual-reviews",
+    "domain": "tomshardware.com",
+    "subjects": [],
+    "upvotes": 216,
+    "downvotes": 6,
+    "comments": 2,
+    "submitted_at": "2026-04-20T14:08:05.820Z"
+  },
+  {
+    "id": "177",
+    "user": "zed",
+    "type": "tool",
+    "tags": [
+      "mcp"
+    ],
+    "title": "Show HN: I just built a MCP Server that connects Claude to all your wearables",
+    "url": "https://pacetraining.co/",
+    "domain": "pacetraining.co",
+    "subjects": [],
+    "upvotes": 254,
+    "downvotes": 2,
+    "comments": 0,
+    "submitted_at": "2026-04-20T10:20:03.863Z"
+  },
+  {
+    "id": "178",
+    "user": "nova",
+    "type": "news",
+    "tags": [
+      "model-release"
+    ],
+    "title": "Opus 4.7 is horrible at writing",
+    "url": "https://news.ycombinator.com/item?id=47801971",
+    "domain": "news.ycombinator.com",
+    "subjects": [],
+    "upvotes": 45,
+    "downvotes": 0,
+    "comments": 3,
+    "submitted_at": "2026-04-29T16:21:26.073Z"
+  },
+  {
+    "id": "179",
+    "user": "ren",
+    "type": "news",
+    "tags": [
+      "claude-code"
+    ],
+    "title": "Anthropic's Champion Kit for engineers pushing Claude Code at their company",
+    "url": "https://code.claude.com/docs/en/champion-kit",
+    "domain": "code.claude.com",
+    "subjects": [],
+    "upvotes": 33,
+    "downvotes": 1,
+    "comments": 1,
+    "submitted_at": "2026-04-21T15:35:01.425Z"
+  },
+  {
+    "id": "180",
+    "user": "ish",
+    "type": "tool",
+    "tags": [
+      "claude-code"
+    ],
+    "title": "Show HN: Ctx – a /resume that works across Claude Code and Codex",
+    "url": "https://github.com/dchu917/ctx",
+    "domain": "github.com",
+    "subjects": [],
+    "upvotes": 16,
+    "downvotes": 0,
+    "comments": 0,
+    "submitted_at": "2026-04-28T10:35:44.760Z",
+    "tool_meta": {
+      "stars": 1652,
+      "language": "Go",
+      "last_commit_relative": "5 days ago"
+    }
+  },
+  {
+    "id": "181",
+    "user": "lixiaolai",
+    "type": "tool",
+    "tags": [
+      "claude-code",
+      "agents",
+      "evals"
+    ],
+    "title": "Show HN: OpenRig – agent harness that runs Claude Code and Codex as one system",
+    "url": "https://github.com/mvschwarz/openrig",
+    "domain": "github.com",
+    "subjects": [],
+    "upvotes": 139,
+    "downvotes": 6,
+    "comments": 4,
+    "submitted_at": "2026-04-29T15:29:57.681Z",
+    "tool_meta": {
+      "stars": 320,
+      "language": "Python",
+      "last_commit_relative": "1 week ago"
+    }
+  },
+  {
+    "id": "182",
+    "user": "ada",
+    "type": "news",
+    "tags": [
+      "model-release"
+    ],
+    "title": "What's new in Claude Opus 4.7",
+    "url": "https://platform.claude.com/docs/en/about-claude/models/whats-new-claude-4-7",
+    "domain": "platform.claude.com",
+    "subjects": [],
+    "upvotes": 28,
+    "downvotes": 0,
+    "comments": 2,
+    "submitted_at": "2026-04-23T13:09:13.731Z"
+  },
+  {
+    "id": "183",
+    "user": "kai",
+    "type": "tool",
+    "tags": [],
+    "title": "Show HN: How LLMs Work – Interactive visual guide based on Karpathy's lecture",
+    "url": "https://ynarwal.github.io/how-llms-work/",
+    "domain": "ynarwal.github.io",
+    "subjects": [],
+    "upvotes": 104,
+    "downvotes": 2,
+    "comments": 3,
+    "submitted_at": "2026-04-28T13:43:39.651Z"
+  },
+  {
+    "id": "184",
+    "user": "miro",
+    "type": "news",
+    "tags": [],
+    "title": "I cancelled Claude: Token issues, declining quality, and poor support",
+    "url": "https://nickyreinert.de/en/2026/2026-04-24-claude-critics/",
+    "domain": "nickyreinert.de",
+    "subjects": [],
+    "upvotes": 216,
+    "downvotes": 4,
+    "comments": 1,
+    "submitted_at": "2026-04-18T10:56:26.687Z"
+  },
+  {
+    "id": "185",
+    "user": "lin",
+    "type": "news",
+    "tags": [
+      "claude-code"
+    ],
+    "title": "An update on recent Claude Code quality reports",
+    "url": "https://www.anthropic.com/engineering/april-23-postmortem",
+    "domain": "anthropic.com",
+    "subjects": [],
+    "upvotes": 66,
+    "downvotes": 2,
+    "comments": 3,
+    "submitted_at": "2026-04-29T14:04:28.809Z"
+  },
+  {
+    "id": "186",
+    "user": "sasha",
+    "type": "news",
+    "tags": [],
+    "title": "Tell HN: Anthropic no longer allows you to fix to specific model version",
+    "url": "https://news.ycombinator.com/item?id=47775389",
+    "domain": "news.ycombinator.com",
+    "subjects": [],
+    "upvotes": 14,
+    "downvotes": 0,
+    "comments": 1,
+    "submitted_at": "2026-04-25T10:03:34.895Z"
+  },
+  {
+    "id": "187",
+    "user": "zed",
+    "type": "tool",
+    "tags": [
+      "mcp"
+    ],
+    "title": "Show HN: I forced Claude to play Tetris in Emacs",
+    "url": "https://imgur.com/a/e3nxq5k",
+    "domain": "imgur.com",
+    "subjects": [],
+    "upvotes": 567,
+    "downvotes": 16,
+    "comments": 6,
+    "submitted_at": "2026-04-27T16:28:00.601Z"
+  },
+  {
+    "id": "188",
+    "user": "nova",
+    "type": "tool",
+    "tags": [],
+    "title": "Show HN: GoModel – an open-source AI gateway in Go",
+    "url": "https://github.com/ENTERPILOT/GOModel/",
+    "domain": "github.com",
+    "subjects": [],
+    "upvotes": 106,
+    "downvotes": 3,
+    "comments": 2,
+    "submitted_at": "2026-04-24T13:13:29.210Z",
+    "tool_meta": {
+      "stars": 414,
+      "language": "Python",
+      "last_commit_relative": "3 days ago"
+    }
+  },
+  {
+    "id": "189",
+    "user": "ren",
+    "type": "tool",
+    "tags": [
+      "evals"
+    ],
+    "title": "Show HN: A new benchmark for testing LLMs for deterministic outputs",
+    "url": "https://interfaze.ai/blog/introducing-structured-output-benchmark",
+    "domain": "interfaze.ai",
+    "subjects": [],
+    "upvotes": 14,
+    "downvotes": 0,
+    "comments": 1,
+    "submitted_at": "2026-04-12T10:32:29.309Z"
+  },
+  {
+    "id": "190",
+    "user": "ish",
+    "type": "tool",
+    "tags": [
+      "claude-code"
+    ],
+    "title": "Show HN: Postgres extension for BM25 relevance-ranked full-text search",
+    "url": "https://github.com/timescale/pg_textsearch",
+    "domain": "github.com",
+    "subjects": [],
+    "upvotes": 110,
+    "downvotes": 4,
+    "comments": 3,
+    "submitted_at": "2026-04-24T10:56:21.660Z",
+    "tool_meta": {
+      "stars": 146,
+      "language": "Python",
+      "last_commit_relative": "3 days ago"
+    }
+  },
+  {
+    "id": "191",
+    "user": "lixiaolai",
+    "type": "news",
+    "tags": [
+      "model-release"
+    ],
+    "title": "Who's on call? How Opus 4.6 helped us calculate this 2,500x faster",
+    "url": "https://incident.io/blog/whos-on-call-how-claude-helped-us-calculate-this-2-500-x-faster",
+    "domain": "incident.io",
+    "subjects": [],
+    "upvotes": 42,
+    "downvotes": 0,
+    "comments": 2,
+    "submitted_at": "2026-04-26T12:35:52.709Z"
+  },
+  {
+    "id": "192",
+    "user": "ada",
+    "type": "discussion",
+    "tags": [
+      "model-release"
+    ],
+    "title": "Ask HN: Has Claude Opus 4.7 nerfed?",
+    "url": "https://news.ycombinator.com/item?id=47909674",
+    "domain": "news.ycombinator.com",
+    "subjects": [],
+    "upvotes": 189,
+    "downvotes": 1,
+    "comments": 5,
+    "submitted_at": "2026-04-29T12:19:45.410Z",
+    "text": "HN 5 pts · 8 comments · q='claude'"
+  },
+  {
+    "id": "193",
+    "user": "kai",
+    "type": "discussion",
+    "tags": [
+      "model-release"
+    ],
+    "title": "Ask HN: Models Comparable to Opus 4.6?",
+    "url": "https://news.ycombinator.com/item?id=47886276",
+    "domain": "news.ycombinator.com",
+    "subjects": [],
+    "upvotes": 218,
+    "downvotes": 7,
+    "comments": 5,
+    "submitted_at": "2026-04-30T09:37:42.911Z",
+    "text": "HN 5 pts · 3 comments · q='claude'"
+  },
+  {
+    "id": "194",
+    "user": "miro",
+    "type": "news",
+    "tags": [],
+    "title": "Pro Max 5x quota exhausted in 1.5 hours despite moderate usage",
+    "url": "https://github.com/anthropics/claude-code/issues/45756",
+    "domain": "github.com",
+    "subjects": [],
+    "upvotes": 16,
+    "downvotes": 0,
+    "comments": 1,
+    "submitted_at": "2026-04-11T10:35:23.783Z"
+  },
+  {
+    "id": "195",
+    "user": "lin",
+    "type": "news",
+    "tags": [
+      "claude-code"
+    ],
+    "title": "Claude Code Routines",
+    "url": "https://code.claude.com/docs/en/routines",
+    "domain": "code.claude.com",
+    "subjects": [],
+    "upvotes": 31,
+    "downvotes": 0,
+    "comments": 1,
+    "submitted_at": "2026-04-18T09:54:18.983Z"
+  },
+  {
+    "id": "196",
+    "user": "sasha",
+    "type": "news",
+    "tags": [
+      "model-release"
+    ],
+    "title": "Measuring Claude 4.7's tokenizer costs",
+    "url": "https://www.claudecodecamp.com/p/i-measured-claude-4-7-s-new-tokenizer-here-s-what-it-costs-you",
+    "domain": "claudecodecamp.com",
+    "subjects": [],
+    "upvotes": 34,
+    "downvotes": 0,
+    "comments": 1,
+    "submitted_at": "2026-04-27T12:42:50.042Z"
+  },
+  {
+    "id": "197",
+    "user": "zed",
+    "type": "news",
+    "tags": [],
+    "title": "Anthropic to limit Using third-party harnesses with Claude subscriptions",
+    "url": "https://news.ycombinator.com/item?id=47633568",
+    "domain": "news.ycombinator.com",
+    "subjects": [],
+    "upvotes": 10,
+    "downvotes": 0,
+    "comments": 2,
+    "submitted_at": "2026-04-28T14:23:46.761Z"
+  },
+  {
+    "id": "198",
+    "user": "nova",
+    "type": "news",
+    "tags": [
+      "claude-code",
+      "agents"
+    ],
+    "title": "Launch HN: Twill.ai (YC S25) – Delegate to cloud agents, get back PRs",
+    "url": "https://twill.ai",
+    "domain": "twill.ai",
+    "subjects": [],
+    "upvotes": 111,
+    "downvotes": 0,
+    "comments": 4,
+    "submitted_at": "2026-04-29T12:33:38.888Z"
+  },
+  {
+    "id": "199",
+    "user": "ClauDepot",
+    "type": "tool",
+    "tags": [
+      "release-watch",
+      "agents",
+      "mcp"
+    ],
+    "title": "openai/openai-agents-python v0.14.8",
+    "url": "https://github.com/openai/openai-agents-python/releases/tag/v0.14.8",
+    "domain": "github.com",
+    "subjects": [],
+    "upvotes": 31,
+    "downvotes": 1,
+    "comments": 3,
+    "submitted_at": "2026-04-13T10:29:56.703Z",
+    "auto_posted": true,
+    "tool_meta": {
+      "stars": 268,
+      "language": "TypeScript",
+      "last_commit_relative": "today"
+    }
+  },
+  {
+    "id": "200",
+    "user": "ClauDepot",
+    "type": "tool",
+    "tags": [
+      "release-watch",
+      "agents"
+    ],
+    "title": "pydantic/pydantic-ai v1.88.0 (2026-04-28)",
+    "url": "https://github.com/pydantic/pydantic-ai/releases/tag/v1.88.0",
+    "domain": "github.com",
+    "subjects": [],
+    "upvotes": 273,
+    "downvotes": 9,
+    "comments": 4,
+    "submitted_at": "2026-04-25T13:15:25.944Z",
+    "auto_posted": true,
+    "tool_meta": {
+      "stars": 24769,
+      "language": "Python",
+      "last_commit_relative": "today"
+    }
+  },
+  {
+    "id": "201",
+    "user": "ClauDepot",
+    "type": "tool",
+    "tags": [
+      "release-watch",
+      "agents"
+    ],
+    "title": "langchain-ai/langgraph langgraph-prebuilt==1.0.13",
+    "url": "https://github.com/langchain-ai/langgraph/releases/tag/prebuilt%3D%3D1.0.13",
+    "domain": "github.com",
+    "subjects": [],
+    "upvotes": 40,
+    "downvotes": 1,
+    "comments": 2,
+    "submitted_at": "2026-04-19T15:56:06.864Z",
+    "auto_posted": true,
+    "tool_meta": {
+      "stars": 2836,
+      "language": "Python",
+      "last_commit_relative": "2 days ago"
+    }
+  },
+  {
+    "id": "202",
+    "user": "ClauDepot",
+    "type": "tool",
+    "tags": [
+      "release-watch",
+      "agents"
+    ],
+    "title": "mem0ai/mem0 Mem0 OpenClaw Plugin (v1.0.11)",
+    "url": "https://github.com/mem0ai/mem0/releases/tag/openclaw-v1.0.11",
+    "domain": "github.com",
+    "subjects": [],
+    "upvotes": 39,
+    "downvotes": 0,
+    "comments": 1,
+    "submitted_at": "2026-04-21T14:10:01.014Z",
+    "auto_posted": true,
+    "tool_meta": {
+      "stars": 3131,
+      "language": "Python",
+      "last_commit_relative": "5 days ago"
+    }
+  },
+  {
+    "id": "203",
+    "user": "ClauDepot",
+    "type": "tool",
+    "tags": [
+      "release-watch",
+      "agents"
+    ],
+    "title": "All-Hands-AI/OpenHands cloud-1.24.0",
+    "url": "https://github.com/OpenHands/OpenHands/releases/tag/cloud-1.24.0",
+    "domain": "github.com",
+    "subjects": [],
+    "upvotes": 34,
+    "downvotes": 0,
+    "comments": 1,
+    "submitted_at": "2026-04-18T15:51:46.480Z",
+    "auto_posted": true,
+    "tool_meta": {
+      "stars": 282,
+      "language": "Python",
+      "last_commit_relative": "yesterday"
+    }
+  },
+  {
+    "id": "204",
+    "user": "ClauDepot",
+    "type": "tool",
+    "tags": [
+      "release-watch",
+      "agents"
+    ],
+    "title": "vercel/ai @ai-sdk/xai@3.0.84",
+    "url": "https://github.com/vercel/ai/releases/tag/%40ai-sdk%2Fxai%403.0.84",
+    "domain": "github.com",
+    "subjects": [],
+    "upvotes": 92,
+    "downvotes": 4,
+    "comments": 3,
+    "submitted_at": "2026-04-25T14:06:38.353Z",
+    "auto_posted": true,
+    "tool_meta": {
+      "stars": 31568,
+      "language": "TypeScript",
+      "last_commit_relative": "today"
+    }
+  },
+  {
+    "id": "205",
+    "user": "ClauDepot",
+    "type": "tool",
+    "tags": [
+      "release-watch",
+      "agents"
+    ],
+    "title": "langchain-ai/langchain langchain-tests==1.1.7",
+    "url": "https://github.com/langchain-ai/langchain/releases/tag/langchain-tests%3D%3D1.1.7",
+    "domain": "github.com",
+    "subjects": [],
+    "upvotes": 42,
+    "downvotes": 0,
+    "comments": 1,
+    "submitted_at": "2026-04-26T11:51:35.907Z",
+    "auto_posted": true,
+    "tool_meta": {
+      "stars": 4033,
+      "language": "Python",
+      "last_commit_relative": "yesterday"
+    }
+  },
+  {
+    "id": "206",
+    "user": "ClauDepot",
+    "type": "tool",
+    "tags": [
+      "release-watch",
+      "agents"
+    ],
+    "title": "agno-agi/agno v2.6.4",
+    "url": "https://github.com/agno-agi/agno/releases/tag/v2.6.4",
+    "domain": "github.com",
+    "subjects": [],
+    "upvotes": 9,
+    "downvotes": 0,
+    "comments": 2,
+    "submitted_at": "2026-04-06T14:21:21.709Z",
+    "auto_posted": true,
+    "tool_meta": {
+      "stars": 118,
+      "language": "Python",
+      "last_commit_relative": "3 days ago"
+    }
+  },
+  {
+    "id": "207",
+    "user": "ClauDepot",
+    "type": "tool",
+    "tags": [
+      "release-watch",
+      "agents"
+    ],
+    "title": "e2b-dev/E2B e2b@2.19.2",
+    "url": "https://github.com/e2b-dev/E2B/releases/tag/e2b%402.19.2",
+    "domain": "github.com",
+    "subjects": [],
+    "upvotes": 32,
+    "downvotes": 0,
+    "comments": 2,
+    "submitted_at": "2026-04-28T14:01:13.387Z",
+    "auto_posted": true,
+    "tool_meta": {
+      "stars": 2982,
+      "language": "Python",
+      "last_commit_relative": "1 week ago"
+    }
+  },
+  {
+    "id": "208",
+    "user": "ClauDepot",
+    "type": "tool",
+    "tags": [
+      "release-watch",
+      "agents"
+    ],
+    "title": "CopilotKit/CopilotKit v1.56.4",
+    "url": "https://github.com/CopilotKit/CopilotKit/releases/tag/v1.56.4",
+    "domain": "github.com",
+    "subjects": [],
+    "upvotes": 26,
+    "downvotes": 0,
+    "comments": 2,
+    "submitted_at": "2026-04-24T16:53:00.465Z",
+    "auto_posted": true,
+    "tool_meta": {
+      "stars": 374,
+      "language": "TypeScript",
+      "last_commit_relative": "5 days ago"
+    }
+  },
+  {
+    "id": "209",
+    "user": "ClauDepot",
+    "type": "tool",
+    "tags": [
+      "release-watch",
+      "agents"
+    ],
+    "title": "trycua/cua cua-driver-v0.0.13",
+    "url": "https://github.com/trycua/cua/releases/tag/cua-driver-v0.0.13",
+    "domain": "github.com",
+    "subjects": [],
+    "upvotes": 9,
+    "downvotes": 0,
+    "comments": 1,
+    "submitted_at": "2026-04-22T13:20:31.409Z",
+    "auto_posted": true,
+    "tool_meta": {
+      "stars": 355,
+      "language": "TypeScript",
+      "last_commit_relative": "2 days ago"
+    }
+  },
+  {
+    "id": "210",
+    "user": "ClauDepot",
+    "type": "tool",
+    "tags": [
+      "release-watch",
+      "agents"
+    ],
+    "title": "activepieces/activepieces 0.82.1",
+    "url": "https://github.com/activepieces/activepieces/releases/tag/0.82.1",
+    "domain": "github.com",
+    "subjects": [],
+    "upvotes": 38,
+    "downvotes": 0,
+    "comments": 2,
+    "submitted_at": "2026-04-27T09:43:30.848Z",
+    "auto_posted": true,
+    "tool_meta": {
+      "stars": 413,
+      "language": "Python",
+      "last_commit_relative": "1 week ago"
+    }
+  },
+  {
+    "id": "211",
+    "user": "ClauDepot",
+    "type": "tool",
+    "tags": [
+      "release-watch",
+      "agents"
+    ],
+    "title": "crewAIInc/crewAI 1.14.3",
+    "url": "https://github.com/crewAIInc/crewAI/releases/tag/1.14.3",
+    "domain": "github.com",
+    "subjects": [],
+    "upvotes": 28,
+    "downvotes": 0,
+    "comments": 0,
+    "submitted_at": "2026-04-28T10:32:23.247Z",
+    "auto_posted": true,
+    "tool_meta": {
+      "stars": 276,
+      "language": "TypeScript",
+      "last_commit_relative": "5 days ago"
+    }
+  },
+  {
+    "id": "212",
+    "user": "ClauDepot",
+    "type": "tool",
+    "tags": [
+      "release-watch",
+      "agents"
+    ],
+    "title": "triggerdotdev/trigger.dev re2-test-supervisor-ndots-override: feat(supervisor): optional ndots override for runner pods (#3441)",
+    "url": "https://github.com/triggerdotdev/trigger.dev/releases/tag/re2-test-supervisor-ndots-override",
+    "domain": "github.com",
+    "subjects": [],
+    "upvotes": 81,
+    "downvotes": 3,
+    "comments": 2,
+    "submitted_at": "2026-04-28T16:51:57.910Z",
+    "auto_posted": true,
+    "tool_meta": {
+      "stars": 32786,
+      "language": "Python",
+      "last_commit_relative": "1 week ago"
+    }
+  },
+  {
+    "id": "213",
+    "user": "ClauDepot",
+    "type": "tool",
+    "tags": [
+      "release-watch",
+      "agents"
+    ],
+    "title": "stanfordnlp/dspy 3.2.0",
+    "url": "https://github.com/stanfordnlp/dspy/releases/tag/3.2.0",
+    "domain": "github.com",
+    "subjects": [],
+    "upvotes": 66,
+    "downvotes": 1,
+    "comments": 3,
+    "submitted_at": "2026-04-27T13:43:14.977Z",
+    "auto_posted": true,
+    "tool_meta": {
+      "stars": 874,
+      "language": "Python",
+      "last_commit_relative": "1 week ago"
+    }
+  },
+  {
+    "id": "214",
+    "user": "ClauDepot",
+    "type": "tool",
+    "tags": [
+      "release-watch",
+      "agents"
+    ],
+    "title": "run-llama/llama_index v0.14.21",
+    "url": "https://github.com/run-llama/llama_index/releases/tag/v0.14.21",
+    "domain": "github.com",
+    "subjects": [],
+    "upvotes": 106,
+    "downvotes": 2,
+    "comments": 0,
+    "submitted_at": "2026-04-23T14:44:15.219Z",
+    "auto_posted": true,
+    "tool_meta": {
+      "stars": 3743,
+      "language": "TypeScript",
+      "last_commit_relative": "3 days ago"
+    }
+  },
+  {
+    "id": "215",
+    "user": "ClauDepot",
+    "type": "tool",
+    "tags": [
+      "release-watch",
+      "agents"
+    ],
+    "title": "assafelovic/gpt-researcher v3.4.4",
+    "url": "https://github.com/assafelovic/gpt-researcher/releases/tag/v3.4.4",
+    "domain": "github.com",
+    "subjects": [],
+    "upvotes": 16,
+    "downvotes": 0,
+    "comments": 1,
+    "submitted_at": "2026-04-29T13:52:59.241Z",
+    "auto_posted": true,
+    "tool_meta": {
+      "stars": 3527,
+      "language": "TypeScript",
+      "last_commit_relative": "2 days ago"
+    }
+  },
+  {
+    "id": "216",
+    "user": "ClauDepot",
+    "type": "tool",
+    "tags": [
+      "release-watch",
+      "agents"
+    ],
+    "title": "FlowiseAI/Flowise flowise-ui@3.1.2: Release/3.1.2 (#6215)",
+    "url": "https://github.com/FlowiseAI/Flowise/releases/tag/flowise-ui%403.1.2",
+    "domain": "github.com",
+    "subjects": [],
+    "upvotes": 119,
+    "downvotes": 4,
+    "comments": 1,
+    "submitted_at": "2026-04-26T12:52:55.482Z",
+    "auto_posted": true,
+    "tool_meta": {
+      "stars": 361,
+      "language": "Python",
+      "last_commit_relative": "2 days ago"
+    }
+  },
+  {
+    "id": "217",
+    "user": "ClauDepot",
+    "type": "tool",
+    "tags": [
+      "release-watch",
+      "model-release"
+    ],
+    "title": "ollama/ollama v0.22.1",
+    "url": "https://github.com/ollama/ollama/releases/tag/v0.22.1",
+    "domain": "github.com",
+    "subjects": [],
+    "upvotes": 109,
+    "downvotes": 1,
+    "comments": 0,
+    "submitted_at": "2026-04-16T16:57:09.397Z",
+    "auto_posted": true,
+    "tool_meta": {
+      "stars": 162,
+      "language": "Go",
+      "last_commit_relative": "today"
+    }
+  },
+  {
+    "id": "218",
+    "user": "ClauDepot",
+    "type": "tool",
+    "tags": [
+      "release-watch",
+      "model-release"
+    ],
+    "title": "huggingface/transformers Release v5.7.0",
+    "url": "https://github.com/huggingface/transformers/releases/tag/v5.7.0",
+    "domain": "github.com",
+    "subjects": [],
+    "upvotes": 95,
+    "downvotes": 2,
+    "comments": 1,
+    "submitted_at": "2026-04-17T09:07:53.098Z",
+    "auto_posted": true,
+    "tool_meta": {
+      "stars": 893,
+      "language": "Python",
+      "last_commit_relative": "yesterday"
+    }
+  },
+  {
+    "id": "219",
+    "user": "ren",
+    "type": "article",
+    "tags": [
+      "model-release",
+      "claude-code"
+    ],
+    "title": "Changes to GitHub Copilot Individual plans",
+    "url": "https://simonwillison.net/2026/Apr/22/changes-to-github-copilot/#atom-everything",
+    "domain": "simonwillison.net",
+    "subjects": [],
+    "upvotes": 276,
+    "downvotes": 6,
+    "comments": 5,
+    "submitted_at": "2026-04-30T15:22:20.692Z",
+    "reading_time_min": 7
+  },
+  {
+    "id": "220",
+    "user": "ish",
+    "type": "article",
+    "tags": [
+      "claude-code",
+      "evals"
+    ],
+    "title": "An update on recent Claude Code quality reports",
+    "url": "https://simonwillison.net/2026/Apr/24/recent-claude-code-quality-reports/#atom-everything",
+    "domain": "simonwillison.net",
+    "subjects": [],
+    "upvotes": 40,
+    "downvotes": 0,
+    "comments": 2,
+    "submitted_at": "2026-04-19T12:17:48.479Z",
+    "reading_time_min": 7
+  },
+  {
+    "id": "221",
+    "user": "lixiaolai",
+    "type": "article",
+    "tags": [],
+    "title": "Quoting Bobby Holley",
+    "url": "https://simonwillison.net/2026/Apr/22/bobby-holley/#atom-everything",
+    "domain": "simonwillison.net",
+    "subjects": [],
+    "upvotes": 72,
+    "downvotes": 2,
+    "comments": 2,
+    "submitted_at": "2026-04-23T09:55:52.498Z",
+    "reading_time_min": 7
+  },
+  {
+    "id": "222",
+    "user": "ada",
+    "type": "article",
+    "tags": [
+      "claude-code",
+      "infra"
+    ],
+    "title": "Is Claude Code going to cost $100/month? Probably not - it's all very confusing",
+    "url": "https://simonwillison.net/2026/Apr/22/claude-code-confusion/#atom-everything",
+    "domain": "simonwillison.net",
+    "subjects": [],
+    "upvotes": 18,
+    "downvotes": 0,
+    "comments": 1,
+    "submitted_at": "2026-04-26T12:03:16.754Z",
+    "reading_time_min": 7
+  },
+  {
+    "id": "223",
+    "user": "kai",
+    "type": "article",
+    "tags": [
+      "safety"
+    ],
+    "title": "The Zig project's rationale for their firm anti-AI contribution policy",
+    "url": "https://simonwillison.net/2026/Apr/30/zig-anti-ai/#atom-everything",
+    "domain": "simonwillison.net",
+    "subjects": [],
+    "upvotes": 121,
+    "downvotes": 1,
+    "comments": 1,
+    "submitted_at": "2026-04-25T15:35:10.850Z",
+    "reading_time_min": 7
+  },
+  {
+    "id": "224",
+    "user": "miro",
+    "type": "article",
+    "tags": [
+      "model-release",
+      "claude-code",
+      "agents"
+    ],
+    "title": "Quoting Romain Huet",
+    "url": "https://simonwillison.net/2026/Apr/25/romain-huet/#atom-everything",
+    "domain": "simonwillison.net",
+    "subjects": [],
+    "upvotes": 17,
+    "downvotes": 0,
+    "comments": 2,
+    "submitted_at": "2026-04-29T13:07:15.589Z",
+    "reading_time_min": 5
+  },
+  {
+    "id": "225",
+    "user": "lin",
+    "type": "article",
+    "tags": [
+      "model-release",
+      "claude-code"
+    ],
+    "title": "Quoting OpenAI Codex base_instructions",
+    "url": "https://simonwillison.net/2026/Apr/28/openai-codex/#atom-everything",
+    "domain": "simonwillison.net",
+    "subjects": [],
+    "upvotes": 195,
+    "downvotes": 4,
+    "comments": 2,
+    "submitted_at": "2026-04-26T09:51:11.187Z",
+    "reading_time_min": 4
+  },
+  {
+    "id": "226",
+    "user": "sasha",
+    "type": "article",
+    "tags": [
+      "evals"
+    ],
+    "title": "WHY ARE YOU LIKE THIS",
+    "url": "https://simonwillison.net/2026/Apr/25/why-are-you-like-this/#atom-everything",
+    "domain": "simonwillison.net",
+    "subjects": [],
+    "upvotes": 296,
+    "downvotes": 5,
+    "comments": 2,
+    "submitted_at": "2026-04-22T09:30:06.484Z",
+    "reading_time_min": 7
+  },
+  {
+    "id": "227",
+    "user": "zed",
+    "type": "article",
+    "tags": [
+      "model-release",
+      "claude-code"
+    ],
+    "title": "GPT-5.5 prompting guide",
+    "url": "https://simonwillison.net/2026/Apr/25/gpt-5-5-prompting-guide/#atom-everything",
+    "domain": "simonwillison.net",
+    "subjects": [],
+    "upvotes": 28,
+    "downvotes": 0,
+    "comments": 2,
+    "submitted_at": "2026-04-19T11:10:29.337Z",
+    "reading_time_min": 7
+  },
+  {
+    "id": "228",
+    "user": "nova",
+    "type": "article",
+    "tags": [
+      "agents"
+    ],
+    "title": "Quoting Matthew Yglesias",
+    "url": "https://simonwillison.net/2026/Apr/28/matthew-yglesias/#atom-everything",
+    "domain": "simonwillison.net",
+    "subjects": [],
+    "upvotes": 25,
+    "downvotes": 0,
+    "comments": 2,
+    "submitted_at": "2026-04-09T15:58:34.024Z",
+    "reading_time_min": 4
+  },
+  {
+    "id": "229",
+    "user": "ren",
+    "type": "article",
+    "tags": [
+      "long-context"
+    ],
+    "title": "DeepSeek V4 - almost on the frontier, a fraction of the price",
+    "url": "https://simonwillison.net/2026/Apr/24/deepseek-v4/#atom-everything",
+    "domain": "simonwillison.net",
+    "subjects": [],
+    "upvotes": 39,
+    "downvotes": 0,
+    "comments": 1,
+    "submitted_at": "2026-04-27T14:37:43.735Z",
+    "reading_time_min": 7
+  },
+  {
+    "id": "230",
+    "user": "ish",
+    "type": "article",
+    "tags": [
+      "agents"
+    ],
+    "title": "It's a big one",
+    "url": "https://simonwillison.net/2026/Apr/24/weekly/#atom-everything",
+    "domain": "simonwillison.net",
+    "subjects": [],
+    "upvotes": 342,
+    "downvotes": 3,
+    "comments": 2,
+    "submitted_at": "2026-04-24T12:29:26.100Z",
+    "reading_time_min": 4
+  },
+  {
+    "id": "231",
+    "user": "lixiaolai",
+    "type": "article",
+    "tags": [
+      "agents"
+    ],
+    "title": "Qwen3.6-27B: Flagship-Level Coding in a 27B Dense Model",
+    "url": "https://simonwillison.net/2026/Apr/22/qwen36-27b/#atom-everything",
+    "domain": "simonwillison.net",
+    "subjects": [],
+    "upvotes": 98,
+    "downvotes": 4,
+    "comments": 0,
+    "submitted_at": "2026-04-26T16:33:42.473Z",
+    "reading_time_min": 7
+  },
+  {
+    "id": "232",
+    "user": "ada",
+    "type": "article",
+    "tags": [
+      "model-release",
+      "claude-code"
+    ],
+    "title": "LLM 0.32a0 is a major backwards-compatible refactor",
+    "url": "https://simonwillison.net/2026/Apr/29/llm/#atom-everything",
+    "domain": "simonwillison.net",
+    "subjects": [],
+    "upvotes": 494,
+    "downvotes": 6,
+    "comments": 0,
+    "submitted_at": "2026-04-18T12:04:21.877Z",
+    "reading_time_min": 7
+  },
+  {
+    "id": "233",
+    "user": "kai",
+    "type": "article",
+    "tags": [
+      "voice"
+    ],
+    "title": "Speech translation in Google Meet is now rolling out to mobile devices",
+    "url": "https://simonwillison.net/2026/Apr/27/speech-translation-in-google-meet-is-now-rolling-out-to-mobile-d/#atom-everything",
+    "domain": "simonwillison.net",
+    "subjects": [],
+    "upvotes": 40,
+    "downvotes": 0,
+    "comments": 1,
+    "submitted_at": "2026-04-25T14:53:13.006Z",
+    "reading_time_min": 7
+  },
+  {
+    "id": "234",
+    "user": "miro",
+    "type": "news",
+    "tags": [],
+    "title": "Millisecond Converter",
+    "url": "https://simonwillison.net/2026/Apr/24/milliseconds/#atom-everything",
+    "domain": "simonwillison.net",
+    "subjects": [],
+    "upvotes": 24,
+    "downvotes": 0,
+    "comments": 0,
+    "submitted_at": "2026-04-29T12:22:37.635Z"
+  },
+  {
+    "id": "235",
+    "user": "lin",
+    "type": "article",
+    "tags": [
+      "model-release",
+      "claude-code"
+    ],
+    "title": "A pelican for GPT-5.5 via the semi-official Codex backdoor API",
+    "url": "https://simonwillison.net/2026/Apr/23/gpt-5-5/#atom-everything",
+    "domain": "simonwillison.net",
+    "subjects": [],
+    "upvotes": 575,
+    "downvotes": 15,
+    "comments": 2,
+    "submitted_at": "2026-04-17T14:22:33.982Z",
+    "reading_time_min": 7
+  },
+  {
+    "id": "236",
+    "user": "sasha",
+    "type": "news",
+    "tags": [
+      "model-release",
+      "claude-code"
+    ],
+    "title": "llm-openai-via-codex 0.1a0",
+    "url": "https://simonwillison.net/2026/Apr/23/llm-openai-via-codex/#atom-everything",
+    "domain": "simonwillison.net",
+    "subjects": [],
+    "upvotes": 28,
+    "downvotes": 1,
+    "comments": 1,
+    "submitted_at": "2026-04-29T10:43:22.309Z"
+  },
+  {
+    "id": "237",
+    "user": "zed",
+    "type": "news",
+    "tags": [
+      "agents"
+    ],
+    "title": "llm 0.32a1",
+    "url": "https://simonwillison.net/2026/Apr/29/llm-3/#atom-everything",
+    "domain": "simonwillison.net",
+    "subjects": [],
+    "upvotes": 29,
+    "downvotes": 1,
+    "comments": 2,
+    "submitted_at": "2026-04-23T16:12:00.735Z"
+  },
+  {
+    "id": "238",
+    "user": "nova",
+    "type": "news",
+    "tags": [],
+    "title": "llm 0.32a0",
+    "url": "https://simonwillison.net/2026/Apr/29/llm-2/#atom-everything",
+    "domain": "simonwillison.net",
+    "subjects": [],
+    "upvotes": 20,
+    "downvotes": 0,
+    "comments": 2,
+    "submitted_at": "2026-04-30T13:32:18.210Z"
+  },
+  {
+    "id": "239",
+    "user": "ren",
+    "type": "article",
+    "tags": [],
+    "title": "What's new in pip 26.1 - lockfiles and dependency cooldowns!",
+    "url": "https://simonwillison.net/2026/Apr/28/pip-261/#atom-everything",
+    "domain": "simonwillison.net",
+    "subjects": [],
+    "upvotes": 8,
+    "downvotes": 0,
+    "comments": 1,
+    "submitted_at": "2026-04-30T15:03:57.909Z",
+    "reading_time_min": 7
+  },
+  {
+    "id": "240",
+    "user": "ish",
+    "type": "article",
+    "tags": [
+      "model-release",
+      "voice"
+    ],
+    "title": "Introducing talkie: a 13B vintage language model from 1930",
+    "url": "https://simonwillison.net/2026/Apr/28/talkie/#atom-everything",
+    "domain": "simonwillison.net",
+    "subjects": [],
+    "upvotes": 59,
+    "downvotes": 1,
+    "comments": 1,
+    "submitted_at": "2026-04-27T16:13:06.927Z",
+    "reading_time_min": 7
+  },
+  {
+    "id": "241",
+    "user": "lixiaolai",
+    "type": "article",
+    "tags": [
+      "voice"
+    ],
+    "title": "microsoft/VibeVoice",
+    "url": "https://simonwillison.net/2026/Apr/27/vibevoice/#atom-everything",
+    "domain": "simonwillison.net",
+    "subjects": [],
+    "upvotes": 13,
+    "downvotes": 0,
+    "comments": 1,
+    "submitted_at": "2026-04-25T11:26:48.883Z",
+    "reading_time_min": 6
+  },
+  {
+    "id": "242",
+    "user": "ada",
+    "type": "article",
+    "tags": [],
+    "title": "Tracking the history of the now-deceased OpenAI Microsoft AGI clause",
+    "url": "https://simonwillison.net/2026/Apr/27/now-deceased-agi-clause/#atom-everything",
+    "domain": "simonwillison.net",
+    "subjects": [],
+    "upvotes": 12,
+    "downvotes": 0,
+    "comments": 4,
+    "submitted_at": "2026-04-28T10:33:14.734Z",
+    "reading_time_min": 7
+  },
+  {
+    "id": "243",
+    "user": "kai",
+    "type": "article",
+    "tags": [
+      "model-release"
+    ],
+    "title": "llm 0.31",
+    "url": "https://simonwillison.net/2026/Apr/24/llm/#atom-everything",
+    "domain": "simonwillison.net",
+    "subjects": [],
+    "upvotes": 78,
+    "downvotes": 2,
+    "comments": 2,
+    "submitted_at": "2026-04-27T10:37:49.749Z",
+    "reading_time_min": 6
+  },
+  {
+    "id": "244",
+    "user": "ClauDepot",
+    "type": "tool",
+    "tags": [
+      "release-watch",
+      "claude-code",
+      "agents"
+    ],
+    "title": "anthropics/claude-agent-sdk-typescript v0.2.123",
+    "url": "https://github.com/anthropics/claude-agent-sdk-typescript/releases/tag/v0.2.123",
+    "domain": "github.com",
+    "subjects": [],
+    "upvotes": 30,
+    "downvotes": 0,
+    "comments": 4,
+    "submitted_at": "2026-04-15T10:11:00.215Z",
+    "auto_posted": true,
+    "tool_meta": {
+      "stars": 4085,
+      "language": "Rust",
+      "last_commit_relative": "2 days ago"
+    }
+  },
+  {
+    "id": "245",
+    "user": "ClauDepot",
+    "type": "tool",
+    "tags": [
+      "release-watch",
+      "agents"
+    ],
+    "title": "anthropics/claude-agent-sdk-python v0.1.71",
+    "url": "https://github.com/anthropics/claude-agent-sdk-python/releases/tag/v0.1.71",
+    "domain": "github.com",
+    "subjects": [],
+    "upvotes": 36,
+    "downvotes": 0,
+    "comments": 3,
+    "submitted_at": "2026-04-25T13:57:51.554Z",
+    "auto_posted": true,
+    "tool_meta": {
+      "stars": 41,
+      "language": "TypeScript",
+      "last_commit_relative": "3 days ago"
+    }
+  },
+  {
+    "id": "246",
+    "user": "ClauDepot",
+    "type": "tool",
+    "tags": [
+      "release-watch",
+      "claude-code",
+      "agents"
+    ],
+    "title": "anthropics/anthropic-cli v1.4.0",
+    "url": "https://github.com/anthropics/anthropic-cli/releases/tag/v1.4.0",
+    "domain": "github.com",
+    "subjects": [],
+    "upvotes": 17,
+    "downvotes": 0,
+    "comments": 3,
+    "submitted_at": "2026-04-29T15:53:26.802Z",
+    "auto_posted": true,
+    "tool_meta": {
+      "stars": 23085,
+      "language": "Go",
+      "last_commit_relative": "yesterday"
+    }
+  },
+  {
+    "id": "247",
+    "user": "ClauDepot",
+    "type": "tool",
+    "tags": [
+      "release-watch",
+      "claude-code"
+    ],
+    "title": "anthropics/claude-code-action Claude Code GitHub Action v1.0",
+    "url": "https://github.com/anthropics/claude-code-action/releases/tag/v1",
+    "domain": "github.com",
+    "subjects": [],
+    "upvotes": 19,
+    "downvotes": 0,
+    "comments": 1,
+    "submitted_at": "2026-04-25T11:27:45.219Z",
+    "auto_posted": true,
+    "tool_meta": {
+      "stars": 32982,
+      "language": "Go",
+      "last_commit_relative": "2 days ago"
+    }
+  },
+  {
+    "id": "248",
+    "user": "ClauDepot",
+    "type": "tool",
+    "tags": [
+      "release-watch",
+      "claude-code"
+    ],
+    "title": "anthropics/claude-code v2.1.123",
+    "url": "https://github.com/anthropics/claude-code/releases/tag/v2.1.123",
+    "domain": "github.com",
+    "subjects": [],
+    "upvotes": 243,
+    "downvotes": 10,
+    "comments": 4,
+    "submitted_at": "2026-04-24T14:25:04.999Z",
+    "auto_posted": true,
+    "tool_meta": {
+      "stars": 257,
+      "language": "Rust",
+      "last_commit_relative": "today"
+    }
+  },
+  {
+    "id": "249",
+    "user": "ClauDepot",
+    "type": "tool",
+    "tags": [
+      "release-watch"
+    ],
+    "title": "anthropics/anthropic-sdk-php v0.17.1",
+    "url": "https://github.com/anthropics/anthropic-sdk-php/releases/tag/v0.17.1",
+    "domain": "github.com",
+    "subjects": [],
+    "upvotes": 23,
+    "downvotes": 0,
+    "comments": 1,
+    "submitted_at": "2026-04-29T15:10:11.543Z",
+    "auto_posted": true,
+    "tool_meta": {
+      "stars": 424,
+      "language": "Rust",
+      "last_commit_relative": "1 week ago"
+    }
+  },
+  {
+    "id": "250",
+    "user": "ClauDepot",
+    "type": "tool",
+    "tags": [
+      "release-watch"
+    ],
+    "title": "anthropics/anthropic-sdk-typescript sdk: v0.91.1",
+    "url": "https://github.com/anthropics/anthropic-sdk-typescript/releases/tag/sdk-v0.91.1",
+    "domain": "github.com",
+    "subjects": [],
+    "upvotes": 419,
+    "downvotes": 7,
+    "comments": 0,
+    "submitted_at": "2026-04-24T09:47:04.220Z",
+    "auto_posted": true,
+    "tool_meta": {
+      "stars": 344,
+      "language": "TypeScript",
+      "last_commit_relative": "3 days ago"
+    }
+  },
+  {
+    "id": "251",
+    "user": "ClauDepot",
+    "type": "tool",
+    "tags": [
+      "release-watch",
+      "claude-code",
+      "agents"
+    ],
+    "title": "shinpr/claude-code-workflows v0.16.15",
+    "url": "https://github.com/shinpr/claude-code-workflows/releases/tag/v0.16.15",
+    "domain": "github.com",
+    "subjects": [],
+    "upvotes": 25,
+    "downvotes": 0,
+    "comments": 1,
+    "submitted_at": "2026-04-21T12:15:57.923Z",
+    "auto_posted": true,
+    "tool_meta": {
+      "stars": 70,
+      "language": "TypeScript",
+      "last_commit_relative": "3 days ago"
+    }
+  },
+  {
+    "id": "252",
+    "user": "ClauDepot",
+    "type": "tool",
+    "tags": [
+      "release-watch",
+      "claude-code"
+    ],
+    "title": "hesreallyhim/awesome-claude-code v2-pre-v3-cutover",
+    "url": "https://github.com/hesreallyhim/awesome-claude-code/releases/tag/v2-pre-v3-cutover",
+    "domain": "github.com",
+    "subjects": [],
+    "upvotes": 173,
+    "downvotes": 4,
+    "comments": 2,
+    "submitted_at": "2026-04-27T14:02:42.968Z",
+    "auto_posted": true,
+    "tool_meta": {
+      "stars": 49,
+      "language": "Python",
+      "last_commit_relative": "today"
+    }
+  },
+  {
+    "id": "253",
+    "user": "ClauDepot",
+    "type": "tool",
+    "tags": [
+      "release-watch",
+      "claude-code"
+    ],
+    "title": "FlorianBruniaux/claude-code-ultimate-guide Claude Code Ultimate Guide — PDF & EPUB Export v3.38.3",
+    "url": "https://github.com/FlorianBruniaux/claude-code-ultimate-guide/releases/tag/guide-export-v3.38.3",
+    "domain": "github.com",
+    "subjects": [],
+    "upvotes": 110,
+    "downvotes": 2,
+    "comments": 2,
+    "submitted_at": "2026-04-29T15:02:51.445Z",
+    "auto_posted": true,
+    "tool_meta": {
+      "stars": 2994,
+      "language": "TypeScript",
+      "last_commit_relative": "5 days ago"
+    }
+  },
+  {
+    "id": "254",
+    "user": "ClauDepot",
+    "type": "tool",
+    "tags": [
+      "release-watch"
+    ],
+    "title": "yamadashy/repomix v1.14.0",
+    "url": "https://github.com/yamadashy/repomix/releases/tag/v1.14.0",
+    "domain": "github.com",
+    "subjects": [],
+    "upvotes": 132,
+    "downvotes": 2,
+    "comments": 2,
+    "submitted_at": "2026-04-27T12:22:03.393Z",
+    "auto_posted": true,
+    "tool_meta": {
+      "stars": 88,
+      "language": "Rust",
+      "last_commit_relative": "2 days ago"
+    }
+  },
+  {
+    "id": "255",
+    "user": "ClauDepot",
+    "type": "tool",
+    "tags": [
+      "release-watch",
+      "infra",
+      "prompt-caching"
+    ],
+    "title": "weaviate/weaviate v1.37.2 - TTL Stability, Vector Cache & Export Fixes",
+    "url": "https://github.com/weaviate/weaviate/releases/tag/v1.37.2",
+    "domain": "github.com",
+    "subjects": [],
+    "upvotes": 26,
+    "downvotes": 0,
+    "comments": 1,
+    "submitted_at": "2026-04-24T10:08:32.837Z",
+    "auto_posted": true,
+    "tool_meta": {
+      "stars": 397,
+      "language": "Go",
+      "last_commit_relative": "3 days ago"
+    }
+  },
+  {
+    "id": "256",
+    "user": "ClauDepot",
+    "type": "tool",
+    "tags": [
+      "release-watch",
+      "infra"
+    ],
+    "title": "chroma-core/chroma Latest",
+    "url": "https://github.com/chroma-core/chroma/releases/tag/latest",
+    "domain": "github.com",
+    "subjects": [],
+    "upvotes": 211,
+    "downvotes": 3,
+    "comments": 0,
+    "submitted_at": "2026-04-20T12:22:42.209Z",
+    "auto_posted": true,
+    "tool_meta": {
+      "stars": 3339,
+      "language": "Python",
+      "last_commit_relative": "3 days ago"
+    }
+  },
+  {
+    "id": "257",
+    "user": "ClauDepot",
+    "type": "tool",
+    "tags": [
+      "release-watch",
+      "infra"
+    ],
+    "title": "openai/openai-python v2.33.0",
+    "url": "https://github.com/openai/openai-python/releases/tag/v2.33.0",
+    "domain": "github.com",
+    "subjects": [],
+    "upvotes": 13,
+    "downvotes": 0,
+    "comments": 3,
+    "submitted_at": "2026-04-17T16:17:33.043Z",
+    "auto_posted": true,
+    "tool_meta": {
+      "stars": 2059,
+      "language": "TypeScript",
+      "last_commit_relative": "3 days ago"
+    }
+  },
+  {
+    "id": "258",
+    "user": "ClauDepot",
+    "type": "tool",
+    "tags": [
+      "release-watch",
+      "infra"
+    ],
+    "title": "BerriAI/litellm v1.83.10-stable",
+    "url": "https://github.com/BerriAI/litellm/releases/tag/v1.83.10-stable",
+    "domain": "github.com",
+    "subjects": [],
+    "upvotes": 118,
+    "downvotes": 2,
+    "comments": 1,
+    "submitted_at": "2026-04-20T09:45:02.536Z",
+    "auto_posted": true,
+    "tool_meta": {
+      "stars": 52048,
+      "language": "Rust",
+      "last_commit_relative": "2 days ago"
+    }
+  },
+  {
+    "id": "259",
+    "user": "miro",
+    "type": "news",
+    "tags": [
+      "agents"
+    ],
+    "title": "How do you test AI agents in production? The unpredictability is overwhelming.[D]",
+    "url": "https://old.reddit.com/r/MachineLearning/comments/1sx3p40/how_do_you_test_ai_agents_in_production_the/",
+    "domain": "reddit.com",
+    "subjects": [],
+    "upvotes": 0,
+    "downvotes": 0,
+    "comments": 0,
+    "submitted_at": "2026-04-20T12:13:41.330Z",
+    "state": "pending",
+    "ai_decision": {
+      "reason": "Self-promotion signal moderate — author has 3 prior posts to the same domain this week.",
+      "confidence": 0.62,
+      "tags_assigned": [
+        "agents"
+      ],
+      "type_assigned": "news",
+      "decided_at": "2026-04-20T12:13:41.330Z"
+    }
+  },
+  {
+    "id": "260",
+    "user": "lin",
+    "type": "news",
+    "tags": [],
+    "title": "How strongly do you believe LLM judges on the for the ML papers?? [D]",
+    "url": "https://old.reddit.com/r/MachineLearning/comments/1sz6uuj/how_strongly_do_you_believe_llm_judges_on_the_for/",
+    "domain": "reddit.com",
+    "subjects": [],
+    "upvotes": 0,
+    "downvotes": 0,
+    "comments": 0,
+    "submitted_at": "2026-04-28T14:03:09.355Z",
+    "state": "rejected",
+    "ai_decision": {
+      "reason": "Title pattern matches promotional spam (\"10x your X with this one tool\"). No substantive content in URL preview.",
+      "confidence": 0.92,
+      "tags_assigned": [],
+      "decided_at": "2026-04-28T14:03:09.355Z"
+    }
+  },
+  {
+    "id": "261",
+    "user": "sasha",
+    "type": "news",
+    "tags": [],
+    "title": "An interactive semantic map of the latest 10 million published papers [P]",
+    "url": "https://old.reddit.com/r/MachineLearning/comments/1sz14mi/an_interactive_semantic_map_of_the_latest_10/",
+    "domain": "reddit.com",
+    "subjects": [],
+    "upvotes": 0,
+    "downvotes": 0,
+    "comments": 0,
+    "submitted_at": "2026-04-29T10:33:58.710Z",
+    "state": "rejected",
+    "ai_decision": {
+      "reason": "Affiliate/referral link in URL without disclosure. Rule 4 violation.",
+      "confidence": 0.94,
+      "tags_assigned": [],
+      "decided_at": "2026-04-29T10:33:58.710Z"
+    }
+  },
+  {
+    "id": "262",
+    "user": "zed",
+    "type": "news",
+    "tags": [
+      "voice"
+    ],
+    "title": "Free Registration & $20K Prize Pool: 2nd MLC-SLM Challenge 2026 on Multilingual Speech LLMs [N]",
+    "url": "https://old.reddit.com/r/MachineLearning/comments/1symd9i/free_registration_20k_prize_pool_2nd_mlcslm/",
+    "domain": "reddit.com",
+    "subjects": [],
+    "upvotes": 0,
+    "downvotes": 0,
+    "comments": 0,
+    "submitted_at": "2026-04-30T10:31:29.483Z",
+    "state": "rejected",
+    "ai_decision": {
+      "reason": "Duplicate — same URL submitted by another user 6 hours earlier.",
+      "confidence": 0.97,
+      "tags_assigned": [],
+      "decided_at": "2026-04-30T10:31:29.483Z"
+    }
+  },
+  {
+    "id": "263",
+    "user": "nova",
+    "type": "news",
+    "tags": [
+      "claude-code",
+      "agents",
+      "prompt-caching"
+    ],
+    "title": "Speeding up agentic workflows with WebSockets in the Responses API",
+    "url": "https://openai.com/index/speeding-up-agentic-workflows-with-websockets",
+    "domain": "openai.com",
+    "subjects": [],
+    "upvotes": 35,
+    "downvotes": 1,
+    "comments": 0,
+    "submitted_at": "2026-04-15T14:29:55.399Z"
+  },
+  {
+    "id": "264",
+    "user": "ren",
+    "type": "news",
+    "tags": [
+      "claude-code",
+      "agents"
+    ],
+    "title": "OpenAI models, Codex, and Managed Agents come to AWS",
+    "url": "https://openai.com/index/openai-on-aws",
+    "domain": "openai.com",
+    "subjects": [],
+    "upvotes": 0,
+    "downvotes": 0,
+    "comments": 0,
+    "submitted_at": "2026-04-29T12:17:47.525Z",
+    "state": "pending",
+    "ai_decision": {
+      "reason": "Mixed-language content; classifier confidence drops on the non-English passages.",
+      "confidence": 0.65,
+      "tags_assigned": [
+        "claude-code",
+        "agents"
+      ],
+      "type_assigned": "news",
+      "decided_at": "2026-04-29T12:17:47.525Z"
+    }
+  },
+  {
+    "id": "265",
+    "user": "ish",
+    "type": "news",
+    "tags": [
+      "claude-code",
+      "agents"
+    ],
+    "title": "An open-source spec for orchestration: Symphony",
+    "url": "https://openai.com/index/open-source-codex-orchestration-symphony",
+    "domain": "openai.com",
+    "subjects": [],
+    "upvotes": 0,
+    "downvotes": 0,
+    "comments": 0,
+    "submitted_at": "2026-04-19T09:57:15.687Z",
+    "state": "pending",
+    "ai_decision": {
+      "reason": "Domain unfamiliar to classifier. URL preview reads as legitimate but no signal history.",
+      "confidence": 0.74,
+      "tags_assigned": [
+        "claude-code",
+        "agents"
+      ],
+      "type_assigned": "news",
+      "decided_at": "2026-04-19T09:57:15.687Z"
+    }
+  },
+  {
+    "id": "266",
+    "user": "lixiaolai",
+    "type": "news",
+    "tags": [
+      "claude-code",
+      "agents"
+    ],
+    "title": "Introducing workspace agents in ChatGPT",
+    "url": "https://openai.com/index/introducing-workspace-agents-in-chatgpt",
+    "domain": "openai.com",
+    "subjects": [],
+    "upvotes": 0,
+    "downvotes": 0,
+    "comments": 0,
+    "submitted_at": "2026-04-26T13:26:01.078Z",
+    "state": "pending",
+    "ai_decision": {
+      "reason": "Edge of safety policy — discusses jailbreak techniques. Could be educational or not.",
+      "confidence": 0.59,
+      "tags_assigned": [
+        "claude-code",
+        "agents"
+      ],
+      "type_assigned": "news",
+      "decided_at": "2026-04-26T13:26:01.078Z"
+    }
+  },
+  {
+    "id": "267",
+    "user": "ClauDepot",
+    "type": "tool",
+    "tags": [
+      "release-watch",
+      "claude-code"
+    ],
+    "title": "CherryHQ/cherry-studio v1.9.3",
+    "url": "https://github.com/CherryHQ/cherry-studio/releases/tag/v1.9.3",
+    "domain": "github.com",
+    "subjects": [],
+    "upvotes": 73,
+    "downvotes": 0,
+    "comments": 1,
+    "submitted_at": "2026-04-28T13:36:04.130Z",
+    "auto_posted": true,
+    "tool_meta": {
+      "stars": 2741,
+      "language": "Go",
+      "last_commit_relative": "2 days ago"
+    }
+  },
+  {
+    "id": "268",
+    "user": "ClauDepot",
+    "type": "tool",
+    "tags": [
+      "release-watch"
+    ],
+    "title": "lobehub/lobe-chat 🚀 Release v2.1.55",
+    "url": "https://github.com/lobehub/lobehub/releases/tag/v2.1.55",
+    "domain": "github.com",
+    "subjects": [],
+    "upvotes": 218,
+    "downvotes": 9,
+    "comments": 4,
+    "submitted_at": "2026-04-21T16:31:00.825Z",
+    "auto_posted": true,
+    "tool_meta": {
+      "stars": 420,
+      "language": "Rust",
+      "last_commit_relative": "today"
+    }
+  },
+  {
+    "id": "269",
+    "user": "ClauDepot",
+    "type": "tool",
+    "tags": [
+      "release-watch"
+    ],
+    "title": "n8n-io/n8n v1: :rocket: Release 1.123.38 (#29514)",
+    "url": "https://github.com/n8n-io/n8n/releases/tag/v1",
+    "domain": "github.com",
+    "subjects": [],
+    "upvotes": 86,
+    "downvotes": 1,
+    "comments": 1,
+    "submitted_at": "2026-04-30T10:53:37.334Z",
+    "auto_posted": true,
+    "tool_meta": {
+      "stars": 2081,
+      "language": "TypeScript",
+      "last_commit_relative": "yesterday"
+    }
+  },
+  {
+    "id": "270",
+    "user": "ClauDepot",
+    "type": "tool",
+    "tags": [
+      "release-watch"
+    ],
+    "title": "labring/FastGPT v4.14.17",
+    "url": "https://github.com/labring/FastGPT/releases/tag/v4.14.17",
+    "domain": "github.com",
+    "subjects": [],
+    "upvotes": 33,
+    "downvotes": 0,
+    "comments": 3,
+    "submitted_at": "2026-04-28T11:06:51.276Z",
+    "auto_posted": true,
+    "tool_meta": {
+      "stars": 3281,
+      "language": "Rust",
+      "last_commit_relative": "2 days ago"
+    }
+  },
+  {
+    "id": "271",
+    "user": "ClauDepot",
+    "type": "tool",
+    "tags": [
+      "release-watch"
+    ],
+    "title": "open-webui/open-webui v0.9.2",
+    "url": "https://github.com/open-webui/open-webui/releases/tag/v0.9.2",
+    "domain": "github.com",
+    "subjects": [],
+    "upvotes": 588,
+    "downvotes": 3,
+    "comments": 4,
+    "submitted_at": "2026-04-24T15:18:01.856Z",
+    "auto_posted": true,
+    "tool_meta": {
+      "stars": 364,
+      "language": "Python",
+      "last_commit_relative": "3 days ago"
+    }
+  },
+  {
+    "id": "272",
+    "user": "ClauDepot",
+    "type": "tool",
+    "tags": [
+      "release-watch"
+    ],
+    "title": "danny-avila/LibreChat v0.8.5",
+    "url": "https://github.com/danny-avila/LibreChat/releases/tag/v0.8.5",
+    "domain": "github.com",
+    "subjects": [],
+    "upvotes": 19,
+    "downvotes": 0,
+    "comments": 5,
+    "submitted_at": "2026-04-13T13:35:09.311Z",
+    "auto_posted": true,
+    "tool_meta": {
+      "stars": 46,
+      "language": "Python",
+      "last_commit_relative": "3 days ago"
+    }
+  },
+  {
+    "id": "273",
+    "user": "ClauDepot",
+    "type": "tool",
+    "tags": [
+      "release-watch"
+    ],
+    "title": "chatboxai/chatbox v1.20.1",
+    "url": "https://github.com/chatboxai/chatbox/releases/tag/v1.20.1",
+    "domain": "github.com",
+    "subjects": [],
+    "upvotes": 31,
+    "downvotes": 1,
+    "comments": 2,
+    "submitted_at": "2026-04-26T13:01:02.648Z",
+    "auto_posted": true,
+    "tool_meta": {
+      "stars": 830,
+      "language": "Go",
+      "last_commit_relative": "1 week ago"
+    }
+  },
+  {
+    "id": "274",
+    "user": "ada",
+    "type": "news",
+    "tags": [
+      "model-release",
+      "claude-code",
+      "agents"
+    ],
+    "title": "Cursor & Claude deleted a company's entire database",
+    "url": "https://old.reddit.com/r/cursor/comments/1sxsp8i/cursor_claude_deleted_a_companys_entire_database/",
+    "domain": "reddit.com",
+    "subjects": [],
+    "upvotes": 26,
+    "downvotes": 0,
+    "comments": 1,
+    "submitted_at": "2026-04-10T10:43:04.168Z"
+  },
+  {
+    "id": "275",
+    "user": "kai",
+    "type": "news",
+    "tags": [
+      "mcp",
+      "model-release"
+    ],
+    "title": "What the heck Anthropic? Opus 4.7, YouTube API MCP",
+    "url": "https://old.reddit.com/r/cursor/comments/1snirt2/what_the_heck_anthropic_opus_47_youtube_api_mcp/",
+    "domain": "reddit.com",
+    "subjects": [],
+    "upvotes": 60,
+    "downvotes": 0,
+    "comments": 3,
+    "submitted_at": "2026-04-17T15:37:52.416Z"
+  },
+  {
+    "id": "276",
+    "user": "miro",
+    "type": "news",
+    "tags": [
+      "mcp",
+      "claude-code",
+      "agents"
+    ],
+    "title": "You can now open a business bank account and manage finances through Cursor",
+    "url": "https://old.reddit.com/r/cursor/comments/1shprat/you_can_now_open_a_business_bank_account_and/",
+    "domain": "reddit.com",
+    "subjects": [],
+    "upvotes": 85,
+    "downvotes": 0,
+    "comments": 2,
+    "submitted_at": "2026-04-12T14:26:50.473Z"
+  },
+  {
+    "id": "277",
+    "user": "lin",
+    "type": "tutorial",
+    "tags": [
+      "model-release",
+      "claude-code"
+    ],
+    "title": "How I use Cursor 10+ hours a day without torching my Claude Opus 4.6 limits",
+    "url": "https://old.reddit.com/r/cursor/comments/1sgz94r/how_i_use_cursor_10_hours_a_day_without_torching/",
+    "domain": "reddit.com",
+    "subjects": [],
+    "upvotes": 20,
+    "downvotes": 0,
+    "comments": 1,
+    "submitted_at": "2026-04-25T09:54:54.991Z",
+    "reading_time_min": 7
+  },
+  {
+    "id": "278",
+    "user": "sasha",
+    "type": "news",
+    "tags": [
+      "model-release",
+      "claude-code",
+      "infra"
+    ],
+    "title": "My Opus 4.6 high-thinking calls went from $0.08 to $1.40 each over 10 days for identical work. What changed?",
+    "url": "https://old.reddit.com/r/cursor/comments/1sf6stw/my_opus_46_highthinking_calls_went_from_008_to/",
+    "domain": "reddit.com",
+    "subjects": [],
+    "upvotes": 27,
+    "downvotes": 0,
+    "comments": 4,
+    "submitted_at": "2026-04-30T13:15:43.295Z"
+  },
+  {
+    "id": "279",
+    "user": "zed",
+    "type": "news",
+    "tags": [
+      "claude-code",
+      "agents"
+    ],
+    "title": "Moving from Cursor to VS Code + Codex/Claude Code: Is it worth the switch?",
+    "url": "https://old.reddit.com/r/cursor/comments/1swm9xp/moving_from_cursor_to_vs_code_codexclaude_code_is/",
+    "domain": "reddit.com",
+    "subjects": [],
+    "upvotes": 131,
+    "downvotes": 4,
+    "comments": 1,
+    "submitted_at": "2026-04-17T11:45:19.927Z"
+  },
+  {
+    "id": "280",
+    "user": "nova",
+    "type": "news",
+    "tags": [
+      "model-release",
+      "claude-code",
+      "agents"
+    ],
+    "title": "Anthropic response to Claude Code change",
+    "url": "https://old.reddit.com/r/ClaudeAI/comments/1ss5fi4/anthropic_response_to_claude_code_change/",
+    "domain": "reddit.com",
+    "subjects": [],
+    "upvotes": 45,
+    "downvotes": 1,
+    "comments": 2,
+    "submitted_at": "2026-04-17T10:46:59.521Z"
+  },
+  {
+    "id": "281",
+    "user": "ren",
+    "type": "news",
+    "tags": [
+      "model-release",
+      "claude-code"
+    ],
+    "title": "Anthropic just quietly locked Opus behind a paywall-within-a-paywall for Pro users in Claude Code",
+    "url": "https://old.reddit.com/r/ClaudeAI/comments/1sxi9mo/anthropic_just_quietly_locked_opus_behind_a/",
+    "domain": "reddit.com",
+    "subjects": [],
+    "upvotes": 230,
+    "downvotes": 9,
+    "comments": 4,
+    "submitted_at": "2026-04-28T14:21:49.165Z"
+  },
+  {
+    "id": "282",
+    "user": "ish",
+    "type": "news",
+    "tags": [
+      "model-release",
+      "claude-code",
+      "agents"
+    ],
+    "title": "Introducing Claude Design by Anthropic Labs",
+    "url": "https://old.reddit.com/r/ClaudeAI/comments/1so3k1y/introducing_claude_design_by_anthropic_labs/",
+    "domain": "reddit.com",
+    "subjects": [],
+    "upvotes": 41,
+    "downvotes": 0,
+    "comments": 1,
+    "submitted_at": "2026-04-28T11:47:11.516Z"
+  },
+  {
+    "id": "283",
+    "user": "lixiaolai",
+    "type": "news",
+    "tags": [
+      "model-release",
+      "agents"
+    ],
+    "title": "Introducing Claude Opus 4.7, our most capable Opus model yet.",
+    "url": "https://old.reddit.com/r/ClaudeAI/comments/1sn57af/introducing_claude_opus_47_our_most_capable_opus/",
+    "domain": "reddit.com",
+    "subjects": [],
+    "upvotes": 13,
+    "downvotes": 0,
+    "comments": 3,
+    "submitted_at": "2026-04-27T10:57:18.884Z"
+  },
+  {
+    "id": "284",
+    "user": "ada",
+    "type": "news",
+    "tags": [
+      "safety",
+      "claude-code",
+      "agents"
+    ],
+    "title": "Claude-powered AI coding agent deletes entire company database in 9 seconds — backups zapped, after Cursor tool powered by Anthropic's Claude goes rogue",
+    "url": "https://old.reddit.com/r/ClaudeAI/comments/1sxe7cf/claudepowered_ai_coding_agent_deletes_entire/",
+    "domain": "reddit.com",
+    "subjects": [],
+    "upvotes": 36,
+    "downvotes": 1,
+    "comments": 0,
+    "submitted_at": "2026-04-06T15:58:49.119Z"
+  },
+  {
+    "id": "285",
+    "user": "kai",
+    "type": "news",
+    "tags": [
+      "model-release"
+    ],
+    "title": "Differences Between Opus 4.6 and Opus 4.7 on MineBench",
+    "url": "https://old.reddit.com/r/ClaudeAI/comments/1sofgno/differences_between_opus_46_and_opus_47_on/",
+    "domain": "reddit.com",
+    "subjects": [],
+    "upvotes": 33,
+    "downvotes": 0,
+    "comments": 1,
+    "submitted_at": "2026-04-15T16:01:48.975Z"
+  },
+  {
+    "id": "286",
+    "user": "miro",
+    "type": "news",
+    "tags": [
+      "model-release"
+    ],
+    "title": "Claude Design keeps drawing a turd",
+    "url": "https://old.reddit.com/r/ClaudeAI/comments/1sp6hns/claude_design_keeps_drawing_a_turd/",
+    "domain": "reddit.com",
+    "subjects": [],
+    "upvotes": 8,
+    "downvotes": 0,
+    "comments": 2,
+    "submitted_at": "2026-04-19T13:24:45.125Z"
+  },
+  {
+    "id": "287",
+    "user": "lin",
+    "type": "news",
+    "tags": [
+      "model-release"
+    ],
+    "title": "Claude Opus 4.7 Text Category Rankings",
+    "url": "https://old.reddit.com/r/ClaudeAI/comments/1so814j/claude_opus_47_text_category_rankings/",
+    "domain": "reddit.com",
+    "subjects": [],
+    "upvotes": 277,
+    "downvotes": 9,
+    "comments": 1,
+    "submitted_at": "2026-04-12T13:18:05.244Z"
+  },
+  {
+    "id": "288",
+    "user": "sasha",
+    "type": "news",
+    "tags": [
+      "model-release"
+    ],
+    "title": "Claude 4.7 just dropped and I'm already cooked",
+    "url": "https://old.reddit.com/r/ClaudeAI/comments/1sn6z9u/claude_47_just_dropped_and_im_already_cooked/",
+    "domain": "reddit.com",
+    "subjects": [],
+    "upvotes": 28,
+    "downvotes": 0,
+    "comments": 1,
+    "submitted_at": "2026-04-30T10:25:37.751Z"
+  },
+  {
+    "id": "289",
+    "user": "zed",
+    "type": "news",
+    "tags": [
+      "model-release",
+      "claude-code"
+    ],
+    "title": "You can now build a fully functional Claude Code executable directly from source code now - modding claude code has never been easier",
+    "url": "https://old.reddit.com/r/ClaudeAI/comments/1s98srg/you_can_now_build_a_fully_functional_claude_code/",
+    "domain": "reddit.com",
+    "subjects": [],
+    "upvotes": 35,
+    "downvotes": 0,
+    "comments": 2,
+    "submitted_at": "2026-04-30T15:38:54.925Z"
+  },
+  {
+    "id": "290",
+    "user": "nova",
+    "type": "news",
+    "tags": [
+      "safety",
+      "claude-code",
+      "infra"
+    ],
+    "title": "PSA: The string \"HERMES.md\" in your git commit history silently routes Claude Code billing to extra usage — cost me $200",
+    "url": "https://old.reddit.com/r/ClaudeAI/comments/1svdm1w/psa_the_string_hermesmd_in_your_git_commit/",
+    "domain": "reddit.com",
+    "subjects": [],
+    "upvotes": 28,
+    "downvotes": 0,
+    "comments": 1,
+    "submitted_at": "2026-04-21T13:08:00.212Z"
+  },
+  {
+    "id": "291",
+    "user": "ren",
+    "type": "news",
+    "tags": [],
+    "title": "PSA: Anthropic bans organizations without warning",
+    "url": "https://old.reddit.com/r/ClaudeAI/comments/1sspwz2/psa_anthropic_bans_organizations_without_warning/",
+    "domain": "reddit.com",
+    "subjects": [],
+    "upvotes": 57,
+    "downvotes": 1,
+    "comments": 1,
+    "submitted_at": "2026-04-26T11:19:08.093Z"
+  },
+  {
+    "id": "292",
+    "user": "ish",
+    "type": "news",
+    "tags": [],
+    "title": "An open letter to Anthropic",
+    "url": "https://old.reddit.com/r/ClaudeAI/comments/1ss8h1x/an_open_letter_to_anthropic/",
+    "domain": "reddit.com",
+    "subjects": [],
+    "upvotes": 114,
+    "downvotes": 4,
+    "comments": 3,
+    "submitted_at": "2026-04-20T15:18:40.731Z"
+  },
+  {
+    "id": "293",
+    "user": "lixiaolai",
+    "type": "news",
+    "tags": [],
+    "title": "Claude Design just launched and Figma dropped 4.26% in a single day, we are witnessing history in real time",
+    "url": "https://old.reddit.com/r/ClaudeAI/comments/1so6z2t/claude_design_just_launched_and_figma_dropped_426/",
+    "domain": "reddit.com",
+    "subjects": [],
+    "upvotes": 51,
+    "downvotes": 0,
+    "comments": 0,
+    "submitted_at": "2026-04-24T16:40:01.514Z"
+  },
+  {
+    "id": "294",
+    "user": "ada",
+    "type": "news",
+    "tags": [],
+    "title": "Anthropic's Claude Mythos isn't a sentient super-hacker, it's a sales pitch — claims of 'thousands' of severe zero-days rely on just 198 manual reviews",
+    "url": "https://old.reddit.com/r/ClaudeAI/comments/1sjbsyg/anthropics_claude_mythos_isnt_a_sentient/",
+    "domain": "reddit.com",
+    "subjects": [],
+    "upvotes": 29,
+    "downvotes": 0,
+    "comments": 0,
+    "submitted_at": "2026-04-16T10:29:23.533Z"
+  },
+  {
+    "id": "295",
+    "user": "kai",
+    "type": "news",
+    "tags": [
+      "voice",
+      "claude-code"
+    ],
+    "title": "Anthropic: Stop shipping. Seriously.",
+    "url": "https://old.reddit.com/r/ClaudeAI/comments/1siqwmp/anthropic_stop_shipping_seriously/",
+    "domain": "reddit.com",
+    "subjects": [],
+    "upvotes": 10,
+    "downvotes": 0,
+    "comments": 2,
+    "submitted_at": "2026-04-12T09:18:27.620Z"
+  },
+  {
+    "id": "296",
+    "user": "miro",
+    "type": "news",
+    "tags": [
+      "claude-code"
+    ],
+    "title": "AMD AI directors analysis confirms lobotomization of Claude",
+    "url": "https://old.reddit.com/r/ClaudeAI/comments/1sifepi/amd_ai_directors_analysis_confirms_lobotomization/",
+    "domain": "reddit.com",
+    "subjects": [],
+    "upvotes": 36,
+    "downvotes": 1,
+    "comments": 1,
+    "submitted_at": "2026-04-06T10:58:10.336Z"
+  },
+  {
+    "id": "297",
+    "user": "lin",
+    "type": "news",
+    "tags": [],
+    "title": "How Anthropic talks about Claude Mythos rn:",
+    "url": "https://old.reddit.com/r/ClaudeAI/comments/1sf7yzm/how_anthropic_talks_about_claude_mythos_rn/",
+    "domain": "reddit.com",
+    "subjects": [],
+    "upvotes": 46,
+    "downvotes": 0,
+    "comments": 4,
+    "submitted_at": "2026-04-03T13:35:11.343Z"
+  },
+  {
+    "id": "298",
+    "user": "ClauDepot",
+    "type": "news",
+    "tags": [
+      "model-release",
+      "agents"
+    ],
+    "title": "Introducing Claude Opus 4.7",
+    "url": "https://www.anthropic.com/news/claude-opus-4-7",
+    "domain": "anthropic.com",
+    "subjects": [],
+    "upvotes": 219,
+    "downvotes": 1,
+    "comments": 6,
+    "submitted_at": "2026-04-26T10:06:27.417Z",
+    "auto_posted": true
+  },
+  {
+    "id": "299",
+    "user": "ClauDepot",
+    "type": "news",
+    "tags": [
+      "model-release"
+    ],
+    "title": "Introducing Claude Design by Anthropic Labs",
+    "url": "https://www.anthropic.com/news/claude-design-anthropic-labs",
+    "domain": "anthropic.com",
+    "subjects": [],
+    "upvotes": 315,
+    "downvotes": 6,
+    "comments": 4,
+    "submitted_at": "2026-04-29T12:14:45.248Z",
+    "auto_posted": true
+  },
+  {
+    "id": "300",
+    "user": "sasha",
+    "type": "podcast",
+    "tags": [
+      "agents"
+    ],
+    "title": "AI News: Claude Can Now Control Your Computer!",
+    "url": "https://www.youtube.com/watch?v=a_T5fjA2ulY",
+    "domain": "youtube.com",
+    "subjects": [],
+    "upvotes": 62,
+    "downvotes": 0,
+    "comments": 1,
+    "submitted_at": "2026-04-28T12:39:08.694Z",
+    "podcast_meta": {
+      "duration_min": 16,
+      "host": "Matt Wolfe"
+    }
+  },
+  {
+    "id": "301",
+    "user": "zed",
+    "type": "podcast",
+    "tags": [
+      "safety"
+    ],
+    "title": "Alignment faking in large language models",
+    "url": "https://www.youtube.com/watch?v=9eXV64O2Xp8",
+    "domain": "youtube.com",
+    "subjects": [],
+    "upvotes": 80,
+    "downvotes": 0,
+    "comments": 2,
+    "submitted_at": "2026-04-18T14:09:33.299Z",
+    "podcast_meta": {
+      "duration_min": 69,
+      "host": "Anthropic"
+    }
+  },
+  {
+    "id": "302",
+    "user": "nova",
+    "type": "podcast",
+    "tags": [],
+    "title": "Claude is Taking Over: Every New Feature Explained (Full Guide)",
+    "url": "https://www.youtube.com/watch?v=_5xDx_lL9fQ",
+    "domain": "youtube.com",
+    "subjects": [],
+    "upvotes": 205,
+    "downvotes": 6,
+    "comments": 2,
+    "submitted_at": "2026-04-27T13:16:29.139Z",
+    "podcast_meta": {
+      "duration_min": 47,
+      "host": "Riley Brown"
+    }
+  },
+  {
+    "id": "303",
+    "user": "ren",
+    "type": "podcast",
+    "tags": [
+      "agents"
+    ],
+    "title": "OpenAI’s Sam Altman Talks ChatGPT, AI Agents and Superintelligence — Live at TED2025",
+    "url": "https://www.youtube.com/watch?v=5MWT_doo68k",
+    "domain": "youtube.com",
+    "subjects": [],
+    "upvotes": 63,
+    "downvotes": 0,
+    "comments": 0,
+    "submitted_at": "2026-04-27T16:57:43.908Z",
+    "podcast_meta": {
+      "duration_min": 163,
+      "host": "TED"
+    }
+  },
+  {
+    "id": "304",
+    "user": "ish",
+    "type": "podcast",
+    "tags": [
+      "agents"
+    ],
+    "title": "Demis Hassabis: Agents, AGI & The Next Big Scientific Breakthrough",
+    "url": "https://www.youtube.com/watch?v=JNyuX1zoOgU",
+    "domain": "youtube.com",
+    "subjects": [],
+    "upvotes": 124,
+    "downvotes": 2,
+    "comments": 0,
+    "submitted_at": "2026-04-23T14:32:38.478Z",
+    "podcast_meta": {
+      "duration_min": 167,
+      "host": "Y Combinator"
+    }
+  }
+]

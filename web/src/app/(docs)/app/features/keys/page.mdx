@@ -1,0 +1,65 @@
+export const metadata = {
+  title: "Keys",
+  description:
+    "Manage API keys for third-party services. Self-clearing clipboard, never echoed, never logged.",
+};
+
+# Keys
+
+API keys for the services you use alongside Claude — Anthropic
+console, Resend, OpenAI, GitHub PATs, OAuth refresh tokens. The Keys
+tab stores them in your OS keychain and gives you a single view to
+audit, copy, and rotate.
+
+## Add a key
+
+Three flavours:
+
+- **API key** &mdash; long-lived secret, e.g.
+  `sk-ant-api03-…`. ClauDepot stores it under a label you choose.
+- **OAuth token pair** &mdash; access + refresh tokens with an
+  expiry. ClauDepot tracks expiry and warns before tokens go stale.
+- **Personal access token** &mdash; GitHub-style PAT with scopes.
+
+Pasting in a secret happens entirely in Rust on the backend; the value
+is zeroized from local memory on every exit path before the IPC
+returns. The renderer&rsquo;s React state is cleared in a `finally`
+block on the same call.
+
+## Copy
+
+Every key has a *Copy* button. Behaviour:
+
+- ClauDepot writes the secret to your OS clipboard via Tauri&rsquo;s
+  clipboard plugin — Rust-side, never returned to the renderer.
+- The IPC returns only a receipt: a label, a `sk-ant-…xyz`-style
+  preview, and a clear deadline.
+- After 30 seconds, ClauDepot reads the clipboard. If it still holds
+  the same secret (no other app has overwritten it), ClauDepot
+  clears the clipboard. If something else is on the clipboard now,
+  ClauDepot leaves it alone.
+
+The result: secrets stay in the clipboard exactly long enough to paste
+once, and never leak to a future paste-target.
+
+## Audit
+
+Each row shows last-used (when ClauDepot last copied it for you),
+expiry (for OAuth pairs), and the key&rsquo;s scope or label. A keys
+event-log records every mint and revoke against the local DB.
+
+## Rotate
+
+Editing a key creates a new keychain entry and atomically swaps it
+in. The old entry is deleted only after the new one is verified to
+work.
+
+## Why this matters
+
+Token values starting with `sk-ant-` (or any other secret pattern)
+are never logged, never printed in error messages, never serialised
+into IPC responses. Truncated previews use the form `sk-ant-oat01-Abc…xyz`
+— enough to identify the key visually, not enough to re-use it.
+See
+[`KeyError`](https://github.com/xiaolai/claudepot-app/blob/main/crates/claudepot-core/src/keys/errors.rs)
+for the audited Display impl.

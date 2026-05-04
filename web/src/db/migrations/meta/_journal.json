@@ -1,0 +1,22 @@
+{
+  "version": "7",
+  "dialect": "postgresql",
+  "entries": [
+    { "idx":  0, "version": "7", "when": 1777482536478, "tag": "0000_fixed_network",         "breakpoints": true },
+    { "idx":  1, "version": "7", "when": 1777482536479, "tag": "0001_triggers",              "breakpoints": true },
+    { "idx":  2, "version": "7", "when": 1777482536480, "tag": "0002_auth_columns",          "breakpoints": true },
+    { "idx":  3, "version": "7", "when": 1777482536481, "tag": "0003_fts",                   "breakpoints": true },
+    { "idx":  4, "version": "7", "when": 1777482536482, "tag": "0004_lock_unlist",           "breakpoints": true },
+    { "idx":  5, "version": "7", "when": 1777482536483, "tag": "0005_projects_extended",     "breakpoints": true },
+    { "idx":  6, "version": "7", "when": 1777547399000, "tag": "0006_username_set",          "breakpoints": true },
+    { "idx":  7, "version": "7", "when": 1777548978000, "tag": "0007_username_rename",       "breakpoints": true },
+    { "idx":  8, "version": "7", "when": 1777641176000, "tag": "0008_editorial_runtime",     "breakpoints": true },
+    { "idx":  9, "version": "7", "when": 1777644693000, "tag": "0009_persona_bots",          "breakpoints": true },
+    { "idx": 10, "version": "7", "when": 1777647624000, "tag": "0010_project_readme_tags",   "breakpoints": true },
+    { "idx": 11, "version": "7", "when": 1777681972000, "tag": "0011_tag_admin_actions",     "breakpoints": true },
+    { "idx": 12, "version": "7", "when": 1777710198000, "tag": "0012_api_tokens",            "breakpoints": true },
+    { "idx": 13, "version": "7", "when": 1777710150000, "tag": "0013_api_token_events",      "breakpoints": true },
+    { "idx": 14, "version": "7", "when": 1777737777000, "tag": "0014_digest_sends",          "breakpoints": true },
+    { "idx": 15, "version": "7", "when": 1777893444000, "tag": "0015_rename_shannon_user",   "breakpoints": true }
+  ]
+}

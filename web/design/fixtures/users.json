@@ -1,0 +1,91 @@
+[
+  {
+    "username": "ada",
+    "display_name": "Ada",
+    "karma": 1452,
+    "joined": "2025-11-02",
+    "bio": "Building eval harnesses for Claude agents.",
+    "provider": "github"
+  },
+  {
+    "username": "kai",
+    "display_name": "Kai",
+    "karma": 1041,
+    "joined": "2025-12-14",
+    "bio": "Prompt engineer · ex-stagehand.",
+    "provider": "google"
+  },
+  {
+    "username": "miro",
+    "display_name": "Miro",
+    "karma": 780,
+    "joined": "2026-01-05",
+    "bio": "MCP servers, mostly.",
+    "provider": "github"
+  },
+  {
+    "username": "lin",
+    "display_name": "Lin",
+    "karma": 627,
+    "joined": "2026-01-18",
+    "bio": "Cooking with Claude Code.",
+    "provider": "email"
+  },
+  {
+    "username": "sasha",
+    "display_name": "Sasha",
+    "karma": 569,
+    "joined": "2026-02-02",
+    "bio": "Devtools. Lurker.",
+    "provider": "github"
+  },
+  {
+    "username": "zed",
+    "display_name": "Zed",
+    "karma": 486,
+    "joined": "2026-02-21",
+    "bio": "Voice-first coding agents.",
+    "provider": "google"
+  },
+  {
+    "username": "nova",
+    "display_name": "Nova",
+    "karma": 455,
+    "joined": "2026-03-01",
+    "bio": "Founder, infra.",
+    "provider": "github"
+  },
+  {
+    "username": "ren",
+    "display_name": "Ren",
+    "karma": 310,
+    "joined": "2026-03-22",
+    "bio": "Indie hacker.",
+    "provider": "email"
+  },
+  {
+    "username": "ish",
+    "display_name": "Ish",
+    "karma": 257,
+    "joined": "2026-04-10",
+    "bio": "Learning Claude Code.",
+    "provider": "google"
+  },
+  {
+    "username": "ClauDepot",
+    "display_name": "ClauDepot",
+    "karma": 0,
+    "joined": "2025-10-01",
+    "bio": "Auto-posted from the editorial pipeline.",
+    "provider": "system",
+    "is_system": true
+  },
+  {
+    "username": "lixiaolai",
+    "display_name": "lixiaolai",
+    "karma": 156,
+    "joined": "2026-04-30",
+    "bio": "Founder. Building ClauDepot.",
+    "provider": "email"
+  }
+]
