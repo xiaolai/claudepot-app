@@ -7,12 +7,14 @@ import { Button } from "../components/primitives/Button";
 /**
  * Global section — user-wide Claude Code surfaces.
  *
- * Two tabs:
+ * Tabs (in tab-bar order):
  *   - **Config** (default) — wraps `ConfigSection` with
  *     `forcedAnchor = { kind: "global" }` so the tree shows only
  *     user-level artifacts (User config, Plugins, Memory across
  *     projects, Managed policy). The project-scoped equivalent
  *     lives inside the Projects shell's Config tab.
+ *   - **Memory** — `~/.claude/CLAUDE.md` health and across-projects
+ *     memory dashboard.
  *   - **Updates** — Claude Code CLI + Claude Desktop update manager
  *     (see `src/sections/global/UpdatesPanel.tsx` and
  *     `dev-docs/auto-updates.md`).
@@ -79,19 +81,19 @@ export function GlobalSection({
         </Button>
         <Button
           size="sm"
-          variant={tab === "updates" ? "subtle" : "ghost"}
-          active={tab === "updates"}
-          onClick={() => switchTab("updates")}
-        >
-          Updates
-        </Button>
-        <Button
-          size="sm"
           variant={tab === "memory" ? "subtle" : "ghost"}
           active={tab === "memory"}
           onClick={() => switchTab("memory")}
         >
           Memory
+        </Button>
+        <Button
+          size="sm"
+          variant={tab === "updates" ? "subtle" : "ghost"}
+          active={tab === "updates"}
+          onClick={() => switchTab("updates")}
+        >
+          Updates
         </Button>
       </div>
       <div style={{ flex: 1, minHeight: 0, overflow: "auto" }}>
