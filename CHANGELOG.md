@@ -6,6 +6,33 @@ Versioning scheme:
 - `0.1.x` — beta
 - `1.0.0+` — stable
 
+## 0.1.6 — beta (unreleased)
+
+### Fixed
+
+- **Browser-login flow had no Cancel button after the RunningOps
+  rewrite.** Once the login op moved through the shared
+  `OperationProgressModal`, the modal only rendered "Run in
+  background" / "Close" — there was no way to abort the in-flight
+  `claude auth login` from the UI. The modal now carries a primary
+  Cancel button while the op is in flight, on both the **Add
+  account → Log in with a new account** browser-register path and
+  the per-account **Re-login** path. The same dead end b61adda
+  fixed for the inline modal had silently returned during the
+  services rewrite.
+- **WindowChrome home glyph misaligned** with the macOS traffic
+  lights by a couple of pixels in the 38 px chrome strip.
+
+### Changed
+
+- **Operation progress modal renders cancellation as "Cancelled."**
+  (info tone) instead of red "Error." when the terminal detail
+  says the user cancelled — and suppresses the now-irrelevant
+  "Open Repair" button on cancellation.
+- **"Opening browser…" toast during re-login** is now an info
+  toast (not error) and no longer carries a redundant Cancel undo
+  affordance — the modal owns that action now.
+
 ## 0.1.5 — beta (unreleased)
 
 ### Fixed
