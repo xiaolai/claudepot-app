@@ -142,7 +142,11 @@ export default async function ChangelogPage() {
             {older.map((s) => {
               // Strip the markdown `## ` prefix for display.
               const label = s.heading.replace(/^##\s+/, "");
-              if (!s.version) {
+              // Only link to a GitHub release when the heading carries
+              // a date — `(unreleased)` markers mean no tag was ever
+              // pushed, so the release page doesn't exist.
+              const released = !/\(unreleased\)/i.test(s.heading);
+              if (!s.version || !released) {
                 return <li key={label}>{label}</li>;
               }
               return (
