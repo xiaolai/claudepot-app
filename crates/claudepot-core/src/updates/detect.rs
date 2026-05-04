@@ -241,6 +241,26 @@ fn detect_cli_installs_at(home: Option<&Path>) -> Vec<CliInstall> {
         }
     }
 
+    // Fallback active. PATH lookup misses two common cases that
+    // both leave us with installs but no `is_active` entry:
+    //   1. The user's `claude` is a shell function/alias — our PATH
+    //      walk is process-environment-only and ignores shell-defined
+    //      names by design.
+    //   2. The Tauri GUI was launched from Finder / Dock and inherited
+    //      the macOS launchd PATH (no `~/.local/bin`, no `/opt/homebrew/bin`),
+    //      while the binary actually lives in one of those dirs and
+    //      the user's interactive shell sees it fine.
+    // In both cases the install IS detected by the explicit-path
+    // probes above, just not flagged active. Promote the highest-
+    // precedence install (enumeration order: native > brew > npm
+    // > linux pkg) so the panel reports an installed version and
+    // the updater knows which install to drive.
+    if !out.iter().any(|c| c.is_active) {
+        if let Some(first) = out.first_mut() {
+            first.is_active = true;
+        }
+    }
+
     out
 }
 
@@ -722,6 +742,32 @@ mod tests {
         std::fs::write(lock_dir.join("not-a-lock.txt"), "{}").unwrap();
         let n = count_running_cli_locks_at(tmp.path());
         assert_eq!(n, 0);
+    }
+
+    #[test]
+    fn detect_cli_installs_at_promotes_native_when_path_lookup_misses() {
+        // Reproduces the user-reported case: native install present at
+        // `~/.local/bin/claude`, but PATH doesn't include `~/.local/bin`
+        // (typical for a macOS GUI app launched from Finder, or any
+        // shell where `claude` is a function/alias). The install must
+        // still be flagged `is_active = true` so the Updates panel
+        // shows the version and the updater has a target.
+        let tmp = tempfile::tempdir().unwrap();
+        let bin_dir = tmp.path().join(".local/bin");
+        std::fs::create_dir_all(&bin_dir).unwrap();
+        std::fs::write(bin_dir.join(cli_filename()), b"#!/bin/sh\n").unwrap();
+
+        // Empty PATH so resolve_active_cli_binary returns None.
+        let saved_path = std::env::var_os("PATH");
+        std::env::set_var("PATH", "");
+        let r = detect_cli_installs_at(Some(tmp.path()));
+        if let Some(p) = saved_path {
+            std::env::set_var("PATH", p);
+        }
+
+        let active = r.iter().filter(|c| c.is_active).collect::<Vec<_>>();
+        assert_eq!(active.len(), 1, "exactly one install should be active");
+        assert!(matches!(active[0].kind, CliInstallKind::NativeCurl));
     }
 
     #[test]
