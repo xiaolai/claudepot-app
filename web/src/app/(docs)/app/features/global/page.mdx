@@ -1,0 +1,64 @@
+export const metadata = {
+  title: "Global",
+  description:
+    "Per-machine config: paths, defaults, behaviors that apply across all accounts.",
+};
+
+# Global
+
+The Global tab is for settings that apply *to this machine*, not to
+any specific account. Most users open it once and forget it.
+
+## What lives here
+
+**Data directory.** ClauDepot stores its DB and notification log
+under `~/.claudepot/` by default. The Global tab lets you point it
+elsewhere — useful if your home directory is on a small SSD and
+you&rsquo;d rather keep ClauDepot data on bulk storage. The
+`CLAUDEPOT_DATA_DIR` env var also overrides this; the tab shows
+which is currently in effect.
+
+**Default account behaviour.** When you start ClauDepot fresh, which
+account should be active in the CLI slot? In the Desktop slot?
+Options: *the most recently used*, *a specific one you pin*, or
+*always prompt*.
+
+**Notifications.** OS-banner toggles per event class
+(automation completed, automation failed, account verification
+expired). Quiet hours. Click-to-action defaults.
+
+**Theme.** Light / dark / system. ClauDepot&rsquo;s paper-mono
+register has both; flipping `data-theme` on `<html>` switches them
+without reloading.
+
+**Updates.** Auto-update on/off, channel (stable / beta), proxy.
+The auto-updater pulls from GitHub Releases via Tauri&rsquo;s
+plugin-updater and verifies signatures before applying.
+
+## Power-user knobs
+
+Less common settings that don&rsquo;t fit elsewhere:
+
+- **Session-index parallelism** — how many JSONL files to parse in
+  parallel when rebuilding. Default is `num_cpus`.
+- **Op-progress modal default behaviour** — auto-dismiss on success,
+  or stay until acknowledged.
+- **Notification log retention** — default 500 entries. Lower for
+  smaller disk footprint.
+- **Telemetry** — fully off by default. ClauDepot ships with no
+  remote telemetry; the toggle is here in case a future opt-in
+  diagnostics channel is added.
+
+## CLI mirror
+
+Most Global settings have a `claudepot config` equivalent:
+
+```bash
+claudepot config get data-dir
+claudepot config set theme dark
+claudepot config get auto-update.channel
+```
+
+The CLI and GUI write to the same JSON config file at
+`~/.claudepot/config.json`, so changes from one are visible
+immediately in the other.

@@ -1,0 +1,43 @@
+export const metadata = {
+  title: "Third-parties",
+  description:
+    "Configure tools that integrate with Claude — GitHub, Linear, custom MCP servers — without leaking secrets.",
+};
+
+# Third-parties
+
+Claude Code and Claude Desktop both talk to other services: GitHub
+for issues and PRs, Linear for tickets, custom MCP servers for
+domain-specific workflows. The Third-parties tab is the one place to
+configure those integrations across all your accounts.
+
+## What it covers
+
+- **GitHub** &mdash; PATs and fine-grained tokens with scope display.
+  Linked to the Keys tab; one entry per PAT.
+- **Linear** &mdash; API key for Linear&rsquo;s Cloud GraphQL.
+- **Custom MCP servers** &mdash; URL + auth pair for any
+  Model Context Protocol server you&rsquo;ve registered locally with
+  Claude Code. ClauDepot reads the registration from
+  `~/.claude/mcp.json` and overlays your local secrets.
+
+Each entry surfaces three states: *connected* (we have working
+credentials), *needs auth* (registered but not authorised), or
+*missing* (registered with Claude but ClauDepot doesn&rsquo;t see
+credentials).
+
+## Why a separate tab from Keys
+
+Keys is about the *secret*; Third-parties is about the *integration
+state*. A Linear API key is a row in Keys; the Linear integration
+(API key + workspace + project preferences) is a row in
+Third-parties. The two are linked — editing the Key updates the
+integration immediately.
+
+## Architecture
+
+Integration metadata lives in `~/.claudepot/accounts.db` alongside
+account state. Secrets stay in the OS keychain. The renderer never
+touches the secret directly; it requests an integration test (e.g.
+&ldquo;ping Linear API&rdquo;), Rust performs the call, and the
+result is a status enum returned over IPC.

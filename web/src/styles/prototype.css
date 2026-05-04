@@ -1,0 +1,3446 @@
+/*
+ * Prototype-only styles for /v2/* routes.
+ * Imported only by src/app/(frontend)/v2/layout.tsx.
+ * Uses design tokens from theme.css — no hardcoded numerics.
+ */
+
+/* ── Prototype nav ──────────────────────────────────────────── */
+
+.proto-nav {
+  position: sticky;
+  top: 0;
+  z-index: var(--z-header);
+  display: flex;
+  align-items: center;
+  gap: var(--sp-24);
+  padding: var(--sp-16) var(--sp-24);
+  border-bottom: var(--bw-hair) solid var(--rule-hair);
+  font-family: var(--font-body);
+  font-size: var(--fs-small);
+  background: var(--bg);
+}
+
+.proto-nav-brand {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-8);
+  font-family: var(--font-display);
+  font-size: var(--fs-title-md);
+  color: var(--editorial-dark);
+  text-decoration: none;
+  margin-right: auto;
+}
+
+.proto-nav-logo {
+  display: block;
+  /* Sized between the wordmark height and a hero scale; not an
+     integer multiple of the SVG's 16-cell pixel grid, so pixels
+     render slightly uneven under image-rendering: pixelated.
+     Accepted for the visual proportion vs the wordmark. */
+  width: var(--sp-36);
+  height: var(--sp-36);
+  color: var(--accent);
+  image-rendering: pixelated;
+  flex-shrink: 0;
+}
+
+.proto-nav-wordmark {
+  display: inline-flex;
+  font-weight: 700;
+}
+
+/* :where() drops the descendant-rule specificity to (0,0,1) so any
+   .proto-nav-cta / .proto-nav-login / .proto-nav-staff / .proto-nav-avatar
+   class wins via class specificity (0,1,0) — no !important needed. */
+:where(.proto-nav) a {
+  color: var(--text);
+  text-decoration: none;
+  padding: var(--sp-4) 0;
+}
+
+:where(.proto-nav) a:hover { color: var(--accent-ink); }
+:where(.proto-nav) a[aria-current="page"] {
+  color: var(--accent-ink);
+  border-bottom: var(--bw-rule) solid var(--accent);
+}
+
+.proto-nav-cta {
+  background: var(--accent);
+  color: var(--white);
+  padding: var(--sp-4) var(--sp-12);
+  border-radius: var(--radius-full);
+  font-weight: 500;
+}
+.proto-nav-cta:hover { background: var(--accent-ink); }
+
+/* Pill children sit on always-dark backgrounds and must keep white
+   text through every state change. The :where(.proto-nav) a:hover
+   and a[aria-current="page"] rules above would otherwise repaint
+   text to --accent-ink — matching the pill's own dark fill exactly
+   on .proto-nav-cta:hover (invisible) and producing a ~3:1 dark-on-
+   dark on .proto-nav-staff (fails WCAG AA). Specificity (0,2,0)
+   beats those rules at (0,1,1). */
+.proto-nav .proto-nav-cta,
+.proto-nav .proto-nav-staff {
+  color: var(--white);
+}
+
+.proto-nav-login {
+  border: var(--bw-hair) solid var(--border);
+  padding: var(--sp-4) var(--sp-12);
+  border-radius: var(--radius-full);
+}
+
+.proto-nav-staff {
+  background: var(--editorial-dark);
+  color: var(--white);
+  padding: var(--sp-4) var(--sp-12);
+  border-radius: var(--radius-full);
+  font-family: var(--font-mono);
+  font-size: var(--fs-meta);
+  letter-spacing: var(--ls-wide);
+  text-transform: uppercase;
+}
+
+.proto-nav-avatar {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-6);
+  font-family: var(--font-mono);
+  font-size: var(--fs-meta);
+  padding: var(--sp-4) var(--sp-8);
+  border-radius: var(--radius-full);
+  background: var(--accent-soft);
+  color: var(--accent-ink);
+  border: var(--bw-hair) solid var(--accent-border);
+}
+
+/* ── Account dropdown — collapses notifications + saved + settings +
+   profile into a single menu under the avatar pill. <details>/<summary>
+   gives free toggle behavior with no JS; PrototypeNav resets `open`
+   on route change so a menu click doesn't leave the panel hanging
+   over the new page. */
+
+.proto-nav-menu {
+  position: relative;
+}
+
+summary.proto-nav-avatar {
+  list-style: none;
+  cursor: pointer;
+  user-select: none;
+}
+summary.proto-nav-avatar::-webkit-details-marker { display: none; }
+
+.proto-nav-menu[open] > summary.proto-nav-avatar {
+  background: var(--accent);
+  color: var(--white);
+  border-color: var(--accent);
+}
+
+.proto-nav-unread-dot {
+  width: var(--sp-8);
+  height: var(--sp-8);
+  background: var(--accent);
+  border-radius: var(--radius-full);
+  margin-left: var(--sp-2);
+}
+.proto-nav-menu[open] > summary.proto-nav-avatar .proto-nav-unread-dot {
+  background: var(--white);
+}
+
+.proto-nav-menu-panel {
+  position: absolute;
+  top: calc(100% + var(--sp-8));
+  right: 0;
+  z-index: var(--z-dropdown);
+  background: var(--surface);
+  border: var(--bw-hair) solid var(--rule-hair);
+  border-radius: var(--radius-md);
+  box-shadow: 0 var(--sp-4) var(--sp-12) var(--shadow-card);
+  padding: var(--sp-4);
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+  min-width: var(--aside-width);
+}
+
+.proto-nav-menu-panel a {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-8);
+  padding: var(--sp-8) var(--sp-12);
+  border-radius: var(--radius-sm);
+  color: var(--text);
+  text-decoration: none;
+  font-family: var(--font-body);
+  font-size: var(--fs-meta);
+}
+.proto-nav-menu-panel a:hover {
+  background: var(--accent-soft);
+  color: var(--accent-ink);
+}
+
+.proto-nav-menu-count {
+  margin-left: auto;
+  font-family: var(--font-mono);
+  font-size: var(--fs-badge-sm);
+  color: var(--white);
+  background: var(--accent);
+  padding: 0 var(--sp-6);
+  border-radius: var(--radius-full);
+  min-width: var(--sp-16);
+  text-align: center;
+  line-height: var(--lh-tight);
+}
+
+/* Sign-out row: same shape as the link rows above, but it's a
+   server-action <form><button> instead of <a>. Hairline above
+   separates "navigate inside your account" from "leave your account". */
+.proto-nav-menu-signout {
+  margin: 0;
+  padding-top: var(--sp-4);
+  border-top: var(--bw-hair) solid var(--rule-hair);
+}
+.proto-nav-menu-signout button {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-8);
+  width: 100%;
+  padding: var(--sp-8) var(--sp-12);
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text);
+  font-family: var(--font-body);
+  font-size: var(--fs-meta);
+  cursor: pointer;
+  text-align: left;
+}
+.proto-nav-menu-signout button:hover {
+  background: var(--accent-soft);
+  color: var(--accent-ink);
+}
+
+/* ── Active-link focus harmonization ─────────────────────────
+   The global :focus-visible rule in theme.css draws a 2px solid
+   --accent outline with 2px offset around any focused interactive
+   element. Every "current page" indicator below also paints in
+   --accent on a single edge:
+     .proto-nav            → border-bottom    (top nav)
+     .proto-tabs           → border-bottom    (FeedTabs, /top, /submit, /u)
+     .proto-admin-tabs     → border-bottom    (admin shell)
+     .proto-page-aside-nav → border-left      (Office/Account/About)
+   Stacking the rectangle outline on top of the edge bar produces
+   the doubled-up box you saw on Home. Suppress the outline only
+   when the link is the active page; substitute --accent-soft as
+   the focus cue so WCAG 2.4.7 still has a visible state-change
+   between "active, not focused" and "active and focused". */
+:where(
+  .proto-nav,
+  .proto-tabs,
+  .proto-admin-tabs,
+  .proto-page-aside-nav
+) a[aria-current="page"]:focus-visible {
+  outline: none;
+  background: var(--accent-soft);
+  border-radius: var(--radius-sm);
+}
+
+/* ── Feed container ─────────────────────────────────────────── */
+
+.proto-page {
+  max-width: var(--max-width);
+  margin: 0 auto;
+  padding: var(--sp-32) var(--sp-24);
+}
+
+.proto-page-narrow {
+  max-width: var(--content-width);
+  margin: 0 auto;
+  padding: var(--sp-32) var(--sp-24);
+}
+
+/* ── Docs-style page (sidebar + content) ────────────────────────
+   Used on /about, /office, /settings. Same outer width as .proto-page
+   (1200px), but split into a sticky left sidebar + a content column
+   capped at --content-width so prose still reads at ~720px. Sidebar
+   carries either a TOC (anchor links to the page's own sections) or
+   an area nav (sibling pages). */
+
+.proto-page-aside {
+  max-width: var(--max-width);
+  margin: 0 auto;
+  padding: var(--sp-32) var(--sp-24);
+  display: grid;
+  grid-template-columns: var(--aside-width) minmax(0, var(--content-width));
+  gap: var(--sp-40);
+  align-items: start;
+}
+
+.proto-page-aside-content {
+  min-width: 0;
+}
+
+/* Anchored sections need scroll-margin so clicking a TOC link lands
+   the heading below the sticky .proto-nav, not under it. Applied
+   inside the aside content scope so it doesn't leak to other surfaces. */
+.proto-page-aside-content :where(section[id], [id]) {
+  scroll-margin-top: var(--nav-height);
+}
+
+.proto-page-aside-nav {
+  position: sticky;
+  top: var(--nav-height);
+  font-family: var(--font-mono);
+  font-size: var(--fs-meta);
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-12);
+}
+
+.proto-page-aside-nav-title {
+  font-family: var(--font-body);
+  font-size: var(--fs-eyebrow);
+  font-weight: 600;
+  letter-spacing: var(--ls-eyebrow);
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+.proto-page-aside-nav ul {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.proto-page-aside-nav li {
+  /* Negative margin keeps the bar flush with the column edge while
+     leaving room to grow it into the active state. */
+  margin-left: calc(-1 * (var(--sp-12) + var(--bw-rule)));
+}
+
+.proto-page-aside-nav a {
+  /* flex (not block) so lucide icons inline with the link text —
+     the global `svg { display: block }` reset would otherwise stack
+     them above. Full-width tap target preserved by the wrapping
+     `<li>` and the link's flex-grow content. */
+  display: flex;
+  align-items: center;
+  gap: var(--sp-6);
+  color: var(--muted);
+  text-decoration: none;
+  padding: var(--sp-6) var(--sp-12);
+  border-left: var(--bw-rule) solid transparent;
+  line-height: var(--lh-snug);
+  transition: color var(--transition-short), border-color var(--transition-short);
+}
+
+.proto-page-aside-nav a:hover {
+  color: var(--text);
+}
+
+.proto-page-aside-nav a[aria-current="page"] {
+  color: var(--accent-ink);
+  border-left-color: var(--accent);
+}
+
+/* ── Tabs ───────────────────────────────────────────────────── */
+
+.proto-tabs {
+  display: flex;
+  gap: var(--sp-24);
+  border-bottom: var(--bw-hair) solid var(--rule-hair);
+  padding-bottom: var(--sp-8);
+  margin-bottom: var(--sp-16);
+  font-family: var(--font-body);
+  font-size: var(--fs-small);
+  position: sticky;
+  top: var(--nav-height);
+  background: var(--bg);
+  z-index: var(--z-subnav);
+}
+
+.proto-tabs a {
+  text-decoration: none;
+  color: var(--muted);
+  padding: var(--sp-8) 0;
+  border-bottom: var(--bw-rule) solid transparent;
+  margin-bottom: calc(-1 * var(--sp-1));
+}
+
+.proto-tabs a:hover { color: var(--text); }
+
+.proto-tabs a[aria-current="page"] {
+  color: var(--text);
+  border-bottom-color: var(--accent);
+}
+
+/* ── Tag pills (homepage filter strip) ──────────────────────── */
+
+.proto-tag-pills {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--sp-8);
+  margin: var(--sp-24) 0;
+}
+
+.proto-tag-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-6);
+  padding: var(--sp-2) var(--sp-8);
+  border: var(--bw-hair) solid var(--rule-hair);
+  border-radius: var(--radius-full);
+  background: var(--surface);
+  font-family: var(--font-body);
+  font-size: var(--fs-meta);
+  color: var(--text);
+  text-decoration: none;
+  transition: border-color var(--transition-short), background var(--transition-short);
+}
+
+.proto-tag-pill:hover {
+  border-color: var(--accent-border);
+  background: var(--accent-soft);
+}
+
+.proto-tag-pill-name { font-weight: 500; }
+
+.proto-tag-pill-count {
+  font-family: var(--font-mono);
+  font-size: var(--fs-badge);
+  color: var(--muted);
+}
+
+.proto-tag-pill-all {
+  border-color: transparent;
+  color: var(--accent-ink);
+}
+
+/* ── Tag page header ─────────────────────────────────────────── */
+
+.proto-tag-header {
+  margin-bottom: var(--sp-40);
+  padding-bottom: var(--sp-20);
+  border-bottom: var(--bw-hair) solid var(--rule-hair);
+}
+
+.proto-tag-header .eyebrow {
+  color: var(--accent-ink);
+  margin: 0 0 var(--sp-6);
+}
+
+.proto-tag-meta {
+  font-family: var(--font-mono);
+  font-size: var(--fs-meta);
+  color: var(--muted);
+  margin: var(--sp-8) 0 0;
+}
+
+.proto-tag-meta a { color: var(--accent-ink); text-decoration: none; }
+.proto-tag-meta a:hover { text-decoration: underline; }
+
+/* ── Submission row ─────────────────────────────────────────── */
+
+.proto-feed { list-style: none; margin: 0; padding: 0; }
+
+.proto-row {
+  display: grid;
+  grid-template-columns: auto auto 1fr auto;
+  gap: var(--sp-12);
+  padding: var(--sp-16) 0;
+  border-bottom: var(--bw-hair) solid var(--rule-hair);
+  align-items: start;
+}
+
+.proto-row:has(.proto-rank) {
+  grid-template-columns: auto auto 1fr auto;
+}
+
+.proto-row-compact {
+  padding: var(--sp-8) 0;
+  border-bottom: var(--bw-hair) solid var(--rule-hair);
+}
+
+.proto-row-bare {
+  border-bottom: 0;
+  padding: 0;
+}
+
+.proto-rank {
+  font-family: var(--font-mono);
+  font-size: var(--fs-small);
+  color: var(--muted);
+  min-width: var(--sp-32);
+  text-align: right;
+  padding-top: var(--sp-2);
+}
+
+.proto-row-content { min-width: 0; }
+
+.proto-row-title {
+  font-family: var(--font-serif-body);
+  font-size: var(--fs-playbook-body);
+  line-height: var(--lh-snug);
+  margin: 0;
+}
+
+.proto-row-title a {
+  color: var(--text);
+  text-decoration: none;
+}
+
+.proto-row-title a:hover { color: var(--accent-ink); }
+
+.proto-row-domain {
+  font-family: var(--font-body);
+  font-size: var(--fs-meta);
+  color: var(--muted);
+  margin-left: var(--sp-8);
+}
+
+/* Source-link affordance on submission rows: title now goes to the
+ * detail page, this is the secondary "open the actual link in a new
+ * tab" target. Inline-flex so the ExternalLink icon sits cleanly on
+ * the text baseline. */
+.proto-row-source {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-2);
+  font-family: var(--font-body);
+  font-size: var(--fs-meta);
+  color: var(--muted);
+  text-decoration: none;
+  margin-left: var(--sp-8);
+}
+.proto-row-source:hover {
+  color: var(--accent-ink);
+  text-decoration: underline;
+}
+
+.proto-row-meta {
+  font-family: var(--font-body);
+  font-size: var(--fs-meta);
+  color: var(--muted);
+  margin-top: var(--sp-4);
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--sp-8);
+  align-items: center;
+}
+
+.proto-row-meta a {
+  color: var(--muted);
+  text-decoration: none;
+}
+
+.proto-row-meta a:hover { color: var(--text); text-decoration: underline; }
+
+.proto-row-meta .sep { color: var(--rule-bold); }
+
+/* ── Type badge ─────────────────────────────────────────────── */
+
+.proto-type {
+  display: inline-block;
+  font-family: var(--font-body);
+  font-size: var(--fs-badge);
+  letter-spacing: var(--ls-wide);
+  text-transform: uppercase;
+  padding: var(--sp-2) var(--sp-6);
+  border: var(--bw-hair) solid var(--border);
+  border-radius: var(--radius-xs);
+  color: var(--editorial-mid);
+  background: var(--surface);
+}
+
+/* ── Subject tags ───────────────────────────────────────────── */
+
+.proto-subjects {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: var(--sp-4);
+}
+
+.proto-subject {
+  font-family: var(--font-mono);
+  font-size: var(--fs-badge-sm);
+  color: var(--muted);
+}
+
+.proto-subject::before { content: "#"; }
+
+/* ── Vote buttons ───────────────────────────────────────────── */
+
+.proto-vote {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  font-family: var(--font-body);
+  font-size: var(--fs-meta);
+  color: var(--muted);
+  user-select: none;
+  min-width: var(--sp-32);
+}
+
+.proto-vote-arrow {
+  background: none;
+  border: 0;
+  cursor: pointer;
+  padding: var(--sp-2) var(--sp-6);
+  font-size: var(--fs-body);
+  line-height: var(--lh-tight);
+  color: var(--rule-bold);
+  transition: color var(--transition-short);
+}
+
+.proto-vote-arrow:hover { color: var(--accent); }
+
+.proto-vote-up.active   { color: var(--accent); }
+.proto-vote-down.active { color: var(--editorial-mid); }
+
+.proto-vote-score {
+  font-variant-numeric: tabular-nums;
+  font-weight: 500;
+  color: var(--text);
+}
+
+/* ── Save (★ private bookmark, distinct from ▲ vote) ───────── */
+
+.proto-save {
+  background: none;
+  border: 0;
+  cursor: pointer;
+  padding: var(--sp-4) var(--sp-8);
+  font-size: var(--fs-body);
+  line-height: var(--lh-tight);
+  color: var(--rule-bold);
+  align-self: start;
+  transition: color var(--transition-short);
+}
+
+.proto-save:hover { color: var(--accent); }
+.proto-save.active { color: var(--accent); }
+
+/* ── Type-specific meta strips ──────────────────────────────── */
+
+.proto-type-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--sp-8);
+  align-items: center;
+  margin: var(--sp-6) 0;
+  font-family: var(--font-body);
+  font-size: var(--fs-meta);
+  color: var(--editorial-mid);
+}
+
+.proto-type-meta-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-4);
+  padding: var(--sp-2) var(--sp-8);
+  background: var(--accent-soft);
+  border: var(--bw-hair) solid var(--accent-soft);
+  border-radius: var(--radius-xs);
+  color: var(--accent-ink);
+  font-family: var(--font-mono);
+  font-size: var(--fs-badge);
+}
+
+.proto-type-meta-play {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-4);
+  padding: var(--sp-2) var(--sp-12);
+  background: var(--accent);
+  color: var(--white);
+  border: 0;
+  border-radius: var(--radius-full);
+  cursor: pointer;
+  font-family: var(--font-body);
+  font-size: var(--fs-badge);
+  letter-spacing: var(--ls-wide);
+  text-transform: uppercase;
+}
+
+.proto-type-meta-play:hover { background: var(--accent-ink); }
+
+.proto-type-meta-host {
+  font-family: var(--font-body);
+  font-size: var(--fs-meta);
+  color: var(--muted);
+}
+
+.proto-discussion-preview {
+  font-family: var(--font-serif-body);
+  font-size: var(--fs-body);
+  line-height: var(--lh-snug);
+  color: var(--editorial-mid);
+  margin: var(--sp-8) 0 var(--sp-4);
+  border-left: var(--bw-rule) solid var(--rule-hair);
+  padding-left: var(--sp-12);
+}
+
+/* ── Submitter context ──────────────────────────────────────── */
+
+/* Post body: plain content container that matches the site-wide
+ * mono editorial language. The earlier shape (accent-soft fill, thick
+ * left rule) made the body look like a callout / aside; in practice
+ * the post body IS the post for discussion submissions, not an
+ * aside, and the callout treatment didn't match anything else on the
+ * site. Now mirrors .proto-comment-body — same font, same surface,
+ * same rhythm. The markdown-typography rules below give code blocks
+ * and mermaid diagrams their own surfaces, so the body doesn't lose
+ * visual structure when its outer fill goes away. */
+.proto-text {
+  font-family: var(--font-serif-body);
+  font-size: var(--fs-body);
+  line-height: var(--lh-body);
+  color: var(--text);
+  margin: var(--sp-16) 0;
+}
+
+/* ── Editorial prose typography (site-wide) ─────────────────────
+ *
+ * One ruleset shared by every prose surface: hand-authored sections
+ * (.proto-section on /about, /office, /settings) and renderMarkdown
+ * output (.proto-text post bodies, .proto-comment-body comments).
+ * Same paragraph rhythm, same list pattern, same media spacing.
+ *
+ * Surface-specific divergences live below this block (the post body
+ * decorates fenced code with a header + gutter via .proto-code; the
+ * editorial pages don't author fenced code at all). Anything not in
+ * the divergence list is unified here.
+ */
+
+/* Block rhythm — Block tier (--sp-16) between sibling block elements. */
+:where(.proto-section, .proto-text, .proto-comment-body) p,
+:where(.proto-section, .proto-text, .proto-comment-body) ul,
+:where(.proto-section, .proto-text, .proto-comment-body) ol,
+:where(.proto-section, .proto-text, .proto-comment-body) blockquote {
+  margin: 0 0 var(--sp-16);
+}
+
+/* Block media (fenced code, mermaid, tables, figures) gets
+ * Stride-tier breathing room — about one rendered line at body
+ * line-height — so the surrounding prose doesn't crowd the box.
+ * Corners use --radius-lg uniformly so every block media surface
+ * reads with the same shape.
+ *
+ * <img> is intentionally NOT in this list. Inline images (e.g., a
+ * 16×16 icon mid-paragraph) are replaced inline elements; giving
+ * them a vertical block margin would push the line height of
+ * surrounding text. Standalone images (alone in their <p>) get
+ * block rhythm from the p:has(> img:only-child) rule below, which
+ * targets the wrapping <p> instead of the <img>. */
+:where(.proto-section, .proto-text, .proto-comment-body) pre,
+:where(.proto-section, .proto-text, .proto-comment-body) .proto-code,
+:where(.proto-section, .proto-text, .proto-comment-body) .proto-mermaid,
+:where(.proto-section, .proto-text, .proto-comment-body) .proto-table-wrap,
+:where(.proto-section, .proto-text, .proto-comment-body) figure {
+  margin: var(--sp-24) 0;
+  max-width: 100%;
+}
+
+/* Bare <img> and inline <svg> in editorial prose pick up the same
+ * corner shape as the code/mermaid wrappers. <pre>, .proto-code,
+ * and .proto-mermaid set their own --radius-lg below; this rule
+ * covers raw media that has no specific wrapper. */
+:where(.proto-section, .proto-text, .proto-comment-body) img,
+:where(.proto-section, .proto-text, .proto-comment-body) > svg {
+  border-radius: var(--radius-lg);
+  height: auto;
+}
+
+/* Standalone image (the only child of its paragraph): promote to a
+ * centered block with block-media rhythm. Inline images inside
+ * paragraphs of text remain inline-flowing at their natural size,
+ * since :has() only matches when the <p> contains nothing but the
+ * image. */
+:where(.proto-section, .proto-text, .proto-comment-body) p:has(> img:only-child) {
+  text-align: center;
+  margin: var(--sp-24) 0;
+}
+
+:where(.proto-section, .proto-text, .proto-comment-body) p:has(> img:only-child) > img {
+  display: block;
+  margin-inline: auto;
+}
+
+:where(.proto-section, .proto-text, .proto-comment-body) > :last-child {
+  margin-bottom: 0;
+}
+
+/* Custom list markers via ::before so <ul> and <ol> share the same
+ * indent column and the same marker→text gap regardless of marker
+ * width (single-digit, double-digit, or bullet). The text column
+ * starts at --sp-32 from the list edge; markers are right-aligned
+ * (ol) or centered (ul) inside the --sp-24 marker column, leaving
+ * --sp-8 of gap before the text. */
+:where(.proto-section, .proto-text, .proto-comment-body) ul,
+:where(.proto-section, .proto-text, .proto-comment-body) ol {
+  list-style: none;
+  padding-inline-start: 0;
+}
+
+:where(.proto-section, .proto-text, .proto-comment-body) ol {
+  counter-reset: prose-list-item;
+}
+
+:where(.proto-section, .proto-text, .proto-comment-body) li {
+  position: relative;
+  padding-inline-start: var(--sp-32);
+}
+
+:where(.proto-section, .proto-text, .proto-comment-body) ul > li::before {
+  content: "•";
+  position: absolute;
+  left: 0;
+  width: var(--sp-24);
+  text-align: center;
+  color: var(--muted);
+}
+
+:where(.proto-section, .proto-text, .proto-comment-body) ol > li {
+  counter-increment: prose-list-item;
+}
+
+:where(.proto-section, .proto-text, .proto-comment-body) ol > li::before {
+  content: counter(prose-list-item) ".";
+  position: absolute;
+  left: 0;
+  width: var(--sp-24);
+  text-align: right;
+  color: var(--muted);
+}
+
+/* A <p> directly inside an <li> shouldn't open a second margin gap
+ * below the list item — the li already participates in block rhythm. */
+:where(.proto-section, .proto-text, .proto-comment-body) li > p {
+  margin: 0;
+}
+
+/* A nested list (or any block element) at the END of a list item
+ * shouldn't carry a trailing bottom margin: that margin shows up as
+ * an asymmetric gap between the parent list item and its sibling.
+ * Same pattern used on blockquote > :last-child. */
+:where(.proto-section, .proto-text, .proto-comment-body) li > :last-child {
+  margin-bottom: 0;
+}
+
+/* Last child inside a blockquote also drops its bottom margin —
+ * otherwise marked emits <blockquote><p>…</p></blockquote> and the
+ * <p>'s 16px bottom margin extends the blockquote box (and its
+ * border-left rule) past the visible text. */
+:where(.proto-section, .proto-text, .proto-comment-body) blockquote > :last-child {
+  margin-bottom: 0;
+}
+
+/* Blockquote: left rule + breathing room.
+ *
+ * Padding-block is --sp-8 (Pair tier) — tight enough to match a
+ * conversational rhythm, generous enough that the glyph reads
+ * comfortably against the rule rather than touching its edges.
+ *
+ * Border-left color shifts per blockquote via --bq-hue: each
+ * <blockquote> picks one of six accent-related hues from the OKLCH
+ * wheel (15° red-orange / 45° accent / 75° amber / 165° teal /
+ * 225° blue / 285° purple). decorateBlockquotes() in
+ * src/lib/markdown.ts hashes the quote's text and emits a stable
+ * inline `style="--bq-hue: N"`; same content always picks the same
+ * color. The fallback 45 (the base accent) covers any blockquote
+ * outside the markdown path (e.g., a future hand-authored <blockquote>
+ * on /about).
+ *
+ * border-radius rounds the rule's terminus into a soft cap. The
+ * other corners have no border to show — only the left edge
+ * renders, so rounding the box rounds the visible rule. */
+:where(.proto-section, .proto-text, .proto-comment-body) blockquote {
+  padding: var(--sp-8) var(--sp-16);
+  border-left-width: var(--bw-accent);
+  border-left-style: solid;
+  border-left-color: oklch(var(--accent-tone) var(--bq-hue, var(--accent-hue)));
+  border-radius: var(--radius-sm);
+  color: var(--muted);
+}
+
+/* Bare <pre> matches the editorial pages' simple monospace box.
+ * The decorated .proto-code wrapper below replaces this surface
+ * inside post bodies and comment bodies for fenced ```lang blocks.
+ * Radius is --radius-lg (0.5rem) so block media (this, .proto-code,
+ * .proto-mermaid) all read with the same corner shape. */
+:where(.proto-section, .proto-text, .proto-comment-body) pre {
+  padding: var(--sp-16);
+  background: var(--code-bg);
+  color: var(--code-text);
+  border-radius: var(--radius-lg);
+  overflow-x: auto;
+  font-size: var(--fs-small);
+}
+
+/* Inline <code> stays unstyled. Under font-mono-only.css every
+ * element is already monospace, so the visual distinction is the
+ * source formatting itself — adding a pill would make code stand
+ * out against… more code. */
+
+/* User-content h1 inside a post body or comment is visually demoted
+ * so it doesn't compete with the page-level <h1> (the post title).
+ * h2 onward inherits the global heading scale untouched. */
+:where(.proto-text, .proto-comment-body) h1 {
+  font-size: var(--fs-title-md);
+}
+
+/* Horizontal rule — full-width hairline with Stride-tier breathing
+ * room above and below so it reads as a real section break. */
+:where(.proto-section, .proto-text, .proto-comment-body) hr {
+  border: 0;
+  border-top: var(--bw-hair) solid var(--rule-hair);
+  margin: var(--sp-24) 0;
+}
+
+/* Tables — the markdown decorator wraps each <table> in a
+ * .proto-table-wrap so wide tables scroll horizontally inside the
+ * column. The wrapper carries the surface treatment: a hairline
+ * border + --radius-lg corners so tables read with the same shape
+ * as code blocks and mermaid diagrams. overflow: auto activates the
+ * scroll context, which also clips inner content to the rounded
+ * box (so the inner table corners follow the wrapper's radius).
+ *
+ * The table itself uses border-collapse for clean hairline dividers
+ * between cells; thead gets a heavier bottom rule painted in the
+ * accent — same OKLCH tone as the blockquote rule and code-block
+ * accents, so all editorial-prose surfaces share one color voice.
+ * No per-table hue rotation: tables are tabular convention, not
+ * authorial expression — varying their color reads as random.
+ *
+ * Padding is --sp-8 vertical / --sp-12 horizontal — tight enough
+ * that dense tables still fit, generous enough that text doesn't
+ * touch the dividers. */
+:where(.proto-section, .proto-text, .proto-comment-body) .proto-table-wrap {
+  /* margin + max-width come from the block-media rule above; this
+   * rule owns the surface treatment (border, radius, scroll). */
+  overflow: auto;
+  border: var(--bw-hair) solid var(--border);
+  border-radius: var(--radius-lg);
+}
+
+:where(.proto-section, .proto-text, .proto-comment-body) .proto-table-wrap table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: var(--fs-small);
+}
+
+:where(.proto-section, .proto-text, .proto-comment-body) th,
+:where(.proto-section, .proto-text, .proto-comment-body) td {
+  padding: var(--sp-8) var(--sp-12);
+  border-bottom: var(--bw-hair) solid var(--rule-hair);
+  text-align: left;
+  vertical-align: top;
+}
+
+:where(.proto-section, .proto-text, .proto-comment-body) thead th {
+  border-bottom-width: var(--bw-hair);
+  border-bottom-color: oklch(var(--accent-tone) var(--accent-hue));
+  font-weight: 600;
+}
+
+/* Last row in tbody loses its bottom hairline — the wrapper border
+ * is already there, so the doubled-up edge would read as a thicker
+ * artifact at the bottom of the card. */
+:where(.proto-section, .proto-text, .proto-comment-body) tbody tr:last-child > td {
+  border-bottom: 0;
+}
+
+/* GFM-style alert callouts — five types (note, tip, important,
+ * warning, caution) painted with accent-related OKLCH hues from the
+ * accent tone envelope. The label paragraph reads as an eyebrow:
+ * uppercase, eyebrow-sized, type-tinted color. The body paragraph
+ * sits beneath with the same muted prose color used by plain quotes.
+ *
+ * Specificity: :where(...) blockquote.proto-callout = (0,1,1),
+ * which beats the plain :where(...) blockquote = (0,0,1) regardless
+ * of source order. The class on blockquote is what wins. */
+:where(.proto-section, .proto-text, .proto-comment-body) blockquote.proto-callout {
+  background: oklch(var(--accent-tone) var(--callout-hue) / 0.08);
+  border-left-color: oklch(var(--accent-tone) var(--callout-hue));
+  color: var(--text);
+}
+
+.proto-callout .proto-callout-label {
+  font-size: var(--fs-eyebrow);
+  letter-spacing: var(--ls-eyebrow);
+  text-transform: uppercase;
+  font-weight: 600;
+  color: oklch(var(--accent-tone) var(--callout-hue));
+  margin: 0 0 var(--sp-4);
+}
+
+.proto-callout-note      { --callout-hue: 240; }  /* blue */
+.proto-callout-tip       { --callout-hue: 145; }  /* green */
+.proto-callout-important { --callout-hue: 285; }  /* purple */
+.proto-callout-warning   { --callout-hue:  75; }  /* amber */
+.proto-callout-caution   { --callout-hue:  25; }  /* red-orange */
+
+/* Decorated code block (decorateCodeBlocks() in src/lib/markdown.ts).
+ *
+ * Layout: a wrapper owns the surface (background, border, radius);
+ * the header sits on top with the language label + copy button; the
+ * body is a <pre> with padding, max-height, and overflow scroll.
+ * Line numbers come from a CSS counter on .proto-code-line so the
+ * SSR'd HTML doesn't need to carry them.
+ */
+
+:where(.proto-text, .proto-comment-body) .proto-code {
+  /* Wrapper owns the border + radius + clip; the header and body
+   * each paint their own background, so the wrapper itself is
+   * transparent. */
+  background: transparent;
+  color: var(--code-text);
+  border: var(--bw-hair) solid var(--border);
+  border-radius: var(--radius-lg);
+  overflow: hidden;
+  font-size: var(--fs-small);
+  line-height: var(--lh-snug);
+}
+
+/* Header tints with one of six accent-related OKLCH hues — same
+ * palette as blockquotes, picked per code block by hashing
+ * lang + source. Alpha 0.10 keeps the tint subtle so token colors
+ * in the body still dominate visually. The default fallback hue
+ * (--accent-hue) covers any future <pre> rendered outside the
+ * decorated path. */
+.proto-code-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sp-12);
+  padding: var(--sp-6) var(--sp-12);
+  background: oklch(
+    var(--accent-tone) var(--code-hue, var(--accent-hue)) / 0.10
+  );
+  border-bottom: var(--bw-hair) solid var(--border);
+  font-family: var(--font-mono);
+  font-size: var(--fs-eyebrow);
+  letter-spacing: var(--ls-eyebrow);
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+.proto-code-lang {
+  font-weight: 500;
+}
+
+.proto-code-copy {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: var(--sp-4);
+  background: transparent;
+  border: var(--bw-hair) solid transparent;
+  border-radius: var(--radius-xs);
+  color: inherit;
+  cursor: pointer;
+  transition: background var(--transition-short), border-color var(--transition-short), color var(--transition-short);
+}
+
+.proto-code-copy:hover {
+  background: var(--code-bg);
+  border-color: var(--border);
+  color: var(--text);
+}
+
+.proto-code-copy:focus-visible {
+  outline: var(--outline-width) solid var(--accent-border);
+  outline-offset: var(--outline-offset);
+}
+
+.proto-code-copy[data-state="copied"] {
+  color: var(--state-approved-fg);
+}
+
+/* Override the bare-pre base rule for pre's INSIDE a decorated wrapper:
+ * the wrapper owns border + radius + clip; the inner pre paints its
+ * own off-white background. --code-body-bg (#f9fafb) sits one step
+ * softer than --code-bg, so the code area is barely distinguishable
+ * from the page surface — token colors and the tinted header carry
+ * the visual hierarchy. */
+:where(.proto-text, .proto-comment-body) .proto-code .proto-code-body {
+  margin: 0;
+  padding: var(--sp-12) var(--sp-16);
+  background: var(--code-body-bg);
+  border: 0;
+  border-radius: 0;
+  max-height: var(--code-max-h);
+  overflow: auto;
+}
+
+.proto-code-body code {
+  display: block;
+  counter-reset: code-line;
+  font-family: var(--font-mono);
+}
+
+.proto-code-line {
+  display: block;
+  counter-increment: code-line;
+  position: relative;
+  padding-left: var(--sp-32);
+}
+
+.proto-code-line::before {
+  content: counter(code-line);
+  position: absolute;
+  left: 0;
+  width: var(--sp-24);
+  padding-right: var(--sp-4);
+  color: var(--muted);
+  text-align: right;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+/* Mermaid diagrams (progressive enhancement of ```mermaid``` blocks).
+ * The MermaidEnhancer client component replaces each <pre> with a
+ * .proto-mermaid wrapper containing inline SVG. Pages that include
+ * a diagram pay the ~250 KB mermaid bundle on demand; pages without
+ * one pay nothing. */
+.proto-mermaid {
+  padding: var(--sp-12) var(--sp-16);
+  /* Transparent so the chart sits cleanly on whatever the page
+   * surface is — including any future colored backdrop. The border
+   * + radius below still frames it as a figure. */
+  background: transparent;
+  border: var(--bw-hair) solid var(--border);
+  border-radius: var(--radius-lg);
+  overflow-x: auto;
+  /* Click-to-zoom: the wrapper acts as a button (role="button",
+   * tabindex=0) for keyboard users. Cursor affords clickability. */
+  cursor: zoom-in;
+}
+
+.proto-mermaid:focus-visible {
+  outline: var(--outline-width) solid var(--accent);
+  outline-offset: var(--outline-offset);
+}
+
+/* Mermaid bakes width="100%" + display: block onto the SVG so the
+ * wrapper's text-align: center is ignored (text-align doesn't apply
+ * to block children). Override width to auto so the SVG renders at
+ * its viewBox-natural size, capped at 100% via max-width. Then
+ * margin-inline: auto centers the SVG block within the wrapper.
+ * Diagrams narrower than the column visibly center; wider ones fill
+ * the column and overflow-x scrolls. */
+.proto-mermaid svg {
+  width: auto;
+  max-width: 100%;
+  height: auto;
+  display: block;
+  margin-inline: auto;
+}
+
+/* ── Mermaid zoom modal ─────────────────────────────────────────
+ *
+ * Built and torn down imperatively by MermaidEnhancer when a
+ * diagram is clicked. Full-screen scrim + toolbar + pan-and-zoom
+ * pane. Keyboard: ESC closes, +/− zooms, 0 resets, Tab cycles
+ * within the toolbar (the dialog is mounted last in the DOM so
+ * focus returns to the diagram on close).
+ */
+
+.proto-mermaid-modal {
+  position: fixed;
+  inset: 0;
+  z-index: var(--z-modal);
+  background: var(--scrim);
+  display: flex;
+  flex-direction: column;
+}
+
+.proto-mermaid-modal-toolbar {
+  display: flex;
+  justify-content: flex-end;
+  gap: var(--sp-8);
+  padding: var(--sp-12);
+}
+
+.proto-mermaid-modal-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: var(--sp-32);
+  height: var(--sp-32);
+  background: var(--bg);
+  color: var(--text);
+  border: var(--bw-hair) solid var(--border);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  transition: border-color var(--transition-short), color var(--transition-short);
+}
+
+.proto-mermaid-modal-btn:hover {
+  border-color: var(--rule-bold);
+  color: var(--accent-ink);
+}
+
+.proto-mermaid-modal-btn:focus-visible {
+  outline: var(--outline-width) solid var(--accent);
+  outline-offset: var(--outline-offset);
+}
+
+.proto-mermaid-modal-pane {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+  cursor: grab;
+  user-select: none;
+  -webkit-user-select: none;
+  touch-action: none;
+}
+
+.proto-mermaid-modal-pane:active {
+  cursor: grabbing;
+}
+
+.proto-mermaid-modal-pane svg {
+  /* Inside the modal, override the in-page caps — the diagram is
+   * free to zoom to any size; pan handles overflow. */
+  max-width: none;
+  max-height: none;
+  width: auto;
+  height: auto;
+  display: block;
+  /* Solid card surface so the diagram's labels and edges are
+   * legible against the dark scrim. The in-page wrapper is
+   * transparent (sits on the page surface), but in the modal the
+   * page surface is gone — the SVG needs its own backing. */
+  background: var(--bg);
+  padding: var(--sp-24);
+  border-radius: var(--radius-lg);
+  /* Soft outer lift against the scrim. */
+  filter: drop-shadow(0 0 var(--sp-4) var(--shadow-card));
+}
+
+/* ── Comment thread ─────────────────────────────────────────── */
+
+.proto-comments {
+  margin-top: var(--sp-40);
+  border-top: var(--bw-hair) solid var(--rule-hair);
+  padding-top: var(--sp-24);
+}
+
+.proto-comment {
+  margin-top: var(--sp-16);
+  padding-top: var(--sp-12);
+  border-top: var(--bw-hair) solid var(--rule-hair);
+}
+
+.proto-comment:first-child { border-top: 0; padding-top: 0; }
+
+.proto-comment-meta {
+  font-family: var(--font-body);
+  font-size: var(--fs-meta);
+  color: var(--muted);
+  margin-bottom: var(--sp-6);
+}
+
+.proto-comment-meta a { color: var(--text); text-decoration: none; }
+.proto-comment-meta a:hover { text-decoration: underline; }
+
+.proto-comment-body {
+  font-family: var(--font-serif-body);
+  font-size: var(--fs-body);
+  line-height: var(--lh-body);
+  color: var(--text);
+}
+
+.proto-comment-children {
+  margin-left: var(--sp-20);
+  margin-top: var(--sp-12);
+  padding-left: var(--sp-16);
+  border-left: var(--bw-hair) solid var(--rule-hair);
+}
+
+.proto-comment-box {
+  margin-bottom: var(--sp-40);
+  padding: var(--sp-16);
+  border: var(--bw-hair) solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--accent-soft);
+  font-family: var(--font-body);
+  font-size: var(--fs-meta);
+  color: var(--muted);
+}
+
+.proto-comment-box a {
+  color: var(--accent-ink);
+  text-decoration: none;
+}
+
+/* ── Forms (login + submit) ─────────────────────────────────── */
+
+.proto-form {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-12);
+  font-family: var(--font-body);
+}
+
+.proto-form label {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-6);
+  font-size: var(--fs-small);
+  color: var(--text);
+}
+
+/* Checkbox / radio labels: box + text inline on the same row.
+   The default column-stacked label is right for "label above text
+   input"; checkboxes need horizontal alignment with the text. */
+.proto-form label:has(input[type="checkbox"]),
+.proto-form label:has(input[type="radio"]) {
+  flex-direction: row;
+  align-items: center;
+  gap: var(--sp-8);
+  font-size: var(--fs-body);
+}
+
+.proto-form input:not([type="checkbox"]):not([type="radio"]),
+.proto-form select,
+.proto-form textarea {
+  font-family: var(--font-body);
+  font-size: var(--fs-body);
+  padding: var(--sp-8) var(--sp-12);
+  border: var(--bw-hair) solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+  color: var(--text);
+}
+
+/* Focus indicator: inherit the global :focus-visible outline from
+   theme.css. Don't recolor the input's border — that conflates
+   "input is focused" with "input has a state-coloured edge" and
+   reads as visual noise inside reading copy. The outline lives
+   outside the box, so layout doesn't shift on focus either. */
+
+.proto-form textarea { min-height: var(--sp-48); resize: vertical; }
+
+.proto-form .help {
+  font-size: var(--fs-meta);
+  color: var(--muted);
+}
+
+.proto-form button[type="submit"],
+.proto-form .proto-button-primary {
+  background: var(--accent);
+  color: var(--white);
+  border: 0;
+  padding: var(--sp-6) var(--sp-16);
+  font-family: var(--font-body);
+  font-size: var(--fs-body);
+  font-weight: 500;
+  border-radius: var(--radius-full);
+  cursor: pointer;
+  align-self: start;
+}
+
+.proto-form button[type="submit"]:hover,
+.proto-form .proto-button-primary:hover {
+  background: var(--accent-ink);
+}
+
+.proto-form button[type="submit"]:disabled,
+.proto-form .proto-button-primary:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.proto-form-error {
+  color: var(--state-rejected-fg);
+  font-size: var(--fs-meta);
+  margin: var(--sp-4) 0 0;
+}
+
+/* ── Login provider buttons ─────────────────────────────────── */
+
+.proto-providers {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-12);
+  margin: var(--sp-40) 0;
+}
+
+.proto-provider {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--sp-12);
+  font-family: var(--font-body);
+  font-size: var(--fs-body);
+  padding: var(--sp-6) var(--sp-16);
+  border: var(--bw-hair) solid var(--border);
+  border-radius: var(--radius-full);
+  background: var(--surface);
+  color: var(--text);
+  text-decoration: none;
+  cursor: pointer;
+}
+
+.proto-provider:hover { border-color: var(--rule-bold); }
+
+.proto-provider-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--text);
+  min-width: var(--sp-20);
+}
+
+.proto-provider-icon svg {
+  width: var(--sp-16);
+  height: var(--sp-16);
+}
+
+/* Google "G" path extends closer to its viewBox corners than the
+ * Octocat, so it reads visually larger at the same width. Trim it
+ * down to fs-small (var(--fs-byline)) for visual parity. */
+.proto-provider-icon-google svg {
+  width: var(--fs-small);
+  height: var(--fs-small);
+}
+
+.proto-divider {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-12);
+  font-family: var(--font-body);
+  font-size: var(--fs-meta);
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: var(--ls-eyebrow);
+  margin: var(--sp-12) 0;
+}
+
+.proto-divider::before,
+.proto-divider::after {
+  content: "";
+  flex: 1;
+  height: var(--bw-hair);
+  background: var(--rule-hair);
+}
+
+/* ── Project hub ────────────────────────────────────────────── */
+
+.proto-projects-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(var(--grid-min-card), 1fr));
+  gap: var(--sp-24);
+  margin-top: var(--sp-40);
+}
+
+.proto-project-card {
+  border: var(--bw-hair) solid var(--border);
+  border-radius: var(--radius-md);
+  padding: var(--sp-20);
+  background: var(--surface);
+  text-decoration: none;
+  color: var(--text);
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-12);
+  transition: border-color var(--transition-short), box-shadow var(--transition-short);
+}
+
+.proto-project-card:hover {
+  border-color: var(--accent);
+  box-shadow: 0 var(--sp-2) var(--sp-12) var(--shadow-subtle);
+}
+
+.proto-project-card-name {
+  font-family: var(--font-display);
+  font-size: var(--fs-title-md);
+  color: var(--editorial-dark);
+  margin: 0;
+}
+
+.proto-project-card-tagline {
+  font-family: var(--font-serif-body);
+  font-size: var(--fs-body);
+  line-height: var(--lh-snug);
+  color: var(--editorial-mid);
+  margin: 0;
+}
+
+.proto-project-card-body {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-12);
+  text-decoration: none;
+  color: inherit;
+}
+
+.proto-project-card-meta {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-12);
+  font-family: var(--font-mono);
+  font-size: var(--fs-meta);
+  color: var(--muted);
+  margin-top: auto;
+}
+
+.proto-project-card-repo {
+  margin-left: auto;
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-4);
+  text-decoration: none;
+  color: var(--muted);
+  padding: var(--sp-2) var(--sp-6);
+  border-radius: var(--radius-sm);
+  border: var(--bw-hair) solid transparent;
+  transition: border-color var(--transition-short), color var(--transition-short);
+}
+
+.proto-project-card-repo:hover {
+  color: var(--editorial-dark);
+  border-color: var(--rule-hair);
+}
+
+/* ── Project page ───────────────────────────────────────────── */
+
+.proto-project-hero {
+  margin-bottom: var(--sp-40);
+}
+
+.proto-project-hero-tagline {
+  font-family: var(--font-serif-body);
+  font-size: var(--fs-playbook-dek);
+  line-height: var(--lh-dek);
+  color: var(--editorial-mid);
+  margin: 0 0 var(--sp-16);
+}
+
+.proto-project-meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--sp-16);
+  font-family: var(--font-mono);
+  font-size: var(--fs-meta);
+  color: var(--muted);
+}
+
+.proto-project-meta-link {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-4);
+  color: var(--accent-ink);
+  text-decoration: none;
+}
+
+.proto-project-meta-link:hover {
+  text-decoration: underline;
+}
+
+/* Tag chips below the hero meta. Reuses /c/[slug] semantics — clicking
+   a chip lands on the tag-filtered feed. */
+.proto-project-tags {
+  list-style: none;
+  margin: var(--sp-16) 0 0;
+  padding: 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--sp-8);
+}
+
+.proto-project-tag-chip {
+  display: inline-flex;
+  align-items: center;
+  font-family: var(--font-mono);
+  font-size: var(--fs-meta);
+  color: var(--editorial-mid);
+  text-decoration: none;
+  padding: var(--sp-2) var(--sp-8);
+  border-radius: var(--radius-full);
+  border: var(--bw-hair) solid var(--rule-hair);
+  background: var(--surface);
+  transition: border-color var(--transition-short), color var(--transition-short);
+}
+
+.proto-project-tag-chip:hover {
+  color: var(--editorial-dark);
+  border-color: var(--accent);
+}
+
+/* Editor's-note lede above the README. Distinct visual register from
+   the rendered README body so the reader can tell xiaolai's voice
+   from the upstream project's own copy. */
+.proto-project-editorial {
+  margin-bottom: var(--sp-40);
+  padding: var(--sp-20) var(--sp-24);
+  border-left: var(--bw-accent) solid var(--accent);
+  background: var(--accent-soft);
+  font-family: var(--font-serif-body);
+  font-size: var(--fs-playbook-body);
+  line-height: var(--lh-playbook-body);
+  color: var(--editorial-dark);
+}
+
+.proto-project-editorial > :first-child { margin-top: 0; }
+.proto-project-editorial > :last-child  { margin-bottom: 0; }
+.proto-project-editorial p { margin: 0 0 var(--sp-12); }
+.proto-project-editorial a { color: var(--accent-ink); }
+
+/* Rendered README body. Long-form prose styling for GitHub READMEs
+   surfaced via /projects/[slug]. Uses the playbook reading scale to
+   distinguish "article body" from "stat dump." */
+.proto-project-readme {
+  margin-bottom: var(--sp-40);
+  font-family: var(--font-serif-body);
+  font-size: var(--fs-playbook-body);
+  line-height: var(--lh-playbook-body);
+  color: var(--text);
+}
+
+.proto-project-readme > :first-child { margin-top: 0; }
+.proto-project-readme > :last-child  { margin-bottom: 0; }
+
+/* Readme h1 is one notch smaller than the page-level h1 since the
+   readme already sits under the project hero. h2/h3/h4 inherit the
+   global heading scale. */
+.proto-project-readme h1 { font-size: var(--fs-title-md); }
+
+.proto-project-readme p,
+.proto-project-readme li {
+  margin: 0 0 var(--sp-12);
+}
+
+.proto-project-readme ul,
+.proto-project-readme ol {
+  margin: 0 0 var(--sp-16);
+  padding-left: var(--sp-24);
+}
+
+.proto-project-readme blockquote {
+  margin: var(--sp-16) 0;
+  padding: var(--sp-8) var(--sp-16);
+  border-left: var(--bw-accent) solid var(--rule-hair);
+  color: var(--editorial-mid);
+}
+
+.proto-project-readme code {
+  font-family: var(--font-mono);
+  font-size: var(--fs-small);
+  padding: var(--sp-2) var(--sp-6);
+  background: var(--light);
+  border-radius: var(--radius-sm);
+}
+
+.proto-project-readme pre {
+  margin: var(--sp-16) 0;
+  padding: var(--sp-16);
+  background: var(--light);
+  border-radius: var(--radius-md);
+  overflow-x: auto;
+  font-family: var(--font-mono);
+  font-size: var(--fs-small);
+  line-height: var(--lh-snug);
+}
+
+.proto-project-readme pre code {
+  padding: 0;
+  background: transparent;
+  border-radius: 0;
+}
+
+.proto-project-readme a {
+  color: var(--accent-ink);
+}
+
+.proto-project-readme a:hover {
+  text-decoration: underline;
+}
+
+.proto-project-readme img {
+  max-width: 100%;
+  height: auto;
+  border-radius: var(--radius-sm);
+}
+
+.proto-project-readme hr {
+  border: 0;
+  height: var(--bw-hair);
+  background: var(--rule-hair);
+  margin: var(--sp-40) 0;
+}
+
+.proto-project-readme table {
+  border-collapse: collapse;
+  margin: var(--sp-16) 0;
+  font-size: var(--fs-small);
+}
+
+.proto-project-readme th,
+.proto-project-readme td {
+  border: var(--bw-hair) solid var(--rule-hair);
+  padding: var(--sp-8) var(--sp-12);
+  text-align: left;
+}
+
+.proto-project-readme th {
+  background: var(--light);
+  font-family: var(--font-display);
+  color: var(--editorial-dark);
+}
+
+/* Section break + prose typography for hand-authored editorial
+ * pages (/about, /office, /settings). Inner element rules
+ * (paragraph rhythm, list markers, blockquotes, pre, etc.) come
+ * from the site-wide editorial-prose block higher in this file —
+ * .proto-section, .proto-text, and .proto-comment-body share one
+ * set of rules so the visual language doesn't drift across pages. */
+.proto-section {
+  margin-bottom: var(--sp-40);
+  font-family: var(--font-serif-body);
+  font-size: var(--fs-body);
+  line-height: var(--lh-body);
+  color: var(--text);
+}
+
+/* ── Profile ─────────────────────────────────────────────── */
+
+.proto-profile-header {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-16);
+  margin-bottom: var(--sp-12);
+}
+
+.proto-profile-header h1 {
+  margin: 0;
+}
+
+.proto-profile-meta {
+  font-family: var(--font-mono);
+  font-size: var(--fs-meta);
+  color: var(--muted);
+}
+
+.proto-profile-bio {
+  font-family: var(--font-serif-body);
+  font-size: var(--fs-body);
+  color: var(--editorial-mid);
+  margin: 0 0 var(--sp-40);
+}
+
+/* ── Misc ───────────────────────────────────────────────── */
+
+.proto-empty {
+  font-family: var(--font-body);
+  font-size: var(--fs-meta);
+  color: var(--muted);
+  text-align: center;
+  padding: var(--sp-32);
+}
+
+.proto-empty-spaced { margin-top: var(--sp-40); }
+
+/* ── Notifications ─────────────────────────────────────────── */
+
+.proto-notifications {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.proto-notification {
+  border-bottom: var(--bw-hair) solid var(--rule-hair);
+}
+
+.proto-notification.unread {
+  background: var(--accent-soft);
+}
+
+.proto-notification-link {
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  gap: var(--sp-16);
+  padding: var(--sp-12) var(--sp-16);
+  text-decoration: none;
+  align-items: center;
+}
+
+.proto-notification-link:hover {
+  background: var(--accent-soft);
+}
+
+.proto-notification-kind {
+  font-family: var(--font-mono);
+  font-size: var(--fs-meta);
+  color: var(--accent-ink);
+  letter-spacing: var(--ls-wide);
+}
+
+.proto-notification-body {
+  font-family: var(--font-serif-body);
+  font-size: var(--fs-body);
+  color: var(--text);
+}
+
+.proto-notification-time {
+  font-family: var(--font-mono);
+  font-size: var(--fs-meta);
+  color: var(--muted);
+}
+
+/* ── Moderation table ──────────────────────────────────────── */
+
+.proto-mod-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-family: var(--font-body);
+  font-size: var(--fs-meta);
+}
+
+.proto-mod-table th,
+.proto-mod-table td {
+  padding: var(--sp-12);
+  border-bottom: var(--bw-hair) solid var(--rule-hair);
+  text-align: left;
+  vertical-align: top;
+}
+
+.proto-mod-table th {
+  font-family: var(--font-body);
+  font-size: var(--fs-eyebrow);
+  letter-spacing: var(--ls-eyebrow);
+  text-transform: uppercase;
+  color: var(--muted);
+  border-bottom: var(--bw-rule) solid var(--rule-bold);
+}
+
+.proto-mod-reason {
+  color: var(--editorial-mid);
+  font-style: italic;
+}
+
+.proto-mod-target-type {
+  color: var(--muted);
+  font-family: var(--font-mono);
+  font-size: var(--fs-badge);
+}
+
+.proto-mod-btn {
+  font-family: var(--font-body);
+  font-size: var(--fs-meta);
+  padding: var(--sp-2) var(--sp-8);
+  margin-right: var(--sp-4);
+  border: var(--bw-hair) solid var(--border);
+  border-radius: var(--radius-full);
+  background: var(--surface);
+  cursor: pointer;
+}
+
+.proto-mod-btn-keep:hover   { border-color: var(--editorial-mid); }
+.proto-mod-btn-warn:hover   { border-color: var(--accent); color: var(--accent-ink); }
+.proto-mod-btn-remove:hover { border-color: var(--editorial-dark); background: var(--editorial-dark); color: var(--white); }
+
+/* Multi-action cells: each button is in its own form, so we need
+   inline-flex layout to keep them on one row inside a table cell. */
+.proto-mod-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--sp-4);
+  align-items: center;
+}
+.proto-mod-actions form { display: inline-flex; }
+
+.proto-dek {
+  font-family: var(--font-serif-body);
+  font-size: var(--fs-playbook-body);
+  line-height: var(--lh-dek);
+  color: var(--editorial-mid);
+  margin: 0 0 var(--sp-40);
+}
+
+/* ── Mobile (single 768px breakpoint — see CLAUDE.md) ──────── */
+/* The 768px literal MUST match --bp-md in theme.css. CSS @media queries
+ * cannot reference custom properties (var() is invalid inside media-query
+ * conditions per CSS spec), and this project doesn't run a postcss plugin
+ * to substitute one. Documented exception in .claude/rules/design-tokens.md.
+ * If you change --bp-md, change this too. */
+@media (max-width: var(--bp-md)) {
+  .proto-nav { gap: var(--sp-12); padding: var(--sp-12); flex-wrap: wrap; }
+  .proto-page,
+  .proto-page-narrow,
+  .proto-page-aside { padding: var(--sp-20) var(--sp-16); }
+  .proto-row { grid-template-columns: auto 1fr; }
+  .proto-rank { display: none; }
+  .proto-admin-tabs { flex-wrap: wrap; }
+  .office-dl > div { grid-template-columns: 1fr; gap: var(--sp-4); }
+
+  /* Sidebar collapses above content on mobile — sticky-off so it
+     scrolls away with the page; padded rule below visually separates
+     it from the article body. The --mobile-hide variant suppresses
+     long TOCs entirely (e.g. /about's 10-item list would push the
+     article body two screen-heights down). */
+  .proto-page-aside {
+    grid-template-columns: 1fr;
+    gap: var(--sp-20);
+  }
+  .proto-page-aside-nav {
+    position: static;
+    padding-bottom: var(--sp-16);
+    border-bottom: var(--bw-hair) solid var(--rule-hair);
+  }
+  .proto-page-aside-nav--mobile-hide {
+    display: none;
+  }
+}
+
+/* ── Moderation state pills + banners ───────────────────────── */
+
+.proto-state-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-4);
+  padding: var(--sp-2) var(--sp-8);
+  border-radius: var(--radius-sm);
+  font-family: var(--font-mono);
+  font-size: var(--fs-badge);
+  letter-spacing: var(--ls-wide);
+  text-transform: uppercase;
+}
+
+.proto-state-pill-pending {
+  background: var(--state-pending-bg);
+  color: var(--state-pending-fg);
+  border: var(--bw-hair) solid var(--state-pending-border);
+}
+
+.proto-state-pill-rejected {
+  background: var(--state-rejected-bg);
+  color: var(--state-rejected-fg);
+  border: var(--bw-hair) solid var(--state-rejected-border);
+}
+
+.proto-state-pill-approved {
+  background: var(--state-approved-bg);
+  color: var(--state-approved-fg);
+}
+
+.proto-state-note {
+  font-family: var(--font-body);
+  font-size: var(--fs-meta);
+  color: var(--editorial-mid);
+}
+
+.proto-state-appeal {
+  font-family: var(--font-body);
+  font-size: var(--fs-meta);
+  color: var(--accent-ink);
+  text-decoration: none;
+  margin-left: auto;
+}
+
+.proto-state-appeal:hover { text-decoration: underline; }
+
+.proto-row-state-pending,
+.proto-row-state-rejected {
+  background: var(--accent-soft);
+  border-radius: var(--radius-sm);
+}
+
+.proto-row-state-rejected {
+  opacity: 0.85;
+}
+
+.proto-row-pending,
+.proto-row-rejected {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--sp-12);
+  margin-bottom: var(--sp-8);
+}
+
+/* ── /post/[id] under-review banners ────────────────────────── */
+
+.proto-post-state-banner {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--sp-12);
+  padding: var(--sp-16) var(--sp-20);
+  margin-bottom: var(--sp-24);
+  border-radius: var(--radius-md);
+  border: var(--bw-hair) solid var(--rule-hair);
+}
+
+.proto-post-state-banner-pending {
+  background: var(--state-pending-bg);
+  border-color: var(--state-pending-border);
+  color: var(--state-pending-fg);
+}
+
+.proto-post-state-banner-rejected {
+  background: var(--state-rejected-bg);
+  border-color: var(--state-rejected-border);
+  color: var(--state-rejected-fg);
+}
+
+.proto-post-state-title {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-8);
+  font-family: var(--font-display);
+  font-size: var(--fs-title-md);
+  margin: 0;
+}
+
+/* Inline icon wrapper used in prose copy where a lucide SVG sits
+   between words. Without this, the SVG drops to the text baseline
+   and looks misaligned in the middle of a sentence. */
+.proto-inline-icon {
+  display: inline-flex;
+  align-items: center;
+  vertical-align: middle;
+  color: var(--accent-ink);
+}
+
+.proto-post-state-body {
+  font-family: var(--font-serif-body);
+  font-size: var(--fs-body);
+  line-height: var(--lh-snug);
+  margin: 0;
+  flex: 1 1 100%;
+}
+
+/* ── Admin console ──────────────────────────────────────────── */
+
+.proto-admin {
+  max-width: var(--max-width);
+  margin: 0 auto;
+  padding: var(--sp-32) var(--sp-24);
+}
+
+.proto-admin-header {
+  margin-bottom: var(--sp-24);
+  padding-bottom: var(--sp-16);
+  border-bottom: var(--bw-hair) solid var(--rule-hair);
+}
+
+.proto-admin-title {
+  font-family: var(--font-display);
+  font-size: var(--fs-masthead);
+  color: var(--editorial-dark);
+  margin: 0 0 var(--sp-6);
+}
+
+.proto-admin-dek {
+  font-family: var(--font-serif-body);
+  font-size: var(--fs-body);
+  color: var(--editorial-mid);
+  margin: 0;
+}
+
+.proto-admin-tabs {
+  display: flex;
+  gap: var(--sp-24);
+  margin-bottom: var(--sp-24);
+  border-bottom: var(--bw-hair) solid var(--rule-hair);
+}
+
+.proto-admin-tabs a {
+  padding: var(--sp-12) 0;
+  font-family: var(--font-body);
+  font-size: var(--fs-body);
+  color: var(--muted);
+  text-decoration: none;
+  border-bottom: var(--bw-rule) solid transparent;
+  margin-bottom: calc(-1 * var(--sp-1));
+}
+
+.proto-admin-tabs a:hover { color: var(--text); }
+
+.proto-admin-tabs a[aria-current="page"] {
+  color: var(--accent-ink);
+  border-bottom-color: var(--accent);
+}
+
+.proto-admin-body { min-height: var(--admin-body-min-h); }
+
+.proto-admin-gate {
+  padding: var(--sp-48) var(--sp-24);
+  text-align: center;
+}
+
+.proto-mod-row-override {
+  background: var(--accent-soft);
+}
+
+/* ── Public stats page ──────────────────────────────────────── */
+
+.proto-stats {
+  max-width: var(--content-width);
+  margin: 0 auto;
+  padding: var(--sp-32) var(--sp-24);
+}
+
+.proto-stats-title {
+  font-family: var(--font-display);
+  font-size: var(--fs-masthead);
+  color: var(--editorial-dark);
+  margin: 0 0 var(--sp-8);
+}
+
+.proto-stats-dek {
+  font-family: var(--font-serif-body);
+  font-size: var(--fs-body);
+  color: var(--editorial-mid);
+  line-height: var(--lh-body);
+  margin: 0 0 var(--sp-40);
+}
+
+.proto-stats-grid {
+  list-style: none;
+  padding: 0;
+  margin: 0 0 var(--sp-40);
+  display: grid;
+  gap: var(--sp-16);
+  grid-template-columns: repeat(auto-fit, minmax(var(--grid-min-card), 1fr));
+}
+
+/* The stats page wrapper carries .proto-section so it shares the
+ * unified editorial-prose ruleset. That ruleset injects •/numeric
+ * ::before markers on every <li> in a section — appropriate for
+ * authored prose lists, but these two lists are layouts (a card
+ * grid and a tabular row list), not bulleted items. Suppress the
+ * markers and the marker-column padding for both. */
+.proto-stats-grid > li::before,
+.proto-stats-toplist > li::before {
+  content: none;
+}
+.proto-stats-grid > li,
+.proto-stats-toplist > li {
+  padding-inline-start: 0;
+}
+
+.proto-stats-card {
+  border: var(--bw-hair) solid var(--rule-hair);
+  border-radius: var(--radius-md);
+  padding: var(--sp-24) var(--sp-20);
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-4);
+}
+
+.proto-stats-metric {
+  font-family: var(--font-display);
+  font-size: var(--fs-masthead);
+  color: var(--editorial-dark);
+  line-height: var(--lh-tight);
+  letter-spacing: var(--ls-tight);
+}
+
+.proto-stats-metric-label {
+  font-family: var(--font-body);
+  font-size: var(--fs-eyebrow);
+  letter-spacing: var(--ls-eyebrow);
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+.proto-stats-toplist {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  border-top: var(--bw-hair) solid var(--rule-hair);
+}
+
+.proto-stats-toprow {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: var(--sp-16);
+  padding: var(--sp-12) 0;
+  border-bottom: var(--bw-hair) solid var(--rule-hair);
+}
+
+.proto-stats-toprow-path {
+  font-family: var(--font-mono);
+  font-size: var(--fs-small);
+  color: var(--text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.proto-stats-toprow-views {
+  font-family: var(--font-body);
+  font-size: var(--fs-small);
+  color: var(--muted);
+  flex-shrink: 0;
+}
+
+.proto-stats-note {
+  font-family: var(--font-serif-body);
+  font-size: var(--fs-small);
+  color: var(--muted);
+  line-height: var(--lh-snug);
+  margin: 0;
+  padding: var(--sp-16);
+  border-left: var(--bw-rule) solid var(--rule-hair);
+}
+
+.proto-stats-note code {
+  font-family: var(--font-mono);
+  font-size: var(--fs-small);
+  color: var(--text);
+}
+
+.proto-stats-error {
+  font-family: var(--font-body);
+  font-size: var(--fs-small);
+  color: var(--state-rejected-fg);
+  background: var(--state-rejected-bg);
+  border-left: var(--bw-rule) solid var(--state-rejected-border);
+  padding: var(--sp-16);
+  margin: 0;
+}
+
+/* Subsection heading — one notch larger than the global h3 scale.
+   Used for in-page subsection breaks where the readme/office h3 default
+   (--fs-playbook-dek) reads too small. */
+.proto-h3 {
+  font-size: var(--fs-title-md);
+}
+
+/* ── Form bits (admin + submit) ─────────────────────────────── */
+
+/* display: flex is REQUIRED — without it the flex-direction / gap
+ * properties below are silently ignored. Most callers combined this
+ * with .proto-form (which sets display: flex), so it appeared to work;
+ * standalone callers (Copy/Done in the token flash, RevokeTokenButton)
+ * were getting no flex layout and no gap. */
+.proto-form-inline {
+  display: flex;
+  flex-direction: row;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--sp-8);
+}
+
+.proto-input {
+  padding: var(--sp-8) var(--sp-12);
+  font-family: var(--font-body);
+  font-size: var(--fs-body);
+  color: var(--text);
+  background: var(--surface);
+  border: var(--bw-hair) solid var(--rule-hair);
+  border-radius: var(--radius-sm);
+}
+
+.proto-input-wide { flex: 1 1 100%; }
+
+/* Inline input variant for in-row editing (e.g., /admin/flags tag rows).
+   Smaller padding so the input fits a table cell without inflating row
+   height; full width of its container so name/tagline expand naturally. */
+.proto-input-inline {
+  padding: var(--sp-4) var(--sp-8);
+  font-size: var(--fs-meta);
+  width: 100%;
+}
+
+/* Tag-row inline-edit forms — a Save button trails the input on the
+   same baseline. Wraps if the cell is too narrow. */
+.proto-tag-edit,
+.proto-tag-merge {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--sp-4);
+  align-items: center;
+}
+
+/* Inline form-action feedback. Rendered next to the form by the
+   client wrappers (CreateTagForm, TagRow, ModButton) when the server
+   action returns a non-empty message. Color flips on .ok vs .err to
+   reuse the moderation state-pill colors without the pill chrome. */
+.proto-form-flash {
+  margin: var(--sp-4) 0 0;
+  font-family: var(--font-body);
+  font-size: var(--fs-meta);
+}
+.proto-form-flash-ok  { color: var(--state-approved-fg); }
+.proto-form-flash-err { color: var(--state-rejected-fg); }
+
+/* See .proto-form input:focus-visible above — same rationale.
+   Switched from :focus to :focus-visible so the indicator only
+   appears on keyboard focus, not on click. */
+
+.proto-btn-primary {
+  padding: var(--sp-6) var(--sp-16);
+  font-family: var(--font-body);
+  font-size: var(--fs-body);
+  color: var(--white);
+  background: var(--accent);
+  border: var(--bw-hair) solid var(--accent);
+  border-radius: var(--radius-full);
+  cursor: pointer;
+  transition: background var(--transition-short);
+}
+
+.proto-btn-primary:hover { background: var(--accent-ink); }
+
+/* Same dimensions as .proto-btn-primary, outlined fill. Use for the
+   companion (Cancel / Done / Dismiss) sitting next to a primary button
+   so the pair reads as balanced at the same visual weight. */
+.proto-btn-secondary {
+  padding: var(--sp-6) var(--sp-16);
+  font-family: var(--font-body);
+  font-size: var(--fs-body);
+  color: var(--accent-ink);
+  background: var(--surface);
+  border: var(--bw-hair) solid var(--accent);
+  border-radius: var(--radius-full);
+  cursor: pointer;
+  text-decoration: none;
+  display: inline-flex;
+  align-items: center;
+  transition: background var(--transition-short), color var(--transition-short);
+}
+.proto-btn-secondary:hover {
+  background: var(--accent-soft);
+  color: var(--accent-ink);
+}
+.proto-btn-secondary:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+/* ── Comment state ──────────────────────────────────────────── */
+
+.proto-comment-pending {
+  background: var(--state-pending-bg);
+  border-left: var(--bw-rule) solid var(--state-pending-border);
+  padding: var(--sp-12);
+  border-radius: var(--radius-sm);
+}
+
+.proto-comment-rejected {
+  background: var(--accent-soft);
+  padding: var(--sp-8) var(--sp-12);
+  border-radius: var(--radius-sm);
+  font-style: italic;
+  opacity: 0.85;
+}
+
+
+/* ── Avatars (added with avatar feature) ─────────────────────── */
+
+.proto-avatar {
+  display: inline-flex;
+  vertical-align: middle;
+  border-radius: var(--radius-full);
+  overflow: hidden;
+  flex-shrink: 0;
+  line-height: 0;
+  object-fit: cover;
+}
+
+.proto-row-author-link {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-4);
+}
+
+.proto-comment-meta-with-avatar {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-6);
+}
+
+.proto-profile-header-text {
+  display: flex;
+  flex-direction: column;
+}
+
+/* ── Project card tint + grain (decorative) ──────────────────── */
+
+.proto-project-card-tinted {
+  background-color: var(--card-tint, var(--surface));
+  position: relative;
+  isolation: isolate;
+}
+
+/* Subtle grain overlay. The SVG generates a low-amplitude noise field
+   via feTurbulence; opacity keeps it just-barely-visible. The pattern
+   tiles seamlessly because feTurbulence is deterministic. */
+.proto-project-card-tinted::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  pointer-events: none;
+  z-index: -1;
+  opacity: 0.08;
+  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='160' height='160'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='2' stitchTiles='stitch'/><feColorMatrix values='0 0 0 0 0  0 0 0 0 0  0 0 0 0 0  0 0 0 0.6 0'/></filter><rect width='100%25' height='100%25' filter='url(%23n)'/></svg>");
+  background-repeat: repeat;
+}
+
+/* ── Settings panels (username + sign-in methods) ─────────────── */
+
+.proto-username-row {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-12);
+  flex-wrap: wrap;
+}
+
+.proto-username-pill {
+  font-family: var(--font-mono);
+  font-size: var(--fs-body);
+  color: var(--text);
+  padding: var(--sp-4) var(--sp-12);
+  background: var(--light);
+  border-radius: var(--radius-md);
+}
+
+.proto-btn-link {
+  background: none;
+  border: 0;
+  padding: 0;
+  font-family: var(--font-body);
+  font-size: var(--fs-meta);
+  color: var(--accent-ink);
+  cursor: pointer;
+  text-decoration: underline;
+  text-underline-offset: var(--underline-offset);
+}
+
+.proto-btn-link:hover {
+  color: var(--accent);
+}
+
+.proto-btn-link:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.proto-meta-quiet {
+  font-size: var(--fs-meta);
+  color: var(--muted);
+}
+
+.proto-form-actions {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-16);
+  margin-top: var(--sp-8);
+}
+
+.proto-method-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: var(--sp-8);
+}
+
+.proto-method-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sp-12);
+  padding: var(--sp-8) var(--sp-12);
+  background: var(--light);
+  border-radius: var(--radius-md);
+}
+
+.proto-method-label {
+  font-size: var(--fs-body);
+  color: var(--text);
+}
+
+.proto-method-status {
+  font-family: var(--font-mono);
+  font-size: var(--fs-eyebrow);
+  letter-spacing: var(--ls-eyebrow);
+  text-transform: uppercase;
+  padding: var(--sp-2) var(--sp-8);
+  border-radius: var(--radius-full);
+  background: var(--state-approved-bg);
+  color: var(--state-approved-fg);
+}
+
+.proto-method-status-on {
+  background: var(--state-approved-bg);
+  color: var(--state-approved-fg);
+}
+
+/* ── Markdown editor (Write/Preview tabs + toolbar) ───────────── */
+
+.proto-md-editor {
+  display: flex;
+  flex-direction: column;
+  border: var(--bw-hair) solid var(--rule-hair);
+  border-radius: var(--radius-md);
+  background: var(--bg);
+  overflow: hidden;
+}
+
+.proto-md-bar {
+  display: flex;
+  align-items: stretch;
+  justify-content: space-between;
+  gap: var(--sp-12);
+  padding: var(--sp-4) var(--sp-8);
+  border-bottom: var(--bw-hair) solid var(--rule-hair);
+  background: var(--light);
+  flex-wrap: wrap;
+}
+
+.proto-md-tabs {
+  display: inline-flex;
+  gap: var(--sp-2);
+}
+
+.proto-md-tab {
+  background: transparent;
+  border: 0;
+  padding: var(--sp-4) var(--sp-12);
+  font-family: var(--font-body);
+  font-size: var(--fs-meta);
+  color: var(--muted);
+  cursor: pointer;
+  border-radius: var(--radius-sm);
+}
+
+.proto-md-tab:hover {
+  color: var(--text);
+}
+
+.proto-md-tab--active {
+  color: var(--accent);
+}
+
+.proto-md-toolbar {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-2);
+}
+
+.proto-md-tool {
+  background: transparent;
+  border: 0;
+  width: var(--touch-min);
+  height: var(--sp-28);
+  min-width: var(--sp-28);
+  padding: 0;
+  font-family: var(--font-body);
+  font-size: var(--fs-meta);
+  color: var(--muted);
+  cursor: pointer;
+  border-radius: var(--radius-sm);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.proto-md-tool:hover:not(:disabled) {
+  background: var(--bg);
+  color: var(--text);
+}
+
+.proto-md-tool:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.proto-md-area {
+  position: relative;
+}
+
+.proto-md-textarea {
+  display: block;
+  width: 100%;
+  border: 0;
+  padding: var(--sp-12);
+  font-family: var(--font-mono);
+  font-size: var(--fs-body);
+  line-height: var(--lh-body);
+  background: var(--bg);
+  color: var(--text);
+  resize: vertical;
+}
+
+.proto-md-textarea:focus-visible {
+  outline: var(--outline-width) solid var(--accent);
+  outline-offset: var(--outline-offset-inset);
+}
+
+/* Visually hidden but still focusable so HTML5 `required` validation
+   continues to fire if the user clicks Submit while in Preview mode.
+   Standard sr-only-style technique: 1×1 absolute box with the visible
+   area collapsed via clip-path — no negative positioning, no magic
+   numbers. */
+.proto-md-textarea--offscreen {
+  position: absolute;
+  width: var(--sp-1);
+  height: var(--sp-1);
+  padding: 0;
+  margin: 0;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+  border: 0;
+}
+
+.proto-md-preview {
+  padding: var(--sp-12);
+  font-family: var(--font-body);
+  font-size: var(--fs-body);
+  line-height: var(--lh-body);
+  color: var(--text);
+  min-height: var(--sp-48);
+}
+
+.proto-md-preview p:first-child { margin-top: 0; }
+.proto-md-preview p:last-child  { margin-bottom: 0; }
+
+.proto-md-preview-empty {
+  color: var(--muted);
+  font-style: italic;
+  margin: 0;
+}
+
+/* ── /office (the office) ────────────────────────────────────────
+ * Public window into the agentic editorial team. See
+ * editorial/transparency.md for what fits here vs. what stays
+ * private in shannon-office. */
+
+.office-eyebrow {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-6);
+  font-family: var(--font-mono);
+  font-size: var(--fs-eyebrow);
+  letter-spacing: var(--ls-eyebrow);
+  text-transform: uppercase;
+  color: var(--muted);
+  margin-bottom: var(--sp-12);
+}
+
+.office-ai-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-3);
+  padding: var(--sp-1) var(--sp-6);
+  border: var(--bw-accent) solid var(--accent-border);
+  border-radius: var(--radius-full);
+  background: var(--accent-soft);
+  color: var(--accent-ink);
+  font-family: var(--font-mono);
+  font-size: var(--fs-badge-sm);
+  letter-spacing: var(--ls-wide);
+  text-transform: uppercase;
+  margin-left: var(--sp-8);
+}
+
+.office-breadcrumb {
+  margin-bottom: var(--sp-24);
+  font-family: var(--font-mono);
+  font-size: var(--fs-small);
+}
+.office-breadcrumb a {
+  color: var(--muted);
+  text-decoration: none;
+}
+.office-breadcrumb a:hover { color: var(--text); }
+
+.office-filters {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: var(--sp-8);
+  font-family: var(--font-mono);
+  font-size: var(--fs-small);
+  margin-bottom: var(--sp-12);
+}
+
+.office-filter-label {
+  color: var(--muted);
+}
+
+.office-chip {
+  display: inline-block;
+  padding: var(--sp-2) var(--sp-8);
+  border: var(--bw-hair) solid var(--rule-hair);
+  border-radius: var(--radius-full);
+  text-decoration: none;
+  color: var(--text);
+  background: var(--bg);
+}
+.office-chip:hover {
+  border-color: var(--rule-bold);
+}
+.office-chip-active {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+  color: var(--accent-ink);
+}
+
+.office-empty {
+  color: var(--muted);
+  font-style: italic;
+  padding: var(--sp-24) 0;
+}
+
+.office-decision-list {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+}
+
+.office-decision-row {
+  padding: var(--sp-20) 0;
+  border-bottom: var(--bw-hair) solid var(--rule-hair);
+}
+.office-decision-row:last-child { border-bottom: 0; }
+
+.office-decision-head {
+  display: flex;
+  align-items: baseline;
+  gap: var(--sp-8);
+  margin-bottom: var(--sp-6);
+}
+
+.office-decision-title {
+  color: var(--text);
+  text-decoration: none;
+  font-weight: 500;
+  line-height: var(--lh-snug);
+}
+.office-decision-title:hover { color: var(--accent-ink); }
+
+.office-why {
+  color: var(--editorial-mid);
+  font-size: var(--fs-small);
+  line-height: var(--lh-body);
+  margin: var(--sp-6) 0 var(--sp-12) 0;
+}
+
+.office-decision-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--sp-16);
+  margin: 0;
+  font-family: var(--font-mono);
+  font-size: var(--fs-eyebrow);
+  color: var(--muted);
+}
+.office-decision-meta > div {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-1);
+}
+.office-decision-meta dt {
+  letter-spacing: var(--ls-eyebrow);
+  text-transform: uppercase;
+}
+.office-decision-meta dd {
+  margin: 0;
+  color: var(--text);
+  font-size: var(--fs-small);
+}
+.office-decision-meta a { color: var(--accent-ink); text-decoration: none; }
+.office-decision-meta a:hover { text-decoration: underline; }
+
+.office-routing-feed { color: var(--state-approved-fg); }
+.office-routing-firehose { color: var(--muted); }
+.office-routing-human_queue { color: var(--state-pending-fg); }
+
+.office-source-link {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-4);
+  font-family: var(--font-mono);
+  font-size: var(--fs-small);
+  color: var(--accent-ink);
+  text-decoration: none;
+}
+.office-source-link:hover { text-decoration: underline; }
+
+.office-list {
+  margin: var(--sp-8) 0;
+  padding-left: var(--sp-20);
+}
+.office-list li { margin: var(--sp-4) 0; }
+.office-list code {
+  font-family: var(--font-mono);
+  font-size: var(--fs-small);
+  background: var(--light);
+  padding: var(--sp-1) var(--sp-6);
+  border-radius: var(--radius-sm);
+}
+
+.office-scores-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-family: var(--font-mono);
+  font-size: var(--fs-small);
+  margin: var(--sp-12) 0;
+}
+.office-scores-table th,
+.office-scores-table td {
+  text-align: left;
+  padding: var(--sp-6) var(--sp-12);
+  border-bottom: var(--bw-hair) solid var(--rule-hair);
+}
+.office-scores-table th {
+  color: var(--muted);
+  font-weight: normal;
+  letter-spacing: var(--ls-eyebrow);
+  text-transform: uppercase;
+  font-size: var(--fs-eyebrow);
+}
+.office-scores-table code {
+  background: none;
+  padding: 0;
+}
+
+.office-fineprint {
+  font-size: var(--fs-small);
+  color: var(--muted);
+  line-height: var(--lh-body);
+}
+
+.office-footer {
+  margin-top: var(--sp-48);
+  padding-top: var(--sp-24);
+  border-top: var(--bw-hair) solid var(--rule-hair);
+  font-size: var(--fs-small);
+  color: var(--muted);
+}
+.office-footer a { color: var(--accent-ink); }
+
+/* ── /office editorial doc rendering ─────────────────────────── */
+
+.office-doc {
+  font-family: var(--font-body);
+  font-size: var(--fs-body);
+  line-height: var(--lh-body);
+  color: var(--text);
+}
+.office-doc h1,
+.office-doc h2,
+.office-doc h3,
+.office-doc h4 {
+  font-family: var(--font-display);
+  letter-spacing: var(--ls-tight);
+  color: var(--editorial-dark);
+}
+.office-doc h1 { font-size: var(--fs-title-md); }
+.office-doc h2 { font-size: var(--fs-section-heading); }
+.office-doc h3 { font-size: var(--fs-body); text-transform: uppercase; letter-spacing: var(--ls-wide); color: var(--muted); }
+.office-doc p { margin: var(--sp-12) 0; }
+.office-doc ul,
+.office-doc ol { padding-left: var(--sp-24); margin: var(--sp-12) 0; }
+.office-doc li { margin: var(--sp-4) 0; }
+.office-doc table {
+  width: 100%;
+  border-collapse: collapse;
+  margin: var(--sp-16) 0;
+  font-size: var(--fs-small);
+}
+.office-doc th,
+.office-doc td {
+  text-align: left;
+  padding: var(--sp-8) var(--sp-12);
+  border-bottom: var(--bw-hair) solid var(--rule-hair);
+  vertical-align: top;
+}
+.office-doc th { color: var(--muted); font-weight: 500; }
+.office-doc code {
+  font-family: var(--font-mono);
+  font-size: var(--fs-small);
+  background: var(--light);
+  padding: var(--sp-1) var(--sp-6);
+  border-radius: var(--radius-sm);
+}
+.office-doc pre {
+  background: var(--light);
+  padding: var(--sp-12);
+  border-radius: var(--radius-sm);
+  overflow-x: auto;
+  font-size: var(--fs-small);
+}
+.office-doc pre code { background: none; padding: 0; }
+.office-doc blockquote {
+  border-left: var(--bw-accent) solid var(--accent);
+  padding-left: var(--sp-16);
+  margin: var(--sp-16) 0;
+  color: var(--editorial-mid);
+}
+.office-doc hr {
+  border: 0;
+  border-top: var(--bw-hair) solid var(--rule-hair);
+  margin: var(--sp-40) 0;
+}
+
+/* /office/rubric — definition lists + criterion cards */
+
+.office-dl {
+  margin: 0;
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: var(--sp-12);
+}
+.office-dl > div {
+  display: grid;
+  grid-template-columns: var(--dl-term-col) 1fr;
+  gap: var(--sp-16);
+  padding: var(--sp-8) 0;
+  border-bottom: var(--bw-hair) solid var(--rule-hair);
+  align-items: baseline;
+}
+.office-dl > div:last-child { border-bottom: 0; }
+.office-dl dt {
+  font-family: var(--font-mono);
+  font-size: var(--fs-small);
+  color: var(--editorial-mid);
+}
+.office-dl dd {
+  margin: 0;
+  font-size: var(--fs-small);
+  line-height: var(--lh-body);
+}
+
+.office-criteria {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: var(--sp-20);
+}
+.office-criterion {
+  padding: var(--sp-16);
+  border: var(--bw-hair) solid var(--rule-hair);
+  border-radius: var(--radius-md);
+}
+.office-criterion h3 {
+  margin: 0 0 var(--sp-8) 0;
+  font-family: var(--font-display);
+  text-transform: none;
+  letter-spacing: 0;
+  color: var(--editorial-dark);
+  font-size: var(--fs-body);
+}
+.office-criterion-rubric {
+  margin: 0;
+  font-family: var(--font-mono);
+  font-size: var(--fs-small);
+  white-space: pre-wrap;
+  color: var(--editorial-mid);
+  background: none;
+  padding: 0;
+}
+
+.office-format-extension {
+  margin: var(--sp-16) 0;
+}
+.office-format-extension h3 {
+  margin: 0 0 var(--sp-6) 0;
+  font-family: var(--font-mono);
+  text-transform: none;
+  letter-spacing: 0;
+  font-size: var(--fs-small);
+  color: var(--editorial-mid);
+}
+
+/* ── /office redesign — hero, team cards, slim picks ─────────── */
+
+.office-hero {
+  padding-bottom: var(--sp-32);
+  border-bottom: var(--bw-hair) solid var(--rule-hair);
+}
+
+.office-section-lede {
+  color: var(--editorial-mid);
+  font-size: var(--fs-small);
+  line-height: var(--lh-body);
+  margin-top: var(--sp-6);
+  margin-bottom: var(--sp-24);
+}
+
+.office-team {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(var(--grid-min-card), 1fr));
+  gap: var(--sp-16);
+}
+.office-persona-card {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-8);
+  padding: var(--sp-16) var(--sp-20);
+  border: var(--bw-hair) solid var(--rule-hair);
+  border-radius: var(--radius-md);
+  background: var(--bg);
+  text-decoration: none;
+  color: var(--text);
+  transition: border-color var(--transition-short), background var(--transition-short);
+}
+.office-persona-card:hover {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+}
+.office-persona-card-head {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-8);
+}
+.office-persona-card-name {
+  font-family: var(--font-display);
+  font-size: var(--fs-body);
+  font-weight: 500;
+  color: var(--editorial-dark);
+}
+.office-persona-card-blurb {
+  font-size: var(--fs-small);
+  color: var(--editorial-mid);
+  line-height: var(--lh-body);
+  margin: 0;
+}
+.office-persona-card-stat {
+  font-family: var(--font-mono);
+  font-size: var(--fs-eyebrow);
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: var(--ls-eyebrow);
+  margin: 0;
+  margin-top: auto;
+}
+
+.office-empty-card {
+  padding: var(--sp-24);
+  border: var(--bw-hair) dashed var(--rule-hair);
+  border-radius: var(--radius-md);
+  background: var(--light);
+  color: var(--editorial-mid);
+}
+.office-empty-card p {
+  margin: 0;
+  font-size: var(--fs-small);
+  line-height: var(--lh-body);
+}
+.office-empty-card p + p { margin-top: var(--sp-12); }
+
+.office-pick-list {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+}
+.office-pick {
+  padding: var(--sp-20) 0;
+  border-bottom: var(--bw-hair) solid var(--rule-hair);
+}
+.office-pick:last-child { border-bottom: 0; }
+.office-pick-title {
+  margin: 0 0 var(--sp-6) 0;
+  font-family: var(--font-display);
+  font-size: var(--fs-body);
+  font-weight: 500;
+  line-height: var(--lh-snug);
+}
+.office-pick-title a {
+  color: var(--text);
+  text-decoration: none;
+}
+.office-pick-title a:hover { color: var(--accent-ink); }
+.office-pick-host {
+  color: var(--muted);
+  font-size: var(--fs-small);
+  font-weight: 400;
+}
+.office-pick .office-why {
+  margin: var(--sp-6) 0 var(--sp-8) 0;
+}
+.office-pick-byline {
+  margin: 0;
+  font-family: var(--font-mono);
+  font-size: var(--fs-eyebrow);
+  color: var(--muted);
+  letter-spacing: 0;
+  text-transform: none;
+}
+:where(.office-pick-byline) a {
+  color: var(--editorial-mid);
+  text-decoration: none;
+}
+:where(.office-pick-byline) a:hover { color: var(--accent-ink); }
+.office-pick-explain { color: var(--accent-ink); }
+
+/* /office/decision/[id] — friendly verdict + scores */
+
+.office-decision-h1 {
+  margin-top: var(--sp-12);
+  margin-bottom: var(--sp-12);
+}
+.office-decision-h1 a {
+  color: var(--text);
+  text-decoration: none;
+}
+.office-decision-h1 a:hover { color: var(--accent-ink); }
+.office-decision-h1-icon {
+  margin-left: var(--sp-6);
+  display: inline-flex;
+  align-items: center;
+  vertical-align: middle;
+  color: inherit;
+}
+.office-decision-why {
+  margin: 0;
+}
+.office-verdict {
+  font-family: var(--font-display);
+  font-size: var(--fs-section-heading);
+  font-weight: 500;
+  margin: 0;
+  padding: var(--sp-16) var(--sp-20);
+  border-left: var(--bw-accent) solid var(--accent);
+  background: var(--accent-soft);
+}
+.office-verdict.office-routing-firehose {
+  border-left-color: var(--rule-bold);
+  background: var(--light);
+  color: var(--editorial-mid);
+}
+.office-verdict.office-routing-human_queue {
+  border-left-color: var(--state-pending-border);
+  background: var(--state-pending-bg);
+  color: var(--state-pending-fg);
+}
+.office-friendly-scores {
+  width: 100%;
+  border-collapse: collapse;
+  margin: var(--sp-12) 0;
+}
+.office-friendly-scores th,
+.office-friendly-scores td {
+  padding: var(--sp-8) var(--sp-12);
+  border-bottom: var(--bw-hair) solid var(--rule-hair);
+  text-align: left;
+}
+.office-friendly-scores th {
+  font-family: var(--font-body);
+  font-weight: 400;
+  color: var(--text);
+  font-size: var(--fs-small);
+}
+.office-friendly-scores .office-score-cell {
+  text-align: right;
+  font-family: var(--font-mono);
+  font-size: var(--fs-small);
+  color: var(--editorial-mid);
+  width: var(--score-cell-width);
+}
+.office-friendly-scores .office-score-value {
+  font-weight: 500;
+  color: var(--editorial-dark);
+}
+.office-decision-provenance {
+  margin-top: var(--sp-40);
+  padding-top: var(--sp-16);
+  border-top: var(--bw-hair) solid var(--rule-hair);
+  font-family: var(--font-mono);
+  font-size: var(--fs-eyebrow);
+  color: var(--muted);
+}
+.office-decision-provenance p { margin: 0; }
+
+/* /office/persona/[name] — slim activity + stance */
+
+.office-persona-head {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-12);
+  flex-wrap: wrap;
+}
+.office-stance-line {
+  margin: var(--sp-8) 0;
+  font-size: var(--fs-small);
+  line-height: var(--lh-body);
+}
+.office-stance-line strong {
+  font-weight: 500;
+  color: var(--editorial-mid);
+  margin-right: var(--sp-6);
+}
+.office-stat-summary {
+  font-size: var(--fs-body);
+  line-height: var(--lh-body);
+  margin: 0;
+  color: var(--editorial-mid);
+}
+.office-stat-summary strong {
+  color: var(--editorial-dark);
+  font-weight: 500;
+}
+
+/* ── /settings/tokens ─────────────────────────────────────────── */
+
+.proto-form-fieldset {
+  border: var(--bw-hair) solid var(--rule-hair);
+  border-radius: var(--radius-md);
+  padding: var(--sp-16);
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-8);
+}
+.proto-form-fieldset legend {
+  font-size: var(--fs-small);
+  font-weight: 500;
+  color: var(--editorial-mid);
+  padding: 0 var(--sp-6);
+}
+
+/* "Select all" sits at the top of a checkbox fieldset, separated from
+ * the per-item checkboxes by a hairline so it's visually a control,
+ * not just another option. */
+.proto-token-scope-toggle-all {
+  padding-bottom: var(--sp-8);
+  border-bottom: var(--bw-hair) solid var(--rule-hair);
+  margin-bottom: var(--sp-4);
+}
+
+/* The selectors are written as `ul.proto-token-list` / `ul.proto-token-scopes`
+ * to match the specificity (0,1,1) of `.proto-section ul` further up in this
+ * file, which sets padding-left: var(--sp-24) on every ul inside a section.
+ * Same specificity + later cascade order = these rules win. */
+ul.proto-token-list {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-16);
+}
+.proto-token-row {
+  border: var(--bw-hair) solid var(--rule-hair);
+  border-radius: var(--radius-md);
+  padding: var(--sp-16);
+}
+
+.proto-token-head {
+  display: flex;
+  align-items: baseline;
+  gap: var(--sp-12);
+  flex-wrap: wrap;
+  margin-bottom: var(--sp-8);
+}
+.proto-token-name {
+  font-weight: 500;
+}
+.proto-token-prefix {
+  font-size: var(--fs-small);
+  color: var(--muted);
+}
+
+.proto-token-meta {
+  display: grid;
+  /* max-content sizes the dt column to the widest label across all
+   * rows ("Last used" here, ~80px). The shared --dl-term-col token is
+   * 200px — tuned for longer keys on /admin pages — and produced ~150px
+   * of dead space next to short token-meta labels. */
+  grid-template-columns: max-content 1fr;
+  gap: var(--sp-4) var(--sp-16);
+  margin: 0 0 var(--sp-16);
+  font-size: var(--fs-small);
+}
+.proto-token-meta dt {
+  color: var(--muted);
+}
+.proto-token-meta dd {
+  margin: 0;
+  color: var(--text);
+}
+
+ul.proto-token-scopes {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+}
+
+.proto-token-flash {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-12);
+  border: var(--bw-rule) solid var(--accent);
+  border-radius: var(--radius-md);
+  padding: var(--sp-16);
+  background: var(--accent-soft);
+}
+/* The Copy + Done pair sits inside .proto-form-inline, which uses
+ * sp-8 (8px) for compact form-field rows. Too tight between two
+ * full-size pill buttons; sp-24 reads as too far apart. sp-20 sits
+ * on the component-internal tier — appropriate for inter-control
+ * spacing within a contained surface. */
+.proto-token-flash .proto-form-inline {
+  gap: var(--sp-20);
+}
+/* Read-only display of the plaintext token. Not an input, not focusable;
+ * a single click anywhere in the box selects the whole string for copying.
+ * No border / focus ring — the element is intentionally not interactive
+ * beyond text selection. */
+.proto-token-plaintext {
+  display: block;
+  font-family: var(--font-mono);
+  font-size: var(--fs-meta);
+  background: var(--code-bg);
+  color: var(--code-text);
+  padding: var(--sp-12) var(--sp-16);
+  border-radius: var(--radius-sm);
+  user-select: all;
+  word-break: break-all;
+  cursor: text;
+}
+
+/* ── ConfirmDialog (modal confirmation primitive) ──────────────── */
+
+/* Built on the native HTML <dialog> element via showModal(). The
+ * browser handles focus trap, top-layer rendering, and ESC key; we
+ * only style. The body overlay is the dialog's ::backdrop
+ * pseudo-element. */
+
+.proto-confirm-dialog {
+  margin: auto;
+  padding: 0;
+  border: var(--bw-hair) solid var(--rule-bold);
+  border-radius: var(--radius-md);
+  background: var(--bg);
+  color: var(--text);
+  max-width: var(--confirm-dialog-max-w);
+  width: calc(100% - var(--sp-32));
+  font-family: var(--font-mono);
+  box-shadow: 0 var(--sp-12) var(--sp-32) var(--shadow-card);
+}
+
+.proto-confirm-dialog::backdrop {
+  background: var(--scrim);
+}
+
+.proto-confirm-dialog[open] {
+  animation: proto-confirm-dialog-in var(--transition-short) ease-out;
+}
+
+.proto-confirm-dialog[open]::backdrop {
+  animation: proto-confirm-backdrop-in var(--transition-short) ease-out;
+}
+
+@keyframes proto-confirm-dialog-in {
+  from { opacity: 0; transform: translateY(calc(-1 * var(--sp-8))); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes proto-confirm-backdrop-in {
+  from { background: transparent; }
+  to   { background: var(--scrim); }
+}
+
+.proto-confirm-body {
+  padding: var(--sp-24);
+}
+
+.proto-confirm-title {
+  margin: 0 0 var(--sp-8);
+  font-family: var(--font-display);
+  font-size: var(--fs-title-md);
+  line-height: var(--lh-tight);
+  display: flex;
+  align-items: center;
+  gap: var(--sp-8);
+}
+
+.proto-confirm-dialog-danger .proto-confirm-title .proto-inline-icon {
+  color: var(--state-rejected-border);
+}
+
+.proto-confirm-description {
+  font-size: var(--fs-body);
+  line-height: var(--lh-body);
+  color: var(--editorial-mid);
+  margin: 0;
+}
+
+.proto-confirm-description p {
+  margin: 0;
+}
+
+.proto-confirm-description p + p {
+  margin-top: var(--sp-12);
+}
+
+.proto-confirm-actions {
+  margin-top: var(--sp-24);
+  display: flex;
+  justify-content: flex-end;
+  gap: var(--sp-12);
+}
+
+.proto-confirm-btn {
+  font-family: var(--font-mono);
+  font-size: var(--fs-small);
+  padding: var(--sp-8) var(--sp-16);
+  border-radius: var(--radius-sm);
+  border: var(--bw-hair) solid var(--rule-bold);
+  cursor: pointer;
+  background: var(--bg);
+  color: var(--text);
+  transition:
+    background var(--transition-short),
+    border-color var(--transition-short),
+    color var(--transition-short);
+}
+
+.proto-confirm-btn:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.proto-confirm-btn:focus-visible {
+  outline: var(--outline-width) solid var(--accent-border);
+  outline-offset: var(--outline-offset);
+}
+
+.proto-confirm-btn-cancel:not(:disabled):hover {
+  background: var(--light);
+}
+
+.proto-confirm-btn-confirm-default {
+  background: var(--text);
+  color: var(--bg);
+  border-color: var(--text);
+}
+
+.proto-confirm-btn-confirm-default:not(:disabled):hover {
+  background: var(--editorial-dark);
+  border-color: var(--editorial-dark);
+}
+
+.proto-confirm-btn-confirm-danger {
+  background: var(--state-rejected-border);
+  color: var(--white);
+  border-color: var(--state-rejected-border);
+}
+
+.proto-confirm-btn-confirm-danger:not(:disabled):hover {
+  background: var(--state-rejected-fg);
+  border-color: var(--state-rejected-fg);
+}

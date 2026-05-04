@@ -1,0 +1,17 @@
+[
+  {
+    "id": "anchor-accept-eval-comparison-legal",
+    "title": "Comparing four prompt strategies for legal document review (2-week eval)",
+    "url": "synthetic",
+    "body_excerpt": "Over two weeks we tested four prompt strategies on a corpus of 1,200 contract clauses for substantive review. Strategy A (3-shot with reasoning trace) hit 91% precision; Strategy B (0-shot with structured output schema) hit 94%; Strategy C (RAG with BM25 + dense rerank over a clause-precedent index) hit 96% but failed catastrophically on novel contract types — all 7 missed clauses came from the IP-license category we hadn't seen at indexing time. Strategy D... [continues with full mechanism, prompt text, and a side-by-side table]",
+    "type": "case_study",
+    "sub_segment": "knowledge_workers",
+    "expected_verdict": "accept",
+    "expected_reason": "Quantified outcome over 2 weeks (evidence_quality 4–5), four named strategies with specifics (mechanism_specificity 4–5), failure mode disclosed (mechanism_specificity 5), useful for any retrieval-heavy workflow not just legal (cross-domain transfer; diversity_bonus 3).",
+    "expected_score_range": [55, 75],
+    "added": "2026-05-01",
+    "added_by": "xiaolai",
+    "rubric_version_at_addition": "0.2.3",
+    "audience_version_at_addition": "0.1.2"
+  }
+]

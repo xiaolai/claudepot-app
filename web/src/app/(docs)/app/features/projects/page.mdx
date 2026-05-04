@@ -1,0 +1,73 @@
+export const metadata = {
+  title: "Projects",
+  description:
+    "Per-project sessions in a master-detail pane. Rename safely, move, search transcripts.",
+};
+
+# Projects
+
+A Claude project is a directory on your machine that has a sanitised
+slug under `~/.claude/projects/`. The Projects tab is the master view
+over those — one row per project, each opening a detail pane with
+the project&rsquo;s sessions, files, and history.
+
+## What you can do
+
+**Open** &mdash; click into a project to see every session it has,
+filterable by date or content. Each session opens its full transcript
+inline, with copyable code blocks and a download-as-markdown button.
+
+**Rename** &mdash; safely rename the project&rsquo;s on-disk directory.
+Renaming a directory under `~/.claude/projects/` would normally break
+every session file that recorded the old path. ClauDepot rewrites
+every reference, journals the change, and lets you roll back if
+anything looks off. The rename runs through an op-progress modal that
+reports per-session progress in real time.
+
+**Move** &mdash; relocate a project to a different parent directory.
+Same machinery as rename: walks every transcript, rewrites the `cwd`
+field, journals the change.
+
+**Search** &mdash; cross-project search across every transcript. By
+content, by date, by participant. Matches are highlighted inline and
+deep-link to the session they came from.
+
+## Master-detail
+
+The pane on the left is the project list. The pane on the right is
+the selected project&rsquo;s detail — including the per-project
+Sessions sub-view, which mirrors the global Sessions index but scoped
+to one project.
+
+## Worktrees
+
+Git worktrees that share a Claude session history are detected and
+grouped under one project entry. The detail pane shows which
+worktrees a transcript visited.
+
+## Orphans
+
+Sessions whose project directory was deleted (or moved without
+ClauDepot) become *orphans* — the transcript exists but the project
+slug is dangling. The Projects tab surfaces orphans in a separate
+section so you can adopt them into a real project, move them, or
+trash them.
+
+CLI equivalents:
+
+```bash
+claudepot project list
+claudepot project rename <old> <new>
+claudepot project move <slug> <to>
+claudepot session search <query>
+claudepot session list-orphans
+claudepot session adopt-orphan <session-id> <project>
+```
+
+## Path handling
+
+Filesystem paths are first-class data. Every truncated path in the UI
+either has a tooltip with the full path, a copy button, or both.
+Windows paths (drive letters, UNC, verbatim `\\?\` prefix) are
+handled explicitly — see the
+[path handling rule](https://github.com/xiaolai/claudepot-app/blob/main/.claude/rules/paths.md).

@@ -1,0 +1,13 @@
+[
+  { "slug": "mcp", "name": "MCP", "tagline": "Model Context Protocol — agent-to-tool plumbing" },
+  { "slug": "agents", "name": "Agents", "tagline": "Planning, hand-offs, long-horizon failures" },
+  { "slug": "long-context", "name": "Long context", "tagline": "1M-token windows and what they enable" },
+  { "slug": "prompt-caching", "name": "Prompt caching", "tagline": "Cache discipline — cost compounds fast" },
+  { "slug": "claude-code", "name": "Claude Code", "tagline": "The CLI, plugins, and editor integrations" },
+  { "slug": "evals", "name": "Evals", "tagline": "Measuring what an agent actually does" },
+  { "slug": "infra", "name": "AI infra", "tagline": "Inference economics and rate-limit reality" },
+  { "slug": "release-watch", "name": "Release watch", "tagline": "Tool releases — CLIs, libs, MCP servers, plugins" },
+  { "slug": "model-release", "name": "Model release", "tagline": "Frontier model launches and benchmarks" },
+  { "slug": "voice", "name": "Voice", "tagline": "Speech-to-text, audio agents, hands-free coding" },
+  { "slug": "safety", "name": "Safety", "tagline": "Alignment, jailbreaks, agents going wrong" }
+]
