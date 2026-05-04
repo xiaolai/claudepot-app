@@ -15,6 +15,7 @@ import { pricingApi } from "./pricing";
 import { artifactUsageApi } from "./artifact-usage";
 import { artifactLifecycleApi } from "./artifact-lifecycle";
 import { memoryHealthApi } from "./memory-health";
+import { memoryApi } from "./memory";
 import { migrateApi } from "./migrate";
 import { routeApi } from "./route";
 import { automationApi } from "./automation";
@@ -37,6 +38,7 @@ export const api = {
   ...artifactUsageApi,
   ...artifactLifecycleApi,
   ...memoryHealthApi,
+  ...memoryApi,
   ...routeApi,
   ...automationApi,
   ...templateApi,

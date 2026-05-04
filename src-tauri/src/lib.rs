@@ -11,6 +11,7 @@ mod commands_config;
 mod commands_config_types;
 mod commands_desktop;
 mod commands_keys;
+mod commands_memory;
 mod commands_memory_health;
 mod commands_migrate;
 mod commands_notification;
@@ -40,6 +41,7 @@ mod dto_artifact_usage;
 mod dto_automations;
 mod dto_desktop;
 mod dto_keys;
+mod dto_memory;
 mod dto_migrate;
 mod dto_project;
 mod dto_project_repair;
@@ -53,6 +55,7 @@ mod dto_templates;
 mod dto_updates;
 mod dto_usage;
 mod live_activity_bridge;
+mod memory_watch;
 mod ops;
 mod preferences;
 mod service_status_watcher;
@@ -169,6 +172,54 @@ pub fn run() {
     // service-refactor pattern owns the runtime, so we hand the
     // cards index into the service's `enable_activity` accessor at
     // construction time.)
+
+    // Memory change-log database. Lives at
+    // `~/.claudepot/memory_changes.db`. Two-step fallback mirrors the
+    // notification-log pattern: try the canonical path; if that fails,
+    // try a temp-dir copy so the current process still has a working
+    // log; only if BOTH fail do we panic (extremely unlikely — both
+    // home and temp would have to be unwritable).
+    //
+    // Audit 2026-05 #2: every memory IPC command requires
+    // `MemoryLogState`, so this MUST always succeed. The previous
+    // `Option<Arc<MemoryLog>>` shape silently broke the entire pane on
+    // open failure because `.manage()` was gated on the option.
+    let memory_log: std::sync::Arc<claudepot_core::memory_log::MemoryLog> = {
+        let primary = claudepot_core::paths::claudepot_data_dir().join("memory_changes.db");
+        match claudepot_core::memory_log::MemoryLog::open(&primary) {
+            Ok(l) => std::sync::Arc::new(l),
+            Err(e) => {
+                tracing::warn!(
+                    target = "claudepot_tauri",
+                    error = %e,
+                    path = %primary.display(),
+                    "memory change-log open failed at canonical path; falling back to temp dir"
+                );
+                let fallback = std::env::temp_dir().join("claudepot-memory_changes.db");
+                std::sync::Arc::new(
+                    claudepot_core::memory_log::MemoryLog::open(&fallback)
+                        .unwrap_or_else(|e2| {
+                            // Both writable locations failed — this is
+                            // catastrophic for log persistence but the
+                            // app can still run. Panic with a clear
+                            // message so users see the underlying issue
+                            // rather than a generic "command failed".
+                            panic!(
+                                "memory change-log unrecoverable: primary={} ({e}); \
+                                 fallback={} ({e2})",
+                                primary.display(),
+                                fallback.display(),
+                            );
+                        }),
+                )
+            }
+        }
+    };
+
+    // Clone the memory-log handle for the setup closure so it can spawn
+    // the watcher; the original Arc stays available for `.manage()`.
+    let memory_log_for_watcher: std::sync::Arc<claudepot_core::memory_log::MemoryLog> =
+        memory_log.clone();
 
     // `mut` is only consumed by the debug-only plugin block below;
     // release builds don't touch it. Silence the release warning here.
@@ -392,6 +443,12 @@ pub fn run() {
             // `dev-docs/network-status.md`.
             service_status_watcher::spawn(app.handle().clone());
 
+            // Long-running fs-watcher for memory file changes. Watches
+            // `~/.claude/` recursively; records diffs to
+            // `~/.claudepot/memory_changes.db` and emits `memory:changed`
+            // for the MemoryPane.
+            memory_watch::spawn(app.handle().clone(), memory_log_for_watcher.clone());
+
             Ok(())
         })
         .manage(state::LoginState::default())
@@ -451,6 +508,10 @@ pub fn run() {
     if let Some(idx) = cards_index {
         builder = builder.manage(commands_activity_cards::ActivityCardsState { index: idx });
     }
+
+    // Memory change-log state. Always managed — `memory_log` is now
+    // unconditionally `Arc<MemoryLog>` per audit 2026-05 #2.
+    builder = builder.manage(commands_memory::MemoryLogState::new(memory_log.clone()));
 
     #[cfg(debug_assertions)]
     {
@@ -618,6 +679,12 @@ pub fn run() {
             commands_usage_local::pricing_tier_set,
             commands_usage_local::top_costly_prompts,
             commands_memory_health::memory_health_get,
+            commands_memory::memory_list_for_project,
+            commands_memory::memory_read_file,
+            commands_memory::memory_change_log,
+            commands_memory::auto_memory_state,
+            commands_memory::auto_memory_state_global,
+            commands_memory::auto_memory_set,
             config_watch::config_watch_start,
             config_watch::config_watch_stop,
             commands_migrate::migrate_inspect,

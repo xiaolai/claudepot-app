@@ -21,6 +21,8 @@ import { ProjectsList } from "./projects/ProjectsList";
 import { ProjectDetail } from "./projects/ProjectDetail";
 import { SessionDetail } from "./sessions/SessionDetail";
 import { ConfigSection } from "./ConfigSection";
+import { basename as projectBasename } from "./projects/format";
+import { MemoryPane } from "./projects/MemoryPane";
 import { SectionTab } from "./sessions/components/SectionTab";
 import { RenameProjectModal } from "./projects/RenameProjectModal";
 import { RemoveProjectModal } from "./projects/RemoveProjectModal";
@@ -70,7 +72,9 @@ export function ProjectsSection({
   // switch so each project starts on Sessions. Config sub-route is
   // local to this section — not persisted across app restarts, which
   // matches the "follow the user" model (no sticky drilldowns).
-  const [projectTab, setProjectTab] = useState<"sessions" | "config">("sessions");
+  const [projectTab, setProjectTab] = useState<
+    "sessions" | "config" | "memory"
+  >("sessions");
   const [configSubRoute, setConfigSubRoute] = useState<string | null>(null);
   // Master-detail state for the Sessions tab: which transcript file
   // the user opened. `null` = show the session list. Reset on project
@@ -490,12 +494,17 @@ export function ProjectsSection({
                         onOpenSession={(p) => setOpenedSessionPath(p)}
                       />
                     )
-                  ) : (
+                  ) : projectTab === "config" ? (
                     <ConfigSection
                       key={`config:${selectedPath}`}
                       subRoute={configSubRoute}
                       onSubRouteChange={setConfigSubRoute}
                       forcedAnchor={{ kind: "folder", path: selectedPath }}
+                    />
+                  ) : (
+                    <MemoryPane
+                      key={`memory:${selectedPath}`}
+                      projectRoot={selectedPath}
                     />
                   )}
                 </div>
@@ -540,8 +549,9 @@ export function ProjectsSection({
             setRenameTarget(null);
             try {
               const opId = await api.projectMoveStart(args);
-              const base = (p: string) =>
-                p.split("/").filter(Boolean).pop() ?? p;
+              // Cross-platform basename — Windows paths contain `\`
+              // separators (audit 2026-05 #12).
+              const base = (p: string) => projectBasename(p) || p;
               openOpModal({
                 opId,
                 title: `Renaming ${base(args.oldPath)} → ${base(args.newPath)}`,
@@ -806,12 +816,14 @@ function ProjectsListFilterBar({
   );
 }
 
+type ProjectTab = "sessions" | "config" | "memory";
+
 function ProjectTabBar({
   active,
   onChange,
 }: {
-  active: "sessions" | "config";
-  onChange: (next: "sessions" | "config") => void;
+  active: ProjectTab;
+  onChange: (next: ProjectTab) => void;
 }) {
   return (
     <div
@@ -839,6 +851,13 @@ function ProjectTabBar({
         label="Config"
         active={active === "config"}
         onSelect={() => onChange("config")}
+      />
+      <SectionTab
+        id="project-tab-memory"
+        panelId="project-panel-memory"
+        label="Memory"
+        active={active === "memory"}
+        onSelect={() => onChange("memory")}
       />
     </div>
   );

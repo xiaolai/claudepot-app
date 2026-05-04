@@ -118,6 +118,14 @@ arc-swap = "1"
 notify = "6"
 notify-debouncer-mini = "0.4"
 
+# Text diffing — used by `claudepot-core::memory_log` to compute
+# unified diffs between memory file revisions for the per-file change
+# log. Pure-Rust LCS implementation, no external bindings, ~150 KB
+# compile footprint. Chosen over `dissimilar` and a hand-rolled LCS
+# because `similar` has a stable unified-diff formatter and handles
+# CRLF / mixed line endings without surprising output.
+similar = "2"
+
 # ─── Desktop-identity crypto (Phase 2) ──────────────────────────────────
 # Chromium OSCrypt / Electron safeStorage envelope:
 #   macOS  — PBKDF2-HMAC-SHA1 (1003 iters) + AES-128-CBC (fixed-IV, PKCS#7)

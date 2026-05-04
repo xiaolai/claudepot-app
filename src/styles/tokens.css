@@ -272,7 +272,12 @@
   --pill-value-max-width:     160px;
   --session-filter-min-width: 140px;
   --responsive-breakpoint-sm: 600px;  /* mobile flip-to-column */
+  --responsive-breakpoint-md: 720px;  /* split panes flip to single-column */
   --sidebar-collapsed-max-h:  200px;  /* sidebar height in column mode */
+  --memory-filelist-min-width: 220px; /* MemoryPane left rail floor */
+  --memory-viewer-max-height: 380px;  /* MemoryPane right pane content cap */
+  --memory-when-min-width:     90px;  /* MemoryPane change-log "when" column */
+  --memory-openwith-min-width: 200px; /* MemoryPane "Open with…" menu width floor */
 
   /* Scroll-driven compact-header thresholds. Read in JS via
      `getComputedStyle` so the SessionDetail's auto-compact toggle

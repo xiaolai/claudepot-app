@@ -1,5 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
-import { Icon } from "../../components/Icon";
+import { CopyButton } from "../../components/CopyButton";
+import { IconButton } from "../../components/primitives/IconButton";
+import { NF } from "../../icons";
 import { SkeletonRows } from "../../components/primitives/Skeleton";
 import { api } from "../../api";
 import type { ProtectedPath } from "../../types";
@@ -172,7 +174,18 @@ export function ProtectedPathsPane({ pushToast }: Props) {
           )}
           {items.map((p) => (
             <li key={p.path} className="protected-row">
-              <code className="protected-path selectable">{p.path}</code>
+              {/* The path is the row's primary data and this list is
+                  its only home, so per .claude/rules/path-display.md
+                  state C we ship both the disclosure tooltip and an
+                  inline copy affordance. CSS truncates head-first
+                  via direction: rtl. */}
+              <code
+                className="protected-path selectable"
+                title={p.path}
+              >
+                {p.path}
+              </code>
+              <CopyButton text={p.path} />
               <span
                 className={`status-badge status-badge-${
                   p.source === "default" ? "ok" : "warn"
@@ -185,16 +198,14 @@ export function ProtectedPathsPane({ pushToast }: Props) {
               >
                 {p.source}
               </span>
-              <button
-                type="button"
-                className="btn ghost icon-only sm"
+              <IconButton
+                glyph={NF.x}
+                size="sm"
                 onClick={() => handleRemove(p.path)}
                 disabled={busy}
                 aria-label={`Remove ${p.path}`}
                 title={`Remove ${p.path}`}
-              >
-                <Icon name="x" size={12} />
-              </button>
+              />
             </li>
           ))}
         </ul>

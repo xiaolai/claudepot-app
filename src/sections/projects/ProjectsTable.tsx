@@ -4,7 +4,7 @@ import { IconButton } from "../../components/primitives/IconButton";
 import { Tag } from "../../components/primitives/Tag";
 import { NF } from "../../icons";
 import type { ProjectInfo } from "../../types";
-import { formatRelativeTime, formatSize } from "./format";
+import { basename, formatRelativeTime, formatSize } from "./format";
 import { classifyProject, type ProjectStatus } from "./projectStatus";
 
 export type ProjectFilter = "all" | "orphan" | "unreachable" | "empty";
@@ -26,9 +26,10 @@ const COLS =
   "var(--sp-20) minmax(0,1.6fr) minmax(0,0.9fr) minmax(0,0.9fr) minmax(0,0.8fr) minmax(0,1fr) var(--sp-24)";
 
 function projectBasename(p: ProjectInfo): string {
-  return (
-    p.original_path.split("/").filter(Boolean).pop() ?? p.sanitized_name
-  ).toLowerCase();
+  // Cross-platform basename — pre-fix this hardcoded `/` and rendered
+  // the whole Windows path as the basename (audit 2026-05 #11).
+  const tail = basename(p.original_path);
+  return (tail || p.sanitized_name).toLowerCase();
 }
 
 function compareProjects(a: ProjectInfo, b: ProjectInfo, key: SortKey): number {
@@ -204,8 +205,8 @@ function ProjectRow({
 }) {
   const [hover, setHover] = useState(false);
   const status = classifyProject(p);
-  const name =
-    p.original_path.split("/").filter(Boolean).pop() ?? p.sanitized_name;
+  // Cross-platform basename — see projectBasename above (audit #11).
+  const name = basename(p.original_path) || p.sanitized_name;
 
   return (
     <li
@@ -274,6 +275,11 @@ function ProjectRow({
           </span>
         </div>
         <div
+          // Truncated path subtext — full string disclosed via tooltip
+          // here; the canonical copy site is `ProjectDetail` (header
+          // path with `<CopyButton>`), which the row click opens.
+          // Per .claude/rules/path-display.md state B: no inline copy.
+          title={p.original_path}
           style={{
             marginTop: "var(--sp-2)",
             color: "var(--fg-faint)",
