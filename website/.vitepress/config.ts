@@ -1,7 +1,12 @@
 import { defineConfig } from 'vitepress'
 
 export default defineConfig({
-  title: 'Claudepot',
+  // `title` lands in <title> and OG tags as a plain string. The
+  // colored "Clau" + "Depot" rendering is applied in the navbar
+  // (via the BrandMark slot — see .vitepress/theme/index.ts), in
+  // the home hero (via gradient on `--vp-home-hero-name-*`), and
+  // in the footer copyright (via inline HTML below).
+  title: 'ClauDepot',
   description: 'A control panel for Claude Code and Claude Desktop.',
   cleanUrls: true,
   lastUpdated: true,
@@ -12,7 +17,10 @@ export default defineConfig({
   ],
   themeConfig: {
     logo: '/logo.svg',
-    siteTitle: 'Claudepot',
+    // Hide the default text title so the BrandMark slot owns the
+    // navbar brand. The slot is wired in .vitepress/theme/index.ts
+    // (`nav-bar-title-before`).
+    siteTitle: false,
 
     nav: [
       { text: 'Guide', link: '/guide/what-and-why', activeMatch: '/guide/' },
@@ -79,7 +87,11 @@ export default defineConfig({
 
     footer: {
       message: 'Released under the ISC License.',
-      copyright: 'Claudepot — a control panel for Claude Code and Claude Desktop.',
+      // VitePress renders `copyright` via v-html, so the brand-mark
+      // spans pick up the same `.brand-clau` / `.brand-depot` rules
+      // as the BrandMark Vue component.
+      copyright:
+        '<span class="brand-mark"><span class="brand-clau">Clau</span><span class="brand-depot">Depot</span></span> — a control panel for Claude Code and Claude Desktop.',
     },
 
     search: {
