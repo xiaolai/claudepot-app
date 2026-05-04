@@ -40,3 +40,4 @@ focus-ring|shadow|font|dur-|ease-)[A-Za-z0-9_-]*\s*:" src/styles/components/  # 
 @import "./styles/components/projects.css";
 @import "./styles/components/projects-orphans.css";
 @import "./styles/components/markdown.css";
+@import "./styles/components/memory.css";

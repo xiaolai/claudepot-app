@@ -73,7 +73,16 @@ export function WindowChrome({
           color="var(--fg-faint)"
           style={{ transform: "translateY(var(--glyph-optical-nudge))" }}
         />
-        <span style={{ color: "var(--fg)", fontWeight: 500 }}>{cwd}</span>
+        <span
+          // Chrome breadcrumb — long cwds can clip in narrow windows.
+          // Title carries the full path so hover always discloses it;
+          // canonical copy site is `ProjectDetail` per
+          // .claude/rules/path-display.md state B.
+          title={cwd}
+          style={{ color: "var(--fg)", fontWeight: 500 }}
+        >
+          {cwd}
+        </span>
       </div>
 
       <div style={{ flex: 1 }} />

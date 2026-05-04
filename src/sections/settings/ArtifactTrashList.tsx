@@ -10,6 +10,7 @@
 import { useCallback, useState } from "react";
 import { api } from "../../api";
 import { Button } from "../../components/primitives/Button";
+import { IconButton } from "../../components/primitives/IconButton";
 import { ConfirmDialog } from "../../components/ConfirmDialog";
 import { NF } from "../../icons";
 import { formatRelative } from "../../lib/formatRelative";
@@ -195,15 +196,14 @@ function TrashRow({
         <Td align="right">
           <span style={{ display: "inline-flex", gap: "var(--sp-6)" }}>
             {row.state === "healthy" && (
-              <Button
-                variant="ghost"
+              <IconButton
                 glyph={NF.refresh}
                 onClick={onRestore}
                 disabled={busy}
                 size="sm"
-              >
-                Restore
-              </Button>
+                title="Restore"
+                aria-label="Restore"
+              />
             )}
             {(row.state === "missing_manifest" ||
               row.state === "abandoned_staging") && (
@@ -217,16 +217,14 @@ function TrashRow({
                 Recover…
               </Button>
             )}
-            <Button
-              variant="ghost"
-              danger
+            <IconButton
               glyph={NF.trash}
               onClick={() => setConfirmForget(true)}
               disabled={busy}
               size="sm"
-            >
-              Forget
-            </Button>
+              title="Forget — remove from disk, no further undo"
+              aria-label="Forget — remove from disk, no further undo"
+            />
           </span>
         </Td>
       </Tr>

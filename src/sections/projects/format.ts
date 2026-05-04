@@ -33,3 +33,16 @@ export function formatRelativeTime(ms: number): string {
   if (diff < WEEK) return `${Math.floor(diff / DAY)}d ago`;
   return `${Math.floor(diff / WEEK)}w ago`;
 }
+
+/**
+ * Cross-platform basename. Splits on both `/` and `\` so a Windows path
+ * (`C:\Users\joker\proj`) renders the right tail. The previous
+ * `split("/").pop()` returned the whole string on Windows-shaped paths
+ * (audit 2026-05 #11/#12). Falls back to the input when no separator
+ * is present.
+ */
+export function basename(absPath: string): string {
+  // Handles `/`, `\`, and mixed separators (msys/IntelliJ emit C:/x/y).
+  const parts = absPath.split(/[\\/]/).filter(Boolean);
+  return parts.length > 0 ? parts[parts.length - 1] : absPath;
+}

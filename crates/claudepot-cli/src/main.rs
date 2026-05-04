@@ -165,6 +165,18 @@ enum Commands {
         #[command(subcommand)]
         action: ActivityAction,
     },
+    /// Per-project memory artifacts: list, view, and inspect the
+    /// change log for `CLAUDE.md` + `~/.claude/projects/<slug>/memory/*.md`.
+    Memory {
+        #[command(subcommand)]
+        action: MemoryAction,
+    },
+    /// Read or modify CC settings that Claudepot exposes as toggles
+    /// (currently: auto-memory).
+    Settings {
+        #[command(subcommand)]
+        action: SettingsAction,
+    },
     /// Health check and diagnostics
     Doctor,
     /// Ground-truth authentication status.
@@ -455,6 +467,81 @@ enum ActivityAction {
     /// activity index. Idempotent — re-running adds zero rows when
     /// the source hasn't changed.
     Reindex,
+}
+
+#[derive(Subcommand)]
+enum MemoryAction {
+    /// List memory files for a project (defaults to cwd).
+    List {
+        /// Project root path. Defaults to the current directory.
+        #[arg(long)]
+        project: Option<String>,
+    },
+    /// Print a memory file's content. FILE may be an absolute path
+    /// or a basename inside the project's memory dir or CLAUDE.md
+    /// candidate locations.
+    View {
+        file: String,
+        #[arg(long)]
+        project: Option<String>,
+    },
+    /// Show recent change-log entries.
+    Log {
+        #[arg(long)]
+        project: Option<String>,
+        /// Limit to one file (absolute path or memory-dir basename).
+        #[arg(long)]
+        file: Option<String>,
+        /// Maximum rows. Defaults to 50, capped at 10 000.
+        #[arg(long)]
+        limit: Option<usize>,
+        /// Print the unified diff for each entry.
+        #[arg(long)]
+        show_diff: bool,
+    },
+}
+
+#[derive(Subcommand)]
+enum SettingsAction {
+    /// Inspect or change CC's `autoMemoryEnabled` setting.
+    AutoMemory {
+        #[command(subcommand)]
+        action: AutoMemoryAction,
+    },
+}
+
+#[derive(Subcommand)]
+enum AutoMemoryAction {
+    /// Show the effective state and per-source breakdown.
+    Status {
+        #[arg(long)]
+        project: Option<String>,
+    },
+    /// Set `autoMemoryEnabled = true`. Without `--project`, writes
+    /// to `~/.claude/settings.json` (global). With `--project`,
+    /// writes to `<PROJECT>/.claude/settings.local.json`.
+    Enable {
+        #[arg(long)]
+        project: Option<String>,
+        /// Apply at project scope (writes to `.claude/settings.local.json`).
+        #[arg(long = "project-scope")]
+        project_scope: bool,
+    },
+    /// Set `autoMemoryEnabled = false`. Same scope rules as `enable`.
+    Disable {
+        #[arg(long)]
+        project: Option<String>,
+        #[arg(long = "project-scope")]
+        project_scope: bool,
+    },
+    /// Remove the `autoMemoryEnabled` key from the relevant settings
+    /// file so the next-higher layer takes over the decision.
+    Clear {
+        #[arg(long)]
+        project: Option<String>,
+        #[arg(long = "project-scope")]
+        project_scope: bool,
+    },
 }
 
 #[derive(Subcommand)]
@@ -1031,6 +1118,69 @@ async fn main() -> Result<()> {
                 limit,
             )?,
             ActivityAction::Reindex => commands::activity::reindex(&ctx)?,
+        },
+        Commands::Memory { action } => match action {
+            MemoryAction::List { project } => {
+                commands::memory::list(&ctx, project.as_deref()).await?
+            }
+            MemoryAction::View { file, project } => {
+                commands::memory::view(&ctx, &file, project.as_deref()).await?
+            }
+            MemoryAction::Log {
+                project,
+                file,
+                limit,
+                show_diff,
+            } => {
+                commands::memory::log(
+                    &ctx,
+                    project.as_deref(),
+                    file.as_deref(),
+                    limit,
+                    show_diff,
+                )
+                .await?
+            }
+        },
+        Commands::Settings { action } => match action {
+            SettingsAction::AutoMemory { action } => match action {
+                AutoMemoryAction::Status { project } => {
+                    commands::settings::auto_memory_status(&ctx, project.as_deref()).await?
+                }
+                AutoMemoryAction::Enable {
+                    project,
+                    project_scope,
+                } => {
+                    commands::settings::auto_memory_enable(
+                        &ctx,
+                        project.as_deref(),
+                        project_scope || project.is_some(),
+                    )
+                    .await?
+                }
+                AutoMemoryAction::Disable {
+                    project,
+                    project_scope,
+                } => {
+                    commands::settings::auto_memory_disable(
+                        &ctx,
+                        project.as_deref(),
+                        project_scope || project.is_some(),
+                    )
+                    .await?
+                }
+                AutoMemoryAction::Clear {
+                    project,
+                    project_scope,
+                } => {
+                    commands::settings::auto_memory_clear(
+                        &ctx,
+                        project.as_deref(),
+                        project_scope || project.is_some(),
+                    )
+                    .await?
+                }
+            },
         },
         Commands::Session { action } => match action {
             SessionAction::ListOrphans => commands::session::list_orphans(&ctx)?,
