@@ -60,21 +60,32 @@ pub fn install_shim(
     Ok(shim_path)
 }
 
-/// Resolve the absolute path of the binary the automation should
-/// invoke. For first-party, walks `PATH` for `claude` (or
-/// `claude.exe` on Windows). For routes, returns
-/// `<claudepot_data_dir>/bin/<wrapper-name>`.
+/// Resolve what the shim should put in the `claude`-invocation slot.
+///
+/// **First-party:** returns the bare name (`claude` or `claude.exe`).
+/// The shim renders that name into the `claude -p …` line and the
+/// shim's own `PATH` (set from [`default_path_segments`] in
+/// `super::env`) resolves it at run time. We deliberately do NOT
+/// walk the caller's `PATH` here — register-time resolution would
+/// (a) consult the wrong `PATH` when the caller is a Dock-launched
+/// macOS GUI (which inherits only `path_helper`'s defaults, not the
+/// user's shell `PATH`), and (b) bake an absolute path that goes
+/// stale across `claude doctor` upgrades. Resolving by name at run
+/// time inside the shim's controlled `PATH` sidesteps both.
+///
+/// **Route:** still resolves to an absolute path. Route wrappers
+/// live under `<claudepot_data_dir>/bin/<name>`, which is appended
+/// last in [`default_path_segments`], but spelling them absolute
+/// makes shim debugging easier and locks identity to the wrapper
+/// we just wrote.
+///
+/// [`default_path_segments`]: super::env::default_path_segments
 pub fn resolve_binary(
     automation: &Automation,
     route_lookup: &dyn Fn(&uuid::Uuid) -> Option<String>,
 ) -> Result<String, AutomationError> {
     match &automation.binary {
-        AutomationBinary::FirstParty => which_claude().ok_or_else(|| {
-            AutomationError::InvalidPath(
-                "claude".into(),
-                "first-party `claude` binary not found on PATH",
-            )
-        }),
+        AutomationBinary::FirstParty => Ok(claude_exe_name().to_string()),
         AutomationBinary::Route { route_id } => {
             let wrapper_name = route_lookup(route_id)
                 .ok_or_else(|| AutomationError::NotFound(format!("route {route_id}")))?;
@@ -90,20 +101,12 @@ pub fn resolve_binary(
     }
 }
 
-fn which_claude() -> Option<String> {
-    let exe = if cfg!(target_os = "windows") {
+const fn claude_exe_name() -> &'static str {
+    if cfg!(target_os = "windows") {
         "claude.exe"
     } else {
         "claude"
-    };
-    let path_var = std::env::var_os("PATH")?;
-    for dir in std::env::split_paths(&path_var) {
-        let candidate = dir.join(exe);
-        if candidate.is_file() {
-            return Some(candidate.display().to_string());
-        }
     }
-    None
 }
 
 /// Resolve the path to the `claudepot` CLI binary the helper shim
@@ -267,5 +270,44 @@ mod tests {
         let lookup = |_id: &uuid::Uuid| None;
         let res = resolve_binary(&a, &lookup);
         assert!(matches!(res, Err(AutomationError::NotFound(_))));
+    }
+
+    #[test]
+    fn resolve_binary_first_party_returns_bare_name() {
+        // The contract: FirstParty returns just the executable name
+        // so the shim's runtime PATH (not the GUI's) resolves it.
+        // Stable across `claude doctor` upgrades; correct under
+        // Dock-launched Tauri where shell PATH is unavailable.
+        let a = auto();
+        let lookup = |_id: &uuid::Uuid| None;
+        let res = resolve_binary(&a, &lookup).unwrap();
+        if cfg!(target_os = "windows") {
+            assert_eq!(res, "claude.exe");
+        } else {
+            assert_eq!(res, "claude");
+        }
+        // Must not be an absolute path — that would re-introduce
+        // the GUI-PATH bug and the upgrade-staleness bug.
+        assert!(
+            !std::path::Path::new(&res).is_absolute(),
+            "FirstParty resolution must be a bare name, got {res}"
+        );
+    }
+
+    #[test]
+    fn resolve_binary_first_party_independent_of_caller_path() {
+        // Even with PATH cleared (the macOS-Dock-GUI shape),
+        // FirstParty still resolves — because we don't consult PATH.
+        let _guard = ENV_LOCK.lock();
+        let prior = std::env::var_os("PATH");
+        std::env::remove_var("PATH");
+        let a = auto();
+        let lookup = |_id: &uuid::Uuid| None;
+        let res = resolve_binary(&a, &lookup);
+        if let Some(p) = prior {
+            std::env::set_var("PATH", p);
+        }
+        let resolved = res.expect("FirstParty must not depend on caller PATH");
+        assert!(resolved == "claude" || resolved == "claude.exe");
     }
 }
