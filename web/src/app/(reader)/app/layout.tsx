@@ -1,4 +1,5 @@
 import { DocsSidebar } from "@/components/docs/DocsSidebar";
+import "@/styles/docs.css";
 
 export default function AppDocsLayout({
   children,
