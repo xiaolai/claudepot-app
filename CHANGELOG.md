@@ -6,6 +6,66 @@ Versioning scheme:
 - `0.1.x` — beta
 - `1.0.0+` — stable
 
+## 0.1.4 — beta (unreleased)
+
+### Added
+
+- **Projects → Memory pane.** A third sub-tab next to Sessions and
+  Config. For the project you have open: lists every memory artifact
+  CC loads (project `CLAUDE.md`, `.claude/CLAUDE.md`, the auto-memory
+  index + topic files, KAIROS daily logs, and the global
+  `~/.claude/CLAUDE.md`); renders markdown content with a
+  rendered/raw toggle; opens any file in your editor of choice via
+  the existing "Open with…" detector; surfaces a per-file change-log
+  timeline with collapsible unified diffs; toggles auto-memory at
+  per-project scope (writes `.claude/settings.local.json`).
+- **Settings → General · Auto-memory toggle.** Global on/off for
+  CC's `autoMemoryEnabled` setting (writes `~/.claude/settings.json`),
+  with read-only display when an env var is overriding.
+- **CLI verbs.** `claudepot memory list|view|log [--show-diff]` and
+  `claudepot settings auto-memory status|enable|disable|clear`.
+- **`.claude/rules/icon-buttons.md` and `.claude/rules/path-display.md`.**
+  Two project rules that codify when to use icon-only buttons (3-tier
+  system) and how truncatable paths must be disclosed (tooltip
+  mandatory; copy default unless covered by a canonical detail
+  surface).
+
+### Changed
+
+- Long-running fs-watcher backs the change-log: 250 ms debounced,
+  recursive on `~/.claude/`, plus per-file watches on every
+  registered project's CLAUDE.md candidates. Picks up newly-added
+  projects on a 30 s rescan; recovers original paths for lossy
+  (>= 200-char) slugs via session.jsonl `cwd`.
+- `ArtifactTrashList`, `DisabledArtifactList`, `ProtectedPathsPane`
+  per-row Restore/Forget/Re-enable/Trash/Remove actions converted
+  to `IconButton` with tooltips per the icon-button rule.
+- `ProjectsTable` row + `WindowChrome` breadcrumb now disclose full
+  paths via tooltip per the path-display rule.
+- Cross-platform basename helper in `projects/format.ts` — Windows
+  paths in the Projects table and rename progress now display
+  correctly.
+- `Toggle` primitive in `SettingsSection` honors `disabled`
+  (regression: previously accepted the prop but ignored clicks).
+
+### Fixed
+
+- **Symlink escape in `read_memory_content`.** The IPC now
+  canonicalizes the target path before the allowlist check, so a
+  symlink inside the auto-memory dir whose target is outside the
+  scope is rejected before `std::fs::read` follows the link.
+- **Memory IPC dies when `MemoryLog::open` fails.** Two-step
+  fallback (canonical → temp dir) so the change-log state is always
+  managed; the pane no longer goes dark on a transient open error.
+- **Global toggle conflated user and project settings.** Settings →
+  General now uses a dedicated global-only resolver instead of
+  routing through the per-project chain (which would read
+  `~/.claude/settings.json` twice as both user- and
+  project-settings).
+- **First post-restart edit logged with no diff.** Bootstrap now
+  re-reads current bytes so the watcher has a real baseline for
+  the first event after a Claudepot restart.
+
 ## 0.1.3 — beta (2026-05-03)
 
 Patch release adding a network-status indicator. One small dot in the
