@@ -139,22 +139,35 @@ export function AddAccountModal({
     }
   };
 
+  const handleCancelBrowserLogin = async () => {
+    // Fire-and-forget: the backend's terminal error event is what
+    // actually drives the modal back to its terminal state. The
+    // command treats "nothing running" as a no-op, so calling it
+    // during the brief pre-handoff window is safe.
+    try {
+      await api.accountLoginCancel();
+    } catch {
+      // Lock-poisoning corner case — not worth a toast when the user
+      // is trying to back out of the flow.
+    }
+  };
+
   const handleBrowserLogin = async () => {
     setBrowserLoggingIn(true);
     try {
       // Async start: returns op_id immediately; phase events flow on
       // `op-progress::<op_id>`. The shell `OperationProgressModal`
-      // takes over the user-visible surface.
+      // takes over the user-visible surface and carries the Cancel
+      // button via `onCancel`.
       const opId = await api.accountRegisterFromBrowserStart();
-      // Hand off the AddAccountModal — the OperationProgressModal owns
-      // the in-flight surface from here. The parent shell will pick up
-      // the new account on the next refresh once `onComplete` fires.
       openOpModal({
         opId,
         title: "Add account: browser login",
         phases: LOGIN_PHASES,
         fetchStatus: api.accountLoginStatus,
         renderResult: renderLoginResult,
+        onCancel: handleCancelBrowserLogin,
+        cancelLabel: "Cancel login",
         onComplete: () => {
           // We don't know the new email yet (the synchronous return
           // value is gone); the parent's refresh will pick it up. Pass
@@ -182,27 +195,12 @@ export function AddAccountModal({
     }
   };
 
-  const handleCancelBrowserLogin = async () => {
-    // Fire-and-forget: the command never errors, and the awaited
-    // `handleBrowserLogin` promise is what actually surfaces the
-    // cancellation result back to state.
-    try {
-      await api.accountLoginCancel();
-    } catch {
-      // The backend treats "nothing running" as a no-op. Anything
-      // else is the lock-poisoning corner case — not worth a toast
-      // when the user is trying to back out of the flow.
-    }
-  };
-
   /**
    * Wrap every dismiss route (Esc / scrim / header-X / footer Close)
-   * so we always cancel the backend before the modal disappears.
-   * Without this, a close while `browserLoggingIn` leaves the
-   * `claude auth login` subprocess running invisibly in the
-   * background, which is exactly the original bug this feature was
-   * meant to fix. Cancel is fire-and-forget so dismissal is still
-   * instant from the user's perspective.
+   * so we always cancel the backend during the brief pre-handoff
+   * window where `accountRegisterFromBrowserStart` hasn't returned
+   * yet. Once the handoff completes, the OperationProgressModal owns
+   * cancellation and this path is moot.
    */
   const handleRequestClose = () => {
     if (browserLoggingIn) {
@@ -316,56 +314,25 @@ export function AddAccountModal({
 
           {/* Action 2 — Browser login. Wired through
               account_register_from_browser; the core service owns the
-              subprocess so the refresh token never enters JS. While the
-              flow is waiting for the browser, the card disables itself
-              and a prominent Cancel appears in the footer (plus a
-              secondary Cancel inline for discoverability). */}
+              subprocess so the refresh token never enters JS. The
+              `browserLoggingIn` state covers only the brief window
+              between Log-in click and `accountRegisterFromBrowserStart`
+              returning — once the OperationProgressModal takes over,
+              this modal closes and Cancel lives there. */}
           <ActionCard
             glyph={NF.user}
             title="Log in with a new account…"
             subtitle={
               browserLoggingIn
-                ? "Waiting for you to finish in the browser…"
+                ? "Opening browser…"
                 : "Open a browser, complete OAuth, then register the result as a fresh account."
             }
             command="account_register_from_browser"
             disabled={browserLoggingIn || importing}
             onClick={handleBrowserLogin}
-            cta={browserLoggingIn ? "Waiting…" : "Log in"}
+            cta={browserLoggingIn ? "Opening…" : "Log in"}
             ctaGlyph={browserLoggingIn ? NF.clock : NF.arrowUpR}
-          >
-            {browserLoggingIn && (
-              <div
-                style={{
-                  marginTop: "var(--sp-10)",
-                  display: "flex",
-                  alignItems: "center",
-                  justifyContent: "space-between",
-                  gap: "var(--sp-10)",
-                  padding: "var(--sp-8) var(--sp-10)",
-                  borderRadius: "var(--r-2)",
-                  background: "var(--bg-sunken)",
-                  border: "var(--bw-hair) solid var(--line)",
-                  fontSize: "var(--fs-xs)",
-                  color: "var(--fg-muted)",
-                }}
-                aria-live="polite"
-              >
-                <span>
-                  Finish sign-in in your browser, or stop waiting if you
-                  already cancelled there.
-                </span>
-                <Button
-                  variant="ghost"
-                  glyph={NF.x}
-                  onClick={handleCancelBrowserLogin}
-                  aria-label="Cancel browser login"
-                >
-                  Cancel login
-                </Button>
-              </div>
-            )}
-          </ActionCard>
+          />
 
           {/* Tier 3-A — Desktop session import. Decrypts live
               oauth:tokenCache via the authoritative /profile path
@@ -384,19 +351,9 @@ export function AddAccountModal({
         </ModalBody>
 
         <ModalFooter>
-          {browserLoggingIn ? (
-            <Button
-              variant="solid"
-              glyph={NF.x}
-              onClick={handleCancelBrowserLogin}
-            >
-              Cancel login
-            </Button>
-          ) : (
-            <Button variant="ghost" onClick={handleRequestClose}>
-              Close
-            </Button>
-          )}
+          <Button variant="ghost" onClick={handleRequestClose}>
+            Close
+          </Button>
         </ModalFooter>
       </div>
     </Modal>

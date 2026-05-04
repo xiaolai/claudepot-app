@@ -81,23 +81,19 @@ export function useActions({ pushToast, refresh, withBusy, openOpModal }: Deps) 
         // Kick off the async start. The IPC worker returns immediately
         // with an op_id; phase events flow on `op-progress::<op_id>`.
         const opId = await api.accountLoginStart(a.uuid);
-        // The OperationProgressModal owns the user-visible surface.
-        // We still drop a discoverable "opening browser" toast so users
-        // glancing at the toast region see what's happening; the toast
-        // carries the Cancel undo affordance for parity with the
-        // legacy synchronous flow.
-        pushToast(
-          "error",
-          `Opening browser — sign in as ${a.email}…`,
-          cancelLogin,
-          { undoLabel: "Cancel" },
-        );
+        // The OperationProgressModal owns the user-visible surface and
+        // carries the canonical Cancel button via `onCancel`. A short
+        // info toast tells the user the browser is opening so the
+        // attention shift to the browser tab is expected.
+        pushToast("info", `Opening browser — sign in as ${a.email}…`);
         openOpModal({
           opId,
           title: `Re-login: ${a.email}`,
           phases: LOGIN_PHASES,
           fetchStatus: api.accountLoginStatus,
           renderResult: renderLoginResult,
+          onCancel: cancelLogin,
+          cancelLabel: "Cancel login",
           onComplete: () => {
             pushToast("info", `Signed in as ${a.email}`);
             void refresh();

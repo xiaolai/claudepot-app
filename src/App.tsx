@@ -1251,6 +1251,8 @@ function AppShell() {
               closeOp();
               setSection("projects", "repair");
             }}
+            onCancel={activeOp.onCancel}
+            cancelLabel={activeOp.cancelLabel}
           />
         </Suspense>
       )}

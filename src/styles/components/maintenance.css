@@ -199,4 +199,5 @@
 }
 .op-terminal.ok { background: var(--ok-weak); color: var(--ok); }
 .op-terminal.bad { background: var(--bad-weak); color: var(--bad); }
+.op-terminal.info { background: var(--info-weak); color: var(--info); }
 
