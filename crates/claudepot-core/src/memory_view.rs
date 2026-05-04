@@ -528,8 +528,7 @@ fn recover_project_root_from_slug_dir(slug_dir: &Path) -> Option<PathBuf> {
     // Lossy slug: walk the slug dir's session.jsonl files for an
     // authoritative `cwd`. If the project has ever been opened in CC,
     // at least one session file should carry it.
-    crate::project_helpers::recover_cwd_from_sessions_pub(slug_dir)
-        .map(PathBuf::from)
+    crate::project_helpers::recover_cwd_from_sessions_pub(slug_dir).map(PathBuf::from)
 }
 
 #[cfg(test)]
@@ -588,10 +587,7 @@ mod tests {
     #[test]
     fn classify_picks_kairos_for_logs() {
         assert_eq!(
-            classify_auto_memory_file(
-                Path::new("/m"),
-                Path::new("/m/logs/2026/05/2026-05-04.md")
-            ),
+            classify_auto_memory_file(Path::new("/m"), Path::new("/m/logs/2026/05/2026-05-04.md")),
             Some(MemoryFileRole::KairosLog)
         );
     }
@@ -675,9 +671,7 @@ mod tests {
         fs::write(anchor.auto_memory_dir.join("user.md"), "topic").unwrap();
         fs::create_dir_all(anchor.auto_memory_dir.join("logs/2026/05")).unwrap();
         fs::write(
-            anchor
-                .auto_memory_dir
-                .join("logs/2026/05/2026-05-04.md"),
+            anchor.auto_memory_dir.join("logs/2026/05/2026-05-04.md"),
             "log",
         )
         .unwrap();
@@ -855,11 +849,10 @@ mod tests {
         )
         .is_none());
         // .md file outside the memory dir.
-        assert!(classify_path_for_watcher(
-            &cfg.join("projects").join("foo").join("notes.md"),
-            &[]
-        )
-        .is_none());
+        assert!(
+            classify_path_for_watcher(&cfg.join("projects").join("foo").join("notes.md"), &[])
+                .is_none()
+        );
         std::env::remove_var("CLAUDE_CONFIG_DIR");
     }
 
@@ -917,15 +910,13 @@ mod tests {
         let claude_md = project.join("CLAUDE.md");
         let dot_claude_md = project.join(".claude").join("CLAUDE.md");
 
-        let (role, slug) =
-            classify_path_for_watcher(&claude_md, std::slice::from_ref(&project))
-                .expect("classify project CLAUDE.md");
+        let (role, slug) = classify_path_for_watcher(&claude_md, std::slice::from_ref(&project))
+            .expect("classify project CLAUDE.md");
         assert_eq!(role, MemoryFileRole::ClaudeMdProject);
         assert!(slug.is_some());
 
-        let (role, _) =
-            classify_path_for_watcher(&dot_claude_md, std::slice::from_ref(&project))
-                .expect("classify .claude/CLAUDE.md");
+        let (role, _) = classify_path_for_watcher(&dot_claude_md, std::slice::from_ref(&project))
+            .expect("classify .claude/CLAUDE.md");
         assert_eq!(role, MemoryFileRole::ClaudeMdProjectLocal);
 
         // Without project_roots, the project CLAUDE.md is invisible —
@@ -979,12 +970,15 @@ mod tests {
         fs::create_dir(repo.join(".git")).unwrap();
 
         let anchor = ProjectMemoryAnchor::for_project(&nested);
-        // Canonicalize for comparison since `find_canonical_git_root`
-        // canonicalizes; tempdir itself may carry symlinks (e.g.
-        // /var/folders → /private/var/folders on macOS).
-        assert_eq!(
-            anchor.auto_memory_anchor,
-            repo.canonicalize().unwrap_or(repo.clone())
-        );
+        // `find_canonical_git_root` canonicalizes AND strips the
+        // Windows verbatim `\\?\` prefix via `simplify_windows_path`
+        // (see .claude/rules/paths.md). The expected value must do
+        // the same, otherwise on Windows we'd compare
+        // `C:\…\repo` against `\\?\C:\…\repo`. macOS still needs
+        // the canonicalize step because tempdir paths route through
+        // `/var/folders → /private/var/folders` symlinks.
+        let expected_canon = repo.canonicalize().unwrap_or_else(|_| repo.clone());
+        let expected = PathBuf::from(simplify_windows_path(&expected_canon.to_string_lossy()));
+        assert_eq!(anchor.auto_memory_anchor, expected);
     }
 }
