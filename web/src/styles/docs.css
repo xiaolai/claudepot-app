@@ -1,9 +1,12 @@
 /* /app/* docs surface, nested inside the reader group's chrome.
  * The reader's PrototypeNav supplies the masthead; this file
- * only adds the docs sidebar + article layout below it. Uses
- * web/'s `theme.css` tokens directly. Heading + body styles
- * mirror the reader's editorial register (Playfair Display +
- * Source Serif 4) so /app/* feels like the same publication. */
+ * only adds the docs sidebar + article layout below it.
+ *
+ * theme.css applies a global box-sizing/margin/padding reset on *,
+ * so EVERY block element (h*, p, ul, ol, li, pre, table, hr,
+ * blockquote, …) starts at zero. The rules below restore editorial
+ * vertical rhythm under .docs-main only — keeping the reader's
+ * other surfaces unaffected. */
 
 .docs-shell {
   display: grid;
@@ -64,42 +67,72 @@
 .docs-main {
   min-width: 0;
   max-width: var(--bp-md);
+  font-size: var(--fs-body);
+  line-height: var(--lh-body);
+  color: var(--text);
+}
+
+/* Default vertical rhythm: every direct child gets a top margin
+ * except the first. Specific elements override below. */
+.docs-main > * + * {
+  margin-top: var(--sp-16);
+}
+
+.docs-main h1,
+.docs-main h2,
+.docs-main h3,
+.docs-main h4 {
+  font-family: var(--font-display);
+  letter-spacing: var(--ls-tight);
+  color: var(--editorial-dark);
+  line-height: var(--lh-heading);
 }
 
 .docs-main h1 {
-  font-family: var(--font-display);
   font-size: var(--fs-masthead);
-  letter-spacing: var(--ls-tight);
-  margin: 0 0 var(--sp-16);
-  color: var(--editorial-dark);
+}
+
+.docs-main > h1:first-child {
+  margin-top: 0;
 }
 
 .docs-main h2 {
-  font-family: var(--font-display);
   font-size: var(--fs-section-heading);
-  margin: var(--sp-32) 0 var(--sp-12);
-  letter-spacing: var(--ls-tight);
-  color: var(--editorial-dark);
+  margin-top: var(--sp-36);
 }
 
 .docs-main h3 {
-  font-family: var(--font-display);
   font-size: var(--fs-playbook-dek);
-  margin: var(--sp-24) 0 var(--sp-8);
-  color: var(--editorial-dark);
+  margin-top: var(--sp-28);
+}
+
+.docs-main h4 {
+  font-size: var(--fs-body);
+  margin-top: var(--sp-20);
 }
 
 .docs-main p,
 .docs-main li {
   font-family: var(--font-serif-body);
+  font-size: var(--fs-body);
   line-height: var(--lh-body);
-  font-size: var(--fs-playbook-body);
-  color: var(--text);
 }
 
-.docs-main p + p {
-  margin-top: var(--sp-12);
+.docs-main ul,
+.docs-main ol {
+  padding-left: var(--sp-24);
 }
+
+.docs-main li + li {
+  margin-top: var(--sp-4);
+}
+
+.docs-main li > p {
+  margin-top: var(--sp-4);
+}
+
+.docs-main strong { font-weight: 600; }
+.docs-main em { font-style: italic; }
 
 .docs-main pre,
 .docs-main code {
@@ -112,6 +145,8 @@
   border-radius: var(--sp-6);
   overflow-x: auto;
   background: var(--code-bg);
+  font-size: var(--fs-meta);
+  line-height: var(--lh-snug);
 }
 
 .docs-main :not(pre) > code {
@@ -128,12 +163,39 @@
   text-underline-offset: var(--bw-rule);
 }
 
+.docs-main hr {
+  border: 0;
+  border-top: var(--bw-hair) solid var(--border);
+  margin: var(--sp-32) 0;
+}
+
 .docs-main blockquote {
-  margin: var(--sp-20) 0;
   padding: var(--sp-12) var(--sp-20);
   border-left: var(--bw-accent) solid var(--accent);
   color: var(--muted);
   background: var(--accent-soft);
+}
+
+.docs-main blockquote p {
+  margin: 0;
+}
+
+.docs-main table {
+  border-collapse: collapse;
+  font-size: var(--fs-meta);
+  width: 100%;
+}
+
+.docs-main table th,
+.docs-main table td {
+  border: var(--bw-hair) solid var(--border);
+  padding: var(--sp-8) var(--sp-12);
+  text-align: left;
+}
+
+.docs-main table th {
+  background: var(--code-bg);
+  font-weight: 600;
 }
 
 /* /app/ landing — hero + features grid */
