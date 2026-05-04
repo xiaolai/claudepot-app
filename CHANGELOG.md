@@ -6,6 +6,37 @@ Versioning scheme:
 - `0.1.x` — beta
 - `1.0.0+` — stable
 
+## 0.1.5 — beta (unreleased)
+
+### Fixed
+
+- **Automations: "first-party `claude` binary not found on PATH" when
+  registering a scheduled run.** The GUI walked the GUI process's
+  `PATH` to resolve `claude`, but Dock-launched Tauri apps on macOS
+  inherit only `path_helper`'s defaults (no `~/.local/bin`), so users
+  on the Anthropic native installer (canonical layout since Sept
+  2025) couldn't save an automation. The shim now invokes `claude`
+  by name and resolves it against its own controlled `PATH` at run
+  time. Bonus: automations stay correct across `claude doctor`
+  upgrades — the version-specific symlink target rotates, but the
+  symlink stays put.
+- **Automations: shim runtime `PATH` now covers bun, npm-global, and
+  Volta installs** alongside the existing Homebrew + system + native
+  paths. The Anthropic native installer (`~/.local/bin`) is ranked
+  first so a stale Homebrew copy can't shadow it.
+- **Memory pane: Windows test failure for `anchor_uses_git_root_when_present`.**
+  The test compared a path against `canonicalize`'s output without
+  stripping the verbatim `\\?\` prefix; production code already
+  routes through `simplify_windows_path`, so the test was the only
+  thing wrong. `paths.md` rule now applies in the test too.
+
+### Changed
+
+- **Repo housekeeping.** rustfmt drift on `main` from the 0.1.4
+  release commit reformatted across `claudepot-cli/src/commands`,
+  `claudepot-core/src/{memory_log,memory_view,settings_writer}.rs`,
+  and `main.rs`. No behavioral change — pure formatting.
+
 ## 0.1.4 — beta (unreleased)
 
 ### Added
