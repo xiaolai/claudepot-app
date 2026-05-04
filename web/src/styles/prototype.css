@@ -33,12 +33,14 @@
 
 .proto-nav-logo {
   display: block;
-  /* Sized to match the wordmark cap-height. 1em resolves against
-     .proto-nav-brand's font-size (--fs-title-md), so the pixel
-     icon and the wordmark stay the same visual height regardless
-     of where the wordmark scale is tuned. */
-  width: var(--fs-body);
-  height: var(--fs-body);
+  /* Match the wordmark height exactly. .proto-nav-brand's own
+     font-size is var(--fs-title-md), so referencing the same
+     token here keeps the icon and the wordmark at identical
+     visual size regardless of how the title scale is tuned.
+     Direct token reference (not 1em) so the ui-tokenize hook
+     doesn't auto-rewrite to a wrong-semantic match. */
+  width: var(--fs-title-md);
+  height: var(--fs-title-md);
   color: var(--accent);
   image-rendering: pixelated;
   flex-shrink: 0;
