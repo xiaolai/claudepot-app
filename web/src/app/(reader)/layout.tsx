@@ -19,6 +19,15 @@ const jetbrainsMono = JetBrains_Mono({
   subsets: ["latin"],
   display: "swap",
   variable: "--font-mono",
+  // Without explicit weights, next/font/google preloads every variant
+  // even though most pages render mostly 400/500/700 — the browser
+  // surfaces this as "preloaded but not used within a few seconds".
+  weight: ["400", "500", "600", "700"],
+  // We use display:swap, so the page always renders immediately in
+  // the system fallback and swaps when the woff2 lands. The preload
+  // hint isn't load-bearing for that — turn it off to silence the
+  // unused-preload warnings without delaying first paint.
+  preload: false,
 });
 
 const SITE_DESCRIPTION =
