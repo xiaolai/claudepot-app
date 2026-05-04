@@ -19,13 +19,17 @@ async function loadChangelog(): Promise<string> {
   try {
     return await readFile(fsPath, "utf8");
   } catch {
+    // GitHub raw fallback. cache:"no-store" because Vercel's Data
+    // Cache otherwise persists the result across deploys (keyed on
+    // URL+options), so a new build can't pick up the latest CHANGELOG
+    // until the cache TTL expires. Per-request fetch is fine — this
+    // is a docs page, not a hot path, and GitHub raw is sub-50ms.
     const r = await fetch(
       "https://raw.githubusercontent.com/xiaolai/claudepot-app/main/CHANGELOG.md",
-      { next: { revalidate: 3600 } },
+      { cache: "no-store" },
     );
     if (!r.ok) {
-      // Render a placeholder rather than failing the build.
-      return "# Changelog\n\n_Changelog source unavailable at build time._\n";
+      return "# Changelog\n\n_Changelog source unavailable right now._\n";
     }
     return r.text();
   }
