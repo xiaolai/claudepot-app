@@ -64,15 +64,12 @@ export function WindowChrome({
           color: "var(--fg-muted)",
         }}
       >
-        {/* NF glyph ink sits ~6–8% above the geometric centre of its
-            em-box; verticalAlign on Glyph is a no-op in flex, so we
-            apply the baseline nudge here via transform to re-center
-            the ink against the traffic-light row and the text. */}
-        <Glyph
-          g={NF.home}
-          color="var(--fg-faint)"
-          style={{ transform: "translateY(var(--glyph-optical-nudge))" }}
-        />
+        {/* Lucide SVG ink is already centered in its bounding box, so
+            no baseline nudge is needed here. The flex parent's
+            `align-items: center` lands the icon on the chrome
+            centerline, matching where the OS centers the traffic
+            lights via `trafficLightPosition.y`. */}
+        <Glyph g={NF.home} color="var(--fg-faint)" />
         <span
           // Chrome breadcrumb — long cwds can clip in narrow windows.
           // Title carries the full path so hover always discloses it;
