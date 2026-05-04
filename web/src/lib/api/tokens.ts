@@ -1,7 +1,7 @@
 /**
  * Token generation, hashing, and lookup.
  *
- * Plaintext format: `shn_pat_<28 url-safe-base64 chars>` (168 bits of entropy).
+ * Plaintext format: `cdp_pat_<28 url-safe-base64 chars>` (168 bits of entropy).
  * Storage: SHA-256 hex digest of the full plaintext. The plaintext leaves
  * the server exactly once — at creation time — and is never logged.
  *
@@ -17,16 +17,16 @@ import { eq } from "drizzle-orm";
 import { db } from "@/db/client";
 import { apiTokens } from "@/db/schema";
 
-const TOKEN_PREFIX = "shn_pat_";
+const TOKEN_PREFIX = "cdp_pat_";
 const RANDOM_BYTES = 21; // 21 bytes -> 28 base64url chars
-const DISPLAY_PREFIX_LEN = 12; // "shn_pat_XXXX"
+const DISPLAY_PREFIX_LEN = 12; // "cdp_pat_XXXX"
 
 /**
  * Strict format validator: prefix + exactly 28 URL-safe-base64 chars.
  * Used by auth.ts to reject oversized / malformed bearer values BEFORE
  * paying for a SHA-256 hash and DB query.
  */
-export const TOKEN_FORMAT_RE = /^shn_pat_[A-Za-z0-9_-]{28}$/;
+export const TOKEN_FORMAT_RE = /^cdp_pat_[A-Za-z0-9_-]{28}$/;
 
 export type ApiToken = typeof apiTokens.$inferSelect;
 

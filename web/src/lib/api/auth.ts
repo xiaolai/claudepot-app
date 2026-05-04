@@ -39,7 +39,7 @@ export type AuthSuccess = { ok: true; token: ApiToken; user: AuthUser };
 export type AuthFailure = { ok: false; problem: Problem };
 
 // Tight upper bound on the bearer value length. Format is
-// `shn_pat_<28 base64url>` (36 chars); cap a touch higher to reject
+// `cdp_pat_<28 base64url>` (36 chars); cap a touch higher to reject
 // pathological inputs before doing any work but still allow future
 // prefix changes without code edits.
 const MAX_BEARER_LEN = 64;
@@ -53,7 +53,7 @@ export async function authenticate(
     return {
       ok: false,
       problem: unauthorized(
-        "Missing or malformed Authorization header. Expected: Authorization: Bearer shn_pat_<28 url-safe-base64 chars>",
+        "Missing or malformed Authorization header. Expected: Authorization: Bearer cdp_pat_<28 url-safe-base64 chars>",
       ),
     };
   }
