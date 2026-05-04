@@ -20,8 +20,8 @@ fn resolve_project(project: Option<&str>) -> Result<PathBuf> {
         Some(p) => p.to_string(),
         None => std::env::current_dir()?.to_string_lossy().into_owned(),
     };
-    let resolved = resolve_path(&raw)
-        .map_err(|e| anyhow!("resolve project path {}: {}", raw, e))?;
+    let resolved =
+        resolve_path(&raw).map_err(|e| anyhow!("resolve project path {}: {}", raw, e))?;
     Ok(PathBuf::from(resolved))
 }
 
@@ -68,7 +68,11 @@ fn print_state(
     }
     println!(
         "auto-memory: {} ({})",
-        if state.effective { "ENABLED" } else { "DISABLED" },
+        if state.effective {
+            "ENABLED"
+        } else {
+            "DISABLED"
+        },
         decided_label(state.decided_by)
     );
     println!("project:     {}", project_root.display());
