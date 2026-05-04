@@ -1,0 +1,8 @@
+{
+  "claudepot-app": ["claude-code"],
+  "claude-agent-sdk-skill-autoupdated": ["claude-code", "agents"],
+  "claude-plugin-marketplace": ["claude-code"],
+  "nlpm-for-claude": ["claude-code"],
+  "ui-responsive": ["claude-code"],
+  "mecha.im": ["agents"]
+}

@@ -102,7 +102,7 @@ jobs:
           cat > homebrew-tap/Formula/claudepot.rb <<RUBY
           class Claudepot < Formula
             desc "Multi-account Claude Code / Claude Desktop switcher (CLI)"
-            homepage "https://github.com/${REPO}"
+            homepage "https://claudepot.com/app/"
             version "${VERSION}"
             license "MIT"
 
@@ -166,10 +166,10 @@ jobs:
 
             name "Claudepot"
             desc "Multi-account Claude Code / Claude Desktop switcher"
-            homepage "https://github.com/${REPO}"
+            homepage "https://claudepot.com/app/"
 
             livecheck do
-              url :homepage
+              url "https://github.com/${REPO}"
               strategy :github_latest
             end
 

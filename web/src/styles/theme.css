@@ -1,0 +1,500 @@
+/* ============================================================
+   shannon design tokens
+   A publication on the AI tools field.
+   ============================================================ */
+
+:root {
+  /* --- Fonts --- */
+  --font-display: "Playfair Display", Georgia, serif;
+  --font-serif-body: "Source Serif 4", Georgia, "Times New Roman", serif;
+  --font-body: "Inter", system-ui, -apple-system, sans-serif;
+  --font-mono: "JetBrains Mono", "Fira Code", "Consolas", monospace;
+
+  /* --- Typography scale --- */
+  --fs-masthead: 2.5rem;
+  --fs-playbook-title: 3rem;
+  --fs-playbook-dek: 1.375rem;
+  --fs-playbook-body: 1.125rem;
+  --fs-section-heading: 1.5rem;
+  --fs-eyebrow: 0.75rem;
+  --fs-byline: 0.875rem;
+  --fs-meta: 0.8125rem;
+  --fs-body: 1rem;
+  --fs-small: 0.875rem;
+
+  /* --- Line heights --- */
+  --lh-drop-cap: 0.8;
+  --lh-tight: 1.2;
+  --lh-heading: 1.3;
+  --lh-snug: 1.4;
+  --lh-dek: 1.5;
+  --lh-body: 1.6;
+  --lh-playbook-body: 1.7;
+  --lh-loose: 1.8;
+
+  /* --- Letter spacing --- */
+  --ls-tight: -0.01em;
+  --ls-normal: 0;
+  --ls-wide: 0.02em;
+  --ls-eyebrow: 0.1em;
+  --ls-masthead: 0.08em;
+
+  /* --- Accent system (Claude terracotta, OKLCH) ──────────────
+        Lifted from claudepot-app/src/styles/tokens.css. Four-tier
+        semantic stack — same hue at 45°, only L and alpha vary, so
+        every accent surface reads as the same color at different
+        intensities. Pair tiers per the upstream conventions:
+
+          filled hero  →  background: var(--accent);
+                          color: var(--on-color);
+          tinted chip  →  background: var(--accent-soft);
+                          color: var(--accent-ink);
+                          border: var(--accent-border);
+          accent bar   →  box-shadow: inset 0 0 0
+                          var(--bw-accent) var(--accent);
+          focus ring   →  box-shadow: 0 0 0 3px var(--accent-border);
+  */
+  --accent:        oklch(68% 0.13 45);
+  --accent-soft:   oklch(68% 0.13 45 / 0.12);
+  --accent-border: oklch(68% 0.13 45 / 0.28);
+  --accent-ink:    oklch(42% 0.10 45);
+  /* Tonal envelope (lightness + chroma) shared by every accent-
+     family color. Pair this with --accent-hue (or a swapped hue)
+     to produce a hue-shifted accent — used by the blockquote
+     rotator to pick from the OKLCH wheel while staying in the same
+     visual weight as --accent. */
+  --accent-tone:   68% 0.13;
+  --accent-hue:    45;
+  /* Scrim — full-screen modal backdrop (mermaid zoom view, future
+     dialogs). Pure black at 70% so light content reads against it
+     regardless of the page surface. */
+  --scrim:         oklch(0% 0 0 / 0.7);
+  /* Divider painted ON TOP of a solid accent fill (split buttons,
+     composite controls) so the two halves stay visually separable
+     without dropping to a theme-agnostic rgba literal. */
+  --accent-divider-ink: oklch(100% 0 0 / 0.22);
+  /* Foreground on filled accent / danger surfaces — white in both
+     themes, since theme-sensitive --text would fail contrast. */
+  --on-color: oklch(100% 0 0);
+  /* Border-width scale. --bw-hair / --bw-rule are the structural
+     hairlines used everywhere borders are decorative (rows, cards,
+     dividers). --bw-accent stays distinct from --outline-width
+     (focus rings) so selection bars and focus indicators tune
+     independently. */
+  --bw-hair: 1px;
+  --bw-rule: 2px;
+  --bw-accent: 3px;
+
+  /* --- Colors ───────────────────────────────────────────────
+     Light-mode neutrals stay hex (anchored to known web values for
+     stable rendering and easy contrast checking). Dark-mode flips
+     each token explicitly below — same hex literal style, no OKLCH
+     conversion to avoid round-trip color drift. The accent system
+     is OKLCH so the 4-tier ladder derives from one base. */
+  --dark: #1a1a2e;
+  --text: #1f2937;
+  --muted: #6b7280;
+  --light: #f3f4f6;
+  --bg: #ffffff;
+  /* --white is "I always want white" intent, but on a card surface
+     that should flip in dark mode use --surface (defined below). */
+  --white: #ffffff;
+  --surface: var(--bg);
+  --border: #e5e7eb;
+
+  /* --- Editorial colors --- */
+  --editorial-dark: #1a1a2e;
+  --editorial-mid: #374151;
+
+  /* --- Hairline rules --- */
+  --rule-hair: #d1d5db;
+  --rule-bold: #9ca3af;
+
+  /* --- Code surface (inline + block) --- */
+  --code-bg: #f3f4f6;
+  /* One step softer than --code-bg — used for the inner body of a
+     decorated .proto-code block so the code area reads as "barely
+     off-white" against the page surface, leaving --code-bg free for
+     hover states and bare-pre fallbacks where a touch more contrast
+     is appropriate. */
+  --code-body-bg: #f9fafb;
+  --code-text: #1f2937;
+
+  /* --- Moderation state colors --- */
+  --state-pending-bg: #fef3c7;
+  --state-pending-fg: #92400e;
+  --state-pending-border: #f59e0b;
+  --state-rejected-bg: #fee2e2;
+  --state-rejected-fg: #991b1b;
+  --state-rejected-border: #ef4444;
+  --state-approved-bg: #d1fae5;
+  --state-approved-fg: #065f46;
+
+  /* --- Shadows --- */
+  --shadow-card: rgba(0, 0, 0, 0.08);
+  --shadow-subtle: rgba(0, 0, 0, 0.06);
+  --shadow-focus-ring: 0 0 0 3px var(--accent-border);
+
+  /* --- Spacing scale (4px base) --- */
+  --sp-1: 0.0625rem;   /* 1px */
+  --sp-2: 0.125rem;    /* 2px */
+  --sp-3: 0.15rem;     /* ~2.4px — chip-internal gap (one-off) */
+  --sp-4: 0.25rem;     /* 4px */
+  --sp-6: 0.375rem;    /* 6px */
+  --sp-8: 0.5rem;      /* 8px */
+  --sp-12: 0.75rem;    /* 12px */
+  --sp-16: 1rem;       /* 16px */
+  --sp-20: 1.25rem;    /* 20px */
+  --sp-24: 1.5rem;     /* 24px */
+  --sp-28: 1.75rem;    /* 28px */
+  --sp-32: 2rem;       /* 32px */
+  --sp-36: 2.25rem;    /* 36px */
+  --sp-40: 2.5rem;     /* 40px */
+  --sp-48: 3rem;       /* 48px */
+
+  /* --- Component sizes --- */
+  --fs-title-md: 1.75rem;
+  --fs-badge: 0.6875rem;
+  --fs-badge-sm: 0.625rem;
+  --fs-filter: 0.8125rem;
+
+  /* --- Transitions --- */
+  --transition-short: 0.15s;
+  --transition-normal: 0.2s;
+
+  /* --- Border radii --- */
+  --radius-xs: 2px;
+  --radius-sm: 0.25rem;
+  --radius-md: 0.375rem;
+  --radius-lg: 0.5rem;
+  --radius-xl: 0.75rem;
+  --radius-full: 9999px;
+
+  /* --- Layout --- */
+  --max-width: 1200px;
+  --content-width: 720px;
+  --aside-width: 240px;       /* sidebar column for docs-style pages */
+  --grid-min-card: 280px;     /* mirrors tokens.json grid.min-card */
+  --touch-min: 44px;
+  --nav-height: 5rem;         /* sticky-nav clearance — used as `top:` for sticky sidebars beneath the masthead */
+
+  /* Specific column widths that don't fit a generic spacing scale. */
+  --dl-term-col: 200px;       /* definition-list term column on /office/rubric */
+  --score-cell-width: 80px;   /* numeric-cell column on /office/decision/[id] friendly-scores table */
+  --admin-body-min-h: 50vh;   /* min height for /admin body so empty states don't squish */
+  --confirm-dialog-max-w: 28rem; /* max width of the ConfirmDialog primitive — bounded so long descriptions wrap instead of stretching across wide viewports */
+  --code-max-h: 30rem;        /* max-height for code blocks before vertical scroll kicks in */
+
+  /* --- Z-index scale --- */
+  --z-subnav: 40;             /* sticky sub-navs (.proto-tabs) below the masthead */
+  --z-header: 50;
+  --z-dropdown: 60;
+  --z-modal: 100;             /* full-screen overlays (mermaid zoom) sit above all chrome */
+
+  /* --- Focus ring --- */
+  --outline-width: 2px;
+  --outline-offset: 2px;
+  --outline-offset-inset: -2px;
+  --underline-offset: 2px;
+
+  /* Breakpoint. Catalog-tracked here so the value has a single source
+     of truth, even though @media queries can't dereference custom
+     properties — every @media (max-width: 768px) literal in the
+     stylesheets must match this value. Single mobile/desktop split,
+     per .claude/CLAUDE.md ("Mobile target: 375px. Single 768px
+     breakpoint exists; tighter mobile pass deferred until
+     implementation"). */
+  --bp-md: 768px;
+}
+
+
+/* ============================================================
+   Base reset
+   ============================================================ */
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+html {
+  -webkit-text-size-adjust: 100%;
+  text-size-adjust: 100%;
+}
+
+body {
+  font-family: var(--font-body);
+  font-size: var(--fs-body);
+  line-height: var(--lh-body);
+  color: var(--text);
+  background-color: var(--bg);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+img,
+picture,
+video,
+canvas,
+svg {
+  display: block;
+  max-width: 100%;
+}
+
+input,
+button,
+textarea,
+select {
+  font: inherit;
+}
+
+/* Cursor + caret discipline.
+
+   1. Cursor: browsers resolve `cursor: auto` to the I-beam over
+      selectable text, which reads as "you can place a text cursor
+      here" — useful in editors, noisy on a publication where prose
+      is read-only. Set the body default to a plain arrow and opt
+      back into the I-beam only on editable surfaces. Buttons and
+      links keep their own `cursor: pointer` (declared per-component,
+      higher specificity than these :where() rules).
+
+   2. Caret: hides the blinking text caret site-wide, then restores
+      it on editable surfaces. Pure cosmetic on most browsers, but
+      critical for users running with caret browsing on (Chromium F7
+      / Safari accessibility) — without this, every click parks a
+      blinking caret on read-only prose, headings, and even buttons.
+      caret-color is inherited, so the body rule cascades. */
+:where(body) {
+  cursor: default;
+  caret-color: transparent;
+}
+
+:where(input, textarea, [contenteditable], [contenteditable=""], [contenteditable="true"]) {
+  cursor: text;
+  caret-color: auto;
+}
+
+
+/* ============================================================
+   Typography (global)
+   ============================================================ */
+
+h1, h2, h3, h4 {
+  font-family: var(--font-display);
+  line-height: var(--lh-heading);
+  color: var(--editorial-dark);
+  letter-spacing: var(--ls-tight);
+}
+
+h1 { font-size: var(--fs-playbook-title); }
+h2 { font-size: var(--fs-section-heading); }
+h3 { font-size: var(--fs-playbook-dek); }
+
+/* Heading rhythm — five-tier block scale (see .claude/rules/design-tokens.md):
+     Pair    = sp-8   heading→content coupling; tightly-bonded pair
+     Block   = sp-16  p→p, list-item rhythm
+     Stride  = sp-24  h3 above; minor region within a section
+     Break   = sp-40  h2 above; section margin-bottom; major separator
+     Region  = sp-48  page-level break
+   Wrapped in :where() so any class-based rule overrides without
+   specificity wars. Margins collapse with adjacent siblings, so the
+   larger of (prev mb, heading mt) wins — that's the intent.
+   Bottom margins are uniform sp-8 (Pair) so heading hierarchy is
+   carried by font-size, not by redundant margin variation. */
+:where(h1) { margin: 0 0 var(--sp-8); }
+:where(h2) { margin: var(--sp-40) 0 var(--sp-8); }
+:where(h3) { margin: var(--sp-24) 0 var(--sp-8); }
+:where(h4) { margin: var(--sp-24) 0 var(--sp-8); }
+:where(h5, h6) { margin: var(--sp-16) 0 var(--sp-4); }
+:where(h1, h2, h3, h4, h5, h6):first-child { margin-top: 0; }
+
+a {
+  color: var(--accent);
+  text-decoration-thickness: var(--bw-hair);
+  text-underline-offset: var(--underline-offset);
+  transition: color var(--transition-short) ease;
+}
+
+a:hover {
+  color: var(--accent-ink);
+}
+
+
+/* ============================================================
+   Eyebrow (small caps label above headings) — used by tag
+   pages and other prototype surfaces.
+   ============================================================ */
+
+.eyebrow {
+  font-family: var(--font-body);
+  font-size: var(--fs-eyebrow);
+  font-weight: 600;
+  letter-spacing: var(--ls-eyebrow);
+  text-transform: uppercase;
+  color: var(--muted);
+  margin-bottom: var(--sp-8);
+}
+
+
+/* ============================================================
+   Global focus styles
+   ============================================================ */
+
+a:focus-visible,
+button:focus-visible,
+input:focus-visible,
+textarea:focus-visible,
+select:focus-visible,
+[tabindex]:focus-visible {
+  outline: var(--outline-width) solid var(--accent);
+  outline-offset: var(--outline-offset);
+  border-radius: var(--radius-xs);
+}
+
+
+/* ============================================================
+   Responsive token overrides
+   ============================================================ */
+
+@media (max-width: var(--bp-md)) {
+  :root {
+    --fs-masthead: 2rem;
+    --fs-playbook-title: 2rem;
+    --fs-playbook-dek: 1.25rem;
+    --fs-section-heading: 1.25rem;
+  }
+}
+
+
+/* ============================================================
+   Reduced-motion — honor the OS-level "Reduce motion" setting.
+   Collapses all transitions and animations to a near-zero duration
+   instead of removing them outright, so transitionend/animationend
+   handlers still fire. !important is the recommended pattern from
+   the WCAG SC 2.3.3 implementation note.
+   ============================================================ */
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}
+
+
+/* ============================================================
+   Dark mode — flips every neutral, state color, and accent so
+   the page reads as a coherent inverted theme, not "light page
+   with brighter accent."
+
+   Accent: chroma bumped 0.13 → 0.17 and L tuned to 72% so the
+   solid fill reads at the same visual saturation weight as the
+   light-mode accent against an ink-paper background. Raw 0.13
+   chroma at L=74% renders milky/desaturated on dark.
+
+   Neutrals: gray-900/800/700/500/400/200/100/50 (Tailwind scale)
+   inverted from light. Mostly hex to match the light palette's
+   anchor points and keep contrast checking simple.
+
+   State colors: backgrounds darken to a tinted dark surface,
+   foregrounds lighten so legibility is preserved at high alpha.
+
+   Both [data-theme="dark"] and prefers-color-scheme paths kept
+   in lockstep so a user with no preference set sees the same
+   theme as one who picked dark explicitly. The shared block is
+   defined once in a CSS custom-property layer (the @media path
+   uses :root:not([data-theme]) so an explicit user choice wins).
+   Mirrors claudepot-app/src/styles/tokens.css for the accent.
+   ============================================================ */
+
+[data-theme="dark"] {
+  /* Accent (OKLCH) */
+  --accent:        oklch(72% 0.17 45);
+  --accent-soft:   oklch(72% 0.17 45 / 0.18);
+  --accent-border: oklch(72% 0.17 45 / 0.38);
+  --accent-ink:    oklch(82% 0.14 45);
+
+  /* Neutrals */
+  --dark: #f9fafb;
+  --text: #f3f4f6;
+  --muted: #9ca3af;
+  --light: #1f2937;
+  --bg: #111827;
+  --surface: #1f2937;
+  --border: #374151;
+  --editorial-dark: #f9fafb;
+  --editorial-mid: #d1d5db;
+  --rule-hair: #374151;
+  --rule-bold: #6b7280;
+
+  /* Code surface */
+  --code-bg: #1f2937;
+  --code-text: #e5e7eb;
+
+  /* State colors — dark-tinted bg, light-tinted fg */
+  --state-pending-bg: #422006;
+  --state-pending-fg: #fcd34d;
+  --state-pending-border: #f59e0b;
+  --state-rejected-bg: #450a0a;
+  --state-rejected-fg: #fca5a5;
+  --state-rejected-border: #ef4444;
+  --state-approved-bg: #064e3b;
+  --state-approved-fg: #6ee7b7;
+
+  /* Shadows — heavier alpha on dark to remain visible */
+  --shadow-card: rgba(0, 0, 0, 0.4);
+  --shadow-subtle: rgba(0, 0, 0, 0.3);
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme]) {
+    --accent:        oklch(72% 0.17 45);
+    --accent-soft:   oklch(72% 0.17 45 / 0.18);
+    --accent-border: oklch(72% 0.17 45 / 0.38);
+    --accent-ink:    oklch(82% 0.14 45);
+    /* Tonal envelope follows the dark accent: brighter, more
+       saturated than light mode so accent-tinted surfaces
+       (blockquote rules, code-block headers, callout backgrounds)
+       still read against the dark page surface. --accent-hue is
+       hue, doesn't shift between modes. */
+    --accent-tone:   72% 0.17;
+
+    --dark: #f9fafb;
+    --text: #f3f4f6;
+    --muted: #9ca3af;
+    --light: #1f2937;
+    --bg: #111827;
+    --surface: #1f2937;
+    --border: #374151;
+    --editorial-dark: #f9fafb;
+    --editorial-mid: #d1d5db;
+    --rule-hair: #374151;
+    --rule-bold: #6b7280;
+
+    --code-bg: #1f2937;
+    /* Body sits closer to --bg (#111827) than to --code-bg
+       (#1f2937) — same "barely off-page" semantic as the light
+       mode pairing, just inverted. */
+    --code-body-bg: #1a2233;
+    --code-text: #e5e7eb;
+
+    --state-pending-bg: #422006;
+    --state-pending-fg: #fcd34d;
+    --state-pending-border: #f59e0b;
+    --state-rejected-bg: #450a0a;
+    --state-rejected-fg: #fca5a5;
+    --state-rejected-border: #ef4444;
+    --state-approved-bg: #064e3b;
+    --state-approved-fg: #6ee7b7;
+
+    --shadow-card: rgba(0, 0, 0, 0.4);
+    --shadow-subtle: rgba(0, 0, 0, 0.3);
+  }
+}

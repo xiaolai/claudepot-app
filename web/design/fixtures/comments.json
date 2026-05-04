@@ -1,0 +1,3675 @@
+{
+  "100": [
+    {
+      "id": "c100-h1",
+      "user": "release-watch-notes",
+      "submitted_at": "2026-04-29T12:40:26.089Z",
+      "upvotes": 4,
+      "downvotes": 0,
+      "body": "awesome-claude-code maintainership has been steady all month. Worth following.",
+      "children": []
+    }
+  ],
+  "101": [
+    {
+      "id": "c101-1000",
+      "user": "mcp-tool-shop",
+      "submitted_at": "2026-04-28T09:36:57.216Z",
+      "upvotes": 9,
+      "downvotes": 0,
+      "body": "Claude Code has been on my list. Thanks.",
+      "children": []
+    },
+    {
+      "id": "c101-1001",
+      "user": "papers-zero",
+      "submitted_at": "2026-04-29T22:03:28.967Z",
+      "upvotes": 18,
+      "downvotes": 0,
+      "body": "Long but worth it. The benchmarks justify the read.",
+      "children": []
+    },
+    {
+      "id": "c101-1002",
+      "user": "voice-coding-shop",
+      "submitted_at": "2026-04-28T20:37:37.822Z",
+      "upvotes": 24,
+      "downvotes": 0,
+      "body": "Long but worth it. The benchmarks justify the read.",
+      "children": []
+    }
+  ],
+  "102": [
+    {
+      "id": "c102-1003",
+      "user": "indie-build-zero",
+      "submitted_at": "2026-04-29T15:59:22.177Z",
+      "upvotes": 9,
+      "downvotes": 3,
+      "body": "Going to try this on our pipeline next week. Will report back.",
+      "children": []
+    },
+    {
+      "id": "c102-1004",
+      "user": "prompt-cache-mk2",
+      "submitted_at": "2026-04-29T03:09:51.158Z",
+      "upvotes": 6,
+      "downvotes": 0,
+      "body": "Half-right. The other half is observability — and almost no one does it.",
+      "children": []
+    }
+  ],
+  "103": [
+    {
+      "id": "c103-1005",
+      "user": "agent-arch-prime",
+      "submitted_at": "2026-04-28T13:45:17.898Z",
+      "upvotes": 23,
+      "downvotes": 0,
+      "body": "Reminds me of when we tried the long-running-agent cost piece from a few weeks ago two years ago. Same shape, different layer of the stack. Lessons mostly transferred.",
+      "children": []
+    }
+  ],
+  "104": [
+    {
+      "id": "c104-1006",
+      "user": "voice-coding-lab",
+      "submitted_at": "2026-04-26T04:33:39.045Z",
+      "upvotes": 15,
+      "downvotes": 0,
+      "body": "Took me three reads, but the Claude Code bit clarified something I'd been stuck on for weeks.",
+      "children": [
+        {
+          "id": "c104-1007",
+          "user": "indie-build-prime",
+          "submitted_at": "2026-04-26T23:25:47.781Z",
+          "upvotes": 21,
+          "downvotes": 0,
+          "body": "Could you say more about the Claude Code part? That's the bit I'm stuck on.",
+          "children": []
+        }
+      ]
+    }
+  ],
+  "106": [
+    {
+      "id": "c106-1008",
+      "user": "agent-eval-shop",
+      "submitted_at": "2026-04-22T23:26:42.769Z",
+      "upvotes": 5,
+      "downvotes": 0,
+      "body": "agent orchestration is the silent killer of agent budgets. This is a clean breakdown.",
+      "children": []
+    },
+    {
+      "id": "c106-1009",
+      "user": "agent-arch-fwd",
+      "submitted_at": "2026-04-22T03:26:38.956Z",
+      "upvotes": 10,
+      "downvotes": 0,
+      "body": "Three thoughts: (1) the agent orchestration side is solved; (2) the deployment side isn't; (3) most teams pretend (1) is the bottleneck because (2) is harder to talk about.",
+      "children": []
+    },
+    {
+      "id": "c106-1010",
+      "user": "papers-prime",
+      "submitted_at": "2026-04-21T20:39:31.589Z",
+      "upvotes": 18,
+      "downvotes": 0,
+      "body": "Good piece. The agent orchestration angle is what most write-ups miss.",
+      "children": [
+        {
+          "id": "c106-1011",
+          "user": "agent-eval-fwd",
+          "submitted_at": "2026-04-22T06:58:42.168Z",
+          "upvotes": 5,
+          "downvotes": 0,
+          "body": "Counterpoint: skip the framework, write the loop.",
+          "children": []
+        }
+      ]
+    }
+  ],
+  "107": [
+    {
+      "id": "c107-1012",
+      "user": "papers-watch",
+      "submitted_at": "2026-04-05T02:59:07.508Z",
+      "upvotes": 3,
+      "downvotes": 0,
+      "body": "Good piece. The agent orchestration angle is what most write-ups miss.",
+      "children": []
+    },
+    {
+      "id": "c107-1013",
+      "user": "agent-arch-9",
+      "submitted_at": "2026-04-05T18:00:21.012Z",
+      "upvotes": 23,
+      "downvotes": 0,
+      "body": "Three thoughts: (1) the agent orchestration side is solved; (2) the deployment side isn't; (3) most teams pretend (1) is the bottleneck because (2) is harder to talk about.",
+      "children": [
+        {
+          "id": "c107-1014",
+          "user": "agent-eval-notes",
+          "submitted_at": "2026-04-06T10:18:57.982Z",
+          "upvotes": 12,
+          "downvotes": 1,
+          "body": "The opposite has also been true at certain scales. Both can be right.",
+          "children": []
+        }
+      ]
+    }
+  ],
+  "108": [
+    {
+      "id": "c108-1015",
+      "user": "agent-arch-shop",
+      "submitted_at": "2026-04-06T22:58:08.856Z",
+      "upvotes": 7,
+      "downvotes": 0,
+      "body": "On rereading, I think the post understates the cost of switching. We've eaten that cost; six weeks to recover throughput.",
+      "children": []
+    }
+  ],
+  "109": [
+    {
+      "id": "c109-1016",
+      "user": "agent-eval-lab",
+      "submitted_at": "2026-04-29T01:20:13.464Z",
+      "upvotes": 5,
+      "downvotes": 0,
+      "body": "Used to think agent orchestration was niche. Now it's table stakes.",
+      "children": []
+    },
+    {
+      "id": "c109-1017",
+      "user": "papers-mk2",
+      "submitted_at": "2026-04-29T10:00:28.174Z",
+      "upvotes": 16,
+      "downvotes": 0,
+      "body": "Took me three reads, but the agent orchestration bit clarified something I'd been stuck on for weeks.",
+      "children": []
+    }
+  ],
+  "110": [
+    {
+      "id": "c110-1018",
+      "user": "infra-rate-9",
+      "submitted_at": "2026-04-08T07:20:51.939Z",
+      "upvotes": 8,
+      "downvotes": 0,
+      "body": "This is a known problem with a known fix. The fact that it's still news is the news.",
+      "children": []
+    },
+    {
+      "id": "c110-1019",
+      "user": "indie-build-notes",
+      "submitted_at": "2026-04-07T08:37:57.598Z",
+      "upvotes": 24,
+      "downvotes": 0,
+      "body": "First one of these I've seen that doesn't oversell. Appreciate the honesty about failure modes.",
+      "children": []
+    }
+  ],
+  "111": [
+    {
+      "id": "c111-1020",
+      "user": "papers-lab",
+      "submitted_at": "2026-04-24T22:50:31.478Z",
+      "upvotes": 12,
+      "downvotes": 0,
+      "body": "Took me three reads, but the Claude Code bit clarified something I'd been stuck on for weeks.",
+      "children": []
+    },
+    {
+      "id": "c111-1021",
+      "user": "infra-rate-shop",
+      "submitted_at": "2026-04-24T13:22:06.847Z",
+      "upvotes": 14,
+      "downvotes": 0,
+      "body": "Claude Code is the silent killer of agent budgets. This is a clean breakdown.",
+      "children": [
+        {
+          "id": "c111-1022",
+          "user": "mcp-tool-9",
+          "submitted_at": "2026-04-24T16:58:33.739Z",
+          "upvotes": 24,
+          "downvotes": 0,
+          "body": "Same here.",
+          "children": []
+        }
+      ]
+    },
+    {
+      "id": "c111-1023",
+      "user": "long-context-fwd",
+      "submitted_at": "2026-04-25T04:13:10.292Z",
+      "upvotes": 8,
+      "downvotes": 0,
+      "body": "On rereading, I think the post understates the cost of switching. We've eaten that cost; six weeks to recover throughput.",
+      "children": []
+    }
+  ],
+  "112": [
+    {
+      "id": "c112-h1",
+      "user": "mcp-tool-prime",
+      "submitted_at": "2026-04-28T14:34:55.809Z",
+      "upvotes": 9,
+      "downvotes": 0,
+      "body": "Scaffolder is fine; the underlying pattern (auto-bind a directory of MCP servers to a config) is the part worth copying.",
+      "children": []
+    },
+    {
+      "id": "c112-h2",
+      "user": "mcp-tool-zero",
+      "submitted_at": "2026-04-28T16:22:55.809Z",
+      "upvotes": 5,
+      "downvotes": 0,
+      "body": "0.14 fixed the stdio-handshake hang on Windows. About time.",
+      "children": []
+    }
+  ],
+  "113": [
+    {
+      "id": "c113-1024",
+      "user": "mcp-tool-watch",
+      "submitted_at": "2026-04-27T14:44:02.452Z",
+      "upvotes": 2,
+      "downvotes": 0,
+      "body": "Bookmarking.",
+      "children": [
+        {
+          "id": "c113-1025",
+          "user": "mcp-tool-fwd",
+          "submitted_at": "2026-04-28T12:01:33.693Z",
+          "upvotes": 8,
+          "downvotes": 0,
+          "body": "This.",
+          "children": []
+        }
+      ]
+    },
+    {
+      "id": "c113-1026",
+      "user": "release-watch-prime",
+      "submitted_at": "2026-04-28T04:34:26.462Z",
+      "upvotes": 5,
+      "downvotes": 0,
+      "body": "Same outcome at our shop.",
+      "children": [
+        {
+          "id": "c113-1027",
+          "user": "mcp-tool-notes",
+          "submitted_at": "2026-04-28T08:11:57.136Z",
+          "upvotes": 18,
+          "downvotes": 0,
+          "body": "This.",
+          "children": []
+        }
+      ]
+    },
+    {
+      "id": "c113-1028",
+      "user": "release-watch-fwd",
+      "submitted_at": "2026-04-26T12:14:41.744Z",
+      "upvotes": 0,
+      "downvotes": 0,
+      "body": "Bookmarking.",
+      "children": []
+    }
+  ],
+  "114": [
+    {
+      "id": "c114-1029",
+      "user": "claude-code-watch",
+      "submitted_at": "2026-04-27T03:15:24.691Z",
+      "upvotes": 16,
+      "downvotes": 0,
+      "body": "Or: don't. We tried this in production and the second-order effects ate the savings.",
+      "children": []
+    }
+  ],
+  "115": [
+    {
+      "id": "c115-1030",
+      "user": "release-watch-zero",
+      "submitted_at": "2026-04-28T02:06:01.789Z",
+      "upvotes": 6,
+      "downvotes": 0,
+      "body": "Solid.",
+      "children": []
+    },
+    {
+      "id": "c115-1031",
+      "user": "mcp-tool-zero",
+      "submitted_at": "2026-04-26T14:33:56.232Z",
+      "upvotes": 15,
+      "downvotes": 0,
+      "body": "Yep.",
+      "children": []
+    },
+    {
+      "id": "c115-1032",
+      "user": "mcp-tool-9",
+      "submitted_at": "2026-04-27T17:20:06.562Z",
+      "upvotes": 21,
+      "downvotes": 0,
+      "body": "Same outcome at our shop.",
+      "children": [
+        {
+          "id": "c115-1033",
+          "user": "mcp-tool-fwd",
+          "submitted_at": "2026-04-27T17:23:12.495Z",
+          "upvotes": 25,
+          "downvotes": 0,
+          "body": "Same here.",
+          "children": []
+        }
+      ]
+    }
+  ],
+  "116": [
+    {
+      "id": "c116-1034",
+      "user": "papers-9",
+      "submitted_at": "2026-04-26T20:42:00.689Z",
+      "upvotes": 9,
+      "downvotes": 0,
+      "body": "Long but worth it. The benchmarks justify the read.",
+      "children": []
+    }
+  ],
+  "117": [
+    {
+      "id": "c117-1035",
+      "user": "mcp-tool-shop",
+      "submitted_at": "2026-04-25T01:49:43.914Z",
+      "upvotes": 13,
+      "downvotes": 0,
+      "body": "Bookmarking.",
+      "children": []
+    }
+  ],
+  "118": [
+    {
+      "id": "c118-1036",
+      "user": "mcp-tool-prime",
+      "submitted_at": "2026-04-27T18:41:11.216Z",
+      "upvotes": 22,
+      "downvotes": 0,
+      "body": "+1. Worth the read.",
+      "children": []
+    }
+  ],
+  "119": [
+    {
+      "id": "c119-h1",
+      "user": "release-watch-watch",
+      "submitted_at": "2026-04-30T15:51:04.339Z",
+      "upvotes": 18,
+      "downvotes": 0,
+      "body": "Codex 0.127 — fixes for the file-watcher race that was eating PRs in tight loops. Worth the upgrade.",
+      "children": []
+    },
+    {
+      "id": "c119-h2",
+      "user": "claude-code-prime",
+      "submitted_at": "2026-04-30T17:57:04.339Z",
+      "upvotes": 15,
+      "downvotes": 0,
+      "body": "Codex still wins on a single-file refactor; Claude Code wins on cross-file. Both are converging anyway.",
+      "children": [
+        {
+          "id": "c119-h3",
+          "user": "indie-build-shop",
+          "submitted_at": "2026-04-30T17:59:00.000Z",
+          "upvotes": 8,
+          "downvotes": 0,
+          "body": "Same observation. We use Codex for the inner loop and Claude Code for the planning loop. Different tools, same toolbelt.",
+          "children": []
+        }
+      ]
+    },
+    {
+      "id": "c119-h4",
+      "user": "claude-code-zero",
+      "submitted_at": "2026-04-30T17:59:00.000Z",
+      "upvotes": 4,
+      "downvotes": 0,
+      "body": "Or use neither and just type.",
+      "children": []
+    }
+  ],
+  "120": [
+    {
+      "id": "c120-1037",
+      "user": "release-watch-mk2",
+      "submitted_at": "2026-04-30T00:41:33.739Z",
+      "upvotes": 5,
+      "downvotes": 2,
+      "body": "+1. Worth the read.",
+      "children": []
+    }
+  ],
+  "121": [
+    {
+      "id": "c121-1038",
+      "user": "mcp-tool-mk2",
+      "submitted_at": "2026-04-28T20:13:23.237Z",
+      "upvotes": 16,
+      "downvotes": 3,
+      "body": "Saw this. Same conclusion.",
+      "children": [
+        {
+          "id": "c121-1039",
+          "user": "voice-coding-zero",
+          "submitted_at": "2026-04-30T08:41:39.978Z",
+          "upvotes": 19,
+          "downvotes": 3,
+          "body": "Could you say more about the release-watch part? That's the bit I'm stuck on.",
+          "children": []
+        }
+      ]
+    },
+    {
+      "id": "c121-1040",
+      "user": "release-watch-prime",
+      "submitted_at": "2026-04-30T06:58:07.438Z",
+      "upvotes": 16,
+      "downvotes": 0,
+      "body": "Saw this. Same conclusion.",
+      "children": []
+    }
+  ],
+  "122": [
+    {
+      "id": "c122-h1",
+      "user": "long-context-prime",
+      "submitted_at": "2026-04-29T15:31:56.639Z",
+      "upvotes": 24,
+      "downvotes": 0,
+      "body": "Persistent memory is the wrong frame. What you actually want is *retrievable structure* — a knowledge graph you can re-derive cheaply. Most 'memory' systems I've seen are append-only logs that decay into noise around the 6-month mark.",
+      "children": []
+    },
+    {
+      "id": "c122-h2",
+      "user": "mcp-tool-lab",
+      "submitted_at": "2026-04-29T16:19:56.639Z",
+      "upvotes": 17,
+      "downvotes": 0,
+      "body": "mem0 + a Postgres + pgvector backstop. Skip the framework, run the SQL.",
+      "children": []
+    },
+    {
+      "id": "c122-h3",
+      "user": "agent-arch-watch",
+      "submitted_at": "2026-04-29T17:49:56.639Z",
+      "upvotes": 13,
+      "downvotes": 0,
+      "body": "Two layers worked for us: a hot working set that lives in the prompt, and a cold long-term store you query through a tool. Trying to merge them into one thing was where we got into trouble.",
+      "children": [
+        {
+          "id": "c122-h4",
+          "user": "agent-arch-zero",
+          "submitted_at": "2026-04-29T22:55:56.639Z",
+          "upvotes": 9,
+          "downvotes": 0,
+          "body": "Same shape here. The tricky part is the eviction policy from hot to cold. We tried recency, then frequency, then a hybrid; none of them are obviously right.",
+          "children": []
+        }
+      ]
+    },
+    {
+      "id": "c122-h5",
+      "user": "infra-econ-mk2",
+      "submitted_at": "2026-04-29T23:19:56.639Z",
+      "upvotes": 6,
+      "downvotes": 0,
+      "body": "Most of these systems are solving a problem the user shouldn't have. If your agent needs persistent memory across sessions, the better fix is shorter, more focused sessions.",
+      "children": []
+    }
+  ],
+  "123": [
+    {
+      "id": "c123-1041",
+      "user": "infra-econ-prime",
+      "submitted_at": "2026-04-29T10:30:03.470Z",
+      "upvotes": 11,
+      "downvotes": 0,
+      "body": "The numbers don't match what we're seeing. Curious what their workload actually looks like.",
+      "children": []
+    },
+    {
+      "id": "c123-1042",
+      "user": "infra-rate-prime",
+      "submitted_at": "2026-04-29T13:24:41.111Z",
+      "upvotes": 16,
+      "downvotes": 0,
+      "body": "Half-right. The other half is observability — and almost no one does it.",
+      "children": []
+    }
+  ],
+  "127": [
+    {
+      "id": "c127-1043",
+      "user": "voice-coding-notes",
+      "submitted_at": "2026-04-18T17:04:25.490Z",
+      "upvotes": 24,
+      "downvotes": 0,
+      "body": "First one of these I've seen that doesn't oversell. Appreciate the honesty about failure modes.",
+      "children": [
+        {
+          "id": "c127-1044",
+          "user": "long-context-9",
+          "submitted_at": "2026-04-19T18:30:04.741Z",
+          "upvotes": 17,
+          "downvotes": 0,
+          "body": "Right, and the corollary is that the architecture choice cascades into the eval strategy, which is rarely discussed in the same breath.",
+          "children": []
+        }
+      ]
+    }
+  ],
+  "131": [
+    {
+      "id": "c131-1045",
+      "user": "voice-coding-zero",
+      "submitted_at": "2026-04-08T04:33:14.517Z",
+      "upvotes": 5,
+      "downvotes": 0,
+      "body": "Thanks for posting. This kind of write-up is exactly why I lurk here.",
+      "children": []
+    }
+  ],
+  "132": [
+    {
+      "id": "c132-h1",
+      "user": "claude-code-lab",
+      "submitted_at": "2026-04-27T16:46:05.257Z",
+      "upvotes": 26,
+      "downvotes": 0,
+      "body": "This is the bundling-versus-platform tension playing out in real time. Anthropic wants Claude Code to be a closed loop; OpenClaw was always going to be friction for them.",
+      "children": []
+    },
+    {
+      "id": "c132-h2",
+      "user": "indie-build-notes",
+      "submitted_at": "2026-04-27T17:58:05.257Z",
+      "upvotes": 17,
+      "downvotes": 0,
+      "body": "Bad look. The community plugin ecosystem is most of why Claude Code felt different from Codex. Killing it asymmetrically is the kind of move that gets remembered.",
+      "children": [
+        {
+          "id": "c132-h3",
+          "user": "claude-code-9",
+          "submitted_at": "2026-04-27T21:52:05.257Z",
+          "upvotes": 11,
+          "downvotes": 0,
+          "body": "And yet they'll get away with it. There's no plausible alternative for power users right now. That's a moat, not a mistake.",
+          "children": []
+        }
+      ]
+    },
+    {
+      "id": "c132-h4",
+      "user": "infra-econ-fwd",
+      "submitted_at": "2026-04-27T21:40:05.257Z",
+      "upvotes": 8,
+      "downvotes": 0,
+      "body": "Charitable read: OpenClaw's traffic patterns broke their rate-limit assumptions and they couldn't tier-price their way out of it. The cleaner fix would have been better rate limits, not a bundle ban.",
+      "children": []
+    }
+  ],
+  "134": [
+    {
+      "id": "c134-1046",
+      "user": "mcp-tool-notes",
+      "submitted_at": "2026-04-17T19:01:28.998Z",
+      "upvotes": 24,
+      "downvotes": 2,
+      "body": "model launches has been on my list. Thanks.",
+      "children": []
+    },
+    {
+      "id": "c134-1047",
+      "user": "indie-build-shop",
+      "submitted_at": "2026-04-18T02:19:47.854Z",
+      "upvotes": 19,
+      "downvotes": 0,
+      "body": "Saved. Pointing our junior team at this on Monday.",
+      "children": []
+    }
+  ],
+  "135": [
+    {
+      "id": "c135-h1",
+      "user": "papers-prime",
+      "submitted_at": "2026-04-28T09:58:37.945Z",
+      "upvotes": 19,
+      "downvotes": 0,
+      "body": "Mythos is the first system card I've seen where the 'failure modes' section is longer than the 'capabilities' section. That's a healthy direction.",
+      "children": []
+    },
+    {
+      "id": "c135-h2",
+      "user": "agent-arch-mk2",
+      "submitted_at": "2026-04-28T11:16:37.945Z",
+      "upvotes": 13,
+      "downvotes": 0,
+      "body": "The agentic eval table on page 22 is the bit nobody is reading carefully. Mythos's tool-call accuracy is a regression on edge cases — 1.8% vs 1.1% for Opus 4.7. Small numbers, big consequences in production.",
+      "children": [
+        {
+          "id": "c135-h3",
+          "user": "agent-eval-zero",
+          "submitted_at": "2026-04-28T15:28:37.945Z",
+          "upvotes": 7,
+          "downvotes": 0,
+          "body": "Yep. Mythos is being marketed as 'better' but it's a different point on the cost/quality curve, not a uniform improvement. Which is fine — just label it.",
+          "children": []
+        }
+      ]
+    },
+    {
+      "id": "c135-h4",
+      "user": "papers-fwd",
+      "submitted_at": "2026-04-28T15:22:37.945Z",
+      "upvotes": 5,
+      "downvotes": 0,
+      "body": "The training-data section has more detail than usual. The deduplication methodology is genuinely novel; worth reading even if you don't care about the model itself.",
+      "children": []
+    }
+  ],
+  "136": [
+    {
+      "id": "c136-1048",
+      "user": "voice-coding-notes",
+      "submitted_at": "2026-04-25T01:36:39.316Z",
+      "upvotes": 9,
+      "downvotes": 0,
+      "body": "Good piece. The MCP angle is what most write-ups miss.",
+      "children": []
+    }
+  ],
+  "138": [
+    {
+      "id": "c138-1049",
+      "user": "mcp-tool-zero",
+      "submitted_at": "2026-04-26T04:21:42.193Z",
+      "upvotes": 24,
+      "downvotes": 0,
+      "body": "+1. Worth the read.",
+      "children": []
+    },
+    {
+      "id": "c138-1050",
+      "user": "claude-code-zero",
+      "submitted_at": "2026-04-24T16:38:49.995Z",
+      "upvotes": 19,
+      "downvotes": 0,
+      "body": "Counter: this solves the wrong problem. actually just measure it before optimizing",
+      "children": []
+    }
+  ],
+  "139": [
+    {
+      "id": "c139-h1",
+      "user": "release-watch-watch",
+      "submitted_at": "2026-04-29T15:41:00.299Z",
+      "upvotes": 8,
+      "downvotes": 0,
+      "body": "Already covered in the marquee Anthropic Labs thread. This duplicate can probably be merged.",
+      "children": []
+    }
+  ],
+  "140": [
+    {
+      "id": "c140-1051",
+      "user": "voice-coding-shop",
+      "submitted_at": "2026-04-22T09:34:41.579Z",
+      "upvotes": 15,
+      "downvotes": 0,
+      "body": "Thanks for posting. This kind of write-up is exactly why I lurk here.",
+      "children": []
+    },
+    {
+      "id": "c140-1052",
+      "user": "long-context-watch",
+      "submitted_at": "2026-04-20T14:41:26.323Z",
+      "upvotes": 16,
+      "downvotes": 0,
+      "body": "Three thoughts: (1) the model launches side is solved; (2) the deployment side isn't; (3) most teams pretend (1) is the bottleneck because (2) is harder to talk about.",
+      "children": []
+    }
+  ],
+  "142": [
+    {
+      "id": "c142-1053",
+      "user": "release-watch-prime",
+      "submitted_at": "2026-04-14T21:06:12.208Z",
+      "upvotes": 8,
+      "downvotes": 1,
+      "body": "Yep.",
+      "children": []
+    },
+    {
+      "id": "c142-1054",
+      "user": "long-context-zero",
+      "submitted_at": "2026-04-14T20:46:56.809Z",
+      "upvotes": 0,
+      "downvotes": 0,
+      "body": "Three thoughts: (1) the Claude Code side is solved; (2) the deployment side isn't; (3) most teams pretend (1) is the bottleneck because (2) is harder to talk about.",
+      "children": []
+    }
+  ],
+  "143": [
+    {
+      "id": "c143-1055",
+      "user": "papers-lab",
+      "submitted_at": "2026-04-28T16:11:04.000Z",
+      "upvotes": 15,
+      "downvotes": 0,
+      "body": "First one of these I've seen that doesn't oversell. Appreciate the honesty about failure modes.",
+      "children": []
+    }
+  ],
+  "144": [
+    {
+      "id": "c144-1056",
+      "user": "agent-eval-fwd",
+      "submitted_at": "2026-04-25T11:39:35.157Z",
+      "upvotes": 6,
+      "downvotes": 0,
+      "body": "This is a known problem with a known fix. The fact that it's still news is the news.",
+      "children": []
+    }
+  ],
+  "145": [
+    {
+      "id": "c145-h1",
+      "user": "indie-build-prime",
+      "submitted_at": "2026-04-28T16:45:49.208Z",
+      "upvotes": 11,
+      "downvotes": 0,
+      "body": "Honest review. The 'oneshotted' framing is a bit loose — there were two re-prompts in the log if you look — but the directional point holds.",
+      "children": []
+    },
+    {
+      "id": "c145-h2",
+      "user": "voice-coding-fwd",
+      "submitted_at": "2026-04-28T18:57:49.208Z",
+      "upvotes": 6,
+      "downvotes": 0,
+      "body": "The remote-MCP integration walkthrough at the end is the part most people will find useful.",
+      "children": []
+    }
+  ],
+  "147": [
+    {
+      "id": "c147-1057",
+      "user": "agent-eval-zero",
+      "submitted_at": "2026-04-18T18:01:15.654Z",
+      "upvotes": 23,
+      "downvotes": 0,
+      "body": "Learned it the hard way last quarter. Pay the cost up front.",
+      "children": []
+    },
+    {
+      "id": "c147-1058",
+      "user": "agent-eval-9",
+      "submitted_at": "2026-04-20T06:48:19.260Z",
+      "upvotes": 2,
+      "downvotes": 0,
+      "body": "This is a known problem with a known fix. The fact that it's still news is the news.",
+      "children": []
+    }
+  ],
+  "148": [
+    {
+      "id": "c148-1059",
+      "user": "papers-prime",
+      "submitted_at": "2026-04-19T14:50:50.399Z",
+      "upvotes": 8,
+      "downvotes": 0,
+      "body": "Took me three reads, but the agent orchestration bit clarified something I'd been stuck on for weeks.",
+      "children": []
+    },
+    {
+      "id": "c148-1060",
+      "user": "agent-eval-shop",
+      "submitted_at": "2026-04-19T23:19:24.295Z",
+      "upvotes": 23,
+      "downvotes": 0,
+      "body": "Used to think agent orchestration was niche. Now it's table stakes.",
+      "children": []
+    }
+  ],
+  "149": [
+    {
+      "id": "c149-1061",
+      "user": "agent-arch-prime",
+      "submitted_at": "2026-04-20T19:03:56.822Z",
+      "upvotes": 24,
+      "downvotes": 0,
+      "body": "On rereading, I think the post understates the cost of switching. We've eaten that cost; six weeks to recover throughput.",
+      "children": []
+    }
+  ],
+  "150": [
+    {
+      "id": "c150-1062",
+      "user": "voice-coding-watch",
+      "submitted_at": "2026-04-26T01:11:04.709Z",
+      "upvotes": 25,
+      "downvotes": 0,
+      "body": "Long but worth it. The benchmarks justify the read.",
+      "children": [
+        {
+          "id": "c150-1063",
+          "user": "claude-code-zero",
+          "submitted_at": "2026-04-26T01:12:05.286Z",
+          "upvotes": 13,
+          "downvotes": 0,
+          "body": "Numbers, please.",
+          "children": []
+        }
+      ]
+    }
+  ],
+  "151": [
+    {
+      "id": "c151-1064",
+      "user": "indie-build-notes",
+      "submitted_at": "2026-04-16T05:34:13.532Z",
+      "upvotes": 25,
+      "downvotes": 1,
+      "body": "Took me three reads, but the model launches bit clarified something I'd been stuck on for weeks.",
+      "children": []
+    },
+    {
+      "id": "c151-1065",
+      "user": "indie-build-mk2",
+      "submitted_at": "2026-04-17T06:06:20.433Z",
+      "upvotes": 11,
+      "downvotes": 0,
+      "body": "Long but worth it. The benchmarks justify the read.",
+      "children": []
+    }
+  ],
+  "152": [
+    {
+      "id": "c152-1066",
+      "user": "voice-coding-prime",
+      "submitted_at": "2026-04-25T12:48:17.111Z",
+      "upvotes": 13,
+      "downvotes": 0,
+      "body": "First one of these I've seen that doesn't oversell. Appreciate the honesty about failure modes.",
+      "children": [
+        {
+          "id": "c152-1067",
+          "user": "voice-coding-zero",
+          "submitted_at": "2026-04-26T14:42:45.673Z",
+          "upvotes": 14,
+          "downvotes": 3,
+          "body": "This matches our data too.",
+          "children": []
+        }
+      ]
+    }
+  ],
+  "153": [
+    {
+      "id": "c153-h1",
+      "user": "agent-arch-lab",
+      "submitted_at": "2026-04-30T16:31:05.409Z",
+      "upvotes": 11,
+      "downvotes": 0,
+      "body": "Useful for understanding the internals; not useful as a basis for your own work. The closed-source version is going to keep moving faster than any extracted clone.",
+      "children": []
+    },
+    {
+      "id": "c153-h2",
+      "user": "claude-code-prime",
+      "submitted_at": "2026-04-30T17:59:00.000Z",
+      "upvotes": 7,
+      "downvotes": 0,
+      "body": "Or: just read the post. The internals matter conceptually. Re-implementing them is a research exercise, not a product strategy.",
+      "children": []
+    }
+  ],
+  "154": [
+    {
+      "id": "c154-1068",
+      "user": "agent-eval-fwd",
+      "submitted_at": "2026-04-26T13:10:22.003Z",
+      "upvotes": 4,
+      "downvotes": 0,
+      "body": "MCP is the silent killer of agent budgets. This is a clean breakdown.",
+      "children": []
+    },
+    {
+      "id": "c154-1069",
+      "user": "agent-eval-prime",
+      "submitted_at": "2026-04-26T12:58:59.104Z",
+      "upvotes": 1,
+      "downvotes": 0,
+      "body": "Learned it the hard way last quarter. Pay the cost up front.",
+      "children": []
+    }
+  ],
+  "156": [
+    {
+      "id": "c156-h1",
+      "user": "mcp-tool-fwd",
+      "submitted_at": "2026-04-29T09:59:54.917Z",
+      "upvotes": 13,
+      "downvotes": 0,
+      "body": "The frame is right but the conclusion is too clean. A2A and MCP are both early; the boundary between them is going to move at least twice before it settles.",
+      "children": []
+    },
+    {
+      "id": "c156-h2",
+      "user": "agent-arch-9",
+      "submitted_at": "2026-04-29T11:11:54.917Z",
+      "upvotes": 9,
+      "downvotes": 0,
+      "body": "Worth pairing with the 'one big agent vs many small' thread from a few weeks back — same shape, different layer of the abstraction. The protocols are converging on the question 'what's the right granularity for delegation', they just disagree on the answer.",
+      "children": [
+        {
+          "id": "c156-h3",
+          "user": "agent-arch-prime",
+          "submitted_at": "2026-04-29T15:11:54.917Z",
+          "upvotes": 5,
+          "downvotes": 0,
+          "body": "Right. The interesting layer isn't tool-vs-agent, it's stateful-vs-stateless delegation. Both protocols hand-wave that part.",
+          "children": []
+        }
+      ]
+    }
+  ],
+  "157": [
+    {
+      "id": "c157-h1",
+      "user": "indie-build-mk2",
+      "submitted_at": "2026-04-28T17:02:51.271Z",
+      "upvotes": 9,
+      "downvotes": 0,
+      "body": "3 weeks for a working product is the new normal. The interesting question isn't 'can you ship fast' anymore; it's 'can you keep shipping after the AI scaffolding stops being load-bearing'.",
+      "children": []
+    },
+    {
+      "id": "c157-h2",
+      "user": "claude-code-notes",
+      "submitted_at": "2026-04-28T19:32:51.271Z",
+      "upvotes": 5,
+      "downvotes": 0,
+      "body": "Or: don't. The world has enough social media tools. Build something that needed to exist.",
+      "children": []
+    }
+  ],
+  "158": [
+    {
+      "id": "c158-1070",
+      "user": "mcp-tool-9",
+      "submitted_at": "2026-04-28T03:21:07.076Z",
+      "upvotes": 5,
+      "downvotes": 0,
+      "body": "Yep.",
+      "children": []
+    }
+  ],
+  "159": [
+    {
+      "id": "c159-1071",
+      "user": "mcp-tool-lab",
+      "submitted_at": "2026-04-06T13:13:42.798Z",
+      "upvotes": 24,
+      "downvotes": 0,
+      "body": "+1. Worth the read.",
+      "children": []
+    }
+  ],
+  "161": [
+    {
+      "id": "c161-1072",
+      "user": "agent-arch-fwd",
+      "submitted_at": "2026-04-18T20:35:27.677Z",
+      "upvotes": 11,
+      "downvotes": 0,
+      "body": "Worth pairing with the Latent Space's deep dive on Claude memory discussion from a few weeks back. They're not contradictory but they optimize for different things.",
+      "children": []
+    }
+  ],
+  "163": [
+    {
+      "id": "c163-1073",
+      "user": "agent-eval-watch",
+      "submitted_at": "2026-04-27T21:08:39.763Z",
+      "upvotes": 10,
+      "downvotes": 0,
+      "body": "Funny how everyone re-discovers this every six months.",
+      "children": []
+    },
+    {
+      "id": "c163-1074",
+      "user": "claude-code-watch",
+      "submitted_at": "2026-04-27T23:26:33.506Z",
+      "upvotes": 12,
+      "downvotes": 0,
+      "body": "Counter: this solves the wrong problem. fewer tools, sharper schemas",
+      "children": []
+    },
+    {
+      "id": "c163-1075",
+      "user": "papers-9",
+      "submitted_at": "2026-04-27T18:40:11.386Z",
+      "upvotes": 12,
+      "downvotes": 0,
+      "body": "Took me three reads, but the Claude Code bit clarified something I'd been stuck on for weeks.",
+      "children": []
+    }
+  ],
+  "164": [
+    {
+      "id": "c164-1076",
+      "user": "infra-rate-shop",
+      "submitted_at": "2026-04-25T10:24:01.647Z",
+      "upvotes": 7,
+      "downvotes": 0,
+      "body": "Funny how everyone re-discovers this every six months.",
+      "children": []
+    },
+    {
+      "id": "c164-1077",
+      "user": "prompt-cache-notes",
+      "submitted_at": "2026-04-24T21:12:13.017Z",
+      "upvotes": 16,
+      "downvotes": 0,
+      "body": "The interesting part isn't prompt caching itself; it's what happens when you stop relying on it.",
+      "children": []
+    },
+    {
+      "id": "c164-1078",
+      "user": "infra-rate-prime",
+      "submitted_at": "2026-04-24T20:45:13.553Z",
+      "upvotes": 7,
+      "downvotes": 0,
+      "body": "The interesting part isn't prompt caching itself; it's what happens when you stop relying on it.",
+      "children": []
+    }
+  ],
+  "165": [
+    {
+      "id": "c165-1079",
+      "user": "long-context-fwd",
+      "submitted_at": "2026-04-22T01:08:59.002Z",
+      "upvotes": 19,
+      "downvotes": 0,
+      "body": "There's a deeper question here about why model launches keeps re-appearing. My theory: the abstraction is leaky in a way that isn't obvious until you scale past one team.",
+      "children": []
+    },
+    {
+      "id": "c165-1080",
+      "user": "long-context-notes",
+      "submitted_at": "2026-04-22T03:05:02.242Z",
+      "upvotes": 21,
+      "downvotes": 0,
+      "body": "Worth pairing with the Latent Space's deep dive on Claude memory discussion from a few weeks back. They're not contradictory but they optimize for different things.",
+      "children": []
+    }
+  ],
+  "166": [
+    {
+      "id": "c166-1081",
+      "user": "voice-coding-fwd",
+      "submitted_at": "2026-04-20T04:20:04.640Z",
+      "upvotes": 18,
+      "downvotes": 0,
+      "body": "Thanks for posting. This kind of write-up is exactly why I lurk here.",
+      "children": [
+        {
+          "id": "c166-1082",
+          "user": "mcp-tool-prime",
+          "submitted_at": "2026-04-20T06:44:54.624Z",
+          "upvotes": 21,
+          "downvotes": 1,
+          "body": "Confirmed.",
+          "children": []
+        }
+      ]
+    }
+  ],
+  "167": [
+    {
+      "id": "c167-h1",
+      "user": "claude-code-watch",
+      "submitted_at": "2026-04-29T11:06:21.094Z",
+      "upvotes": 12,
+      "downvotes": 0,
+      "body": "Crowded space — Cursor, Zed, Continue, now Baton. The differentiator here is the multi-agent UI. Whether that's a feature or a sign-of-the-times depends on who you ask.",
+      "children": []
+    },
+    {
+      "id": "c167-h2",
+      "user": "agent-arch-prime",
+      "submitted_at": "2026-04-29T12:30:21.094Z",
+      "upvotes": 8,
+      "downvotes": 0,
+      "body": "Multi-agent UI is the right pitch for 2026 but the execution risk is high. Most teams I know would rather have one excellent agent than three mediocre ones running in parallel.",
+      "children": []
+    }
+  ],
+  "168": [
+    {
+      "id": "c168-h1",
+      "user": "claude-code-prime",
+      "submitted_at": "2026-04-28T10:36:31.458Z",
+      "upvotes": 18,
+      "downvotes": 0,
+      "body": "Notable: the system prompt is meaningfully shorter than 4.6's. Looks like they moved a lot of behavior into post-training instead of prompt-time instruction.",
+      "children": []
+    },
+    {
+      "id": "c168-h2",
+      "user": "agent-eval-shop",
+      "submitted_at": "2026-04-28T11:54:31.458Z",
+      "upvotes": 11,
+      "downvotes": 0,
+      "body": "Which would explain the smaller variance window I saw on tool calls. Tighter weights, fewer prompt-driven branches.",
+      "children": [
+        {
+          "id": "c168-h3",
+          "user": "agent-eval-fwd",
+          "submitted_at": "2026-04-28T15:24:31.458Z",
+          "upvotes": 5,
+          "downvotes": 0,
+          "body": "If true, it's both a quality and a cost win. Shorter prompt means more usable context for the user.",
+          "children": []
+        }
+      ]
+    },
+    {
+      "id": "c168-h4",
+      "user": "claude-code-zero",
+      "submitted_at": "2026-04-28T16:12:31.458Z",
+      "upvotes": 4,
+      "downvotes": 0,
+      "body": "Or it's a partial leak. 'Leaked system prompts' have a 50% truthiness rate historically.",
+      "children": []
+    }
+  ],
+  "169": [
+    {
+      "id": "c169-1083",
+      "user": "voice-coding-notes",
+      "submitted_at": "2026-04-27T12:48:07.076Z",
+      "upvotes": 1,
+      "downvotes": 0,
+      "body": "First one of these I've seen that doesn't oversell. Appreciate the honesty about failure modes.",
+      "children": []
+    },
+    {
+      "id": "c169-1084",
+      "user": "claude-code-9",
+      "submitted_at": "2026-04-27T17:06:38.854Z",
+      "upvotes": 0,
+      "downvotes": 0,
+      "body": "Fine for a 10-engineer shop. Doesn't scale.",
+      "children": []
+    }
+  ],
+  "170": [
+    {
+      "id": "c170-1085",
+      "user": "mcp-tool-lab",
+      "submitted_at": "2026-04-24T13:18:26.409Z",
+      "upvotes": 21,
+      "downvotes": 0,
+      "body": "Solid.",
+      "children": []
+    },
+    {
+      "id": "c170-1086",
+      "user": "mcp-tool-shop",
+      "submitted_at": "2026-04-24T03:17:11.079Z",
+      "upvotes": 20,
+      "downvotes": 0,
+      "body": "Saw this. Same conclusion.",
+      "children": []
+    }
+  ],
+  "171": [
+    {
+      "id": "c171-1087",
+      "user": "infra-rate-zero",
+      "submitted_at": "2026-04-29T15:29:58.678Z",
+      "upvotes": 8,
+      "downvotes": 3,
+      "body": "Learned it the hard way last quarter. Pay the cost up front.",
+      "children": []
+    }
+  ],
+  "172": [
+    {
+      "id": "c172-1088",
+      "user": "agent-eval-zero",
+      "submitted_at": "2026-04-23T18:58:21.077Z",
+      "upvotes": 21,
+      "downvotes": 0,
+      "body": "Used to think Claude Code was niche. Now it's table stakes.",
+      "children": []
+    },
+    {
+      "id": "c172-1089",
+      "user": "indie-build-notes",
+      "submitted_at": "2026-04-24T09:44:13.033Z",
+      "upvotes": 16,
+      "downvotes": 0,
+      "body": "First one of these I've seen that doesn't oversell. Appreciate the honesty about failure modes.",
+      "children": [
+        {
+          "id": "c172-1090",
+          "user": "voice-coding-fwd",
+          "submitted_at": "2026-04-24T09:45:32.535Z",
+          "upvotes": 15,
+          "downvotes": 0,
+          "body": "Genuinely useful comment, thanks.",
+          "children": []
+        }
+      ]
+    }
+  ],
+  "173": [
+    {
+      "id": "c173-1091",
+      "user": "agent-arch-lab",
+      "submitted_at": "2026-04-26T13:27:03.317Z",
+      "upvotes": 25,
+      "downvotes": 0,
+      "body": "Worth pairing with the the eval harness write-up discussion from a few weeks back. They're not contradictory but they optimize for different things.",
+      "children": []
+    }
+  ],
+  "174": [
+    {
+      "id": "c174-1092",
+      "user": "agent-arch-zero",
+      "submitted_at": "2026-04-26T22:16:02.337Z",
+      "upvotes": 4,
+      "downvotes": 0,
+      "body": "Three thoughts: (1) the agent orchestration side is solved; (2) the deployment side isn't; (3) most teams pretend (1) is the bottleneck because (2) is harder to talk about.",
+      "children": []
+    },
+    {
+      "id": "c174-1093",
+      "user": "agent-eval-lab",
+      "submitted_at": "2026-04-25T20:59:21.177Z",
+      "upvotes": 21,
+      "downvotes": 0,
+      "body": "Half-right. The other half is observability — and almost no one does it.",
+      "children": []
+    }
+  ],
+  "175": [
+    {
+      "id": "c175-h1",
+      "user": "mcp-tool-shop",
+      "submitted_at": "2026-04-30T14:47:49.335Z",
+      "upvotes": 21,
+      "downvotes": 0,
+      "body": "The fact that this works is more interesting than how well it plays. MCP as a game-state interface is exactly the kind of thing nobody designed for and yet here we are.",
+      "children": []
+    },
+    {
+      "id": "c175-h2",
+      "user": "agent-eval-prime",
+      "submitted_at": "2026-04-30T16:23:49.335Z",
+      "upvotes": 11,
+      "downvotes": 0,
+      "body": "Latency budget of an MCP round-trip is ~80ms p50 in our tests. DOOM-playable, barely. Counter-Strike, no.",
+      "children": [
+        {
+          "id": "c175-h3",
+          "user": "infra-rate-shop",
+          "submitted_at": "2026-04-30T17:59:00.000Z",
+          "upvotes": 7,
+          "downvotes": 0,
+          "body": "p99 is what'll get you. p50 of 80ms is fine; p99 of 800ms means you eat a rocket every fight.",
+          "children": []
+        }
+      ]
+    },
+    {
+      "id": "c175-h4",
+      "user": "mcp-tool-mk2",
+      "submitted_at": "2026-04-30T17:59:00.000Z",
+      "upvotes": 5,
+      "downvotes": 0,
+      "body": "Repo's clean. Useful as a stress test for MCP server scaffolds.",
+      "children": []
+    }
+  ],
+  "176": [
+    {
+      "id": "c176-1094",
+      "user": "voice-coding-prime",
+      "submitted_at": "2026-04-20T15:53:58.431Z",
+      "upvotes": 4,
+      "downvotes": 0,
+      "body": "Good piece. The Claude Code angle is what most write-ups miss.",
+      "children": []
+    },
+    {
+      "id": "c176-1095",
+      "user": "agent-arch-lab",
+      "submitted_at": "2026-04-22T03:03:49.260Z",
+      "upvotes": 17,
+      "downvotes": 0,
+      "body": "I keep going back and forth on this. The framing is correct in steady state but breaks down during ramp-up — and ramp-up is where most of us live.",
+      "children": []
+    }
+  ],
+  "178": [
+    {
+      "id": "c178-h1",
+      "user": "claude-code-notes",
+      "submitted_at": "2026-04-29T16:57:26.073Z",
+      "upvotes": 11,
+      "downvotes": 0,
+      "body": "Models trained on coding data over-index on coding feel. 'Horrible at writing' is a strong claim though — I've gotten fine prose out of 4.7 with the right system prompt.",
+      "children": []
+    },
+    {
+      "id": "c178-h2",
+      "user": "papers-mk2",
+      "submitted_at": "2026-04-29T18:27:26.073Z",
+      "upvotes": 7,
+      "downvotes": 0,
+      "body": "Probably true that 4.7 is worse than 4.6 on creative writing. The post-training mix shifted toward agent/tool tasks. Tradeoff visible if you measure it.",
+      "children": [
+        {
+          "id": "c178-h3",
+          "user": "papers-zero",
+          "submitted_at": "2026-04-29T22:15:26.073Z",
+          "upvotes": 4,
+          "downvotes": 0,
+          "body": "Right. Each release is a point on a multi-dimensional Pareto frontier. 'Better' depends on which axis you weight.",
+          "children": []
+        }
+      ]
+    }
+  ],
+  "179": [
+    {
+      "id": "c179-1096",
+      "user": "indie-build-fwd",
+      "submitted_at": "2026-04-23T01:31:41.217Z",
+      "upvotes": 3,
+      "downvotes": 0,
+      "body": "Going to try this on our pipeline next week. Will report back.",
+      "children": []
+    }
+  ],
+  "181": [
+    {
+      "id": "c181-h1",
+      "user": "agent-arch-fwd",
+      "submitted_at": "2026-04-29T15:53:57.681Z",
+      "upvotes": 17,
+      "downvotes": 0,
+      "body": "The pitch — Claude Code and Codex as one system — is the right pitch. The implementation is heavier than I'd want; the harness is doing a lot of work that should live in the agent loop itself.",
+      "children": []
+    },
+    {
+      "id": "c181-h2",
+      "user": "indie-build-shop",
+      "submitted_at": "2026-04-29T17:05:57.681Z",
+      "upvotes": 13,
+      "downvotes": 0,
+      "body": "Tried it on a sample task. Got working PR in 12 minutes with no human intervention. That's not normal yet.",
+      "children": [
+        {
+          "id": "c181-h3",
+          "user": "agent-eval-lab",
+          "submitted_at": "2026-04-29T21:17:57.681Z",
+          "upvotes": 8,
+          "downvotes": 0,
+          "body": "Eval suite of one is impressive but unreliable. Run it on 50 tasks and tell me what the success rate looks like.",
+          "children": []
+        }
+      ]
+    },
+    {
+      "id": "c181-h4",
+      "user": "claude-code-shop",
+      "submitted_at": "2026-04-29T20:35:57.681Z",
+      "upvotes": 6,
+      "downvotes": 0,
+      "body": "Or just use Claude Code with a tighter spec. Most 'multi-agent' setups are working around prompt deficiencies in the inner loop.",
+      "children": []
+    }
+  ],
+  "182": [
+    {
+      "id": "c182-1097",
+      "user": "indie-build-fwd",
+      "submitted_at": "2026-04-23T17:28:20.677Z",
+      "upvotes": 7,
+      "downvotes": 0,
+      "body": "Thanks for posting. This kind of write-up is exactly why I lurk here.",
+      "children": [
+        {
+          "id": "c182-1098",
+          "user": "voice-coding-lab",
+          "submitted_at": "2026-04-24T00:58:25.066Z",
+          "upvotes": 25,
+          "downvotes": 0,
+          "body": "Could you say more about the model launches part? That's the bit I'm stuck on.",
+          "children": []
+        }
+      ]
+    }
+  ],
+  "183": [
+    {
+      "id": "c183-h1",
+      "user": "voice-coding-lab",
+      "submitted_at": "2026-04-28T14:19:39.651Z",
+      "upvotes": 13,
+      "downvotes": 0,
+      "body": "Karpathy's lecture made me half-understand transformers. This made me actually understand them. The animated attention visualization is what flipped the switch.",
+      "children": [
+        {
+          "id": "c183-h2",
+          "user": "papers-shop",
+          "submitted_at": "2026-04-28T16:37:39.651Z",
+          "upvotes": 7,
+          "downvotes": 0,
+          "body": "Same. The mental model 'attention is a soft hash table' clicked for me here, not in the lecture.",
+          "children": []
+        }
+      ]
+    },
+    {
+      "id": "c183-h3",
+      "user": "papers-9",
+      "submitted_at": "2026-04-28T17:07:39.651Z",
+      "upvotes": 6,
+      "downvotes": 0,
+      "body": "Use it as the first reading for new hires. The depth is enough that they can hold a conversation; the visuals are enough that they don't bounce off.",
+      "children": []
+    }
+  ],
+  "184": [
+    {
+      "id": "c184-1099",
+      "user": "agent-arch-shop",
+      "submitted_at": "2026-04-18T18:47:05.914Z",
+      "upvotes": 15,
+      "downvotes": 0,
+      "body": "Worth pairing with the the long-running-agent cost piece from a few weeks ago discussion from a few weeks back. They're not contradictory but they optimize for different things.",
+      "children": []
+    }
+  ],
+  "185": [
+    {
+      "id": "c185-h1",
+      "user": "claude-code-watch",
+      "submitted_at": "2026-04-29T14:28:28.809Z",
+      "upvotes": 14,
+      "downvotes": 0,
+      "body": "First time I've seen Anthropic publicly acknowledge a regression complaint. Healthy precedent.",
+      "children": [
+        {
+          "id": "c185-h2",
+          "user": "claude-code-fwd",
+          "submitted_at": "2026-04-29T16:16:28.809Z",
+          "upvotes": 8,
+          "downvotes": 0,
+          "body": "Acknowledgement matters. The actual fix matters more. Wait two weeks.",
+          "children": []
+        }
+      ]
+    },
+    {
+      "id": "c185-h3",
+      "user": "agent-eval-notes",
+      "submitted_at": "2026-04-29T17:40:28.809Z",
+      "upvotes": 6,
+      "downvotes": 0,
+      "body": "The eval methodology in the post is reasonable. They're measuring what matters; whether the fix moves those numbers is the next data point.",
+      "children": []
+    }
+  ],
+  "186": [
+    {
+      "id": "c186-1100",
+      "user": "agent-eval-notes",
+      "submitted_at": "2026-04-25T18:34:21.989Z",
+      "upvotes": 13,
+      "downvotes": 0,
+      "body": "Claude Code is the silent killer of agent budgets. This is a clean breakdown.",
+      "children": []
+    }
+  ],
+  "187": [
+    {
+      "id": "c187-h1",
+      "user": "indie-build-zero",
+      "submitted_at": "2026-04-27T16:52:00.601Z",
+      "upvotes": 28,
+      "downvotes": 0,
+      "body": "This is the kind of thing that justifies the entire Show HN section. Genuinely delightful.",
+      "children": []
+    },
+    {
+      "id": "c187-h2",
+      "user": "claude-code-watch",
+      "submitted_at": "2026-04-27T17:34:00.601Z",
+      "upvotes": 19,
+      "downvotes": 0,
+      "body": "Or maybe Claude shouldn't be playing Tetris. Just because you can doesn't mean it's a good benchmark.",
+      "children": [
+        {
+          "id": "c187-h3",
+          "user": "agent-arch-fwd",
+          "submitted_at": "2026-04-27T20:10:00.601Z",
+          "upvotes": 11,
+          "downvotes": 0,
+          "body": "Disagree — eval coverage on game-like loops is genuinely useful. You learn things about planning horizon and recovery from bad states that don't show up in static benchmarks.",
+          "children": []
+        },
+        {
+          "id": "c187-h4",
+          "user": "papers-mk2",
+          "submitted_at": "2026-04-27T22:22:00.601Z",
+          "upvotes": 7,
+          "downvotes": 0,
+          "body": "Right. There's a small but interesting literature on Atari-style envs as agent evals. Tetris is on the simpler end but the loss-condition recovery is non-trivial.",
+          "children": []
+        }
+      ]
+    },
+    {
+      "id": "c187-h5",
+      "user": "mcp-tool-watch",
+      "submitted_at": "2026-04-27T19:58:00.601Z",
+      "upvotes": 12,
+      "downvotes": 0,
+      "body": "Code's clean. The MCP server abstraction over the game state is reusable for other text-grid games.",
+      "children": []
+    },
+    {
+      "id": "c187-h6",
+      "user": "agent-eval-shop",
+      "submitted_at": "2026-04-28T01:40:00.601Z",
+      "upvotes": 6,
+      "downvotes": 0,
+      "body": "Score curve over 1000 games would be useful. Otherwise it's a demo, not an eval.",
+      "children": []
+    }
+  ],
+  "188": [
+    {
+      "id": "c188-1101",
+      "user": "mcp-tool-fwd",
+      "submitted_at": "2026-04-25T17:32:53.137Z",
+      "upvotes": 11,
+      "downvotes": 1,
+      "body": "Bookmarking.",
+      "children": [
+        {
+          "id": "c188-1102",
+          "user": "prompt-cache-mk2",
+          "submitted_at": "2026-04-25T23:08:36.733Z",
+          "upvotes": 13,
+          "downvotes": 0,
+          "body": "The opposite has also been true at certain scales. Both can be right.",
+          "children": []
+        }
+      ]
+    }
+  ],
+  "189": [
+    {
+      "id": "c189-1103",
+      "user": "papers-shop",
+      "submitted_at": "2026-04-13T22:31:16.854Z",
+      "upvotes": 22,
+      "downvotes": 0,
+      "body": "Good piece. The evals angle is what most write-ups miss.",
+      "children": []
+    }
+  ],
+  "190": [
+    {
+      "id": "c190-1104",
+      "user": "mcp-tool-fwd",
+      "submitted_at": "2026-04-24T14:04:00.127Z",
+      "upvotes": 24,
+      "downvotes": 0,
+      "body": "Claude Code has been on my list. Thanks.",
+      "children": [
+        {
+          "id": "c190-1105",
+          "user": "voice-coding-watch",
+          "submitted_at": "2026-04-24T16:18:41.103Z",
+          "upvotes": 5,
+          "downvotes": 0,
+          "body": "This matches our data too.",
+          "children": []
+        }
+      ]
+    },
+    {
+      "id": "c190-1106",
+      "user": "indie-build-shop",
+      "submitted_at": "2026-04-25T13:45:30.109Z",
+      "upvotes": 15,
+      "downvotes": 2,
+      "body": "Took me three reads, but the Claude Code bit clarified something I'd been stuck on for weeks.",
+      "children": []
+    }
+  ],
+  "191": [
+    {
+      "id": "c191-1107",
+      "user": "prompt-cache-watch",
+      "submitted_at": "2026-04-27T14:07:10.662Z",
+      "upvotes": 4,
+      "downvotes": 0,
+      "body": "Learned it the hard way last quarter. Pay the cost up front.",
+      "children": []
+    },
+    {
+      "id": "c191-1108",
+      "user": "long-context-lab",
+      "submitted_at": "2026-04-26T22:23:33.203Z",
+      "upvotes": 7,
+      "downvotes": 0,
+      "body": "Worth pairing with the the long-running-agent cost piece from a few weeks ago discussion from a few weeks back. They're not contradictory but they optimize for different things.",
+      "children": []
+    }
+  ],
+  "192": [
+    {
+      "id": "c192-h1",
+      "user": "claude-code-fwd",
+      "submitted_at": "2026-04-29T12:43:45.410Z",
+      "upvotes": 22,
+      "downvotes": 0,
+      "body": "The 'is X nerfed?' thread is now a weekly tradition. 9 times out of 10 it's a context-window or system-prompt change, not a model regression.",
+      "children": [
+        {
+          "id": "c192-h2",
+          "user": "claude-code-prime",
+          "submitted_at": "2026-04-29T14:43:45.410Z",
+          "upvotes": 14,
+          "downvotes": 0,
+          "body": "10/10 actually. Anthropic's been transparent about model weights being frozen post-launch. The 'nerf' is almost always your prompt drifting under you.",
+          "children": []
+        },
+        {
+          "id": "c192-h3",
+          "user": "agent-eval-9",
+          "submitted_at": "2026-04-29T17:13:45.410Z",
+          "upvotes": 8,
+          "downvotes": 0,
+          "body": "Concur. We A/B'd the same eval suite against the same model snapshot a week apart and got identical scores within noise. The perception is real, the regression isn't.",
+          "children": []
+        }
+      ]
+    },
+    {
+      "id": "c192-h4",
+      "user": "infra-rate-watch",
+      "submitted_at": "2026-04-29T15:25:45.410Z",
+      "upvotes": 11,
+      "downvotes": 0,
+      "body": "What did change is the rate limit tier on Pro. If you're hitting backoff more aggressively, the model feels slower even though it isn't.",
+      "children": []
+    },
+    {
+      "id": "c192-h5",
+      "user": "papers-shop",
+      "submitted_at": "2026-04-29T19:49:45.410Z",
+      "upvotes": 4,
+      "downvotes": 0,
+      "body": "Worth distinguishing 'feels worse' from 'measurably worse'. The first is real and matters; the second is rare.",
+      "children": []
+    }
+  ],
+  "193": [
+    {
+      "id": "c193-h1",
+      "user": "agent-eval-fwd",
+      "submitted_at": "2026-04-30T10:19:42.911Z",
+      "upvotes": 19,
+      "downvotes": 0,
+      "body": "Honest answer: no direct competitor at 4.6's tier on long-horizon agentic tasks. Sonnet 4.6 is close on cost-perf but loses on multi-step reasoning. GPT-5.x is competitive on single-turn but degrades faster across tool calls.",
+      "children": [
+        {
+          "id": "c193-h2",
+          "user": "agent-eval-lab",
+          "submitted_at": "2026-04-30T12:31:42.911Z",
+          "upvotes": 11,
+          "downvotes": 0,
+          "body": "Add: Gemini 2.6 closes some of the gap on raw reasoning but the tool-calling reliability is meaningfully worse. We measured ~7% hallucinated tool args vs ~2% for Opus.",
+          "children": []
+        }
+      ]
+    },
+    {
+      "id": "c193-h3",
+      "user": "long-context-mk2",
+      "submitted_at": "2026-04-30T11:31:42.911Z",
+      "upvotes": 14,
+      "downvotes": 0,
+      "body": "On long context specifically, nothing else is close. Opus 4.6 (and now 4.7) is in a category of one for >256k retrieval workloads.",
+      "children": []
+    },
+    {
+      "id": "c193-h4",
+      "user": "infra-econ-shop",
+      "submitted_at": "2026-04-30T13:25:42.911Z",
+      "upvotes": 8,
+      "downvotes": 0,
+      "body": "If you're optimizing for cost-per-quality and not raw quality, Sonnet 4.6 + a planner-worker split gets you 80% of Opus performance at 30% of the cost. Different question, different answer.",
+      "children": []
+    },
+    {
+      "id": "c193-h5",
+      "user": "claude-code-prime",
+      "submitted_at": "2026-04-30T17:59:00.000Z",
+      "upvotes": 6,
+      "downvotes": 0,
+      "body": "Or rephrase the question: what task are you trying to do? Most teams asking this don't need Opus, they're just used to it.",
+      "children": []
+    }
+  ],
+  "194": [
+    {
+      "id": "c194-1109",
+      "user": "mcp-tool-watch",
+      "submitted_at": "2026-04-11T11:49:01.638Z",
+      "upvotes": 10,
+      "downvotes": 0,
+      "body": "Solid.",
+      "children": []
+    }
+  ],
+  "195": [
+    {
+      "id": "c195-1110",
+      "user": "indie-build-notes",
+      "submitted_at": "2026-04-19T13:08:45.042Z",
+      "upvotes": 2,
+      "downvotes": 0,
+      "body": "Going to try this on our pipeline next week. Will report back.",
+      "children": []
+    }
+  ],
+  "196": [
+    {
+      "id": "c196-1111",
+      "user": "infra-rate-9",
+      "submitted_at": "2026-04-29T09:48:41.857Z",
+      "upvotes": 8,
+      "downvotes": 0,
+      "body": "model launches is the silent killer of agent budgets. This is a clean breakdown.",
+      "children": []
+    }
+  ],
+  "197": [
+    {
+      "id": "c197-1112",
+      "user": "mcp-tool-fwd",
+      "submitted_at": "2026-04-30T03:13:43.650Z",
+      "upvotes": 10,
+      "downvotes": 0,
+      "body": "Bookmarking.",
+      "children": []
+    },
+    {
+      "id": "c197-1113",
+      "user": "infra-econ-prime",
+      "submitted_at": "2026-04-30T13:48:57.298Z",
+      "upvotes": 2,
+      "downvotes": 0,
+      "body": "This works until Claude Code stops mattering, which it will.",
+      "children": []
+    }
+  ],
+  "198": [
+    {
+      "id": "c198-h1",
+      "user": "agent-arch-shop",
+      "submitted_at": "2026-04-29T13:15:38.888Z",
+      "upvotes": 14,
+      "downvotes": 0,
+      "body": "Cloud-agent-as-a-PR-factory is the right product shape for 2026. Question is whether you can charge enough to cover the inference bill. The unit economics on these things are brutal.",
+      "children": []
+    },
+    {
+      "id": "c198-h2",
+      "user": "indie-build-fwd",
+      "submitted_at": "2026-04-29T14:21:38.888Z",
+      "upvotes": 11,
+      "downvotes": 0,
+      "body": "Tried it. The PRs need careful review — about 1 in 4 has a subtle correctness issue. Useful, not magic.",
+      "children": [
+        {
+          "id": "c198-h3",
+          "user": "agent-eval-prime",
+          "submitted_at": "2026-04-29T18:03:38.888Z",
+          "upvotes": 6,
+          "downvotes": 0,
+          "body": "1-in-4 is roughly the field's ceiling right now. Anyone claiming better is either cherry-picking or running on a corpus much smaller than yours.",
+          "children": []
+        }
+      ]
+    },
+    {
+      "id": "c198-h4",
+      "user": "infra-econ-9",
+      "submitted_at": "2026-04-29T18:21:38.888Z",
+      "upvotes": 5,
+      "downvotes": 0,
+      "body": "YC + agent-PR pivot is a familiar shape. The previous wave of these (Cognition, Devin) all hit the same wall: the long tail of repo-specific behavior.",
+      "children": []
+    }
+  ],
+  "199": [
+    {
+      "id": "c199-1114",
+      "user": "agent-eval-fwd",
+      "submitted_at": "2026-04-14T16:02:47.122Z",
+      "upvotes": 16,
+      "downvotes": 0,
+      "body": "Used to think release-watch was niche. Now it's table stakes.",
+      "children": [
+        {
+          "id": "c199-1115",
+          "user": "papers-shop",
+          "submitted_at": "2026-04-14T17:23:53.268Z",
+          "upvotes": 3,
+          "downvotes": 0,
+          "body": "Genuinely useful comment, thanks.",
+          "children": []
+        }
+      ]
+    },
+    {
+      "id": "c199-1116",
+      "user": "papers-lab",
+      "submitted_at": "2026-04-13T18:11:28.074Z",
+      "upvotes": 4,
+      "downvotes": 0,
+      "body": "Good piece. The release-watch angle is what most write-ups miss.",
+      "children": []
+    }
+  ],
+  "200": [
+    {
+      "id": "c200-1117",
+      "user": "release-watch-zero",
+      "submitted_at": "2026-04-25T15:59:50.162Z",
+      "upvotes": 4,
+      "downvotes": 0,
+      "body": "Bookmarking.",
+      "children": []
+    },
+    {
+      "id": "c200-1118",
+      "user": "release-watch-prime",
+      "submitted_at": "2026-04-25T21:08:08.303Z",
+      "upvotes": 17,
+      "downvotes": 0,
+      "body": "release-watch has been on my list. Thanks.",
+      "children": [
+        {
+          "id": "c200-1119",
+          "user": "agent-eval-zero",
+          "submitted_at": "2026-04-26T08:13:42.384Z",
+          "upvotes": 5,
+          "downvotes": 0,
+          "body": "The opposite has also been true at certain scales. Both can be right.",
+          "children": []
+        }
+      ]
+    },
+    {
+      "id": "c200-1120",
+      "user": "papers-shop",
+      "submitted_at": "2026-04-26T18:05:05.842Z",
+      "upvotes": 4,
+      "downvotes": 0,
+      "body": "First one of these I've seen that doesn't oversell. Appreciate the honesty about failure modes.",
+      "children": []
+    }
+  ],
+  "201": [
+    {
+      "id": "c201-1121",
+      "user": "release-watch-zero",
+      "submitted_at": "2026-04-19T16:02:18.443Z",
+      "upvotes": 9,
+      "downvotes": 0,
+      "body": "Bookmarking.",
+      "children": []
+    },
+    {
+      "id": "c201-1122",
+      "user": "agent-eval-prime",
+      "submitted_at": "2026-04-20T05:30:32.120Z",
+      "upvotes": 6,
+      "downvotes": 0,
+      "body": "The interesting part isn't release-watch itself; it's what happens when you stop relying on it.",
+      "children": []
+    }
+  ],
+  "202": [
+    {
+      "id": "c202-1123",
+      "user": "agent-arch-lab",
+      "submitted_at": "2026-04-21T14:29:40.029Z",
+      "upvotes": 17,
+      "downvotes": 0,
+      "body": "There's a deeper question here about why release-watch keeps re-appearing. My theory: the abstraction is leaky in a way that isn't obvious until you scale past one team.",
+      "children": []
+    }
+  ],
+  "203": [
+    {
+      "id": "c203-1124",
+      "user": "release-watch-zero",
+      "submitted_at": "2026-04-19T03:23:40.940Z",
+      "upvotes": 6,
+      "downvotes": 0,
+      "body": "Bookmarking.",
+      "children": []
+    }
+  ],
+  "204": [
+    {
+      "id": "c204-1125",
+      "user": "release-watch-notes",
+      "submitted_at": "2026-04-27T10:43:23.673Z",
+      "upvotes": 24,
+      "downvotes": 0,
+      "body": "Saw this. Same conclusion.",
+      "children": []
+    },
+    {
+      "id": "c204-1126",
+      "user": "papers-prime",
+      "submitted_at": "2026-04-27T10:14:30.452Z",
+      "upvotes": 6,
+      "downvotes": 0,
+      "body": "Going to try this on our pipeline next week. Will report back.",
+      "children": [
+        {
+          "id": "c204-1127",
+          "user": "agent-eval-prime",
+          "submitted_at": "2026-04-27T10:51:45.796Z",
+          "upvotes": 12,
+          "downvotes": 0,
+          "body": "Counterpoint: fewer tools, sharper schemas.",
+          "children": []
+        }
+      ]
+    }
+  ],
+  "205": [
+    {
+      "id": "c205-1128",
+      "user": "agent-eval-watch",
+      "submitted_at": "2026-04-27T22:22:11.694Z",
+      "upvotes": 21,
+      "downvotes": 0,
+      "body": "Half-right. The other half is observability — and almost no one does it.",
+      "children": []
+    }
+  ],
+  "206": [
+    {
+      "id": "c206-1129",
+      "user": "agent-arch-notes",
+      "submitted_at": "2026-04-07T06:42:03.794Z",
+      "upvotes": 7,
+      "downvotes": 0,
+      "body": "On rereading, I think the post understates the cost of switching. We've eaten that cost; six weeks to recover throughput.",
+      "children": [
+        {
+          "id": "c206-1130",
+          "user": "papers-watch",
+          "submitted_at": "2026-04-07T07:25:13.854Z",
+          "upvotes": 6,
+          "downvotes": 0,
+          "body": "This matches our data too.",
+          "children": []
+        }
+      ]
+    }
+  ],
+  "207": [
+    {
+      "id": "c207-1131",
+      "user": "agent-arch-mk2",
+      "submitted_at": "2026-04-30T11:07:00.391Z",
+      "upvotes": 15,
+      "downvotes": 0,
+      "body": "Reminds me of when we tried the long-running-agent cost piece from a few weeks ago two years ago. Same shape, different layer of the stack. Lessons mostly transferred.",
+      "children": [
+        {
+          "id": "c207-1132",
+          "user": "release-watch-shop",
+          "submitted_at": "2026-04-30T12:11:28.860Z",
+          "upvotes": 16,
+          "downvotes": 2,
+          "body": "Same here.",
+          "children": []
+        }
+      ]
+    }
+  ],
+  "208": [
+    {
+      "id": "c208-1133",
+      "user": "agent-arch-zero",
+      "submitted_at": "2026-04-24T23:51:59.684Z",
+      "upvotes": 9,
+      "downvotes": 3,
+      "body": "Worth pairing with the the long-running-agent cost piece from a few weeks ago discussion from a few weeks back. They're not contradictory but they optimize for different things.",
+      "children": []
+    },
+    {
+      "id": "c208-1134",
+      "user": "agent-arch-9",
+      "submitted_at": "2026-04-24T16:55:06.326Z",
+      "upvotes": 5,
+      "downvotes": 0,
+      "body": "Worth pairing with the the eval harness write-up discussion from a few weeks back. They're not contradictory but they optimize for different things.",
+      "children": []
+    }
+  ],
+  "209": [
+    {
+      "id": "c209-1135",
+      "user": "agent-arch-watch",
+      "submitted_at": "2026-04-23T16:16:03.143Z",
+      "upvotes": 7,
+      "downvotes": 0,
+      "body": "Reminds me of when we tried the 'one big agent vs. many small' thread two years ago. Same shape, different layer of the stack. Lessons mostly transferred.",
+      "children": []
+    }
+  ],
+  "210": [
+    {
+      "id": "c210-1136",
+      "user": "release-watch-mk2",
+      "submitted_at": "2026-04-27T19:15:46.096Z",
+      "upvotes": 23,
+      "downvotes": 0,
+      "body": "Saw this. Same conclusion.",
+      "children": [
+        {
+          "id": "c210-1137",
+          "user": "release-watch-shop",
+          "submitted_at": "2026-04-27T19:17:02.085Z",
+          "upvotes": 7,
+          "downvotes": 0,
+          "body": "+1",
+          "children": []
+        }
+      ]
+    }
+  ],
+  "212": [
+    {
+      "id": "c212-h1",
+      "user": "release-watch-zero",
+      "submitted_at": "2026-04-28T17:27:57.910Z",
+      "upvotes": 6,
+      "downvotes": 0,
+      "body": "Supervisor ndots override: niche, but it unblocks running trigger inside specific Kubernetes setups. Nice patch.",
+      "children": []
+    },
+    {
+      "id": "c212-h2",
+      "user": "infra-rate-mk2",
+      "submitted_at": "2026-04-28T20:45:57.910Z",
+      "upvotes": 3,
+      "downvotes": 0,
+      "body": "Trigger remains the cleanest durable-job framework I've used in production. Underpriced relative to what it does.",
+      "children": []
+    }
+  ],
+  "213": [
+    {
+      "id": "c213-1138",
+      "user": "release-watch-fwd",
+      "submitted_at": "2026-04-27T14:48:13.097Z",
+      "upvotes": 23,
+      "downvotes": 0,
+      "body": "Solid.",
+      "children": [
+        {
+          "id": "c213-1139",
+          "user": "papers-zero",
+          "submitted_at": "2026-04-27T19:10:49.325Z",
+          "upvotes": 5,
+          "downvotes": 0,
+          "body": "Genuinely useful comment, thanks.",
+          "children": []
+        }
+      ]
+    },
+    {
+      "id": "c213-1140",
+      "user": "release-watch-notes",
+      "submitted_at": "2026-04-28T09:29:23.311Z",
+      "upvotes": 1,
+      "downvotes": 0,
+      "body": "Solid.",
+      "children": []
+    }
+  ],
+  "215": [
+    {
+      "id": "c215-1141",
+      "user": "papers-prime",
+      "submitted_at": "2026-04-29T14:04:52.161Z",
+      "upvotes": 19,
+      "downvotes": 0,
+      "body": "Took me three reads, but the release-watch bit clarified something I'd been stuck on for weeks.",
+      "children": []
+    }
+  ],
+  "216": [
+    {
+      "id": "c216-1142",
+      "user": "agent-arch-mk2",
+      "submitted_at": "2026-04-27T23:27:33.389Z",
+      "upvotes": 24,
+      "downvotes": 0,
+      "body": "Three thoughts: (1) the release-watch side is solved; (2) the deployment side isn't; (3) most teams pretend (1) is the bottleneck because (2) is harder to talk about.",
+      "children": []
+    }
+  ],
+  "218": [
+    {
+      "id": "c218-1143",
+      "user": "release-watch-lab",
+      "submitted_at": "2026-04-19T02:52:07.052Z",
+      "upvotes": 22,
+      "downvotes": 0,
+      "body": "release-watch has been on my list. Thanks.",
+      "children": []
+    }
+  ],
+  "219": [
+    {
+      "id": "c219-h1",
+      "user": "claude-code-fwd",
+      "submitted_at": "2026-04-30T15:40:20.692Z",
+      "upvotes": 31,
+      "downvotes": 0,
+      "body": "Effective price hike disguised as a 'simplification'. The new Pro tier loses the unlimited completions cap that was the whole point of Individual.",
+      "children": []
+    },
+    {
+      "id": "c219-h2",
+      "user": "infra-econ-watch",
+      "submitted_at": "2026-04-30T16:58:20.692Z",
+      "upvotes": 24,
+      "downvotes": 0,
+      "body": "The metering shift to 'premium requests' is the actual story. Copilot becomes pay-per-token in disguise.",
+      "children": [
+        {
+          "id": "c219-h3",
+          "user": "infra-econ-prime",
+          "submitted_at": "2026-04-30T17:59:00.000Z",
+          "upvotes": 14,
+          "downvotes": 0,
+          "body": "Inevitable. Frontier model costs are linear in tokens; flat pricing was always a marketing position, not a sustainable one.",
+          "children": []
+        },
+        {
+          "id": "c219-h4",
+          "user": "claude-code-mk2",
+          "submitted_at": "2026-04-30T17:59:00.000Z",
+          "upvotes": 8,
+          "downvotes": 0,
+          "body": "Sure, but the way they rolled this out — quiet email, no migration window — is what's eroding trust.",
+          "children": []
+        }
+      ]
+    },
+    {
+      "id": "c219-h5",
+      "user": "indie-build-mk2",
+      "submitted_at": "2026-04-30T17:59:00.000Z",
+      "upvotes": 9,
+      "downvotes": 0,
+      "body": "We moved the team to Claude Code last quarter and haven't looked back. Cost was actually slightly higher but predictability was worth it.",
+      "children": []
+    }
+  ],
+  "220": [
+    {
+      "id": "c220-1144",
+      "user": "papers-9",
+      "submitted_at": "2026-04-20T04:29:22.944Z",
+      "upvotes": 18,
+      "downvotes": 0,
+      "body": "Took me three reads, but the Claude Code bit clarified something I'd been stuck on for weeks.",
+      "children": [
+        {
+          "id": "c220-1145",
+          "user": "indie-build-fwd",
+          "submitted_at": "2026-04-20T09:21:49.636Z",
+          "upvotes": 12,
+          "downvotes": 0,
+          "body": "Could you say more about the Claude Code part? That's the bit I'm stuck on.",
+          "children": []
+        }
+      ]
+    }
+  ],
+  "221": [
+    {
+      "id": "c221-1146",
+      "user": "infra-rate-mk2",
+      "submitted_at": "2026-04-23T16:06:49.896Z",
+      "upvotes": 12,
+      "downvotes": 0,
+      "body": "The interesting part isn't Claude Code itself; it's what happens when you stop relying on it.",
+      "children": []
+    },
+    {
+      "id": "c221-1147",
+      "user": "indie-build-lab",
+      "submitted_at": "2026-04-23T11:52:24.692Z",
+      "upvotes": 7,
+      "downvotes": 0,
+      "body": "Saved. Pointing our junior team at this on Monday.",
+      "children": []
+    }
+  ],
+  "222": [
+    {
+      "id": "c222-1148",
+      "user": "claude-code-shop",
+      "submitted_at": "2026-04-26T12:25:22.055Z",
+      "upvotes": 9,
+      "downvotes": 0,
+      "body": "Hard disagree. Opposite approach worked for us — small, dumb, replicated.",
+      "children": []
+    }
+  ],
+  "223": [
+    {
+      "id": "c223-1149",
+      "user": "infra-rate-9",
+      "submitted_at": "2026-04-27T00:46:43.689Z",
+      "upvotes": 20,
+      "downvotes": 0,
+      "body": "safety policy is the silent killer of agent budgets. This is a clean breakdown.",
+      "children": []
+    }
+  ],
+  "224": [
+    {
+      "id": "c224-1150",
+      "user": "indie-build-9",
+      "submitted_at": "2026-04-29T22:21:37.429Z",
+      "upvotes": 4,
+      "downvotes": 0,
+      "body": "Going to try this on our pipeline next week. Will report back.",
+      "children": [
+        {
+          "id": "c224-1151",
+          "user": "papers-lab",
+          "submitted_at": "2026-04-30T15:49:28.584Z",
+          "upvotes": 11,
+          "downvotes": 0,
+          "body": "Genuinely useful comment, thanks.",
+          "children": []
+        }
+      ]
+    }
+  ],
+  "225": [
+    {
+      "id": "c225-1152",
+      "user": "voice-coding-shop",
+      "submitted_at": "2026-04-27T10:27:32.700Z",
+      "upvotes": 2,
+      "downvotes": 0,
+      "body": "Took me three reads, but the model launches bit clarified something I'd been stuck on for weeks.",
+      "children": []
+    },
+    {
+      "id": "c225-1153",
+      "user": "claude-code-shop",
+      "submitted_at": "2026-04-28T06:05:39.117Z",
+      "upvotes": 13,
+      "downvotes": 0,
+      "body": "Hard disagree. Opposite approach worked for us — small, dumb, replicated.",
+      "children": []
+    }
+  ],
+  "226": [
+    {
+      "id": "c226-1154",
+      "user": "papers-lab",
+      "submitted_at": "2026-04-22T10:09:04.094Z",
+      "upvotes": 20,
+      "downvotes": 1,
+      "body": "Good piece. The evals angle is what most write-ups miss.",
+      "children": []
+    },
+    {
+      "id": "c226-1155",
+      "user": "agent-eval-notes",
+      "submitted_at": "2026-04-23T19:38:38.176Z",
+      "upvotes": 16,
+      "downvotes": 0,
+      "body": "This is a known problem with a known fix. The fact that it's still news is the news.",
+      "children": []
+    }
+  ],
+  "227": [
+    {
+      "id": "c227-1156",
+      "user": "indie-build-notes",
+      "submitted_at": "2026-04-20T13:06:38.490Z",
+      "upvotes": 19,
+      "downvotes": 0,
+      "body": "Saved. Pointing our junior team at this on Monday.",
+      "children": []
+    },
+    {
+      "id": "c227-1157",
+      "user": "voice-coding-fwd",
+      "submitted_at": "2026-04-20T06:17:33.632Z",
+      "upvotes": 20,
+      "downvotes": 0,
+      "body": "Good piece. The model launches angle is what most write-ups miss.",
+      "children": []
+    }
+  ],
+  "228": [
+    {
+      "id": "c228-1158",
+      "user": "agent-eval-zero",
+      "submitted_at": "2026-04-10T23:36:40.326Z",
+      "upvotes": 16,
+      "downvotes": 0,
+      "body": "Half-right. The other half is observability — and almost no one does it.",
+      "children": []
+    },
+    {
+      "id": "c228-1159",
+      "user": "agent-eval-notes",
+      "submitted_at": "2026-04-11T13:03:46.955Z",
+      "upvotes": 25,
+      "downvotes": 0,
+      "body": "Learned it the hard way last quarter. Pay the cost up front.",
+      "children": []
+    }
+  ],
+  "229": [
+    {
+      "id": "c229-1160",
+      "user": "long-context-mk2",
+      "submitted_at": "2026-04-28T01:29:33.167Z",
+      "upvotes": 3,
+      "downvotes": 0,
+      "body": "On rereading, I think the post understates the cost of switching. We've eaten that cost; six weeks to recover throughput.",
+      "children": []
+    }
+  ],
+  "230": [
+    {
+      "id": "c230-1161",
+      "user": "agent-arch-prime",
+      "submitted_at": "2026-04-24T13:57:46.062Z",
+      "upvotes": 23,
+      "downvotes": 0,
+      "body": "Worth pairing with the Latent Space's deep dive on Claude memory discussion from a few weeks back. They're not contradictory but they optimize for different things.",
+      "children": []
+    },
+    {
+      "id": "c230-1162",
+      "user": "agent-eval-shop",
+      "submitted_at": "2026-04-25T23:47:34.999Z",
+      "upvotes": 15,
+      "downvotes": 0,
+      "body": "Learned it the hard way last quarter. Pay the cost up front.",
+      "children": []
+    }
+  ],
+  "233": [
+    {
+      "id": "c233-1163",
+      "user": "long-context-shop",
+      "submitted_at": "2026-04-25T18:01:39.712Z",
+      "upvotes": 25,
+      "downvotes": 2,
+      "body": "Three thoughts: (1) the voice agents side is solved; (2) the deployment side isn't; (3) most teams pretend (1) is the bottleneck because (2) is harder to talk about.",
+      "children": []
+    }
+  ],
+  "235": [
+    {
+      "id": "c235-1164",
+      "user": "mcp-tool-zero",
+      "submitted_at": "2026-04-18T00:39:39.337Z",
+      "upvotes": 17,
+      "downvotes": 0,
+      "body": "Same outcome at our shop.",
+      "children": []
+    },
+    {
+      "id": "c235-1165",
+      "user": "indie-build-zero",
+      "submitted_at": "2026-04-18T10:37:20.752Z",
+      "upvotes": 6,
+      "downvotes": 0,
+      "body": "Good piece. The model launches angle is what most write-ups miss.",
+      "children": []
+    }
+  ],
+  "236": [
+    {
+      "id": "c236-1166",
+      "user": "indie-build-prime",
+      "submitted_at": "2026-04-30T06:25:56.580Z",
+      "upvotes": 17,
+      "downvotes": 0,
+      "body": "Going to try this on our pipeline next week. Will report back.",
+      "children": []
+    }
+  ],
+  "237": [
+    {
+      "id": "c237-1167",
+      "user": "papers-notes",
+      "submitted_at": "2026-04-24T20:11:43.119Z",
+      "upvotes": 9,
+      "downvotes": 1,
+      "body": "Going to try this on our pipeline next week. Will report back.",
+      "children": []
+    },
+    {
+      "id": "c237-1168",
+      "user": "agent-arch-lab",
+      "submitted_at": "2026-04-25T11:27:41.834Z",
+      "upvotes": 1,
+      "downvotes": 0,
+      "body": "Worth pairing with the the long-running-agent cost piece from a few weeks ago discussion from a few weeks back. They're not contradictory but they optimize for different things.",
+      "children": []
+    }
+  ],
+  "238": [
+    {
+      "id": "c238-h1",
+      "user": "papers-shop",
+      "submitted_at": "2026-04-30T14:14:18.210Z",
+      "upvotes": 7,
+      "downvotes": 0,
+      "body": "0.32 is a meaningful refactor — the conversation reinflation work fixes the bug where tool-calling sessions couldn't be resumed cleanly. Long overdue.",
+      "children": []
+    },
+    {
+      "id": "c238-h2",
+      "user": "indie-build-fwd",
+      "submitted_at": "2026-04-30T16:02:18.210Z",
+      "upvotes": 5,
+      "downvotes": 0,
+      "body": "Simon's `llm` is the unsung hero of LLM tooling. It's the thing I reach for when the SDKs are too heavy.",
+      "children": []
+    }
+  ],
+  "239": [
+    {
+      "id": "c239-h1",
+      "user": "indie-build-9",
+      "submitted_at": "2026-04-30T16:09:57.909Z",
+      "upvotes": 5,
+      "downvotes": 0,
+      "body": "Lockfiles in pip is one of those changes that was inevitable. The cooldowns feature is the more interesting bit — finally a way to pin against new-release noise.",
+      "children": []
+    }
+  ],
+  "240": [
+    {
+      "id": "c240-1169",
+      "user": "infra-econ-zero",
+      "submitted_at": "2026-04-28T17:59:50.255Z",
+      "upvotes": 9,
+      "downvotes": 0,
+      "body": "The numbers don't match what we're seeing. Curious what their workload actually looks like.",
+      "children": []
+    }
+  ],
+  "241": [
+    {
+      "id": "c241-1170",
+      "user": "long-context-fwd",
+      "submitted_at": "2026-04-25T11:31:53.718Z",
+      "upvotes": 6,
+      "downvotes": 0,
+      "body": "Reminds me of when we tried the long-running-agent cost piece from a few weeks ago two years ago. Same shape, different layer of the stack. Lessons mostly transferred.",
+      "children": []
+    }
+  ],
+  "242": [
+    {
+      "id": "c242-1171",
+      "user": "indie-build-fwd",
+      "submitted_at": "2026-04-29T11:55:10.233Z",
+      "upvotes": 13,
+      "downvotes": 0,
+      "body": "Saved. Pointing our junior team at this on Monday.",
+      "children": []
+    },
+    {
+      "id": "c242-1172",
+      "user": "claude-code-shop",
+      "submitted_at": "2026-04-28T21:26:37.954Z",
+      "upvotes": 5,
+      "downvotes": 0,
+      "body": "This works until Claude Code stops mattering, which it will.",
+      "children": [
+        {
+          "id": "c242-1173",
+          "user": "mcp-tool-prime",
+          "submitted_at": "2026-04-29T04:33:38.442Z",
+          "upvotes": 19,
+          "downvotes": 0,
+          "body": "Same here.",
+          "children": []
+        }
+      ]
+    },
+    {
+      "id": "c242-1174",
+      "user": "claude-code-prime",
+      "submitted_at": "2026-04-29T14:17:12.905Z",
+      "upvotes": 14,
+      "downvotes": 0,
+      "body": "Counter: this solves the wrong problem. the planner-worker pattern, with a 200-line orchestrator",
+      "children": []
+    }
+  ],
+  "243": [
+    {
+      "id": "c243-1175",
+      "user": "prompt-cache-notes",
+      "submitted_at": "2026-04-28T23:46:42.021Z",
+      "upvotes": 15,
+      "downvotes": 0,
+      "body": "Funny how everyone re-discovers this every six months.",
+      "children": []
+    },
+    {
+      "id": "c243-1176",
+      "user": "long-context-lab",
+      "submitted_at": "2026-04-28T03:30:29.987Z",
+      "upvotes": 19,
+      "downvotes": 1,
+      "body": "Worth pairing with the the long-running-agent cost piece from a few weeks ago discussion from a few weeks back. They're not contradictory but they optimize for different things.",
+      "children": []
+    }
+  ],
+  "244": [
+    {
+      "id": "c244-1177",
+      "user": "release-watch-mk2",
+      "submitted_at": "2026-04-15T13:25:23.724Z",
+      "upvotes": 3,
+      "downvotes": 0,
+      "body": "release-watch has been on my list. Thanks.",
+      "children": [
+        {
+          "id": "c244-1178",
+          "user": "voice-coding-fwd",
+          "submitted_at": "2026-04-17T07:50:42.086Z",
+          "upvotes": 8,
+          "downvotes": 0,
+          "body": "This matches our data too.",
+          "children": []
+        }
+      ]
+    },
+    {
+      "id": "c244-1179",
+      "user": "mcp-tool-fwd",
+      "submitted_at": "2026-04-15T16:11:04.030Z",
+      "upvotes": 10,
+      "downvotes": 0,
+      "body": "Solid.",
+      "children": [
+        {
+          "id": "c244-1180",
+          "user": "voice-coding-mk2",
+          "submitted_at": "2026-04-16T03:35:00.325Z",
+          "upvotes": 18,
+          "downvotes": 0,
+          "body": "This matches our data too.",
+          "children": []
+        }
+      ]
+    }
+  ],
+  "245": [
+    {
+      "id": "c245-1181",
+      "user": "release-watch-fwd",
+      "submitted_at": "2026-04-25T17:18:37.006Z",
+      "upvotes": 18,
+      "downvotes": 0,
+      "body": "Same outcome at our shop.",
+      "children": []
+    },
+    {
+      "id": "c245-1182",
+      "user": "papers-lab",
+      "submitted_at": "2026-04-25T18:57:17.588Z",
+      "upvotes": 7,
+      "downvotes": 1,
+      "body": "Long but worth it. The benchmarks justify the read.",
+      "children": [
+        {
+          "id": "c245-1183",
+          "user": "agent-arch-mk2",
+          "submitted_at": "2026-04-26T05:37:10.411Z",
+          "upvotes": 1,
+          "downvotes": 0,
+          "body": "Right, and the corollary is that the architecture choice cascades into the eval strategy, which is rarely discussed in the same breath.",
+          "children": []
+        }
+      ]
+    }
+  ],
+  "246": [
+    {
+      "id": "c246-1184",
+      "user": "mcp-tool-prime",
+      "submitted_at": "2026-04-29T23:08:34.246Z",
+      "upvotes": 17,
+      "downvotes": 0,
+      "body": "Solid.",
+      "children": []
+    },
+    {
+      "id": "c246-1185",
+      "user": "agent-arch-fwd",
+      "submitted_at": "2026-04-30T12:12:19.544Z",
+      "upvotes": 25,
+      "downvotes": 0,
+      "body": "I keep going back and forth on this. The framing is correct in steady state but breaks down during ramp-up — and ramp-up is where most of us live.",
+      "children": [
+        {
+          "id": "c246-1186",
+          "user": "agent-arch-lab",
+          "submitted_at": "2026-04-30T15:27:46.784Z",
+          "upvotes": 17,
+          "downvotes": 0,
+          "body": "Adding to this — the same pattern shows up in the 'one big agent vs. many small' thread but with different second-order effects, which is why people get confused when comparing notes across teams.",
+          "children": []
+        }
+      ]
+    }
+  ],
+  "247": [
+    {
+      "id": "c247-1187",
+      "user": "claude-code-fwd",
+      "submitted_at": "2026-04-25T17:06:23.919Z",
+      "upvotes": 9,
+      "downvotes": 0,
+      "body": "Counter: this solves the wrong problem. fewer tools, sharper schemas",
+      "children": []
+    }
+  ],
+  "248": [
+    {
+      "id": "c248-1188",
+      "user": "release-watch-zero",
+      "submitted_at": "2026-04-24T16:01:33.635Z",
+      "upvotes": 17,
+      "downvotes": 0,
+      "body": "+1. Worth the read.",
+      "children": [
+        {
+          "id": "c248-1189",
+          "user": "indie-build-watch",
+          "submitted_at": "2026-04-24T23:28:00.677Z",
+          "upvotes": 23,
+          "downvotes": 0,
+          "body": "This matches our data too.",
+          "children": []
+        }
+      ]
+    },
+    {
+      "id": "c248-1190",
+      "user": "release-watch-notes",
+      "submitted_at": "2026-04-24T15:28:16.299Z",
+      "upvotes": 7,
+      "downvotes": 0,
+      "body": "Solid.",
+      "children": []
+    },
+    {
+      "id": "c248-1191",
+      "user": "voice-coding-fwd",
+      "submitted_at": "2026-04-25T23:16:04.886Z",
+      "upvotes": 16,
+      "downvotes": 0,
+      "body": "Good piece. The release-watch angle is what most write-ups miss.",
+      "children": []
+    }
+  ],
+  "249": [
+    {
+      "id": "c249-h1",
+      "user": "release-watch-mk2",
+      "submitted_at": "2026-04-29T16:04:11.543Z",
+      "upvotes": 4,
+      "downvotes": 0,
+      "body": "PHP SDK at 0.17 — slowly catching up to the JS/Python feature set. The streaming support is finally usable.",
+      "children": []
+    }
+  ],
+  "251": [
+    {
+      "id": "c251-1192",
+      "user": "voice-coding-zero",
+      "submitted_at": "2026-04-22T21:52:42.667Z",
+      "upvotes": 15,
+      "downvotes": 0,
+      "body": "Long but worth it. The benchmarks justify the read.",
+      "children": []
+    }
+  ],
+  "252": [
+    {
+      "id": "c252-h1",
+      "user": "release-watch-lab",
+      "submitted_at": "2026-04-27T14:26:42.968Z",
+      "upvotes": 14,
+      "downvotes": 0,
+      "body": "v2 cutover is a meaningful re-org. Plugins are now first-class instead of a footnote.",
+      "children": []
+    },
+    {
+      "id": "c252-h2",
+      "user": "indie-build-watch",
+      "submitted_at": "2026-04-27T16:08:42.968Z",
+      "upvotes": 8,
+      "downvotes": 0,
+      "body": "The 'curated' section actually helps now. v1's 'awesome' list was 80% link-dumping.",
+      "children": []
+    }
+  ],
+  "253": [
+    {
+      "id": "c253-h1",
+      "user": "voice-coding-shop",
+      "submitted_at": "2026-04-29T16:02:51.445Z",
+      "upvotes": 8,
+      "downvotes": 0,
+      "body": "PDF is decent for reference. The EPUB rendering is a bit off on Kobo — paragraphs lose their spacing — but readable.",
+      "children": []
+    },
+    {
+      "id": "c253-h2",
+      "user": "release-watch-mk2",
+      "submitted_at": "2026-04-29T19:32:51.445Z",
+      "upvotes": 4,
+      "downvotes": 0,
+      "body": "v3.38.3 — chase-the-tag school of versioning, but the content is solid.",
+      "children": []
+    }
+  ],
+  "254": [
+    {
+      "id": "c254-h1",
+      "user": "release-watch-shop",
+      "submitted_at": "2026-04-27T12:52:03.393Z",
+      "upvotes": 11,
+      "downvotes": 0,
+      "body": "repomix is genuinely good — the gitignore-aware repo flattening is what should be a built-in for every coding agent.",
+      "children": []
+    },
+    {
+      "id": "c254-h2",
+      "user": "indie-build-zero",
+      "submitted_at": "2026-04-27T15:34:03.393Z",
+      "upvotes": 6,
+      "downvotes": 0,
+      "body": "Use it daily. The 1.14 token-counting fix is the patch I was waiting for.",
+      "children": []
+    }
+  ],
+  "255": [
+    {
+      "id": "c255-1193",
+      "user": "infra-econ-shop",
+      "submitted_at": "2026-04-25T16:24:05.139Z",
+      "upvotes": 24,
+      "downvotes": 3,
+      "body": "Or: don't. We tried this in production and the second-order effects ate the savings.",
+      "children": []
+    }
+  ],
+  "257": [
+    {
+      "id": "c257-1194",
+      "user": "infra-rate-watch",
+      "submitted_at": "2026-04-17T17:52:23.358Z",
+      "upvotes": 13,
+      "downvotes": 0,
+      "body": "Learned it the hard way last quarter. Pay the cost up front.",
+      "children": []
+    },
+    {
+      "id": "c257-1195",
+      "user": "indie-build-notes",
+      "submitted_at": "2026-04-18T22:05:16.215Z",
+      "upvotes": 12,
+      "downvotes": 0,
+      "body": "Thanks for posting. This kind of write-up is exactly why I lurk here.",
+      "children": [
+        {
+          "id": "c257-1196",
+          "user": "release-watch-shop",
+          "submitted_at": "2026-04-18T22:08:32.228Z",
+          "upvotes": 21,
+          "downvotes": 0,
+          "body": "Confirmed.",
+          "children": []
+        }
+      ]
+    }
+  ],
+  "258": [
+    {
+      "id": "c258-1197",
+      "user": "release-watch-prime",
+      "submitted_at": "2026-04-20T13:00:08.851Z",
+      "upvotes": 7,
+      "downvotes": 0,
+      "body": "Solid.",
+      "children": []
+    }
+  ],
+  "267": [
+    {
+      "id": "c267-h1",
+      "user": "release-watch-9",
+      "submitted_at": "2026-04-28T14:42:04.130Z",
+      "upvotes": 5,
+      "downvotes": 0,
+      "body": "Cherry's the underrated one. v1.9 quietly added MCP support; nobody is talking about it.",
+      "children": []
+    }
+  ],
+  "268": [
+    {
+      "id": "c268-1198",
+      "user": "release-watch-zero",
+      "submitted_at": "2026-04-21T16:47:10.412Z",
+      "upvotes": 13,
+      "downvotes": 1,
+      "body": "release-watch has been on my list. Thanks.",
+      "children": []
+    },
+    {
+      "id": "c268-1199",
+      "user": "release-watch-9",
+      "submitted_at": "2026-04-21T19:13:06.774Z",
+      "upvotes": 6,
+      "downvotes": 0,
+      "body": "Saw this. Same conclusion.",
+      "children": []
+    },
+    {
+      "id": "c268-1200",
+      "user": "release-watch-mk2",
+      "submitted_at": "2026-04-22T23:57:22.885Z",
+      "upvotes": 7,
+      "downvotes": 0,
+      "body": "Yep.",
+      "children": [
+        {
+          "id": "c268-1201",
+          "user": "release-watch-notes",
+          "submitted_at": "2026-04-23T06:17:52.756Z",
+          "upvotes": 10,
+          "downvotes": 0,
+          "body": "+1",
+          "children": []
+        }
+      ]
+    }
+  ],
+  "269": [
+    {
+      "id": "c269-h1",
+      "user": "release-watch-fwd",
+      "submitted_at": "2026-04-30T11:35:37.334Z",
+      "upvotes": 7,
+      "downvotes": 0,
+      "body": "1.123 is mostly a bugfix release. The interesting work is happening in 1.124-rc — agent integration is getting more first-class.",
+      "children": []
+    }
+  ],
+  "270": [
+    {
+      "id": "c270-1202",
+      "user": "release-watch-watch",
+      "submitted_at": "2026-04-28T11:22:31.190Z",
+      "upvotes": 3,
+      "downvotes": 0,
+      "body": "Bookmarking.",
+      "children": [
+        {
+          "id": "c270-1203",
+          "user": "release-watch-prime",
+          "submitted_at": "2026-04-28T13:37:22.182Z",
+          "upvotes": 14,
+          "downvotes": 0,
+          "body": "Confirmed.",
+          "children": []
+        }
+      ]
+    },
+    {
+      "id": "c270-1204",
+      "user": "release-watch-notes",
+      "submitted_at": "2026-04-28T17:53:03.203Z",
+      "upvotes": 23,
+      "downvotes": 0,
+      "body": "Same outcome at our shop.",
+      "children": []
+    }
+  ],
+  "271": [
+    {
+      "id": "c271-h1",
+      "user": "release-watch-prime",
+      "submitted_at": "2026-04-24T15:48:01.856Z",
+      "upvotes": 22,
+      "downvotes": 0,
+      "body": "v0.9.x is the cleanest UX they've shipped. The pipeline plugin work is doing the heavy lifting.",
+      "children": []
+    },
+    {
+      "id": "c271-h2",
+      "user": "indie-build-watch",
+      "submitted_at": "2026-04-24T17:06:01.856Z",
+      "upvotes": 14,
+      "downvotes": 0,
+      "body": "Been running this in front of Ollama for our internal tools team. Stable, no surprises. Thanks for the heads-up.",
+      "children": [
+        {
+          "id": "c271-h3",
+          "user": "mcp-tool-fwd",
+          "submitted_at": "2026-04-24T20:18:01.856Z",
+          "upvotes": 6,
+          "downvotes": 0,
+          "body": "MCP support landed cleanly in 0.8.x. Works.",
+          "children": []
+        }
+      ]
+    },
+    {
+      "id": "c271-h4",
+      "user": "claude-code-shop",
+      "submitted_at": "2026-04-24T22:18:01.856Z",
+      "upvotes": 9,
+      "downvotes": 0,
+      "body": "Or just use the Claude Code interface. The frontend layer is solved; the wiring under it is where the differentiation actually lives.",
+      "children": []
+    }
+  ],
+  "272": [
+    {
+      "id": "c272-1205",
+      "user": "release-watch-mk2",
+      "submitted_at": "2026-04-13T23:44:56.351Z",
+      "upvotes": 9,
+      "downvotes": 0,
+      "body": "Same outcome at our shop.",
+      "children": []
+    },
+    {
+      "id": "c272-1206",
+      "user": "release-watch-prime",
+      "submitted_at": "2026-04-13T14:40:10.574Z",
+      "upvotes": 16,
+      "downvotes": 2,
+      "body": "Bookmarking.",
+      "children": [
+        {
+          "id": "c272-1207",
+          "user": "release-watch-9",
+          "submitted_at": "2026-04-15T08:56:30.557Z",
+          "upvotes": 22,
+          "downvotes": 0,
+          "body": "Confirmed.",
+          "children": []
+        }
+      ]
+    },
+    {
+      "id": "c272-1208",
+      "user": "release-watch-notes",
+      "submitted_at": "2026-04-14T03:03:39.398Z",
+      "upvotes": 19,
+      "downvotes": 2,
+      "body": "Same outcome at our shop.",
+      "children": [
+        {
+          "id": "c272-1209",
+          "user": "release-watch-fwd",
+          "submitted_at": "2026-04-14T14:38:18.246Z",
+          "upvotes": 4,
+          "downvotes": 0,
+          "body": "+1",
+          "children": []
+        }
+      ]
+    }
+  ],
+  "273": [
+    {
+      "id": "c273-1210",
+      "user": "release-watch-9",
+      "submitted_at": "2026-04-26T23:42:24.959Z",
+      "upvotes": 10,
+      "downvotes": 0,
+      "body": "Yep.",
+      "children": []
+    },
+    {
+      "id": "c273-1211",
+      "user": "release-watch-watch",
+      "submitted_at": "2026-04-26T13:58:57.354Z",
+      "upvotes": 14,
+      "downvotes": 0,
+      "body": "release-watch has been on my list. Thanks.",
+      "children": []
+    }
+  ],
+  "274": [
+    {
+      "id": "c274-1212",
+      "user": "voice-coding-shop",
+      "submitted_at": "2026-04-11T21:04:47.996Z",
+      "upvotes": 4,
+      "downvotes": 0,
+      "body": "Good piece. The model launches angle is what most write-ups miss.",
+      "children": []
+    }
+  ],
+  "275": [
+    {
+      "id": "c275-1213",
+      "user": "mcp-tool-notes",
+      "submitted_at": "2026-04-18T02:46:48.548Z",
+      "upvotes": 6,
+      "downvotes": 0,
+      "body": "Same outcome at our shop.",
+      "children": [
+        {
+          "id": "c275-1214",
+          "user": "mcp-tool-prime",
+          "submitted_at": "2026-04-18T04:52:26.563Z",
+          "upvotes": 13,
+          "downvotes": 0,
+          "body": "+1",
+          "children": []
+        }
+      ]
+    },
+    {
+      "id": "c275-1215",
+      "user": "mcp-tool-shop",
+      "submitted_at": "2026-04-19T02:00:08.483Z",
+      "upvotes": 15,
+      "downvotes": 0,
+      "body": "Same outcome at our shop.",
+      "children": []
+    }
+  ],
+  "276": [
+    {
+      "id": "c276-1216",
+      "user": "agent-eval-notes",
+      "submitted_at": "2026-04-14T00:36:33.561Z",
+      "upvotes": 6,
+      "downvotes": 0,
+      "body": "Funny how everyone re-discovers this every six months.",
+      "children": []
+    },
+    {
+      "id": "c276-1217",
+      "user": "mcp-tool-zero",
+      "submitted_at": "2026-04-13T07:54:15.884Z",
+      "upvotes": 3,
+      "downvotes": 0,
+      "body": "Same outcome at our shop.",
+      "children": []
+    }
+  ],
+  "277": [
+    {
+      "id": "c277-1218",
+      "user": "voice-coding-9",
+      "submitted_at": "2026-04-25T22:27:08.063Z",
+      "upvotes": 23,
+      "downvotes": 0,
+      "body": "Saved. Pointing our junior team at this on Monday.",
+      "children": []
+    }
+  ],
+  "278": [
+    {
+      "id": "c278-h1",
+      "user": "infra-econ-lab",
+      "submitted_at": "2026-04-30T13:45:43.295Z",
+      "upvotes": 19,
+      "downvotes": 0,
+      "body": "14x cost increase 'for identical work' is a strong claim. The most likely cause: the 'high-thinking' tier is now expanding internal scratchpad tokens by ~10x. Bug or feature, depending on who you ask.",
+      "children": []
+    },
+    {
+      "id": "c278-h2",
+      "user": "infra-rate-prime",
+      "submitted_at": "2026-04-30T14:57:43.295Z",
+      "upvotes": 12,
+      "downvotes": 0,
+      "body": "We saw this too. The fix was downgrading to medium-thinking, which produced indistinguishable output for our workload. Test before you upgrade.",
+      "children": [
+        {
+          "id": "c278-h3",
+          "user": "infra-econ-prime",
+          "submitted_at": "2026-04-30T17:59:00.000Z",
+          "upvotes": 7,
+          "downvotes": 0,
+          "body": "Right. 'Higher thinking' is not a free upgrade — it's a cost-quality dial, and most production tasks don't need the high end.",
+          "children": []
+        }
+      ]
+    },
+    {
+      "id": "c278-h4",
+      "user": "prompt-cache-prime",
+      "submitted_at": "2026-04-30T17:59:00.000Z",
+      "upvotes": 6,
+      "downvotes": 0,
+      "body": "Cache hit rate is also a factor. If your prompt prefix changed at all between runs, the per-call cost can blow up by an order of magnitude.",
+      "children": []
+    }
+  ],
+  "279": [
+    {
+      "id": "c279-1219",
+      "user": "indie-build-zero",
+      "submitted_at": "2026-04-17T22:58:08.473Z",
+      "upvotes": 13,
+      "downvotes": 0,
+      "body": "Saved. Pointing our junior team at this on Monday.",
+      "children": []
+    }
+  ],
+  "280": [
+    {
+      "id": "c280-1220",
+      "user": "papers-9",
+      "submitted_at": "2026-04-18T11:03:18.213Z",
+      "upvotes": 25,
+      "downvotes": 0,
+      "body": "Took me three reads, but the model launches bit clarified something I'd been stuck on for weeks.",
+      "children": []
+    },
+    {
+      "id": "c280-1221",
+      "user": "papers-fwd",
+      "submitted_at": "2026-04-18T04:22:31.326Z",
+      "upvotes": 15,
+      "downvotes": 0,
+      "body": "Good piece. The model launches angle is what most write-ups miss.",
+      "children": []
+    }
+  ],
+  "281": [
+    {
+      "id": "c281-h1",
+      "user": "infra-econ-zero",
+      "submitted_at": "2026-04-28T14:45:49.165Z",
+      "upvotes": 28,
+      "downvotes": 0,
+      "body": "The math is clear. A 1M-context Opus call at 90% cache hit is still ~$2-3 worth of compute. Pro at $20/mo can't sustain unlimited Opus access for power users. It was always going to land here.",
+      "children": []
+    },
+    {
+      "id": "c281-h2",
+      "user": "claude-code-shop",
+      "submitted_at": "2026-04-28T15:51:49.165Z",
+      "upvotes": 21,
+      "downvotes": 0,
+      "body": "Communicate the change. That's the whole ask. Don't ship a quiet email telling me my workflow stops working at 17:00 UTC.",
+      "children": [
+        {
+          "id": "c281-h3",
+          "user": "claude-code-lab",
+          "submitted_at": "2026-04-28T19:51:49.165Z",
+          "upvotes": 13,
+          "downvotes": 0,
+          "body": "Plus one. The product is genuinely good. The way they handle pricing changes is starting to feel hostile.",
+          "children": []
+        }
+      ]
+    },
+    {
+      "id": "c281-h4",
+      "user": "indie-build-9",
+      "submitted_at": "2026-04-28T19:33:49.165Z",
+      "upvotes": 9,
+      "downvotes": 0,
+      "body": "API access is still flat. If you're a power user, the cost-effective answer is to migrate off the chat product and into the API directly.",
+      "children": []
+    }
+  ],
+  "282": [
+    {
+      "id": "c282-1222",
+      "user": "agent-eval-lab",
+      "submitted_at": "2026-04-29T01:08:46.258Z",
+      "upvotes": 23,
+      "downvotes": 1,
+      "body": "Half-right. The other half is observability — and almost no one does it.",
+      "children": []
+    }
+  ],
+  "283": [
+    {
+      "id": "c283-1223",
+      "user": "agent-arch-prime",
+      "submitted_at": "2026-04-27T15:05:46.395Z",
+      "upvotes": 14,
+      "downvotes": 3,
+      "body": "Reminds me of when we tried the long-running-agent cost piece from a few weeks ago two years ago. Same shape, different layer of the stack. Lessons mostly transferred.",
+      "children": []
+    },
+    {
+      "id": "c283-1224",
+      "user": "papers-mk2",
+      "submitted_at": "2026-04-27T23:49:45.303Z",
+      "upvotes": 9,
+      "downvotes": 0,
+      "body": "Good piece. The model launches angle is what most write-ups miss.",
+      "children": []
+    },
+    {
+      "id": "c283-1225",
+      "user": "papers-lab",
+      "submitted_at": "2026-04-27T10:59:24.641Z",
+      "upvotes": 7,
+      "downvotes": 0,
+      "body": "Saved. Pointing our junior team at this on Monday.",
+      "children": []
+    }
+  ],
+  "285": [
+    {
+      "id": "c285-1226",
+      "user": "release-watch-mk2",
+      "submitted_at": "2026-04-15T16:05:23.820Z",
+      "upvotes": 20,
+      "downvotes": 3,
+      "body": "Yep.",
+      "children": []
+    }
+  ],
+  "286": [
+    {
+      "id": "c286-1227",
+      "user": "mcp-tool-lab",
+      "submitted_at": "2026-04-19T16:25:36.942Z",
+      "upvotes": 16,
+      "downvotes": 2,
+      "body": "+1. Worth the read.",
+      "children": []
+    },
+    {
+      "id": "c286-1228",
+      "user": "infra-rate-mk2",
+      "submitted_at": "2026-04-19T14:18:24.185Z",
+      "upvotes": 25,
+      "downvotes": 0,
+      "body": "This is a known problem with a known fix. The fact that it's still news is the news.",
+      "children": []
+    }
+  ],
+  "287": [
+    {
+      "id": "c287-1229",
+      "user": "voice-coding-prime",
+      "submitted_at": "2026-04-13T14:36:42.616Z",
+      "upvotes": 21,
+      "downvotes": 0,
+      "body": "Good piece. The model launches angle is what most write-ups miss.",
+      "children": []
+    }
+  ],
+  "288": [
+    {
+      "id": "c288-h1",
+      "user": "claude-code-shop",
+      "submitted_at": "2026-04-30T11:07:37.751Z",
+      "upvotes": 8,
+      "downvotes": 0,
+      "body": "Reset your context, re-do your eval suite, decide if it's actually different or just feels different. 90% of the time it's the second.",
+      "children": []
+    }
+  ],
+  "289": [
+    {
+      "id": "c289-h1",
+      "user": "claude-code-9",
+      "submitted_at": "2026-04-30T16:08:54.925Z",
+      "upvotes": 10,
+      "downvotes": 0,
+      "body": "Modding Claude Code from source is a fun afternoon project, but you lose update cadence. Net negative for production use.",
+      "children": []
+    },
+    {
+      "id": "c289-h2",
+      "user": "indie-build-9",
+      "submitted_at": "2026-04-30T17:59:00.000Z",
+      "upvotes": 5,
+      "downvotes": 0,
+      "body": "Done it. Useful for learning the internals, not useful day-to-day. Stick to the released binary.",
+      "children": []
+    }
+  ],
+  "290": [
+    {
+      "id": "c290-1230",
+      "user": "mcp-tool-prime",
+      "submitted_at": "2026-04-21T23:56:47.519Z",
+      "upvotes": 19,
+      "downvotes": 0,
+      "body": "Yep.",
+      "children": []
+    }
+  ],
+  "291": [
+    {
+      "id": "c291-1231",
+      "user": "infra-rate-watch",
+      "submitted_at": "2026-04-27T07:33:35.698Z",
+      "upvotes": 19,
+      "downvotes": 0,
+      "body": "Funny how everyone re-discovers this every six months.",
+      "children": []
+    }
+  ],
+  "292": [
+    {
+      "id": "c292-1232",
+      "user": "long-context-watch",
+      "submitted_at": "2026-04-21T03:53:38.865Z",
+      "upvotes": 19,
+      "downvotes": 0,
+      "body": "There's a deeper question here about why Claude Code keeps re-appearing. My theory: the abstraction is leaky in a way that isn't obvious until you scale past one team.",
+      "children": []
+    },
+    {
+      "id": "c292-1233",
+      "user": "agent-arch-watch",
+      "submitted_at": "2026-04-20T15:19:41.855Z",
+      "upvotes": 18,
+      "downvotes": 0,
+      "body": "Three thoughts: (1) the Claude Code side is solved; (2) the deployment side isn't; (3) most teams pretend (1) is the bottleneck because (2) is harder to talk about.",
+      "children": []
+    },
+    {
+      "id": "c292-1234",
+      "user": "agent-arch-shop",
+      "submitted_at": "2026-04-20T18:00:12.365Z",
+      "upvotes": 24,
+      "downvotes": 0,
+      "body": "On rereading, I think the post understates the cost of switching. We've eaten that cost; six weeks to recover throughput.",
+      "children": []
+    }
+  ],
+  "295": [
+    {
+      "id": "c295-1235",
+      "user": "voice-coding-shop",
+      "submitted_at": "2026-04-12T16:36:48.627Z",
+      "upvotes": 14,
+      "downvotes": 0,
+      "body": "Long but worth it. The benchmarks justify the read.",
+      "children": []
+    },
+    {
+      "id": "c295-1236",
+      "user": "indie-build-zero",
+      "submitted_at": "2026-04-14T03:13:02.018Z",
+      "upvotes": 1,
+      "downvotes": 0,
+      "body": "Long but worth it. The benchmarks justify the read.",
+      "children": []
+    }
+  ],
+  "296": [
+    {
+      "id": "c296-1237",
+      "user": "indie-build-9",
+      "submitted_at": "2026-04-08T02:14:10.491Z",
+      "upvotes": 12,
+      "downvotes": 0,
+      "body": "Took me three reads, but the Claude Code bit clarified something I'd been stuck on for weeks.",
+      "children": []
+    }
+  ],
+  "297": [
+    {
+      "id": "c297-1238",
+      "user": "voice-coding-notes",
+      "submitted_at": "2026-04-04T01:02:39.601Z",
+      "upvotes": 8,
+      "downvotes": 0,
+      "body": "Saved. Pointing our junior team at this on Monday.",
+      "children": [
+        {
+          "id": "c297-1239",
+          "user": "agent-eval-lab",
+          "submitted_at": "2026-04-04T01:30:29.319Z",
+          "upvotes": 6,
+          "downvotes": 0,
+          "body": "Counterpoint: the planner-worker pattern, with a 200-line orchestrator.",
+          "children": []
+        }
+      ]
+    },
+    {
+      "id": "c297-1240",
+      "user": "long-context-lab",
+      "submitted_at": "2026-04-04T05:10:18.657Z",
+      "upvotes": 17,
+      "downvotes": 0,
+      "body": "There's a deeper question here about why Claude Code keeps re-appearing. My theory: the abstraction is leaky in a way that isn't obvious until you scale past one team.",
+      "children": [
+        {
+          "id": "c297-1241",
+          "user": "agent-arch-watch",
+          "submitted_at": "2026-04-04T05:46:14.363Z",
+          "upvotes": 4,
+          "downvotes": 0,
+          "body": "Adding to this — the same pattern shows up in the eval harness write-up but with different second-order effects, which is why people get confused when comparing notes across teams.",
+          "children": []
+        }
+      ]
+    }
+  ],
+  "298": [
+    {
+      "id": "c298-h1",
+      "user": "long-context-watch",
+      "submitted_at": "2026-04-26T10:18:27.417Z",
+      "upvotes": 32,
+      "downvotes": 0,
+      "body": "The 1M context window is the headline but the recall curve is the news. Anthropic published a chart showing degradation past 600k that's much shallower than 4.6 was. Big deal for long-running agents.",
+      "children": []
+    },
+    {
+      "id": "c298-h2",
+      "user": "agent-eval-watch",
+      "submitted_at": "2026-04-26T10:54:27.417Z",
+      "upvotes": 24,
+      "downvotes": 0,
+      "body": "Quick eval pass: SWE-bench-Verified scores up ~6 points over 4.6, but the variance across runs widened. Worth waiting a week for the field to stabilize before drawing conclusions.",
+      "children": [
+        {
+          "id": "c298-h3",
+          "user": "agent-eval-mk2",
+          "submitted_at": "2026-04-26T13:30:27.417Z",
+          "upvotes": 13,
+          "downvotes": 0,
+          "body": "Variance is the bigger story for me. A model that beats 4.6 on the median but loses on the p10 is a regression for production agents that depend on tail behavior.",
+          "children": []
+        },
+        {
+          "id": "c298-h4",
+          "user": "papers-watch",
+          "submitted_at": "2026-04-26T15:00:27.417Z",
+          "upvotes": 9,
+          "downvotes": 0,
+          "body": "The system card's eval section is unusually detailed this round. Tail behavior gets a paragraph instead of a footnote. Read past page 14.",
+          "children": []
+        }
+      ]
+    },
+    {
+      "id": "c298-h5",
+      "user": "claude-code-watch",
+      "submitted_at": "2026-04-26T12:06:27.417Z",
+      "upvotes": 18,
+      "downvotes": 0,
+      "body": "The price hint in the API docs is the thing nobody's talking about. Per 1M output tokens at the 1M-context tier is a meaningful step up from Sonnet — not a like-for-like upgrade.",
+      "children": []
+    },
+    {
+      "id": "c298-h6",
+      "user": "prompt-cache-fwd",
+      "submitted_at": "2026-04-26T16:30:27.417Z",
+      "upvotes": 11,
+      "downvotes": 0,
+      "body": "Cache hit improvements are quiet but real. Same workflow as last week, my hit rate jumped from 72% to 84% without any code change.",
+      "children": []
+    }
+  ],
+  "299": [
+    {
+      "id": "c299-h1",
+      "user": "claude-code-watch",
+      "submitted_at": "2026-04-29T12:38:45.248Z",
+      "upvotes": 26,
+      "downvotes": 0,
+      "body": "Anthropic is moving up the stack. Whether this is a moat or a distraction depends on what shipping velocity looks like in six months.",
+      "children": []
+    },
+    {
+      "id": "c299-h2",
+      "user": "indie-build-fwd",
+      "submitted_at": "2026-04-29T13:26:45.248Z",
+      "upvotes": 19,
+      "downvotes": 0,
+      "body": "First impressions: the design tokens model is sane, the live preview is faster than v0, and the Figma export actually round-trips. Worth a serious look.",
+      "children": [
+        {
+          "id": "c299-h3",
+          "user": "voice-coding-watch",
+          "submitted_at": "2026-04-29T17:14:45.248Z",
+          "upvotes": 9,
+          "downvotes": 0,
+          "body": "The Figma round-trip is what closes the gap for me — that was the missing piece in every prior tool I tried.",
+          "children": []
+        }
+      ]
+    },
+    {
+      "id": "c299-h4",
+      "user": "indie-build-prime",
+      "submitted_at": "2026-04-29T16:14:45.248Z",
+      "upvotes": 11,
+      "downvotes": 0,
+      "body": "Tried it for an internal admin app. Output is good, but the pricing tier is going to matter — design loops eat tokens fast and the cost wasn't visible during preview.",
+      "children": []
+    }
+  ],
+  "300": [
+    {
+      "id": "c300-1242",
+      "user": "agent-arch-9",
+      "submitted_at": "2026-04-29T08:21:20.406Z",
+      "upvotes": 10,
+      "downvotes": 2,
+      "body": "Worth pairing with the the long-running-agent cost piece from a few weeks ago discussion from a few weeks back. They're not contradictory but they optimize for different things.",
+      "children": []
+    }
+  ],
+  "301": [
+    {
+      "id": "c301-1243",
+      "user": "infra-econ-fwd",
+      "submitted_at": "2026-04-18T14:21:32.281Z",
+      "upvotes": 23,
+      "downvotes": 0,
+      "body": "Or: don't. We tried this in production and the second-order effects ate the savings.",
+      "children": [
+        {
+          "id": "c301-1244",
+          "user": "indie-build-lab",
+          "submitted_at": "2026-04-19T13:27:11.382Z",
+          "upvotes": 0,
+          "downvotes": 0,
+          "body": "This matches our data too.",
+          "children": []
+        }
+      ]
+    }
+  ],
+  "302": [
+    {
+      "id": "c302-h1",
+      "user": "voice-coding-prime",
+      "submitted_at": "2026-04-27T14:28:29.139Z",
+      "upvotes": 12,
+      "downvotes": 0,
+      "body": "Solid overview. The hands-free demo at 18:30 is the bit worth jumping to.",
+      "children": []
+    },
+    {
+      "id": "c302-h2",
+      "user": "claude-code-9",
+      "submitted_at": "2026-04-27T17:52:29.139Z",
+      "upvotes": 6,
+      "downvotes": 0,
+      "body": "Or read the changelog. 90 minutes for what could be a five-minute scan.",
+      "children": []
+    }
+  ]
+}

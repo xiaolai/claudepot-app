@@ -1,0 +1,68 @@
+export const metadata = {
+  title: "Automations",
+  description:
+    "Cron-scheduled prompts. Run a prompt every weekday morning, every Monday, or any cron schedule.",
+};
+
+# Automations
+
+A Claude prompt that needs to run on a schedule — a daily standup
+summary, a weekly digest of your inbox, a Friday-afternoon
+status check — is an *Automation*. The Automations tab is the place
+to write, schedule, and review them.
+
+## Anatomy
+
+Each automation has:
+
+- **A prompt** &mdash; the text Claude receives when the schedule
+  fires.
+- **A schedule** &mdash; standard cron syntax, with named presets
+  (every weekday at 8am, every Monday morning, every hour, &hellip;).
+- **An account binding** &mdash; which Anthropic identity runs the
+  prompt. Multi-account safe: you can have a *daily-news* automation
+  on your personal account and a *standup-summary* automation on
+  work, both running concurrently.
+- **A target** &mdash; where the result lands. Options: email
+  (via the Resend integration), file in a project directory,
+  ClauDepot&rsquo;s Notifications log, or a custom MCP-server hook.
+
+## Templates
+
+A library of starter automations: status reports, weekly summaries,
+inbox triage. Each is a regular automation you can clone and tweak —
+nothing magic, just convenient defaults. See the
+[automations templates research](https://github.com/xiaolai/claudepot-app/blob/main/dev-docs/automations-templates-research.md)
+for the catalog rationale.
+
+## How they run
+
+ClauDepot uses the OS&rsquo;s own scheduler (launchd on macOS,
+systemd timer on Linux, Task Scheduler on Windows) — *not* a
+ClauDepot-internal daemon. This means automations run even when
+ClauDepot itself is closed, and survive reboots without
+configuration.
+
+When the schedule fires, the OS scheduler invokes the
+`claudepot automation run <id>` CLI, which prints the prompt to the
+target and writes a journal entry. Failures are written to the
+notifications log; you see them next time you open the GUI.
+
+## Pedestrian needs
+
+A common pattern is the *boring repetitive task* you&rsquo;d normally
+delegate to an intern: collect the day&rsquo;s news, summarise a
+folder of files, clean up a stale inbox label. ClauDepot calls these
+&ldquo;pedestrian needs&rdquo; — the things automations are best at.
+The
+[pedestrian-automation-needs catalog](https://github.com/xiaolai/claudepot-app/blob/main/dev-docs/pedestrian-automation-needs-catalog.md)
+documents the patterns.
+
+## Op-progress for long runs
+
+When you trigger a one-off run from the GUI (for testing or a manual
+fire), the run goes through the same op-progress pipeline as project
+rename: `Tauri *_start` cmd → spawns task → emits events on
+`op-progress::<op_id>` channels → the modal subscribes by op_id.
+You can dismiss the modal and the run continues; reopen later to see
+where it got to.

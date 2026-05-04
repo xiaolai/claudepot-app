@@ -1,0 +1,52 @@
+export const metadata = {
+  title: "Activities",
+  description:
+    "Live view of every running Claude session, sorted by who needs your attention first.",
+};
+
+# Activities
+
+The Activities tab is the answer to *what is Claude doing right now?*
+across every project at once. It has three parts.
+
+## Live strip
+
+A continuously-updating strip at the top showing every session
+ClauDepot can see — including ones started before ClauDepot launched.
+Each row carries:
+
+- Project name and current working file.
+- Last token timestamp (so you can tell if a session is humming or
+  stalled).
+- Status: running, awaiting tool approval, awaiting input, idle.
+- A direct link to open the conversation in its source tool.
+
+Sort order is &ldquo;needs you first&rdquo; — sessions awaiting your
+input or your tool approval rise to the top.
+
+## Today / month dashboard
+
+A summary view with rough counts: total sessions, total messages,
+total token spend, top projects by activity. Numbers are read from
+the local session-index DB — no API calls — so the dashboard is fast
+and offline-friendly. Useful when you want a quick &ldquo;was today
+busy?&rdquo; without inspecting individual transcripts.
+
+## Cards stream
+
+A reverse-chronological feed of every session event — start, message,
+tool call, completion. Each card is collapsible; click in to see the
+message body or the tool result. The stream is filterable by project,
+account, and event type.
+
+## Where the data comes from
+
+Sessions are JSONL transcripts in `~/.claude/projects/<slug>/`.
+ClauDepot maintains a SQLite index at `~/.claudepot/sessions.db`
+keyed by `file_path`, with `(size, mtime_ns)` as the re-parse guard.
+A file watcher noticed changes; the index updates incrementally.
+
+If the index ever drifts from the on-disk truth, *Settings → Cleanup*
+has a *Rebuild index* button that re-parses every session file from
+scratch. The same operation is available as
+`claudepot session rebuild-index` from the CLI.

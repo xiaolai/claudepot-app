@@ -1,0 +1,74 @@
+export const metadata = {
+  title: "Accounts",
+  description:
+    "Add, switch, and verify Anthropic accounts. CLI and Desktop slots are independent.",
+};
+
+# Accounts
+
+The Accounts tab is the home base. Each row is a registered Anthropic
+identity — an email address Claude knows you by. ClauDepot remembers
+the credentials in your OS keychain (separate from Claude&rsquo;s own)
+and lets you switch between them without editing files in `~/.claude/`.
+
+## Two independent slots
+
+Claude Code reads credentials from one slot. Claude Desktop reads
+session files from a different slot. **They are independent.** You can
+have:
+
+- Account A active in CLI, Account B active in Desktop.
+- The same account active in both.
+- Either slot empty while the other is active.
+
+The header on each account card shows which slots it currently owns.
+
+## Add an account
+
+Three paths in:
+
+- **From current Claude Code session.** If you&rsquo;ve `claude /login`-ed
+  on this machine, ClauDepot finds the credentials and offers to
+  register them as a named account.
+- **Browser login.** Spawns the Claude OAuth flow in your default
+  browser; the resulting credentials are stored under the email you
+  authenticate with.
+- **Paste an existing OAuth token.** For accounts already provisioned
+  on another machine.
+
+Identity is the email address. Email prefix matching means you can type
+just `joe` and ClauDepot resolves it as long as exactly one registered
+account starts with that prefix.
+
+## Switch slots
+
+Each account card has a *Use for CLI* and *Use for Desktop* button.
+Click either to make that account the active slot. Switching is
+atomic: it writes the credentials, signals Claude to refresh, and
+verifies the change took effect before reporting success.
+
+## Verify
+
+The shield icon next to each account runs a verification check —
+calls the Anthropic API with the stored credentials and confirms the
+token is still valid. Useful before committing to a long task.
+
+The *Verify all* button at the top runs the check across every
+registered account in parallel.
+
+## Remove
+
+Removing an account purges the keychain entry and the local DB row.
+Claude&rsquo;s own session files are untouched — if the account is
+currently active in a slot, ClauDepot detaches first, then deletes.
+
+## Architecture
+
+Account state is in `~/.claudepot/accounts.db` (SQLite, single-writer).
+Credentials live in the OS keychain under the bundle ID
+`com.claudepot.app`. ClauDepot uses two distinct keychain surfaces
+on macOS — one for its own secrets via the `keyring` crate, one to
+read Claude&rsquo;s credential via `/usr/bin/security` subprocess.
+See the
+[architecture rules](https://github.com/xiaolai/claudepot-app/blob/main/.claude/rules/architecture.md)
+for why this split matters.

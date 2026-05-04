@@ -1,0 +1,65 @@
+name: CI / Web (Next.js)
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'web/**'
+      - '.github/workflows/ci-web.yml'
+  pull_request:
+    paths:
+      - 'web/**'
+      - '.github/workflows/ci-web.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-web-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: Typecheck and test
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: web
+
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Install pnpm
+        uses: pnpm/action-setup@v5
+        with:
+          version: 10
+
+      - name: Install Node
+        uses: actions/setup-node@v5
+        with:
+          node-version: 24
+          cache: pnpm
+          cache-dependency-path: web/pnpm-lock.yaml
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Typecheck
+        run: pnpm exec tsc --noEmit
+
+      - name: Test
+        env:
+          NODE_ENV: test
+        run: pnpm test
+
+      # Note: `pnpm build` is intentionally NOT run in CI. Several
+      # routes call `generateStaticParams` and hit Neon at build
+      # time — a placeholder URL fails ECONNREFUSED, and the real
+      # one shouldn't be in CI secrets when Vercel already runs the
+      # full build per push. CI's job is typecheck + tests; Vercel
+      # validates the build with the real env. If a build-time
+      # regression escapes Vercel, swap in a Neon preview-branch URL
+      # here via a `${{ secrets.NEON_DATABASE_URL_CI }}` and re-add
+      # the build step.

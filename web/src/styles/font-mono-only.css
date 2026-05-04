@@ -1,0 +1,37 @@
+/* ============================================================
+   Mono-only typography override
+   ────────────────────────────────────────────────────────────
+   The site's distinct style is a single monospaced typeface.
+   theme.css still defines --font-display / --font-serif-body /
+   --font-body for legacy compatibility (the prototype CSS uses
+   them in 71 places). This file aliases all three to
+   --font-mono, which the layout sets to JetBrains Mono via
+   next/font/google.
+
+   Imported AFTER theme.css in the layout so the cascade wins.
+   Keep this file lean — it intentionally does only one thing.
+
+   To upgrade to a true patched Nerd Font (with Powerline /
+   Devicon glyphs), self-host a JetBrainsMono Nerd Font woff2
+   via next/font/local under variable: "--font-mono". This file
+   needs no changes.
+   ============================================================ */
+
+:root {
+  --font-display: var(--font-mono);
+  --font-serif-body: var(--font-mono);
+  --font-body: var(--font-mono);
+}
+
+/* JetBrains Mono's ex-height ratio (~0.535) and heavier strokes
+   make it read ~6-8% larger than Inter at the same nominal size.
+   font-size-adjust pegs the rendered ex-height to a fixed ratio,
+   so the browser scales mono down to match the design's previous
+   sans-serif weight. 0.5 is close to Inter's natural ratio and a
+   common neutral target — dial 0.48-0.52 to taste. All --fs-*
+   tokens shrink uniformly; no per-token override needed. Lives on
+   html (not :root) since it's a behavioural property, not a token
+   declaration — keeps the :root block tokens-only. */
+html {
+  font-size-adjust: 0.5;
+}

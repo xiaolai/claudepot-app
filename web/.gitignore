@@ -1,0 +1,33 @@
+node_modules/
+.next/
+out/
+dist/
+build/
+
+.env
+.env.local
+.env.*.local
+
+*.tsbuildinfo
+next-env.d.ts
+
+.DS_Store
+*.pem
+
+# Vercel CLI link directory
+.vercel
+
+# Claude Code runtime artifacts — settings, hooks, rules, and CLAUDE.md
+# are tracked; only local overrides and runtime state stay ignored.
+.claude/settings.local.json
+.claude/scheduled_tasks.lock
+
+# Local-only artifacts from MCP / hook tooling and ad-hoc captures
+.playwright-mcp/
+.tokenize/
+.responsive/
+screenshots/
+avatars-*.png
+
+# Backfill importer dry-run output
+design/scripts/.candidates.json
