@@ -14,9 +14,7 @@
 
 use crate::dto_memory::{AutoMemoryStateDto, MemoryChangeDto, MemoryEnumerateDto};
 use claudepot_core::memory_log::{ChangeQuery, MemoryFileStats, MemoryLog};
-use claudepot_core::memory_view::{
-    enumerate_project_memory, read_memory_content, ReadMemoryError,
-};
+use claudepot_core::memory_view::{enumerate_project_memory, read_memory_content, ReadMemoryError};
 use claudepot_core::project_helpers::resolve_path;
 use claudepot_core::settings_writer::{
     clear_auto_memory_enabled, resolve_auto_memory_enabled, resolve_auto_memory_enabled_global,
@@ -59,8 +57,8 @@ pub async fn memory_list_for_project(
     state: State<'_, MemoryLogState>,
 ) -> Result<MemoryEnumerateDto, String> {
     let root = resolve_project_root(&project_root)?;
-    let result = enumerate_project_memory(&root, true)
-        .map_err(|e| format!("enumerate memory: {e}"))?;
+    let result =
+        enumerate_project_memory(&root, true).map_err(|e| format!("enumerate memory: {e}"))?;
     let stats: std::collections::HashMap<PathBuf, MemoryFileStats> = state
         .log
         .project_file_stats(&result.anchor.slug)
@@ -75,10 +73,7 @@ pub async fn memory_list_for_project(
 /// `project_root` argument scopes the containment check; passing a
 /// path outside that scope returns an error rather than reading.
 #[tauri::command]
-pub async fn memory_read_file(
-    project_root: String,
-    abs_path: String,
-) -> Result<String, String> {
+pub async fn memory_read_file(project_root: String, abs_path: String) -> Result<String, String> {
     let root = resolve_project_root(&project_root)?;
     let target = PathBuf::from(&abs_path);
     read_memory_content(&target, &[root]).map_err(|e| match e {
@@ -156,10 +151,12 @@ pub async fn auto_memory_set(
         other => return Err(format!("unknown scope {other}; want user|local_project")),
     };
     match value {
-        Some(v) => write_auto_memory_enabled(layer, &root, v)
-            .map_err(|e| format!("write setting: {e}"))?,
-        None => clear_auto_memory_enabled(layer, &root)
-            .map_err(|e| format!("clear setting: {e}"))?,
+        Some(v) => {
+            write_auto_memory_enabled(layer, &root, v).map_err(|e| format!("write setting: {e}"))?
+        }
+        None => {
+            clear_auto_memory_enabled(layer, &root).map_err(|e| format!("clear setting: {e}"))?
+        }
     }
     let state = resolve_auto_memory_enabled(&root);
     Ok(AutoMemoryStateDto::from_state(state, &root))
