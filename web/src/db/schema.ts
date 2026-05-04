@@ -653,7 +653,7 @@ export const metricsDaily = pgTable("metrics_daily", {
 
 /* ── Public API tokens ──────────────────────────────────────────
  * Per-user Personal Access Tokens for the public REST + MCP API.
- * Plaintext (`shn_pat_<28 random url-safe-base64 chars>`) is shown
+ * Plaintext (`cdp_pat_<28 random url-safe-base64 chars>`) is shown
  * once at creation; only the SHA-256 hex digest is stored.
  *
  * Scopes are an open text array, validated in app code (see
