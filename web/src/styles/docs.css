@@ -1,48 +1,9 @@
-/* /app/* docs surface. Uses web/'s `theme.css` tokens directly —
- * no claudepot-app spacing scale, no hardcoded color fallbacks,
- * no global brand-mark classes. Scoped to `.docs-*` so it doesn't
- * collide with the reader's `prototype.css`. */
-
-.docs-topbar {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: var(--sp-12) var(--sp-20);
-  border-bottom: var(--bw-hair) solid var(--border);
-  background: var(--bg);
-  position: sticky;
-  top: 0;
-  z-index: 10;
-}
-
-.docs-brand {
-  text-decoration: none;
-  font-size: var(--fs-section-heading);
-  font-weight: 600;
-  letter-spacing: var(--ls-tight);
-  color: var(--text);
-}
-
-.docs-topbar-nav {
-  display: flex;
-  gap: var(--sp-20);
-  align-items: center;
-}
-
-.docs-topbar-nav a {
-  color: var(--muted);
-  text-decoration: none;
-  font-size: var(--fs-meta);
-}
-
-.docs-topbar-nav a:hover {
-  color: var(--text);
-}
-
-.docs-topbar-reader {
-  border-left: var(--bw-hair) solid var(--border);
-  padding-left: var(--sp-20);
-}
+/* /app/* docs surface, nested inside the reader group's chrome.
+ * The reader's PrototypeNav supplies the masthead; this file
+ * only adds the docs sidebar + article layout below it. Uses
+ * web/'s `theme.css` tokens directly. Heading + body styles
+ * mirror the reader's editorial register (Playfair Display +
+ * Source Serif 4) so /app/* feels like the same publication. */
 
 .docs-shell {
   display: grid;
@@ -55,7 +16,7 @@
 
 .docs-sidebar {
   position: sticky;
-  top: calc(var(--sp-28) + 4rem);
+  top: var(--sp-28);
   align-self: flex-start;
   font-size: var(--fs-meta);
 }
@@ -102,29 +63,38 @@
 
 .docs-main {
   min-width: 0;
-  max-width: 48rem;
+  max-width: var(--bp-md);
 }
 
 .docs-main h1 {
+  font-family: var(--font-display);
   font-size: var(--fs-masthead);
   letter-spacing: var(--ls-tight);
   margin: 0 0 var(--sp-16);
+  color: var(--editorial-dark);
 }
 
 .docs-main h2 {
+  font-family: var(--font-display);
   font-size: var(--fs-section-heading);
   margin: var(--sp-32) 0 var(--sp-12);
   letter-spacing: var(--ls-tight);
+  color: var(--editorial-dark);
 }
 
 .docs-main h3 {
+  font-family: var(--font-display);
   font-size: var(--fs-playbook-dek);
   margin: var(--sp-24) 0 var(--sp-8);
+  color: var(--editorial-dark);
 }
 
 .docs-main p,
 .docs-main li {
+  font-family: var(--font-serif-body);
   line-height: var(--lh-body);
+  font-size: var(--fs-playbook-body);
+  color: var(--text);
 }
 
 .docs-main p + p {
@@ -145,9 +115,9 @@
 }
 
 .docs-main :not(pre) > code {
-  padding: 0.1em 0.35em;
+  padding: var(--ls-eyebrow) 0.35em;
   border: var(--bw-hair) solid var(--border);
-  border-radius: 3px;
+  border-radius: var(--bw-accent);
   background: var(--code-bg);
   font-size: 0.92em;
 }
@@ -155,7 +125,7 @@
 .docs-main a {
   color: var(--accent-ink);
   text-decoration: underline;
-  text-underline-offset: 2px;
+  text-underline-offset: var(--bw-rule);
 }
 
 .docs-main blockquote {
@@ -164,18 +134,6 @@
   border-left: var(--bw-accent) solid var(--accent);
   color: var(--muted);
   background: var(--accent-soft);
-}
-
-.docs-footer {
-  border-top: var(--bw-hair) solid var(--border);
-  padding: var(--sp-20);
-  text-align: center;
-  color: var(--muted);
-  font-size: var(--fs-meta);
-}
-
-.docs-footer a {
-  color: var(--accent-ink);
 }
 
 /* /app/ landing — hero + features grid */
@@ -191,10 +149,12 @@
 }
 
 .docs-hero-tagline {
+  font-family: var(--font-serif-body);
   font-size: var(--fs-playbook-dek);
   color: var(--muted);
   max-width: 36rem;
   margin: 0 0 var(--sp-24);
+  line-height: var(--lh-dek);
 }
 
 .docs-hero-actions {
@@ -211,17 +171,21 @@
   border-radius: var(--sp-4);
   text-decoration: none;
   font-weight: 600;
+  font-family: var(--font-mono);
+  font-size: var(--fs-meta);
+  letter-spacing: var(--ls-wide);
+  text-transform: uppercase;
 }
 
 .docs-cta-primary {
-  background: var(--text);
+  background: var(--editorial-dark);
   color: var(--bg);
-  border-color: var(--text);
+  border-color: var(--editorial-dark);
 }
 
 .docs-cta-secondary {
   background: var(--bg);
-  color: var(--text);
+  color: var(--editorial-dark);
 }
 
 .docs-feature-grid {
@@ -241,21 +205,25 @@
 }
 
 .docs-feature-card:hover {
-  border-color: var(--text);
+  border-color: var(--editorial-dark);
 }
 
 .docs-feature-card h3 {
   margin: 0 0 var(--sp-8);
   font-size: var(--fs-playbook-dek);
+  font-family: var(--font-display);
+  color: var(--editorial-dark);
 }
 
 .docs-feature-card p {
   margin: 0;
+  font-family: var(--font-serif-body);
   color: var(--muted);
   font-size: var(--fs-body);
+  line-height: var(--lh-body);
 }
 
-@media (max-width: 720px) {
+@media (max-width: var(--content-width)) {
   .docs-shell {
     grid-template-columns: 1fr;
   }

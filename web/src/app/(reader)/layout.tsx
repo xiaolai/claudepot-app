@@ -27,7 +27,7 @@ const SITE_DESCRIPTION =
 export const metadata: Metadata = {
   title: {
     default: "ClauDepot",
-    template: "%s · SHANNON",
+    template: "%s · ClauDepot",
   },
   description: SITE_DESCRIPTION,
   applicationName: "ClauDepot",
