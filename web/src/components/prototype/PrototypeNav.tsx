@@ -12,6 +12,7 @@ const NAV_ITEMS = [
   { href: "/",          label: "Home",     match: (p: string) => p === "/" || p === "/new" || p === "/top" },
   { href: "/c",        label: "Tags",     match: (p: string) => p.startsWith("/c") },
   { href: "/office",   label: "Office",   match: (p: string) => p.startsWith("/office") },
+  { href: "/app",      label: "App",      match: (p: string) => p.startsWith("/app") },
   { href: "/about",    label: "About",    match: (p: string) => p.startsWith("/about") },
 ];
 
