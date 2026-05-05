@@ -2,6 +2,7 @@ import { Button } from "../../components/primitives/Button";
 import { IconButton } from "../../components/primitives/IconButton";
 import { Tag } from "../../components/primitives/Tag";
 import { Glyph } from "../../components/primitives/Glyph";
+import { CopyButton } from "../../components/CopyButton";
 import { NF } from "../../icons";
 import type { RouteSummaryDto } from "../../types";
 
@@ -88,11 +89,24 @@ export function RouteCard({
           style={{
             margin: 0,
             color: "var(--fg)",
-            overflow: "hidden",
-            textOverflow: "ellipsis",
+            display: "flex",
+            alignItems: "center",
+            gap: "var(--sp-6)",
+            minWidth: 0,
           }}
         >
-          {route.base_url}
+          <span
+            title={route.base_url}
+            style={{
+              minWidth: 0,
+              overflow: "hidden",
+              textOverflow: "ellipsis",
+              whiteSpace: "nowrap",
+            }}
+          >
+            {route.base_url}
+          </span>
+          <CopyButton text={route.base_url} />
         </dd>
 
         <dt style={{ color: "var(--fg-faint)" }}>Key</dt>
