@@ -1,15 +1,27 @@
 /**
  * Seed the office bot army.
  *
- *   pnpm exec tsx --env-file=.env.local scripts/seed-office-bots.ts [--apply] [--out=PATH]
+ *   pnpm exec tsx --env-file=.env.local scripts/seed-office-bots.ts \
+ *     [--apply] [--out=PATH] [--icon-dir=PATH]
  *
  * Default is dry-run: prints what would happen and exits without writing.
- * Pass `--apply` to insert users + mint PATs and write `.env.office`.
+ * Pass `--apply` to upload avatars to Blob, insert users + mint PATs,
+ * and write `.env.office`.
+ *
+ * Avatars: each bot's source PNG (`<icon-dir>/<iconBase>_256.png`) is
+ * uploaded to Vercel Blob at `avatars/<username>.png` (stable, no random
+ * suffix; allowOverwrite=true so re-runs idempotently overwrite). The
+ * returned URL is what gets stored in `users.image` / `users.avatar_url`.
+ * The previous /public/-based scheme was removed because (a) it coupled
+ * avatar changes to git deploys, and (b) it published the bot roster
+ * publicly in the repo. Vercel Blob keeps the bytes off the source tree
+ * and inside the same auth boundary as the Next.js app.
  *
  * Idempotent on (citext) username: if a bot already exists, it is left
  * alone and no new PAT is minted (because we cannot recover the plaintext
  * of an existing one). Re-runs after a partial failure are safe; to
- * re-mint, revoke the old token in `/settings/tokens` first.
+ * re-mint, revoke the old token in `/settings/tokens` first. Re-uploading
+ * the same avatar is harmless (overwrite-in-place).
  *
  * No truncation. No deletion. Additive only.
  *
@@ -18,11 +30,15 @@
  * `Authorization: Bearer cdp_pat_*`. Full access = all five scopes,
  * never-expiring (bypasses the staff-only gate in createApiToken because
  * we INSERT directly).
+ *
+ * Required env: NEON_DATABASE_URL (or DATABASE_URL), BLOB_READ_WRITE_TOKEN.
  */
 
-import { writeFileSync, chmodSync } from "node:fs";
+import { writeFileSync, chmodSync, readFileSync } from "node:fs";
 import { resolve } from "node:path";
+import { homedir } from "node:os";
 
+import { put } from "@vercel/blob";
 import { eq, sql } from "drizzle-orm";
 
 import { db } from "@/db/client";
@@ -34,43 +50,58 @@ import { SCOPES } from "@/lib/api/scopes";
 // to http://localhost:3000, and seed scripts run against the same `.env.local`
 // the dev server uses, so reading it would write localhost URLs into the
 // production users table. (This bug shipped once; the offending rows were
-// rewritten with a one-shot UPDATE.) Bots are tied to the public domain;
-// if you ever stand up a separate environment, edit this constant.
+// rewritten with a one-shot UPDATE.) SITE_URL is only used to render
+// CLAUDEPOT_API_BASE / CLAUDEPOT_SITE_URL into .env.office; avatar URLs
+// come from Vercel Blob (see uploadAvatar).
 const SITE_URL = "https://claudepot.com";
 const EMAIL_DOMAIN = "claudepot.com";
+const DEFAULT_ICON_DIR = resolve(homedir(), "shannon-family/design-system/outputs/icons");
 
-type BotSpec = { username: string; displayName: string };
+// (botUsername, displayName, iconBase) — iconBase matches files in the
+// icon dir as `<iconBase>_256.png`. mom→bonnie + daddy→joe; the rest
+// share the same name.
+type BotSpec = { username: string; displayName: string; iconBase: string };
 
 const BOTS: BotSpec[] = [
-  { username: "bonnie",  displayName: "Bonnie" },
-  { username: "joe",     displayName: "Joe" },
-  { username: "ada",     displayName: "Ada" },
-  { username: "alan",    displayName: "Alan" },
-  { username: "blair",   displayName: "Blair" },
-  { username: "byte",    displayName: "Byte" },
-  { username: "delon",   displayName: "Delon" },
-  { username: "laura",   displayName: "Laura" },
-  { username: "loki",    displayName: "Loki" },
-  { username: "nancy",   displayName: "Nancy" },
-  { username: "selina",  displayName: "Selina" },
-  { username: "shirley", displayName: "Shirley" },
-  { username: "stephen", displayName: "Stephen" },
-  { username: "warren",  displayName: "Warren" },
-  { username: "wayne",   displayName: "Wayne" },
+  { username: "bonnie",  displayName: "Bonnie",  iconBase: "mom" },
+  { username: "joe",     displayName: "Joe",     iconBase: "daddy" },
+  { username: "ada",     displayName: "Ada",     iconBase: "ada" },
+  { username: "alan",    displayName: "Alan",    iconBase: "alan" },
+  { username: "blair",   displayName: "Blair",   iconBase: "blair" },
+  { username: "byte",    displayName: "Byte",    iconBase: "byte" },
+  { username: "delon",   displayName: "Delon",   iconBase: "delon" },
+  { username: "laura",   displayName: "Laura",   iconBase: "laura" },
+  { username: "loki",    displayName: "Loki",    iconBase: "loki" },
+  { username: "nancy",   displayName: "Nancy",   iconBase: "nancy" },
+  { username: "selina",  displayName: "Selina",  iconBase: "selina" },
+  { username: "shirley", displayName: "Shirley", iconBase: "shirley" },
+  { username: "stephen", displayName: "Stephen", iconBase: "stephen" },
+  { username: "warren",  displayName: "Warren",  iconBase: "warren" },
+  { username: "wayne",   displayName: "Wayne",   iconBase: "wayne" },
 ];
 
-function parseArgs(argv: string[]): { apply: boolean; out: string } {
+function parseArgs(argv: string[]): { apply: boolean; out: string; iconDir: string } {
   let apply = false;
   let out = resolve(process.cwd(), "../.env.office");
+  let iconDir = DEFAULT_ICON_DIR;
   for (const a of argv) {
     if (a === "--apply") apply = true;
     else if (a.startsWith("--out=")) out = resolve(a.slice("--out=".length));
+    else if (a.startsWith("--icon-dir=")) iconDir = resolve(a.slice("--icon-dir=".length));
   }
-  return { apply, out };
+  return { apply, out, iconDir };
 }
 
-function avatarUrl(username: string): string {
-  return `${SITE_URL.replace(/\/$/, "")}/avatars/${username}.png`;
+async function uploadAvatar(username: string, iconPath: string): Promise<string> {
+  const bytes = readFileSync(iconPath);
+  const { url } = await put(`avatars/${username}.png`, bytes, {
+    access: "public",
+    contentType: "image/png",
+    addRandomSuffix: false,
+    allowOverwrite: true,
+    cacheControlMaxAge: 60 * 60 * 24 * 365, // 1y; treat per-username avatars as immutable
+  });
+  return url;
 }
 
 function emailFor(username: string): string {
@@ -85,9 +116,12 @@ type SeedResult = {
   status: "created+minted" | "exists-skipped";
 };
 
-async function ensureBot(spec: BotSpec, apply: boolean): Promise<SeedResult> {
+async function ensureBot(
+  spec: BotSpec,
+  iconDir: string,
+  apply: boolean,
+): Promise<SeedResult> {
   const email = emailFor(spec.username);
-  const image = avatarUrl(spec.username);
 
   // Existing? citext makes this case-insensitive on username.
   const [existing] = await db
@@ -115,6 +149,13 @@ async function ensureBot(spec: BotSpec, apply: boolean): Promise<SeedResult> {
       status: "created+minted",
     };
   }
+
+  // Upload the avatar BEFORE inserting the user. If the upload fails, we
+  // haven't touched the DB yet — clean abort. If the user insert fails
+  // after a successful upload, the blob is overwritten on the next
+  // re-run (allowOverwrite=true) so no orphan accumulates.
+  const iconPath = resolve(iconDir, `${spec.iconBase}_256.png`);
+  const image = await uploadAvatar(spec.username, iconPath);
 
   // The neon-http driver has no transaction support, so we sequence the
   // three inserts and roll back manually if a later step fails. Without
@@ -229,8 +270,16 @@ function renderEnvOffice(results: SeedResult[]): string {
 }
 
 async function main() {
-  const { apply, out } = parseArgs(process.argv.slice(2));
+  const { apply, out, iconDir } = parseArgs(process.argv.slice(2));
   console.log(`> seed-office-bots — ${apply ? "APPLY" : "dry-run"}`);
+  console.log(`> icon-dir = ${iconDir}`);
+
+  if (apply && !process.env.BLOB_READ_WRITE_TOKEN) {
+    throw new Error(
+      "BLOB_READ_WRITE_TOKEN missing. Run `vercel env pull` in web/ first " +
+        "(requires the claudepot-com Vercel project linked + Blob store connected).",
+    );
+  }
 
   // Sanity-check we can reach the DB.
   const probe = await db.execute(sql`SELECT current_database() AS db, version() AS v`);
@@ -240,7 +289,7 @@ async function main() {
   const results: SeedResult[] = [];
   for (const spec of BOTS) {
     try {
-      const r = await ensureBot(spec, apply);
+      const r = await ensureBot(spec, iconDir, apply);
       results.push(r);
       const tag = r.status === "exists-skipped" ? "SKIP" : apply ? "OK  " : "PLAN";
       console.log(`  ${tag} ${spec.username.padEnd(8)} ${r.email}`);
