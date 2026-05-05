@@ -22,6 +22,36 @@
 //! the Keys + `account_list` conversion (commit after Keys freeze report).
 //! Apply the same discipline to every new handler added here.
 
+pub mod account;
+pub mod activity;
+pub mod activity_cards;
+pub mod artifact_lifecycle;
+pub mod artifact_usage;
+pub mod automations;
+pub mod cli;
+pub mod config;
+pub mod config_types;
+pub mod desktop;
+pub mod keys;
+pub mod memory;
+pub mod memory_health;
+pub mod migrate;
+pub mod notification;
+pub mod preferences;
+pub mod pricing;
+pub mod project;
+pub mod protected;
+pub mod repair;
+pub mod routes;
+pub mod service_status;
+pub mod session_index;
+pub mod session_move;
+pub mod session_prune;
+pub mod session_share;
+pub mod templates;
+pub mod updates;
+pub mod usage_local;
+
 use crate::dto::{AccountSummary, AccountSummaryBasic, AppStatus, ReconcileReportDto};
 use claudepot_core::account::{Account, AccountStore};
 use claudepot_core::desktop_backend;

@@ -351,7 +351,7 @@ pub async fn templates_install(
         template_id: Some(resolved.template_id),
     };
 
-    crate::commands_automations::automations_add(dto).await
+    crate::commands::automations::automations_add(dto).await
 }
 
 // ---------- Helpers ----------

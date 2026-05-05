@@ -20,7 +20,7 @@
 //! comment in `commands.rs` for the full rationale — any blocking I/O on
 //! the main thread freezes the webview.
 
-use crate::commands_config_types::{
+use super::config_types::{
     auto_reason_label, render_path, ConfigTreeDto, EditorCandidateDto, EditorDefaultsDto,
     EffectiveMcpDto, EffectiveMcpServerDto, EffectiveSettingsDto, McpSimulationModeDto,
     PolicyErrorDto, ProvenanceLeafDto, ScopeNodeDto, SearchHitDto, SearchQueryDto,

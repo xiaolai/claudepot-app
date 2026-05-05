@@ -6,7 +6,7 @@
 //! Decrypted path and is the only method whose email the UI can trust
 //! for mutation. Plan v2 §D6 / §VerifiedIdentity.
 
-use crate::commands::open_store;
+use super::open_store;
 use crate::dto;
 use claudepot_core::desktop_backend;
 use claudepot_core::services;
@@ -25,7 +25,7 @@ pub async fn desktop_use(
     let _guard = lock.0.lock().await;
 
     let store = open_store()?;
-    let target = crate::commands::resolve_target(&store, &email)?;
+    let target = super::resolve_target(&store, &email)?;
 
     let platform = desktop_backend::create_platform()
         .ok_or_else(|| "Desktop not supported on this platform".to_string())?;

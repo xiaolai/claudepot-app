@@ -549,7 +549,7 @@ fn handle_cli_switch(app: &AppHandle, uuid_str: &str) {
         let from_email = active_cli_email();
         let cc_was_running =
             claudepot_core::cli_backend::swap::is_cc_process_running_public().await;
-        match crate::commands_cli::cli_use(to_email.clone(), Some(true)).await {
+        match crate::commands::cli::cli_use(to_email.clone(), Some(true)).await {
             Ok(()) => {
                 if let Err(e) = rebuild(&app).await {
                     tracing::warn!("tray rebuild after cli switch failed: {e}");
@@ -604,7 +604,7 @@ fn handle_desktop_switch(app: &AppHandle, uuid_str: &str) {
                 return;
             }
         };
-        match crate::commands_desktop::desktop_use(email, true, lock).await {
+        match crate::commands::desktop::desktop_use(email, true, lock).await {
             Ok(()) => {
                 if let Err(e) = rebuild(&app).await {
                     tracing::warn!("tray rebuild after desktop switch failed: {e}");

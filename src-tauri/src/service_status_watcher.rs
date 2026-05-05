@@ -24,8 +24,8 @@ use claudepot_core::notification_log::{NotificationKind, NotificationSource};
 use claudepot_core::service_status as core;
 use tauri::{AppHandle, Emitter, Manager};
 
-use crate::commands_notification::NotificationLogState;
-use crate::commands_service_status::ServiceStatusState;
+use crate::commands::notification::NotificationLogState;
+use crate::commands::service_status::ServiceStatusState;
 use crate::preferences::PreferencesState;
 
 /// Initial delay before the first tick. Long enough for the webview
