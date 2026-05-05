@@ -745,6 +745,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(not(target_os = "windows"))]
     fn detect_cli_installs_at_promotes_native_when_path_lookup_misses() {
         // Reproduces the user-reported case: native install present at
         // `~/.local/bin/claude`, but PATH doesn't include `~/.local/bin`
@@ -752,6 +753,14 @@ mod tests {
         // shell where `claude` is a function/alias). The install must
         // still be flagged `is_active = true` so the Updates panel
         // shows the version and the updater has a target.
+        //
+        // Gated to non-Windows: `~/.local/bin/claude` is XDG-style and
+        // doesn't apply on Windows (WinGet → `%LOCALAPPDATA%\Programs\Claude\`
+        // is the native pathway there). The implementation's
+        // `NATIVE_BIN_REL` constant is a literal `.local/bin/claude`
+        // with no `.exe` suffix, so on Windows the test setup creates
+        // a `claude.exe` the detection logic correctly never looks for —
+        // the assertion `active.len() == 1` would always fail.
         let tmp = tempfile::tempdir().unwrap();
         let bin_dir = tmp.path().join(".local/bin");
         std::fs::create_dir_all(&bin_dir).unwrap();
