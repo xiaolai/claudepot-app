@@ -5,6 +5,7 @@ import { Button } from "../components/primitives/Button";
 import { SkeletonList } from "../components/primitives/Skeleton";
 import { NF } from "../icons";
 import { api } from "../api";
+import { useAppState } from "../providers/AppStateProvider";
 import type {
   AutomationSummaryDto,
   RouteSummaryDto,
@@ -34,16 +35,13 @@ import { TemplateGallery } from "./templates/TemplateGallery";
  * (fs-watch, webhook) are explicit v2.
  */
 export function AutomationsSection() {
+  const { pushToast } = useAppState();
   const [automations, setAutomations] =
     useState<AutomationSummaryDto[] | null>(null);
   const [routes, setRoutes] = useState<RouteSummaryDto[]>([]);
   const [capabilities, setCapabilities] =
     useState<SchedulerCapabilitiesDto | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
-  const [toast, setToast] = useState<{
-    kind: "info" | "error";
-    msg: string;
-  } | null>(null);
   const [busyIds, setBusyIds] = useState<Set<string>>(new Set());
   const [showAdd, setShowAdd] = useState(false);
   const [showGallery, setShowGallery] = useState(false);
@@ -115,10 +113,7 @@ export function AutomationsSection() {
         const payload = event.payload;
         if (payload.phase === "op") {
           if (payload.status === "error") {
-            setToast({
-              kind: "error",
-              msg: payload.detail ?? "Run failed.",
-            });
+            pushToast("error", payload.detail ?? "Run failed.");
           } else {
             setRunsRefreshKey((k) => k + 1);
           }
@@ -135,7 +130,7 @@ export function AutomationsSection() {
     } catch (e) {
       cleanup();
       setBusy(id, false);
-      setToast({ kind: "error", msg: String(e) });
+      pushToast("error", String(e));
     }
   }
 
@@ -144,12 +139,12 @@ export function AutomationsSection() {
     try {
       await api.automationsSetEnabled(id, enabled);
       await refresh();
-      setToast({
-        kind: "info",
-        msg: `Automation ${enabled ? "enabled" : "disabled"}.`,
-      });
+      pushToast(
+        "info",
+        `Automation ${enabled ? "enabled" : "disabled"}.`,
+      );
     } catch (e) {
-      setToast({ kind: "error", msg: String(e) });
+      pushToast("error", String(e));
     } finally {
       setBusy(id, false);
     }
@@ -163,9 +158,9 @@ export function AutomationsSection() {
       await api.automationsRemove(id);
       setRemoveTarget(null);
       await refresh();
-      setToast({ kind: "info", msg: "Automation removed." });
+      pushToast("info", "Automation removed.");
     } catch (e) {
-      setToast({ kind: "error", msg: String(e) });
+      pushToast("error", String(e));
     } finally {
       setBusy(id, false);
     }
@@ -202,13 +197,15 @@ export function AutomationsSection() {
             >
               From template…
             </Button>
-            <Button
-              variant="solid"
-              glyph={NF.plus}
-              onClick={() => setShowAdd(true)}
-            >
-              Add automation
-            </Button>
+            {automations !== null && automations.length > 0 && (
+              <Button
+                variant="solid"
+                glyph={NF.plus}
+                onClick={() => setShowAdd(true)}
+              >
+                Add automation
+              </Button>
+            )}
           </>
         }
       />
@@ -224,28 +221,6 @@ export function AutomationsSection() {
           }}
         >
           {loadError}
-        </div>
-      )}
-
-      {toast && (
-        <div
-          style={{
-            padding: "var(--sp-6) var(--sp-12)",
-            border: "var(--bw-hair) solid var(--line)",
-            borderRadius: "var(--r-2)",
-            color:
-              toast.kind === "error" ? "var(--danger)" : "var(--fg-2)",
-            fontSize: "var(--fs-sm)",
-            background: "var(--bg-raised)",
-            display: "flex",
-            justifyContent: "space-between",
-            alignItems: "center",
-          }}
-        >
-          <span>{toast.msg}</span>
-          <Button variant="ghost" onClick={() => setToast(null)}>
-            Dismiss
-          </Button>
         </div>
       )}
 
@@ -283,9 +258,9 @@ export function AutomationsSection() {
         onClose={() => setShowAdd(false)}
         onCreated={() => {
           refresh();
-          setToast({ kind: "info", msg: "Automation created." });
+          pushToast("info", "Automation created.");
         }}
-        onError={(msg) => setToast({ kind: "error", msg })}
+        onError={(msg) => pushToast("error", msg)}
       />
 
       <TemplateGallery
@@ -293,9 +268,9 @@ export function AutomationsSection() {
         onClose={() => setShowGallery(false)}
         onInstalled={() => {
           refresh();
-          setToast({ kind: "info", msg: "Template installed." });
+          pushToast("info", "Template installed.");
         }}
-        onError={(msg) => setToast({ kind: "error", msg })}
+        onError={(msg) => pushToast("error", msg)}
         onOpenThirdParties={() => {
           // Best-effort deep-link: dispatch a custom event the
           // sidebar/router listens to. If nothing handles it,
@@ -315,9 +290,9 @@ export function AutomationsSection() {
         onClose={() => setEditTarget(null)}
         onUpdated={() => {
           refresh();
-          setToast({ kind: "info", msg: "Automation updated." });
+          pushToast("info", "Automation updated.");
         }}
-        onError={(msg) => setToast({ kind: "error", msg })}
+        onError={(msg) => pushToast("error", msg)}
       />
 
       {removeTarget && (
