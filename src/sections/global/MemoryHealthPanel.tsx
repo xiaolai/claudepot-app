@@ -14,6 +14,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { api } from "../../api";
+import { CopyButton } from "../../components/CopyButton";
 import type { FileHealth, MemoryHealthReport } from "../../types";
 
 export function MemoryHealthPanel() {
@@ -199,19 +200,29 @@ function FileHealthCard({
           </div>
         </div>
         <span
-          title={health.path}
           style={{
-            fontSize: "var(--fs-2xs)",
-            color: "var(--fg-faint)",
-            maxWidth: "var(--settings-nav-width)",
-            overflow: "hidden",
-            textOverflow: "ellipsis",
-            whiteSpace: "nowrap",
-            direction: "rtl",
-            textAlign: "right",
+            display: "inline-flex",
+            alignItems: "center",
+            gap: "var(--sp-4)",
+            minWidth: 0,
           }}
         >
-          {health.path}
+          <span
+            title={health.path}
+            style={{
+              fontSize: "var(--fs-2xs)",
+              color: "var(--fg-faint)",
+              maxWidth: "var(--settings-nav-width)",
+              overflow: "hidden",
+              textOverflow: "ellipsis",
+              whiteSpace: "nowrap",
+              direction: "rtl",
+              textAlign: "right",
+            }}
+          >
+            {health.path}
+          </span>
+          <CopyButton text={health.path} />
         </span>
       </div>
       {health.missing ? (
