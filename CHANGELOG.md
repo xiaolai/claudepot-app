@@ -6,6 +6,27 @@ Versioning scheme:
 - `0.1.x` — beta
 - `1.0.0+` — stable
 
+## 0.1.11 — beta (2026-05-06)
+
+### Added
+
+- **Settings → About now names the publisher.** Adds a Publisher
+  row (HANDO K.K.) and a short note explaining why macOS surfaces
+  this name in *System Settings → General → Login Items & Extensions
+  → App Background Activity* and in occasional "ran in the
+  background" notifications when Launch-at-login is enabled — it's
+  the Apple Developer–registered entity behind the Developer ID
+  certificate, not a third-party process.
+
+### Changed
+
+- **Auto-memory toggle relocated to Global → Memory.** Auto-memory
+  governs Claude Code's `~/.claude/.../memory/` writes — a CC
+  behavior, not a Claudepot app preference — so the toggle now lives
+  next to the rest of the CC global state instead of in Settings →
+  General. The new panel-card sits above the file-health grid; ⌘K
+  still finds it.
+
 ## 0.1.10 — beta (2026-05-05)
 
 ### Fixed
