@@ -6,6 +6,17 @@ Versioning scheme:
 - `0.1.x` — beta
 - `1.0.0+` — stable
 
+## 0.1.10 — beta (2026-05-05)
+
+### Fixed
+
+- **Traffic-light buttons sat ~1px above the breadcrumb on macOS.**
+  At `trafficLightPosition.y = 21`, the OS centered the buttons at
+  visual y=18.75 logical while the home glyph next to "keys" landed
+  at y=19.50 — the 0.75px gap was visible to a careful eye. Bumped
+  to y=22 so the OS-drawn dots line up with the chrome's flex-
+  centered content. Light- and dark-mode both verified.
+
 ## 0.1.9 — beta (2026-05-05)
 
 Internal-only release. No user-visible changes.
