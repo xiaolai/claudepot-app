@@ -94,7 +94,7 @@ export function PrototypeNav({
   return (
     <nav className="proto-nav" aria-label="Main">
       <Link href={withAuth("/", urlShim)} className="proto-nav-brand">
-        <Logo size={36} className="proto-nav-logo" />
+        <Logo size={24} className="proto-nav-logo" />
         <span className="proto-nav-wordmark">
           <span className="proto-nav-wordmark-clau">CLAU</span>
           <span className="proto-nav-wordmark-depot">DEPOT</span>
