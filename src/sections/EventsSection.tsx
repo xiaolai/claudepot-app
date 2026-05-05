@@ -807,6 +807,8 @@ function CardStream({ cards, loading, error, lastSeenId, onCardClick }: CardStre
   }
   return (
     <ul
+      role="listbox"
+      aria-label="Activity cards"
       style={{
         margin: 0,
         padding: 0,
@@ -837,7 +839,16 @@ interface CardRowProps {
 function CardRow({ card, isNew, onClick }: CardRowProps) {
   return (
     <li
+      role="option"
+      aria-selected={false}
+      tabIndex={0}
       onClick={onClick}
+      onKeyDown={(e) => {
+        if (e.key === "Enter" || e.key === " ") {
+          e.preventDefault();
+          onClick();
+        }
+      }}
       style={{
         padding: "var(--sp-12) var(--sp-16)",
         borderBottom: "var(--bw-subhair) solid var(--border)",
