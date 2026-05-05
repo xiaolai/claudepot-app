@@ -427,11 +427,11 @@ function TabButton({
         background: "transparent",
         color: active ? "var(--accent-ink)" : "var(--fg-muted)",
         border: "none",
-        borderBottom: `2px solid ${active ? "var(--accent)" : "transparent"}`,
+        borderBottom: `var(--bw-strong) solid ${active ? "var(--accent)" : "transparent"}`,
         fontSize: "var(--fs-sm)",
         fontWeight: active ? 600 : 400,
         cursor: "pointer",
-        marginBottom: "-1px",
+        marginBottom: "calc(-1 * var(--bw-hair))",
       }}
     >
       {label}
@@ -921,7 +921,7 @@ function CardRow({ card, isNew, onClick }: CardRowProps) {
               marginTop: "var(--sp-4)",
               padding: "var(--sp-4) var(--sp-8)",
               background: "var(--bg-elev)",
-              borderLeft: "2px solid var(--accent)",
+              borderLeft: "var(--bw-strong) solid var(--accent)",
               borderRadius: "var(--r-1)",
             }}
           >
