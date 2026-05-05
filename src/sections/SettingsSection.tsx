@@ -705,8 +705,29 @@ function AboutPane() {
               </div>
             }
           />
+          <Kv label="Publisher" value="HANDO K.K." />
           <Kv label="Design" value="paper-mono" />
         </dl>
+        <p
+          style={{
+            margin: "var(--sp-8) 0 0",
+            fontSize: "var(--fs-xs)",
+            color: "var(--fg-faint)",
+            lineHeight: "var(--lh-body)",
+          }}
+        >
+          HANDO K.K. is the Apple Developer–registered entity that
+          code-signs and notarizes Claudepot. macOS shows this name in
+          {" "}
+          <em>
+            System Settings → General → Login Items &amp; Extensions →
+            App Background Activity
+          </em>
+          {" "}when “Launch at login” is enabled, and in occasional
+          “ran in the background” notifications. It’s the legal name
+          behind the Developer ID certificate — not a third-party
+          process.
+        </p>
       </SettingsGroup>
       <UpdatesPane />
     </div>
