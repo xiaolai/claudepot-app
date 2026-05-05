@@ -315,6 +315,9 @@ export function EventsSection() {
         <TabStrip current={tab} onPick={setTab} />
         {tab === "stream" && (
           <div
+            role="tabpanel"
+            id="events-panel-stream"
+            aria-labelledby="events-tab-stream"
             style={{
               flex: 1,
               minHeight: 0,
@@ -344,13 +347,29 @@ export function EventsSection() {
           </div>
         )}
         {tab === "usage" && (
-          <UsageView
-            registerRefresh={(fn) => {
-              usageRefreshRef.current = fn;
-            }}
-          />
+          <div
+            role="tabpanel"
+            id="events-panel-usage"
+            aria-labelledby="events-tab-usage"
+            style={{ flex: 1, minHeight: 0, display: "flex" }}
+          >
+            <UsageView
+              registerRefresh={(fn) => {
+                usageRefreshRef.current = fn;
+              }}
+            />
+          </div>
         )}
-        {tab === "cost" && <CostTab />}
+        {tab === "cost" && (
+          <div
+            role="tabpanel"
+            id="events-panel-cost"
+            aria-labelledby="events-tab-cost"
+            style={{ flex: 1, minHeight: 0, display: "flex" }}
+          >
+            <CostTab />
+          </div>
+        )}
       </div>
     </div>
   );
@@ -382,18 +401,24 @@ function TabStrip({
       }}
     >
       <TabButton
+        id="events-tab-stream"
+        controls="events-panel-stream"
         active={current === "stream"}
         label="Stream"
         sub="Failures + slow events"
         onClick={() => onPick("stream")}
       />
       <TabButton
+        id="events-tab-usage"
+        controls="events-panel-usage"
         active={current === "usage"}
         label="Usage"
         sub="Per-artifact invocation counts"
         onClick={() => onPick("usage")}
       />
       <TabButton
+        id="events-tab-cost"
+        controls="events-panel-cost"
         active={current === "cost"}
         label="Cost"
         sub="Per-project tokens + USD"
@@ -404,11 +429,15 @@ function TabStrip({
 }
 
 function TabButton({
+  id,
+  controls,
   active,
   label,
   sub,
   onClick,
 }: {
+  id: string;
+  controls: string;
   active: boolean;
   label: string;
   sub: string;
@@ -417,8 +446,10 @@ function TabButton({
   return (
     <button
       type="button"
+      id={id}
       role="tab"
       aria-selected={active}
+      aria-controls={controls}
       onClick={onClick}
       className="pm-focus"
       title={sub}

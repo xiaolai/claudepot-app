@@ -138,7 +138,7 @@ function DisabledRow({
         <Td align="right">
           <span style={{ display: "inline-flex", gap: "var(--sp-6)" }}>
             <IconButton
-              glyph={NF.refresh}
+              glyph={NF.restore}
               onClick={onEnable}
               disabled={busy}
               size="sm"

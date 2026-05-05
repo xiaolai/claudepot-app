@@ -64,6 +64,8 @@ export function GlobalSection({
   return (
     <div style={{ display: "flex", flexDirection: "column", height: "100%" }}>
       <div
+        role="tablist"
+        aria-label="Global views"
         style={{
           display: "flex",
           gap: "var(--sp-4)",
@@ -72,6 +74,10 @@ export function GlobalSection({
         }}
       >
         <Button
+          id="global-tab-config"
+          role="tab"
+          aria-selected={tab === "config"}
+          aria-controls="global-panel-config"
           size="sm"
           variant={tab === "config" ? "subtle" : "ghost"}
           active={tab === "config"}
@@ -80,6 +86,10 @@ export function GlobalSection({
           Config
         </Button>
         <Button
+          id="global-tab-memory"
+          role="tab"
+          aria-selected={tab === "memory"}
+          aria-controls="global-panel-memory"
           size="sm"
           variant={tab === "memory" ? "subtle" : "ghost"}
           active={tab === "memory"}
@@ -88,6 +98,10 @@ export function GlobalSection({
           Memory
         </Button>
         <Button
+          id="global-tab-updates"
+          role="tab"
+          aria-selected={tab === "updates"}
+          aria-controls="global-panel-updates"
           size="sm"
           variant={tab === "updates" ? "subtle" : "ghost"}
           active={tab === "updates"}
@@ -98,14 +112,37 @@ export function GlobalSection({
       </div>
       <div style={{ flex: 1, minHeight: 0, overflow: "auto" }}>
         {tab === "config" && (
-          <ConfigSection
-            subRoute={subRoute}
-            onSubRouteChange={onSubRouteChange}
-            forcedAnchor={{ kind: "global" }}
-          />
+          <div
+            role="tabpanel"
+            id="global-panel-config"
+            aria-labelledby="global-tab-config"
+            style={{ height: "100%" }}
+          >
+            <ConfigSection
+              subRoute={subRoute}
+              onSubRouteChange={onSubRouteChange}
+              forcedAnchor={{ kind: "global" }}
+            />
+          </div>
         )}
-        {tab === "updates" && <UpdatesPanel />}
-        {tab === "memory" && <MemoryHealthPanel />}
+        {tab === "updates" && (
+          <div
+            role="tabpanel"
+            id="global-panel-updates"
+            aria-labelledby="global-tab-updates"
+          >
+            <UpdatesPanel />
+          </div>
+        )}
+        {tab === "memory" && (
+          <div
+            role="tabpanel"
+            id="global-panel-memory"
+            aria-labelledby="global-tab-memory"
+          >
+            <MemoryHealthPanel />
+          </div>
+        )}
       </div>
     </div>
   );
