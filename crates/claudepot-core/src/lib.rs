@@ -21,8 +21,6 @@
     clippy::collapsible_if,
     clippy::needless_borrows_for_generic_args,
     clippy::redundant_closure,
-    clippy::needless_return,
-    clippy::useless_format,
     clippy::manual_map,
     clippy::single_match,
     clippy::assertions_on_constants,
