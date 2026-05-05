@@ -6,6 +6,23 @@ Versioning scheme:
 - `0.1.x` — beta
 - `1.0.0+` — stable
 
+## 0.1.9 — beta (2026-05-05)
+
+Internal-only release. No user-visible changes.
+
+### Internal
+
+- **CI green again on `windows-latest`.** A native-install detection
+  test (`detect_cli_installs_at_promotes_native_when_path_lookup_misses`)
+  set up `~/.local/bin/claude.exe` via `cli_filename()` but the
+  detection's `NATIVE_BIN_REL` constant is a literal `.local/bin/claude`
+  with no extension — the XDG layout is Unix-only; Windows uses
+  WinGet to `%LOCALAPPDATA%\Programs\Claude\`. The test is now
+  `cfg(not(target_os = "windows"))`-gated. Pre-existing on main
+  since v0.1.7's path-lookup-miss promotion fix; v0.1.7 + v0.1.8
+  binaries shipped fine (the Release workflow runs `cargo build`,
+  not `cargo test`), but CI was red.
+
 ## 0.1.8 — beta (2026-05-05)
 
 Internal-only release. No user-visible changes.
