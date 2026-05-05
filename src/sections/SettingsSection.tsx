@@ -20,7 +20,6 @@ import {
 } from "../lib/notify";
 import { NF } from "../icons";
 import { ScreenHeader } from "../shell/ScreenHeader";
-import { AutoMemoryGlobalRow } from "./settings/AutoMemoryGlobalRow";
 import { NetworkPane } from "./settings/NetworkPane";
 import { ProtectedPathsPane } from "./settings/ProtectedPathsPane";
 import { CleanupPane } from "./sessions/CleanupPane";
@@ -365,7 +364,6 @@ function GeneralPane({
           <Toggle on={hideDock === true} onChange={toggleHideDock} />
         </Row>
       )}
-      <AutoMemoryGlobalRow Row={Row} Toggle={Toggle} pushToast={pushToast} />
       {/* Developer mode: hidden from the UI on purpose. Toggle is
           ⌃⌥⌘L (Ctrl+Alt+Cmd+L). The four-modifier combo is
           unreachable by accident and matches macOS's own
@@ -1902,8 +1900,8 @@ function Toggle({
   /**
    * Renders the toggle non-interactive (audit 2026-05 #4: previously
    * accepted from the type position but ignored; clicks still flipped
-   * the value). Lets callers like AutoMemoryGlobalRow honor the
-   * "overridden by env var" state.
+   * the value). Lets callers honor read-only states such as an env
+   * override.
    */
   disabled?: boolean;
 }) {

@@ -3,11 +3,35 @@ import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 
 const memoryHealthGetMock = vi.fn();
+const autoMemoryStateGlobalMock = vi.fn().mockResolvedValue({
+  project_root: "",
+  effective: true,
+  decided_by: "default",
+  decided_label: "default",
+  user_writable: true,
+  user_settings_value: null,
+  project_settings_value: null,
+  local_project_settings_value: null,
+  env_disable_set: false,
+  env_simple_set: false,
+  local_settings_gitignored: null,
+});
+const autoMemorySetMock = vi.fn();
 
 vi.mock("../../api", () => ({
   api: {
     memoryHealthGet: (...args: unknown[]) => memoryHealthGetMock(...args),
+    autoMemoryStateGlobal: (...args: unknown[]) =>
+      autoMemoryStateGlobalMock(...args),
+    autoMemorySet: (...args: unknown[]) => autoMemorySetMock(...args),
   },
+}));
+
+// AutoMemoryGlobalCard reads pushToast from AppStateProvider; stub it
+// so the panel can mount without booting the whole app shell.
+const pushToastSpy = vi.fn();
+vi.mock("../../providers/AppStateProvider", () => ({
+  useAppState: () => ({ pushToast: pushToastSpy }),
 }));
 
 import { MemoryHealthPanel } from "./MemoryHealthPanel";

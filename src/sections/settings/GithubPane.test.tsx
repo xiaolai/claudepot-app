@@ -32,10 +32,9 @@ vi.mock("../../api", () => ({
     repairList: vi.fn().mockResolvedValue([]),
     sessionIndexRebuild: vi.fn(),
     projectCleanPreview: vi.fn().mockResolvedValue({ candidates: [] }),
-    // GeneralPane mounts the AutoMemoryGlobalRow on first render even
-    // when the active tab is "github" — the row's load runs once at
-    // mount time. Stub a default shape so the row renders without
-    // toasting an error.
+    // Some panes (e.g. Projects → Memory) mount auto-memory readers
+    // even when the active settings tab is "github". Stub default
+    // shapes so they render without toasting an error.
     autoMemoryState: vi.fn().mockResolvedValue({
       project_root: "~",
       effective: true,
