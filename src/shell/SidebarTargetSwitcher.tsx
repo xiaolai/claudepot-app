@@ -311,7 +311,7 @@ function TargetSwitchOption({
         >
           {account.email}
         </div>
-        {account.org_name && (
+        {disabled && disabledReason ? (
           <div
             style={{
               fontSize: "var(--fs-2xs)",
@@ -321,8 +321,22 @@ function TargetSwitchOption({
               textOverflow: "ellipsis",
             }}
           >
-            {account.org_name}
+            {disabledReason}
           </div>
+        ) : (
+          account.org_name && (
+            <div
+              style={{
+                fontSize: "var(--fs-2xs)",
+                color: "var(--fg-faint)",
+                whiteSpace: "nowrap",
+                overflow: "hidden",
+                textOverflow: "ellipsis",
+              }}
+            >
+              {account.org_name}
+            </div>
+          )
         )}
       </div>
       {current ? (
