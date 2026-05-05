@@ -26,6 +26,10 @@
   gap: var(--sp-8);
   font-family: var(--font-display);
   font-size: var(--fs-title-md);
+  /* Collapse the wordmark's text-line-box so flex centering
+     aligns the logo's optical center with the wordmark's
+     cap-height, not with an inflated line-leading box. */
+  line-height: 1;
   color: var(--editorial-dark);
   text-decoration: none;
   margin-right: auto;
@@ -33,14 +37,13 @@
 
 .proto-nav-logo {
   display: block;
-  /* Match the wordmark height exactly. .proto-nav-brand's own
-     font-size is var(--fs-title-md), so referencing the same
-     token here keeps the icon and the wordmark at identical
-     visual size regardless of how the title scale is tuned.
-     Direct token reference (not 1em) so the ui-tokenize hook
-     doesn't auto-rewrite to a wrong-semantic match. */
-  width: var(--fs-title-md);
-  height: var(--fs-title-md);
+  /* One step smaller than the wordmark font-size — keeps the
+     pixel-art logo visually quieter than the all-caps wordmark
+     while still legible. Direct token reference (not em) so the
+     ui-tokenize hook doesn't auto-rewrite to a wrong-semantic
+     match. */
+  width: var(--fs-section-heading);
+  height: var(--fs-section-heading);
   color: var(--accent);
   image-rendering: pixelated;
   flex-shrink: 0;
