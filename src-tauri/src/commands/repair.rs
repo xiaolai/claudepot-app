@@ -6,7 +6,7 @@
 //! surface (`repair_abandon`, `repair_break_lock`, `repair_gc`, etc.)
 //! lives here too — one module per logical concern.
 
-use crate::commands_project::{claudepot_home_dirs, JOURNAL_NAG_THRESHOLD_SECS};
+use super::project::{claudepot_home_dirs, JOURNAL_NAG_THRESHOLD_SECS};
 use crate::dto::MoveArgsDto;
 use crate::ops::{
     emit_terminal, new_op_id, new_running_op, spawn_op_thread, MoveResultSummary, OpKind,

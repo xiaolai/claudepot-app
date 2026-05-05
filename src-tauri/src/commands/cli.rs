@@ -1,7 +1,7 @@
 //! Tauri commands for the CC (CLI) surface: switch, running-check,
 //! startup sync, ground-truth identity probe.
 
-use crate::commands::{active_id, open_store, resolve_target};
+use super::{active_id, open_store, resolve_target};
 use crate::dto::CcIdentity;
 use claudepot_core::account::AccountStore;
 use claudepot_core::cli_backend;

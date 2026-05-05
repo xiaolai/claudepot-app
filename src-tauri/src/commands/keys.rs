@@ -11,7 +11,7 @@
 //! command surface is — blocking I/O on Tauri's main thread freezes
 //! the webview. See `commands.rs` header for the full rationale.
 
-use crate::commands::open_store;
+use super::open_store;
 use crate::dto::{ApiKeySummaryDto, OauthTokenSummaryDto};
 use claudepot_core::account::AccountStore;
 use claudepot_core::keys::{

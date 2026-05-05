@@ -5,7 +5,7 @@
 //! they're the default read surface every section mounts against. The
 //! mutating / async-heavy verbs live here.
 
-use crate::commands::open_store;
+use super::open_store;
 use crate::dto::{AccountSummary, RegisterOutcome, RemoveOutcome, UsageEntryDto};
 use crate::ops::{
     emit_terminal, new_op_id, new_running_op, spawn_op_thread, OpKind, RunningOpInfo, RunningOps,
