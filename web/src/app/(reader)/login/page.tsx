@@ -1,3 +1,4 @@
+import Link from "next/link";
 import { redirect } from "next/navigation";
 import { auth, signIn } from "@/lib/auth";
 import { safeCallback } from "@/lib/safe-redirect";
@@ -88,6 +89,12 @@ export default async function LoginPage({
 
       <p className="proto-empty proto-empty-spaced">
         Apple Sign-In coming later.
+      </p>
+
+      <p className="proto-legal-consent">
+        By continuing, you agree to our{" "}
+        <Link href="/terms">Terms of Service</Link> and{" "}
+        <Link href="/privacy">Privacy Policy</Link>.
       </p>
     </div>
   );
