@@ -178,29 +178,15 @@ pub async fn quit_now(app: tauri::AppHandle) -> Result<(), String> {
 }
 
 /// macOS-only: request a keychain unlock via the system's native dialog.
-/// Spawns `security unlock-keychain` without -p so macOS shows its built-in
-/// "Unlock Keychain" password prompt. The user's password never reaches
-/// Claudepot (it goes to macOS's trusted process).
+/// Body lives in `claudepot_core::cli_backend::keychain::unlock_login_keychain`
+/// so all `/usr/bin/security` invocations stay co-located.
 #[tauri::command]
 pub async fn unlock_keychain() -> Result<(), String> {
     #[cfg(target_os = "macos")]
     {
-        use tokio::process::Command;
-        // `security unlock-keychain` with no password attempts an interactive
-        // unlock. In a GUI process context, macOS surfaces the standard
-        // Keychain Access unlock panel.
-        let out = Command::new("/usr/bin/security")
-            .arg("unlock-keychain")
-            .output()
+        claudepot_core::cli_backend::keychain::unlock_login_keychain()
             .await
-            .map_err(|e| format!("security spawn failed: {e}"))?;
-        if !out.status.success() {
-            // Exit 51 is common when the user cancels the prompt.
-            let code = out.status.code().unwrap_or(-1);
-            let stderr = String::from_utf8_lossy(&out.stderr);
-            return Err(format!("unlock-keychain exited {code}: {}", stderr.trim()));
-        }
-        Ok(())
+            .map_err(|e| e.to_string())
     }
     #[cfg(not(target_os = "macos"))]
     {
