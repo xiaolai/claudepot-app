@@ -6,6 +6,24 @@ Versioning scheme:
 - `0.1.x` — beta
 - `1.0.0+` — stable
 
+## 0.1.8 — beta (2026-05-05)
+
+Internal-only release. No user-visible changes.
+
+### Internal
+
+- **Tauri command modules reorganized.** The 30 `src-tauri/src/commands_*.rs`
+  files moved into `src-tauri/src/commands/<noun>.rs`, mirroring the
+  CLI's `cli/commands/<noun>.rs` layout (per `.claude/rules/commands.md`).
+  `lib.rs` lost 28 top-level `mod` lines; new handlers go in the
+  noun directory. No runtime behavior change.
+- **Linux clippy gate restored.** Clippy 1.95 strengthened
+  `needless_return`; four `cfg(not(target_os = "macos"))` branches
+  in `claudepot-core` (`automations/scheduler`, `desktop_identity`,
+  `routes/desktop`, `routes/helper`) now end with the bare expression
+  instead of `return …;`, so the Linux + Windows CI gates compile
+  warning-free again.
+
 ## 0.1.7 — beta (2026-05-04)
 
 ### Fixed
