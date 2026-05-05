@@ -129,8 +129,7 @@ See `dev-docs/implementation-plan.md` for the full plan.
 root Tauri app. Two surfaces in one app:
 
 - `/` — **reader**: resource aggregator for one-man companies
-  building with AI (ported by copy from sha.nnon.ai, rebranded
-  ClauDepot, fresh Neon DB).
+  building with AI.
 - `/app/*` — **product docs**: 14 routes (landing + why + install
   + 8 features + features index + changelog + download), MDX
   inside the `(docs)` route group.
@@ -148,10 +147,9 @@ records to `76.76.21.21`. Phase-1 plan and full migration log in
 CI: `.github/workflows/ci-web.yml` runs typecheck + tests on
 `web/**` changes (no build — Vercel handles the build per push).
 
-The `web/.tokenize/` config is set to `disabled: true` during the
-sha.nnon.ai → ClauDepot rebrand transition; re-enable with
-`/ui-tokenize:fix` after the imported codebase's residual hardcoded
-values are absorbed.
+The `web/.tokenize/` config is currently `disabled: true`; re-enable
+with `/ui-tokenize:fix` after the residual hardcoded values in the
+imported codebase are absorbed.
 
 ## Reference
 
