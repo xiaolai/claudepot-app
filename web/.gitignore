@@ -31,3 +31,4 @@ avatars-*.png
 
 # Backfill importer dry-run output
 design/scripts/.candidates.json
+.env*.local
