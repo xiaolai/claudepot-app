@@ -1,9 +1,10 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { ScreenHeader } from "../shell/ScreenHeader";
 import { Button } from "../components/primitives/Button";
 import { SkeletonList } from "../components/primitives/Skeleton";
 import { NF } from "../icons";
 import { api } from "../api";
+import { useAppState } from "../providers/AppStateProvider";
 import type { RouteSettingsDto, RouteSummaryDto } from "../types";
 import { ConfirmDialog } from "../components/ConfirmDialog";
 import { AddRouteModal, EditRouteModal } from "./third-party/AddRouteModal";
@@ -25,25 +26,11 @@ import { RouteCard } from "./third-party/RouteCard";
  *     `~/Library/Application Support/Claude-3p/`.
  */
 export function ThirdPartySection() {
+  const { pushToast } = useAppState();
   const [routes, setRoutes] = useState<RouteSummaryDto[] | null>(null);
   const [settings, setSettings] = useState<RouteSettingsDto | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
-  const [toast, setToast] = useState<{
-    kind: "info" | "error";
-    msg: string;
-  } | null>(null);
   const [busyIds, setBusyIds] = useState<Set<string>>(new Set());
-  // Track the auto-dismiss timer so a fast unmount or a second toast
-  // doesn't fire setToast on a dead component / replace the timer with
-  // a stale one. `clearTimeout` on undefined is a no-op.
-  const toastTimerRef = useRef<number | undefined>(undefined);
-  useEffect(() => {
-    return () => {
-      if (toastTimerRef.current !== undefined) {
-        window.clearTimeout(toastTimerRef.current);
-      }
-    };
-  }, []);
   const [showAdd, setShowAdd] = useState(false);
   const [editTarget, setEditTarget] = useState<RouteSummaryDto | null>(null);
   const [removeTarget, setRemoveTarget] = useState<RouteSummaryDto | null>(
@@ -81,31 +68,20 @@ export function ThirdPartySection() {
     });
   };
 
-  const showToast = (kind: "info" | "error", msg: string) => {
-    setToast({ kind, msg });
-    if (toastTimerRef.current !== undefined) {
-      window.clearTimeout(toastTimerRef.current);
-    }
-    toastTimerRef.current = window.setTimeout(() => {
-      setToast(null);
-      toastTimerRef.current = undefined;
-    }, 4500);
-  };
-
   const handleUseCli = async (id: string) => {
     setBusy(id, true);
     try {
       await api.routesUseCli(id);
       await refresh();
       const r = (await api.routesList()).find((x) => x.id === id);
-      showToast(
+      pushToast(
         "info",
         r
           ? `Wrapper installed: \`${r.wrapper_name}\`. Add ~/.claudepot/bin to PATH if you haven't already.`
           : "Wrapper installed.",
       );
     } catch (e) {
-      showToast("error", `Use in CLI failed: ${e instanceof Error ? e.message : e}`);
+      pushToast("error", `Use in CLI failed: ${e instanceof Error ? e.message : e}`);
     } finally {
       setBusy(id, false);
     }
@@ -116,9 +92,9 @@ export function ThirdPartySection() {
     try {
       await api.routesUnuseCli(id);
       await refresh();
-      showToast("info", "Wrapper removed.");
+      pushToast("info", "Wrapper removed.");
     } catch (e) {
-      showToast("error", `Uninstall CLI failed: ${e instanceof Error ? e.message : e}`);
+      pushToast("error", `Uninstall CLI failed: ${e instanceof Error ? e.message : e}`);
     } finally {
       setBusy(id, false);
     }
@@ -144,9 +120,9 @@ export function ThirdPartySection() {
       await api.routesUseDesktop(id);
       await refresh();
       await flagRestartIfRunning();
-      showToast("info", "Active on Desktop.");
+      pushToast("info", "Active on Desktop.");
     } catch (e) {
-      showToast("error", `Use in Desktop failed: ${e instanceof Error ? e.message : e}`);
+      pushToast("error", `Use in Desktop failed: ${e instanceof Error ? e.message : e}`);
     } finally {
       setBusy(id, false);
     }
@@ -158,9 +134,9 @@ export function ThirdPartySection() {
       await api.routesUnuseDesktop();
       await refresh();
       await flagRestartIfRunning();
-      showToast("info", "Desktop activation cleared.");
+      pushToast("info", "Desktop activation cleared.");
     } catch (e) {
-      showToast("error", `Deactivate Desktop failed: ${e instanceof Error ? e.message : e}`);
+      pushToast("error", `Deactivate Desktop failed: ${e instanceof Error ? e.message : e}`);
     } finally {
       setBusy(id, false);
     }
@@ -171,9 +147,9 @@ export function ThirdPartySection() {
     try {
       await api.routesDesktopRestart();
       setRestartHint("applied");
-      showToast("info", "Claude Desktop restarted.");
+      pushToast("info", "Claude Desktop restarted.");
     } catch (e) {
-      showToast(
+      pushToast(
         "error",
         `Restart failed: ${e instanceof Error ? e.message : e}`,
       );
@@ -195,9 +171,9 @@ export function ThirdPartySection() {
       if (route.active_on_desktop) {
         await flagRestartIfRunning();
       }
-      showToast("info", "Route deleted.");
+      pushToast("info", "Route deleted.");
     } catch (e) {
-      showToast("error", `Delete failed: ${e instanceof Error ? e.message : e}`);
+      pushToast("error", `Delete failed: ${e instanceof Error ? e.message : e}`);
     } finally {
       setBusy(route.id, false);
     }
@@ -211,7 +187,7 @@ export function ThirdPartySection() {
       });
       setSettings(next);
     } catch (e) {
-      showToast("error", `Settings update failed: ${e instanceof Error ? e.message : e}`);
+      pushToast("error", `Settings update failed: ${e instanceof Error ? e.message : e}`);
     }
   };
 
@@ -264,22 +240,6 @@ export function ThirdPartySection() {
           </div>
         )}
 
-        {toast && (
-          <div
-            role={toast.kind === "error" ? "alert" : "status"}
-            style={{
-              padding: "var(--sp-10) var(--sp-14)",
-              borderRadius: "var(--r-2)",
-              border: "var(--bw-hair) solid var(--line)",
-              background: "var(--bg-raised)",
-              color: toast.kind === "error" ? "var(--danger-fg, var(--fg))" : "var(--fg)",
-              fontSize: "var(--fs-sm)",
-            }}
-          >
-            {toast.msg}
-          </div>
-        )}
-
         {restartHint === "needed" && (
           <div
             role="status"
@@ -301,7 +261,7 @@ export function ThirdPartySection() {
               configuration.
             </span>
             <Button
-              variant="solid"
+              variant="ghost"
               size="sm"
               onClick={handleRestartDesktop}
               disabled={restartingDesktop}
@@ -369,9 +329,9 @@ export function ThirdPartySection() {
         onClose={() => setShowAdd(false)}
         onCreated={() => {
           void refresh();
-          showToast("info", "Route added.");
+          pushToast("info", "Route added.");
         }}
-        onError={(msg) => showToast("error", msg)}
+        onError={(msg) => pushToast("error", msg)}
       />
       <EditRouteModal
         open={editTarget !== null}
@@ -379,9 +339,9 @@ export function ThirdPartySection() {
         onClose={() => setEditTarget(null)}
         onSaved={() => {
           void refresh();
-          showToast("info", "Route updated.");
+          pushToast("info", "Route updated.");
         }}
-        onError={(msg) => showToast("error", msg)}
+        onError={(msg) => pushToast("error", msg)}
       />
       {removeTarget && (
         <ConfirmDialog
