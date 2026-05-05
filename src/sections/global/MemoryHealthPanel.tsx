@@ -16,6 +16,7 @@ import { useCallback, useEffect, useState } from "react";
 import { api } from "../../api";
 import { CopyButton } from "../../components/CopyButton";
 import type { FileHealth, MemoryHealthReport } from "../../types";
+import { AutoMemoryGlobalCard } from "./AutoMemoryGlobalCard";
 
 export function MemoryHealthPanel() {
   const [report, setReport] = useState<MemoryHealthReport | null>(null);
@@ -51,6 +52,7 @@ export function MemoryHealthPanel() {
         minHeight: 0,
       }}
     >
+      <AutoMemoryGlobalCard />
       <div
         style={{
           display: "flex",
