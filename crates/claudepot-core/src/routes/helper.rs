@@ -46,9 +46,9 @@ pub fn write_helper(route_id: RouteId, field: SecretField) -> Result<PathBuf, Ro
     {
         let _ = route_id;
         let _ = field;
-        return Err(RouteError::UnsupportedPlatform(
+        Err(RouteError::UnsupportedPlatform(
             "OS-keychain-backed routes are currently macOS-only",
-        ));
+        ))
     }
     #[cfg(target_os = "macos")]
     {

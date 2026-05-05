@@ -34,9 +34,9 @@ use super::CLAUDEPOT_MANAGED_MARKER;
 pub fn data_dir() -> Result<PathBuf, RouteError> {
     #[cfg(not(target_os = "macos"))]
     {
-        return Err(RouteError::UnsupportedPlatform(
+        Err(RouteError::UnsupportedPlatform(
             "Cowork-on-3P Desktop activation is currently macOS-only",
-        ));
+        ))
     }
     #[cfg(target_os = "macos")]
     {

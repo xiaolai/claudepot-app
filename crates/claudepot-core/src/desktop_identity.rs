@@ -203,7 +203,7 @@ where
     #[cfg(not(any(target_os = "macos", target_os = "windows")))]
     {
         let _ = (token_b64, secret);
-        return Err(DesktopIdentityError::Unsupported);
+        Err(DesktopIdentityError::Unsupported)
     }
 
     #[cfg(any(target_os = "macos", target_os = "windows"))]
