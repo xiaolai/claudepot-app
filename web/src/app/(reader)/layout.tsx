@@ -4,6 +4,7 @@ import { JetBrains_Mono } from "next/font/google";
 import { Analytics } from "@vercel/analytics/next";
 import { and, count, eq, isNull } from "drizzle-orm";
 import { PrototypeNav } from "@/components/prototype/PrototypeNav";
+import { Footer } from "@/components/prototype/Footer";
 import { auth } from "@/lib/auth";
 import { db } from "@/db/client";
 import { notifications } from "@/db/schema";
@@ -106,6 +107,7 @@ export default async function PrototypeLayout({
           />
         </Suspense>
         <main>{children}</main>
+        <Footer />
         {/*
          * Vercel Web Analytics replaces the prior Cloudflare beacon.
          * CF Web Analytics requires the host to be proxied through CF

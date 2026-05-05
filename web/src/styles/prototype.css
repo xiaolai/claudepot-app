@@ -3455,3 +3455,63 @@ ul.proto-token-scopes {
   background: var(--state-rejected-fg);
   border-color: var(--state-rejected-fg);
 }
+
+/* ─── Site footer ──────────────────────────────────────────────
+ * Quiet horizontal strip at the bottom of every reader page.
+ * Carries the legal/project links OAuth provider reviewers expect
+ * to find within one click of the homepage.
+ */
+.proto-footer {
+  border-top: var(--bw-hair) solid var(--rule);
+  margin-top: var(--sp-48);
+  padding: var(--sp-20) var(--sp-24);
+  font-size: var(--fs-meta);
+  color: var(--text-dim);
+}
+
+.proto-footer-inner {
+  max-width: var(--max-width);
+  margin: 0 auto;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sp-12) var(--sp-24);
+}
+
+.proto-footer-nav {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--sp-20);
+}
+
+.proto-footer-nav a {
+  color: var(--text-dim);
+  text-decoration: none;
+}
+
+.proto-footer-nav a:hover {
+  color: var(--text);
+  text-decoration: underline;
+}
+
+.proto-footer-brand {
+  white-space: nowrap;
+}
+
+/* Login-page consent disclosure — one line below the providers. */
+.proto-legal-consent {
+  margin-top: var(--sp-24);
+  font-size: var(--fs-meta);
+  color: var(--text-dim);
+  text-align: center;
+}
+
+.proto-legal-consent a {
+  color: var(--text-dim);
+  text-decoration: underline;
+}
+
+.proto-legal-consent a:hover {
+  color: var(--text);
+}
