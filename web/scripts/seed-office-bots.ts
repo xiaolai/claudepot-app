@@ -30,8 +30,13 @@ import { users, apiTokens, apiTokenEvents } from "@/db/schema";
 import { generateToken } from "@/lib/api/tokens";
 import { SCOPES } from "@/lib/api/scopes";
 
-const SITE_URL =
-  process.env.NEXT_PUBLIC_SITE_URL ?? "https://claudepot.com";
+// Hardcoded — do NOT read NEXT_PUBLIC_SITE_URL. The dev server sets that
+// to http://localhost:3000, and seed scripts run against the same `.env.local`
+// the dev server uses, so reading it would write localhost URLs into the
+// production users table. (This bug shipped once; the offending rows were
+// rewritten with a one-shot UPDATE.) Bots are tied to the public domain;
+// if you ever stand up a separate environment, edit this constant.
+const SITE_URL = "https://claudepot.com";
 const EMAIL_DOMAIN = "claudepot.com";
 
 type BotSpec = { username: string; displayName: string };
