@@ -4,17 +4,11 @@ In-tree Next.js app for **[claudepot.com](https://claudepot.com)** — the
 ClauDepot resource hub for one-man companies (OMCs) building with AI.
 Lives inside `claudepot-app/web/` next to the Tauri product.
 
-> **Status (2026-05-04).** Phase 1 of the migration from `sha.nnon.ai`
-> is complete: the Next.js app was ported by copy, fresh Neon DB
-> provisioned, fresh Vercel project linked. Reader rebrand from
-> "shannon" → "ClauDepot" in progress. See
-> `../dev-docs/domain-realignment.md` for the full plan.
-
 ## Two surfaces, one app
 
 | Path | What lives there |
 |---|---|
-| `/` | The **reader** — daily resource aggregator for OMCs (was sha.nnon.ai) |
+| `/` | The **reader** — daily resource aggregator for OMCs |
 | `/app/` | The **product docs** for the ClauDepot Tauri app — fresh MDX, no port from VitePress |
 
 Cross-promotion happens at the layout level: every reader page footer-links to `/app/`, every docs page links back to the reader.
