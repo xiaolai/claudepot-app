@@ -152,10 +152,36 @@ async function isAtDailyCap(authorId: string): Promise<boolean> {
   return (row?.n ?? 0) >= cap;
 }
 
+/**
+ * Test-injection seam. When set (only in test environments), the
+ * moderate() function returns the override directly without hitting
+ * exempt/enabled/cap/model paths. Production code never reads this;
+ * the setter throws in production as a sanity net.
+ */
+let __TEST_VERDICT_OVERRIDE: ModerationVerdict | null = null;
+
+export function __setTestVerdictOverride(
+  verdict: ModerationVerdict | null,
+): void {
+  if (process.env.NODE_ENV === "production") {
+    throw new Error(
+      "__setTestVerdictOverride is forbidden in production",
+    );
+  }
+  __TEST_VERDICT_OVERRIDE = verdict;
+}
+
 export async function moderate(
   content: ModerationContent,
   author: ModerationAuthor,
 ): Promise<ModerationVerdict> {
+  if (
+    __TEST_VERDICT_OVERRIDE &&
+    process.env.NODE_ENV !== "production"
+  ) {
+    return __TEST_VERDICT_OVERRIDE;
+  }
+
   if (isExemptFromModeration(author)) {
     return syntheticPass("author exempt from moderation", "exempt");
   }
