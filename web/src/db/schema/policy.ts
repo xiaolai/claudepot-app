@@ -19,6 +19,7 @@ import {
   timestamp,
   uuid,
 } from "drizzle-orm/pg-core";
+import { sql } from "drizzle-orm";
 
 import { targetTypeEnum } from "./enums";
 import { users } from "./users";
@@ -48,6 +49,11 @@ export const policyDecisions = pgTable(
   (t) => [
     index("idx_policy_decisions_target").on(t.targetType, t.targetId, t.decidedAt.desc()),
     index("idx_policy_decisions_author_created").on(t.authorId, t.decidedAt.desc()),
-    index("idx_policy_decisions_category_created").on(t.category, t.decidedAt.desc()),
+    // Partial index — matches migration 0018. Only `verdict='reject'`
+    // rows are useful for the rolling-window count queries
+    // (lib/moderation/ladder.ts) and the staff queue surface.
+    index("idx_policy_decisions_category_created")
+      .on(t.category, t.decidedAt.desc())
+      .where(sql`${t.verdict} = 'reject'`),
   ],
 );

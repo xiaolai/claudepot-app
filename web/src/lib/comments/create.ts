@@ -39,6 +39,7 @@ import {
   checkBanCandidate,
   checkLadderRateLimit,
   moderate,
+  writeModerationLogForReject,
   writeModerationNotification,
   writePolicyDecision,
   type ModerationAuthor,
@@ -102,6 +103,16 @@ export async function createComment(
           targetId: null,
           verdict,
         });
+        // Hard-block is a state-changing terminal event — write the
+        // moderation_log row so /admin/log surfaces it. Target the
+        // parent submission since no comment row exists; the note
+        // says only "illegal" (no PII spillage) per persist.ts §.
+        await writeModerationLogForReject({
+          targetType: "submission",
+          targetId: input.submissionId,
+          category: "illegal",
+          oneLineWhy: verdict.oneLineWhy,
+        });
         await writeModerationNotification({
           recipientId: authorId,
           targetType: "comment",
@@ -134,6 +145,28 @@ export async function createComment(
   // Non-illegal rejects fall through to optimistic publish. Pass
   // verdicts also fall through. The transaction handles insert +
   // notification atomically.
+  //
+  // Insert-state policy:
+  //   - Non-illegal moderator reject: force 'approved'. The plan's
+  //     optimistic-publish design needs the comment to be visible
+  //     (and thus retractable by runCommentConfirmation) — leaving
+  //     it 'pending' would freeze it under the karma gate and the
+  //     confirmation pass skips anything not currently 'approved'.
+  //   - Synthetic-due-to-error verdict: force 'pending' so a model
+  //     outage does not silently publish unmoderated comments under
+  //     the karma gate's auto-approve rules. Mirrors the submission
+  //     failure-mode matrix per plan §11.
+  //   - Pass / exempt / disabled: use the karma-gate state.
+  const moderatorRejectedNonIllegal =
+    verdict.verdict === "reject" && verdict.category !== "illegal";
+  const moderatorErrored =
+    verdict.synthetic && verdict.syntheticReason === "error";
+  const insertState = moderatorRejectedNonIllegal
+    ? "approved"
+    : moderatorErrored
+      ? "pending"
+      : initialState;
+
   type Outcome =
     | { kind: "ok"; commentId: string }
     | { kind: "not_found" }
@@ -189,13 +222,13 @@ export async function createComment(
         submissionId: input.submissionId,
         parentId: input.parentId ?? null,
         body: input.body,
-        state: initialState,
+        state: insertState,
       })
       .returning({ id: comments.id });
 
     const notifyTarget = parentAuthor ?? target.authorId;
     if (
-      initialState === "approved" &&
+      insertState === "approved" &&
       notifyTarget &&
       notifyTarget !== authorId
     ) {
@@ -258,7 +291,7 @@ export async function createComment(
   return {
     ok: true,
     commentId: outcome.commentId,
-    pending: initialState === "pending",
+    pending: insertState === "pending",
   };
 }
 

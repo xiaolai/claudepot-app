@@ -93,13 +93,20 @@ export interface ModerationLogParams {
  * Writes one moderation_log row with the system user as actor.
  * Call only on terminal rejects per §4.5 — the rule is "state-
  * changing terminal events only", which keeps /admin/log readable.
+ *
+ * Note content: only the category (and optional pass=2 marker) goes
+ * into the public-facing `note` field. The moderator's verbatim
+ * one_line_why CAN contain the very PII the model just classified
+ * (e.g. on a doxxing reject the model may quote the address that
+ * triggered the rule), and /admin/log is visible to any signed-in
+ * user. Staff who need the full reasoning drill into the joined
+ * policy_decisions row by target_id.
  */
 export async function writeModerationLogForReject(
   params: ModerationLogParams,
 ): Promise<void> {
   const staffId = await getSystemUserId();
-  const noteParts: string[] = [];
-  noteParts.push(`${params.category}: ${params.oneLineWhy}`);
+  const noteParts: string[] = [params.category];
   if (params.passNumber === 2) noteParts.push("[pass=2]");
   const note = noteParts.join(" ").slice(0, 500);
 

@@ -48,6 +48,12 @@ export interface LadderRateLimitDecision {
 /**
  * Counts an author's `verdict='reject'` rows in policy_decisions
  * within the trailing `windowDays` window. Powers both rungs.
+ *
+ * Excludes pass-1 comment rejects that the confirmation pass later
+ * overturned: the plan's optimistic-publish design says an
+ * overturned reject is not a strike against the author. Submission
+ * rejects always count (no pass-2 path); illegal comment rejects
+ * count (target_id=NULL means no pass-2 can match).
  */
 export async function recentRejectsForAuthor(
   authorId: string,
@@ -62,6 +68,18 @@ export async function recentRejectsForAuthor(
         eq(policyDecisions.authorId, authorId),
         eq(policyDecisions.verdict, "reject"),
         gt(policyDecisions.decidedAt, cutoff),
+        // Exclude rejects whose pass-2 confirmation flipped to pass.
+        // Match by (target_type, target_id) — the unique handle on
+        // the underlying content. Rows with target_id IS NULL (the
+        // illegal-comment block path) are unaffected: no pass-2 row
+        // can share a NULL target_id, so the NOT EXISTS holds.
+        sql`NOT EXISTS (
+          SELECT 1 FROM ${policyDecisions} p2
+           WHERE p2.target_type = ${policyDecisions.targetType}
+             AND p2.target_id   = ${policyDecisions.targetId}
+             AND p2.pass_number = 2
+             AND p2.verdict     = 'pass'
+        )`,
       ),
     );
   return row?.n ?? 0;

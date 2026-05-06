@@ -45,7 +45,20 @@ export type SubmissionInput = z.infer<typeof submissionInputSchema>;
 export type SubmitResult =
   | { ok: true; submissionId: string; pending: boolean }
   | { ok: false; reason: "validation" | "locked" | "rate"; detail?: string }
-  | { ok: false; reason: "duplicate"; existingId: string };
+  | { ok: false; reason: "duplicate"; existingId: string }
+  | {
+      // The AI policy moderator rejected the post. The row exists in
+      // the DB with state='rejected' so an appeal can target it; the
+      // caller's job is to surface the verdict to the user (not to
+      // claim the publish succeeded). decisionId points at the
+      // policy_decisions row used for /appeal/[id].
+      ok: false;
+      reason: "rejected";
+      submissionId: string;
+      category: string;
+      oneLineWhy: string;
+      decisionId: string;
+    };
 
 /**
  * Entry-point provenance. Web traffic passes { surface: 'web' };

@@ -22,6 +22,7 @@
  * the confirmation lands, we skip the retract gracefully.
  */
 
+import { revalidatePath } from "next/cache";
 import { eq } from "drizzle-orm";
 
 import { db } from "@/db/client";
@@ -125,6 +126,11 @@ export async function runCommentConfirmation(
       decisionId,
     });
     await checkBanCandidate(params.author.id, verdict, "comment", row.id);
+
+    // Pass-2 just flipped state to 'rejected' — the post page's
+    // cache still shows the optimistic comment as approved. Force
+    // a revalidate so readers see the tombstone on next visit.
+    revalidatePath(`/post/${params.submissionId}`);
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
     console.warn(

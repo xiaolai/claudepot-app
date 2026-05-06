@@ -24,15 +24,21 @@
  */
 
 import { revalidatePath } from "next/cache";
-import { and, eq } from "drizzle-orm";
+import { and, eq, sql } from "drizzle-orm";
 import { z } from "zod";
 
 import { db } from "@/db/client";
-import { flags, policyDecisions, submissions } from "@/db/schema";
+import { comments, flags, policyDecisions, submissions } from "@/db/schema";
 
+// flags.reason has a practical 500-char ceiling (set by callers via
+// .slice(500) — see lib/moderation/persist.ts). The "appeal: "
+// prefix takes 8 chars, leaving ~490 for user text. Cap at 480 to
+// keep a margin for emoji byte expansion and any future prefix
+// changes. Going higher would silently truncate user-submitted
+// appeals, which is the bug Codex flagged.
 export const appealInputSchema = z.object({
   decisionId: z.uuid(),
-  text: z.string().trim().min(10).max(1000),
+  text: z.string().trim().min(10).max(480),
 });
 
 export type AppealInput = z.infer<typeof appealInputSchema>;
@@ -79,9 +85,9 @@ export async function submitAppealAsAuthor(
     return { ok: false, reason: "stale" };
   }
 
-  // For submissions, also confirm the submission still exists and
-  // is in 'rejected' state — if staff already approved or the row
-  // was deleted, an appeal is moot.
+  // Confirm the targeted content still exists and is in a
+  // rejected/non-deleted state — if staff already approved or the
+  // row was deleted, an appeal is moot.
   if (decision.targetType === "submission") {
     const [sub] = await db
       .select({ state: submissions.state, deletedAt: submissions.deletedAt })
@@ -90,21 +96,40 @@ export async function submitAppealAsAuthor(
       .limit(1);
     if (!sub || sub.deletedAt) return { ok: false, reason: "stale" };
     if (sub.state !== "rejected") return { ok: false, reason: "stale" };
+  } else {
+    // Comment targets: appeals make sense only when the comment is
+    // currently 'rejected' (typically by the confirmation pass) and
+    // not deleted. A pass-2-cleared or staff-approved comment has
+    // nothing to appeal.
+    const [c] = await db
+      .select({ state: comments.state, deletedAt: comments.deletedAt })
+      .from(comments)
+      .where(eq(comments.id, decision.targetId))
+      .limit(1);
+    if (!c || c.deletedAt) return { ok: false, reason: "stale" };
+    if (c.state !== "rejected") return { ok: false, reason: "stale" };
   }
 
-  // Block duplicates: at most one open appeal flag per target.
-  const [existing] = await db
-    .select({ id: flags.id, reason: flags.reason })
+  // Block duplicates: at most one open appeal flag per target. The
+  // SQL filters specifically for appeal-tagged rows so an unrelated
+  // open flag (community report) doesn't cause us to silently miss
+  // an existing appeal. Race against concurrent inserts is bounded
+  // and acceptable for v0 — staff dismisses dupes from /admin/queue
+  // — but the prefix filter eliminates the more common false
+  // negative path.
+  const [existingAppeal] = await db
+    .select({ id: flags.id })
     .from(flags)
     .where(
       and(
         eq(flags.targetType, decision.targetType),
         eq(flags.targetId, decision.targetId),
         eq(flags.status, "open"),
+        sql`${flags.reason} LIKE 'appeal:%'`,
       ),
     )
     .limit(1);
-  if (existing && existing.reason.startsWith("appeal:")) {
+  if (existingAppeal) {
     return { ok: false, reason: "duplicate" };
   }
 

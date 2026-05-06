@@ -35,6 +35,7 @@ export type {
   ModerationContent,
   ModerationKind,
   ModerationVerdict,
+  SyntheticReason,
 } from "./types";
 export { isExemptFromModeration };
 export {
@@ -66,29 +67,53 @@ function isEnabled(): boolean {
   return v === "1" || v === "true";
 }
 
-function syntheticPass(reason: string): ModerationVerdict {
+function syntheticPass(
+  oneLineWhy: string,
+  syntheticReason: "exempt" | "disabled" | "error",
+): ModerationVerdict {
   return {
     verdict: "pass",
     category: null,
     confidence: "high",
-    oneLineWhy: reason,
+    oneLineWhy,
     synthetic: true,
+    syntheticReason,
     modelId: POLICY_MODEL,
     promptVersion: POLICY_PROMPT_V,
     costUsd: null,
   };
 }
 
+/**
+ * Boot-time guard: in production with MODERATION_ENABLED=1 and no
+ * OPENAI_API_KEY, the app would silently synth-pass every submission
+ * — the worst possible failure mode. Force a fast crash instead.
+ * Safe in dev (MODERATION_ENABLED defaults off) and in CI / test
+ * (NODE_ENV !== 'production').
+ */
+function assertProductionConfig(): void {
+  if (
+    process.env.NODE_ENV === "production" &&
+    isEnabled() &&
+    !process.env.OPENAI_API_KEY
+  ) {
+    throw new Error(
+      "MODERATION_ENABLED=1 in production but OPENAI_API_KEY is not set — refusing to start",
+    );
+  }
+}
+assertProductionConfig();
+
 export async function moderate(
   content: ModerationContent,
   author: ModerationAuthor,
 ): Promise<ModerationVerdict> {
   if (isExemptFromModeration(author)) {
-    return syntheticPass("author exempt from moderation");
+    return syntheticPass("author exempt from moderation", "exempt");
   }
 
   if (!isEnabled()) {
-    return syntheticPass("moderation disabled");
+    return syntheticPass("moderation disabled", "disabled");
   }
 
   try {
@@ -99,6 +124,7 @@ export async function moderate(
       confidence: response.confidence,
       oneLineWhy: response.one_line_why,
       synthetic: false,
+      syntheticReason: null,
       modelId: POLICY_MODEL,
       promptVersion: POLICY_PROMPT_V,
       costUsd,
@@ -110,6 +136,9 @@ export async function moderate(
     // alarms — these are expected at low single-digit %.
     const msg = err instanceof Error ? err.message : String(err);
     console.warn(`[moderation] model call failed: ${msg}`);
-    return syntheticPass(`moderator unavailable: ${msg.slice(0, 120)}`);
+    return syntheticPass(
+      `moderator unavailable: ${msg.slice(0, 120)}`,
+      "error",
+    );
   }
 }
