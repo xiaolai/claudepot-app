@@ -146,18 +146,21 @@ export async function POST(req: Request): Promise<Response> {
       // The AI policy moderator rejected the submission. The row
       // exists with state='rejected' so the user can appeal at
       // /appeal/[decisionId]; do NOT return 201 / a publish URL.
+      // decisionId is null when the audit-row write itself failed —
+      // surface that as appealUrl=null so clients don't deep-link
+      // to a 404.
       return problemResponse({
         type: "https://claudepot.com/api/errors/policy-rejected",
         title: "Submission blocked by policy moderator",
         status: 422,
         detail: result.oneLineWhy,
-        // Surface the decisionId + submissionId so PAT/MCP clients
-        // can deep-link to the appeal page or the rejected row.
         ...({
           category: result.category,
           decisionId: result.decisionId,
           submissionId: result.submissionId,
-          appealUrl: `https://claudepot.com/appeal/${result.decisionId}`,
+          appealUrl: result.decisionId
+            ? `https://claudepot.com/appeal/${result.decisionId}`
+            : null,
         } as Record<string, unknown>),
       });
     }

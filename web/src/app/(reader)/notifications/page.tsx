@@ -42,14 +42,22 @@ type NotePayload = {
   // lib/moderation/notify.ts. The two payload variants coexist here
   // because notifications.payload is `jsonb` and per-kind dispatch
   // happens at render time.
-  appeal_url?: string;
+  //
+  // appeal_url can be explicitly null on illegal-comment blocks (no
+  // appealable target exists). decision_id is still set, but we MUST
+  // NOT reconstruct an /appeal/[id] link from it — the appeal core
+  // returns "stale" because target_id was never set, so a deep-link
+  // would dead-end the user.
+  appeal_url?: string | null;
   decision_id?: string;
 };
 
 function buildLink(payload: unknown): string {
   const p = (payload ?? {}) as NotePayload;
+  // Honor an explicit null appeal_url — the notification's author
+  // intentionally suppressed the appeal CTA.
+  if (p.appeal_url === null) return "#";
   if (p.appeal_url) return p.appeal_url;
-  if (p.decision_id) return `/appeal/${p.decision_id}`;
   if (p.submissionId && p.commentId) {
     return `/post/${p.submissionId}#comment-${p.commentId}`;
   }
