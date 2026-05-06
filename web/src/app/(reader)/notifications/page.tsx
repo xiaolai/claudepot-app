@@ -1,6 +1,6 @@
 import type { ReactNode } from "react";
 import Link from "next/link";
-import { desc, eq, sql } from "drizzle-orm";
+import { desc, eq } from "drizzle-orm";
 import { AtSign, Check, CornerDownRight } from "lucide-react";
 
 import { db } from "@/db/client";
@@ -8,6 +8,7 @@ import { notifications, users } from "@/db/schema";
 import { auth } from "@/lib/auth";
 import { relativeTime } from "@/lib/format";
 import { getCurrentUser } from "@/lib/auth-shim";
+import { markAllReadForUser } from "@/lib/notifications";
 import { AccountSidebar } from "@/components/prototype/AccountSidebar";
 
 function KindLabel({
@@ -97,12 +98,11 @@ export default async function Notifications({
     .orderBy(desc(notifications.createdAt))
     .limit(50);
 
-  // Mark unread as read on view (fire-and-forget; UI shows the unread state
-  // already at this point).
-  await db
-    .update(notifications)
-    .set({ readAt: new Date() })
-    .where(sql`${notifications.userId} = ${userId} AND ${notifications.readAt} IS NULL`);
+  // Mark unread as read on view. The UI snapshotted readAt above so
+  // unread items still render with the unread style on this render.
+  // Shares lib/notifications.markAllReadForUser with the API surface
+  // so both consume notifications the same way.
+  await markAllReadForUser(userId);
 
   return (
     <div className="proto-page-aside">
