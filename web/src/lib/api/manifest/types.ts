@@ -41,7 +41,9 @@ export type EndpointId =
   | "me:quota"
   | "me:list_decisions"
   | "notifications:list"
-  | "notifications:mark_read";
+  | "notifications:mark_read"
+  // Appeals against AI policy moderator decisions
+  | "appeals:create";
 
 export type HttpMethod = "GET" | "POST" | "PATCH" | "DELETE";
 

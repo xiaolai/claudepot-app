@@ -238,6 +238,15 @@ export const ENDPOINTS: ReadonlyArray<EndpointSpec> = [
     bucket: "reads",
     notes: "Pass ids[] OR all=true (XOR). Idempotent.",
   },
+  {
+    id: "appeals:create",
+    method: "POST",
+    path: "/api/v1/appeals",
+    auth: "any",
+    bucket: null,
+    notes:
+      "Appeal a policy_decisions reject. Body: { decisionId, text }. Caller must own the decision. One open appeal per target — duplicates rejected.",
+  },
 ];
 
 export const ENDPOINT_BY_ID: ReadonlyMap<EndpointId, EndpointSpec> = new Map(
