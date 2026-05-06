@@ -2,9 +2,16 @@
  * OpenAI SDK wrapper for the policy moderator.
  *
  * One call shape — chat.completions with structured-output JSON
- * schema. Hard 1500ms timeout via AbortController; anything slower
+ * schema. Hard 3000ms timeout via AbortController; anything slower
  * is treated as a model error per the failure-mode matrix in
  * dev-docs/policy-moderator-plan.md §12.
+ *
+ * The 3s ceiling is calibrated against real probe runs: warm-call
+ * latency for gpt-4o-mini + structured-output spans 800–2100ms (5
+ * cases sampled, median ~1500ms). The earlier 1500ms ceiling tripped
+ * AbortController on roughly half of legitimate calls. 3000ms covers
+ * observed max with margin without tipping into perceptible-delay
+ * territory (~5s).
  *
  * No retries. The caller decides how to respond to errors based on
  * the content kind (fail-open for comments, fail-closed for
@@ -21,7 +28,7 @@ import {
 import { PolicyResponseSchema, reconcileCategory, type PolicyResponse } from "./schema";
 import { POLICY_MODEL, type ModerationContent } from "./types";
 
-const TIMEOUT_MS = 1500;
+const TIMEOUT_MS = 3000;
 
 let client: OpenAI | null = null;
 
