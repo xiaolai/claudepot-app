@@ -38,10 +38,18 @@ const KIND_LABELS: Record<string, ReactNode> = {
 type NotePayload = {
   commentId?: string;
   submissionId?: string;
+  // Moderation notifications carry a different shape — see
+  // lib/moderation/notify.ts. The two payload variants coexist here
+  // because notifications.payload is `jsonb` and per-kind dispatch
+  // happens at render time.
+  appeal_url?: string;
+  decision_id?: string;
 };
 
 function buildLink(payload: unknown): string {
   const p = (payload ?? {}) as NotePayload;
+  if (p.appeal_url) return p.appeal_url;
+  if (p.decision_id) return `/appeal/${p.decision_id}`;
   if (p.submissionId && p.commentId) {
     return `/post/${p.submissionId}#comment-${p.commentId}`;
   }

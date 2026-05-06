@@ -20,6 +20,13 @@ import { z } from "zod";
 
 import { db } from "@/db/client";
 import { submissions, submissionTags, users } from "@/db/schema";
+import {
+  moderate,
+  writeModerationLogForReject,
+  writeModerationNotification,
+  writePolicyDecision,
+  type ModerationAuthor,
+} from "@/lib/moderation";
 
 /* ── Schema (shared with lib/actions/submission.ts) ─────────────── */
 
@@ -73,18 +80,36 @@ export type SubmitResult =
 const APPROVED_PAST_THRESHOLD = 2;
 const KARMA_AUTO_APPROVE = 50;
 
-async function determineInitialState(
+interface AuthorContext {
+  role: "user" | "staff" | "locked" | "system";
+  karma: number;
+  isAgent: boolean;
+  botModerationExempt: boolean;
+}
+
+async function loadAuthorContext(
   authorId: string,
-): Promise<"pending" | "approved" | "locked"> {
-  const [karmaRow] = await db
-    .select({ karma: users.karma, role: users.role })
+): Promise<AuthorContext | null> {
+  const [row] = await db
+    .select({
+      role: users.role,
+      karma: users.karma,
+      isAgent: users.isAgent,
+      botModerationExempt: users.botModerationExempt,
+    })
     .from(users)
     .where(eq(users.id, authorId))
     .limit(1);
-  if (!karmaRow) return "pending";
-  if (karmaRow.role === "locked") return "locked";
-  if (karmaRow.role === "staff" || karmaRow.role === "system") return "approved";
-  if (karmaRow.karma >= KARMA_AUTO_APPROVE) return "approved";
+  return row ?? null;
+}
+
+async function determineInitialState(
+  authorId: string,
+  ctx: AuthorContext,
+): Promise<"pending" | "approved" | "locked"> {
+  if (ctx.role === "locked") return "locked";
+  if (ctx.role === "staff" || ctx.role === "system") return "approved";
+  if (ctx.karma >= KARMA_AUTO_APPROVE) return "approved";
 
   const [c] = await db
     .select({ n: count() })
@@ -144,10 +169,39 @@ export async function createSubmission(
     if (dup) return { ok: false, reason: "duplicate", existingId: dup };
   }
 
-  const initialState = await determineInitialState(authorId);
-  if (initialState === "locked") {
+  const ctx = await loadAuthorContext(authorId);
+  if (!ctx) return { ok: false, reason: "validation", detail: "Author not found." };
+
+  const karmaState = await determineInitialState(authorId, ctx);
+  if (karmaState === "locked") {
     return { ok: false, reason: "locked", detail: "Account is locked." };
   }
+
+  // Run the policy moderator BEFORE inserting. Synchronous by
+  // design: the row's initial state must reflect the verdict so
+  // a rejected submission never enters the public feed even
+  // briefly. See dev-docs/policy-moderator-plan.md §7.1.
+  const author: ModerationAuthor = {
+    id: authorId,
+    role: ctx.role,
+    isAgent: ctx.isAgent,
+    botModerationExempt: ctx.botModerationExempt,
+  };
+  const verdict = await moderate(
+    {
+      kind: "submission",
+      title,
+      // Body for the moderator is whatever the user actually wrote —
+      // text body or the URL itself if URL-only. The model needs at
+      // least one of them; the input schema already enforces XOR.
+      body: normalizedText ?? normalizedUrl ?? "",
+    },
+    author,
+  );
+
+  const moderatorRejected =
+    verdict.verdict === "reject" && verdict.category !== null;
+  const initialState = moderatorRejected ? "rejected" : karmaState;
 
   const now = new Date();
   const [row] = await db
@@ -171,8 +225,49 @@ export async function createSubmission(
     );
   }
 
+  // Record the verdict + (on reject) the audit log + the user
+  // notification. Sequential not transactional — createSubmission
+  // is non-transactional today; an audit-row failure here logs but
+  // does not roll back the submission insert. Acceptable because
+  // (a) the row is already user-visible, (b) the user will retry
+  // on appeal, (c) Slice 1b will reconcile if needed.
+  if (!verdict.synthetic) {
+    try {
+      const decisionId = await writePolicyDecision({
+        authorId,
+        targetType: "submission",
+        targetId: row.id,
+        verdict,
+      });
+      if (moderatorRejected && verdict.category) {
+        await writeModerationLogForReject({
+          targetType: "submission",
+          targetId: row.id,
+          category: verdict.category,
+          oneLineWhy: verdict.oneLineWhy,
+        });
+        await writeModerationNotification({
+          recipientId: authorId,
+          targetType: "submission",
+          targetId: row.id,
+          targetTitle: title,
+          category: verdict.category,
+          oneLineWhy: verdict.oneLineWhy,
+          decisionId,
+        });
+      }
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      console.warn(`[moderation] persist failed for submission ${row.id}: ${msg}`);
+    }
+  }
+
   if (initialState === "approved") revalidatePath("/");
-  return { ok: true, submissionId: row.id, pending: initialState === "pending" };
+  return {
+    ok: true,
+    submissionId: row.id,
+    pending: initialState === "pending",
+  };
 }
 
 /* ── deleteSubmissionAsAuthor ────────────────────────────────────
