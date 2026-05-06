@@ -16,6 +16,7 @@
     "projects:seed": "tsx --env-file=.env.local scripts/sync-projects.ts --seed",
     "editorial:score": "tsx --env-file=.env.local scripts/editorial-score.ts",
     "test:editorial": "tsx tests/editorial-routing.test.ts",
+    "policy:moderate": "tsx --env-file=.env.local scripts/policy-moderate.ts",
     "social:post": "tsx --env-file=.env.local scripts/social-post.ts",
     "social:test": "tsx --env-file=.env.local scripts/social-test-auth.ts",
     "test:social": "tsx tests/social-format.test.ts"
