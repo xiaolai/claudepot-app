@@ -22,7 +22,6 @@
 import OpenAI from "openai";
 import {
   POLICY_RESPONSE_JSON_SCHEMA,
-  buildSystemPrompt,
   buildUserPrompt,
 } from "./prompt";
 import { PolicyResponseSchema, reconcileCategory, type PolicyResponse } from "./schema";
@@ -51,6 +50,7 @@ export interface ModelCallResult {
 
 export async function callPolicyModel(
   content: ModerationContent,
+  systemPrompt: string,
 ): Promise<ModelCallResult> {
   const ctrl = new AbortController();
   const timer = setTimeout(() => ctrl.abort(), TIMEOUT_MS);
@@ -60,7 +60,7 @@ export async function callPolicyModel(
       {
         model: POLICY_MODEL,
         messages: [
-          { role: "system", content: buildSystemPrompt() },
+          { role: "system", content: systemPrompt },
           { role: "user", content: buildUserPrompt(content) },
         ],
         response_format: {
