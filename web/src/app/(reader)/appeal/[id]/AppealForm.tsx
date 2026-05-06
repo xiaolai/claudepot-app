@@ -52,10 +52,10 @@ export function AppealForm({ decisionId }: Props) {
         onChange={(e) => setText(e.target.value)}
         rows={6}
         minLength={10}
-        maxLength={1000}
+        maxLength={480}
         required
         disabled={isPending}
-        placeholder="Tell us why you think the decision was wrong. 10–1000 characters."
+        placeholder="Tell us why you think the decision was wrong. 10–480 characters."
       />
       <div className="proto-appeal-form-actions">
         <button type="submit" disabled={isPending || text.trim().length < 10}>
@@ -88,7 +88,7 @@ function formatReason(
     case "forbidden":
       return "You can only appeal your own content.";
     case "validation":
-      return "Please write 10–1000 characters explaining the appeal.";
+      return "Please write 10–480 characters explaining the appeal.";
     case "duplicate":
       return "An appeal for this content is already in the queue.";
     case "stale":

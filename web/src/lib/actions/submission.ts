@@ -104,6 +104,12 @@ export async function submitAndRedirect(formData: FormData) {
     if (result.reason === "duplicate") {
       redirect(`/post/${result.existingId}?dup=1`);
     }
+    if (result.reason === "rejected") {
+      // Moderator rejected — the row exists with state='rejected'
+      // and a notification was written. Send the user to the
+      // appeal page rather than the (hidden) post permalink.
+      redirect(`/appeal/${result.decisionId}`);
+    }
     redirect(`/submit?error=${result.reason}`);
   }
   redirect(`/post/${result.submissionId}`);

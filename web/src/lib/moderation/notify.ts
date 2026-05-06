@@ -23,7 +23,13 @@ export interface ModerationNotificationPayload {
   category: PolicyCategory;
   one_line_why: string;
   decision_id: string;
-  appeal_url: string;
+  /**
+   * Null when the rejected content was never inserted (illegal
+   * comment block path) — there's no appeal because there is no
+   * row for staff to act on. Renderers should suppress the appeal
+   * link and tell the user the block is final.
+   */
+  appeal_url: string | null;
 }
 
 export async function writeModerationNotification(params: {
@@ -35,6 +41,11 @@ export async function writeModerationNotification(params: {
   oneLineWhy: string;
   decisionId: string;
 }): Promise<void> {
+  // Illegal-comment blocks (and any future "no row to point at"
+  // path) get null targetId → null appeal_url. Anything else gets
+  // the standard appeal page link.
+  const appealUrl =
+    params.targetId === null ? null : `/appeal/${params.decisionId}`;
   const payload: ModerationNotificationPayload = {
     target: {
       type: params.targetType,
@@ -44,7 +55,7 @@ export async function writeModerationNotification(params: {
     category: params.category,
     one_line_why: params.oneLineWhy,
     decision_id: params.decisionId,
-    appeal_url: `/appeal/${params.decisionId}`,
+    appeal_url: appealUrl,
   };
 
   await db.insert(notifications).values({

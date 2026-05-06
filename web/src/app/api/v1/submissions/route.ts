@@ -142,6 +142,25 @@ export async function POST(req: Request): Promise<Response> {
         detail: result.detail ?? "Daily cap reached.",
       });
     }
+    if (result.reason === "rejected") {
+      // The AI policy moderator rejected the submission. The row
+      // exists with state='rejected' so the user can appeal at
+      // /appeal/[decisionId]; do NOT return 201 / a publish URL.
+      return problemResponse({
+        type: "https://claudepot.com/api/errors/policy-rejected",
+        title: "Submission blocked by policy moderator",
+        status: 422,
+        detail: result.oneLineWhy,
+        // Surface the decisionId + submissionId so PAT/MCP clients
+        // can deep-link to the appeal page or the rejected row.
+        ...({
+          category: result.category,
+          decisionId: result.decisionId,
+          submissionId: result.submissionId,
+          appealUrl: `https://claudepot.com/appeal/${result.decisionId}`,
+        } as Record<string, unknown>),
+      });
+    }
     return problemResponse(validation(result.detail ?? "Submission failed."));
   }
 

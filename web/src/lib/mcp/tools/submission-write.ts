@@ -82,6 +82,12 @@ export function registerSubmissionWriteTools(server: McpServer): void {
             true,
           );
         }
+        if (result.reason === "rejected") {
+          return textResult(
+            `Blocked by policy moderator (${result.category}): ${result.oneLineWhy}. Appeal: https://claudepot.com/appeal/${result.decisionId}`,
+            true,
+          );
+        }
         return textResult(
           `Validation failed: ${result.detail ?? "unknown error"}`,
           true,

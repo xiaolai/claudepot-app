@@ -73,12 +73,15 @@ export async function POST(req: Request): Promise<Response> {
     }
     if (result.reason === "illegal") {
       // The AI policy moderator hard-blocked the comment as 'illegal'.
-      // Surface as 422 Unprocessable Entity with the moderator's
-      // one-line-why. Staff has been notified via /admin/queue.
+      // 423 Locked is the correct status: the parent submission is
+      // not the problem (it's not actually locked), but the comment
+      // attempt cannot proceed and there's no appeal path because
+      // the row was never inserted. 422 would imply a syntactic /
+      // schema problem the client can fix by retrying.
       return problemResponse({
         type: "https://claudepot.com/api/errors/illegal-content",
         title: "Comment blocked by policy moderator",
-        status: 422,
+        status: 423,
         detail: result.detail ?? "Content not allowed.",
       });
     }

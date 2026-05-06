@@ -45,6 +45,19 @@ export interface ModerationAuthor {
  * inside its own transaction so the verdict and any state change
  * commit atomically.
  */
+/**
+ * Why a verdict ended up as 'pass' WITHOUT a real model call. The
+ * caller branches on this to apply the failure-mode matrix:
+ *
+ *   - 'exempt' / 'disabled' → genuine "no moderation needed" — caller
+ *     uses its existing default state (karma gate, optimistic publish).
+ *   - 'error' → model call failed (timeout, 5xx, schema parse,
+ *     refusal). Submissions force state='pending'; comments still
+ *     publish optimistically and queue retroactive review. Plan §11.
+ *   - null when verdict.synthetic === false.
+ */
+export type SyntheticReason = "exempt" | "disabled" | "error";
+
 export interface ModerationVerdict {
   verdict: PolicyVerdict;
   /** null on pass; the rejected category otherwise. */
@@ -52,12 +65,14 @@ export interface ModerationVerdict {
   confidence: PolicyConfidence;
   oneLineWhy: string;
   /**
-   * True when the verdict was synthesized (MODERATION_ENABLED=0 in
-   * dev, or model error in fail-open mode). Persistence layer skips
-   * the policy_decisions row when synthetic=true, since there's no
-   * real model decision to record.
+   * True when the verdict was synthesized (exempt author, moderator
+   * disabled in dev, or a model error). Persistence layer skips the
+   * policy_decisions row when synthetic=true, since there's no real
+   * model decision to record.
    */
   synthetic: boolean;
+  /** Discriminator for synthetic verdicts. Null when synthetic=false. */
+  syntheticReason: SyntheticReason | null;
   modelId: string;
   promptVersion: string;
   /** Null when synthetic; populated when the model run reported usage. */

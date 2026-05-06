@@ -100,7 +100,20 @@ export async function createSubmission(
 
   const moderatorRejected =
     verdict.verdict === "reject" && verdict.category !== null;
-  const initialState = moderatorRejected ? "rejected" : karmaState;
+  // Failure-mode matrix per dev-docs/policy-moderator-plan.md §11:
+  //   - synthetic-due-to-error → force state='pending' so a model
+  //     outage doesn't quietly publish unmoderated content under the
+  //     karma gate's auto-approve rules.
+  //   - exempt / disabled → use karma-gate state (synthetic verdict
+  //     is genuine here — the moderator simply isn't being applied).
+  //   - moderator reject → state='rejected', regardless of karma.
+  const moderatorErrored =
+    verdict.synthetic && verdict.syntheticReason === "error";
+  const initialState = moderatorRejected
+    ? "rejected"
+    : moderatorErrored
+      ? "pending"
+      : karmaState;
 
   const now = new Date();
   const [row] = await db
@@ -130,9 +143,10 @@ export async function createSubmission(
   // does not roll back the submission insert. Acceptable because
   // (a) the row is already user-visible, (b) the user will retry
   // on appeal, (c) Slice 1b will reconcile if needed.
+  let decisionId: string | null = null;
   if (!verdict.synthetic) {
     try {
-      const decisionId = await writePolicyDecision({
+      decisionId = await writePolicyDecision({
         authorId,
         targetType: "submission",
         targetId: row.id,
@@ -165,6 +179,22 @@ export async function createSubmission(
       const msg = err instanceof Error ? err.message : String(err);
       console.warn(`[moderation] persist failed for submission ${row.id}: ${msg}`);
     }
+  }
+
+  // On a moderator reject, surface the verdict to the caller. The row
+  // exists with state='rejected'; callers translate to 422 / a UI
+  // error / a text-result on MCP. Returning ok:true with pending:false
+  // would tell the user the publish succeeded — which is a lie, since
+  // the rejected state hides the row from every public surface.
+  if (moderatorRejected && verdict.category && decisionId) {
+    return {
+      ok: false,
+      reason: "rejected",
+      submissionId: row.id,
+      category: verdict.category,
+      oneLineWhy: verdict.oneLineWhy,
+      decisionId,
+    };
   }
 
   if (initialState === "approved") revalidatePath("/");

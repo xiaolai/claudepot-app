@@ -75,6 +75,18 @@ export async function callPolicyModel(
     );
 
     const choice = completion.choices[0];
+    // OpenAI surfaces structured-output refusals on a separate
+    // `refusal` field (see https://platform.openai.com/docs/guides/structured-outputs).
+    // Treat as a model error so the caller falls into the failure-
+    // mode matrix (submissions → pending, comments → optimistic
+    // publish + retroactive). DO NOT translate to a synthetic pass
+    // verdict — a refusal on user content is surprising and worth
+    // investigating in /admin/log instead of silently published.
+    if (choice?.message?.refusal) {
+      throw new Error(
+        `Policy model refused: ${String(choice.message.refusal).slice(0, 200)}`,
+      );
+    }
     if (!choice?.message?.content) {
       throw new Error("Policy model returned empty content");
     }
