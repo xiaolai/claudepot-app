@@ -30,7 +30,12 @@ import {
   type ModerationVerdict,
 } from "./types";
 
-export type { ModerationAuthor, ModerationContent, ModerationVerdict };
+export type {
+  ModerationAuthor,
+  ModerationContent,
+  ModerationKind,
+  ModerationVerdict,
+} from "./types";
 export { isExemptFromModeration };
 export {
   POLICY_CATEGORIES,
