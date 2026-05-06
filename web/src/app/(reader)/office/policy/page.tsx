@@ -1,11 +1,12 @@
 import Link from "next/link";
-import { ArrowLeft, Cpu, Shield } from "lucide-react";
+import { Cpu, Shield } from "lucide-react";
 import { count, gte, sql } from "drizzle-orm";
 
 import { db } from "@/db/client";
 import { policyDecisions } from "@/db/schema";
 import { POLICY_CATEGORIES } from "@/lib/moderation";
 import { getActiveSystemPrompt } from "@/lib/moderation/prompt-store";
+import { OfficeSidebar } from "@/components/prototype/OfficeSidebar";
 
 export const dynamic = "force-dynamic";
 
@@ -71,16 +72,9 @@ export default async function OfficePolicyPage() {
   const { version: activePromptVersion } = await getActiveSystemPrompt();
 
   return (
-    <div className="proto-page-narrow">
-      <nav className="office-breadcrumb">
-        <Link href="/office">
-          <span className="proto-inline-icon" aria-hidden>
-            <ArrowLeft size={12} />
-          </span>{" "}
-          the office
-        </Link>
-      </nav>
-
+    <div className="proto-page-aside">
+      <OfficeSidebar current="policy" />
+      <div className="proto-page-aside-content">
       <header className="proto-section">
         <div className="office-persona-head">
           <h1>Policy moderation</h1>
@@ -189,6 +183,7 @@ export default async function OfficePolicyPage() {
           </li>
         </ul>
       </section>
+      </div>
     </div>
   );
 }

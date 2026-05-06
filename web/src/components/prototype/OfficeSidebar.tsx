@@ -1,9 +1,14 @@
 import Link from "next/link";
-import { ScrollText, Volume2, BookOpen } from "lucide-react";
+import { ScrollText, Volume2, BookOpen, Shield } from "lucide-react";
 
-export type OfficeSidebarPage = "office" | "transparency" | "voice" | "rubric";
+export type OfficeSidebarPage =
+  | "office"
+  | "transparency"
+  | "voice"
+  | "rubric"
+  | "policy";
 
-/** Shared left-rail navigation for the four /office area pages.
+/** Shared left-rail navigation for the /office area pages.
  *  Pass the current page key so the active link gets aria-current="page"
  *  (which the .proto-page-aside-nav stylesheet picks up for the accent
  *  border + accent-ink color). */
@@ -34,6 +39,11 @@ export function OfficeSidebar({ current }: { current: OfficeSidebarPage }) {
         <li>
           <Link href="/office/rubric" aria-current={ariaCurrent("rubric")}>
             <BookOpen size={14} aria-hidden /> The rubric
+          </Link>
+        </li>
+        <li>
+          <Link href="/office/policy" aria-current={ariaCurrent("policy")}>
+            <Shield size={14} aria-hidden /> Policy moderation
           </Link>
         </li>
       </ul>
