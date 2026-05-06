@@ -113,6 +113,20 @@ function syntheticErrorVerdict(): ModerationVerdict {
   };
 }
 
+function syntheticCappedVerdict(): ModerationVerdict {
+  return {
+    verdict: "pass",
+    category: null,
+    confidence: "high",
+    oneLineWhy: "daily moderation cap (50) reached for this author",
+    synthetic: true,
+    syntheticReason: "capped",
+    modelId: POLICY_MODEL,
+    promptVersion: POLICY_PROMPT_V,
+    costUsd: null,
+  };
+}
+
 async function freshAuthor(testDb: TestDb): Promise<{ id: string; username: string }> {
   // Karma 100 → state='approved' on pass. New users with karma 0 hit
   // the "pending" branch, which makes the pass-verdict assertions
@@ -278,6 +292,40 @@ async function freshAuthor(testDb: TestDb): Promise<{ id: string; username: stri
         .from(notifications)
         .where(eq(notifications.userId, author.id));
       assert.equal(notifRows.length, 0);
+    } finally {
+      __setTestVerdictOverride(null);
+    }
+  });
+
+  // Test 4 — synthetic-capped verdict (per-author daily cap exceeded)
+  await test("synthetic-capped verdict → state='pending' (same matrix as 'error')", async () => {
+    await resetTables(db);
+    const author = await freshAuthor(db);
+    __setTestVerdictOverride(syntheticCappedVerdict());
+    try {
+      const result = await createSubmission(author.id, {
+        type: "discussion",
+        title: "Test cap-path",
+        text: "Body submitted after the per-author daily cap.",
+      });
+      assert.equal(result.ok, true);
+      if (!result.ok) throw new Error("unreachable");
+      assert.equal(
+        result.pending,
+        true,
+        "capped synthetic should fail-closed for submissions, same as error",
+      );
+      const [row] = await db
+        .select({ state: submissions.state })
+        .from(submissions)
+        .where(eq(submissions.id, result.submissionId));
+      assert.equal(row?.state, "pending");
+      // Synthetic verdicts don't persist policy_decisions.
+      const pdRows = await db
+        .select({ id: policyDecisions.id })
+        .from(policyDecisions)
+        .where(eq(policyDecisions.targetId, result.submissionId));
+      assert.equal(pdRows.length, 0);
     } finally {
       __setTestVerdictOverride(null);
     }

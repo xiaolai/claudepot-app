@@ -49,14 +49,15 @@ migration 0018. Tests that need that row call
 
 | Test file | Verifies |
 |---|---|
-| `createSubmission-moderation.test.ts` | The pass / reject / synthetic-error branches of createSubmission, including the policy_decisions, moderation_log, and notifications side-effects |
+| `createSubmission-moderation.test.ts` | The pass / reject / synthetic-error / synthetic-capped branches of createSubmission, including the policy_decisions, moderation_log, and notifications side-effects |
+| `createComment-moderation.test.ts` | The pass / non-illegal reject (optimistic publish) / illegal hard-block / synthetic-error (fail-open + retro enqueue) branches of createComment, including ban-candidate flag insertion (target_type='user'), notification appeal_url=null on illegal blocks, and retro_queue entry inserted on fail-open |
 
 Add additional integration files for:
 
-- `createComment-moderation.test.ts` — pass / illegal-block /
-  optimistic-publish / synthetic-error (retro enqueue)
 - `runCommentConfirmation.test.ts` — pass-2 retract path
-- `drainRetroQueue.test.ts` — cron drain semantics
+- `drainRetroQueue.test.ts` — cron drain semantics, including the
+  branch where 'disabled' / 'exempt' / 'capped' synthetic verdicts
+  on the retry mark the queue entry 'done' rather than cycling
 - `submitAppeal.test.ts` — race + dedup against the
   partial unique index from migration 0019
 
