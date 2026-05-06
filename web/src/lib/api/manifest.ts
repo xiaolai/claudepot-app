@@ -62,6 +62,7 @@ export type EndpointId =
   | "health"
   | "me:identify"
   | "me:quota"
+  | "me:list_decisions"
   | "notifications:list"
   | "notifications:mark_read";
 
@@ -296,6 +297,15 @@ export const ENDPOINTS: ReadonlyArray<EndpointSpec> = [
     notes: "Daily-bucket usage for the calling token. No rate-limit charge.",
   },
   {
+    id: "me:list_decisions",
+    method: "GET",
+    path: "/api/v1/me/decisions",
+    auth: "read:all",
+    bucket: "reads",
+    notes:
+      "Caller's own AI policy moderator decisions. Filters: kind (submission|comment), since. Cursor-free; returns most recent 200.",
+  },
+  {
     id: "notifications:list",
     method: "GET",
     path: "/api/v1/notifications",
@@ -357,7 +367,8 @@ export type McpToolName =
   | "list_notifications"
   | "mark_notifications_read"
   | "me"
-  | "get_quota";
+  | "get_quota"
+  | "list_my_decisions";
 
 export type McpToolSpec = {
   readonly name: McpToolName;
@@ -395,6 +406,7 @@ export const MCP_TOOLS: ReadonlyArray<McpToolSpec> = [
   { name: "mark_notifications_read", mirrors: "notifications:mark_read" },
   { name: "me", mirrors: "me:identify" },
   { name: "get_quota", mirrors: "me:quota" },
+  { name: "list_my_decisions", mirrors: "me:list_decisions" },
 ];
 
 const MCP_BY_NAME = new Map<McpToolName, McpToolSpec>(

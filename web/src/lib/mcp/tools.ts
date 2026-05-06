@@ -43,6 +43,10 @@ import {
   markReadInputSchema,
   NOTIFICATION_KINDS,
 } from "@/lib/notifications";
+import {
+  listMyDecisions,
+  listMyDecisionsInputSchema,
+} from "@/lib/moderation";
 import { castVote, saveInputSchema, setSave, voteInputSchema } from "@/lib/votes";
 import { getConstitution } from "@/lib/api/constitution";
 import { readQuotaForToken } from "@/lib/api/quota";
@@ -586,6 +590,40 @@ export function registerTools(server: McpServer): void {
       if (!a.ok) return a.result;
       const quota = await readQuotaForToken(a.ctx.tokenId);
       return textResult(JSON.stringify(quota, null, 2));
+    },
+  );
+
+  /* ── list_my_decisions ───────────────────────────────────── */
+  server.registerTool(
+    "list_my_decisions",
+    {
+      title: "List your AI policy moderator decisions",
+      description:
+        "Returns the calling user's own AI policy moderator decisions, " +
+        "newest first. Use `since` to incrementally poll. Filter `kind` " +
+        "to scope to submission or comment decisions. Requires read:all.",
+      inputSchema: {
+        kind: z.enum(["submission", "comment"]).optional(),
+        since: z.iso.datetime().optional(),
+      },
+    },
+    async (args, extra) => {
+      const a = await checkAuthForTool("list_my_decisions", extra);
+      if (!a.ok) return a.result;
+
+      const parsed = listMyDecisionsInputSchema.safeParse(args);
+      if (!parsed.success) {
+        return textResult(
+          `Validation failed: ${formatZodIssues(parsed.error)}`,
+          true,
+        );
+      }
+
+      const c = await chargeForTool("list_my_decisions", a.ctx.tokenId);
+      if (!c.ok) return c.result;
+
+      const result = await listMyDecisions(a.ctx.userId, parsed.data);
+      return textResult(JSON.stringify(result, null, 2));
     },
   );
 
