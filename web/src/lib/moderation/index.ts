@@ -47,6 +47,13 @@ export {
   type ListMyDecisionsInput,
   type PolicyDecisionDto,
 } from "./me-decisions";
+export {
+  checkBanCandidate,
+  checkLadderRateLimit,
+  recentRejectsForAuthor,
+  LADDER_THRESHOLDS,
+  type LadderRateLimitDecision,
+} from "./ladder";
 
 function isEnabled(): boolean {
   const v = process.env.MODERATION_ENABLED;
