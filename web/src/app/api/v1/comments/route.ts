@@ -7,7 +7,12 @@
  * submissionId.
  */
 
-import { forbidden, notFound, validation } from "@/lib/api/errors";
+import {
+  forbidden,
+  notFound,
+  rateLimited,
+  validation,
+} from "@/lib/api/errors";
 import { created, preflight, problemResponse } from "@/lib/api/response";
 import { commentInputSchema, createComment } from "@/lib/comments";
 import { endpointSpec } from "@/lib/api/manifest";
@@ -64,6 +69,26 @@ export async function POST(req: Request): Promise<Response> {
         forbidden(
           "Your account is locked, or this submission is closed to new comments.",
         ),
+      );
+    }
+    if (result.reason === "illegal") {
+      // The AI policy moderator hard-blocked the comment as 'illegal'.
+      // Surface as 422 Unprocessable Entity with the moderator's
+      // one-line-why. Staff has been notified via /admin/queue.
+      return problemResponse({
+        type: "https://claudepot.com/api/errors/illegal-content",
+        title: "Comment blocked by policy moderator",
+        status: 422,
+        detail: result.detail ?? "Content not allowed.",
+      });
+    }
+    if (result.reason === "rate") {
+      // Rung 3 of the ban ladder — the author's daily cap dropped
+      // after recent rejects. Return 429; reset is at UTC midnight.
+      const utcMidnight = new Date();
+      utcMidnight.setUTCHours(24, 0, 0, 0);
+      return problemResponse(
+        rateLimited(result.detail ?? "Daily cap reached.", utcMidnight),
       );
     }
     return problemResponse(validation("Comment failed."));
