@@ -6,7 +6,7 @@ import { SubmissionMeta } from "./SubmissionMeta";
 import { SubmissionStateBanner } from "./SubmissionStateBanner";
 import { TutorialMeta, PodcastMetaInline, ToolMetaInline, DiscussionPreview } from "./TypeMeta";
 import type { Submission } from "@/lib/prototype-fixtures";
-import { effectiveState, effectiveDecision } from "@/lib/moderation";
+import { effectiveState, effectiveDecision } from "@/lib/moderation-fixtures";
 
 interface Props {
   rank?: number;
