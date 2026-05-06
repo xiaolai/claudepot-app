@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { CircleDashed, X } from "lucide-react";
 import type { CommentNode } from "@/lib/prototype-fixtures";
-import { commentEffectiveState } from "@/lib/moderation";
+import { commentEffectiveState } from "@/lib/moderation-fixtures";
 import { relativeTime } from "@/lib/format";
 import { renderMarkdown } from "@/lib/markdown";
 import { UserAvatar } from "./Avatar";
