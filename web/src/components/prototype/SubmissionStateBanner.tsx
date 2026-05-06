@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { CircleDashed, X } from "lucide-react";
-import type { AIDecision, ModerationState } from "@/lib/moderation";
+import type { AIDecision, ModerationState } from "@/lib/moderation-fixtures";
 import { relativeTime } from "@/lib/format";
 
 interface Props {

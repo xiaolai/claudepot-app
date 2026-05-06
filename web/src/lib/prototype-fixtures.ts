@@ -9,7 +9,7 @@ import {
   commentEffectiveState,
   type AIDecision,
   type ModerationState,
-} from "@/lib/moderation";
+} from "@/lib/moderation-fixtures";
 
 export type SubmissionType =
   | "news"
