@@ -7,30 +7,24 @@
  * submissionId.
  */
 
-import { authenticate, requireScope } from "@/lib/api/auth";
-import { checkAndIncrement } from "@/lib/api/rate-limit";
-import {
-  forbidden,
-  notFound,
-  rateLimited,
-  validation,
-} from "@/lib/api/errors";
+import { forbidden, notFound, validation } from "@/lib/api/errors";
 import { created, preflight, problemResponse } from "@/lib/api/response";
 import { commentInputSchema, createComment } from "@/lib/comments";
+import { endpointSpec } from "@/lib/api/manifest";
+import { chargeForSpec, checkAuthForSpec } from "@/lib/api/policy";
 
 export async function OPTIONS(): Promise<Response> {
   return preflight();
 }
 
 export async function POST(req: Request): Promise<Response> {
-  const auth = await authenticate(req);
-  if (!auth.ok) return problemResponse(auth.problem);
+  const SPEC = endpointSpec("comments:create");
+  const policy = await checkAuthForSpec(req, SPEC);
+  if (!policy.ok) return policy.response;
+  const { auth } = policy;
 
-  const denied = requireScope(auth.token, "comment:write");
-  if (denied) return problemResponse(denied.problem);
-
-  // Parse + validate before bumping the rate-limit bucket — see the
-  // submissions route for the rationale.
+  // Parse + validate before bumping the rate-limit bucket — same
+  // rationale as the submissions route.
   let body: unknown;
   try {
     body = await req.json();
@@ -51,15 +45,8 @@ export async function POST(req: Request): Promise<Response> {
     );
   }
 
-  const limit = await checkAndIncrement(auth.token.id, "comments");
-  if (!limit.ok) {
-    return problemResponse(
-      rateLimited(
-        `Daily comment limit (${limit.limit}) exceeded for this token.`,
-        limit.resetAt,
-      ),
-    );
-  }
+  const charge = await chargeForSpec(SPEC, auth.token.id);
+  if (!charge.ok) return charge.response;
 
   const result = await createComment(auth.user.id, parsed.data);
 

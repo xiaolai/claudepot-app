@@ -1,41 +1,51 @@
 /**
- * Author-only mutations on a single submission via PAT.
+ * /api/v1/submissions/[id] — single-submission verbs.
  *
- *   PATCH  /api/v1/submissions/[id]  → update title / text
- *   DELETE /api/v1/submissions/[id]  → soft delete
+ *   GET    — public read.
+ *   PATCH  — author-only edit (title / text). Bots bypass the 5-min
+ *            window humans hit.
+ *   DELETE — author-only soft delete.
  *
- * Both mirror the equivalent web UI server actions. Author + window
- * checks happen inside the cores; PAT scopes are enforced here. Both
- * verbs charge against the `submissions` daily bucket so a leaked
- * token can't drain mutations past the daily limit.
- *
- * The PATCH path is the bot edit story: human users still hit the
- * 5-minute window the web action has always enforced, but bots
- * (is_agent OR role IN system/staff) bypass the window. Out-of-window
- * edits set submissions.updated_at so the UI can render an "edited"
- * badge.
+ * Scope and rate-limit policy are sourced from lib/api/manifest.ts.
+ * Author + window checks live inside the cores in lib/submissions.ts;
+ * this file only enforces the API-edge concerns (path validation,
+ * auth gate, bucket charge, response shaping).
  */
 
-import { authenticate, requireScope } from "@/lib/api/auth";
-import { checkAndIncrement } from "@/lib/api/rate-limit";
-import {
-  forbidden,
-  notFound,
-  rateLimited,
-  validation,
-} from "@/lib/api/errors";
+import { forbidden, notFound, validation } from "@/lib/api/errors";
 import { ok, preflight, problemResponse } from "@/lib/api/response";
 import {
   deleteSubmissionAsAuthor,
   updateSubmissionAsAuthor,
   updateSubmissionInputSchema,
 } from "@/lib/submissions";
-
-const UUID_RE =
-  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+import { getSubmissionByIdForApi } from "@/lib/api/queries";
+import { isUuid } from "@/lib/api/inputs";
+import { endpointSpec } from "@/lib/api/manifest";
+import { chargeForSpec, checkAuthForSpec } from "@/lib/api/policy";
 
 export async function OPTIONS(): Promise<Response> {
   return preflight();
+}
+
+export async function GET(
+  req: Request,
+  { params }: { params: Promise<{ id: string }> },
+): Promise<Response> {
+  const { id } = await params;
+  if (!isUuid(id)) return problemResponse(notFound("Invalid id."));
+
+  const SPEC = endpointSpec("submissions:get");
+  const policy = await checkAuthForSpec(req, SPEC);
+  if (!policy.ok) return policy.response;
+  const { auth } = policy;
+
+  const charge = await chargeForSpec(SPEC, auth.token.id);
+  if (!charge.ok) return charge.response;
+
+  const dto = await getSubmissionByIdForApi(auth.user.id, id);
+  if (!dto) return problemResponse(notFound("Submission not found."));
+  return ok(dto);
 }
 
 export async function DELETE(
@@ -43,23 +53,15 @@ export async function DELETE(
   { params }: { params: Promise<{ id: string }> },
 ): Promise<Response> {
   const { id } = await params;
-  if (!UUID_RE.test(id)) return problemResponse(notFound("Invalid id."));
+  if (!isUuid(id)) return problemResponse(notFound("Invalid id."));
 
-  const auth = await authenticate(req);
-  if (!auth.ok) return problemResponse(auth.problem);
+  const SPEC = endpointSpec("submissions:delete");
+  const policy = await checkAuthForSpec(req, SPEC);
+  if (!policy.ok) return policy.response;
+  const { auth } = policy;
 
-  const denied = requireScope(auth.token, "submission:delete");
-  if (denied) return problemResponse(denied.problem);
-
-  const limit = await checkAndIncrement(auth.token.id, "submissions");
-  if (!limit.ok) {
-    return problemResponse(
-      rateLimited(
-        `Daily submission-write limit (${limit.limit}) exceeded for this token.`,
-        limit.resetAt,
-      ),
-    );
-  }
+  const charge = await chargeForSpec(SPEC, auth.token.id);
+  if (!charge.ok) return charge.response;
 
   const result = await deleteSubmissionAsAuthor(auth.user.id, id);
   if (!result.ok) {
@@ -79,13 +81,12 @@ export async function PATCH(
   { params }: { params: Promise<{ id: string }> },
 ): Promise<Response> {
   const { id } = await params;
-  if (!UUID_RE.test(id)) return problemResponse(notFound("Invalid id."));
+  if (!isUuid(id)) return problemResponse(notFound("Invalid id."));
 
-  const auth = await authenticate(req);
-  if (!auth.ok) return problemResponse(auth.problem);
-
-  const denied = requireScope(auth.token, "submission:update");
-  if (denied) return problemResponse(denied.problem);
+  const SPEC = endpointSpec("submissions:update");
+  const policy = await checkAuthForSpec(req, SPEC);
+  if (!policy.ok) return policy.response;
+  const { auth } = policy;
 
   let body: unknown;
   try {
@@ -107,15 +108,8 @@ export async function PATCH(
     );
   }
 
-  const limit = await checkAndIncrement(auth.token.id, "submissions");
-  if (!limit.ok) {
-    return problemResponse(
-      rateLimited(
-        `Daily submission-write limit (${limit.limit}) exceeded for this token.`,
-        limit.resetAt,
-      ),
-    );
-  }
+  const charge = await chargeForSpec(SPEC, auth.token.id);
+  if (!charge.ok) return charge.response;
 
   const result = await updateSubmissionAsAuthor(auth.user.id, id, parsed.data);
   if (!result.ok) {

@@ -6,7 +6,12 @@ import {
   mintApiTokenFormAction,
   type MintFormState,
 } from "@/lib/actions/api-tokens";
-import { SCOPES, SCOPE_LABELS, type Scope } from "@/lib/api/scopes";
+import {
+  SCOPES,
+  SCOPE_GROUPS,
+  SCOPE_LABELS,
+  type Scope,
+} from "@/lib/api/scopes";
 
 const INIT: MintFormState = { phase: "idle" };
 
@@ -99,21 +104,27 @@ export function MintTokenForm({ staff }: { staff: boolean }) {
           />
           <strong>Select all</strong>
         </label>
-        {SCOPES.map((s) => (
-          <label key={s}>
-            <input
-              type="checkbox"
-              name="scopes"
-              value={s}
-              checked={selected.has(s)}
-              onChange={(e) => toggleScope(s, e.currentTarget.checked)}
-            />
-            <code>{s}</code> — {SCOPE_LABELS[s]}
-          </label>
+        {SCOPE_GROUPS.map((group) => (
+          <div key={group.label} className="proto-token-scope-group">
+            <p className="proto-token-scope-group-label">{group.label}</p>
+            {group.scopes.map((s) => (
+              <label key={s}>
+                <input
+                  type="checkbox"
+                  name="scopes"
+                  value={s}
+                  checked={selected.has(s)}
+                  onChange={(e) => toggleScope(s, e.currentTarget.checked)}
+                />
+                <code>{s}</code> — {SCOPE_LABELS[s]}
+              </label>
+            ))}
+          </div>
         ))}
         <span className="help">
-          Pick the smallest set of scopes the token actually needs. You can
-          revoke and re-mint with different scopes anytime.
+          Pick the smallest set of scopes the token actually needs. Most
+          read-only bots want just <code>read:all</code>. You can revoke
+          and re-mint with different scopes anytime.
         </span>
       </fieldset>
 

@@ -1,39 +1,47 @@
 /**
- * Author-only mutations on a single comment via PAT.
+ * /api/v1/comments/[id] — single-comment verbs.
  *
- *   PATCH  /api/v1/comments/[id]  → update body
- *   DELETE /api/v1/comments/[id]  → soft (with replies) or hard delete
- *
- * Both mirror the equivalent web UI server actions. Author + window
- * checks happen inside the cores; PAT scopes are enforced here. Both
- * verbs charge against the `comments` daily bucket.
- *
- * The PATCH path: human users still hit the 5-minute window the web
- * action enforces; bots (is_agent OR role IN system/staff) bypass it.
- * Out-of-window edits set comments.updated_at so the UI can render
- * an "edited" badge.
+ *   GET    — public read. Returns CommentDetailDto including a
+ *            compact reference to the parent submission.
+ *   PATCH  — author-only edit. Bots bypass the 5-minute window.
+ *   DELETE — author-only delete. Soft-delete with replies, hard-delete
+ *            without.
  */
 
-import { authenticate, requireScope } from "@/lib/api/auth";
-import { checkAndIncrement } from "@/lib/api/rate-limit";
-import {
-  forbidden,
-  notFound,
-  rateLimited,
-  validation,
-} from "@/lib/api/errors";
+import { forbidden, notFound, validation } from "@/lib/api/errors";
 import { ok, preflight, problemResponse } from "@/lib/api/response";
 import {
   deleteCommentAsAuthor,
   updateCommentAsAuthor,
   updateCommentInputSchema,
 } from "@/lib/comments";
-
-const UUID_RE =
-  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+import { getCommentByIdForApi } from "@/lib/api/queries";
+import { isUuid } from "@/lib/api/inputs";
+import { endpointSpec } from "@/lib/api/manifest";
+import { chargeForSpec, checkAuthForSpec } from "@/lib/api/policy";
 
 export async function OPTIONS(): Promise<Response> {
   return preflight();
+}
+
+export async function GET(
+  req: Request,
+  { params }: { params: Promise<{ id: string }> },
+): Promise<Response> {
+  const { id } = await params;
+  if (!isUuid(id)) return problemResponse(notFound("Invalid id."));
+
+  const SPEC = endpointSpec("comments:get");
+  const policy = await checkAuthForSpec(req, SPEC);
+  if (!policy.ok) return policy.response;
+  const { auth } = policy;
+
+  const charge = await chargeForSpec(SPEC, auth.token.id);
+  if (!charge.ok) return charge.response;
+
+  const dto = await getCommentByIdForApi(auth.user.id, id);
+  if (!dto) return problemResponse(notFound("Comment not found."));
+  return ok(dto);
 }
 
 export async function DELETE(
@@ -41,23 +49,15 @@ export async function DELETE(
   { params }: { params: Promise<{ id: string }> },
 ): Promise<Response> {
   const { id } = await params;
-  if (!UUID_RE.test(id)) return problemResponse(notFound("Invalid id."));
+  if (!isUuid(id)) return problemResponse(notFound("Invalid id."));
 
-  const auth = await authenticate(req);
-  if (!auth.ok) return problemResponse(auth.problem);
+  const SPEC = endpointSpec("comments:delete");
+  const policy = await checkAuthForSpec(req, SPEC);
+  if (!policy.ok) return policy.response;
+  const { auth } = policy;
 
-  const denied = requireScope(auth.token, "comment:delete");
-  if (denied) return problemResponse(denied.problem);
-
-  const limit = await checkAndIncrement(auth.token.id, "comments");
-  if (!limit.ok) {
-    return problemResponse(
-      rateLimited(
-        `Daily comment-write limit (${limit.limit}) exceeded for this token.`,
-        limit.resetAt,
-      ),
-    );
-  }
+  const charge = await chargeForSpec(SPEC, auth.token.id);
+  if (!charge.ok) return charge.response;
 
   const result = await deleteCommentAsAuthor(auth.user.id, id);
   if (!result.ok) {
@@ -77,13 +77,12 @@ export async function PATCH(
   { params }: { params: Promise<{ id: string }> },
 ): Promise<Response> {
   const { id } = await params;
-  if (!UUID_RE.test(id)) return problemResponse(notFound("Invalid id."));
+  if (!isUuid(id)) return problemResponse(notFound("Invalid id."));
 
-  const auth = await authenticate(req);
-  if (!auth.ok) return problemResponse(auth.problem);
-
-  const denied = requireScope(auth.token, "comment:update");
-  if (denied) return problemResponse(denied.problem);
+  const SPEC = endpointSpec("comments:update");
+  const policy = await checkAuthForSpec(req, SPEC);
+  if (!policy.ok) return policy.response;
+  const { auth } = policy;
 
   let body: unknown;
   try {
@@ -105,15 +104,8 @@ export async function PATCH(
     );
   }
 
-  const limit = await checkAndIncrement(auth.token.id, "comments");
-  if (!limit.ok) {
-    return problemResponse(
-      rateLimited(
-        `Daily comment-write limit (${limit.limit}) exceeded for this token.`,
-        limit.resetAt,
-      ),
-    );
-  }
+  const charge = await chargeForSpec(SPEC, auth.token.id);
+  if (!charge.ok) return charge.response;
 
   const result = await updateCommentAsAuthor(auth.user.id, id, parsed.data);
   if (!result.ok) {

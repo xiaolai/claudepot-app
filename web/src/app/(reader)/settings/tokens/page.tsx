@@ -39,7 +39,10 @@ export default async function TokensPage() {
         <p className="proto-dek">
           Personal Access Tokens for the public REST and MCP API. Each token
           identifies you to the API and carries the scopes you assign at
-          creation time. Tokens are shown once — copy on creation.
+          creation time. Tokens are shown once — copy on creation. See{" "}
+          <Link href="/api">/api</Link> for the endpoint reference, scope
+          map, and MCP catalog. A token can introspect its own daily usage
+          at <code>GET /api/v1/me/quota</code> (no scope required).
         </p>
 
         <section id="mint" className="proto-section">
