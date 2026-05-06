@@ -25,14 +25,17 @@ export const dynamic = "force-dynamic";
  */
 
 const CATEGORY_NOTES: Record<string, string> = {
-  spam: "Off-topic promotion, link farms, repetitive postings, paid promotion without disclosure.",
+  spam: "Promotional content with no surrounding discussion, link farms, repetitive postings, paid promotion without disclosure.",
   abuse: "Harassment, slurs, threats, targeted personal attacks against an identified person or group.",
   illegal:
     "CSAM; distributing malware or stolen credentials; flagrant copyright violation. Discussion of these is allowed; distribution is not.",
   doxxing:
     "Exposing a private individual's home address, phone number, government ID, or non-public personal email tied to a real-name target.",
-  off_topic:
-    "Submissions only — clearly unrelated to AI tools / AI-augmented work / LLM technique. Comments are not rejected for off-topic.",
+  // Legacy category — retired in POLICY_PROMPT_V="2". Kept here so
+  // historical policy_decisions rows with category='off_topic'
+  // render with a recognizable label on this page if they surface
+  // in the aggregate. New rejects never use this category.
+  off_topic: "[legacy] Submissions retired from this category in v2.",
 };
 
 export default async function OfficePolicyPage() {
@@ -96,12 +99,14 @@ export default async function OfficePolicyPage() {
       </header>
 
       <section className="proto-section">
-        <h2>The five categories</h2>
+        <h2>Categories</h2>
         <p className="office-section-lede">
-          Reject only when content clearly fits one. When in doubt,
-          pass. The rubric is intentionally small — five categories,
-          not fifty — because every additional category trades
-          precision for argued-edges.
+          Universal trust-and-safety taxonomy. Reject only when
+          content clearly fits one. When in doubt, pass. Topical
+          fit (does this submission match the platform&rsquo;s
+          audience) is NOT a moderator concern — that&rsquo;s
+          handled by editorial scoring and community voting, not
+          by the gate.
         </p>
         <dl className="office-policy-categories">
           {POLICY_CATEGORIES.map((cat) => (

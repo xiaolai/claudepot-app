@@ -1,12 +1,14 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
-import { eq, sql } from "drizzle-orm";
+import { and, eq, sql } from "drizzle-orm";
 import { z } from "zod";
 
 import { db } from "@/db/client";
 import { moderationLog, submissionTags, tags } from "@/db/schema";
+import { clearTagVocabCache } from "@/lib/moderation";
 import { requireStaffId } from "@/lib/staff";
+import { tagSlugSchema as slugSchema } from "@/lib/tags/slug";
 
 /** Discriminated state shape returned from every admin-tag action.
  *  Pairs with React 19's useActionState in the client form components.
@@ -17,10 +19,6 @@ export type TagActionState = { ok: boolean; message: string };
 
 const ok = (message: string): TagActionState => ({ ok: true, message });
 const err = (message: string): TagActionState => ({ ok: false, message });
-
-// kebab-case, alphanumeric + hyphens, 2..40 chars
-const SLUG = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
-const slugSchema = z.string().trim().min(2).max(40).regex(SLUG);
 
 const createInput = z.object({
   slug: slugSchema,
@@ -56,6 +54,13 @@ function revalidateTagSurfaces(slugs: string[]) {
  *  rolling back the whole action. */
 async function logTagAction(
   staffId: string,
+  // tag_create  — new tag entered the active vocabulary (manual or
+  //               via approving a pending Ada-proposed tag).
+  // tag_rename  — display name/tagline changed.
+  // tag_merge   — associations moved, source slug deleted.
+  // tag_retire  — tag deleted entirely (manual retire OR rejection
+  //               of a pending Ada-proposed tag — they share the
+  //               same DB effect, the note string discriminates).
   action: "tag_create" | "tag_rename" | "tag_merge" | "tag_retire",
   note: string,
 ) {
@@ -110,6 +115,12 @@ export async function createTag(
   }
 
   await logTagAction(staffId, "tag_create", `slug=${parsed.data.slug}`);
+  // Drop the moderator's cached vocab so Ada sees the new active
+  // slug on the next call. Without this, up to 60 s of submissions
+  // would still treat the slug as new and produce duplicate
+  // pending-tag noise (the brand-new row gets ON CONFLICT DO
+  // NOTHING'd, but pending_review state could thrash).
+  clearTagVocabCache();
   revalidateTagSurfaces([parsed.data.slug]);
   return ok(`Created tag "${parsed.data.slug}".`);
 }
@@ -224,6 +235,10 @@ export async function mergeTag(
     "tag_merge",
     `from=${parsed.data.fromSlug} to=${parsed.data.toSlug} moved=${movedCount}`,
   );
+  // The fromSlug just disappeared from the active vocabulary; if
+  // we don't drop the cache, Ada might keep proposing it for up
+  // to 60 s and applyAiTags would resurrect it as a pending row.
+  clearTagVocabCache();
   revalidateTagSurfaces([parsed.data.fromSlug, parsed.data.toSlug]);
   return ok(
     `Merged "${parsed.data.fromSlug}" into "${parsed.data.toSlug}" — ${movedCount} association${movedCount === 1 ? "" : "s"} moved.`,
@@ -256,6 +271,118 @@ export async function retireTag(
     "tag_retire",
     `slug=${parsed.data.slug}`,
   );
+  // Same reason as the merge path: the slug just left the active
+  // vocabulary; force the cache so Ada doesn't keep re-proposing
+  // it and recreating it as a pending row.
+  clearTagVocabCache();
   revalidateTagSurfaces([parsed.data.slug]);
   return ok(`Retired tag "${parsed.data.slug}".`);
+}
+
+/**
+ * Approve a pending Ada-proposed tag (migration 0022). Flip
+ * pending_review=false and optionally rename / set tagline. The
+ * tag-vocab cache used by the moderator is cleared so Ada can
+ * pick up the newly-public tag on the very next moderate() call
+ * without a 60s wait.
+ *
+ * Form fields:
+ *   - slug (required, must reference an existing pending tag)
+ *   - name (optional override; if empty, keep the placeholder)
+ *   - tagline (optional)
+ */
+const approvePendingInput = z.object({
+  slug: slugSchema,
+  name: z.string().trim().min(1).max(60).optional(),
+  tagline: z.string().trim().max(200).optional(),
+});
+
+export async function approvePendingTag(
+  _prev: TagActionState,
+  formData: FormData,
+): Promise<TagActionState> {
+  const staffId = await requireStaffId();
+  if (!staffId) return err("Not authorized.");
+
+  const parsed = approvePendingInput.safeParse({
+    slug: formData.get("slug"),
+    name: formData.get("name") || undefined,
+    tagline: formData.get("tagline") || undefined,
+  });
+  if (!parsed.success) return err("Invalid input.");
+
+  // .returning() reports zero rows when the WHERE doesn't match —
+  // either the tag doesn't exist or it's already approved. Both
+  // mean "nothing to approve" from the staff's POV.
+  const updateValues: {
+    pendingReview: boolean;
+    name?: string;
+    tagline?: string | null;
+  } = { pendingReview: false };
+  if (parsed.data.name !== undefined) updateValues.name = parsed.data.name;
+  if (parsed.data.tagline !== undefined) {
+    updateValues.tagline = parsed.data.tagline;
+  }
+
+  const updated = await db
+    .update(tags)
+    .set(updateValues)
+    .where(and(eq(tags.slug, parsed.data.slug), eq(tags.pendingReview, true)))
+    .returning({ slug: tags.slug });
+
+  if (updated.length === 0) {
+    return err(`Pending tag "${parsed.data.slug}" not found.`);
+  }
+
+  await logTagAction(
+    staffId,
+    "tag_create",
+    `approved-pending slug=${parsed.data.slug}`,
+  );
+  // Drop the moderator's cached vocab so Ada sees the newly-public
+  // tag immediately. Without this, up to 60s of submissions would
+  // still be tagged with is_new=true on this same slug, creating
+  // duplicate pending-tag noise for staff to re-approve.
+  clearTagVocabCache();
+  revalidateTagSurfaces([parsed.data.slug]);
+  return ok(`Approved tag "${parsed.data.slug}".`);
+}
+
+/**
+ * Reject a pending Ada-proposed tag (migration 0022). Deletes the
+ * tag row, which cascades through submission_tags via the existing
+ * FK (ON DELETE CASCADE). The submissions remain — they just lose
+ * this single tag association.
+ */
+const rejectPendingInput = z.object({ slug: slugSchema });
+
+export async function rejectPendingTag(
+  _prev: TagActionState,
+  formData: FormData,
+): Promise<TagActionState> {
+  const staffId = await requireStaffId();
+  if (!staffId) return err("Not authorized.");
+
+  const parsed = rejectPendingInput.safeParse({ slug: formData.get("slug") });
+  if (!parsed.success) return err("Invalid slug.");
+
+  // Only delete pending rows — guard against accidentally retiring
+  // an approved tag through this path. The retireTag action handles
+  // approved tags explicitly.
+  const removed = await db
+    .delete(tags)
+    .where(and(eq(tags.slug, parsed.data.slug), eq(tags.pendingReview, true)))
+    .returning({ slug: tags.slug });
+
+  if (removed.length === 0) {
+    return err(`Pending tag "${parsed.data.slug}" not found.`);
+  }
+
+  await logTagAction(
+    staffId,
+    "tag_retire",
+    `rejected-pending slug=${parsed.data.slug}`,
+  );
+  revalidateTagSurfaces([parsed.data.slug]);
+  return ok(`Rejected tag "${parsed.data.slug}".`);
 }

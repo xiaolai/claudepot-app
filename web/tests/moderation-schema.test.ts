@@ -36,10 +36,12 @@ test("parses a happy-path pass response", () => {
     category: null,
     confidence: "high",
     one_line_why: "Looks like a normal tutorial submission.",
+    tags: [],
   };
   const parsed = PolicyResponseSchema.parse(raw);
   assert.equal(parsed.verdict, "pass");
   assert.equal(parsed.category, null);
+  assert.deepEqual(parsed.tags, []);
 });
 
 test("parses a happy-path reject response", () => {
@@ -48,10 +50,55 @@ test("parses a happy-path reject response", () => {
     category: "spam",
     confidence: "high",
     one_line_why: "Promotional link with no surrounding discussion.",
+    tags: [],
   };
   const parsed = PolicyResponseSchema.parse(raw);
   assert.equal(parsed.verdict, "reject");
   assert.equal(parsed.category, "spam");
+});
+
+test("parses Ada-proposed tags on a pass response", () => {
+  const raw = {
+    verdict: "pass",
+    category: null,
+    confidence: "high",
+    one_line_why: "Tutorial on retrieval-augmented agents.",
+    tags: [
+      { slug: "rag", is_new: false },
+      { slug: "ai-agents", is_new: true },
+    ],
+  };
+  const parsed = PolicyResponseSchema.parse(raw);
+  assert.equal(parsed.tags.length, 2);
+  assert.equal(parsed.tags[0].slug, "rag");
+  assert.equal(parsed.tags[0].is_new, false);
+  assert.equal(parsed.tags[1].is_new, true);
+});
+
+test("rejects more than 2 tags", () => {
+  const raw = {
+    verdict: "pass",
+    category: null,
+    confidence: "high",
+    one_line_why: "x",
+    tags: [
+      { slug: "a", is_new: false },
+      { slug: "b", is_new: false },
+      { slug: "c", is_new: false },
+    ],
+  };
+  assert.throws(() => PolicyResponseSchema.parse(raw));
+});
+
+test("rejects malformed tag slug", () => {
+  const raw = {
+    verdict: "pass",
+    category: null,
+    confidence: "high",
+    one_line_why: "x",
+    tags: [{ slug: "Invalid Slug!", is_new: true }],
+  };
+  assert.throws(() => PolicyResponseSchema.parse(raw));
 });
 
 test("rejects an unknown category", () => {
@@ -60,6 +107,7 @@ test("rejects an unknown category", () => {
     category: "self_harm",
     confidence: "high",
     one_line_why: "x",
+    tags: [],
   };
   assert.throws(() => PolicyResponseSchema.parse(raw));
 });
@@ -70,6 +118,7 @@ test("rejects an unknown verdict", () => {
     category: null,
     confidence: "high",
     one_line_why: "x",
+    tags: [],
   };
   assert.throws(() => PolicyResponseSchema.parse(raw));
 });
@@ -80,6 +129,7 @@ test("rejects a one_line_why over the length limit", () => {
     category: null,
     confidence: "high",
     one_line_why: "x".repeat(500),
+    tags: [],
   };
   assert.throws(() => PolicyResponseSchema.parse(raw));
 });
@@ -90,18 +140,18 @@ test("rejects an empty one_line_why", () => {
     category: null,
     confidence: "high",
     one_line_why: "",
+    tags: [],
   };
   assert.throws(() => PolicyResponseSchema.parse(raw));
 });
 
 test("reconcileCategory clears category when verdict is pass", () => {
-  // Some model outputs ship a leftover category on pass; we strip
-  // it server-side rather than persist a contradictory row.
   const parsed = PolicyResponseSchema.parse({
     verdict: "pass",
     category: "spam",
     confidence: "low",
     one_line_why: "borderline pass",
+    tags: [],
   });
   const out = reconcileCategory(parsed);
   assert.equal(out.category, null);
@@ -114,6 +164,7 @@ test("reconcileCategory throws when reject ships category=null", () => {
     category: null,
     confidence: "high",
     one_line_why: "x",
+    tags: [],
   });
   assert.throws(() => reconcileCategory(parsed));
 });

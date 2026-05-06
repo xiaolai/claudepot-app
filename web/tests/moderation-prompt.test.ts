@@ -7,8 +7,8 @@
  * versioned via POLICY_PROMPT_V. These tests lock invariants we
  * never want a casual edit to break:
  *
- *   1. The system prompt names the five categories exactly once
- *      each — drift in the taxonomy must be deliberate.
+ *   1. The system prompt names every category in POLICY_CATEGORIES
+ *      exactly once each — drift in the taxonomy must be deliberate.
  *   2. The user prompt includes both kind and body, and includes
  *      the title only when present.
  *   3. The JSON schema we send to OpenAI matches the categories
@@ -92,16 +92,21 @@ test("user prompt trims surrounding whitespace on title and body", () => {
   assert.match(prompt, /Body:\nspaced body/);
 });
 
-test("JSON schema lists exactly the five categories plus null", () => {
+test("JSON schema lists exactly POLICY_CATEGORIES plus null", () => {
   const props = POLICY_RESPONSE_JSON_SCHEMA.schema
     .properties as Record<string, unknown>;
   const cat = props.category as { enum: ReadonlyArray<string | null> };
-  // null + the five categories.
+  // null + every category in POLICY_CATEGORIES.
   assert.equal(cat.enum.length, POLICY_CATEGORIES.length + 1);
   for (const c of POLICY_CATEGORIES) {
     assert.ok(cat.enum.includes(c), `JSON schema missing category ${c}`);
   }
   assert.ok(cat.enum.includes(null), "JSON schema missing null category");
+  // Negative: the legacy off_topic value must not be in the v=2 enum.
+  assert.ok(
+    !cat.enum.includes("off_topic"),
+    "off_topic should be retired from v=2 schema",
+  );
 });
 
 test("JSON schema flags strict + additionalProperties=false", () => {
