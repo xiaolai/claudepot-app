@@ -40,6 +40,13 @@ export {
 export type { PolicyCategory, PolicyVerdict } from "./types";
 export { writePolicyDecision, writeModerationLogForReject } from "./persist";
 export { writeModerationNotification } from "./notify";
+export { getSystemUserId } from "./system-user";
+export {
+  listMyDecisions,
+  listMyDecisionsInputSchema,
+  type ListMyDecisionsInput,
+  type PolicyDecisionDto,
+} from "./me-decisions";
 
 function isEnabled(): boolean {
   const v = process.env.MODERATION_ENABLED;
