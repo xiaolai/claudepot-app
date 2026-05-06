@@ -23,7 +23,11 @@ export type ListMyDecisionsInput = z.infer<typeof listMyDecisionsInputSchema>;
 
 export interface PolicyDecisionDto {
   id: string;
-  targetType: "submission" | "comment";
+  // Includes 'user' as of migration 0019 — surfaces here for
+  // completeness even though policy_decisions itself only inserts
+  // 'submission' or 'comment' today. Future user-targeted decisions
+  // (e.g. account-level flags) can land without a DTO change.
+  targetType: "submission" | "comment" | "user";
   targetId: string | null;
   verdict: string;
   category: string | null;

@@ -20,6 +20,7 @@
     { "idx": 15, "version": "7", "when": 1777893444000, "tag": "0015_rename_shannon_user",   "breakpoints": true },
     { "idx": 16, "version": "7", "when": 1778066553000, "tag": "0016_api_token_event_scope_change", "breakpoints": true },
     { "idx": 17, "version": "7", "when": 1778067777000, "tag": "0017_content_updated_at",         "breakpoints": true },
-    { "idx": 18, "version": "7", "when": 1778169999000, "tag": "0018_policy_moderation",          "breakpoints": true }
+    { "idx": 18, "version": "7", "when": 1778169999000, "tag": "0018_policy_moderation",          "breakpoints": true },
+    { "idx": 19, "version": "7", "when": 1778199999000, "tag": "0019_policy_moderation_followups","breakpoints": true }
   ]
 }

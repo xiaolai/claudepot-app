@@ -60,14 +60,16 @@ export async function toggleBotModerationExempt(
       .set({ botModerationExempt: exempt })
       .where(eq(users.id, userId));
 
+    // Distinct enum values added in migration 0019 — /admin/log can
+    // now filter on the action discriminator without parsing the
+    // free-text note. Note still carries the target user id so the
+    // log row is self-describing.
     await tx.insert(moderationLog).values({
       staffId,
-      action: "approve",
-      targetType: null,
-      targetId: null,
-      note: exempt
-        ? `bot_exempt_grant:${userId}`
-        : `bot_exempt_revoke:${userId}`,
+      action: exempt ? "bot_exempt_grant" : "bot_exempt_revoke",
+      targetType: "user",
+      targetId: userId,
+      note: null,
     });
   });
 

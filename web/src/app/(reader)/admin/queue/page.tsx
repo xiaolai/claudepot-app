@@ -75,8 +75,17 @@ export default async function ModQueue({
           </thead>
           <tbody>
             {openFlags.map((f) => {
+              // 'user'-targeted flags (ban candidates from the policy
+              // moderator's rung 4) point at the user, not at content.
+              // Target link goes to the user's profile; the destructive
+              // action is lock_user, not delete.
+              const isUserTarget = f.targetType === "user";
               const targetHref =
-                f.targetType === "submission" ? `/post/${f.targetId}` : "#";
+                f.targetType === "submission"
+                  ? `/post/${f.targetId}`
+                  : isUserTarget
+                    ? `/u/${f.targetId}`
+                    : "#";
               return (
                 <tr key={f.id}>
                   <td>{relativeTime(f.createdAt.toISOString())}</td>
@@ -97,16 +106,28 @@ export default async function ModQueue({
                     >
                       Dismiss
                     </ModButton>
-                    <ModButton
-                      action="delete"
-                      targetType={f.targetType}
-                      targetId={f.targetId}
-                      flagId={f.id}
-                      className="proto-mod-btn proto-mod-btn-remove"
-                      pendingLabel="Removing…"
-                    >
-                      Remove target
-                    </ModButton>
+                    {f.targetType === "user" ? (
+                      <ModButton
+                        action="lock_user"
+                        targetId={f.targetId}
+                        flagId={f.id}
+                        className="proto-mod-btn proto-mod-btn-remove"
+                        pendingLabel="Suspending…"
+                      >
+                        Suspend user
+                      </ModButton>
+                    ) : (
+                      <ModButton
+                        action="delete"
+                        targetType={f.targetType}
+                        targetId={f.targetId}
+                        flagId={f.id}
+                        className="proto-mod-btn proto-mod-btn-remove"
+                        pendingLabel="Removing…"
+                      >
+                        Remove target
+                      </ModButton>
+                    )}
                   </td>
                 </tr>
               );

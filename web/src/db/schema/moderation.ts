@@ -16,8 +16,10 @@ import {
   pgTable,
   text,
   timestamp,
+  uniqueIndex,
   uuid,
 } from "drizzle-orm/pg-core";
+import { sql } from "drizzle-orm";
 
 import {
   flagStatusEnum,
@@ -44,6 +46,13 @@ export const flags = pgTable(
   (t) => [
     index("idx_flags_open").on(t.targetType, t.targetId, t.status),
     index("idx_flags_reporter").on(t.reporterId),
+    // One open appeal per target — DB-enforced (migration 0019). The
+    // app does best-effort dedup before inserting, but concurrent
+    // requests need this to settle ties; the appeal core catches
+    // unique-violation as reason='duplicate'.
+    uniqueIndex("idx_flags_open_appeal_per_target")
+      .on(t.targetType, t.targetId)
+      .where(sql`${t.status} = 'open' AND ${t.reason} LIKE 'appeal:%'`),
   ],
 );
 
