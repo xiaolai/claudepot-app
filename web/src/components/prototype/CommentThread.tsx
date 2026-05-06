@@ -11,7 +11,10 @@ async function CommentItem({ node }: { node: CommentNode }) {
 
   if (state === "rejected") {
     return (
-      <article className="proto-comment proto-comment-rejected">
+      <article
+        id={`comment-${node.id}`}
+        className="proto-comment proto-comment-rejected"
+      >
         <header className="proto-comment-meta">
           <span className="proto-state-pill proto-state-pill-rejected">
             <X size={12} aria-hidden /> Removed
@@ -28,6 +31,7 @@ async function CommentItem({ node }: { node: CommentNode }) {
 
   return (
     <article
+      id={`comment-${node.id}`}
       className={`proto-comment ${state === "pending" ? "proto-comment-pending" : ""}`}
     >
       {state === "pending" && (
