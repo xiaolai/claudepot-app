@@ -133,18 +133,53 @@ export async function submitAppealAsAuthor(
     return { ok: false, reason: "duplicate" };
   }
 
-  const [row] = await db
-    .insert(flags)
-    .values({
-      reporterId: authorId,
-      targetType: decision.targetType,
-      targetId: decision.targetId,
-      reason: `appeal: ${text}`.slice(0, 500),
-    })
-    .returning({ id: flags.id });
+  let row: { id: string } | undefined;
+  try {
+    [row] = await db
+      .insert(flags)
+      .values({
+        reporterId: authorId,
+        targetType: decision.targetType,
+        targetId: decision.targetId,
+        reason: `appeal: ${text}`.slice(0, 500),
+      })
+      .returning({ id: flags.id });
+  } catch (err) {
+    // Migration 0019 lays a partial unique index on (target_type,
+    // target_id) WHERE status='open' AND reason LIKE 'appeal:%'. A
+    // concurrent insert that lost the race lands here with a
+    // unique-violation; translate to reason='duplicate' so the
+    // caller maps to 409 / "already in queue".
+    if (isUniqueViolation(err)) {
+      return { ok: false, reason: "duplicate" };
+    }
+    throw err;
+  }
+  if (!row) {
+    // Defensive: insert succeeded but RETURNING produced no row. Treat
+    // as not_found so the caller surfaces a retryable error.
+    return { ok: false, reason: "not_found" };
+  }
 
   revalidatePath("/admin/queue");
   revalidatePath(`/appeal/${decisionId}`);
 
   return { ok: true, flagId: row.id };
+}
+
+// Postgres unique-violation is SQLSTATE 23505. The neon-http driver
+// surfaces it on err.code; the @neondatabase/serverless package
+// preserves the standard PG error fields. Catch loosely so a future
+// driver swap doesn't silently mask the constraint.
+function isUniqueViolation(err: unknown): boolean {
+  if (typeof err !== "object" || err === null) return false;
+  const e = err as { code?: unknown; message?: unknown };
+  if (e.code === "23505") return true;
+  if (
+    typeof e.message === "string" &&
+    e.message.includes("idx_flags_open_appeal_per_target")
+  ) {
+    return true;
+  }
+  return false;
 }

@@ -98,11 +98,19 @@ export const moderationActionEnum = pgEnum("moderation_action", [
   "tag_rename",
   "tag_merge",
   "tag_retire",
+  // Bot-exempt toggle on /admin/users — added in migration 0019 so
+  // grants and revokes can be filtered without parsing the note.
+  "bot_exempt_grant",
+  "bot_exempt_revoke",
 ]);
 
 export const targetTypeEnum = pgEnum("target_type", [
   "submission",
   "comment",
+  // User-level targets — added in migration 0019 so the policy
+  // moderator's ban-candidate flags can point at the user under
+  // review instead of a representative submission.
+  "user",
 ]);
 
 export const apiTokenEventEnum = pgEnum("api_token_event", [

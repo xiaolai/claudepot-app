@@ -144,25 +144,31 @@ export async function checkLadderRateLimit(
  * policy_decisions row has been written, so `recentRejects` reflects
  * the latest reject inclusive.
  *
- * Inserts a `flags` row tagged `ban_candidate:user=<authorId>:…` if:
+ * Inserts a `flags` row with target_type='user', target_id=authorId,
+ * reason='ban_candidate:trigger=<...>: <one_line>' if:
  *   1. The latest verdict's category is 'illegal' (any single
  *      illegal verdict triggers immediate review), OR
  *   2. The author has accumulated ≥ RUNG4_REJECT_TRIGGER rejects in
  *      the last RUNG4_WINDOW_DAYS days.
  *
- * Dedup'd by string-matching the reason prefix — at most one open
- * ban-candidate flag per user. The targetType/targetId on the flag
- * point at the latest rejected content; staff sees the flag in
- * /admin/queue alongside community flags. The system user
- * (policy-moderator) is the reporter, distinguishing AI-flagged
- * from user-reported content.
+ * Dedup'd by an open-flag check on (target_type='user', target_id);
+ * at most one open ban-candidate flag per user. The flag's
+ * target_type='user' (added in migration 0019) means /admin/queue's
+ * destructive actions point at the user under review, not at a
+ * representative submission. The system user (policy-moderator) is
+ * the reporter, distinguishing AI-flagged from user-reported content.
+ *
+ * The `targetType` / `targetId` arguments are the just-rejected
+ * content's coordinates — kept for API symmetry with checkBanCandidate's
+ * pre-0019 signature, but no longer used in the flag insert itself.
  */
 export async function checkBanCandidate(
   authorId: string,
   verdict: ModerationVerdict,
-  targetType: ModerationKind,
-  /** The just-rejected content's id. Required — the flag needs a target. */
-  targetId: string,
+  // Kept for backward-compat with callers in submissions/create.ts
+  // and comments/create.ts; not read.
+  _targetType: ModerationKind,
+  _targetId: string,
 ): Promise<void> {
   if (verdict.verdict !== "reject") return;
 
@@ -170,15 +176,18 @@ export async function checkBanCandidate(
   const rejects = await recentRejectsForAuthor(authorId, RUNG4_WINDOW_DAYS);
   if (!isIllegal && rejects < RUNG4_REJECT_TRIGGER) return;
 
-  const reasonPrefix = `ban_candidate:user=${authorId}:`;
-
+  // Dedup: one open ban-candidate flag per user. Open flags are
+  // resolved by staff via the existing /admin/queue dismiss path;
+  // until they are, additional rejects don't multiply the flag.
   const [existing] = await db
     .select({ id: flags.id })
     .from(flags)
     .where(
       and(
+        eq(flags.targetType, "user"),
+        eq(flags.targetId, authorId),
         eq(flags.status, "open"),
-        sql`${flags.reason} LIKE ${reasonPrefix + "%"}`,
+        sql`${flags.reason} LIKE 'ban_candidate:%'`,
       ),
     )
     .limit(1);
@@ -186,13 +195,13 @@ export async function checkBanCandidate(
 
   const trigger = isIllegal ? "illegal" : `rejects_${rejects}`;
   const reason =
-    `${reasonPrefix}trigger=${trigger}: ${verdict.oneLineWhy}`.slice(0, 500);
+    `ban_candidate:trigger=${trigger}: ${verdict.oneLineWhy}`.slice(0, 500);
 
   const systemUserId = await getSystemUserId();
   await db.insert(flags).values({
     reporterId: systemUserId,
-    targetType,
-    targetId,
+    targetType: "user",
+    targetId: authorId,
     reason,
   });
 }
