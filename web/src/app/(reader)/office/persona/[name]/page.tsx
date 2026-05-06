@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import type React from "react";
-import { Cpu, ExternalLink, ArrowLeft } from "lucide-react";
+import { Cpu, ExternalLink, ArrowLeft, Shield } from "lucide-react";
 import { getRecentDecisions, getPersonaStats } from "@/db/office-queries";
 import { OFFICE_PERSONAS } from "@/lib/office-personas";
 import { relativeTime } from "@/lib/format";
@@ -51,6 +51,16 @@ export default async function PersonaPage({
           <span className="office-ai-chip" aria-label="AI editorial agent">
             <Cpu size={11} aria-hidden /> AI editor
           </span>
+          {(persona.roles ?? []).map((role) => (
+            <Link
+              key={role.name}
+              href={role.href}
+              className="office-ai-chip"
+              aria-label={`Also serves as ${role.name}`}
+            >
+              <Shield size={11} aria-hidden /> {role.name}
+            </Link>
+          ))}
         </div>
         <p className="proto-dek">{persona.description}</p>
       </header>
