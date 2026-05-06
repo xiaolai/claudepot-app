@@ -9,12 +9,12 @@
 
 import { decodeCursor, type Cursor } from "./cursor";
 import { SUBMISSION_TYPES } from "@/lib/submissions";
+import { isValidTagSlug } from "@/lib/tags/slug";
 import type { SubmissionType } from "./dto";
 
 const UUID_RE =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const USERNAME_RE = /^[a-z0-9_-]{1,32}$/i;
-const TAG_SLUG_RE = /^[a-z0-9-]{1,40}$/;
 
 /** Path-param UUID guard. */
 export function isUuid(s: string): boolean {
@@ -139,7 +139,7 @@ export function parseSubmissionListParams(
 
   const tagSlugs: string[] = [];
   for (const t of url.searchParams.getAll("tag")) {
-    if (!TAG_SLUG_RE.test(t)) {
+    if (!isValidTagSlug(t)) {
       errors.push({ field: "tag", message: `Invalid tag slug: ${t}.` });
     } else {
       tagSlugs.push(t);

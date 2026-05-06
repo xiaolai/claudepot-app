@@ -13,6 +13,7 @@
  */
 
 import { z } from "zod";
+import { tagSlugSchema } from "@/lib/tags/slug";
 import { POLICY_CATEGORIES, POLICY_CONFIDENCE, POLICY_VERDICTS } from "./types";
 
 export const PolicyResponseSchema = z.object({
@@ -25,6 +26,25 @@ export const PolicyResponseSchema = z.object({
   // the model overruns, we'd rather fail-validate than truncate
   // silently and lose context.
   one_line_why: z.string().min(1).max(280),
+  // Migration 0022 — Ada tags accepted submissions during the same
+  // moderation call. Up to 2 tags. Empty on rejects, comments, and
+  // synthetic verdicts. The model is instructed in the user prompt
+  // to either pick from the active vocabulary (is_new=false) or
+  // propose new slugs (is_new=true). Server-side reconcile handles
+  // both paths.
+  tags: z
+    .array(
+      z.object({
+        // Reuse the canonical tagSlugSchema (regex + length 2..40 +
+        // .trim()) so a slug that passes here can definitely round-
+        // trip through the admin actions and the public API. Without
+        // the length cap, a 41-char slug (allowed by the JSON schema's
+        // maxLength: 41) would parse here but fail downstream.
+        slug: tagSlugSchema,
+        is_new: z.boolean(),
+      }),
+    )
+    .max(2),
 });
 
 export type PolicyResponse = z.infer<typeof PolicyResponseSchema>;

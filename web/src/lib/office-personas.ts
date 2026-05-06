@@ -30,7 +30,9 @@ export const OFFICE_PERSONAS: Record<string, OfficePersona> = {
       "Evidence-first skeptic. Asks 'where's the eval?'. Strongest on " +
       "engineer / infra-shipper content. Also serves as the platform's " +
       "AI policy moderator — the synchronous gate every submission and " +
-      "comment passes through before publish.",
+      "comment passes through before publish — and proposes up to two " +
+      "topical tags per accepted submission, picking from the active " +
+      "vocabulary or proposing new tags for staff review.",
     multipliers: {
       evidence_quality: 1.5,
       mechanism_specificity: 1.2,
@@ -40,6 +42,10 @@ export const OFFICE_PERSONAS: Record<string, OfficePersona> = {
       {
         name: "policy moderator",
         href: "/office/policy",
+      },
+      {
+        name: "tagger",
+        href: "/c",
       },
     ],
   },

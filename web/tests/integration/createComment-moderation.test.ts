@@ -82,6 +82,7 @@ function passVerdict(): ModerationVerdict {
     modelId: POLICY_MODEL,
     promptVersion: POLICY_PROMPT_V,
     costUsd: 0.0001,
+    tags: [],
   };
 }
 
@@ -96,6 +97,7 @@ function rejectSpamVerdict(): ModerationVerdict {
     modelId: POLICY_MODEL,
     promptVersion: POLICY_PROMPT_V,
     costUsd: 0.0001,
+    tags: [],
   };
 }
 
@@ -110,6 +112,7 @@ function illegalVerdict(): ModerationVerdict {
     modelId: POLICY_MODEL,
     promptVersion: POLICY_PROMPT_V,
     costUsd: 0.0001,
+    tags: [],
   };
 }
 
@@ -124,6 +127,7 @@ function syntheticErrorVerdict(): ModerationVerdict {
     modelId: POLICY_MODEL,
     promptVersion: POLICY_PROMPT_V,
     costUsd: null,
+    tags: [],
   };
 }
 
