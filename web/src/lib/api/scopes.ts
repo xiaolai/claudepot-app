@@ -20,6 +20,10 @@ export const SCOPES = [
   "vote:write",
   "save:write",
   "read:all",
+  // Per-noun read scope. NOT covered by read:all because notifications
+  // are private per-recipient, not the public feed/comment surface
+  // read:all unlocks. Mark-read is folded in (consume == read).
+  "notification:read",
 ] as const;
 
 export type Scope = (typeof SCOPES)[number];
@@ -47,4 +51,5 @@ export const SCOPE_LABELS: Record<Scope, string> = {
   "vote:write": "Cast upvotes and downvotes",
   "save:write": "Save (bookmark) submissions",
   "read:all": "Read feed, submissions, and comments",
+  "notification:read": "Read and dismiss your own notifications",
 };

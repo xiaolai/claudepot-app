@@ -40,6 +40,13 @@ import {
   updateSubmissionAsAuthor,
   updateSubmissionInputSchema,
 } from "@/lib/submissions";
+import {
+  listNotificationsForUser,
+  listNotificationsInputSchema,
+  markNotificationsReadForUser,
+  markReadInputSchema,
+  NOTIFICATION_KINDS,
+} from "@/lib/notifications";
 import { castVote, saveInputSchema, setSave, voteInputSchema } from "@/lib/votes";
 import type { ClaudepotAuthExtra } from "./auth";
 
@@ -687,6 +694,136 @@ export function registerTools(server: McpServer): void {
       return textResult(
         `${parsed.data.saved ? "Saved" : "Unsaved"} submission ${parsed.data.submissionId}.`,
       );
+    },
+  );
+
+  /* ── list_notifications ────────────────────────────────────────
+   *
+   * Read the calling user's inbox. Maps 1:1 to GET /api/v1/notifications.
+   * Filters: unreadOnly, since (ISO8601), limit, kinds[]. Always
+   * reports unreadCount over the FULL inbox so polling clients can
+   * decide whether to keep polling. Charged against the daily reads
+   * bucket. Requires the notification:read scope.
+   */
+
+  server.registerTool(
+    "list_notifications",
+    {
+      title: "List your notifications",
+      description:
+        "Returns the calling user's notifications, newest first. " +
+        "Use `since` to do incremental polling — pass back the highest " +
+        "createdAt you've seen and you'll only get newer items. " +
+        "`unreadCount` is the inbox-wide unread total, independent of " +
+        "your filter. Requires the notification:read scope.",
+      inputSchema: {
+        unreadOnly: z
+          .boolean()
+          .optional()
+          .describe("If true, return only unread items (readAt IS NULL)."),
+        since: z
+          .iso
+          .datetime()
+          .optional()
+          .describe(
+            "ISO 8601 timestamp; only items with createdAt >= since are returned.",
+          ),
+        limit: z
+          .number()
+          .int()
+          .min(1)
+          .max(200)
+          .optional()
+          .describe("Max items to return (default 50, max 200)."),
+        kinds: z
+          .array(z.enum(NOTIFICATION_KINDS))
+          .max(NOTIFICATION_KINDS.length)
+          .optional()
+          .describe(
+            "Filter to specific kinds: comment_reply, submission_reply, moderation, mention.",
+          ),
+      },
+    },
+    async (args, extra) => {
+      const auth = getAuthExtra(extra);
+      if (!auth) return textResult("Unauthorized.", true);
+
+      if (!hasScope(extra, "notification:read")) {
+        return textResult(
+          "Forbidden: this token is missing the notification:read scope.",
+          true,
+        );
+      }
+
+      const parsed = listNotificationsInputSchema.safeParse(args);
+      if (!parsed.success) {
+        return textResult(
+          `Validation failed: ${formatZodIssues(parsed.error)}`,
+          true,
+        );
+      }
+
+      const limited = await enforceRateLimit(auth.tokenId, "reads");
+      if (limited) return limited;
+
+      const result = await listNotificationsForUser(auth.userId, parsed.data);
+      return textResult(JSON.stringify(result, null, 2));
+    },
+  );
+
+  /* ── mark_notifications_read ──────────────────────────────────
+   *
+   * Pass `ids` to mark specific notifications, or `all: true` to
+   * mark every unread row for the calling user. Idempotent —
+   * already-read rows aren't double-counted; `updated` is the
+   * number that flipped on this call. Maps 1:1 to POST
+   * /api/v1/notifications/mark-read.
+   */
+
+  server.registerTool(
+    "mark_notifications_read",
+    {
+      title: "Mark notifications as read",
+      description:
+        "Marks notifications as read for the calling user. Pass " +
+        "`ids` to mark specific items, or `all: true` to mark every " +
+        "unread item. Idempotent. Requires the notification:read scope.",
+      inputSchema: {
+        ids: z
+          .array(z.uuid())
+          .max(500)
+          .optional()
+          .describe("UUIDs of notifications to mark read (max 500 per call)."),
+        all: z
+          .boolean()
+          .optional()
+          .describe("If true, mark every unread notification for this user."),
+      },
+    },
+    async (args, extra) => {
+      const auth = getAuthExtra(extra);
+      if (!auth) return textResult("Unauthorized.", true);
+
+      if (!hasScope(extra, "notification:read")) {
+        return textResult(
+          "Forbidden: this token is missing the notification:read scope.",
+          true,
+        );
+      }
+
+      const parsed = markReadInputSchema.safeParse(args);
+      if (!parsed.success) {
+        return textResult(
+          `Validation failed: ${formatZodIssues(parsed.error)}`,
+          true,
+        );
+      }
+
+      const limited = await enforceRateLimit(auth.tokenId, "reads");
+      if (limited) return limited;
+
+      const result = await markNotificationsReadForUser(auth.userId, parsed.data);
+      return textResult(`Marked ${result.updated} notification(s) as read.`);
     },
   );
 
