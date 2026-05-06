@@ -26,6 +26,7 @@ import { db } from "@/db/client";
 import { policyDecisions } from "@/db/schema";
 import { callPolicyModel } from "./openai";
 import { isExemptFromModeration } from "./exempt";
+import { getActiveSystemPrompt } from "./prompt-store";
 import {
   POLICY_MODEL,
   POLICY_PROMPT_V,
@@ -203,7 +204,14 @@ export async function moderate(
   }
 
   try {
-    const { response, costUsd } = await callPolicyModel(content);
+    // Resolve the active system prompt (DB-backed via migration 0021;
+    // falls back to the FALLBACK_SYSTEM_PROMPT constant when no row
+    // is active). The version stamps every policy_decisions row so
+    // /admin/log drill-down can correlate verdict drift with prompt
+    // changes — and so a /office/policy/ aggregate can chart accept
+    // rates per prompt version.
+    const { systemPrompt, version } = await getActiveSystemPrompt();
+    const { response, costUsd } = await callPolicyModel(content, systemPrompt);
     return {
       verdict: response.verdict,
       category: response.category,
@@ -212,7 +220,7 @@ export async function moderate(
       synthetic: false,
       syntheticReason: null,
       modelId: POLICY_MODEL,
-      promptVersion: POLICY_PROMPT_V,
+      promptVersion: version,
       costUsd,
     };
   } catch (err) {
