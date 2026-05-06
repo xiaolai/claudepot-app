@@ -18,17 +18,11 @@
  * can decide whether to keep polling even when their filtered slice
  * comes back empty.
  *
- * Charged against the `reads` daily bucket (10000/day default — large
- * enough for poll-every-minute bot loops).
- *
- * Requires the notification:read scope. NOT covered by read:all
- * because notifications are private per-recipient, not the public
- * surface read:all unlocks.
+ * Scope and bucket policy come from the manifest — `notification:read`,
+ * not `read:all`, because notifications are private per-recipient.
  */
 
-import { authenticate, requireScope } from "@/lib/api/auth";
-import { checkAndIncrement } from "@/lib/api/rate-limit";
-import { rateLimited, validation } from "@/lib/api/errors";
+import { validation } from "@/lib/api/errors";
 import { ok, preflight, problemResponse } from "@/lib/api/response";
 import {
   listNotificationsForUser,
@@ -36,17 +30,18 @@ import {
   NOTIFICATION_KINDS,
   type NotificationKind,
 } from "@/lib/notifications";
+import { endpointSpec } from "@/lib/api/manifest";
+import { chargeForSpec, checkAuthForSpec } from "@/lib/api/policy";
 
 export async function OPTIONS(): Promise<Response> {
   return preflight();
 }
 
 export async function GET(req: Request): Promise<Response> {
-  const auth = await authenticate(req);
-  if (!auth.ok) return problemResponse(auth.problem);
-
-  const denied = requireScope(auth.token, "notification:read");
-  if (denied) return problemResponse(denied.problem);
+  const SPEC = endpointSpec("notifications:list");
+  const policy = await checkAuthForSpec(req, SPEC);
+  if (!policy.ok) return policy.response;
+  const { auth } = policy;
 
   const url = new URL(req.url);
   const rawKinds = url.searchParams.getAll("kind");
@@ -85,15 +80,8 @@ export async function GET(req: Request): Promise<Response> {
     );
   }
 
-  const limit = await checkAndIncrement(auth.token.id, "reads");
-  if (!limit.ok) {
-    return problemResponse(
-      rateLimited(
-        `Daily read limit (${limit.limit}) exceeded for this token.`,
-        limit.resetAt,
-      ),
-    );
-  }
+  const charge = await chargeForSpec(SPEC, auth.token.id);
+  if (!charge.ok) return charge.response;
 
   const result = await listNotificationsForUser(auth.user.id, parsed.data);
   return ok(result);

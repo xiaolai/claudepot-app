@@ -50,6 +50,59 @@ export const SCOPE_LABELS: Record<Scope, string> = {
   "comment:delete": "Delete own comments",
   "vote:write": "Cast upvotes and downvotes",
   "save:write": "Save (bookmark) submissions",
-  "read:all": "Read feed, submissions, and comments",
+  "read:all":
+    "Read feeds, profiles, tags, search, and your own scoring decisions",
   "notification:read": "Read and dismiss your own notifications",
 };
+
+/**
+ * Display grouping for the mint UI. Reads first because the
+ * dominant first token shape is a read-only observer; writes
+ * grouped by noun so the picker can scan by intent.
+ *
+ * The order here is the order that ships to the form. Adding a new
+ * scope requires landing it in both SCOPES (above) and one group
+ * here — a TS exhaustiveness check at module load asserts every
+ * scope appears exactly once.
+ */
+export const SCOPE_GROUPS: ReadonlyArray<{
+  readonly label: string;
+  readonly scopes: ReadonlyArray<Scope>;
+}> = [
+  {
+    label: "Reads",
+    scopes: ["read:all", "notification:read"],
+  },
+  {
+    label: "Submission writes",
+    scopes: ["submission:write", "submission:update", "submission:delete"],
+  },
+  {
+    label: "Comment writes",
+    scopes: ["comment:write", "comment:update", "comment:delete"],
+  },
+  {
+    label: "Engagement",
+    scopes: ["vote:write", "save:write"],
+  },
+];
+
+// Module-load exhaustiveness check — any scope missing from the
+// groups (or duplicated) throws at startup so the form can't
+// silently drop a newly-added scope from the picker.
+(() => {
+  const seen = new Set<Scope>();
+  for (const g of SCOPE_GROUPS) {
+    for (const s of g.scopes) {
+      if (seen.has(s)) {
+        throw new Error(`SCOPE_GROUPS: duplicate scope "${s}".`);
+      }
+      seen.add(s);
+    }
+  }
+  for (const s of SCOPES) {
+    if (!seen.has(s)) {
+      throw new Error(`SCOPE_GROUPS: missing scope "${s}".`);
+    }
+  }
+})();

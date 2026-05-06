@@ -1,37 +1,87 @@
 /**
- * POST /api/v1/submissions — create a submission via PAT.
+ * /api/v1/submissions
  *
- * Mirrors the web UI's submitPost server action but takes the author
- * identity from a Bearer-token-authenticated request instead of a
- * cookie session. The resulting row is marked submitterKind='scout'
- * with sourceId=token.displayPrefix so admins can trace the
- * submission back to the token that minted it.
+ *   GET  — list approved submissions (cursor-paginated, filterable).
+ *   POST — create a submission via PAT. Mirrors the web UI's
+ *          submitPost server action; the resulting row is marked
+ *          submitterKind='scout' with sourceId=token.id so admins
+ *          can trace the submission back to the token that minted it.
+ *
+ * Scope and rate-limit policy are declared in lib/api/manifest.ts
+ * and consumed via endpointSpec() — string literals for scope/bucket
+ * are deliberately absent from this file.
  */
 
-import { authenticate, requireScope } from "@/lib/api/auth";
-import { checkAndIncrement } from "@/lib/api/rate-limit";
-import { rateLimited, validation } from "@/lib/api/errors";
+import { validation } from "@/lib/api/errors";
 import { created, ok, preflight, problemResponse } from "@/lib/api/response";
 import {
   createSubmission,
   submissionInputSchema,
 } from "@/lib/submissions";
+import { parseSubmissionListParams } from "@/lib/api/inputs";
+import { listSubmissions } from "@/lib/api/queries";
+import { clampPageLimit } from "@/lib/api/cursor";
+import { endpointSpec } from "@/lib/api/manifest";
+import {
+  chargeForSpec,
+  checkAuthForSpec,
+  isStaffAuth,
+} from "@/lib/api/policy";
 
 export async function OPTIONS(): Promise<Response> {
   return preflight();
 }
 
+export async function GET(req: Request): Promise<Response> {
+  const SPEC = endpointSpec("submissions:list");
+  const policy = await checkAuthForSpec(req, SPEC);
+  if (!policy.ok) return policy.response;
+  const { auth } = policy;
+
+  const parsed = parseSubmissionListParams(new URL(req.url));
+  if (!parsed.ok) {
+    return problemResponse(
+      validation("Query validation failed.", parsed.errors),
+    );
+  }
+
+  const charge = await chargeForSpec(SPEC, auth.token.id);
+  if (!charge.ok) return charge.response;
+
+  // Citizens cannot see pending content. The route silently clamps
+  // — the PRD calls this out explicitly so a forward-looking client
+  // doesn't break when the param shows up in docs.
+  const viewerIsStaff = isStaffAuth(auth);
+  const effectiveState =
+    parsed.value.state === "pending" && !viewerIsStaff
+      ? "approved"
+      : parsed.value.state;
+
+  const page = await listSubmissions({
+    viewerId: auth.user.id,
+    sort: parsed.value.sort,
+    cursor: parsed.value.cursor,
+    limit: clampPageLimit(parsed.value.limit),
+    since: parsed.value.since,
+    types: parsed.value.types,
+    tagSlugs: parsed.value.tagSlugs,
+    authorUsername: parsed.value.authorUsername,
+    state: effectiveState,
+  });
+
+  return ok(page);
+}
+
 export async function POST(req: Request): Promise<Response> {
-  const auth = await authenticate(req);
-  if (!auth.ok) return problemResponse(auth.problem);
+  const SPEC = endpointSpec("submissions:create");
+  const policy = await checkAuthForSpec(req, SPEC);
+  if (!policy.ok) return policy.response;
+  const { auth } = policy;
 
-  const denied = requireScope(auth.token, "submission:write");
-  if (denied) return problemResponse(denied.problem);
-
-  // Parse + validate the body BEFORE incrementing the rate-limit bucket.
-  // Otherwise malformed/invalid requests consume daily quota even though
-  // they can never produce a submission — letting buggy clients DoS
-  // themselves out of their own write budget.
+  // Parse + validate BEFORE incrementing the rate-limit bucket.
+  // Malformed/invalid requests must not consume daily quota — that
+  // would let buggy clients DoS themselves out of their own write
+  // budget.
   let body: unknown;
   try {
     body = await req.json();
@@ -52,15 +102,8 @@ export async function POST(req: Request): Promise<Response> {
     );
   }
 
-  const limit = await checkAndIncrement(auth.token.id, "submissions");
-  if (!limit.ok) {
-    return problemResponse(
-      rateLimited(
-        `Daily submission limit (${limit.limit}) exceeded for this token.`,
-        limit.resetAt,
-      ),
-    );
-  }
+  const charge = await chargeForSpec(SPEC, auth.token.id);
+  if (!charge.ok) return charge.response;
 
   const result = await createSubmission(auth.user.id, parsed.data, {
     surface: "api",

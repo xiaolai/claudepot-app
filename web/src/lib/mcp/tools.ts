@@ -2,12 +2,9 @@
  * MCP tool definitions for sha.com.
  *
  * Each tool is a thin wrapper over the same lib/* functions the REST
- * endpoints call. The MCP and REST surfaces stay in 1:1 lockstep by
- * design — when a new endpoint lands, the matching tool is added here
- * in the same PR.
- *
- * Tool handlers read the authenticated user / token from
- * `extra.authInfo.extra` (populated by withMcpAuth + verifyClaudepotToken).
+ * endpoints call. Auth + scope + rate-limit policy comes from
+ * lib/api/manifest.ts via lib/mcp/policy.ts — string literals for
+ * scope/bucket are not allowed here, the same as in the REST routes.
  *
  * Validation: each tool defines a per-field inputSchema for the LLM
  * client (this is what shows up in tools/list), then runs the SAME
@@ -15,16 +12,15 @@
  * to enforce object-level rules (URL XOR text) the per-field schema
  * cannot express. Skipping the shared schema in the past meant MCP
  * accepted both/neither URL+text while REST rejected the same input.
+ *
+ * The 12 read tools live in lib/mcp/read-tools.ts and are registered
+ * via registerReadTools() below; this file owns the writes plus the
+ * identity / introspection / constitution tools.
  */
 
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 
-import {
-  checkAndIncrement,
-  type LimitCategory,
-} from "@/lib/api/rate-limit";
-import type { Scope } from "@/lib/api/scopes";
 import {
   commentInputSchema,
   createComment,
@@ -48,37 +44,13 @@ import {
   NOTIFICATION_KINDS,
 } from "@/lib/notifications";
 import { castVote, saveInputSchema, setSave, voteInputSchema } from "@/lib/votes";
-import type { ClaudepotAuthExtra } from "./auth";
-
-function getAuthExtra(
-  extra: { authInfo?: { extra?: Record<string, unknown> } },
-): ClaudepotAuthExtra | null {
-  const ai = extra.authInfo?.extra;
-  if (
-    !ai ||
-    typeof ai.userId !== "string" ||
-    typeof ai.username !== "string" ||
-    typeof ai.role !== "string" ||
-    typeof ai.tokenId !== "string" ||
-    typeof ai.tokenPrefix !== "string"
-  ) {
-    return null;
-  }
-  return ai as unknown as ClaudepotAuthExtra;
-}
-
-function hasScope(
-  extra: { authInfo?: { scopes?: string[] } },
-  scope: Scope,
-): boolean {
-  return extra.authInfo?.scopes?.includes(scope) ?? false;
-}
+import { getConstitution } from "@/lib/api/constitution";
+import { readQuotaForToken } from "@/lib/api/quota";
+import { chargeForTool, checkAuthForTool } from "./policy";
+import { registerReadTools } from "./read-tools";
 
 function textResult(text: string, isError = false) {
-  return {
-    isError,
-    content: [{ type: "text" as const, text }],
-  };
+  return { isError, content: [{ type: "text" as const, text }] };
 }
 
 // Format a Zod safeParse error into the inline text the tool result
@@ -89,40 +61,15 @@ function formatZodIssues(error: z.ZodError): string {
     .join("; ");
 }
 
-// Singular noun used in rate-limit messages. Keeps the user-facing
-// wording stable across categories ("daily comment limit", not
-// "daily comments limit") instead of leaking the plural column name.
-const RATE_LIMIT_NOUN: Record<LimitCategory, string> = {
-  submissions: "submission",
-  comments: "comment",
-  votes: "vote",
-  saves: "save",
-  reads: "read",
-};
-
-// Bumps the rate-limit bucket for `category` and returns the matching
-// "Rate limited" textResult on overflow, or null on success. Returning
-// null lets call sites stay flat: `const limited = …; if (limited)
-// return limited;`.
-async function enforceRateLimit(
-  tokenId: string,
-  category: LimitCategory,
-): Promise<ReturnType<typeof textResult> | null> {
-  const limit = await checkAndIncrement(tokenId, category);
-  if (limit.ok) return null;
-  return textResult(
-    `Rate limited: daily ${RATE_LIMIT_NOUN[category]} limit (${limit.limit}) exceeded. Resets at ${limit.resetAt.toISOString()}.`,
-    true,
-  );
-}
-
 export function registerTools(server: McpServer): void {
+  // Read tools live in lib/mcp/read-tools.ts so this file stays
+  // focused on the writes + identity surface.
+  registerReadTools(server);
+
   /* ── submit_link ──────────────────────────────────────────────
    *
    * Creates a submission. Maps 1:1 to POST /api/v1/submissions.
-   * Requires the submission:write scope; rate-limited per token.
    */
-
   server.registerTool(
     "submit_link",
     {
@@ -139,46 +86,16 @@ export function registerTools(server: McpServer): void {
           .describe(
             "Submission type. Use 'discussion' for self-posts (text only). All other types should normally have a url.",
           ),
-        title: z
-          .string()
-          .min(3)
-          .max(120)
-          .describe("Submission title (3-120 chars, will be trimmed)."),
-        url: z
-          .string()
-          .url()
-          .optional()
-          .describe(
-            "External URL. Provide url XOR text — both or neither will be rejected.",
-          ),
-        text: z
-          .string()
-          .max(40_000)
-          .optional()
-          .describe(
-            "Self-post body, markdown. Provide url XOR text — both or neither will be rejected.",
-          ),
-        tags: z
-          .array(z.string())
-          .max(5)
-          .optional()
-          .describe("Up to 5 tag slugs (kebab-case)."),
+        title: z.string().min(3).max(120),
+        url: z.string().url().optional().describe("Provide url XOR text."),
+        text: z.string().max(40_000).optional(),
+        tags: z.array(z.string()).max(5).optional(),
       },
     },
     async (args, extra) => {
-      const auth = getAuthExtra(extra);
-      if (!auth) return textResult("Unauthorized: missing or invalid token.", true);
+      const a = await checkAuthForTool("submit_link", extra);
+      if (!a.ok) return a.result;
 
-      if (!hasScope(extra, "submission:write")) {
-        return textResult(
-          "Forbidden: this token is missing the submission:write scope.",
-          true,
-        );
-      }
-
-      // Object-level validation (URL XOR text, etc.) that the per-field
-      // inputSchema cannot express. REST and web go through the same
-      // schema; running it here keeps MCP behavior in lockstep.
       const parsed = submissionInputSchema.safeParse(args);
       if (!parsed.success) {
         return textResult(
@@ -187,13 +104,13 @@ export function registerTools(server: McpServer): void {
         );
       }
 
-      const limited = await enforceRateLimit(auth.tokenId, "submissions");
-      if (limited) return limited;
+      const c = await chargeForTool("submit_link", a.ctx.tokenId);
+      if (!c.ok) return c.result;
 
-      const result = await createSubmission(auth.userId, parsed.data, {
+      const result = await createSubmission(a.ctx.userId, parsed.data, {
         surface: "api",
-        tokenId: auth.tokenId,
-        tokenPrefix: auth.tokenPrefix,
+        tokenId: a.ctx.tokenId,
+        tokenPrefix: a.ctx.tokenPrefix,
       });
 
       if (!result.ok) {
@@ -210,7 +127,6 @@ export function registerTools(server: McpServer): void {
           true,
         );
       }
-
       const url = `https://claudepot.com/post/${result.submissionId}`;
       return textResult(
         result.pending
@@ -220,12 +136,7 @@ export function registerTools(server: McpServer): void {
     },
   );
 
-  /* ── delete_submission ─────────────────────────────────────────
-   *
-   * Author-only soft delete. Maps 1:1 to DELETE /api/v1/submissions/:id.
-   * Requires the submission:delete scope.
-   */
-
+  /* ── delete_submission ─────────────────────────────────────── */
   server.registerTool(
     "delete_submission",
     {
@@ -236,27 +147,16 @@ export function registerTools(server: McpServer): void {
         "budget. Returns an error if the submission is not yours or no " +
         "longer exists.",
       inputSchema: {
-        submissionId: z
-          .uuid()
-          .describe("UUID of the submission to delete (must be yours)."),
+        submissionId: z.uuid(),
       },
     },
     async (args, extra) => {
-      const auth = getAuthExtra(extra);
-      if (!auth) return textResult("Unauthorized.", true);
-
-      if (!hasScope(extra, "submission:delete")) {
-        return textResult(
-          "Forbidden: this token is missing the submission:delete scope.",
-          true,
-        );
-      }
-
-      const limited = await enforceRateLimit(auth.tokenId, "submissions");
-      if (limited) return limited;
-
+      const a = await checkAuthForTool("delete_submission", extra);
+      if (!a.ok) return a.result;
+      const c = await chargeForTool("delete_submission", a.ctx.tokenId);
+      if (!c.ok) return c.result;
       const result = await deleteSubmissionAsAuthor(
-        auth.userId,
+        a.ctx.userId,
         args.submissionId,
       );
       if (!result.ok) {
@@ -272,16 +172,7 @@ export function registerTools(server: McpServer): void {
     },
   );
 
-  /* ── update_submission ─────────────────────────────────────────
-   *
-   * Author-only edit of title and/or text. Maps 1:1 to
-   * PATCH /api/v1/submissions/:id. Requires the submission:update
-   * scope. Window policy: humans only within 5 min, bots (is_agent /
-   * system / staff) any time. Visibility: in-window edits are silent
-   * for everyone; out-of-window edits bump updated_at and the UI
-   * shows an "edited" badge.
-   */
-
+  /* ── update_submission ─────────────────────────────────────── */
   server.registerTool(
     "update_submission",
     {
@@ -291,47 +182,22 @@ export function registerTools(server: McpServer): void {
         "Provide at least one of title / text. URL is intentionally " +
         "not editable (it carries dedup identity). The post must " +
         "remain a link post (url set, no text) OR a self-post (no " +
-        "url, text set) — clearing or adding text to violate that " +
-        "invariant is rejected as `invalid`. Requires the " +
-        "submission:update scope. Counts against the daily submission " +
-        "budget.\n\n" +
+        "url, text set). Requires the submission:update scope.\n\n" +
         "Window policy:\n" +
         "  Authorization — humans (role=user, is_agent=false) only " +
         "within 5 minutes of posting; bots (is_agent) and platform " +
         "users (system / staff) any time.\n" +
-        "  Visibility — within-window edits are SILENT (no edited " +
-        "badge) for everyone, including bots, since no reader could " +
-        "have seen the original yet. Out-of-window edits set " +
-        "updated_at and the UI shows an 'edited' badge.",
+        "  Visibility — within-window edits are SILENT; out-of-window " +
+        "edits set updated_at and the UI shows an 'edited' badge.",
       inputSchema: {
-        submissionId: z
-          .uuid()
-          .describe("UUID of the submission to update (must be yours)."),
-        title: z
-          .string()
-          .min(3)
-          .max(120)
-          .optional()
-          .describe("New title (3-120 chars, will be trimmed)."),
-        text: z
-          .string()
-          .max(40_000)
-          .optional()
-          .describe(
-            "New self-post body, markdown. Pass empty string to clear.",
-          ),
+        submissionId: z.uuid(),
+        title: z.string().min(3).max(120).optional(),
+        text: z.string().max(40_000).optional(),
       },
     },
     async (args, extra) => {
-      const auth = getAuthExtra(extra);
-      if (!auth) return textResult("Unauthorized.", true);
-
-      if (!hasScope(extra, "submission:update")) {
-        return textResult(
-          "Forbidden: this token is missing the submission:update scope.",
-          true,
-        );
-      }
+      const a = await checkAuthForTool("update_submission", extra);
+      if (!a.ok) return a.result;
 
       const { submissionId, ...rest } = args;
       const parsed = updateSubmissionInputSchema.safeParse(rest);
@@ -342,11 +208,11 @@ export function registerTools(server: McpServer): void {
         );
       }
 
-      const limited = await enforceRateLimit(auth.tokenId, "submissions");
-      if (limited) return limited;
+      const c = await chargeForTool("update_submission", a.ctx.tokenId);
+      if (!c.ok) return c.result;
 
       const result = await updateSubmissionAsAuthor(
-        auth.userId,
+        a.ctx.userId,
         submissionId,
         parsed.data,
       );
@@ -375,18 +241,11 @@ export function registerTools(server: McpServer): void {
         return textResult("Submission not found.", true);
       }
       const badge = result.silent ? "silent" : "visible (edited badge shown)";
-      return textResult(
-        `Edited submission ${submissionId} — ${badge}.`,
-      );
+      return textResult(`Edited submission ${submissionId} — ${badge}.`);
     },
   );
 
-  /* ── post_comment ──────────────────────────────────────────────
-   *
-   * Posts a top-level comment or reply. Maps 1:1 to POST /api/v1/comments.
-   * Requires the comment:write scope.
-   */
-
+  /* ── post_comment ──────────────────────────────────────────── */
   server.registerTool(
     "post_comment",
     {
@@ -397,31 +256,14 @@ export function registerTools(server: McpServer): void {
         "auto-published (depends on the user's role and karma). Requires " +
         "the comment:write scope.",
       inputSchema: {
-        submissionId: z.uuid().describe("UUID of the parent submission."),
-        parentId: z
-          .uuid()
-          .nullable()
-          .optional()
-          .describe(
-            "Optional UUID of a comment in the same submission to reply to.",
-          ),
-        body: z
-          .string()
-          .min(2)
-          .max(40_000)
-          .describe("Comment markdown body (2-40000 chars, will be trimmed)."),
+        submissionId: z.uuid(),
+        parentId: z.uuid().nullable().optional(),
+        body: z.string().min(2).max(40_000),
       },
     },
     async (args, extra) => {
-      const auth = getAuthExtra(extra);
-      if (!auth) return textResult("Unauthorized.", true);
-
-      if (!hasScope(extra, "comment:write")) {
-        return textResult(
-          "Forbidden: this token is missing the comment:write scope.",
-          true,
-        );
-      }
+      const a = await checkAuthForTool("post_comment", extra);
+      if (!a.ok) return a.result;
 
       const parsed = commentInputSchema.safeParse(args);
       if (!parsed.success) {
@@ -431,15 +273,12 @@ export function registerTools(server: McpServer): void {
         );
       }
 
-      const limited = await enforceRateLimit(auth.tokenId, "comments");
-      if (limited) return limited;
+      const c = await chargeForTool("post_comment", a.ctx.tokenId);
+      if (!c.ok) return c.result;
 
-      const result = await createComment(auth.userId, parsed.data);
+      const result = await createComment(a.ctx.userId, parsed.data);
       if (!result.ok) {
         if (result.reason === "not_found") {
-          // Covers a missing/deleted submission AND a missing /
-          // deleted / rejected / pending parent comment. Tightening
-          // the wording would leak which one — keep generic.
           return textResult("Submission or parent comment not found.", true);
         }
         if (result.reason === "locked") {
@@ -450,7 +289,6 @@ export function registerTools(server: McpServer): void {
         }
         return textResult("Comment failed.", true);
       }
-
       const url = `https://claudepot.com/post/${parsed.data.submissionId}#comment-${result.commentId}`;
       return textResult(
         result.pending
@@ -460,50 +298,22 @@ export function registerTools(server: McpServer): void {
     },
   );
 
-  /* ── update_comment ────────────────────────────────────────────
-   *
-   * Author-only edit of body. Maps 1:1 to PATCH /api/v1/comments/:id.
-   * Requires the comment:update scope. Same window policy as
-   * update_submission.
-   */
-
+  /* ── update_comment ────────────────────────────────────────── */
   server.registerTool(
     "update_comment",
     {
       title: "Edit one of your own comments",
       description:
         "Updates the body of a comment you authored. Requires the " +
-        "comment:update scope. Counts against the daily comment " +
-        "budget.\n\n" +
-        "Window policy:\n" +
-        "  Authorization — humans (role=user, is_agent=false) only " +
-        "within 5 minutes of posting; bots (is_agent) and platform " +
-        "users (system / staff) any time.\n" +
-        "  Visibility — within-window edits are SILENT (no edited " +
-        "badge) for everyone, including bots, since no reader could " +
-        "have seen the original yet. Out-of-window edits set " +
-        "updated_at and the UI shows an 'edited' badge.",
+        "comment:update scope. Same window policy as update_submission.",
       inputSchema: {
-        commentId: z
-          .uuid()
-          .describe("UUID of the comment to update (must be yours)."),
-        body: z
-          .string()
-          .min(2)
-          .max(40_000)
-          .describe("New comment markdown body (2-40000 chars, will be trimmed)."),
+        commentId: z.uuid(),
+        body: z.string().min(2).max(40_000),
       },
     },
     async (args, extra) => {
-      const auth = getAuthExtra(extra);
-      if (!auth) return textResult("Unauthorized.", true);
-
-      if (!hasScope(extra, "comment:update")) {
-        return textResult(
-          "Forbidden: this token is missing the comment:update scope.",
-          true,
-        );
-      }
+      const a = await checkAuthForTool("update_comment", extra);
+      if (!a.ok) return a.result;
 
       const { commentId, ...rest } = args;
       const parsed = updateCommentInputSchema.safeParse(rest);
@@ -514,11 +324,11 @@ export function registerTools(server: McpServer): void {
         );
       }
 
-      const limited = await enforceRateLimit(auth.tokenId, "comments");
-      if (limited) return limited;
+      const c = await chargeForTool("update_comment", a.ctx.tokenId);
+      if (!c.ok) return c.result;
 
       const result = await updateCommentAsAuthor(
-        auth.userId,
+        a.ctx.userId,
         commentId,
         parsed.data,
       );
@@ -545,12 +355,7 @@ export function registerTools(server: McpServer): void {
     },
   );
 
-  /* ── delete_comment ────────────────────────────────────────────
-   *
-   * Author-only delete (soft when the comment has replies, hard
-   * otherwise). Maps 1:1 to DELETE /api/v1/comments/:id.
-   */
-
+  /* ── delete_comment ────────────────────────────────────────── */
   server.registerTool(
     "delete_comment",
     {
@@ -558,29 +363,17 @@ export function registerTools(server: McpServer): void {
       description:
         "Deletes a comment you authored. If the comment has replies, the " +
         "row is soft-deleted (tombstone preserved); otherwise it is " +
-        "hard-deleted. Requires the comment:delete scope. Counts against " +
-        "the daily comment budget.",
+        "hard-deleted. Requires the comment:delete scope.",
       inputSchema: {
-        commentId: z
-          .uuid()
-          .describe("UUID of the comment to delete (must be yours)."),
+        commentId: z.uuid(),
       },
     },
     async (args, extra) => {
-      const auth = getAuthExtra(extra);
-      if (!auth) return textResult("Unauthorized.", true);
-
-      if (!hasScope(extra, "comment:delete")) {
-        return textResult(
-          "Forbidden: this token is missing the comment:delete scope.",
-          true,
-        );
-      }
-
-      const limited = await enforceRateLimit(auth.tokenId, "comments");
-      if (limited) return limited;
-
-      const result = await deleteCommentAsAuthor(auth.userId, args.commentId);
+      const a = await checkAuthForTool("delete_comment", extra);
+      if (!a.ok) return a.result;
+      const c = await chargeForTool("delete_comment", a.ctx.tokenId);
+      if (!c.ok) return c.result;
+      const result = await deleteCommentAsAuthor(a.ctx.userId, args.commentId);
       if (!result.ok) {
         if (result.reason === "forbidden") {
           return textResult(
@@ -594,12 +387,7 @@ export function registerTools(server: McpServer): void {
     },
   );
 
-  /* ── vote ──────────────────────────────────────────────────────
-   *
-   * Cast / change / clear a vote. Maps 1:1 to POST /api/v1/votes.
-   * Requires the vote:write scope.
-   */
-
+  /* ── vote ──────────────────────────────────────────────────── */
   server.registerTool(
     "vote",
     {
@@ -609,22 +397,13 @@ export function registerTools(server: McpServer): void {
         "submission. Downvotes require karma >= 100 (staff exempt). " +
         "Requires the vote:write scope.",
       inputSchema: {
-        submissionId: z.uuid().describe("UUID of the submission."),
-        value: z
-          .union([z.literal(1), z.literal(-1), z.literal(0)])
-          .describe("1 = upvote, -1 = downvote, 0 = clear vote."),
+        submissionId: z.uuid(),
+        value: z.union([z.literal(1), z.literal(-1), z.literal(0)]),
       },
     },
     async (args, extra) => {
-      const auth = getAuthExtra(extra);
-      if (!auth) return textResult("Unauthorized.", true);
-
-      if (!hasScope(extra, "vote:write")) {
-        return textResult(
-          "Forbidden: this token is missing the vote:write scope.",
-          true,
-        );
-      }
+      const a = await checkAuthForTool("vote", extra);
+      if (!a.ok) return a.result;
 
       const parsed = voteInputSchema.safeParse(args);
       if (!parsed.success) {
@@ -634,16 +413,13 @@ export function registerTools(server: McpServer): void {
         );
       }
 
-      const limited = await enforceRateLimit(auth.tokenId, "votes");
-      if (limited) return limited;
+      const c = await chargeForTool("vote", a.ctx.tokenId);
+      if (!c.ok) return c.result;
 
-      const result = await castVote(auth.userId, parsed.data);
+      const result = await castVote(a.ctx.userId, parsed.data);
       if (!result.ok) {
         if (result.reason === "karma_gate") {
-          return textResult(
-            "Forbidden: downvotes require at least 100 karma.",
-            true,
-          );
+          return textResult("Forbidden: downvotes require at least 100 karma.", true);
         }
         if (result.reason === "locked") {
           return textResult("Forbidden: account is locked.", true);
@@ -651,49 +427,30 @@ export function registerTools(server: McpServer): void {
         if (result.reason === "missing_user") {
           return textResult("Unauthorized: token references a deleted user.", true);
         }
-        return textResult(
-          "Submission not found, or not in a votable state.",
-          true,
-        );
+        return textResult("Submission not found, or not in a votable state.", true);
       }
-
       return textResult(
         `Vote recorded: submission ${parsed.data.submissionId}, value ${result.value}.`,
       );
     },
   );
 
-  /* ── save ──────────────────────────────────────────────────────
-   *
-   * Toggle a private bookmark. Maps 1:1 to POST /api/v1/saves.
-   * Requires the save:write scope.
-   */
-
+  /* ── save ──────────────────────────────────────────────────── */
   server.registerTool(
     "save",
     {
       title: "Save (or unsave) a submission",
       description:
         "Adds or removes a private bookmark on the given submission. " +
-        "Idempotent — duplicate saves and missing unsaves are absorbed. " +
-        "Requires the save:write scope.",
+        "Idempotent. Requires the save:write scope.",
       inputSchema: {
-        submissionId: z.uuid().describe("UUID of the submission."),
-        saved: z
-          .boolean()
-          .describe("true = bookmark, false = remove bookmark."),
+        submissionId: z.uuid(),
+        saved: z.boolean(),
       },
     },
     async (args, extra) => {
-      const auth = getAuthExtra(extra);
-      if (!auth) return textResult("Unauthorized.", true);
-
-      if (!hasScope(extra, "save:write")) {
-        return textResult(
-          "Forbidden: this token is missing the save:write scope.",
-          true,
-        );
-      }
+      const a = await checkAuthForTool("save", extra);
+      if (!a.ok) return a.result;
 
       const parsed = saveInputSchema.safeParse(args);
       if (!parsed.success) {
@@ -703,15 +460,12 @@ export function registerTools(server: McpServer): void {
         );
       }
 
-      const limited = await enforceRateLimit(auth.tokenId, "saves");
-      if (limited) return limited;
+      const c = await chargeForTool("save", a.ctx.tokenId);
+      if (!c.ok) return c.result;
 
-      const result = await setSave(auth.userId, parsed.data);
+      const result = await setSave(a.ctx.userId, parsed.data);
       if (!result.ok) {
-        return textResult(
-          "Submission not found, or not in a saveable state.",
-          true,
-        );
+        return textResult("Submission not found, or not in a saveable state.", true);
       }
       return textResult(
         `${parsed.data.saved ? "Saved" : "Unsaved"} submission ${parsed.data.submissionId}.`,
@@ -719,63 +473,28 @@ export function registerTools(server: McpServer): void {
     },
   );
 
-  /* ── list_notifications ────────────────────────────────────────
-   *
-   * Read the calling user's inbox. Maps 1:1 to GET /api/v1/notifications.
-   * Filters: unreadOnly, since (ISO8601), limit, kinds[]. Always
-   * reports unreadCount over the FULL inbox so polling clients can
-   * decide whether to keep polling. Charged against the daily reads
-   * bucket. Requires the notification:read scope.
-   */
-
+  /* ── list_notifications ────────────────────────────────────── */
   server.registerTool(
     "list_notifications",
     {
       title: "List your notifications",
       description:
         "Returns the calling user's notifications, newest first. " +
-        "Use `since` to do incremental polling — pass back the highest " +
-        "createdAt you've seen and you'll only get newer items. " +
-        "`unreadCount` is the inbox-wide unread total, independent of " +
-        "your filter. Requires the notification:read scope.",
+        "Use `since` to do incremental polling. Requires the " +
+        "notification:read scope.",
       inputSchema: {
-        unreadOnly: z
-          .boolean()
-          .optional()
-          .describe("If true, return only unread items (readAt IS NULL)."),
-        since: z
-          .iso
-          .datetime()
-          .optional()
-          .describe(
-            "ISO 8601 timestamp; only items with createdAt > since are returned (exclusive — pass back the highest createdAt you've seen).",
-          ),
-        limit: z
-          .number()
-          .int()
-          .min(1)
-          .max(200)
-          .optional()
-          .describe("Max items to return (default 50, max 200)."),
+        unreadOnly: z.boolean().optional(),
+        since: z.iso.datetime().optional(),
+        limit: z.number().int().min(1).max(200).optional(),
         kinds: z
           .array(z.enum(NOTIFICATION_KINDS))
           .max(NOTIFICATION_KINDS.length)
-          .optional()
-          .describe(
-            "Filter to specific kinds: comment_reply, submission_reply, moderation, mention.",
-          ),
+          .optional(),
       },
     },
     async (args, extra) => {
-      const auth = getAuthExtra(extra);
-      if (!auth) return textResult("Unauthorized.", true);
-
-      if (!hasScope(extra, "notification:read")) {
-        return textResult(
-          "Forbidden: this token is missing the notification:read scope.",
-          true,
-        );
-      }
+      const a = await checkAuthForTool("list_notifications", extra);
+      if (!a.ok) return a.result;
 
       const parsed = listNotificationsInputSchema.safeParse(args);
       if (!parsed.success) {
@@ -785,23 +504,15 @@ export function registerTools(server: McpServer): void {
         );
       }
 
-      const limited = await enforceRateLimit(auth.tokenId, "reads");
-      if (limited) return limited;
+      const c = await chargeForTool("list_notifications", a.ctx.tokenId);
+      if (!c.ok) return c.result;
 
-      const result = await listNotificationsForUser(auth.userId, parsed.data);
+      const result = await listNotificationsForUser(a.ctx.userId, parsed.data);
       return textResult(JSON.stringify(result, null, 2));
     },
   );
 
-  /* ── mark_notifications_read ──────────────────────────────────
-   *
-   * Pass `ids` to mark specific notifications, or `all: true` to
-   * mark every unread row for the calling user. Idempotent —
-   * already-read rows aren't double-counted; `updated` is the
-   * number that flipped on this call. Maps 1:1 to POST
-   * /api/v1/notifications/mark-read.
-   */
-
+  /* ── mark_notifications_read ──────────────────────────────── */
   server.registerTool(
     "mark_notifications_read",
     {
@@ -811,27 +522,13 @@ export function registerTools(server: McpServer): void {
         "`ids` to mark specific items, or `all: true` to mark every " +
         "unread item. Idempotent. Requires the notification:read scope.",
       inputSchema: {
-        ids: z
-          .array(z.uuid())
-          .max(500)
-          .optional()
-          .describe("UUIDs of notifications to mark read (max 500 per call)."),
-        all: z
-          .boolean()
-          .optional()
-          .describe("If true, mark every unread notification for this user."),
+        ids: z.array(z.uuid()).max(500).optional(),
+        all: z.boolean().optional(),
       },
     },
     async (args, extra) => {
-      const auth = getAuthExtra(extra);
-      if (!auth) return textResult("Unauthorized.", true);
-
-      if (!hasScope(extra, "notification:read")) {
-        return textResult(
-          "Forbidden: this token is missing the notification:read scope.",
-          true,
-        );
-      }
+      const a = await checkAuthForTool("mark_notifications_read", extra);
+      if (!a.ok) return a.result;
 
       const parsed = markReadInputSchema.safeParse(args);
       if (!parsed.success) {
@@ -841,41 +538,78 @@ export function registerTools(server: McpServer): void {
         );
       }
 
-      const limited = await enforceRateLimit(auth.tokenId, "reads");
-      if (limited) return limited;
+      const c = await chargeForTool("mark_notifications_read", a.ctx.tokenId);
+      if (!c.ok) return c.result;
 
-      const result = await markNotificationsReadForUser(auth.userId, parsed.data);
+      const result = await markNotificationsReadForUser(a.ctx.userId, parsed.data);
       return textResult(`Marked ${result.updated} notification(s) as read.`);
     },
   );
 
-  /* ── me ───────────────────────────────────────────────────────
-   *
-   * Token introspection. Maps 1:1 to GET /api/v1/me. No scope required;
-   * any active token can call it. Useful for MCP clients to verify
-   * connectivity + see what they can do.
-   */
+  /* ── get_constitution ─────────────────────────────────────── */
+  server.registerTool(
+    "get_constitution",
+    {
+      title: "Read the editorial constitution",
+      description:
+        "Returns the public editorial sources (audience, rubric, " +
+        "transparency) plus a stable `version` string. The " +
+        "`rubric.public` field is the structured public-safe view " +
+        "— weights, thresholds, and persona multipliers are " +
+        "intentionally omitted. Requires read:all.",
+      inputSchema: {},
+    },
+    async (_args, extra) => {
+      const a = await checkAuthForTool("get_constitution", extra);
+      if (!a.ok) return a.result;
+      const c = await chargeForTool("get_constitution", a.ctx.tokenId);
+      if (!c.ok) return c.result;
+      const constitution = getConstitution();
+      return textResult(JSON.stringify(constitution, null, 2));
+    },
+  );
 
+  /* ── get_quota ────────────────────────────────────────────── */
+  server.registerTool(
+    "get_quota",
+    {
+      title: "Read the calling token's daily quota",
+      description:
+        "Returns the daily usage and limits for each rate-limited " +
+        "category (submissions, comments, votes, saves, reads), " +
+        "along with the reset timestamp. No scope required and no " +
+        "rate-limit charge.",
+      inputSchema: {},
+    },
+    async (_args, extra) => {
+      const a = await checkAuthForTool("get_quota", extra);
+      if (!a.ok) return a.result;
+      const quota = await readQuotaForToken(a.ctx.tokenId);
+      return textResult(JSON.stringify(quota, null, 2));
+    },
+  );
+
+  /* ── me ──────────────────────────────────────────────────── */
   server.registerTool(
     "me",
     {
       title: "Identify the calling user",
       description:
-        "Return the username, role, and granted scopes for the token used to authenticate. " +
-        "No scope required — any active token can call it.",
+        "Return the username, role, and granted scopes for the token " +
+        "used to authenticate. No scope required.",
       inputSchema: {},
     },
     async (_args, extra) => {
-      const auth = getAuthExtra(extra);
-      if (!auth) return textResult("Unauthorized.", true);
+      const a = await checkAuthForTool("me", extra);
+      if (!a.ok) return a.result;
       const scopes = extra.authInfo?.scopes ?? [];
       return textResult(
         JSON.stringify(
           {
-            username: auth.username,
-            role: auth.role,
+            username: a.ctx.username,
+            role: a.ctx.role,
             scopes,
-            tokenPrefix: auth.tokenPrefix,
+            tokenPrefix: a.ctx.tokenPrefix,
           },
           null,
           2,

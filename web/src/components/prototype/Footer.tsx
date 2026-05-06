@@ -12,6 +12,7 @@ export function Footer() {
         </span>
         <nav className="proto-footer-nav" aria-label="Legal and project links">
           <Link href="/about">About</Link>
+          <Link href="/api">API</Link>
           <Link href="/privacy">Privacy</Link>
           <Link href="/terms">Terms</Link>
           <a href={REPO_URL} target="_blank" rel="noopener noreferrer">

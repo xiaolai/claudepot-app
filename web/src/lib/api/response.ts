@@ -15,7 +15,10 @@ import type { Problem } from "./errors";
 
 const CORS_HEADERS = {
   "access-control-allow-origin": "*",
-  "access-control-allow-methods": "GET, POST, PUT, DELETE, OPTIONS",
+  // PATCH is the verb used for partial updates (submissions, comments);
+  // no route uses PUT today. Listing PATCH here lets browsers complete
+  // the cross-origin preflight for /api/v1/submissions/{id} edits.
+  "access-control-allow-methods": "GET, POST, PATCH, DELETE, OPTIONS",
   "access-control-allow-headers": "authorization, content-type",
   "access-control-max-age": "86400",
 };
@@ -46,6 +49,18 @@ export function created<T>(data: T, location?: string): Response {
 
 export function noContent(): Response {
   return new Response(null, { status: 204, headers: CORS_HEADERS });
+}
+
+/**
+ * 304 Not Modified — for ETag revalidation. The body MUST be empty
+ * (RFC 7232 §4.1) and the ETag header SHOULD be re-sent so the client
+ * can refresh its cache key without parsing the body.
+ */
+export function notModified(etag: string): Response {
+  return new Response(null, {
+    status: 304,
+    headers: { ...CORS_HEADERS, etag },
+  });
 }
 
 export function problemResponse(p: Problem): Response {

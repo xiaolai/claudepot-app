@@ -2,8 +2,8 @@
  * GET /api/v1/me — token introspection.
  *
  * Returns the authenticated user and the token metadata. This is the
- * entry-point clients use to verify a token works before doing real work,
- * so it deliberately:
+ * entry-point clients use to verify a token works before doing real
+ * work, so it deliberately:
  *
  *   - requires no scope (any active token can call it)
  *   - is exempt from rate limits (getting blocked here is hostile UX)
@@ -11,20 +11,31 @@
  *
  * The `last_used_at` bump happens inside `authenticate()`, so the very
  * first /me call will already register the token as "used".
+ *
+ * The manifest spec confirms `auth: "any"` and `bucket: null` — the
+ * helper handles both shapes; chargeForSpec is a no-op here.
  */
 
-import { authenticate } from "@/lib/api/auth";
-import { ok, preflight, problemResponse } from "@/lib/api/response";
+import { ok, preflight } from "@/lib/api/response";
+import { endpointSpec } from "@/lib/api/manifest";
+import { chargeForSpec, checkAuthForSpec } from "@/lib/api/policy";
 
 export async function OPTIONS(): Promise<Response> {
   return preflight();
 }
 
 export async function GET(req: Request): Promise<Response> {
-  const auth = await authenticate(req);
-  if (!auth.ok) return problemResponse(auth.problem);
+  const SPEC = endpointSpec("me:identify");
+  const policy = await checkAuthForSpec(req, SPEC);
+  if (!policy.ok) return policy.response;
+  const { user, token } = policy.auth;
 
-  const { user, token } = auth;
+  // chargeForSpec is a no-op when spec.bucket is null (as it is for
+  // /me), but the manifest invariant says every authed route runs
+  // both halves of the policy contract. Keeps this route honest if a
+  // future manifest change wires /me to a bucket.
+  const charge = await chargeForSpec(SPEC, token.id);
+  if (!charge.ok) return charge.response;
 
   return ok({
     user: {

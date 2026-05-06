@@ -3231,6 +3231,27 @@ summary.proto-nav-avatar::-webkit-details-marker { display: none; }
   margin-bottom: var(--sp-4);
 }
 
+/* Scope groups (Reads / Writes / Engagement). Each group is a small
+ * stack with a label band — keeps the picker scannable as the surface
+ * grows. The label uses the same eyebrow typography as section headers
+ * elsewhere in the prototype. */
+.proto-token-scope-group {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-4);
+}
+.proto-token-scope-group + .proto-token-scope-group {
+  margin-top: var(--sp-8);
+}
+.proto-token-scope-group-label {
+  font-size: var(--fs-xsmall);
+  font-weight: 500;
+  letter-spacing: var(--ls-eyebrow);
+  text-transform: uppercase;
+  color: var(--editorial-mid);
+  margin: 0;
+}
+
 /* The selectors are written as `ul.proto-token-list` / `ul.proto-token-scopes`
  * to match the specificity (0,1,1) of `.proto-section ul` further up in this
  * file, which sets padding-left: var(--sp-24) on every ul inside a section.
