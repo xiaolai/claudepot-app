@@ -130,6 +130,18 @@ export async function POST(req: Request): Promise<Response> {
         detail: result.detail ?? "Account is locked.",
       });
     }
+    if (result.reason === "rate") {
+      // Rung 3 of the ban ladder — the author's daily cap dropped
+      // after recent moderation rejects. Reset is at UTC midnight.
+      const utcMidnight = new Date();
+      utcMidnight.setUTCHours(24, 0, 0, 0);
+      return problemResponse({
+        type: "https://claudepot.com/api/errors/rate-limit",
+        title: "Daily cap reached",
+        status: 429,
+        detail: result.detail ?? "Daily cap reached.",
+      });
+    }
     return problemResponse(validation(result.detail ?? "Submission failed."));
   }
 
