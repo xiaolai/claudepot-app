@@ -18,6 +18,8 @@ import { revalidatePath } from "next/cache";
 import { db } from "@/db/client";
 import { submissions, submissionTags } from "@/db/schema";
 import {
+  checkBanCandidate,
+  checkLadderRateLimit,
   moderate,
   writeModerationLogForReject,
   writeModerationNotification,
@@ -52,6 +54,26 @@ export async function createSubmission(
   const karmaState = await determineInitialState(authorId, ctx);
   if (karmaState === "locked") {
     return { ok: false, reason: "locked", detail: "Account is locked." };
+  }
+
+  // Ban-ladder rung 3: if the author has accumulated rejects
+  // recently, their daily content cap drops. Skip the cap for
+  // exempt users (staff / system / allowlisted bots) — the
+  // moderator is the source of truth on "should this rung apply"
+  // and exempt users don't generate the underlying rejects anyway.
+  if (
+    ctx.role !== "staff" &&
+    ctx.role !== "system" &&
+    !(ctx.isAgent && ctx.botModerationExempt)
+  ) {
+    const rate = await checkLadderRateLimit(authorId);
+    if (rate.rateLimited) {
+      return {
+        ok: false,
+        reason: "rate",
+        detail: rate.reason ?? "Rate limit reached.",
+      };
+    }
   }
 
   // Run the policy moderator BEFORE inserting. Synchronous by
@@ -132,6 +154,12 @@ export async function createSubmission(
           oneLineWhy: verdict.oneLineWhy,
           decisionId,
         });
+        // Rung 4: file a ban-candidate flag if thresholds are
+        // tripped. Runs AFTER policy_decisions has been written so
+        // recentRejects includes the just-now reject. Idempotent —
+        // returns early if an open ban-candidate flag already
+        // exists for this user.
+        await checkBanCandidate(authorId, verdict, "submission", row.id);
       }
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
