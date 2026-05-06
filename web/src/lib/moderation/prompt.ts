@@ -7,14 +7,19 @@
  * tunable in the way the editorial taste rubric is — keeping them
  * public buys reviewability and CI-testability.
  *
- * If you change anything in this file beyond a typo fix, bump
- * POLICY_PROMPT_V in types.ts so the policy_decisions audit trail
- * can correlate verdict drift with prompt changes.
+ * Migration 0021 added a DB-backed editor at /admin/policy-prompt.
+ * The constant below is the FALLBACK that ships with the deploy;
+ * once staff saves a row in moderation_prompts via the editor,
+ * lib/moderation/prompt-store.ts returns the active row instead.
+ *
+ * If you change FALLBACK_SYSTEM_PROMPT, bump the version label in
+ * the editor's first save (or in the seed) so policy_decisions.
+ * prompt_version stays meaningful as an audit trail.
  */
 
 import type { ModerationContent, ModerationKind } from "./types";
 
-const SYSTEM_PROMPT = `You are claudepot.com's policy moderator. Decide whether a piece of user-submitted content violates the platform's narrow policy taxonomy.
+export const FALLBACK_SYSTEM_PROMPT = `You are claudepot.com's policy moderator. Decide whether a piece of user-submitted content violates the platform's narrow policy taxonomy.
 
 Five categories. Reject only if the content clearly fits one. When in doubt, pass.
 
@@ -60,8 +65,13 @@ export function buildUserPrompt(content: ModerationContent): string {
 ${titleBlock}${bodyBlock}`;
 }
 
+/**
+ * Returns the fallback system prompt. lib/moderation/prompt-store.ts
+ * is the runtime path — it reads the active DB row (migration 0021)
+ * and falls back to this constant when the table is empty.
+ */
 export function buildSystemPrompt(): string {
-  return SYSTEM_PROMPT;
+  return FALLBACK_SYSTEM_PROMPT;
 }
 
 /**

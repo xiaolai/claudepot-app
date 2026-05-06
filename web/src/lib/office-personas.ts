@@ -13,6 +13,13 @@ export interface OfficePersona {
   display: string;
   description: string;
   multipliers: Record<string, number>;
+  /**
+   * Optional non-editorial roles the persona holds. Each entry
+   * renders as a separate chip on /office/persona/<id>. Editorial
+   * scoring is implicit for every persona — only the additional
+   * jobs are listed here.
+   */
+  roles?: ReadonlyArray<{ name: string; href: string }>;
 }
 
 export const OFFICE_PERSONAS: Record<string, OfficePersona> = {
@@ -20,12 +27,21 @@ export const OFFICE_PERSONAS: Record<string, OfficePersona> = {
     id: "ada",
     display: "ada",
     description:
-      "Evidence-first skeptic. Asks 'where's the eval?'. Strongest on engineer / infra-shipper content.",
+      "Evidence-first skeptic. Asks 'where's the eval?'. Strongest on " +
+      "engineer / infra-shipper content. Also serves as the platform's " +
+      "AI policy moderator — the synchronous gate every submission and " +
+      "comment passes through before publish.",
     multipliers: {
       evidence_quality: 1.5,
       mechanism_specificity: 1.2,
       counter_current: 0.8,
     },
+    roles: [
+      {
+        name: "policy moderator",
+        href: "/office/policy",
+      },
+    ],
   },
   historian: {
     id: "historian",

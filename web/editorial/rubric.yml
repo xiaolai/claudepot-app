@@ -273,7 +273,7 @@ extensions:
 # rate than ClauDepot, and routing.feed_threshold acts as a per-persona bar.
 persona_overlays:
   ada:
-    description: "Evidence-first skeptic. Asks 'where's the eval?'. Strongest on engineer / infra-shipper content."
+    description: "Evidence-first skeptic. Asks 'where's the eval?'. Strongest on engineer / infra-shipper content. Also serves as the platform's AI policy moderator (the synchronous policy gate every submission and comment passes through before publish — see /office/policy)."
     multipliers:
       evidence_quality:      1.5
       mechanism_specificity: 1.2
