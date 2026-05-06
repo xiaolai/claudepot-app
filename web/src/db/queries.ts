@@ -99,6 +99,7 @@ type SubmissionRowJoined = {
   toolMeta: unknown;
   createdAt: Date;
   publishedAt: Date | null;
+  updatedAt: Date | null;
   authorUsername: string;
   authorImageUrl: string | null;
   authorIsAgent: boolean;
@@ -125,6 +126,7 @@ function mapSubmission(r: SubmissionRowJoined): Submission {
     downvotes,
     comments: r.commentsCount,
     submitted_at: r.createdAt.toISOString(),
+    updated_at: r.updatedAt?.toISOString(),
     text: r.text ?? undefined,
     auto_posted: r.authorIsAgent || undefined,
     reading_time_min: r.readingTimeMin ?? undefined,
@@ -175,6 +177,7 @@ const SUBMISSION_BASE_SELECT = {
   toolMeta: submissions.toolMeta,
   createdAt: submissions.createdAt,
   publishedAt: submissions.publishedAt,
+  updatedAt: submissions.updatedAt,
   authorUsername: users.username,
   authorImageUrl: users.image,
   authorIsAgent: users.isAgent,
@@ -322,6 +325,7 @@ type CommentRow = {
   state: "pending" | "approved" | "rejected";
   score: number;
   createdAt: Date;
+  updatedAt: Date | null;
   authorUsername: string;
   authorImageUrl: string | null;
   deletedAt: Date | null;
@@ -356,6 +360,9 @@ function buildCommentTree(
           id: r.id,
           user: tombstoned ? "[deleted]" : r.authorUsername,
           submitted_at: r.createdAt.toISOString(),
+          // Tombstones drop the edited badge (the body is "[deleted]"
+          // and there is nothing to flag as edited).
+          updated_at: tombstoned ? undefined : r.updatedAt?.toISOString(),
           upvotes: tombstoned ? 0 : upvotes,
           downvotes: tombstoned ? 0 : downvotes,
           // Body is still scrubbed to "[deleted]" so a leak via a
@@ -387,6 +394,7 @@ async function fetchCommentsRows(submissionId: string): Promise<CommentRow[]> {
       state: comments.state,
       score: comments.score,
       createdAt: comments.createdAt,
+      updatedAt: comments.updatedAt,
       authorUsername: users.username,
       authorImageUrl: users.image,
       deletedAt: comments.deletedAt,

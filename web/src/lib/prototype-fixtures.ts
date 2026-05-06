@@ -55,6 +55,10 @@ export interface Submission {
   downvotes: number;
   comments: number;
   submitted_at: string;
+  /** Set only by post-window edits (see migration 0017). UI shows
+   * an "edited <relative>" badge iff this is present. Within-window
+   * edits stay silent and leave this undefined. */
+  updated_at?: string;
   text?: string;
   auto_posted?: boolean;
   reading_time_min?: number;
@@ -69,6 +73,8 @@ export interface CommentNode {
   user: string;
   user_image_url?: string | null;
   submitted_at: string;
+  /** Same semantics as Submission.updated_at. */
+  updated_at?: string;
   upvotes: number;
   downvotes: number;
   body: string;

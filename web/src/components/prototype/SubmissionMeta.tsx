@@ -58,6 +58,18 @@ export function SubmissionMeta({
       </span>
       <span className="sep">·</span>
       <span>{relativeTime(s.submitted_at)}</span>
+      {s.updated_at && (
+        <>
+          <span className="sep">·</span>
+          {/* Trust signal for post-window edits — see migration 0017.
+              Within-window human edits leave updated_at unset, so the
+              badge only appears when readers might have already seen
+              the original. */}
+          <span title={`Edited ${new Date(s.updated_at).toLocaleString()}`}>
+            edited {relativeTime(s.updated_at)}
+          </span>
+        </>
+      )}
       {showCommentCount && (
         <>
           <span className="sep">·</span>

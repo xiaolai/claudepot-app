@@ -1,18 +1,15 @@
 "use server";
 
-import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
-import { eq } from "drizzle-orm";
-import { z } from "zod";
 
 import { auth } from "@/lib/auth";
-import { db } from "@/db/client";
-import { submissions } from "@/db/schema";
 import type { Submission as PrototypeSubmission } from "@/lib/prototype-fixtures";
 import {
   createSubmission,
   deleteSubmissionAsAuthor,
   submissionInputSchema,
+  updateSubmissionAsAuthor,
+  updateSubmissionInputSchema,
   type SubmissionInput,
   type SubmitResult as CoreSubmitResult,
 } from "@/lib/submissions";
@@ -39,15 +36,7 @@ export async function submitPost(input: unknown): Promise<SubmitResult> {
   return createSubmission(session.user.id, parsed.data, { surface: "web" });
 }
 
-/* ── editSubmission (5-minute window) ──────────────────────────── */
-
-const EDIT_WINDOW_MS = 5 * 60 * 1000;
-
-const editInput = z.object({
-  id: z.uuid(),
-  title: z.string().trim().min(3).max(120).optional(),
-  text: z.string().trim().max(40_000).optional(),
-});
+/* ── editSubmission — thin wrapper over updateSubmissionAsAuthor ─ */
 
 export async function editSubmission(
   input: unknown,
@@ -58,29 +47,24 @@ export async function editSubmission(
   const session = await auth();
   if (!session?.user?.id) return { ok: false, reason: "unauth" };
 
-  const parsed = editInput.safeParse(input);
+  // Web action accepts { id, title?, text? } — split id off and pass
+  // the rest to the core's narrower schema.
+  if (typeof input !== "object" || input === null || !("id" in input)) {
+    return { ok: false, reason: "validation" };
+  }
+  const { id, ...rest } = input as { id: unknown } & Record<string, unknown>;
+  if (typeof id !== "string") return { ok: false, reason: "validation" };
+
+  const parsed = updateSubmissionInputSchema.safeParse(rest);
   if (!parsed.success) return { ok: false, reason: "validation" };
 
-  const [existing] = await db
-    .select({
-      authorId: submissions.authorId,
-      createdAt: submissions.createdAt,
-    })
-    .from(submissions)
-    .where(eq(submissions.id, parsed.data.id))
-    .limit(1);
-  if (!existing) return { ok: false, reason: "not_found" };
-  if (existing.authorId !== session.user.id) return { ok: false, reason: "forbidden" };
-  if (Date.now() - existing.createdAt.getTime() > EDIT_WINDOW_MS)
-    return { ok: false, reason: "expired" };
-
-  const updates: Record<string, unknown> = {};
-  if (parsed.data.title !== undefined) updates.title = parsed.data.title;
-  if (parsed.data.text !== undefined) updates.text = parsed.data.text;
-  if (Object.keys(updates).length === 0) return { ok: true };
-
-  await db.update(submissions).set(updates).where(eq(submissions.id, parsed.data.id));
-  revalidatePath(`/post/${parsed.data.id}`);
+  const result = await updateSubmissionAsAuthor(session.user.id, id, parsed.data);
+  if (!result.ok) {
+    // The core's "noop" is success-equivalent for the web caller —
+    // hitting Save with no changes shouldn't error.
+    if (result.reason === "noop") return { ok: true };
+    return { ok: false, reason: result.reason };
+  }
   return { ok: true };
 }
 

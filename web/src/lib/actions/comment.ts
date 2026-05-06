@@ -1,16 +1,12 @@
 "use server";
 
-import { revalidatePath } from "next/cache";
-import { eq } from "drizzle-orm";
-import { z } from "zod";
-
 import { auth } from "@/lib/auth";
-import { db } from "@/db/client";
-import { comments } from "@/db/schema";
 import {
   commentInputSchema,
   createComment,
   deleteCommentAsAuthor,
+  updateCommentAsAuthor,
+  updateCommentInputSchema,
   type CommentResult as CoreCommentResult,
 } from "@/lib/comments";
 
@@ -30,14 +26,7 @@ export async function submitComment(input: unknown): Promise<CommentResult> {
   return createComment(session.user.id, parsed.data);
 }
 
-/* ── Edit (5-minute window) ────────────────────────────────────── */
-
-const EDIT_WINDOW_MS = 5 * 60 * 1000;
-
-const editInput = z.object({
-  id: z.uuid(),
-  body: z.string().trim().min(2).max(40_000),
-});
+/* ── Edit — thin wrapper over updateCommentAsAuthor ──────────── */
 
 export async function editComment(
   input: unknown,
@@ -48,28 +37,20 @@ export async function editComment(
   const session = await auth();
   if (!session?.user?.id) return { ok: false, reason: "unauth" };
 
-  const parsed = editInput.safeParse(input);
+  if (typeof input !== "object" || input === null || !("id" in input)) {
+    return { ok: false, reason: "validation" };
+  }
+  const { id, ...rest } = input as { id: unknown } & Record<string, unknown>;
+  if (typeof id !== "string") return { ok: false, reason: "validation" };
+
+  const parsed = updateCommentInputSchema.safeParse(rest);
   if (!parsed.success) return { ok: false, reason: "validation" };
 
-  const [existing] = await db
-    .select({
-      authorId: comments.authorId,
-      submissionId: comments.submissionId,
-      createdAt: comments.createdAt,
-    })
-    .from(comments)
-    .where(eq(comments.id, parsed.data.id))
-    .limit(1);
-  if (!existing) return { ok: false, reason: "not_found" };
-  if (existing.authorId !== session.user.id) return { ok: false, reason: "forbidden" };
-  if (Date.now() - existing.createdAt.getTime() > EDIT_WINDOW_MS)
-    return { ok: false, reason: "expired" };
-
-  await db
-    .update(comments)
-    .set({ body: parsed.data.body })
-    .where(eq(comments.id, parsed.data.id));
-  revalidatePath(`/post/${existing.submissionId}`);
+  const result = await updateCommentAsAuthor(session.user.id, id, parsed.data);
+  if (!result.ok) {
+    if (result.reason === "noop") return { ok: true };
+    return { ok: false, reason: result.reason };
+  }
   return { ok: true };
 }
 

@@ -55,6 +55,16 @@ async function CommentItem({ node }: { node: CommentNode }) {
         <Link href={`/u/${node.user}`}>{node.user}</Link>
         {" · "}
         <span>{relativeTime(node.submitted_at)}</span>
+        {node.updated_at && (
+          <>
+            {" · "}
+            <span
+              title={`Edited ${new Date(node.updated_at).toLocaleString()}`}
+            >
+              edited {relativeTime(node.updated_at)}
+            </span>
+          </>
+        )}
         {" · "}
         <span>{node.upvotes - node.downvotes} pts</span>
       </header>

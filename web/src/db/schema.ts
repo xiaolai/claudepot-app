@@ -246,6 +246,10 @@ export const submissions = pgTable(
     toolMeta: jsonb("tool_meta"),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     publishedAt: timestamp("published_at", { withTimezone: true }),
+    // Set only by post-window edits — see migration 0017. Within-
+    // window edits stay silent (no bump). NULL = never edited (or
+    // only within-window).
+    updatedAt: timestamp("updated_at", { withTimezone: true }),
     deletedAt: timestamp("deleted_at", { withTimezone: true }),
     // Audit finding 3.3 — moderation lock/unlist columns.
     lockedAt: timestamp("locked_at", { withTimezone: true }),
@@ -312,6 +316,8 @@ export const comments = pgTable(
     state: contentStateEnum("state").notNull().default("approved"),
     score: integer("score").notNull().default(0),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    // See migration 0017. Same semantics as submissions.updated_at.
+    updatedAt: timestamp("updated_at", { withTimezone: true }),
     deletedAt: timestamp("deleted_at", { withTimezone: true }),
   },
   (t) => [
