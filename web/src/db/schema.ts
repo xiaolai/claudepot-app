@@ -726,6 +726,7 @@ export const apiTokenUsage = pgTable(
 export const apiTokenEventEnum = pgEnum("api_token_event", [
   "mint",
   "revoke",
+  "scope_change",
 ]);
 
 export const apiTokenEvents = pgTable(
