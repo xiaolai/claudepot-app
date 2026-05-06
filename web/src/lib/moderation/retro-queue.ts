@@ -194,11 +194,29 @@ export async function drainRetroQueue(): Promise<DrainResult> {
         author,
       );
 
-      // Synthetic verdicts on the retro pass mean another error
-      // happened (or the moderator is now disabled / exempt). Keep
-      // the entry in retry; transition to failed when attempts hit
-      // the cap so the queue doesn't accumulate forever.
+      // Synthetic verdicts: branch on syntheticReason.
+      //   - 'disabled' / 'exempt' / 'capped': retrying produces the
+      //     same outcome (moderator configured off, author allow-
+      //     listed, or cap hit). Mark 'done' so the queue doesn't
+      //     poison the row by cycling until MAX_ATTEMPTS. The
+      //     optimistic publish stands.
+      //   - 'error': transient model failure. Retry up to
+      //     MAX_ATTEMPTS, then transition to 'failed' so a persistent
+      //     outage doesn't accumulate pending work indefinitely.
       if (verdict.synthetic) {
+        const isTransientError = verdict.syntheticReason === "error";
+        if (!isTransientError) {
+          await db
+            .update(moderationRetroQueue)
+            .set({
+              state: "done",
+              completedAt: new Date(),
+              lastError: verdict.oneLineWhy,
+            })
+            .where(eq(moderationRetroQueue.id, row.id));
+          result.succeeded += 1;
+          continue;
+        }
         const nextAttempts = row.attempts + 1;
         const terminal = nextAttempts >= MAX_ATTEMPTS;
         await db

@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { and, desc, eq, isNull } from "drizzle-orm";
+import { and, desc, eq, inArray, isNull } from "drizzle-orm";
 
 import { db } from "@/db/client";
 import { flags, submissions, users } from "@/db/schema";
@@ -31,6 +31,22 @@ export default async function ModQueue({
     .where(eq(flags.status, "open"))
     .orderBy(desc(flags.createdAt))
     .limit(50);
+
+  // For 'user'-targeted flags, the targetId is a UUID. The profile
+  // link wants the username. One IN-list lookup keeps the join out
+  // of the flag query while still correctly resolving the profile
+  // URL for each ban-candidate row.
+  const userTargetIds = openFlags
+    .filter((f) => f.targetType === "user")
+    .map((f) => f.targetId);
+  const userTargetMap = new Map<string, string>();
+  if (userTargetIds.length > 0) {
+    const rows = await db
+      .select({ id: users.id, username: users.username })
+      .from(users)
+      .where(inArray(users.id, userTargetIds));
+    for (const r of rows) userTargetMap.set(r.id, r.username);
+  }
 
   // Lane 2: first-submission queue (pending submissions)
   const pendingSubs = await db
@@ -80,11 +96,14 @@ export default async function ModQueue({
               // Target link goes to the user's profile; the destructive
               // action is lock_user, not delete.
               const isUserTarget = f.targetType === "user";
+              const userTargetUsername = isUserTarget
+                ? userTargetMap.get(f.targetId)
+                : undefined;
               const targetHref =
                 f.targetType === "submission"
                   ? `/post/${f.targetId}`
-                  : isUserTarget
-                    ? `/u/${f.targetId}`
+                  : isUserTarget && userTargetUsername
+                    ? `/u/${userTargetUsername}`
                     : "#";
               return (
                 <tr key={f.id}>
