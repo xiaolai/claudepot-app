@@ -25,12 +25,20 @@ import {
   type LimitCategory,
 } from "@/lib/api/rate-limit";
 import type { Scope } from "@/lib/api/scopes";
-import { commentInputSchema, createComment, deleteCommentAsAuthor } from "@/lib/comments";
+import {
+  commentInputSchema,
+  createComment,
+  deleteCommentAsAuthor,
+  updateCommentAsAuthor,
+  updateCommentInputSchema,
+} from "@/lib/comments";
 import {
   createSubmission,
   deleteSubmissionAsAuthor,
   submissionInputSchema,
   SUBMISSION_TYPES,
+  updateSubmissionAsAuthor,
+  updateSubmissionInputSchema,
 } from "@/lib/submissions";
 import { castVote, saveInputSchema, setSave, voteInputSchema } from "@/lib/votes";
 import type { ClaudepotAuthExtra } from "./auth";
@@ -257,6 +265,99 @@ export function registerTools(server: McpServer): void {
     },
   );
 
+  /* ── update_submission ─────────────────────────────────────────
+   *
+   * Author-only edit of title and/or text. Maps 1:1 to
+   * PATCH /api/v1/submissions/:id. Requires the submission:update
+   * scope. Bots (is_agent / system / staff) bypass the 5-minute
+   * window and their edits set updated_at so the UI can render an
+   * "edited" badge.
+   */
+
+  server.registerTool(
+    "update_submission",
+    {
+      title: "Edit one of your own submissions",
+      description:
+        "Updates the title and/or text of a submission you authored. " +
+        "Provide at least one of title / text. URL is intentionally " +
+        "not editable (it carries dedup identity). Requires the " +
+        "submission:update scope. Counts against the daily submission " +
+        "budget. Bot tokens (is_agent / system / staff) bypass the " +
+        "5-minute window; their edits set updated_at and the UI shows " +
+        "an 'edited' badge.",
+      inputSchema: {
+        submissionId: z
+          .uuid()
+          .describe("UUID of the submission to update (must be yours)."),
+        title: z
+          .string()
+          .min(3)
+          .max(120)
+          .optional()
+          .describe("New title (3-120 chars, will be trimmed)."),
+        text: z
+          .string()
+          .max(40_000)
+          .optional()
+          .describe(
+            "New self-post body, markdown. Pass empty string to clear.",
+          ),
+      },
+    },
+    async (args, extra) => {
+      const auth = getAuthExtra(extra);
+      if (!auth) return textResult("Unauthorized.", true);
+
+      if (!hasScope(extra, "submission:update")) {
+        return textResult(
+          "Forbidden: this token is missing the submission:update scope.",
+          true,
+        );
+      }
+
+      const { submissionId, ...rest } = args;
+      const parsed = updateSubmissionInputSchema.safeParse(rest);
+      if (!parsed.success) {
+        return textResult(
+          `Validation failed: ${formatZodIssues(parsed.error)}`,
+          true,
+        );
+      }
+
+      const limited = await enforceRateLimit(auth.tokenId, "submissions");
+      if (limited) return limited;
+
+      const result = await updateSubmissionAsAuthor(
+        auth.userId,
+        submissionId,
+        parsed.data,
+      );
+      if (!result.ok) {
+        if (result.reason === "forbidden") {
+          return textResult(
+            "Forbidden: you can only edit your own submissions.",
+            true,
+          );
+        }
+        if (result.reason === "expired") {
+          return textResult(
+            "Forbidden: edit window expired. Bot tokens (is_agent / system / staff) bypass it.",
+            true,
+          );
+        }
+        if (result.reason === "noop") {
+          return textResult(`No-op: nothing changed on ${submissionId}.`);
+        }
+        return textResult("Submission not found.", true);
+      }
+      const badge = result.silent ? "silent" : "visible (edited badge shown)";
+      return textResult(
+        `Edited submission ${submissionId} — ${badge}.`,
+      );
+    },
+  );
+
   /* ── post_comment ──────────────────────────────────────────────
    *
    * Posts a top-level comment or reply. Maps 1:1 to POST /api/v1/comments.
@@ -333,6 +434,85 @@ export function registerTools(server: McpServer): void {
           ? `Comment ${result.commentId} routed to AI moderation. ${url}`
           : `Posted: ${url}`,
       );
+    },
+  );
+
+  /* ── update_comment ────────────────────────────────────────────
+   *
+   * Author-only edit of body. Maps 1:1 to PATCH /api/v1/comments/:id.
+   * Requires the comment:update scope. Same window policy as
+   * update_submission.
+   */
+
+  server.registerTool(
+    "update_comment",
+    {
+      title: "Edit one of your own comments",
+      description:
+        "Updates the body of a comment you authored. Requires the " +
+        "comment:update scope. Counts against the daily comment " +
+        "budget. Bot tokens (is_agent / system / staff) bypass the " +
+        "5-minute window; their edits set updated_at and the UI " +
+        "shows an 'edited' badge.",
+      inputSchema: {
+        commentId: z
+          .uuid()
+          .describe("UUID of the comment to update (must be yours)."),
+        body: z
+          .string()
+          .min(2)
+          .max(40_000)
+          .describe("New comment markdown body (2-40000 chars, will be trimmed)."),
+      },
+    },
+    async (args, extra) => {
+      const auth = getAuthExtra(extra);
+      if (!auth) return textResult("Unauthorized.", true);
+
+      if (!hasScope(extra, "comment:update")) {
+        return textResult(
+          "Forbidden: this token is missing the comment:update scope.",
+          true,
+        );
+      }
+
+      const { commentId, ...rest } = args;
+      const parsed = updateCommentInputSchema.safeParse(rest);
+      if (!parsed.success) {
+        return textResult(
+          `Validation failed: ${formatZodIssues(parsed.error)}`,
+          true,
+        );
+      }
+
+      const limited = await enforceRateLimit(auth.tokenId, "comments");
+      if (limited) return limited;
+
+      const result = await updateCommentAsAuthor(
+        auth.userId,
+        commentId,
+        parsed.data,
+      );
+      if (!result.ok) {
+        if (result.reason === "forbidden") {
+          return textResult(
+            "Forbidden: you can only edit your own comments.",
+            true,
+          );
+        }
+        if (result.reason === "expired") {
+          return textResult(
+            "Forbidden: edit window expired. Bot tokens (is_agent / system / staff) bypass it.",
+            true,
+          );
+        }
+        if (result.reason === "noop") {
+          return textResult(`No-op: nothing changed on ${commentId}.`);
+        }
+        return textResult("Comment not found.", true);
+      }
+      const badge = result.silent ? "silent" : "visible (edited badge shown)";
+      return textResult(`Edited comment ${commentId} — ${badge}.`);
     },
   );
 

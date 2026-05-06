@@ -236,3 +236,80 @@ export async function deleteCommentAsAuthor(
   revalidatePath(`/post/${outcome.submissionId}`);
   return { ok: true, submissionId: outcome.submissionId };
 }
+
+/* ── updateCommentAsAuthor ──────────────────────────────────────
+ *
+ * Author-only edit. Same window policy as updateSubmissionAsAuthor:
+ * 5-min window for human users, no window for bots / system / staff.
+ * Within-window human edits stay silent; out-of-window edits bump
+ * updated_at so the UI can render an "edited" badge.
+ */
+
+const EDIT_WINDOW_MS = 5 * 60 * 1000;
+
+export const updateCommentInputSchema = z.object({
+  body: z.string().trim().min(2).max(40_000),
+});
+
+export type UpdateCommentInput = z.infer<typeof updateCommentInputSchema>;
+
+export type UpdateCommentResult =
+  | { ok: true; silent: boolean; submissionId: string; updatedAt: Date | null }
+  | {
+      ok: false;
+      reason: "not_found" | "forbidden" | "expired" | "noop";
+    };
+
+export async function updateCommentAsAuthor(
+  authorId: string,
+  commentId: string,
+  input: UpdateCommentInput,
+): Promise<UpdateCommentResult> {
+  const [actor] = await db
+    .select({ role: users.role, isAgent: users.isAgent })
+    .from(users)
+    .where(eq(users.id, authorId))
+    .limit(1);
+  if (!actor) return { ok: false, reason: "not_found" };
+
+  const [existing] = await db
+    .select({
+      authorId: comments.authorId,
+      submissionId: comments.submissionId,
+      createdAt: comments.createdAt,
+      body: comments.body,
+      deletedAt: comments.deletedAt,
+    })
+    .from(comments)
+    .where(eq(comments.id, commentId))
+    .limit(1);
+  if (!existing) return { ok: false, reason: "not_found" };
+  // Soft-deleted comments stay readable as tombstones; editing one
+  // would surface the original body as if undeleted. Treat as gone.
+  if (existing.deletedAt) return { ok: false, reason: "not_found" };
+  if (existing.authorId !== authorId) return { ok: false, reason: "forbidden" };
+
+  const ageMs = Date.now() - existing.createdAt.getTime();
+  const withinWindow = ageMs <= EDIT_WINDOW_MS;
+  const bypassesWindow =
+    actor.isAgent || actor.role === "system" || actor.role === "staff";
+  if (!withinWindow && !bypassesWindow) {
+    return { ok: false, reason: "expired" };
+  }
+  if (input.body === existing.body) return { ok: false, reason: "noop" };
+
+  const silent = withinWindow && !bypassesWindow;
+  const bumpedAt = silent ? null : new Date();
+
+  await db
+    .update(comments)
+    .set({ body: input.body, updatedAt: bumpedAt })
+    .where(eq(comments.id, commentId));
+  revalidatePath(`/post/${existing.submissionId}`);
+  return {
+    ok: true,
+    silent,
+    submissionId: existing.submissionId,
+    updatedAt: bumpedAt,
+  };
+}

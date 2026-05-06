@@ -207,3 +207,111 @@ export async function deleteSubmissionAsAuthor(
   revalidatePath("/");
   return { ok: true };
 }
+
+/* ── updateSubmissionAsAuthor ────────────────────────────────────
+ *
+ * Author-only edit. Editable fields mirror the existing web action:
+ * `title` and `text`. URL is intentionally NOT editable (it carries
+ * dedup identity); type and tags are out of scope here.
+ *
+ * Window policy is role-aware, not surface-aware:
+ *   - Human users (role === "user" AND is_agent === false) can only
+ *     edit within EDIT_WINDOW_MS. Within-window edits stay silent —
+ *     they do NOT bump updated_at, matching the original web UX
+ *     ("nobody noticed yet, no badge").
+ *   - Bots (is_agent === true) and platform users (role === "system"
+ *     or "staff") can edit at any time. Their edits ALWAYS bump
+ *     updated_at so the UI can render an "edited" badge for reader
+ *     trust.
+ *
+ * Returns ok with `silent` to let the caller decide messaging.
+ */
+
+const EDIT_WINDOW_MS = 5 * 60 * 1000;
+
+export const updateSubmissionInputSchema = z
+  .object({
+    title: z.string().trim().min(3).max(120).optional(),
+    text: z.string().trim().max(40_000).optional(),
+  })
+  .refine((v) => v.title !== undefined || v.text !== undefined, {
+    message: "Provide at least one of: title, text.",
+  });
+
+export type UpdateSubmissionInput = z.infer<typeof updateSubmissionInputSchema>;
+
+export type UpdateSubmissionResult =
+  | { ok: true; silent: boolean; updatedAt: Date | null }
+  | {
+      ok: false;
+      reason: "not_found" | "forbidden" | "expired" | "noop";
+    };
+
+export async function updateSubmissionAsAuthor(
+  authorId: string,
+  submissionId: string,
+  input: UpdateSubmissionInput,
+): Promise<UpdateSubmissionResult> {
+  const [actor] = await db
+    .select({ role: users.role, isAgent: users.isAgent })
+    .from(users)
+    .where(eq(users.id, authorId))
+    .limit(1);
+  // Missing actor → unauth equivalent. The REST surface authenticated
+  // already; this only fires if the user was deleted between auth and
+  // here, which we treat as not_found (don't disclose existence).
+  if (!actor) return { ok: false, reason: "not_found" };
+
+  const [existing] = await db
+    .select({
+      authorId: submissions.authorId,
+      createdAt: submissions.createdAt,
+      title: submissions.title,
+      text: submissions.text,
+    })
+    .from(submissions)
+    .where(eq(submissions.id, submissionId))
+    .limit(1);
+  if (!existing) return { ok: false, reason: "not_found" };
+  if (existing.authorId !== authorId) return { ok: false, reason: "forbidden" };
+
+  const ageMs = Date.now() - existing.createdAt.getTime();
+  const withinWindow = ageMs <= EDIT_WINDOW_MS;
+  const bypassesWindow =
+    actor.isAgent || actor.role === "system" || actor.role === "staff";
+  if (!withinWindow && !bypassesWindow) {
+    return { ok: false, reason: "expired" };
+  }
+
+  const updates: Partial<{
+    title: string;
+    text: string | null;
+    updatedAt: Date;
+  }> = {};
+  if (input.title !== undefined && input.title !== existing.title) {
+    updates.title = input.title;
+  }
+  if (input.text !== undefined && input.text !== (existing.text ?? "")) {
+    updates.text = input.text === "" ? null : input.text;
+  }
+  if (updates.title === undefined && updates.text === undefined) {
+    return { ok: false, reason: "noop" };
+  }
+
+  // Silent edit only when both true: this row is still in its initial
+  // 5-min window AND the editor is human. Bots crossing the window
+  // is the dominant new path; their edits always show.
+  const silent = withinWindow && !bypassesWindow;
+  let bumpedAt: Date | null = null;
+  if (!silent) {
+    bumpedAt = new Date();
+    updates.updatedAt = bumpedAt;
+  }
+
+  await db
+    .update(submissions)
+    .set(updates)
+    .where(eq(submissions.id, submissionId));
+  revalidatePath(`/post/${submissionId}`);
+  return { ok: true, silent, updatedAt: bumpedAt };
+}
