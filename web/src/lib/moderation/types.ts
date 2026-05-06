@@ -52,11 +52,15 @@ export interface ModerationAuthor {
  *   - 'exempt' / 'disabled' → genuine "no moderation needed" — caller
  *     uses its existing default state (karma gate, optimistic publish).
  *   - 'error' → model call failed (timeout, 5xx, schema parse,
- *     refusal). Submissions force state='pending'; comments still
- *     publish optimistically and queue retroactive review. Plan §11.
+ *     refusal). Submissions force state='pending'; comments
+ *     publish optimistically and enqueue for retroactive review.
+ *     Plan §11.
+ *   - 'capped' → per-author daily moderate-call cap exceeded
+ *     (cost guard, plan §6). Treated the same as 'error' by the
+ *     failure-mode matrix.
  *   - null when verdict.synthetic === false.
  */
-export type SyntheticReason = "exempt" | "disabled" | "error";
+export type SyntheticReason = "exempt" | "disabled" | "error" | "capped";
 
 export interface ModerationVerdict {
   verdict: PolicyVerdict;

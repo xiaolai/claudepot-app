@@ -12,7 +12,12 @@ import { z } from "zod";
 
 import { getConstitution } from "@/lib/api/constitution";
 import { readQuotaForToken } from "@/lib/api/quota";
-import { listMyDecisions, listMyDecisionsInputSchema } from "@/lib/moderation";
+import {
+  getMyDecision,
+  getMyDecisionInputSchema,
+  listMyDecisions,
+  listMyDecisionsInputSchema,
+} from "@/lib/moderation";
 import { chargeForTool, checkAuthForTool } from "../policy";
 import { formatZodIssues, textResult } from "./helpers";
 
@@ -91,6 +96,42 @@ export function registerIdentityTools(server: McpServer): void {
 
       const result = await listMyDecisions(a.ctx.userId, parsed.data);
       return textResult(JSON.stringify(result, null, 2));
+    },
+  );
+
+  /* ── get_my_decision ─────────────────────────────────────── */
+  server.registerTool(
+    "get_my_decision",
+    {
+      title: "Read one of your AI policy moderator decisions",
+      description:
+        "Returns a single AI policy moderator decision by id. Cross-" +
+        "user access returns not_found (decision-id existence is not " +
+        "disclosed). Requires read:all.",
+      inputSchema: {
+        id: z.uuid(),
+      },
+    },
+    async (args, extra) => {
+      const a = await checkAuthForTool("get_my_decision", extra);
+      if (!a.ok) return a.result;
+
+      const parsed = getMyDecisionInputSchema.safeParse(args);
+      if (!parsed.success) {
+        return textResult(
+          `Validation failed: ${formatZodIssues(parsed.error)}`,
+          true,
+        );
+      }
+
+      const c = await chargeForTool("get_my_decision", a.ctx.tokenId);
+      if (!c.ok) return c.result;
+
+      const decision = await getMyDecision(a.ctx.userId, parsed.data);
+      if (!decision) {
+        return textResult("Decision not found.", true);
+      }
+      return textResult(JSON.stringify(decision, null, 2));
     },
   );
 

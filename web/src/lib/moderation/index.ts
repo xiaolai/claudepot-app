@@ -20,6 +20,10 @@
  * No retries — see openai.ts for rationale.
  */
 
+import { and, count, eq, gte } from "drizzle-orm";
+
+import { db } from "@/db/client";
+import { policyDecisions } from "@/db/schema";
 import { callPolicyModel } from "./openai";
 import { isExemptFromModeration } from "./exempt";
 import {
@@ -50,7 +54,10 @@ export { getSystemUserId } from "./system-user";
 export {
   listMyDecisions,
   listMyDecisionsInputSchema,
+  getMyDecision,
+  getMyDecisionInputSchema,
   type ListMyDecisionsInput,
+  type GetMyDecisionInput,
   type PolicyDecisionDto,
 } from "./me-decisions";
 export {
@@ -60,6 +67,12 @@ export {
   LADDER_THRESHOLDS,
   type LadderRateLimitDecision,
 } from "./ladder";
+export {
+  drainRetroQueue,
+  enqueueRetroComment,
+  type DrainResult as RetroDrainResult,
+  type EnqueueRetroParams,
+} from "./retro-queue";
 
 function isEnabled(): boolean {
   const v = process.env.MODERATION_ENABLED;
@@ -69,7 +82,7 @@ function isEnabled(): boolean {
 
 function syntheticPass(
   oneLineWhy: string,
-  syntheticReason: "exempt" | "disabled" | "error",
+  syntheticReason: "exempt" | "disabled" | "error" | "capped",
 ): ModerationVerdict {
   return {
     verdict: "pass",
@@ -104,6 +117,41 @@ function assertProductionConfig(): void {
 }
 assertProductionConfig();
 
+/**
+ * Per-author cost guard. Counts policy_decisions rows the moderator
+ * has produced for this user since UTC midnight today. Beyond the
+ * cap, moderate() short-circuits to a synthetic 'capped' verdict
+ * which the caller handles via the failure-mode matrix (plan §6).
+ *
+ * Strawman cap: 50/day. Tunable via env so an operator can raise
+ * it for a specific incident without a code change. Constants are
+ * defaulted in code so dev / CI don't need to know about it.
+ */
+const DEFAULT_DAILY_MODERATE_CAP = 50;
+
+function getDailyCap(): number {
+  const v = Number(process.env.MODERATION_DAILY_CAP_PER_AUTHOR);
+  return Number.isFinite(v) && v > 0 ? Math.floor(v) : DEFAULT_DAILY_MODERATE_CAP;
+}
+
+async function isAtDailyCap(authorId: string): Promise<boolean> {
+  const cap = getDailyCap();
+  // Counts all real policy_decisions rows (synthetic verdicts don't
+  // persist) since UTC midnight. The hot path is one indexed COUNT.
+  const startOfDayUtc = new Date();
+  startOfDayUtc.setUTCHours(0, 0, 0, 0);
+  const [row] = await db
+    .select({ n: count() })
+    .from(policyDecisions)
+    .where(
+      and(
+        eq(policyDecisions.authorId, authorId),
+        gte(policyDecisions.decidedAt, startOfDayUtc),
+      ),
+    );
+  return (row?.n ?? 0) >= cap;
+}
+
 export async function moderate(
   content: ModerationContent,
   author: ModerationAuthor,
@@ -114,6 +162,18 @@ export async function moderate(
 
   if (!isEnabled()) {
     return syntheticPass("moderation disabled", "disabled");
+  }
+
+  // Cost guard: cap at N moderate() calls per author per UTC day.
+  // Beyond the cap, return synthetic 'capped' so the caller's
+  // failure-mode matrix kicks in (submissions → pending, comments →
+  // optimistic publish + retro queue). Avoids runaway OpenAI spend
+  // from a single user blasting submissions.
+  if (await isAtDailyCap(author.id)) {
+    return syntheticPass(
+      `daily moderation cap (${getDailyCap()}) reached for this author`,
+      "capped",
+    );
   }
 
   try {

@@ -29,6 +29,7 @@ export * from "./enums";
 export * from "./users";
 export * from "./content";
 export * from "./moderation";
+export * from "./moderation-retro";
 export * from "./notifications";
 export * from "./editorial";
 export * from "./policy";

@@ -223,6 +223,15 @@ export const ENDPOINTS: ReadonlyArray<EndpointSpec> = [
       "Caller's own AI policy moderator decisions. Filters: kind (submission|comment), since. Cursor-free; returns most recent 200.",
   },
   {
+    id: "me:get_decision",
+    method: "GET",
+    path: "/api/v1/me/decisions/{id}",
+    auth: "read:all",
+    bucket: "reads",
+    notes:
+      "Caller's own AI policy moderator decision by id. Cross-user access returns 404 (not 403) so existence isn't disclosed.",
+  },
+  {
     id: "notifications:list",
     method: "GET",
     path: "/api/v1/notifications",
