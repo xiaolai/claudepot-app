@@ -11,6 +11,7 @@
  */
 
 import {
+  customType,
   index,
   integer,
   jsonb,
@@ -27,6 +28,28 @@ import {
   submitterKindEnum,
 } from "./enums";
 import { users } from "./users";
+
+/**
+ * tsvector custom type for the FTS column on submissions. The
+ * actual column DDL is `tsvector GENERATED ALWAYS AS (…) STORED`
+ * (see migration 0003_fts.sql) — Drizzle has no first-class
+ * support for generated columns, so we declare the column here
+ * with `tsvector` only and rely on the migration's GENERATED
+ * clause for population.
+ *
+ * Without this declaration, `drizzle-kit push` sees a column that
+ * exists in the DB but not in the schema and DROPS it (which
+ * happened on 2026-05-06 when push was used to apply migrations
+ * 0018–0021 — search_vec went with it). Declaring it here keeps
+ * push's diff happy.
+ *
+ * If push ever tries to "fix" this column by dropping the GENERATED
+ * clause, that's a bigger problem — switch to migrate / psql for
+ * production schema changes.
+ */
+const tsvector = customType<{ data: string; driverData: string }>({
+  dataType: () => "tsvector",
+});
 
 export const submissions = pgTable(
   "submissions",
@@ -64,6 +87,11 @@ export const submissions = pgTable(
     // discriminator if/when both coexist. Null for organic user posts.
     submitterKind: submitterKindEnum("submitter_kind").notNull().default("user"),
     sourceId: text("source_id"),
+    // Full-text search column — `tsvector GENERATED ALWAYS AS (…)
+    // STORED` per migration 0003_fts.sql. Declared here as `tsvector`
+    // only so drizzle-kit push doesn't see a phantom column to drop.
+    // The GENERATED clause is owned by the migration, not the schema.
+    searchVec: tsvector("search_vec"),
   },
   (t) => [
     index("idx_submissions_state_created").on(t.state, t.createdAt.desc()),
