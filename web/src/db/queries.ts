@@ -182,7 +182,19 @@ const SUBMISSION_BASE_SELECT = {
   authorImageUrl: users.image,
   authorIsAgent: users.isAgent,
   commentsCount: sql<number>`(SELECT COUNT(*)::int FROM ${comments} WHERE ${comments.submissionId} = ${submissions.id} AND ${comments.deletedAt} IS NULL)`,
-  tagSlugs: sql<string[]>`ARRAY(SELECT ${submissionTags.tagSlug} FROM ${submissionTags} WHERE ${submissionTags.submissionId} = ${submissions.id})`,
+  // Migration 0022 — exclude pending_review=true tags from public
+  // submission rows. Without this filter, an Ada-proposed tag still
+  // awaiting staff review would appear as a chip on /c rows linking
+  // to a /c/<slug> page that 404s (getTagBySlug filters pending too).
+  // Joining tags via the slug FK and gating on pending_review keeps
+  // the chip and the landing page in sync.
+  tagSlugs: sql<string[]>`ARRAY(
+    SELECT ${submissionTags.tagSlug}
+    FROM ${submissionTags}
+    INNER JOIN ${tags} ON ${tags.slug} = ${submissionTags.tagSlug}
+    WHERE ${submissionTags.submissionId} = ${submissions.id}
+      AND ${tags.pendingReview} = false
+  )`,
 };
 
 // GREATEST(..., 0) clamps the age so future-dated fixture rows don't
@@ -491,9 +503,14 @@ export async function getUpvotedByUser(username: string): Promise<Submission[]> 
 /* ── Tags ───────────────────────────────────────────────────────── */
 
 export async function getAllTags(): Promise<Tag[]> {
+  // Migration 0022 — pending_review=true tags are Ada-proposed and
+  // awaiting staff approval. Hide them from the public catalog so
+  // the /c index only shows curated tags. Staff sees and approves
+  // them at /admin/tags.
   const rows = await db
     .select()
     .from(tags)
+    .where(eq(tags.pendingReview, false))
     .orderBy(tags.sortOrder);
   return rows.map((t) => ({
     slug: t.slug,
@@ -503,7 +520,15 @@ export async function getAllTags(): Promise<Tag[]> {
 }
 
 export async function getTagBySlug(slug: string): Promise<Tag | undefined> {
-  const [t] = await db.select().from(tags).where(eq(tags.slug, slug)).limit(1);
+  // Per migration 0022, a pending_review tag has no public landing
+  // page — return undefined so /c/<slug> 404s until staff approves
+  // it. Submissions that already link to a pending tag remain in
+  // the DB; they're just not surfaced by tag.
+  const [t] = await db
+    .select()
+    .from(tags)
+    .where(and(eq(tags.slug, slug), eq(tags.pendingReview, false)))
+    .limit(1);
   return t ? { slug: t.slug, name: t.name, tagline: t.tagline ?? "" } : undefined;
 }
 
@@ -527,6 +552,9 @@ export async function getTopTags(): Promise<Array<Tag & { count: number }>> {
         gte(submissions.createdAt, cutoff),
       ),
     )
+    // Migration 0022 — drop pending_review=true rows so the home
+    // page top-tags rail only shows staff-approved tags.
+    .where(eq(tags.pendingReview, false))
     .groupBy(tags.slug, tags.name, tags.tagline, tags.sortOrder)
     .orderBy(desc(sql`COUNT(${submissionTags.submissionId})`));
   return rows.map((r) => ({

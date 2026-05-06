@@ -51,6 +51,10 @@ export interface ModelCallResult {
 export async function callPolicyModel(
   content: ModerationContent,
   systemPrompt: string,
+  /** Active tag vocabulary for submissions; ignored for comments.
+   *  Empty array means Ada always has to mark new tags with
+   *  is_new=true (the bootstrap state when no tags exist yet). */
+  availableTags: string[] = [],
 ): Promise<ModelCallResult> {
   const ctrl = new AbortController();
   const timer = setTimeout(() => ctrl.abort(), TIMEOUT_MS);
@@ -61,7 +65,7 @@ export async function callPolicyModel(
         model: POLICY_MODEL,
         messages: [
           { role: "system", content: systemPrompt },
-          { role: "user", content: buildUserPrompt(content) },
+          { role: "user", content: buildUserPrompt(content, availableTags) },
         ],
         response_format: {
           type: "json_schema",

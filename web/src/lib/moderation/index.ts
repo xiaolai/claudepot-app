@@ -20,10 +20,10 @@
  * No retries — see openai.ts for rationale.
  */
 
-import { and, count, eq, gte } from "drizzle-orm";
+import { and, asc, count, eq, gte } from "drizzle-orm";
 
 import { db } from "@/db/client";
-import { policyDecisions } from "@/db/schema";
+import { policyDecisions, tags } from "@/db/schema";
 import { callPolicyModel } from "./openai";
 import { isExemptFromModeration } from "./exempt";
 import { getActiveSystemPrompt } from "./prompt-store";
@@ -90,6 +90,10 @@ function syntheticPass(
     category: null,
     confidence: "high",
     oneLineWhy,
+    // Synthetic verdicts never produce tags — Ada didn't actually
+    // score the content. The submission's user-supplied tags (if
+    // any) still apply via the existing input.tags path.
+    tags: [],
     synthetic: true,
     syntheticReason,
     modelId: POLICY_MODEL,
@@ -133,6 +137,53 @@ const DEFAULT_DAILY_MODERATE_CAP = 50;
 function getDailyCap(): number {
   const v = Number(process.env.MODERATION_DAILY_CAP_PER_AUTHOR);
   return Number.isFinite(v) && v > 0 ? Math.floor(v) : DEFAULT_DAILY_MODERATE_CAP;
+}
+
+/**
+ * Active tag vocabulary for the moderator prompt — pending tags
+ * are excluded so Ada can't accidentally re-propose a tag staff is
+ * still reviewing. Cached per process for TAG_VOCAB_TTL_MS.
+ *
+ * The list is injected into the moderator's USER prompt (not
+ * system) so /admin/policy-prompt edits don't accidentally drop
+ * tagging behavior. The system prompt only describes the rules;
+ * the user prompt carries the data.
+ */
+const TAG_VOCAB_TTL_MS = 60_000;
+let cachedTagSlugs: string[] | null = null;
+let cachedTagSlugsAt = 0;
+
+async function getActiveTagSlugs(): Promise<string[]> {
+  const now = Date.now();
+  if (cachedTagSlugs && now - cachedTagSlugsAt < TAG_VOCAB_TTL_MS) {
+    return cachedTagSlugs;
+  }
+  try {
+    const rows = await db
+      .select({ slug: tags.slug })
+      .from(tags)
+      .where(eq(tags.pendingReview, false))
+      .orderBy(asc(tags.slug));
+    cachedTagSlugs = rows.map((r) => r.slug);
+  } catch (err) {
+    // DB error → return what's cached (even if stale) or [] so the
+    // moderator falls back to "all tags are new" behavior. Better
+    // than blocking moderation on a tag-vocab fetch failure.
+    const msg = err instanceof Error ? err.message : String(err);
+    console.warn(
+      `[moderation] tag vocab fetch failed; using ${cachedTagSlugs ? "stale cache" : "empty"}: ${msg}`,
+    );
+    if (!cachedTagSlugs) cachedTagSlugs = [];
+  }
+  cachedTagSlugsAt = now;
+  return cachedTagSlugs;
+}
+
+/** Test-only / admin-server-action: clear the tag-vocab cache so a
+ *  newly-approved tag becomes visible immediately. */
+export function clearTagVocabCache(): void {
+  cachedTagSlugs = null;
+  cachedTagSlugsAt = 0;
 }
 
 async function isAtDailyCap(authorId: string): Promise<boolean> {
@@ -211,12 +262,28 @@ export async function moderate(
     // changes — and so a /office/policy/ aggregate can chart accept
     // rates per prompt version.
     const { systemPrompt, version } = await getActiveSystemPrompt();
-    const { response, costUsd } = await callPolicyModel(content, systemPrompt);
+    // Submissions get the active tag vocabulary injected into the
+    // user prompt; comments never tag, so callers skip this fetch.
+    const availableTags =
+      content.kind === "submission" ? await getActiveTagSlugs() : [];
+    const { response, costUsd } = await callPolicyModel(
+      content,
+      systemPrompt,
+      availableTags,
+    );
     return {
       verdict: response.verdict,
       category: response.category,
       confidence: response.confidence,
       oneLineWhy: response.one_line_why,
+      // Tags only apply to accepted submissions. Reject + comments
+      // strip them defensively — the model is instructed to leave
+      // them empty in those cases, but we don't trust output without
+      // verification.
+      tags:
+        response.verdict === "pass" && content.kind === "submission"
+          ? response.tags.map((t) => ({ slug: t.slug, isNew: t.is_new }))
+          : [],
       synthetic: false,
       syntheticReason: null,
       modelId: POLICY_MODEL,

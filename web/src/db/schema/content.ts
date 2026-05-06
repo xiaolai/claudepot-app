@@ -11,6 +11,7 @@
  */
 
 import {
+  boolean,
   customType,
   index,
   integer,
@@ -106,7 +107,19 @@ export const tags = pgTable("tags", {
   name: text("name").notNull(),
   tagline: text("tagline"),
   sortOrder: integer("sort_order").notNull().default(0),
+  // Migration 0022 — Ada-proposed tags land with pending_review=true
+  // and stay hidden from the public /c catalog until staff approves
+  // them at /admin/tags. Staff approval flips this to false.
+  pendingReview: boolean("pending_review").notNull().default(false),
 });
+
+/**
+ * Provenance values accepted by submission_tags.source. The
+ * matching CHECK constraint lives in migration 0022 — keep these
+ * two in sync if you add a third source (e.g. 'import').
+ */
+export const SUBMISSION_TAG_SOURCES = ["ai", "user"] as const;
+export type SubmissionTagSource = (typeof SUBMISSION_TAG_SOURCES)[number];
 
 export const submissionTags = pgTable(
   "submission_tags",
@@ -117,6 +130,17 @@ export const submissionTags = pgTable(
     tagSlug: text("tag_slug")
       .notNull()
       .references(() => tags.slug, { onDelete: "cascade" }),
+    // Migration 0022 — provenance. 'user' for tags from the submit
+    // form's tags[]; 'ai' for tags Ada applied during moderation.
+    // CHECK constraint in the migration enforces the value space at
+    // the DB layer; .$type() narrows TS so writes that pass an
+    // unknown string fail at compile time before the constraint
+    // ever fires. The set of valid values is exported as
+    // `SUBMISSION_TAG_SOURCES` so call sites can assert on the union.
+    source: text("source")
+      .notNull()
+      .default("user")
+      .$type<SubmissionTagSource>(),
   },
   (t) => [
     primaryKey({ columns: [t.submissionId, t.tagSlug] }),

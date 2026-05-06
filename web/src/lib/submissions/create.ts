@@ -26,6 +26,7 @@ import {
   writePolicyDecision,
   type ModerationAuthor,
 } from "@/lib/moderation";
+import { applyAiTags } from "@/lib/moderation/apply-ai-tags";
 
 import {
   determineInitialState,
@@ -133,8 +134,42 @@ export async function createSubmission(
 
   if (tags.length > 0) {
     await db.insert(submissionTags).values(
-      tags.map((tagSlug) => ({ submissionId: row.id, tagSlug })),
+      // Migration 0022 — explicit source='user' for user-supplied
+      // tags so /admin/log + analytics can split user vs ai tagging.
+      // The column has a DEFAULT 'user', so omitting it would also
+      // work, but being explicit here makes the provenance audit-
+      // grep-able from a single point.
+      tags.map((tagSlug) => ({
+        submissionId: row.id,
+        tagSlug,
+        source: "user" as const,
+      })),
     );
+  }
+
+  // Apply Ada-proposed tags only on accepted submissions. Skip when
+  // moderator rejected or errored — a rejected row never displays
+  // tags publicly, and the synthetic-error path doesn't carry real
+  // tag proposals (verdict.tags is forced to [] in those cases).
+  // Errors here MUST NOT roll back the submission insert, so the
+  // try/catch keeps applyAiTags isolated from the main pipeline.
+  if (
+    !moderatorRejected &&
+    !moderatorErrored &&
+    verdict.tags.length > 0
+  ) {
+    try {
+      await applyAiTags({
+        submissionId: row.id,
+        userTagSlugs: tags,
+        aiTags: verdict.tags,
+      });
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      console.warn(
+        `[moderation] AI-tag apply failed for submission ${row.id}: ${msg}`,
+      );
+    }
   }
 
   // Record the verdict + (on reject) the audit log + the user
