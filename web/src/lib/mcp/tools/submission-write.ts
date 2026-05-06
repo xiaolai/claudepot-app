@@ -83,8 +83,11 @@ export function registerSubmissionWriteTools(server: McpServer): void {
           );
         }
         if (result.reason === "rejected") {
+          const appealLine = result.decisionId
+            ? ` Appeal: https://claudepot.com/appeal/${result.decisionId}`
+            : " (Audit record could not be written; contact staff to appeal.)";
           return textResult(
-            `Blocked by policy moderator (${result.category}): ${result.oneLineWhy}. Appeal: https://claudepot.com/appeal/${result.decisionId}`,
+            `Blocked by policy moderator (${result.category}): ${result.oneLineWhy}.${appealLine}`,
             true,
           );
         }

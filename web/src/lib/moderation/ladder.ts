@@ -49,11 +49,16 @@ export interface LadderRateLimitDecision {
  * Counts an author's `verdict='reject'` rows in policy_decisions
  * within the trailing `windowDays` window. Powers both rungs.
  *
- * Excludes pass-1 comment rejects that the confirmation pass later
- * overturned: the plan's optimistic-publish design says an
- * overturned reject is not a strike against the author. Submission
- * rejects always count (no pass-2 path); illegal comment rejects
- * count (target_id=NULL means no pass-2 can match).
+ * Strike-counting rules:
+ *   - Pass-1 reject is the strike. Pass-2 confirms or overturns it
+ *     but is not its own strike — counting both would double-count
+ *     a single moderation event.
+ *   - Pass-1 rejects whose pass-2 cleared (verdict='pass') don't
+ *     count: the plan's optimistic-publish design says an overturned
+ *     reject is not a strike against the author.
+ *   - Submission rejects always count (no pass-2 path exists).
+ *   - Illegal comment blocks count (target_id=NULL means no pass-2
+ *     row can match the NOT EXISTS predicate, so it holds).
  */
 export async function recentRejectsForAuthor(
   authorId: string,
@@ -67,12 +72,8 @@ export async function recentRejectsForAuthor(
       and(
         eq(policyDecisions.authorId, authorId),
         eq(policyDecisions.verdict, "reject"),
+        eq(policyDecisions.passNumber, 1),
         gt(policyDecisions.decidedAt, cutoff),
-        // Exclude rejects whose pass-2 confirmation flipped to pass.
-        // Match by (target_type, target_id) — the unique handle on
-        // the underlying content. Rows with target_id IS NULL (the
-        // illegal-comment block path) are unaffected: no pass-2 row
-        // can share a NULL target_id, so the NOT EXISTS holds.
         sql`NOT EXISTS (
           SELECT 1 FROM ${policyDecisions} p2
            WHERE p2.target_type = ${policyDecisions.targetType}

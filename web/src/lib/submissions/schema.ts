@@ -52,12 +52,17 @@ export type SubmitResult =
       // caller's job is to surface the verdict to the user (not to
       // claim the publish succeeded). decisionId points at the
       // policy_decisions row used for /appeal/[id].
+      //
+      // decisionId is null only when the moderator rejected but the
+      // post-insert audit-row write itself failed. The submission
+      // is still rejected; users contact staff manually since
+      // /appeal/[id] needs a real policy_decisions row.
       ok: false;
       reason: "rejected";
       submissionId: string;
       category: string;
       oneLineWhy: string;
-      decisionId: string;
+      decisionId: string | null;
     };
 
 /**

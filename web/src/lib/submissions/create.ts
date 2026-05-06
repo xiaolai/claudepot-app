@@ -186,7 +186,12 @@ export async function createSubmission(
   // error / a text-result on MCP. Returning ok:true with pending:false
   // would tell the user the publish succeeded — which is a lie, since
   // the rejected state hides the row from every public surface.
-  if (moderatorRejected && verdict.category && decisionId) {
+  //
+  // decisionId may be null if writePolicyDecision threw above. The
+  // row is still rejected; we surface that honestly even without an
+  // appeal target. Callers handle null decisionId by suppressing the
+  // appeal CTA and pointing the user at staff.
+  if (moderatorRejected && verdict.category) {
     return {
       ok: false,
       reason: "rejected",

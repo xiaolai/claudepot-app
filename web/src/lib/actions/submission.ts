@@ -107,8 +107,14 @@ export async function submitAndRedirect(formData: FormData) {
     if (result.reason === "rejected") {
       // Moderator rejected — the row exists with state='rejected'
       // and a notification was written. Send the user to the
-      // appeal page rather than the (hidden) post permalink.
-      redirect(`/appeal/${result.decisionId}`);
+      // appeal page rather than the (hidden) post permalink. If
+      // the decisionId is null (audit-row write failed), the
+      // appeal page has nothing to render — surface a submit-page
+      // error instead of redirecting to /appeal/null.
+      if (result.decisionId) {
+        redirect(`/appeal/${result.decisionId}`);
+      }
+      redirect(`/submit?error=rejected`);
     }
     redirect(`/submit?error=${result.reason}`);
   }
