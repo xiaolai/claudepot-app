@@ -3,10 +3,16 @@
  *
  * Filters (all optional, all query-string):
  *   ?unread=true          only unread (readAt IS NULL)
- *   ?since=<ISO8601>      only items with createdAt >= since (inclusive)
+ *   ?since=<ISO8601>      only items with createdAt > since (exclusive,
+ *                         so a bot can pass back the highest createdAt
+ *                         it last processed without re-receiving it)
  *   ?limit=<n>            cap result count (default 50, max 200)
  *   ?kind=<k>[&kind=<k>]  filter by kind (comment_reply, submission_reply,
- *                         moderation, mention). Repeat for OR.
+ *                         moderation, mention). Repeat for OR. Any
+ *                         unknown kind in the list is rejected outright
+ *                         (422) — silently dropping it would change the
+ *                         filter into "all kinds" which is the opposite
+ *                         of what the caller asked for.
  *
  * Always includes `unreadCount` over the FULL inbox so polling clients
  * can decide whether to keep polling even when their filtered slice
@@ -44,13 +50,22 @@ export async function GET(req: Request): Promise<Response> {
 
   const url = new URL(req.url);
   const rawKinds = url.searchParams.getAll("kind");
-  // Filter unknown kinds out at the boundary so the schema's z.enum
-  // sees only valid values; bots passing an obsolete kind shouldn't
-  // produce a 422 — they should just see no results for that kind.
-  const kinds: NotificationKind[] = rawKinds.filter(
-    (k): k is NotificationKind =>
-      (NOTIFICATION_KINDS as readonly string[]).includes(k),
+  const invalidKinds = rawKinds.filter(
+    (k) => !(NOTIFICATION_KINDS as readonly string[]).includes(k),
   );
+  // Any invalid kind in the request is a hard error — not silently
+  // dropped. Same shape as the MCP tool, which validates kinds via
+  // its zod enum. Mixed valid+invalid silently keeping only the
+  // valid ones would mean a typo'd filter would still return data
+  // matching the rest, which masks the bug.
+  if (invalidKinds.length > 0) {
+    return problemResponse(
+      validation(
+        `Invalid kind(s): ${invalidKinds.join(", ")}. Accepted: ${NOTIFICATION_KINDS.join(", ")}.`,
+      ),
+    );
+  }
+  const kinds: NotificationKind[] = rawKinds as NotificationKind[];
 
   const parsed = listNotificationsInputSchema.safeParse({
     unreadOnly: url.searchParams.get("unread") === "true",

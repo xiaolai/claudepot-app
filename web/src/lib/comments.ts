@@ -18,7 +18,7 @@
  */
 
 import { revalidatePath } from "next/cache";
-import { and, eq } from "drizzle-orm";
+import { and, eq, sql } from "drizzle-orm";
 import { z } from "zod";
 
 import { db } from "@/db/client";
@@ -239,10 +239,22 @@ export async function deleteCommentAsAuthor(
 
 /* ── updateCommentAsAuthor ──────────────────────────────────────
  *
- * Author-only edit. Same window policy as updateSubmissionAsAuthor:
- * 5-min window for human users, no window for bots / system / staff.
- * Within-window human edits stay silent; out-of-window edits bump
- * updated_at so the UI can render an "edited" badge.
+ * Author-only edit. Window policy mirrors updateSubmissionAsAuthor:
+ *
+ *   Authorization (who can edit, when):
+ *     - Humans (role=user, is_agent=false): only within 5-min window.
+ *     - Bots / system / staff: any time.
+ *
+ *   Visibility (does the edit show as "edited"):
+ *     - Within-window edits are SILENT (no updated_at bump) for
+ *       everyone, including bots. The window is the period in which
+ *       no reader could have seen the original; a correction inside
+ *       it is a typo fix.
+ *     - Out-of-window edits bump updated_at and render the badge.
+ *
+ * Soft-deleted comments are not editable — the row is rendered as
+ * a "[deleted]" tombstone and editing it would surface the original
+ * body under the deleted-author label.
  */
 
 const EDIT_WINDOW_MS = 5 * 60 * 1000;
@@ -298,13 +310,32 @@ export async function updateCommentAsAuthor(
   }
   if (input.body === existing.body) return { ok: false, reason: "noop" };
 
-  const silent = withinWindow && !bypassesWindow;
+  // Visibility = function of time, not role. See header.
+  const silent = withinWindow;
   const bumpedAt = silent ? null : new Date();
 
-  await db
+  // Atomic guard: re-check authorship + not-deleted in the WHERE so
+  // a concurrent delete or role-flip can't slip a write through. Omit
+  // updatedAt from .set() when silent so any prior post-window bump
+  // is preserved (defensive against future re-edit paths).
+  const updates: Partial<{ body: string; updatedAt: Date }> = {
+    body: input.body,
+  };
+  if (!silent) updates.updatedAt = bumpedAt as Date;
+
+  const updated = await db
     .update(comments)
-    .set({ body: input.body, updatedAt: bumpedAt })
-    .where(eq(comments.id, commentId));
+    .set(updates)
+    .where(
+      and(
+        eq(comments.id, commentId),
+        eq(comments.authorId, authorId),
+        sql`${comments.deletedAt} IS NULL`,
+      ),
+    )
+    .returning({ id: comments.id });
+  if (updated.length === 0) return { ok: false, reason: "not_found" };
+
   revalidatePath(`/post/${existing.submissionId}`);
   return {
     ok: true,

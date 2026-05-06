@@ -63,6 +63,10 @@ export async function editSubmission(
     // The core's "noop" is success-equivalent for the web caller —
     // hitting Save with no changes shouldn't error.
     if (result.reason === "noop") return { ok: true };
+    // The core's "invalid" reason flags URL/text invariant violations
+    // (adding text to a link post, clearing a self-post). Web caller
+    // sees them as validation failures.
+    if (result.reason === "invalid") return { ok: false, reason: "validation" };
     return { ok: false, reason: result.reason };
   }
   return { ok: true };

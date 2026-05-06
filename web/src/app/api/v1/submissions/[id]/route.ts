@@ -131,6 +131,11 @@ export async function PATCH(
         ),
       );
     }
+    if (result.reason === "invalid") {
+      return problemResponse(
+        validation(result.detail ?? "Update would violate the URL/text invariant."),
+      );
+    }
     if (result.reason === "noop") {
       // Treat as success — no fields changed, idempotent.
       return ok({ id, edited: false, silent: true, updatedAt: null });

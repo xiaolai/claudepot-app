@@ -14,7 +14,7 @@
  * userId they're given.
  */
 
-import { and, eq, gte, inArray, isNull } from "drizzle-orm";
+import { and, count, desc, eq, gt, inArray, isNull } from "drizzle-orm";
 import { z } from "zod";
 
 import { db } from "@/db/client";
@@ -38,9 +38,12 @@ const MAX_LIMIT = 200;
 
 export const listNotificationsInputSchema = z.object({
   unreadOnly: z.boolean().optional(),
-  // Inclusive lower bound on createdAt for incremental polling.
+  // Exclusive lower bound on createdAt for incremental polling.
   // Bots persist the highest createdAt they've seen and pass it back
-  // here so they don't re-pull the whole inbox.
+  // here; using `>` (not `>=`) means the boundary item is not
+  // re-delivered. Same-millisecond ties are vanishingly rare for a
+  // single user's inbox; if they ever matter, switch to a composite
+  // (createdAt, id) cursor.
   since: z.iso.datetime().optional(),
   limit: z.coerce.number().int().min(1).max(MAX_LIMIT).optional(),
   // Filter to specific kinds; omitted = all kinds.
@@ -69,11 +72,24 @@ export async function listNotificationsForUser(
   const limit = input.limit ?? DEFAULT_LIMIT;
   const conditions = [eq(notifications.userId, userId)];
   if (input.unreadOnly) conditions.push(isNull(notifications.readAt));
-  if (input.since) conditions.push(gte(notifications.createdAt, new Date(input.since)));
+  if (input.since) conditions.push(gt(notifications.createdAt, new Date(input.since)));
   if (input.kinds && input.kinds.length > 0) {
     conditions.push(inArray(notifications.kind, input.kinds));
   }
 
+  // ORDER BY DESC + LIMIT N returns the newest N matching rows.
+  // For incremental polling (`since` provided), this returns the
+  // newest N items strictly after the boundary.
+  //
+  // Trade-off: if more than `limit` items arrive between two polls,
+  // the older ones in that window are missed (the cursor advances to
+  // the newest seen, skipping the gap). Bots avoiding backlog must
+  // poll often enough that any window stays under `limit` (default
+  // 50, max 200). Acceptable for the typical use case (one bot, one
+  // user's inbox, polling every minute or two — > 50 events/min on
+  // one user is implausible). Adding a `nextCursor` / `hasMore`
+  // pagination response is the right fix when this assumption
+  // breaks; not in scope today.
   const rows = await db
     .select({
       id: notifications.id,
@@ -84,18 +100,15 @@ export async function listNotificationsForUser(
     })
     .from(notifications)
     .where(and(...conditions))
-    .orderBy(notifications.createdAt)
+    .orderBy(desc(notifications.createdAt))
     .limit(limit);
-
-  // Reverse to newest-first AFTER the SQL — ordering ASC keeps
-  // pagination stable when callers iterate with `since`.
-  rows.reverse();
 
   // Unread count is over the FULL inbox, not the filtered slice — bots
   // need the inbox-wide unread count to decide whether to keep polling
-  // even if their current filter is empty.
-  const unreadRows = await db
-    .select({ id: notifications.id })
+  // even if their current filter is empty. Aggregate count() so a
+  // 10k-unread inbox doesn't materialize 10k rows just to .length them.
+  const [{ n: unreadCount } = { n: 0 }] = await db
+    .select({ n: count() })
     .from(notifications)
     .where(and(eq(notifications.userId, userId), isNull(notifications.readAt)));
 
@@ -107,20 +120,31 @@ export async function listNotificationsForUser(
       createdAt: r.createdAt.toISOString(),
       readAt: r.readAt?.toISOString() ?? null,
     })),
-    unreadCount: unreadRows.length,
+    unreadCount,
   };
 }
 
 /* ── Mark read ──────────────────────────────────────────────────── */
 
+// True XOR: exactly one of {ids non-empty, all === true}. The previous
+// shape allowed { all: true, ids: [...] } and silently marked the whole
+// inbox while looking like an id-targeted call — that's a footgun for
+// any bot that builds the request dynamically.
 export const markReadInputSchema = z
   .object({
     ids: z.array(z.uuid()).max(500).optional(),
     all: z.boolean().optional(),
   })
-  .refine((v) => v.all === true || (v.ids !== undefined && v.ids.length > 0), {
-    message: "Provide either ids[] or all=true.",
-  });
+  .refine(
+    (v) => {
+      const hasIds = v.ids !== undefined && v.ids.length > 0;
+      const hasAll = v.all === true;
+      return hasIds !== hasAll;
+    },
+    {
+      message: "Provide exactly one of: ids[] (non-empty) OR all=true.",
+    },
+  );
 
 export type MarkReadInput = z.infer<typeof markReadInputSchema>;
 
@@ -150,17 +174,14 @@ export async function markNotificationsReadForUser(
   return { updated: updated.length };
 }
 
-/* ── Helper retained for compatibility with the existing web page ── */
+/* ── Helper retained for the existing web page ────────────────── */
 
-/** Fully-typed: mark all unread as read for a single user. Used by
- * the web notifications page on view. The API surface uses
- * markNotificationsReadForUser({all:true}) instead. */
+/** Mark every unread notification for a user as read. Thin shim over
+ * `markNotificationsReadForUser({ all: true })` for callers that
+ * don't care about the count, used by the web notifications page on
+ * view. New API/MCP callers go through the typed core. */
 export async function markAllReadForUser(userId: string): Promise<number> {
-  const updated = await db
-    .update(notifications)
-    .set({ readAt: new Date() })
-    .where(and(eq(notifications.userId, userId), isNull(notifications.readAt)))
-    .returning({ id: notifications.id });
-  return updated.length;
+  const { updated } = await markNotificationsReadForUser(userId, { all: true });
+  return updated;
 }
 
