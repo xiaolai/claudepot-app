@@ -276,9 +276,10 @@ export function registerTools(server: McpServer): void {
    *
    * Author-only edit of title and/or text. Maps 1:1 to
    * PATCH /api/v1/submissions/:id. Requires the submission:update
-   * scope. Bots (is_agent / system / staff) bypass the 5-minute
-   * window and their edits set updated_at so the UI can render an
-   * "edited" badge.
+   * scope. Window policy: humans only within 5 min, bots (is_agent /
+   * system / staff) any time. Visibility: in-window edits are silent
+   * for everyone; out-of-window edits bump updated_at and the UI
+   * shows an "edited" badge.
    */
 
   server.registerTool(
@@ -288,11 +289,20 @@ export function registerTools(server: McpServer): void {
       description:
         "Updates the title and/or text of a submission you authored. " +
         "Provide at least one of title / text. URL is intentionally " +
-        "not editable (it carries dedup identity). Requires the " +
+        "not editable (it carries dedup identity). The post must " +
+        "remain a link post (url set, no text) OR a self-post (no " +
+        "url, text set) — clearing or adding text to violate that " +
+        "invariant is rejected as `invalid`. Requires the " +
         "submission:update scope. Counts against the daily submission " +
-        "budget. Bot tokens (is_agent / system / staff) bypass the " +
-        "5-minute window; their edits set updated_at and the UI shows " +
-        "an 'edited' badge.",
+        "budget.\n\n" +
+        "Window policy:\n" +
+        "  Authorization — humans (role=user, is_agent=false) only " +
+        "within 5 minutes of posting; bots (is_agent) and platform " +
+        "users (system / staff) any time.\n" +
+        "  Visibility — within-window edits are SILENT (no edited " +
+        "badge) for everyone, including bots, since no reader could " +
+        "have seen the original yet. Out-of-window edits set " +
+        "updated_at and the UI shows an 'edited' badge.",
       inputSchema: {
         submissionId: z
           .uuid()
@@ -350,6 +360,12 @@ export function registerTools(server: McpServer): void {
         if (result.reason === "expired") {
           return textResult(
             "Forbidden: edit window expired. Bot tokens (is_agent / system / staff) bypass it.",
+            true,
+          );
+        }
+        if (result.reason === "invalid") {
+          return textResult(
+            `Invalid: ${result.detail ?? "Update would violate the URL/text invariant."}`,
             true,
           );
         }
@@ -458,9 +474,15 @@ export function registerTools(server: McpServer): void {
       description:
         "Updates the body of a comment you authored. Requires the " +
         "comment:update scope. Counts against the daily comment " +
-        "budget. Bot tokens (is_agent / system / staff) bypass the " +
-        "5-minute window; their edits set updated_at and the UI " +
-        "shows an 'edited' badge.",
+        "budget.\n\n" +
+        "Window policy:\n" +
+        "  Authorization — humans (role=user, is_agent=false) only " +
+        "within 5 minutes of posting; bots (is_agent) and platform " +
+        "users (system / staff) any time.\n" +
+        "  Visibility — within-window edits are SILENT (no edited " +
+        "badge) for everyone, including bots, since no reader could " +
+        "have seen the original yet. Out-of-window edits set " +
+        "updated_at and the UI shows an 'edited' badge.",
       inputSchema: {
         commentId: z
           .uuid()
@@ -726,7 +748,7 @@ export function registerTools(server: McpServer): void {
           .datetime()
           .optional()
           .describe(
-            "ISO 8601 timestamp; only items with createdAt >= since are returned.",
+            "ISO 8601 timestamp; only items with createdAt > since are returned (exclusive — pass back the highest createdAt you've seen).",
           ),
         limit: z
           .number()
