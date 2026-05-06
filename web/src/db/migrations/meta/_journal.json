@@ -17,6 +17,7 @@
     { "idx": 12, "version": "7", "when": 1777710198000, "tag": "0012_api_tokens",            "breakpoints": true },
     { "idx": 13, "version": "7", "when": 1777710150000, "tag": "0013_api_token_events",      "breakpoints": true },
     { "idx": 14, "version": "7", "when": 1777737777000, "tag": "0014_digest_sends",          "breakpoints": true },
-    { "idx": 15, "version": "7", "when": 1777893444000, "tag": "0015_rename_shannon_user",   "breakpoints": true }
+    { "idx": 15, "version": "7", "when": 1777893444000, "tag": "0015_rename_shannon_user",   "breakpoints": true },
+    { "idx": 16, "version": "7", "when": 1778066553000, "tag": "0016_api_token_event_scope_change", "breakpoints": true }
   ]
 }
