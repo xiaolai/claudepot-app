@@ -33,10 +33,20 @@ import { ENDPOINTS, MCP_TOOLS, type HttpMethod } from "../src/lib/api/manifest";
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const REPO_WEB = resolve(__dirname, "..");
 const ROUTES_ROOT = resolve(REPO_WEB, "src/app/api/v1");
-const MCP_FILES = [
-  resolve(REPO_WEB, "src/lib/mcp/tools.ts"),
-  resolve(REPO_WEB, "src/lib/mcp/read-tools.ts"),
-];
+
+// MCP tool registrations live in lib/mcp/read-tools.ts (12 reads) and
+// across the lib/mcp/tools/ directory (writes + identity, split by
+// domain). Walk both at discovery time so a new tools/ file picks up
+// drift checks automatically.
+function discoverMcpFiles(): string[] {
+  const out: string[] = [resolve(REPO_WEB, "src/lib/mcp/read-tools.ts")];
+  const toolsDir = resolve(REPO_WEB, "src/lib/mcp/tools");
+  for (const name of readdirSync(toolsDir)) {
+    if (name.endsWith(".ts")) out.push(resolve(toolsDir, name));
+  }
+  return out;
+}
+const MCP_FILES = discoverMcpFiles();
 
 let passed = 0;
 let failed = 0;

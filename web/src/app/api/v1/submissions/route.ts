@@ -130,6 +130,40 @@ export async function POST(req: Request): Promise<Response> {
         detail: result.detail ?? "Account is locked.",
       });
     }
+    if (result.reason === "rate") {
+      // Rung 3 of the ban ladder — the author's daily cap dropped
+      // after recent moderation rejects. Reset is at UTC midnight.
+      const utcMidnight = new Date();
+      utcMidnight.setUTCHours(24, 0, 0, 0);
+      return problemResponse({
+        type: "https://claudepot.com/api/errors/rate-limit",
+        title: "Daily cap reached",
+        status: 429,
+        detail: result.detail ?? "Daily cap reached.",
+      });
+    }
+    if (result.reason === "rejected") {
+      // The AI policy moderator rejected the submission. The row
+      // exists with state='rejected' so the user can appeal at
+      // /appeal/[decisionId]; do NOT return 201 / a publish URL.
+      // decisionId is null when the audit-row write itself failed —
+      // surface that as appealUrl=null so clients don't deep-link
+      // to a 404.
+      return problemResponse({
+        type: "https://claudepot.com/api/errors/policy-rejected",
+        title: "Submission blocked by policy moderator",
+        status: 422,
+        detail: result.oneLineWhy,
+        ...({
+          category: result.category,
+          decisionId: result.decisionId,
+          submissionId: result.submissionId,
+          appealUrl: result.decisionId
+            ? `https://claudepot.com/appeal/${result.decisionId}`
+            : null,
+        } as Record<string, unknown>),
+      });
+    }
     return problemResponse(validation(result.detail ?? "Submission failed."));
   }
 

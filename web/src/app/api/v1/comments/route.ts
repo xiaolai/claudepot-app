@@ -7,7 +7,12 @@
  * submissionId.
  */
 
-import { forbidden, notFound, validation } from "@/lib/api/errors";
+import {
+  forbidden,
+  notFound,
+  rateLimited,
+  validation,
+} from "@/lib/api/errors";
 import { created, preflight, problemResponse } from "@/lib/api/response";
 import { commentInputSchema, createComment } from "@/lib/comments";
 import { endpointSpec } from "@/lib/api/manifest";
@@ -64,6 +69,29 @@ export async function POST(req: Request): Promise<Response> {
         forbidden(
           "Your account is locked, or this submission is closed to new comments.",
         ),
+      );
+    }
+    if (result.reason === "illegal") {
+      // The AI policy moderator hard-blocked the comment as 'illegal'.
+      // 423 Locked is the correct status: the parent submission is
+      // not the problem (it's not actually locked), but the comment
+      // attempt cannot proceed and there's no appeal path because
+      // the row was never inserted. 422 would imply a syntactic /
+      // schema problem the client can fix by retrying.
+      return problemResponse({
+        type: "https://claudepot.com/api/errors/illegal-content",
+        title: "Comment blocked by policy moderator",
+        status: 423,
+        detail: result.detail ?? "Content not allowed.",
+      });
+    }
+    if (result.reason === "rate") {
+      // Rung 3 of the ban ladder — the author's daily cap dropped
+      // after recent rejects. Return 429; reset is at UTC midnight.
+      const utcMidnight = new Date();
+      utcMidnight.setUTCHours(24, 0, 0, 0);
+      return problemResponse(
+        rateLimited(result.detail ?? "Daily cap reached.", utcMidnight),
       );
     }
     return problemResponse(validation("Comment failed."));

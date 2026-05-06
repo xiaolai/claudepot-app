@@ -10,7 +10,7 @@ import { SubmissionStateBanner } from "@/components/prototype/SubmissionStateBan
 import { VoteButtons } from "@/components/prototype/VoteButtons";
 import { auth } from "@/lib/auth";
 import { totalCommentCount } from "@/lib/format";
-import { effectiveDecision, effectiveState } from "@/lib/moderation";
+import { effectiveDecision, effectiveState } from "@/lib/moderation-fixtures";
 import { getCurrentUser, isStaff } from "@/lib/auth-shim";
 import { getCommentsForSubmission, getSubmissionById } from "@/db/queries";
 import { renderMarkdown } from "@/lib/markdown";

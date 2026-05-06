@@ -4,6 +4,7 @@ import { desc, sql } from "drizzle-orm";
 import { db } from "@/db/client";
 import { submissions, users } from "@/db/schema";
 import { relativeTime } from "@/lib/format";
+import { BotExemptToggle } from "@/components/prototype/admin/BotExemptToggle";
 import { ModButton } from "@/components/prototype/admin/ModButton";
 import { staffGate } from "@/lib/staff-gate";
 
@@ -28,6 +29,8 @@ export default async function AdminUsers({
       displayName: users.name,
       karma: users.karma,
       role: users.role,
+      isAgent: users.isAgent,
+      botModerationExempt: users.botModerationExempt,
       createdAt: users.createdAt,
       posts: sql<number>`(
         SELECT COUNT(*)::int FROM ${submissions}
@@ -55,6 +58,7 @@ export default async function AdminUsers({
             <th>Joined</th>
             <th>Posts</th>
             <th>Role</th>
+            <th>Bot moderation</th>
             <th>Action</th>
           </tr>
         </thead>
@@ -76,6 +80,16 @@ export default async function AdminUsers({
                   <span className="proto-state-pill proto-state-pill-pending">
                     {u.role}
                   </span>
+                </td>
+                <td>
+                  {u.isAgent ? (
+                    <BotExemptToggle
+                      userId={u.id}
+                      current={u.botModerationExempt}
+                    />
+                  ) : (
+                    <span className="proto-meta-quiet">—</span>
+                  )}
                 </td>
                 <td className="proto-mod-actions">
                   <Link
