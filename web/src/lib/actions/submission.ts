@@ -11,6 +11,7 @@ import { submissions } from "@/db/schema";
 import type { Submission as PrototypeSubmission } from "@/lib/prototype-fixtures";
 import {
   createSubmission,
+  deleteSubmissionAsAuthor,
   submissionInputSchema,
   type SubmissionInput,
   type SubmitResult as CoreSubmitResult,
@@ -91,21 +92,7 @@ export async function deleteSubmission(
   const session = await auth();
   if (!session?.user?.id) return { ok: false, reason: "unauth" };
 
-  const [existing] = await db
-    .select({ authorId: submissions.authorId })
-    .from(submissions)
-    .where(eq(submissions.id, id))
-    .limit(1);
-  if (!existing) return { ok: false, reason: "not_found" };
-  if (existing.authorId !== session.user.id) return { ok: false, reason: "forbidden" };
-
-  await db
-    .update(submissions)
-    .set({ deletedAt: new Date() })
-    .where(eq(submissions.id, id));
-  revalidatePath(`/post/${id}`);
-  revalidatePath("/");
-  return { ok: true };
+  return deleteSubmissionAsAuthor(session.user.id, id);
 }
 
 /* ── Helper exposed to UI: redirect after submit ───────────────── */

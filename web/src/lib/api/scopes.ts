@@ -12,7 +12,9 @@
 
 export const SCOPES = [
   "submission:write",
+  "submission:delete",
   "comment:write",
+  "comment:delete",
   "vote:write",
   "save:write",
   "read:all",
@@ -35,7 +37,9 @@ export function normalizeScopes(input: readonly string[]): Scope[] {
 /** Human-facing labels for the /settings/tokens UI. */
 export const SCOPE_LABELS: Record<Scope, string> = {
   "submission:write": "Create submissions",
+  "submission:delete": "Delete own submissions",
   "comment:write": "Post comments and replies",
+  "comment:delete": "Delete own comments",
   "vote:write": "Cast upvotes and downvotes",
   "save:write": "Save (bookmark) submissions",
   "read:all": "Read feed, submissions, and comments",
