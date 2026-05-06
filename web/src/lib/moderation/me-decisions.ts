@@ -86,3 +86,59 @@ export async function listMyDecisions(
     })),
   };
 }
+
+export const getMyDecisionInputSchema = z.object({
+  id: z.uuid(),
+});
+
+export type GetMyDecisionInput = z.infer<typeof getMyDecisionInputSchema>;
+
+/**
+ * Single-row fetcher for the caller's own AI policy moderator
+ * decision. Returns null when:
+ *   - The decision id doesn't exist, OR
+ *   - The decision exists but isn't owned by `userId`.
+ *
+ * Returning null in both cases is deliberate — disclosing "exists
+ * but isn't yours" leaks decision-id existence to anyone who can
+ * guess UUIDs. The route maps null → 404.
+ */
+export async function getMyDecision(
+  userId: string,
+  input: GetMyDecisionInput,
+): Promise<PolicyDecisionDto | null> {
+  const [r] = await db
+    .select({
+      id: policyDecisions.id,
+      authorId: policyDecisions.authorId,
+      targetType: policyDecisions.targetType,
+      targetId: policyDecisions.targetId,
+      verdict: policyDecisions.verdict,
+      category: policyDecisions.category,
+      confidence: policyDecisions.confidence,
+      oneLineWhy: policyDecisions.oneLineWhy,
+      modelId: policyDecisions.modelId,
+      promptVersion: policyDecisions.promptVersion,
+      passNumber: policyDecisions.passNumber,
+      decidedAt: policyDecisions.decidedAt,
+    })
+    .from(policyDecisions)
+    .where(eq(policyDecisions.id, input.id))
+    .limit(1);
+
+  if (!r || r.authorId !== userId) return null;
+
+  return {
+    id: r.id,
+    targetType: r.targetType,
+    targetId: r.targetId,
+    verdict: r.verdict,
+    category: r.category,
+    confidence: r.confidence,
+    oneLineWhy: r.oneLineWhy,
+    modelId: r.modelId,
+    promptVersion: r.promptVersion,
+    passNumber: r.passNumber,
+    decidedAt: r.decidedAt.toISOString(),
+  };
+}

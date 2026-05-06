@@ -40,6 +40,7 @@ export type EndpointId =
   | "me:identify"
   | "me:quota"
   | "me:list_decisions"
+  | "me:get_decision"
   | "notifications:list"
   | "notifications:mark_read"
   // Appeals against AI policy moderator decisions
@@ -103,7 +104,8 @@ export type McpToolName =
   | "mark_notifications_read"
   | "me"
   | "get_quota"
-  | "list_my_decisions";
+  | "list_my_decisions"
+  | "get_my_decision";
 
 export type McpToolSpec = {
   readonly name: McpToolName;

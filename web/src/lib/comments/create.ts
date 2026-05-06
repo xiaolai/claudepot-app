@@ -38,6 +38,7 @@ import { comments, notifications, submissions } from "@/db/schema";
 import {
   checkBanCandidate,
   checkLadderRateLimit,
+  enqueueRetroComment,
   moderate,
   writeModerationLogForReject,
   writeModerationNotification,
@@ -152,19 +153,22 @@ export async function createComment(
   //     (and thus retractable by runCommentConfirmation) — leaving
   //     it 'pending' would freeze it under the karma gate and the
   //     confirmation pass skips anything not currently 'approved'.
-  //   - Synthetic-due-to-error verdict: force 'pending' so a model
-  //     outage does not silently publish unmoderated comments under
-  //     the karma gate's auto-approve rules. Mirrors the submission
-  //     failure-mode matrix per plan §11.
+  //   - Synthetic-due-to-error / 'capped': force 'approved' and
+  //     enqueue for retroactive review. Plan §11 says comments
+  //     fail-OPEN: publish, queue for re-evaluation. The retro-queue
+  //     cron picks up the entry on its next tick. If the retro pass
+  //     rejects, the comment retracts via the same persist+log path
+  //     as the confirmation pass.
   //   - Pass / exempt / disabled: use the karma-gate state.
   const moderatorRejectedNonIllegal =
     verdict.verdict === "reject" && verdict.category !== "illegal";
-  const moderatorErrored =
-    verdict.synthetic && verdict.syntheticReason === "error";
-  const insertState = moderatorRejectedNonIllegal
-    ? "approved"
-    : moderatorErrored
-      ? "pending"
+  const moderatorFailOpen =
+    verdict.synthetic &&
+    (verdict.syntheticReason === "error" ||
+      verdict.syntheticReason === "capped");
+  const insertState =
+    moderatorRejectedNonIllegal || moderatorFailOpen
+      ? "approved"
       : initialState;
 
   type Outcome =
@@ -285,6 +289,26 @@ export async function createComment(
         submissionId: input.submissionId,
       }),
     );
+  }
+
+  // Fail-open path: enqueue for retroactive review. The cron at
+  // /api/cron/moderation-retro picks these up on its next tick.
+  // The reason carried into the queue tells the staff side why the
+  // initial moderate() call didn't produce a real verdict.
+  if (moderatorFailOpen) {
+    try {
+      await enqueueRetroComment({
+        targetType: "comment",
+        targetId: outcome.commentId,
+        authorId,
+        triggerReason: verdict.oneLineWhy,
+      });
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      console.warn(
+        `[moderation] retro enqueue failed for comment ${outcome.commentId}: ${msg}`,
+      );
+    }
   }
 
   revalidatePath(`/post/${input.submissionId}`);

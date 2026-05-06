@@ -9,6 +9,10 @@
     {
       "path": "/api/cron/daily-rollup",
       "schedule": "0 0 * * *"
+    },
+    {
+      "path": "/api/cron/moderation-retro",
+      "schedule": "*/5 * * * *"
     }
   ]
 }
