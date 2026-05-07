@@ -218,7 +218,14 @@ const SUBMISSION_BASE_SELECT = {
   authorUsername: users.username,
   authorImageUrl: users.image,
   authorIsAgent: users.isAgent,
-  commentsCount: sql<number>`(SELECT COUNT(*)::int FROM ${comments} WHERE ${comments.submissionId} = ${submissions.id} AND ${comments.deletedAt} IS NULL)`,
+  // Public count must not leak moderation activity: only count
+  // approved, non-deleted comments. Mirrors lib/api/queries.ts.
+  commentsCount: sql<number>`(
+    SELECT COUNT(*)::int FROM ${comments}
+    WHERE ${comments.submissionId} = ${submissions.id}
+      AND ${comments.state} = 'approved'
+      AND ${comments.deletedAt} IS NULL
+  )`,
   // Migration 0022 — exclude pending_review=true tags from public
   // submission rows. Without this filter, an Ada-proposed tag still
   // awaiting staff review would appear as a chip on /c rows linking
@@ -251,11 +258,16 @@ const SITEMAP_MAX_SUBMISSIONS = 10_000;
 export async function getAllSubmissions(
   limit: number = SITEMAP_MAX_SUBMISSIONS,
 ): Promise<Submission[]> {
+  // Use the same public-visibility predicate as feed reads — sitemap
+  // entries are crawler-visible URLs, so anything unlisted, deleted,
+  // or unapproved must NOT be enumerated. Without unlistedAt the
+  // unlist moderator action would be a no-op for SEO. See FEED_BASE
+  // _FILTERS for the canonical predicate.
   const rows = await db
     .select(SUBMISSION_BASE_SELECT)
     .from(submissions)
     .innerJoin(users, eq(users.id, submissions.authorId))
-    .where(isNull(submissions.deletedAt))
+    .where(FEED_BASE_FILTERS())
     .orderBy(desc(submissions.createdAt))
     .limit(limit);
   return rows.map(mapSubmission);
@@ -398,7 +410,14 @@ export async function getSubmissionsByUser(
   const { includeAll = false, limit = DEFAULT_PAGE_LIMIT, cursor = null } = opts;
   const cap = clampLimit(limit) ?? DEFAULT_PAGE_LIMIT;
   const cond = [eq(users.username, username), isNull(submissions.deletedAt)];
-  if (!includeAll) cond.push(eq(submissions.state, "approved"));
+  if (!includeAll) {
+    // `includeAll=true` is the author's own pending/rejected view; it
+    // intentionally bypasses approval + unlist gates. Public callers
+    // (profile page, RSS) pass false and need the same predicate as
+    // the rest of the feed surfaces.
+    cond.push(eq(submissions.state, "approved"));
+    cond.push(isNull(submissions.unlistedAt));
+  }
   if (cursor) {
     const cutoff = new Date(cursor.t);
     cond.push(
@@ -715,7 +734,7 @@ export async function getTopTags(): Promise<Array<Tag & { count: number }>> {
       slug: tags.slug,
       name: tags.name,
       tagline: tags.tagline,
-      count: sql<number>`COUNT(${submissionTags.submissionId})::int`,
+      count: sql<number>`COUNT(${submissions.id})::int`,
     })
     .from(tags)
     .leftJoin(submissionTags, eq(submissionTags.tagSlug, tags.slug))
@@ -725,6 +744,10 @@ export async function getTopTags(): Promise<Array<Tag & { count: number }>> {
         eq(submissions.id, submissionTags.submissionId),
         eq(submissions.state, "approved"),
         isNull(submissions.deletedAt),
+        // Match the public-feed predicate; without unlistedAt the
+        // top-tag count counts hidden submissions and the rail
+        // ranks tags whose hidden volume is high.
+        isNull(submissions.unlistedAt),
         gte(submissions.createdAt, cutoff),
       ),
     )
@@ -732,7 +755,11 @@ export async function getTopTags(): Promise<Array<Tag & { count: number }>> {
     // page top-tags rail only shows staff-approved tags.
     .where(eq(tags.pendingReview, false))
     .groupBy(tags.slug, tags.name, tags.tagline, tags.sortOrder)
-    .orderBy(desc(sql`COUNT(${submissionTags.submissionId})`));
+    // Count submissions.id (NULL on tag rows with no joined visible
+    // submission) instead of submission_tags.submissionId, which
+    // would count rows that pre-leftJoin point at filtered-out
+    // submissions and inflate the rank.
+    .orderBy(desc(sql`COUNT(${submissions.id})`));
   return rows.map((r) => ({
     slug: r.slug,
     name: r.name,
@@ -860,8 +887,7 @@ export async function getRelatedSubmissionsForProject(
     .innerJoin(users, eq(users.id, submissions.authorId))
     .where(
       and(
-        eq(submissions.state, "approved"),
-        isNull(submissions.deletedAt),
+        FEED_BASE_FILTERS(),
         sql`EXISTS (
           SELECT 1 FROM ${submissionTags}
           INNER JOIN ${projectTags} ON ${projectTags.tagSlug} = ${submissionTags.tagSlug}

@@ -98,11 +98,26 @@ export async function persistBotReport(
   }
 
   // Cost denormalization — explicit override beats payload.usd.
+  // Only attaches to kind='cost' rows: every spend-aggregation path
+  // (rollup cron, getBotDailyCosts, persistBotReport's cap-breach
+  // check, /office/costs, /admin/console/cost-reconcile) filters on
+  // kind='cost', so a costUsd value attached to e.g. a work_summary
+  // would silently disappear from totals — a confusing inconsistency
+  // for the bot author. Reject the override on non-cost kinds at
+  // ingest instead of letting it land in the column.
   let costUsd: string | null = null;
-  if (typeof input.costUsd === "number") {
-    costUsd = input.costUsd.toFixed(6);
-  } else if (input.kind === "cost" && typeof payload.usd === "number") {
-    costUsd = (payload.usd as number).toFixed(6);
+  if (input.kind === "cost") {
+    if (typeof input.costUsd === "number") {
+      costUsd = input.costUsd.toFixed(6);
+    } else if (typeof payload.usd === "number") {
+      costUsd = (payload.usd as number).toFixed(6);
+    }
+  } else if (typeof input.costUsd === "number") {
+    return {
+      ok: false,
+      reason: "validation",
+      detail: `costUsd is only valid for kind='cost' (got kind='${input.kind}').`,
+    };
   }
 
   // Proposals enter as status='open'. Everything else has status=null.

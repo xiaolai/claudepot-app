@@ -220,13 +220,18 @@ export async function getBotDailyCosts(opts: {
     Math.min(MAX_COST_WINDOW_DAYS, Math.floor(requested) || DEFAULT_COST_WINDOW_DAYS),
   );
   const windowEnd = new Date();
-  const windowStart = new Date(windowEnd.getTime() - days * 86_400_000);
 
   // UTC midnight that starts today's bucket. Anything >= this is
   // "today" (read live); anything < this is "closed" (read rollup).
   const today = new Date(windowEnd);
   today.setUTCHours(0, 0, 0, 0);
   const todayKey = today.toISOString().slice(0, 10);
+
+  // Window covers today + the previous (days - 1) closed days, for
+  // a true "last N days" total of N calendar buckets. Anchor the
+  // start at UTC midnight (today minus days-1 days) so the window
+  // length doesn't depend on the time-of-day of the request.
+  const windowStart = new Date(today.getTime() - (days - 1) * 86_400_000);
 
   // Closed days from the rollup, summed across providers. The
   // provider column was added in migration 0029; the per-bot-per-day

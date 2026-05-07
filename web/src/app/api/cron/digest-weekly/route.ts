@@ -104,6 +104,10 @@ export const GET = withErrorHandling(async (req: Request) => {
       and(
         eq(submissions.state, "approved"),
         isNull(submissions.deletedAt),
+        // Match the public-feed predicate — moderator-unlisted posts
+        // must not be emailed to digest subscribers. Without this an
+        // unlist action would still ship the post to inboxes.
+        isNull(submissions.unlistedAt),
         gte(submissions.createdAt, weekAgo),
       ),
     )
