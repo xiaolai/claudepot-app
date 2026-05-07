@@ -356,6 +356,87 @@ export function markdownToPlaintext(source: string, maxChars: number): string {
   return `${trimmed.trimEnd()}…`;
 }
 
+/**
+ * Generate a URL-safe slug from a heading's text content. Lowercases,
+ * strips diacritics, replaces non-word characters with hyphens, collapses
+ * runs of hyphens, and trims leading/trailing hyphens. Returns the empty
+ * string for content that has no slug-worthy characters (e.g. a heading
+ * that's entirely emoji); the caller treats that as "skip".
+ */
+function slugifyHeading(text: string): string {
+  return text
+    .normalize("NFKD")
+    .replace(/[̀-ͯ]/g, "")
+    .toLowerCase()
+    .replace(/[^a-z0-9\s-]/g, "")
+    .trim()
+    .replace(/\s+/g, "-")
+    .replace(/-+/g, "-")
+    .replace(/^-+|-+$/g, "");
+}
+
+/**
+ * Inject `id` attributes on h1-h6 elements based on their text content.
+ * Runs AFTER sanitize-html so any user-supplied id attribute has been
+ * stripped (id is not in ALLOWED_ATTRS) — we then inject our own
+ * server-derived slugs, which is safe.
+ *
+ * Duplicates are disambiguated by appending `-2`, `-3`, etc., matching
+ * the GitHub / GFM convention.
+ */
+function addHeadingIds(html: string): string {
+  const seen = new Map<string, number>();
+  return html.replace(
+    /<(h[1-6])>([\s\S]*?)<\/\1>/g,
+    (match, tag: string, inner: string) => {
+      const text = inner.replace(/<[^>]+>/g, "").trim();
+      const base = slugifyHeading(text);
+      if (!base) return match;
+      const count = seen.get(base) ?? 0;
+      seen.set(base, count + 1);
+      const id = count === 0 ? base : `${base}-${count + 1}`;
+      return `<${tag} id="${escapeAttr(id)}">${inner}</${tag}>`;
+    },
+  );
+}
+
+export interface TocEntry {
+  level: 1 | 2 | 3 | 4 | 5 | 6;
+  id: string;
+  text: string;
+}
+
+/**
+ * Walk rendered HTML for headings with `id` attributes (added by
+ * addHeadingIds inside renderMarkdown) and return a flat TOC array.
+ *
+ * `levels` controls which heading levels are included — defaults to
+ * h2 + h3, the conventional in-page TOC range. The post detail uses
+ * h1 for the post title (rendered as the page heading, not from the
+ * markdown body), so user h1 inside the body is excluded by default
+ * to avoid double-billing.
+ */
+export function extractToc(
+  html: string,
+  levels: ReadonlyArray<TocEntry["level"]> = [2, 3],
+): TocEntry[] {
+  const out: TocEntry[] = [];
+  // Headings post-addHeadingIds carry exactly one attribute: id="…".
+  // Match that shape strictly so a future change to attribute order or
+  // additional attributes is a deliberate rewrite, not a silent miss.
+  const re = /<h([1-6]) id="([^"]+)">([\s\S]*?)<\/h\1>/g;
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(html)) !== null) {
+    const level = Number(m[1]) as TocEntry["level"];
+    if (!levels.includes(level)) continue;
+    const id = m[2];
+    const text = m[3].replace(/<[^>]+>/g, "").trim();
+    if (text.length === 0) continue;
+    out.push({ level, id, text });
+  }
+  return out;
+}
+
 export async function renderMarkdown(source: string): Promise<string> {
   const html = marked.parse(source, { gfm: true, breaks: true }) as string;
   const sanitized = sanitizeHtml(html, {
@@ -403,8 +484,13 @@ export async function renderMarkdown(source: string): Promise<string> {
       }),
     },
   });
+  // Headings get IDs after sanitize so any user-supplied id was already
+  // stripped (id is not in ALLOWED_ATTRS); we inject server-derived
+  // slugs for in-page anchor + TOC use. extractToc() in this module
+  // reads them back later from a different render entry point.
+  const withIds = addHeadingIds(sanitized);
   return decorateGfmCallouts(
-    decorateTables(decorateBlockquotes(await decorateCodeBlocks(sanitized))),
+    decorateTables(decorateBlockquotes(await decorateCodeBlocks(withIds))),
   );
 }
 
