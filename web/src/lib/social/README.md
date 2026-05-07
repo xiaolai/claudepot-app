@@ -1,6 +1,6 @@
 # src/lib/social/
 
-Cross-platform publishing for sha.com's marketing channels (Bluesky + X).
+Cross-platform publishing for claudepot.com's marketing channels (Bluesky + X).
 
 This is a publishing layer, not an editorial layer. Editorial logic (what to post, when, why) lives elsewhere; this directory only knows how to take a `{ text, url }` and put it on each platform safely.
 

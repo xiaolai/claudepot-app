@@ -111,7 +111,7 @@ export default async function PrototypeLayout({
         {/*
          * Vercel Web Analytics replaces the prior Cloudflare beacon.
          * CF Web Analytics requires the host to be proxied through CF
-         * (orange cloud), but sha.com is on Vercel direct (gray
+         * (orange cloud), but claudepot.com is on Vercel direct (gray
          * cloud DNS-only), so the CF beacon's POST to /cdn-cgi/rum
          * was CORS-blocked and recorded zero events. Vercel Analytics
          * runs natively on this stack with no CORS surface.

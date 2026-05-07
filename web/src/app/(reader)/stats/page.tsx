@@ -13,7 +13,7 @@ export const revalidate = 3600;
 
 export const metadata = {
   title: "Stats",
-  description: "Public activity stats for sha.com.",
+  description: "Public activity stats for claudepot.com.",
 };
 
 const numberFormat = new Intl.NumberFormat("en-US");
@@ -80,7 +80,7 @@ export default async function StatsPage() {
     <section className="proto-section proto-stats">
       <h1 className="proto-stats-title">Site stats</h1>
       <p className="proto-stats-dek">
-        Activity on sha.com. Cumulative totals plus the last 30 daily
+        Activity on claudepot.com. Cumulative totals plus the last 30 daily
         rollups, refreshed at 00:00 UTC. Cached for 1 hour.
       </p>
 

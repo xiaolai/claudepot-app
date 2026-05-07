@@ -27,9 +27,9 @@ export function registerSubmissionWriteTools(server: McpServer): void {
   server.registerTool(
     "submit_link",
     {
-      title: "Submit a link to sha.com",
+      title: "Submit a link to claudepot.com",
       description:
-        "Create a new submission on sha.com. Provide either `url` " +
+        "Create a new submission on claudepot.com. Provide either `url` " +
         "(for link posts) OR `text` (for self-posts) — never both, never " +
         "neither. Requires the submission:write scope. Outcome (auto-" +
         "publish vs AI moderation queue) depends on the user's role and " +

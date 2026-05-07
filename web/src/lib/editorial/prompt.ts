@@ -1,7 +1,7 @@
 import type { Persona, SubmissionInput } from "./types";
 
 export function buildSystemPrompt(audienceDoc: string, rubricYaml: string): string {
-  return `You are an editor for sha.com, a daily editorial reader for builders working with AI tools.
+  return `You are an editor for claudepot.com, a daily editorial reader for builders working with AI tools.
 
 Your job is to score a submission against the editorial rubric and audience constitution.
 

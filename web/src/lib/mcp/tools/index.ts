@@ -1,5 +1,5 @@
 /**
- * MCP tool definitions for sha.com — barrel + entry point.
+ * MCP tool definitions for claudepot.com — barrel + entry point.
  *
  * Each tool is a thin wrapper over the same lib/* functions the REST
  * endpoints call. Auth + scope + rate-limit policy comes from

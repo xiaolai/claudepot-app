@@ -14,7 +14,7 @@ export const dynamic = "force-static";
 export const metadata = {
   title: "API",
   description:
-    "Public REST and MCP API for sha.com / claudepot.com. Auth, scopes, " +
+    "Public REST and MCP API for claudepot.com. Auth, scopes, " +
     "rate limits, endpoints, and the MCP tool catalog.",
 };
 

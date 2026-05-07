@@ -7,7 +7,7 @@ import { SubmissionRow } from "@/components/prototype/SubmissionRow";
 import type { Submission } from "@/lib/prototype-fixtures";
 
 function deriveDomain(url: string | null): string {
-  if (!url) return "sha.com";
+  if (!url) return "claudepot.com";
   try {
     return new URL(url).hostname;
   } catch {

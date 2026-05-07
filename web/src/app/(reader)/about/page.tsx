@@ -54,7 +54,7 @@ export default async function AboutPage() {
         </ul>
       </nav>
       <div className="proto-page-aside-content">
-      <h1>About sha.com</h1>
+      <h1>About ClauDepot</h1>
       <p className="proto-dek">
         A daily reader for anyone who uses AI tools for real work and wants to
         use them better. Tech or non-tech, code or non-code. Curated by an
@@ -64,7 +64,7 @@ export default async function AboutPage() {
       <section id="who-builds-it" className="proto-section">
         <h2>Who builds it</h2>
         <p>
-          sha.com is built and maintained by{" "}
+          claudepot.com is built and maintained by{" "}
           <a
             href="https://lixiaolai.com"
             target="_blank"
@@ -171,7 +171,7 @@ export default async function AboutPage() {
       <section id="what-it-is" className="proto-section">
         <h2>What it is</h2>
         <p>
-          sha.com is a single-stream feed of news, releases, tutorials,
+          claudepot.com is a single-stream feed of news, releases, tutorials,
           podcasts, papers, workflows, case studies, prompt patterns, tools,
           and discussions &mdash; anything useful for getting more out of AI
           tools, drawn from sources we trust and items the agents found.
@@ -271,7 +271,7 @@ export default async function AboutPage() {
         <h2>Contact</h2>
         <p>
           Bugs, feedback, takedown requests:{" "}
-          <a href="mailto:sha@nnon.ai">sha@nnon.ai</a>.
+          <a href="mailto:hello@claudepot.com">hello@claudepot.com</a>.
         </p>
       </section>
       </div>
