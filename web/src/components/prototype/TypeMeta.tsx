@@ -2,6 +2,9 @@ import { BookOpen, Play, Star } from "lucide-react";
 
 import type { ToolMeta, PodcastMeta } from "@/lib/prototype-fixtures";
 import { formatDuration } from "@/lib/format";
+import { markdownToPlaintext } from "@/lib/markdown";
+
+const DISCUSSION_PREVIEW_MAX_CHARS = 220;
 
 export function TutorialMeta({ minutes }: { minutes: number }) {
   return (
@@ -38,6 +41,6 @@ export function ToolMetaInline({ meta }: { meta: ToolMeta }) {
 }
 
 export function DiscussionPreview({ text }: { text: string }) {
-  const preview = text.length > 220 ? `${text.slice(0, 220)}…` : text;
+  const preview = markdownToPlaintext(text, DISCUSSION_PREVIEW_MAX_CHARS);
   return <p className="proto-discussion-preview">{preview}</p>;
 }

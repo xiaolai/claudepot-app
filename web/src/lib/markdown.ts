@@ -320,6 +320,42 @@ function decorateTables(html: string): string {
   );
 }
 
+/**
+ * Strip a markdown source to a single-line plaintext preview, capped
+ * at `maxChars`. Intended for list-card previews where rendering full
+ * markdown (headings, code blocks, tables) would destroy the row
+ * rhythm — every aggregator with cards (HN, Lobsters, Reddit index)
+ * does the same.
+ *
+ * Pass 1: marked parses the markdown to HTML.
+ * Pass 2: insert a space before every OPENING tag so adjacent block
+ *   text nodes don't fuse when tags are stripped. Closing tags are
+ *   left alone — adding a space before `</em>.` would produce
+ *   "italic ." with a stray gap before the period.
+ * Pass 3: sanitize-html with empty allowedTags strips every tag and
+ *   decodes HTML entities back to text.
+ * Pass 4: collapse whitespace; truncate on a word boundary if the
+ *   cut would otherwise land mid-word.
+ */
+export function markdownToPlaintext(source: string, maxChars: number): string {
+  if (!source) return "";
+  const html = marked.parse(source, { gfm: true, breaks: true }) as string;
+  const spaced = html.replace(/<(?!\/)/g, " <");
+  const text = sanitizeHtml(spaced, {
+    allowedTags: [],
+    allowedAttributes: {},
+  });
+  const collapsed = text.replace(/\s+/g, " ").trim();
+  if (collapsed.length <= maxChars) return collapsed;
+  const cut = collapsed.slice(0, maxChars);
+  const lastSpace = cut.lastIndexOf(" ");
+  // Only word-break if the last space is past 70% of the cap —
+  // otherwise the slice itself is fine and a hard cut is preferable
+  // to dropping a third of the preview to find a clean boundary.
+  const trimmed = lastSpace > maxChars * 0.7 ? cut.slice(0, lastSpace) : cut;
+  return `${trimmed.trimEnd()}…`;
+}
+
 export async function renderMarkdown(source: string): Promise<string> {
   const html = marked.parse(source, { gfm: true, breaks: true }) as string;
   const sanitized = sanitizeHtml(html, {
