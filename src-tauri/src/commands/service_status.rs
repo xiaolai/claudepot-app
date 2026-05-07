@@ -19,7 +19,8 @@ use claudepot_core::service_status as core;
 use tauri::State;
 
 use crate::dto_service_status::{
-    tier_str, ComponentDto, HostLatencyDto, IncidentDto, LatencyReportDto, ServiceStatusSummaryDto,
+    tier_str, ComponentDto, FirstRunNetworkDto, HostLatencyDto, IncidentDto, LatencyReportDto,
+    ServiceStatusSummaryDto,
 };
 
 /// Tauri-managed shared state. Single mutex around both surfaces — the
@@ -166,6 +167,21 @@ pub async fn service_status_probe_now(
         probed_at_ms,
         hosts: hosts.iter().map(HostLatencyDto::from).collect(),
     })
+}
+
+/// First-run reachability check. Probes `api.anthropic.com` once and
+/// returns a structured diagnosis the renderer can branch on without
+/// parsing error strings. Worst-case wall time:
+/// `service_status::PROBE_TIMEOUT` (5 s).
+///
+/// Distinct from [`service_status_probe_now`]: that command fans out
+/// to every HOTPATH host and is shaped for the Settings → Network
+/// pane's per-host table. This command is shaped for the panel —
+/// single host, single classification, no caller-side aggregation.
+#[tauri::command]
+pub async fn network_first_run_check() -> Result<FirstRunNetworkDto, String> {
+    let d = core::diagnose_anthropic().await;
+    Ok(FirstRunNetworkDto::from(d))
 }
 
 /// Read the most recent latency report (probed by `_probe_now` or by

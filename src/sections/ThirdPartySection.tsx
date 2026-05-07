@@ -9,6 +9,11 @@ import type { RouteSettingsDto, RouteSummaryDto } from "../types";
 import { ConfirmDialog } from "../components/ConfirmDialog";
 import { AddRouteModal, EditRouteModal } from "./third-party/AddRouteModal";
 import { RouteCard } from "./third-party/RouteCard";
+import {
+  EVENT_OPEN_ADD_ROUTE,
+  clearFromNetworkPanelBreadcrumb,
+  consumeOpenAddRouteHint,
+} from "../lib/networkPanelDeepLink";
 
 /**
  * Third-party section — entry point for non-Anthropic LLM routes.
@@ -31,7 +36,9 @@ export function ThirdPartySection() {
   const [settings, setSettings] = useState<RouteSettingsDto | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [busyIds, setBusyIds] = useState<Set<string>>(new Set());
-  const [showAdd, setShowAdd] = useState(false);
+  // Cold-mount path: read the sessionStorage hint set by the
+  // NetworkUnreachablePanel before this section mounted.
+  const [showAdd, setShowAdd] = useState(() => consumeOpenAddRouteHint());
   const [editTarget, setEditTarget] = useState<RouteSummaryDto | null>(null);
   const [removeTarget, setRemoveTarget] = useState<RouteSummaryDto | null>(
     null,
@@ -58,6 +65,17 @@ export function ThirdPartySection() {
   useEffect(() => {
     void refresh();
   }, [refresh]);
+
+  // Hot-mount path for the NetworkUnreachablePanel's deep-link.
+  // When this section is already mounted, `setSection("third-party")`
+  // is a no-op and the cold-mount sessionStorage read won't re-fire,
+  // so the panel's button needs a CustomEvent to reach us. See
+  // `src/lib/networkPanelDeepLink.ts`.
+  useEffect(() => {
+    const handler = () => setShowAdd(true);
+    window.addEventListener(EVENT_OPEN_ADD_ROUTE, handler);
+    return () => window.removeEventListener(EVENT_OPEN_ADD_ROUTE, handler);
+  }, []);
 
   const setBusy = (id: string, busy: boolean) => {
     setBusyIds((prev) => {
@@ -326,7 +344,13 @@ export function ThirdPartySection() {
 
       <AddRouteModal
         open={showAdd}
-        onClose={() => setShowAdd(false)}
+        onClose={() => {
+          setShowAdd(false);
+          // Clear the network-panel breadcrumb so a future Add Route
+          // (opened from the empty-state CTA, not from the network
+          // panel) doesn't inherit the China-reachable highlight.
+          clearFromNetworkPanelBreadcrumb();
+        }}
         onCreated={() => {
           void refresh();
           pushToast("info", "Route added.");

@@ -605,6 +605,7 @@ pub fn run() {
             commands::service_status::service_status_summary_get,
             commands::service_status::service_status_probe_now,
             commands::service_status::service_status_latency_get,
+            commands::service_status::network_first_run_check,
             commands::activity::session_live_start,
             commands::activity::session_live_stop,
             commands::activity::session_live_snapshot,
