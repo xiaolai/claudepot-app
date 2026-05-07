@@ -64,6 +64,28 @@ export interface LatencyReport {
   hosts: HostLatency[];
 }
 
+/** Coarse classification of the first-run reachability probe. Mirrors
+ *  the Rust enum `claudepot_core::service_status::Diagnosis`. The
+ *  panel branches on this to pick copy and remediation; the renderer
+ *  never parses error strings itself. */
+export type NetworkDiagnosis =
+  | "reachable"
+  | "dns_failure"
+  | "connection_refused"
+  | "tls_error"
+  | "timeout"
+  | "http_error"
+  | "unknown";
+
+export interface FirstRunNetworkStatus {
+  diagnosis: NetworkDiagnosis;
+  /** ms when reachable; null otherwise. */
+  latencyMs: number | null;
+  /** Redacted error string for diagnostics surface only. The
+   *  unreachable panel doesn't display it. */
+  message: string | null;
+}
+
 export const serviceStatusApi = {
   /** Read the cached status-page summary (refreshed by the Rust
    *  watcher). Pure read — never hits the network. */
@@ -79,6 +101,14 @@ export const serviceStatusApi = {
    *  (the Rust-side per-host timeout). */
   serviceStatusProbeNow(): Promise<LatencyReport> {
     return invoke<LatencyReport>("service_status_probe_now");
+  },
+
+  /** First-run reachability check against `api.anthropic.com`.
+   *  Single host, structured diagnosis. Worst-case wall time: 5s.
+   *  Distinct from `serviceStatusProbeNow` which fans out to every
+   *  HOTPATH host for the per-host latency table. */
+  networkFirstRunCheck(): Promise<FirstRunNetworkStatus> {
+    return invoke<FirstRunNetworkStatus>("network_first_run_check");
   },
 
   /** Partial update of the `service_status` preference block.

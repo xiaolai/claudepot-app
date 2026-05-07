@@ -8,6 +8,12 @@ import {
   useState,
 } from "react";
 import { StatusIssuesBanner } from "./components/StatusIssuesBanner";
+import { NetworkUnreachablePanel } from "./components/NetworkUnreachablePanel";
+import { useNetworkGate } from "./hooks/useNetworkGate";
+import {
+  triggerOpenAddRoute,
+  triggerSettingsTab,
+} from "./lib/networkPanelDeepLink";
 import { ToastContainer } from "./components/ToastContainer";
 import { CommandPalette } from "./components/CommandPalette";
 import { ConfirmDialog } from "./components/ConfirmDialog";
@@ -177,6 +183,12 @@ function AppShell() {
   const { summary: pendingSummary, refresh: refreshPendingBanner } =
     usePendingJournals();
   const { ops: runningOps } = useRunningOps();
+  // First-run network reachability gate. Probes api.anthropic.com
+  // once on mount; renders the unreachable panel below the
+  // StatusIssuesBanner when the probe fails AND the user hasn't
+  // dismissed for this session. See
+  // `dev-docs/network-detection-panel.md`.
+  const networkGate = useNetworkGate();
   const { active: activeOp, open: openOp, close: closeOp } = useOperations();
   const {
     accounts,
@@ -1127,6 +1139,30 @@ function AppShell() {
           }}
         >
           <StatusIssuesBanner issues={visibleIssues} onDismiss={dismiss} />
+
+          {/* First-run network detection panel. See
+              `dev-docs/network-detection-panel.md`. Renders only when
+              api.anthropic.com is unreachable AND the user hasn't
+              dismissed it for this session. */}
+          {networkGate.shouldShowPanel && networkGate.state.kind === "unreachable" && (
+            <NetworkUnreachablePanel
+              diagnosis={networkGate.state.diagnosis}
+              onRetry={networkGate.retry}
+              onDismiss={networkGate.dismiss}
+              onUseThirdParty={() => {
+                // triggerOpenAddRoute sets sessionStorage (cold-mount
+                // path) AND dispatches a CustomEvent (hot-mount path
+                // for when ThirdPartySection is already mounted).
+                // See `src/lib/networkPanelDeepLink.ts`.
+                triggerOpenAddRoute();
+                setSection("third-party");
+              }}
+              onConfigureProxy={() => {
+                triggerSettingsTab("network");
+                setSection("settings");
+              }}
+            />
+          )}
 
           <div
             style={{

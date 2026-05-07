@@ -27,6 +27,11 @@ import { ArtifactLifecyclePane } from "./settings/ArtifactLifecyclePane";
 import { TrashDrawer } from "./sessions/TrashDrawer";
 import type { AppStatus, CcIdentity } from "../types";
 import { APP_VERSION } from "../version";
+import {
+  EVENT_SETTINGS_TAB,
+  consumeSettingsTabHint,
+  type SettingsTabEventDetail,
+} from "../lib/networkPanelDeepLink";
 
 type Tab =
   | "general"
@@ -74,8 +79,32 @@ const SECTION_OPTIONS = [
 
 export function SettingsSection() {
   const { pushToast } = useAppState();
-  const [tab, setTab] = useState<Tab>("general");
+  // Cold-mount path: read the sessionStorage hint set by the
+  // NetworkUnreachablePanel before this section mounted.
+  const [tab, setTab] = useState<Tab>(() => {
+    const hint = consumeSettingsTabHint();
+    if (hint && TAB_DEFS.some((t) => t.id === hint)) {
+      return hint as Tab;
+    }
+    return "general";
+  });
   const active = TAB_DEFS.find((t) => t.id === tab) ?? TAB_DEFS[0];
+
+  // Hot-mount path: when this section is already mounted,
+  // `setSection("settings")` is a no-op and the cold-mount
+  // sessionStorage read won't re-fire. The CustomEvent reaches us
+  // either way. See `src/lib/networkPanelDeepLink.ts`.
+  useEffect(() => {
+    const handler = (e: Event) => {
+      const ce = e as CustomEvent<SettingsTabEventDetail>;
+      const next = ce.detail?.tab;
+      if (next && TAB_DEFS.some((t) => t.id === next)) {
+        setTab(next as Tab);
+      }
+    };
+    window.addEventListener(EVENT_SETTINGS_TAB, handler);
+    return () => window.removeEventListener(EVENT_SETTINGS_TAB, handler);
+  }, []);
 
   return (
     <>

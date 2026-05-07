@@ -1,6 +1,19 @@
 # Claudepot
 
-Multi-account Claude Code / Claude Desktop switcher. Tauri 2 + Rust + React.
+Control center for Claude Code and Claude Desktop. Tauri 2 + Rust + React.
+
+The seed was multi-account credential switching. The shipped surface
+is broader: accounts, projects, sessions, API keys, third-party
+integrations, automations, memory (CLAUDE.md files), usage/cost
+tracking, updates, service status, and notifications — all under one
+Tauri shell with tray + menubar integration.
+
+The four-noun domain model (account, cli, desktop, project) still
+holds in `claudepot-core` — new surfaces are presentation layers over
+those nouns and over CC's filesystem, not new domain types. See
+`.claude/rules/architecture.md` for the noun-vs-surface distinction.
+Scope discipline applies to the *domain model* (don't add nouns
+casually); it does not cap what the UI can usefully expose.
 
 ## Build
 
