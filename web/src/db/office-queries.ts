@@ -11,6 +11,7 @@ import { and, desc, eq, gte, isNotNull, sql } from "drizzle-orm";
 
 import { db } from "./client";
 import {
+  botCostsDaily,
   botReports,
   decisionRecords,
   overrideRecords,
@@ -190,15 +191,19 @@ const MAX_COST_WINDOW_DAYS = 90;
 /**
  * Daily cost aggregate per bot for the last N days.
  *
- * Reads `bot_reports` directly — no rollup table. The
- * idx_bot_reports_cost_reported partial index covers the predicate
- * (cost_usd IS NOT NULL) so the scan is bounded by daily report
- * volume × N days, not by the full table. Each bot files 1–10 cost
- * reports per day; over 90 days that's at most 900 rows per bot,
- * which the SUM() collapses to ~90 result rows. Cheap.
+ * Two-source read:
+ *   - Closed days (yesterday and earlier UTC) come from
+ *     `bot_costs_daily`, the rollup populated nightly by the
+ *     daily-rollup cron (migration 0027). Survives any retention
+ *     pruning of `bot_reports`.
+ *   - Today (current UTC date) is computed live from `bot_reports`
+ *     via the `idx_bot_reports_cost_reported` partial index, since
+ *     the rollup hasn't run for today yet. This means the page's
+ *     "today" column reflects every cost report posted up to the
+ *     request, not just yesterday's rollup snapshot.
  *
- * Uses `date_trunc('day', reported_at AT TIME ZONE 'UTC')` for the
- * day bucket — matches the daily-rollup cron's UTC convention.
+ * Both sides UNION on the (bot_id, day) shape; the JS layer merges
+ * them and computes per-day + per-bot totals.
  *
  * Self-reported numbers. The Office page banner explicitly says so;
  * monthly reconciliation against provider invoices happens
@@ -216,35 +221,59 @@ export async function getBotDailyCosts(opts: {
   const windowEnd = new Date();
   const windowStart = new Date(windowEnd.getTime() - days * 86_400_000);
 
-  const rows = await db
+  // UTC midnight that starts today's bucket. Anything >= this is
+  // "today" (read live); anything < this is "closed" (read rollup).
+  const today = new Date(windowEnd);
+  today.setUTCHours(0, 0, 0, 0);
+  const todayKey = today.toISOString().slice(0, 10);
+
+  // Closed days from the rollup. windowStart..today (exclusive).
+  const closedRows = await db
     .select({
-      day: sql<string>`to_char(date_trunc('day', ${botReports.reportedAt} AT TIME ZONE 'UTC'), 'YYYY-MM-DD')`,
-      botId: botReports.botId,
+      // bot_costs_daily.day is `date`, returned as a Date by drizzle.
+      day: sql<string>`to_char(${botCostsDaily.day}, 'YYYY-MM-DD')`,
+      botId: botCostsDaily.botId,
       botUsername: users.username,
-      usd: sql<string>`COALESCE(SUM(${botReports.costUsd}), 0)::text`,
-      reports: sql<number>`COUNT(*)::int`,
+      usd: sql<string>`${botCostsDaily.usd}::text`,
+      reports: botCostsDaily.reports,
     })
-    .from(botReports)
-    .innerJoin(users, eq(users.id, botReports.botId))
+    .from(botCostsDaily)
+    .innerJoin(users, eq(users.id, botCostsDaily.botId))
     .where(
       and(
-        eq(botReports.kind, "cost"),
-        isNotNull(botReports.costUsd),
-        gte(botReports.reportedAt, windowStart),
+        gte(botCostsDaily.day, sql`${windowStart}::date`),
+        sql`${botCostsDaily.day} < ${todayKey}::date`,
       ),
     )
-    .groupBy(
-      sql`date_trunc('day', ${botReports.reportedAt} AT TIME ZONE 'UTC')`,
-      botReports.botId,
-      users.username,
-    )
-    .orderBy(
-      desc(sql`date_trunc('day', ${botReports.reportedAt} AT TIME ZONE 'UTC')`),
-      users.username,
-    );
+    .orderBy(desc(botCostsDaily.day), users.username);
+
+  // Today's running total from the live event log. Only fire if
+  // `today >= windowStart` — for tiny windows the request might not
+  // include today, and we want to keep the rollup-only path warm.
+  const todayRows =
+    today.getTime() >= windowStart.getTime()
+      ? await db
+          .select({
+            day: sql<string>`${todayKey}::text`,
+            botId: botReports.botId,
+            botUsername: users.username,
+            usd: sql<string>`COALESCE(SUM(${botReports.costUsd}), 0)::text`,
+            reports: sql<number>`COUNT(*)::int`,
+          })
+          .from(botReports)
+          .innerJoin(users, eq(users.id, botReports.botId))
+          .where(
+            and(
+              eq(botReports.kind, "cost"),
+              isNotNull(botReports.costUsd),
+              gte(botReports.reportedAt, today),
+            ),
+          )
+          .groupBy(botReports.botId, users.username)
+      : [];
 
   // numeric → string (Drizzle preserves precision); parse for arithmetic.
-  const detailed: BotDailyCost[] = rows.map((r) => ({
+  const detailed: BotDailyCost[] = [...todayRows, ...closedRows].map((r) => ({
     day: r.day,
     botId: r.botId,
     botUsername: r.botUsername,
