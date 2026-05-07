@@ -24,6 +24,8 @@
     { "idx": 19, "version": "7", "when": 1778199999000, "tag": "0019_policy_moderation_followups","breakpoints": true },
     { "idx": 20, "version": "7", "when": 1778210000000, "tag": "0020_moderation_retro_queue",     "breakpoints": true },
     { "idx": 21, "version": "7", "when": 1778220000000, "tag": "0021_moderation_prompts",         "breakpoints": true },
-    { "idx": 22, "version": "7", "when": 1778316000000, "tag": "0022_ai_tagging",                  "breakpoints": true }
+    { "idx": 22, "version": "7", "when": 1778316000000, "tag": "0022_ai_tagging",                  "breakpoints": true },
+    { "idx": 23, "version": "7", "when": 1778400000000, "tag": "0023_bots_to_system",              "breakpoints": true },
+    { "idx": 24, "version": "7", "when": 1778400001000, "tag": "0024_approve_passed_pending",      "breakpoints": true }
   ]
 }
