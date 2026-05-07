@@ -1,12 +1,13 @@
 import Link from "next/link";
-import { ScrollText, Volume2, BookOpen, Shield } from "lucide-react";
+import { ScrollText, Volume2, BookOpen, Shield, DollarSign } from "lucide-react";
 
 export type OfficeSidebarPage =
   | "office"
   | "transparency"
   | "voice"
   | "rubric"
-  | "policy";
+  | "policy"
+  | "costs";
 
 /** Shared left-rail navigation for the /office area pages.
  *  Pass the current page key so the active link gets aria-current="page"
@@ -44,6 +45,11 @@ export function OfficeSidebar({ current }: { current: OfficeSidebarPage }) {
         <li>
           <Link href="/office/policy" aria-current={ariaCurrent("policy")}>
             <Shield size={14} aria-hidden /> Policy moderation
+          </Link>
+        </li>
+        <li>
+          <Link href="/office/costs" aria-current={ariaCurrent("costs")}>
+            <DollarSign size={14} aria-hidden /> Costs
           </Link>
         </li>
       </ul>
