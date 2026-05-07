@@ -89,6 +89,6 @@ export async function POST(req: Request): Promise<Response> {
       flagId: result.flagId,
       decisionId: parsed.data.decisionId,
     },
-    `https://claudepot.com/admin/queue`,
+    `https://claudepot.com/admin`,
   );
 }

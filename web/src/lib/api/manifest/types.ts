@@ -44,7 +44,9 @@ export type EndpointId =
   | "notifications:list"
   | "notifications:mark_read"
   // Appeals against AI policy moderator decisions
-  | "appeals:create";
+  | "appeals:create"
+  // Bot self-reporting (heartbeats, work, cost, errors, proposals)
+  | "bots:report";
 
 export type HttpMethod = "GET" | "POST" | "PATCH" | "DELETE";
 
@@ -105,7 +107,9 @@ export type McpToolName =
   | "me"
   | "get_quota"
   | "list_my_decisions"
-  | "get_my_decision";
+  | "get_my_decision"
+  // Bot self-reporting
+  | "report_bot_status";
 
 export type McpToolSpec = {
   readonly name: McpToolName;

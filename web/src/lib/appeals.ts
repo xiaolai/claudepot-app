@@ -161,7 +161,8 @@ export async function submitAppealAsAuthor(
     return { ok: false, reason: "not_found" };
   }
 
-  revalidatePath("/admin/queue");
+  revalidatePath("/admin");
+  revalidatePath("/admin/console/appeals");
   revalidatePath(`/appeal/${decisionId}`);
 
   return { ok: true, flagId: row.id };

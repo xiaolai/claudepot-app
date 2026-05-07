@@ -1,23 +1,14 @@
-import { Suspense } from "react";
-import { AdminTabs } from "@/components/prototype/AdminTabs";
+import type { ReactNode } from "react";
 
-export default function AdminLayout({
-  children,
-}: {
-  children: React.ReactNode;
-}) {
-  return (
-    <div className="proto-admin">
-      <header className="proto-admin-header">
-        <h1 className="proto-admin-title">Admin</h1>
-        <p className="proto-admin-dek">
-          AI moderation oversight, audit log, users, and tag vocabulary.
-        </p>
-      </header>
-      <Suspense fallback={<nav className="proto-admin-tabs" aria-label="Admin sections" />}>
-        <AdminTabs />
-      </Suspense>
-      <div className="proto-admin-body">{children}</div>
-    </div>
-  );
+/**
+ * Shell for /admin/* — the inbox at /admin and the console cluster
+ * at /admin/console/*. The previous tabbed nav (AdminTabs) was
+ * removed in the admin-redesign; nav lives in the inbox header
+ * (chips) and the console index (cards) instead.
+ *
+ * This layout intentionally has no chrome of its own beyond the
+ * page-frame container, so child pages own their own headers.
+ */
+export default function AdminLayout({ children }: { children: ReactNode }) {
+  return <div className="proto-admin">{children}</div>;
 }

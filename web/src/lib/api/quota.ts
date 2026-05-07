@@ -31,6 +31,7 @@ const ZERO_USAGE: Record<LimitCategory, number> = {
   votes: 0,
   saves: 0,
   reads: 0,
+  bots: 0,
 };
 
 export async function readQuotaForToken(tokenId: string): Promise<QuotaDto> {
@@ -44,6 +45,7 @@ export async function readQuotaForToken(tokenId: string): Promise<QuotaDto> {
       votes: apiTokenUsage.votesCount,
       saves: apiTokenUsage.savesCount,
       reads: apiTokenUsage.readsCount,
+      bots: apiTokenUsage.botsCount,
     })
     .from(apiTokenUsage)
     .where(
@@ -69,6 +71,7 @@ export async function readQuotaForToken(tokenId: string): Promise<QuotaDto> {
       votes: bucket("votes"),
       saves: bucket("saves"),
       reads: bucket("reads"),
+      bots: bucket("bots"),
     },
   };
 }

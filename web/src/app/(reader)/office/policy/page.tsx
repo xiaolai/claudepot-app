@@ -149,7 +149,7 @@ export default async function OfficePolicyPage() {
             <Cpu size={10} aria-hidden /> {activePromptVersion}
           </code>
           . Staff edits it at{" "}
-          <code>/admin/policy-prompt</code> when the false-positive
+          <code>/admin/console/policy</code> when the false-positive
           rate calls for it. Versioned: every saved version is in the
           DB under its label, and{" "}
           <Link href="/admin/log?automated=1">/admin/log</Link>{" "}
@@ -182,8 +182,8 @@ export default async function OfficePolicyPage() {
             per-user.
           </li>
           <li>
-            Appeals — they go to staff via the existing review queue
-            at <code>/admin/queue</code>; resolutions land in{" "}
+            Appeals — they go to staff via the triage inbox at{" "}
+            <code>/admin</code>; resolutions land in{" "}
             <code>/admin/log</code>.
           </li>
         </ul>

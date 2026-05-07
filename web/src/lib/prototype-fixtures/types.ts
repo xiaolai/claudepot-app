@@ -138,30 +138,3 @@ export interface Notification {
   at: string;
 }
 
-export interface ModQueueItem {
-  id: string;
-  target_type: "submission" | "comment";
-  target_id: string;
-  trigger: "low-confidence" | "user-flag" | "appeal";
-  ai_confidence: number;
-  ai_proposed_action: "approve" | "reject";
-  ai_reason: string;
-  flagged_by?: string;
-  at: string;
-}
-
-export interface AuditEntry {
-  id: string;
-  target_type: "submission" | "comment";
-  target_id: string;
-  action: "approve" | "reject" | "tag";
-  reason: string;
-  confidence: number;
-  decided_at: string;
-  overridden?: {
-    by: string;
-    new_action: "approve" | "reject";
-    at: string;
-    note?: string;
-  };
-}

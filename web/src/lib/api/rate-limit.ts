@@ -20,6 +20,10 @@ export const DEFAULT_DAILY_LIMITS = {
   votes: 1000,
   saves: 1000,
   reads: 10_000,
+  // Bot self-reporting (migration 0025). 5k/day per bot covers
+  // ~one report every 17s sustained — well above realistic bot
+  // cadence. Heartbeats UPSERT and don't charge this bucket.
+  bots: 5_000,
 } as const;
 
 export type LimitCategory = keyof typeof DEFAULT_DAILY_LIMITS;
@@ -30,6 +34,7 @@ const COLUMN_BY_CATEGORY: Record<LimitCategory, string> = {
   votes: "votes_count",
   saves: "saves_count",
   reads: "reads_count",
+  bots: "bots_count",
 };
 
 export type RateLimitResult =

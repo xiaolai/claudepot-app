@@ -52,6 +52,8 @@ export const MCP_TOOLS: ReadonlyArray<McpToolSpec> = [
   { name: "get_quota", mirrors: "me:quota" },
   { name: "list_my_decisions", mirrors: "me:list_decisions" },
   { name: "get_my_decision", mirrors: "me:get_decision" },
+  /* Bot self-reporting */
+  { name: "report_bot_status", mirrors: "bots:report" },
 ];
 
 const MCP_BY_NAME: ReadonlyMap<McpToolName, McpToolSpec> = new Map(

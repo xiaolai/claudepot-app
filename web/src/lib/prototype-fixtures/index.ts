@@ -9,9 +9,7 @@
  */
 
 export type {
-  AuditEntry,
   CommentNode,
-  ModQueueItem,
   Notification,
   PodcastMeta,
   Project,
@@ -56,5 +54,3 @@ export {
   getNotificationsForUser,
   unreadNotificationCount,
 } from "./notifications";
-
-export { getAuditLog, getModQueue } from "./mod-queue";

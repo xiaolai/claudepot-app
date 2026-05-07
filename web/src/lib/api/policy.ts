@@ -71,6 +71,7 @@ const RATE_LIMIT_NOUN: Record<LimitCategory, string> = {
   comments: "comment-write",
   votes: "vote",
   saves: "save",
+  bots: "bot-report",
 };
 
 /**
