@@ -3,6 +3,8 @@ mod commands;
 mod config_dto;
 mod config_watch;
 mod config_watch_types;
+#[cfg(target_os = "macos")]
+mod dock_icon;
 mod dto;
 mod dto_account;
 mod dto_activity;
@@ -235,6 +237,16 @@ pub fn run() {
             if hide_dock {
                 app.set_activation_policy(tauri::ActivationPolicy::Accessory);
             }
+
+            // Force the Dock icon to render via NSImage instead of
+            // the legacy IconServices .icns pipeline. Without this,
+            // pixel-art icons whose grid doesn't divide the Apple
+            // icon-size ladder evenly (16/32/64/128/256/512/1024)
+            // show visibly soft anti-aliased edges at default Dock
+            // sizes. Mirrors Tauri's dev-mode `setApplicationIconImage`
+            // call — see `dock_icon.rs` for full rationale.
+            #[cfg(target_os = "macos")]
+            dock_icon::override_application_icon();
 
             // Honor the "show window on startup" preference. The window
             // is configured `visible: true` in tauri.conf.json so the
