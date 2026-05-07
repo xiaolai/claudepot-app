@@ -6,6 +6,44 @@ Versioning scheme:
 - `0.1.x` — beta
 - `1.0.0+` — stable
 
+## 0.1.12 — beta (2026-05-07)
+
+### Fixed
+
+- **Project detail no longer flashes a "consider cleaning" hint
+  that goes nowhere.** Alive projects with leftover bytes from
+  retired third-party CC plugins (e.g. `.cccmemory.db-shm`,
+  `.db-wal` files whose `.db` was removed) used to show a "Go to
+  Maintenance" call-to-action that landed on *"Nothing to clean."*
+  Maintenance only handles orphan projects whose source folder is
+  gone, and an alive project's source by definition still exists.
+  The misleading hint is gone; the project header's *Finder*
+  button is the right way to inspect leftover files and decide
+  manually.
+
+- **Updater progress bar no longer jumps backwards.** The download
+  bar previously rendered at a fake 33% before the first chunk
+  arrived, dropped to 0% once the Tauri updater's `Started` event
+  reported the content length, then climbed to 100%. The "33%"
+  was a static placeholder for the brief unknown-total window —
+  not progress. The bar now starts at 0% and grows monotonically;
+  activity during the pre-`Started` window is conveyed by the
+  byte counter that's already there.
+
+- **Updates panel speaks truthfully.** The CLI/Desktop secondary
+  action button was labeled *Update anyway* even when already on
+  the latest version, where pressing it ran a no-op `claude
+  update` — relabeled to *Reinstall*, which is what the action
+  actually does. The post-install confirmation banner said
+  *"Active install: vX.Y.Z"* / *"Installed Claude.app vX.Y.Z via
+  brew"* regardless of whether the version actually changed; it
+  now compares before-vs-after and reports one of *reinstalled
+  (vX.Y.Z)*, *updated from vA.B.C to vX.Y.Z*, or *installed at
+  vX.Y.Z*. The CLI card's subtitle and comparison badge mirror
+  the Desktop card's "not installed" wording when no `claude`
+  binary is on PATH (was: *"installed: unknown"* with a useless
+  *unknown* badge).
+
 ## 0.1.11 — beta (2026-05-06)
 
 ### Added
