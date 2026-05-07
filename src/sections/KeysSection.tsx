@@ -437,7 +437,7 @@ function ApiKeysTable({
                 <Td align="right">
                   <RowActions>
                     <IconButton
-                      glyph={NF.refresh}
+                      glyph={NF.shield}
                       title={t("keys.probe")}
                       aria-label={t("keys.probe") + " " + row.label}
                       onClick={() => onProbe(row)}

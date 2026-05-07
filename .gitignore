@@ -45,7 +45,19 @@ typescript
 # a file once its parent directory is excluded.
 /scripts/*
 !/scripts/generate-menu-icons.sh
+!/scripts/regen-icons.sh
 dev-docs/
+
+# Tauri's `pnpm tauri icon` command regenerates these on every run,
+# but we don't ship for MSIX/iOS/Android, so any reappearance is dead
+# bytes. Ignored so a stray `pnpm tauri icon` invocation doesn't
+# stage them. The supported regen path is `scripts/regen-icons.sh`,
+# which produces only the assets the bundler actually consumes.
+src-tauri/icons/Square*Logo.png
+src-tauri/icons/StoreLogo.png
+src-tauri/icons/128x128@2x.png
+src-tauri/icons/ios/
+src-tauri/icons/android/
 
 # tdd-guardian generated artifacts
 .claude/tdd-guardian/state.json

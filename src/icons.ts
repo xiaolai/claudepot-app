@@ -62,6 +62,7 @@ import {
   Play,
   Plus,
   RefreshCw,
+  RotateCcw,
   Search,
   Server,
   Shield,
@@ -131,6 +132,10 @@ export const NF = {
   trash:      Trash2,
   edit:       Edit,
   refresh:    RefreshCw,
+  /** Counter-clockwise rotate — universal "undo / restore / re-enable"
+   *  semantic. Use when the verb means "bring back to a prior state",
+   *  not "fetch fresh data" (which is `refresh`). */
+  restore:    RotateCcw,
   download:   Download,
   upload:     Upload,
   play:       Play,

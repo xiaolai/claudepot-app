@@ -141,22 +141,35 @@ export function AddAccountModal({
     }
   };
 
+  const handleCancelBrowserLogin = async () => {
+    // Fire-and-forget: the backend's terminal error event is what
+    // actually drives the modal back to its terminal state. The
+    // command treats "nothing running" as a no-op, so calling it
+    // during the brief pre-handoff window is safe.
+    try {
+      await api.accountLoginCancel();
+    } catch {
+      // Lock-poisoning corner case — not worth a toast when the user
+      // is trying to back out of the flow.
+    }
+  };
+
   const handleBrowserLogin = async () => {
     setBrowserLoggingIn(true);
     try {
       // Async start: returns op_id immediately; phase events flow on
       // `op-progress::<op_id>`. The shell `OperationProgressModal`
-      // takes over the user-visible surface.
+      // takes over the user-visible surface and carries the Cancel
+      // button via `onCancel`.
       const opId = await api.accountRegisterFromBrowserStart();
-      // Hand off the AddAccountModal — the OperationProgressModal owns
-      // the in-flight surface from here. The parent shell will pick up
-      // the new account on the next refresh once `onComplete` fires.
       openOpModal({
         opId,
         title: t("accounts.addModal.title"),
         phases: LOGIN_PHASES,
         fetchStatus: api.accountLoginStatus,
         renderResult: renderLoginResult,
+        onCancel: handleCancelBrowserLogin,
+        cancelLabel: "Cancel login",
         onComplete: () => {
           // We don't know the new email yet (the synchronous return
           // value is gone); the parent's refresh will pick it up. Pass
@@ -184,27 +197,12 @@ export function AddAccountModal({
     }
   };
 
-  const handleCancelBrowserLogin = async () => {
-    // Fire-and-forget: the command never errors, and the awaited
-    // `handleBrowserLogin` promise is what actually surfaces the
-    // cancellation result back to state.
-    try {
-      await api.accountLoginCancel();
-    } catch {
-      // The backend treats "nothing running" as a no-op. Anything
-      // else is the lock-poisoning corner case — not worth a toast
-      // when the user is trying to back out of the flow.
-    }
-  };
-
   /**
    * Wrap every dismiss route (Esc / scrim / header-X / footer Close)
-   * so we always cancel the backend before the modal disappears.
-   * Without this, a close while `browserLoggingIn` leaves the
-   * `claude auth login` subprocess running invisibly in the
-   * background, which is exactly the original bug this feature was
-   * meant to fix. Cancel is fire-and-forget so dismissal is still
-   * instant from the user's perspective.
+   * so we always cancel the backend during the brief pre-handoff
+   * window where `accountRegisterFromBrowserStart` hasn't returned
+   * yet. Once the handoff completes, the OperationProgressModal owns
+   * cancellation and this path is moot.
    */
   const handleRequestClose = () => {
     if (browserLoggingIn) {
@@ -318,10 +316,11 @@ export function AddAccountModal({
 
           {/* Action 2 — Browser login. Wired through
               account_register_from_browser; the core service owns the
-              subprocess so the refresh token never enters JS. While the
-              flow is waiting for the browser, the card disables itself
-              and a prominent Cancel appears in the footer (plus a
-              secondary Cancel inline for discoverability). */}
+              subprocess so the refresh token never enters JS. The
+              `browserLoggingIn` state covers only the brief window
+              between Log-in click and `accountRegisterFromBrowserStart`
+              returning — once the OperationProgressModal takes over,
+              this modal closes and Cancel lives there. */}
           <ActionCard
             glyph={NF.user}
             title={t("accounts.addModal.browserTitle")}

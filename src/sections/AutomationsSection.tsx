@@ -6,6 +6,7 @@ import { Button } from "../components/primitives/Button";
 import { SkeletonList } from "../components/primitives/Skeleton";
 import { NF } from "../icons";
 import { api } from "../api";
+import { useAppState } from "../providers/AppStateProvider";
 import type {
   AutomationSummaryDto,
   RouteSummaryDto,
@@ -42,10 +43,6 @@ export function AutomationsSection() {
   const [capabilities, setCapabilities] =
     useState<SchedulerCapabilitiesDto | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
-  const [toast, setToast] = useState<{
-    kind: "info" | "error";
-    msg: string;
-  } | null>(null);
   const [busyIds, setBusyIds] = useState<Set<string>>(new Set());
   const [showAdd, setShowAdd] = useState(false);
   const [showGallery, setShowGallery] = useState(false);
@@ -137,7 +134,7 @@ export function AutomationsSection() {
     } catch (e) {
       cleanup();
       setBusy(id, false);
-      setToast({ kind: "error", msg: String(e) });
+      pushToast("error", String(e));
     }
   }
 
@@ -151,7 +148,7 @@ export function AutomationsSection() {
         msg: enabled ? t("automations.enabled") : t("automations.disabled"),
       });
     } catch (e) {
-      setToast({ kind: "error", msg: String(e) });
+      pushToast("error", String(e));
     } finally {
       setBusy(id, false);
     }
@@ -167,7 +164,7 @@ export function AutomationsSection() {
       await refresh();
       setToast({ kind: "info", msg: t("automations.removed") });
     } catch (e) {
-      setToast({ kind: "error", msg: String(e) });
+      pushToast("error", String(e));
     } finally {
       setBusy(id, false);
     }
@@ -203,12 +200,21 @@ export function AutomationsSection() {
               {t("automations.fromTemplate")}
             </Button>
             <Button
-              variant="solid"
-              glyph={NF.plus}
-              onClick={() => setShowAdd(true)}
+              variant="ghost"
+              glyph={NF.copy}
+              onClick={() => setShowGallery(true)}
             >
               {t("automations.add")}
             </Button>
+            {automations !== null && automations.length > 0 && (
+              <Button
+                variant="solid"
+                glyph={NF.plus}
+                onClick={() => setShowAdd(true)}
+              >
+                Add automation
+              </Button>
+            )}
           </>
         }
       />
@@ -285,7 +291,6 @@ export function AutomationsSection() {
           refresh();
           setToast({ kind: "info", msg: t("automations.created") });
         }}
-        onError={(msg) => setToast({ kind: "error", msg })}
       />
 
       <TemplateGallery
@@ -317,7 +322,7 @@ export function AutomationsSection() {
           refresh();
           setToast({ kind: "info", msg: t("automations.updated") });
         }}
-        onError={(msg) => setToast({ kind: "error", msg })}
+        onError={(msg) => pushToast("error", msg)}
       />
 
       {removeTarget && (

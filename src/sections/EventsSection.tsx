@@ -349,7 +349,52 @@ export function EventsSection() {
             registerRefresh={(fn) => {
               usageRefreshRef.current = fn;
             }}
-          />
+          >
+            <FilterRail filters={filters} onChange={setFilters} />
+            <div
+              style={{
+                flex: 1,
+                minWidth: 0,
+                display: "flex",
+                flexDirection: "column",
+                minHeight: 0,
+              }}
+            >
+              <DashboardStrip />
+              <MetricsStrip cards={aggCards} loading={loading} />
+              <CardStream
+                cards={cards}
+                loading={loading}
+                error={error}
+                lastSeenId={counts?.lastSeenId ?? null}
+                onCardClick={handleCardClick}
+              />
+            </div>
+          </div>
+        )}
+        {tab === "usage" && (
+          <div
+            role="tabpanel"
+            id="events-panel-usage"
+            aria-labelledby="events-tab-usage"
+            style={{ flex: 1, minHeight: 0, display: "flex" }}
+          >
+            <UsageView
+              registerRefresh={(fn) => {
+                usageRefreshRef.current = fn;
+              }}
+            />
+          </div>
+        )}
+        {tab === "cost" && (
+          <div
+            role="tabpanel"
+            id="events-panel-cost"
+            aria-labelledby="events-tab-cost"
+            style={{ flex: 1, minHeight: 0, display: "flex" }}
+          >
+            <CostTab />
+          </div>
         )}
         {tab === "cost" && <CostTab />}
       </div>
@@ -384,12 +429,16 @@ function TabStrip({
       }}
     >
       <TabButton
+        id="events-tab-stream"
+        controls="events-panel-stream"
         active={current === "stream"}
         label={t("events.stream")}
         sub="Failures + slow events"
         onClick={() => onPick("stream")}
       />
       <TabButton
+        id="events-tab-usage"
+        controls="events-panel-usage"
         active={current === "usage"}
         label={t("events.usage")}
         sub="Per-artifact invocation counts"
@@ -406,11 +455,15 @@ function TabStrip({
 }
 
 function TabButton({
+  id,
+  controls,
   active,
   label,
   sub,
   onClick,
 }: {
+  id: string;
+  controls: string;
   active: boolean;
   label: string;
   sub: string;
@@ -419,8 +472,10 @@ function TabButton({
   return (
     <button
       type="button"
+      id={id}
       role="tab"
       aria-selected={active}
+      aria-controls={controls}
       onClick={onClick}
       className="pm-focus"
       title={sub}
@@ -429,11 +484,11 @@ function TabButton({
         background: "transparent",
         color: active ? "var(--accent-ink)" : "var(--fg-muted)",
         border: "none",
-        borderBottom: `2px solid ${active ? "var(--accent)" : "transparent"}`,
+        borderBottom: `var(--bw-strong) solid ${active ? "var(--accent)" : "transparent"}`,
         fontSize: "var(--fs-sm)",
         fontWeight: active ? 600 : 400,
         cursor: "pointer",
-        marginBottom: "-1px",
+        marginBottom: "calc(-1 * var(--bw-hair))",
       }}
     >
       {label}
@@ -809,6 +864,8 @@ function CardStream({ cards, loading, error, lastSeenId, onCardClick }: CardStre
   }
   return (
     <ul
+      role="listbox"
+      aria-label="Activity cards"
       style={{
         margin: 0,
         padding: 0,
@@ -839,7 +896,16 @@ interface CardRowProps {
 function CardRow({ card, isNew, onClick }: CardRowProps) {
   return (
     <li
+      role="option"
+      aria-selected={false}
+      tabIndex={0}
       onClick={onClick}
+      onKeyDown={(e) => {
+        if (e.key === "Enter" || e.key === " ") {
+          e.preventDefault();
+          onClick();
+        }
+      }}
       style={{
         padding: "var(--sp-12) var(--sp-16)",
         borderBottom: "var(--bw-subhair) solid var(--border)",
@@ -912,7 +978,7 @@ function CardRow({ card, isNew, onClick }: CardRowProps) {
               marginTop: "var(--sp-4)",
               padding: "var(--sp-4) var(--sp-8)",
               background: "var(--bg-elev)",
-              borderLeft: "2px solid var(--accent)",
+              borderLeft: "var(--bw-strong) solid var(--accent)",
               borderRadius: "var(--r-1)",
             }}
           >

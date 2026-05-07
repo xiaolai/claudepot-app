@@ -144,3 +144,47 @@ pub fn tier_str(t: core::StatusTier) -> String {
     }
     .to_string()
 }
+
+// ---------------------------------------------------------------------------
+// First-run network diagnosis. See `dev-docs/network-detection-panel.md`.
+// ---------------------------------------------------------------------------
+
+/// Wire shape returned by [`network_first_run_check`]. Keep flat —
+/// the renderer's `NetworkUnreachablePanel` reads `diagnosis` to pick
+/// copy and `latencyMs` for the Settings → Network status line.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct FirstRunNetworkDto {
+    /// `reachable | dns_failure | connection_refused | tls_error |
+    /// timeout | http_error | unknown`. Pre-classified server-side
+    /// so the renderer doesn't have to parse error strings itself.
+    pub diagnosis: String,
+    /// Round-trip ms when `diagnosis == "reachable"`; null otherwise.
+    pub latency_ms: Option<u32>,
+    /// Redacted error string, exposed only in the Settings →
+    /// Diagnostics surface. The unreachable panel doesn't render it.
+    pub message: Option<String>,
+}
+
+pub fn diagnosis_str(d: core::Diagnosis) -> String {
+    match d {
+        core::Diagnosis::Reachable => "reachable",
+        core::Diagnosis::DnsFailure => "dns_failure",
+        core::Diagnosis::ConnectionRefused => "connection_refused",
+        core::Diagnosis::TlsError => "tls_error",
+        core::Diagnosis::Timeout => "timeout",
+        core::Diagnosis::HttpError => "http_error",
+        core::Diagnosis::Unknown => "unknown",
+    }
+    .to_string()
+}
+
+impl From<core::AnthropicDiagnosis> for FirstRunNetworkDto {
+    fn from(d: core::AnthropicDiagnosis) -> Self {
+        Self {
+            diagnosis: diagnosis_str(d.diagnosis),
+            latency_ms: d.latency_ms,
+            message: d.message,
+        }
+    }
+}

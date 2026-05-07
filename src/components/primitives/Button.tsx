@@ -35,6 +35,12 @@ interface ButtonProps {
   "aria-pressed"?: boolean;
   "aria-haspopup"?: boolean | "menu" | "listbox" | "tree" | "grid" | "dialog";
   "aria-expanded"?: boolean;
+  /** Tab semantics for tablist participation. Use with role="tab",
+   *  aria-selected, and aria-controls pointing at the tabpanel id. */
+  id?: string;
+  role?: "tab" | "menuitem" | "option";
+  "aria-selected"?: boolean;
+  "aria-controls"?: string;
   autoFocus?: boolean;
 }
 

@@ -21,8 +21,6 @@
     clippy::collapsible_if,
     clippy::needless_borrows_for_generic_args,
     clippy::redundant_closure,
-    clippy::needless_return,
-    clippy::useless_format,
     clippy::manual_map,
     clippy::single_match,
     clippy::assertions_on_constants,
@@ -41,6 +39,7 @@ pub mod artifact_lifecycle;
 pub mod artifact_usage;
 pub mod automations;
 pub mod blob;
+pub mod cc_tips;
 pub mod cli_backend;
 pub mod config_view;
 pub mod desktop_backend;
@@ -52,6 +51,8 @@ pub mod host_activate;
 pub mod keys;
 pub mod launcher;
 pub mod memory_health;
+pub mod memory_log;
+pub mod memory_view;
 pub mod migrate;
 pub mod migrations;
 pub mod notification_log;
@@ -103,6 +104,7 @@ pub mod session_slim;
 pub mod session_subagents;
 pub mod session_tool_link;
 pub mod session_worktree;
+pub mod settings_writer;
 pub mod templates;
 pub mod trash;
 pub mod updates;

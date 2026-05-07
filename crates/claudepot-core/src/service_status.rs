@@ -441,6 +441,173 @@ fn build_client() -> reqwest::Client {
         .unwrap_or_else(|_| reqwest::Client::new())
 }
 
+// ---------------------------------------------------------------------------
+// First-run diagnosis — coarser than HostLatency, structured for the
+// network-detection panel. See `dev-docs/network-detection-panel.md`.
+// ---------------------------------------------------------------------------
+
+/// Coarse classification of why the primary Anthropic host is
+/// unreachable. The exact error message that produced the variant is
+/// not load-bearing: the variant tells the panel which copy to show
+/// and which remediation to highlight, the message stays available
+/// for diagnostics-pane display only.
+///
+/// Heuristics are conservative: `Unknown` is the right fallback when
+/// the error string doesn't match a known signature, never a guess.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Diagnosis {
+    /// `api.anthropic.com` returned an HTTP response (any status —
+    /// even 401 means the path is alive).
+    Reachable,
+    /// DNS resolution failed. Common GFW symptom (DNS poisoning) and
+    /// also the result of a broken resolver / captive portal that
+    /// hijacks DNS.
+    DnsFailure,
+    /// TCP connection refused or reset. The path resolves but a
+    /// downstream router or firewall is actively dropping traffic.
+    ConnectionRefused,
+    /// TLS handshake failed — certificate validation, version
+    /// mismatch, or interception. Often the signature of an
+    /// inspecting middlebox.
+    TlsError,
+    /// Connection timed out — could be saturation, blocked path, or
+    /// a route black-hole. Indistinguishable from "blocked" without
+    /// more probes; the panel says "couldn't reach in time" and
+    /// surfaces the same remediation set as `ConnectionRefused`.
+    Timeout,
+    /// Reached an HTTP responder but it wasn't Anthropic's API (or
+    /// Anthropic returned 5xx). Distinct from unreachability — this
+    /// is a service-side issue, not a network one.
+    HttpError,
+    /// None of the heuristics matched. The panel surfaces the raw
+    /// (redacted) message and the generic remediation set.
+    Unknown,
+}
+
+impl Diagnosis {
+    /// True iff the diagnosis indicates Anthropic is reachable from
+    /// the user's network. Used as the panel's gate.
+    pub fn reachable(self) -> bool {
+        matches!(self, Self::Reachable)
+    }
+}
+
+/// Classify a redacted error message into a coarse [`Diagnosis`].
+/// Pure string heuristics — no network calls. Returns
+/// [`Diagnosis::Unknown`] when no signature matches.
+///
+/// Keep the patterns lowercase-insensitive and substring-based: the
+/// underlying `reqwest::Error::Display` shape varies across hyper /
+/// rustls versions, and matching loosely is more robust than
+/// matching the exact phrasing of any one library version.
+pub fn classify_error(message: &str) -> Diagnosis {
+    let m = message.to_lowercase();
+    // DNS first — "dns error" / "failed to lookup address" / "name
+    // or service not known" / "no such host".
+    if m.contains("dns")
+        || m.contains("lookup address")
+        || m.contains("no such host")
+        || m.contains("name or service not known")
+        || m.contains("nodename nor servname")
+    {
+        return Diagnosis::DnsFailure;
+    }
+    // TLS — handshake, certificate, alert, invalid record.
+    if m.contains("tls")
+        || m.contains("certificate")
+        || m.contains("handshake")
+        || m.contains("ssl")
+    {
+        return Diagnosis::TlsError;
+    }
+    // Connection refused / reset / network unreachable.
+    if m.contains("refused")
+        || m.contains("reset by peer")
+        || m.contains("network is unreachable")
+        || m.contains("no route to host")
+    {
+        return Diagnosis::ConnectionRefused;
+    }
+    Diagnosis::Unknown
+}
+
+/// First-run reachability summary for the network-detection panel.
+/// Probes `api.anthropic.com` only — the panel's question is "can the
+/// user use Anthropic from this network", which is answered by the
+/// canonical hot-path host alone. Probing all three HOTPATH hosts
+/// would muddy the signal: `claude.ai` reachability is a separate
+/// concern (auth flow), and `platform.claude.com` failures while
+/// `api.anthropic.com` is up almost never happen in practice.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AnthropicDiagnosis {
+    pub diagnosis: Diagnosis,
+    /// Round-trip in milliseconds when reachable. `None` for any
+    /// non-`Reachable` outcome.
+    pub latency_ms: Option<u32>,
+    /// Redacted error string for the diagnostics pane. `None` when
+    /// reachable. The panel itself never displays this — copy is
+    /// driven by the `diagnosis` variant — but the Settings →
+    /// Network pane includes it for users debugging.
+    pub message: Option<String>,
+}
+
+/// Map an HTTP status to a [`Diagnosis`]. 5xx is a service-side
+/// failure (api.anthropic.com is up but degraded — Statuspage
+/// territory); everything else (2xx, 3xx, 4xx including the
+/// expected unauthenticated-HEAD 401) means the network path is
+/// alive. Pulled out so the mapping is unit-testable without a
+/// real HTTP client.
+pub fn diagnose_status(status: u16) -> Diagnosis {
+    if (500..600).contains(&status) {
+        Diagnosis::HttpError
+    } else {
+        Diagnosis::Reachable
+    }
+}
+
+/// Single-host probe against `api.anthropic.com` with structured
+/// diagnosis. Distinct from [`probe_one`] because it inspects the
+/// HTTP status to populate [`Diagnosis::HttpError`] for 5xx
+/// responses — the audit-flagged case where Anthropic is reachable
+/// but degraded would otherwise collapse to "Reachable" silently.
+pub async fn diagnose_anthropic() -> AnthropicDiagnosis {
+    let host = HOTPATH_HOSTS[0]; // api.anthropic.com — see HOTPATH_HOSTS docstring.
+    debug_assert_eq!(host.name, "api.anthropic.com");
+    let client = build_client();
+    let start = Instant::now();
+    match client.head(host.url).send().await {
+        Ok(resp) => {
+            let status = resp.status().as_u16();
+            let ms = start.elapsed().as_millis().min(u128::from(u32::MAX)) as u32;
+            let diagnosis = diagnose_status(status);
+            let message = if matches!(diagnosis, Diagnosis::HttpError) {
+                Some(format!("HTTP {status} from api.anthropic.com"))
+            } else {
+                None
+            };
+            AnthropicDiagnosis {
+                diagnosis,
+                latency_ms: Some(ms),
+                message,
+            }
+        }
+        Err(e) if e.is_timeout() => AnthropicDiagnosis {
+            diagnosis: Diagnosis::Timeout,
+            latency_ms: None,
+            message: Some("connection timed out".to_string()),
+        },
+        Err(e) => {
+            let message = redact(&e.to_string());
+            AnthropicDiagnosis {
+                diagnosis: classify_error(&message),
+                latency_ms: None,
+                message: Some(message),
+            }
+        }
+    }
+}
+
 /// Sanitize an error string before surfacing it to the renderer.
 /// `reqwest::Error::Display` is generally clean (it doesn't include
 /// request bodies or headers), but we still strip anything that looks
@@ -667,5 +834,109 @@ mod tests {
              GrowthBook client uses apiHost=api.anthropic.com. See \
              HOTPATH_HOSTS docstring before re-adding."
         );
+    }
+
+    // -----------------------------------------------------------------
+    // First-run diagnosis
+    // -----------------------------------------------------------------
+
+    #[test]
+    fn classify_error_dns_signatures() {
+        // Common shapes across reqwest / hyper / rustls versions.
+        for s in [
+            "dns error: failed to lookup address",
+            "DNS error",
+            "no such host (os error 8)",
+            "Name or service not known",
+            "nodename nor servname provided",
+        ] {
+            assert_eq!(
+                classify_error(s),
+                Diagnosis::DnsFailure,
+                "expected DnsFailure for: {s}"
+            );
+        }
+    }
+
+    #[test]
+    fn classify_error_tls_signatures() {
+        for s in [
+            "tls handshake eof",
+            "Certificate verify failed",
+            "ssl alert: bad certificate",
+            "handshake timed out",
+        ] {
+            assert_eq!(
+                classify_error(s),
+                Diagnosis::TlsError,
+                "expected TlsError for: {s}"
+            );
+        }
+    }
+
+    #[test]
+    fn classify_error_connection_refused_signatures() {
+        for s in [
+            "connection refused",
+            "Connection reset by peer",
+            "Network is unreachable",
+            "no route to host",
+        ] {
+            assert_eq!(
+                classify_error(s),
+                Diagnosis::ConnectionRefused,
+                "expected ConnectionRefused for: {s}"
+            );
+        }
+    }
+
+    #[test]
+    fn classify_error_unknown_falls_through() {
+        // Generic / unrecognized shape → Unknown, not a guess.
+        assert_eq!(classify_error("something went wrong"), Diagnosis::Unknown);
+        assert_eq!(classify_error(""), Diagnosis::Unknown);
+    }
+
+    #[test]
+    fn diagnosis_reachable_predicate() {
+        assert!(Diagnosis::Reachable.reachable());
+        assert!(!Diagnosis::DnsFailure.reachable());
+        assert!(!Diagnosis::Timeout.reachable());
+        assert!(!Diagnosis::ConnectionRefused.reachable());
+        assert!(!Diagnosis::TlsError.reachable());
+        assert!(!Diagnosis::HttpError.reachable());
+        assert!(!Diagnosis::Unknown.reachable());
+    }
+
+    #[test]
+    fn diagnose_anthropic_probes_first_hotpath_host() {
+        // The function relies on HOTPATH_HOSTS[0] being
+        // api.anthropic.com. Lock that ordering down so a future
+        // reordering doesn't silently change which host the panel
+        // probes.
+        assert_eq!(HOTPATH_HOSTS[0].name, "api.anthropic.com");
+    }
+
+    #[test]
+    fn diagnose_status_maps_5xx_to_http_error() {
+        // The audit-flagged case: Anthropic reachable but degraded.
+        // Without the status check, this would collapse to Reachable
+        // and the user would see "everything's fine" when it isn't.
+        assert_eq!(diagnose_status(500), Diagnosis::HttpError);
+        assert_eq!(diagnose_status(502), Diagnosis::HttpError);
+        assert_eq!(diagnose_status(503), Diagnosis::HttpError);
+        assert_eq!(diagnose_status(599), Diagnosis::HttpError);
+    }
+
+    #[test]
+    fn diagnose_status_maps_success_redirect_and_4xx_to_reachable() {
+        // 2xx — fine. 3xx — fine (we don't follow). 4xx — fine
+        // (401 is the expected unauthenticated-HEAD response).
+        assert_eq!(diagnose_status(200), Diagnosis::Reachable);
+        assert_eq!(diagnose_status(204), Diagnosis::Reachable);
+        assert_eq!(diagnose_status(301), Diagnosis::Reachable);
+        assert_eq!(diagnose_status(401), Diagnosis::Reachable);
+        assert_eq!(diagnose_status(404), Diagnosis::Reachable);
+        assert_eq!(diagnose_status(429), Diagnosis::Reachable);
     }
 }

@@ -1,0 +1,153 @@
+import { NextResponse } from "next/server";
+import { withErrorHandling } from "@/lib/api/response";
+import { and, count, gte, lt, sql, type AnyColumn } from "drizzle-orm";
+
+import { db } from "@/db/client";
+import {
+  comments,
+  metricsDaily,
+  submissions,
+  users,
+  votes,
+} from "@/db/schema";
+
+/**
+ * Daily 00:00 UTC — aggregate yesterday's events into metrics_daily.
+ * Idempotent (ON CONFLICT DO UPDATE) so a retry doesn't double-count.
+ */
+export const GET = withErrorHandling(async (req: Request) => {
+  // Audit finding 2.2 — CRON_SECRET fail-closed in production.
+  const expected = process.env.CRON_SECRET;
+  const isProd = process.env.NODE_ENV === "production";
+  if (isProd) {
+    if (!expected) {
+      return NextResponse.json(
+        { error: "CRON_SECRET not configured" },
+        { status: 500 },
+      );
+    }
+    if (req.headers.get("authorization") !== `Bearer ${expected}`) {
+      return NextResponse.json({ error: "unauthorized" }, { status: 401 });
+    }
+  } else if (expected) {
+    if (req.headers.get("authorization") !== `Bearer ${expected}`) {
+      return NextResponse.json({ error: "unauthorized" }, { status: 401 });
+    }
+  }
+
+  const now = new Date();
+  // Yesterday's UTC bounds.
+  const yesterdayStart = new Date(
+    Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() - 1),
+  );
+  const todayStart = new Date(
+    Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()),
+  );
+  const dayKey = yesterdayStart.toISOString().slice(0, 10);
+
+  const range = (col: AnyColumn) =>
+    and(gte(col, yesterdayStart), lt(col, todayStart));
+
+  const [subs] = await db
+    .select({ n: count() })
+    .from(submissions)
+    .where(range(submissions.createdAt));
+  const [coms] = await db
+    .select({ n: count() })
+    .from(comments)
+    .where(range(comments.createdAt));
+  const [vts] = await db
+    .select({ n: count() })
+    .from(votes)
+    .where(range(votes.createdAt));
+  const [signs] = await db
+    .select({ n: count() })
+    .from(users)
+    .where(range(users.createdAt));
+
+  // Active users in last 24h: users who posted, commented, or voted.
+  const since24h = new Date(now.getTime() - 86_400_000);
+  const [active] = await db.execute(sql`
+    SELECT COUNT(DISTINCT actor)::int AS n FROM (
+      SELECT author_id AS actor FROM ${submissions} WHERE created_at >= ${since24h}
+      UNION
+      SELECT author_id FROM ${comments} WHERE created_at >= ${since24h}
+      UNION
+      SELECT user_id FROM ${votes} WHERE created_at >= ${since24h}
+    ) t
+  `) as unknown as Array<{ n: number }>;
+
+  await db
+    .insert(metricsDaily)
+    .values({
+      day: dayKey,
+      submissionsTotal: subs?.n ?? 0,
+      commentsTotal: coms?.n ?? 0,
+      votesTotal: vts?.n ?? 0,
+      signupsTotal: signs?.n ?? 0,
+      activeUsers24h: Number(active?.n ?? 0),
+    })
+    .onConflictDoUpdate({
+      target: metricsDaily.day,
+      set: {
+        submissionsTotal: subs?.n ?? 0,
+        commentsTotal: coms?.n ?? 0,
+        votesTotal: vts?.n ?? 0,
+        signupsTotal: signs?.n ?? 0,
+        activeUsers24h: Number(active?.n ?? 0),
+      },
+    });
+
+  // Bot-cost rollup. One INSERT … SELECT … ON CONFLICT DO UPDATE
+  // collapses every per-bot-per-provider daily aggregate into
+  // bot_costs_daily. Idempotent across cron retries; ON DELETE
+  // CASCADE on the bot_id FK keeps orphan rows out if a bot account
+  // is removed.
+  //
+  // Rolls up YESTERDAY's UTC bucket (the same window as metrics_daily
+  // above). The /office/costs page computes today live from
+  // bot_reports, so today's running total is never missed even
+  // though it isn't in the rollup yet.
+  //
+  // `provider` is extracted from payload->>'provider' (the cost
+  // payload schema requires it). A NULL or empty provider would
+  // violate the new NOT NULL PK column; the COALESCE fallback to
+  // 'unknown' protects against malformed inputs that somehow slipped
+  // past the lib/bots/schemas.ts validator (defense in depth).
+  const botCostsResult = await db.execute(sql`
+    WITH agg AS (
+      SELECT
+        bot_id,
+        (date_trunc('day', reported_at AT TIME ZONE 'UTC'))::date AS day,
+        COALESCE(NULLIF(payload->>'provider', ''), 'unknown') AS provider,
+        COALESCE(SUM(cost_usd), 0) AS usd,
+        COUNT(*)::int AS reports
+      FROM bot_reports
+      WHERE kind = 'cost'
+        AND cost_usd IS NOT NULL
+        AND reported_at >= ${yesterdayStart}
+        AND reported_at <  ${todayStart}
+      GROUP BY 1, 2, 3
+    )
+    INSERT INTO bot_costs_daily (bot_id, day, provider, usd, reports, rolled_up_at)
+    SELECT bot_id, day, provider, usd, reports, NOW() FROM agg
+    ON CONFLICT (bot_id, day, provider) DO UPDATE
+    SET usd = EXCLUDED.usd,
+        reports = EXCLUDED.reports,
+        rolled_up_at = NOW()
+    RETURNING 1
+  `);
+  const botCostRows = Array.isArray(botCostsResult)
+    ? botCostsResult.length
+    : (botCostsResult as { rows?: unknown[] }).rows?.length ?? 0;
+
+  return NextResponse.json({
+    day: dayKey,
+    submissions: subs?.n ?? 0,
+    comments: coms?.n ?? 0,
+    votes: vts?.n ?? 0,
+    signups: signs?.n ?? 0,
+    active24h: Number(active?.n ?? 0),
+    botCostRows,
+  });
+});

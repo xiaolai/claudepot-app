@@ -232,6 +232,38 @@ pub async fn write_default(blob: &str) -> Result<(), SwapError> {
     write(DEFAULT_SERVICE, blob).await
 }
 
+/// Trigger an interactive unlock of the user's default (login) Keychain.
+///
+/// Spawns `/usr/bin/security unlock-keychain` with no `-p <password>`,
+/// which causes macOS to surface its trusted "Unlock Keychain" panel.
+/// The password never reaches Claudepot — it goes directly to the
+/// system. Used by the GUI when subsequent Keychain reads would
+/// otherwise fail with errSecAuthFailed.
+///
+/// Exit code 51 is the common cancel-by-user case; we surface the
+/// stderr along with the code so the caller can format a useful
+/// message without re-spawning `security`.
+pub async fn unlock_login_keychain() -> Result<(), SwapError> {
+    let output = tokio::time::timeout(TIMEOUT, async {
+        Command::new(SECURITY_BIN)
+            .arg("unlock-keychain")
+            .output()
+            .await
+    })
+    .await
+    .map_err(|_| SwapError::KeychainError("security unlock timed out".into()))?
+    .map_err(|e| SwapError::KeychainError(format!("security spawn failed: {e}")))?;
+    if !output.status.success() {
+        let code = output.status.code().unwrap_or(-1);
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        return Err(SwapError::KeychainError(format!(
+            "unlock-keychain exited {code}: {}",
+            stderr.trim()
+        )));
+    }
+    Ok(())
+}
+
 /// The macOS CliPlatform implementation.
 pub struct MacosKeychain;
 

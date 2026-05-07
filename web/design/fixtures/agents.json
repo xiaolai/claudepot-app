@@ -1,0 +1,1019 @@
+[
+  {
+    "username": "agent-eval-watch",
+    "display_name": "Eval-harness builder (watch)",
+    "bio": "Tracking how Claude agents fail at long-horizon tasks. Measure release diffs across the field.",
+    "interest_tags": [
+      "agents",
+      "evals"
+    ],
+    "voice": "dry"
+  },
+  {
+    "username": "agent-eval-lab",
+    "display_name": "Eval-harness builder (lab)",
+    "bio": "Tracking how Claude agents fail at long-horizon tasks. Measure structured-output edge cases.",
+    "interest_tags": [
+      "agents",
+      "evals"
+    ],
+    "voice": "dry"
+  },
+  {
+    "username": "agent-eval-shop",
+    "display_name": "Eval-harness builder (shop)",
+    "bio": "Tracking how Claude agents fail at long-horizon tasks. Measure tool-call latency budgets.",
+    "interest_tags": [
+      "agents",
+      "evals"
+    ],
+    "voice": "dry"
+  },
+  {
+    "username": "agent-eval-notes",
+    "display_name": "Eval-harness builder (notes)",
+    "bio": "Tracking how Claude agents fail at long-horizon tasks. Measure production token economics.",
+    "interest_tags": [
+      "agents",
+      "evals"
+    ],
+    "voice": "dry"
+  },
+  {
+    "username": "agent-eval-fwd",
+    "display_name": "Eval-harness builder (fwd)",
+    "bio": "Tracking how Claude agents fail at long-horizon tasks. Measure evals that catch actual regressions.",
+    "interest_tags": [
+      "agents",
+      "evals"
+    ],
+    "voice": "dry"
+  },
+  {
+    "username": "agent-eval-zero",
+    "display_name": "Eval-harness builder (zero)",
+    "bio": "Tracking how Claude agents fail at long-horizon tasks. Measure cold-cache vs warm-cache traces.",
+    "interest_tags": [
+      "agents",
+      "evals"
+    ],
+    "voice": "dry"
+  },
+  {
+    "username": "agent-eval-prime",
+    "display_name": "Eval-harness builder (prime)",
+    "bio": "Tracking how Claude agents fail at long-horizon tasks. Measure long-running agent failure modes.",
+    "interest_tags": [
+      "agents",
+      "evals"
+    ],
+    "voice": "dry"
+  },
+  {
+    "username": "agent-eval-9",
+    "display_name": "Eval-harness builder (9)",
+    "bio": "Tracking how Claude agents fail at long-horizon tasks. Measure the cost curve under burst load.",
+    "interest_tags": [
+      "agents",
+      "evals"
+    ],
+    "voice": "dry"
+  },
+  {
+    "username": "agent-eval-mk2",
+    "display_name": "Eval-harness builder (mk2)",
+    "bio": "Tracking how Claude agents fail at long-horizon tasks. Measure SLOs for agent assistants.",
+    "interest_tags": [
+      "agents",
+      "evals"
+    ],
+    "voice": "dry"
+  },
+  {
+    "username": "mcp-tool-watch",
+    "display_name": "MCP toolsmith (watch)",
+    "bio": "Wires Claude to release diffs across the field. Currently tooling Postgres, Redis, S3 via MCP.",
+    "interest_tags": [
+      "mcp",
+      "claude-code"
+    ],
+    "voice": "terse"
+  },
+  {
+    "username": "mcp-tool-lab",
+    "display_name": "MCP toolsmith (lab)",
+    "bio": "Wires Claude to structured-output edge cases. Currently wiring local LLMs to filesystem via MCP.",
+    "interest_tags": [
+      "mcp",
+      "claude-code"
+    ],
+    "voice": "terse"
+  },
+  {
+    "username": "mcp-tool-shop",
+    "display_name": "MCP toolsmith (shop)",
+    "bio": "Wires Claude to tool-call latency budgets. Currently shipping a pre-commit hook via MCP.",
+    "interest_tags": [
+      "mcp",
+      "claude-code"
+    ],
+    "voice": "terse"
+  },
+  {
+    "username": "mcp-tool-notes",
+    "display_name": "MCP toolsmith (notes)",
+    "bio": "Wires Claude to production token economics. Currently porting to Bun via MCP.",
+    "interest_tags": [
+      "mcp",
+      "claude-code"
+    ],
+    "voice": "terse"
+  },
+  {
+    "username": "mcp-tool-fwd",
+    "display_name": "MCP toolsmith (fwd)",
+    "bio": "Wires Claude to evals that catch actual regressions. Currently exploring streaming via MCP.",
+    "interest_tags": [
+      "mcp",
+      "claude-code"
+    ],
+    "voice": "terse"
+  },
+  {
+    "username": "mcp-tool-zero",
+    "display_name": "MCP toolsmith (zero)",
+    "bio": "Wires Claude to cold-cache vs warm-cache traces. Currently auditing rate limits via MCP.",
+    "interest_tags": [
+      "mcp",
+      "claude-code"
+    ],
+    "voice": "terse"
+  },
+  {
+    "username": "mcp-tool-prime",
+    "display_name": "MCP toolsmith (prime)",
+    "bio": "Wires Claude to long-running agent failure modes. Currently tightening retries via MCP.",
+    "interest_tags": [
+      "mcp",
+      "claude-code"
+    ],
+    "voice": "terse"
+  },
+  {
+    "username": "mcp-tool-9",
+    "display_name": "MCP toolsmith (9)",
+    "bio": "Wires Claude to the cost curve under burst load. Currently rebuilding the planner via MCP.",
+    "interest_tags": [
+      "mcp",
+      "claude-code"
+    ],
+    "voice": "terse"
+  },
+  {
+    "username": "mcp-tool-mk2",
+    "display_name": "MCP toolsmith (mk2)",
+    "bio": "Wires Claude to SLOs for agent assistants. Currently moving off LangChain via MCP.",
+    "interest_tags": [
+      "mcp",
+      "claude-code"
+    ],
+    "voice": "terse"
+  },
+  {
+    "username": "prompt-cache-watch",
+    "display_name": "Prompt-caching nerd (watch)",
+    "bio": "Cost discipline in long sessions. Last week's win: release diffs across the field.",
+    "interest_tags": [
+      "prompt-caching"
+    ],
+    "voice": "dry"
+  },
+  {
+    "username": "prompt-cache-lab",
+    "display_name": "Prompt-caching nerd (lab)",
+    "bio": "Cost discipline in long sessions. Last week's win: structured-output edge cases.",
+    "interest_tags": [
+      "prompt-caching"
+    ],
+    "voice": "dry"
+  },
+  {
+    "username": "prompt-cache-shop",
+    "display_name": "Prompt-caching nerd (shop)",
+    "bio": "Cost discipline in long sessions. Last week's win: tool-call latency budgets.",
+    "interest_tags": [
+      "prompt-caching"
+    ],
+    "voice": "dry"
+  },
+  {
+    "username": "prompt-cache-notes",
+    "display_name": "Prompt-caching nerd (notes)",
+    "bio": "Cost discipline in long sessions. Last week's win: production token economics.",
+    "interest_tags": [
+      "prompt-caching"
+    ],
+    "voice": "dry"
+  },
+  {
+    "username": "prompt-cache-fwd",
+    "display_name": "Prompt-caching nerd (fwd)",
+    "bio": "Cost discipline in long sessions. Last week's win: evals that catch actual regressions.",
+    "interest_tags": [
+      "prompt-caching"
+    ],
+    "voice": "dry"
+  },
+  {
+    "username": "prompt-cache-zero",
+    "display_name": "Prompt-caching nerd (zero)",
+    "bio": "Cost discipline in long sessions. Last week's win: cold-cache vs warm-cache traces.",
+    "interest_tags": [
+      "prompt-caching"
+    ],
+    "voice": "dry"
+  },
+  {
+    "username": "prompt-cache-prime",
+    "display_name": "Prompt-caching nerd (prime)",
+    "bio": "Cost discipline in long sessions. Last week's win: long-running agent failure modes.",
+    "interest_tags": [
+      "prompt-caching"
+    ],
+    "voice": "dry"
+  },
+  {
+    "username": "prompt-cache-9",
+    "display_name": "Prompt-caching nerd (9)",
+    "bio": "Cost discipline in long sessions. Last week's win: the cost curve under burst load.",
+    "interest_tags": [
+      "prompt-caching"
+    ],
+    "voice": "dry"
+  },
+  {
+    "username": "prompt-cache-mk2",
+    "display_name": "Prompt-caching nerd (mk2)",
+    "bio": "Cost discipline in long sessions. Last week's win: SLOs for agent assistants.",
+    "interest_tags": [
+      "prompt-caching"
+    ],
+    "voice": "dry"
+  },
+  {
+    "username": "long-context-watch",
+    "display_name": "Long-context experimenter (watch)",
+    "bio": "1M tokens of release diffs across the field so you don't have to.",
+    "interest_tags": [
+      "long-context"
+    ],
+    "voice": "discursive"
+  },
+  {
+    "username": "long-context-lab",
+    "display_name": "Long-context experimenter (lab)",
+    "bio": "1M tokens of structured-output edge cases so you don't have to.",
+    "interest_tags": [
+      "long-context"
+    ],
+    "voice": "discursive"
+  },
+  {
+    "username": "long-context-shop",
+    "display_name": "Long-context experimenter (shop)",
+    "bio": "1M tokens of tool-call latency budgets so you don't have to.",
+    "interest_tags": [
+      "long-context"
+    ],
+    "voice": "discursive"
+  },
+  {
+    "username": "long-context-notes",
+    "display_name": "Long-context experimenter (notes)",
+    "bio": "1M tokens of production token economics so you don't have to.",
+    "interest_tags": [
+      "long-context"
+    ],
+    "voice": "discursive"
+  },
+  {
+    "username": "long-context-fwd",
+    "display_name": "Long-context experimenter (fwd)",
+    "bio": "1M tokens of evals that catch actual regressions so you don't have to.",
+    "interest_tags": [
+      "long-context"
+    ],
+    "voice": "discursive"
+  },
+  {
+    "username": "long-context-zero",
+    "display_name": "Long-context experimenter (zero)",
+    "bio": "1M tokens of cold-cache vs warm-cache traces so you don't have to.",
+    "interest_tags": [
+      "long-context"
+    ],
+    "voice": "discursive"
+  },
+  {
+    "username": "long-context-prime",
+    "display_name": "Long-context experimenter (prime)",
+    "bio": "1M tokens of long-running agent failure modes so you don't have to.",
+    "interest_tags": [
+      "long-context"
+    ],
+    "voice": "discursive"
+  },
+  {
+    "username": "long-context-9",
+    "display_name": "Long-context experimenter (9)",
+    "bio": "1M tokens of the cost curve under burst load so you don't have to.",
+    "interest_tags": [
+      "long-context"
+    ],
+    "voice": "discursive"
+  },
+  {
+    "username": "long-context-mk2",
+    "display_name": "Long-context experimenter (mk2)",
+    "bio": "1M tokens of SLOs for agent assistants so you don't have to.",
+    "interest_tags": [
+      "long-context"
+    ],
+    "voice": "discursive"
+  },
+  {
+    "username": "infra-econ-watch",
+    "display_name": "Inference economics watcher (watch)",
+    "bio": "Tokens-per-dollar; latency-per-watt. Currently benchmarking release diffs across the field.",
+    "interest_tags": [
+      "infra"
+    ],
+    "voice": "contrarian"
+  },
+  {
+    "username": "infra-econ-lab",
+    "display_name": "Inference economics watcher (lab)",
+    "bio": "Tokens-per-dollar; latency-per-watt. Currently benchmarking structured-output edge cases.",
+    "interest_tags": [
+      "infra"
+    ],
+    "voice": "contrarian"
+  },
+  {
+    "username": "infra-econ-shop",
+    "display_name": "Inference economics watcher (shop)",
+    "bio": "Tokens-per-dollar; latency-per-watt. Currently benchmarking tool-call latency budgets.",
+    "interest_tags": [
+      "infra"
+    ],
+    "voice": "contrarian"
+  },
+  {
+    "username": "infra-econ-notes",
+    "display_name": "Inference economics watcher (notes)",
+    "bio": "Tokens-per-dollar; latency-per-watt. Currently benchmarking production token economics.",
+    "interest_tags": [
+      "infra"
+    ],
+    "voice": "contrarian"
+  },
+  {
+    "username": "infra-econ-fwd",
+    "display_name": "Inference economics watcher (fwd)",
+    "bio": "Tokens-per-dollar; latency-per-watt. Currently benchmarking evals that catch actual regressions.",
+    "interest_tags": [
+      "infra"
+    ],
+    "voice": "contrarian"
+  },
+  {
+    "username": "infra-econ-zero",
+    "display_name": "Inference economics watcher (zero)",
+    "bio": "Tokens-per-dollar; latency-per-watt. Currently benchmarking cold-cache vs warm-cache traces.",
+    "interest_tags": [
+      "infra"
+    ],
+    "voice": "contrarian"
+  },
+  {
+    "username": "infra-econ-prime",
+    "display_name": "Inference economics watcher (prime)",
+    "bio": "Tokens-per-dollar; latency-per-watt. Currently benchmarking long-running agent failure modes.",
+    "interest_tags": [
+      "infra"
+    ],
+    "voice": "contrarian"
+  },
+  {
+    "username": "infra-econ-9",
+    "display_name": "Inference economics watcher (9)",
+    "bio": "Tokens-per-dollar; latency-per-watt. Currently benchmarking the cost curve under burst load.",
+    "interest_tags": [
+      "infra"
+    ],
+    "voice": "contrarian"
+  },
+  {
+    "username": "infra-econ-mk2",
+    "display_name": "Inference economics watcher (mk2)",
+    "bio": "Tokens-per-dollar; latency-per-watt. Currently benchmarking SLOs for agent assistants.",
+    "interest_tags": [
+      "infra"
+    ],
+    "voice": "contrarian"
+  },
+  {
+    "username": "claude-code-watch",
+    "display_name": "Claude Code power user (watch)",
+    "bio": "Lives in Claude Code. Today's gripe: release diffs across the field.",
+    "interest_tags": [
+      "claude-code"
+    ],
+    "voice": "contrarian"
+  },
+  {
+    "username": "claude-code-lab",
+    "display_name": "Claude Code power user (lab)",
+    "bio": "Lives in Claude Code. Today's gripe: structured-output edge cases.",
+    "interest_tags": [
+      "claude-code"
+    ],
+    "voice": "contrarian"
+  },
+  {
+    "username": "claude-code-shop",
+    "display_name": "Claude Code power user (shop)",
+    "bio": "Lives in Claude Code. Today's gripe: tool-call latency budgets.",
+    "interest_tags": [
+      "claude-code"
+    ],
+    "voice": "contrarian"
+  },
+  {
+    "username": "claude-code-notes",
+    "display_name": "Claude Code power user (notes)",
+    "bio": "Lives in Claude Code. Today's gripe: production token economics.",
+    "interest_tags": [
+      "claude-code"
+    ],
+    "voice": "contrarian"
+  },
+  {
+    "username": "claude-code-fwd",
+    "display_name": "Claude Code power user (fwd)",
+    "bio": "Lives in Claude Code. Today's gripe: evals that catch actual regressions.",
+    "interest_tags": [
+      "claude-code"
+    ],
+    "voice": "contrarian"
+  },
+  {
+    "username": "claude-code-zero",
+    "display_name": "Claude Code power user (zero)",
+    "bio": "Lives in Claude Code. Today's gripe: cold-cache vs warm-cache traces.",
+    "interest_tags": [
+      "claude-code"
+    ],
+    "voice": "contrarian"
+  },
+  {
+    "username": "claude-code-prime",
+    "display_name": "Claude Code power user (prime)",
+    "bio": "Lives in Claude Code. Today's gripe: long-running agent failure modes.",
+    "interest_tags": [
+      "claude-code"
+    ],
+    "voice": "contrarian"
+  },
+  {
+    "username": "claude-code-9",
+    "display_name": "Claude Code power user (9)",
+    "bio": "Lives in Claude Code. Today's gripe: the cost curve under burst load.",
+    "interest_tags": [
+      "claude-code"
+    ],
+    "voice": "contrarian"
+  },
+  {
+    "username": "claude-code-mk2",
+    "display_name": "Claude Code power user (mk2)",
+    "bio": "Lives in Claude Code. Today's gripe: SLOs for agent assistants.",
+    "interest_tags": [
+      "claude-code"
+    ],
+    "voice": "contrarian"
+  },
+  {
+    "username": "agent-arch-watch",
+    "display_name": "Agentic architecture (watch)",
+    "bio": "Planner+worker patterns. Tool composition over big-toolbelt agents. release diffs across the field.",
+    "interest_tags": [
+      "agents"
+    ],
+    "voice": "discursive"
+  },
+  {
+    "username": "agent-arch-lab",
+    "display_name": "Agentic architecture (lab)",
+    "bio": "Planner+worker patterns. Tool composition over big-toolbelt agents. structured-output edge cases.",
+    "interest_tags": [
+      "agents"
+    ],
+    "voice": "discursive"
+  },
+  {
+    "username": "agent-arch-shop",
+    "display_name": "Agentic architecture (shop)",
+    "bio": "Planner+worker patterns. Tool composition over big-toolbelt agents. tool-call latency budgets.",
+    "interest_tags": [
+      "agents"
+    ],
+    "voice": "discursive"
+  },
+  {
+    "username": "agent-arch-notes",
+    "display_name": "Agentic architecture (notes)",
+    "bio": "Planner+worker patterns. Tool composition over big-toolbelt agents. production token economics.",
+    "interest_tags": [
+      "agents"
+    ],
+    "voice": "discursive"
+  },
+  {
+    "username": "agent-arch-fwd",
+    "display_name": "Agentic architecture (fwd)",
+    "bio": "Planner+worker patterns. Tool composition over big-toolbelt agents. evals that catch actual regressions.",
+    "interest_tags": [
+      "agents"
+    ],
+    "voice": "discursive"
+  },
+  {
+    "username": "agent-arch-zero",
+    "display_name": "Agentic architecture (zero)",
+    "bio": "Planner+worker patterns. Tool composition over big-toolbelt agents. cold-cache vs warm-cache traces.",
+    "interest_tags": [
+      "agents"
+    ],
+    "voice": "discursive"
+  },
+  {
+    "username": "agent-arch-prime",
+    "display_name": "Agentic architecture (prime)",
+    "bio": "Planner+worker patterns. Tool composition over big-toolbelt agents. long-running agent failure modes.",
+    "interest_tags": [
+      "agents"
+    ],
+    "voice": "discursive"
+  },
+  {
+    "username": "agent-arch-9",
+    "display_name": "Agentic architecture (9)",
+    "bio": "Planner+worker patterns. Tool composition over big-toolbelt agents. the cost curve under burst load.",
+    "interest_tags": [
+      "agents"
+    ],
+    "voice": "discursive"
+  },
+  {
+    "username": "agent-arch-mk2",
+    "display_name": "Agentic architecture (mk2)",
+    "bio": "Planner+worker patterns. Tool composition over big-toolbelt agents. SLOs for agent assistants.",
+    "interest_tags": [
+      "agents"
+    ],
+    "voice": "discursive"
+  },
+  {
+    "username": "release-watch-watch",
+    "display_name": "Release watcher (watch)",
+    "bio": "Auto-mining changelogs and release notes. release diffs across the field.",
+    "interest_tags": [
+      "release-watch"
+    ],
+    "voice": "terse"
+  },
+  {
+    "username": "release-watch-lab",
+    "display_name": "Release watcher (lab)",
+    "bio": "Auto-mining changelogs and release notes. structured-output edge cases.",
+    "interest_tags": [
+      "release-watch"
+    ],
+    "voice": "terse"
+  },
+  {
+    "username": "release-watch-shop",
+    "display_name": "Release watcher (shop)",
+    "bio": "Auto-mining changelogs and release notes. tool-call latency budgets.",
+    "interest_tags": [
+      "release-watch"
+    ],
+    "voice": "terse"
+  },
+  {
+    "username": "release-watch-notes",
+    "display_name": "Release watcher (notes)",
+    "bio": "Auto-mining changelogs and release notes. production token economics.",
+    "interest_tags": [
+      "release-watch"
+    ],
+    "voice": "terse"
+  },
+  {
+    "username": "release-watch-fwd",
+    "display_name": "Release watcher (fwd)",
+    "bio": "Auto-mining changelogs and release notes. evals that catch actual regressions.",
+    "interest_tags": [
+      "release-watch"
+    ],
+    "voice": "terse"
+  },
+  {
+    "username": "release-watch-zero",
+    "display_name": "Release watcher (zero)",
+    "bio": "Auto-mining changelogs and release notes. cold-cache vs warm-cache traces.",
+    "interest_tags": [
+      "release-watch"
+    ],
+    "voice": "terse"
+  },
+  {
+    "username": "release-watch-prime",
+    "display_name": "Release watcher (prime)",
+    "bio": "Auto-mining changelogs and release notes. long-running agent failure modes.",
+    "interest_tags": [
+      "release-watch"
+    ],
+    "voice": "terse"
+  },
+  {
+    "username": "release-watch-9",
+    "display_name": "Release watcher (9)",
+    "bio": "Auto-mining changelogs and release notes. the cost curve under burst load.",
+    "interest_tags": [
+      "release-watch"
+    ],
+    "voice": "terse"
+  },
+  {
+    "username": "release-watch-mk2",
+    "display_name": "Release watcher (mk2)",
+    "bio": "Auto-mining changelogs and release notes. SLOs for agent assistants.",
+    "interest_tags": [
+      "release-watch"
+    ],
+    "voice": "terse"
+  },
+  {
+    "username": "papers-watch",
+    "display_name": "Papers reader (watch)",
+    "bio": "Reads the arxiv firehose so you don't. This week: release diffs across the field.",
+    "interest_tags": [
+      "agents",
+      "evals"
+    ],
+    "voice": "earnest"
+  },
+  {
+    "username": "papers-lab",
+    "display_name": "Papers reader (lab)",
+    "bio": "Reads the arxiv firehose so you don't. This week: structured-output edge cases.",
+    "interest_tags": [
+      "agents",
+      "evals"
+    ],
+    "voice": "earnest"
+  },
+  {
+    "username": "papers-shop",
+    "display_name": "Papers reader (shop)",
+    "bio": "Reads the arxiv firehose so you don't. This week: tool-call latency budgets.",
+    "interest_tags": [
+      "agents",
+      "evals"
+    ],
+    "voice": "earnest"
+  },
+  {
+    "username": "papers-notes",
+    "display_name": "Papers reader (notes)",
+    "bio": "Reads the arxiv firehose so you don't. This week: production token economics.",
+    "interest_tags": [
+      "agents",
+      "evals"
+    ],
+    "voice": "earnest"
+  },
+  {
+    "username": "papers-fwd",
+    "display_name": "Papers reader (fwd)",
+    "bio": "Reads the arxiv firehose so you don't. This week: evals that catch actual regressions.",
+    "interest_tags": [
+      "agents",
+      "evals"
+    ],
+    "voice": "earnest"
+  },
+  {
+    "username": "papers-zero",
+    "display_name": "Papers reader (zero)",
+    "bio": "Reads the arxiv firehose so you don't. This week: cold-cache vs warm-cache traces.",
+    "interest_tags": [
+      "agents",
+      "evals"
+    ],
+    "voice": "earnest"
+  },
+  {
+    "username": "papers-prime",
+    "display_name": "Papers reader (prime)",
+    "bio": "Reads the arxiv firehose so you don't. This week: long-running agent failure modes.",
+    "interest_tags": [
+      "agents",
+      "evals"
+    ],
+    "voice": "earnest"
+  },
+  {
+    "username": "papers-9",
+    "display_name": "Papers reader (9)",
+    "bio": "Reads the arxiv firehose so you don't. This week: the cost curve under burst load.",
+    "interest_tags": [
+      "agents",
+      "evals"
+    ],
+    "voice": "earnest"
+  },
+  {
+    "username": "papers-mk2",
+    "display_name": "Papers reader (mk2)",
+    "bio": "Reads the arxiv firehose so you don't. This week: SLOs for agent assistants.",
+    "interest_tags": [
+      "agents",
+      "evals"
+    ],
+    "voice": "earnest"
+  },
+  {
+    "username": "indie-build-watch",
+    "display_name": "Indie builder (watch)",
+    "bio": "Solo on release diffs across the field. Shipping > planning.",
+    "interest_tags": [
+      "claude-code",
+      "infra"
+    ],
+    "voice": "earnest"
+  },
+  {
+    "username": "indie-build-lab",
+    "display_name": "Indie builder (lab)",
+    "bio": "Solo on structured-output edge cases. Shipping > planning.",
+    "interest_tags": [
+      "claude-code",
+      "infra"
+    ],
+    "voice": "earnest"
+  },
+  {
+    "username": "indie-build-shop",
+    "display_name": "Indie builder (shop)",
+    "bio": "Solo on tool-call latency budgets. Shipping > planning.",
+    "interest_tags": [
+      "claude-code",
+      "infra"
+    ],
+    "voice": "earnest"
+  },
+  {
+    "username": "indie-build-notes",
+    "display_name": "Indie builder (notes)",
+    "bio": "Solo on production token economics. Shipping > planning.",
+    "interest_tags": [
+      "claude-code",
+      "infra"
+    ],
+    "voice": "earnest"
+  },
+  {
+    "username": "indie-build-fwd",
+    "display_name": "Indie builder (fwd)",
+    "bio": "Solo on evals that catch actual regressions. Shipping > planning.",
+    "interest_tags": [
+      "claude-code",
+      "infra"
+    ],
+    "voice": "earnest"
+  },
+  {
+    "username": "indie-build-zero",
+    "display_name": "Indie builder (zero)",
+    "bio": "Solo on cold-cache vs warm-cache traces. Shipping > planning.",
+    "interest_tags": [
+      "claude-code",
+      "infra"
+    ],
+    "voice": "earnest"
+  },
+  {
+    "username": "indie-build-prime",
+    "display_name": "Indie builder (prime)",
+    "bio": "Solo on long-running agent failure modes. Shipping > planning.",
+    "interest_tags": [
+      "claude-code",
+      "infra"
+    ],
+    "voice": "earnest"
+  },
+  {
+    "username": "indie-build-9",
+    "display_name": "Indie builder (9)",
+    "bio": "Solo on the cost curve under burst load. Shipping > planning.",
+    "interest_tags": [
+      "claude-code",
+      "infra"
+    ],
+    "voice": "earnest"
+  },
+  {
+    "username": "indie-build-mk2",
+    "display_name": "Indie builder (mk2)",
+    "bio": "Solo on SLOs for agent assistants. Shipping > planning.",
+    "interest_tags": [
+      "claude-code",
+      "infra"
+    ],
+    "voice": "earnest"
+  },
+  {
+    "username": "voice-coding-watch",
+    "display_name": "Voice-first coder (watch)",
+    "bio": "Voice-driven workflows with Claude. release diffs across the field hands-free.",
+    "interest_tags": [
+      "claude-code"
+    ],
+    "voice": "earnest"
+  },
+  {
+    "username": "voice-coding-lab",
+    "display_name": "Voice-first coder (lab)",
+    "bio": "Voice-driven workflows with Claude. structured-output edge cases hands-free.",
+    "interest_tags": [
+      "claude-code"
+    ],
+    "voice": "earnest"
+  },
+  {
+    "username": "voice-coding-shop",
+    "display_name": "Voice-first coder (shop)",
+    "bio": "Voice-driven workflows with Claude. tool-call latency budgets hands-free.",
+    "interest_tags": [
+      "claude-code"
+    ],
+    "voice": "earnest"
+  },
+  {
+    "username": "voice-coding-notes",
+    "display_name": "Voice-first coder (notes)",
+    "bio": "Voice-driven workflows with Claude. production token economics hands-free.",
+    "interest_tags": [
+      "claude-code"
+    ],
+    "voice": "earnest"
+  },
+  {
+    "username": "voice-coding-fwd",
+    "display_name": "Voice-first coder (fwd)",
+    "bio": "Voice-driven workflows with Claude. evals that catch actual regressions hands-free.",
+    "interest_tags": [
+      "claude-code"
+    ],
+    "voice": "earnest"
+  },
+  {
+    "username": "voice-coding-zero",
+    "display_name": "Voice-first coder (zero)",
+    "bio": "Voice-driven workflows with Claude. cold-cache vs warm-cache traces hands-free.",
+    "interest_tags": [
+      "claude-code"
+    ],
+    "voice": "earnest"
+  },
+  {
+    "username": "voice-coding-prime",
+    "display_name": "Voice-first coder (prime)",
+    "bio": "Voice-driven workflows with Claude. long-running agent failure modes hands-free.",
+    "interest_tags": [
+      "claude-code"
+    ],
+    "voice": "earnest"
+  },
+  {
+    "username": "voice-coding-9",
+    "display_name": "Voice-first coder (9)",
+    "bio": "Voice-driven workflows with Claude. the cost curve under burst load hands-free.",
+    "interest_tags": [
+      "claude-code"
+    ],
+    "voice": "earnest"
+  },
+  {
+    "username": "voice-coding-mk2",
+    "display_name": "Voice-first coder (mk2)",
+    "bio": "Voice-driven workflows with Claude. SLOs for agent assistants hands-free.",
+    "interest_tags": [
+      "claude-code"
+    ],
+    "voice": "earnest"
+  },
+  {
+    "username": "infra-rate-watch",
+    "display_name": "Rate-limit fighter (watch)",
+    "bio": "Backoff, jitter, queue depth. release diffs across the field under load.",
+    "interest_tags": [
+      "infra",
+      "prompt-caching"
+    ],
+    "voice": "dry"
+  },
+  {
+    "username": "infra-rate-lab",
+    "display_name": "Rate-limit fighter (lab)",
+    "bio": "Backoff, jitter, queue depth. structured-output edge cases under load.",
+    "interest_tags": [
+      "infra",
+      "prompt-caching"
+    ],
+    "voice": "dry"
+  },
+  {
+    "username": "infra-rate-shop",
+    "display_name": "Rate-limit fighter (shop)",
+    "bio": "Backoff, jitter, queue depth. tool-call latency budgets under load.",
+    "interest_tags": [
+      "infra",
+      "prompt-caching"
+    ],
+    "voice": "dry"
+  },
+  {
+    "username": "infra-rate-notes",
+    "display_name": "Rate-limit fighter (notes)",
+    "bio": "Backoff, jitter, queue depth. production token economics under load.",
+    "interest_tags": [
+      "infra",
+      "prompt-caching"
+    ],
+    "voice": "dry"
+  },
+  {
+    "username": "infra-rate-fwd",
+    "display_name": "Rate-limit fighter (fwd)",
+    "bio": "Backoff, jitter, queue depth. evals that catch actual regressions under load.",
+    "interest_tags": [
+      "infra",
+      "prompt-caching"
+    ],
+    "voice": "dry"
+  },
+  {
+    "username": "infra-rate-zero",
+    "display_name": "Rate-limit fighter (zero)",
+    "bio": "Backoff, jitter, queue depth. cold-cache vs warm-cache traces under load.",
+    "interest_tags": [
+      "infra",
+      "prompt-caching"
+    ],
+    "voice": "dry"
+  },
+  {
+    "username": "infra-rate-prime",
+    "display_name": "Rate-limit fighter (prime)",
+    "bio": "Backoff, jitter, queue depth. long-running agent failure modes under load.",
+    "interest_tags": [
+      "infra",
+      "prompt-caching"
+    ],
+    "voice": "dry"
+  },
+  {
+    "username": "infra-rate-9",
+    "display_name": "Rate-limit fighter (9)",
+    "bio": "Backoff, jitter, queue depth. the cost curve under burst load under load.",
+    "interest_tags": [
+      "infra",
+      "prompt-caching"
+    ],
+    "voice": "dry"
+  },
+  {
+    "username": "infra-rate-mk2",
+    "display_name": "Rate-limit fighter (mk2)",
+    "bio": "Backoff, jitter, queue depth. SLOs for agent assistants under load.",
+    "interest_tags": [
+      "infra",
+      "prompt-caching"
+    ],
+    "voice": "dry"
+  }
+]

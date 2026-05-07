@@ -6,6 +6,469 @@ Versioning scheme:
 - `0.1.x` — beta
 - `1.0.0+` — stable
 
+## 0.1.20 — beta (2026-05-07)
+
+### Added
+
+- **Global → Tips: a searchable ledger of CC's spinner tips.** New
+  sub-tab in Global that extracts the tip registry directly from
+  the user's installed CC binary (Bun-compiled binaries embed the
+  JS source as ASCII; no network call required), joins against
+  `~/.claude.json::tipsHistory` to mark seen / never-seen rows,
+  and time-resolves "last seen" via a Claudepot-side snapshot log
+  that converts CC's count-based ledger into wall-clock deltas.
+  Surfaces categories (12 buckets), plain-English trigger
+  summaries, A/B variant disclosure with the GrowthBook flag name,
+  platform-conditional branches (Apple Terminal vs Shift+Enter),
+  shortcut interpolation against the user's keybindings, and the
+  raw `isRelevant` source under a "Show advanced trigger logic"
+  disclosure. 47 of 53 known tips extracted from CC 2.1.132 on
+  first launch; format drift is caught by an integration test
+  against the real binary. Lives at `claudepot-core::cc_tips` —
+  pure Rust, no JS parser dependency.
+
+### Changed
+
+- **Global tab order**: Config → Memory → Tips → Updates. Tips
+  ships before Updates so the page where the user looks for "what
+  did I miss?" sits above the maintenance surface.
+
+### Fixed
+
+- _…_
+
+## 0.1.19 — beta (2026-05-07)
+
+### Fixed
+
+- **Dock icon now matches dev-mode crispness in prod.** v0.1.17–18
+  shipped pixel-perfect `.icns` layers, but the Dock still rendered
+  soft because macOS displays Dock icons at 48pt = 96 raster pixels
+  on Retina by default, and `.icns` doesn't have a 96-pixel layer
+  slot. macOS picks the 128 layer and downscales 128→96 with
+  bilinear filtering, softening pixel-art edges. Routed the icon
+  through Cocoa's NSImage pipeline at runtime via
+  `NSApplication.setApplicationIconImage` with our 512×512 source —
+  Cocoa picks Lanczos for any Dock size's downsample, preserving
+  crispness. Same trick Tauri's runtime uses in dev mode.
+
+### Changed
+
+- _…_
+
+### Added
+
+- _…_
+
+## 0.1.18 — beta (2026-05-07)
+
+### Fixed
+
+- **Pixel-art house now fills ~80% of the squircle.** v0.1.17's
+  16-px grid kept rendering crisp, but the house was visibly too
+  small inside the orange surround. Bumped the cell size to 24 px
+  while keeping the same 14×12-cell design — the icon now matches
+  the proportions of standard pixel-art app icons (e.g. Space
+  Invaders). Dock-relevant sizes (64/128/256/512/1024) still
+  render pixel-perfect; only the micro-icon layers (16/24/32/48
+  raster) pick up sub-pixel antialiasing, which is invisible at
+  those sizes.
+
+### Changed
+
+- _…_
+
+### Added
+
+- _…_
+
+## 0.1.17 — beta (2026-05-07)
+
+### Fixed
+
+- **Dock icon now renders pixel-perfect at every standard size.**
+  The root cause of the v0.1.13–0.1.16 blur was the SVG's 22-px
+  pixel-art grid, which doesn't divide the Apple/Microsoft icon-
+  size ladder (16/32/64/128/256/512/1024) evenly — at 128 raster,
+  each "art pixel" covered 5.5 raster pixels and rsvg's default
+  antialiasing softened the edges. Redesigned the SVG on a 16-px
+  grid (which divides every standard size cleanly). The squircle
+  is on the same grid (48,48 / 416×416) so its edges are crisp too.
+- **Reverted the v0.1.16 objc2 runtime override.** That patch
+  loaded the 32×32 PNG and let Cocoa upscale to 128, producing
+  visibly blocky output — strictly worse than the now-clean .icns
+  rendering. With the 16-grid SVG, no runtime trick is needed.
+
+### Changed
+
+- _…_
+
+### Added
+
+- _…_
+
+## 0.1.16 — beta (2026-05-07)
+
+### Fixed
+
+- **macOS Dock icon now matches dev-mode crispness in prod.**
+  v0.1.15 shipped pixel-perfect `.icns` layers, but the actual
+  blur was in macOS's render pipeline, not the file content:
+  Tauri's runtime calls `NSApplication.setApplicationIconImage`
+  only in dev mode, leaving prod to render via the legacy
+  IconServices `.icns` path which softens pixel-art edges at
+  default Dock sizes. Replicated dev's `setApplicationIconImage`
+  call in our own `setup()` so prod uses the same Cocoa NSImage
+  pipeline.
+
+### Changed
+
+- **Repo cleanup: removed 47 unused icon files.** `Square*Logo.png`
+  (MSIX/UWP), `iOS/`, `Android/`, and the 1× tray-icon variants
+  that were never `include_bytes!`-d. Tauri's `pnpm tauri icon`
+  command produces them by default, but we don't ship for those
+  targets — they were dead bytes. Added `scripts/regen-icons.sh`
+  that produces only the assets we actually consume, using
+  `rsvg-convert` + `iconutil` directly to avoid the bilinear blur
+  that `pnpm tauri icon` introduced in earlier releases.
+
+### Added
+
+- _…_
+
+## 0.1.15 — beta (2026-05-07)
+
+### Fixed
+
+- **macOS Dock icon now renders crisply at every size.** The `.icns`
+  layers were bilinearly resampled by tauri's icon generator,
+  visibly softening the 128×128 and 256×256 layers — exactly the
+  ones macOS picks for default Dock display on Retina. Regenerated
+  every layer fresh from `icon.svg` via `rsvg-convert` plus
+  `iconutil`; pixel-identical to a clean SVG render now.
+- After upgrading from a previous beta, run `killall Dock; killall
+  Finder` once if the Dock still shows the cached softer icon —
+  macOS's icon-services cache holds onto the old version until
+  explicitly flushed.
+
+### Added
+
+- _…_
+
+### Changed
+
+- _…_
+
+## 0.1.14 — beta (2026-05-07)
+
+### Fixed
+
+- **Linux app icon now installs at every standard hicolor size.**
+  Previous `.deb` / `.rpm` packages shipped only 32×32 and 128×128;
+  the freedesktop spec's required 48×48, GNOME's 256×256 app-grid
+  default, and 64×64 / 512×512 launcher sizes were missing or filed
+  under a non-standard `hicolor/256x256@2/` directory that no Linux
+  desktop environment looks at. Packages now install the full
+  32 / 48 / 64 / 128 / 256 / 512 ladder.
+
+- **macOS Dock icon no longer renders larger than well-behaved
+  apps.** The orange squircle was drawn full-bleed (0,0 / 512×512);
+  Apple's Big Sur+ HIG specifies a ~10% transparent margin per
+  side. Inset to (51, 51) / 410×410 so Claudepot now sits at the
+  same visual weight as system apps.
+
+### Added
+
+- _…_
+
+### Changed
+
+- _…_
+
+## 0.1.13 — beta (2026-05-07)
+
+### Added
+
+- **Network detection panel on first run.** When
+  `api.anthropic.com` isn't reachable from your network — DNS
+  poisoning, TCP block, TLS interception, timeout, 5xx, or an
+  unclassified failure — Claudepot now surfaces a remediation
+  panel above the active section. Diagnosis-specific copy plus
+  four buttons: *Use a third-party LLM* (deep-links into
+  Third-parties → Add Route, with China-reachable presets
+  highlighted), *Configure proxy* (Settings → Network),
+  *Network help* (opens claudepot.com/help/network), and *Retry*.
+  Dismissible per session; the rest of the app stays usable
+  (Sessions, Memory, Cleanup don't need network).
+
+- **Quick-start gateway presets in Add Route.** Six curated
+  OpenAI-compatible providers — DeepSeek, Kimi (Moonshot), Qwen
+  (DashScope), GLM (Zhipu), OpenRouter, Ollama-local — each
+  pre-fills base URL + a sensible default model. The
+  China-reachable subset is emphasized when arriving from the
+  network panel.
+
+- **claudepot.com/help/network help page.** Endpoints Claudepot
+  needs, how to diagnose unreachability with `curl`, how to
+  configure a proxy, npm-mirror install for the Claude CLI, and
+  third-party-LLM routing. Explicit boundary on what Claudepot
+  doesn't ship (no VPN setup).
+
+### Changed
+
+- _…_
+
+### Fixed
+
+- _…_
+
+## 0.1.12 — beta (2026-05-07)
+
+### Fixed
+
+- **Project detail no longer flashes a "consider cleaning" hint
+  that goes nowhere.** Alive projects with leftover bytes from
+  retired third-party CC plugins (e.g. `.cccmemory.db-shm`,
+  `.db-wal` files whose `.db` was removed) used to show a "Go to
+  Maintenance" call-to-action that landed on *"Nothing to clean."*
+  Maintenance only handles orphan projects whose source folder is
+  gone, and an alive project's source by definition still exists.
+  The misleading hint is gone; the project header's *Finder*
+  button is the right way to inspect leftover files and decide
+  manually.
+
+- **Updater progress bar no longer jumps backwards.** The download
+  bar previously rendered at a fake 33% before the first chunk
+  arrived, dropped to 0% once the Tauri updater's `Started` event
+  reported the content length, then climbed to 100%. The "33%"
+  was a static placeholder for the brief unknown-total window —
+  not progress. The bar now starts at 0% and grows monotonically;
+  activity during the pre-`Started` window is conveyed by the
+  byte counter that's already there.
+
+- **Updates panel speaks truthfully.** The CLI/Desktop secondary
+  action button was labeled *Update anyway* even when already on
+  the latest version, where pressing it ran a no-op `claude
+  update` — relabeled to *Reinstall*, which is what the action
+  actually does. The post-install confirmation banner said
+  *"Active install: vX.Y.Z"* / *"Installed Claude.app vX.Y.Z via
+  brew"* regardless of whether the version actually changed; it
+  now compares before-vs-after and reports one of *reinstalled
+  (vX.Y.Z)*, *updated from vA.B.C to vX.Y.Z*, or *installed at
+  vX.Y.Z*. The CLI card's subtitle and comparison badge mirror
+  the Desktop card's "not installed" wording when no `claude`
+  binary is on PATH (was: *"installed: unknown"* with a useless
+  *unknown* badge).
+
+## 0.1.11 — beta (2026-05-06)
+
+### Added
+
+- **Settings → About now names the publisher.** Adds a Publisher
+  row (HANDO K.K.) and a short note explaining why macOS surfaces
+  this name in *System Settings → General → Login Items & Extensions
+  → App Background Activity* and in occasional "ran in the
+  background" notifications when Launch-at-login is enabled — it's
+  the Apple Developer–registered entity behind the Developer ID
+  certificate, not a third-party process.
+
+### Changed
+
+- **Auto-memory toggle relocated to Global → Memory.** Auto-memory
+  governs Claude Code's `~/.claude/.../memory/` writes — a CC
+  behavior, not a Claudepot app preference — so the toggle now lives
+  next to the rest of the CC global state instead of in Settings →
+  General. The new panel-card sits above the file-health grid; ⌘K
+  still finds it.
+
+## 0.1.10 — beta (2026-05-05)
+
+### Fixed
+
+- **Traffic-light buttons sat ~1px above the breadcrumb on macOS.**
+  At `trafficLightPosition.y = 21`, the OS centered the buttons at
+  visual y=18.75 logical while the home glyph next to "keys" landed
+  at y=19.50 — the 0.75px gap was visible to a careful eye. Bumped
+  to y=22 so the OS-drawn dots line up with the chrome's flex-
+  centered content. Light- and dark-mode both verified.
+
+## 0.1.9 — beta (2026-05-05)
+
+Internal-only release. No user-visible changes.
+
+### Internal
+
+- **CI green again on `windows-latest`.** A native-install detection
+  test (`detect_cli_installs_at_promotes_native_when_path_lookup_misses`)
+  set up `~/.local/bin/claude.exe` via `cli_filename()` but the
+  detection's `NATIVE_BIN_REL` constant is a literal `.local/bin/claude`
+  with no extension — the XDG layout is Unix-only; Windows uses
+  WinGet to `%LOCALAPPDATA%\Programs\Claude\`. The test is now
+  `cfg(not(target_os = "windows"))`-gated. Pre-existing on main
+  since v0.1.7's path-lookup-miss promotion fix; v0.1.7 + v0.1.8
+  binaries shipped fine (the Release workflow runs `cargo build`,
+  not `cargo test`), but CI was red.
+
+## 0.1.8 — beta (2026-05-05)
+
+Internal-only release. No user-visible changes.
+
+### Internal
+
+- **Tauri command modules reorganized.** The 30 `src-tauri/src/commands_*.rs`
+  files moved into `src-tauri/src/commands/<noun>.rs`, mirroring the
+  CLI's `cli/commands/<noun>.rs` layout (per `.claude/rules/commands.md`).
+  `lib.rs` lost 28 top-level `mod` lines; new handlers go in the
+  noun directory. No runtime behavior change.
+- **Linux clippy gate restored.** Clippy 1.95 strengthened
+  `needless_return`; four `cfg(not(target_os = "macos"))` branches
+  in `claudepot-core` (`automations/scheduler`, `desktop_identity`,
+  `routes/desktop`, `routes/helper`) now end with the bare expression
+  instead of `return …;`, so the Linux + Windows CI gates compile
+  warning-free again.
+
+## 0.1.7 — beta (2026-05-04)
+
+### Fixed
+
+- **Updates panel showed "installed: unknown" and skipped CC CLI
+  auto-updates with "no active CC install detected"** even when CC
+  was installed and running. Root cause: `resolve_active_cli_binary`
+  walked the Tauri process's `PATH`, but Dock-launched apps on macOS
+  inherit the launchd default (no `~/.local/bin`, no
+  `/opt/homebrew/bin`). The native install was enumerated by the
+  explicit-path probe but never flagged active. Detection now
+  promotes the highest-precedence detected install (native > brew >
+  npm > linux pkg) when `PATH` lookup misses — same behavior covers
+  users whose `claude` is a shell function or alias.
+
+### Changed
+
+- **Settings → About → Website** now points at
+  `https://claudepot.com/app` (the product page) instead of the
+  reader landing.
+- **Global section tab order** is now `Config | Memory | Updates`
+  — `Memory` sits next to the static reference tabs; `Updates` is
+  the action surface and reads last.
+
+## 0.1.6 — beta (2026-05-04)
+
+### Fixed
+
+- **Browser-login flow had no Cancel button after the RunningOps
+  rewrite.** Once the login op moved through the shared
+  `OperationProgressModal`, the modal only rendered "Run in
+  background" / "Close" — there was no way to abort the in-flight
+  `claude auth login` from the UI. The modal now carries a primary
+  Cancel button while the op is in flight, on both the **Add
+  account → Log in with a new account** browser-register path and
+  the per-account **Re-login** path. The same dead end b61adda
+  fixed for the inline modal had silently returned during the
+  services rewrite.
+- **WindowChrome home glyph misaligned** with the macOS traffic
+  lights by a couple of pixels in the 38 px chrome strip.
+
+### Changed
+
+- **Operation progress modal renders cancellation as "Cancelled."**
+  (info tone) instead of red "Error." when the terminal detail
+  says the user cancelled — and suppresses the now-irrelevant
+  "Open Repair" button on cancellation.
+- **"Opening browser…" toast during re-login** is now an info
+  toast (not error) and no longer carries a redundant Cancel undo
+  affordance — the modal owns that action now.
+
+## 0.1.5 — beta (2026-05-04)
+
+### Fixed
+
+- **Automations: "first-party `claude` binary not found on PATH" when
+  registering a scheduled run.** The GUI walked the GUI process's
+  `PATH` to resolve `claude`, but Dock-launched Tauri apps on macOS
+  inherit only `path_helper`'s defaults (no `~/.local/bin`), so users
+  on the Anthropic native installer (canonical layout since Sept
+  2025) couldn't save an automation. The shim now invokes `claude`
+  by name and resolves it against its own controlled `PATH` at run
+  time. Bonus: automations stay correct across `claude doctor`
+  upgrades — the version-specific symlink target rotates, but the
+  symlink stays put.
+- **Automations: shim runtime `PATH` now covers bun, npm-global, and
+  Volta installs** alongside the existing Homebrew + system + native
+  paths. The Anthropic native installer (`~/.local/bin`) is ranked
+  first so a stale Homebrew copy can't shadow it.
+- **Memory pane: Windows test failure for `anchor_uses_git_root_when_present`.**
+  The test compared a path against `canonicalize`'s output without
+  stripping the verbatim `\\?\` prefix; production code already
+  routes through `simplify_windows_path`, so the test was the only
+  thing wrong. `paths.md` rule now applies in the test too.
+
+### Changed
+
+- **Repo housekeeping.** rustfmt drift on `main` from the 0.1.4
+  release commit reformatted across `claudepot-cli/src/commands`,
+  `claudepot-core/src/{memory_log,memory_view,settings_writer}.rs`,
+  and `main.rs`. No behavioral change — pure formatting.
+
+## 0.1.4 — beta (2026-05-04)
+
+### Added
+
+- **Projects → Memory pane.** A third sub-tab next to Sessions and
+  Config. For the project you have open: lists every memory artifact
+  CC loads (project `CLAUDE.md`, `.claude/CLAUDE.md`, the auto-memory
+  index + topic files, KAIROS daily logs, and the global
+  `~/.claude/CLAUDE.md`); renders markdown content with a
+  rendered/raw toggle; opens any file in your editor of choice via
+  the existing "Open with…" detector; surfaces a per-file change-log
+  timeline with collapsible unified diffs; toggles auto-memory at
+  per-project scope (writes `.claude/settings.local.json`).
+- **Settings → General · Auto-memory toggle.** Global on/off for
+  CC's `autoMemoryEnabled` setting (writes `~/.claude/settings.json`),
+  with read-only display when an env var is overriding.
+- **CLI verbs.** `claudepot memory list|view|log [--show-diff]` and
+  `claudepot settings auto-memory status|enable|disable|clear`.
+- **`.claude/rules/icon-buttons.md` and `.claude/rules/path-display.md`.**
+  Two project rules that codify when to use icon-only buttons (3-tier
+  system) and how truncatable paths must be disclosed (tooltip
+  mandatory; copy default unless covered by a canonical detail
+  surface).
+
+### Changed
+
+- Long-running fs-watcher backs the change-log: 250 ms debounced,
+  recursive on `~/.claude/`, plus per-file watches on every
+  registered project's CLAUDE.md candidates. Picks up newly-added
+  projects on a 30 s rescan; recovers original paths for lossy
+  (>= 200-char) slugs via session.jsonl `cwd`.
+- `ArtifactTrashList`, `DisabledArtifactList`, `ProtectedPathsPane`
+  per-row Restore/Forget/Re-enable/Trash/Remove actions converted
+  to `IconButton` with tooltips per the icon-button rule.
+- `ProjectsTable` row + `WindowChrome` breadcrumb now disclose full
+  paths via tooltip per the path-display rule.
+- Cross-platform basename helper in `projects/format.ts` — Windows
+  paths in the Projects table and rename progress now display
+  correctly.
+- `Toggle` primitive in `SettingsSection` honors `disabled`
+  (regression: previously accepted the prop but ignored clicks).
+
+### Fixed
+
+- **Symlink escape in `read_memory_content`.** The IPC now
+  canonicalizes the target path before the allowlist check, so a
+  symlink inside the auto-memory dir whose target is outside the
+  scope is rejected before `std::fs::read` follows the link.
+- **Memory IPC dies when `MemoryLog::open` fails.** Two-step
+  fallback (canonical → temp dir) so the change-log state is always
+  managed; the pane no longer goes dark on a transient open error.
+- **Global toggle conflated user and project settings.** Settings →
+  General now uses a dedicated global-only resolver instead of
+  routing through the per-project chain (which would read
+  `~/.claude/settings.json` twice as both user- and
+  project-settings).
+- **First post-restart edit logged with no diff.** Bootstrap now
+  re-reads current bytes so the watcher has a real baseline for
+  the first event after a Claudepot restart.
+
 ## 0.1.3 — beta (2026-05-03)
 
 Patch release adding a network-status indicator. One small dot in the
@@ -411,7 +874,7 @@ UI.
   no longer falls back to env `NO_PROXY` so the cache key
   faithfully reflects every input that affects the built client.
 
-## 0.0.15 — alpha (unreleased)
+## 0.0.15 — alpha (2026-04-30)
 
 ### Fixed
 
@@ -860,7 +1323,7 @@ UI.
   per bundle; standalone CLI tarballs / zips still ship for
   CLI-only users.
 
-## 0.0.8 — alpha (unreleased)
+## 0.0.8 — alpha (2026-04-29)
 
 ### Fixed
 
@@ -873,7 +1336,7 @@ UI.
   and the in-app updater for Linux/Windows points at the real
   installer URLs (`.AppImage`, `-setup.exe`).
 
-## 0.0.7 — alpha (unreleased)
+## 0.0.7 — alpha (2026-04-28)
 
 ### Added
 

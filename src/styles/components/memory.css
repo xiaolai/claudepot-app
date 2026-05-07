@@ -1,0 +1,316 @@
+/* Memory pane — third Project sub-tab (Sessions / Config / Memory).
+   Lives directly under ProjectsSection's tab strip and fills the
+   detail column. Tokens come from `tokens.css`; this file declares
+   none. */
+
+.memory-pane {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-12);
+  padding: var(--sp-16) var(--sp-24) var(--sp-24);
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+}
+
+.memory-pane__header {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: var(--sp-12);
+  justify-content: space-between;
+}
+
+.memory-pane__empty {
+  margin: var(--sp-8) 0;
+}
+
+.memory-pane__body {
+  display: grid;
+  grid-template-columns: minmax(var(--memory-filelist-min-width), 30%) 1fr;
+  gap: var(--sp-16);
+  min-height: 0;
+}
+
+.memory-pane__filelist {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-12);
+}
+
+.memory-pane__filegroup ul {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.memory-pane__grouplabel {
+  display: block;
+  font-size: var(--fs-2xs);
+  text-transform: uppercase;
+  letter-spacing: var(--ls-wide);
+  color: var(--fg-muted);
+  margin-bottom: var(--sp-4);
+}
+
+.memory-pane__fileitem {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+  padding: var(--sp-6) var(--sp-8);
+  border-radius: var(--rad-sm);
+  cursor: pointer;
+  outline: none;
+}
+
+.memory-pane__fileitem:hover {
+  background: var(--bg-hover-soft);
+}
+
+.memory-pane__fileitem:focus-visible {
+  box-shadow: 0 0 0 var(--sp-2) var(--accent);
+}
+
+.memory-pane__fileitem--selected {
+  background: var(--bg-selected-firm);
+}
+
+.memory-pane__filebasename {
+  font-family: var(--font-mono);
+  font-size: var(--fs-sm);
+  word-break: break-all;
+}
+
+.memory-pane__filemeta {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-6);
+  font-size: var(--fs-2xs);
+  color: var(--fg-muted);
+}
+
+.memory-pane__filesize {
+  font-family: var(--font-mono);
+}
+
+.memory-pane__dot {
+  display: inline-block;
+  width: var(--sp-6);
+  height: var(--sp-6);
+  border-radius: 50%;
+  background: var(--accent);
+}
+
+.memory-pane__viewer {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-12);
+  min-width: 0;
+}
+
+.memory-pane__viewer-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sp-8);
+  padding-bottom: var(--sp-8);
+  border-bottom: var(--sp-px) solid var(--line);
+}
+
+.memory-pane__viewer-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-8);
+}
+
+.memory-pane__viewtoggle {
+  display: inline-flex;
+  border: var(--sp-px) solid var(--line);
+  border-radius: var(--rad-sm);
+  overflow: hidden;
+}
+
+.memory-pane__viewtoggle-btn {
+  padding: var(--sp-2) var(--sp-8);
+  background: transparent;
+  border: 0;
+  font-size: var(--fs-2xs);
+  color: var(--fg-muted);
+  cursor: pointer;
+}
+
+.memory-pane__viewtoggle-btn:hover {
+  background: var(--bg-hover-soft);
+}
+
+.memory-pane__viewtoggle-btn--active {
+  background: var(--bg-selected-firm);
+  color: var(--fg);
+}
+
+.memory-pane__viewtoggle-btn:not(:last-child) {
+  border-right: var(--sp-px) solid var(--line);
+}
+
+.memory-pane__content {
+  background: var(--bg-sunken);
+  border: var(--sp-px) solid var(--line);
+  border-radius: var(--rad-md);
+  padding: var(--sp-12) var(--sp-16);
+  max-height: var(--memory-viewer-max-height);
+  overflow: auto;
+}
+
+.memory-pane__raw {
+  margin: 0;
+  font-family: var(--font-mono);
+  font-size: var(--fs-xs);
+  line-height: var(--lh-normal);
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.memory-pane__openwith {
+  position: relative;
+  display: inline-block;
+}
+
+.memory-pane__openwith-menu {
+  position: absolute;
+  top: calc(100% + var(--sp-4));
+  right: 0;
+  z-index: var(--z-popover);
+  min-width: var(--memory-openwith-min-width);
+  padding: var(--sp-4);
+  background: var(--bg-raised);
+  border: var(--sp-px) solid var(--line);
+  border-radius: var(--rad-md);
+  box-shadow: var(--shadow-popover);
+  display: flex;
+  flex-direction: column;
+}
+
+.memory-pane__openwith-item {
+  text-align: left;
+  padding: var(--sp-4) var(--sp-8);
+  background: transparent;
+  border: 0;
+  border-radius: var(--rad-sm);
+  font-size: var(--fs-xs);
+  color: var(--fg);
+  cursor: pointer;
+}
+
+.memory-pane__openwith-item:hover:not(:disabled) {
+  background: var(--bg-hover-soft);
+}
+
+.memory-pane__openwith-item:disabled {
+  opacity: var(--opacity-disabled);
+  cursor: default;
+}
+
+.memory-pane__openwith-loading {
+  padding: var(--sp-4) var(--sp-8);
+}
+
+.memory-pane__changelog ul {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+}
+
+.memory-pane__changerow {
+  border-radius: var(--rad-sm);
+}
+
+.memory-pane__changetoggle {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-8);
+  width: 100%;
+  padding: var(--sp-4) var(--sp-8);
+  background: transparent;
+  border: 0;
+  border-radius: var(--rad-sm);
+  color: var(--fg);
+  text-align: left;
+  font-size: var(--fs-2xs);
+  cursor: pointer;
+}
+
+.memory-pane__changetoggle:hover:not(:disabled) {
+  background: var(--bg-hover-soft);
+}
+
+.memory-pane__changetoggle:disabled {
+  cursor: default;
+  opacity: 0.85;
+}
+
+.memory-pane__changewhen {
+  min-width: var(--memory-when-min-width);
+  color: var(--fg-muted);
+}
+
+.memory-pane__changekind {
+  min-width: var(--sp-80);
+  text-transform: uppercase;
+  letter-spacing: var(--ls-wide);
+  color: var(--fg-muted);
+}
+
+.memory-pane__changesize {
+  font-family: var(--font-mono);
+  flex: 1;
+  min-width: 0;
+}
+
+.memory-pane__changereason {
+  font-style: italic;
+  color: var(--fg-muted);
+}
+
+.memory-pane__diff {
+  margin: var(--sp-2) 0 var(--sp-8) var(--sp-12);
+  padding: var(--sp-8) var(--sp-12);
+  background: var(--bg-sunken);
+  border: var(--sp-px) solid var(--line);
+  border-radius: var(--rad-sm);
+  font-family: var(--font-mono);
+  font-size: var(--fs-2xs);
+  line-height: var(--lh-tight);
+  white-space: pre;
+  overflow-x: auto;
+  max-height: var(--config-menu-min-width);
+}
+
+.memory-pane__toggle {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--sp-8);
+}
+
+.memory-pane__togglebuttons {
+  display: inline-flex;
+  gap: var(--sp-4);
+}
+
+.memory-pane__gitignore-hint {
+  flex-basis: 100%;
+  margin: var(--sp-4) 0 0;
+}
+
+@media (max-width: 720px) {
+  .memory-pane__body {
+    grid-template-columns: 1fr;
+  }
+  .memory-pane__filelist {
+    max-height: var(--settings-nav-width);
+    overflow: auto;
+  }
+}

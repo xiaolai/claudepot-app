@@ -4,7 +4,10 @@ import userEvent from "@testing-library/user-event";
 import type { ReactElement } from "react";
 
 import { AddAccountModal } from "./AddAccountModal";
-import { OperationsProvider } from "../../hooks/useOperations";
+import {
+  OperationsContext,
+  OperationsProvider,
+} from "../../hooks/useOperations";
 
 // Mock the api module — we only exercise the calls this modal uses.
 // `accountRegisterFromBrowserStart` replaces the old synchronous
@@ -89,6 +92,59 @@ describe("AddAccountModal — browser login (async start)", () => {
       expect(mockApi.accountRegisterFromBrowserStart).toHaveBeenCalledOnce(),
     );
     await waitFor(() => expect(onClose).toHaveBeenCalled());
+  });
+
+  it("wires onCancel through the op handle so the shell modal can cancel the login", async () => {
+    // The shell `OperationProgressModal` owns the Cancel button and
+    // calls `onCancel` when the user clicks it. AddAccountModal must
+    // pass a handler that hits `accountLoginCancel` so the backend
+    // unwinds the in-flight `claude auth login`.
+    mockApi.accountRegisterFromBrowserStart.mockResolvedValue("op-fake");
+    mockApi.accountLoginCancel.mockResolvedValue(undefined);
+
+    const captured: { onCancel?: () => void; cancelLabel?: string } = {};
+    const TestProvider = ({ children }: { children: ReactElement }) => {
+      const value = {
+        active: null,
+        open: (handle: {
+          onCancel?: () => void;
+          cancelLabel?: string;
+        }) => {
+          captured.onCancel = handle.onCancel;
+          captured.cancelLabel = handle.cancelLabel;
+        },
+        close: () => {},
+      };
+      return (
+        <OperationsContext.Provider value={value as never}>
+          {children}
+        </OperationsContext.Provider>
+      );
+    };
+
+    render(
+      <TestProvider>
+        <AddAccountModal
+          open
+          onClose={() => {}}
+          onAdded={() => {}}
+          onError={() => {}}
+          accounts={[]}
+          onAdoptDesktop={() => Promise.resolve(true)}
+        />
+      </TestProvider>,
+    );
+
+    const loginBtn = await screen.findByRole("button", { name: /log in/i });
+    await userEvent.click(loginBtn);
+
+    await waitFor(() => expect(captured.onCancel).toBeTypeOf("function"));
+    expect(captured.cancelLabel).toBe("Cancel login");
+
+    captured.onCancel?.();
+    await waitFor(() =>
+      expect(mockApi.accountLoginCancel).toHaveBeenCalledOnce(),
+    );
   });
 
   it("surfaces non-cancel errors via onError when the start call rejects", async () => {

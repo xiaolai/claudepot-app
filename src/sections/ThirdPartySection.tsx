@@ -1,14 +1,20 @@
-import { useCallback, useEffect, useRef, useState } from "react";
-import { useTranslation } from "react-i18next";
+import { useCallback, useEffect, useState } from "react";
+import { Trans, useTranslation } from "react-i18next";
 import { ScreenHeader } from "../shell/ScreenHeader";
 import { Button } from "../components/primitives/Button";
 import { SkeletonList } from "../components/primitives/Skeleton";
 import { NF } from "../icons";
 import { api } from "../api";
+import { useAppState } from "../providers/AppStateProvider";
 import type { RouteSettingsDto, RouteSummaryDto } from "../types";
 import { ConfirmDialog } from "../components/ConfirmDialog";
 import { AddRouteModal, EditRouteModal } from "./third-party/AddRouteModal";
 import { RouteCard } from "./third-party/RouteCard";
+import {
+  EVENT_OPEN_ADD_ROUTE,
+  clearFromNetworkPanelBreadcrumb,
+  consumeOpenAddRouteHint,
+} from "../lib/networkPanelDeepLink";
 
 /**
  * Third-party section — entry point for non-Anthropic LLM routes.
@@ -27,26 +33,14 @@ import { RouteCard } from "./third-party/RouteCard";
  */
 export function ThirdPartySection() {
   const { t } = useTranslation();
+  const { pushToast } = useAppState();
   const [routes, setRoutes] = useState<RouteSummaryDto[] | null>(null);
   const [settings, setSettings] = useState<RouteSettingsDto | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
-  const [toast, setToast] = useState<{
-    kind: "info" | "error";
-    msg: string;
-  } | null>(null);
   const [busyIds, setBusyIds] = useState<Set<string>>(new Set());
-  // Track the auto-dismiss timer so a fast unmount or a second toast
-  // doesn't fire setToast on a dead component / replace the timer with
-  // a stale one. `clearTimeout` on undefined is a no-op.
-  const toastTimerRef = useRef<number | undefined>(undefined);
-  useEffect(() => {
-    return () => {
-      if (toastTimerRef.current !== undefined) {
-        window.clearTimeout(toastTimerRef.current);
-      }
-    };
-  }, []);
-  const [showAdd, setShowAdd] = useState(false);
+  // Cold-mount path: read the sessionStorage hint set by the
+  // NetworkUnreachablePanel before this section mounted.
+  const [showAdd, setShowAdd] = useState(() => consumeOpenAddRouteHint());
   const [editTarget, setEditTarget] = useState<RouteSummaryDto | null>(null);
   const [removeTarget, setRemoveTarget] = useState<RouteSummaryDto | null>(
     null,
@@ -74,6 +68,17 @@ export function ThirdPartySection() {
     void refresh();
   }, [refresh]);
 
+  // Hot-mount path for the NetworkUnreachablePanel's deep-link.
+  // When this section is already mounted, `setSection("third-party")`
+  // is a no-op and the cold-mount sessionStorage read won't re-fire,
+  // so the panel's button needs a CustomEvent to reach us. See
+  // `src/lib/networkPanelDeepLink.ts`.
+  useEffect(() => {
+    const handler = () => setShowAdd(true);
+    window.addEventListener(EVENT_OPEN_ADD_ROUTE, handler);
+    return () => window.removeEventListener(EVENT_OPEN_ADD_ROUTE, handler);
+  }, []);
+
   const setBusy = (id: string, busy: boolean) => {
     setBusyIds((prev) => {
       const next = new Set(prev);
@@ -83,31 +88,20 @@ export function ThirdPartySection() {
     });
   };
 
-  const showToast = (kind: "info" | "error", msg: string) => {
-    setToast({ kind, msg });
-    if (toastTimerRef.current !== undefined) {
-      window.clearTimeout(toastTimerRef.current);
-    }
-    toastTimerRef.current = window.setTimeout(() => {
-      setToast(null);
-      toastTimerRef.current = undefined;
-    }, 4500);
-  };
-
   const handleUseCli = async (id: string) => {
     setBusy(id, true);
     try {
       await api.routesUseCli(id);
       await refresh();
       const r = (await api.routesList()).find((x) => x.id === id);
-      showToast(
+      pushToast(
         "info",
         r
           ? t("thirdParty.wrapperInstalled", { name: r.wrapper_name })
-          : t("thirdParty.wrapperRemoved"),
+          : t("thirdParty.wrapperInstalledStatic"),
       );
     } catch (e) {
-      showToast("error", `Use in CLI failed: ${e instanceof Error ? e.message : e}`);
+      pushToast("error", `Use in CLI failed: ${e instanceof Error ? e.message : e}`);
     } finally {
       setBusy(id, false);
     }
@@ -118,9 +112,9 @@ export function ThirdPartySection() {
     try {
       await api.routesUnuseCli(id);
       await refresh();
-      showToast("info", t("thirdParty.wrapperRemoved"));
+      pushToast("info", t("thirdParty.wrapperRemoved"));
     } catch (e) {
-      showToast("error", `Uninstall CLI failed: ${e instanceof Error ? e.message : e}`);
+      pushToast("error", `Uninstall CLI failed: ${e instanceof Error ? e.message : e}`);
     } finally {
       setBusy(id, false);
     }
@@ -146,9 +140,9 @@ export function ThirdPartySection() {
       await api.routesUseDesktop(id);
       await refresh();
       await flagRestartIfRunning();
-      showToast("info", t("thirdParty.activeOnDesktop"));
+      pushToast("info", t("thirdParty.activeOnDesktop"));
     } catch (e) {
-      showToast("error", `Use in Desktop failed: ${e instanceof Error ? e.message : e}`);
+      pushToast("error", `Use in Desktop failed: ${e instanceof Error ? e.message : e}`);
     } finally {
       setBusy(id, false);
     }
@@ -160,9 +154,9 @@ export function ThirdPartySection() {
       await api.routesUnuseDesktop();
       await refresh();
       await flagRestartIfRunning();
-      showToast("info", t("thirdParty.desktopCleared"));
+      pushToast("info", t("thirdParty.desktopCleared"));
     } catch (e) {
-      showToast("error", `Deactivate Desktop failed: ${e instanceof Error ? e.message : e}`);
+      pushToast("error", `Deactivate Desktop failed: ${e instanceof Error ? e.message : e}`);
     } finally {
       setBusy(id, false);
     }
@@ -173,9 +167,9 @@ export function ThirdPartySection() {
     try {
       await api.routesDesktopRestart();
       setRestartHint("applied");
-      showToast("info", t("thirdParty.desktopRestarted"));
+      pushToast("info", t("thirdParty.desktopRestarted"));
     } catch (e) {
-      showToast(
+      pushToast(
         "error",
         `Restart failed: ${e instanceof Error ? e.message : e}`,
       );
@@ -197,9 +191,9 @@ export function ThirdPartySection() {
       if (route.active_on_desktop) {
         await flagRestartIfRunning();
       }
-      showToast("info", t("thirdParty.routeDeleted"));
+      pushToast("info", t("thirdParty.routeDeleted"));
     } catch (e) {
-      showToast("error", `Delete failed: ${e instanceof Error ? e.message : e}`);
+      pushToast("error", `Delete failed: ${e instanceof Error ? e.message : e}`);
     } finally {
       setBusy(route.id, false);
     }
@@ -213,7 +207,7 @@ export function ThirdPartySection() {
       });
       setSettings(next);
     } catch (e) {
-      showToast("error", `Settings update failed: ${e instanceof Error ? e.message : e}`);
+      pushToast("error", `Settings update failed: ${e instanceof Error ? e.message : e}`);
     }
   };
 
@@ -266,22 +260,6 @@ export function ThirdPartySection() {
           </div>
         )}
 
-        {toast && (
-          <div
-            role={toast.kind === "error" ? "alert" : "status"}
-            style={{
-              padding: "var(--sp-10) var(--sp-14)",
-              borderRadius: "var(--r-2)",
-              border: "var(--bw-hair) solid var(--line)",
-              background: "var(--bg-raised)",
-              color: toast.kind === "error" ? "var(--danger-fg, var(--fg))" : "var(--fg)",
-              fontSize: "var(--fs-sm)",
-            }}
-          >
-            {toast.msg}
-          </div>
-        )}
-
         {restartHint === "needed" && (
           <div
             role="status"
@@ -302,7 +280,7 @@ export function ThirdPartySection() {
               {t("thirdParty.restartBanner")}
             </span>
             <Button
-              variant="solid"
+              variant="ghost"
               size="sm"
               onClick={handleRestartDesktop}
               disabled={restartingDesktop}
@@ -324,7 +302,7 @@ export function ThirdPartySection() {
               fontSize: "var(--fs-sm)",
               color: "var(--fg-faint)",
             }}
-            title={t("thirdParty.hideChooser")}
+            title={t("thirdParty.chooserTitle")}
           >
             <input
               type="checkbox"
@@ -367,12 +345,18 @@ export function ThirdPartySection() {
 
       <AddRouteModal
         open={showAdd}
-        onClose={() => setShowAdd(false)}
+        onClose={() => {
+          setShowAdd(false);
+          // Clear the network-panel breadcrumb so a future Add Route
+          // (opened from the empty-state CTA, not from the network
+          // panel) doesn't inherit the China-reachable highlight.
+          clearFromNetworkPanelBreadcrumb();
+        }}
         onCreated={() => {
           void refresh();
-          showToast("info", t("thirdParty.routeAdded"));
+          pushToast("info", t("thirdParty.routeAdded"));
         }}
-        onError={(msg) => showToast("error", msg)}
+        onError={(msg) => pushToast("error", msg)}
       />
       <EditRouteModal
         open={editTarget !== null}
@@ -380,9 +364,9 @@ export function ThirdPartySection() {
         onClose={() => setEditTarget(null)}
         onSaved={() => {
           void refresh();
-          showToast("info", t("thirdParty.routeUpdated"));
+          pushToast("info", t("thirdParty.routeUpdated"));
         }}
-        onError={(msg) => showToast("error", msg)}
+        onError={(msg) => pushToast("error", msg)}
       />
       {removeTarget && (
         <ConfirmDialog

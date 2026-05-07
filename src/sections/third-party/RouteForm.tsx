@@ -4,6 +4,7 @@ import { Input } from "../../components/primitives/Input";
 import { FieldBlock } from "../../components/primitives/modalParts";
 import { NF } from "../../icons";
 import { api } from "../../api";
+import { readFromNetworkPanelBreadcrumb } from "../../lib/networkPanelDeepLink";
 import type {
   BedrockInputDto,
   FoundryInputDto,
@@ -142,6 +143,12 @@ export function RouteForm({
   const [fdUseKeychain, setFdUseKeychain] = useState(initialUseKeychain);
 
   const [submitting, setSubmitting] = useState(false);
+
+  // Sticky hint: was this form opened via the network-detection
+  // panel's "Use a third-party LLM" button? Drives preset emphasis.
+  // The breadcrumb key is read here without clearing — ThirdPartySection
+  // clears it when the modal closes. See `lib/networkPanelDeepLink.ts`.
+  const [fromNetworkPanel] = useState(() => readFromNetworkPanelBreadcrumb());
 
   // Auto-derive slug preview from model field.
   useEffect(() => {
@@ -301,6 +308,8 @@ export function RouteForm({
           setUseKeychain={setGwUseKeychain}
           editKeyHint={mode === "edit"}
           mode={mode}
+          setModel={setModel}
+          fromNetworkPanel={fromNetworkPanel}
         />
       )}
       {providerKind === "bedrock" && (
@@ -554,6 +563,156 @@ function KeychainOption(props: {
   );
 }
 
+/**
+ * Curated gateway-provider presets. Each entry pre-fills base URL +
+ * a sensible default model so users don't have to copy-paste from
+ * vendor docs. The list deliberately leans toward providers reachable
+ * from regions where Anthropic itself is blocked (mainland China),
+ * since this is the catalog the network-detection panel routes users
+ * to. See `dev-docs/network-detection-panel.md`.
+ *
+ * Endpoint paths are the OpenAI-compatible chat-completions roots —
+ * the gateway wrapper handles the request-shape translation. If a
+ * vendor changes their endpoint, update here; the form just plumbs
+ * the string through.
+ */
+interface GatewayPreset {
+  id: string;
+  label: string;
+  baseUrl: string;
+  model: string;
+  note: string;
+  /** True when reachable from networks that block Anthropic (China et
+   *  al). Drives the "reachable here" hint when the form is opened
+   *  from the network-detection panel. */
+  reachableFromBlockedRegions: boolean;
+}
+
+const GATEWAY_PRESETS: GatewayPreset[] = [
+  {
+    id: "deepseek",
+    label: "DeepSeek",
+    baseUrl: "https://api.deepseek.com/v1",
+    model: "deepseek-chat",
+    note: "Reachable from mainland China.",
+    reachableFromBlockedRegions: true,
+  },
+  {
+    id: "moonshot",
+    label: "Kimi (Moonshot)",
+    baseUrl: "https://api.moonshot.cn/v1",
+    model: "moonshot-v1-32k",
+    note: "Reachable from mainland China.",
+    reachableFromBlockedRegions: true,
+  },
+  {
+    id: "qwen",
+    label: "Qwen (DashScope)",
+    baseUrl: "https://dashscope.aliyuncs.com/compatible-mode/v1",
+    model: "qwen-coder-plus",
+    note: "Alibaba's Qwen. Reachable from mainland China.",
+    reachableFromBlockedRegions: true,
+  },
+  {
+    id: "glm",
+    label: "GLM (Zhipu)",
+    baseUrl: "https://open.bigmodel.cn/api/paas/v4",
+    model: "glm-4-plus",
+    note: "Zhipu's GLM. Reachable from mainland China.",
+    reachableFromBlockedRegions: true,
+  },
+  {
+    id: "openrouter",
+    label: "OpenRouter",
+    baseUrl: "https://openrouter.ai/api/v1",
+    model: "moonshotai/kimi-k2",
+    note: "Routes to many providers. Reachability from blocked regions varies.",
+    reachableFromBlockedRegions: false,
+  },
+  {
+    id: "ollama",
+    label: "Ollama (local)",
+    baseUrl: "http://127.0.0.1:11434/v1",
+    model: "llama3.2:3b",
+    note: "Local inference. Always reachable — requires Ollama running.",
+    reachableFromBlockedRegions: true,
+  },
+];
+
+function GatewayPresetsBar({
+  setBaseUrl,
+  setModel,
+  highlight,
+}: {
+  setBaseUrl: (s: string) => void;
+  setModel: (s: string) => void;
+  /** When true, emphasize the China-reachable presets — the form was
+   *  opened from the network-detection panel. */
+  highlight: boolean;
+}) {
+  return (
+    <div
+      style={{
+        display: "flex",
+        flexDirection: "column",
+        gap: "var(--sp-6)",
+        padding: "var(--sp-10) var(--sp-12)",
+        background: highlight
+          ? "color-mix(in oklch, var(--accent) 8%, var(--bg-raised))"
+          : "var(--bg-sunken)",
+        border: highlight
+          ? "var(--bw-hair) solid var(--accent)"
+          : "var(--bw-hair) solid var(--line)",
+        borderRadius: "var(--r-2)",
+      }}
+    >
+      <div
+        style={{
+          fontSize: "var(--fs-xs)",
+          color: "var(--fg-muted)",
+        }}
+      >
+        {highlight
+          ? "Quick start — providers reachable from your network:"
+          : "Quick start — pre-fill from a known provider:"}
+      </div>
+      <div
+        style={{
+          display: "flex",
+          flexWrap: "wrap",
+          gap: "var(--sp-6)",
+        }}
+      >
+        {GATEWAY_PRESETS.filter(
+          (p) => !highlight || p.reachableFromBlockedRegions,
+        ).map((p) => (
+          <button
+            key={p.id}
+            type="button"
+            onClick={() => {
+              setBaseUrl(p.baseUrl);
+              setModel(p.model);
+            }}
+            title={p.note}
+            style={{
+              padding: "var(--sp-4) var(--sp-10)",
+              fontSize: "var(--fs-xs)",
+              fontFamily: "inherit",
+              color: "var(--fg)",
+              background: "var(--bg-raised)",
+              border: "var(--bw-hair) solid var(--line)",
+              borderRadius: "var(--r-1)",
+              cursor: "pointer",
+            }}
+          >
+            {p.label}
+          </button>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 function GatewayFields(props: {
   baseUrl: string;
   setBaseUrl: (s: string) => void;
@@ -567,14 +726,27 @@ function GatewayFields(props: {
   setUseKeychain: (b: boolean) => void;
   editKeyHint: boolean;
   mode: "add" | "edit";
+  /** Set the route's default model. Plumbed through so the preset
+   *  buttons can pre-fill it alongside base URL. */
+  setModel?: (s: string) => void;
+  /** True when the form was opened via the network-detection panel.
+   *  Highlights the China-reachable preset subset. */
+  fromNetworkPanel?: boolean;
 }) {
   return (
     <>
+      {props.mode === "add" && props.setModel && (
+        <GatewayPresetsBar
+          setBaseUrl={props.setBaseUrl}
+          setModel={props.setModel}
+          highlight={props.fromNetworkPanel ?? false}
+        />
+      )}
       <FieldBlock label="Base URL" htmlFor="route-base">
         <Input
           value={props.baseUrl}
           onChange={(e) => props.setBaseUrl(e.target.value)}
-          placeholder="http://127.0.0.1:11434"
+          placeholder="http://127.0.0.1:11434/v1"
           glyph={NF.globe}
         />
       </FieldBlock>

@@ -4,7 +4,7 @@ cask "claudepot" do
   on_arm do
     sha256 "REPLACE_ME_DMG_AARCH64_SHA256"
 
-    url "https://github.com/xiaolai/com.claudepot.app/releases/download/v#{version}/Claudepot-aarch64.dmg"
+    url "https://github.com/xiaolai/claudepot-app/releases/download/v#{version}/Claudepot-aarch64.dmg"
 
     binary "#{appdir}/Claudepot.app/Contents/MacOS/claudepot-cli-aarch64-apple-darwin",
            target: "claudepot"
@@ -12,7 +12,7 @@ cask "claudepot" do
   on_intel do
     sha256 "REPLACE_ME_DMG_X86_64_SHA256"
 
-    url "https://github.com/xiaolai/com.claudepot.app/releases/download/v#{version}/Claudepot-x86_64.dmg"
+    url "https://github.com/xiaolai/claudepot-app/releases/download/v#{version}/Claudepot-x86_64.dmg"
 
     binary "#{appdir}/Claudepot.app/Contents/MacOS/claudepot-cli-x86_64-apple-darwin",
            target: "claudepot"
@@ -20,10 +20,10 @@ cask "claudepot" do
 
   name "Claudepot"
   desc "Multi-account Claude Code / Claude Desktop switcher"
-  homepage "https://github.com/xiaolai/com.claudepot.app"
+  homepage "https://claudepot.com/app/"
 
   livecheck do
-    url :homepage
+    url "https://github.com/xiaolai/claudepot-app"
     strategy :github_latest
   end
 

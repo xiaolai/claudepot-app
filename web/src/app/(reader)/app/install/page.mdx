@@ -1,0 +1,83 @@
+export const metadata = {
+  title: "Install",
+  description: "Install ClauDepot on macOS, Linux, or Windows.",
+};
+
+# Install
+
+ClauDepot ships as a signed desktop app on macOS (Intel + Apple
+Silicon), Linux, and Windows. Source is at
+[github.com/xiaolai/claudepot-app](https://github.com/xiaolai/claudepot-app).
+
+## Pick a platform
+
+### macOS — Homebrew
+
+```bash
+brew install --cask xiaolai/tap/claudepot
+```
+
+The cask handles updates via `brew upgrade`. The app is signed and
+notarized.
+
+### macOS — direct download
+
+Grab the matching `.dmg` from the [latest release](https://github.com/xiaolai/claudepot-app/releases/latest):
+
+- `Claudepot-aarch64.dmg` — Apple Silicon (M-series).
+- `Claudepot-x86_64.dmg` — Intel.
+
+### Linux
+
+```bash
+brew install xiaolai/tap/claudepot
+```
+
+Or grab the `.tar.gz` for your arch from the [latest release](https://github.com/xiaolai/claudepot-app/releases/latest):
+
+- `claudepot-aarch64-linux.tar.gz`
+- `claudepot-x86_64-linux.tar.gz`
+
+The CLI binary is in `bin/claudepot`. The GUI is `bin/Claudepot`.
+
+### Windows
+
+Download `Claudepot-x86_64.msi` from the [latest release](https://github.com/xiaolai/claudepot-app/releases/latest)
+and double-click. The installer is signed.
+
+## First run
+
+When you launch ClauDepot the first time, it will:
+
+1. **Check for an existing Claude Code session.** If you've used
+   Claude Code on this machine, ClauDepot finds your current
+   credentials and offers to register them as your first account.
+2. **Ask permission to read `~/.claude/`.** Required for the
+   Activities, Projects, and Sessions views. Read-only by default;
+   write actions (rename, slim, trash) prompt before applying.
+3. **Set up the macOS Keychain entry** (macOS only). ClauDepot uses a
+   separate Keychain item from Claude's own — see the [architecture
+   note](https://github.com/xiaolai/claudepot-app/blob/main/.claude/rules/architecture.md)
+   for why.
+
+After first run, the Accounts tab is your home base. Add a second
+account from the menu and you're set.
+
+## Build from source
+
+```bash
+git clone https://github.com/xiaolai/claudepot-app
+cd claudepot-app
+pnpm install
+cargo build -p claudepot-cli       # CLI binary
+pnpm tauri dev                     # GUI in dev mode
+pnpm tauri build --no-bundle       # GUI release binary
+```
+
+Requires Rust stable, Node 24+, pnpm 10+.
+
+## Where to next
+
+- [Why ClauDepot →](/app/why)
+- [Browse all features →](/app/features)
+- [Latest release notes →](/app/changelog)

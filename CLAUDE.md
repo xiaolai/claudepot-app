@@ -1,6 +1,19 @@
 # Claudepot
 
-Multi-account Claude Code / Claude Desktop switcher. Tauri 2 + Rust + React.
+Control center for Claude Code and Claude Desktop. Tauri 2 + Rust + React.
+
+The seed was multi-account credential switching. The shipped surface
+is broader: accounts, projects, sessions, API keys, third-party
+integrations, automations, memory (CLAUDE.md files), usage/cost
+tracking, updates, service status, and notifications — all under one
+Tauri shell with tray + menubar integration.
+
+The four-noun domain model (account, cli, desktop, project) still
+holds in `claudepot-core` — new surfaces are presentation layers over
+those nouns and over CC's filesystem, not new domain types. See
+`.claude/rules/architecture.md` for the noun-vs-surface distinction.
+Scope discipline applies to the *domain model* (don't add nouns
+casually); it does not cap what the UI can usefully expose.
 
 ## Build
 
@@ -121,10 +134,63 @@ See `dev-docs/implementation-plan.md` for the full plan.
   by op_id. The `RunningOps` map on the backend is the polling
   backstop; see `src-tauri/src/ops.rs`.
 
+## Web (claudepot.com)
+
+`web/` is a self-contained Next.js 15 app that ships
+`https://claudepot.com`. Independent install (its own
+`package.json` + `pnpm-lock.yaml`); not a workspace member of the
+root Tauri app. Two surfaces in one app:
+
+- `/` — **reader**: resource aggregator for one-man companies
+  building with AI.
+- `/app/*` — **product docs**: 14 routes (landing + why + install
+  + 8 features + features index + changelog + download), MDX
+  inside the `(docs)` route group.
+
+Stack: Next.js 15 + Drizzle/Neon + Auth.js v5 (GitHub + Google +
+Resend magic-link) + Resend + boring-avatars. `editorial/` carries
+the editorial spec read at runtime by the bot office (a separate
+private repo).
+
+Deploy: Vercel project `lixiaolai/claudepot-com`, Root Directory
+`web/`. CF DNS for the `claudepot.com` zone is unproxied A
+records to `76.76.21.21`. Phase-1 plan and full migration log in
+`dev-docs/domain-realignment.md`.
+
+CI: `.github/workflows/ci-web.yml` runs typecheck + tests on
+`web/**` changes (no build — Vercel handles the build per push).
+
+The `web/.tokenize/` config is currently `disabled: true`; re-enable
+with `/ui-tokenize:fix` after the residual hardcoded values in the
+imported codebase are absorbed.
+
 ## Reference
 
 `dev-docs/kannon/reference.md` — 3400-line verified reference for CC/Desktop internals.
 Always verify claims against CC source at `~/github/claude_code_src/src` before coding.
+
+## Icon assets
+
+Full post-mortem of the v0.1.13–0.1.19 Dock-blur arc is in
+`dev-docs/icon-design-notes.md`. Load-bearing rules:
+
+- **SVG must use a power-of-2-friendly grid.** Cell sizes 16, 24,
+  32, 64 in a 512-px viewBox. Avoid 22, 28, 30 — they don't divide
+  128/256 cleanly and rsvg AA-softens at every Dock size.
+- **Generate raster icons via `scripts/regen-icons.sh`,
+  not `pnpm tauri icon`.** The latter uses lossy resampling for
+  some `.icns` layers and produces ~50 dead-byte files for targets
+  we don't ship (iOS, Android, MSIX). Our script uses
+  `rsvg-convert` + `iconutil` + a manual ICO struct-pack that
+  embeds PNG-compressed layers verbatim.
+- **`src-tauri/src/dock_icon.rs` calls `setApplicationIconImage`
+  with `icon.png` (512×512) at startup on macOS.** This is required
+  — Tauri's runtime only does this in dev mode. Without it, prod
+  Dock at default size (96 px on Retina) renders the `.icns` 128
+  layer downscaled bilinearly and looks visibly soft. The 512-px
+  source means every Dock size is a clean Lanczos downsample.
+- **`pnpm tauri icon`'s output paths are `.gitignore`'d** so a
+  stray invocation can't re-stage MSIX/iOS/Android dead bytes.
 
 ## Conventions
 

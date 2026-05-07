@@ -1,45 +1,21 @@
 mod app_menu;
 mod commands;
-mod commands_account;
-mod commands_activity;
-mod commands_activity_cards;
-mod commands_artifact_lifecycle;
-mod commands_artifact_usage;
-mod commands_automations;
-mod commands_cli;
-mod commands_config;
-mod commands_config_types;
-mod commands_desktop;
-mod commands_keys;
-mod commands_memory_health;
-mod commands_migrate;
-mod commands_notification;
-mod commands_preferences;
-mod commands_pricing;
-mod commands_project;
-mod commands_protected;
-mod commands_repair;
-mod commands_routes;
-mod commands_service_status;
-mod commands_session_index;
-mod commands_session_move;
-mod commands_session_prune;
-mod commands_session_share;
-mod commands_templates;
-mod commands_updates;
-mod commands_usage_local;
 mod config_dto;
 mod config_watch;
 mod config_watch_types;
+#[cfg(target_os = "macos")]
+mod dock_icon;
 mod dto;
 mod dto_account;
 mod dto_activity;
 mod dto_activity_cards;
+mod dto_cc_tips;
 mod dto_artifact_lifecycle;
 mod dto_artifact_usage;
 mod dto_automations;
 mod dto_desktop;
 mod dto_keys;
+mod dto_memory;
 mod dto_migrate;
 mod dto_project;
 mod dto_project_repair;
@@ -53,6 +29,7 @@ mod dto_templates;
 mod dto_updates;
 mod dto_usage;
 mod live_activity_bridge;
+mod memory_watch;
 mod ops;
 mod preferences;
 mod service_status_watcher;
@@ -112,7 +89,7 @@ pub fn run() {
     let notification_log_state = match claudepot_core::notification_log::NotificationLog::open(
         notification_log_path.clone(),
     ) {
-        Ok(log) => commands_notification::NotificationLogState::new(log),
+        Ok(log) => commands::notification::NotificationLogState::new(log),
         Err(e) => {
             tracing::warn!(
                 target = "claudepot_tauri",
@@ -139,7 +116,7 @@ pub fn run() {
                     );
                     claudepot_core::notification_log::NotificationLog::in_memory_only()
                 });
-            commands_notification::NotificationLogState::new(log)
+            commands::notification::NotificationLogState::new(log)
         }
     };
 
@@ -169,6 +146,53 @@ pub fn run() {
     // service-refactor pattern owns the runtime, so we hand the
     // cards index into the service's `enable_activity` accessor at
     // construction time.)
+
+    // Memory change-log database. Lives at
+    // `~/.claudepot/memory_changes.db`. Two-step fallback mirrors the
+    // notification-log pattern: try the canonical path; if that fails,
+    // try a temp-dir copy so the current process still has a working
+    // log; only if BOTH fail do we panic (extremely unlikely — both
+    // home and temp would have to be unwritable).
+    //
+    // Audit 2026-05 #2: every memory IPC command requires
+    // `MemoryLogState`, so this MUST always succeed. The previous
+    // `Option<Arc<MemoryLog>>` shape silently broke the entire pane on
+    // open failure because `.manage()` was gated on the option.
+    let memory_log: std::sync::Arc<claudepot_core::memory_log::MemoryLog> = {
+        let primary = claudepot_core::paths::claudepot_data_dir().join("memory_changes.db");
+        match claudepot_core::memory_log::MemoryLog::open(&primary) {
+            Ok(l) => std::sync::Arc::new(l),
+            Err(e) => {
+                tracing::warn!(
+                    target = "claudepot_tauri",
+                    error = %e,
+                    path = %primary.display(),
+                    "memory change-log open failed at canonical path; falling back to temp dir"
+                );
+                let fallback = std::env::temp_dir().join("claudepot-memory_changes.db");
+                std::sync::Arc::new(
+                    claudepot_core::memory_log::MemoryLog::open(&fallback).unwrap_or_else(|e2| {
+                        // Both writable locations failed — this is
+                        // catastrophic for log persistence but the
+                        // app can still run. Panic with a clear
+                        // message so users see the underlying issue
+                        // rather than a generic "command failed".
+                        panic!(
+                            "memory change-log unrecoverable: primary={} ({e}); \
+                                 fallback={} ({e2})",
+                            primary.display(),
+                            fallback.display(),
+                        );
+                    }),
+                )
+            }
+        }
+    };
+
+    // Clone the memory-log handle for the setup closure so it can spawn
+    // the watcher; the original Arc stays available for `.manage()`.
+    let memory_log_for_watcher: std::sync::Arc<claudepot_core::memory_log::MemoryLog> =
+        memory_log.clone();
 
     // `mut` is only consumed by the debug-only plugin block below;
     // release builds don't touch it. Silence the release warning here.
@@ -214,6 +238,14 @@ pub fn run() {
             if hide_dock {
                 app.set_activation_policy(tauri::ActivationPolicy::Accessory);
             }
+
+            // Force the Dock icon through Cocoa's NSImage pipeline
+            // with our 512×512 source so non-128 Dock sizes (the
+            // default 96-px render in particular) get high-quality
+            // Lanczos downsampling instead of the legacy IconServices
+            // bilinear-from-128-layer path. See `dock_icon.rs`.
+            #[cfg(target_os = "macos")]
+            dock_icon::override_application_icon();
 
             // Honor the "show window on startup" preference. The window
             // is configured `visible: true` in tauri.conf.json so the
@@ -392,6 +424,12 @@ pub fn run() {
             // `dev-docs/network-status.md`.
             service_status_watcher::spawn(app.handle().clone());
 
+            // Long-running fs-watcher for memory file changes. Watches
+            // `~/.claude/` recursively; records diffs to
+            // `~/.claudepot/memory_changes.db` and emits `memory:changed`
+            // for the MemoryPane.
+            memory_watch::spawn(app.handle().clone(), memory_log_for_watcher.clone());
+
             Ok(())
         })
         .manage(state::LoginState::default())
@@ -432,7 +470,7 @@ pub fn run() {
         // the IPC layer — service moved to `claudepot-core` so the
         // commit policy is testable without Tauri.
         .manage(claudepot_core::config_view::ConfigScanService::new())
-        .manage(commands_config::SearchRegistry::default())
+        .manage(commands::config::SearchRegistry::default())
         .manage(config_watch::ConfigWatchState::default())
         .manage(claudepot_core::services::usage_cache::UsageCache::new())
         // D-3: process-wide pricing cache + singleflight refresh.
@@ -441,7 +479,7 @@ pub fn run() {
         // `pricing_refresh` button-mash path too.
         .manage(claudepot_core::pricing::PricingCacheService::new())
         .manage(notification_log_state)
-        .manage(commands_service_status::ServiceStatusState::new());
+        .manage(commands::service_status::ServiceStatusState::new());
 
     // Conditionally publish the cards index — `None` means open
     // failed at startup, in which case the cards-* commands return
@@ -449,8 +487,12 @@ pub fn run() {
     // a "cards index not ready" toast. The live-strip surface and
     // every other command keeps working.
     if let Some(idx) = cards_index {
-        builder = builder.manage(commands_activity_cards::ActivityCardsState { index: idx });
+        builder = builder.manage(commands::activity_cards::ActivityCardsState { index: idx });
     }
+
+    // Memory change-log state. Always managed — `memory_log` is now
+    // unconditionally `Arc<MemoryLog>` per audit 2026-05 #2.
+    builder = builder.manage(commands::memory::MemoryLogState::new(memory_log.clone()));
 
     #[cfg(debug_assertions)]
     {
@@ -463,224 +505,234 @@ pub fn run() {
             commands::updater_supported,
             commands::quit_now,
             commands::tray_set_alert_count,
-            commands_cli::sync_from_current_cc,
+            commands::cli::sync_from_current_cc,
             commands::unlock_keychain,
             commands::reveal_in_finder,
             commands::account_list,
             commands::account_list_basic,
             commands::accounts_reconcile,
-            commands_cli::cli_use,
-            commands_cli::cli_is_cc_running,
-            commands_desktop::desktop_use,
-            commands_desktop::current_desktop_identity,
-            commands_desktop::verified_desktop_identity,
-            commands_desktop::desktop_adopt,
-            commands_desktop::desktop_clear,
-            commands_desktop::sync_from_current_desktop,
-            commands_desktop::desktop_launch,
-            commands_account::account_add_from_current,
-            commands_account::account_register_from_browser,
-            commands_account::account_register_from_browser_start,
-            commands_account::account_login,
-            commands_account::account_login_start,
-            commands_account::account_login_status,
-            commands_account::account_login_cancel,
-            commands_account::account_remove,
-            commands_account::fetch_all_usage,
-            commands_account::refresh_usage_for,
-            commands_account::verify_all_accounts,
-            commands_account::verify_all_accounts_start,
-            commands_account::verify_all_accounts_status,
-            commands_account::verify_account,
-            commands_cli::current_cc_identity,
-            commands_project::project_list,
-            commands_project::project_show,
-            commands_project::project_move_dry_run,
-            commands_project::project_clean_preview,
-            commands_project::project_clean_start,
-            commands_project::project_clean_status,
-            commands_project::project_remove_preview,
-            commands_project::project_remove_preview_basic,
-            commands_project::project_remove_preview_extras,
-            commands_project::project_remove_execute,
-            commands_project::project_trash_list,
-            commands_project::project_trash_restore,
-            commands_project::project_trash_empty,
-            commands_project::repair_list,
-            commands_project::repair_pending_count,
-            commands_repair::repair_resume_start,
-            commands_repair::repair_rollback_start,
-            commands_repair::repair_abandon,
-            commands_repair::repair_break_lock,
-            commands_repair::repair_gc,
-            commands_repair::repair_preview_abandoned,
-            commands_repair::repair_cleanup_abandoned,
-            commands_repair::running_ops_list,
-            commands_repair::project_move_start,
-            commands_repair::project_move_status,
-            commands_project::repair_status_summary,
-            commands_session_move::session_list_orphans,
-            commands_session_move::session_move,
-            commands_session_move::session_move_start,
-            commands_session_move::session_move_status,
-            commands_session_move::session_adopt_orphan,
-            commands_session_move::session_discard_orphan,
-            commands_session_index::session_list_all,
-            commands_session_index::session_read,
-            commands_session_index::session_read_path,
-            commands_session_index::session_index_rebuild,
-            commands_session_index::session_chunks,
-            commands_session_index::session_context_attribution,
-            commands_session_index::session_export_to_file,
-            commands_session_index::session_search,
-            commands_session_index::session_worktree_groups,
-            commands_artifact_usage::artifact_usage_for,
-            commands_artifact_usage::artifact_usage_batch,
-            commands_artifact_usage::artifact_usage_top,
-            commands_artifact_lifecycle::artifact_classify_path,
-            commands_artifact_lifecycle::artifact_disable,
-            commands_artifact_lifecycle::artifact_enable,
-            commands_artifact_lifecycle::artifact_list_disabled,
-            commands_artifact_lifecycle::artifact_trash,
-            commands_artifact_lifecycle::artifact_list_trash,
-            commands_artifact_lifecycle::artifact_restore_from_trash,
-            commands_artifact_lifecycle::artifact_recover_trash,
-            commands_artifact_lifecycle::artifact_forget_trash,
-            commands_artifact_lifecycle::artifact_purge_trash,
-            commands_artifact_lifecycle::artifact_disabled_preview,
-            commands_protected::protected_paths_list,
-            commands_protected::protected_paths_add,
-            commands_protected::protected_paths_remove,
-            commands_protected::protected_paths_reset,
-            commands_preferences::preferences_get,
-            commands_preferences::preferences_set_hide_dock_icon,
-            commands_preferences::preferences_set_show_window_on_startup,
-            commands_keys::key_api_list,
-            commands_keys::key_api_add,
-            commands_keys::key_api_remove,
-            commands_keys::key_api_rename,
-            commands_keys::key_api_copy,
-            commands_keys::key_api_probe,
-            commands_keys::key_oauth_list,
-            commands_keys::key_oauth_add,
-            commands_keys::key_oauth_remove,
-            commands_keys::key_oauth_rename,
-            commands_keys::key_oauth_copy,
-            commands_keys::key_oauth_copy_shell,
-            commands_keys::key_oauth_usage_cached,
-            commands_preferences::preferences_set_activity,
-            commands_preferences::preferences_set_notifications,
-            commands_preferences::preferences_set_service_status,
-            commands_service_status::service_status_summary_get,
-            commands_service_status::service_status_probe_now,
-            commands_service_status::service_status_latency_get,
-            commands_activity::session_live_start,
-            commands_activity::session_live_stop,
-            commands_activity::session_live_snapshot,
-            commands_activity::session_live_session_snapshot,
-            commands_activity::session_live_subscribe,
-            commands_activity::session_live_unsubscribe,
-            commands_activity::activity_trends,
-            commands_activity_cards::cards_recent,
-            commands_activity_cards::cards_count_new_since,
-            commands_activity_cards::cards_set_last_seen,
-            commands_activity_cards::cards_navigate,
-            commands_activity_cards::cards_body,
-            commands_activity_cards::cards_reindex,
-            commands_session_prune::session_prune_plan,
-            commands_session_prune::session_prune_start,
-            commands_session_prune::session_slim_plan,
-            commands_session_prune::session_slim_start,
-            commands_session_prune::session_slim_plan_all,
-            commands_session_prune::session_slim_start_all,
-            commands_session_prune::session_trash_list,
-            commands_session_prune::session_trash_restore,
-            commands_session_prune::session_trash_empty,
-            commands_session_share::session_export_preview,
-            commands_session_share::session_share_gist_start,
-            commands_session_share::settings_github_token_get,
-            commands_session_share::settings_github_token_set,
-            commands_session_share::settings_github_token_clear,
-            commands_config::config_scan,
-            commands_config::config_preview,
-            commands_config::config_list_editors,
-            commands_config::config_get_editor_defaults,
-            commands_config::config_set_editor_default,
-            commands_config::config_open_in_editor_path,
-            commands_config::config_search_start,
-            commands_config::config_search_cancel,
-            commands_config::config_effective_settings,
-            commands_config::config_effective_mcp,
-            commands_pricing::pricing_get,
-            commands_pricing::pricing_refresh,
-            commands_usage_local::local_usage_aggregate,
-            commands_usage_local::pricing_tier_get,
-            commands_usage_local::pricing_tier_set,
-            commands_usage_local::top_costly_prompts,
-            commands_memory_health::memory_health_get,
+            commands::cli::cli_use,
+            commands::cli::cli_is_cc_running,
+            commands::desktop::desktop_use,
+            commands::desktop::current_desktop_identity,
+            commands::desktop::verified_desktop_identity,
+            commands::desktop::desktop_adopt,
+            commands::desktop::desktop_clear,
+            commands::desktop::sync_from_current_desktop,
+            commands::desktop::desktop_launch,
+            commands::account::account_add_from_current,
+            commands::account::account_register_from_browser,
+            commands::account::account_register_from_browser_start,
+            commands::account::account_login,
+            commands::account::account_login_start,
+            commands::account::account_login_status,
+            commands::account::account_login_cancel,
+            commands::account::account_remove,
+            commands::account::fetch_all_usage,
+            commands::account::refresh_usage_for,
+            commands::account::verify_all_accounts,
+            commands::account::verify_all_accounts_start,
+            commands::account::verify_all_accounts_status,
+            commands::account::verify_account,
+            commands::cli::current_cc_identity,
+            commands::project::project_list,
+            commands::project::project_show,
+            commands::project::project_move_dry_run,
+            commands::project::project_clean_preview,
+            commands::project::project_clean_start,
+            commands::project::project_clean_status,
+            commands::project::project_remove_preview,
+            commands::project::project_remove_preview_basic,
+            commands::project::project_remove_preview_extras,
+            commands::project::project_remove_execute,
+            commands::project::project_trash_list,
+            commands::project::project_trash_restore,
+            commands::project::project_trash_empty,
+            commands::project::repair_list,
+            commands::project::repair_pending_count,
+            commands::repair::repair_resume_start,
+            commands::repair::repair_rollback_start,
+            commands::repair::repair_abandon,
+            commands::repair::repair_break_lock,
+            commands::repair::repair_gc,
+            commands::repair::repair_preview_abandoned,
+            commands::repair::repair_cleanup_abandoned,
+            commands::repair::running_ops_list,
+            commands::repair::project_move_start,
+            commands::repair::project_move_status,
+            commands::project::repair_status_summary,
+            commands::session_move::session_list_orphans,
+            commands::session_move::session_move,
+            commands::session_move::session_move_start,
+            commands::session_move::session_move_status,
+            commands::session_move::session_adopt_orphan,
+            commands::session_move::session_discard_orphan,
+            commands::session_index::session_list_all,
+            commands::session_index::session_read,
+            commands::session_index::session_read_path,
+            commands::session_index::session_index_rebuild,
+            commands::session_index::session_chunks,
+            commands::session_index::session_context_attribution,
+            commands::session_index::session_export_to_file,
+            commands::session_index::session_search,
+            commands::session_index::session_worktree_groups,
+            commands::artifact_usage::artifact_usage_for,
+            commands::artifact_usage::artifact_usage_batch,
+            commands::artifact_usage::artifact_usage_top,
+            commands::artifact_lifecycle::artifact_classify_path,
+            commands::artifact_lifecycle::artifact_disable,
+            commands::artifact_lifecycle::artifact_enable,
+            commands::artifact_lifecycle::artifact_list_disabled,
+            commands::artifact_lifecycle::artifact_trash,
+            commands::artifact_lifecycle::artifact_list_trash,
+            commands::artifact_lifecycle::artifact_restore_from_trash,
+            commands::artifact_lifecycle::artifact_recover_trash,
+            commands::artifact_lifecycle::artifact_forget_trash,
+            commands::artifact_lifecycle::artifact_purge_trash,
+            commands::artifact_lifecycle::artifact_disabled_preview,
+            commands::protected::protected_paths_list,
+            commands::protected::protected_paths_add,
+            commands::protected::protected_paths_remove,
+            commands::protected::protected_paths_reset,
+            commands::preferences::preferences_get,
+            commands::preferences::preferences_set_hide_dock_icon,
+            commands::preferences::preferences_set_show_window_on_startup,
+            commands::keys::key_api_list,
+            commands::keys::key_api_add,
+            commands::keys::key_api_remove,
+            commands::keys::key_api_rename,
+            commands::keys::key_api_copy,
+            commands::keys::key_api_probe,
+            commands::keys::key_oauth_list,
+            commands::keys::key_oauth_add,
+            commands::keys::key_oauth_remove,
+            commands::keys::key_oauth_rename,
+            commands::keys::key_oauth_copy,
+            commands::keys::key_oauth_copy_shell,
+            commands::keys::key_oauth_usage_cached,
+            commands::preferences::preferences_set_activity,
+            commands::preferences::preferences_set_notifications,
+            commands::preferences::preferences_set_service_status,
+            commands::service_status::service_status_summary_get,
+            commands::service_status::service_status_probe_now,
+            commands::service_status::service_status_latency_get,
+            commands::service_status::network_first_run_check,
+            commands::activity::session_live_start,
+            commands::activity::session_live_stop,
+            commands::activity::session_live_snapshot,
+            commands::activity::session_live_session_snapshot,
+            commands::activity::session_live_subscribe,
+            commands::activity::session_live_unsubscribe,
+            commands::activity::activity_trends,
+            commands::activity_cards::cards_recent,
+            commands::activity_cards::cards_count_new_since,
+            commands::activity_cards::cards_set_last_seen,
+            commands::activity_cards::cards_navigate,
+            commands::activity_cards::cards_body,
+            commands::activity_cards::cards_reindex,
+            commands::session_prune::session_prune_plan,
+            commands::session_prune::session_prune_start,
+            commands::session_prune::session_slim_plan,
+            commands::session_prune::session_slim_start,
+            commands::session_prune::session_slim_plan_all,
+            commands::session_prune::session_slim_start_all,
+            commands::session_prune::session_trash_list,
+            commands::session_prune::session_trash_restore,
+            commands::session_prune::session_trash_empty,
+            commands::session_share::session_export_preview,
+            commands::session_share::session_share_gist_start,
+            commands::session_share::settings_github_token_get,
+            commands::session_share::settings_github_token_set,
+            commands::session_share::settings_github_token_clear,
+            commands::config::config_scan,
+            commands::config::config_preview,
+            commands::config::config_list_editors,
+            commands::config::config_get_editor_defaults,
+            commands::config::config_set_editor_default,
+            commands::config::config_open_in_editor_path,
+            commands::config::config_search_start,
+            commands::config::config_search_cancel,
+            commands::config::config_effective_settings,
+            commands::config::config_effective_mcp,
+            commands::pricing::pricing_get,
+            commands::pricing::pricing_refresh,
+            commands::usage_local::local_usage_aggregate,
+            commands::usage_local::pricing_tier_get,
+            commands::usage_local::pricing_tier_set,
+            commands::usage_local::top_costly_prompts,
+            commands::memory_health::memory_health_get,
+            commands::cc_tips::cc_tips_list,
+            commands::cc_tips::cc_tips_refresh,
+            commands::cc_tips::cc_tips_record_view,
+            commands::memory::memory_list_for_project,
+            commands::memory::memory_read_file,
+            commands::memory::memory_change_log,
+            commands::memory::auto_memory_state,
+            commands::memory::auto_memory_state_global,
+            commands::memory::auto_memory_set,
             config_watch::config_watch_start,
             config_watch::config_watch_stop,
-            commands_migrate::migrate_inspect,
-            commands_migrate::migrate_export,
-            commands_migrate::migrate_import,
-            commands_migrate::migrate_undo,
-            commands_routes::routes_list,
-            commands_routes::routes_get,
-            commands_routes::routes_settings_get,
-            commands_routes::routes_settings_set,
-            commands_routes::routes_add,
-            commands_routes::routes_edit,
-            commands_routes::routes_remove,
-            commands_routes::routes_use_cli,
-            commands_routes::routes_unuse_cli,
-            commands_routes::routes_use_desktop,
-            commands_routes::routes_unuse_desktop,
-            commands_routes::routes_derive_slug,
-            commands_routes::routes_validate_wrapper_name,
-            commands_routes::routes_zero_secret,
-            commands_routes::routes_desktop_running,
-            commands_routes::routes_desktop_restart,
-            commands_automations::automations_list,
-            commands_automations::automations_get,
-            commands_automations::automations_add,
-            commands_automations::automations_update,
-            commands_automations::automations_remove,
-            commands_automations::automations_set_enabled,
-            commands_automations::automations_run_now_start,
-            commands_automations::automations_runs_list,
-            commands_automations::automations_run_get,
-            commands_automations::automations_validate_name,
-            commands_automations::automations_validate_cron,
-            commands_automations::automations_scheduler_capabilities,
-            commands_automations::automations_dry_run_artifact,
-            commands_automations::automations_open_artifact_dir,
-            commands_automations::automations_linger_status,
-            commands_automations::automations_linger_enable,
-            commands_templates::templates_list,
-            commands_templates::templates_get,
-            commands_templates::templates_sample_report,
-            commands_templates::templates_capable_routes,
-            commands_templates::templates_install,
-            commands_templates::templates_read_report,
-            commands_templates::templates_pending_changes,
-            commands_templates::templates_apply_pending,
-            commands_templates::routing_rules_get,
-            commands_templates::routing_rules_set,
-            commands_templates::routing_rules_evaluate_for,
-            commands_notification::notification_activate_host_for_session,
-            commands_notification::notification_log_append,
-            commands_notification::notification_log_list,
-            commands_notification::notification_log_mark_all_read,
-            commands_notification::notification_log_clear,
-            commands_notification::notification_log_unread_count,
-            commands_updates::updates_status_get,
-            commands_updates::updates_check_now,
-            commands_updates::updates_cli_install,
-            commands_updates::updates_desktop_install,
-            commands_updates::updates_settings_get,
-            commands_updates::updates_settings_set,
-            commands_updates::updates_channel_set,
-            commands_updates::updates_minimum_version_set,
+            commands::migrate::migrate_inspect,
+            commands::migrate::migrate_export,
+            commands::migrate::migrate_import,
+            commands::migrate::migrate_undo,
+            commands::routes::routes_list,
+            commands::routes::routes_get,
+            commands::routes::routes_settings_get,
+            commands::routes::routes_settings_set,
+            commands::routes::routes_add,
+            commands::routes::routes_edit,
+            commands::routes::routes_remove,
+            commands::routes::routes_use_cli,
+            commands::routes::routes_unuse_cli,
+            commands::routes::routes_use_desktop,
+            commands::routes::routes_unuse_desktop,
+            commands::routes::routes_derive_slug,
+            commands::routes::routes_validate_wrapper_name,
+            commands::routes::routes_zero_secret,
+            commands::routes::routes_desktop_running,
+            commands::routes::routes_desktop_restart,
+            commands::automations::automations_list,
+            commands::automations::automations_get,
+            commands::automations::automations_add,
+            commands::automations::automations_update,
+            commands::automations::automations_remove,
+            commands::automations::automations_set_enabled,
+            commands::automations::automations_run_now_start,
+            commands::automations::automations_runs_list,
+            commands::automations::automations_run_get,
+            commands::automations::automations_validate_name,
+            commands::automations::automations_validate_cron,
+            commands::automations::automations_scheduler_capabilities,
+            commands::automations::automations_dry_run_artifact,
+            commands::automations::automations_open_artifact_dir,
+            commands::automations::automations_linger_status,
+            commands::automations::automations_linger_enable,
+            commands::templates::templates_list,
+            commands::templates::templates_get,
+            commands::templates::templates_sample_report,
+            commands::templates::templates_capable_routes,
+            commands::templates::templates_install,
+            commands::templates::templates_read_report,
+            commands::templates::templates_pending_changes,
+            commands::templates::templates_apply_pending,
+            commands::templates::routing_rules_get,
+            commands::templates::routing_rules_set,
+            commands::templates::routing_rules_evaluate_for,
+            commands::notification::notification_activate_host_for_session,
+            commands::notification::notification_log_append,
+            commands::notification::notification_log_list,
+            commands::notification::notification_log_mark_all_read,
+            commands::notification::notification_log_clear,
+            commands::notification::notification_log_unread_count,
+            commands::updates::updates_status_get,
+            commands::updates::updates_check_now,
+            commands::updates::updates_cli_install,
+            commands::updates::updates_desktop_install,
+            commands::updates::updates_settings_get,
+            commands::updates::updates_settings_set,
+            commands::updates::updates_channel_set,
+            commands::updates::updates_minimum_version_set,
         ])
         .run(tauri::generate_context!())
         .unwrap_or_else(|e| {

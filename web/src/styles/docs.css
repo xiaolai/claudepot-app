@@ -1,0 +1,317 @@
+/* /app/* docs surface, nested inside the reader group's chrome.
+ * The reader's PrototypeNav supplies the masthead; this file
+ * only adds the docs sidebar + article layout below it.
+ *
+ * theme.css applies a global box-sizing/margin/padding reset on *,
+ * so EVERY block element (h*, p, ul, ol, li, pre, table, hr,
+ * blockquote, …) starts at zero. The rules below restore editorial
+ * vertical rhythm under .docs-main only — keeping the reader's
+ * other surfaces unaffected. */
+
+.docs-shell {
+  display: grid;
+  grid-template-columns: 16rem 1fr;
+  gap: var(--sp-32);
+  max-width: 78rem;
+  margin: 0 auto;
+  padding: var(--sp-28) var(--sp-20);
+}
+
+.docs-sidebar {
+  position: sticky;
+  top: var(--sp-28);
+  align-self: flex-start;
+  font-size: var(--fs-meta);
+}
+
+.docs-nav-group + .docs-nav-group {
+  margin-top: var(--sp-24);
+}
+
+.docs-nav-group-title {
+  font-size: var(--fs-eyebrow);
+  text-transform: uppercase;
+  letter-spacing: var(--ls-eyebrow);
+  color: var(--muted);
+  margin: 0 0 var(--sp-8);
+}
+
+.docs-nav-list {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+}
+
+.docs-nav-link {
+  display: block;
+  padding: var(--sp-8) var(--sp-12);
+  color: var(--muted);
+  text-decoration: none;
+  border-radius: var(--sp-4);
+}
+
+.docs-nav-link:hover {
+  background: var(--code-bg);
+  color: var(--text);
+}
+
+.docs-nav-link.is-active {
+  color: var(--text);
+  font-weight: 600;
+  background: var(--accent-soft);
+}
+
+.docs-main {
+  min-width: 0;
+  max-width: var(--bp-md);
+  font-size: var(--fs-body);
+  line-height: var(--lh-body);
+  color: var(--text);
+}
+
+/* Default vertical rhythm: every direct child gets a top margin
+ * except the first. Specific elements override below. */
+.docs-main > * + * {
+  margin-top: var(--sp-16);
+}
+
+.docs-main h1,
+.docs-main h2,
+.docs-main h3,
+.docs-main h4 {
+  font-family: var(--font-display);
+  letter-spacing: var(--ls-tight);
+  color: var(--editorial-dark);
+  line-height: var(--lh-heading);
+}
+
+.docs-main h1 {
+  font-size: var(--fs-masthead);
+}
+
+.docs-main > h1:first-child {
+  margin-top: 0;
+}
+
+.docs-main h2 {
+  font-size: var(--fs-section-heading);
+  margin-top: var(--sp-36);
+}
+
+.docs-main h3 {
+  font-size: var(--fs-playbook-dek);
+  margin-top: var(--sp-28);
+}
+
+.docs-main h4 {
+  font-size: var(--fs-body);
+  margin-top: var(--sp-20);
+}
+
+.docs-main p,
+.docs-main li {
+  font-family: var(--font-serif-body);
+  font-size: var(--fs-body);
+  line-height: var(--lh-body);
+}
+
+.docs-main ul,
+.docs-main ol {
+  padding-left: var(--sp-24);
+}
+
+.docs-main li + li {
+  margin-top: var(--sp-4);
+}
+
+.docs-main li > p {
+  margin-top: var(--sp-4);
+}
+
+.docs-main strong { font-weight: 600; }
+.docs-main em { font-style: italic; }
+
+.docs-main pre,
+.docs-main code {
+  font-family: var(--font-mono);
+}
+
+.docs-main pre {
+  padding: var(--sp-16);
+  border: var(--bw-hair) solid var(--border);
+  border-radius: var(--sp-6);
+  overflow-x: auto;
+  background: var(--code-bg);
+  font-size: var(--fs-meta);
+  line-height: var(--lh-snug);
+}
+
+.docs-main :not(pre) > code {
+  padding: var(--ls-eyebrow) 0.35em;
+  border: var(--bw-hair) solid var(--border);
+  border-radius: var(--bw-accent);
+  background: var(--code-bg);
+  font-size: 0.92em;
+}
+
+/* Underline only inline-context links (paragraphs, list items,
+ * headings, blockquotes). Anchor wrappers used as cards
+ * (.docs-feature-card) keep their own no-underline rule. */
+.docs-main :is(p, li, h1, h2, h3, h4, blockquote) a {
+  color: var(--accent-ink);
+  text-decoration: underline;
+  text-underline-offset: var(--bw-rule);
+}
+
+.docs-main hr {
+  border: 0;
+  border-top: var(--bw-hair) solid var(--border);
+  margin: var(--sp-32) 0;
+}
+
+.docs-main img {
+  max-width: 100%;
+  height: auto;
+  border: var(--bw-hair) solid var(--border);
+  border-radius: var(--sp-6);
+  background: var(--code-bg);
+}
+
+.docs-main blockquote {
+  padding: var(--sp-12) var(--sp-20);
+  border-left: var(--bw-accent) solid var(--accent);
+  color: var(--muted);
+  background: var(--accent-soft);
+}
+
+.docs-main blockquote p {
+  margin: 0;
+}
+
+.docs-main table {
+  border-collapse: collapse;
+  font-size: var(--fs-meta);
+  width: 100%;
+}
+
+.docs-main table th,
+.docs-main table td {
+  border: var(--bw-hair) solid var(--border);
+  padding: var(--sp-8) var(--sp-12);
+  text-align: left;
+}
+
+.docs-main table th {
+  background: var(--code-bg);
+  font-weight: 600;
+}
+
+/* /app/ landing — hero + features grid */
+
+.docs-hero {
+  padding: var(--sp-36) 0 var(--sp-28);
+  border-bottom: var(--bw-hair) solid var(--border);
+}
+
+.docs-hero h1 {
+  font-size: var(--fs-playbook-title);
+  margin-bottom: var(--sp-16);
+}
+
+.docs-hero-tagline {
+  font-family: var(--font-serif-body);
+  font-size: var(--fs-playbook-dek);
+  color: var(--muted);
+  max-width: 36rem;
+  margin: 0 0 var(--sp-24);
+  line-height: var(--lh-dek);
+}
+
+.docs-hero-actions {
+  display: flex;
+  gap: var(--sp-12);
+  flex-wrap: wrap;
+}
+
+/* CTAs match the reader's design language: pill-shaped accent button
+ * (mirrors .proto-button-primary) for the primary action; outlined
+ * accent for the secondary. Same shape, same weight, same family —
+ * the only difference is fill vs stroke. */
+
+.docs-cta-primary,
+.docs-cta-secondary {
+  display: inline-block;
+  padding: var(--sp-8) var(--sp-20);
+  border-radius: var(--radius-full);
+  font-family: var(--font-body);
+  font-size: var(--fs-body);
+  font-weight: 500;
+  text-decoration: none;
+  border: var(--bw-hair) solid var(--accent);
+}
+
+.docs-cta-primary {
+  background: var(--accent);
+  color: var(--white);
+}
+
+.docs-cta-primary:hover {
+  background: var(--accent-ink);
+  border-color: var(--accent-ink);
+}
+
+.docs-cta-secondary {
+  background: transparent;
+  color: var(--accent-ink);
+}
+
+.docs-cta-secondary:hover {
+  background: var(--accent-soft);
+}
+
+.docs-feature-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(16rem, 1fr));
+  gap: var(--sp-20);
+  padding: var(--sp-24) 0;
+}
+
+.docs-feature-card {
+  padding: var(--sp-20);
+  border: var(--bw-hair) solid var(--border);
+  border-radius: var(--sp-6);
+  text-decoration: none;
+  color: inherit;
+  transition: border-color 120ms ease;
+}
+
+.docs-feature-card:hover {
+  border-color: var(--editorial-dark);
+}
+
+.docs-feature-card h3 {
+  margin: 0 0 var(--sp-8);
+  font-size: var(--fs-playbook-dek);
+  font-family: var(--font-display);
+  color: var(--editorial-dark);
+}
+
+.docs-feature-card p {
+  margin: 0;
+  font-family: var(--font-serif-body);
+  color: var(--muted);
+  font-size: var(--fs-body);
+  line-height: var(--lh-body);
+}
+
+@media (max-width: 720px) {
+  .docs-shell {
+    grid-template-columns: 1fr;
+  }
+  .docs-sidebar {
+    position: static;
+  }
+}

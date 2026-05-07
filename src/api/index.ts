@@ -15,6 +15,7 @@ import { pricingApi } from "./pricing";
 import { artifactUsageApi } from "./artifact-usage";
 import { artifactLifecycleApi } from "./artifact-lifecycle";
 import { memoryHealthApi } from "./memory-health";
+import { memoryApi } from "./memory";
 import { migrateApi } from "./migrate";
 import { routeApi } from "./route";
 import { automationApi } from "./automation";
@@ -23,6 +24,7 @@ import { usageApi } from "./usage";
 import { notificationApi } from "./notification";
 import { serviceStatusApi } from "./service-status";
 import { updatesApi } from "./updates";
+import { ccTipsApi } from "./cc-tips";
 
 export const api = {
   ...accountApi,
@@ -37,6 +39,7 @@ export const api = {
   ...artifactUsageApi,
   ...artifactLifecycleApi,
   ...memoryHealthApi,
+  ...memoryApi,
   ...routeApi,
   ...automationApi,
   ...templateApi,
@@ -44,6 +47,7 @@ export const api = {
   ...notificationApi,
   ...serviceStatusApi,
   ...updatesApi,
+  ...ccTipsApi,
   migrate: migrateApi,
 };
 

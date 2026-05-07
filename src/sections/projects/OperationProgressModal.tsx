@@ -2,6 +2,7 @@ import { useCallback, useId, useMemo, useRef, useState, type ReactNode } from "r
 import { useTranslation } from "react-i18next";
 import { useTauriEvent } from "../../hooks/useTauriEvent";
 import { Button } from "../../components/primitives/Button";
+import { NF } from "../../icons";
 import {
   Modal,
   ModalHeader,
@@ -42,6 +43,8 @@ export function OperationProgressModal({
   onComplete,
   onError,
   onOpenRepair,
+  onCancel,
+  cancelLabel = "Cancel",
 }: {
   opId: string;
   title: string;
@@ -63,6 +66,14 @@ export function OperationProgressModal({
   /** Optional: navigate to Repair subview (enables the "Open Repair"
    * button in the error state). If omitted, the button is hidden. */
   onOpenRepair?: (failedJournalId: string | null) => void;
+  /** Optional: cancel the in-flight op. When provided, a primary
+   *  Cancel button shows in the footer until a terminal event lands.
+   *  Implementations are fire-and-forget — the backend's terminal
+   *  error event drives the modal back to its terminal state. */
+  onCancel?: () => void;
+  /** Footer label for the cancel button. Defaults to "Cancel". Login
+   *  flows pass "Cancel login" for clarity. */
+  cancelLabel?: string;
 }) {
   const channel = `op-progress::${opId}`;
   const phaseIds = useMemo(() => phases.map((p) => p.id), [phases]);
@@ -206,16 +217,22 @@ export function OperationProgressModal({
           </div>
         )}
         {terminal?.kind === "error" && (
-          <div className="op-terminal bad">
-            <strong>{t("projects.opProgress.error")}</strong>{" "}
-            <span className="mono small">{terminal.detail ?? t("projects.opProgress.unknown")}</span>
-            {terminal.failedJournalId && (
-              <p className="small muted">
-                {t("projects.opProgress.journalId")}
-                <code className="mono">{terminal.failedJournalId}</code>
-              </p>
-            )}
-          </div>
+          isCancelled(terminal.detail) ? (
+            <div className="op-terminal info">
+              <strong>{t("projects.opProgress.cancelled")}</strong>
+            </div>
+          ) : (
+            <div className="op-terminal bad">
+              <strong>{t("projects.opProgress.error")}</strong>{" "}
+              <span className="mono small">{terminal.detail ?? t("projects.opProgress.unknown")}</span>
+              {terminal.failedJournalId && (
+                <p className="small muted">
+                  {t("projects.opProgress.journalId")}
+                  <code className="mono">{terminal.failedJournalId}</code>
+                </p>
+              )}
+            </div>
+          )
         )}
 
       </ModalBody>
@@ -223,15 +240,38 @@ export function OperationProgressModal({
         <Button variant="ghost" onClick={onClose}>
           {terminal ? t("projects.opProgress.close") : t("projects.opProgress.runInBackground")}
         </Button>
-        {terminal?.kind === "error" && onOpenRepair && (
+        {!terminal && onCancel && (
           <Button
             variant="solid"
-            onClick={() => onOpenRepair(terminal.failedJournalId)}
+            glyph={NF.x}
+            onClick={onCancel}
+            aria-label={cancelLabel}
           >
-            {t("projects.opProgress.openRepair")}
+            {cancelLabel}
           </Button>
         )}
+        {terminal?.kind === "error" &&
+          !isCancelled(terminal.detail) &&
+          onOpenRepair && (
+            <Button
+              variant="solid"
+              onClick={() => onOpenRepair(terminal.failedJournalId)}
+            >
+              Open Repair
+            </Button>
+          )}
       </ModalFooter>
     </Modal>
   );
+}
+
+/**
+ * The backend signals user-initiated cancellation by way of a terminal
+ * error whose detail contains "cancel" (e.g. `claude auth login was
+ * cancelled by the user`, `move was cancelled`). The modal renders that
+ * as a calmer "Cancelled." state instead of a red "Error." — the user
+ * just clicked Cancel, they don't need to be alarmed.
+ */
+function isCancelled(detail: string | null | undefined): boolean {
+  return typeof detail === "string" && /cancel/i.test(detail);
 }

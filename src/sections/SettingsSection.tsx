@@ -28,6 +28,11 @@ import { ArtifactLifecyclePane } from "./settings/ArtifactLifecyclePane";
 import { TrashDrawer } from "./sessions/TrashDrawer";
 import type { AppStatus, CcIdentity } from "../types";
 import { APP_VERSION } from "../version";
+import {
+  EVENT_SETTINGS_TAB,
+  consumeSettingsTabHint,
+  type SettingsTabEventDetail,
+} from "../lib/networkPanelDeepLink";
 
 type Tab =
   | "general"
@@ -76,8 +81,32 @@ const SECTION_OPTIONS = [
 export function SettingsSection() {
   const { t } = useTranslation();
   const { pushToast } = useAppState();
-  const [tab, setTab] = useState<Tab>("general");
+  // Cold-mount path: read the sessionStorage hint set by the
+  // NetworkUnreachablePanel before this section mounted.
+  const [tab, setTab] = useState<Tab>(() => {
+    const hint = consumeSettingsTabHint();
+    if (hint && TAB_DEFS.some((t) => t.id === hint)) {
+      return hint as Tab;
+    }
+    return "general";
+  });
   const active = TAB_DEFS.find((t) => t.id === tab) ?? TAB_DEFS[0];
+
+  // Hot-mount path: when this section is already mounted,
+  // `setSection("settings")` is a no-op and the cold-mount
+  // sessionStorage read won't re-fire. The CustomEvent reaches us
+  // either way. See `src/lib/networkPanelDeepLink.ts`.
+  useEffect(() => {
+    const handler = (e: Event) => {
+      const ce = e as CustomEvent<SettingsTabEventDetail>;
+      const next = ce.detail?.tab;
+      if (next && TAB_DEFS.some((t) => t.id === next)) {
+        setTab(next as Tab);
+      }
+    };
+    window.addEventListener(EVENT_SETTINGS_TAB, handler);
+    return () => window.removeEventListener(EVENT_SETTINGS_TAB, handler);
+  }, []);
 
   return (
     <>
@@ -1896,16 +1925,26 @@ function Kv({
 function Toggle({
   on,
   onChange,
+  disabled = false,
 }: {
   on: boolean;
   onChange: (next: boolean) => void;
+  /**
+   * Renders the toggle non-interactive (audit 2026-05 #4: previously
+   * accepted from the type position but ignored; clicks still flipped
+   * the value). Lets callers honor read-only states such as an env
+   * override.
+   */
+  disabled?: boolean;
 }) {
   return (
     <button
       type="button"
       role="switch"
       aria-checked={on}
-      onClick={() => onChange(!on)}
+      aria-disabled={disabled || undefined}
+      disabled={disabled}
+      onClick={disabled ? undefined : () => onChange(!on)}
       style={{
         width: "var(--toggle-track-w)",
         height: "var(--toggle-track-h)",
@@ -1913,7 +1952,8 @@ function Toggle({
         background: on ? "var(--accent)" : "var(--bg-active)",
         border: `var(--bw-hair) solid ${on ? "var(--accent)" : "var(--line-strong)"}`,
         position: "relative",
-        cursor: "pointer",
+        cursor: disabled ? "not-allowed" : "pointer",
+        opacity: disabled ? "var(--opacity-disabled)" : 1,
         transition: "background var(--dur-base) var(--ease-linear)",
       }}
     >

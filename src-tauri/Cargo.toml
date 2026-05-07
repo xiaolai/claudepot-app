@@ -15,7 +15,7 @@ tauri-build = { version = "2", features = [] }
 [dependencies]
 claudepot-core = { path = "../crates/claudepot-core" }
 keyring.workspace = true
-tauri = { version = "2", features = [ "tray-icon", "image-png"] }
+tauri = { version = "2", features = ["macos-private-api", "tray-icon", "image-png"] }
 serde.workspace = true
 serde_json.workspace = true
 tokio.workspace = true
@@ -43,6 +43,24 @@ zeroize.workspace = true
 dirs = { workspace = true }
 notify.workspace = true
 notify-debouncer-mini.workspace = true
+# Memory-watch fingerprint comparison (`memory_watch.rs`). sha256 is
+# good enough for content-equality dedup; mirrors what `memory_log`
+# stores so a process restart can reuse persisted hashes.
+sha2.workspace = true
+hex.workspace = true
+
+[target.'cfg(target_os = "macos")'.dependencies]
+# Override the macOS Dock icon at runtime via NSApplication's
+# `setApplicationIconImage`. macOS Dock renders at 96px (48pt × 2)
+# at default size — which isn't a layer in the .icns format. The
+# default render path picks the 128 layer and downscales with
+# bilinear filtering, softening pixel-art edges. Routing the icon
+# through Cocoa's NSImage pipeline with our 512x512 PNG source
+# lets Lanczos handle the downsample, preserving crispness at any
+# Dock size. See `dock_icon.rs`.
+objc2 = "0.6"
+objc2-app-kit = { version = "0.3", features = ["NSApplication", "NSImage"] }
+objc2-foundation = { version = "0.3", features = ["NSData"] }
 
 [dev-dependencies]
 tempfile.workspace = true
