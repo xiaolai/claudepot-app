@@ -6,6 +6,43 @@ Versioning scheme:
 - `0.1.x` — beta
 - `1.0.0+` — stable
 
+## 0.1.13 — beta (2026-05-07)
+
+### Added
+
+- **Network detection panel on first run.** When
+  `api.anthropic.com` isn't reachable from your network — DNS
+  poisoning, TCP block, TLS interception, timeout, 5xx, or an
+  unclassified failure — Claudepot now surfaces a remediation
+  panel above the active section. Diagnosis-specific copy plus
+  four buttons: *Use a third-party LLM* (deep-links into
+  Third-parties → Add Route, with China-reachable presets
+  highlighted), *Configure proxy* (Settings → Network),
+  *Network help* (opens claudepot.com/help/network), and *Retry*.
+  Dismissible per session; the rest of the app stays usable
+  (Sessions, Memory, Cleanup don't need network).
+
+- **Quick-start gateway presets in Add Route.** Six curated
+  OpenAI-compatible providers — DeepSeek, Kimi (Moonshot), Qwen
+  (DashScope), GLM (Zhipu), OpenRouter, Ollama-local — each
+  pre-fills base URL + a sensible default model. The
+  China-reachable subset is emphasized when arriving from the
+  network panel.
+
+- **claudepot.com/help/network help page.** Endpoints Claudepot
+  needs, how to diagnose unreachability with `curl`, how to
+  configure a proxy, npm-mirror install for the Claude CLI, and
+  third-party-LLM routing. Explicit boundary on what Claudepot
+  doesn't ship (no VPN setup).
+
+### Changed
+
+- _…_
+
+### Fixed
+
+- _…_
+
 ## 0.1.12 — beta (2026-05-07)
 
 ### Fixed
