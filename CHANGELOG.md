@@ -6,6 +6,29 @@ Versioning scheme:
 - `0.1.x` — beta
 - `1.0.0+` — stable
 
+## 0.1.19 — beta (2026-05-07)
+
+### Fixed
+
+- **Dock icon now matches dev-mode crispness in prod.** v0.1.17–18
+  shipped pixel-perfect `.icns` layers, but the Dock still rendered
+  soft because macOS displays Dock icons at 48pt = 96 raster pixels
+  on Retina by default, and `.icns` doesn't have a 96-pixel layer
+  slot. macOS picks the 128 layer and downscales 128→96 with
+  bilinear filtering, softening pixel-art edges. Routed the icon
+  through Cocoa's NSImage pipeline at runtime via
+  `NSApplication.setApplicationIconImage` with our 512×512 source —
+  Cocoa picks Lanczos for any Dock size's downsample, preserving
+  crispness. Same trick Tauri's runtime uses in dev mode.
+
+### Changed
+
+- _…_
+
+### Added
+
+- _…_
+
 ## 0.1.18 — beta (2026-05-07)
 
 ### Fixed
