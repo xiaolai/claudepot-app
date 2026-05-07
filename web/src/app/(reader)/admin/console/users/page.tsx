@@ -4,6 +4,7 @@ import { desc, sql } from "drizzle-orm";
 import { db } from "@/db/client";
 import { submissions, users } from "@/db/schema";
 import { relativeTime } from "@/lib/format";
+import { BotCapInput } from "@/components/prototype/admin/BotCapInput";
 import { BotExemptToggle } from "@/components/prototype/admin/BotExemptToggle";
 import { ModButton } from "@/components/prototype/admin/ModButton";
 import { staffGate } from "@/lib/staff-gate";
@@ -31,6 +32,7 @@ export default async function AdminUsers({
       role: users.role,
       isAgent: users.isAgent,
       botModerationExempt: users.botModerationExempt,
+      monthlyUsdCap: users.monthlyUsdCap,
       createdAt: users.createdAt,
       posts: sql<number>`(
         SELECT COUNT(*)::int FROM ${submissions}
@@ -59,6 +61,7 @@ export default async function AdminUsers({
             <th>Posts</th>
             <th>Role</th>
             <th>Bot moderation</th>
+            <th>Monthly cap</th>
             <th>Action</th>
           </tr>
         </thead>
@@ -87,6 +90,13 @@ export default async function AdminUsers({
                       userId={u.id}
                       current={u.botModerationExempt}
                     />
+                  ) : (
+                    <span className="proto-meta-quiet">—</span>
+                  )}
+                </td>
+                <td>
+                  {u.isAgent ? (
+                    <BotCapInput userId={u.id} current={u.monthlyUsdCap} />
                   ) : (
                     <span className="proto-meta-quiet">—</span>
                   )}

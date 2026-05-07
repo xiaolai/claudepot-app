@@ -228,15 +228,19 @@ export async function getBotDailyCosts(opts: {
   today.setUTCHours(0, 0, 0, 0);
   const todayKey = today.toISOString().slice(0, 10);
 
-  // Closed days from the rollup. windowStart..today (exclusive).
+  // Closed days from the rollup, summed across providers. The
+  // provider column was added in migration 0029; the per-bot-per-day
+  // view at /office/costs still wants one row per (bot, day), so we
+  // aggregate here. The provider split is preserved for the
+  // reconciliation queries that join against provider_invoices.
   const closedRows = await db
     .select({
       // bot_costs_daily.day is `date`, returned as a Date by drizzle.
       day: sql<string>`to_char(${botCostsDaily.day}, 'YYYY-MM-DD')`,
       botId: botCostsDaily.botId,
       botUsername: users.username,
-      usd: sql<string>`${botCostsDaily.usd}::text`,
-      reports: botCostsDaily.reports,
+      usd: sql<string>`COALESCE(SUM(${botCostsDaily.usd}), 0)::text`,
+      reports: sql<number>`COALESCE(SUM(${botCostsDaily.reports}), 0)::int`,
     })
     .from(botCostsDaily)
     .innerJoin(users, eq(users.id, botCostsDaily.botId))
@@ -246,6 +250,7 @@ export async function getBotDailyCosts(opts: {
         sql`${botCostsDaily.day} < ${todayKey}::date`,
       ),
     )
+    .groupBy(botCostsDaily.day, botCostsDaily.botId, users.username)
     .orderBy(desc(botCostsDaily.day), users.username);
 
   // Today's running total from the live event log. Only fire if
@@ -312,16 +317,22 @@ export async function getBotDailyCosts(opts: {
 export interface MonthlyReconcileRow {
   /** YYYY-MM. */
   month: string;
-  /** Sum of self-reported USD across all bots in that month. */
+  /** Provider name, lowercased. Special value 'unknown' = bot
+   *  reported a cost without a provider tag (defended against in
+   *  the cron's COALESCE). 'live-today' = current-day live
+   *  bot_reports rows that haven't been rolled up yet. */
+  provider: string;
+  /** Sum of self-reported USD for this (month, provider). */
   selfReportedUsd: number;
-  /** Sum of provider invoices uploaded for that month. */
+  /** Sum of invoiced USD for this (month, provider). */
   invoicedUsd: number;
   /** invoicedUsd - selfReportedUsd. Positive = under-reported. */
   varianceUsd: number;
-  /** Per-provider invoice rows so the page can render them inline. */
+  /** Provider invoice rows for this pair (usually 0 or 1; the
+   *  unique index on (provider, month) guarantees ≤1, but the type
+   *  is array-shaped for the delete-form rendering loop). */
   invoices: Array<{
     id: string;
-    provider: string;
     invoicedUsd: number;
     notes: string | null;
     uploadedAt: Date;
@@ -329,17 +340,36 @@ export interface MonthlyReconcileRow {
   }>;
 }
 
+export interface MonthTotals {
+  month: string;
+  selfReportedUsd: number;
+  invoicedUsd: number;
+  varianceUsd: number;
+}
+
+export interface ReconcileSummary {
+  /** One row per (month, provider) — primary table view. Sorted
+   *  newest-month-first, then provider asc. */
+  rows: MonthlyReconcileRow[];
+  /** Per-month aggregates summed across providers — for the
+   *  "Reconciliation status" badge surfaces. */
+  monthTotals: MonthTotals[];
+}
+
 /**
- * Per-month reconciliation: self-reported (from bot_costs_daily,
- * already UTC-bucketed by day) vs invoiced (from provider_invoices,
- * staff-uploaded). Returns rows newest-month-first, last `months`
- * months including the current one. The current month's
- * selfReportedUsd includes today's running live total; closed
- * months are stable.
+ * Per-(month, provider) reconciliation: self-reported (from
+ * bot_costs_daily + today's live bot_reports) vs invoiced (from
+ * provider_invoices, staff-uploaded).
+ *
+ * Returns rows for the union of (month, provider) pairs that appear
+ * on either side, plus empty rows for any month in the requested
+ * window that has no data on either side (so the staff scan reads
+ * "missing invoice" cleanly). The current month's selfReportedUsd
+ * includes today's running live total; closed months are stable.
  */
 export async function getMonthlyReconcile(opts: {
   months?: number;
-} = {}): Promise<MonthlyReconcileRow[]> {
+} = {}): Promise<ReconcileSummary> {
   const months = Math.max(1, Math.min(24, opts.months ?? 12));
   const now = new Date();
   const cutoff = new Date(
@@ -347,23 +377,32 @@ export async function getMonthlyReconcile(opts: {
   );
   const cutoffMonthKey = cutoff.toISOString().slice(0, 7);
 
-  // Closed days self-reported (rollup).
+  // Closed days self-reported, split per provider.
   const rollupRows = await db
     .select({
       month: sql<string>`to_char(${botCostsDaily.day}, 'YYYY-MM')`,
+      provider: botCostsDaily.provider,
       sum: sql<string>`COALESCE(SUM(${botCostsDaily.usd}), 0)::text`,
     })
     .from(botCostsDaily)
     .where(gte(botCostsDaily.day, sql`${cutoff}::date`))
-    .groupBy(sql`to_char(${botCostsDaily.day}, 'YYYY-MM')`);
+    .groupBy(
+      sql`to_char(${botCostsDaily.day}, 'YYYY-MM')`,
+      botCostsDaily.provider,
+    );
 
-  // Today's live self-reported (only contributes to current month).
+  // Today's live self-reported, split per provider. We can't roll
+  // these into rollup rows yet (the daily-rollup cron hasn't run),
+  // but they DO need to attribute to the right provider for the
+  // reconciliation totals to match an invoice the staff uploads
+  // mid-month.
   const todayStart = new Date(
     Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()),
   );
   const todayMonthKey = todayStart.toISOString().slice(0, 7);
   const liveTodayRows = await db
     .select({
+      provider: sql<string>`COALESCE(NULLIF(${botReports.payload}->>'provider', ''), 'unknown')`,
       sum: sql<string>`COALESCE(SUM(${botReports.costUsd}), 0)::text`,
     })
     .from(botReports)
@@ -373,8 +412,8 @@ export async function getMonthlyReconcile(opts: {
         isNotNull(botReports.costUsd),
         gte(botReports.reportedAt, todayStart),
       ),
-    );
-  const liveTodayUsd = Number.parseFloat(liveTodayRows[0]?.sum ?? "0") || 0;
+    )
+    .groupBy(sql`COALESCE(NULLIF(${botReports.payload}->>'provider', ''), 'unknown')`);
 
   // Provider invoices in the window.
   const invoiceRows = await db
@@ -389,54 +428,149 @@ export async function getMonthlyReconcile(opts: {
     })
     .from(providerInvoices)
     .leftJoin(users, eq(users.id, providerInvoices.uploadedBy))
-    .where(gte(providerInvoices.month, cutoffMonthKey))
-    .orderBy(desc(providerInvoices.month), providerInvoices.provider);
+    .where(gte(providerInvoices.month, cutoffMonthKey));
 
-  // Build the (month → row) map. Iterate over the requested window
-  // so empty months still render.
-  const byMonth = new Map<string, MonthlyReconcileRow>();
-  for (let i = 0; i < months; i++) {
-    const d = new Date(
-      Date.UTC(now.getUTCFullYear(), now.getUTCMonth() - i, 1),
-    );
-    const m = d.toISOString().slice(0, 7);
-    byMonth.set(m, {
-      month: m,
-      selfReportedUsd: 0,
-      invoicedUsd: 0,
-      varianceUsd: 0,
-      invoices: [],
-    });
+  // Build the row map keyed by `${month}|${provider}`.
+  const key = (m: string, p: string) => `${m}|${p}`;
+  const byPair = new Map<string, MonthlyReconcileRow>();
+  function ensureRow(month: string, provider: string): MonthlyReconcileRow {
+    const k = key(month, provider);
+    let r = byPair.get(k);
+    if (!r) {
+      r = {
+        month,
+        provider,
+        selfReportedUsd: 0,
+        invoicedUsd: 0,
+        varianceUsd: 0,
+        invoices: [],
+      };
+      byPair.set(k, r);
+    }
+    return r;
   }
 
   for (const r of rollupRows) {
-    const row = byMonth.get(r.month);
-    if (row) row.selfReportedUsd += Number.parseFloat(r.sum) || 0;
+    ensureRow(r.month, r.provider).selfReportedUsd +=
+      Number.parseFloat(r.sum) || 0;
   }
-  // Add today's running total to the current month if it's in the window.
-  const cur = byMonth.get(todayMonthKey);
-  if (cur) cur.selfReportedUsd += liveTodayUsd;
-
+  for (const r of liveTodayRows) {
+    ensureRow(todayMonthKey, r.provider).selfReportedUsd +=
+      Number.parseFloat(r.sum) || 0;
+  }
   for (const inv of invoiceRows) {
-    const row = byMonth.get(inv.month);
-    if (!row) continue;
+    const row = ensureRow(inv.month, inv.provider);
     const usd = Number.parseFloat(inv.invoicedUsd) || 0;
     row.invoicedUsd += usd;
     row.invoices.push({
       id: inv.id,
-      provider: inv.provider,
       invoicedUsd: usd,
       notes: inv.notes,
       uploadedAt: inv.uploadedAt,
       uploadedBy: inv.uploadedByUsername,
     });
   }
-
-  for (const r of byMonth.values()) {
+  for (const r of byPair.values()) {
     r.varianceUsd = r.invoicedUsd - r.selfReportedUsd;
   }
 
-  return Array.from(byMonth.values()).sort((a, b) =>
-    a.month < b.month ? 1 : -1,
-  );
+  // Per-month totals (across providers) for the badge surfaces.
+  const monthMap = new Map<string, MonthTotals>();
+  for (let i = 0; i < months; i++) {
+    const d = new Date(
+      Date.UTC(now.getUTCFullYear(), now.getUTCMonth() - i, 1),
+    );
+    const m = d.toISOString().slice(0, 7);
+    monthMap.set(m, {
+      month: m,
+      selfReportedUsd: 0,
+      invoicedUsd: 0,
+      varianceUsd: 0,
+    });
+  }
+  for (const r of byPair.values()) {
+    const t = monthMap.get(r.month);
+    if (!t) continue;
+    t.selfReportedUsd += r.selfReportedUsd;
+    t.invoicedUsd += r.invoicedUsd;
+  }
+  for (const t of monthMap.values()) {
+    t.varianceUsd = t.invoicedUsd - t.selfReportedUsd;
+  }
+
+  return {
+    rows: Array.from(byPair.values()).sort((a, b) => {
+      if (a.month !== b.month) return a.month < b.month ? 1 : -1;
+      return a.provider < b.provider ? -1 : 1;
+    }),
+    monthTotals: Array.from(monthMap.values()).sort((a, b) =>
+      a.month < b.month ? 1 : -1,
+    ),
+  };
+}
+
+/* ── Public reconciliation summary (for /office/costs banner) ─── */
+
+export type ReconcileStatus =
+  /** Closed month, invoice present, variance ≤ 5%. */
+  | "matched"
+  /** Closed month, invoice present, variance > 5%. */
+  | "mismatch"
+  /** Closed month with self-reported activity but no invoice yet. */
+  | "awaiting"
+  /** Current month or month with no activity on either side. */
+  | "open";
+
+export interface PublicReconcileMonth {
+  month: string;
+  selfReportedUsd: number;
+  invoicedUsd: number;
+  varianceUsd: number;
+  status: ReconcileStatus;
+}
+
+const MISMATCH_TOLERANCE_PCT = 0.05;
+
+/**
+ * Public-page reconciliation summary — totals only, no provider
+ * breakdown, no invoice details. The /office/costs banner
+ * surfaces these so visitors can see at a glance whether each
+ * recent closed month has been reconciled. Anything more granular
+ * lives on /admin/console/cost-reconcile.
+ */
+export async function getPublicReconcileSummary(opts: {
+  months?: number;
+} = {}): Promise<PublicReconcileMonth[]> {
+  const months = Math.max(1, Math.min(12, opts.months ?? 3));
+  const summary = await getMonthlyReconcile({ months: months + 1 });
+
+  const now = new Date();
+  const currentMonthKey = now.toISOString().slice(0, 7);
+
+  return summary.monthTotals
+    .map((t): PublicReconcileMonth => {
+      const isClosed = t.month < currentMonthKey;
+      const hasActivity = t.selfReportedUsd > 0 || t.invoicedUsd > 0;
+      let status: ReconcileStatus;
+      if (!hasActivity) {
+        status = "open";
+      } else if (!isClosed) {
+        status = "open";
+      } else if (t.invoicedUsd === 0) {
+        status = "awaiting";
+      } else {
+        const denom = Math.max(t.invoicedUsd, t.selfReportedUsd);
+        const ratio = denom > 0 ? Math.abs(t.varianceUsd) / denom : 0;
+        status = ratio <= MISMATCH_TOLERANCE_PCT ? "matched" : "mismatch";
+      }
+      return {
+        month: t.month,
+        selfReportedUsd: t.selfReportedUsd,
+        invoicedUsd: t.invoicedUsd,
+        varianceUsd: t.varianceUsd,
+        status,
+      };
+    })
+    .filter((m) => m.month < currentMonthKey || m.selfReportedUsd > 0)
+    .slice(0, months);
 }

@@ -99,19 +99,27 @@ export const GET = withErrorHandling(async (req: Request) => {
     });
 
   // Bot-cost rollup. One INSERT … SELECT … ON CONFLICT DO UPDATE
-  // collapses every per-bot daily aggregate into bot_costs_daily.
-  // Idempotent across cron retries; ON DELETE CASCADE on the bot_id
-  // FK keeps orphan rows out if a bot account is removed.
+  // collapses every per-bot-per-provider daily aggregate into
+  // bot_costs_daily. Idempotent across cron retries; ON DELETE
+  // CASCADE on the bot_id FK keeps orphan rows out if a bot account
+  // is removed.
   //
   // Rolls up YESTERDAY's UTC bucket (the same window as metrics_daily
   // above). The /office/costs page computes today live from
   // bot_reports, so today's running total is never missed even
   // though it isn't in the rollup yet.
+  //
+  // `provider` is extracted from payload->>'provider' (the cost
+  // payload schema requires it). A NULL or empty provider would
+  // violate the new NOT NULL PK column; the COALESCE fallback to
+  // 'unknown' protects against malformed inputs that somehow slipped
+  // past the lib/bots/schemas.ts validator (defense in depth).
   const botCostsResult = await db.execute(sql`
     WITH agg AS (
       SELECT
         bot_id,
         (date_trunc('day', reported_at AT TIME ZONE 'UTC'))::date AS day,
+        COALESCE(NULLIF(payload->>'provider', ''), 'unknown') AS provider,
         COALESCE(SUM(cost_usd), 0) AS usd,
         COUNT(*)::int AS reports
       FROM bot_reports
@@ -119,11 +127,11 @@ export const GET = withErrorHandling(async (req: Request) => {
         AND cost_usd IS NOT NULL
         AND reported_at >= ${yesterdayStart}
         AND reported_at <  ${todayStart}
-      GROUP BY 1, 2
+      GROUP BY 1, 2, 3
     )
-    INSERT INTO bot_costs_daily (bot_id, day, usd, reports, rolled_up_at)
-    SELECT bot_id, day, usd, reports, NOW() FROM agg
-    ON CONFLICT (bot_id, day) DO UPDATE
+    INSERT INTO bot_costs_daily (bot_id, day, provider, usd, reports, rolled_up_at)
+    SELECT bot_id, day, provider, usd, reports, NOW() FROM agg
+    ON CONFLICT (bot_id, day, provider) DO UPDATE
     SET usd = EXCLUDED.usd,
         reports = EXCLUDED.reports,
         rolled_up_at = NOW()

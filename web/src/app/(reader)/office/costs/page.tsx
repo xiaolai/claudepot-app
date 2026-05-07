@@ -1,6 +1,11 @@
 import type { Metadata } from "next";
 import { OfficeSidebar } from "@/components/prototype/OfficeSidebar";
-import { getBotDailyCosts, type BotCostSummary } from "@/db/office-queries";
+import {
+  getBotDailyCosts,
+  getPublicReconcileSummary,
+  type BotCostSummary,
+  type PublicReconcileMonth,
+} from "@/db/office-queries";
 
 export const metadata: Metadata = {
   title: "Office costs",
@@ -52,7 +57,10 @@ export default async function OfficeCostsPage({
   const windowParam = (
     sp.days && VALID_DAYS.has(sp.days as WindowDays) ? sp.days : "30"
   ) as WindowDays;
-  const summary = await getBotDailyCosts({ days: Number.parseInt(windowParam, 10) });
+  const [summary, reconcile] = await Promise.all([
+    getBotDailyCosts({ days: Number.parseInt(windowParam, 10) }),
+    getPublicReconcileSummary({ months: 3 }),
+  ]);
 
   return (
     <div className="proto-page-aside">
@@ -80,6 +88,8 @@ export default async function OfficeCostsPage({
             </a>
           ))}
         </nav>
+
+        <ReconcileBadge months={reconcile} />
 
         <CostMatrix summary={summary} />
       </div>
@@ -168,5 +178,62 @@ function CostMatrix({ summary }: { summary: BotCostSummary }) {
         </table>
       </section>
     </>
+  );
+}
+
+const STATUS_LABEL: Record<PublicReconcileMonth["status"], string> = {
+  matched: "matched",
+  mismatch: "mismatch",
+  awaiting: "awaiting invoice",
+  open: "open",
+};
+
+const STATUS_DEK: Record<PublicReconcileMonth["status"], string> = {
+  matched:
+    "Self-reported total within 5% of the staff-uploaded provider invoice.",
+  mismatch:
+    "Self-reported total diverges from invoice by more than 5%. Staff is investigating.",
+  awaiting: "Closed month with self-reported activity but no invoice uploaded yet.",
+  open: "Current month — invoices arrive after billing closes.",
+};
+
+function ReconcileBadge({ months }: { months: PublicReconcileMonth[] }) {
+  if (months.length === 0) return null;
+  return (
+    <section className="proto-section office-reconcile">
+      <h2>Reconciliation</h2>
+      <p className="proto-dek">
+        Closed months get matched against the provider invoice. Variance
+        threshold is 5%; anything wider gets flagged for staff to chase
+        down before publishing.
+      </p>
+      <ul className="proto-feed proto-feed-compact">
+        {months.map((m) => (
+          <li key={m.month} className="proto-row">
+            <div className="proto-row-meta">
+              <strong>{m.month}</strong>{" "}
+              <span
+                className={`proto-state-pill proto-state-pill-${
+                  m.status === "matched"
+                    ? "approved"
+                    : m.status === "mismatch"
+                      ? "rejected"
+                      : "pending"
+                }`}
+                title={STATUS_DEK[m.status]}
+              >
+                {STATUS_LABEL[m.status]}
+              </span>
+            </div>
+            <p className="proto-row-meta">
+              Self-reported {fmt(m.selfReportedUsd)}
+              {m.invoicedUsd > 0
+                ? ` · invoiced ${fmt(m.invoicedUsd)} · variance ${fmt(m.varianceUsd)}`
+                : ""}
+            </p>
+          </li>
+        ))}
+      </ul>
+    </section>
   );
 }

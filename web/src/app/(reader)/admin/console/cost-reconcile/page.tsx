@@ -46,7 +46,7 @@ export default async function CostReconcilePage({
   const gate = await staffGate(sp);
   if (gate) return gate;
 
-  const rows = await getMonthlyReconcile({ months: 12 });
+  const { rows, monthTotals } = await getMonthlyReconcile({ months: 12 });
 
   return (
     <div className="proto-page">
@@ -136,10 +136,16 @@ export default async function CostReconcilePage({
 
       <section className="proto-section">
         <h2>Last 12 months</h2>
+        <p className="proto-dek">
+          One row per (month, provider). Months with self-reported
+          spend but no invoice show <em>variance = full self-reported
+          amount</em>; that row is the prompt to upload an invoice.
+        </p>
         <table className="proto-table">
           <thead>
             <tr>
               <th scope="col">Month</th>
+              <th scope="col">Provider</th>
               <th scope="col" className="proto-table-num">
                 Self-reported
               </th>
@@ -149,70 +155,107 @@ export default async function CostReconcilePage({
               <th scope="col" className="proto-table-num">
                 Variance
               </th>
-              <th scope="col">Invoices</th>
+              <th scope="col">Invoice</th>
             </tr>
           </thead>
           <tbody>
+            {rows.length === 0 ? (
+              <tr>
+                <td colSpan={6} className="proto-empty">
+                  No cost reports or invoices in this window yet.
+                </td>
+              </tr>
+            ) : null}
             {rows.map((r) => {
               const tone =
                 r.invoicedUsd === 0 && r.selfReportedUsd === 0
                   ? "quiet"
-                  : Math.abs(r.varianceUsd) <= 0.01
-                    ? "ok"
-                    : Math.abs(r.varianceUsd) <
-                        Math.max(r.invoicedUsd, r.selfReportedUsd) * 0.05
+                  : r.invoicedUsd === 0
+                    ? "warn"
+                    : r.selfReportedUsd === 0
                       ? "warn"
-                      : "alert";
+                      : Math.abs(r.varianceUsd) <= 0.01
+                        ? "ok"
+                        : Math.abs(r.varianceUsd) <
+                            Math.max(r.invoicedUsd, r.selfReportedUsd) * 0.05
+                          ? "warn"
+                          : "alert";
+              const invoice = r.invoices[0]; // (provider, month) is unique
               return (
-                <tr key={r.month} data-tone={tone}>
+                <tr key={`${r.month}|${r.provider}`} data-tone={tone}>
                   <th scope="row">{r.month}</th>
-                  <td className="proto-table-num">{fmt(r.selfReportedUsd)}</td>
+                  <td>
+                    <code>{r.provider}</code>
+                  </td>
+                  <td className="proto-table-num">
+                    {r.selfReportedUsd > 0 ? fmt(r.selfReportedUsd) : "—"}
+                  </td>
                   <td className="proto-table-num">
                     {r.invoicedUsd > 0 ? fmt(r.invoicedUsd) : "—"}
                   </td>
                   <td className="proto-table-num">
-                    {r.invoicedUsd > 0 ? fmt(r.varianceUsd) : "—"}
+                    {r.invoicedUsd > 0 || r.selfReportedUsd > 0
+                      ? fmt(r.varianceUsd)
+                      : "—"}
                   </td>
                   <td>
-                    {r.invoices.length === 0 ? (
-                      <span className="proto-empty">no invoices yet</span>
+                    {!invoice ? (
+                      <span className="proto-empty">no invoice yet</span>
                     ) : (
-                      <ul className="proto-inline-list">
-                        {r.invoices.map((inv) => (
-                          <li key={inv.id}>
-                            <strong>{inv.provider}</strong>:{" "}
-                            {fmt(inv.invoicedUsd)}{" "}
-                            <span className="proto-empty">
-                              · {relativeTime(inv.uploadedAt.toISOString())}
-                              {inv.uploadedBy ? ` by @${inv.uploadedBy}` : ""}
-                              {inv.notes ? ` · ${inv.notes}` : ""}
-                            </span>{" "}
-                            <form
-                              action={deleteProviderInvoice}
-                              style={{ display: "inline" }}
-                            >
-                              <input
-                                type="hidden"
-                                name="id"
-                                value={inv.id}
-                              />
-                              <button
-                                type="submit"
-                                className="proto-btn-link"
-                                aria-label={`Delete ${inv.provider} ${r.month} invoice`}
-                              >
-                                delete
-                              </button>
-                            </form>
-                          </li>
-                        ))}
-                      </ul>
+                      <span>
+                        <span className="proto-empty">
+                          {relativeTime(invoice.uploadedAt.toISOString())}
+                          {invoice.uploadedBy
+                            ? ` by @${invoice.uploadedBy}`
+                            : ""}
+                          {invoice.notes ? ` · ${invoice.notes}` : ""}
+                        </span>{" "}
+                        <form
+                          action={deleteProviderInvoice}
+                          style={{ display: "inline" }}
+                        >
+                          <input type="hidden" name="id" value={invoice.id} />
+                          <button
+                            type="submit"
+                            className="proto-btn-link"
+                            aria-label={`Delete ${r.provider} ${r.month} invoice`}
+                          >
+                            delete
+                          </button>
+                        </form>
+                      </span>
                     )}
                   </td>
                 </tr>
               );
             })}
           </tbody>
+          <tfoot>
+            <tr>
+              <th scope="row" colSpan={2}>
+                Month totals
+              </th>
+              <td colSpan={4}></td>
+            </tr>
+            {monthTotals.map((t) => (
+              <tr key={`total|${t.month}`} className="proto-table-totals">
+                <th scope="row">{t.month}</th>
+                <td>—</td>
+                <td className="proto-table-num">
+                  {t.selfReportedUsd > 0 ? fmt(t.selfReportedUsd) : "—"}
+                </td>
+                <td className="proto-table-num">
+                  {t.invoicedUsd > 0 ? fmt(t.invoicedUsd) : "—"}
+                </td>
+                <td className="proto-table-num">
+                  {t.invoicedUsd > 0 || t.selfReportedUsd > 0
+                    ? fmt(t.varianceUsd)
+                    : "—"}
+                </td>
+                <td></td>
+              </tr>
+            ))}
+          </tfoot>
         </table>
         <p className="proto-empty proto-empty-spaced">
           The current month&rsquo;s self-reported total includes
