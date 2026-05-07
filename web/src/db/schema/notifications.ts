@@ -87,7 +87,14 @@ export const userTagFollows = pgTable(
       .notNull()
       .defaultNow(),
   },
-  (t) => [primaryKey({ columns: [t.userId, t.tagSlug] })],
+  (t) => [
+    primaryKey({ columns: [t.userId, t.tagSlug] }),
+    // Mirror migration 0026: per-user list (`/your followed tags` reads)
+    // sorts on followedAt desc; per-tag count uses tagSlug. Declared
+    // here so a future drizzle-kit push doesn't drop them.
+    index("idx_user_tag_follows_user").on(t.userId, t.followedAt.desc()),
+    index("idx_user_tag_follows_tag").on(t.tagSlug),
+  ],
 );
 
 export const userEmailPrefs = pgTable("user_email_prefs", {

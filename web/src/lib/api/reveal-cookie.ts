@@ -85,6 +85,13 @@ type RevealPayload = {
   plaintext: string;
   tokenName: string;
   displayPrefix: string;
+  /**
+   * The user id the token was minted for. The reveal page checks this
+   * against the current session and refuses to render if they differ —
+   * defends against same-browser logout-then-login or an explicit
+   * account switch happening within the 120s TTL.
+   */
+  userId: string;
 };
 
 export async function setRevealCookie(payload: RevealPayload): Promise<void> {
@@ -99,7 +106,18 @@ export async function setRevealCookie(payload: RevealPayload): Promise<void> {
   });
 }
 
-export async function consumeRevealCookie(): Promise<RevealPayload | null> {
+/**
+ * Read and consume the reveal cookie. The cookie is deleted on every
+ * call — single-use — and the payload is returned only when the
+ * minting user matches `expectedUserId`. The parameter is required:
+ * callers MUST resolve the current session and pass a real id, or
+ * the redeem fails closed (returns null). An anonymous reveal-page
+ * visit with a signed-out session returns null even if a cookie
+ * exists, defending against same-browser logout-then-visit.
+ */
+export async function consumeRevealCookie(
+  expectedUserId: string,
+): Promise<RevealPayload | null> {
   const jar = await cookies();
   const blob = jar.get(REVEAL_COOKIE)?.value;
   if (!blob) return null;
@@ -111,8 +129,12 @@ export async function consumeRevealCookie(): Promise<RevealPayload | null> {
     if (
       typeof obj.plaintext !== "string" ||
       typeof obj.tokenName !== "string" ||
-      typeof obj.displayPrefix !== "string"
+      typeof obj.displayPrefix !== "string" ||
+      typeof obj.userId !== "string"
     ) {
+      return null;
+    }
+    if (obj.userId !== expectedUserId) {
       return null;
     }
     return obj;

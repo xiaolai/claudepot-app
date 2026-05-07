@@ -392,10 +392,20 @@ export async function mintApiTokenFormAction(
     return { phase: "err", message: map[result.reason] };
   }
 
+  // createApiToken would have returned `unauth` above if the session
+  // were missing; the !result.ok early-return guarantees a session
+  // exists at this point. Pulling it again here keeps the userId
+  // binding type-safe without changing createApiToken's contract.
+  const session = await auth();
+  if (!session?.user?.id) {
+    return { phase: "err", message: "Sign in first." };
+  }
+
   await setRevealCookie({
     plaintext: result.plaintext,
     tokenName: result.token.name,
     displayPrefix: result.token.displayPrefix,
+    userId: session.user.id,
   });
   // redirect() throws — never returns; the type system can't see that
   // through the Promise<MintFormState> contract, so the unreachable

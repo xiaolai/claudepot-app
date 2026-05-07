@@ -108,7 +108,7 @@ export const ENDPOINTS: ReadonlyArray<EndpointSpec> = [
     auth: "read:all",
     bucket: "reads",
     notes:
-      "Substring search. q (2–200 chars). kind=submission|comment. ILIKE in v0.",
+      "Search. q (2–200 chars). kind=submission uses Postgres FTS (websearch_to_tsquery, English stemmer); kind=comment uses ILIKE substring.",
   },
   {
     id: "constitution",

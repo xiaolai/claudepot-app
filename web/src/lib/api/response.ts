@@ -94,7 +94,21 @@ export function withErrorHandling<Args extends unknown[]>(
     try {
       return await handler(...args);
     } catch (err) {
-      console.error("[api] unhandled error", err);
+      // First arg is always the Request when called by Next's route
+      // dispatcher. Pull method + pathname so production logs can
+      // distinguish which of the 24+ wrapped routes failed without
+      // every caller passing a label.
+      const req = args[0];
+      let where = "unknown";
+      if (req instanceof Request) {
+        try {
+          const { pathname } = new URL(req.url);
+          where = `${req.method} ${pathname}`;
+        } catch {
+          where = req.method;
+        }
+      }
+      console.error(`[api] unhandled error in ${where}`, err);
       return problemResponse(internal());
     }
   };

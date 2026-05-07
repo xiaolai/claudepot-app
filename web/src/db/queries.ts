@@ -14,11 +14,7 @@
 import { and, desc, eq, gte, isNull, notInArray, sql } from "drizzle-orm";
 
 import { db } from "./client";
-import {
-  encodeCursor,
-  type CursorScore,
-  type CursorTime,
-} from "@/lib/api/cursor";
+import { encodeCursor, type CursorTime } from "@/lib/api/cursor";
 import {
   comments,
   projectTags,
@@ -44,24 +40,46 @@ async function getMutedTagSlugs(userId: string | null): Promise<string[]> {
   return rows.map((r) => r.tagSlug);
 }
 
+// Postgres SQLSTATE 42P01 — relation does not exist. Thrown when
+// migration 0026 has been merged into the codebase but not yet
+// applied to the target database (the rules/db-migrations.md flow
+// requires manual `psql` apply for prod). Treat as "feature not
+// available" rather than 500-ing the page.
+function isUndefinedTable(err: unknown): boolean {
+  return (
+    typeof err === "object" &&
+    err !== null &&
+    "code" in err &&
+    (err as { code?: unknown }).code === "42P01"
+  );
+}
+
 /**
  * Whether `userId` follows `tagSlug`. Returns false for null/anon
  * viewers without a query — used by the FollowTagButton to decide
  * which label/state to render.
+ *
+ * Returns false (not throws) if the user_tag_follows table doesn't
+ * exist yet — see isUndefinedTable comment above.
  */
 export async function isTagFollowed(
   userId: string | null,
   tagSlug: string,
 ): Promise<boolean> {
   if (!userId) return false;
-  const [row] = await db
-    .select({ tagSlug: userTagFollows.tagSlug })
-    .from(userTagFollows)
-    .where(
-      and(eq(userTagFollows.userId, userId), eq(userTagFollows.tagSlug, tagSlug)),
-    )
-    .limit(1);
-  return Boolean(row);
+  try {
+    const [row] = await db
+      .select({ tagSlug: userTagFollows.tagSlug })
+      .from(userTagFollows)
+      .where(
+        and(eq(userTagFollows.userId, userId), eq(userTagFollows.tagSlug, tagSlug)),
+      )
+      .limit(1);
+    return Boolean(row);
+  } catch (err) {
+    if (isUndefinedTable(err)) return false;
+    throw err;
+  }
 }
 
 /**
@@ -318,17 +336,25 @@ export async function getSubmissionsByNew({
   return { items: slice.map(mapSubmission), nextCursor };
 }
 
+/**
+ * /top is a leaderboard, not a queue. Capped at TOP_FEED_LIMIT rows
+ * per range with no pagination — the audit's mutable-score-cursor
+ * concern (votes shifting a row across the cursor between page-1
+ * and page-N reads, causing skip/duplicate) doesn't apply when
+ * there's no cursor. Users wanting more depth use /new (immutable
+ * createdAt cursor) or filter by tag.
+ *
+ * Matches the HN /top model: small, fresh, single-page.
+ */
+const TOP_FEED_LIMIT = 30;
+
 export async function getSubmissionsByTop({
   range = "day",
   viewerId = null,
-  limit = DEFAULT_PAGE_LIMIT,
-  cursor = null,
 }: {
   range?: "day" | "week" | "all";
   viewerId?: string | null;
-  limit?: number;
-  cursor?: CursorScore | null;
-} = {}): Promise<Page<Submission>> {
+} = {}): Promise<Submission[]> {
   const muted = await getMutedTagSlugs(viewerId);
   const cutoff =
     range === "all"
@@ -336,29 +362,16 @@ export async function getSubmissionsByTop({
       : new Date(
           Date.now() - (range === "day" ? 1 : 7) * 86_400_000,
         );
-  const cap = clampLimit(limit) ?? DEFAULT_PAGE_LIMIT;
   const cond = [FEED_BASE_FILTERS(), notInMutedTags(muted)];
   if (cutoff) cond.push(gte(submissions.createdAt, cutoff));
-  if (cursor) {
-    cond.push(
-      sql`(${submissions.score}, ${submissions.id}) < (${cursor.s}, ${cursor.id})`,
-    );
-  }
   const rows = await db
     .select(SUBMISSION_BASE_SELECT)
     .from(submissions)
     .innerJoin(users, eq(users.id, submissions.authorId))
     .where(and(...cond))
     .orderBy(desc(submissions.score), desc(submissions.id))
-    .limit(cap + 1);
-  const hasMore = rows.length > cap;
-  const slice = hasMore ? rows.slice(0, cap) : rows;
-  const tail = slice[slice.length - 1];
-  const nextCursor =
-    hasMore && tail
-      ? encodeCursor({ s: tail.score, id: tail.id })
-      : null;
-  return { items: slice.map(mapSubmission), nextCursor };
+    .limit(TOP_FEED_LIMIT);
+  return rows.map(mapSubmission);
 }
 
 export async function getSubmissionById(
