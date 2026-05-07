@@ -1,35 +1,38 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="0 0 512 512" shape-rendering="crispEdges">
 <!--
-  Every coordinate is a multiple of 16 so the SVG rasterizes
-  pixel-perfectly at every Apple/Microsoft/freedesktop icon size:
-  32, 64, 128, 256, 512, 1024 (and 48 with one half-pixel row).
-  The earlier 22-px pixel-art grid produced sub-pixel rect edges
-  at 128/256, which rsvg's antialiasing rendered as soft borders;
-  hence the visible Dock blur in 0.1.13–0.1.16.
+  House drawn on a 24-px grid (was 16-px in v0.1.17). 24 still
+  divides every common Dock-display size cleanly: 64 (×3), 128 (×6),
+  256 (×12), 512 (×24), 1024 (×48). The micro layers (16/24/32/48
+  raster) get some antialiasing — invisible at those tiny sizes.
+  Trade: the house now fills ~80% of the squircle width (was ~54%),
+  matching standard pixel-art icon proportions.
+
+  Origin at (88, 112): keeps the 14×12-cell design centered both
+  horizontally and vertically inside the (48,48)/416×416 squircle.
 -->
 <rect x="48" y="48" width="416" height="416" rx="74" ry="74" fill="#E8833A"/>
 <!-- Roof, peak to base -->
-<rect x="240" y="160" width="32"  height="16" fill="var(--mask-opaque)"/>
-<rect x="224" y="176" width="64"  height="16" fill="var(--mask-opaque)"/>
-<rect x="208" y="192" width="96"  height="16" fill="var(--mask-opaque)"/>
-<rect x="192" y="208" width="128" height="16" fill="var(--mask-opaque)"/>
-<rect x="176" y="224" width="160" height="16" fill="var(--mask-opaque)"/>
-<rect x="160" y="240" width="192" height="16" fill="var(--mask-opaque)"/>
+<rect x="232" y="112" width="48"  height="24" fill="var(--mask-opaque)"/>
+<rect x="208" y="136" width="96"  height="24" fill="var(--mask-opaque)"/>
+<rect x="184" y="160" width="144" height="24" fill="var(--mask-opaque)"/>
+<rect x="160" y="184" width="192" height="24" fill="var(--mask-opaque)"/>
+<rect x="136" y="208" width="240" height="24" fill="var(--mask-opaque)"/>
+<rect x="112" y="232" width="288" height="24" fill="var(--mask-opaque)"/>
 <!-- Eaves row (gaps for windows) -->
-<rect x="144" y="256" width="64"  height="16" fill="var(--mask-opaque)"/>
-<rect x="224" y="256" width="64"  height="16" fill="var(--mask-opaque)"/>
-<rect x="304" y="256" width="64"  height="16" fill="var(--mask-opaque)"/>
+<rect x="88"  y="256" width="96"  height="24" fill="var(--mask-opaque)"/>
+<rect x="208" y="256" width="96"  height="24" fill="var(--mask-opaque)"/>
+<rect x="328" y="256" width="96"  height="24" fill="var(--mask-opaque)"/>
 <!-- Window-divider row -->
-<rect x="176" y="272" width="32"  height="16" fill="var(--mask-opaque)"/>
-<rect x="224" y="272" width="64"  height="16" fill="var(--mask-opaque)"/>
-<rect x="304" y="272" width="32"  height="16" fill="var(--mask-opaque)"/>
+<rect x="136" y="280" width="48"  height="24" fill="var(--mask-opaque)"/>
+<rect x="208" y="280" width="96"  height="24" fill="var(--mask-opaque)"/>
+<rect x="328" y="280" width="48"  height="24" fill="var(--mask-opaque)"/>
 <!-- Body -->
-<rect x="176" y="288" width="160" height="16" fill="var(--mask-opaque)"/>
-<rect x="176" y="304" width="160" height="16" fill="var(--mask-opaque)"/>
-<rect x="176" y="320" width="160" height="16" fill="var(--mask-opaque)"/>
+<rect x="136" y="304" width="240" height="24" fill="var(--mask-opaque)"/>
+<rect x="136" y="328" width="240" height="24" fill="var(--mask-opaque)"/>
+<rect x="136" y="352" width="240" height="24" fill="var(--mask-opaque)"/>
 <!-- Legs / stilts -->
-<rect x="176" y="336" width="32"  height="16" fill="var(--mask-opaque)"/>
-<rect x="224" y="336" width="16"  height="16" fill="var(--mask-opaque)"/>
-<rect x="256" y="336" width="16"  height="16" fill="var(--mask-opaque)"/>
-<rect x="304" y="336" width="32"  height="16" fill="var(--mask-opaque)"/>
+<rect x="136" y="376" width="48"  height="24" fill="var(--mask-opaque)"/>
+<rect x="208" y="376" width="24"  height="24" fill="var(--mask-opaque)"/>
+<rect x="256" y="376" width="24"  height="24" fill="var(--mask-opaque)"/>
+<rect x="328" y="376" width="48"  height="24" fill="var(--mask-opaque)"/>
 </svg>
