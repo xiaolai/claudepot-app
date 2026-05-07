@@ -23,10 +23,13 @@
  */
 
 import {
+  date,
   index,
+  integer,
   jsonb,
   numeric,
   pgTable,
+  primaryKey,
   text,
   timestamp,
   uniqueIndex,
@@ -83,5 +86,31 @@ export const botReports = pgTable(
       .where(
         sql`${t.kind} = 'proposal' AND ${t.status} = 'open' AND ${t.payload}->>'key' IS NOT NULL`,
       ),
+  ],
+);
+
+/**
+ * Daily-cost rollup (migration 0027). One row per (bot_id, day);
+ * populated by the daily-rollup cron each midnight UTC. /office/costs
+ * reads closed days from this table and computes today live from
+ * bot_reports. Composite PK + ON CONFLICT in the cron makes the
+ * upsert idempotent across cron retries.
+ */
+export const botCostsDaily = pgTable(
+  "bot_costs_daily",
+  {
+    botId: uuid("bot_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    day: date("day").notNull(),
+    usd: numeric("usd", { precision: 10, scale: 6 }).notNull().default("0"),
+    reports: integer("reports").notNull().default(0),
+    rolledUpAt: timestamp("rolled_up_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [
+    primaryKey({ columns: [t.botId, t.day] }),
+    index("idx_bot_costs_daily_day").on(t.day.desc()),
   ],
 );

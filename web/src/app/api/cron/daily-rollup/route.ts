@@ -98,6 +98,41 @@ export const GET = withErrorHandling(async (req: Request) => {
       },
     });
 
+  // Bot-cost rollup. One INSERT … SELECT … ON CONFLICT DO UPDATE
+  // collapses every per-bot daily aggregate into bot_costs_daily.
+  // Idempotent across cron retries; ON DELETE CASCADE on the bot_id
+  // FK keeps orphan rows out if a bot account is removed.
+  //
+  // Rolls up YESTERDAY's UTC bucket (the same window as metrics_daily
+  // above). The /office/costs page computes today live from
+  // bot_reports, so today's running total is never missed even
+  // though it isn't in the rollup yet.
+  const botCostsResult = await db.execute(sql`
+    WITH agg AS (
+      SELECT
+        bot_id,
+        (date_trunc('day', reported_at AT TIME ZONE 'UTC'))::date AS day,
+        COALESCE(SUM(cost_usd), 0) AS usd,
+        COUNT(*)::int AS reports
+      FROM bot_reports
+      WHERE kind = 'cost'
+        AND cost_usd IS NOT NULL
+        AND reported_at >= ${yesterdayStart}
+        AND reported_at <  ${todayStart}
+      GROUP BY 1, 2
+    )
+    INSERT INTO bot_costs_daily (bot_id, day, usd, reports, rolled_up_at)
+    SELECT bot_id, day, usd, reports, NOW() FROM agg
+    ON CONFLICT (bot_id, day) DO UPDATE
+    SET usd = EXCLUDED.usd,
+        reports = EXCLUDED.reports,
+        rolled_up_at = NOW()
+    RETURNING 1
+  `);
+  const botCostRows = Array.isArray(botCostsResult)
+    ? botCostsResult.length
+    : (botCostsResult as { rows?: unknown[] }).rows?.length ?? 0;
+
   return NextResponse.json({
     day: dayKey,
     submissions: subs?.n ?? 0,
@@ -105,5 +140,6 @@ export const GET = withErrorHandling(async (req: Request) => {
     votes: vts?.n ?? 0,
     signups: signs?.n ?? 0,
     active24h: Number(active?.n ?? 0),
+    botCostRows,
   });
 });
