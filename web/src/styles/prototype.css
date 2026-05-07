@@ -298,8 +298,12 @@ summary.proto-nav-avatar::-webkit-details-marker { display: none; }
 
 /* Anchored sections need scroll-margin so clicking a TOC link lands
    the heading below the sticky .proto-nav, not under it. Applied
-   inside the aside content scope so it doesn't leak to other surfaces. */
-.proto-page-aside-content :where(section[id], [id]) {
+   inside the aside content scope so it doesn't leak to other surfaces.
+   .proto-text headings get the same treatment so external #anchor
+   links to a post (e.g. a shared deep-link) still land cleanly even
+   when the post is rendered in the narrow layout (no TOC). */
+.proto-page-aside-content :where(section[id], [id]),
+.proto-text :where(h1[id], h2[id], h3[id], h4[id], h5[id], h6[id]) {
   scroll-margin-top: var(--nav-height);
 }
 

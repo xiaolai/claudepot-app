@@ -13,7 +13,14 @@ import { totalCommentCount } from "@/lib/format";
 import { effectiveDecision, effectiveState } from "@/lib/moderation-fixtures";
 import { getCurrentUser, isStaff } from "@/lib/auth-shim";
 import { getCommentsForSubmission, getSubmissionById } from "@/db/queries";
-import { renderMarkdown } from "@/lib/markdown";
+import { extractToc, renderMarkdown } from "@/lib/markdown";
+
+// Show the on-this-page TOC sidebar only when the post has enough
+// structure to make navigation worth the column. Below this, the post
+// renders in the existing centered narrow column. The threshold is a
+// taste call — three is the smallest list where a TOC carries more
+// information than the eye can grab from the body itself.
+const TOC_MIN_ENTRIES = 3;
 
 export async function generateMetadata({
   params,
@@ -72,9 +79,16 @@ export default async function PostDetail({
   const score = post.upvotes - post.downvotes;
   const total = totalCommentCount(comments);
   const bodyHtml = post.text ? await renderMarkdown(post.text) : null;
+  const toc = bodyHtml ? extractToc(bodyHtml) : [];
+  const showToc = toc.length >= TOC_MIN_ENTRIES;
 
-  return (
-    <div className="proto-page-narrow">
+  // The two layouts share content; only the wrapper class and TOC
+  // aside differ. proto-page-aside is the existing pattern from
+  // /privacy + /office — sticky sidebar, content column. The aside
+  // is suppressed below 768px (proto-page-aside-nav--mobile-hide) so
+  // a long TOC doesn't push the post body two screens down.
+  const articleBody = (
+    <>
       {decision && (
         <SubmissionStateBanner
           state={state}
@@ -136,6 +150,29 @@ export default async function PostDetail({
        * Pure click handler — the button shell, lucide SVG, and line
        * gutter are all baked into the HTML by decorateCodeBlocks. */}
       <CodeCopyEnhancer />
+    </>
+  );
+
+  if (!showToc) {
+    return <div className="proto-page-narrow">{articleBody}</div>;
+  }
+
+  return (
+    <div className="proto-page-aside">
+      <nav
+        className="proto-page-aside-nav proto-page-aside-nav--mobile-hide"
+        aria-label="On this page"
+      >
+        <span className="proto-page-aside-nav-title">On this page</span>
+        <ul>
+          {toc.map((entry) => (
+            <li key={entry.id}>
+              <a href={`#${entry.id}`}>{entry.text}</a>
+            </li>
+          ))}
+        </ul>
+      </nav>
+      <div className="proto-page-aside-content">{articleBody}</div>
     </div>
   );
 }
