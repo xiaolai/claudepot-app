@@ -2,6 +2,7 @@ import { useState } from "react";
 import { ConfigSection } from "./ConfigSection";
 import { UpdatesPanel } from "./global/UpdatesPanel";
 import { MemoryHealthPanel } from "./global/MemoryHealthPanel";
+import { TipsPanel } from "./global/TipsPanel";
 import { Button } from "../components/primitives/Button";
 
 /**
@@ -25,7 +26,7 @@ import { Button } from "../components/primitives/Button";
  * untouched.
  */
 
-type GlobalTab = "config" | "updates" | "memory";
+type GlobalTab = "config" | "updates" | "memory" | "tips";
 const TAB_STORAGE_KEY = "claudepot.global.tab";
 
 function loadTab(): GlobalTab {
@@ -33,6 +34,7 @@ function loadTab(): GlobalTab {
     const raw = localStorage.getItem(TAB_STORAGE_KEY);
     if (raw === "updates") return "updates";
     if (raw === "memory") return "memory";
+    if (raw === "tips") return "tips";
     return "config";
   } catch {
     return "config";
@@ -98,6 +100,18 @@ export function GlobalSection({
           Memory
         </Button>
         <Button
+          id="global-tab-tips"
+          role="tab"
+          aria-selected={tab === "tips"}
+          aria-controls="global-panel-tips"
+          size="sm"
+          variant={tab === "tips" ? "subtle" : "ghost"}
+          active={tab === "tips"}
+          onClick={() => switchTab("tips")}
+        >
+          Tips
+        </Button>
+        <Button
           id="global-tab-updates"
           role="tab"
           aria-selected={tab === "updates"}
@@ -141,6 +155,16 @@ export function GlobalSection({
             aria-labelledby="global-tab-memory"
           >
             <MemoryHealthPanel />
+          </div>
+        )}
+        {tab === "tips" && (
+          <div
+            role="tabpanel"
+            id="global-panel-tips"
+            aria-labelledby="global-tab-tips"
+            style={{ height: "100%" }}
+          >
+            <TipsPanel />
           </div>
         )}
       </div>

@@ -24,6 +24,7 @@ import { usageApi } from "./usage";
 import { notificationApi } from "./notification";
 import { serviceStatusApi } from "./service-status";
 import { updatesApi } from "./updates";
+import { ccTipsApi } from "./cc-tips";
 
 export const api = {
   ...accountApi,
@@ -46,6 +47,7 @@ export const api = {
   ...notificationApi,
   ...serviceStatusApi,
   ...updatesApi,
+  ...ccTipsApi,
   migrate: migrateApi,
 };
 
