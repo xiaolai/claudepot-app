@@ -6,6 +6,31 @@ Versioning scheme:
 - `0.1.x` — beta
 - `1.0.0+` — stable
 
+## 0.1.17 — beta (2026-05-07)
+
+### Fixed
+
+- **Dock icon now renders pixel-perfect at every standard size.**
+  The root cause of the v0.1.13–0.1.16 blur was the SVG's 22-px
+  pixel-art grid, which doesn't divide the Apple/Microsoft icon-
+  size ladder (16/32/64/128/256/512/1024) evenly — at 128 raster,
+  each "art pixel" covered 5.5 raster pixels and rsvg's default
+  antialiasing softened the edges. Redesigned the SVG on a 16-px
+  grid (which divides every standard size cleanly). The squircle
+  is on the same grid (48,48 / 416×416) so its edges are crisp too.
+- **Reverted the v0.1.16 objc2 runtime override.** That patch
+  loaded the 32×32 PNG and let Cocoa upscale to 128, producing
+  visibly blocky output — strictly worse than the now-clean .icns
+  rendering. With the 16-grid SVG, no runtime trick is needed.
+
+### Changed
+
+- _…_
+
+### Added
+
+- _…_
+
 ## 0.1.16 — beta (2026-05-07)
 
 ### Fixed
