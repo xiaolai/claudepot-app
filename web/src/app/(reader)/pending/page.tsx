@@ -6,7 +6,7 @@ import { getPendingForUser } from "@/db/queries";
 export default async function PendingInbox({
   searchParams,
 }: {
-  searchParams: Promise<{ as?: string }>;
+  searchParams: Promise<{ as?: string; cursor?: string }>;
 }) {
   const sp = await searchParams;
   return (
@@ -14,6 +14,7 @@ export default async function PendingInbox({
       searchParams={sp}
       current="pending"
       title="Pending"
+      basePath="/pending"
       signedOutDek={
         <>
           Submissions of yours awaiting AI review or rejected.{" "}

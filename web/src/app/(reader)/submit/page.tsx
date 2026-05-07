@@ -28,12 +28,17 @@ export default async function SubmitPage({
   const isSignedIn = Boolean(session?.user) || Boolean(devUser);
 
   if (!isSignedIn) {
+    const isDev = process.env.NODE_ENV !== "production";
     return (
       <div className="proto-page-narrow">
         <h1>Submit</h1>
         <p className="proto-dek">
-          <Link href="/login">Sign in</Link> to submit. Or append{" "}
-          <code>?as=ada</code> to simulate a session in dev.
+          <Link href="/login?callbackUrl=/submit">Sign in</Link> to submit.
+          {isDev ? (
+            <>
+              {" "}Or append <code>?as=ada</code> to simulate a session in dev.
+            </>
+          ) : null}
         </p>
       </div>
     );

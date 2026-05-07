@@ -52,8 +52,8 @@ export async function createSubmission(
   const ctx = await loadAuthorContext(authorId);
   if (!ctx) return { ok: false, reason: "validation", detail: "Author not found." };
 
-  const karmaState = await determineInitialState(authorId, ctx);
-  if (karmaState === "locked") {
+  const baseState = determineInitialState(ctx);
+  if (baseState === "locked") {
     return { ok: false, reason: "locked", detail: "Account is locked." };
   }
 
@@ -103,18 +103,17 @@ export async function createSubmission(
     verdict.verdict === "reject" && verdict.category !== null;
   // Failure-mode matrix per dev-docs/policy-moderator-plan.md §11:
   //   - synthetic-due-to-error → force state='pending' so a model
-  //     outage doesn't quietly publish unmoderated content under the
-  //     karma gate's auto-approve rules.
-  //   - exempt / disabled → use karma-gate state (synthetic verdict
-  //     is genuine here — the moderator simply isn't being applied).
-  //   - moderator reject → state='rejected', regardless of karma.
+  //     outage doesn't quietly publish unmoderated content.
+  //   - exempt / disabled → use baseState (synthetic verdict is
+  //     genuine here — the moderator simply isn't being applied).
+  //   - moderator reject → state='rejected'.
   const moderatorErrored =
     verdict.synthetic && verdict.syntheticReason === "error";
   const initialState = moderatorRejected
     ? "rejected"
     : moderatorErrored
       ? "pending"
-      : karmaState;
+      : baseState;
 
   const now = new Date();
   const [row] = await db

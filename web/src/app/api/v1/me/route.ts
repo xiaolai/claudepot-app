@@ -16,7 +16,7 @@
  * helper handles both shapes; chargeForSpec is a no-op here.
  */
 
-import { ok, preflight } from "@/lib/api/response";
+import { ok, preflight , withErrorHandling } from "@/lib/api/response";
 import { endpointSpec } from "@/lib/api/manifest";
 import { chargeForSpec, checkAuthForSpec } from "@/lib/api/policy";
 
@@ -24,7 +24,7 @@ export async function OPTIONS(): Promise<Response> {
   return preflight();
 }
 
-export async function GET(req: Request): Promise<Response> {
+export const GET = withErrorHandling(async (req: Request): Promise<Response> => {
   const SPEC = endpointSpec("me:identify");
   const policy = await checkAuthForSpec(req, SPEC);
   if (!policy.ok) return policy.response;
@@ -57,4 +57,4 @@ export async function GET(req: Request): Promise<Response> {
       createdAt: token.createdAt,
     },
   });
-}
+});

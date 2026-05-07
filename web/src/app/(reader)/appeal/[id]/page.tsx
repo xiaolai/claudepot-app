@@ -36,7 +36,7 @@ export default async function AppealPage({
 
   const session = await auth();
   if (!session?.user?.id) {
-    redirect(`/login?next=${encodeURIComponent(`/appeal/${id}`)}`);
+    redirect(`/login?callbackUrl=${encodeURIComponent(`/appeal/${id}`)}`);
   }
 
   const [decision] = await db

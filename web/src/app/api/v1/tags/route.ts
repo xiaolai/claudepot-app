@@ -6,7 +6,7 @@
  */
 
 import { validation } from "@/lib/api/errors";
-import { ok, preflight, problemResponse } from "@/lib/api/response";
+import { ok, preflight, problemResponse , withErrorHandling } from "@/lib/api/response";
 import { parseTagListParams } from "@/lib/api/inputs";
 import { listTagsForApi } from "@/lib/api/queries";
 import { endpointSpec } from "@/lib/api/manifest";
@@ -16,7 +16,7 @@ export async function OPTIONS(): Promise<Response> {
   return preflight();
 }
 
-export async function GET(req: Request): Promise<Response> {
+export const GET = withErrorHandling(async (req: Request): Promise<Response> => {
   const SPEC = endpointSpec("tags:list");
   const policy = await checkAuthForSpec(req, SPEC);
   if (!policy.ok) return policy.response;
@@ -34,4 +34,4 @@ export async function GET(req: Request): Promise<Response> {
 
   const items = await listTagsForApi(parsed.value.sort);
   return ok({ items });
-}
+});

@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { withErrorHandling } from "@/lib/api/response";
 
 import { drainRetroQueue } from "@/lib/moderation";
 
@@ -20,7 +21,7 @@ import { drainRetroQueue } from "@/lib/moderation";
  * persistent model outages don't accumulate work indefinitely —
  * an entry transitions to 'failed' and stops being picked up.
  */
-export async function GET(req: Request) {
+export const GET = withErrorHandling(async (req: Request) => {
   const expected = process.env.CRON_SECRET;
   const isProd = process.env.NODE_ENV === "production";
   if (isProd) {
@@ -41,4 +42,4 @@ export async function GET(req: Request) {
 
   const result = await drainRetroQueue();
   return NextResponse.json(result);
-}
+});

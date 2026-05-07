@@ -11,7 +11,7 @@
  */
 
 import { notFound, validation } from "@/lib/api/errors";
-import { ok, preflight, problemResponse } from "@/lib/api/response";
+import { ok, preflight, problemResponse , withErrorHandling } from "@/lib/api/response";
 import { saveInputSchema, setSave } from "@/lib/votes";
 import { endpointSpec } from "@/lib/api/manifest";
 import { chargeForSpec, checkAuthForSpec } from "@/lib/api/policy";
@@ -20,7 +20,7 @@ export async function OPTIONS(): Promise<Response> {
   return preflight();
 }
 
-export async function POST(req: Request): Promise<Response> {
+export const POST = withErrorHandling(async (req: Request): Promise<Response> => {
   const SPEC = endpointSpec("saves:toggle");
   const policy = await checkAuthForSpec(req, SPEC);
   if (!policy.ok) return policy.response;
@@ -58,4 +58,4 @@ export async function POST(req: Request): Promise<Response> {
   }
 
   return ok({ submissionId: parsed.data.submissionId, saved: result.saved });
-}
+});

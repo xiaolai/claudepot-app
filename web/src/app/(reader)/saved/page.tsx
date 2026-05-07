@@ -6,7 +6,7 @@ import { getSavedForUser } from "@/db/queries";
 export default async function SavedInbox({
   searchParams,
 }: {
-  searchParams: Promise<{ as?: string }>;
+  searchParams: Promise<{ as?: string; cursor?: string }>;
 }) {
   const sp = await searchParams;
   return (
@@ -14,6 +14,7 @@ export default async function SavedInbox({
       searchParams={sp}
       current="saved"
       title="Saved"
+      basePath="/saved"
       signedOutDek={
         <>
           Your private bookmark inbox. <Link href="/login">Sign in</Link> to

@@ -13,16 +13,17 @@ export async function GET(
   const tag = await getTagBySlug(slug);
   if (!tag) return new NextResponse("Not found", { status: 404 });
 
-  const items = (await getSubmissionsByTag(slug)).slice(0, 30);
+  const { items } = await getSubmissionsByTag(slug, { limit: 30 });
   const updated = items[0]?.submitted_at ?? new Date().toISOString();
 
+  const safeSlug = escape(slug);
   const xml = `<?xml version="1.0" encoding="utf-8"?>
 <feed xmlns="http://www.w3.org/2005/Atom">
   <title>ClauDepot · #${escape(tag.name)}</title>
-  <link href="${SITE_URL}/c/${slug}" />
-  <link rel="self" href="${SITE_URL}/api/rss/c/${slug}" />
+  <link href="${SITE_URL}/c/${safeSlug}" />
+  <link rel="self" href="${SITE_URL}/api/rss/c/${safeSlug}" />
   <updated>${updated}</updated>
-  <id>${SITE_URL}/c/${slug}</id>
+  <id>${SITE_URL}/c/${safeSlug}</id>
 ${items
   .map(
     (s) => `  <entry>

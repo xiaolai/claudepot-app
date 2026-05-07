@@ -11,7 +11,7 @@
  * separation lets a load balancer pin each to a different SLO.
  */
 
-import { ok, preflight } from "@/lib/api/response";
+import { ok, preflight , withErrorHandling } from "@/lib/api/response";
 import { endpointSpec } from "@/lib/api/manifest";
 
 // Imported for the manifest invariant: this route's policy lives in
@@ -24,10 +24,10 @@ export async function OPTIONS(): Promise<Response> {
   return preflight();
 }
 
-export async function GET(): Promise<Response> {
+export const GET = withErrorHandling(async (): Promise<Response> => {
   return ok({
     status: "ok",
     version: process.env.VERCEL_GIT_COMMIT_SHA ?? "dev",
     time: new Date().toISOString(),
   });
-}
+});

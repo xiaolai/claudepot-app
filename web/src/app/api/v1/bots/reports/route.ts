@@ -24,7 +24,7 @@
  */
 
 import { conflict, validation } from "@/lib/api/errors";
-import { ok, preflight, problemResponse } from "@/lib/api/response";
+import { ok, preflight, problemResponse , withErrorHandling } from "@/lib/api/response";
 import { endpointSpec } from "@/lib/api/manifest";
 import { chargeForSpec, checkAuthForSpec } from "@/lib/api/policy";
 import { persistBotReport, reportInputSchema } from "@/lib/bots";
@@ -33,7 +33,7 @@ export async function OPTIONS(): Promise<Response> {
   return preflight();
 }
 
-export async function POST(req: Request): Promise<Response> {
+export const POST = withErrorHandling(async (req: Request): Promise<Response> => {
   const SPEC = endpointSpec("bots:report");
   const policy = await checkAuthForSpec(req, SPEC);
   if (!policy.ok) return policy.response;
@@ -104,4 +104,4 @@ export async function POST(req: Request): Promise<Response> {
     botId: auth.user.id,
     reportId: result.reportId,
   });
-}
+});

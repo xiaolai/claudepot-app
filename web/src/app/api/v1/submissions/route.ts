@@ -13,7 +13,7 @@
  */
 
 import { validation } from "@/lib/api/errors";
-import { created, ok, preflight, problemResponse } from "@/lib/api/response";
+import { created, ok, preflight, problemResponse , withErrorHandling } from "@/lib/api/response";
 import {
   createSubmission,
   submissionInputSchema,
@@ -32,7 +32,7 @@ export async function OPTIONS(): Promise<Response> {
   return preflight();
 }
 
-export async function GET(req: Request): Promise<Response> {
+export const GET = withErrorHandling(async (req: Request): Promise<Response> => {
   const SPEC = endpointSpec("submissions:list");
   const policy = await checkAuthForSpec(req, SPEC);
   if (!policy.ok) return policy.response;
@@ -70,9 +70,9 @@ export async function GET(req: Request): Promise<Response> {
   });
 
   return ok(page);
-}
+});
 
-export async function POST(req: Request): Promise<Response> {
+export const POST = withErrorHandling(async (req: Request): Promise<Response> => {
   const SPEC = endpointSpec("submissions:create");
   const policy = await checkAuthForSpec(req, SPEC);
   if (!policy.ok) return policy.response;
@@ -175,4 +175,4 @@ export async function POST(req: Request): Promise<Response> {
     },
     `https://claudepot.com/post/${result.submissionId}`,
   );
-}
+});

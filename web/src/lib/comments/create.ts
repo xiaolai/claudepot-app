@@ -61,8 +61,8 @@ export async function createComment(
   const ctx = await loadAuthorContext(authorId);
   if (!ctx) return { ok: false, reason: "not_found" };
 
-  const initialState = await determineInitialState(authorId, ctx);
-  if (initialState === "locked") return { ok: false, reason: "locked" };
+  const baseState = determineInitialState(ctx);
+  if (baseState === "locked") return { ok: false, reason: "locked" };
 
   if (!isExempt(ctx)) {
     const rate = await checkLadderRateLimit(authorId);
@@ -169,7 +169,7 @@ export async function createComment(
   const insertState =
     moderatorRejectedNonIllegal || moderatorFailOpen
       ? "approved"
-      : initialState;
+      : baseState;
 
   type Outcome =
     | { kind: "ok"; commentId: string }

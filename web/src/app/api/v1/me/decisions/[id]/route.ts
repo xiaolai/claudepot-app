@@ -11,7 +11,7 @@
 
 import { getMyDecision, getMyDecisionInputSchema } from "@/lib/moderation";
 import { notFound, validation } from "@/lib/api/errors";
-import { ok, preflight, problemResponse } from "@/lib/api/response";
+import { ok, preflight, problemResponse , withErrorHandling } from "@/lib/api/response";
 import { endpointSpec } from "@/lib/api/manifest";
 import { chargeForSpec, checkAuthForSpec } from "@/lib/api/policy";
 
@@ -19,10 +19,10 @@ export async function OPTIONS(): Promise<Response> {
   return preflight();
 }
 
-export async function GET(
+export const GET = withErrorHandling(async (
   req: Request,
   { params }: { params: Promise<{ id: string }> },
-): Promise<Response> {
+): Promise<Response> => {
   const SPEC = endpointSpec("me:get_decision");
   const policy = await checkAuthForSpec(req, SPEC);
   if (!policy.ok) return policy.response;
@@ -51,4 +51,4 @@ export async function GET(
   }
 
   return ok(decision);
-}
+});

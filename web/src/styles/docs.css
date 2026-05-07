@@ -307,7 +307,7 @@
   line-height: var(--lh-body);
 }
 
-@media (max-width: var(--content-width)) {
+@media (max-width: 720px) {
   .docs-shell {
     grid-template-columns: 1fr;
   }

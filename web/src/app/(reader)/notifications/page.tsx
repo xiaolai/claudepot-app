@@ -1,15 +1,23 @@
 import type { ReactNode } from "react";
 import Link from "next/link";
-import { desc, eq } from "drizzle-orm";
+import { desc, eq, inArray } from "drizzle-orm";
 import { AtSign, Check, CornerDownRight } from "lucide-react";
 
 import { db } from "@/db/client";
-import { notifications, users } from "@/db/schema";
+import { comments, notifications, users } from "@/db/schema";
 import { auth } from "@/lib/auth";
 import { relativeTime } from "@/lib/format";
 import { getCurrentUser } from "@/lib/auth-shim";
 import { markAllReadForUser } from "@/lib/notifications";
 import { AccountSidebar } from "@/components/prototype/AccountSidebar";
+
+const NOTIFICATION_BODY_PREVIEW_CHARS = 140;
+
+function previewBody(body: string): string {
+  const trimmed = body.trim();
+  if (trimmed.length <= NOTIFICATION_BODY_PREVIEW_CHARS) return trimmed;
+  return trimmed.slice(0, NOTIFICATION_BODY_PREVIEW_CHARS).trimEnd() + "…";
+}
 
 function KindLabel({
   icon: Icon,
@@ -114,11 +122,64 @@ export default async function Notifications({
     .orderBy(desc(notifications.createdAt))
     .limit(50);
 
+  // Enrich reply/mention rows with the commenting author's username and
+  // a body excerpt so the inbox surfaces "@actor: snippet…" instead of
+  // a generic "New reply." Moderation rows carry their own copy via the
+  // payload (decision_id / appeal_url) and don't need the lookup.
+  const commentIds = Array.from(
+    new Set(
+      notes
+        .map((n) => (n.payload as NotePayload | null)?.commentId)
+        .filter((id): id is string => typeof id === "string"),
+    ),
+  );
+
+  type CommentEnrichment = { author: string; body: string };
+  const commentMap = new Map<string, CommentEnrichment>();
+  if (commentIds.length > 0) {
+    const rows = await db
+      .select({
+        id: comments.id,
+        body: comments.body,
+        author: users.username,
+      })
+      .from(comments)
+      .innerJoin(users, eq(users.id, comments.authorId))
+      .where(inArray(comments.id, commentIds));
+    for (const r of rows) {
+      commentMap.set(r.id, { author: r.author, body: r.body });
+    }
+  }
+
   // Mark unread as read on view. The UI snapshotted readAt above so
   // unread items still render with the unread style on this render.
   // Shares lib/notifications.markAllReadForUser with the API surface
   // so both consume notifications the same way.
   await markAllReadForUser(userId);
+
+  function bodyFor(n: (typeof notes)[number]): ReactNode {
+    const p = (n.payload ?? {}) as NotePayload;
+    if (p.commentId) {
+      const enrich = commentMap.get(p.commentId);
+      if (enrich) {
+        return (
+          <>
+            <span className="proto-notification-actor">@{enrich.author}</span>
+            <span className="proto-notification-snippet">
+              {previewBody(enrich.body)}
+            </span>
+          </>
+        );
+      }
+      return "New reply";
+    }
+    if (n.kind === "moderation") {
+      return p.appeal_url
+        ? "Your submission was rejected — appeal available."
+        : "Moderation decision on your content.";
+    }
+    return "New activity";
+  }
 
   return (
     <div className="proto-page-aside">
@@ -143,9 +204,7 @@ export default async function Notifications({
                   <span className="proto-notification-kind">
                     {KIND_LABELS[n.kind] ?? n.kind}
                   </span>
-                  <span className="proto-notification-body">
-                    {(n.payload as NotePayload | null)?.commentId ? "New reply" : "New activity"}
-                  </span>
+                  <span className="proto-notification-body">{bodyFor(n)}</span>
                   <span className="proto-notification-time">
                     {relativeTime(n.createdAt.toISOString())}
                   </span>

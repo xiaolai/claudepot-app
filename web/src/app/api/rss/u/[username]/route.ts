@@ -13,16 +13,17 @@ export async function GET(
   const user = await getUser(username);
   if (!user) return new NextResponse("Not found", { status: 404 });
 
-  const items = (await getSubmissionsByUser(username)).slice(0, 30);
+  const { items } = await getSubmissionsByUser(username, { limit: 30 });
   const updated = items[0]?.submitted_at ?? new Date().toISOString();
 
+  const safeUsername = escape(username);
   const xml = `<?xml version="1.0" encoding="utf-8"?>
 <feed xmlns="http://www.w3.org/2005/Atom">
-  <title>ClauDepot · @${escape(username)}</title>
-  <link href="${SITE_URL}/u/${username}" />
-  <link rel="self" href="${SITE_URL}/api/rss/u/${username}" />
+  <title>ClauDepot · @${safeUsername}</title>
+  <link href="${SITE_URL}/u/${safeUsername}" />
+  <link rel="self" href="${SITE_URL}/api/rss/u/${safeUsername}" />
   <updated>${updated}</updated>
-  <id>${SITE_URL}/u/${username}</id>
+  <id>${SITE_URL}/u/${safeUsername}</id>
 ${items
   .map(
     (s) => `  <entry>

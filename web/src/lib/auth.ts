@@ -73,16 +73,20 @@ if (RESEND_API_KEY) {
   providers.push(Resend({ apiKey: RESEND_API_KEY, from: EMAIL_FROM }));
 }
 
-// DrizzleAdapter's generic type is rigid about column types — it expects
-// `email` etc. to be PgText, but ours is citext (custom type). The runtime
-// behavior is identical (text-compatible). Cast to bypass the type check.
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
+// DrizzleAdapter's expected schema requires every text-shaped column
+// to be `PgText` / `PgVarchar`. Our `users.email` and `users.username`
+// are `citext` (custom type), which is text-compatible at runtime but
+// disjoint at the type level. Specializing the generic to `typeof db`
+// pins SqlFlavor to the Postgres branch; the `as unknown as` cast
+// then bridges the citext/PgText gap in one place instead of stamping
+// `any` on each table.
+type AdapterSchema = NonNullable<Parameters<typeof DrizzleAdapter<typeof db>>[1]>;
 const adapterTables = {
-  usersTable: users as any,
-  accountsTable: accounts as any,
-  sessionsTable: sessions as any,
-  verificationTokensTable: verificationTokens as any,
-};
+  usersTable: users,
+  accountsTable: accounts,
+  sessionsTable: sessions,
+  verificationTokensTable: verificationTokens,
+} as unknown as AdapterSchema;
 
 const baseAdapter = DrizzleAdapter(db, adapterTables);
 

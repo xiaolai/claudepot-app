@@ -9,7 +9,7 @@
  */
 
 import { forbidden, notFound, validation } from "@/lib/api/errors";
-import { ok, preflight, problemResponse } from "@/lib/api/response";
+import { ok, preflight, problemResponse , withErrorHandling } from "@/lib/api/response";
 import {
   deleteCommentAsAuthor,
   updateCommentAsAuthor,
@@ -24,10 +24,10 @@ export async function OPTIONS(): Promise<Response> {
   return preflight();
 }
 
-export async function GET(
+export const GET = withErrorHandling(async (
   req: Request,
   { params }: { params: Promise<{ id: string }> },
-): Promise<Response> {
+): Promise<Response> => {
   const { id } = await params;
   if (!isUuid(id)) return problemResponse(notFound("Invalid id."));
 
@@ -42,12 +42,12 @@ export async function GET(
   const dto = await getCommentByIdForApi(auth.user.id, id);
   if (!dto) return problemResponse(notFound("Comment not found."));
   return ok(dto);
-}
+});
 
-export async function DELETE(
+export const DELETE = withErrorHandling(async (
   req: Request,
   { params }: { params: Promise<{ id: string }> },
-): Promise<Response> {
+): Promise<Response> => {
   const { id } = await params;
   if (!isUuid(id)) return problemResponse(notFound("Invalid id."));
 
@@ -70,12 +70,12 @@ export async function DELETE(
   }
 
   return ok({ id, deleted: true, submissionId: result.submissionId });
-}
+});
 
-export async function PATCH(
+export const PATCH = withErrorHandling(async (
   req: Request,
   { params }: { params: Promise<{ id: string }> },
-): Promise<Response> {
+): Promise<Response> => {
   const { id } = await params;
   if (!isUuid(id)) return problemResponse(notFound("Invalid id."));
 
@@ -134,4 +134,4 @@ export async function PATCH(
     submissionId: result.submissionId,
     updatedAt: result.updatedAt?.toISOString() ?? null,
   });
-}
+});

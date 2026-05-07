@@ -1,24 +1,29 @@
 import { sql } from "drizzle-orm";
 
 import { db } from "@/db/client";
-import { submissions, users } from "@/db/schema";
+import { comments, submissions, users } from "@/db/schema";
 import { SubmissionRow } from "@/components/prototype/SubmissionRow";
+import { deriveDomain } from "@/lib/url";
 
 import type { Submission } from "@/lib/prototype-fixtures";
 
-function deriveDomain(url: string | null): string {
-  if (!url) return "claudepot.com";
-  try {
-    return new URL(url).hostname;
-  } catch {
-    return "";
-  }
-}
+type SearchRow = {
+  id: string;
+  type: Submission["type"];
+  title: string;
+  url: string | null;
+  text: string | null;
+  state: Submission["state"];
+  score: number;
+  comments_count: number;
+  created_at: string;
+  author_username: string;
+};
 
 async function search(q: string): Promise<Submission[]> {
   if (!q || q.trim().length < 2) return [];
   const tsQuery = sql`websearch_to_tsquery('english', ${q})`;
-  const rows = await db.execute(sql`
+  const rows = await db.execute<SearchRow>(sql`
     SELECT
       ${submissions.id} AS id,
       ${submissions.type} AS type,
@@ -27,6 +32,11 @@ async function search(q: string): Promise<Submission[]> {
       ${submissions.text} AS text,
       ${submissions.state} AS state,
       ${submissions.score} AS score,
+      (
+        SELECT COUNT(*)::int FROM ${comments}
+        WHERE ${comments.submissionId} = ${submissions.id}
+          AND ${comments.deletedAt} IS NULL
+      ) AS comments_count,
       ${submissions.createdAt} AS created_at,
       ${users.username} AS author_username,
       ts_rank(${submissions}.search_vec, ${tsQuery}) AS rank
@@ -39,25 +49,22 @@ async function search(q: string): Promise<Submission[]> {
     LIMIT 30
   `);
 
-  // drizzle-orm's db.execute returns a result object; rows is typically `.rows`.
-  // Cast through unknown for the dynamic shape.
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const list = (rows as any).rows ?? rows;
-  return (list as Array<Record<string, unknown>>).map((r) => ({
-    id: r.id as string,
-    user: r.author_username as string,
-    type: r.type as Submission["type"],
+  const list = (rows.rows ?? []) as SearchRow[];
+  return list.map((r) => ({
+    id: r.id,
+    user: r.author_username,
+    type: r.type,
     tags: [],
-    title: r.title as string,
-    url: (r.url as string) ?? null,
-    domain: deriveDomain((r.url as string) ?? null),
+    title: r.title,
+    url: r.url ?? null,
+    domain: deriveDomain(r.url ?? null) ?? "",
     subjects: [],
     upvotes: Math.max(Number(r.score) ?? 0, 0),
     downvotes: Math.max(-(Number(r.score) ?? 0), 0),
-    comments: 0,
-    submitted_at: new Date(r.created_at as string).toISOString(),
-    text: (r.text as string) ?? undefined,
-    state: r.state as Submission["state"],
+    comments: Number(r.comments_count) || 0,
+    submitted_at: new Date(r.created_at).toISOString(),
+    text: r.text ?? undefined,
+    state: r.state,
   }));
 }
 

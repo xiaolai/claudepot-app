@@ -9,7 +9,7 @@
  * is "your cache is current," which the client already had.
  */
 
-import { notModified, ok, preflight } from "@/lib/api/response";
+import { notModified, ok, preflight , withErrorHandling } from "@/lib/api/response";
 import {
   etagFor,
   getConstitution,
@@ -22,7 +22,7 @@ export async function OPTIONS(): Promise<Response> {
   return preflight();
 }
 
-export async function GET(req: Request): Promise<Response> {
+export const GET = withErrorHandling(async (req: Request): Promise<Response> => {
   const SPEC = endpointSpec("constitution");
   const policy = await checkAuthForSpec(req, SPEC);
   if (!policy.ok) return policy.response;
@@ -42,4 +42,4 @@ export async function GET(req: Request): Promise<Response> {
   if (!charge.ok) return charge.response;
 
   return ok(constitution, { headers: { etag } });
-}
+});

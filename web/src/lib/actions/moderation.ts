@@ -4,7 +4,6 @@ import { revalidatePath } from "next/cache";
 import { eq } from "drizzle-orm";
 import { z } from "zod";
 
-import { auth } from "@/lib/auth";
 import { db } from "@/db/client";
 import {
   comments,
@@ -15,47 +14,6 @@ import {
   users,
 } from "@/db/schema";
 import { requireStaffId } from "@/lib/staff";
-
-/* ── flag (any signed-in user with email_verified) ─────────────── */
-
-const flagInput = z.object({
-  targetType: z.enum(["submission", "comment"]),
-  targetId: z.uuid(),
-  reason: z.string().trim().min(3).max(500),
-});
-
-export async function flag(
-  input: unknown,
-): Promise<
-  | { ok: true; flagId: string }
-  | { ok: false; reason: "unauth" | "validation" | "unverified" }
-> {
-  const session = await auth();
-  if (!session?.user?.id) return { ok: false, reason: "unauth" };
-
-  const [me] = await db
-    .select({ verified: users.emailVerified, role: users.role })
-    .from(users)
-    .where(eq(users.id, session.user.id))
-    .limit(1);
-  if (!me?.verified && me?.role !== "system") {
-    return { ok: false, reason: "unverified" };
-  }
-
-  const parsed = flagInput.safeParse(input);
-  if (!parsed.success) return { ok: false, reason: "validation" };
-
-  const [row] = await db
-    .insert(flags)
-    .values({
-      reporterId: session.user.id,
-      targetType: parsed.data.targetType,
-      targetId: parsed.data.targetId,
-      reason: parsed.data.reason,
-    })
-    .returning({ id: flags.id });
-  return { ok: true, flagId: row.id };
-}
 
 /* ── Staff actions ─────────────────────────────────────────────── */
 
