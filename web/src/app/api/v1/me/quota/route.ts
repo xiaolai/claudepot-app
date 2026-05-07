@@ -9,7 +9,7 @@
  * implicitly knows by counting its own requests.
  */
 
-import { ok, preflight } from "@/lib/api/response";
+import { ok, preflight , withErrorHandling } from "@/lib/api/response";
 import { readQuotaForToken } from "@/lib/api/quota";
 import { endpointSpec } from "@/lib/api/manifest";
 import { chargeForSpec, checkAuthForSpec } from "@/lib/api/policy";
@@ -18,7 +18,7 @@ export async function OPTIONS(): Promise<Response> {
   return preflight();
 }
 
-export async function GET(req: Request): Promise<Response> {
+export const GET = withErrorHandling(async (req: Request): Promise<Response> => {
   const SPEC = endpointSpec("me:quota");
   const policy = await checkAuthForSpec(req, SPEC);
   if (!policy.ok) return policy.response;
@@ -30,4 +30,4 @@ export async function GET(req: Request): Promise<Response> {
 
   const quota = await readQuotaForToken(policy.auth.token.id);
   return ok(quota);
-}
+});

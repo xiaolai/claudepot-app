@@ -8,7 +8,7 @@
  */
 
 import { notFound, validation } from "@/lib/api/errors";
-import { ok, preflight, problemResponse } from "@/lib/api/response";
+import { ok, preflight, problemResponse , withErrorHandling } from "@/lib/api/response";
 import { parseSubmissionListParams } from "@/lib/api/inputs";
 import { getTagBySlugForApi, listSubmissions } from "@/lib/api/queries";
 import { clampPageLimit } from "@/lib/api/cursor";
@@ -25,10 +25,10 @@ export async function OPTIONS(): Promise<Response> {
   return preflight();
 }
 
-export async function GET(
+export const GET = withErrorHandling(async (
   req: Request,
   { params }: { params: Promise<{ slug: string }> },
-): Promise<Response> {
+): Promise<Response> => {
   const { slug } = await params;
   if (!SLUG_RE.test(slug)) {
     return problemResponse(notFound("Invalid tag slug."));
@@ -72,4 +72,4 @@ export async function GET(
   });
 
   return ok({ tag, ...page });
-}
+});

@@ -11,7 +11,7 @@
  * mitigate, and that lives outside CORS.
  */
 
-import type { Problem } from "./errors";
+import { internal, type Problem } from "./errors";
 
 const CORS_HEADERS = {
   "access-control-allow-origin": "*",
@@ -73,4 +73,29 @@ export function problemResponse(p: Problem): Response {
 /** OPTIONS preflight handler — every route exports this. */
 export function preflight(): Response {
   return new Response(null, { status: 204, headers: CORS_HEADERS });
+}
+
+/**
+ * Wrap a route handler so an unhandled exception returns a structured
+ * problem+json 500 instead of Next's default HTML error page. Logs the
+ * underlying error to stderr; never exposes it in the response body.
+ *
+ * Usage:
+ *   export const POST = withErrorHandling(async (req) => { ... });
+ */
+type RouteHandler<Args extends unknown[]> = (
+  ...args: Args
+) => Promise<Response> | Response;
+
+export function withErrorHandling<Args extends unknown[]>(
+  handler: RouteHandler<Args>,
+): RouteHandler<Args> {
+  return async (...args: Args): Promise<Response> => {
+    try {
+      return await handler(...args);
+    } catch (err) {
+      console.error("[api] unhandled error", err);
+      return problemResponse(internal());
+    }
+  };
 }

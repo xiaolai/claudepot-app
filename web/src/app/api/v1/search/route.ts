@@ -13,7 +13,7 @@
  */
 
 import { validation } from "@/lib/api/errors";
-import { ok, preflight, problemResponse } from "@/lib/api/response";
+import { ok, preflight, problemResponse , withErrorHandling } from "@/lib/api/response";
 import { parseSearchParams } from "@/lib/api/inputs";
 import { searchForApi } from "@/lib/api/queries";
 import { clampPageLimit } from "@/lib/api/cursor";
@@ -24,7 +24,7 @@ export async function OPTIONS(): Promise<Response> {
   return preflight();
 }
 
-export async function GET(req: Request): Promise<Response> {
+export const GET = withErrorHandling(async (req: Request): Promise<Response> => {
   const SPEC = endpointSpec("search");
   const policy = await checkAuthForSpec(req, SPEC);
   if (!policy.ok) return policy.response;
@@ -53,4 +53,4 @@ export async function GET(req: Request): Promise<Response> {
   });
 
   return ok({ ...result.page, query: parsed.value.q });
-}
+});

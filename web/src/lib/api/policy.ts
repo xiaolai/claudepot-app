@@ -101,7 +101,15 @@ export async function chargeForSpec(
  * For staff-only branches (e.g. clamping `state=pending` to approved
  * for non-staff). The role check is duplicated across several routes;
  * keeping it here ensures everyone agrees what "staff" means.
+ *
+ * Both `staff` (humans) and `system` (Ada and other agent accounts)
+ * are admitted — same definition the web shell uses in
+ * `lib/staff.ts:requireStaffId` and `lib/staff-gate.tsx:staffGate`.
+ * Without this symmetry, the same `system` account sees different
+ * pending-content visibility through a PAT than through a web
+ * session.
  */
 export function isStaffAuth(auth: AuthSuccess): boolean {
-  return auth.user.role === "staff";
+  const role = auth.user.role;
+  return role === "staff" || role === "system";
 }

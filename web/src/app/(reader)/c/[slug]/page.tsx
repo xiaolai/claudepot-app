@@ -3,6 +3,7 @@ import { notFound } from "next/navigation";
 import { SubmissionRow } from "@/components/prototype/SubmissionRow";
 import { auth } from "@/lib/auth";
 import { getAllTags, getTagBySlug, getSubmissionsByTag } from "@/db/queries";
+import { decodeCursor, isCursorTime } from "@/lib/api/cursor";
 
 /**
  * Force dynamic rendering. The page reads `auth()` (cookies), so it's
@@ -26,15 +27,23 @@ export async function generateStaticParams() {
 
 export default async function TagPage({
   params,
+  searchParams,
 }: {
   params: Promise<{ slug: string }>;
+  searchParams: Promise<{ cursor?: string }>;
 }) {
   const { slug } = await params;
+  const sp = await searchParams;
   const tag = await getTagBySlug(slug);
   if (!tag) notFound();
 
   const session = await auth();
-  const items = await getSubmissionsByTag(slug, session?.user?.id ?? null, 60);
+  const decoded = decodeCursor(sp.cursor);
+  const cursor = decoded && isCursorTime(decoded) ? decoded : null;
+  const { items, nextCursor } = await getSubmissionsByTag(slug, {
+    viewerId: session?.user?.id ?? null,
+    cursor,
+  });
 
   return (
     <div className="proto-page">
@@ -43,8 +52,8 @@ export default async function TagPage({
         <h1>{tag.name}</h1>
         <p className="proto-dek">{tag.tagline}</p>
         <p className="proto-tag-meta">
-          {items.length} {items.length === 1 ? "post" : "posts"} ·{" "}
-          <Link href="/c">All tags</Link>
+          <Link href="/c">All tags</Link> ·{" "}
+          <Link href={`/api/rss/c/${slug}`}>RSS</Link>
         </p>
       </header>
 
@@ -57,6 +66,13 @@ export default async function TagPage({
           ))
         )}
       </ol>
+      {nextCursor ? (
+        <p className="proto-pagination">
+          <Link href={`/c/${slug}?cursor=${encodeURIComponent(nextCursor)}`}>
+            Older →
+          </Link>
+        </p>
+      ) : null}
     </div>
   );
 }

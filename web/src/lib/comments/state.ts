@@ -2,30 +2,20 @@
  * State helpers for the comment-create path.
  *
  * Mirror of submissions/state.ts: one fetch returns the user fields
- * the rest of createComment needs (role, karma, isAgent, exempt-flag),
- * and the karma gate is computed against that context. Comments use
- * a softer karma gate than submissions — any user with at least one
- * approved submission is past first-comment review.
+ * createComment needs (role, isAgent, exempt-flag). Locked accounts
+ * are rejected outright; everyone else auto-approves and Ada (the
+ * AI policy moderator) is the post-publication gate. The previous
+ * karma gate was disabled pre-launch (no signal) and never re-enabled;
+ * it's been removed rather than left as a dead `if (false)` branch.
  */
 
-import { and, eq } from "drizzle-orm";
+import { eq } from "drizzle-orm";
 
 import { db } from "@/db/client";
-import { submissions, users } from "@/db/schema";
-
-// Mirrors KARMA_GATE_ENABLED in lib/submissions/state.ts. Pre-launch
-// the gate provides no signal — no user has karma, no user has prior
-// approved submissions — so every first comment lands in 'pending'
-// and disappears from the thread. Ada is the sole gate while this
-// is false. Re-enable once karma signal accumulates. Keep the two
-// flags moving together unless there's a specific reason to gate
-// comments more aggressively than submissions.
-const KARMA_GATE_ENABLED = false;
-const KARMA_AUTO_APPROVE = 50;
+import { users } from "@/db/schema";
 
 export interface AuthorContext {
   role: "user" | "staff" | "locked" | "system";
-  karma: number;
   isAgent: boolean;
   botModerationExempt: boolean;
 }
@@ -36,7 +26,6 @@ export async function loadAuthorContext(
   const [row] = await db
     .select({
       role: users.role,
-      karma: users.karma,
       isAgent: users.isAgent,
       botModerationExempt: users.botModerationExempt,
     })
@@ -46,26 +35,12 @@ export async function loadAuthorContext(
   return row ?? null;
 }
 
-export async function determineInitialState(
-  authorId: string,
+export function determineInitialState(
   ctx: AuthorContext,
-): Promise<"pending" | "approved" | "locked"> {
-  // Mirror lib/submissions: locked accounts are rejected outright,
-  // not silently routed to the moderation queue. PAT-driven flooding
-  // would otherwise consume reviewer time + the daily comments bucket.
+): "pending" | "approved" | "locked" {
+  // PAT-driven flooding from a locked account would otherwise
+  // consume reviewer time + the daily comments bucket; reject
+  // outright instead of routing silently to the moderation queue.
   if (ctx.role === "locked") return "locked";
-  if (ctx.role === "staff" || ctx.role === "system") return "approved";
-  if (!KARMA_GATE_ENABLED) return "approved";
-  if (ctx.karma >= KARMA_AUTO_APPROVE) return "approved";
-
-  // Softer than submissions: any prior approved submission lifts the
-  // first-comment-pending gate.
-  const [hasApproved] = await db
-    .select({ id: submissions.id })
-    .from(submissions)
-    .where(
-      and(eq(submissions.authorId, authorId), eq(submissions.state, "approved")),
-    )
-    .limit(1);
-  return hasApproved ? "approved" : "pending";
+  return "approved";
 }

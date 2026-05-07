@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { withErrorHandling } from "@/lib/api/response";
 import { Resend } from "resend";
 import { and, desc, eq, gte, isNull } from "drizzle-orm";
 
@@ -47,7 +48,7 @@ function isoWeekKey(d: Date): string {
  * a visible unsubscribe link, so Gmail's bulk-sender requirements (Feb
  * 2024) are satisfied as soon as the digest goes out at scale.
  */
-export async function GET(req: Request) {
+export const GET = withErrorHandling(async (req: Request) => {
   // Audit finding 2.2 — CRON_SECRET must be mandatory in production. In dev
   // (NODE_ENV !== production) we allow unauthenticated calls so the route
   // can be hit from a browser; in prod we reject if the secret is unset
@@ -238,4 +239,4 @@ export async function GET(req: Request) {
     recipients: recipients.length,
     weekKey,
   });
-}
+});

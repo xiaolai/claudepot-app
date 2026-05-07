@@ -41,7 +41,7 @@ export function registerSubmissionWriteTools(server: McpServer): void {
             "Submission type. Use 'discussion' for self-posts (text only). All other types should normally have a url.",
           ),
         title: z.string().min(3).max(120),
-        url: z.string().url().optional().describe("Provide url XOR text."),
+        url: z.url().optional().describe("Provide url XOR text."),
         text: z.string().max(40_000).optional(),
         tags: z.array(z.string()).max(5).optional(),
       },

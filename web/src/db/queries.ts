@@ -15,6 +15,11 @@ import { and, desc, eq, gte, isNull, notInArray, sql } from "drizzle-orm";
 
 import { db } from "./client";
 import {
+  encodeCursor,
+  type CursorScore,
+  type CursorTime,
+} from "@/lib/api/cursor";
+import {
   comments,
   projectTags,
   projects,
@@ -67,16 +72,9 @@ import type {
   User,
 } from "@/lib/prototype-fixtures";
 
-/* ── Internal helpers ───────────────────────────────────────────── */
+import { deriveDomain } from "@/lib/url";
 
-function deriveDomain(url: string | null | undefined): string {
-  if (!url) return "claudepot.com";
-  try {
-    return new URL(url).hostname;
-  } catch {
-    return "";
-  }
-}
+/* ── Internal helpers ───────────────────────────────────────────── */
 
 function synthesizeVotes(score: number): { upvotes: number; downvotes: number } {
   return score >= 0
@@ -117,7 +115,7 @@ function mapSubmission(r: SubmissionRowJoined): Submission {
     tags: r.tagSlugs,
     title: r.title,
     url: r.url,
-    domain: deriveDomain(r.url),
+    domain: deriveDomain(r.url) ?? "",
     // `subjects` is a legacy field on the prototype's Submission type
     // (concept-first IA, superseded by tag-based). Kept empty for type
     // compatibility with components; will drop when the type is trimmed.
@@ -205,13 +203,22 @@ const HOT_RANK_EXPR = sql<number>`(
   POWER(GREATEST(EXTRACT(EPOCH FROM (NOW() - ${submissions.createdAt})) / 3600, 0) + 2, 1.8)
 )`;
 
-export async function getAllSubmissions(): Promise<Submission[]> {
+// Sitemap protocol allows up to 50,000 URLs per file; we cap well
+// below that to bound memory and Vercel function time. If the corpus
+// grows past this, split into a sitemap index instead of raising the
+// cap.
+const SITEMAP_MAX_SUBMISSIONS = 10_000;
+
+export async function getAllSubmissions(
+  limit: number = SITEMAP_MAX_SUBMISSIONS,
+): Promise<Submission[]> {
   const rows = await db
     .select(SUBMISSION_BASE_SELECT)
     .from(submissions)
     .innerJoin(users, eq(users.id, submissions.authorId))
     .where(isNull(submissions.deletedAt))
-    .orderBy(desc(submissions.createdAt));
+    .orderBy(desc(submissions.createdAt))
+    .limit(limit);
   return rows.map(mapSubmission);
 }
 
@@ -242,27 +249,65 @@ export async function getSubmissionsByHot(
   return rows.map(mapSubmission);
 }
 
-export async function getSubmissionsByNew(
-  viewerId: string | null = null,
-  limit?: number,
-): Promise<Submission[]> {
+/**
+ * Cursor pagination for time-ordered feeds. The cursor encodes the
+ * tail row's (createdAt, id) so the next call resumes after it.
+ * Compatible with the `lib/api/cursor.ts` time-cursor shape so reader
+ * pages and the v1 API can read each other's cursors.
+ */
+export interface Page<T> {
+  items: T[];
+  nextCursor: string | null;
+}
+
+const DEFAULT_PAGE_LIMIT = 30;
+
+export async function getSubmissionsByNew({
+  viewerId = null,
+  limit = DEFAULT_PAGE_LIMIT,
+  cursor = null,
+}: {
+  viewerId?: string | null;
+  limit?: number;
+  cursor?: CursorTime | null;
+} = {}): Promise<Page<Submission>> {
   const muted = await getMutedTagSlugs(viewerId);
-  const cap = clampLimit(limit);
-  const q = db
+  const cap = clampLimit(limit) ?? DEFAULT_PAGE_LIMIT;
+  const cond = [FEED_BASE_FILTERS(), notInMutedTags(muted)];
+  if (cursor) {
+    const cutoff = new Date(cursor.t);
+    cond.push(
+      sql`(${submissions.createdAt}, ${submissions.id}) < (${cutoff}, ${cursor.id})`,
+    );
+  }
+  const rows = await db
     .select(SUBMISSION_BASE_SELECT)
     .from(submissions)
     .innerJoin(users, eq(users.id, submissions.authorId))
-    .where(and(FEED_BASE_FILTERS(), notInMutedTags(muted)))
-    .orderBy(desc(submissions.createdAt));
-  const rows = cap ? await q.limit(cap) : await q;
-  return rows.map(mapSubmission);
+    .where(and(...cond))
+    .orderBy(desc(submissions.createdAt), desc(submissions.id))
+    .limit(cap + 1);
+  const hasMore = rows.length > cap;
+  const slice = hasMore ? rows.slice(0, cap) : rows;
+  const tail = slice[slice.length - 1];
+  const nextCursor =
+    hasMore && tail
+      ? encodeCursor({ t: tail.createdAt.getTime(), id: tail.id })
+      : null;
+  return { items: slice.map(mapSubmission), nextCursor };
 }
 
-export async function getSubmissionsByTop(
-  range: "day" | "week" | "all" = "day",
-  viewerId: string | null = null,
-  limit?: number,
-): Promise<Submission[]> {
+export async function getSubmissionsByTop({
+  range = "day",
+  viewerId = null,
+  limit = DEFAULT_PAGE_LIMIT,
+  cursor = null,
+}: {
+  range?: "day" | "week" | "all";
+  viewerId?: string | null;
+  limit?: number;
+  cursor?: CursorScore | null;
+} = {}): Promise<Page<Submission>> {
   const muted = await getMutedTagSlugs(viewerId);
   const cutoff =
     range === "all"
@@ -270,18 +315,29 @@ export async function getSubmissionsByTop(
       : new Date(
           Date.now() - (range === "day" ? 1 : 7) * 86_400_000,
         );
-  const where = cutoff
-    ? and(FEED_BASE_FILTERS(), notInMutedTags(muted), gte(submissions.createdAt, cutoff))
-    : and(FEED_BASE_FILTERS(), notInMutedTags(muted));
-  const cap = clampLimit(limit);
-  const q = db
+  const cap = clampLimit(limit) ?? DEFAULT_PAGE_LIMIT;
+  const cond = [FEED_BASE_FILTERS(), notInMutedTags(muted)];
+  if (cutoff) cond.push(gte(submissions.createdAt, cutoff));
+  if (cursor) {
+    cond.push(
+      sql`(${submissions.score}, ${submissions.id}) < (${cursor.s}, ${cursor.id})`,
+    );
+  }
+  const rows = await db
     .select(SUBMISSION_BASE_SELECT)
     .from(submissions)
     .innerJoin(users, eq(users.id, submissions.authorId))
-    .where(where)
-    .orderBy(desc(submissions.score));
-  const rows = cap ? await q.limit(cap) : await q;
-  return rows.map(mapSubmission);
+    .where(and(...cond))
+    .orderBy(desc(submissions.score), desc(submissions.id))
+    .limit(cap + 1);
+  const hasMore = rows.length > cap;
+  const slice = hasMore ? rows.slice(0, cap) : rows;
+  const tail = slice[slice.length - 1];
+  const nextCursor =
+    hasMore && tail
+      ? encodeCursor({ s: tail.score, id: tail.id })
+      : null;
+  return { items: slice.map(mapSubmission), nextCursor };
 }
 
 export async function getSubmissionById(
@@ -299,98 +355,81 @@ export async function getSubmissionById(
 
 export async function getSubmissionsByUser(
   username: string,
-  includeAll = false,
-): Promise<Submission[]> {
-  const baseConds = [eq(users.username, username), isNull(submissions.deletedAt)];
-  if (!includeAll) baseConds.push(eq(submissions.state, "approved"));
+  opts: {
+    includeAll?: boolean;
+    limit?: number;
+    cursor?: CursorTime | null;
+  } = {},
+): Promise<Page<Submission>> {
+  const { includeAll = false, limit = DEFAULT_PAGE_LIMIT, cursor = null } = opts;
+  const cap = clampLimit(limit) ?? DEFAULT_PAGE_LIMIT;
+  const cond = [eq(users.username, username), isNull(submissions.deletedAt)];
+  if (!includeAll) cond.push(eq(submissions.state, "approved"));
+  if (cursor) {
+    const cutoff = new Date(cursor.t);
+    cond.push(
+      sql`(${submissions.createdAt}, ${submissions.id}) < (${cutoff}, ${cursor.id})`,
+    );
+  }
   const rows = await db
     .select(SUBMISSION_BASE_SELECT)
     .from(submissions)
     .innerJoin(users, eq(users.id, submissions.authorId))
-    .where(and(...baseConds))
-    .orderBy(desc(submissions.createdAt));
-  return rows.map(mapSubmission);
+    .where(and(...cond))
+    .orderBy(desc(submissions.createdAt), desc(submissions.id))
+    .limit(cap + 1);
+  const hasMore = rows.length > cap;
+  const slice = hasMore ? rows.slice(0, cap) : rows;
+  const tail = slice[slice.length - 1];
+  const nextCursor =
+    hasMore && tail
+      ? encodeCursor({ t: tail.createdAt.getTime(), id: tail.id })
+      : null;
+  return { items: slice.map(mapSubmission), nextCursor };
 }
 
-export async function getPendingForUser(username: string): Promise<Submission[]> {
+export async function getPendingForUser(
+  username: string,
+  opts: { limit?: number; cursor?: CursorTime | null } = {},
+): Promise<Page<Submission>> {
+  const { limit = DEFAULT_PAGE_LIMIT, cursor = null } = opts;
+  const cap = clampLimit(limit) ?? DEFAULT_PAGE_LIMIT;
+  const cond = [
+    eq(users.username, username),
+    sql`${submissions.state} != 'approved'`,
+    isNull(submissions.deletedAt),
+  ];
+  if (cursor) {
+    const cutoff = new Date(cursor.t);
+    cond.push(
+      sql`(${submissions.createdAt}, ${submissions.id}) < (${cutoff}, ${cursor.id})`,
+    );
+  }
   const rows = await db
     .select(SUBMISSION_BASE_SELECT)
     .from(submissions)
     .innerJoin(users, eq(users.id, submissions.authorId))
-    .where(
-      and(
-        eq(users.username, username),
-        sql`${submissions.state} != 'approved'`,
-        isNull(submissions.deletedAt),
-      ),
-    )
-    .orderBy(desc(submissions.createdAt));
-  return rows.map(mapSubmission);
+    .where(and(...cond))
+    .orderBy(desc(submissions.createdAt), desc(submissions.id))
+    .limit(cap + 1);
+  const hasMore = rows.length > cap;
+  const slice = hasMore ? rows.slice(0, cap) : rows;
+  const tail = slice[slice.length - 1];
+  const nextCursor =
+    hasMore && tail
+      ? encodeCursor({ t: tail.createdAt.getTime(), id: tail.id })
+      : null;
+  return { items: slice.map(mapSubmission), nextCursor };
 }
 
 /* ── Comments ───────────────────────────────────────────────────── */
 
-type CommentRow = {
-  id: string;
-  parentId: string | null;
-  body: string;
-  state: "pending" | "approved" | "rejected";
-  score: number;
-  createdAt: Date;
-  updatedAt: Date | null;
-  authorUsername: string;
-  authorImageUrl: string | null;
-  deletedAt: Date | null;
-};
+// buildCommentTree + CommentRow live in lib/comments/tree.ts so the
+// pure-function test can import them without triggering the Neon
+// client initialization.
+import { buildCommentTree, type CommentRow } from "@/lib/comments/tree";
 
-function buildCommentTree(
-  rows: CommentRow[],
-  publicOnly: boolean,
-): CommentNode[] {
-  // Audit finding 3.1 — preserve thread structure when a parent is
-  // filtered (rejected) but has approved descendants. Build the full
-  // tree first, then prune tombstone leaves (filtered/deleted nodes
-  // with no visible children).
-  const byParent = new Map<string | null, CommentRow[]>();
-  for (const r of rows) {
-    const list = byParent.get(r.parentId) ?? [];
-    list.push(r);
-    byParent.set(r.parentId, list);
-  }
-
-  function buildLevel(parentId: string | null): CommentNode[] {
-    const kids = byParent.get(parentId) ?? [];
-    return kids
-      .map((r): CommentNode | null => {
-        const children = buildLevel(r.id);
-        const filtered = publicOnly && r.state !== "approved";
-        const tombstoned = r.deletedAt != null || filtered;
-        // Prune tombstone leaves; surface tombstone branches with kids.
-        if (tombstoned && children.length === 0) return null;
-        const { upvotes, downvotes } = synthesizeVotes(r.score);
-        return {
-          id: r.id,
-          user: tombstoned ? "[deleted]" : r.authorUsername,
-          submitted_at: r.createdAt.toISOString(),
-          // Tombstones drop the edited badge (the body is "[deleted]"
-          // and there is nothing to flag as edited).
-          updated_at: tombstoned ? undefined : r.updatedAt?.toISOString(),
-          upvotes: tombstoned ? 0 : upvotes,
-          downvotes: tombstoned ? 0 : downvotes,
-          // Body is still scrubbed to "[deleted]" so a leak via a
-          // forgotten consumer doesn't expose the original text. The
-          // `tombstoned` flag below is what the renderer keys off,
-          // independent of the body's literal content.
-          body: tombstoned ? "[deleted]" : r.body,
-          children,
-          state: r.state,
-          tombstoned,
-        };
-      })
-      .filter((n): n is CommentNode => n !== null);
-  }
-  return buildLevel(null);
-}
+export { buildCommentTree, type CommentRow };
 
 // Audit finding 6.1 — bound the comment fetch so a viral post (1000+
 // comments) doesn't unbounded-scan. 200 covers the long tail; pagination
@@ -427,14 +466,6 @@ export async function getCommentsForSubmission(
   return buildCommentTree(rows, /* publicOnly */ true);
 }
 
-export async function getAllCommentsForSubmission(
-  id: string,
-): Promise<CommentNode[]> {
-  if (!isUuid(id)) return [];
-  const rows = await fetchCommentsRows(id);
-  return buildCommentTree(rows, /* publicOnly */ false);
-}
-
 /* ── Users ──────────────────────────────────────────────────────── */
 
 export async function getUser(username: string): Promise<User | undefined> {
@@ -446,58 +477,169 @@ export async function getUser(username: string): Promise<User | undefined> {
   return u ? mapUser(u) : undefined;
 }
 
-export async function getAllUsers(): Promise<User[]> {
-  const rows = await db.select().from(users).orderBy(desc(users.karma));
-  return rows.map(mapUser);
+export interface UserCommentSummary {
+  id: string;
+  submissionId: string;
+  submissionTitle: string;
+  body: string;
+  score: number;
+  submitted_at: string;
+}
+
+/**
+ * Public-visible comments authored by `username`, newest first. Excludes
+ * tombstoned (deleted/rejected) comments and any comment whose parent
+ * submission is itself unlisted, deleted, or unapproved — those would
+ * otherwise leak through to the profile page.
+ */
+export async function getCommentsByUser(
+  username: string,
+  opts: { limit?: number; cursor?: CursorTime | null } = {},
+): Promise<Page<UserCommentSummary>> {
+  const { limit = DEFAULT_PAGE_LIMIT, cursor = null } = opts;
+  const cap = clampLimit(limit) ?? DEFAULT_PAGE_LIMIT;
+
+  const [u] = await db
+    .select({ id: users.id })
+    .from(users)
+    .where(eq(users.username, username))
+    .limit(1);
+  if (!u) return { items: [], nextCursor: null };
+
+  const cond = [
+    eq(comments.authorId, u.id),
+    eq(comments.state, "approved"),
+    isNull(comments.deletedAt),
+    eq(submissions.state, "approved"),
+    isNull(submissions.deletedAt),
+    isNull(submissions.unlistedAt),
+  ];
+  if (cursor) {
+    const cutoff = new Date(cursor.t);
+    cond.push(
+      sql`(${comments.createdAt}, ${comments.id}) < (${cutoff}, ${cursor.id})`,
+    );
+  }
+
+  const rows = await db
+    .select({
+      id: comments.id,
+      submissionId: comments.submissionId,
+      submissionTitle: submissions.title,
+      body: comments.body,
+      score: comments.score,
+      createdAt: comments.createdAt,
+    })
+    .from(comments)
+    .innerJoin(submissions, eq(submissions.id, comments.submissionId))
+    .where(and(...cond))
+    .orderBy(desc(comments.createdAt), desc(comments.id))
+    .limit(cap + 1);
+
+  const hasMore = rows.length > cap;
+  const slice = hasMore ? rows.slice(0, cap) : rows;
+  const tail = slice[slice.length - 1];
+  const nextCursor =
+    hasMore && tail
+      ? encodeCursor({ t: tail.createdAt.getTime(), id: tail.id })
+      : null;
+
+  return {
+    items: slice.map((r) => ({
+      id: r.id,
+      submissionId: r.submissionId,
+      submissionTitle: r.submissionTitle,
+      body: r.body,
+      score: r.score,
+      submitted_at: r.createdAt.toISOString(),
+    })),
+    nextCursor,
+  };
 }
 
 /* ── Saved + upvoted (per-user lists) ──────────────────────────── */
 
-export async function getSavedForUser(username: string): Promise<Submission[]> {
+export async function getSavedForUser(
+  username: string,
+  opts: { limit?: number; cursor?: CursorTime | null } = {},
+): Promise<Page<Submission>> {
+  const { limit = DEFAULT_PAGE_LIMIT, cursor = null } = opts;
+  const cap = clampLimit(limit) ?? DEFAULT_PAGE_LIMIT;
   const [u] = await db
     .select({ id: users.id })
     .from(users)
     .where(eq(users.username, username))
     .limit(1);
-  if (!u) return [];
+  if (!u) return { items: [], nextCursor: null };
+  const cond = [
+    eq(saves.userId, u.id),
+    isNull(submissions.deletedAt),
+    eq(submissions.state, "approved"),
+  ];
+  if (cursor) {
+    const cutoff = new Date(cursor.t);
+    cond.push(
+      sql`(${saves.createdAt}, ${submissions.id}) < (${cutoff}, ${cursor.id})`,
+    );
+  }
   const rows = await db
-    .select(SUBMISSION_BASE_SELECT)
+    .select({ ...SUBMISSION_BASE_SELECT, savedAt: saves.createdAt })
     .from(saves)
     .innerJoin(submissions, eq(submissions.id, saves.submissionId))
     .innerJoin(users, eq(users.id, submissions.authorId))
-    .where(
-      and(
-        eq(saves.userId, u.id),
-        isNull(submissions.deletedAt),
-        eq(submissions.state, "approved"),
-      ),
-    )
-    .orderBy(desc(saves.createdAt));
-  return rows.map(mapSubmission);
+    .where(and(...cond))
+    .orderBy(desc(saves.createdAt), desc(submissions.id))
+    .limit(cap + 1);
+  const hasMore = rows.length > cap;
+  const slice = hasMore ? rows.slice(0, cap) : rows;
+  const tail = slice[slice.length - 1];
+  const nextCursor =
+    hasMore && tail
+      ? encodeCursor({ t: tail.savedAt.getTime(), id: tail.id })
+      : null;
+  return { items: slice.map(mapSubmission), nextCursor };
 }
 
-export async function getUpvotedByUser(username: string): Promise<Submission[]> {
+export async function getUpvotedByUser(
+  username: string,
+  opts: { limit?: number; cursor?: CursorTime | null } = {},
+): Promise<Page<Submission>> {
+  const { limit = DEFAULT_PAGE_LIMIT, cursor = null } = opts;
+  const cap = clampLimit(limit) ?? DEFAULT_PAGE_LIMIT;
   const [u] = await db
     .select({ id: users.id })
     .from(users)
     .where(eq(users.username, username))
     .limit(1);
-  if (!u) return [];
+  if (!u) return { items: [], nextCursor: null };
+  const cond = [
+    eq(votes.userId, u.id),
+    eq(votes.value, 1),
+    isNull(submissions.deletedAt),
+    eq(submissions.state, "approved"),
+  ];
+  if (cursor) {
+    const cutoff = new Date(cursor.t);
+    cond.push(
+      sql`(${votes.createdAt}, ${submissions.id}) < (${cutoff}, ${cursor.id})`,
+    );
+  }
   const rows = await db
-    .select(SUBMISSION_BASE_SELECT)
+    .select({ ...SUBMISSION_BASE_SELECT, votedAt: votes.createdAt })
     .from(votes)
     .innerJoin(submissions, eq(submissions.id, votes.submissionId))
     .innerJoin(users, eq(users.id, submissions.authorId))
-    .where(
-      and(
-        eq(votes.userId, u.id),
-        eq(votes.value, 1),
-        isNull(submissions.deletedAt),
-        eq(submissions.state, "approved"),
-      ),
-    )
-    .orderBy(desc(votes.createdAt));
-  return rows.map(mapSubmission);
+    .where(and(...cond))
+    .orderBy(desc(votes.createdAt), desc(submissions.id))
+    .limit(cap + 1);
+  const hasMore = rows.length > cap;
+  const slice = hasMore ? rows.slice(0, cap) : rows;
+  const tail = slice[slice.length - 1];
+  const nextCursor =
+    hasMore && tail
+      ? encodeCursor({ t: tail.votedAt.getTime(), id: tail.id })
+      : null;
+  return { items: slice.map(mapSubmission), nextCursor };
 }
 
 /* ── Tags ───────────────────────────────────────────────────────── */
@@ -567,26 +709,47 @@ export async function getTopTags(): Promise<Array<Tag & { count: number }>> {
 
 export async function getSubmissionsByTag(
   slug: string,
-  viewerId: string | null = null,
-  limit?: number,
-): Promise<Submission[]> {
+  opts: {
+    viewerId?: string | null;
+    limit?: number;
+    cursor?: CursorTime | null;
+  } = {},
+): Promise<Page<Submission>> {
+  const { viewerId = null, limit = DEFAULT_PAGE_LIMIT, cursor = null } = opts;
+  const cap = clampLimit(limit) ?? DEFAULT_PAGE_LIMIT;
   const muted = await getMutedTagSlugs(viewerId);
-  const cap = clampLimit(limit);
-  const q = db
+  const cond = [
+    eq(submissionTags.tagSlug, slug),
+    FEED_BASE_FILTERS(),
+    notInMutedTags(muted),
+  ];
+  if (cursor) {
+    const cutoff = new Date(cursor.t);
+    cond.push(
+      sql`(${submissions.createdAt}, ${submissions.id}) < (${cutoff}, ${cursor.id})`,
+    );
+  }
+  // Tag pages used to order by HOT_RANK_EXPR. Switched to createdAt
+  // for stable cursor pagination — hot rank decays over time, which
+  // makes a (rank, id) cursor unstable across reads. createdAt-desc
+  // is a common feed shape for tag/topic pages and aligns with how
+  // /new behaves elsewhere in the reader.
+  const rows = await db
     .select(SUBMISSION_BASE_SELECT)
     .from(submissions)
     .innerJoin(users, eq(users.id, submissions.authorId))
     .innerJoin(submissionTags, eq(submissionTags.submissionId, submissions.id))
-    .where(
-      and(
-        eq(submissionTags.tagSlug, slug),
-        FEED_BASE_FILTERS(),
-        notInMutedTags(muted),
-      ),
-    )
-    .orderBy(desc(HOT_RANK_EXPR));
-  const rows = cap ? await q.limit(cap) : await q;
-  return rows.map(mapSubmission);
+    .where(and(...cond))
+    .orderBy(desc(submissions.createdAt), desc(submissions.id))
+    .limit(cap + 1);
+  const hasMore = rows.length > cap;
+  const slice = hasMore ? rows.slice(0, cap) : rows;
+  const tail = slice[slice.length - 1];
+  const nextCursor =
+    hasMore && tail
+      ? encodeCursor({ t: tail.createdAt.getTime(), id: tail.id })
+      : null;
+  return { items: slice.map(mapSubmission), nextCursor };
 }
 
 /* ── Projects ───────────────────────────────────────────────────── */

@@ -359,7 +359,7 @@ select:focus-visible,
    Responsive token overrides
    ============================================================ */
 
-@media (max-width: var(--bp-md)) {
+@media (max-width: 768px) {
   :root {
     --fs-masthead: 2rem;
     --fs-playbook-title: 2rem;

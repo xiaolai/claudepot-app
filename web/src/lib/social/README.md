@@ -24,7 +24,7 @@ In `.env.local` (see `.env.example` at the repo root for the canonical shape):
 
 ```bash
 # Bluesky — free; create app password at https://bsky.app/settings/app-passwords
-BLUESKY_HANDLE=sha.com
+BLUESKY_HANDLE=claudepot.bsky.social
 BLUESKY_APP_PASSWORD=
 
 # X — paid API access required (Basic ≈ $200/mo). Skip until tier is provisioned.

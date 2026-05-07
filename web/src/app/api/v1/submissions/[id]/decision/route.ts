@@ -28,7 +28,7 @@
  */
 
 import { forbidden, notFound } from "@/lib/api/errors";
-import { ok, preflight, problemResponse } from "@/lib/api/response";
+import { ok, preflight, problemResponse , withErrorHandling } from "@/lib/api/response";
 import { getDecisionForAuthor } from "@/lib/api/decisions";
 import { isUuid } from "@/lib/api/inputs";
 import { endpointSpec } from "@/lib/api/manifest";
@@ -42,10 +42,10 @@ export async function OPTIONS(): Promise<Response> {
   return preflight();
 }
 
-export async function GET(
+export const GET = withErrorHandling(async (
   req: Request,
   { params }: { params: Promise<{ id: string }> },
-): Promise<Response> {
+): Promise<Response> => {
   const { id } = await params;
   if (!isUuid(id)) return problemResponse(notFound("Invalid id."));
 
@@ -78,4 +78,4 @@ export async function GET(
   }
 
   return ok(result.decision);
-}
+});

@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { withErrorHandling } from "@/lib/api/response";
 import { and, count, gte, lt, sql, type AnyColumn } from "drizzle-orm";
 
 import { db } from "@/db/client";
@@ -14,7 +15,7 @@ import {
  * Daily 00:00 UTC — aggregate yesterday's events into metrics_daily.
  * Idempotent (ON CONFLICT DO UPDATE) so a retry doesn't double-count.
  */
-export async function GET(req: Request) {
+export const GET = withErrorHandling(async (req: Request) => {
   // Audit finding 2.2 — CRON_SECRET fail-closed in production.
   const expected = process.env.CRON_SECRET;
   const isProd = process.env.NODE_ENV === "production";
@@ -105,4 +106,4 @@ export async function GET(req: Request) {
     signups: signs?.n ?? 0,
     active24h: Number(active?.n ?? 0),
   });
-}
+});

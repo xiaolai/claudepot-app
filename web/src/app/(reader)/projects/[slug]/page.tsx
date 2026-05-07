@@ -94,10 +94,7 @@ export default async function ProjectPage({
         />
       ) : (
         <section className="proto-section">
-          <p className="proto-empty">
-            No README captured yet. Run{" "}
-            <code>pnpm projects:seed</code> to refresh.
-          </p>
+          <p className="proto-empty">No README captured yet.</p>
         </section>
       )}
 
@@ -111,9 +108,7 @@ export default async function ProjectPage({
           </ol>
         ) : projectTags.length === 0 ? (
           <p className="proto-empty">
-            Bind tags to this project in{" "}
-            <code>design/fixtures/project-tags.json</code> to populate this
-            list.
+            Nothing on ClauDepot for this project yet.
           </p>
         ) : (
           <p className="proto-empty">

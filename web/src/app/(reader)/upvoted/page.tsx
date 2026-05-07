@@ -6,7 +6,7 @@ import { getUpvotedByUser } from "@/db/queries";
 export default async function UpvotedInbox({
   searchParams,
 }: {
-  searchParams: Promise<{ as?: string }>;
+  searchParams: Promise<{ as?: string; cursor?: string }>;
 }) {
   const sp = await searchParams;
   return (
@@ -14,6 +14,7 @@ export default async function UpvotedInbox({
       searchParams={sp}
       current="upvoted"
       title="Upvoted"
+      basePath="/upvoted"
       signedOutDek={
         <>
           Posts you&rsquo;ve upvoted. <Link href="/login">Sign in</Link> to

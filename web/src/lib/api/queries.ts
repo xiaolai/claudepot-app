@@ -78,14 +78,7 @@ function buildAuthorRef(r: AuthorRow): AuthorRef {
 
 /* ── Submission shape mapper ─────────────────────────────────────── */
 
-function deriveDomain(url: string | null): string | null {
-  if (!url) return null;
-  try {
-    return new URL(url).hostname;
-  } catch {
-    return null;
-  }
-}
+import { deriveDomain } from "@/lib/url";
 
 type SubmissionRow = {
   id: string;
@@ -746,11 +739,18 @@ export async function searchForApi(input: SearchInput): Promise<SearchResult> {
   const needle = `%${escaped}%`;
 
   if (input.kind === "submission") {
+    // Submissions are gated by the FTS index on `submissions.search_vec`
+    // (see migration 0003). Same operator the reader's /search page
+    // uses, so both surfaces share a single regression blast-radius:
+    // if `search_vec` is ever dropped (the `db-migrations.md` rule
+    // exists because that has happened), both hard-fail together
+    // rather than diverging.
+    const tsQuery = sql`websearch_to_tsquery('english', ${input.q})`;
     const cond = [
       isNull(submissions.deletedAt),
       isNull(submissions.unlistedAt),
       eq(submissions.state, "approved"),
-      sql`(${submissions.title} ILIKE ${needle} OR ${submissions.url} ILIKE ${needle} OR COALESCE(${submissions.text}, '') ILIKE ${needle})`,
+      sql`${submissions}.search_vec @@ ${tsQuery}`,
     ];
     if (input.since) cond.push(gte(submissions.createdAt, input.since));
     if (input.types && input.types.length > 0) {

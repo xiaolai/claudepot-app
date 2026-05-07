@@ -1,6 +1,7 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
+import { redirect } from "next/navigation";
 import { and, count, desc, eq, gt, isNull, or, sql } from "drizzle-orm";
 import { z } from "zod";
 
@@ -8,6 +9,7 @@ import { auth } from "@/lib/auth";
 import { db } from "@/db/client";
 import { apiTokens, apiTokenEvents } from "@/db/schema";
 import { generateToken } from "@/lib/api/tokens";
+import { setRevealCookie } from "@/lib/api/reveal-cookie";
 import { SCOPES, normalizeScopes, type Scope } from "@/lib/api/scopes";
 
 /* ── Defaults ───────────────────────────────────────────────────
@@ -231,7 +233,7 @@ export async function createApiToken(
  * their own tokens; revoking someone else's id returns not_found.
  */
 
-const revokeInput = z.object({ tokenId: z.string().uuid() });
+const revokeInput = z.object({ tokenId: z.uuid() });
 
 export type RevokeTokenResult =
   | { ok: true }
@@ -352,9 +354,15 @@ export async function listMyApiTokens(): Promise<TokenListItem[]> {
 
 export type MintFormState =
   | { phase: "idle" }
-  | { phase: "ok"; plaintext: string; tokenName: string; displayPrefix: string }
   | { phase: "err"; message: string };
 
+/**
+ * On success, the plaintext is stashed in a one-time encrypted cookie
+ * (see `lib/api/reveal-cookie.ts`) and we redirect to
+ * `/settings/tokens/reveal`. The plaintext never crosses the
+ * useActionState boundary, so it never enters the React client heap.
+ * Errors still flow through the form state.
+ */
 export async function mintApiTokenFormAction(
   _prev: MintFormState,
   formData: FormData,
@@ -384,12 +392,15 @@ export async function mintApiTokenFormAction(
     return { phase: "err", message: map[result.reason] };
   }
 
-  return {
-    phase: "ok",
+  await setRevealCookie({
     plaintext: result.plaintext,
     tokenName: result.token.name,
     displayPrefix: result.token.displayPrefix,
-  };
+  });
+  // redirect() throws — never returns; the type system can't see that
+  // through the Promise<MintFormState> contract, so the unreachable
+  // return below preserves the signature.
+  redirect("/settings/tokens/reveal");
 }
 
 export type RevokeFormState =

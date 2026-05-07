@@ -18,9 +18,9 @@ import { z } from "zod";
 
 /* ── Common building blocks ─────────────────────────────────── */
 
-const isoTimestamp = z
-  .string()
-  .datetime({ message: "must be an ISO-8601 timestamp" });
+const isoTimestamp = z.iso.datetime({
+  message: "must be an ISO-8601 timestamp",
+});
 
 const usdAmount = z
   .number()

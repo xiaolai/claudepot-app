@@ -15,12 +15,23 @@ import {
 
 const INIT: MintFormState = { phase: "idle" };
 
+/**
+ * Mint flow:
+ *
+ *   submit form → server action → on success the action sets a
+ *   one-time encrypted cookie (see `lib/api/reveal-cookie.ts`) and
+ *   redirects to `/settings/tokens/reveal`. The plaintext never
+ *   crosses the useActionState boundary, so it never enters the
+ *   React client heap inside this component.
+ *
+ *   On failure the action returns an error in the form state, which
+ *   we render below the form.
+ */
 export function MintTokenForm({ staff }: { staff: boolean }) {
   const [state, formAction, pending] = useActionState(
     mintApiTokenFormAction,
     INIT,
   );
-  const [copied, setCopied] = useState(false);
   const [selected, setSelected] = useState<Set<Scope>>(new Set());
   const formId = useId();
 
@@ -38,40 +49,6 @@ export function MintTokenForm({ staff }: { staff: boolean }) {
 
   function toggleAll(on: boolean) {
     setSelected(on ? new Set(SCOPES) : new Set());
-  }
-
-  async function copyPlaintext(plaintext: string) {
-    try {
-      await navigator.clipboard.writeText(plaintext);
-      setCopied(true);
-      window.setTimeout(() => setCopied(false), 2000);
-    } catch {
-      setCopied(false);
-    }
-  }
-
-  if (state.phase === "ok") {
-    return (
-      <div className="proto-token-flash">
-        <p className="proto-form-flash proto-form-flash-ok">
-          Token <strong>{state.tokenName}</strong> ({state.displayPrefix}…)
-          minted. Copy it now — it cannot be shown again.
-        </p>
-        <code className="proto-token-plaintext">{state.plaintext}</code>
-        <div className="proto-form-inline">
-          <button
-            type="button"
-            className="proto-btn-primary"
-            onClick={() => copyPlaintext(state.plaintext)}
-          >
-            {copied ? "Copied" : "Copy"}
-          </button>
-          <a href="/settings/tokens" className="proto-btn-secondary">
-            Done
-          </a>
-        </div>
-      </div>
-    );
   }
 
   return (

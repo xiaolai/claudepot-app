@@ -8,12 +8,16 @@ const RESEND_ENABLED = !!process.env.RESEND_API_KEY;
 export default async function LoginPage({
   searchParams,
 }: {
-  searchParams: Promise<{ callbackUrl?: string | string[] }>;
+  searchParams: Promise<{
+    callbackUrl?: string | string[];
+    next?: string | string[];
+  }>;
 }) {
   const sp = await searchParams;
   const session = await auth();
+  const redirectTo = safeCallback(sp.callbackUrl ?? sp.next);
   if (session?.user) {
-    redirect(safeCallback(sp.callbackUrl));
+    redirect(redirectTo);
   }
   return (
     <div className="proto-page-narrow">
@@ -26,7 +30,7 @@ export default async function LoginPage({
         <form
           action={async () => {
             "use server";
-            await signIn("github", { redirectTo: "/" });
+            await signIn("github", { redirectTo });
           }}
         >
           <button type="submit" className="proto-provider">
@@ -41,7 +45,7 @@ export default async function LoginPage({
         <form
           action={async () => {
             "use server";
-            await signIn("google", { redirectTo: "/" });
+            await signIn("google", { redirectTo });
           }}
         >
           <button type="submit" className="proto-provider">
@@ -64,7 +68,7 @@ export default async function LoginPage({
               "use server";
               await signIn("resend", {
                 email: formData.get("email"),
-                redirectTo: "/",
+                redirectTo,
               });
             }}
           >

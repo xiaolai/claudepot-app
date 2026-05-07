@@ -1,5 +1,6 @@
 import { SubmissionRow } from "@/components/prototype/SubmissionRow";
 import { FeedHeader } from "@/components/prototype/FeedHeader";
+import { EmptyFeedState } from "@/components/prototype/EmptyFeedState";
 import { auth } from "@/lib/auth";
 import { getSubmissionsByHot } from "@/db/queries";
 
@@ -17,9 +18,13 @@ export default async function Home() {
       <FeedHeader />
 
       <ol className="proto-feed">
-        {feed.map((s, i) => (
-          <SubmissionRow key={s.id} rank={i + 1} submission={s} />
-        ))}
+        {feed.length === 0 ? (
+          <EmptyFeedState message="No posts yet — be the first." />
+        ) : (
+          feed.map((s, i) => (
+            <SubmissionRow key={s.id} rank={i + 1} submission={s} />
+          ))
+        )}
       </ol>
     </div>
   );

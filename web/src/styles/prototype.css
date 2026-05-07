@@ -1890,7 +1890,7 @@ summary.proto-nav-avatar::-webkit-details-marker { display: none; }
  * conditions per CSS spec), and this project doesn't run a postcss plugin
  * to substitute one. Documented exception in .claude/rules/design-tokens.md.
  * If you change --bp-md, change this too. */
-@media (max-width: var(--bp-md)) {
+@media (max-width: 768px) {
   .proto-nav { gap: var(--sp-12); padding: var(--sp-12); flex-wrap: wrap; }
   .proto-page,
   .proto-page-narrow,
@@ -2331,7 +2331,7 @@ a.proto-inbox-chip:hover {
   background: var(--bg, var(--surface));
 }
 
-@media (max-width: var(--content-width)) {
+@media (max-width: 720px) {
   .proto-inbox-row {
     grid-template-columns: 1fr;
     gap: var(--sp-8);
@@ -2727,7 +2727,7 @@ a.proto-inbox-chip:hover {
   background: color-mix(in oklch, var(--good, var(--accent)) 14%, transparent);
 }
 
-@media (max-width: var(--content-width)) {
+@media (max-width: 720px) {
   .proto-prompt-diff-grid {
     grid-template-columns: 1fr;
   }

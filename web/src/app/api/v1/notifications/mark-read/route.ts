@@ -15,7 +15,7 @@
  */
 
 import { validation } from "@/lib/api/errors";
-import { ok, preflight, problemResponse } from "@/lib/api/response";
+import { ok, preflight, problemResponse , withErrorHandling } from "@/lib/api/response";
 import {
   markNotificationsReadForUser,
   markReadInputSchema,
@@ -27,7 +27,7 @@ export async function OPTIONS(): Promise<Response> {
   return preflight();
 }
 
-export async function POST(req: Request): Promise<Response> {
+export const POST = withErrorHandling(async (req: Request): Promise<Response> => {
   const SPEC = endpointSpec("notifications:mark_read");
   const policy = await checkAuthForSpec(req, SPEC);
   if (!policy.ok) return policy.response;
@@ -58,4 +58,4 @@ export async function POST(req: Request): Promise<Response> {
 
   const result = await markNotificationsReadForUser(auth.user.id, parsed.data);
   return ok(result);
-}
+});

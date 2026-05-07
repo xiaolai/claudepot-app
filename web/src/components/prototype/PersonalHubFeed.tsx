@@ -1,4 +1,5 @@
 import type { ReactNode } from "react";
+import Link from "next/link";
 import { SubmissionRow } from "@/components/prototype/SubmissionRow";
 import {
   AccountSidebar,
@@ -6,6 +7,12 @@ import {
 } from "@/components/prototype/AccountSidebar";
 import { auth } from "@/lib/auth";
 import type { Submission } from "@/lib/prototype-fixtures";
+import type { Page } from "@/db/queries";
+import {
+  decodeCursor,
+  isCursorTime,
+  type CursorTime,
+} from "@/lib/api/cursor";
 import { getCurrentUser } from "@/lib/auth-shim";
 
 /** Shared shell for the per-user feed pages in the personal hub
@@ -13,7 +20,7 @@ import { getCurrentUser } from "@/lib/auth-shim";
  *  auth, falling back to the dev `?as=` shim. The shim is null in
  *  prod by contract — see `getCurrentUser` in prototype-fixtures.ts.
  *  Renders either a sign-in prompt (narrow layout) or the
- *  sidebar-flanked feed of submissions returned by the loader. */
+ *  sidebar-flanked, paginated feed returned by the loader. */
 export async function PersonalHubFeed({
   searchParams,
   current,
@@ -23,34 +30,48 @@ export async function PersonalHubFeed({
   emptyText,
   loader,
   rowMarkers,
+  basePath,
 }: {
-  searchParams: { as?: string };
+  searchParams: { as?: string; cursor?: string };
   current: AccountSidebarPage;
   title: string;
   dek: ReactNode;
   signedOutDek: ReactNode;
   emptyText: ReactNode;
-  loader: (username: string) => Promise<Submission[]>;
+  loader: (
+    username: string,
+    opts: { cursor?: CursorTime | null },
+  ) => Promise<Page<Submission>>;
   rowMarkers?: { initialSaved?: boolean; initialVote?: "up" | "down" | null };
+  basePath: string;
 }) {
   const session = await auth();
   const devUser = getCurrentUser(searchParams);
   const username = session?.user?.username ?? devUser?.username ?? null;
 
   if (!username) {
+    const isDev = process.env.NODE_ENV !== "production";
     return (
       <div className="proto-page-narrow">
         <h1>{title}</h1>
         <p className="proto-dek">{signedOutDek}</p>
-        <p className="proto-empty proto-empty-spaced">
-          Tip: append <code>?as=ada</code> to URLs to simulate a signed-in
-          session.
-        </p>
+        {isDev ? (
+          <p className="proto-empty proto-empty-spaced">
+            Tip: append <code>?as=ada</code> to URLs to simulate a signed-in
+            session.
+          </p>
+        ) : null}
       </div>
     );
   }
 
-  const items = await loader(username);
+  const decoded = decodeCursor(searchParams.cursor);
+  const cursor = decoded && isCursorTime(decoded) ? decoded : null;
+  const { items, nextCursor } = await loader(username, { cursor });
+
+  const olderHref =
+    nextCursor &&
+    `${basePath}?cursor=${encodeURIComponent(nextCursor)}${searchParams.as ? `&as=${searchParams.as}` : ""}`;
 
   return (
     <div className="proto-page-aside">
@@ -71,6 +92,11 @@ export async function PersonalHubFeed({
             ))
           )}
         </ol>
+        {olderHref ? (
+          <p className="proto-pagination">
+            <Link href={olderHref}>Older →</Link>
+          </p>
+        ) : null}
       </div>
     </div>
   );

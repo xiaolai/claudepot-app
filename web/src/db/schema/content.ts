@@ -6,8 +6,9 @@
  * by table would scatter the dependency map without a payoff.
  *
  * `submissions.score` is denormalized — maintained by the
- * `score_after_vote_change` trigger (see 0002_triggers.sql). Hot
- * rank is computed at query time via SQL expression in src/lib/rank.ts.
+ * `fn_submission_score_after_vote` trigger (see 0001_triggers.sql).
+ * Hot rank is computed at query time via the inlined SQL expression
+ * `HOT_RANK_EXPR` in src/db/queries.ts.
  */
 
 import {

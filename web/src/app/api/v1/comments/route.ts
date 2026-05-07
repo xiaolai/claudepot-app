@@ -13,7 +13,7 @@ import {
   rateLimited,
   validation,
 } from "@/lib/api/errors";
-import { created, preflight, problemResponse } from "@/lib/api/response";
+import { created, preflight, problemResponse , withErrorHandling } from "@/lib/api/response";
 import { commentInputSchema, createComment } from "@/lib/comments";
 import { endpointSpec } from "@/lib/api/manifest";
 import { chargeForSpec, checkAuthForSpec } from "@/lib/api/policy";
@@ -22,7 +22,7 @@ export async function OPTIONS(): Promise<Response> {
   return preflight();
 }
 
-export async function POST(req: Request): Promise<Response> {
+export const POST = withErrorHandling(async (req: Request): Promise<Response> => {
   const SPEC = endpointSpec("comments:create");
   const policy = await checkAuthForSpec(req, SPEC);
   if (!policy.ok) return policy.response;
@@ -105,4 +105,4 @@ export async function POST(req: Request): Promise<Response> {
     },
     `https://claudepot.com/post/${parsed.data.submissionId}#comment-${result.commentId}`,
   );
-}
+});

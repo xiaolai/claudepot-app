@@ -85,7 +85,14 @@ function discoverRoutes(): RouteInstance[] {
       } else if (isRouteFile(full)) {
         const url = "/api/v1" + (urlSegs.length > 0 ? "/" + urlSegs.join("/") : "");
         const content = readFileSync(full, "utf-8");
-        for (const m of content.matchAll(/^export async function (GET|POST|PATCH|DELETE)\(/gm)) {
+        // Match both shapes:
+        //   export async function GET(...)
+        //   export const GET = withErrorHandling(async (...))
+        const verbRe = /^export (?:async function|const) (GET|POST|PATCH|DELETE)\b/gm;
+        const seen = new Set<string>();
+        for (const m of content.matchAll(verbRe)) {
+          if (seen.has(m[1])) continue;
+          seen.add(m[1]);
           out.push({
             method: m[1] as HttpMethod,
             path: url,

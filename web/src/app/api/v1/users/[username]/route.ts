@@ -7,7 +7,7 @@
  */
 
 import { notFound } from "@/lib/api/errors";
-import { ok, preflight, problemResponse } from "@/lib/api/response";
+import { ok, preflight, problemResponse , withErrorHandling } from "@/lib/api/response";
 import { isUsername } from "@/lib/api/inputs";
 import { getUserByUsername } from "@/lib/api/queries";
 import { endpointSpec } from "@/lib/api/manifest";
@@ -17,10 +17,10 @@ export async function OPTIONS(): Promise<Response> {
   return preflight();
 }
 
-export async function GET(
+export const GET = withErrorHandling(async (
   req: Request,
   { params }: { params: Promise<{ username: string }> },
-): Promise<Response> {
+): Promise<Response> => {
   const { username } = await params;
   if (!isUsername(username)) {
     return problemResponse(notFound("Invalid username."));
@@ -37,4 +37,4 @@ export async function GET(
   const dto = await getUserByUsername(username);
   if (!dto) return problemResponse(notFound("User not found."));
   return ok(dto);
-}
+});

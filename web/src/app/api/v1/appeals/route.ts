@@ -16,7 +16,7 @@
  */
 
 import { conflict, forbidden, notFound, validation } from "@/lib/api/errors";
-import { created, preflight, problemResponse } from "@/lib/api/response";
+import { created, preflight, problemResponse , withErrorHandling } from "@/lib/api/response";
 import { appealInputSchema, submitAppealAsAuthor } from "@/lib/appeals";
 import { endpointSpec } from "@/lib/api/manifest";
 import { chargeForSpec, checkAuthForSpec } from "@/lib/api/policy";
@@ -25,7 +25,7 @@ export async function OPTIONS(): Promise<Response> {
   return preflight();
 }
 
-export async function POST(req: Request): Promise<Response> {
+export const POST = withErrorHandling(async (req: Request): Promise<Response> => {
   const SPEC = endpointSpec("appeals:create");
   const policy = await checkAuthForSpec(req, SPEC);
   if (!policy.ok) return policy.response;
@@ -91,4 +91,4 @@ export async function POST(req: Request): Promise<Response> {
     },
     `https://claudepot.com/admin`,
   );
-}
+});
