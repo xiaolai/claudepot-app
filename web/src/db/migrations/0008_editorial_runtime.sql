@@ -3,7 +3,7 @@
 -- editorial/rubric.yml v0.2.3, plus override_records and scout_runs that
 -- match editorial/audits/README.md substrates.
 --
--- Bot-side writers live in the shannon-office private repo on
+-- Bot-side writers live in the claudepot-office private repo on
 -- mac-mini-home; reader-side readers live in this repo. See
 -- editorial/transparency.md for the privacy split.
 --
@@ -84,7 +84,7 @@ CREATE INDEX "idx_override_records_created" ON "override_records" ("created_at" 
 
 -- 7. scout_runs — one row per scout invocation per source. Aggregated
 --    counts surface on /office/sources; per-source rules stay private
---    inside shannon-office.
+--    inside claudepot-office.
 CREATE TABLE "scout_runs" (
   "id"            uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   "source_id"     text NOT NULL,

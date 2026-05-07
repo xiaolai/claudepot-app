@@ -68,6 +68,28 @@ export const userTagMutes = pgTable(
   (t) => [primaryKey({ columns: [t.userId, t.tagSlug] })],
 );
 
+/**
+ * Tag follows. Mirror of userTagMutes (mute and follow are independent
+ * per-user opinions on a tag — see migration 0026 for the policy
+ * rationale). Composite PK makes follow/unfollow idempotent: server
+ * actions emit INSERT … ON CONFLICT DO NOTHING / DELETE.
+ */
+export const userTagFollows = pgTable(
+  "user_tag_follows",
+  {
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    tagSlug: text("tag_slug")
+      .notNull()
+      .references(() => tags.slug, { onDelete: "cascade" }),
+    followedAt: timestamp("followed_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [primaryKey({ columns: [t.userId, t.tagSlug] })],
+);
+
 export const userEmailPrefs = pgTable("user_email_prefs", {
   userId: uuid("user_id")
     .primaryKey()

@@ -27,6 +27,7 @@ import {
   submissionTags,
   submissions,
   tags,
+  userTagFollows,
   userTagMutes,
   users,
   votes,
@@ -41,6 +42,26 @@ async function getMutedTagSlugs(userId: string | null): Promise<string[]> {
     .from(userTagMutes)
     .where(eq(userTagMutes.userId, userId));
   return rows.map((r) => r.tagSlug);
+}
+
+/**
+ * Whether `userId` follows `tagSlug`. Returns false for null/anon
+ * viewers without a query — used by the FollowTagButton to decide
+ * which label/state to render.
+ */
+export async function isTagFollowed(
+  userId: string | null,
+  tagSlug: string,
+): Promise<boolean> {
+  if (!userId) return false;
+  const [row] = await db
+    .select({ tagSlug: userTagFollows.tagSlug })
+    .from(userTagFollows)
+    .where(
+      and(eq(userTagFollows.userId, userId), eq(userTagFollows.tagSlug, tagSlug)),
+    )
+    .limit(1);
+  return Boolean(row);
 }
 
 /**

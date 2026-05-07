@@ -1,8 +1,14 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { SubmissionRow } from "@/components/prototype/SubmissionRow";
+import { FollowTagButton } from "@/components/prototype/FollowTagButton";
 import { auth } from "@/lib/auth";
-import { getAllTags, getTagBySlug, getSubmissionsByTag } from "@/db/queries";
+import {
+  getAllTags,
+  getSubmissionsByTag,
+  getTagBySlug,
+  isTagFollowed,
+} from "@/db/queries";
 import { decodeCursor, isCursorTime } from "@/lib/api/cursor";
 
 /**
@@ -38,12 +44,14 @@ export default async function TagPage({
   if (!tag) notFound();
 
   const session = await auth();
+  const viewerId = session?.user?.id ?? null;
   const decoded = decodeCursor(sp.cursor);
   const cursor = decoded && isCursorTime(decoded) ? decoded : null;
-  const { items, nextCursor } = await getSubmissionsByTag(slug, {
-    viewerId: session?.user?.id ?? null,
-    cursor,
-  });
+  const [page, followed] = await Promise.all([
+    getSubmissionsByTag(slug, { viewerId, cursor }),
+    isTagFollowed(viewerId, slug),
+  ]);
+  const { items, nextCursor } = page;
 
   return (
     <div className="proto-page">
@@ -55,6 +63,11 @@ export default async function TagPage({
           <Link href="/c">All tags</Link> ·{" "}
           <Link href={`/api/rss/c/${slug}`}>RSS</Link>
         </p>
+        <FollowTagButton
+          tagSlug={slug}
+          initialFollowed={followed}
+          signedIn={Boolean(viewerId)}
+        />
       </header>
 
       <ol className="proto-feed">
