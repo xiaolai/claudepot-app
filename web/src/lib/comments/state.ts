@@ -13,6 +13,14 @@ import { and, eq } from "drizzle-orm";
 import { db } from "@/db/client";
 import { submissions, users } from "@/db/schema";
 
+// Mirrors KARMA_GATE_ENABLED in lib/submissions/state.ts. Pre-launch
+// the gate provides no signal — no user has karma, no user has prior
+// approved submissions — so every first comment lands in 'pending'
+// and disappears from the thread. Ada is the sole gate while this
+// is false. Re-enable once karma signal accumulates. Keep the two
+// flags moving together unless there's a specific reason to gate
+// comments more aggressively than submissions.
+const KARMA_GATE_ENABLED = false;
 const KARMA_AUTO_APPROVE = 50;
 
 export interface AuthorContext {
@@ -47,6 +55,7 @@ export async function determineInitialState(
   // would otherwise consume reviewer time + the daily comments bucket.
   if (ctx.role === "locked") return "locked";
   if (ctx.role === "staff" || ctx.role === "system") return "approved";
+  if (!KARMA_GATE_ENABLED) return "approved";
   if (ctx.karma >= KARMA_AUTO_APPROVE) return "approved";
 
   // Softer than submissions: any prior approved submission lifts the
