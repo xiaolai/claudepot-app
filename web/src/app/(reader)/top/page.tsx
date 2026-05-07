@@ -4,7 +4,6 @@ import { SubmissionRow } from "@/components/prototype/SubmissionRow";
 import { EmptyFeedState } from "@/components/prototype/EmptyFeedState";
 import { auth } from "@/lib/auth";
 import { getSubmissionsByTop } from "@/db/queries";
-import { decodeCursor, isCursorScore } from "@/lib/api/cursor";
 
 const RANGES = [
   { key: "day",  label: "Today" },
@@ -12,26 +11,27 @@ const RANGES = [
   { key: "all",  label: "All time" },
 ] as const;
 
+/**
+ * /top is a single-page leaderboard — no cursor pagination. The audit
+ * round-2 finding flagged that a (score, id) cursor on a mutable
+ * score column allows skip/duplicate at page boundaries when votes
+ * shift a row's score across the cursor between page reads. Users
+ * who want depth go to /new (immutable createdAt cursor) or filter
+ * by tag.
+ */
 export default async function TopFeed({
   searchParams,
 }: {
-  searchParams: Promise<{ range?: string; cursor?: string }>;
+  searchParams: Promise<{ range?: string }>;
 }) {
   const params = await searchParams;
   const range =
     params.range === "week" || params.range === "all" ? params.range : "day";
   const session = await auth();
-  const decoded = decodeCursor(params.cursor);
-  const cursor = decoded && isCursorScore(decoded) ? decoded : null;
-  const { items, nextCursor } = await getSubmissionsByTop({
+  const items = await getSubmissionsByTop({
     range,
     viewerId: session?.user?.id ?? null,
-    cursor,
   });
-
-  const olderHref =
-    nextCursor &&
-    `/top?${range !== "day" ? `range=${range}&` : ""}cursor=${encodeURIComponent(nextCursor)}`;
 
   return (
     <div className="proto-page">
@@ -56,11 +56,6 @@ export default async function TopFeed({
           ))
         )}
       </ol>
-      {olderHref ? (
-        <p className="proto-pagination">
-          <Link href={olderHref}>Older →</Link>
-        </p>
-      ) : null}
     </div>
   );
 }

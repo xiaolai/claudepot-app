@@ -55,30 +55,51 @@ const followInput = z.object({
  * states (see migration 0026); a tag can be muted-and-followed (e.g.
  * a user who wants the firehose-suppressed-from-feeds but visible on
  * the tag page).
+ *
+ * Returns `{ ok: false, reason: "unavailable" }` if migration 0026
+ * has not been applied to the target database yet — this lets the
+ * client surface a soft message instead of throwing a 500.
  */
 export async function followTag(
   input: unknown,
-): Promise<{ ok: true } | { ok: false; reason: "unauth" | "validation" }> {
+): Promise<
+  | { ok: true }
+  | { ok: false; reason: "unauth" | "validation" | "unavailable" }
+> {
   const session = await auth();
   if (!session?.user?.id) return { ok: false, reason: "unauth" };
 
   const parsed = followInput.safeParse(input);
   if (!parsed.success) return { ok: false, reason: "validation" };
 
-  if (parsed.data.followed) {
-    await db
-      .insert(userTagFollows)
-      .values({ userId: session.user.id, tagSlug: parsed.data.tagSlug })
-      .onConflictDoNothing();
-  } else {
-    await db
-      .delete(userTagFollows)
-      .where(
-        and(
-          eq(userTagFollows.userId, session.user.id),
-          eq(userTagFollows.tagSlug, parsed.data.tagSlug),
-        ),
-      );
+  try {
+    if (parsed.data.followed) {
+      await db
+        .insert(userTagFollows)
+        .values({ userId: session.user.id, tagSlug: parsed.data.tagSlug })
+        .onConflictDoNothing();
+    } else {
+      await db
+        .delete(userTagFollows)
+        .where(
+          and(
+            eq(userTagFollows.userId, session.user.id),
+            eq(userTagFollows.tagSlug, parsed.data.tagSlug),
+          ),
+        );
+    }
+  } catch (err) {
+    // Postgres SQLSTATE 42P01 — relation does not exist. See
+    // db/queries.ts:isUndefinedTable for the rationale.
+    if (
+      typeof err === "object" &&
+      err !== null &&
+      "code" in err &&
+      (err as { code?: unknown }).code === "42P01"
+    ) {
+      return { ok: false, reason: "unavailable" };
+    }
+    throw err;
   }
 
   revalidatePath(`/c/${parsed.data.tagSlug}`);

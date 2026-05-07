@@ -230,6 +230,12 @@ export async function listSubmissions(
         sql`(${submissions.createdAt}, ${submissions.id}) < (${cutoff}, ${input.cursor.id})`,
       );
     } else if (input.sort === "top" && isCursorScore(input.cursor)) {
+      // sort=top pagination is best-effort consistent: votes shifting
+      // a row's score between page reads can skip or duplicate that
+      // row at the cursor boundary. /api/v1/* clients that need a
+      // strict monotonic stream should use sort=new (cursor is on
+      // the immutable createdAt column). See the equivalent comment
+      // on db/queries.ts:getSubmissionsByTop.
       cond.push(
         sql`(${submissions.score}, ${submissions.id}) < (${input.cursor.s}, ${input.cursor.id})`,
       );
@@ -719,17 +725,19 @@ export type SearchResult =
   | { kind: "comment"; page: CursorPage<CommentDto> };
 
 /**
- * v0 implementation: Postgres ILIKE on title + url + text (submissions)
- * or body (comments). The PRD declares implementation freedom — pg_trgm
- * / FTS / external — so callers don't depend on ranking. ILIKE is the
- * conservative choice without a new index migration; the substring
- * match is escape-safe (drizzle parameterizes the value) and avoids
- * the surface-area of ts_query syntax errors leaking through user
- * input.
+ * Submission search: gates rows on Postgres FTS via
+ * `submissions.search_vec @@ websearch_to_tsquery('english', q)`.
+ * Same predicate the reader's /search page uses, so both surfaces
+ * share a single regression blast-radius if the FTS column is
+ * dropped (see .claude/rules/db-migrations.md).
  *
- * Sorted by createdAt DESC — relevance ranking is a follow-up when we
- * add an FTS index. The cursor uses the time-shaped form so the same
- * helper covers the feed.
+ * Comment search: still Postgres ILIKE on `comments.body` —
+ * comments have no FTS column. websearch_to_tsquery handles
+ * malformed input by returning an empty tsquery (no matches), so
+ * we don't need to pre-validate q for ts_query syntax.
+ *
+ * Sorted by createdAt DESC for both kinds. The cursor uses the
+ * time-shaped form so the same helper covers the feed.
  */
 export async function searchForApi(input: SearchInput): Promise<SearchResult> {
   // ESCAPE % and _ in the search term so user input can't unintendedly

@@ -1,10 +1,10 @@
 import type { ReactNode } from "react";
 import Link from "next/link";
-import { desc, eq, inArray } from "drizzle-orm";
+import { and, desc, eq, inArray, isNull } from "drizzle-orm";
 import { AtSign, Check, CornerDownRight } from "lucide-react";
 
 import { db } from "@/db/client";
-import { comments, notifications, users } from "@/db/schema";
+import { comments, notifications, submissions, users } from "@/db/schema";
 import { auth } from "@/lib/auth";
 import { relativeTime } from "@/lib/format";
 import { getCurrentUser } from "@/lib/auth-shim";
@@ -137,6 +137,12 @@ export default async function Notifications({
   type CommentEnrichment = { author: string; body: string };
   const commentMap = new Map<string, CommentEnrichment>();
   if (commentIds.length > 0) {
+    // Apply the same visibility filters the public thread renders
+    // with: only approved, non-deleted comments whose parent
+    // submission is itself approved and visible. Without these,
+    // a moderator-rejected reply or a soft-deleted comment would
+    // still leak its body into the recipient's notification snippet
+    // — even though the click-through would tombstone it.
     const rows = await db
       .select({
         id: comments.id,
@@ -145,7 +151,17 @@ export default async function Notifications({
       })
       .from(comments)
       .innerJoin(users, eq(users.id, comments.authorId))
-      .where(inArray(comments.id, commentIds));
+      .innerJoin(submissions, eq(submissions.id, comments.submissionId))
+      .where(
+        and(
+          inArray(comments.id, commentIds),
+          eq(comments.state, "approved"),
+          isNull(comments.deletedAt),
+          eq(submissions.state, "approved"),
+          isNull(submissions.deletedAt),
+          isNull(submissions.unlistedAt),
+        ),
+      );
     for (const r of rows) {
       commentMap.set(r.id, { author: r.author, body: r.body });
     }

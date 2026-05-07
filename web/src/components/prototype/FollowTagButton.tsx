@@ -41,14 +41,23 @@ export function FollowTagButton({
     const next = !followed;
     setFollowed(next);
     startTransition(async () => {
-      const result = await followTag({ tagSlug, followed: next });
-      if (!result.ok) {
+      try {
+        const result = await followTag({ tagSlug, followed: next });
+        if (!result.ok) {
+          setFollowed(!next);
+          setError(
+            result.reason === "unauth"
+              ? "Sign in first."
+              : result.reason === "unavailable"
+                ? "Follow isn't available yet on this deployment."
+                : "Couldn't update. Try again.",
+          );
+        }
+      } catch {
+        // Server action threw (e.g. DB exception, network drop). Roll
+        // the optimistic flip back so the UI matches reality.
         setFollowed(!next);
-        setError(
-          result.reason === "unauth"
-            ? "Sign in first."
-            : "Couldn't update. Try again.",
-        );
+        setError("Couldn't update. Try again.");
       }
     });
   }

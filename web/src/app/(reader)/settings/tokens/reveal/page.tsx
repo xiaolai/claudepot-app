@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { redirect } from "next/navigation";
 
+import { auth } from "@/lib/auth";
 import { consumeRevealCookie } from "@/lib/api/reveal-cookie";
 import { CopyButton } from "./CopyButton";
 
@@ -9,19 +10,32 @@ import { CopyButton } from "./CopyButton";
  *
  * Reads the encrypted reveal cookie set by mintApiTokenFormAction,
  * deletes it (single-use), and renders the plaintext server-side
- * directly into HTML. The plaintext is NOT a prop on a client
- * component — only the small CopyButton is client-side, and it gets
- * the value via a defaultValue/inputRef pattern that the user can
- * reach but the React tree doesn't retain after copy.
+ * directly into HTML. The plaintext IS passed as a prop to
+ * CopyButton (a client component) for the clipboard write — meaning
+ * it does enter the React client heap for this single page render.
+ * The improvement over the previous useActionState flow is scope:
+ * the value lives only inside this leaf component until the user
+ * navigates away (the page is `force-dynamic`, so BFCache won't
+ * stash it). The previous flow held it in the mint-form's React
+ * state across re-renders and route changes.
  *
  * If the cookie is missing or invalid (direct visit, expired window,
- * already-consumed), redirect back to /settings/tokens — the user
+ * already-consumed, or the minting user no longer matches the
+ * current session), redirect back to /settings/tokens — the user
  * has nothing to do here without a payload.
  */
 export const dynamic = "force-dynamic";
 
 export default async function TokenRevealPage() {
-  const payload = await consumeRevealCookie();
+  const session = await auth();
+  // No session → bounce to login before touching the cookie. We
+  // intentionally don't consume here so a brief network blip doesn't
+  // burn the user's reveal window; once they log back in within the
+  // 120s TTL the redeem still works.
+  if (!session?.user?.id) {
+    redirect("/login?callbackUrl=/settings/tokens/reveal");
+  }
+  const payload = await consumeRevealCookie(session.user.id);
   if (!payload) {
     redirect("/settings/tokens");
   }

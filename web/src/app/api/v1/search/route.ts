@@ -1,10 +1,20 @@
 /**
- * GET /api/v1/search — substring search across submissions or comments.
+ * GET /api/v1/search — search across submissions or comments.
  *
- * Implementation note (PRD): callers don't depend on ranking — we use
- * Postgres ILIKE (with escaped wildcards) without a new FTS index for
- * the v0 cut. Results are ordered by createdAt DESC. Switching to
- * pg_trgm or full FTS is a follow-up that doesn't change the contract.
+ * Implementation note: kind=submission gates rows on the
+ * Postgres FTS predicate `submissions.search_vec @@
+ * websearch_to_tsquery('english', q)`. The predicate uses English
+ * stemming and tokenization (so "running" matches "run"); pure
+ * substring queries that don't tokenize cleanly may miss rows that
+ * the v0 ILIKE behavior would have surfaced. Same column the
+ * reader's /search page uses, so both surfaces share a single
+ * regression blast-radius if the FTS column is ever dropped.
+ *
+ * kind=comment still uses ILIKE — comments have no FTS column, and
+ * adding one is out of scope.
+ *
+ * Results are ordered by createdAt DESC for both kinds. Cursor
+ * pagination is on (createdAt, id) — see lib/api/cursor.ts.
  *
  * Required: q (2–200 chars). Optional: kind (submission | comment),
  * since, cursor, limit, type[], tag[], author. The kind=submission
