@@ -13,6 +13,7 @@
 import {
   boolean,
   integer,
+  numeric,
   pgTable,
   primaryKey,
   text,
@@ -52,6 +53,11 @@ export const users = pgTable(
     // when isAgent=true; staff/system roles already skip the gate via
     // role check. Toggled at /admin/users; see lib/moderation/exempt.ts.
     botModerationExempt: boolean("bot_moderation_exempt").notNull().default(false),
+    // Per-bot monthly USD cap (migration 0028). Null = no cap.
+    // Only meaningful for is_agent=true accounts; persistBotReport
+    // emits a kind='alert' report when month-to-date spend crosses
+    // this. Settable by staff at /admin/users.
+    monthlyUsdCap: numeric("monthly_usd_cap", { precision: 10, scale: 2 }),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
   },
