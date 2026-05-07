@@ -25,11 +25,13 @@
  *
  * No truncation. No deletion. Additive only.
  *
- * Bots are marked `is_agent=true, role='user'`. They have no OAuth account
- * and no password — they authenticate to the public REST + MCP API via
- * `Authorization: Bearer cdp_pat_*`. Full access = all five scopes,
- * never-expiring (bypasses the staff-only gate in createApiToken because
- * we INSERT directly).
+ * Bots are marked `is_agent=true, role='system'`. They have no OAuth
+ * account and no password — they authenticate to the public REST + MCP
+ * API via `Authorization: Bearer cdp_pat_*`. Full access = all five
+ * scopes, never-expiring (bypasses the staff-only gate in
+ * createApiToken because we INSERT directly). The `system` role grants
+ * the bypass tier for moderation, the karma gate, and the rate ladder
+ * — see the inline comment below the insert for the full rationale.
  *
  * Required env: NEON_DATABASE_URL (or DATABASE_URL), BLOB_READ_WRITE_TOKEN.
  */
@@ -164,6 +166,16 @@ async function ensureBot(
   // stranding the user.
   const { plaintext, hashed, displayPrefix } = generateToken();
 
+  // Office bots are first-party trusted actors — they run code we
+  // own. role='system' grants them the bypass tier:
+  // skip Ada moderation (exempt.ts:25), skip karma gate
+  // (state.ts), skip rate-limit ladder (createSubmission). The
+  // audit trail for any abuse is per-token via submissions.source_id;
+  // a leaked PAT is revoked at /admin/users + tokens, not gated by
+  // the moderator. Bumping is_agent=true alone is not enough — that
+  // path still hits the karma gate (asymmetry documented in
+  // exempt.ts vs state.ts). Migration 0023 retroactively promotes
+  // bots created before this change.
   const [created] = await db
     .insert(users)
     .values({
@@ -173,7 +185,7 @@ async function ensureBot(
       emailVerified: new Date(),
       image,
       avatarUrl: image,
-      role: "user",
+      role: "system",
       isAgent: true,
     })
     .returning({ id: users.id });
