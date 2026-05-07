@@ -36,8 +36,8 @@ if ! command -v iconutil >/dev/null; then
   echo "error: iconutil not found. macOS-only tool — run this on a Mac." >&2
   exit 1
 fi
-if ! command -v magick >/dev/null; then
-  echo "error: ImageMagick (magick) not found. Install via 'brew install imagemagick'." >&2
+if ! python3 -c "from PIL import Image" 2>/dev/null; then
+  echo "error: PIL/Pillow not found. Install via 'pip3 install Pillow' or 'brew install python-pillow'." >&2
   exit 1
 fi
 
@@ -65,19 +65,45 @@ done
 iconutil -c icns "$SET" -o "$ICONS_DIR/icon.icns"
 echo "  wrote $ICONS_DIR/icon.icns"
 
-# 3. Windows .ico — Microsoft spec sizes (16, 24, 32, 48, 64, 256),
-#    PNG-compressed inside .ico via magick. Each layer rendered fresh
-#    from SVG so pixel content is crisp.
+# 3. Windows .ico — Microsoft spec sizes (16, 24, 32, 48, 64, 256).
+#    PIL writes each ICO layer as a PNG-compressed sub-image, which is
+#    what Vista+ Windows expects (ImageMagick's `magick *.png foo.ico`
+#    falls back to raw BMP per layer and bloats the file ~100×).
 ICO_PNGS=$(mktemp -d -t claudepot-ico)
 for size in 16 24 32 48 64 256; do
   rsvg-convert -w "$size" -h "$size" "$SVG" -o "$ICO_PNGS/$size.png"
 done
-# `magick` stores layers ≥256 as PNG-compressed automatically; for
-# smaller layers it defaults to BMP which bloats the file. Force PNG
-# for all by using the per-layer PNG-format directive.
-magick "$ICO_PNGS/16.png" "$ICO_PNGS/24.png" "$ICO_PNGS/32.png" \
-       "$ICO_PNGS/48.png" "$ICO_PNGS/64.png" "$ICO_PNGS/256.png" \
-       -define ico:format=png "$ICONS_DIR/icon.ico"
+python3 - "$ICO_PNGS" "$ICONS_DIR/icon.ico" <<'PY'
+"""Build a multi-layer .ico whose every layer is a PNG-compressed
+copy of the matching pre-rendered file. Embedding raw PNG bytes
+avoids any decoder/resizer round-trip, so the bitmap content is
+exactly what rsvg produced. PIL's ICO writer would re-encode and
+resize from a single source — the wrong shape for this task.
+
+Format reference: ICONDIR + 6 ICONDIRENTRYs + 6 PNG payloads."""
+import struct, sys
+from pathlib import Path
+
+src_dir, out_path = Path(sys.argv[1]), Path(sys.argv[2])
+sizes = [16, 24, 32, 48, 64, 256]
+payloads = [(src_dir / f"{s}.png").read_bytes() for s in sizes]
+
+# ICONDIR = reserved (2) + type (2, 1=ICO) + count (2)
+header = struct.pack("<HHH", 0, 1, len(sizes))
+# Each ICONDIRENTRY = 16 bytes; payloads start after header + N entries.
+entries_start = len(header) + 16 * len(sizes)
+offset = entries_start
+entries, blob = b"", b""
+for size, payload in zip(sizes, payloads):
+    # Width/height of 0 means 256+ in the ICO format.
+    w = h = 0 if size >= 256 else size
+    # ICONDIRENTRY: w(1) h(1) colors(1) reserved(1) planes(2) bpp(2) size(4) offset(4)
+    entries += struct.pack("<BBBBHHII", w, h, 0, 0, 1, 32, len(payload), offset)
+    blob += payload
+    offset += len(payload)
+
+out_path.write_bytes(header + entries + blob)
+PY
 echo "  wrote $ICONS_DIR/icon.ico"
 
 echo ""

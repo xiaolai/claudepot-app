@@ -1,22 +1,35 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="0 0 512 512" shape-rendering="crispEdges">
-<rect x="51" y="51" width="410" height="410" rx="74" ry="74" fill="#E8833A"/>
-<rect x="234" y="124" width="44" height="22" fill="#000000"/>
-<rect x="212" y="146" width="88" height="22" fill="#000000"/>
-<rect x="190" y="168" width="132" height="22" fill="#000000"/>
-<rect x="168" y="190" width="176" height="22" fill="#000000"/>
-<rect x="146" y="212" width="220" height="22" fill="#000000"/>
-<rect x="124" y="234" width="264" height="22" fill="#000000"/>
-<rect x="102" y="256" width="88" height="22" fill="#000000"/>
-<rect x="212" y="256" width="88" height="22" fill="#000000"/>
-<rect x="322" y="256" width="88" height="22" fill="#000000"/>
-<rect x="146" y="278" width="44" height="22" fill="#000000"/>
-<rect x="212" y="278" width="88" height="22" fill="#000000"/>
-<rect x="322" y="278" width="44" height="22" fill="#000000"/>
-<rect x="146" y="300" width="220" height="22" fill="#000000"/>
-<rect x="146" y="322" width="220" height="22" fill="#000000"/>
-<rect x="146" y="344" width="220" height="22" fill="#000000"/>
-<rect x="146" y="366" width="44" height="22" fill="#000000"/>
-<rect x="212" y="366" width="22" height="22" fill="#000000"/>
-<rect x="278" y="366" width="22" height="22" fill="#000000"/>
-<rect x="322" y="366" width="44" height="22" fill="#000000"/>
+<!--
+  Every coordinate is a multiple of 16 so the SVG rasterizes
+  pixel-perfectly at every Apple/Microsoft/freedesktop icon size:
+  32, 64, 128, 256, 512, 1024 (and 48 with one half-pixel row).
+  The earlier 22-px pixel-art grid produced sub-pixel rect edges
+  at 128/256, which rsvg's antialiasing rendered as soft borders;
+  hence the visible Dock blur in 0.1.13–0.1.16.
+-->
+<rect x="48" y="48" width="416" height="416" rx="74" ry="74" fill="#E8833A"/>
+<!-- Roof, peak to base -->
+<rect x="240" y="160" width="32"  height="16" fill="var(--mask-opaque)"/>
+<rect x="224" y="176" width="64"  height="16" fill="var(--mask-opaque)"/>
+<rect x="208" y="192" width="96"  height="16" fill="var(--mask-opaque)"/>
+<rect x="192" y="208" width="128" height="16" fill="var(--mask-opaque)"/>
+<rect x="176" y="224" width="160" height="16" fill="var(--mask-opaque)"/>
+<rect x="160" y="240" width="192" height="16" fill="var(--mask-opaque)"/>
+<!-- Eaves row (gaps for windows) -->
+<rect x="144" y="256" width="64"  height="16" fill="var(--mask-opaque)"/>
+<rect x="224" y="256" width="64"  height="16" fill="var(--mask-opaque)"/>
+<rect x="304" y="256" width="64"  height="16" fill="var(--mask-opaque)"/>
+<!-- Window-divider row -->
+<rect x="176" y="272" width="32"  height="16" fill="var(--mask-opaque)"/>
+<rect x="224" y="272" width="64"  height="16" fill="var(--mask-opaque)"/>
+<rect x="304" y="272" width="32"  height="16" fill="var(--mask-opaque)"/>
+<!-- Body -->
+<rect x="176" y="288" width="160" height="16" fill="var(--mask-opaque)"/>
+<rect x="176" y="304" width="160" height="16" fill="var(--mask-opaque)"/>
+<rect x="176" y="320" width="160" height="16" fill="var(--mask-opaque)"/>
+<!-- Legs / stilts -->
+<rect x="176" y="336" width="32"  height="16" fill="var(--mask-opaque)"/>
+<rect x="224" y="336" width="16"  height="16" fill="var(--mask-opaque)"/>
+<rect x="256" y="336" width="16"  height="16" fill="var(--mask-opaque)"/>
+<rect x="304" y="336" width="32"  height="16" fill="var(--mask-opaque)"/>
 </svg>
