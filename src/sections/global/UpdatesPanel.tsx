@@ -31,6 +31,25 @@ function compareVersions(installed: string | null, latest: string | null): Compa
   return "equal";
 }
 
+/**
+ * Build a truthful confirmation string for a manual install. The user
+ * can click "Update now" or "Reinstall" — both invoke the same Tauri
+ * command, so we infer what actually happened from the version diff
+ * instead of trusting the button label. `after === null` means the
+ * subprocess reported success but the post-install version probe
+ * couldn't confirm a number.
+ */
+function describeInstallOutcome(
+  surface: string,
+  before: string | null,
+  after: string | null,
+): string {
+  if (after && before === after) return `${surface} reinstalled (${after})`;
+  if (after && before) return `${surface} updated from ${before} to ${after}`;
+  if (after) return `${surface} installed at ${after}`;
+  return `${surface} install completed`;
+}
+
 function formatRelativeTime(unix: number | null): string {
   if (!unix) return "never";
   const now = Date.now() / 1000;
@@ -93,7 +112,11 @@ function CliCard({
 
   return (
     <Card>
-      <CardHeader title="CC CLI" subtitle={`installed: ${installed ?? "unknown"}`} badge={<StatusBadge comparison={comparison} />} />
+      <CardHeader
+        title="CC CLI"
+        subtitle={installed ? `installed: ${installed}` : "not installed"}
+        badge={installed ? <StatusBadge comparison={comparison} /> : undefined}
+      />
       <Row label="Latest">
         {latest ?? <em style={{ color: "var(--fg-faint)" }}>network probe failed</em>}
         {cli.last_check_unix && (
@@ -155,7 +178,7 @@ function CliCard({
       )}
       <Actions
         primary={{
-          label: comparison === "older" ? "Update now" : "Update anyway",
+          label: comparison === "older" ? "Update now" : "Reinstall",
           onClick: onInstall,
           disabled: busy || disabledReason !== null,
           glyph: NF.download,
@@ -233,7 +256,7 @@ function DesktopCard({
       </Row>
       <Actions
         primary={{
-          label: comparison === "older" ? "Update now" : "Update anyway",
+          label: comparison === "older" ? "Update now" : "Reinstall",
           onClick: onInstall,
           disabled: busy || disabledReason !== null,
           glyph: NF.download,
@@ -784,31 +807,28 @@ export function UpdatesPanel() {
     setBusy(true);
     setError(null);
     setInfo(null);
+    const before =
+      status?.cli.installs.find((i) => i.is_active)?.version ?? null;
     try {
       const res = await api.updatesCliInstall();
-      setInfo(
-        res.installed_after
-          ? `Active install: ${res.installed_after}`
-          : "Update completed",
-      );
+      setInfo(describeInstallOutcome("CC CLI", before, res.installed_after));
       await refresh(true);
     } catch (e: unknown) {
       setError(String(e));
     } finally {
       setBusy(false);
     }
-  }, [refresh]);
+  }, [refresh, status]);
 
   const onDesktopInstall = useCallback(async () => {
     setBusy(true);
     setError(null);
     setInfo(null);
+    const before = status?.desktop.install?.version ?? null;
     try {
       const res = await api.updatesDesktopInstall();
       setInfo(
-        res.version_after
-          ? `Installed Claude.app ${res.version_after} (via ${res.method})`
-          : `Update completed via ${res.method}`,
+        describeInstallOutcome("Claude Desktop", before, res.version_after),
       );
       await refresh(true);
     } catch (e: unknown) {
@@ -816,7 +836,7 @@ export function UpdatesPanel() {
     } finally {
       setBusy(false);
     }
-  }, [refresh]);
+  }, [refresh, status]);
 
   const setSettingsField = useCallback(
     async (
