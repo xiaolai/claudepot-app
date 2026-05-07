@@ -169,6 +169,29 @@ imported codebase are absorbed.
 `dev-docs/kannon/reference.md` — 3400-line verified reference for CC/Desktop internals.
 Always verify claims against CC source at `~/github/claude_code_src/src` before coding.
 
+## Icon assets
+
+Full post-mortem of the v0.1.13–0.1.19 Dock-blur arc is in
+`dev-docs/icon-design-notes.md`. Load-bearing rules:
+
+- **SVG must use a power-of-2-friendly grid.** Cell sizes 16, 24,
+  32, 64 in a 512-px viewBox. Avoid 22, 28, 30 — they don't divide
+  128/256 cleanly and rsvg AA-softens at every Dock size.
+- **Generate raster icons via `scripts/regen-icons.sh`,
+  not `pnpm tauri icon`.** The latter uses lossy resampling for
+  some `.icns` layers and produces ~50 dead-byte files for targets
+  we don't ship (iOS, Android, MSIX). Our script uses
+  `rsvg-convert` + `iconutil` + a manual ICO struct-pack that
+  embeds PNG-compressed layers verbatim.
+- **`src-tauri/src/dock_icon.rs` calls `setApplicationIconImage`
+  with `icon.png` (512×512) at startup on macOS.** This is required
+  — Tauri's runtime only does this in dev mode. Without it, prod
+  Dock at default size (96 px on Retina) renders the `.icns` 128
+  layer downscaled bilinearly and looks visibly soft. The 512-px
+  source means every Dock size is a clean Lanczos downsample.
+- **`pnpm tauri icon`'s output paths are `.gitignore`'d** so a
+  stray invocation can't re-stage MSIX/iOS/Android dead bytes.
+
 ## Conventions
 
 - Grill reports go in `dev-docs/reports/`. Never drop them at the repo root.
