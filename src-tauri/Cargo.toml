@@ -49,17 +49,5 @@ notify-debouncer-mini.workspace = true
 sha2.workspace = true
 hex.workspace = true
 
-[target.'cfg(target_os = "macos")'.dependencies]
-# Force the macOS application icon at runtime via NSApplication's
-# `setApplicationIconImage`. Tauri's runtime only does this in dev
-# (search `setApplicationIconImage` in tauri's `app.rs`). Without
-# this, prod falls back to the legacy IconServices `.icns` render
-# pipeline, which anti-aliases pixel-art icons softly at every
-# non-integer downscale. Calling it ourselves at startup mirrors
-# dev's pipeline and keeps the Dock icon crisp.
-objc2 = "0.6"
-objc2-app-kit = { version = "0.3", features = ["NSApplication", "NSImage"] }
-objc2-foundation = { version = "0.3", features = ["NSData"] }
-
 [dev-dependencies]
 tempfile.workspace = true
