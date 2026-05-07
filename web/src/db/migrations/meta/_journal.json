@@ -27,6 +27,7 @@
     { "idx": 22, "version": "7", "when": 1778316000000, "tag": "0022_ai_tagging",                  "breakpoints": true },
     { "idx": 23, "version": "7", "when": 1778400000000, "tag": "0023_bots_to_system",              "breakpoints": true },
     { "idx": 24, "version": "7", "when": 1778400001000, "tag": "0024_approve_passed_pending",      "breakpoints": true },
-    { "idx": 25, "version": "7", "when": 1778500000000, "tag": "0025_bot_reports",                  "breakpoints": true }
+    { "idx": 25, "version": "7", "when": 1778500000000, "tag": "0025_bot_reports",                  "breakpoints": true },
+    { "idx": 26, "version": "7", "when": 1778600000000, "tag": "0026_user_tag_follows",              "breakpoints": true }
   ]
 }
