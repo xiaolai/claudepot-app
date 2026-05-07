@@ -3,6 +3,8 @@ mod commands;
 mod config_dto;
 mod config_watch;
 mod config_watch_types;
+#[cfg(target_os = "macos")]
+mod dock_icon;
 mod dto;
 mod dto_account;
 mod dto_activity;
@@ -235,6 +237,14 @@ pub fn run() {
             if hide_dock {
                 app.set_activation_policy(tauri::ActivationPolicy::Accessory);
             }
+
+            // Force the Dock icon through Cocoa's NSImage pipeline
+            // with our 512×512 source so non-128 Dock sizes (the
+            // default 96-px render in particular) get high-quality
+            // Lanczos downsampling instead of the legacy IconServices
+            // bilinear-from-128-layer path. See `dock_icon.rs`.
+            #[cfg(target_os = "macos")]
+            dock_icon::override_application_icon();
 
             // Honor the "show window on startup" preference. The window
             // is configured `visible: true` in tauri.conf.json so the
