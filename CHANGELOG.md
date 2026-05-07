@@ -6,6 +6,37 @@ Versioning scheme:
 - `0.1.x` — beta
 - `1.0.0+` — stable
 
+## 0.1.20 — beta (2026-05-07)
+
+### Added
+
+- **Global → Tips: a searchable ledger of CC's spinner tips.** New
+  sub-tab in Global that extracts the tip registry directly from
+  the user's installed CC binary (Bun-compiled binaries embed the
+  JS source as ASCII; no network call required), joins against
+  `~/.claude.json::tipsHistory` to mark seen / never-seen rows,
+  and time-resolves "last seen" via a Claudepot-side snapshot log
+  that converts CC's count-based ledger into wall-clock deltas.
+  Surfaces categories (12 buckets), plain-English trigger
+  summaries, A/B variant disclosure with the GrowthBook flag name,
+  platform-conditional branches (Apple Terminal vs Shift+Enter),
+  shortcut interpolation against the user's keybindings, and the
+  raw `isRelevant` source under a "Show advanced trigger logic"
+  disclosure. 47 of 53 known tips extracted from CC 2.1.132 on
+  first launch; format drift is caught by an integration test
+  against the real binary. Lives at `claudepot-core::cc_tips` —
+  pure Rust, no JS parser dependency.
+
+### Changed
+
+- **Global tab order**: Config → Memory → Tips → Updates. Tips
+  ships before Updates so the page where the user looks for "what
+  did I miss?" sits above the maintenance surface.
+
+### Fixed
+
+- _…_
+
 ## 0.1.19 — beta (2026-05-07)
 
 ### Fixed

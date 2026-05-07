@@ -9,6 +9,7 @@ mod dto;
 mod dto_account;
 mod dto_activity;
 mod dto_activity_cards;
+mod dto_cc_tips;
 mod dto_artifact_lifecycle;
 mod dto_artifact_usage;
 mod dto_automations;
@@ -660,6 +661,9 @@ pub fn run() {
             commands::usage_local::pricing_tier_set,
             commands::usage_local::top_costly_prompts,
             commands::memory_health::memory_health_get,
+            commands::cc_tips::cc_tips_list,
+            commands::cc_tips::cc_tips_refresh,
+            commands::cc_tips::cc_tips_record_view,
             commands::memory::memory_list_for_project,
             commands::memory::memory_read_file,
             commands::memory::memory_change_log,
