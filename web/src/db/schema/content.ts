@@ -23,6 +23,7 @@ import {
   timestamp,
   uuid,
 } from "drizzle-orm/pg-core";
+import { sql } from "drizzle-orm";
 
 import {
   contentStateEnum,
@@ -176,6 +177,13 @@ export const comments = pgTable(
     index("idx_comments_submission_created").on(t.submissionId, t.createdAt),
     index("idx_comments_parent").on(t.parentId),
     index("idx_comments_author").on(t.authorId),
+    // Migration 0031 — partial covering index for the public-feed
+    // /u/[username] Comments tab + /api/v1/users/[username]/comments.
+    // Both filter on (author_id, state='approved', deleted_at IS NULL)
+    // and order by created_at DESC.
+    index("idx_comments_author_visible_created")
+      .on(t.authorId, t.createdAt.desc())
+      .where(sql`${t.state} = 'approved' AND ${t.deletedAt} IS NULL`),
   ],
 );
 

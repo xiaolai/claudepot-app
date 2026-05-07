@@ -63,6 +63,12 @@ export type NotificationDto = {
 export type ListNotificationsResult = {
   items: NotificationDto[];
   unreadCount: number;
+  /**
+   * True iff there are more rows beyond the returned page. Polling
+   * bots should re-poll with `since` advanced to the oldest item's
+   * createdAt to drain the rest before treating the inbox as caught up.
+   */
+  hasMore: boolean;
 };
 
 export async function listNotificationsForUser(
@@ -77,20 +83,14 @@ export async function listNotificationsForUser(
     conditions.push(inArray(notifications.kind, input.kinds));
   }
 
-  // ORDER BY DESC + LIMIT N returns the newest N matching rows.
-  // For incremental polling (`since` provided), this returns the
-  // newest N items strictly after the boundary.
-  //
-  // Trade-off: if more than `limit` items arrive between two polls,
-  // the older ones in that window are missed (the cursor advances to
-  // the newest seen, skipping the gap). Bots avoiding backlog must
-  // poll often enough that any window stays under `limit` (default
-  // 50, max 200). Acceptable for the typical use case (one bot, one
-  // user's inbox, polling every minute or two — > 50 events/min on
-  // one user is implausible). Adding a `nextCursor` / `hasMore`
-  // pagination response is the right fix when this assumption
-  // breaks; not in scope today.
-  const rows = await db
+  // ORDER BY DESC + LIMIT N+1 lets us return the newest N items
+  // plus a `hasMore` flag. Bots polling with `since` can keep
+  // draining (advancing the next poll's `since` to the oldest item
+  // they've seen and re-polling) until hasMore=false. Without
+  // hasMore, a poll that overflowed `limit` would silently miss
+  // every event older than the newest `limit` returned — the cursor
+  // would advance past the gap on the next poll.
+  const rowsPlusOne = await db
     .select({
       id: notifications.id,
       kind: notifications.kind,
@@ -101,7 +101,9 @@ export async function listNotificationsForUser(
     .from(notifications)
     .where(and(...conditions))
     .orderBy(desc(notifications.createdAt))
-    .limit(limit);
+    .limit(limit + 1);
+  const hasMore = rowsPlusOne.length > limit;
+  const rows = hasMore ? rowsPlusOne.slice(0, limit) : rowsPlusOne;
 
   // Unread count is over the FULL inbox, not the filtered slice — bots
   // need the inbox-wide unread count to decide whether to keep polling
@@ -121,6 +123,7 @@ export async function listNotificationsForUser(
       readAt: r.readAt?.toISOString() ?? null,
     })),
     unreadCount,
+    hasMore,
   };
 }
 

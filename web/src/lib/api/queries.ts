@@ -30,6 +30,7 @@ import {
   users,
   votes,
 } from "@/db/schema";
+import { ftsSubmissionMatch } from "@/db/search-predicate";
 import {
   encodeCursor,
   isCursorScore,
@@ -164,14 +165,29 @@ function submissionSelectColumns(viewerId: string) {
     authorAvatarUrl: users.avatarUrl,
     authorImage: users.image,
     authorIsAgent: users.isAgent,
+    // Mirror the web-side query: exclude pending_review=true tags
+    // from public DTOs. Migration 0022 added the column; without
+    // this filter an Ada-proposed tag awaiting staff review would
+    // surface on /api/v1/submissions and chip-link to a pending
+    // /api/v1/tags/<slug> that 404s after the tag query's gate.
     tagSlugs: sql<string[]>`COALESCE(ARRAY(
       SELECT ${submissionTags.tagSlug}
       FROM ${submissionTags}
+      INNER JOIN ${tags} ON ${tags.slug} = ${submissionTags.tagSlug}
       WHERE ${submissionTags.submissionId} = ${submissions.id}
+        AND ${tags.pendingReview} = false
     ), ARRAY[]::text[])`,
     voteCount: sql<number>`(SELECT COUNT(*)::int FROM ${votes} WHERE ${votes.submissionId} = ${submissions.id})`,
     saveCount: sql<number>`(SELECT COUNT(*)::int FROM ${saves} WHERE ${saves.submissionId} = ${submissions.id})`,
-    commentCount: sql<number>`(SELECT COUNT(*)::int FROM ${comments} WHERE ${comments.submissionId} = ${submissions.id} AND ${comments.deletedAt} IS NULL)`,
+    // Public count must not leak moderation activity: only count
+    // approved, non-deleted comments. The same predicate is mirrored
+    // in db/queries.ts for the web feed.
+    commentCount: sql<number>`(
+      SELECT COUNT(*)::int FROM ${comments}
+      WHERE ${comments.submissionId} = ${submissions.id}
+        AND ${comments.state} = 'approved'
+        AND ${comments.deletedAt} IS NULL
+    )`,
     viewerVoteValue: sql<
       number | null
     >`(SELECT ${votes.value} FROM ${votes} WHERE ${votes.submissionId} = ${submissions.id} AND ${votes.userId} = ${viewerId} LIMIT 1)`,
@@ -676,6 +692,11 @@ export async function listTagsForApi(
       submissionCount: visibleSubmissionCountForTag,
     })
     .from(tags)
+    // Hide pending-review tags from the public API; the reader's
+    // /c page also filters them out, and a /api/v1/tags/<pending>
+    // detail call would expose a slug that should not be visible
+    // until staff approves. Migration 0022 added pending_review.
+    .where(eq(tags.pendingReview, false))
     .orderBy(
       sort === "count" ? sql`${visibleSubmissionCountForTag} DESC` : tags.name,
     );
@@ -696,7 +717,7 @@ export async function getTagBySlugForApi(
       submissionCount: visibleSubmissionCountForTag,
     })
     .from(tags)
-    .where(eq(tags.slug, slug))
+    .where(and(eq(tags.slug, slug), eq(tags.pendingReview, false)))
     .limit(1);
   if (!row) return null;
   return {
@@ -748,17 +769,16 @@ export async function searchForApi(input: SearchInput): Promise<SearchResult> {
 
   if (input.kind === "submission") {
     // Submissions are gated by the FTS index on `submissions.search_vec`
-    // (see migration 0003). Same operator the reader's /search page
-    // uses, so both surfaces share a single regression blast-radius:
-    // if `search_vec` is ever dropped (the `db-migrations.md` rule
-    // exists because that has happened), both hard-fail together
-    // rather than diverging.
-    const tsQuery = sql`websearch_to_tsquery('english', ${input.q})`;
+    // (see migration 0003). Same predicate the reader's /search page
+    // uses — extracted to db/search-predicate.ts so a future change
+    // flows through one edit. If `search_vec` is ever dropped (the
+    // `db-migrations.md` rule exists because that has happened), both
+    // surfaces hard-fail together rather than diverging.
     const cond = [
       isNull(submissions.deletedAt),
       isNull(submissions.unlistedAt),
       eq(submissions.state, "approved"),
-      sql`${submissions}.search_vec @@ ${tsQuery}`,
+      ftsSubmissionMatch(input.q),
     ];
     if (input.since) cond.push(gte(submissions.createdAt, input.since));
     if (input.types && input.types.length > 0) {

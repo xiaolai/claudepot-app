@@ -2,6 +2,7 @@ import { sql } from "drizzle-orm";
 
 import { db } from "@/db/client";
 import { comments, submissions, users } from "@/db/schema";
+import { ftsTsQuery } from "@/db/search-predicate";
 import { SubmissionRow } from "@/components/prototype/SubmissionRow";
 import { deriveDomain } from "@/lib/url";
 
@@ -20,9 +21,21 @@ type SearchRow = {
   author_username: string;
 };
 
+/**
+ * Reader-side FTS search. Sibling to lib/api/queries.ts:searchForApi:
+ * both gate rows on `submissions.search_vec @@ websearch_to_tsquery
+ * ('english', q)` so a future drop of the FTS column fails both
+ * surfaces together. The two diverge on ordering (this page ranks by
+ * ts_rank for browse-time relevance; the API orders by createdAt for
+ * cursor-stable pagination) and on DTO shape (reader fixture-typed
+ * here; SubmissionDto in the API). When editing the predicate here,
+ * mirror it in searchForApi — the public-visibility filters
+ * (state='approved', deletedAt IS NULL, unlistedAt IS NULL) must
+ * stay in lockstep.
+ */
 async function search(q: string): Promise<Submission[]> {
   if (!q || q.trim().length < 2) return [];
-  const tsQuery = sql`websearch_to_tsquery('english', ${q})`;
+  const tsQuery = ftsTsQuery(q);
   const rows = await db.execute<SearchRow>(sql`
     SELECT
       ${submissions.id} AS id,
@@ -44,6 +57,7 @@ async function search(q: string): Promise<Submission[]> {
     INNER JOIN ${users} ON ${users.id} = ${submissions.authorId}
     WHERE ${submissions.state} = 'approved'
       AND ${submissions.deletedAt} IS NULL
+      AND ${submissions.unlistedAt} IS NULL
       AND ${submissions}.search_vec @@ ${tsQuery}
     ORDER BY rank DESC
     LIMIT 30

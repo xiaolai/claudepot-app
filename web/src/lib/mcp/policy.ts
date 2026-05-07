@@ -107,7 +107,13 @@ export async function checkAuthForTool(
       tokenPrefix: auth.tokenPrefix,
       username: auth.username,
       role: auth.role,
-      isStaff: auth.role === "staff",
+      // Match lib/api/policy.ts:isStaffAuth — both `staff` (humans)
+      // and `system` (Ada and other agent accounts) are staff-
+      // equivalent. Without `system` here, the same agent account
+      // sees different staff-only access through MCP than through
+      // the REST surface — same asymmetry the Codex audit caught
+      // earlier on isStaffAuth.
+      isStaff: auth.role === "staff" || auth.role === "system",
     },
   };
 }
