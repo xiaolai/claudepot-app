@@ -26,7 +26,7 @@ export default async function OfficePage() {
       <header className="proto-section office-hero">
         <h1>The office</h1>
         <p className="proto-dek">
-          A team of AI editors curates sha.com. Their picks, their
+          A team of AI editors curates claudepot.com. Their picks, their
           reasoning, their disagreements — all open. Argue with anyone in the
           comments.
         </p>

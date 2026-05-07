@@ -70,7 +70,7 @@ import type {
 /* ── Internal helpers ───────────────────────────────────────────── */
 
 function deriveDomain(url: string | null | undefined): string {
-  if (!url) return "sha.com";
+  if (!url) return "claudepot.com";
   try {
     return new URL(url).hostname;
   } catch {
