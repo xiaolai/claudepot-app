@@ -6,6 +6,28 @@ Versioning scheme:
 - `0.1.x` — beta
 - `1.0.0+` — stable
 
+## 0.1.18 — beta (2026-05-07)
+
+### Fixed
+
+- **Pixel-art house now fills ~80% of the squircle.** v0.1.17's
+  16-px grid kept rendering crisp, but the house was visibly too
+  small inside the orange surround. Bumped the cell size to 24 px
+  while keeping the same 14×12-cell design — the icon now matches
+  the proportions of standard pixel-art app icons (e.g. Space
+  Invaders). Dock-relevant sizes (64/128/256/512/1024) still
+  render pixel-perfect; only the micro-icon layers (16/24/32/48
+  raster) pick up sub-pixel antialiasing, which is invisible at
+  those sizes.
+
+### Changed
+
+- _…_
+
+### Added
+
+- _…_
+
 ## 0.1.17 — beta (2026-05-07)
 
 ### Fixed
