@@ -1,5 +1,4 @@
 import { useCallback, useEffect, useState } from "react";
-import { useTranslation } from "react-i18next";
 import { listen } from "@tauri-apps/api/event";
 import { ScreenHeader } from "../shell/ScreenHeader";
 import { Button } from "../components/primitives/Button";
@@ -36,7 +35,7 @@ import { TemplateGallery } from "./templates/TemplateGallery";
  * (fs-watch, webhook) are explicit v2.
  */
 export function AutomationsSection() {
-  const { t } = useTranslation();
+  const { pushToast } = useAppState();
   const [automations, setAutomations] =
     useState<AutomationSummaryDto[] | null>(null);
   const [routes, setRoutes] = useState<RouteSummaryDto[]>([]);
@@ -114,10 +113,7 @@ export function AutomationsSection() {
         const payload = event.payload;
         if (payload.phase === "op") {
           if (payload.status === "error") {
-            setToast({
-              kind: "error",
-              msg: payload.detail ?? t("automations.runFailed"),
-            });
+            pushToast("error", payload.detail ?? "Run failed.");
           } else {
             setRunsRefreshKey((k) => k + 1);
           }
@@ -143,10 +139,10 @@ export function AutomationsSection() {
     try {
       await api.automationsSetEnabled(id, enabled);
       await refresh();
-      setToast({
-        kind: "info",
-        msg: enabled ? t("automations.enabled") : t("automations.disabled"),
-      });
+      pushToast(
+        "info",
+        `Automation ${enabled ? "enabled" : "disabled"}.`,
+      );
     } catch (e) {
       pushToast("error", String(e));
     } finally {
@@ -162,7 +158,7 @@ export function AutomationsSection() {
       await api.automationsRemove(id);
       setRemoveTarget(null);
       await refresh();
-      setToast({ kind: "info", msg: t("automations.removed") });
+      pushToast("info", "Automation removed.");
     } catch (e) {
       pushToast("error", String(e));
     } finally {
@@ -180,8 +176,10 @@ export function AutomationsSection() {
       }}
     >
       <ScreenHeader
-        title={t("automations.title")}
-        subtitle={t("automations.subtitle", { scheduler: capabilities?.native_label ?? "no scheduler" })}
+        title="Automations"
+        subtitle={`Scheduled and manual claude -p runs · ${
+          capabilities?.native_label ?? "no scheduler"
+        }`}
         actions={
           <>
             <Button
@@ -190,21 +188,14 @@ export function AutomationsSection() {
               onClick={refresh}
               disabled={automations === null}
             >
-              {t("automations.refresh")}
+              Refresh
             </Button>
             <Button
               variant="ghost"
               glyph={NF.copy}
               onClick={() => setShowGallery(true)}
             >
-              {t("automations.fromTemplate")}
-            </Button>
-            <Button
-              variant="ghost"
-              glyph={NF.copy}
-              onClick={() => setShowGallery(true)}
-            >
-              {t("automations.add")}
+              From template…
             </Button>
             {automations !== null && automations.length > 0 && (
               <Button
@@ -230,28 +221,6 @@ export function AutomationsSection() {
           }}
         >
           {loadError}
-        </div>
-      )}
-
-      {toast && (
-        <div
-          style={{
-            padding: "var(--sp-6) var(--sp-12)",
-            border: "var(--bw-hair) solid var(--line)",
-            borderRadius: "var(--r-2)",
-            color:
-              toast.kind === "error" ? "var(--danger)" : "var(--fg-2)",
-            fontSize: "var(--fs-sm)",
-            background: "var(--bg-raised)",
-            display: "flex",
-            justifyContent: "space-between",
-            alignItems: "center",
-          }}
-        >
-          <span>{toast.msg}</span>
-          <Button variant="ghost" onClick={() => setToast(null)}>
-            {t("automations.dismiss")}
-          </Button>
         </div>
       )}
 
@@ -289,8 +258,9 @@ export function AutomationsSection() {
         onClose={() => setShowAdd(false)}
         onCreated={() => {
           refresh();
-          setToast({ kind: "info", msg: t("automations.created") });
+          pushToast("info", "Automation created.");
         }}
+        onError={(msg) => pushToast("error", msg)}
       />
 
       <TemplateGallery
@@ -298,9 +268,9 @@ export function AutomationsSection() {
         onClose={() => setShowGallery(false)}
         onInstalled={() => {
           refresh();
-          setToast({ kind: "info", msg: t("automations.templateInstalled") });
+          pushToast("info", "Template installed.");
         }}
-        onError={(msg) => setToast({ kind: "error", msg })}
+        onError={(msg) => pushToast("error", msg)}
         onOpenThirdParties={() => {
           // Best-effort deep-link: dispatch a custom event the
           // sidebar/router listens to. If nothing handles it,
@@ -320,16 +290,16 @@ export function AutomationsSection() {
         onClose={() => setEditTarget(null)}
         onUpdated={() => {
           refresh();
-          setToast({ kind: "info", msg: t("automations.updated") });
+          pushToast("info", "Automation updated.");
         }}
         onError={(msg) => pushToast("error", msg)}
       />
 
       {removeTarget && (
         <ConfirmDialog
-          title={t("automations.deleteTitle")}
-          body={t("automations.deleteBody", { name: removeTarget.display_name || removeTarget.name })}
-          confirmLabel={t("automations.deleteConfirm")}
+          title="Delete automation?"
+          body={`'${removeTarget.display_name || removeTarget.name}' will be unregistered from the OS scheduler and its run history removed.`}
+          confirmLabel="Delete"
           confirmDanger
           onConfirm={handleConfirmRemove}
           onCancel={() => setRemoveTarget(null)}
@@ -340,7 +310,6 @@ export function AutomationsSection() {
 }
 
 function EmptyState({ onAdd }: { onAdd: () => void }) {
-  const { t } = useTranslation();
   return (
     <div
       style={{
@@ -356,13 +325,15 @@ function EmptyState({ onAdd }: { onAdd: () => void }) {
       }}
     >
       <h3 style={{ margin: 0, fontSize: "var(--fs-md)", color: "var(--fg)" }}>
-        {t("automations.emptyTitle")}
+        Schedule a claude -p run
       </h3>
       <p style={{ margin: 0, fontSize: "var(--fs-sm)", maxWidth: "60ch" }}>
-        {t("automations.emptyDesc")}
+        Project commands and agents in the chosen folder are picked up
+        automatically. Use a slash-command for the prompt to keep
+        complex jobs versioned in your repo.
       </p>
       <Button variant="solid" glyph={NF.plus} onClick={onAdd}>
-        {t("automations.add")}
+        Add automation
       </Button>
     </div>
   );

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
-import { Trans, useTranslation } from "react-i18next";
+import { useTranslation } from "react-i18next";
 import { ScreenHeader } from "../shell/ScreenHeader";
 import { Button } from "../components/primitives/Button";
 import { SkeletonList } from "../components/primitives/Skeleton";

@@ -345,34 +345,6 @@ export function EventsSection() {
           </div>
         )}
         {tab === "usage" && (
-          <UsageView
-            registerRefresh={(fn) => {
-              usageRefreshRef.current = fn;
-            }}
-          >
-            <FilterRail filters={filters} onChange={setFilters} />
-            <div
-              style={{
-                flex: 1,
-                minWidth: 0,
-                display: "flex",
-                flexDirection: "column",
-                minHeight: 0,
-              }}
-            >
-              <DashboardStrip />
-              <MetricsStrip cards={aggCards} loading={loading} />
-              <CardStream
-                cards={cards}
-                loading={loading}
-                error={error}
-                lastSeenId={counts?.lastSeenId ?? null}
-                onCardClick={handleCardClick}
-              />
-            </div>
-          </div>
-        )}
-        {tab === "usage" && (
           <div
             role="tabpanel"
             id="events-panel-usage"
@@ -396,7 +368,6 @@ export function EventsSection() {
             <CostTab />
           </div>
         )}
-        {tab === "cost" && <CostTab />}
       </div>
     </div>
   );
@@ -445,6 +416,8 @@ function TabStrip({
         onClick={() => onPick("usage")}
       />
       <TabButton
+        id="events-tab-cost"
+        controls="events-panel-cost"
         active={current === "cost"}
         label={t("events.cost")}
         sub="Per-project tokens + USD"
