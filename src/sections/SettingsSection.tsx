@@ -1103,7 +1103,7 @@ function UpdateAvailableCard({
           >
             <div
               style={{
-                width: total > 0 ? `${pct}%` : "33%",
+                width: `${pct}%`,
                 height: "100%",
                 background: "var(--accent)",
                 transition: "width var(--dur-base) var(--ease-out)",
