@@ -19,6 +19,13 @@ import { and, count, desc, eq, gte, sql } from "drizzle-orm";
 import { db } from "@/db/client";
 import { submissions, users } from "@/db/schema";
 
+// Launch-mode flag. Pre-launch the karma gate provides no signal —
+// no user has karma, no user has past approvals, so every real
+// submission lands in 'pending' and the user sees a 404 on their
+// own permalink. Ada is the sole gate while this is false. Re-enable
+// once karma signal accumulates (vote volume, repeat contributors)
+// or when spam volume justifies the friction.
+const KARMA_GATE_ENABLED = false;
 const APPROVED_PAST_THRESHOLD = 2;
 const KARMA_AUTO_APPROVE = 50;
 
@@ -51,6 +58,7 @@ export async function determineInitialState(
 ): Promise<"pending" | "approved" | "locked"> {
   if (ctx.role === "locked") return "locked";
   if (ctx.role === "staff" || ctx.role === "system") return "approved";
+  if (!KARMA_GATE_ENABLED) return "approved";
   if (ctx.karma >= KARMA_AUTO_APPROVE) return "approved";
 
   const [c] = await db
