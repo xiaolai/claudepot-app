@@ -207,6 +207,8 @@ export type QuotaDto = {
     votes: QuotaBucket;
     saves: QuotaBucket;
     reads: QuotaBucket;
+    /** Bot self-reporting (POST /api/v1/bots/reports). */
+    bots: QuotaBucket;
   };
 };
 

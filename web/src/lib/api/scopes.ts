@@ -24,6 +24,11 @@ export const SCOPES = [
   // are private per-recipient, not the public feed/comment surface
   // read:all unlocks. Mark-read is folded in (consume == read).
   "notification:read",
+  // Bot self-reporting (migration 0025). The endpoint derives
+  // bot_id from the token's user_id, so a token holding this scope
+  // can only post for its own bot — leak isolation is per-token
+  // even though the scope name is shared across bots.
+  "bots:report",
 ] as const;
 
 export type Scope = (typeof SCOPES)[number];
@@ -53,6 +58,8 @@ export const SCOPE_LABELS: Record<Scope, string> = {
   "read:all":
     "Read feeds, profiles, tags, search, and your own scoring decisions",
   "notification:read": "Read and dismiss your own notifications",
+  "bots:report":
+    "Post bot heartbeats, work summaries, costs, errors, and proposals",
 };
 
 /**
@@ -84,6 +91,10 @@ export const SCOPE_GROUPS: ReadonlyArray<{
   {
     label: "Engagement",
     scopes: ["vote:write", "save:write"],
+  },
+  {
+    label: "Bots",
+    scopes: ["bots:report"],
   },
 ];
 

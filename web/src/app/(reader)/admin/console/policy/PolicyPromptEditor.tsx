@@ -40,6 +40,9 @@ export function PolicyPromptEditor({
   const [previewResults, setPreviewResults] = useState<PreviewFixtureResult[] | null>(null);
   const [previewError, setPreviewError] = useState<string | null>(null);
   const [previewPending, startPreview] = useTransition();
+  const [diffOpen, setDiffOpen] = useState(false);
+
+  const isDirty = systemPrompt !== initialSystemPrompt;
 
   const [publishState, publishAction, publishPending] = useActionState(
     publishPolicyPromptFormAction,
@@ -143,6 +146,20 @@ export function PolicyPromptEditor({
             {previewPending ? "Previewing…" : "Preview"}
           </button>
           <button
+            type="button"
+            onClick={() => setDiffOpen((v) => !v)}
+            disabled={!isDirty}
+            className="proto-btn"
+            aria-pressed={diffOpen}
+            title={
+              isDirty
+                ? "Compare your edit against the currently-active prompt"
+                : "No changes to diff yet"
+            }
+          >
+            {diffOpen ? "Hide diff" : "Show diff vs active"}
+          </button>
+          <button
             type="submit"
             disabled={publishPending}
             className="proto-btn proto-btn-primary"
@@ -163,6 +180,13 @@ export function PolicyPromptEditor({
           ) : null}
         </div>
       </form>
+
+      {diffOpen && isDirty ? (
+        <PromptDiff
+          activeText={initialSystemPrompt}
+          editText={systemPrompt}
+        />
+      ) : null}
 
       {previewMismatchWarn ? (
         <p className="proto-form-flash proto-form-flash-err" role="alert">
@@ -242,4 +266,85 @@ function formatPreviewError(
     case "no_api_key":
       return "OPENAI_API_KEY is not set in this environment — preview cannot run.";
   }
+}
+
+/**
+ * Side-by-side prompt diff. Naive line-equality check —
+ * "active" lines that don't exist verbatim in the edit buffer
+ * are tinted as removed; "edit" lines that don't exist verbatim
+ * in the active buffer are tinted as added; lines present on
+ * both sides render muted. This is not a Myers diff, but for a
+ * 200–8000-char system prompt the operator is scanning for
+ * directional change, not edit-distance optimality.
+ *
+ * Counts at the top tell the operator the magnitude of the
+ * edit at a glance; the side-by-side panel tells them where.
+ */
+function PromptDiff({
+  activeText,
+  editText,
+}: {
+  activeText: string;
+  editText: string;
+}) {
+  const activeLines = activeText.split("\n");
+  const editLines = editText.split("\n");
+  const activeSet = new Set(activeLines);
+  const editSet = new Set(editLines);
+  const added = editLines.filter((l) => !activeSet.has(l)).length;
+  const removed = activeLines.filter((l) => !editSet.has(l)).length;
+
+  return (
+    <section className="proto-section proto-prompt-diff">
+      <div className="proto-prompt-diff-summary">
+        <span className="proto-prompt-diff-count proto-prompt-diff-removed">
+          −{removed}
+        </span>
+        <span className="proto-prompt-diff-count proto-prompt-diff-added">
+          +{added}
+        </span>
+        <span className="proto-meta-quiet">
+          line-equality diff vs the currently-active prompt
+        </span>
+      </div>
+      <div className="proto-prompt-diff-grid">
+        <div>
+          <h4 className="proto-prompt-diff-head">Active</h4>
+          <pre className="proto-prompt-diff-pane">
+            {activeLines.map((line, i) => (
+              <span
+                key={i}
+                className={
+                  editSet.has(line)
+                    ? "proto-prompt-diff-line"
+                    : "proto-prompt-diff-line proto-prompt-diff-line-removed"
+                }
+              >
+                {line || " "}
+                {"\n"}
+              </span>
+            ))}
+          </pre>
+        </div>
+        <div>
+          <h4 className="proto-prompt-diff-head">Edit buffer</h4>
+          <pre className="proto-prompt-diff-pane">
+            {editLines.map((line, i) => (
+              <span
+                key={i}
+                className={
+                  activeSet.has(line)
+                    ? "proto-prompt-diff-line"
+                    : "proto-prompt-diff-line proto-prompt-diff-line-added"
+                }
+              >
+                {line || " "}
+                {"\n"}
+              </span>
+            ))}
+          </pre>
+        </div>
+      </div>
+    </section>
+  );
 }

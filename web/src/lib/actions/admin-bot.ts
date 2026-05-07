@@ -73,7 +73,7 @@ export async function toggleBotModerationExempt(
     });
   });
 
-  revalidatePath("/admin/users");
+  revalidatePath("/admin/console/users");
   revalidatePath("/admin/log");
   return { ok: true, exempt };
 }

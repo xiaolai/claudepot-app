@@ -40,7 +40,7 @@ const mergeInput = z.object({
 const retireInput = z.object({ slug: slugSchema });
 
 function revalidateTagSurfaces(slugs: string[]) {
-  revalidatePath("/admin/flags");
+  revalidatePath("/admin/console/vocabulary");
   revalidatePath("/admin/log");
   revalidatePath("/c");
   for (const s of slugs) revalidatePath(`/c/${s}`);

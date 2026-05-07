@@ -154,7 +154,7 @@ export async function publishPolicyPromptAction(
   clearPromptCache();
 
   // Revalidate paths whose rendering depends on the active prompt.
-  revalidatePath("/admin/policy-prompt");
+  revalidatePath("/admin/console/policy");
   revalidatePath("/admin/log");
 
   return { ok: true, id: newId, version };

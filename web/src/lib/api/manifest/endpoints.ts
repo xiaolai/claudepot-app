@@ -256,6 +256,15 @@ export const ENDPOINTS: ReadonlyArray<EndpointSpec> = [
     notes:
       "Appeal a policy_decisions reject. Body: { decisionId, text }. Caller must own the decision. One open appeal per target — duplicates rejected.",
   },
+  {
+    id: "bots:report",
+    method: "POST",
+    path: "/api/v1/bots/reports",
+    auth: "bots:report",
+    bucket: "bots",
+    notes:
+      "Bot self-report. Body: { kind, payload, costUsd? }. kind ∈ heartbeat | work_summary | cost | error | proposal | decision_summary. heartbeat UPSERTs bot_heartbeats and skips the rate-limit charge; everything else appends to bot_reports. bot_id is derived from the token's user — no impersonation possible.",
+  },
 ];
 
 export const ENDPOINT_BY_ID: ReadonlyMap<EndpointId, EndpointSpec> = new Map(

@@ -97,6 +97,7 @@ export default function ApiDocsPage() {
           <li><a href="#shapes">Common shapes</a></li>
           <li><a href="#reads">Reads</a></li>
           <li><a href="#writes">Writes</a></li>
+          <li><a href="#bot-reports">Bot self-reporting</a></li>
           <li><a href="#identity">Identity & introspection</a></li>
           <li><a href="#scopes">Scopes</a></li>
           <li><a href="#mcp">MCP catalog</a></li>
@@ -195,6 +196,14 @@ export default function ApiDocsPage() {
                   <td>{DEFAULT_DAILY_LIMITS.saves.toLocaleString()}</td>
                   <td>POST /api/v1/saves.</td>
                 </tr>
+                <tr>
+                  <td><code>bots</code></td>
+                  <td>{DEFAULT_DAILY_LIMITS.bots.toLocaleString()}</td>
+                  <td>
+                    POST /api/v1/bots/reports for non-heartbeat kinds.
+                    Heartbeats are unmetered.
+                  </td>
+                </tr>
               </tbody>
             </table>
           </div>
@@ -202,8 +211,9 @@ export default function ApiDocsPage() {
             Validation errors are evaluated <em>before</em> the bucket
             increments — a 422 doesn&rsquo;t consume budget. A 304 from{" "}
             <code>/api/v1/constitution</code> is also free; same for{" "}
-            <code>/api/v1/health</code>, <code>/api/v1/me</code>, and{" "}
-            <code>/api/v1/me/quota</code>.
+            <code>/api/v1/health</code>, <code>/api/v1/me</code>,{" "}
+            <code>/api/v1/me/quota</code>, and{" "}
+            <code>kind=heartbeat</code> on <code>/api/v1/bots/reports</code>.
           </p>
         </section>
 
@@ -289,6 +299,65 @@ export default function ApiDocsPage() {
             valid scope is necessary but not sufficient.
           </p>
           <EndpointTable rows={WRITE_IDS} />
+        </section>
+
+        <section id="bot-reports" className="proto-section">
+          <h2>Bot self-reporting</h2>
+          <p>
+            <code>POST /api/v1/bots/reports</code> is the single
+            endpoint office bots use to report status, work, cost,
+            errors, and proposals. There is no <code>botId</code> in
+            the body — it&rsquo;s derived from the token&rsquo;s
+            user, so a leaked token can only post for the one bot it
+            belongs to.
+          </p>
+          <p>
+            Body: <code>{`{ kind, payload, costUsd? }`}</code>. The{" "}
+            <code>kind</code> discriminator selects the payload
+            schema:
+          </p>
+          <ul>
+            <li>
+              <code>heartbeat</code> —{" "}
+              <code>{`{ version?, env?, meta? }`}</code>. UPSERTs one
+              row in <code>bot_heartbeats</code>. Unmetered (does not
+              consume the <code>bots</code> bucket).
+            </li>
+            <li>
+              <code>work_summary</code> —{" "}
+              <code>{`{ windowStart, windowEnd, units: Record<string, int>, notes? }`}</code>.
+              Roll-up of work units in a window.
+            </li>
+            <li>
+              <code>cost</code> —{" "}
+              <code>{`{ provider, model, usd, inputTokens?, outputTokens?, notes? }`}</code>.
+              The <code>usd</code> field is denormalized to{" "}
+              <code>cost_usd</code> for fast spend roll-ups.
+            </li>
+            <li>
+              <code>error</code> —{" "}
+              <code>{`{ severity: "warn" | "error", message, context? }`}</code>.
+              Non-fatal but operator-worthy.
+            </li>
+            <li>
+              <code>proposal</code> —{" "}
+              <code>{`{ kind: "vocab_tag" | "block_user" | "tag_merge" | "tag_retire" | "general", reason, target?, key? }`}</code>.
+              Surfaces in the staff inbox notice strip until acked.
+              Pass a stable <code>payload.key</code> for retry
+              idempotency — re-posting under the same{" "}
+              <code>(botId, key)</code> while still open returns 409.
+            </li>
+            <li>
+              <code>decision_summary</code> —{" "}
+              <code>{`{ windowStart, windowEnd, verdicts, confidence?, driftZ?, notes? }`}</code>.
+              Moderation-class drift telemetry.
+            </li>
+          </ul>
+          <p>
+            Mirrored as the <code>report_bot_status</code> MCP tool —
+            same scope (<code>bots:report</code>), same bucket, same
+            shape.
+          </p>
         </section>
 
         <section id="identity" className="proto-section">

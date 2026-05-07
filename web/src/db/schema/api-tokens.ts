@@ -78,6 +78,10 @@ export const apiTokenUsage = pgTable(
     votesCount: integer("votes_count").notNull().default(0),
     savesCount: integer("saves_count").notNull().default(0),
     readsCount: integer("reads_count").notNull().default(0),
+    // Migration 0025_bot_reports — separate bucket for bot
+    // self-reporting calls so a chatty bot doesn't burn a token's
+    // submission/comment quota.
+    botsCount: integer("bots_count").notNull().default(0),
   },
   (t) => [primaryKey({ columns: [t.tokenId, t.bucketDate] })],
 );

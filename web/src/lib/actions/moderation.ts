@@ -247,10 +247,13 @@ export async function moderationAction(
 
   if (applied === 0) return { ok: false, reason: "not_found" };
 
-  revalidatePath("/admin/queue");
+  // /admin is the Today inbox; /admin/console/appeals surfaces
+  // appeal-flag actions in the dedicated appeals lane.
+  revalidatePath("/admin");
+  revalidatePath("/admin/console/appeals");
   revalidatePath("/admin/log");
   if (targetType === "submission") revalidatePath(`/post/${targetId}`);
-  if (action === "lock_user") revalidatePath("/admin/users");
+  if (action === "lock_user") revalidatePath("/admin/console/users");
   return { ok: true };
 }
 
