@@ -6,6 +6,32 @@ Versioning scheme:
 - `0.1.x` — beta
 - `1.0.0+` — stable
 
+## 0.1.14 — beta (2026-05-07)
+
+### Fixed
+
+- **Linux app icon now installs at every standard hicolor size.**
+  Previous `.deb` / `.rpm` packages shipped only 32×32 and 128×128;
+  the freedesktop spec's required 48×48, GNOME's 256×256 app-grid
+  default, and 64×64 / 512×512 launcher sizes were missing or filed
+  under a non-standard `hicolor/256x256@2/` directory that no Linux
+  desktop environment looks at. Packages now install the full
+  32 / 48 / 64 / 128 / 256 / 512 ladder.
+
+- **macOS Dock icon no longer renders larger than well-behaved
+  apps.** The orange squircle was drawn full-bleed (0,0 / 512×512);
+  Apple's Big Sur+ HIG specifies a ~10% transparent margin per
+  side. Inset to (51, 51) / 410×410 so Claudepot now sits at the
+  same visual weight as system apps.
+
+### Added
+
+- _…_
+
+### Changed
+
+- _…_
+
 ## 0.1.13 — beta (2026-05-07)
 
 ### Added
