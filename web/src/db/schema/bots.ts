@@ -98,11 +98,15 @@ export const botReports = pgTable(
 );
 
 /**
- * Daily-cost rollup (migration 0027). One row per (bot_id, day);
- * populated by the daily-rollup cron each midnight UTC. /office/costs
- * reads closed days from this table and computes today live from
- * bot_reports. Composite PK + ON CONFLICT in the cron makes the
- * upsert idempotent across cron retries.
+ * Daily-cost rollup (migrations 0027 + 0029). One row per
+ * (bot_id, day, provider); populated by the daily-rollup cron each
+ * midnight UTC from `bot_reports.payload->>'provider'`. /office/costs
+ * sums across providers for the per-(bot, day) table and uses the
+ * provider split for monthly reconciliation against invoices.
+ *
+ * Composite PK + ON CONFLICT in the cron makes the upsert idempotent
+ * across retries; ON DELETE CASCADE on bot_id keeps orphan rows out
+ * if the bot account is removed.
  */
 export const botCostsDaily = pgTable(
   "bot_costs_daily",
@@ -111,6 +115,7 @@ export const botCostsDaily = pgTable(
       .notNull()
       .references(() => users.id, { onDelete: "cascade" }),
     day: date("day").notNull(),
+    provider: text("provider").notNull(),
     usd: numeric("usd", { precision: 10, scale: 6 }).notNull().default("0"),
     reports: integer("reports").notNull().default(0),
     rolledUpAt: timestamp("rolled_up_at", { withTimezone: true })
@@ -118,7 +123,7 @@ export const botCostsDaily = pgTable(
       .defaultNow(),
   },
   (t) => [
-    primaryKey({ columns: [t.botId, t.day] }),
+    primaryKey({ columns: [t.botId, t.day, t.provider] }),
     index("idx_bot_costs_daily_day").on(t.day.desc()),
   ],
 );

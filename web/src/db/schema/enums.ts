@@ -102,6 +102,11 @@ export const moderationActionEnum = pgEnum("moderation_action", [
   // grants and revokes can be filtered without parsing the note.
   "bot_exempt_grant",
   "bot_exempt_revoke",
+  // Bot monthly USD cap set/clear on /admin/users — added in
+  // migration 0030 so the audit trail surfaces cap adjustments
+  // alongside other bot config changes.
+  "bot_cap_set",
+  "bot_cap_clear",
 ]);
 
 export const targetTypeEnum = pgEnum("target_type", [
