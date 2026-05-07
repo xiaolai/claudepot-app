@@ -268,28 +268,6 @@ export function ProjectDetail({
         )}
       </section>
 
-      {noContent && status === "alive" && (
-        <div className="project-hint cleanup" role="status">
-          <Icon name="trash-2" size={14} />
-          <span>
-            No sessions or memory files.{" "}
-            {info.total_size_bytes > 4096
-              ? `${formatSize(info.total_size_bytes)} of CC internal state — consider cleaning.`
-              : "This project can be safely cleaned."}
-          </span>
-          {onOpenMaintenance && (
-            <button
-              type="button"
-              className="btn"
-              onClick={onOpenMaintenance}
-              title="Open Maintenance to clean orphan projects"
-            >
-              Go to Maintenance
-            </button>
-          )}
-        </div>
-      )}
-
       {noContent && status !== "alive" && status !== "unreachable" && (
         <div className="project-hint cleanup" role="status">
           <Icon name="info" size={14} />
