@@ -6,6 +6,35 @@ Versioning scheme:
 - `0.1.x` — beta
 - `1.0.0+` — stable
 
+## 0.1.16 — beta (2026-05-07)
+
+### Fixed
+
+- **macOS Dock icon now matches dev-mode crispness in prod.**
+  v0.1.15 shipped pixel-perfect `.icns` layers, but the actual
+  blur was in macOS's render pipeline, not the file content:
+  Tauri's runtime calls `NSApplication.setApplicationIconImage`
+  only in dev mode, leaving prod to render via the legacy
+  IconServices `.icns` path which softens pixel-art edges at
+  default Dock sizes. Replicated dev's `setApplicationIconImage`
+  call in our own `setup()` so prod uses the same Cocoa NSImage
+  pipeline.
+
+### Changed
+
+- **Repo cleanup: removed 47 unused icon files.** `Square*Logo.png`
+  (MSIX/UWP), `iOS/`, `Android/`, and the 1× tray-icon variants
+  that were never `include_bytes!`-d. Tauri's `pnpm tauri icon`
+  command produces them by default, but we don't ship for those
+  targets — they were dead bytes. Added `scripts/regen-icons.sh`
+  that produces only the assets we actually consume, using
+  `rsvg-convert` + `iconutil` directly to avoid the bilinear blur
+  that `pnpm tauri icon` introduced in earlier releases.
+
+### Added
+
+- _…_
+
 ## 0.1.15 — beta (2026-05-07)
 
 ### Fixed
