@@ -7,10 +7,11 @@
  * mac-mini-home; this file only reads.
  */
 
-import { and, desc, eq, sql } from "drizzle-orm";
+import { and, desc, eq, gte, isNotNull, sql } from "drizzle-orm";
 
 import { db } from "./client";
 import {
+  botReports,
   decisionRecords,
   overrideRecords,
   submissions,
@@ -152,4 +153,126 @@ export async function getPersonaStats(persona: string): Promise<PersonaStats> {
     .where(eq(decisionRecords.appliedPersona, persona));
   const r = rows[0] ?? { total: 0, accepted: 0, rejected: 0, borderline: 0, avgWeightedTotalAccepted: 0 };
   return { persona, ...r };
+}
+
+/* ── Bot cost reports ──────────────────────────────────────────── */
+
+export interface BotDailyCost {
+  /** ISO date (YYYY-MM-DD) in UTC. */
+  day: string;
+  /** Bot user.id. */
+  botId: string;
+  /** Bot user.username. Used for the public column header. */
+  botUsername: string;
+  /** Sum of cost_usd across all kind='cost' reports on that day. */
+  usd: number;
+  /** Number of cost reports the bot filed that day. */
+  reports: number;
+}
+
+export interface BotCostSummary {
+  /** Per-(bot, day) rows over the requested window, newest day first. */
+  rows: BotDailyCost[];
+  /** Per-day totals across all bots — for the "totals" row in the UI. */
+  totalsByDay: Array<{ day: string; usd: number }>;
+  /** Per-bot totals across the window — for sort-stable bot column order. */
+  totalsByBot: Array<{ botId: string; botUsername: string; usd: number }>;
+  /** Window edges. */
+  windowStart: Date;
+  windowEnd: Date;
+  /** Days requested. */
+  windowDays: number;
+}
+
+const DEFAULT_COST_WINDOW_DAYS = 30;
+const MAX_COST_WINDOW_DAYS = 90;
+
+/**
+ * Daily cost aggregate per bot for the last N days.
+ *
+ * Reads `bot_reports` directly — no rollup table. The
+ * idx_bot_reports_cost_reported partial index covers the predicate
+ * (cost_usd IS NOT NULL) so the scan is bounded by daily report
+ * volume × N days, not by the full table. Each bot files 1–10 cost
+ * reports per day; over 90 days that's at most 900 rows per bot,
+ * which the SUM() collapses to ~90 result rows. Cheap.
+ *
+ * Uses `date_trunc('day', reported_at AT TIME ZONE 'UTC')` for the
+ * day bucket — matches the daily-rollup cron's UTC convention.
+ *
+ * Self-reported numbers. The Office page banner explicitly says so;
+ * monthly reconciliation against provider invoices happens
+ * privately. See lib/bots/schemas.ts:costPayloadSchema for the
+ * payload shape bots POST.
+ */
+export async function getBotDailyCosts(opts: {
+  days?: number;
+} = {}): Promise<BotCostSummary> {
+  const requested = opts.days ?? DEFAULT_COST_WINDOW_DAYS;
+  const days = Math.max(
+    1,
+    Math.min(MAX_COST_WINDOW_DAYS, Math.floor(requested) || DEFAULT_COST_WINDOW_DAYS),
+  );
+  const windowEnd = new Date();
+  const windowStart = new Date(windowEnd.getTime() - days * 86_400_000);
+
+  const rows = await db
+    .select({
+      day: sql<string>`to_char(date_trunc('day', ${botReports.reportedAt} AT TIME ZONE 'UTC'), 'YYYY-MM-DD')`,
+      botId: botReports.botId,
+      botUsername: users.username,
+      usd: sql<string>`COALESCE(SUM(${botReports.costUsd}), 0)::text`,
+      reports: sql<number>`COUNT(*)::int`,
+    })
+    .from(botReports)
+    .innerJoin(users, eq(users.id, botReports.botId))
+    .where(
+      and(
+        eq(botReports.kind, "cost"),
+        isNotNull(botReports.costUsd),
+        gte(botReports.reportedAt, windowStart),
+      ),
+    )
+    .groupBy(
+      sql`date_trunc('day', ${botReports.reportedAt} AT TIME ZONE 'UTC')`,
+      botReports.botId,
+      users.username,
+    )
+    .orderBy(
+      desc(sql`date_trunc('day', ${botReports.reportedAt} AT TIME ZONE 'UTC')`),
+      users.username,
+    );
+
+  // numeric → string (Drizzle preserves precision); parse for arithmetic.
+  const detailed: BotDailyCost[] = rows.map((r) => ({
+    day: r.day,
+    botId: r.botId,
+    botUsername: r.botUsername,
+    usd: Number.parseFloat(r.usd) || 0,
+    reports: r.reports,
+  }));
+
+  const totalsByDayMap = new Map<string, number>();
+  const totalsByBotMap = new Map<string, { username: string; usd: number }>();
+  for (const r of detailed) {
+    totalsByDayMap.set(r.day, (totalsByDayMap.get(r.day) ?? 0) + r.usd);
+    const prev = totalsByBotMap.get(r.botId);
+    totalsByBotMap.set(r.botId, {
+      username: r.botUsername,
+      usd: (prev?.usd ?? 0) + r.usd,
+    });
+  }
+
+  return {
+    rows: detailed,
+    totalsByDay: Array.from(totalsByDayMap, ([day, usd]) => ({ day, usd })),
+    totalsByBot: Array.from(totalsByBotMap, ([botId, { username, usd }]) => ({
+      botId,
+      botUsername: username,
+      usd,
+    })).sort((a, b) => b.usd - a.usd),
+    windowStart,
+    windowEnd,
+    windowDays: days,
+  };
 }
