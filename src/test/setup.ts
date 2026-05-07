@@ -7,6 +7,8 @@
 import "@testing-library/jest-dom/vitest";
 import { afterEach, vi } from "vitest";
 import { cleanup } from "@testing-library/react";
+// Initialize react-i18next for all tests (defaults to English).
+import "../i18n/config";
 
 afterEach(() => {
   cleanup();

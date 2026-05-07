@@ -24,10 +24,12 @@
     "@tauri-apps/plugin-process": "^2",
     "@tauri-apps/plugin-updater": "^2",
     "highlight.js": "^11.11.1",
+    "i18next": "^26.0.9",
     "lucide-react": "^1.8.0",
     "mermaid": "^11.14.0",
     "react": "^19.1.0",
     "react-dom": "^19.1.0",
+    "react-i18next": "^17.0.6",
     "react-markdown": "^10.1.0",
     "rehype-highlight": "^7.0.2",
     "remark-gfm": "^4.0.1"
