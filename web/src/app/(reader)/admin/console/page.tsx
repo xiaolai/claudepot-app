@@ -160,6 +160,13 @@ export default async function AdminConsoleIndex({
           dek="Retro queue, model + prompt version, OpenAI spend, heartbeats."
           tone={retroPendingCount > 5 ? "alert" : "quiet"}
         />
+        <ConsoleCard
+          href={`/admin/console/cost-reconcile${asSuffix}`}
+          label="Cost reconcile"
+          stat="invoices vs self-reported"
+          dek="Upload monthly provider invoices and compare against bot self-reported spend. Audit trail for the public /office/costs page."
+          tone="quiet"
+        />
       </ul>
     </section>
   );

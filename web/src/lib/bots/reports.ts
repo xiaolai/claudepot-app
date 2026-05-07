@@ -19,10 +19,15 @@
  * callers turn that into a 409. Other DB errors propagate.
  */
 
-import { sql } from "drizzle-orm";
+import { and, eq, gte, sql } from "drizzle-orm";
 
 import { db } from "@/db/client";
-import { botHeartbeats, botReports } from "@/db/schema";
+import {
+  botCostsDaily,
+  botHeartbeats,
+  botReports,
+  users,
+} from "@/db/schema";
 
 import {
   KIND_SCHEMA_BY_KIND,
@@ -125,6 +130,23 @@ export async function persistBotReport(
         detail: "insert returned no row",
       };
     }
+
+    // Server-side monthly-cap-breach detection. Runs after the
+    // cost-report itself is committed so a failed alert insert can
+    // never block the cost from being recorded. Idempotent via the
+    // partial unique index `idx_bot_reports_alert_key` — repeat
+    // crosses within the same month collapse onto the same row.
+    if (input.kind === "cost" && costUsd !== null) {
+      // Best-effort: any failure here logs and swallows. The cost
+      // report already succeeded; alerting is observability, not
+      // load-bearing for the response.
+      try {
+        await maybeEmitCapBreachAlert(botId);
+      } catch (err) {
+        console.error("[bots] cap-breach detection failed", err);
+      }
+    }
+
     return {
       ok: true,
       kind: input.kind as Exclude<ReportKind, "heartbeat">,
@@ -145,4 +167,95 @@ export async function persistBotReport(
     }
     throw e;
   }
+}
+
+/* ── Monthly cap detection ──────────────────────────────────────── */
+
+/**
+ * If the bot has a `users.monthly_usd_cap` set and this month's
+ * spend has crossed it, INSERT one alert report. Idempotent via
+ * `idx_bot_reports_alert_key` — repeat crosses within the same
+ * month collapse onto the same row, so the staff inbox doesn't
+ * fire over and over for every additional cost report after the
+ * cap is breached.
+ *
+ * Month-to-date is read from two sources to match the rollup
+ * model: closed days come from bot_costs_daily, today comes from
+ * the live bot_reports event log (since the daily-rollup cron
+ * hasn't written today's bucket yet). Same as getBotDailyCosts —
+ * keeping the two consistent so a Cap-breach matches what the
+ * page shows.
+ */
+async function maybeEmitCapBreachAlert(botId: string): Promise<void> {
+  const [u] = await db
+    .select({ cap: users.monthlyUsdCap })
+    .from(users)
+    .where(eq(users.id, botId))
+    .limit(1);
+  const capStr = u?.cap;
+  if (!capStr) return; // null cap = unlimited; no alert
+  const cap = Number.parseFloat(capStr);
+  if (!Number.isFinite(cap) || cap <= 0) return;
+
+  // Month start in UTC.
+  const now = new Date();
+  const monthStart = new Date(
+    Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1),
+  );
+  const todayStart = new Date(
+    Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()),
+  );
+  const monthKey = monthStart.toISOString().slice(0, 7); // YYYY-MM
+
+  // Closed days this month (rollup).
+  const closed = await db
+    .select({
+      sum: sql<string>`COALESCE(SUM(${botCostsDaily.usd}), 0)::text`,
+    })
+    .from(botCostsDaily)
+    .where(
+      and(
+        eq(botCostsDaily.botId, botId),
+        gte(botCostsDaily.day, sql`${monthStart}::date`),
+        sql`${botCostsDaily.day} < ${todayStart}::date`,
+      ),
+    );
+  const closedUsd = Number.parseFloat(closed[0]?.sum ?? "0") || 0;
+
+  // Today live (event log).
+  const live = await db
+    .select({
+      sum: sql<string>`COALESCE(SUM(${botReports.costUsd}), 0)::text`,
+    })
+    .from(botReports)
+    .where(
+      and(
+        eq(botReports.botId, botId),
+        eq(botReports.kind, "cost"),
+        gte(botReports.reportedAt, todayStart),
+      ),
+    );
+  const liveUsd = Number.parseFloat(live[0]?.sum ?? "0") || 0;
+
+  const mtd = closedUsd + liveUsd;
+  if (mtd <= cap) return;
+
+  // Cross. Insert one alert; the partial unique index dedupes
+  // repeat triggers within the month.
+  await db
+    .insert(botReports)
+    .values({
+      botId,
+      kind: "alert",
+      payload: {
+        key: `cap_breach:${monthKey}`,
+        severity: "high",
+        cap,
+        mtd: Number(mtd.toFixed(6)),
+        message: `Monthly cap of $${cap.toFixed(2)} crossed for ${monthKey}: month-to-date $${mtd.toFixed(2)}.`,
+      },
+      costUsd: null,
+      status: null,
+    })
+    .onConflictDoNothing();
 }

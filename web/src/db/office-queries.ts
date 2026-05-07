@@ -15,6 +15,7 @@ import {
   botReports,
   decisionRecords,
   overrideRecords,
+  providerInvoices,
   submissions,
   users,
 } from "./schema";
@@ -304,4 +305,138 @@ export async function getBotDailyCosts(opts: {
     windowEnd,
     windowDays: days,
   };
+}
+
+/* ── Cost reconciliation (staff-only) ─────────────────────────── */
+
+export interface MonthlyReconcileRow {
+  /** YYYY-MM. */
+  month: string;
+  /** Sum of self-reported USD across all bots in that month. */
+  selfReportedUsd: number;
+  /** Sum of provider invoices uploaded for that month. */
+  invoicedUsd: number;
+  /** invoicedUsd - selfReportedUsd. Positive = under-reported. */
+  varianceUsd: number;
+  /** Per-provider invoice rows so the page can render them inline. */
+  invoices: Array<{
+    id: string;
+    provider: string;
+    invoicedUsd: number;
+    notes: string | null;
+    uploadedAt: Date;
+    uploadedBy: string | null;
+  }>;
+}
+
+/**
+ * Per-month reconciliation: self-reported (from bot_costs_daily,
+ * already UTC-bucketed by day) vs invoiced (from provider_invoices,
+ * staff-uploaded). Returns rows newest-month-first, last `months`
+ * months including the current one. The current month's
+ * selfReportedUsd includes today's running live total; closed
+ * months are stable.
+ */
+export async function getMonthlyReconcile(opts: {
+  months?: number;
+} = {}): Promise<MonthlyReconcileRow[]> {
+  const months = Math.max(1, Math.min(24, opts.months ?? 12));
+  const now = new Date();
+  const cutoff = new Date(
+    Date.UTC(now.getUTCFullYear(), now.getUTCMonth() - (months - 1), 1),
+  );
+  const cutoffMonthKey = cutoff.toISOString().slice(0, 7);
+
+  // Closed days self-reported (rollup).
+  const rollupRows = await db
+    .select({
+      month: sql<string>`to_char(${botCostsDaily.day}, 'YYYY-MM')`,
+      sum: sql<string>`COALESCE(SUM(${botCostsDaily.usd}), 0)::text`,
+    })
+    .from(botCostsDaily)
+    .where(gte(botCostsDaily.day, sql`${cutoff}::date`))
+    .groupBy(sql`to_char(${botCostsDaily.day}, 'YYYY-MM')`);
+
+  // Today's live self-reported (only contributes to current month).
+  const todayStart = new Date(
+    Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()),
+  );
+  const todayMonthKey = todayStart.toISOString().slice(0, 7);
+  const liveTodayRows = await db
+    .select({
+      sum: sql<string>`COALESCE(SUM(${botReports.costUsd}), 0)::text`,
+    })
+    .from(botReports)
+    .where(
+      and(
+        eq(botReports.kind, "cost"),
+        isNotNull(botReports.costUsd),
+        gte(botReports.reportedAt, todayStart),
+      ),
+    );
+  const liveTodayUsd = Number.parseFloat(liveTodayRows[0]?.sum ?? "0") || 0;
+
+  // Provider invoices in the window.
+  const invoiceRows = await db
+    .select({
+      id: providerInvoices.id,
+      provider: providerInvoices.provider,
+      month: providerInvoices.month,
+      invoicedUsd: providerInvoices.invoicedUsd,
+      uploadedAt: providerInvoices.uploadedAt,
+      uploadedByUsername: users.username,
+      notes: providerInvoices.notes,
+    })
+    .from(providerInvoices)
+    .leftJoin(users, eq(users.id, providerInvoices.uploadedBy))
+    .where(gte(providerInvoices.month, cutoffMonthKey))
+    .orderBy(desc(providerInvoices.month), providerInvoices.provider);
+
+  // Build the (month → row) map. Iterate over the requested window
+  // so empty months still render.
+  const byMonth = new Map<string, MonthlyReconcileRow>();
+  for (let i = 0; i < months; i++) {
+    const d = new Date(
+      Date.UTC(now.getUTCFullYear(), now.getUTCMonth() - i, 1),
+    );
+    const m = d.toISOString().slice(0, 7);
+    byMonth.set(m, {
+      month: m,
+      selfReportedUsd: 0,
+      invoicedUsd: 0,
+      varianceUsd: 0,
+      invoices: [],
+    });
+  }
+
+  for (const r of rollupRows) {
+    const row = byMonth.get(r.month);
+    if (row) row.selfReportedUsd += Number.parseFloat(r.sum) || 0;
+  }
+  // Add today's running total to the current month if it's in the window.
+  const cur = byMonth.get(todayMonthKey);
+  if (cur) cur.selfReportedUsd += liveTodayUsd;
+
+  for (const inv of invoiceRows) {
+    const row = byMonth.get(inv.month);
+    if (!row) continue;
+    const usd = Number.parseFloat(inv.invoicedUsd) || 0;
+    row.invoicedUsd += usd;
+    row.invoices.push({
+      id: inv.id,
+      provider: inv.provider,
+      invoicedUsd: usd,
+      notes: inv.notes,
+      uploadedAt: inv.uploadedAt,
+      uploadedBy: inv.uploadedByUsername,
+    });
+  }
+
+  for (const r of byMonth.values()) {
+    r.varianceUsd = r.invoicedUsd - r.selfReportedUsd;
+  }
+
+  return Array.from(byMonth.values()).sort((a, b) =>
+    a.month < b.month ? 1 : -1,
+  );
 }

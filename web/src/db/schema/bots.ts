@@ -86,6 +86,14 @@ export const botReports = pgTable(
       .where(
         sql`${t.kind} = 'proposal' AND ${t.status} = 'open' AND ${t.payload}->>'key' IS NOT NULL`,
       ),
+    // Migration 0028 — alert dedup. Server-side cap-breach detection
+    // emits one alert per (bot, month-cap-cross) pair via INSERT … ON
+    // CONFLICT DO NOTHING; this index makes the conflict deterministic.
+    uniqueIndex("idx_bot_reports_alert_key")
+      .on(t.botId, sql`(${t.payload}->>'key')`)
+      .where(
+        sql`${t.kind} = 'alert' AND ${t.payload}->>'key' IS NOT NULL`,
+      ),
   ],
 );
 
@@ -112,5 +120,39 @@ export const botCostsDaily = pgTable(
   (t) => [
     primaryKey({ columns: [t.botId, t.day] }),
     index("idx_bot_costs_daily_day").on(t.day.desc()),
+  ],
+);
+
+/**
+ * Provider invoice ledger (migration 0028). Staff manually uploads
+ * one row per (provider, month) with the invoiced USD figure.
+ * /admin/console/cost-reconcile joins this against bot_costs_daily
+ * to surface the diff between self-reported and invoiced spend.
+ *
+ * Uniqueness on (provider, month) makes the upload form idempotent:
+ * staff can re-upload an invoice number after a credit and the row
+ * is updated rather than duplicated.
+ */
+export const providerInvoices = pgTable(
+  "provider_invoices",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    provider: text("provider").notNull(),
+    month: text("month").notNull(), // 'YYYY-MM'
+    invoicedUsd: numeric("invoiced_usd", { precision: 10, scale: 2 }).notNull(),
+    uploadedBy: uuid("uploaded_by").references(() => users.id, {
+      onDelete: "set null",
+    }),
+    uploadedAt: timestamp("uploaded_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    notes: text("notes"),
+  },
+  (t) => [
+    uniqueIndex("provider_invoices_provider_month_unique").on(
+      t.provider,
+      t.month,
+    ),
+    index("idx_provider_invoices_month").on(t.month.desc()),
   ],
 );
