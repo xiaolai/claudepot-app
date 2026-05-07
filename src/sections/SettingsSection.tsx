@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useTranslation } from "react-i18next";
 import type { NfIcon } from "../icons";
 import { api } from "../api";
 import { Button } from "../components/primitives/Button";
@@ -73,6 +74,7 @@ const SECTION_OPTIONS = [
 ] as const;
 
 export function SettingsSection() {
+  const { t } = useTranslation();
   const { pushToast } = useAppState();
   const [tab, setTab] = useState<Tab>("general");
   const active = TAB_DEFS.find((t) => t.id === tab) ?? TAB_DEFS[0];
@@ -80,8 +82,8 @@ export function SettingsSection() {
   return (
     <>
       <ScreenHeader
-        title="Settings"
-        subtitle="Preferences, data, and diagnostics."
+        title={t("settings.title")}
+        subtitle={t("settings.subtitle")}
       />
 
       <div style={{ flex: 1, display: "flex", minHeight: 0 }}>
@@ -104,7 +106,7 @@ export function SettingsSection() {
               marginBottom: "var(--sp-16)",
             }}
           >
-            {active.label}
+            {t("settings." + active.id)}
           </h2>
 
           {tab === "general" && <GeneralPane pushToast={pushToast} />}
@@ -134,12 +136,13 @@ function SettingsNav({
   active: Tab;
   onSelect: (t: Tab) => void;
 }) {
+  const { t: tr } = useTranslation();
   const groups: { label: string; items: typeof TAB_DEFS }[] = useMemo(
     () => [
-      { label: "", items: TAB_DEFS.filter((t) => t.group === "core") },
+      { label: "", items: TAB_DEFS.filter((td) => td.group === "core") },
       {
-        label: "Advanced",
-        items: TAB_DEFS.filter((t) => t.group === "advanced"),
+        label: tr("settings.advanced"),
+        items: TAB_DEFS.filter((td) => td.group === "advanced"),
       },
     ],
     [],
@@ -169,13 +172,13 @@ function SettingsNav({
               {group.label}
             </div>
           )}
-          {group.items.map((t) => {
-            const isActive = t.id === active;
+          {group.items.map((td) => {
+            const isActive = td.id === active;
             return (
               <button
-                key={t.id}
+                key={td.id}
                 type="button"
-                onClick={() => onSelect(t.id)}
+                onClick={() => onSelect(td.id)}
                 aria-current={isActive ? "page" : undefined}
                 style={{
                   display: "flex",
@@ -196,11 +199,11 @@ function SettingsNav({
                 }}
               >
                 <Glyph
-                  g={t.glyph}
+                  g={td.glyph}
                   color={isActive ? "var(--accent)" : "currentColor"}
                   style={{ fontSize: "var(--fs-base)" }}
                 />
-                <span>{t.label}</span>
+                <span>{tr("settings." + td.id)}</span>
               </button>
             );
           })}

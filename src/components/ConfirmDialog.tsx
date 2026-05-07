@@ -1,4 +1,5 @@
 import React, { useId } from "react";
+import { useTranslation } from "react-i18next";
 import { Button } from "./primitives/Button";
 import { Modal, ModalHeader, ModalBody, ModalFooter } from "./primitives/Modal";
 
@@ -24,6 +25,7 @@ export function ConfirmDialog({
   onCancel: () => void;
   onConfirm: () => void;
 }) {
+  const { t } = useTranslation();
   const titleId = useId();
   return (
     <Modal open onClose={onCancel} aria-labelledby={titleId}>
@@ -31,7 +33,7 @@ export function ConfirmDialog({
       <ModalBody>{body}</ModalBody>
       <ModalFooter>
         <Button variant="ghost" onClick={onCancel}>
-          Cancel
+          {t("confirm.cancel")}
         </Button>
         <Button
           variant="solid"

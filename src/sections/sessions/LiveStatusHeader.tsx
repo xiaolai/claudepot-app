@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
+import { useTranslation } from "react-i18next";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { api } from "../../api";
 import { Glyph } from "../../components/primitives/Glyph";
@@ -33,6 +34,7 @@ interface Props {
 }
 
 export function LiveStatusHeader({ sessionId }: Props) {
+  const { t } = useTranslation();
   const aggregate = useSessionLive();
   const summary = useMemo(
     () => aggregate.find((s) => s.session_id === sessionId) ?? null,
@@ -202,14 +204,16 @@ export function LiveStatusHeader({ sessionId }: Props) {
         waitingFor={waitingFor}
         errored={errored}
         idleMs={summary.idle_ms}
+        t={t}
       />
       <CurrentActionCard
         action={currentAction}
         status={status}
         waitingFor={waitingFor}
+        t={t}
       />
       {errored || stuck ? (
-        <OverlayBanner errored={errored} stuck={stuck} />
+        <OverlayBanner errored={errored} stuck={stuck} t={t} />
       ) : null}
     </section>
   );
@@ -223,6 +227,7 @@ interface StatusChipRowProps {
   waitingFor: string | null;
   errored: boolean;
   idleMs: number;
+  t: (key: string, options?: Record<string, unknown>) => string;
 }
 
 function StatusChipRow({
@@ -231,6 +236,7 @@ function StatusChipRow({
   waitingFor,
   errored,
   idleMs,
+  t,
 }: StatusChipRowProps) {
   const statusTone: ChipTone = errored ? "warn" : STATUS_TONE[status];
   // The elapsed counter reuses `idle_ms` across every status. Name it
@@ -238,10 +244,10 @@ function StatusChipRow({
   // means "idle for 17s" or "this turn has been running 17s".
   const elapsedLabel =
     status === "busy"
-      ? "working"
+      ? t("sessions.live.working")
       : status === "waiting"
-        ? "waiting"
-        : "idle";
+        ? t("sessions.live.waiting")
+        : t("sessions.live.idle");
   return (
     <div
       style={{
@@ -268,18 +274,20 @@ function CurrentActionCard({
   action,
   status,
   waitingFor,
+  t,
 }: {
   action: string | null;
   status: LiveSessionSummary["status"];
   waitingFor: string | null;
+  t: (key: string, options?: Record<string, unknown>) => string;
 }) {
   const body =
     action ??
     (status === "waiting" && waitingFor
-      ? `waiting — ${waitingFor}`
+      ? t("sessions.live.waitingFor", { waitingFor })
       : status === "idle"
-        ? "idle — awaiting your prompt"
-        : "working…");
+        ? t("sessions.live.idleAwaiting")
+        : t("sessions.live.workingEllipsis"));
   return (
     <div
       style={{
@@ -316,10 +324,18 @@ function CurrentActionCard({
   );
 }
 
-function OverlayBanner({ errored, stuck }: { errored: boolean; stuck: boolean }) {
+function OverlayBanner({
+  errored,
+  stuck,
+  t,
+}: {
+  errored: boolean;
+  stuck: boolean;
+  t: (key: string, options?: Record<string, unknown>) => string;
+}) {
   const messages: string[] = [];
-  if (errored) messages.push("errors in the last minute");
-  if (stuck) messages.push("tool call has been running > 10 min");
+  if (errored) messages.push(t("sessions.live.errorsLastMin"));
+  if (stuck) messages.push(t("sessions.live.toolCallStuck"));
   return (
     <div
       role="alert"

@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useTranslation } from "react-i18next";
 import { api } from "../api";
 import { useOperations } from "../hooks/useOperations";
 import { useGlobalShortcuts } from "../hooks/useGlobalShortcuts";
@@ -60,6 +61,7 @@ export function ProjectsSection({
    *  can clear state and avoid re-applying on every prop change. */
   onPendingConsumed?: () => void;
 }) {
+  const { t } = useTranslation();
   const [projects, setProjects] = useState<ProjectInfo[]>([]);
   const [orphans, setOrphans] = useState<OrphanedProject[]>([]);
   const [adoptOpen, setAdoptOpen] = useState(false);
@@ -253,16 +255,16 @@ export function ProjectsSection({
       <>
         <ScreenHeader
           crumbs={["claudepot", "projects", "maintenance"]}
-          title="Maintenance"
-          subtitle="Clean orphaned projects and resume pending rename journals."
+          title={t("projects.maintenance")}
+          subtitle={t("projects.maintenanceSubtitle")}
           actions={
             <Button
               variant="ghost"
               glyph={NF.arrowR}
               onClick={() => onSubRouteChange(null)}
-              title="Back to project list"
+              title={t("projects.backToListTitle")}
             >
-              Back to list
+              {t("projects.backToList")}
             </Button>
           }
         />
@@ -273,7 +275,7 @@ export function ProjectsSection({
   const subtitle = (() => {
     const total = projects.length;
     if (total === 0) {
-      return "No CC projects yet — run `claude` in any directory to create one.";
+      return t("projects.emptySubtitle");
     }
     const narrowed =
       (nameFilter.trim() !== "" || filter !== "all") &&
@@ -295,7 +297,7 @@ export function ProjectsSection({
   return (
     <>
       <ScreenHeader
-        title="Projects"
+        title={t("projects.title")}
         subtitle={subtitle}
         actions={
           compact ? (
@@ -303,20 +305,20 @@ export function ProjectsSection({
               <IconButton
                 glyph={NF.download}
                 onClick={() => setImportOpen(true)}
-                title="Import bundle"
-                aria-label="Import bundle"
+                title={t("projects.importBundle")}
+                aria-label={t("projects.importBundle")}
               />
               <IconButton
                 glyph={NF.wrench}
                 onClick={() => onSubRouteChange("maintenance")}
-                title="Maintenance — clean + repair"
-                aria-label="Maintenance"
+                title={t("projects.maintenanceTitle")}
+                aria-label={t("projects.maintenanceBtn")}
               />
               <IconButton
                 glyph={NF.refresh}
                 onClick={refresh}
-                title="Refresh (⌘R)"
-                aria-label="Refresh projects"
+                title={t("projects.refreshTitle")}
+                aria-label={t("projects.refreshProjects")}
               />
             </>
           ) : (
@@ -326,27 +328,27 @@ export function ProjectsSection({
                 glyph={NF.download}
                 glyphColor="var(--fg-muted)"
                 onClick={() => setImportOpen(true)}
-                title="Import a *.claudepot.tar.zst bundle"
+                title={t("projects.importBundle")}
               >
-                Import bundle
+                {t("projects.importBundle")}
               </Button>
               <Button
                 variant="ghost"
                 glyph={NF.wrench}
                 glyphColor="var(--fg-muted)"
                 onClick={() => onSubRouteChange("maintenance")}
-                title="Maintenance: clean + repair"
+                title={t("projects.maintenanceTitle")}
               >
-                Maintenance
+                {t("projects.maintenanceBtn")}
               </Button>
               <Button
                 variant="ghost"
                 glyph={NF.refresh}
                 glyphColor="var(--fg-muted)"
                 onClick={refresh}
-                title="Refresh project list (⌘R)"
+                title={t("projects.refreshTitle")}
               >
-                Refresh projects
+                {t("projects.refreshProjects")}
               </Button>
             </>
           )
@@ -376,7 +378,7 @@ export function ProjectsSection({
           }}
         >
           <h2 style={{ fontSize: "var(--fs-lg)", margin: 0 }}>
-            Couldn't load projects
+            {t("projects.errorTitle")}
           </h2>
           <p
             style={{
@@ -513,8 +515,7 @@ export function ProjectsSection({
                   padding: "var(--sp-32)",
                 }}
               >
-                Select a project from the list to see its sessions and
-                config.
+                {t("projects.selectPlaceholder")}
               </div>
             )}
           </div>

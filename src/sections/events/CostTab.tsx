@@ -20,6 +20,8 @@
 // honesty signals on the figure.
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useTranslation } from "react-i18next";
+import type { TFunction } from "i18next";
 import { api } from "../../api";
 import { Table, Th, ThSort, Tr, Td } from "../../components/primitives";
 import { formatRelative } from "../../lib/formatRelative";
@@ -46,25 +48,29 @@ const TOP_PROMPTS_LIMIT = 5;
 /** Picker options for the pricing tier — keeps the labels stable
  *  alongside the wire-form ids. Order mirrors the Rust
  *  `PriceTier::all()` so the default lands at the top. */
-const TIER_OPTIONS: { value: PriceTierId; label: string }[] = [
-  { value: "anthropic_api", label: "Anthropic API" },
-  { value: "vertex_global", label: "Vertex Global" },
-  { value: "vertex_regional", label: "Vertex Regional" },
-  { value: "aws_bedrock", label: "AWS Bedrock" },
-];
+function getTierOptions(t: TFunction): { value: PriceTierId; label: string }[] {
+  return [
+    { value: "anthropic_api", label: t("cost.tier.anthropic") },
+    { value: "vertex_global", label: t("cost.tier.vertexGlobal") },
+    { value: "vertex_regional", label: t("cost.tier.vertexRegional") },
+    { value: "aws_bedrock", label: t("cost.tier.awsBedrock") },
+  ];
+}
 
-function labelForTier(t: PriceTierId): string {
-  return TIER_OPTIONS.find((o) => o.value === t)?.label ?? t;
+function labelForTier(t: TFunction, tier: PriceTierId): string {
+  return getTierOptions(t).find((o) => o.value === tier)?.label ?? tier;
 }
 
 type WindowChoice = "7d" | "30d" | "90d" | "all";
 
-const WINDOW_OPTIONS: { value: WindowChoice; label: string }[] = [
-  { value: "7d", label: "Last 7 days" },
-  { value: "30d", label: "Last 30 days" },
-  { value: "90d", label: "Last 90 days" },
-  { value: "all", label: "All time" },
-];
+function getWindowOptions(t: TFunction): { value: WindowChoice; label: string }[] {
+  return [
+    { value: "7d", label: t("cost.window.7d") },
+    { value: "30d", label: t("cost.window.30d") },
+    { value: "90d", label: t("cost.window.90d") },
+    { value: "all", label: t("cost.window.all") },
+  ];
+}
 
 function toSpec(c: WindowChoice): UsageWindowSpec {
   if (c === "all") return { kind: "all" };
@@ -83,6 +89,9 @@ type SortKey =
 type SortDir = "asc" | "desc";
 
 export function CostTab() {
+  const { t } = useTranslation();
+  const tierOptions = useMemo(() => getTierOptions(t), [t]);
+  const windowOptions = useMemo(() => getWindowOptions(t), [t]);
   const [choice, setChoice] = useState<WindowChoice>("7d");
   const [report, setReport] = useState<LocalUsageReport | null>(null);
   const [topPrompts, setTopPrompts] = useState<TopCostlyPrompts | null>(null);
@@ -231,8 +240,11 @@ export function CostTab() {
         pricingTier={activeTier ?? report?.pricing_tier ?? null}
         onTier={setTier}
         loading={loading}
+        t={t}
+        tierOptions={tierOptions}
+        windowOptions={windowOptions}
       />
-      <SummaryTiles report={report} loading={loading} />
+      <SummaryTiles report={report} loading={loading} t={t} />
       {error && (
         <div
           role="alert"
@@ -250,12 +262,13 @@ export function CostTab() {
           sortKey={sortKey}
           sortDir={sortDir}
           onSort={onSort}
+          t={t}
         />
       )}
       {!error && topPrompts && topPrompts.turns.length > 0 && (
         <TopPromptsPanel data={topPrompts} />
       )}
-      <UnpricedFooter report={report} onRefreshPrices={refreshPrices} />
+      <UnpricedFooter report={report} onRefreshPrices={refreshPrices} t={t} />
     </div>
   );
 }
@@ -270,6 +283,9 @@ function Controls({
   pricingTier,
   onTier,
   loading,
+  t,
+  tierOptions,
+  windowOptions,
 }: {
   choice: WindowChoice;
   onChoice: (c: WindowChoice) => void;
@@ -278,6 +294,9 @@ function Controls({
   pricingTier: PriceTierId | null;
   onTier: (t: PriceTierId) => void;
   loading: boolean;
+  t: TFunction;
+  tierOptions: { value: PriceTierId; label: string }[];
+  windowOptions: { value: WindowChoice; label: string }[];
 }) {
   return (
     <div
@@ -295,7 +314,7 @@ function Controls({
           color: "var(--fg-muted)",
         }}
       >
-        Window
+        {t("cost.window.label")}
       </label>
       <select
         id="cost-tab-window"
@@ -311,7 +330,7 @@ function Controls({
           fontFamily: "inherit",
         }}
       >
-        {WINDOW_OPTIONS.map((o) => (
+        {windowOptions.map((o) => (
           <option key={o.value} value={o.value}>
             {o.label}
           </option>
@@ -324,13 +343,13 @@ function Controls({
           color: "var(--fg-muted)",
         }}
       >
-        Tier
+        {t("cost.tier.label")}
       </label>
       <select
         id="cost-tab-tier"
         value={pricingTier ?? "anthropic_api"}
         onChange={(e) => onTier(e.target.value as PriceTierId)}
-        title="Platform you're billed through. Drives the cost label and (where verified) the rate multiplier."
+        title={t("cost.tier.platformTitle")}
         style={{
           fontSize: "var(--fs-xs)",
           padding: "var(--sp-3) var(--sp-8)",
@@ -341,7 +360,7 @@ function Controls({
           fontFamily: "inherit",
         }}
       >
-        {TIER_OPTIONS.map((o) => (
+        {tierOptions.map((o) => (
           <option key={o.value} value={o.value}>
             {o.label}
           </option>
@@ -349,7 +368,7 @@ function Controls({
       </select>
       {pricingSource && (
         <span
-          title={pricingError ?? `Price table source: ${pricingSource}`}
+          title={pricingError ?? t("cost.pricingSourceTitle", { source: pricingSource })}
           style={{
             fontSize: "var(--fs-2xs)",
             color: pricingError ? "var(--warn)" : "var(--fg-faint)",
@@ -361,9 +380,9 @@ function Controls({
             textTransform: "uppercase",
           }}
         >
-          {pricingTier ? `${labelForTier(pricingTier)} · ` : ""}
+          {pricingTier ? `${labelForTier(t, pricingTier)} · ` : ""}
           {pricingSource}
-          {pricingError ? " · stale" : ""}
+          {pricingError ? t("cost.stale") : ""}
         </span>
       )}
       {loading && (
@@ -373,7 +392,7 @@ function Controls({
             color: "var(--fg-faint)",
           }}
         >
-          loading…
+          {t("cost.loading")}
         </span>
       )}
     </div>
@@ -385,11 +404,13 @@ function Controls({
 function SummaryTiles({
   report,
   loading,
+  t,
 }: {
   report: LocalUsageReport | null;
   loading: boolean;
+  t: TFunction;
 }) {
-  const t = report?.totals;
+  const totals = report?.totals;
   const dash = "—";
   return (
     <div
@@ -406,42 +427,42 @@ function SummaryTiles({
       }}
     >
       <Tile
-        label="Total cost"
+        label={t("cost.totalCost")}
         value={
-          t && t.cost_usd != null
-            ? `$${t.cost_usd.toFixed(2)}`
+          totals && totals.cost_usd != null
+            ? `$${totals.cost_usd.toFixed(2)}`
             : loading
               ? dash
-              : t
-                ? "n/a"
+              : totals
+                ? t("cost.na")
                 : dash
         }
-        sub="install-wide"
+        sub={t("cost.installWide")}
       />
       <Tile
-        label="Tokens in"
-        value={renderTokens(t?.tokens_input)}
+        label={t("cost.tokensIn")}
+        value={renderTokens(totals?.tokens_input)}
         sub={
-          t
-            ? `cache hit ${formatHitRate(cacheHitRate(t))}`
-            : renderTokens(undefined, "cache read")
+          totals
+            ? t("cost.cacheHit", { rate: formatHitRate(cacheHitRate(totals)) })
+            : renderTokens(undefined, t("cost.cacheRead"))
         }
       />
       <Tile
-        label="Tokens out"
-        value={renderTokens(t?.tokens_output)}
-        sub={renderTokens(t?.tokens_cache_creation, "cache write")}
+        label={t("cost.tokensOut")}
+        value={renderTokens(totals?.tokens_output)}
+        sub={renderTokens(totals?.tokens_cache_creation, t("cost.cacheWrite"))}
       />
       <Tile
-        label="Sessions"
+        label={t("cost.sessions")}
         // Render `—` for zero so the empty-window state matches the
         // project-wide "render-if-nonzero" rule. A literal `0` reads
         // as a real value and competes with the "no sessions in this
         // window" notice in the table below.
-        value={t && t.session_count > 0 ? String(t.session_count) : dash}
+        value={totals && totals.session_count > 0 ? String(totals.session_count) : dash}
         sub={
-          t && t.unpriced_sessions > 0
-            ? `${t.unpriced_sessions} unpriced`
+          totals && totals.unpriced_sessions > 0
+            ? `${totals.unpriced_sessions} ${t("cost.unpriced")}`
             : undefined
         }
       />
@@ -524,11 +545,13 @@ function CostTable({
   sortKey,
   sortDir,
   onSort,
+  t,
 }: {
   rows: ProjectUsageRow[];
   sortKey: SortKey;
   sortDir: SortDir;
   onSort: (k: SortKey) => void;
+  t: TFunction;
 }) {
   if (rows.length === 0) {
     return (
@@ -540,7 +563,7 @@ function CostTable({
           textAlign: "center",
         }}
       >
-        No sessions in this window.
+        {t("cost.noSessions")}
       </div>
     );
   }
@@ -555,7 +578,7 @@ function CostTable({
             onSort={onSort}
             align="left"
           >
-            Project
+            {t("cost.colProject")}
           </ThSort>
           <ThSort
             value="sessions"
@@ -564,7 +587,7 @@ function CostTable({
             onSort={onSort}
             align="right"
           >
-            Sess
+            {t("cost.colSessions")}
           </ThSort>
           <ThSort
             value="last"
@@ -573,7 +596,7 @@ function CostTable({
             onSort={onSort}
             align="right"
           >
-            Last active
+            {t("cost.colLastActive")}
           </ThSort>
           <ThSort
             value="input"
@@ -582,7 +605,7 @@ function CostTable({
             onSort={onSort}
             align="right"
           >
-            Input
+            {t("cost.colInput")}
           </ThSort>
           <ThSort
             value="output"
@@ -591,7 +614,7 @@ function CostTable({
             onSort={onSort}
             align="right"
           >
-            Output
+            {t("cost.colOutput")}
           </ThSort>
           <ThSort
             value="cache_hit"
@@ -600,9 +623,9 @@ function CostTable({
             onSort={onSort}
             align="right"
           >
-            Cache hit
+            {t("cost.colCacheHit")}
           </ThSort>
-          <Th align="left">Models</Th>
+          <Th align="left">{t("cost.colModels")}</Th>
           <ThSort
             value="cost"
             current={sortKey}
@@ -610,23 +633,23 @@ function CostTable({
             onSort={onSort}
             align="right"
           >
-            Cost
+            {t("cost.colCost")}
           </ThSort>
           <Th align="center">⚠</Th>
         </tr>
       </thead>
       <tbody>
         {rows.map((r) => (
-          <Row key={r.project_path} row={r} />
+          <Row key={r.project_path} row={r} t={t} />
         ))}
       </tbody>
     </Table>
   );
 }
 
-function Row({ row }: { row: ProjectUsageRow }) {
+function Row({ row, t }: { row: ProjectUsageRow; t: TFunction }) {
   const cost =
-    row.cost_usd == null ? "n/a" : `$${row.cost_usd.toFixed(2)}`;
+    row.cost_usd == null ? t("cost.na") : `$${row.cost_usd.toFixed(2)}`;
   const last =
     row.last_active_ms != null
       ? formatRelative(row.last_active_ms, { ago: false })
@@ -660,7 +683,7 @@ function Row({ row }: { row: ProjectUsageRow }) {
         align="right"
         title={
           hit == null
-            ? "no input-side tokens"
+            ? t("cost.noInputTokens")
             : `${formatCompact(row.tokens_cache_read)} cache-read of ${formatCompact(row.tokens_input + row.tokens_cache_creation + row.tokens_cache_read)} prompt tokens`
         }
       >
@@ -673,7 +696,7 @@ function Row({ row }: { row: ProjectUsageRow }) {
       <Td align="center">
         {warn != null ? (
           <span
-            title={`${warn} session(s) had no priced model`}
+            title={t("cost.noPricedModelTitle", { count: warn })}
             style={{ color: "var(--warn)" }}
           >
             ⚠
@@ -738,9 +761,11 @@ function ModelBadges({ mix }: { mix: Record<string, number> }) {
 function UnpricedFooter({
   report,
   onRefreshPrices,
+  t,
 }: {
   report: LocalUsageReport | null;
   onRefreshPrices: () => void;
+  t: TFunction;
 }) {
   if (!report || report.totals.unpriced_sessions === 0) return null;
   const u = report.totals.unpriced_sessions;
@@ -762,9 +787,7 @@ function UnpricedFooter({
       }}
     >
       <span>
-        ⚠ {u} of {total} session{total === 1 ? "" : "s"} used a model not
-        in the price table — token counts above include them; cost
-        excludes them.
+        {t("cost.unpricedNote", { count: u, total })}
       </span>
       <button
         type="button"
@@ -781,7 +804,7 @@ function UnpricedFooter({
           fontFamily: "inherit",
         }}
       >
-        Refresh prices
+        {t("cost.refreshPrices")}
       </button>
     </div>
   );

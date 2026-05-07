@@ -1,4 +1,5 @@
 import { useCallback, useId, useMemo, useRef, useState, type ReactNode } from "react";
+import { useTranslation } from "react-i18next";
 import { useTauriEvent } from "../../hooks/useTauriEvent";
 import { Button } from "../../components/primitives/Button";
 import {
@@ -83,6 +84,7 @@ export function OperationProgressModal({
     | null
   >(null);
   const firedTerminal = useRef(false);
+  const { t } = useTranslation();
   const headingId = useId();
 
   // Audit H9: stabilize handler identity so the underlying `listen`
@@ -175,10 +177,18 @@ export function OperationProgressModal({
             const state = phaseStates[p.id] ?? "pending";
             return (
               <li key={p.id} className={`phase phase-${state}`}>
-                <span className="phase-tag" title={`Internal id: ${p.id}`}>
+                <span className="phase-tag" title={t("projects.opProgress.internalId", { id: p.id })}>
                   {p.label}
                 </span>
-                <span className="phase-label">{state}</span>
+                <span className="phase-label">
+                  {state === "pending"
+                    ? t("projects.opProgress.statePending")
+                    : state === "running"
+                      ? t("projects.opProgress.stateRunning")
+                      : state === "complete"
+                        ? t("projects.opProgress.stateComplete")
+                        : t("projects.opProgress.stateError")}
+                </span>
                 {sub && sub.phase === p.id && (
                   <span className="phase-progress mono small muted">
                     {" "}({sub.done}/{sub.total})
@@ -191,17 +201,17 @@ export function OperationProgressModal({
 
         {terminal?.kind === "complete" && (
           <div className="op-terminal ok">
-            <strong>✓ Complete.</strong>
+            <strong>{t("projects.opProgress.complete")}</strong>
             {renderResult ? renderResult(terminal.info) : null}
           </div>
         )}
         {terminal?.kind === "error" && (
           <div className="op-terminal bad">
-            <strong>Error.</strong>{" "}
-            <span className="mono small">{terminal.detail ?? "unknown"}</span>
+            <strong>{t("projects.opProgress.error")}</strong>{" "}
+            <span className="mono small">{terminal.detail ?? t("projects.opProgress.unknown")}</span>
             {terminal.failedJournalId && (
               <p className="small muted">
-                Journal id:{" "}
+                {t("projects.opProgress.journalId")}
                 <code className="mono">{terminal.failedJournalId}</code>
               </p>
             )}
@@ -211,14 +221,14 @@ export function OperationProgressModal({
       </ModalBody>
       <ModalFooter>
         <Button variant="ghost" onClick={onClose}>
-          {terminal ? "Close" : "Run in background"}
+          {terminal ? t("projects.opProgress.close") : t("projects.opProgress.runInBackground")}
         </Button>
         {terminal?.kind === "error" && onOpenRepair && (
           <Button
             variant="solid"
             onClick={() => onOpenRepair(terminal.failedJournalId)}
           >
-            Open Repair
+            {t("projects.opProgress.openRepair")}
           </Button>
         )}
       </ModalFooter>

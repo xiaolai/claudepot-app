@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useTranslation } from "react-i18next";
 import { listen } from "@tauri-apps/api/event";
 import { api } from "../api";
 import type {
@@ -370,6 +371,7 @@ function TabStrip({
   current: EventsTab;
   onPick: (t: EventsTab) => void;
 }) {
+  const { t } = useTranslation();
   return (
     <div
       role="tablist"
@@ -383,19 +385,19 @@ function TabStrip({
     >
       <TabButton
         active={current === "stream"}
-        label="Stream"
+        label={t("events.stream")}
         sub="Failures + slow events"
         onClick={() => onPick("stream")}
       />
       <TabButton
         active={current === "usage"}
-        label="Usage"
+        label={t("events.usage")}
         sub="Per-artifact invocation counts"
         onClick={() => onPick("usage")}
       />
       <TabButton
         active={current === "cost"}
-        label="Cost"
+        label={t("events.cost")}
         sub="Per-project tokens + USD"
         onClick={() => onPick("cost")}
       />

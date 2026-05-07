@@ -1,4 +1,5 @@
-import { useId } from "react";
+import { useId, useMemo } from "react";
+import { useTranslation } from "react-i18next";
 import { Modal, ModalHeader, ModalBody } from "./primitives/Modal";
 import { Kbd } from "./primitives/Kbd";
 
@@ -13,56 +14,6 @@ interface ShortcutGroup {
   items: ShortcutBinding[];
 }
 
-const GROUPS: ShortcutGroup[] = [
-  {
-    title: "Navigation",
-    items: [
-      { keys: ["⌘", "1"], label: "Accounts" },
-      { keys: ["⌘", "2"], label: "Projects" },
-      { keys: ["⌘", "3"], label: "Sessions" },
-      { keys: ["⌘", "4"], label: "Config" },
-      { keys: ["⌘", "5"], label: "Keys" },
-      { keys: ["⌘", "6"], label: "Settings" },
-      { keys: ["⌘", ","], label: "Settings (standard shortcut)" },
-    ],
-  },
-  {
-    title: "Global actions",
-    items: [
-      { keys: ["⌘", "K"], label: "Open command palette" },
-      { keys: ["⌘", "/"], label: "Show keyboard shortcuts" },
-      { keys: ["⌘", "R"], label: "Refresh this section" },
-      { keys: ["⌘", "N"], label: "Add account", scope: "Accounts" },
-      { keys: ["⌘", "F"], label: "Focus filter (where exposed)" },
-      { keys: ["⌘", "⇧", "C"], label: "Copy first matching email", scope: "Accounts" },
-      { keys: ["⌘", "⇧", "L"], label: "Focus Live sessions strip" },
-    ],
-  },
-  {
-    title: "In modals",
-    items: [
-      { keys: ["Esc"], label: "Close dialog" },
-      { keys: ["Tab"], label: "Cycle focus (trapped)" },
-    ],
-  },
-  {
-    title: "Command palette",
-    items: [
-      { keys: ["↑", "↓"], label: "Move selection" },
-      { keys: ["Enter"], label: "Run selected" },
-      { keys: ["Esc"], label: "Close palette" },
-    ],
-  },
-  {
-    title: "Live sessions strip",
-    items: [
-      { keys: ["j"], label: "Next session" },
-      { keys: ["k"], label: "Previous session" },
-      { keys: ["Enter"], label: "Open focused session" },
-    ],
-  },
-];
-
 /**
  * Global shortcut reference. Mounted at the shell level so it's
  * reachable from every section (⌘/ or the palette entry). Static
@@ -71,10 +22,62 @@ const GROUPS: ShortcutGroup[] = [
  * Modal, CommandPalette, and SidebarLiveStrip.
  */
 export function ShortcutsModal({ onClose }: { onClose: () => void }) {
+  const { t } = useTranslation();
   const titleId = useId();
+
+  const groups: ShortcutGroup[] = useMemo(() => [
+    {
+      title: t("shortcuts.group.navigation"),
+      items: [
+        { keys: ["⌘", "1"], label: t("shortcuts.nav.accounts") },
+        { keys: ["⌘", "2"], label: t("shortcuts.nav.projects") },
+        { keys: ["⌘", "3"], label: t("shortcuts.nav.sessions") },
+        { keys: ["⌘", "4"], label: t("shortcuts.nav.config") },
+        { keys: ["⌘", "5"], label: t("shortcuts.nav.keys") },
+        { keys: ["⌘", "6"], label: t("shortcuts.nav.settings") },
+        { keys: ["⌘", ","], label: t("shortcuts.nav.settingsStd") },
+      ],
+    },
+    {
+      title: t("shortcuts.group.global"),
+      items: [
+        { keys: ["⌘", "K"], label: t("shortcuts.act.palette") },
+        { keys: ["⌘", "/"], label: t("shortcuts.act.shortcuts") },
+        { keys: ["⌘", "R"], label: t("shortcuts.act.refresh") },
+        { keys: ["⌘", "N"], label: t("shortcuts.act.add"), scope: t("shortcuts.scope.accounts") },
+        { keys: ["⌘", "F"], label: t("shortcuts.act.filter") },
+        { keys: ["⌘", "⇧", "C"], label: t("shortcuts.act.copyEmail"), scope: t("shortcuts.scope.accounts") },
+        { keys: ["⌘", "⇧", "L"], label: t("shortcuts.act.liveSessions") },
+      ],
+    },
+    {
+      title: t("shortcuts.group.modals"),
+      items: [
+        { keys: ["Esc"], label: t("shortcuts.modal.close") },
+        { keys: ["Tab"], label: t("shortcuts.modal.focus") },
+      ],
+    },
+    {
+      title: t("shortcuts.group.palette"),
+      items: [
+        { keys: ["↑", "↓"], label: t("shortcuts.pal.move") },
+        { keys: ["Enter"], label: t("shortcuts.pal.run") },
+        { keys: ["Esc"], label: t("shortcuts.pal.close") },
+      ],
+    },
+    {
+      title: t("shortcuts.group.sessions"),
+      items: [
+        { keys: ["j"], label: t("shortcuts.ss.next") },
+        { keys: ["k"], label: t("shortcuts.ss.prev") },
+        { keys: ["Enter"], label: t("shortcuts.ss.open") },
+      ],
+    },
+  ], [t]);
+
   return (
     <Modal open onClose={onClose} width="lg" aria-labelledby={titleId}>
-      <ModalHeader title="Keyboard shortcuts" id={titleId} onClose={onClose} />
+      <ModalHeader title={t("shortcuts.title")} id={titleId} onClose={onClose} />
       <ModalBody>
         <div
           style={{
@@ -83,7 +86,7 @@ export function ShortcutsModal({ onClose }: { onClose: () => void }) {
             gap: "var(--sp-24) var(--sp-32)",
           }}
         >
-          {GROUPS.map((g) => (
+          {groups.map((g) => (
             <section key={g.title}>
               <h3
                 className="mono-cap"
@@ -156,7 +159,7 @@ export function ShortcutsModal({ onClose }: { onClose: () => void }) {
             color: "var(--fg-faint)",
           }}
         >
-          Shortcuts are suppressed while typing in a text field.
+          {t("shortcuts.footer")}
         </p>
       </ModalBody>
     </Modal>

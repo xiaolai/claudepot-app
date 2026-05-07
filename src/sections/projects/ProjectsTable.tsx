@@ -1,4 +1,5 @@
 import { type MouseEvent, useMemo, useState } from "react";
+import { useTranslation, Trans } from "react-i18next";
 import { Glyph } from "../../components/primitives/Glyph";
 import { IconButton } from "../../components/primitives/IconButton";
 import { Tag } from "../../components/primitives/Tag";
@@ -67,6 +68,7 @@ export function ProjectsTable({
   onSelect: (path: string) => void;
   onContextMenu?: (e: MouseEvent, p: ProjectInfo) => void;
 }) {
+  const { t } = useTranslation();
   // Default: last_touched desc — freshest work on top. Clicking a
   // sortable column cycles that column through asc → desc → default.
   const [sort, setSort] = useState<{ key: SortKey; dir: SortDir }>({
@@ -98,7 +100,7 @@ export function ProjectsTable({
     return (
       <EmptyRow>
         <Glyph g={NF.folder} size="var(--sp-24)" color="var(--fg-ghost)" />
-        <div>No CC projects yet.</div>
+        <div>{t("projects.table.empty")}</div>
         <div
           style={{
             marginTop: "var(--sp-4)",
@@ -106,8 +108,10 @@ export function ProjectsTable({
             color: "var(--fg-faint)",
           }}
         >
-          Run <code style={{ fontFamily: "var(--font)" }}>claude</code>{" "}
-          in any directory to create one.
+          <Trans i18nKey="projects.table.emptyHint">
+            Run <code style={{ fontFamily: "var(--font)" }}>claude</code>{" "}
+            in any directory to create one.
+          </Trans>
         </div>
       </EmptyRow>
     );
@@ -137,29 +141,29 @@ export function ProjectsTable({
       >
         <span />
         <SortHeader
-          label="Project"
+          label={t("projects.table.colProject")}
           col="path"
           currentKey={sort.key}
           currentDir={sort.dir}
           onToggle={toggleSort}
         />
         <SortHeader
-          label="Sessions"
+          label={t("projects.table.colSessions")}
           col="session_count"
           currentKey={sort.key}
           currentDir={sort.dir}
           onToggle={toggleSort}
         />
         <SortHeader
-          label="Size"
+          label={t("projects.table.colSize")}
           col="size"
           currentKey={sort.key}
           currentDir={sort.dir}
           onToggle={toggleSort}
         />
-        <span>Status</span>
+        <span>{t("projects.table.colStatus")}</span>
         <SortHeader
-          label="Last touched"
+          label={t("projects.table.colLastTouched")}
           col="last_touched"
           currentKey={sort.key}
           currentDir={sort.dir}
@@ -169,11 +173,11 @@ export function ProjectsTable({
       </div>
 
       {shown.length === 0 ? (
-        <EmptyRow>No projects in this filter.</EmptyRow>
+        <EmptyRow>{t("projects.table.noMatch")}</EmptyRow>
       ) : (
         <ul
           role="listbox"
-          aria-label="Projects"
+          aria-label={t("projects.table.ariaLabel")}
           style={{ listStyle: "none", margin: 0, padding: 0 }}
         >
           {shown.map((p) => (
@@ -202,6 +206,7 @@ function ProjectRow({
   onSelect: (path: string) => void;
   onContextMenu?: (e: MouseEvent, p: ProjectInfo) => void;
 }) {
+  const { t } = useTranslation();
   const [hover, setHover] = useState(false);
   const status = classifyProject(p);
   const name =
@@ -352,8 +357,8 @@ function ProjectRow({
                   p,
                 );
               }}
-              title="More actions"
-              aria-label={`More actions for ${name}`}
+              title={t("projects.table.moreActions")}
+              aria-label={t("projects.table.moreActionsFor", { name })}
               aria-haspopup="menu"
             />
           </span>
@@ -388,6 +393,7 @@ function SortHeader({
   currentDir: SortDir;
   onToggle: (key: SortKey) => void;
 }) {
+  const { t } = useTranslation();
   const active = currentKey === col;
   const aria: "ascending" | "descending" | "none" = active
     ? currentDir === "asc"
@@ -400,7 +406,7 @@ function SortHeader({
       role="columnheader"
       aria-sort={aria}
       onClick={() => onToggle(col)}
-      title={`Sort by ${label.toLowerCase()}`}
+      title={t("projects.table.sortBy", { label: label.toLowerCase() })}
       style={{
         background: "transparent",
         border: 0,
@@ -429,23 +435,24 @@ function SortHeader({
 }
 
 function StatusTag({ status }: { status: ProjectStatus }) {
+  const { t } = useTranslation();
   switch (status) {
     case "orphan":
       return (
-        <Tag tone="warn" glyph={NF.warn} title="Source directory is missing">
-          orphan
+        <Tag tone="warn" glyph={NF.warn} title={t("projects.status.orphan")}>
+          {t("projects.status.orphanLabel")}
         </Tag>
       );
     case "unreachable":
       return (
-        <Tag tone="neutral" title="Volume unmounted or permission denied">
-          offline
+        <Tag tone="neutral" title={t("projects.status.offline")}>
+          {t("projects.status.offlineLabel")}
         </Tag>
       );
     case "empty":
       return (
-        <Tag tone="ghost" title="No sessions or memory files">
-          empty
+        <Tag tone="ghost" title={t("projects.status.empty")}>
+          {t("projects.status.emptyLabel")}
         </Tag>
       );
     case "alive":

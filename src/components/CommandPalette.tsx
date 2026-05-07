@@ -1,4 +1,5 @@
 import { useState, useCallback, useEffect, useRef } from "react";
+import { useTranslation } from "react-i18next";
 import { Icon } from "./Icon";
 import { useFocusTrap } from "../hooks/useFocusTrap";
 import { usePaletteActions, type PaletteAction } from "../hooks/usePaletteActions";
@@ -61,6 +62,7 @@ export function CommandPalette({
   /** Open the global shortcuts reference modal. */
   onShowShortcuts?: () => void;
 }) {
+  const { t } = useTranslation();
   const [query, setQuery] = useState("");
   const [selectedIndex, setSelectedIndex] = useState(0);
   const inputRef = useRef<HTMLInputElement>(null);
@@ -172,25 +174,25 @@ export function CommandPalette({
       type="button"
       className="palette-backdrop"
       onClick={onClose}
-      aria-label="Close palette"
+      aria-label={t("palette.closeAriaLabel")}
       tabIndex={-1}
     >
       <div ref={trapRef} className="palette" onClick={(e) => e.stopPropagation()}
-        onKeyDown={handleKeyDown} role="dialog" aria-modal="true" aria-label="Command palette">
+        onKeyDown={handleKeyDown} role="dialog" aria-modal="true" aria-label={t("palette.title")}>
         <div className="palette-input-row">
           <Icon name="search" size={16} className="palette-search-icon" />
           <input ref={inputRef} className="palette-input" type="text"
-            placeholder="Search accounts, actions…" value={query}
-            onChange={(e) => setQuery(e.target.value)} aria-label="Search accounts and actions" />
+            placeholder={t("palette.searchPlaceholder")} value={query}
+            onChange={(e) => setQuery(e.target.value)} aria-label={t("palette.searchAriaLabel")} />
           <kbd className="palette-kbd">esc</kbd>
         </div>
         <div className="palette-list" ref={listRef} role="listbox">
           {filtered.length === 0 && sessionHits.length === 0 && !sessionSearch.loading && (
-            <div className="palette-empty">No matches</div>
+            <div className="palette-empty">{t("palette.noResults")}</div>
           )}
           {switchItems.length > 0 && (
             <>
-              <div className="palette-group-label">Quick Switch</div>
+              <div className="palette-group-label">{t("palette.groupQuickSwitch")}</div>
               {switchItems.map((item) => {
                 const i = idx++;
                 return <PaletteItem key={item.id} item={item} selected={i === selectedIndex}
@@ -200,7 +202,7 @@ export function CommandPalette({
           )}
           {navigateItems.length > 0 && (
             <>
-              <div className="palette-group-label">Navigate</div>
+              <div className="palette-group-label">{t("palette.groupNavigate")}</div>
               {navigateItems.map((item) => {
                 const i = idx++;
                 return <PaletteItem key={item.id} item={item} selected={i === selectedIndex}
@@ -210,7 +212,7 @@ export function CommandPalette({
           )}
           {actionItems.length > 0 && (
             <>
-              <div className="palette-group-label">Actions</div>
+              <div className="palette-group-label">{t("palette.groupActions")}</div>
               {actionItems.map((item) => {
                 const i = idx++;
                 return <PaletteItem key={item.id} item={item} selected={i === selectedIndex}
@@ -224,9 +226,9 @@ export function CommandPalette({
               filtered.length === 0) && (
             <>
               <div className="palette-group-label">
-                Sessions{" "}
+                {t("palette.groupSessions")}{" "}
                 {sessionSearch.loading && (
-                  <span style={{ color: "var(--fg-faint)" }}>…searching</span>
+                  <span style={{ color: "var(--fg-faint)" }}>{t("palette.sessionSearching")}</span>
                 )}
               </div>
               {/* Empty session section — only when the whole palette is
@@ -236,7 +238,7 @@ export function CommandPalette({
               {sessionHits.length === 0 &&
                 !sessionSearch.loading &&
                 filtered.length === 0 && (
-                  <div className="palette-empty">No session matches</div>
+                  <div className="palette-empty">{t("palette.noSessionMatches")}</div>
                 )}
               {sessionHits.map((hit, hi) => {
                 const i = filtered.length + hi;

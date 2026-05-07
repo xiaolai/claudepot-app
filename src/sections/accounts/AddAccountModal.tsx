@@ -1,4 +1,5 @@
 import { type ReactNode, useEffect, useId, useState } from "react";
+import { useTranslation } from "react-i18next";
 import type { NfIcon } from "../../icons";
 import { api } from "../../api";
 import { Button } from "../../components/primitives/Button";
@@ -62,6 +63,7 @@ export function AddAccountModal({
   accounts,
   onAdoptDesktop,
 }: AddAccountModalProps) {
+  const { t } = useTranslation();
   const [importing, setImporting] = useState(false);
   const [browserLoggingIn, setBrowserLoggingIn] = useState(false);
   const [preflight, setPreflight] = useState<Preflight>({ kind: "checking" });
@@ -151,7 +153,7 @@ export function AddAccountModal({
       // the new account on the next refresh once `onComplete` fires.
       openOpModal({
         opId,
-        title: "Add account: browser login",
+        title: t("accounts.addModal.title"),
         phases: LOGIN_PHASES,
         fetchStatus: api.accountLoginStatus,
         renderResult: renderLoginResult,
@@ -164,7 +166,7 @@ export function AddAccountModal({
         onError: (detail) => {
           const msg = detail ?? "";
           if (!/cancel/i.test(msg)) {
-            onError(msg ? redactSecrets(msg) : "register failed");
+            onError(msg ? redactSecrets(msg) : t("accounts.addModal.title"));
           }
         },
       });
@@ -211,7 +213,7 @@ export function AddAccountModal({
     onClose();
   };
 
-  const summary = summaryFor(preflight);
+  const summary = summaryFor(preflight, t);
 
   return (
     <Modal
@@ -223,7 +225,7 @@ export function AddAccountModal({
       <div ref={trapRef} style={{ display: "contents" }}>
         <ModalHeader
           glyph={NF.plus}
-          title="Add account"
+          title={t("accounts.addModal.title")}
           onClose={handleRequestClose}
           id={titleId}
         />
@@ -259,13 +261,13 @@ export function AddAccountModal({
           {/* Action 1 — Import from Claude Code */}
           <ActionCard
             glyph={NF.download}
-            title="Import from Claude Code"
-            subtitle={importSubtitle(preflight)}
+            title={t("accounts.addModal.importTitle")}
+            subtitle={importSubtitle(preflight, t)}
             command="account_add_from_current"
             accent
             disabled={preflight.kind !== "new" || importing}
             onClick={handleImport}
-            cta={importing ? "Importing…" : "Import"}
+            cta={importing ? t("accounts.addModal.importingCta") : t("accounts.addModal.importCta")}
             ctaGlyph={importing ? NF.clock : NF.download}
           >
             {preflight.kind === "new" && (
@@ -281,7 +283,7 @@ export function AddAccountModal({
                 subscription={preflight.knownAccount.subscription_type}
                 orgName={preflight.knownAccount.org_name}
                 dimmed
-                badge={<Tag tone="neutral">already managed</Tag>}
+                badge={<Tag tone="neutral">{t("accounts.addModal.knownBadge")}</Tag>}
               />
             )}
           </ActionCard>
@@ -304,7 +306,7 @@ export function AddAccountModal({
                 background: "var(--line)",
               }}
             />
-            <span className="mono-cap">or add a different account</span>
+            <span className="mono-cap">{t("accounts.addModal.orSeparator")}</span>
             <div
               style={{
                 flex: 1,
@@ -322,16 +324,16 @@ export function AddAccountModal({
               secondary Cancel inline for discoverability). */}
           <ActionCard
             glyph={NF.user}
-            title="Log in with a new account…"
+            title={t("accounts.addModal.browserTitle")}
             subtitle={
               browserLoggingIn
-                ? "Waiting for you to finish in the browser…"
-                : "Open a browser, complete OAuth, then register the result as a fresh account."
+                ? t("accounts.addModal.browserWaiting")
+                : t("accounts.addModal.browserDesc")
             }
             command="account_register_from_browser"
             disabled={browserLoggingIn || importing}
             onClick={handleBrowserLogin}
-            cta={browserLoggingIn ? "Waiting…" : "Log in"}
+            cta={browserLoggingIn ? t("accounts.addModal.waitingCta") : t("accounts.addModal.browserCta")}
             ctaGlyph={browserLoggingIn ? NF.clock : NF.arrowUpR}
           >
             {browserLoggingIn && (
@@ -352,16 +354,15 @@ export function AddAccountModal({
                 aria-live="polite"
               >
                 <span>
-                  Finish sign-in in your browser, or stop waiting if you
-                  already cancelled there.
+                  {t("accounts.addModal.inlineMsg")}
                 </span>
                 <Button
                   variant="ghost"
                   glyph={NF.x}
                   onClick={handleCancelBrowserLogin}
-                  aria-label="Cancel browser login"
+                  aria-label={t("accounts.addModal.cancelLoginAria")}
                 >
-                  Cancel login
+                  {t("accounts.addModal.cancelLogin")}
                 </Button>
               </div>
             )}
@@ -390,11 +391,11 @@ export function AddAccountModal({
               glyph={NF.x}
               onClick={handleCancelBrowserLogin}
             >
-              Cancel login
+              {t("accounts.addModal.cancelLogin")}
             </Button>
           ) : (
             <Button variant="ghost" onClick={handleRequestClose}>
-              Close
+              {t("accounts.addModal.close")}
             </Button>
           )}
         </ModalFooter>
@@ -403,7 +404,10 @@ export function AddAccountModal({
   );
 }
 
-function summaryFor(p: Preflight): {
+function summaryFor(
+  p: Preflight,
+  t: ReturnType<typeof useTranslation>["t"],
+): {
   glyph: NfIcon;
   tone: string;
   text: ReactNode;
@@ -413,7 +417,7 @@ function summaryFor(p: Preflight): {
       return {
         glyph: NF.clock,
         tone: "var(--fg-faint)",
-        text: "Checking Claude Code's current session…",
+        text: t("accounts.addModal.checking"),
       };
     case "new":
       return {
@@ -421,7 +425,7 @@ function summaryFor(p: Preflight): {
         tone: "var(--ok)",
         text: (
           <>
-            Claude Code is signed in as{" "}
+            {t("accounts.addModal.signedInAs")}{" "}
             <span style={{ color: "var(--fg)", fontWeight: 600 }}>
               {p.email}
             </span>
@@ -435,11 +439,11 @@ function summaryFor(p: Preflight): {
         tone: "var(--fg-muted)",
         text: (
           <>
-            Claude Code is signed in as{" "}
+            {t("accounts.addModal.signedInAs")}{" "}
             <span style={{ color: "var(--fg)", fontWeight: 600 }}>
               {p.email}
             </span>{" "}
-            — already managed.
+            {t("accounts.addModal.alreadyManaged")}
           </>
         ),
       };
@@ -447,29 +451,32 @@ function summaryFor(p: Preflight): {
       return {
         glyph: NF.warn,
         tone: "var(--warn)",
-        text: "Claude Code has no saved credentials.",
+        text: t("accounts.addModal.summaryEmpty"),
       };
     case "error":
       return {
         glyph: NF.warn,
         tone: "var(--warn)",
-        text: <>Couldn't read Claude Code session: {p.message}</>,
+        text: t("accounts.addModal.summaryError", { message: p.message }),
       };
   }
 }
 
-function importSubtitle(p: Preflight): string {
+function importSubtitle(
+  p: Preflight,
+  t: ReturnType<typeof useTranslation>["t"],
+): string {
   switch (p.kind) {
     case "new":
-      return "Copy the current credential blob into a new managed slot.";
+      return t("accounts.addModal.importSubtitleNew");
     case "known":
-      return "Nothing new to import — that account is already managed.";
+      return t("accounts.addModal.importSubtitleKnown");
     case "empty":
-      return "No credentials to import. Sign in with Claude Code first.";
+      return t("accounts.addModal.importSubtitleEmpty");
     case "error":
-      return "Preflight failed. Resolve the error above and retry.";
+      return t("accounts.addModal.importSubtitleError");
     case "checking":
-      return "Waiting on Claude Code session check…";
+      return t("accounts.addModal.importSubtitleChecking");
   }
 }
 

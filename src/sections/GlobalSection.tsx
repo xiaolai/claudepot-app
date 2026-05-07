@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { useTranslation } from "react-i18next";
 import { ConfigSection } from "./ConfigSection";
 import { UpdatesPanel } from "./global/UpdatesPanel";
 import { MemoryHealthPanel } from "./global/MemoryHealthPanel";
@@ -52,6 +53,7 @@ export function GlobalSection({
   subRoute: string | null;
   onSubRouteChange: (next: string | null) => void;
 }) {
+  const { t } = useTranslation();
   const [tab, setTab] = useState<GlobalTab>(loadTab);
 
   const switchTab = (next: GlobalTab) => {
@@ -75,7 +77,7 @@ export function GlobalSection({
           active={tab === "config"}
           onClick={() => switchTab("config")}
         >
-          Config
+          {t("global.config")}
         </Button>
         <Button
           size="sm"
@@ -83,7 +85,7 @@ export function GlobalSection({
           active={tab === "updates"}
           onClick={() => switchTab("updates")}
         >
-          Updates
+          {t("global.updates")}
         </Button>
         <Button
           size="sm"
@@ -91,7 +93,7 @@ export function GlobalSection({
           active={tab === "memory"}
           onClick={() => switchTab("memory")}
         >
-          Memory
+          {t("global.memory")}
         </Button>
       </div>
       <div style={{ flex: 1, minHeight: 0, overflow: "auto" }}>

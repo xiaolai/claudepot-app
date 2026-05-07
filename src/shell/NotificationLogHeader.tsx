@@ -1,4 +1,5 @@
 import type { CSSProperties } from "react";
+import { useTranslation } from "react-i18next";
 import { Glyph } from "../components/primitives/Glyph";
 import { NF } from "../icons";
 import type { NotificationLogOrder } from "../api/notification";
@@ -31,6 +32,7 @@ export function NotificationLogHeader({
   onClear,
   hasEntries,
 }: PopoverHeaderProps) {
+  const { t } = useTranslation();
   return (
     <div
       style={{
@@ -52,14 +54,14 @@ export function NotificationLogHeader({
           color: "var(--fg-muted)",
         }}
       >
-        Notifications
+        {t("shell.notification.title")}
       </h2>
       <button
         type="button"
         onClick={onToggleOrder}
         className="pm-focus"
         title={
-          order === "newestFirst" ? "Sort oldest first" : "Sort newest first"
+          order === "newestFirst" ? t("shell.notification.sortNewest") : t("shell.notification.sortOldest")
         }
         style={miniBtnStyle}
       >
@@ -67,27 +69,27 @@ export function NotificationLogHeader({
           g={order === "newestFirst" ? NF.chevronD : NF.chevronU}
           size="var(--fs-sm)"
         />
-        <span>{order === "newestFirst" ? "Newest" : "Oldest"}</span>
+        <span>{order === "newestFirst" ? t("shell.notification.sortNewest") : t("shell.notification.sortOldest")}</span>
       </button>
       <button
         type="button"
         onClick={onMarkAllRead}
         disabled={!hasEntries}
         className="pm-focus"
-        title="Clear the unread badge"
+        title={t("shell.notification.markRead")}
         style={miniBtnStyle}
       >
-        Mark read
+        {t("shell.notification.markReadBtn")}
       </button>
       <button
         type="button"
         onClick={onClear}
         disabled={!hasEntries}
         className="pm-focus"
-        title="Delete every entry"
+        title={t("shell.notification.clearTitle")}
         style={miniBtnStyle}
       >
-        Clear
+        {t("shell.notification.clear")}
       </button>
     </div>
   );

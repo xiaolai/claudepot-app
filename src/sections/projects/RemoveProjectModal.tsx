@@ -1,4 +1,5 @@
 import { useEffect, useId, useState } from "react";
+import { useTranslation } from "react-i18next";
 import { api } from "../../api";
 import { Button } from "../../components/primitives/Button";
 import { Input } from "../../components/primitives/Input";
@@ -43,6 +44,7 @@ export function RemoveProjectModal({
   onCompleted: (result: RemoveProjectResult) => void;
   onError: (msg: string) => void;
 }) {
+  const { t } = useTranslation();
   const headingId = useId();
   const inputId = useId();
   const [basic, setBasic] = useState<RemoveProjectPreviewBasic | null>(null);
@@ -94,9 +96,9 @@ export function RemoveProjectModal({
   // race — never make the user wait on lsof).
   const canSubmit = matches && !liveBlocked && !submitting;
   const disabledReason = liveBlocked
-    ? "Live CC session running — close it first."
+    ? t("projects.remove.liveSession")
     : !matches && basic
-      ? `Type ${basic.slug} to confirm.`
+      ? t("projects.remove.confirmPrompt", { slug: basic.slug })
       : null;
 
   const recoverableUntil = (() => {
@@ -121,7 +123,7 @@ export function RemoveProjectModal({
     <Modal open onClose={onClose} width="lg" aria-labelledby={headingId}>
       <ModalHeader
         glyph={NF.trash}
-        title="Remove project"
+        title={t("projects.remove.title")}
         onClose={onClose}
         id={headingId}
       />
@@ -146,11 +148,11 @@ export function RemoveProjectModal({
               fontSize: "var(--fs-sm)",
             }}
           >
-            Loading…
+            {t("projects.remove.loading")}
           </p>
         ) : (
           <>
-            <Block label="Removing">
+            <Block label={t("projects.remove.removing")}>
               <code
                 className="selectable"
                 style={{
@@ -161,10 +163,10 @@ export function RemoveProjectModal({
               >
                 {`~/.claude/projects/${basic.slug}/`}
               </code>
-              <Meta items={metaItems(basic, extras)} />
+              <Meta items={metaItems(t, basic, extras)} />
             </Block>
 
-            <Block label="Not touching">
+            <Block label={t("projects.remove.notTouching")}>
               <code
                 className="selectable"
                 style={{
@@ -173,7 +175,7 @@ export function RemoveProjectModal({
                   wordBreak: "break-all",
                 }}
               >
-                {basic.original_path ?? "(unknown source path)"}
+                {basic.original_path ?? t("projects.remove.unknownSource")}
               </code>
               <p
                 style={{
@@ -182,11 +184,11 @@ export function RemoveProjectModal({
                   color: "var(--fg-faint)",
                 }}
               >
-                Your actual project files. Untouched.
+                {t("projects.remove.yourFiles")}
               </p>
             </Block>
 
-            <Block label={`Recoverable until ${recoverableUntil}`}>
+            <Block label={t("projects.remove.recoverable", { date: recoverableUntil })}>
               <p
                 style={{
                   margin: 0,
@@ -194,8 +196,7 @@ export function RemoveProjectModal({
                   color: "var(--fg-faint)",
                 }}
               >
-                Lives in <code>~/.claudepot/trash/projects/</code> for 30 days.
-                Restore via <code>claudepot project trash restore &lt;id&gt;</code>.
+                {t("projects.remove.trashNote")}
               </p>
             </Block>
 
@@ -215,30 +216,12 @@ export function RemoveProjectModal({
                   letterSpacing: "var(--ls-wide)",
                 }}
               >
-                Type{" "}
-                <code
-                  className="selectable"
-                  style={{
-                    color: "var(--fg)",
-                    // Slugs are case-sensitive on disk. The
-                    // surrounding label is `text-transform:
-                    // uppercase` for visual consistency with the
-                    // REMOVING/NOT TOUCHING/RECOVERABLE block
-                    // headers, but the slug itself must render in
-                    // its original casing — otherwise users type
-                    // what they see (uppercase) and the match fails
-                    // forever.
-                    textTransform: "none",
-                  }}
-                >
-                  {basic.slug}
-                </code>{" "}
-                to confirm
+                {t("projects.remove.typeToConfirm")} <code style={{ textTransform: "none", letterSpacing: "normal" }}>{basic.slug}</code> {t("projects.remove.toConfirm")}
               </label>
               <Input
                 value={confirmInput}
                 onChange={(e) => setConfirmInput(e.target.value)}
-                aria-label="Type project slug to confirm removal"
+                aria-label={t("projects.remove.confirmAria")}
                 autoFocus
                 style={{ fontFamily: "var(--font-mono)" }}
               />
@@ -260,7 +243,7 @@ export function RemoveProjectModal({
           </span>
         )}
         <Button variant="solid" onClick={onClose} autoFocus={!basic}>
-          Cancel
+          {t("projects.remove.cancel")}
         </Button>
         <Button
           variant="outline"
@@ -268,7 +251,7 @@ export function RemoveProjectModal({
           disabled={!canSubmit}
           onClick={handleSubmit}
         >
-          {submitting ? "Removing…" : "Remove"}
+          {submitting ? t("projects.remove.removingBtn") : t("projects.remove.removeBtn")}
         </Button>
       </ModalFooter>
     </Modal>
@@ -323,28 +306,25 @@ function Meta({ items }: { items: string[] }) {
 }
 
 function metaItems(
+  t: (key: string, opts?: Record<string, unknown>) => string,
   basic: RemoveProjectPreviewBasic,
   extras: RemoveProjectPreviewExtras | null,
 ): string[] {
   const items: string[] = [];
   if (basic.session_count > 0) {
-    items.push(
-      `${basic.session_count} session${basic.session_count === 1 ? "" : "s"}`,
-    );
+    items.push(t("projects.remove.metaSessions", { count: basic.session_count }));
   }
   if (basic.bytes > 0) {
     items.push(formatSize(basic.bytes));
   }
   if (basic.last_modified_ms != null) {
-    items.push(`last touched ${formatRelativeTime(basic.last_modified_ms)}`);
+    items.push(t("projects.remove.metaLastTouched", { time: formatRelativeTime(basic.last_modified_ms) }));
   }
   if (extras?.claude_json_entry_present) {
-    items.push("with .claude.json entry");
+    items.push(t("projects.remove.metaClaudeJson"));
   }
   if (extras && extras.history_lines_count > 0) {
-    items.push(
-      `${extras.history_lines_count} history line${extras.history_lines_count === 1 ? "" : "s"}`,
-    );
+    items.push(t("projects.remove.metaHistoryLines", { count: extras.history_lines_count }));
   }
   return items;
 }

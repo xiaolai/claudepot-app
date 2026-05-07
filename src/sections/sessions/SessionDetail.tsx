@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useTranslation } from "react-i18next";
 import { api } from "../../api";
 import { Glyph } from "../../components/primitives/Glyph";
 import { useReachTop } from "../../hooks/useReachTop";
@@ -69,6 +70,7 @@ export function SessionDetail({
   onError?: (msg: string) => void;
   onBack?: () => void;
 }) {
+  const { t } = useTranslation();
   const [detail, setDetail] = useState<SessionDetailData | null>(null);
   const [chunks, setChunks] = useState<SessionChunk[] | null>(null);
   const [loading, setLoading] = useState(true);
@@ -196,14 +198,14 @@ export function SessionDetail({
     const text = detail?.row.first_user_prompt;
     if (!text) return;
     navigator.clipboard.writeText(text).catch(() => {
-      onError?.("Couldn't copy first prompt to clipboard.");
+      onError?.(t("sessions.detail.copyFailed"));
     });
   }, [detail, onError]);
 
   const handleReveal = useCallback(() => {
     if (!detail) return;
     api.revealInFinder(detail.row.file_path).catch((e) => {
-      onError?.(`Couldn't reveal: ${e}`);
+      onError?.(t("sessions.detail.revealFailed", { error: e }));
     });
   }, [detail, onError]);
 
@@ -211,7 +213,7 @@ export function SessionDetail({
     return (
       <LoadingPane>
         <Glyph g={NF.chatAlt} color="var(--fg-ghost)" />
-        Loading session…
+        {t("sessions.detail.loading")}
       </LoadingPane>
     );
   }
@@ -220,7 +222,7 @@ export function SessionDetail({
     return (
       <LoadingPane>
         <Glyph g={NF.warn} color="var(--warn)" />
-        <div style={{ color: "var(--fg)" }}>Couldn't load session</div>
+        <div style={{ color: "var(--fg)" }}>{t("sessions.detail.loadFailed")}</div>
         <div style={{ color: "var(--fg-faint)", fontSize: "var(--fs-xs)" }}>
           {error}
         </div>

@@ -1,3 +1,4 @@
+import { useTranslation } from "react-i18next";
 import type {
   NotificationEntry,
   NotificationKind,
@@ -23,6 +24,7 @@ interface EntryRowProps {
 }
 
 export function NotificationLogEntry({ entry, onClick }: EntryRowProps) {
+  const { t } = useTranslation();
   const clickable = entry.target != null;
   const colors = kindColors(entry.kind);
   // Keyboard activation for clickable rows. Pre-fix this was a bare
@@ -139,13 +141,13 @@ export function NotificationLogEntry({ entry, onClick }: EntryRowProps) {
             color: "var(--fg-faint)",
           }}
         >
-          <span>{entry.source === "toast" ? "in-app" : "OS"}</span>
+          <span>{entry.source === "toast" ? t("shell.notification.entrySourceToast") : t("shell.notification.entrySourceOs")}</span>
           <span>·</span>
           <span>{entry.kind}</span>
           {clickable && (
             <>
               <span>·</span>
-              <span>click to follow</span>
+              <span>{t("shell.notification.entryClickToFollow")}</span>
             </>
           )}
         </div>

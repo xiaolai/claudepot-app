@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useId, useMemo, useRef, useState } from "react";
+import { useTranslation } from "react-i18next";
 import { open as openDialog } from "@tauri-apps/plugin-dialog";
 import { api } from "../../api";
 import { Button } from "../../components/primitives/Button";
@@ -60,6 +61,7 @@ export function RenameProjectModal({
   const [noMove, setNoMove] = useState(false);
   const [preview, setPreview] = useState<PreviewState>({ kind: "idle" });
 
+  const { t } = useTranslation();
   const headingId = useId();
 
   // Used to drop stale preview responses: every keystroke increments
@@ -134,7 +136,7 @@ export function RenameProjectModal({
       const result = await openDialog({
         directory: true,
         multiple: false,
-        title: "Choose parent folder",
+        title: t("projects.rename.chooseParent"),
       });
       if (typeof result === "string" && result) {
         const basename = currentBasename(newPath) || currentBasename(oldPath);
@@ -148,12 +150,12 @@ export function RenameProjectModal({
   const conflict = preview.kind === "ok" ? preview.plan.conflict : null;
   const conflictNeedsPolicy = Boolean(conflict) && collision === "none";
   const disabledReason: string | null = (() => {
-    if (!newPath.trim()) return "Enter a new path";
-    if (newPath === oldPath) return "New path is unchanged";
-    if (preview.kind === "loading") return "Computing preview…";
-    if (preview.kind === "error") return "Preview failed";
-    if (preview.kind === "idle") return "Preview pending";
-    if (conflictNeedsPolicy) return "Resolve the conflict above";
+    if (!newPath.trim()) return t("projects.rename.disabledEnterPath");
+    if (newPath === oldPath) return t("projects.rename.disabledUnchanged");
+    if (preview.kind === "loading") return t("projects.rename.disabledComputing");
+    if (preview.kind === "error") return t("projects.rename.disabledFailed");
+    if (preview.kind === "idle") return t("projects.rename.disabledPending");
+    if (conflictNeedsPolicy) return t("projects.rename.disabledConflict");
     return null;
   })();
   const submitDisabled = disabledReason !== null;
@@ -162,12 +164,12 @@ export function RenameProjectModal({
     <Modal open onClose={onClose} width="lg" aria-labelledby={headingId}>
       <ModalHeader
         glyph={NF.edit}
-        title="Rename project"
+        title={t("projects.rename.title")}
         id={headingId}
         onClose={onClose}
       />
       <ModalBody style={{ display: "flex", flexDirection: "column", gap: "var(--sp-16)" }}>
-        <FieldBlock label="Current path">
+        <FieldBlock label={t("projects.rename.currentPath")}>
           <div
             className="mono selectable"
             style={{
@@ -186,7 +188,7 @@ export function RenameProjectModal({
           </div>
         </FieldBlock>
 
-        <FieldBlock label="New path" htmlFor="rename-new-path">
+        <FieldBlock label={t("projects.rename.newPath")} htmlFor="rename-new-path">
           <div style={{ display: "flex", gap: "var(--sp-6)", alignItems: "stretch" }}>
             <input
               id="rename-new-path"
@@ -211,25 +213,24 @@ export function RenameProjectModal({
             />
             <IconButton
               glyph={NF.folder}
-              title="Browse for parent folder"
-              aria-label="Browse for parent folder"
+              title={t("projects.rename.browseAria")}
+              aria-label={t("projects.rename.browseAria")}
               onClick={browseParent}
             />
           </div>
           <Hint>
-            Different case = case-only rename (handled via two-step on
-            case-insensitive disks).
+            {t("projects.rename.caseHint")}
           </Hint>
         </FieldBlock>
 
-        <GroupCard label="Collision policy">
+        <GroupCard label={t("projects.rename.collisionPolicy")}>
           <OptionRow
             type="radio"
             name="collision"
             checked={collision === "none"}
             onChange={() => setCollision("none")}
           >
-            <strong style={{ fontWeight: 600 }}>None</strong> — abort if target exists
+            <span style={{ fontSize: "var(--fs-sm)" }}>{t("projects.rename.collisionAbort")}</span>
           </OptionRow>
           <OptionRow
             type="radio"
@@ -237,7 +238,7 @@ export function RenameProjectModal({
             checked={collision === "merge"}
             onChange={() => setCollision("merge")}
           >
-            <strong style={{ fontWeight: 600 }}>Merge (old wins)</strong> — keep existing files at target
+            <span style={{ fontSize: "var(--fs-sm)" }}>{t("projects.rename.collisionMerge")}</span>
           </OptionRow>
           <OptionRow
             type="radio"
@@ -245,7 +246,7 @@ export function RenameProjectModal({
             checked={collision === "overwrite"}
             onChange={() => setCollision("overwrite")}
           >
-            <strong style={{ fontWeight: 600 }}>Overwrite</strong> — replace files at target with source
+            <span style={{ fontSize: "var(--fs-sm)" }}>{t("projects.rename.collisionOverwrite")}</span>
           </OptionRow>
         </GroupCard>
 
@@ -254,13 +255,13 @@ export function RenameProjectModal({
           checked={noMove}
           onChange={(e) => setNoMove(e.target.checked)}
         >
-          <strong style={{ fontWeight: 600 }}>State-only</strong> — update CC state, don't move the source directory
+          <span style={{ fontSize: "var(--fs-sm)" }}>{t("projects.rename.collisionStateOnly")}</span>
         </OptionRow>
 
         <GroupCard
           label={
             <span style={{ display: "inline-flex", alignItems: "center", gap: "var(--sp-5)", color: "var(--bad)" }}>
-              <Glyph g={NF.warn} size="var(--fs-xs)" /> Danger zone
+              <Glyph g={NF.warn} size="var(--fs-xs)" /> {t("projects.rename.dangerZone")}
             </span>
           }
           tone="danger"
@@ -270,21 +271,18 @@ export function RenameProjectModal({
             checked={force}
             onChange={(e) => setForce(e.target.checked)}
           >
-            <strong style={{ fontWeight: 600 }}>--force</strong> — skip live-session detection. If CC is running
-            against this project, its session files can be corrupted.
+            <span style={{ fontSize: "var(--fs-sm)" }}>{t("projects.rename.force")}</span>
           </OptionRow>
           <OptionRow
             type="checkbox"
             checked={ignorePending}
             onChange={(e) => setIgnorePending(e.target.checked)}
           >
-            <strong style={{ fontWeight: 600 }}>--ignore-pending-journals</strong> — run even if a prior rename
-            left a journal behind. Resolve pending journals first via Repair
-            unless you know why this one is safe.
+            <span style={{ fontSize: "var(--fs-sm)" }}>{t("projects.rename.ignoreJournals")}</span>
           </OptionRow>
         </GroupCard>
 
-        <FieldBlock label="Preview">
+        <FieldBlock label={t("projects.rename.preview")}>
           <div
             aria-live="polite"
             style={{
@@ -296,11 +294,11 @@ export function RenameProjectModal({
               color: "var(--fg-muted)",
             }}
           >
-            {preview.kind === "idle" && <span>Enter a new path to preview.</span>}
-            {preview.kind === "loading" && <span>Computing preview…</span>}
+            {preview.kind === "idle" && <span>{t("projects.rename.enterPath")}</span>}
+            {preview.kind === "loading" && <span>{t("projects.rename.computingPreview")}</span>}
             {preview.kind === "error" && (
               <div>
-                <strong style={{ color: "var(--fg)", fontWeight: 600 }}>Invalid:</strong>{" "}
+                <strong style={{ color: "var(--fg)", fontWeight: 600 }}>{t("projects.rename.invalid")}</strong>{" "}
                 <span className="mono" style={{ fontSize: "var(--fs-xs)" }}>{preview.message}</span>
               </div>
             )}
@@ -315,7 +313,7 @@ export function RenameProjectModal({
                 }}
               >
                 <li>
-                  {preview.plan.would_move_dir ? "Will" : "Won't"} move source directory
+                  {preview.plan.would_move_dir ? t("projects.rename.willMoveSource") : t("projects.rename.wontMoveSource")}
                 </li>
                 <li>
                   CC dir: <code className="mono" style={{ fontSize: "var(--fs-xs)" }}>{preview.plan.old_cc_dir}</code>{" "}
@@ -368,8 +366,7 @@ export function RenameProjectModal({
             color: "var(--fg-faint)",
           }}
         >
-          Preview is approximate. Live-session and pending-journal checks
-          happen at apply time.
+          {t("projects.rename.previewNote")}
         </p>
         {submitDisabled && disabledReason && (
           <span
@@ -383,14 +380,14 @@ export function RenameProjectModal({
           </span>
         )}
         <Button variant="ghost" onClick={onClose}>
-          Cancel
+          {t("projects.rename.cancel")}
         </Button>
         <Button
           variant="solid"
           disabled={submitDisabled}
           onClick={() => onSubmit(args)}
         >
-          Rename
+          {t("projects.rename.rename")}
         </Button>
       </ModalFooter>
     </Modal>

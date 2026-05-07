@@ -1,4 +1,5 @@
 import { useMemo } from "react";
+import { useTranslation } from "react-i18next";
 import type { AccountSummary, AppStatus } from "../types";
 
 export interface PaletteAction {
@@ -50,6 +51,8 @@ export function usePaletteActions(opts: {
   /** Open the global keyboard shortcuts reference modal. */
   onShowShortcuts?: () => void;
 }) {
+  const { t } = useTranslation();
+
   const {
     accounts,
     status,
@@ -71,7 +74,7 @@ export function usePaletteActions(opts: {
       if (!a.is_cli_active && a.credentials_healthy) {
         items.push({
           id: `cli-${a.uuid}`,
-          label: `Switch CLI to ${a.email}`,
+          label: t("palette.switchCli", { email: a.email }),
           detail: a.org_name ?? "personal",
           iconName: "terminal",
           category: "switch",
@@ -86,7 +89,7 @@ export function usePaletteActions(opts: {
       if (!a.is_desktop_active && a.desktop_profile_on_disk && status.desktop_installed) {
         items.push({
           id: `desk-${a.uuid}`,
-          label: `Switch Desktop to ${a.email}`,
+          label: t("palette.switchDesktop", { email: a.email }),
           detail: a.org_name ?? "personal",
           iconName: "monitor",
           category: "switch",
@@ -100,7 +103,7 @@ export function usePaletteActions(opts: {
       if (onAdoptDesktop && !a.desktop_profile_on_disk && status.desktop_installed) {
         items.push({
           id: `adopt-${a.uuid}`,
-          label: `Bind current Desktop session to ${a.email}`,
+          label: t("palette.bindDesktop", { email: a.email }),
           detail: a.org_name ?? "personal",
           iconName: "monitor",
           category: "action",
@@ -111,7 +114,7 @@ export function usePaletteActions(opts: {
     if (status.desktop_installed && onClearDesktop) {
       items.push({
         id: "desktop-clear",
-        label: "Sign Desktop out",
+        label: t("palette.signDesktopOut"),
         iconName: "trash",
         category: "action",
         onSelect: onClearDesktop,
@@ -120,7 +123,7 @@ export function usePaletteActions(opts: {
     if (status.desktop_installed && onLaunchDesktop) {
       items.push({
         id: "desktop-launch",
-        label: "Launch Claude Desktop",
+        label: t("palette.launchDesktop"),
         iconName: "monitor",
         category: "action",
         onSelect: onLaunchDesktop,
@@ -129,33 +132,33 @@ export function usePaletteActions(opts: {
     if (onNavigate) {
       items.push({
         id: "nav-projects",
-        label: "Open Projects",
+        label: t("palette.openProjects"),
         iconName: "folder",
         category: "navigate",
         onSelect: () => onNavigate("projects"),
       });
       items.push({
         id: "nav-maintenance",
-        label: "Open Maintenance",
-        detail: "Clean + Repair",
+        label: t("palette.openMaintenance"),
+        detail: t("palette.cleanRepair"),
         iconName: "wrench",
         category: "navigate",
         onSelect: () => onNavigate("projects", "maintenance"),
       });
       items.push({
         id: "nav-settings",
-        label: "Open Settings",
+        label: t("palette.openSettings"),
         iconName: "settings",
         category: "navigate",
         onSelect: () => onNavigate("settings"),
       });
     }
-    items.push({ id: "add", label: "Add account", iconName: "user-plus", category: "action", onSelect: onAdd });
-    items.push({ id: "refresh", label: "Refresh all", iconName: "refresh-cw", category: "action", onSelect: onRefresh });
+    items.push({ id: "add", label: t("palette.addAccount"), iconName: "user-plus", category: "action", onSelect: onAdd });
+    items.push({ id: "refresh", label: t("palette.refreshAll"), iconName: "refresh-cw", category: "action", onSelect: onRefresh });
     if (onShowShortcuts) {
       items.push({
         id: "shortcuts",
-        label: "Show keyboard shortcuts",
+        label: t("palette.showShortcuts"),
         detail: "⌘ /",
         iconName: "help",
         category: "action",
@@ -165,7 +168,7 @@ export function usePaletteActions(opts: {
     for (const a of accounts) {
       items.push({
         id: `rm-${a.uuid}`,
-        label: `Remove ${a.email}`,
+        label: t("palette.removeAccount", { email: a.email }),
         detail: a.org_name ?? "personal",
         iconName: "trash",
         category: "action",
@@ -174,6 +177,7 @@ export function usePaletteActions(opts: {
     }
     return items;
   }, [
+    t,
     accounts,
     status,
     onSwitchCli,

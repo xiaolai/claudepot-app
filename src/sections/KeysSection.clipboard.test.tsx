@@ -122,7 +122,7 @@ describe("KeysSection — D-5/6/7 copy flow", () => {
     render(<KeysSection />);
 
     // Wait until the row mounts; then click the Copy icon by aria-label.
-    const btn = await screen.findByLabelText(/Copy ci-api-key/);
+    const btn = await screen.findByLabelText(new RegExp("Copy full value to clipboard ci-api-key"));
     await userEvent.click(btn);
 
     await waitFor(() => expect(keyApiCopy).toHaveBeenCalledOnce());
@@ -151,7 +151,7 @@ describe("KeysSection — D-5/6/7 copy flow", () => {
     });
 
     render(<KeysSection />);
-    const btn = await screen.findByLabelText(/Copy ci-oauth-token/);
+    const btn = await screen.findByLabelText(new RegExp("Copy full value to clipboard ci-oauth-token"));
     await userEvent.click(btn);
 
     await waitFor(() => expect(keyOauthCopy).toHaveBeenCalledOnce());
@@ -168,7 +168,7 @@ describe("KeysSection — D-5/6/7 copy flow", () => {
 
     render(<KeysSection />);
     const btn = await screen.findByLabelText(
-      /Copy shell command for ci-oauth-token/,
+      new RegExp("Copy:.*ci-oauth-token"),
     );
     await userEvent.click(btn);
 
@@ -190,7 +190,7 @@ describe("KeysSection — D-5/6/7 copy flow", () => {
     keyApiCopy.mockRejectedValue(new Error("clipboard: permission denied"));
 
     render(<KeysSection />);
-    const btn = await screen.findByLabelText(/Copy ci-api-key/);
+    const btn = await screen.findByLabelText(new RegExp("Copy full value to clipboard ci-api-key"));
     await userEvent.click(btn);
 
     await waitFor(() =>

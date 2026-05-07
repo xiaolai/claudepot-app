@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { useTranslation } from "react-i18next";
 import type { AccountSummary } from "../types";
 import { api } from "../api";
 import { useUsage } from "../hooks/useUsage";
@@ -33,6 +34,7 @@ export function AccountsSection({
 }: {
   onNavigate?: (section: string, subRoute?: string | null) => void;
 }) {
+  const { t } = useTranslation();
   const {
     pushToast,
     status,
@@ -140,8 +142,8 @@ export function AccountsSection({
         if (!target) return;
         void navigator.clipboard
           .writeText(target.email)
-          .then(() => pushToast("info", `Copied ${target.email}`))
-          .catch((err) => pushToast("error", `Copy failed: ${err}`));
+          .then(() => pushToast("info", t("accounts.copied", { email: target.email })))
+          .catch((err) => pushToast("error", t("accounts.copyFailed", { error: err })));
       }
     };
     window.addEventListener("keydown", onKey);
@@ -236,7 +238,7 @@ export function AccountsSection({
       launchDesktop: () => {
         api.desktopLaunch().catch((e) => {
           const msg = e instanceof Error ? e.message : String(e);
-          pushToast("error", `Desktop launch failed: ${msg}`);
+          pushToast("error", t("accounts.desktopLaunchFailed", { msg }));
         });
       },
       adoptDesktop: (a) => {
@@ -269,7 +271,7 @@ export function AccountsSection({
               margin: 0,
             }}
           >
-            Couldn't load accounts
+            {t("accounts.errorTitle")}
           </h2>
           <p
             style={{
@@ -279,12 +281,10 @@ export function AccountsSection({
               textAlign: "center",
             }}
           >
-            Claudepot couldn't read its account database. Retrying often
-            resolves this; if it persists, check the data directory in
-            Settings → Diagnostics.
+            {t("accounts.errorDesc")}
           </p>
           <Button variant="solid" onClick={() => refresh()}>
-            Retry
+            {t("accounts.retry")}
           </Button>
           <details style={{ width: "100%" }}>
             <summary
@@ -296,7 +296,7 @@ export function AccountsSection({
                 letterSpacing: "var(--ls-wide)",
               }}
             >
-              Error detail
+              {t("accounts.errorDetail")}
             </summary>
             <pre
               style={{
@@ -319,7 +319,7 @@ export function AccountsSection({
     return (
       <SkeletonList
         rows={2}
-        label="Loading accounts…"
+        label={t("accounts.loading")}
         style={{ padding: "var(--sp-32)" }}
       />
     );
@@ -328,7 +328,7 @@ export function AccountsSection({
   return (
     <>
       <ScreenHeader
-        title="Accounts"
+        title={t("accounts.title")}
         subtitle={<HealthChips accounts={accounts} />}
         actions={
           <>
@@ -337,8 +337,8 @@ export function AccountsSection({
                 <IconButton
                   glyph={NF.shield}
                   onClick={runVerifyAll}
-                  title="Verify all — check every account against /profile"
-                  aria-label="Verify all accounts"
+                  title={t("accounts.verifyAllTitle")}
+                  aria-label={t("accounts.verifyAllAccounts")}
                 />
                 <IconButton
                   glyph={NF.refresh}
@@ -346,8 +346,8 @@ export function AccountsSection({
                     refresh();
                     refreshUsage();
                   }}
-                  title="Refresh usage (⌘R)"
-                  aria-label="Refresh usage"
+                  title={t("accounts.refreshTitle")}
+                  aria-label={t("accounts.refreshUsage")}
                 />
               </>
             ) : (
@@ -357,9 +357,9 @@ export function AccountsSection({
                   glyph={NF.shield}
                   glyphColor="var(--fg-muted)"
                   onClick={runVerifyAll}
-                  title="Verify every account against /profile"
+                  title={t("accounts.verifyAllTitle")}
                 >
-                  Verify all
+                  {t("accounts.verifyAll")}
                 </Button>
                 {usageAgeLabel && (
                   <span
@@ -386,9 +386,9 @@ export function AccountsSection({
                     refresh();
                     refreshUsage();
                   }}
-                  title="Refresh (⌘R)"
+                  title={t("accounts.refreshShort")}
                 >
-                  Refresh usage
+                  {t("accounts.refreshUsage")}
                 </Button>
               </>
             )}
@@ -396,9 +396,9 @@ export function AccountsSection({
               variant="solid"
               glyph={NF.plus}
               onClick={() => setShowAdd(true)}
-              title="Add account (⌘N)"
+              title={t("accounts.addShort")}
             >
-              Add account
+              {t("accounts.add")}
             </Button>
           </>
         }
@@ -423,11 +423,11 @@ export function AccountsSection({
         onAdoptCurrent={async () => {
           try {
             const outcome = await api.accountAddFromCurrent();
-            pushToast("info", `Adopted ${outcome.email}.`);
+            pushToast("info", t("accounts.adopted", { email: outcome.email }));
             await refresh();
           } catch (e) {
             const msg = e instanceof Error ? e.message : String(e);
-            pushToast("error", `Couldn't adopt current session: ${msg}`);
+            pushToast("error", t("accounts.adoptFailed", { msg }));
           }
         }}
       />
@@ -439,7 +439,7 @@ export function AccountsSection({
         onAdded={async () => {
           setShowAdd(false);
           await refresh();
-          pushToast("info", "Account added.");
+          pushToast("info", t("accounts.added"));
         }}
         onError={(msg) => pushToast("error", msg)}
         onAdoptDesktop={(a) => actions.adoptDesktop(a)}

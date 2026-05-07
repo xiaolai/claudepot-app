@@ -5,6 +5,7 @@ import {
   useMemo,
   useState,
 } from "react";
+import { useTranslation, Trans } from "react-i18next";
 import { api } from "../api";
 import { Button } from "../components/primitives/Button";
 import { ConfirmDialog } from "../components/ConfirmDialog";
@@ -32,6 +33,7 @@ type PendingRemoval =
   | { kind: "oauth"; row: OauthTokenSummary };
 
 export function KeysSection() {
+  const { t } = useTranslation();
   const { pushToast } = useAppState();
   const [apiKeys, setApiKeys] = useState<ApiKeySummary[]>([]);
   const [oauthTokens, setOauthTokens] = useState<OauthTokenSummary[]>([]);
@@ -94,7 +96,7 @@ export function KeysSection() {
       setOauthTokens(oauth);
       setAccounts(accts);
     } catch (e) {
-      pushToast("error", `Load failed: ${e}`);
+      pushToast("error", t("keys.loadFailed", { e: String(e) }));
     } finally {
       setLoading(false);
     }
@@ -128,10 +130,10 @@ export function KeysSection() {
             : await api.keyOauthCopy(uuid);
         pushToast(
           "info",
-          `Copied ${r.label} (${r.preview}) — clipboard clears in 30s.`,
+          t("keys.copied", { label: r.label, preview: r.preview }),
         );
       } catch (e) {
-        pushToast("error", `Copy failed: ${e}`);
+        pushToast("error", t("keys.copyFailed", { e: String(e) }));
       }
     },
     [pushToast],
@@ -149,10 +151,10 @@ export function KeysSection() {
         const r = await api.keyOauthCopyShell(row.uuid);
         pushToast(
           "info",
-          `Copied shell command for ${r.label} (${r.preview}) — clipboard clears in 30s.`,
+          t("keys.copiedShell", { label: r.label, preview: r.preview }),
         );
       } catch (e) {
-        pushToast("error", `Copy failed: ${e}`);
+        pushToast("error", t("keys.copyFailed", { e: String(e) }));
       }
     },
     [pushToast],
@@ -164,10 +166,10 @@ export function KeysSection() {
     try {
       if (kind === "api") await api.keyApiRemove(row.uuid);
       else await api.keyOauthRemove(row.uuid);
-      pushToast("info", `Removed ${row.label}.`);
+      pushToast("info", t("keys.removed", { label: row.label }));
       await refresh();
     } catch (e) {
-      pushToast("error", `Remove failed: ${e}`);
+      pushToast("error", t("keys.removeFailed", { e: String(e) }));
     } finally {
       setPendingRemoval(null);
     }
@@ -189,7 +191,7 @@ export function KeysSection() {
           );
         }
       } catch (e) {
-        pushToast("error", `Rename failed: ${e}`);
+        pushToast("error", t("keys.renameFailed", { e: String(e) }));
         throw e;
       }
     },
@@ -200,7 +202,7 @@ export function KeysSection() {
     (kind: "api" | "oauth") => {
       pushToast(
         "info",
-        kind === "api" ? "API key added." : "OAuth token added.",
+        kind === "api" ? t("keys.addedApiKey") : t("keys.addedOauthToken"),
       );
       setAdding(false);
       void refresh();
@@ -211,15 +213,15 @@ export function KeysSection() {
   return (
     <>
       <ScreenHeader
-        title="Keys"
-        subtitle="Anthropic API keys and Claude Code OAuth tokens."
+        title={t("keys.title")}
+        subtitle={t("keys.subtitle")}
         actions={
           <Button
             variant="solid"
             glyph={NF.plus}
             onClick={() => setAdding(true)}
           >
-            Add key
+            {t("keys.addKey")}
           </Button>
         }
       />
@@ -237,11 +239,11 @@ export function KeysSection() {
         >
           <Input
             glyph={NF.search}
-            placeholder="Filter keys and tokens"
+            placeholder={t("keys.filterPlaceholder")}
             value={filter}
             onChange={(e) => setFilter(e.target.value)}
             style={{ width: "var(--filter-input-width)" }}
-            aria-label="Filter keys and tokens"
+            aria-label={t("keys.filterAriaLabel")}
           />
           {filter.trim() !== "" && (
             <span
@@ -272,7 +274,7 @@ export function KeysSection() {
           onProbe={(row) =>
             void api
               .keyApiProbe(row.uuid)
-              .then(() => pushToast("info", `${row.label}: valid`))
+              .then(() => pushToast("info", t("keys.valid", { label: row.label })))
               .catch((e) => pushToast("error", `${row.label}: ${e}`))
           }
           onRemove={(row) => setPendingRemoval({ kind: "api", row })}
@@ -294,15 +296,13 @@ export function KeysSection() {
 
       {pendingRemoval && (
         <ConfirmDialog
-          title="Remove key?"
+          title={t("keys.removeTitle")}
           body={
             <p style={{ margin: 0, lineHeight: "var(--lh-body)" }}>
-              Remove <strong>{pendingRemoval.row.label}</strong>? The stored
-              secret will be deleted from the system Keychain. This can’t be
-              undone.
+              {t("keys.removeBody", { label: pendingRemoval.row.label })}
             </p>
           }
-          confirmLabel="Remove"
+          confirmLabel={t("keys.removeConfirm")}
           confirmDanger
           onCancel={() => setPendingRemoval(null)}
           onConfirm={() => void confirmRemoval()}
@@ -351,10 +351,11 @@ function ApiKeysTable({
   onRename: (row: ApiKeySummary, label: string) => Promise<void>;
   onAddRequested: () => void;
 }) {
+  const { t } = useTranslation();
   return (
     <section>
       <SectionLabel style={{ paddingLeft: 0, paddingRight: 0 }}>
-        API keys {rows.length > 0 ? `· ${rows.length}` : ""}
+        {t("keys.apiKeysLabel")}{rows.length > 0 ? ` · ${rows.length}` : ""}
       </SectionLabel>
       <p
         style={{
@@ -363,8 +364,7 @@ function ApiKeysTable({
           margin: "var(--sp-4) 0 var(--sp-14)",
         }}
       >
-        Console-issued <code>sk-ant-api03-…</code> keys. Usage reports are
-        not available per-key via the public API.
+        {t("keys.apiKeysDesc")}
       </p>
 
       {loading && rows.length === 0 ? (
@@ -372,19 +372,19 @@ function ApiKeysTable({
       ) : rows.length === 0 ? (
         <EmptyHint>
           <div style={{ display: "flex", flexDirection: "column", gap: "var(--sp-8)", alignItems: "flex-start" }}>
-            <span>
+            <Trans i18nKey="keys.apiKeysEmpty">
               No API keys yet. Create one in your{" "}
               <ExternalLink href="https://console.anthropic.com/settings/keys">
                 Anthropic console
               </ExternalLink>
               , then paste it here.
-            </span>
+            </Trans>
             <Button
               variant="ghost"
               glyph={NF.plus}
               onClick={onAddRequested}
             >
-              Add API key
+              {t("keys.addApiKey")}
             </Button>
           </div>
         </EmptyHint>
@@ -392,10 +392,10 @@ function ApiKeysTable({
         <Table>
           <thead>
             <tr>
-              <Th>Label</Th>
-              <Th>Created by</Th>
-              <Th>Created</Th>
-              <Th align="right" aria-label="Actions" />
+              <Th>{t("keys.colLabel")}</Th>
+              <Th>{t("keys.colCreatedBy")}</Th>
+              <Th>{t("keys.colCreated")}</Th>
+              <Th align="right" aria-label={t("keys.colActions")} />
             </tr>
           </thead>
           <tbody>
@@ -418,9 +418,9 @@ function ApiKeysTable({
                   ) : (
                     <Tag
                       tone="warn"
-                      title="The account this key was created under has been removed."
+                      title={t("keys.accountRemovedTitle")}
                     >
-                      account removed
+                      {t("keys.accountRemoved")}
                     </Tag>
                   )}
                 </Td>
@@ -438,20 +438,20 @@ function ApiKeysTable({
                   <RowActions>
                     <IconButton
                       glyph={NF.refresh}
-                      title="Probe (verify validity)"
-                      aria-label={`Probe ${row.label}`}
+                      title={t("keys.probe")}
+                      aria-label={t("keys.probe") + " " + row.label}
                       onClick={() => onProbe(row)}
                     />
                     <IconButton
                       glyph={NF.copy}
-                      title="Copy full value to clipboard"
-                      aria-label={`Copy ${row.label}`}
+                      title={t("keys.copyToClipboard")}
+                      aria-label={t("keys.copyToClipboard") + " " + row.label}
                       onClick={() => onCopy(row)}
                     />
                     <IconButton
                       glyph={NF.trash}
-                      title="Remove"
-                      aria-label={`Remove ${row.label}`}
+                      title={t("keys.remove")}
+                      aria-label={t("keys.remove") + " " + row.label}
                       onClick={() => onRemove(row)}
                     />
                   </RowActions>
@@ -484,10 +484,11 @@ function OauthTokensTable({
   onRename: (row: OauthTokenSummary, label: string) => Promise<void>;
   onAddRequested: () => void;
 }) {
+  const { t } = useTranslation();
   return (
     <section>
       <SectionLabel style={{ paddingLeft: 0, paddingRight: 0 }}>
-        OAuth tokens {rows.length > 0 ? `· ${rows.length}` : ""}
+        {t("keys.oauthTokensLabel")}{rows.length > 0 ? ` · ${rows.length}` : ""}
       </SectionLabel>
       <p
         style={{
@@ -496,8 +497,7 @@ function OauthTokensTable({
           margin: "var(--sp-4) 0 var(--sp-14)",
         }}
       >
-        Long-lived <code>sk-ant-oat01-…</code> tokens generated by{" "}
-        <code>claude setup-token</code>.
+        {t("keys.oauthTokensDesc")}
       </p>
 
       {loading && rows.length === 0 ? (
@@ -506,15 +506,14 @@ function OauthTokensTable({
         <EmptyHint>
           <div style={{ display: "flex", flexDirection: "column", gap: "var(--sp-8)", alignItems: "flex-start" }}>
             <span>
-              No OAuth tokens yet. Run <code>claude setup-token</code> and
-              paste the value into “Add key”.
+              {t("keys.oauthTokensEmpty")}
             </span>
             <Button
               variant="ghost"
               glyph={NF.plus}
               onClick={onAddRequested}
             >
-              Add OAuth token
+              {t("keys.addOauthToken")}
             </Button>
           </div>
         </EmptyHint>
@@ -522,22 +521,16 @@ function OauthTokensTable({
         <Table>
           <thead>
             <tr>
-              <Th>Label</Th>
-              <Th>Created by</Th>
-              <Th>Created</Th>
-              <Th>Expires</Th>
-              <Th
-                title={
-                  "Copy a paste-ready terminal command " +
-                  "(CLAUDE_CODE_OAUTH_TOKEN='…' claude). " +
-                  "Launches Claude Code with this token in a new " +
-                  "terminal without disturbing your current login."
-                }
+              <Th>{t("keys.colLabel")}</Th>
+              <Th>{t("keys.colCreatedBy")}</Th>
+              <Th>{t("keys.colCreated")}</Th>
+              <Th>{t("keys.colExpires")}</Th>
+              <Th title={t("keys.copyShell")}
               >
-                Shell{" "}
+                {t("keys.colShell")}{" "}
                 <Glyph g={NF.info} color="var(--fg-faint)" size="var(--fs-xs)" />
               </Th>
-              <Th align="right" aria-label="Actions" />
+              <Th align="right" aria-label={t("keys.colActions")} />
             </tr>
           </thead>
           <tbody>
@@ -555,8 +548,8 @@ function OauthTokensTable({
                     onClick={() => onOpenUsage(row)}
                     title={
                       row.account_email
-                        ? "View usage"
-                        : "View cached usage (linked account has been removed)"
+                        ? t("keys.viewUsage")
+                        : t("keys.viewCachedUsage")
                     }
                     style={{
                       background: "transparent",
@@ -569,7 +562,7 @@ function OauthTokensTable({
                       tone={row.account_email ? "accent" : "warn"}
                       style={{ textTransform: "none", letterSpacing: "normal" }}
                     >
-                      {row.account_email ?? "account removed"}
+                      {row.account_email ?? t("keys.accountRemoved")}
                     </Tag>
                   </button>
                 </Td>
@@ -590,22 +583,22 @@ function OauthTokensTable({
                   <IconButton
                     glyph={NF.terminal}
                     onClick={() => onCopyShell(row)}
-                    title="Copy: CLAUDE_CODE_OAUTH_TOKEN='…' claude"
-                    aria-label={`Copy shell command for ${row.label}`}
+                    title={t("keys.copyShell")}
+                    aria-label={t("keys.copyShell") + " " + row.label}
                   />
                 </Td>
                 <Td align="right">
                   <RowActions>
                     <IconButton
                       glyph={NF.copy}
-                      title="Copy full value to clipboard"
-                      aria-label={`Copy ${row.label}`}
+                      title={t("keys.copyToClipboard")}
+                      aria-label={t("keys.copyToClipboard") + " " + row.label}
                       onClick={() => onCopy(row)}
                     />
                     <IconButton
                       glyph={NF.trash}
-                      title="Remove"
-                      aria-label={`Remove ${row.label}`}
+                      title={t("keys.remove")}
+                      aria-label={t("keys.remove") + " " + row.label}
                       onClick={() => onRemove(row)}
                     />
                   </RowActions>
@@ -620,10 +613,11 @@ function OauthTokensTable({
 }
 
 function DaysLeftChip({ daysRemaining }: { daysRemaining: number }) {
+  const { t } = useTranslation();
   if (daysRemaining <= 0) {
     return (
       <Tag tone="danger" glyph={NF.xCircle}>
-        Expired
+        {t("keys.expired")}
       </Tag>
     );
   }
@@ -659,6 +653,7 @@ function EditableLabel({
   value: string;
   onSubmit: (label: string) => Promise<void>;
 }) {
+  const { t } = useTranslation();
   const [draft, setDraft] = useState(value);
   const [focused, setFocused] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -713,7 +708,7 @@ function EditableLabel({
         void commit();
       }}
       onKeyDown={onKeyDown}
-      aria-label="Key label"
+      aria-label={t("keys.colLabel")}
       style={{
         width: "100%",
         font: "inherit",

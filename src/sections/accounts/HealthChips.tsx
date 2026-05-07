@@ -1,3 +1,4 @@
+import { useTranslation } from "react-i18next";
 import { Glyph } from "../../components/primitives/Glyph";
 import type { NfIcon } from "../../icons";
 import { NF } from "../../icons";
@@ -63,10 +64,11 @@ interface Props {
  * replacing the earlier prose ("3 accounts · 1 needs attention").
  */
 export function HealthChips({ accounts }: Props) {
+  const { t } = useTranslation();
   if (accounts.length === 0) {
     return (
       <span style={{ color: "var(--fg-muted)" }}>
-        No accounts registered yet.
+        {t("accounts.health.empty")}
       </span>
     );
   }
@@ -81,8 +83,8 @@ export function HealthChips({ accounts }: Props) {
       glyph: NF.users,
       tone: "var(--fg-muted)",
       count: accounts.length,
-      title: `${accounts.length} account${accounts.length === 1 ? "" : "s"} total`,
-      aria: "accounts total",
+      title: t("accounts.health.total", { count: accounts.length }),
+      aria: t("accounts.health.totalAria"),
     },
   ];
 
@@ -91,8 +93,8 @@ export function HealthChips({ accounts }: Props) {
       glyph: NF.check,
       tone: "var(--ok)",
       count: buckets.ok,
-      title: `${buckets.ok} verified recently`,
-      aria: "verified",
+      title: t("accounts.health.verified", { count: buckets.ok }),
+      aria: t("accounts.health.verifiedAria"),
     });
   }
   if (buckets.unverified > 0) {
@@ -100,8 +102,8 @@ export function HealthChips({ accounts }: Props) {
       glyph: NF.circle,
       tone: "var(--fg-faint)",
       count: buckets.unverified,
-      title: `${buckets.unverified} not yet verified`,
-      aria: "unverified",
+      title: t("accounts.health.unverified", { count: buckets.unverified }),
+      aria: t("accounts.health.unverifiedAria"),
     });
   }
   if (buckets.drift > 0) {
@@ -109,8 +111,8 @@ export function HealthChips({ accounts }: Props) {
       glyph: NF.warn,
       tone: "var(--warn)",
       count: buckets.drift,
-      title: `${buckets.drift} drift — slot misfiled, re-login or remove`,
-      aria: "drift",
+      title: t("accounts.health.drift", { count: buckets.drift }),
+      aria: t("accounts.health.driftAria"),
     });
   }
   if (buckets.broken > 0) {
@@ -118,8 +120,8 @@ export function HealthChips({ accounts }: Props) {
       glyph: NF.ban,
       tone: "var(--warn)",
       count: buckets.broken,
-      title: `${buckets.broken} broken — credentials rejected or unreadable`,
-      aria: "broken",
+      title: t("accounts.health.broken", { count: buckets.broken }),
+      aria: t("accounts.health.brokenAria"),
     });
   }
 
@@ -133,7 +135,7 @@ export function HealthChips({ accounts }: Props) {
         fontVariantNumeric: "tabular-nums",
       }}
       role="list"
-      aria-label="Account health summary"
+      aria-label={t("accounts.health.summaryAria")}
     >
       {chips.map((chip) => (
         <span

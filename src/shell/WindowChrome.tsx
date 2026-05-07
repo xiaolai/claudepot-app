@@ -1,4 +1,5 @@
 import type { MouseEvent } from "react";
+import { useTranslation } from "react-i18next";
 import { Glyph } from "../components/primitives/Glyph";
 import { IconButton } from "../components/primitives/IconButton";
 import { NF } from "../icons";
@@ -30,6 +31,7 @@ export function WindowChrome({
   onToggleTheme,
   onCmdK,
 }: WindowChromeProps) {
+  const { t } = useTranslation();
   const stopDrag = (e: MouseEvent) => e.stopPropagation();
   return (
     <div
@@ -85,7 +87,7 @@ export function WindowChrome({
         type="button"
         onClick={onCmdK}
         onMouseDown={stopDrag}
-        aria-label="Open command palette"
+        aria-label={t("shell.windowChrome.openPalette")}
         style={{
           display: "flex",
           alignItems: "center",
@@ -104,7 +106,7 @@ export function WindowChrome({
         }}
       >
         <Glyph g={NF.search} />
-        <span style={{ flex: 1, textAlign: "left" }}>Jump to anything</span>
+        <span style={{ flex: 1, textAlign: "left" }}>{t("shell.windowChrome.jumpTo")}</span>
         <span
           style={{
             fontFamily: "var(--font)",
@@ -129,9 +131,9 @@ export function WindowChrome({
         glyph={theme === "dark" ? NF.sun : NF.moon}
         onClick={onToggleTheme}
         onMouseDown={stopDrag}
-        title="Toggle theme"
+        title={t("shell.windowChrome.toggleTheme")}
         aria-label={
-          theme === "dark" ? "Switch to light mode" : "Switch to dark mode"
+          theme === "dark" ? t("shell.windowChrome.switchLight") : t("shell.windowChrome.switchDark")
         }
         // Glyph scales off the button's own font-size. --fs-xl (tokens.sp[22])
         // was correct in the Nerd Font era — NF glyphs rendered at

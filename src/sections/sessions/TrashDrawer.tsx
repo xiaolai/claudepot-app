@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
+import { useTranslation } from "react-i18next";
 import { api } from "../../api";
 import { Button } from "../../components/primitives/Button";
 import { Tag } from "../../components/primitives/Tag";
@@ -10,6 +11,7 @@ import type { TrashListing } from "../../types";
  * the trash only on mount + after each action.
  */
 export function TrashDrawer({ onChange }: { onChange?: () => void }) {
+  const { t } = useTranslation();
   const [listing, setListing] = useState<TrashListing | null>(null);
   const [loading, setLoading] = useState(false);
   const [err, setErr] = useState<string | null>(null);
@@ -66,7 +68,7 @@ export function TrashDrawer({ onChange }: { onChange?: () => void }) {
 
   return (
     <aside
-      aria-label="Trash"
+      aria-label={t("sessions.trash.ariaLabel")}
       style={{
         display: "flex",
         flexDirection: "column",
@@ -85,14 +87,14 @@ export function TrashDrawer({ onChange }: { onChange?: () => void }) {
           className="mono-cap"
           style={{ color: "var(--fg-faint)" }}
         >
-          Trash
+          {t("sessions.trash.heading")}
         </span>
         {listing && listing.entries.length > 0 && (
           <Tag tone="neutral">{listing.entries.length}</Tag>
         )}
         <div style={{ flex: 1 }} />
         <Button variant="ghost" onClick={refresh} disabled={loading}>
-          Refresh
+          {t("sessions.trash.refresh")}
         </Button>
         {listing && listing.entries.length > 0 && (
           <>
@@ -103,7 +105,7 @@ export function TrashDrawer({ onChange }: { onChange?: () => void }) {
                   onClick={() => setConfirming(false)}
                   disabled={busy === "empty"}
                 >
-                  Cancel
+                  {t("sessions.trash.cancel")}
                 </Button>
                 <Button
                   variant="solid"
@@ -111,12 +113,12 @@ export function TrashDrawer({ onChange }: { onChange?: () => void }) {
                   disabled={busy === "empty"}
                   data-testid="confirm-empty"
                 >
-                  {busy === "empty" ? "Emptying…" : "Empty trash — confirm"}
+                  {busy === "empty" ? t("sessions.trash.emptying") : t("sessions.trash.confirmEmpty")}
                 </Button>
               </>
             ) : (
               <Button variant="ghost" onClick={() => setConfirming(true)}>
-                Empty trash…
+                {t("sessions.trash.emptyTrash")}
               </Button>
             )}
           </>
@@ -141,7 +143,7 @@ export function TrashDrawer({ onChange }: { onChange?: () => void }) {
             textAlign: "center",
           }}
         >
-          Trash is empty.
+          {t("sessions.trash.empty")}
         </div>
       )}
 
@@ -185,7 +187,7 @@ export function TrashDrawer({ onChange }: { onChange?: () => void }) {
                 disabled={busy === e.id}
                 onClick={() => restore(e.id)}
               >
-                {busy === e.id ? "Restoring…" : "Restore"}
+                {busy === e.id ? t("sessions.trash.restoring") : t("sessions.trash.restore")}
               </Button>
             </li>
           ))}

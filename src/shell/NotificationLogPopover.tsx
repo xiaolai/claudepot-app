@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useTranslation } from "react-i18next";
 import { ConfirmDialog } from "../components/ConfirmDialog";
 import { api } from "../api";
 import type {
@@ -48,6 +49,7 @@ export function NotificationLogPopover({
   onClose,
   onCountMaybeChanged,
 }: PopoverProps) {
+  const { t } = useTranslation();
   const panelRef = useRef<HTMLDivElement | null>(null);
   const [entries, setEntries] = useState<NotificationEntry[]>([]);
   const [loading, setLoading] = useState(true);
@@ -247,7 +249,7 @@ export function NotificationLogPopover({
       <div
         ref={panelRef}
         role="dialog"
-        aria-label="Notifications"
+        aria-label={t("shell.notification.title")}
         style={{
           position: "fixed",
           top: pos.top,
@@ -295,14 +297,14 @@ export function NotificationLogPopover({
           }}
         >
           {loading ? (
-            <EmptyHint>Loading…</EmptyHint>
+            <EmptyHint>{t("shell.notification.loading")}</EmptyHint>
           ) : error ? (
             <EmptyHint danger>{error}</EmptyHint>
           ) : entries.length === 0 ? (
             <EmptyHint>
               {hasFilter(filter, windowMs)
-                ? "No matches. Adjust the filter or clear it."
-                : "No notifications yet. Toasts and OS banners will collect here."}
+                ? t("shell.notification.filteredEmpty")
+                : t("shell.notification.empty")}
             </EmptyHint>
           ) : (
             <ul style={{ margin: 0, padding: 0, listStyle: "none" }}>
@@ -319,14 +321,13 @@ export function NotificationLogPopover({
       </div>
       {confirmClear && (
         <ConfirmDialog
-          title="Clear notification history?"
+          title={t("shell.notification.clearConfirmTitle")}
           body={
             <p style={{ margin: 0 }}>
-              All {entries.length} entries will be deleted. This can't be
-              undone.
+              {t("shell.notification.clearConfirmBody", { count: entries.length })}
             </p>
           }
-          confirmLabel="Clear"
+          confirmLabel={t("shell.notification.clearConfirmLabel")}
           confirmDanger
           onCancel={() => setConfirmClear(false)}
           onConfirm={onClear}

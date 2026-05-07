@@ -1,4 +1,5 @@
 import { type MouseEvent } from "react";
+import { useTranslation } from "react-i18next";
 import { Avatar, avatarColorFor } from "../../components/primitives/Avatar";
 import { IconButton } from "../../components/primitives/IconButton";
 import { TargetButton } from "../../components/primitives/TargetButton";
@@ -55,6 +56,7 @@ export function AccountCard({
   tokenCount,
   onOpenTokens,
 }: AccountCardProps) {
+  const { t } = useTranslation();
   const bound = a.is_cli_active || a.is_desktop_active;
   const severe = isAnomaly(a);
 
@@ -103,7 +105,7 @@ export function AccountCard({
     <article
       data-account-uuid={a.uuid}
       tabIndex={0}
-      aria-label={`Account ${a.email}`}
+      aria-label={t("accounts.card.accountLabel", { email: a.email })}
       onContextMenu={onContextMenu ? (e) => onContextMenu(e, a) : undefined}
       onKeyDown={handleKeyboardMenu}
       style={{
@@ -206,10 +208,10 @@ export function AccountCard({
                   textTransform: "uppercase",
                   fontFamily: "var(--font)",
                 }}
-                title={`Open Keys filtered to ${a.email}`}
-                aria-label={`Open Keys filtered to ${a.email} (${tokenCount} token${tokenCount === 1 ? "" : "s"})`}
+                title={t("accounts.card.openKeys", { email: a.email })}
+                aria-label={t("accounts.card.tokensAria", { email: a.email, count: tokenCount })}
               >
-                {tokenCount} token{tokenCount === 1 ? "" : "s"}
+                {t("accounts.card.tokens", { count: tokenCount })}
               </button>
             )}
           </div>
@@ -243,8 +245,8 @@ export function AccountCard({
                   a,
                 );
               }}
-              title="More actions"
-              aria-label={`More actions for ${a.email}`}
+              title={t("accounts.card.moreActions")}
+              aria-label={t("accounts.card.moreActionsFor", { email: a.email })}
               aria-haspopup="menu"
             />
           )}

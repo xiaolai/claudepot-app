@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
+import { useTranslation } from "react-i18next";
 import { ScreenHeader } from "../shell/ScreenHeader";
 import { Button } from "../components/primitives/Button";
 import { SkeletonList } from "../components/primitives/Skeleton";
@@ -25,6 +26,7 @@ import { RouteCard } from "./third-party/RouteCard";
  *     `~/Library/Application Support/Claude-3p/`.
  */
 export function ThirdPartySection() {
+  const { t } = useTranslation();
   const [routes, setRoutes] = useState<RouteSummaryDto[] | null>(null);
   const [settings, setSettings] = useState<RouteSettingsDto | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
@@ -101,8 +103,8 @@ export function ThirdPartySection() {
       showToast(
         "info",
         r
-          ? `Wrapper installed: \`${r.wrapper_name}\`. Add ~/.claudepot/bin to PATH if you haven't already.`
-          : "Wrapper installed.",
+          ? t("thirdParty.wrapperInstalled", { name: r.wrapper_name })
+          : t("thirdParty.wrapperRemoved"),
       );
     } catch (e) {
       showToast("error", `Use in CLI failed: ${e instanceof Error ? e.message : e}`);
@@ -116,7 +118,7 @@ export function ThirdPartySection() {
     try {
       await api.routesUnuseCli(id);
       await refresh();
-      showToast("info", "Wrapper removed.");
+      showToast("info", t("thirdParty.wrapperRemoved"));
     } catch (e) {
       showToast("error", `Uninstall CLI failed: ${e instanceof Error ? e.message : e}`);
     } finally {
@@ -144,7 +146,7 @@ export function ThirdPartySection() {
       await api.routesUseDesktop(id);
       await refresh();
       await flagRestartIfRunning();
-      showToast("info", "Active on Desktop.");
+      showToast("info", t("thirdParty.activeOnDesktop"));
     } catch (e) {
       showToast("error", `Use in Desktop failed: ${e instanceof Error ? e.message : e}`);
     } finally {
@@ -158,7 +160,7 @@ export function ThirdPartySection() {
       await api.routesUnuseDesktop();
       await refresh();
       await flagRestartIfRunning();
-      showToast("info", "Desktop activation cleared.");
+      showToast("info", t("thirdParty.desktopCleared"));
     } catch (e) {
       showToast("error", `Deactivate Desktop failed: ${e instanceof Error ? e.message : e}`);
     } finally {
@@ -171,7 +173,7 @@ export function ThirdPartySection() {
     try {
       await api.routesDesktopRestart();
       setRestartHint("applied");
-      showToast("info", "Claude Desktop restarted.");
+      showToast("info", t("thirdParty.desktopRestarted"));
     } catch (e) {
       showToast(
         "error",
@@ -195,7 +197,7 @@ export function ThirdPartySection() {
       if (route.active_on_desktop) {
         await flagRestartIfRunning();
       }
-      showToast("info", "Route deleted.");
+      showToast("info", t("thirdParty.routeDeleted"));
     } catch (e) {
       showToast("error", `Delete failed: ${e instanceof Error ? e.message : e}`);
     } finally {
@@ -225,16 +227,16 @@ export function ThirdPartySection() {
       }}
     >
       <ScreenHeader
-        title="Third-parties"
-        subtitle="Run Claude Code and Claude Desktop with non-Anthropic LLMs"
+        title={t("thirdParty.title")}
+        subtitle={t("thirdParty.subtitle")}
         actions={
           <Button
             variant="solid"
             glyph={NF.plus}
             onClick={() => setShowAdd(true)}
-            title="Configure a new third-party route"
+            title={t("thirdParty.addRouteTitle")}
           >
-            Add route
+            {t("thirdParty.addRoute")}
           </Button>
         }
       />
@@ -297,8 +299,7 @@ export function ThirdPartySection() {
             }}
           >
             <span>
-              Claude Desktop is running. Restart it to apply the new
-              configuration.
+              {t("thirdParty.restartBanner")}
             </span>
             <Button
               variant="solid"
@@ -308,8 +309,8 @@ export function ThirdPartySection() {
               glyph={NF.refresh}
             >
               {restartingDesktop
-                ? "Restarting…"
-                : "Quit & relaunch Claude Desktop"}
+                ? t("thirdParty.restarting")
+                : t("thirdParty.restartButton")}
             </Button>
           </div>
         )}
@@ -323,14 +324,14 @@ export function ThirdPartySection() {
               fontSize: "var(--fs-sm)",
               color: "var(--fg-faint)",
             }}
-            title="When enabled, Claude Desktop skips the launch-time chooser and commits to the active mode."
+            title={t("thirdParty.hideChooser")}
           >
             <input
               type="checkbox"
               checked={settings.disable_deployment_mode_chooser}
               onChange={toggleChooser}
             />
-            Hide the deployment-mode chooser at Claude Desktop launch
+            {t("thirdParty.hideChooser")}
           </label>
         )}
 
@@ -369,7 +370,7 @@ export function ThirdPartySection() {
         onClose={() => setShowAdd(false)}
         onCreated={() => {
           void refresh();
-          showToast("info", "Route added.");
+          showToast("info", t("thirdParty.routeAdded"));
         }}
         onError={(msg) => showToast("error", msg)}
       />
@@ -379,20 +380,18 @@ export function ThirdPartySection() {
         onClose={() => setEditTarget(null)}
         onSaved={() => {
           void refresh();
-          showToast("info", "Route updated.");
+          showToast("info", t("thirdParty.routeUpdated"));
         }}
         onError={(msg) => showToast("error", msg)}
       />
       {removeTarget && (
         <ConfirmDialog
-          title="Delete route?"
-          confirmLabel="Delete route"
+          title={t("thirdParty.deleteTitle")}
+          confirmLabel={t("thirdParty.deleteConfirm")}
           confirmDanger
           body={
             <p style={{ margin: 0, lineHeight: "var(--lh-body)" }}>
-              <code>{removeTarget.name}</code>'s CLI wrapper will be
-              removed and its Desktop activation cleared. The route
-              definition cannot be recovered without recreating it.
+              {t("thirdParty.deleteBody", { name: removeTarget.name })}
             </p>
           }
           onCancel={() => setRemoveTarget(null)}
@@ -408,6 +407,7 @@ export function ThirdPartySection() {
 }
 
 function EmptyState({ onAdd }: { onAdd: () => void }) {
+  const { t } = useTranslation();
   return (
     <div
       style={{
@@ -423,25 +423,13 @@ function EmptyState({ onAdd }: { onAdd: () => void }) {
       }}
     >
       <p style={{ margin: 0 }}>
-        No routes yet. Add a route to run Claude Code or Claude Desktop
-        against a non-Anthropic backend — Bedrock, Vertex, Foundry, or
-        any Anthropic-Messages-compatible gateway (Ollama, vLLM,
-        OpenRouter, Kimi, DeepSeek, GLM, LiteLLM, …).
+        {t("thirdParty.emptyText1")}
       </p>
       <p style={{ margin: 0 }}>
-        Each route installs a wrapper command on PATH —{" "}
-        <code style={{ color: "var(--fg-strong)" }}>claude-llama3</code>,{" "}
-        <code style={{ color: "var(--fg-strong)" }}>claude-kimi</code>,{" "}
-        <code style={{ color: "var(--fg-strong)" }}>
-          claude-bedrock-prod
-        </code>{" "}
-        — and (optionally) a profile in Claude Desktop&rsquo;s native
-        configuration registry. The first-party{" "}
-        <code style={{ color: "var(--fg-strong)" }}>claude</code> binary
-        and your Anthropic account are never touched.
+        {t("thirdParty.emptyText2")}
       </p>
       <Button variant="solid" glyph={NF.plus} onClick={onAdd}>
-        Add your first route
+        {t("thirdParty.addFirstRoute")}
       </Button>
     </div>
   );

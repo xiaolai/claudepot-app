@@ -1,4 +1,5 @@
 import type { CSSProperties } from "react";
+import { useTranslation } from "react-i18next";
 import type {
   NotificationKind,
   NotificationSource,
@@ -20,26 +21,19 @@ import type {
  * a `NotificationLogFilter` in the parent's `useMemo`.
  */
 
-const ALL_KIND_OPTIONS: { value: NotificationKind; label: string }[] = [
-  { value: "info", label: "Info" },
-  { value: "notice", label: "Notice" },
-  { value: "error", label: "Error" },
+const KIND_OPTIONS: NotificationKind[] = ["info", "notice", "error"];
+
+const SOURCE_OPTIONS: (NotificationSource | "both")[] = [
+  "both",
+  "toast",
+  "os",
 ];
 
-const SOURCE_OPTIONS: {
-  value: NotificationSource | "both";
-  label: string;
-}[] = [
-  { value: "both", label: "Both" },
-  { value: "toast", label: "In-app" },
-  { value: "os", label: "OS" },
-];
-
-export const WINDOW_OPTIONS: { value: string; label: string }[] = [
-  { value: "all", label: "All time" },
-  { value: String(60 * 60 * 1000), label: "Last 1 h" },
-  { value: String(24 * 60 * 60 * 1000), label: "Last 24 h" },
-  { value: String(7 * 24 * 60 * 60 * 1000), label: "Last 7 d" },
+export const WINDOW_OPTIONS: { value: string; labelKey: string }[] = [
+  { value: "all", labelKey: "shell.notification.windowAll" },
+  { value: String(60 * 60 * 1000), labelKey: "shell.notification.window1h" },
+  { value: String(24 * 60 * 60 * 1000), labelKey: "shell.notification.window24h" },
+  { value: String(7 * 24 * 60 * 60 * 1000), labelKey: "shell.notification.window7d" },
 ];
 
 interface PopoverFiltersProps {
@@ -53,6 +47,18 @@ interface PopoverFiltersProps {
   onChangeQuery: (q: string) => void;
 }
 
+const kindLabelKey: Record<NotificationKind, string> = {
+  info: "shell.notification.filterInfo",
+  notice: "shell.notification.filterNotice",
+  error: "shell.notification.filterError",
+};
+
+const sourceLabelKey: Record<NotificationSource | "both", string> = {
+  both: "shell.notification.sourceBoth",
+  toast: "shell.notification.sourceInApp",
+  os: "shell.notification.sourceOs",
+};
+
 export function NotificationLogFilters({
   kinds,
   onToggleKind,
@@ -63,6 +69,7 @@ export function NotificationLogFilters({
   query,
   onChangeQuery,
 }: PopoverFiltersProps) {
+  const { t } = useTranslation();
   return (
     <div
       style={{
@@ -77,7 +84,7 @@ export function NotificationLogFilters({
       <input
         type="search"
         value={query}
-        placeholder="Search title or body…"
+        placeholder={t("shell.notification.searchPlaceholder")}
         onChange={(e) => onChangeQuery(e.target.value)}
         className="pm-focus"
         style={{
@@ -99,13 +106,14 @@ export function NotificationLogFilters({
           alignItems: "center",
         }}
       >
-        {ALL_KIND_OPTIONS.map((opt) => {
-          const active = kinds.has(opt.value);
+        {KIND_OPTIONS.map((kind) => {
+          const active = kinds.has(kind);
+          const label = t(kindLabelKey[kind]);
           return (
             <button
-              key={opt.value}
+              key={kind}
               type="button"
-              onClick={() => onToggleKind(opt.value)}
+              onClick={() => onToggleKind(kind)}
               className="pm-focus"
               style={{
                 ...chipStyle,
@@ -114,7 +122,7 @@ export function NotificationLogFilters({
                 borderColor: active ? "var(--accent-border)" : "var(--border)",
               }}
             >
-              {opt.label}
+              {label}
             </button>
           );
         })}
@@ -124,26 +132,26 @@ export function NotificationLogFilters({
           onChange={(e) =>
             onChangeSource(e.target.value as NotificationSource | "both")
           }
-          aria-label="Source"
+          aria-label={t("shell.notification.sourceLabel")}
           className="pm-focus"
           style={selectStyle}
         >
-          {SOURCE_OPTIONS.map((o) => (
-            <option key={o.value} value={o.value}>
-              {o.label}
+          {SOURCE_OPTIONS.map((s) => (
+            <option key={s} value={s}>
+              {t(sourceLabelKey[s])}
             </option>
           ))}
         </select>
         <select
           value={windowKey}
           onChange={(e) => onChangeWindow(e.target.value)}
-          aria-label="Time window"
+          aria-label={t("shell.notification.windowLabel")}
           className="pm-focus"
           style={selectStyle}
         >
           {WINDOW_OPTIONS.map((o) => (
             <option key={o.value} value={o.value}>
-              {o.label}
+              {t(o.labelKey)}
             </option>
           ))}
         </select>

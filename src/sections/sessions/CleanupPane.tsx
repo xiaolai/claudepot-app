@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
+import { useTranslation } from "react-i18next";
 import { api } from "../../api";
 import { Button } from "../../components/primitives/Button";
 import { FilterChip } from "../../components/primitives/FilterChip";
@@ -33,6 +34,7 @@ export function CleanupPane({
    *  compile. */
   setToast?: (msg: string) => void;
 }) {
+  const { t } = useTranslation();
   const [olderThanDays, setOlderThanDays] = useState<string>("");
   const [largerThanMb, setLargerThanMb] = useState<string>("");
   const [hasError, setHasError] = useState(false);
@@ -129,7 +131,7 @@ export function CleanupPane({
 
   return (
     <section
-      aria-label="Cleanup"
+      aria-label={t("sessions.cleanup.title")}
       style={{
         display: "flex",
         flexDirection: "column",
@@ -148,35 +150,35 @@ export function CleanupPane({
         <Input
           glyph={NF.clock}
           type="number"
-          placeholder="Older than (days)"
+          placeholder={t("sessions.cleanup.olderThanPlaceholder")}
           value={olderThanDays}
           onChange={(e) => setOlderThanDays(e.target.value)}
-          aria-label="Older than days"
+          aria-label={t("sessions.cleanup.olderThanAria")}
           style={{ width: "var(--input-width-md)" }}
         />
         <Input
           glyph={NF.archive}
           type="number"
-          placeholder="Larger than (MB)"
+          placeholder={t("sessions.cleanup.largerThanPlaceholder")}
           value={largerThanMb}
           onChange={(e) => setLargerThanMb(e.target.value)}
-          aria-label="Larger than MB"
+          aria-label={t("sessions.cleanup.largerThanAria")}
           style={{ width: "var(--input-width-md)" }}
         />
         <FilterChip active={hasError} onToggle={() => setHasError((v) => !v)}>
-          Errors
+          {t("sessions.cleanup.filterErrors")}
         </FilterChip>
         <FilterChip active={sidechain} onToggle={() => setSidechain((v) => !v)}>
-          Agents
+          {t("sessions.cleanup.filterAgents")}
         </FilterChip>
         <div style={{ flex: 1 }} />
         <Button
           variant="ghost"
           onClick={preview}
           disabled={!anyFilter || loading}
-          title={anyFilter ? undefined : "Pick at least one filter"}
+          title={anyFilter ? undefined : t("sessions.cleanup.needFilter")}
         >
-          {loading ? "Previewing…" : "Preview"}
+          {loading ? t("sessions.cleanup.previewing") : t("sessions.cleanup.preview")}
         </Button>
         <Button
           variant="solid"
@@ -184,13 +186,13 @@ export function CleanupPane({
           disabled={!plan || plan.plan.entries.length === 0 || running}
           title={
             !plan
-              ? "Run Preview first"
+              ? t("sessions.cleanup.runPreviewFirst")
               : plan.plan.entries.length === 0
-                ? "Nothing matches the filter"
+                ? t("sessions.cleanup.nothingMatches")
                 : undefined
           }
         >
-          {running ? "Pruning…" : "Prune → Trash"}
+          {running ? t("sessions.cleanup.pruning") : t("sessions.cleanup.prune")}
         </Button>
       </div>
 
@@ -210,8 +212,8 @@ export function CleanupPane({
         <CleanupPlanPreview
           testid="prune-preview"
           summaryText={
-            `Plan · ${plan.plan.entries.length} file(s) · ${formatSize(plan.plan.total_bytes)}` +
-            (plan.plan.entries.length === 0 ? " · nothing to prune" : "")
+            t("sessions.cleanup.summary", { count: plan.plan.entries.length, size: formatSize(plan.plan.total_bytes) }) +
+            (plan.plan.entries.length === 0 ? ` · ${t("sessions.cleanup.nothingToPrune")}` : "")
           }
           rows={plan.plan.entries.map((e) => ({
             id: e.file_path,

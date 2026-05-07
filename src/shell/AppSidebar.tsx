@@ -1,4 +1,5 @@
 import type React from "react";
+import { useTranslation } from "react-i18next";
 import { Divider } from "../components/primitives/Divider";
 import { Glyph } from "../components/primitives/Glyph";
 import { SectionLabel } from "../components/primitives/SectionLabel";
@@ -55,9 +56,10 @@ export function AppSidebar({
   synced = true,
   onOpenLiveSession,
 }: AppSidebarProps) {
+  const { t } = useTranslation();
   const targets = [
-    { id: "cli" as const, label: "CLI", glyph: NF.terminal },
-    { id: "desktop" as const, label: "Desktop", glyph: NF.desktop },
+    { id: "cli" as const, label: t("shell.sidebar.cli"), glyph: NF.terminal },
+    { id: "desktop" as const, label: t("shell.sidebar.desktop"), glyph: NF.desktop },
   ];
 
   return (
@@ -81,7 +83,7 @@ export function AppSidebar({
         <SectionLabel
           style={{ padding: "0 var(--sp-4) var(--sp-6)" }}
         >
-          Swap targets
+          {t("shell.sidebar.swapTargets")}
         </SectionLabel>
         <div
           style={{
@@ -111,7 +113,7 @@ export function AppSidebar({
           <SidebarItem
             key={s.id}
             glyph={s.glyph}
-            label={s.label}
+            label={t("nav." + s.id)}
             active={active === s.id}
             badge={badges?.[s.id] ?? undefined}
             onClick={() => onSelect(s.id)}
@@ -146,7 +148,7 @@ export function AppSidebar({
           color={synced ? "var(--ok)" : "var(--warn)"}
           style={{ fontSize: "var(--fs-4xs)" }}
         />
-        <span>{synced ? "synced" : "syncing…"}</span>
+        <span>{synced ? t("shell.sidebar.synced") : t("shell.sidebar.syncing")}</span>
         <span style={{ flex: 1 }} />
         {version && <span>{version}</span>}
       </div>
