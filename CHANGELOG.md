@@ -6,6 +6,29 @@ Versioning scheme:
 - `0.1.x` — beta
 - `1.0.0+` — stable
 
+## 0.1.15 — beta (2026-05-07)
+
+### Fixed
+
+- **macOS Dock icon now renders crisply at every size.** The `.icns`
+  layers were bilinearly resampled by tauri's icon generator,
+  visibly softening the 128×128 and 256×256 layers — exactly the
+  ones macOS picks for default Dock display on Retina. Regenerated
+  every layer fresh from `icon.svg` via `rsvg-convert` plus
+  `iconutil`; pixel-identical to a clean SVG render now.
+- After upgrading from a previous beta, run `killall Dock; killall
+  Finder` once if the Dock still shows the cached softer icon —
+  macOS's icon-services cache holds onto the old version until
+  explicitly flushed.
+
+### Added
+
+- _…_
+
+### Changed
+
+- _…_
+
 ## 0.1.14 — beta (2026-05-07)
 
 ### Fixed
