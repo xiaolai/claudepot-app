@@ -151,6 +151,26 @@
   scroll-margin-top: calc(var(--nav-height) + var(--sp-48));
 }
 
+.cat-block-see-also {
+  margin: var(--sp-12) 0 0;
+  padding-top: var(--sp-8);
+  border-top: var(--bw-hair) solid var(--rule-hair);
+  font-size: var(--fs-meta);
+  color: var(--muted);
+  font-style: italic;
+}
+
+.cat-block-see-also a {
+  color: var(--accent-ink);
+  text-decoration: none;
+  font-style: normal;
+}
+
+.cat-block-see-also a:hover {
+  color: var(--accent);
+  text-decoration: underline;
+}
+
 /* ── Sticky category pills (in-page TOC) ────────────────────── */
 
 .links-pills {
