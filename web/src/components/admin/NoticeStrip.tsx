@@ -3,6 +3,7 @@ import { and, count, desc, eq } from "drizzle-orm";
 
 import { db } from "@/db/client";
 import { botReports, tags, users } from "@/db/schema";
+import { links } from "@/db/schema/links";
 import { ProposalActionButton } from "@/components/admin/ProposalActionButton";
 
 interface Props {
@@ -22,7 +23,7 @@ interface Props {
  * Renders nothing when both feeds are empty.
  */
 export async function NoticeStrip({ asSuffix }: Props) {
-  const [pendingTagRow, openProposals] = await Promise.all([
+  const [pendingTagRow, openProposals, pendingLinkRow] = await Promise.all([
     db
       .select({ n: count() })
       .from(tags)
@@ -42,11 +43,22 @@ export async function NoticeStrip({ asSuffix }: Props) {
       )
       .orderBy(desc(botReports.reportedAt))
       .limit(20),
+    db
+      .select({ n: count() })
+      .from(links)
+      .where(eq(links.status, "pending"))
+      .then((rows) => rows[0] ?? { n: 0 }),
   ]);
 
   const pendingTagCount = pendingTagRow.n;
+  const pendingLinkCount = pendingLinkRow.n;
 
-  if (pendingTagCount === 0 && openProposals.length === 0) return null;
+  if (
+    pendingTagCount === 0 &&
+    pendingLinkCount === 0 &&
+    openProposals.length === 0
+  )
+    return null;
 
   return (
     <ul className="proto-inbox-notices" aria-label="Notices">
@@ -55,6 +67,13 @@ export async function NoticeStrip({ asSuffix }: Props) {
           <strong>{pendingTagCount}</strong>{" "}
           tag{pendingTagCount === 1 ? "" : "s"} awaiting vocabulary review.{" "}
           <Link href={`/admin/console/vocabulary${asSuffix}`}>Review →</Link>
+        </li>
+      ) : null}
+      {pendingLinkCount > 0 ? (
+        <li className="proto-inbox-notice">
+          <strong>{pendingLinkCount}</strong>{" "}
+          link{pendingLinkCount === 1 ? "" : "s"} suggested for the directory.{" "}
+          <Link href={`/admin/links${asSuffix}`}>Review →</Link>
         </li>
       ) : null}
       {openProposals.map((p) => {

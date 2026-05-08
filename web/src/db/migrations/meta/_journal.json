@@ -33,6 +33,10 @@
     { "idx": 28, "version": "7", "when": 1778800000000, "tag": "0028_cost_caps_and_invoices",        "breakpoints": true },
     { "idx": 29, "version": "7", "when": 1778900000000, "tag": "0029_bot_costs_per_provider",        "breakpoints": true },
     { "idx": 30, "version": "7", "when": 1779000000000, "tag": "0030_bot_cap_log_actions",           "breakpoints": true },
-    { "idx": 31, "version": "7", "when": 1779100000000, "tag": "0031_comments_author_visible_index", "breakpoints": true }
+    { "idx": 31, "version": "7", "when": 1779100000000, "tag": "0031_comments_author_visible_index", "breakpoints": true },
+    { "idx": 32, "version": "7", "when": 1779200000000, "tag": "0032_promote_xiaolai_staff",          "breakpoints": true },
+    { "idx": 33, "version": "7", "when": 1779300000000, "tag": "0033_links",                            "breakpoints": true },
+    { "idx": 34, "version": "7", "when": 1779300001000, "tag": "0034_links_featured",                   "breakpoints": true },
+    { "idx": 35, "version": "7", "when": 1779300002000, "tag": "0035_links_suggested_by",               "breakpoints": true }
   ]
 }
