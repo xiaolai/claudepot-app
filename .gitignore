@@ -48,6 +48,14 @@ typescript
 !/scripts/regen-icons.sh
 dev-docs/
 
+# Claude Code local override files (read alongside CLAUDE.md / AGENTS.md
+# but kept out of version control). The general pattern catches any
+# *.local.md file anywhere in the tree (the `*.local` pattern above
+# only matches files literally ending in `.local`, not `.local.md`).
+CLAUDE.local.md
+AGENTS.local.md
+**/*.local.md
+
 # Tauri's `pnpm tauri icon` command regenerates these on every run,
 # but we don't ship for MSIX/iOS/Android, so any reappearance is dead
 # bytes. Ignored so a stray `pnpm tauri icon` invocation doesn't

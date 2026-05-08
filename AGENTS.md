@@ -24,10 +24,15 @@ pnpm test:coverage                   # React with coverage report
 
 - `src-tauri/src/commands.rs` — async Tauri commands wrapping `claudepot-core`. NO business logic.
 - `src-tauri/src/dto.rs` — serde DTOs crossing to JS. Credentials never cross.
-- `src/App.tsx` + `src/api.ts` + `src/types.ts` — React UI, plain CSS.
+- `src/App.tsx` + `src/api/` (sliced by domain — `account`, `project`,
+  `notification`, `activity`, etc., merged in `index.ts`) + `src/types.ts` — React UI, plain CSS.
 - `AccountStore.db` is `Mutex<Connection>` so stores can cross `await` points in Tauri commands.
 
 ## Test on test-host
+
+> Real `<user>`, `<host>`, and `<password>` values live in
+> `AGENTS.local.md` (gitignored). The placeholder shape below is
+> the public form.
 
 ```bash
 cargo build -p claudepot-cli

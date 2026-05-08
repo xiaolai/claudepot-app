@@ -57,6 +57,10 @@ pnpm test:coverage                   # React with coverage report
 
 ## Test on test-host
 
+> Real `<user>`, `<host>`, and `<password>` values live in
+> `CLAUDE.local.md` (gitignored). The placeholder shape below is
+> the public form.
+
 ```bash
 cargo build -p claudepot-cli
 scp target/debug/claudepot <user>@<host>:/tmp/claudepot
@@ -74,8 +78,8 @@ CI's clippy + Windows-test gates run on Linux/Windows runners that
 local macOS can't reproduce. A four-round cascade of "fix-and-pray"
 clippy commits in v0.0.18 prompted this setup:
 
-- **`<runner-a>`** (internal validator network, Ubuntu aarch64) — runs the same
-  command as CI's `Format / Clippy (Linux)` job:
+- **`<runner-a>`** (internal validator network, Ubuntu aarch64) —
+  runs the same command as CI's `Format / Clippy (Linux)` job:
   ```bash
   cargo clippy -p claudepot-core -p claudepot-cli -- -D warnings
   ```
@@ -83,13 +87,16 @@ clippy commits in v0.0.18 prompted this setup:
   `manual_pattern_char_comparison`) and `cfg(target_os = "macos")`-only
   items that the macOS-local clippy never sees.
 
-- **`<runner-b>`** (internal validator network, Win 11 MSVC x86_64) — runs the
-  same compile-step as CI's `Tests (windows-latest)` job:
+- **`<runner-b>`** (internal validator network, Win 11 MSVC x86_64) —
+  runs the same compile-step as CI's `Tests (windows-latest)` job:
   ```bash
   cargo test -p claudepot-core -p claudepot-cli --no-run
   ```
   Catches Windows-only compile errors (e.g. types referenced in
   `cfg(target_os = "windows")` arms but cfg-gated to macOS only).
+
+Real host names and the network they sit on live in `CLAUDE.local.md`
+(gitignored).
 
 A `pre-push` hook at `.git/hooks/pre-push` (per-clone, not committed
 because git refuses to track `.git/`) auto-runs both validators
