@@ -372,7 +372,7 @@
   column-gap: var(--sp-32);
 }
 
-@media (max-width: var(--content-width)) {
+@media (max-width: 720px) {
   .cat-page .link-list {
     columns: 1;
   }

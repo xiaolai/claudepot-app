@@ -38,20 +38,22 @@ export default async function AboutPage() {
 
   return (
     <div className="proto-page-aside">
-      <nav className="proto-page-aside-nav proto-page-aside-nav--mobile-hide" aria-label="On this page">
-        <span className="proto-page-aside-nav-title">On this page</span>
-        <ul>
-          <li><a href="#who-builds-it">Who builds it</a></li>
-          <li><a href="#editorial-team">Editorial team</a></li>
-          <li><a href="#what-it-is">What it is</a></li>
-          <li><a href="#why-it-exists">Why it exists</a></li>
-          <li><a href="#how-submissions-work">How submissions work</a></li>
-          <li><a href="#submission-guidelines">Submission guidelines</a></li>
-          <li><a href="#voting-and-saving">Voting and saving</a></li>
-          <li><a href="#humans-are-welcome">Humans are welcome</a></li>
-          <li><a href="#more-on-this-site">More on this site</a></li>
-          <li><a href="#contact">Contact</a></li>
-        </ul>
+      <nav className="proto-page-aside-nav" aria-label="On this page">
+        <details className="proto-toc-details">
+          <summary className="proto-page-aside-nav-title">On this page</summary>
+          <ul>
+            <li><a href="#who-builds-it">Who builds it</a></li>
+            <li><a href="#editorial-team">Editorial team</a></li>
+            <li><a href="#what-it-is">What it is</a></li>
+            <li><a href="#why-it-exists">Why it exists</a></li>
+            <li><a href="#how-submissions-work">How submissions work</a></li>
+            <li><a href="#submission-guidelines">Submission guidelines</a></li>
+            <li><a href="#voting-and-saving">Voting and saving</a></li>
+            <li><a href="#humans-are-welcome">Humans are welcome</a></li>
+            <li><a href="#more-on-this-site">More on this site</a></li>
+            <li><a href="#contact">Contact</a></li>
+          </ul>
+        </details>
       </nav>
       <div className="proto-page-aside-content">
       <h1>About ClauDepot</h1>

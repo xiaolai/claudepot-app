@@ -86,9 +86,10 @@ export default async function PostDetail({
 
   // The two layouts share content; only the wrapper class and TOC
   // aside differ. proto-page-aside is the existing pattern from
-  // /privacy + /office — sticky sidebar, content column. The aside
-  // is suppressed below 768px (proto-page-aside-nav--mobile-hide) so
-  // a long TOC doesn't push the post body two screens down.
+  // /privacy + /office — sticky sidebar, content column. On mobile
+  // the TOC collapses into a tap-to-expand <details> disclosure
+  // (proto-toc-details) so a long TOC doesn't push the post body
+  // two screens down.
   const articleBody = (
     <>
       {decision && (
@@ -161,18 +162,17 @@ export default async function PostDetail({
 
   return (
     <div className="proto-page-aside">
-      <nav
-        className="proto-page-aside-nav proto-page-aside-nav--mobile-hide"
-        aria-label="On this page"
-      >
-        <span className="proto-page-aside-nav-title">On this page</span>
-        <ul>
-          {toc.map((entry) => (
-            <li key={entry.id}>
-              <a href={`#${entry.id}`}>{entry.text}</a>
-            </li>
-          ))}
-        </ul>
+      <nav className="proto-page-aside-nav" aria-label="On this page">
+        <details className="proto-toc-details">
+          <summary className="proto-page-aside-nav-title">On this page</summary>
+          <ul>
+            {toc.map((entry) => (
+              <li key={entry.id}>
+                <a href={`#${entry.id}`}>{entry.text}</a>
+              </li>
+            ))}
+          </ul>
+        </details>
       </nav>
       <div className="proto-page-aside-content">{articleBody}</div>
     </div>

@@ -15,26 +15,25 @@ const LICENSE_URL = `${REPO_URL}/blob/main/LICENSE`;
 export default function TermsPage() {
   return (
     <div className="proto-page-aside">
-      <nav
-        className="proto-page-aside-nav proto-page-aside-nav--mobile-hide"
-        aria-label="On this page"
-      >
-        <span className="proto-page-aside-nav-title">On this page</span>
-        <ul>
-          <li><a href="#summary">The short version</a></li>
-          <li><a href="#what-claudepot-is">What Claudepot is</a></li>
-          <li><a href="#open-source">Open source &amp; license</a></li>
-          <li><a href="#your-account">Your account</a></li>
-          <li><a href="#acceptable-use">Acceptable use</a></li>
-          <li><a href="#your-content">Your content</a></li>
-          <li><a href="#third-parties">Third-party services</a></li>
-          <li><a href="#disclaimers">Disclaimers</a></li>
-          <li><a href="#liability">Limitation of liability</a></li>
-          <li><a href="#termination">Termination</a></li>
-          <li><a href="#changes">Changes to these terms</a></li>
-          <li><a href="#governing-law">Governing law</a></li>
-          <li><a href="#contact">Contact</a></li>
-        </ul>
+      <nav className="proto-page-aside-nav" aria-label="On this page">
+        <details className="proto-toc-details">
+          <summary className="proto-page-aside-nav-title">On this page</summary>
+          <ul>
+            <li><a href="#summary">The short version</a></li>
+            <li><a href="#what-claudepot-is">What Claudepot is</a></li>
+            <li><a href="#open-source">Open source &amp; license</a></li>
+            <li><a href="#your-account">Your account</a></li>
+            <li><a href="#acceptable-use">Acceptable use</a></li>
+            <li><a href="#your-content">Your content</a></li>
+            <li><a href="#third-parties">Third-party services</a></li>
+            <li><a href="#disclaimers">Disclaimers</a></li>
+            <li><a href="#liability">Limitation of liability</a></li>
+            <li><a href="#termination">Termination</a></li>
+            <li><a href="#changes">Changes to these terms</a></li>
+            <li><a href="#governing-law">Governing law</a></li>
+            <li><a href="#contact">Contact</a></li>
+          </ul>
+        </details>
       </nav>
       <div className="proto-page-aside-content">
         <h1>Terms of Service</h1>

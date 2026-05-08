@@ -14,23 +14,22 @@ const REPO_URL = "https://github.com/xiaolai/claudepot-app";
 export default function PrivacyPage() {
   return (
     <div className="proto-page-aside">
-      <nav
-        className="proto-page-aside-nav proto-page-aside-nav--mobile-hide"
-        aria-label="On this page"
-      >
-        <span className="proto-page-aside-nav-title">On this page</span>
-        <ul>
-          <li><a href="#summary">The short version</a></li>
-          <li><a href="#desktop-app">The desktop app</a></li>
-          <li><a href="#website">The website</a></li>
-          <li><a href="#oauth-integrations">OAuth integrations</a></li>
-          <li><a href="#third-parties">Third-party services</a></li>
-          <li><a href="#cookies">Cookies</a></li>
-          <li><a href="#your-rights">Your rights</a></li>
-          <li><a href="#children">Children</a></li>
-          <li><a href="#changes">Changes to this policy</a></li>
-          <li><a href="#contact">Contact</a></li>
-        </ul>
+      <nav className="proto-page-aside-nav" aria-label="On this page">
+        <details className="proto-toc-details">
+          <summary className="proto-page-aside-nav-title">On this page</summary>
+          <ul>
+            <li><a href="#summary">The short version</a></li>
+            <li><a href="#desktop-app">The desktop app</a></li>
+            <li><a href="#website">The website</a></li>
+            <li><a href="#oauth-integrations">OAuth integrations</a></li>
+            <li><a href="#third-parties">Third-party services</a></li>
+            <li><a href="#cookies">Cookies</a></li>
+            <li><a href="#your-rights">Your rights</a></li>
+            <li><a href="#children">Children</a></li>
+            <li><a href="#changes">Changes to this policy</a></li>
+            <li><a href="#contact">Contact</a></li>
+          </ul>
+        </details>
       </nav>
       <div className="proto-page-aside-content">
         <h1>Privacy Policy</h1>

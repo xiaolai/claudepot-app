@@ -1,4 +1,4 @@
-import type { Metadata } from "next";
+import type { Metadata, Viewport } from "next";
 import { Suspense } from "react";
 import { JetBrains_Mono } from "next/font/google";
 import { Analytics } from "@vercel/analytics/next";
@@ -54,6 +54,16 @@ export const metadata: Metadata = {
     title: "ClauDepot",
     description: SITE_DESCRIPTION,
   },
+};
+
+// Without this, mobile Safari/Chrome render the page at the legacy
+// 980px desktop viewport, so phone visitors see a zoomed-out layout
+// until they pinch in. Next.js only emits `<meta name="viewport">`
+// when this export exists.
+export const viewport: Viewport = {
+  width: "device-width",
+  initialScale: 1,
+  // Don't lock zoom — pinch-to-zoom is an accessibility affordance.
 };
 
 export default async function PrototypeLayout({

@@ -9,19 +9,18 @@ export const metadata: Metadata = {
 export default function NetworkHelpPage() {
   return (
     <div className="proto-page-aside">
-      <nav
-        className="proto-page-aside-nav proto-page-aside-nav--mobile-hide"
-        aria-label="On this page"
-      >
-        <span className="proto-page-aside-nav-title">On this page</span>
-        <ul>
-          <li><a href="#what-claudepot-needs">What Claudepot needs</a></li>
-          <li><a href="#diagnose">Diagnose the failure</a></li>
-          <li><a href="#proxy">Configure a proxy</a></li>
-          <li><a href="#install-mirrors">Faster CLI install (mirrors)</a></li>
-          <li><a href="#third-party">Use a third-party LLM</a></li>
-          <li><a href="#out-of-scope">What we don't cover</a></li>
-        </ul>
+      <nav className="proto-page-aside-nav" aria-label="On this page">
+        <details className="proto-toc-details">
+          <summary className="proto-page-aside-nav-title">On this page</summary>
+          <ul>
+            <li><a href="#what-claudepot-needs">What Claudepot needs</a></li>
+            <li><a href="#diagnose">Diagnose the failure</a></li>
+            <li><a href="#proxy">Configure a proxy</a></li>
+            <li><a href="#install-mirrors">Faster CLI install (mirrors)</a></li>
+            <li><a href="#third-party">Use a third-party LLM</a></li>
+            <li><a href="#out-of-scope">What we don't cover</a></li>
+          </ul>
+        </details>
       </nav>
 
       <div className="proto-page-aside-content">

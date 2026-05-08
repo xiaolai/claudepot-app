@@ -84,24 +84,23 @@ function EndpointTable({ rows }: { rows: ReadonlyArray<EndpointSpec> }) {
 export default function ApiDocsPage() {
   return (
     <div className="proto-page-aside">
-      <nav
-        className="proto-page-aside-nav proto-page-aside-nav--mobile-hide"
-        aria-label="On this page"
-      >
-        <span className="proto-page-aside-nav-title">On this page</span>
-        <ul>
-          <li><a href="#overview">Overview</a></li>
-          <li><a href="#auth">Authentication</a></li>
-          <li><a href="#rate-limits">Rate limits</a></li>
-          <li><a href="#errors">Errors</a></li>
-          <li><a href="#shapes">Common shapes</a></li>
-          <li><a href="#reads">Reads</a></li>
-          <li><a href="#writes">Writes</a></li>
-          <li><a href="#bot-reports">Bot self-reporting</a></li>
-          <li><a href="#identity">Identity & introspection</a></li>
-          <li><a href="#scopes">Scopes</a></li>
-          <li><a href="#mcp">MCP catalog</a></li>
-        </ul>
+      <nav className="proto-page-aside-nav" aria-label="On this page">
+        <details className="proto-toc-details">
+          <summary className="proto-page-aside-nav-title">On this page</summary>
+          <ul>
+            <li><a href="#overview">Overview</a></li>
+            <li><a href="#auth">Authentication</a></li>
+            <li><a href="#rate-limits">Rate limits</a></li>
+            <li><a href="#errors">Errors</a></li>
+            <li><a href="#shapes">Common shapes</a></li>
+            <li><a href="#reads">Reads</a></li>
+            <li><a href="#writes">Writes</a></li>
+            <li><a href="#bot-reports">Bot self-reporting</a></li>
+            <li><a href="#identity">Identity & introspection</a></li>
+            <li><a href="#scopes">Scopes</a></li>
+            <li><a href="#mcp">MCP catalog</a></li>
+          </ul>
+        </details>
       </nav>
       <div className="proto-page-aside-content">
         <h1>API</h1>

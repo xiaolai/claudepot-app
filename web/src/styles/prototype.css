@@ -1918,9 +1918,17 @@ summary.proto-nav-avatar::-webkit-details-marker { display: none; }
  * cannot reference custom properties (var() is invalid inside media-query
  * conditions per CSS spec), and this project doesn't run a postcss plugin
  * to substitute one. Documented exception in .claude/rules/design-tokens.md.
- * If you change --bp-md, change this too. */
+ * If you change --bp-md, change this too.
+ * NOTE: ui-tokenize@xiaolai's PreToolUse hook has been observed
+ * rewriting this literal to `var(--bp-md)` despite the comment above —
+ * if you see that rewrite land, revert the value, the rule is unsound. */
 @media (max-width: 768px) {
   .proto-nav { gap: var(--sp-12); padding: var(--sp-12); flex-wrap: wrap; }
+  /* Give the brand its own row on mobile so menu items flow
+     left-to-right with predictable wrapping instead of being shoved
+     against the right edge by margin-right: auto and clipping the
+     last word ("App" on a 375 px viewport). */
+  .proto-nav-brand { flex-basis: 100%; margin-right: 0; }
   .proto-page,
   .proto-page-narrow,
   .proto-page-aside { padding: var(--sp-20) var(--sp-16); }
@@ -1928,11 +1936,23 @@ summary.proto-nav-avatar::-webkit-details-marker { display: none; }
   .proto-rank { display: none; }
   .office-dl > div { grid-template-columns: 1fr; gap: var(--sp-4); }
 
+  /* Empty-state spacing was tuned for desktop where 32 px padding +
+     40 px top-margin + 48 px footer margin-top reads as breathing
+     room in a wide column. On a 375 px viewport those tokens stack
+     to ~150 px of whitespace around a one-line "No posts yet"
+     message — most of the screen ends up blank. Trim them on mobile.
+     Affects every empty surface (/top, /hot, /new, /saved, /upvoted,
+     /submit, /login*, /admin/*, /office/costs, …) without touching
+     the desktop look. */
+  .proto-empty { padding: var(--sp-16); }
+  .proto-empty-spaced { margin-top: var(--sp-16); }
+  .proto-footer { margin-top: var(--sp-24); padding: var(--sp-16); }
+
   /* Sidebar collapses above content on mobile — sticky-off so it
      scrolls away with the page; padded rule below visually separates
-     it from the article body. The --mobile-hide variant suppresses
-     long TOCs entirely (e.g. /about's 10-item list would push the
-     article body two screen-heights down). */
+     it from the article body. The collapsible <details> wrapper
+     (.proto-toc-details) keeps long TOCs from pushing the article
+     two screen-heights down — closed by default, tap-to-expand. */
   .proto-page-aside {
     grid-template-columns: 1fr;
     gap: var(--sp-20);
@@ -1942,8 +1962,112 @@ summary.proto-nav-avatar::-webkit-details-marker { display: none; }
     padding-bottom: var(--sp-16);
     border-bottom: var(--bw-hair) solid var(--rule-hair);
   }
-  .proto-page-aside-nav--mobile-hide {
-    display: none;
+
+  /* Wide admin tables (.proto-mod-table — users, bots, decisions,
+     log, …) overflow a 375 px viewport when their 6–8 columns stay
+     in normal table layout. Letting the table itself become a
+     horizontal scroll container preserves the desktop column
+     alignment and adds a swipe affordance, without touching the
+     11+ call sites. The internal display: table-cell / table-row
+     semantics remain because UA stylesheet defaults still apply
+     to descendants when only the table itself is `display: block`. */
+  .proto-mod-table {
+    display: block;
+    overflow-x: auto;
+    max-width: 100%;
+    -webkit-overflow-scrolling: touch;
+  }
+}
+
+/* ── Touch targets (phones, tablets, touch laptops) ─────────────
+ *
+ * `(pointer: coarse)` is the right gate: it targets devices where
+ * the primary input is imprecise (finger), regardless of viewport
+ * width. Bumping vote / save / nav-cta padding on mouse-driven
+ * desktops would just bloat the feed. Apple HIG = 44 pt;
+ * Material = 48 dp; --touch-min in theme.css is 44 px. */
+@media (pointer: coarse) {
+  .proto-vote-arrow,
+  .proto-save {
+    /* Was sp-2/sp-6 (~24-28 px) — fingers want ≥ 44 px. */
+    padding: var(--sp-12) var(--sp-12);
+    min-width: var(--touch-min);
+    min-height: var(--touch-min);
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+  }
+  .proto-nav-cta,
+  .proto-nav-login {
+    padding: var(--sp-12) var(--sp-16);
+    min-height: var(--touch-min);
+    display: inline-flex;
+    align-items: center;
+  }
+  .proto-nav-avatar {
+    min-height: var(--touch-min);
+    padding: var(--sp-8) var(--sp-12);
+  }
+}
+
+/* ── Collapsible TOC (used by /about, /privacy, /terms, /api,
+ *    /post/[id], /help/network) ──────────────────────────────────
+ *
+ * Markup contract:
+ *   <nav class="proto-page-aside-nav" aria-label="On this page">
+ *     <details class="proto-toc-details">
+ *       <summary class="proto-page-aside-nav-title">…</summary>
+ *       <ul>…</ul>
+ *     </details>
+ *   </nav>
+ *
+ * Mobile: <details> is closed by default, summary is a tappable
+ *   disclosure with a +/− glyph. Long TOCs no longer steal
+ *   two screen-heights above the article.
+ * Desktop: the UA closed-state hide is overridden so the <ul>
+ *   stays visible regardless of [open]; the summary acts as a
+ *   non-interactive section title (the existing visual). */
+.proto-toc-details > summary {
+  list-style: none;
+}
+.proto-toc-details > summary::-webkit-details-marker { display: none; }
+.proto-toc-details > summary::marker { content: ""; }
+
+@media (max-width: 768px) {
+  .proto-toc-details > summary {
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: var(--sp-8) 0;
+    min-height: var(--touch-min);
+  }
+  .proto-toc-details > summary::after {
+    content: "+";
+    font-family: var(--font-mono);
+    font-size: var(--fs-body);
+    font-weight: 400;
+    color: var(--muted);
+    transition: transform var(--transition-short);
+  }
+  .proto-toc-details[open] > summary::after {
+    content: "−";
+  }
+}
+
+/* 769px = --bp-md + 1; the bp-md-can't-be-var() exception note is
+   at the top of the .proto-page-aside mobile block. If --bp-md
+   moves, change both literals. */
+@media (min-width: 769px) {
+  /* Force <details> children visible regardless of [open] — the
+     summary becomes a static title and the list is always shown.
+     Author rule overrides the UA rule that hides non-summary
+     children of a closed <details>. */
+  .proto-toc-details > summary {
+    cursor: default;
+  }
+  .proto-toc-details > ul {
+    display: flex;
   }
 }
 
