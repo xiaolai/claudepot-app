@@ -1,7 +1,6 @@
 import type { Metadata } from "next";
 import { Suspense } from "react";
 import { JetBrains_Mono } from "next/font/google";
-import { Analytics } from "@vercel/analytics/next";
 import { and, count, eq, isNull } from "drizzle-orm";
 import { PrototypeNav } from "@/components/prototype/PrototypeNav";
 import { Footer } from "@/components/prototype/Footer";
@@ -108,15 +107,6 @@ export default async function PrototypeLayout({
         </Suspense>
         <main>{children}</main>
         <Footer />
-        {/*
-         * Vercel Web Analytics replaces the prior Cloudflare beacon.
-         * CF Web Analytics requires the host to be proxied through CF
-         * (orange cloud), but claudepot.com is on Vercel direct (gray
-         * cloud DNS-only), so the CF beacon's POST to /cdn-cgi/rum
-         * was CORS-blocked and recorded zero events. Vercel Analytics
-         * runs natively on this stack with no CORS surface.
-         */}
-        <Analytics />
       </body>
     </html>
   );
