@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import { Suspense } from "react";
 import { JetBrains_Mono } from "next/font/google";
 import { Analytics } from "@vercel/analytics/next";
+import { SpeedInsights } from "@vercel/speed-insights/next";
 import { and, count, eq, isNull } from "drizzle-orm";
 import { PrototypeNav } from "@/components/prototype/PrototypeNav";
 import { Footer } from "@/components/prototype/Footer";
@@ -117,6 +118,7 @@ export default async function PrototypeLayout({
          * runs natively on this stack with no CORS surface.
          */}
         <Analytics />
+        <SpeedInsights />
       </body>
     </html>
   );

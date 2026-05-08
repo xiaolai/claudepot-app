@@ -44,6 +44,9 @@ importers:
       '@vercel/blob':
         specifier: ^2.3.3
         version: 2.3.3
+      '@vercel/speed-insights':
+        specifier: ^2.0.0
+        version: 2.0.0(next@15.4.11(react-dom@19.2.5(react@19.2.5))(react@19.2.5))(react@19.2.5)
       boring-avatars:
         specifier: ^2.0.4
         version: 2.0.4(react-dom@19.2.5(react@19.2.5))(react@19.2.5)
@@ -1288,6 +1291,32 @@ packages:
   '@vercel/blob@2.3.3':
     resolution: {integrity: sha512-MtD7VLo6hU07eHR7bmk5SIMD290q574UaNYTe46qeyRT+hWrCy26CoAqfd7PnIefVXvRehRZBzukxuTO9iGTVg==}
     engines: {node: '>=20.0.0'}
+
+  '@vercel/speed-insights@2.0.0':
+    resolution: {integrity: sha512-jwkNcrTeafWxjmWq4AHBaptSqZiJkYU5adLC9QBSqeim0GcqDMgN5Ievh8OG1rJ6W3A4l1oiP7qr9CWxGuzu3w==}
+    peerDependencies:
+      '@sveltejs/kit': ^1 || ^2
+      next: '>= 13'
+      nuxt: '>= 3'
+      react: ^18 || ^19 || ^19.0.0-rc
+      svelte: '>= 4'
+      vue: ^3
+      vue-router: ^4
+    peerDependenciesMeta:
+      '@sveltejs/kit':
+        optional: true
+      next:
+        optional: true
+      nuxt:
+        optional: true
+      react:
+        optional: true
+      svelte:
+        optional: true
+      vue:
+        optional: true
+      vue-router:
+        optional: true
 
   accepts@2.0.0:
     resolution: {integrity: sha512-5cvg6CtKwfgdmVqY1WIiXKc3Q1bkRqGLi+2W/6ao+6Y7gu/RCwRuAhGEzh5B4KlszSuTLgZYuqFqo5bImjNKng==}
@@ -3901,6 +3930,11 @@ snapshots:
       is-node-process: 1.2.0
       throttleit: 2.1.0
       undici: 6.25.0
+
+  '@vercel/speed-insights@2.0.0(next@15.4.11(react-dom@19.2.5(react@19.2.5))(react@19.2.5))(react@19.2.5)':
+    optionalDependencies:
+      next: 15.4.11(react-dom@19.2.5(react@19.2.5))(react@19.2.5)
+      react: 19.2.5
 
   accepts@2.0.0:
     dependencies:
