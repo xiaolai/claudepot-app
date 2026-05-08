@@ -422,6 +422,19 @@ fn snapshot_for(snapshot: &UsageSnapshot, uuid: Uuid) -> Option<&AccountSnapshot
     snapshot.accounts.get(&uuid.to_string())
 }
 
+/// Filtering on `AccountStatus::Ok` already implicitly excludes
+/// candidates whose `verify_status` is `drift` or `rejected`:
+/// `usage_cache::identity_gate` (in core) refuses to fetch
+/// `/usage` for those, so the snapshot writer records
+/// `AccountStatus::Error`, not `Ok`. The `never` and
+/// `network_error` statuses do not block the gate — those
+/// accounts CAN reach the snapshot as `Ok`, and rotating to them
+/// is intentional (they're recently added or transiently
+/// offline; the next reconcile pass will confirm).
+///
+/// Passing a separate verify_status field through evaluator input
+/// would only re-implement the filter the gate already enforces,
+/// so this comment is the documentation, not new code.
 fn select_least_used(
     snapshot: &UsageSnapshot,
     active_uuid: Uuid,

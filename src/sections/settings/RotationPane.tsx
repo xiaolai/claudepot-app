@@ -70,7 +70,7 @@ export function RotationPane({ pushToast }: Props) {
         setFile(next);
         // Refresh audit too — the rule add itself doesn't change it,
         // but a follow-up tick might already have emitted a suggestion.
-        const a = await api.rotationAuditGet(20);
+        const a = await api.rotationAuditGet(50);
         setAudit(a);
       } catch (e) {
         pushToast("error", `Rotation save failed: ${e}`);

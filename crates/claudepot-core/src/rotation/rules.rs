@@ -525,6 +525,22 @@ mod tests {
         assert_eq!(back, file);
     }
 
+    /// Reject an unknown window value (typo in a hand-edited file).
+    /// `UsageWindowKind` is a closed enum on the wire — serde
+    /// errors on unknown variants, which the store's load path
+    /// handles as corruption (rename-aside). This test pins the
+    /// schema-level rejection behavior independent of the store.
+    #[test]
+    fn reject_unknown_window_value() {
+        let json = r#"{
+            "id": "r",
+            "trigger": { "kind": "utilization_threshold", "window": "not_a_window", "pct": 90 },
+            "action": { "kind": "rotate_to", "selector": { "kind": "explicit", "email": "a@x.com" } }
+        }"#;
+        let r = serde_json::from_str::<RotationRule>(json);
+        assert!(r.is_err(), "unknown window must be a parse error");
+    }
+
     /// Reject an unknown trigger kind (forward-incompatible client
     /// or hand-edit typo). The error is bubbled by serde rather
     /// than silently dropping the rule.
