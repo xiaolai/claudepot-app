@@ -9,11 +9,11 @@ import { UserAvatar } from "./Avatar";
 import { signOutAction } from "@/lib/actions/auth";
 
 const NAV_ITEMS = [
-  { href: "/",          label: "Home",     match: (p: string) => p === "/" || p === "/new" || p === "/top" },
-  { href: "/c",        label: "Tags",     match: (p: string) => p.startsWith("/c") },
-  { href: "/office",   label: "Office",   match: (p: string) => p.startsWith("/office") },
-  { href: "/app",      label: "App",      match: (p: string) => p.startsWith("/app") },
-  { href: "/about",    label: "About",    match: (p: string) => p.startsWith("/about") },
+  { href: "/",          label: "Feed",     match: (p: string) => p === "/" || p === "/new" || p === "/top" },
+  { href: "/links",     label: "Links",    match: (p: string) => p.startsWith("/links") },
+  { href: "/office",    label: "Office",   match: (p: string) => p.startsWith("/office") },
+  { href: "/app",       label: "App",      match: (p: string) => p.startsWith("/app") },
+  { href: "/about",     label: "About",    match: (p: string) => p.startsWith("/about") },
 ];
 
 // Local fallback for the dev `?as=` shim only. Real-session staff
