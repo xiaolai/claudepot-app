@@ -2031,24 +2031,34 @@ summary.proto-nav-avatar::-webkit-details-marker { display: none; }
   }
 }
 
-/* ── Collapsible TOC (used by /about, /privacy, /terms, /api,
- *    /post/[id], /help/network) ──────────────────────────────────
+/* ── Collapsible aside-nav, two flavors ──────────────────────────
  *
- * Markup contract:
- *   <nav class="proto-page-aside-nav" aria-label="On this page">
+ * In-page TOC (anchor links to sections of the current page):
+ *   /about, /privacy, /terms, /api, /post/[id], /help/network
+ *   — summary text is "On this page".
+ * Sibling-page nav (links to other pages in the same area):
+ *   OfficeSidebar (/office/*), AccountSidebar (/u, /notifications,
+ *   /saved, /upvoted, /pending, /settings, /settings/tokens)
+ *   — summary text is "Office" / "Account".
+ *
+ * Both share the same markup contract:
+ *   <nav class="proto-page-aside-nav" aria-label="…">
  *     <details class="proto-toc-details">
  *       <summary class="proto-page-aside-nav-title">…</summary>
  *       <ul>…</ul>
  *     </details>
  *   </nav>
  *
- * Mobile: the <nav> floats fixed at the bottom-left as a "Contents ▴"
- *   pill button (FAB). Tap to expand the TOC into a popover anchored
- *   above the button. Esc, click-outside, and tapping a TOC link all
- *   close the popover (handled by inline JS in the reader layout).
+ * Mobile: the <nav> floats fixed at the bottom-left as a pill
+ *   button (FAB). Tap to expand into a popover anchored above the
+ *   button. Esc, click-outside, and tapping a link all close the
+ *   popover (handled by inline JS in the reader layout — link-tap
+ *   close also fires on sibling-page nav, which is harmless because
+ *   the navigation happens anyway).
  * Desktop: the UA closed-state hide is overridden so the <ul>
  *   stays visible regardless of [open]; the summary acts as a
- *   non-interactive section title (the existing inline-sidebar look). */
+ *   non-interactive section title (existing inline-sidebar look,
+ *   plus a subtle eyebrow above OfficeSidebar / AccountSidebar). */
 .proto-toc-details > summary {
   list-style: none;
 }

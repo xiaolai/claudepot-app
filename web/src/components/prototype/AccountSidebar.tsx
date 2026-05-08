@@ -43,64 +43,67 @@ export function AccountSidebar({
   const suffix = asParam ? `?as=${asParam}` : "";
   return (
     <nav className="proto-page-aside-nav" aria-label="Your account">
-      <ul>
-        <li>
-          <Link
-            href={`/u/${username}${suffix}`}
-            aria-current={aria("profile")}
-          >
-            <User size={14} aria-hidden /> @{username}
-          </Link>
-        </li>
-        <li>
-          <Link
-            href={`/notifications${suffix}`}
-            aria-current={aria("notifications")}
-          >
-            <Bell size={14} aria-hidden /> Notifications
-          </Link>
-        </li>
-        <li>
-          <Link
-            href={`/saved${suffix}`}
-            aria-current={aria("saved")}
-          >
-            <Bookmark size={14} aria-hidden /> Saved
-          </Link>
-        </li>
-        <li>
-          <Link
-            href={`/upvoted${suffix}`}
-            aria-current={aria("upvoted")}
-          >
-            <ChevronUp size={14} aria-hidden /> Upvoted
-          </Link>
-        </li>
-        <li>
-          <Link
-            href={`/pending${suffix}`}
-            aria-current={aria("pending")}
-          >
-            <CircleDashed size={14} aria-hidden /> Pending
-          </Link>
-        </li>
-        <li>
-          <Link
-            href={`/settings${suffix}`}
-            aria-current={aria("settings")}
-          >
-            <SettingsIcon size={14} aria-hidden /> Settings
-          </Link>
-        </li>
-        <li>
-          <Link
-            href={`/settings/tokens${suffix}`}
-            aria-current={aria("tokens")}
-          >
-            <KeyRound size={14} aria-hidden /> API tokens
-          </Link>
-        </li>
-      </ul>
+      <details className="proto-toc-details">
+        <summary className="proto-page-aside-nav-title">Account</summary>
+        <ul>
+          <li>
+            <Link
+              href={`/u/${username}${suffix}`}
+              aria-current={aria("profile")}
+            >
+              <User size={14} aria-hidden /> @{username}
+            </Link>
+          </li>
+          <li>
+            <Link
+              href={`/notifications${suffix}`}
+              aria-current={aria("notifications")}
+            >
+              <Bell size={14} aria-hidden /> Notifications
+            </Link>
+          </li>
+          <li>
+            <Link
+              href={`/saved${suffix}`}
+              aria-current={aria("saved")}
+            >
+              <Bookmark size={14} aria-hidden /> Saved
+            </Link>
+          </li>
+          <li>
+            <Link
+              href={`/upvoted${suffix}`}
+              aria-current={aria("upvoted")}
+            >
+              <ChevronUp size={14} aria-hidden /> Upvoted
+            </Link>
+          </li>
+          <li>
+            <Link
+              href={`/pending${suffix}`}
+              aria-current={aria("pending")}
+            >
+              <CircleDashed size={14} aria-hidden /> Pending
+            </Link>
+          </li>
+          <li>
+            <Link
+              href={`/settings${suffix}`}
+              aria-current={aria("settings")}
+            >
+              <SettingsIcon size={14} aria-hidden /> Settings
+            </Link>
+          </li>
+          <li>
+            <Link
+              href={`/settings/tokens${suffix}`}
+              aria-current={aria("tokens")}
+            >
+              <KeyRound size={14} aria-hidden /> API tokens
+            </Link>
+          </li>
+        </ul>
+      </details>
     </nav>
   );
 }

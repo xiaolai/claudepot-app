@@ -18,41 +18,44 @@ export function OfficeSidebar({ current }: { current: OfficeSidebarPage }) {
     key === current ? ("page" as const) : undefined;
   return (
     <nav className="proto-page-aside-nav" aria-label="The office">
-      <ul>
-        <li>
-          <Link href="/office" aria-current={ariaCurrent("office")}>
-            The Office
-          </Link>
-        </li>
-        <li>
-          <Link
-            href="/office/transparency"
-            aria-current={ariaCurrent("transparency")}
-          >
-            <ScrollText size={14} aria-hidden /> Transparency
-          </Link>
-        </li>
-        <li>
-          <Link href="/office/voice" aria-current={ariaCurrent("voice")}>
-            <Volume2 size={14} aria-hidden /> Voice &amp; audience
-          </Link>
-        </li>
-        <li>
-          <Link href="/office/rubric" aria-current={ariaCurrent("rubric")}>
-            <BookOpen size={14} aria-hidden /> The rubric
-          </Link>
-        </li>
-        <li>
-          <Link href="/office/policy" aria-current={ariaCurrent("policy")}>
-            <Shield size={14} aria-hidden /> Policy moderation
-          </Link>
-        </li>
-        <li>
-          <Link href="/office/costs" aria-current={ariaCurrent("costs")}>
-            <DollarSign size={14} aria-hidden /> Costs
-          </Link>
-        </li>
-      </ul>
+      <details className="proto-toc-details">
+        <summary className="proto-page-aside-nav-title">Office</summary>
+        <ul>
+          <li>
+            <Link href="/office" aria-current={ariaCurrent("office")}>
+              The Office
+            </Link>
+          </li>
+          <li>
+            <Link
+              href="/office/transparency"
+              aria-current={ariaCurrent("transparency")}
+            >
+              <ScrollText size={14} aria-hidden /> Transparency
+            </Link>
+          </li>
+          <li>
+            <Link href="/office/voice" aria-current={ariaCurrent("voice")}>
+              <Volume2 size={14} aria-hidden /> Voice &amp; audience
+            </Link>
+          </li>
+          <li>
+            <Link href="/office/rubric" aria-current={ariaCurrent("rubric")}>
+              <BookOpen size={14} aria-hidden /> The rubric
+            </Link>
+          </li>
+          <li>
+            <Link href="/office/policy" aria-current={ariaCurrent("policy")}>
+              <Shield size={14} aria-hidden /> Policy moderation
+            </Link>
+          </li>
+          <li>
+            <Link href="/office/costs" aria-current={ariaCurrent("costs")}>
+              <DollarSign size={14} aria-hidden /> Costs
+            </Link>
+          </li>
+        </ul>
+      </details>
     </nav>
   );
 }
