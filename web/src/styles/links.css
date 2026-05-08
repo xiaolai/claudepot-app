@@ -171,19 +171,77 @@
   text-decoration: underline;
 }
 
-/* ── Sticky category pills (in-page TOC) ────────────────────── */
+/* ── Sticky category pills (in-page TOC) ──────────────────────
+ *
+ * On a 375 px viewport the 13 long category names ("Model
+ * providers, inference platforms, local model tools", etc.) each
+ * exceed half the screen width, so flex-wrap stacks them as 13
+ * full-width rows and the pill list eats the entire fold. The
+ * <details> disclosure collapses all of that into one tappable
+ * "Categories 13 ▾" line on mobile; tap to expand.
+ *
+ * Desktop unchanged: the toggle is hidden, the list renders inline
+ * as a flex-wrap pill row. We force-show via !important because
+ * the UA closed-state hide on <details> children is implemented
+ * differently across browsers (UA stylesheet on Firefox / Safari,
+ * ::details-content shadow pseudo on Chromium 130+) and a regular
+ * author rule isn't reliable cross-browser.
+ */
 
 .links-pills {
   position: sticky;
   top: var(--nav-height);
   z-index: var(--z-subnav);
+  margin-bottom: var(--sp-20);
+  background: var(--bg);
+  border-bottom: var(--bw-hair) solid var(--rule-hair);
+}
+
+.links-pills-details > summary {
+  list-style: none;
+}
+.links-pills-details > summary::-webkit-details-marker { display: none; }
+.links-pills-details > summary::marker { content: ""; }
+
+.links-pills-toggle {
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: var(--sp-8);
+  padding: var(--sp-12) 0;
+  min-height: var(--touch-min);
+  font-size: var(--fs-small);
+  font-weight: 500;
+  user-select: none;
+}
+
+.links-pills-toggle-count {
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.links-pills-toggle::after {
+  content: "▾";
+  margin-left: auto;
+  color: var(--muted);
+  transition: transform var(--transition-short);
+}
+
+.links-pills-details[open] .links-pills-toggle::after {
+  transform: rotate(180deg);
+}
+
+.links-pills-list {
   display: flex;
   flex-wrap: wrap;
   gap: var(--sp-6);
   padding: var(--sp-12) 0;
-  margin-bottom: var(--sp-20);
-  background: var(--bg);
-  border-bottom: var(--bw-hair) solid var(--rule-hair);
+}
+
+@media (min-width: 769px) {
+  /* Toggle is mobile-only; pills always visible on desktop. */
+  .links-pills-toggle { display: none; }
+  .links-pills-list { display: flex !important; }
 }
 
 .links-pill {

@@ -84,11 +84,21 @@ export default async function LinksPage() {
       <FeaturedStrip links={featured} />
 
       <nav className="links-pills" aria-label="Jump to category">
-        {grid.topLevel.map((cat) => (
-          <a key={cat.slug} href={`#${cat.slug}`} className="links-pill">
-            {cat.name}
-          </a>
-        ))}
+        <details className="links-pills-details">
+          <summary className="links-pills-toggle">
+            <span className="links-pills-toggle-label">Categories</span>
+            <span className="links-pills-toggle-count">
+              {grid.topLevel.length}
+            </span>
+          </summary>
+          <div className="links-pills-list">
+            {grid.topLevel.map((cat) => (
+              <a key={cat.slug} href={`#${cat.slug}`} className="links-pill">
+                {cat.name}
+              </a>
+            ))}
+          </div>
+        </details>
       </nav>
 
       <main className="links-grid">

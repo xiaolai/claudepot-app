@@ -2061,13 +2061,15 @@ summary.proto-nav-avatar::-webkit-details-marker { display: none; }
 @media (min-width: 769px) {
   /* Force <details> children visible regardless of [open] — the
      summary becomes a static title and the list is always shown.
-     Author rule overrides the UA rule that hides non-summary
-     children of a closed <details>. */
+     !important reliably overrides the UA closed-state hide across
+     Firefox, Safari, and the Chromium 130+ ::details-content
+     shadow-pseudo variant; a regular author rule can lose the
+     specificity battle in some of those engines. */
   .proto-toc-details > summary {
     cursor: default;
   }
   .proto-toc-details > ul {
-    display: flex;
+    display: flex !important;
   }
 }
 
