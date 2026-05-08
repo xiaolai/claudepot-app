@@ -44,33 +44,36 @@ export function DocsSidebar() {
   const pathname = usePathname() ?? "";
   return (
     <aside className="docs-sidebar" aria-label="Documentation navigation">
-      <nav>
-        {NAV.map((group) => (
-          <section key={group.title} className="docs-nav-group">
-            <h2 className="docs-nav-group-title">{group.title}</h2>
-            <ul className="docs-nav-list">
-              {group.items.map((item) => {
-                const isActive =
-                  item.href === "/app"
-                    ? pathname === "/app"
-                    : pathname === item.href ||
-                      pathname.startsWith(item.href + "/");
-                return (
-                  <li key={item.href}>
-                    <Link
-                      href={item.href}
-                      className={isActive ? "docs-nav-link is-active" : "docs-nav-link"}
-                      aria-current={isActive ? "page" : undefined}
-                    >
-                      {item.label}
-                    </Link>
-                  </li>
-                );
-              })}
-            </ul>
-          </section>
-        ))}
-      </nav>
+      <details className="docs-sidebar-disclosure">
+        <summary className="docs-sidebar-toggle">Docs</summary>
+        <nav>
+          {NAV.map((group) => (
+            <section key={group.title} className="docs-nav-group">
+              <h2 className="docs-nav-group-title">{group.title}</h2>
+              <ul className="docs-nav-list">
+                {group.items.map((item) => {
+                  const isActive =
+                    item.href === "/app"
+                      ? pathname === "/app"
+                      : pathname === item.href ||
+                        pathname.startsWith(item.href + "/");
+                  return (
+                    <li key={item.href}>
+                      <Link
+                        href={item.href}
+                        className={isActive ? "docs-nav-link is-active" : "docs-nav-link"}
+                        aria-current={isActive ? "page" : undefined}
+                      >
+                        {item.label}
+                      </Link>
+                    </li>
+                  );
+                })}
+              </ul>
+            </section>
+          ))}
+        </nav>
+      </details>
     </aside>
   );
 }

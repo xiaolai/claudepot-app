@@ -307,11 +307,94 @@
   line-height: var(--lh-body);
 }
 
-@media (max-width: 720px) {
+/* Docs sidebar mobile FAB — same pattern as the reader's
+ * .proto-toc-details disclosure (see prototype.css "Collapsible
+ * aside-nav" block). On mobile the sidebar floats fixed at the
+ * bottom-left as a "Docs ▴" pill button; tap to expand the 3-group
+ * nav into a popover anchored above the button. The reader layout's
+ * inline JS handles outside-tap / Esc / link-tap dismissal — its
+ * selectors target details elements broadly so this disclosure is
+ * covered too.
+ *
+ * Breakpoint bumped from the previous 720 px to 768 px to match
+ * the rest of the site (--bp-md). */
+@media (max-width: 768px) {
   .docs-shell {
     grid-template-columns: 1fr;
+    /* The sidebar is now position:fixed below, so don't reserve
+       space for it in the grid flow. */
+    padding-top: var(--sp-20);
   }
   .docs-sidebar {
-    position: static;
+    position: fixed;
+    top: auto;
+    bottom: max(var(--sp-16), env(safe-area-inset-bottom));
+    left: var(--sp-16);
+    z-index: var(--z-dropdown);
+    align-self: auto;
+    margin: 0;
+    padding: 0;
+  }
+
+  .docs-sidebar-disclosure > summary {
+    list-style: none;
+    cursor: pointer;
+    user-select: none;
+    display: inline-flex;
+    align-items: center;
+    gap: var(--sp-8);
+    padding: 0 var(--sp-16);
+    min-height: var(--touch-min);
+    background: var(--bg);
+    border: var(--bw-hair) solid var(--border);
+    border-radius: var(--radius-full);
+    box-shadow: 0 var(--sp-4) var(--sp-12) var(--shadow-card);
+    font-family: var(--font-body);
+    font-size: var(--fs-small);
+    font-weight: 500;
+    color: var(--text);
+  }
+  .docs-sidebar-disclosure > summary::-webkit-details-marker { display: none; }
+  .docs-sidebar-disclosure > summary::marker { content: ""; }
+  .docs-sidebar-disclosure > summary::after {
+    content: "▴";
+    color: var(--muted);
+    transition: transform var(--transition-short);
+  }
+  .docs-sidebar-disclosure[open] > summary::after {
+    transform: rotate(180deg);
+  }
+
+  /* Popover panel — fixed above the button. */
+  .docs-sidebar-disclosure[open] > nav {
+    position: fixed;
+    bottom: calc(
+      max(var(--sp-16), env(safe-area-inset-bottom))
+      + var(--touch-min)
+      + var(--sp-8)
+    );
+    left: var(--sp-16);
+    max-width: calc(100vw - 2 * var(--sp-16));
+    max-height: 60vh;
+    overflow-y: auto;
+    z-index: var(--z-dropdown);
+    padding: var(--sp-12) var(--sp-16);
+    background: var(--bg);
+    border: var(--bw-hair) solid var(--border);
+    border-radius: var(--radius-md);
+    box-shadow: 0 var(--sp-12) var(--sp-32) var(--shadow-card);
+  }
+}
+
+/* 769px = --bp-md + 1 — see the @media literal exception note in
+   prototype.css. Force <nav> visible on desktop regardless of
+   [open], hide the toggle. !important reliably overrides the UA
+   closed-state hide on <details> children across all engines. */
+@media (min-width: 769px) {
+  .docs-sidebar-disclosure > summary {
+    display: none;
+  }
+  .docs-sidebar-disclosure > nav {
+    display: block !important;
   }
 }
