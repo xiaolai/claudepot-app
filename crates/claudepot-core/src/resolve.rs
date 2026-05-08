@@ -97,11 +97,11 @@ mod tests {
         let (store, _dir) = test_store();
         assert_eq!(resolve_email(&store, "li").unwrap(), "lixiaolai@gmail.com");
         assert_eq!(
-            resolve_email(&store, "xiaolaid").unwrap(),
+            resolve_email(&store, "account-b").unwrap(),
             "account-b@example.com"
         );
         assert_eq!(
-            resolve_email(&store, "xiaolaia").unwrap(),
+            resolve_email(&store, "account-a").unwrap(),
             "account-a@example.com"
         );
     }
@@ -109,7 +109,7 @@ mod tests {
     #[test]
     fn test_resolve_ambiguous() {
         let (store, _dir) = test_store();
-        let err = resolve_email(&store, "xiaolai").unwrap_err();
+        let err = resolve_email(&store, "account-").unwrap_err();
         assert!(matches!(err, ResolveError::Ambiguous { .. }));
     }
 
