@@ -1957,11 +1957,11 @@ summary.proto-nav-avatar::-webkit-details-marker { display: none; }
     grid-template-columns: 1fr;
     gap: var(--sp-20);
   }
-  .proto-page-aside-nav {
-    position: static;
-    padding-bottom: var(--sp-16);
-    border-bottom: var(--bw-hair) solid var(--rule-hair);
-  }
+  /* The .proto-page-aside-nav element gets fixed-positioned as a
+     bottom-left FAB on mobile — see the "Collapsible aside-nav"
+     block below. We don't keep an inline-flow fallback rule here
+     because every consumer of .proto-page-aside-nav now wraps its
+     contents in <details class="proto-toc-details">. */
 
   /* Wide tables overflow a 375 px viewport when their 6–8 columns
      stay in normal table layout. Letting the table itself become a
@@ -2066,13 +2066,19 @@ summary.proto-nav-avatar::-webkit-details-marker { display: none; }
 .proto-toc-details > summary::marker { content: ""; }
 
 @media (max-width: 768px) {
-  /* :has() targets only the doc-TOC variant of .proto-page-aside-nav,
-     leaving OfficeSidebar / AccountSidebar (which share the outer
-     class but have no inner <details>) at their normal mobile
-     position. Browser support: Chrome 105+, Safari 15.4+, Firefox 121+.
-     env(safe-area-inset-bottom) keeps the button clear of the iPhone
-     home-indicator bar. */
-  .proto-page-aside-nav:has(.proto-toc-details) {
+  /* All .proto-page-aside-nav elements now wrap their contents in
+     <details class="proto-toc-details"> (in-page TOC pages,
+     OfficeSidebar, AccountSidebar), so the FAB rule applies
+     unconditionally on mobile. We previously used :has(.proto-toc-details)
+     to scope this, but Safari's :has() interaction with <details>
+     was unreliable in practice — the rule silently failed to match
+     on some iOS versions, leaving the <nav> in document flow at
+     the top of the page while the popover panel still rendered
+     fixed at the bottom (visible mismatch). Dropping :has() makes
+     it broadly compatible.
+     env(safe-area-inset-bottom) keeps the button clear of the
+     iPhone home-indicator bar. */
+  .proto-page-aside-nav {
     position: fixed;
     bottom: max(var(--sp-16), env(safe-area-inset-bottom));
     left: var(--sp-16);
