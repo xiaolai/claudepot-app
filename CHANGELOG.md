@@ -6,6 +6,78 @@ Versioning scheme:
 - `0.1.x` — beta
 - `1.0.0+` — stable
 
+## 0.1.22 — beta (2026-05-08)
+
+### Added
+
+- **Auto-rotation of the active CLI account.** New
+  Settings → Rotation pane lets you author rules that swap the
+  active CLI account when an Anthropic-reported usage window
+  (5h / 7d / 7d-Opus / 7d-Sonnet) crosses a threshold you set.
+  Triggers fire from the existing `/api/oauth/usage` poll (no new
+  network cost). Two modes: **Confirm** (default) raises a toast
+  with a Switch action; **Auto** swaps immediately. Selectors:
+  `least-used` (lowest utilization in candidate list),
+  `round-robin`, `explicit`. Guards: `min_interval_secs` (default
+  60s), `max_swaps_per_window` (default 3 per cycle, evaluated
+  against the actual `resets_at` cycle marker — not a fixed
+  lookback), `skip_when_cc_running` (defers cleanly without
+  re-logging every tick). Every swap attempt — applied, suggested,
+  skipped, failed — lands in a 500-entry ring-buffer audit log
+  (`~/.claudepot/rotation-audit.json`) visible in the same pane
+  with an outcome filter. The rule file
+  (`~/.claudepot/rotation-rules.json`) is hand-edit-friendly JSON
+  with stable schema-version field. Pure-Rust evaluator in
+  `claudepot-core::rotation::eval` is fully unit-tested
+  (44 tests, including cycle-boundary regressions). See
+  Settings → Rotation to add a rule; the empty state explains the
+  policy framing.
+- **Confirm-mode toast hydration on mount.** Rotation suggestions
+  raised while the renderer was disconnected (between reloads,
+  before mount) are re-surfaced via `rotationPendingList()` on the
+  same path live events take, so a Switch action is never
+  silently lost.
+- **Web: YouTube auto-embed in submission bodies.** Bare YouTube
+  URLs in a post's markdown body render as inline players. Pipeline
+  hardened against malformed URLs and parameter injection
+  (`web/src/lib/youtube-embed.ts` + tests). Production-safe.
+- **Web: `/app/features` screenshots.** Six previously-404'ing
+  screenshot assets are now tracked in
+  `web/public/screenshots/`.
+
+### Changed
+
+- **Web: re-enabled Vercel `<Analytics />` + added
+  `<SpeedInsights />`** in the root layout, now that the Vercel
+  Web Analytics dashboard is on for the project.
+- **Web: office layout refactor.** Newsroom + ada moderator card
+  introduced; AI chip on team cards replaced with the bare bot
+  glyph; Admin link moved into the `@user` dropdown.
+
+### Fixed
+
+- **Rotation cycle-boundary accounting.** The
+  `max_swaps_per_window` guard now compares each prior swap's
+  `resets_at` against the current cycle's marker. A swap from the
+  previous cycle that still falls inside the raw 5h/7d lookback no
+  longer counts toward the new cycle's cap.
+- **Rotation rules I/O distinction.** A real read failure
+  (permission denied, transient FS error) on
+  `~/.claudepot/rotation-rules.json` now propagates instead of
+  silently looking like "no rules" — protecting against a
+  follow-up save that would clobber the user's real config. Missing
+  + corrupt files still recover to empty as before.
+- **Rotation pending-swap lifecycle.** TTL evicts before every
+  accessor (`pending_list`, `take_pending`, `peek_pending`); the
+  apply path peeks then removes only on success, so a transient
+  swap failure leaves the entry available for retry; dedupe key
+  now includes `from_uuid` so a fresh suggestion to the same
+  target after the active account changed is no longer suppressed.
+- **Rotation dry-run accuracy.** The "Test now" button in the rule
+  form now reads the audit log when evaluating, so guards
+  (min-interval, max-swaps) participate. Previously it could
+  promise "would fire" when the next real tick would be blocked.
+
 ## 0.1.21 — beta (2026-05-08)
 
 ### Added
