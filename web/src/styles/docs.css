@@ -329,7 +329,9 @@
     position: fixed;
     top: auto;
     bottom: max(var(--sp-16), env(safe-area-inset-bottom));
-    left: var(--sp-16);
+    /* Bottom-RIGHT — matches the .proto-page-aside-nav FAB on the
+       reader pages so the docs surface feels of-a-piece on mobile. */
+    right: var(--sp-16);
     z-index: var(--z-dropdown);
     align-self: auto;
     margin: 0;
@@ -365,7 +367,7 @@
     transform: rotate(180deg);
   }
 
-  /* Popover panel — fixed above the button. */
+  /* Popover panel — fixed above the button, anchored bottom-right. */
   .docs-sidebar-disclosure[open] > nav {
     position: fixed;
     bottom: calc(
@@ -373,7 +375,7 @@
       + var(--touch-min)
       + var(--sp-8)
     );
-    left: var(--sp-16);
+    right: var(--sp-16);
     max-width: calc(100vw - 2 * var(--sp-16));
     max-height: 60vh;
     overflow-y: auto;

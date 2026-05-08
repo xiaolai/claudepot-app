@@ -2084,12 +2084,14 @@ summary.proto-nav-avatar::-webkit-details-marker { display: none; }
        for the desktop sticky-sidebar pattern. With position:fixed and
        both `top` AND `bottom` set, the element stretches between them
        — anchored at the top, defeating the FAB look. Unset `top` here
-       so only `bottom` controls vertical placement. (DocsSidebar's
-       parallel rule in docs.css does the same; this is the missing
-       half of that fix.) */
+       so only `bottom` controls vertical placement. */
     top: auto;
     bottom: max(var(--sp-16), env(safe-area-inset-bottom));
-    left: var(--sp-16);
+    /* Bottom-RIGHT (Material FAB convention; better right-thumb reach
+       on phones). The iOS Safari back-button gesture lives in the
+       browser chrome below the viewport, so it doesn't conflict with
+       a viewport-fixed element either way. */
+    right: var(--sp-16);
     z-index: var(--z-dropdown);
     margin: 0;
     padding-bottom: 0;
@@ -2142,7 +2144,10 @@ summary.proto-nav-avatar::-webkit-details-marker { display: none; }
       + var(--touch-min)
       + var(--sp-8)
     );
-    left: var(--sp-16);
+    /* Anchor the popover to the same edge as the FAB button
+       (bottom-right). Width is capped to nearly the viewport so
+       long entries don't extend past the left edge. */
+    right: var(--sp-16);
     max-width: calc(100vw - 2 * var(--sp-16));
     max-height: 60vh;
     overflow-y: auto;
