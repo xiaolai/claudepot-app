@@ -19,6 +19,7 @@ mod dto_memory;
 mod dto_migrate;
 mod dto_project;
 mod dto_project_repair;
+mod dto_rotation;
 mod dto_routes;
 mod dto_service_status;
 mod dto_session;
@@ -32,6 +33,7 @@ mod live_activity_bridge;
 mod memory_watch;
 mod ops;
 mod preferences;
+mod rotation_orchestrator;
 mod service_status_watcher;
 mod state;
 mod tray;
@@ -194,6 +196,16 @@ pub fn run() {
     // the watcher; the original Arc stays available for `.manage()`.
     let memory_log_for_watcher: std::sync::Arc<claudepot_core::memory_log::MemoryLog> =
         memory_log.clone();
+
+    // Open the rotation audit log alongside the other persistent stores
+    // so the orchestrator can record every swap attempt at boot. Same
+    // boot-fallback story as the notification log: missing → empty;
+    // corrupt → renamed aside; canonical-path-fails → in-memory-only.
+    let rotation_audit: std::sync::Arc<claudepot_core::rotation::RotationAuditLog> =
+        std::sync::Arc::new(claudepot_core::rotation::RotationAuditLog::open_default());
+    let rotation_orchestrator = std::sync::Arc::new(
+        rotation_orchestrator::RotationOrchestrator::new(rotation_audit.clone()),
+    );
 
     // `mut` is only consumed by the debug-only plugin block below;
     // release builds don't touch it. Silence the release warning here.
@@ -488,7 +500,8 @@ pub fn run() {
         // `pricing_refresh` button-mash path too.
         .manage(claudepot_core::pricing::PricingCacheService::new())
         .manage(notification_log_state)
-        .manage(commands::service_status::ServiceStatusState::new());
+        .manage(commands::service_status::ServiceStatusState::new())
+        .manage(rotation_orchestrator);
 
     // Conditionally publish the cards index — `None` means open
     // failed at startup, in which case the cards-* commands return
@@ -742,6 +755,14 @@ pub fn run() {
             commands::updates::updates_settings_set,
             commands::updates::updates_channel_set,
             commands::updates::updates_minimum_version_set,
+            commands::rotation::rotation_rules_get,
+            commands::rotation::rotation_rules_set,
+            commands::rotation::rotation_rule_validate,
+            commands::rotation::rotation_dry_run,
+            commands::rotation::rotation_audit_get,
+            commands::rotation::rotation_pending_list,
+            commands::rotation::rotation_apply_pending,
+            commands::rotation::rotation_dismiss_pending,
         ])
         .run(tauri::generate_context!())
         .unwrap_or_else(|e| {

@@ -18,11 +18,15 @@
 //! costs no tokens, so the call budget is well within reason for
 //! typical 1–5 account households.
 
+use std::sync::Arc;
 use std::time::Duration;
 
 use claudepot_core::services::usage_cache::UsageCache;
 use claudepot_core::services::usage_snapshot;
 use tauri::{AppHandle, Manager};
+use uuid::Uuid;
+
+use crate::rotation_orchestrator::RotationOrchestrator;
 
 /// Match `usage_watcher`'s 5-minute cadence. Different cadence here
 /// would only desynchronize the two writers' snapshot/threshold
@@ -108,4 +112,22 @@ async fn run_tick(app: &AppHandle) {
             "usage_snapshot: wrote"
         );
     }
+
+    // Run rotation evaluation against the same snapshot we just
+    // produced. The orchestrator loads its rules each tick (cheap;
+    // small file), evaluates per-rule, and dispatches swaps via
+    // mode (auto / confirm). When no rules exist, the orchestrator
+    // returns immediately — zero overhead for users who don't opt in.
+    if let Some(active_uuid) = active_cli_uuid(&accounts) {
+        let orchestrator = app.state::<Arc<RotationOrchestrator>>();
+        let orchestrator: Arc<RotationOrchestrator> = Arc::clone(&orchestrator);
+        orchestrator.tick(app, &snapshot, active_uuid).await;
+    }
+}
+
+/// Pick the active-CLI account's uuid from the list. Returns `None`
+/// when no account is marked active — rotation has nothing to do in
+/// that state.
+fn active_cli_uuid(accounts: &[claudepot_core::account::Account]) -> Option<Uuid> {
+    accounts.iter().find(|a| a.is_cli_active).map(|a| a.uuid)
 }
