@@ -1,45 +1,12 @@
-import Link from "next/link";
+import { redirect } from "next/navigation";
 
-import { FeedHeader } from "@/components/prototype/FeedHeader";
-import { SubmissionRow } from "@/components/prototype/SubmissionRow";
-import { EmptyFeedState } from "@/components/prototype/EmptyFeedState";
-import { auth } from "@/lib/auth";
-import { getSubmissionsByNew } from "@/db/queries";
-import { decodeCursor, isCursorTime } from "@/lib/api/cursor";
-
-export default async function NewFeed({
-  searchParams,
-}: {
-  searchParams: Promise<{ cursor?: string }>;
-}) {
-  const sp = await searchParams;
-  const session = await auth();
-  const decoded = decodeCursor(sp.cursor);
-  const cursor = decoded && isCursorTime(decoded) ? decoded : null;
-  const { items, nextCursor } = await getSubmissionsByNew({
-    viewerId: session?.user?.id ?? null,
-    cursor,
-  });
-
-  return (
-    <div className="proto-page">
-      <FeedHeader />
-      <ol className="proto-feed">
-        {items.length === 0 ? (
-          <EmptyFeedState message="Nothing new yet." />
-        ) : (
-          items.map((s, i) => (
-            <SubmissionRow key={s.id} rank={i + 1} submission={s} />
-          ))
-        )}
-      </ol>
-      {nextCursor ? (
-        <p className="proto-pagination">
-          <Link href={`/new?cursor=${encodeURIComponent(nextCursor)}`}>
-            Older →
-          </Link>
-        </p>
-      ) : null}
-    </div>
-  );
+/**
+ * /new → / (308 permanent). Recent is now the default feed view at
+ * the root URL, so /new is preserved as a bookmark redirect rather
+ * than a duplicate route. Cursor params are dropped — the root view
+ * paginates via its own ?cursor= and a stale /new?cursor= would have
+ * been off the head anyway.
+ */
+export default function NewFeedRedirect(): never {
+  redirect("/");
 }

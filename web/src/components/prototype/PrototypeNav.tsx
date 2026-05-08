@@ -9,7 +9,7 @@ import { UserAvatar } from "./Avatar";
 import { signOutAction } from "@/lib/actions/auth";
 
 const NAV_ITEMS = [
-  { href: "/",          label: "Feed",     match: (p: string) => p === "/" || p === "/new" || p === "/top" },
+  { href: "/",          label: "Feed",     match: (p: string) => p === "/" || p === "/hot" || p === "/top" },
   { href: "/links",     label: "Links",    match: (p: string) => p.startsWith("/links") },
   { href: "/office",    label: "Office",   match: (p: string) => p.startsWith("/office") },
   { href: "/app",       label: "App",      match: (p: string) => p.startsWith("/app") },

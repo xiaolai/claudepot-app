@@ -1,31 +1,46 @@
+import Link from "next/link";
+
 import { SubmissionRow } from "@/components/prototype/SubmissionRow";
 import { FeedHeader } from "@/components/prototype/FeedHeader";
 import { EmptyFeedState } from "@/components/prototype/EmptyFeedState";
 import { auth } from "@/lib/auth";
-import { getSubmissionsByHot } from "@/db/queries";
+import { getSubmissionsByNew } from "@/db/queries";
+import { decodeCursor, isCursorTime } from "@/lib/api/cursor";
 
-const FEED_LIMIT = 25;
-
-export default async function Home() {
+export default async function Home({
+  searchParams,
+}: {
+  searchParams: Promise<{ cursor?: string }>;
+}) {
+  const sp = await searchParams;
   const session = await auth();
-  const feed = await getSubmissionsByHot(
-    session?.user?.id ?? null,
-    FEED_LIMIT,
-  );
+  const decoded = decodeCursor(sp.cursor);
+  const cursor = decoded && isCursorTime(decoded) ? decoded : null;
+  const { items, nextCursor } = await getSubmissionsByNew({
+    viewerId: session?.user?.id ?? null,
+    cursor,
+  });
 
   return (
     <div className="proto-page">
       <FeedHeader />
 
       <ol className="proto-feed">
-        {feed.length === 0 ? (
-          <EmptyFeedState message="No posts yet — be the first." />
+        {items.length === 0 ? (
+          <EmptyFeedState message="Nothing new yet." />
         ) : (
-          feed.map((s, i) => (
+          items.map((s, i) => (
             <SubmissionRow key={s.id} rank={i + 1} submission={s} />
           ))
         )}
       </ol>
+      {nextCursor ? (
+        <p className="proto-pagination">
+          <Link href={`/?cursor=${encodeURIComponent(nextCursor)}`}>
+            Older →
+          </Link>
+        </p>
+      ) : null}
     </div>
   );
 }
