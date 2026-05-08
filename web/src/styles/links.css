@@ -1,0 +1,582 @@
+/* ============================================================
+   /links/ — hao123-style directory of curated AI/Claude links.
+
+   Density-first: hide nothing structural, let the wall of links
+   carry the page. Hover states and tooltips do the heavy lifting
+   for individual entry context; the global header + featured
+   strip orient first-time visitors.
+
+   All dimensions and colors come from theme.css tokens. The few
+   one-off values (search-input width, featured-strip min-col)
+   are inherited from the closest semantic token.
+   ============================================================ */
+
+.links-page {
+  /* Match .proto-page top/side padding so /feed and /links land the
+   * h1 at the same position. Bottom padding is bigger here because
+   * the directory is taller than a feed-page worth of rows.
+   * font-family is inherited — the global layout aliases the three
+   * --font-* vars to JetBrains Mono via font-mono-only.css.
+   */
+  max-width: var(--max-width);
+  margin: 0 auto;
+  padding: var(--sp-32) var(--sp-24) var(--sp-48);
+}
+
+/* ── Page header ────────────────────────────────────────────── */
+
+.links-header {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: var(--sp-12) var(--sp-24);
+  margin-bottom: var(--sp-24);
+  padding-bottom: var(--sp-16);
+  border-bottom: var(--bw-hair) solid var(--rule-hair);
+}
+
+.links-header h1 {
+  margin: 0;
+  font-size: var(--fs-masthead);
+  letter-spacing: var(--ls-tight);
+}
+
+.links-subhead {
+  margin: 0;
+  color: var(--muted);
+  font-size: var(--fs-meta);
+}
+
+.links-search {
+  margin-left: auto;
+  display: flex;
+  gap: var(--sp-4);
+}
+
+.links-search input {
+  width: var(--aside-width);
+  max-width: 100%;
+  padding: var(--sp-6) var(--sp-12);
+  border: var(--bw-hair) solid var(--border);
+  border-radius: var(--radius-md);
+  background: transparent;
+  color: inherit;
+  font: inherit;
+}
+
+.links-search input:focus {
+  outline: none;
+  box-shadow: var(--shadow-focus-ring);
+  border-color: var(--accent);
+}
+
+/* ── Featured strip ─────────────────────────────────────────── */
+
+.featured-strip {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(var(--aside-width), 1fr));
+  gap: var(--sp-8);
+  margin: 0 0 var(--sp-32);
+}
+
+.featured-card {
+  display: block;
+  padding: var(--sp-12) var(--sp-16);
+  border: var(--bw-hair) solid var(--border);
+  border-radius: var(--radius-lg);
+  background: var(--accent-soft);
+  color: inherit;
+  text-decoration: none;
+  transition: border-color var(--transition-short);
+}
+
+.featured-card:hover {
+  border-color: var(--accent);
+}
+
+.featured-card h3 {
+  margin: 0 0 var(--sp-4);
+  font-size: var(--fs-byline);
+  color: var(--accent-ink);
+  letter-spacing: 0;
+}
+
+.featured-card p {
+  margin: 0;
+  font-size: var(--fs-meta);
+  line-height: var(--lh-snug);
+  color: var(--muted);
+}
+
+/* ── Main grid ──────────────────────────────────────────────── */
+
+/* Manual N-column layout. The page renders 3 column wrappers
+ * (`.links-column`); cards are distributed server-side by greedy
+ * weight so each column ends at roughly the same height. CSS just
+ * stacks cards vertically within each column.
+ *
+ * Why not CSS multi-column: `balance` (the default) leaves vacuum
+ * at the top of later columns when items can't break, and
+ * `column-fill: auto` requires a magic height constraint. Manual
+ * distribution avoids both warts and gives us deterministic order.
+ *
+ * Responsive: flex-wraps to 2 or 1 columns at narrower widths,
+ * driven by the column-min flex-basis.
+ */
+.links-grid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--sp-20);
+  align-items: flex-start;
+}
+
+.links-column {
+  flex: 1 1 var(--grid-min-card);
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-20);
+}
+
+.cat-block {
+  display: flex;
+  flex-direction: column;
+  border: var(--bw-hair) solid var(--border);
+  border-radius: var(--radius-lg);
+  padding: var(--sp-12) var(--sp-16) var(--sp-12);
+  background: var(--surface);
+  /* Anchor-jump landing zone — clear the sticky global nav + pills
+   * bar so the heading isn't tucked under the chrome.
+   */
+  scroll-margin-top: calc(var(--nav-height) + var(--sp-48));
+}
+
+/* ── Sticky category pills (in-page TOC) ────────────────────── */
+
+.links-pills {
+  position: sticky;
+  top: var(--nav-height);
+  z-index: var(--z-subnav);
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--sp-6);
+  padding: var(--sp-12) 0;
+  margin-bottom: var(--sp-20);
+  background: var(--bg);
+  border-bottom: var(--bw-hair) solid var(--rule-hair);
+}
+
+.links-pill {
+  padding: var(--sp-4) var(--sp-12);
+  border: var(--bw-hair) solid var(--border);
+  border-radius: var(--radius-full);
+  background: transparent;
+  color: inherit;
+  font-size: var(--fs-meta);
+  text-decoration: none;
+  white-space: nowrap;
+  transition: background var(--transition-short),
+              border-color var(--transition-short),
+              color var(--transition-short);
+}
+
+.links-pill:hover,
+.links-pill:focus-visible {
+  background: var(--accent-soft);
+  border-color: var(--accent-border);
+  color: var(--accent-ink);
+  outline: none;
+}
+
+.cat-header {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--sp-8);
+  margin-bottom: var(--sp-8);
+  padding-bottom: var(--sp-6);
+  border-bottom: var(--bw-hair) solid var(--rule-hair);
+}
+
+.cat-header h2 {
+  margin: 0;
+  font-size: var(--fs-body);
+  letter-spacing: 0;
+}
+
+.cat-count {
+  margin-left: var(--sp-6);
+  font-size: var(--fs-meta);
+  color: var(--muted);
+  font-weight: 400;
+}
+
+.cat-header a {
+  font-size: var(--fs-meta);
+  color: var(--muted);
+  text-decoration: none;
+}
+
+.cat-header a:hover {
+  color: var(--accent);
+  text-decoration: underline;
+}
+
+.sub-block {
+  margin-top: var(--sp-6);
+}
+
+.sub-block + .sub-block {
+  margin-top: var(--sp-12);
+}
+
+.sub-block h3 {
+  margin: 0 0 var(--sp-4);
+  font-size: var(--fs-eyebrow);
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: var(--ls-eyebrow);
+  font-weight: 500;
+}
+
+.link-list {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+}
+
+.link-entry {
+  margin: 0;
+  padding: 0;
+  font-size: var(--fs-byline);
+  line-height: var(--lh-snug);
+}
+
+.link-entry a {
+  display: block;
+  padding: var(--sp-2) 0;
+  color: inherit;
+  text-decoration: none;
+  border-radius: var(--radius-xs);
+}
+
+.link-entry a:hover {
+  color: var(--accent);
+}
+
+.link-entry a:hover .link-name {
+  text-decoration: underline;
+}
+
+.link-name {
+  font-weight: 500;
+}
+
+.link-desc {
+  color: var(--muted);
+  font-size: var(--fs-meta);
+  margin-left: var(--sp-6);
+}
+
+.link-region-tag {
+  display: inline-block;
+  margin-left: var(--sp-6);
+  padding: 0 var(--sp-4);
+  border-radius: var(--radius-xs);
+  background: var(--accent-soft);
+  color: var(--accent-ink);
+  font-size: var(--fs-badge-sm);
+  vertical-align: var(--ls-eyebrow);
+  letter-spacing: var(--ls-wide);
+}
+
+/* ── Footer ─────────────────────────────────────────────────── */
+
+.links-footer {
+  margin-top: var(--sp-48);
+  padding-top: var(--sp-16);
+  border-top: var(--bw-hair) solid var(--rule-hair);
+  font-size: var(--fs-meta);
+  color: var(--muted);
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--sp-16);
+}
+
+.links-footer a {
+  color: inherit;
+  text-decoration: underline;
+  text-decoration-color: var(--rule-hair);
+}
+
+.links-footer a:hover {
+  color: var(--accent);
+  text-decoration-color: currentColor;
+}
+
+/* ── Category deep page ─────────────────────────────────────── */
+
+.cat-page {
+  max-width: var(--max-width);
+  margin: 0 auto;
+  padding: var(--sp-32) var(--sp-24) var(--sp-48);
+}
+
+.cat-page-crumbs {
+  font-size: var(--fs-meta);
+  color: var(--muted);
+  margin-bottom: var(--sp-8);
+}
+
+.cat-page-crumbs a {
+  color: inherit;
+  text-decoration: none;
+}
+
+.cat-page-crumbs a:hover {
+  color: var(--accent);
+  text-decoration: underline;
+}
+
+.cat-page h1 {
+  margin: 0 0 var(--sp-8);
+}
+
+.cat-page-desc {
+  margin: 0 0 var(--sp-24);
+  color: var(--muted);
+}
+
+.cat-page .link-list {
+  columns: 2;
+  column-gap: var(--sp-32);
+}
+
+@media (max-width: var(--content-width)) {
+  .cat-page .link-list {
+    columns: 1;
+  }
+}
+
+/* ── Search results page ────────────────────────────────────── */
+
+.search-page {
+  max-width: var(--content-width);
+  margin: 0 auto;
+  padding: var(--sp-32) var(--sp-24) var(--sp-48);
+}
+
+.search-meta {
+  color: var(--muted);
+  font-size: var(--fs-meta);
+  margin: var(--sp-8) 0 var(--sp-24);
+}
+
+.search-result {
+  padding: var(--sp-12) 0;
+  border-bottom: var(--bw-hair) solid var(--rule-hair);
+}
+
+.search-result h3 {
+  margin: 0 0 var(--sp-4);
+  font-size: var(--fs-body);
+}
+
+.search-result h3 a {
+  color: inherit;
+  text-decoration: none;
+}
+
+.search-result h3 a:hover {
+  color: var(--accent);
+  text-decoration: underline;
+}
+
+.search-result-meta {
+  font-size: var(--fs-meta);
+  color: var(--muted);
+}
+
+/* ── Suggest a link form ────────────────────────────────────── */
+
+.suggest-form {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-16);
+  max-width: var(--content-width);
+}
+
+.suggest-form label {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-4);
+  font-size: var(--fs-meta);
+  color: var(--muted);
+}
+
+.suggest-form input,
+.suggest-form select {
+  padding: var(--sp-8) var(--sp-12);
+  border: var(--bw-hair) solid var(--border);
+  border-radius: var(--radius-md);
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  font-size: var(--fs-body);
+}
+
+.suggest-form input:focus,
+.suggest-form select:focus {
+  outline: none;
+  box-shadow: var(--shadow-focus-ring);
+  border-color: var(--accent);
+}
+
+.suggest-form-actions {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-16);
+  margin-top: var(--sp-8);
+}
+
+.suggest-form-actions button {
+  padding: var(--sp-8) var(--sp-20);
+  border: var(--bw-hair) solid var(--accent);
+  border-radius: var(--radius-md);
+  background: var(--accent-soft);
+  color: var(--accent-ink);
+  font: inherit;
+  font-weight: 500;
+  cursor: pointer;
+  transition: background var(--transition-short);
+}
+
+.suggest-form-actions button:hover {
+  background: var(--accent-border);
+}
+
+.suggest-form-actions a {
+  color: var(--muted);
+  text-decoration: none;
+  font-size: var(--fs-meta);
+}
+
+.suggest-form-actions a:hover {
+  color: var(--accent);
+  text-decoration: underline;
+}
+
+.suggest-error {
+  padding: var(--sp-8) var(--sp-12);
+  border: var(--bw-hair) solid var(--state-rejected-border);
+  background: var(--state-rejected-bg);
+  color: var(--state-rejected-fg);
+  border-radius: var(--radius-md);
+  font-size: var(--fs-meta);
+  margin-bottom: var(--sp-16);
+}
+
+/* ── Admin: links queue ─────────────────────────────────────── */
+
+.links-queue {
+  list-style: none;
+  padding: 0;
+  margin: var(--sp-20) 0 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-12);
+}
+
+.links-queue-row {
+  border: var(--bw-hair) solid var(--border);
+  border-radius: var(--radius-lg);
+  padding: var(--sp-12) var(--sp-16);
+  background: var(--surface);
+}
+
+.links-queue-meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: var(--sp-12);
+  font-size: var(--fs-meta);
+  color: var(--muted);
+  margin-bottom: var(--sp-4);
+}
+
+.links-queue-name {
+  font-size: var(--fs-body);
+  font-weight: 500;
+  color: inherit;
+  text-decoration: none;
+}
+
+.links-queue-name:hover {
+  color: var(--accent);
+  text-decoration: underline;
+}
+
+.links-queue-cat {
+  padding: 0 var(--sp-6);
+  border-radius: var(--radius-xs);
+  background: var(--accent-soft);
+  color: var(--accent-ink);
+  font-size: var(--fs-badge-sm);
+}
+
+.links-queue-time,
+.links-queue-by {
+  font-size: var(--fs-meta);
+}
+
+.links-queue-by a {
+  color: inherit;
+}
+
+.links-queue-by a:hover {
+  color: var(--accent);
+}
+
+.links-queue-url {
+  font-size: var(--fs-meta);
+  color: var(--muted);
+  word-break: break-all;
+}
+
+.links-queue-desc {
+  margin: var(--sp-4) 0 0;
+  font-size: var(--fs-byline);
+}
+
+.links-queue-actions {
+  margin-top: var(--sp-12);
+  display: flex;
+  gap: var(--sp-8);
+}
+
+.links-queue-actions button {
+  padding: var(--sp-6) var(--sp-16);
+  border: var(--bw-hair) solid var(--border);
+  border-radius: var(--radius-md);
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+  transition: background var(--transition-short);
+}
+
+.links-queue-actions button.links-queue-approve {
+  border-color: var(--state-approved-border);
+  background: var(--state-approved-bg);
+  color: var(--state-approved-fg);
+}
+
+.links-queue-actions button.links-queue-reject {
+  border-color: var(--state-rejected-border);
+  background: var(--state-rejected-bg);
+  color: var(--state-rejected-fg);
+}
+
+.links-queue-actions button:hover {
+  filter: brightness(0.95);
+}
