@@ -14,6 +14,14 @@
   align-items: center;
   gap: var(--sp-24);
   padding: var(--sp-16) var(--sp-24);
+  /* --nav-height is the design's declared sticky-nav height; without
+   * min-height the rendered nav is shorter (content + padding only),
+   * leaving a transparent gap between the bottom of the nav and any
+   * sub-nav that uses `top: var(--nav-height)` (e.g. /links pills,
+   * .proto-page-aside-nav). Pinning the height closes the gap and
+   * matches the token's declared semantics. */
+  min-height: var(--nav-height);
+  box-sizing: border-box;
   border-bottom: var(--bw-hair) solid var(--rule-hair);
   font-family: var(--font-body);
   font-size: var(--fs-small);
