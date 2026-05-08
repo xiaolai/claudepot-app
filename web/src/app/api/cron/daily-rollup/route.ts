@@ -67,7 +67,7 @@ export const GET = withErrorHandling(async (req: Request) => {
 
   // Active users in last 24h: users who posted, commented, or voted.
   const since24h = new Date(now.getTime() - 86_400_000);
-  const [active] = await db.execute(sql`
+  const activeResult = await db.execute<{ n: number }>(sql`
     SELECT COUNT(DISTINCT actor)::int AS n FROM (
       SELECT author_id AS actor FROM ${submissions} WHERE created_at >= ${since24h}
       UNION
@@ -75,7 +75,8 @@ export const GET = withErrorHandling(async (req: Request) => {
       UNION
       SELECT user_id FROM ${votes} WHERE created_at >= ${since24h}
     ) t
-  `) as unknown as Array<{ n: number }>;
+  `);
+  const active = activeResult.rows[0];
 
   await db
     .insert(metricsDaily)

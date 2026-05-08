@@ -115,16 +115,7 @@ export async function drainRetroQueue(): Promise<DrainResult> {
      RETURNING q.id, q.target_type, q.target_id, q.author_id,
                q.trigger_reason, q.attempts
   `);
-  // neon-http returns the array directly under .rows.
-  type RawRow = {
-    id: string;
-    target_type: "submission" | "comment" | "user";
-    target_id: string;
-    author_id: string;
-    trigger_reason: string;
-    attempts: number;
-  };
-  const rows = (picked as unknown as { rows?: RawRow[] }).rows ?? (picked as unknown as RawRow[]);
+  const rows = picked.rows;
   result.picked = rows.length;
 
   for (const row of rows) {

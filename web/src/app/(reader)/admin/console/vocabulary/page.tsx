@@ -90,15 +90,7 @@ export default async function AdminFlags({
       WHERE rn <= ${PENDING_SAMPLE_LIMIT}
       ORDER BY tag_slug, rn
     `);
-    // db.execute returns either { rows: [...] } (pg adapter) or
-    // an array directly (neon-http) — handle both shapes.
-    const rows: Array<{ tag_slug: string; title: string }> = Array.isArray(
-      sampleRows,
-    )
-      ? sampleRows
-      : (sampleRows as { rows: Array<{ tag_slug: string; title: string }> })
-          .rows;
-    for (const row of rows) {
+    for (const row of sampleRows.rows) {
       (samplesByTag[row.tag_slug] ??= []).push(row.title);
     }
   }

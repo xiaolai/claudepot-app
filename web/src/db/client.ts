@@ -10,12 +10,22 @@
  * connections across invocations within a warm Lambda, so the
  * per-request overhead is one WebSocket handshake on cold start, not
  * per-request. `@neondatabase/serverless` ≥ 1.x ships a built-in
- * WebSocket polyfill that works in Vercel's Node runtime and Edge
- * runtime without any `ws`/`neonConfig.webSocketConstructor` plumbing.
+ * WebSocket polyfill that does not require any `ws`/
+ * `neonConfig.webSocketConstructor` plumbing in Vercel's Node runtime.
  *
  * Vercel-managed Neon provisions `DATABASE_URL` as the pooled
  * (PgBouncer) URL — that's the right one for runtime. The unpooled
  * URL exists for migrations only.
+ *
+ * Runtime constraint: this module-scope `Pool` is correct for the
+ * default Vercel Node runtime, where invocations within a warm Lambda
+ * can reuse the same pool. It is NOT safe to reuse like this in Edge
+ * Functions — `@neondatabase/serverless`'s README explicitly says to
+ * create and close `Pool`/`Client` inside a single request when
+ * running on Edge. No route in `src/app/**` declares
+ * `runtime = "edge"`, so this constraint is documentary today; if a
+ * route is ever switched to Edge, it must construct its own per-
+ * request Pool instead of importing this `db`.
  */
 
 import { Pool } from "@neondatabase/serverless";

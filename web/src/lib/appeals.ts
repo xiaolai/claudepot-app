@@ -168,10 +168,11 @@ export async function submitAppealAsAuthor(
   return { ok: true, flagId: row.id };
 }
 
-// Postgres unique-violation is SQLSTATE 23505. The neon-http driver
-// surfaces it on err.code; the @neondatabase/serverless package
-// preserves the standard PG error fields. Catch loosely so a future
-// driver swap doesn't silently mask the constraint.
+// Postgres unique-violation is SQLSTATE 23505. Under
+// `@neondatabase/serverless`'s `Pool`, errors surface as pg
+// `DatabaseError` with `.code === "23505"`. Catch loosely (typed code
+// + message fallback) so a future driver swap doesn't silently mask
+// the constraint.
 function isUniqueViolation(err: unknown): boolean {
   if (typeof err !== "object" || err === null) return false;
   const e = err as { code?: unknown; message?: unknown };

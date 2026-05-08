@@ -170,11 +170,18 @@ export async function persistBotReport(
   } catch (e) {
     // Partial unique index `idx_bot_reports_open_proposal_key`
     // collisions surface here. Postgres raises 23505 (unique
-    // violation); the Drizzle/neon-http driver wraps it as
-    // PostgresError | DatabaseError. Sniff the message because the
-    // adapter doesn't surface a typed code.
+    // violation); under `@neondatabase/serverless`'s Pool the error
+    // is a pg `DatabaseError` with `.code === "23505"`. Prefer the
+    // typed code; fall back to message sniffing for any wrapper that
+    // strips the code (e.g. Drizzle re-throwing without preserving
+    // it on every path).
+    const code =
+      typeof e === "object" && e !== null && "code" in e
+        ? (e as { code?: unknown }).code
+        : undefined;
     const msg = e instanceof Error ? e.message : String(e);
     if (
+      code === "23505" ||
       msg.includes("idx_bot_reports_open_proposal_key") ||
       msg.includes("duplicate key")
     ) {
