@@ -1,0 +1,65 @@
+name: Links / Quarterly diff vs awesome lists
+
+# Runs `web/scripts/diff-awesome-lists.ts` on a quarterly cadence
+# (1st of every 3rd month at 03:00 UTC) and uploads the JSON report
+# as a workflow artifact. Manual `workflow_dispatch` trigger is also
+# wired so curators can run on demand.
+#
+# REQUIREMENT: the repo must define a `NEON_DATABASE_URL` secret in
+# Settings → Secrets and variables → Actions. The script reads our
+# DB to compute the diff against the live link set.
+
+on:
+  schedule:
+    # Minute 0, hour 3 UTC, day 1, every 3rd month, any weekday.
+    - cron: '0 3 1 */3 *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: links-diff-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  diff:
+    name: Diff awesome lists
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    defaults:
+      run:
+        working-directory: web
+
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Install pnpm
+        uses: pnpm/action-setup@v5
+        with:
+          version: 10
+
+      - name: Install Node
+        uses: actions/setup-node@v5
+        with:
+          node-version: 24
+          cache: pnpm
+          cache-dependency-path: web/pnpm-lock.yaml
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Run diff
+        env:
+          NEON_DATABASE_URL: ${{ secrets.NEON_DATABASE_URL }}
+        run: |
+          pnpm exec tsx scripts/diff-awesome-lists.ts | tee /tmp/diff-summary.txt
+
+      - name: Upload report
+        uses: actions/upload-artifact@v4
+        with:
+          name: links-diff-${{ github.run_id }}
+          path: |
+            /tmp/links-diff-awesome.json
+            /tmp/diff-summary.txt
+          retention-days: 90
