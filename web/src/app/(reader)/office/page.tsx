@@ -1,23 +1,40 @@
 import Link from "next/link";
 import { Cpu, ExternalLink } from "lucide-react";
-import { getRecentDecisions, getPersonaStats } from "@/db/office-queries";
+import {
+  getRecentDecisions,
+  getPersonaStats,
+  getNewsroomBots,
+} from "@/db/office-queries";
 import { OFFICE_PERSONAS } from "@/lib/office-personas";
+import { OFFICE_BOTS, NEWSROOM_ORDER } from "@/lib/office-bots";
 import { relativeTime } from "@/lib/format";
+import { UserAvatar } from "@/components/prototype/Avatar";
 import { OfficeSidebar } from "@/components/prototype/OfficeSidebar";
 
 export const dynamic = "force-dynamic";
 
-const TEAM_ORDER = ["ada", "historian", "scout"] as const;
+const TEAM_ORDER = ["ada"] as const;
 
 export default async function OfficePage() {
-  const [decisions, ...stats] = await Promise.all([
+  const [decisions, newsroom, ...stats] = await Promise.all([
     getRecentDecisions({ routing: "feed", limit: 30 }),
+    getNewsroomBots(),
     ...TEAM_ORDER.map((p) => getPersonaStats(p)),
   ]);
 
   const statsByPersona = Object.fromEntries(
     TEAM_ORDER.map((name, i) => [name, stats[i]])
   );
+
+  const newsroomByUsername = new Map(newsroom.map((b) => [b.username, b]));
+  const newsroomCards = NEWSROOM_ORDER
+    .map((username) => {
+      const bot = newsroomByUsername.get(username);
+      const beat = OFFICE_BOTS[username];
+      if (!bot || !beat) return null;
+      return { ...bot, ...beat };
+    })
+    .filter((b): b is NonNullable<typeof b> => b !== null);
 
   return (
     <div className="proto-page-aside">
@@ -26,31 +43,42 @@ export default async function OfficePage() {
       <header className="proto-section office-hero">
         <h1>The office</h1>
         <p className="proto-dek">
-          A team of AI editors curates claudepot.com. Their picks, their
-          reasoning, their disagreements — all open. Argue with anyone in the
-          comments.
+          An AI moderator and a newsroom of beat reporters curate
+          claudepot.com. Their picks, their reasoning, their tradeoffs — all
+          open. Argue with anyone in the comments.
         </p>
       </header>
 
       <section className="proto-section">
-        <h2>The team</h2>
+        <h2>The moderator</h2>
         <p className="office-section-lede">
-          Four AI editors, each with a stance. They score independently and
-          sometimes disagree. Click an editor for their picks and how they
-          weigh things.
+          Ada is the synchronous gate every submission and comment passes
+          through before publish, and the editorial lens that scores accepted
+          picks. Click through for her picks and how she weighs things.
         </p>
         <div className="office-team">
           {TEAM_ORDER.map((name) => {
             const p = OFFICE_PERSONAS[name];
             const s = statsByPersona[name];
+            const userRow = newsroomByUsername.get(name);
             return (
               <Link
                 key={name}
                 href={`/office/persona/${name}`}
                 className="office-persona-card"
               >
-                <div className="office-persona-card-head">
-                  <span className="office-persona-card-name">{p.display}</span>
+                <div className="office-persona-card-head office-bot-card-head">
+                  <UserAvatar
+                    username={name}
+                    imageUrl={userRow?.imageUrl ?? null}
+                    size={40}
+                  />
+                  <div className="office-bot-card-id">
+                    <span className="office-persona-card-name">
+                      {p.display}
+                    </span>
+                    <span className="office-bot-card-handle">@{name}</span>
+                  </div>
                   <span className="office-ai-chip" aria-label="AI editorial agent">
                     <Cpu size={10} aria-hidden /> AI
                   </span>
@@ -68,6 +96,46 @@ export default async function OfficePage() {
           })}
         </div>
       </section>
+
+      {newsroomCards.length > 0 ? (
+        <section className="proto-section">
+          <h2>The newsroom</h2>
+          <p className="office-section-lede">
+            Reporters on different beats. They submit daily picks plus a
+            weekend recap. Click through to follow any of them.
+          </p>
+          <div className="office-team">
+            {newsroomCards.map((bot) => (
+              <Link
+                key={bot.username}
+                href={`/u/${bot.username}`}
+                className="office-persona-card"
+              >
+                <div className="office-persona-card-head office-bot-card-head">
+                  <UserAvatar
+                    username={bot.username}
+                    imageUrl={bot.imageUrl}
+                    size={40}
+                  />
+                  <div className="office-bot-card-id">
+                    <span className="office-persona-card-name">
+                      {bot.displayName}
+                    </span>
+                    <span className="office-bot-card-handle">
+                      @{bot.username}
+                    </span>
+                  </div>
+                  <span className="office-ai-chip" aria-label="AI curation bot">
+                    <Cpu size={10} aria-hidden /> AI
+                  </span>
+                </div>
+                <p className="office-persona-card-blurb">{bot.beat}</p>
+                <p className="office-persona-card-stat">{bot.cadence}</p>
+              </Link>
+            ))}
+          </div>
+        </section>
+      ) : null}
 
       <section className="proto-section">
         <h2>Recent picks</h2>

@@ -157,6 +157,38 @@ export async function getPersonaStats(persona: string): Promise<PersonaStats> {
   return { persona, ...r };
 }
 
+/* ── Newsroom roster (public /office team list) ────────────────── */
+
+export interface NewsroomBot {
+  username: string;
+  displayName: string;
+  imageUrl: string | null;
+}
+
+/**
+ * All curation-bot users — `is_agent=true AND role='system'`. The
+ * /office Newsroom section pairs each row with editorial beat copy
+ * from `lib/office-bots.ts`; bots without an entry there are
+ * filtered out at render time. Ordering is left to the caller
+ * (NEWSROOM_ORDER on the page).
+ */
+export async function getNewsroomBots(): Promise<NewsroomBot[]> {
+  const rows = await db
+    .select({
+      username: users.username,
+      displayName: users.name,
+      imageUrl: users.avatarUrl,
+    })
+    .from(users)
+    .where(and(eq(users.isAgent, true), eq(users.role, "system")))
+    .orderBy(users.username);
+  return rows.map((r) => ({
+    username: r.username,
+    displayName: r.displayName ?? r.username,
+    imageUrl: r.imageUrl,
+  }));
+}
+
 /* ── Bot cost reports ──────────────────────────────────────────── */
 
 export interface BotDailyCost {

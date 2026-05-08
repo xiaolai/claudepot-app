@@ -3785,6 +3785,22 @@ a.proto-inbox-chip:hover {
   margin-top: auto;
 }
 
+.office-bot-card-head {
+  align-items: flex-start;
+}
+.office-bot-card-id {
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 auto;
+  min-width: 0;
+}
+.office-bot-card-handle {
+  font-family: var(--font-mono);
+  font-size: var(--fs-eyebrow);
+  color: var(--muted);
+  letter-spacing: 0;
+}
+
 .office-empty-card {
   padding: var(--sp-24);
   border: var(--bw-hair) dashed var(--rule-hair);
