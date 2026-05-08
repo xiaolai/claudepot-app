@@ -17,7 +17,7 @@ Cross-promotion happens at the layout level: every reader page footer-links to `
 
 - **Next.js 15** (App Router, Node 24 LTS, `output: standalone`)
 - **Auth.js v5** with `@auth/drizzle-adapter` — GitHub + Google OAuth, Resend magic link
-- **Drizzle 0.45** against **Neon serverless Postgres** (project `claudepot-com`, `<neon-project>`)
+- **Drizzle 0.45** against **Neon serverless Postgres** (project `claudepot-com`)
 - **Resend** for transactional mail (sender domain migration to `claudepot.com` is Phase 3)
 - **`boring-avatars`** for user avatars (the Shannon pixel-avatar pipeline is retired per locked decision #2)
 - **`marked`** + **`sanitize-html`** for the comment / submission body renderer
