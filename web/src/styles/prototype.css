@@ -2080,6 +2080,14 @@ summary.proto-nav-avatar::-webkit-details-marker { display: none; }
      iPhone home-indicator bar. */
   .proto-page-aside-nav {
     position: fixed;
+    /* The base rule at the top of the file sets `top: var(--nav-height)`
+       for the desktop sticky-sidebar pattern. With position:fixed and
+       both `top` AND `bottom` set, the element stretches between them
+       — anchored at the top, defeating the FAB look. Unset `top` here
+       so only `bottom` controls vertical placement. (DocsSidebar's
+       parallel rule in docs.css does the same; this is the missing
+       half of that fix.) */
+    top: auto;
     bottom: max(var(--sp-16), env(safe-area-inset-bottom));
     left: var(--sp-16);
     z-index: var(--z-dropdown);
