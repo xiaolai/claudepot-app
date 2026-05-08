@@ -6,6 +6,37 @@ Versioning scheme:
 - `0.1.x` — beta
 - `1.0.0+` — stable
 
+## 0.1.21 — beta (2026-05-08)
+
+### Added
+
+- **Per-account usage snapshot file for non-GUI consumers.** The
+  GUI now writes `~/.claudepot/usage-snapshot.json` (mode 0600)
+  every 5 minutes, carrying per-account 5h / 7d / 7d-Opus /
+  7d-Sonnet utilization plus reset timestamps and an
+  `ok | no_credentials | expired | rate_limited | error` status
+  per entry. Cron jobs, Claude Code Bash-tool subprocesses, and
+  third-party automations can now consult per-account usage —
+  e.g. pick the least-loaded account at startup, or refuse to run
+  when every account is saturated — without going through the
+  keychain. The previous wall (CC-spawned subprocesses and cron
+  jobs hitting `errSecAuthFailed` from `/usr/bin/security`) is
+  bypassed entirely: consumers read JSON, no auth, no IPC, no
+  daemon. `written_at` is the consumer's tripwire — older than
+  5 minutes means Claudepot isn't running, treat as historical.
+  Owned by `claudepot-core::services::usage_snapshot` (pure,
+  Tauri-free) and the new periodic task in
+  `src-tauri/src/usage_snapshot.rs`.
+
+- **`claudepot account list` now shows the 7-day window.** The
+  CLI's table grew a `7d` column between `5h` and `CLI`,
+  rendering the same `seven_day` utilization the GUI's usage
+  modal already showed. Useful for quickly spotting which
+  account is approaching the 7-day cap when picking where to
+  start a session. JSON output gained a parallel
+  `seven_day_pct` field next to the existing `five_hour_pct` —
+  additive, non-breaking for existing consumers.
+
 ## 0.1.20 — beta (2026-05-07)
 
 ### Added

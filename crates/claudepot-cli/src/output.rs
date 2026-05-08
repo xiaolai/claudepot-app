@@ -2,7 +2,17 @@ use claudepot_core::account::Account;
 use std::collections::HashMap;
 use uuid::Uuid;
 
-pub fn format_account_list(accounts: &[Account], usage: &HashMap<Uuid, f64>, json: bool) -> String {
+#[derive(Default, Clone, Copy)]
+pub struct AccountUsageRow {
+    pub five_hour: Option<f64>,
+    pub seven_day: Option<f64>,
+}
+
+pub fn format_account_list(
+    accounts: &[Account],
+    usage: &HashMap<Uuid, AccountUsageRow>,
+    json: bool,
+) -> String {
     if json {
         return format_account_list_json(accounts, usage);
     }
@@ -13,32 +23,40 @@ pub fn format_account_list(accounts: &[Account], usage: &HashMap<Uuid, f64>, jso
 
     let mut out = String::new();
     out.push_str(&format!(
-        "  {:<30}  {:<6}  {:>4}  {:<8}  {:<8}\n",
-        "Email", "Plan", "5h", "CLI", "Desktop"
+        "  {:<30}  {:<6}  {:>4}  {:>4}  {:<8}  {:<8}\n",
+        "Email", "Plan", "5h", "7d", "CLI", "Desktop"
     ));
     out.push_str(&format!(
-        "  {:<30}  {:<6}  {:>4}  {:<8}  {:<8}\n",
-        "─────", "────", "──", "───", "───────"
+        "  {:<30}  {:<6}  {:>4}  {:>4}  {:<8}  {:<8}\n",
+        "─────", "────", "──", "──", "───", "───────"
     ));
 
     for a in accounts {
         let plan = a.subscription_type.as_deref().unwrap_or("?");
         let cli_mark = if a.is_cli_active { "active" } else { "—" };
         let desk_mark = if a.is_desktop_active { "active" } else { "—" };
-        let usage_str = usage
-            .get(&a.uuid)
+        let row = usage.get(&a.uuid).copied().unwrap_or_default();
+        let fh_str = row
+            .five_hour
+            .map(|pct| format!("{:.0}%", pct))
+            .unwrap_or_else(|| "—".to_string());
+        let sd_str = row
+            .seven_day
             .map(|pct| format!("{:.0}%", pct))
             .unwrap_or_else(|| "—".to_string());
         out.push_str(&format!(
-            "  {:<30}  {:<6}  {:>4}  {:<8}  {:<8}\n",
-            a.email, plan, usage_str, cli_mark, desk_mark
+            "  {:<30}  {:<6}  {:>4}  {:>4}  {:<8}  {:<8}\n",
+            a.email, plan, fh_str, sd_str, cli_mark, desk_mark
         ));
     }
     out.push_str(&format!("\n{} account(s) registered.", accounts.len()));
     out
 }
 
-fn format_account_list_json(accounts: &[Account], usage: &HashMap<Uuid, f64>) -> String {
+fn format_account_list_json(
+    accounts: &[Account],
+    usage: &HashMap<Uuid, AccountUsageRow>,
+) -> String {
     let entries: Vec<serde_json::Value> = accounts
         .iter()
         .map(|a| {
@@ -54,8 +72,13 @@ fn format_account_list_json(accounts: &[Account], usage: &HashMap<Uuid, f64>) ->
                 "has_cli_credentials": a.has_cli_credentials,
                 "has_desktop_profile": a.has_desktop_profile,
             });
-            if let Some(pct) = usage.get(&a.uuid) {
-                obj["five_hour_pct"] = serde_json::json!(pct);
+            if let Some(row) = usage.get(&a.uuid) {
+                if let Some(pct) = row.five_hour {
+                    obj["five_hour_pct"] = serde_json::json!(pct);
+                }
+                if let Some(pct) = row.seven_day {
+                    obj["seven_day_pct"] = serde_json::json!(pct);
+                }
             }
             obj
         })

@@ -7,3 +7,4 @@ pub mod identity;
 pub mod live_activity_service;
 pub mod usage_alerts;
 pub mod usage_cache;
+pub mod usage_snapshot;

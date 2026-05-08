@@ -40,10 +40,12 @@ pub async fn list(ctx: &AppContext) -> Result<()> {
             .await
             .into_iter()
             .filter_map(|(id, result)| {
-                result
-                    .ok()
-                    .flatten()
-                    .and_then(|r| r.five_hour.map(|fh| (id, fh.utilization)))
+                let report = result.ok().flatten()?;
+                let row = output::AccountUsageRow {
+                    five_hour: report.five_hour.as_ref().map(|w| w.utilization),
+                    seven_day: report.seven_day.as_ref().map(|w| w.utilization),
+                };
+                Some((id, row))
             })
             .collect()
     };

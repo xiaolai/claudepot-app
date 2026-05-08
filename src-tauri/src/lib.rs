@@ -38,6 +38,7 @@ mod tray;
 mod tray_icons;
 mod tray_menu;
 mod updates_watcher;
+mod usage_snapshot;
 mod usage_watcher;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -409,6 +410,14 @@ pub fn run() {
             // forcing an Arc<UsageCache> at the manage() site (which
             // would break every `State<'_, UsageCache>` consumer).
             usage_watcher::spawn(app.handle().clone());
+
+            // Periodic writer for `~/.claudepot/usage-snapshot.json`.
+            // Lets non-GUI processes (cron, CC bash subprocesses,
+            // bots) read per-account utilization without keychain
+            // access. Same 5-min cadence as `usage_watcher`; shares
+            // the in-memory `UsageCache`. See
+            // `src-tauri/src/usage_snapshot.rs`.
+            usage_snapshot::spawn(app.handle().clone());
 
             // Background poller for CC CLI + Claude Desktop updates.
             // Probes upstream every `poll_interval_minutes` (default
