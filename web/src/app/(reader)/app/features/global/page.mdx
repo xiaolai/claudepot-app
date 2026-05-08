@@ -1,66 +1,80 @@
 export const metadata = {
   title: "Global",
   description:
-    "Per-machine config: paths, defaults, behaviors that apply across all accounts.",
+    "Read-only inspection of your machine-wide Claude Code state: config layers, memory, tips ledger, and updates for both apps.",
 };
 
 # Global
 
 ![ClauDepot — global tab](/screenshots/global.png)
 
-The Global tab is for settings that apply *to this machine*, not to
-any specific account. Most users open it once and forget it.
+The Global tab is the read-only window onto everything Claude Code
+maintains *across all your projects* — config layers, memory files,
+the tips ledger CC keeps internally, and the update channel for
+both Claude Code and Claude Desktop. Four sub-tabs.
 
-## What lives here
+## Config
 
-**Data directory.** ClauDepot stores its DB and notification log
-under `~/.claudepot/` by default. The Global tab lets you point it
-elsewhere — useful if your home directory is on a small SSD and
-you&rsquo;d rather keep ClauDepot data on bulk storage. The
-`CLAUDEPOT_DATA_DIR` env var also overrides this; the tab shows
-which is currently in effect.
+A tree of every layer Claude Code consults at startup, in cascade
+order: managed policy, user prefs, global config, plugins, and any
+memory CC pulls in across projects. Each leaf opens to show the raw
+file (or the merged effective view, depending on the leaf type), so
+when something behaves oddly you can see *which* layer is responsible
+without grepping `~/.claude/`.
 
-**Default account behaviour.** When you start ClauDepot fresh, which
-account should be active in the CLI slot? In the Desktop slot?
-Options: *the most recently used*, *a specific one you pin*, or
-*always prompt*.
+This is the user-level half of the same Config view that lives
+inside Projects → Config; that one is forced to a project anchor.
+This one is forced to the global anchor — they share one component,
+two scopes.
 
-**Notifications.** OS-banner toggles per event class
-(automation completed, automation failed, account verification
-expired). Quiet hours. Click-to-action defaults.
+## Memory
 
-**Theme.** Light / dark / system. ClauDepot&rsquo;s paper-mono
-register has both; flipping `data-theme` on `<html>` switches them
-without reloading.
+Health cards for your machine-wide CLAUDE.md (`~/.claude/CLAUDE.md`)
+and for Claude Code's per-project MEMORY.md indexes. Three signals
+per file:
 
-**Updates.** Auto-update on/off, channel (stable / beta), proxy.
-The auto-updater pulls from GitHub Releases via Tauri&rsquo;s
-plugin-updater and verifies signatures before applying.
+- **Existence** — does the file exist at all?
+- **Bloat** — line count plus an estimated token cost.
+- **Visibility** — physical lines past CC's truncation cutoff,
+  which the model never sees no matter what they say.
 
-## Power-user knobs
+Pure read; ClauDepot doesn't presume to suggest what you should cut.
+The tab is a diagnostic, not an editor.
 
-Less common settings that don&rsquo;t fit elsewhere:
+## Tips
 
-- **Session-index parallelism** — how many JSONL files to parse in
-  parallel when rebuilding. Default is `num_cpus`.
-- **Op-progress modal default behaviour** — auto-dismiss on success,
-  or stay until acknowledged.
-- **Notification log retention** — default 500 entries. Lower for
-  smaller disk footprint.
-- **Telemetry** — fully off by default. ClauDepot ships with no
-  remote telemetry; the toggle is here in case a future opt-in
-  diagnostics channel is added.
+Claude Code ships with an internal *tips ledger* — short
+contextual hints CC schedules and dismisses based on its own state.
+The Tips tab lifts that ledger into a searchable, filterable list:
+which tips exist, which ones CC has shown you, when, and why. Useful
+when you want to see what CC was about to recommend, or to confirm a
+tip you saw and want to look up later.
+
+Catalog is extracted from the user's CC binary, joined against
+`~/.claude.json`'s `tipsHistory` and ClauDepot's local snapshot log.
+
+## Updates
+
+A unified update manager for both surfaces:
+
+- **Claude Code (CLI)** — installed version, latest available
+  version, channel. Updates run via the same npm-global-install path
+  CC uses natively.
+- **Claude Desktop** — installed version, latest available, channel.
+  Updates use the platform-native flow (DMG drop on macOS, MSI on
+  Windows).
+
+ClauDepot's *own* updates live in Settings → About, not here. This
+panel is about keeping Anthropic's two apps current.
 
 ## CLI mirror
 
-Most Global settings have a `claudepot config` equivalent:
+Most Global tabs have CLI equivalents:
 
 ```bash
-claudepot config get data-dir
-claudepot config set theme dark
-claudepot config get auto-update.channel
+claudepot config show            # cascade view
+claudepot status                 # version + sanity check across surfaces
+claudepot doctor                 # deeper diagnostics
 ```
 
-The CLI and GUI write to the same JSON config file at
-`~/.claudepot/config.json`, so changes from one are visible
-immediately in the other.
+The Memory and Tips tabs are GUI-only today.

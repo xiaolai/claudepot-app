@@ -1,80 +1,68 @@
 export const metadata = {
   title: "Install",
-  description: "Install ClauDepot on macOS, Linux, or Windows.",
+  description: "Install ClauDepot from source on macOS, Linux, or Windows.",
 };
 
 # Install
 
-ClauDepot ships as a signed desktop app on macOS (Intel + Apple
-Silicon), Linux, and Windows. Source is at
+> **Status: beta (`0.1.22`).** Daily-driven on macOS. Linux and
+> Windows builds are green but less seasoned.
+>
+> **Pre-built installers are coming.** Until they ship, ClauDepot is
+> source-build only. The build is fast (under two minutes on a
+> modern laptop) and needs no system dependencies beyond the Rust
+> and Node toolchains.
+
+Source is at
 [github.com/xiaolai/claudepot-app](https://github.com/xiaolai/claudepot-app).
 
-## Pick a platform
+## Prerequisites
 
-### macOS — Homebrew
+- A recent **Rust toolchain** ([rustup.rs](https://rustup.rs)).
+- **Node 20+** with **pnpm** ([pnpm.io](https://pnpm.io)).
 
-```bash
-brew install --cask xiaolai/tap/claudepot
-```
+That's it. No Xcode-only tooling on macOS, no MSVC on Windows beyond
+what `rustup` already pulls in, no extra system libraries on Linux.
 
-The cask handles updates via `brew upgrade`. The app is signed and
-notarized.
-
-### macOS — direct download
-
-Grab the matching `.dmg` from the [latest release](https://github.com/xiaolai/claudepot-app/releases/latest):
-
-- `Claudepot-aarch64.dmg` — Apple Silicon (M-series).
-- `Claudepot-x86_64.dmg` — Intel.
-
-### Linux
-
-```bash
-brew install xiaolai/tap/claudepot
-```
-
-Or grab the `.tar.gz` for your arch from the [latest release](https://github.com/xiaolai/claudepot-app/releases/latest):
-
-- `claudepot-aarch64-linux.tar.gz`
-- `claudepot-x86_64-linux.tar.gz`
-
-The CLI binary is in `bin/claudepot`. The GUI is `bin/Claudepot`.
-
-### Windows
-
-Download `Claudepot-x86_64.msi` from the [latest release](https://github.com/xiaolai/claudepot-app/releases/latest)
-and double-click. The installer is signed.
-
-## First run
-
-When you launch ClauDepot the first time, it will:
-
-1. **Check for an existing Claude Code session.** If you've used
-   Claude Code on this machine, ClauDepot finds your current
-   credentials and offers to register them as your first account.
-2. **Ask permission to read `~/.claude/`.** Required for the
-   Activities, Projects, and Sessions views. Read-only by default;
-   write actions (rename, slim, trash) prompt before applying.
-3. **Set up the macOS Keychain entry** (macOS only). ClauDepot uses a
-   separate Keychain item from Claude's own — see the [architecture
-   note](https://github.com/xiaolai/claudepot-app/blob/main/.claude/rules/architecture.md)
-   for why.
-
-After first run, the Accounts tab is your home base. Add a second
-account from the menu and you're set.
-
-## Build from source
+## Build
 
 ```bash
 git clone https://github.com/xiaolai/claudepot-app
 cd claudepot-app
 pnpm install
-cargo build -p claudepot-cli       # CLI binary
-pnpm tauri dev                     # GUI in dev mode
-pnpm tauri build --no-bundle       # GUI release binary
+
+# Command-line tool
+cargo build -p claudepot-cli --release
+# Binary lands at ./target/release/claudepot
+
+# Desktop app
+pnpm tauri build --no-bundle      # builds a binary; no installer
+# OR
+pnpm tauri dev                    # run the GUI in dev mode (hot reload)
 ```
 
-Requires Rust stable, Node 24+, pnpm 10+.
+`pnpm tauri build --no-bundle` skips the platform installer and
+gives you the raw app bundle in
+`src-tauri/target/release/bundle/`. On macOS that's a `.app`; on
+Linux it's a binary; on Windows it's an `.exe`.
+
+## First run
+
+When you launch ClauDepot the first time, it will:
+
+1. **Check for an existing Claude Code session.** If you've run
+   `claude /login` on this machine, ClauDepot finds your current
+   credentials and offers to register them as your first account.
+2. **Open the Accounts tab.** This is your home base — add other
+   accounts here, switch the CLI and Desktop slots independently.
+3. **Set up the OS keychain entry.** ClauDepot uses a separate
+   keychain item from Claude's own — see the [architecture
+   note](https://github.com/xiaolai/claudepot-app/blob/main/.claude/rules/architecture.md)
+   for why this split matters.
+
+Your data lives at `~/.claudepot/`. Override with the
+`CLAUDEPOT_DATA_DIR` environment variable if your home directory is
+on a small SSD.
 
 ## Where to next
 

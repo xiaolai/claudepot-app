@@ -1,36 +1,87 @@
 export const metadata = {
   title: "Settings",
   description:
-    "Themes, shortcuts, notifications. Cleanup (session prune + slim + trash with 7-day undo) lives here.",
+    "Eleven sub-panes covering preferences, auto-rotation, network probes, cleanup, protected paths, GitHub PAT, lock-recovery, diagnostics, and About.",
 };
 
 # Settings
 
 ![ClauDepot — settings tab](/screenshots/settings.png)
 
-Personal preferences plus the cleanup tools that keep `~/.claude/`
-from quietly growing to many gigabytes.
+ClauDepot's preference surface and the operational controls that
+don't belong to any single tab. Eleven sub-panes, grouped into
+*Core* (everyday prefs), *Advanced* (less-touched), and *About*.
 
-## Personal
+## General
 
-- **Theme** &mdash; light / dark / system. Same surface as Global,
-  exposed here for convenience.
-- **Keyboard shortcuts** &mdash; the cmd-K palette, cmd-R refresh,
-  cmd-N add, cmd-1..cmd-8 section-jump bindings are visible and
-  customisable.
-- **Notifications** &mdash; what fires an OS banner vs. what stays
-  in-app. The bell-icon popover in the WindowChrome shows the last
-  500 entries.
+Default section on launch, primary-account binding for the
+top-level keyboard shortcuts (⌘1..⌘8 jump to a section), and the
+small ergonomic toggles that don't deserve their own pane.
+
+## Appearance
+
+Theme — light / dark / system. Density (paper-mono compact / cosy).
+Flipping `data-theme` on `<html>` switches without reloading.
+
+## Notifications
+
+OS-banner toggles per event class (automation completed, automation
+failed, account verification expired, **rotation suggested**,
+session waiting on you). Quiet hours, click-to-action defaults. The
+bell-icon popover in the WindowChrome shows the last 500 dispatched
+entries; corrupt log files are moved aside and the log starts fresh
+— never fatal at boot.
+
+## Network
+
+The Status-bar dot at the bottom of the window. Toggles for
+status-page polling (Anthropic + Resend + GitHub) and on-focus
+latency probes. Cadence and backoff are tuned to be unobtrusive on
+metered connections.
+
+## Rotation
+
+The marquee 0.1.22 feature. Author rules that swap the active CLI
+account when an Anthropic-reported usage window crosses a threshold.
+
+A rule is built from:
+
+- **Trigger** — which window (`5h` / `7d` / `7d-Opus` / `7d-Sonnet`)
+  and which percent. Triggers fire from the existing
+  `/api/oauth/usage` poll, so there's no new network cost.
+- **Selector** — `least-used` (lowest utilization in your candidate
+  list), `round-robin`, or `explicit` (a fixed target).
+- **Mode** — *Confirm* (default) raises a toast with a Switch
+  action; *Auto* swaps immediately. Promote to Auto after watching a
+  rule fire correctly.
+- **Guards** — `min_interval_secs` (default 60s),
+  `max_swaps_per_window` (default 3 per `resets_at` cycle), and
+  `skip_when_cc_running` (defers cleanly without re-logging every
+  tick).
+
+Every swap attempt — applied, suggested, skipped, failed — lands in
+a 500-entry ring-buffer audit log
+(`~/.claudepot/rotation-audit.json`) visible in the same pane with
+an outcome filter. Suggestions raised while the renderer was
+disconnected (between reloads, before mount) are re-surfaced on
+mount, so a Switch action is never silently lost.
+
+The rule file (`~/.claudepot/rotation-rules.json`) is hand-edit-
+friendly JSON with a stable `schema_version` field. The pure-Rust
+evaluator in `claudepot-core::rotation::eval` is fully unit-tested,
+including cycle-boundary regressions. See
+[`dev-docs/auto-rotation.md`](https://github.com/xiaolai/claudepot-app/blob/main/dev-docs/auto-rotation.md)
+for the design.
 
 ## Cleanup
 
-The bigger half of the Settings tab. Three operations:
+The disk-reclaim tools that keep `~/.claude/` from quietly growing
+to many gigabytes. Three operations:
 
 ### Prune
 
-Removes orphaned session files — transcripts whose project directory
-no longer exists. Lists them first so you can review before
-deleting. CLI:
+Removes orphaned session files — transcripts whose project
+directory no longer exists. Lists them first so you can review.
 
 ```bash
 claudepot session prune --dry-run
@@ -39,17 +90,12 @@ claudepot session prune
 
 ### Slim
 
-Reduces the size of individual transcripts without losing the
-conversation history. Common targets:
-
-- **Drop image attachments** stored verbatim in `toolUseResult` while
-  preserving the same images in `message.content` (where Claude
-  already transformed them for token-counting). Saved on average
-  ~40% per transcript with images.
-- **Strip cached tool calls** that are deterministic and reproducible.
-- **Compact whitespace** in JSONL fields.
-
-`session slim --strip-images` is the canonical use. CLI:
+Reduces transcript size without losing the conversation history.
+Canonical use is `--strip-images`, which drops bulky image payloads
+that CC stored verbatim in `toolUseResult` (display-only) while
+leaving the same images in `message.content` (where Claude already
+transformed them for token-counting). Saved on average ~40% per
+transcript with images.
 
 ```bash
 claudepot session slim --strip-images <session-id>
@@ -59,8 +105,8 @@ claudepot session slim --strip-images --all
 ### Trash
 
 A 7-day soft-delete bin. Anything you remove via Cleanup lands here
-first; after 7 days it&rsquo;s permanently deleted. You can restore
-or empty manually any time.
+first; after 7 days it's permanently deleted. Restore or empty
+manually any time.
 
 ```bash
 claudepot trash list
@@ -68,22 +114,71 @@ claudepot trash restore <id>
 claudepot trash empty
 ```
 
-## What&rsquo;s in the data directories
+A *Rebuild index* button alongside re-parses every session file
+from scratch when the SQLite session cache drifts from on-disk
+truth. Same operation as `claudepot session rebuild-index`.
 
-For reference, the disk locations ClauDepot manages:
+The Cleanup pane also hosts an **Artifacts** sub-view: disabled
+ClauDepot artifacts (rules, sections, integrations a future build
+turned off) and their own trash list.
 
-- `~/.claude/projects/<slug>/*.jsonl` — Claude&rsquo;s session
+## Protected paths
+
+A list of directories ClauDepot must never write into, even when an
+operation requests it. Used to fence off sensitive trees — your
+`~/keys/`, your `~/work/clientA-only/`, anywhere a stray rename or
+trash would be costly. Validates absolute and `~`-prefixed paths;
+rejects relative paths and `..` traversal.
+
+## GitHub
+
+A single Personal Access Token slot for ClauDepot's own GitHub
+calls (release manifest fetch for the auto-updater, mostly).
+Stored in the OS keychain, zeroized from local memory on every IPC
+exit path. Per-route GitHub credentials live in the
+[Keys tab](/app/features/keys), not here.
+
+## Locks
+
+Recovery for the `accounts.db` / `sessions.db` SQLite locks if a
+crashed ClauDepot leaves them held. Almost never needed; here for
+the rare case where a kernel panic took down the writer mid-tx.
+
+## Diagnostics
+
+The `claudepot doctor` flow as a button: probe the keychain, probe
+each registered account, probe the data directory, probe Claude
+Code's own state. Output is structured and copyable for bug
+reports. CLI mirror: `claudepot doctor`.
+
+## About
+
+Version, channel, license, and a link to the auto-updater. ClauDepot's
+own updates flow through here — *not* through Global → Updates,
+which manages Claude Code and Claude Desktop versions.
+
+## What's on disk
+
+For reference, the data directories ClauDepot manages:
+
+- `~/.claude/projects/<slug>/*.jsonl` — Claude's session
   transcripts. Owned by Claude; ClauDepot reads and (carefully)
   rewrites.
 - `~/.claudepot/accounts.db` — accounts + verification state.
   ClauDepot-owned, single-writer.
-- `~/.claudepot/sessions.db` — session-index cache. One row per
-  transcript, keyed by `file_path`, `(size, mtime_ns)` as the
-  re-parse guard. Rebuild any time via *Cleanup → Rebuild index*.
+- `~/.claudepot/sessions.db` — session-index cache. Re-parse guard
+  is `(size, mtime_ns)` per file_path. Rebuild any time via
+  *Cleanup → Rebuild index*.
 - `~/.claudepot/notifications.json` — ring buffer of dispatched
-  toasts and OS banners (≤ 500 entries). Corrupt files are moved
-  aside to `notifications.json.corrupt` and the log starts fresh —
-  never fatal at boot.
+  toasts and OS banners (≤ 500 entries).
+- `~/.claudepot/rotation-rules.json` — user-authored auto-rotation
+  rules. Hand-edit-friendly JSON.
+- `~/.claudepot/rotation-audit.json` — ring buffer of rotation
+  outcomes (≤ 500 entries) shown in the Rotation pane.
+- `~/.claudepot/usage-snapshot.json` — per-account utilization
+  written every 5 min (mode `0600`). Cron jobs and CC Bash
+  subprocesses can consult per-account usage without going through
+  the keychain. `written_at` is the consumer's tripwire — older
+  than 5 min means ClauDepot isn't running, treat as historical.
 
-`CLAUDEPOT_DATA_DIR` overrides the second-to-fourth path. See the
-[Global](/app/features/global) tab.
+`CLAUDEPOT_DATA_DIR` overrides the `~/.claudepot/` paths.

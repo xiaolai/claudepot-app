@@ -36,7 +36,7 @@ const FEATURES = [
     slug: "third-parties",
     title: "Third-parties",
     summary:
-      "Configure tools that integrate with Claude — GitHub tokens, Linear, etc. — without leaking secrets.",
+      "Run non-Anthropic models through the same `claude` interface. Wrapper binaries on PATH; first-party Claude is never touched.",
   },
   {
     slug: "automations",
@@ -48,13 +48,13 @@ const FEATURES = [
     slug: "global",
     title: "Global",
     summary:
-      "Per-machine config: paths, defaults, behaviors that apply across all accounts.",
+      "Read-only inspection of Claude Code's machine-wide state: config layers, CLAUDE.md health, the tips ledger, updates for both apps.",
   },
   {
     slug: "settings",
     title: "Settings",
     summary:
-      "Themes, shortcuts, notifications. Cleanup (session prune + slim + trash with 7-day undo) lives here.",
+      "Eleven sub-panes: prefs, auto-rotation rules, network, cleanup (prune + slim + trash with 7-day undo), protected paths, GitHub PAT, locks, diagnostics, About.",
   },
 ];
 

@@ -1,45 +1,86 @@
 export const metadata = {
   title: "Third-parties",
   description:
-    "Configure tools that integrate with Claude — GitHub, Linear, custom MCP servers — without leaking secrets.",
+    "Run Claude Code and Claude Desktop against non-Anthropic LLMs — Bedrock, Vertex, Ollama, OpenRouter — without disturbing first-party Claude.",
 };
 
 # Third-parties
 
 ![ClauDepot — third-parties tab](/screenshots/third-parties.png)
 
-Claude Code and Claude Desktop both talk to other services: GitHub
-for issues and PRs, Linear for tickets, custom MCP servers for
-domain-specific workflows. The Third-parties tab is the one place to
-configure those integrations across all your accounts.
+Claude Code and Claude Desktop are designed to talk to Anthropic.
+The Third-parties tab lets you point them at *anything else* that
+speaks the Anthropic-Messages protocol — AWS Bedrock, Google Vertex,
+Azure Foundry, OpenRouter, Kimi, DeepSeek, GLM, or a local
+llama.cpp / Ollama / vLLM endpoint — **alongside** your first-party
+Anthropic setup, never on top of it.
 
-## What it covers
+## What a "route" is
 
-- **GitHub** &mdash; PATs and fine-grained tokens with scope display.
-  Linked to the Keys tab; one entry per PAT.
-- **Linear** &mdash; API key for Linear&rsquo;s Cloud GraphQL.
-- **Custom MCP servers** &mdash; URL + auth pair for any
-  Model Context Protocol server you&rsquo;ve registered locally with
-  Claude Code. ClauDepot reads the registration from
-  `~/.claude/mcp.json` and overlays your local secrets.
+A route is a saved bundle of `(provider, base URL, auth material,
+model list)`. ClauDepot turns each route into two artifacts:
 
-Each entry surfaces three states: *connected* (we have working
-credentials), *needs auth* (registered but not authorised), or
-*missing* (registered with Claude but ClauDepot doesn&rsquo;t see
-credentials).
+- **A wrapper binary on PATH** at `~/.claudepot/bin/<name>` — a
+  three-line shell script that sets the right `ANTHROPIC_BASE_URL` /
+  `ANTHROPIC_AUTH_TOKEN` / `ANTHROPIC_MODEL` and `exec`s the real
+  `claude`. So `claude-ollama`, `claude-bedrock-prod`, and bare
+  `claude` all coexist on your machine. Each terminal picks its
+  model by typing the binary name.
+- **A separate Desktop profile** at
+  `~/Library/Application Support/Claude-3p/configLibrary/<uuid>.json`.
+  When Claude Desktop launches, the deployment-mode chooser offers
+  *Sign in with Anthropic* or *Cowork on 3P (your routes)*. The
+  first-party `Claude/` directory is never touched.
 
-## Why a separate tab from Keys
+## Why this is a separate dimension
 
-Keys is about the *secret*; Third-parties is about the *integration
-state*. A Linear API key is a row in Keys; the Linear integration
-(API key + workspace + project preferences) is a row in
-Third-parties. The two are linked — editing the Key updates the
-integration immediately.
+First-party `claude` keeps reading from the `Claude Code-credentials`
+keychain entry — untouched. First-party Claude Desktop keeps reading
+from `~/Library/Application Support/Claude/` — untouched. Routes
+install as **siblings**, not replacements. Removing a route deletes
+the wrapper binary and the profile JSON; nothing about your
+first-party state changes.
+
+## Add a route
+
+The Add modal walks you through:
+
+1. **Provider preset** — Bedrock, Vertex, Foundry, OpenRouter,
+   Ollama, custom. Each preset pre-fills the base URL pattern and
+   the model list shape.
+2. **Auth material** — API key, OAuth bearer, AWS profile + region,
+   or none (for local endpoints). Stored under the user-only-readable
+   profile JSON (mode `0600`); ClauDepot doesn't put 3P credentials
+   in the OS keychain.
+3. **Model list** — picked from the provider's catalog or
+   hand-entered. The first model becomes the default; small/fast
+   model is configurable separately.
+4. **Wrapper-binary name** — what you'll type in the terminal.
+   `claude-` prefix is convention, not enforced.
+
+ClauDepot writes the wrapper, registers the Desktop profile, and the
+route appears as a card in the tab. The first run reminds you to
+restart Claude Desktop so the new profile is visible in the chooser.
+
+## Manage routes
+
+Each card surfaces three states: *active* (wrapper present, Desktop
+profile written), *needs restart* (one of the two not yet visible to
+the running app), and *broken* (something else on PATH is shadowing
+the wrapper, or the profile JSON is malformed).
+
+Edit changes the wrapper script and the profile JSON in place.
+Remove deletes both. There is no swap, no "default" — every route
+is just a sibling on disk.
 
 ## Architecture
 
-Integration metadata lives in `~/.claudepot/accounts.db` alongside
-account state. Secrets stay in the OS keychain. The renderer never
-touches the secret directly; it requests an integration test (e.g.
-&ldquo;ping Linear API&rdquo;), Rust performs the call, and the
-result is a status enum returned over IPC.
+Pure file-write helpers in `claudepot-core::routes`. No new domain
+noun (the four — account, cli, desktop, project — still hold);
+routes are a presentation-layer feature backed by atomic JSON writes.
+First-party state is mutationally isolated: every existing path
+through `claudepot-core` keeps working unchanged whether routes
+exist or not.
+
+See the [architecture rules](https://github.com/xiaolai/claudepot-app/blob/main/.claude/rules/architecture.md)
+for the noun-vs-surface distinction.

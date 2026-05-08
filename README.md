@@ -24,11 +24,13 @@ Claudepot is a desktop app — with a matching command-line tool — that sits n
 
 - **Account switching.** Keep work and personal accounts side by side; switch in one click.
 - **A live view.** See every Claude session that's running right now, including which one is waiting on you.
+- **Auto-rotation.** When the active CLI account hits a usage threshold you set (5h, 7d, 7d-Opus, 7d-Sonnet), Claudepot can swap to a chosen alternate — confirm-mode by default, auto-mode once you trust the rule.
 - **Scheduled prompts.** Have Claude run a prompt every morning, every weekday, or on any cron schedule you like.
 - **Searchable history.** Find that chat from last week. Reopen it. Export it.
 - **Safe project rename.** `mv`-ing a project folder breaks Claude's session history. Claudepot doesn't.
 - **Disk cleanup.** `~/.claude/` quietly grows to many gigabytes. One click reclaims most of it, with a 7-day undo.
 - **Privacy on export.** Tokens, auth headers, and cookies are stripped before any session leaves your machine.
+- **Usage snapshot for non-GUI consumers.** A `~/.claudepot/usage-snapshot.json` (mode `0600`) refreshed every 5 minutes lets cron jobs and Claude Code Bash subprocesses pick the least-loaded account without going through the keychain.
 
 It's macOS-first today. Windows and Linux build clean and work, with less polish.
 
@@ -46,6 +48,7 @@ If you use Claude Code or Claude Desktop daily, you've probably hit at least one
 | You've leaked tokens by pasting a screenshot or exporting a chat | Tokens appear verbatim in transcripts and exports.                                                        |
 | You want Claude to run a daily summary at 8am                    | There's no scheduler.                                                                                     |
 | You hit a rate limit you didn't know existed                     | The 5-hour window, 7-day window, and Opus split are invisible until you trip them.                        |
+| You hit the limit *while you were typing* and have to switch by hand | Once you've authored a rule, Claudepot watches utilization for you and either suggests or applies the swap.       |
 
 ## How
 
@@ -102,7 +105,7 @@ After that, switch with one click from the sidebar, the ⌘K command palette, or
 
 ![Keys tab](assets/screenshots/keys.png)
 
-**Third-parties** — Run non-Anthropic models through the same `claude` interface. Each route installs as a wrapper binary on `PATH` and a separate Desktop profile, so first-party Claude is never touched.
+**Third-parties** — Run non-Anthropic models (Bedrock, Vertex, Foundry, OpenRouter, Ollama, vLLM, llama.cpp, …) through the same `claude` interface. Each route installs as a wrapper binary on `PATH` (`~/.claudepot/bin/<name>`) and a separate Desktop profile (`~/Library/Application Support/Claude-3p/`), so first-party Claude is never touched. Routes are siblings on disk — no swap, no default.
 
 ![Third-parties tab](assets/screenshots/third-parties.png)
 
@@ -110,11 +113,11 @@ After that, switch with one click from the sidebar, the ⌘K command palette, or
 
 ![Automations tab](assets/screenshots/automations.png)
 
-**Global** — Browse your user-wide Claude Code configuration in one place: user prefs, global config, plugins, memory across projects, managed policy. Read-only inspection — handy when something behaves oddly and you need to know which config layer is responsible.
+**Global** — Read-only inspection of your machine-wide Claude Code state across four sub-tabs: **Config** (cascade view of managed policy / user prefs / global config / plugins / cross-project memory), **Memory** (CLAUDE.md health — bloat, lines past CC's truncation cutoff), **Tips** (the CC tips ledger, searchable + filterable), and **Updates** (Claude Code CLI + Claude Desktop versions, channel, install). Claudepot's *own* updates live under Settings → About.
 
 ![Global tab](assets/screenshots/global.png)
 
-**Settings** — Theme and density (paper-mono light / dark), Activity preferences, Diagnostics (`doctor`), Cleanup (**Prune** old/large sessions · **Slim** drops bulky tool-output payloads while keeping prompts and replies · **Trash** 7-day undo for anything deleted), Protected paths, GitHub PAT, Locks, About.
+**Settings** — Eleven sub-panes: General, Appearance (light / dark / system, paper-mono density), Notifications, Network (status-bar dot + status-page polling), **Rotation** (rule-driven auto-swap of the active CLI account when a usage window crosses a threshold — confirm or auto, with a 500-entry audit log), Cleanup (**Prune** orphaned sessions · **Slim** strips bulky tool-output payloads · **Trash** 7-day undo), Protected paths, GitHub PAT, Locks (SQLite-lock recovery), Diagnostics (`doctor`), and About.
 
 ![Settings tab](assets/screenshots/settings.png)
 
