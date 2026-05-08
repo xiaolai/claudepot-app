@@ -3,7 +3,7 @@
 import { useEffect, useRef } from "react";
 import Link from "next/link";
 import { usePathname, useSearchParams } from "next/navigation";
-import { Bell, Bookmark, LogOut, Settings, User } from "lucide-react";
+import { Bell, Bookmark, LogOut, Settings, ShieldCheck, User } from "lucide-react";
 import { Logo } from "./Logo";
 import { UserAvatar } from "./Avatar";
 import { signOutAction } from "@/lib/actions/auth";
@@ -109,15 +109,6 @@ export function PrototypeNav({
           {item.label}
         </Link>
       ))}
-      {isStaff && (
-        <Link
-          href={withAuth("/admin", urlShim)}
-          className="proto-nav-staff"
-          aria-current={pathname.startsWith("/admin") ? "page" : undefined}
-        >
-          Admin
-        </Link>
-      )}
       <Link href={withAuth("/submit", urlShim)} className="proto-nav-cta">
         Submit
       </Link>
@@ -154,6 +145,15 @@ export function PrototypeNav({
             <Link href={withAuth("/saved", urlShim)} role="menuitem">
               <Bookmark size={14} aria-hidden /> Saved
             </Link>
+            {isStaff && (
+              <Link
+                href={withAuth("/admin", urlShim)}
+                role="menuitem"
+                aria-current={pathname.startsWith("/admin") ? "page" : undefined}
+              >
+                <ShieldCheck size={14} aria-hidden /> Admin
+              </Link>
+            )}
             <Link href={withAuth("/settings", urlShim)} role="menuitem">
               <Settings size={14} aria-hidden /> Settings
             </Link>
