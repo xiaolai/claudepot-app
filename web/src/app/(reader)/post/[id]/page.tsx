@@ -78,7 +78,9 @@ export default async function PostDetail({
   const comments = await getCommentsForSubmission(id);
   const score = post.upvotes - post.downvotes;
   const total = totalCommentCount(comments);
-  const bodyHtml = post.text ? await renderMarkdown(post.text) : null;
+  const bodyHtml = post.text
+    ? await renderMarkdown(post.text, { allowYoutube: true })
+    : null;
   const toc = bodyHtml ? extractToc(bodyHtml) : [];
   const showToc = toc.length >= TOC_MIN_ENTRIES;
 

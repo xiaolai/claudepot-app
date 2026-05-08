@@ -11,6 +11,13 @@ import { marked } from "marked";
 import sanitizeHtml from "sanitize-html";
 
 import { highlightCodeToLines } from "@/lib/highlight";
+import { rewriteYoutubeEmbeds } from "@/lib/youtube-embed";
+
+/** Mirror of the iframe shape rewriteYoutubeEmbeds emits. The
+ *  src must always be `https://www.youtube-nocookie.com/embed/<11>`
+ *  with optional querystring; sanitize-html drops the iframe tag
+ *  entirely when the regex doesn't match (defense in depth). */
+const YT_EMBED_SRC = /^https:\/\/www\.youtube-nocookie\.com\/embed\/[a-zA-Z0-9_-]{11}(?:\?[\w=&-]*)?$/;
 
 export const ALLOWED_TAGS = [
   "p",
@@ -437,10 +444,34 @@ export function extractToc(
   return out;
 }
 
-export async function renderMarkdown(source: string): Promise<string> {
-  const html = marked.parse(source, { gfm: true, breaks: true }) as string;
+export interface RenderMarkdownOptions {
+  /**
+   * Allow YouTube auto-embeds. Default false. When true:
+   *   - bare YouTube URLs sitting alone in a paragraph become an
+   *     iframe player
+   *   - `:youtube[ID]` directives on their own line become an iframe
+   *   - the iframe survives sanitize-html via a strict src allowlist
+   *     pinned to https://www.youtube-nocookie.com/embed/<11-char-id>
+   *
+   * Wire only on submission body surfaces — comments and editorial
+   * docs should remain text-only so a YouTube link in a heated reply
+   * can't visually dominate the thread.
+   */
+  allowYoutube?: boolean;
+}
+
+export async function renderMarkdown(
+  source: string,
+  options: RenderMarkdownOptions = {},
+): Promise<string> {
+  const allowYoutube = options.allowYoutube === true;
+  const preprocessed = allowYoutube ? rewriteYoutubeEmbeds(source) : source;
+  const html = marked.parse(preprocessed, { gfm: true, breaks: true }) as string;
+  const allowedTags = allowYoutube
+    ? [...ALLOWED_TAGS, "iframe", "div"]
+    : ALLOWED_TAGS;
   const sanitized = sanitizeHtml(html, {
-    allowedTags: ALLOWED_TAGS,
+    allowedTags,
     allowedAttributes: {
       ...ALLOWED_ATTRS,
       // marked emits e.g. <code class="language-mermaid"> for fenced
@@ -449,10 +480,25 @@ export async function renderMarkdown(source: string): Promise<string> {
       // can't paint arbitrary class names onto its output.
       code: ["class"],
       pre: ["class"],
+      // YouTube-embed wrappers and iframes — only meaningful when
+      // allowYoutube=true. Keys are present unconditionally because
+      // sanitize-html drops the tags themselves outside that mode.
+      div: ["class"],
+      iframe: [
+        "src",
+        "title",
+        "loading",
+        "referrerpolicy",
+        "sandbox",
+        "allow",
+        "allowfullscreen",
+      ],
     },
     allowedClasses: {
       code: [/^language-[\w-]+$/],
       pre: [/^language-[\w-]+$/],
+      // The pre-pass emits exactly this class on the wrapper.
+      div: ["proto-yt-embed"],
     },
     allowedSchemes: ["http", "https", "mailto"],
     // Tighter scheme list for <img> than for the rest. http and
@@ -460,7 +506,7 @@ export async function renderMarkdown(source: string): Promise<string> {
     // (mixed content under HTTPS) or be nonsense (mailto on img).
     // data: is excluded because user content shouldn't be able to
     // ship arbitrary inline payloads.
-    allowedSchemesByTag: { img: ["https"] },
+    allowedSchemesByTag: { img: ["https"], iframe: ["https"] },
     transformTags: {
       a: (tagName, attribs) => ({
         tagName,
@@ -482,6 +528,18 @@ export async function renderMarkdown(source: string): Promise<string> {
           decoding: "async",
         },
       }),
+      // Re-validate the iframe src against the YouTube-nocookie
+      // pattern. If a bug in the pre-pass ever produced a bad src
+      // (or an attacker found a way to get raw <iframe> through
+      // marked's HTML pass), drop the tag entirely. This is the
+      // second layer of defense; the first is the regex inside
+      // rewriteYoutubeEmbeds.
+      iframe: (tagName, attribs) => {
+        if (!allowYoutube) return { tagName: "div", attribs: {} };
+        const src = attribs.src ?? "";
+        if (!YT_EMBED_SRC.test(src)) return { tagName: "div", attribs: {} };
+        return { tagName, attribs };
+      },
     },
   });
   // Headings get IDs after sanitize so any user-supplied id was already

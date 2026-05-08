@@ -44,6 +44,13 @@ interface Props {
   disabled?: boolean;
   // Wrapping div className passthrough (host can size/space the editor)
   className?: string;
+  /**
+   * Surface this editor is rendering on. `submission` enables
+   * YouTube auto-embed in the preview pane (matching the server
+   * render at /post/<id>); `comment` keeps the comment surface
+   * text-only. Default `comment` for safety on unspecified callers.
+   */
+  kind?: "submission" | "comment";
 }
 
 /**
@@ -161,6 +168,7 @@ export function MarkdownEditor({
   required,
   disabled,
   className,
+  kind = "comment",
 }: Props) {
   const isControlled = controlledValue !== undefined;
   const [internal, setInternal] = useState(defaultValue);
@@ -248,7 +256,7 @@ export function MarkdownEditor({
             // so we eat the ~50 KB bundle cost and render identically.
             dangerouslySetInnerHTML={{
               __html: value.trim()
-                ? renderMarkdown(value)
+                ? renderMarkdown(value, { allowYoutube: kind === "submission" })
                 : `<p class="proto-md-preview-empty">Nothing to preview yet.</p>`,
             }}
           />

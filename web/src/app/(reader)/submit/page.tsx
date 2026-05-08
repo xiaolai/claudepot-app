@@ -133,6 +133,7 @@ export default async function SubmitPage({
               maxLength={40000}
               placeholder="Markdown supported (subset)…"
               required
+              kind="submission"
             />
             <span className="help">
               Allowed: paragraphs, italic, bold, links, code, lists, blockquote,
