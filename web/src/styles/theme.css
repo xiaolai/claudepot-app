@@ -205,6 +205,16 @@
      breakpoint exists; tighter mobile pass deferred until
      implementation"). */
   --bp-md: 768px;
+
+  /* Paper grain. A 240×240 fractalNoise SVG, baked at opacity 0.5
+     on the rect inside; tiled and viewport-fixed via the body rule
+     below. baseFrequency=0.9 + numOctaves=2 produces a fine grain
+     that reads as paper at 100% zoom and doesn't moiré on Retina.
+     stitchTiles='stitch' keeps tile seams invisible. The same SVG
+     serves both themes — gray noise reads as darker spots on light
+     bg, lighter spots on dark bg. URL-encoded inline so it costs
+     one parse, no network request. */
+  --noise-svg: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='240' height='240'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)' opacity='0.5'/%3E%3C/svg%3E");
 }
 
 
@@ -231,8 +241,28 @@ body {
   line-height: var(--lh-body);
   color: var(--text);
   background-color: var(--bg);
+  /* Paper grain — a 240×240 fractalNoise tile, fixed to the
+     viewport so it doesn't scroll with content. The SVG bakes its
+     own opacity (0.5 on the rect), then a11y media queries below
+     turn it off. Light mode: gray noise reads as faint darker spots
+     on a warm bg. Dark mode: same gray reads as faint lighter
+     spots, which is visually correct without a second asset. */
+  background-image: var(--noise-svg);
+  background-repeat: repeat;
+  background-size: var(--aside-width);
+  background-attachment: fixed;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
+}
+
+/* Honor reader preferences. prefers-reduced-transparency is the
+   directly-relevant signal — users who want chrome to stay solid
+   shouldn't get a textured page. prefers-contrast: more disables
+   it too because grain can mottle the background under high-
+   contrast accommodations. */
+@media (prefers-reduced-transparency: reduce),
+       (prefers-contrast: more) {
+  body { background-image: none; }
 }
 
 img,
