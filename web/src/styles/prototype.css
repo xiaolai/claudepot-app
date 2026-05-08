@@ -2178,10 +2178,23 @@ summary.proto-nav-avatar::-webkit-details-marker { display: none; }
 @media (min-width: 769px) {
   /* Force <details> children visible regardless of [open] — the
      summary becomes a static title and the list is always shown.
-     !important reliably overrides the UA closed-state hide across
-     Firefox, Safari, and the Chromium 130+ ::details-content
-     shadow-pseudo variant; a regular author rule can lose the
-     specificity battle in some of those engines. */
+
+     Chromium 131+ implements the closed-state hide via
+     `content-visibility: hidden` on the ::details-content shadow
+     pseudo (the slot that wraps everything except <summary>). The
+     children are slotted inside that hidden slot, so author rules
+     on the children alone (`> ul { display: flex !important }`)
+     are ignored — the entire subtree is skipped from layout. The
+     fix is to override ::details-content itself.
+
+     Firefox and Safari currently hide via UA rules on the children
+     directly, so the `> ul` override below still does the job for
+     them. The ::details-content rule is silently ignored on
+     engines that haven't shipped the pseudo yet. */
+  .proto-toc-details::details-content {
+    display: block !important;
+    content-visibility: visible !important;
+  }
   .proto-toc-details > summary {
     cursor: default;
   }

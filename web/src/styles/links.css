@@ -239,7 +239,15 @@
 }
 
 @media (min-width: 769px) {
-  /* Toggle is mobile-only; pills always visible on desktop. */
+  /* Toggle is mobile-only; pills always visible on desktop.
+     ::details-content override needed because Chromium 131+ hides
+     the closed-details slot via content-visibility, which author
+     rules on the children cannot override. See the parallel
+     ::details-content overrides in prototype.css and docs.css. */
+  .links-pills-details::details-content {
+    display: block !important;
+    content-visibility: visible !important;
+  }
   .links-pills-toggle { display: none; }
   .links-pills-list { display: flex !important; }
 }

@@ -390,9 +390,24 @@
 
 /* 769px = --bp-md + 1 — see the @media literal exception note in
    prototype.css. Force <nav> visible on desktop regardless of
-   [open], hide the toggle. !important reliably overrides the UA
-   closed-state hide on <details> children across all engines. */
+   [open], hide the toggle.
+
+   Chromium 131+ hides closed-details content via
+   `content-visibility: hidden` on the ::details-content shadow
+   pseudo (the slot wrapper). Author rules on the children
+   (`> nav { display: block !important }`) cannot override that —
+   the whole subtree is skipped from layout. Override
+   ::details-content directly. Firefox / Safari hide via UA rules
+   on the children, so the `> nav` rule still does the job for
+   them; the ::details-content rule is silently ignored on engines
+   that haven't shipped the pseudo. Without this, /app on Chromium
+   131+ desktop showed nothing in the left rail (summary hidden,
+   nav slotted into a hidden ::details-content). */
 @media (min-width: 769px) {
+  .docs-sidebar-disclosure::details-content {
+    display: block !important;
+    content-visibility: visible !important;
+  }
   .docs-sidebar-disclosure > summary {
     display: none;
   }
