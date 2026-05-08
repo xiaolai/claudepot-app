@@ -22,11 +22,15 @@ next-env.d.ts
 .claude/settings.local.json
 .claude/scheduled_tasks.lock
 
-# Local-only artifacts from MCP / hook tooling and ad-hoc captures
+# Local-only artifacts from MCP / hook tooling and ad-hoc captures.
+# `/screenshots/` is anchored to the web/ root — it catches the
+# playwright-mcp capture dir at web/screenshots/ but does NOT catch
+# web/public/screenshots/, which holds the /app/features/* MDX
+# screenshots that need to ship to production.
 .playwright-mcp/
 .tokenize/
 .responsive/
-screenshots/
+/screenshots/
 avatars-*.png
 
 # Backfill importer dry-run output
