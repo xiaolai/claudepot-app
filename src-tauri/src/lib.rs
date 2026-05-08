@@ -32,6 +32,7 @@ mod live_activity_bridge;
 mod memory_watch;
 mod ops;
 mod preferences;
+mod rotation_orchestrator;
 mod service_status_watcher;
 mod state;
 mod tray;
@@ -194,6 +195,16 @@ pub fn run() {
     // the watcher; the original Arc stays available for `.manage()`.
     let memory_log_for_watcher: std::sync::Arc<claudepot_core::memory_log::MemoryLog> =
         memory_log.clone();
+
+    // Open the rotation audit log alongside the other persistent stores
+    // so the orchestrator can record every swap attempt at boot. Same
+    // boot-fallback story as the notification log: missing → empty;
+    // corrupt → renamed aside; canonical-path-fails → in-memory-only.
+    let rotation_audit: std::sync::Arc<claudepot_core::rotation::RotationAuditLog> =
+        std::sync::Arc::new(claudepot_core::rotation::RotationAuditLog::open_default());
+    let rotation_orchestrator = std::sync::Arc::new(
+        rotation_orchestrator::RotationOrchestrator::new(rotation_audit.clone()),
+    );
 
     // `mut` is only consumed by the debug-only plugin block below;
     // release builds don't touch it. Silence the release warning here.
@@ -488,7 +499,8 @@ pub fn run() {
         // `pricing_refresh` button-mash path too.
         .manage(claudepot_core::pricing::PricingCacheService::new())
         .manage(notification_log_state)
-        .manage(commands::service_status::ServiceStatusState::new());
+        .manage(commands::service_status::ServiceStatusState::new())
+        .manage(rotation_orchestrator);
 
     // Conditionally publish the cards index — `None` means open
     // failed at startup, in which case the cards-* commands return
