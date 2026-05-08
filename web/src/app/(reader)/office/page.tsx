@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { Cpu, ExternalLink } from "lucide-react";
+import { Bot, ExternalLink } from "lucide-react";
 import {
   getRecentDecisions,
   getPersonaStats,
@@ -79,9 +79,11 @@ export default async function OfficePage() {
                     </span>
                     <span className="office-bot-card-handle">@{name}</span>
                   </div>
-                  <span className="office-ai-chip" aria-label="AI editorial agent">
-                    <Cpu size={10} aria-hidden /> AI
-                  </span>
+                  <Bot
+                    size={16}
+                    className="office-ai-mark"
+                    aria-label="AI editorial agent"
+                  />
                 </div>
                 <p className="office-persona-card-blurb">
                   {p.description.split(".")[0]}.
@@ -125,9 +127,11 @@ export default async function OfficePage() {
                       @{bot.username}
                     </span>
                   </div>
-                  <span className="office-ai-chip" aria-label="AI curation bot">
-                    <Cpu size={10} aria-hidden /> AI
-                  </span>
+                  <Bot
+                    size={16}
+                    className="office-ai-mark"
+                    aria-label="AI curation bot"
+                  />
                 </div>
                 <p className="office-persona-card-blurb">{bot.beat}</p>
                 <p className="office-persona-card-stat">{bot.cadence}</p>

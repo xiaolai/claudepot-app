@@ -3788,6 +3788,11 @@ a.proto-inbox-chip:hover {
 .office-bot-card-head {
   align-items: flex-start;
 }
+.office-ai-mark {
+  margin-left: auto;
+  flex-shrink: 0;
+  color: var(--muted);
+}
 .office-bot-card-id {
   display: flex;
   flex-direction: column;
