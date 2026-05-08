@@ -90,6 +90,39 @@ const ID = "dQw4w9WgXcQ";
   check("inline URL: anchor present", html.includes("<a href"));
 }
 
+// 7. Hand-rolled iframe with autoplay= is dropped (query string
+//    rejected by the tightened regex).
+{
+  const html = await renderMarkdown(
+    `<iframe src="https://www.youtube-nocookie.com/embed/${ID}?autoplay=1"></iframe>`,
+    { allowYoutube: true },
+  );
+  check("autoplay query: dropped", !html.includes("<iframe"));
+}
+
+// 8. Hand-rolled iframe with the canonical SRC but missing
+//    sandbox/referrerpolicy gets the safe attrs RE-STAMPED, not
+//    omitted (defense in depth on the sanitize side).
+{
+  const html = await renderMarkdown(
+    `<iframe src="https://www.youtube-nocookie.com/embed/${ID}"></iframe>`,
+    { allowYoutube: true },
+  );
+  check("hand-rolled valid iframe: kept", html.includes("<iframe"));
+  check("hand-rolled valid iframe: sandbox restamped", html.includes("sandbox="));
+  check("hand-rolled valid iframe: referrerpolicy restamped", html.includes("referrerpolicy="));
+  check("hand-rolled valid iframe: lazy restamped", html.includes("loading=\"lazy\""));
+}
+
+// 9. URL inside a fenced code block is NOT embedded (pre-pass skips
+//    fence content). The code block itself should still render as code.
+{
+  const md = "Intro.\n\n```\nhttps://youtu.be/" + ID + "\n```\n\nAfter.";
+  const html = await renderMarkdown(md, { allowYoutube: true });
+  check("fenced URL: no iframe", !html.includes("<iframe"));
+  check("fenced URL: stays in code block", html.includes("<pre") || html.includes("<code"));
+}
+
 console.log("");
 console.log(`${passed} passed, ${failed} failed`);
 if (failed > 0) process.exit(1);

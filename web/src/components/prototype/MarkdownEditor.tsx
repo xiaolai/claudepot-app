@@ -1,6 +1,13 @@
 "use client";
 
-import { useId, useRef, useState, type ChangeEvent, type ComponentType } from "react";
+import {
+  useEffect,
+  useId,
+  useRef,
+  useState,
+  type ChangeEvent,
+  type ComponentType,
+} from "react";
 import { Bold, Code, Eye, Italic, Link as LinkIcon, List, Pencil, Quote } from "lucide-react";
 import { renderMarkdown } from "@/lib/markdown";
 
@@ -177,6 +184,28 @@ export function MarkdownEditor({
   const ref = useRef<HTMLTextAreaElement>(null);
   const id = useId();
 
+  // Async preview render. renderMarkdown is async (Shiki tokenization
+  // is async on first call); piping the Promise straight into
+  // dangerouslySetInnerHTML would render `[object Promise]`. We
+  // resolve into state with a cancellation flag so a fast typer
+  // doesn't get a stale render flashed in.
+  const [previewHtml, setPreviewHtml] = useState<string>("");
+  useEffect(() => {
+    if (mode !== "preview" || !value.trim()) {
+      setPreviewHtml("");
+      return;
+    }
+    let cancelled = false;
+    renderMarkdown(value, { allowYoutube: kind === "submission" }).then(
+      (html) => {
+        if (!cancelled) setPreviewHtml(html);
+      },
+    );
+    return () => {
+      cancelled = true;
+    };
+  }, [mode, value, kind]);
+
   function handleChange(e: ChangeEvent<HTMLTextAreaElement>) {
     if (!isControlled) setInternal(e.target.value);
     onChange?.(e.target.value);
@@ -254,9 +283,10 @@ export function MarkdownEditor({
             // The same `renderMarkdown` runs server-side at submit
             // time. Skipping sanitization here would diverge the two,
             // so we eat the ~50 KB bundle cost and render identically.
+            // The Promise resolution lives in the useEffect above.
             dangerouslySetInnerHTML={{
               __html: value.trim()
-                ? renderMarkdown(value, { allowYoutube: kind === "submission" })
+                ? previewHtml
                 : `<p class="proto-md-preview-empty">Nothing to preview yet.</p>`,
             }}
           />

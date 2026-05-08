@@ -13,11 +13,28 @@ import sanitizeHtml from "sanitize-html";
 import { highlightCodeToLines } from "@/lib/highlight";
 import { rewriteYoutubeEmbeds } from "@/lib/youtube-embed";
 
-/** Mirror of the iframe shape rewriteYoutubeEmbeds emits. The
- *  src must always be `https://www.youtube-nocookie.com/embed/<11>`
- *  with optional querystring; sanitize-html drops the iframe tag
- *  entirely when the regex doesn't match (defense in depth). */
-const YT_EMBED_SRC = /^https:\/\/www\.youtube-nocookie\.com\/embed\/[a-zA-Z0-9_-]{11}(?:\?[\w=&-]*)?$/;
+/** Mirror of the iframe shape rewriteYoutubeEmbeds emits. The src
+ *  must be EXACTLY `https://www.youtube-nocookie.com/embed/<11>` —
+ *  no query string. Query params (e.g. `?autoplay=1`, `?si=…`) get
+ *  stripped here so a hand-rolled iframe can't sneak in autoplay or
+ *  tracking params. The pre-pass already emits the bare canonical
+ *  form, so this never rejects pre-pass output. */
+const YT_EMBED_SRC = /^https:\/\/www\.youtube-nocookie\.com\/embed\/[a-zA-Z0-9_-]{11}$/;
+
+/** Canonical safe attribute set forced onto every surviving YouTube
+ *  iframe. We re-stamp these on every iframe (even pre-pass output)
+ *  so a hand-rolled iframe with the right SRC but missing or weakened
+ *  sandbox/referrerpolicy/loading values gets normalised to the safe
+ *  shape. */
+const YT_IFRAME_ATTRS = {
+  title: "YouTube video",
+  loading: "lazy",
+  referrerpolicy: "strict-origin-when-cross-origin",
+  sandbox: "allow-scripts allow-same-origin allow-presentation",
+  allow:
+    "accelerometer; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share",
+  allowfullscreen: "",
+} as const;
 
 export const ALLOWED_TAGS = [
   "p",
@@ -529,16 +546,25 @@ export async function renderMarkdown(
         },
       }),
       // Re-validate the iframe src against the YouTube-nocookie
-      // pattern. If a bug in the pre-pass ever produced a bad src
-      // (or an attacker found a way to get raw <iframe> through
-      // marked's HTML pass), drop the tag entirely. This is the
-      // second layer of defense; the first is the regex inside
-      // rewriteYoutubeEmbeds.
+      // pattern AND overwrite all other attrs to the canonical safe
+      // set. Two layers of defense:
+      //   1. SRC pattern check — if it doesn't match exactly the
+      //      bare nocookie/embed/<11> shape, drop the tag entirely
+      //      (sanitize-html maps an empty-attribs tagName change to
+      //      a div, which renders as nothing through the embed CSS).
+      //   2. Attribute restamping — even when the SRC is valid, the
+      //      caller's attrs are discarded and replaced with the
+      //      canonical safe set so a hand-rolled iframe can't omit
+      //      sandbox/referrerpolicy or add autoplay-style query
+      //      params (the SRC regex above already drops queries).
       iframe: (tagName, attribs) => {
         if (!allowYoutube) return { tagName: "div", attribs: {} };
         const src = attribs.src ?? "";
         if (!YT_EMBED_SRC.test(src)) return { tagName: "div", attribs: {} };
-        return { tagName, attribs };
+        return {
+          tagName,
+          attribs: { src, ...YT_IFRAME_ATTRS },
+        };
       },
     },
   });

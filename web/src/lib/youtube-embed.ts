@@ -101,29 +101,74 @@ function buildEmbed(id: string): string {
  * Apply this BEFORE marked.parse so the iframe lands in the marked
  * input as a raw HTML block (the only safe insertion point that
  * doesn't get treated as inline text).
+ *
+ * Context-aware: walks the source line by line and skips lines
+ * inside fenced code blocks (``` or ~~~) so a YouTube URL inside a
+ * code sample is preserved verbatim. Indented code blocks (4+ space
+ * indent) are skipped via the 0-3-space leading-indent gate on the
+ * trigger regexes — same threshold CommonMark uses.
  */
 export function rewriteYoutubeEmbeds(source: string): string {
-  let out = source;
+  const lines = source.split("\n");
+  const out: string[] = [];
+  let inFence = false;
+  let fenceChar: "`" | "~" | null = null;
+  let fenceLen = 0;
 
-  // Shortcode: `:youtube[ID]` on its own line. Allow optional
-  // surrounding whitespace; require flanking newlines (or BOF/EOF)
-  // so the directive is paragraph-alone.
-  out = out.replace(
-    /(^|\n)[ \t]*:youtube\[([a-zA-Z0-9_-]{11})\][ \t]*(?=\n|$)/g,
-    (_match, lead: string, id: string) => `${lead}\n${buildEmbed(id)}\n`,
-  );
+  // Trigger regexes — both require 0-3 leading spaces (any more
+  // would be an indented code block in CommonMark).
+  const URL_LINE = /^ {0,3}(https?:\/\/\S+)[ \t]*$/;
+  const DIRECTIVE_LINE = /^ {0,3}:youtube\[([a-zA-Z0-9_-]{11})\][ \t]*$/;
 
-  // Bare URL paragraph: a line that contains exactly one URL whose
-  // host matches our YT family. Strict — any prose on the same line
-  // disqualifies, matching the Reddit/Discourse rule.
-  out = out.replace(
-    /(^|\n)[ \t]*(https?:\/\/\S+)[ \t]*(?=\n|$)/g,
-    (match, lead: string, url: string) => {
-      const id = extractYoutubeId(url);
-      if (!id) return match;
-      return `${lead}\n${buildEmbed(id)}\n`;
-    },
-  );
+  for (const line of lines) {
+    // Fence open/close detection. Per CommonMark, a fence opener is
+    // a line starting with 0-3 spaces followed by 3+ backticks (or
+    // tildes) and an optional info string; the matching closer must
+    // use the same character and at least the same length.
+    const fenceMatch = line.match(/^ {0,3}(`{3,}|~{3,})/);
+    if (fenceMatch) {
+      const marker = fenceMatch[1];
+      const ch = marker[0] as "`" | "~";
+      if (!inFence) {
+        inFence = true;
+        fenceChar = ch;
+        fenceLen = marker.length;
+        out.push(line);
+        continue;
+      }
+      if (ch === fenceChar && marker.length >= fenceLen) {
+        inFence = false;
+        fenceChar = null;
+        fenceLen = 0;
+        out.push(line);
+        continue;
+      }
+    }
 
-  return out;
+    if (inFence) {
+      out.push(line);
+      continue;
+    }
+
+    // Directive shortcode first — more specific match wins.
+    const directiveMatch = line.match(DIRECTIVE_LINE);
+    if (directiveMatch) {
+      out.push(buildEmbed(directiveMatch[1]));
+      continue;
+    }
+
+    // Bare URL paragraph.
+    const urlMatch = line.match(URL_LINE);
+    if (urlMatch) {
+      const id = extractYoutubeId(urlMatch[1]);
+      if (id) {
+        out.push(buildEmbed(id));
+        continue;
+      }
+    }
+
+    out.push(line);
+  }
+
+  return out.join("\n");
 }

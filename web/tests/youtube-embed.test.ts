@@ -118,6 +118,43 @@ const once = rewriteYoutubeEmbeds(`https://youtu.be/${ID}`);
 const twice = rewriteYoutubeEmbeds(once);
 check("rewrite is idempotent", once, twice);
 
+// ── rewriteYoutubeEmbeds — fenced code blocks ────────────────────
+// Backtick fence — URL inside must NOT be rewritten.
+const fenced = rewriteYoutubeEmbeds(
+  "Intro.\n\n\`\`\`\nhttps://youtu.be/" + ID + "\n\`\`\`\n\nAfter.",
+);
+check("URL inside ``` fence → not embedded", fenced.includes("<iframe"), false);
+checkContains("URL inside ``` fence → preserved", fenced, `youtu.be/${ID}`);
+
+// Tilde fence — same protection.
+const fencedTilde = rewriteYoutubeEmbeds(
+  `\n~~~\nhttps://youtu.be/${ID}\n~~~\n`,
+);
+check("URL inside ~~~ fence → not embedded", fencedTilde.includes("<iframe"), false);
+
+// Directive shortcode inside a fence is also preserved verbatim.
+const fencedDirective = rewriteYoutubeEmbeds(
+  "\`\`\`\n:youtube[" + ID + "]\n\`\`\`",
+);
+check("directive inside fence → not embedded", fencedDirective.includes("<iframe"), false);
+checkContains("directive inside fence → preserved", fencedDirective, `:youtube[${ID}]`);
+
+// Outside the fence still works after a fenced block.
+const mixedFence = rewriteYoutubeEmbeds(
+  "\`\`\`\nhttps://youtu.be/" + ID + "\n\`\`\`\n\nhttps://youtu.be/" + ID + "\n",
+);
+checkContains("URL after fence → embedded", mixedFence, "<iframe");
+check(
+  "URL inside fence stays bare URL",
+  /\`\`\`\nhttps:\/\/youtu\.be\//.test(mixedFence),
+  true,
+);
+
+// Indented code (4+ spaces) — the 0-3-space gate keeps the rewriter
+// out of indented blocks the same way CommonMark does.
+const indented = rewriteYoutubeEmbeds(`    https://youtu.be/${ID}\n`);
+check("indented (4-space) URL → not embedded", indented.includes("<iframe"), false);
+
 console.log("");
 console.log(`${passed} passed, ${failed} failed`);
 if (failed > 0) process.exit(1);
