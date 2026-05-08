@@ -70,6 +70,14 @@ pub struct RotationTriggerSummary {
     /// budget) rather than a window utilization.
     #[serde(default)]
     pub is_extra_usage: bool,
+    /// `resets_at` of the window's current cycle at fire time. The
+    /// guard math (`max_swaps_per_window`) compares against this so a
+    /// swap from the previous cycle that happens to fall within the
+    /// raw lookback length doesn't count toward the new cycle's cap.
+    /// `None` for triggers without a cycle (extra-usage, or windows
+    /// the server returned with `resets_at: null`).
+    #[serde(default)]
+    pub cycle_resets_at: Option<DateTime<chrono::FixedOffset>>,
 }
 
 /// One audit entry. Self-describing — the orchestrator may rotate
@@ -308,6 +316,7 @@ mod tests {
                 utilization_pct: 91.0,
                 threshold_pct: 90,
                 is_extra_usage: false,
+                cycle_resets_at: None,
             },
             "a@x.com",
             Some("b@x.com".into()),

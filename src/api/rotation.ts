@@ -103,6 +103,7 @@ export interface PendingSwap {
   fromEmail: string;
   toEmail: string;
   queuedAt: string;
+  trigger: RotationTriggerSummary;
 }
 
 export const rotationApi = {

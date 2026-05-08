@@ -27,27 +27,37 @@ pub enum RotationStoreError {
     Validation(#[from] ValidationError),
 }
 
-/// Load rules from the canonical path. Missing file → empty file
-/// (no error). Corrupt file → moved aside, empty file returned.
-pub fn load() -> RotationRulesFile {
+/// Load rules from the canonical path. Three outcomes:
+///
+/// - `Ok(file)` — successfully read + parsed + validated, OR the
+///   file didn't exist (returns `RotationRulesFile::default()`), OR
+///   the file existed but was corrupt (moved aside; default
+///   returned).
+/// - `Err(io_error)` — a *real* filesystem failure (permission
+///   denied, transient I/O error, disk unmounted). Caller should
+///   refuse to act on the assumption "no rules" until the error is
+///   resolved — silently treating a permission failure as
+///   "no rules" then saving would clobber the user's real config.
+///
+/// Corruption recovery is intentionally NOT an error case: a
+/// missing or unparseable file is a recoverable steady state, and
+/// the rename-aside `<path>.corrupt` preserves forensics.
+pub fn load() -> std::io::Result<RotationRulesFile> {
     load_from(&rules_path())
 }
 
-/// Test-friendly load that takes the path directly.
-pub fn load_from(path: &Path) -> RotationRulesFile {
+/// Test-friendly load that takes the path directly. See [`load`].
+pub fn load_from(path: &Path) -> std::io::Result<RotationRulesFile> {
     let bytes = match std::fs::read(path) {
         Ok(b) => b,
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
-            return RotationRulesFile::default();
+            return Ok(RotationRulesFile::default());
         }
-        Err(e) => {
-            tracing::warn!(error = %e, "rotation_store: read failed; starting empty");
-            return RotationRulesFile::default();
-        }
+        Err(e) => return Err(e),
     };
     match serde_json::from_slice::<RotationRulesFile>(&bytes) {
         Ok(file) => match file.validate() {
-            Ok(()) => file,
+            Ok(()) => Ok(file),
             Err(e) => {
                 tracing::warn!(
                     error = %e,
@@ -55,7 +65,7 @@ pub fn load_from(path: &Path) -> RotationRulesFile {
                 );
                 let corrupt = path.with_extension("json.corrupt");
                 let _ = std::fs::rename(path, corrupt);
-                RotationRulesFile::default()
+                Ok(RotationRulesFile::default())
             }
         },
         Err(e) => {
@@ -65,6 +75,20 @@ pub fn load_from(path: &Path) -> RotationRulesFile {
             );
             let corrupt = path.with_extension("json.corrupt");
             let _ = std::fs::rename(path, corrupt);
+            Ok(RotationRulesFile::default())
+        }
+    }
+}
+
+/// Convenience: log + swallow real I/O errors, always returning a
+/// usable file. Use this from sites that can't propagate errors
+/// (legacy callers, the dry-run command's snapshot read). New code
+/// should prefer [`load`] and surface failures.
+pub fn load_or_default() -> RotationRulesFile {
+    match load() {
+        Ok(f) => f,
+        Err(e) => {
+            tracing::warn!(error = %e, "rotation_store: read failed; defaulting to empty (real failures should propagate, but caller asked for default)");
             RotationRulesFile::default()
         }
     }
@@ -115,7 +139,7 @@ mod tests {
     fn load_missing_file_yields_default() {
         let tmp = tempfile::tempdir().unwrap();
         let p = tmp.path().join("nope.json");
-        let f = load_from(&p);
+        let f = load_from(&p).unwrap();
         assert_eq!(f.schema_version, SCHEMA_VERSION);
         assert!(f.rules.is_empty());
     }
@@ -127,7 +151,7 @@ mod tests {
         let mut file = RotationRulesFile::default();
         file.rules.push(sample_rule());
         save_to(&p, &file).unwrap();
-        let back = load_from(&p);
+        let back = load_from(&p).unwrap();
         assert_eq!(back.rules.len(), 1);
         assert_eq!(back.rules[0], sample_rule());
     }
@@ -151,7 +175,7 @@ mod tests {
         let tmp = tempfile::tempdir().unwrap();
         let p = tmp.path().join("rules.json");
         std::fs::write(&p, b"this is not json").unwrap();
-        let f = load_from(&p);
+        let f = load_from(&p).unwrap();
         assert!(f.rules.is_empty());
         let corrupt = p.with_extension("json.corrupt");
         assert!(corrupt.exists(), "corrupt file should be moved aside");
@@ -172,10 +196,45 @@ mod tests {
             ]
         });
         std::fs::write(&p, bad.to_string()).unwrap();
-        let f = load_from(&p);
+        let f = load_from(&p).unwrap();
         assert!(f.rules.is_empty());
         let corrupt = p.with_extension("json.corrupt");
         assert!(corrupt.exists());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn permission_denied_returns_err_not_default() {
+        // Regression for the silent-clobber bug: a permission error
+        // on read used to look like "no rules" — a follow-up save
+        // would then write a fresh file and lose the user's real
+        // config. Now the error propagates so the caller can refuse
+        // to act on the assumption.
+        use std::os::unix::fs::PermissionsExt;
+        let tmp = tempfile::tempdir().unwrap();
+        let p = tmp.path().join("rules.json");
+        std::fs::write(&p, br#"{"schema_version":1,"rules":[]}"#).unwrap();
+        std::fs::set_permissions(&p, std::fs::Permissions::from_mode(0o000)).unwrap();
+        let result = load_from(&p);
+        // Restore permissions so the tempdir cleanup can delete it.
+        std::fs::set_permissions(&p, std::fs::Permissions::from_mode(0o600)).unwrap();
+        assert!(result.is_err(), "permission denied must surface as Err");
+    }
+
+    /// Add a malformed-JSON regression test (Codex audit Low finding):
+    /// a hand-edited file with a bogus window value parses to a
+    /// SerdeError, which the load path treats as corruption.
+    #[test]
+    fn malformed_window_value_is_treated_as_corrupt() {
+        let tmp = tempfile::tempdir().unwrap();
+        let p = tmp.path().join("rules.json");
+        let bad = r#"{"schema_version":1,"rules":[{"id":"r","enabled":true,
+            "trigger":{"kind":"utilization_threshold","window":"not_a_window","pct":90},
+            "action":{"kind":"rotate_to","selector":{"kind":"explicit","email":"a@x.com"}}}]}"#;
+        std::fs::write(&p, bad).unwrap();
+        let f = load_from(&p).unwrap();
+        assert!(f.rules.is_empty());
+        assert!(p.with_extension("json.corrupt").exists());
     }
 
     #[cfg(unix)]

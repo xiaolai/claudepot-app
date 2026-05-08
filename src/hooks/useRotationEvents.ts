@@ -2,6 +2,7 @@ import { useCallback, useEffect } from "react";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 
 import { api } from "../api";
+import type { PendingSwap } from "../api/rotation";
 import { dispatchOsNotification } from "../lib/notify";
 
 /**
@@ -93,6 +94,12 @@ export function useRotationEvents(pushToast: PushToastFn): void {
           dedupeKey: `rotation:suggested:${p.swapId}`,
         },
       );
+      // OS notification only when the window is unfocused — when
+      // it's focused, the in-app toast already carries the signal,
+      // and dispatching both is "status spray" per design.md.
+      if (typeof document !== "undefined" && document.hasFocus()) {
+        return;
+      }
       void dispatchOsNotification(title, body, {
         dedupeKey: `rotation:suggested:${p.swapId}`,
         group: "rotation",
@@ -144,6 +151,38 @@ export function useRotationEvents(pushToast: PushToastFn): void {
     wire<SuggestedPayload>("rotation-suggested", handleSuggested);
     wire<AppliedPayload>("rotation-applied", handleApplied);
     wire<FailedPayload>("rotation-failed", handleFailed);
+
+    // Hydrate any pending swaps the orchestrator queued while the
+    // renderer was disconnected (between reloads, before mount,
+    // etc.). Each becomes a Switch toast on the same path live
+    // events take. The orchestrator's TTL has already evicted any
+    // stale entries before we read.
+    void api
+      .rotationPendingList()
+      .then((pendings: PendingSwap[]) => {
+        if (!active) return;
+        for (const p of pendings) {
+          handleSuggested({
+            swapId: p.swapId,
+            ruleId: p.ruleId,
+            fromEmail: p.fromEmail,
+            toEmail: p.toEmail,
+            // The orchestrator doesn't expose uuids in
+            // PendingSwapDto — they're only used for the
+            // dedupe key, which the orchestrator already
+            // applied on its side. Empty strings are safe in
+            // the toast handler (it doesn't read them).
+            fromUuid: "",
+            toUuid: "",
+            window: p.trigger.window,
+            utilizationPct: p.trigger.utilizationPct,
+            thresholdPct: p.trigger.thresholdPct,
+          });
+        }
+      })
+      .catch(() => {
+        /* non-tauri env or no pending */
+      });
 
     return () => {
       active = false;

@@ -37,14 +37,11 @@ pub struct PendingSwap {
 }
 
 /// Why the evaluator declined to emit a swap for a rule that matched.
-/// Surfaced via the audit log for forensics.
+/// Surfaced via the audit log for forensics. Below-threshold doesn't
+/// appear here — that's the steady state and isn't audit-worthy; it
+/// returns `RuleDecision::Skip { reason: None }` instead.
 #[derive(Debug, Clone, PartialEq)]
 pub enum SkipReason {
-    /// Active account utilization didn't reach threshold.
-    BelowThreshold {
-        utilization_pct: f64,
-        threshold_pct: u32,
-    },
     /// Active account was missing from the snapshot or had no usage
     /// data (status != Ok or window absent).
     NoActiveSnapshot,
@@ -98,6 +95,10 @@ pub struct SkipReasonRecord {
     pub trigger: RotationTriggerSummary,
     pub from_email: String,
     pub to_email: Option<String>,
+    /// The rule's configured mode at evaluation time. Carried so the
+    /// audit log records the real mode the rule was running under,
+    /// instead of always saying `confirm` for skipped paths.
+    pub mode: AuditMode,
 }
 
 /// Evaluate every enabled rule against the current snapshot + audit
@@ -149,6 +150,7 @@ fn evaluate_one(
                     trigger: trigger_summary_below(rule, 0.0),
                     from_email: from_email.to_string(),
                     to_email: None,
+                    mode: rule.mode.into(),
                 }),
             };
         }
@@ -169,6 +171,7 @@ fn evaluate_one(
                     trigger: trigger_summary_below(rule, 0.0),
                     from_email: from_email.to_string(),
                     to_email: None,
+                    mode: rule.mode.into(),
                 }),
             };
         }
@@ -183,6 +186,7 @@ fn evaluate_one(
                     trigger: trigger_summary_below(rule, 0.0),
                     from_email: from_email.to_string(),
                     to_email: None,
+                    mode: rule.mode.into(),
                 }),
             };
         }
@@ -197,11 +201,13 @@ fn evaluate_one(
         };
     }
 
+    let cycle_resets_at = window_resets_at(usage, window);
     let trigger_summary = RotationTriggerSummary {
         window: Some(window),
         utilization_pct: active_pct,
         threshold_pct,
         is_extra_usage: false,
+        cycle_resets_at,
     };
 
     // 2. Guard: min_interval_secs since the last swap by ANY rule.
@@ -219,34 +225,27 @@ fn evaluate_one(
                     trigger: trigger_summary.clone(),
                     from_email: from_email.to_string(),
                     to_email: None,
+                    mode: rule.mode.into(),
                 }),
             };
         }
     }
 
     // 3. Guard: max_swaps_per_window for THIS rule + the current
-    //    cycle of the trigger window. A cycle is bounded by the
-    //    window's `resets_at` — entries from a prior cycle don't
-    //    count.
-    let cycle_start_ts = window_resets_at(usage, window).map(|ts| ts.with_timezone(&Utc));
-    // The "current cycle" is everything between (cycle_start_ts -
-    // window-length) and now. We don't know the exact window length,
-    // so we use a generous lower bound: any audit entry whose
-    // trigger.window matches AND whose ts is after the most recent
-    // swap that referenced this rule beyond a 24h ago bound. The
-    // simpler and equally correct rule: count audit entries for THIS
-    // rule_id within the last `cycle_length` of `window` (5h or 7d).
-    // We hardcode the lower bound here — exposing window-length out
-    // of UsageWindowKind would be cleaner but is purely an
-    // ergonomic expansion the user doesn't see. A 5h trigger looks
-    // back 5h, a 7d trigger looks back 7d.
-    let cycle_length = cycle_length_for(window);
-    let cycle_floor = now - cycle_length;
-    let swaps_in_cycle = count_applied_for_rule(audit, &rule.id, cycle_floor);
+    //    cycle of the trigger window. We compare each prior audit
+    //    entry's `cycle_resets_at` against the current cycle's
+    //    `resets_at`: only entries from the same cycle count. Entries
+    //    written before the cycle marker was added (legacy data) fall
+    //    back to a fixed-length lookback so the guard still bounds
+    //    blast radius on old logs.
+    let swaps_in_cycle = count_applied_in_cycle(
+        audit,
+        &rule.id,
+        cycle_resets_at,
+        cycle_length_for(window),
+        now,
+    );
     if swaps_in_cycle >= rule.guards.max_swaps_per_window {
-        // Use cycle_start_ts in the audit entry if we have it for
-        // forensic clarity.
-        let _ = cycle_start_ts;
         return RuleDecision::Skip {
             rule_id: rule.id.clone(),
             reason: Some(SkipReasonRecord {
@@ -254,6 +253,7 @@ fn evaluate_one(
                 trigger: trigger_summary.clone(),
                 from_email: from_email.to_string(),
                 to_email: None,
+                    mode: rule.mode.into(),
             }),
         };
     }
@@ -274,6 +274,7 @@ fn evaluate_one(
                     trigger: trigger_summary.clone(),
                     from_email: from_email.to_string(),
                     to_email: None,
+                    mode: rule.mode.into(),
                 }),
             };
         }
@@ -300,6 +301,7 @@ fn trigger_summary_below(rule: &RotationRule, util: f64) -> RotationTriggerSumma
         utilization_pct: util,
         threshold_pct,
         is_extra_usage: false,
+        cycle_resets_at: None,
     }
 }
 
@@ -340,17 +342,50 @@ fn secs_since_last_applied(audit: &[RotationAuditEntry], now: DateTime<Utc>) -> 
         .min()
 }
 
-fn count_applied_for_rule(
+/// Count `applied` audit entries for `rule_id` that belong to the
+/// current cycle of the trigger window.
+///
+/// An entry counts when EITHER:
+/// - its `trigger.cycle_resets_at` matches the current cycle's
+///   `current_cycle_resets_at` (the cycle marker is the source of
+///   truth), OR
+/// - the entry is older than the marker schema (no
+///   `cycle_resets_at` recorded) AND its `ts` falls inside the raw
+///   `[now - cycle_length, now]` lookback (legacy fallback).
+///
+/// This matters at cycle boundaries: a swap at 4h59m of a 5h cycle
+/// must NOT count against the next cycle's cap. Using the marker
+/// instead of a fixed lookback is the only way to honour that.
+fn count_applied_in_cycle(
     audit: &[RotationAuditEntry],
     rule_id: &str,
-    floor: DateTime<Utc>,
+    current_cycle_resets_at: Option<chrono::DateTime<chrono::FixedOffset>>,
+    cycle_length: chrono::Duration,
+    now: DateTime<Utc>,
 ) -> u32 {
+    let floor = now - cycle_length;
     audit
         .iter()
         .filter(|e| {
-            e.rule_id == rule_id
-                && matches!(e.outcome, RotationOutcome::Applied)
-                && e.ts >= floor
+            if e.rule_id != rule_id {
+                return false;
+            }
+            if !matches!(e.outcome, RotationOutcome::Applied) {
+                return false;
+            }
+            match (e.trigger.cycle_resets_at, current_cycle_resets_at) {
+                // Both have a marker — count only when they match.
+                (Some(entry_cycle), Some(now_cycle)) => entry_cycle == now_cycle,
+                // Legacy entry (no marker): fall back to the raw
+                // lookback so the guard still bounds blast radius
+                // on data written before this fix.
+                (None, _) => e.ts >= floor,
+                // Current cycle has no marker (server returned
+                // resets_at: null) but entry does — entry's marker
+                // can't match an unknown current cycle, so the
+                // entry can't be in "this cycle" by definition.
+                (Some(_), None) => false,
+            }
         })
         .count() as u32
 }
@@ -682,6 +717,7 @@ mod tests {
                 utilization_pct: 91.0,
                 threshold_pct: 90,
                 is_extra_usage: false,
+                cycle_resets_at: None,
             },
             from_email: "a@x.com".into(),
             to_email: Some("b@x.com".into()),
@@ -727,6 +763,7 @@ mod tests {
                 utilization_pct: 91.0,
                 threshold_pct: 90,
                 is_extra_usage: false,
+                cycle_resets_at: None,
             },
             from_email: "a@x.com".into(),
             to_email: Some("b@x.com".into()),
@@ -748,6 +785,107 @@ mod tests {
             },
             _ => panic!("expected skip"),
         }
+    }
+
+    #[test]
+    fn cycle_boundary_old_cycle_marker_does_not_count() {
+        // The bug: a swap from the previous 5h cycle that's still
+        // within the raw 5h lookback (e.g. 4h ago, but cycle has
+        // since reset) was incorrectly counted toward the new
+        // cycle's cap. The cycle marker fixes this — entries from a
+        // different cycle don't count.
+        let active = Uuid::new_v4();
+        let other = Uuid::new_v4();
+        let snap = build_snapshot(vec![
+            (active, snap_account("a@x.com", Some(95.0), Some(40.0), true)),
+            (other, snap_account("b@x.com", Some(20.0), Some(10.0), false)),
+        ]);
+        let mut rule = rule_5h_least_used(vec!["a@x.com".into(), "b@x.com".into()]);
+        rule.guards.max_swaps_per_window = 1;
+        rule.guards.min_interval_secs = 0;
+
+        // Audit entry from 4h ago tagged with the PREVIOUS cycle's
+        // resets_at (3h before fixed_now). Snapshot's current cycle
+        // is `resets_at(3)` — 3h ahead of fixed_now. The old entry's
+        // marker is different, so it must NOT count.
+        let prev_cycle =
+            (fixed_now() - Duration::hours(2)).with_timezone(&FixedOffset::east_opt(0).unwrap());
+        let old_in_lookback = RotationAuditEntry {
+            id: 1,
+            ts: fixed_now() - Duration::hours(4),
+            rule_id: "5h-near-cap".into(),
+            trigger: RotationTriggerSummary {
+                window: Some(UsageWindowKind::FiveHour),
+                utilization_pct: 91.0,
+                threshold_pct: 90,
+                is_extra_usage: false,
+                cycle_resets_at: Some(prev_cycle),
+            },
+            from_email: "a@x.com".into(),
+            to_email: Some("b@x.com".into()),
+            mode: AuditMode::Auto,
+            outcome: RotationOutcome::Applied,
+            reason: "".into(),
+        };
+        let decisions = evaluate(
+            &[rule],
+            &snap,
+            active,
+            &[old_in_lookback],
+            fixed_now(),
+        );
+        // Old cycle's swap should not count → fires.
+        assert!(matches!(decisions[0], RuleDecision::Fire(_)));
+    }
+
+    #[test]
+    fn cycle_boundary_same_cycle_marker_counts() {
+        // Mirror of the above — entries with the SAME cycle marker
+        // count, even at the edge of the raw lookback window.
+        let active = Uuid::new_v4();
+        let other = Uuid::new_v4();
+        let snap = build_snapshot(vec![
+            (active, snap_account("a@x.com", Some(95.0), Some(40.0), true)),
+            (other, snap_account("b@x.com", Some(20.0), Some(10.0), false)),
+        ]);
+        let mut rule = rule_5h_least_used(vec!["a@x.com".into(), "b@x.com".into()]);
+        rule.guards.max_swaps_per_window = 1;
+        rule.guards.min_interval_secs = 0;
+
+        // Snapshot's current cycle marker (matches snap_account's
+        // helper: `resets_at(3)` is 3h ahead of fixed_now).
+        let current_cycle =
+            (fixed_now() + Duration::hours(3)).with_timezone(&FixedOffset::east_opt(0).unwrap());
+        let entry_in_cycle = RotationAuditEntry {
+            id: 1,
+            ts: fixed_now() - Duration::hours(2),
+            rule_id: "5h-near-cap".into(),
+            trigger: RotationTriggerSummary {
+                window: Some(UsageWindowKind::FiveHour),
+                utilization_pct: 91.0,
+                threshold_pct: 90,
+                is_extra_usage: false,
+                cycle_resets_at: Some(current_cycle),
+            },
+            from_email: "a@x.com".into(),
+            to_email: Some("b@x.com".into()),
+            mode: AuditMode::Auto,
+            outcome: RotationOutcome::Applied,
+            reason: "".into(),
+        };
+        let mut audit = vec![entry_in_cycle];
+        let decisions = evaluate(&[rule.clone()], &snap, active, &audit, fixed_now());
+        // Cap=1, one applied swap in same cycle → blocked.
+        match &decisions[0] {
+            RuleDecision::Skip { reason: Some(rec), .. } => {
+                assert!(matches!(rec.reason, SkipReason::MaxSwapsHit { .. }));
+            }
+            d => panic!("expected MaxSwapsHit skip, got {d:?}"),
+        }
+        // Sanity: emptying audit lets it fire.
+        audit.clear();
+        let decisions = evaluate(&[rule], &snap, active, &audit, fixed_now());
+        assert!(matches!(decisions[0], RuleDecision::Fire(_)));
     }
 
     #[test]
@@ -775,6 +913,7 @@ mod tests {
                 utilization_pct: 91.0,
                 threshold_pct: 90,
                 is_extra_usage: false,
+                cycle_resets_at: None,
             },
             from_email: "a@x.com".into(),
             to_email: Some("b@x.com".into()),

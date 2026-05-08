@@ -2,7 +2,9 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 
 import { api } from "../../api";
 import {
+  ROTATION_OUTCOME_LABEL,
   type RotationAuditEntry,
+  type RotationOutcomeId,
   type RotationRule,
   type RotationRulesFile,
 } from "../../api/rotation";
@@ -33,13 +35,16 @@ export function RotationPane({ pushToast }: Props) {
   const [editingRule, setEditingRule] = useState<RotationRule | null>(null);
   const [adding, setAdding] = useState(false);
   const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
+  const [auditFilter, setAuditFilter] = useState<RotationOutcomeId | "all">(
+    "all",
+  );
 
   const refresh = useCallback(async () => {
     try {
       const [f, accts, a] = await Promise.all([
         api.rotationRulesGet(),
         api.accountList(),
-        api.rotationAuditGet(20),
+        api.rotationAuditGet(50),
       ]);
       setFile(f);
       setAccounts(accts);
@@ -197,23 +202,75 @@ export function RotationPane({ pushToast }: Props) {
       </section>
 
       <section>
-        <h3
+        <header
           style={{
-            margin: 0,
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "space-between",
             marginBottom: "var(--sp-12)",
-            fontSize: "var(--fs-md)",
-            fontWeight: 600,
-            letterSpacing: "var(--ls-tight)",
+            gap: "var(--sp-12)",
           }}
         >
-          Recent activity
-        </h3>
+          <h3
+            style={{
+              margin: 0,
+              fontSize: "var(--fs-md)",
+              fontWeight: 600,
+              letterSpacing: "var(--ls-tight)",
+            }}
+          >
+            Recent activity
+          </h3>
+          {audit.length > 0 && (
+            <label
+              style={{
+                display: "flex",
+                alignItems: "center",
+                gap: "var(--sp-6)",
+                fontSize: "var(--fs-xs)",
+                color: "var(--fg-muted)",
+              }}
+            >
+              Filter
+              <select
+                value={auditFilter}
+                onChange={(e) =>
+                  setAuditFilter(e.target.value as RotationOutcomeId | "all")
+                }
+                style={{
+                  padding: "var(--sp-3) var(--sp-6)",
+                  border: "var(--bw-hair) solid var(--line)",
+                  borderRadius: "var(--rad-sm)",
+                  background: "var(--bg-raised)",
+                  color: "var(--fg)",
+                  fontFamily: "inherit",
+                  fontSize: "var(--fs-xs)",
+                }}
+              >
+                <option value="all">All outcomes</option>
+                {(Object.keys(ROTATION_OUTCOME_LABEL) as RotationOutcomeId[]).map(
+                  (k) => (
+                    <option key={k} value={k}>
+                      {ROTATION_OUTCOME_LABEL[k]}
+                    </option>
+                  ),
+                )}
+              </select>
+            </label>
+          )}
+        </header>
         {audit.length === 0 ? (
           <p style={{ margin: 0, color: "var(--fg-faint)", fontSize: "var(--fs-sm)" }}>
             No rotation activity yet.
           </p>
         ) : (
-          <AuditTable entries={audit} />
+          <AuditTable
+            entries={
+              auditFilter === "all"
+                ? audit
+                : audit.filter((e) => e.outcome === auditFilter)
+            }
+          />
         )}
       </section>
 

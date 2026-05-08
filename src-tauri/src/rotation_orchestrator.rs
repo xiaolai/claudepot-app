@@ -49,6 +49,14 @@ const PENDING_TTL_SECS: i64 = 1800;
 #[derive(Default)]
 struct Inner {
     pending: HashMap<String, QueuedSwap>,
+    /// Per-rule deferral state for `skip_when_cc_running`. Keyed by
+    /// rule_id; the value is the time we first observed CC running
+    /// for this rule. Once set, subsequent ticks see the entry and
+    /// suppress the audit-log spam — they don't re-log
+    /// `SkippedCcRunning` every 5 minutes for the same wait. The
+    /// entry is cleared the first time the rule is dispatched OR
+    /// after an idle CC tick where CC isn't running.
+    cc_deferred: HashMap<String, chrono::DateTime<Utc>>,
 }
 
 /// Orchestrator state — `manage()`'d by the Tauri app, reachable via
@@ -76,7 +84,17 @@ impl RotationOrchestrator {
         snapshot: &UsageSnapshot,
         active_uuid: Uuid,
     ) {
-        let rules: RotationRulesFile = rotation_store::load();
+        // Real I/O failures (permission denied, transient FS error)
+        // skip this tick rather than silently treating the failure
+        // as "no rules" — silent default would be invisible to the
+        // user. NotFound + corruption are still recovered to empty.
+        let rules: RotationRulesFile = match rotation_store::load() {
+            Ok(f) => f,
+            Err(e) => {
+                tracing::warn!(error = %e, "rotation_orchestrator: rules load failed; skipping tick");
+                return;
+            }
+        };
         if rules.rules.iter().all(|r| !r.enabled) {
             return;
         }
@@ -112,7 +130,9 @@ impl RotationOrchestrator {
             rec.trigger.clone(),
             rec.from_email.clone(),
             rec.to_email.clone(),
-            AuditMode::Confirm, // mode unknown for skip; default benign
+            // Carry the rule's actual mode so the audit log records
+            // the truth — auto-mode skips look like auto-mode skips.
+            rec.mode,
             outcome,
             reason_text,
         );
@@ -135,21 +155,46 @@ impl RotationOrchestrator {
     async fn dispatch_auto(&self, app: &AppHandle, pending: PendingSwap) {
         // Honor `skip_when_cc_running` — the orchestrator only checks
         // this for auto mode; in confirm mode the user gets the toast
-        // and decides whether to wait.
+        // and decides whether to wait. To avoid re-logging
+        // SkippedCcRunning every tick for the same wait, we record
+        // the first deferral and only audit-log the transition (and
+        // the eventual resolve), not every check.
         if pending.skip_when_cc_running
             && cli_backend::swap::is_cc_process_running_public().await
         {
-            let entry = entry_for(
-                &pending.rule_id,
-                pending.trigger.clone(),
-                pending.from_email.clone(),
-                Some(pending.to_email.clone()),
-                AuditMode::Auto,
-                RotationOutcome::SkippedCcRunning,
-                "cli is currently running",
-            );
-            let _ = self.audit.append(entry);
+            let mut g = match self.inner.lock() {
+                Ok(g) => g,
+                Err(p) => p.into_inner(),
+            };
+            let was_already_deferred = g.cc_deferred.contains_key(&pending.rule_id);
+            if !was_already_deferred {
+                g.cc_deferred.insert(pending.rule_id.clone(), Utc::now());
+            }
+            drop(g);
+            if !was_already_deferred {
+                let entry = entry_for(
+                    &pending.rule_id,
+                    pending.trigger.clone(),
+                    pending.from_email.clone(),
+                    Some(pending.to_email.clone()),
+                    AuditMode::Auto,
+                    RotationOutcome::SkippedCcRunning,
+                    "cli is currently running; waiting until idle",
+                );
+                let _ = self.audit.append(entry);
+            }
             return;
+        }
+        // CC is not running (or the rule didn't ask to defer). Drop
+        // any prior deferral entry for this rule so the next CC-busy
+        // window will log a fresh "deferred" audit entry instead of
+        // staying silent.
+        {
+            let mut g = match self.inner.lock() {
+                Ok(g) => g,
+                Err(p) => p.into_inner(),
+            };
+            g.cc_deferred.remove(&pending.rule_id);
         }
 
         match perform_swap(pending.from_uuid, pending.to_uuid).await {
@@ -183,15 +228,19 @@ impl RotationOrchestrator {
     }
 
     fn queue_confirm(&self, app: &AppHandle, pending: PendingSwap) {
-        // Dedupe: if we already have a pending entry for the same
-        // (rule_id, to_uuid), don't queue another. The toast is still
-        // showing somewhere; spamming the user is the worst outcome.
+        // Dedupe key: (rule_id, from_uuid, to_uuid). Including
+        // from_uuid lets a second suggestion through when the active
+        // account changed mid-toast — same rule_id + same target
+        // from a different starting point is a legitimate distinct
+        // event the user should see.
         let mut g = match self.inner.lock() {
             Ok(g) => g,
             Err(p) => p.into_inner(),
         };
         if g.pending.values().any(|q| {
-            q.pending.rule_id == pending.rule_id && q.pending.to_uuid == pending.to_uuid
+            q.pending.rule_id == pending.rule_id
+                && q.pending.from_uuid == pending.from_uuid
+                && q.pending.to_uuid == pending.to_uuid
         }) {
             return;
         }
@@ -228,8 +277,12 @@ impl RotationOrchestrator {
     }
 
     /// Look up + remove a pending swap. Used by
-    /// `commands::rotation::rotation_apply_pending`.
+    /// `commands::rotation::rotation_apply_pending`. Evicts stale
+    /// entries first so a swap_id whose entry has TTL'd between
+    /// the toast click and this call returns `None` rather than
+    /// re-applying a stale 30-minute-old fire.
     pub fn take_pending(&self, swap_id: &str) -> Option<QueuedSwap> {
+        self.evict_stale();
         let mut g = match self.inner.lock() {
             Ok(g) => g,
             Err(p) => p.into_inner(),
@@ -237,11 +290,38 @@ impl RotationOrchestrator {
         g.pending.remove(swap_id)
     }
 
+    /// Like [`take_pending`] but only peeks — does not remove.
+    /// Used by `apply_pending` so a transient swap failure leaves
+    /// the entry available for retry.
+    pub fn peek_pending(&self, swap_id: &str) -> Option<QueuedSwap> {
+        self.evict_stale();
+        let g = match self.inner.lock() {
+            Ok(g) => g,
+            Err(p) => p.into_inner(),
+        };
+        g.pending.get(swap_id).cloned()
+    }
+
+    /// Remove a pending swap by id. Used after a confirmed swap
+    /// succeeds (peek-then-apply-then-remove) and as the
+    /// `dismiss-pending` command's effect. Evicting first keeps the
+    /// stash bounded.
+    pub fn remove_pending(&self, swap_id: &str) {
+        self.evict_stale();
+        let mut g = match self.inner.lock() {
+            Ok(g) => g,
+            Err(p) => p.into_inner(),
+        };
+        g.pending.remove(swap_id);
+    }
+
     /// Snapshot of currently queued confirm-mode swaps. Used by the
     /// front-end on mount to re-hydrate any toasts that were
     /// suggested while the renderer was disconnected (e.g. between
-    /// reloads).
+    /// reloads). Evicts stale entries first so the renderer never
+    /// hydrates a TTL-expired suggestion.
     pub fn pending_list(&self) -> Vec<QueuedSwap> {
+        self.evict_stale();
         let g = match self.inner.lock() {
             Ok(g) => g,
             Err(p) => p.into_inner(),
@@ -251,6 +331,11 @@ impl RotationOrchestrator {
 
     /// Apply a swap by uuid pair, recording an audit entry. Used by
     /// the apply-pending command after the user confirms.
+    ///
+    /// On success: removes the pending entry. On failure: leaves the
+    /// pending entry in the stash so the user can retry — a
+    /// transient error (token refresh hiccup, identity-gate flap)
+    /// shouldn't silently lose the suggestion.
     pub async fn apply_confirmed(
         &self,
         app: &AppHandle,
@@ -269,6 +354,7 @@ impl RotationOrchestrator {
                 );
                 let _ = self.audit.append(entry);
                 emit_applied(app, &queued.pending);
+                self.remove_pending(&queued.swap_id);
                 Ok(())
             }
             Err(e) => {
@@ -283,6 +369,8 @@ impl RotationOrchestrator {
                 );
                 let _ = self.audit.append(entry);
                 emit_failed(app, &queued.pending, &e);
+                // Do NOT remove the pending entry — let the user
+                // retry. The 30-min TTL still bounds blast radius.
                 Err(e)
             }
         }
@@ -292,13 +380,16 @@ impl RotationOrchestrator {
     pub fn list_audit(&self, limit: usize) -> Vec<RotationAuditEntry> {
         self.audit.list(limit)
     }
+
+    /// Full audit snapshot — used by `dry_run` so its evaluator
+    /// honors the same guards a live tick would.
+    pub fn audit_snapshot(&self) -> Vec<RotationAuditEntry> {
+        self.audit.snapshot()
+    }
 }
 
 fn skip_reason_to_outcome(r: &SkipReason) -> (RotationOutcome, String) {
     match r {
-        SkipReason::BelowThreshold { .. } => {
-            (RotationOutcome::SkippedGuard, "below threshold".into())
-        }
         SkipReason::NoActiveSnapshot => (
             RotationOutcome::SkippedGuard,
             "active account had no usage snapshot".into(),

@@ -485,4 +485,60 @@ mod tests {
         let r = rule_least_used();
         assert_eq!(r.trigger_threshold_pct(), Some(90));
     }
+
+    /// Golden round-trip: a representative file shape decodes,
+    /// re-encodes, and the second decode equals the first. Catches
+    /// drift if a future refactor changes serialization defaults.
+    #[test]
+    fn golden_round_trip_full_file() {
+        let golden = r#"{
+  "schema_version": 1,
+  "rules": [
+    {
+      "id": "5h-near-cap",
+      "enabled": true,
+      "trigger": { "kind": "utilization_threshold", "window": "five_hour", "pct": 90 },
+      "action": {
+        "kind": "rotate_to",
+        "selector": {
+          "kind": "least_used",
+          "window": "five_hour",
+          "candidates": ["a@x.com", "b@x.com"]
+        }
+      },
+      "mode": "confirm",
+      "guards": {
+        "min_interval_secs": 60,
+        "max_swaps_per_window": 3,
+        "skip_when_cc_running": false
+      }
+    }
+  ]
+}"#;
+        let file: RotationRulesFile = serde_json::from_str(golden).unwrap();
+        assert!(file.validate().is_ok());
+        // Re-serialize, re-parse, compare to first parse — any
+        // drift in field defaults or serde renames trips the
+        // assertion.
+        let encoded = serde_json::to_string(&file).unwrap();
+        let back: RotationRulesFile = serde_json::from_str(&encoded).unwrap();
+        assert_eq!(back, file);
+    }
+
+    /// Reject an unknown trigger kind (forward-incompatible client
+    /// or hand-edit typo). The error is bubbled by serde rather
+    /// than silently dropping the rule.
+    #[test]
+    fn reject_unknown_trigger_kind() {
+        let json = r#"{
+            "schema_version": 1,
+            "rules": [{
+                "id": "r",
+                "trigger": { "kind": "future_kind", "window": "five_hour", "pct": 90 },
+                "action": { "kind": "rotate_to", "selector": { "kind": "explicit", "email": "a@x.com" } }
+            }]
+        }"#;
+        let r = serde_json::from_str::<RotationRulesFile>(json);
+        assert!(r.is_err(), "unknown trigger kind must be a parse error");
+    }
 }

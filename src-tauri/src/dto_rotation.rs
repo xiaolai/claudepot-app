@@ -322,6 +322,10 @@ pub struct PendingSwapDto {
     pub from_email: String,
     pub to_email: String,
     pub queued_at: DateTime<Utc>,
+    /// Trigger details from the moment the swap was queued. Lets
+    /// the renderer's hydration path show a meaningful toast
+    /// instead of a stripped-down placeholder.
+    pub trigger: TriggerSummaryDto,
 }
 
 #[derive(Debug, Clone, Serialize)]

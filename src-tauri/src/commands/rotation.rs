@@ -8,7 +8,7 @@ use std::sync::Arc;
 
 use chrono::Utc;
 use claudepot_core::rotation::{
-    eval::{evaluate, RuleDecision},
+    eval::{evaluate, NoCandidateReason, RuleDecision, SkipReason},
     rules::RotationRulesFile,
     store as rotation_store,
 };
@@ -21,13 +21,16 @@ use crate::dto_rotation::{
 };
 use crate::rotation_orchestrator::RotationOrchestrator;
 
-/// Read rules from disk. Missing file → empty.
+/// Read rules from disk. Missing/corrupt → empty. Real I/O failure
+/// (permission denied, etc.) returns an error so the panel can show
+/// it instead of silently presenting an empty rule list that a save
+/// would clobber over the real file.
 #[tauri::command]
 pub async fn rotation_rules_get() -> Result<RotationRulesFileDto, String> {
-    let file =
-        tauri::async_runtime::spawn_blocking(rotation_store::load)
-            .await
-            .map_err(|e| format!("rotation_rules_get: join failed: {e}"))?;
+    let file = tauri::async_runtime::spawn_blocking(rotation_store::load)
+        .await
+        .map_err(|e| format!("rotation_rules_get: join failed: {e}"))?
+        .map_err(|e| format!("rotation_rules_get: {e}"))?;
     Ok(file.into())
 }
 
@@ -52,8 +55,16 @@ pub async fn rotation_rule_validate(rule: RotationRuleDto) -> Result<(), String>
 
 /// Dry-run a proposed rule against the current usage snapshot. v1
 /// answers "would this fire RIGHT NOW?" — historical replay deferred.
+///
+/// Reads the orchestrator's current audit log so guards
+/// (`min_interval_secs`, `max_swaps_per_window`) are honored — the
+/// previous version passed an empty audit slice and could lie about
+/// whether the rule would actually fire.
 #[tauri::command]
-pub async fn rotation_dry_run(rule: RotationRuleDto) -> Result<RotationDryRunDto, String> {
+pub async fn rotation_dry_run(
+    orchestrator: State<'_, Arc<RotationOrchestrator>>,
+    rule: RotationRuleDto,
+) -> Result<RotationDryRunDto, String> {
     let core_rule = claudepot_core::rotation::rules::RotationRule::try_from(rule)?;
     core_rule.validate().map_err(|e| e.to_string())?;
 
@@ -93,7 +104,8 @@ pub async fn rotation_dry_run(rule: RotationRuleDto) -> Result<RotationDryRunDto
         });
     };
 
-    let decisions = evaluate(&[core_rule], &snapshot, active_uuid, &[], Utc::now());
+    let audit = orchestrator.audit_snapshot();
+    let decisions = evaluate(&[core_rule], &snapshot, active_uuid, &audit, Utc::now());
     Ok(match decisions.into_iter().next() {
         Some(RuleDecision::Fire(p)) => RotationDryRunDto {
             would_fire: true,
@@ -118,7 +130,7 @@ pub async fn rotation_dry_run(rule: RotationRuleDto) -> Result<RotationDryRunDto
         }) => RotationDryRunDto {
             would_fire: false,
             target_email: rec.to_email,
-            reason: format!("would not fire — {:?}", rec.reason),
+            reason: format!("would not fire — {}", skip_reason_user_text(&rec.reason)),
         },
         None => RotationDryRunDto {
             would_fire: false,
@@ -126,6 +138,46 @@ pub async fn rotation_dry_run(rule: RotationRuleDto) -> Result<RotationDryRunDto
             reason: "rule disabled".into(),
         },
     })
+}
+
+/// Render a [`SkipReason`] as user-facing text. Renderer-stable
+/// strings instead of `{:?}` on internal enums.
+fn skip_reason_user_text(r: &SkipReason) -> String {
+    match r {
+        SkipReason::NoActiveSnapshot => {
+            "active account has no usage data yet".into()
+        }
+        SkipReason::NoWindowData => {
+            "the trigger window has no data on the active account".into()
+        }
+        SkipReason::MinIntervalNotElapsed { secs_since_last } => {
+            format!("min-interval guard ({secs_since_last}s since last swap)")
+        }
+        SkipReason::MaxSwapsHit { swaps_in_cycle } => {
+            format!("max-swaps-per-cycle guard ({swaps_in_cycle} already this cycle)")
+        }
+        SkipReason::NoCandidate(reason) => format!(
+            "no candidate available ({})",
+            no_candidate_user_text(reason)
+        ),
+    }
+}
+
+fn no_candidate_user_text(r: &NoCandidateReason) -> &'static str {
+    match r {
+        NoCandidateReason::OnlyActive => {
+            "only the active account matched the candidate list"
+        }
+        NoCandidateReason::AllAboveThreshold => {
+            "every alternate candidate is also at or above the threshold"
+        }
+        NoCandidateReason::UnknownEmails => {
+            "no candidate email matches a registered account"
+        }
+        NoCandidateReason::ActiveNotInList => {
+            "active account is not in the round-robin candidate list"
+        }
+    }
 }
 
 /// Newest-first audit log entries.
@@ -154,6 +206,7 @@ pub async fn rotation_pending_list(
             from_email: q.pending.from_email,
             to_email: q.pending.to_email,
             queued_at: q.queued_at,
+            trigger: q.pending.trigger.into(),
         })
         .collect())
 }
@@ -163,13 +216,17 @@ pub async fn rotation_pending_list(
 /// `Ok(())` with `swap_id` not present in the pending map is treated
 /// as a no-op — the entry may have TTL'd or been already-applied by a
 /// concurrent click.
+///
+/// Peeks the pending entry (does not remove). The orchestrator
+/// removes it only on a successful swap, so a transient failure
+/// leaves the entry available for the user to retry.
 #[tauri::command]
 pub async fn rotation_apply_pending(
     app: AppHandle,
     orchestrator: State<'_, Arc<RotationOrchestrator>>,
     swap_id: String,
 ) -> Result<(), String> {
-    let queued = match orchestrator.take_pending(&swap_id) {
+    let queued = match orchestrator.peek_pending(&swap_id) {
         Some(q) => q,
         None => return Ok(()),
     };
