@@ -46,7 +46,7 @@ pnpm test:coverage                   # React with coverage report
     `.jsonl` transcript, keyed by file_path; `(size, mtime_ns)` is the
     re-parse guard. Owned by `claudepot-core::session_index`. Rebuild
     via Settings → Cleanup or `claudepot session rebuild-index`.
-- One JSON ring buffer also lives in `~/.claudepot/`:
+- Three JSON ring buffers also live in `~/.claudepot/`:
   - `notifications.json` — ≤ 500 dispatched toast + OS-banner entries
     surfaced by the WindowChrome bell-icon popover. Owned by
     `claudepot-core::notification_log`. Capture sites: `pushToast` in
@@ -54,6 +54,34 @@ pnpm test:coverage                   # React with coverage report
     `src/lib/notify.ts`. Corrupt files are moved aside to
     `notifications.json.corrupt` and the log starts empty — never
     fatal at boot.
+  - `rotation-rules.json` — user-authored auto-rotation rules.
+    Hand-edit-friendly JSON with `{schema_version, rules: [...]}`.
+    Owned by `claudepot-core::rotation::store`. Settings → Rotation
+    is the editor; the orchestrator loads the file each
+    `usage_snapshot::run_tick`. Empty file or no rules = feature off.
+  - `rotation-audit.json` — ≤ 500 rotation outcomes (applied,
+    suggested, skipped_*, failed) with rule_id + from/to + reason.
+    Owned by `claudepot-core::rotation::audit`. Rendered in the
+    Settings → Rotation pane's "Recent activity" table.
+
+## Auto-rotation (Settings → Rotation)
+
+Optional feature: when the active CLI account's Anthropic
+utilization on a configured window crosses a user-set threshold,
+swap to a chosen alternate.
+
+- Pure rule logic in `claudepot-core::rotation::eval` —
+  `evaluate(rules, snapshot, active, audit, now) -> Vec<RuleDecision>`,
+  no I/O. Tests inject the clock.
+- Orchestrator at `src-tauri/src/rotation_orchestrator.rs` bridges
+  to the Tauri runtime: confirm-mode emits `rotation-suggested`
+  events for the toast, auto-mode calls
+  `cli_backend::swap::switch_force` directly.
+- Hooks into `usage_snapshot::run_tick` (the existing 5-min
+  multi-account fetch). Zero overhead when no rules exist.
+- Confirm is the default mode; promote to auto after watching the
+  rule fire correctly. See `dev-docs/auto-rotation.md` for the
+  full design including the policy framing.
 
 ## Test on test-host
 

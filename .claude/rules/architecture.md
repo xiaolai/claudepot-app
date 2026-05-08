@@ -23,6 +23,17 @@ introspection surfaces (Sessions, Config) are presentation layers
 over those nouns and CC's filesystem. They do not appear in
 `claudepot-core` as domain types.
 
+**Behavior surfaces.** Auto-rotation (Settings → Rotation) is a
+*behavior* over the existing nouns, not a new noun. A rule
+references accounts by email and acts via the existing `cli`
+slot's swap primitive. The pure rule engine lives at
+`claudepot-core::rotation` (rules / store / audit / eval); the
+runtime bridge is `src-tauri/src/rotation_orchestrator.rs`. New
+behaviors of this shape (rules over existing nouns, evaluated on
+snapshot data, dispatched via existing primitives) belong in
+`claudepot-core` as siblings of `rotation`, not as new domain
+modules.
+
 ## Crate separation
 
 - `claudepot-core` — pure Rust library. NO Tauri dependency. All
