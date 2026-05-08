@@ -111,6 +111,7 @@ import { useActivityNotifications } from "./hooks/useActivityNotifications";
 import { useCardNotifications } from "./sections/events/useCardNotifications";
 import { useOpDoneNotifications } from "./hooks/useOpDoneNotifications";
 import { useUsageThresholdNotifications } from "./hooks/useUsageThresholdNotifications";
+import { useRotationEvents } from "./hooks/useRotationEvents";
 import {
   consumeRecentTarget,
   dispatchOsNotification,
@@ -439,6 +440,10 @@ function AppShell() {
   // (window × threshold) per-cycle policy. See
   // src/hooks/useUsageThresholdNotifications.ts for click routing.
   useUsageThresholdNotifications();
+  // Auto-rotation events. Confirm-mode rules surface as a toast
+  // with a Switch action; auto-mode swaps surface as info toasts;
+  // failures as errors. See src/hooks/useRotationEvents.ts.
+  useRotationEvents(pushToast);
 
   // Notification-click router. The Tauri 2 desktop notification plugin
   // doesn't surface body-click events to JS (verified by reading

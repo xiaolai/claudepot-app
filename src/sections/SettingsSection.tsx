@@ -22,6 +22,7 @@ import { NF } from "../icons";
 import { ScreenHeader } from "../shell/ScreenHeader";
 import { NetworkPane } from "./settings/NetworkPane";
 import { ProtectedPathsPane } from "./settings/ProtectedPathsPane";
+import { RotationPane } from "./settings/RotationPane";
 import { CleanupPane } from "./sessions/CleanupPane";
 import { ArtifactLifecyclePane } from "./settings/ArtifactLifecyclePane";
 import { TrashDrawer } from "./sessions/TrashDrawer";
@@ -38,6 +39,7 @@ type Tab =
   | "appearance"
   | "notifications"
   | "network"
+  | "rotation"
   | "cleanup"
   | "protected"
   | "github"
@@ -61,6 +63,7 @@ const TAB_DEFS: ReadonlyArray<{
   { id: "appearance",  label: "Appearance",     glyph: NF.sun,      group: "core" },
   { id: "notifications", label: "Notifications", glyph: NF.bell,     group: "core" },
   { id: "network",     label: "Network",        glyph: NF.globe,    group: "core" },
+  { id: "rotation",    label: "Rotation",       glyph: NF.refresh,  group: "core" },
   { id: "cleanup",     label: "Cleanup",        glyph: NF.trash,    group: "advanced" },
   { id: "protected",   label: "Protected paths", glyph: NF.shield,  group: "advanced" },
   { id: "github",      label: "GitHub",         glyph: NF.key,      group: "advanced" },
@@ -140,6 +143,7 @@ export function SettingsSection() {
           {tab === "appearance" && <AppearancePane />}
           {tab === "notifications" && <NotificationsPane pushToast={pushToast} />}
           {tab === "network" && <NetworkPane pushToast={pushToast} />}
+          {tab === "rotation" && <RotationPane pushToast={pushToast} />}
           {tab === "cleanup" && <CleanupTabPane pushToast={pushToast} />}
           {tab === "protected" && <ProtectedPathsPane pushToast={pushToast} />}
           {tab === "github" && <GithubPane pushToast={pushToast} />}
